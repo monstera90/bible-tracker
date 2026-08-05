@@ -409,7 +409,7 @@
   }
 
   .chapters-container.open{
-    max-height:2000px;
+    max-height:var(--ch-h, 2000px);
   }
 
   .chapters-grid{
@@ -697,7 +697,12 @@
   .modal-note.error{ color:#8a2f1c; font-weight:bold; }
   .modal-note.success{ color:#1f7a45; font-weight:bold; }
 
-  @media (prefers-reduced-motion: reduce){
+    /* отключение анимаций при массовых операциях */
+  .no-transitions *{
+    transition:none !important;
+  }
+
+@media (prefers-reduced-motion: reduce){
     *{transition:none !important; animation:none !important;}
   }
 </style>
@@ -744,7 +749,7 @@
     <div class="theme-dots" id="themeDots"></div>
   </div>
 
-  <div class="app-version">v0.7.4</div>
+  <div class="app-version">v0.8.0</div>
 </footer>
 
 <!-- ===== модальное окно синхронизации ===== -->
@@ -762,7 +767,6 @@
   "use strict";
 
   // ===================== ДАННЫЕ БИБЛИИ =====================
-  // Книги и количество глав — Перевод нового мира (издание 2021, рус.)
   var sections = [
     {
       title:"Еврейско-арамейские Писания",
@@ -793,15 +797,30 @@
   var TOTAL_CHAPTERS = 0;
   sections.forEach(function(s){ s.books.forEach(function(b){ TOTAL_CHAPTERS += b[1]; }); });
 
-  // ===================== ХРАНЕНИЕ =====================
-  var STORAGE_KEY = "bibleReadingProgress_v2"; // { "Книга|номер": {c:bool, t:timestamp} }
-  var OLD_STORAGE_KEY = "bibleReadingProgress_v1"; // старый формат (просто true/false)
+  // ===================== ХРАНЕНИЕ (с дебаунсом) =====================
+  var STORAGE_KEY = "bibleReadingProgress_v2";
+  var OLD_STORAGE_KEY = "bibleReadingProgress_v1";
   var SYNC_ID_KEY = "bibleReadingSyncId_v1";
+  var MIGRATED_KEY = "__migrated_v2";
+  var CELEBRATION_SHOWN_KEY = "bibleCelebrationShown_v1";
+  var UPDATE_DISMISSED_KEY = "bibleUpdateDismissedVersion_v1";
 
   var JSONBLOB_BASE = "https://jsonblob.com/api/jsonBlob";
 
   var state = loadState();
   var syncId = localStorage.getItem(SYNC_ID_KEY) || null;
+
+  // Инкрементальные счётчики
+  var totalChecked = 0;
+  var checkedPerBook = {};
+
+  var saveTimer = null;
+  function saveLocalState(){
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function(){
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+    }, 300);
+  }
 
   function chapterKey(bookName, chapterNum){
     return bookName + "|" + chapterNum;
@@ -813,50 +832,37 @@
       if(raw){ return JSON.parse(raw); }
     }catch(e){}
 
-    // миграция со старой версии (просто true/false, без времени)
+    // миграция со старой версии — единожды
     try{
-      var oldRaw = localStorage.getItem(OLD_STORAGE_KEY);
-      if(oldRaw){
-        var oldState = JSON.parse(oldRaw);
-        var migrated = {};
-        var now = Date.now();
-        Object.keys(oldState).forEach(function(k){
-          if(oldState[k]){
-            migrated[k] = {c:true, t:now};
-          }
-        });
-        return migrated;
+      if(!localStorage.getItem(MIGRATED_KEY)){
+        var oldRaw = localStorage.getItem(OLD_STORAGE_KEY);
+        if(oldRaw){
+          var oldState = JSON.parse(oldRaw);
+          var migrated = {};
+          var now = Date.now();
+          Object.keys(oldState).forEach(function(k){
+            if(oldState[k]) migrated[k] = {c:true, t:now};
+          });
+          localStorage.setItem(MIGRATED_KEY, "1");
+          return migrated;
+        }
+        localStorage.setItem(MIGRATED_KEY, "1");
       }
     }catch(e){}
-
     return {};
-  }
-
-  function saveLocalState(){
-    try{
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    }catch(e){ /* тихо игнорируем, если хранилище недоступно */ }
   }
 
   function isChecked(key){
     return !!(state[key] && state[key].c);
   }
 
-  // ===================== ТЕМЫ ОФОРМЛЕНИЯ =====================
-  // Выбор темы хранится внутри того же state (ключ "__theme"), поэтому
-  // синхронизируется между устройствами по той же логике "позже — побеждает",
-  // что и главы, без отдельного кода.
+  // ===================== ТЕМЫ =====================
   var THEME_KEY = "__theme";
   var DEFAULT_THEME_ID = 1;
-
   var THEMES = [
-    {id:1, name:"Пергамент"},
-    {id:2, name:"Шалфей и небо"},
-    {id:3, name:"Розовый и мята"},
-    {id:4, name:"Лаванда и слоновая кость"},
-    {id:5, name:"Лимонный шифон и небо"},
-    {id:6, name:"Пыльная роза и графит"},
-    {id:7, name:"Морская пена и песок"}
+    {id:1, name:"Пергамент"},{id:2, name:"Шалфей и небо"},{id:3, name:"Розовый и мята"},
+    {id:4, name:"Лаванда и слоновая кость"},{id:5, name:"Лимонный шифон и небо"},
+    {id:6, name:"Пыльная роза и графит"},{id:7, name:"Морская пена и песок"}
   ];
 
   function getCurrentThemeId(){
@@ -896,66 +902,44 @@
       dot.title = theme.name;
       dot.setAttribute("aria-label", "Тема: " + theme.name);
       dot.style.background = themeSwatchGradient(theme.id);
-      dot.addEventListener("click", function(){
-        selectTheme(theme.id);
-      });
+      dot.addEventListener("click", function(){ selectTheme(theme.id); });
       holder.appendChild(dot);
     });
   }
 
-  // мини-превью для кружка темы: берём цвета заголовка и акцента из CSS-переменных
   function themeSwatchGradient(themeId){
     var swatches = {
-      1:["#5c3d24","#48F78E"],
-      2:["#5b7c99","#5AD1A0"],
-      3:["#c98a97","#7FE8C0"],
-      4:["#8f7fb8","#8FE3C7"],
-      5:["#7fa8c9","#8FE0A8"],
-      6:["#7d8a99","#8FD9B8"],
-      7:["#6fada0","#6FE0C0"]
+      1:["#5c3d24","#48F78E"],2:["#5b7c99","#5AD1A0"],3:["#c98a97","#7FE8C0"],
+      4:["#8f7fb8","#8FE3C7"],5:["#7fa8c9","#8FE0A8"],6:["#7d8a99","#8FD9B8"],7:["#6fada0","#6FE0C0"]
     };
     var pair = swatches[themeId] || swatches[1];
     return "linear-gradient(135deg, " + pair[0] + " 50%, " + pair[1] + " 50%)";
   }
 
-  // ===================== СЧЁТЧИК ПРОПУЩЕННЫХ ДНЕЙ =====================
-  // Дата последней отметки хранится в state["__lastRead"] = {c:timestamp, t:timestamp},
-  // поэтому синхронизируется между устройствами по той же схеме "позже — побеждает".
+  // ===================== ПРОПУЩЕННЫЕ ДНИ =====================
   var DAY_MS = 24 * 60 * 60 * 1000;
-
   function pluralRu(n, forms){
-    var abs = Math.abs(n) % 100;
-    var n1 = abs % 10;
+    var abs = Math.abs(n) % 100, n1 = abs % 10;
     if(abs > 10 && abs < 20) return forms[2];
     if(n1 > 1 && n1 < 5) return forms[1];
     if(n1 === 1) return forms[0];
     return forms[2];
   }
-
-  var DAY_FORMS   = ["день","дня","дней"];
-  var WEEK_FORMS  = ["неделя","недели","недель"];
-  var MONTH_FORMS = ["месяц","месяца","месяцев"];
+  var DAY_FORMS = ["день","дня","дней"], WEEK_FORMS = ["неделя","недели","недель"], MONTH_FORMS = ["месяц","месяца","месяцев"], YEAR_FORMS = ["год","года","лет"];
 
   function buildMissedMessage(totalDays){
-    if(totalDays === 1){
-      return "Пропущен 1 день.";
-    }
-    if(totalDays < 7){
-      return "Пропущено " + totalDays + " " + pluralRu(totalDays, DAY_FORMS) + ".";
-    }
+    if(totalDays === 1) return "Пропущен 1 день.";
+    if(totalDays < 7) return "Пропущено " + totalDays + " " + pluralRu(totalDays, DAY_FORMS) + ".";
     if(totalDays < 60){
-      var weeks = Math.floor(totalDays / 7);
-      var days = totalDays - weeks * 7;
+      var weeks = Math.floor(totalDays / 7), days = totalDays - weeks * 7;
       var msg = "Пропущено " + weeks + " " + pluralRu(weeks, WEEK_FORMS);
-      if(days > 0){ msg += " и " + days + " " + pluralRu(days, DAY_FORMS); }
+      if(days > 0) msg += " и " + days + " " + pluralRu(days, DAY_FORMS);
       return msg + ".";
     }
     if(totalDays < 90){
-      var months = Math.floor(totalDays / 30);
-      var remDays = totalDays - months * 30;
-      var remWeeks = Math.floor(remDays / 7);
+      var months = Math.floor(totalDays / 30), remDays = totalDays - months * 30, remWeeks = Math.floor(remDays / 7);
       var msg2 = "Пропущено " + months + " " + pluralRu(months, MONTH_FORMS);
-      if(remWeeks > 0){ msg2 += " и " + remWeeks + " " + pluralRu(remWeeks, WEEK_FORMS); }
+      if(remWeeks > 0) msg2 += " и " + remWeeks + " " + pluralRu(remWeeks, WEEK_FORMS);
       return msg2 + ".";
     }
     if(totalDays < 182) return "Пропущено более трех месяцев.";
@@ -965,79 +949,43 @@
   }
 
   function updateMissedBanner(){
-    var wrap = document.getElementById("missedWrap");
-    var textEl = document.getElementById("missedText");
+    var wrap = document.getElementById("missedWrap"), textEl = document.getElementById("missedText");
     if(!wrap || !textEl) return;
-
     var rec = state["__lastRead"];
-    if(!rec || !rec.c){
-      wrap.classList.remove("visible");
-      return;
-    }
-
+    if(!rec || !rec.c){ wrap.classList.remove("visible"); return; }
     var totalDays = Math.floor((Date.now() - rec.c) / DAY_MS);
-    if(totalDays < 1){
-      wrap.classList.remove("visible");
-      return;
-    }
-
+    if(totalDays < 1){ wrap.classList.remove("visible"); return; }
     textEl.textContent = buildMissedMessage(totalDays);
     wrap.classList.add("visible");
   }
 
-  // если у устройства уже есть прогресс, но ещё нет отметки времени
-  // последнего чтения (обновление со старой версии страницы) — берём
-  // время самой поздней отмеченной главы как отправную точку.
   function ensureLastReadInitialized(){
     if(state["__lastRead"]) return;
     var maxT = 0;
     Object.keys(state).forEach(function(k){
-      if(k.indexOf("|") !== -1 && state[k] && state[k].c && state[k].t > maxT){
-        maxT = state[k].t;
-      }
+      if(k.indexOf("|") !== -1 && state[k] && state[k].c && state[k].t > maxT) maxT = state[k].t;
     });
-    if(maxT > 0){
-      state["__lastRead"] = {c: maxT, t: maxT};
-      saveLocalState();
-    }
+    if(maxT > 0){ state["__lastRead"] = {c: maxT, t: maxT}; saveLocalState(); }
   }
-
-  // ===================== ДЛИТЕЛЬНОСТЬ ЧТЕНИЯ =====================
-  // Момент самой первой отметки хранится в state["__firstRead"], по той же
-  // схеме {c,t}, что и остальное состояние — значит, тоже сливается между
-  // устройствами. Сбрасывается (c:null) только полным сбросом прогресса.
-  var YEAR_FORMS = ["год","года","лет"];
 
   function joinRu(parts){
     if(parts.length === 1) return parts[0];
     if(parts.length === 2) return parts[0] + " и " + parts[1];
     return parts.slice(0, -1).join(", ") + " и " + parts[parts.length - 1];
   }
-
   function buildDurationText(totalDays){
-    var years = Math.floor(totalDays / 365);
-    var remAfterYears = totalDays - years * 365;
-    var months = Math.floor(remAfterYears / 30);
-    var days = remAfterYears - months * 30;
-
+    var years = Math.floor(totalDays / 365), rem = totalDays - years * 365, months = Math.floor(rem / 30), days = rem - months * 30;
     var parts = [];
     if(years > 0) parts.push(years + " " + pluralRu(years, YEAR_FORMS));
     if(months > 0) parts.push(months + " " + pluralRu(months, MONTH_FORMS));
     if(days > 0) parts.push(days + " " + pluralRu(days, DAY_FORMS));
-
-    if(parts.length === 0) return "меньше дня";
-    return joinRu(parts);
+    return parts.length === 0 ? "меньше дня" : joinRu(parts);
   }
-
   function getDurationSuffix(){
     var rec = state["__firstRead"];
     if(!rec || rec.c == null) return "";
-    var totalDays = Math.floor((Date.now() - rec.c) / DAY_MS);
-    return " — " + buildDurationText(totalDays);
+    return " — " + buildDurationText(Math.floor((Date.now() - rec.c) / DAY_MS));
   }
-
-  // такая же разовая подстановка для тех, у кого уже был прогресс
-  // до появления этой функции — берём время САМОЙ РАННЕЙ отметки.
   function ensureFirstReadInitialized(){
     if(state["__firstRead"]) return;
     var minT = null;
@@ -1046,61 +994,35 @@
         if(minT === null || state[k].t < minT) minT = state[k].t;
       }
     });
-    if(minT !== null){
-      state["__firstRead"] = {c: minT, t: minT};
-      saveLocalState();
-    }
+    if(minT !== null){ state["__firstRead"] = {c: minT, t: minT}; saveLocalState(); }
   }
 
-  // ===================== ПОЗДРАВЛЕНИЕ С ЗАВЕРШЕНИЕМ =====================
-  // Показывается один раз за "прохождение" (пока прогресс не сброшен и не
-  // опустится ниже 100%) — состояние флага хранится только локально,
-  // поэтому не мешает синхронизации остальных данных.
-  var CELEBRATION_SHOWN_KEY = "bibleCelebrationShown_v1";
-
-  // Написана независимо от modalOverlay/modalBox/closeModal (которые
-  // инициализируются ниже по файлу), потому что это окно может
-  // сработать сразу при первой отрисовке страницы, ещё до того как
-  // остальной код модалки синхронизации успеет отработать.
+  // ===================== ПОЗДРАВЛЕНИЕ =====================
   function showCelebrationModal(){
-    var overlay = document.getElementById("modalOverlay");
-    var box = document.getElementById("modalBox");
+    var overlay = document.getElementById("modalOverlay"), box = document.getElementById("modalBox");
     if(!overlay || !box) return;
-
-    function closeThis(){
-      overlay.classList.remove("open");
-      box.innerHTML = "";
-    }
-
-    box.innerHTML =
-      modalHeader("Ты молодец!", "Прочитал Библию полностью. Не останавливайся на достигнутом!") +
+    function closeThis(){ overlay.classList.remove("open"); box.innerHTML = ""; }
+    box.innerHTML = modalHeader("Ты молодец!", "Прочитал Библию полностью. Не останавливайся на достигнутом!") +
       '<button class="modal-btn primary" id="mCelebrateReset">Начать читать заново (сбросить прогресс)</button>' +
       '<button class="modal-btn" id="mCelebrateKeep">Не сбрасывать</button>';
     var closeBtn0 = document.getElementById("mClose");
     if(closeBtn0) closeBtn0.addEventListener("click", closeThis);
     overlay.classList.add("open");
-
     document.getElementById("mCelebrateReset").addEventListener("click", function(){
       performFullReset();
-      box.innerHTML =
-        modalHeader("Прогресс был обновлён", "Приятного чтения!") +
-        '<button class="modal-btn primary" id="mDone">Продолжить</button>';
+      box.innerHTML = modalHeader("Прогресс был обновлён", "Приятного чтения!") + '<button class="modal-btn primary" id="mDone">Продолжить</button>';
       var closeBtn1 = document.getElementById("mClose");
       if(closeBtn1) closeBtn1.addEventListener("click", closeThis);
       document.getElementById("mDone").addEventListener("click", closeThis);
     });
-
     document.getElementById("mCelebrateKeep").addEventListener("click", function(){
-      box.innerHTML =
-        modalHeader("Хорошо", "Помните, вы всегда можете начать читать Библию заново. Для этого просто нужно нажать на кнопку «Начать чтение сначала и сбросить прогресс» — она находится в самом низу страницы.") +
-        '<button class="modal-btn primary" id="mOk">ОК</button>';
+      box.innerHTML = modalHeader("Хорошо", "Помните, вы всегда можете начать читать Библию заново. Для этого просто нужно нажать на кнопку «Начать чтение сначала и сбросить прогресс» — она находится в самом низу страницы.") + '<button class="modal-btn primary" id="mOk">ОК</button>';
       var closeBtn2 = document.getElementById("mClose");
       if(closeBtn2) closeBtn2.addEventListener("click", closeThis);
       document.getElementById("mOk").addEventListener("click", closeThis);
     });
   }
-
-  function checkCelebration(totalChecked){
+  function checkCelebration(){
     if(totalChecked === TOTAL_CHAPTERS){
       if(localStorage.getItem(CELEBRATION_SHOWN_KEY) !== "1"){
         try{ localStorage.setItem(CELEBRATION_SHOWN_KEY, "1"); }catch(e){}
@@ -1111,219 +1033,219 @@
     }
   }
 
-  // ===================== ПОСТРОЕНИЕ СТРАНИЦЫ =====================
+  // ===================== ПОСТРОЕНИЕ СТРАНИЦЫ (DocumentFragment) =====================
   var booksContainer = document.getElementById("booksContainer");
   var overallFill = document.getElementById("overallFill");
   var overallText = document.getElementById("overallText");
+  var bookMeta = {};
+  var chapterInputs = {};
 
-  var bookMeta = {}; // bookName -> {fillEl, countEl, chapterCount}
-  var chapterInputs = {}; // key -> input element
+  function initPage(){
+    var frag = document.createDocumentFragment();
+    sections.forEach(function(section){
+      var label = document.createElement("div");
+      label.className = "section-label";
+      label.textContent = section.title;
+      frag.appendChild(label);
 
-  sections.forEach(function(section){
-    var label = document.createElement("div");
-    label.className = "section-label";
-    label.textContent = section.title;
-    booksContainer.appendChild(label);
+      section.books.forEach(function(book){
+        var bookName = book[0], chapterCount = book[1];
+        checkedPerBook[bookName] = 0;
 
-    section.books.forEach(function(book){
-      var bookName = book[0];
-      var chapterCount = book[1];
+        var card = document.createElement("div");
+        card.className = "book-card";
 
-      var card = document.createElement("div");
-      card.className = "book-card";
+        var headerEl = document.createElement("div");
+        headerEl.className = "book-header";
 
-      var headerEl = document.createElement("div");
-      headerEl.className = "book-header";
+        var fillEl = document.createElement("div");
+        fillEl.className = "book-fill";
 
-      var fillEl = document.createElement("div");
-      fillEl.className = "book-fill";
+        var headerContent = document.createElement("div");
+        headerContent.className = "book-header-content";
 
-      var headerContent = document.createElement("div");
-      headerContent.className = "book-header-content";
+        var nameEl = document.createElement("div");
+        nameEl.className = "book-name";
+        nameEl.textContent = bookName;
 
-      var nameEl = document.createElement("div");
-      nameEl.className = "book-name";
-      nameEl.textContent = bookName;
+        var countEl = document.createElement("div");
+        countEl.className = "book-count";
 
-      var countEl = document.createElement("div");
-      countEl.className = "book-count";
+        var toggleEl = document.createElement("div");
+        toggleEl.className = "toggle-check";
+        toggleEl.innerHTML = "<span>&gt;</span>";
 
-      var toggleEl = document.createElement("div");
-      toggleEl.className = "toggle-check";
-      toggleEl.innerHTML = "<span>&gt;</span>";
+        headerContent.appendChild(nameEl);
+        headerContent.appendChild(countEl);
+        headerContent.appendChild(toggleEl);
+        headerEl.appendChild(fillEl);
+        headerEl.appendChild(headerContent);
 
-      headerContent.appendChild(nameEl);
-      headerContent.appendChild(countEl);
-      headerContent.appendChild(toggleEl);
+        var chaptersContainer = document.createElement("div");
+        chaptersContainer.className = "chapters-container";
 
-      headerEl.appendChild(fillEl);
-      headerEl.appendChild(headerContent);
+        var grid = document.createElement("div");
+        grid.className = "chapters-grid";
 
-      var chaptersContainer = document.createElement("div");
-      chaptersContainer.className = "chapters-container";
+        for(var c=1;c<=chapterCount;c++){
+          (function(chapterNum){
+            var key = chapterKey(bookName, chapterNum);
+            var checked = isChecked(key);
+            if(checked){ checkedPerBook[bookName]++; totalChecked++; }
 
-      var grid = document.createElement("div");
-      grid.className = "chapters-grid";
+            var item = document.createElement("div");
+            item.className = "chapter-item";
 
-      for(var c=1;c<=chapterCount;c++){
-        (function(chapterNum){
-          var item = document.createElement("div");
-          item.className = "chapter-item";
+            var input = document.createElement("input");
+            input.type = "checkbox";
+            input.id = "ch_" + bookName.replace(/\s+/g,"_") + "_" + chapterNum;
+            input.checked = checked;
 
-          var id = "ch_" + bookName.replace(/\s+/g,"_") + "_" + chapterNum;
-          var key = chapterKey(bookName, chapterNum);
+            var lbl = document.createElement("label");
+            lbl.setAttribute("for", input.id);
+            lbl.textContent = chapterNum;
 
-          var input = document.createElement("input");
-          input.type = "checkbox";
-          input.id = id;
-          input.checked = isChecked(key);
-
-          var lbl = document.createElement("label");
-          lbl.setAttribute("for", id);
-          lbl.textContent = chapterNum;
-
-          input.addEventListener("change", function(){
-            state[key] = {c: input.checked, t: Date.now()};
-            if(input.checked){
-              var now = Date.now();
-              state["__lastRead"] = {c: now, t: now};
-              if(!state["__firstRead"] || state["__firstRead"].c == null){
-                state["__firstRead"] = {c: now, t: now};
+            input.addEventListener("change", function(){
+              var wasChecked = !!state[key];
+              state[key] = {c: input.checked, t: Date.now()};
+              if(input.checked){
+                var now = Date.now();
+                state["__lastRead"] = {c: now, t: now};
+                if(!state["__firstRead"] || state["__firstRead"].c == null){
+                  state["__firstRead"] = {c: now, t: now};
+                }
+                checkedPerBook[bookName]++;
+                totalChecked++;
+              } else {
+                checkedPerBook[bookName]--;
+                totalChecked--;
               }
-            }
-            saveLocalState();
-            updateBookProgress(bookName);
-            updateOverallProgress();
-            updateMissedBanner();
-            scheduleCloudPush();
-          });
+              saveLocalState();
+              updateBookProgress(bookName);
+              updateOverallProgress();
+              updateMissedBanner();
+              scheduleCloudPush();
+            });
 
-          chapterInputs[key] = input;
+            chapterInputs[key] = input;
+            item.appendChild(input);
+            item.appendChild(lbl);
+            grid.appendChild(item);
+          })(c);
+        }
 
-          item.appendChild(input);
-          item.appendChild(lbl);
-          grid.appendChild(item);
-        })(c);
-      }
+        chaptersContainer.appendChild(grid);
 
-      chaptersContainer.appendChild(grid);
+        headerEl.addEventListener("click", function(){
+          var isOpen = chaptersContainer.classList.toggle("open");
+          headerEl.classList.toggle("expanded", isOpen);
+          if(isOpen){
+            chaptersContainer.style.setProperty("--ch-h", grid.scrollHeight + 28 + "px");
+          }
+        });
 
-      headerEl.addEventListener("click", function(){
-        var isOpen = chaptersContainer.classList.toggle("open");
-        headerEl.classList.toggle("expanded", isOpen);
+        card.appendChild(headerEl);
+        card.appendChild(chaptersContainer);
+        frag.appendChild(card);
+
+        bookMeta[bookName] = {fillEl:fillEl, countEl:countEl, chapterCount:chapterCount};
+        updateBookProgress(bookName);
       });
-
-      card.appendChild(headerEl);
-      card.appendChild(chaptersContainer);
-      booksContainer.appendChild(card);
-
-      bookMeta[bookName] = {fillEl:fillEl, countEl:countEl, chapterCount:chapterCount};
-      updateBookProgress(bookName);
     });
-  });
-
-  function countCheckedInBook(bookName, chapterCount){
-    var n = 0;
-    for(var c=1;c<=chapterCount;c++){
-      if(isChecked(chapterKey(bookName,c))) n++;
-    }
-    return n;
+    booksContainer.appendChild(frag);
   }
 
   function updateBookProgress(bookName){
     var meta = bookMeta[bookName];
-    var checked = countCheckedInBook(bookName, meta.chapterCount);
+    var checked = checkedPerBook[bookName] || 0;
     var pct = meta.chapterCount ? Math.round((checked/meta.chapterCount)*100) : 0;
     meta.fillEl.style.width = pct + "%";
     meta.countEl.textContent = checked + " / " + meta.chapterCount;
   }
 
   function updateOverallProgress(){
-    var totalChecked = 0;
-    sections.forEach(function(section){
-      section.books.forEach(function(book){
-        totalChecked += countCheckedInBook(book[0], book[1]);
-      });
-    });
     var pct = TOTAL_CHAPTERS ? Math.round((totalChecked/TOTAL_CHAPTERS)*100) : 0;
     overallFill.style.width = pct + "%";
     overallText.textContent = totalChecked + " из " + TOTAL_CHAPTERS + " глав (" + pct + "%)" + getDurationSuffix();
-    checkCelebration(totalChecked);
+    checkCelebration();
   }
 
   function rerenderAllFromState(){
+    var prevTotal = totalChecked;
+    totalChecked = 0;
+    Object.keys(checkedPerBook).forEach(function(bn){ checkedPerBook[bn] = 0; });
+
     Object.keys(chapterInputs).forEach(function(key){
-      chapterInputs[key].checked = isChecked(key);
+      var input = chapterInputs[key];
+      var newChecked = isChecked(key);
+      if(input.checked !== newChecked) input.checked = newChecked;
+      if(newChecked){
+        var parts = key.split("|");
+        checkedPerBook[parts[0]] = (checkedPerBook[parts[0]] || 0) + 1;
+        totalChecked++;
+      }
     });
+
     Object.keys(bookMeta).forEach(function(bookName){
       updateBookProgress(bookName);
     });
     updateOverallProgress();
     applyThemeToPage(getCurrentThemeId());
-    renderThemeDots();
+    if(!document.getElementById("themeDots").children.length) renderThemeDots();
     updateMissedBanner();
   }
 
-  ensureLastReadInitialized();
-  ensureFirstReadInitialized();
-  updateOverallProgress();
-  applyThemeToPage(getCurrentThemeId());
-  renderThemeDots();
-  updateMissedBanner();
-  setInterval(function(){
-    updateOverallProgress();
-    updateMissedBanner();
-  }, 30 * 60 * 1000); // обновляем формулировки раз в 30 минут, пока страница открыта
-
   // ===================== СБРОС ПРОГРЕССА =====================
+  function setNoTransitions(enable){
+    document.body.classList.toggle("no-transitions", enable);
+  }
+
   function performFullReset(){
+    setNoTransitions(true);
     var now = Date.now();
-    // важно: явно ставим c:false с новым временем для КАЖДОЙ главы,
-    // а не просто очищаем объект — иначе при синхронизации со вторым
-    // устройством "пустое" состояние проиграет более старой отметке true.
     sections.forEach(function(section){
       section.books.forEach(function(book){
         var bookName = book[0], chapterCount = book[1];
+        checkedPerBook[bookName] = 0;
         for(var c=1;c<=chapterCount;c++){
           state[chapterKey(bookName,c)] = {c:false, t:now};
         }
       });
     });
-    // сбрасываем счётчик пропущенных дней и длительность чтения —
-    // c:null с новым временем корректно "побеждает" при слиянии
-    // на других устройствах
+    totalChecked = 0;
     state["__lastRead"] = {c:null, t:now};
     state["__firstRead"] = {c:null, t:now};
-
     saveLocalState();
     rerenderAllFromState();
-
     try{ localStorage.removeItem(CELEBRATION_SHOWN_KEY); }catch(e){}
+    setTimeout(function(){ setNoTransitions(false); }, 50);
 
     if(syncId && navigator.onLine){
       setSyncState("syncing");
-      putCloudBlob(syncId, state).then(function(){
-        setSyncState("synced");
-      }).catch(function(){
-        setSyncState("error");
-      });
+      putCloudBlob(syncId, state).then(function(){ setSyncState("synced"); }).catch(function(){ setSyncState("error"); });
     }
   }
 
   document.getElementById("resetBtn").addEventListener("click", function(){
-    var sure = confirm("Точно сбросить весь прогресс чтения и начать сначала?");
-    if(!sure) return;
+    if(!confirm("Точно сбросить весь прогресс чтения и начать сначала?")) return;
     performFullReset();
   });
 
-  // ===================== ОБЛАЧНАЯ СИНХРОНИЗАЦИЯ =====================
+  // ===================== ОБЛАЧНАЯ СИНХРОНИЗАЦИЯ (AbortController) =====================
+  function fetchWithTimeout(url, options, timeoutMs){
+    var ctrl = new AbortController();
+    var timer = setTimeout(function(){ ctrl.abort(); }, timeoutMs || 8000);
+    options = options || {};
+    options.signal = ctrl.signal;
+    return fetch(url, options).finally(function(){ clearTimeout(timer); });
+  }
 
   function createCloudBlob(initialData){
-    return fetch(JSONBLOB_BASE, {
+    return fetchWithTimeout(JSONBLOB_BASE, {
       method:"POST",
       headers:{"Content-Type":"application/json","Accept":"application/json"},
       body: JSON.stringify(initialData)
-    }).then(function(res){
+    }, 15000).then(function(res){
       if(!res.ok) throw new Error("create_failed_" + res.status);
       var loc = res.headers.get("Location") || res.headers.get("location");
       if(!loc) throw new Error("no_location_header");
@@ -1333,10 +1255,9 @@
   }
 
   function fetchCloudBlob(id){
-    return fetch(JSONBLOB_BASE + "/" + encodeURIComponent(id), {
-      method:"GET",
-      headers:{"Accept":"application/json"}
-    }).then(function(res){
+    return fetchWithTimeout(JSONBLOB_BASE + "/" + encodeURIComponent(id), {
+      method:"GET", headers:{"Accept":"application/json"}
+    }, 8000).then(function(res){
       if(res.status === 404) throw new Error("not_found");
       if(!res.ok) throw new Error("fetch_failed_" + res.status);
       return res.json();
@@ -1344,37 +1265,29 @@
   }
 
   function putCloudBlob(id, data){
-    return fetch(JSONBLOB_BASE + "/" + encodeURIComponent(id), {
+    return fetchWithTimeout(JSONBLOB_BASE + "/" + encodeURIComponent(id), {
       method:"PUT",
       headers:{"Content-Type":"application/json","Accept":"application/json"},
       body: JSON.stringify(data)
-    }).then(function(res){
+    }, 15000).then(function(res){
       if(!res.ok) throw new Error("put_failed_" + res.status);
       return true;
     });
   }
 
-  // слияние: для каждой главы побеждает запись с более поздним t
   function mergeStates(local, cloud){
-    var merged = {};
-    var keys = {};
+    var merged = {}, keys = {};
     Object.keys(local||{}).forEach(function(k){ keys[k]=true; });
     Object.keys(cloud||{}).forEach(function(k){ keys[k]=true; });
     Object.keys(keys).forEach(function(k){
-      var l = local ? local[k] : null;
-      var c = cloud ? cloud[k] : null;
-      if(l && c){
-        merged[k] = (l.t >= c.t) ? l : c;
-      } else {
-        merged[k] = l || c;
-      }
+      var l = local ? local[k] : null, c = cloud ? cloud[k] : null;
+      merged[k] = (l && c) ? ((l.t >= c.t) ? l : c) : (l || c);
     });
     return merged;
   }
 
   function statesEqual(a, b){
-    var ak = Object.keys(a||{}).sort();
-    var bk = Object.keys(b||{}).sort();
+    var ak = Object.keys(a||{}).sort(), bk = Object.keys(b||{}).sort();
     if(ak.length !== bk.length) return false;
     for(var i=0;i<ak.length;i++){
       var k = ak[i];
@@ -1389,13 +1302,7 @@
 
   function setSyncState(st, extraText){
     syncStatusPill.setAttribute("data-state", st);
-    var labels = {
-      off:"Синхронизация выкл.",
-      offline:"Офлайн",
-      syncing:"Синхронизация…",
-      synced:"Синхронизировано",
-      error:"Ошибка синхронизации"
-    };
+    var labels = {off:"Синхронизация выкл.",offline:"Офлайн",syncing:"Синхронизация…",synced:"Синхронизировано",error:"Ошибка синхронизации"};
     syncStatusText.textContent = extraText || labels[st] || "";
   }
 
@@ -1427,7 +1334,9 @@
       state = merged;
       if(localChanged){
         saveLocalState();
+        setNoTransitions(true);
         rerenderAllFromState();
+        setTimeout(function(){ setNoTransitions(false); }, 50);
       }
       if(cloudChanged){
         return putCloudBlob(syncId, merged);
@@ -1442,78 +1351,67 @@
     });
   }
 
-  window.addEventListener("online", function(){
-    refreshStatusBase();
-    doCloudSync();
-  });
-  window.addEventListener("offline", function(){
-    refreshStatusBase();
-  });
-
-  // синхронизация при загрузке страницы, если код уже настроен
-  if(syncId){
-    doCloudSync();
-  }
+  window.addEventListener("online", function(){ refreshStatusBase(); doCloudSync(); });
+  window.addEventListener("offline", function(){ refreshStatusBase(); });
+  if(syncId) doCloudSync();
 
   // ===================== МОДАЛЬНОЕ ОКНО СИНХРОНИЗАЦИИ =====================
   var modalOverlay = document.getElementById("modalOverlay");
   var modalBox = document.getElementById("modalBox");
-  var activeStream = null;
-  var scanRAF = null;
+  var activeStream = null, scanRAF = null;
 
   function stopCamera(){
     if(scanRAF){ cancelAnimationFrame(scanRAF); scanRAF = null; }
-    if(activeStream){
-      activeStream.getTracks().forEach(function(t){ t.stop(); });
-      activeStream = null;
-    }
+    if(activeStream){ activeStream.getTracks().forEach(function(t){ t.stop(); }); activeStream = null; }
   }
-
-  function closeModal(){
-    stopCamera();
-    modalOverlay.classList.remove("open");
-    modalBox.innerHTML = "";
-  }
-
-  function openModal(){
-    modalOverlay.classList.add("open");
-    renderModalHome();
-  }
-
-  modalOverlay.addEventListener("click", function(e){
-    if(e.target === modalOverlay) closeModal();
-  });
-
+  function closeModal(){ stopCamera(); modalOverlay.classList.remove("open"); modalBox.innerHTML = ""; }
+  function openModal(){ modalOverlay.classList.add("open"); renderModalHome(); }
+  modalOverlay.addEventListener("click", function(e){ if(e.target === modalOverlay) closeModal(); });
   syncStatusPill.addEventListener("click", openModal);
 
   function modalHeader(title, subtitle){
-    var html = '<button class="modal-close" id="mClose">&times;</button>';
-    html += '<h2>' + title + '</h2>';
-    if(subtitle) html += '<p>' + subtitle + '</p>';
-    return html;
+    var h = '<button class="modal-close" id="mClose">&times;</button><h2>' + title + '</h2>';
+    if(subtitle) h += '<p>' + subtitle + '</p>';
+    return h;
+  }
+  function bindClose(){ var btn = document.getElementById("mClose"); if(btn) btn.addEventListener("click", closeModal); }
+
+  // --- ленивая загрузка QRCode и jsQR ---
+  var qrLibLoaded = false, jsqrLibLoaded = false;
+  function loadQrLib(){
+    if(qrLibLoaded) return Promise.resolve();
+    return new Promise(function(resolve, reject){
+      var s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js";
+      s.onload = function(){ qrLibLoaded = true; resolve(); };
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+  function loadJsqrLib(){
+    if(jsqrLibLoaded) return Promise.resolve();
+    return new Promise(function(resolve, reject){
+      var s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
+      s.onload = function(){ jsqrLibLoaded = true; resolve(); };
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
   }
 
-  function bindClose(){
-    var btn = document.getElementById("mClose");
-    if(btn) btn.addEventListener("click", closeModal);
-  }
-
-  // --- главный экран модалки ---
   function renderModalHome(){
     stopCamera();
     if(!syncId){
-      modalBox.innerHTML =
-        modalHeader("Синхронизация между устройствами",
-          "Читаете с нескольких устройств? Подключите их между собой, и прогресс будет совпадать на всех.") +
+      modalBox.innerHTML = modalHeader("Синхронизация между устройствами",
+        "Читаете с нескольких устройств? Подключите их между собой, и прогресс будет совпадать на всех.") +
         '<button class="modal-btn primary" id="mCreate">Это первое устройство — создать код</button>' +
         '<button class="modal-btn" id="mJoin">У меня уже есть код с другого устройства</button>';
       bindClose();
       document.getElementById("mCreate").addEventListener("click", handleCreateCode);
       document.getElementById("mJoin").addEventListener("click", renderJoinScreen);
     } else {
-      modalBox.innerHTML =
-        modalHeader("Устройство подключено",
-          "Прогресс синхронизируется с другими вашими устройствами.") +
+      modalBox.innerHTML = modalHeader("Устройство подключено",
+        "Прогресс синхронизируется с другими вашими устройствами.") +
         '<div id="mOwnQrHolder"></div>' +
         '<div class="modal-note" id="mSyncNote" style="margin-bottom:12px;"></div>' +
         '<button class="modal-btn" id="mSyncNow">Синхронизировать сейчас</button>' +
@@ -1522,15 +1420,18 @@
           '<p class="modal-note">Это не удалит облачную копию — просто это устройство перестанет с ней сверяться.</p>' +
         '</div>';
       bindClose();
-      showCodeAndQR("mOwnQrHolder", syncId, "Код для подключения ещё одного устройства:");
+      loadQrLib().then(function(){
+        showCodeAndQR("mOwnQrHolder", syncId, "Код для подключения ещё одного устройства:");
+      }).catch(function(){
+        document.getElementById("mOwnQrHolder").innerHTML = '<p class="modal-note error">Не удалось загрузить QR-код (нет интернета?).</p>';
+      });
       document.getElementById("mSyncNow").addEventListener("click", function(){
         doCloudSync();
         var note = document.getElementById("mSyncNote");
         if(note) note.textContent = "Синхронизация запущена…";
       });
       document.getElementById("mDisconnect").addEventListener("click", function(){
-        var sure = confirm("Отключить это устройство от синхронизации? Локальный прогресс сохранится.");
-        if(!sure) return;
+        if(!confirm("Отключить это устройство от синхронизации? Локальный прогресс сохранится.")) return;
         syncId = null;
         localStorage.removeItem(SYNC_ID_KEY);
         refreshStatusBase();
@@ -1542,31 +1443,18 @@
   function showCodeAndQR(holderId, code, label){
     var holder = document.getElementById(holderId);
     if(!holder) return;
-    holder.innerHTML =
-      '<p class="modal-note">' + label + '</p>' +
-      '<div id="qrHolder"></div>' +
-      '<div class="code-row">' +
-        '<input type="text" id="codeText" readonly value="' + code + '">' +
-        '<button id="codeCopy">Копировать</button>' +
-      '</div>';
+    holder.innerHTML = '<p class="modal-note">' + label + '</p><div id="qrHolder"></div>' +
+      '<div class="code-row"><input type="text" id="codeText" readonly value="' + code + '"><button id="codeCopy">Копировать</button></div>';
     try{
-      new QRCode(document.getElementById("qrHolder"), {
-        text: code,
-        width: 200,
-        height: 200,
-        colorDark: "#2e2418",
-        colorLight: "#fbf4e2"
-      });
+      new QRCode(document.getElementById("qrHolder"), {text: code, width: 200, height: 200, colorDark: "#2e2418", colorLight: "#fbf4e2"});
     }catch(e){
       document.getElementById("qrHolder").textContent = "Не удалось построить QR-код.";
     }
     document.getElementById("codeCopy").addEventListener("click", function(){
       var input = document.getElementById("codeText");
-      input.select();
-      input.setSelectionRange(0, 99999);
-      var copied = false;
+      input.select(); input.setSelectionRange(0, 99999);
       if(navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(code).then(function(){ copied = true; }).catch(function(){});
+        navigator.clipboard.writeText(code).catch(function(){});
       }
       try{ document.execCommand("copy"); }catch(e){}
       var btn = document.getElementById("codeCopy");
@@ -1576,13 +1464,10 @@
   }
 
   function handleCreateCode(){
-    modalBox.innerHTML =
-      modalHeader("Создаём код…", "Секунду, подключаемся к облачному хранилищу.");
+    modalBox.innerHTML = modalHeader("Создаём код…", "Секунду, подключаемся к облачному хранилищу.");
     bindClose();
     if(!navigator.onLine){
-      modalBox.innerHTML =
-        modalHeader("Нет подключения к интернету", "Для создания кода синхронизации нужен интернет. Подключитесь и попробуйте снова.") +
-        '<button class="modal-btn primary" id="mBack">Назад</button>';
+      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для создания кода синхронизации нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderModalHome);
       return;
@@ -1591,28 +1476,27 @@
       syncId = id;
       localStorage.setItem(SYNC_ID_KEY, id);
       refreshStatusBase();
-      modalBox.innerHTML =
-        modalHeader("Код создан", "Отсканируйте этот QR-код на другом устройстве (в этой же панели, кнопка «У меня уже есть код») — или введите код текстом.") +
-        '<div id="mNewQrHolder"></div>' +
-        '<button class="modal-btn primary" id="mDone">Готово</button>';
+      modalBox.innerHTML = modalHeader("Код создан", "Отсканируйте этот QR-код на другом устройстве (в этой же панели, кнопка «У меня уже есть код») — или введите код текстом.") +
+        '<div id="mNewQrHolder"></div><button class="modal-btn primary" id="mDone">Готово</button>';
       bindClose();
-      showCodeAndQR("mNewQrHolder", id, "Код синхронизации:");
+      loadQrLib().then(function(){
+        showCodeAndQR("mNewQrHolder", id, "Код синхронизации:");
+      }).catch(function(){
+        document.getElementById("mNewQrHolder").innerHTML = '<p class="modal-note error">Не удалось загрузить QR-код.</p>';
+      });
       document.getElementById("mDone").addEventListener("click", closeModal);
     }).catch(function(err){
       console.error(err);
-      modalBox.innerHTML =
-        modalHeader("Не удалось создать код",
-          "Возможно, временно недоступен облачный сервис синхронизации. Попробуйте ещё раз чуть позже — локальный прогресс при этом никуда не делся.") +
+      modalBox.innerHTML = modalHeader("Не удалось создать код",
+        "Возможно, временно недоступен облачный сервис синхронизации. Попробуйте ещё раз чуть позже — локальный прогресс при этом никуда не делся.") +
         '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderModalHome);
     });
   }
 
-  // --- экран подключения по коду ---
   function renderJoinScreen(){
-    modalBox.innerHTML =
-      modalHeader("Подключение по коду", "Отсканируйте QR-код с первого устройства камерой или введите код вручную.") +
+    modalBox.innerHTML = modalHeader("Подключение по коду", "Отсканируйте QR-код с первого устройства камерой или введите код вручную.") +
       '<button class="modal-btn primary" id="mScan">Сканировать QR-код</button>' +
       '<button class="modal-btn" id="mManual">Ввести код вручную</button>' +
       '<button class="modal-btn" id="mBack">Назад</button>';
@@ -1623,11 +1507,8 @@
   }
 
   function renderManualScreen(){
-    modalBox.innerHTML =
-      modalHeader("Ввод кода вручную", "Введите код синхронизации с первого устройства.") +
-      '<div class="code-row">' +
-        '<input type="text" id="manualCodeInput" placeholder="код синхронизации">' +
-      '</div>' +
+    modalBox.innerHTML = modalHeader("Ввод кода вручную", "Введите код синхронизации с первого устройства.") +
+      '<div class="code-row"><input type="text" id="manualCodeInput" placeholder="код синхронизации"></div>' +
       '<button class="modal-btn primary" id="mSubmit">Подключить</button>' +
       '<button class="modal-btn" id="mBack">Назад</button>' +
       '<div class="modal-note" id="mJoinNote"></div>';
@@ -1635,18 +1516,13 @@
     document.getElementById("mBack").addEventListener("click", renderJoinScreen);
     document.getElementById("mSubmit").addEventListener("click", function(){
       var val = document.getElementById("manualCodeInput").value.trim();
-      if(!val) return;
-      joinWithCode(val);
+      if(val) joinWithCode(val);
     });
   }
 
   function renderScanScreen(){
-    modalBox.innerHTML =
-      modalHeader("Сканирование QR-кода", "Наведите камеру на QR-код с первого устройства.") +
-      '<div class="scan-video-wrap">' +
-        '<video id="scanVideo" playsinline autoplay muted></video>' +
-        '<div class="scan-frame"></div>' +
-      '</div>' +
+    modalBox.innerHTML = modalHeader("Сканирование QR-кода", "Наведите камеру на QR-код с первого устройства.") +
+      '<div class="scan-video-wrap"><video id="scanVideo" playsinline autoplay muted></video><div class="scan-frame"></div></div>' +
       '<canvas id="scanCanvas" style="display:none;"></canvas>' +
       '<button class="modal-btn" id="mManualFallback">Ввести код вручную вместо этого</button>' +
       '<button class="modal-btn" id="mBack">Назад</button>' +
@@ -1659,43 +1535,47 @@
     var canvas = document.getElementById("scanCanvas");
     var note = document.getElementById("mScanNote");
 
-    if(typeof jsQR !== "function"){
-      note.className = "modal-note error";
-      note.textContent = "Не удалось загрузить модуль сканирования (нет интернета?). Введите код вручную.";
-      return;
-    }
-
-    navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
-      .then(function(stream){
-        activeStream = stream;
-        video.srcObject = stream;
-        video.play();
-        scanRAF = requestAnimationFrame(tick);
-      })
-      .catch(function(err){
-        console.error(err);
+    loadJsqrLib().then(function(){
+      if(typeof jsQR !== "function"){
         note.className = "modal-note error";
-        note.textContent = "Не удалось получить доступ к камере. Введите код вручную.";
-      });
-
-    function tick(){
-      if(video.readyState === video.HAVE_ENOUGH_DATA){
-        canvas.height = video.videoHeight;
-        canvas.width = video.videoWidth;
-        var ctx = canvas.getContext("2d");
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        var result = jsQR(imageData.data, imageData.width, imageData.height, {inversionAttempts:"dontInvert"});
-        if(result && result.data){
-          stopCamera();
-          note.className = "modal-note success";
-          note.textContent = "Код распознан!";
-          joinWithCode(result.data);
-          return;
-        }
+        note.textContent = "Не удалось загрузить модуль сканирования. Введите код вручную.";
+        return;
       }
-      scanRAF = requestAnimationFrame(tick);
-    }
+      navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
+        .then(function(stream){
+          activeStream = stream;
+          video.srcObject = stream;
+          video.play();
+          scanRAF = requestAnimationFrame(tick);
+        }).catch(function(err){
+          console.error(err);
+          note.className = "modal-note error";
+          note.textContent = "Не удалось получить доступ к камере. Введите код вручную.";
+        });
+
+      function tick(){
+        if(video.readyState === video.HAVE_ENOUGH_DATA){
+          // уменьшаем разрешение для скорости
+          var w = 320, h = 240;
+          canvas.width = w; canvas.height = h;
+          var ctx = canvas.getContext("2d");
+          ctx.drawImage(video, 0, 0, w, h);
+          var imageData = ctx.getImageData(0, 0, w, h);
+          var result = jsQR(imageData.data, imageData.width, imageData.height, {inversionAttempts:"dontInvert"});
+          if(result && result.data){
+            stopCamera();
+            note.className = "modal-note success";
+            note.textContent = "Код распознан!";
+            joinWithCode(result.data);
+            return;
+          }
+        }
+        scanRAF = requestAnimationFrame(tick);
+      }
+    }).catch(function(){
+      note.className = "modal-note error";
+      note.textContent = "Не удалось загрузить сканер (нет интернета?). Введите код вручную.";
+    });
   }
 
   function joinWithCode(id){
@@ -1703,53 +1583,40 @@
     if(!id) return;
     modalBox.innerHTML = modalHeader("Подключаемся…", "Загружаем и объединяем прогресс.");
     bindClose();
-
     if(!navigator.onLine){
-      modalBox.innerHTML =
-        modalHeader("Нет подключения к интернету", "Для подключения нужен интернет. Подключитесь и попробуйте снова.") +
-        '<button class="modal-btn primary" id="mBack">Назад</button>';
+      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для подключения нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderJoinScreen);
       return;
     }
-
     fetchCloudBlob(id).then(function(cloudData){
       var merged = mergeStates(state, cloudData || {});
       state = merged;
       syncId = id;
       localStorage.setItem(SYNC_ID_KEY, id);
       saveLocalState();
+      setNoTransitions(true);
       rerenderAllFromState();
+      setTimeout(function(){ setNoTransitions(false); }, 50);
       return putCloudBlob(id, merged);
     }).then(function(){
       refreshStatusBase();
       setSyncState("synced");
-      modalBox.innerHTML =
-        modalHeader("Готово!", "Устройство подключено, прогресс объединён.") +
-        '<button class="modal-btn primary" id="mDone">Закрыть</button>';
+      modalBox.innerHTML = modalHeader("Готово!", "Устройство подключено, прогресс объединён.") + '<button class="modal-btn primary" id="mDone">Закрыть</button>';
       bindClose();
       document.getElementById("mDone").addEventListener("click", closeModal);
     }).catch(function(err){
       console.error(err);
       var msg = "Не удалось подключиться. Проверьте код и подключение к интернету.";
-      if(String(err.message||"").indexOf("not_found") !== -1){
-        msg = "Код не найден. Проверьте, что он введён без ошибок.";
-      }
-      modalBox.innerHTML =
-        modalHeader("Не получилось подключиться", msg) +
-        '<button class="modal-btn primary" id="mBack">Назад</button>';
+      if(String(err.message||"").indexOf("not_found") !== -1) msg = "Код не найден. Проверьте, что он введён без ошибок.";
+      modalBox.innerHTML = modalHeader("Не получилось подключиться", msg) + '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderJoinScreen);
     });
   }
 
   // ===================== SERVICE WORKER И УВЕДОМЛЕНИЕ ОБ ОБНОВЛЕНИИ =====================
-  // Работает только когда страница открыта по http(s)-адресу (например, GitHub Pages) —
-  // для локального файла (file://) service worker браузеры не регистрируют,
-  // поэтому этот блок просто ничего не делает и не мешает офлайн-работе как раньше.
-  var UPDATE_DISMISSED_KEY = "bibleUpdateDismissedVersion_v1";
-  var pendingUpdateVersion = null;
-  var pendingRegistration = null;
+  var pendingUpdateVersion = null, pendingRegistration = null;
 
   function showUpdateBanner(version){
     if(version && localStorage.getItem(UPDATE_DISMISSED_KEY) === version) return;
@@ -1757,81 +1624,51 @@
     var wrap = document.getElementById("updateWrap");
     if(wrap) wrap.classList.add("visible");
   }
-
   function hideUpdateBanner(){
     var wrap = document.getElementById("updateWrap");
     if(wrap) wrap.classList.remove("visible");
   }
-
   function openUpdateModal(){
-    var overlay = document.getElementById("modalOverlay");
-    var box = document.getElementById("modalBox");
+    var overlay = document.getElementById("modalOverlay"), box = document.getElementById("modalBox");
     if(!overlay || !box) return;
-
-    function closeThis(){
-      overlay.classList.remove("open");
-      box.innerHTML = "";
-    }
-
-    box.innerHTML =
-      modalHeader("Доступна новая версия",
-        "Скачать новую версию этой страницы? Ваш прогресс чтения сохранится.") +
+    function closeThis(){ overlay.classList.remove("open"); box.innerHTML = ""; }
+    box.innerHTML = modalHeader("Доступна новая версия", "Скачать новую версию этой страницы? Ваш прогресс чтения сохранится.") +
       '<button class="modal-btn primary" id="mUpdYes">Да, обновить</button>' +
       '<button class="modal-btn" id="mUpdNo">Не сейчас</button>' +
       '<button class="modal-btn" id="mUpdNever">Больше не показывать это уведомление</button>';
     var closeBtn = document.getElementById("mClose");
     if(closeBtn) closeBtn.addEventListener("click", closeThis);
     overlay.classList.add("open");
-
     document.getElementById("mUpdYes").addEventListener("click", function(){
       if(pendingRegistration && pendingRegistration.waiting){
         pendingRegistration.waiting.postMessage("SKIP_WAITING");
-      } else {
-        window.location.reload();
-      }
+      } else { window.location.reload(); }
       closeThis();
     });
     document.getElementById("mUpdNo").addEventListener("click", closeThis);
     document.getElementById("mUpdNever").addEventListener("click", function(){
-      if(pendingUpdateVersion){
-        try{ localStorage.setItem(UPDATE_DISMISSED_KEY, pendingUpdateVersion); }catch(e){}
-      }
-      hideUpdateBanner();
-      closeThis();
+      if(pendingUpdateVersion){ try{ localStorage.setItem(UPDATE_DISMISSED_KEY, pendingUpdateVersion); }catch(e){} }
+      hideUpdateBanner(); closeThis();
     });
   }
 
-  document.addEventListener("DOMContentLoaded", function(){
-    var updateBar = document.getElementById("updateBar");
-    if(updateBar) updateBar.addEventListener("click", openUpdateModal);
-  });
-  // на случай если DOMContentLoaded уже наступил к этому моменту
-  var _updateBarNow = document.getElementById("updateBar");
-  if(_updateBarNow) _updateBarNow.addEventListener("click", openUpdateModal);
+  var updateBar = document.getElementById("updateBar");
+  if(updateBar) updateBar.addEventListener("click", openUpdateModal);
 
   if("serviceWorker" in navigator && (location.protocol === "http:" || location.protocol === "https:")){
     navigator.serviceWorker.addEventListener("message", function(event){
-      if(event.data && event.data.type === "SW_VERSION"){
-        pendingUpdateVersion = event.data.version;
-      }
+      if(event.data && event.data.type === "SW_VERSION") pendingUpdateVersion = event.data.version;
     });
-
     var reloadedAfterUpdate = false;
     navigator.serviceWorker.addEventListener("controllerchange", function(){
       if(reloadedAfterUpdate) return;
       reloadedAfterUpdate = true;
       window.location.reload();
     });
-
     window.addEventListener("load", function(){
       navigator.serviceWorker.register("./sw.js").then(function(reg){
         pendingRegistration = reg;
-
-        // версия уже ждёт активации ещё с прошлого визита
-        if(reg.waiting && navigator.serviceWorker.controller){
-          showUpdateBanner(pendingUpdateVersion);
-        }
-
+        if(reg.waiting && navigator.serviceWorker.controller) showUpdateBanner(pendingUpdateVersion);
         reg.addEventListener("updatefound", function(){
           var newWorker = reg.installing;
           if(!newWorker) return;
@@ -1841,11 +1678,19 @@
             }
           });
         });
-      }).catch(function(err){
-        console.error("Не удалось зарегистрировать service worker:", err);
-      });
+      }).catch(function(err){ console.error("Не удалось зарегистрировать service worker:", err); });
     });
   }
+
+  // ===================== ЗАПУСК =====================
+  initPage();
+  ensureLastReadInitialized();
+  ensureFirstReadInitialized();
+  updateOverallProgress();
+  applyThemeToPage(getCurrentThemeId());
+  renderThemeDots();
+  updateMissedBanner();
+  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); }, 30 * 60 * 1000);
 
 })();
 </script>
