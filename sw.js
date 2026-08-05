@@ -6,7 +6,7 @@
 // что sw.js изменился, скачать новую версию в фоне и подготовить её к
 // установке — без этого шага обновление не будет обнаружено автоматически.
 
-const APP_VERSION = "v0.6.0";
+const APP_VERSION = "v0.7.0";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Список файлов, которые нужны странице для полностью офлайн-работы.
@@ -14,7 +14,10 @@ const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 // manifest.json) — добавьте их сюда же.
 const ASSETS = [
   "./",
-  "./index.html"
+  "./index.html",
+  "./manifest.json",
+  "./icon-192x192.png",
+  "./icon-512x512.png"
 ];
 
 self.addEventListener("install", (event) => {
