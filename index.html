@@ -137,6 +137,11 @@
     color:#f1e6cd;
     font-size:17px;
     line-height:1.55;
+    opacity:0;
+    transition:opacity 1.5s ease;
+    min-height:52px;
+  }
+  header .quote.visible{
     opacity:.9;
   }
 
@@ -716,7 +721,7 @@
   </div>
 
   <h1>ГРАФИК ЧТЕНИЯ БИБЛИИ</h1>
-  <p class="quote">«Счастлив тот, кто… находит радость в законе Иеговы и читает его вполголоса день и ночь» (Псалом 1:1, 2).</p>
+  <p class="quote" id="dailyQuote">«Счастлив тот, кто… находит радость в законе Иеговы и читает его вполголоса день и ночь» (Псалом 1:1, 2).</p>
   <div class="overall-progress-wrap">
     <div class="xp-bar">
       <div class="xp-fill" id="overallFill"></div>
@@ -749,7 +754,7 @@
     <div class="theme-dots" id="themeDots"></div>
   </div>
 
-  <div class="app-version">v0.8.0</div>
+  <div class="app-version">v0.8.1</div>
 </footer>
 
 <!-- ===== модальное окно синхронизации ===== -->
@@ -806,6 +811,99 @@
   var UPDATE_DISMISSED_KEY = "bibleUpdateDismissedVersion_v1";
 
   var JSONBLOB_BASE = "https://jsonblob.com/api/jsonBlob";
+
+  // ===================== ЦИТАТЫ ДНЯ =====================
+  var QUOTE_KEY = "__quote";
+  var QUOTE_INTERVAL = 24 * 60 * 60 * 1000; // 24 часа
+  var QUOTES = [
+    "«Счастлив тот, кто… находит радость в законе Иеговы и читает его вполголоса день и ночь» (Псалом 1:1, 2).",
+    "«Закон Иеговы совершенен, восстанавливает силы» (Псалом 19:7).",
+    "«Счастливы те, кто стремится утолить свой духовный голод» (Матфея 5:3).",
+    "«Я по-настоящему люблю закон Бога» (Римлянам 7:22).",
+    "«Как я люблю твой закон! Весь день размышляю о нём» (Псалом 119:97).",
+    "«Размышляй об этом, будь этим поглощён, чтобы твои духовные успехи были видны всем» (1 Тим. 4:15).",
+    "«Кто всматривается в совершенный закон, ведущий к свободе, и соблюдает его, тот не забывает услышанное» (Иакова 1:25).",
+    "«Наставления Иеговы достойны доверия, делают неопытных мудрыми» (Псалом 19:7).",
+    "«Повеления Иеговы справедливы, радуют сердце» (Псалом 19:8).",
+    "«Всё написанное прежде было написано для нашего наставления» (Рим. 15:4).",
+    "«Заповедь Иеговы чиста, наделяет проницательностью» (Псалом 19:8).",
+    "«Закон, который ты дал, для меня лучше… золота и серебра» (Псалом 119:72).",
+    "«[Иегова] оживляет мою душу, ведёт путями праведности» (Псалом 23:3).",
+    "«Твои наставления прекрасны, поэтому я следую им» (Псалом 119:129).",
+    "«Всё Писание вдохновлено Богом и полезно» (2 Тим. 3:16).",
+    "«Твоё слово — это истина» (Иоанна 17:17).",
+    "«Людей направлял святой дух, и они передавали весть Бога» (2 Пет. 1:21).",
+    "«Вы хорошо делаете, что относитесь к [пророческому слову] со всем вниманием» (2 Пет. 1:19).",
+    "«[Писание] помогает обучать, обличать, исправлять, наставлять на правильный путь» (2 Тим. 3:16).",
+    "«Твоё слово — светильник для моих ног и свет на моём пути» (Пс. 119:105)."
+  ];
+
+  function getQuoteIndex(){
+    var rec = state[QUOTE_KEY];
+    return (rec && typeof rec.c === "number") ? rec.c : 0;
+  }
+
+  function getQuoteLastChange(){
+    var rec = state[QUOTE_KEY];
+    return (rec && rec.t) ? rec.t : 0;
+  }
+
+  function advanceQuote(){
+    var now = Date.now();
+    var idx = (getQuoteIndex() + 1) % QUOTES.length;
+    state[QUOTE_KEY] = {c: idx, t: now};
+    saveLocalState();
+    return idx;
+  }
+
+  function shouldRotateQuote(){
+    return Date.now() - getQuoteLastChange() >= QUOTE_INTERVAL;
+  }
+
+  function showQuote(idx){
+    var el = document.getElementById("dailyQuote");
+    if(!el) return;
+    el.textContent = QUOTES[idx];
+    // небольшая задержка, чтобы transition сработал при загрузке
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){
+        el.classList.add("visible");
+      });
+    });
+  }
+
+  function initQuote(){
+    var idx = getQuoteIndex();
+    if(shouldRotateQuote()){
+      idx = advanceQuote();
+    }
+    showQuote(idx);
+
+    // Если страница открыта долго, проверяем раз в 5 минут.
+    // Смену делаем только когда вкладка неактивна (пользователь ушёл),
+    // чтобы он не видел мелькания текста.
+    setInterval(function(){
+      if(shouldRotateQuote() && document.hidden){
+        advanceQuote();
+      }
+    }, 5 * 60 * 1000);
+
+    // Когда пользователь возвращается на вкладку,
+    // показываем актуальную цитату без анимации смены.
+    document.addEventListener("visibilitychange", function(){
+      if(!document.hidden){
+        var el = document.getElementById("dailyQuote");
+        if(el){
+          el.classList.remove("visible");
+          el.textContent = QUOTES[getQuoteIndex()];
+          requestAnimationFrame(function(){
+            requestAnimationFrame(function(){ el.classList.add("visible"); });
+          });
+        }
+      }
+    });
+  }
+
 
   var state = loadState();
   var syncId = localStorage.getItem(SYNC_ID_KEY) || null;
@@ -1683,6 +1781,7 @@
   }
 
   // ===================== ЗАПУСК =====================
+  initQuote();
   initPage();
   ensureLastReadInitialized();
   ensureFirstReadInitialized();
