@@ -1,7 +1,7 @@
 {
   "name": "График чтения Библии",
   "short_name": "Библия",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f1e6cd",
