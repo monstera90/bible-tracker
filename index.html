@@ -754,7 +754,7 @@
     <div class="theme-dots" id="themeDots"></div>
   </div>
 
-  <div class="app-version">v0.8.2</div>
+  <div class="app-version">v0.8.3</div>
 </footer>
 
 <!-- ===== модальное окно синхронизации ===== -->
@@ -847,13 +847,19 @@
   }
 
   function getQuoteRec(){
-    return state[QUOTE_KEY] || {c:0, t:0, slot:-1};
+    var rec = state[QUOTE_KEY];
+    if(!rec || typeof rec.c !== "number") return {c:0, t:0, slot:-1};
+    // миграция со старого формата (без slot)
+    if(typeof rec.slot !== "number"){
+      rec = {c: rec.c, t: rec.t, slot: -1};
+    }
+    return rec;
   }
 
   function shouldRotateQuote(){
     var rec = getQuoteRec();
     var currentSlot = getDaySlot();
-    return currentSlot !== rec.slot && currentSlot > 0;
+    return currentSlot !== rec.slot && currentSlot > 0 && rec.slot >= 0;
   }
 
   function advanceQuote(){
