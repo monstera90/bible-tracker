@@ -754,7 +754,7 @@
     <div class="theme-dots" id="themeDots"></div>
   </div>
 
-  <div class="app-version">v0.8.1</div>
+  <div class="app-version">v0.8.2</div>
 </footer>
 
 <!-- ===== модальное окно синхронизации ===== -->
@@ -814,7 +814,6 @@
 
   // ===================== ЦИТАТЫ ДНЯ =====================
   var QUOTE_KEY = "__quote";
-  var QUOTE_INTERVAL = 24 * 60 * 60 * 1000; // 24 часа
   var QUOTES = [
     "«Счастлив тот, кто… находит радость в законе Иеговы и читает его вполголоса день и ночь» (Псалом 1:1, 2).",
     "«Закон Иеговы совершенен, восстанавливает силы» (Псалом 19:7).",
@@ -838,64 +837,81 @@
     "«Твоё слово — светильник для моих ног и свет на моём пути» (Пс. 119:105)."
   ];
 
-  function getQuoteIndex(){
-    var rec = state[QUOTE_KEY];
-    return (rec && typeof rec.c === "number") ? rec.c : 0;
+  // Слоты дня: 0=ночь(0-8), 1=утро(8-12), 2=день(12-18), 3=вечер(18-24)
+  function getDaySlot(){
+    var h = new Date().getHours();
+    if(h < 8) return 0;
+    if(h < 12) return 1;
+    if(h < 18) return 2;
+    return 3;
   }
 
-  function getQuoteLastChange(){
-    var rec = state[QUOTE_KEY];
-    return (rec && rec.t) ? rec.t : 0;
-  }
-
-  function advanceQuote(){
-    var now = Date.now();
-    var idx = (getQuoteIndex() + 1) % QUOTES.length;
-    state[QUOTE_KEY] = {c: idx, t: now};
-    saveLocalState();
-    return idx;
+  function getQuoteRec(){
+    return state[QUOTE_KEY] || {c:0, t:0, slot:-1};
   }
 
   function shouldRotateQuote(){
-    return Date.now() - getQuoteLastChange() >= QUOTE_INTERVAL;
+    var rec = getQuoteRec();
+    var currentSlot = getDaySlot();
+    return currentSlot !== rec.slot && currentSlot > 0;
+  }
+
+  function advanceQuote(){
+    var rec = getQuoteRec();
+    var currentSlot = getDaySlot();
+    var idx = rec.c;
+    // Если перешли в новый дневной слот — сдвигаем индекс
+    if(currentSlot > 0 && currentSlot !== rec.slot){
+      var steps = currentSlot > rec.slot ? currentSlot - rec.slot : currentSlot + 4 - rec.slot;
+      idx = (idx + steps) % QUOTES.length;
+    }
+    state[QUOTE_KEY] = {c: idx, t: Date.now(), slot: currentSlot};
+    saveLocalState();
+    return idx;
   }
 
   function showQuote(idx){
     var el = document.getElementById("dailyQuote");
     if(!el) return;
     el.textContent = QUOTES[idx];
-    // небольшая задержка, чтобы transition сработал при загрузке
     requestAnimationFrame(function(){
-      requestAnimationFrame(function(){
-        el.classList.add("visible");
-      });
+      requestAnimationFrame(function(){ el.classList.add("visible"); });
     });
   }
 
   function initQuote(){
-    var idx = getQuoteIndex();
-    if(shouldRotateQuote()){
-      idx = advanceQuote();
+    var rec = getQuoteRec();
+    var currentSlot = getDaySlot();
+    var idx = rec.c;
+
+    // Если зашли в новый слот
+    if(currentSlot !== rec.slot){
+      if(currentSlot > 0){
+        // Дневной слот — меняем цитату
+        var steps = currentSlot > rec.slot ? currentSlot - rec.slot : currentSlot + 4 - rec.slot;
+        idx = (idx + steps) % QUOTES.length;
+      }
+      // Ночь (0) — оставляем последнюю дневную цитату
+      state[QUOTE_KEY] = {c: idx, t: Date.now(), slot: currentSlot};
+      saveLocalState();
     }
     showQuote(idx);
 
-    // Если страница открыта долго, проверяем раз в 5 минут.
-    // Смену делаем только когда вкладка неактивна (пользователь ушёл),
-    // чтобы он не видел мелькания текста.
+    // Проверяем раз в минуту. Смену делаем только когда вкладка неактивна,
+    // чтобы пользователь не видел мелькания текста.
     setInterval(function(){
       if(shouldRotateQuote() && document.hidden){
         advanceQuote();
       }
-    }, 5 * 60 * 1000);
+    }, 60 * 1000);
 
-    // Когда пользователь возвращается на вкладку,
-    // показываем актуальную цитату без анимации смены.
+    // Когда пользователь возвращается — показываем актуальную цитату
     document.addEventListener("visibilitychange", function(){
       if(!document.hidden){
         var el = document.getElementById("dailyQuote");
         if(el){
           el.classList.remove("visible");
-          el.textContent = QUOTES[getQuoteIndex()];
+          el.textContent = QUOTES[getQuoteRec().c];
           requestAnimationFrame(function(){
             requestAnimationFrame(function(){ el.classList.add("visible"); });
           });
@@ -903,6 +919,7 @@
       }
     });
   }
+
 
 
   var state = loadState();
