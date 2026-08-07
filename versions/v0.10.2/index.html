@@ -1,0 +1,2052 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>График чтения Библии</title>
+<link rel="icon" type="image/png" href="icon-192x192.png">
+<link rel="apple-touch-icon" href="icon-192x192.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#5c3d24">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Библия">
+<style>
+  :root{
+    --parchment:#f1e6cd;
+    --parchment-dark:#e4d3ac;
+    --ink:#2e2418;
+    --ink-soft:#5b4c37;
+    --wood:#5c3d24;
+    --wood-dark:#3c2716;
+    --gold:#a97c26;
+    --gold-light:#d4a94f;
+    --xp-green-dark:#1f9e5a;
+    --xp-green:#48F78E;
+    --groove-shadow:#8a7550;
+    --bg-top:#efe2c2;
+    --bg-mid:#ddc99a;
+    --bg-bottom:#cdb27f;
+    --danger:#8a3c2b;
+    --danger-dark:#5e2318;
+    --status-off:#8a8578;
+    --status-offline:#8a8578;
+    --status-sync:#c9a227;
+    --status-ok:#2fa15f;
+    --status-err:#b0432e;
+  }
+
+  /* ---------- темы оформления ---------- */
+  html[data-theme="2"]{
+    --parchment:#e9f0e6; --parchment-dark:#dbe6d6;
+    --ink:#2f3b2c; --ink-soft:#57624f;
+    --wood:#5b7c99; --wood-dark:#3f5a70;
+    --gold:#a9c4a0; --gold-light:#cfe0c8;
+    --groove-shadow:#8fae87;
+    --xp-green:#5AD1A0; --xp-green-dark:#2E9E76;
+    --bg-top:#eef3ea; --bg-mid:#dbe6d9; --bg-bottom:#c7d8c2;
+    --danger:#b3654f; --danger-dark:#7a4436;
+  }
+  html[data-theme="3"]{
+    --parchment:#fbeef1; --parchment-dark:#f6dee3;
+    --ink:#4a2c33; --ink-soft:#7a5560;
+    --wood:#c98a97; --wood-dark:#9c6270;
+    --gold:#f3c6cf; --gold-light:#fbdfe4;
+    --groove-shadow:#d9a7b0;
+    --xp-green:#7FE8C0; --xp-green-dark:#3FB98E;
+    --bg-top:#fdf1f2; --bg-mid:#f8dfe4; --bg-bottom:#f1c9d2;
+    --danger:#c2607a; --danger-dark:#8a3f56;
+  }
+  html[data-theme="4"]{
+    --parchment:#f4f0f8; --parchment-dark:#e9e0f1;
+    --ink:#3b3350; --ink-soft:#6a6080;
+    --wood:#8f7fb8; --wood-dark:#6a5a91;
+    --gold:#d8cdec; --gold-light:#ece3f7;
+    --groove-shadow:#b6a8d1;
+    --xp-green:#8FE3C7; --xp-green-dark:#4FBE9B;
+    --bg-top:#f6f2fa; --bg-mid:#e9e0f2; --bg-bottom:#d9cbe8;
+    --danger:#7a5a9c; --danger-dark:#543d70;
+  }
+  html[data-theme="5"]{
+    --parchment:#fbf6e3; --parchment-dark:#f3ecc9;
+    --ink:#4a422a; --ink-soft:#7a6f4c;
+    --wood:#7fa8c9; --wood-dark:#4f7fa3;
+    --gold:#f0e2a3; --gold-light:#f8f0c9;
+    --groove-shadow:#c9b96f;
+    --xp-green:#8FE0A8; --xp-green-dark:#48B978;
+    --bg-top:#fdf8e4; --bg-mid:#f6ecc4; --bg-bottom:#eadfa0;
+    --danger:#c98a3f; --danger-dark:#96652a;
+  }
+  html[data-theme="6"]{
+    --parchment:#f6ecec; --parchment-dark:#ecd9d9;
+    --ink:#3a3538; --ink-soft:#665f66;
+    --wood:#7d8a99; --wood-dark:#586573;
+    --gold:#e3c9cd; --gold-light:#f2dfe2;
+    --groove-shadow:#b9a6ab;
+    --xp-green:#8FD9B8; --xp-green-dark:#45AD82;
+    --bg-top:#f7eeee; --bg-mid:#ece0e1; --bg-bottom:#d9c8ca;
+    --danger:#8a5a63; --danger-dark:#5e3d44;
+  }
+  html[data-theme="7"]{
+    --parchment:#f4efe2; --parchment-dark:#e8ded0;
+    --ink:#3a3327; --ink-soft:#6b6250;
+    --wood:#6fada0; --wood-dark:#4a7d72;
+    --gold:#c9e3d6; --gold-light:#e0f0e8;
+    --groove-shadow:#a3c6b8;
+    --xp-green:#6FE0C0; --xp-green-dark:#33AD87;
+    --bg-top:#f6f1e4; --bg-mid:#eae0cc; --bg-bottom:#d9cba8;
+    --danger:#c17b5a; --danger-dark:#8f5540;
+  }
+
+  *{box-sizing:border-box;}
+
+  body{
+    margin:0;
+    padding:0 0 60px 0;
+    background:
+      radial-gradient(ellipse at top, var(--bg-top) 0%, var(--bg-mid) 60%, var(--bg-bottom) 100%);
+    font-family: "Palatino Linotype","Georgia", "Times New Roman", serif;
+    color:var(--ink);
+    min-height:100vh;
+    transition:background .4s ease, color .3s ease;
+  }
+
+  header{
+    position:relative;
+    text-align:center;
+    padding:38px 20px 26px 20px;
+    background:
+      linear-gradient(180deg, var(--wood) 0%, var(--wood-dark) 100%);
+    border-bottom:6px solid var(--gold);
+    box-shadow:0 4px 14px rgba(0,0,0,.35);
+  }
+
+  header h1{
+    margin:0 0 14px 0;
+    font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
+    letter-spacing:4px;
+    font-size:clamp(22px,4vw,36px);
+    color:var(--gold-light);
+    text-shadow:0 2px 3px rgba(0,0,0,.6);
+  }
+
+  header .quote{
+    max-width:640px;
+    margin:0 auto 26px auto;
+    font-style:italic;
+    color:#f1e6cd;
+    font-size:17px;
+    line-height:1.55;
+    opacity:0;
+    transition:opacity 1.5s ease;
+    min-height:52px;
+  }
+  header .quote.visible{
+    opacity:.9;
+  }
+
+  /* ---------- sync status pill ---------- */
+  .sync-status{
+    position:absolute;
+    top:14px;
+    right:14px;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    padding:7px 12px 7px 9px;
+    border-radius:20px;
+    background:rgba(0,0,0,.28);
+    border:1px solid rgba(255,255,255,.25);
+    color:#f1e6cd;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:12px;
+    cursor:pointer;
+    user-select:none;
+    transition:background .2s ease;
+  }
+  .sync-status:hover{ background:rgba(0,0,0,.42); }
+
+  .sync-dot{
+    width:9px;height:9px;border-radius:50%;
+    background:var(--status-off);
+    flex-shrink:0;
+    box-shadow:0 0 0 2px rgba(255,255,255,.15);
+  }
+  .sync-status[data-state="off"] .sync-dot{ background:var(--status-off); }
+  .sync-status[data-state="offline"] .sync-dot{ background:var(--status-offline); }
+  .sync-status[data-state="syncing"] .sync-dot{ background:var(--status-sync); animation:pulse 1s infinite; }
+  .sync-status[data-state="synced"] .sync-dot{ background:var(--status-ok); }
+  .sync-status[data-state="error"] .sync-dot{ background:var(--status-err); }
+
+  @keyframes pulse{
+    0%,100%{opacity:1;}
+    50%{opacity:.35;}
+  }
+
+  /* ---------- overall progress bar (Windows XP style, сплошная заливка) ---------- */
+  .overall-progress-wrap{
+    max-width:640px;
+    margin:0 auto;
+  }
+
+  .xp-bar{
+    position:relative;
+    height:30px;
+    border-radius:4px;
+    background:#e9e4d4;
+    border:2px solid #6b6449;
+    box-shadow:
+      inset 0 2px 4px rgba(0,0,0,.45),
+      0 1px 0 rgba(255,255,255,.25);
+    overflow:hidden;
+  }
+
+  .xp-fill{
+    height:100%;
+    width:0%;
+    background-color:var(--xp-green);
+    background-image:linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,50,20,0) 60%, rgba(0,50,20,.25) 100%);
+    box-shadow:
+      inset 0 2px 3px rgba(255,255,255,.55),
+      inset 0 -3px 5px rgba(0,60,0,.35);
+    border-right:2px solid var(--xp-green-dark);
+    transition:width .35s ease;
+  }
+
+  .xp-text{
+    position:absolute;
+    top:0;left:0;right:0;bottom:0;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:bold;
+    font-size:12.5px;
+    color:#20351f;
+    text-shadow:0 1px 1px rgba(255,255,255,.5);
+    letter-spacing:.3px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    padding:0 8px;
+  }
+
+  .missed-wrap{
+    max-width:640px;
+    margin:10px auto 0 auto;
+    display:none;
+  }
+  .missed-wrap.visible{ display:block; }
+
+  .update-wrap{
+    max-width:640px;
+    margin:10px auto 0 auto;
+    display:none;
+  }
+  .update-wrap.visible{ display:block; }
+
+  .update-fill{
+    height:100%;
+    width:100%;
+    background-color:#6fb3e0;
+    background-image:linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(0,30,60,.2) 100%);
+    box-shadow:
+      inset 0 2px 3px rgba(255,255,255,.55),
+      inset 0 -3px 5px rgba(0,30,60,.3);
+    cursor:pointer;
+  }
+
+  .update-text{
+    position:absolute;
+    top:0;left:0;right:0;bottom:0;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:bold;
+    font-size:13px;
+    color:#0c2c42;
+    text-shadow:0 1px 1px rgba(255,255,255,.5);
+    letter-spacing:.5px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    cursor:pointer;
+  }
+
+  .warn-fill{
+    height:100%;
+    width:100%;
+    background-color:#e2a640;
+    background-image:linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(90,40,0,.2) 100%);
+    box-shadow:
+      inset 0 2px 3px rgba(255,255,255,.55),
+      inset 0 -3px 5px rgba(90,40,0,.3);
+  }
+
+  .warn-text{
+    position:absolute;
+    top:0;left:0;right:0;bottom:0;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:bold;
+    font-size:13px;
+    color:#3a2705;
+    text-shadow:0 1px 1px rgba(255,255,255,.5);
+    letter-spacing:.5px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+  }
+
+  /* ---------- main ---------- */
+  main{
+    max-width:760px;
+    margin:34px auto;
+    padding:0 18px;
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+
+  .section-label{
+    margin:26px 0 4px 4px;
+    font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
+    letter-spacing:2px;
+    text-transform:uppercase;
+    color:var(--wood);
+    font-size:15.5px;
+    border-bottom:1px solid var(--gold);
+    padding-bottom:6px;
+  }
+  .section-label:first-child{margin-top:0;}
+
+  .book-card{
+    background:var(--parchment);
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    box-shadow:0 2px 6px rgba(60,39,22,.25);
+    overflow:hidden;
+  }
+
+  /* book header IS the progress bar */
+  .book-header{
+    position:relative;
+    display:flex;
+    align-items:center;
+    height:44px;
+    cursor:pointer;
+    background:var(--parchment-dark);
+    border-bottom:1px solid transparent;
+    user-select:none;
+  }
+
+  .book-fill{
+    position:absolute;
+    top:0;left:0;bottom:0;
+    width:0%;
+    background-color:var(--xp-green);
+    background-image:linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,50,20,0) 60%, rgba(0,50,20,.25) 100%);
+    box-shadow:
+      inset 0 2px 3px rgba(255,255,255,.55),
+      inset 0 -3px 5px rgba(0,60,0,.35);
+    border-right:2px solid var(--xp-green-dark);
+    transition:width .3s ease;
+    z-index:1;
+  }
+
+  .book-header-content{
+    position:relative;
+    z-index:2;
+    display:flex;
+    align-items:center;
+    width:100%;
+    height:100%;
+    padding:0 14px;
+    gap:10px;
+  }
+
+  .book-name{
+    flex:1;
+    font-weight:bold;
+    font-size:20px;
+    color:var(--ink);
+    text-shadow:0 1px 1px rgba(255,255,255,.4);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  .book-count{
+    font-size:12.5px;
+    color:var(--ink-soft);
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    background:rgba(255,255,255,.55);
+    padding:2px 8px;
+    border-radius:10px;
+    white-space:nowrap;
+  }
+
+  .toggle-check{
+    flex-shrink:0;
+    width:26px;
+    height:26px;
+    border-radius:50%;
+    background:#fffaf0;
+    border:2px solid var(--wood);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:14px;
+    font-weight:bold;
+    color:var(--wood);
+    transition:transform .25s ease, background .2s ease;
+  }
+  .toggle-check span{
+    display:inline-block;
+    transform:rotate(90deg); /* стрелка ">" смотрит вниз, когда список свёрнут */
+    transition:transform .25s ease;
+  }
+
+  .book-header.expanded .toggle-check{
+    background:var(--gold-light);
+  }
+  .book-header.expanded .toggle-check span{
+    transform:rotate(-90deg); /* и вверх, когда список развёрнут */
+  }
+
+  /* chapters */
+  .chapters-container{
+    max-height:0;
+    overflow:hidden;
+    transition:max-height .3s ease;
+    background:#fbf4e2;
+  }
+
+  .chapters-container.open{
+    max-height:var(--ch-h, 2000px);
+  }
+
+  .chapters-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(46px,1fr));
+    gap:6px;
+    padding:14px;
+  }
+
+  .chapter-item{
+    position:relative;
+  }
+
+  .chapter-item input{
+    position:absolute;
+    opacity:0;
+    width:100%;
+    height:100%;
+    margin:0;
+    cursor:pointer;
+  }
+
+  .chapter-item label{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    height:34px;
+    border:1px solid var(--groove-shadow);
+    border-radius:4px;
+    background:#fffef8;
+    font-size:14px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    color:var(--ink-soft);
+    cursor:pointer;
+    transition:background .15s ease, color .15s ease, border-color .15s ease;
+  }
+
+  .chapter-item input:checked + label{
+    background:var(--xp-green);
+    border-color:var(--xp-green-dark);
+    color:#12351f;
+    font-weight:bold;
+    box-shadow:inset 0 -3px 5px rgba(0,60,0,.35), inset 0 2px 2px rgba(255,255,255,.5);
+  }
+
+  .chapter-item input:focus-visible + label{
+    outline:2px solid var(--wood);
+    outline-offset:1px;
+  }
+
+  /* footer / reset */
+  footer{
+    max-width:760px;
+    margin:40px auto 0 auto;
+    padding:0 18px;
+    text-align:center;
+  }
+
+  #resetBtn{
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:16.5px;
+    padding:12px 26px;
+    background:linear-gradient(180deg, var(--danger) 0%, var(--danger-dark) 100%);
+    color:#f4e6c8;
+    border:1px solid var(--danger-dark);
+    border-radius:6px;
+    cursor:pointer;
+    letter-spacing:.5px;
+    box-shadow:0 3px 6px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.15);
+    transition:transform .1s ease, box-shadow .1s ease, background .3s ease;
+  }
+
+  #resetBtn:hover{
+    box-shadow:0 4px 9px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.2);
+  }
+  #resetBtn:active{
+    transform:translateY(1px);
+  }
+
+  /* ---------- переключатель тем ---------- */
+  .theme-picker{
+    margin-top:28px;
+    text-align:center;
+  }
+  .theme-picker-label{
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:13px;
+    letter-spacing:.5px;
+    color:var(--ink-soft);
+    margin-bottom:10px;
+  }
+  .theme-dots{
+    display:flex;
+    justify-content:center;
+    flex-wrap:wrap;
+    gap:14px;
+  }
+  .theme-dot{
+    width:34px;
+    height:34px;
+    border-radius:50%;
+    border:2px solid rgba(0,0,0,.2);
+    cursor:pointer;
+    padding:0;
+    position:relative;
+    box-shadow:0 2px 4px rgba(0,0,0,.25);
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .theme-dot:hover{ transform:scale(1.08); }
+  .theme-dot.selected{
+    border:3px solid var(--ink);
+    box-shadow:0 0 0 3px rgba(255,255,255,.5), 0 2px 6px rgba(0,0,0,.3);
+  }
+  .theme-dot.selected::after{
+    content:"\2713";
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color:#fff;
+    font-size:15px;
+    font-weight:bold;
+    text-shadow:0 1px 2px rgba(0,0,0,.6);
+  }
+
+  .app-version{
+    margin-top:22px;
+    text-align:center;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:11px;
+    color:var(--ink-soft);
+    opacity:.65;
+  }
+
+  /* ---------- список предыдущих версий ---------- */
+  .version-history-wrap{
+    max-width:640px;
+    margin:22px auto 0 auto;
+  }
+  .version-history-bar{
+    position:relative;
+    height:30px;
+    border-radius:4px;
+    background:#e9e4d4;
+    border:2px solid #6b6449;
+    box-shadow:
+      inset 0 2px 4px rgba(0,0,0,.45),
+      0 1px 0 rgba(255,255,255,.25);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    user-select:none;
+  }
+  .version-history-bar-text{
+    font-weight:bold;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    letter-spacing:.3px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .version-history-bar-text span.chev{
+    display:inline-block;
+    transition:transform .2s ease;
+  }
+  .version-history-wrap.open .version-history-bar-text span.chev{
+    transform:rotate(180deg);
+  }
+  .version-history-list{
+    max-height:0;
+    overflow:hidden;
+    transition:max-height .25s ease;
+    background:var(--parchment);
+    border:1px solid var(--groove-shadow);
+    border-top:none;
+    border-radius:0 0 6px 6px;
+  }
+  .version-history-wrap.open .version-history-list{
+    max-height:300px;
+  }
+  .version-history-item{
+    display:block;
+    width:100%;
+    text-align:left;
+    padding:10px 14px;
+    border:none;
+    border-top:1px solid var(--groove-shadow);
+    background:transparent;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:13px;
+    color:var(--ink);
+    cursor:pointer;
+    text-decoration:none;
+  }
+  .version-history-item:hover{ background:var(--parchment-dark); }
+  .version-history-update-item{
+    display:block;
+    width:100%;
+    text-align:left;
+    padding:10px 14px;
+    border:none;
+    background:var(--xp-green);
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:13px;
+    font-weight:bold;
+    color:#12351f;
+    cursor:pointer;
+    text-decoration:none;
+  }
+  .version-history-update-item:hover{ filter:brightness(1.05); }
+  .version-history-empty{
+    padding:12px 14px;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    font-style:italic;
+  }
+
+  /* ---------- sync modal ---------- */
+  .modal-overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(20,14,7,.55);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:16px;
+    z-index:1000;
+  }
+  .modal-overlay.open{ display:flex; }
+
+  .modal-box{
+    background:var(--parchment);
+    border:1px solid var(--groove-shadow);
+    border-radius:10px;
+    max-width:420px;
+    width:100%;
+    max-height:88vh;
+    overflow-y:auto;
+    padding:22px;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);
+    position:relative;
+  }
+
+  .modal-box h2{
+    margin:0 0 6px 0;
+    font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
+    letter-spacing:1px;
+    font-size:19px;
+    color:var(--wood);
+  }
+
+  .modal-box p{
+    font-size:15.5px;
+    line-height:1.55;
+    color:var(--ink-soft);
+    margin:0 0 14px 0;
+  }
+
+  .modal-close{
+    position:absolute;
+    top:12px;right:14px;
+    background:none;
+    border:none;
+    font-size:20px;
+    color:var(--wood);
+    cursor:pointer;
+    line-height:1;
+  }
+
+  .modal-btn{
+    display:block;
+    width:100%;
+    text-align:left;
+    padding:12px 14px;
+    margin-bottom:10px;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:16px;
+    color:var(--ink);
+    cursor:pointer;
+    transition:background .15s ease;
+  }
+  .modal-btn:hover{ background:#f4ead0; }
+  .modal-btn.primary{
+    background:var(--wood);
+    color:#f4e6c8;
+    border-color:var(--wood-dark);
+    text-align:center;
+    font-weight:bold;
+  }
+  .modal-btn.primary:hover{ background:var(--wood-dark); }
+  .modal-btn.danger{
+    color:#8a2f1c;
+  }
+
+  .modal-section{
+    border-top:1px solid var(--groove-shadow);
+    margin-top:14px;
+    padding-top:14px;
+  }
+
+  #qrHolder{
+    display:flex;
+    justify-content:center;
+    padding:10px 0;
+    background:#fbf4e2;
+    border-radius:6px;
+    margin-bottom:10px;
+  }
+
+  .code-row{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    margin-bottom:10px;
+  }
+  .code-row input[type=text]{
+    flex:1;
+    font-family:"Courier New",monospace;
+    font-size:13px;
+    padding:9px 10px;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    background:#fffef8;
+    color:var(--ink);
+  }
+  .code-row button{
+    flex-shrink:0;
+    padding:9px 12px;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    background:#fffef8;
+    cursor:pointer;
+    font-size:13px;
+  }
+
+  .scan-video-wrap{
+    position:relative;
+    border-radius:8px;
+    overflow:hidden;
+    background:#000;
+    margin-bottom:12px;
+  }
+  .scan-video-wrap video{
+    width:100%;
+    display:block;
+  }
+  .scan-frame{
+    position:absolute;
+    top:50%;left:50%;
+    width:60%;
+    height:60%;
+    transform:translate(-50%,-50%);
+    border:3px solid var(--xp-green);
+    border-radius:8px;
+    box-shadow:0 0 0 999px rgba(0,0,0,.35);
+    pointer-events:none;
+  }
+
+  .modal-note{
+    font-size:12.5px;
+    color:var(--ink-soft);
+    line-height:1.4;
+  }
+  .modal-note.error{ color:#8a2f1c; font-weight:bold; }
+  .modal-note.success{ color:#1f7a45; font-weight:bold; }
+
+    /* отключение анимаций при массовых операциях */
+  .no-transitions *{
+    transition:none !important;
+  }
+
+@media (prefers-reduced-motion: reduce){
+    *{transition:none !important; animation:none !important;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="sync-status" id="syncStatusPill" data-state="off">
+    <span class="sync-dot"></span>
+    <span id="syncStatusText">Синхронизация выкл.</span>
+  </div>
+
+  <h1>ГРАФИК ЧТЕНИЯ БИБЛИИ</h1>
+  <p class="quote" id="dailyQuote">«Счастлив тот, кто… находит радость в законе Иеговы и читает его вполголоса день и ночь» (Псалом 1:1, 2).</p>
+  <div class="overall-progress-wrap">
+    <div class="xp-bar">
+      <div class="xp-fill" id="overallFill"></div>
+      <div class="xp-text" id="overallText">0 из 1189 глав (0%)</div>
+    </div>
+  </div>
+
+  <div class="update-wrap" id="updateWrap">
+    <div class="xp-bar" id="updateBar">
+      <div class="update-fill"></div>
+      <div class="update-text" id="updateText">Доступна новая версия этого графика</div>
+    </div>
+  </div>
+
+  <div class="missed-wrap" id="missedWrap">
+    <div class="xp-bar">
+      <div class="warn-fill"></div>
+      <div class="warn-text" id="missedText"></div>
+    </div>
+  </div>
+</header>
+
+<main id="booksContainer"></main>
+
+<footer>
+  <button id="resetBtn">Начать чтение сначала и сбросить прогресс</button>
+
+  <div class="theme-picker">
+    <div class="theme-picker-label">Тема оформления</div>
+    <div class="theme-dots" id="themeDots"></div>
+  </div>
+
+  <div class="version-history-wrap" id="versionHistoryWrap">
+    <div class="version-history-bar" id="versionHistoryBar">
+      <div class="version-history-bar-text">
+        <span>Версии</span>
+        <span class="chev">&#9662;</span>
+      </div>
+    </div>
+    <div class="version-history-list" id="versionHistoryList">
+      <div id="versionUpdateRow"></div>
+      <div id="versionHistoryItems"></div>
+    </div>
+  </div>
+
+  <div class="app-version" id="appVersionText">v0.10.0</div>
+</footer>
+
+<!-- ===== модальное окно синхронизации ===== -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal-box" id="modalBox">
+    <!-- содержимое рисуется скриптом -->
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+
+<script>
+(function(){
+  "use strict";
+
+  // ===================== ДАННЫЕ БИБЛИИ =====================
+  var sections = [
+    {
+      title:"Еврейско-арамейские Писания",
+      books:[
+        ["Бытие",50],["Исход",40],["Левит",27],["Числа",36],["Второзаконие",34],
+        ["Иисус Навин",24],["Судей",21],["Руфь",4],["1 Самуила",31],["2 Самуила",24],
+        ["1 Царей",22],["2 Царей",25],["1 Летопись",29],["2 Летопись",36],["Ездра",10],
+        ["Неемия",13],["Эсфирь",10],["Иов",42],["Псалмы",150],["Притчи",31],
+        ["Экклезиаст",12],["Песня Соломона",8],["Исаия",66],["Иеремия",52],["Плач Иеремии",5],
+        ["Иезекииль",48],["Даниил",12],["Осия",14],["Иоиль",3],["Амос",9],
+        ["Авдий",1],["Иона",4],["Михей",7],["Наум",3],["Аввакум",3],
+        ["Софония",3],["Аггей",2],["Захария",14],["Малахия",4]
+      ]
+    },
+    {
+      title:"Христианские Греческие Писания",
+      books:[
+        ["Матфея",28],["Марка",16],["Луки",24],["Иоанна",21],["Деяния",28],
+        ["Римлянам",16],["1 Коринфянам",16],["2 Коринфянам",13],["Галатам",6],["Эфесянам",6],
+        ["Филиппийцам",4],["Колоссянам",4],["1 Фессалоникийцам",5],["2 Фессалоникийцам",3],["1 Тимофею",6],
+        ["2 Тимофею",4],["Титу",3],["Филимону",1],["Евреям",13],["Иакова",5],
+        ["1 Петра",5],["2 Петра",3],["1 Иоанна",5],["2 Иоанна",1],["3 Иоанна",1],
+        ["Иуды",1],["Откровение",22]
+      ]
+    }
+  ];
+
+  var TOTAL_CHAPTERS = 0;
+  sections.forEach(function(s){ s.books.forEach(function(b){ TOTAL_CHAPTERS += b[1]; }); });
+
+  // ===================== ХРАНЕНИЕ (с дебаунсом) =====================
+  var STORAGE_KEY = "bibleReadingProgress_v2";
+  var OLD_STORAGE_KEY = "bibleReadingProgress_v1";
+  var SYNC_ID_KEY = "bibleReadingSyncId_v1";
+  var MIGRATED_KEY = "__migrated_v2";
+  var CELEBRATION_SHOWN_KEY = "bibleCelebrationShown_v1";
+  var UPDATE_DISMISSED_KEY = "bibleUpdateDismissedVersion_v1";
+  var UPDATE_SNOOZE_KEY = "bibleUpdateSnoozeUntil_v1";
+  var UPDATES_DISABLED_KEY = "bibleUpdatesDisabled_v1";
+  var SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000;
+
+  var FIREBASE_BASE = "https://my-nekogram-default-rtdb.europe-west1.firebasedatabase.app/sync";
+
+  // ===================== ЦИТАТЫ ДНЯ =====================
+  var QUOTE_KEY = "__quote";
+  var QUOTES = [
+    "«Счастлив тот, кто… находит радость в законе Иеговы и читает его вполголоса день и ночь» (Псалом 1:1, 2).",
+    "«Закон Иеговы совершенен, восстанавливает силы» (Псалом 19:7).",
+    "«Счастливы те, кто стремится утолить свой духовный голод» (Матфея 5:3).",
+    "«Я по-настоящему люблю закон Бога» (Римлянам 7:22).",
+    "«Как я люблю твой закон! Весь день размышляю о нём» (Псалом 119:97).",
+    "«Размышляй об этом, будь этим поглощён, чтобы твои духовные успехи были видны всем» (1 Тим. 4:15).",
+    "«Кто всматривается в совершенный закон, ведущий к свободе, и соблюдает его, тот не забывает услышанное» (Иакова 1:25).",
+    "«Наставления Иеговы достойны доверия, делают неопытных мудрыми» (Псалом 19:7).",
+    "«Повеления Иеговы справедливы, радуют сердце» (Псалом 19:8).",
+    "«Всё написанное прежде было написано для нашего наставления» (Рим. 15:4).",
+    "«Заповедь Иеговы чиста, наделяет проницательностью» (Псалом 19:8).",
+    "«Закон, который ты дал, для меня лучше… золота и серебра» (Псалом 119:72).",
+    "«[Иегова] оживляет мою душу, ведёт путями праведности» (Псалом 23:3).",
+    "«Твои наставления прекрасны, поэтому я следую им» (Псалом 119:129).",
+    "«Всё Писание вдохновлено Богом и полезно» (2 Тим. 3:16).",
+    "«Твоё слово — это истина» (Иоанна 17:17).",
+    "«Людей направлял святой дух, и они передавали весть Бога» (2 Пет. 1:21).",
+    "«Вы хорошо делаете, что относитесь к [пророческому слову] со всем вниманием» (2 Пет. 1:19).",
+    "«[Писание] помогает обучать, обличать, исправлять, наставлять на правильный путь» (2 Тим. 3:16).",
+    "«Твоё слово — светильник для моих ног и свет на моём пути» (Пс. 119:105)."
+  ];
+
+  // Слоты дня: 0=ночь(0-8), 1=утро(8-12), 2=день(12-18), 3=вечер(18-24)
+  function getDaySlot(){
+    var h = new Date().getHours();
+    if(h < 8) return 0;
+    if(h < 12) return 1;
+    if(h < 18) return 2;
+    return 3;
+  }
+
+  function getQuoteRec(){
+    var rec = state[QUOTE_KEY];
+    if(!rec || typeof rec.c !== "number") return {c:0, t:0, slot:-1};
+    // миграция со старого формата (без slot)
+    if(typeof rec.slot !== "number"){
+      rec = {c: rec.c, t: rec.t, slot: -1};
+    }
+    return rec;
+  }
+
+  function shouldRotateQuote(){
+    var rec = getQuoteRec();
+    var currentSlot = getDaySlot();
+    return currentSlot !== rec.slot && currentSlot > 0 && rec.slot >= 0;
+  }
+
+  function advanceQuote(){
+    var rec = getQuoteRec();
+    var currentSlot = getDaySlot();
+    var idx = rec.c;
+    // Если перешли в новый дневной слот — сдвигаем индекс
+    if(currentSlot > 0 && currentSlot !== rec.slot){
+      var steps = currentSlot > rec.slot ? currentSlot - rec.slot : currentSlot + 4 - rec.slot;
+      idx = (idx + steps) % QUOTES.length;
+    }
+    state[QUOTE_KEY] = {c: idx, t: Date.now(), slot: currentSlot};
+    saveLocalState();
+    return idx;
+  }
+
+  function showQuote(idx){
+    var el = document.getElementById("dailyQuote");
+    if(!el) return;
+    el.textContent = QUOTES[idx];
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){ el.classList.add("visible"); });
+    });
+  }
+
+  function initQuote(){
+    var rec = getQuoteRec();
+    var currentSlot = getDaySlot();
+    var idx = rec.c;
+
+    // Если зашли в новый слот
+    if(currentSlot !== rec.slot){
+      if(currentSlot > 0){
+        // Дневной слот — меняем цитату
+        var steps = currentSlot > rec.slot ? currentSlot - rec.slot : currentSlot + 4 - rec.slot;
+        idx = (idx + steps) % QUOTES.length;
+      }
+      // Ночь (0) — оставляем последнюю дневную цитату
+      state[QUOTE_KEY] = {c: idx, t: Date.now(), slot: currentSlot};
+      saveLocalState();
+    }
+    showQuote(idx);
+
+    // Проверяем раз в минуту. Смену делаем только когда вкладка неактивна,
+    // чтобы пользователь не видел мелькания текста.
+    setInterval(function(){
+      if(shouldRotateQuote() && document.hidden){
+        advanceQuote();
+      }
+    }, 60 * 1000);
+
+    // Когда пользователь возвращается — показываем актуальную цитату
+    document.addEventListener("visibilitychange", function(){
+      if(!document.hidden){
+        var el = document.getElementById("dailyQuote");
+        if(el){
+          el.classList.remove("visible");
+          el.textContent = QUOTES[getQuoteRec().c];
+          requestAnimationFrame(function(){
+            requestAnimationFrame(function(){ el.classList.add("visible"); });
+          });
+        }
+      }
+    });
+  }
+
+
+
+  var state = loadState();
+  var syncId = localStorage.getItem(SYNC_ID_KEY) || null;
+
+  // Инкрементальные счётчики
+  var totalChecked = 0;
+  var checkedPerBook = {};
+
+  var saveTimer = null;
+  function saveLocalState(){
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function(){
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+    }, 300);
+  }
+
+  function chapterKey(bookName, chapterNum){
+    return bookName + "|" + chapterNum;
+  }
+
+  function loadState(){
+    try{
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if(raw){ return JSON.parse(raw); }
+    }catch(e){}
+
+    // миграция со старой версии — единожды
+    try{
+      if(!localStorage.getItem(MIGRATED_KEY)){
+        var oldRaw = localStorage.getItem(OLD_STORAGE_KEY);
+        if(oldRaw){
+          var oldState = JSON.parse(oldRaw);
+          var migrated = {};
+          var now = Date.now();
+          Object.keys(oldState).forEach(function(k){
+            if(oldState[k]) migrated[k] = {c:true, t:now};
+          });
+          localStorage.setItem(MIGRATED_KEY, "1");
+          return migrated;
+        }
+        localStorage.setItem(MIGRATED_KEY, "1");
+      }
+    }catch(e){}
+    return {};
+  }
+
+  function isChecked(key){
+    return !!(state[key] && state[key].c);
+  }
+
+  // ===================== ТЕМЫ =====================
+  var THEME_KEY = "__theme";
+  var DEFAULT_THEME_ID = 1;
+  var THEMES = [
+    {id:1, name:"Пергамент"},{id:2, name:"Шалфей и небо"},{id:3, name:"Розовый и мята"},
+    {id:4, name:"Лаванда и слоновая кость"},{id:5, name:"Лимонный шифон и небо"},
+    {id:6, name:"Пыльная роза и графит"},{id:7, name:"Морская пена и песок"}
+  ];
+
+  function getCurrentThemeId(){
+    var rec = state[THEME_KEY];
+    return (rec && rec.c) ? rec.c : DEFAULT_THEME_ID;
+  }
+
+  function applyThemeToPage(themeId){
+    if(themeId === DEFAULT_THEME_ID){
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", String(themeId));
+    }
+    var dots = document.querySelectorAll(".theme-dot");
+    dots.forEach(function(dot){
+      dot.classList.toggle("selected", Number(dot.getAttribute("data-theme-id")) === themeId);
+    });
+  }
+
+  function selectTheme(themeId){
+    state[THEME_KEY] = {c: themeId, t: Date.now()};
+    saveLocalState();
+    applyThemeToPage(themeId);
+    scheduleCloudPush();
+  }
+
+  function renderThemeDots(){
+    var holder = document.getElementById("themeDots");
+    if(!holder) return;
+    holder.innerHTML = "";
+    var current = getCurrentThemeId();
+    THEMES.forEach(function(theme){
+      var dot = document.createElement("button");
+      dot.type = "button";
+      dot.className = "theme-dot" + (theme.id === current ? " selected" : "");
+      dot.setAttribute("data-theme-id", theme.id);
+      dot.title = theme.name;
+      dot.setAttribute("aria-label", "Тема: " + theme.name);
+      dot.style.background = themeSwatchGradient(theme.id);
+      dot.addEventListener("click", function(){ selectTheme(theme.id); });
+      holder.appendChild(dot);
+    });
+  }
+
+  function themeSwatchGradient(themeId){
+    var swatches = {
+      1:["#5c3d24","#48F78E"],2:["#5b7c99","#5AD1A0"],3:["#c98a97","#7FE8C0"],
+      4:["#8f7fb8","#8FE3C7"],5:["#7fa8c9","#8FE0A8"],6:["#7d8a99","#8FD9B8"],7:["#6fada0","#6FE0C0"]
+    };
+    var pair = swatches[themeId] || swatches[1];
+    return "linear-gradient(135deg, " + pair[0] + " 50%, " + pair[1] + " 50%)";
+  }
+
+  // ===================== ПРОПУЩЕННЫЕ ДНИ =====================
+  var DAY_MS = 24 * 60 * 60 * 1000;
+  function pluralRu(n, forms){
+    var abs = Math.abs(n) % 100, n1 = abs % 10;
+    if(abs > 10 && abs < 20) return forms[2];
+    if(n1 > 1 && n1 < 5) return forms[1];
+    if(n1 === 1) return forms[0];
+    return forms[2];
+  }
+  var DAY_FORMS = ["день","дня","дней"], WEEK_FORMS = ["неделя","недели","недель"], MONTH_FORMS = ["месяц","месяца","месяцев"], YEAR_FORMS = ["год","года","лет"];
+
+  function buildMissedMessage(totalDays){
+    if(totalDays === 1) return "Пропущен 1 день.";
+    if(totalDays < 7) return "Пропущено " + totalDays + " " + pluralRu(totalDays, DAY_FORMS) + ".";
+    if(totalDays < 60){
+      var weeks = Math.floor(totalDays / 7), days = totalDays - weeks * 7;
+      var msg = "Пропущено " + weeks + " " + pluralRu(weeks, WEEK_FORMS);
+      if(days > 0) msg += " и " + days + " " + pluralRu(days, DAY_FORMS);
+      return msg + ".";
+    }
+    if(totalDays < 90){
+      var months = Math.floor(totalDays / 30), remDays = totalDays - months * 30, remWeeks = Math.floor(remDays / 7);
+      var msg2 = "Пропущено " + months + " " + pluralRu(months, MONTH_FORMS);
+      if(remWeeks > 0) msg2 += " и " + remWeeks + " " + pluralRu(remWeeks, WEEK_FORMS);
+      return msg2 + ".";
+    }
+    if(totalDays < 182) return "Пропущено более трех месяцев.";
+    if(totalDays < 365) return "Пропущено более полугода.";
+    if(totalDays < 730) return "Пропущено более 1 года.";
+    return "Пропущено более двух лет.";
+  }
+
+  function updateMissedBanner(){
+    var wrap = document.getElementById("missedWrap"), textEl = document.getElementById("missedText");
+    if(!wrap || !textEl) return;
+    var rec = state["__lastRead"];
+    if(!rec || !rec.c){ wrap.classList.remove("visible"); return; }
+    var totalDays = Math.floor((Date.now() - rec.c) / DAY_MS);
+    if(totalDays < 1){ wrap.classList.remove("visible"); return; }
+    textEl.textContent = buildMissedMessage(totalDays);
+    wrap.classList.add("visible");
+  }
+
+  function ensureLastReadInitialized(){
+    if(state["__lastRead"]) return;
+    var maxT = 0;
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("|") !== -1 && state[k] && state[k].c && state[k].t > maxT) maxT = state[k].t;
+    });
+    if(maxT > 0){ state["__lastRead"] = {c: maxT, t: maxT}; saveLocalState(); }
+  }
+
+  function joinRu(parts){
+    if(parts.length === 1) return parts[0];
+    if(parts.length === 2) return parts[0] + " и " + parts[1];
+    return parts.slice(0, -1).join(", ") + " и " + parts[parts.length - 1];
+  }
+  function buildDurationText(totalDays){
+    var years = Math.floor(totalDays / 365), rem = totalDays - years * 365, months = Math.floor(rem / 30), days = rem - months * 30;
+    var parts = [];
+    if(years > 0) parts.push(years + " " + pluralRu(years, YEAR_FORMS));
+    if(months > 0) parts.push(months + " " + pluralRu(months, MONTH_FORMS));
+    if(days > 0) parts.push(days + " " + pluralRu(days, DAY_FORMS));
+    return parts.length === 0 ? "меньше дня" : joinRu(parts);
+  }
+  function getDurationSuffix(){
+    var rec = state["__firstRead"];
+    if(!rec || rec.c == null) return "";
+    return " — " + buildDurationText(Math.floor((Date.now() - rec.c) / DAY_MS));
+  }
+  function ensureFirstReadInitialized(){
+    if(state["__firstRead"]) return;
+    var minT = null;
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("|") !== -1 && state[k] && state[k].c){
+        if(minT === null || state[k].t < minT) minT = state[k].t;
+      }
+    });
+    if(minT !== null){ state["__firstRead"] = {c: minT, t: minT}; saveLocalState(); }
+  }
+
+  // ===================== ПОЗДРАВЛЕНИЕ =====================
+  function showCelebrationModal(){
+    var overlay = document.getElementById("modalOverlay"), box = document.getElementById("modalBox");
+    if(!overlay || !box) return;
+    function closeThis(){ overlay.classList.remove("open"); box.innerHTML = ""; }
+    box.innerHTML = modalHeader("Ты молодец!", "Прочитал Библию полностью. Не останавливайся на достигнутом!") +
+      '<button class="modal-btn primary" id="mCelebrateReset">Начать читать заново (сбросить прогресс)</button>' +
+      '<button class="modal-btn" id="mCelebrateKeep">Не сбрасывать</button>';
+    var closeBtn0 = document.getElementById("mClose");
+    if(closeBtn0) closeBtn0.addEventListener("click", closeThis);
+    overlay.classList.add("open");
+    document.getElementById("mCelebrateReset").addEventListener("click", function(){
+      performFullReset();
+      box.innerHTML = modalHeader("Прогресс был обновлён", "Приятного чтения!") + '<button class="modal-btn primary" id="mDone">Продолжить</button>';
+      var closeBtn1 = document.getElementById("mClose");
+      if(closeBtn1) closeBtn1.addEventListener("click", closeThis);
+      document.getElementById("mDone").addEventListener("click", closeThis);
+    });
+    document.getElementById("mCelebrateKeep").addEventListener("click", function(){
+      box.innerHTML = modalHeader("Хорошо", "Помните, вы всегда можете начать читать Библию заново. Для этого просто нужно нажать на кнопку «Начать чтение сначала и сбросить прогресс» — она находится в самом низу страницы.") + '<button class="modal-btn primary" id="mOk">ОК</button>';
+      var closeBtn2 = document.getElementById("mClose");
+      if(closeBtn2) closeBtn2.addEventListener("click", closeThis);
+      document.getElementById("mOk").addEventListener("click", closeThis);
+    });
+  }
+  function checkCelebration(){
+    if(totalChecked === TOTAL_CHAPTERS){
+      if(localStorage.getItem(CELEBRATION_SHOWN_KEY) !== "1"){
+        try{ localStorage.setItem(CELEBRATION_SHOWN_KEY, "1"); }catch(e){}
+        showCelebrationModal();
+      }
+    } else {
+      try{ localStorage.removeItem(CELEBRATION_SHOWN_KEY); }catch(e){}
+    }
+  }
+
+  // ===================== ПОСТРОЕНИЕ СТРАНИЦЫ (DocumentFragment) =====================
+  var booksContainer = document.getElementById("booksContainer");
+  var overallFill = document.getElementById("overallFill");
+  var overallText = document.getElementById("overallText");
+  var bookMeta = {};
+  var chapterInputs = {};
+
+  function initPage(){
+    var frag = document.createDocumentFragment();
+    sections.forEach(function(section){
+      var label = document.createElement("div");
+      label.className = "section-label";
+      label.textContent = section.title;
+      frag.appendChild(label);
+
+      section.books.forEach(function(book){
+        var bookName = book[0], chapterCount = book[1];
+        checkedPerBook[bookName] = 0;
+
+        var card = document.createElement("div");
+        card.className = "book-card";
+
+        var headerEl = document.createElement("div");
+        headerEl.className = "book-header";
+
+        var fillEl = document.createElement("div");
+        fillEl.className = "book-fill";
+
+        var headerContent = document.createElement("div");
+        headerContent.className = "book-header-content";
+
+        var nameEl = document.createElement("div");
+        nameEl.className = "book-name";
+        nameEl.textContent = bookName;
+
+        var countEl = document.createElement("div");
+        countEl.className = "book-count";
+
+        var toggleEl = document.createElement("div");
+        toggleEl.className = "toggle-check";
+        toggleEl.innerHTML = "<span>&gt;</span>";
+
+        headerContent.appendChild(nameEl);
+        headerContent.appendChild(countEl);
+        headerContent.appendChild(toggleEl);
+        headerEl.appendChild(fillEl);
+        headerEl.appendChild(headerContent);
+
+        var chaptersContainer = document.createElement("div");
+        chaptersContainer.className = "chapters-container";
+
+        var grid = document.createElement("div");
+        grid.className = "chapters-grid";
+
+        for(var c=1;c<=chapterCount;c++){
+          (function(chapterNum){
+            var key = chapterKey(bookName, chapterNum);
+            var checked = isChecked(key);
+            if(checked){ checkedPerBook[bookName]++; totalChecked++; }
+
+            var item = document.createElement("div");
+            item.className = "chapter-item";
+
+            var input = document.createElement("input");
+            input.type = "checkbox";
+            input.id = "ch_" + bookName.replace(/\s+/g,"_") + "_" + chapterNum;
+            input.checked = checked;
+
+            var lbl = document.createElement("label");
+            lbl.setAttribute("for", input.id);
+            lbl.textContent = chapterNum;
+
+            input.addEventListener("change", function(){
+              var wasChecked = !!state[key];
+              state[key] = {c: input.checked, t: Date.now()};
+              if(input.checked){
+                var now = Date.now();
+                state["__lastRead"] = {c: now, t: now};
+                if(!state["__firstRead"] || state["__firstRead"].c == null){
+                  state["__firstRead"] = {c: now, t: now};
+                }
+                checkedPerBook[bookName]++;
+                totalChecked++;
+              } else {
+                checkedPerBook[bookName]--;
+                totalChecked--;
+              }
+              saveLocalState();
+              updateBookProgress(bookName);
+              updateOverallProgress();
+              updateMissedBanner();
+              scheduleCloudPush();
+            });
+
+            chapterInputs[key] = input;
+            item.appendChild(input);
+            item.appendChild(lbl);
+            grid.appendChild(item);
+          })(c);
+        }
+
+        chaptersContainer.appendChild(grid);
+
+        headerEl.addEventListener("click", function(){
+          var isOpen = chaptersContainer.classList.toggle("open");
+          headerEl.classList.toggle("expanded", isOpen);
+          if(isOpen){
+            chaptersContainer.style.setProperty("--ch-h", grid.scrollHeight + 28 + "px");
+          }
+        });
+
+        card.appendChild(headerEl);
+        card.appendChild(chaptersContainer);
+        frag.appendChild(card);
+
+        bookMeta[bookName] = {fillEl:fillEl, countEl:countEl, chapterCount:chapterCount};
+        updateBookProgress(bookName);
+      });
+    });
+    booksContainer.appendChild(frag);
+  }
+
+  function updateBookProgress(bookName){
+    var meta = bookMeta[bookName];
+    var checked = checkedPerBook[bookName] || 0;
+    var pct = meta.chapterCount ? Math.round((checked/meta.chapterCount)*100) : 0;
+    meta.fillEl.style.width = pct + "%";
+    meta.countEl.textContent = checked + " / " + meta.chapterCount;
+  }
+
+  function updateOverallProgress(){
+    var pct = TOTAL_CHAPTERS ? Math.round((totalChecked/TOTAL_CHAPTERS)*100) : 0;
+    overallFill.style.width = pct + "%";
+    overallText.textContent = totalChecked + " из " + TOTAL_CHAPTERS + " глав (" + pct + "%)" + getDurationSuffix();
+    checkCelebration();
+  }
+
+  function rerenderAllFromState(){
+    var prevTotal = totalChecked;
+    totalChecked = 0;
+    Object.keys(checkedPerBook).forEach(function(bn){ checkedPerBook[bn] = 0; });
+
+    Object.keys(chapterInputs).forEach(function(key){
+      var input = chapterInputs[key];
+      var newChecked = isChecked(key);
+      if(input.checked !== newChecked) input.checked = newChecked;
+      if(newChecked){
+        var parts = key.split("|");
+        checkedPerBook[parts[0]] = (checkedPerBook[parts[0]] || 0) + 1;
+        totalChecked++;
+      }
+    });
+
+    Object.keys(bookMeta).forEach(function(bookName){
+      updateBookProgress(bookName);
+    });
+    updateOverallProgress();
+    applyThemeToPage(getCurrentThemeId());
+    if(!document.getElementById("themeDots").children.length) renderThemeDots();
+    updateMissedBanner();
+  }
+
+  // ===================== СБРОС ПРОГРЕССА =====================
+  function setNoTransitions(enable){
+    document.body.classList.toggle("no-transitions", enable);
+  }
+
+  function performFullReset(){
+    setNoTransitions(true);
+    var now = Date.now();
+    sections.forEach(function(section){
+      section.books.forEach(function(book){
+        var bookName = book[0], chapterCount = book[1];
+        checkedPerBook[bookName] = 0;
+        for(var c=1;c<=chapterCount;c++){
+          state[chapterKey(bookName,c)] = {c:false, t:now};
+        }
+      });
+    });
+    totalChecked = 0;
+    state["__lastRead"] = {c:null, t:now};
+    state["__firstRead"] = {c:null, t:now};
+    saveLocalState();
+    rerenderAllFromState();
+    try{ localStorage.removeItem(CELEBRATION_SHOWN_KEY); }catch(e){}
+    setTimeout(function(){ setNoTransitions(false); }, 50);
+
+    if(syncId && navigator.onLine){
+      setSyncState("syncing");
+      putCloudBlob(syncId, state).then(function(){ setSyncState("synced"); }).catch(function(){ setSyncState("error"); });
+    }
+  }
+
+  document.getElementById("resetBtn").addEventListener("click", function(){
+    if(!confirm("Точно сбросить весь прогресс чтения и начать сначала?")) return;
+    performFullReset();
+  });
+
+  // ===================== ОБЛАЧНАЯ СИНХРОНИЗАЦИЯ (AbortController) =====================
+  function fetchWithTimeout(url, options, timeoutMs){
+    var ctrl = new AbortController();
+    var timer = setTimeout(function(){ ctrl.abort(); }, timeoutMs || 8000);
+    options = options || {};
+    options.signal = ctrl.signal;
+    return fetch(url, options).finally(function(){ clearTimeout(timer); });
+  }
+
+  function createCloudBlob(initialData){
+    var id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    return fetchWithTimeout(FIREBASE_BASE + "/" + id + ".json", {
+      method:"PUT",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(initialData)
+    }, 15000).then(function(res){
+      if(!res.ok) throw new Error("create_failed_" + res.status);
+      return id;
+    });
+  }
+
+  function fetchCloudBlob(id){
+    return fetchWithTimeout(FIREBASE_BASE + "/" + encodeURIComponent(id) + ".json", {
+      method:"GET"
+    }, 8000).then(function(res){
+      if(!res.ok) throw new Error("fetch_failed_" + res.status);
+      return res.json().then(function(data){
+        if(data === null) throw new Error("not_found");
+        return data;
+      });
+    });
+  }
+
+  function putCloudBlob(id, data){
+    return fetchWithTimeout(FIREBASE_BASE + "/" + encodeURIComponent(id) + ".json", {
+      method:"PUT",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(data)
+    }, 15000).then(function(res){
+      if(!res.ok) throw new Error("put_failed_" + res.status);
+      return true;
+    });
+  }
+
+  function mergeStates(local, cloud){
+    var merged = {}, keys = {};
+    Object.keys(local||{}).forEach(function(k){ keys[k]=true; });
+    Object.keys(cloud||{}).forEach(function(k){ keys[k]=true; });
+    Object.keys(keys).forEach(function(k){
+      var l = local ? local[k] : null, c = cloud ? cloud[k] : null;
+      merged[k] = (l && c) ? ((l.t >= c.t) ? l : c) : (l || c);
+    });
+    return merged;
+  }
+
+  function statesEqual(a, b){
+    var ak = Object.keys(a||{}).sort(), bk = Object.keys(b||{}).sort();
+    if(ak.length !== bk.length) return false;
+    for(var i=0;i<ak.length;i++){
+      var k = ak[i];
+      if(!b[k]) return false;
+      if(a[k].c !== b[k].c || a[k].t !== b[k].t) return false;
+    }
+    return true;
+  }
+
+  var syncStatusPill = document.getElementById("syncStatusPill");
+  var syncStatusText = document.getElementById("syncStatusText");
+
+  function setSyncState(st, extraText){
+    syncStatusPill.setAttribute("data-state", st);
+    var labels = {off:"Синхронизация выкл.",offline:"Офлайн",syncing:"Синхронизация…",synced:"Синхронизировано",error:"Ошибка синхронизации"};
+    syncStatusText.textContent = extraText || labels[st] || "";
+  }
+
+  function refreshStatusBase(){
+    if(!syncId){ setSyncState("off"); return; }
+    if(!navigator.onLine){ setSyncState("offline"); return; }
+    setSyncState("synced");
+  }
+  refreshStatusBase();
+
+  var pushTimer = null;
+  function scheduleCloudPush(){
+    if(!syncId) return;
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(doCloudSync, 1500);
+  }
+
+  var syncInProgress = false;
+  function doCloudSync(){
+    if(!syncId) { setSyncState("off"); return; }
+    if(!navigator.onLine){ setSyncState("offline"); return; }
+    if(syncInProgress) return;
+    syncInProgress = true;
+    setSyncState("syncing");
+    fetchCloudBlob(syncId).then(function(cloudData){
+      var merged = mergeStates(state, cloudData);
+      var localChanged = !statesEqual(merged, state);
+      var cloudChanged = !statesEqual(merged, cloudData);
+      state = merged;
+      if(localChanged){
+        saveLocalState();
+        setNoTransitions(true);
+        rerenderAllFromState();
+        setTimeout(function(){ setNoTransitions(false); }, 50);
+      }
+      if(cloudChanged){
+        return putCloudBlob(syncId, merged);
+      }
+    }).then(function(){
+      setSyncState("synced");
+    }).catch(function(err){
+      console.error("Ошибка синхронизации:", err);
+      setSyncState("error");
+    }).finally(function(){
+      syncInProgress = false;
+    });
+  }
+
+  window.addEventListener("online", function(){ refreshStatusBase(); doCloudSync(); });
+  window.addEventListener("offline", function(){ refreshStatusBase(); });
+  if(syncId) doCloudSync();
+
+  // ===================== МОДАЛЬНОЕ ОКНО СИНХРОНИЗАЦИИ =====================
+  var modalOverlay = document.getElementById("modalOverlay");
+  var modalBox = document.getElementById("modalBox");
+  var activeStream = null, scanRAF = null;
+
+  function stopCamera(){
+    if(scanRAF){ cancelAnimationFrame(scanRAF); scanRAF = null; }
+    if(activeStream){ activeStream.getTracks().forEach(function(t){ t.stop(); }); activeStream = null; }
+  }
+  function closeModal(){ stopCamera(); modalOverlay.classList.remove("open"); modalBox.innerHTML = ""; }
+  function openModal(){ modalOverlay.classList.add("open"); renderModalHome(); }
+  modalOverlay.addEventListener("click", function(e){ if(e.target === modalOverlay) closeModal(); });
+  syncStatusPill.addEventListener("click", openModal);
+
+  function modalHeader(title, subtitle){
+    var h = '<button class="modal-close" id="mClose">&times;</button><h2>' + title + '</h2>';
+    if(subtitle) h += '<p>' + subtitle + '</p>';
+    return h;
+  }
+  function bindClose(){ var btn = document.getElementById("mClose"); if(btn) btn.addEventListener("click", closeModal); }
+
+  // --- ленивая загрузка QRCode и jsQR ---
+  var qrLibLoaded = false, jsqrLibLoaded = false;
+  function loadQrLib(){
+    if(qrLibLoaded) return Promise.resolve();
+    return new Promise(function(resolve, reject){
+      var s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js";
+      s.onload = function(){ qrLibLoaded = true; resolve(); };
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+  function loadJsqrLib(){
+    if(jsqrLibLoaded) return Promise.resolve();
+    return new Promise(function(resolve, reject){
+      var s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
+      s.onload = function(){ jsqrLibLoaded = true; resolve(); };
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  function renderModalHome(){
+    stopCamera();
+    if(!syncId){
+      modalBox.innerHTML = modalHeader("Синхронизация между устройствами",
+        "Читаете с нескольких устройств? Подключите их между собой, и прогресс будет совпадать на всех.") +
+        '<button class="modal-btn primary" id="mCreate">Это первое устройство — создать код</button>' +
+        '<button class="modal-btn" id="mJoin">У меня уже есть код с другого устройства</button>';
+      bindClose();
+      document.getElementById("mCreate").addEventListener("click", handleCreateCode);
+      document.getElementById("mJoin").addEventListener("click", renderJoinScreen);
+    } else {
+      modalBox.innerHTML = modalHeader("Устройство подключено",
+        "Прогресс синхронизируется с другими вашими устройствами.") +
+        '<div id="mOwnQrHolder"></div>' +
+        '<div class="modal-note" id="mSyncNote" style="margin-bottom:12px;"></div>' +
+        '<button class="modal-btn" id="mSyncNow">Синхронизировать сейчас</button>' +
+        '<div class="modal-section">' +
+          '<button class="modal-btn danger" id="mDisconnect">Отключить синхронизацию на этом устройстве</button>' +
+          '<p class="modal-note">Это не удалит облачную копию — просто это устройство перестанет с ней сверяться.</p>' +
+        '</div>';
+      bindClose();
+      loadQrLib().then(function(){
+        showCodeAndQR("mOwnQrHolder", syncId, "Код для подключения ещё одного устройства:");
+      }).catch(function(){
+        document.getElementById("mOwnQrHolder").innerHTML = '<p class="modal-note error">Не удалось загрузить QR-код (нет интернета?).</p>';
+      });
+      document.getElementById("mSyncNow").addEventListener("click", function(){
+        doCloudSync();
+        var note = document.getElementById("mSyncNote");
+        if(note) note.textContent = "Синхронизация запущена…";
+      });
+      document.getElementById("mDisconnect").addEventListener("click", function(){
+        if(!confirm("Отключить это устройство от синхронизации? Локальный прогресс сохранится.")) return;
+        syncId = null;
+        localStorage.removeItem(SYNC_ID_KEY);
+        refreshStatusBase();
+        renderModalHome();
+      });
+    }
+  }
+
+  function showCodeAndQR(holderId, code, label){
+    var holder = document.getElementById(holderId);
+    if(!holder) return;
+    holder.innerHTML = '<p class="modal-note">' + label + '</p><div id="qrHolder"></div>' +
+      '<div class="code-row"><input type="text" id="codeText" readonly value="' + code + '"><button id="codeCopy">Копировать</button></div>';
+    try{
+      new QRCode(document.getElementById("qrHolder"), {text: code, width: 200, height: 200, colorDark: "#2e2418", colorLight: "#fbf4e2"});
+    }catch(e){
+      document.getElementById("qrHolder").textContent = "Не удалось построить QR-код.";
+    }
+    document.getElementById("codeCopy").addEventListener("click", function(){
+      var input = document.getElementById("codeText");
+      input.select(); input.setSelectionRange(0, 99999);
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(code).catch(function(){});
+      }
+      try{ document.execCommand("copy"); }catch(e){}
+      var btn = document.getElementById("codeCopy");
+      btn.textContent = "Скопировано";
+      setTimeout(function(){ btn.textContent = "Копировать"; }, 1500);
+    });
+  }
+
+  function handleCreateCode(){
+    modalBox.innerHTML = modalHeader("Создаём код…", "Секунду, подключаемся к облачному хранилищу.");
+    bindClose();
+    if(!navigator.onLine){
+      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для создания кода синхронизации нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderModalHome);
+      return;
+    }
+    createCloudBlob(state).then(function(id){
+      syncId = id;
+      localStorage.setItem(SYNC_ID_KEY, id);
+      refreshStatusBase();
+      modalBox.innerHTML = modalHeader("Код создан", "Отсканируйте этот QR-код на другом устройстве (в этой же панели, кнопка «У меня уже есть код») — или введите код текстом.") +
+        '<div id="mNewQrHolder"></div><button class="modal-btn primary" id="mDone">Готово</button>';
+      bindClose();
+      loadQrLib().then(function(){
+        showCodeAndQR("mNewQrHolder", id, "Код синхронизации:");
+      }).catch(function(){
+        document.getElementById("mNewQrHolder").innerHTML = '<p class="modal-note error">Не удалось загрузить QR-код.</p>';
+      });
+      document.getElementById("mDone").addEventListener("click", closeModal);
+    }).catch(function(err){
+      console.error(err);
+      modalBox.innerHTML = modalHeader("Не удалось создать код",
+        "Возможно, временно недоступен облачный сервис синхронизации. Попробуйте ещё раз чуть позже — локальный прогресс при этом никуда не делся.") +
+        '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderModalHome);
+    });
+  }
+
+  function renderJoinScreen(){
+    modalBox.innerHTML = modalHeader("Подключение по коду", "Отсканируйте QR-код с первого устройства камерой или введите код вручную.") +
+      '<button class="modal-btn primary" id="mScan">Сканировать QR-код</button>' +
+      '<button class="modal-btn" id="mManual">Ввести код вручную</button>' +
+      '<button class="modal-btn" id="mBack">Назад</button>';
+    bindClose();
+    document.getElementById("mScan").addEventListener("click", renderScanScreen);
+    document.getElementById("mManual").addEventListener("click", renderManualScreen);
+    document.getElementById("mBack").addEventListener("click", renderModalHome);
+  }
+
+  function renderManualScreen(){
+    modalBox.innerHTML = modalHeader("Ввод кода вручную", "Введите код синхронизации с первого устройства.") +
+      '<div class="code-row"><input type="text" id="manualCodeInput" placeholder="код синхронизации"></div>' +
+      '<button class="modal-btn primary" id="mSubmit">Подключить</button>' +
+      '<button class="modal-btn" id="mBack">Назад</button>' +
+      '<div class="modal-note" id="mJoinNote"></div>';
+    bindClose();
+    document.getElementById("mBack").addEventListener("click", renderJoinScreen);
+    document.getElementById("mSubmit").addEventListener("click", function(){
+      var val = document.getElementById("manualCodeInput").value.trim();
+      if(val) joinWithCode(val);
+    });
+  }
+
+  function renderScanScreen(){
+    modalBox.innerHTML = modalHeader("Сканирование QR-кода", "Наведите камеру на QR-код с первого устройства.") +
+      '<div class="scan-video-wrap"><video id="scanVideo" playsinline autoplay muted></video><div class="scan-frame"></div></div>' +
+      '<canvas id="scanCanvas" style="display:none;"></canvas>' +
+      '<button class="modal-btn" id="mManualFallback">Ввести код вручную вместо этого</button>' +
+      '<button class="modal-btn" id="mBack">Назад</button>' +
+      '<div class="modal-note" id="mScanNote"></div>';
+    bindClose();
+    document.getElementById("mBack").addEventListener("click", function(){ stopCamera(); renderJoinScreen(); });
+    document.getElementById("mManualFallback").addEventListener("click", function(){ stopCamera(); renderManualScreen(); });
+
+    var video = document.getElementById("scanVideo");
+    var canvas = document.getElementById("scanCanvas");
+    var note = document.getElementById("mScanNote");
+
+    loadJsqrLib().then(function(){
+      if(typeof jsQR !== "function"){
+        note.className = "modal-note error";
+        note.textContent = "Не удалось загрузить модуль сканирования. Введите код вручную.";
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
+        .then(function(stream){
+          activeStream = stream;
+          video.srcObject = stream;
+          video.play();
+          scanRAF = requestAnimationFrame(tick);
+        }).catch(function(err){
+          console.error(err);
+          note.className = "modal-note error";
+          note.textContent = "Не удалось получить доступ к камере. Введите код вручную.";
+        });
+
+      function tick(){
+        if(video.readyState === video.HAVE_ENOUGH_DATA){
+          // уменьшаем разрешение для скорости
+          var w = 320, h = 240;
+          canvas.width = w; canvas.height = h;
+          var ctx = canvas.getContext("2d");
+          ctx.drawImage(video, 0, 0, w, h);
+          var imageData = ctx.getImageData(0, 0, w, h);
+          var result = jsQR(imageData.data, imageData.width, imageData.height, {inversionAttempts:"dontInvert"});
+          if(result && result.data){
+            stopCamera();
+            note.className = "modal-note success";
+            note.textContent = "Код распознан!";
+            joinWithCode(result.data);
+            return;
+          }
+        }
+        scanRAF = requestAnimationFrame(tick);
+      }
+    }).catch(function(){
+      note.className = "modal-note error";
+      note.textContent = "Не удалось загрузить сканер (нет интернета?). Введите код вручную.";
+    });
+  }
+
+  function joinWithCode(id){
+    id = (id||"").trim();
+    if(!id) return;
+    modalBox.innerHTML = modalHeader("Подключаемся…", "Загружаем и объединяем прогресс.");
+    bindClose();
+    if(!navigator.onLine){
+      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для подключения нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderJoinScreen);
+      return;
+    }
+    fetchCloudBlob(id).then(function(cloudData){
+      var merged = mergeStates(state, cloudData || {});
+      state = merged;
+      syncId = id;
+      localStorage.setItem(SYNC_ID_KEY, id);
+      saveLocalState();
+      setNoTransitions(true);
+      rerenderAllFromState();
+      setTimeout(function(){ setNoTransitions(false); }, 50);
+      return putCloudBlob(id, merged);
+    }).then(function(){
+      refreshStatusBase();
+      setSyncState("synced");
+      modalBox.innerHTML = modalHeader("Готово!", "Устройство подключено, прогресс объединён.") + '<button class="modal-btn primary" id="mDone">Закрыть</button>';
+      bindClose();
+      document.getElementById("mDone").addEventListener("click", closeModal);
+    }).catch(function(err){
+      console.error(err);
+      var msg = "Не удалось подключиться. Проверьте код и подключение к интернету.";
+      if(String(err.message||"").indexOf("not_found") !== -1) msg = "Код не найден. Проверьте, что он введён без ошибок.";
+      modalBox.innerHTML = modalHeader("Не получилось подключиться", msg) + '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderJoinScreen);
+    });
+  }
+
+  // ===================== SERVICE WORKER И УВЕДОМЛЕНИЕ ОБ ОБНОВЛЕНИИ =====================
+  var pendingUpdateVersion = null, pendingRegistration = null;
+
+  function showUpdateBanner(version){
+    try{ if(localStorage.getItem(UPDATES_DISABLED_KEY) === "1") return; }catch(e){}
+    if(version && localStorage.getItem(UPDATE_DISMISSED_KEY) === version) return;
+    pendingUpdateVersion = version || null;
+    var wrap = document.getElementById("updateWrap");
+    if(wrap) wrap.classList.add("visible");
+  }
+  function hideUpdateBanner(){
+    var wrap = document.getElementById("updateWrap");
+    if(wrap) wrap.classList.remove("visible");
+  }
+  // если после нажатия "Не сейчас" прошли сутки — прячем баннер и больше
+  // не напоминаем про эту конкретную версию (до выхода следующей)
+  function checkUpdateSnoozeExpiry(){
+    var raw;
+    try{ raw = localStorage.getItem(UPDATE_SNOOZE_KEY); }catch(e){ return; }
+    if(!raw) return;
+    var rec;
+    try{ rec = JSON.parse(raw); }catch(e){ return; }
+    if(rec && rec.version && Date.now() >= rec.until){
+      try{ localStorage.setItem(UPDATE_DISMISSED_KEY, rec.version); }catch(e){}
+      try{ localStorage.removeItem(UPDATE_SNOOZE_KEY); }catch(e){}
+      hideUpdateBanner();
+    }
+  }
+  function openUpdateModal(){
+    var overlay = document.getElementById("modalOverlay"), box = document.getElementById("modalBox");
+    if(!overlay || !box) return;
+    function closeThis(){ overlay.classList.remove("open"); box.innerHTML = ""; }
+    box.innerHTML = modalHeader("Доступна новая версия", "Скачать новую версию этой страницы? Ваш прогресс чтения сохранится.") +
+      '<button class="modal-btn primary" id="mUpdYes">Да, обновить</button>' +
+      '<button class="modal-btn" id="mUpdNo">Не сейчас</button>' +
+      '<button class="modal-btn" id="mUpdNever">Больше не показывать это уведомление</button>';
+    var closeBtn = document.getElementById("mClose");
+    if(closeBtn) closeBtn.addEventListener("click", closeThis);
+    overlay.classList.add("open");
+    document.getElementById("mUpdYes").addEventListener("click", function(){
+      if(pendingRegistration && pendingRegistration.waiting){
+        pendingRegistration.waiting.postMessage("SKIP_WAITING");
+      } else { window.location.reload(); }
+      closeThis();
+    });
+    document.getElementById("mUpdNo").addEventListener("click", function(){
+      if(pendingUpdateVersion){
+        try{
+          localStorage.setItem(UPDATE_SNOOZE_KEY, JSON.stringify({
+            version: pendingUpdateVersion,
+            until: Date.now() + SNOOZE_DURATION_MS
+          }));
+        }catch(e){}
+      }
+      // баннер намеренно НЕ скрываем — по договорённости он остаётся
+      // виден ещё сутки, а затем прячется сам (см. checkUpdateSnoozeExpiry)
+      closeThis();
+    });
+    document.getElementById("mUpdNever").addEventListener("click", function(){
+      try{ localStorage.setItem(UPDATES_DISABLED_KEY, "1"); }catch(e){}
+      hideUpdateBanner(); closeThis();
+    });
+  }
+
+  var updateBar = document.getElementById("updateBar");
+  if(updateBar) updateBar.addEventListener("click", openUpdateModal);
+
+  // строка "обновить сейчас" в подвале — работает независимо от того,
+  // отключены ли всплывающие уведомления (см. UPDATES_DISABLED_KEY):
+  // человек всегда может проверить и обновиться вручную здесь
+  function renderManualUpdateOption(){
+    var row = document.getElementById("versionUpdateRow");
+    if(!row) return;
+    if(pendingRegistration && pendingRegistration.waiting){
+      var label = pendingUpdateVersion ? ("Обновить до v" + pendingUpdateVersion) : "Доступно обновление — обновить";
+      row.innerHTML = '<button class="version-history-update-item" id="versionUpdateBtn">' + label + '</button>';
+      var btn = document.getElementById("versionUpdateBtn");
+      if(btn){
+        btn.addEventListener("click", function(){
+          if(pendingRegistration && pendingRegistration.waiting){
+            pendingRegistration.waiting.postMessage("SKIP_WAITING");
+          } else {
+            window.location.reload();
+          }
+        });
+      }
+    } else {
+      row.innerHTML = "";
+    }
+  }
+
+  // версия в подвале подтягивается напрямую из sw.js через служебный
+  // запрос по MessageChannel — значит, менять её нужно только в одном
+  // месте (APP_VERSION в sw.js), а не отдельно ещё и в разметке
+  function applyVersionToFooter(version){
+    if(!version) return;
+    var el = document.getElementById("appVersionText");
+    if(el) el.textContent = "v" + String(version).replace(/^v/i, "");
+  }
+
+  function requestVersionFromSW(){
+    if(!("serviceWorker" in navigator) || !navigator.serviceWorker.controller) return;
+    try{
+      var channel = new MessageChannel();
+      channel.port1.onmessage = function(event){
+        if(event.data && event.data.type === "VERSION"){
+          applyVersionToFooter(event.data.version);
+        }
+      };
+      navigator.serviceWorker.controller.postMessage({type:"GET_VERSION"}, [channel.port2]);
+    }catch(e){}
+  }
+
+  if("serviceWorker" in navigator && (location.protocol === "http:" || location.protocol === "https:")){
+    navigator.serviceWorker.addEventListener("message", function(event){
+      if(event.data && event.data.type === "SW_VERSION") pendingUpdateVersion = event.data.version;
+    });
+    var reloadedAfterUpdate = false;
+    navigator.serviceWorker.addEventListener("controllerchange", function(){
+      requestVersionFromSW();
+      if(reloadedAfterUpdate) return;
+      reloadedAfterUpdate = true;
+      window.location.reload();
+    });
+    window.addEventListener("load", function(){
+      navigator.serviceWorker.register("./sw.js").then(function(reg){
+        pendingRegistration = reg;
+        requestVersionFromSW();
+        if(reg.waiting && navigator.serviceWorker.controller) showUpdateBanner(pendingUpdateVersion);
+        renderManualUpdateOption();
+        reg.addEventListener("updatefound", function(){
+          var newWorker = reg.installing;
+          if(!newWorker) return;
+          newWorker.addEventListener("statechange", function(){
+            if(newWorker.state === "installed" && navigator.serviceWorker.controller){
+              showUpdateBanner(pendingUpdateVersion);
+              renderManualUpdateOption();
+            }
+          });
+        });
+      }).catch(function(err){ console.error("Не удалось зарегистрировать service worker:", err); });
+    });
+  }
+
+  // ===================== АРХИВ ПРЕДЫДУЩИХ ВЕРСИЙ =====================
+  // Список берётся автоматически из ./versions/versions.json — этот файл
+  // ведёт GitHub Action при публикации релиза (тега) в репозитории, вручную
+  // ничего копировать и редактировать в коде больше не нужно.
+  function renderVersionHistory(){
+    var itemsHolder = document.getElementById("versionHistoryItems");
+    if(!itemsHolder) return;
+    fetch("./versions/versions.json")
+      .then(function(res){
+        if(!res.ok) throw new Error("no versions.json");
+        return res.json();
+      })
+      .then(function(data){
+        var items = (data && data.versions) ? data.versions.slice(0, 5) : [];
+        renderVersionItems(items);
+      })
+      .catch(function(){
+        renderVersionItems([]);
+      });
+  }
+
+  function renderVersionItems(items){
+    var itemsHolder = document.getElementById("versionHistoryItems");
+    if(!itemsHolder) return;
+    itemsHolder.innerHTML = "";
+    if(!items.length){
+      var empty = document.createElement("div");
+      empty.className = "version-history-empty";
+      empty.textContent = "Архив версий пока пуст";
+      itemsHolder.appendChild(empty);
+      return;
+    }
+    items.forEach(function(item){
+      var link = document.createElement("a");
+      link.className = "version-history-item";
+      link.href = "./versions/v" + item.version + "/index.html";
+      link.textContent = "v" + item.version + (item.date ? " — " + item.date : "");
+      itemsHolder.appendChild(link);
+    });
+  }
+
+  var versionHistoryWrap = document.getElementById("versionHistoryWrap");
+  var versionHistoryBar = document.getElementById("versionHistoryBar");
+  if(versionHistoryBar){
+    versionHistoryBar.addEventListener("click", function(){
+      versionHistoryWrap.classList.toggle("open");
+      renderManualUpdateOption();
+    });
+  }
+
+  // ===================== ЗАПУСК =====================
+  initQuote();
+  initPage();
+  ensureLastReadInitialized();
+  ensureFirstReadInitialized();
+  updateOverallProgress();
+  applyThemeToPage(getCurrentThemeId());
+  renderThemeDots();
+  updateMissedBanner();
+  renderVersionHistory();
+  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); }, 30 * 60 * 1000);
+  checkUpdateSnoozeExpiry();
+
+})();
+</script>
+
+</body>
+</html>
