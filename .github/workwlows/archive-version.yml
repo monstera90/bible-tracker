@@ -1,1 +1,69 @@
+name: Archive tagged version
 
+# Срабатывает, когда в репозитории публикуется тег вида v0.9.3, v0.10.0 и т.п.
+# Проще всего создать такой тег через GitHub → Releases → Draft a new release,
+# указав нужный коммит и версию (например "v0.9.3") в поле "Choose a tag".
+# Никаких файлов копировать руками не нужно — этот workflow делает всё сам.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Извлечь номер версии из тега
+        id: ver
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Архивируем версию: $VERSION (тег $TAG)"
+
+      - name: Скопировать файлы из тега в versions/vX.Y.Z
+        run: |
+          set -e
+          DEST="versions/v${{ steps.ver.outputs.version }}"
+          mkdir -p "$DEST"
+          git show "${{ github.ref_name }}:index.html" > "$DEST/index.html"
+          git show "${{ github.ref_name }}:sw.js" > "$DEST/sw.js"
+          git show "${{ github.ref_name }}:manifest.json" > "$DEST/manifest.json" 2>/dev/null || true
+          git show "${{ github.ref_name }}:icon-192x192.png" > "$DEST/icon-192x192.png" 2>/dev/null || true
+          git show "${{ github.ref_name }}:icon-512x512.png" > "$DEST/icon-512x512.png" 2>/dev/null || true
+
+      - name: Обновить versions/versions.json
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = 'versions/versions.json';
+            let data = { versions: [] };
+            if (fs.existsSync(path)) {
+              try { data = JSON.parse(fs.readFileSync(path, 'utf8')); } catch (e) {}
+              if (!Array.isArray(data.versions)) data.versions = [];
+            }
+            const version = '${{ steps.ver.outputs.version }}';
+            const date = new Date().toISOString().slice(0, 10);
+            data.versions = data.versions.filter((v) => v.version !== version);
+            data.versions.unshift({ version: version, date: date });
+            fs.mkdirSync('versions', { recursive: true });
+            fs.writeFileSync(path, JSON.stringify(data, null, 2));
+          "
+
+      - name: Закоммитить архив
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add versions/
+          git diff --cached --quiet && echo "Нечего коммитить" || git commit -m "Архивация версии v${{ steps.ver.outputs.version }}"
+          git push
