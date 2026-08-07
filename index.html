@@ -912,7 +912,7 @@
   var UPDATES_DISABLED_KEY = "bibleUpdatesDisabled_v1";
   var SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000;
 
-  var JSONBLOB_BASE = "https://my-nekogram-default-rtdb.europe-west1.firebasedatabase.app/sync";
+  var FIREBASE_BASE = "https://my-nekogram-default-rtdb.europe-west1.firebasedatabase.app/sync";
 
   // ===================== ЦИТАТЫ ДНЯ =====================
   var QUOTE_KEY = "__quote";
@@ -1464,33 +1464,33 @@
   }
 
   function createCloudBlob(initialData){
-    return fetchWithTimeout(JSONBLOB_BASE, {
-      method:"POST",
-      headers:{"Content-Type":"application/json","Accept":"application/json"},
+    var id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    return fetchWithTimeout(FIREBASE_BASE + "/" + id + ".json", {
+      method:"PUT",
+      headers:{"Content-Type":"application/json"},
       body: JSON.stringify(initialData)
     }, 15000).then(function(res){
       if(!res.ok) throw new Error("create_failed_" + res.status);
-      var loc = res.headers.get("Location") || res.headers.get("location");
-      if(!loc) throw new Error("no_location_header");
-      var parts = loc.split("/");
-      return parts[parts.length - 1];
+      return id;
     });
   }
 
   function fetchCloudBlob(id){
-    return fetchWithTimeout(JSONBLOB_BASE + "/" + encodeURIComponent(id), {
-      method:"GET", headers:{"Accept":"application/json"}
+    return fetchWithTimeout(FIREBASE_BASE + "/" + encodeURIComponent(id) + ".json", {
+      method:"GET"
     }, 8000).then(function(res){
-      if(res.status === 404) throw new Error("not_found");
       if(!res.ok) throw new Error("fetch_failed_" + res.status);
-      return res.json();
+      return res.json().then(function(data){
+        if(data === null) throw new Error("not_found");
+        return data;
+      });
     });
   }
 
   function putCloudBlob(id, data){
-    return fetchWithTimeout(JSONBLOB_BASE + "/" + encodeURIComponent(id), {
+    return fetchWithTimeout(FIREBASE_BASE + "/" + encodeURIComponent(id) + ".json", {
       method:"PUT",
-      headers:{"Content-Type":"application/json","Accept":"application/json"},
+      headers:{"Content-Type":"application/json"},
       body: JSON.stringify(data)
     }, 15000).then(function(res){
       if(!res.ok) throw new Error("put_failed_" + res.status);
