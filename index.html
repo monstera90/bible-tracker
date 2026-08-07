@@ -550,6 +550,92 @@
     opacity:.65;
   }
 
+  /* ---------- список предыдущих версий ---------- */
+  .version-history-wrap{
+    max-width:640px;
+    margin:22px auto 0 auto;
+  }
+  .version-history-bar{
+    position:relative;
+    height:30px;
+    border-radius:4px;
+    background:#e9e4d4;
+    border:2px solid #6b6449;
+    box-shadow:
+      inset 0 2px 4px rgba(0,0,0,.45),
+      0 1px 0 rgba(255,255,255,.25);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    user-select:none;
+  }
+  .version-history-bar-text{
+    font-weight:bold;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    letter-spacing:.3px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .version-history-bar-text span.chev{
+    display:inline-block;
+    transition:transform .2s ease;
+  }
+  .version-history-wrap.open .version-history-bar-text span.chev{
+    transform:rotate(180deg);
+  }
+  .version-history-list{
+    max-height:0;
+    overflow:hidden;
+    transition:max-height .25s ease;
+    background:var(--parchment);
+    border:1px solid var(--groove-shadow);
+    border-top:none;
+    border-radius:0 0 6px 6px;
+  }
+  .version-history-wrap.open .version-history-list{
+    max-height:300px;
+  }
+  .version-history-item{
+    display:block;
+    width:100%;
+    text-align:left;
+    padding:10px 14px;
+    border:none;
+    border-top:1px solid var(--groove-shadow);
+    background:transparent;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:13px;
+    color:var(--ink);
+    cursor:pointer;
+    text-decoration:none;
+  }
+  .version-history-item:hover{ background:var(--parchment-dark); }
+  .version-history-update-item{
+    display:block;
+    width:100%;
+    text-align:left;
+    padding:10px 14px;
+    border:none;
+    background:var(--xp-green);
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:13px;
+    font-weight:bold;
+    color:#12351f;
+    cursor:pointer;
+    text-decoration:none;
+  }
+  .version-history-update-item:hover{ filter:brightness(1.05); }
+  .version-history-empty{
+    padding:12px 14px;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    font-style:italic;
+  }
+
   /* ---------- sync modal ---------- */
   .modal-overlay{
     position:fixed;
@@ -754,7 +840,20 @@
     <div class="theme-dots" id="themeDots"></div>
   </div>
 
-  <div class="app-version">v0.8.3</div>
+  <div class="version-history-wrap" id="versionHistoryWrap">
+    <div class="version-history-bar" id="versionHistoryBar">
+      <div class="version-history-bar-text">
+        <span>Версии</span>
+        <span class="chev">&#9662;</span>
+      </div>
+    </div>
+    <div class="version-history-list" id="versionHistoryList">
+      <div id="versionUpdateRow"></div>
+      <div id="versionHistoryItems"></div>
+    </div>
+  </div>
+
+  <div class="app-version" id="appVersionText">v0.10.0</div>
 </footer>
 
 <!-- ===== модальное окно синхронизации ===== -->
@@ -809,6 +908,9 @@
   var MIGRATED_KEY = "__migrated_v2";
   var CELEBRATION_SHOWN_KEY = "bibleCelebrationShown_v1";
   var UPDATE_DISMISSED_KEY = "bibleUpdateDismissedVersion_v1";
+  var UPDATE_SNOOZE_KEY = "bibleUpdateSnoozeUntil_v1";
+  var UPDATES_DISABLED_KEY = "bibleUpdatesDisabled_v1";
+  var SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000;
 
   var JSONBLOB_BASE = "https://jsonblob.com/api/jsonBlob";
 
@@ -1740,6 +1842,7 @@
   var pendingUpdateVersion = null, pendingRegistration = null;
 
   function showUpdateBanner(version){
+    try{ if(localStorage.getItem(UPDATES_DISABLED_KEY) === "1") return; }catch(e){}
     if(version && localStorage.getItem(UPDATE_DISMISSED_KEY) === version) return;
     pendingUpdateVersion = version || null;
     var wrap = document.getElementById("updateWrap");
@@ -1748,6 +1851,20 @@
   function hideUpdateBanner(){
     var wrap = document.getElementById("updateWrap");
     if(wrap) wrap.classList.remove("visible");
+  }
+  // если после нажатия "Не сейчас" прошли сутки — прячем баннер и больше
+  // не напоминаем про эту конкретную версию (до выхода следующей)
+  function checkUpdateSnoozeExpiry(){
+    var raw;
+    try{ raw = localStorage.getItem(UPDATE_SNOOZE_KEY); }catch(e){ return; }
+    if(!raw) return;
+    var rec;
+    try{ rec = JSON.parse(raw); }catch(e){ return; }
+    if(rec && rec.version && Date.now() >= rec.until){
+      try{ localStorage.setItem(UPDATE_DISMISSED_KEY, rec.version); }catch(e){}
+      try{ localStorage.removeItem(UPDATE_SNOOZE_KEY); }catch(e){}
+      hideUpdateBanner();
+    }
   }
   function openUpdateModal(){
     var overlay = document.getElementById("modalOverlay"), box = document.getElementById("modalBox");
@@ -1766,9 +1883,21 @@
       } else { window.location.reload(); }
       closeThis();
     });
-    document.getElementById("mUpdNo").addEventListener("click", closeThis);
+    document.getElementById("mUpdNo").addEventListener("click", function(){
+      if(pendingUpdateVersion){
+        try{
+          localStorage.setItem(UPDATE_SNOOZE_KEY, JSON.stringify({
+            version: pendingUpdateVersion,
+            until: Date.now() + SNOOZE_DURATION_MS
+          }));
+        }catch(e){}
+      }
+      // баннер намеренно НЕ скрываем — по договорённости он остаётся
+      // виден ещё сутки, а затем прячется сам (см. checkUpdateSnoozeExpiry)
+      closeThis();
+    });
     document.getElementById("mUpdNever").addEventListener("click", function(){
-      if(pendingUpdateVersion){ try{ localStorage.setItem(UPDATE_DISMISSED_KEY, pendingUpdateVersion); }catch(e){} }
+      try{ localStorage.setItem(UPDATES_DISABLED_KEY, "1"); }catch(e){}
       hideUpdateBanner(); closeThis();
     });
   }
@@ -1776,12 +1905,59 @@
   var updateBar = document.getElementById("updateBar");
   if(updateBar) updateBar.addEventListener("click", openUpdateModal);
 
+  // строка "обновить сейчас" в подвале — работает независимо от того,
+  // отключены ли всплывающие уведомления (см. UPDATES_DISABLED_KEY):
+  // человек всегда может проверить и обновиться вручную здесь
+  function renderManualUpdateOption(){
+    var row = document.getElementById("versionUpdateRow");
+    if(!row) return;
+    if(pendingRegistration && pendingRegistration.waiting){
+      var label = pendingUpdateVersion ? ("Обновить до v" + pendingUpdateVersion) : "Доступно обновление — обновить";
+      row.innerHTML = '<button class="version-history-update-item" id="versionUpdateBtn">' + label + '</button>';
+      var btn = document.getElementById("versionUpdateBtn");
+      if(btn){
+        btn.addEventListener("click", function(){
+          if(pendingRegistration && pendingRegistration.waiting){
+            pendingRegistration.waiting.postMessage("SKIP_WAITING");
+          } else {
+            window.location.reload();
+          }
+        });
+      }
+    } else {
+      row.innerHTML = "";
+    }
+  }
+
+  // версия в подвале подтягивается напрямую из sw.js через служебный
+  // запрос по MessageChannel — значит, менять её нужно только в одном
+  // месте (APP_VERSION в sw.js), а не отдельно ещё и в разметке
+  function applyVersionToFooter(version){
+    if(!version) return;
+    var el = document.getElementById("appVersionText");
+    if(el) el.textContent = "v" + String(version).replace(/^v/i, "");
+  }
+
+  function requestVersionFromSW(){
+    if(!("serviceWorker" in navigator) || !navigator.serviceWorker.controller) return;
+    try{
+      var channel = new MessageChannel();
+      channel.port1.onmessage = function(event){
+        if(event.data && event.data.type === "VERSION"){
+          applyVersionToFooter(event.data.version);
+        }
+      };
+      navigator.serviceWorker.controller.postMessage({type:"GET_VERSION"}, [channel.port2]);
+    }catch(e){}
+  }
+
   if("serviceWorker" in navigator && (location.protocol === "http:" || location.protocol === "https:")){
     navigator.serviceWorker.addEventListener("message", function(event){
       if(event.data && event.data.type === "SW_VERSION") pendingUpdateVersion = event.data.version;
     });
     var reloadedAfterUpdate = false;
     navigator.serviceWorker.addEventListener("controllerchange", function(){
+      requestVersionFromSW();
       if(reloadedAfterUpdate) return;
       reloadedAfterUpdate = true;
       window.location.reload();
@@ -1789,17 +1965,70 @@
     window.addEventListener("load", function(){
       navigator.serviceWorker.register("./sw.js").then(function(reg){
         pendingRegistration = reg;
+        requestVersionFromSW();
         if(reg.waiting && navigator.serviceWorker.controller) showUpdateBanner(pendingUpdateVersion);
+        renderManualUpdateOption();
         reg.addEventListener("updatefound", function(){
           var newWorker = reg.installing;
           if(!newWorker) return;
           newWorker.addEventListener("statechange", function(){
             if(newWorker.state === "installed" && navigator.serviceWorker.controller){
               showUpdateBanner(pendingUpdateVersion);
+              renderManualUpdateOption();
             }
           });
         });
       }).catch(function(err){ console.error("Не удалось зарегистрировать service worker:", err); });
+    });
+  }
+
+  // ===================== АРХИВ ПРЕДЫДУЩИХ ВЕРСИЙ =====================
+  // Список берётся автоматически из ./versions/versions.json — этот файл
+  // ведёт GitHub Action при публикации релиза (тега) в репозитории, вручную
+  // ничего копировать и редактировать в коде больше не нужно.
+  function renderVersionHistory(){
+    var itemsHolder = document.getElementById("versionHistoryItems");
+    if(!itemsHolder) return;
+    fetch("./versions/versions.json")
+      .then(function(res){
+        if(!res.ok) throw new Error("no versions.json");
+        return res.json();
+      })
+      .then(function(data){
+        var items = (data && data.versions) ? data.versions.slice(0, 5) : [];
+        renderVersionItems(items);
+      })
+      .catch(function(){
+        renderVersionItems([]);
+      });
+  }
+
+  function renderVersionItems(items){
+    var itemsHolder = document.getElementById("versionHistoryItems");
+    if(!itemsHolder) return;
+    itemsHolder.innerHTML = "";
+    if(!items.length){
+      var empty = document.createElement("div");
+      empty.className = "version-history-empty";
+      empty.textContent = "Архив версий пока пуст";
+      itemsHolder.appendChild(empty);
+      return;
+    }
+    items.forEach(function(item){
+      var link = document.createElement("a");
+      link.className = "version-history-item";
+      link.href = "./versions/v" + item.version + "/index.html";
+      link.textContent = "v" + item.version + (item.date ? " — " + item.date : "");
+      itemsHolder.appendChild(link);
+    });
+  }
+
+  var versionHistoryWrap = document.getElementById("versionHistoryWrap");
+  var versionHistoryBar = document.getElementById("versionHistoryBar");
+  if(versionHistoryBar){
+    versionHistoryBar.addEventListener("click", function(){
+      versionHistoryWrap.classList.toggle("open");
+      renderManualUpdateOption();
     });
   }
 
@@ -1812,7 +2041,9 @@
   applyThemeToPage(getCurrentThemeId());
   renderThemeDots();
   updateMissedBanner();
-  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); }, 30 * 60 * 1000);
+  renderVersionHistory();
+  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); }, 30 * 60 * 1000);
+  checkUpdateSnoozeExpiry();
 
 })();
 </script>

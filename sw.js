@@ -6,7 +6,7 @@
 // что sw.js изменился, скачать новую версию в фоне и подготовить её к
 // установке — без этого шага обновление не будет обнаружено автоматически.
 
-const APP_VERSION = "v0.8.3";
+const APP_VERSION = "v0.10.0";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Список файлов, которые нужны странице для полностью офлайн-работы.
@@ -75,9 +75,17 @@ self.addEventListener("fetch", (event) => {
 });
 
 // страница просит "активируйся уже" после того, как пользователь
-// согласился на обновление в диалоге
+// согласился на обновление в диалоге; либо спрашивает текущую версию,
+// чтобы показать её в подвале страницы (единственный источник истины —
+// APP_VERSION здесь, наверху этого файла)
 self.addEventListener("message", (event) => {
   if (event.data === "SKIP_WAITING") {
     self.skipWaiting();
+    return;
+  }
+  if (event.data && event.data.type === "GET_VERSION") {
+    if (event.ports && event.ports[0]) {
+      event.ports[0].postMessage({ type: "VERSION", version: APP_VERSION });
+    }
   }
 });
