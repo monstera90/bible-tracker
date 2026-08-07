@@ -236,6 +236,137 @@
   }
   .missed-wrap.visible{ display:block; }
 
+  /* ---------- дополнительный счётчик часов ---------- */
+  .hour-bar-wrap{
+    max-width:640px;
+    margin:10px auto 0 auto;
+    display:none;
+  }
+  .hour-bar-wrap.visible{ display:block; }
+
+  .hour-bar{
+    position:relative;
+    height:30px;
+    border-radius:4px;
+    background:#e9e4d4;
+    border:2px solid #6b6449;
+    box-shadow:
+      inset 0 2px 4px rgba(0,0,0,.45),
+      0 1px 0 rgba(255,255,255,.25);
+    overflow:hidden;
+    cursor:pointer;
+  }
+
+  .hour-bar-light-fill{
+    position:absolute;
+    top:0;left:0;bottom:0;
+    width:0%;
+    z-index:1;
+    background-color:#29B6F6;
+    background-image:linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(0,30,60,.2) 100%);
+    box-shadow:inset 0 2px 3px rgba(255,255,255,.55), inset 0 -3px 5px rgba(0,30,60,.3);
+    transition:width .3s ease;
+  }
+  .hour-bar-dark-fill{
+    position:absolute;
+    top:0;left:0;bottom:0;
+    width:0%;
+    z-index:2;
+    background-color:#0277BD;
+    background-image:linear-gradient(180deg, rgba(255,255,255,.35) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(0,20,40,.25) 100%);
+    box-shadow:inset 0 2px 3px rgba(255,255,255,.4), inset 0 -3px 5px rgba(0,20,40,.35);
+    transition:width .3s ease;
+  }
+  .hour-bar-reveal{
+    position:absolute;
+    top:0;left:0;right:0;bottom:0;
+    z-index:3;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:bold;
+    font-size:13px;
+    color:#fff;
+    text-shadow:0 1px 2px rgba(0,0,0,.55);
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .3s ease;
+  }
+  .hour-bar-reveal.visible{ opacity:1; }
+
+  .hour-input-overlay{
+    display:none;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    margin-top:8px;
+  }
+  .hour-input-overlay.open{ display:flex; }
+  .hour-input-mask{
+    width:90px;
+    text-align:center;
+    font-family:"Courier New",monospace;
+    font-size:18px;
+    letter-spacing:2px;
+    padding:8px 6px;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    background:#fffef8;
+    color:var(--ink);
+  }
+  .hour-input-confirm, .hour-input-cancel{
+    width:36px;height:36px;
+    border-radius:50%;
+    border:2px solid var(--wood);
+    background:#fffaf0;
+    color:var(--wood);
+    font-size:16px;
+    font-weight:bold;
+    cursor:pointer;
+  }
+  .hour-input-confirm:hover, .hour-input-cancel:hover{ background:var(--gold-light); }
+
+  .hour-reset-btn{
+    display:none;
+    margin:10px auto 0 auto;
+    padding:8px 16px;
+    background:var(--danger);
+    color:#f4e6c8;
+    border:1px solid var(--danger-dark);
+    border-radius:6px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:12.5px;
+    cursor:pointer;
+  }
+
+  /* годовой (сегментированный) бар для режима "50" */
+  .hour-year-bar{
+    cursor:default;
+    padding:0;
+  }
+  .hour-year-segments{
+    position:absolute;
+    top:0;left:0;bottom:0;
+    display:flex;
+  }
+  .hour-year-segment{
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:11.5px;
+    font-weight:bold;
+    color:#fff;
+    text-shadow:0 1px 2px rgba(0,0,0,.55);
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    border-right:1px solid rgba(255,255,255,.4);
+    background-color:#29B6F6;
+    overflow:hidden;
+    white-space:nowrap;
+  }
+  .hour-year-segment:nth-child(odd){ background-color:#29B6F6; }
+  .hour-year-segment:nth-child(even){ background-color:#0277BD; }
+  .hour-year-segment:last-child{ border-right:none; }
+
   .update-wrap{
     max-width:640px;
     margin:10px auto 0 auto;
@@ -704,6 +835,27 @@
     transition:background .15s ease;
   }
   .modal-btn:hover{ background:#f4ead0; }
+  .modal-btn-grid{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    justify-content:center;
+    margin-bottom:10px;
+  }
+  .modal-btn-grid button{
+    width:52px;
+    padding:12px 0;
+    text-align:center;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:16px;
+    font-weight:bold;
+    color:var(--ink);
+    cursor:pointer;
+  }
+  .modal-btn-grid button:hover{ background:var(--xp-green); }
   .modal-btn.primary{
     background:var(--wood);
     color:#f4e6c8;
@@ -815,17 +967,37 @@
     </div>
   </div>
 
-  <div class="update-wrap" id="updateWrap">
-    <div class="xp-bar" id="updateBar">
-      <div class="update-fill"></div>
-      <div class="update-text" id="updateText">Доступна новая версия этого графика</div>
-    </div>
-  </div>
-
   <div class="missed-wrap" id="missedWrap">
     <div class="xp-bar">
       <div class="warn-fill"></div>
       <div class="warn-text" id="missedText"></div>
+    </div>
+  </div>
+
+  <div class="hour-bar-wrap" id="hourMonthWrap">
+    <div class="hour-bar" id="hourMonthBar">
+      <div class="hour-bar-light-fill" id="hourMonthLightFill"></div>
+      <div class="hour-bar-dark-fill" id="hourMonthDarkFill"></div>
+      <div class="hour-bar-reveal" id="hourMonthReveal"></div>
+    </div>
+    <div class="hour-input-overlay" id="hourMonthOverlay">
+      <input type="text" class="hour-input-mask" id="hourMonthInput" inputmode="numeric" placeholder="__:__" maxlength="5">
+      <button class="hour-input-confirm" id="hourMonthConfirm" title="Подтвердить">&#10003;</button>
+      <button class="hour-input-cancel" id="hourMonthCancel" title="Отмена">&times;</button>
+    </div>
+    <button class="hour-reset-btn" id="hourMonthResetBtn" style="display:none;">Сбросить счётчик</button>
+  </div>
+
+  <div class="hour-bar-wrap" id="hourYearWrap">
+    <div class="hour-bar hour-year-bar" id="hourYearBar">
+      <div class="hour-year-segments" id="hourYearSegments"></div>
+    </div>
+  </div>
+
+  <div class="update-wrap" id="updateWrap">
+    <div class="xp-bar" id="updateBar">
+      <div class="update-fill"></div>
+      <div class="update-text" id="updateText">Доступна новая версия этого графика</div>
     </div>
   </div>
 </header>
@@ -850,10 +1022,11 @@
     <div class="version-history-list" id="versionHistoryList">
       <div id="versionUpdateRow"></div>
       <div id="versionHistoryItems"></div>
+      <div id="hourCounterMenuRow"></div>
     </div>
   </div>
 
-  <div class="app-version" id="appVersionText">v0.10.0</div>
+  <div class="app-version" id="appVersionText">v0.11.0</div>
 </footer>
 
 <!-- ===== модальное окно синхронизации ===== -->
@@ -912,7 +1085,7 @@
   var UPDATES_DISABLED_KEY = "bibleUpdatesDisabled_v1";
   var SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000;
 
-  var FIREBASE_BASE = "https://my-nekogram-default-rtdb.europe-west1.firebasedatabase.app/sync";
+  var JSONBLOB_BASE = "https://jsonblob.com/api/jsonBlob";
 
   // ===================== ЦИТАТЫ ДНЯ =====================
   var QUOTE_KEY = "__quote";
@@ -1416,6 +1589,8 @@
     applyThemeToPage(getCurrentThemeId());
     if(!document.getElementById("themeDots").children.length) renderThemeDots();
     updateMissedBanner();
+    renderHourBars();
+    renderHourCounterMenu();
   }
 
   // ===================== СБРОС ПРОГРЕССА =====================
@@ -1464,33 +1639,33 @@
   }
 
   function createCloudBlob(initialData){
-    var id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    return fetchWithTimeout(FIREBASE_BASE + "/" + id + ".json", {
-      method:"PUT",
-      headers:{"Content-Type":"application/json"},
+    return fetchWithTimeout(JSONBLOB_BASE, {
+      method:"POST",
+      headers:{"Content-Type":"application/json","Accept":"application/json"},
       body: JSON.stringify(initialData)
     }, 15000).then(function(res){
       if(!res.ok) throw new Error("create_failed_" + res.status);
-      return id;
+      var loc = res.headers.get("Location") || res.headers.get("location");
+      if(!loc) throw new Error("no_location_header");
+      var parts = loc.split("/");
+      return parts[parts.length - 1];
     });
   }
 
   function fetchCloudBlob(id){
-    return fetchWithTimeout(FIREBASE_BASE + "/" + encodeURIComponent(id) + ".json", {
-      method:"GET"
+    return fetchWithTimeout(JSONBLOB_BASE + "/" + encodeURIComponent(id), {
+      method:"GET", headers:{"Accept":"application/json"}
     }, 8000).then(function(res){
+      if(res.status === 404) throw new Error("not_found");
       if(!res.ok) throw new Error("fetch_failed_" + res.status);
-      return res.json().then(function(data){
-        if(data === null) throw new Error("not_found");
-        return data;
-      });
+      return res.json();
     });
   }
 
   function putCloudBlob(id, data){
-    return fetchWithTimeout(FIREBASE_BASE + "/" + encodeURIComponent(id) + ".json", {
+    return fetchWithTimeout(JSONBLOB_BASE + "/" + encodeURIComponent(id), {
       method:"PUT",
-      headers:{"Content-Type":"application/json"},
+      headers:{"Content-Type":"application/json","Accept":"application/json"},
       body: JSON.stringify(data)
     }, 15000).then(function(res){
       if(!res.ok) throw new Error("put_failed_" + res.status);
@@ -2032,6 +2207,400 @@
     });
   }
 
+  // ===================== ДОПОЛНИТЕЛЬНЫЙ СЧЁТЧИК ЧАСОВ =====================
+  // Данные хранятся в том же общем state (синхронизируются по той же схеме
+  // {c,t} "побеждает более позднее время"). Каждая внесённая запись времени
+  // и каждый закрытый месяц (для режима "50") — это отдельный уникальный
+  // ключ вида "hourlog:..." / "hoursegment:...", поэтому при слиянии между
+  // устройствами записи просто объединяются (см. mergeStates выше) —
+  // никакой новой логики слияния писать не пришлось.
+  var HOUR_GOAL_KEY = "__hourGoal";
+  var HOUR_MONTHS_KEY = "__hourMonthsToSeptember";
+  var HOUR_MONTH_PERIOD_KEY = "__hourMonthPeriodStart";
+  var HOUR_YEAR_PERIOD_KEY = "__hourYearPeriodStart";
+  var HOUR_MONTH_DEFERRED_KEY = "__hourMonthDeferred";
+  var HOUR_YEAR_DEFERRED_KEY = "__hourYearDeferred";
+  var HOUR_FORMS = ["час","часа","часов"];
+  var MINUTE_FORMS = ["минута","минуты","минут"];
+
+  function getHourGoal(){ var r = state[HOUR_GOAL_KEY]; return (r && r.c) ? r.c : null; }
+  function getMonthsToSeptember(){ var r = state[HOUR_MONTHS_KEY]; return (r && r.c) ? r.c : null; }
+  function getMonthPeriodStart(){ var r = state[HOUR_MONTH_PERIOD_KEY]; return (r && r.c) ? r.c : null; }
+  function getYearPeriodStart(){ var r = state[HOUR_YEAR_PERIOD_KEY]; return (r && r.c) ? r.c : null; }
+
+  function formatHHMM(totalMinutes){
+    totalMinutes = Math.max(0, Math.round(totalMinutes));
+    var h = Math.floor(totalMinutes/60), m = totalMinutes % 60;
+    return h + ":" + (m < 10 ? "0" : "") + m;
+  }
+  function formatHoursWord(totalMinutes){
+    totalMinutes = Math.max(0, Math.round(totalMinutes));
+    var h = Math.floor(totalMinutes/60), m = totalMinutes % 60;
+    var text = h + " " + pluralRu(h, HOUR_FORMS);
+    if(m > 0) text += " " + m + " " + pluralRu(m, MINUTE_FORMS);
+    return text;
+  }
+  function parseHHMM(raw){
+    raw = (raw || "").trim();
+    var m = raw.match(/^(\d{1,3}):([0-5]?\d)$/);
+    if(!m) return null;
+    var h = parseInt(m[1], 10), mi = parseInt(m[2], 10);
+    if(isNaN(h) || isNaN(mi)) return null;
+    return h * 60 + mi;
+  }
+
+  function sumHourLogsSince(sinceTs){
+    if(!sinceTs) return 0;
+    var total = 0;
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("hourlog:") === 0 && state[k] && typeof state[k].c === "number" && state[k].t >= sinceTs){
+        total += state[k].c;
+      }
+    });
+    return total;
+  }
+  function addHourLogEntry(minutes){
+    var id = "hourlog:" + Date.now() + "-" + Math.random().toString(36).slice(2,8);
+    state[id] = {c: minutes, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+  }
+  function recordMonthSegment(periodStart, totalMinutes){
+    state["hoursegment:" + periodStart] = {c: totalMinutes, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+  }
+  function getClosedMonthSegments(){
+    var list = [];
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("hoursegment:") === 0 && state[k] && typeof state[k].c === "number"){
+        list.push({periodStart: Number(k.slice("hoursegment:".length)), minutes: state[k].c});
+      }
+    });
+    list.sort(function(a,b){ return a.periodStart - b.periodStart; });
+    return list;
+  }
+  function sumYearMinutes(){
+    var yearStart = getYearPeriodStart();
+    if(!yearStart) return 0;
+    var total = getClosedMonthSegments()
+      .filter(function(s){ return s.periodStart >= yearStart; })
+      .reduce(function(a,s){ return a + s.minutes; }, 0);
+    total += sumHourLogsSince(getMonthPeriodStart());
+    return total;
+  }
+
+  function isNewCalendarMonth(sinceTs){
+    var since = new Date(sinceTs), now = new Date();
+    return (now.getFullYear() > since.getFullYear()) ||
+      (now.getFullYear() === since.getFullYear() && now.getMonth() > since.getMonth());
+  }
+  function computeNextSeptemberFirst(fromTs){
+    var d = new Date(fromTs);
+    var septThisYear = new Date(d.getFullYear(), 8, 1).getTime();
+    return (d.getTime() < septThisYear) ? septThisYear : new Date(d.getFullYear()+1, 8, 1).getTime();
+  }
+
+  function setHourState(key, value){
+    state[key] = {c: value, t: Date.now()};
+  }
+
+  function activateHourCounter(goal, monthsToSeptember){
+    var now = Date.now();
+    setHourState(HOUR_GOAL_KEY, goal);
+    setHourState(HOUR_MONTHS_KEY, goal === 50 ? monthsToSeptember : null);
+    setHourState(HOUR_YEAR_PERIOD_KEY, goal === 50 ? now : null);
+    setHourState(HOUR_MONTH_PERIOD_KEY, now);
+    setHourState(HOUR_MONTH_DEFERRED_KEY, null);
+    setHourState(HOUR_YEAR_DEFERRED_KEY, null);
+    saveLocalState();
+    scheduleCloudPush();
+    renderHourBars();
+    renderHourCounterMenu();
+  }
+
+  function deactivateHourCounter(){
+    setHourState(HOUR_GOAL_KEY, null);
+    setHourState(HOUR_MONTHS_KEY, null);
+    setHourState(HOUR_MONTH_PERIOD_KEY, null);
+    setHourState(HOUR_YEAR_PERIOD_KEY, null);
+    setHourState(HOUR_MONTH_DEFERRED_KEY, null);
+    setHourState(HOUR_YEAR_DEFERRED_KEY, null);
+    saveLocalState();
+    scheduleCloudPush();
+    renderHourBars();
+    renderHourCounterMenu();
+  }
+
+  function updateHourBarVisual(prefix, totalMinutes, goalMinutes){
+    var light = document.getElementById(prefix + "LightFill");
+    var dark = document.getElementById(prefix + "DarkFill");
+    if(!light || !dark || goalMinutes <= 0) return;
+    light.style.width = Math.min(100, (totalMinutes/goalMinutes)*100) + "%";
+    var darkPct = 0;
+    if(totalMinutes > goalMinutes){
+      var over = totalMinutes - goalMinutes;
+      var rem = over % goalMinutes;
+      darkPct = (rem === 0) ? 100 : (rem/goalMinutes)*100;
+    }
+    dark.style.width = darkPct + "%";
+  }
+
+  function flashHourReveal(elId, totalMinutes){
+    var el = document.getElementById(elId);
+    if(!el) return;
+    el.textContent = formatHHMM(totalMinutes);
+    el.classList.add("visible");
+    clearTimeout(el._hideTimer);
+    el._hideTimer = setTimeout(function(){ el.classList.remove("visible"); }, 10000);
+  }
+
+  function updateHourResetButtonVisibility(){
+    var btn = document.getElementById("hourMonthResetBtn");
+    if(!btn) return;
+    var goal = getHourGoal();
+    if(!goal){ btn.style.display = "none"; return; }
+    var yearDeferred = goal === 50 && state[HOUR_YEAR_DEFERRED_KEY] &&
+      state[HOUR_YEAR_DEFERRED_KEY].c === getYearPeriodStart();
+    var monthDeferred = state[HOUR_MONTH_DEFERRED_KEY] &&
+      state[HOUR_MONTH_DEFERRED_KEY].c === getMonthPeriodStart();
+    btn.style.display = (yearDeferred || monthDeferred) ? "block" : "none";
+  }
+
+  function renderHourYearBar(){
+    var holder = document.getElementById("hourYearSegments");
+    if(!holder) return;
+    var months = getMonthsToSeptember();
+    var yearStart = getYearPeriodStart();
+    holder.innerHTML = "";
+    if(!months || !yearStart) return;
+    var targetMinutes = months * 50 * 60;
+    var segments = getClosedMonthSegments()
+      .filter(function(s){ return s.periodStart >= yearStart; })
+      .map(function(s){ return s.minutes; });
+    segments.push(sumHourLogsSince(getMonthPeriodStart()));
+    segments.forEach(function(minutes){
+      if(minutes <= 0) return;
+      var seg = document.createElement("div");
+      seg.className = "hour-year-segment";
+      seg.style.width = (targetMinutes > 0 ? (minutes/targetMinutes)*100 : 0) + "%";
+      seg.textContent = Math.round(minutes/60);
+      holder.appendChild(seg);
+    });
+  }
+
+  function renderHourBars(){
+    var goal = getHourGoal();
+    var monthWrap = document.getElementById("hourMonthWrap");
+    var yearWrap = document.getElementById("hourYearWrap");
+    if(!goal){
+      if(monthWrap) monthWrap.classList.remove("visible");
+      if(yearWrap) yearWrap.classList.remove("visible");
+      return;
+    }
+    if(monthWrap) monthWrap.classList.add("visible");
+    var periodStart = getMonthPeriodStart() || Date.now();
+    updateHourBarVisual("hourMonth", sumHourLogsSince(periodStart), goal*60);
+    updateHourResetButtonVisibility();
+    if(goal === 50){
+      if(yearWrap) yearWrap.classList.add("visible");
+      renderHourYearBar();
+    } else if(yearWrap){
+      yearWrap.classList.remove("visible");
+    }
+  }
+
+  function closeHourInputOverlay(prefix){
+    var overlay = document.getElementById(prefix + "Overlay");
+    if(overlay) overlay.classList.remove("open");
+  }
+  function toggleHourInputOverlay(prefix){
+    var overlay = document.getElementById(prefix + "Overlay");
+    if(!overlay) return;
+    overlay.classList.toggle("open");
+    if(overlay.classList.contains("open")){
+      var input = document.getElementById(prefix + "Input");
+      if(input){ input.value = ""; input.style.borderColor = ""; input.focus(); }
+    }
+  }
+  function confirmHourInput(prefix){
+    var input = document.getElementById(prefix + "Input");
+    if(!input) return;
+    var minutes = parseHHMM(input.value);
+    if(minutes === null || minutes <= 0){
+      input.style.borderColor = "#b0432e";
+      return;
+    }
+    addHourLogEntry(minutes);
+    closeHourInputOverlay(prefix);
+    renderHourBars();
+    flashHourReveal(prefix + "Reveal", sumHourLogsSince(getMonthPeriodStart()));
+  }
+
+  // --- диалоги окончания месяца / года (тот же стиль, что у окна синхронизации) ---
+  function showHourMonthEndDialog(periodStart){
+    if(modalOverlay.classList.contains("open")) return;
+    var totalMinutes = sumHourLogsSince(periodStart);
+    modalBox.innerHTML =
+      modalHeader("Месяц закончился - " + formatHHMM(totalMinutes), "Обнулить счётчик?") +
+      '<button class="modal-btn primary" id="mHourMonthYes">Да</button>' +
+      '<button class="modal-btn" id="mHourMonthNo">Нет</button>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    document.getElementById("mHourMonthYes").addEventListener("click", function(){
+      if(getHourGoal() === 50){
+        recordMonthSegment(periodStart, totalMinutes);
+        setHourState(HOUR_MONTH_PERIOD_KEY, Date.now());
+        setHourState(HOUR_MONTH_DEFERRED_KEY, null);
+        saveLocalState(); scheduleCloudPush();
+        renderHourBars();
+      } else {
+        deactivateHourCounter();
+      }
+      closeModal();
+    });
+    document.getElementById("mHourMonthNo").addEventListener("click", function(){
+      setHourState(HOUR_MONTH_DEFERRED_KEY, periodStart);
+      saveLocalState(); scheduleCloudPush();
+      updateHourResetButtonVisibility();
+      closeModal();
+    });
+  }
+
+  function showHourYearEndDialog(yearStart){
+    if(modalOverlay.classList.contains("open")) return;
+    var totalMinutes = sumYearMinutes();
+    modalBox.innerHTML =
+      modalHeader("Год окончен - " + formatHoursWord(totalMinutes), "Сбросить счётчик?") +
+      '<button class="modal-btn primary" id="mHourYearYes">Да</button>' +
+      '<button class="modal-btn" id="mHourYearNo">Нет</button>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    document.getElementById("mHourYearYes").addEventListener("click", function(){
+      deactivateHourCounter();
+      closeModal();
+    });
+    document.getElementById("mHourYearNo").addEventListener("click", function(){
+      setHourState(HOUR_YEAR_DEFERRED_KEY, yearStart);
+      saveLocalState(); scheduleCloudPush();
+      updateHourResetButtonVisibility();
+      closeModal();
+    });
+  }
+
+  function resolveDeferredHourReset(){
+    var goal = getHourGoal();
+    if(!goal) return;
+    var yearDeferred = goal === 50 && state[HOUR_YEAR_DEFERRED_KEY] &&
+      state[HOUR_YEAR_DEFERRED_KEY].c === getYearPeriodStart();
+    if(yearDeferred){ deactivateHourCounter(); return; }
+    var monthDeferred = state[HOUR_MONTH_DEFERRED_KEY] &&
+      state[HOUR_MONTH_DEFERRED_KEY].c === getMonthPeriodStart();
+    if(monthDeferred){
+      if(goal === 50){
+        var periodStart = getMonthPeriodStart();
+        recordMonthSegment(periodStart, sumHourLogsSince(periodStart));
+        setHourState(HOUR_MONTH_PERIOD_KEY, Date.now());
+        setHourState(HOUR_MONTH_DEFERRED_KEY, null);
+        saveLocalState(); scheduleCloudPush();
+        renderHourBars();
+      } else {
+        deactivateHourCounter();
+      }
+    }
+  }
+
+  function checkHourBoundaries(){
+    var goal = getHourGoal();
+    if(!goal || modalOverlay.classList.contains("open")) return;
+    var periodStart = getMonthPeriodStart();
+    if(periodStart && isNewCalendarMonth(periodStart)){
+      var monthDeferredRec = state[HOUR_MONTH_DEFERRED_KEY];
+      if(!(monthDeferredRec && monthDeferredRec.c === periodStart)){
+        showHourMonthEndDialog(periodStart);
+        return;
+      }
+    }
+    if(goal === 50){
+      var yearStart = getYearPeriodStart();
+      if(yearStart && Date.now() >= computeNextSeptemberFirst(yearStart)){
+        var yearDeferredRec = state[HOUR_YEAR_DEFERRED_KEY];
+        if(!(yearDeferredRec && yearDeferredRec.c === yearStart)){
+          showHourYearEndDialog(yearStart);
+        }
+      }
+    }
+  }
+
+  // --- меню в подвале ("Дополнительный счётчик" / "Убрать дополнительный счётчик") ---
+  function renderHourCounterMenu(){
+    var row = document.getElementById("hourCounterMenuRow");
+    if(!row) return;
+    if(getHourGoal()){
+      row.innerHTML = '<button class="version-history-item" id="hourCounterRemoveBtn" style="color:#8a2f1c;">Убрать дополнительный счётчик</button>';
+      document.getElementById("hourCounterRemoveBtn").addEventListener("click", openRemoveHourCounterConfirm);
+    } else {
+      row.innerHTML = '<button class="version-history-item" id="hourCounterAddBtn">Дополнительный счётчик</button>';
+      document.getElementById("hourCounterAddBtn").addEventListener("click", openHourGoalModal);
+    }
+  }
+
+  function openHourGoalModal(){
+    modalBox.innerHTML =
+      modalHeader("Дополнительный счётчик", "Выберите цель часов в месяц.") +
+      '<div class="modal-btn-grid">' +
+        '<button id="mHour15">15</button>' +
+        '<button id="mHour30">30</button>' +
+        '<button id="mHour50">50</button>' +
+      '</div>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    document.getElementById("mHour15").addEventListener("click", function(){ activateHourCounter(15, null); closeModal(); });
+    document.getElementById("mHour30").addEventListener("click", function(){ activateHourCounter(30, null); closeModal(); });
+    document.getElementById("mHour50").addEventListener("click", openMonthsToSeptemberModal);
+  }
+
+  function openMonthsToSeptemberModal(){
+    var buttons = "";
+    for(var i = 1; i <= 12; i++){ buttons += '<button data-months="' + i + '">' + i + '</button>'; }
+    modalBox.innerHTML =
+      modalHeader("Введите количество месяцев до сентября", "") +
+      '<div class="modal-btn-grid">' + buttons + '</div>';
+    bindClose();
+    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-months]"), function(btn){
+      btn.addEventListener("click", function(){
+        activateHourCounter(50, Number(btn.getAttribute("data-months")));
+        closeModal();
+      });
+    });
+  }
+
+  function openRemoveHourCounterConfirm(){
+    modalBox.innerHTML =
+      modalHeader("Весь прогресс будет потерян. Уверены?", "") +
+      '<button class="modal-btn primary" id="mHourRemoveYes">Да</button>' +
+      '<button class="modal-btn" id="mHourRemoveNo">Нет</button>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    document.getElementById("mHourRemoveYes").addEventListener("click", function(){ deactivateHourCounter(); closeModal(); });
+    document.getElementById("mHourRemoveNo").addEventListener("click", closeModal);
+  }
+
+  // --- обработчики баров ---
+  var hourMonthBar = document.getElementById("hourMonthBar");
+  if(hourMonthBar) hourMonthBar.addEventListener("click", function(){ toggleHourInputOverlay("hourMonth"); });
+  var hourMonthInput = document.getElementById("hourMonthInput");
+  if(hourMonthInput){
+    hourMonthInput.addEventListener("click", function(e){ e.stopPropagation(); });
+    hourMonthInput.addEventListener("keydown", function(e){ if(e.key === "Enter") confirmHourInput("hourMonth"); });
+  }
+  var hourMonthConfirm = document.getElementById("hourMonthConfirm");
+  if(hourMonthConfirm) hourMonthConfirm.addEventListener("click", function(e){ e.stopPropagation(); confirmHourInput("hourMonth"); });
+  var hourMonthCancel = document.getElementById("hourMonthCancel");
+  if(hourMonthCancel) hourMonthCancel.addEventListener("click", function(e){ e.stopPropagation(); closeHourInputOverlay("hourMonth"); });
+  var hourMonthResetBtn = document.getElementById("hourMonthResetBtn");
+  if(hourMonthResetBtn) hourMonthResetBtn.addEventListener("click", function(e){ e.stopPropagation(); resolveDeferredHourReset(); });
+
   // ===================== ЗАПУСК =====================
   initQuote();
   initPage();
@@ -2042,7 +2611,10 @@
   renderThemeDots();
   updateMissedBanner();
   renderVersionHistory();
-  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); }, 30 * 60 * 1000);
+  renderHourBars();
+  renderHourCounterMenu();
+  checkHourBoundaries();
+  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); checkHourBoundaries(); }, 30 * 60 * 1000);
   checkUpdateSnoozeExpiry();
 
 })();
