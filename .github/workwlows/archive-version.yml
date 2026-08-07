@@ -9,6 +9,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Номер версии для архивации (например, 0.9.3)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -26,8 +32,13 @@ jobs:
       - name: Извлечь номер версии из тега
         id: ver
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            TAG="v$VERSION"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#v}"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Архивируем версию: $VERSION (тег $TAG)"
 
