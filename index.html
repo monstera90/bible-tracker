@@ -283,10 +283,11 @@
     z-index:3;
     display:flex;align-items:center;justify-content:center;
     font-weight:bold;
-    font-size:13px;
+    font-size:12.5px;
     color:#fff;
     text-shadow:0 1px 2px rgba(0,0,0,.55);
     font-family:"Segoe UI","Tahoma",sans-serif;
+    letter-spacing:.3px;
     opacity:0;
     pointer-events:none;
     transition:opacity .3s ease;
@@ -340,14 +341,28 @@
 
   /* годовой (сегментированный) бар для режима "50" */
   .hour-year-bar{
-    cursor:default;
+    cursor:pointer;
     padding:0;
+  }
+  .hour-year-total{
+    position:absolute;
+    top:0;left:0;right:0;bottom:0;
+    z-index:3;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:bold;
+    font-size:12.5px;
+    color:#fff;
+    text-shadow:0 1px 2px rgba(0,0,0,.55);
+    letter-spacing:.3px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
   }
   .hour-year-segments{
     position:absolute;
     top:0;left:0;bottom:0;
-    display:flex;
+    display:none;
   }
+  .hour-year-bar.expanded .hour-year-segments{ display:flex; }
+  .hour-year-bar.expanded .hour-year-total{ display:none; }
   .hour-year-segment{
     height:100%;
     display:flex;
@@ -366,6 +381,15 @@
   .hour-year-segment:nth-child(odd){ background-color:#29B6F6; }
   .hour-year-segment:nth-child(even){ background-color:#0277BD; }
   .hour-year-segment:last-child{ border-right:none; }
+  .hour-year-remaining{
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:11.5px;
+    font-weight:bold;
+    color:var(--ink-soft);
+  }
 
   .update-wrap{
     max-width:640px;
@@ -856,6 +880,7 @@
     cursor:pointer;
   }
   .modal-btn-grid button:hover{ background:var(--xp-green); }
+  .modal-btn-center{ text-align:center; }
   .modal-btn.primary{
     background:var(--wood);
     color:#f4e6c8;
@@ -978,10 +1003,10 @@
     <div class="hour-bar" id="hourMonthBar">
       <div class="hour-bar-light-fill" id="hourMonthLightFill"></div>
       <div class="hour-bar-dark-fill" id="hourMonthDarkFill"></div>
-      <div class="hour-bar-reveal" id="hourMonthReveal"></div>
+      <div class="hour-bar-reveal visible" id="hourMonthReveal">0:00</div>
     </div>
     <div class="hour-input-overlay" id="hourMonthOverlay">
-      <input type="text" class="hour-input-mask" id="hourMonthInput" inputmode="numeric" placeholder="__:__" maxlength="5">
+      <input type="text" class="hour-input-mask" id="hourMonthInput" inputmode="numeric" placeholder="__.__" maxlength="6">
       <button class="hour-input-confirm" id="hourMonthConfirm" title="Подтвердить">&#10003;</button>
       <button class="hour-input-cancel" id="hourMonthCancel" title="Отмена">&times;</button>
     </div>
@@ -990,6 +1015,7 @@
 
   <div class="hour-bar-wrap" id="hourYearWrap">
     <div class="hour-bar hour-year-bar" id="hourYearBar">
+      <div class="hour-year-total" id="hourYearTotal">0</div>
       <div class="hour-year-segments" id="hourYearSegments"></div>
     </div>
   </div>
@@ -1026,7 +1052,7 @@
     </div>
   </div>
 
-  <div class="app-version" id="appVersionText">v0.11.0</div>
+  <div class="app-version" id="appVersionText">v0.12.0</div>
 </footer>
 
 <!-- ===== модальное окно синхронизации ===== -->
@@ -2210,18 +2236,16 @@
   // ===================== ДОПОЛНИТЕЛЬНЫЙ СЧЁТЧИК ЧАСОВ =====================
   // Данные хранятся в том же общем state (синхронизируются по той же схеме
   // {c,t} "побеждает более позднее время"). Каждая внесённая запись времени
-  // и каждый закрытый месяц (для режима "50") — это отдельный уникальный
+  // и каждый закрытый период (для режима "50") — это отдельный уникальный
   // ключ вида "hourlog:..." / "hoursegment:...", поэтому при слиянии между
-  // устройствами записи просто объединяются (см. mergeStates выше) —
-  // никакой новой логики слияния писать не пришлось.
+  // устройствами записи просто объединяются — новой логики слияния не нужно.
   var HOUR_GOAL_KEY = "__hourGoal";
   var HOUR_MONTHS_KEY = "__hourMonthsToSeptember";
   var HOUR_MONTH_PERIOD_KEY = "__hourMonthPeriodStart";
   var HOUR_YEAR_PERIOD_KEY = "__hourYearPeriodStart";
   var HOUR_MONTH_DEFERRED_KEY = "__hourMonthDeferred";
   var HOUR_YEAR_DEFERRED_KEY = "__hourYearDeferred";
-  var HOUR_FORMS = ["час","часа","часов"];
-  var MINUTE_FORMS = ["минута","минуты","минут"];
+  var HOUR_SEGMENT_LABEL_MIN = 10; // сегмент/остаток меньше 10 часов — число не показываем
 
   function getHourGoal(){ var r = state[HOUR_GOAL_KEY]; return (r && r.c) ? r.c : null; }
   function getMonthsToSeptember(){ var r = state[HOUR_MONTHS_KEY]; return (r && r.c) ? r.c : null; }
@@ -2233,19 +2257,13 @@
     var h = Math.floor(totalMinutes/60), m = totalMinutes % 60;
     return h + ":" + (m < 10 ? "0" : "") + m;
   }
-  function formatHoursWord(totalMinutes){
-    totalMinutes = Math.max(0, Math.round(totalMinutes));
-    var h = Math.floor(totalMinutes/60), m = totalMinutes % 60;
-    var text = h + " " + pluralRu(h, HOUR_FORMS);
-    if(m > 0) text += " " + m + " " + pluralRu(m, MINUTE_FORMS);
-    return text;
-  }
-  function parseHHMM(raw){
+  // принимает "1.40", "01.40", "01,40", "1:50" и т.п. — разделитель не важен
+  function parseHourInput(raw){
     raw = (raw || "").trim();
-    var m = raw.match(/^(\d{1,3}):([0-5]?\d)$/);
+    var m = raw.match(/^(\d{1,3})[.,:](\d{1,2})$/);
     if(!m) return null;
     var h = parseInt(m[1], 10), mi = parseInt(m[2], 10);
-    if(isNaN(h) || isNaN(mi)) return null;
+    if(isNaN(h) || isNaN(mi) || mi > 59) return null;
     return h * 60 + mi;
   }
 
@@ -2301,9 +2319,7 @@
     return (d.getTime() < septThisYear) ? septThisYear : new Date(d.getFullYear()+1, 8, 1).getTime();
   }
 
-  function setHourState(key, value){
-    state[key] = {c: value, t: Date.now()};
-  }
+  function setHourState(key, value){ state[key] = {c: value, t: Date.now()}; }
 
   function activateHourCounter(goal, monthsToSeptember){
     var now = Date.now();
@@ -2318,7 +2334,6 @@
     renderHourBars();
     renderHourCounterMenu();
   }
-
   function deactivateHourCounter(){
     setHourState(HOUR_GOAL_KEY, null);
     setHourState(HOUR_MONTHS_KEY, null);
@@ -2346,15 +2361,6 @@
     dark.style.width = darkPct + "%";
   }
 
-  function flashHourReveal(elId, totalMinutes){
-    var el = document.getElementById(elId);
-    if(!el) return;
-    el.textContent = formatHHMM(totalMinutes);
-    el.classList.add("visible");
-    clearTimeout(el._hideTimer);
-    el._hideTimer = setTimeout(function(){ el.classList.remove("visible"); }, 10000);
-  }
-
   function updateHourResetButtonVisibility(){
     var btn = document.getElementById("hourMonthResetBtn");
     if(!btn) return;
@@ -2362,31 +2368,51 @@
     if(!goal){ btn.style.display = "none"; return; }
     var yearDeferred = goal === 50 && state[HOUR_YEAR_DEFERRED_KEY] &&
       state[HOUR_YEAR_DEFERRED_KEY].c === getYearPeriodStart();
-    var monthDeferred = state[HOUR_MONTH_DEFERRED_KEY] &&
+    var monthDeferred = goal !== 50 && state[HOUR_MONTH_DEFERRED_KEY] &&
       state[HOUR_MONTH_DEFERRED_KEY].c === getMonthPeriodStart();
+    btn.textContent = "Сбросить счётчик";
     btn.style.display = (yearDeferred || monthDeferred) ? "block" : "none";
   }
 
+  // --- годовой бар: свёрнутый вид = общее число по центру,
+  //     развёрнутый (по клику) = сегменты + "не хватает" ---
   function renderHourYearBar(){
-    var holder = document.getElementById("hourYearSegments");
-    if(!holder) return;
+    var totalEl = document.getElementById("hourYearTotal");
+    var segHolder = document.getElementById("hourYearSegments");
+    if(!totalEl || !segHolder) return;
     var months = getMonthsToSeptember();
     var yearStart = getYearPeriodStart();
-    holder.innerHTML = "";
-    if(!months || !yearStart) return;
+    segHolder.innerHTML = "";
+    if(!months || !yearStart) { totalEl.textContent = "0"; return; }
+
     var targetMinutes = months * 50 * 60;
-    var segments = getClosedMonthSegments()
-      .filter(function(s){ return s.periodStart >= yearStart; })
-      .map(function(s){ return s.minutes; });
-    segments.push(sumHourLogsSince(getMonthPeriodStart()));
-    segments.forEach(function(minutes){
+    var closed = getClosedMonthSegments().filter(function(s){ return s.periodStart >= yearStart; });
+    var currentMinutes = sumHourLogsSince(getMonthPeriodStart());
+    var achievedMinutes = closed.reduce(function(a,s){ return a+s.minutes; }, 0) + currentMinutes;
+
+    totalEl.textContent = Math.round(achievedMinutes/60);
+
+    var segMinutesList = closed.map(function(s){ return s.minutes; });
+    segMinutesList.push(currentMinutes);
+    segMinutesList.forEach(function(minutes){
       if(minutes <= 0) return;
       var seg = document.createElement("div");
       seg.className = "hour-year-segment";
       seg.style.width = (targetMinutes > 0 ? (minutes/targetMinutes)*100 : 0) + "%";
-      seg.textContent = Math.round(minutes/60);
-      holder.appendChild(seg);
+      var hoursVal = minutes/60;
+      seg.textContent = (hoursVal >= HOUR_SEGMENT_LABEL_MIN) ? Math.round(hoursVal) : "";
+      segHolder.appendChild(seg);
     });
+
+    var remainingMinutes = Math.max(0, targetMinutes - achievedMinutes);
+    if(remainingMinutes > 0){
+      var rem = document.createElement("div");
+      rem.className = "hour-year-remaining";
+      rem.style.width = (targetMinutes > 0 ? (remainingMinutes/targetMinutes)*100 : 0) + "%";
+      var remHours = remainingMinutes/60;
+      rem.textContent = (remHours >= HOUR_SEGMENT_LABEL_MIN) ? Math.round(remHours) : "";
+      segHolder.appendChild(rem);
+    }
   }
 
   function renderHourBars(){
@@ -2400,8 +2426,12 @@
     }
     if(monthWrap) monthWrap.classList.add("visible");
     var periodStart = getMonthPeriodStart() || Date.now();
-    updateHourBarVisual("hourMonth", sumHourLogsSince(periodStart), goal*60);
+    var monthMinutes = sumHourLogsSince(periodStart);
+    updateHourBarVisual("hourMonth", monthMinutes, goal*60);
+    var revealEl = document.getElementById("hourMonthReveal");
+    if(revealEl) revealEl.textContent = formatHHMM(monthMinutes);
     updateHourResetButtonVisibility();
+
     if(goal === 50){
       if(yearWrap) yearWrap.classList.add("visible");
       renderHourYearBar();
@@ -2426,7 +2456,7 @@
   function confirmHourInput(prefix){
     var input = document.getElementById(prefix + "Input");
     if(!input) return;
-    var minutes = parseHHMM(input.value);
+    var minutes = parseHourInput(input.value);
     if(minutes === null || minutes <= 0){
       input.style.borderColor = "#b0432e";
       return;
@@ -2434,21 +2464,23 @@
     addHourLogEntry(minutes);
     closeHourInputOverlay(prefix);
     renderHourBars();
-    flashHourReveal(prefix + "Reveal", sumHourLogsSince(getMonthPeriodStart()));
   }
 
   // --- диалоги окончания месяца / года (тот же стиль, что у окна синхронизации) ---
   function showHourMonthEndDialog(periodStart){
     if(modalOverlay.classList.contains("open")) return;
     var totalMinutes = sumHourLogsSince(periodStart);
+    var goal = getHourGoal();
+    var isYearMode = goal === 50;
     modalBox.innerHTML =
-      modalHeader("Месяц закончился - " + formatHHMM(totalMinutes), "Обнулить счётчик?") +
+      modalHeader("Месяц закончился - " + formatHHMM(totalMinutes),
+        isYearMode ? "Перейти к следующему месяцу?" : "Обнулить счётчик?") +
       '<button class="modal-btn primary" id="mHourMonthYes">Да</button>' +
-      '<button class="modal-btn" id="mHourMonthNo">Нет</button>';
+      '<button class="modal-btn modal-btn-center" id="mHourMonthNo">Нет</button>';
     bindClose();
     modalOverlay.classList.add("open");
     document.getElementById("mHourMonthYes").addEventListener("click", function(){
-      if(getHourGoal() === 50){
+      if(isYearMode){
         recordMonthSegment(periodStart, totalMinutes);
         setHourState(HOUR_MONTH_PERIOD_KEY, Date.now());
         setHourState(HOUR_MONTH_DEFERRED_KEY, null);
@@ -2471,9 +2503,9 @@
     if(modalOverlay.classList.contains("open")) return;
     var totalMinutes = sumYearMinutes();
     modalBox.innerHTML =
-      modalHeader("Год окончен - " + formatHoursWord(totalMinutes), "Сбросить счётчик?") +
+      modalHeader("Год окончен - " + Math.round(totalMinutes/60) + " часов", "Сбросить счётчик?") +
       '<button class="modal-btn primary" id="mHourYearYes">Да</button>' +
-      '<button class="modal-btn" id="mHourYearNo">Нет</button>';
+      '<button class="modal-btn modal-btn-center" id="mHourYearNo">Нет</button>';
     bindClose();
     modalOverlay.classList.add("open");
     document.getElementById("mHourYearYes").addEventListener("click", function(){
@@ -2547,7 +2579,7 @@
 
   function openHourGoalModal(){
     modalBox.innerHTML =
-      modalHeader("Дополнительный счётчик", "Выберите цель часов в месяц.") +
+      modalHeader("Дополнительный счётчик") +
       '<div class="modal-btn-grid">' +
         '<button id="mHour15">15</button>' +
         '<button id="mHour30">30</button>' +
@@ -2564,7 +2596,7 @@
     var buttons = "";
     for(var i = 1; i <= 12; i++){ buttons += '<button data-months="' + i + '">' + i + '</button>'; }
     modalBox.innerHTML =
-      modalHeader("Введите количество месяцев до сентября", "") +
+      modalHeader("Введите количество месяцев до сентября") +
       '<div class="modal-btn-grid">' + buttons + '</div>';
     bindClose();
     Array.prototype.forEach.call(modalBox.querySelectorAll("[data-months]"), function(btn){
@@ -2577,9 +2609,9 @@
 
   function openRemoveHourCounterConfirm(){
     modalBox.innerHTML =
-      modalHeader("Весь прогресс будет потерян. Уверены?", "") +
+      modalHeader("Весь прогресс будет потерян. Уверены?") +
       '<button class="modal-btn primary" id="mHourRemoveYes">Да</button>' +
-      '<button class="modal-btn" id="mHourRemoveNo">Нет</button>';
+      '<button class="modal-btn modal-btn-center" id="mHourRemoveNo">Нет</button>';
     bindClose();
     modalOverlay.classList.add("open");
     document.getElementById("mHourRemoveYes").addEventListener("click", function(){ deactivateHourCounter(); closeModal(); });
@@ -2600,6 +2632,8 @@
   if(hourMonthCancel) hourMonthCancel.addEventListener("click", function(e){ e.stopPropagation(); closeHourInputOverlay("hourMonth"); });
   var hourMonthResetBtn = document.getElementById("hourMonthResetBtn");
   if(hourMonthResetBtn) hourMonthResetBtn.addEventListener("click", function(e){ e.stopPropagation(); resolveDeferredHourReset(); });
+  var hourYearBar = document.getElementById("hourYearBar");
+  if(hourYearBar) hourYearBar.addEventListener("click", function(){ hourYearBar.classList.toggle("expanded"); });
 
   // ===================== ЗАПУСК =====================
   initQuote();
