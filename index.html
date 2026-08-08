@@ -277,22 +277,21 @@
     box-shadow:inset 0 2px 3px rgba(255,255,255,.4), inset 0 -3px 5px rgba(0,20,40,.35);
     transition:width .3s ease;
   }
-  .hour-bar-reveal{
+  .hour-bar-zone-text{
     position:absolute;
-    top:0;left:0;right:0;bottom:0;
+    top:0;bottom:0;
     z-index:3;
     display:flex;align-items:center;justify-content:center;
     font-weight:bold;
     font-size:12.5px;
-    color:#fff;
-    text-shadow:0 1px 2px rgba(0,0,0,.55);
-    font-family:"Segoe UI","Tahoma",sans-serif;
+    color:#20351f;
+    text-shadow:0 1px 1px rgba(255,255,255,.5);
     letter-spacing:.3px;
-    opacity:0;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    overflow:hidden;
+    white-space:nowrap;
     pointer-events:none;
-    transition:opacity .3s ease;
   }
-  .hour-bar-reveal.visible{ opacity:1; }
 
   .hour-input-overlay{
     display:none;
@@ -339,30 +338,23 @@
     cursor:pointer;
   }
 
-  /* годовой (сегментированный) бар для режима "50" */
+  /* годовой бар для режима "50": свёрнутый вид = заливка + 2 подписи,
+     развёрнутый (по клику) = сегменты по месяцам */
   .hour-year-bar{
     cursor:pointer;
     padding:0;
   }
-  .hour-year-total{
+  .hour-year-collapsed{
     position:absolute;
     top:0;left:0;right:0;bottom:0;
-    z-index:3;
-    display:flex;align-items:center;justify-content:center;
-    font-weight:bold;
-    font-size:12.5px;
-    color:#fff;
-    text-shadow:0 1px 2px rgba(0,0,0,.55);
-    letter-spacing:.3px;
-    font-family:"Segoe UI","Tahoma",sans-serif;
   }
+  .hour-year-bar.expanded .hour-year-collapsed{ display:none; }
   .hour-year-segments{
     position:absolute;
-    top:0;left:0;bottom:0;
+    top:0;left:0;bottom:0;right:0;
     display:none;
   }
   .hour-year-bar.expanded .hour-year-segments{ display:flex; }
-  .hour-year-bar.expanded .hour-year-total{ display:none; }
   .hour-year-segment{
     height:100%;
     display:flex;
@@ -370,8 +362,8 @@
     justify-content:center;
     font-size:11.5px;
     font-weight:bold;
-    color:#fff;
-    text-shadow:0 1px 2px rgba(0,0,0,.55);
+    color:#20351f;
+    text-shadow:0 1px 1px rgba(255,255,255,.5);
     font-family:"Segoe UI","Tahoma",sans-serif;
     border-right:1px solid rgba(255,255,255,.4);
     background-color:#29B6F6;
@@ -388,7 +380,9 @@
     justify-content:center;
     font-size:11.5px;
     font-weight:bold;
-    color:var(--ink-soft);
+    color:#20351f;
+    text-shadow:0 1px 1px rgba(255,255,255,.5);
+    font-family:"Segoe UI","Tahoma",sans-serif;
   }
 
   .update-wrap{
@@ -846,7 +840,7 @@
   .modal-btn{
     display:block;
     width:100%;
-    text-align:left;
+    text-align:center;
     padding:12px 14px;
     margin-bottom:10px;
     background:#fffef8;
@@ -1003,7 +997,8 @@
     <div class="hour-bar" id="hourMonthBar">
       <div class="hour-bar-light-fill" id="hourMonthLightFill"></div>
       <div class="hour-bar-dark-fill" id="hourMonthDarkFill"></div>
-      <div class="hour-bar-reveal visible" id="hourMonthReveal">0:00</div>
+      <div class="hour-bar-zone-text" id="hourMonthAchievedText"></div>
+      <div class="hour-bar-zone-text" id="hourMonthRemainingText"></div>
     </div>
     <div class="hour-input-overlay" id="hourMonthOverlay">
       <input type="text" class="hour-input-mask" id="hourMonthInput" inputmode="numeric" placeholder="__.__" maxlength="6">
@@ -1015,7 +1010,12 @@
 
   <div class="hour-bar-wrap" id="hourYearWrap">
     <div class="hour-bar hour-year-bar" id="hourYearBar">
-      <div class="hour-year-total" id="hourYearTotal">0</div>
+      <div class="hour-year-collapsed" id="hourYearCollapsed">
+        <div class="hour-bar-light-fill" id="hourYearLightFill"></div>
+        <div class="hour-bar-dark-fill" id="hourYearDarkFill"></div>
+        <div class="hour-bar-zone-text" id="hourYearAchievedText"></div>
+        <div class="hour-bar-zone-text" id="hourYearRemainingText"></div>
+      </div>
       <div class="hour-year-segments" id="hourYearSegments"></div>
     </div>
   </div>
@@ -1052,7 +1052,7 @@
     </div>
   </div>
 
-  <div class="app-version" id="appVersionText">v0.12.0</div>
+  <div class="app-version" id="appVersionText">v0.13.0</div>
 </footer>
 
 <!-- ===== модальное окно синхронизации ===== -->
@@ -2241,6 +2241,7 @@
   // устройствами записи просто объединяются — новой логики слияния не нужно.
   var HOUR_GOAL_KEY = "__hourGoal";
   var HOUR_MONTHS_KEY = "__hourMonthsToSeptember";
+  var HOUR_REAL_MONTHS_KEY = "__hourRealMonthsAtActivation";
   var HOUR_MONTH_PERIOD_KEY = "__hourMonthPeriodStart";
   var HOUR_YEAR_PERIOD_KEY = "__hourYearPeriodStart";
   var HOUR_MONTH_DEFERRED_KEY = "__hourMonthDeferred";
@@ -2249,6 +2250,7 @@
 
   function getHourGoal(){ var r = state[HOUR_GOAL_KEY]; return (r && r.c) ? r.c : null; }
   function getMonthsToSeptember(){ var r = state[HOUR_MONTHS_KEY]; return (r && r.c) ? r.c : null; }
+  function getRealMonthsAtActivation(){ var r = state[HOUR_REAL_MONTHS_KEY]; return (r && r.c) ? r.c : null; }
   function getMonthPeriodStart(){ var r = state[HOUR_MONTH_PERIOD_KEY]; return (r && r.c) ? r.c : null; }
   function getYearPeriodStart(){ var r = state[HOUR_YEAR_PERIOD_KEY]; return (r && r.c) ? r.c : null; }
 
@@ -2318,6 +2320,29 @@
     var septThisYear = new Date(d.getFullYear(), 8, 1).getTime();
     return (d.getTime() < septThisYear) ? septThisYear : new Date(d.getFullYear()+1, 8, 1).getTime();
   }
+  // сколько реальных календарных месяцев осталось до ближайшего 1 сентября
+  // (текущий месяц считается за 1 целиком, независимо от числа)
+  function computeRealMonthsRemaining(fromTs){
+    var target = computeNextSeptemberFirst(fromTs);
+    var d = new Date(fromTs), t = new Date(target);
+    var months = (t.getFullYear() - d.getFullYear()) * 12 + (t.getMonth() - d.getMonth());
+    return Math.max(1, months);
+  }
+
+  // --- "наверстывание": сколько периодов выбрано сверх реально оставшихся ---
+  function getClosedSegmentsCountThisYear(){
+    var yearStart = getYearPeriodStart();
+    if(!yearStart) return 0;
+    return getClosedMonthSegments().filter(function(s){ return s.periodStart >= yearStart; }).length;
+  }
+  function getOverdueCatchUpCount(){
+    var chosen = getMonthsToSeptember(), real = getRealMonthsAtActivation();
+    if(!chosen || !real) return 0;
+    return Math.max(0, chosen - real);
+  }
+  function isInCatchUpMode(){
+    return getHourGoal() === 50 && getClosedSegmentsCountThisYear() < getOverdueCatchUpCount();
+  }
 
   function setHourState(key, value){ state[key] = {c: value, t: Date.now()}; }
 
@@ -2326,6 +2351,7 @@
     setHourState(HOUR_GOAL_KEY, goal);
     setHourState(HOUR_MONTHS_KEY, goal === 50 ? monthsToSeptember : null);
     setHourState(HOUR_YEAR_PERIOD_KEY, goal === 50 ? now : null);
+    setHourState(HOUR_REAL_MONTHS_KEY, goal === 50 ? computeRealMonthsRemaining(now) : null);
     setHourState(HOUR_MONTH_PERIOD_KEY, now);
     setHourState(HOUR_MONTH_DEFERRED_KEY, null);
     setHourState(HOUR_YEAR_DEFERRED_KEY, null);
@@ -2337,6 +2363,7 @@
   function deactivateHourCounter(){
     setHourState(HOUR_GOAL_KEY, null);
     setHourState(HOUR_MONTHS_KEY, null);
+    setHourState(HOUR_REAL_MONTHS_KEY, null);
     setHourState(HOUR_MONTH_PERIOD_KEY, null);
     setHourState(HOUR_YEAR_PERIOD_KEY, null);
     setHourState(HOUR_MONTH_DEFERRED_KEY, null);
@@ -2347,11 +2374,31 @@
     renderHourCounterMenu();
   }
 
+  // закрывает текущий период (режим "50"): в сегмент попадают только целые
+  // часы, а остаток минут переносится в начало следующего периода
+  function closeCurrentMonthPeriodWithCarry(){
+    var periodStart = getMonthPeriodStart();
+    var totalMinutes = sumHourLogsSince(periodStart);
+    var wholeMinutes = Math.floor(totalMinutes/60) * 60;
+    var carryMinutes = totalMinutes - wholeMinutes;
+    recordMonthSegment(periodStart, wholeMinutes);
+    var newStart = Date.now();
+    setHourState(HOUR_MONTH_PERIOD_KEY, newStart);
+    setHourState(HOUR_MONTH_DEFERRED_KEY, null);
+    if(carryMinutes > 0){
+      state["hourlog:" + newStart + "-carry"] = {c: carryMinutes, t: newStart};
+    }
+    saveLocalState();
+    scheduleCloudPush();
+    renderHourBars();
+  }
+
   function updateHourBarVisual(prefix, totalMinutes, goalMinutes){
     var light = document.getElementById(prefix + "LightFill");
     var dark = document.getElementById(prefix + "DarkFill");
-    if(!light || !dark || goalMinutes <= 0) return;
-    light.style.width = Math.min(100, (totalMinutes/goalMinutes)*100) + "%";
+    if(!light || !dark || goalMinutes <= 0) return {lightPct:0, darkPct:0};
+    var lightPct = Math.min(100, (totalMinutes/goalMinutes)*100);
+    light.style.width = lightPct + "%";
     var darkPct = 0;
     if(totalMinutes > goalMinutes){
       var over = totalMinutes - goalMinutes;
@@ -2359,6 +2406,35 @@
       darkPct = (rem === 0) ? 100 : (rem/goalMinutes)*100;
     }
     dark.style.width = darkPct + "%";
+    return {lightPct: lightPct, darkPct: darkPct};
+  }
+
+  // размещает подписи "заполнено" / "не хватает" внутри их собственных зон бара
+  function positionZoneTexts(achievedElId, remainingElId, totalMinutes, goalMinutes, achievedLabel, remainingLabel){
+    var achievedEl = document.getElementById(achievedElId);
+    var remainingEl = document.getElementById(remainingElId);
+    if(!achievedEl || !remainingEl || goalMinutes <= 0) return;
+
+    if(totalMinutes <= goalMinutes){
+      var achievedPct = (totalMinutes/goalMinutes)*100;
+      achievedEl.style.left = "0%";
+      achievedEl.style.width = achievedPct + "%";
+      achievedEl.textContent = achievedLabel;
+
+      remainingEl.style.left = achievedPct + "%";
+      remainingEl.style.width = (100 - achievedPct) + "%";
+      remainingEl.textContent = (100 - achievedPct) > 0.5 ? remainingLabel : "";
+    } else {
+      // цель уже превышена — идёт "тёмный круг", подпись про остаток тут не нужна
+      var over = totalMinutes - goalMinutes;
+      var rem = over % goalMinutes;
+      var darkPct = (rem === 0) ? 100 : (rem/goalMinutes)*100;
+      achievedEl.style.left = "0%";
+      achievedEl.style.width = darkPct + "%";
+      achievedEl.textContent = achievedLabel;
+      remainingEl.style.width = "0%";
+      remainingEl.textContent = "";
+    }
   }
 
   function updateHourResetButtonVisibility(){
@@ -2374,24 +2450,29 @@
     btn.style.display = (yearDeferred || monthDeferred) ? "block" : "none";
   }
 
-  // --- годовой бар: свёрнутый вид = общее число по центру,
-  //     развёрнутый (по клику) = сегменты + "не хватает" ---
   function renderHourYearBar(){
-    var totalEl = document.getElementById("hourYearTotal");
-    var segHolder = document.getElementById("hourYearSegments");
-    if(!totalEl || !segHolder) return;
     var months = getMonthsToSeptember();
     var yearStart = getYearPeriodStart();
+    var segHolder = document.getElementById("hourYearSegments");
+    if(!segHolder) return;
     segHolder.innerHTML = "";
-    if(!months || !yearStart) { totalEl.textContent = "0"; return; }
+    if(!months || !yearStart) return;
 
     var targetMinutes = months * 50 * 60;
     var closed = getClosedMonthSegments().filter(function(s){ return s.periodStart >= yearStart; });
     var currentMinutes = sumHourLogsSince(getMonthPeriodStart());
     var achievedMinutes = closed.reduce(function(a,s){ return a+s.minutes; }, 0) + currentMinutes;
 
-    totalEl.textContent = Math.round(achievedMinutes/60);
+    // свёрнутый вид: заливка + 2 подписи (как у месячного бара), в целых часах
+    updateHourBarVisual("hourYear", achievedMinutes, targetMinutes);
+    positionZoneTexts(
+      "hourYearAchievedText", "hourYearRemainingText",
+      achievedMinutes, targetMinutes,
+      String(Math.round(achievedMinutes/60)),
+      String(Math.round(Math.max(0, targetMinutes-achievedMinutes)/60))
+    );
 
+    // развёрнутый вид: сегменты по месяцам + остаток
     var segMinutesList = closed.map(function(s){ return s.minutes; });
     segMinutesList.push(currentMinutes);
     segMinutesList.forEach(function(minutes){
@@ -2403,7 +2484,6 @@
       seg.textContent = (hoursVal >= HOUR_SEGMENT_LABEL_MIN) ? Math.round(hoursVal) : "";
       segHolder.appendChild(seg);
     });
-
     var remainingMinutes = Math.max(0, targetMinutes - achievedMinutes);
     if(remainingMinutes > 0){
       var rem = document.createElement("div");
@@ -2427,9 +2507,14 @@
     if(monthWrap) monthWrap.classList.add("visible");
     var periodStart = getMonthPeriodStart() || Date.now();
     var monthMinutes = sumHourLogsSince(periodStart);
-    updateHourBarVisual("hourMonth", monthMinutes, goal*60);
-    var revealEl = document.getElementById("hourMonthReveal");
-    if(revealEl) revealEl.textContent = formatHHMM(monthMinutes);
+    var goalMinutes = goal*60;
+    updateHourBarVisual("hourMonth", monthMinutes, goalMinutes);
+    positionZoneTexts(
+      "hourMonthAchievedText", "hourMonthRemainingText",
+      monthMinutes, goalMinutes,
+      formatHHMM(monthMinutes),
+      formatHHMM(Math.max(0, goalMinutes-monthMinutes))
+    );
     updateHourResetButtonVisibility();
 
     if(goal === 50){
@@ -2464,28 +2549,29 @@
     addHourLogEntry(minutes);
     closeHourInputOverlay(prefix);
     renderHourBars();
+    // режим "50" с выбранным числом месяцев больше реального — при каждом
+    // внесении времени, пока не наверстали "просроченные" периоды, снова
+    // спрашиваем про переход к следующему месяцу
+    if(isInCatchUpMode() && !modalOverlay.classList.contains("open")){
+      showHourMonthEndDialog(getMonthPeriodStart());
+    }
   }
 
   // --- диалоги окончания месяца / года (тот же стиль, что у окна синхронизации) ---
   function showHourMonthEndDialog(periodStart){
     if(modalOverlay.classList.contains("open")) return;
     var totalMinutes = sumHourLogsSince(periodStart);
-    var goal = getHourGoal();
-    var isYearMode = goal === 50;
+    var isYearMode = getHourGoal() === 50;
     modalBox.innerHTML =
       modalHeader("Месяц закончился - " + formatHHMM(totalMinutes),
         isYearMode ? "Перейти к следующему месяцу?" : "Обнулить счётчик?") +
       '<button class="modal-btn primary" id="mHourMonthYes">Да</button>' +
-      '<button class="modal-btn modal-btn-center" id="mHourMonthNo">Нет</button>';
+      '<button class="modal-btn" id="mHourMonthNo">Нет</button>';
     bindClose();
     modalOverlay.classList.add("open");
     document.getElementById("mHourMonthYes").addEventListener("click", function(){
       if(isYearMode){
-        recordMonthSegment(periodStart, totalMinutes);
-        setHourState(HOUR_MONTH_PERIOD_KEY, Date.now());
-        setHourState(HOUR_MONTH_DEFERRED_KEY, null);
-        saveLocalState(); scheduleCloudPush();
-        renderHourBars();
+        closeCurrentMonthPeriodWithCarry();
       } else {
         deactivateHourCounter();
       }
@@ -2505,7 +2591,7 @@
     modalBox.innerHTML =
       modalHeader("Год окончен - " + Math.round(totalMinutes/60) + " часов", "Сбросить счётчик?") +
       '<button class="modal-btn primary" id="mHourYearYes">Да</button>' +
-      '<button class="modal-btn modal-btn-center" id="mHourYearNo">Нет</button>';
+      '<button class="modal-btn" id="mHourYearNo">Нет</button>';
     bindClose();
     modalOverlay.classList.add("open");
     document.getElementById("mHourYearYes").addEventListener("click", function(){
@@ -2530,18 +2616,15 @@
       state[HOUR_MONTH_DEFERRED_KEY].c === getMonthPeriodStart();
     if(monthDeferred){
       if(goal === 50){
-        var periodStart = getMonthPeriodStart();
-        recordMonthSegment(periodStart, sumHourLogsSince(periodStart));
-        setHourState(HOUR_MONTH_PERIOD_KEY, Date.now());
-        setHourState(HOUR_MONTH_DEFERRED_KEY, null);
-        saveLocalState(); scheduleCloudPush();
-        renderHourBars();
+        closeCurrentMonthPeriodWithCarry();
       } else {
         deactivateHourCounter();
       }
     }
   }
 
+  // календарные границы (реальное 1 число месяца / 1 сентября) — отдельно
+  // от "наверстывания", которое привязано не к календарю, а к вводу часов
   function checkHourBoundaries(){
     var goal = getHourGoal();
     if(!goal || modalOverlay.classList.contains("open")) return;
@@ -2611,7 +2694,7 @@
     modalBox.innerHTML =
       modalHeader("Весь прогресс будет потерян. Уверены?") +
       '<button class="modal-btn primary" id="mHourRemoveYes">Да</button>' +
-      '<button class="modal-btn modal-btn-center" id="mHourRemoveNo">Нет</button>';
+      '<button class="modal-btn" id="mHourRemoveNo">Нет</button>';
     bindClose();
     modalOverlay.classList.add("open");
     document.getElementById("mHourRemoveYes").addEventListener("click", function(){ deactivateHourCounter(); closeModal(); });
