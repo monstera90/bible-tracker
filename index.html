@@ -13,22 +13,24 @@
 <meta name="apple-mobile-web-app-title" content="Библия">
 <style>
   :root{
-    --parchment:#f1e6cd;
-    --parchment-dark:#e4d3ac;
-    --ink:#2e2418;
-    --ink-soft:#5b4c37;
-    --wood:#5c3d24;
-    --wood-dark:#3c2716;
-    --gold:#a97c26;
-    --gold-light:#d4a94f;
-    --xp-green-dark:#1f9e5a;
-    --xp-green:#48F78E;
-    --groove-shadow:#8a7550;
-    --bg-top:#efe2c2;
-    --bg-mid:#ddc99a;
-    --bg-bottom:#cdb27f;
-    --danger:#8a3c2b;
-    --danger-dark:#5e2318;
+    --parchment:#f4f0f8;
+    --parchment-dark:#e9e0f1;
+    --ink:#3b3350;
+    --ink-soft:#6a6080;
+    --wood:#8f7fb8;
+    --wood-dark:#6a5a91;
+    --gold:#d8cdec;
+    --gold-light:#ece3f7;
+    --xp-green-dark:#4FBE9B;
+    --xp-green:#8FE3C7;
+    --groove-shadow:#b6a8d1;
+    --bg-top:#f6f2fa;
+    --bg-mid:#e9e0f2;
+    --bg-bottom:#d9cbe8;
+    --danger:#7a5a9c;
+    --danger-dark:#543d70;
+    --warn:#d9a45c;
+    --warn-dark:#a9773a;
     --status-off:#8a8578;
     --status-offline:#8a8578;
     --status-sync:#c9a227;
@@ -37,6 +39,17 @@
   }
 
   /* ---------- темы оформления ---------- */
+  html[data-theme="1"]{
+    --parchment:#f1e6cd; --parchment-dark:#e4d3ac;
+    --ink:#2e2418; --ink-soft:#5b4c37;
+    --wood:#5c3d24; --wood-dark:#3c2716;
+    --gold:#a97c26; --gold-light:#d4a94f;
+    --groove-shadow:#8a7550;
+    --xp-green:#48F78E; --xp-green-dark:#1f9e5a;
+    --bg-top:#efe2c2; --bg-mid:#ddc99a; --bg-bottom:#cdb27f;
+    --danger:#8a3c2b; --danger-dark:#5e2318;
+    --warn:#e2a640; --warn-dark:#b17a29;
+  }
   html[data-theme="2"]{
     --parchment:#e9f0e6; --parchment-dark:#dbe6d6;
     --ink:#2f3b2c; --ink-soft:#57624f;
@@ -46,6 +59,7 @@
     --xp-green:#5AD1A0; --xp-green-dark:#2E9E76;
     --bg-top:#eef3ea; --bg-mid:#dbe6d9; --bg-bottom:#c7d8c2;
     --danger:#b3654f; --danger-dark:#7a4436;
+    --warn:#d9a441; --warn-dark:#a97a2c;
   }
   html[data-theme="3"]{
     --parchment:#fbeef1; --parchment-dark:#f6dee3;
@@ -56,6 +70,7 @@
     --xp-green:#7FE8C0; --xp-green-dark:#3FB98E;
     --bg-top:#fdf1f2; --bg-mid:#f8dfe4; --bg-bottom:#f1c9d2;
     --danger:#c2607a; --danger-dark:#8a3f56;
+    --warn:#e08a5a; --warn-dark:#af6339;
   }
   html[data-theme="4"]{
     --parchment:#f4f0f8; --parchment-dark:#e9e0f1;
@@ -66,6 +81,7 @@
     --xp-green:#8FE3C7; --xp-green-dark:#4FBE9B;
     --bg-top:#f6f2fa; --bg-mid:#e9e0f2; --bg-bottom:#d9cbe8;
     --danger:#7a5a9c; --danger-dark:#543d70;
+    --warn:#d9a45c; --warn-dark:#a9773a;
   }
   html[data-theme="5"]{
     --parchment:#fbf6e3; --parchment-dark:#f3ecc9;
@@ -76,6 +92,7 @@
     --xp-green:#8FE0A8; --xp-green-dark:#48B978;
     --bg-top:#fdf8e4; --bg-mid:#f6ecc4; --bg-bottom:#eadfa0;
     --danger:#c98a3f; --danger-dark:#96652a;
+    --warn:#d98a3f; --warn-dark:#a9662a;
   }
   html[data-theme="6"]{
     --parchment:#f6ecec; --parchment-dark:#ecd9d9;
@@ -86,6 +103,7 @@
     --xp-green:#8FD9B8; --xp-green-dark:#45AD82;
     --bg-top:#f7eeee; --bg-mid:#ece0e1; --bg-bottom:#d9c8ca;
     --danger:#8a5a63; --danger-dark:#5e3d44;
+    --warn:#c97b5a; --warn-dark:#9a5a3f;
   }
   html[data-theme="7"]{
     --parchment:#f4efe2; --parchment-dark:#e8ded0;
@@ -95,6 +113,8 @@
     --groove-shadow:#a3c6b8;
     --xp-green:#6FE0C0; --xp-green-dark:#33AD87;
     --bg-top:#f6f1e4; --bg-mid:#eae0cc; --bg-bottom:#d9cba8;
+    --danger:#c17b5a; --danger-dark:#8f5540;
+    --warn:#d9a24a; --warn-dark:#a97832;
     --danger:#c17b5a; --danger-dark:#8f5540;
   }
 
@@ -165,6 +185,126 @@
     transition:background .2s ease;
   }
   .sync-status:hover{ background:rgba(0,0,0,.42); }
+
+  .mood-status{
+    position:absolute;
+    top:14px;
+    left:14px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:34px;
+    height:34px;
+    border-radius:50%;
+    background:rgba(0,0,0,.28);
+    border:1px solid rgba(255,255,255,.25);
+    font-size:18px;
+    cursor:pointer;
+    user-select:none;
+    transition:background .2s ease;
+  }
+  .mood-status:hover{ background:rgba(0,0,0,.42); }
+  .mood-status.unlogged{ filter:grayscale(100%); opacity:.7; }
+
+  .mood-picker-grid{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    justify-content:center;
+    margin-bottom:10px;
+  }
+  .mood-picker-grid button{
+    width:52px;height:52px;
+    font-size:26px;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    cursor:pointer;
+  }
+  .mood-picker-grid button:hover{ background:var(--xp-green); }
+
+  .mood-checkin-grid{
+    display:grid;
+    grid-template-columns:repeat(3, 1fr);
+    gap:8px;
+    margin-bottom:10px;
+  }
+  .mood-checkin-item{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:4px;
+    padding:12px 4px;
+    background:#fffef8;
+    border:2px solid var(--groove-shadow);
+    border-radius:8px;
+    cursor:pointer;
+  }
+  .mood-checkin-item .emoji{ font-size:26px; }
+  .mood-checkin-item .label{
+    font-size:11px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    color:var(--ink-soft);
+    text-align:center;
+  }
+  .mood-checkin-item.selected{
+    border-color:var(--xp-green-dark);
+    background:var(--xp-green);
+  }
+  .mood-checkin-hint{
+    text-align:center;
+    font-size:12.5px;
+    color:#8a2f1c;
+    font-weight:bold;
+    min-height:16px;
+    margin-bottom:8px;
+  }
+
+  .mood-diagram-title{
+    text-align:center;
+    font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
+    font-size:15px;
+    letter-spacing:.5px;
+    color:var(--wood);
+    margin-bottom:14px;
+  }
+  .mood-diagram-empty{
+    text-align:center;
+    font-size:14px;
+    color:var(--ink-soft);
+    padding:20px 10px;
+  }
+  .mood-diagram-wrap{
+    display:flex;
+    justify-content:center;
+    margin-bottom:8px;
+  }
+  .mood-diagram-svg{
+    cursor:pointer;
+    overflow:visible;
+  }
+  .mood-diagram-slice{
+    transition:transform .35s ease;
+  }
+  .mood-diagram-emoji{
+    font-size:20px;
+    pointer-events:none;
+  }
+  .mood-diagram-reset-row{
+    display:flex;
+    justify-content:flex-end;
+    margin-top:6px;
+  }
+  .mood-diagram-reset-btn{
+    padding:7px 12px;
+    background:var(--danger);
+    color:#f4e6c8;
+    border:1px solid var(--danger-dark);
+    border-radius:6px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:12px;
+    cursor:pointer;
+  }
 
   .sync-dot{
     width:9px;height:9px;border-radius:50%;
@@ -365,14 +505,15 @@
     color:#20351f;
     text-shadow:0 1px 1px rgba(255,255,255,.5);
     font-family:"Segoe UI","Tahoma",sans-serif;
-    border-right:1px solid rgba(255,255,255,.4);
     background-color:#29B6F6;
+    background-image:linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(0,30,60,.2) 100%);
+    box-shadow:
+      inset 2px 0 2px -1px rgba(255,255,255,.6),
+      inset -2px 0 2px -1px rgba(0,30,60,.45);
     overflow:hidden;
     white-space:nowrap;
   }
-  .hour-year-segment:nth-child(odd){ background-color:#29B6F6; }
-  .hour-year-segment:nth-child(even){ background-color:#0277BD; }
-  .hour-year-segment:last-child{ border-right:none; }
+
   .hour-year-remaining{
     height:100%;
     display:flex;
@@ -419,7 +560,7 @@
   .warn-fill{
     height:100%;
     width:100%;
-    background-color:#e2a640;
+    background-color:var(--warn);
     background-image:linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(90,40,0,.2) 100%);
     box-shadow:
       inset 0 2px 3px rgba(255,255,255,.55),
@@ -977,6 +1118,8 @@
     <span id="syncStatusText">Синхронизация выкл.</span>
   </div>
 
+  <div class="mood-status" id="moodStatusPill" style="display:none;">😀</div>
+
   <h1>ГРАФИК ЧТЕНИЯ БИБЛИИ</h1>
   <p class="quote" id="dailyQuote">«Счастлив тот, кто… находит радость в законе Иеговы и читает его вполголоса день и ночь» (Псалом 1:1, 2).</p>
   <div class="overall-progress-wrap">
@@ -1049,10 +1192,11 @@
       <div id="versionUpdateRow"></div>
       <div id="versionHistoryItems"></div>
       <div id="hourCounterMenuRow"></div>
+      <div id="moodCounterMenuRow"></div>
     </div>
   </div>
 
-  <div class="app-version" id="appVersionText">v0.13.0</div>
+  <div class="app-version" id="appVersionText">v0.14.0</div>
 </footer>
 
 <!-- ===== модальное окно синхронизации ===== -->
@@ -1280,7 +1424,7 @@
 
   // ===================== ТЕМЫ =====================
   var THEME_KEY = "__theme";
-  var DEFAULT_THEME_ID = 1;
+  var DEFAULT_THEME_ID = 4;
   var THEMES = [
     {id:1, name:"Пергамент"},{id:2, name:"Шалфей и небо"},{id:3, name:"Розовый и мята"},
     {id:4, name:"Лаванда и слоновая кость"},{id:5, name:"Лимонный шифон и небо"},
@@ -1293,11 +1437,7 @@
   }
 
   function applyThemeToPage(themeId){
-    if(themeId === DEFAULT_THEME_ID){
-      document.documentElement.removeAttribute("data-theme");
-    } else {
-      document.documentElement.setAttribute("data-theme", String(themeId));
-    }
+    document.documentElement.setAttribute("data-theme", String(themeId));
     var dots = document.querySelectorAll(".theme-dot");
     dots.forEach(function(dot){
       dot.classList.toggle("selected", Number(dot.getAttribute("data-theme-id")) === themeId);
@@ -1370,12 +1510,21 @@
     return "Пропущено более двух лет.";
   }
 
+  function startOfDay(ts){
+    var d = new Date(ts);
+    d.setHours(0,0,0,0);
+    return d.getTime();
+  }
+
   function updateMissedBanner(){
     var wrap = document.getElementById("missedWrap"), textEl = document.getElementById("missedText");
     if(!wrap || !textEl) return;
     var rec = state["__lastRead"];
     if(!rec || !rec.c){ wrap.classList.remove("visible"); return; }
-    var totalDays = Math.floor((Date.now() - rec.c) / DAY_MS);
+    // считаем разницу КАЛЕНДАРНЫХ дней (00:00-00:00), а не скользящее окно
+    // 24 часа — иначе отметка вечером и проверка утром следующего дня ещё
+    // не покажет "пропущен день", хотя календарно день уже сменился
+    var totalDays = Math.round((startOfDay(Date.now()) - startOfDay(rec.c)) / DAY_MS);
     if(totalDays < 1){ wrap.classList.remove("visible"); return; }
     textEl.textContent = buildMissedMessage(totalDays);
     wrap.classList.add("visible");
@@ -1570,11 +1719,48 @@
         card.appendChild(chaptersContainer);
         frag.appendChild(card);
 
-        bookMeta[bookName] = {fillEl:fillEl, countEl:countEl, chapterCount:chapterCount};
+        bookMeta[bookName] = {fillEl:fillEl, countEl:countEl, chapterCount:chapterCount, card:card};
         updateBookProgress(bookName);
       });
     });
     booksContainer.appendChild(frag);
+    addHideProgressButton();
+  }
+
+  // --- "Скрыть прогресс": прячет из списка книги, прочитанные на 100% ---
+  var hideCompletedActive = false;
+  function addHideProgressButton(){
+    var card = document.createElement("div");
+    card.className = "book-card";
+    var headerEl = document.createElement("div");
+    headerEl.className = "book-header";
+    headerEl.style.cursor = "pointer";
+    var headerContent = document.createElement("div");
+    headerContent.className = "book-header-content";
+    var nameEl = document.createElement("div");
+    nameEl.className = "book-name";
+    nameEl.id = "hideProgressToggleText";
+    nameEl.textContent = "Скрыть прогресс";
+    headerContent.appendChild(nameEl);
+    headerEl.appendChild(headerContent);
+    headerEl.addEventListener("click", toggleHideCompletedBooks);
+    card.appendChild(headerEl);
+    booksContainer.appendChild(card);
+  }
+  function applyHideCompletedBooks(){
+    Object.keys(bookMeta).forEach(function(bookName){
+      var meta = bookMeta[bookName];
+      if(!meta || !meta.card) return;
+      var checked = checkedPerBook[bookName] || 0;
+      var isComplete = meta.chapterCount > 0 && checked === meta.chapterCount;
+      meta.card.style.display = (hideCompletedActive && isComplete) ? "none" : "";
+    });
+  }
+  function toggleHideCompletedBooks(){
+    hideCompletedActive = !hideCompletedActive;
+    var textEl = document.getElementById("hideProgressToggleText");
+    if(textEl) textEl.textContent = hideCompletedActive ? "Показать весь прогресс" : "Скрыть прогресс";
+    applyHideCompletedBooks();
   }
 
   function updateBookProgress(bookName){
@@ -1583,6 +1769,9 @@
     var pct = meta.chapterCount ? Math.round((checked/meta.chapterCount)*100) : 0;
     meta.fillEl.style.width = pct + "%";
     meta.countEl.textContent = checked + " / " + meta.chapterCount;
+    if(hideCompletedActive && meta.card){
+      meta.card.style.display = (meta.chapterCount > 0 && checked === meta.chapterCount) ? "none" : "";
+    }
   }
 
   function updateOverallProgress(){
@@ -1617,6 +1806,8 @@
     updateMissedBanner();
     renderHourBars();
     renderHourCounterMenu();
+    renderMoodPill();
+    renderMoodMenu();
   }
 
   // ===================== СБРОС ПРОГРЕССА =====================
@@ -2679,7 +2870,7 @@
     var buttons = "";
     for(var i = 1; i <= 12; i++){ buttons += '<button data-months="' + i + '">' + i + '</button>'; }
     modalBox.innerHTML =
-      modalHeader("Введите количество месяцев до сентября") +
+      modalHeader("Выберите количество месяцев до сентября") +
       '<div class="modal-btn-grid">' + buttons + '</div>';
     bindClose();
     Array.prototype.forEach.call(modalBox.querySelectorAll("[data-months]"), function(btn){
@@ -2718,6 +2909,335 @@
   var hourYearBar = document.getElementById("hourYearBar");
   if(hourYearBar) hourYearBar.addEventListener("click", function(){ hourYearBar.classList.toggle("expanded"); });
 
+  // ===================== СЧЁТЧИК НАСТРОЕНИЯ =====================
+  // Записи настроения синхронизируются так же, как записи часов — каждая
+  // отметка это отдельный уникальный ключ ("moodlog:...", "moodsession:..."),
+  // поэтому объединение между устройствами работает "само собой".
+  // Сброс данных не удаляет записи физически (это небезопасно для
+  // синхронизации — см. комментарий у MOOD_DATA_RESET_AT_KEY), а просто
+  // отодвигает "нижнюю границу" видимых записей вперёд по времени.
+  var MOOD_EMOJI_KEY = "__moodEmoji";
+  var MOOD_ENABLED_KEY = "__moodEnabled";
+  var MOOD_FIRST_LOG_KEY = "__moodFirstLog";
+  var MOOD_DATA_RESET_AT_KEY = "__moodDataResetAt";
+
+  var MOOD_COLORS = {joy:"#F7C948", sad:"#6FA8DC", calm:"#8FD9B8", anger:"#E06666", down:"#8E7CC3", sleepy:"#B4A7D6"};
+
+  function moodCategoriesResolved(){
+    var joyEmoji = getMoodEmoji() || "😀";
+    return [
+      {key:"joy", emoji:joyEmoji, label:"Радость"},
+      {key:"sad", emoji:"😕", label:"Грусть"},
+      {key:"calm", emoji:"🙄", label:"Спокойствие"},
+      {key:"anger", emoji:"😡", label:"Раздражительность"},
+      {key:"down", emoji:"😞", label:"Подавленность"},
+      {key:"sleepy", emoji:"🥱", label:"Сонливость"}
+    ];
+  }
+
+  function getMoodEmoji(){ var r = state[MOOD_EMOJI_KEY]; return (r && r.c) ? r.c : null; }
+  function isMoodEnabled(){ var r = state[MOOD_ENABLED_KEY]; return !!(r && r.c); }
+  function getMoodDataResetAt(){ var r = state[MOOD_DATA_RESET_AT_KEY]; return (r && r.c) ? r.c : 0; }
+
+  function getTodaySessionsCount(){
+    var floor = Math.max(startOfDay(Date.now()), getMoodDataResetAt());
+    var count = 0;
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("moodsession:") === 0 && state[k] && state[k].t >= floor) count++;
+    });
+    return count;
+  }
+  function hasLoggedToday(){ return getTodaySessionsCount() > 0; }
+
+  function getMoodCounts(){
+    var floor = getMoodDataResetAt();
+    var counts = {};
+    moodCategoriesResolved().forEach(function(c){ counts[c.key] = 0; });
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("moodlog:") === 0 && state[k] && typeof state[k].c === "string" && state[k].t >= floor){
+        if(counts[state[k].c] !== undefined) counts[state[k].c]++;
+      }
+    });
+    return counts;
+  }
+
+  function activateMoodCounter(emoji){
+    setHourState(MOOD_EMOJI_KEY, emoji);
+    setHourState(MOOD_ENABLED_KEY, true);
+    saveLocalState();
+    scheduleCloudPush();
+    renderMoodPill();
+    renderMoodMenu();
+  }
+  function deactivateMoodCounter(){
+    setHourState(MOOD_ENABLED_KEY, null);
+    saveLocalState();
+    scheduleCloudPush();
+    renderMoodPill();
+    renderMoodMenu();
+  }
+  function resetMoodData(){
+    setHourState(MOOD_DATA_RESET_AT_KEY, Date.now());
+    setHourState(MOOD_FIRST_LOG_KEY, null);
+    saveLocalState();
+    scheduleCloudPush();
+  }
+
+  function renderMoodPill(){
+    var pill = document.getElementById("moodStatusPill");
+    if(!pill) return;
+    if(!isMoodEnabled()){ pill.style.display = "none"; return; }
+    pill.style.display = "flex";
+    pill.textContent = getMoodEmoji() || "😀";
+    pill.classList.toggle("unlogged", !hasLoggedToday());
+  }
+
+  function renderMoodMenu(){
+    var row = document.getElementById("moodCounterMenuRow");
+    if(!row) return;
+    if(isMoodEnabled()){
+      row.innerHTML =
+        '<button class="version-history-item" id="moodRemoveBtn" style="color:#8a2f1c;">Убрать счётчик настроения</button>' +
+        '<button class="version-history-item" id="moodDiagramBtn">Диаграмма настроения</button>';
+      document.getElementById("moodRemoveBtn").addEventListener("click", deactivateMoodCounter);
+      document.getElementById("moodDiagramBtn").addEventListener("click", openMoodDiagram);
+    } else {
+      row.innerHTML = '<button class="version-history-item" id="moodAddBtn">Добавить счётчик настроения</button>';
+      document.getElementById("moodAddBtn").addEventListener("click", function(){ openMoodEmojiPicker(false); });
+    }
+  }
+
+  // --- выбор смайлика (при первой настройке и, с возможностью отказа, после сброса) ---
+  function openMoodEmojiPicker(allowDecline){
+    var emojis = ["😀","😅","🙂","😉","😋","😜"];
+    var buttons = emojis.map(function(e){ return '<button data-emoji="'+e+'">'+e+'</button>'; }).join("");
+    modalBox.innerHTML =
+      modalHeader("Выберите внешний вид кнопки") +
+      '<div class="mood-picker-grid">' + buttons + '</div>' +
+      (allowDecline ? '<button class="modal-btn" id="mMoodDecline">Не нужно</button>' : '');
+    bindClose();
+    modalOverlay.classList.add("open");
+    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-emoji]"), function(btn){
+      btn.addEventListener("click", function(){
+        activateMoodCounter(btn.getAttribute("data-emoji"));
+        closeModal();
+      });
+    });
+    if(allowDecline){
+      var declineBtn = document.getElementById("mMoodDecline");
+      if(declineBtn) declineBtn.addEventListener("click", function(){ deactivateMoodCounter(); closeModal(); });
+    }
+  }
+
+  // --- отметка настроения (до 3 раз в сутки, до 2 вариантов за раз) ---
+  var moodCheckinSelected = [];
+  function openMoodCheckin(){
+    if(getTodaySessionsCount() >= 3){
+      modalBox.innerHTML =
+        modalHeader("Сегодня достаточно", "Вы уже отмечали настроение 3 раза сегодня.") +
+        '<button class="modal-btn primary" id="mMoodOk">ОК</button>';
+      bindClose();
+      modalOverlay.classList.add("open");
+      document.getElementById("mMoodOk").addEventListener("click", closeModal);
+      return;
+    }
+    moodCheckinSelected = [];
+    renderMoodCheckinModal();
+  }
+  function renderMoodCheckinModal(){
+    var cats = moodCategoriesResolved();
+    var items = cats.map(function(c){
+      var sel = moodCheckinSelected.indexOf(c.key) !== -1;
+      return '<div class="mood-checkin-item' + (sel ? ' selected' : '') + '" data-mood="' + c.key + '">' +
+        '<span class="emoji">' + c.emoji + '</span><span class="label">' + c.label + '</span></div>';
+    }).join("");
+    modalBox.innerHTML =
+      modalHeader("Что ты сейчас чувствуешь?") +
+      '<div class="mood-checkin-hint" id="moodCheckinHint"></div>' +
+      '<div class="mood-checkin-grid">' + items + '</div>' +
+      '<button class="modal-btn primary" id="mMoodConfirm">Готово</button>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-mood]"), function(el){
+      el.addEventListener("click", function(){
+        var key = el.getAttribute("data-mood");
+        var idx = moodCheckinSelected.indexOf(key);
+        if(idx !== -1){
+          moodCheckinSelected.splice(idx, 1);
+        } else {
+          if(moodCheckinSelected.length >= 2){
+            var hint = document.getElementById("moodCheckinHint");
+            if(hint) hint.textContent = "Выбирать можно только два варианта";
+            return;
+          }
+          moodCheckinSelected.push(key);
+        }
+        renderMoodCheckinModal();
+      });
+    });
+    document.getElementById("mMoodConfirm").addEventListener("click", function(){
+      if(moodCheckinSelected.length === 0){ closeModal(); return; }
+      var sessionTs = Date.now();
+      state["moodsession:" + sessionTs + "-" + Math.random().toString(36).slice(2,7)] = {c: 1, t: sessionTs};
+      moodCheckinSelected.forEach(function(key){
+        state["moodlog:" + sessionTs + "-" + key + "-" + Math.random().toString(36).slice(2,7)] = {c: key, t: sessionTs};
+      });
+      if(!state[MOOD_FIRST_LOG_KEY] || state[MOOD_FIRST_LOG_KEY].c == null || state[MOOD_FIRST_LOG_KEY].c < getMoodDataResetAt()){
+        setHourState(MOOD_FIRST_LOG_KEY, sessionTs);
+      }
+      saveLocalState();
+      scheduleCloudPush();
+      renderMoodPill();
+      closeModal();
+    });
+  }
+
+  // --- диаграмма настроения ---
+  var moodDiagramExpanded = false;
+
+  function polarPoint(cx, cy, r, angleDeg){
+    var rad = (angleDeg - 90) * Math.PI / 180;
+    return {x: cx + r*Math.cos(rad), y: cy + r*Math.sin(rad)};
+  }
+  function describeArcPath(cx, cy, r, startAngle, endAngle){
+    var start = polarPoint(cx, cy, r, startAngle);
+    var end = polarPoint(cx, cy, r, endAngle);
+    var largeArc = (endAngle - startAngle) > 180 ? 1 : 0;
+    return ["M", cx, cy, "L", start.x.toFixed(2), start.y.toFixed(2),
+      "A", r, r, 0, largeArc, 1, end.x.toFixed(2), end.y.toFixed(2), "Z"].join(" ");
+  }
+
+  function formatMoodPeriodLabel(totalDays){
+    totalDays = Math.max(1, totalDays);
+    if(totalDays < 60) return "за " + totalDays + " " + pluralRu(totalDays, DAY_FORMS);
+    var months = Math.max(1, Math.round(totalDays/30));
+    return "за " + months + " " + pluralRu(months, MONTH_FORMS);
+  }
+
+  function openMoodDiagram(){
+    moodDiagramExpanded = false;
+    renderMoodDiagramModal();
+  }
+
+  function renderMoodDiagramModal(){
+    var counts = getMoodCounts();
+    var total = 0;
+    Object.keys(counts).forEach(function(k){ total += counts[k]; });
+
+    if(total === 0){
+      modalBox.innerHTML =
+        modalHeader("Диаграмма настроения") +
+        '<div class="mood-diagram-empty">Данных о настроении нет. Добавьте настроение — тогда здесь появится диаграмма.</div>';
+      bindClose();
+      modalOverlay.classList.add("open");
+      return;
+    }
+
+    var firstLogRec = state[MOOD_FIRST_LOG_KEY];
+    var totalDays = 1;
+    if(firstLogRec && firstLogRec.c){
+      totalDays = Math.max(1, Math.round((Date.now() - firstLogRec.c) / DAY_MS));
+    }
+
+    modalBox.innerHTML =
+      modalHeader("Диаграмма настроения " + formatMoodPeriodLabel(totalDays)) +
+      '<div class="mood-diagram-wrap" id="moodDiagramWrap"></div>' +
+      '<div class="mood-diagram-reset-row"><button class="mood-diagram-reset-btn" id="mMoodResetBtn">Сбросить данные настроения</button></div>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    buildMoodDiagramSVG(counts, total);
+    document.getElementById("mMoodResetBtn").addEventListener("click", openMoodResetConfirm);
+  }
+
+  function buildMoodDiagramSVG(counts, total){
+    var wrap = document.getElementById("moodDiagramWrap");
+    if(!wrap) return;
+
+    var cats = moodCategoriesResolved().filter(function(c){ return counts[c.key] > 0; });
+    var size = 240, cx = size/2, cy = size/2, r = 78;
+    var gapDeg = 3;
+    var collapsedOffset = 3, expandedOffset = 22;
+
+    var cum = 0;
+    var defsParts = [], sliceParts = [], emojiParts = [];
+
+    cats.forEach(function(cat, idx){
+      var p = counts[cat.key] / total;
+      var spanFull = p * 360;
+      var startFull = cum, endFull = cum + spanFull;
+      cum = endFull;
+
+      var start = startFull + gapDeg/2, end = endFull - gapDeg/2;
+      if(end < start) end = start;
+      var mid = (start + end) / 2;
+      var path = describeArcPath(0, 0, r, start, end);
+      var color = MOOD_COLORS[cat.key] || "#ccc";
+
+      var dirRad = (mid - 90) * Math.PI/180;
+      var dx = Math.cos(dirRad), dy = Math.sin(dirRad);
+
+      var gradId = "moodGrad" + idx;
+      defsParts.push(
+        '<radialGradient id="' + gradId + '" cx="35%" cy="30%" r="75%">' +
+        '<stop offset="0%" stop-color="#ffffff" stop-opacity="0.55"/>' +
+        '<stop offset="45%" stop-color="#ffffff" stop-opacity="0.08"/>' +
+        '<stop offset="100%" stop-color="#000000" stop-opacity="0.08"/>' +
+        '</radialGradient>'
+      );
+
+      sliceParts.push(
+        '<g class="mood-diagram-slice" data-dx="' + dx.toFixed(3) + '" data-dy="' + dy.toFixed(3) + '" ' +
+        'transform="translate(' + (dx*collapsedOffset).toFixed(2) + ',' + (dy*collapsedOffset).toFixed(2) + ')">' +
+        '<path d="' + path + '" fill="' + color + '" stroke="rgba(255,255,255,.6)" stroke-width="1.5"></path>' +
+        '<path d="' + path + '" fill="url(#' + gradId + ')" stroke="none"></path>' +
+        '</g>'
+      );
+
+      var labelR = r + 24;
+      var lx = cx + dx*labelR, ly = cy + dy*labelR;
+      emojiParts.push('<div class="mood-diagram-emoji" style="position:absolute;left:' + lx.toFixed(1) + 'px;top:' + ly.toFixed(1) + 'px;transform:translate(-50%,-50%);">' + cat.emoji + '</div>');
+    });
+
+    wrap.innerHTML =
+      '<div style="position:relative;width:' + size + 'px;height:' + size + 'px;">' +
+        '<svg class="mood-diagram-svg" id="moodDiagramSvg" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" style="filter:drop-shadow(0 4px 6px rgba(0,0,0,.3));">' +
+          '<defs>' + defsParts.join("") + '</defs>' +
+          '<g transform="translate(' + cx + ',' + cy + ')">' + sliceParts.join("") + '</g>' +
+        '</svg>' +
+        emojiParts.join("") +
+      '</div>';
+
+    var svgEl = document.getElementById("moodDiagramSvg");
+    svgEl.addEventListener("click", function(){
+      moodDiagramExpanded = !moodDiagramExpanded;
+      var offset = moodDiagramExpanded ? expandedOffset : collapsedOffset;
+      var groups = svgEl.querySelectorAll(".mood-diagram-slice");
+      groups.forEach(function(g){
+        var dx = parseFloat(g.getAttribute("data-dx"));
+        var dy = parseFloat(g.getAttribute("data-dy"));
+        g.setAttribute("transform", "translate(" + (dx*offset).toFixed(2) + "," + (dy*offset).toFixed(2) + ")");
+      });
+    });
+  }
+
+  function openMoodResetConfirm(){
+    modalBox.innerHTML =
+      modalHeader("Вы точно хотите сбросить данные настроения?",
+        "Вы можете выбрать «Нет» и сделать скриншот, чтобы сохранить прогресс.") +
+      '<button class="modal-btn primary" id="mMoodResetYes">Да</button>' +
+      '<button class="modal-btn" id="mMoodResetNo">Нет</button>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    document.getElementById("mMoodResetYes").addEventListener("click", function(){
+      resetMoodData();
+      openMoodEmojiPicker(true);
+    });
+    document.getElementById("mMoodResetNo").addEventListener("click", closeModal);
+  }
+
+  var moodStatusPill = document.getElementById("moodStatusPill");
+  if(moodStatusPill) moodStatusPill.addEventListener("click", openMoodCheckin);
+
   // ===================== ЗАПУСК =====================
   initQuote();
   initPage();
@@ -2731,7 +3251,9 @@
   renderHourBars();
   renderHourCounterMenu();
   checkHourBoundaries();
-  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); checkHourBoundaries(); }, 30 * 60 * 1000);
+  renderMoodPill();
+  renderMoodMenu();
+  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); checkHourBoundaries(); renderMoodPill(); }, 30 * 60 * 1000);
   checkUpdateSnoozeExpiry();
 
 })();
