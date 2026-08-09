@@ -29,8 +29,8 @@
     --bg-bottom:#d9cbe8;
     --danger:#7a5a9c;
     --danger-dark:#543d70;
-    --warn:#d9a45c;
-    --warn-dark:#a9773a;
+    --warn:#9b7bc4;
+    --warn-dark:#6f4f96;
     --status-off:#8a8578;
     --status-offline:#8a8578;
     --status-sync:#c9a227;
@@ -59,7 +59,7 @@
     --xp-green:#5AD1A0; --xp-green-dark:#2E9E76;
     --bg-top:#eef3ea; --bg-mid:#dbe6d9; --bg-bottom:#c7d8c2;
     --danger:#b3654f; --danger-dark:#7a4436;
-    --warn:#d9a441; --warn-dark:#a97a2c;
+    --warn:#c97a52; --warn-dark:#9a5936;
   }
   html[data-theme="3"]{
     --parchment:#fbeef1; --parchment-dark:#f6dee3;
@@ -70,7 +70,7 @@
     --xp-green:#7FE8C0; --xp-green-dark:#3FB98E;
     --bg-top:#fdf1f2; --bg-mid:#f8dfe4; --bg-bottom:#f1c9d2;
     --danger:#c2607a; --danger-dark:#8a3f56;
-    --warn:#e08a5a; --warn-dark:#af6339;
+    --warn:#d97a6a; --warn-dark:#a85647;
   }
   html[data-theme="4"]{
     --parchment:#f4f0f8; --parchment-dark:#e9e0f1;
@@ -81,7 +81,7 @@
     --xp-green:#8FE3C7; --xp-green-dark:#4FBE9B;
     --bg-top:#f6f2fa; --bg-mid:#e9e0f2; --bg-bottom:#d9cbe8;
     --danger:#7a5a9c; --danger-dark:#543d70;
-    --warn:#d9a45c; --warn-dark:#a9773a;
+    --warn:#9b7bc4; --warn-dark:#6f4f96;
   }
   html[data-theme="5"]{
     --parchment:#fbf6e3; --parchment-dark:#f3ecc9;
@@ -103,7 +103,7 @@
     --xp-green:#8FD9B8; --xp-green-dark:#45AD82;
     --bg-top:#f7eeee; --bg-mid:#ece0e1; --bg-bottom:#d9c8ca;
     --danger:#8a5a63; --danger-dark:#5e3d44;
-    --warn:#c97b5a; --warn-dark:#9a5a3f;
+    --warn:#a85a6a; --warn-dark:#7a3f4a;
   }
   html[data-theme="7"]{
     --parchment:#f4efe2; --parchment-dark:#e8ded0;
@@ -114,7 +114,7 @@
     --xp-green:#6FE0C0; --xp-green-dark:#33AD87;
     --bg-top:#f6f1e4; --bg-mid:#eae0cc; --bg-bottom:#d9cba8;
     --danger:#c17b5a; --danger-dark:#8f5540;
-    --warn:#d9a24a; --warn-dark:#a97832;
+    --warn:#c9835a; --warn-dark:#9a6140;
     --danger:#c17b5a; --danger-dark:#8f5540;
   }
 
@@ -296,13 +296,13 @@
     margin-top:6px;
   }
   .mood-diagram-reset-btn{
-    padding:7px 12px;
+    padding:4px 8px;
     background:var(--danger);
     color:#f4e6c8;
     border:1px solid var(--danger-dark);
-    border-radius:6px;
+    border-radius:5px;
     font-family:"Segoe UI","Tahoma",sans-serif;
-    font-size:12px;
+    font-size:10px;
     cursor:pointer;
   }
 
@@ -1516,27 +1516,61 @@
     return d.getTime();
   }
 
+  function todayDateStr(){
+    var d = new Date();
+    return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
+  }
+
+  // Ключи глав, которые сегодня уже были "сожжены": пользователь снял ранее
+  // стоявшую галочку и снова её поставил в тот же день. Такая перепроверка
+  // не должна засчитываться как повод убрать уведомление "Пропущено" —
+  // иначе можно было бы обманывать счётчик, щёлкая одной и той же главой.
+  // Реальный новый прогресс (другая глава) при этом продолжает работать
+  // как обычно. Список сам "устаревает" на следующий день (сравнение дат).
+  function getTodayExcludedKeys(){
+    var rec = state["__lastReadExcludedToday"];
+    if(!rec || !rec.c || rec.c.date !== todayDateStr()) return [];
+    return rec.c.keys || [];
+  }
+  function addTodayExcludedKey(key){
+    var today = todayDateStr();
+    var rec = state["__lastReadExcludedToday"];
+    var keys = (rec && rec.c && rec.c.date === today) ? rec.c.keys.slice() : [];
+    if(keys.indexOf(key) === -1) keys.push(key);
+    state["__lastReadExcludedToday"] = {c: {date: today, keys: keys}, t: Date.now()};
+  }
+
+  // "Последнее чтение" больше не хранится отдельным полем, которое можно
+  // случайно рассинхронизировать с реальным состоянием глав — оно всегда
+  // вычисляется напрямую: самая свежая отметка среди ГЛАВ, которые сейчас
+  // действительно отмечены как прочитанные (и не "сожжены" сегодня).
+  function computeEffectiveLastRead(){
+    var excluded = getTodayExcludedKeys();
+    var maxT = null;
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("|") === -1) return;
+      var rec = state[k];
+      if(!rec || rec.c !== true) return;
+      if(excluded.indexOf(k) !== -1) return;
+      if(maxT === null || rec.t > maxT) maxT = rec.t;
+    });
+    return maxT;
+  }
+
   function updateMissedBanner(){
     var wrap = document.getElementById("missedWrap"), textEl = document.getElementById("missedText");
     if(!wrap || !textEl) return;
-    var rec = state["__lastRead"];
-    if(!rec || !rec.c){ wrap.classList.remove("visible"); return; }
-    // считаем разницу КАЛЕНДАРНЫХ дней (00:00-00:00), а не скользящее окно
-    // 24 часа — иначе отметка вечером и проверка утром следующего дня ещё
-    // не покажет "пропущен день", хотя календарно день уже сменился
-    var totalDays = Math.round((startOfDay(Date.now()) - startOfDay(rec.c)) / DAY_MS);
+    var lastReadTs = computeEffectiveLastRead();
+    if(!lastReadTs){ wrap.classList.remove("visible"); return; }
+    // считаем ПОЛНОСТЬЮ прошедшие календарные дни без единой отметки.
+    // Разница дат сама по себе включает "сегодня" как ещё не законченный
+    // день (в нём ещё можно успеть отметиться) — поэтому вычитаем 1: если
+    // вчера была отметка, "вчера" не в счёт, а "сегодня" ещё идёт, значит
+    // пропущенных дней пока 0, а не 1.
+    var totalDays = Math.round((startOfDay(Date.now()) - startOfDay(lastReadTs)) / DAY_MS) - 1;
     if(totalDays < 1){ wrap.classList.remove("visible"); return; }
     textEl.textContent = buildMissedMessage(totalDays);
     wrap.classList.add("visible");
-  }
-
-  function ensureLastReadInitialized(){
-    if(state["__lastRead"]) return;
-    var maxT = 0;
-    Object.keys(state).forEach(function(k){
-      if(k.indexOf("|") !== -1 && state[k] && state[k].c && state[k].t > maxT) maxT = state[k].t;
-    });
-    if(maxT > 0){ state["__lastRead"] = {c: maxT, t: maxT}; saveLocalState(); }
   }
 
   function joinRu(parts){
@@ -1677,17 +1711,22 @@
             lbl.textContent = chapterNum;
 
             input.addEventListener("change", function(){
-              var wasChecked = !!state[key];
+              var prevRec = state[key];
               state[key] = {c: input.checked, t: Date.now()};
               if(input.checked){
-                var now = Date.now();
-                state["__lastRead"] = {c: now, t: now};
                 if(!state["__firstRead"] || state["__firstRead"].c == null){
-                  state["__firstRead"] = {c: now, t: now};
+                  state["__firstRead"] = {c: Date.now(), t: Date.now()};
                 }
                 checkedPerBook[bookName]++;
                 totalChecked++;
               } else {
+                // снимаем галочку, стоявшую с СЕГОДНЯ — значит, это была
+                // сегодняшняя перепроверка, а не подтверждённое со вчера
+                // чтение; помечаем её "сожжённой" на сегодня, чтобы
+                // повторная установка в тот же день не засчиталась заново
+                if(prevRec && prevRec.c === true && startOfDay(prevRec.t) === startOfDay(Date.now())){
+                  addTodayExcludedKey(key);
+                }
                 checkedPerBook[bookName]--;
                 totalChecked--;
               }
@@ -1728,24 +1767,50 @@
   }
 
   // --- "Скрыть прогресс": прячет из списка книги, прочитанные на 100% ---
+  function getHideCompletedActive(){
+    var r = state["__hideCompletedBooks"];
+    return !!(r && r.c);
+  }
+  function countCompletedBooks(){
+    var n = 0;
+    Object.keys(bookMeta).forEach(function(bookName){
+      var meta = bookMeta[bookName];
+      var checked = checkedPerBook[bookName] || 0;
+      if(meta.chapterCount > 0 && checked === meta.chapterCount) n++;
+    });
+    return n;
+  }
   var hideCompletedActive = false;
   function addHideProgressButton(){
+    hideCompletedActive = getHideCompletedActive();
     var card = document.createElement("div");
     card.className = "book-card";
     var headerEl = document.createElement("div");
     headerEl.className = "book-header";
-    headerEl.style.cursor = "pointer";
     var headerContent = document.createElement("div");
     headerContent.className = "book-header-content";
     var nameEl = document.createElement("div");
     nameEl.className = "book-name";
     nameEl.id = "hideProgressToggleText";
-    nameEl.textContent = "Скрыть прогресс";
+    nameEl.textContent = hideCompletedActive ? "Показать весь прогресс" : "Скрыть прогресс";
+    var countEl = document.createElement("div");
+    countEl.className = "book-count";
+    countEl.id = "hideProgressCountBadge";
+    var toggleEl = document.createElement("div");
+    toggleEl.className = "toggle-check";
+    toggleEl.style.cursor = "pointer";
     headerContent.appendChild(nameEl);
+    headerContent.appendChild(countEl);
+    headerContent.appendChild(toggleEl);
     headerEl.appendChild(headerContent);
-    headerEl.addEventListener("click", toggleHideCompletedBooks);
+    toggleEl.addEventListener("click", toggleHideCompletedBooks);
     card.appendChild(headerEl);
     booksContainer.appendChild(card);
+    updateHideProgressBadge();
+  }
+  function updateHideProgressBadge(){
+    var badge = document.getElementById("hideProgressCountBadge");
+    if(badge) badge.textContent = String(countCompletedBooks());
   }
   function applyHideCompletedBooks(){
     Object.keys(bookMeta).forEach(function(bookName){
@@ -1755,9 +1820,13 @@
       var isComplete = meta.chapterCount > 0 && checked === meta.chapterCount;
       meta.card.style.display = (hideCompletedActive && isComplete) ? "none" : "";
     });
+    updateHideProgressBadge();
   }
   function toggleHideCompletedBooks(){
     hideCompletedActive = !hideCompletedActive;
+    state["__hideCompletedBooks"] = {c: hideCompletedActive, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
     var textEl = document.getElementById("hideProgressToggleText");
     if(textEl) textEl.textContent = hideCompletedActive ? "Показать весь прогресс" : "Скрыть прогресс";
     applyHideCompletedBooks();
@@ -1772,6 +1841,7 @@
     if(hideCompletedActive && meta.card){
       meta.card.style.display = (meta.chapterCount > 0 && checked === meta.chapterCount) ? "none" : "";
     }
+    updateHideProgressBadge();
   }
 
   function updateOverallProgress(){
@@ -1828,7 +1898,7 @@
       });
     });
     totalChecked = 0;
-    state["__lastRead"] = {c:null, t:now};
+    state["__lastReadExcludedToday"] = {c:null, t:now};
     state["__firstRead"] = {c:null, t:now};
     saveLocalState();
     rerenderAllFromState();
@@ -1932,10 +2002,16 @@
   function scheduleCloudPush(){
     if(!syncId) return;
     clearTimeout(pushTimer);
+    clearTimeout(syncRetryTimer);
+    syncRetryCount = 0;
     pushTimer = setTimeout(doCloudSync, 1500);
   }
 
   var syncInProgress = false;
+  var syncRetryCount = 0;
+  var syncRetryTimer = null;
+  var SYNC_RETRY_DELAYS = [5000, 15000, 40000, 90000];
+
   function doCloudSync(){
     if(!syncId) { setSyncState("off"); return; }
     if(!navigator.onLine){ setSyncState("offline"); return; }
@@ -1957,16 +2033,32 @@
         return putCloudBlob(syncId, merged);
       }
     }).then(function(){
+      syncRetryCount = 0;
+      clearTimeout(syncRetryTimer);
       setSyncState("synced");
     }).catch(function(err){
       console.error("Ошибка синхронизации:", err);
       setSyncState("error");
+      // не заставляем пользователя перепривязывать устройство вручную —
+      // сами повторяем попытку с нарастающей паузой (сбой чаще всего
+      // временный: сеть моргнула или разросшийся объём данных долго грузится)
+      if(syncRetryCount < SYNC_RETRY_DELAYS.length){
+        var delay = SYNC_RETRY_DELAYS[syncRetryCount];
+        syncRetryCount++;
+        clearTimeout(syncRetryTimer);
+        syncRetryTimer = setTimeout(doCloudSync, delay);
+      }
     }).finally(function(){
       syncInProgress = false;
     });
   }
 
-  window.addEventListener("online", function(){ refreshStatusBase(); doCloudSync(); });
+  window.addEventListener("online", function(){
+    refreshStatusBase();
+    syncRetryCount = 0;
+    clearTimeout(syncRetryTimer);
+    doCloudSync();
+  });
   window.addEventListener("offline", function(){ refreshStatusBase(); });
   if(syncId) doCloudSync();
 
@@ -2041,6 +2133,8 @@
         document.getElementById("mOwnQrHolder").innerHTML = '<p class="modal-note error">Не удалось загрузить QR-код (нет интернета?).</p>';
       });
       document.getElementById("mSyncNow").addEventListener("click", function(){
+        syncRetryCount = 0;
+        clearTimeout(syncRetryTimer);
         doCloudSync();
         var note = document.getElementById("mSyncNote");
         if(note) note.textContent = "Синхронизация запущена…";
@@ -2559,6 +2653,7 @@
     setHourState(HOUR_YEAR_PERIOD_KEY, null);
     setHourState(HOUR_MONTH_DEFERRED_KEY, null);
     setHourState(HOUR_YEAR_DEFERRED_KEY, null);
+    pruneStaleHourLogs(Date.now() + 1);
     saveLocalState();
     scheduleCloudPush();
     renderHourBars();
@@ -2567,6 +2662,20 @@
 
   // закрывает текущий период (режим "50"): в сегмент попадают только целые
   // часы, а остаток минут переносится в начало следующего периода
+  // записи, старше нового periodStart, уже никогда не читаются никаким
+  // кодом (все подсчёты фильтруют по текущему periodStart) — их значения
+  // уже "законсервированы" в закрытом сегменте, поэтому их можно смело
+  // удалить локально: даже если ещё не до конца синхронизированное
+  // устройство "воскресит" такую запись при слиянии, она всё равно ни на
+  // что не повлияет, так как окажется раньше актуального periodStart
+  function pruneStaleHourLogs(beforeTs){
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("hourlog:") === 0 && state[k] && state[k].t < beforeTs){
+        delete state[k];
+      }
+    });
+  }
+
   function closeCurrentMonthPeriodWithCarry(){
     var periodStart = getMonthPeriodStart();
     var totalMinutes = sumHourLogsSince(periodStart);
@@ -2579,6 +2688,7 @@
     if(carryMinutes > 0){
       state["hourlog:" + newStart + "-carry"] = {c: carryMinutes, t: newStart};
     }
+    pruneStaleHourLogs(newStart);
     saveLocalState();
     scheduleCloudPush();
     renderHourBars();
@@ -3241,7 +3351,6 @@
   // ===================== ЗАПУСК =====================
   initQuote();
   initPage();
-  ensureLastReadInitialized();
   ensureFirstReadInitialized();
   updateOverallProgress();
   applyThemeToPage(getCurrentThemeId());
