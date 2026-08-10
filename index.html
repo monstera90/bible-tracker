@@ -1326,7 +1326,7 @@
     </div>
   </div>
 
-  <div class="app-version" id="appVersionText">v0.16.0</div>
+  <div class="app-version" id="appVersionText">v0.17.0</div>
 </footer>
 
 <!-- ===== модальное окно синхронизации ===== -->
@@ -1385,7 +1385,6 @@
   var UPDATES_DISABLED_KEY = "bibleUpdatesDisabled_v1";
   var SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000;
 
-  var JSONBLOB_BASE = "https://jsonblob.com/api/jsonBlob";
 
   // ===================== ЦИТАТЫ ДНЯ =====================
   var QUOTE_KEY = "__quote";
@@ -2010,7 +2009,17 @@
     performFullReset();
   });
 
-  // ===================== ОБЛАЧНАЯ СИНХРОНИЗАЦИЯ (AbortController) =====================
+  // ===================== ОБЛАЧНАЯ СИНХРОНИЗАЦИЯ (Firebase Realtime Database) =====================
+  // ВАЖНО: этот URL нужно проверить/поправить на точный "Database URL" из
+  // консоли Firebase (Realtime Database → вкладка Data, отображается прямо
+  // над данными). Обычно это или https://<имя>.firebaseio.com, или адрес
+  // с регионом вида https://<имя>.<регион>.firebasedatabase.app — они
+  // отличаются в зависимости от того, в каком регионе была создана база.
+  // Правила сейчас открытые (read/write: true), поэтому токен/ключ не
+  // нужен — простые GET/PUT запросы работают напрямую.
+  var FIREBASE_DB_URL = "https://my-nekogram-default-rtdb.firebaseio.com";
+  var FIREBASE_SYNCS_PATH = "/syncs";
+
   function fetchWithTimeout(url, options, timeoutMs){
     var ctrl = new AbortController();
     var timer = setTimeout(function(){ ctrl.abort(); }, timeoutMs || 8000);
@@ -2019,39 +2028,39 @@
     return fetch(url, options).finally(function(){ clearTimeout(timer); });
   }
 
-  function createCloudBlob(initialData){
-    return fetchWithTimeout(JSONBLOB_BASE, {
-      method:"POST",
-      headers:{"Content-Type":"application/json","Accept":"application/json"},
-      body: JSON.stringify(initialData)
-    }, 15000).then(function(res){
-      if(!res.ok) throw new Error("create_failed_" + res.status);
-      var loc = res.headers.get("Location") || res.headers.get("location");
-      if(!loc) throw new Error("no_location_header");
-      var parts = loc.split("/");
-      return parts[parts.length - 1];
-    });
+  function generateSyncId(){
+    return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2,10);
   }
 
   function fetchCloudBlob(id){
-    return fetchWithTimeout(JSONBLOB_BASE + "/" + encodeURIComponent(id), {
-      method:"GET", headers:{"Accept":"application/json"}
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + ".json", {
+      method:"GET"
     }, 8000).then(function(res){
-      if(res.status === 404) throw new Error("not_found");
       if(!res.ok) throw new Error("fetch_failed_" + res.status);
       return res.json();
+    }).then(function(data){
+      // Firebase отдаёт null (не 404), если по пути ничего нет
+      if(data === null || data === undefined) throw new Error("not_found");
+      return data;
     });
   }
 
   function putCloudBlob(id, data){
-    return fetchWithTimeout(JSONBLOB_BASE + "/" + encodeURIComponent(id), {
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + ".json", {
       method:"PUT",
-      headers:{"Content-Type":"application/json","Accept":"application/json"},
+      headers:{"Content-Type":"application/json"},
       body: JSON.stringify(data)
     }, 15000).then(function(res){
       if(!res.ok) throw new Error("put_failed_" + res.status);
       return true;
     });
+  }
+
+  // отдельного "создания" Firebase не требует — запись по случайному ID
+  // сама создаёт узел при первом PUT
+  function createCloudBlob(initialData){
+    var id = generateSyncId();
+    return putCloudBlob(id, initialData).then(function(){ return id; });
   }
 
   function mergeStates(local, cloud){
@@ -3448,18 +3457,9 @@
     }
   }
 
-  // --- отметка настроения (до 3 раз в сутки, до 2 вариантов за раз) ---
+  // --- отметка настроения (без ограничения по количеству в сутки, до 2 вариантов за раз) ---
   var moodCheckinSelected = [];
   function openMoodCheckin(){
-    if(getTodaySessionsCount() >= 3){
-      modalBox.innerHTML =
-        modalHeader("Сегодня достаточно", "Вы уже отмечали настроение 3 раза сегодня.") +
-        '<button class="modal-btn primary" id="mMoodOk">ОК</button>';
-      bindClose();
-      modalOverlay.classList.add("open");
-      document.getElementById("mMoodOk").addEventListener("click", closeModal);
-      return;
-    }
     moodCheckinSelected = [];
     renderMoodCheckinModal();
   }
@@ -3590,7 +3590,7 @@
     var end = polarPointEllipse(cx, cy, rx, ry, startAngle);
     var largeArc = (endAngle - startAngle) > 180 ? 1 : 0;
     return ["M", cx, cy, "L", start.x.toFixed(2), start.y.toFixed(2),
-      "A", rx, ry, 0, largeArc, 1, end.x.toFixed(2), end.y.toFixed(2), "Z"].join(" ");
+      "A", rx, ry, 0, largeArc, 0, end.x.toFixed(2), end.y.toFixed(2), "Z"].join(" ");
   }
   function darkenColor(hex, amount){
     var n = parseInt(hex.slice(1), 16);
