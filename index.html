@@ -526,6 +526,127 @@
     font-family:"Segoe UI","Tahoma",sans-serif;
   }
 
+  /* ---------- личные цели ---------- */
+  .goals-toggle-wrap{
+    display:flex;
+    justify-content:center;
+    margin-top:4px;
+  }
+  .goals-toggle-btn{
+    background:none;
+    border:none;
+    color:#f1e6cd;
+    font-size:13px;
+    line-height:1;
+    cursor:pointer;
+    padding:5px 16px;
+    opacity:.7;
+    transition:transform .2s ease, opacity .15s ease;
+  }
+  .goals-toggle-btn:hover{ opacity:1; }
+
+  .goals-section{
+    max-width:640px;
+    margin:0 auto;
+    max-height:0;
+    overflow:hidden;
+    transition:max-height .3s ease;
+  }
+  .goals-section.open{ max-height:4000px; }
+
+  .goals-list{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    padding:10px;
+    margin-top:6px;
+    background:rgba(0,0,0,.14);
+    border-radius:8px;
+  }
+
+  .goal-bar{
+    position:relative;
+    height:34px;
+    border-radius:5px;
+    background:#e9e4d4;
+    border:2px solid #6b6449;
+    box-shadow:inset 0 2px 4px rgba(0,0,0,.4), 0 1px 0 rgba(255,255,255,.2);
+    overflow:hidden;
+    cursor:pointer;
+    display:flex;
+  }
+  .goal-segment{
+    height:100%;
+    border-right:1px solid rgba(0,0,0,.15);
+  }
+  .goal-segment:last-child{ border-right:none; }
+  .goal-segment.filled{
+    background-image:linear-gradient(180deg, rgba(255,255,255,.4) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(0,0,0,.18) 100%);
+    box-shadow:inset 0 2px 3px rgba(255,255,255,.45), inset 0 -3px 5px rgba(0,0,0,.25);
+  }
+  .goal-bar-text{
+    position:absolute;
+    top:0;left:0;right:0;bottom:0;
+    z-index:2;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:bold;
+    font-size:12.5px;
+    color:#20351f;
+    text-shadow:0 1px 1px rgba(255,255,255,.6);
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    pointer-events:none;
+    padding:0 10px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  .goal-task-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-bottom:8px;
+  }
+  .goal-task-row input[type=checkbox]{ width:20px;height:20px;flex-shrink:0; }
+  .goal-task-row input[type=text]{
+    flex:1;
+    padding:8px 10px;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    background:#fffef8;
+    color:var(--ink);
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:13px;
+  }
+  .goal-task-remove{
+    background:none;border:none;
+    color:#8a2f1c;
+    font-size:20px;
+    line-height:1;
+    cursor:pointer;
+    flex-shrink:0;
+  }
+  .goal-color-square{
+    width:40px;height:40px;
+    border-radius:6px;
+    border:2px solid var(--groove-shadow);
+    cursor:pointer;
+    flex-shrink:0;
+  }
+  .goal-color-grid{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    justify-content:center;
+    margin-bottom:10px;
+  }
+  .goal-color-grid button{
+    width:40px;height:40px;
+    border-radius:6px;
+    border:2px solid rgba(0,0,0,.2);
+    cursor:pointer;
+  }
+
   .update-wrap{
     max-width:640px;
     margin:10px auto 0 auto;
@@ -1129,13 +1250,6 @@
     </div>
   </div>
 
-  <div class="missed-wrap" id="missedWrap">
-    <div class="xp-bar">
-      <div class="warn-fill"></div>
-      <div class="warn-text" id="missedText"></div>
-    </div>
-  </div>
-
   <div class="hour-bar-wrap" id="hourMonthWrap">
     <div class="hour-bar" id="hourMonthBar">
       <div class="hour-bar-light-fill" id="hourMonthLightFill"></div>
@@ -1160,6 +1274,21 @@
         <div class="hour-bar-zone-text" id="hourYearRemainingText"></div>
       </div>
       <div class="hour-year-segments" id="hourYearSegments"></div>
+    </div>
+  </div>
+
+  <div class="goals-toggle-wrap" id="goalsToggleWrap" style="display:none;">
+    <button class="goals-toggle-btn" id="goalsToggleBtn" title="Свернуть/развернуть личные цели">&#9660;</button>
+  </div>
+
+  <div class="goals-section" id="goalsSection" style="display:none;">
+    <div class="goals-list" id="goalsList"></div>
+  </div>
+
+  <div class="missed-wrap" id="missedWrap">
+    <div class="xp-bar">
+      <div class="warn-fill"></div>
+      <div class="warn-text" id="missedText"></div>
     </div>
   </div>
 
@@ -1193,10 +1322,11 @@
       <div id="versionHistoryItems"></div>
       <div id="hourCounterMenuRow"></div>
       <div id="moodCounterMenuRow"></div>
+      <div id="addGoalMenuRow"></div>
     </div>
   </div>
 
-  <div class="app-version" id="appVersionText">v0.14.0</div>
+  <div class="app-version" id="appVersionText">v0.16.0</div>
 </footer>
 
 <!-- ===== модальное окно синхронизации ===== -->
@@ -1301,26 +1431,6 @@
     return rec;
   }
 
-  function shouldRotateQuote(){
-    var rec = getQuoteRec();
-    var currentSlot = getDaySlot();
-    return currentSlot !== rec.slot && currentSlot > 0 && rec.slot >= 0;
-  }
-
-  function advanceQuote(){
-    var rec = getQuoteRec();
-    var currentSlot = getDaySlot();
-    var idx = rec.c;
-    // Если перешли в новый дневной слот — сдвигаем индекс
-    if(currentSlot > 0 && currentSlot !== rec.slot){
-      var steps = currentSlot > rec.slot ? currentSlot - rec.slot : currentSlot + 4 - rec.slot;
-      idx = (idx + steps) % QUOTES.length;
-    }
-    state[QUOTE_KEY] = {c: idx, t: Date.now(), slot: currentSlot};
-    saveLocalState();
-    return idx;
-  }
-
   function showQuote(idx){
     var el = document.getElementById("dailyQuote");
     if(!el) return;
@@ -1330,45 +1440,27 @@
     });
   }
 
+  // Цитата меняется только тогда, когда пользователь ДЕЙСТВИТЕЛЬНО открыл
+  // страницу в новом временном слоте относительно своего прошлого визита —
+  // а не по факту того, что время просто прошло. Если человек не заходил
+  // весь слот целиком, для него ничего не "сгорает" и не накапливается:
+  // при следующем визите цитата сдвигается ровно на один шаг вперёд, а не
+  // "досчитывает" пропущенные слоты.
   function initQuote(){
     var rec = getQuoteRec();
     var currentSlot = getDaySlot();
     var idx = rec.c;
 
-    // Если зашли в новый слот
-    if(currentSlot !== rec.slot){
-      if(currentSlot > 0){
-        // Дневной слот — меняем цитату
-        var steps = currentSlot > rec.slot ? currentSlot - rec.slot : currentSlot + 4 - rec.slot;
-        idx = (idx + steps) % QUOTES.length;
-      }
-      // Ночь (0) — оставляем последнюю дневную цитату
+    if(rec.slot < 0){
+      // самый первый визит вообще — фиксируем слот, цитату не сдвигаем
+      state[QUOTE_KEY] = {c: idx, t: Date.now(), slot: currentSlot};
+      saveLocalState();
+    } else if(currentSlot !== rec.slot){
+      idx = (idx + 1) % QUOTES.length;
       state[QUOTE_KEY] = {c: idx, t: Date.now(), slot: currentSlot};
       saveLocalState();
     }
     showQuote(idx);
-
-    // Проверяем раз в минуту. Смену делаем только когда вкладка неактивна,
-    // чтобы пользователь не видел мелькания текста.
-    setInterval(function(){
-      if(shouldRotateQuote() && document.hidden){
-        advanceQuote();
-      }
-    }, 60 * 1000);
-
-    // Когда пользователь возвращается — показываем актуальную цитату
-    document.addEventListener("visibilitychange", function(){
-      if(!document.hidden){
-        var el = document.getElementById("dailyQuote");
-        if(el){
-          el.classList.remove("visible");
-          el.textContent = QUOTES[getQuoteRec().c];
-          requestAnimationFrame(function(){
-            requestAnimationFrame(function(){ el.classList.add("visible"); });
-          });
-        }
-      }
-    });
   }
 
 
@@ -1792,7 +1884,7 @@
     var nameEl = document.createElement("div");
     nameEl.className = "book-name";
     nameEl.id = "hideProgressToggleText";
-    nameEl.textContent = hideCompletedActive ? "Показать весь прогресс" : "Скрыть прогресс";
+    nameEl.textContent = hideCompletedActive ? "Показать прочитанное" : "Скрыть прочитанное";
     var countEl = document.createElement("div");
     countEl.className = "book-count";
     countEl.id = "hideProgressCountBadge";
@@ -1828,7 +1920,7 @@
     saveLocalState();
     scheduleCloudPush();
     var textEl = document.getElementById("hideProgressToggleText");
-    if(textEl) textEl.textContent = hideCompletedActive ? "Показать весь прогресс" : "Скрыть прогресс";
+    if(textEl) textEl.textContent = hideCompletedActive ? "Показать прочитанное" : "Скрыть прочитанное";
     applyHideCompletedBooks();
   }
 
@@ -1878,6 +1970,8 @@
     renderHourCounterMenu();
     renderMoodPill();
     renderMoodMenu();
+    renderGoalsSection();
+    renderAddGoalMenu();
   }
 
   // ===================== СБРОС ПРОГРЕССА =====================
@@ -2106,16 +2200,229 @@
     });
   }
 
+  // ===================== ЭКСПОРТ ЛИЧНЫХ ДАННЫХ =====================
+  // Собирает всё в структуру, понятную и человеку, и нейросети (плоские
+  // списки "дата -> что было в этот день"), и упаковывает в настоящий
+  // ZIP-архив без сторонних библиотек (формат STORED — без сжатия, это
+  // самый простой валидный вариант ZIP, полностью совместимый с любым
+  // распаковщиком).
+  function isoDate(ts){ return new Date(ts).toISOString().slice(0,10); }
+
+  function buildExportData(){
+    var data = {
+      exportedAt: new Date().toISOString(),
+      app: "Bible Reading Tracker — экспорт личных данных",
+      readingProgress: {
+        totalChapters: TOTAL_CHAPTERS,
+        checkedChapters: totalChecked,
+        percentComplete: TOTAL_CHAPTERS ? Math.round((totalChecked/TOTAL_CHAPTERS)*100) : 0
+      },
+      dailyReadingLog: [],
+      hourCounter: {
+        enabled: !!getHourGoal(),
+        goalHoursPerMonth: getHourGoal(),
+        monthsToSeptember: getMonthsToSeptember(),
+        note: "dailyHoursLog содержит только текущий незакрытый период — итоги закрытых месяцев доступны только суммарно, в closedMonthSegments",
+        dailyHoursLog: [],
+        closedMonthSegments: []
+      },
+      moodCounter: {
+        enabled: isMoodEnabled(),
+        dailyMoodLog: []
+      }
+    };
+
+    var byDate = {};
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("|") === -1) return;
+      var rec = state[k];
+      if(!rec || rec.c !== true) return;
+      var d = isoDate(rec.t);
+      (byDate[d] = byDate[d] || []).push(k.replace("|", " "));
+    });
+    Object.keys(byDate).sort().forEach(function(d){
+      data.dailyReadingLog.push({date: d, chaptersRead: byDate[d], count: byDate[d].length});
+    });
+
+    var hourByDate = {};
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("hourlog:") !== 0) return;
+      var rec = state[k];
+      if(!rec || typeof rec.c !== "number") return;
+      var d = isoDate(rec.t);
+      hourByDate[d] = (hourByDate[d]||0) + rec.c;
+    });
+    Object.keys(hourByDate).sort().forEach(function(d){
+      data.hourCounter.dailyHoursLog.push({date:d, hoursMinutesText: formatHHMM(hourByDate[d]), minutes: hourByDate[d]});
+    });
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("hoursegment:") !== 0) return;
+      var rec = state[k];
+      if(!rec) return;
+      data.hourCounter.closedMonthSegments.push({
+        periodStartDate: isoDate(Number(k.slice("hoursegment:".length))),
+        totalHours: Math.round(rec.c/60)
+      });
+    });
+
+    var moodByDate = {};
+    var floor = getMoodDataResetAt();
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("moodlog:") !== 0) return;
+      var rec = state[k];
+      if(!rec || rec.t < floor) return;
+      var d = isoDate(rec.t);
+      (moodByDate[d] = moodByDate[d] || []).push(rec.c);
+    });
+    Object.keys(moodByDate).sort().forEach(function(d){
+      data.moodCounter.dailyMoodLog.push({date:d, moods: moodByDate[d]});
+    });
+
+    return data;
+  }
+
+  function crc32Bytes(bytes){
+    if(!crc32Bytes.table){
+      var table = [];
+      for(var n=0;n<256;n++){
+        var c = n;
+        for(var k=0;k<8;k++){ c = (c & 1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); }
+        table[n] = c >>> 0;
+      }
+      crc32Bytes.table = table;
+    }
+    var crc = 0xFFFFFFFF;
+    for(var i=0;i<bytes.length;i++){
+      crc = crc32Bytes.table[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  // Собирает валидный ZIP (метод STORED, без сжатия) из списка файлов
+  // {name, content: Uint8Array} — минимальная, но полностью рабочая
+  // реализация формата, без сторонних библиотек.
+  function buildZipBlob(files){
+    var encoder = new TextEncoder();
+    var localParts = [], centralParts = [];
+    var offset = 0;
+
+    files.forEach(function(f){
+      var nameBytes = encoder.encode(f.name);
+      var data = f.content;
+      var crc = crc32Bytes(data);
+      var size = data.length;
+      var dosDate = 0x21, dosTime = 0;
+
+      var lh = new Uint8Array(30 + nameBytes.length);
+      var ldv = new DataView(lh.buffer);
+      ldv.setUint32(0, 0x04034b50, true);
+      ldv.setUint16(4, 20, true);
+      ldv.setUint16(6, 0, true);
+      ldv.setUint16(8, 0, true);
+      ldv.setUint16(10, dosTime, true);
+      ldv.setUint16(12, dosDate, true);
+      ldv.setUint32(14, crc, true);
+      ldv.setUint32(18, size, true);
+      ldv.setUint32(22, size, true);
+      ldv.setUint16(26, nameBytes.length, true);
+      ldv.setUint16(28, 0, true);
+      lh.set(nameBytes, 30);
+      localParts.push(lh, data);
+
+      var ch = new Uint8Array(46 + nameBytes.length);
+      var cdv = new DataView(ch.buffer);
+      cdv.setUint32(0, 0x02014b50, true);
+      cdv.setUint16(4, 20, true);
+      cdv.setUint16(6, 20, true);
+      cdv.setUint16(8, 0, true);
+      cdv.setUint16(10, 0, true);
+      cdv.setUint16(12, dosTime, true);
+      cdv.setUint16(14, dosDate, true);
+      cdv.setUint32(16, crc, true);
+      cdv.setUint32(20, size, true);
+      cdv.setUint32(24, size, true);
+      cdv.setUint16(28, nameBytes.length, true);
+      cdv.setUint16(30, 0, true);
+      cdv.setUint16(32, 0, true);
+      cdv.setUint16(34, 0, true);
+      cdv.setUint16(36, 0, true);
+      cdv.setUint32(38, 0, true);
+      cdv.setUint32(42, offset, true);
+      ch.set(nameBytes, 46);
+      centralParts.push(ch);
+
+      offset += lh.length + data.length;
+    });
+
+    var centralSize = centralParts.reduce(function(a,p){ return a+p.length; }, 0);
+    var eocd = new Uint8Array(22);
+    var edv = new DataView(eocd.buffer);
+    edv.setUint32(0, 0x06054b50, true);
+    edv.setUint16(4, 0, true);
+    edv.setUint16(6, 0, true);
+    edv.setUint16(8, files.length, true);
+    edv.setUint16(10, files.length, true);
+    edv.setUint32(12, centralSize, true);
+    edv.setUint32(16, offset, true);
+    edv.setUint16(20, 0, true);
+
+    return new Blob(localParts.concat(centralParts, [eocd]), {type:"application/zip"});
+  }
+
+  function exportSectionHtml(){
+    return '<div class="modal-section">' +
+      '<button class="modal-btn" id="mExportData">Экспортировать личные данные</button>' +
+      '<p class="modal-note">Скачает ZIP-архив со всеми вашими данными (прогресс чтения, часы, настроение) в формате, удобном для просмотра или анализа — например, нейросетью.</p>' +
+      '</div>';
+  }
+  function bindExportButton(){
+    var btn = document.getElementById("mExportData");
+    if(!btn) return;
+    btn.addEventListener("click", function(){
+      try{
+        var data = buildExportData();
+        var encoder = new TextEncoder();
+        var jsonBytes = encoder.encode(JSON.stringify(data, null, 2));
+        var readmeBytes = encoder.encode(
+          "Экспорт личных данных из «Графика чтения Библии»\n" +
+          "Файл data.json содержит все данные в структурированном виде:\n" +
+          "- dailyReadingLog: по дням, какие главы Библии были прочитаны\n" +
+          "- hourCounter.dailyHoursLog: по дням, сколько времени внесено (текущий период)\n" +
+          "- hourCounter.closedMonthSegments: итоги уже закрытых месяцев (суммарно)\n" +
+          "- moodCounter.dailyMoodLog: по дням, какое настроение отмечалось\n" +
+          "Этот файл можно отдать нейросети для анализа корреляций между чтением, временем служения и настроением.\n"
+        );
+        var blob = buildZipBlob([
+          {name:"data.json", content:jsonBytes},
+          {name:"README.txt", content:readmeBytes}
+        ]);
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = "bible-tracker-export-" + isoDate(Date.now()) + ".zip";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+      }catch(e){
+        console.error("Ошибка экспорта:", e);
+        alert("Не удалось собрать архив с данными. Попробуйте ещё раз.");
+      }
+    });
+  }
+
   function renderModalHome(){
     stopCamera();
     if(!syncId){
       modalBox.innerHTML = modalHeader("Синхронизация между устройствами",
         "Читаете с нескольких устройств? Подключите их между собой, и прогресс будет совпадать на всех.") +
         '<button class="modal-btn primary" id="mCreate">Это первое устройство — создать код</button>' +
-        '<button class="modal-btn" id="mJoin">У меня уже есть код с другого устройства</button>';
+        '<button class="modal-btn" id="mJoin">У меня уже есть код с другого устройства</button>' +
+        exportSectionHtml();
       bindClose();
       document.getElementById("mCreate").addEventListener("click", handleCreateCode);
       document.getElementById("mJoin").addEventListener("click", renderJoinScreen);
+      bindExportButton();
     } else {
       modalBox.innerHTML = modalHeader("Устройство подключено",
         "Прогресс синхронизируется с другими вашими устройствами.") +
@@ -2125,7 +2432,8 @@
         '<div class="modal-section">' +
           '<button class="modal-btn danger" id="mDisconnect">Отключить синхронизацию на этом устройстве</button>' +
           '<p class="modal-note">Это не удалит облачную копию — просто это устройство перестанет с ней сверяться.</p>' +
-        '</div>';
+        '</div>' +
+        exportSectionHtml();
       bindClose();
       loadQrLib().then(function(){
         showCodeAndQR("mOwnQrHolder", syncId, "Код для подключения ещё одного устройства:");
@@ -2146,6 +2454,7 @@
         refreshStatusBase();
         renderModalHome();
       });
+      bindExportButton();
     }
   }
 
@@ -3040,7 +3349,7 @@
       {key:"sad", emoji:"😕", label:"Грусть"},
       {key:"calm", emoji:"🙄", label:"Спокойствие"},
       {key:"anger", emoji:"😡", label:"Раздражительность"},
-      {key:"down", emoji:"😞", label:"Подавленность"},
+      {key:"down", emoji:"😌", label:"Внутренний мир"},
       {key:"sleepy", emoji:"🥱", label:"Сонливость"}
     ];
   }
@@ -3217,6 +3526,16 @@
       "A", r, r, 0, largeArc, 1, end.x.toFixed(2), end.y.toFixed(2), "Z"].join(" ");
   }
 
+  var MARK_FORMS = ["отметка","отметки","отметок"];
+  function getTotalSessionsCount(){
+    var floor = getMoodDataResetAt();
+    var count = 0;
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("moodsession:") === 0 && state[k] && state[k].t >= floor) count++;
+    });
+    return count;
+  }
+
   function formatMoodPeriodLabel(totalDays){
     totalDays = Math.max(1, totalDays);
     if(totalDays < 60) return "за " + totalDays + " " + pluralRu(totalDays, DAY_FORMS);
@@ -3248,9 +3567,12 @@
     if(firstLogRec && firstLogRec.c){
       totalDays = Math.max(1, Math.round((Date.now() - firstLogRec.c) / DAY_MS));
     }
+    var sessionsCount = getTotalSessionsCount();
+    var title = "Диаграмма настроения " + formatMoodPeriodLabel(totalDays) +
+      " - всего " + sessionsCount + " " + pluralRu(sessionsCount, MARK_FORMS) + " настроения";
 
     modalBox.innerHTML =
-      modalHeader("Диаграмма настроения " + formatMoodPeriodLabel(totalDays)) +
+      modalHeader(title) +
       '<div class="mood-diagram-wrap" id="moodDiagramWrap"></div>' +
       '<div class="mood-diagram-reset-row"><button class="mood-diagram-reset-btn" id="mMoodResetBtn">Сбросить данные настроения</button></div>';
     bindClose();
@@ -3259,17 +3581,40 @@
     document.getElementById("mMoodResetBtn").addEventListener("click", openMoodResetConfirm);
   }
 
+  function polarPointEllipse(cx, cy, rx, ry, angleDeg){
+    var rad = (angleDeg - 90) * Math.PI / 180;
+    return {x: cx + rx*Math.cos(rad), y: cy + ry*Math.sin(rad)};
+  }
+  function describeArcPathEllipse(cx, cy, rx, ry, startAngle, endAngle){
+    var start = polarPointEllipse(cx, cy, rx, ry, endAngle);
+    var end = polarPointEllipse(cx, cy, rx, ry, startAngle);
+    var largeArc = (endAngle - startAngle) > 180 ? 1 : 0;
+    return ["M", cx, cy, "L", start.x.toFixed(2), start.y.toFixed(2),
+      "A", rx, ry, 0, largeArc, 1, end.x.toFixed(2), end.y.toFixed(2), "Z"].join(" ");
+  }
+  function darkenColor(hex, amount){
+    var n = parseInt(hex.slice(1), 16);
+    var r = Math.max(0, (n >> 16) - amount);
+    var g = Math.max(0, ((n >> 8) & 0xff) - amount);
+    var b = Math.max(0, (n & 0xff) - amount);
+    return "rgb(" + r + "," + g + "," + b + ")";
+  }
+
   function buildMoodDiagramSVG(counts, total){
     var wrap = document.getElementById("moodDiagramWrap");
     if(!wrap) return;
 
     var cats = moodCategoriesResolved().filter(function(c){ return counts[c.key] > 0; });
-    var size = 240, cx = size/2, cy = size/2, r = 78;
+    // сплюснутый эллипс вместо круга + "стенка" толщины диска снизу —
+    // вместе это даёт вид как бы под углом ~45° сбоку, а не сверху
+    var rx = 95, ry = 52, depth = 20;
+    var size = 260, cx = size/2, cy = size/2 - depth/2;
     var gapDeg = 3;
     var collapsedOffset = 3, expandedOffset = 22;
+    var ryRatio = ry/rx;
 
     var cum = 0;
-    var defsParts = [], sliceParts = [], emojiParts = [];
+    var defsParts = [], wallParts = [], sliceParts = [], emojiParts = [];
 
     cats.forEach(function(cat, idx){
       var p = counts[cat.key] / total;
@@ -3280,19 +3625,29 @@
       var start = startFull + gapDeg/2, end = endFull - gapDeg/2;
       if(end < start) end = start;
       var mid = (start + end) / 2;
-      var path = describeArcPath(0, 0, r, start, end);
+      var path = describeArcPathEllipse(0, 0, rx, ry, start, end);
       var color = MOOD_COLORS[cat.key] || "#ccc";
+      var wallColor = darkenColor(color, 55);
 
       var dirRad = (mid - 90) * Math.PI/180;
-      var dx = Math.cos(dirRad), dy = Math.sin(dirRad);
+      var dx = Math.cos(dirRad), dy = Math.sin(dirRad) * ryRatio;
 
       var gradId = "moodGrad" + idx;
       defsParts.push(
         '<radialGradient id="' + gradId + '" cx="35%" cy="30%" r="75%">' +
         '<stop offset="0%" stop-color="#ffffff" stop-opacity="0.55"/>' +
         '<stop offset="45%" stop-color="#ffffff" stop-opacity="0.08"/>' +
-        '<stop offset="100%" stop-color="#000000" stop-opacity="0.08"/>' +
+        '<stop offset="100%" stop-color="#000000" stop-opacity="0.1"/>' +
         '</radialGradient>'
+      );
+
+      // "стенка" — та же дуга, но сдвинутая вниз на глубину диска и
+      // залитая тёмным вариантом цвета; видна только снизу переднего
+      // края, так как верхний эллипс со срезами рисуется поверх неё
+      wallParts.push(
+        '<g transform="translate(' + (dx*collapsedOffset).toFixed(2) + ',' + (dy*collapsedOffset).toFixed(2) + ')">' +
+        '<path d="' + describeArcPathEllipse(0, depth, rx, ry, start, end) + '" fill="' + wallColor + '"></path>' +
+        '</g>'
       );
 
       sliceParts.push(
@@ -3303,16 +3658,20 @@
         '</g>'
       );
 
-      var labelR = r + 24;
-      var lx = cx + dx*labelR, ly = cy + dy*labelR;
+      var labelR = rx + 26;
+      var lx = cx + Math.cos(dirRad)*labelR;
+      var ly = cy + Math.sin(dirRad)*(ry+22);
       emojiParts.push('<div class="mood-diagram-emoji" style="position:absolute;left:' + lx.toFixed(1) + 'px;top:' + ly.toFixed(1) + 'px;transform:translate(-50%,-50%);">' + cat.emoji + '</div>');
     });
 
     wrap.innerHTML =
-      '<div style="position:relative;width:' + size + 'px;height:' + size + 'px;">' +
-        '<svg class="mood-diagram-svg" id="moodDiagramSvg" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" style="filter:drop-shadow(0 4px 6px rgba(0,0,0,.3));">' +
+      '<div style="position:relative;width:' + size + 'px;height:' + (size) + 'px;">' +
+        '<svg class="mood-diagram-svg" id="moodDiagramSvg" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '" style="filter:drop-shadow(0 5px 8px rgba(0,0,0,.35));overflow:visible;">' +
           '<defs>' + defsParts.join("") + '</defs>' +
-          '<g transform="translate(' + cx + ',' + cy + ')">' + sliceParts.join("") + '</g>' +
+          '<g transform="translate(' + cx + ',' + cy + ')">' +
+            wallParts.join("") +
+            sliceParts.join("") +
+          '</g>' +
         '</svg>' +
         emojiParts.join("") +
       '</div>';
@@ -3348,6 +3707,240 @@
   var moodStatusPill = document.getElementById("moodStatusPill");
   if(moodStatusPill) moodStatusPill.addEventListener("click", openMoodCheckin);
 
+  // ===================== ЛИЧНЫЕ ЦЕЛИ =====================
+  // Каждая цель — отдельный уникальный ключ state["goal:<id>"], поэтому
+  // объединение между устройствами работает автоматически (та же схема,
+  // что у остальных функций). Удаление — c:null с новым временем (как и
+  // везде), а не физическое удаление ключа — чтобы не "воскрешать" её при
+  // слиянии с ещё не обновившимся устройством.
+  var GOAL_DEFAULT_COLOR = "#9370DB";
+  var GOAL_COLORS = [
+    "#48F78E","#29B6F6","#9370DB","#E06666","#F7C948","#FF9F43",
+    "#4ECDC4","#6FA8DC","#FF6FB5","#A0785A","#8E7CC3","#8FD9B8",
+    "#D9534F","#B4A7D6","#5DADE2","#F1948A"
+  ];
+  var GOAL_MAX_TASKS = 10;
+  var goalsExpanded = false;
+
+  function escapeHtml(s){
+    return String(s == null ? "" : s)
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  function getAllGoals(){
+    var list = [];
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("goal:") === 0 && state[k] && state[k].c){
+        list.push({id: k.slice(5), data: state[k].c, t: state[k].t});
+      }
+    });
+    list.sort(function(a,b){ return a.t - b.t; });
+    return list;
+  }
+  function getGoalData(goalId){
+    var rec = state["goal:" + goalId];
+    return (rec && rec.c) ? rec.c : null;
+  }
+  function saveGoal(goalId, data){
+    state["goal:" + goalId] = {c: data, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+  }
+  function deleteGoal(goalId){
+    state["goal:" + goalId] = {c: null, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+  }
+  function createNewGoal(){
+    var id = "g" + Date.now() + Math.random().toString(36).slice(2,7);
+    saveGoal(id, {title:"", color: GOAL_DEFAULT_COLOR, tasks: []});
+    return id;
+  }
+
+  function buildGoalBarEl(goal){
+    var bar = document.createElement("div");
+    bar.className = "goal-bar";
+    var tasks = goal.data.tasks || [];
+    var n = tasks.length;
+    tasks.forEach(function(task){
+      var seg = document.createElement("div");
+      seg.className = "goal-segment" + (task.checked ? " filled" : "");
+      seg.style.width = (100/n) + "%";
+      if(task.checked) seg.style.backgroundColor = goal.data.color || GOAL_DEFAULT_COLOR;
+      bar.appendChild(seg);
+    });
+    var textEl = document.createElement("div");
+    textEl.className = "goal-bar-text";
+    textEl.textContent = goal.data.title || "Без названия";
+    bar.appendChild(textEl);
+    bar.addEventListener("click", function(){ openGoalSettingsModal(goal.id); });
+    return bar;
+  }
+
+  function renderGoalsSection(){
+    var toggleWrap = document.getElementById("goalsToggleWrap");
+    var section = document.getElementById("goalsSection");
+    var list = document.getElementById("goalsList");
+    if(!toggleWrap || !section || !list) return;
+    var goals = getAllGoals();
+    if(goals.length === 0){
+      toggleWrap.style.display = "none";
+      section.style.display = "none";
+      list.innerHTML = "";
+      return;
+    }
+    toggleWrap.style.display = "flex";
+    section.style.display = "block";
+    list.innerHTML = "";
+    goals.forEach(function(g){ list.appendChild(buildGoalBarEl(g)); });
+    section.classList.toggle("open", goalsExpanded);
+    var btn = document.getElementById("goalsToggleBtn");
+    if(btn) btn.innerHTML = goalsExpanded ? "&#9650;" : "&#9660;";
+  }
+
+  function renderAddGoalMenu(){
+    var row = document.getElementById("addGoalMenuRow");
+    if(!row) return;
+    row.innerHTML = '<button class="version-history-item" id="addGoalBtn">Добавить для себя цель</button>';
+    document.getElementById("addGoalBtn").addEventListener("click", function(){
+      var id = createNewGoal();
+      goalsExpanded = true;
+      renderGoalsSection();
+      openGoalSettingsModal(id);
+    });
+  }
+
+  // --- окно настройки цели: заголовок, цвет, список задач ---
+  function openGoalSettingsModal(goalId){
+    var goal = getGoalData(goalId);
+    if(!goal) return;
+    modalBox.innerHTML =
+      modalHeader("Настройка цели") +
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;">' +
+        '<input type="text" id="goalTitleInput" placeholder="Заголовок" value="' + escapeHtml(goal.title) + '" ' +
+          'style="flex:1;padding:10px;border:1px solid var(--groove-shadow);border-radius:6px;background:#fffef8;color:var(--ink);font-family:inherit;font-size:14px;">' +
+        '<div class="goal-color-square" id="goalColorSquare" style="background:' + (goal.color || GOAL_DEFAULT_COLOR) + ';"></div>' +
+      '</div>' +
+      '<div id="goalTasksList"></div>' +
+      '<button class="modal-btn" id="goalAddTaskBtn">Добавить задачу</button>' +
+      '<div class="modal-note" id="goalTaskLimitNote" style="text-align:center;"></div>' +
+      '<div class="modal-section">' +
+        '<button class="modal-btn danger" id="goalDeleteBtn">Удалить эту цель</button>' +
+      '</div>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    renderGoalTasksList(goalId);
+
+    document.getElementById("goalTitleInput").addEventListener("input", function(){
+      var g = getGoalData(goalId); if(!g) return;
+      g.title = this.value;
+      saveGoal(goalId, g);
+      renderGoalsSection();
+    });
+    document.getElementById("goalColorSquare").addEventListener("click", function(){ openGoalColorPicker(goalId); });
+    document.getElementById("goalAddTaskBtn").addEventListener("click", function(){
+      var g = getGoalData(goalId); if(!g) return;
+      g.tasks = g.tasks || [];
+      if(g.tasks.length >= GOAL_MAX_TASKS) return;
+      g.tasks.push({text:"", checked:false});
+      saveGoal(goalId, g);
+      renderGoalTasksList(goalId);
+      renderGoalsSection();
+    });
+    document.getElementById("goalDeleteBtn").addEventListener("click", function(){
+      if(!confirm("Удалить эту цель вместе со всеми задачами?")) return;
+      deleteGoal(goalId);
+      closeModal();
+      renderGoalsSection();
+    });
+  }
+
+  function renderGoalTasksList(goalId){
+    var holder = document.getElementById("goalTasksList");
+    if(!holder) return;
+    var goal = getGoalData(goalId);
+    if(!goal) return;
+    var tasks = goal.tasks || [];
+    holder.innerHTML = "";
+    tasks.forEach(function(task, idx){
+      var row = document.createElement("div");
+      row.className = "goal-task-row";
+      row.innerHTML =
+        '<input type="checkbox" data-idx="' + idx + '" class="goalTaskCheckbox"' + (task.checked ? " checked" : "") + '>' +
+        '<input type="text" data-idx="' + idx + '" class="goalTaskText" value="' + escapeHtml(task.text) + '" placeholder="Текст задачи">' +
+        '<button data-idx="' + idx + '" class="goal-task-remove" title="Убрать задачу">&times;</button>';
+      holder.appendChild(row);
+    });
+    Array.prototype.forEach.call(holder.querySelectorAll(".goalTaskCheckbox"), function(cb){
+      cb.addEventListener("change", function(){
+        var g = getGoalData(goalId); if(!g) return;
+        var idx = Number(cb.getAttribute("data-idx"));
+        if(g.tasks[idx]) g.tasks[idx].checked = cb.checked;
+        saveGoal(goalId, g);
+        renderGoalsSection();
+      });
+    });
+    Array.prototype.forEach.call(holder.querySelectorAll(".goalTaskText"), function(inp){
+      inp.addEventListener("input", function(){
+        var g = getGoalData(goalId); if(!g) return;
+        var idx = Number(inp.getAttribute("data-idx"));
+        if(g.tasks[idx]) g.tasks[idx].text = inp.value;
+        saveGoal(goalId, g);
+        renderGoalsSection();
+      });
+    });
+    Array.prototype.forEach.call(holder.querySelectorAll(".goal-task-remove"), function(btn){
+      btn.addEventListener("click", function(){
+        var g = getGoalData(goalId); if(!g) return;
+        var idx = Number(btn.getAttribute("data-idx"));
+        g.tasks.splice(idx, 1);
+        saveGoal(goalId, g);
+        renderGoalTasksList(goalId);
+        renderGoalsSection();
+      });
+    });
+    updateGoalTaskLimitNote(goalId);
+  }
+
+  function updateGoalTaskLimitNote(goalId){
+    var goal = getGoalData(goalId);
+    var note = document.getElementById("goalTaskLimitNote");
+    var addBtn = document.getElementById("goalAddTaskBtn");
+    var atMax = goal && (goal.tasks || []).length >= GOAL_MAX_TASKS;
+    if(note) note.textContent = atMax ? "Достигнуто максимальное количество задач (10)." : "";
+    if(addBtn) addBtn.style.display = atMax ? "none" : "block";
+  }
+
+  function openGoalColorPicker(goalId){
+    var buttons = GOAL_COLORS.map(function(c){
+      return '<button data-color="' + c + '" style="background:' + c + ';"></button>';
+    }).join("");
+    modalBox.innerHTML =
+      modalHeader("Выберите цвет прогресс-бара") +
+      '<div class="goal-color-grid">' + buttons + '</div>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-color]"), function(btn){
+      btn.addEventListener("click", function(){
+        var g = getGoalData(goalId); if(!g) return;
+        g.color = btn.getAttribute("data-color");
+        saveGoal(goalId, g);
+        renderGoalsSection();
+        openGoalSettingsModal(goalId);
+      });
+    });
+  }
+
+  var goalsToggleBtn = document.getElementById("goalsToggleBtn");
+  if(goalsToggleBtn){
+    goalsToggleBtn.addEventListener("click", function(){
+      goalsExpanded = !goalsExpanded;
+      var section = document.getElementById("goalsSection");
+      if(section) section.classList.toggle("open", goalsExpanded);
+      goalsToggleBtn.innerHTML = goalsExpanded ? "&#9650;" : "&#9660;";
+    });
+  }
+
   // ===================== ЗАПУСК =====================
   initQuote();
   initPage();
@@ -3362,6 +3955,8 @@
   checkHourBoundaries();
   renderMoodPill();
   renderMoodMenu();
+  renderGoalsSection();
+  renderAddGoalMenu();
   setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); checkHourBoundaries(); renderMoodPill(); }, 30 * 60 * 1000);
   checkUpdateSnoozeExpiry();
 
