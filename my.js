@@ -176,6 +176,78 @@
     return !!(state[key] && state[key].c);
   }
 
+  // ===================== ЦВЕТНАЯ ОТМЕТКА ГЛАВ =====================
+  var CHAPTER_COLOR_BLUE = "#29B6F6";
+  var CHAPTER_COLOR_RED = "#ED2939";
+
+  function getColorMarkEnabled(){
+    var r = state["__colorMarkChapters"];
+    return !!(r && r.c);
+  }
+  function setColorMarkEnabled(value){
+    state["__colorMarkChapters"] = {c: value, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+  }
+  function applyChapterColorClass(item, clr){
+    if(!item) return;
+    item.classList.remove("clr-blue","clr-red");
+    if(clr === "blue") item.classList.add("clr-blue");
+    else if(clr === "red") item.classList.add("clr-red");
+  }
+  function refreshAllChapterColorVisuals(){
+    var enabled = getColorMarkEnabled();
+    Object.keys(chapterInputs).forEach(function(key){
+      var input = chapterInputs[key];
+      if(!input || !input.parentElement) return;
+      var item = input.parentElement;
+      var stored = state[key];
+      var clr = (stored && stored.clr) || null;
+      applyChapterColorClass(item, (enabled && input.checked && clr) ? clr : null);
+    });
+  }
+  function cycleChapterState(bookName, key, input, item){
+    var prevRec = state[key];
+    var wasChecked = !!(prevRec && prevRec.c);
+    var prevColor = (prevRec && prevRec.clr) || null;
+    var newChecked, newColor;
+
+    if(!wasChecked){
+      newChecked = true; newColor = "green";
+    } else if(prevColor === "blue"){
+      newChecked = true; newColor = "red";
+    } else if(prevColor === "red"){
+      newChecked = false; newColor = null;
+    } else {
+      // отмечена, но без цвета (или зелёная) — следующий шаг: голубая
+      newChecked = true; newColor = "blue";
+    }
+
+    if(newChecked && !wasChecked){
+      if(!state["__firstRead"] || state["__firstRead"].c == null){
+        state["__firstRead"] = {c: Date.now(), t: Date.now()};
+      }
+      checkedPerBook[bookName]++;
+      totalChecked++;
+    } else if(!newChecked && wasChecked){
+      if(prevRec && prevRec.c === true && startOfDay(prevRec.t) === startOfDay(Date.now())){
+        addTodayExcludedKey(key);
+      }
+      checkedPerBook[bookName]--;
+      totalChecked--;
+    }
+
+    state[key] = {c: newChecked, t: Date.now(), clr: newColor || undefined};
+    input.checked = newChecked;
+    applyChapterColorClass(item, newChecked ? newColor : null);
+
+    saveLocalState();
+    updateBookProgress(bookName);
+    updateOverallProgress();
+    updateMissedBanner();
+    scheduleCloudPush();
+  }
+
   // ===================== ТЕМЫ =====================
   var THEME_KEY = "__theme";
   var DEFAULT_THEME_ID = 4;
@@ -464,7 +536,14 @@
             lbl.setAttribute("for", input.id);
             lbl.textContent = chapterNum;
 
+            input.addEventListener("click", function(e){
+              if(!getColorMarkEnabled()) return; // обычный режим — обрабатывается в "change"
+              e.preventDefault();
+              cycleChapterState(bookName, key, input, item);
+            });
+
             input.addEventListener("change", function(){
+              if(getColorMarkEnabled()) return; // цветовой режим — уже обработано в "click"
               var prevRec = state[key];
               state[key] = {c: input.checked, t: Date.now()};
               if(input.checked){
@@ -495,6 +574,10 @@
             item.appendChild(input);
             item.appendChild(lbl);
             grid.appendChild(item);
+            if(checked && getColorMarkEnabled()){
+              var storedClr = (state[key] && state[key].clr) || null;
+              if(storedClr) applyChapterColorClass(item, storedClr);
+            }
           })(c);
         }
 
@@ -552,12 +635,12 @@
     countEl.id = "hideProgressCountBadge";
     var toggleEl = document.createElement("div");
     toggleEl.className = "toggle-check";
-    toggleEl.style.cursor = "pointer";
+    headerContent.style.cursor = "pointer";
     headerContent.appendChild(nameEl);
     headerContent.appendChild(countEl);
     headerContent.appendChild(toggleEl);
     headerEl.appendChild(headerContent);
-    toggleEl.addEventListener("click", toggleHideCompletedBooks);
+    headerContent.addEventListener("click", toggleHideCompletedBooks);
     card.appendChild(headerEl);
     booksContainer.appendChild(card);
     updateHideProgressBadge();
@@ -620,6 +703,7 @@
         totalChecked++;
       }
     });
+    refreshAllChapterColorVisuals();
 
     Object.keys(bookMeta).forEach(function(bookName){
       updateBookProgress(bookName);
@@ -1572,10 +1656,12 @@
     var hourOn = !!getHourGoal();
     var moodOn = isMoodEnabled();
     var reducedOn = getGoalsReducedView();
+    var colorMarkOn = getColorMarkEnabled();
     container.innerHTML =
       '<div class="settings-row"><span>Добавить дополнительный счётчик</span><input type="checkbox" id="settingsHourCb"' + (hourOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Добавить счётчик настроения</span><input type="checkbox" id="settingsMoodCb"' + (moodOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row" style="border-bottom:none;"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row" style="border-bottom:none;"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
       '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:16px;">Добавить для себя цель</button>';
 
     document.getElementById("settingsHourCb").addEventListener("change", function(){
@@ -1620,6 +1706,11 @@
       setGoalsReducedView(this.checked);
       goalsExpanded = true;
       renderGoalsSection();
+    });
+
+    document.getElementById("settingsColorMarkCb").addEventListener("change", function(){
+      setColorMarkEnabled(this.checked);
+      refreshAllChapterColorVisuals();
     });
 
     document.getElementById("settingsAddGoalBtn").addEventListener("click", function(){
