@@ -1,0 +1,54 @@
+/* ===========================================================================
+   base.css
+   Базовые стили: сброс, body, header, заголовок, цитата дня
+   =========================================================================== */
+
+  *{box-sizing:border-box;}
+
+  html{ overflow-x:hidden; }
+  body{
+    margin:0;
+    padding:0 0 60px 0;
+    overflow-x:hidden;
+    background:
+      radial-gradient(ellipse at top, var(--bg-top) 0%, var(--bg-mid) 60%, var(--bg-bottom) 100%);
+    font-family: "Palatino Linotype","Georgia", "Times New Roman", serif;
+    color:var(--ink);
+    min-height:100vh;
+    transition:background .4s ease, color .3s ease;
+  }
+
+  header{
+    position:relative;
+    text-align:center;
+    padding:38px 20px 26px 20px;
+    background:
+      linear-gradient(180deg, var(--wood) 0%, var(--wood-dark) 100%);
+    border-bottom:6px solid var(--gold);
+    box-shadow:0 4px 14px rgba(0,0,0,.35);
+  }
+
+  header h1{
+    margin:0 0 14px 0;
+    font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
+    letter-spacing:4px;
+    font-size:clamp(22px,4vw,36px);
+    color:var(--gold-light);
+    text-shadow:0 2px 3px rgba(0,0,0,.6);
+  }
+
+  header .quote{
+    max-width:640px;
+    margin:0 auto 26px auto;
+    font-style:italic;
+    color:#f1e6cd;
+    font-size:17px;
+    line-height:1.55;
+    opacity:0;
+    transition:opacity 1.5s ease;
+    min-height:52px;
+  }
+  header .quote.visible{
+    opacity:.9;
+  }
+

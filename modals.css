@@ -1,0 +1,320 @@
+/* ===========================================================================
+   modals.css
+   Модальные окна: история версий, настройки (шестерёнка), синхронизация
+   (QR/скан), отключение анимаций при массовых операциях
+   =========================================================================== */
+
+  /* ---------- список предыдущих версий ---------- */
+  .footer-buttons-row{
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    gap:10px;
+    margin:22px auto 0 auto;
+    max-width:640px;
+  }
+  .versions-btn{
+    padding:10px 22px;
+    background:#e9e4d4;
+    border:2px solid #6b6449;
+    border-radius:4px;
+    box-shadow:inset 0 2px 4px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.25);
+    font-weight:bold;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    letter-spacing:.3px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    cursor:pointer;
+  }
+  .settings-gear-btn{
+    width:38px;height:38px;
+    flex-shrink:0;
+    background:#e9e4d4;
+    border:2px solid #6b6449;
+    border-radius:50%;
+    box-shadow:inset 0 2px 4px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.25);
+    font-size:17px;
+    color:var(--ink-soft);
+    cursor:pointer;
+  }
+
+  .version-history-item{
+    display:block;
+    width:100%;
+    text-align:left;
+    padding:10px 14px;
+    border:none;
+    border-top:1px solid var(--groove-shadow);
+    background:transparent;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:13px;
+    color:var(--ink);
+    cursor:pointer;
+    text-decoration:none;
+  }
+  .version-history-item:hover{ background:var(--parchment-dark); }
+  .version-history-item.selected{ background:var(--xp-green); font-weight:bold; }
+  .version-history-update-item{
+    display:block;
+    width:100%;
+    text-align:left;
+    padding:10px 14px;
+    border:none;
+    background:var(--xp-green);
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:13px;
+    font-weight:bold;
+    color:#12351f;
+    cursor:pointer;
+    text-decoration:none;
+  }
+  .version-history-update-item:hover{ filter:brightness(1.05); }
+  .version-history-empty{
+    padding:12px 14px;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    font-style:italic;
+  }
+
+  /* ---------- модалка настроек (шестерёнка) с "язычками", как в блокноте ---------- */
+  .settings-modal-overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(20,14,7,.55);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:16px 46px 16px 16px;
+    z-index:1000;
+  }
+  .settings-modal-overlay.open{ display:flex; }
+  .settings-modal-box{
+    position:relative;
+    background:var(--parchment);
+    border:1px solid var(--groove-shadow);
+    border-radius:10px;
+    max-width:340px;
+    width:100%;
+    max-height:82vh;
+    overflow-y:auto;
+    padding:22px;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);
+  }
+  .settings-tabs{
+    position:absolute;
+    right:-30px;
+    top:36px;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .settings-tab{
+    width:30px;height:42px;
+    background:var(--wood);
+    color:var(--gold-light);
+    border:1px solid var(--wood-dark);
+    border-left:none;
+    border-radius:0 8px 8px 0;
+    font-size:16px;
+    cursor:pointer;
+    box-shadow:2px 2px 5px rgba(0,0,0,.3);
+  }
+  .settings-tab.active{ background:var(--gold-light); color:var(--wood); }
+  .settings-tab.muted{ filter:grayscale(100%) brightness(1.15); opacity:.75; }
+  .settings-tab.muted.active{ filter:none; opacity:1; }
+
+  .settings-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:12px 4px;
+    border-bottom:1px solid var(--groove-shadow);
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:14.5px;
+    color:var(--ink);
+  }
+  .settings-row input[type=checkbox]{ width:22px;height:22px;flex-shrink:0; }
+
+  /* ---------- sync modal ---------- */
+  .modal-overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(20,14,7,.55);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:16px;
+    z-index:1000;
+  }
+  .modal-overlay.open{ display:flex; }
+
+  .modal-box{
+    background:var(--parchment);
+    border:1px solid var(--groove-shadow);
+    border-radius:10px;
+    max-width:420px;
+    width:100%;
+    max-height:88vh;
+    overflow-y:auto;
+    padding:22px;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);
+    position:relative;
+  }
+
+  .modal-box h2{
+    margin:0 0 6px 0;
+    font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
+    letter-spacing:1px;
+    font-size:19px;
+    color:var(--wood);
+  }
+
+  .modal-box p{
+    font-size:15.5px;
+    line-height:1.55;
+    color:var(--ink-soft);
+    margin:0 0 14px 0;
+  }
+
+  .modal-close{
+    position:absolute;
+    top:12px;right:14px;
+    background:none;
+    border:none;
+    font-size:20px;
+    color:var(--wood);
+    cursor:pointer;
+    line-height:1;
+  }
+
+  .modal-btn{
+    display:block;
+    width:100%;
+    text-align:center;
+    padding:12px 14px;
+    margin-bottom:10px;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:16px;
+    color:var(--ink);
+    cursor:pointer;
+    transition:background .15s ease;
+  }
+  .modal-btn:hover{ background:#f4ead0; }
+  .modal-btn-grid{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    justify-content:center;
+    margin-bottom:10px;
+  }
+  .modal-btn-grid button{
+    width:52px;
+    padding:12px 0;
+    text-align:center;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:16px;
+    font-weight:bold;
+    color:var(--ink);
+    cursor:pointer;
+  }
+  .modal-btn-grid button:hover{ background:var(--xp-green); }
+  .modal-btn-center{ text-align:center; }
+  .modal-btn.primary{
+    background:var(--wood);
+    color:#f4e6c8;
+    border-color:var(--wood-dark);
+    text-align:center;
+    font-weight:bold;
+  }
+  .modal-btn.primary:hover{ background:var(--wood-dark); }
+  .modal-btn.danger{
+    color:#8a2f1c;
+  }
+
+  .modal-section{
+    border-top:1px solid var(--groove-shadow);
+    margin-top:14px;
+    padding-top:14px;
+  }
+
+  #qrHolder{
+    display:flex;
+    justify-content:center;
+    padding:10px 0;
+    background:#fbf4e2;
+    border-radius:6px;
+    margin-bottom:10px;
+  }
+
+  .code-row{
+    display:flex;
+    gap:8px;
+    align-items:center;
+    margin-bottom:10px;
+  }
+  .code-row input[type=text]{
+    flex:1;
+    font-family:"Courier New",monospace;
+    font-size:13px;
+    padding:9px 10px;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    background:#fffef8;
+    color:var(--ink);
+  }
+  .code-row button{
+    flex-shrink:0;
+    padding:9px 12px;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    background:#fffef8;
+    cursor:pointer;
+    font-size:13px;
+  }
+
+  .scan-video-wrap{
+    position:relative;
+    border-radius:8px;
+    overflow:hidden;
+    background:#000;
+    margin-bottom:12px;
+  }
+  .scan-video-wrap video{
+    width:100%;
+    display:block;
+  }
+  .scan-frame{
+    position:absolute;
+    top:50%;left:50%;
+    width:60%;
+    height:60%;
+    transform:translate(-50%,-50%);
+    border:3px solid var(--xp-green);
+    border-radius:8px;
+    box-shadow:0 0 0 999px rgba(0,0,0,.35);
+    pointer-events:none;
+  }
+
+  .modal-note{
+    font-size:12.5px;
+    color:var(--ink-soft);
+    line-height:1.4;
+  }
+  .modal-note.error{ color:#8a2f1c; font-weight:bold; }
+  .modal-note.success{ color:#1f7a45; font-weight:bold; }
+
+    /* отключение анимаций при массовых операциях */
+  .no-transitions *{
+    transition:none !important;
+  }
+
+@media (prefers-reduced-motion: reduce){
+    *{transition:none !important; animation:none !important;}
+  }

@@ -1,0 +1,110 @@
+/* ===========================================================================
+   theme.css
+   Цветовые переменные (:root) и палитры тем оформления (data-theme 1..7)
+   =========================================================================== */
+
+  :root{
+    --parchment:#f4f0f8;
+    --parchment-dark:#e9e0f1;
+    --ink:#3b3350;
+    --ink-soft:#6a6080;
+    --wood:#8f7fb8;
+    --wood-dark:#6a5a91;
+    --gold:#d8cdec;
+    --gold-light:#ece3f7;
+    --xp-green-dark:#4FBE9B;
+    --xp-green:#8FE3C7;
+    --groove-shadow:#b6a8d1;
+    --bg-top:#f6f2fa;
+    --bg-mid:#e9e0f2;
+    --bg-bottom:#d9cbe8;
+    --danger:#7a5a9c;
+    --danger-dark:#543d70;
+    --warn:#9b7bc4;
+    --warn-dark:#6f4f96;
+    --status-off:#8a8578;
+    --status-offline:#8a8578;
+    --status-sync:#c9a227;
+    --status-ok:#2fa15f;
+    --status-err:#b0432e;
+  }
+
+  /* ---------- темы оформления ---------- */
+  html[data-theme="1"]{
+    --parchment:#f1e6cd; --parchment-dark:#e4d3ac;
+    --ink:#2e2418; --ink-soft:#5b4c37;
+    --wood:#5c3d24; --wood-dark:#3c2716;
+    --gold:#a97c26; --gold-light:#d4a94f;
+    --groove-shadow:#8a7550;
+    --xp-green:#48F78E; --xp-green-dark:#1f9e5a;
+    --bg-top:#efe2c2; --bg-mid:#ddc99a; --bg-bottom:#cdb27f;
+    --danger:#8a3c2b; --danger-dark:#5e2318;
+    --warn:#e2a640; --warn-dark:#b17a29;
+  }
+  html[data-theme="2"]{
+    --parchment:#e9f0e6; --parchment-dark:#dbe6d6;
+    --ink:#2f3b2c; --ink-soft:#57624f;
+    --wood:#5b7c99; --wood-dark:#3f5a70;
+    --gold:#a9c4a0; --gold-light:#cfe0c8;
+    --groove-shadow:#8fae87;
+    --xp-green:#5AD1A0; --xp-green-dark:#2E9E76;
+    --bg-top:#eef3ea; --bg-mid:#dbe6d9; --bg-bottom:#c7d8c2;
+    --danger:#b3654f; --danger-dark:#7a4436;
+    --warn:#c97a52; --warn-dark:#9a5936;
+  }
+  html[data-theme="3"]{
+    --parchment:#fbeef1; --parchment-dark:#f6dee3;
+    --ink:#4a2c33; --ink-soft:#7a5560;
+    --wood:#c98a97; --wood-dark:#9c6270;
+    --gold:#f3c6cf; --gold-light:#fbdfe4;
+    --groove-shadow:#d9a7b0;
+    --xp-green:#7FE8C0; --xp-green-dark:#3FB98E;
+    --bg-top:#fdf1f2; --bg-mid:#f8dfe4; --bg-bottom:#f1c9d2;
+    --danger:#c2607a; --danger-dark:#8a3f56;
+    --warn:#d97a6a; --warn-dark:#a85647;
+  }
+  html[data-theme="4"]{
+    --parchment:#f4f0f8; --parchment-dark:#e9e0f1;
+    --ink:#3b3350; --ink-soft:#6a6080;
+    --wood:#8f7fb8; --wood-dark:#6a5a91;
+    --gold:#d8cdec; --gold-light:#ece3f7;
+    --groove-shadow:#b6a8d1;
+    --xp-green:#8FE3C7; --xp-green-dark:#4FBE9B;
+    --bg-top:#f6f2fa; --bg-mid:#e9e0f2; --bg-bottom:#d9cbe8;
+    --danger:#7a5a9c; --danger-dark:#543d70;
+    --warn:#9b7bc4; --warn-dark:#6f4f96;
+  }
+  html[data-theme="5"]{
+    --parchment:#fbf6e3; --parchment-dark:#f3ecc9;
+    --ink:#4a422a; --ink-soft:#7a6f4c;
+    --wood:#7fa8c9; --wood-dark:#4f7fa3;
+    --gold:#f0e2a3; --gold-light:#f8f0c9;
+    --groove-shadow:#c9b96f;
+    --xp-green:#8FE0A8; --xp-green-dark:#48B978;
+    --bg-top:#fdf8e4; --bg-mid:#f6ecc4; --bg-bottom:#eadfa0;
+    --danger:#c98a3f; --danger-dark:#96652a;
+    --warn:#d98a3f; --warn-dark:#a9662a;
+  }
+  html[data-theme="6"]{
+    --parchment:#f6ecec; --parchment-dark:#ecd9d9;
+    --ink:#3a3538; --ink-soft:#665f66;
+    --wood:#7d8a99; --wood-dark:#586573;
+    --gold:#e3c9cd; --gold-light:#f2dfe2;
+    --groove-shadow:#b9a6ab;
+    --xp-green:#8FD9B8; --xp-green-dark:#45AD82;
+    --bg-top:#f7eeee; --bg-mid:#ece0e1; --bg-bottom:#d9c8ca;
+    --danger:#8a5a63; --danger-dark:#5e3d44;
+    --warn:#a85a6a; --warn-dark:#7a3f4a;
+  }
+  html[data-theme="7"]{
+    --parchment:#f4efe2; --parchment-dark:#e8ded0;
+    --ink:#3a3327; --ink-soft:#6b6250;
+    --wood:#6fada0; --wood-dark:#4a7d72;
+    --gold:#c9e3d6; --gold-light:#e0f0e8;
+    --groove-shadow:#a3c6b8;
+    --xp-green:#6FE0C0; --xp-green-dark:#33AD87;
+    --bg-top:#f6f1e4; --bg-mid:#eae0cc; --bg-bottom:#d9cba8;
+    --danger:#c17b5a; --danger-dark:#8f5540;
+    --warn:#c9835a; --warn-dark:#9a6140;
+    --danger:#c17b5a; --danger-dark:#8f5540;
+  }
