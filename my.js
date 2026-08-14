@@ -1638,11 +1638,21 @@
 
   function openSettingsModal(){
     refreshSettingsTabsVisibility();
+    settingsModalBox.style.height = "";
     settingsModalOverlay.classList.add("open");
     switchSettingsTab("gear");
+    lockSettingsModalHeight();
   }
   function closeSettingsModal(){
     settingsModalOverlay.classList.remove("open");
+  }
+  // Высота окна всегда берётся от вкладки "настройки" (шестерёнка) — она
+  // открывается первой при каждом входе в окно. Остальные вкладки (например,
+  // диаграмма настроения) подстраиваются под эту высоту, а не задают свою,
+  // чтобы при переключении между вкладками окно не "прыгало" по размеру.
+  function lockSettingsModalHeight(){
+    if(!settingsModalBox) return;
+    settingsModalBox.style.height = settingsModalBox.scrollHeight + "px";
   }
   function refreshSettingsTabsVisibility(){
     var moodTab = document.getElementById("settingsTabMoodBtn");
