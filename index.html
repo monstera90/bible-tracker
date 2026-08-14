@@ -105,13 +105,15 @@
 
 <!-- ===== модальное окно настроек (шестерёнка) ===== -->
 <div class="settings-modal-overlay" id="settingsModalOverlay">
-  <div class="settings-modal-box" id="settingsModalBox">
-    <button class="modal-close" id="settingsModalClose">&times;</button>
+  <div class="settings-modal-frame">
+    <div class="settings-modal-box" id="settingsModalBox">
+      <button class="modal-close" id="settingsModalClose">&times;</button>
+      <div class="settings-tab-content" id="settingsTabContent"></div>
+    </div>
     <div class="settings-tabs" id="settingsTabs">
       <button class="settings-tab active" id="settingsTabGearBtn" title="Настройки">&#9881;</button>
       <button class="settings-tab muted" id="settingsTabMoodBtn" title="Диаграмма настроения" style="display:none;">&#128578;</button>
     </div>
-    <div class="settings-tab-content" id="settingsTabContent"></div>
   </div>
 </div>
 
