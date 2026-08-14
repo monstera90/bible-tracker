@@ -191,8 +191,9 @@
   }
   function applyChapterColorClass(item, clr){
     if(!item) return;
-    item.classList.remove("clr-blue","clr-red");
-    if(clr === "blue") item.classList.add("clr-blue");
+    item.classList.remove("clr-green","clr-blue","clr-red");
+    if(clr === "green") item.classList.add("clr-green");
+    else if(clr === "blue") item.classList.add("clr-blue");
     else if(clr === "red") item.classList.add("clr-red");
   }
   function refreshAllChapterColorVisuals(){
@@ -202,7 +203,7 @@
       if(!input || !input.parentElement) return;
       var item = input.parentElement;
       var stored = state[key];
-      var clr = (stored && stored.clr) || null;
+      var clr = (stored && stored.clr) || (input.checked ? "green" : null);
       applyChapterColorClass(item, (enabled && input.checked && clr) ? clr : null);
     });
   }
@@ -212,16 +213,15 @@
     var prevColor = (prevRec && prevRec.clr) || null;
     var newChecked, newColor;
 
+    // цикл: не выделено -> зелёный -> синий -> красный -> не выделено
     if(!wasChecked){
-      // первая отметка сразу получает цвет — для "green" не было CSS-стиля,
-      // из-за чего глава визуально оставалась обычной (некрашеной)
-      newChecked = true; newColor = "blue";
+      newChecked = true; newColor = "green";
     } else if(prevColor === "blue"){
       newChecked = true; newColor = "red";
     } else if(prevColor === "red"){
       newChecked = false; newColor = null;
     } else {
-      // отмечена, но без цвета (устаревшие записи) — следующий шаг: голубая
+      // отмечена зелёным (или без цвета — устаревшие записи) — дальше синяя
       newChecked = true; newColor = "blue";
     }
 
@@ -541,7 +541,15 @@
             input.addEventListener("click", function(e){
               if(!getColorMarkEnabled()) return; // обычный режим — обрабатывается в "change"
               e.preventDefault();
-              cycleChapterState(bookName, key, input, item);
+              // Браузер откатывает checked к значению "до клика" сразу после
+              // отмены дефолтного действия чекбокса — это происходит уже
+              // ПОСЛЕ выполнения этого обработчика и стирает любое присвоение
+              // input.checked, сделанное синхронно здесь. Откладываем на
+              // следующий тик, чтобы наше значение применилось уже после
+              // отката браузера.
+              setTimeout(function(){
+                cycleChapterState(bookName, key, input, item);
+              }, 0);
             });
 
             input.addEventListener("change", function(){
