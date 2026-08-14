@@ -3,33 +3,12 @@
    Подвал страницы: кнопка сброса, переключатель тем, версия приложения
    =========================================================================== */
 
-  /* footer / reset */
+  /* footer */
   footer{
     max-width:760px;
     margin:40px auto 0 auto;
     padding:0 18px;
     text-align:center;
-  }
-
-  #resetBtn{
-    font-family:"Palatino Linotype",Georgia,serif;
-    font-size:16.5px;
-    padding:12px 26px;
-    background:linear-gradient(180deg, var(--danger) 0%, var(--danger-dark) 100%);
-    color:#f4e6c8;
-    border:1px solid var(--danger-dark);
-    border-radius:6px;
-    cursor:pointer;
-    letter-spacing:.5px;
-    box-shadow:0 3px 6px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.15);
-    transition:transform .1s ease, box-shadow .1s ease, background .3s ease;
-  }
-
-  #resetBtn:hover{
-    box-shadow:0 4px 9px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.2);
-  }
-  #resetBtn:active{
-    transform:translateY(1px);
   }
 
   /* ---------- переключатель тем ---------- */

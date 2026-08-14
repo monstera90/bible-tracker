@@ -449,7 +449,7 @@
       document.getElementById("mDone").addEventListener("click", closeThis);
     });
     document.getElementById("mCelebrateKeep").addEventListener("click", function(){
-      box.innerHTML = modalHeader("Хорошо", "Помните, вы всегда можете начать читать Библию заново. Для этого просто нужно нажать на кнопку «Начать чтение сначала и сбросить прогресс» — она находится в самом низу страницы.") + '<button class="modal-btn primary" id="mOk">ОК</button>';
+      box.innerHTML = modalHeader("Хорошо", "Помните, вы всегда можете начать читать Библию заново. Для этого просто нужно открыть настройки (значок шестерёнки внизу страницы) и нажать на кнопку «Начать чтение сначала и сбросить прогресс».") + '<button class="modal-btn primary" id="mOk">ОК</button>';
       var closeBtn2 = document.getElementById("mClose");
       if(closeBtn2) closeBtn2.addEventListener("click", closeThis);
       document.getElementById("mOk").addEventListener("click", closeThis);
@@ -761,10 +761,7 @@
     }
   }
 
-  document.getElementById("resetBtn").addEventListener("click", function(){
-    if(!confirm("Точно сбросить весь прогресс чтения и начать сначала?")) return;
-    performFullReset();
-  });
+  // Кнопка сброса прогресса перенесена в настройки (settingsResetBtn, см. renderSettingsTabGear)
 
   // ===================== ОБЛАЧНАЯ СИНХРОНИЗАЦИЯ (Firebase Realtime Database) =====================
   // ВАЖНО: этот URL нужно проверить/поправить на точный "Database URL" из
@@ -1672,7 +1669,8 @@
       '<div class="settings-row"><span>Добавить счётчик настроения</span><input type="checkbox" id="settingsMoodCb"' + (moodOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" style="border-bottom:none;"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
-      '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:16px;">Добавить для себя цель</button>';
+      '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:16px;">Добавить для себя цель</button>' +
+      '<button class="modal-btn danger" id="settingsResetBtn" style="margin-top:10px;">Начать чтение сначала и сбросить прогресс</button>';
 
     document.getElementById("settingsHourCb").addEventListener("change", function(){
       var cb = this;
@@ -1728,6 +1726,12 @@
       renderGoalsSection();
       closeSettingsModal();
       openGoalSettingsModal(id);
+    });
+
+    document.getElementById("settingsResetBtn").addEventListener("click", function(){
+      if(!confirm("Точно сбросить весь прогресс чтения и начать сначала?")) return;
+      performFullReset();
+      closeSettingsModal();
     });
   }
 
