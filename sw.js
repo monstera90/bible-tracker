@@ -29,7 +29,22 @@ const ASSETS = [
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(ASSETS))
+      .then((cache) => {
+        // ВАЖНО: обычный cache.addAll() делает fetch() с учётом HTTP-кэша
+        // браузера — если сервер отдаёт файлы (например my.js) с
+        // Cache-Control, разрешающим кэширование, новый service worker
+        // может "закэшировать" ту же самую старую версию файла, даже
+        // если на сервере уже лежит новая. Поэтому качаем каждый файл
+        // явно в обход HTTP-кэша ({cache: "reload"}).
+        return Promise.all(
+          ASSETS.map((url) =>
+            fetch(url, { cache: "reload" }).then((response) => {
+              if (!response.ok) throw new Error("Failed to fetch " + url);
+              return cache.put(url, response);
+            })
+          )
+        );
+      })
       .then(() => {
         // сообщаем всем открытым вкладкам номер новой версии —
         // страница использует это для текста уведомления/для
@@ -65,7 +80,7 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      const networkFetch = fetch(event.request)
+      const networkFetch = fetch(event.request, { cache: "no-store" })
         .then((response) => {
           if (response && response.status === 200) {
             const copy = response.clone();
