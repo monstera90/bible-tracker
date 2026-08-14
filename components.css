@@ -199,7 +199,6 @@
     font-weight:bold;
     font-size:12.5px;
     color:#20351f;
-    text-shadow:0 1px 1px rgba(255,255,255,.5);
     letter-spacing:.3px;
     font-family:"Segoe UI","Tahoma",sans-serif;
     white-space:nowrap;
@@ -264,7 +263,6 @@
     font-weight:bold;
     font-size:12.5px;
     color:#20351f;
-    text-shadow:0 1px 1px rgba(255,255,255,.5);
     letter-spacing:.3px;
     font-family:"Segoe UI","Tahoma",sans-serif;
     overflow:hidden;
@@ -445,7 +443,6 @@
     font-weight:bold;
     font-size:12.5px;
     color:#20351f;
-    text-shadow:0 1px 1px rgba(255,255,255,.6);
     font-family:"Segoe UI","Tahoma",sans-serif;
     pointer-events:none;
     padding:0 10px;
@@ -625,7 +622,6 @@
     font-weight:bold;
     font-size:20px;
     color:var(--ink);
-    text-shadow:0 1px 1px rgba(255,255,255,.4);
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
