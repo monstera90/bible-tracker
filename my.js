@@ -2600,9 +2600,13 @@
 
       // "стенка" — та же дуга, но сдвинутая вниз на глубину диска и
       // залитая тёмным вариантом цвета; видна только снизу переднего
-      // края, так как верхний эллипс со срезами рисуется поверх неё
+      // края, так как верхний эллипс со срезами рисуется поверх неё.
+      // Класс + data-dx/data-dy такие же, как у верхнего среза, чтобы при
+      // разъезжании (клик по диаграмме) стенка двигалась вместе со своим
+      // сегментом, а не оставалась на месте.
       wallParts.push(
-        '<g transform="translate(' + (dx*collapsedOffset).toFixed(2) + ',' + (dy*collapsedOffset).toFixed(2) + ')">' +
+        '<g class="mood-diagram-wall" data-dx="' + dx.toFixed(3) + '" data-dy="' + dy.toFixed(3) + '" ' +
+        'transform="translate(' + (dx*collapsedOffset).toFixed(2) + ',' + (dy*collapsedOffset).toFixed(2) + ')">' +
         '<path d="' + describeArcPathEllipse(0, depth, rx, ry, start, end) + '" fill="' + wallColor + '"></path>' +
         '</g>'
       );
@@ -2637,7 +2641,7 @@
     svgEl.addEventListener("click", function(){
       moodDiagramExpanded = !moodDiagramExpanded;
       var offset = moodDiagramExpanded ? expandedOffset : collapsedOffset;
-      var groups = svgEl.querySelectorAll(".mood-diagram-slice");
+      var groups = svgEl.querySelectorAll(".mood-diagram-slice, .mood-diagram-wall");
       groups.forEach(function(g){
         var dx = parseFloat(g.getAttribute("data-dx"));
         var dy = parseFloat(g.getAttribute("data-dy"));

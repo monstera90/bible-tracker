@@ -105,7 +105,7 @@
     font-size:15px;
     letter-spacing:.5px;
     color:var(--wood);
-    margin-bottom:14px;
+    margin:16px 0 14px 0;
   }
   .mood-diagram-empty{
     text-align:center;
@@ -122,7 +122,7 @@
     cursor:pointer;
     overflow:visible;
   }
-  .mood-diagram-slice{
+  .mood-diagram-slice, .mood-diagram-wall{
     transition:transform .35s ease;
   }
   .mood-diagram-emoji{
