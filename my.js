@@ -2662,7 +2662,7 @@
     "#4ECDC4","#6FA8DC","#FF6FB5","#A0785A","#8E7CC3","#8FD9B8",
     "#D9534F","#B4A7D6","#5DADE2","#F1948A"
   ];
-  var GOAL_MAX_TASKS = 10;
+  var GOAL_MAX_TASKS = 20;
   var goalsExpanded = true; // раскрыта ли полоса в режиме "видеть меньше" (внутри сессии)
 
   function getGoalsReducedView(){
@@ -2886,7 +2886,7 @@
     var note = document.getElementById("goalTaskLimitNote");
     var addBtn = document.getElementById("goalAddTaskBtn");
     var atMax = goal && (goal.tasks || []).length >= GOAL_MAX_TASKS;
-    if(note) note.textContent = atMax ? "Достигнуто максимальное количество задач (10)." : "";
+    if(note) note.textContent = atMax ? "Достигнуто максимальное количество задач (" + GOAL_MAX_TASKS + ")." : "";
     if(addBtn) addBtn.style.display = atMax ? "none" : "block";
   }
 
