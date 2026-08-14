@@ -2598,15 +2598,24 @@
         '</radialGradient>'
       );
 
-      // "стенка" — та же дуга, но сдвинутая вниз на глубину диска и
-      // залитая тёмным вариантом цвета; видна только снизу переднего
-      // края, так как верхний эллипс со срезами рисуется поверх неё.
-      // Класс + data-dx/data-dy такие же, как у верхнего среза, чтобы при
-      // разъезжании (клик по диаграмме) стенка двигалась вместе со своим
-      // сегментом, а не оставалась на месте.
+      // "стенка" куска: боковая (радиальная) грань у начала среза, боковая
+      // грань у конца среза, и дуговая (внешняя, ободная) грань — все три
+      // залиты тёмным вариантом цвета и лежат в одной группе с верхним
+      // срезом по data-dx/data-dy, чтобы при разъезжании кусок уезжал
+      // целиком, вместе со всеми своими гранями, а не только "крышкой".
+      var pStartTop = polarPointEllipse(0, 0, rx, ry, start);
+      var pEndTop = polarPointEllipse(0, 0, rx, ry, end);
+      var pStartBottom = polarPointEllipse(0, depth, rx, ry, start);
+      var pEndBottom = polarPointEllipse(0, depth, rx, ry, end);
+      var sideStartPath = ["M", "0,0", "L", pStartTop.x.toFixed(2)+","+pStartTop.y.toFixed(2),
+        "L", pStartBottom.x.toFixed(2)+","+pStartBottom.y.toFixed(2), "L", "0,"+depth, "Z"].join(" ");
+      var sideEndPath = ["M", "0,0", "L", pEndTop.x.toFixed(2)+","+pEndTop.y.toFixed(2),
+        "L", pEndBottom.x.toFixed(2)+","+pEndBottom.y.toFixed(2), "L", "0,"+depth, "Z"].join(" ");
       wallParts.push(
         '<g class="mood-diagram-wall" data-dx="' + dx.toFixed(3) + '" data-dy="' + dy.toFixed(3) + '" ' +
         'transform="translate(' + (dx*collapsedOffset).toFixed(2) + ',' + (dy*collapsedOffset).toFixed(2) + ')">' +
+        '<path d="' + sideStartPath + '" fill="' + wallColor + '"></path>' +
+        '<path d="' + sideEndPath + '" fill="' + wallColor + '"></path>' +
         '<path d="' + describeArcPathEllipse(0, depth, rx, ry, start, end) + '" fill="' + wallColor + '"></path>' +
         '</g>'
       );
