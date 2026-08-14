@@ -1,218 +1,154 @@
-/* ---------- Книги и главы ---------- */  
-.book-card {  
-  background: var(--parchment);  
-  border: 1px solid var(--groove-shadow);  
-  border-radius: 6px;  
-  box-shadow: 0 2px 6px rgba(60,39,22,.25);  
-  overflow: hidden;  
-}  
-.book-header {  
-  position: relative; display: flex; align-items: center;  
-  height: 44px; cursor: pointer; background: var(--parchment-dark);  
-  border-bottom: 1px solid transparent; user-select: none;  
-}  
-.book-fill {  
-  position: absolute; top: 0; left: 0; bottom: 0; width: 0%;  
-  background-color: var(--xp-green);  
-  background-image: linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,50,20,0) 60%, rgba(0,50,20,.25) 100%);  
-  box-shadow: inset 0 2px 3px rgba(255,255,255,.55), inset 0 -3px 5px rgba(0,60,0,.35);  
-  border-right: 2px solid var(--xp-green-dark); transition: width .3s ease; z-index: 1;  
-}  
-.book-header-content {  
-  position: relative; z-index: 2; display: flex; align-items: center;  
-  width: 100%; height: 100%; padding: 0 14px; gap: 10px;  
-}  
-.book-name {  
-  flex: 1; font-weight: bold; font-size: 20px; color: var(--ink);  
-  text-shadow: 0 1px 1px rgba(255,255,255,.4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;  
-}  
-.book-count {  
-  font-size: 12.5px; color: var(--ink-soft); font-family: "Segoe UI", sans-serif;  
-  background: rgba(255,255,255,.55); padding: 2px 8px; border-radius: 10px; white-space: nowrap;  
-}  
-.toggle-check {  
-  flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; background: #fffaf0;  
-  border: 2px solid var(--wood); display: flex; align-items: center; justify-content: center;  
-  font-size: 14px; font-weight: bold; color: var(--wood); transition: transform .25s ease, background .2s ease;  
-  cursor: pointer; pointer-events: auto;
-}  
-.toggle-check span { display: inline-block; transform: rotate(90deg); transition: transform .25s ease; }  
-.book-header.expanded .toggle-check { background: var(--gold-light); }  
-.book-header.expanded .toggle-check span { transform: rotate(-90deg); }  
+/* 
+   Bible Tracker PWA - Full Production components.css
+   Исправлена адаптивная верстка карточек и чекбоксов.
+*/
 
-.chapters-container { max-height: 0; overflow: hidden; transition: max-height .3s ease; background: #fbf4e2; }  
-.chapters-container.open { max-height: var(--ch-h, 2000px); }  
-.chapters-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(46px,1fr)); gap: 6px; padding: 14px; }  
-.chapter-item { position: relative; }  
-.chapter-item input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }  
-.chapter-item label {  
-  display: flex; align-items: center; justify-content: center; height: 34px;  
-  border: 1px solid var(--groove-shadow); border-radius: 4px; background: #fffef8;  
-  font-size: 14px; font-family: "Segoe UI", sans-serif; color: var(--ink-soft);  
-  cursor: pointer; transition: background .15s ease, color .15s ease, border-color .15s ease;  
-  user-select: none;
-}  
-
-/* Зеленая марка (обычная) */
-.chapter-item input:checked + label,
-.chapter-item.state-1 label {  
-  background: var(--xp-green); border-color: var(--xp-green-dark); color: #12351f;  
-  font-weight: bold; box-shadow: inset 0 -3px 5px rgba(0,60,0,.35), inset 0 2px 2px rgba(255,255,255,.5);  
-}  
-
-/* Голубая марка (#29B6F6) */
-.chapter-item.state-2 label {
-  background: #29B6F6 !important; border-color: #0277BD !important; color: #0c2c42 !important;
-  font-weight: bold; box-shadow: inset 0 -3px 5px rgba(0,30,60,.35), inset 0 2px 2px rgba(255,255,255,.5) !important;
+:root {
+    --primary-color: #4a6fa5;
+    --primary-hover: #3b5984;
+    --bg-card: #ffffff;
+    --text-primary: #2c3e50;
+    --text-secondary: #7f8c8d;
+    --border-color: #eef2f5;
+    --shadow-soft: 0 2px 8px rgba(0, 0, 0, 0.06);
+    --radius-standard: 12px;
 }
 
-/* Красная марка (#ED2939) */
-.chapter-item.state-3 label {
-  background: #ED2939 !important; border-color: #900C3F !important; color: #ffffff !important;
-  font-weight: bold; box-shadow: inset 0 -3px 5px rgba(60,0,0,.35), inset 0 2px 2px rgba(255,255,255,.4) !important;
+/* Общий контейнер */
+.card {
+    background-color: var(--bg-card);
+    border-radius: var(--radius-standard);
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow-soft);
+    border: 1px solid var(--border-color);
 }
 
-.chapter-item input:focus-visible + label { outline: 2px solid var(--wood); outline-offset: 1px; }  
+.tasks-container, .tasks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+    width: 100%;
+    box-sizing: border-box;
+}
 
-/* ---------- XP Bar / Прогресс-бары ---------- */  
-.overall-progress-wrap { max-width: 640px; margin: 0 auto; }  
-.xp-bar {  
-  position: relative; height: 30px; border-radius: 4px; background: #e9e4d4;  
-  border: 2px solid #6b6449; box-shadow: inset 0 2px 4px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.25); overflow: hidden;  
-}  
-.xp-fill {  
-  height: 100%; width: 0%; background-color: var(--xp-green);  
-  background-image: linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,50,20,0) 60%, rgba(0,50,20,.25) 100%);  
-  box-shadow: inset 0 2px 3px rgba(255,255,255,.55), inset 0 -3px 5px rgba(0,60,0,.35);  
-  border-right: 2px solid var(--xp-green-dark); transition: width .3s ease;  
-}  
-.xp-text {  
-  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;  
-  font-weight: bold; font-size: 12.5px; color: #20351f; text-shadow: 0 1px 1px rgba(255,255,255,.5);  
-  font-family: "Segoe UI", sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 8px;  
-}  
+/* Светлая белая карточка строки */
+.task-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: #ffffff;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px 16px;
+    gap: 14px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.03);
+    box-sizing: border-box;
+    width: 100%;
+    transition: border-color 0.2s, transform 0.2s;
+}
 
-.missed-wrap, .update-wrap { max-width: 640px; margin: 10px auto 0 auto; display: none; }  
-.missed-wrap.visible, .update-wrap.visible { display: block; }  
-.update-fill {  
-  height: 100%; width: 100%; background-color: #6fb3e0;  
-  background-image: linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(0,30,60,.2) 100%);  
-  box-shadow: inset 0 2px 3px rgba(255,255,255,.55), inset 0 -3px 5px rgba(0,30,60,.3); cursor: pointer;  
-}  
-.update-text {  
-  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;  
-  font-weight: bold; font-size: 13px; color: #0c2c42; text-shadow: 0 1px 1px rgba(255,255,255,.5);  
-  font-family: "Segoe UI", sans-serif; cursor: pointer;  
-}  
-.warn-fill {  
-  height: 100%; width: 100%; background-color: var(--warn);  
-  background-image: linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(90,40,0,.2) 100%);  
-  box-shadow: inset 0 2px 3px rgba(255,255,255,.55), inset 0 -3px 5px rgba(90,40,0,.3);  
-}  
-.warn-text {  
-  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;  
-  font-weight: bold; font-size: 13px; color: var(--warn-text-color, #3a2705); text-shadow: 0 1px 1px rgba(255,255,255,.3);  
-  font-family: "Segoe UI", sans-serif;  
-}  
+.task-row:hover {
+    border-color: var(--primary-color);
+}
 
-/* ---------- Счётчик часов и Личные цели ---------- */  
-.hour-bar-wrap { max-width: 640px; margin: 10px auto 0 auto; display: none; }  
-.hour-bar-wrap.visible { display: block; }  
-.hour-bar {  
-  position: relative; height: 30px; border-radius: 4px; background: #e9e4d4;  
-  border: 2px solid #6b6449; box-shadow: inset 0 2px 4px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.25);  
-  overflow: hidden; cursor: pointer;  
-}  
-.hour-bar-light-fill {  
-  position: absolute; top: 0; left: 0; bottom: 0; width: 0%; z-index: 1; background-color: #29B6F6;  
-  background-image: linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(0,30,60,.2) 100%);  
-  box-shadow: inset 0 2px 3px rgba(255,255,255,.55), inset 0 -3px 5px rgba(0,30,60,.3); transition: width .3s ease;  
-}  
-.hour-bar-dark-fill {  
-  position: absolute; top: 0; left: 0; bottom: 0; width: 0%; z-index: 2; background-color: #0277BD;  
-  background-image: linear-gradient(180deg, rgba(255,255,255,.35) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(0,20,40,.25) 100%);  
-  box-shadow: inset 0 2px 3px rgba(255,255,255,.4), inset 0 -3px 5px rgba(0,20,40,.35); transition: width .3s ease;  
-}  
-.hour-bar-zone-text {  
-  position: absolute; top: 0; bottom: 0; z-index: 3; display: flex; align-items: center; justify-content: center;  
-  font-weight: bold; font-size: 12.5px; color: #20351f; text-shadow: 0 1px 1px rgba(255,255,255,.5);  
-  font-family: "Segoe UI", sans-serif; overflow: hidden; white-space: nowrap; pointer-events: none;  
-}  
-.hour-input-overlay { display: none; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; }  
-.hour-input-overlay.open { display: flex; }  
-.hour-input-mask {  
-  width: 90px; text-align: center; font-family: "Courier New", monospace; font-size: 18px;  
-  letter-spacing: 2px; padding: 8px 6px; border: 1px solid var(--groove-shadow); border-radius: 6px;  
-  background: #fffef8; color: var(--ink);  
-}  
-.hour-input-confirm, .hour-input-cancel, .hour-input-info {  
-  width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--wood);  
-  background: #fffaf0; color: var(--wood); font-size: 16px; font-weight: bold; cursor: pointer;  
-  display: flex; align-items: center; justify-content: center;
-}  
-.hour-input-confirm:hover, .hour-input-cancel:hover, .hour-input-info:hover { background: var(--gold-light); }  
-.hour-reset-btn {  
-  display: none; margin: 10px auto 0 auto; padding: 8px 16px; background: var(--danger);  
-  color: #f4e6c8; border: 1px solid var(--danger-dark); border-radius: 6px;  
-  font-family: "Segoe UI", sans-serif; font-size: 12.5px; cursor: pointer;  
-}  
-.hour-year-bar { cursor: pointer; padding: 0; }  
-.hour-year-collapsed { position: absolute; inset: 0; }  
-.hour-year-bar.expanded .hour-year-collapsed { display: none; }  
-.hour-year-segments { position: absolute; inset: 0; display: none; }  
-.hour-year-bar.expanded .hour-year-segments { display: flex; }  
-.hour-year-segment, .hour-year-remaining {  
-  height: 100%; display: flex; align-items: center; justify-content: center;  
-  font-size: 11.5px; font-weight: bold; color: #20351f; text-shadow: 0 1px 1px rgba(255,255,255,.5);  
-  font-family: "Segoe UI", sans-serif;  
-}  
-.hour-year-segment {  
-  background-color: #29B6F6;  
-  background-image: linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(0,30,60,.2) 100%);  
-  box-shadow: inset 2px 0 2px -1px rgba(255,255,255,.6), inset -2px 0 2px -1px rgba(0,30,60,.45);  
-  overflow: hidden; white-space: nowrap;  
-}  
+.task-row.completed {
+    background-color: #f8fafc;
+    opacity: 0.75;
+}
 
-.goals-list-inline { display: flex; flex-direction: column; gap: 10px; }  
-.goals-list-inline:not(:empty) { margin-top: 10px; }  
-.goals-toggle-wrap { display: none; justify-content: center; margin-top: 6px; }  
-.goals-toggle-wrap.visible { display: flex; }  
-.goals-toggle-btn {  
-  background: none; border: none; color: var(--wood); font-size: 18px; line-height: 1;  
-  cursor: pointer; padding: 4px 18px; opacity: .85; transition: transform .2s ease, opacity .15s ease;  
-}  
-.goals-toggle-btn:hover { opacity: 1; }  
-.goals-toggle-btn.open { transform: rotate(180deg); }  
-.goals-band {  
-  display: none; width: 100vw; margin-left: calc(50% - 50vw); margin-right: calc(50% - 50vw);  
-  max-height: 0; overflow: hidden; background: rgba(0,0,0,.06); transition: max-height .3s ease;  
-}  
-.goals-band.reduced-mode { display: block; }  
-.goals-band.open { max-height: 4000px; }  
-.goals-list { display: flex; flex-direction: column; gap: 10px; max-width: 640px; margin: 0 auto; padding: 12px 18px; }  
-.goal-bar {  
-  position: relative; height: 30px; border-radius: 4px; background: #e9e4d4;  
-  border: 2px solid #6b6449; box-shadow: inset 0 2px 4px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.25);  
-  overflow: hidden; cursor: pointer;  
-}  
-.goal-fill {  
-  position: absolute; top: 0; left: 0; bottom: 0; width: 0%;  
-  background-image: linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(0,0,0,.2) 100%);  
-  box-shadow: inset 0 2px 3px rgba(255,255,255,.5), inset 0 -3px 5px rgba(0,0,0,.3); transition: width .3s ease;  
-}  
-.goal-bar-text {  
-  position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center;  
-  font-weight: bold; font-size: 12.5px; color: #20351f; text-shadow: 0 1px 1px rgba(255,255,255,.6);  
-  font-family: "Segoe UI", sans-serif; pointer-events: none; padding: 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;  
-}  
-.goal-task-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }  
-.goal-task-row input[type=checkbox] { width: 20px; height: 20px; flex-shrink: 0; }  
-.goal-task-row input[type=text] {  
-  flex: 1; padding: 8px 10px; border: 1px solid var(--groove-shadow); border-radius: 6px;  
-  background: #fffef8; color: var(--ink); font-family: "Palatino Linotype", Georgia, serif; font-size: 13px;  
-}  
-.goal-task-remove { background: none; border: none; color: #8a2f1c; font-size: 20px; line-height: 1; cursor: pointer; flex-shrink: 0; }  
-.goal-color-square { width: 40px; height: 40px; border-radius: 6px; border: 2px solid var(--groove-shadow); cursor: pointer; flex-shrink: 0; }  
-.goal-color-grid { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 10px; }  
-.goal-color-grid button { width: 40px; height: 40px; border-radius: 6px; border: 2px solid rgba(0,0,0,.2); cursor: pointer; }
+.task-row.completed label {
+    text-decoration: line-through;
+    color: var(--text-secondary);
+}
+
+/* Стабильное выравнивание чекбокса внутри плашки */
+.task-row input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+    flex-shrink: 0; /* Не даёт чекбоксу сжиматься или вылетать */
+    accent-color: var(--primary-color); /* Сохраняет единый стиль во всех браузерах */
+}
+
+/* Текст названия книги */
+.task-row label {
+    flex-grow: 1;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-primary);
+    cursor: pointer;
+    user-select: none;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+/* Кнопки действий */
+.task-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.btn-icon {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.btn-icon:hover {
+    background-color: #fee2e2;
+    color: #ef4444;
+}
+
+/* Прогресс-бар */
+.progress-container {
+    width: 100%;
+    background-color: #e2e8f0;
+    border-radius: 8px;
+    height: 12px;
+    overflow: hidden;
+    margin: 10px 0;
+}
+
+.progress-bar {
+    height: 100%;
+    background-color: var(--primary-color);
+    width: 0%;
+    transition: width 0.3s ease-in-out;
+    border-radius: 8px;
+}
+
+/* Кнопки */
+.btn-primary {
+    background-color: var(--primary-color);
+    color: #ffffff;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.btn-primary:hover {
+    background-color: var(--primary-hover);
+}
+
+.empty-state {
+    text-align: center;
+    padding: 24px;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-style: italic;
+}
 
