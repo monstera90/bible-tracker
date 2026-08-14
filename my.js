@@ -213,13 +213,15 @@
     var newChecked, newColor;
 
     if(!wasChecked){
-      newChecked = true; newColor = "green";
+      // первая отметка сразу получает цвет — для "green" не было CSS-стиля,
+      // из-за чего глава визуально оставалась обычной (некрашеной)
+      newChecked = true; newColor = "blue";
     } else if(prevColor === "blue"){
       newChecked = true; newColor = "red";
     } else if(prevColor === "red"){
       newChecked = false; newColor = null;
     } else {
-      // отмечена, но без цвета (или зелёная) — следующий шаг: голубая
+      // отмечена, но без цвета (устаревшие записи) — следующий шаг: голубая
       newChecked = true; newColor = "blue";
     }
 
