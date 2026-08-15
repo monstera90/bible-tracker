@@ -2556,6 +2556,34 @@
     var b = Math.max(0, (n & 0xff) - amount);
     return "rgb(" + r + "," + g + "," + b + ")";
   }
+  // Толщина стенки в данном угле обода: у переднего края (angle=180°)
+  // толщина полная (depth), у заднего (angle=0°) — не ноль, а MIN_WALL_FRAC
+  // от depth, плавно убывая между ними. Без этого минимума задняя половина
+  // диска выглядит совсем плоской ("без объёма") — стенка у неё физически
+  // была бы полностью скрыта собственной верхней гранью диска, но
+  // нарисованный так эллипс перестаёт читаться как объёмный целиком.
+  var MOOD_WALL_MIN_FRAC = 0.4;
+  function moodWallThickness(depth, angleDeg){
+    var t = (1 - Math.cos(angleDeg * Math.PI/180)) / 2; // 0 сзади, 1 спереди
+    return depth * (MOOD_WALL_MIN_FRAC + (1 - MOOD_WALL_MIN_FRAC) * t);
+  }
+  // Лента-стенка вдоль обода: полигон из точек верхнего края (толщина 0)
+  // и точек нижнего края (толщина moodWallThickness на каждый угол), а не
+  // фиксированный сдвиг всего среза вниз — так толщина стенки плавно
+  // меняется по углу и никогда не пропадает совсем.
+  function buildMoodWallRibbonPath(rx, ry, depth, startAngle, endAngle){
+    var steps = Math.max(2, Math.ceil((endAngle - startAngle) / 6));
+    var tops = [], bottoms = [];
+    for(var i=0; i<=steps; i++){
+      var a = startAngle + (endAngle - startAngle) * i / steps;
+      var top = polarPointEllipse(0, 0, rx, ry, a);
+      var th = moodWallThickness(depth, a);
+      tops.push(top.x.toFixed(2) + "," + top.y.toFixed(2));
+      bottoms.push(top.x.toFixed(2) + "," + (top.y + th).toFixed(2));
+    }
+    bottoms.reverse();
+    return "M " + tops.join(" L ") + " L " + bottoms.join(" L ") + " Z";
+  }
 
   function buildMoodDiagramSVG(counts, total){
     var wrap = document.getElementById("moodDiagramWrap");
@@ -2604,21 +2632,26 @@
       // залиты тёмным вариантом цвета и лежат в одной группе с верхним
       // срезом по data-dx/data-dy, чтобы при разъезжании кусок уезжал
       // целиком, вместе со всеми своими гранями, а не только "крышкой".
+      // Толщина у краёв (start/end) берётся той же функцией moodWallThickness,
+      // что и у ободной ленты — грани стыкуются без ступеньки.
       var pStartTop = polarPointEllipse(0, 0, rx, ry, start);
       var pEndTop = polarPointEllipse(0, 0, rx, ry, end);
-      var pStartBottom = polarPointEllipse(0, depth, rx, ry, start);
-      var pEndBottom = polarPointEllipse(0, depth, rx, ry, end);
+      var thStart = moodWallThickness(depth, start);
+      var thEnd = moodWallThickness(depth, end);
+      var pStartBottom = {x: pStartTop.x, y: pStartTop.y + thStart};
+      var pEndBottom = {x: pEndTop.x, y: pEndTop.y + thEnd};
       var sideStartPath = ["M", "0,0", "L", pStartTop.x.toFixed(2)+","+pStartTop.y.toFixed(2),
-        "L", pStartBottom.x.toFixed(2)+","+pStartBottom.y.toFixed(2), "L", "0,"+depth, "Z"].join(" ");
+        "L", pStartBottom.x.toFixed(2)+","+pStartBottom.y.toFixed(2), "L", "0,"+thStart.toFixed(2), "Z"].join(" ");
       var sideEndPath = ["M", "0,0", "L", pEndTop.x.toFixed(2)+","+pEndTop.y.toFixed(2),
-        "L", pEndBottom.x.toFixed(2)+","+pEndBottom.y.toFixed(2), "L", "0,"+depth, "Z"].join(" ");
+        "L", pEndBottom.x.toFixed(2)+","+pEndBottom.y.toFixed(2), "L", "0,"+thEnd.toFixed(2), "Z"].join(" ");
       var wallStr =
         '<g class="mood-diagram-wall" data-dx="' + dx.toFixed(3) + '" data-dy="' + dy.toFixed(3) + '" ' +
         'transform="translate(' + (dx*collapsedOffset).toFixed(2) + ',' + (dy*collapsedOffset).toFixed(2) + ')">' +
         '<path d="' + sideStartPath + '" fill="' + wallColor + '"></path>' +
         '<path d="' + sideEndPath + '" fill="' + wallColor + '"></path>' +
-        '<path d="' + describeArcPathEllipse(0, depth, rx, ry, start, end) + '" fill="' + wallColor + '"></path>' +
+        '<path d="' + buildMoodWallRibbonPath(rx, ry, depth, start, end) + '" fill="' + wallColor + '"></path>' +
         '</g>';
+
 
       var sliceStr =
         '<g class="mood-diagram-slice" data-dx="' + dx.toFixed(3) + '" data-dy="' + dy.toFixed(3) + '" ' +
