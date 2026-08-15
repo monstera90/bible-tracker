@@ -365,62 +365,83 @@
     font-family:"Segoe UI","Tahoma",sans-serif;
   }
 
-  /* ---------- карта дней года (сетка активности по типу GitHub) ---------- */
-  .year-grid-wrap{
-    max-width:640px;
-    margin:10px auto 0 auto;
-    display:none;
+  /* ---------- карта дней года (вертикальная сетка активности, живёт
+     внутри третьей вкладки настроек — см. .settings-tab / #settingsTabContent).
+     Прокручивается только сама сетка (year-grid-v-scroll), чтобы окно
+     вкладки не становилось выше, чем у остальных вкладок настроек. ---------- */
+  .year-grid-stats{
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:13px;
+    color:var(--ink);
+    text-align:center;
+    margin:0 0 10px 0;
   }
-  .year-grid-wrap.visible{ display:block; }
-  .year-grid-scroll{
-    overflow-x:auto;
-    overflow-y:hidden;
+
+  .year-grid-tab-title{
+    text-align:center;
+    font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
+    font-size:15px;
+    letter-spacing:.5px;
+    color:var(--wood);
+    margin:0 0 10px 0;
+  }
+
+  .year-grid-v-scroll{
+    max-height:160px;
+    overflow-y:auto;
+    overflow-x:hidden;
     -webkit-overflow-scrolling:touch;
-    padding-bottom:3px;
+    border:1px solid var(--groove-shadow);
     border-radius:6px;
+    padding:8px 6px;
+    background:rgba(0,0,0,.03);
   }
-  .year-grid-scroll::-webkit-scrollbar{ height:5px; }
-  .year-grid-scroll::-webkit-scrollbar-thumb{ background:var(--groove-shadow); border-radius:3px; }
-  .year-grid-inner{
-    display:inline-flex;
-    flex-direction:column;
-    gap:3px;
-    padding:6px 4px;
+  .year-grid-v-scroll::-webkit-scrollbar{ width:5px; }
+  .year-grid-v-scroll::-webkit-scrollbar-thumb{ background:var(--groove-shadow); border-radius:3px; }
+
+  .year-grid-v-row{
+    display:flex;
+    align-items:center;
+    gap:2px;
   }
-  .year-grid-months{
-    position:relative;
-    height:11px;
-  }
-  .year-grid-month-label{
-    position:absolute;
-    top:0;
+  .year-grid-v-row + .year-grid-v-row{ margin-top:2px; }
+  .year-grid-v-header{ margin-bottom:5px; }
+  .year-grid-v-month-label{
+    width:22px;
+    flex-shrink:0;
     font-size:9px;
     font-family:"Segoe UI","Tahoma",sans-serif;
     color:var(--ink-soft);
-    white-space:nowrap;
+    text-align:right;
+    padding-right:3px;
+    box-sizing:border-box;
+    line-height:10px;
   }
-  .year-grid-cols{
-    display:flex;
-    gap:2px;
+  .year-grid-v-weekday{
+    width:10px;
+    flex:1 1 10px;
+    font-size:8px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    color:var(--ink-soft);
+    text-align:center;
+    line-height:10px;
   }
-  .year-grid-col{
-    display:flex;
-    flex-direction:column;
-    gap:2px;
-  }
-  .year-grid-cell{
-    width:9px;height:9px;
+  .year-grid-v-cell{
+    width:10px;height:10px;
+    flex:1 1 10px;
+    max-width:10px;
     border-radius:2px;
     background:var(--parchment-dark);
     border:1px solid rgba(0,0,0,.1);
     cursor:pointer;
     box-sizing:border-box;
+    display:inline-block;
   }
-  .year-grid-cell.empty{ visibility:hidden; cursor:default; }
-  .year-grid-cell.future{ opacity:.4; cursor:default; }
-  .year-grid-cell.light{ background:var(--xp-green); border-color:rgba(0,0,0,.12); }
-  .year-grid-cell.dark{ background:var(--xp-green-dark); border-color:rgba(0,0,0,.18); }
-  .year-grid-cell.today{ box-shadow:0 0 0 1px var(--wood); border-color:var(--wood); }
+  .year-grid-v-cell.empty{ visibility:hidden; cursor:default; }
+  .year-grid-v-cell.future{ opacity:.4; cursor:default; }
+  .year-grid-v-cell.light{ background:var(--xp-green); border-color:rgba(0,0,0,.12); }
+  .year-grid-v-cell.dark{ background:var(--xp-green-dark); border-color:rgba(0,0,0,.18); }
+  .year-grid-v-cell.today{ box-shadow:0 0 0 1px var(--wood); border-color:var(--wood); }
 
   .year-grid-legend{
     display:flex;
@@ -430,27 +451,10 @@
     font-family:"Segoe UI","Tahoma",sans-serif;
     font-size:12px;
     color:var(--ink-soft);
-    margin:14px 0 4px 0;
+    margin:8px 0 0 0;
   }
-  .year-grid-legend .year-grid-cell{ cursor:default; }
+  .year-grid-legend .year-grid-v-cell{ cursor:default; flex:none; }
   .year-grid-legend-sep{ margin:0 2px; opacity:.6; }
-
-  .year-grid-stats{
-    font-family:"Segoe UI","Tahoma",sans-serif;
-    font-size:13px;
-    color:var(--ink);
-    text-align:center;
-    margin:14px 0 4px 0;
-    line-height:1.6;
-  }
-  .year-grid-note{
-    font-family:"Segoe UI","Tahoma",sans-serif;
-    font-size:11px;
-    color:var(--ink-soft);
-    font-style:italic;
-    text-align:center;
-    margin-top:6px;
-  }
 
   .year-day-modal-title{
     text-align:center;
