@@ -377,12 +377,33 @@
   }
   .goals-list-inline:not(:empty){ margin-top:10px; }
 
-  /* режим "Видеть меньше прогресс-баров": треугольник + отдельная
-     светлая полоса на всю ширину экрана, второй частью шапки */
+  /* режим "Видеть меньше прогресс-баров": сворачиваемая полоса с личными
+     целями, тем же стилем и фоном, что и остальные бары (без подложки).
+     Треугольник стоит последним элементом, после всех баров — он их
+     не разделяет, а просто сворачивает/разворачивает список целей. */
+  .goals-band{
+    display:none;
+    max-height:0;
+    overflow:hidden;
+    margin-top:10px;
+    transition:max-height .3s ease;
+  }
+  .goals-band.reduced-mode{ display:block; }
+  .goals-band.open{ max-height:4000px; }
+
+  .goals-list{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    max-width:640px;
+    margin:0 auto;
+    padding:0 18px;
+  }
+
   .goals-toggle-wrap{
     display:none;
     justify-content:center;
-    margin-top:6px;
+    margin-top:10px;
   }
   .goals-toggle-wrap.visible{ display:flex; }
   .goals-toggle-btn{
@@ -398,28 +419,6 @@
     transition:opacity .15s ease;
   }
   .goals-toggle-btn:hover{ opacity:1; }
-
-  .goals-band{
-    display:none;
-    width:100vw;
-    margin-left:calc(50% - 50vw);
-    margin-right:calc(50% - 50vw);
-    max-height:0;
-    overflow:hidden;
-    background:rgba(255,255,255,.10);
-    transition:max-height .3s ease;
-  }
-  .goals-band.reduced-mode{ display:block; }
-  .goals-band.open{ max-height:4000px; }
-
-  .goals-list{
-    display:flex;
-    flex-direction:column;
-    gap:10px;
-    max-width:640px;
-    margin:0 auto;
-    padding:12px 18px;
-  }
 
   .goal-bar{
     position:relative;
