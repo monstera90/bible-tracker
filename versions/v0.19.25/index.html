@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>График чтения Библии</title>
+<link rel="icon" type="image/png" href="icon-192x192.png">
+<link rel="apple-touch-icon" href="icon-192x192.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#5c3d24">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Библия">
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="footer.css">
+<link rel="stylesheet" href="modals.css">
+</head>
+<body>
+
+<header>
+  <div class="sync-status" id="syncStatusPill" data-state="off">
+    <span class="sync-dot"></span>
+    <span id="syncStatusText">Синхронизация выкл.</span>
+  </div>
+
+  <div class="mood-status" id="moodStatusPill" style="display:none;">😀</div>
+
+  <h1>ГРАФИК ЧТЕНИЯ БИБЛИИ</h1>
+  <p class="quote" id="dailyQuote">«Счастлив тот, кто… находит радость в законе Иеговы и читает его вполголоса день и ночь» (Псалом 1:1, 2).</p>
+  <div class="overall-progress-wrap">
+    <div class="xp-bar">
+      <div class="xp-fill" id="overallFill"></div>
+      <div class="xp-text" id="overallText">0 из 1189 глав (0%)</div>
+    </div>
+  </div>
+
+  <div class="hour-bar-wrap" id="hourMonthWrap">
+    <div class="hour-bar" id="hourMonthBar">
+      <div class="hour-bar-light-fill" id="hourMonthLightFill"></div>
+      <div class="hour-bar-dark-fill" id="hourMonthDarkFill"></div>
+      <div class="hour-bar-zone-text" id="hourMonthAchievedText"></div>
+      <div class="hour-bar-zone-text" id="hourMonthRemainingText"></div>
+    </div>
+    <div class="hour-input-overlay" id="hourMonthOverlay">
+      <input type="text" class="hour-input-mask" id="hourMonthInput" inputmode="numeric" placeholder="__.__" maxlength="6">
+      <button class="hour-input-confirm" id="hourMonthConfirm" title="Подтвердить">&#10003;</button>
+      <button class="hour-input-cancel" id="hourMonthCancel" title="Отмена">&times;</button>
+      <button class="hour-input-info" id="hourMonthInfo" title="Статистика за месяц">i</button>
+    </div>
+    <button class="hour-reset-btn" id="hourMonthResetBtn" style="display:none;">Сбросить счётчик</button>
+  </div>
+
+  <div class="hour-bar-wrap" id="hourYearWrap">
+    <div class="hour-bar hour-year-bar" id="hourYearBar">
+      <div class="hour-year-collapsed" id="hourYearCollapsed">
+        <div class="hour-bar-light-fill" id="hourYearLightFill"></div>
+        <div class="hour-bar-dark-fill" id="hourYearDarkFill"></div>
+        <div class="hour-bar-zone-text" id="hourYearAchievedText"></div>
+        <div class="hour-bar-zone-text" id="hourYearRemainingText"></div>
+      </div>
+      <div class="hour-year-segments" id="hourYearSegments"></div>
+    </div>
+  </div>
+
+  <div class="goals-list-inline" id="goalsListInline"></div>
+
+  <div class="missed-wrap" id="missedWrap">
+    <div class="xp-bar">
+      <div class="warn-fill"></div>
+      <div class="warn-text" id="missedText"></div>
+    </div>
+  </div>
+
+  <div class="update-wrap" id="updateWrap">
+    <div class="xp-bar" id="updateBar">
+      <div class="update-fill"></div>
+      <div class="update-text" id="updateText">Доступна новая версия этого графика</div>
+    </div>
+  </div>
+
+  <div class="goals-band" id="goalsBand">
+    <div class="goals-list" id="goalsList"></div>
+  </div>
+  <div class="goals-toggle-wrap" id="goalsToggleWrap">
+    <button class="goals-toggle-btn" id="goalsToggleBtn" title="Свернуть/развернуть личные цели">&#9660;</button>
+  </div>
+</header>
+
+<main id="booksContainer"></main>
+
+<footer>
+  <div class="theme-picker">
+    <div class="theme-picker-label">Тема оформления</div>
+    <div class="theme-dots" id="themeDots"></div>
+  </div>
+
+  <div class="footer-buttons-row">
+    <button class="versions-btn" id="versionsBtn">Версии</button>
+    <button class="settings-gear-btn" id="settingsGearBtn" title="Настройки">&#9881;</button>
+  </div>
+
+  <div class="app-version" id="appVersionText">v0.18.0</div>
+</footer>
+
+<!-- ===== модальное окно настроек (шестерёнка) ===== -->
+<div class="settings-modal-overlay" id="settingsModalOverlay">
+  <div class="settings-modal-frame">
+    <div class="settings-modal-box" id="settingsModalBox">
+      <button class="modal-close" id="settingsModalClose">&times;</button>
+      <div class="settings-tab-content" id="settingsTabContent"></div>
+    </div>
+    <div class="settings-tabs" id="settingsTabs">
+      <button class="settings-tab active" id="settingsTabGearBtn" title="Настройки">&#9881;</button>
+      <button class="settings-tab muted" id="settingsTabMoodBtn" title="Диаграмма настроения" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"></circle>
+          <path d="M8.5 10.5h.01"></path>
+          <path d="M15.5 10.5h.01"></path>
+          <path d="M8 15c1.2 1.2 2.5 1.8 4 1.8s2.8-.6 4-1.8"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== модальное окно синхронизации ===== -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal-box" id="modalBox">
+    <!-- содержимое рисуется скриптом -->
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+
+<script src="my.js"></script>
+
+</body>
+</html>

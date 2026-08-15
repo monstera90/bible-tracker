@@ -1,0 +1,21 @@
+{
+  "name": "График чтения Библии",
+  "short_name": "Библия",
+  "id": "bible-tracker",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f1e6cd",
+  "theme_color": "#5c3d24",
+  "icons": [
+    {
+      "src": "icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
