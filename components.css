@@ -291,7 +291,7 @@
     background:#fffef8;
     color:var(--ink);
   }
-  .hour-input-confirm, .hour-input-cancel{
+  .hour-input-confirm, .hour-input-cancel, .hour-input-info{
     width:36px;height:36px;
     border-radius:50%;
     border:2px solid var(--wood);
@@ -301,7 +301,8 @@
     font-weight:bold;
     cursor:pointer;
   }
-  .hour-input-confirm:hover, .hour-input-cancel:hover{ background:var(--gold-light); }
+  .hour-input-confirm:hover, .hour-input-cancel:hover, .hour-input-info:hover{ background:var(--gold-light); }
+  .hour-input-info{ font-family:Georgia,"Palatino Linotype",serif; font-style:italic; }
 
   .hour-reset-btn{
     display:none;

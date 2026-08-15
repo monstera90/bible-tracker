@@ -2266,6 +2266,51 @@
     });
   }
 
+  // накопленное с начала месяца время на каждую дату, где были записи
+  // (последняя запись дня "выигрывает" отображаемое значение на эту дату).
+  // отдаём от новых дат к старым.
+  function getMonthCumulativeStats(){
+    var periodStart = getMonthPeriodStart();
+    if(!periodStart) return [];
+    var entries = [];
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("hourlog:") === 0 && state[k] && typeof state[k].c === "number" && state[k].t >= periodStart){
+        entries.push({minutes: state[k].c, t: state[k].t});
+      }
+    });
+    entries.sort(function(a,b){ return a.t - b.t; });
+    function pad2(n){ return (n < 10 ? "0" : "") + n; }
+    var rows = [];
+    var running = 0;
+    var lastKey = null;
+    entries.forEach(function(e){
+      running += e.minutes;
+      var d = new Date(e.t);
+      var key = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
+      if(key === lastKey){
+        rows[rows.length - 1].minutes = running;
+      } else {
+        rows.push({label: pad2(d.getDate()) + "." + pad2(d.getMonth() + 1), minutes: running});
+        lastKey = key;
+      }
+    });
+    rows.reverse();
+    return rows;
+  }
+
+  function openHourMonthStatsModal(){
+    if(modalOverlay.classList.contains("open")) return;
+    var rows = getMonthCumulativeStats();
+    var body = rows.length
+      ? rows.map(function(r){
+          return '<div class="settings-row"><span>' + r.label + '</span><span>' + formatHHMM(r.minutes) + '</span></div>';
+        }).join("")
+      : '<div class="version-history-empty">В этом месяце пока нет записей.</div>';
+    modalBox.innerHTML = modalHeader("Статистика за месяц") + body;
+    bindClose();
+    modalOverlay.classList.add("open");
+  }
+
   function openRemoveHourCounterConfirm(){
     modalBox.innerHTML =
       modalHeader("Весь прогресс будет потерян. Уверены?") +
@@ -2289,6 +2334,8 @@
   if(hourMonthConfirm) hourMonthConfirm.addEventListener("click", function(e){ e.stopPropagation(); confirmHourInput("hourMonth"); });
   var hourMonthCancel = document.getElementById("hourMonthCancel");
   if(hourMonthCancel) hourMonthCancel.addEventListener("click", function(e){ e.stopPropagation(); closeHourInputOverlay("hourMonth"); });
+  var hourMonthInfo = document.getElementById("hourMonthInfo");
+  if(hourMonthInfo) hourMonthInfo.addEventListener("click", function(e){ e.stopPropagation(); openHourMonthStatsModal(); });
   var hourMonthResetBtn = document.getElementById("hourMonthResetBtn");
   if(hourMonthResetBtn) hourMonthResetBtn.addEventListener("click", function(e){ e.stopPropagation(); resolveDeferredHourReset(); });
   var hourYearBar = document.getElementById("hourYearBar");
