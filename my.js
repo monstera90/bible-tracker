@@ -931,7 +931,7 @@
     if(scanRAF){ cancelAnimationFrame(scanRAF); scanRAF = null; }
     if(activeStream){ activeStream.getTracks().forEach(function(t){ t.stop(); }); activeStream = null; }
   }
-  function closeModal(){ stopCamera(); modalOverlay.classList.remove("open"); modalBox.innerHTML = ""; }
+  function closeModal(){ stopCamera(); modalOverlay.classList.remove("open"); modalBox.classList.remove("year-day-modal"); modalBox.innerHTML = ""; }
   function openModal(){ modalOverlay.classList.add("open"); renderModalHome(); }
   modalOverlay.addEventListener("click", function(e){ if(e.target === modalOverlay) closeModal(); });
   syncStatusPill.addEventListener("click", openModal);
@@ -3136,6 +3136,20 @@
       rowsHtml += '</div>';
     }
 
+    // невидимая строка-распорка внизу ленты (те же классы строки/клеток —
+    // поэтому её высота автоматически совпадает с обычной строкой при любой
+    // ширине экрана). Она не участвует в подсчёте и не кликабельна (нет
+    // data-day-ts), а нужна только для того, чтобы при прокрутке до упора
+    // вниз (см. requestAnimationFrame ниже и ручную прокрутку пользователем)
+    // самая свежая настоящая строка поднималась выше нижнего края примерно
+    // на один квадрат и полностью выходила из-под затемняющей маски-тумана
+    // (.year-grid-v-scroll, см. mask-image в components.css).
+    rowsHtml += '<div class="year-grid-v-row year-grid-v-spacer-row"><span class="year-grid-v-month-label"></span>';
+    for(var sp = 0; sp < 7; sp++){
+      rowsHtml += '<span class="year-grid-v-cell empty"></span>';
+    }
+    rowsHtml += '</div>';
+
     return {html: headerHtml + rowsHtml, activeDays: activeDays};
   }
 
@@ -3194,6 +3208,7 @@
         '</div>';
     }
 
+    modalBox.classList.add("year-day-modal");
     modalBox.innerHTML =
       modalHeader(weekdayLabel.charAt(0).toUpperCase() + weekdayLabel.slice(1)) +
       '<div class="year-day-modal-title">' + escapeHtml(formatDayFull(dayTs)) + '</div>' +
@@ -3234,7 +3249,6 @@
         '<div class="year-grid-legend-row"><span class="year-grid-v-cell light"></span><span>— один вид активности: чтение, доп. счётчик или выполненная задача цели</span></div>' +
         '<div class="year-grid-legend-row"><span class="year-grid-v-cell dark"></span><span>— два вида активности из этих трёх в один день</span></div>' +
         '<div class="year-grid-legend-row"><span class="year-grid-v-cell darkest"></span><span>— все три вида активности в один день</span></div>' +
-        '<div class="year-grid-legend-note">Настроение на цвет клетки не влияет — оно видно только в карточке дня по тапу.</div>' +
       '</div>';
 
     container.innerHTML =

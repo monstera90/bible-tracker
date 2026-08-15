@@ -425,9 +425,10 @@
     padding:6px 2px;
     -webkit-mask-image:linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
     mask-image:linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
+    scrollbar-width:none;
+    -ms-overflow-style:none;
   }
-  .year-grid-v-scroll::-webkit-scrollbar{ width:5px; }
-  .year-grid-v-scroll::-webkit-scrollbar-thumb{ background:var(--groove-shadow); border-radius:3px; }
+  .year-grid-v-scroll::-webkit-scrollbar{ display:none; width:0; height:0; }
 
   .year-grid-v-row{
     display:flex;
@@ -506,13 +507,6 @@
     width:16px;height:16px;
     aspect-ratio:auto;
     cursor:default;
-  }
-  .year-grid-legend-note{
-    margin-top:8px;
-    padding-top:8px;
-    border-top:1px solid var(--groove-shadow);
-    font-style:italic;
-    line-height:1.4;
   }
 
   .year-day-goal-item{
