@@ -249,6 +249,7 @@
     updateOverallProgress();
     updateMissedBanner();
     scheduleCloudPush();
+    renderYearGrid();
   }
 
   // ===================== ТЕМЫ =====================
@@ -729,6 +730,7 @@
     renderMoodMenu();
     renderGoalsSection();
     renderAddGoalMenu();
+    renderYearGrid();
   }
 
   // ===================== СБРОС ПРОГРЕССА =====================
@@ -1658,13 +1660,18 @@
   function refreshSettingsTabsVisibility(){
     var moodTab = document.getElementById("settingsTabMoodBtn");
     if(moodTab) moodTab.style.display = isMoodEnabled() ? "block" : "none";
+    var yearTab = document.getElementById("settingsTabYearBtn");
+    if(yearTab) yearTab.style.display = isYearGridEnabled() ? "block" : "none";
   }
   function switchSettingsTab(tab){
     var gearBtn = document.getElementById("settingsTabGearBtn");
     var moodBtn = document.getElementById("settingsTabMoodBtn");
+    var yearBtn = document.getElementById("settingsTabYearBtn");
     if(gearBtn) gearBtn.classList.toggle("active", tab === "gear");
     if(moodBtn) moodBtn.classList.toggle("active", tab === "mood");
+    if(yearBtn) yearBtn.classList.toggle("active", tab === "year");
     if(tab === "mood") renderSettingsTabMood();
+    else if(tab === "year") renderSettingsTabYear();
     else renderSettingsTabGear();
   }
 
@@ -1675,9 +1682,11 @@
     var moodOn = isMoodEnabled();
     var reducedOn = getGoalsReducedView();
     var colorMarkOn = getColorMarkEnabled();
+    var yearGridOn = isYearGridEnabled();
     container.innerHTML =
       '<div class="settings-row"><span>Добавить дополнительный счётчик</span><input type="checkbox" id="settingsHourCb"' + (hourOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Добавить счётчик настроения</span><input type="checkbox" id="settingsMoodCb"' + (moodOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row"><span>Добавить карту дней года</span><input type="checkbox" id="settingsYearGridCb"' + (yearGridOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" style="border-bottom:none;"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
       '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:16px;">Добавить для себя цель</button>' +
@@ -1719,6 +1728,11 @@
         refreshSettingsTabsVisibility();
         renderSettingsTabGear();
       }
+    });
+
+    document.getElementById("settingsYearGridCb").addEventListener("change", function(){
+      if(this.checked) activateYearGrid();
+      else deactivateYearGrid();
     });
 
     document.getElementById("settingsReducedCb").addEventListener("change", function(){
@@ -1781,8 +1795,10 @@
 
   var settingsTabGearBtn = document.getElementById("settingsTabGearBtn");
   var settingsTabMoodBtn = document.getElementById("settingsTabMoodBtn");
+  var settingsTabYearBtn = document.getElementById("settingsTabYearBtn");
   if(settingsTabGearBtn) settingsTabGearBtn.addEventListener("click", function(){ switchSettingsTab("gear"); });
   if(settingsTabMoodBtn) settingsTabMoodBtn.addEventListener("click", function(){ switchSettingsTab("mood"); });
+  if(settingsTabYearBtn) settingsTabYearBtn.addEventListener("click", function(){ switchSettingsTab("year"); });
 
   var settingsModalClose = document.getElementById("settingsModalClose");
   if(settingsModalClose) settingsModalClose.addEventListener("click", closeSettingsModal);
@@ -1846,6 +1862,7 @@
     state[id] = {c: minutes, t: Date.now()};
     saveLocalState();
     scheduleCloudPush();
+    renderYearGrid();
   }
   function recordMonthSegment(periodStart, totalMinutes){
     state["hoursegment:" + periodStart] = {c: totalMinutes, t: Date.now()};
@@ -2581,6 +2598,7 @@
       saveLocalState();
       scheduleCloudPush();
       renderMoodPill();
+      renderYearGrid();
       closeModal();
     });
   }
@@ -2869,6 +2887,242 @@
   var moodStatusPill = document.getElementById("moodStatusPill");
   if(moodStatusPill) moodStatusPill.addEventListener("click", openMoodCheckin);
 
+  // ===================== КАРТА ДНЕЙ ГОДА =====================
+  // Компактная сетка "один квадратик = один день года", как в GitHub-графике
+  // коммитов. Своего отдельного лога не ведёт — цвет каждого дня считается
+  // на лету по уже существующим данным:
+  //  - светло-зелёный: в этот день была отмечена хотя бы одна глава (ключи
+  //    вида "БукваКниги|Номер", т.е. содержащие "|" — см. buildExportData);
+  //  - тёмно-зелёный: в этот день, помимо чтения, было и служение
+  //    (записи "hourlog:") — но подробные записи "hourlog:" хранятся только
+  //    примерно за последний скользящий месяц (см. pruneOldHourLogsForStats),
+  //    поэтому для более старых дней служение не может быть учтено отдельно
+  //    и такой день, при наличии чтения, всегда будет светло-зелёным.
+  // Настроение в цвет клетки не входит — оно показывается только в
+  // детализации по тапу на день (записи "moodlog:" не удаляются никогда,
+  // поэтому доступны за весь год).
+  var YEAR_GRID_ENABLED_KEY = "__yearGridEnabled";
+
+  function isYearGridEnabled(){ var r = state[YEAR_GRID_ENABLED_KEY]; return !!(r && r.c); }
+  function activateYearGrid(){
+    state[YEAR_GRID_ENABLED_KEY] = {c:true, t:Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+    refreshSettingsTabsVisibility();
+    renderYearGrid();
+  }
+  function deactivateYearGrid(){
+    state[YEAR_GRID_ENABLED_KEY] = {c:false, t:Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+    refreshSettingsTabsVisibility();
+    renderYearGrid();
+  }
+
+  var MONTH_NAMES_SHORT = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
+  var MONTH_NAMES_FULL = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
+  var WEEKDAY_NAMES_FULL = ["воскресенье","понедельник","вторник","среда","четверг","пятница","суббота"];
+
+  function formatDayFull(ts){
+    var d = new Date(ts);
+    return d.getDate() + " " + MONTH_NAMES_FULL[d.getMonth()] + " " + d.getFullYear();
+  }
+
+  // сколько глав было отмечено в каждый день (по ключам вида "Книга|Глава")
+  function getReadingCountsByDay(){
+    var byDay = {};
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("|") === -1) return;
+      var rec = state[k];
+      if(!rec || rec.c !== true) return;
+      var day = startOfDay(rec.t);
+      byDay[day] = (byDay[day] || 0) + 1;
+    });
+    return byDay;
+  }
+
+  // сколько минут служения записано в каждый день (только "сырые" hourlog:,
+  // доступные примерно за последний месяц — см. комментарий выше)
+  function getServiceMinutesByDay(){
+    var byDay = {};
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("hourlog:") !== 0) return;
+      var rec = state[k];
+      if(!rec || typeof rec.c !== "number") return;
+      var day = startOfDay(rec.t);
+      byDay[day] = (byDay[day] || 0) + rec.c;
+    });
+    return byDay;
+  }
+
+  // список отметок настроения в каждый день (ключи "moodlog:", не удаляются)
+  function getMoodsByDay(){
+    var byDay = {};
+    var floor = getMoodDataResetAt();
+    var cats = moodCategoriesResolved();
+    var catByKey = {};
+    cats.forEach(function(c){ catByKey[c.key] = c; });
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("moodlog:") !== 0) return;
+      var rec = state[k];
+      if(!rec || typeof rec.c !== "string" || rec.t < floor) return;
+      var cat = catByKey[rec.c];
+      if(!cat) return;
+      var day = startOfDay(rec.t);
+      (byDay[day] = byDay[day] || []).push(cat);
+    });
+    return byDay;
+  }
+
+  // --- рендер сетки в основном окне (шапка приложения) ---
+  function renderYearGrid(){
+    var wrap = document.getElementById("yearGridWrap");
+    var colsHolder = document.getElementById("yearGridCols");
+    var monthsHolder = document.getElementById("yearGridMonths");
+    if(!wrap || !colsHolder || !monthsHolder) return;
+
+    if(!isYearGridEnabled()){
+      wrap.classList.remove("visible");
+      wrap.style.display = "none";
+      return;
+    }
+    wrap.style.display = "";
+    wrap.classList.add("visible");
+
+    var readingByDay = getReadingCountsByDay();
+    var serviceByDay = getServiceMinutesByDay();
+
+    var now = new Date();
+    var year = now.getFullYear();
+    var todayStart = startOfDay(now.getTime());
+    var jan1 = new Date(year, 0, 1).getTime();
+    var dec31 = new Date(year, 11, 31).getTime();
+    // понедельник = 0 ... воскресенье = 6
+    var jan1Weekday = (new Date(jan1).getDay() + 6) % 7;
+    var gridStart = jan1 - jan1Weekday * DAY_MS;
+    var totalDays = Math.round((dec31 - gridStart) / DAY_MS) + 1;
+    var totalCols = Math.ceil(totalDays / 7);
+
+    var CELL_PX = 9, GAP_PX = 2;
+    var colWidth = CELL_PX + GAP_PX;
+
+    colsHolder.innerHTML = "";
+    var monthLabelsHtml = "";
+    var lastMonthShown = -1;
+
+    for(var col = 0; col < totalCols; col++){
+      var colEl = document.createElement("div");
+      colEl.className = "year-grid-col";
+      var colFirstDay = gridStart + col * 7 * DAY_MS;
+      var colFirstMonth = new Date(colFirstDay).getMonth();
+      if(colFirstDay >= jan1 && colFirstMonth !== lastMonthShown){
+        lastMonthShown = colFirstMonth;
+        monthLabelsHtml += '<span class="year-grid-month-label" style="left:' + (col * colWidth) + 'px;">' +
+          MONTH_NAMES_SHORT[colFirstMonth] + '</span>';
+      }
+      for(var row = 0; row < 7; row++){
+        var dayTs = colFirstDay + row * DAY_MS;
+        var cell = document.createElement("div");
+        cell.className = "year-grid-cell";
+        if(dayTs < jan1 || dayTs > dec31){
+          cell.classList.add("empty");
+        } else if(dayTs > todayStart){
+          cell.classList.add("future");
+        } else {
+          var chapters = readingByDay[dayTs] || 0;
+          var minutes = serviceByDay[dayTs] || 0;
+          if(chapters > 0 && minutes > 0) cell.classList.add("dark");
+          else if(chapters > 0) cell.classList.add("light");
+          if(dayTs === todayStart) cell.classList.add("today");
+          (function(ts){
+            cell.addEventListener("click", function(){ openYearDayModal(ts); });
+          })(dayTs);
+        }
+        colEl.appendChild(cell);
+      }
+      colsHolder.appendChild(colEl);
+    }
+    monthsHolder.innerHTML = monthLabelsHtml;
+
+    // при первом показе сразу прокручиваем к текущей неделе
+    var scrollHolder = document.getElementById("yearGridScroll");
+    if(scrollHolder){
+      requestAnimationFrame(function(){
+        scrollHolder.scrollLeft = Math.max(0, scrollHolder.scrollWidth - scrollHolder.clientWidth);
+      });
+    }
+  }
+
+  // --- детализация по тапу на день ---
+  function openYearDayModal(dayTs){
+    var readingByDay = getReadingCountsByDay();
+    var serviceByDay = getServiceMinutesByDay();
+    var moodsByDay = getMoodsByDay();
+
+    var chapters = readingByDay[dayTs] || 0;
+    var minutes = serviceByDay[dayTs] || 0;
+    var moods = moodsByDay[dayTs] || [];
+
+    var d = new Date(dayTs);
+    var weekdayLabel = WEEKDAY_NAMES_FULL[d.getDay()];
+    var rows = "";
+
+    if(chapters > 0){
+      rows += '<div class="year-day-stat-row"><span class="year-day-stat-icon">📖</span><span>' +
+        chapters + " " + pluralRu(chapters, ["глава","главы","глав"]) + " прочитано</span></div>";
+    }
+    if(minutes > 0){
+      rows += '<div class="year-day-stat-row"><span class="year-day-stat-icon">🕓</span><span>Служение: ' +
+        formatHHMM(minutes) + '</span></div>';
+    }
+    if(moods.length){
+      var moodHtml = moods.map(function(m){ return m.emoji + " " + escapeHtml(m.label); }).join(", ");
+      rows += '<div class="year-day-stat-row"><span class="year-day-stat-icon">🙂</span><span>Настроение: ' + moodHtml + '</span></div>';
+    }
+    if(!rows){
+      rows = '<div class="year-day-empty">В этот день активность не отмечена.</div>';
+    }
+
+    modalBox.innerHTML =
+      modalHeader(weekdayLabel.charAt(0).toUpperCase() + weekdayLabel.slice(1)) +
+      '<div class="year-day-modal-title">' + escapeHtml(formatDayFull(dayTs)) + '</div>' +
+      rows;
+    bindClose();
+    modalOverlay.classList.add("open");
+  }
+
+  // --- третья вкладка настроек: включение/выключение и пояснение к карте ---
+  function renderSettingsTabYear(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+
+    var readingByDay = getReadingCountsByDay();
+    var activeDays = Object.keys(readingByDay).length;
+    var year = new Date().getFullYear();
+
+    container.innerHTML =
+      '<div class="mood-diagram-title">Карта дней ' + year + ' года</div>' +
+      '<div class="year-grid-stats">Отмечено дней с чтением в этом году: ' + activeDays + '</div>' +
+      '<div class="year-grid-legend">' +
+        '<span>Меньше</span>' +
+        '<span class="year-grid-cell"></span>' +
+        '<span class="year-grid-cell light"></span>' +
+        '<span class="year-grid-cell dark"></span>' +
+        '<span>Больше</span>' +
+      '</div>' +
+      '<div class="year-grid-legend"><span class="year-grid-cell light"></span><span>— было чтение</span><span class="year-grid-legend-sep">·</span><span class="year-grid-cell dark"></span><span>— чтение и служение</span></div>' +
+      '<div class="year-grid-note">Сама карта отображается в шапке главного экрана. Тапните на день там, чтобы увидеть подробности.</div>' +
+      '<div class="settings-row" style="border-top:1px solid var(--groove-shadow); margin-top:16px; border-bottom:none;"><span>Показывать карту дней года</span><input type="checkbox" id="settingsYearGridTabCb" checked></div>';
+
+    document.getElementById("settingsYearGridTabCb").addEventListener("change", function(){
+      if(!this.checked){
+        deactivateYearGrid();
+        renderSettingsTabGear();
+        switchSettingsTab("gear");
+      }
+    });
+  }
+
   // ===================== ЛИЧНЫЕ ЦЕЛИ =====================
   // Каждая цель — отдельный уникальный ключ state["goal:<id>"], поэтому
   // объединение между устройствами работает автоматически (та же схема,
@@ -3156,7 +3410,9 @@
   renderMoodMenu();
   renderGoalsSection();
   renderAddGoalMenu();
-  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); checkHourBoundaries(); renderMoodPill(); }, 30 * 60 * 1000);
+  refreshSettingsTabsVisibility();
+  renderYearGrid();
+  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); checkHourBoundaries(); renderMoodPill(); renderYearGrid(); }, 30 * 60 * 1000);
   checkUpdateSnoozeExpiry();
 
 })();
