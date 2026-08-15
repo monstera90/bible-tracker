@@ -2670,10 +2670,24 @@
       var frontness = -Math.cos(mid * Math.PI/180);
       records.push({frontness: frontness, wallStr: wallStr, sliceStr: sliceStr});
 
-      var labelR = rx + 26;
-      var lx = cx + Math.cos(dirRad)*labelR;
-      var ly = cy + Math.sin(dirRad)*(ry+22);
-      emojiParts.push('<div class="mood-diagram-emoji" style="position:absolute;left:' + lx.toFixed(1) + 'px;top:' + ly.toFixed(1) + 'px;transform:translate(-50%,-50%);">' + cat.emoji + '</div>');
+      // Отступ смайлика теперь считается от РЕАЛЬНОЙ дальней границы куска —
+      // точки на ободе плюс толщина стенки в этом угле (moodWallThickness),
+      // а не от фиксированных цифр. Раньше отступ по Y не учитывал, что
+      // стенка сама выступает вниз ещё почти на всю глубину — из-за этого
+      // у широких кусков (например у "спокойствия") смайлик почти касался
+      // стенки. Теперь margin откладывается от фактического края куска.
+      var rimAtMid = polarPointEllipse(0, 0, rx, ry, mid);
+      var wallThAtMid = moodWallThickness(depth, mid);
+      var farX = rimAtMid.x, farY = rimAtMid.y + wallThAtMid;
+      var labelMargin = 24;
+      var lx = cx + farX + Math.cos(dirRad)*labelMargin;
+      var ly = cy + farY + Math.sin(dirRad)*labelMargin;
+      emojiParts.push(
+        '<div class="mood-diagram-emoji" data-dx="' + dx.toFixed(3) + '" data-dy="' + dy.toFixed(3) + '" style="' +
+        'position:absolute;left:' + lx.toFixed(1) + 'px;top:' + ly.toFixed(1) + 'px;' +
+        'transform:translate(-50%,-50%) translate(' + (dx*collapsedOffset).toFixed(2) + 'px,' + (dy*collapsedOffset).toFixed(2) + 'px);">' +
+        cat.emoji + '</div>'
+      );
     });
 
     // рисуем от дальних кусков к ближним: сначала те, что мысленно "сзади"
@@ -2705,6 +2719,17 @@
         var dx = parseFloat(g.getAttribute("data-dx"));
         var dy = parseFloat(g.getAttribute("data-dy"));
         g.setAttribute("transform", "translate(" + (dx*offset).toFixed(2) + "," + (dy*offset).toFixed(2) + ")");
+      });
+      // смайлики едут тем же смещением, что и их куски (та же пара
+      // data-dx/data-dy и то же collapsedOffset/expandedOffset) — тогда
+      // расстояние между смайликом и его куском не меняется и остаётся
+      // таким же безопасным, как в закрытом виде, так что пересечься они
+      // не могут ни в одном из двух состояний.
+      var emojis = wrap.querySelectorAll(".mood-diagram-emoji");
+      emojis.forEach(function(el){
+        var dx = parseFloat(el.getAttribute("data-dx"));
+        var dy = parseFloat(el.getAttribute("data-dy"));
+        el.style.transform = "translate(-50%,-50%) translate(" + (dx*offset).toFixed(2) + "px," + (dy*offset).toFixed(2) + "px)";
       });
     });
   }
