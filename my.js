@@ -1963,7 +1963,10 @@
     if(carryMinutes > 0){
       state["hourlog:" + newStart + "-carry"] = {c: carryMinutes, t: newStart};
     }
-    pruneStaleHourLogs(newStart);
+    // старые записи периода больше не удаляем сразу: они нужны для
+    // статистики за скользящий месяц (см. pruneOldHourLogsForStats) и
+    // больше не участвуют в подсчёте текущего периода — все суммы
+    // фильтруются по актуальному periodStart
     saveLocalState();
     scheduleCloudPush();
     renderHourBars();
@@ -2202,6 +2205,7 @@
   // календарные границы (реальное 1 число месяца / 1 сентября) — отдельно
   // от "наверстывания", которое привязано не к календарю, а к вводу часов
   function checkHourBoundaries(){
+    pruneOldHourLogsForStats();
     var goal = getHourGoal();
     if(!goal || modalOverlay.classList.contains("open")) return;
     var periodStart = getMonthPeriodStart();
@@ -2266,49 +2270,109 @@
     });
   }
 
-  // накопленное с начала месяца время на каждую дату, где были записи
-  // (последняя запись дня "выигрывает" отображаемое значение на эту дату).
-  // отдаём от новых дат к старым.
+  // ---- статистика за скользящий календарный месяц (независимо от того,
+  // когда закрывался текущий период счётчика) ----
+
+  // начало окна хранения: сегодняшняя дата минус 1 календарный месяц, 00:00
+  function getStatsCutoffTs(){
+    var d = new Date();
+    d.setHours(0,0,0,0);
+    d.setMonth(d.getMonth() - 1);
+    return d.getTime();
+  }
+
+  // записи старше скользящего месяца нигде не нужны (ни локально, ни в
+  // облаке) — удаляем их и, если что-то удалили, отправляем изменение дальше
+  function pruneOldHourLogsForStats(){
+    var cutoff = getStatsCutoffTs();
+    var removed = false;
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("hourlog:") === 0 && state[k] && typeof state[k].t === "number" && state[k].t < cutoff){
+        delete state[k];
+        removed = true;
+      }
+    });
+    if(removed){
+      saveLocalState();
+      scheduleCloudPush();
+    }
+  }
+
+  // накопленное с начала месяца время, сгруппированное по датам, где были
+  // записи, за последний календарный месяц (не привязано к текущему
+  // периоду счётчика — переход на новый период данные не стирает).
+  // для каждой даты хранится массив накопленных значений на момент каждой
+  // отдельной записи этого дня, от новых к старым.
   function getMonthCumulativeStats(){
-    var periodStart = getMonthPeriodStart();
-    if(!periodStart) return [];
+    var cutoff = getStatsCutoffTs();
     var entries = [];
     Object.keys(state).forEach(function(k){
-      if(k.indexOf("hourlog:") === 0 && state[k] && typeof state[k].c === "number" && state[k].t >= periodStart){
+      if(k.indexOf("hourlog:") === 0 && state[k] && typeof state[k].c === "number" && state[k].t >= cutoff){
         entries.push({minutes: state[k].c, t: state[k].t});
       }
     });
     entries.sort(function(a,b){ return a.t - b.t; });
     function pad2(n){ return (n < 10 ? "0" : "") + n; }
-    var rows = [];
+    var days = [];
     var running = 0;
     var lastKey = null;
     entries.forEach(function(e){
       running += e.minutes;
       var d = new Date(e.t);
       var key = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
-      if(key === lastKey){
-        rows[rows.length - 1].minutes = running;
-      } else {
-        rows.push({label: pad2(d.getDate()) + "." + pad2(d.getMonth() + 1), minutes: running});
+      if(key !== lastKey){
+        days.push({label: pad2(d.getDate()) + "." + pad2(d.getMonth() + 1), values: []});
         lastKey = key;
       }
+      days[days.length - 1].values.push(running);
     });
-    rows.reverse();
-    return rows;
+    days.forEach(function(day){ day.values.reverse(); }); // внутри дня — новые записи сверху
+    days.reverse(); // дни — от новых к старым
+    return days;
+  }
+
+  function hourStatsRowHtml(label, minutes, mark, extraClass){
+    return '<div class="settings-row hour-stats-row' + (extraClass ? " " + extraClass : "") + '">' +
+      '<span class="hour-stats-left"><span class="hour-stats-mark">' + (mark ? "*" : "") + '</span><span>' + label + '</span></span>' +
+      '<span>' + formatHHMM(minutes) + '</span>' +
+    '</div>';
   }
 
   function openHourMonthStatsModal(){
     if(modalOverlay.classList.contains("open")) return;
-    var rows = getMonthCumulativeStats();
-    var body = rows.length
-      ? rows.map(function(r){
-          return '<div class="settings-row"><span>' + r.label + '</span><span>' + formatHHMM(r.minutes) + '</span></div>';
-        }).join("")
-      : '<div class="version-history-empty">В этом месяце пока нет записей.</div>';
+    pruneOldHourLogsForStats();
+    var days = getMonthCumulativeStats();
+    var body = days.length ? days.map(function(day, idx){
+      var hasMultiple = day.values.length > 1;
+      if(!hasMultiple){
+        return hourStatsRowHtml(day.label, day.values[0], false);
+      }
+      var collapsed = hourStatsRowHtml(day.label, day.values[0], true, "hour-stats-toggle");
+      var expandedRows = day.values.map(function(v){
+        return hourStatsRowHtml(day.label, v, false, "hour-stats-toggle");
+      }).join("");
+      return '<div class="hour-stats-day" data-day="' + idx + '">' +
+        '<div class="hour-stats-collapsed">' + collapsed + '</div>' +
+        '<div class="hour-stats-expanded" style="display:none;">' + expandedRows + '</div>' +
+      '</div>';
+    }).join("") : '<div class="version-history-empty">За последний месяц пока нет записей.</div>';
     modalBox.innerHTML = modalHeader("Статистика за месяц") + body;
     bindClose();
     modalOverlay.classList.add("open");
+    Array.prototype.forEach.call(modalBox.querySelectorAll(".hour-stats-day"), function(dayEl){
+      var collapsed = dayEl.querySelector(".hour-stats-collapsed");
+      var expanded = dayEl.querySelector(".hour-stats-expanded");
+      collapsed.addEventListener("click", function(){
+        collapsed.style.display = "none";
+        expanded.style.display = "block";
+      });
+      Array.prototype.forEach.call(expanded.querySelectorAll(".hour-stats-row"), function(row){
+        row.addEventListener("click", function(){
+          expanded.style.display = "none";
+          collapsed.style.display = "block";
+        });
+      });
+    });
   }
 
   function openRemoveHourCounterConfirm(){

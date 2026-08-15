@@ -152,6 +152,23 @@
   }
   .settings-row input[type=checkbox]{ width:22px;height:22px;flex-shrink:0; }
 
+  /* ---------- статистика по счётчику часов (табличка дат) ---------- */
+  .hour-stats-row{ cursor:default; }
+  .hour-stats-row.hour-stats-toggle{ cursor:pointer; }
+  .hour-stats-row.hour-stats-toggle:hover{ background:var(--parchment-dark); }
+  .hour-stats-left{
+    display:flex;
+    align-items:center;
+  }
+  .hour-stats-mark{
+    display:inline-block;
+    width:14px;
+    flex-shrink:0;
+    color:var(--wood);
+    font-weight:bold;
+  }
+  .hour-stats-expanded .hour-stats-row{ padding-left:4px; }
+
   /* ---------- sync modal ---------- */
   .modal-overlay{
     position:fixed;
