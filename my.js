@@ -2571,7 +2571,8 @@
     var ryRatio = ry/rx;
 
     var cum = 0;
-    var defsParts = [], wallParts = [], sliceParts = [], emojiParts = [];
+    var defsParts = [], emojiParts = [];
+    var records = [];
 
     cats.forEach(function(cat, idx){
       var p = counts[cat.key] / total;
@@ -2611,28 +2612,44 @@
         "L", pStartBottom.x.toFixed(2)+","+pStartBottom.y.toFixed(2), "L", "0,"+depth, "Z"].join(" ");
       var sideEndPath = ["M", "0,0", "L", pEndTop.x.toFixed(2)+","+pEndTop.y.toFixed(2),
         "L", pEndBottom.x.toFixed(2)+","+pEndBottom.y.toFixed(2), "L", "0,"+depth, "Z"].join(" ");
-      wallParts.push(
+      var wallStr =
         '<g class="mood-diagram-wall" data-dx="' + dx.toFixed(3) + '" data-dy="' + dy.toFixed(3) + '" ' +
         'transform="translate(' + (dx*collapsedOffset).toFixed(2) + ',' + (dy*collapsedOffset).toFixed(2) + ')">' +
         '<path d="' + sideStartPath + '" fill="' + wallColor + '"></path>' +
         '<path d="' + sideEndPath + '" fill="' + wallColor + '"></path>' +
         '<path d="' + describeArcPathEllipse(0, depth, rx, ry, start, end) + '" fill="' + wallColor + '"></path>' +
-        '</g>'
-      );
+        '</g>';
 
-      sliceParts.push(
+      var sliceStr =
         '<g class="mood-diagram-slice" data-dx="' + dx.toFixed(3) + '" data-dy="' + dy.toFixed(3) + '" ' +
         'transform="translate(' + (dx*collapsedOffset).toFixed(2) + ',' + (dy*collapsedOffset).toFixed(2) + ')">' +
         '<path d="' + path + '" fill="' + color + '" stroke="rgba(255,255,255,.6)" stroke-width="1.5"></path>' +
         '<path d="' + path + '" fill="url(#' + gradId + ')" stroke="none"></path>' +
-        '</g>'
-      );
+        '</g>';
+
+      // frontness: насколько кусок обращён "к зрителю" (к нижнему краю
+      // эллипса, mid=180°) — от -1 (совсем сзади, у mid=0°) до +1 (совсем
+      // спереди). Кладём в records вместе с фигурами, чтобы отрисовать их
+      // по правилу "дальние сначала, ближние поверх" (как в живописи) —
+      // иначе соседний кусок, который просто оказался позже в массиве
+      // категорий, мог перекрывать стенку своего соседа, который на самом
+      // деле должен быть виден спереди.
+      var frontness = -Math.cos(mid * Math.PI/180);
+      records.push({frontness: frontness, wallStr: wallStr, sliceStr: sliceStr});
 
       var labelR = rx + 26;
       var lx = cx + Math.cos(dirRad)*labelR;
       var ly = cy + Math.sin(dirRad)*(ry+22);
       emojiParts.push('<div class="mood-diagram-emoji" style="position:absolute;left:' + lx.toFixed(1) + 'px;top:' + ly.toFixed(1) + 'px;transform:translate(-50%,-50%);">' + cat.emoji + '</div>');
     });
+
+    // рисуем от дальних кусков к ближним: сначала те, что мысленно "сзади"
+    // диаграммы (у верхнего края эллипса), последними — те, что "спереди"
+    // (у нижнего края). Тогда сосед, который ближе к зрителю, всегда
+    // корректно перекрывает грань того, что дальше, а не наоборот.
+    records.sort(function(a, b){ return a.frontness - b.frontness; });
+    var wallParts = records.map(function(r){ return r.wallStr; });
+    var sliceParts = records.map(function(r){ return r.sliceStr; });
 
     wrap.innerHTML =
       '<div style="position:relative;width:' + size + 'px;height:' + (size) + 'px;">' +
