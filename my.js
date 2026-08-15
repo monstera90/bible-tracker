@@ -990,7 +990,9 @@
         monthsToSeptember: getMonthsToSeptember(),
         note: "dailyHoursLog содержит только текущий незакрытый период — итоги закрытых месяцев доступны только суммарно, в closedMonthSegments",
         dailyHoursLog: [],
-        closedMonthSegments: []
+        closedMonthSegments: [],
+        notesEnabled: isHourNotesEnabled(),
+        dailyNotesLog: []
       },
       moodCounter: {
         enabled: isMoodEnabled(),
@@ -1029,6 +1031,11 @@
         periodStartDate: isoDate(Number(k.slice("hoursegment:".length))),
         totalHours: Math.round(rec.c/60)
       });
+    });
+
+    var notesByDay = getHourNotesByDay();
+    Object.keys(notesByDay).sort(function(a,b){ return Number(a)-Number(b); }).forEach(function(dayTs){
+      data.hourCounter.dailyNotesLog.push({date: isoDate(Number(dayTs)), comment: notesByDay[dayTs]});
     });
 
     var moodByDate = {};
@@ -1174,6 +1181,7 @@
           "- dailyReadingLog: по дням, какие главы Библии были прочитаны\n" +
           "- hourCounter.dailyHoursLog: по дням, сколько времени внесено (текущий период)\n" +
           "- hourCounter.closedMonthSegments: итоги уже закрытых месяцев (суммарно)\n" +
+          "- hourCounter.dailyNotesLog: по дням, комментарии к дополнительному счётчику\n" +
           "- moodCounter.dailyMoodLog: по дням, какое настроение отмечалось\n" +
           "- goalCompletions.dailyLog: по дням, какие задачи личных целей были отмечены выполненными (название цели и текст задачи) — эти записи сохраняются, даже если сама цель потом была удалена или галочка снята\n" +
           "Этот файл можно отдать нейросети для анализа корреляций между чтением, отмеченным временем и настроением.\n"
@@ -1690,11 +1698,13 @@
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     var hourOn = !!getHourGoal();
+    var hourNotesOn = isHourNotesEnabled();
     var moodOn = isMoodEnabled();
     var reducedOn = getGoalsReducedView();
     var colorMarkOn = getColorMarkEnabled();
     container.innerHTML =
       '<div class="settings-row"><span>Добавить дополнительный счётчик</span><input type="checkbox" id="settingsHourCb"' + (hourOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row" id="settingsHourNotesRow" style="' + (hourOn ? "" : "display:none;") + '"><span>Добавить комментарий в дополнительный счётчик</span><input type="checkbox" id="settingsHourNotesCb"' + (hourNotesOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Добавить счётчик настроения</span><input type="checkbox" id="settingsMoodCb"' + (moodOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" style="border-bottom:none;"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
@@ -1726,6 +1736,13 @@
         });
       }
     });
+
+    var settingsHourNotesCb = document.getElementById("settingsHourNotesCb");
+    if(settingsHourNotesCb){
+      settingsHourNotesCb.addEventListener("change", function(){
+        setHourNotesEnabled(this.checked);
+      });
+    }
 
     document.getElementById("settingsMoodCb").addEventListener("change", function(){
       var cb = this;
@@ -1828,9 +1845,46 @@
   var HOUR_YEAR_PERIOD_KEY = "__hourYearPeriodStart";
   var HOUR_MONTH_DEFERRED_KEY = "__hourMonthDeferred";
   var HOUR_YEAR_DEFERRED_KEY = "__hourYearDeferred";
+  var HOUR_NOTES_ENABLED_KEY = "__hourNotesEnabled";
   var HOUR_SEGMENT_LABEL_MIN = 10; // сегмент/остаток меньше 10 часов — число не показываем
 
   function getHourGoal(){ var r = state[HOUR_GOAL_KEY]; return (r && r.c) ? r.c : null; }
+  function isHourNotesEnabled(){ var r = state[HOUR_NOTES_ENABLED_KEY]; return !!(r && r.c); }
+  function setHourNotesEnabled(value){
+    state[HOUR_NOTES_ENABLED_KEY] = {c: value, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+  }
+
+  // ---- заметки дополнительного счётчика ("hournote:<началоДня>") ----
+  // Один ключ на день — значение полностью перезаписывается при
+  // редактировании (в т.ч. между устройствами: слияние — по последнему t,
+  // как и везде). Не пропалываются функцией pruneOldHourLogsForStats:
+  // в отличие от "сырых" hourlog:, заметки должны храниться и
+  // редактироваться сколь угодно давние ("Карта дней года").
+  function hourNoteKeyForDay(dayTs){ return "hournote:" + dayTs; }
+  function getHourNoteForDay(dayTs){
+    var rec = state[hourNoteKeyForDay(dayTs)];
+    return (rec && typeof rec.c === "string" && rec.c) ? rec.c : "";
+  }
+  function setHourNoteForDay(dayTs, text){
+    var trimmed = (text || "").trim();
+    state[hourNoteKeyForDay(dayTs)] = {c: trimmed ? trimmed : null, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+    refreshYearGridIfOpen();
+  }
+  function getHourNotesByDay(){
+    var byDay = {};
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("hournote:") !== 0) return;
+      var rec = state[k];
+      if(!rec || typeof rec.c !== "string" || !rec.c) return;
+      var day = Number(k.slice("hournote:".length));
+      byDay[day] = rec.c;
+    });
+    return byDay;
+  }
   function getMonthsToSeptember(){ var r = state[HOUR_MONTHS_KEY]; return (r && r.c) ? r.c : null; }
   function getRealMonthsAtActivation(){ var r = state[HOUR_REAL_MONTHS_KEY]; return (r && r.c) ? r.c : null; }
   function getMonthPeriodStart(){ var r = state[HOUR_MONTH_PERIOD_KEY]; return (r && r.c) ? r.c : null; }
@@ -2137,18 +2191,50 @@
     overlay.classList.toggle("open");
     if(overlay.classList.contains("open")){
       var input = document.getElementById(prefix + "Input");
-      if(input){ input.value = ""; input.style.borderColor = ""; input.focus(); }
+      if(input){ input.value = ""; input.style.borderColor = ""; }
+      // поле комментария за сегодня: показываем только если функция включена
+      // в настройках, и сразу подставляем уже существующий текст — чтобы
+      // повторное открытие бара за тот же день позволяло его редактировать,
+      // а не затирать новым
+      if(prefix === "hourMonth"){
+        var noteInput = document.getElementById("hourMonthNoteInput");
+        if(noteInput){
+          var notesOn = isHourNotesEnabled();
+          noteInput.style.display = notesOn ? "block" : "none";
+          noteInput.style.borderColor = "";
+          noteInput.value = notesOn ? getHourNoteForDay(startOfDay(Date.now())) : "";
+        }
+      }
+      if(input) input.focus();
     }
   }
   function confirmHourInput(prefix){
     var input = document.getElementById(prefix + "Input");
     if(!input) return;
-    var minutes = parseHourInput(input.value);
-    if(minutes === null || minutes <= 0){
+    var rawValue = input.value;
+    var hasRawValue = rawValue.trim().length > 0;
+    var minutes = parseHourInput(rawValue);
+
+    var notesOn = (prefix === "hourMonth") && isHourNotesEnabled();
+    var noteInput = notesOn ? document.getElementById("hourMonthNoteInput") : null;
+    var noteText = noteInput ? noteInput.value : "";
+    var hasNoteText = notesOn && noteText.trim().length > 0;
+
+    // часы введены, но не разобрались — явная ошибка формата
+    if(hasRawValue && (minutes === null || minutes <= 0)){
       input.style.borderColor = "#b0432e";
       return;
     }
-    addHourLogEntry(minutes);
+    // ничего не введено вовсе — ни часов, ни (при включённой функции) заметки
+    if(!hasRawValue && !hasNoteText){
+      input.style.borderColor = "#b0432e";
+      if(noteInput) noteInput.style.borderColor = "#b0432e";
+      return;
+    }
+
+    if(hasRawValue) addHourLogEntry(minutes);
+    if(notesOn) setHourNoteForDay(startOfDay(Date.now()), noteText);
+
     closeHourInputOverlay(prefix);
     renderHourBars();
     // режим "50" с выбранным числом месяцев больше реального — при каждом
@@ -2421,6 +2507,8 @@
     hourMonthInput.addEventListener("click", function(e){ e.stopPropagation(); });
     hourMonthInput.addEventListener("keydown", function(e){ if(e.key === "Enter") confirmHourInput("hourMonth"); });
   }
+  var hourMonthNoteInput = document.getElementById("hourMonthNoteInput");
+  if(hourMonthNoteInput) hourMonthNoteInput.addEventListener("click", function(e){ e.stopPropagation(); });
   var hourMonthConfirm = document.getElementById("hourMonthConfirm");
   if(hourMonthConfirm) hourMonthConfirm.addEventListener("click", function(e){ e.stopPropagation(); confirmHourInput("hourMonth"); });
   var hourMonthCancel = document.getElementById("hourMonthCancel");
@@ -3090,12 +3178,41 @@
       rows = '<div class="year-day-empty">В этот день активность не отмечена.</div>';
     }
 
+    // блок с комментарием этого дня: показываем и даём редактировать, если
+    // функция сейчас включена в настройках, либо если за этот день уже
+    // существует ранее сохранённая заметка (чтобы старые записи оставались
+    // доступны для просмотра/правки, даже если функцию потом выключили)
+    var existingNote = getHourNoteForDay(dayTs);
+    var noteSectionHtml = "";
+    if(isHourNotesEnabled() || existingNote){
+      noteSectionHtml =
+        '<div class="year-day-note-section">' +
+          '<div class="year-day-note-label">Комментарий за этот день</div>' +
+          '<textarea class="year-day-note-textarea" id="yearDayNoteInput" rows="3" placeholder="Комментарий…">' + escapeHtml(existingNote) + '</textarea>' +
+          '<button class="modal-btn year-day-note-savebtn" id="yearDayNoteSaveBtn">Сохранить комментарий</button>' +
+          '<div class="year-day-note-saved-msg" id="yearDayNoteSavedMsg">Сохранено.</div>' +
+        '</div>';
+    }
+
     modalBox.innerHTML =
       modalHeader(weekdayLabel.charAt(0).toUpperCase() + weekdayLabel.slice(1)) +
       '<div class="year-day-modal-title">' + escapeHtml(formatDayFull(dayTs)) + '</div>' +
-      rows;
+      rows + noteSectionHtml;
     bindClose();
     modalOverlay.classList.add("open");
+
+    var noteSaveBtn = document.getElementById("yearDayNoteSaveBtn");
+    if(noteSaveBtn){
+      noteSaveBtn.addEventListener("click", function(){
+        var textarea = document.getElementById("yearDayNoteInput");
+        setHourNoteForDay(dayTs, textarea ? textarea.value : "");
+        var savedMsg = document.getElementById("yearDayNoteSavedMsg");
+        if(savedMsg){
+          savedMsg.classList.add("visible");
+          setTimeout(function(){ savedMsg.classList.remove("visible"); }, 2000);
+        }
+      });
+    }
   }
 
   // --- третья вкладка настроек: сама карта на весь экран, со своей
