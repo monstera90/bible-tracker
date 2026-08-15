@@ -1644,18 +1644,27 @@
     settingsModalBox.style.height = "";
     settingsModalOverlay.classList.add("open");
     switchSettingsTab("gear");
-    lockSettingsModalHeight();
   }
   function closeSettingsModal(){
     settingsModalOverlay.classList.remove("open");
   }
-  // Высота окна всегда берётся от вкладки "настройки" (шестерёнка) — она
-  // открывается первой при каждом входе в окно. Остальные вкладки (например,
-  // диаграмма настроения) подстраиваются под эту высоту, а не задают свою,
-  // чтобы при переключении между вкладками окно не "прыгало" по размеру.
-  function lockSettingsModalHeight(){
+  // Высота окна подстраивается под содержимое активной вкладки: у вкладок
+  // "настройки" и "настроение" — под их естественную высоту (компактно), а
+  // у "карты дней" — растягивается на весь доступный максимум (см.
+  // .settings-modal-frame/.settings-modal-box max-height в CSS), чтобы
+  // квадратики карты могли использовать пространство по максимуму. Переход
+  // между размерами анимируется плавно (transition: height в CSS), а не
+  // "прыгает".
+  function lockSettingsModalHeightForTab(tab){
     if(!settingsModalBox) return;
-    settingsModalBox.style.height = settingsModalBox.scrollHeight + "px";
+    if(tab === "year"){
+      settingsModalBox.style.height = "";
+      var maxH = parseFloat(getComputedStyle(settingsModalBox).maxHeight);
+      settingsModalBox.style.height = (maxH ? maxH : settingsModalBox.scrollHeight) + "px";
+    } else {
+      settingsModalBox.style.height = "";
+      settingsModalBox.style.height = settingsModalBox.scrollHeight + "px";
+    }
   }
   function refreshSettingsTabsVisibility(){
     var moodTab = document.getElementById("settingsTabMoodBtn");
@@ -1668,9 +1677,13 @@
     if(gearBtn) gearBtn.classList.toggle("active", tab === "gear");
     if(moodBtn) moodBtn.classList.toggle("active", tab === "mood");
     if(yearBtn) yearBtn.classList.toggle("active", tab === "year");
+    if(settingsModalBox) settingsModalBox.classList.toggle("year-mode", tab === "year");
+    var container = document.getElementById("settingsTabContent");
+    if(container) container.classList.toggle("year-mode", tab === "year");
     if(tab === "mood") renderSettingsTabMood();
     else if(tab === "year") renderSettingsTabYear();
     else renderSettingsTabGear();
+    lockSettingsModalHeightForTab(tab);
   }
 
   function renderSettingsTabGear(){
@@ -2879,24 +2892,26 @@
   if(moodStatusPill) moodStatusPill.addEventListener("click", openMoodCheckin);
 
   // ===================== КАРТА ДНЕЙ ГОДА =====================
-  // Компактная сетка "один квадратик = один день года", как в GitHub-графике
-  // коммитов. Живёт внутри модалки настроек, на третьей вкладке (всегда
-  // видна, отдельного включения/выключения не требует). Своего лога не
-  // ведёт — цвет каждого дня считается на лету по уже существующим данным:
-  //  - светло-зелёный: в этот день была отмечена хотя бы одна глава (ключи
-  //    вида "БукваКниги|Номер", т.е. содержащие "|" — см. buildExportData);
-  //  - тёмно-зелёный: в этот день, помимо чтения, использовался и
-  //    дополнительный счётчик (записи "hourlog:") — но подробные записи
-  //    "hourlog:" хранятся только примерно за последний скользящий месяц
-  //    (см. pruneOldHourLogsForStats), поэтому для более старых дней это не
-  //    может быть учтено отдельно, и такой день, при наличии чтения, всегда
-  //    будет светло-зелёным.
-  // Настроение в цвет клетки не входит — оно показывается только в
-  // детализации по тапу на день (записи "moodlog:" не удаляются никогда,
-  // поэтому доступны за весь год).
+  // Компактная сетка "один квадратик = один день", как в GitHub-графике
+  // коммитов, но не привязана к календарному году — это скользящее окно
+  // за последние 365 дней, заканчивающееся сегодняшним днём. Живёт внутри
+  // модалки настроек, на третьей вкладке (всегда видна, отдельного
+  // включения/выключения не требует). Своего лога не ведёт — цвет каждого
+  // дня считается на лету по уже существующим данным, и в него входит
+  // любая отмеченная в этот день активность:
+  //  - чтение хотя бы одной главы (ключи вида "БукваКниги|Номер", т.е.
+  //    содержащие "|" — см. buildExportData);
+  //  - дополнительный счётчик (записи "hourlog:") — подробные записи
+  //    хранятся только примерно за последний скользящий месяц (см.
+  //    pruneOldHourLogsForStats), поэтому для более старых дней это не
+  //    может быть учтено;
+  //  - отметка настроения (записи "moodlog:", не удаляются никогда).
+  // Один отмеченный вид активности за день — клетка "light", два и
+  // более — "dark" (то есть насыщенность цвета показывает не количество
+  // глав, а разнообразие отметок за день).
   // Сетка строится заново при каждом открытии/перерисовке вкладки — она
-  // всегда читает актуальный state, поэтому только что отмеченное чтение
-  // сразу видно, без отдельного кеша.
+  // всегда читает актуальный state, поэтому только что отмеченная
+  // активность сразу видна, без отдельного кеша.
 
   var MONTH_NAMES_SHORT = ["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
   var MONTH_NAMES_FULL = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
@@ -2955,19 +2970,22 @@
   }
 
   // --- построение вертикальной сетки (недели сверху вниз, дни слева направо) ---
+  // Скользящее окно: последние 365 дней, включая сегодня, дополненное до
+  // целых недель (понедельник — воскресенье) с обеих сторон.
   function buildYearGridMarkup(){
     var readingByDay = getReadingCountsByDay();
     var serviceByDay = getServiceMinutesByDay();
+    var moodsByDay = getMoodsByDay();
 
     var now = new Date();
-    var year = now.getFullYear();
     var todayStart = startOfDay(now.getTime());
-    var jan1 = new Date(year, 0, 1).getTime();
-    var dec31 = new Date(year, 11, 31).getTime();
+    var windowStart = todayStart - 364 * DAY_MS; // 365 дней включительно
     // понедельник = 0 ... воскресенье = 6
-    var jan1Weekday = (new Date(jan1).getDay() + 6) % 7;
-    var gridStart = jan1 - jan1Weekday * DAY_MS;
-    var totalDays = Math.round((dec31 - gridStart) / DAY_MS) + 1;
+    var windowStartWeekday = (new Date(windowStart).getDay() + 6) % 7;
+    var gridStart = windowStart - windowStartWeekday * DAY_MS;
+    var todayWeekday = (new Date(todayStart).getDay() + 6) % 7;
+    var gridEnd = todayStart + (6 - todayWeekday) * DAY_MS;
+    var totalDays = Math.round((gridEnd - gridStart) / DAY_MS) + 1;
     var totalRows = Math.ceil(totalDays / 7);
 
     var headerHtml = '<div class="year-grid-v-row year-grid-v-header">' +
@@ -2979,11 +2997,12 @@
 
     var rowsHtml = "";
     var lastMonthShown = -1;
+    var activeDays = 0;
     for(var row = 0; row < totalRows; row++){
       var rowFirstDay = gridStart + row * 7 * DAY_MS;
       var rowFirstMonth = new Date(rowFirstDay).getMonth();
       var monthLabel = "";
-      if(rowFirstDay >= jan1 && rowFirstMonth !== lastMonthShown){
+      if(rowFirstDay >= windowStart && rowFirstMonth !== lastMonthShown){
         lastMonthShown = rowFirstMonth;
         monthLabel = MONTH_NAMES_SHORT[rowFirstMonth];
       }
@@ -2992,15 +3011,18 @@
         var dayTs = rowFirstDay + col * DAY_MS;
         var cls = "year-grid-v-cell";
         var attr = "";
-        if(dayTs < jan1 || dayTs > dec31){
+        if(dayTs < windowStart){
           cls += " empty";
         } else if(dayTs > todayStart){
           cls += " future";
         } else {
           var chapters = readingByDay[dayTs] || 0;
           var minutes = serviceByDay[dayTs] || 0;
-          if(chapters > 0 && minutes > 0) cls += " dark";
-          else if(chapters > 0) cls += " light";
+          var moods = moodsByDay[dayTs] || [];
+          var kinds = (chapters > 0 ? 1 : 0) + (minutes > 0 ? 1 : 0) + (moods.length > 0 ? 1 : 0);
+          if(kinds >= 2) cls += " dark";
+          else if(kinds === 1) cls += " light";
+          if(kinds > 0) activeDays++;
           if(dayTs === todayStart) cls += " today";
           attr = ' data-day-ts="' + dayTs + '"';
         }
@@ -3009,7 +3031,7 @@
       rowsHtml += '</div>';
     }
 
-    return {html: headerHtml + rowsHtml, year: year, activeDays: Object.keys(readingByDay).length};
+    return {html: headerHtml + rowsHtml, activeDays: activeDays};
   }
 
   // --- детализация по тапу на день ---
@@ -3050,26 +3072,30 @@
     modalOverlay.classList.add("open");
   }
 
-  // --- третья вкладка настроек: сама карта (вертикальная, со своей
-  // внутренней прокруткой) + пояснение под ней ---
+  // --- третья вкладка настроек: сама карта на весь экран, со своей
+  // внутренней прокруткой. Пояснение ("летопись") — не отдельный блок под
+  // сеткой, а первый элемент внутри той же прокрутки, над самой старой
+  // неделей: по умолчанию окно открыто прокрученным вниз (к сегодня), так
+  // что пояснение видно, только если докрутить ленту до самого верха. ---
   function renderSettingsTabYear(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
+    container.classList.add("year-mode");
 
     var built = buildYearGridMarkup();
 
+    var legendHtml =
+      '<div class="year-grid-legend-top">' +
+        '<div class="year-grid-legend-top-title">Как читать карту</div>' +
+        '<div class="year-grid-legend-row"><span class="year-grid-v-cell"></span><span>— в этот день отметок нет</span></div>' +
+        '<div class="year-grid-legend-row"><span class="year-grid-v-cell light"></span><span>— один вид отметки (чтение, доп. счётчик или настроение)</span></div>' +
+        '<div class="year-grid-legend-row"><span class="year-grid-v-cell dark"></span><span>— два и более вида отметок в этот день</span></div>' +
+      '</div>';
+
     container.innerHTML =
-      '<div class="year-grid-tab-title">Карта дней ' + built.year + ' года</div>' +
-      '<div class="year-grid-stats">Отмечено дней с чтением в этом году: ' + built.activeDays + '</div>' +
-      '<div class="year-grid-v-scroll" id="yearGridVScroll">' + built.html + '</div>' +
-      '<div class="year-grid-legend">' +
-        '<span>Меньше</span>' +
-        '<span class="year-grid-v-cell"></span>' +
-        '<span class="year-grid-v-cell light"></span>' +
-        '<span class="year-grid-v-cell dark"></span>' +
-        '<span>Больше</span>' +
-      '</div>' +
-      '<div class="year-grid-legend"><span class="year-grid-v-cell light"></span><span>— было чтение</span><span class="year-grid-legend-sep">·</span><span class="year-grid-v-cell dark"></span><span>— чтение и дополнительный счётчик</span></div>';
+      '<div class="year-grid-tab-title">Карта дней года</div>' +
+      '<div class="year-grid-stats">Дней с отметками за последние 365 дней: ' + built.activeDays + '</div>' +
+      '<div class="year-grid-v-scroll" id="yearGridVScroll">' + legendHtml + built.html + '</div>';
 
     var scrollHolder = document.getElementById("yearGridVScroll");
     if(scrollHolder){
@@ -3079,7 +3105,8 @@
         var ts = Number(cell.getAttribute("data-day-ts"));
         if(!isNaN(ts)) openYearDayModal(ts);
       });
-      // сразу прокручиваем к текущей неделе (в самый низ сетки)
+      // сразу прокручиваем к текущей неделе (в самый низ сетки) — пояснение
+      // наверху ленты остаётся скрыто, пока не прокрутить наверх вручную
       requestAnimationFrame(function(){
         scrollHolder.scrollTop = scrollHolder.scrollHeight;
       });

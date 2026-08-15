@@ -90,9 +90,9 @@
   .settings-modal-overlay.open{ display:flex; }
   .settings-modal-frame{
     position:relative;
-    max-width:340px;
+    max-width:380px;
     width:100%;
-    max-height:82vh;
+    max-height:90vh;
   }
   .settings-modal-box{
     position:relative;
@@ -100,10 +100,26 @@
     border:1px solid var(--groove-shadow);
     border-radius:10px 10px 0 10px;
     width:100%;
-    max-height:82vh;
+    max-height:90vh;
     overflow-y:auto;
     padding:22px;
     box-shadow:0 10px 30px rgba(0,0,0,.5);
+    transition:height .28s ease;
+  }
+  /* режим вкладки "карта дней": окно растягивается на весь доступный
+     максимум (см. max-height выше), и прокручивается не сама коробка
+     окна, а только лента карты внутри неё (.year-grid-v-scroll) —
+     заголовок, статистика и крестик закрытия остаются на месте. */
+  .settings-modal-box.year-mode{
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  .settings-modal-box.year-mode #settingsTabContent{
+    display:flex;
+    flex-direction:column;
+    flex:1 1 auto;
+    min-height:0;
   }
   /* язычки прижаты к низу окна: settingsTabGearBtn идёт первым в DOM и
      благодаря column-reverse оказывается самым нижним — он и открывается

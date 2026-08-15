@@ -367,8 +367,10 @@
 
   /* ---------- карта дней года (вертикальная сетка активности, живёт
      внутри третьей вкладки настроек — см. .settings-tab / #settingsTabContent).
-     Прокручивается только сама сетка (year-grid-v-scroll), чтобы окно
-     вкладки не становилось выше, чем у остальных вкладок настроек. ---------- */
+     У этой вкладки окно настроек растягивается на весь доступный максимум
+     (см. .settings-modal-box.year-mode в modals.css), а прокручивается
+     только сама лента (.year-grid-v-scroll) — заголовок и статистика
+     остаются на месте. ---------- */
   .year-grid-stats{
     font-family:"Segoe UI","Tahoma",sans-serif;
     font-size:13px;
@@ -386,15 +388,21 @@
     margin:0 0 10px 0;
   }
 
+  /* Окантовки у ленты нет специально — она должна восприниматься как
+     продолжение самого окна настроек, а не как отдельная врезка. Плавное
+     появление/исчезание строк у верхнего и нижнего края (вместо жёсткого
+     обреза) — через маску-градиент: создаёт ощущение мягкого "перелистывания"
+     при прокрутке, а заодно мягко скрывает пояснение сверху ленты, пока не
+     докрутить до самого верха. */
   .year-grid-v-scroll{
-    max-height:160px;
+    flex:1 1 auto;
+    min-height:120px;
     overflow-y:auto;
     overflow-x:hidden;
     -webkit-overflow-scrolling:touch;
-    border:1px solid var(--groove-shadow);
-    border-radius:6px;
-    padding:8px 6px;
-    background:rgba(0,0,0,.03);
+    padding:6px 2px;
+    -webkit-mask-image:linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
+    mask-image:linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
   }
   .year-grid-v-scroll::-webkit-scrollbar{ width:5px; }
   .year-grid-v-scroll::-webkit-scrollbar-thumb{ background:var(--groove-shadow); border-radius:3px; }
@@ -402,35 +410,36 @@
   .year-grid-v-row{
     display:flex;
     align-items:center;
-    gap:2px;
+    gap:4px;
   }
-  .year-grid-v-row + .year-grid-v-row{ margin-top:2px; }
-  .year-grid-v-header{ margin-bottom:5px; }
+  .year-grid-v-row + .year-grid-v-row{ margin-top:4px; }
+  .year-grid-v-header{ margin-bottom:8px; }
   .year-grid-v-month-label{
-    width:22px;
+    width:26px;
     flex-shrink:0;
-    font-size:9px;
+    font-size:11px;
     font-family:"Segoe UI","Tahoma",sans-serif;
     color:var(--ink-soft);
     text-align:right;
-    padding-right:3px;
+    padding-right:4px;
     box-sizing:border-box;
-    line-height:10px;
+    line-height:1;
   }
   .year-grid-v-weekday{
-    width:10px;
-    flex:1 1 10px;
-    font-size:8px;
+    flex:1 1 0;
+    font-size:10px;
     font-family:"Segoe UI","Tahoma",sans-serif;
     color:var(--ink-soft);
     text-align:center;
-    line-height:10px;
+    line-height:1;
   }
+  /* квадратик сам растягивается на всю доступную ширину ленты (флекс
+     без max-width) и остаётся квадратным за счёт aspect-ratio — так он
+     становится крупнее вместе с окном, а не остаётся фиксированных 10px */
   .year-grid-v-cell{
-    width:10px;height:10px;
-    flex:1 1 10px;
-    max-width:10px;
-    border-radius:2px;
+    flex:1 1 0;
+    aspect-ratio:1 / 1;
+    border-radius:3px;
     background:var(--parchment-dark);
     border:1px solid rgba(0,0,0,.1);
     cursor:pointer;
@@ -441,20 +450,40 @@
   .year-grid-v-cell.future{ opacity:.4; cursor:default; }
   .year-grid-v-cell.light{ background:var(--xp-green); border-color:rgba(0,0,0,.12); }
   .year-grid-v-cell.dark{ background:var(--xp-green-dark); border-color:rgba(0,0,0,.18); }
-  .year-grid-v-cell.today{ box-shadow:0 0 0 1px var(--wood); border-color:var(--wood); }
+  .year-grid-v-cell.today{ box-shadow:0 0 0 2px var(--wood); border-color:var(--wood); }
 
-  .year-grid-legend{
-    display:flex;
-    align-items:center;
-    flex-wrap:wrap;
-    gap:6px;
+  /* "летопись" — краткое пояснение цветов, лежит первым элементом внутри
+     самой ленты (.year-grid-v-scroll), над самой старой неделей. Лента по
+     умолчанию открыта прокрученной вниз (к сегодня), поэтому пояснение
+     видно только если докрутить её до самого верха. */
+  .year-grid-legend-top{
+    padding:2px 2px 14px 2px;
+    margin-bottom:10px;
+    border-bottom:1px dashed var(--groove-shadow);
     font-family:"Segoe UI","Tahoma",sans-serif;
     font-size:12px;
     color:var(--ink-soft);
-    margin:8px 0 0 0;
   }
-  .year-grid-legend .year-grid-v-cell{ cursor:default; flex:none; }
-  .year-grid-legend-sep{ margin:0 2px; opacity:.6; }
+  .year-grid-legend-top-title{
+    font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
+    font-size:13px;
+    letter-spacing:.3px;
+    color:var(--wood);
+    margin-bottom:8px;
+    text-align:center;
+  }
+  .year-grid-legend-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin:6px 0;
+  }
+  .year-grid-legend-row .year-grid-v-cell{
+    flex:none;
+    width:16px;height:16px;
+    aspect-ratio:auto;
+    cursor:default;
+  }
 
   .year-day-modal-title{
     text-align:center;
