@@ -46,6 +46,7 @@
   var UPDATE_DISMISSED_KEY = "bibleUpdateDismissedVersion_v1";
   var UPDATE_SNOOZE_KEY = "bibleUpdateSnoozeUntil_v1";
   var UPDATES_DISABLED_KEY = "bibleUpdatesDisabled_v1";
+  var GOALS_EXPANDED_KEY = "bibleGoalsBandExpanded_v1";
   var SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000;
 
 
@@ -1723,6 +1724,7 @@
     document.getElementById("settingsReducedCb").addEventListener("change", function(){
       setGoalsReducedView(this.checked);
       goalsExpanded = true;
+      try{ localStorage.setItem(GOALS_EXPANDED_KEY, "1"); }catch(e){}
       renderGoalsSection();
     });
 
@@ -2283,6 +2285,10 @@
 
   // записи старше скользящего месяца нигде не нужны (ни локально, ни в
   // облаке) — удаляем их и, если что-то удалили, отправляем изменение дальше
+  // очистка касается ТОЛЬКО "сырых" записей hourlog: (детальная история для
+  // дневной статистики месячного счётчика). Годовой счётчик хранит данные
+  // отдельно, по одному числу на закрытый месяц, в ключах "hoursegment:" —
+  // они этой функцией не затрагиваются и не удаляются никогда.
   function pruneOldHourLogsForStats(){
     var cutoff = getStatsCutoffTs();
     var removed = false;
@@ -2876,7 +2882,7 @@
     "#D9534F","#B4A7D6","#5DADE2","#F1948A"
   ];
   var GOAL_MAX_TASKS = 20;
-  var goalsExpanded = true; // раскрыта ли полоса в режиме "видеть меньше" (внутри сессии)
+  var goalsExpanded = (localStorage.getItem(GOALS_EXPANDED_KEY) !== "0"); // раскрыта ли полоса в режиме "видеть меньше" (сохраняется между перезагрузками)
 
   function getGoalsReducedView(){
     var r = state["__goalsReducedView"];
@@ -3127,6 +3133,7 @@
   if(goalsToggleBtn){
     goalsToggleBtn.addEventListener("click", function(){
       goalsExpanded = !goalsExpanded;
+      try{ localStorage.setItem(GOALS_EXPANDED_KEY, goalsExpanded ? "1" : "0"); }catch(e){}
       var band = document.getElementById("goalsBand");
       if(band) band.classList.toggle("open", goalsExpanded);
       goalsToggleBtn.innerHTML = goalsExpanded ? "&#9650;" : "&#9660;";

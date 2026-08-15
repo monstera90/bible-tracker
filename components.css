@@ -385,7 +385,7 @@
     display:none;
     max-height:0;
     overflow:hidden;
-    margin-top:10px;
+    padding-top:10px;
     transition:max-height .3s ease;
   }
   .goals-band.reduced-mode{ display:block; }
