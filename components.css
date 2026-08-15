@@ -372,6 +372,8 @@
     display:flex;
     flex-direction:column;
     gap:10px;
+    max-width:640px;
+    margin:0 auto;
   }
   .goals-list-inline:not(:empty){ margin-top:10px; }
 
@@ -399,7 +401,7 @@
 
   .goals-band{
     display:none;
-    width:100%;
+    width:100vw;
     margin-left:calc(50% - 50vw);
     margin-right:calc(50% - 50vw);
     max-height:0;
