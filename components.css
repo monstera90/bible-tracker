@@ -450,6 +450,7 @@
   .year-grid-v-cell.future{ opacity:.4; cursor:default; }
   .year-grid-v-cell.light{ background:var(--xp-green); border-color:rgba(0,0,0,.12); }
   .year-grid-v-cell.dark{ background:var(--xp-green-dark); border-color:rgba(0,0,0,.18); }
+  .year-grid-v-cell.darkest{ background:var(--xp-green-dark); border-color:rgba(0,0,0,.25); filter:brightness(.72) saturate(1.15); }
   .year-grid-v-cell.today{ box-shadow:0 0 0 2px var(--wood); border-color:var(--wood); }
 
   /* "летопись" — краткое пояснение цветов, лежит первым элементом внутри
@@ -483,6 +484,22 @@
     width:16px;height:16px;
     aspect-ratio:auto;
     cursor:default;
+  }
+  .year-grid-legend-note{
+    margin-top:8px;
+    padding-top:8px;
+    border-top:1px solid var(--groove-shadow);
+    font-style:italic;
+    line-height:1.4;
+  }
+
+  .year-day-goal-item{
+    padding:3px 0 3px 0;
+    font-size:13px;
+  }
+  .year-day-goal-source{
+    color:var(--ink-soft);
+    font-size:12px;
   }
 
   .year-day-modal-title{

@@ -2897,18 +2897,19 @@
   // за последние 365 дней, заканчивающееся сегодняшним днём. Живёт внутри
   // модалки настроек, на третьей вкладке (всегда видна, отдельного
   // включения/выключения не требует). Своего лога не ведёт — цвет каждого
-  // дня считается на лету по уже существующим данным, и в него входит
-  // любая отмеченная в этот день активность:
+  // дня считается на лету по трём видам активности за этот день:
   //  - чтение хотя бы одной главы (ключи вида "БукваКниги|Номер", т.е.
   //    содержащие "|" — см. buildExportData);
   //  - дополнительный счётчик (записи "hourlog:") — подробные записи
   //    хранятся только примерно за последний скользящий месяц (см.
   //    pruneOldHourLogsForStats), поэтому для более старых дней это не
   //    может быть учтено;
-  //  - отметка настроения (записи "moodlog:", не удаляются никогда).
-  // Один отмеченный вид активности за день — клетка "light", два и
-  // более — "dark" (то есть насыщенность цвета показывает не количество
-  // глав, а разнообразие отметок за день).
+  //  - выполненная задача в прогресс-баре личной цели (записи
+  //    "goalcompletion:" — не удаляются никогда, переживают удаление
+  //    самой цели).
+  // Один вид активности за день — клетка "light", два — "dark", все три —
+  // "darkest". Настроение (moodlog:) в закраску клетки не входит вовсе —
+  // оно только показывается в детализации по тапу на день.
   // Сетка строится заново при каждом открытии/перерисовке вкладки — она
   // всегда читает актуальный state, поэтому только что отмеченная
   // активность сразу видна, без отдельного кеша.
@@ -2969,13 +2970,28 @@
     return byDay;
   }
 
+  // список выполненных задач по личным целям в каждый день (ключи
+  // "goalcompletion:", независимая запись — не пропадает из истории, даже
+  // если саму цель потом удалили или переиспользовали)
+  function getGoalCompletionsByDay(){
+    var byDay = {};
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("goalcompletion:") !== 0) return;
+      var rec = state[k];
+      if(!rec || !rec.c) return;
+      var day = startOfDay(rec.t);
+      (byDay[day] = byDay[day] || []).push(rec.c);
+    });
+    return byDay;
+  }
+
   // --- построение вертикальной сетки (недели сверху вниз, дни слева направо) ---
   // Скользящее окно: последние 365 дней, включая сегодня, дополненное до
   // целых недель (понедельник — воскресенье) с обеих сторон.
   function buildYearGridMarkup(){
     var readingByDay = getReadingCountsByDay();
     var serviceByDay = getServiceMinutesByDay();
-    var moodsByDay = getMoodsByDay();
+    var goalsByDay = getGoalCompletionsByDay();
 
     var now = new Date();
     var todayStart = startOfDay(now.getTime());
@@ -3018,9 +3034,10 @@
         } else {
           var chapters = readingByDay[dayTs] || 0;
           var minutes = serviceByDay[dayTs] || 0;
-          var moods = moodsByDay[dayTs] || [];
-          var kinds = (chapters > 0 ? 1 : 0) + (minutes > 0 ? 1 : 0) + (moods.length > 0 ? 1 : 0);
-          if(kinds >= 2) cls += " dark";
+          var goalsDone = goalsByDay[dayTs] || [];
+          var kinds = (chapters > 0 ? 1 : 0) + (minutes > 0 ? 1 : 0) + (goalsDone.length > 0 ? 1 : 0);
+          if(kinds >= 3) cls += " darkest";
+          else if(kinds === 2) cls += " dark";
           else if(kinds === 1) cls += " light";
           if(kinds > 0) activeDays++;
           if(dayTs === todayStart) cls += " today";
@@ -3039,10 +3056,12 @@
     var readingByDay = getReadingCountsByDay();
     var serviceByDay = getServiceMinutesByDay();
     var moodsByDay = getMoodsByDay();
+    var goalsByDay = getGoalCompletionsByDay();
 
     var chapters = readingByDay[dayTs] || 0;
     var minutes = serviceByDay[dayTs] || 0;
     var moods = moodsByDay[dayTs] || [];
+    var goalsDone = goalsByDay[dayTs] || [];
 
     var d = new Date(dayTs);
     var weekdayLabel = WEEKDAY_NAMES_FULL[d.getDay()];
@@ -3055,6 +3074,13 @@
     if(minutes > 0){
       rows += '<div class="year-day-stat-row"><span class="year-day-stat-icon">🕓</span><span>Дополнительный счётчик: ' +
         formatHHMM(minutes) + '</span></div>';
+    }
+    if(goalsDone.length){
+      var goalsHtml = goalsDone.map(function(g){
+        return '<div class="year-day-goal-item">' + escapeHtml(g.taskText || "Без названия") +
+          ' <span class="year-day-goal-source">— ' + escapeHtml(g.goalTitle || "Без названия") + '</span></div>';
+      }).join("");
+      rows += '<div class="year-day-stat-row"><span class="year-day-stat-icon">🎯</span><span>Выполненные задачи целей:' + goalsHtml + '</span></div>';
     }
     if(moods.length){
       var moodHtml = moods.map(function(m){ return m.emoji + " " + escapeHtml(m.label); }).join(", ");
@@ -3088,8 +3114,10 @@
       '<div class="year-grid-legend-top">' +
         '<div class="year-grid-legend-top-title">Как читать карту</div>' +
         '<div class="year-grid-legend-row"><span class="year-grid-v-cell"></span><span>— в этот день отметок нет</span></div>' +
-        '<div class="year-grid-legend-row"><span class="year-grid-v-cell light"></span><span>— один вид отметки (чтение, доп. счётчик или настроение)</span></div>' +
-        '<div class="year-grid-legend-row"><span class="year-grid-v-cell dark"></span><span>— два и более вида отметок в этот день</span></div>' +
+        '<div class="year-grid-legend-row"><span class="year-grid-v-cell light"></span><span>— один вид активности: чтение, доп. счётчик или выполненная задача цели</span></div>' +
+        '<div class="year-grid-legend-row"><span class="year-grid-v-cell dark"></span><span>— два вида активности из этих трёх в один день</span></div>' +
+        '<div class="year-grid-legend-row"><span class="year-grid-v-cell darkest"></span><span>— все три вида активности в один день</span></div>' +
+        '<div class="year-grid-legend-note">Настроение на цвет клетки не влияет — оно видно только в карточке дня по тапу.</div>' +
       '</div>';
 
     container.innerHTML =
