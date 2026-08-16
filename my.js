@@ -190,6 +190,55 @@
     saveLocalState();
     scheduleCloudPush();
   }
+
+  // ===================== ВКЛАДКИ ЗАДАЧ (red/inbox/next/…) =====================
+  // Список ключей вкладок задач в том же порядке, в каком они идут в DOM
+  // (см. index.html, .settings-tabs) — используется и для показа/скрытия
+  // ярлычков по галочке "Показать все мои задачи", и для переключения
+  // между ними в switchSettingsTab.
+  var TASK_TAB_IDS = {
+    red: "settingsTabRedBtn",
+    inbox: "settingsTabInboxBtn",
+    next: "settingsTabNextBtn",
+    projects: "settingsTabProjectsBtn",
+    waiting: "settingsTabWaitingBtn",
+    read: "settingsTabReadBtn",
+    someday: "settingsTabSomedayBtn",
+    archive: "settingsTabArchiveBtn"
+  };
+  var TASK_TAB_TITLES = {
+    red: "Red", inbox: "Inbox", next: "Next", projects: "Projects",
+    waiting: "Waiting", read: "Read", someday: "Someday", archive: "Archive"
+  };
+  // вкладки-списки задач, между которыми можно переносить задачу стрелочкой
+  // (без архива — туда задача попадает только через отметку чекбокса)
+  var TASK_MOVABLE_TABS = ["red","inbox","next","projects","waiting","read","someday"];
+  var TASK_MOVE_ICONS = {
+    red: '<path d="M5 3v18"></path><path d="M5 4h11l-2.5 4L16 12H5"></path>',
+    inbox: '<path d="M4 12h4l2 3h4l2-3h4"></path><path d="M4 12l1.5-7h13L20 12"></path><path d="M4 12v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6"></path>',
+    next: '<path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path>',
+    projects: '<path d="M4 6a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6z"></path>',
+    waiting: '<path d="M6 3h12"></path><path d="M6 21h12"></path><path d="M7 3c0 4 3 5 5 6-2 1-5 2-5 6"></path><path d="M17 3c0 4-3 5-5 6 2 1 5 2 5 6"></path>',
+    read: '<path d="M12 6c-1.5-1.2-3.5-1.8-6-1.8v13.6c2.5 0 4.5.6 6 1.8"></path><path d="M12 6c1.5-1.2 3.5-1.8 6-1.8v13.6c-2.5 0-4.5.6-6 1.8"></path><path d="M12 6v13.6"></path>',
+    someday: '<path d="M12 4l1.8 4.6 4.9.4-3.7 3.3 1.1 4.8L12 14.8 7.9 17.1l1.1-4.8-3.7-3.3 4.9-.4z"></path>'
+  };
+  var TASK_MOVE_ICON_SVG = function(key){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + (TASK_MOVE_ICONS[key] || "") + '</svg>';
+  };
+  var ARROW_MOVE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path></svg>';
+  var LINK_NEXT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"></path><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"></path></svg>';
+  var RESTORE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>';
+  var TASK_ARCHIVE_MAX_SHOWN = 50;
+
+  function getShowAllTasksEnabled(){
+    var r = state["__showAllTasks"];
+    return !!(r && r.c);
+  }
+  function setShowAllTasksEnabled(value){
+    state["__showAllTasks"] = {c: value, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+  }
   function applyChapterColorClass(item, clr){
     if(!item) return;
     item.classList.remove("clr-green","clr-blue","clr-red");
@@ -1624,27 +1673,37 @@
 
   var selectedVersionUrl = null;
 
-  // отдельная вкладка настроек "Версии" (язычок оторван от общего стека,
-  // см. .settings-tabs-top в modals.css) — содержимое рисуется прямо в
-  // #settingsTabContent, как и у остальных вкладок (шестерёнка/настроение/
-  // карта года), а не во всплывающем modalOverlay, как было раньше
+  // содержимое "Версий" открывается кнопкой из вкладки настроек (шестерёнка,
+  // см. renderSettingsTabGear), а не отдельным язычком — рисуется прямо в
+  // #settingsTabContent, как и у остальных вкладок
   function renderSettingsTabVersions(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     selectedVersionUrl = null;
     container.innerHTML =
+      '<button class="modal-btn" id="mVersionBackBtn" style="margin-bottom:14px;">&larr; Назад к настройкам</button>' +
       '<div class="year-grid-tab-title" style="margin-bottom:12px;">Версии</div>' +
       '<div id="versionUpdateRow"></div>' +
       '<div id="versionHistoryItems"></div>' +
       '<button class="modal-btn primary" id="mVersionReturnBtn" style="display:none;margin-top:12px;">Вернуться на выбранную версию</button>';
     renderManualUpdateOption();
     renderVersionHistory();
+    var backBtn = document.getElementById("mVersionBackBtn");
+    if(backBtn) backBtn.addEventListener("click", function(){ switchSettingsTab("gear"); });
     var returnBtn = document.getElementById("mVersionReturnBtn");
     if(returnBtn){
       returnBtn.addEventListener("click", function(){
         if(selectedVersionUrl) window.location.href = selectedVersionUrl;
       });
     }
+  }
+
+  // заглушка для 8 новых вкладок задач (red/inbox/next/projects/waiting/
+  // read/someday/archive) — содержимое появится позже, сейчас только
+  // рисует заголовок раздела в #settingsTabContent
+  function renderSettingsTabTask(taskKey){
+    if(taskKey === "archive") renderTaskArchiveTab();
+    else renderTaskTabList(taskKey);
   }
 
   // ---------- модалка настроек (шестерёнка) с вкладками ----------
@@ -1681,6 +1740,21 @@
       }
 
       settingsModalBox.style.height = desired + "px";
+      // Размер (толщина) каждого язычка вкладки — единая переменная
+      // --settings-tab-size на .settings-modal-frame (её читают и
+      // .settings-tab, и .settings-tab-gear, см. modals.css). Считаем её
+      // здесь: высота окна настроек (desired, только что зафиксирована
+      // выше), минус промежутки между 9 язычками стопки (год + 8 задач:
+      // red/inbox/next/projects/waiting/read/someday/archive — считаем
+      // все 9, а не только сейчас видимые), по 1px gap между соседними —
+      // это 8 промежутков, — и делим остаток на 9. Так каждый язычок
+      // получает фиксированный размер, который не меняется от того,
+      // сколько из 9 сейчас реально показано.
+      var totalTabs = 9;
+      var gapsPx = (totalTabs - 1) * 1;
+      var tabUnit = (desired - gapsPx) / totalTabs;
+      var frame = settingsModalBox.parentElement;
+      if(frame && tabUnit > 0) frame.style.setProperty("--settings-tab-size", tabUnit + "px");
     });
   }
   function closeSettingsModal(){
@@ -1688,8 +1762,11 @@
     settingsModalOverlay.classList.remove("open");
   }
   function refreshSettingsTabsVisibility(){
-    var moodTab = document.getElementById("settingsTabMoodBtn");
-    if(moodTab) moodTab.style.display = isMoodEnabled() ? "block" : "none";
+    var showTasks = getShowAllTasksEnabled();
+    Object.keys(TASK_TAB_IDS).forEach(function(key){
+      var btn = document.getElementById(TASK_TAB_IDS[key]);
+      if(btn) btn.style.display = showTasks ? "flex" : "none";
+    });
   }
   // Окно настроек всегда одного размера (см. .settings-modal-box в
   // modals.css) — высота фиксирована и не зависит от вкладки, поэтому
@@ -1699,18 +1776,21 @@
   function switchSettingsTab(tab){
     flushPendingYearDayNoteEdit();
     var gearBtn = document.getElementById("settingsTabGearBtn");
-    var moodBtn = document.getElementById("settingsTabMoodBtn");
     var yearBtn = document.getElementById("settingsTabYearBtn");
-    var versionsBtn = document.getElementById("settingsTabVersionsBtn");
     if(gearBtn) gearBtn.classList.toggle("active", tab === "gear");
-    if(moodBtn) moodBtn.classList.toggle("active", tab === "mood");
     if(yearBtn) yearBtn.classList.toggle("active", tab === "year");
-    if(versionsBtn) versionsBtn.classList.toggle("active", tab === "versions");
+    Object.keys(TASK_TAB_IDS).forEach(function(key){
+      var btn = document.getElementById(TASK_TAB_IDS[key]);
+      if(btn) btn.classList.toggle("active", tab === key);
+    });
     var container = document.getElementById("settingsTabContent");
     if(container) container.scrollTop = 0;
+    var addFab = document.getElementById("taskAddFab");
+    if(addFab) addFab.classList.toggle("visible", TASK_MOVABLE_TABS.indexOf(tab) !== -1);
     if(tab === "mood") renderSettingsTabMood();
     else if(tab === "year") renderSettingsTabYear();
     else if(tab === "versions") renderSettingsTabVersions();
+    else if(TASK_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabTask(tab);
     else renderSettingsTabGear();
   }
 
@@ -1722,13 +1802,17 @@
     var moodOn = isMoodEnabled();
     var reducedOn = getGoalsReducedView();
     var colorMarkOn = getColorMarkEnabled();
+    var showAllTasksOn = getShowAllTasksEnabled();
     container.innerHTML =
       '<div class="settings-row"><span>Добавить дополнительный счётчик</span><input type="checkbox" id="settingsHourCb"' + (hourOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" id="settingsHourNotesRow" style="' + (hourOn ? "" : "display:none;") + '"><span>Добавить комментарий в дополнительный счётчик</span><input type="checkbox" id="settingsHourNotesCb"' + (hourNotesOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Добавить счётчик настроения</span><input type="checkbox" id="settingsMoodCb"' + (moodOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row" style="border-bottom:none;"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row" style="border-bottom:none;"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
       '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:16px;">Добавить для себя цель</button>' +
+      (moodOn ? '<button class="modal-btn" id="settingsMoodDiagramBtn" style="margin-top:10px;">Показать диаграмму настроения</button>' : '') +
+      '<button class="modal-btn" id="settingsVersionsBtn" style="margin-top:10px;">Версии</button>' +
       '<button class="modal-btn danger" id="settingsResetBtn" style="margin-top:10px;">Начать чтение сначала и сбросить прогресс</button>';
 
     document.getElementById("settingsHourCb").addEventListener("change", function(){
@@ -1788,11 +1872,25 @@
       refreshAllChapterColorVisuals();
     });
 
+    document.getElementById("settingsShowAllTasksCb").addEventListener("change", function(){
+      setShowAllTasksEnabled(this.checked);
+      refreshSettingsTabsVisibility();
+    });
+
     document.getElementById("settingsAddGoalBtn").addEventListener("click", function(){
       var id = createNewGoal();
       renderGoalsSection();
       closeSettingsModal();
       openGoalSettingsModal(id);
+    });
+
+    var moodDiagramBtn = document.getElementById("settingsMoodDiagramBtn");
+    if(moodDiagramBtn){
+      moodDiagramBtn.addEventListener("click", function(){ switchSettingsTab("mood"); });
+    }
+
+    document.getElementById("settingsVersionsBtn").addEventListener("click", function(){
+      switchSettingsTab("versions");
     });
 
     document.getElementById("settingsResetBtn").addEventListener("click", function(){
@@ -1809,8 +1907,11 @@
     var total = 0;
     Object.keys(counts).forEach(function(k){ total += counts[k]; });
 
+    var backBtnHtml = '<button class="modal-btn" id="mMoodBackBtn" style="margin-bottom:14px;">&larr; Назад к настройкам</button>';
+
     if(total === 0){
-      container.innerHTML = '<div class="mood-diagram-empty">Данных о настроении нет. Добавьте настроение — тогда здесь появится диаграмма.</div>';
+      container.innerHTML = backBtnHtml + '<div class="mood-diagram-empty">Данных о настроении нет. Добавьте настроение — тогда здесь появится диаграмма.</div>';
+      document.getElementById("mMoodBackBtn").addEventListener("click", function(){ switchSettingsTab("gear"); });
       return;
     }
 
@@ -1824,10 +1925,12 @@
       " - всего " + sessionsCount + " " + pluralRu(sessionsCount, MARK_FORMS) + " настроения";
 
     container.innerHTML =
+      backBtnHtml +
       '<div class="mood-diagram-title">' + escapeHtml(title) + '</div>' +
       '<div class="mood-diagram-wrap" id="moodDiagramWrap"></div>' +
       '<div class="mood-diagram-reset-row"><button class="mood-diagram-reset-btn" id="mMoodResetBtn2">Сбросить данные настроения</button></div>';
     buildMoodDiagramSVG(counts, total);
+    document.getElementById("mMoodBackBtn").addEventListener("click", function(){ switchSettingsTab("gear"); });
     document.getElementById("mMoodResetBtn2").addEventListener("click", function(){
       closeSettingsModal();
       openMoodResetConfirm();
@@ -1835,13 +1938,13 @@
   }
 
   var settingsTabGearBtn = document.getElementById("settingsTabGearBtn");
-  var settingsTabMoodBtn = document.getElementById("settingsTabMoodBtn");
   var settingsTabYearBtn = document.getElementById("settingsTabYearBtn");
-  var settingsTabVersionsBtn = document.getElementById("settingsTabVersionsBtn");
   if(settingsTabGearBtn) settingsTabGearBtn.addEventListener("click", function(){ switchSettingsTab("gear"); });
-  if(settingsTabMoodBtn) settingsTabMoodBtn.addEventListener("click", function(){ switchSettingsTab("mood"); });
   if(settingsTabYearBtn) settingsTabYearBtn.addEventListener("click", function(){ switchSettingsTab("year"); });
-  if(settingsTabVersionsBtn) settingsTabVersionsBtn.addEventListener("click", function(){ switchSettingsTab("versions"); });
+  Object.keys(TASK_TAB_IDS).forEach(function(key){
+    var btn = document.getElementById(TASK_TAB_IDS[key]);
+    if(btn) btn.addEventListener("click", function(){ switchSettingsTab(key); });
+  });
 
   if(settingsModalOverlay){
     settingsModalOverlay.addEventListener("click", function(e){
@@ -3008,7 +3111,7 @@
   // за последние 365 дней, заканчивающееся сегодняшним днём. Живёт внутри
   // модалки настроек, на третьей вкладке (всегда видна, отдельного
   // включения/выключения не требует). Своего лога не ведёт — цвет каждого
-  // дня считается на лету по трём видам активности за этот день:
+  // дня считается на лету по видам активности за этот день:
   //  - чтение хотя бы одной главы (ключи вида "БукваКниги|Номер", т.е.
   //    содержащие "|" — см. buildExportData);
   //  - дополнительный счётчик (записи "hourlog:") — подробные записи
@@ -3017,10 +3120,13 @@
   //    может быть учтено;
   //  - выполненная задача в прогресс-баре личной цели (записи
   //    "goalcompletion:" — не удаляются никогда, переживают удаление
-  //    самой цели).
-  // Один вид активности за день — клетка "light", два — "dark", все три —
-  // "darkest". Настроение (moodlog:) в закраску клетки не входит вовсе —
-  // оно только показывается в детализации по тапу на день.
+  //    самой цели);
+  //  - отмеченная задача во вкладках задач (записи "taskcompletion:" —
+  //    тоже не удаляются никогда, переживают извлечение задачи из архива
+  //    только если сама отметка ещё не была отменена — см. restoreTaskFromArchive).
+  // Один вид активности за день — клетка "light", два — "dark", три и
+  // более — "darkest". Настроение (moodlog:) в закраску клетки не входит
+  // вовсе — оно только показывается в детализации по тапу на день.
   // Сетка строится заново при каждом открытии/перерисовке вкладки — она
   // всегда читает актуальный state, поэтому только что отмеченная
   // активность сразу видна, без отдельного кеша.
@@ -3103,6 +3209,7 @@
     var readingByDay = getReadingCountsByDay();
     var serviceByDay = getServiceMinutesByDay();
     var goalsByDay = getGoalCompletionsByDay();
+    var tasksByDay = getTaskCompletionsByDay();
 
     var now = new Date();
     var todayStart = startOfDay(now.getTime());
@@ -3146,7 +3253,8 @@
           var chapters = readingByDay[dayTs] || 0;
           var minutes = serviceByDay[dayTs] || 0;
           var goalsDone = goalsByDay[dayTs] || [];
-          var kinds = (chapters > 0 ? 1 : 0) + (minutes > 0 ? 1 : 0) + (goalsDone.length > 0 ? 1 : 0);
+          var tasksDone = tasksByDay[dayTs] || [];
+          var kinds = (chapters > 0 ? 1 : 0) + (minutes > 0 ? 1 : 0) + (goalsDone.length > 0 ? 1 : 0) + (tasksDone.length > 0 ? 1 : 0);
           if(kinds >= 3) cls += " darkest";
           else if(kinds === 2) cls += " dark";
           else if(kinds === 1) cls += " light";
@@ -3192,11 +3300,13 @@
     var serviceByDay = getServiceMinutesByDay();
     var moodsByDay = getMoodsByDay();
     var goalsByDay = getGoalCompletionsByDay();
+    var tasksByDay = getTaskCompletionsByDay();
 
     var chapters = readingByDay[dayTs] || 0;
     var minutes = serviceByDay[dayTs] || 0;
     var moods = moodsByDay[dayTs] || [];
     var goalsDone = goalsByDay[dayTs] || [];
+    var tasksDone = tasksByDay[dayTs] || [];
 
     var d = new Date(dayTs);
     var weekdayLabel = WEEKDAY_NAMES_FULL[d.getDay()];
@@ -3216,6 +3326,13 @@
           ' <span class="year-day-goal-source">— ' + escapeHtml(g.goalTitle || "Без названия") + '</span></div>';
       }).join("");
       rows += '<div class="year-day-stat-row"><span class="year-day-stat-icon">🎯</span><span>Выполненные задачи целей:' + goalsHtml + '</span></div>';
+    }
+    if(tasksDone.length){
+      var tasksHtml = tasksDone.map(function(t){
+        return '<div class="year-day-goal-item">' + escapeHtml(t.text || "Без названия") +
+          ' <span class="year-day-goal-source">— ' + escapeHtml(TASK_TAB_TITLES[t.tab] || t.tab || "") + '</span></div>';
+      }).join("");
+      rows += '<div class="year-day-stat-row"><span class="year-day-stat-icon">✅</span><span>Выполненные задачи:' + tasksHtml + '</span></div>';
     }
     if(moods.length){
       var moodHtml = moods.map(function(m){ return m.emoji + " " + escapeHtml(m.label); }).join(", ");
@@ -3368,9 +3485,9 @@
       '<div class="year-grid-legend-top">' +
         '<div class="year-grid-legend-top-title">Как читать карту</div>' +
         '<div class="year-grid-legend-row"><span class="year-grid-v-cell"></span><span>— в этот день отметок нет</span></div>' +
-        '<div class="year-grid-legend-row"><span class="year-grid-v-cell light"></span><span>— один вид активности: чтение, доп. счётчик или выполненная задача цели</span></div>' +
-        '<div class="year-grid-legend-row"><span class="year-grid-v-cell dark"></span><span>— два вида активности из этих трёх в один день</span></div>' +
-        '<div class="year-grid-legend-row"><span class="year-grid-v-cell darkest"></span><span>— все три вида активности в один день</span></div>' +
+        '<div class="year-grid-legend-row"><span class="year-grid-v-cell light"></span><span>— один вид активности: чтение, доп. счётчик, задача цели или выполненная задача</span></div>' +
+        '<div class="year-grid-legend-row"><span class="year-grid-v-cell dark"></span><span>— два вида активности в один день</span></div>' +
+        '<div class="year-grid-legend-row"><span class="year-grid-v-cell darkest"></span><span>— три и более видов активности в один день</span></div>' +
       '</div>';
 
     container.innerHTML =
@@ -3682,6 +3799,344 @@
       var band = document.getElementById("goalsBand");
       if(band) band.classList.toggle("open", goalsExpanded);
       goalsToggleBtn.innerHTML = goalsExpanded ? "&#9650;" : "&#9660;";
+    });
+  }
+
+  // ===================== ВКЛАДКИ ЗАДАЧ: ХРАНЕНИЕ =====================
+  // Каждая задача — отдельный ключ "task:<id>" в общем state (та же схема
+  // {c:..., t:...}, что и у всего остального — поэтому синхронизация между
+  // устройствами и экспорт работают автоматически, без доп. кода).
+  // c = {text, tab, checked, checkedAt, completionKey, nextForProjectId}
+  //   text            — текст задачи
+  //   tab             — вкладка, где живёт задача, пока не отмечена (не
+  //                     меняется, когда задача уходит в архив — так после
+  //                     извлечения она возвращается туда же, откуда была)
+  //   checked         — отмечена ли (значит, сейчас показывается в архиве)
+  //   checkedAt       — когда отмечена (для сортировки в архиве и как день
+  //                     для "Карты дней года")
+  //   completionKey   — ключ отдельной вечной записи "taskcompletion:…"
+  //                     (см. ниже), которая держит эту отметку в истории/
+  //                     экспорте, даже если сама задача потом изменится —
+  //                     удаляется (c:null) при извлечении из архива, т.к.
+  //                     это отменяет сам факт "выполнения"
+  //   nextForProjectId — только у задач во вкладке "next": id задачи-проекта
+  //                     (из вкладки "projects"), для которой это next-действие
+  function genTaskId(){
+    return "tk" + Date.now() + Math.random().toString(36).slice(2,7);
+  }
+  function getAllTasks(){
+    var list = [];
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("task:") === 0 && state[k] && state[k].c){
+        list.push({id: k.slice(5), c: state[k].c, t: state[k].t});
+      }
+    });
+    list.sort(function(a,b){ return a.t - b.t; });
+    return list;
+  }
+  function getTaskById(id){
+    var rec = state["task:" + id];
+    if(!rec || !rec.c) return null;
+    return {id: id, c: rec.c, t: rec.t};
+  }
+  function saveTaskData(id, data){
+    var rec = state["task:" + id];
+    var t = (rec && typeof rec.t === "number") ? rec.t : Date.now();
+    state["task:" + id] = {c: data, t: t};
+    saveLocalState();
+    scheduleCloudPush();
+  }
+  function createTask(tab){
+    var id = genTaskId();
+    saveTaskData(id, {text: "", tab: tab, checked: false, checkedAt: null, completionKey: null, nextForProjectId: null});
+    return id;
+  }
+  function getTasksForTab(tab){
+    return getAllTasks().filter(function(t){ return t.c.tab === tab && t.c.checked !== true; });
+  }
+  function getArchivedTasksAll(){
+    return getAllTasks().filter(function(t){ return t.c.checked === true; })
+      .sort(function(a,b){ return (b.c.checkedAt||0) - (a.c.checkedAt||0); });
+  }
+  // задача во вкладке "projects" считается "без next", если для неё нет ни
+  // одной незакрытой (не отмеченной) задачи во вкладке "next", ссылающейся
+  // на неё через nextForProjectId — как только такая next-задача отмечена
+  // и уходит в архив, проект автоматически снова подсвечивается красным
+  function projectHasActiveNext(projectId){
+    return getAllTasks().some(function(t){
+      return t.c.tab === "next" && t.c.checked !== true && t.c.nextForProjectId === projectId;
+    });
+  }
+  function setTaskText(id, text){
+    var task = getTaskById(id);
+    if(!task) return;
+    task.c.text = text;
+    saveTaskData(id, task.c);
+  }
+  function moveTaskToTab(id, newTab){
+    var task = getTaskById(id);
+    if(!task || task.c.tab === newTab) return;
+    task.c.tab = newTab;
+    if(newTab !== "next") task.c.nextForProjectId = null;
+    saveTaskData(id, task.c);
+  }
+  function checkTaskDone(id){
+    var task = getTaskById(id);
+    if(!task || task.c.checked) return;
+    var ts = Date.now();
+    var completionKey = "taskcompletion:" + ts + "-" + Math.random().toString(36).slice(2,7);
+    state[completionKey] = {c: {text: task.c.text || "Без названия", tab: task.c.tab}, t: ts};
+    task.c.checked = true;
+    task.c.checkedAt = ts;
+    task.c.completionKey = completionKey;
+    saveTaskData(id, task.c);
+  }
+  function restoreTaskFromArchive(id){
+    var task = getTaskById(id);
+    if(!task || !task.c.checked) return;
+    if(task.c.completionKey){
+      state[task.c.completionKey] = {c: null, t: Date.now()};
+    }
+    task.c.checked = false;
+    task.c.checkedAt = null;
+    task.c.completionKey = null;
+    saveTaskData(id, task.c);
+  }
+  // выполненные задачи по дням (ключи "taskcompletion:", не удаляются —
+  // используются и в детализации дня "Карты дней года", и в экспорте)
+  function getTaskCompletionsByDay(){
+    var byDay = {};
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("taskcompletion:") !== 0) return;
+      var rec = state[k];
+      if(!rec || !rec.c) return;
+      var day = startOfDay(rec.t);
+      (byDay[day] = byDay[day] || []).push(rec.c);
+    });
+    return byDay;
+  }
+
+  // ===================== ВКЛАДКИ ЗАДАЧ: ОТРИСОВКА =====================
+  function renderTaskTabList(tabKey){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var title = TASK_TAB_TITLES[tabKey] || tabKey;
+    var tasks = getTasksForTab(tabKey);
+    var rowsHtml = tasks.map(function(t){ return buildTaskRowHtml(t); }).join("");
+    container.innerHTML =
+      '<div class="year-grid-tab-title" style="margin-bottom:6px;">' + escapeHtml(title) + '</div>' +
+      '<div class="task-list" id="taskListWrap">' + rowsHtml + '</div>' +
+      (tasks.length === 0 ? '<div class="task-empty">Здесь пока нет задач.</div>' : '');
+    tasks.forEach(function(t){ bindTaskRow(t.id); });
+
+    var fab = document.getElementById("taskAddFab");
+    if(fab){
+      // при создании новой задачи НЕ перерисовываем список целиком (это
+      // на некоторых мобильных браузерах сбивает фокус: клавиатура
+      // открывается, но ввод не попадает в поле) — вместо этого просто
+      // добавляем одну новую строку в уже существующий список и сразу
+      // переключаем именно её в режим редактирования
+      fab.onclick = function(){
+        var id = createTask(tabKey);
+        var wrap = document.getElementById("taskListWrap");
+        if(wrap){
+          var emptyMsg = document.querySelector(".task-empty");
+          if(emptyMsg) emptyMsg.remove();
+          var holder = document.createElement("div");
+          holder.innerHTML = buildTaskRowHtml(getTaskById(id));
+          wrap.appendChild(holder.firstChild);
+          bindTaskRow(id);
+          renderTaskRowEdit(id);
+        } else {
+          renderTaskTabList(tabKey);
+          requestAnimationFrame(function(){ renderTaskRowEdit(id); });
+        }
+      };
+    }
+  }
+
+  function buildTaskRowHtml(task){
+    return '<div class="task-row" data-id="' + task.id + '">' +
+      '<input type="checkbox" class="task-checkbox" data-id="' + task.id + '">' +
+      '<div class="task-body" data-id="' + task.id + '"></div>' +
+      '</div>';
+  }
+
+  function bindTaskRow(id){
+    var row = document.querySelector('.task-row[data-id="' + id + '"]');
+    if(!row) return;
+    var cb = row.querySelector(".task-checkbox");
+    if(cb){
+      cb.addEventListener("change", function(){
+        if(!cb.checked) return; // снять галочку можно только извлечением из архива
+        var task = getTaskById(id);
+        var currentTab = task ? task.c.tab : null;
+        checkTaskDone(id);
+        if(currentTab) renderTaskTabList(currentTab);
+      });
+    }
+    renderTaskRowView(id);
+  }
+
+  function renderTaskRowView(id){
+    var body = document.querySelector('.task-body[data-id="' + id + '"]');
+    var task = getTaskById(id);
+    if(!body || !task) return;
+    var isProjectsTab = task.c.tab === "projects";
+    var showRed = isProjectsTab && !projectHasActiveNext(id);
+    var textHtml = task.c.text ? escapeHtml(task.c.text) : '<span class="task-text-placeholder">Новая задача</span>';
+    body.innerHTML =
+      '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + '">' + textHtml + '</span>' +
+      '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
+      '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
+      (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Next">' + LINK_NEXT_ICON_SVG + '</button>' : '');
+    body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderTaskRowEdit(id); });
+    body.querySelector(".task-move-btn").addEventListener("click", function(){ openTaskMovePicker(id); });
+    var nextBtn = body.querySelector(".task-next-btn");
+    if(nextBtn) nextBtn.addEventListener("click", function(){ openTaskNextPicker(id); });
+  }
+
+  // редактирование текста задачи — та же механика, что и у комментария дня
+  // в "Карте дней года" (contenteditable + дискета сразу после текста)
+  function renderTaskRowEdit(id){
+    var body = document.querySelector('.task-body[data-id="' + id + '"]');
+    var task = getTaskById(id);
+    if(!body || !task) return;
+    body.innerHTML = '<div class="task-editable" id="taskEditable_' + id + '" contenteditable="true"></div>';
+    var editable = document.getElementById("taskEditable_" + id);
+    if(!editable) return;
+    var textNode = document.createTextNode(task.c.text || "");
+    editable.appendChild(textNode);
+    var saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "task-icon-btn";
+    saveBtn.title = "Сохранить";
+    saveBtn.innerHTML = SAVE_ICON_SVG;
+    editable.appendChild(saveBtn);
+
+    function updatePlaceholder(){
+      var empty = getEditableNoteText(editable, saveBtn).length === 0;
+      editable.classList.toggle("is-empty", empty);
+    }
+    updatePlaceholder();
+
+    editable.focus();
+    var range = document.createRange();
+    range.setStart(textNode, textNode.length);
+    range.collapse(true);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    editable.addEventListener("input", updatePlaceholder);
+    editable.addEventListener("keydown", function(e){
+      if(e.key === "Enter"){
+        e.preventDefault();
+        document.execCommand("insertText", false, "\n");
+      }
+    });
+
+    saveBtn.addEventListener("click", function(e){
+      e.stopPropagation();
+      var newText = getEditableNoteText(editable, saveBtn);
+      setTaskText(id, newText.trim());
+      renderTaskRowView(id);
+    });
+  }
+
+  // сетка выбора вкладки-назначения — как у выбора цвета цели
+  // (openGoalColorPicker), только квадратики с иконками вкладок
+  function openTaskMovePicker(id){
+    var task = getTaskById(id);
+    if(!task) return;
+    var buttons = TASK_MOVABLE_TABS.map(function(key){
+      var isCurrent = key === task.c.tab;
+      return '<button type="button" data-tab="' + key + '"' + (isCurrent ? ' class="current"' : '') + '>' +
+        TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key]) + '</span></button>';
+    }).join("");
+    modalBox.innerHTML =
+      modalHeader("Перенести задачу") +
+      '<div class="task-picker-grid">' + buttons + '</div>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-tab]"), function(btn){
+      btn.addEventListener("click", function(){
+        var newTab = btn.getAttribute("data-tab");
+        var fromTab = task.c.tab;
+        moveTaskToTab(id, newTab);
+        closeModal();
+        renderTaskTabList(fromTab);
+      });
+    });
+  }
+
+  // выбор next-действия для задачи-проекта: список текущих незакрытых
+  // задач вкладки "next", ещё не привязанных к другому проекту, плюс
+  // возможность сразу создать новую next-задачу, привязанную к этому проекту
+  function openTaskNextPicker(projectId){
+    var candidates = getTasksForTab("next").filter(function(t){
+      return !t.c.nextForProjectId || t.c.nextForProjectId === projectId;
+    });
+    var itemsHtml = candidates.map(function(t){
+      var label = t.c.text ? escapeHtml(t.c.text) : "Без названия";
+      var linked = t.c.nextForProjectId === projectId;
+      return '<button type="button" class="version-history-item" data-next-id="' + t.id + '">' +
+        (linked ? "✓ " : "") + label + '</button>';
+    }).join("");
+    modalBox.innerHTML =
+      modalHeader("Next-действие для проекта") +
+      '<div>' + (itemsHtml || '<div class="version-history-empty">Пока нет свободных задач во вкладке next.</div>') + '</div>' +
+      '<button class="modal-btn" id="taskCreateNextBtn" style="margin-top:12px;">+ Новая next-задача</button>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-next-id]"), function(btn){
+      btn.addEventListener("click", function(){
+        var nid = btn.getAttribute("data-next-id");
+        var t = getTaskById(nid);
+        if(!t) return;
+        // повторное нажатие на уже привязанную задачу — отвязать
+        t.c.nextForProjectId = (t.c.nextForProjectId === projectId) ? null : projectId;
+        saveTaskData(nid, t.c);
+        closeModal();
+        renderTaskTabList("projects");
+      });
+    });
+    document.getElementById("taskCreateNextBtn").addEventListener("click", function(){
+      var nid = createTask("next");
+      var t = getTaskById(nid);
+      t.c.nextForProjectId = projectId;
+      saveTaskData(nid, t.c);
+      closeModal();
+      renderTaskTabList("projects");
+    });
+  }
+
+  // ---------- вкладка "архив": последние TASK_ARCHIVE_MAX_SHOWN отмеченных
+  // задач, каждая — с чекбоксом (отмечен) и стрелочкой извлечения, которая
+  // возвращает задачу туда, где она была до отметки. Кнопки "+" здесь нет. ----------
+  function renderTaskArchiveTab(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var all = getArchivedTasksAll();
+    var shown = all.slice(0, TASK_ARCHIVE_MAX_SHOWN);
+    var rowsHtml = shown.map(function(t){
+      var label = t.c.text ? escapeHtml(t.c.text) : "Без названия";
+      return '<div class="task-archive-row" data-id="' + t.id + '">' +
+        '<input type="checkbox" class="task-archive-check" checked disabled>' +
+        '<span class="task-archive-text">' + label + '</span>' +
+        '<button type="button" class="task-restore-btn" data-id="' + t.id + '" title="Извлечь из архива">' + RESTORE_ICON_SVG + '</button>' +
+      '</div>';
+    }).join("");
+    container.innerHTML =
+      '<div class="year-grid-tab-title" style="margin-bottom:6px;">' + escapeHtml(TASK_TAB_TITLES.archive) + '</div>' +
+      '<div class="task-list">' + rowsHtml + '</div>' +
+      (shown.length === 0 ? '<div class="task-empty">Архив пуст.</div>' : '');
+    Array.prototype.forEach.call(container.querySelectorAll(".task-restore-btn"), function(btn){
+      btn.addEventListener("click", function(){
+        var id = btn.getAttribute("data-id");
+        restoreTaskFromArchive(id);
+        renderTaskArchiveTab();
+      });
     });
   }
 

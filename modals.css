@@ -115,7 +115,7 @@
     display:none;
     align-items:flex-start;
     justify-content:center;
-    padding:16px 74px 16px 16px;
+    padding:16px 74px 80px 16px;
     z-index:1000;
   }
   .settings-modal-overlay.open{ display:flex; }
@@ -141,7 +141,7 @@
     position:relative;
     background:var(--parchment);
     border:1px solid var(--groove-shadow);
-    border-radius:10px 0 0 10px;
+    border-radius:10px 0 0 0;
     width:100%;
     max-height:90vh;
     display:flex;
@@ -161,12 +161,30 @@
     -ms-overflow-style:none;
   }
   #settingsTabContent::-webkit-scrollbar{ display:none; width:0; height:0; }
-  /* язычки прижаты к низу окна: settingsTabGearBtn идёт первым в DOM и
-     благодаря column-reverse оказывается самым нижним — он и открывается
-     по умолчанию при открытии окна настроек. settingsTabMoodBtn — над ним,
-     почти вплотную. Размер и зазор между язычками зафиксированы и не
-     меняются при нажатии/наведении — никаких transition/transform на
-     width/height/padding здесь нет специально. */
+  /* язычки прижаты к низу окна: settingsTabYearBtn идёт первым в DOM и
+     благодаря column-reverse оказывается самым нижним, за ним — 8 язычков
+     задач (red/inbox/next/projects/waiting/read/someday/archive, скрыты,
+     пока не включена галочка "Показать все мои задачи" в настройках).
+     Вкладка настроек (шестерёнка) в этом стеке больше не участвует — она
+     вынесена отдельно, "лежа на боку", под левый нижний угол окна (см.
+     .settings-tabs-gear ниже) и по-прежнему открывается по умолчанию при
+     открытии окна настроек (это задаётся явно в JS, а не положением в
+     стопке).
+     Высота каждого язычка — переменная --settings-tab-size, которую
+     считает JS (см. openSettingsModal в my.js) один раз при открытии
+     окна: высота окна настроек минус 8 промежутков по 1px между 9
+     язычками (год + 8 задач), делённая на 9. Результат — фиксированное
+     число px, одинаковое для ВСЕХ язычков (и обычных, и "лежачей"
+     шестерёнки, см. .settings-tab-gear) и НЕ зависящее от того, сколько
+     из них сейчас реально показано — специально, чтобы один и тот же
+     язычок никогда не менял размер в зависимости от количества видимых
+     соседей. Поэтому стопка прижата только к низу окна (bottom:0, без
+     top:0): её общая высота — просто сумма высот видимых язычков, какой
+     бы она ни была; если язычков много, стопка может вылезти выше
+     верхнего края окна — это ожидаемо. 94px — запасное значение на
+     случай, если JS ещё не отработал. Ширина (62px, толщина язычка)
+     зафиксирована отдельно. Никаких transition/transform на этих
+     свойствах нет специально. */
   .settings-tabs{
     position:absolute;
     right:-62px;
@@ -175,33 +193,10 @@
     flex-direction:column-reverse;
     gap:1px;
   }
-  /* язычок "Версии" — намеренно не часть общего стека выше: он не
-     примыкает к остальным вкладкам снизу, а закреплён отдельно у
-     самого верха окна настроек. Использует тот же класс .settings-tab,
-     поэтому размер/цвета/наведение/нажатие и активное состояние у него
-     полностью совпадают с остальными язычками; :last-child в правиле
-     .settings-tab даёт ему ту же тёмную линию-срез сверху, что и у
-     верхнего язычка основного стека. */
-  .settings-tabs-top{
-    position:absolute;
-    right:-62px;
-    top:0;
-    display:flex;
-    flex-direction:column;
-  }
-  /* этот язычок трогает окно СВОИМ НИЗОМ (а не верхом, как весь основной
-     стек снизу) — то есть по роли он ближе к нижнему, приклеенному к окну
-     язычку "настройки". Поэтому общее правило .settings-tab:last-child
-     (тёмная 2px линия-срез, означающая "здесь кончается стопка язычков и
-     начинается открытый фон") ему не подходит и здесь отменяется — вместо
-     неё та же едва заметная сиреневая окантовка в 1px, что и по остальным
-     сторонам язычка (и что видна как тонкий ободок по нижнему краю самого
-     нижнего язычка стопки снизу) — так верх этого язычка получает
-     аккуратную законченную кромку на стыке с окном, а не голый белый край. */
-  .settings-tabs-top .settings-tab:last-child{ border-top:1px solid var(--groove-shadow); }
   .settings-tab{
-    width:62px;height:84px;
-    flex:0 0 62px;
+    width:62px;
+    height:var(--settings-tab-size, 94px);
+    flex:0 0 var(--settings-tab-size, 94px);
     display:flex;
     align-items:center;
     justify-content:center;
@@ -223,15 +218,14 @@
     -webkit-tap-highlight-color:transparent;
   }
   .settings-tab svg{ width:32px; height:32px; }
-  /* тёмная линия-срез сверху (имитирует край окна настроек, "прибитого"
-     к языкам) нужна только у самого верхнего язычка всей стопки — он же
-     последний в DOM из-за column-reverse (см. выше). Раньше эта линия
-     была у КАЖДОГО неактивного язычка, и на стыке двух соседних
-     неактивных язычков (1px зазор + 2px сплошная линия следующего)
-     промежуток выглядел заметно больше, чем на стыке с активным (там
-     линия прозрачная и сливается с ним) — из-за этого "карта года" и
-     "настроение" казались раздвинуты сильнее, чем остальные пары. */
-  .settings-tab:last-child{ border-top:2px solid var(--ink); }
+  /* тонкая лиловая линия-срез сверху (плавный переход в страницу, а не
+     жёсткая тёмная граница) нужна только у самого верхнего язычка
+     ВЕРТИКАЛЬНОГО стека (#settingsTabs) — он же последний в DOM из-за
+     column-reverse (см. выше), то есть сейчас это язычок "archive".
+     Правило нарочно ограничено этим стеком через #settingsTabs, чтобы не
+     задеть отдельно стоящую "лежачую" вкладку-шестерёнку — у неё своя,
+     другая по стороне, линия-срез (см. .settings-tab-gear). */
+  #settingsTabs .settings-tab:last-child{ border-top:1px solid var(--groove-shadow); }
   /* активный язычок — та же страница, что и открытое окно: линия сверху,
      отделяющая его, пропадает, и он выглядит продолжением окна.
      неактивный остаётся того же цвета страницы, но т.к. окно "лежит"
@@ -249,6 +243,33 @@
     background:var(--wood);
     color:var(--parchment);
   }
+
+  /* ---------- "лежачая" вкладка настроек (шестерёнка) под окном ---------- */
+  /* Приклеена снизу-слева окна настроек, первой с левого края — там, где
+     у самого окна теперь срезано скругление (см. border-radius в
+     .settings-modal-box). Развёрнута на 90° относительно обычных
+     вкладок: толщина (height) фиксирована как 62px (та же толщина, что и
+     ширина у обычных вкладок), а длина (width) — та же переменная
+     --settings-tab-size, что и у обычных язычков (см. подробное описание
+     расчёта в комментарии над #settingsTabs выше и в openSettingsModal в
+     my.js), т.к. эта вкладка "смотрит" не вправо, а вниз, и должна быть
+     ровно того же размера, что и любая другая. Соответственно скруглены
+     не правые, а нижние углы, и линия-срез (означающая стык с окном)
+     идёт не сверху, а слева. */
+  .settings-tabs-gear{
+    position:absolute;
+    left:0;
+    bottom:-62px;
+    display:flex;
+  }
+  .settings-tab-gear{
+    width:var(--settings-tab-size, 94px);height:62px;
+    flex:0 0 var(--settings-tab-size, 94px);
+    border-left:1px solid var(--groove-shadow);
+    border-top:none;
+    border-radius:0 0 14px 14px;
+  }
+  .settings-tab-gear:last-child{ border-top:none; }
 
   .settings-row{
     display:flex;
@@ -502,6 +523,175 @@
     color:var(--ink-soft);
     font-style:italic;
   }
+
+  /* ---------- вкладки задач (red/inbox/next/projects/waiting/read/
+     someday/archive) — списки задач с чекбоксами внутри вкладки настроек.
+     Текст задачи оформлен тем же шрифтом/размером, что и комментарий дня
+     в "Карте дней года" (.year-day-note-view), карандашик работает по той
+     же механике (см. renderTaskRowEdit в my.js). ---------- */
+  .task-list{
+    display:flex;
+    flex-direction:column;
+  }
+  .task-row{
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    padding:10px 2px;
+    border-top:1px solid var(--groove-shadow);
+  }
+  .task-row:first-child{ border-top:none; }
+  .task-checkbox{
+    width:20px;height:20px;
+    flex-shrink:0;
+    margin-top:2px;
+  }
+  .task-body{
+    flex:1;
+    min-width:0;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:14px;
+    line-height:1.5;
+    color:var(--ink);
+    word-break:break-word;
+  }
+  .task-text-placeholder{
+    color:var(--ink-soft);
+    font-style:italic;
+  }
+  .task-text-red{ color:#c0392b; }
+  .task-icon-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:22px;height:22px;
+    margin-left:6px;
+    padding:0;
+    border:none;
+    background:transparent;
+    color:var(--wood);
+    cursor:pointer;
+    vertical-align:middle;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .task-icon-btn svg{ width:15px; height:15px; }
+  .task-editable{
+    outline:none;
+    white-space:pre-wrap;
+    word-break:break-word;
+    cursor:text;
+    min-height:1.5em;
+  }
+  .task-editable.is-empty::before{
+    content:"Новая задача…";
+    color:var(--ink-soft);
+    font-style:italic;
+  }
+  .task-empty{
+    padding:12px 14px;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    font-style:italic;
+  }
+
+  /* круглая кнопка "+", размер как у круглых кнопок счётчика
+     (см. .hour-input-confirm), заливка — тот же сиреневый (var(--wood)),
+     каким закрашен счётчик "дней с отметками" и другие акцентные элементы
+     "Карты дней года" — приклеена к правому нижнему углу окна настроек и
+     не уезжает при прокрутке списка задач, т.к. лежит вне
+     #settingsTabContent (settings-modal-box — position:relative). */
+  .task-add-fab{
+    display:none;
+    position:absolute;
+    right:14px;
+    bottom:14px;
+    width:44px;height:44px;
+    border-radius:50%;
+    border:1.5px solid var(--wood-dark);
+    background:linear-gradient(180deg, var(--wood) 0%, var(--wood-dark) 100%);
+    color:var(--parchment);
+    font-size:24px;
+    font-weight:bold;
+    line-height:1;
+    cursor:pointer;
+    align-items:center;
+    justify-content:center;
+    box-shadow:0 3px 8px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.35);
+    z-index:5;
+  }
+  .task-add-fab.visible{ display:flex; }
+  .task-add-fab:hover{ filter:brightness(1.08); }
+  .task-add-fab:active{ transform:scale(.95); }
+
+  /* сетка выбора вкладки-назначения (перенос задачи) и списка next-задач
+     проекта — переиспользуют общее модальное окно (modalOverlay/modalBox),
+     тот же приём, что и у .goal-color-grid */
+  .task-picker-grid{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    justify-content:center;
+    margin-bottom:10px;
+  }
+  .task-picker-grid button{
+    width:70px;height:70px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:4px;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    color:var(--wood);
+    cursor:pointer;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:10.5px;
+    text-align:center;
+  }
+  .task-picker-grid button svg{ width:22px; height:22px; }
+  .task-picker-grid button:hover{ background:var(--xp-green); }
+  .task-picker-grid button.current{ background:var(--wood); color:var(--parchment); }
+
+  /* ---------- архив задач ---------- */
+  .task-archive-row{
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    padding:10px 2px;
+    border-top:1px solid var(--groove-shadow);
+  }
+  .task-archive-row:first-child{ border-top:none; }
+  .task-archive-check{
+    width:20px;height:20px;
+    flex-shrink:0;
+    margin-top:2px;
+    accent-color:var(--wood);
+  }
+  .task-archive-text{
+    flex:1;
+    min-width:0;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:14px;
+    line-height:1.5;
+    color:var(--ink-soft);
+    text-decoration:line-through;
+    word-break:break-word;
+  }
+  .task-restore-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:26px;height:26px;
+    flex-shrink:0;
+    padding:0;
+    border:none;
+    background:transparent;
+    color:var(--wood);
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .task-restore-btn svg{ width:17px; height:17px; }
 
     /* отключение анимаций при массовых операциях */
   .no-transitions *{

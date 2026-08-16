@@ -117,27 +117,20 @@
   <div class="settings-modal-frame">
     <div class="settings-modal-box" id="settingsModalBox">
       <div class="settings-tab-content" id="settingsTabContent"></div>
+      <button type="button" class="task-add-fab" id="taskAddFab" title="Добавить задачу">+</button>
     </div>
-    <!-- отдельный, "оторванный" от общего блокнотного стека язычок:
-         не примыкает к остальным вкладкам снизу, а висит особняком у
-         самого верха окна настроек (см. .settings-tabs-top в modals.css) -->
-    <div class="settings-tabs-top" id="settingsTabsTop">
-      <button class="settings-tab" id="settingsTabVersionsBtn" title="Версии">
-        <svg viewBox="0 0 24 24" fill="none">
-          <path fill="currentColor" d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"></path>
-        </svg>
-      </button>
-    </div>
+    <!-- Стек вкладок настроек. Благодаря flex-direction:column-reverse в CSS
+         (.settings-tabs) первый элемент в DOM оказывается самым НИЖНИМ, а
+         последний — самым ВЕРХНИМ. Порядок снизу вверх: карта года, затем
+         8 ярлычков задач (red, inbox, next, projects, waiting, read,
+         someday, archive) — видны только если в настройках включена
+         галочка "Показать все мои задачи" (см. refreshSettingsTabsVisibility
+         в my.js). Вкладка настроек (шестерёнка) больше не часть этого
+         вертикального стека — она вынесена отдельным "лежачим" язычком
+         под левый нижний угол окна (см. .settings-tabs-gear в modals.css).
+         Вкладка "Версии" и вкладка "Настроение" перенесены внутрь вкладки
+         настроек как кнопки (см. renderSettingsTabGear в my.js). -->
     <div class="settings-tabs" id="settingsTabs">
-      <button class="settings-tab active" id="settingsTabGearBtn" title="Настройки">&#9881;</button>
-      <button class="settings-tab muted" id="settingsTabMoodBtn" title="Диаграмма настроения" style="display:none;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="9"></circle>
-          <path d="M8.5 10.5h.01"></path>
-          <path d="M15.5 10.5h.01"></path>
-          <path d="M8 15c1.2 1.2 2.5 1.8 4 1.8s2.8-.6 4-1.8"></path>
-        </svg>
-      </button>
       <button class="settings-tab" id="settingsTabYearBtn" title="Карта дней года">
         <svg viewBox="0 0 24 24" fill="none">
           <rect x="2" y="2" width="4" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
@@ -158,6 +151,66 @@
           <rect x="20" y="20" width="2" height="2" rx="1" fill="currentColor" opacity="0.5"></rect>
         </svg>
       </button>
+      <button class="settings-tab task-tab" id="settingsTabRedBtn" data-task="red" title="red" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 3v18"></path>
+          <path d="M5 4h11l-2.5 4L16 12H5"></path>
+        </svg>
+      </button>
+      <button class="settings-tab task-tab" id="settingsTabInboxBtn" data-task="inbox" title="inbox" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 12h4l2 3h4l2-3h4"></path>
+          <path d="M4 12l1.5-7h13L20 12"></path>
+          <path d="M4 12v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6"></path>
+        </svg>
+      </button>
+      <button class="settings-tab task-tab" id="settingsTabNextBtn" data-task="next" title="next" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h13"></path>
+          <path d="M13 6l6 6-6 6"></path>
+        </svg>
+      </button>
+      <button class="settings-tab task-tab" id="settingsTabProjectsBtn" data-task="projects" title="projects" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 6a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6z"></path>
+        </svg>
+      </button>
+      <button class="settings-tab task-tab" id="settingsTabWaitingBtn" data-task="waiting" title="waiting" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 3h12"></path>
+          <path d="M6 21h12"></path>
+          <path d="M7 3c0 4 3 5 5 6-2 1-5 2-5 6"></path>
+          <path d="M17 3c0 4-3 5-5 6 2 1 5 2 5 6"></path>
+        </svg>
+      </button>
+      <button class="settings-tab task-tab" id="settingsTabReadBtn" data-task="read" title="read" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 6c-1.5-1.2-3.5-1.8-6-1.8v13.6c2.5 0 4.5.6 6 1.8"></path>
+          <path d="M12 6c1.5-1.2 3.5-1.8 6-1.8v13.6c-2.5 0-4.5.6-6 1.8"></path>
+          <path d="M12 6v13.6"></path>
+        </svg>
+      </button>
+      <button class="settings-tab task-tab" id="settingsTabSomedayBtn" data-task="someday" title="someday" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 4l1.8 4.6 4.9.4-3.7 3.3 1.1 4.8L12 14.8 7.9 17.1l1.1-4.8-3.7-3.3 4.9-.4z"></path>
+        </svg>
+      </button>
+      <button class="settings-tab task-tab" id="settingsTabArchiveBtn" data-task="archive" title="archive" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="4" width="16" height="4" rx="1"></rect>
+          <path d="M5 8v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"></path>
+          <path d="M10 13h4"></path>
+        </svg>
+      </button>
+    </div>
+    <!-- Вкладка настроек (шестерёнка) — единственная "лежачая", развёрнута
+         на 90°: у неё ширина и высота поменяны местами относительно
+         обычной вкладки (было 62×84, стало 84×62), а закруглены не правый,
+         а нижние углы, т.к. она "смотрит вниз" и приклеена снизу-слева к
+         окну, первой с левого края (см. .settings-tabs-gear в modals.css).
+         По умолчанию активна и открывается при открытии окна настроек. -->
+    <div class="settings-tabs-gear" id="settingsTabsGear">
+      <button class="settings-tab settings-tab-gear active" id="settingsTabGearBtn" title="Настройки">&#9881;</button>
     </div>
   </div>
 </div>
