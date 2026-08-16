@@ -1624,24 +1624,28 @@
 
   var selectedVersionUrl = null;
 
-  function openVersionsModal(){
+  // отдельная вкладка настроек "Версии" (язычок оторван от общего стека,
+  // см. .settings-tabs-top в modals.css) — содержимое рисуется прямо в
+  // #settingsTabContent, как и у остальных вкладок (шестерёнка/настроение/
+  // карта года), а не во всплывающем modalOverlay, как было раньше
+  function renderSettingsTabVersions(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
     selectedVersionUrl = null;
-    modalBox.innerHTML =
-      modalHeader("Версии") +
+    container.innerHTML =
+      '<div class="year-grid-tab-title" style="margin-bottom:12px;">Версии</div>' +
       '<div id="versionUpdateRow"></div>' +
       '<div id="versionHistoryItems"></div>' +
       '<button class="modal-btn primary" id="mVersionReturnBtn" style="display:none;margin-top:12px;">Вернуться на выбранную версию</button>';
-    bindClose();
-    modalOverlay.classList.add("open");
     renderManualUpdateOption();
     renderVersionHistory();
-    document.getElementById("mVersionReturnBtn").addEventListener("click", function(){
-      if(selectedVersionUrl) window.location.href = selectedVersionUrl;
-    });
+    var returnBtn = document.getElementById("mVersionReturnBtn");
+    if(returnBtn){
+      returnBtn.addEventListener("click", function(){
+        if(selectedVersionUrl) window.location.href = selectedVersionUrl;
+      });
+    }
   }
-
-  var versionsBtn = document.getElementById("versionsBtn");
-  if(versionsBtn) versionsBtn.addEventListener("click", openVersionsModal);
 
   // ---------- модалка настроек (шестерёнка) с вкладками ----------
   var settingsModalOverlay = document.getElementById("settingsModalOverlay");
@@ -1649,8 +1653,35 @@
 
   function openSettingsModal(){
     refreshSettingsTabsVisibility();
+    settingsModalBox.style.height = "";
     settingsModalOverlay.classList.add("open");
     switchSettingsTab("gear");
+    // фиксируем размер окна равным естественной высоте вкладки "настройки"
+    // (шестерёнки) — именно она открывается по умолчанию — плюс запас в
+    // полтора язычка (см. .settings-tab { height:84px } в modals.css), и
+    // больше не меняем его при переключении вкладок (см. комментарий в
+    // modals.css). Дополнительно подрезаем итоговую высоту так, чтобы низ
+    // окна не заезжал на плавающую кнопку настроек (.settings-fab): берём
+    // её реальное положение на экране через getBoundingClientRect (а не
+    // проценты от vh, которые на мобильных браузерах не совпадают с видимой
+    // областью из-за скрывающейся адресной строки).
+    requestAnimationFrame(function(){
+      if(!settingsModalBox) return;
+      var natural = settingsModalBox.getBoundingClientRect().height;
+      var tabHeight = 84;
+      var desired = natural + tabHeight * 2;
+
+      var boxTop = settingsModalBox.getBoundingClientRect().top;
+      var gearBtn = document.getElementById("settingsGearBtn");
+      if(gearBtn){
+        var gearTop = gearBtn.getBoundingClientRect().top;
+        var gapAboveGear = 16;
+        var maxAllowed = gearTop - boxTop - gapAboveGear;
+        if(maxAllowed > 120) desired = Math.min(desired, maxAllowed);
+      }
+
+      settingsModalBox.style.height = desired + "px";
+    });
   }
   function closeSettingsModal(){
     settingsModalOverlay.classList.remove("open");
@@ -1668,13 +1699,16 @@
     var gearBtn = document.getElementById("settingsTabGearBtn");
     var moodBtn = document.getElementById("settingsTabMoodBtn");
     var yearBtn = document.getElementById("settingsTabYearBtn");
+    var versionsBtn = document.getElementById("settingsTabVersionsBtn");
     if(gearBtn) gearBtn.classList.toggle("active", tab === "gear");
     if(moodBtn) moodBtn.classList.toggle("active", tab === "mood");
     if(yearBtn) yearBtn.classList.toggle("active", tab === "year");
+    if(versionsBtn) versionsBtn.classList.toggle("active", tab === "versions");
     var container = document.getElementById("settingsTabContent");
     if(container) container.scrollTop = 0;
     if(tab === "mood") renderSettingsTabMood();
     else if(tab === "year") renderSettingsTabYear();
+    else if(tab === "versions") renderSettingsTabVersions();
     else renderSettingsTabGear();
   }
 
@@ -1801,12 +1835,12 @@
   var settingsTabGearBtn = document.getElementById("settingsTabGearBtn");
   var settingsTabMoodBtn = document.getElementById("settingsTabMoodBtn");
   var settingsTabYearBtn = document.getElementById("settingsTabYearBtn");
+  var settingsTabVersionsBtn = document.getElementById("settingsTabVersionsBtn");
   if(settingsTabGearBtn) settingsTabGearBtn.addEventListener("click", function(){ switchSettingsTab("gear"); });
   if(settingsTabMoodBtn) settingsTabMoodBtn.addEventListener("click", function(){ switchSettingsTab("mood"); });
   if(settingsTabYearBtn) settingsTabYearBtn.addEventListener("click", function(){ switchSettingsTab("year"); });
+  if(settingsTabVersionsBtn) settingsTabVersionsBtn.addEventListener("click", function(){ switchSettingsTab("versions"); });
 
-  var settingsModalClose = document.getElementById("settingsModalClose");
-  if(settingsModalClose) settingsModalClose.addEventListener("click", closeSettingsModal);
   if(settingsModalOverlay){
     settingsModalOverlay.addEventListener("click", function(e){
       if(e.target === settingsModalOverlay) closeSettingsModal();
@@ -3138,7 +3172,17 @@
   }
 
   // --- детализация по тапу на день ---
-  function openYearDayModal(dayTs){
+  // Раньше открывалась отдельным всплывающим окном (modalOverlay/modalBox).
+  // Теперь показывается прямо внутри вкладки настроек "Карта дней года" —
+  // подменяет собой сетку в том же #settingsTabContent, как будто на
+  // странице сменилось изображение. Отдельной кнопки закрытия ("крестик")
+  // здесь нет: чтобы вернуться к сетке, достаточно ещё раз нажать на
+  // язычок настроек "Карта дней года" — он всегда заново отрисовывает
+  // сетку (см. switchSettingsTab → renderSettingsTabYear).
+  function renderYearDayDetail(dayTs){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+
     var readingByDay = getReadingCountsByDay();
     var serviceByDay = getServiceMinutesByDay();
     var moodsByDay = getMoodsByDay();
@@ -3192,13 +3236,11 @@
         '</div>';
     }
 
-    modalBox.classList.add("year-day-modal");
-    modalBox.innerHTML =
-      modalHeader(weekdayLabel.charAt(0).toUpperCase() + weekdayLabel.slice(1)) +
+    container.innerHTML =
+      '<div class="year-grid-tab-title">' + escapeHtml(weekdayLabel.charAt(0).toUpperCase() + weekdayLabel.slice(1)) + '</div>' +
       '<div class="year-day-modal-title">' + escapeHtml(formatDayFull(dayTs)) + '</div>' +
       rows + noteSectionHtml;
-    bindClose();
-    modalOverlay.classList.add("open");
+    container.scrollTop = 0;
 
     var noteSaveBtn = document.getElementById("yearDayNoteSaveBtn");
     if(noteSaveBtn){
@@ -3235,9 +3277,22 @@
       '</div>';
 
     container.innerHTML =
-      '<div class="year-grid-tab-title">Карта дней года</div>' +
-      '<div class="year-grid-stats">Дней с отметками за последние 365 дней: ' + built.activeDays + '</div>' +
+      '<div class="year-grid-tab-header">' +
+        '<div class="year-grid-tab-title">Карта дней года</div>' +
+        '<button class="year-grid-active-days-btn" id="yearGridActiveDaysBtn" title="Дней с отметками за последние 365 дней">' + built.activeDays + '</button>' +
+      '</div>' +
       '<div class="year-grid-v-scroll" id="yearGridVScroll">' + legendHtml + built.html + '</div>';
+
+    var activeDaysBtn = document.getElementById("yearGridActiveDaysBtn");
+    if(activeDaysBtn){
+      activeDaysBtn.addEventListener("click", function(e){
+        e.stopPropagation();
+        if(modalOverlay.classList.contains("open")) return;
+        modalBox.innerHTML = modalHeader("Дней с отметками за последние 365 дней: " + built.activeDays);
+        bindClose();
+        modalOverlay.classList.add("open");
+      });
+    }
 
     var scrollHolder = document.getElementById("yearGridVScroll");
     if(scrollHolder){
@@ -3245,7 +3300,7 @@
         var cell = e.target.closest ? e.target.closest("[data-day-ts]") : null;
         if(!cell) return;
         var ts = Number(cell.getAttribute("data-day-ts"));
-        if(!isNaN(ts)) openYearDayModal(ts);
+        if(!isNaN(ts)) renderYearDayDetail(ts);
       });
       // сразу прокручиваем к текущей неделе (в самый низ сетки) — пояснение
       // наверху ленты остаётся скрыто, пока не прокрутить наверх вручную

@@ -4,60 +4,44 @@
    (QR/скан), отключение анимаций при массовых операциях
    =========================================================================== */
 
-  /* ---------- список предыдущих версий ---------- */
-  .footer-buttons-row{
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    gap:10px;
-    margin:22px auto 0 auto;
-    max-width:640px;
-  }
-  .versions-btn{
-    padding:10px 22px;
-    background:#e9e4d4;
-    border:2px solid #6b6449;
-    border-radius:4px;
-    box-shadow:inset 0 2px 4px rgba(0,0,0,.45), 0 1px 0 rgba(255,255,255,.25);
-    font-weight:bold;
-    font-size:12.5px;
-    color:var(--ink-soft);
-    letter-spacing:.3px;
-    font-family:"Segoe UI","Tahoma",sans-serif;
-    cursor:pointer;
-  }
-  /* ---------- плавающая кнопка настроек (нижний правый угол) ---------- */
+  /* ---------- плавающая кнопка настроек (нижний правый угол) ----------
+     Фон кнопки — тот же градиент, что и у шапки сайта (header в base.css).
+     Сама шестерёнка (тело со впадинами-зубцами) закрашена цветом фона
+     основного тела страницы, а центральная "дырочка" — снова цветом фона
+     шапки, чтобы кнопка выглядела как окошко, вырезанное в цвет шапки на
+     фоне страницы. Поднята на 30px выше прежнего исходного положения
+     (50px вверх, затем 20px вниз). */
   .settings-fab{
     position:fixed;
     right:26px;
-    bottom:102px;
+    bottom:132px;
     width:68px;height:68px;
     display:flex;
     align-items:center;
     justify-content:center;
     flex-shrink:0;
     padding:0;
-    background:#dcdce1;
-    border:1.5px solid #6b6b74;
+    background:linear-gradient(180deg, var(--wood) 0%, var(--wood-dark) 100%);
+    border:1.5px solid var(--wood-dark);
     border-radius:50%;
     box-shadow:0 4px 14px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.4);
     cursor:pointer;
     z-index:500;
-    transition:transform .15s ease, background .15s ease;
+    transition:transform .15s ease, filter .15s ease;
   }
   .settings-fab:hover,
   .settings-fab:focus-visible{
-    background:#eaeaee;
+    filter:brightness(1.08);
     transform:scale(1.06);
   }
   .settings-fab:active{ transform:scale(.95); }
   .settings-fab-icon{
-    width:66%;
-    height:66%;
+    width:78%;
+    height:78%;
     pointer-events:none;
   }
   .settings-fab-icon path{
-    fill:#d8d8dc;
+    fill:var(--bg-mid);
     stroke:#3a3a40;
     stroke-width:2.4;
     stroke-linejoin:round;
@@ -73,14 +57,14 @@
     stroke-width:6.2;
   }
   .settings-fab-hole{
-    fill:#f0f0f2;
+    fill:var(--wood);
     stroke:#3a3a40;
     stroke-width:2.4;
   }
   @media (max-width:640px){
     .settings-fab{
       right:20px;
-      bottom:88px;
+      bottom:118px;
       width:60px;height:60px;
     }
   }
@@ -129,7 +113,7 @@
     inset:0;
     background:rgba(20,14,7,.55);
     display:none;
-    align-items:center;
+    align-items:flex-start;
     justify-content:center;
     padding:16px 74px 16px 16px;
     z-index:1000;
@@ -139,23 +123,27 @@
     position:relative;
     max-width:380px;
     width:100%;
-    height:90vh;
     max-height:90vh;
   }
-  /* Окно настроек всегда одного и того же размера и одной и той же
-     позиции (высота растянута на весь доступный максимум — как у вкладки
-     "карта дней года"), независимо от того, какая вкладка открыта. Это
-     не даёт верхнему краю окна "прыгать" при переключении вкладок,
-     особенно важно на смартфоне. Заголовок/крестик остаются на месте,
-     а прокручивается только содержимое активной вкладки (#settingsTabContent) —
-     без видимого индикатора прокрутки. */
+  /* Окно настроек всегда одного и того же размера — такого, какой у него
+     естественная высота на вкладке "настройки" (шестерёнка): её высота
+     измеряется JS-ом при открытии окна и фиксируется инлайн-стилем (см.
+     openSettingsModal в my.js), а верх окна "прибит" к верхнему краю
+     оверлея (align-items:flex-start), а не к центру — поэтому ни размер,
+     ни положение окна не меняются при переключении вкладок, только на
+     смартфоне это особенно заметно. Если у какой-то вкладки контента
+     больше, чем помещается — прокручивается содержимое активной вкладки
+     (#settingsTabContent), а не всё окно; индикатор прокрутки скрыт.
+     Кроме того, тот же JS дополнительно подрезает высоту так, чтобы низ
+     окна не заезжал на кнопку настроек (.settings-fab) — см. комментарий
+     в openSettingsModal. */
   .settings-modal-box{
     position:relative;
     background:var(--parchment);
     border:1px solid var(--groove-shadow);
-    border-radius:10px 10px 0 10px;
+    border-radius:10px 0 0 10px;
     width:100%;
-    height:100%;
+    max-height:90vh;
     display:flex;
     flex-direction:column;
     overflow:hidden;
@@ -176,36 +164,91 @@
   /* язычки прижаты к низу окна: settingsTabGearBtn идёт первым в DOM и
      благодаря column-reverse оказывается самым нижним — он и открывается
      по умолчанию при открытии окна настроек. settingsTabMoodBtn — над ним,
-     почти вплотную. */
+     почти вплотную. Размер и зазор между язычками зафиксированы и не
+     меняются при нажатии/наведении — никаких transition/transform на
+     width/height/padding здесь нет специально. */
   .settings-tabs{
     position:absolute;
-    right:-53px;
+    right:-62px;
     bottom:0;
     display:flex;
     flex-direction:column-reverse;
-    gap:2px;
+    gap:1px;
   }
+  /* язычок "Версии" — намеренно не часть общего стека выше: он не
+     примыкает к остальным вкладкам снизу, а закреплён отдельно у
+     самого верха окна настроек. Использует тот же класс .settings-tab,
+     поэтому размер/цвета/наведение/нажатие и активное состояние у него
+     полностью совпадают с остальными язычками; :last-child в правиле
+     .settings-tab даёт ему ту же тёмную линию-срез сверху, что и у
+     верхнего язычка основного стека. */
+  .settings-tabs-top{
+    position:absolute;
+    right:-62px;
+    top:0;
+    display:flex;
+    flex-direction:column;
+  }
+  /* этот язычок трогает окно СВОИМ НИЗОМ (а не верхом, как весь основной
+     стек снизу) — то есть по роли он ближе к нижнему, приклеенному к окну
+     язычку "настройки". Поэтому общее правило .settings-tab:last-child
+     (тёмная 2px линия-срез, означающая "здесь кончается стопка язычков и
+     начинается открытый фон") ему не подходит и здесь отменяется — вместо
+     неё та же едва заметная сиреневая окантовка в 1px, что и по остальным
+     сторонам язычка (и что видна как тонкий ободок по нижнему краю самого
+     нижнего язычка стопки снизу) — так верх этого язычка получает
+     аккуратную законченную кромку на стыке с окном, а не голый белый край. */
+  .settings-tabs-top .settings-tab:last-child{ border-top:1px solid var(--groove-shadow); }
   .settings-tab{
-    width:53px;height:74px;
+    width:62px;height:84px;
+    flex:0 0 62px;
     display:flex;
     align-items:center;
     justify-content:center;
+    box-sizing:border-box;
     background:var(--parchment);
     color:var(--wood);
     border:1px solid var(--groove-shadow);
     border-left:none;
-    border-top:2px solid var(--ink);
+    border-top:none;
     border-radius:0 14px 14px 0;
-    font-size:28px;
+    font-size:32px;
     cursor:pointer;
     box-shadow:2px 2px 5px rgba(0,0,0,.3);
+    padding:0;
+    margin:0;
+    outline:none;
+    -webkit-appearance:none;
+    appearance:none;
+    -webkit-tap-highlight-color:transparent;
   }
-  .settings-tab svg{ width:28px; height:28px; }
+  .settings-tab svg{ width:32px; height:32px; }
+  /* тёмная линия-срез сверху (имитирует край окна настроек, "прибитого"
+     к языкам) нужна только у самого верхнего язычка всей стопки — он же
+     последний в DOM из-за column-reverse (см. выше). Раньше эта линия
+     была у КАЖДОГО неактивного язычка, и на стыке двух соседних
+     неактивных язычков (1px зазор + 2px сплошная линия следующего)
+     промежуток выглядел заметно больше, чем на стыке с активным (там
+     линия прозрачная и сливается с ним) — из-за этого "карта года" и
+     "настроение" казались раздвинуты сильнее, чем остальные пары. */
+  .settings-tab:last-child{ border-top:2px solid var(--ink); }
   /* активный язычок — та же страница, что и открытое окно: линия сверху,
      отделяющая его, пропадает, и он выглядит продолжением окна.
      неактивный остаётся того же цвета страницы, но т.к. окно "лежит"
-     поверх него, видна тёмная линия среза сверху. */
-  .settings-tab.active{ border-top-color:transparent; }
+     поверх него, видна тёмная линия среза сверху.
+
+     Цвета активного язычка не инвертируются программно (не CSS filter:
+     invert), а меняются местами в пределах уже используемых на сайте
+     фиолетовых оттенков: самый тёмный фиолетовый (--wood — им же
+     обычно закрашены сами значки/квадратики через currentColor)
+     становится фоном язычка, а сами значки перекрашиваются в
+     еле-сиреневый оттенок фона (--parchment). Размер язычка при этом
+     не меняется — только background/color. */
+  .settings-tab.active{
+    border-top-color:transparent;
+    background:var(--wood);
+    color:var(--parchment);
+  }
 
   .settings-row{
     display:flex;

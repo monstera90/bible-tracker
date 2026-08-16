@@ -393,22 +393,42 @@
      (см. .settings-modal-box.year-mode в modals.css), а прокручивается
      только сама лента (.year-grid-v-scroll) — заголовок и статистика
      остаются на месте. ---------- */
-  .year-grid-stats{
-    font-family:"Segoe UI","Tahoma",sans-serif;
-    font-size:13px;
-    color:var(--ink);
-    text-align:center;
+  .year-grid-tab-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
     margin:0 0 10px 0;
   }
 
   .year-grid-tab-title{
-    text-align:center;
+    text-align:left;
     font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
     font-size:15px;
     letter-spacing:.5px;
     color:var(--wood);
-    margin:0 0 10px 0;
+    margin:0;
   }
+
+  /* счётчик "дней с отметками" — компактная кнопка справа от заголовка;
+     полная фраза (раньше выводилась отдельной строкой под заголовком)
+     теперь показывается по тапу как всплывающее уведомление, см.
+     yearGridActiveDaysBtn в my.js. */
+  .year-grid-active-days-btn{
+    flex-shrink:0;
+    min-width:30px;
+    padding:4px 10px;
+    background:var(--parchment-dark);
+    border:1px solid var(--groove-shadow);
+    border-radius:12px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-weight:bold;
+    font-size:13px;
+    color:var(--wood);
+    cursor:pointer;
+    text-align:center;
+  }
+  .year-grid-active-days-btn:active{ filter:brightness(.96); }
 
   /* Окантовки у ленты нет специально — она должна восприниматься как
      продолжение самого окна настроек, а не как отдельная врезка. Плавное
