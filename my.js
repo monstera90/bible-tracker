@@ -1649,35 +1649,21 @@
 
   function openSettingsModal(){
     refreshSettingsTabsVisibility();
-    settingsModalBox.style.height = "";
     settingsModalOverlay.classList.add("open");
     switchSettingsTab("gear");
   }
   function closeSettingsModal(){
     settingsModalOverlay.classList.remove("open");
   }
-  // Высота окна подстраивается под содержимое активной вкладки: у вкладок
-  // "настройки" и "настроение" — под их естественную высоту (компактно), а
-  // у "карты дней" — растягивается на весь доступный максимум (см.
-  // .settings-modal-frame/.settings-modal-box max-height в CSS), чтобы
-  // квадратики карты могли использовать пространство по максимуму. Переход
-  // между размерами анимируется плавно (transition: height в CSS), а не
-  // "прыгает".
-  function lockSettingsModalHeightForTab(tab){
-    if(!settingsModalBox) return;
-    if(tab === "year"){
-      settingsModalBox.style.height = "";
-      var maxH = parseFloat(getComputedStyle(settingsModalBox).maxHeight);
-      settingsModalBox.style.height = (maxH ? maxH : settingsModalBox.scrollHeight) + "px";
-    } else {
-      settingsModalBox.style.height = "";
-      settingsModalBox.style.height = settingsModalBox.scrollHeight + "px";
-    }
-  }
   function refreshSettingsTabsVisibility(){
     var moodTab = document.getElementById("settingsTabMoodBtn");
     if(moodTab) moodTab.style.display = isMoodEnabled() ? "block" : "none";
   }
+  // Окно настроек всегда одного размера (см. .settings-modal-box в
+  // modals.css) — высота фиксирована и не зависит от вкладки, поэтому
+  // верхний край окна не "прыгает" при переключении вкладок. Если
+  // содержимое вкладки не помещается, прокручивается #settingsTabContent
+  // (без видимого индикатора прокрутки, см. CSS).
   function switchSettingsTab(tab){
     var gearBtn = document.getElementById("settingsTabGearBtn");
     var moodBtn = document.getElementById("settingsTabMoodBtn");
@@ -1685,13 +1671,11 @@
     if(gearBtn) gearBtn.classList.toggle("active", tab === "gear");
     if(moodBtn) moodBtn.classList.toggle("active", tab === "mood");
     if(yearBtn) yearBtn.classList.toggle("active", tab === "year");
-    if(settingsModalBox) settingsModalBox.classList.toggle("year-mode", tab === "year");
     var container = document.getElementById("settingsTabContent");
-    if(container) container.classList.toggle("year-mode", tab === "year");
+    if(container) container.scrollTop = 0;
     if(tab === "mood") renderSettingsTabMood();
     else if(tab === "year") renderSettingsTabYear();
     else renderSettingsTabGear();
-    lockSettingsModalHeightForTab(tab);
   }
 
   function renderSettingsTabGear(){
@@ -3238,7 +3222,6 @@
   function renderSettingsTabYear(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
-    container.classList.add("year-mode");
 
     var built = buildYearGridMarkup();
 
