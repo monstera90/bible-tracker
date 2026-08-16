@@ -551,12 +551,15 @@
     align-items:center;
     gap:10px;
     padding:9px 4px;
-    border-bottom:1px solid var(--groove-shadow);
     font-family:"Palatino Linotype",Georgia,serif;
     font-size:14px;
     color:var(--ink);
   }
-  .year-day-stat-row:last-of-type{ border-bottom:none; }
+  /* разделитель — только МЕЖДУ строками (граница сверху у всех кроме
+     первой), а не "снизу у всех кроме последней": так он не зависит от
+     того, что идёт после строк (например, блок комментария), и не даёт
+     задвоения линии на стыке с ним */
+  .year-day-stat-row + .year-day-stat-row{ border-top:1px solid var(--groove-shadow); }
   .year-day-stat-icon{ font-size:17px; width:22px; text-align:center; flex-shrink:0; }
   .year-day-empty{
     text-align:center;

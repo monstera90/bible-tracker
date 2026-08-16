@@ -1684,6 +1684,7 @@
     });
   }
   function closeSettingsModal(){
+    flushPendingYearDayNoteEdit();
     settingsModalOverlay.classList.remove("open");
   }
   function refreshSettingsTabsVisibility(){
@@ -1696,6 +1697,7 @@
   // содержимое вкладки не помещается, прокручивается #settingsTabContent
   // (без видимого индикатора прокрутки, см. CSS).
   function switchSettingsTab(tab){
+    flushPendingYearDayNoteEdit();
     var gearBtn = document.getElementById("settingsTabGearBtn");
     var moodBtn = document.getElementById("settingsTabMoodBtn");
     var yearBtn = document.getElementById("settingsTabYearBtn");
@@ -1885,12 +1887,15 @@
     var rec = state[hourNoteKeyForDay(dayTs)];
     return (rec && typeof rec.c === "string" && rec.c) ? rec.c : "";
   }
-  function setHourNoteForDay(dayTs, text){
+  function setHourNoteForDay(dayTs, text, skipGridRefresh){
     var trimmed = (text || "").trim();
     state[hourNoteKeyForDay(dayTs)] = {c: trimmed ? trimmed : null, t: Date.now()};
     saveLocalState();
     scheduleCloudPush();
-    refreshYearGridIfOpen();
+    // при сохранении прямо из карточки дня (см. renderYearDayNoteEdit) сброс
+    // к общей сетке не нужен — пользователь должен оставаться на этом же
+    // экране дня; поэтому вызывающий код передаёт skipGridRefresh=true
+    if(!skipGridRefresh) refreshYearGridIfOpen();
   }
   function getHourNotesByDay(){
     var byDay = {};
@@ -3220,40 +3225,132 @@
       rows = '<div class="year-day-empty">В этот день активность не отмечена.</div>';
     }
 
-    // блок с комментарием этого дня: показываем и даём редактировать, если
-    // функция сейчас включена в настройках, либо если за этот день уже
-    // существует ранее сохранённая заметка (чтобы старые записи оставались
-    // доступны для просмотра/правки, даже если функцию потом выключили)
+    // блок с комментарием этого дня: показываем, если функция сейчас
+    // включена в настройках, либо если за этот день уже существует ранее
+    // сохранённая заметка (чтобы старые записи оставались доступны для
+    // просмотра/правки, даже если функцию потом выключили). Комментарий
+    // отображается как обычный статичный текст (как и всё остальное в
+    // окне), с карандашиком сразу после текста — по нажатию на него текст
+    // превращается в редактируемое поле; там же появляется дискета для
+    // сохранения (после сохранения снова становится карандашиком).
     var existingNote = getHourNoteForDay(dayTs);
-    var noteSectionHtml = "";
-    if(isHourNotesEnabled() || existingNote){
-      noteSectionHtml =
-        '<div class="year-day-note-section">' +
-          '<div class="year-day-note-label">Комментарий за этот день</div>' +
-          '<textarea class="year-day-note-textarea" id="yearDayNoteInput" rows="3" placeholder="Комментарий…">' + escapeHtml(existingNote) + '</textarea>' +
-          '<button class="modal-btn year-day-note-savebtn" id="yearDayNoteSaveBtn">Сохранить комментарий</button>' +
-          '<div class="year-day-note-saved-msg" id="yearDayNoteSavedMsg">Сохранено.</div>' +
-        '</div>';
-    }
+    var showNotes = isHourNotesEnabled() || existingNote;
 
     container.innerHTML =
       '<div class="year-grid-tab-title">' + escapeHtml(weekdayLabel.charAt(0).toUpperCase() + weekdayLabel.slice(1)) + '</div>' +
       '<div class="year-day-modal-title">' + escapeHtml(formatDayFull(dayTs)) + '</div>' +
-      rows + noteSectionHtml;
+      rows +
+      (showNotes ? '<div class="year-day-note-section" id="yearDayNoteSection"></div>' : '');
     container.scrollTop = 0;
 
-    var noteSaveBtn = document.getElementById("yearDayNoteSaveBtn");
-    if(noteSaveBtn){
-      noteSaveBtn.addEventListener("click", function(){
-        var textarea = document.getElementById("yearDayNoteInput");
-        setHourNoteForDay(dayTs, textarea ? textarea.value : "");
-        var savedMsg = document.getElementById("yearDayNoteSavedMsg");
-        if(savedMsg){
-          savedMsg.classList.add("visible");
-          setTimeout(function(){ savedMsg.classList.remove("visible"); }, 2000);
-        }
+    if(showNotes) renderYearDayNoteView(dayTs, existingNote);
+  }
+
+  var PENCIL_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>';
+  var SAVE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>';
+
+  // статичный вид комментария: текст (или блёклая заглушка "Комментарий",
+  // если ещё ничего не введено) и карандашик сразу после него
+  function renderYearDayNoteView(dayTs, noteText){
+    var wrap = document.getElementById("yearDayNoteSection");
+    if(!wrap) return;
+    var textHtml = noteText ? escapeHtml(noteText) : '<span class="year-day-note-placeholder">Комментарий</span>';
+    wrap.innerHTML =
+      '<div class="year-day-note-view">' + textHtml +
+        '<button type="button" class="year-day-note-icon-btn" id="yearDayNoteEditBtn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
+      '</div>';
+    var editBtn = document.getElementById("yearDayNoteEditBtn");
+    if(editBtn){
+      editBtn.addEventListener("click", function(){
+        renderYearDayNoteEdit(dayTs, noteText);
       });
     }
+  }
+
+  // режим редактирования: тот же блок текста, что и в статичном виде
+  // (contenteditable вместо textarea), а дискета — реальный элемент СРАЗУ
+  // ПОСЛЕ текста в потоке (как и карандашик), поэтому она естественным
+  // образом сдвигается по мере набора текста и переносится на новую строку
+  // вместе с ним, а не висит в фиксированном месте экрана
+  function getEditableNoteText(root, skipEl){
+    var text = "";
+    function walk(node){
+      if(node === skipEl) return;
+      if(node.nodeType === 3){ text += node.nodeValue; return; }
+      if(node.nodeType === 1 && node.tagName === "BR"){ text += "\n"; return; }
+      var kids = node.childNodes;
+      for(var i = 0; i < kids.length; i++) walk(kids[i]);
+    }
+    var top = root.childNodes;
+    for(var i = 0; i < top.length; i++) walk(top[i]);
+    return text;
+  }
+  function renderYearDayNoteEdit(dayTs, noteText){
+    var wrap = document.getElementById("yearDayNoteSection");
+    if(!wrap) return;
+    wrap.innerHTML =
+      '<div class="year-day-note-view year-day-note-editable" id="yearDayNoteInput" contenteditable="true"></div>';
+    var editable = document.getElementById("yearDayNoteInput");
+    if(!editable) return;
+
+    var textNode = document.createTextNode(noteText || "");
+    editable.appendChild(textNode);
+    editable.setAttribute("data-day-ts", String(dayTs)); // нужно для автосохранения при закрытии окна/смене вкладки
+    var saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "year-day-note-icon-btn";
+    saveBtn.id = "yearDayNoteSaveBtn";
+    saveBtn.title = "Сохранить";
+    saveBtn.innerHTML = SAVE_ICON_SVG;
+    editable.appendChild(saveBtn);
+
+    function updatePlaceholder(){
+      var empty = getEditableNoteText(editable, saveBtn).length === 0;
+      editable.classList.toggle("is-empty", empty);
+    }
+    updatePlaceholder();
+
+    // курсор сразу ставим в конец введённого текста (перед дискетой) —
+    // так же, как карандашик стоит сразу после текста в статичном виде
+    editable.focus();
+    var range = document.createRange();
+    range.setStart(textNode, textNode.length);
+    range.collapse(true);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    editable.addEventListener("input", updatePlaceholder);
+    // Enter вставляет обычный перевод строки внутри того же текстового узла
+    // (white-space:pre-wrap в CSS), вместо того чтобы браузер плодил <div>
+    editable.addEventListener("keydown", function(e){
+      if(e.key === "Enter"){
+        e.preventDefault();
+        document.execCommand("insertText", false, "\n");
+      }
+    });
+
+    saveBtn.addEventListener("click", function(e){
+      e.stopPropagation();
+      var newText = getEditableNoteText(editable, saveBtn);
+      setHourNoteForDay(dayTs, newText, true); // остаёмся на этой же карточке дня, сетку не перерисовываем
+      renderYearDayNoteView(dayTs, newText.trim());
+    });
+  }
+
+  // если в этот момент открыта карточка дня с активным редактированием
+  // комментария (contenteditable, см. renderYearDayNoteEdit), сохраняем
+  // введённый текст без явного нажатия на дискету — вызывается перед
+  // закрытием окна настроек и перед переключением на другую вкладку
+  // настроек, чтобы недописанный текст не терялся
+  function flushPendingYearDayNoteEdit(){
+    var editable = document.getElementById("yearDayNoteInput");
+    if(!editable || !editable.isContentEditable) return;
+    var dayTsAttr = editable.getAttribute("data-day-ts");
+    if(dayTsAttr === null) return;
+    var saveBtn = document.getElementById("yearDayNoteSaveBtn");
+    var newText = getEditableNoteText(editable, saveBtn);
+    setHourNoteForDay(Number(dayTsAttr), newText, true);
   }
 
   // --- третья вкладка настроек: сама карта на весь экран, со своей
