@@ -211,8 +211,17 @@
     waiting: "Waiting", read: "Read", someday: "Someday", archive: "Archive"
   };
   // вкладки-списки задач, между которыми можно переносить задачу стрелочкой
-  // (без архива — туда задача попадает только через отметку чекбокса)
+  // (без архива — туда задача попадает только через отметку чекбокса).
+  // "red" сюда тоже входит — используется, чтобы кнопка "+" показывалась
+  // и на вкладке Red (там тоже можно создать задачу напрямую), но САМОЙ
+  // "red" в качестве места хранения (реального taskа.c.tab) больше нет:
+  // Red — это витрина по цветной отметке (см. TASK_MOVE_TARGET_TABS ниже,
+  // getTasksForTab и cycleTaskFlag).
   var TASK_MOVABLE_TABS = ["red","inbox","next","projects","waiting","read","someday"];
+  // а вот КУДА реально можно перенести задачу стрелочкой (пикер
+  // "Перенести задачу") — без red, т.к. принадлежность к Red определяется
+  // не вкладкой-домом, а цветной отметкой слева от чекбокса
+  var TASK_MOVE_TARGET_TABS = ["inbox","next","projects","waiting","read","someday"];
   var TASK_MOVE_ICONS = {
     red: '<path d="M5 3v18"></path><path d="M5 4h11l-2.5 4L16 12H5"></path>',
     inbox: '<path d="M4 12h4l2 3h4l2-3h4"></path><path d="M4 12l1.5-7h13L20 12"></path><path d="M4 12v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6"></path>',
@@ -228,6 +237,7 @@
   var ARROW_MOVE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path></svg>';
   var LINK_NEXT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"></path><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"></path></svg>';
   var RESTORE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>';
+  var DELETE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>';
   var TASK_ARCHIVE_MAX_SHOWN = 50;
 
   function getShowAllTasksEnabled(){
@@ -1759,6 +1769,7 @@
   }
   function closeSettingsModal(){
     flushPendingYearDayNoteEdit();
+    flushPendingTaskEdits();
     settingsModalOverlay.classList.remove("open");
   }
   function refreshSettingsTabsVisibility(){
@@ -1775,6 +1786,7 @@
   // (без видимого индикатора прокрутки, см. CSS).
   function switchSettingsTab(tab){
     flushPendingYearDayNoteEdit();
+    flushPendingTaskEdits();
     var gearBtn = document.getElementById("settingsTabGearBtn");
     var yearBtn = document.getElementById("settingsTabYearBtn");
     if(gearBtn) gearBtn.classList.toggle("active", tab === "gear");
@@ -3389,6 +3401,18 @@
   // ПОСЛЕ текста в потоке (как и карандашик), поэтому она естественным
   // образом сдвигается по мере набора текста и переносится на новую строку
   // вместе с ним, а не висит в фиксированном месте экрана
+  //
+  // изначально пустой текстовый узел (createTextNode("")) — не даёт
+  // браузеру стабильной точки для курсора: Selection API подтверждает
+  // установку каретки, но реально набираемый текст в такой узел не
+  // попадает (символы теряются). Поэтому для пустого случая текстовый
+  // узел начинается с невидимого символа нулевой ширины (ZERO WIDTH
+  // SPACE, U+200B) — он делает узел непустым (ввод начинает приниматься
+  // браузером нормально), но ничего не отображает и не занимает места,
+  // так что дискета остаётся ровно на своей строке рядом с текстом (в
+  // отличие от служебного <br>, который переносил бы её на строку ниже).
+  // При вычислении/сохранении текста этот символ вырезается.
+  var EMPTY_ANCHOR_CHAR = "\u200B";
   function getEditableNoteText(root, skipEl){
     var text = "";
     function walk(node){
@@ -3400,7 +3424,10 @@
     }
     var top = root.childNodes;
     for(var i = 0; i < top.length; i++) walk(top[i]);
-    return text;
+    // служебный символ-якорь мог оказаться где угодно в тексте (браузер
+    // иногда сохраняет его перед впечатанным текстом, а не только в
+    // начале) — вырезаем все вхождения, это не пользовательский ввод
+    return text.split(EMPTY_ANCHOR_CHAR).join("");
   }
   function renderYearDayNoteEdit(dayTs, noteText){
     var wrap = document.getElementById("yearDayNoteSection");
@@ -3410,7 +3437,7 @@
     var editable = document.getElementById("yearDayNoteInput");
     if(!editable) return;
 
-    var textNode = document.createTextNode(noteText || "");
+    var textNode = document.createTextNode(noteText ? noteText : EMPTY_ANCHOR_CHAR);
     editable.appendChild(textNode);
     editable.setAttribute("data-day-ts", String(dayTs)); // нужно для автосохранения при закрытии окна/смене вкладки
     var saveBtn = document.createElement("button");
@@ -3429,6 +3456,8 @@
 
     // курсор сразу ставим в конец введённого текста (перед дискетой) —
     // так же, как карандашик стоит сразу после текста в статичном виде
+    // (если текста ещё нет — сразу после невидимого символа-якоря, см.
+    // EMPTY_ANCHOR_CHAR выше)
     editable.focus();
     var range = document.createRange();
     range.setStart(textNode, textNode.length);
@@ -3468,6 +3497,25 @@
     var saveBtn = document.getElementById("yearDayNoteSaveBtn");
     var newText = getEditableNoteText(editable, saveBtn);
     setHourNoteForDay(Number(dayTsAttr), newText, true);
+  }
+
+  // то же самое для текста задачи (вкладки red/inbox/next/…): если в
+  // момент ухода со вкладки/закрытия окна настроек какая-то строка была
+  // в режиме редактирования (contenteditable, см. renderTaskRowEdit),
+  // сохраняем введённый текст без явного нажатия на дискету — иначе он
+  // терялся при простом переключении вкладки. Строк в редактировании
+  // одновременно может быть несколько (клик по карандашику на разных
+  // строках), поэтому проходим по всем.
+  function flushPendingTaskEdits(){
+    var editables = document.querySelectorAll(".task-editable[data-task-id]");
+    Array.prototype.forEach.call(editables, function(editable){
+      if(!editable.isContentEditable) return;
+      var taskId = editable.getAttribute("data-task-id");
+      if(!taskId) return;
+      var saveBtn = editable.querySelector(".task-icon-btn");
+      var newText = getEditableNoteText(editable, saveBtn);
+      setTaskText(taskId, newText.trim());
+    });
   }
 
   // --- третья вкладка настроек: сама карта на весь экран, со своей
@@ -3806,11 +3854,13 @@
   // Каждая задача — отдельный ключ "task:<id>" в общем state (та же схема
   // {c:..., t:...}, что и у всего остального — поэтому синхронизация между
   // устройствами и экспорт работают автоматически, без доп. кода).
-  // c = {text, tab, checked, checkedAt, completionKey, nextForProjectId}
+  // c = {text, tab, checked, checkedAt, completionKey, nextForProjectId, flag}
   //   text            — текст задачи
-  //   tab             — вкладка, где живёт задача, пока не отмечена (не
-  //                     меняется, когда задача уходит в архив — так после
-  //                     извлечения она возвращается туда же, откуда была)
+  //   tab             — вкладка, где реально "живёт" задача (её единственный
+  //                     дом: inbox/next/projects/waiting/read/someday — без
+  //                     red, см. flag ниже), пока не отмечена (не меняется,
+  //                     когда задача уходит в архив — так после извлечения
+  //                     она возвращается туда же, откуда была)
   //   checked         — отмечена ли (значит, сейчас показывается в архиве)
   //   checkedAt       — когда отмечена (для сортировки в архиве и как день
   //                     для "Карты дней года")
@@ -3821,6 +3871,15 @@
   //                     это отменяет сам факт "выполнения"
   //   nextForProjectId — только у задач во вкладке "next": id задачи-проекта
   //                     (из вкладки "projects"), для которой это next-действие
+  //   flag            — цветная отметка слева от чекбокса: null (нет
+  //                     отметки, бледно-сиреневый кружок) | "red" | "yellow".
+  //                     Вкладка Red — не отдельное хранилище, а витрина:
+  //                     показывает ЛЮБУЮ незакрытую задачу с flag "red" или
+  //                     "yellow", независимо от того, в какой реальной
+  //                     вкладке она живёт (см. getTasksForTab). Поэтому
+  //                     отметка задачи выполненной прямо на вкладке Red
+  //                     закрывает тот же самый task:<id> — и он пропадает
+  //                     отовсюду разом, это одна и та же запись, не копия.
   function genTaskId(){
     return "tk" + Date.now() + Math.random().toString(36).slice(2,7);
   }
@@ -3848,10 +3907,30 @@
   }
   function createTask(tab){
     var id = genTaskId();
-    saveTaskData(id, {text: "", tab: tab, checked: false, checkedAt: null, completionKey: null, nextForProjectId: null});
+    // на вкладке Red своего хранилища нет (см. пояснение выше) — такая
+    // задача реально уходит в inbox, но сразу получает красную отметку,
+    // поэтому продолжает быть видна на Red
+    var homeTab = (tab === "red") ? "inbox" : tab;
+    var flag = (tab === "red") ? "red" : null;
+    saveTaskData(id, {text: "", tab: homeTab, checked: false, checkedAt: null, completionKey: null, nextForProjectId: null, flag: flag});
     return id;
   }
   function getTasksForTab(tab){
+    if(tab === "red"){
+      // витрина: любая незакрытая задача с красной/жёлтой отметкой, из
+      // какой бы вкладки она ни была — плюс на всякий случай задачи с
+      // «настоящим» tab==="red" (могли остаться из более старой версии
+      // данных, когда red ещё была обычным местом хранения)
+      return getAllTasks().filter(function(t){
+        if(t.c.checked === true) return false;
+        return t.c.tab === "red" || t.c.flag === "red" || t.c.flag === "yellow";
+      }).sort(function(a,b){
+        var pa = a.c.flag === "red" ? 0 : 1;
+        var pb = b.c.flag === "red" ? 0 : 1;
+        if(pa !== pb) return pa - pb;
+        return a.t - b.t;
+      });
+    }
     return getAllTasks().filter(function(t){ return t.c.tab === tab && t.c.checked !== true; });
   }
   function getArchivedTasksAll(){
@@ -3880,6 +3959,18 @@
     if(newTab !== "next") task.c.nextForProjectId = null;
     saveTaskData(id, task.c);
   }
+  // цветная отметка слева от чекбокса: нет отметки → red → yellow → нет
+  // отметки. Возвращает новое значение (null/"red"/"yellow").
+  function cycleTaskFlag(id){
+    var task = getTaskById(id);
+    if(!task) return null;
+    var order = [null, "red", "yellow"];
+    var idx = order.indexOf(task.c.flag || null);
+    var next = order[(idx + 1) % order.length];
+    task.c.flag = next;
+    saveTaskData(id, task.c);
+    return next;
+  }
   function checkTaskDone(id){
     var task = getTaskById(id);
     if(!task || task.c.checked) return;
@@ -3901,6 +3992,22 @@
     task.c.checkedAt = null;
     task.c.completionKey = null;
     saveTaskData(id, task.c);
+  }
+  // полное удаление задачи из архива — без диалога подтверждения (как и
+  // просили). Тушим саму запись задачи (c:null, как и везде в этом файле
+  // для "мягкого" удаления — ключ остаётся, но getAllTasks/getTaskById
+  // её больше не видят), а заодно и её запись в "taskcompletion:…", если
+  // она есть — иначе отметка о выполнении осталась бы навсегда висеть в
+  // "Карте дней года", хотя самой задачи уже нет.
+  function deleteTaskPermanently(id){
+    var task = getTaskById(id);
+    if(!task) return;
+    if(task.c.completionKey){
+      state[task.c.completionKey] = {c: null, t: Date.now()};
+    }
+    state["task:" + id] = {c: null, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
   }
   // выполненные задачи по дням (ключи "taskcompletion:", не удаляются —
   // используются и в детализации дня "Карты дней года", и в экспорте)
@@ -3927,7 +4034,7 @@
       '<div class="year-grid-tab-title" style="margin-bottom:6px;">' + escapeHtml(title) + '</div>' +
       '<div class="task-list" id="taskListWrap">' + rowsHtml + '</div>' +
       (tasks.length === 0 ? '<div class="task-empty">Здесь пока нет задач.</div>' : '');
-    tasks.forEach(function(t){ bindTaskRow(t.id); });
+    tasks.forEach(function(t){ bindTaskRow(t.id, tabKey); });
 
     var fab = document.getElementById("taskAddFab");
     if(fab){
@@ -3937,6 +4044,7 @@
       // добавляем одну новую строку в уже существующий список и сразу
       // переключаем именно её в режим редактирования
       fab.onclick = function(){
+        flushPendingTaskEdits(); // не потерять то, что уже набрано в другой строке
         var id = createTask(tabKey);
         var wrap = document.getElementById("taskListWrap");
         if(wrap){
@@ -3945,7 +4053,7 @@
           var holder = document.createElement("div");
           holder.innerHTML = buildTaskRowHtml(getTaskById(id));
           wrap.appendChild(holder.firstChild);
-          bindTaskRow(id);
+          bindTaskRow(id, tabKey);
           renderTaskRowEdit(id);
         } else {
           renderTaskTabList(tabKey);
@@ -3956,44 +4064,59 @@
   }
 
   function buildTaskRowHtml(task){
+    var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
     return '<div class="task-row" data-id="' + task.id + '">' +
+      '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + task.id + '" title="Приоритет"></button>' +
       '<input type="checkbox" class="task-checkbox" data-id="' + task.id + '">' +
       '<div class="task-body" data-id="' + task.id + '"></div>' +
       '</div>';
   }
 
-  function bindTaskRow(id){
+  function bindTaskRow(id, tabKey){
     var row = document.querySelector('.task-row[data-id="' + id + '"]');
     if(!row) return;
+    var dot = row.querySelector(".task-flag-dot");
+    if(dot){
+      dot.addEventListener("click", function(e){
+        e.stopPropagation();
+        flushPendingTaskEdits();
+        cycleTaskFlag(id);
+        // на самой Red набор и порядок строк зависят от отметки, а на
+        // остальных вкладках принадлежность к списку от неё не зависит —
+        // но проще и надёжнее везде просто перерисовать вкладку целиком
+        // (та же схема, что и у чекбокса ниже)
+        renderTaskTabList(tabKey);
+      });
+    }
     var cb = row.querySelector(".task-checkbox");
     if(cb){
       cb.addEventListener("change", function(){
         if(!cb.checked) return; // снять галочку можно только извлечением из архива
-        var task = getTaskById(id);
-        var currentTab = task ? task.c.tab : null;
-        checkTaskDone(id);
-        if(currentTab) renderTaskTabList(currentTab);
+        flushPendingTaskEdits();
+        checkTaskDone(id); // одна и та же задача — закрывается везде разом
+        renderTaskTabList(tabKey);
       });
     }
-    renderTaskRowView(id);
+    renderTaskRowView(id, tabKey);
   }
 
-  function renderTaskRowView(id){
+  function renderTaskRowView(id, tabKey){
     var body = document.querySelector('.task-body[data-id="' + id + '"]');
     var task = getTaskById(id);
     if(!body || !task) return;
     var isProjectsTab = task.c.tab === "projects";
     var showRed = isProjectsTab && !projectHasActiveNext(id);
-    var textHtml = task.c.text ? escapeHtml(task.c.text) : '<span class="task-text-placeholder">Новая задача</span>';
+    var placeholder = isProjectsTab ? "Новый проект" : "Новая задача";
+    var textHtml = task.c.text ? escapeHtml(task.c.text) : '<span class="task-text-placeholder">' + placeholder + '</span>';
     body.innerHTML =
       '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + '">' + textHtml + '</span>' +
       '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
       '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
       (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Next">' + LINK_NEXT_ICON_SVG + '</button>' : '');
     body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderTaskRowEdit(id); });
-    body.querySelector(".task-move-btn").addEventListener("click", function(){ openTaskMovePicker(id); });
+    body.querySelector(".task-move-btn").addEventListener("click", function(){ openTaskMovePicker(id, tabKey); });
     var nextBtn = body.querySelector(".task-next-btn");
-    if(nextBtn) nextBtn.addEventListener("click", function(){ openTaskNextPicker(id); });
+    if(nextBtn) nextBtn.addEventListener("click", function(){ openTaskNextPicker(id, tabKey); });
   }
 
   // редактирование текста задачи — та же механика, что и у комментария дня
@@ -4002,11 +4125,14 @@
     var body = document.querySelector('.task-body[data-id="' + id + '"]');
     var task = getTaskById(id);
     if(!body || !task) return;
-    body.innerHTML = '<div class="task-editable" id="taskEditable_' + id + '" contenteditable="true"></div>';
+    flushPendingTaskEdits(); // если в этот момент редактировалась другая строка — сохранить её
+    var isProjectsTab = task.c.tab === "projects";
+    body.innerHTML = '<div class="task-editable' + (isProjectsTab ? ' task-editable-project' : '') + '" id="taskEditable_' + id + '" contenteditable="true"></div>';
     var editable = document.getElementById("taskEditable_" + id);
     if(!editable) return;
-    var textNode = document.createTextNode(task.c.text || "");
+    var textNode = document.createTextNode(task.c.text ? task.c.text : EMPTY_ANCHOR_CHAR);
     editable.appendChild(textNode);
+    editable.setAttribute("data-task-id", String(id)); // нужно для автосохранения при уходе со вкладки/закрытии окна
     var saveBtn = document.createElement("button");
     saveBtn.type = "button";
     saveBtn.className = "task-icon-btn";
@@ -4046,10 +4172,10 @@
 
   // сетка выбора вкладки-назначения — как у выбора цвета цели
   // (openGoalColorPicker), только квадратики с иконками вкладок
-  function openTaskMovePicker(id){
+  function openTaskMovePicker(id, tabKey){
     var task = getTaskById(id);
     if(!task) return;
-    var buttons = TASK_MOVABLE_TABS.map(function(key){
+    var buttons = TASK_MOVE_TARGET_TABS.map(function(key){
       var isCurrent = key === task.c.tab;
       return '<button type="button" data-tab="' + key + '"' + (isCurrent ? ' class="current"' : '') + '>' +
         TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key]) + '</span></button>';
@@ -4062,10 +4188,12 @@
     Array.prototype.forEach.call(modalBox.querySelectorAll("[data-tab]"), function(btn){
       btn.addEventListener("click", function(){
         var newTab = btn.getAttribute("data-tab");
-        var fromTab = task.c.tab;
         moveTaskToTab(id, newTab);
         closeModal();
-        renderTaskTabList(fromTab);
+        // возвращаемся туда, где реально была открыта карточка (может
+        // быть вкладка-витрина Red, а не настоящая домашняя вкладка
+        // задачи — см. пояснение у getTasksForTab)
+        renderTaskTabList(tabKey || task.c.tab);
       });
     });
   }
@@ -4073,7 +4201,7 @@
   // выбор next-действия для задачи-проекта: список текущих незакрытых
   // задач вкладки "next", ещё не привязанных к другому проекту, плюс
   // возможность сразу создать новую next-задачу, привязанную к этому проекту
-  function openTaskNextPicker(projectId){
+  function openTaskNextPicker(projectId, tabKey){
     var candidates = getTasksForTab("next").filter(function(t){
       return !t.c.nextForProjectId || t.c.nextForProjectId === projectId;
     });
@@ -4098,7 +4226,7 @@
         t.c.nextForProjectId = (t.c.nextForProjectId === projectId) ? null : projectId;
         saveTaskData(nid, t.c);
         closeModal();
-        renderTaskTabList("projects");
+        renderTaskTabList(tabKey || "projects");
       });
     });
     document.getElementById("taskCreateNextBtn").addEventListener("click", function(){
@@ -4107,13 +4235,15 @@
       t.c.nextForProjectId = projectId;
       saveTaskData(nid, t.c);
       closeModal();
-      renderTaskTabList("projects");
+      renderTaskTabList(tabKey || "projects");
     });
   }
 
   // ---------- вкладка "архив": последние TASK_ARCHIVE_MAX_SHOWN отмеченных
-  // задач, каждая — с чекбоксом (отмечен) и стрелочкой извлечения, которая
-  // возвращает задачу туда, где она была до отметки. Кнопки "+" здесь нет. ----------
+  // задач, каждая — с чекбоксом (отмечен), стрелочкой извлечения (возвращает
+  // задачу туда, где она была до отметки) и крестиком полного удаления
+  // (без диалога подтверждения — тушит саму задачу и её запись в "Карте
+  // дней года", см. deleteTaskPermanently). Кнопки "+" здесь нет. ----------
   function renderTaskArchiveTab(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -4125,6 +4255,7 @@
         '<input type="checkbox" class="task-archive-check" checked disabled>' +
         '<span class="task-archive-text">' + label + '</span>' +
         '<button type="button" class="task-restore-btn" data-id="' + t.id + '" title="Извлечь из архива">' + RESTORE_ICON_SVG + '</button>' +
+        '<button type="button" class="task-delete-btn" data-id="' + t.id + '" title="Удалить навсегда">' + DELETE_ICON_SVG + '</button>' +
       '</div>';
     }).join("");
     container.innerHTML =
@@ -4135,6 +4266,13 @@
       btn.addEventListener("click", function(){
         var id = btn.getAttribute("data-id");
         restoreTaskFromArchive(id);
+        renderTaskArchiveTab();
+      });
+    });
+    Array.prototype.forEach.call(container.querySelectorAll(".task-delete-btn"), function(btn){
+      btn.addEventListener("click", function(){
+        var id = btn.getAttribute("data-id");
+        deleteTaskPermanently(id);
         renderTaskArchiveTab();
       });
     });

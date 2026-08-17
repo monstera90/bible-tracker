@@ -541,6 +541,23 @@
     border-top:1px solid var(--groove-shadow);
   }
   .task-row:first-child{ border-top:none; }
+  /* цветная отметка приоритета слева от чекбокса: нет отметки (бледно-
+     сиреневый) → red → yellow → снова нет отметки (см. cycleTaskFlag в
+     my.js). Любая задача с red/yellow дополнительно показывается на
+     вкладке Red, независимо от того, в какой вкладке она реально живёт. */
+  .task-flag-dot{
+    width:14px; height:14px;
+    flex-shrink:0;
+    margin-top:5px;
+    padding:0;
+    border-radius:50%;
+    border:1px solid var(--groove-shadow);
+    background:#d9cdea;
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .task-flag-dot.flag-red{ background:#c0392b; border-color:#8a291d; }
+  .task-flag-dot.flag-yellow{ background:#d4a017; border-color:#9c780f; }
   .task-checkbox{
     width:20px;height:20px;
     flex-shrink:0;
@@ -586,6 +603,10 @@
     content:"Новая задача…";
     color:var(--ink-soft);
     font-style:italic;
+  }
+  /* на вкладке Projects заготовка называется иначе (см. renderTaskRowEdit) */
+  .task-editable.task-editable-project.is-empty::before{
+    content:"Новый проект…";
   }
   .task-empty{
     padding:12px 14px;
@@ -692,6 +713,20 @@
     -webkit-tap-highlight-color:transparent;
   }
   .task-restore-btn svg{ width:17px; height:17px; }
+  .task-delete-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:26px;height:26px;
+    flex-shrink:0;
+    padding:0;
+    border:none;
+    background:transparent;
+    color:#c0392b;
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .task-delete-btn svg{ width:15px; height:15px; }
 
     /* отключение анимаций при массовых операциях */
   .no-transitions *{
