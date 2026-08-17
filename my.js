@@ -238,6 +238,7 @@
   var LINK_NEXT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"></path><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"></path></svg>';
   var RESTORE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>';
   var DELETE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>';
+  var PAPERCLIP_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>';
   var TASK_ARCHIVE_MAX_SHOWN = 50;
 
   function getShowAllTasksEnabled(){
@@ -1822,7 +1823,8 @@
       '<div class="settings-row"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" style="border-bottom:none;"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
-      '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:16px;">Добавить для себя цель</button>' +
+      (showAllTasksOn ? '<button class="modal-btn" id="settingsImportTasksBtn" style="margin-top:16px;">Восстановить задачи из .txt</button>' : '') +
+      '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:' + (showAllTasksOn ? "10px" : "16px") + ';">Добавить для себя цель</button>' +
       (moodOn ? '<button class="modal-btn" id="settingsMoodDiagramBtn" style="margin-top:10px;">Показать диаграмму настроения</button>' : '') +
       '<button class="modal-btn" id="settingsVersionsBtn" style="margin-top:10px;">Версии</button>' +
       '<button class="modal-btn danger" id="settingsResetBtn" style="margin-top:10px;">Начать чтение сначала и сбросить прогресс</button>';
@@ -1895,6 +1897,14 @@
       closeSettingsModal();
       openGoalSettingsModal(id);
     });
+
+    var importTasksBtn = document.getElementById("settingsImportTasksBtn");
+    if(importTasksBtn){
+      importTasksBtn.addEventListener("click", function(){
+        closeSettingsModal();
+        openTaskImportTabPicker();
+      });
+    }
 
     var moodDiagramBtn = document.getElementById("settingsMoodDiagramBtn");
     if(moodDiagramBtn){
@@ -3915,6 +3925,15 @@
     saveTaskData(id, {text: "", tab: homeTab, checked: false, checkedAt: null, completionKey: null, nextForProjectId: null, flag: flag});
     return id;
   }
+  // как createTask, но сразу с готовым текстом — для массового
+  // восстановления задач из .txt (см. openTaskImportFileModal)
+  function createTaskWithText(tab, text){
+    var id = genTaskId();
+    var homeTab = (tab === "red") ? "inbox" : tab;
+    var flag = (tab === "red") ? "red" : null;
+    saveTaskData(id, {text: text, tab: homeTab, checked: false, checkedAt: null, completionKey: null, nextForProjectId: null, flag: flag});
+    return id;
+  }
   function getTasksForTab(tab){
     if(tab === "red"){
       // витрина: любая незакрытая задача с красной/жёлтой отметкой, из
@@ -4195,6 +4214,84 @@
         // задачи — см. пояснение у getTasksForTab)
         renderTaskTabList(tabKey || task.c.tab);
       });
+    });
+  }
+
+  // ===== Восстановление задач из .txt =====
+  // Шаг 1: та же сетка вкладок, что и у "Перенести задачу" — здесь
+  // пользователь выбирает, в какую вкладку будут добавлены задачи из файла.
+  function openTaskImportTabPicker(){
+    var buttons = TASK_MOVE_TARGET_TABS.map(function(key){
+      return '<button type="button" data-tab="' + key + '">' +
+        TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key]) + '</span></button>';
+    }).join("");
+    modalBox.innerHTML =
+      modalHeader("Восстановить задачи из .txt") +
+      '<div class="task-picker-grid">' + buttons + '</div>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-tab]"), function(btn){
+      btn.addEventListener("click", function(){
+        var tabKey = btn.getAttribute("data-tab");
+        openTaskImportFileModal(tabKey);
+      });
+    });
+  }
+  // Шаг 2: выбор .txt-файла (через системный файловый менеджер) и импорт —
+  // отдельные задачи в файле разделены пустой строкой
+  function openTaskImportFileModal(tabKey){
+    var selectedFile = null;
+    modalBox.innerHTML =
+      modalHeader("Восстановить задачи из .txt") +
+      '<p>Выберите файл в формате .txt</p>' +
+      '<p style="opacity:.7;font-size:.9em;margin-top:-8px;">Обратите внимание: задачи должны быть разделены пустой строкой.</p>' +
+      '<div class="task-import-file-row">' +
+        '<button type="button" class="task-import-attach-btn" id="taskImportAttachBtn" title="Прикрепить файл">' + PAPERCLIP_ICON_SVG + '</button>' +
+        '<span id="taskImportFileName" class="task-import-file-name">Файл не выбран</span>' +
+      '</div>' +
+      '<input type="file" accept=".txt,text/plain" id="taskImportFileInput" style="display:none;">' +
+      '<button class="modal-btn primary" id="taskImportSubmitBtn" style="margin-top:14px;" disabled>Импортировать</button>';
+    bindClose();
+    modalOverlay.classList.add("open");
+
+    var fileInput = document.getElementById("taskImportFileInput");
+    var fileNameEl = document.getElementById("taskImportFileName");
+    var submitBtn = document.getElementById("taskImportSubmitBtn");
+
+    document.getElementById("taskImportAttachBtn").addEventListener("click", function(){
+      fileInput.click();
+    });
+    fileInput.addEventListener("change", function(){
+      selectedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+      fileNameEl.textContent = selectedFile ? selectedFile.name : "Файл не выбран";
+      submitBtn.disabled = !selectedFile;
+    });
+    submitBtn.addEventListener("click", function(){
+      if(!selectedFile) return;
+      submitBtn.disabled = true;
+      var reader = new FileReader();
+      reader.onload = function(){
+        var raw = typeof reader.result === "string" ? reader.result : "";
+        // задачи разделены пустой строкой (одной или несколькими) —
+        // поддерживаем и \n, и \r\n
+        var chunks = raw.split(/\r?\n\s*\r?\n/);
+        var count = 0;
+        chunks.forEach(function(chunk){
+          var text = chunk.trim();
+          if(!text) return;
+          createTaskWithText(tabKey, text);
+          count++;
+        });
+        closeModal();
+        if(count > 0){
+          openSettingsModal();
+          switchSettingsTab(tabKey);
+        }
+      };
+      reader.onerror = function(){
+        submitBtn.disabled = false;
+      };
+      reader.readAsText(selectedFile, "UTF-8");
     });
   }
 

@@ -674,6 +674,33 @@
   .task-picker-grid button:hover{ background:var(--xp-green); }
   .task-picker-grid button.current{ background:var(--wood); color:var(--parchment); }
 
+  /* ---------- восстановление задач из .txt ---------- */
+  .task-import-file-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-top:10px;
+  }
+  .task-import-attach-btn{
+    width:40px;height:40px;
+    flex-shrink:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    color:var(--wood);
+    cursor:pointer;
+  }
+  .task-import-attach-btn svg{ width:20px; height:20px; }
+  .task-import-attach-btn:hover{ background:var(--xp-green); }
+  .task-import-file-name{
+    font-size:.9em;
+    opacity:.8;
+    word-break:break-all;
+  }
+
   /* ---------- архив задач ---------- */
   .task-archive-row{
     display:flex;
