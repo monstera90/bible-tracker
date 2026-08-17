@@ -1780,6 +1780,7 @@
     var fabTop = window.innerHeight * 0.75;
     var desired = fabTop - boxTop;
     if(desired < 120) desired = 120; // не даём окну схлопнуться в ноль на совсем маленьких экранах
+    if(desired > 650) desired = 650; // потолок на больших экранах (планшет/десктоп)
 
     settingsModalBox.style.height = desired + "px";
     // Размер (толщина) каждого язычка вертикального стека — единая
