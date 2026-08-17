@@ -1738,20 +1738,19 @@
   function openSettingsModal(){
     refreshSettingsTabsVisibility();
     settingsModalBox.style.height = "";
+    settingsModalBox.style.marginTop = "";
     settingsModalOverlay.classList.add("open");
     switchSettingsTab("gear");
     requestAnimationFrame(layoutSettingsModal);
   }
   // Плавающая кнопка-язычок (.settings-fab, id=settingsGearBtn) стоит на
   // ФИКСИРОВАННОЙ высоте — 25% экрана от его нижнего края (fabTop = 75%
-  // высоты окна браузера), и эта высота больше не зависит ни от контента
-  // вкладок, ни от вьюпорта отдельным подрезающим условием. Окно настроек
-  // "разворачивается" от этой точки вверх: его верх стоит там же, где и
-  // раньше (прибит к верхнему краю оверлея), а высота подгоняется так,
-  // чтобы нижний край окна оказался ровно на уровне верхнего края кнопки
-  // (т.е. кнопка всегда остаётся под пальцем в одном и том же месте,
-  // открыто окно или нет). Кнопка при этом по-прежнему "приклеена" к
-  // правому нижнему углу рамки (.settings-modal-frame) по горизонтали —
+  // высоты окна браузера). Окно настроек привязано к НЕЙ, а не к верху
+  // экрана: нижний край окна всегда на fabTop, а высота отсчитывается от
+  // кнопки вверх фиксированным числом пикселей (см. WINDOW_H ниже) — то
+  // есть меняется положение верхнего края окна (через margin-top), а не
+  // сама точка, где сидит кнопка. Кнопка при этом по-прежнему "приклеена"
+  // к правому нижнему углу рамки (.settings-modal-frame) по горизонтали —
   // это не менялось. Работает и когда модалка закрыта: оверлей больше не
   // display:none (см. .settings-modal-overlay в modals.css), а скрыт
   // через opacity/visibility — рамка при этом всё равно реально
@@ -1770,18 +1769,29 @@
     var content = document.getElementById("settingsTabContent");
     if(content && !content.innerHTML.trim()) renderSettingsTabGear();
 
-    // Высота окна = расстояние от его верхнего края (16px, см. padding-top
-    // у .settings-modal-overlay) до фиксированной точки на 25% экрана от
-    // низа (fabTop). Больше не меняется при переключении вкладок и не
-    // зависит от объёма контента — переключение вкладок прокручивает
-    // содержимое (#settingsTabContent), а не меняет размер окна.
+    // Окно "пришито" снизу к кнопке-язычку (.settings-fab), а не сверху к
+    // экрану: нижний край окна всегда стоит на фиксированной точке —
+    // 25% экрана от его нижнего края (fabTop = 75% высоты окна браузера),
+    // а высота отсчитывается от НЕЁ вверх — фиксированные 650px (WINDOW_H
+    // ниже), а не вниз от верхнего края экрана. Поэтому у окна больше нет
+    // "родного" верха: он вычисляется как fabTop − высота и выставляется
+    // через margin-top (естественное положение по CSS — 16px от верха
+    // оверлея, см. padding-top). Если 650px не помещается (см. minTop —
+    // не даём окну вылезти выше 16px от верха экрана), высота ужимается,
+    // но низ окна (а с ним и кнопка) всё равно остаётся ровно на fabTop —
+    // окно никогда не отрывается от кнопки, просто может быть короче
+    // 650px на маленьких экранах.
     settingsModalBox.style.height = "";
-    var boxTop = settingsModalBox.getBoundingClientRect().top;
+    settingsModalBox.style.marginTop = "";
+    var naturalTop = settingsModalBox.getBoundingClientRect().top; // 16px по CSS
     var fabTop = window.innerHeight * 0.75;
-    var desired = fabTop - boxTop;
-    if(desired < 120) desired = 120; // не даём окну схлопнуться в ноль на совсем маленьких экранах
-    if(desired > 650) desired = 650; // потолок на больших экранах (планшет/десктоп)
+    var WINDOW_H = 650; // высота окна настроек, отсчитанная от кнопки вверх
+    var minTop = naturalTop; // не даём окну вылезти выше верхнего края оверлея
+    var desiredTop = fabTop - WINDOW_H;
+    if(desiredTop < minTop) desiredTop = minTop;
+    var desired = fabTop - desiredTop;
 
+    settingsModalBox.style.marginTop = (desiredTop - naturalTop) + "px";
     settingsModalBox.style.height = desired + "px";
     // Размер (толщина) каждого язычка вертикального стека — единая
     // переменная --settings-tab-size на .settings-modal-frame (её читают
