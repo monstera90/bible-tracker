@@ -5,57 +5,68 @@
    =========================================================================== */
 
   /* ---------- плавающая кнопка настроек — угловой язычок ----------
-     Раньше была отдельной круглой кнопкой с иконкой шестерёнки. Теперь —
-     чистый (без пиктограммы) язычок, визуально образованный стыком двух
-     рядов язычков модалки настроек: бокового вертикального (#settingsTabs,
-     приклеен к правому краю ОКНА настроек) и нижнего горизонтального
-     (.settings-tabs-gear, приклеен к нижнему краю ОКНА настроек) — между
-     ними остаётся незанятый уголок 62×62 сразу за правым нижним углом
-     самого окна (а не экрана). Именно туда кнопку и ставит JS
-     (position:fixed; left/top — координаты правого нижнего угла
-     .settings-modal-frame, см. layoutSettingsModal в my.js; right/bottom
-     ниже — только запасные значения на случай, если JS ещё не отработал).
-     Т.к. кнопка "прикреплена" к рамке своими верхней и левой сторонами
-     (там, где к ней подходят вертикальный и горизонтальный ряды), а
-     свободные, ничем не прикрытые стороны — правая и нижняя, закруглён
-     (тем же радиусом 14px, что и у остальных язычков) только правый
-     нижний угол; на прикреплённых верхней и левой сторонах, как и у
-     остальных язычков на их прикреплённом крае, нет ни радиуса, ни
-     обводки. Толщина (62px) — та же, что и у обычных язычков.
+     Раньше была маленьким квадратным патчем 62×62, который просто
+     затыкал пустой уголок между стыком двух рядов язычков модалки
+     настроек. Теперь это полноценный язычок такого же типа, как и
+     остальные — как будто вертикальный стек (#settingsTabs, приклеен к
+     правому краю ОКНА настроек) не заканчивается на последнем видимом
+     язычке, а условно продолжается ещё на один — этот самый. Именно
+     поэтому его толщина (width, 62px) — та же, что и у обычных
+     вертикальных язычков (#settingsTabs .settings-tab), а не какая-то
+     отдельная величина.
+     Длина же (height) этого язычка считается НЕ так, как у обычных
+     вертикальных (--settings-tab-size, высота окна делённая на 9), а
+     берётся готовым значением --settings-tab-size-h — тем же, что и у
+     язычков НИЖНЕГО горизонтального ряда (см. layoutSettingsModal в
+     my.js) — иными словами, размер этого язычка "по длине" привязан не
+     к вертикальному стеку, а к нижнему ряду.
+     Только один угол — верхний левый — не закруглён и стоит прямо в
+     точку правого нижнего угла рамки (.settings-modal-frame, см.
+     layoutSettingsModal в my.js), с тем же зазором в 1px, что и между
+     любыми двумя соседними язычками (gap:1px в #settingsTabs /
+     .settings-tabs-gear) — остальные три угла (верхний правый, нижний
+     левый, нижний правый) закруглены обычным радиусом 14px, т.к. с этих
+     сторон язычок ничем не прикрыт. Раз обычные бортики флеш-стыка с
+     соседями (border-left/top:none, как у .settings-tab) тут не
+     применимы — этот язычок не встроен в общий flex-стек, а стоит особняком
+     в 1px от рамки, — обводка идёт по всем четырём сторонам.
      Полупрозрачная в состоянии покоя, непрозрачная при наведении/фокусе/
      нажатии. */
   .settings-fab{
     position:fixed;
     right:0;
     bottom:25%;
-    width:62px;height:62px;
+    width:62px;height:76px;
     display:flex;
     align-items:center;
     justify-content:center;
     flex-shrink:0;
     padding:0;
-    background:var(--parchment);
-    border:1px solid var(--groove-shadow);
+    background:var(--groove-shadow);
+    color:var(--wood);
     border-top:none;
     border-left:none;
-    border-radius:0 0 14px 0;
+    border-right:1px solid var(--groove-shadow);
+    border-bottom:1px solid var(--groove-shadow);
+    border-radius:0 14px 14px 14px;
     box-shadow:2px 2px 5px rgba(0,0,0,.3);
     cursor:pointer;
-    z-index:500;
+    z-index:1001;
+    outline:none;
     opacity:.55;
-    transition:opacity .25s ease, filter .15s ease, transform .15s ease;
+    -webkit-appearance:none;
+    appearance:none;
+    -webkit-tap-highlight-color:transparent;
+    transition:filter .15s ease, transform .15s ease, opacity .15s ease, background .15s ease;
   }
-  .settings-fab:hover,
-  .settings-fab:focus-visible{
-    opacity:1;
+  .settings-fab:hover{
     filter:brightness(1.08);
   }
-  .settings-fab:active{ opacity:1; transform:scale(.95); }
-  @media (max-width:640px){
-    .settings-fab{
-      width:54px;height:54px;
-    }
+  .settings-fab.is-open{
+    background:var(--parchment);
+    opacity:1;
   }
+  .settings-fab:active{ transform:scale(.95); }
 
   .version-history-item{
     display:block;

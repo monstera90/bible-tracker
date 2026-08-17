@@ -1740,6 +1740,8 @@
     settingsModalBox.style.height = "";
     settingsModalBox.style.marginTop = "";
     settingsModalOverlay.classList.add("open");
+    var gearBtn = document.getElementById("settingsGearBtn");
+    if(gearBtn) gearBtn.classList.add("is-open");
     switchSettingsTab("gear");
     requestAnimationFrame(layoutSettingsModal);
   }
@@ -1819,21 +1821,25 @@
     var tabHUnit = (boxWidth - gapsHPx) / totalHTabs;
     if(tabHUnit > 0) frame.style.setProperty("--settings-tab-size-h", tabHUnit + "px");
 
-    // Ставим язычок-кнопку строго в угол рамки: её left/top — это правый
-    // нижний угол рамки (frameRect.right/frameRect.bottom), а сама кнопка
-    // растёт от этой точки вправо-вниз на свои 62×62 (см. .settings-fab в
-    // modals.css) — ровно в тот незанятый уголок между двумя рядами.
+    // Кнопка-язычок теперь полноразмерная: её толщина (width) — те же
+    // 62px, что и у обычных вертикальных язычков, а длина (height) — то
+    // же значение --settings-tab-size-h, что и у язычков нижнего ряда
+    // (tabHUnit, посчитан только что выше). Стоит вплотную к углу рамки
+    // (без зазора).
     var settingsGearBtn = document.getElementById("settingsGearBtn");
     if(settingsGearBtn){
       var frameRect = frame.getBoundingClientRect();
-      settingsGearBtn.style.left = frameRect.right + "px";
-      settingsGearBtn.style.top = frameRect.bottom + "px";
+      settingsGearBtn.style.left = (frameRect.right + 1) + "px";
+      settingsGearBtn.style.top = (frameRect.bottom + 1) + "px";
+      if(tabHUnit > 0) settingsGearBtn.style.height = tabHUnit + "px";
     }
   }
   function closeSettingsModal(){
     flushPendingYearDayNoteEdit();
     flushPendingTaskEdits();
     settingsModalOverlay.classList.remove("open");
+    var gearBtn = document.getElementById("settingsGearBtn");
+    if(gearBtn) gearBtn.classList.remove("is-open");
   }
   function refreshSettingsTabsVisibility(){
     var showTasks = getShowAllTasksEnabled();
@@ -2054,7 +2060,13 @@
   }
 
   var settingsGearBtn = document.getElementById("settingsGearBtn");
-  if(settingsGearBtn) settingsGearBtn.addEventListener("click", openSettingsModal);
+  if(settingsGearBtn) settingsGearBtn.addEventListener("click", function(){
+    if(settingsModalOverlay && settingsModalOverlay.classList.contains("open")){
+      closeSettingsModal();
+    } else {
+      openSettingsModal();
+    }
+  });
 
   // Ставим язычок-кнопку в угол окна настроек сразу при загрузке страницы
   // (а не только при первом открытии окна) и держим его там при ресайзе/
