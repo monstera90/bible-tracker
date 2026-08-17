@@ -59,8 +59,10 @@
     -webkit-tap-highlight-color:transparent;
     transition:filter .15s ease, transform .15s ease, opacity .15s ease, background .15s ease;
   }
-  .settings-fab:hover{
-    filter:brightness(1.08);
+  @media (hover:hover) and (pointer:fine){
+    .settings-fab:hover{
+      filter:brightness(1.08);
+    }
   }
   .settings-fab.is-open{
     background:var(--parchment);

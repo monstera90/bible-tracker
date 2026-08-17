@@ -1742,7 +1742,7 @@
     settingsModalOverlay.classList.add("open");
     var gearBtn = document.getElementById("settingsGearBtn");
     if(gearBtn) gearBtn.classList.add("is-open");
-    switchSettingsTab("gear");
+    switchSettingsTab(getShowAllTasksEnabled() ? "red" : "gear");
     requestAnimationFrame(layoutSettingsModal);
   }
   // Плавающая кнопка-язычок (.settings-fab, id=settingsGearBtn) стоит на
@@ -1818,20 +1818,23 @@
     var totalHTabs = 5;
     var gapsHPx = (totalHTabs - 1) * 1;
     var boxWidth = settingsModalBox.getBoundingClientRect().width;
-    var tabHUnit = (boxWidth - gapsHPx) / totalHTabs;
+    // Резервируем ещё 1px в конце ряда — там, где ряд стыкуется с
+    // кнопкой-язычком, чтобы получившийся зазор оказался ровно под
+    // вертикальным лавандовым швом (правым краем окна), а не правее него.
+    var tabHUnit = (boxWidth - gapsHPx - 1) / totalHTabs;
     if(tabHUnit > 0) frame.style.setProperty("--settings-tab-size-h", tabHUnit + "px");
 
     // Кнопка-язычок теперь полноразмерная: её толщина (width) — те же
     // 62px, что и у обычных вертикальных язычков, а длина (height) — то
     // же значение --settings-tab-size-h, что и у язычков нижнего ряда
     // (tabHUnit, посчитан только что выше). Стоит вплотную к углу рамки
-    // (без зазора).
+    // (без зазора) — сам зазор уже учтён в ширине ряда выше.
     var settingsGearBtn = document.getElementById("settingsGearBtn");
     if(settingsGearBtn){
       var frameRect = frame.getBoundingClientRect();
-      settingsGearBtn.style.left = (frameRect.right + 1) + "px";
-      settingsGearBtn.style.top = (frameRect.bottom + 1) + "px";
-      if(tabHUnit > 0) settingsGearBtn.style.height = tabHUnit + "px";
+      settingsGearBtn.style.left = Math.round(frameRect.right) + "px";
+      settingsGearBtn.style.top = Math.round(frameRect.bottom) + "px";
+      if(tabHUnit > 0) settingsGearBtn.style.height = Math.round(tabHUnit) + "px";
     }
   }
   function closeSettingsModal(){
