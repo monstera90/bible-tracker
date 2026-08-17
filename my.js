@@ -218,6 +218,17 @@
   // Red — это витрина по цветной отметке (см. TASK_MOVE_TARGET_TABS ниже,
   // getTasksForTab и cycleTaskFlag).
   var TASK_MOVABLE_TABS = ["red","inbox","next","projects","waiting","read","someday"];
+  // 4 вкладки-заглушки в горизонтальном ряду рядом со вкладкой настроек
+  // (см. .settings-tabs-gear в index.html/modals.css) — контент под них
+  // ещё не определён, показывают только "Контент появится позже"
+  // (см. renderSettingsTabExtra ниже). В отличие от TASK_TAB_IDS видимость
+  // не переключается — эти вкладки показаны всегда.
+  var EXTRA_TAB_IDS = {
+    extra1: "settingsTabExtra1Btn",
+    extra2: "settingsTabExtra2Btn",
+    extra3: "settingsTabExtra3Btn",
+    extra4: "settingsTabExtra4Btn"
+  };
   // а вот КУДА реально можно перенести задачу стрелочкой (пикер
   // "Перенести задачу") — без red, т.к. принадлежность к Red определяется
   // не вкладкой-домом, а цветной отметкой слева от чекбокса
@@ -235,6 +246,9 @@
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + (TASK_MOVE_ICONS[key] || "") + '</svg>';
   };
   var ARROW_MOVE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path></svg>';
+  // галочка "перенести в архив" — заменяет собой прежний чекбокс задачи,
+  // делает ровно то же самое (см. .task-done-btn в renderTaskRowView)
+  var CHECK_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"></path></svg>';
   var LINK_NEXT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"></path><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"></path></svg>';
   var RESTORE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>';
   var DELETE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>';
@@ -1766,6 +1780,18 @@
       var tabUnit = (desired - gapsPx) / totalTabs;
       var frame = settingsModalBox.parentElement;
       if(frame && tabUnit > 0) frame.style.setProperty("--settings-tab-size", tabUnit + "px");
+
+      // Ширина вкладок горизонтального ряда под окном (шестерёнка + 4
+      // заглушки, см. .settings-tabs-gear в modals.css) — отдельная
+      // переменная --settings-tab-size-h, т.к. этот ряд зависит от ШИРИНЫ
+      // окна настроек, а не от высоты. Сейчас в ряд помещается ровно 5
+      // вкладок, поэтому делим ширину окна на 5 (и 4 промежутка по 1px
+      // между ними, как и в вертикальном стеке).
+      var totalHTabs = 5;
+      var gapsHPx = (totalHTabs - 1) * 1;
+      var boxWidth = settingsModalBox.getBoundingClientRect().width;
+      var tabHUnit = (boxWidth - gapsHPx) / totalHTabs;
+      if(frame && tabHUnit > 0) frame.style.setProperty("--settings-tab-size-h", tabHUnit + "px");
     });
   }
   function closeSettingsModal(){
@@ -1796,6 +1822,10 @@
       var btn = document.getElementById(TASK_TAB_IDS[key]);
       if(btn) btn.classList.toggle("active", tab === key);
     });
+    Object.keys(EXTRA_TAB_IDS).forEach(function(key){
+      var btn = document.getElementById(EXTRA_TAB_IDS[key]);
+      if(btn) btn.classList.toggle("active", tab === key);
+    });
     var container = document.getElementById("settingsTabContent");
     if(container) container.scrollTop = 0;
     var addFab = document.getElementById("taskAddFab");
@@ -1804,7 +1834,16 @@
     else if(tab === "year") renderSettingsTabYear();
     else if(tab === "versions") renderSettingsTabVersions();
     else if(TASK_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabTask(tab);
+    else if(EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabExtra();
     else renderSettingsTabGear();
+  }
+
+  // Заглушка для 4 новых вкладок рядом со вкладкой настроек — содержимое
+  // ещё не определено.
+  function renderSettingsTabExtra(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    container.innerHTML = '<div class="mood-diagram-empty">Контент появится позже</div>';
   }
 
   function renderSettingsTabGear(){
@@ -1965,6 +2004,10 @@
   if(settingsTabYearBtn) settingsTabYearBtn.addEventListener("click", function(){ switchSettingsTab("year"); });
   Object.keys(TASK_TAB_IDS).forEach(function(key){
     var btn = document.getElementById(TASK_TAB_IDS[key]);
+    if(btn) btn.addEventListener("click", function(){ switchSettingsTab(key); });
+  });
+  Object.keys(EXTRA_TAB_IDS).forEach(function(key){
+    var btn = document.getElementById(EXTRA_TAB_IDS[key]);
     if(btn) btn.addEventListener("click", function(){ switchSettingsTab(key); });
   });
 
@@ -4046,11 +4089,9 @@
   function renderTaskTabList(tabKey){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
-    var title = TASK_TAB_TITLES[tabKey] || tabKey;
     var tasks = getTasksForTab(tabKey);
     var rowsHtml = tasks.map(function(t){ return buildTaskRowHtml(t); }).join("");
     container.innerHTML =
-      '<div class="year-grid-tab-title" style="margin-bottom:6px;">' + escapeHtml(title) + '</div>' +
       '<div class="task-list" id="taskListWrap">' + rowsHtml + '</div>' +
       (tasks.length === 0 ? '<div class="task-empty">Здесь пока нет задач.</div>' : '');
     tasks.forEach(function(t){ bindTaskRow(t.id, tabKey); });
@@ -4083,39 +4124,12 @@
   }
 
   function buildTaskRowHtml(task){
-    var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
     return '<div class="task-row" data-id="' + task.id + '">' +
-      '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + task.id + '" title="Приоритет"></button>' +
-      '<input type="checkbox" class="task-checkbox" data-id="' + task.id + '">' +
       '<div class="task-body" data-id="' + task.id + '"></div>' +
       '</div>';
   }
 
   function bindTaskRow(id, tabKey){
-    var row = document.querySelector('.task-row[data-id="' + id + '"]');
-    if(!row) return;
-    var dot = row.querySelector(".task-flag-dot");
-    if(dot){
-      dot.addEventListener("click", function(e){
-        e.stopPropagation();
-        flushPendingTaskEdits();
-        cycleTaskFlag(id);
-        // на самой Red набор и порядок строк зависят от отметки, а на
-        // остальных вкладках принадлежность к списку от неё не зависит —
-        // но проще и надёжнее везде просто перерисовать вкладку целиком
-        // (та же схема, что и у чекбокса ниже)
-        renderTaskTabList(tabKey);
-      });
-    }
-    var cb = row.querySelector(".task-checkbox");
-    if(cb){
-      cb.addEventListener("change", function(){
-        if(!cb.checked) return; // снять галочку можно только извлечением из архива
-        flushPendingTaskEdits();
-        checkTaskDone(id); // одна и та же задача — закрывается везде разом
-        renderTaskTabList(tabKey);
-      });
-    }
     renderTaskRowView(id, tabKey);
   }
 
@@ -4127,15 +4141,39 @@
     var showRed = isProjectsTab && !projectHasActiveNext(id);
     var placeholder = isProjectsTab ? "Новый проект" : "Новая задача";
     var textHtml = task.c.text ? escapeHtml(task.c.text) : '<span class="task-text-placeholder">' + placeholder + '</span>';
+    var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
     body.innerHTML =
       '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + '">' + textHtml + '</span>' +
-      '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
-      '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
-      (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Next">' + LINK_NEXT_ICON_SVG + '</button>' : '');
+      '<span class="task-actions">' +
+        '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
+        '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
+        '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
+        (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Next">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
+        '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + task.id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
+      '</span>';
     body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderTaskRowEdit(id); });
+    // галочка "в архив" — делает ровно то же, что раньше делала отметка
+    // чекбокса (снять её обратно можно только извлечением из архива)
+    body.querySelector(".task-done-btn").addEventListener("click", function(){
+      flushPendingTaskEdits();
+      checkTaskDone(id); // одна и та же задача — закрывается везде разом
+      renderTaskTabList(tabKey || task.c.tab);
+    });
     body.querySelector(".task-move-btn").addEventListener("click", function(){ openTaskMovePicker(id, tabKey); });
     var nextBtn = body.querySelector(".task-next-btn");
     if(nextBtn) nextBtn.addEventListener("click", function(){ openTaskNextPicker(id, tabKey); });
+    var dot = body.querySelector(".task-flag-dot");
+    if(dot){
+      dot.addEventListener("click", function(e){
+        e.stopPropagation();
+        flushPendingTaskEdits();
+        cycleTaskFlag(id);
+        // на самой Red набор и порядок строк зависят от отметки, а на
+        // остальных вкладках принадлежность к списку от неё не зависит —
+        // но проще и надёжнее везде просто перерисовать вкладку целиком
+        renderTaskTabList(tabKey || task.c.tab);
+      });
+    }
   }
 
   // редактирование текста задачи — та же механика, что и у комментария дня
@@ -4356,7 +4394,6 @@
       '</div>';
     }).join("");
     container.innerHTML =
-      '<div class="year-grid-tab-title" style="margin-bottom:6px;">' + escapeHtml(TASK_TAB_TITLES.archive) + '</div>' +
       '<div class="task-list">' + rowsHtml + '</div>' +
       (shown.length === 0 ? '<div class="task-empty">Архив пуст.</div>' : '');
     Array.prototype.forEach.call(container.querySelectorAll(".task-restore-btn"), function(btn){

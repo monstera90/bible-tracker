@@ -203,14 +203,26 @@
         </svg>
       </button>
     </div>
-    <!-- Вкладка настроек (шестерёнка) — единственная "лежачая", развёрнута
-         на 90°: у неё ширина и высота поменяны местами относительно
-         обычной вкладки (было 62×84, стало 84×62), а закруглены не правый,
-         а нижние углы, т.к. она "смотрит вниз" и приклеена снизу-слева к
-         окну, первой с левого края (см. .settings-tabs-gear в modals.css).
-         По умолчанию активна и открывается при открытии окна настроек. -->
+    <!-- Горизонтальный ряд "лежачих" вкладок под окном настроек, развёрнутых
+         на 90° относительно обычных: у них ширина и высота поменяны местами
+         (было 62×84 у вертикальной, стало 84×62 у лежачей), а закруглены не
+         правый, а нижние углы, т.к. они "смотрят вниз" и приклеены
+         снизу-слева к окну (см. .settings-tabs-gear в modals.css). Первая —
+         вкладка настроек (шестерёнка), она же первая с левого края, по
+         умолчанию активна и открывается при открытии окна настроек. Следом
+         за ней 4 вкладки-заглушки (settingsTabExtra1..4) — контент под них
+         ещё не определён (см. renderSettingsTabExtra в my.js). Ширина
+         каждой вкладки в этом ряду — переменная --settings-tab-size-h,
+         которую JS считает от ширины окна настроек (а не от высоты, как
+         --settings-tab-size у вертикального стека), т.к. в ряд помещается
+         ровно 5 вкладок при текущей ширине окна (см. openSettingsModal в
+         my.js). -->
     <div class="settings-tabs-gear" id="settingsTabsGear">
       <button class="settings-tab settings-tab-gear active" id="settingsTabGearBtn" title="Настройки">&#9881;</button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabExtra1Btn" title=""></button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabExtra2Btn" title=""></button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabExtra3Btn" title=""></button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabExtra4Btn" title=""></button>
     </div>
   </div>
 </div>

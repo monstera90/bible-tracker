@@ -147,7 +147,7 @@
     display:flex;
     flex-direction:column;
     overflow:hidden;
-    padding:22px;
+    padding:16px;
     box-shadow:0 10px 30px rgba(0,0,0,.5);
   }
   #settingsTabContent{
@@ -157,6 +157,7 @@
     min-height:0;
     overflow-y:auto;
     overflow-x:hidden;
+    overscroll-behavior:contain;
     scrollbar-width:none;
     -ms-overflow-style:none;
   }
@@ -244,27 +245,32 @@
     color:var(--parchment);
   }
 
-  /* ---------- "лежачая" вкладка настроек (шестерёнка) под окном ---------- */
-  /* Приклеена снизу-слева окна настроек, первой с левого края — там, где
-     у самого окна теперь срезано скругление (см. border-radius в
-     .settings-modal-box). Развёрнута на 90° относительно обычных
-     вкладок: толщина (height) фиксирована как 62px (та же толщина, что и
-     ширина у обычных вкладок), а длина (width) — та же переменная
-     --settings-tab-size, что и у обычных язычков (см. подробное описание
-     расчёта в комментарии над #settingsTabs выше и в openSettingsModal в
-     my.js), т.к. эта вкладка "смотрит" не вправо, а вниз, и должна быть
-     ровно того же размера, что и любая другая. Соответственно скруглены
-     не правые, а нижние углы, и линия-срез (означающая стык с окном)
-     идёт не сверху, а слева. */
+  /* ---------- горизонтальный ряд "лежачих" вкладок под окном ---------- */
+  /* Приклеен снизу-слева окна настроек, первой с левого края идёт вкладка
+     настроек (шестерёнка) — там, где у самого окна срезано скругление
+     (см. border-radius в .settings-modal-box), за ней вправо — 4 вкладки-
+     заглушки. Каждая вкладка в ряду развёрнута на 90° относительно
+     обычных (вертикальных): толщина (height) фиксирована как 62px (та же
+     толщина, что и ширина у обычных вкладок), а длина (width) — переменная
+     --settings-tab-size-h, которую считает JS (см. openSettingsModal в
+     my.js) один раз при открытии окна: ширина окна настроек минус 4
+     промежутка по 1px между 5 вкладками ряда, делённая на 5. Это ОТДЕЛЬНАЯ
+     переменная от --settings-tab-size (та считается от высоты окна и
+     используется только вертикальным стеком #settingsTabs) — этот ряд
+     зависит от ширины окна, а не от высоты. Между вкладками ряда — тот же
+     зазор в 1px, что и между вкладками вертикального стека (gap:1px).
+     Соответственно скруглены не правые, а нижние углы, и линия-срез
+     (означающая стык с окном) идёт не сверху, а слева у каждой вкладки. */
   .settings-tabs-gear{
     position:absolute;
     left:0;
     bottom:-62px;
     display:flex;
+    gap:1px;
   }
   .settings-tab-gear{
-    width:var(--settings-tab-size, 94px);height:62px;
-    flex:0 0 var(--settings-tab-size, 94px);
+    width:var(--settings-tab-size-h, 76px);height:62px;
+    flex:0 0 var(--settings-tab-size-h, 76px);
     border-left:1px solid var(--groove-shadow);
     border-top:none;
     border-radius:0 0 14px 14px;
@@ -322,7 +328,8 @@
     width:100%;
     max-height:88vh;
     overflow-y:auto;
-    padding:22px;
+    overscroll-behavior:contain;
+    padding:16px;
     box-shadow:0 10px 30px rgba(0,0,0,.5);
     position:relative;
   }
@@ -525,10 +532,12 @@
   }
 
   /* ---------- вкладки задач (red/inbox/next/projects/waiting/read/
-     someday/archive) — списки задач с чекбоксами внутри вкладки настроек.
-     Текст задачи оформлен тем же шрифтом/размером, что и комментарий дня
-     в "Карте дней года" (.year-day-note-view), карандашик работает по той
-     же механике (см. renderTaskRowEdit в my.js). ---------- */
+     someday/archive) — списки задач внутри вкладки настроек. Текст задачи
+     оформлен тем же шрифтом/размером, что и комментарий дня в "Карте дней
+     года" (.year-day-note-view), карандашик работает по той же механике
+     (см. renderTaskRowEdit в my.js). Отметка "выполнено" — не чекбокс, а
+     галочка-иконка (.task-done-btn) среди прочих кнопок строки, делает то
+     же самое: переносит задачу в архив (см. renderTaskRowView). ---------- */
   .task-list{
     display:flex;
     flex-direction:column;
@@ -536,41 +545,75 @@
   .task-row{
     display:flex;
     align-items:flex-start;
-    gap:10px;
-    padding:10px 2px;
+    padding:6px 2px;
     border-top:1px solid var(--groove-shadow);
   }
   .task-row:first-child{ border-top:none; }
-  /* цветная отметка приоритета слева от чекбокса: нет отметки (бледно-
-     сиреневый) → red → yellow → снова нет отметки (см. cycleTaskFlag в
-     my.js). Любая задача с red/yellow дополнительно показывается на
-     вкладке Red, независимо от того, в какой вкладке она реально живёт. */
+  /* цветная отметка приоритета — теперь стоит в конце строки, после
+     стрелочки переноса (см. разметку в renderTaskRowView в my.js): нет
+     отметки (пустой кружок) → red → yellow → снова нет отметки (см.
+     cycleTaskFlag в my.js). Любая задача с red/yellow дополнительно
+     показывается на вкладке Red, независимо от того, в какой вкладке она
+     реально живёт.
+     Кликабельная область (кнопка) нарочно крупнее, чем сам видимый
+     кружок — чтобы легко попадать пальцем, — но сама кнопка прозрачная и
+     никак не видна; виден только маленький внутренний кружок
+     (.task-flag-dot-inner), поэтому вокруг него нет никакого ореола. */
   .task-flag-dot{
-    width:14px; height:14px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:22px;height:22px;
     flex-shrink:0;
-    margin-top:5px;
+    margin-left:6px;
     padding:0;
+    border:none;
     border-radius:50%;
-    border:1px solid var(--groove-shadow);
-    background:#d9cdea;
+    background:transparent;
     cursor:pointer;
+    vertical-align:middle;
     -webkit-tap-highlight-color:transparent;
   }
-  .task-flag-dot.flag-red{ background:#c0392b; border-color:#8a291d; }
-  .task-flag-dot.flag-yellow{ background:#d4a017; border-color:#9c780f; }
-  .task-checkbox{
-    width:20px;height:20px;
-    flex-shrink:0;
-    margin-top:2px;
+  .task-flag-dot-inner{
+    display:block;
+    width:9px;height:9px;
+    border-radius:50%;
+    border:1px solid var(--groove-shadow);
+    background:transparent;
   }
+  .task-flag-dot.flag-red .task-flag-dot-inner{ background:#e0392b; border-color:#a52a1e; }
+  .task-flag-dot.flag-yellow .task-flag-dot-inner{ background:#f2b705; border-color:#b8860b; }
+  /* .task-body устроен как обычный текстовый поток (не flex): это
+     единственный способ получить именно "подверстку" кнопок к ПОСЛЕДНЕЙ
+     строке текста, если там есть место, — flexbox для этого не годится,
+     т.к. вычисляет место для переносимого текста заранее, до реальной
+     разбивки на строки, и всегда уводил бы кнопки на отдельную строку,
+     даже если места было полно (см. историю правок). */
   .task-body{
     flex:1;
     min-width:0;
+    display:flow-root; /* содержит float ниже, чтобы высота строки учитывала кнопки, если они ушли на отдельную строку */
     font-family:"Palatino Linotype",Georgia,serif;
     font-size:14px;
     line-height:1.5;
     color:var(--ink);
+  }
+  .task-text-view{
     word-break:break-word;
+  }
+  /* группа кнопок (карандаш/галочка/стрелочка/next/приоритет) — единый
+     неразрывный float:right, идущий в разметке сразу после текста
+     (см. renderTaskRowView в my.js): браузер сам "подверстывает" его к
+     последней строке текста, если там есть место, — и тогда кнопки
+     оказываются на одной строке с текстом, прижатые к правому краю;
+     если места нет, весь блок целиком (а не отдельные кнопки) уходит на
+     следующую строку, тоже прижатый к правому краю. */
+  .task-actions{
+    float:right;
+    display:inline-flex;
+    align-items:center;
+    margin-left:8px;
+    white-space:nowrap;
   }
   .task-text-placeholder{
     color:var(--ink-soft);
