@@ -1740,59 +1740,84 @@
     settingsModalBox.style.height = "";
     settingsModalOverlay.classList.add("open");
     switchSettingsTab("gear");
-    // фиксируем размер окна равным естественной высоте вкладки "настройки"
-    // (шестерёнки) — именно она открывается по умолчанию — плюс запас в
-    // полтора язычка (см. .settings-tab { height:84px } в modals.css), и
-    // больше не меняем его при переключении вкладок (см. комментарий в
-    // modals.css). Дополнительно подрезаем итоговую высоту так, чтобы низ
-    // окна не заезжал на плавающую кнопку настроек (.settings-fab): берём
-    // её реальное положение на экране через getBoundingClientRect (а не
-    // проценты от vh, которые на мобильных браузерах не совпадают с видимой
-    // областью из-за скрывающейся адресной строки).
-    requestAnimationFrame(function(){
-      if(!settingsModalBox) return;
-      var natural = settingsModalBox.getBoundingClientRect().height;
-      var tabHeight = 84;
-      var desired = natural + tabHeight * 2;
+    requestAnimationFrame(layoutSettingsModal);
+  }
+  // Плавающая кнопка-язычок (.settings-fab, id=settingsGearBtn) стоит на
+  // ФИКСИРОВАННОЙ высоте — 25% экрана от его нижнего края (fabTop = 75%
+  // высоты окна браузера), и эта высота больше не зависит ни от контента
+  // вкладок, ни от вьюпорта отдельным подрезающим условием. Окно настроек
+  // "разворачивается" от этой точки вверх: его верх стоит там же, где и
+  // раньше (прибит к верхнему краю оверлея), а высота подгоняется так,
+  // чтобы нижний край окна оказался ровно на уровне верхнего края кнопки
+  // (т.е. кнопка всегда остаётся под пальцем в одном и том же месте,
+  // открыто окно или нет). Кнопка при этом по-прежнему "приклеена" к
+  // правому нижнему углу рамки (.settings-modal-frame) по горизонтали —
+  // это не менялось. Работает и когда модалка закрыта: оверлей больше не
+  // display:none (см. .settings-modal-overlay в modals.css), а скрыт
+  // через opacity/visibility — рамка при этом всё равно реально
+  // отрисована и её координаты можно измерить через getBoundingClientRect.
+  // Вызывается при открытии окна, при загрузке страницы и при ресайзе
+  // (см. вызовы ниже), чтобы кнопка всегда стояла в нужном месте, даже
+  // если окно ни разу не открывали.
+  function layoutSettingsModal(){
+    if(!settingsModalBox) return;
+    var frame = settingsModalBox.parentElement;
+    if(!frame) return;
 
-      var boxTop = settingsModalBox.getBoundingClientRect().top;
-      var gearBtn = document.getElementById("settingsGearBtn");
-      if(gearBtn){
-        var gearTop = gearBtn.getBoundingClientRect().top;
-        var gapAboveGear = 16;
-        var maxAllowed = gearTop - boxTop - gapAboveGear;
-        if(maxAllowed > 120) desired = Math.min(desired, maxAllowed);
-      }
+    // Вкладка "настройки" должна быть хоть раз отрисована — на случай,
+    // если окно ещё ни разу не открывали (иначе #settingsTabContent
+    // пустой, но на итоговую высоту это больше не влияет).
+    var content = document.getElementById("settingsTabContent");
+    if(content && !content.innerHTML.trim()) renderSettingsTabGear();
 
-      settingsModalBox.style.height = desired + "px";
-      // Размер (толщина) каждого язычка вкладки — единая переменная
-      // --settings-tab-size на .settings-modal-frame (её читают и
-      // .settings-tab, и .settings-tab-gear, см. modals.css). Считаем её
-      // здесь: высота окна настроек (desired, только что зафиксирована
-      // выше), минус промежутки между 9 язычками стопки (год + 8 задач:
-      // red/inbox/next/projects/waiting/read/someday/archive — считаем
-      // все 9, а не только сейчас видимые), по 1px gap между соседними —
-      // это 8 промежутков, — и делим остаток на 9. Так каждый язычок
-      // получает фиксированный размер, который не меняется от того,
-      // сколько из 9 сейчас реально показано.
-      var totalTabs = 9;
-      var gapsPx = (totalTabs - 1) * 1;
-      var tabUnit = (desired - gapsPx) / totalTabs;
-      var frame = settingsModalBox.parentElement;
-      if(frame && tabUnit > 0) frame.style.setProperty("--settings-tab-size", tabUnit + "px");
+    // Высота окна = расстояние от его верхнего края (16px, см. padding-top
+    // у .settings-modal-overlay) до фиксированной точки на 25% экрана от
+    // низа (fabTop). Больше не меняется при переключении вкладок и не
+    // зависит от объёма контента — переключение вкладок прокручивает
+    // содержимое (#settingsTabContent), а не меняет размер окна.
+    settingsModalBox.style.height = "";
+    var boxTop = settingsModalBox.getBoundingClientRect().top;
+    var fabTop = window.innerHeight * 0.75;
+    var desired = fabTop - boxTop;
+    if(desired < 120) desired = 120; // не даём окну схлопнуться в ноль на совсем маленьких экранах
 
-      // Ширина вкладок горизонтального ряда под окном (шестерёнка + 4
-      // заглушки, см. .settings-tabs-gear в modals.css) — отдельная
-      // переменная --settings-tab-size-h, т.к. этот ряд зависит от ШИРИНЫ
-      // окна настроек, а не от высоты. Сейчас в ряд помещается ровно 5
-      // вкладок, поэтому делим ширину окна на 5 (и 4 промежутка по 1px
-      // между ними, как и в вертикальном стеке).
-      var totalHTabs = 5;
-      var gapsHPx = (totalHTabs - 1) * 1;
-      var boxWidth = settingsModalBox.getBoundingClientRect().width;
-      var tabHUnit = (boxWidth - gapsHPx) / totalHTabs;
-      if(frame && tabHUnit > 0) frame.style.setProperty("--settings-tab-size-h", tabHUnit + "px");
-    });
+    settingsModalBox.style.height = desired + "px";
+    // Размер (толщина) каждого язычка вертикального стека — единая
+    // переменная --settings-tab-size на .settings-modal-frame (её читают
+    // #settingsTabs .settings-tab). Считаем её здесь: высота окна настроек
+    // (desired, только что зафиксирована выше), минус промежутки между 9
+    // язычками стопки (год + 8 задач: red/inbox/next/projects/waiting/
+    // read/someday/archive — считаем все 9, а не только сейчас видимые),
+    // по 1px gap между соседними — это 8 промежутков, — и делим остаток на
+    // 9. Так каждый язычок получает фиксированный размер, который не
+    // меняется от того, сколько из 9 сейчас реально показано.
+    var totalTabs = 9;
+    var gapsPx = (totalTabs - 1) * 1;
+    var tabUnit = (desired - gapsPx) / totalTabs;
+    if(tabUnit > 0) frame.style.setProperty("--settings-tab-size", tabUnit + "px");
+
+    // Ширина вкладок горизонтального ряда под окном (шестерёнка + 4
+    // заглушки, см. .settings-tabs-gear в modals.css) — отдельная
+    // переменная --settings-tab-size-h, т.к. этот ряд зависит от ШИРИНЫ
+    // окна настроек, а не от высоты. Сейчас в ряд помещается ровно 5
+    // вкладок, поэтому делим ширину окна на 5 (и 4 промежутка по 1px
+    // между ними, как и в вертикальном стеке).
+    var totalHTabs = 5;
+    var gapsHPx = (totalHTabs - 1) * 1;
+    var boxWidth = settingsModalBox.getBoundingClientRect().width;
+    var tabHUnit = (boxWidth - gapsHPx) / totalHTabs;
+    if(tabHUnit > 0) frame.style.setProperty("--settings-tab-size-h", tabHUnit + "px");
+
+    // Ставим язычок-кнопку строго в угол рамки: её left/top — это правый
+    // нижний угол рамки (frameRect.right/frameRect.bottom), а сама кнопка
+    // растёт от этой точки вправо-вниз на свои 62×62 (см. .settings-fab в
+    // modals.css) — ровно в тот незанятый уголок между двумя рядами.
+    var settingsGearBtn = document.getElementById("settingsGearBtn");
+    if(settingsGearBtn){
+      var frameRect = frame.getBoundingClientRect();
+      settingsGearBtn.style.left = frameRect.right + "px";
+      settingsGearBtn.style.top = frameRect.bottom + "px";
+    }
   }
   function closeSettingsModal(){
     flushPendingYearDayNoteEdit();
@@ -2019,6 +2044,16 @@
 
   var settingsGearBtn = document.getElementById("settingsGearBtn");
   if(settingsGearBtn) settingsGearBtn.addEventListener("click", openSettingsModal);
+
+  // Ставим язычок-кнопку в угол окна настроек сразу при загрузке страницы
+  // (а не только при первом открытии окна) и держим его там при ресайзе/
+  // повороте экрана — см. layoutSettingsModal выше.
+  layoutSettingsModal();
+  var settingsLayoutResizeTimer = null;
+  window.addEventListener("resize", function(){
+    clearTimeout(settingsLayoutResizeTimer);
+    settingsLayoutResizeTimer = setTimeout(layoutSettingsModal, 120);
+  });
 
   // ===================== ДОПОЛНИТЕЛЬНЫЙ СЧЁТЧИК ЧАСОВ =====================
   // Данные хранятся в том же общем state (синхронизируются по той же схеме

@@ -4,68 +4,56 @@
    (QR/скан), отключение анимаций при массовых операциях
    =========================================================================== */
 
-  /* ---------- плавающая кнопка настроек (нижний правый угол) ----------
-     Фон кнопки — тот же градиент, что и у шапки сайта (header в base.css).
-     Сама шестерёнка (тело со впадинами-зубцами) закрашена цветом фона
-     основного тела страницы, а центральная "дырочка" — снова цветом фона
-     шапки, чтобы кнопка выглядела как окошко, вырезанное в цвет шапки на
-     фоне страницы. Поднята на 30px выше прежнего исходного положения
-     (50px вверх, затем 20px вниз). */
+  /* ---------- плавающая кнопка настроек — угловой язычок ----------
+     Раньше была отдельной круглой кнопкой с иконкой шестерёнки. Теперь —
+     чистый (без пиктограммы) язычок, визуально образованный стыком двух
+     рядов язычков модалки настроек: бокового вертикального (#settingsTabs,
+     приклеен к правому краю ОКНА настроек) и нижнего горизонтального
+     (.settings-tabs-gear, приклеен к нижнему краю ОКНА настроек) — между
+     ними остаётся незанятый уголок 62×62 сразу за правым нижним углом
+     самого окна (а не экрана). Именно туда кнопку и ставит JS
+     (position:fixed; left/top — координаты правого нижнего угла
+     .settings-modal-frame, см. layoutSettingsModal в my.js; right/bottom
+     ниже — только запасные значения на случай, если JS ещё не отработал).
+     Т.к. кнопка "прикреплена" к рамке своими верхней и левой сторонами
+     (там, где к ней подходят вертикальный и горизонтальный ряды), а
+     свободные, ничем не прикрытые стороны — правая и нижняя, закруглён
+     (тем же радиусом 14px, что и у остальных язычков) только правый
+     нижний угол; на прикреплённых верхней и левой сторонах, как и у
+     остальных язычков на их прикреплённом крае, нет ни радиуса, ни
+     обводки. Толщина (62px) — та же, что и у обычных язычков.
+     Полупрозрачная в состоянии покоя, непрозрачная при наведении/фокусе/
+     нажатии. */
   .settings-fab{
     position:fixed;
-    right:26px;
-    bottom:132px;
-    width:68px;height:68px;
+    right:0;
+    bottom:25%;
+    width:62px;height:62px;
     display:flex;
     align-items:center;
     justify-content:center;
     flex-shrink:0;
     padding:0;
-    background:linear-gradient(180deg, var(--wood) 0%, var(--wood-dark) 100%);
-    border:1.5px solid var(--wood-dark);
-    border-radius:50%;
-    box-shadow:0 4px 14px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.4);
+    background:var(--parchment);
+    border:1px solid var(--groove-shadow);
+    border-top:none;
+    border-left:none;
+    border-radius:0 0 14px 0;
+    box-shadow:2px 2px 5px rgba(0,0,0,.3);
     cursor:pointer;
     z-index:500;
-    transition:transform .15s ease, filter .15s ease;
+    opacity:.55;
+    transition:opacity .25s ease, filter .15s ease, transform .15s ease;
   }
   .settings-fab:hover,
   .settings-fab:focus-visible{
+    opacity:1;
     filter:brightness(1.08);
-    transform:scale(1.06);
   }
-  .settings-fab:active{ transform:scale(.95); }
-  .settings-fab-icon{
-    width:78%;
-    height:78%;
-    pointer-events:none;
-  }
-  .settings-fab-icon path{
-    fill:var(--bg-mid);
-    stroke:#3a3a40;
-    stroke-width:2.4;
-    stroke-linejoin:round;
-  }
-  .settings-fab-ring-outer{
-    fill:none;
-    stroke:#3a3a40;
-    stroke-width:8.4;
-  }
-  .settings-fab-ring-inner{
-    fill:none;
-    stroke:#8f8f96;
-    stroke-width:6.2;
-  }
-  .settings-fab-hole{
-    fill:var(--wood);
-    stroke:#3a3a40;
-    stroke-width:2.4;
-  }
+  .settings-fab:active{ opacity:1; transform:scale(.95); }
   @media (max-width:640px){
     .settings-fab{
-      right:20px;
-      bottom:118px;
-      width:60px;height:60px;
+      width:54px;height:54px;
     }
   }
 
@@ -108,17 +96,28 @@
   }
 
   /* ---------- модалка настроек (шестерёнка) с "язычками", как в блокноте ---------- */
+  /* display:none раньше означал, что рамка окна (.settings-modal-frame)
+     совсем не отрисована, пока модалка закрыта, и её координаты нельзя
+     измерить. Теперь плавающая кнопка-язычок (.settings-fab) должна
+     стоять в углу этой самой рамки даже в закрытом состоянии (см.
+     layoutSettingsModal в my.js), поэтому оверлей вместо display:none
+     скрывается через opacity/visibility — раскладка (flex, отступы,
+     max-width рамки) остаётся активной всегда, меняется только видимость
+     и кликабельность. */
   .settings-modal-overlay{
     position:fixed;
     inset:0;
     background:rgba(20,14,7,.55);
-    display:none;
+    display:flex;
     align-items:flex-start;
     justify-content:center;
     padding:16px 74px 80px 16px;
     z-index:1000;
+    opacity:0;
+    visibility:hidden;
+    pointer-events:none;
   }
-  .settings-modal-overlay.open{ display:flex; }
+  .settings-modal-overlay.open{ opacity:1; visibility:visible; pointer-events:auto; }
   .settings-modal-frame{
     position:relative;
     max-width:380px;
