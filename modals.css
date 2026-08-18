@@ -512,6 +512,16 @@
     color:var(--ink-soft);
     font-style:italic;
   }
+  /* кликабельные ссылки внутри текста (см. linkifyHtml в my.js) — общий
+     класс для комментария к дню ("Карта дней года") и текста задач на
+     любой вкладке. Цвет акцента темы, подчёркивание, чуть темнее при
+     наведении/нажатии, как и у остальных акцентных элементов сайта. */
+  .auto-link{
+    color:var(--wood);
+    text-decoration:underline;
+    word-break:break-word;
+  }
+  .auto-link:hover, .auto-link:active{ color:var(--wood-dark); }
   .year-day-note-icon-btn{
     display:inline-flex;
     align-items:center;
@@ -670,12 +680,13 @@
     font-style:italic;
   }
 
-  /* круглая кнопка "+", размер как у круглых кнопок счётчика
-     (см. .hour-input-confirm), заливка — тот же сиреневый (var(--wood)),
-     каким закрашен счётчик "дней с отметками" и другие акцентные элементы
-     "Карты дней года" — приклеена к правому нижнему углу окна настроек и
+  /* круглая кнопка "+", приклеена к правому нижнему углу окна настроек и
      не уезжает при прокрутке списка задач, т.к. лежит вне
-     #settingsTabContent (settings-modal-box — position:relative). */
+     #settingsTabContent (settings-modal-box — position:relative).
+     Оформлена в том же стиле, что и сейчас выбранная (активная) вкладка
+     (см. .settings-tab.active выше): тот же сплошной фон var(--wood) и
+     тот же цвет "чернил" var(--parchment), без градиента — просто круглая
+     версия того же сочетания цветов. */
   .task-add-fab{
     display:none;
     position:absolute;
@@ -683,8 +694,8 @@
     bottom:14px;
     width:44px;height:44px;
     border-radius:50%;
-    border:1.5px solid var(--wood-dark);
-    background:linear-gradient(180deg, var(--wood) 0%, var(--wood-dark) 100%);
+    border:1px solid var(--groove-shadow);
+    background:var(--wood);
     color:var(--parchment);
     font-size:24px;
     font-weight:bold;
@@ -692,16 +703,57 @@
     cursor:pointer;
     align-items:center;
     justify-content:center;
-    box-shadow:0 3px 8px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.35);
+    box-shadow:2px 2px 5px rgba(0,0,0,.3);
     z-index:5;
   }
   .task-add-fab.visible{ display:flex; }
   .task-add-fab:hover{ filter:brightness(1.08); }
   .task-add-fab:active{ transform:scale(.95); }
 
-  /* сетка выбора вкладки-назначения (перенос задачи) и списка next-задач
-     проекта — переиспользуют общее модальное окно (modalOverlay/modalBox),
-     тот же приём, что и у .goal-color-grid */
+  /* окно "Все задачи проекта" (openTaskNextPicker в my.js) — по
+     требованию должно перекрывать окно настроек с вкладками от края до
+     края: JS копирует текущий прямоугольник .settings-modal-box
+     (position/размер) через getBoundingClientRect и жёстко фиксирует те
+     же значения inline-стилем (см. positionProjectModal), поэтому здесь
+     обычная центровка .modal-box (max-width/max-height, центровка через
+     flex у оверлея) отключается. */
+  .modal-box.task-project-modal-box{
+    position:fixed;
+    margin:0;
+    max-width:none;
+    max-height:none;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+  .task-project-modal-body{
+    flex:1 1 auto;
+    min-height:0;
+    display:flex;
+    flex-direction:column;
+  }
+  /* верхняя (привязанные задачи) и нижняя (доступные задачи) области —
+     равные половины окна, каждая со своей независимой прокруткой (как у
+     #settingsTabContent — тот же приём: скрытый индикатор прокрутки).
+     Кнопка "+ Новая задача" между ними — flex:0 0 auto, поэтому всегда
+     стоит ровно на границе двух половин, а не "плавает" с содержимым. */
+  .task-project-area{
+    flex:1 1 0;
+    min-height:0;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    scrollbar-width:none;
+    -ms-overflow-style:none;
+  }
+  .task-project-area::-webkit-scrollbar{ display:none; width:0; height:0; }
+  .task-project-add-btn{
+    flex:0 0 auto;
+    margin:10px 0;
+  }
+
+  /* сетка выбора вкладки-назначения (перенос задачи) — переиспользует
+     общее модальное окно (modalOverlay/modalBox), тот же приём, что и у
+     .goal-color-grid */
   .task-picker-grid{
     display:flex;
     flex-wrap:wrap;
