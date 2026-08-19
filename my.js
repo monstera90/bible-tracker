@@ -4317,10 +4317,11 @@
         var pa = a.c.flag === "red" ? 0 : 1;
         var pb = b.c.flag === "red" ? 0 : 1;
         if(pa !== pb) return pa - pb;
-        return a.t - b.t;
+        return b.t - a.t;
       });
     }
-    return getAllTasks().filter(function(t){ return t.c.tab === tab && t.c.checked !== true; });
+    return getAllTasks().filter(function(t){ return t.c.tab === tab && t.c.checked !== true; })
+      .sort(function(a,b){ return b.t - a.t; });
   }
   function getArchivedTasksAll(){
     return getAllTasks().filter(function(t){ return t.c.checked === true; })
@@ -4439,7 +4440,7 @@
           if(emptyMsg) emptyMsg.remove();
           var holder = document.createElement("div");
           holder.innerHTML = buildTaskRowHtml(getTaskById(id));
-          wrap.appendChild(holder.firstChild);
+          wrap.insertBefore(holder.firstChild, wrap.firstChild);
           bindTaskRow(id, tabKey);
           renderTaskRowEdit(id, tabKey);
         } else {
