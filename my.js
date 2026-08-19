@@ -1794,37 +1794,90 @@
   // она просто плавно проявляется через opacity за то же время
   // (см. animateSettingsWave), отдельно от геометрии волны.
   //
-  // Клип применяется к рамке в её СОБСТВЕННЫХ координатах (0%..100% —
-  // это ширина/высота самой рамки, а не экрана), поэтому никакой
-  // хитрости с пересчётом точки старта не нужно: кнопка-язычок стоит
-  // буквально впритык к правому нижнему углу рамки (см.
-  // layoutSettingsModal — settingsGearBtn.style.left/top берутся из
-  // frameRect.right/bottom), то есть угол (100%,100%) рамки — это и
-  // есть точка кнопки.
+  // Клип применяется к рамке, но у самой рамки координатная система
+  // 0%..100% — это её СОБСТВЕННЫЙ бокс, а оба ряда вкладок торчат за его
+  // пределы (#settingsTabs — правее, через right:-62px; .settings-tabs-gear
+  // — ниже, через bottom:-62px, см. modals.css). Проценты 0..100 этот
+  // "хвост" не покрывают в принципе, поэтому раньше вкладки не участвовали
+  // в волне и появлялись рывком лишь в момент, когда клип снимался
+  // целиком (t=1, clip-path:none). Чтобы вкладки тоже разворачивались
+  // вместе с окном — считаем клип не в процентах, а в пикселях (px —
+  // валидная единица для clip-path: polygon(), отсчитывается от левого
+  // верхнего угла рамки и не ограничена её собственными width/height), и
+  // границы прямоугольника, который нужно раскрыть, берём не от самой
+  // рамки, а от РЕАЛЬНО измеренных прямоугольников #settingsTabs и
+  // .settings-tabs-gear (см. updateSettingsWaveGeometry).
+  //
+  // Форма волны — та же, что и была изначально: растущий из угла
+  // диагональный треугольник (t<=0.5), который затем дотягивается до
+  // противоположного угла пятиугольником (t>0.5), пока не закроет всю
+  // область целиком (см. settingsWavePolygonAt). Опорный угол — не сам
+  // getBoundingClientRect() кнопки (её высота считается по другой
+  // переменной, чем высота нижнего ряда вкладок, — из-за этого несовпадения
+  // при попытке стартовать ровно от угла кнопки прямоугольник расползался
+  // неравномерно по осям и "выпрыгивал"), а именно правый нижний угол
+  // ОБЩЕЙ области (окно + оба ряда вкладок) — кнопка и так стоит вплотную
+  // к этому углу, визуально неотличимо.
   var settingsWaveRAF = null;
   var SETTINGS_WAVE_DURATION = 400; // мс, см. обсуждение с пользователем
+  // Геометрия волны в px, в координатах рамки (0,0 — её левый верхний
+  // угол); пересчитывается в updateSettingsWaveGeometry перед каждым
+  // запуском волны. minX/minY/maxX/maxY — прямоугольник, который нужно
+  // открыть целиком: объединение рамки окна и обоих рядов вкладок; волна
+  // стартует из его правого нижнего угла (maxX,maxY).
+  var settingsWaveGeom = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
 
-  // t: 0 (совсем свёрнуто, в точку у кнопки) .. 1 (рамка развёрнута
-  // полностью). Первая половина (t<=0.5) — растущий треугольник от
-  // угла (100%,100%) до половины рамки (по главной диагонали). Вторая
-  // половина (t>0.5) — тот же треугольник дотягивается до
-  // противоположного угла (0,0), пятиугольником, пока не закроет всю
-  // рамку целиком. Число вершин специально разное в двух половинах —
-  // поэтому считается через JS/rAF, а не через CSS-transition (тот не
-  // умеет плавно менять число точек полигона).
+  // Пересчитывает settingsWaveGeom от текущего размера рамки окна
+  // настроек и обоих рядов вкладок (#settingsTabs, #settingsTabsGear).
+  // Вызывается заново перед каждым запуском волны (а не один раз при
+  // layoutSettingsModal), т.к. размеры могут поменяться между открытиями
+  // (ресайз, поворот экрана, включена/выключена галочка "Показать все
+  // мои задачи"). Ряд, у которого сейчас нет ни одной видимой вкладки
+  // (нулевой width/height), не расширяет границы — это ожидаемо,
+  // разворачивать нечего.
+  function updateSettingsWaveGeometry(){
+    var empty = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+    if(!settingsModalFrame){ settingsWaveGeom = empty; return; }
+    var frameRect = settingsModalFrame.getBoundingClientRect();
+    if(!frameRect.width || !frameRect.height){ settingsWaveGeom = empty; return; }
+
+    var minX = 0, minY = 0, maxX = frameRect.width, maxY = frameRect.height;
+    [document.getElementById("settingsTabs"), document.getElementById("settingsTabsGear")].forEach(function(el){
+      if(!el) return;
+      var r = el.getBoundingClientRect();
+      if(r.width <= 0 || r.height <= 0) return;
+      minX = Math.min(minX, r.left - frameRect.left);
+      minY = Math.min(minY, r.top - frameRect.top);
+      maxX = Math.max(maxX, r.right - frameRect.left);
+      maxY = Math.max(maxY, r.bottom - frameRect.top);
+    });
+
+    settingsWaveGeom = { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+  }
+
+  // t: 0 (совсем свёрнуто, в точку у угла (maxX,maxY) — там же стоит
+  // кнопка) .. 1 (открыто полностью — окно и оба ряда вкладок). Первая
+  // половина (t<=0.5) — растущий треугольник от угла (maxX,maxY) до
+  // половины области (по главной диагонали). Вторая половина (t>0.5) —
+  // тот же треугольник дотягивается до противоположного угла
+  // (minX,minY), пятиугольником, пока не закроет всю область целиком.
+  // Число вершин специально разное в двух половинах — поэтому считается
+  // через JS/rAF, а не через CSS-transition (тот не умеет плавно менять
+  // число точек полигона).
   function settingsWavePolygonAt(t){
-    if(t <= 0) return "polygon(100% 100%, 100% 100%, 100% 100%)";
+    var g = settingsWaveGeom;
+    if(t <= 0) return "polygon(" + g.maxX + "px " + g.maxY + "px, " + g.maxX + "px " + g.maxY + "px, " + g.maxX + "px " + g.maxY + "px)";
     if(t >= 1) return "none";
     if(t <= 0.5){
       var s = t * 2; // 0..1
-      var by = 100 - 100 * s;
-      var cx = 100 - 100 * s;
-      return "polygon(100% 100%, 100% " + by + "%, " + cx + "% 100%)";
+      var by = g.maxY - (g.maxY - g.minY) * s;
+      var cx = g.maxX - (g.maxX - g.minX) * s;
+      return "polygon(" + g.maxX + "px " + g.maxY + "px, " + g.maxX + "px " + by + "px, " + cx + "px " + g.maxY + "px)";
     }
     var q = (t - 0.5) * 2; // 0..1
-    var topX = 100 - 100 * q;
-    var leftY = 100 - 100 * q;
-    return "polygon(100% 100%, 100% 0%, " + topX + "% 0%, 0% " + leftY + "%, 0% 100%)";
+    var topX = g.maxX - (g.maxX - g.minX) * q;
+    var leftY = g.maxY - (g.maxY - g.minY) * q;
+    return "polygon(" + g.maxX + "px " + g.maxY + "px, " + g.maxX + "px " + g.minY + "px, " + topX + "px " + g.minY + "px, " + g.minX + "px " + leftY + "px, " + g.minX + "px " + g.maxY + "px)";
   }
 
   function setSettingsWaveClip(t){
@@ -1841,6 +1894,7 @@
   // исчезнуть), подложка одновременно гаснет opacity 1->0.
   function animateSettingsWave(opening, onDone){
     if(settingsWaveRAF){ cancelAnimationFrame(settingsWaveRAF); settingsWaveRAF = null; }
+    updateSettingsWaveGeometry();
     var start = null;
     function frame(now){
       if(start === null) start = now;
@@ -1865,13 +1919,33 @@
     var gearBtn = document.getElementById("settingsGearBtn");
     if(gearBtn) gearBtn.classList.add("is-open");
     switchSettingsTab(getShowAllTasksEnabled() ? "red" : "gear");
-    requestAnimationFrame(layoutSettingsModal);
-    if(getExtraAnimationsEnabled()){
-      setSettingsWaveClip(0);
+    var extraAnim = getExtraAnimationsEnabled();
+    if(extraAnim){
+      // Геометрию волны (updateSettingsWaveGeometry) нельзя мерить прямо
+      // сейчас: высоту/отступ окна (settingsModalBox.style.height/
+      // marginTop) мы только что сбросили в "", а актуальные значения
+      // выставляет layoutSettingsModal — и она запускается позже, тем же
+      // requestAnimationFrame ниже. Раньше геометрия волны считалась в
+      // процентах ("%"), а проценты в clip-path браузер пересчитывает
+      // сам при каждой перерисовке — поэтому можно было не думать о
+      // порядке. Теперь координаты в px (см. комментарий у
+      // settingsWavePolygonAt) — они статичны, снятый слишком рано (по
+      // ещё не актуальной рамке) размер так и останется неверным до
+      // конца анимации. Поэтому старт волны (updateSettingsWaveGeometry
+      // + setSettingsWaveClip(0) + сам rAF-цикл) переносим ВНУТРЬ того
+      // же requestAnimationFrame, СРАЗУ ПОСЛЕ layoutSettingsModal — оверлей
+      // при этом уже открыт, но невидим (opacity:0), так что один лишний
+      // кадр со старой геометрией зрителю не виден.
       settingsModalOverlay.style.opacity = "0";
       settingsModalOverlay.classList.add("open");
-      animateSettingsWave(true);
+      requestAnimationFrame(function(){
+        layoutSettingsModal();
+        updateSettingsWaveGeometry();
+        setSettingsWaveClip(0);
+        animateSettingsWave(true);
+      });
     } else {
+      requestAnimationFrame(layoutSettingsModal);
       if(settingsModalFrame){
         settingsModalFrame.style.clipPath = "";
         settingsModalFrame.style.webkitClipPath = "";
