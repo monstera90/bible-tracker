@@ -191,6 +191,22 @@
     scheduleCloudPush();
   }
 
+  // ===================== ДОПОЛНИТЕЛЬНЫЕ АНИМАЦИИ =====================
+  // Настройка "Включить дополнительные анимации" (вкладка настроек,
+  // шестерёнка). Пока управляет только диагональной "волной" открытия/
+  // закрытия окна настроек от плавающей кнопки (см. animateSettingsWave
+  // ниже) — в будущем сюда же можно добавить и другие необязательные
+  // анимации за тем же флагом.
+  function getExtraAnimationsEnabled(){
+    var r = state["__extraAnimations"];
+    return !!(r && r.c);
+  }
+  function setExtraAnimationsEnabled(value){
+    state["__extraAnimations"] = {c: value, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+  }
+
   // ===================== ВКЛАДКИ ЗАДАЧ (red/inbox/next/…) =====================
   // Список ключей вкладок задач в том же порядке, в каком они идут в DOM
   // (см. index.html, .settings-tabs) — используется и для показа/скрытия
@@ -222,14 +238,14 @@
   // Red — это витрина по цветной отметке (см. TASK_MOVE_TARGET_TABS ниже,
   // getTasksForTab и cycleTaskFlag).
   var TASK_MOVABLE_TABS = ["red","inbox","next","projects","waiting","council","read","someday"];
-  // 3 вкладки-заглушки в горизонтальном ряду рядом со вкладкой настроек
-  // (было 4 — одну убрали, освободив место под переехавшую сюда вкладку
-  // года, см. .settings-tabs-gear в index.html/modals.css) — контент под
-  // них ещё не определён, показывают только "Контент появится позже"
-  // (см. renderSettingsTabExtra ниже). В отличие от TASK_TAB_IDS видимость
-  // не переключается — эти вкладки показаны всегда.
+  // 2 вкладки-заглушки в горизонтальном ряду рядом со вкладкой настроек
+  // (было 3 — одну отдали под вкладку диаграммы настроения, см.
+  // settingsTabMoodBtn/switchSettingsTab ниже, см. также
+  // .settings-tabs-gear в index.html/modals.css) — контент под них ещё
+  // не определён, показывают только "Контент появится позже" (см.
+  // renderSettingsTabExtra ниже). В отличие от TASK_TAB_IDS видимость не
+  // переключается — эти вкладки показаны всегда.
   var EXTRA_TAB_IDS = {
-    extra1: "settingsTabExtra1Btn",
     extra2: "settingsTabExtra2Btn",
     extra3: "settingsTabExtra3Btn"
   };
@@ -244,8 +260,13 @@
     projects: '<path d="M4 6a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6z"></path>',
     waiting: '<path d="M6 3h12"></path><path d="M6 21h12"></path><path d="M7 3c0 4 3 5 5 6-2 1-5 2-5 6"></path><path d="M17 3c0 4-3 5-5 6 2 1 5 2 5 6"></path>',
     council: '<circle cx="12" cy="7.5" r="3"></circle><path d="M5 21c0-4 3-7 7-7s7 3 7 7"></path>',
-    read: '<path d="M12 6c-1.5-1.2-3.5-1.8-6-1.8v13.6c2.5 0 4.5.6 6 1.8"></path><path d="M12 6c1.5-1.2 3.5-1.8 6-1.8v13.6c-2.5 0-4.5.6-6 1.8"></path><path d="M12 6v13.6"></path>',
-    someday: '<path d="M12 4l1.8 4.6 4.9.4-3.7 3.3 1.1 4.8L12 14.8 7.9 17.1l1.1-4.8-3.7-3.3 4.9-.4z"></path>'
+    // раскрытая книга — та же геометрия, что и у вкладки Read в
+    // index.html (перебалансированные пропорции разворота, см. пояснение
+    // там же)
+    read: '<path d="M12 7c-1.8-1-4.5-1.3-7-1.3v10c2.5 0 4.7.3 7 1.3"></path><path d="M12 7c1.8-1 4.5-1.3 7-1.3v10c-2.5 0-4.7.3-7 1.3"></path><path d="M12 7v10"></path>',
+    // та же стрелочка, что у next, повёрнута на 90° против часовой стрелки,
+    // чтобы указывать вверх (см. #settingsTabSomedayBtn в index.html)
+    someday: '<g transform="rotate(-90 12 12)"><path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path></g>'
   };
   var TASK_MOVE_ICON_SVG = function(key){
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + (TASK_MOVE_ICONS[key] || "") + '</svg>';
@@ -351,6 +372,23 @@
     dots.forEach(function(dot){
       dot.classList.toggle("selected", Number(dot.getAttribute("data-theme-id")) === themeId);
     });
+    syncThemeColorMeta();
+  }
+
+  // синхронизирует <meta name="theme-color"> (цвет строки состояния в
+  // Chrome и заголовка окна у установленного PWA) с реальным цветом
+  // "шапки" темы — берёт готовое значение переменной --wood прямо из
+  // применённой темы (html[data-theme=...]), а не хранит отдельный
+  // список цветов, который иначе легко рассинхронизировать с theme.css.
+  // Раньше здесь было захардкожено значение из темы №1 (коричневое),
+  // а по умолчанию включена тема №4 — из-за этого при каждой загрузке
+  // страницы/установленного приложения строка сверху была коричневой
+  // независимо от того, какая тема реально выбрана.
+  function syncThemeColorMeta(){
+    var wood = getComputedStyle(document.documentElement).getPropertyValue("--wood").trim();
+    if(!wood) return;
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if(meta) meta.setAttribute("content", wood);
   }
 
   function selectTheme(themeId){
@@ -1746,16 +1784,101 @@
   // ---------- модалка настроек (шестерёнка) с вкладками ----------
   var settingsModalOverlay = document.getElementById("settingsModalOverlay");
   var settingsModalBox = document.getElementById("settingsModalBox");
+  var settingsModalFrame = settingsModalBox ? settingsModalBox.parentElement : null; // .settings-modal-frame
+
+  // ===== Волна открытия/закрытия окна настроек (доп. анимации) =====
+  // Разворачивается ТОЛЬКО рамка окна (.settings-modal-frame — она же
+  // содержит и сам блок настроек, и вертикальный стек вкладок, и
+  // горизонтальный ряд, см. index.html), а не весь экран. Тёмная
+  // подложка (.settings-modal-overlay) в волне не участвует —
+  // она просто плавно проявляется через opacity за то же время
+  // (см. animateSettingsWave), отдельно от геометрии волны.
+  //
+  // Клип применяется к рамке в её СОБСТВЕННЫХ координатах (0%..100% —
+  // это ширина/высота самой рамки, а не экрана), поэтому никакой
+  // хитрости с пересчётом точки старта не нужно: кнопка-язычок стоит
+  // буквально впритык к правому нижнему углу рамки (см.
+  // layoutSettingsModal — settingsGearBtn.style.left/top берутся из
+  // frameRect.right/bottom), то есть угол (100%,100%) рамки — это и
+  // есть точка кнопки.
+  var settingsWaveRAF = null;
+  var SETTINGS_WAVE_DURATION = 400; // мс, см. обсуждение с пользователем
+
+  // t: 0 (совсем свёрнуто, в точку у кнопки) .. 1 (рамка развёрнута
+  // полностью). Первая половина (t<=0.5) — растущий треугольник от
+  // угла (100%,100%) до половины рамки (по главной диагонали). Вторая
+  // половина (t>0.5) — тот же треугольник дотягивается до
+  // противоположного угла (0,0), пятиугольником, пока не закроет всю
+  // рамку целиком. Число вершин специально разное в двух половинах —
+  // поэтому считается через JS/rAF, а не через CSS-transition (тот не
+  // умеет плавно менять число точек полигона).
+  function settingsWavePolygonAt(t){
+    if(t <= 0) return "polygon(100% 100%, 100% 100%, 100% 100%)";
+    if(t >= 1) return "none";
+    if(t <= 0.5){
+      var s = t * 2; // 0..1
+      var by = 100 - 100 * s;
+      var cx = 100 - 100 * s;
+      return "polygon(100% 100%, 100% " + by + "%, " + cx + "% 100%)";
+    }
+    var q = (t - 0.5) * 2; // 0..1
+    var topX = 100 - 100 * q;
+    var leftY = 100 - 100 * q;
+    return "polygon(100% 100%, 100% 0%, " + topX + "% 0%, 0% " + leftY + "%, 0% 100%)";
+  }
+
+  function setSettingsWaveClip(t){
+    if(!settingsModalFrame) return;
+    var poly = settingsWavePolygonAt(t);
+    settingsModalFrame.style.clipPath = poly;
+    settingsModalFrame.style.webkitClipPath = poly;
+  }
+
+  // opening=true — волна открытия: рамка разворачивается t=0->1, а
+  // тёмная подложка одновременно проявляется opacity 0->1. opening=
+  // false — обратная волна: рамка схлопывается t=1->0 (честно до
+  // полного нуля, чтобы гарантированно стянуться в точку у кнопки и
+  // исчезнуть), подложка одновременно гаснет opacity 1->0.
+  function animateSettingsWave(opening, onDone){
+    if(settingsWaveRAF){ cancelAnimationFrame(settingsWaveRAF); settingsWaveRAF = null; }
+    var start = null;
+    function frame(now){
+      if(start === null) start = now;
+      var p = Math.min(1, (now - start) / SETTINGS_WAVE_DURATION);
+      var t = opening ? p : (1 - p);
+      setSettingsWaveClip(t);
+      settingsModalOverlay.style.opacity = String(t);
+      if(p < 1){
+        settingsWaveRAF = requestAnimationFrame(frame);
+      } else {
+        settingsWaveRAF = null;
+        if(onDone) onDone();
+      }
+    }
+    settingsWaveRAF = requestAnimationFrame(frame);
+  }
 
   function openSettingsModal(){
     refreshSettingsTabsVisibility();
     settingsModalBox.style.height = "";
     settingsModalBox.style.marginTop = "";
-    settingsModalOverlay.classList.add("open");
     var gearBtn = document.getElementById("settingsGearBtn");
     if(gearBtn) gearBtn.classList.add("is-open");
     switchSettingsTab(getShowAllTasksEnabled() ? "red" : "gear");
     requestAnimationFrame(layoutSettingsModal);
+    if(getExtraAnimationsEnabled()){
+      setSettingsWaveClip(0);
+      settingsModalOverlay.style.opacity = "0";
+      settingsModalOverlay.classList.add("open");
+      animateSettingsWave(true);
+    } else {
+      if(settingsModalFrame){
+        settingsModalFrame.style.clipPath = "";
+        settingsModalFrame.style.webkitClipPath = "";
+      }
+      settingsModalOverlay.style.opacity = "";
+      settingsModalOverlay.classList.add("open");
+    }
   }
   // Плавающая кнопка-язычок (.settings-fab, id=settingsGearBtn) стоит на
   // ФИКСИРОВАННОЙ высоте — 25% экрана от его нижнего края (fabTop = 75%
@@ -1852,9 +1975,25 @@
   function closeSettingsModal(){
     flushPendingYearDayNoteEdit();
     flushPendingTaskEdits();
-    settingsModalOverlay.classList.remove("open");
     var gearBtn = document.getElementById("settingsGearBtn");
     if(gearBtn) gearBtn.classList.remove("is-open");
+    if(getExtraAnimationsEnabled()){
+      animateSettingsWave(false, function(){
+        settingsModalOverlay.classList.remove("open");
+        settingsModalOverlay.style.opacity = "";
+        if(settingsModalFrame){
+          settingsModalFrame.style.clipPath = "";
+          settingsModalFrame.style.webkitClipPath = "";
+        }
+      });
+    } else {
+      settingsModalOverlay.classList.remove("open");
+      settingsModalOverlay.style.opacity = "";
+      if(settingsModalFrame){
+        settingsModalFrame.style.clipPath = "";
+        settingsModalFrame.style.webkitClipPath = "";
+      }
+    }
   }
   function refreshSettingsTabsVisibility(){
     var showTasks = getShowAllTasksEnabled();
@@ -1873,8 +2012,10 @@
     flushPendingTaskEdits();
     var gearBtn = document.getElementById("settingsTabGearBtn");
     var yearBtn = document.getElementById("settingsTabYearBtn");
+    var moodTabBtn = document.getElementById("settingsTabMoodBtn");
     if(gearBtn) gearBtn.classList.toggle("active", tab === "gear");
     if(yearBtn) yearBtn.classList.toggle("active", tab === "year");
+    if(moodTabBtn) moodTabBtn.classList.toggle("active", tab === "mood");
     Object.keys(TASK_TAB_IDS).forEach(function(key){
       var btn = document.getElementById(TASK_TAB_IDS[key]);
       if(btn) btn.classList.toggle("active", tab === key);
@@ -1895,8 +2036,8 @@
     else renderSettingsTabGear();
   }
 
-  // Заглушка для 4 новых вкладок рядом со вкладкой настроек — содержимое
-  // ещё не определено.
+  // Заглушка для 2 вкладок рядом со вкладкой настроек — содержимое ещё
+  // не определено.
   function renderSettingsTabExtra(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -1912,16 +2053,17 @@
     var reducedOn = getGoalsReducedView();
     var colorMarkOn = getColorMarkEnabled();
     var showAllTasksOn = getShowAllTasksEnabled();
+    var extraAnimOn = getExtraAnimationsEnabled();
     container.innerHTML =
       '<div class="settings-row"><span>Добавить дополнительный счётчик</span><input type="checkbox" id="settingsHourCb"' + (hourOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" id="settingsHourNotesRow" style="' + (hourOn ? "" : "display:none;") + '"><span>Добавить комментарий в дополнительный счётчик</span><input type="checkbox" id="settingsHourNotesCb"' + (hourNotesOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Добавить счётчик настроения</span><input type="checkbox" id="settingsMoodCb"' + (moodOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row" style="border-bottom:none;"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row" style="border-bottom:none;"><span>Включить дополнительные анимации</span><input type="checkbox" id="settingsExtraAnimCb"' + (extraAnimOn ? " checked" : "") + '></div>' +
       (showAllTasksOn ? '<button class="modal-btn" id="settingsImportTasksBtn" style="margin-top:16px;">Восстановить задачи из .txt</button>' : '') +
       '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:' + (showAllTasksOn ? "10px" : "16px") + ';">Добавить для себя цель</button>' +
-      (moodOn ? '<button class="modal-btn" id="settingsMoodDiagramBtn" style="margin-top:10px;">Показать диаграмму настроения</button>' : '') +
       '<button class="modal-btn" id="settingsVersionsBtn" style="margin-top:10px;">Версии</button>' +
       '<button class="modal-btn danger" id="settingsResetBtn" style="margin-top:10px;">Начать чтение сначала и сбросить прогресс</button>';
 
@@ -1987,6 +2129,10 @@
       refreshSettingsTabsVisibility();
     });
 
+    document.getElementById("settingsExtraAnimCb").addEventListener("change", function(){
+      setExtraAnimationsEnabled(this.checked);
+    });
+
     document.getElementById("settingsAddGoalBtn").addEventListener("click", function(){
       var id = createNewGoal();
       renderGoalsSection();
@@ -2000,11 +2146,6 @@
         closeSettingsModal();
         openTaskImportTabPicker();
       });
-    }
-
-    var moodDiagramBtn = document.getElementById("settingsMoodDiagramBtn");
-    if(moodDiagramBtn){
-      moodDiagramBtn.addEventListener("click", function(){ switchSettingsTab("mood"); });
     }
 
     document.getElementById("settingsVersionsBtn").addEventListener("click", function(){
@@ -2025,11 +2166,8 @@
     var total = 0;
     Object.keys(counts).forEach(function(k){ total += counts[k]; });
 
-    var backBtnHtml = '<button class="modal-btn" id="mMoodBackBtn" style="margin-bottom:14px;">&larr; Назад к настройкам</button>';
-
     if(total === 0){
-      container.innerHTML = backBtnHtml + '<div class="mood-diagram-empty">Данных о настроении нет. Добавьте настроение — тогда здесь появится диаграмма.</div>';
-      document.getElementById("mMoodBackBtn").addEventListener("click", function(){ switchSettingsTab("gear"); });
+      container.innerHTML = '<div class="mood-diagram-empty">Данных о настроении нет. Добавьте настроение — тогда здесь появится диаграмма.</div>';
       return;
     }
 
@@ -2043,12 +2181,10 @@
       " - всего " + sessionsCount + " " + pluralRu(sessionsCount, MARK_FORMS) + " настроения";
 
     container.innerHTML =
-      backBtnHtml +
       '<div class="mood-diagram-title">' + escapeHtml(title) + '</div>' +
       '<div class="mood-diagram-wrap" id="moodDiagramWrap"></div>' +
       '<div class="mood-diagram-reset-row"><button class="mood-diagram-reset-btn" id="mMoodResetBtn2">Сбросить данные настроения</button></div>';
     buildMoodDiagramSVG(counts, total);
-    document.getElementById("mMoodBackBtn").addEventListener("click", function(){ switchSettingsTab("gear"); });
     document.getElementById("mMoodResetBtn2").addEventListener("click", function(){
       closeSettingsModal();
       openMoodResetConfirm();
@@ -2057,8 +2193,10 @@
 
   var settingsTabGearBtn = document.getElementById("settingsTabGearBtn");
   var settingsTabYearBtn = document.getElementById("settingsTabYearBtn");
+  var settingsTabMoodBtn = document.getElementById("settingsTabMoodBtn");
   if(settingsTabGearBtn) settingsTabGearBtn.addEventListener("click", function(){ switchSettingsTab("gear"); });
   if(settingsTabYearBtn) settingsTabYearBtn.addEventListener("click", function(){ switchSettingsTab("year"); });
+  if(settingsTabMoodBtn) settingsTabMoodBtn.addEventListener("click", function(){ switchSettingsTab("mood"); });
   Object.keys(TASK_TAB_IDS).forEach(function(key){
     var btn = document.getElementById(TASK_TAB_IDS[key]);
     if(btn) btn.addEventListener("click", function(){ switchSettingsTab(key); });
@@ -3047,16 +3185,33 @@
     var b = Math.max(0, (n & 0xff) - amount);
     return "rgb(" + r + "," + g + "," + b + ")";
   }
-  // Толщина стенки в данном угле обода: у переднего края (angle=180°)
-  // толщина полная (depth), у заднего (angle=0°) — не ноль, а MIN_WALL_FRAC
-  // от depth, плавно убывая между ними. Без этого минимума задняя половина
-  // диска выглядит совсем плоской ("без объёма") — стенка у неё физически
-  // была бы полностью скрыта собственной верхней гранью диска, но
-  // нарисованный так эллипс перестаёт читаться как объёмный целиком.
-  var MOOD_WALL_MIN_FRAC = 0.4;
+  // Толщина стенки в данном угле обода. Раньше стенка не пропадала
+  // никогда (даже у самого заднего края держался минимум 40% глубины) —
+  // из-за этого тёмная стенка тянулась по всему периметру эллипса на
+  // фиксированном расстоянии и читалась как отдельный "второй круг", а
+  // на боках (angle≈90°/270°, где верхний и нижний контуры визуально
+  // сходятся) толщина обрывалась не до нуля, а сразу до заметных 70% —
+  // отсюда ощущение, что нижний контур там резко "подворачивается".
+  // Первая попытка исправить это — обнулить стенку целиком за пределами
+  // ближней половины (90°..270°) — убрала слипание, но заодно убрала и
+  // объём у всех долек, которые просто оказались в дальней половине:
+  // они стали выглядеть совсем плоскими.
+  //
+  // Теперь — два плавных "лепестка" на разных половинах вместо одного:
+  // на ближней половине (90°..270°) толщина растёт по синусоиде от 0 на
+  // обоих боках до полной depth по центру (180°, прямо на зрителя); на
+  // дальней половине (270°..360°..90°) — тоже от 0 на тех же боках, но
+  // до более скромного BACK_FRAC от depth по центру дальней стороны (0°/
+  // 360°, "затылок" диска). Оба лепестка стыкуются строго в нуле у 90° и
+  // 270° — там, где контуры сходятся, никакой лишней толщины уже нет,
+  // но при этом ни одна долька не остаётся полностью плоской.
+  var MOOD_WALL_BACK_FRAC = 0.4;
   function moodWallThickness(depth, angleDeg){
-    var t = (1 - Math.cos(angleDeg * Math.PI/180)) / 2; // 0 сзади, 1 спереди
-    return depth * (MOOD_WALL_MIN_FRAC + (1 - MOOD_WALL_MIN_FRAC) * t);
+    if(angleDeg > 90 && angleDeg < 270){
+      return depth * Math.sin((angleDeg - 90) * Math.PI / 180);
+    }
+    var back = angleDeg <= 90 ? (90 - angleDeg) : (angleDeg - 270);
+    return depth * MOOD_WALL_BACK_FRAC * Math.sin(back * Math.PI / 180);
   }
   // Лента-стенка вдоль обода: полигон из точек верхнего края (толщина 0)
   // и точек нижнего края (толщина moodWallThickness на каждый угол), а не
@@ -4212,10 +4367,10 @@
           holder.innerHTML = buildTaskRowHtml(getTaskById(id));
           wrap.appendChild(holder.firstChild);
           bindTaskRow(id, tabKey);
-          renderTaskRowEdit(id);
+          renderTaskRowEdit(id, tabKey);
         } else {
           renderTaskTabList(tabKey);
-          requestAnimationFrame(function(){ renderTaskRowEdit(id); });
+          requestAnimationFrame(function(){ renderTaskRowEdit(id, tabKey); });
         }
       };
     }
@@ -4249,15 +4404,31 @@
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + task.id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
       '</span>';
-    body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderTaskRowEdit(id); });
+    body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderTaskRowEdit(id, tabKey); });
+    bindTaskRowActions(body, id, tabKey);
+  }
+
+  // кнопки переноса/архивации/next-привязки/приоритета — общие для
+  // обычного вида строки (renderTaskRowView) и режима редактирования
+  // (renderTaskRowEdit): без явной дискеты сохранения текст сохраняется
+  // сам (через flushPendingTaskEdits внутри каждого обработчика), поэтому
+  // эти кнопки должны работать одинаково в обоих режимах и не пропадать,
+  // пока идёт редактирование
+  function bindTaskRowActions(body, id, tabKey){
+    var task = getTaskById(id);
+    if(!task) return;
     // галочка "в архив" — делает ровно то же, что раньше делала отметка
     // чекбокса (снять её обратно можно только извлечением из архива)
-    body.querySelector(".task-done-btn").addEventListener("click", function(){
-      flushPendingTaskEdits();
-      checkTaskDone(id); // одна и та же задача — закрывается везде разом
-      renderTaskTabList(tabKey || task.c.tab);
-    });
-    body.querySelector(".task-move-btn").addEventListener("click", function(){ openTaskMovePicker(id, tabKey); });
+    var doneBtn = body.querySelector(".task-done-btn");
+    if(doneBtn){
+      doneBtn.addEventListener("click", function(){
+        flushPendingTaskEdits();
+        checkTaskDone(id); // одна и та же задача — закрывается везде разом
+        renderTaskTabList(tabKey || task.c.tab);
+      });
+    }
+    var moveBtn = body.querySelector(".task-move-btn");
+    if(moveBtn) moveBtn.addEventListener("click", function(){ openTaskMovePicker(id, tabKey); });
     var nextBtn = body.querySelector(".task-next-btn");
     if(nextBtn) nextBtn.addEventListener("click", function(){ openTaskNextPicker(id, tabKey); });
     var dot = body.querySelector(".task-flag-dot");
@@ -4274,29 +4445,35 @@
     }
   }
 
-  // редактирование текста задачи — та же механика, что и у комментария дня
-  // в "Карте дней года" (contenteditable + дискета сразу после текста)
-  function renderTaskRowEdit(id){
+  // редактирование текста задачи — без отдельной дискеты сохранения:
+  // задача сохраняется сама, как только поле теряет фокус (клик по любой
+  // из соседних кнопок — они по-прежнему на месте, см. bindTaskRowActions
+  // — или переход в другое место приложения). Кнопки действия
+  // (архивировать/перенести/приоритет и т.д.), в отличие от прежнего
+  // варианта, во время редактирования не пропадают — только карандашик,
+  // ему тут не место, пока и так идёт редактирование.
+  function renderTaskRowEdit(id, tabKey){
     var body = document.querySelector('.task-body[data-id="' + id + '"]');
     var task = getTaskById(id);
     if(!body || !task) return;
     flushPendingTaskEdits(); // если в этот момент редактировалась другая строка — сохранить её
     var isProjectsTab = task.c.tab === "projects";
-    body.innerHTML = '<div class="task-editable' + (isProjectsTab ? ' task-editable-project' : '') + '" id="taskEditable_' + id + '" contenteditable="true"></div>';
+    var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
+    body.innerHTML =
+      '<div class="task-editable' + (isProjectsTab ? ' task-editable-project' : '') + '" id="taskEditable_' + id + '" contenteditable="true" data-task-id="' + id + '"></div>' +
+      '<span class="task-actions">' +
+        '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
+        '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
+        (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
+        '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
+      '</span>';
     var editable = document.getElementById("taskEditable_" + id);
     if(!editable) return;
     var textNode = document.createTextNode(task.c.text ? task.c.text : EMPTY_ANCHOR_CHAR);
     editable.appendChild(textNode);
-    editable.setAttribute("data-task-id", String(id)); // нужно для автосохранения при уходе со вкладки/закрытии окна
-    var saveBtn = document.createElement("button");
-    saveBtn.type = "button";
-    saveBtn.className = "task-icon-btn";
-    saveBtn.title = "Сохранить";
-    saveBtn.innerHTML = SAVE_ICON_SVG;
-    editable.appendChild(saveBtn);
 
     function updatePlaceholder(){
-      var empty = getEditableNoteText(editable, saveBtn).length === 0;
+      var empty = getEditableNoteText(editable).length === 0;
       editable.classList.toggle("is-empty", empty);
     }
     updatePlaceholder();
@@ -4317,12 +4494,23 @@
       }
     });
 
-    saveBtn.addEventListener("click", function(e){
-      e.stopPropagation();
-      var newText = getEditableNoteText(editable, saveBtn);
-      setTaskText(id, newText.trim());
-      renderTaskRowView(id);
+    // setTimeout нужен, чтобы клик по соседней кнопке (архив/перенос/
+    // приоритет и т.д.) успел сработать раньше, чем мы перерисуем строку
+    // обратно в обычный вид — иначе клик попал бы по уже отсоединённому
+    // от DOM элементу. Сами эти кнопки уже сохраняют текст самостоятельно
+    // (flushPendingTaskEdits в начале своих обработчиков, см.
+    // bindTaskRowActions), так что до срабатывания этого таймера строка
+    // обычно уже перерисована ими, и здесь просто нечего делать.
+    editable.addEventListener("blur", function(){
+      setTimeout(function(){
+        if(!editable.isContentEditable || !document.body.contains(editable)) return;
+        var newText = getEditableNoteText(editable);
+        setTaskText(id, newText.trim());
+        renderTaskRowView(id, tabKey);
+      }, 0);
     });
+
+    bindTaskRowActions(body, id, tabKey);
   }
 
   // сетка выбора вкладки-назначения — как у выбора цвета цели
@@ -4434,7 +4622,20 @@
   // выбор next-действия для задачи-проекта: список текущих незакрытых
   // задач вкладки "next", ещё не привязанных к другому проекту, плюс
   // возможность сразу создать новую next-задачу, привязанную к этому проекту
+  // "Все задачи проекта" (кнопка-цепочка на строке проекта) — не
+  // отдельное всплывающее окно, а замена содержимого прямо в
+  // #settingsTabContent (тот же приём, что и у "Версий", см.
+  // renderSettingsTabVersions выше). Отдельной кнопки "назад" нет —
+  // возврат к списку проектов происходит так же, как и вход сюда: через
+  // повторный клик по язычку "Projects" (switchSettingsTab("projects")
+  // безусловно перерисовывает список проектов поверх этого экрана).
   function openTaskNextPicker(projectId, tabKey){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+
+    var mode = "linked"; // "linked" — обычный вид (проект + next-задачи),
+                          // "attach" — выбор существующей задачи для привязки
+
     function getLinkedTasks(){
       return getTasksForTab("next").filter(function(t){ return t.c.nextForProjectId === projectId; });
     }
@@ -4447,75 +4648,96 @@
       });
     }
 
-    // ---------- окно: две прокручиваемые области, жёстко разделённые
-    // кнопкой "+ Новая задача" (см. .task-project-add-btn — flex:0 0 auto
-    // между двумя flex:1 областями, так что кнопка всегда стоит ровно
-    // посередине окна, а не "плавает" вместе с содержимым) ----------
-    function renderProjectModal(){
-      var linked = getLinkedTasks();
-      var available = getAvailableTasks();
-      var linkedHtml = linked.map(function(t){
-        return '<div class="task-row" data-id="' + t.id + '"><div class="task-body" data-id="' + t.id + '"></div></div>';
-      }).join("");
-      var availableHtml = available.map(function(t){
-        var label = t.c.text ? escapeHtml(t.c.text) : "Без названия";
-        return '<button type="button" class="version-history-item" data-avail-id="' + t.id + '">' + label + '</button>';
-      }).join("");
-      modalBox.className = "modal-box task-project-modal-box";
-      modalBox.innerHTML =
-        modalHeader("Все задачи проекта") +
+    // ---------- сверху всегда сам проект, ниже — либо привязанные к нему
+    // next-задачи (обычный режим), либо список для привязки существующей
+    // задачи (режим "attach", включается кнопкой-звеном). Задачи из
+    // других списков в обычном режиме не показываются вовсе — только по
+    // явному запросу через кнопку-звено. ---------- */
+    function render(){
+      flushPendingTaskEdits();
+      var projectHtml = '<div class="task-row" data-id="' + projectId + '"><div class="task-body" data-id="' + projectId + '"></div></div>';
+      var areaHtml;
+      if(mode === "attach"){
+        var available = getAvailableTasks();
+        var availableHtml = available.map(function(t){
+          var label = t.c.text ? escapeHtml(t.c.text) : "Без названия";
+          return '<button type="button" class="version-history-item" data-avail-id="' + t.id + '">' + label + '</button>';
+        }).join("");
+        areaHtml = '<div class="task-list">' + availableHtml + '</div>' +
+          (available.length === 0 ? '<div class="task-empty">Нет доступных задач.</div>' : '');
+      } else {
+        var linked = getLinkedTasks();
+        var linkedHtml = linked.map(function(t){
+          return '<div class="task-row" data-id="' + t.id + '"><div class="task-body" data-id="' + t.id + '"></div></div>';
+        }).join("");
+        areaHtml = '<div class="task-list">' + linkedHtml + '</div>' +
+          (linked.length === 0 ? '<div class="task-empty">Пока нет задач, привязанных к проекту.</div>' : '');
+      }
+      container.innerHTML =
+        '<div class="year-grid-tab-title" style="margin-bottom:12px;">Все задачи проекта</div>' +
         '<div class="task-project-modal-body">' +
-          '<div class="task-project-area" id="taskProjectLinkedArea">' +
-            '<div class="task-list">' + linkedHtml + '</div>' +
-            (linked.length === 0 ? '<div class="task-empty">Пока нет задач, привязанных к проекту.</div>' : '') +
-          '</div>' +
-          '<button type="button" class="modal-btn task-project-add-btn" id="taskCreateNextBtn">+ Новая задача</button>' +
-          '<div class="task-project-area" id="taskProjectAvailableArea">' +
-            '<div class="task-list">' + availableHtml + '</div>' +
-            (available.length === 0 ? '<div class="task-empty">Нет доступных задач.</div>' : '') +
-          '</div>' +
-        '</div>';
-      bindClose();
-      modalOverlay.classList.add("open");
-      positionProjectModal();
+          '<div class="task-list task-project-project-row">' + projectHtml + '</div>' +
+          '<div class="task-project-area" id="taskProjectArea">' + areaHtml + '</div>' +
+        '</div>' +
+        '<button type="button" class="task-project-fab task-project-fab-link' + (mode === "attach" ? " active" : "") + '" id="taskProjectLinkFab" title="Прикрепить существующую задачу">' + LINK_NEXT_ICON_SVG + '</button>' +
+        '<button type="button" class="task-project-fab task-project-fab-create" id="taskProjectCreateFab" title="Новая задача">+</button>';
 
-      linked.forEach(function(t){ renderProjectRowView(t.id); });
+      // глобальная "+" (task-add-fab) относится к обычным вкладкам —
+      // здесь вместо неё две свои кнопки, поэтому её прячем; она сама
+      // вернётся при выходе (switchSettingsTab выставляет видимость
+      // заново для каждой вкладки)
+      var globalFab = document.getElementById("taskAddFab");
+      if(globalFab) globalFab.classList.remove("visible");
 
-      Array.prototype.forEach.call(modalBox.querySelectorAll("[data-avail-id]"), function(btn){
-        btn.addEventListener("click", function(){
-          flushPendingTaskEdits();
-          var aid = btn.getAttribute("data-avail-id");
-          var t = getTaskById(aid);
-          if(!t) return;
-          // задача из любой другой вкладки становится next-действием —
-          // физически переезжает во "next" (единственная вкладка, где
-          // вообще работает nextForProjectId) и сразу привязывается
-          if(t.c.tab !== "next") moveTaskToTab(aid, "next");
-          var updated = getTaskById(aid);
-          updated.c.nextForProjectId = projectId;
-          saveTaskData(aid, updated.c);
-          renderTaskTabList(tabKey || "projects");
-          renderProjectModal();
+      renderRowView(projectId);
+      if(mode !== "attach"){
+        getLinkedTasks().forEach(function(t){ renderRowView(t.id); });
+      }
+
+      if(mode === "attach"){
+        Array.prototype.forEach.call(container.querySelectorAll("[data-avail-id]"), function(btn){
+          btn.addEventListener("click", function(){
+            flushPendingTaskEdits();
+            var aid = btn.getAttribute("data-avail-id");
+            var t = getTaskById(aid);
+            if(!t) return;
+            // задача из любой другой вкладки становится next-действием —
+            // физически переезжает во "next" (единственная вкладка, где
+            // вообще работает nextForProjectId) и сразу привязывается
+            if(t.c.tab !== "next") moveTaskToTab(aid, "next");
+            var updated = getTaskById(aid);
+            updated.c.nextForProjectId = projectId;
+            saveTaskData(aid, updated.c);
+            mode = "linked";
+            render();
+          });
         });
+      }
+
+      document.getElementById("taskProjectLinkFab").addEventListener("click", function(){
+        flushPendingTaskEdits();
+        mode = (mode === "attach") ? "linked" : "attach";
+        render();
       });
 
-      document.getElementById("taskCreateNextBtn").addEventListener("click", function(){
+      document.getElementById("taskProjectCreateFab").addEventListener("click", function(){
         flushPendingTaskEdits();
         var nid = createTask("next");
         var t = getTaskById(nid);
         t.c.nextForProjectId = projectId;
         saveTaskData(nid, t.c);
-        renderTaskTabList(tabKey || "projects");
-        renderProjectModal();
-        renderProjectRowEdit(nid);
+        mode = "linked";
+        render();
+        renderRowEdit(nid);
       });
     }
 
-    // строка привязанной задачи в верхней области — те же пиктограммы и
-    // та же логика, что и у обычной строки задачи (renderTaskRowView),
-    // только вместо перерисовки вкладки настроек в фоне каждое действие
-    // перерисовывает это же окно (renderProjectModal)
-    function renderProjectRowView(id){
+    // строка привязанной задачи (и сама строка проекта наверху) — те же
+    // пиктограммы и та же логика, что и у обычной строки задачи
+    // (renderTaskRowView/bindTaskRowActions), только каждое действие
+    // вместо перерисовки вкладки настроек перерисовывает этот же экран
+    // (render)
+    function renderRowView(id){
       var body = document.querySelector('.task-body[data-id="' + id + '"]');
       var task = getTaskById(id);
       if(!body || !task) return;
@@ -4529,48 +4751,58 @@
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
         '</span>';
-      body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderProjectRowEdit(id); });
-      body.querySelector(".task-done-btn").addEventListener("click", function(){
-        flushPendingTaskEdits();
-        checkTaskDone(id);
-        renderTaskTabList(tabKey || "projects");
-        renderProjectModal();
-      });
-      body.querySelector(".task-move-btn").addEventListener("click", function(){ openProjectRowMovePicker(id); });
+      body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderRowEdit(id); });
+      bindRowActions(body, id);
+    }
+
+    // кнопки архива/переноса/приоритета — общие для обычного вида и
+    // режима редактирования, чтобы они не пропадали, пока идёт ввод
+    // текста (см. renderRowEdit)
+    function bindRowActions(body, id){
+      var doneBtn = body.querySelector(".task-done-btn");
+      if(doneBtn){
+        doneBtn.addEventListener("click", function(){
+          flushPendingTaskEdits();
+          checkTaskDone(id);
+          render();
+        });
+      }
+      var moveBtn = body.querySelector(".task-move-btn");
+      if(moveBtn) moveBtn.addEventListener("click", function(){ openRowMovePicker(id); });
       var dot = body.querySelector(".task-flag-dot");
       if(dot){
         dot.addEventListener("click", function(e){
           e.stopPropagation();
           flushPendingTaskEdits();
           cycleTaskFlag(id);
-          renderTaskTabList(tabKey || "projects");
-          renderProjectRowView(id);
+          renderRowView(id);
         });
       }
     }
 
-    // редактирование текста привязанной задачи — та же механика
-    // (contenteditable + дискета), что и renderTaskRowEdit
-    function renderProjectRowEdit(id){
+    // редактирование текста — без отдельной дискеты: текст сохраняется
+    // сам, как только поле теряет фокус (клик по соседней кнопке — они
+    // никуда не пропадают, см. bindRowActions — или уход с экрана).
+    function renderRowEdit(id){
       var body = document.querySelector('.task-body[data-id="' + id + '"]');
       var task = getTaskById(id);
       if(!body || !task) return;
       flushPendingTaskEdits();
-      body.innerHTML = '<div class="task-editable" id="taskEditable_' + id + '" contenteditable="true"></div>';
+      var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
+      body.innerHTML =
+        '<div class="task-editable" id="taskEditable_' + id + '" contenteditable="true" data-task-id="' + id + '"></div>' +
+        '<span class="task-actions">' +
+          '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
+          '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
+          '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
+        '</span>';
       var editable = document.getElementById("taskEditable_" + id);
       if(!editable) return;
       var textNode = document.createTextNode(task.c.text ? task.c.text : EMPTY_ANCHOR_CHAR);
       editable.appendChild(textNode);
-      editable.setAttribute("data-task-id", String(id));
-      var saveBtn = document.createElement("button");
-      saveBtn.type = "button";
-      saveBtn.className = "task-icon-btn";
-      saveBtn.title = "Сохранить";
-      saveBtn.innerHTML = SAVE_ICON_SVG;
-      editable.appendChild(saveBtn);
 
       function updatePlaceholder(){
-        var empty = getEditableNoteText(editable, saveBtn).length === 0;
+        var empty = getEditableNoteText(editable).length === 0;
         editable.classList.toggle("is-empty", empty);
       }
       updatePlaceholder();
@@ -4591,18 +4823,23 @@
         }
       });
 
-      saveBtn.addEventListener("click", function(e){
-        e.stopPropagation();
-        var newText = getEditableNoteText(editable, saveBtn);
-        setTaskText(id, newText.trim());
-        renderProjectRowView(id);
+      editable.addEventListener("blur", function(){
+        setTimeout(function(){
+          if(!editable.isContentEditable || !document.body.contains(editable)) return;
+          var newText = getEditableNoteText(editable);
+          setTaskText(id, newText.trim());
+          renderRowView(id);
+        }, 0);
       });
+
+      bindRowActions(body, id);
     }
 
     // "Перенести" для привязанной задачи — та же сетка вкладок, что и
-    // openTaskMovePicker, но после выбора возвращает не к вкладке
-    // настроек, а обратно в это же окно "Все задачи проекта"
-    function openProjectRowMovePicker(id){
+    // openTaskMovePicker (маленькая всплывающая модалка, как и везде в
+    // приложении), но после выбора возвращает не к вкладке настроек, а
+    // обратно к этому же экрану "Все задачи проекта"
+    function openRowMovePicker(id){
       var task = getTaskById(id);
       if(!task) return;
       var buttons = TASK_MOVE_TARGET_TABS.map(function(key){
@@ -4610,54 +4847,21 @@
         return '<button type="button" data-tab="' + key + '"' + (isCurrent ? ' class="current"' : '') + '>' +
           TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key]) + '</span></button>';
       }).join("");
-      modalBox.className = "modal-box";
-      modalBox.removeAttribute("style");
       modalBox.innerHTML =
         modalHeader("Перенести задачу") +
         '<div class="task-picker-grid">' + buttons + '</div>';
       bindClose();
+      modalOverlay.classList.add("open");
       Array.prototype.forEach.call(modalBox.querySelectorAll("[data-tab]"), function(btn){
         btn.addEventListener("click", function(){
           moveTaskToTab(id, btn.getAttribute("data-tab"));
-          renderTaskTabList(tabKey || "projects");
-          renderProjectModal();
+          closeModal();
+          render();
         });
       });
     }
 
-    // Размер и положение окна — ровно такие же, как у окна настроек с
-    // вкладками (.settings-modal-box) в данный момент: копируем его
-    // текущий прямоугольник через getBoundingClientRect и жёстко
-    // фиксируем те же значения inline-стилем (см. .task-project-modal-box
-    // в modals.css — там своя, "полноэкранная" раскладка вместо обычной
-    // центровки .modal-box). Открывается это окно только изнутри уже
-    // открытого окна настроек (клик по пиктограмме на вкладке Projects),
-    // поэтому settingsModalBox на этот момент всегда уже отрисован и
-    // измерим.
-    function positionProjectModal(){
-      if(!settingsModalBox || !modalBox.classList.contains("task-project-modal-box")) return;
-      var rect = settingsModalBox.getBoundingClientRect();
-      modalBox.style.top = rect.top + "px";
-      modalBox.style.left = rect.left + "px";
-      modalBox.style.width = rect.width + "px";
-      modalBox.style.height = rect.height + "px";
-    }
-    function onResize(){ positionProjectModal(); }
-    window.addEventListener("resize", onResize);
-    var origCloseModal = closeModal;
-    // подчищаем слушатель ресайза и сброс размера/позиции окна при
-    // закрытии (в т.ч. кликом по фону) — иначе слушатель продолжал бы
-    // висеть, а следующая обычная модалка унаследовала бы фиксированный
-    // размер/положение этого окна
-    closeModal = function(){
-      window.removeEventListener("resize", onResize);
-      closeModal = origCloseModal;
-      modalBox.className = "modal-box";
-      modalBox.removeAttribute("style");
-      origCloseModal();
-    };
-
-    renderProjectModal();
+    render();
   }
 
   // ---------- вкладка "архив": последние TASK_ARCHIVE_MAX_SHOWN отмеченных

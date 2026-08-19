@@ -7,7 +7,7 @@
 <link rel="icon" type="image/png" href="icon-192x192.png">
 <link rel="apple-touch-icon" href="icon-192x192.png">
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#5c3d24">
+<meta name="theme-color" content="#8f7fb8">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Библия">
@@ -142,7 +142,7 @@
            перекрашивается вместе с фоном вкладки при .active. -->
       <button class="settings-tab task-tab" id="settingsTabRedBtn" data-task="red" title="red" style="display:none;">
         <svg viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="7" fill="#e0392b" stroke="#a52a1e" stroke-width="1.5"></circle>
+          <circle cx="12" cy="12" r="7" fill="#e0392b" stroke="#a52a1e" stroke-width="0.75"></circle>
         </svg>
       </button>
       <button class="settings-tab task-tab" id="settingsTabInboxBtn" data-task="inbox" title="inbox" style="display:none;">
@@ -184,16 +184,33 @@
           <path d="M5 21c0-4 3-7 7-7s7 3 7 7"></path>
         </svg>
       </button>
+      <!-- Раскрытая книга: раньше корешок и створки были заметно вытянуты
+           по высоте (13.6 в высоту при развороте всего 12 в ширину, да
+           ещё и слабый изгиб делал страницы визуально узкими "лепестками",
+           а не разворотом книги). Здесь тот же принцип построения (одна
+           кривая на каждую половину + прямой корешок), но пропорции
+           перебалансированы: разворот шире (14 вместо 12), а высота
+           меньше (11.3 вместо 15.4) — книга выглядит раскрытой, а не
+           вытянутой в столбик. Толщина линии и итоговый размер
+           пиктограммы не завязаны на конкретные цифры пути — берутся
+           из общих правил #settingsTabs .task-tab svg (modals.css),
+           как и у остальных вкладок бокового стека. -->
       <button class="settings-tab task-tab" id="settingsTabReadBtn" data-task="read" title="read" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 6c-1.5-1.2-3.5-1.8-6-1.8v13.6c2.5 0 4.5.6 6 1.8"></path>
-          <path d="M12 6c1.5-1.2 3.5-1.8 6-1.8v13.6c-2.5 0-4.5.6-6 1.8"></path>
-          <path d="M12 6v13.6"></path>
+          <path d="M12 7c-1.8-1-4.5-1.3-7-1.3v10c2.5 0 4.7.3 7 1.3"></path>
+          <path d="M12 7c1.8-1 4.5-1.3 7-1.3v10c-2.5 0-4.7.3-7 1.3"></path>
+          <path d="M12 7v10"></path>
         </svg>
       </button>
+      <!-- Пиктограмма — та же стрелочка, что и у Next (см. #settingsTabNextBtn
+           выше), просто повёрнута на 90° против часовой стрелки (rotate(-90)
+           вокруг центра 12,12), чтобы указывать вверх, а не вправо. -->
       <button class="settings-tab task-tab" id="settingsTabSomedayBtn" data-task="someday" title="someday" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 4l1.8 4.6 4.9.4-3.7 3.3 1.1 4.8L12 14.8 7.9 17.1l1.1-4.8-3.7-3.3 4.9-.4z"></path>
+          <g transform="rotate(-90 12 12)">
+            <path d="M5 12h13"></path>
+            <path d="M13 6l6 6-6 6"></path>
+          </g>
         </svg>
       </button>
       <button class="settings-tab task-tab" id="settingsTabArchiveBtn" data-task="archive" title="archive" style="display:none;">
@@ -226,9 +243,13 @@
          никакого отдельного правила для этого не нужно. Сразу за ней —
          вкладка "Карта дней
          года" (settingsTabYearBtn, переехала сюда из вертикального стека
-         #settingsTabs, чтобы быть рядом с шестерёнкой), затем 3 вкладки-
-         заглушки (settingsTabExtra1..3, было 4 — одну убрали, освобождая
-         место под вкладку года) — контент под них ещё не определён (см.
+         #settingsTabs, чтобы быть рядом с шестерёнкой), сразу за ней —
+         вкладка диаграммы настроения (settingsTabMoodBtn, заняла место
+         бывшей вкладки-заглушки settingsTabExtra1Btn; раньше диаграмма
+         открывалась кнопкой "Показать диаграмму настроения" на вкладке
+         настроек — эта кнопка убрана, диаграмма доступна только отсюда,
+         см. renderSettingsTabMood в my.js), затем 2 вкладки-заглушки
+         (settingsTabExtra2..3) — контент под них ещё не определён (см.
          renderSettingsTabExtra в my.js). Ширина каждой вкладки в этом
          ряду — переменная --settings-tab-size-h, которую JS считает от
          ширины окна настроек (а не от высоты, как --settings-tab-size у
@@ -261,7 +282,14 @@
           <rect x="20" y="20" width="2" height="2" rx="1" fill="currentColor" opacity="0.5"></rect>
         </svg>
       </button>
-      <button class="settings-tab settings-tab-gear" id="settingsTabExtra1Btn" title=""></button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabMoodBtn" title="Диаграмма настроения">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12,12 L12,1.5 A10.5,10.5 0 0,1 22.5,12 Z" fill="currentColor" opacity="0.7"></path>
+          <path d="M12,12 L22.5,12 A10.5,10.5 0 0,1 12,22.5 Z" fill="currentColor" opacity="0.25"></path>
+          <path d="M12,12 L12,22.5 A10.5,10.5 0 0,1 1.5,12 Z" fill="currentColor" opacity="0.15"></path>
+          <path d="M12,12 L1.5,12 A10.5,10.5 0 0,1 12,1.5 Z" fill="currentColor" opacity="0.5"></path>
+        </svg>
+      </button>
       <button class="settings-tab settings-tab-gear" id="settingsTabExtra2Btn" title=""></button>
       <button class="settings-tab settings-tab-gear" id="settingsTabExtra3Btn" title=""></button>
     </div>

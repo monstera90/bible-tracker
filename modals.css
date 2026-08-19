@@ -231,6 +231,22 @@
     -webkit-tap-highlight-color:transparent;
   }
   .settings-tab svg{ width:32px; height:32px; }
+  /* Пиктограммы вкладок-списков задач в боковом стеке (#settingsTabs) —
+     чуть крупнее общего правила выше, приближенно к тому, какой
+     визуально кажется пиктограмма вкладки настроек (контур шестерёнки
+     почти вплотную заполняет свой viewBox 24×24, а эти значки — с
+     заметными полями, поэтому при одинаковом размере svg выглядят
+     мельче). Линия при этом специально чуть тоньше базового значения
+     1.6 из атрибута каждой svg (переопределяется здесь через CSS,
+     которое имеет приоритет над presentation-атрибутом stroke-width) —
+     иначе из-за увеличенного размера сама линия становится заметно
+     толще линии шестерёнки (та отрисована при 32px), а должна быть
+     такой же тонкой. Red — исключение, у неё не линия, а закрашенный
+     кружок со своим stroke-width на самом <circle>, поэтому это
+     правило на него не действует; правило ниже лишь возвращает ему
+     прежний размер (за счёт более высокой специфичности id-селектора). */
+  #settingsTabs .task-tab svg{ width:38px; height:38px; stroke-width:1.35; }
+  #settingsTabRedBtn svg{ width:32px; height:32px; }
   /* тонкая лиловая линия-срез сверху (плавный переход в страницу, а не
      жёсткая тёмная граница) нужна только у самого верхнего язычка
      ВЕРТИКАЛЬНОГО стека (#settingsTabs) — он же последний в DOM из-за
@@ -664,15 +680,13 @@
     cursor:text;
     min-height:1.5em;
   }
-  .task-editable.is-empty::before{
-    content:"Новая задача…";
-    color:var(--ink-soft);
-    font-style:italic;
-  }
-  /* на вкладке Projects заготовка называется иначе (см. renderTaskRowEdit) */
-  .task-editable.task-editable-project.is-empty::before{
-    content:"Новый проект…";
-  }
+  /* В режиме редактирования текст-заглушка ("Новая задача…"/"Новый
+     проект…") намеренно НЕ показывается — только мигающий курсор в
+     начале строки (пустой узел на базе EMPTY_ANCHOR_CHAR, см.
+     renderTaskRowEdit в my.js). Заглушка видна только в обычном виде
+     строки, пока задача не заполнена и не отредактирована — это
+     отдельный класс .task-text-placeholder (см. buildTaskRowHtml /
+     renderTaskRowView), который этим правилом не затрагивается. */
   .task-empty{
     padding:12px 14px;
     font-size:12.5px;
@@ -710,35 +724,28 @@
   .task-add-fab:hover{ filter:brightness(1.08); }
   .task-add-fab:active{ transform:scale(.95); }
 
-  /* окно "Все задачи проекта" (openTaskNextPicker в my.js) — по
-     требованию должно перекрывать окно настроек с вкладками от края до
-     края: JS копирует текущий прямоугольник .settings-modal-box
-     (position/размер) через getBoundingClientRect и жёстко фиксирует те
-     же значения inline-стилем (см. positionProjectModal), поэтому здесь
-     обычная центровка .modal-box (max-width/max-height, центровка через
-     flex у оверлея) отключается. */
-  .modal-box.task-project-modal-box{
-    position:fixed;
-    margin:0;
-    max-width:none;
-    max-height:none;
-    overflow:hidden;
-    display:flex;
-    flex-direction:column;
-  }
+  /* Экран "Все задачи проекта" (openTaskNextPicker в my.js) — не
+     отдельное окно, а замена содержимого прямо в #settingsTabContent
+     (тот же приём, что и у "Версий", см. renderSettingsTabVersions в
+     my.js), поэтому размер и позиционирование окна настроек, к которому
+     он принадлежит, не трогаем — просто вписываемся в оставшуюся высоту
+     этого контейнера. Сверху всегда строка самого проекта (не
+     прокручивается вместе со списком), ниже — единственная
+     прокручиваемая область: либо привязанные next-задачи, либо (в режиме
+     "attach") список для привязки существующей задачи. */
   .task-project-modal-body{
     flex:1 1 auto;
     min-height:0;
     display:flex;
     flex-direction:column;
+    overflow:hidden; /* прокручивается только область ниже, не весь #settingsTabContent */
   }
-  /* верхняя (привязанные задачи) и нижняя (доступные задачи) области —
-     равные половины окна, каждая со своей независимой прокруткой (как у
-     #settingsTabContent — тот же приём: скрытый индикатор прокрутки).
-     Кнопка "+ Новая задача" между ними — flex:0 0 auto, поэтому всегда
-     стоит ровно на границе двух половин, а не "плавает" с содержимым. */
+  .task-project-project-row{
+    flex:0 0 auto;
+    margin-bottom:4px;
+  }
   .task-project-area{
-    flex:1 1 0;
+    flex:1 1 auto;
     min-height:0;
     overflow-y:auto;
     overscroll-behavior:contain;
@@ -746,10 +753,38 @@
     -ms-overflow-style:none;
   }
   .task-project-area::-webkit-scrollbar{ display:none; width:0; height:0; }
-  .task-project-add-btn{
-    flex:0 0 auto;
-    margin:10px 0;
+
+  /* две круглые кнопки внизу окна — "прикрепить существующую" (звенья) и
+     "новая задача" (+), в том же стиле и на том же месте, что и общая
+     .task-add-fab (см. выше), только их здесь две в ряд: звенья слева от
+     плюса. Активный режим "attach" подсвечивает кнопку звеньев тем же
+     сочетанием цветов, что и активный язычок вкладки (.settings-tab.active). */
+  .task-project-fab{
+    position:absolute;
+    bottom:14px;
+    width:44px;height:44px;
+    border-radius:50%;
+    border:1px solid var(--groove-shadow);
+    background:var(--wood);
+    color:var(--parchment);
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    box-shadow:2px 2px 5px rgba(0,0,0,.3);
+    z-index:5;
   }
+  .task-project-fab:hover{ filter:brightness(1.08); }
+  .task-project-fab:active{ transform:scale(.95); }
+  .task-project-fab-create{
+    right:14px;
+    font-size:24px;
+    font-weight:bold;
+    line-height:1;
+  }
+  .task-project-fab-link{ right:66px; }
+  .task-project-fab-link svg{ width:20px; height:20px; }
+  .task-project-fab-link.active{ filter:brightness(1.15); box-shadow:0 0 0 2px var(--parchment) inset, 2px 2px 5px rgba(0,0,0,.3); }
 
   /* сетка выбора вкладки-назначения (перенос задачи) — переиспользует
      общее модальное окно (modalOverlay/modalBox), тот же приём, что и у
