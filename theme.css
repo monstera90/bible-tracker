@@ -75,15 +75,15 @@
     --warn:#9b7bc4; --warn-dark:#6f4f96;
   }
   html[data-theme="5"]{
-    --parchment:#fbf6e3; --parchment-dark:#f3ecc9;
-    --ink:#4a422a; --ink-soft:#7a6f4c;
-    --wood:#7fa8c9; --wood-dark:#4f7fa3;
-    --gold:#f0e2a3; --gold-light:#f8f0c9;
-    --groove-shadow:#c9b96f;
-    --xp-green:#8FE0A8; --xp-green-dark:#48B978;
-    --bg-top:#fdf8e4; --bg-mid:#f6ecc4; --bg-bottom:#eadfa0;
-    --danger:#c98a3f; --danger-dark:#96652a;
-    --warn:#d98a3f; --warn-dark:#a9662a;
+    --parchment:#f8f5fc; --parchment-dark:#ece1f8;
+    --ink:#2d1b4e; --ink-soft:#5b3d82;
+    --wood:#7a3fc0; --wood-dark:#4e2482;
+    --gold:#c9a8f0; --gold-light:#e6d6fa;
+    --groove-shadow:#a97fe0;
+    --xp-green:#8FE3C7; --xp-green-dark:#4FBE9B;
+    --bg-top:#f9f6fd; --bg-mid:#ece0f7; --bg-bottom:#d9c2f2;
+    --danger:#9b3fd1; --danger-dark:#6b2494;
+    --warn:#b06fe0; --warn-dark:#8347b8;
   }
   html[data-theme="6"]{
     --parchment:#f6ecec; --parchment-dark:#ecd9d9;
@@ -113,6 +113,6 @@
      темы 1 и 3 — без изменений (стандартный тёмный цвет из components.css) */
   html[data-theme="2"] .warn-text{ color: var(--xp-green-dark); }
   html[data-theme="4"] .warn-text{ color: #9C80FE; }
-  html[data-theme="5"] .warn-text{ color: #29B6F6; }
+  html[data-theme="5"] .warn-text{ color: #9C80FE; }
   html[data-theme="6"] .warn-text{ color: #29B6F6; }
   html[data-theme="7"] .warn-text{ color: var(--xp-green-dark); }
