@@ -47,6 +47,7 @@
   var UPDATE_SNOOZE_KEY = "bibleUpdateSnoozeUntil_v1";
   var UPDATES_DISABLED_KEY = "bibleUpdatesDisabled_v1";
   var GOALS_EXPANDED_KEY = "bibleGoalsBandExpanded_v1";
+  var FAB_VISIBLE_KEY = "bibleSettingsFabVisible_v1";
   var SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000;
 
 
@@ -423,6 +424,36 @@
     };
     var pair = swatches[themeId] || swatches[1];
     return "linear-gradient(135deg, " + pair[0] + " 50%, " + pair[1] + " 50%)";
+  }
+
+  // ---------- переключатель видимости плавающей кнопки настроек ----------
+  // Управляет только показом/скрытием самого язычка (.settings-fab,
+  // id=settingsGearBtn) через display — состояние того, что выбрано
+  // ВНУТРИ окна настроек (активная вкладка, задачи и т.п.), хранится
+  // отдельно в своих собственных ключах localStorage и этим переключателем
+  // никак не затрагивается. По умолчанию (ключ ещё не сохранён) кнопка
+  // скрыта.
+  function isSettingsFabVisible(){
+    try{ return localStorage.getItem(FAB_VISIBLE_KEY) === "1"; }catch(e){ return false; }
+  }
+
+  function applySettingsFabVisibility(){
+    var visible = isSettingsFabVisible();
+    var fab = document.getElementById("settingsGearBtn");
+    if(fab) fab.style.display = visible ? "" : "none";
+    var toggleBtn = document.getElementById("fabToggleBtn");
+    if(toggleBtn) toggleBtn.textContent = visible ? "Убрать плавающую кнопку" : "Включить плавающую кнопку";
+  }
+
+  function initSettingsFabToggle(){
+    var toggleBtn = document.getElementById("fabToggleBtn");
+    if(!toggleBtn) return;
+    toggleBtn.addEventListener("click", function(){
+      var visible = isSettingsFabVisible();
+      try{ localStorage.setItem(FAB_VISIBLE_KEY, visible ? "0" : "1"); }catch(e){}
+      applySettingsFabVisibility();
+    });
+    applySettingsFabVisibility();
   }
 
   // ===================== ПРОПУЩЕННЫЕ ДНИ =====================
@@ -5020,6 +5051,7 @@
   updateOverallProgress();
   applyThemeToPage(getCurrentThemeId());
   renderThemeDots();
+  initSettingsFabToggle();
   updateMissedBanner();
   renderVersionHistory();
   renderHourBars();
