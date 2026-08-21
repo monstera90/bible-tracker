@@ -174,6 +174,12 @@
     -ms-overflow-style:none;
   }
   #settingsTabContent::-webkit-scrollbar{ display:none; width:0; height:0; }
+  /* контент некоторых экранов (импорт задач, подтверждения сброса,
+     версии) прижат к нижнему краю области настроек — так до кнопок
+     проще дотянуться большим пальцем; работает за счёт того, что
+     #settingsTabContent — flex-column, а margin-top:auto у обёртки
+     выталкивает её вниз, если места больше, чем нужно контенту */
+  .settings-content-bottom{ margin-top:auto; }
   /* язычки прижаты к низу окна: settingsTabYearBtn идёт первым в DOM и
      благодаря column-reverse оказывается самым нижним, за ним — 8 язычков
      задач (red/inbox/next/projects/waiting/read/someday/archive, скрыты,

@@ -1757,15 +1757,14 @@
     if(!container) return;
     selectedVersionUrl = null;
     container.innerHTML =
-      '<button class="modal-btn" id="mVersionBackBtn" style="margin-bottom:14px;">&larr; Назад к настройкам</button>' +
+      '<div class="settings-content-bottom">' +
       '<div class="year-grid-tab-title" style="margin-bottom:12px;">Версии</div>' +
       '<div id="versionUpdateRow"></div>' +
       '<div id="versionHistoryItems"></div>' +
-      '<button class="modal-btn primary" id="mVersionReturnBtn" style="display:none;margin-top:12px;">Вернуться на выбранную версию</button>';
+      '<button class="modal-btn primary" id="mVersionReturnBtn" style="display:none;margin-top:12px;">Вернуться на выбранную версию</button>' +
+      '</div>';
     renderManualUpdateOption();
     renderVersionHistory();
-    var backBtn = document.getElementById("mVersionBackBtn");
-    if(backBtn) backBtn.addEventListener("click", function(){ switchSettingsTab("gear"); });
     var returnBtn = document.getElementById("mVersionReturnBtn");
     if(returnBtn){
       returnBtn.addEventListener("click", function(){
@@ -2105,6 +2104,9 @@
     if(tab === "mood") renderSettingsTabMood();
     else if(tab === "year") renderSettingsTabYear();
     else if(tab === "versions") renderSettingsTabVersions();
+    else if(tab === "import") renderSettingsTabImportPicker();
+    else if(tab === "resetConfirm") renderSettingsTabResetConfirm();
+    else if(tab === "moodResetConfirm") renderSettingsTabMoodResetConfirm();
     else if(TASK_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabTask(tab);
     else if(EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabExtra();
     else renderSettingsTabGear();
@@ -2217,8 +2219,7 @@
     var importTasksBtn = document.getElementById("settingsImportTasksBtn");
     if(importTasksBtn){
       importTasksBtn.addEventListener("click", function(){
-        closeSettingsModal();
-        openTaskImportTabPicker();
+        switchSettingsTab("import");
       });
     }
 
@@ -2227,9 +2228,103 @@
     });
 
     document.getElementById("settingsResetBtn").addEventListener("click", function(){
-      if(!confirm("Точно сбросить весь прогресс чтения и начать сначала?")) return;
+      switchSettingsTab("resetConfirm");
+    });
+  }
+
+  // ===== Восстановление задач из .txt (внутри настроек, вкладка "import") =====
+  // Шаг 1: та же сетка вкладок, что и у "Перенести задачу" — здесь
+  // пользователь выбирает, в какую вкладку будут добавлены задачи из файла.
+  function renderSettingsTabImportPicker(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var buttons = TASK_MOVE_TARGET_TABS.map(function(key){
+      return '<button type="button" data-tab="' + key + '">' +
+        TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key]) + '</span></button>';
+    }).join("");
+    container.innerHTML =
+      '<div class="settings-content-bottom">' +
+      '<p>Выбери на какую вкладку будут импортированы задачи</p>' +
+      '<div class="task-picker-grid">' + buttons + '</div>' +
+      '</div>';
+    Array.prototype.forEach.call(container.querySelectorAll("[data-tab]"), function(btn){
+      btn.addEventListener("click", function(){
+        var tabKey = btn.getAttribute("data-tab");
+        renderSettingsTabImportFile(tabKey);
+      });
+    });
+  }
+  // Шаг 2: выбор .txt-файла (через системный файловый менеджер) и импорт —
+  // отдельные задачи в файле разделены пустой строкой
+  function renderSettingsTabImportFile(tabKey){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var selectedFile = null;
+    container.innerHTML =
+      '<div class="settings-content-bottom">' +
+      '<p>Выберите файл в формате .txt</p>' +
+      '<p style="opacity:.7;font-size:.9em;margin-top:-8px;">Обратите внимание: задачи должны быть разделены пустой строкой.</p>' +
+      '<div class="task-import-file-row">' +
+        '<button type="button" class="task-import-attach-btn" id="taskImportAttachBtn" title="Прикрепить файл">' + PAPERCLIP_ICON_SVG + '</button>' +
+        '<span id="taskImportFileName" class="task-import-file-name">Файл не выбран</span>' +
+      '</div>' +
+      '<input type="file" accept=".txt,text/plain" id="taskImportFileInput" style="display:none;">' +
+      '<button class="modal-btn primary" id="taskImportSubmitBtn" style="margin-top:14px;" disabled>Импортировать</button>' +
+      '</div>';
+
+    var fileInput = document.getElementById("taskImportFileInput");
+    var fileNameEl = document.getElementById("taskImportFileName");
+    var submitBtn = document.getElementById("taskImportSubmitBtn");
+
+    document.getElementById("taskImportAttachBtn").addEventListener("click", function(){
+      fileInput.click();
+    });
+    fileInput.addEventListener("change", function(){
+      selectedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+      fileNameEl.textContent = selectedFile ? selectedFile.name : "Файл не выбран";
+      submitBtn.disabled = !selectedFile;
+    });
+    submitBtn.addEventListener("click", function(){
+      if(!selectedFile) return;
+      submitBtn.disabled = true;
+      var reader = new FileReader();
+      reader.onload = function(){
+        var raw = typeof reader.result === "string" ? reader.result : "";
+        // задачи разделены пустой строкой (одной или несколькими) —
+        // поддерживаем и \n, и \r\n
+        var chunks = raw.split(/\r?\n\s*\r?\n/);
+        var count = 0;
+        chunks.forEach(function(chunk){
+          var text = chunk.trim();
+          if(!text) return;
+          createTaskWithText(tabKey, text);
+          count++;
+        });
+        switchSettingsTab(count > 0 ? tabKey : "gear");
+      };
+      reader.onerror = function(){
+        submitBtn.disabled = false;
+      };
+      reader.readAsText(selectedFile, "UTF-8");
+    });
+  }
+
+  // ===== Подтверждение сброса прогресса (внутри настроек, вкладка "resetConfirm") =====
+  function renderSettingsTabResetConfirm(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    container.innerHTML =
+      '<div class="settings-content-bottom">' +
+      '<p>Точно сбросить весь прогресс чтения и начать сначала?</p>' +
+      '<button class="modal-btn danger" id="mResetConfirmYesBtn" style="margin-top:14px;">Да, сбросить прогресс</button>' +
+      '<button class="modal-btn" id="mResetConfirmNoBtn" style="margin-top:10px;">Отмена</button>' +
+      '</div>';
+    document.getElementById("mResetConfirmYesBtn").addEventListener("click", function(){
       performFullReset();
       closeSettingsModal();
+    });
+    document.getElementById("mResetConfirmNoBtn").addEventListener("click", function(){
+      switchSettingsTab("gear");
     });
   }
 
@@ -2260,8 +2355,27 @@
       '<div class="mood-diagram-reset-row"><button class="mood-diagram-reset-btn" id="mMoodResetBtn2">Сбросить данные настроения</button></div>';
     buildMoodDiagramSVG(counts, total);
     document.getElementById("mMoodResetBtn2").addEventListener("click", function(){
-      closeSettingsModal();
-      openMoodResetConfirm();
+      switchSettingsTab("moodResetConfirm");
+    });
+  }
+
+  // ===== Подтверждение сброса данных настроения (внутри настроек) =====
+  function renderSettingsTabMoodResetConfirm(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    container.innerHTML =
+      '<div class="settings-content-bottom">' +
+      '<p>Вы точно хотите сбросить данные настроения?</p>' +
+      '<p style="opacity:.7;font-size:.9em;margin-top:-8px;">Вы можете выбрать «Нет» и сделать скриншот, чтобы сохранить прогресс.</p>' +
+      '<button class="modal-btn danger" id="mMoodResetConfirmYesBtn" style="margin-top:14px;">Да</button>' +
+      '<button class="modal-btn" id="mMoodResetConfirmNoBtn" style="margin-top:10px;">Нет</button>' +
+      '</div>';
+    document.getElementById("mMoodResetConfirmYesBtn").addEventListener("click", function(){
+      resetMoodData();
+      openMoodEmojiPicker(true);
+    });
+    document.getElementById("mMoodResetConfirmNoBtn").addEventListener("click", function(){
+      switchSettingsTab("mood");
     });
   }
 
@@ -4296,7 +4410,7 @@
     return id;
   }
   // как createTask, но сразу с готовым текстом — для массового
-  // восстановления задач из .txt (см. openTaskImportFileModal)
+  // восстановления задач из .txt (см. renderSettingsTabImportFile)
   function createTaskWithText(tab, text){
     var id = genTaskId();
     var homeTab = (tab === "red") ? "inbox" : tab;
@@ -4613,84 +4727,6 @@
         // задачи — см. пояснение у getTasksForTab)
         renderTaskTabList(tabKey || task.c.tab);
       });
-    });
-  }
-
-  // ===== Восстановление задач из .txt =====
-  // Шаг 1: та же сетка вкладок, что и у "Перенести задачу" — здесь
-  // пользователь выбирает, в какую вкладку будут добавлены задачи из файла.
-  function openTaskImportTabPicker(){
-    var buttons = TASK_MOVE_TARGET_TABS.map(function(key){
-      return '<button type="button" data-tab="' + key + '">' +
-        TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key]) + '</span></button>';
-    }).join("");
-    modalBox.innerHTML =
-      modalHeader("Восстановить задачи из .txt") +
-      '<div class="task-picker-grid">' + buttons + '</div>';
-    bindClose();
-    modalOverlay.classList.add("open");
-    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-tab]"), function(btn){
-      btn.addEventListener("click", function(){
-        var tabKey = btn.getAttribute("data-tab");
-        openTaskImportFileModal(tabKey);
-      });
-    });
-  }
-  // Шаг 2: выбор .txt-файла (через системный файловый менеджер) и импорт —
-  // отдельные задачи в файле разделены пустой строкой
-  function openTaskImportFileModal(tabKey){
-    var selectedFile = null;
-    modalBox.innerHTML =
-      modalHeader("Восстановить задачи из .txt") +
-      '<p>Выберите файл в формате .txt</p>' +
-      '<p style="opacity:.7;font-size:.9em;margin-top:-8px;">Обратите внимание: задачи должны быть разделены пустой строкой.</p>' +
-      '<div class="task-import-file-row">' +
-        '<button type="button" class="task-import-attach-btn" id="taskImportAttachBtn" title="Прикрепить файл">' + PAPERCLIP_ICON_SVG + '</button>' +
-        '<span id="taskImportFileName" class="task-import-file-name">Файл не выбран</span>' +
-      '</div>' +
-      '<input type="file" accept=".txt,text/plain" id="taskImportFileInput" style="display:none;">' +
-      '<button class="modal-btn primary" id="taskImportSubmitBtn" style="margin-top:14px;" disabled>Импортировать</button>';
-    bindClose();
-    modalOverlay.classList.add("open");
-
-    var fileInput = document.getElementById("taskImportFileInput");
-    var fileNameEl = document.getElementById("taskImportFileName");
-    var submitBtn = document.getElementById("taskImportSubmitBtn");
-
-    document.getElementById("taskImportAttachBtn").addEventListener("click", function(){
-      fileInput.click();
-    });
-    fileInput.addEventListener("change", function(){
-      selectedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
-      fileNameEl.textContent = selectedFile ? selectedFile.name : "Файл не выбран";
-      submitBtn.disabled = !selectedFile;
-    });
-    submitBtn.addEventListener("click", function(){
-      if(!selectedFile) return;
-      submitBtn.disabled = true;
-      var reader = new FileReader();
-      reader.onload = function(){
-        var raw = typeof reader.result === "string" ? reader.result : "";
-        // задачи разделены пустой строкой (одной или несколькими) —
-        // поддерживаем и \n, и \r\n
-        var chunks = raw.split(/\r?\n\s*\r?\n/);
-        var count = 0;
-        chunks.forEach(function(chunk){
-          var text = chunk.trim();
-          if(!text) return;
-          createTaskWithText(tabKey, text);
-          count++;
-        });
-        closeModal();
-        if(count > 0){
-          openSettingsModal();
-          switchSettingsTab(tabKey);
-        }
-      };
-      reader.onerror = function(){
-        submitBtn.disabled = false;
-      };
-      reader.readAsText(selectedFile, "UTF-8");
     });
   }
 

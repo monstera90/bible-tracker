@@ -109,10 +109,6 @@
     --danger:#c17b5a; --danger-dark:#8f5540;
   }
 
-  /* ---------- цвет надписи о пропущенном чтении (.warn-text), по темам ----------
-     темы 1 и 3 — без изменений (стандартный тёмный цвет из components.css) */
-  html[data-theme="2"] .warn-text{ color: var(--xp-green-dark); }
-  html[data-theme="4"] .warn-text{ color: #9C80FE; }
-  html[data-theme="5"] .warn-text{ color: #9C80FE; }
-  html[data-theme="6"] .warn-text{ color: #29B6F6; }
-  html[data-theme="7"] .warn-text{ color: var(--xp-green-dark); }
+  /* цвет надписи о пропущенном чтении (.warn-text) — теперь единый для
+     всех тем, как и у остальных прогресс-баров (см. .xp-text в
+     components.css), без переопределений по темам */
