@@ -181,14 +181,19 @@
     overflow:hidden;
   }
 
+  /* Оптимизация: у всех *-fill баров ниже (.xp-fill, .hour-bar-*-fill,
+     .goal-fill, .book-fill) раньше были ещё и inset box-shadow поверх
+     background-image градиента — они давали почти тот же визуальный эффект
+     (блик сверху/затемнение снизу), что и сам градиент, то есть дублировали
+     друг друга. Так как эти бары анимируются через transition:width, на
+     каждом кадре анимации браузеру приходится заново отрисовывать все слои
+     заливки — уборка дублирующего слоя тени снижает стоимость перерисовки
+     каждого кадра без заметной разницы в картинке. */
   .xp-fill{
     height:100%;
     width:0%;
     background-color:var(--xp-green);
     background-image:linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,50,20,0) 60%, rgba(0,50,20,.25) 100%);
-    box-shadow:
-      inset 0 2px 3px rgba(255,255,255,.55),
-      inset 0 -3px 5px rgba(0,60,0,.35);
     border-right:2px solid var(--xp-green-dark);
     transition:width .35s ease;
   }
@@ -243,7 +248,6 @@
     z-index:1;
     background-color:#29B6F6;
     background-image:linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(0,30,60,.2) 100%);
-    box-shadow:inset 0 2px 3px rgba(255,255,255,.55), inset 0 -3px 5px rgba(0,30,60,.3);
     transition:width .3s ease;
   }
   .hour-bar-dark-fill{
@@ -253,7 +257,6 @@
     z-index:2;
     background-color:#0277BD;
     background-image:linear-gradient(180deg, rgba(255,255,255,.35) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(0,20,40,.25) 100%);
-    box-shadow:inset 0 2px 3px rgba(255,255,255,.4), inset 0 -3px 5px rgba(0,20,40,.35);
     transition:width .3s ease;
   }
   .hour-bar-zone-text{
@@ -593,7 +596,7 @@
     transition:max-height .3s ease;
   }
   .goals-band.reduced-mode{ display:block; }
-  .goals-band.open{ max-height:4000px; }
+  .goals-band.open{ max-height:var(--gb-h, 2000px); }
 
   .goals-list{
     display:flex;
@@ -634,6 +637,12 @@
     overflow:hidden;
     cursor:pointer;
   }
+  /* У .goal-fill (в отличие от .xp-fill/.book-fill/.hour-bar-*-fill)
+     градиент-подложка одна не давала того же объёма — заливка выглядела
+     плоской и "недоотрисованной" на глаз, особенно рядом с другими
+     барами, у которых тень осталась. Целей у пользователя обычно немного
+     (в отличие от 66 книг), поэтому цена этой тени по производительности
+     здесь пренебрежимо мала — возвращаю её только тут, ради вида. */
   .goal-fill{
     position:absolute;
     top:0;left:0;bottom:0;
@@ -803,9 +812,6 @@
     width:0%;
     background-color:var(--xp-green);
     background-image:linear-gradient(180deg, rgba(255,255,255,.45) 0%, rgba(255,255,255,0) 40%, rgba(0,50,20,0) 60%, rgba(0,50,20,.25) 100%);
-    box-shadow:
-      inset 0 2px 3px rgba(255,255,255,.55),
-      inset 0 -3px 5px rgba(0,60,0,.35);
     border-right:2px solid var(--xp-green-dark);
     transition:width .3s ease;
     z-index:1;

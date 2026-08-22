@@ -57,11 +57,15 @@
     -webkit-appearance:none;
     appearance:none;
     -webkit-tap-highlight-color:transparent;
-    transition:filter .15s ease, transform .15s ease, opacity .15s ease, background .15s ease;
+    transition:transform .15s ease, opacity .15s ease, background .15s ease;
   }
   @media (hover:hover) and (pointer:fine){
     .settings-fab:hover{
-      filter:brightness(1.08);
+      /* Раньше здесь было filter:brightness(1.08) — filter создаёт
+         отдельный слой рендеринга и дороже в отрисовке, чем opacity,
+         который обрабатывается композитором. Даёт похожий визуальный
+         эффект "стало чуть заметнее", но дешевле для слабых устройств. */
+      opacity:.8;
     }
   }
   .settings-fab.is-open{

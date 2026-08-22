@@ -15,7 +15,7 @@
     font-family: "Palatino Linotype","Georgia", "Times New Roman", serif;
     color:var(--ink);
     min-height:100vh;
-    transition:background .4s ease, color .3s ease;
+    transition:color .3s ease;
   }
 
   header{

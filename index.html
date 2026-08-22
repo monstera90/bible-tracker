@@ -2,6 +2,14 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
+<script>
+window.addEventListener("error", function(e){
+  var box = document.createElement("div");
+  box.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#c0392b;color:#fff;padding:12px;font:12px monospace;white-space:pre-wrap;max-height:60vh;overflow:auto;";
+  box.textContent = "JS ERROR: " + e.message + "\n" + (e.filename||"") + ":" + e.lineno + ":" + e.colno + "\n" + (e.error && e.error.stack ? e.error.stack : "");
+  document.body ? document.body.appendChild(box) : window.addEventListener("DOMContentLoaded", function(){ document.body.appendChild(box); });
+});
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>График чтения Библии</title>
 <link rel="icon" type="image/png" href="icon-192x192.png">
@@ -308,6 +316,7 @@
 <script src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 
+<script src="mood.js"></script>
 <script src="my.js"></script>
 
 </body>
