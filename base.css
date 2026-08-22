@@ -51,4 +51,11 @@
   header .quote.visible{
     opacity:.9;
   }
+  header .quote a{
+    color:inherit;
+    text-decoration:none;
+  }
+  header .quote a:active{
+    opacity:.7;
+  }
 

@@ -543,11 +543,11 @@
      любой вкладке. Цвет акцента темы, подчёркивание, чуть темнее при
      наведении/нажатии, как и у остальных акцентных элементов сайта. */
   .auto-link{
-    color:var(--wood);
-    text-decoration:underline;
+    color:#7a3fc0;
+    text-decoration:none;
     word-break:break-word;
   }
-  .auto-link:hover, .auto-link:active{ color:var(--wood-dark); }
+  .auto-link:hover, .auto-link:active{ color:#4e2482; }
   .year-day-note-icon-btn{
     display:inline-flex;
     align-items:center;

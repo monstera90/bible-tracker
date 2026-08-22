@@ -37,6 +37,124 @@
   var TOTAL_CHAPTERS = 0;
   sections.forEach(function(s){ s.books.forEach(function(b){ TOTAL_CHAPTERS += b[1]; }); });
 
+  // ===================== ССЫЛКА НА ГЛАВУ (JW Finder) =====================
+  // Порядок книг в sections совпадает с канонической нумерацией 1-66
+  // (Бытие=1 ... Откровение=66), поэтому номер книги — это просто её
+  // порядковый номер в общем списке. Диапазон стихов 000-999 означает
+  // "вся глава целиком" независимо от реального числа стихов в ней.
+  function chapterLink(bookNumber, chapterNum){
+    var bb = String(bookNumber).padStart(2, "0");
+    var ccc = String(chapterNum).padStart(3, "0");
+    return "https://www.jw.org/finder?srcid=jwlshare&wtlocale=U&prefer=lang" +
+           "&bible=" + bb + ccc + "000-" + bb + ccc + "999&pub=nwtsty";
+  }
+
+  // Карта "название книги -> номер 1..66", по тому же принципу — строится
+  // один раз из sections и используется везде, где нужна ссылка на стих.
+  var BOOK_NUMBERS = {};
+  (function(){
+    var n = 0;
+    sections.forEach(function(s){ s.books.forEach(function(b){ n++; BOOK_NUMBERS[b[0]] = n; }); });
+  })();
+
+  // Ссылка на конкретный стих (или диапазон стихов) внутри главы.
+  function verseLink(bookName, chapterNum, v1, v2){
+    var bookNumber = BOOK_NUMBERS[bookName];
+    if(!bookNumber) return null;
+    var bb = String(bookNumber).padStart(2, "0");
+    var ccc = String(chapterNum).padStart(3, "0");
+    var vv1 = String(v1).padStart(3, "0");
+    var vv2 = String(v2 || v1).padStart(3, "0");
+    return "https://www.jw.org/finder?srcid=jwlshare&wtlocale=U&prefer=lang" +
+           "&bible=" + bb + ccc + vv1 + "-" + bb + ccc + vv2 + "&pub=nwtsty";
+  }
+
+  // Распознавание библейских ссылок в свободном тексте (заметки, задачи).
+  // Ключ — то, как ссылка написана в тексте; значение — каноническое
+  // название книги из sections. Для каждого "стема" ниже автоматически
+  // генерируются варианты с точкой и без неё (важно для распознавания
+  // сокращений в любом написании).
+  var BOOK_ALIASES = {};
+  function addAlias(alias, canonical){ if(!BOOK_ALIASES[alias]) BOOK_ALIASES[alias] = canonical; }
+  function addStemVariants(stem, canonical){
+    addAlias(stem, canonical);
+    addAlias(stem + ".", canonical);
+  }
+  Object.keys(BOOK_NUMBERS).forEach(function(name){ BOOK_ALIASES[name] = name; });
+
+  // Сокращения для книг без номера (Быт., Исх., Пс. и т.п.)
+  var SIMPLE_STEMS = {
+    "Бытие":["Быт"], "Исход":["Исх"], "Левит":["Лев","Лв"], "Числа":["Чис","Чс"],
+    "Второзаконие":["Втор","Вт"], "Судей":["Суд","Сд"], "Руфь":["Рф"],
+    "Ездра":["Езд"], "Неемия":["Неем","Не"], "Эсфирь":["Эсф"],
+    "Псалмы":["Пс","Псалом"], "Притчи":["Пр"], "Экклезиаст":["Эк"], "Песня Соломона":["Псн"],
+    "Исаия":["Ис"], "Иеремия":["Иер"], "Плач Иеремии":["Пл"], "Иезекииль":["Иез"],
+    "Даниил":["Дан"], "Осия":["Ос"], "Иоиль":["Ил"], "Амос":["Ам"], "Авдий":["Авд"],
+    "Иона":["Ион"], "Михей":["Мх","Мих"], "Наум":["На"], "Аввакум":["Авв"],
+    "Софония":["Соф","Сф"], "Аггей":["Аг"], "Захария":["Зах"], "Малахия":["Мал","Мл"],
+    "Матфея":["Мф","Матф"], "Марка":["Мк"], "Луки":["Лук","Лк"], "Иоанна":["Иоан","Ин"],
+    "Деяния":["Дн","Деян"], "Римлянам":["Рм","Рим"], "Галатам":["Гал","Гл"], "Эфесянам":["Эф"],
+    "Филиппийцам":["Филип","Фп"], "Колоссянам":["Кол","Кл"], "Титу":["Тит"],
+    "Филимону":["Фм","Филим"], "Евреям":["Евр"], "Иакова":["Иак"], "Откровение":["Отк"]
+  };
+  Object.keys(SIMPLE_STEMS).forEach(function(canonical){
+    SIMPLE_STEMS[canonical].forEach(function(stem){ addStemVariants(stem, canonical); });
+  });
+
+  // Сокращения для книг с номером (1/2 Самуила, 1/2/3 Иоанна и т.п.) —
+  // стем общий для обеих (или всех трёх) частей, номер подставляется
+  // автоматически, слитно и раздельно.
+  var NUMBERED_STEMS = {
+    "Самуила":["Сам","См"], "Царей":["Цр","Цар"], "Летопись":["Лет","Лт"],
+    "Коринфянам":["Кор","Кр"], "Фессалоникийцам":["Фес"], "Тимофею":["Тим","Тм"],
+    "Петра":["Пет","Пт"], "Иоанна":["Ин","Иоан"]
+  };
+  Object.keys(BOOK_NUMBERS).forEach(function(canonical){
+    var m = canonical.match(/^([123]) (.+)$/);
+    if(!m) return;
+    var digit = m[1], base = m[2];
+    var stems = NUMBERED_STEMS[base];
+    if(!stems) return;
+    stems.forEach(function(stem){
+      addStemVariants(digit + " " + stem, canonical);
+      addStemVariants(digit + stem, canonical);
+    });
+  });
+
+  // Двусловные сокращения (Иис. Нав., Пл. Иер.) — вариант с точками и
+  // "слитный" вариант без них.
+  var MULTI_WORD_ALIASES = {
+    "Иисус Навин":["Иис. Нав."],
+    "Плач Иеремии":["Пл. Иер."]
+  };
+  Object.keys(MULTI_WORD_ALIASES).forEach(function(canonical){
+    MULTI_WORD_ALIASES[canonical].forEach(function(alias){
+      addAlias(alias, canonical);
+      addAlias(alias.replace(/\./g, ""), canonical);
+    });
+  });
+
+  var SCRIPTURE_RE = (function(){
+    var aliases = Object.keys(BOOK_ALIASES).sort(function(a,b){ return b.length - a.length; });
+    var escaped = aliases.map(function(a){ return a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); });
+    return new RegExp(
+      "(?<![а-яА-ЯёЁ])(" + escaped.join("|") + ")(?![а-яА-ЯёЁ])" +
+      "\\s+(\\d{1,3})[:.](\\d{1,3})(?:\\s*[-,]\\s*(\\d{1,3}))?",
+      "g"
+    );
+  })();
+
+  // Оборачивает в ссылку узнанные библейские цитаты внутри УЖЕ
+  // экранированного HTML (см. linkifyHtml ниже).
+  function scripturifyHtml(escapedHtml){
+    return escapedHtml.replace(SCRIPTURE_RE, function(full, alias, ch, v1, v2){
+      var canonical = BOOK_ALIASES[alias];
+      var link = verseLink(canonical, Number(ch), Number(v1), v2 ? Number(v2) : undefined);
+      if(!link) return full;
+      return '<a href="' + link + '" target="_blank" rel="noopener noreferrer" class="auto-link scripture-link">' + full + '</a>';
+    });
+  }
+
   // ===================== ХРАНЕНИЕ (с дебаунсом) =====================
   var STORAGE_KEY = "bibleReadingProgress_v2";
   var OLD_STORAGE_KEY = "bibleReadingProgress_v1";
@@ -54,26 +172,26 @@
   // ===================== ЦИТАТЫ ДНЯ =====================
   var QUOTE_KEY = "__quote";
   var QUOTES = [
-    "«Счастлив тот, кто… находит радость в законе Иеговы и читает его вполголоса день и ночь» (Псалом 1:1, 2).",
-    "«Закон Иеговы совершенен, восстанавливает силы» (Псалом 19:7).",
-    "«Счастливы те, кто стремится утолить свой духовный голод» (Матфея 5:3).",
-    "«Я по-настоящему люблю закон Бога» (Римлянам 7:22).",
-    "«Как я люблю твой закон! Весь день размышляю о нём» (Псалом 119:97).",
-    "«Размышляй об этом, будь этим поглощён, чтобы твои духовные успехи были видны всем» (1 Тим. 4:15).",
-    "«Кто всматривается в совершенный закон, ведущий к свободе, и соблюдает его, тот не забывает услышанное» (Иакова 1:25).",
-    "«Наставления Иеговы достойны доверия, делают неопытных мудрыми» (Псалом 19:7).",
-    "«Повеления Иеговы справедливы, радуют сердце» (Псалом 19:8).",
-    "«Всё написанное прежде было написано для нашего наставления» (Рим. 15:4).",
-    "«Заповедь Иеговы чиста, наделяет проницательностью» (Псалом 19:8).",
-    "«Закон, который ты дал, для меня лучше… золота и серебра» (Псалом 119:72).",
-    "«[Иегова] оживляет мою душу, ведёт путями праведности» (Псалом 23:3).",
-    "«Твои наставления прекрасны, поэтому я следую им» (Псалом 119:129).",
-    "«Всё Писание вдохновлено Богом и полезно» (2 Тим. 3:16).",
-    "«Твоё слово — это истина» (Иоанна 17:17).",
-    "«Людей направлял святой дух, и они передавали весть Бога» (2 Пет. 1:21).",
-    "«Вы хорошо делаете, что относитесь к [пророческому слову] со всем вниманием» (2 Пет. 1:19).",
-    "«[Писание] помогает обучать, обличать, исправлять, наставлять на правильный путь» (2 Тим. 3:16).",
-    "«Твоё слово — светильник для моих ног и свет на моём пути» (Пс. 119:105)."
+    { text:"Счастлив тот, кто… находит радость в законе Иеговы и читает его вполголоса день и ночь", ref:"Псалом 1:1, 2", book:"Псалмы", ch:1, v1:1, v2:2 },
+    { text:"Закон Иеговы совершенен, восстанавливает силы", ref:"Псалом 19:7", book:"Псалмы", ch:19, v1:7 },
+    { text:"Счастливы те, кто стремится утолить свой духовный голод", ref:"Матфея 5:3", book:"Матфея", ch:5, v1:3 },
+    { text:"Я по-настоящему люблю закон Бога", ref:"Римлянам 7:22", book:"Римлянам", ch:7, v1:22 },
+    { text:"Как я люблю твой закон! Весь день размышляю о нём", ref:"Псалом 119:97", book:"Псалмы", ch:119, v1:97 },
+    { text:"Размышляй об этом, будь этим поглощён, чтобы твои духовные успехи были видны всем", ref:"1 Тим. 4:15", book:"1 Тимофею", ch:4, v1:15 },
+    { text:"Кто всматривается в совершенный закон, ведущий к свободе, и соблюдает его, тот не забывает услышанное", ref:"Иакова 1:25", book:"Иакова", ch:1, v1:25 },
+    { text:"Наставления Иеговы достойны доверия, делают неопытных мудрыми", ref:"Псалом 19:7", book:"Псалмы", ch:19, v1:7 },
+    { text:"Повеления Иеговы справедливы, радуют сердце", ref:"Псалом 19:8", book:"Псалмы", ch:19, v1:8 },
+    { text:"Всё написанное прежде было написано для нашего наставления", ref:"Рим. 15:4", book:"Римлянам", ch:15, v1:4 },
+    { text:"Заповедь Иеговы чиста, наделяет проницательностью", ref:"Псалом 19:8", book:"Псалмы", ch:19, v1:8 },
+    { text:"Закон, который ты дал, для меня лучше… золота и серебра", ref:"Псалом 119:72", book:"Псалмы", ch:119, v1:72 },
+    { text:"[Иегова] оживляет мою душу, ведёт путями праведности", ref:"Псалом 23:3", book:"Псалмы", ch:23, v1:3 },
+    { text:"Твои наставления прекрасны, поэтому я следую им", ref:"Псалом 119:129", book:"Псалмы", ch:119, v1:129 },
+    { text:"Всё Писание вдохновлено Богом и полезно", ref:"2 Тим. 3:16", book:"2 Тимофею", ch:3, v1:16 },
+    { text:"Твоё слово — это истина", ref:"Иоанна 17:17", book:"Иоанна", ch:17, v1:17 },
+    { text:"Людей направлял святой дух, и они передавали весть Бога", ref:"2 Пет. 1:21", book:"2 Петра", ch:1, v1:21 },
+    { text:"Вы хорошо делаете, что относитесь к [пророческому слову] со всем вниманием", ref:"2 Пет. 1:19", book:"2 Петра", ch:1, v1:19 },
+    { text:"[Писание] помогает обучать, обличать, исправлять, наставлять на правильный путь", ref:"2 Тим. 3:16", book:"2 Тимофею", ch:3, v1:16 },
+    { text:"Твоё слово — светильник для моих ног и свет на моём пути", ref:"Пс. 119:105", book:"Псалмы", ch:119, v1:105 }
   ];
 
   // Слоты дня: 0=ночь(0-8), 1=утро(8-12), 2=день(12-18), 3=вечер(18-24)
@@ -98,7 +216,12 @@
   function showQuote(idx){
     var el = document.getElementById("dailyQuote");
     if(!el) return;
-    el.textContent = QUOTES[idx];
+    var q = QUOTES[idx];
+    var link = verseLink(q.book, q.ch, q.v1, q.v2);
+    var refHtml = link
+      ? '<a href="' + link + '" target="_blank" rel="noopener">(' + q.ref + ')</a>'
+      : '(' + q.ref + ')';
+    el.innerHTML = "«" + q.text + "» " + refHtml + ".";
     requestAnimationFrame(function(){
       requestAnimationFrame(function(){ el.classList.add("visible"); });
     });
@@ -635,6 +758,7 @@
 
   function initPage(){
     var frag = document.createDocumentFragment();
+    var bookNumber = 0; // сквозная нумерация книг 1..66 для ссылок JW Finder
     sections.forEach(function(section){
       var label = document.createElement("div");
       label.className = "section-label";
@@ -643,6 +767,8 @@
 
       section.books.forEach(function(book){
         var bookName = book[0], chapterCount = book[1];
+        bookNumber++;
+        var thisBookNumber = bookNumber; // фиксируем для замыканий ниже
         checkedPerBook[bookName] = 0;
 
         var card = document.createElement("div");
@@ -698,7 +824,57 @@
             lbl.setAttribute("for", input.id);
             lbl.textContent = chapterNum;
 
+            // ---- долгое нажатие: открыть главу в JW Library / jw.org ----
+            var LONG_PRESS_MS = 300;
+            var pressTimer = null;
+            var longPressFired = false;
+            var pressStartXY = null;
+            var MOVE_CANCEL_PX = 10;
+
+            function clearPressTimer(){
+              clearTimeout(pressTimer);
+              pressTimer = null;
+            }
+            function startPress(x, y){
+              longPressFired = false;
+              pressStartXY = {x:x, y:y};
+              clearPressTimer();
+              pressTimer = setTimeout(function(){
+                longPressFired = true;
+                window.open(chapterLink(thisBookNumber, chapterNum), "_blank");
+              }, LONG_PRESS_MS);
+            }
+            function movePress(x, y){
+              if(!pressStartXY) return;
+              var dx = x - pressStartXY.x, dy = y - pressStartXY.y;
+              if(Math.sqrt(dx*dx + dy*dy) > MOVE_CANCEL_PX) clearPressTimer();
+            }
+
+            item.addEventListener("touchstart", function(e){
+              var t = e.touches[0];
+              startPress(t.clientX, t.clientY);
+            }, {passive:true});
+            item.addEventListener("touchmove", function(e){
+              var t = e.touches[0];
+              movePress(t.clientX, t.clientY);
+            }, {passive:true});
+            item.addEventListener("touchend", clearPressTimer);
+            item.addEventListener("touchcancel", clearPressTimer);
+
+            // Поддержка мыши — удобно для отладки на десктопе.
+            item.addEventListener("mousedown", function(e){ startPress(e.clientX, e.clientY); });
+            item.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
+            item.addEventListener("mouseup", clearPressTimer);
+            item.addEventListener("mouseleave", clearPressTimer);
+
             input.addEventListener("click", function(e){
+              if(longPressFired){
+                // Долгое нажатие уже открыло ссылку — гасим обычный цикл
+                // отметки, чтобы одно и то же нажатие не делало два дела.
+                e.preventDefault();
+                longPressFired = false;
+                return;
+              }
               if(!getColorMarkEnabled()) return; // обычный режим — обрабатывается в "change"
               e.preventDefault();
               // Браузер откатывает checked к значению "до клика" сразу после
@@ -713,6 +889,7 @@
             });
 
             input.addEventListener("change", function(){
+              if(longPressFired){ longPressFired = false; return; }
               if(getColorMarkEnabled()) return; // цветовой режим — уже обработано в "click"
               var prevRec = state[key];
               state[key] = {c: input.checked, t: Date.now()};
@@ -3675,7 +3852,7 @@
   var LINKIFY_TRAIL_RE = /[.,;:!?)\]}'"]+$/;
   function linkifyHtml(s){
     var escaped = escapeHtml(s);
-    return escaped.replace(LINKIFY_URL_RE, function(match){
+    escaped = escaped.replace(LINKIFY_URL_RE, function(match){
       var trail = "";
       var m = match.match(LINKIFY_TRAIL_RE);
       if(m){
@@ -3686,6 +3863,7 @@
       var href = /^https?:\/\//i.test(match) ? match : "https://" + match;
       return '<a href="' + href + '" target="_blank" rel="noopener noreferrer" class="auto-link">' + match + '</a>' + trail;
     });
+    return scripturifyHtml(escaped);
   }
 
   function getAllGoals(){
