@@ -7,8 +7,8 @@
   /* ---------- sync status pill ---------- */
   .sync-status{
     position:absolute;
-    top:14px;
-    right:14px;
+    top:23px;
+    right:23px;
     display:flex;
     align-items:center;
     gap:6px;
@@ -24,43 +24,6 @@
     transition:background .2s ease;
   }
   .sync-status:hover{ background:rgba(0,0,0,.42); }
-
-  .mood-status{
-    position:absolute;
-    top:14px;
-    left:14px;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    width:34px;
-    height:34px;
-    border-radius:50%;
-    background:rgba(0,0,0,.28);
-    border:1px solid rgba(255,255,255,.25);
-    font-size:18px;
-    cursor:pointer;
-    user-select:none;
-    transition:background .2s ease;
-  }
-  .mood-status:hover{ background:rgba(0,0,0,.42); }
-  .mood-status.unlogged{ filter:grayscale(100%); opacity:.7; }
-
-  .mood-picker-grid{
-    display:flex;
-    flex-wrap:wrap;
-    gap:8px;
-    justify-content:center;
-    margin-bottom:10px;
-  }
-  .mood-picker-grid button{
-    width:52px;height:52px;
-    font-size:26px;
-    background:#fffef8;
-    border:1px solid var(--groove-shadow);
-    border-radius:8px;
-    cursor:pointer;
-  }
-  .mood-picker-grid button:hover{ background:var(--xp-green); }
 
   .mood-checkin-grid{
     display:grid;
@@ -86,18 +49,26 @@
     color:var(--ink-soft);
     text-align:center;
   }
-  .mood-checkin-item.selected{
-    border-color:var(--xp-green-dark);
-    background:var(--xp-green);
-  }
-  .mood-checkin-hint{
-    text-align:center;
-    font-size:12.5px;
-    color:#8a2f1c;
-    font-weight:bold;
-    min-height:16px;
-    margin-bottom:8px;
-  }
+
+  /* ---------- отметка настроения внутри вкладки диаграммы (плавающая
+     кнопка настроек, #settingsTabContent) ---------- */
+  /* Блок вопроса и кнопок выбора прижат к низу области вкладки за счёт
+     .settings-content-bottom (margin-top:auto у #settingsTabContent —
+     flex-column), тем же приёмом, что и у resetConfirm/moodResetConfirm.
+     Диаграмма выше остаётся без изменений — она отрисовывается
+     отдельным блоком перед этим и не входит в .settings-content-bottom,
+     поэтому не сдвигается вниз вместе с вопросом. */
+  .mood-tab-checkin p{ margin-bottom:4px; }
+  /* Окно настроек (.settings-modal-box) уже само по себе уже, чем
+     отдельная модалка (.modal-box, max-width:420px), поэтому сетка из 6
+     кнопок настроения здесь чуть плотнее: тот же грид в 3 колонки/2 ряда
+     (см. .mood-checkin-grid выше), но с уменьшенными отступами и
+     размером содержимого — пропорции те же, просто немного компактнее,
+     чтобы уверенно помещаться по ширине и на узких экранах. */
+  #settingsTabContent .mood-checkin-grid{ gap:6px; }
+  #settingsTabContent .mood-checkin-item{ padding:8px 3px; }
+  #settingsTabContent .mood-checkin-item .emoji{ font-size:22px; }
+  #settingsTabContent .mood-checkin-item .label{ font-size:10px; }
 
   .mood-diagram-title{
     text-align:center;
@@ -105,7 +76,7 @@
     font-size:15px;
     letter-spacing:.5px;
     color:var(--wood);
-    margin:16px 0 14px 0;
+    margin:0 0 4px 0;
   }
   .mood-diagram-empty{
     text-align:center;
@@ -116,6 +87,7 @@
   .mood-diagram-wrap{
     display:flex;
     justify-content:center;
+    margin-top:-16px;
     margin-bottom:8px;
   }
   .mood-diagram-svg{
@@ -133,7 +105,7 @@
   .mood-diagram-reset-row{
     display:flex;
     justify-content:flex-end;
-    margin-top:6px;
+    margin-top:-36px;
   }
   .mood-diagram-reset-btn{
     padding:4px 8px;

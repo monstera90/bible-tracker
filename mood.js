@@ -40,17 +40,14 @@
   // Сброс данных не удаляет записи физически (это небезопасно для
   // синхронизации — см. комментарий у MOOD_DATA_RESET_AT_KEY), а просто
   // отодвигает "нижнюю границу" видимых записей вперёд по времени.
-  var MOOD_EMOJI_KEY = "__moodEmoji";
-  var MOOD_ENABLED_KEY = "__moodEnabled";
   var MOOD_FIRST_LOG_KEY = "__moodFirstLog";
   var MOOD_DATA_RESET_AT_KEY = "__moodDataResetAt";
 
   var MOOD_COLORS = {joy:"#F7C948", sad:"#6FA8DC", calm:"#8FD9B8", anger:"#E06666", down:"#8E7CC3", sleepy:"#B4A7D6"};
 
   function moodCategoriesResolved(){
-    var joyEmoji = getMoodEmoji() || "😀";
     return [
-      {key:"joy", emoji:joyEmoji, label:"Радость"},
+      {key:"joy", emoji:"😊", label:"Радость"},
       {key:"sad", emoji:"😕", label:"Грусть"},
       {key:"calm", emoji:"🙄", label:"Спокойствие"},
       {key:"anger", emoji:"😡", label:"Раздражительность"},
@@ -59,19 +56,10 @@
     ];
   }
 
-  function getMoodEmoji(){ var r = state()[MOOD_EMOJI_KEY]; return (r && r.c) ? r.c : null; }
-  function isMoodEnabled(){ var r = state()[MOOD_ENABLED_KEY]; return !!(r && r.c); }
+  // Счётчик настроения включён всегда — отдельного переключателя в
+  // настройках больше нет (см. renderSettingsTabGear в my.js).
+  function isMoodEnabled(){ return true; }
   function getMoodDataResetAt(){ var r = state()[MOOD_DATA_RESET_AT_KEY]; return (r && r.c) ? r.c : 0; }
-
-  function getTodaySessionsCount(){
-    var floor = Math.max(startOfDay(Date.now()), getMoodDataResetAt());
-    var count = 0;
-    Object.keys(state()).forEach(function(k){
-      if(k.indexOf("moodsession:") === 0 && state()[k] && state()[k].t >= floor) count++;
-    });
-    return count;
-  }
-  function hasLoggedToday(){ return getTodaySessionsCount() > 0; }
 
   function getMoodCounts(){
     var floor = getMoodDataResetAt();
@@ -85,21 +73,6 @@
     return counts;
   }
 
-  function activateMoodCounter(emoji){
-    setHourState(MOOD_EMOJI_KEY, emoji);
-    setHourState(MOOD_ENABLED_KEY, true);
-    saveLocalState();
-    scheduleCloudPush();
-    renderMoodPill();
-    renderMoodMenu();
-  }
-  function deactivateMoodCounter(){
-    setHourState(MOOD_ENABLED_KEY, null);
-    saveLocalState();
-    scheduleCloudPush();
-    renderMoodPill();
-    renderMoodMenu();
-  }
   function resetMoodData(){
     setHourState(MOOD_DATA_RESET_AT_KEY, Date.now());
     setHourState(MOOD_FIRST_LOG_KEY, null);
@@ -107,121 +80,9 @@
     scheduleCloudPush();
   }
 
-  function renderMoodPill(){
-    var pill = document.getElementById("moodStatusPill");
-    if(!pill) return;
-    if(!isMoodEnabled()){ pill.style.display = "none"; return; }
-    pill.style.display = "flex";
-    pill.textContent = getMoodEmoji() || "😀";
-    pill.classList.toggle("unlogged", !hasLoggedToday());
-  }
-
-  function renderMoodMenu(){
-    var row = document.getElementById("moodCounterMenuRow");
-    if(!row) return;
-    if(isMoodEnabled()){
-      row.innerHTML =
-        '<button class="version-history-item" id="moodRemoveBtn" style="color:#8a2f1c;">Убрать счётчик настроения</button>' +
-        '<button class="version-history-item" id="moodDiagramBtn">Диаграмма настроения</button>';
-      document.getElementById("moodRemoveBtn").addEventListener("click", deactivateMoodCounter);
-      document.getElementById("moodDiagramBtn").addEventListener("click", openMoodDiagram);
-    } else {
-      row.innerHTML = '<button class="version-history-item" id="moodAddBtn">Добавить счётчик настроения</button>';
-      document.getElementById("moodAddBtn").addEventListener("click", function(){ openMoodEmojiPicker(false); });
-    }
-  }
-
-  // --- выбор смайлика (при первой настройке и, с возможностью отказа, после сброса) ---
-  function openMoodEmojiPicker(allowDecline){
-    var emojis = ["😀","😅","🙂","😉","😋","😜"];
-    var buttons = emojis.map(function(e){ return '<button data-emoji="'+e+'">'+e+'</button>'; }).join("");
-    modalBox.innerHTML =
-      modalHeader("Выберите внешний вид кнопки") +
-      '<div class="mood-picker-grid">' + buttons + '</div>' +
-      (allowDecline ? '<button class="modal-btn" id="mMoodDecline">Не нужно</button>' : '');
-    bindClose();
-    modalOverlay.classList.add("open");
-    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-emoji]"), function(btn){
-      btn.addEventListener("click", function(){
-        activateMoodCounter(btn.getAttribute("data-emoji"));
-        closeModal();
-      });
-    });
-    if(allowDecline){
-      var declineBtn = document.getElementById("mMoodDecline");
-      if(declineBtn) declineBtn.addEventListener("click", function(){ deactivateMoodCounter(); closeModal(); });
-    }
-  }
-
   // --- отметка настроения (до 2 вариантов за раз) ---
-  var moodCheckinSelected = [];
-  function openMoodCheckin(){
-    moodCheckinSelected = [];
-    renderMoodCheckinModal();
-  }
-  function renderMoodCheckinModal(){
-    var cats = moodCategoriesResolved();
-    var items = cats.map(function(c){
-      var sel = moodCheckinSelected.indexOf(c.key) !== -1;
-      return '<div class="mood-checkin-item' + (sel ? ' selected' : '') + '" data-mood="' + c.key + '">' +
-        '<span class="emoji">' + c.emoji + '</span><span class="label">' + c.label + '</span></div>';
-    }).join("");
-    modalBox.innerHTML =
-      modalHeader("Что ты сейчас чувствуешь?") +
-      '<div class="mood-checkin-hint" id="moodCheckinHint"></div>' +
-      '<div class="mood-checkin-grid">' + items + '</div>' +
-      '<button class="modal-btn primary" id="mMoodConfirm">Готово</button>';
-    bindClose();
-    modalOverlay.classList.add("open");
-    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-mood]"), function(el){
-      el.addEventListener("click", function(){
-        var key = el.getAttribute("data-mood");
-        var idx = moodCheckinSelected.indexOf(key);
-        if(idx !== -1){
-          moodCheckinSelected.splice(idx, 1);
-        } else {
-          if(moodCheckinSelected.length >= 2){
-            var hint = document.getElementById("moodCheckinHint");
-            if(hint) hint.textContent = "Выбирать можно только два варианта";
-            return;
-          }
-          moodCheckinSelected.push(key);
-        }
-        renderMoodCheckinModal();
-      });
-    });
-    document.getElementById("mMoodConfirm").addEventListener("click", function(){
-      if(moodCheckinSelected.length === 0){ closeModal(); return; }
-      var sessionTs = Date.now();
-      state()["moodsession:" + sessionTs + "-" + Math.random().toString(36).slice(2,7)] = {c: 1, t: sessionTs};
-      moodCheckinSelected.forEach(function(key){
-        state()["moodlog:" + sessionTs + "-" + key + "-" + Math.random().toString(36).slice(2,7)] = {c: key, t: sessionTs};
-      });
-      if(!state()[MOOD_FIRST_LOG_KEY] || state()[MOOD_FIRST_LOG_KEY].c == null || state()[MOOD_FIRST_LOG_KEY].c < getMoodDataResetAt()){
-        setHourState(MOOD_FIRST_LOG_KEY, sessionTs);
-      }
-      saveLocalState();
-      scheduleCloudPush();
-      renderMoodPill();
-      refreshYearGridIfOpen();
-      closeModal();
-    });
-  }
-
   // --- диаграмма настроения ---
   var moodDiagramExpanded = false;
-
-  function polarPoint(cx, cy, r, angleDeg){
-    var rad = (angleDeg - 90) * Math.PI / 180;
-    return {x: cx + r*Math.cos(rad), y: cy + r*Math.sin(rad)};
-  }
-  function describeArcPath(cx, cy, r, startAngle, endAngle){
-    var start = polarPoint(cx, cy, r, startAngle);
-    var end = polarPoint(cx, cy, r, endAngle);
-    var largeArc = (endAngle - startAngle) > 180 ? 1 : 0;
-    return ["M", cx, cy, "L", start.x.toFixed(2), start.y.toFixed(2),
-      "A", r, r, 0, largeArc, 1, end.x.toFixed(2), end.y.toFixed(2), "Z"].join(" ");
-  }
 
   var MARK_FORMS = ["отметка","отметки","отметок"];
   function getTotalSessionsCount(){
@@ -238,44 +99,6 @@
     if(totalDays < 60) return "за " + totalDays + " " + pluralRu(totalDays, DAY_FORMS);
     var months = Math.max(1, Math.round(totalDays/30));
     return "за " + months + " " + pluralRu(months, MONTH_FORMS);
-  }
-
-  function openMoodDiagram(){
-    moodDiagramExpanded = false;
-    renderMoodDiagramModal();
-  }
-
-  function renderMoodDiagramModal(){
-    var counts = getMoodCounts();
-    var total = 0;
-    Object.keys(counts).forEach(function(k){ total += counts[k]; });
-
-    if(total === 0){
-      modalBox.innerHTML =
-        modalHeader("Диаграмма настроения") +
-        '<div class="mood-diagram-empty">Данных о настроении нет. Добавьте настроение — тогда здесь появится диаграмма.</div>';
-      bindClose();
-      modalOverlay.classList.add("open");
-      return;
-    }
-
-    var firstLogRec = state()[MOOD_FIRST_LOG_KEY];
-    var totalDays = 1;
-    if(firstLogRec && firstLogRec.c){
-      totalDays = Math.round((startOfDay(Date.now()) - startOfDay(firstLogRec.c)) / DAY_MS) + 1;
-    }
-    var sessionsCount = getTotalSessionsCount();
-    var title = "Диаграмма настроения " + formatMoodPeriodLabel(totalDays) +
-      " - всего " + sessionsCount + " " + pluralRu(sessionsCount, MARK_FORMS) + " настроения";
-
-    modalBox.innerHTML =
-      modalHeader(title) +
-      '<div class="mood-diagram-wrap" id="moodDiagramWrap"></div>' +
-      '<div class="mood-diagram-reset-row"><button class="mood-diagram-reset-btn" id="mMoodResetBtn">Сбросить данные настроения</button></div>';
-    bindClose();
-    modalOverlay.classList.add("open");
-    buildMoodDiagramSVG(counts, total);
-    document.getElementById("mMoodResetBtn").addEventListener("click", openMoodResetConfirm);
   }
 
   function polarPointEllipse(cx, cy, rx, ry, angleDeg){
@@ -491,23 +314,57 @@
     });
   }
 
-  function openMoodResetConfirm(){
-    modalBox.innerHTML =
-      modalHeader("Вы точно хотите сбросить данные настроения?",
-        "Вы можете выбрать «Нет» и сделать скриншот, чтобы сохранить прогресс.") +
-      '<button class="modal-btn primary" id="mMoodResetYes">Да</button>' +
-      '<button class="modal-btn" id="mMoodResetNo">Нет</button>';
-    bindClose();
-    modalOverlay.classList.add("open");
-    document.getElementById("mMoodResetYes").addEventListener("click", function(){
-      resetMoodData();
-      openMoodEmojiPicker(true);
-    });
-    document.getElementById("mMoodResetNo").addEventListener("click", closeModal);
+  // --- отметка настроения, встроенная во вкладку диаграммы (плавающая
+  //     кнопка настроек) — по нажатию на один вариант запись сразу
+  //     сохраняется и обновляет диаграмму выше, без отдельной кнопки
+  //     подтверждения и без выбора нескольких вариантов сразу ---
+
+  function buildMoodCheckinBlockHtml(){
+    var cats = moodCategoriesResolved();
+    var items = cats.map(function(c){
+      return '<div class="mood-checkin-item" data-mood="' + c.key + '">' +
+        '<span class="emoji">' + c.emoji + '</span><span class="label">' + c.label + '</span></div>';
+    }).join("");
+    // Вопрос — обычный <p> без своего класса, специально: так он получает
+    // те же унаследованные шрифт/размер (body: Palatino Linotype/Georgia/
+    // Times New Roman, 16px), что и вопрос "Точно сбросить весь прогресс
+    // чтения и начать сначала?" на вкладке resetConfirm (см.
+    // renderSettingsTabResetConfirm) — там это тоже голый <p> внутри
+    // .settings-content-bottom без переопределений шрифта. Расстояние до
+    // кнопок под ним стягивается стилями .mood-tab-checkin в components.css
+    // (там же и уменьшенная сетка для этого узкого окна).
+    return (
+      '<div class="settings-content-bottom mood-tab-checkin">' +
+      '<p>Что ты сейчас чувствуешь?</p>' +
+      '<div class="mood-checkin-grid" id="settingsMoodCheckinGrid">' + items + '</div>' +
+      '</div>'
+    );
   }
 
-  var moodStatusPill = document.getElementById("moodStatusPill");
-  if(moodStatusPill) moodStatusPill.addEventListener("click", openMoodCheckin);
+  // Сохраняет запись настроения по одному выбранному варианту и
+  // обновляет диаграмму — вызывается сразу по нажатию на вариант.
+  function commitMoodTabCheckin(key){
+    var sessionTs = Date.now();
+    state()["moodsession:" + sessionTs + "-" + Math.random().toString(36).slice(2,7)] = {c: 1, t: sessionTs};
+    state()["moodlog:" + sessionTs + "-" + key + "-" + Math.random().toString(36).slice(2,7)] = {c: key, t: sessionTs};
+    if(!state()[MOOD_FIRST_LOG_KEY] || state()[MOOD_FIRST_LOG_KEY].c == null || state()[MOOD_FIRST_LOG_KEY].c < getMoodDataResetAt()){
+      setHourState(MOOD_FIRST_LOG_KEY, sessionTs);
+    }
+    saveLocalState();
+    scheduleCloudPush();
+    refreshYearGridIfOpen();
+  }
+
+  function bindMoodCheckinBlock(){
+    var grid = document.getElementById("settingsMoodCheckinGrid");
+    if(!grid) return;
+    Array.prototype.forEach.call(grid.querySelectorAll("[data-mood]"), function(el){
+      el.addEventListener("click", function(){
+        commitMoodTabCheckin(el.getAttribute("data-mood"));
+        renderSettingsTabMood();
+      });
+    });
+  }
 
   function renderSettingsTabMood(){
     var container = document.getElementById("settingsTabContent");
@@ -516,28 +373,33 @@
     var total = 0;
     Object.keys(counts).forEach(function(k){ total += counts[k]; });
 
+    var diagramHtml;
     if(total === 0){
-      container.innerHTML = '<div class="mood-diagram-empty">Данных о настроении нет. Добавьте настроение — тогда здесь появится диаграмма.</div>';
-      return;
+      diagramHtml = '<div class="mood-diagram-empty">Данных о настроении нет. Добавьте настроение — тогда здесь появится диаграмма.</div>';
+    } else {
+      var firstLogRec = state()[MOOD_FIRST_LOG_KEY];
+      var totalDays = 1;
+      if(firstLogRec && firstLogRec.c){
+        totalDays = Math.round((startOfDay(Date.now()) - startOfDay(firstLogRec.c)) / DAY_MS) + 1;
+      }
+      var sessionsCount = getTotalSessionsCount();
+      var title = "Диаграмма настроения " + formatMoodPeriodLabel(totalDays) +
+        " - всего " + sessionsCount + " " + pluralRu(sessionsCount, MARK_FORMS) + " настроения";
+      diagramHtml =
+        '<div class="mood-diagram-title">' + escapeHtml(title) + '</div>' +
+        '<div class="mood-diagram-wrap" id="moodDiagramWrap"></div>' +
+        '<div class="mood-diagram-reset-row"><button class="mood-diagram-reset-btn" id="mMoodResetBtn2">Сбросить данные настроения</button></div>';
     }
 
-    var firstLogRec = state()[MOOD_FIRST_LOG_KEY];
-    var totalDays = 1;
-    if(firstLogRec && firstLogRec.c){
-      totalDays = Math.round((startOfDay(Date.now()) - startOfDay(firstLogRec.c)) / DAY_MS) + 1;
-    }
-    var sessionsCount = getTotalSessionsCount();
-    var title = "Диаграмма настроения " + formatMoodPeriodLabel(totalDays) +
-      " - всего " + sessionsCount + " " + pluralRu(sessionsCount, MARK_FORMS) + " настроения";
+    container.innerHTML = diagramHtml + buildMoodCheckinBlockHtml();
 
-    container.innerHTML =
-      '<div class="mood-diagram-title">' + escapeHtml(title) + '</div>' +
-      '<div class="mood-diagram-wrap" id="moodDiagramWrap"></div>' +
-      '<div class="mood-diagram-reset-row"><button class="mood-diagram-reset-btn" id="mMoodResetBtn2">Сбросить данные настроения</button></div>';
-    buildMoodDiagramSVG(counts, total);
-    document.getElementById("mMoodResetBtn2").addEventListener("click", function(){
-      switchSettingsTab("moodResetConfirm");
-    });
+    if(total > 0){
+      buildMoodDiagramSVG(counts, total);
+      document.getElementById("mMoodResetBtn2").addEventListener("click", function(){
+        switchSettingsTab("moodResetConfirm");
+      });
+    }
+    bindMoodCheckinBlock();
   }
 
   // ===== Подтверждение сброса данных настроения (внутри настроек) =====
@@ -553,7 +415,7 @@
       '</div>';
     document.getElementById("mMoodResetConfirmYesBtn").addEventListener("click", function(){
       resetMoodData();
-      openMoodEmojiPicker(true);
+      switchSettingsTab("mood");
     });
     document.getElementById("mMoodResetConfirmNoBtn").addEventListener("click", function(){
       switchSettingsTab("mood");
@@ -583,19 +445,10 @@
 
     return {
       isMoodEnabled: isMoodEnabled,
-      getMoodEmoji: getMoodEmoji,
       getMoodDataResetAt: getMoodDataResetAt,
       getMoodCounts: getMoodCounts,
       moodCategoriesResolved: moodCategoriesResolved,
-      activateMoodCounter: activateMoodCounter,
-      deactivateMoodCounter: deactivateMoodCounter,
       resetMoodData: resetMoodData,
-      renderMoodPill: renderMoodPill,
-      renderMoodMenu: renderMoodMenu,
-      openMoodEmojiPicker: openMoodEmojiPicker,
-      openMoodCheckin: openMoodCheckin,
-      openMoodDiagram: openMoodDiagram,
-      openMoodResetConfirm: openMoodResetConfirm,
       renderSettingsTabMood: renderSettingsTabMood,
       renderSettingsTabMoodResetConfirm: renderSettingsTabMoodResetConfirm,
       getMoodsByDay: getMoodsByDay

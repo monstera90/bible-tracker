@@ -948,8 +948,6 @@
     updateMissedBanner();
     renderHourBars();
     renderHourCounterMenu();
-    renderMoodPill();
-    renderMoodMenu();
     renderGoalsSection();
     renderAddGoalMenu();
     refreshYearGridIfOpen();
@@ -1211,10 +1209,6 @@
   });
   var isMoodEnabled = Mood.isMoodEnabled;
   var getMoodDataResetAt = Mood.getMoodDataResetAt;
-  var deactivateMoodCounter = Mood.deactivateMoodCounter;
-  var openMoodEmojiPicker = Mood.openMoodEmojiPicker;
-  var renderMoodPill = Mood.renderMoodPill;
-  var renderMoodMenu = Mood.renderMoodMenu;
   var renderSettingsTabMood = Mood.renderSettingsTabMood;
   var renderSettingsTabMoodResetConfirm = Mood.renderSettingsTabMoodResetConfirm;
   var getMoodsByDay = Mood.getMoodsByDay;
@@ -2252,7 +2246,7 @@
     if(container) container.scrollTop = 0;
     var addFab = document.getElementById("taskAddFab");
     if(addFab) addFab.classList.toggle("visible", TASK_MOVABLE_TABS.indexOf(tab) !== -1);
-    if(tab === "mood") renderSettingsTabMood();
+    if(tab === "mood"){ renderSettingsTabMood(); }
     else if(tab === "year") renderSettingsTabYear();
     else if(tab === "versions") renderSettingsTabVersions();
     else if(tab === "import") renderSettingsTabImportPicker();
@@ -2276,7 +2270,6 @@
     if(!container) return;
     var hourOn = !!getHourGoal();
     var hourNotesOn = isHourNotesEnabled();
-    var moodOn = isMoodEnabled();
     var reducedOn = getGoalsReducedView();
     var colorMarkOn = getColorMarkEnabled();
     var showAllTasksOn = getShowAllTasksEnabled();
@@ -2284,7 +2277,6 @@
     container.innerHTML =
       '<div class="settings-row"><span>Добавить дополнительный счётчик</span><input type="checkbox" id="settingsHourCb"' + (hourOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" id="settingsHourNotesRow" style="' + (hourOn ? "" : "display:none;") + '"><span>Добавить комментарий в дополнительный счётчик</span><input type="checkbox" id="settingsHourNotesCb"' + (hourNotesOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row"><span>Добавить счётчик настроения</span><input type="checkbox" id="settingsMoodCb"' + (moodOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
@@ -2326,18 +2318,6 @@
         setHourNotesEnabled(this.checked);
       });
     }
-
-    document.getElementById("settingsMoodCb").addEventListener("change", function(){
-      var cb = this;
-      if(cb.checked){
-        closeSettingsModal();
-        openMoodEmojiPicker(false);
-      } else {
-        deactivateMoodCounter();
-        refreshSettingsTabsVisibility();
-        renderSettingsTabGear();
-      }
-    });
 
     document.getElementById("settingsReducedCb").addEventListener("change", function(){
       setGoalsReducedView(this.checked);
@@ -4646,12 +4626,10 @@
   renderHourBars();
   renderHourCounterMenu();
   checkHourBoundaries();
-  renderMoodPill();
-  renderMoodMenu();
   renderGoalsSection();
   renderAddGoalMenu();
   refreshSettingsTabsVisibility();
-  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); checkHourBoundaries(); renderMoodPill(); refreshYearGridIfOpen(); }, 30 * 60 * 1000);
+  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); checkHourBoundaries(); refreshYearGridIfOpen(); }, 30 * 60 * 1000);
   checkUpdateSnoozeExpiry();
 
 })();
