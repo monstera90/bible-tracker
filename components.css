@@ -202,13 +202,21 @@
   }
 
   /* "synced" — светодиод мерцает как маячок, циклично переходя между
-     тремя оттенками зелёного */
+     тремя оттенками зелёного. Стили заданы явно (margin/border/box-shadow),
+     чтобы состояние никогда не выглядело как обычная точка, даже если у
+     плашки остался класс .sync-collapsed от предыдущего состояния "off" */
   .sync-status[data-state="synced"] .sync-dot{
+    margin-top:0;
+    border:none;
+    background:#2fa15f;
     animation:beacon-green 2.4s ease-in-out infinite;
   }
 
   /* "syncing" — то же самое, но жёлтым */
   .sync-status[data-state="syncing"] .sync-dot{
+    margin-top:0;
+    border:none;
+    background:#c9a227;
     animation:beacon-yellow 2.4s ease-in-out infinite;
   }
 
