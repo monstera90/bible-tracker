@@ -152,15 +152,96 @@
     flex-shrink:0;
     box-shadow:0 0 0 2px rgba(255,255,255,.15);
   }
-  .sync-status[data-state="off"] .sync-dot{ background:var(--status-off); }
+
+  /* "off" — код синхронизации не настроен: бесцветный неактивный индикатор
+     (полая точка без заливки), а не тревожный цвет. Надпись видна только
+     до первого взаимодействия пользователя со страницей (см. .sync-collapsed) */
+  .sync-status[data-state="off"]{
+    align-items:flex-start;
+    padding-top:6px;
+    padding-bottom:6px;
+  }
+  .sync-status[data-state="off"] .sync-dot{
+    margin-top:4px;
+    background:transparent;
+    border:1.5px solid rgba(241,230,205,.45);
+    box-shadow:none;
+  }
+  .sync-status[data-state="off"] #syncStatusText{
+    line-height:1.3;
+  }
+
   .sync-status[data-state="offline"] .sync-dot{ background:var(--status-offline); }
-  .sync-status[data-state="syncing"] .sync-dot{ background:var(--status-sync); animation:pulse 1s infinite; }
-  .sync-status[data-state="synced"] .sync-dot{ background:var(--status-ok); }
+
+  /* состояния без подписи (offline, syncing, synced, и "off" после того как
+     пользователь начал взаимодействовать со страницей) — плашка сжимается
+     в правильный круг вокруг светодиода, а не в овал из-за паддингов пилюли */
+  .sync-status[data-state="offline"],
+  .sync-status[data-state="synced"],
+  .sync-status[data-state="syncing"],
+  .sync-status[data-state="off"].sync-collapsed{
+    width:28px;
+    height:28px;
+    padding:0;
+    align-items:center;
+    justify-content:center;
+    border-radius:50%;
+  }
+  .sync-status[data-state="offline"] #syncStatusText,
+  .sync-status[data-state="synced"] #syncStatusText,
+  .sync-status[data-state="syncing"] #syncStatusText,
+  .sync-status[data-state="off"].sync-collapsed #syncStatusText{
+    display:none;
+  }
+  /* в свёрнутом виде "off" превращается в обычную серую точку, как offline */
+  .sync-status[data-state="off"].sync-collapsed .sync-dot{
+    margin-top:0;
+    background:var(--status-off);
+    border:none;
+    box-shadow:0 0 0 2px rgba(255,255,255,.15);
+  }
+
+  /* "synced" — светодиод мерцает как маячок, циклично переходя между
+     тремя оттенками зелёного */
+  .sync-status[data-state="synced"] .sync-dot{
+    animation:beacon-green 2.4s ease-in-out infinite;
+  }
+
+  /* "syncing" — то же самое, но жёлтым */
+  .sync-status[data-state="syncing"] .sync-dot{
+    animation:beacon-yellow 2.4s ease-in-out infinite;
+  }
+
   .sync-status[data-state="error"] .sync-dot{ background:var(--status-err); }
 
-  @keyframes pulse{
-    0%,100%{opacity:1;}
-    50%{opacity:.35;}
+  @keyframes beacon-green{
+    0%,100%{
+      background:#2fa15f;
+      box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 0 3px 1px rgba(47,161,95,.25);
+    }
+    35%{
+      background:#6fd99c;
+      box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 0 7px 2px rgba(111,217,156,.6);
+    }
+    70%{
+      background:#1c7a45;
+      box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 0 2px 1px rgba(28,122,69,.2);
+    }
+  }
+
+  @keyframes beacon-yellow{
+    0%,100%{
+      background:#c9a227;
+      box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 0 3px 1px rgba(201,162,39,.25);
+    }
+    35%{
+      background:#f0cf6a;
+      box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 0 7px 2px rgba(240,207,106,.6);
+    }
+    70%{
+      background:#8a6d1a;
+      box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 0 2px 1px rgba(138,109,26,.2);
+    }
   }
 
   /* ---------- overall progress bar (Windows XP style, сплошная заливка) ---------- */

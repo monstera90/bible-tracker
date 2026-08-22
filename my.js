@@ -1069,8 +1069,8 @@
 
   function setSyncState(st, extraText){
     syncStatusPill.setAttribute("data-state", st);
-    var labels = {off:"Синхронизация выкл.",offline:"Офлайн",syncing:"Синхронизация…",synced:"Синхронизировано",error:"Ошибка синхронизации"};
-    syncStatusText.textContent = extraText || labels[st] || "";
+    var labels = {off:"Настроить<br>синхронизацию",offline:"",syncing:"",synced:"",error:"Не синхронизировано"};
+    syncStatusText.innerHTML = (extraText != null ? extraText : labels[st]) || "";
   }
 
   function refreshStatusBase(){
@@ -1157,6 +1157,22 @@
   function openModal(){ modalOverlay.classList.add("open"); renderModalHome(); }
   modalOverlay.addEventListener("click", function(e){ if(e.target === modalOverlay) closeModal(); });
   syncStatusPill.addEventListener("click", openModal);
+
+  // надпись "Настроить синхронизацию" видна только до первого
+  // взаимодействия пользователя со страницей — дальше плашка сворачивается
+  // в обычную серую точку, чтобы не отвлекать от контента
+  (function(){
+    var collapseEvents = ["scroll","touchstart","pointerdown","mousedown","keydown","wheel"];
+    function collapseSyncPill(){
+      syncStatusPill.classList.add("sync-collapsed");
+      collapseEvents.forEach(function(ev){
+        window.removeEventListener(ev, collapseSyncPill, {capture:true});
+      });
+    }
+    collapseEvents.forEach(function(ev){
+      window.addEventListener(ev, collapseSyncPill, {capture:true, passive:true});
+    });
+  })();
 
   function modalHeader(title, subtitle){
     var h = '<button class="modal-close" id="mClose">&times;</button><h2>' + title + '</h2>';
