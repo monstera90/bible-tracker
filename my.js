@@ -301,7 +301,7 @@
         : ' (' + escapeHtml(q.ref) + ')') : "";
       html = "«" + escapeHtml(q.text) + "»" + refHtml + ".";
     } else {
-      html = escapeHtml(q.text);
+      html = linkifyHtml(q.text);
     }
     el.innerHTML = html;
     requestAnimationFrame(function(){
