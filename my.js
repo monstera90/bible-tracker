@@ -170,6 +170,50 @@
 
 
   // ===================== ЦИТАТЫ ДНЯ =====================
+  // Шапка может показывать 2 вида записей, каждый включается отдельной
+  // галочкой в настройках (обе выключены по умолчанию — раньше стихи
+  // показывались всегда, теперь это опция):
+  //  1) BIBLE_QUOTES_ENABLED_KEY — библейские стихи: системный список
+  //     QUOTES ниже + опционально один свой стих (CUSTOM_VERSE_KEY),
+  //     добавленный пользователем через настройки.
+  //  2) CUSTOM_COMMENTS_ENABLED_KEY — личные комментарии пользователя,
+  //     созданные во вкладке "Добавить кастомный комментарий" (см.
+  //     COMMENT_KEY_PREFIX ниже).
+  // Если включены обе — оба вида перемешиваются в один общий список и
+  // чередуются по тем же правилам, что и раньше (смена по временным
+  // слотам, см. getDaySlot/initQuote). Если включена только одна — работает
+  // только она. Если не включена ни одна — шапка скрыта.
+  var BIBLE_QUOTES_ENABLED_KEY = "__bibleQuotesEnabled";
+  var CUSTOM_COMMENTS_ENABLED_KEY = "__customCommentsEnabled";
+  var CUSTOM_VERSE_KEY = "__customKeyVerse";
+
+  function getBibleQuotesEnabled(){ var r = state[BIBLE_QUOTES_ENABLED_KEY]; return !!(r && r.c); }
+  function setBibleQuotesEnabled(value){
+    state[BIBLE_QUOTES_ENABLED_KEY] = {c: value, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+    refreshHeaderQuote();
+  }
+  function getCustomCommentsEnabled(){ var r = state[CUSTOM_COMMENTS_ENABLED_KEY]; return !!(r && r.c); }
+  function setCustomCommentsEnabled(value){
+    state[CUSTOM_COMMENTS_ENABLED_KEY] = {c: value, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+    refreshHeaderQuote();
+  }
+  function getCustomVerse(){
+    var r = state[CUSTOM_VERSE_KEY];
+    return (r && r.c) ? r.c : {text:"", ref:""};
+  }
+  function setCustomVerse(text, ref){
+    text = (text || "").trim();
+    ref = (ref || "").trim();
+    state[CUSTOM_VERSE_KEY] = {c: (text ? {text:text, ref:ref} : null), t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+    refreshHeaderQuote();
+  }
+
   var QUOTE_KEY = "__quote";
   var QUOTES = [
     { text:"Счастлив тот, кто… находит радость в законе Иеговы и читает его вполголоса день и ночь", ref:"Псалом 1:1, 2", book:"Псалмы", ch:1, v1:1, v2:2 },
@@ -213,15 +257,53 @@
     return rec;
   }
 
-  function showQuote(idx){
+  // Собирает общий список записей для ротации в шапке — из библейских
+  // стихов (системных + своего) и/или личных комментариев пользователя,
+  // в зависимости от того, какие галочки сейчас включены в настройках
+  // (см. getBibleQuotesEnabled/getCustomCommentsEnabled выше). Порядок:
+  // сначала все библейские, затем все комментарии — стабильный порядок
+  // важен, чтобы индекс idx осмысленно "листал" один и тот же список,
+  // пока он не меняется.
+  function buildQuotePool(){
+    var pool = [];
+    if(getBibleQuotesEnabled()){
+      QUOTES.forEach(function(q){
+        pool.push({type:"bible", text:q.text, ref:q.ref, book:q.book, ch:q.ch, v1:q.v1, v2:q.v2});
+      });
+      var custom = getCustomVerse();
+      if(custom && custom.text){
+        pool.push({type:"bible", text:custom.text, ref:custom.ref, custom:true});
+      }
+    }
+    if(getCustomCommentsEnabled()){
+      getAllComments().forEach(function(c){
+        if(c.c && c.c.text) pool.push({type:"comment", text:c.c.text});
+      });
+    }
+    return pool;
+  }
+
+  function showQuote(pool, idx){
     var el = document.getElementById("dailyQuote");
     if(!el) return;
-    var q = QUOTES[idx];
-    var link = verseLink(q.book, q.ch, q.v1, q.v2);
-    var refHtml = link
-      ? '<a href="' + link + '" target="_blank" rel="noopener">(' + q.ref + ')</a>'
-      : '(' + q.ref + ')';
-    el.innerHTML = "«" + q.text + "» " + refHtml + ".";
+    if(!pool.length){
+      el.classList.remove("visible");
+      el.style.display = "none";
+      return;
+    }
+    el.style.display = "";
+    var q = pool[idx % pool.length];
+    var html;
+    if(q.type === "bible"){
+      var link = q.custom ? null : verseLink(q.book, q.ch, q.v1, q.v2);
+      var refHtml = q.ref ? (link
+        ? ' <a href="' + link + '" target="_blank" rel="noopener">(' + escapeHtml(q.ref) + ')</a>'
+        : ' (' + escapeHtml(q.ref) + ')') : "";
+      html = "«" + escapeHtml(q.text) + "»" + refHtml + ".";
+    } else {
+      html = "«" + escapeHtml(q.text) + "»";
+    }
+    el.innerHTML = html;
     requestAnimationFrame(function(){
       requestAnimationFrame(function(){ el.classList.add("visible"); });
     });
@@ -234,6 +316,7 @@
   // при следующем визите цитата сдвигается ровно на один шаг вперёд, а не
   // "досчитывает" пропущенные слоты.
   function initQuote(){
+    var pool = buildQuotePool();
     var rec = getQuoteRec();
     var currentSlot = getDaySlot();
     var idx = rec.c;
@@ -243,11 +326,23 @@
       state[QUOTE_KEY] = {c: idx, t: Date.now(), slot: currentSlot};
       saveLocalState();
     } else if(currentSlot !== rec.slot){
-      idx = (idx + 1) % QUOTES.length;
+      idx = pool.length ? (idx + 1) % pool.length : 0;
       state[QUOTE_KEY] = {c: idx, t: Date.now(), slot: currentSlot};
       saveLocalState();
     }
-    showQuote(idx);
+    showQuote(pool, idx);
+  }
+
+  // Пересчитывает и перерисовывает шапку немедленно (без сдвига индекса
+  // по слотам) — вызывается сразу после того, как пользователь поменял
+  // галочки, свой стих или список личных комментариев, чтобы шапка не
+  // ждала следующего временного слота. Индекс лишь ограничивается новым
+  // размером списка (список мог измениться).
+  function refreshHeaderQuote(){
+    var pool = buildQuotePool();
+    var rec = getQuoteRec();
+    var idx = pool.length ? (rec.c % pool.length) : 0;
+    showQuote(pool, idx);
   }
 
 
@@ -1444,6 +1539,16 @@
       moodCounter: {
         enabled: isMoodEnabled(),
         dailyMoodLog: []
+      },
+      headerQuotes: {
+        bibleQuotesEnabled: getBibleQuotesEnabled(),
+        customCommentsEnabled: getCustomCommentsEnabled(),
+        customVerse: getCustomVerse()
+      },
+      customComments: {
+        note: "list — записи из вкладки \"Добавить кастомный комментарий\" (могут быть отредактированы/удалены независимо от их копий в Карте дней года). dailyLog — копии, привязанные к дню создания и показанные в Карте дней года; удаление записи из list их не затрагивает.",
+        list: [],
+        dailyLog: []
       }
     };
 
@@ -1515,6 +1620,15 @@
     });
     Object.keys(goalByDate).sort().forEach(function(d){
       data.goalCompletions.dailyLog.push({date:d, completed: goalByDate[d]});
+    });
+
+    getAllComments().forEach(function(c){
+      if(!c.c.text) return;
+      data.customComments.list.push({date: isoDate(c.t), text: c.c.text});
+    });
+    var yearCommentsByDay = getYearCommentsByDayAll();
+    Object.keys(yearCommentsByDay).sort(function(a,b){ return Number(a)-Number(b); }).forEach(function(dayTs){
+      data.customComments.dailyLog.push({date: isoDate(Number(dayTs)), comments: yearCommentsByDay[dayTs]});
     });
 
     return data;
@@ -2369,7 +2483,9 @@
   }
   function closeSettingsModal(){
     flushPendingYearDayNoteEdit();
+    flushPendingYearCommentEdits();
     flushPendingTaskEdits();
+    flushPendingCommentEdits();
     var gearBtn = document.getElementById("settingsGearBtn");
     if(gearBtn) gearBtn.classList.remove("is-open");
     if(getExtraAnimationsEnabled()){
@@ -2404,7 +2520,9 @@
   // (без видимого индикатора прокрутки, см. CSS).
   function switchSettingsTab(tab){
     flushPendingYearDayNoteEdit();
+    flushPendingYearCommentEdits();
     flushPendingTaskEdits();
+    flushPendingCommentEdits();
     var gearBtn = document.getElementById("settingsTabGearBtn");
     var yearBtn = document.getElementById("settingsTabYearBtn");
     var moodTabBtn = document.getElementById("settingsTabMoodBtn");
@@ -2422,7 +2540,8 @@
     var container = document.getElementById("settingsTabContent");
     if(container) container.scrollTop = 0;
     var addFab = document.getElementById("taskAddFab");
-    if(addFab) addFab.classList.toggle("visible", TASK_MOVABLE_TABS.indexOf(tab) !== -1);
+    var isCommentsTab = (tab === "extra2" && getCustomCommentsEnabled());
+    if(addFab) addFab.classList.toggle("visible", TASK_MOVABLE_TABS.indexOf(tab) !== -1 || isCommentsTab);
     if(tab === "mood"){ renderSettingsTabMood(); }
     else if(tab === "year") renderSettingsTabYear();
     else if(tab === "versions") renderSettingsTabVersions();
@@ -2430,13 +2549,19 @@
     else if(tab === "resetConfirm") renderSettingsTabResetConfirm();
     else if(tab === "moodResetConfirm") renderSettingsTabMoodResetConfirm();
     else if(TASK_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabTask(tab);
-    else if(EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabExtra();
+    else if(EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabExtra(tab);
     else renderSettingsTabGear();
   }
 
-  // Заглушка для 2 вкладок рядом со вкладкой настроек — содержимое ещё
-  // не определено.
-  function renderSettingsTabExtra(){
+  // extra2 — вкладка "Добавить кастомный комментарий", когда включена
+  // соответствующая галочка в настройках (см. renderSettingsTabGear и
+  // refreshExtra2TabAppearance); иначе, как и extra3, — пока просто
+  // заглушка без содержимого.
+  function renderSettingsTabExtra(tabKey){
+    if(tabKey === "extra2" && getCustomCommentsEnabled()){
+      renderCommentsTab();
+      return;
+    }
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     container.innerHTML = '<div class="mood-diagram-empty">Контент появится позже</div>';
@@ -2451,17 +2576,48 @@
     var colorMarkOn = getColorMarkEnabled();
     var showAllTasksOn = getShowAllTasksEnabled();
     var extraAnimOn = getExtraAnimationsEnabled();
+    var bibleQuotesOn = getBibleQuotesEnabled();
+    var customCommentsOn = getCustomCommentsEnabled();
+    var customVerse = getCustomVerse();
     container.innerHTML =
       '<div class="settings-row"><span>Добавить дополнительный счётчик</span><input type="checkbox" id="settingsHourCb"' + (hourOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" id="settingsHourNotesRow" style="' + (hourOn ? "" : "display:none;") + '"><span>Добавить комментарий в дополнительный счётчик</span><input type="checkbox" id="settingsHourNotesCb"' + (hourNotesOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row"><span>Включить библейские стихи в шапке приложения</span><input type="checkbox" id="settingsBibleQuotesCb"' + (bibleQuotesOn ? " checked" : "") + '></div>' +
+      '<div class="settings-verse-block" id="settingsCustomVerseRow" style="' + (bibleQuotesOn ? "" : "display:none;") + '">' +
+        '<span class="settings-verse-label">Свой ключевой стих для шапки (по желанию)</span>' +
+        '<textarea class="settings-verse-input" id="settingsCustomVerseText" placeholder="Текст стиха…" rows="2"></textarea>' +
+        '<input type="text" class="settings-verse-input" id="settingsCustomVerseRef" placeholder="Ссылка, например: Иоанна 3:16">' +
+      '</div>' +
+      '<div class="settings-row"><span>Включить личные комментарии в шапке сайта</span><input type="checkbox" id="settingsCustomCommentsCb"' + (customCommentsOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" style="border-bottom:none;"><span>Включить дополнительные анимации</span><input type="checkbox" id="settingsExtraAnimCb"' + (extraAnimOn ? " checked" : "") + '></div>' +
       (showAllTasksOn ? '<button class="modal-btn" id="settingsImportTasksBtn" style="margin-top:16px;">Восстановить задачи из .txt</button>' : '') +
       '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:' + (showAllTasksOn ? "10px" : "16px") + ';">Добавить для себя цель</button>' +
       '<button class="modal-btn" id="settingsVersionsBtn" style="margin-top:10px;">Версии</button>' +
       '<button class="modal-btn danger" id="settingsResetBtn" style="margin-top:10px;">Начать чтение сначала и сбросить прогресс</button>';
+
+    var customVerseTextEl = document.getElementById("settingsCustomVerseText");
+    var customVerseRefEl = document.getElementById("settingsCustomVerseRef");
+    if(customVerseTextEl) customVerseTextEl.value = customVerse.text || "";
+    if(customVerseRefEl) customVerseRefEl.value = customVerse.ref || "";
+    function saveCustomVerseFromInputs(){
+      setCustomVerse(customVerseTextEl.value, customVerseRefEl.value);
+    }
+    if(customVerseTextEl) customVerseTextEl.addEventListener("blur", saveCustomVerseFromInputs);
+    if(customVerseRefEl) customVerseRefEl.addEventListener("blur", saveCustomVerseFromInputs);
+
+    document.getElementById("settingsBibleQuotesCb").addEventListener("change", function(){
+      setBibleQuotesEnabled(this.checked);
+      var row = document.getElementById("settingsCustomVerseRow");
+      if(row) row.style.display = this.checked ? "" : "none";
+    });
+
+    document.getElementById("settingsCustomCommentsCb").addEventListener("change", function(){
+      setCustomCommentsEnabled(this.checked);
+      refreshExtra2TabAppearance();
+    });
 
     document.getElementById("settingsHourCb").addEventListener("change", function(){
       var cb = this;
@@ -3596,14 +3752,23 @@
     var existingNote = getHourNoteForDay(dayTs);
     var showNotes = isHourNotesEnabled() || existingNote;
 
+    // личные комментарии из шапки, скопированные на этот день (см.
+    // createYearCommentCopy) — независимый от вкладки "комментарии"
+    // список, показывается всегда, если для этого дня есть хоть одна
+    // такая запись (даже если галочка "Включить личные комментарии…"
+    // сейчас выключена — старые записи остаются доступны).
+    var yearComments = getYearCommentsForDay(dayTs);
+
     container.innerHTML =
       '<div class="year-grid-tab-title">' + escapeHtml(weekdayLabel.charAt(0).toUpperCase() + weekdayLabel.slice(1)) + '</div>' +
       '<div class="year-day-modal-title">' + escapeHtml(formatDayFull(dayTs)) + '</div>' +
       rows +
-      (showNotes ? '<div class="year-day-note-section" id="yearDayNoteSection"></div>' : '');
+      (showNotes ? '<div class="year-day-note-section" id="yearDayNoteSection"></div>' : '') +
+      (yearComments.length ? '<div class="year-day-note-section" id="yearCustomCommentsSection"></div>' : '');
     container.scrollTop = 0;
 
     if(showNotes) renderYearDayNoteView(dayTs, existingNote);
+    if(yearComments.length) renderYearCustomCommentsSection(dayTs);
   }
 
   var PENCIL_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>';
@@ -3729,6 +3894,109 @@
     var saveBtn = document.getElementById("yearDayNoteSaveBtn");
     var newText = getEditableNoteText(editable, saveBtn);
     setHourNoteForDay(Number(dayTsAttr), newText, true);
+  }
+
+  // ---- личные комментарии из шапки, скопированные на конкретный день
+  // "Карты дней года" (см. createYearCommentCopy) ----
+  // Список из 0+ независимых записей: каждая — как обычный комментарий
+  // дня (та же разметка .year-day-note-view), но с добавленным крестиком
+  // для удаления (per-запись, не общий на весь день).
+  function renderYearCustomCommentsSection(dayTs){
+    var wrap = document.getElementById("yearCustomCommentsSection");
+    if(!wrap) return;
+    var items = getYearCommentsForDay(dayTs);
+    wrap.innerHTML = items.map(function(item){
+      return '<div class="year-custom-comment-item" id="' + yearCommentDomId(item.key) + '"></div>';
+    }).join("");
+    items.forEach(function(item){ renderYearCommentItemView(item.key, item.text); });
+  }
+  function yearCommentDomId(key){ return "yearComment_" + key.replace(/[^a-zA-Z0-9]/g,"_"); }
+  function renderYearCommentItemView(key, text){
+    var holder = document.getElementById(yearCommentDomId(key));
+    if(!holder) return;
+    holder.innerHTML =
+      '<div class="year-day-note-view">' + linkifyHtml(text) +
+        '<button type="button" class="year-day-note-icon-btn year-comment-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
+        '<button type="button" class="year-day-note-icon-btn year-comment-delete-btn" title="Удалить">' + CROSS_SMALL_ICON_SVG + '</button>' +
+      '</div>';
+    holder.querySelector(".year-comment-edit-btn").addEventListener("click", function(){
+      renderYearCommentItemEdit(key, text);
+    });
+    holder.querySelector(".year-comment-delete-btn").addEventListener("click", function(){
+      deleteYearCommentPermanently(key);
+      holder.remove();
+    });
+  }
+  function renderYearCommentItemEdit(key, text){
+    var holder = document.getElementById(yearCommentDomId(key));
+    if(!holder) return;
+    flushPendingYearCommentEdits();
+    holder.innerHTML =
+      '<div class="year-day-note-view year-day-note-editable" id="yearCommentInput_' + yearCommentDomId(key) + '" contenteditable="true" data-year-comment-key="' + escapeHtml(key) + '"></div>';
+    var editable = document.getElementById("yearCommentInput_" + yearCommentDomId(key));
+    if(!editable) return;
+    var textNode = document.createTextNode(text ? text : EMPTY_ANCHOR_CHAR);
+    editable.appendChild(textNode);
+    var saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "year-day-note-icon-btn";
+    saveBtn.title = "Сохранить";
+    saveBtn.innerHTML = SAVE_ICON_SVG;
+    editable.appendChild(saveBtn);
+    var deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "year-day-note-icon-btn";
+    deleteBtn.title = "Удалить";
+    deleteBtn.innerHTML = CROSS_SMALL_ICON_SVG;
+    editable.appendChild(deleteBtn);
+
+    function updatePlaceholder(){
+      var empty = getEditableNoteText(editable, saveBtn).length === 0;
+      editable.classList.toggle("is-empty", empty);
+    }
+    updatePlaceholder();
+
+    editable.focus();
+    var range = document.createRange();
+    range.setStart(textNode, textNode.length);
+    range.collapse(true);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    editable.addEventListener("input", updatePlaceholder);
+    editable.addEventListener("keydown", function(e){
+      if(e.key === "Enter"){
+        e.preventDefault();
+        document.execCommand("insertText", false, "\n");
+      }
+    });
+
+    saveBtn.addEventListener("click", function(e){
+      e.stopPropagation();
+      var newText = getEditableNoteText(editable, saveBtn);
+      setYearCommentText(key, newText);
+      renderYearCommentItemView(key, newText.trim());
+    });
+    deleteBtn.addEventListener("click", function(e){
+      e.stopPropagation();
+      deleteYearCommentPermanently(key);
+      holder.remove();
+    });
+  }
+  // недописанное редактирование записи "Карты дней года" сохраняем перед
+  // закрытием окна настроек/переключением вкладки — та же идея, что и у
+  // flushPendingYearDayNoteEdit
+  function flushPendingYearCommentEdits(){
+    var editables = document.querySelectorAll("[data-year-comment-key]");
+    Array.prototype.forEach.call(editables, function(editable){
+      if(!editable.isContentEditable) return;
+      var key = editable.getAttribute("data-year-comment-key");
+      if(!key) return;
+      var saveBtn = editable.querySelector(".year-day-note-icon-btn");
+      var newText = getEditableNoteText(editable, saveBtn);
+      setYearCommentText(key, newText);
+    });
   }
 
   // то же самое для текста задачи (вкладки red/inbox/next/…): если в
@@ -4305,6 +4573,266 @@
     return byDay;
   }
 
+  // ===================== ЛИЧНЫЕ КОММЕНТАРИИ (шапка / вкладка "комментарии") =====================
+  // Список во вкладке "Добавить кастомный комментарий" устроен как список
+  // задач ("comment:<id>", мягкое удаление через c:null — та же схема,
+  // что и у task:, см. getAllTasks/deleteTaskPermanently выше), но без
+  // переноса и отметки "выполнено": только карандаш (редактирование с
+  // автосохранением по потере фокуса) и крестик (безвозвратное удаление,
+  // как в архиве задач).
+  //
+  // При первом сохранении непустого текста комментарий один раз копируется
+  // в "Карту дней года" на день своего создания (yearcomment:<деньСоздания>-
+  // <rand>, см. ниже) — это НЕЗАВИСИМАЯ копия: дальнейшее редактирование
+  // или удаление записи здесь, во вкладке комментариев, эту копию больше
+  // не трогает. Чтобы убрать запись из "Карты дней года", нужно открыть
+  // именно этот день и удалить её там (см. renderYearCustomCommentsSection).
+  function genCommentId(){
+    return "cm" + Date.now() + Math.random().toString(36).slice(2,7);
+  }
+  function getAllComments(){
+    var list = [];
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("comment:") === 0 && state[k] && state[k].c){
+        list.push({id: k.slice(8), c: state[k].c, t: state[k].t});
+      }
+    });
+    list.sort(function(a,b){ return b.t - a.t; });
+    return list;
+  }
+  function getCommentById(id){
+    var rec = state["comment:" + id];
+    if(!rec || !rec.c) return null;
+    return {id: id, c: rec.c, t: rec.t};
+  }
+  function saveCommentData(id, data, createdAt){
+    var rec = state["comment:" + id];
+    var t = (rec && typeof rec.t === "number") ? rec.t : (createdAt || Date.now());
+    state["comment:" + id] = {c: data, t: t};
+    saveLocalState();
+    scheduleCloudPush();
+  }
+  function createComment(){
+    var id = genCommentId();
+    saveCommentData(id, {text: "", createdDayTs: startOfDay(Date.now()), yearCopied: false});
+    return id;
+  }
+  function setCommentText(id, text){
+    var comment = getCommentById(id);
+    if(!comment) return;
+    comment.c.text = text;
+    var trimmed = (text || "").trim();
+    if(trimmed && !comment.c.yearCopied){
+      createYearCommentCopy(comment.c.createdDayTs, trimmed);
+      comment.c.yearCopied = true;
+    }
+    saveCommentData(id, comment.c);
+    refreshHeaderQuote();
+  }
+  // безвозвратное удаление — не трогает уже сделанную копию в "Карте дней
+  // года" (см. пояснение выше)
+  function deleteCommentPermanently(id){
+    state["comment:" + id] = {c: null, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+    refreshHeaderQuote();
+  }
+
+  // ---- независимые копии в "Карте дней года" ("yearcomment:<деньСоздания>-<rand>") ----
+  function genYearCommentId(dayTs){
+    return "yearcomment:" + dayTs + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  }
+  function createYearCommentCopy(dayTs, text){
+    var key = genYearCommentId(dayTs);
+    state[key] = {c: {text: text}, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+    refreshYearGridIfOpen();
+    return key;
+  }
+  function getYearCommentsForDay(dayTs){
+    var prefix = "yearcomment:" + dayTs + "-";
+    var list = [];
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf(prefix) !== 0) return;
+      var rec = state[k];
+      if(!rec || !rec.c || !rec.c.text) return;
+      list.push({key: k, text: rec.c.text, t: rec.t});
+    });
+    list.sort(function(a,b){ return a.t - b.t; });
+    return list;
+  }
+  function setYearCommentText(key, text){
+    var trimmed = (text || "").trim();
+    var rec = state[key];
+    var t = (rec && typeof rec.t === "number") ? rec.t : Date.now();
+    state[key] = {c: (trimmed ? {text: trimmed} : null), t: t};
+    saveLocalState();
+    scheduleCloudPush();
+  }
+  function deleteYearCommentPermanently(key){
+    state[key] = {c: null, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+  }
+  // все копии-комментарии по дням — для экспорта (см. buildExportData)
+  function getYearCommentsByDayAll(){
+    var byDay = {};
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("yearcomment:") !== 0) return;
+      var rec = state[k];
+      if(!rec || !rec.c || !rec.c.text) return;
+      var rest = k.slice("yearcomment:".length);
+      var day = Number(rest.split("-")[0]);
+      (byDay[day] = byDay[day] || []).push(rec.c.text);
+    });
+    return byDay;
+  }
+
+  // ===================== ВКЛАДКА "КОММЕНТАРИИ" (extra2): ОТРИСОВКА =====================
+  // Значок-иконка (речевое облако) для язычка вкладки, когда функция
+  // включена — тот же визуальный язык (контур, currentColor), что и у
+  // остальных пиктограмм вкладок.
+  var COMMENT_TAB_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 4V5z"></path><path d="M8 10h8"></path><path d="M8 13h5"></path></svg>';
+  var CROSS_SMALL_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>';
+
+  // Меняет вид язычка extra2 в зависимости от галочки "Включить личные
+  // комментарии…" — вызывается при загрузке страницы и сразу после
+  // переключения галочки (см. renderSettingsTabGear).
+  function refreshExtra2TabAppearance(){
+    var btn = document.getElementById("settingsTabExtra2Btn");
+    if(!btn) return;
+    if(getCustomCommentsEnabled()){
+      btn.title = "Добавить кастомный комментарий";
+      btn.innerHTML = COMMENT_TAB_ICON_SVG;
+    } else {
+      btn.title = "";
+      btn.innerHTML = "";
+    }
+  }
+
+  function renderCommentsTab(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var comments = getAllComments();
+    var rowsHtml = comments.map(function(c){ return buildCommentRowHtml(c); }).join("");
+    container.innerHTML =
+      '<div class="task-list" id="commentListWrap">' + rowsHtml + '</div>' +
+      (comments.length === 0 ? '<div class="task-empty">Здесь пока нет комментариев.</div>' : '');
+    comments.forEach(function(c){ renderCommentRowView(c.id); });
+
+    var fab = document.getElementById("taskAddFab");
+    if(fab){
+      fab.onclick = function(){
+        flushPendingCommentEdits();
+        var id = createComment();
+        var wrap = document.getElementById("commentListWrap");
+        if(wrap){
+          var emptyMsg = document.querySelector(".task-empty");
+          if(emptyMsg) emptyMsg.remove();
+          var holder = document.createElement("div");
+          holder.innerHTML = buildCommentRowHtml(getCommentById(id));
+          wrap.insertBefore(holder.firstChild, wrap.firstChild);
+          renderCommentRowEdit(id);
+        } else {
+          renderCommentsTab();
+          requestAnimationFrame(function(){ renderCommentRowEdit(id); });
+        }
+      };
+    }
+  }
+
+  function buildCommentRowHtml(comment){
+    return '<div class="task-row" data-id="' + comment.id + '">' +
+      '<div class="task-body" data-id="' + comment.id + '"></div>' +
+      '</div>';
+  }
+
+  function renderCommentRowView(id){
+    var body = document.querySelector('#commentListWrap .task-body[data-id="' + id + '"]');
+    var comment = getCommentById(id);
+    if(!body || !comment) return;
+    var textHtml = comment.c.text ? linkifyHtml(comment.c.text) : '<span class="task-text-placeholder">Новый комментарий</span>';
+    body.innerHTML =
+      '<span class="task-text-view">' + textHtml + '</span>' +
+      '<span class="task-actions">' +
+        '<button type="button" class="task-icon-btn comment-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
+        '<button type="button" class="task-icon-btn comment-delete-btn" title="Удалить">' + CROSS_SMALL_ICON_SVG + '</button>' +
+      '</span>';
+    body.querySelector(".comment-edit-btn").addEventListener("click", function(){ renderCommentRowEdit(id); });
+    body.querySelector(".comment-delete-btn").addEventListener("click", function(){
+      deleteCommentPermanently(id);
+      renderCommentsTab();
+    });
+  }
+
+  function renderCommentRowEdit(id){
+    var body = document.querySelector('#commentListWrap .task-body[data-id="' + id + '"]');
+    var comment = getCommentById(id);
+    if(!body || !comment) return;
+    flushPendingCommentEdits();
+    body.innerHTML =
+      '<div class="task-editable" id="commentEditable_' + id + '" contenteditable="true" data-comment-id="' + id + '"></div>' +
+      '<span class="task-actions">' +
+        '<button type="button" class="task-icon-btn comment-delete-btn" title="Удалить">' + CROSS_SMALL_ICON_SVG + '</button>' +
+      '</span>';
+    var editable = document.getElementById("commentEditable_" + id);
+    if(!editable) return;
+    var textNode = document.createTextNode(comment.c.text ? comment.c.text : EMPTY_ANCHOR_CHAR);
+    editable.appendChild(textNode);
+
+    function updatePlaceholder(){
+      var empty = getEditableNoteText(editable).length === 0;
+      editable.classList.toggle("is-empty", empty);
+    }
+    updatePlaceholder();
+
+    editable.focus();
+    var range = document.createRange();
+    range.setStart(textNode, textNode.length);
+    range.collapse(true);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    editable.addEventListener("input", updatePlaceholder);
+    editable.addEventListener("keydown", function(e){
+      if(e.key === "Enter"){
+        e.preventDefault();
+        document.execCommand("insertText", false, "\n");
+      }
+    });
+
+    editable.addEventListener("blur", function(){
+      setTimeout(function(){
+        if(!editable.isContentEditable || !document.body.contains(editable)) return;
+        var newText = getEditableNoteText(editable);
+        setCommentText(id, newText.trim());
+        renderCommentRowView(id);
+      }, 0);
+    });
+
+    body.querySelector(".comment-delete-btn").addEventListener("click", function(){
+      deleteCommentPermanently(id);
+      renderCommentsTab();
+    });
+  }
+
+  // если в момент ухода со вкладки комментариев/закрытия окна настроек
+  // какая-то строка была в режиме редактирования — сохраняем введённый
+  // текст без явного действия пользователя (та же идея, что и у
+  // flushPendingTaskEdits/flushPendingYearDayNoteEdit)
+  function flushPendingCommentEdits(){
+    var editables = document.querySelectorAll(".task-editable[data-comment-id]");
+    Array.prototype.forEach.call(editables, function(editable){
+      if(!editable.isContentEditable) return;
+      var id = editable.getAttribute("data-comment-id");
+      if(!id) return;
+      var newText = getEditableNoteText(editable);
+      setCommentText(id, newText.trim());
+    });
+  }
+
   // ===================== ВКЛАДКИ ЗАДАЧ: ОТРИСОВКА =====================
   function renderTaskTabList(tabKey){
     var container = document.getElementById("settingsTabContent");
@@ -4799,6 +5327,7 @@
   applyThemeToPage(getCurrentThemeId());
   renderThemeDots();
   initSettingsFabToggle();
+  refreshExtra2TabAppearance();
   updateMissedBanner();
   renderVersionHistory();
   renderHourBars();

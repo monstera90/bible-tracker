@@ -328,6 +328,33 @@
   }
   .settings-row input[type=checkbox]{ width:22px;height:22px;flex-shrink:0; }
 
+  /* блок ввода своего ключевого стиха — появляется под галочкой "Включить
+     библейские стихи…" (см. renderSettingsTabGear в my.js), тот же отступ
+     снизу, что и у обычной .settings-row */
+  .settings-verse-block{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    padding:4px 4px 12px 4px;
+    border-bottom:1px solid var(--groove-shadow);
+  }
+  .settings-verse-label{
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+  .settings-verse-input{
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:14px;
+    color:var(--ink);
+    background:var(--parchment-dark);
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    padding:6px 8px;
+    resize:none;
+    width:100%;
+  }
+
   /* ---------- статистика по счётчику часов (табличка дат) ---------- */
   .hour-stats-row{ cursor:default; }
   .hour-stats-row.hour-stats-toggle{ cursor:pointer; }
@@ -577,6 +604,14 @@
     content:"Комментарий…";
     color:var(--ink-soft);
     font-style:italic;
+  }
+  /* несколько независимых личных комментариев из шапки, скопированных на
+     один и тот же день (см. renderYearCustomCommentsSection в my.js) —
+     каждый в своём .year-day-note-view, с отступом между записями */
+  .year-custom-comment-item + .year-custom-comment-item{
+    margin-top:10px;
+    padding-top:10px;
+    border-top:1px solid var(--groove-shadow);
   }
 
   /* ---------- вкладки задач (red/inbox/next/projects/waiting/read/
