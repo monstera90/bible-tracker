@@ -1070,7 +1070,7 @@
   function setSyncState(st, extraText){
     syncStatusPill.setAttribute("data-state", st);
     if(st !== "off") syncStatusPill.classList.remove("sync-collapsed");
-    var labels = {off:"Настроить<br>синхронизацию",offline:"",syncing:"",synced:"",error:"Не синхронизировано"};
+    var labels = {off:"Настроить<br>синхронизацию",offline:"",syncing:"",synced:"",error:""};
     syncStatusText.innerHTML = (extraText != null ? extraText : labels[st]) || "";
   }
 

@@ -153,9 +153,9 @@
     box-shadow:0 0 0 2px rgba(255,255,255,.15);
   }
 
-  /* "off" — код синхронизации не настроен: бесцветный неактивный индикатор
-     (полая точка без заливки), а не тревожный цвет. Надпись видна только
-     до первого взаимодействия пользователя со страницей (см. .sync-collapsed) */
+  /* "off" — код синхронизации не настроен: простой серый неактивный
+     индикатор, без мерцания. Надпись видна только до первого взаимодействия
+     пользователя со страницей (см. .sync-collapsed) */
   .sync-status[data-state="off"]{
     align-items:flex-start;
     padding-top:6px;
@@ -163,42 +163,53 @@
   }
   .sync-status[data-state="off"] .sync-dot{
     margin-top:4px;
-    background:transparent;
-    border:1.5px solid rgba(241,230,205,.45);
-    box-shadow:none;
+    background:#8a8578;
+    border:none;
+    box-shadow:0 0 0 2px rgba(255,255,255,.15);
+    animation:none !important;
   }
   .sync-status[data-state="off"] #syncStatusText{
     line-height:1.3;
   }
 
-  .sync-status[data-state="offline"] .sync-dot{ background:var(--status-offline); }
-
-  /* состояния без подписи (offline, syncing, synced, и "off" после того как
-     пользователь начал взаимодействовать со страницей) — плашка сжимается
-     в правильный круг вокруг светодиода, а не в овал из-за паддингов пилюли */
+  /* состояния без подписи (offline, syncing, synced, error, и "off" после
+     того как пользователь начал взаимодействовать со страницей) — сама
+     плашка-«таблетка» больше не рисуется, остаётся только сам светодиод,
+     без круглого фона/обводки вокруг него */
   .sync-status[data-state="offline"],
   .sync-status[data-state="synced"],
   .sync-status[data-state="syncing"],
+  .sync-status[data-state="error"],
   .sync-status[data-state="off"].sync-collapsed{
-    width:28px;
-    height:28px;
+    width:auto;
+    height:auto;
     padding:0;
-    align-items:center;
-    justify-content:center;
-    border-radius:50%;
+    background:transparent;
+    border:none;
+    box-shadow:none;
   }
   .sync-status[data-state="offline"] #syncStatusText,
   .sync-status[data-state="synced"] #syncStatusText,
   .sync-status[data-state="syncing"] #syncStatusText,
+  .sync-status[data-state="error"] #syncStatusText,
   .sync-status[data-state="off"].sync-collapsed #syncStatusText{
     display:none;
   }
-  /* в свёрнутом виде "off" превращается в обычную серую точку, как offline */
+  /* в свёрнутом виде "off" превращается в обычную серую точку — статичную,
+     без мерцания (человек ещё не настроил синхронизацию, мерцать нечему).
+     "offline" — другое состояние (сеть пропала при настроенной синхронизации)
+     и мерцает серым, как остальные активные состояния */
   .sync-status[data-state="off"].sync-collapsed .sync-dot{
     margin-top:0;
-    background:var(--status-off);
     border:none;
-    box-shadow:0 0 0 2px rgba(255,255,255,.15);
+    background:#8a8578;
+    animation:none !important;
+  }
+  .sync-status[data-state="offline"] .sync-dot{
+    margin-top:0;
+    border:none;
+    background:#8a8578;
+    animation:beacon-gray 2.4s ease-in-out infinite !important;
   }
 
   /* "synced" — светодиод мерцает как маячок, циклично переходя между
@@ -209,7 +220,7 @@
     margin-top:0;
     border:none;
     background:#2fa15f;
-    animation:beacon-green 2.4s ease-in-out infinite;
+    animation:beacon-green 2.4s ease-in-out infinite !important;
   }
 
   /* "syncing" — то же самое, но жёлтым */
@@ -217,10 +228,16 @@
     margin-top:0;
     border:none;
     background:#c9a227;
-    animation:beacon-yellow 2.4s ease-in-out infinite;
+    animation:beacon-yellow 2.4s ease-in-out infinite !important;
   }
 
-  .sync-status[data-state="error"] .sync-dot{ background:var(--status-err); }
+  /* "error" — то же самое, но красным, без текста "Не синхронизировано" */
+  .sync-status[data-state="error"] .sync-dot{
+    margin-top:0;
+    border:none;
+    background:#b0432e;
+    animation:beacon-red 2.4s ease-in-out infinite !important;
+  }
 
   @keyframes beacon-green{
     0%,100%{
@@ -249,6 +266,36 @@
     70%{
       background:#8a6d1a;
       box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 0 2px 1px rgba(138,109,26,.2);
+    }
+  }
+
+  @keyframes beacon-red{
+    0%,100%{
+      background:#b0432e;
+      box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 0 3px 1px rgba(176,67,46,.25);
+    }
+    35%{
+      background:#e0705a;
+      box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 0 7px 2px rgba(224,112,90,.6);
+    }
+    70%{
+      background:#7a2c1c;
+      box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 0 2px 1px rgba(122,44,28,.2);
+    }
+  }
+
+  @keyframes beacon-gray{
+    0%,100%{
+      background:#8a8578;
+      box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 0 3px 1px rgba(138,133,120,.25);
+    }
+    35%{
+      background:#b5b0a0;
+      box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 0 6px 2px rgba(181,176,160,.45);
+    }
+    70%{
+      background:#5f5b4f;
+      box-shadow:0 0 0 2px rgba(255,255,255,.15), 0 0 2px 1px rgba(95,91,79,.2);
     }
   }
 
