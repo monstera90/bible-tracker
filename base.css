@@ -55,6 +55,17 @@
     color:inherit;
     text-decoration:none;
   }
+  /* ссылки внутри личных комментариев (см. linkifyHtml/scripturifyHtml в
+     my.js) добавляют класс .auto-link с собственным фиолетовым цветом
+     (см. modals.css) — здесь, в шапке, он не подходит: ссылка должна
+     выглядеть как обычный текст цитаты, а не как акцентная ссылка */
+  header .quote a.auto-link{
+    color:inherit;
+  }
+  header .quote a.auto-link:hover,
+  header .quote a.auto-link:active{
+    color:inherit;
+  }
   header .quote a:active{
     opacity:.7;
   }
