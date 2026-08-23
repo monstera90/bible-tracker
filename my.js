@@ -2923,6 +2923,32 @@
     });
     return total;
   }
+  // "стартовый" день для целей "Обзора" (см. sumHourLogMinutesDayFiltered
+  // ниже) — если за один календарный день суммарно внесено больше этого
+  // порога, весь день считается разовым вводом задним числом, а не
+  // реальным использованием в этот день
+  var HOUR_BASELINE_DAY_THRESHOLD_MINUTES = 16 * 60;
+  // группирует "сырые" hourlog: за [fromTs, toTs) по календарным дням и
+  // делит итог на обычные минуты и "стартовые" (день целиком превысил
+  // порог) — использовать ТОЛЬКО для статистики ("Обзор"); на сам счётчик
+  // и его прогресс (sumHourLogsSince выше) это не влияет
+  function sumHourLogMinutesDayFiltered(fromTs, toTs){
+    var perDay = {};
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("hourlog:") !== 0) return;
+      var rec = state[k];
+      if(!rec || typeof rec.c !== "number") return;
+      if(rec.t < fromTs || rec.t >= toTs) return;
+      var day = startOfDay(rec.t);
+      perDay[day] = (perDay[day] || 0) + rec.c;
+    });
+    var total = 0, baseline = 0;
+    Object.keys(perDay).forEach(function(dayKey){
+      if(perDay[dayKey] > HOUR_BASELINE_DAY_THRESHOLD_MINUTES) baseline += perDay[dayKey];
+      else total += perDay[dayKey];
+    });
+    return {total: total, baseline: baseline};
+  }
   function addHourLogEntry(minutes){
     var id = "hourlog:" + Date.now() + "-" + Math.random().toString(36).slice(2,8);
     state[id] = {c: minutes, t: Date.now()};
@@ -2930,8 +2956,12 @@
     scheduleCloudPush();
     refreshYearGridIfOpen();
   }
-  function recordMonthSegment(periodStart, totalMinutes){
-    state["hoursegment:" + periodStart] = {c: totalMinutes, t: Date.now()};
+  // baselineMinutes — сколько из totalMinutes относится к "стартовым" дням
+  // этого периода (см. sumHourLogMinutesDayFiltered) — сохраняется вместе с
+  // сегментом, чтобы "Обзор" мог вычесть эту часть даже после того, как
+  // период закрылся и подневная разбивка исходных записей стала недоступна
+  function recordMonthSegment(periodStart, totalMinutes, baselineMinutes){
+    state["hoursegment:" + periodStart] = {c: totalMinutes, t: Date.now(), baseline: baselineMinutes || 0};
     saveLocalState();
     scheduleCloudPush();
   }
@@ -3041,7 +3071,11 @@
     var totalMinutes = sumHourLogsSince(periodStart);
     var wholeMinutes = Math.floor(totalMinutes/60) * 60;
     var carryMinutes = totalMinutes - wholeMinutes;
-    recordMonthSegment(periodStart, wholeMinutes);
+    // доля этого периода, приходящаяся на "стартовые" дни (см.
+    // sumHourLogMinutesDayFiltered) — считаем её ДО того, как сырые записи
+    // станут недоступны для подневного разбора, и сохраняем при сегменте
+    var baselineMinutes = Math.min(sumHourLogMinutesDayFiltered(periodStart, Date.now() + 1).baseline, wholeMinutes);
+    recordMonthSegment(periodStart, wholeMinutes, baselineMinutes);
     var newStart = Date.now();
     setHourState(HOUR_MONTH_PERIOD_KEY, newStart);
     setHourState(HOUR_MONTH_DEFERRED_KEY, null);
@@ -4890,15 +4924,53 @@
     });
     return count;
   }
-  // сырые "hourlog:" хранятся только примерно за последний месяц (см.
-  // pruneOldHourLogsForStats выше) — для более дальних периодов
-  // дополнительно учитываем уже закрытые месячные сегменты "hoursegment:"
+  // сырые "hourlog:" хранятся ~месяц (см. pruneOldHourLogsForStats), но НЕ
+  // удаляются сразу при закрытии месячного периода (годовой режим "50
+  // часов к сентябрю") — поэтому одни и те же минуты могут быть видны и
+  // как "сырые" записи, и как уже закрытый сегмент "hoursegment:" за тот
+  // же период. Чтобы не посчитать их дважды, "сырые" записи учитываются
+  // только начиная с даты открытия ТЕКУЩЕГО периода (getMonthPeriodStart) —
+  // всё, что раньше, уже представлено соответствующим сегментом.
+  //
+  // "стартовый" день исключения (см. sumHourLogMinutesDayFiltered выше) —
+  // применяется и к текущему (ещё не закрытому) периоду "на лету", и к уже
+  // закрытым сегментам — для них исключаемая доля посчитана заранее и
+  // сохранена в сегменте (см. closeCurrentMonthPeriodWithCarry). Если
+  // сегмент был закрыт ДО появления этого правила и .baseline у него нет —
+  // пробуем пересчитать по ещё не удалённым сырым записям того периода;
+  // если их уже нет, вычесть нечего (ограничение архитектуры — как и с
+  // самим pruneOldHourLogsForStats).
+  function getHourSegmentBoundaries(){
+    var starts = [];
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("hoursegment:") === 0){
+        var s = Number(k.slice("hoursegment:".length));
+        if(!isNaN(s)) starts.push(s);
+      }
+    });
+    var current = getMonthPeriodStart();
+    if(current) starts.push(current);
+    starts.sort(function(a,b){ return a - b; });
+    return starts;
+  }
+  function getSegmentBaselineMinutes(segStart, segTotal){
+    var rec = state["hoursegment:" + segStart];
+    if(rec && typeof rec.baseline === "number") return Math.min(rec.baseline, segTotal);
+    var boundaries = getHourSegmentBoundaries();
+    var idx = boundaries.indexOf(segStart);
+    var upper = (idx !== -1 && idx + 1 < boundaries.length) ? boundaries[idx+1] : (getMonthPeriodStart() || (Date.now() + 1));
+    return Math.min(sumHourLogMinutesDayFiltered(segStart, upper).baseline, segTotal);
+  }
   function getHourMinutesSince(startTs){
-    var total = sumHourLogsSince(startTs);
+    var periodStart = getMonthPeriodStart();
+    var rawFrom = periodStart ? Math.max(startTs, periodStart) : startTs;
+    var total = sumHourLogMinutesDayFiltered(rawFrom, Date.now() + 1).total;
     Object.keys(state).forEach(function(k){
       if(k.indexOf("hoursegment:") === 0 && state[k] && typeof state[k].c === "number"){
-        var periodStart = Number(k.slice("hoursegment:".length));
-        if(!isNaN(periodStart) && periodStart >= startTs) total += state[k].c;
+        var segStart = Number(k.slice("hoursegment:".length));
+        if(isNaN(segStart) || segStart < startTs) return;
+        var seg = state[k].c - getSegmentBaselineMinutes(segStart, state[k].c);
+        if(seg > 0) total += seg;
       }
     });
     return total;
