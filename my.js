@@ -468,6 +468,24 @@
     extra2: "settingsTabExtra2Btn",
     extra3: "settingsTabExtra3Btn"
   };
+  // ===== ВТОРОЙ НАБОР ВКЛАДОК (заглушки) =====
+  // Полный дубль первого набора: 9 боковых + 5 нижних язычков (см. разметку
+  // в index.html, .settingsTabsSet2 / .settingsTabsGearSet2). Пока все 14 —
+  // просто заглушки без функций (см. renderSettingsTabSet2Stub ниже);
+  // ключи специально с префиксом "set2" — тем же, что и остальные
+  // (TASK_TAB_IDS/EXTRA_TAB_IDS), участвуют в общем переключателе
+  // switchSettingsTab. set2b_1 — "домашняя" вкладка второго набора
+  // (открывается по умолчанию при переключении на набор, см.
+  // cycleSettingsTabSet).
+  var SET2_TAB_IDS = {
+    set2s_1: "settingsTabSet2Btn1", set2s_2: "settingsTabSet2Btn2", set2s_3: "settingsTabSet2Btn3",
+    set2s_4: "settingsTabSet2Btn4", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
+    set2s_7: "settingsTabSet2Btn7", set2s_8: "settingsTabSet2Btn8", set2s_9: "settingsTabSet2Btn9"
+  };
+  var SET2_EXTRA_TAB_IDS = {
+    set2b_1: "settingsTabSet2GearBtn1", set2b_2: "settingsTabSet2GearBtn2", set2b_3: "settingsTabSet2GearBtn3",
+    set2b_4: "settingsTabSet2GearBtn4", set2b_5: "settingsTabSet2GearBtn5"
+  };
   // а вот КУДА реально можно перенести задачу стрелочкой (пикер
   // "Перенести задачу") — без red, т.к. принадлежность к Red определяется
   // не вкладкой-домом, а цветной отметкой слева от чекбокса
@@ -2524,6 +2542,15 @@
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
     flushPendingCommentEdits();
+    // запоминаем позицию только если это реальная вкладка одного из двух
+    // стеков (бокового или нижнего, набор 1 или 2) — служебные экраны вроде
+    // "versions"/"import"/"resetConfirm" (открываются кнопками ВНУТРИ
+    // вкладки настроек) не считаются отдельной позицией и не сбивают
+    // запомненное место — см. cycleSettingsTabSet ниже.
+    if(SETTINGS_SIDE_ORDER_1.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(tab) !== -1 ||
+       SETTINGS_SIDE_ORDER_2.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_2.indexOf(tab) !== -1){
+      settingsLastStackTab = tab;
+    }
     var gearBtn = document.getElementById("settingsTabGearBtn");
     var yearBtn = document.getElementById("settingsTabYearBtn");
     var moodTabBtn = document.getElementById("settingsTabMoodBtn");
@@ -2536,6 +2563,14 @@
     });
     Object.keys(EXTRA_TAB_IDS).forEach(function(key){
       var btn = document.getElementById(EXTRA_TAB_IDS[key]);
+      if(btn) btn.classList.toggle("active", tab === key);
+    });
+    Object.keys(SET2_TAB_IDS).forEach(function(key){
+      var btn = document.getElementById(SET2_TAB_IDS[key]);
+      if(btn) btn.classList.toggle("active", tab === key);
+    });
+    Object.keys(SET2_EXTRA_TAB_IDS).forEach(function(key){
+      var btn = document.getElementById(SET2_EXTRA_TAB_IDS[key]);
       if(btn) btn.classList.toggle("active", tab === key);
     });
     var container = document.getElementById("settingsTabContent");
@@ -2551,6 +2586,7 @@
     else if(tab === "moodResetConfirm") renderSettingsTabMoodResetConfirm();
     else if(TASK_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabTask(tab);
     else if(EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabExtra(tab);
+    else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
   }
 
@@ -2570,6 +2606,94 @@
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     container.innerHTML = '<div class="mood-diagram-empty">Контент появится позже</div>';
+  }
+
+  // ===== ВТОРОЙ НАБОР ВКЛАДОК (заглушки) =====
+  // Все 14 вкладок второго набора (9 боковых + 5 нижних, см. SET2_TAB_IDS/
+  // SET2_EXTRA_TAB_IDS выше) пока показывают один и тот же текст — функции
+  // под них появятся позже.
+  function renderSettingsTabSet2Stub(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    container.innerHTML = '<div class="mood-diagram-empty">Вкладка пока не запрограммирована.<br>Контент появится позже.</div>';
+  }
+
+  // Какой набор вкладок сейчас показан — 1 (боковые/нижние из #settingsTabs
+  // и #settingsTabsGear) или 2 (заглушки из #settingsTabsSet2/
+  // #settingsTabsGearSet2). Плавающая кнопка-язычок (#settingsGearBtn)
+  // переключает их по кругу: закрыто -> набор 1 -> набор 2 -> набор 1 ->
+  // ... (см. cycleSettingsTabSet и обработчик клика по settingsGearBtn
+  // ниже). При каждом закрытии блокнота (клик мимо него) выбор набора не
+  // хранится — следующее открытие всегда начинается с набора 1 (см. ветку
+  // "иначе" в обработчике клика).
+  var settingsActiveTabSet = 1;
+  // Полный порядок позиций в каждом из 4 стеков (боковой/нижний × набор
+  // 1/2), от первого места до последнего — используется и для запоминания
+  // позиции (см. settingsLastStackTab), и для поиска "того же места" в
+  // другом наборе (см. getCorrespondingTabInOtherSet). Порядок должен
+  // совпадать с физическим (визуальным) порядком язычков в стопке:
+  // - боковые стеки идут снизу вверх (первый элемент — самый нижний
+  //   язычок, см. flex-direction:column-reverse в CSS и порядок кнопок в
+  //   index.html — #settingsTabs и #settingsTabsSet2 построены одинаково,
+  //   первым в DOM у обоих идёт "нижний" язычок).
+  // - нижний ряд (EXTRA_TAB_IDS в TASK_TAB_IDS не входит: вкладки
+  //   "настройки"/"год"/"настроение" переключаются отдельными
+  //   переменными gearBtn/yearBtn/moodTabBtn, а не через EXTRA_TAB_IDS —
+  //   поэтому единственный полный список из всех 5 нижних вкладок первого
+  //   набора собран здесь вручную, а не через Object.keys(EXTRA_TAB_IDS),
+  //   в котором только 2 из 5) идёт слева направо.
+  var SETTINGS_SIDE_ORDER_1 = Object.keys(TASK_TAB_IDS);              // red..archive
+  var SETTINGS_BOTTOM_ORDER_1 = ["gear","year","mood"].concat(Object.keys(EXTRA_TAB_IDS)); // gear,year,mood,extra2,extra3
+  var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_9
+  var SETTINGS_BOTTOM_ORDER_2 = Object.keys(SET2_EXTRA_TAB_IDS);      // set2b_1..set2b_5
+  // последняя реально выбранная вкладка одного из двух стеков (см.
+  // switchSettingsTab выше) — используется, чтобы при переключении набора
+  // (cycleSettingsTabSet) открывалась не первая попавшаяся вкладка нового
+  // набора, а та, что стоит на ТОЙ ЖЕ позиции (тот же порядковый номер в
+  // своём стеке — боковом или нижнем), что и вкладка, на которой
+  // произошло переключение.
+  var settingsLastStackTab = "gear";
+  // ищет вкладку с той же позицией (индексом), что и tab, но в ДРУГОМ
+  // наборе и в том же стеке (боковой -> боковой, нижний -> нижний).
+  // Возвращает null, если позиция не распознана (такого пока не бывает,
+  // т.к. функция вызывается только с ключом из одного из 4 списков выше).
+  function getCorrespondingTabInOtherSet(tab){
+    var idx;
+    if((idx = SETTINGS_SIDE_ORDER_1.indexOf(tab)) !== -1) return SETTINGS_SIDE_ORDER_2[idx];
+    if((idx = SETTINGS_BOTTOM_ORDER_1.indexOf(tab)) !== -1) return SETTINGS_BOTTOM_ORDER_2[idx];
+    if((idx = SETTINGS_SIDE_ORDER_2.indexOf(tab)) !== -1) return SETTINGS_SIDE_ORDER_1[idx];
+    if((idx = SETTINGS_BOTTOM_ORDER_2.indexOf(tab)) !== -1) return SETTINGS_BOTTOM_ORDER_1[idx];
+    return null;
+  }
+  function applySettingsTabSetVisibility(){
+    var set1Side = document.getElementById("settingsTabs");
+    var set1Bottom = document.getElementById("settingsTabsGear");
+    var set2Side = document.getElementById("settingsTabsSet2");
+    var set2Bottom = document.getElementById("settingsTabsGearSet2");
+    var showSet1 = settingsActiveTabSet === 1;
+    if(set1Side) set1Side.style.display = showSet1 ? "" : "none";
+    if(set1Bottom) set1Bottom.style.display = showSet1 ? "" : "none";
+    if(set2Side) set2Side.style.display = showSet1 ? "none" : "";
+    if(set2Bottom) set2Bottom.style.display = showSet1 ? "none" : "";
+  }
+  // вызывается кликом по язычку-кнопке, когда блокнот уже открыт —
+  // переключает набор и открывает вкладку нового набора на той же позиции,
+  // где стояло переключение (settingsLastStackTab), а не первую попавшуюся.
+  function cycleSettingsTabSet(){
+    settingsActiveTabSet = (settingsActiveTabSet === 1) ? 2 : 1;
+    applySettingsTabSetVisibility();
+    var target = getCorrespondingTabInOtherSet(settingsLastStackTab);
+    if(!target){
+      target = (settingsActiveTabSet === 1) ? (getShowAllTasksEnabled() ? "red" : "gear") : "set2b_1";
+    }
+    // боковые вкладки набора 1 (red..archive) скрыты, пока не включена
+    // галочка "Показать все мои задачи" — переходить на скрытую вкладку
+    // не нужно, вместо неё открываем вкладку настроек (тот же принцип,
+    // что и при обычном открытии блокнота, см. openSettingsModal).
+    if(settingsActiveTabSet === 1 && TASK_TAB_IDS.hasOwnProperty(target) && !getShowAllTasksEnabled()){
+      target = "gear";
+    }
+    switchSettingsTab(target);
   }
 
   function renderSettingsTabGear(){
@@ -2811,6 +2935,14 @@
     var btn = document.getElementById(EXTRA_TAB_IDS[key]);
     if(btn) btn.addEventListener("click", function(){ switchSettingsTab(key); });
   });
+  Object.keys(SET2_TAB_IDS).forEach(function(key){
+    var btn = document.getElementById(SET2_TAB_IDS[key]);
+    if(btn) btn.addEventListener("click", function(){ switchSettingsTab(key); });
+  });
+  Object.keys(SET2_EXTRA_TAB_IDS).forEach(function(key){
+    var btn = document.getElementById(SET2_EXTRA_TAB_IDS[key]);
+    if(btn) btn.addEventListener("click", function(){ switchSettingsTab(key); });
+  });
 
   if(settingsModalOverlay){
     settingsModalOverlay.addEventListener("click", function(e){
@@ -2821,8 +2953,13 @@
   var settingsGearBtn = document.getElementById("settingsGearBtn");
   if(settingsGearBtn) settingsGearBtn.addEventListener("click", function(){
     if(settingsModalOverlay && settingsModalOverlay.classList.contains("open")){
-      closeSettingsModal();
+      // блокнот уже открыт — переключаем набор вкладок по кругу
+      // (1 -> 2 -> 1 -> ...), сам блокнот не закрывается
+      cycleSettingsTabSet();
     } else {
+      // новое открытие всегда начинается с первого набора вкладок
+      settingsActiveTabSet = 1;
+      applySettingsTabSetVisibility();
       openSettingsModal();
     }
   });
@@ -4995,6 +5132,25 @@
     return best ? best.emoji : null;
   }
 
+  // прогноз: сколько дней предположительно потребуется, чтобы дочитать
+  // оставшиеся главы, если сохранять темп чтения за выбранный период
+  // (неделя/месяц/3 месяца). Темп = глав прочитано за период / число
+  // прошедших дней в периоде; далее — оставшиеся главы делим на темп.
+  // Если за период не прочитано ни одной главы, или Библия уже дочитана
+  // целиком, прогноз не показывается (как и остальные строки обзора).
+  function getBibleForecastDays(period){
+    var remaining = TOTAL_CHAPTERS - totalChecked;
+    if(remaining <= 0) return null;
+    var startTs = getReviewPeriodStart(period);
+    var elapsedDays = (Date.now() - startTs) / DAY_MS;
+    if(elapsedDays <= 0) return null;
+    var chaptersRead = getChaptersReadCountSince(startTs);
+    if(chaptersRead <= 0) return null;
+    var ratePerDay = chaptersRead / elapsedDays;
+    if(ratePerDay <= 0) return null;
+    return Math.ceil(remaining / ratePerDay);
+  }
+
   function renderReviewTab(){
     reviewSelectedPeriod = "week";
     renderReviewTabContent();
@@ -5007,6 +5163,9 @@
     var rows = [];
     var chaptersCount = getChaptersReadCountSince(startTs);
     if(chaptersCount > 0) rows.push(["Прочитанные главы", chaptersCount]);
+
+    var forecastDays = getBibleForecastDays(reviewSelectedPeriod);
+    if(forecastDays !== null) rows.push(["До завершения чтения Библии предположительно", forecastDays + " " + pluralRu(forecastDays, DAY_FORMS)]);
 
     var goalsCount = getGoalCompletionsCountSince(startTs);
     if(goalsCount > 0) rows.push(["Количество личных целей, которые были достигнуты", goalsCount]);

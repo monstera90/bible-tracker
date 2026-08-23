@@ -264,7 +264,7 @@
      Правило нарочно ограничено этим стеком через #settingsTabs, чтобы не
      задеть отдельно стоящую "лежачую" вкладку-шестерёнку — у неё своя,
      другая по стороне, линия-срез (см. .settings-tab-gear). */
-  #settingsTabs .settings-tab:last-child{ border-top:1px solid var(--groove-shadow); }
+  #settingsTabs .settings-tab:last-child, #settingsTabsSet2 .settings-tab:last-child{ border-top:1px solid var(--groove-shadow); }
   /* активный язычок — та же страница, что и открытое окно: линия сверху,
      отделяющая его, пропадает, и он выглядит продолжением окна.
      неактивный остаётся того же цвета страницы, но т.к. окно "лежит"

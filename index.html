@@ -301,6 +301,40 @@ window.addEventListener("error", function(e){
       <button class="settings-tab settings-tab-gear" id="settingsTabExtra2Btn" title=""></button>
       <button class="settings-tab settings-tab-gear" id="settingsTabExtra3Btn" title=""></button>
     </div>
+    <!-- ===== ВТОРОЙ НАБОР ВКЛАДОК (заглушки) =====
+         Полный дубль первого набора по устройству: 9 боковых язычков
+         (.settings-tabs) + 5 нижних (.settings-tabs-gear) — те же CSS-
+         классы, поэтому размер язычков (--settings-tab-size /
+         --settings-tab-size-h, см. layoutSettingsModal в my.js) общий для
+         обоих наборов и не пересчитывается при переключении. Стоят в той
+         же точке (position:absolute от .settings-modal-frame), что и
+         первый набор — видно всегда только ОДИН набор, второй скрыт через
+         display:none (см. applySettingsTabSetVisibility в my.js).
+         Каждая кнопка пока просто заглушка: клик по ней показывает текст
+         "Вкладка пока не запрограммирована" (см. renderSettingsTabSet2Stub
+         в my.js) — сама функция появится позже. Первая нижняя вкладка
+         (settingsTabSet2GearBtn1) играет роль "домашней" для этого набора
+         — так же, как шестерёнка для первого — и открывается по
+         умолчанию при переключении на второй набор (см.
+         cycleSettingsTabSet в my.js). -->
+    <div class="settings-tabs" id="settingsTabsSet2" style="display:none;">
+      <button class="settings-tab" id="settingsTabSet2Btn1" title="">1</button>
+      <button class="settings-tab" id="settingsTabSet2Btn2" title="">2</button>
+      <button class="settings-tab" id="settingsTabSet2Btn3" title="">3</button>
+      <button class="settings-tab" id="settingsTabSet2Btn4" title="">4</button>
+      <button class="settings-tab" id="settingsTabSet2Btn5" title="">5</button>
+      <button class="settings-tab" id="settingsTabSet2Btn6" title="">6</button>
+      <button class="settings-tab" id="settingsTabSet2Btn7" title="">7</button>
+      <button class="settings-tab" id="settingsTabSet2Btn8" title="">8</button>
+      <button class="settings-tab" id="settingsTabSet2Btn9" title="">9</button>
+    </div>
+    <div class="settings-tabs-gear" id="settingsTabsGearSet2" style="display:none;">
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn1" title="">1</button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn2" title="">2</button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn3" title="">3</button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn4" title="">4</button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn5" title="">5</button>
+    </div>
   </div>
 </div>
 
