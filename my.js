@@ -1484,6 +1484,7 @@
   var renderSettingsTabMood = Mood.renderSettingsTabMood;
   var renderSettingsTabMoodResetConfirm = Mood.renderSettingsTabMoodResetConfirm;
   var getMoodsByDay = Mood.getMoodsByDay;
+  var moodCategoriesResolved = Mood.moodCategoriesResolved;
 
   // --- ленивая загрузка QRCode и jsQR ---
   var qrLibLoaded = false, jsqrLibLoaded = false;
@@ -2560,6 +2561,10 @@
   function renderSettingsTabExtra(tabKey){
     if(tabKey === "extra2" && getCustomCommentsEnabled()){
       renderCommentsTab();
+      return;
+    }
+    if(tabKey === "extra3"){
+      renderReviewTab();
       return;
     }
     var container = document.getElementById("settingsTabContent");
@@ -4694,7 +4699,18 @@
   // включена — тот же визуальный язык (контур, currentColor), что и у
   // остальных пиктограмм вкладок.
   var COMMENT_TAB_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 4V5z"></path><path d="M8 10h8"></path><path d="M8 13h5"></path></svg>';
+  var REVIEW_TAB_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V10"></path><path d="M12 19V5"></path><path d="M19 19v-7"></path></svg>';
   var CROSS_SMALL_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>';
+
+  // extra3 — вкладка "Обзор" (см. renderReviewTab) — постоянная, галочки в
+  // настройках не требует, поэтому иконка/подпись задаются один раз при
+  // загрузке (см. вызов в самом низу файла)
+  function refreshExtra3TabAppearance(){
+    var btn = document.getElementById("settingsTabExtra3Btn");
+    if(!btn) return;
+    btn.title = "Обзор";
+    btn.innerHTML = REVIEW_TAB_ICON_SVG;
+  }
 
   // Меняет вид язычка extra2 в зависимости от галочки "Включить личные
   // комментарии…" — вызывается при загрузке страницы и сразу после
@@ -4830,6 +4846,131 @@
       if(!id) return;
       var newText = getEditableNoteText(editable);
       setCommentText(id, newText.trim());
+    });
+  }
+
+  // ===================== ВКЛАДКА "ОБЗОР" (extra3) =====================
+  // Всегда доступна (без отдельной галочки в настройках) — три периода
+  // (неделя/месяц/3 месяца), переключаемые пилюлями внизу вкладки. При
+  // каждом открытии вкладки выбор сбрасывается на "1 нед." (см.
+  // renderReviewTab). Показываются только цифры — если по какому-то
+  // показателю за период нет данных, строка просто не выводится.
+  var REVIEW_PERIODS = [
+    {key:"week", label:"1 нед."},
+    {key:"month", label:"1 мес."},
+    {key:"quarter", label:"3 мес."}
+  ];
+  var reviewSelectedPeriod = "week";
+
+  function getReviewPeriodStart(period){
+    var d = new Date();
+    d.setHours(0,0,0,0);
+    if(period === "week") d.setDate(d.getDate() - 7);
+    else if(period === "month") d.setMonth(d.getMonth() - 1);
+    else d.setMonth(d.getMonth() - 3);
+    return d.getTime();
+  }
+
+  // ключи прочитанных глав имеют вид "Книга|Глава" (см. chapterKey выше) —
+  // это единственный тип ключей в state с символом "|", поэтому его
+  // достаточно для отличия от task:/comment:/hourlog: и т.п.
+  function getChaptersReadCountSince(startTs){
+    var count = 0;
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("|") === -1) return;
+      var rec = state[k];
+      if(rec && rec.c === true && typeof rec.t === "number" && rec.t >= startTs) count++;
+    });
+    return count;
+  }
+  function getGoalCompletionsCountSince(startTs){
+    var count = 0;
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("goalcompletion:") === 0 && state[k] && typeof state[k].t === "number" && state[k].t >= startTs) count++;
+    });
+    return count;
+  }
+  // сырые "hourlog:" хранятся только примерно за последний месяц (см.
+  // pruneOldHourLogsForStats выше) — для более дальних периодов
+  // дополнительно учитываем уже закрытые месячные сегменты "hoursegment:"
+  function getHourMinutesSince(startTs){
+    var total = sumHourLogsSince(startTs);
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("hoursegment:") === 0 && state[k] && typeof state[k].c === "number"){
+        var periodStart = Number(k.slice("hoursegment:".length));
+        if(!isNaN(periodStart) && periodStart >= startTs) total += state[k].c;
+      }
+    });
+    return total;
+  }
+  function getArchivedTasksSince(startTs){
+    return getArchivedTasksAll().filter(function(t){ return (t.c.checkedAt || 0) >= startTs; });
+  }
+  // самая частая отметка настроения за период (одно эмодзи, без подписи)
+  function getMoodTopEmojiSince(startTs){
+    var floor = Math.max(startTs, getMoodDataResetAt());
+    var counts = {};
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("moodlog:") === 0 && state[k] && typeof state[k].c === "string" && state[k].t >= floor){
+        counts[state[k].c] = (counts[state[k].c] || 0) + 1;
+      }
+    });
+    var best = null, bestCount = 0;
+    moodCategoriesResolved().forEach(function(cat){
+      var c = counts[cat.key] || 0;
+      if(c > bestCount){ bestCount = c; best = cat; }
+    });
+    return best ? best.emoji : null;
+  }
+
+  function renderReviewTab(){
+    reviewSelectedPeriod = "week";
+    renderReviewTabContent();
+  }
+  function renderReviewTabContent(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var startTs = getReviewPeriodStart(reviewSelectedPeriod);
+
+    var rows = [];
+    var chaptersCount = getChaptersReadCountSince(startTs);
+    if(chaptersCount > 0) rows.push(["Прочитанные главы", chaptersCount]);
+
+    var goalsCount = getGoalCompletionsCountSince(startTs);
+    if(goalsCount > 0) rows.push(["Количество личных целей, которые были достигнуты", goalsCount]);
+
+    var hourMinutes = getHourMinutesSince(startTs);
+    if(hourMinutes > 0) rows.push(["Количество часов", formatHHMM(hourMinutes)]);
+
+    var archived = getArchivedTasksSince(startTs);
+    if(archived.length > 0) rows.push(["Количество закрытых задач", archived.length]);
+
+    var moodEmoji = getMoodTopEmojiSince(startTs);
+    if(moodEmoji) rows.push(["Преобладающее настроение", moodEmoji]);
+
+    var importantClosed = archived.filter(function(t){ return t.c.flag === "red"; }).length;
+    if(importantClosed > 0) rows.push(["Количество закрытых важных задач", importantClosed]);
+
+    var projectsDone = archived.filter(function(t){ return t.c.tab === "projects"; }).length;
+    if(projectsDone > 0) rows.push(["Количество выполненных проектов", projectsDone]);
+
+    var rowsHtml = rows.length
+      ? rows.map(function(r){
+          return '<div class="review-stat-row"><span>' + escapeHtml(r[0]) + ':</span><span class="review-stat-value">' + escapeHtml(String(r[1])) + '</span></div>';
+        }).join("")
+      : '<div class="task-empty">За этот период данных пока нет.</div>';
+
+    var pillsHtml = '<div class="review-pills">' + REVIEW_PERIODS.map(function(p){
+      return '<button type="button" class="review-pill' + (p.key === reviewSelectedPeriod ? " active" : "") + '" data-period="' + p.key + '">' + escapeHtml(p.label) + '</button>';
+    }).join("") + '</div>';
+
+    container.innerHTML = '<div class="review-stats-list">' + rowsHtml + '</div>' + pillsHtml;
+
+    Array.prototype.forEach.call(container.querySelectorAll(".review-pill"), function(btn){
+      btn.addEventListener("click", function(){
+        reviewSelectedPeriod = btn.getAttribute("data-period");
+        renderReviewTabContent();
+      });
     });
   }
 
@@ -5328,6 +5469,7 @@
   renderThemeDots();
   initSettingsFabToggle();
   refreshExtra2TabAppearance();
+  refreshExtra3TabAppearance();
   updateMissedBanner();
   renderVersionHistory();
   renderHourBars();

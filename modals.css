@@ -614,6 +614,57 @@
     border-top:1px solid var(--groove-shadow);
   }
 
+  /* ===== вкладка "Обзор" (extra3, см. renderReviewTab в my.js) ===== */
+  .review-stats-list{
+    display:flex;
+    flex-direction:column;
+  }
+  .review-stat-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    gap:12px;
+    padding:10px 4px;
+    border-bottom:1px solid var(--groove-shadow);
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:15px;
+    color:var(--ink);
+  }
+  .review-stat-row:last-child{ border-bottom:none; }
+  .review-stat-value{
+    font-weight:bold;
+    flex-shrink:0;
+    white-space:nowrap;
+  }
+  /* переключатель периода — три "пилюли" внизу вкладки; активная выделена
+     основным цветом шапки текущей темы (--wood). margin-top:auto вместе с
+     #settingsTabContent (flex-column) прижимает ряд пилюль к нижнему краю
+     окна настроек, а не просто вниз списка статистики (та же идея, что и
+     у .settings-content-bottom выше) — так до них проще дотянуться. */
+  .review-pills{
+    display:flex;
+    gap:8px;
+    margin-top:auto;
+    padding-top:16px;
+  }
+  .review-pill{
+    flex:1;
+    padding:10px 6px;
+    border-radius:999px;
+    border:1px solid var(--groove-shadow);
+    background:var(--parchment-dark);
+    color:var(--ink);
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:14px;
+    text-align:center;
+    cursor:pointer;
+  }
+  .review-pill.active{
+    background:var(--wood);
+    border-color:var(--wood);
+    color:var(--parchment);
+  }
+
   /* ---------- вкладки задач (red/inbox/next/projects/waiting/read/
      someday/archive) — списки задач внутри вкладки настроек. Текст задачи
      оформлен тем же шрифтом/размером, что и комментарий дня в "Карте дней
