@@ -316,7 +316,12 @@ window.addEventListener("error", function(e){
          (settingsTabSet2GearBtn1) играет роль "домашней" для этого набора
          — так же, как шестерёнка для первого — и открывается по
          умолчанию при переключении на второй набор (см.
-         cycleSettingsTabSet в my.js). -->
+         cycleSettingsTabSet в my.js). Третья нижняя вкладка
+         (settingsTabSet2GearBtn3) тоже уже не заглушка — это вкладка
+         "Объединение заметок" (слияние .jwlibrary файлов), см.
+         renderSettingsTabNotesMerge в jwlmerge.js и её отдельную ветку в
+         switchSettingsTab в my.js (стоит ДО общей проверки на
+         renderSettingsTabSet2Stub, иначе заглушка перехватила бы её тоже). -->
     <div class="settings-tabs" id="settingsTabsSet2" style="display:none;">
       <button class="settings-tab" id="settingsTabSet2Btn1" title="">1</button>
       <button class="settings-tab" id="settingsTabSet2Btn2" title="">2</button>
@@ -339,7 +344,17 @@ window.addEventListener("error", function(e){
         </svg>
       </button>
       <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn2" title="">2</button>
-      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn3" title="">3</button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn3" title="Объединение заметок">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 4h7l4 4v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"></path>
+          <path d="M13 4v4h4"></path>
+          <path d="M8.5 12.5h7"></path>
+          <path d="M8.5 15.5h4.5"></path>
+          <circle cx="17" cy="16.5" r="1.4" fill="currentColor" stroke="none"></circle>
+          <circle cx="19.5" cy="19" r="1.4" fill="currentColor" stroke="none"></circle>
+          <path d="M17.7 17.5l1.1 1.1"></path>
+        </svg>
+      </button>
       <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn4" title="">4</button>
       <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn5" title="">5</button>
     </div>
@@ -357,7 +372,9 @@ window.addEventListener("error", function(e){
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 
 <script src="mood.js"></script>
+<script src="minizip.js"></script>
 <script src="workbooks.js"></script>
+<script src="jwlmerge.js"></script>
 <script src="my.js"></script>
 
 </body>

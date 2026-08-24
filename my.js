@@ -1585,6 +1585,18 @@
   });
   var renderSettingsTabWorkbooks = Workbooks.renderSettingsTabWorkbooks;
 
+  // ===================== ОБЪЕДИНЕНИЕ ЗАМЕТОК JW LIBRARY =====================
+  // Логика вкладки "Объединение заметок" (третья нижняя вкладка второго
+  // набора, settingsTabSet2GearBtn3 / "set2b_3") вынесена в отдельный файл
+  // jwlmerge.js (см. index.html и sw.js) — по тому же образцу, что и
+  // Workbooks выше.
+  var JwlMerge = window.initJwlMergeModule({
+    escapeHtml: escapeHtml,
+    PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG,
+    switchSettingsTab: switchSettingsTab
+  });
+  var renderSettingsTabNotesMerge = JwlMerge.renderSettingsTabNotesMerge;
+
   // --- ленивая загрузка QRCode и jsQR ---
   var qrLibLoaded = false, jsqrLibLoaded = false;
   function loadQrLib(){
@@ -2890,6 +2902,7 @@
     else if(TASK_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabTask(tab);
     else if(EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabExtra(tab);
     else if(tab === "set2b_1") renderSettingsTabWorkbooks();
+    else if(tab === "set2b_3") renderSettingsTabNotesMerge();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
   }

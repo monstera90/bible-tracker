@@ -8,10 +8,12 @@
    Сейчас реализовано: 8 полей для ссылок на гугл-документы (сохраняются
    в localStorage, переживают перезапуск приложения) и кнопка "Начать",
    которая реально скачивает каждый документ (.../export?format=docx,
-   CORS для этого домена проверен вручную - работает) и показывает статус
-   по каждой ссылке. Сама разборка таблиц из .docx и сборка .xlsx (то же,
-   что делает python-скрипт workbook-script.py) добавится здесь же
-   следующим шагом.
+   CORS для этого домена проверен вручную - работает), распаковывает его
+   через MiniZip (см. minizip.js - собственный ZIP-ридер) и показывает
+   статус по каждой ссылке (включая число найденных таблиц). Сама
+   разборка содержимого таблиц в задания и сборка .xlsx (то же, что
+   делает python-скрипт workbook-script.py) добавится здесь же следующим
+   шагом.
    =========================================================================== */
 
 (function(global){
@@ -24,10 +26,10 @@
     var LINKS_KEY = "workbooksLinks";
     var LINKS_COUNT = 8;
 
-    // Загруженные на последний "Начать" .docx-файлы (как Blob), по номеру
-    // ссылки (0..7). Здесь же будет брать данные следующий шаг — сама
-    // разборка таблиц. Существует только в памяти вкладки, не сохраняется.
-    var lastFetchedBlobs = [];
+    // Загруженные на последний "Начать" документы: XML-содержимое
+    // word/document.xml для каждой ссылки (0..7), уже готовое к разбору
+    // таблиц следующим шагом. Существует только в памяти вкладки.
+    var lastDocumentXmls = [];
 
     function loadLinks(){
       try{
@@ -91,7 +93,7 @@
     function runFetchAll(){
       var links = readLinksFromInputs();
       saveLinks(links);
-      lastFetchedBlobs = new Array(LINKS_COUNT).fill(null);
+      lastDocumentXmls = new Array(LINKS_COUNT).fill(null);
 
       var summaryEl = document.getElementById("workbooksRunSummary");
       var anyLink = links.some(function(l){ return l; });
@@ -118,10 +120,14 @@
               setStatusLine(i, '<span class="workbooks-status-err">HTTP ' + response.status + '</span>');
               return;
             }
-            return response.blob().then(function(blob){
-              lastFetchedBlobs[i] = blob;
-              var kb = Math.round(blob.size / 1024);
-              setStatusLine(i, '<span class="workbooks-status-ok">Загружено, ' + kb + ' КБ</span>');
+            return response.arrayBuffer().then(function(buf){
+              setStatusLine(i, "Распаковываю…");
+              return MiniZip.extractDocxDocumentXml(buf).then(function(xml){
+                lastDocumentXmls[i] = xml;
+                var tableCount = (xml.match(/<w:tbl>/g) || []).length;
+                var kb = Math.round(buf.byteLength / 1024);
+                setStatusLine(i, '<span class="workbooks-status-ok">' + kb + ' КБ, таблиц: ' + tableCount + '</span>');
+              });
             });
           })
           .catch(function(err){
@@ -131,11 +137,11 @@
       });
 
       Promise.all(tasks).then(function(){
-        var okCount = lastFetchedBlobs.filter(function(b){ return b; }).length;
+        var okCount = lastDocumentXmls.filter(function(x){ return x; }).length;
         if(summaryEl){
           summaryEl.textContent = okCount > 0
-            ? "Готово: успешно загружено файлов - " + okCount + ". Разбор таблиц добавим следующим шагом."
-            : "Ни один файл не загрузился — проверь ссылки.";
+            ? "Готово: успешно обработано документов - " + okCount + ". Разбор таблиц в задания добавим следующим шагом."
+            : "Ни один файл не обработался — проверь ссылки.";
         }
       });
     }
