@@ -947,18 +947,14 @@ window.initJwlMergeModule = function(deps){
 
   // ===================== "ОТКРЫТЬ СЕЙЧАС" / "СОХРАНИТЬ В DOWNLOADS" =====================
 
-  function shareOrOpenFile(blob, filename){
-    try{
-      var file = new File([blob], filename, {type:"application/octet-stream"});
-      if(navigator.canShare && navigator.canShare({files:[file]})){
-        return navigator.share({files:[file], title:filename}).catch(function(){ /* отмена шаринга — не ошибка */ });
-      }
-    }catch(e){ /* File API/canShare недоступны — уходим в фолбэк ниже */ }
-    var url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
-    setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
-    return Promise.resolve();
-  }
+  // Возвращает Promise<{ok:bool, reason?:string}> — вызывающий код показывает
+  // понятное сообщение вместо тихого "ничего не произошло".
+  // Кнопку "Открыть сейчас" (через navigator.share) убрали: у Chrome есть
+  // жёсткий список разрешённых для шаринга типов файлов, и архивы (.jwlibrary
+  // в том числе) туда не входят ни при каком MIME-типе — по документации
+  // MDN (Shareable file types) это подтверждённое ограничение браузера, а
+  // не что-то поправимое в коде. Вместо неё — подсказка рядом с кнопкой
+  // "Сохранить в Downloads" (см. renderSettingsTabNotesMerge ниже).
 
   function downloadFile(blob, filename){
     var url = URL.createObjectURL(blob);
@@ -1021,8 +1017,8 @@ window.initJwlMergeModule = function(deps){
         '<button class="modal-btn primary" id="jwlMergeStartBtn" style="margin-top:16px;" disabled>Начать</button>' +
         '<div id="jwlMergeStatus" style="margin-top:10px;"></div>' +
         '<div id="jwlMergeResult" style="display:none;margin-top:10px;">' +
-          '<button class="modal-btn primary" id="jwlMergeOpenBtn">Открыть сейчас</button>' +
-          '<button class="modal-btn" id="jwlMergeSaveBtn">Сохранить в Downloads</button>' +
+          '<button class="modal-btn primary" id="jwlMergeSaveBtn">Сохранить в Downloads</button>' +
+          '<p style="opacity:.7;font-size:.85em;margin-top:6px;">После сохранения откройте уведомление о загрузке (или значок загрузок в браузере) и нажмите там «Открыть» — так можно будет выбрать JW Library.</p>' +
           '<div id="jwlMergeStats" style="margin-top:8px;"></div>' +
         '</div>' +
       '</div>';
@@ -1068,9 +1064,6 @@ window.initJwlMergeModule = function(deps){
       });
     });
 
-    document.getElementById("jwlMergeOpenBtn").addEventListener("click", function(){
-      if(resultBlob) shareOrOpenFile(resultBlob, resultName);
-    });
     document.getElementById("jwlMergeSaveBtn").addEventListener("click", function(){
       if(resultBlob) downloadFile(resultBlob, resultName);
     });

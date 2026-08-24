@@ -11,7 +11,7 @@
      остальные — как будто вертикальный стек (#settingsTabs, приклеен к
      правому краю ОКНА настроек) не заканчивается на последнем видимом
      язычке, а условно продолжается ещё на один — этот самый. Именно
-     поэтому его толщина (width, 62px) — та же, что и у обычных
+     поэтому его толщина (width, 54px) — та же, что и у обычных
      вертикальных язычков (#settingsTabs .settings-tab), а не какая-то
      отдельная величина.
      Длина же (height) этого язычка считается НЕ так, как у обычных
@@ -36,7 +36,7 @@
     position:fixed;
     right:0;
     bottom:25%;
-    width:62px;height:76px;
+    width:54px;height:76px;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -128,7 +128,7 @@
     display:flex;
     align-items:flex-start;
     justify-content:flex-end;
-    padding:16px 74px 80px 16px;
+    padding:16px 66px 72px 16px;
     z-index:1000;
     opacity:0;
     visibility:hidden;
@@ -137,7 +137,7 @@
   .settings-modal-overlay.open{ opacity:1; visibility:visible; pointer-events:auto; }
   .settings-modal-frame{
     position:relative;
-    max-width:380px;
+    max-width:388px;
     width:100%;
     max-height:90vh;
   }
@@ -205,19 +205,19 @@
      top:0): её общая высота — просто сумма высот видимых язычков, какой
      бы она ни была; если язычков много, стопка может вылезти выше
      верхнего края окна — это ожидаемо. 94px — запасное значение на
-     случай, если JS ещё не отработал. Ширина (62px, толщина язычка)
+     случай, если JS ещё не отработал. Ширина (54px, толщина язычка)
      зафиксирована отдельно. Никаких transition/transform на этих
      свойствах нет специально. */
   .settings-tabs{
     position:absolute;
-    right:-62px;
+    right:-54px;
     bottom:0;
     display:flex;
     flex-direction:column-reverse;
     gap:1px;
   }
   .settings-tab{
-    width:62px;
+    width:54px;
     height:var(--settings-tab-size, 94px);
     flex:0 0 var(--settings-tab-size, 94px);
     display:flex;
@@ -288,7 +288,7 @@
      настроек (шестерёнка) — там, где у самого окна срезано скругление
      (см. border-radius в .settings-modal-box), за ней вправо — 4 вкладки-
      заглушки. Каждая вкладка в ряду развёрнута на 90° относительно
-     обычных (вертикальных): толщина (height) фиксирована как 62px (та же
+     обычных (вертикальных): толщина (height) фиксирована как 54px (та же
      толщина, что и ширина у обычных вкладок), а длина (width) — переменная
      --settings-tab-size-h, которую считает JS (см. openSettingsModal в
      my.js) один раз при открытии окна: ширина окна настроек минус 4
@@ -302,12 +302,12 @@
   .settings-tabs-gear{
     position:absolute;
     left:0;
-    bottom:-62px;
+    bottom:-54px;
     display:flex;
     gap:1px;
   }
   .settings-tab-gear{
-    width:var(--settings-tab-size-h, 76px);height:62px;
+    width:var(--settings-tab-size-h, 76px);height:54px;
     flex:0 0 var(--settings-tab-size-h, 76px);
     border-left:1px solid var(--groove-shadow);
     border-top:none;
