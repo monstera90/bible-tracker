@@ -166,6 +166,25 @@
   var UPDATES_DISABLED_KEY = "bibleUpdatesDisabled_v1";
   var GOALS_EXPANDED_KEY = "bibleGoalsBandExpanded_v1";
   var FAB_VISIBLE_KEY = "bibleSettingsFabVisible_v1";
+  // Локальный (не синхронизируемый и не попадающий в экспорт) флаг доступа
+  // ко второму набору вкладок — только на этом устройстве/в этом браузере.
+  // Это не защита данных, а просто способ спрятать не нужные большинству
+  // пользователей функции: сам код лежит в этом файле открытым текстом,
+  // как и любой JS-код, исполняющийся в браузере, поэтому его несложно
+  // найти в исходниках — но для этой задачи это и не требуется.
+  var SET2_UNLOCK_KEY = "bibleSet2Unlocked_v1";
+  var SET2_SECRET_CODE = "orion-glass-47";
+  function isSet2Unlocked(){
+    try{ return localStorage.getItem(SET2_UNLOCK_KEY) === "1"; }catch(e){ return false; }
+  }
+  function trySet2UnlockCode(input){
+    var normalized = (input || "").trim().toLowerCase();
+    if(normalized && normalized === SET2_SECRET_CODE.toLowerCase()){
+      try{ localStorage.setItem(SET2_UNLOCK_KEY, "1"); }catch(e){}
+      return true;
+    }
+    return false;
+  }
   var SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000;
 
 
@@ -470,13 +489,17 @@
   };
   // ===== ВТОРОЙ НАБОР ВКЛАДОК (заглушки) =====
   // Полный дубль первого набора: 9 боковых + 5 нижних язычков (см. разметку
-  // в index.html, .settingsTabsSet2 / .settingsTabsGearSet2). Пока все 14 —
-  // просто заглушки без функций (см. renderSettingsTabSet2Stub ниже);
-  // ключи специально с префиксом "set2" — тем же, что и остальные
+  // в index.html, .settingsTabsSet2 / .settingsTabsGearSet2). 13 из 14 —
+  // всё ещё просто заглушки без функций (см. renderSettingsTabSet2Stub
+  // ниже); ключи специально с префиксом "set2" — тем же, что и остальные
   // (TASK_TAB_IDS/EXTRA_TAB_IDS), участвуют в общем переключателе
   // switchSettingsTab. set2b_1 — "домашняя" вкладка второго набора
   // (открывается по умолчанию при переключении на набор, см.
-  // cycleSettingsTabSet).
+  // cycleSettingsTabSet) — уже не заглушка: это вкладка "Извлечение
+  // информации из графиков", см. renderSettingsTabWorkbooks в
+  // workbooks.js и её отдельную ветку в switchSettingsTab ниже (стоит
+  // ДО общей проверки на renderSettingsTabSet2Stub, иначе заглушка
+  // перехватила бы её тоже).
   var SET2_TAB_IDS = {
     set2s_1: "settingsTabSet2Btn1", set2s_2: "settingsTabSet2Btn2", set2s_3: "settingsTabSet2Btn3",
     set2s_4: "settingsTabSet2Btn4", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
@@ -1286,6 +1309,12 @@
   // нужен — простые GET/PUT запросы работают напрямую.
   var FIREBASE_DB_URL = "https://my-nekogram-default-rtdb.europe-west1.firebasedatabase.app";
   var FIREBASE_SYNCS_PATH = "/syncs";
+  // Ключ технической записи в облачных данных с меткой времени последнего
+  // обращения к этому коду синхронизации (создание, подключение, обычная
+  // фоновая синхронизация — что угодно, что реально пишет в облако).
+  // Не имеет отношения к пользовательским данным.
+  var LAST_ACTIVE_STATE_KEY = "__syncLastActive";
+  var SYNC_EXPIRY_MS = 365 * 24 * 60 * 60 * 1000; // 365 дней
 
   function fetchWithTimeout(url, options, timeoutMs){
     var ctrl = new AbortController();
@@ -1308,15 +1337,45 @@
     }).then(function(data){
       // Firebase отдаёт null (не 404), если по пути ничего нет
       if(data === null || data === undefined) throw new Error("not_found");
+      // Данные, которыми не пользовались (ни разу не подключались/не
+      // синхронизировались) больше года — считаем истёкшими: удаляем с
+      // сервера и сообщаем вызывающему коду, что кода больше не существует.
+      // У записей, созданных до появления этой метки, __syncLastActive
+      // отсутствует — такие записи не удаляем (нет данных, чтобы посчитать
+      // срок), они получат метку при первой же следующей записи в облако.
+      var lastActiveRec = data[LAST_ACTIVE_STATE_KEY];
+      var lastActiveTs = lastActiveRec && typeof lastActiveRec.t === "number" ? lastActiveRec.t : null;
+      if(lastActiveTs !== null && (Date.now() - lastActiveTs) > SYNC_EXPIRY_MS){
+        return deleteCloudBlob(id).catch(function(){}).then(function(){
+          throw new Error("expired");
+        });
+      }
       return data;
     });
   }
 
+  function deleteCloudBlob(id){
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + ".json", {
+      method:"DELETE"
+    }, 8000).then(function(res){
+      if(!res.ok) throw new Error("delete_failed_" + res.status);
+      return true;
+    });
+  }
+
   function putCloudBlob(id, data){
+    // Каждая запись в облако обновляет метку "последней активности" этого
+    // кода синхронизации — от неё считается годовой срок хранения (см.
+    // fetchCloudBlob). Метка добавляется только в отправляемую копию,
+    // локальный объект state этим не засоряется.
+    var payload = {};
+    var src = data || {};
+    Object.keys(src).forEach(function(k){ payload[k] = src[k]; });
+    payload[LAST_ACTIVE_STATE_KEY] = {c:true, t:Date.now()};
     return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + ".json", {
       method:"PUT",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify(data)
+      body: JSON.stringify(payload)
     }, 15000).then(function(res){
       if(!res.ok) throw new Error("put_failed_" + res.status);
       return true;
@@ -1409,6 +1468,18 @@
       setSyncState("synced");
     }).catch(function(err){
       console.error("Ошибка синхронизации:", err);
+      // Код истёк (данные на сервере удалены за неактивностью дольше года,
+      // см. fetchCloudBlob) — повторять попытки бессмысленно, кода больше
+      // не существует. Отключаем синхронизацию на этом устройстве, локальный
+      // прогресс при этом не трогаем, и сообщаем пользователю один раз.
+      if(String(err.message||"").indexOf("expired") !== -1){
+        syncId = null;
+        localStorage.removeItem(SYNC_ID_KEY);
+        setSyncState("off");
+        refreshStatusBase();
+        alert("Синхронизация на этом устройстве отключена: данные на сервере были удалены, так как этим кодом не пользовались больше года. Локальный прогресс сохранён — при необходимости создайте новый код синхронизации.");
+        return;
+      }
       setSyncState("error");
       // не заставляем пользователя перепривязывать устройство вручную —
       // сами повторяем попытку с нарастающей паузой (сбой чаще всего
@@ -1504,6 +1575,16 @@
   var getMoodsByDay = Mood.getMoodsByDay;
   var moodCategoriesResolved = Mood.moodCategoriesResolved;
 
+  // ===================== ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ ИЗ ГРАФИКОВ =====================
+  // Логика вкладки "Извлечение информации из графиков" (первая нижняя
+  // вкладка второго набора, settingsTabSet2GearBtn1 / "set2b_1") вынесена
+  // в отдельный файл workbooks.js (см. index.html и sw.js) — по тому же
+  // образцу, что и Mood выше.
+  var Workbooks = window.initWorkbooksModule({
+    escapeHtml: escapeHtml
+  });
+  var renderSettingsTabWorkbooks = Workbooks.renderSettingsTabWorkbooks;
+
   // --- ленивая загрузка QRCode и jsQR ---
   var qrLibLoaded = false, jsqrLibLoaded = false;
   function loadQrLib(){
@@ -1534,10 +1615,12 @@
   // самый простой валидный вариант ZIP, полностью совместимый с любым
   // распаковщиком).
   function isoDate(ts){ return new Date(ts).toISOString().slice(0,10); }
+  var EXPORT_FORMAT_VERSION = 2;
 
   function buildExportData(){
     var data = {
       exportedAt: new Date().toISOString(),
+      exportFormatVersion: EXPORT_FORMAT_VERSION,
       app: "Bible Reading Tracker — экспорт личных данных",
       readingProgress: {
         totalChapters: TOTAL_CHAPTERS,
@@ -1585,11 +1668,19 @@
 
     var hourByDate = {};
     Object.keys(state).forEach(function(k){
-      if(k.indexOf("hourlog:") !== 0) return;
-      var rec = state[k];
-      if(!rec || typeof rec.c !== "number") return;
-      var d = isoDate(rec.t);
-      hourByDate[d] = (hourByDate[d]||0) + rec.c;
+      if(k.indexOf("hourlog:") === 0){
+        var rec = state[k];
+        if(!rec || typeof rec.c !== "number") return;
+        var d = isoDate(rec.t);
+        hourByDate[d] = (hourByDate[d]||0) + rec.c;
+      } else if(k.indexOf("hourday:") === 0){
+        var rec3 = state[k];
+        if(!rec3 || typeof rec3.c !== "number") return;
+        var dayTs = Number(k.slice("hourday:".length));
+        if(isNaN(dayTs)) return;
+        var d2 = isoDate(dayTs);
+        hourByDate[d2] = (hourByDate[d2]||0) + rec3.c;
+      }
     });
     Object.keys(hourByDate).sort().forEach(function(d){
       data.hourCounter.dailyHoursLog.push({date:d, hoursMinutesText: formatHHMM(hourByDate[d]), minutes: hourByDate[d]});
@@ -1649,6 +1740,33 @@
     Object.keys(yearCommentsByDay).sort(function(a,b){ return Number(a)-Number(b); }).forEach(function(dayTs){
       data.customComments.dailyLog.push({date: isoDate(Number(dayTs)), comments: yearCommentsByDay[dayTs]});
     });
+
+    // rawState — точный технический снимок всех данных приложения (то же,
+    // что хранится в localStorage и синхронизируется в облаке). Разделы
+    // выше уже собраны в удобном для чтения (в т.ч. нейросетью) виде — этот
+    // раздел дублирует ту же информацию без потерь и нужен только для
+    // восстановления через кнопку "Импортировать личные данные": именно
+    // из rawState.data при импорте полностью восстанавливаются прогресс-бары,
+    // ячейки по датам и всё остальное. Менять его вручную не нужно.
+    data.rawState = {
+      note: "Технический снимок для восстановления (кнопка «Импортировать личные данные»). Формат каждой записи: {c: значение, t: время изменения в мс}. Ключи см. в keyFormats.",
+      keyFormats: {
+        "Книга|Глава (напр. \"John|3\")": "отметка о прочтении главы: c — прочитано (true/false)",
+        "hourlog:*": "запись счётчика часов текущего периода: c — минуты",
+        "hourday:*": "запись счётчика часов, привязанная к конкретному дню: c — минуты",
+        "hoursegment:*": "итог уже закрытого месяца: c — минуты за весь месяц",
+        "hournote:*": "комментарий к записи счётчика часов",
+        "moodlog:*": "отметка настроения: c — значение настроения",
+        "goal:*": "личная цель и список её задач",
+        "goalcompletion:*": "отметка о выполнении задачи внутри цели",
+        "task:*": "задача (вне целей)",
+        "taskcompletion:*": "отметка о выполнении задачи",
+        "comment:*": "запись из списка кастомных комментариев",
+        "yearcomment:*": "комментарий, привязанный к дню в «Карте дней года»",
+        "__* (напр. __theme, __firstRead, __syncLastActive)": "настройки приложения (тема, видимость элементов интерфейса и т.п.) и служебные технические записи синхронизации"
+      },
+      data: state
+    };
 
     return data;
   }
@@ -1744,7 +1862,7 @@
   function exportSectionHtml(){
     return '<div class="modal-section">' +
       '<button class="modal-btn" id="mExportData">Экспортировать личные данные</button>' +
-      '<p class="modal-note">Скачает ZIP-архив со всеми вашими данными (прогресс чтения, часы, настроение, достижение целей).</p>' +
+      '<p class="modal-note">Скачает ZIP-архив со всеми вашими данными (прогресс чтения, настроение, достижение целей).</p>' +
       '</div>';
   }
   function bindExportButton(){
@@ -1764,6 +1882,7 @@
           "- hourCounter.dailyNotesLog: по дням, комментарии к дополнительному счётчику\n" +
           "- moodCounter.dailyMoodLog: по дням, какое настроение отмечалось\n" +
           "- goalCompletions.dailyLog: по дням, какие задачи личных целей были отмечены выполненными (название цели и текст задачи) — эти записи сохраняются, даже если сама цель потом была удалена или галочка снята\n" +
+          "- rawState: технический снимок для восстановления через кнопку «Импортировать личные данные» в самом приложении (прогресс-бары, ячейки по датам и всё остальное восстанавливаются именно из него)\n" +
           "Этот файл можно отдать нейросети для анализа корреляций между чтением, отмеченным временем и настроением.\n"
         );
         var blob = buildZipBlob([
@@ -1785,6 +1904,154 @@
     });
   }
 
+  // ===================== ИМПОРТ ЛИЧНЫХ ДАННЫХ =====================
+  // Читает файл, экспортированный кнопкой "Экспортировать личные данные"
+  // (сам ZIP-архив или извлечённый из него data.json), и полностью
+  // заменяет данные на этом устройстве содержимым rawState.data.
+  // Импорт всегда заменяет, а не объединяет локальные данные — по тем же
+  // причинам, по которым подключение по коду синхронизации тоже больше не
+  // выполняет объединение (см. joinWithCode): слепое объединение по
+  // временным меткам может оставить "победителем" случайные/тестовые
+  // отметки вместо настоящих данных.
+
+  // Достаёт текстовое содержимое файла data.json из ZIP-архива.
+  // Поддерживает и несжатые записи (STORED, метод 0 — как создаёт наш
+  // buildZipBlob), и сжатые (DEFLATE, метод 8 — как у обычных ZIP-архиваторов),
+  // читая центральный каталог архива, чтобы не зависеть от того, чем именно
+  // архив был создан.
+  function extractDataJsonFromZip(arrayBuffer){
+    return new Promise(function(resolve, reject){
+      try{
+        var bytes = new Uint8Array(arrayBuffer);
+        var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        var eocdOffset = -1;
+        var scanFrom = Math.max(0, bytes.length - 65557);
+        for(var i = bytes.length - 22; i >= scanFrom; i--){
+          if(view.getUint32(i, true) === 0x06054b50){ eocdOffset = i; break; }
+        }
+        if(eocdOffset === -1){ reject(new Error("not_zip")); return; }
+        var entryCount = view.getUint16(eocdOffset + 10, true);
+        var centralOffset = view.getUint32(eocdOffset + 16, true);
+        var decoder = new TextDecoder();
+        var pos = centralOffset, target = null;
+        for(var e = 0; e < entryCount; e++){
+          if(view.getUint32(pos, true) !== 0x02014b50) break;
+          var method = view.getUint16(pos + 10, true);
+          var compSize = view.getUint32(pos + 20, true);
+          var nameLen = view.getUint16(pos + 28, true);
+          var extraLen = view.getUint16(pos + 30, true);
+          var commentLen = view.getUint16(pos + 32, true);
+          var localOffset = view.getUint32(pos + 42, true);
+          var name = decoder.decode(bytes.subarray(pos + 46, pos + 46 + nameLen));
+          if(/data\.json$/i.test(name)){ target = {method:method, compSize:compSize, localOffset:localOffset}; }
+          pos += 46 + nameLen + extraLen + commentLen;
+        }
+        if(!target){ reject(new Error("no_data_json")); return; }
+        var lNameLen = view.getUint16(target.localOffset + 26, true);
+        var lExtraLen = view.getUint16(target.localOffset + 28, true);
+        var dataStart = target.localOffset + 30 + lNameLen + lExtraLen;
+        var compBytes = bytes.subarray(dataStart, dataStart + target.compSize);
+        if(target.method === 0){
+          resolve(decoder.decode(compBytes));
+        } else if(target.method === 8 && typeof DecompressionStream !== "undefined"){
+          var stream = new Response(compBytes).body.pipeThrough(new DecompressionStream("deflate-raw"));
+          new Response(stream).text().then(resolve).catch(reject);
+        } else {
+          reject(new Error("unsupported_method"));
+        }
+      }catch(err){ reject(err); }
+    });
+  }
+
+  function readImportFile(file){
+    return file.arrayBuffer().then(function(buf){
+      var isJson = /\.json$/i.test(file.name) || file.type === "application/json";
+      if(isJson){
+        return new TextDecoder().decode(buf);
+      }
+      return extractDataJsonFromZip(buf);
+    });
+  }
+
+  function importSectionHtml(){
+    return '<div class="modal-section">' +
+      '<button class="modal-btn" id="mImportData">Импортировать личные данные</button>' +
+      '<input type="file" id="mImportFileInput" accept=".zip,.json,application/json,application/zip" style="display:none">' +
+      '<p class="modal-note">Восстановит прогресс чтения, настроение и остальные данные из файла, полученного кнопкой «Экспортировать личные данные» (можно выбрать сам ZIP-архив или файл data.json из него). Данные, которые уже есть на этом устройстве, будут заменены.</p>' +
+      '</div>';
+  }
+
+  function bindImportButton(){
+    var btn = document.getElementById("mImportData");
+    var input = document.getElementById("mImportFileInput");
+    if(!btn || !input) return;
+    btn.addEventListener("click", function(){ input.click(); });
+    input.addEventListener("change", function(){
+      var file = input.files && input.files[0];
+      input.value = "";
+      if(!file) return;
+      readImportFile(file).then(function(text){
+        var parsed;
+        try{ parsed = JSON.parse(text); }catch(e){ throw new Error("bad_json"); }
+        if(!parsed || !parsed.rawState || typeof parsed.rawState.data !== "object"){
+          throw new Error("no_raw_state");
+        }
+        renderImportConfirmScreen(parsed.rawState.data);
+      }).catch(function(err){
+        console.error("Ошибка импорта:", err);
+        var msg = "Не удалось прочитать файл. Убедитесь, что выбран ZIP-архив или data.json, полученные экспортом из этого приложения.";
+        if(err && err.message === "no_raw_state") msg = "В этом файле нет данных для восстановления (возможно, он экспортирован старой версией приложения). Экспортируйте данные заново с другого устройства.";
+        modalBox.innerHTML = modalHeader("Не получилось импортировать", msg) + '<button class="modal-btn primary" id="mBack">Назад</button>';
+        bindClose();
+        document.getElementById("mBack").addEventListener("click", renderModalHome);
+      });
+    });
+  }
+
+  function renderImportConfirmScreen(importedState){
+    modalBox.innerHTML = modalHeader("Внимание",
+        "Все данные, которые сейчас есть на этом устройстве, будут удалены и заменены данными из этого файла. Объединение с текущими данными не выполняется — отменить действие после импорта будет нельзя.") +
+      '<button class="modal-btn danger" id="mImportConfirm">Да, удалить текущие данные и импортировать</button>' +
+      '<button class="modal-btn" id="mBack">Отмена</button>';
+    bindClose();
+    document.getElementById("mBack").addEventListener("click", renderModalHome);
+    document.getElementById("mImportConfirm").addEventListener("click", function(){
+      applyImportedState(importedState);
+    });
+  }
+
+  function applyImportedState(importedState){
+    state = importedState;
+    saveLocalState();
+    setNoTransitions(true);
+    rerenderAllFromState();
+    setTimeout(function(){ setNoTransitions(false); }, 50);
+    if(syncId){
+      // Устройство отвязывается от прежнего кода синхронизации: старый код
+      // остаётся привязан к прежним (потенциально некорректным/тестовым)
+      // облачным данным, и его нельзя молча переиспользовать для только
+      // что импортированных данных — ни отправка без объединения, ни тем
+      // более обычная автосинхронизация с объединением по временным меткам
+      // (см. doCloudSync) для этого не подходят. Поэтому синхронизация
+      // просто отключается, а дальше пользователю сразу предлагается
+      // создать новый код — уже для восстановленных данных.
+      syncId = null;
+      localStorage.removeItem(SYNC_ID_KEY);
+    }
+    refreshStatusBase();
+    renderImportDoneScreen();
+  }
+
+  function renderImportDoneScreen(){
+    modalBox.innerHTML = modalHeader("Данные восстановлены",
+        "Прогресс на этом устройстве обновлён. Синхронизация с прежним кодом отключена — при желании создайте новый код для этих данных.") +
+      '<button class="modal-btn primary" id="mImportCreateCode">Создать новый код синхронизации</button>' +
+      '<button class="modal-btn" id="mDone">Закрыть без синхронизации</button>';
+    bindClose();
+    document.getElementById("mImportCreateCode").addEventListener("click", handleCreateCode);
+    document.getElementById("mDone").addEventListener("click", closeModal);
+  }
+
   function renderModalHome(){
     stopCamera();
     if(!syncId){
@@ -1792,11 +2059,13 @@
         "Читаете с нескольких устройств? Подключите их между собой, и прогресс будет совпадать на всех.") +
         '<button class="modal-btn primary" id="mCreate">Это первое устройство — создать код</button>' +
         '<button class="modal-btn" id="mJoin">У меня уже есть код с другого устройства</button>' +
-        exportSectionHtml();
+        exportSectionHtml() +
+        importSectionHtml();
       bindClose();
       document.getElementById("mCreate").addEventListener("click", handleCreateCode);
       document.getElementById("mJoin").addEventListener("click", renderJoinScreen);
       bindExportButton();
+      bindImportButton();
     } else {
       modalBox.innerHTML = modalHeader("Устройство подключено",
         "Прогресс синхронизируется с другими вашими устройствами.") +
@@ -1807,7 +2076,8 @@
           '<button class="modal-btn danger" id="mDisconnect">Отключить синхронизацию на этом устройстве</button>' +
           '<p class="modal-note">Это не удалит облачную копию — просто это устройство перестанет с ней сверяться.</p>' +
         '</div>' +
-        exportSectionHtml();
+        exportSectionHtml() +
+        importSectionHtml();
       bindClose();
       loadQrLib().then(function(){
         showCodeAndQR("mOwnQrHolder", syncId, "Код для подключения ещё одного устройства:");
@@ -1829,6 +2099,7 @@
         renderModalHome();
       });
       bindExportButton();
+      bindImportButton();
     }
   }
 
@@ -1908,7 +2179,7 @@
     document.getElementById("mBack").addEventListener("click", renderJoinScreen);
     document.getElementById("mSubmit").addEventListener("click", function(){
       var val = document.getElementById("manualCodeInput").value.trim();
-      if(val) joinWithCode(val);
+      if(val) confirmJoinWithCode(val);
     });
   }
 
@@ -1958,7 +2229,7 @@
             stopCamera();
             note.className = "modal-note success";
             note.textContent = "Код распознан!";
-            joinWithCode(result.data);
+            confirmJoinWithCode(result.data);
             return;
           }
         }
@@ -1970,10 +2241,22 @@
     });
   }
 
+  function confirmJoinWithCode(id){
+    id = (id||"").trim();
+    if(!id) return;
+    modalBox.innerHTML = modalHeader("Внимание",
+        "Все данные, которые сейчас есть на этом устройстве, будут удалены и заменены данными из облака по этому коду. Совмещение (объединение) данных больше не выполняется — отменить это действие после подключения будет нельзя.") +
+      '<button class="modal-btn danger" id="mJoinConfirm">Да, удалить данные на этом устройстве и подключиться</button>' +
+      '<button class="modal-btn" id="mBack">Отмена</button>';
+    bindClose();
+    document.getElementById("mBack").addEventListener("click", renderJoinScreen);
+    document.getElementById("mJoinConfirm").addEventListener("click", function(){ joinWithCode(id); });
+  }
+
   function joinWithCode(id){
     id = (id||"").trim();
     if(!id) return;
-    modalBox.innerHTML = modalHeader("Подключаемся…", "Загружаем и объединяем прогресс.");
+    modalBox.innerHTML = modalHeader("Подключаемся…", "Загружаем данные из облака.");
     bindClose();
     if(!navigator.onLine){
       modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для подключения нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
@@ -1982,29 +2265,49 @@
       return;
     }
     fetchCloudBlob(id).then(function(cloudData){
-      var merged = mergeStates(state, cloudData || {});
-      state = merged;
+      // Полная замена локальных данных облачными — без объединения (merge).
+      // Раньше здесь вызывался mergeStates(state, cloudData), который сравнивал
+      // временные метки по каждому ключу и мог оставить "победителем" случайные
+      // тестовые отметки с этого устройства, если их время оказывалось свежее
+      // настоящих данных в облаке. После этого испорченное объединение сразу
+      // же уходило обратно в облако и ломало прогресс на других устройствах.
+      // Теперь подключение по коду просто берёт состояние из облака как есть,
+      // а пользователь заранее предупреждён (см. confirmJoinWithCode), что
+      // локальные данные будут стёрты.
+      var incoming = cloudData || {};
+      state = incoming;
       syncId = id;
       localStorage.setItem(SYNC_ID_KEY, id);
       saveLocalState();
       setNoTransitions(true);
       rerenderAllFromState();
       setTimeout(function(){ setNoTransitions(false); }, 50);
-      return putCloudBlob(id, merged);
+      return putCloudBlob(id, incoming);
     }).then(function(){
       refreshStatusBase();
       setSyncState("synced");
-      modalBox.innerHTML = modalHeader("Готово!", "Устройство подключено, прогресс объединён.") + '<button class="modal-btn primary" id="mDone">Закрыть</button>';
-      bindClose();
-      document.getElementById("mDone").addEventListener("click", closeModal);
+      renderSyncRetentionNotice();
     }).catch(function(err){
       console.error(err);
       var msg = "Не удалось подключиться. Проверьте код и подключение к интернету.";
       if(String(err.message||"").indexOf("not_found") !== -1) msg = "Код не найден. Проверьте, что он введён без ошибок.";
+      if(String(err.message||"").indexOf("expired") !== -1) msg = "Этот код больше не действует: данные на сервере были удалены, так как ими не пользовались больше года. Если актуальный прогресс есть на другом устройстве, создайте на нём новый код.";
       modalBox.innerHTML = modalHeader("Не получилось подключиться", msg) + '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderJoinScreen);
     });
+  }
+
+  // Показывается сразу после успешного подключения по коду — предупреждает,
+  // что облачная копия не хранится вечно: если этим кодом никто не будет
+  // пользоваться (ни разу не синхронизироваться) больше года, данные с
+  // сервера удаляются.
+  function renderSyncRetentionNotice(){
+    modalBox.innerHTML = modalHeader("Устройство подключено", "Данные загружены из облака.") +
+      '<p class="modal-note">Синхронизируемые данные будут удалены с сервера, если ими никто не пользуется более 365 дней.</p>' +
+      '<button class="modal-btn primary" id="mDone">Ок</button>';
+    bindClose();
+    document.getElementById("mDone").addEventListener("click", closeModal);
   }
 
   // ===================== SERVICE WORKER И УВЕДОМЛЕНИЕ ОБ ОБНОВЛЕНИИ =====================
@@ -2586,6 +2889,7 @@
     else if(tab === "moodResetConfirm") renderSettingsTabMoodResetConfirm();
     else if(TASK_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabTask(tab);
     else if(EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabExtra(tab);
+    else if(tab === "set2b_1") renderSettingsTabWorkbooks();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
   }
@@ -2725,7 +3029,14 @@
       (showAllTasksOn ? '<button class="modal-btn" id="settingsImportTasksBtn" style="margin-top:16px;">Восстановить задачи из .txt</button>' : '') +
       '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:' + (showAllTasksOn ? "10px" : "16px") + ';">Добавить для себя цель</button>' +
       '<button class="modal-btn" id="settingsVersionsBtn" style="margin-top:10px;">Версии</button>' +
-      '<button class="modal-btn danger" id="settingsResetBtn" style="margin-top:10px;">Начать чтение сначала и сбросить прогресс</button>';
+      '<button class="modal-btn danger" id="settingsResetBtn" style="margin-top:10px;">Начать чтение сначала и сбросить прогресс</button>' +
+      (isSet2Unlocked() ? '' :
+        '<div class="settings-row" style="border-bottom:none; flex-direction:column; align-items:stretch; gap:8px; margin-top:16px;">' +
+          '<span>Введите секретный код</span>' +
+          '<input type="text" class="settings-verse-input" id="settingsSecretCodeInput" placeholder="Код" autocomplete="off" autocapitalize="off" spellcheck="false">' +
+          '<div class="modal-note" id="settingsSecretCodeNote" style="display:none;"></div>' +
+        '</div>'
+      );
 
     var customVerseTextEl = document.getElementById("settingsCustomVerseText");
     var customVerseRefEl = document.getElementById("settingsCustomVerseRef");
@@ -2823,6 +3134,29 @@
     document.getElementById("settingsResetBtn").addEventListener("click", function(){
       switchSettingsTab("resetConfirm");
     });
+
+    var secretCodeInput = document.getElementById("settingsSecretCodeInput");
+    if(secretCodeInput){
+      var secretCodeNote = document.getElementById("settingsSecretCodeNote");
+      var submitSecretCode = function(){
+        var val = secretCodeInput.value;
+        if(!val) return;
+        if(trySet2UnlockCode(val)){
+          renderSettingsTabGear();
+        } else {
+          secretCodeInput.value = "";
+          if(secretCodeNote){
+            secretCodeNote.className = "modal-note error";
+            secretCodeNote.textContent = "Неверный код.";
+            secretCodeNote.style.display = "";
+          }
+        }
+      };
+      secretCodeInput.addEventListener("keydown", function(e){
+        if(e.key === "Enter"){ e.preventDefault(); submitSecretCode(); }
+      });
+      secretCodeInput.addEventListener("blur", submitSecretCode);
+    }
   }
 
   // ===== Восстановление задач из .txt (внутри настроек, вкладка "import") =====
@@ -2953,9 +3287,16 @@
   var settingsGearBtn = document.getElementById("settingsGearBtn");
   if(settingsGearBtn) settingsGearBtn.addEventListener("click", function(){
     if(settingsModalOverlay && settingsModalOverlay.classList.contains("open")){
-      // блокнот уже открыт — переключаем набор вкладок по кругу
-      // (1 -> 2 -> 1 -> ...), сам блокнот не закрывается
-      cycleSettingsTabSet();
+      // блокнот уже открыт: если второй набор вкладок разблокирован кодом —
+      // переключаем набор по кругу (1 -> 2 -> 1 -> ...), блокнот не
+      // закрывается. Если не разблокирован — второго набора для этого
+      // пользователя как будто не существует, поэтому повторный клик по
+      // язычку просто сворачивает блокнот (как обычное закрытие).
+      if(isSet2Unlocked()){
+        cycleSettingsTabSet();
+      } else {
+        closeSettingsModal();
+      }
     } else {
       // новое открытие всегда начинается с первого набора вкладок
       settingsActiveTabSet = 1;
@@ -3575,14 +3916,31 @@
   // дневной статистики месячного счётчика). Годовой счётчик хранит данные
   // отдельно, по одному числу на закрытый месяц, в ключах "hoursegment:" —
   // они этой функцией не затрагиваются и не удаляются никогда.
+  // Прежде чем удалить "сырую" запись, её минуты суммируются в постоянный
+  // (никогда не удаляемый) итог за день — "hourday:<началоДня>" — по одному
+  // числу на день, без деталей по отдельным записям. Это даёт компактную
+  // историю на много лет вперёд (нужную для карты дней года — см. ниже),
+  // не раздувая state детальными логами старше скользящего месяца.
   function pruneOldHourLogsForStats(){
     var cutoff = getStatsCutoffTs();
     var removed = false;
+    var dayTotals = {};
     Object.keys(state).forEach(function(k){
       if(k.indexOf("hourlog:") === 0 && state[k] && typeof state[k].t === "number" && state[k].t < cutoff){
+        var rec = state[k];
+        if(typeof rec.c === "number"){
+          var day = startOfDay(rec.t);
+          dayTotals[day] = (dayTotals[day] || 0) + rec.c;
+        }
         delete state[k];
         removed = true;
       }
+    });
+    Object.keys(dayTotals).forEach(function(day){
+      var key = "hourday:" + day;
+      var existing = state[key];
+      var prevMinutes = (existing && typeof existing.c === "number") ? existing.c : 0;
+      state[key] = {c: prevMinutes + dayTotals[day], t: Date.now()};
     });
     if(removed){
       saveLocalState();
@@ -3708,10 +4066,11 @@
   // дня считается на лету по видам активности за этот день:
   //  - чтение хотя бы одной главы (ключи вида "БукваКниги|Номер", т.е.
   //    содержащие "|" — см. buildExportData);
-  //  - дополнительный счётчик (записи "hourlog:") — подробные записи
-  //    хранятся только примерно за последний скользящий месяц (см.
-  //    pruneOldHourLogsForStats), поэтому для более старых дней это не
-  //    может быть учтено;
+  //  - дополнительный счётчик: подробные записи "hourlog:" хранятся только
+  //    примерно за последний скользящий месяц, но при их устаревании минуты
+  //    сохраняются в постоянный итог за день "hourday:" (см.
+  //    pruneOldHourLogsForStats) — поэтому для любых дней, включая старые,
+  //    наличие служения всё равно учитывается;
   //  - выполненная задача в прогресс-баре личной цели (записи
   //    "goalcompletion:" — не удаляются никогда, переживают удаление
   //    самой цели);
@@ -3748,16 +4107,26 @@
     return byDay;
   }
 
-  // сколько минут дополнительного счётчика записано в каждый день (только
-  // "сырые" hourlog:, доступные примерно за последний месяц — см. выше)
+  // сколько минут дополнительного счётчика записано в каждый день:
+  // "сырые" hourlog: (последний скользящий месяц, см. pruneOldHourLogsForStats)
+  // + постоянные "hourday:" итоги за более старые дни (создаются той же
+  // функцией при удалении устаревших "сырых" записей) — вместе они дают
+  // полную историю без ограничения в месяц.
   function getServiceMinutesByDay(){
     var byDay = {};
     Object.keys(state).forEach(function(k){
-      if(k.indexOf("hourlog:") !== 0) return;
-      var rec = state[k];
-      if(!rec || typeof rec.c !== "number") return;
-      var day = startOfDay(rec.t);
-      byDay[day] = (byDay[day] || 0) + rec.c;
+      if(k.indexOf("hourlog:") === 0){
+        var rec = state[k];
+        if(!rec || typeof rec.c !== "number") return;
+        var day = startOfDay(rec.t);
+        byDay[day] = (byDay[day] || 0) + rec.c;
+      } else if(k.indexOf("hourday:") === 0){
+        var rec2 = state[k];
+        if(!rec2 || typeof rec2.c !== "number") return;
+        var day2 = Number(k.slice("hourday:".length));
+        if(isNaN(day2)) return;
+        byDay[day2] = (byDay[day2] || 0) + rec2.c;
+      }
     });
     return byDay;
   }
@@ -5132,16 +5501,36 @@
     return best ? best.emoji : null;
   }
 
+  // самая ранняя дата прочтения главы среди всех сохранённых записей —
+  // используется, чтобы понять, покрывают ли реальные данные весь
+  // выбранный период (неделя/месяц/3 месяца) целиком, а не только его часть
+  function getEarliestChapterReadTs(){
+    var earliest = null;
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("|") === -1) return;
+      var rec = state[k];
+      if(rec && rec.c === true && typeof rec.t === "number"){
+        if(earliest === null || rec.t < earliest) earliest = rec.t;
+      }
+    });
+    return earliest;
+  }
+
   // прогноз: сколько дней предположительно потребуется, чтобы дочитать
   // оставшиеся главы, если сохранять темп чтения за выбранный период
   // (неделя/месяц/3 месяца). Темп = глав прочитано за период / число
   // прошедших дней в периоде; далее — оставшиеся главы делим на темп.
-  // Если за период не прочитано ни одной главы, или Библия уже дочитана
-  // целиком, прогноз не показывается (как и остальные строки обзора).
+  // Если за период не прочитано ни одной главы, Библия уже дочитана
+  // целиком, или реальные данные не покрывают выбранный период целиком
+  // (т.е. самая ранняя запись о прочтении новее начала периода — темп
+  // считался бы по неполным данным и был бы неточным), прогноз не
+  // показывается (как и остальные строки обзора).
   function getBibleForecastDays(period){
     var remaining = TOTAL_CHAPTERS - totalChecked;
     if(remaining <= 0) return null;
     var startTs = getReviewPeriodStart(period);
+    var earliest = getEarliestChapterReadTs();
+    if(earliest === null || earliest > startTs) return null;
     var elapsedDays = (Date.now() - startTs) / DAY_MS;
     if(elapsedDays <= 0) return null;
     var chaptersRead = getChaptersReadCountSince(startTs);

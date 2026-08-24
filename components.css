@@ -84,6 +84,62 @@
     color:var(--ink-soft);
     padding:20px 10px;
   }
+  .workbooks-title{
+    font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
+    font-size:15px;
+    letter-spacing:.5px;
+    color:var(--wood);
+    text-align:center;
+    margin:0 0 4px 0;
+  }
+  .workbooks-links-list{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    margin-top:14px;
+  }
+  .workbooks-link-row{
+    display:flex;
+    flex-direction:column;
+  }
+  .workbooks-link-input{
+    width:100%;
+    box-sizing:border-box;
+    padding:8px 10px;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    background:var(--parchment);
+    color:var(--ink);
+    font-size:13px;
+  }
+  .workbooks-link-status{
+    font-size:11.5px;
+    margin-top:3px;
+    margin-left:2px;
+    min-height:14px;
+  }
+  .workbooks-status-ok{ color:var(--status-ok); }
+  .workbooks-status-err{ color:var(--status-err); }
+  .workbooks-run-btn{
+    display:block;
+    width:100%;
+    margin-top:16px;
+    padding:10px 14px;
+    border:none;
+    border-radius:8px;
+    background:var(--wood);
+    color:var(--parchment);
+    font-size:14px;
+    cursor:pointer;
+  }
+  .workbooks-run-btn:active{ background:var(--wood-dark); }
+  .workbooks-run-summary{
+    margin-top:10px;
+    text-align:center;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    line-height:1.4;
+  }
   .mood-diagram-wrap{
     display:flex;
     justify-content:center;
