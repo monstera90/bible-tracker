@@ -2967,13 +2967,29 @@
   //   Cross-Origin-Opener-Policy/Cross-Origin-Embedder-Policy, поэтому
   //   должно работать на обычном статическом хостинге без дополнительной
   //   настройки заголовков;
+  // - библиотека ffmpeg.wasm сама создаёт Web Worker по пути "worker.js"
+  //   рядом с собой; так как модуль грузится с чужого домена (CDN), а не
+  //   с домена самой страницы, браузер по умолчанию блокирует создание
+  //   такого воркера (Same-Origin Policy) — поэтому все три файла
+  //   (ffmpeg-core.js, ffmpeg-core.wasm И сам worker.js) сначала
+  //   скачиваются через toBlobURL и подсовываются ffmpeg.load() как
+  //   blob:-ссылки (у них всегда тот же источник, что и у страницы) —
+  //   см. classWorkerURL ниже;
   // - само ядро весит порядка 30 МБ и грузится с jsDelivr при первом
   //   запуске (дальше браузер кеширует) — на первый раз нужен интернет и
   //   может потребоваться время, особенно в мобильной сети;
+  // - открытие index.html напрямую как файла (file://, "локально из
+  //   папки") не работает и не может работать: и динамический import(),
+  //   и fetch() чужого домена для скачивания ffmpeg заблокированы
+  //   браузером именно из-за протокола file:// — приложение нужно
+  //   открывать через http(s), см. проверку location.protocol ниже;
   // - если в выбранном mp4 нет встроенной дорожки субтитров (индекс
-  //   0:s:0), ffmpeg.exec ниже завершится с ошибкой — это отражается
-  //   отдельным сообщением в статусе, а не тихим пустым результатом.
-  var FFMPEG_JS_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/index.js";
+  //   0:s:0), ffmpeg.exec ниже завершится с ошибкой — конкретный текст
+  //   ошибки попадает в статус и в консоль (console.error), а не тихий
+  //   пустой результат.
+  var FFMPEG_JS_BASE = "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm";
+  var FFMPEG_JS_URL = FFMPEG_JS_BASE + "/index.js";
+  var FFMPEG_WORKER_URL = FFMPEG_JS_BASE + "/worker.js";
   var FFMPEG_UTIL_JS_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/dist/esm/index.js";
   var FFMPEG_CORE_BASE_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm";
   var ffmpegModulesPromise = null;
@@ -2999,11 +3015,16 @@
       if(onProgress){
         ffmpeg.on("progress", function(ev){ onProgress(ev && ev.progress); });
       }
+      // все три ссылки — через toBlobURL: скачивает файл сам и заворачивает
+      // его в blob:-URL, который браузер всегда считает "своим" источником
+      // (в т.ч. для создания Worker'а из classWorkerURL, см. комментарий
+      // выше про Same-Origin Policy)
       return Promise.all([
         UtilNS.toBlobURL(FFMPEG_CORE_BASE_URL + "/ffmpeg-core.js", "text/javascript"),
-        UtilNS.toBlobURL(FFMPEG_CORE_BASE_URL + "/ffmpeg-core.wasm", "application/wasm")
+        UtilNS.toBlobURL(FFMPEG_CORE_BASE_URL + "/ffmpeg-core.wasm", "application/wasm"),
+        UtilNS.toBlobURL(FFMPEG_WORKER_URL, "text/javascript")
       ]).then(function(urls){
-        return ffmpeg.load({ coreURL: urls[0], wasmURL: urls[1] });
+        return ffmpeg.load({ coreURL: urls[0], wasmURL: urls[1], classWorkerURL: urls[2] });
       }).then(function(){
         ffmpegInstance = ffmpeg;
         return ffmpeg;
@@ -3116,6 +3137,15 @@
 
     startBtn.addEventListener("click", function(){
       if(!selectedFile) return;
+      // fetch()/import() с чужого домена (сюда, к сожалению, попадает и
+      // сам ffmpeg.wasm с CDN) не работают при открытии страницы как
+      // файла (file://) — это ограничение самого браузера, а не этого
+      // приложения, и код здесь ничего не может с этим сделать; сразу
+      // объясняем это, а не даём словить непонятную ошибку ниже.
+      if(location.protocol === "file:"){
+        setStatus("Эта вкладка не работает при открытии файла напрямую (file://) — откройте приложение через http/https (например, локальный веб-сервер) или через опубликованную версию.");
+        return;
+      }
       startBtn.disabled = true;
       setCopyReady(false);
       outputEl.value = "";
@@ -3134,10 +3164,12 @@
           setCopyReady(false);
           setStatus("Дорожка субтитров в этом видео пуста.");
         }
-      }).catch(function(){
+      }).catch(function(err){
         startBtn.disabled = false;
         setCopyReady(false);
-        setStatus("Не удалось извлечь субтитры. Убедитесь, что в этом видео есть встроенная дорожка субтитров, и что есть подключение к интернету.");
+        console.error("Извлечение субтитров: ошибка", err);
+        var detail = err && err.message ? err.message : String(err);
+        setStatus("Не удалось извлечь субтитры: " + detail + ". Подробности — в консоли браузера (F12 → Console).");
       });
     });
 
