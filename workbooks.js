@@ -5,15 +5,20 @@
    my.js). Выделено в отдельный файл по тому же образцу, что и mood.js —
    модуль создаётся вызовом window.initWorkbooksModule(deps) из my.js.
 
-   Сейчас реализовано: 8 полей для ссылок на гугл-документы (сохраняются
-   в localStorage, переживают перезапуск приложения) и кнопка "Начать",
-   которая реально скачивает каждый документ (.../export?format=docx,
-   CORS для этого домена проверен вручную - работает), распаковывает его
-   через MiniZip (см. minizip.js - собственный ZIP-ридер) и показывает
-   статус по каждой ссылке (включая число найденных таблиц). Сама
-   разборка содержимого таблиц в задания и сборка .xlsx (то же, что
-   делает python-скрипт workbook-script.py) добавится здесь же следующим
-   шагом.
+   Реализовано полностью: 8 слотов для прикрепления файлов .docx (значки
+   со скрепкой — тот же приём, что и во вкладке "Объединение заметок", см.
+   jwlmerge.js/fileRowHtml), два в ряд (4 ряда). Кнопка "Начать" разбирает
+   каждый прикреплённый файл прямо на устройстве — распаковывает через
+   MiniZip (minizip.js), разбирает таблицы через DocxParse (docxparse.js)
+   и WorkbookParse (workbookparse.js — перенос python-скрипта
+   workbook-script.py, все 14 вкладок), собирает итоговый .xlsx через
+   MiniXlsx (minixlsx.js). Кнопка "Скачать" рядом с "Начать" — обычная
+   загрузка в Downloads; неактивна (в базовом стиле .workbooks-result-btn),
+   пока файл не собран, и становится залитой фиолетовым (класс "ready",
+   тот же вид, что и у рабочей кнопки "Начать") как только .xlsx готов.
+   Файлы (в памяти вкладки, объект File — до перезагрузки страницы) и
+   собранный .xlsx остаются между переключениями вкладок до следующего
+   запуска "Начать", как и раньше.
    =========================================================================== */
 
 (function(global){
@@ -22,112 +27,63 @@
   function initWorkbooksModule(deps){
     deps = deps || {};
     var escapeHtml = deps.escapeHtml || function(s){ return String(s); };
+    var PAPERCLIP_ICON_SVG = deps.PAPERCLIP_ICON_SVG || "";
 
-    var LINKS_KEY = "workbooksLinks";
-    var LINKS_COUNT = 8;
+    var FILES_COUNT = 8;
 
-    // Загруженные на последний "Начать" документы: XML-содержимое
-    // word/document.xml для каждой ссылки (0..7), уже готовое к разбору
-    // таблиц следующим шагом. Существует только в памяти вкладки.
-    var lastDocumentXmls = [];
+    // Прикреплённые файлы — только в памяти вкладки (File нельзя положить
+    // в localStorage), как и во вкладке "Объединение заметок" (см.
+    // jwlmerge.js). Переживают переключение вкладок (модуль создаётся
+    // один раз), но не перезагрузку страницы.
+    var selectedFiles = new Array(FILES_COUNT).fill(null);
 
-    function loadLinks(){
-      try{
-        var raw = localStorage.getItem(LINKS_KEY);
-        var arr = raw ? JSON.parse(raw) : [];
-        if(!Array.isArray(arr)) arr = [];
-        while(arr.length < LINKS_COUNT) arr.push("");
-        return arr.slice(0, LINKS_COUNT);
-      }catch(e){
-        return new Array(LINKS_COUNT).fill("");
-      }
-    }
-
-    function saveLinks(links){
-      try{ localStorage.setItem(LINKS_KEY, JSON.stringify(links)); }catch(e){}
-    }
-
-    function readLinksFromInputs(){
-      var links = [];
-      for(var i = 0; i < LINKS_COUNT; i++){
-        var el = document.getElementById("workbooksLink" + i);
-        links.push(el ? el.value.trim() : "");
-      }
-      return links;
-    }
-
-    // Принимает любую ссылку на гугл-документ (обычную .../edit?...,
-    // уже готовую .../export?format=docx, или просто ID документа) и
-    // приводит её к виду .../export?format=docx. Возвращает null, если
-    // это не похоже на ссылку/ID гугл-документа.
-    function toExportUrl(raw){
-      var s = (raw || "").trim();
-      if(!s) return null;
-
-      var m = s.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
-      if(m) return "https://docs.google.com/document/d/" + m[1] + "/export?format=docx";
-
-      if(/^[a-zA-Z0-9_-]{20,}$/.test(s)){
-        return "https://docs.google.com/document/d/" + s + "/export?format=docx";
-      }
-
-      return null;
-    }
-
-    function renderLinkInputsHtml(links){
-      var html = "";
-      for(var i = 0; i < LINKS_COUNT; i++){
-        html +=
-          '<input type="text" id="workbooksLink' + i + '" class="workbooks-link-input" ' +
-          'placeholder="Ссылка на документ ' + (i + 1) + '" value="' +
-          escapeHtml(links[i] || "") + '">';
-      }
-      return html;
-    }
+    // Последний собранный .xlsx — хранится в памяти вкладки и "не
+    // исчезает", пока не запущен новый разбор.
+    var lastXlsxBlob = null;
+    var lastXlsxFilename = "Сводная_таблица.xlsx";
 
     function setStatusLine(index, html){
       var el = document.getElementById("workbooksLinkStatus" + index);
       if(el) el.innerHTML = html;
     }
 
-    function runFetchAll(){
-      var links = readLinksFromInputs();
-      saveLinks(links);
-      lastDocumentXmls = new Array(LINKS_COUNT).fill(null);
+    function setFileName(index, name){
+      var el = document.getElementById("workbooksFileName" + index);
+      if(el) el.textContent = name || ("Документ " + (index + 1));
+    }
 
+    function refreshDownloadBtn(){
+      var btn = document.getElementById("workbooksDownloadBtn");
+      if(!btn) return;
+      btn.disabled = !lastXlsxBlob;
+      btn.classList.toggle("ready", !!lastXlsxBlob);
+    }
+
+    function runFetchAll(){
       var summaryEl = document.getElementById("workbooksRunSummary");
-      var anyLink = links.some(function(l){ return l; });
-      if(!anyLink){
-        if(summaryEl) summaryEl.textContent = "Сначала вставь хотя бы одну ссылку.";
+      var anyFile = selectedFiles.some(function(f){ return f; });
+      if(!anyFile){
+        if(summaryEl) summaryEl.textContent = "Сначала прикрепи хотя бы один файл.";
         return;
       }
-      if(summaryEl) summaryEl.textContent = "Загружаю…";
+      if(summaryEl) summaryEl.textContent = "Разбираю…";
+      lastXlsxBlob = null;
+      refreshDownloadBtn();
 
-      var tasks = links.map(function(link, i){
+      var xmls = new Array(FILES_COUNT).fill(null);
+
+      var tasks = selectedFiles.map(function(file, i){
         setStatusLine(i, "");
-        if(!link) return Promise.resolve();
+        if(!file) return Promise.resolve();
 
-        var exportUrl = toExportUrl(link);
-        if(!exportUrl){
-          setStatusLine(i, '<span class="workbooks-status-err">Не похоже на ссылку гугл-документа</span>');
-          return Promise.resolve();
-        }
-
-        setStatusLine(i, "Загружаю…");
-        return fetch(exportUrl)
-          .then(function(response){
-            if(!response.ok){
-              setStatusLine(i, '<span class="workbooks-status-err">HTTP ' + response.status + '</span>');
-              return;
-            }
-            return response.arrayBuffer().then(function(buf){
-              setStatusLine(i, "Распаковываю…");
-              return MiniZip.extractDocxDocumentXml(buf).then(function(xml){
-                lastDocumentXmls[i] = xml;
-                var tableCount = (xml.match(/<w:tbl>/g) || []).length;
-                var kb = Math.round(buf.byteLength / 1024);
-                setStatusLine(i, '<span class="workbooks-status-ok">' + kb + ' КБ, таблиц: ' + tableCount + '</span>');
-              });
+        setStatusLine(i, "Распаковываю…");
+        return file.arrayBuffer()
+          .then(function(buf){
+            return MiniZip.extractDocxDocumentXml(buf).then(function(xml){
+              xmls[i] = xml;
+              var tableCount = (xml.match(/<w:tbl>/g) || []).length;
+              var kb = Math.round(buf.byteLength / 1024);
+              setStatusLine(i, '<span class="workbooks-status-ok">' + kb + ' КБ, таблиц: ' + tableCount + '</span>');
             });
           })
           .catch(function(err){
@@ -137,13 +93,65 @@
       });
 
       Promise.all(tasks).then(function(){
-        var okCount = lastDocumentXmls.filter(function(x){ return x; }).length;
+        var okXmls = xmls.filter(function(x){ return x; });
         if(summaryEl){
-          summaryEl.textContent = okCount > 0
-            ? "Готово: успешно обработано документов - " + okCount + ". Разбор таблиц в задания добавим следующим шагом."
-            : "Ни один файл не обработался — проверь ссылки.";
+          summaryEl.textContent = okXmls.length > 0
+            ? "Собрано документов: " + okXmls.length + ". Формирую таблицу…"
+            : "Ни один файл не обработался — проверь документы.";
         }
+        if(okXmls.length === 0){
+          refreshDownloadBtn();
+          return;
+        }
+        try{
+          var wb = WorkbookParse.buildWorkbook(okXmls);
+          var sheets = wb.order.map(function(name){
+            return { name: name, rows: wb.sheets[name] };
+          });
+          var xlsxBytes = MiniXlsx.buildXlsx(sheets);
+          lastXlsxBlob = new Blob([xlsxBytes], {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          });
+          if(summaryEl){
+            summaryEl.textContent = "Готово: обработано документов - " + okXmls.length + ".";
+          }
+        }catch(err){
+          lastXlsxBlob = null;
+          if(summaryEl){
+            summaryEl.textContent = "Ошибка при сборке таблицы: " + (err && err.message || err);
+          }
+        }
+        refreshDownloadBtn();
       });
+    }
+
+    function downloadToDownloads(){
+      if(!lastXlsxBlob) return;
+      var url = URL.createObjectURL(lastXlsxBlob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = lastXlsxFilename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 10000);
+    }
+
+    // Один слот сетки: скрепка + имя выбранного файла + статус разбора.
+    // initialName приходит из selectedFiles при повторном открытии вкладки
+    // (DOM пересоздаётся, но выбор файлов — нет).
+    function fileSlotHtml(idx, initialName){
+      return '' +
+        '<div class="workbooks-file-slot">' +
+          '<button type="button" class="task-import-attach-btn" id="workbooksAttachBtn' + idx + '" title="Прикрепить файл">' + PAPERCLIP_ICON_SVG + '</button>' +
+          '<div class="workbooks-file-slot-body">' +
+            '<span id="workbooksFileName' + idx + '" class="task-import-file-name">' +
+              escapeHtml(initialName || ("Документ " + (idx + 1))) +
+            '</span>' +
+            '<div id="workbooksLinkStatus' + idx + '" class="workbooks-link-status"></div>' +
+          '</div>' +
+          '<input type="file" accept=".docx" id="workbooksFileInput' + idx + '" style="display:none;">' +
+        '</div>';
     }
 
     // Вкладка рисуется прямо в общую рабочую область окна настроек, как и
@@ -154,35 +162,33 @@
       var container = document.getElementById("settingsTabContent");
       if(!container) return;
 
-      var links = loadLinks();
-
-      var rowsHtml = "";
-      for(var i = 0; i < LINKS_COUNT; i++){
-        rowsHtml +=
-          '<div class="workbooks-link-row">' +
-            '<input type="text" id="workbooksLink' + i + '" class="workbooks-link-input" ' +
-            'placeholder="Ссылка на документ ' + (i + 1) + '" value="' +
-            escapeHtml(links[i] || "") + '">' +
-            '<div id="workbooksLinkStatus' + i + '" class="workbooks-link-status"></div>' +
-          '</div>';
+      var slotsHtml = "";
+      for(var i = 0; i < FILES_COUNT; i++){
+        slotsHtml += fileSlotHtml(i, selectedFiles[i] ? selectedFiles[i].name : null);
       }
 
       container.innerHTML =
-        '<div class="workbooks-tab">' +
+        '<div class="workbooks-tab settings-content-bottom">' +
           '<h3 class="workbooks-title">Извлечение информации из графиков</h3>' +
-          '<div class="workbooks-links-list">' + rowsHtml + '</div>' +
-          '<button type="button" id="workbooksRunBtn" class="workbooks-run-btn">Начать</button>' +
+          '<div class="workbooks-files-grid">' + slotsHtml + '</div>' +
+          '<div class="workbooks-actions-row">' +
+            '<button type="button" id="workbooksRunBtn" class="workbooks-run-btn">Начать</button>' +
+            '<button type="button" id="workbooksDownloadBtn" class="workbooks-result-btn workbooks-download-btn" disabled>Скачать</button>' +
+          '</div>' +
           '<div id="workbooksRunSummary" class="workbooks-run-summary"></div>' +
         '</div>';
 
-      // сохраняем ссылки по мере ввода, чтобы не потерять их, даже если
-      // "Начать" ни разу не нажали
-      for(var j = 0; j < LINKS_COUNT; j++){
+      for(var j = 0; j < FILES_COUNT; j++){
         (function(idx){
-          var el = document.getElementById("workbooksLink" + idx);
-          if(el){
-            el.addEventListener("input", function(){
-              saveLinks(readLinksFromInputs());
+          var input = document.getElementById("workbooksFileInput" + idx);
+          var attachBtn = document.getElementById("workbooksAttachBtn" + idx);
+          if(attachBtn) attachBtn.addEventListener("click", function(){ input.click(); });
+          if(input){
+            input.addEventListener("change", function(){
+              var f = input.files && input.files[0] ? input.files[0] : null;
+              selectedFiles[idx] = f;
+              setFileName(idx, f ? f.name : null);
+              setStatusLine(idx, "");
             });
           }
         })(j);
@@ -190,6 +196,11 @@
 
       var runBtn = document.getElementById("workbooksRunBtn");
       if(runBtn) runBtn.addEventListener("click", runFetchAll);
+
+      var downloadBtn = document.getElementById("workbooksDownloadBtn");
+      if(downloadBtn) downloadBtn.addEventListener("click", downloadToDownloads);
+
+      refreshDownloadBtn(); // покажет "Скачать" активной, если файл уже был собран ранее
     }
 
     return {

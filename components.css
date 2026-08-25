@@ -92,38 +92,52 @@
     text-align:center;
     margin:0 0 4px 0;
   }
-  .workbooks-links-list{
-    display:flex;
-    flex-direction:column;
-    gap:10px;
+  /* сетка слотов для прикреплённых файлов (скрепка + имя + статус) —
+     два слота в ряд, всего 4 ряда на 8 файлов. Кнопка-скрепка и подпись
+     переиспользуют .task-import-attach-btn/.task-import-file-name из
+     modals.css (тот же стиль, что и во вкладке "Объединение заметок",
+     см. jwlmerge.js), здесь только сетка и обрезка длинных имён. */
+  .workbooks-files-grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px 10px;
     margin-top:14px;
   }
-  .workbooks-link-row{
+  .workbooks-file-slot{
     display:flex;
-    flex-direction:column;
+    align-items:center;
+    gap:8px;
+    min-width:0;
   }
-  .workbooks-link-input{
-    width:100%;
-    box-sizing:border-box;
-    padding:8px 10px;
-    border:1px solid var(--groove-shadow);
-    border-radius:8px;
-    background:var(--parchment);
-    color:var(--ink);
-    font-size:13px;
+  .workbooks-file-slot-body{
+    min-width:0;
+    flex:1;
+  }
+  .workbooks-file-slot-body .task-import-file-name{
+    display:block;
+    font-size:.85em;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
   }
   .workbooks-link-status{
     font-size:11.5px;
     margin-top:3px;
-    margin-left:2px;
     min-height:14px;
   }
   .workbooks-status-ok{ color:var(--status-ok); }
   .workbooks-status-err{ color:var(--status-err); }
+  /* "Начать" и "Скачать" — рядом, поровну делят ширину */
+  .workbooks-actions-row{
+    display:flex;
+    gap:10px;
+    margin-top:16px;
+  }
   .workbooks-run-btn{
     display:block;
-    width:100%;
-    margin-top:16px;
+    flex:1;
+    min-width:0;
+    margin-top:0;
     padding:10px 14px;
     border:none;
     border-radius:8px;
@@ -133,12 +147,117 @@
     cursor:pointer;
   }
   .workbooks-run-btn:active{ background:var(--wood-dark); }
+  /* используется и во вкладке "Объединение заметок" — там кнопка "Начать"
+     недоступна, пока не выбраны оба файла */
+  .workbooks-run-btn:disabled{
+    cursor:default;
+  }
+  .workbooks-run-btn:disabled:active{ background:var(--wood); }
   .workbooks-run-summary{
     margin-top:10px;
     text-align:center;
     font-size:12.5px;
     color:var(--ink-soft);
     line-height:1.4;
+  }
+  .workbooks-result-btn{
+    padding:9px 12px;
+    border:1px solid var(--wood);
+    border-radius:8px;
+    background:transparent;
+    color:var(--wood);
+    font-size:13px;
+    cursor:pointer;
+  }
+  .workbooks-result-btn:active{ background:var(--wood); color:var(--parchment); }
+  /* кнопка "Скачать": пока файл не собран — обычный контурный стиль
+     (см. .workbooks-result-btn выше) и неактивна; как только .xlsx готов,
+     runFetchAll добавляет класс "ready" — тот же залитый фиолетовый вид,
+     что и у рабочей кнопки "Начать" (.workbooks-run-btn). */
+  .workbooks-download-btn{
+    flex:1;
+    min-width:0;
+  }
+  .workbooks-download-btn:disabled{
+    opacity:.5;
+    cursor:default;
+  }
+  .workbooks-download-btn:disabled:active{ background:transparent; color:var(--wood); }
+  .workbooks-download-btn.ready{
+    background:var(--wood);
+    color:var(--parchment);
+    border-color:var(--wood-dark);
+    opacity:1;
+  }
+  .workbooks-download-btn.ready:active{ background:var(--wood-dark); }
+
+  /* ---------- извлечение субтитров (вкладка settingsTabSet2GearBtn4,
+     "set2b_4") — заголовок и подсказка в том же стиле, что и у
+     .workbooks-title/вкладки "Извлечение информации из графиков";
+     кнопка-скрепка выбора файла и подпись переиспользуют
+     .task-import-attach-btn/.task-import-file-name из modals.css (тот же
+     стиль, что и во вкладке "Объединение заметок") ---------- */
+  .subtitle-extract-hint{
+    font-size:12.5px;
+    color:var(--ink-soft);
+    text-align:center;
+    line-height:1.4;
+    margin:4px 0 0 0;
+  }
+  /* "Начать" и "Скопировать субтитры" — рядом, по образцу
+     .workbooks-actions-row (там "Начать"+"Скачать") */
+  .subtitle-actions-row{
+    display:flex;
+    align-items:stretch;
+    gap:10px;
+    margin-top:16px;
+  }
+  /* квадратная кнопка копирования (общепринятая пиктограмма — два листа
+     внахлёст, см. COPY_ICON_SVG в my.js): пока субтитры не извлечены —
+     обычный контурный стиль (как .workbooks-result-btn), неактивна; как
+     только текст извлечён, renderSettingsTabSubtitleExtract добавляет
+     класс "ready" — та же залитая заливка, что и у рабочей кнопки
+     "Начать" (.workbooks-run-btn / .subtitle-actions-row .workbooks-run-btn) */
+  .subtitle-copy-btn{
+    flex-shrink:0;
+    width:48px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:0;
+    border:1px solid var(--wood);
+    border-radius:8px;
+    background:transparent;
+    color:var(--wood);
+    cursor:pointer;
+  }
+  .subtitle-copy-btn svg{ width:20px; height:20px; }
+  .subtitle-copy-btn:active{ background:var(--wood); color:var(--parchment); }
+  .subtitle-copy-btn:disabled{ opacity:.5; cursor:default; }
+  .subtitle-copy-btn:disabled:active{ background:transparent; color:var(--wood); }
+  .subtitle-copy-btn.ready{
+    background:var(--wood);
+    color:var(--parchment);
+    border-color:var(--wood-dark);
+    opacity:1;
+  }
+  .subtitle-copy-btn.ready:active{ background:var(--wood-dark); }
+
+  .subtitle-extract-output{
+    width:100%;
+    box-sizing:border-box;
+    margin-top:14px;
+    min-height:140px;
+    max-height:260px;
+    font-family:"Courier New",monospace;
+    font-size:13px;
+    line-height:1.5;
+    padding:10px;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    background:var(--parchment);
+    color:var(--ink);
+    resize:vertical;
   }
   .mood-diagram-wrap{
     display:flex;

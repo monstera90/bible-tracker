@@ -489,7 +489,7 @@
   };
   // ===== ВТОРОЙ НАБОР ВКЛАДОК (заглушки) =====
   // Полный дубль первого набора: 9 боковых + 5 нижних язычков (см. разметку
-  // в index.html, .settingsTabsSet2 / .settingsTabsGearSet2). 13 из 14 —
+  // в index.html, .settingsTabsSet2 / .settingsTabsGearSet2). 12 из 14 —
   // всё ещё просто заглушки без функций (см. renderSettingsTabSet2Stub
   // ниже); ключи специально с префиксом "set2" — тем же, что и остальные
   // (TASK_TAB_IDS/EXTRA_TAB_IDS), участвуют в общем переключателе
@@ -499,7 +499,13 @@
   // информации из графиков", см. renderSettingsTabWorkbooks в
   // workbooks.js и её отдельную ветку в switchSettingsTab ниже (стоит
   // ДО общей проверки на renderSettingsTabSet2Stub, иначе заглушка
-  // перехватила бы её тоже).
+  // перехватила бы её тоже). set2b_4 тоже уже не заглушка — это вкладка
+  // "Извлечение субтитров": пользователь даёт видео (.mp4) со встроенной
+  // дорожкой субтитров, дорожка вынимается в браузере через ffmpeg.wasm
+  // (см. extractSrtFromMp4), а затем убираются номер и таймкод у каждой
+  // реплики (см. extractSrtCueText), остаётся только текст — см.
+  // renderSettingsTabSubtitleExtract ниже, по тому же принципу вынесена
+  // ДО общей проверки на renderSettingsTabSet2Stub.
   var SET2_TAB_IDS = {
     set2s_1: "settingsTabSet2Btn1", set2s_2: "settingsTabSet2Btn2", set2s_3: "settingsTabSet2Btn3",
     set2s_4: "settingsTabSet2Btn4", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
@@ -539,6 +545,10 @@
   var RESTORE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>';
   var DELETE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>';
   var PAPERCLIP_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>';
+  // общепринятая пиктограмма "копировать" (два листа внахлёст) — кнопка
+  // "Скопировать субтитры" вкладки "Извлечение субтитров" (см.
+  // renderSettingsTabSubtitleExtract ниже)
+  var COPY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="13" rx="1.5"></rect><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h3"></path></svg>';
   var TASK_ARCHIVE_MAX_SHOWN = 50;
 
   function getShowAllTasksEnabled(){
@@ -1581,7 +1591,8 @@
   // в отдельный файл workbooks.js (см. index.html и sw.js) — по тому же
   // образцу, что и Mood выше.
   var Workbooks = window.initWorkbooksModule({
-    escapeHtml: escapeHtml
+    escapeHtml: escapeHtml,
+    PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG
   });
   var renderSettingsTabWorkbooks = Workbooks.renderSettingsTabWorkbooks;
 
@@ -2906,6 +2917,7 @@
     else if(EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabExtra(tab);
     else if(tab === "set2b_1") renderSettingsTabWorkbooks();
     else if(tab === "set2b_3") renderSettingsTabNotesMerge();
+    else if(tab === "set2b_4") renderSettingsTabSubtitleExtract();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
   }
@@ -2936,6 +2948,210 @@
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     container.innerHTML = '<div class="mood-diagram-empty">Вкладка пока не запрограммирована.<br>Контент появится позже.</div>';
+  }
+
+  // ===== ИЗВЛЕЧЕНИЕ СУБТИТРОВ (четвёртая нижняя вкладка второго набора,
+  // settingsTabSet2GearBtn4 / "set2b_4") =====
+  // Пользователь даёт видео (.mp4) со встроенной дорожкой субтитров. Сама
+  // дорожка вынимается в браузере через ffmpeg.wasm (WebAssembly-сборка
+  // ffmpeg, без сервера — библиотека подгружается по требованию, только
+  // при первом нажатии "Начать", см. ensureFFmpegLoaded/FFMPEG_* ниже), а
+  // полученный .srt дальше чистится той же функцией extractSrtCueText,
+  // что убирает номер и строку таймкода у каждой реплики (см. её
+  // описание чуть ниже) — реплика остаётся как есть, включая внутренние
+  // переносы строк, блоки склеиваются обратно через пустую строку.
+  //
+  // Технические ограничения (важно для тестирования на реальном хостинге):
+  // - используется однопоточное ядро ffmpeg (@ffmpeg/core, НЕ core-mt) —
+  //   оно не требует SharedArrayBuffer и заголовков
+  //   Cross-Origin-Opener-Policy/Cross-Origin-Embedder-Policy, поэтому
+  //   должно работать на обычном статическом хостинге без дополнительной
+  //   настройки заголовков;
+  // - само ядро весит порядка 30 МБ и грузится с jsDelivr при первом
+  //   запуске (дальше браузер кеширует) — на первый раз нужен интернет и
+  //   может потребоваться время, особенно в мобильной сети;
+  // - если в выбранном mp4 нет встроенной дорожки субтитров (индекс
+  //   0:s:0), ffmpeg.exec ниже завершится с ошибкой — это отражается
+  //   отдельным сообщением в статусе, а не тихим пустым результатом.
+  var FFMPEG_JS_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm/index.js";
+  var FFMPEG_UTIL_JS_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/dist/esm/index.js";
+  var FFMPEG_CORE_BASE_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm";
+  var ffmpegModulesPromise = null;
+  function loadFFmpegModules(){
+    if(ffmpegModulesPromise) return ffmpegModulesPromise;
+    ffmpegModulesPromise = Promise.all([
+      import(/* webpackIgnore: true */ FFMPEG_JS_URL),
+      import(/* webpackIgnore: true */ FFMPEG_UTIL_JS_URL)
+    ]).catch(function(err){
+      ffmpegModulesPromise = null;
+      throw err;
+    });
+    return ffmpegModulesPromise;
+  }
+  var ffmpegInstance = null;
+  var ffmpegLoadPromise = null;
+  function ensureFFmpegLoaded(onProgress){
+    if(ffmpegInstance && ffmpegInstance.loaded) return Promise.resolve(ffmpegInstance);
+    if(ffmpegLoadPromise) return ffmpegLoadPromise;
+    ffmpegLoadPromise = loadFFmpegModules().then(function(mods){
+      var ffmpeg = new mods[0].FFmpeg();
+      var UtilNS = mods[1];
+      if(onProgress){
+        ffmpeg.on("progress", function(ev){ onProgress(ev && ev.progress); });
+      }
+      return Promise.all([
+        UtilNS.toBlobURL(FFMPEG_CORE_BASE_URL + "/ffmpeg-core.js", "text/javascript"),
+        UtilNS.toBlobURL(FFMPEG_CORE_BASE_URL + "/ffmpeg-core.wasm", "application/wasm")
+      ]).then(function(urls){
+        return ffmpeg.load({ coreURL: urls[0], wasmURL: urls[1] });
+      }).then(function(){
+        ffmpegInstance = ffmpeg;
+        return ffmpeg;
+      });
+    });
+    ffmpegLoadPromise.then(function(){ ffmpegLoadPromise = null; }, function(){ ffmpegLoadPromise = null; });
+    return ffmpegLoadPromise;
+  }
+  // Достаёт из mp4-файла встроенную дорожку субтитров (первую, 0:s:0) и
+  // возвращает её содержимое .srt как текст.
+  function extractSrtFromMp4(file, onProgress){
+    return ensureFFmpegLoaded(onProgress).then(function(ffmpeg){
+      return loadFFmpegModules().then(function(mods){
+        return mods[1].fetchFile(file);
+      }).then(function(data){
+        return ffmpeg.writeFile("input.mp4", data);
+      }).then(function(){
+        return ffmpeg.exec(["-i", "input.mp4", "-map", "0:s:0", "output.srt"]);
+      }).then(function(){
+        return ffmpeg.readFile("output.srt");
+      }).then(function(data){
+        var srtText = new TextDecoder("utf-8").decode(data);
+        try{ ffmpeg.deleteFile("input.mp4"); }catch(e){}
+        try{ ffmpeg.deleteFile("output.srt"); }catch(e){}
+        return srtText;
+      });
+    });
+  }
+
+  // Файл .srt (тот, что отдаёт ffmpeg выше) по сути обычный текстовый
+  // файл: реплики идут блоками через пустую строку, у каждого блока
+  // первая строка — порядковый номер, вторая — строка таймкода вида
+  // "00:00:01,438 --> 00:00:03,440", а дальше сама реплика (иногда на
+  // нескольких строках, если не влезала на экран). Отсюда просто
+  // убираются номер и строка таймкода каждого блока — сам текст реплики
+  // (со своими внутренними переносами строк) остаётся как есть, блоки
+  // склеиваются обратно через пустую строку.
+  function extractSrtCueText(raw){
+    var text = String(raw || "").replace(/^\uFEFF/, "");
+    var normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    var blocks = normalized.split(/\n\s*\n/);
+    var timeRe = /^\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,.]\d{3}/;
+    var cues = [];
+    blocks.forEach(function(block){
+      var lines = block.split("\n").map(function(l){ return l.trim(); }).filter(function(l){ return l.length > 0; });
+      if(!lines.length) return;
+      var idx = 0;
+      if(/^\d+$/.test(lines[0])) idx = 1;
+      if(lines[idx] && timeRe.test(lines[idx])) idx++;
+      var textLines = lines.slice(idx);
+      if(textLines.length) cues.push(textLines.join("\n"));
+    });
+    return cues.join("\n\n");
+  }
+
+  // Кнопка-скрепка и подпись файла — тот же стиль, что и во вкладке
+  // "Объединение заметок" (.task-import-attach-btn/.task-import-file-name
+  // из modals.css, см. jwlmerge.js). "Начать"/"Скопировать субтитры" —
+  // по образцу пары "Начать"/"Скачать" из вкладки "Извлечение информации
+  // из графиков" (.workbooks-run-btn/.workbooks-download-btn.ready, см.
+  // workbooks.js) — только вместо скачивания файла тут копирование в
+  // буфер обмена, поэтому кнопка квадратная, с общепринятой пиктограммой
+  // копирования (см. COPY_ICON_SVG выше), и активируется точно так же —
+  // после того как субтитры успешно извлечены.
+  function renderSettingsTabSubtitleExtract(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var selectedFile = null;
+    var extractedText = "";
+    container.innerHTML =
+      '<div class="workbooks-title">Извлечение субтитров</div>' +
+      '<p class="subtitle-extract-hint">Выберите видео (.mp4) со встроенными субтитрами — дорожка субтитров будет извлечена и очищена от таймкодов. При первом запуске потребуется интернет: браузер один раз скачивает модуль обработки видео (~30 МБ).</p>' +
+      '<div class="task-import-file-row">' +
+        '<button type="button" class="task-import-attach-btn" id="srtAttachBtn" title="Выбрать файл">' + PAPERCLIP_ICON_SVG + '</button>' +
+        '<span id="srtFileName" class="task-import-file-name">Файл не выбран</span>' +
+      '</div>' +
+      '<input type="file" accept=".mp4,video/mp4" id="srtFileInput" style="display:none;">' +
+      '<div class="subtitle-actions-row">' +
+        '<button type="button" class="workbooks-run-btn" id="srtStartBtn" disabled>Начать</button>' +
+        '<button type="button" class="subtitle-copy-btn" id="srtCopyBtn" title="Скопировать субтитры" disabled>' + COPY_ICON_SVG + '</button>' +
+      '</div>' +
+      '<textarea class="subtitle-extract-output" id="srtOutput" readonly placeholder="Извлечённый текст появится здесь…"></textarea>' +
+      '<div class="workbooks-run-summary" id="srtStatusNote"></div>';
+
+    var fileInput = document.getElementById("srtFileInput");
+    var fileNameEl = document.getElementById("srtFileName");
+    var startBtn = document.getElementById("srtStartBtn");
+    var copyBtn = document.getElementById("srtCopyBtn");
+    var outputEl = document.getElementById("srtOutput");
+    var statusEl = document.getElementById("srtStatusNote");
+
+    function setStatus(text){ if(statusEl) statusEl.textContent = text || ""; }
+    function setCopyReady(ready){
+      copyBtn.disabled = !ready;
+      copyBtn.classList.toggle("ready", !!ready);
+    }
+
+    document.getElementById("srtAttachBtn").addEventListener("click", function(){
+      fileInput.click();
+    });
+    fileInput.addEventListener("change", function(){
+      selectedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+      fileNameEl.textContent = selectedFile ? selectedFile.name : "Файл не выбран";
+      startBtn.disabled = !selectedFile;
+      extractedText = "";
+      outputEl.value = "";
+      setCopyReady(false);
+      setStatus("");
+    });
+
+    startBtn.addEventListener("click", function(){
+      if(!selectedFile) return;
+      startBtn.disabled = true;
+      setCopyReady(false);
+      outputEl.value = "";
+      extractedText = "";
+      setStatus("Загружаем модуль обработки видео…");
+      extractSrtFromMp4(selectedFile, function(ratio){
+        if(typeof ratio === "number") setStatus("Извлекаем дорожку субтитров… " + Math.round(ratio * 100) + "%");
+      }).then(function(srtText){
+        extractedText = extractSrtCueText(srtText);
+        outputEl.value = extractedText;
+        startBtn.disabled = false;
+        if(extractedText){
+          setCopyReady(true);
+          setStatus("Субтитры извлечены — таймкоды убраны.");
+        } else {
+          setCopyReady(false);
+          setStatus("Дорожка субтитров в этом видео пуста.");
+        }
+      }).catch(function(){
+        startBtn.disabled = false;
+        setCopyReady(false);
+        setStatus("Не удалось извлечь субтитры. Убедитесь, что в этом видео есть встроенная дорожка субтитров, и что есть подключение к интернету.");
+      });
+    });
+
+    copyBtn.addEventListener("click", function(){
+      if(!extractedText) return;
+      outputEl.focus();
+      outputEl.select();
+      outputEl.setSelectionRange(0, 99999);
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(extractedText).catch(function(){});
+      }
+      try{ document.execCommand("copy"); }catch(e){}
+      setStatus("Скопировано в буфер обмена.");
+    });
   }
 
   // Какой набор вкладок сейчас показан — 1 (боковые/нижние из #settingsTabs

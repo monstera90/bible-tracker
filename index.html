@@ -321,7 +321,15 @@ window.addEventListener("error", function(e){
          "Объединение заметок" (слияние .jwlibrary файлов), см.
          renderSettingsTabNotesMerge в jwlmerge.js и её отдельную ветку в
          switchSettingsTab в my.js (стоит ДО общей проверки на
-         renderSettingsTabSet2Stub, иначе заглушка перехватила бы её тоже). -->
+         renderSettingsTabSet2Stub, иначе заглушка перехватила бы её тоже).
+         Четвёртая нижняя вкладка (settingsTabSet2GearBtn4) тоже уже не
+         заглушка — это вкладка "Извлечение субтитров": пользователь даёт
+         видео (.mp4) со встроенной дорожкой субтитров, дорожка вынимается
+         в браузере через ffmpeg.wasm (без сервера, подгружается по
+         требованию) и очищается от номеров реплик и таймкодов — остаётся
+         только текст, см. renderSettingsTabSubtitleExtract в my.js и её
+         отдельную ветку в switchSettingsTab (по той же причине, стоит ДО
+         общей проверки на renderSettingsTabSet2Stub). -->
     <div class="settings-tabs" id="settingsTabsSet2" style="display:none;">
       <button class="settings-tab" id="settingsTabSet2Btn1" title="">1</button>
       <button class="settings-tab" id="settingsTabSet2Btn2" title="">2</button>
@@ -355,7 +363,15 @@ window.addEventListener("error", function(e){
           <path d="M17.7 17.5l1.1 1.1"></path>
         </svg>
       </button>
-      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn4" title="">4</button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn4" title="Извлечение субтитров">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.5" y="3.5" width="19" height="12.5" rx="1.5"></rect>
+          <path d="M10.3 7l4 2.5-4 2.5z" fill="currentColor" stroke="none"></path>
+          <line x1="6" y1="13.3" x2="18" y2="13.3"></line>
+          <path d="M12 18v2.5"></path>
+          <path d="M9.2 19.3l2.8 2.8 2.8-2.8"></path>
+        </svg>
+      </button>
       <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn5" title="">5</button>
     </div>
   </div>
@@ -373,6 +389,9 @@ window.addEventListener("error", function(e){
 
 <script src="mood.js"></script>
 <script src="minizip.js"></script>
+<script src="minixlsx.js"></script>
+<script src="docxparse.js"></script>
+<script src="workbookparse.js"></script>
 <script src="workbooks.js"></script>
 <script src="jwlmerge.js"></script>
 <script src="my.js"></script>

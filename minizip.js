@@ -128,7 +128,139 @@
     return new TextDecoder("utf-8").decode(xmlBytes);
   }
 
+  // ---------------------------------------------------------------------
+  // Запись ZIP (метод STORE - без сжатия). Нужна для сборки .xlsx на
+  // выходе: .xlsx - тоже просто zip-архив с XML внутри, а хранение файлов
+  // без сжатия внутри zip полностью валидно (Excel/Google Таблицы читают
+  // такие файлы без проблем) и не требует CompressionStream.
+  // ---------------------------------------------------------------------
+
+  // Таблица CRC32 (стандартный алгоритм, полином 0xEDB88320)
+  const CRC32_TABLE = (function () {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) {
+        c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      }
+      table[n] = c >>> 0;
+    }
+    return table;
+  })();
+
+  function crc32(bytes) {
+    let crc = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) {
+      crc = CRC32_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  // DOS date/time (упрощённо - текущая дата/время, точность не важна для
+  // читателей xlsx, они ей не пользуются для отображения данных).
+  function dosDateTime() {
+    const d = new Date();
+    const dosTime =
+      ((d.getHours() & 0x1f) << 11) | ((d.getMinutes() & 0x3f) << 5) | ((d.getSeconds() >> 1) & 0x1f);
+    const dosDate =
+      (((d.getFullYear() - 1980) & 0x7f) << 9) | (((d.getMonth() + 1) & 0xf) << 5) | (d.getDate() & 0x1f);
+    return { dosTime, dosDate };
+  }
+
+  function writeUint16LE(arr, offset, value) {
+    arr[offset] = value & 0xff;
+    arr[offset + 1] = (value >>> 8) & 0xff;
+  }
+  function writeUint32LE(arr, offset, value) {
+    arr[offset] = value & 0xff;
+    arr[offset + 1] = (value >>> 8) & 0xff;
+    arr[offset + 2] = (value >>> 16) & 0xff;
+    arr[offset + 3] = (value >>> 24) & 0xff;
+  }
+
+  // files: массив { name: string, data: Uint8Array }
+  // Возвращает Uint8Array готового zip-архива.
+  function createZip(files) {
+    const encoder = new TextEncoder();
+    const { dosTime, dosDate } = dosDateTime();
+
+    const localParts = [];
+    const centralParts = [];
+    let offset = 0;
+
+    for (const file of files) {
+      const nameBytes = encoder.encode(file.name);
+      const data = file.data;
+      const crc = crc32(data);
+
+      const localHeader = new Uint8Array(30 + nameBytes.length);
+      writeUint32LE(localHeader, 0, 0x04034b50);
+      writeUint16LE(localHeader, 4, 20); // version needed
+      writeUint16LE(localHeader, 6, 0); // flags
+      writeUint16LE(localHeader, 8, 0); // method = STORE
+      writeUint16LE(localHeader, 10, dosTime);
+      writeUint16LE(localHeader, 12, dosDate);
+      writeUint32LE(localHeader, 14, crc);
+      writeUint32LE(localHeader, 18, data.length); // compressed size
+      writeUint32LE(localHeader, 22, data.length); // uncompressed size
+      writeUint16LE(localHeader, 26, nameBytes.length);
+      writeUint16LE(localHeader, 28, 0); // extra field length
+      localHeader.set(nameBytes, 30);
+
+      localParts.push(localHeader, data);
+
+      const centralHeader = new Uint8Array(46 + nameBytes.length);
+      writeUint32LE(centralHeader, 0, 0x02014b50);
+      writeUint16LE(centralHeader, 4, 20); // version made by
+      writeUint16LE(centralHeader, 6, 20); // version needed
+      writeUint16LE(centralHeader, 8, 0); // flags
+      writeUint16LE(centralHeader, 10, 0); // method = STORE
+      writeUint16LE(centralHeader, 12, dosTime);
+      writeUint16LE(centralHeader, 14, dosDate);
+      writeUint32LE(centralHeader, 16, crc);
+      writeUint32LE(centralHeader, 20, data.length);
+      writeUint32LE(centralHeader, 24, data.length);
+      writeUint16LE(centralHeader, 28, nameBytes.length);
+      // extra field length(30), comment length(32), disk number(34),
+      // internal attrs(36) - все 0, оставляем нулями
+      writeUint32LE(centralHeader, 38, 0); // external attrs
+      writeUint32LE(centralHeader, 42, offset); // local header offset
+      centralHeader.set(nameBytes, 46);
+
+      centralParts.push(centralHeader);
+
+      offset += localHeader.length + data.length;
+    }
+
+    const centralDirOffset = offset;
+    let centralSize = 0;
+    for (const p of centralParts) centralSize += p.length;
+
+    const eocd = new Uint8Array(22);
+    writeUint32LE(eocd, 0, 0x06054b50);
+    writeUint16LE(eocd, 4, 0); // disk number
+    writeUint16LE(eocd, 6, 0); // disk with central dir
+    writeUint16LE(eocd, 8, files.length); // entries on this disk
+    writeUint16LE(eocd, 10, files.length); // total entries
+    writeUint32LE(eocd, 12, centralSize);
+    writeUint32LE(eocd, 16, centralDirOffset);
+    writeUint16LE(eocd, 20, 0); // comment length
+
+    const allParts = localParts.concat(centralParts, [eocd]);
+    let totalLength = 0;
+    for (const p of allParts) totalLength += p.length;
+
+    const result = new Uint8Array(totalLength);
+    let pos = 0;
+    for (const p of allParts) {
+      result.set(p, pos);
+      pos += p.length;
+    }
+    return result;
+  }
+
   global.MiniZip = {
     extractDocxDocumentXml: extractDocxDocumentXml,
+    createZip: createZip,
   };
 })(typeof window !== "undefined" ? window : globalThis);

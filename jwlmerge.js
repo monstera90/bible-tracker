@@ -954,7 +954,7 @@ window.initJwlMergeModule = function(deps){
   // в том числе) туда не входят ни при каком MIME-типе — по документации
   // MDN (Shareable file types) это подтверждённое ограничение браузера, а
   // не что-то поправимое в коде. Вместо неё — подсказка рядом с кнопкой
-  // "Сохранить в Downloads" (см. renderSettingsTabNotesMerge ниже).
+  // "Скачать" (см. renderSettingsTabNotesMerge ниже).
 
   function downloadFile(blob, filename){
     var url = URL.createObjectURL(blob);
@@ -991,14 +991,18 @@ window.initJwlMergeModule = function(deps){
     return blocks.join("");
   }
 
+  // Слот выбора файла — тот же приём, что и в сетке вкладки "Извлечение
+  // информации из графиков" (см. workbooks.js/fileSlotHtml): скрепка +
+  // имя, два слота в ряд за счёт общей .workbooks-files-grid.
   function fileRowHtml(idx){
     return '' +
-      '<p style="margin-bottom:4px;">Выберите файл ' + idx + '</p>' +
-      '<div class="task-import-file-row">' +
+      '<div class="workbooks-file-slot">' +
         '<button type="button" class="task-import-attach-btn" id="jwlMergeAttachBtn' + idx + '" title="Прикрепить файл">' + PAPERCLIP_ICON_SVG + '</button>' +
-        '<span id="jwlMergeFileName' + idx + '" class="task-import-file-name">Файл не выбран</span>' +
-      '</div>' +
-      '<input type="file" accept=".jwlibrary" id="jwlMergeFileInput' + idx + '" style="display:none;">';
+        '<div class="workbooks-file-slot-body">' +
+          '<span id="jwlMergeFileName' + idx + '" class="task-import-file-name">Файл ' + idx + '</span>' +
+        '</div>' +
+        '<input type="file" accept=".jwlibrary" id="jwlMergeFileInput' + idx + '" style="display:none;">' +
+      '</div>';
   }
 
   function renderSettingsTabNotesMerge(){
@@ -1009,27 +1013,35 @@ window.initJwlMergeModule = function(deps){
 
     container.innerHTML =
       '<div class="settings-content-bottom">' +
-        '<div class="workbooks-title">Объединение заметок</div>' +
+        '<h3 class="workbooks-title">Объединение заметок</h3>' +
         '<p style="opacity:.7;font-size:.9em;margin-top:2px;">Объединит два файла резервной копии JW Library (.jwlibrary) в один — общие заметки, подчёркивания, закладки и теги сольются без дублей, при конфликте берётся более свежая версия.</p>' +
-        fileRowHtml(1) +
-        '<div style="height:12px;"></div>' +
-        fileRowHtml(2) +
-        '<button class="modal-btn primary" id="jwlMergeStartBtn" style="margin-top:16px;" disabled>Начать</button>' +
-        '<div id="jwlMergeStatus" style="margin-top:10px;"></div>' +
-        '<div id="jwlMergeResult" style="display:none;margin-top:10px;">' +
-          '<button class="modal-btn primary" id="jwlMergeSaveBtn">Сохранить в Downloads</button>' +
-          '<p style="opacity:.7;font-size:.85em;margin-top:6px;">После сохранения откройте уведомление о загрузке (или значок загрузок в браузере) и нажмите там «Открыть» — так можно будет выбрать JW Library.</p>' +
-          '<div id="jwlMergeStats" style="margin-top:8px;"></div>' +
+        '<div class="workbooks-files-grid">' +
+          fileRowHtml(1) +
+          fileRowHtml(2) +
         '</div>' +
+        '<div class="workbooks-actions-row">' +
+          '<button class="workbooks-run-btn" id="jwlMergeStartBtn" disabled>Начать</button>' +
+          '<button class="workbooks-result-btn workbooks-download-btn" id="jwlMergeSaveBtn" disabled>Скачать</button>' +
+        '</div>' +
+        '<div id="jwlMergeStatus" style="margin-top:10px;"></div>' +
+        '<div id="jwlMergeStats" style="margin-top:8px;"></div>' +
       '</div>';
 
     var startBtn = document.getElementById("jwlMergeStartBtn");
+    var saveBtn = document.getElementById("jwlMergeSaveBtn");
     var statusEl = document.getElementById("jwlMergeStatus");
-    var resultEl = document.getElementById("jwlMergeResult");
     var statsEl = document.getElementById("jwlMergeStats");
 
     function refreshStartEnabled(){
       startBtn.disabled = !(selectedFile1 && selectedFile2);
+    }
+
+    // "Скачать" рядом с "Начать" — активна (залита фиолетовым, класс
+    // "ready", тот же вид, что и у "Начать") только когда результат
+    // объединения готов; тот же приём, что и у workbooksDownloadBtn.
+    function refreshSaveEnabled(){
+      saveBtn.disabled = !resultBlob;
+      saveBtn.classList.toggle("ready", !!resultBlob);
     }
 
     [1, 2].forEach(function(idx){
@@ -1039,32 +1051,39 @@ window.initJwlMergeModule = function(deps){
       input.addEventListener("change", function(){
         var f = input.files && input.files[0] ? input.files[0] : null;
         if(idx === 1) selectedFile1 = f; else selectedFile2 = f;
-        nameEl.textContent = f ? f.name : "Файл не выбран";
+        nameEl.textContent = f ? f.name : ("Файл " + idx);
+        // выбор нового файла делает прежний результат неактуальным
+        resultBlob = null;
         refreshStartEnabled();
+        refreshSaveEnabled();
       });
     });
 
     startBtn.addEventListener("click", function(){
       startBtn.disabled = true;
-      resultEl.style.display = "none";
+      resultBlob = null;
+      refreshSaveEnabled();
+      statsEl.innerHTML = "";
       statusEl.innerHTML = '<div class="mood-diagram-empty">Идёт объединение…</div>';
 
       mergeTwoFiles(selectedFile1, selectedFile2).then(function(res){
         resultBlob = res.blob;
         resultName = res.outputName;
         statusEl.innerHTML = '<div class="workbooks-status-ok">Готово: ' + escapeHtml(res.outputName) + '</div>';
-        statsEl.innerHTML = statsToHtml(res.stats);
-        resultEl.style.display = "";
+        statsEl.innerHTML = statsToHtml(res.stats) +
+          '<p style="opacity:.7;font-size:.85em;margin-top:6px;">После скачивания откройте уведомление о загрузке (или значок загрузок в браузере) и нажмите там «Открыть» — так можно будет выбрать JW Library.</p>';
         refreshStartEnabled();
+        refreshSaveEnabled();
       }).catch(function(err){
         console.error("jwlmerge:", err);
         statusEl.innerHTML = '<div class="workbooks-status-err">Не удалось объединить файлы: ' +
           escapeHtml(err && err.message ? err.message : String(err)) + '</div>';
         refreshStartEnabled();
+        refreshSaveEnabled();
       });
     });
 
-    document.getElementById("jwlMergeSaveBtn").addEventListener("click", function(){
+    saveBtn.addEventListener("click", function(){
       if(resultBlob) downloadFile(resultBlob, resultName);
     });
   }
