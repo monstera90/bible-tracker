@@ -194,9 +194,9 @@
   /* ---------- извлечение субтитров (вкладка settingsTabSet2GearBtn4,
      "set2b_4") — заголовок и подсказка в том же стиле, что и у
      .workbooks-title/вкладки "Извлечение информации из графиков";
-     кнопка-скрепка выбора файла и подпись переиспользуют
-     .task-import-attach-btn/.task-import-file-name из modals.css (тот же
-     стиль, что и во вкладке "Объединение заметок") ---------- */
+     кнопка-скрепка выбора файла переиспользует .task-import-attach-btn
+     из modals.css (тот же стиль, что и во вкладке "Объединение
+     заметок"), но раскладка строки своя — см. .subtitle-file-row ---------- */
   .subtitle-extract-hint{
     font-size:12.5px;
     color:var(--ink-soft);
@@ -204,13 +204,53 @@
     line-height:1.4;
     margin:4px 0 0 0;
   }
+  /* результат — сразу под подсказкой и тянется на всё оставшееся место
+     (обычный flex-item в #settingsTabContent, см. modals.css), поэтому
+     без width/max-height — их отдаёт flex; resize:vertical оставлен на
+     случай, если человек всё же захочет руками сделать поле выше */
+  .subtitle-extract-output{
+    box-sizing:border-box;
+    margin-top:14px;
+    flex:1 1 100px;
+    min-height:100px;
+    font-family:"Courier New",monospace;
+    font-size:13px;
+    line-height:1.5;
+    padding:10px;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    background:var(--parchment);
+    color:var(--ink);
+    resize:vertical;
+  }
+  /* строка выбора файла: скрепка прижата к правому краю (удобнее
+     дотягиваться большим пальцем), слева от неё — одна строка на две
+     роли, имя файла ДО запуска и статус операции ПОСЛЕ (см. setFileStatus
+     в renderSettingsTabSubtitleExtract) — сама строка и кнопки под ней
+     обёрнуты снаружи в .settings-content-bottom (см. modals.css) и
+     прижаты к низу окна целиком */
+  .subtitle-file-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-top:10px;
+  }
+  .subtitle-file-status{
+    flex:1;
+    min-width:0;
+    font-size:.9em;
+    opacity:.8;
+    word-break:break-word;
+  }
+  .subtitle-file-status.success{ opacity:1; color:var(--status-ok); }
+  .subtitle-file-status.error{ opacity:1; color:var(--danger); }
   /* "Начать" и "Скопировать субтитры" — рядом, по образцу
      .workbooks-actions-row (там "Начать"+"Скачать") */
   .subtitle-actions-row{
     display:flex;
     align-items:stretch;
     gap:10px;
-    margin-top:16px;
+    margin-top:10px;
   }
   /* квадратная кнопка копирования (общепринятая пиктограмма — два листа
      внахлёст, см. COPY_ICON_SVG в my.js): пока субтитры не извлечены —
@@ -243,23 +283,8 @@
   }
   .subtitle-copy-btn.ready:active{ background:var(--wood-dark); }
 
-  .subtitle-extract-output{
-    width:100%;
-    box-sizing:border-box;
-    margin-top:14px;
-    min-height:140px;
-    max-height:260px;
-    font-family:"Courier New",monospace;
-    font-size:13px;
-    line-height:1.5;
-    padding:10px;
-    border:1px solid var(--groove-shadow);
-    border-radius:8px;
-    background:var(--parchment);
-    color:var(--ink);
-    resize:vertical;
-  }
   .mood-diagram-wrap{
+
     display:flex;
     justify-content:center;
     margin-top:-16px;

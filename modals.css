@@ -273,6 +273,13 @@
     box-sizing:border-box;
     background:var(--parchment);
     color:var(--wood);
+    /* --icon-halo всегда равен фону этой вкладки (и переключается вместе
+       с ним в .settings-tab.active ниже) — нужен пиктограмме вкладки
+       "Разделение epub-файлов" (settingsTabSet2Btn5, см. index.html):
+       слово "epub" там лежит поверх линий ножниц, и тонкая подложка
+       такого цвета вокруг букв отделяет текст от линий под ним, в любом
+       состоянии вкладки. */
+    --icon-halo:var(--parchment);
     border:1px solid var(--groove-shadow);
     border-left:none;
     border-top:none;
@@ -328,6 +335,7 @@
     border-top-color:transparent;
     background:var(--wood);
     color:var(--parchment);
+    --icon-halo:var(--wood);
   }
 
   /* ---------- горизонтальный ряд "лежачих" вкладок под окном ---------- */

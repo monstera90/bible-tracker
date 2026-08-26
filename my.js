@@ -489,7 +489,7 @@
   };
   // ===== ВТОРОЙ НАБОР ВКЛАДОК (заглушки) =====
   // Полный дубль первого набора: 9 боковых + 5 нижних язычков (см. разметку
-  // в index.html, .settingsTabsSet2 / .settingsTabsGearSet2). 12 из 14 —
+  // в index.html, .settingsTabsSet2 / .settingsTabsGearSet2). 11 из 14 —
   // всё ещё просто заглушки без функций (см. renderSettingsTabSet2Stub
   // ниже); ключи специально с префиксом "set2" — тем же, что и остальные
   // (TASK_TAB_IDS/EXTRA_TAB_IDS), участвуют в общем переключателе
@@ -501,11 +501,17 @@
   // ДО общей проверки на renderSettingsTabSet2Stub, иначе заглушка
   // перехватила бы её тоже). set2b_4 тоже уже не заглушка — это вкладка
   // "Извлечение субтитров": пользователь даёт видео (.mp4) со встроенной
-  // дорожкой субтитров, дорожка вынимается в браузере через ffmpeg.wasm
-  // (см. extractSrtFromMp4), а затем убираются номер и таймкод у каждой
-  // реплики (см. extractSrtCueText), остаётся только текст — см.
+  // текстовой дорожкой субтитров (tx3g), текст читается прямо в браузере
+  // обычным разбором контейнера mp4 (без сети, без ffmpeg/WebAssembly —
+  // см. extractSubtitleCuesFromMp4), остаётся только текст — см.
   // renderSettingsTabSubtitleExtract ниже, по тому же принципу вынесена
-  // ДО общей проверки на renderSettingsTabSet2Stub.
+  // ДО общей проверки на renderSettingsTabSet2Stub. set2s_5 (пятая боковая)
+  // тоже уже не заглушка — это вкладка "Разделение epub-файлов": книга
+  // .epub конвертируется в текст (в правильном порядке чтения, по spine
+  // из content.opf) и делится на несколько .txt для источников NotebookLM,
+  // см. renderSettingsTabEpubSplit в epubsplit.js и её отдельную ветку в
+  // switchSettingsTab ниже, по тому же принципу вынесена ДО общей проверки
+  // на renderSettingsTabSet2Stub.
   var SET2_TAB_IDS = {
     set2s_1: "settingsTabSet2Btn1", set2s_2: "settingsTabSet2Btn2", set2s_3: "settingsTabSet2Btn3",
     set2s_4: "settingsTabSet2Btn4", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
@@ -1607,6 +1613,17 @@
     switchSettingsTab: switchSettingsTab
   });
   var renderSettingsTabNotesMerge = JwlMerge.renderSettingsTabNotesMerge;
+
+  // ===================== РАЗДЕЛЕНИЕ EPUB-ФАЙЛОВ =====================
+  // Логика вкладки "Разделение epub-файлов" (пятая боковая вкладка второго
+  // набора, settingsTabSet2Btn5 / "set2s_5") вынесена в отдельный файл
+  // epubsplit.js (см. index.html и sw.js) — по тому же образцу, что и
+  // JwlMerge выше.
+  var EpubSplit = window.initEpubSplitModule({
+    escapeHtml: escapeHtml,
+    PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG
+  });
+  var renderSettingsTabEpubSplit = EpubSplit.renderSettingsTabEpubSplit;
 
   // --- ленивая загрузка QRCode и jsQR ---
   var qrLibLoaded = false, jsqrLibLoaded = false;
@@ -2918,6 +2935,7 @@
     else if(tab === "set2b_1") renderSettingsTabWorkbooks();
     else if(tab === "set2b_3") renderSettingsTabNotesMerge();
     else if(tab === "set2b_4") renderSettingsTabSubtitleExtract();
+    else if(tab === "set2s_5") renderSettingsTabEpubSplit();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
   }
@@ -2952,143 +2970,374 @@
 
   // ===== ИЗВЛЕЧЕНИЕ СУБТИТРОВ (четвёртая нижняя вкладка второго набора,
   // settingsTabSet2GearBtn4 / "set2b_4") =====
-  // Пользователь даёт видео (.mp4) со встроенной дорожкой субтитров. Сама
-  // дорожка вынимается в браузере через ffmpeg.wasm (WebAssembly-сборка
-  // ffmpeg, без сервера — библиотека подгружается по требованию, только
-  // при первом нажатии "Начать", см. ensureFFmpegLoaded/FFMPEG_* ниже), а
-  // полученный .srt дальше чистится той же функцией extractSrtCueText,
-  // что убирает номер и строку таймкода у каждой реплики (см. её
-  // описание чуть ниже) — реплика остаётся как есть, включая внутренние
-  // переносы строк, блоки склеиваются обратно через пустую строку.
+  // Первая версия гоняла файл через ffmpeg.wasm (WebAssembly-сборка
+  // ffmpeg, ~30 МБ, грузится с CDN) — на практике это оказалось
+  // ненадёжно: у ffmpeg.wasm есть давние открытые баги именно на
+  // зависание ffmpeg.load()/ffmpeg.exec() без ошибки (см., например,
+  // issues #557, #772, #815, #830 в репозитории ffmpegwasm/ffmpeg.wasm) —
+  // воспроизводится независимо от корректности настройки blob-URL/
+  // classWorkerURL. Поэтому подход полностью другой: дорожка субтитров
+  // вынимается напрямую из контейнера mp4 (ISO BMFF) обычным JS —
+  // разбором дерева "боксов" (см. parseMp4Boxes/readTx3gSubtitleTrack
+  // ниже). Никакой сети, WebAssembly или воркеров — всё мгновенно и
+  // работает даже при открытии файла напрямую (file://), потому что
+  // содержимое видео читается локально через File.arrayBuffer(), а не
+  // качается откуда-то.
   //
-  // Технические ограничения (важно для тестирования на реальном хостинге):
-  // - используется однопоточное ядро ffmpeg (@ffmpeg/core, НЕ core-mt) —
-  //   оно не требует SharedArrayBuffer и заголовков
-  //   Cross-Origin-Opener-Policy/Cross-Origin-Embedder-Policy, поэтому
-  //   должно работать на обычном статическом хостинге без дополнительной
-  //   настройки заголовков;
-  // - библиотека ffmpeg.wasm сама создаёт Web Worker по пути "worker.js"
-  //   рядом с собой; так как модуль грузится с чужого домена (CDN), а не
-  //   с домена самой страницы, браузер по умолчанию блокирует создание
-  //   такого воркера (Same-Origin Policy) — поэтому все три файла
-  //   (ffmpeg-core.js, ffmpeg-core.wasm И сам worker.js) сначала
-  //   скачиваются через toBlobURL и подсовываются ffmpeg.load() как
-  //   blob:-ссылки (у них всегда тот же источник, что и у страницы) —
-  //   см. classWorkerURL ниже;
-  // - само ядро весит порядка 30 МБ и грузится с jsDelivr при первом
-  //   запуске (дальше браузер кеширует) — на первый раз нужен интернет и
-  //   может потребоваться время, особенно в мобильной сети;
-  // - открытие index.html напрямую как файла (file://, "локально из
-  //   папки") не работает и не может работать: и динамический import(),
-  //   и fetch() чужого домена для скачивания ffmpeg заблокированы
-  //   браузером именно из-за протокола file:// — приложение нужно
-  //   открывать через http(s), см. проверку location.protocol ниже;
-  // - если в выбранном mp4 нет встроенной дорожки субтитров (индекс
-  //   0:s:0), ffmpeg.exec ниже завершится с ошибкой — конкретный текст
-  //   ошибки попадает в статус и в консоль (console.error), а не тихий
-  //   пустой результат.
-  var FFMPEG_JS_BASE = "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/esm";
-  var FFMPEG_JS_URL = FFMPEG_JS_BASE + "/index.js";
-  var FFMPEG_WORKER_URL = FFMPEG_JS_BASE + "/worker.js";
-  var FFMPEG_UTIL_JS_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/dist/esm/index.js";
-  var FFMPEG_CORE_BASE_URL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm";
-  var ffmpegModulesPromise = null;
-  function loadFFmpegModules(){
-    if(ffmpegModulesPromise) return ffmpegModulesPromise;
-    ffmpegModulesPromise = Promise.all([
-      import(/* webpackIgnore: true */ FFMPEG_JS_URL),
-      import(/* webpackIgnore: true */ FFMPEG_UTIL_JS_URL)
-    ]).catch(function(err){
-      ffmpegModulesPromise = null;
-      throw err;
-    });
-    return ffmpegModulesPromise;
-  }
-  var ffmpegInstance = null;
-  var ffmpegLoadPromise = null;
-  function ensureFFmpegLoaded(onProgress){
-    if(ffmpegInstance && ffmpegInstance.loaded) return Promise.resolve(ffmpegInstance);
-    if(ffmpegLoadPromise) return ffmpegLoadPromise;
-    ffmpegLoadPromise = loadFFmpegModules().then(function(mods){
-      var ffmpeg = new mods[0].FFmpeg();
-      var UtilNS = mods[1];
-      if(onProgress){
-        ffmpeg.on("progress", function(ev){ onProgress(ev && ev.progress); });
+  // Что именно ищем: большинство mp4 со "встроенными" (soft) субтитрами
+  // хранят их как отдельную текстовую дорожку с кодеком tx3g (3GPP Timed
+  // Text, он же mov_text у ffmpeg) — ровно то, что получается из .srt
+  // командой "ffmpeg -i in.mp4 -i in.srt -c:s mov_text out.mp4". У такой
+  // дорожки mdia/hdlr.handler_type равен "text" (изредка старые
+  // QuickTime-файлы используют "sbtl"/"subt") — по нему дорожка и
+  // ищется. Каждый сэмпл такой дорожки — это 2-байтовая длина текста
+  // (big-endian) и следом сам текст (обычно UTF-8, иногда UTF-16 с BOM);
+  // именно поэтому в результате никогда и не было бы таймкодов — они не
+  // хранятся внутри самих сэмплов текста, а задаются отдельно таблицей
+  // тайминга (stts), которая для этой задачи нам не нужна вообще.
+  //
+  // Если под "субтитрами" в файле имелась в виду не текстовая дорожка, а
+  // "жёстко вшитые" в картинку субтитры (просто часть видеоряда) —
+  // достать их отсюда нельзя в принципе, никаким разбором контейнера: их
+  // там как отдельных данных просто не существует, это происходит только
+  // распознаванием текста на кадрах (OCR), что не имеет отношения к
+  // разбору mp4 и требует отдельного, гораздо более тяжёлого решения.
+
+  // ---- минимальный разбор дерева боксов ISO BMFF (mp4/mov) ----
+  function parseMp4Boxes(view, start, end){
+    var boxes = [];
+    var offset = start;
+    while(offset + 8 <= end){
+      var size = view.getUint32(offset);
+      var type = String.fromCharCode(
+        view.getUint8(offset + 4), view.getUint8(offset + 5),
+        view.getUint8(offset + 6), view.getUint8(offset + 7)
+      );
+      var headerSize = 8;
+      var boxSize = size;
+      if(size === 1){
+        if(offset + 16 > end) break;
+        var hi = view.getUint32(offset + 8);
+        var lo = view.getUint32(offset + 12);
+        boxSize = hi * 4294967296 + lo;
+        headerSize = 16;
+      } else if(size === 0){
+        boxSize = end - offset;
       }
-      // все три ссылки — через toBlobURL: скачивает файл сам и заворачивает
-      // его в blob:-URL, который браузер всегда считает "своим" источником
-      // (в т.ч. для создания Worker'а из classWorkerURL, см. комментарий
-      // выше про Same-Origin Policy)
-      return Promise.all([
-        UtilNS.toBlobURL(FFMPEG_CORE_BASE_URL + "/ffmpeg-core.js", "text/javascript"),
-        UtilNS.toBlobURL(FFMPEG_CORE_BASE_URL + "/ffmpeg-core.wasm", "application/wasm"),
-        UtilNS.toBlobURL(FFMPEG_WORKER_URL, "text/javascript")
-      ]).then(function(urls){
-        return ffmpeg.load({ coreURL: urls[0], wasmURL: urls[1], classWorkerURL: urls[2] });
-      }).then(function(){
-        ffmpegInstance = ffmpeg;
-        return ffmpeg;
-      });
-    });
-    ffmpegLoadPromise.then(function(){ ffmpegLoadPromise = null; }, function(){ ffmpegLoadPromise = null; });
-    return ffmpegLoadPromise;
+      if(boxSize < headerSize || offset + boxSize > end) break;
+      boxes.push({ type: type, bodyStart: offset + headerSize, end: offset + boxSize });
+      offset += boxSize;
+    }
+    return boxes;
   }
-  // Достаёт из mp4-файла встроенную дорожку субтитров (первую, 0:s:0) и
-  // возвращает её содержимое .srt как текст.
-  function extractSrtFromMp4(file, onProgress){
-    return ensureFFmpegLoaded(onProgress).then(function(ffmpeg){
-      return loadFFmpegModules().then(function(mods){
-        return mods[1].fetchFile(file);
-      }).then(function(data){
-        return ffmpeg.writeFile("input.mp4", data);
-      }).then(function(){
-        return ffmpeg.exec(["-i", "input.mp4", "-map", "0:s:0", "output.srt"]);
-      }).then(function(){
-        return ffmpeg.readFile("output.srt");
-      }).then(function(data){
-        var srtText = new TextDecoder("utf-8").decode(data);
-        try{ ffmpeg.deleteFile("input.mp4"); }catch(e){}
-        try{ ffmpeg.deleteFile("output.srt"); }catch(e){}
-        return srtText;
+  function findMp4Box(boxes, type){
+    for(var i = 0; i < boxes.length; i++) if(boxes[i].type === type) return boxes[i];
+    return null;
+  }
+  function findAllMp4Boxes(boxes, type){
+    return boxes.filter(function(b){ return b.type === type; });
+  }
+  function readMp4Stsz(view, box){
+    var p = box.bodyStart;
+    var sampleSize = view.getUint32(p + 4);
+    var count = view.getUint32(p + 8);
+    var sizes = [];
+    if(sampleSize !== 0){
+      for(var i = 0; i < count; i++) sizes.push(sampleSize);
+    } else {
+      var q = p + 12;
+      for(var i = 0; i < count; i++){ sizes.push(view.getUint32(q)); q += 4; }
+    }
+    return sizes;
+  }
+  function readMp4Stsc(view, box){
+    var p = box.bodyStart;
+    var count = view.getUint32(p + 4);
+    var entries = [];
+    var q = p + 8;
+    for(var i = 0; i < count; i++){
+      entries.push({
+        firstChunk: view.getUint32(q),
+        samplesPerChunk: view.getUint32(q + 4)
       });
-    });
+      q += 12;
+    }
+    return entries;
+  }
+  function readMp4Stco(view, box, is64){
+    var p = box.bodyStart;
+    var count = view.getUint32(p + 4);
+    var offsets = [];
+    var q = p + 8;
+    for(var i = 0; i < count; i++){
+      if(is64){
+        var hi = view.getUint32(q);
+        var lo = view.getUint32(q + 4);
+        offsets.push(hi * 4294967296 + lo);
+        q += 8;
+      } else {
+        offsets.push(view.getUint32(q));
+        q += 4;
+      }
+    }
+    return offsets;
+  }
+  // stco (позиции чанков) + stsc (сколько сэмплов в каждом чанке) + stsz
+  // (размер каждого сэмпла) вместе дают позицию в файле для каждого
+  // сэмпла по отдельности — стандартная схема ISO BMFF.
+  function computeMp4SampleOffsets(chunkOffsets, stscEntries, sampleSizes){
+    var offsets = [];
+    var sampleIndex = 0;
+    for(var chunkIdx = 1; chunkIdx <= chunkOffsets.length; chunkIdx++){
+      var samplesPerChunk = 1;
+      for(var i = 0; i < stscEntries.length; i++){
+        if(stscEntries[i].firstChunk <= chunkIdx) samplesPerChunk = stscEntries[i].samplesPerChunk;
+        else break;
+      }
+      var pos = chunkOffsets[chunkIdx - 1];
+      for(var s = 0; s < samplesPerChunk && sampleIndex < sampleSizes.length; s++){
+        offsets.push(pos);
+        pos += sampleSizes[sampleIndex];
+        sampleIndex++;
+      }
+    }
+    return offsets;
+  }
+  // UTF-16BE не входит в стандартный список кодировок TextDecoder — при
+  // BOM 0xFE 0xFF собираем строку вручную (посимвольно; суррогатные пары
+  // при этом складываются корректно, т.к. строки JS сами по себе UTF-16).
+  function decodeMp4Utf16Be(bytes){
+    var chars = [];
+    for(var i = 0; i + 1 < bytes.length; i += 2){
+      chars.push(String.fromCharCode((bytes[i] << 8) | bytes[i + 1]));
+    }
+    return chars.join("");
+  }
+  function decodeTx3gSampleText(bytes){
+    if(bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF){
+      return decodeMp4Utf16Be(bytes.subarray(2));
+    }
+    if(bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE){
+      return new TextDecoder("utf-16le").decode(bytes.subarray(2));
+    }
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+  // Главная функция: находит текстовую дорожку субтитров в mp4 и
+  // возвращает массив реплик (уже без каких-либо таймкодов — см.
+  // комментарий в начале раздела про то, откуда в принципе не может
+  // взяться таймкод внутри текста сэмпла).
+  function readMp4Stts(view, box){
+    var p = box.bodyStart;
+    var count = view.getUint32(p + 4);
+    var entries = [];
+    var q = p + 8;
+    for(var i = 0; i < count; i++){
+      entries.push({ sampleCount: view.getUint32(q), sampleDelta: view.getUint32(q + 4) });
+      q += 8;
+    }
+    return entries;
+  }
+  // stts хранит длительности не по одной на сэмпл, а группами
+  // (sampleCount повторений одного и того же sampleDelta) — разворачиваем
+  // в плоский массив длиной ровно totalSamples, по одному значению на
+  // сэмпл (в единицах таймшкалы трека, см. readMp4MdhdTimescale).
+  function expandMp4Stts(sttsEntries, totalSamples){
+    var durations = [];
+    for(var i = 0; i < sttsEntries.length && durations.length < totalSamples; i++){
+      for(var j = 0; j < sttsEntries[i].sampleCount && durations.length < totalSamples; j++){
+        durations.push(sttsEntries[i].sampleDelta);
+      }
+    }
+    while(durations.length < totalSamples){
+      durations.push(durations.length ? durations[durations.length - 1] : 0);
+    }
+    return durations;
+  }
+  // timescale (сколько единиц таймшкалы трека умещается в одну секунду)
+  // лежит в mdhd на разном смещении в зависимости от версии бокса.
+  function readMp4MdhdTimescale(view, box){
+    var version = view.getUint8(box.bodyStart);
+    if(version === 1) return view.getUint32(box.bodyStart + 20);
+    return view.getUint32(box.bodyStart + 12);
+  }
+  function extractSubtitleCuesFromMp4(arrayBuffer){
+    var view = new DataView(arrayBuffer);
+    var fileLen = arrayBuffer.byteLength;
+    var topBoxes = parseMp4Boxes(view, 0, fileLen);
+    var moov = findMp4Box(topBoxes, "moov");
+    if(!moov) throw new Error("в файле не найден блок moov — это не похоже на корректный mp4");
+    var moovChildren = parseMp4Boxes(view, moov.bodyStart, moov.end);
+    var traks = findAllMp4Boxes(moovChildren, "trak");
+    if(!traks.length) throw new Error("в файле не найдено ни одной дорожки (trak)");
+
+    var subtitleMdiaChildren = null;
+    var seenHandlers = [];
+    for(var t = 0; t < traks.length; t++){
+      var trakChildren = parseMp4Boxes(view, traks[t].bodyStart, traks[t].end);
+      var mdia = findMp4Box(trakChildren, "mdia");
+      if(!mdia) continue;
+      var mdiaChildren = parseMp4Boxes(view, mdia.bodyStart, mdia.end);
+      var hdlr = findMp4Box(mdiaChildren, "hdlr");
+      if(!hdlr) continue;
+      var handlerType = String.fromCharCode(
+        view.getUint8(hdlr.bodyStart + 8), view.getUint8(hdlr.bodyStart + 9),
+        view.getUint8(hdlr.bodyStart + 10), view.getUint8(hdlr.bodyStart + 11)
+      );
+      seenHandlers.push(handlerType);
+      if(handlerType === "text" || handlerType === "sbtl" || handlerType === "subt"){
+        subtitleMdiaChildren = mdiaChildren;
+        break;
+      }
+    }
+    if(!subtitleMdiaChildren){
+      throw new Error("в этом видео не найдено дорожки субтитров (найдены дорожки: " + (seenHandlers.join(", ") || "нет ни одной") + ") — либо субтитры вшиты прямо в картинку, а не хранятся отдельной текстовой дорожкой");
+    }
+
+    var minf = findMp4Box(subtitleMdiaChildren, "minf");
+    if(!minf) throw new Error("повреждена структура дорожки субтитров (нет minf)");
+    var stbl = findMp4Box(parseMp4Boxes(view, minf.bodyStart, minf.end), "stbl");
+    if(!stbl) throw new Error("повреждена структура дорожки субтитров (нет stbl)");
+    var stblChildren = parseMp4Boxes(view, stbl.bodyStart, stbl.end);
+
+    var stszBox = findMp4Box(stblChildren, "stsz");
+    var stscBox = findMp4Box(stblChildren, "stsc");
+    var stcoBox = findMp4Box(stblChildren, "stco");
+    var co64Box = findMp4Box(stblChildren, "co64");
+    if(!stszBox || !stscBox || !(stcoBox || co64Box)){
+      throw new Error("повреждена структура дорожки субтитров (нет stsz/stsc/stco)");
+    }
+    var sampleSizes = readMp4Stsz(view, stszBox);
+    var stscEntries = readMp4Stsc(view, stscBox);
+    var chunkOffsets = stcoBox ? readMp4Stco(view, stcoBox, false) : readMp4Stco(view, co64Box, true);
+    var sampleOffsets = computeMp4SampleOffsets(chunkOffsets, stscEntries, sampleSizes);
+
+    // stts даёт длительность каждого сэмпла — а у tx3g-дорожки "пустой"
+    // сэмпл между двумя репликами (0 байт текста) на самом деле и есть
+    // пауза: его длительность буквально равна времени тишины на экране
+    // между репликами. Это единственный сигнал о паузах в речи, который
+    // вообще есть в самом mp4 (никаких таймкодов в привычном виде тут
+    // никогда не было — они не нужны и не читаются, см. общий комментарий
+    // выше). Если этой информации почему-то нет (нет stts или mdhd, или
+    // timescale==0) — просто не считаем паузы, и весь текст в итоге уйдёт
+    // одним абзацем (см. reflowSubtitleCues ниже) — это и есть
+    // договорённый запасной вариант.
+    var sttsBox = findMp4Box(stblChildren, "stts");
+    var mdhdBox = findMp4Box(subtitleMdiaChildren, "mdhd");
+    var sampleDurationsSec = null;
+    if(sttsBox && mdhdBox){
+      try{
+        var timescale = readMp4MdhdTimescale(view, mdhdBox);
+        if(timescale > 0){
+          var rawDurations = expandMp4Stts(readMp4Stts(view, sttsBox), sampleSizes.length);
+          sampleDurationsSec = rawDurations.map(function(d){ return d / timescale; });
+        }
+      }catch(e){ sampleDurationsSec = null; }
+    }
+
+    var cues = [];
+    var pendingGap = 0;
+    for(var i = 0; i < sampleOffsets.length; i++){
+      var off = sampleOffsets[i];
+      var size = sampleSizes[i];
+      var durSec = sampleDurationsSec ? sampleDurationsSec[i] : 0;
+      if(size < 2 || off + 2 > fileLen){ pendingGap += durSec; continue; }
+      var textLen = view.getUint16(off);
+      if(textLen <= 0){ pendingGap += durSec; continue; }
+      var usableLen = Math.min(textLen, size - 2, fileLen - off - 2);
+      if(usableLen <= 0){ pendingGap += durSec; continue; }
+      var bytes = new Uint8Array(arrayBuffer, off + 2, usableLen);
+      var text = decodeTx3gSampleText(bytes).replace(/\r\n/g, "\n").trim();
+      if(text){
+        cues.push({ text: text, gapBefore: pendingGap });
+        pendingGap = 0;
+      } else {
+        pendingGap += durSec;
+      }
+    }
+    return cues;
   }
 
-  // Файл .srt (тот, что отдаёт ffmpeg выше) по сути обычный текстовый
-  // файл: реплики идут блоками через пустую строку, у каждого блока
-  // первая строка — порядковый номер, вторая — строка таймкода вида
-  // "00:00:01,438 --> 00:00:03,440", а дальше сама реплика (иногда на
-  // нескольких строках, если не влезала на экран). Отсюда просто
-  // убираются номер и строка таймкода каждого блока — сам текст реплики
-  // (со своими внутренними переносами строк) остаётся как есть, блоки
-  // склеиваются обратно через пустую строку.
-  function extractSrtCueText(raw){
-    var text = String(raw || "").replace(/^\uFEFF/, "");
-    var normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    var blocks = normalized.split(/\n\s*\n/);
-    var timeRe = /^\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,.]\d{3}/;
-    var cues = [];
-    blocks.forEach(function(block){
-      var lines = block.split("\n").map(function(l){ return l.trim(); }).filter(function(l){ return l.length > 0; });
-      if(!lines.length) return;
-      var idx = 0;
-      if(/^\d+$/.test(lines[0])) idx = 1;
-      if(lines[idx] && timeRe.test(lines[idx])) idx++;
-      var textLines = lines.slice(idx);
-      if(textLines.length) cues.push(textLines.join("\n"));
+  // Реплики (сэмплы), как они лежат в mp4, — это ещё не готовый текст:
+  // одна реплика может быть куском предложения (перенесённым на новую
+  // "экранную" строку просто по ширине экрана — внутри уже заменено на
+  // пробел выше), а следующая реплика может продолжать ту же мысль или
+  // начинать новую. Склеиваем реплики в предложения по финальной
+  // пунктуации (. ! ? … — в т.ч. перед закрывающей кавычкой/скобкой);
+  // реплика без такой пунктуации в конце ещё не закончена, следующая
+  // приклеивается к ней через пробел.
+  //
+  // Абзацы — это уже не грамматика, а эвристика: если перед началом
+  // предложения была пауза в речи заметно длиннее типичной для этого
+  // ролика (порог считается от медианной паузы САМОГО этого ролика, не
+  // fixed-число — у разных роликов разный темп речи), считаем это
+  // вероятной сменой мысли/темы и начинаем новый абзац. Если пауз с
+  // таймингом нет вовсе или все они примерно одинаковые — порог просто
+  // никогда не сработает, и весь текст останется одним абзацем — это и
+  // есть согласованный запасной вариант, а не отдельная ветка кода.
+  var SUBTITLE_SENTENCE_END_RE = /[.!?…]["»)\]]*$/;
+  function reflowSubtitleCues(cues){
+    if(!cues.length) return "";
+    var sentences = [];
+    var buffer = "";
+    var bufferGap = 0;
+    cues.forEach(function(cue){
+      var piece = cue.text.replace(/\s*\n\s*/g, " ").trim();
+      if(!piece) return;
+      if(!buffer){
+        bufferGap = cue.gapBefore || 0;
+        buffer = piece;
+      } else {
+        buffer += " " + piece;
+      }
+      if(SUBTITLE_SENTENCE_END_RE.test(buffer)){
+        sentences.push({ text: buffer, gapBefore: bufferGap });
+        buffer = "";
+      }
     });
-    return cues.join("\n\n");
+    if(buffer) sentences.push({ text: buffer, gapBefore: bufferGap });
+
+    var gaps = [];
+    for(var i = 1; i < sentences.length; i++){
+      if(sentences[i].gapBefore > 0) gaps.push(sentences[i].gapBefore);
+    }
+    var paragraphThreshold = null;
+    if(gaps.length){
+      var sorted = gaps.slice().sort(function(a, b){ return a - b; });
+      var median = sorted[Math.floor(sorted.length / 2)];
+      paragraphThreshold = Math.max(0.55, median * 2.4);
+    }
+
+    var out = "";
+    sentences.forEach(function(s, i){
+      if(i === 0){ out = s.text; return; }
+      var newParagraph = paragraphThreshold !== null && s.gapBefore >= paragraphThreshold;
+      out += (newParagraph ? "\n\n" : " ") + s.text;
+    });
+    return out;
   }
 
   // Кнопка-скрепка и подпись файла — тот же стиль, что и во вкладке
-  // "Объединение заметок" (.task-import-attach-btn/.task-import-file-name
-  // из modals.css, см. jwlmerge.js). "Начать"/"Скопировать субтитры" —
-  // по образцу пары "Начать"/"Скачать" из вкладки "Извлечение информации
-  // из графиков" (.workbooks-run-btn/.workbooks-download-btn.ready, см.
-  // workbooks.js) — только вместо скачивания файла тут копирование в
-  // буфер обмена, поэтому кнопка квадратная, с общепринятой пиктограммой
-  // копирования (см. COPY_ICON_SVG выше), и активируется точно так же —
-  // после того как субтитры успешно извлечены.
+  // "Объединение заметок" (.task-import-attach-btn из modals.css, см.
+  // jwlmerge.js), но раскладка своя: скрепка прижата к правому краю (за
+  // неё удобнее тянуться большим пальцем), а слева от неё — одна и та же
+  // строка, которая по очереди показывает то имя файла, то статус
+  // операции (см. setFileStatus) — так короче и не дублирует одно и то
+  // же в двух местах. "Начать"/"Скопировать субтитры" — по образцу пары
+  // "Начать"/"Скачать" из вкладки "Извлечение информации из графиков"
+  // (.workbooks-run-btn/.workbooks-download-btn.ready, см. workbooks.js)
+  // — только вместо скачивания файла тут копирование в буфер обмена,
+  // поэтому кнопка квадратная, с общепринятой пиктограммой копирования
+  // (см. COPY_ICON_SVG выше), и активируется точно так же — после того
+  // как субтитры успешно извлечены. Обработка мгновенная (без сети),
+  // поэтому прогресс-бар не нужен — статус меняется сразу.
+  //
+  // Раскладка (см. также .settings-content-bottom в modals.css): текст
+  // результата идёт сразу под короткой инструкцией и растягивается на
+  // всё оставшееся место (flex:1 у .subtitle-extract-output — это
+  // обычный дочерний элемент #settingsTabContent, а он flex-column, см.
+  // modals.css), а строка выбора файла и ряд кнопок обёрнуты в
+  // .settings-content-bottom и всегда прижаты к низу окна — не нужно
+  // тянуться за ними пальцем, даже когда результат уже показан.
   function renderSettingsTabSubtitleExtract(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -3096,27 +3345,35 @@
     var extractedText = "";
     container.innerHTML =
       '<div class="workbooks-title">Извлечение субтитров</div>' +
-      '<p class="subtitle-extract-hint">Выберите видео (.mp4) со встроенными субтитрами — дорожка субтитров будет извлечена и очищена от таймкодов. При первом запуске потребуется интернет: браузер один раз скачивает модуль обработки видео (~30 МБ).</p>' +
-      '<div class="task-import-file-row">' +
-        '<button type="button" class="task-import-attach-btn" id="srtAttachBtn" title="Выбрать файл">' + PAPERCLIP_ICON_SVG + '</button>' +
-        '<span id="srtFileName" class="task-import-file-name">Файл не выбран</span>' +
-      '</div>' +
-      '<input type="file" accept=".mp4,video/mp4" id="srtFileInput" style="display:none;">' +
-      '<div class="subtitle-actions-row">' +
-        '<button type="button" class="workbooks-run-btn" id="srtStartBtn" disabled>Начать</button>' +
-        '<button type="button" class="subtitle-copy-btn" id="srtCopyBtn" title="Скопировать субтитры" disabled>' + COPY_ICON_SVG + '</button>' +
-      '</div>' +
+      '<p class="subtitle-extract-hint">Выберите видео (.mp4) со встроенной текстовой дорожкой субтитров — текст будет извлечён сразу на месте, без выхода в интернет.</p>' +
       '<textarea class="subtitle-extract-output" id="srtOutput" readonly placeholder="Извлечённый текст появится здесь…"></textarea>' +
-      '<div class="workbooks-run-summary" id="srtStatusNote"></div>';
+      '<div class="settings-content-bottom">' +
+        '<div class="subtitle-file-row">' +
+          '<span id="srtFileStatus" class="subtitle-file-status">Файл не выбран</span>' +
+          '<button type="button" class="task-import-attach-btn" id="srtAttachBtn" title="Выбрать файл">' + PAPERCLIP_ICON_SVG + '</button>' +
+        '</div>' +
+        '<input type="file" accept=".mp4,video/mp4" id="srtFileInput" style="display:none;">' +
+        '<div class="subtitle-actions-row">' +
+          '<button type="button" class="workbooks-run-btn" id="srtStartBtn" disabled>Начать</button>' +
+          '<button type="button" class="subtitle-copy-btn" id="srtCopyBtn" title="Скопировать субтитры" disabled>' + COPY_ICON_SVG + '</button>' +
+        '</div>' +
+      '</div>';
 
     var fileInput = document.getElementById("srtFileInput");
-    var fileNameEl = document.getElementById("srtFileName");
+    var fileStatusEl = document.getElementById("srtFileStatus");
     var startBtn = document.getElementById("srtStartBtn");
     var copyBtn = document.getElementById("srtCopyBtn");
     var outputEl = document.getElementById("srtOutput");
-    var statusEl = document.getElementById("srtStatusNote");
 
-    function setStatus(text){ if(statusEl) statusEl.textContent = text || ""; }
+    // Одна и та же строка слева от скрепки играет две роли — имя файла
+    // (нейтральный цвет) и статус операции (успех/ошибка подсвечиваются),
+    // поэтому вместо просто textContent используется общий сеттер с
+    // необязательным модификатором.
+    function setFileStatus(text, kind){
+      fileStatusEl.textContent = text || "";
+      fileStatusEl.classList.remove("success", "error");
+      if(kind) fileStatusEl.classList.add(kind);
+    }
     function setCopyReady(ready){
       copyBtn.disabled = !ready;
       copyBtn.classList.toggle("ready", !!ready);
@@ -3127,49 +3384,47 @@
     });
     fileInput.addEventListener("change", function(){
       selectedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
-      fileNameEl.textContent = selectedFile ? selectedFile.name : "Файл не выбран";
+      setFileStatus(selectedFile ? selectedFile.name : "Файл не выбран");
       startBtn.disabled = !selectedFile;
       extractedText = "";
       outputEl.value = "";
       setCopyReady(false);
-      setStatus("");
     });
 
     startBtn.addEventListener("click", function(){
       if(!selectedFile) return;
-      // fetch()/import() с чужого домена (сюда, к сожалению, попадает и
-      // сам ffmpeg.wasm с CDN) не работают при открытии страницы как
-      // файла (file://) — это ограничение самого браузера, а не этого
-      // приложения, и код здесь ничего не может с этим сделать; сразу
-      // объясняем это, а не даём словить непонятную ошибку ниже.
-      if(location.protocol === "file:"){
-        setStatus("Эта вкладка не работает при открытии файла напрямую (file://) — откройте приложение через http/https (например, локальный веб-сервер) или через опубликованную версию.");
-        return;
-      }
       startBtn.disabled = true;
       setCopyReady(false);
       outputEl.value = "";
       extractedText = "";
-      setStatus("Загружаем модуль обработки видео…");
-      extractSrtFromMp4(selectedFile, function(ratio){
-        if(typeof ratio === "number") setStatus("Извлекаем дорожку субтитров… " + Math.round(ratio * 100) + "%");
-      }).then(function(srtText){
-        extractedText = extractSrtCueText(srtText);
+      setFileStatus("Читаем файл…");
+      var readPromise = (typeof selectedFile.arrayBuffer === "function")
+        ? selectedFile.arrayBuffer()
+        : new Promise(function(resolve, reject){
+            var reader = new FileReader();
+            reader.onload = function(){ resolve(reader.result); };
+            reader.onerror = function(){ reject(reader.error || new Error("не удалось прочитать файл")); };
+            reader.readAsArrayBuffer(selectedFile);
+          });
+      readPromise.then(function(buf){
+        setFileStatus("Ищем дорожку субтитров…");
+        var cues = extractSubtitleCuesFromMp4(buf);
+        extractedText = reflowSubtitleCues(cues);
         outputEl.value = extractedText;
         startBtn.disabled = false;
         if(extractedText){
           setCopyReady(true);
-          setStatus("Субтитры извлечены — таймкоды убраны.");
+          setFileStatus("Готово — извлечено реплик: " + cues.length + ".", "success");
         } else {
           setCopyReady(false);
-          setStatus("Дорожка субтитров в этом видео пуста.");
+          setFileStatus("Дорожка субтитров в этом видео пуста.", "error");
         }
       }).catch(function(err){
         startBtn.disabled = false;
         setCopyReady(false);
         console.error("Извлечение субтитров: ошибка", err);
         var detail = err && err.message ? err.message : String(err);
-        setStatus("Не удалось извлечь субтитры: " + detail + ". Подробности — в консоли браузера (F12 → Console).");
+        setFileStatus("Не удалось извлечь субтитры: " + detail + ".", "error");
       });
     });
 
@@ -3182,7 +3437,7 @@
         navigator.clipboard.writeText(extractedText).catch(function(){});
       }
       try{ document.execCommand("copy"); }catch(e){}
-      setStatus("Скопировано в буфер обмена.");
+      setFileStatus("Скопировано в буфер обмена.", "success");
     });
   }
 

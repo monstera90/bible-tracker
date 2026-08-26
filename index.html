@@ -324,18 +324,34 @@ window.addEventListener("error", function(e){
          renderSettingsTabSet2Stub, иначе заглушка перехватила бы её тоже).
          Четвёртая нижняя вкладка (settingsTabSet2GearBtn4) тоже уже не
          заглушка — это вкладка "Извлечение субтитров": пользователь даёт
-         видео (.mp4) со встроенной дорожкой субтитров, дорожка вынимается
-         в браузере через ffmpeg.wasm (без сервера, подгружается по
-         требованию) и очищается от номеров реплик и таймкодов — остаётся
-         только текст, см. renderSettingsTabSubtitleExtract в my.js и её
+         видео (.mp4) со встроенной текстовой дорожкой субтитров (tx3g),
+         текст читается прямо в браузере обычным разбором контейнера mp4
+         (без сети, без ffmpeg/WebAssembly — см. extractSubtitleCuesFromMp4
+         в my.js), см. renderSettingsTabSubtitleExtract в my.js и её
          отдельную ветку в switchSettingsTab (по той же причине, стоит ДО
-         общей проверки на renderSettingsTabSet2Stub). -->
+         общей проверки на renderSettingsTabSet2Stub). Пятая боковая
+         вкладка (settingsTabSet2Btn5) тоже уже не заглушка — это вкладка
+         "Разделение epub-файлов": книга .epub конвертируется в текст (в
+         правильном порядке чтения, по spine из content.opf) и делится на
+         несколько .txt-частей для источников NotebookLM, см.
+         renderSettingsTabEpubSplit в epubsplit.js и её отдельную ветку в
+         switchSettingsTab (по той же причине, стоит ДО общей проверки на
+         renderSettingsTabSet2Stub). -->
     <div class="settings-tabs" id="settingsTabsSet2" style="display:none;">
       <button class="settings-tab" id="settingsTabSet2Btn1" title="">1</button>
       <button class="settings-tab" id="settingsTabSet2Btn2" title="">2</button>
       <button class="settings-tab" id="settingsTabSet2Btn3" title="">3</button>
       <button class="settings-tab" id="settingsTabSet2Btn4" title="">4</button>
-      <button class="settings-tab" id="settingsTabSet2Btn5" title="">5</button>
+      <button class="settings-tab" id="settingsTabSet2Btn5" title="Разделение epub-файлов">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3.4" y1="5" x2="20.6" y2="19"></line>
+          <line x1="20.6" y1="5" x2="3.4" y2="19"></line>
+          <circle cx="3.4" cy="5" r="2.3"></circle>
+          <circle cx="3.4" cy="19" r="2.3"></circle>
+          <text x="12" y="13.8" text-anchor="middle" font-size="6.4" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="none" stroke="var(--icon-halo)" stroke-width="3" paint-order="stroke fill">epub</text>
+          <text x="12" y="13.8" text-anchor="middle" font-size="6.4" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="currentColor" stroke="none">epub</text>
+        </svg>
+      </button>
       <button class="settings-tab" id="settingsTabSet2Btn6" title="">6</button>
       <button class="settings-tab" id="settingsTabSet2Btn7" title="">7</button>
       <button class="settings-tab" id="settingsTabSet2Btn8" title="">8</button>
@@ -394,6 +410,7 @@ window.addEventListener("error", function(e){
 <script src="workbookparse.js"></script>
 <script src="workbooks.js"></script>
 <script src="jwlmerge.js"></script>
+<script src="epubsplit.js"></script>
 <script src="my.js"></script>
 
 </body>
