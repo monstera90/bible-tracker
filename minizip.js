@@ -113,19 +113,80 @@
     throw new Error("Неподдерживаемый метод сжатия в ZIP: " + entry.compressionMethod);
   }
 
+  // Достаёт из архива произвольную запись по имени и возвращает её как
+  // текст (UTF-8). null, если такой записи в архиве нет (не бросает
+  // исключение - отсутствие необязательной записи вроде docProps/core.xml
+  // не должно ломать основной сценарий).
+  async function extractEntryText(bytes, entries, name) {
+    const entry = entries.get(name);
+    if (!entry) return null;
+    const dataBytes = await extractEntry(bytes, entry);
+    return new TextDecoder("utf-8").decode(dataBytes);
+  }
+
   // Основная функция: принимает ArrayBuffer/Uint8Array .docx-файла,
   // возвращает текст word/document.xml.
   async function extractDocxDocumentXml(docxData) {
     const bytes = docxData instanceof Uint8Array ? docxData : new Uint8Array(docxData);
     const entries = readCentralDirectory(bytes);
 
-    const entry = entries.get("word/document.xml");
-    if (!entry) {
+    const xml = await extractEntryText(bytes, entries, "word/document.xml");
+    if (xml === null) {
       throw new Error("В файле нет word/document.xml - это не похоже на .docx");
     }
+    return xml;
+  }
 
-    const xmlBytes = await extractEntry(bytes, entry);
-    return new TextDecoder("utf-8").decode(xmlBytes);
+  // Разворачивает основные XML-сущности (&amp; &lt; &gt; &quot; &apos;
+  // &#NN; &#xHH;) - core.xml не экранирует ничего сложнее этого.
+  function decodeXmlEntities(s) {
+    return s
+      .replace(/&#x([0-9a-fA-F]+);/g, function (_, hex) { return String.fromCodePoint(parseInt(hex, 16)); })
+      .replace(/&#(\d+);/g, function (_, dec) { return String.fromCodePoint(parseInt(dec, 10)); })
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, "&");
+  }
+
+  // Имя гугл-документа сервер по CORS не отдаёт (заголовок
+  // Content-Disposition при кросс-доменном fetch к docs.google.com не
+  // открыт через Access-Control-Expose-Headers), но само название лежит
+  // внутри самого экспортированного .docx - Google записывает его в
+  // docProps/core.xml как <dc:title>. Отсюда и достаём, без обращения к
+  // заголовкам ответа. Возвращает строку с именем или null, если тега
+  // нет/он пустой/файл вообще не .docx.
+  async function extractDocxTitle(docxData) {
+    const bytes = docxData instanceof Uint8Array ? docxData : new Uint8Array(docxData);
+    let entries;
+    try {
+      entries = readCentralDirectory(bytes);
+    } catch (e) {
+      return null;
+    }
+
+    const coreXml = await extractEntryText(bytes, entries, "docProps/core.xml");
+    if (coreXml) {
+      const m = /<dc:title[^>]*>([\s\S]*?)<\/dc:title>/i.exec(coreXml);
+      if (m) {
+        const title = decodeXmlEntities(m[1]).trim();
+        if (title) return title;
+      }
+    }
+
+    // Подстраховка: некоторые экспорты кладут название в docProps/app.xml
+    // вместо core.xml (например, если core.xml сгенерирован без dc:title).
+    const appXml = await extractEntryText(bytes, entries, "docProps/app.xml");
+    if (appXml) {
+      const m2 = /<Title[^>]*>([\s\S]*?)<\/Title>/i.exec(appXml);
+      if (m2) {
+        const title2 = decodeXmlEntities(m2[1]).trim();
+        if (title2) return title2;
+      }
+    }
+
+    return null;
   }
 
   // ---------------------------------------------------------------------
@@ -261,6 +322,8 @@
 
   global.MiniZip = {
     extractDocxDocumentXml: extractDocxDocumentXml,
+    extractDocxTitle: extractDocxTitle,
+    decodeXmlEntities: decodeXmlEntities,
     createZip: createZip,
   };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -125,6 +125,17 @@
     margin-top:3px;
     min-height:14px;
   }
+  .workbooks-link-inline-input{
+    display:block;
+    width:100%;
+    box-sizing:border-box;
+    padding:4px 6px;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    background:var(--parchment);
+    color:var(--ink);
+    font-size:.85em;
+  }
   .workbooks-status-ok{ color:var(--status-ok); }
   .workbooks-status-err{ color:var(--status-err); }
   /* "Начать" и "Скачать" — рядом, поровну делят ширину */
