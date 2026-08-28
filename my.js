@@ -1625,6 +1625,18 @@
   });
   var renderSettingsTabEpubSplit = EpubSplit.renderSettingsTabEpubSplit;
 
+  // ===================== ЗАПОЛНЕНИЕ БЛАНКОВ S-89 =====================
+  // Логика вкладки "Заполнение бланков S-89" (вторая нижняя вкладка
+  // второго набора, settingsTabSet2GearBtn2 / "set2b_2") вынесена в
+  // отдельный файл s89fill.js (плюс s89tasks.js — разбор документа,
+  // s89draw.js — отрисовка через Canvas) — по тому же образцу, что и
+  // Workbooks/JwlMerge выше.
+  var S89Fill = window.initS89FillModule({
+    escapeHtml: escapeHtml,
+    PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG
+  });
+  var renderSettingsTabS89Fill = S89Fill.renderSettingsTabS89Fill;
+
   // --- ленивая загрузка QRCode и jsQR ---
   var qrLibLoaded = false, jsqrLibLoaded = false;
   function loadQrLib(){
@@ -2933,6 +2945,7 @@
     else if(TASK_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabTask(tab);
     else if(EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabExtra(tab);
     else if(tab === "set2b_1") renderSettingsTabWorkbooks();
+    else if(tab === "set2b_2") renderSettingsTabS89Fill();
     else if(tab === "set2b_3") renderSettingsTabNotesMerge();
     else if(tab === "set2b_4") renderSettingsTabSubtitleExtract();
     else if(tab === "set2s_5") renderSettingsTabEpubSplit();

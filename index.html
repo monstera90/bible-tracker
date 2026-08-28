@@ -322,6 +322,15 @@ window.addEventListener("error", function(e){
          renderSettingsTabNotesMerge в jwlmerge.js и её отдельную ветку в
          switchSettingsTab в my.js (стоит ДО общей проверки на
          renderSettingsTabSet2Stub, иначе заглушка перехватила бы её тоже).
+         Вторая нижняя вкладка (settingsTabSet2GearBtn2) тоже уже не
+         заглушка — это вкладка "Заполнение бланков S-89": пользователь
+         прикрепляет подложку-бланк (картинку) и .docx с графиком, для
+         каждого подходящего задания рисуется отдельный заполненный бланк
+         (Canvas API вместо Pillow из исходного python-скрипта) и все они
+         скачиваются в Downloads — см. renderSettingsTabS89Fill в s89fill.js
+         (плюс s89tasks.js — разбор документа, s89draw.js — сама отрисовка)
+         и её отдельную ветку в switchSettingsTab (по той же причине, стоит
+         ДО общей проверки на renderSettingsTabSet2Stub).
          Четвёртая нижняя вкладка (settingsTabSet2GearBtn4) тоже уже не
          заглушка — это вкладка "Извлечение субтитров": пользователь даёт
          видео (.mp4) со встроенной текстовой дорожкой субтитров (tx3g),
@@ -367,7 +376,15 @@ window.addEventListener("error", function(e){
           <line x1="15" y1="4" x2="15" y2="20"></line>
         </svg>
       </button>
-      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn2" title="">2</button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn2" title="Заполнение бланков S-89">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path>
+          <path d="M15 3v4h4"></path>
+          <line x1="7.5" y1="11" x2="14" y2="11"></line>
+          <rect x="7.5" y="14.5" width="3" height="3"></rect>
+          <path d="M8.1 16l0.6 0.6L10 15.2"></path>
+        </svg>
+      </button>
       <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn3" title="Объединение заметок">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <path d="M6 4h7l4 4v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"></path>
@@ -411,6 +428,9 @@ window.addEventListener("error", function(e){
 <script src="workbooks.js"></script>
 <script src="jwlmerge.js"></script>
 <script src="epubsplit.js"></script>
+<script src="s89tasks.js"></script>
+<script src="s89draw.js"></script>
+<script src="s89fill.js"></script>
 <script src="my.js"></script>
 
 </body>

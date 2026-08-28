@@ -191,6 +191,27 @@
   }
   .workbooks-download-btn.ready:active{ background:var(--wood-dark); }
 
+  /* ---------- заполнение бланков S-89 (вкладка settingsTabSet2GearBtn2,
+     "set2b_2") — поле "год начала отсчёта" (аналог год_начала.txt из
+     python-скрипта task-jpg-script.py) ---------- */
+  .s89-year-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-top:10px;
+    font-size:12.5px;
+    color:var(--ink-soft);
+  }
+  .s89-year-input{
+    width:70px;
+    padding:6px 8px;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    background:var(--parchment);
+    color:var(--ink);
+    font-size:13px;
+  }
+
   /* ---------- извлечение субтитров (вкладка settingsTabSet2GearBtn4,
      "set2b_4") — заголовок и подсказка в том же стиле, что и у
      .workbooks-title/вкладки "Извлечение информации из графиков";
