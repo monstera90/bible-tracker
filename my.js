@@ -519,7 +519,7 @@
   // см. renderSettingsTabImgResize в imgresize.js и её отдельную ветку в
   // switchSettingsTab ниже, по тому же принципу вынесена ДО общей проверки
   // на renderSettingsTabSet2Stub. set2s_1 (первая боковая) — ЭТО БОЛЬШЕ НЕ
-  // ЗАГЛУШКА: это вкладка "Мой почтовый блокнот" — работа с .md заметками
+  // ЗАГЛУШКА: это вкладка "Мой блокнот" — работа с .md заметками
   // в стиле Obsidian (папка через File System Access API, редактор на
   // CodeMirror 6 с decorations, ссылки [[Название]] между заметками), см.
   // renderSettingsTabMdEditor в mdeditor.js и её отдельную ветку в
@@ -1661,7 +1661,7 @@
   var renderSettingsTabImgResize = ImgResize.renderSettingsTabImgResize;
 
   // ===================== МОЙ ПОЧТОВЫЙ БЛОКНОТ (md-редактор) =====================
-  // Логика вкладки "Мой почтовый блокнот" (первая боковая вкладка второго
+  // Логика вкладки "Мой блокнот" (первая боковая вкладка второго
   // набора, settingsTabSet2Btn1 / "set2s_1") вынесена в отдельный файл
   // mdeditor.js (см. index.html и sw.js) — по тому же образцу, что и
   // ImgResize/EpubSplit выше. flushPendingMdEditorEdit сохраняет несохранённые
@@ -1670,7 +1670,15 @@
   // flushPendingCommentEdits и т.п.
   var MdEditor = window.initMdEditorModule({
     escapeHtml: escapeHtml,
-    PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG
+    PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG,
+    // то же распознавание ссылок на Библию, что и в "Карте дней года" (см.
+    // SCRIPTURE_RE/BOOK_ALIASES/verseLink выше) — regexSource передаётся
+    // строкой (а не самим RegExp), чтобы mdeditor.js собрал СВОЙ экземпляр
+    // с флагом "g" и своим lastIndex, не деля состояние с этим же регэкспом
+    // в других местах кода.
+    scriptureRegexSource: SCRIPTURE_RE.source,
+    bookAliases: BOOK_ALIASES,
+    verseLink: verseLink
   });
   var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
   var flushPendingMdEditorEdit = MdEditor.flushPendingMdEditorEdit;
@@ -2934,6 +2942,7 @@
   // содержимое вкладки не помещается, прокручивается #settingsTabContent
   // (без видимого индикатора прокрутки, см. CSS).
   function switchSettingsTab(tab){
+    currentSettingsTab = tab;
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
@@ -3530,6 +3539,12 @@
   // своём стеке — боковом или нижнем), что и вкладка, на которой
   // произошло переключение.
   var settingsLastStackTab = "gear";
+  // текущая открытая вкладка окна настроек (обновляется на КАЖДОЕ
+  // переключение, в отличие от settingsLastStackTab, которая помнит
+  // только вкладки боковых/нижних стеков) — нужна initBackButtonTrap ниже,
+  // чтобы понять, что сейчас открыт md-редактор (set2s_1) и стоит сначала
+  // спросить у него, не обработает ли он жест "назад" сам, внутри вкладки.
+  var currentSettingsTab = "gear";
   // ищет вкладку с той же позицией (индексом), что и tab, но в ДРУГОМ
   // наборе и в том же стеке (боковой -> боковой, нижний -> нижний).
   // Возвращает null, если позиция не распознана (такого пока не бывает,
@@ -6666,18 +6681,34 @@
   // достаточно последить за атрибутом class этих двух элементов через
   // MutationObserver: как только один из них получает класс "open" —
   // значит открылся новый "экран", и в историю браузера добавляется
-  // запись-ловушка. По кнопке/жесту "назад" браузер сам уходит на
-  // предыдущую запись, событие popstate — сигнал закрыть верхний из
-  // открытых сейчас слоёв (сначала #modalOverlay, он показывается поверх
-  // настроек, и только если он не открыт — #settingsModalOverlay).
-  // Если ни то, ни другое не открыто — попап нечего закрывать, событие
-  // просто игнорируется, и следующее "назад" сработает как обычно
-  // (свернёт/закроет приложение) — это ожидаемо и правильно, т.к. на
-  // главном экране чтения возвращаться больше некуда.
+  // запись-ловушка.
+  //
+  // ВАЖНО (после первой версии этой правки): для приложения, установленного
+  // на домашний экран как PWA (standalone), одного pushState() с тем же
+  // самым URL оказалось недостаточно — Android иногда всё равно закрывает
+  // всё приложение вместо перехода на предыдущую запись, если URL записи
+  // совпадает с исходным URL, с которым PWA было запущено. Поэтому каждая
+  // запись-ловушка теперь получает СВОЙ уникальный #hash (реального
+  // значения не несёт, нигде в коде location.hash не читается) — так
+  // Android надёжнее видит, что это другая, отдельная точка истории, и
+  // жест "назад" действительно возвращает на предыдущий "экран" внутри
+  // приложения, а не закрывает его.
+  //
+  // По кнопке/жесту "назад" браузер сам уходит на предыдущую запись,
+  // событие popstate — сигнал закрыть верхний из открытых сейчас слоёв
+  // (сначала #modalOverlay, он показывается поверх настроек, и только
+  // если он не открыт — #settingsModalOverlay). Если ни то, ни другое не
+  // открыто — попап нечего закрывать, событие просто игнорируется, и
+  // следующее "назад" сработает как обычно (свернёт/закроет приложение)
+  // — это ожидаемо и правильно, т.к. на главном экране чтения
+  // возвращаться больше некуда.
   (function initBackButtonTrap(){
     var modalOverlayEl = document.getElementById("modalOverlay");
     var settingsOverlayEl = document.getElementById("settingsModalOverlay");
     if(!modalOverlayEl && !settingsOverlayEl) return;
+
+    var navTrapSeq = 0;
+    var baseUrl = location.pathname + location.search;
 
     function armTrap(el){
       if(!el) return;
@@ -6685,7 +6716,8 @@
       new MutationObserver(function(){
         var isOpen = el.classList.contains("open");
         if(isOpen && !wasOpen){
-          try{ history.pushState({__navTrap:true}, "", location.href); }catch(e){}
+          navTrapSeq++;
+          try{ history.pushState({__navTrap:navTrapSeq}, "", baseUrl + "#nav" + navTrapSeq); }catch(e){}
         }
         wasOpen = isOpen;
       }).observe(el, {attributes:true, attributeFilter:["class"]});
@@ -6697,7 +6729,24 @@
       if(modalOverlayEl && modalOverlayEl.classList.contains("open")){
         closeModal();
       } else if(settingsOverlayEl && settingsOverlayEl.classList.contains("open")){
-        closeSettingsModal();
+        // md-редактор (set2s_1) — единственная вкладка со своей ВНУТРЕННЕЙ
+        // навигацией (список папок -> заметка). Если сейчас открыта именно
+        // она, сперва отдаём ей шанс обработать "назад" самостоятельно
+        // (закрыть открытую заметку -> вернуться к списку, или подняться на
+        // папку вверх) — и, если она это сделала, НЕ закрываем окно
+        // настроек целиком, а вместо истраченной этим "назад" записи в
+        // истории тут же добавляем новую ловушку, чтобы следующее "назад"
+        // снова было перехвачено (а не сразу закрыло приложение).
+        var handledInside = (currentSettingsTab === "set2s_1" &&
+          typeof MdEditor !== "undefined" && MdEditor &&
+          typeof MdEditor.handleBackGesture === "function" &&
+          MdEditor.handleBackGesture());
+        if(handledInside){
+          navTrapSeq++;
+          try{ history.pushState({__navTrap:navTrapSeq}, "", baseUrl + "#nav" + navTrapSeq); }catch(e){}
+        } else {
+          closeSettingsModal();
+        }
       }
       // если ничего не открыто — ничего не делаем, следующее "назад"
       // сработает как обычно (закроет приложение)

@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Вкладка "Мой почтовый блокнот" (первая боковая вкладка второго набора,
+   Вкладка "Мой блокнот" (первая боковая вкладка второго набора,
    settingsTabSet2Btn1 / "set2s_1") — работа с .md заметками в стиле
    Obsidian. Вынесена в отдельный файл по тому же образцу, что и
    Workbooks/JwlMerge/EpubSplit/ImgResize (см. my.js).
@@ -33,6 +33,41 @@ window.initMdEditorModule = function(deps){
   "use strict";
   var escapeHtml = deps.escapeHtml;
   var PAPERCLIP_ICON_SVG = deps.PAPERCLIP_ICON_SVG;
+  // распознавание ссылок на Библию (то же, что и в "Карте дней года", см.
+  // SCRIPTURE_RE/BOOK_ALIASES/verseLink в my.js) — regexSource приходит
+  // строкой, здесь собирается СВОЙ экземпляр RegExp с флагом "g", чтобы не
+  // делить mutable lastIndex с регэкспом из my.js.
+  var SCRIPTURE_RE = deps.scriptureRegexSource ? new RegExp(deps.scriptureRegexSource, "g") : null;
+  var BOOK_ALIASES = deps.bookAliases || null;
+  var verseLink = deps.verseLink || null;
+
+  // Ищет библейскую ссылку в строке, под которой находится offset (символ
+  // клика) — используется и для decorations (см. makeLivePreviewExtension),
+  // и для обработки клика (см. handleMouseDown).
+  function findScriptureRefAt(lineText, offset){
+    if(!SCRIPTURE_RE) return null;
+    SCRIPTURE_RE.lastIndex = 0;
+    var m;
+    while((m = SCRIPTURE_RE.exec(lineText))){
+      var a = m.index, b = a + m[0].length;
+      if(offset >= a && offset <= b) return m;
+      if(m[0].length === 0) SCRIPTURE_RE.lastIndex++;
+    }
+    return null;
+  }
+
+  // Открывает найденную ссылку тем же способом, что и обычные внешние
+  // ссылки/ссылки на Библию в остальном приложении (target="_blank") —
+  // сама ссылка ведёт на jw.org finder, который на устройстве с
+  // установленной JW Library открывается в ней (та же схема, что уже
+  // работает в "Карте дней года").
+  function openScriptureLink(m){
+    if(!BOOK_ALIASES || !verseLink) return;
+    var canonical = BOOK_ALIASES[m[1]];
+    if(!canonical) return;
+    var link = verseLink(canonical, Number(m[2]), Number(m[3]), m[4] ? Number(m[4]) : undefined);
+    if(link) window.open(link, "_blank", "noopener,noreferrer");
+  }
 
   // ---------------------------------------------------------------------
   // Пиктограммы (тот же стиль, что и у остальных вкладок: viewBox 24×24,
@@ -188,6 +223,10 @@ window.initMdEditorModule = function(deps){
         } else if(handle.kind === "directory"){
           var child = await scanTree(handle);
           child.name = name;
+          // ссылка на родителя — нужна, чтобы жест "назад" внутри списка
+          // заметок поднимался на один уровень вверх, а не сразу в корень
+          // (см. handleBackGesture); у rootTree.parent остаётся undefined.
+          child.parent = node;
           // папка остаётся в дереве, если внутри (в т.ч. вложенно) есть
           // .md заметки, ПОДпапки или изображения — папка, где лежат
           // только картинки для заметок (без единого .md), раньше молча
@@ -285,7 +324,7 @@ window.initMdEditorModule = function(deps){
       : "Укажите папку с заметками (.md), чтобы начать.";
     container.innerHTML =
       '<div class="mdeditor-tab">' +
-        '<h3 class="workbooks-title">Мой почтовый блокнот</h3>' +
+        '<h3 class="workbooks-title">Мой блокнот</h3>' +
         '<p class="mdeditor-hint">' + hint + '</p>' +
         '<div class="mdeditor-setup-row">' +
           '<button type="button" class="task-import-attach-btn" id="mdEditorAttachBtn" title="' +
@@ -348,7 +387,7 @@ window.initMdEditorModule = function(deps){
 
     var isRoot = (node === rootTree);
     var html = '<div class="mdeditor-tab">';
-    html += '<h3 class="workbooks-title" style="margin:0 0 4px 0;">' + (isRoot ? "Мой почтовый блокнот" : escName(node.name)) + '</h3>';
+    html += '<h3 class="workbooks-title" style="margin:0 0 4px 0;">' + (isRoot ? "Мой блокнот" : escName(node.name)) + '</h3>';
     if(!items.length){
       html += '<div class="mdeditor-empty">' + (isRoot ? "В этой папке нет .md заметок." : "Здесь пока пусто.") + '</div>';
     } else {
@@ -423,6 +462,34 @@ window.initMdEditorModule = function(deps){
     currentDirNode = rootTree;
     screen = "list";
     render();
+  }
+
+  // ---------------------------------------------------------------------
+  // Жест/кнопка "назад" (Android back) — вызывается СНАРУЖИ, из
+  // initBackButtonTrap в my.js, ПЕРЕД тем, как закрыть всё окно настроек
+  // popstate'ом. Модуль сам решает, есть ли у него собственная "внутренняя"
+  // навигация, которую нужно отработать вместо закрытия окна:
+  //   - открыта заметка ("editor")            -> закрыть её, вернуться к
+  //     списку (как кнопка "домик" в шапке заметки);
+  //   - список показывает вложенную папку     -> подняться на один
+  //     уровень вверх (а не сразу в корень, поэтому используется
+  //     node.parent, а не rootTree — см. child.parent в scanTree выше);
+  //   - список уже в корне / экран выбора папки -> нечего перехватывать.
+  // Возвращает true, если "назад" обработан внутри вкладки (окно
+  // настроек в этом случае закрывать НЕ нужно), иначе false — тогда
+  // вызывающий код закрывает окно настроек как обычно.
+  // ---------------------------------------------------------------------
+  function handleBackGesture(){
+    if(screen === "editor" && openFile){
+      goHome();
+      return true;
+    }
+    if(screen === "list" && currentDirNode && currentDirNode !== rootTree){
+      currentDirNode = currentDirNode.parent || rootTree;
+      render();
+      return true;
+    }
+    return false;
   }
 
   // ---- переименование через шапку (замена заголовка на поле ввода) ----
@@ -734,11 +801,27 @@ window.initMdEditorModule = function(deps){
     var italicMark = Decoration.mark({ class: "cm-md-italic" });
     var highlightMark = Decoration.mark({ class: "cm-md-mark" });
     var linkMark = Decoration.mark({ class: "cm-md-link" });
+    // ссылка на Библию, найденная в свободном тексте ("Матфея 5:3" и т.п.,
+    // см. SCRIPTURE_RE/findScriptureRefAt выше) — тот же стиль, что и у
+    // [[внутренних ссылок]] (цветом, без подчёркивания), сам клик
+    // обрабатывается в handleMouseDown ниже.
+    var scriptureLinkMark = Decoration.mark({ class: "cm-md-scripture-link" });
     var quoteLineDeco = Decoration.line({ attributes: { class: "cm-md-quote" } });
     // "красная строка" — отступ первой строки абзаца (см. ТЗ: примерно
     // 2 пробела), только у обычного текста (не у заголовков/цитат/списков,
     // у них уже своя, другая логика начала строки)
     var paraStartLineDeco = Decoration.line({ attributes: { class: "cm-md-para-start" } });
+    // нумерованный список ("1. ", "2. ", ... или "1) ", "2) ", ...) — в
+    // отличие от маркера "-"/"*" сама цифра НЕ скрывается (порядковый
+    // номер — это содержимое, а не просто оформление), только красится тем
+    // же цветом, что и маркер "•" у обычного списка. У строки — своя красная
+    // строка (та же .cm-md-para-start, что и у обычного абзаца, но
+    // применяется к КАЖДОМУ пункту, а не только к первой строке после
+    // пустой) и отдельный класс с отступом МЕЖДУ пунктами (.cm-md-list-line
+    // в components.css) — без него соседние пункты списка визуально
+    // склеивались в один абзац, если между ними нет пустой строки.
+    var numListMark = Decoration.mark({ class: "cm-md-bullet" });
+    var numListLineDeco = Decoration.line({ attributes: { class: "cm-md-para-start cm-md-list-line" } });
     // пустая строка между абзацами — уменьшенный межстрочный интервал (см.
     // .cm-md-blank-line в components.css), чтобы промежуток между абзацами
     // был вдвое компактнее обычного расстояния между строками
@@ -774,7 +857,7 @@ window.initMdEditorModule = function(deps){
       }
 
       var mHead = /^(#{1,3})(\s+)/.exec(lineText);
-      var mQuote = null, mList = null;
+      var mQuote = null, mList = null, mNum = null;
       if(mHead){
         var hideEnd = mHead[0].length;
         tryClaim(0, hideEnd, function(){
@@ -794,6 +877,14 @@ window.initMdEditorModule = function(deps){
             tryClaim(s, e, function(){
               builder.add(lineFrom + s, lineFrom + e, bulletDeco);
             });
+          } else {
+            mNum = /^(\s*)(\d{1,4}[.)])(\s+)/.exec(lineText);
+            if(mNum){
+              var nMarkStart = mNum[1].length, nMarkEnd = nMarkStart + mNum[2].length;
+              tryClaim(nMarkStart, nMarkEnd, function(){
+                builder.add(lineFrom + nMarkStart, lineFrom + nMarkEnd, numListMark);
+              });
+            }
           }
         }
       }
@@ -813,6 +904,23 @@ window.initMdEditorModule = function(deps){
         if(mImg[0].length === 0) imgRe.lastIndex++;
       }
 
+      // ссылки на Библию ("Матфея 5:3", "Быт. 1:1-2" и т.п.) — раньше
+      // обычных **жирный**/*курсив* и т.д., чтобы служебные символы
+      // разметки внутри найденной ссылки (крайне маловероятно, но
+      // возможно) не перехватили её часть себе
+      if(SCRIPTURE_RE){
+        SCRIPTURE_RE.lastIndex = 0;
+        var mScr;
+        while((mScr = SCRIPTURE_RE.exec(lineText))){
+          (function(a, b){
+            tryClaim(a, b, function(){
+              builder.add(lineFrom + a, lineFrom + b, scriptureLinkMark);
+            });
+          })(mScr.index, mScr.index + mScr[0].length);
+          if(mScr[0].length === 0) SCRIPTURE_RE.lastIndex++;
+        }
+      }
+
       scanPair(/\*\*([^*\n]+?)\*\*/g, 2, boldMark);
       scanPair(/==([^=\n]+?)==/g, 2, highlightMark);
       scanPair(/\[\[([^\[\]\n]+)\]\]/g, 2, linkMark);
@@ -823,6 +931,7 @@ window.initMdEditorModule = function(deps){
       if(mHead) builder.add(lineFrom, lineFrom, headingLineDeco[mHead[1].length - 1]);
       else if(mQuote) builder.add(lineFrom, lineFrom, quoteLineDeco);
       else if(mList){ /* у пунктов списка свой отступ за счёт маркера, "красная строка" тут не нужна */ }
+      else if(mNum) builder.add(lineFrom, lineFrom, numListLineDeco);
       else if(isParaStart) builder.add(lineFrom, lineFrom, paraStartLineDeco);
       claims.forEach(function(c){ c.emit(); });
     }
@@ -835,13 +944,22 @@ window.initMdEditorModule = function(deps){
         var pos = vr.from;
         for(;;){
           var line = doc.lineAt(pos);
-          // начало абзаца: непустая строка, перед которой пусто (или это
-          // самое начало документа) — смотрим соседнюю строку напрямую по
-          // документу, а не по уже пройденным строкам этого цикла, чтобы
-          // работало одинаково с любого места прокрутки, а не только с
-          // самого верха заметки
-          var isParaStart = line.text.trim() !== "" &&
-            (line.from === 0 || doc.lineAt(line.from - 1).text.trim() === "");
+          // начало абзаца: непустая строка, а перед ней — пустая строка,
+          // ЛИБО самое начало документа, ЛИБО (специально для этого) сразу
+          // заголовок ("# ...") или строка-иллюстрация ("![[имя]]") без
+          // пустой строки-разделителя — раньше в этих двух случаях красная
+          // строка не появлялась, хотя абзац фактически начинался заново
+          // сразу после заголовка/картинки. Смотрим соседнюю строку
+          // напрямую по документу, а не по уже пройденным строкам этого
+          // цикла, чтобы работало одинаково с любого места прокрутки, а не
+          // только с самого верха заметки.
+          var isParaStart = line.text.trim() !== "";
+          if(isParaStart && line.from !== 0){
+            var prevText = doc.lineAt(line.from - 1).text;
+            isParaStart = prevText.trim() === "" ||
+              /^(#{1,3})(\s+)/.test(prevText) ||
+              /^\s*!\[\[[^\[\]\n]+\]\]\s*$/.test(prevText);
+          }
           decorateLine(builder, line.text, line.from, isParaStart);
           if(line.to >= vr.to || line.to >= doc.length) break;
           pos = line.to + 1;
@@ -873,6 +991,12 @@ window.initMdEditorModule = function(deps){
         handleLinkClick(m[1]);
         return true;
       }
+    }
+    var scr = findScriptureRefAt(line.text, offset);
+    if(scr){
+      ev.preventDefault();
+      openScriptureLink(scr);
+      return true;
     }
     return false;
   }
@@ -922,6 +1046,7 @@ window.initMdEditorModule = function(deps){
 
   return {
     renderSettingsTabMdEditor: renderSettingsTabMdEditor,
-    flushPendingMdEditorEdit: flushPendingMdEditorEdit
+    flushPendingMdEditorEdit: flushPendingMdEditorEdit,
+    handleBackGesture: handleBackGesture
   };
 };
