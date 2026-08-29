@@ -1383,3 +1383,302 @@
     box-shadow:inset 0 -3px 5px rgba(60,0,0,.35), inset 0 2px 2px rgba(255,255,255,.5);
   }
 
+
+  /* ---------- "Мой почтовый блокнот" (вкладка settingsTabSet2Btn1,
+     "set2s_1", md-редактор в стиле Obsidian, см. mdeditor.js) — шрифт
+     нарочно тот же самый, что и во вкладке "Изменение размера изображения"
+     (.imgresize-tab выше): "Palatino Linotype"/Georgia, по прямой просьбе
+     — переиспользуем ровно тот же font-family, ничего нового не заводим.
+     Важно: .mdeditor-tab НЕ растягивается на всю высоту вкладки (нет
+     flex:1/min-height:0) — специально, чтобы заголовок заметки и текст
+     были частью ОДНОГО обычного потока и прокручивались вместе как единое
+     целое внутри #settingsTabContent (у него уже есть overflow-y:auto, см.
+     modals.css) — заголовок при чтении длинной заметки уезжает вверх и
+     скрывается, как и попросили, без какого-то отдельного "прилипания". ---------- */
+  .mdeditor-tab{
+    font-family:"Palatino Linotype",Georgia,serif;
+    display:block;
+  }
+  .mdeditor-hint{
+    font-size:12.5px;
+    color:var(--ink-soft);
+    text-align:center;
+    line-height:1.4;
+    margin:4px 0 0 0;
+  }
+  .mdeditor-setup-row{
+    display:flex;
+    justify-content:center;
+    margin-top:16px;
+  }
+  .mdeditor-title-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-bottom:2px;
+  }
+  .mdeditor-title{
+    flex:1;
+    min-width:0;
+    font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
+    font-size:15px;
+    letter-spacing:.3px;
+    color:var(--wood);
+    text-align:center;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    cursor:text;
+    padding:2px 4px;
+    border-radius:6px;
+  }
+  .mdeditor-title:hover{ background:var(--parchment-dark); }
+  .mdeditor-title-input{
+    flex:1;
+    min-width:0;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:14px;
+    color:var(--ink);
+    background:var(--parchment);
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    padding:5px 7px;
+  }
+  .mdeditor-title-confirm, .mdeditor-title-cancel{
+    width:26px;height:26px;
+    flex-shrink:0;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border:none;
+    border-radius:6px;
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .mdeditor-title-confirm{ background:var(--xp-green); color:#12351f; }
+  .mdeditor-title-cancel{ background:transparent; color:var(--danger, #c0392b); }
+  .mdeditor-status{
+    min-height:15px;
+    font-size:11.5px;
+    color:var(--ink-soft);
+    text-align:center;
+    margin:2px 0 6px 0;
+  }
+  .mdeditor-status.error{ color:var(--status-err, #c0392b); }
+  /* ---------- плавающие кнопки (домик / переключатель код-без кода) —
+     маленькие, в правом нижнем углу поверх текста. Раньше строка была
+     position:sticky относительно #settingsTabContent — но у sticky точка
+     "прилипания" пересчитывается от текущей видимой области прокрутки, и
+     из-за этого кнопки на самом деле немного "плавали"/подпрыгивали при
+     скролле и при открытии клавиатуры на телефоне. Теперь строка —
+     position:absolute от .settings-modal-box (само окно настроек,
+     position:relative, см. modals.css) — это ЖЁСТКАЯ точка в правом нижнем
+     углу ОКНА, которая никогда не пересчитывается и не зависит от прокрутки
+     текста внутри вкладки, поэтому кнопки гарантированно стоят на одном и
+     том же месте всегда. right/bottom ниже совпадают с внутренним отступом
+     самого окна (padding:16px у .settings-modal-box) минус небольшая
+     поправка, чтобы кнопки были чуть ближе к углу, чем обычный текст —
+     их специально попросили "опустить чуть ниже". Текст заметки под
+     кнопками может быть частично скрыт — это ожидаемо и не проблема. Домик
+     — правее переключателя режима. ---------- */
+  .mdeditor-fab-row{
+    position:absolute;
+    right:16px;
+    bottom:8px;
+    display:flex;
+    gap:8px;
+    pointer-events:none;
+    z-index:5;
+  }
+  .mdeditor-fab-btn{
+    width:32px;height:32px;
+    flex-shrink:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    color:var(--wood);
+    cursor:pointer;
+    pointer-events:auto;
+    box-shadow:0 2px 6px rgba(0,0,0,.28);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .mdeditor-fab-btn svg{ width:16px; height:16px; }
+  .mdeditor-fab-btn:hover{ background:var(--xp-green); }
+  .mdeditor-fab-btn:disabled{ opacity:.35; cursor:default; }
+  .mdeditor-fab-btn:disabled:hover{ background:#fffef8; }
+  /* ---------- список тем/папок (экран без открытой заметки) — папки
+     всегда выше файлов (см. сортировку в mdeditor.js), внутри каждой
+     группы — по алфавиту ---------- */
+  .mdeditor-empty{
+    text-align:center;
+    font-size:14px;
+    color:var(--ink-soft);
+    padding:20px 0;
+  }
+  .mdeditor-list{
+    display:flex;
+    flex-direction:column;
+    margin-top:4px;
+  }
+  .mdeditor-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    width:100%;
+    padding:10px 0;
+    border:none;
+    border-bottom:1px solid var(--groove-shadow);
+    background:transparent;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:14.5px;
+    color:var(--ink);
+    text-align:left;
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .mdeditor-row:hover{ background:var(--parchment-dark); }
+  .mdeditor-row svg{ width:19px; height:19px; flex-shrink:0; color:var(--wood); }
+  .mdeditor-row-name{
+    flex:1;
+    min-width:0;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  /* ---------- сама заметка: без рамки/фона-карточки — текст занимает всю
+     полезную ширину вкладки, высота не ограничена (auto), растёт вместе с
+     документом; прокручивает всё это #settingsTabContent целиком (см.
+     .mdeditor-tab выше), у самого CodeMirror внутренней прокрутки больше
+     нет. ---------- */
+  .mdeditor-editor-host{
+    box-sizing:border-box;
+  }
+  /* Шрифт и межстрочный интервал специально сверены со вкладкой
+     "Заполнение бланков S-89" (.workbooks-run-summary/.settings-row —
+     line-height там заметно компактнее, ~1.4, а не 1.6, как было тут) —
+     строки идут плотнее и заметка выглядит менее "воздушной". Размер
+     шрифта при этом чуть увеличен (было 14.5px), чтобы компактные строки
+     не читались как мелкий текст. */
+  .mdeditor-editor-host .cm-editor{
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:15.5px;
+    color:var(--ink);
+  }
+  .mdeditor-editor-host .cm-scroller{ font-family:inherit; line-height:1.4; overflow:visible; }
+  .mdeditor-editor-host .cm-content{ padding:2px 0 40px 0; }
+  /* Вот где на самом деле сидел "лишний" отступ слева, который прошлая
+     правка .cm-content не трогала: у CodeMirror 6 есть СВОЙ базовый стиль
+     на .cm-line (внутренний, из пакета @codemirror/view, добавляется в
+     <head> в рантайме при загрузке редактора) — по умолчанию у строки
+     padding:0 2px 0 6px, то есть слева заметно больше, чем справа (6px
+     против 2px). Мы этот .cm-line раньше вообще не переопределяли, поэтому
+     правки .cm-content ни на что не влияли — сработал именно встроенный
+     стиль библиотеки. Здесь делаем отступы слева/справа одинаковыми и
+     маленькими. */
+  .mdeditor-editor-host .cm-line{ padding:0; }
+  .mdeditor-editor-host .cm-gutters{ display:none; }
+  .mdeditor-editor-host .cm-focused{ outline:none; }
+  /* "красная строка" — отступ первой строки абзаца, примерно как два
+     пробела в текущем шрифте (см. ТЗ); у заголовков/цитат/списков своя
+     логика начала строки, туда этот класс не попадает (см. mdeditor.js) */
+  /* "красная строка" — отступ первой строки абзаца. Было 2ch, но "ch" —
+     это ширина цифры "0", а не пробела: в этом (пропорциональном, не
+     моноширинном) шрифте "0" заметно шире пробела, поэтому 2ch на глаз
+     давало отступ примерно как 3-4 пробела, а не 2 — уменьшаем до 1ch,
+     это уже ближе к паре пробелов (см. ТЗ). */
+  .cm-md-para-start{ text-indent:1ch; }
+  /* пустая строка-разделитель между абзацами (см. cm-md-blank-line в
+     mdeditor.js) — вдвое меньше обычного межстрочного интервала (0.7 —
+     ровно половина от line-height:1.4 у .cm-scroller), чтобы промежуток
+     между абзацами был вдвое компактнее */
+  .cm-md-blank-line{ line-height:0.7; }
+  /* элементы разметки в режиме "без кода" (см. mdeditor.js) — жирный,
+     курсив, выделение и заголовки живут внутри одного и того же
+     редактируемого поля, decorations только скрывают служебные символы,
+     сам текст документа не меняется (см. пояснение в mdeditor.js) */
+  .cm-md-bold{ font-weight:bold; }
+  .cm-md-italic{ font-style:italic; }
+  .cm-md-mark{
+    background:#f3e08a;
+    color:#3d2f04;
+    border-radius:2px;
+    padding:0 1px;
+  }
+  /* ссылки — цветом, БЕЗ подчёркивания (важное требование из ТЗ) */
+  .cm-md-link{
+    color:#8a6fd8;
+    text-decoration:none;
+    cursor:pointer;
+  }
+  .cm-md-h1, .cm-md-h2, .cm-md-h3{ font-weight:bold; }
+  .cm-md-h1{ font-size:1.5em; }
+  .cm-md-h2{ font-size:1.28em; }
+  .cm-md-h3{ font-size:1.12em; }
+  .cm-md-bullet{ color:var(--wood); }
+  /* цитата (строка, начинающаяся с ">", как в Obsidian) — вертикальная
+     полоса слева и приглушённый курсив, сам символ ">" скрыт decorations */
+  .cm-md-quote{
+    border-left:3px solid var(--wood);
+    padding-left:10px;
+    margin-left:2px;
+    color:var(--ink-soft);
+    font-style:italic;
+  }
+  /* ---------- встроенные картинки в заметке (![[имя.ext]], режим "без
+     кода", см. ImageWidget в mdeditor.js) — сама картинка читается лениво
+     из папки с изображениями рядом с заметками и кэшируется по имени.
+     display:block гарантирует, что широкая картинка сама переносится на
+     отдельную строку, а не растягивает строку текста. ---------- */
+  .cm-md-image-wrap{
+    display:block;
+    max-width:100%;
+    margin:2px 0;
+  }
+  .cm-md-image{
+    display:block;
+    max-width:100%;
+    height:auto;
+    border-radius:8px;
+    border:1px solid var(--groove-shadow);
+  }
+  .cm-md-image-loading{
+    display:block;
+    min-height:40px;
+    border-radius:8px;
+    background:var(--parchment-dark);
+  }
+  .cm-md-image-missing{
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:.85em;
+    font-style:italic;
+    color:var(--ink-soft);
+  }
+  /* ---------- строка-изображение в списке тем/папок (та же "отдельная
+     папка" с картинками рядом с заметками, теперь видна в дереве, см.
+     scanTree/renderListScreen в mdeditor.js) — используется тот же класс
+     .mdeditor-row, что и у заметок/папок, своих правил не требуется, кроме
+     полноэкранного просмотра по клику ---------- */
+  .mdeditor-image-overlay{
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
+    background:rgba(20,14,8,.86);
+    z-index:20;
+    cursor:zoom-out;
+    text-align:center;
+    color:#fffef8;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:13px;
+  }
+  .mdeditor-image-overlay img{
+    max-width:100%;
+    max-height:100%;
+    border-radius:8px;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);
+  }

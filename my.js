@@ -518,6 +518,12 @@
   // растягиваются, см. imgresize.js) и скачивается уже нужного размера,
   // см. renderSettingsTabImgResize в imgresize.js и её отдельную ветку в
   // switchSettingsTab ниже, по тому же принципу вынесена ДО общей проверки
+  // на renderSettingsTabSet2Stub. set2s_1 (первая боковая) — ЭТО БОЛЬШЕ НЕ
+  // ЗАГЛУШКА: это вкладка "Мой почтовый блокнот" — работа с .md заметками
+  // в стиле Obsidian (папка через File System Access API, редактор на
+  // CodeMirror 6 с decorations, ссылки [[Название]] между заметками), см.
+  // renderSettingsTabMdEditor в mdeditor.js и её отдельную ветку в
+  // switchSettingsTab ниже, по тому же принципу вынесена ДО общей проверки
   // на renderSettingsTabSet2Stub.
   var SET2_TAB_IDS = {
     set2s_1: "settingsTabSet2Btn1", set2s_2: "settingsTabSet2Btn2", set2s_3: "settingsTabSet2Btn3",
@@ -1653,6 +1659,21 @@
     PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG
   });
   var renderSettingsTabImgResize = ImgResize.renderSettingsTabImgResize;
+
+  // ===================== МОЙ ПОЧТОВЫЙ БЛОКНОТ (md-редактор) =====================
+  // Логика вкладки "Мой почтовый блокнот" (первая боковая вкладка второго
+  // набора, settingsTabSet2Btn1 / "set2s_1") вынесена в отдельный файл
+  // mdeditor.js (см. index.html и sw.js) — по тому же образцу, что и
+  // ImgResize/EpubSplit выше. flushPendingMdEditorEdit сохраняет несохранённые
+  // правки в открытой заметке при уходе со вкладки — вызывается в общем блоке
+  // flush* в начале switchSettingsTab, тем же приёмом, что и
+  // flushPendingCommentEdits и т.п.
+  var MdEditor = window.initMdEditorModule({
+    escapeHtml: escapeHtml,
+    PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG
+  });
+  var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
+  var flushPendingMdEditorEdit = MdEditor.flushPendingMdEditorEdit;
 
   // --- ленивая загрузка QRCode и jsQR ---
   var qrLibLoaded = false, jsqrLibLoaded = false;
@@ -2917,6 +2938,7 @@
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
     flushPendingCommentEdits();
+    flushPendingMdEditorEdit();
     // запоминаем позицию только если это реальная вкладка одного из двух
     // стеков (бокового или нижнего, набор 1 или 2) — служебные экраны вроде
     // "versions"/"import"/"resetConfirm" (открываются кнопками ВНУТРИ
@@ -2965,6 +2987,7 @@
     else if(tab === "set2b_2") renderSettingsTabS89Fill();
     else if(tab === "set2b_3") renderSettingsTabNotesMerge();
     else if(tab === "set2b_4") renderSettingsTabSubtitleExtract();
+    else if(tab === "set2s_1") renderSettingsTabMdEditor();
     else if(tab === "set2s_5") renderSettingsTabEpubSplit();
     else if(tab === "set2s_6") renderSettingsTabImgResize();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
@@ -6629,6 +6652,57 @@
       });
     });
   }
+
+  // ===================== НАЗАД (Android back / жест назад) =====================
+  // Раньше у страницы вообще не было записей в истории браузера, поэтому
+  // системная кнопка/жест "назад" на Android сразу закрывали окно
+  // приложения (WebView/вкладку), даже если было открыто окно настроек
+  // или любое из модальных окон (задача дня, настройки цели, счётчик
+  // часов и т.п.). Все они, в каком бы месте кода их ни открывали, в
+  // итоге показываются через один и тот же #modalOverlay ИЛИ через
+  // #settingsModalOverlay (второе может быть открыто одновременно, если
+  // модалка вызвана из настроек, например выбор цвета цели) — поэтому
+  // вместо правки каждого места, где что-то открывается/закрывается,
+  // достаточно последить за атрибутом class этих двух элементов через
+  // MutationObserver: как только один из них получает класс "open" —
+  // значит открылся новый "экран", и в историю браузера добавляется
+  // запись-ловушка. По кнопке/жесту "назад" браузер сам уходит на
+  // предыдущую запись, событие popstate — сигнал закрыть верхний из
+  // открытых сейчас слоёв (сначала #modalOverlay, он показывается поверх
+  // настроек, и только если он не открыт — #settingsModalOverlay).
+  // Если ни то, ни другое не открыто — попап нечего закрывать, событие
+  // просто игнорируется, и следующее "назад" сработает как обычно
+  // (свернёт/закроет приложение) — это ожидаемо и правильно, т.к. на
+  // главном экране чтения возвращаться больше некуда.
+  (function initBackButtonTrap(){
+    var modalOverlayEl = document.getElementById("modalOverlay");
+    var settingsOverlayEl = document.getElementById("settingsModalOverlay");
+    if(!modalOverlayEl && !settingsOverlayEl) return;
+
+    function armTrap(el){
+      if(!el) return;
+      var wasOpen = el.classList.contains("open");
+      new MutationObserver(function(){
+        var isOpen = el.classList.contains("open");
+        if(isOpen && !wasOpen){
+          try{ history.pushState({__navTrap:true}, "", location.href); }catch(e){}
+        }
+        wasOpen = isOpen;
+      }).observe(el, {attributes:true, attributeFilter:["class"]});
+    }
+    armTrap(modalOverlayEl);
+    armTrap(settingsOverlayEl);
+
+    window.addEventListener("popstate", function(){
+      if(modalOverlayEl && modalOverlayEl.classList.contains("open")){
+        closeModal();
+      } else if(settingsOverlayEl && settingsOverlayEl.classList.contains("open")){
+        closeSettingsModal();
+      }
+      // если ничего не открыто — ничего не делаем, следующее "назад"
+      // сработает как обычно (закроет приложение)
+    });
+  })();
 
   // ===================== ЗАПУСК =====================
   initQuote();
