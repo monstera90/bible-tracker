@@ -489,7 +489,7 @@
   };
   // ===== ВТОРОЙ НАБОР ВКЛАДОК (заглушки) =====
   // Полный дубль первого набора: 9 боковых + 5 нижних язычков (см. разметку
-  // в index.html, .settingsTabsSet2 / .settingsTabsGearSet2). 11 из 14 —
+  // в index.html, .settingsTabsSet2 / .settingsTabsGearSet2). 10 из 14 —
   // всё ещё просто заглушки без функций (см. renderSettingsTabSet2Stub
   // ниже); ключи специально с префиксом "set2" — тем же, что и остальные
   // (TASK_TAB_IDS/EXTRA_TAB_IDS), участвуют в общем переключателе
@@ -510,6 +510,13 @@
   // .epub конвертируется в текст (в правильном порядке чтения, по spine
   // из content.opf) и делится на несколько .txt для источников NotebookLM,
   // см. renderSettingsTabEpubSplit в epubsplit.js и её отдельную ветку в
+  // switchSettingsTab ниже, по тому же принципу вынесена ДО общей проверки
+  // на renderSettingsTabSet2Stub. set2s_6 (шестая боковая) — ЭТО БОЛЬШЕ НЕ
+  // ЗАГЛУШКА: это вкладка "Изменение размера изображения": пользователь
+  // прикрепляет .jpg/.png и задаёт нужные ширину и высоту в пикселях —
+  // картинка масштабируется на Canvas (без искажений — пиксели никогда не
+  // растягиваются, см. imgresize.js) и скачивается уже нужного размера,
+  // см. renderSettingsTabImgResize в imgresize.js и её отдельную ветку в
   // switchSettingsTab ниже, по тому же принципу вынесена ДО общей проверки
   // на renderSettingsTabSet2Stub.
   var SET2_TAB_IDS = {
@@ -1636,6 +1643,16 @@
     PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG
   });
   var renderSettingsTabS89Fill = S89Fill.renderSettingsTabS89Fill;
+
+  // ===================== ИЗМЕНЕНИЕ РАЗМЕРА ИЗОБРАЖЕНИЯ =====================
+  // Логика вкладки "Изменение размера изображения" (шестая боковая вкладка
+  // второго набора, settingsTabSet2Btn6 / "set2s_6") вынесена в отдельный
+  // файл imgresize.js (см. index.html и sw.js) — по тому же образцу, что и
+  // EpubSplit/JwlMerge выше.
+  var ImgResize = window.initImgResizeModule({
+    PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG
+  });
+  var renderSettingsTabImgResize = ImgResize.renderSettingsTabImgResize;
 
   // --- ленивая загрузка QRCode и jsQR ---
   var qrLibLoaded = false, jsqrLibLoaded = false;
@@ -2949,6 +2966,7 @@
     else if(tab === "set2b_3") renderSettingsTabNotesMerge();
     else if(tab === "set2b_4") renderSettingsTabSubtitleExtract();
     else if(tab === "set2s_5") renderSettingsTabEpubSplit();
+    else if(tab === "set2s_6") renderSettingsTabImgResize();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
   }
