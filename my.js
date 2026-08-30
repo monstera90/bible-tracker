@@ -1982,7 +1982,14 @@
     // этим же регэкспом в других местах кода.
     scriptureRegexSource: SCRIPTURE_RE.source,
     bookAliases: BOOK_ALIASES,
-    scriptureRefLink: scriptureRefLink
+    scriptureRefLink: scriptureRefLink,
+    // для задач формата "- [ ] текст" / "- [x] текст" в режиме "без кода"
+    // (см. TaskActionsWidget в mdeditor.js) — те же иконки/действия, что и
+    // у обычных задач на вкладках задач (см. ТЗ пользователя от 30.08).
+    CHECK_ICON_SVG: CHECK_ICON_SVG,
+    ARROW_MOVE_ICON_SVG: ARROW_MOVE_ICON_SVG,
+    createArchivedTaskWithText: createArchivedTaskWithText,
+    openTaskMoveTargetPicker: openTaskMoveTargetPicker
   });
   var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
   var flushPendingMdEditorEdit = MdEditor.flushPendingMdEditorEdit;
@@ -5916,6 +5923,20 @@
     saveTaskData(id, {text: text, tab: homeTab, checked: false, checkedAt: null, completionKey: null, nextForProjectId: null, flag: flag});
     return id;
   }
+  // Задача, отмеченная "[x]" прямо в "Моём блокноте" (см. TaskActionsWidget
+  // в mdeditor.js) — создаётся СРАЗУ уже закрытой, той же записью в архиве,
+  // что получилась бы, отметь пользователь галочку у обычной задачи (см.
+  // checkTaskDone ниже): текст + отметка времени сохраняются ещё и в
+  // отдельную запись "taskcompletion:...", как и у неё. "Домашняя" вкладка
+  // значения не имеет (архив общий для всех вкладок), поэтому всегда inbox.
+  function createArchivedTaskWithText(text){
+    var id = genTaskId();
+    var ts = Date.now();
+    var completionKey = "taskcompletion:" + ts + "-" + Math.random().toString(36).slice(2,7);
+    state[completionKey] = {c: {text: text || "Без названия", tab: "inbox"}, t: ts};
+    saveTaskData(id, {text: text, tab: "inbox", checked: true, checkedAt: ts, completionKey: completionKey, nextForProjectId: null, flag: null});
+    return id;
+  }
   function getTasksForTab(tab){
     if(tab === "red"){
       // витрина: любая незакрытая задача с красной/жёлтой отметкой, из
@@ -6700,6 +6721,32 @@
         // быть вкладка-витрина Red, а не настоящая домашняя вкладка
         // задачи — см. пояснение у getTasksForTab)
         renderTaskTabList(tabKey || task.c.tab);
+      });
+    });
+  }
+
+  // Тот же пикер выбора вкладки-назначения, что и openTaskMovePicker выше,
+  // но БЕЗ привязки к уже существующей задаче — используется переносом
+  // задачи "- [ ] текст" из "Моего блокнота" (см. TaskActionsWidget в
+  // mdeditor.js): задачи с таким id ещё нет, она создаётся заново, с нуля,
+  // в момент выбора вкладки. Перенос ОДНОСТОРОННИЙ: сама заметка не
+  // меняется, и обратно с получившейся задачей никак не связана — после
+  // переноса это уже независимые друг от друга записи (см. ТЗ).
+  function openTaskMoveTargetPicker(text){
+    var buttons = TASK_MOVE_TARGET_TABS.map(function(key){
+      return '<button type="button" data-tab="' + key + '">' +
+        TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key]) + '</span></button>';
+    }).join("");
+    modalBox.innerHTML =
+      modalHeader("Перенести задачу") +
+      '<div class="task-picker-grid">' + buttons + '</div>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-tab]"), function(btn){
+      btn.addEventListener("click", function(){
+        var newTab = btn.getAttribute("data-tab");
+        createTaskWithText(newTab, text);
+        closeModal();
       });
     });
   }

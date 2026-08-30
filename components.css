@@ -1705,6 +1705,39 @@
     font-style:italic;
     color:var(--ink-soft);
   }
+  /* ---------- задача Obsidian-формата "- [ ] текст" / "- [x] текст" в
+     "Моём блокноте", режим "без кода" (см. TASK_LINE_RE/decorateLine/
+     TaskActionsWidget в mdeditor.js) — оформлена и работает как строка
+     обычной задачи на вкладках задач: те же классы .task-actions/
+     .task-icon-btn (см. .task-row/.task-actions в modals.css), поэтому
+     кнопки "✓"/"→" выглядят и "подверстываются" к тексту точно так же
+     (float:right, см. .task-actions в modals.css). Разделитель сверху и
+     снизу — border, не margin (margin двух соседних строк схлопывался бы
+     сам, а тут границы должны быть видны, даже когда сосед — обычный
+     текст без полей). У двух задач подряд (без пустой строки между ними)
+     нижний разделитель первой и верхний разделитель второй НЕ добавляются
+     оба сразу — see prevIsTaskLine/nextIsTaskLine в mdeditor.js — поэтому
+     между ними остаётся ровно один разделитель, как и требовалось (ТЗ от
+     30.08). ---------- */
+  /* padding задан ПОВЫШЕННОЙ специфичностью (.cm-line.cm-md-task-line, а
+     не просто .cm-md-task-line) — та же причина, что и у .cm-md-quote
+     выше: иначе проигрывал бы более специфичному
+     ".mdeditor-editor-host .cm-line{ padding:0; }". */
+  .mdeditor-editor-host .cm-line.cm-md-task-line{
+    padding-top:6px;
+    padding-bottom:6px;
+  }
+  .cm-md-task-line{ display:block; }
+  .cm-md-task-sep-top{ border-top:1px solid var(--groove-shadow); }
+  .cm-md-task-sep-bottom{ border-bottom:1px solid var(--groove-shadow); }
+  /* отмеченная ("[x]") задача — зачёркнутый, приглушённый текст, без
+     кнопок: сама отправка в архив уже произошла в момент отметки (клик
+     по "✓", см. TaskActionsWidget в mdeditor.js) */
+  .cm-md-task-checked{
+    color:var(--ink-soft);
+    text-decoration:line-through;
+  }
+  .cm-md-task-actions{ margin-left:8px; }
   /* ---------- строка-изображение в списке тем/папок (та же "отдельная
      папка" с картинками рядом с заметками, теперь видна в дереве, см.
      scanTree/renderListScreen в mdeditor.js) — используется тот же класс

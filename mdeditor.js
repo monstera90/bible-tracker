@@ -40,6 +40,15 @@ window.initMdEditorModule = function(deps){
   var SCRIPTURE_RE = deps.scriptureRegexSource ? new RegExp(deps.scriptureRegexSource, "g") : null;
   var BOOK_ALIASES = deps.bookAliases || null;
   var scriptureRefLink = deps.scriptureRefLink || null;
+  // для задач формата "- [ ] текст" в режиме "без кода" (см.
+  // TaskActionsWidget/decorateLine в makeLivePreviewExtension ниже) — те же
+  // иконки и действия, что и у обычных задач на вкладках задач (см. ТЗ
+  // пользователя от 30.08: кнопки/разделители как во вкладках задач,
+  // перенос ОДНОСТОРОННИЙ, отметка "[x]" отправляет в архив).
+  var CHECK_ICON_SVG = deps.CHECK_ICON_SVG || "";
+  var ARROW_MOVE_ICON_SVG = deps.ARROW_MOVE_ICON_SVG || "";
+  var createArchivedTaskWithText = deps.createArchivedTaskWithText || null;
+  var openTaskMoveTargetPicker = deps.openTaskMoveTargetPicker || null;
 
   // Ищет библейскую ссылку в строке, под которой находится offset (символ
   // клика) — используется и для decorations (см. makeLivePreviewExtension),
@@ -826,6 +835,15 @@ window.initMdEditorModule = function(deps){
     var Decoration = cm.view.Decoration, ViewPlugin = cm.view.ViewPlugin, WidgetType = cm.view.WidgetType;
     var RangeSetBuilder = cm.state.RangeSetBuilder;
 
+    // строка-задача в стиле Obsidian: "- [ ] текст" (не отмечена) или
+    // "- [x] текст" (отмечена) — группы: 1) всё до "[" включительно,
+    // 2) сам символ отметки (" "/"x"/"X"), 3) "]" и пробелы после него,
+    // 4) сам текст задачи. Раздельные группы 1/2/3 (а не один общий
+    // "маркер") нужны, чтобы точно знать АБСОЛЮТНУЮ позицию символа
+    // отметки в документе — так кнопка "✓" ниже может править именно его,
+    // не трогая остальную строку (см. TaskActionsWidget).
+    var TASK_LINE_RE = /^(\s*[-*]\s+\[)([ xX])(\]\s*)(.*)$/;
+
     function BulletWidget(){}
     BulletWidget.prototype = Object.create(WidgetType.prototype);
     BulletWidget.prototype.toDOM = function(){
@@ -892,6 +910,70 @@ window.initMdEditorModule = function(deps){
       });
     }
 
+    // ---- кнопки задачи "- [ ] текст" (см. TASK_LINE_RE выше) — те же
+    // классы, что и у строки обычной задачи на вкладках задач (см.
+    // .task-actions/.task-icon-btn в modals.css), чтобы выглядело
+    // единообразно (см. ТЗ). Показывается только у НЕ отмеченной задачи —
+    // у отмеченной ("[x]") показывать уже нечего, она и так уже отправлена
+    // в архив в момент отметки (см. "✓" ниже).
+    //   "✓" ("В архив")   — как и у обычной задачи: сразу создаёт запись
+    //                        в архиве (createArchivedTaskWithText) и,
+    //                        чтобы в самой заметке было видно, что задача
+    //                        обработана, правит "[ ]" на "[x]" прямо в
+    //                        документе (единственная правка документа, на
+    //                        которую способны эти кнопки).
+    //   "→" ("Перенести") — открывает тот же пикер выбора вкладки, что и у
+    //                        обычной задачи, и создаёт НА ВЫБРАННОЙ вкладке
+    //                        новую (ещё не отмеченную) задачу с этим
+    //                        текстом. Сама заметка при этом не меняется —
+    //                        перенос из блокнота на вкладку задач
+    //                        ОДНОСТОРОННИЙ, обратно такая задача уже не
+    //                        возвращается и никак с исходной строкой не
+    //                        связана (см. ТЗ).
+    function TaskActionsWidget(checkPos, text){
+      this.checkPos = checkPos;
+      this.text = text;
+    }
+    TaskActionsWidget.prototype = Object.create(WidgetType.prototype);
+    TaskActionsWidget.prototype.eq = function(other){
+      return other.checkPos === this.checkPos && other.text === this.text;
+    };
+    // как и у ImageWidget выше — клики/т.п. по кнопкам обрабатываются
+    // самим виджетом напрямую, CodeMirror их трогать не должен (иначе
+    // попытался бы поставить курсор туда же, куда кликнули)
+    TaskActionsWidget.prototype.ignoreEvent = function(){ return true; };
+    TaskActionsWidget.prototype.toDOM = function(){
+      var self = this;
+      var wrap = document.createElement("span");
+      wrap.className = "task-actions cm-md-task-actions";
+      var doneBtn = document.createElement("button");
+      doneBtn.type = "button";
+      doneBtn.className = "task-icon-btn cm-md-task-done-btn";
+      doneBtn.title = "В архив";
+      doneBtn.innerHTML = CHECK_ICON_SVG;
+      doneBtn.addEventListener("click", function(ev){
+        ev.preventDefault();
+        if(createArchivedTaskWithText) createArchivedTaskWithText(self.text);
+        if(cmView){
+          cmView.dispatch({ changes: { from: self.checkPos, to: self.checkPos + 1, insert: "x" } });
+        }
+      });
+      wrap.appendChild(doneBtn);
+      if(openTaskMoveTargetPicker){
+        var moveBtn = document.createElement("button");
+        moveBtn.type = "button";
+        moveBtn.className = "task-icon-btn cm-md-task-move-btn";
+        moveBtn.title = "Перенести";
+        moveBtn.innerHTML = ARROW_MOVE_ICON_SVG;
+        moveBtn.addEventListener("click", function(ev){
+          ev.preventDefault();
+          openTaskMoveTargetPicker(self.text);
+        });
+        wrap.appendChild(moveBtn);
+      }
+      return wrap;
+    };
+
     var headingLineDeco = [
       Decoration.line({ attributes: { class: "cm-md-h1" } }),
       Decoration.line({ attributes: { class: "cm-md-h2" } }),
@@ -910,6 +992,19 @@ window.initMdEditorModule = function(deps){
     // обрабатывается в handleMouseDown ниже.
     var scriptureLinkMark = Decoration.mark({ class: "auto-link scripture-link" });
     var quoteLineDeco = Decoration.line({ attributes: { class: "cm-md-quote" } });
+    // строка-задача (см. TASK_LINE_RE выше) — отдельно для отмеченной и
+    // не отмеченной (разное оформление текста, см. components.css), плюс
+    // ДВЕ отдельные строчные decoration для верхнего/нижнего разделителя
+    // (см. .cm-md-task-sep-top/-bottom в components.css) — добавляются
+    // НЕЗАВИСИМО друг от друга и не на каждую строку-задачу, а только с
+    // той стороны, где соседняя строка документа НЕ такая же задача (см.
+    // prevIsTaskLine/nextIsTaskLine в buildDecorations ниже) — так у двух
+    // идущих подряд задач между ними остаётся ровно ОДИН разделитель, а не
+    // два слипшихся (см. ТЗ пользователя от 30.08).
+    var taskLineDecoUnchecked = Decoration.line({ attributes: { class: "cm-md-task-line cm-md-task-unchecked" } });
+    var taskLineDecoChecked = Decoration.line({ attributes: { class: "cm-md-task-line cm-md-task-checked" } });
+    var taskSepTopDeco = Decoration.line({ attributes: { class: "cm-md-task-sep-top" } });
+    var taskSepBottomDeco = Decoration.line({ attributes: { class: "cm-md-task-sep-bottom" } });
     // "красная строка" — отступ первой строки абзаца (см. ТЗ: примерно
     // 2 пробела), только у обычного текста (не у заголовков/цитат/списков,
     // у них уже своя, другая логика начала строки)
@@ -943,7 +1038,7 @@ window.initMdEditorModule = function(deps){
     var hideDeco = Decoration.replace({});
     var bulletDeco = Decoration.replace({ widget: bulletWidgetInstance });
 
-    function decorateLine(builder, lineText, lineFrom, isParaStart){
+    function decorateLine(builder, lineText, lineFrom, isParaStart, prevIsTaskLine, nextIsTaskLine){
       if(lineText.trim() === ""){
         builder.add(lineFrom, lineFrom, blankLineDeco);
         return;
@@ -971,7 +1066,7 @@ window.initMdEditorModule = function(deps){
       }
 
       var mHead = /^(#{1,3})(\s+)/.exec(lineText);
-      var mQuote = null, mList = null, mNum = null;
+      var mQuote = null, mList = null, mNum = null, mTask = null, taskChecked = false;
       // строка целиком — одна картинка (без остального текста рядом);
       // проверяется независимо от остальной цепочки mHead/mQuote/mList/
       // mNum ниже, конфликтов с ними быть не может (эти маркеры никогда
@@ -990,19 +1085,35 @@ window.initMdEditorModule = function(deps){
             builder.add(lineFrom, lineFrom + qEnd, hideDeco);
           });
         } else {
-          mList = /^(\s*)([-*])(\s+)/.exec(lineText);
-          if(mList){
-            var s = mList[1].length, e = mList[0].length;
-            tryClaim(s, e, function(){
-              builder.add(lineFrom + s, lineFrom + e, bulletDeco);
+          // "- [ ] текст" / "- [x] текст" — проверяется РАНЬШЕ обычного
+          // маркированного списка ниже (иначе "[ ]"/"[x]" остались бы
+          // просто текстом внутри обычного пункта списка, см. ТЗ)
+          mTask = TASK_LINE_RE.exec(lineText);
+          if(mTask){
+            taskChecked = mTask[2] === "x" || mTask[2] === "X";
+            // скрывается ВЕСЬ маркер целиком — "- [ ] "/"- [x] " (кнопки и
+            // разделители вместо него достраивает decoration строки ниже,
+            // см. taskLineDecoUnchecked/taskLineDecoChecked и
+            // TaskActionsWidget выше)
+            var tHideEnd = mTask[1].length + 1 + mTask[3].length;
+            tryClaim(0, tHideEnd, function(){
+              builder.add(lineFrom, lineFrom + tHideEnd, hideDeco);
             });
           } else {
-            mNum = /^(\s*)(\d{1,4}[.)])(\s+)/.exec(lineText);
-            if(mNum){
-              var nMarkStart = mNum[1].length, nMarkEnd = nMarkStart + mNum[2].length;
-              tryClaim(nMarkStart, nMarkEnd, function(){
-                builder.add(lineFrom + nMarkStart, lineFrom + nMarkEnd, numListMark);
+            mList = /^(\s*)([-*])(\s+)/.exec(lineText);
+            if(mList){
+              var s = mList[1].length, e = mList[0].length;
+              tryClaim(s, e, function(){
+                builder.add(lineFrom + s, lineFrom + e, bulletDeco);
               });
+            } else {
+              mNum = /^(\s*)(\d{1,4}[.)])(\s+)/.exec(lineText);
+              if(mNum){
+                var nMarkStart = mNum[1].length, nMarkEnd = nMarkStart + mNum[2].length;
+                tryClaim(nMarkStart, nMarkEnd, function(){
+                  builder.add(lineFrom + nMarkStart, lineFrom + nMarkEnd, numListMark);
+                });
+              }
             }
           }
         }
@@ -1049,11 +1160,29 @@ window.initMdEditorModule = function(deps){
       claims.sort(function(a, b){ return a.start - b.start; });
       if(mHead) builder.add(lineFrom, lineFrom, headingLineDeco[mHead[1].length - 1]);
       else if(mQuote) builder.add(lineFrom, lineFrom, quoteLineDeco);
+      else if(mTask){
+        builder.add(lineFrom, lineFrom, taskChecked ? taskLineDecoChecked : taskLineDecoUnchecked);
+        // разделитель сверху/снизу — только там, где соседняя строка сама
+        // не такая же задача (см. пояснение у taskSepTopDeco выше)
+        if(!prevIsTaskLine) builder.add(lineFrom, lineFrom, taskSepTopDeco);
+        if(!nextIsTaskLine) builder.add(lineFrom, lineFrom, taskSepBottomDeco);
+      }
       else if(mList) builder.add(lineFrom, lineFrom, listLineDeco);
       else if(mNum) builder.add(lineFrom, lineFrom, listLineDeco);
       else if(mImgOnly) builder.add(lineFrom, lineFrom, imageLineDeco);
       else if(isParaStart) builder.add(lineFrom, lineFrom, paraStartLineDeco);
       claims.forEach(function(c){ c.emit(); });
+      // кнопки "✓"/"→" — только у ещё не отмеченной задачи (см. пояснение
+      // у TaskActionsWidget выше), точкой в самом конце строки, чтобы
+      // "подверстывались" к тексту тем же приёмом, что и .task-actions на
+      // вкладках задач (float:right, см. components.css)
+      if(mTask && !taskChecked){
+        var widgetPos = lineFrom + lineText.length;
+        builder.add(widgetPos, widgetPos, Decoration.widget({
+          widget: new TaskActionsWidget(lineFrom + mTask[1].length, mTask[4]),
+          side: 1
+        }));
+      }
     }
 
     function buildDecorations(view){
@@ -1080,7 +1209,13 @@ window.initMdEditorModule = function(deps){
               /^(#{1,3})(\s+)/.test(prevText) ||
               /^\s*!\[\[[^\[\]\n]+\]\]\s*$/.test(prevText);
           }
-          decorateLine(builder, line.text, line.from, isParaStart);
+          // соседняя строка документа (не обязательно видимая) — тоже
+          // задача "- [ ]"/"- [x]"? см. taskSepTopDeco/taskSepBottomDeco
+          // выше: разделитель между двумя задачами подряд должен быть
+          // только один, а не два слипшихся.
+          var prevIsTaskLine = line.from !== 0 && TASK_LINE_RE.test(doc.lineAt(line.from - 1).text);
+          var nextIsTaskLine = line.to < doc.length && TASK_LINE_RE.test(doc.lineAt(line.to + 1).text);
+          decorateLine(builder, line.text, line.from, isParaStart, prevIsTaskLine, nextIsTaskLine);
           if(line.to >= vr.to || line.to >= doc.length) break;
           pos = line.to + 1;
         }
