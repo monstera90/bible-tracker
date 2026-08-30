@@ -34,12 +34,12 @@ window.initMdEditorModule = function(deps){
   var escapeHtml = deps.escapeHtml;
   var PAPERCLIP_ICON_SVG = deps.PAPERCLIP_ICON_SVG;
   // распознавание ссылок на Библию (то же, что и в "Карте дней года", см.
-  // SCRIPTURE_RE/BOOK_ALIASES/verseLink в my.js) — regexSource приходит
-  // строкой, здесь собирается СВОЙ экземпляр RegExp с флагом "g", чтобы не
-  // делить mutable lastIndex с регэкспом из my.js.
+  // SCRIPTURE_RE/BOOK_ALIASES/scriptureRefLink в my.js) — regexSource
+  // приходит строкой, здесь собирается СВОЙ экземпляр RegExp с флагом "g",
+  // чтобы не делить mutable lastIndex с регэкспом из my.js.
   var SCRIPTURE_RE = deps.scriptureRegexSource ? new RegExp(deps.scriptureRegexSource, "g") : null;
   var BOOK_ALIASES = deps.bookAliases || null;
-  var verseLink = deps.verseLink || null;
+  var scriptureRefLink = deps.scriptureRefLink || null;
 
   // Ищет библейскую ссылку в строке, под которой находится offset (символ
   // клика) — используется и для decorations (см. makeLivePreviewExtension),
@@ -60,12 +60,15 @@ window.initMdEditorModule = function(deps){
   // ссылки/ссылки на Библию в остальном приложении (target="_blank") —
   // сама ссылка ведёт на jw.org finder, который на устройстве с
   // установленной JW Library открывается в ней (та же схема, что уже
-  // работает в "Карте дней года").
+  // работает в "Карте дней года"). Если в найденной ссылке нет номера
+  // стиха (просто "Книга 6" или диапазон глав "Книга 6-7" без двоеточия) —
+  // scriptureRefLink сама открывает всю первую главу целиком (см. её
+  // определение в my.js).
   function openScriptureLink(m){
-    if(!BOOK_ALIASES || !verseLink) return;
+    if(!BOOK_ALIASES || !scriptureRefLink) return;
     var canonical = BOOK_ALIASES[m[1]];
     if(!canonical) return;
-    var link = verseLink(canonical, Number(m[2]), Number(m[3]), m[4] ? Number(m[4]) : undefined);
+    var link = scriptureRefLink(canonical, Number(m[2]), m[3] ? Number(m[3]) : undefined, m[4] ? Number(m[4]) : undefined);
     if(link) window.open(link, "_blank", "noopener,noreferrer");
   }
 
@@ -194,8 +197,30 @@ window.initMdEditorModule = function(deps){
   var codeMode = false;
   var saveTimer = null;
   var renaming = false;
+  // если "открыть заметку по имени снаружи" (см. openNoteExternally ниже)
+  // пришло РАНЬШЕ, чем закончилась инициализация (папка ещё не выбрана/не
+  // просканирована, initFromStoredHandle ещё выполняется) — запоминаем имя
+  // здесь и открываем сразу по готовности (см. конец initFromStoredHandle)
+  var pendingExternalOpen = null;
+  // взводится openNoteExternally перед открытием заметки по [[ссылке]],
+  // пришедшей СНАРУЖИ модуля (из другой вкладки) — само открытие заметки
+  // в этом случае не отдельный шаг "назад" внутри блокнота, а продолжение
+  // ОДНОГО клика по ссылке: переход уже зарегистрирован снаружи вызовом
+  // switchSettingsTab (см. initAutoFormatting/switchSettingsTab в my.js),
+  // и "назад" должен вести прямо туда, откуда кликнули по ссылке, а не в
+  // список заметок блокнота. См. pushMdNav ниже.
+  var suppressNextNavPush = false;
 
   function escName(s){ return escapeHtml ? escapeHtml(s) : String(s); }
+
+  // Регистрирует один шаг навигации внутри "Моего блокнота" в общем стеке
+  // "назад" (см. window.AppNav в my.js) — если он есть; съедает ОДНО
+  // ожидающее подавление (см. suppressNextNavPush выше), чтобы переход,
+  // пришедший снаружи по [[ссылке]], не задваивал запись в истории.
+  function pushMdNav(restoreFn){
+    if(suppressNextNavPush){ suppressNextNavPush = false; return; }
+    if(window.AppNav && typeof window.AppNav.push === "function") window.AppNav.push(restoreFn);
+  }
 
   function setStatus(msg, isError){
     statusMessage = msg || "";
@@ -225,7 +250,8 @@ window.initMdEditorModule = function(deps){
           child.name = name;
           // ссылка на родителя — нужна, чтобы жест "назад" внутри списка
           // заметок поднимался на один уровень вверх, а не сразу в корень
-          // (см. handleBackGesture); у rootTree.parent остаётся undefined.
+          // (см. pushMdNav в местах перехода по папкам ниже); у
+          // rootTree.parent остаётся undefined.
           child.parent = node;
           // папка остаётся в дереве, если внутри (в т.ч. вложенно) есть
           // .md заметки, ПОДпапки или изображения — папка, где лежат
@@ -291,6 +317,15 @@ window.initMdEditorModule = function(deps){
         var ok = await ensurePermissionSilently(stored);
         if(ok){
           await rescan();
+          // заметка, которую попросили открыть ИЗВНЕ ещё до того, как
+          // папка успела просканироваться (см. openNoteExternally ниже) —
+          // открываем её сразу вместо списка
+          if(pendingExternalOpen){
+            var name = pendingExternalOpen;
+            pendingExternalOpen = null;
+            handleLinkClick(name);
+            return;
+          }
           screen = "list";
           render();
           return;
@@ -304,6 +339,25 @@ window.initMdEditorModule = function(deps){
     setupNeedsPermission = false;
     screen = "setup";
     render();
+  }
+
+  // Открывает заметку по имени СНАРУЖИ модуля — используется, когда клик
+  // по [[ссылке]] произошёл НЕ внутри "Моего блокнота" (например, в
+  // тексте задачи GTD на другой вкладке, см. initAutoFormatting в my.js):
+  // сначала вызывающий код переключает вкладку настроек на "Мой блокнот"
+  // (switchSettingsTab("set2s_1") — обычный публичный API my.js), а сразу
+  // следом — этот метод. Поведение то же, что и у клика по [[ссылке]]
+  // ВНУТРИ самого блокнота (см. handleLinkClick выше), включая
+  // автосоздание отсутствующей заметки. Если инициализация (выбор папки/
+  // сканирование) ещё не завершилась — запоминает имя и открывает его
+  // сразу по готовности (см. конец initFromStoredHandle выше).
+  function openNoteExternally(name){
+    suppressNextNavPush = true;
+    if(!nameIndex){
+      pendingExternalOpen = name;
+      return;
+    }
+    handleLinkClick(name);
   }
 
   function render(){
@@ -381,7 +435,17 @@ window.initMdEditorModule = function(deps){
     // открывает картинку крупно поверх вкладки (см. openImagePreview)
     var imageItems = (node.images || []).map(function(im){ return { type: "image", name: im.name, handle: im.handle }; });
     folderItems.sort(function(a, b){ return a.name.localeCompare(b.name, "ru", { sensitivity: "base" }); });
-    fileItems.sort(function(a, b){ return a.name.localeCompare(b.name, "ru", { sensitivity: "base" }); });
+    // заметки, чьё имя начинается с цифры (даты вроде "04.2025",
+    // "2026-04-27" и т.п.), — отдельной группой В КОНЦЕ списка, а не в
+    // начале, как получалось при простой алфавитной сортировке (цифры
+    // сортируются раньше букв). Внутри каждой из двух групп порядок
+    // остаётся прежним — алфавитным/хронологическим.
+    fileItems.sort(function(a, b){
+      var da = /^\d/.test(a.name) ? 1 : 0;
+      var db = /^\d/.test(b.name) ? 1 : 0;
+      if(da !== db) return da - db;
+      return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
+    });
     imageItems.sort(function(a, b){ return a.name.localeCompare(b.name, "ru", { sensitivity: "base" }); });
     var items = folderItems.concat(fileItems).concat(imageItems);
 
@@ -394,14 +458,34 @@ window.initMdEditorModule = function(deps){
       html += '<div class="mdeditor-list" id="mdEditorList"></div>';
     }
     html += '<div class="mdeditor-fab-row">';
-    html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn" title="К списку заметок"' + (isRoot ? " disabled" : "") + '>' + HOME_ICON_SVG + '</button>';
+    // "домик" теперь ВСЕГДА активен (не disabled даже в корне) — раньше в
+    // корне списка кнопка была просто неактивной заглушкой; теперь клик по
+    // ней в корне прокручивает список к самому началу (полезно, когда
+    // список длинный и прокручен вниз), а вне корня — как и раньше,
+    // возвращает в корень.
+    html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn" title="К списку заметок">' + HOME_ICON_SVG + '</button>';
     html += '</div>';
     html += '</div>';
     container.innerHTML = html;
 
     var homeBtn = document.getElementById("mdEditorHomeBtn");
-    if(homeBtn && !isRoot){
-      homeBtn.addEventListener("click", function(){ currentDirNode = rootTree; render(); });
+    if(homeBtn){
+      homeBtn.addEventListener("click", function(){
+        if(!isRoot){
+          var prevDirNode = currentDirNode;
+          pushMdNav(function(){ currentDirNode = prevDirNode; render(); });
+          currentDirNode = rootTree;
+          render();
+        } else {
+          // прокручивается #settingsTabContent целиком (тот же приём, что
+          // и везде в проекте, см. switchSettingsTab в my.js) — а НЕ
+          // .mdeditor-list, у которого своей прокрутки нет: список внутри
+          // просто растягивает содержимое, и физически скроллится именно
+          // #settingsTabContent
+          var sc = document.getElementById("settingsTabContent");
+          if(sc) sc.scrollTop = 0;
+        }
+      });
     }
 
     var listEl = document.getElementById("mdEditorList");
@@ -414,7 +498,12 @@ window.initMdEditorModule = function(deps){
           '<span class="mdeditor-row-name"></span>';
         row.querySelector(".mdeditor-row-name").textContent = it.name;
         row.addEventListener("click", function(){
-          if(it.type === "folder"){ currentDirNode = it.node; render(); }
+          if(it.type === "folder"){
+            var prevDirNode = currentDirNode;
+            pushMdNav(function(){ currentDirNode = prevDirNode; render(); });
+            currentDirNode = it.node;
+            render();
+          }
           else if(it.type === "image"){ openImagePreview(it.handle, it.name); }
           else { openNoteByEntry({ fileHandle: it.handle, dirHandle: node.dirHandle, name: it.name }); }
         });
@@ -443,6 +532,15 @@ window.initMdEditorModule = function(deps){
     document.getElementById("mdEditorTitle").textContent = openFile.name;
 
     document.getElementById("mdEditorHomeBtn2").addEventListener("click", function(){
+      var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
+      pushMdNav(function(){
+        flushAutosaveNow();
+        destroyEditor();
+        openFile = prevOpenFile;
+        currentDirNode = prevDirNode;
+        screen = prevScreen;
+        render();
+      });
       goHome();
     });
     document.getElementById("mdEditorModeBtn").addEventListener("click", function(){
@@ -464,38 +562,18 @@ window.initMdEditorModule = function(deps){
     render();
   }
 
-  // ---------------------------------------------------------------------
-  // Жест/кнопка "назад" (Android back) — вызывается СНАРУЖИ, из
-  // initBackButtonTrap в my.js, ПЕРЕД тем, как закрыть всё окно настроек
-  // popstate'ом. Модуль сам решает, есть ли у него собственная "внутренняя"
-  // навигация, которую нужно отработать вместо закрытия окна:
-  //   - открыта заметка ("editor")            -> закрыть её, вернуться к
-  //     списку (как кнопка "домик" в шапке заметки);
-  //   - список показывает вложенную папку     -> подняться на один
-  //     уровень вверх (а не сразу в корень, поэтому используется
-  //     node.parent, а не rootTree — см. child.parent в scanTree выше);
-  //   - список уже в корне / экран выбора папки -> нечего перехватывать.
-  // Возвращает true, если "назад" обработан внутри вкладки (окно
-  // настроек в этом случае закрывать НЕ нужно), иначе false — тогда
-  // вызывающий код закрывает окно настроек как обычно.
-  // ---------------------------------------------------------------------
-  function handleBackGesture(){
-    if(screen === "editor" && openFile){
-      goHome();
-      return true;
-    }
-    if(screen === "list" && currentDirNode && currentDirNode !== rootTree){
-      currentDirNode = currentDirNode.parent || rootTree;
-      render();
-      return true;
-    }
-    return false;
-  }
+  // Жест/кнопка "назад" внутри "Моего блокнота" теперь не обрабатывается
+  // отдельной функцией — каждый шаг навигации (открытие/закрытие заметки,
+  // переход в папку/из папки, начало переименования) сам регистрирует
+  // свою отмену в общем стеке навигации в момент перехода (см. pushMdNav
+  // выше и window.AppNav в my.js), так что "назад" срабатывает
+  // единообразно со всем остальным приложением.
 
   // ---- переименование через шапку (замена заголовка на поле ввода) ----
   function startRename(){
     if(renaming || !openFile) return;
     renaming = true;
+    pushMdNav(function(){ renaming = false; render(); });
     var row = document.getElementById("mdEditorTitleRow");
     var titleEl = document.getElementById("mdEditorTitle");
     if(!row || !titleEl) return;
@@ -598,6 +676,19 @@ window.initMdEditorModule = function(deps){
   // Открытие заметки / переход по [[ссылке]]
   // ---------------------------------------------------------------------
   function openNoteByEntry(entry){
+    // снимок состояния ДО открытия заметки — если открытие пришло по
+    // [[ссылке]] снаружи модуля, регистрация подавляется (см. pushMdNav и
+    // openNoteExternally выше), и "назад" вернёт прямо на вкладку/экран,
+    // откуда кликнули по ссылке, а не в список заметок блокнота.
+    var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
+    pushMdNav(function(){
+      flushAutosaveNow();
+      destroyEditor();
+      openFile = prevOpenFile;
+      currentDirNode = prevDirNode;
+      screen = prevScreen;
+      render();
+    });
     flushAutosaveNow();
     destroyEditor();
     entry.fileHandle.getFile().then(function(f){ return f.text(); }).then(function(text){
@@ -619,6 +710,15 @@ window.initMdEditorModule = function(deps){
       await w.close();
       nameIndex.set(name.toLowerCase(), { fileHandle: fh, dirHandle: dirHandle, name: name });
       rootTree.files.push({ name: name, handle: fh });
+      var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
+      pushMdNav(function(){
+        flushAutosaveNow();
+        destroyEditor();
+        openFile = prevOpenFile;
+        currentDirNode = prevDirNode;
+        screen = prevScreen;
+        render();
+      });
       flushAutosaveNow();
       destroyEditor();
       openFile = { fileHandle: fh, dirHandle: dirHandle, name: name, text: "", dirty: false };
@@ -802,10 +902,13 @@ window.initMdEditorModule = function(deps){
     var highlightMark = Decoration.mark({ class: "cm-md-mark" });
     var linkMark = Decoration.mark({ class: "cm-md-link" });
     // ссылка на Библию, найденная в свободном тексте ("Матфея 5:3" и т.п.,
-    // см. SCRIPTURE_RE/findScriptureRefAt выше) — тот же стиль, что и у
-    // [[внутренних ссылок]] (цветом, без подчёркивания), сам клик
+    // см. SCRIPTURE_RE/findScriptureRefAt выше) — используется ТОТ ЖЕ
+    // класс ("auto-link scripture-link"), что и везде в проекте (см.
+    // единое правило .auto-link.scripture-link в components.css и
+    // scripturifyHtml/initAutoScriptureLinks в my.js) — один стиль
+    // ссылки на Библию везде, а не отдельный для блокнота. Сам клик
     // обрабатывается в handleMouseDown ниже.
-    var scriptureLinkMark = Decoration.mark({ class: "cm-md-scripture-link" });
+    var scriptureLinkMark = Decoration.mark({ class: "auto-link scripture-link" });
     var quoteLineDeco = Decoration.line({ attributes: { class: "cm-md-quote" } });
     // "красная строка" — отступ первой строки абзаца (см. ТЗ: примерно
     // 2 пробела), только у обычного текста (не у заголовков/цитат/списков,
@@ -814,18 +917,29 @@ window.initMdEditorModule = function(deps){
     // нумерованный список ("1. ", "2. ", ... или "1) ", "2) ", ...) — в
     // отличие от маркера "-"/"*" сама цифра НЕ скрывается (порядковый
     // номер — это содержимое, а не просто оформление), только красится тем
-    // же цветом, что и маркер "•" у обычного списка. У строки — своя красная
-    // строка (та же .cm-md-para-start, что и у обычного абзаца, но
-    // применяется к КАЖДОМУ пункту, а не только к первой строке после
-    // пустой) и отдельный класс с отступом МЕЖДУ пунктами (.cm-md-list-line
-    // в components.css) — без него соседние пункты списка визуально
-    // склеивались в один абзац, если между ними нет пустой строки.
+    // же цветом, что и маркер "•" у обычного списка.
     var numListMark = Decoration.mark({ class: "cm-md-bullet" });
-    var numListLineDeco = Decoration.line({ attributes: { class: "cm-md-para-start cm-md-list-line" } });
+    // строка ЛЮБОГО пункта списка — маркированного ("-"/"*") или
+    // нумерованного ("1.", "2.", ...) — получает и "красную строку" (та же
+    // .cm-md-para-start, что и у обычного абзаца, но применяется к
+    // КАЖДОМУ пункту, а не только к первой строке после пустой), и
+    // отдельный класс с отступом МЕЖДУ пунктами (.cm-md-list-line в
+    // components.css) — без него соседние пункты списка визуально
+    // склеивались в один абзац, если между ними нет пустой строки.
+    var listLineDeco = Decoration.line({ attributes: { class: "cm-md-para-start cm-md-list-line" } });
     // пустая строка между абзацами — уменьшенный межстрочный интервал (см.
     // .cm-md-blank-line в components.css), чтобы промежуток между абзацами
     // был вдвое компактнее обычного расстояния между строками
     var blankLineDeco = Decoration.line({ attributes: { class: "cm-md-blank-line" } });
+    // строка, ЦЕЛИКОМ состоящая из одной картинки ("![[имя]]", возможно с
+    // пробелами вокруг) — реальный видимый размер задаёт сама картинка
+    // (виджет), а обычный line-height строки (как у текстовой строки)
+    // сверху добавлял ЛИШНЕЕ зарезервированное место над и под ней — это
+    // и была основная причина большого отступа, а не margin у
+    // .cm-md-image-wrap (см. components.css); line-height:0 у самой строки
+    // убирает этот лишний зазор, оставляя только собственные размеры
+    // картинки и её небольшой margin.
+    var imageLineDeco = Decoration.line({ attributes: { class: "cm-md-image-line" } });
     var hideDeco = Decoration.replace({});
     var bulletDeco = Decoration.replace({ widget: bulletWidgetInstance });
 
@@ -858,6 +972,11 @@ window.initMdEditorModule = function(deps){
 
       var mHead = /^(#{1,3})(\s+)/.exec(lineText);
       var mQuote = null, mList = null, mNum = null;
+      // строка целиком — одна картинка (без остального текста рядом);
+      // проверяется независимо от остальной цепочки mHead/mQuote/mList/
+      // mNum ниже, конфликтов с ними быть не может (эти маркеры никогда
+      // не начинаются с "![[")
+      var mImgOnly = /^\s*!\[\[[^\[\]\n]+\]\]\s*$/.test(lineText);
       if(mHead){
         var hideEnd = mHead[0].length;
         tryClaim(0, hideEnd, function(){
@@ -930,8 +1049,9 @@ window.initMdEditorModule = function(deps){
       claims.sort(function(a, b){ return a.start - b.start; });
       if(mHead) builder.add(lineFrom, lineFrom, headingLineDeco[mHead[1].length - 1]);
       else if(mQuote) builder.add(lineFrom, lineFrom, quoteLineDeco);
-      else if(mList){ /* у пунктов списка свой отступ за счёт маркера, "красная строка" тут не нужна */ }
-      else if(mNum) builder.add(lineFrom, lineFrom, numListLineDeco);
+      else if(mList) builder.add(lineFrom, lineFrom, listLineDeco);
+      else if(mNum) builder.add(lineFrom, lineFrom, listLineDeco);
+      else if(mImgOnly) builder.add(lineFrom, lineFrom, imageLineDeco);
       else if(isParaStart) builder.add(lineFrom, lineFrom, paraStartLineDeco);
       claims.forEach(function(c){ c.emit(); });
     }
@@ -1047,6 +1167,6 @@ window.initMdEditorModule = function(deps){
   return {
     renderSettingsTabMdEditor: renderSettingsTabMdEditor,
     flushPendingMdEditorEdit: flushPendingMdEditorEdit,
-    handleBackGesture: handleBackGesture
+    openNoteExternally: openNoteExternally
   };
 };

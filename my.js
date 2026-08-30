@@ -69,6 +69,20 @@
            "&bible=" + bb + ccc + vv1 + "-" + bb + ccc + vv2 + "&pub=nwtsty";
   }
 
+  // Единая точка выбора ссылки для найденной библейской ссылки — если
+  // указан стих (v1 задан), ведёт на конкретный стих/диапазон стихов
+  // (verseLink); если стиха нет (просто "Книга 6" — целая глава, или
+  // "Книга 6-7"/"Книга 6 - 7" — диапазон ГЛАВ без стихов), ведёт на ВСЮ
+  // первую главу (chapterLink) — JW Library физически не может открыть
+  // сразу две главы на одном экране, поэтому диапазон глав трактуется как
+  // ссылка на первую из них (см. ТЗ пользователя от 30.08).
+  function scriptureRefLink(bookName, chapterNum, v1, v2){
+    if(v1) return verseLink(bookName, chapterNum, v1, v2);
+    var bookNumber = BOOK_NUMBERS[bookName];
+    if(!bookNumber) return null;
+    return chapterLink(bookNumber, chapterNum);
+  }
+
   // Распознавание библейских ссылок в свободном тексте (заметки, задачи).
   // Ключ — то, как ссылка написана в тексте; значение — каноническое
   // название книги из sections. Для каждого "стема" ниже автоматически
@@ -138,22 +152,312 @@
     var aliases = Object.keys(BOOK_ALIASES).sort(function(a,b){ return b.length - a.length; });
     var escaped = aliases.map(function(a){ return a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); });
     return new RegExp(
+      // разделитель диапазона стихов — учитывает не только обычный дефис
+      // "-" и запятую ",", но и длинное/среднее тире "—"/"–": в реальных
+      // текстах ("Прит. 3:5—7") часто используется именно тире, и раньше
+      // такие ссылки оставались нераспознанными (см. правку от 30.08).
+      //
+      // После главы — ТРИ варианта (см. ТЗ пользователя от 30.08):
+      //   1) "6:22"/"6.22[-24]" — глава:стих[-стих] (группы 3, 4);
+      //   2) "6-7"/"6 - 7"      — диапазон ГЛАВ без стихов (группы 3,4 не
+      //      заполняются, т.к. у этой ветки нет своих захватывающих
+      //      скобок — она различается только тем, что не совпадает с
+      //      первой веткой; сам номер второй главы не нужен для ссылки,
+      //      см. scriptureRefLink выше — диапазон глав всегда ведёт на
+      //      первую главу целиком, т.к. JW Library не может открыть две
+      //      главы на одном экране);
+      //   3) ничего после номера главы — сама глава целиком ("Книга 6").
       "(?<![а-яА-ЯёЁ])(" + escaped.join("|") + ")(?![а-яА-ЯёЁ])" +
-      "\\s+(\\d{1,3})[:.](\\d{1,3})(?:\\s*[-,]\\s*(\\d{1,3}))?",
+      "\\s+(\\d{1,3})" +
+      "(?:[:.](\\d{1,3})(?:\\s*[-–—,]\\s*(\\d{1,3}))?|\\s*[-–—]\\s*\\d{1,3})?",
       "g"
     );
   })();
 
-  // Оборачивает в ссылку узнанные библейские цитаты внутри УЖЕ
-  // экранированного HTML (см. linkifyHtml ниже).
-  function scripturifyHtml(escapedHtml){
-    return escapedHtml.replace(SCRIPTURE_RE, function(full, alias, ch, v1, v2){
-      var canonical = BOOK_ALIASES[alias];
-      var link = verseLink(canonical, Number(ch), Number(v1), v2 ? Number(v2) : undefined);
-      if(!link) return full;
-      return '<a href="' + link + '" target="_blank" rel="noopener noreferrer" class="auto-link scripture-link">' + full + '</a>';
+  // ===================== ФОРМАТИРОВАНИЕ В СТИЛЕ OBSIDIAN =====================
+  // ссылки http(s)://, www. — конечная пунктуация сразу после ссылки
+  // (точка, запятая, скобка и т.п.) в саму ссылку не включается, остаётся
+  // снаружи тега обычным текстом. Объявлены ЗДЕСЬ, а не рядом с linkifyHtml
+  // ниже по файлу — formatInline пользуется ими уже в САМОМ ПЕРВОМ, ещё
+  // синхронном проходе initAutoFormatting() при загрузке скрипта (см.
+  // ниже), до которого объявление ниже по файлу ещё не успело бы
+  // выполниться.
+  var LINKIFY_URL_RE = /((?:https?:\/\/|www\.)[^\s<]+)/gi;
+  var LINKIFY_TRAIL_RE = /[.,;:!?)\]}'"]+$/;
+  // Единая функция ИНЛАЙН-форматирования одной строки (без переносов) —
+  // ссылки на Библию, [[ссылки на заметки]], обычные URL, **жирный**,
+  // *курсив*/_курсив_, ==выделение==. Работает на СЫРОМ (неэкранированном)
+  // тексте методом "заявок" — тем же приёмом, что и decorateLine в
+  // mdeditor.js: каждый найденный кусок "застолбляет" свой диапазон
+  // символов, при пересечении диапазонов побеждает тот, кто заявил его
+  // раньше. Порядок сканирования ниже намеренно совпадает с decorateLine
+  // (ссылки → **жирный** → ==выделение== → *курсив*) — поэтому, например,
+  // [[ссылка]] ВНУТРИ **жирного** не получает своего отдельного
+  // оформления, ровно как и в живом просмотре "Моего блокнота" (решётки/
+  // скобки внутри выделения остаются как есть, без вложенной разметки).
+  //
+  // Используется и явно (см. formatObsidianHtml/linkifyHtml ниже — для
+  // уже известных вкладок: "Карта дней года", задачи/GTD, комментарии), и
+  // из общего автонаблюдателя initAutoFormatting (см. ниже) — для ЛЮБОЙ
+  // будущей вкладки, которая ничего специально для этого не делает и
+  // просто выводит обычный текст.
+  function formatInline(text){
+    if(!text) return "";
+    var claims = [];
+    function tryClaim(start, end, render){
+      for(var i = 0; i < claims.length; i++){
+        if(start < claims[i].end && end > claims[i].start) return;
+      }
+      claims.push({ start: start, end: end, render: render });
+    }
+
+    if(SCRIPTURE_RE){
+      SCRIPTURE_RE.lastIndex = 0;
+      var mScr;
+      while((mScr = SCRIPTURE_RE.exec(text))){
+        (function(a, b, m){
+          tryClaim(a, b, function(){
+            var canonical = BOOK_ALIASES[m[1]];
+            var link = canonical ? scriptureRefLink(canonical, Number(m[2]), m[3] ? Number(m[3]) : undefined, m[4] ? Number(m[4]) : undefined) : null;
+            var raw = text.slice(a, b);
+            if(!link) return escapeHtml(raw);
+            return '<a href="' + link + '" target="_blank" rel="noopener noreferrer" class="auto-link scripture-link">' + escapeHtml(raw) + '</a>';
+          });
+        })(mScr.index, mScr.index + mScr[0].length, mScr);
+        if(mScr[0].length === 0) SCRIPTURE_RE.lastIndex++;
+      }
+    }
+
+    // [[ссылки на заметки "Моего блокнота"]] — клик обрабатывается ОДНИМ
+    // общим делегированным обработчиком на #settingsTabContent (см.
+    // initAutoFormatting ниже): переключает вкладку настроек на "Мой
+    // блокнот" и сразу открывает эту заметку (создаёт её, если такой ещё
+    // нет — как и при клике на такую же ссылку ВНУТРИ самого блокнота, см.
+    // handleLinkClick/openNoteExternally в mdeditor.js).
+    var noteRe = /\[\[([^\[\]\n]+)\]\]/g, mNote;
+    noteRe.lastIndex = 0;
+    while((mNote = noteRe.exec(text))){
+      (function(a, b, name){
+        tryClaim(a, b, function(){
+          return '<span class="auto-link note-link" data-note-link="' + escapeHtml(name) + '">' + escapeHtml(name) + '</span>';
+        });
+      })(mNote.index, mNote.index + mNote[0].length, mNote[1].trim());
+      if(mNote[0].length === 0) noteRe.lastIndex++;
+    }
+
+    // обычные ссылки http(s)://, www. — конечная пунктуация сразу после
+    // ссылки (точка, запятая, скобка и т.п.) в саму ссылку не включается,
+    // остаётся снаружи тега обычным текстом (см. LINKIFY_TRAIL_RE ниже)
+    LINKIFY_URL_RE.lastIndex = 0;
+    var mUrl;
+    while((mUrl = LINKIFY_URL_RE.exec(text))){
+      (function(raw0, a){
+        var trailM = raw0.match(LINKIFY_TRAIL_RE);
+        var trail = trailM ? trailM[0] : "";
+        var core = trail ? raw0.slice(0, raw0.length - trail.length) : raw0;
+        if(!core) return;
+        tryClaim(a, a + core.length, function(){
+          var href = /^https?:\/\//i.test(core) ? core : "https://" + core;
+          return '<a href="' + href + '" target="_blank" rel="noopener noreferrer" class="auto-link">' + escapeHtml(core) + '</a>';
+        });
+      })(mUrl[0], mUrl.index);
+      if(mUrl[0].length === 0) LINKIFY_URL_RE.lastIndex++;
+    }
+
+    function scanPair(regex, cls){
+      regex.lastIndex = 0;
+      var m;
+      while((m = regex.exec(text))){
+        (function(a, b, inner){
+          tryClaim(a, b, function(){ return '<span class="' + cls + '">' + escapeHtml(inner) + '</span>'; });
+        })(m.index, m.index + m[0].length, m[1]);
+        if(m[0].length === 0) regex.lastIndex++;
+      }
+    }
+    scanPair(/\*\*([^*\n]+?)\*\*/g, "fmt-bold");
+    scanPair(/==([^=\n]+?)==/g, "fmt-mark");
+    scanPair(/\*([^*\n]+?)\*/g, "fmt-italic");
+    scanPair(/_([^_\n]+?)_/g, "fmt-italic");
+
+    claims.sort(function(a, b){ return a.start - b.start; });
+    var html = "", pos = 0;
+    claims.forEach(function(c){
+      if(c.start > pos) html += escapeHtml(text.slice(pos, c.start));
+      html += c.render();
+      pos = c.end;
     });
+    if(pos < text.length) html += escapeHtml(text.slice(pos));
+    return html;
   }
+
+  // Полный рендер многострочного текста в стиле Obsidian: разбивает на
+  // строки и для каждой распознаёт заголовок "# "/"## "/"### ", цитату
+  // "> ", маркированный ("-"/"*") и нумерованный ("1. ") список — плюс
+  // formatInline внутри каждой строки. Блочные признаки, их приоритет и
+  // "красная строка" у первой строки абзаца (после пустой строки или
+  // заголовка) — то же самое, что и в decorateLine в mdeditor.js: один и
+  // тот же язык разметки должен выглядеть одинаково и в "Моём блокноте", и
+  // здесь. Единственное, что тут НЕ поддерживается — встроенные картинки
+  // "![[имя]]" (они завязаны на файловую систему, открытую только внутри
+  // "Моего блокнота"; здесь просто останутся видимым текстом).
+  function formatObsidianHtml(rawText){
+    if(rawText == null || rawText === "") return "";
+    var lines = String(rawText).split("\n");
+    var html = "";
+    for(var i = 0; i < lines.length; i++){
+      var line = lines[i];
+      if(line.trim() === ""){
+        html += '<span class="fmt-line fmt-blank"></span>';
+        continue;
+      }
+      var mHead = /^(#{1,3})(\s+)/.exec(line);
+      if(mHead){
+        html += '<span class="fmt-line fmt-h' + mHead[1].length + '">' + formatInline(line.slice(mHead[0].length)) + '</span>';
+        continue;
+      }
+      var mQuote = /^(\s*>+ ?)/.exec(line);
+      if(mQuote){
+        html += '<span class="fmt-line fmt-quote">' + formatInline(line.slice(mQuote[0].length)) + '</span>';
+        continue;
+      }
+      var mList = /^(\s*)([-*])(\s+)/.exec(line);
+      if(mList){
+        html += '<span class="fmt-line fmt-list"><span class="fmt-bullet">•</span> ' + formatInline(line.slice(mList[0].length)) + '</span>';
+        continue;
+      }
+      var mNum = /^(\s*)(\d{1,4}[.)])(\s+)/.exec(line);
+      if(mNum){
+        html += '<span class="fmt-line fmt-list"><span class="fmt-bullet">' + escapeHtml(mNum[2]) + '</span> ' + formatInline(line.slice(mNum[0].length)) + '</span>';
+        continue;
+      }
+      var prevLine = i > 0 ? lines[i - 1] : null;
+      var isParaStart = prevLine == null || prevLine.trim() === "" || /^(#{1,3})(\s+)/.test(prevLine);
+      html += '<span class="fmt-line' + (isParaStart ? ' fmt-para' : '') + '">' + formatInline(line) + '</span>';
+    }
+    return html;
+  }
+
+  // ===================== АВТОМАТИЧЕСКОЕ ФОРМАТИРОВАНИЕ И ССЫЛКИ НА ЛЮБОЙ
+  //                        ВКЛАДКЕ (в т.ч. будущих) =====================
+  // formatObsidianHtml/linkifyHtml выше нужно вызвать САМОЙ вкладке при
+  // отрисовке — так уже сделано в "Карте дней года", задачах и
+  // комментариях: там получаются ПОЛНЫЕ заголовки/списки/цитаты (см.
+  // formatObsidianHtml). Но это значит, что КАЖДАЯ новая вкладка в будущем
+  // должна сама не забыть это сделать. Вместо этого здесь заводится один
+  // MutationObserver на #settingsTabContent целиком (родитель ЛЮБОЙ
+  // вкладки настроек, включая ещё не написанные) — после каждого
+  // изменения его содержимого сам обходит все текстовые узлы и применяет
+  // ИНЛАЙН-форматирование (см. formatInline выше: ссылки на Библию,
+  // [[ссылки на заметки]], обычные URL, **жирный**, ==выделение==,
+  // *курсив*), даже если конкретная вкладка ничего специально для этого
+  // не делала и просто вывела обычный текст. Заголовки/цитаты/списки
+  // (блочная разметка, привязанная к границам строк) сюда не входят — их
+  // безопасно строить только из СЫРОЙ строки текста (см.
+  // formatObsidianHtml), а не реконструировать заново из уже готового,
+  // произвольно сверстанного DOM; для этого вкладке всё же нужно вызвать
+  // formatObsidianHtml/linkifyHtml явно при отрисовке.
+  //
+  // Что НЕ трогаем:
+  //  - уже обёрнутые ссылки/форматирование (текстовый узел внутри <a> —
+  //    тег A входит в shouldSkip) — иначе получили бы вложенные <a> там,
+  //    где вкладка уже сама вызвала linkifyHtml/formatObsidianHtml;
+  //  - script/style/textarea/input — там либо нет осмысленного текста в
+  //    виде узлов, либо это чисто служебное содержимое;
+  //  - любой contenteditable-элемент (в т.ч. вложенный) — сюда попадают и
+  //    поле CodeMirror в "Моём блокноте" (там уже СВОЙ отдельный механизм
+  //    форматирования и ссылок, см. mdeditor.js — трогать DOM снаружи во
+  //    время редактирования CodeMirror нельзя, поломает его модель), и
+  //    поля редактирования комментария/задачи/дня года (contenteditable
+  //    div, см. renderYearDayNoteEdit и т.п.) — там во время правки лежит
+  //    ЧИСТЫЙ текст, который потом считывается обратно; вставленный <a>/
+  //    <span> испортил бы его при сохранении;
+  //  - "функция часов" (индикатор "4:05 / 10:55" вверху "Моего блокнота",
+  //    см. renderHourBars) — это числа графика чтения, а не текст заметок,
+  //    формировать из них ссылки/форматирование не нужно; она и так вне
+  //    подозрений: там нет текстовых узлов с "**"/"[["/ссылками на Библию.
+  (function initAutoFormatting(){
+    var root = document.getElementById("settingsTabContent");
+    if(!root) return;
+    var applying = false; // защита от зацикливания: сама вставка тегов тоже меняет DOM и породит новую mutation-запись
+
+    function shouldSkip(el){
+      if(!el || el.nodeType !== 1) return false;
+      var tag = el.tagName;
+      if(tag === "A" || tag === "SCRIPT" || tag === "STYLE" || tag === "TEXTAREA" || tag === "INPUT") return true;
+      if(el.isContentEditable) return true;
+      return false;
+    }
+
+    // быстрая отсечка без реального совпадения — если в тексте нет ни
+    // одного из символов/подстрок, с которых может начинаться хоть один
+    // из распознаваемых видов разметки, не тратим время на разбор
+    var QUICK_REJECT_RE = /[:.]|\[\[|\*|_|==|https?:\/\/|www\./;
+
+    function wrapTextNode(node){
+      var text = node.nodeValue;
+      if(!QUICK_REJECT_RE.test(text)) return;
+      var html = formatInline(text);
+      if(html === escapeHtml(text)) return; // ничего не нашли — текстовый узел не трогаем
+      var tpl = document.createElement("template");
+      tpl.innerHTML = html;
+      node.parentNode.replaceChild(tpl.content, node);
+    }
+
+    function walk(node){
+      if(node.nodeType === 3){ wrapTextNode(node); return; }
+      if(node.nodeType !== 1 || shouldSkip(node)) return;
+      // копия childNodes — wrapTextNode заменяет обработанный текстовый
+      // узел на фрагмент, из-за чего "живой" childNodes во время обхода
+      // сместился бы и часть узлов пропустилась/задвоилась
+      Array.prototype.slice.call(node.childNodes).forEach(walk);
+    }
+
+    function runPass(){
+      if(applying) return;
+      applying = true;
+      try{ walk(root); } finally { applying = false; }
+    }
+
+    // если ВСЕ мутации этой пачки пришли изнутри игнорируемых поддеревьев
+    // (типичный случай — пользователь просто печатает в contenteditable-поле
+    // редактирования комментария/задачи/дня года, это тоже мутации DOM) —
+    // полный обход #settingsTabContent не запускаем: там заведомо нечего
+    // находить, а вкладки с длинными списками (задачи, заметки) не должны
+    // пересчитываться на каждое нажатие клавиши в соседнем поле.
+    function isInsideSkippedSubtree(node){
+      var el = node.nodeType === 1 ? node : node.parentElement;
+      while(el && el !== root){
+        if(shouldSkip(el)) return true;
+        el = el.parentElement;
+      }
+      return false;
+    }
+
+    new MutationObserver(function(mutations){
+      for(var i = 0; i < mutations.length; i++){
+        if(!isInsideSkippedSubtree(mutations[i].target)){ runPass(); return; }
+      }
+    }).observe(root, { childList: true, subtree: true, characterData: true });
+    runPass();
+
+    // клик по [[ссылке на заметку]] (см. formatInline выше — span.note-link
+    // с data-note-link) в ЛЮБОМ месте #settingsTabContent, не только внутри
+    // "Моего блокнота": переключает вкладку настроек на "Мой блокнот" и
+    // сразу открывает эту заметку (создаёт, если такой ещё нет — как и при
+    // клике на такую же ссылку ВНУТРИ самого блокнота, см.
+    // openNoteExternally в mdeditor.js). Один делегированный обработчик на
+    // родителе — работает для ссылок в любой, в т.ч. ещё не написанной,
+    // вкладке, без отдельной подписки на каждую из них.
+    root.addEventListener("click", function(ev){
+      var el = ev.target && ev.target.closest ? ev.target.closest(".note-link") : null;
+      if(!el) return;
+      var name = el.getAttribute("data-note-link");
+      if(!name) return;
+      ev.preventDefault();
+      switchSettingsTab("set2s_1");
+      if(MdEditor && MdEditor.openNoteExternally) MdEditor.openNoteExternally(name);
+    });
+  })();
 
   // ===================== ХРАНЕНИЕ (с дебаунсом) =====================
   var STORAGE_KEY = "bibleReadingProgress_v2";
@@ -1672,13 +1976,13 @@
     escapeHtml: escapeHtml,
     PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG,
     // то же распознавание ссылок на Библию, что и в "Карте дней года" (см.
-    // SCRIPTURE_RE/BOOK_ALIASES/verseLink выше) — regexSource передаётся
-    // строкой (а не самим RegExp), чтобы mdeditor.js собрал СВОЙ экземпляр
-    // с флагом "g" и своим lastIndex, не деля состояние с этим же регэкспом
-    // в других местах кода.
+    // SCRIPTURE_RE/BOOK_ALIASES/scriptureRefLink выше) — regexSource
+    // передаётся строкой (а не самим RegExp), чтобы mdeditor.js собрал
+    // СВОЙ экземпляр с флагом "g" и своим lastIndex, не деля состояние с
+    // этим же регэкспом в других местах кода.
     scriptureRegexSource: SCRIPTURE_RE.source,
     bookAliases: BOOK_ALIASES,
-    verseLink: verseLink
+    scriptureRefLink: scriptureRefLink
   });
   var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
   var flushPendingMdEditorEdit = MdEditor.flushPendingMdEditorEdit;
@@ -2942,6 +3246,21 @@
   // содержимое вкладки не помещается, прокручивается #settingsTabContent
   // (без видимого индикатора прокрутки, см. CSS).
   function switchSettingsTab(tab){
+    // Реальное переключение вкладки внутри УЖЕ открытого окна настроек —
+    // отдельный "экран" с точки зрения "назад" (см. window.AppNav выше),
+    // причём независимо от того, чем вызван переход: кликом по язычку
+    // вкладки, программным переключением (как при переходе по
+    // [[ссылке]] из другой вкладки, см. initAutoFormatting выше) или
+    // любым будущим способом — switchSettingsTab единая точка входа для
+    // всех них. Самое ПЕРВОЕ переключение при открытии окна настроек
+    // (settingsModalOverlay ещё без класса "open", см. openSettingsModal)
+    // в стек не попадает — иначе закрытие окна требовало бы лишнего
+    // "назад".
+    var settingsWasOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay &&
+      settingsModalOverlay.classList.contains("open");
+    var prevTab = currentSettingsTab;
+    var isRealSwitch = settingsWasOpen && prevTab !== tab && !suppressNavPush;
+
     currentSettingsTab = tab;
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
@@ -3001,6 +3320,14 @@
     else if(tab === "set2s_6") renderSettingsTabImgResize();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
+
+    if(isRealSwitch && window.AppNav){
+      window.AppNav.push(function(){
+        suppressNavPush = true;
+        switchSettingsTab(prevTab);
+        suppressNavPush = false;
+      });
+    }
   }
 
   // extra2 — вкладка "Добавить кастомный комментарий", когда включена
@@ -3545,6 +3872,11 @@
   // чтобы понять, что сейчас открыт md-редактор (set2s_1) и стоит сначала
   // спросить у него, не обработает ли он жест "назад" сам, внутри вкладки.
   var currentSettingsTab = "gear";
+  // взводится ТОЛЬКО на время восстановления предыдущей вкладки функцией
+  // из стека навигации (см. window.AppNav.push в switchSettingsTab ниже),
+  // чтобы сам этот восстанавливающий вызов switchSettingsTab не породил
+  // новую запись поверх себя же.
+  var suppressNavPush = false;
   // ищет вкладку с той же позицией (индексом), что и tab, но в ДРУГОМ
   // наборе и в том же стеке (боковой -> боковой, нижний -> нижний).
   // Возвращает null, если позиция не распознана (такого пока не бывает,
@@ -5242,29 +5574,16 @@
       .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
   }
 
-  // экранирует текст (как escapeHtml) и вдобавок оборачивает ссылки
-  // (http://, https://, www.) в кликабельные <a target="_blank"> —
-  // используется в статичном виде комментария к дню (см.
-  // renderYearDayNoteView), где в тексте иногда встречаются ссылки на
-  // сторонние сайты. Финальная пунктуация (точка, запятая, скобка и т.п.)
-  // сразу после ссылки в саму ссылку не включается — остаётся снаружи
-  // тега, как обычным текстом.
-  var LINKIFY_URL_RE = /((?:https?:\/\/|www\.)[^\s<]+)/gi;
-  var LINKIFY_TRAIL_RE = /[.,;:!?)\]}'"]+$/;
+  // экранирует текст и оборачивает всё распознаваемое форматирование —
+  // ссылки (Библия, [[заметки]], http/www), **жирный**, ==выделение==,
+  // *курсив*, заголовки/цитаты/списки (Obsidian-стиль). Имя функции
+  // сохранено прежним (linkifyHtml), чтобы не менять вызывающий код во
+  // всех местах, где статично показывается сохранённый текст (комментарий
+  // к дню, личные комментарии, текст/комментарии задач) — см.
+  // formatObsidianHtml/formatInline выше, где и находится вся реальная
+  // логика.
   function linkifyHtml(s){
-    var escaped = escapeHtml(s);
-    escaped = escaped.replace(LINKIFY_URL_RE, function(match){
-      var trail = "";
-      var m = match.match(LINKIFY_TRAIL_RE);
-      if(m){
-        trail = m[0];
-        match = match.slice(0, match.length - trail.length);
-      }
-      if(!match) return trail;
-      var href = /^https?:\/\//i.test(match) ? match : "https://" + match;
-      return '<a href="' + href + '" target="_blank" rel="noopener noreferrer" class="auto-link">' + match + '</a>' + trail;
-    });
-    return scripturifyHtml(escaped);
+    return formatObsidianHtml(s);
   }
 
   function getAllGoals(){
@@ -6668,89 +6987,86 @@
     });
   }
 
-  // ===================== НАЗАД (Android back / жест назад) =====================
+  // ===================== НАЗАД (единый стек навигации) =====================
   // Раньше у страницы вообще не было записей в истории браузера, поэтому
   // системная кнопка/жест "назад" на Android сразу закрывали окно
-  // приложения (WebView/вкладку), даже если было открыто окно настроек
-  // или любое из модальных окон (задача дня, настройки цели, счётчик
-  // часов и т.п.). Все они, в каком бы месте кода их ни открывали, в
-  // итоге показываются через один и тот же #modalOverlay ИЛИ через
-  // #settingsModalOverlay (второе может быть открыто одновременно, если
-  // модалка вызвана из настроек, например выбор цвета цели) — поэтому
-  // вместо правки каждого места, где что-то открывается/закрывается,
-  // достаточно последить за атрибутом class этих двух элементов через
-  // MutationObserver: как только один из них получает класс "open" —
-  // значит открылся новый "экран", и в историю браузера добавляется
-  // запись-ловушка.
+  // приложения (WebView/вкладку). Первая версия этой правки решала это
+  // ОДНОЙ ловушкой в истории на два оверлея (#modalOverlay и
+  // #settingsModalOverlay) — этого хватало, пока "экраном" было ровно
+  // одно из двух: открыта модалка или открыто окно настроек целиком.
   //
-  // ВАЖНО (после первой версии этой правки): для приложения, установленного
-  // на домашний экран как PWA (standalone), одного pushState() с тем же
-  // самым URL оказалось недостаточно — Android иногда всё равно закрывает
-  // всё приложение вместо перехода на предыдущую запись, если URL записи
-  // совпадает с исходным URL, с которым PWA было запущено. Поэтому каждая
-  // запись-ловушка теперь получает СВОЙ уникальный #hash (реального
-  // значения не несёт, нигде в коде location.hash не читается) — так
-  // Android надёжнее видит, что это другая, отдельная точка истории, и
-  // жест "назад" действительно возвращает на предыдущий "экран" внутри
-  // приложения, а не закрывает его.
+  // Как только внутри уже открытого окна настроек появился СВОЙ переход,
+  // который тоже должен отменяться "назад" — переключение вкладки (в т.ч.
+  // ПРОГРАММНОЕ, как при клике по [[ссылке]] в комментарии/задаче/"Карте
+  // дней года", см. initAutoFormatting выше), или шаг навигации внутри
+  // самой вкладки (папка -> заметка в "Моём блокноте", см. mdeditor.js) —
+  // одной ловушки стало не хватать: "назад" либо перехватывался не тем
+  // экраном, либо закрывал всё окно настроек целиком, пропуская вкладку,
+  // с которой реально был совершён переход. Именно так выглядел баг:
+  // переход по ссылке на заметку из другой вкладки, и "назад" вместо
+  // возврата на эту вкладку открывал список всех заметок в блокноте.
   //
-  // По кнопке/жесту "назад" браузер сам уходит на предыдущую запись,
-  // событие popstate — сигнал закрыть верхний из открытых сейчас слоёв
-  // (сначала #modalOverlay, он показывается поверх настроек, и только
-  // если он не открыт — #settingsModalOverlay). Если ни то, ни другое не
-  // открыто — попап нечего закрывать, событие просто игнорируется, и
-  // следующее "назад" сработает как обычно (свернёт/закроет приложение)
-  // — это ожидаемо и правильно, т.к. на главном экране чтения
-  // возвращаться больше некуда.
-  (function initBackButtonTrap(){
-    var modalOverlayEl = document.getElementById("modalOverlay");
-    var settingsOverlayEl = document.getElementById("settingsModalOverlay");
-    if(!modalOverlayEl && !settingsOverlayEl) return;
+  // Вместо одной ловушки — общий СТЕК: КАЖДЫЙ переход, который стоит
+  // показывать отдельным "экраном" (открытие модалки/настроек,
+  // переключение вкладки настроек — см. switchSettingsTab ниже, шаг
+  // навигации внутри вкладки — см. mdeditor.js), кладёт в этот стек
+  // функцию, восстанавливающую состояние ДО перехода, и одновременно
+  // добавляет ОДНУ запись в историю браузера. Системная кнопка/жест
+  // "назад" всегда просто снимает верхнюю запись стека и вызывает её —
+  // независимо от того, из какой вкладки или какого (в т.ч. ещё не
+  // написанного) экрана был совершён переход. Если стек пуст — истории
+  // внутри приложения больше нет, и следующее "назад" сработает как
+  // обычно (свернёт/закроет приложение) — это ожидаемо и правильно на
+  // главном экране чтения, возвращаться больше некуда.
+  //
+  // ВАЖНО (сохраняется из первой версии этой правки): для приложения,
+  // установленного на домашний экран как PWA (standalone), одного
+  // pushState() с тем же самым URL оказывается недостаточно — Android
+  // иногда всё равно закрывает всё приложение вместо перехода на
+  // предыдущую запись, если URL записи совпадает с исходным URL, с
+  // которым PWA было запущено. Поэтому каждая запись получает СВОЙ
+  // уникальный #hash (реального значения не несёт, нигде в коде
+  // location.hash не читается).
+  //
+  // window.AppNav.push(restoreFn) — публичный вход для ЛЮБОГО места в
+  // коде (в т.ч. mdeditor.js и любых будущих вкладок/модулей), которое
+  // хочет зарегистрировать свой шаг навигации как отменяемый "назад".
+  var navStack = [];
+  var navSeq = 0;
+  var navBaseUrl = location.pathname + location.search;
 
-    var navTrapSeq = 0;
-    var baseUrl = location.pathname + location.search;
+  function pushNavState(restoreFn){
+    navStack.push(restoreFn);
+    navSeq++;
+    try{ history.pushState({__navSeq:navSeq}, "", navBaseUrl + "#nav" + navSeq); }catch(e){}
+  }
+  window.AppNav = { push: pushNavState };
 
-    function armTrap(el){
+  window.addEventListener("popstate", function(){
+    var restoreFn = navStack.pop();
+    if(restoreFn){
+      try{ restoreFn(); }catch(e){}
+    }
+    // если стек пуст — ничего не делаем, следующее "назад" сработает как
+    // обычно (свернёт/закроет приложение)
+  });
+
+  // Открытие #modalOverlay / #settingsModalOverlay по-прежнему ловим через
+  // MutationObserver, а не правкой каждого места, которое их открывает —
+  // так в общий стек навигации попадает ЛЮБОЕ их открытие, где бы в коде
+  // оно ни происходило.
+  (function armOverlayNavTraps(){
+    function arm(el, restoreFn){
       if(!el) return;
       var wasOpen = el.classList.contains("open");
       new MutationObserver(function(){
         var isOpen = el.classList.contains("open");
-        if(isOpen && !wasOpen){
-          navTrapSeq++;
-          try{ history.pushState({__navTrap:navTrapSeq}, "", baseUrl + "#nav" + navTrapSeq); }catch(e){}
-        }
+        if(isOpen && !wasOpen) pushNavState(restoreFn);
         wasOpen = isOpen;
       }).observe(el, {attributes:true, attributeFilter:["class"]});
     }
-    armTrap(modalOverlayEl);
-    armTrap(settingsOverlayEl);
-
-    window.addEventListener("popstate", function(){
-      if(modalOverlayEl && modalOverlayEl.classList.contains("open")){
-        closeModal();
-      } else if(settingsOverlayEl && settingsOverlayEl.classList.contains("open")){
-        // md-редактор (set2s_1) — единственная вкладка со своей ВНУТРЕННЕЙ
-        // навигацией (список папок -> заметка). Если сейчас открыта именно
-        // она, сперва отдаём ей шанс обработать "назад" самостоятельно
-        // (закрыть открытую заметку -> вернуться к списку, или подняться на
-        // папку вверх) — и, если она это сделала, НЕ закрываем окно
-        // настроек целиком, а вместо истраченной этим "назад" записи в
-        // истории тут же добавляем новую ловушку, чтобы следующее "назад"
-        // снова было перехвачено (а не сразу закрыло приложение).
-        var handledInside = (currentSettingsTab === "set2s_1" &&
-          typeof MdEditor !== "undefined" && MdEditor &&
-          typeof MdEditor.handleBackGesture === "function" &&
-          MdEditor.handleBackGesture());
-        if(handledInside){
-          navTrapSeq++;
-          try{ history.pushState({__navTrap:navTrapSeq}, "", baseUrl + "#nav" + navTrapSeq); }catch(e){}
-        } else {
-          closeSettingsModal();
-        }
-      }
-      // если ничего не открыто — ничего не делаем, следующее "назад"
-      // сработает как обычно (закроет приложение)
-    });
+    arm(document.getElementById("modalOverlay"), function(){ closeModal(); });
+    arm(document.getElementById("settingsModalOverlay"), function(){ closeSettingsModal(); });
   })();
 
   // ===================== ЗАПУСК =====================

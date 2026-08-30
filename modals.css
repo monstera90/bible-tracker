@@ -630,6 +630,41 @@
     word-break:break-word;
   }
   .auto-link:hover, .auto-link:active{ color:#4e2482; }
+  /* ---------- Форматирование в стиле Obsidian везде, где сохранённый
+     текст показывается статично (комментарий к дню, личные комментарии,
+     текст/комментарии задач — см. formatObsidianHtml/formatInline в
+     my.js) — заголовки, цитаты, списки, **жирный**, ==выделение==,
+     *курсив*. Классы (.fmt-*) намеренно ОТДЕЛЬНЫЕ от аналогичных
+     .cm-md-* в components.css (те работают внутри CodeMirror в "Моём
+     блокноте" и завязаны на структуру .cm-line — здесь обычная статичная
+     вёрстка), но визуально подобраны так же, чтобы один и тот же язык
+     разметки выглядел одинаково в обоих местах. Ни один из них не задаёт
+     свой font-family/font-size — наследуют типографику того контейнера
+     (.year-day-note-view, .task-text-view и т.п.), в который попали. */
+  .fmt-line{ display:block; }
+  .fmt-para{ text-indent:1ch; }
+  .fmt-blank{ min-height:0.7em; }
+  .fmt-h1, .fmt-h2, .fmt-h3{ font-weight:bold; }
+  .fmt-h1{ font-size:1.5em; }
+  .fmt-h2{ font-size:1.28em; }
+  .fmt-h3{ font-size:1.12em; }
+  .fmt-quote{
+    border-left:3px solid var(--wood);
+    padding-left:16px;
+    margin-left:2px;
+    color:var(--ink-soft);
+    font-style:italic;
+  }
+  .fmt-list{ text-indent:1ch; margin-top:6px; }
+  .fmt-bullet{ color:var(--wood); }
+  .fmt-bold{ font-weight:bold; }
+  .fmt-italic{ font-style:italic; }
+  .fmt-mark{
+    background:#f3e08a;
+    color:#3d2f04;
+    border-radius:2px;
+    padding:0 1px;
+  }
   .year-day-note-icon-btn{
     display:inline-flex;
     align-items:center;
