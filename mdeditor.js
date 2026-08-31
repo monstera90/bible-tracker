@@ -1744,10 +1744,25 @@ window.initMdEditorModule = function(deps){
     saveTimer = setTimeout(function(){ flushAutosaveNow(); }, 700);
   }
 
+  // Некоторые источники (сайт/приложение JW Library при копировании
+  // стиха, автозамена на телефоне и т.п.) подставляют вместо обычного
+  // пробела "неразрывные" юникод-пробелы — глазами они неотличимы от
+  // обычного, но браузер не переносит строку в этом месте. Из-за этого
+  // слово перед таким пробелом иногда целиком уезжает на новую строку,
+  // хотя по ширине ещё помещалось бы (переносится не оно само, а весь
+  // "склеенный" им кусок текста). Чистим такие пробелы на обычные при
+  // каждом автосохранении — file на диске сам "лечится" по мере
+  // редактирования заметок; открытые сейчас в редакторе места
+  // подхватят это уже при следующем открытии заметки.
+  var INVISIBLE_SPACE_RE = /[\u00A0\u202F\u2007\u2060]/g;
+  function stripInvisibleSpaces(str){
+    return str.replace(INVISIBLE_SPACE_RE, " ");
+  }
+
   function flushAutosaveNow(){
     if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
     if(!openFile || !cmView || !openFile.dirty) return;
-    var text = cmView.state.doc.toString();
+    var text = stripInvisibleSpaces(cmView.state.doc.toString());
     var fileRef = openFile;
     fileRef.dirty = false;
     openFile.fileHandle.createWritable().then(function(w){

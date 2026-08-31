@@ -7219,10 +7219,14 @@
   }
 
   // ---------- вкладка "архив": последние TASK_ARCHIVE_MAX_SHOWN отмеченных
-  // задач, каждая — с чекбоксом (отмечен), стрелочкой извлечения (возвращает
+  // задач, каждая — с зачёркнутым текстом, стрелочкой извлечения (возвращает
   // задачу туда, где она была до отметки) и крестиком полного удаления
   // (без диалога подтверждения — тушит саму задачу и её запись в "Карте
-  // дней года", см. deleteTaskPermanently). Кнопки "+" здесь нет. ----------
+  // дней года", см. deleteTaskPermanently). Кнопки "+" здесь нет.
+  // Разметка и подгонка кнопок под последнюю строку текста — та же
+  // механика (.task-row/.task-body/.task-actions + fitTaskActions), что и
+  // у невыполненных задач (см. renderTaskRowView), просто без карандаша и
+  // приоритета: сюда идут только стрелочка и крестик. ----------
   function renderTaskArchiveTab(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -7230,16 +7234,22 @@
     var shown = all.slice(0, TASK_ARCHIVE_MAX_SHOWN);
     var rowsHtml = shown.map(function(t){
       var label = t.c.text ? escapeHtml(t.c.text) : "Без названия";
-      return '<div class="task-archive-row" data-id="' + t.id + '">' +
-        '<input type="checkbox" class="task-archive-check" checked disabled>' +
-        '<span class="task-archive-text">' + label + '</span>' +
-        '<button type="button" class="task-restore-btn" data-id="' + t.id + '" title="Извлечь из архива">' + RESTORE_ICON_SVG + '</button>' +
-        '<button type="button" class="task-delete-btn" data-id="' + t.id + '" title="Удалить навсегда">' + DELETE_ICON_SVG + '</button>' +
+      return '<div class="task-row" data-id="' + t.id + '">' +
+        '<div class="task-body task-archive-body" data-id="' + t.id + '">' +
+          '<span class="task-text-view task-archive-text">' + label + '</span>' +
+          '<span class="task-actions">' +
+            '<button type="button" class="task-icon-btn task-restore-btn" data-id="' + t.id + '" title="Извлечь из архива">' + RESTORE_ICON_SVG + '</button>' +
+            '<button type="button" class="task-icon-btn task-delete-btn" data-id="' + t.id + '" title="Удалить навсегда">' + DELETE_ICON_SVG + '</button>' +
+          '</span>' +
+        '</div>' +
       '</div>';
     }).join("");
     container.innerHTML =
       '<div class="task-list">' + rowsHtml + '</div>' +
       (shown.length === 0 ? '<div class="task-empty">Архив пуст.</div>' : '');
+    Array.prototype.forEach.call(container.querySelectorAll(".task-archive-body"), function(body){
+      fitTaskActions(body);
+    });
     Array.prototype.forEach.call(container.querySelectorAll(".task-restore-btn"), function(btn){
       btn.addEventListener("click", function(){
         var id = btn.getAttribute("data-id");

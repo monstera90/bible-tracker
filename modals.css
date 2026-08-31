@@ -202,7 +202,7 @@
     display:flex;
     flex-direction:column;
     overflow:hidden;
-    padding:16px;
+    padding:16px 8px 16px 8px;
     box-shadow:0 10px 30px rgba(0,0,0,.5);
   }
   /* см. комментарий у @media (max-width:600px) выше: на телефоне у окна
@@ -225,11 +225,19 @@
     -ms-overflow-style:none;
   }
   #settingsTabContent::-webkit-scrollbar{ display:none; width:0; height:0; }
-  /* контент некоторых экранов (импорт задач, подтверждения сброса,
-     версии) прижат к нижнему краю области настроек — так до кнопок
+  /* Контент некоторых экранов (импорт задач, подтверждения сброса,
+     версии, а также вкладки-инструменты epub/картинка/S-89/субтитры,
+     отметка настроения) прижат к нижнему краю области настроек — так
      проще дотянуться большим пальцем; работает за счёт того, что
      #settingsTabContent — flex-column, а margin-top:auto у обёртки
-     выталкивает её вниз, если места больше, чем нужно контенту */
+     выталкивает её вниз, если места больше, чем нужно контенту.
+     (Пробовал заменить на фиксированный margin-top:16px, чтобы кнопки
+     не уезжали так далеко вниз после уменьшения padding у
+     .settings-modal-box — сломало сразу все экраны на этом классе,
+     включая отметку настроения и подтверждения сброса: они лишились
+     прижатия к низу, для которого их так и делали. Откатил обратно —
+     padding у .settings-modal-box снова 16px сверху/снизу (см. выше),
+     так что и лишнего пустого места под кнопками теперь тоже нет.) */
   .settings-content-bottom{ margin-top:auto; }
   /* язычки прижаты к низу окна: settingsTabYearBtn идёт первым в DOM и
      благодаря column-reverse оказывается самым нижним, за ним — 8 язычков
@@ -1077,59 +1085,14 @@
     word-break:break-all;
   }
 
-  /* ---------- архив задач ---------- */
-  .task-archive-row{
-    display:flex;
-    align-items:flex-start;
-    gap:10px;
-    padding:10px 2px;
-    border-top:1px solid var(--groove-shadow);
-  }
-  .task-archive-row:first-child{ border-top:none; }
-  .task-archive-check{
-    width:20px;height:20px;
-    flex-shrink:0;
-    margin-top:2px;
-    accent-color:var(--wood);
-  }
+  /* ---------- архив задач: та же структура строки (.task-row/.task-body/
+     .task-actions), что и у невыполненных задач — см. .task-row выше —
+     здесь только переопределение вида текста (зачёркнут, приглушён). ---------- */
   .task-archive-text{
-    flex:1;
-    min-width:0;
-    font-family:"Palatino Linotype",Georgia,serif;
-    font-size:14px;
-    line-height:1.5;
     color:var(--ink-soft);
     text-decoration:line-through;
-    word-break:break-word;
   }
-  .task-restore-btn{
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    width:26px;height:26px;
-    flex-shrink:0;
-    padding:0;
-    border:none;
-    background:transparent;
-    color:var(--wood);
-    cursor:pointer;
-    -webkit-tap-highlight-color:transparent;
-  }
-  .task-restore-btn svg{ width:17px; height:17px; }
-  .task-delete-btn{
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    width:26px;height:26px;
-    flex-shrink:0;
-    padding:0;
-    border:none;
-    background:transparent;
-    color:#c0392b;
-    cursor:pointer;
-    -webkit-tap-highlight-color:transparent;
-  }
-  .task-delete-btn svg{ width:15px; height:15px; }
+  .task-delete-btn{ color:#c0392b; }
 
     /* отключение анимаций при массовых операциях */
   .no-transitions *{
