@@ -101,7 +101,7 @@
     "Бытие":["Быт"], "Исход":["Исх"], "Левит":["Лев","Лв"], "Числа":["Чис","Чс"],
     "Второзаконие":["Втор","Вт"], "Судей":["Суд","Сд"], "Руфь":["Рф"],
     "Ездра":["Езд"], "Неемия":["Неем","Не"], "Эсфирь":["Эсф"],
-    "Псалмы":["Пс","Псалом"], "Притчи":["Пр"], "Экклезиаст":["Эк"], "Песня Соломона":["Псн"],
+    "Псалмы":["Пс","Псалом"], "Притчи":["Пр","Прит"], "Экклезиаст":["Эк"], "Песня Соломона":["Псн"],
     "Исаия":["Ис"], "Иеремия":["Иер"], "Плач Иеремии":["Пл"], "Иезекииль":["Иез"],
     "Даниил":["Дан"], "Осия":["Ос"], "Иоиль":["Ил"], "Амос":["Ам"], "Авдий":["Авд"],
     "Иона":["Ион"], "Михей":["Мх","Мих"], "Наум":["На"], "Аввакум":["Авв"],
@@ -113,6 +113,19 @@
   };
   Object.keys(SIMPLE_STEMS).forEach(function(canonical){
     SIMPLE_STEMS[canonical].forEach(function(stem){ addStemVariants(stem, canonical); });
+  });
+
+  // Полные альтернативные написания названий книг, которые реально
+  // встречаются в текстах, но отличаются от канонического имени в
+  // sections/BOOK_NUMBERS выше (поэтому не покрываются циклом по
+  // Object.keys(BOOK_NUMBERS) чуть выше SIMPLE_STEMS) — например, "Исайя"
+  // (с "й") наравне с "Исаия": раньше такое написание вообще не
+  // распознавалось как ссылка на Библию (см. ТЗ пользователя от 31.08).
+  var ALT_FULL_NAMES = {
+    "Исаия":["Исайя"]
+  };
+  Object.keys(ALT_FULL_NAMES).forEach(function(canonical){
+    ALT_FULL_NAMES[canonical].forEach(function(alt){ addAlias(alt, canonical); });
   });
 
   // Сокращения для книг с номером (1/2 Самуила, 1/2/3 Иоанна и т.п.) —
@@ -276,6 +289,12 @@
     }
     scanPair(/\*\*([^*\n]+?)\*\*/g, "fmt-bold");
     scanPair(/==([^=\n]+?)==/g, "fmt-mark");
+    // зачёркнутый ("~~текст~~") / подчёркнутый ("++текст++" — своё
+    // обозначение, в обычном markdown подчёркивания нет) — та же кнопка
+    // форматирования, что и в "Моём блокноте" (см. wrapEditableSelection
+    // ниже и ТЗ пользователя от 31.08).
+    scanPair(/~~([^~\n]+?)~~/g, "fmt-strike");
+    scanPair(/\+\+([^+\n]+?)\+\+/g, "fmt-underline");
     scanPair(/\*([^*\n]+?)\*/g, "fmt-italic");
     scanPair(/_([^_\n]+?)_/g, "fmt-italic");
 
@@ -828,7 +847,12 @@
   // CodeMirror 6 с decorations, ссылки [[Название]] между заметками), см.
   // renderSettingsTabMdEditor в mdeditor.js и её отдельную ветку в
   // switchSettingsTab ниже, по тому же принципу вынесена ДО общей проверки
-  // на renderSettingsTabSet2Stub.
+  // на renderSettingsTabSet2Stub. set2s_2 (вторая боковая) — ТОЖЕ УЖЕ НЕ
+  // ЗАГЛУШКА: это вкладка "Закладки" — список заметок из "Моего блокнота"
+  // (set2s_1), отмеченных закладкой (долгим нажатием в общем списке или
+  // кнопкой в шапке открытой заметки), см. renderSettingsTabMdBookmarks в
+  // mdeditor.js и её отдельную ветку в switchSettingsTab ниже, по тому же
+  // принципу вынесена ДО общей проверки на renderSettingsTabSet2Stub.
   var SET2_TAB_IDS = {
     set2s_1: "settingsTabSet2Btn1", set2s_2: "settingsTabSet2Btn2", set2s_3: "settingsTabSet2Btn3",
     set2s_4: "settingsTabSet2Btn4", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
@@ -1992,7 +2016,108 @@
     openTaskMoveTargetPicker: openTaskMoveTargetPicker
   });
   var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
+  var renderSettingsTabMdBookmarks = MdEditor.renderSettingsTabMdBookmarks;
   var flushPendingMdEditorEdit = MdEditor.flushPendingMdEditorEdit;
+  initTaskGlobalToolbar();
+
+  // ---------------------------------------------------------------------
+  // Глобальные "Ж" (форматирование выделения) и "Аа" (размер шрифта) на
+  // вкладках задач (см. #taskFormatWrap/#taskFontSizeWrap в index.html) —
+  // одна кнопка на всё приложение, а не по одной на строку, поэтому
+  // применяется к тому task-editable/comment-editable, что открыт для
+  // редактирования ПРЯМО СЕЙЧАС (в один момент времени редактируется не
+  // больше одной строки — остальные при этом уже сохранены, см.
+  // flushPendingTaskEdits/flushPendingCommentEdits). "Аа" использует ТОТ
+  // ЖЕ fontSizeStep, что и "Мой блокнот" (см. MdEditor.changeFontSizeStep
+  // в mdeditor.js) — единица размера, стало быть, общая на оба места (см.
+  // ТЗ пользователя от 31.08).
+  // ---------------------------------------------------------------------
+  function initTaskGlobalToolbar(){
+    // preventDefault на mousedown — чтобы контент-эдитабл не терял фокус/
+    // выделение раньше, чем сработает click (иначе к моменту click строка
+    // уже была бы пересохранена и перерисована в обычный вид, см.
+    // renderTaskRowEdit/renderRowEdit/renderCommentRowEdit — их blur
+    // сохраняет и заменяет DOM строки).
+    function stopMousedown(btn){
+      if(btn) btn.addEventListener("mousedown", function(e){ e.preventDefault(); });
+    }
+
+    // --- "Аа" ---
+    var fontSizePanelOpen = false;
+    var fontBtn = document.getElementById("taskFontSizeBtn");
+    var fontPopup = document.getElementById("taskFontSizePopup");
+    var fontPlusBtn = document.getElementById("taskFontPlusBtn");
+    var fontMinusBtn = document.getElementById("taskFontMinusBtn");
+    stopMousedown(fontBtn); stopMousedown(fontPlusBtn); stopMousedown(fontMinusBtn);
+    if(fontBtn){
+      fontBtn.addEventListener("click", function(){
+        fontSizePanelOpen = !fontSizePanelOpen;
+        if(fontPopup) fontPopup.classList.toggle("open", fontSizePanelOpen);
+      });
+    }
+    function changeTaskFontSizeStep(delta){
+      MdEditor.changeFontSizeStep(delta);
+      refitAllVisibleTaskBodies(); // ширина текста изменилась — пересчитать подгонку кнопок (см. fitTaskActions выше)
+    }
+    if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ changeTaskFontSizeStep(1); });
+    if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ changeTaskFontSizeStep(-1); });
+
+    // --- "Ж" (форматирование выделения) ---
+    var formatPanelOpen = false;
+    var formatBtn = document.getElementById("taskFormatBtn");
+    var formatPopup = document.getElementById("taskFormatPopup");
+    stopMousedown(formatBtn);
+    if(formatBtn){
+      formatBtn.addEventListener("click", function(){
+        formatPanelOpen = !formatPanelOpen;
+        if(formatPopup) formatPopup.classList.toggle("open", formatPanelOpen);
+      });
+    }
+    function bindTaskFmtBtn(id, prefix, suffix){
+      var btn = document.getElementById(id);
+      if(!btn) return;
+      stopMousedown(btn);
+      btn.addEventListener("click", function(){
+        wrapEditableSelection(prefix, suffix);
+        formatPanelOpen = false;
+        if(formatPopup) formatPopup.classList.remove("open");
+      });
+    }
+    bindTaskFmtBtn("taskFmtBoldBtn", "**", "**");
+    bindTaskFmtBtn("taskFmtItalicBtn", "*", "*");
+    bindTaskFmtBtn("taskFmtUnderlineBtn", "++", "++");
+    bindTaskFmtBtn("taskFmtStrikeBtn", "~~", "~~");
+  }
+
+  // оборачивает ВЫДЕЛЕННЫЙ прямо сейчас текст (внутри того
+  // .task-editable, что сейчас редактируется — см. initTaskGlobalToolbar
+  // выше) markdown-маркерами форматирования. Если выделения нет — просто
+  // ничего не делает (оборачивать в пустые маркеры нечего). После вставки
+  // выделение переносится на обёрнутый текст, чтобы можно было сразу
+  // применить ещё один стиль поверх (например Ж, затем К).
+  function wrapEditableSelection(prefix, suffix){
+    var editable = document.querySelector(".task-editable");
+    if(!editable) return;
+    var sel = window.getSelection();
+    if(!sel || sel.rangeCount === 0) return;
+    var range = sel.getRangeAt(0);
+    if(range.collapsed) return;
+    if(!editable.contains(range.commonAncestorContainer)) return;
+    var selectedText = range.toString();
+    if(!selectedText) return;
+    range.deleteContents();
+    var node = document.createTextNode(prefix + selectedText + suffix);
+    range.insertNode(node);
+    var newRange = document.createRange();
+    newRange.selectNode(node);
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+    // ручная вставка через Range не порождает событие "input" сама по
+    // себе — уведомляем редактируемую строку вручную тем же событием,
+    // которое она и так слушает (см. renderTaskRowEdit/renderRowEdit/
+    // renderCommentRowEdit), чтобы плейсхолдер/подгонка кнопок обновились
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
+  }
 
   // --- ленивая загрузка QRCode и jsQR ---
   var qrLibLoaded = false, jsqrLibLoaded = false;
@@ -3309,7 +3434,14 @@
     if(container) container.scrollTop = 0;
     var addFab = document.getElementById("taskAddFab");
     var isCommentsTab = (tab === "extra2" && getCustomCommentsEnabled());
-    if(addFab) addFab.classList.toggle("visible", TASK_MOVABLE_TABS.indexOf(tab) !== -1 || isCommentsTab);
+    var showTaskFab = TASK_MOVABLE_TABS.indexOf(tab) !== -1 || isCommentsTab;
+    if(addFab) addFab.classList.toggle("visible", showTaskFab);
+    // "Ж"/"Аа" видны в тех же случаях, что и "+" (см. ТЗ пользователя от
+    // 31.08 — обе кнопки стоят в одном ряду с ней).
+    var formatWrap = document.getElementById("taskFormatWrap");
+    var fontSizeWrap = document.getElementById("taskFontSizeWrap");
+    if(formatWrap) formatWrap.classList.toggle("visible", showTaskFab);
+    if(fontSizeWrap) fontSizeWrap.classList.toggle("visible", showTaskFab);
     if(tab === "mood"){ renderSettingsTabMood(); }
     else if(tab === "year") renderSettingsTabYear();
     else if(tab === "versions") renderSettingsTabVersions();
@@ -3323,6 +3455,13 @@
     else if(tab === "set2b_3") renderSettingsTabNotesMerge();
     else if(tab === "set2b_4") renderSettingsTabSubtitleExtract();
     else if(tab === "set2s_1") renderSettingsTabMdEditor();
+    // вторая боковая вкладка второго набора (set2s_2) — ЭТО БОЛЬШЕ НЕ
+    // ЗАГЛУШКА: вкладка "Закладки" — плоский список заметок из "Моего
+    // блокнота" (set2s_1), отмеченных закладкой, см.
+    // renderSettingsTabMdBookmarks/renderBookmarksScreen в mdeditor.js;
+    // вынесена ДО общей проверки на renderSettingsTabSet2Stub по тому же
+    // принципу, что и остальные уже не-заглушки этого набора выше.
+    else if(tab === "set2s_2") renderSettingsTabMdBookmarks();
     else if(tab === "set2s_5") renderSettingsTabEpubSplit();
     else if(tab === "set2s_6") renderSettingsTabImgResize();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
@@ -6248,6 +6387,7 @@
       deleteCommentPermanently(id);
       renderCommentsTab();
     });
+    fitTaskActions(body);
   }
 
   function renderCommentRowEdit(id){
@@ -6270,6 +6410,7 @@
       editable.classList.toggle("is-empty", empty);
     }
     updatePlaceholder();
+    fitTaskActions(body);
 
     editable.focus();
     var range = document.createRange();
@@ -6279,7 +6420,10 @@
     sel.removeAllRanges();
     sel.addRange(range);
 
-    editable.addEventListener("input", updatePlaceholder);
+    editable.addEventListener("input", function(){
+      updatePlaceholder();
+      fitTaskActions(body);
+    });
     editable.addEventListener("keydown", function(e){
       if(e.key === "Enter"){
         e.preventDefault();
@@ -6570,6 +6714,65 @@
     renderTaskRowView(id, tabKey);
   }
 
+  // ---------------------------------------------------------------------
+  // Подгонка кнопок задачи (.task-actions) под ПОСЛЕДНЮЮ строку текста
+  // (.task-text-view/.task-editable) — см. подробное объяснение "почему
+  // не float" в комментарии к .task-body в modals.css и ТЗ пользователя
+  // от 31.08 (кнопки уходили на отдельную строку, даже когда после
+  // короткой последней строки было полно места). Кнопки позиционируются
+  // вручную (position:absolute, top/right через inline-style): если после
+  // последней визуальной строки текста есть место — кнопки встают туда;
+  // если нет — уходят под текст отдельной строкой, а .task-body получает
+  // ровно нужный padding-bottom, чтобы под ними не оставалось пустоты.
+  // ---------------------------------------------------------------------
+  function getLastLineRect(el){
+    if(!el) return null;
+    var range;
+    try{
+      range = document.createRange();
+      range.selectNodeContents(el);
+    }catch(e){ return null; }
+    var rects = range.getClientRects();
+    if(!rects || !rects.length) return null;
+    return rects[rects.length - 1];
+  }
+  function fitTaskActions(body){
+    if(!body) return;
+    var actions = body.querySelector(".task-actions");
+    var textEl = body.querySelector(".task-text-view") || body.querySelector(".task-editable");
+    if(!actions || !textEl) return;
+    var lastRect = getLastLineRect(textEl);
+    var bodyRect = body.getBoundingClientRect();
+    if(!lastRect || !bodyRect.width){
+      body.style.paddingBottom = "";
+      actions.style.top = "0px";
+      return;
+    }
+    var gap = 8;
+    var actionsWidth = actions.offsetWidth;
+    var actionsHeight = actions.offsetHeight;
+    var availableAfter = bodyRect.right - lastRect.right - gap;
+    if(actionsWidth <= availableAfter){
+      var top = lastRect.top - bodyRect.top + (lastRect.height - actionsHeight) / 2;
+      actions.style.top = Math.max(0, top) + "px";
+      body.style.paddingBottom = "";
+    } else {
+      actions.style.top = (lastRect.bottom - bodyRect.top + 4) + "px";
+      body.style.paddingBottom = (actionsHeight + 4) + "px";
+    }
+  }
+  // пересчитывает подгонку кнопок у ВСЕХ строк задач, видимых прямо
+  // сейчас, — нужно при изменении размера окна и при смене общего размера
+  // шрифта (см. "Аа" в initTaskGlobalToolbar ниже: у текста меняется
+  // ширина, значит и разбивка на строки, значит подгонку надо пересчитать
+  // заново). Если открыта не вкладка задач — querySelectorAll просто
+  // ничего не найдёт, безвредно.
+  function refitAllVisibleTaskBodies(){
+    var bodies = document.querySelectorAll(".task-body");
+    for(var i = 0; i < bodies.length; i++) fitTaskActions(bodies[i]);
+  }
+  window.addEventListener("resize", refitAllVisibleTaskBodies);
+
   function renderTaskRowView(id, tabKey){
     var body = document.querySelector('.task-body[data-id="' + id + '"]');
     var task = getTaskById(id);
@@ -6590,6 +6793,7 @@
       '</span>';
     body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderTaskRowEdit(id, tabKey); });
     bindTaskRowActions(body, id, tabKey);
+    fitTaskActions(body);
   }
 
   // кнопки переноса/архивации/next-привязки/приоритета — общие для
@@ -6661,6 +6865,7 @@
       editable.classList.toggle("is-empty", empty);
     }
     updatePlaceholder();
+    fitTaskActions(body);
 
     editable.focus();
     var range = document.createRange();
@@ -6670,7 +6875,13 @@
     sel.removeAllRanges();
     sel.addRange(range);
 
-    editable.addEventListener("input", updatePlaceholder);
+    // при каждом вводе текст может перенестись на другое число строк —
+    // подгонку кнопок (fitTaskActions) нужно пересчитывать вживую, а не
+    // только один раз при открытии редактирования
+    editable.addEventListener("input", function(){
+      updatePlaceholder();
+      fitTaskActions(body);
+    });
     editable.addEventListener("keydown", function(e){
       if(e.key === "Enter"){
         e.preventDefault();
@@ -6817,9 +7028,15 @@
       // глобальная "+" (task-add-fab) относится к обычным вкладкам —
       // здесь вместо неё две свои кнопки, поэтому её прячем; она сама
       // вернётся при выходе (switchSettingsTab выставляет видимость
-      // заново для каждой вкладки)
+      // заново для каждой вкладки). "Ж"/"Аа" прячем туда же — они
+      // визуально попадали бы ровно в то место, где здесь стоят свои
+      // круглые кнопки (.task-project-fab-link/-create, см. выше).
       var globalFab = document.getElementById("taskAddFab");
       if(globalFab) globalFab.classList.remove("visible");
+      var globalFormatWrap = document.getElementById("taskFormatWrap");
+      var globalFontSizeWrap = document.getElementById("taskFontSizeWrap");
+      if(globalFormatWrap) globalFormatWrap.classList.remove("visible");
+      if(globalFontSizeWrap) globalFontSizeWrap.classList.remove("visible");
 
       renderRowView(projectId);
       if(mode !== "attach"){
@@ -6885,6 +7102,7 @@
         '</span>';
       body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderRowEdit(id); });
       bindRowActions(body, id);
+      fitTaskActions(body);
     }
 
     // кнопки архива/переноса/приоритета — общие для обычного вида и
@@ -6938,6 +7156,7 @@
         editable.classList.toggle("is-empty", empty);
       }
       updatePlaceholder();
+      fitTaskActions(body);
 
       editable.focus();
       var range = document.createRange();
@@ -6947,7 +7166,10 @@
       sel.removeAllRanges();
       sel.addRange(range);
 
-      editable.addEventListener("input", updatePlaceholder);
+      editable.addEventListener("input", function(){
+        updatePlaceholder();
+        fitTaskActions(body);
+      });
       editable.addEventListener("keydown", function(e){
         if(e.key === "Enter"){
           e.preventDefault();

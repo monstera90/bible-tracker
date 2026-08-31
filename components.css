@@ -1457,6 +1457,38 @@
   }
   .mdeditor-title-confirm{ background:var(--xp-green); color:#12351f; }
   .mdeditor-title-cancel{ background:transparent; color:var(--danger, #c0392b); }
+  /* ---------- поле связей заметки — строка под заголовком, собранная
+     автоматически из исходящих [[ссылок]] текста заметки и входящих
+     ("обратных") ссылок из других заметок (см. #mdEditorLinksRow в
+     mdeditor.js: renderEditorScreen/refreshLinksField/renderLinksField).
+     Сама не редактируется, отдельного position:sticky у неё нет — как и
+     у остального .mdeditor-tab (см. комментарий выше), она часть
+     обычного потока и прокручивается вместе с заметкой. Пуста — не
+     занимает места (:empty), в режиме "с кодом" скрыта явно
+     (.code-hidden, см. applyLinksFieldVisibility). ---------- */
+  .mdeditor-links-row{
+    display:block;
+    text-align:center;
+    font-size:var(--mdeditor-font-size, 15.5px);
+    line-height:1.4;
+    color:var(--ink-soft);
+    margin:4px 0;
+    padding:6px 4px;
+    border-top:1px solid var(--groove-shadow);
+    border-bottom:1px solid var(--groove-shadow);
+  }
+  .mdeditor-links-row:empty{ display:none; margin:0; padding:0; border:none; }
+  .mdeditor-links-row.code-hidden{ display:none; }
+  .mdeditor-links-item{
+    cursor:pointer;
+    color:var(--wood);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .mdeditor-links-item:hover{ opacity:.75; }
+  .mdeditor-links-sep{
+    margin:0 5px;
+    color:var(--ink-soft);
+  }
   .mdeditor-status{
     min-height:15px;
     font-size:11.5px;
@@ -1464,6 +1496,11 @@
     text-align:center;
     margin:2px 0 6px 0;
   }
+  /* пустая строка статуса (нет сообщения "Сохранено"/ошибки) не должна
+     резервировать место — раньше min-height:15px + margins съедали
+     ~23px пустого пространства между полем связей и текстом заметки
+     ВСЕГДА, даже когда показывать нечего (см. ТЗ пользователя от 31.08). */
+  .mdeditor-status:empty{ min-height:0; margin:0; }
   .mdeditor-status.error{ color:var(--status-err, #c0392b); }
   /* ---------- плавающие кнопки (домик / переключатель код-без кода) —
      маленькие, в правом нижнем углу поверх текста. Раньше строка была
@@ -1508,9 +1545,55 @@
     -webkit-tap-highlight-color:transparent;
   }
   .mdeditor-fab-btn svg{ width:16px; height:16px; }
-  .mdeditor-fab-btn:hover{ background:var(--xp-green); }
+  /* :hover обёрнут в (hover:hover) — на тач-устройствах (нет настоящего
+     hover) браузер иначе применяет :hover сразу по тапу и снимает его не
+     сразу (а то и вовсе "залипает" до следующего тапа куда-то ещё) — на
+     экране списка заметок это и была та самая зелёная подсветка "домика"
+     при обычном нажатии, которую попросили убрать (см. ТЗ пользователя):
+     теперь :hover реально работает только там, где есть настоящее
+     наведение мышью, на тач-устройствах кнопка просто нажимается без
+     зависающей подсветки. */
+  @media (hover:hover) and (pointer:fine){
+    .mdeditor-fab-btn:hover{ background:var(--xp-green); }
+  }
   .mdeditor-fab-btn:disabled{ opacity:.35; cursor:default; }
   .mdeditor-fab-btn:disabled:hover{ background:#fffef8; }
+  /* текстовое содержимое кнопки (вместо svg-иконки) — "Аа"/"+"/"-" (см.
+     mdeditor-fontsize-wrap ниже, ТЗ пользователя от 31.08): свой размер
+     шрифта, чуть меньше, чем в самой заметке, чтобы "Аа" уместилась в
+     квадрат 32x32 с тем же отступом от края, что и у иконок рядом. */
+  .mdeditor-fab-btn-text{
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:13px;
+    font-weight:bold;
+  }
+  /* лица кнопок попапа форматирования ("Ж"/"К"/"П"/"Ч") — общие для
+     "Моего блокнота" и вкладок задач (см. .mdeditor-format-popup ниже,
+     .task-format-wrap в modals.css, ТЗ пользователя от 31.08): буква
+     сама показывает применяемый стиль. */
+  .fmt-btn-bold{ font-weight:bold; }
+  .fmt-btn-italic{ font-style:italic; }
+  .fmt-btn-underline{ text-decoration:underline; }
+  .fmt-btn-strike{ text-decoration:line-through; }
+  /* ---------- "Аа" — размер шрифта заметки (см. FONT_SIZE_BASE_PX/
+     changeFontSizeStep в mdeditor.js) — то же место в ряду кнопок, что и у
+     остальных трёх (.mdeditor-fab-row), просто ЛЕВЕЕ скрепки. Клик по "Аа"
+     раскрывает СТОЛБИКОМ прямо над ней ещё две такие же кнопки ("+"/"-"),
+     повторный клик по "Аа" их скрывает — это ЕДИНСТВЕННЫЙ способ закрыть
+     попап (клик мимо не закрывает, как и просили). ---------- */
+  .mdeditor-fontsize-wrap{
+    position:relative;
+    display:flex;
+  }
+  .mdeditor-fontsize-popup{
+    display:none;
+    position:absolute;
+    left:0;
+    bottom:calc(100% + 8px);
+    flex-direction:column;
+    gap:8px;
+  }
+  .mdeditor-fontsize-popup.open{ display:flex; }
   /* ---------- список тем/папок (экран без открытой заметки) — папки
      всегда выше файлов (см. сортировку в mdeditor.js), внутри каждой
      группы — по алфавиту ---------- */
@@ -1550,6 +1633,53 @@
     overflow:hidden;
     text-overflow:ellipsis;
   }
+  /* ---------- кнопка закладки — ОДНА пиктограмма везде (см.
+     BOOKMARK_ICON_SVG в mdeditor.js): в строке общего списка заметок
+     (после долгого нажатия или если заметка уже в закладках), в шапке
+     открытой заметки (всегда видна) и на вкладке "Закладки" (всегда
+     видна и всегда активна). Активное/неактивное состояние — не смена
+     иконки, а инверсия заливки (см. .active ниже: пустой контур —
+     не в закладках, залитый — в закладках), как и попросили. По
+     умолчанию (в строке общего списка) кнопка НЕ видна — показывается
+     только с классом .visible (см. renderListScreen/toggleBookmarkNote в
+     mdeditor.js) — но своё место в строке держит ВСЕГДА (display остаётся
+     inline-flex, скрывается через visibility, а не display): иначе при
+     появлении кнопки (долгое нажатие/уже в закладках) вся строка меняла
+     бы ширину и переносила текст названия — место под кнопку у строки
+     заметки зарезервировано с самого начала, независимо от того,
+     показана она сейчас или нет. ---------- */
+  .mdeditor-bookmark-btn{
+    visibility:hidden;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:26px;height:26px;
+    flex-shrink:0;
+    padding:0;
+    border:none;
+    border-radius:6px;
+    background:transparent;
+    color:var(--wood);
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .mdeditor-bookmark-btn.visible{ visibility:visible; }
+  .mdeditor-bookmark-btn svg{ width:18px; height:18px; fill:none; }
+  /* активная (в закладках) — только заливка контура тем же цветом (см.
+     ТЗ пользователя: зелёный var(--xp-green) здесь смотрелся чужеродно —
+     остальные пиктограммы вкладок все монохромные, var(--wood)/
+     var(--parchment), без отдельного акцентного цвета для "включено", см.
+     .settings-tab.active выше); отдельный цвет для .active поэтому не
+     нужен — currentColor уже var(--wood) по умолчанию. */
+  .mdeditor-bookmark-btn.active svg{ fill:currentColor; }
+  @media (hover:hover) and (pointer:fine){
+    .mdeditor-bookmark-btn:hover{ background:var(--parchment-dark); }
+  }
+  /* в шапке открытой заметки кнопка стоит рядом с заголовком (см.
+     .mdeditor-title-row выше) — свой отступ слева не нужен, gap строки
+     уже даёт 8px; flex-shrink:0 уже задан общим правилом выше, так что
+     кнопка не сжимается при длинном названии (само название обрезается
+     многоточием, см. .mdeditor-title). */
   /* ---------- сама заметка: без рамки/фона-карточки — текст занимает всю
      полезную ширину вкладки, высота не ограничена (auto), растёт вместе с
      документом; прокручивает всё это #settingsTabContent целиком (см.
@@ -1566,7 +1696,7 @@
      не читались как мелкий текст. */
   .mdeditor-editor-host .cm-editor{
     font-family:"Palatino Linotype",Georgia,serif;
-    font-size:15.5px;
+    font-size:var(--mdeditor-font-size, 15.5px);
     color:var(--ink);
   }
   .mdeditor-editor-host .cm-scroller{ font-family:inherit; line-height:1.4; overflow:visible; }
@@ -1617,6 +1747,12 @@
     border-radius:2px;
     padding:0 1px;
   }
+  /* зачёркнутый ("~~текст~~") / подчёркнутый ("++текст++" — своё
+     обозначение, в обычном markdown подчёркивания нет) — та же кнопка
+     форматирования, что и на вкладках задач (см. .fmt-strike/.fmt-underline
+     в modals.css и ТЗ пользователя от 31.08). */
+  .cm-md-strike{ text-decoration:line-through; }
+  .cm-md-underline{ text-decoration:underline; }
   /* ссылки — цветом, БЕЗ подчёркивания (важное требование из ТЗ) */
   .cm-md-link{
     color:#8a6fd8;

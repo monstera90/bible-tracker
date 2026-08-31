@@ -665,6 +665,12 @@
     border-radius:2px;
     padding:0 1px;
   }
+  /* зачёркнутый ("~~текст~~") / подчёркнутый ("++текст++", своё
+     обозначение — в обычном markdown подчёркивания нет) — та же
+     кнопка форматирования, что и на вкладках задач и в "Моём блокноте"
+     (см. ТЗ пользователя от 31.08). */
+  .fmt-strike{ text-decoration:line-through; }
+  .fmt-underline{ text-decoration:underline; }
   .year-day-note-icon-btn{
     display:inline-flex;
     align-items:center;
@@ -807,33 +813,44 @@
   }
   .task-flag-dot.flag-red .task-flag-dot-inner{ background:#e0392b; border-color:#a52a1e; }
   .task-flag-dot.flag-yellow .task-flag-dot-inner{ background:#f2b705; border-color:#b8860b; }
-  /* .task-body устроен как обычный текстовый поток (не flex): это
-     единственный способ получить именно "подверстку" кнопок к ПОСЛЕДНЕЙ
-     строке текста, если там есть место, — flexbox для этого не годится,
-     т.к. вычисляет место для переносимого текста заранее, до реальной
-     разбивки на строки, и всегда уводил бы кнопки на отдельную строку,
-     даже если места было полно (см. историю правок). */
+  /* .task-body — раньше кнопки "подверстывались" к последней строке
+     текста через float:right (см. историю правок), но это оказалось
+     ненадёжно: браузер решает, влезает ли float на текущую строку, ДО
+     того как реально досчитает разбивку предшествующего текста на
+     строки, и в ряде обычных случаев (см. скриншот в ТЗ пользователя от
+     31.08 — короткая последняя строка с кучей места справа) всё равно
+     уводил кнопки на отдельную строку. Вместо этого кнопки теперь
+     позиционируются вручную через position:absolute (см. fitTaskActions
+     в my.js): текст (.task-text-view/.task-editable) всегда занимает всю
+     ширину строки как обычный текстовый поток, а JS после каждой
+     отрисовки измеряет последнюю визуальную строку текста
+     (Range.getClientRects()) и решает — приткнуть кнопки к её концу
+     (если после последней строки есть место) или увести их под текст
+     отдельной строкой, добавив снизу ровно нужный отступ
+     (padding-bottom), чтобы под кнопками не оставалось пустоты.
+     font-size — общая CSS-переменная с "Моим блокнотом" (см. "Аа" в
+     mdeditor.js/ТЗ пользователя от 31.08: одна и та же кнопка меняет
+     размер шрифта сразу везде). */
   .task-body{
+    position:relative;
     flex:1;
     min-width:0;
-    display:flow-root; /* содержит float ниже, чтобы высота строки учитывала кнопки, если они ушли на отдельную строку */
+    display:block;
     font-family:"Palatino Linotype",Georgia,serif;
-    font-size:14px;
+    font-size:var(--mdeditor-font-size, 14px);
     line-height:1.5;
     color:var(--ink);
   }
   .task-text-view{
     word-break:break-word;
   }
-  /* группа кнопок (карандаш/галочка/стрелочка/next/приоритет) — единый
-     неразрывный float:right, идущий в разметке сразу после текста
-     (см. renderTaskRowView в my.js): браузер сам "подверстывает" его к
-     последней строке текста, если там есть место, — и тогда кнопки
-     оказываются на одной строке с текстом, прижатые к правому краю;
-     если места нет, весь блок целиком (а не отдельные кнопки) уходит на
-     следующую строку, тоже прижатый к правому краю. */
+  /* группа кнопок (карандаш/галочка/стрелочка/next/приоритет) —
+     top/right выставляются в JS (см. fitTaskActions в my.js), здесь
+     только сама "коробка" и внутреннее выравнивание. */
   .task-actions{
-    float:right;
+    position:absolute;
+    top:0;
+    right:0;
     display:inline-flex;
     align-items:center;
     margin-left:8px;
@@ -880,34 +897,65 @@
     font-style:italic;
   }
 
-  /* круглая кнопка "+", приклеена к правому нижнему углу окна настроек и
-     не уезжает при прокрутке списка задач, т.к. лежит вне
-     #settingsTabContent (settings-modal-box — position:relative).
-     Оформлена в том же стиле, что и сейчас выбранная (активная) вкладка
-     (см. .settings-tab.active выше): тот же сплошной фон var(--wood) и
-     тот же цвет "чернил" var(--parchment), без градиента — просто круглая
-     версия того же сочетания цветов. */
+  /* Приклеена к правому нижнему углу окна настроек и не уезжает при
+     прокрутке списка задач, т.к. лежит вне #settingsTabContent
+     (settings-modal-box — position:relative). Оформлена в том же стиле и
+     с теми же отступами, что и "домик" в "Моём блокноте" (.mdeditor-fab-btn
+     в components.css) — тот же квадрат со скруглёнными углами, фон,
+     рамка, тень и отступ от края (8px, а не 14px), вместо прежней
+     сплошной круглой кнопки цвета var(--wood) (см. ТЗ пользователя от
+     31.08). */
   .task-add-fab{
     display:none;
     position:absolute;
-    right:14px;
-    bottom:14px;
-    width:44px;height:44px;
-    border-radius:50%;
+    right:8px;
+    bottom:8px;
+    width:32px;height:32px;
+    border-radius:8px;
     border:1px solid var(--groove-shadow);
-    background:var(--wood);
-    color:var(--parchment);
-    font-size:24px;
+    background:#fffef8;
+    color:var(--wood);
+    font-size:19px;
     font-weight:bold;
     line-height:1;
     cursor:pointer;
     align-items:center;
     justify-content:center;
-    box-shadow:2px 2px 5px rgba(0,0,0,.3);
+    box-shadow:0 2px 6px rgba(0,0,0,.28);
+    z-index:5;
+    -webkit-tap-highlight-color:transparent;
+  }
+  /* "Аа" (размер шрифта, общий с "Моим блокнотом") и "Ж" (форматирование
+     выделенного текста) на вкладках задач — те же кнопки/попапы, что и в
+     "Моём блокноте" (.mdeditor-fab-btn/-fontsize-popup в components.css,
+     переиспользуются как есть), просто в собственных обёртках слева от
+     общей "+" (.task-add-fab выше), в одном ряду с ней: форматирование —
+     левее размера шрифта, размер шрифта — левее "+" (см. ТЗ пользователя
+     от 31.08). Видимость включается тем же условием, что и у
+     .task-add-fab (см. switchSettingsTab в my.js). */
+  .task-fontsize-wrap{
+    display:none;
+    position:absolute;
+    right:48px;
+    bottom:8px;
     z-index:5;
   }
+  .task-fontsize-wrap.visible{ display:flex; }
+  .task-format-wrap{
+    display:none;
+    position:absolute;
+    right:88px;
+    bottom:8px;
+    z-index:5;
+  }
+  .task-format-wrap.visible{ display:flex; }
   .task-add-fab.visible{ display:flex; }
-  .task-add-fab:hover{ filter:brightness(1.08); }
+  /* :hover обёрнут в (hover:hover) — та же причина, что и у "домика" в
+     .mdeditor-fab-btn (components.css): на тач-устройствах :hover иначе
+     "залипает" после обычного нажатия. */
+  @media (hover:hover) and (pointer:fine){
+    .task-add-fab:hover{ background:var(--xp-green); }
+  }
   .task-add-fab:active{ transform:scale(.95); }
 
   /* Экран "Все задачи проекта" (openTaskNextPicker в my.js) — не

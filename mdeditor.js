@@ -91,6 +91,19 @@ window.initMdEditorModule = function(deps){
       '<path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"></path>' +
       '<path d="M10 20v-5h4v5"></path>' +
     '</svg>';
+  // закладка (лента/флажок) — единая пиктограмма для ВСЕХ мест, где можно
+  // добавить заметку в закладки или увидеть, что она уже там (см. ТЗ
+  // пользователя: "пусть пиктограмма активной закладки будет везде
+  // одинаковой") — строка списка (после долгого нажатия, см.
+  // renderListScreen), шапка открытой заметки (renderEditorScreen) и сама
+  // вкладка "Закладки" (renderBookmarksScreen). Активное/неактивное
+  // состояние — не отдельная иконка, а инверсия заливки (см.
+  // .mdeditor-bookmark-btn.active в components.css: пустой контур —
+  // не в закладках, залитый — в закладках).
+  var BOOKMARK_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M6.5 3.5h11a1 1 0 0 1 1 1V21l-6.5-4-6.5 4V4.5a1 1 0 0 1 1-1z"></path>' +
+    '</svg>';
   // папка — переиспользуем ровно тот же контур, что и у вкладки-заглушки
   // "projects" (#settingsTabProjectsBtn в index.html), для единообразия
   var FOLDER_ICON_SVG =
@@ -132,13 +145,23 @@ window.initMdEditorModule = function(deps){
   // структурно клонируем, поэтому его можно класть в IndexedDB напрямую.
   // ---------------------------------------------------------------------
   var DB_NAME = "mdEditorDB", STORE_NAME = "handles";
+  // Соединение открывается один раз и переиспользуется всеми idbGet/idbSet
+  // за сессию — раньше indexedDB.open() вызывался заново на КАЖДЫЙ вызов
+  // (а их немало уже при самом старте: fontSizeStep, bookmarks, root,
+  // теперь ещё и treeShape ниже), это лишний асинхронный круг на пустом
+  // месте (см. ТЗ пользователя от 31.08). При ошибке открытия dbPromise
+  // сбрасывается, чтобы следующий вызов мог попробовать снова, а не
+  // навсегда застрять с отклонённым промисом.
+  var dbPromise = null;
   function openDb(){
-    return new Promise(function(resolve, reject){
+    if(dbPromise) return dbPromise;
+    dbPromise = new Promise(function(resolve, reject){
       var req = indexedDB.open(DB_NAME, 1);
       req.onupgradeneeded = function(){ req.result.createObjectStore(STORE_NAME); };
       req.onsuccess = function(){ resolve(req.result); };
-      req.onerror = function(){ reject(req.error); };
+      req.onerror = function(){ dbPromise = null; reject(req.error); };
     });
+    return dbPromise;
   }
   function idbGet(key){
     return openDb().then(function(db){
@@ -197,20 +220,90 @@ window.initMdEditorModule = function(deps){
   // (см. клик по скрепке в renderSetupScreen ниже).
   var imageUrlCache = new Map();
   var IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp)$/i;
+  // единая папка для всех вложений (картинок и mp3) — см.
+  // migrateStrayMediaFiles/ensureFilesFolder и insertImageAtCursor ниже
+  // (ТЗ пользователя от 31.08: файлы этих расширений, "потерявшиеся" где-то
+  // ещё в дереве — например, в корне — автоматически переносятся сюда).
+  var FILES_FOLDER_NAME = "files";
+  var MEDIA_MOVE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp|mp3)$/i;
   var screen = "setup";          // "setup" | "list" | "editor"
   var setupNeedsPermission = false;
+  // Защита от повторного открытия диалога выбора папки, пока предыдущий
+  // ещё не закрыт — браузер разрешает только ОДИН одновременно открытый
+  // showDirectoryPicker()/requestPermission() и на повторный вызов кидает
+  // "File picker already active". Раньше двойное нажатие на скрепку
+  // (например, двойной тап на телефоне) приводило именно к этой ошибке —
+  // см. ТЗ пользователя от 31.08.
+  var attachPickerBusy = false;
   var statusMessage = "", statusIsError = false;
   var openFile = null;           // {fileHandle,dirHandle,name,text,dirty}
   var cmView = null;
+  // Какая из ДВУХ боковых вкладок второго набора сейчас показывает
+  // содержимое этого модуля — "editor" для "Моего блокнота" (set2s_1:
+  // список папок/заметок или открытая заметка, старое поведение) и
+  // "bookmarks" для вкладки "Закладки" (set2s_2, см.
+  // renderSettingsTabMdBookmarks/renderBookmarksScreen ниже). Обе вкладки
+  // делят один и тот же rootTree/nameIndex/openFile — заметка, открытая
+  // из закладок, открывается тем же экраном "editor", что и обычно (см.
+  // render() ниже), поэтому отдельного состояния "screen" для закладок не
+  // требуется — важно только, какая вкладка АКТИВНА для показа списка.
+  var activeMdTab = "editor";
+  // ---- закладки заметок (см. ТЗ пользователя: вкладка "Закладки",
+  // долгое нажатие в общем списке, кнопка в шапке открытой заметки) —
+  // множество имён заметок в нижнем регистре (имена внутри одного
+  // "блокнота" уникальны без учёта регистра, см. nameIndex/buildIndex
+  // выше, поэтому имени достаточно как ключа — путь/handle не нужны,
+  // сама запись при показе списка закладок ищется в nameIndex заново, см.
+  // renderBookmarksScreen). Сохраняется в IndexedDB (тем же способом, что
+  // и fontSizeStep/dirHandle выше), поэтому переживает перезапуск
+  // приложения. ----
+  var bookmarkedNames = new Set();
+  // какие строки основного списка сейчас показывают кнопку закладки
+  // ВРЕМЕННО, после долгого нажатия, хотя заметка ещё не добавлена в
+  // закладки (см. ТЗ: "по умолчанию эта кнопка не показывается,
+  // показывается только для тех заметок, которые добавлены в закладки" —
+  // долгое нажатие раскрывает её для добавления). Живёт только в памяти,
+  // сама принадлежность к закладкам хранится в bookmarkedNames выше.
+  var revealedBookmarkRows = new Set();
+
+  // Оборачивает текущее выделение в CodeMirror маркерами форматирования
+  // (см. кнопки "Ж"/"К"/"П"/"Ч" в renderEditorScreen выше и ТЗ
+  // пользователя от 31.08). Если выделения нет — ничего не делает
+  // (оборачивать в пустые маркеры нечего). После вставки курсор/выделение
+  // переносится на обёрнутый текст, чтобы можно было сразу применить ещё
+  // один стиль поверх (например Ж, затем К).
+  function wrapCmSelection(prefix, suffix){
+    if(!cmView) return;
+    var sel = cmView.state.selection.main;
+    if(sel.from === sel.to) return;
+    var text = cmView.state.sliceDoc(sel.from, sel.to);
+    cmView.dispatch({
+      changes: { from: sel.from, to: sel.to, insert: prefix + text + suffix },
+      selection: { anchor: sel.from, head: sel.from + prefix.length + text.length + suffix.length }
+    });
+    cmView.focus();
+  }
   var livePreviewCompartment = null;
   var codeMode = false;
   var saveTimer = null;
+  // ---- поле связей заметки (см. refreshLinksField/renderLinksField
+  // ниже) — строка под заголовком со всеми исходящими [[ссылками]] из
+  // текста текущей заметки. linksDebounceTimer откладывает пересчёт до
+  // паузы в наборе текста (та же задержка, что и у автосохранения).
+  var linksDebounceTimer = null;
   var renaming = false;
   // если "открыть заметку по имени снаружи" (см. openNoteExternally ниже)
   // пришло РАНЬШЕ, чем закончилась инициализация (папка ещё не выбрана/не
   // просканирована, initFromStoredHandle ещё выполняется) — запоминаем имя
   // здесь и открываем сразу по готовности (см. конец initFromStoredHandle)
   var pendingExternalOpen = null;
+  // Промис ТЕКУЩЕГО фонового полного сканирования папки (см. rescan() и
+  // initFromStoredHandle ниже) — пока список показан мгновенно из кэша
+  // прошлого сканирования (см. shapeToStubNode), у части строк ещё нет
+  // настоящего FileSystemHandle; клик по такой строке просто ждёт этот
+  // промис вместо ошибки (см. openStubItemWhenReady). null, когда фонового
+  // сканирования сейчас не идёт.
+  var pendingRescanPromise = null;
   // взводится openNoteExternally перед открытием заметки по [[ссылке]],
   // пришедшей СНАРУЖИ модуля (из другой вкладки) — само открытие заметки
   // в этом случае не отдельный шаг "назад" внутри блокнота, а продолжение
@@ -219,6 +312,89 @@ window.initMdEditorModule = function(deps){
   // и "назад" должен вести прямо туда, откуда кликнули по ссылке, а не в
   // список заметок блокнота. См. pushMdNav ниже.
   var suppressNextNavPush = false;
+  // ---- размер шрифта (кнопка "Аа") — "единица" равна FONT_SIZE_STEP_PX,
+  // применяется через CSS-переменную --mdeditor-font-size, выставляемую
+  // на :root (document.documentElement), а не только на хост редактора —
+  // это ЕДИНАЯ настройка на всё приложение (см. applyFontSize ниже и ТЗ
+  // пользователя от 31.08: "Аа" должна менять шрифт сразу и в "Моём
+  // блокноте", и на вкладках задач, чтобы он был одинаков везде — сама
+  // "Аа" продублирована там же, слева от "+", см. initTaskGlobalToolbar в
+  // my.js). За исходный (шаг 0) берётся текущий стандартный размер
+  // FONT_SIZE_BASE_PX. Сохраняется в IndexedDB (как и dirHandle выше),
+  // поэтому переживает перезапуск приложения — грузится и применяется
+  // сразу при создании модуля (см. IIFE сразу после объявлений ниже), а
+  // не только при первом открытии вкладки "Мой блокнот", иначе задачи,
+  // открытые раньше блокнота, короткое время показывались бы со старым
+  // размером. ----
+  var FONT_SIZE_BASE_PX = 15.5;
+  var FONT_SIZE_STEP_PX = 1;
+  var FONT_SIZE_MIN_STEP = -6;
+  var FONT_SIZE_MAX_STEP = 12;
+  var fontSizeStep = 0;
+  var fontSizePanelOpen = false; // временные кнопки "+"/"-" сейчас показаны?
+  var formatPanelOpen = false; // попап "Ж"/"К"/"П"/"Ч" сейчас показан?
+
+  function applyFontSize(){
+    var px = (FONT_SIZE_BASE_PX + fontSizeStep * FONT_SIZE_STEP_PX) + "px";
+    document.documentElement.style.setProperty("--mdeditor-font-size", px);
+  }
+  function changeFontSizeStep(delta){
+    var next = fontSizeStep + delta;
+    if(next < FONT_SIZE_MIN_STEP || next > FONT_SIZE_MAX_STEP) return;
+    fontSizeStep = next;
+    applyFontSize();
+    idbSet("fontSizeStep", fontSizeStep).catch(function(){});
+  }
+  // применяется сразу, не дожидаясь открытия вкладки "Мой блокнот" (см.
+  // пояснение выше) — idbGet/idbSet объявлены ниже как function-декларации
+  // и поэтому уже доступны здесь благодаря hoisting.
+  idbGet("fontSizeStep").then(function(savedStep){
+    if(typeof savedStep === "number" && isFinite(savedStep)){
+      fontSizeStep = Math.max(FONT_SIZE_MIN_STEP, Math.min(FONT_SIZE_MAX_STEP, savedStep));
+    }
+    applyFontSize();
+  }).catch(function(){ applyFontSize(); });
+  // закладки — тем же приёмом, что и fontSizeStep выше: грузятся сразу,
+  // не дожидаясь открытия вкладки "Мой блокнот"/"Закладки", и если
+  // какой-то экран уже успел отрисоваться без них (initStarted уже true),
+  // перерисовываем его повторно, чтобы кнопки закладки сразу показали
+  // верное состояние.
+  idbGet("bookmarks").then(function(savedNames){
+    if(Array.isArray(savedNames)) bookmarkedNames = new Set(savedNames);
+    if(initStarted) render();
+  }).catch(function(){});
+  function saveBookmarks(){
+    idbSet("bookmarks", Array.from(bookmarkedNames)).catch(function(){});
+  }
+  // Переключает принадлежность заметки к закладкам и точечно обновляет
+  // все места, где её кнопка закладки сейчас видна — БЕЗ полной
+  // перерисовки экрана открытой заметки (иначе пришлось бы пересоздавать
+  // CodeMirror, см. renderEditorScreen/mountEditor). Список (обычный или
+  // сама вкладка "Закладки") перерисовать целиком безопасно — там нет
+  // "живого" редактора.
+  function toggleBookmarkNote(name){
+    var key = name.toLowerCase();
+    if(bookmarkedNames.has(key)){
+      bookmarkedNames.delete(key);
+      // при снятии закладки кнопка должна вернуться к дефолтному скрытому
+      // состоянию в общем списке, а не просто стать "неактивной" — иначе
+      // она осталась бы видна (пустым контуром) там, где её когда-то
+      // раскрыли долгим нажатием, хотя по ТЗ по умолчанию она скрыта и
+      // видна только для заметок, которые ДЕЙСТВИТЕЛЬНО в закладках.
+      revealedBookmarkRows.delete(key);
+    } else {
+      bookmarkedNames.add(key);
+    }
+    saveBookmarks();
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    if(screen === "editor" && openFile && openFile.name.toLowerCase() === key){
+      var hdrBtn = document.getElementById("mdEditorBookmarkBtn");
+      if(hdrBtn) hdrBtn.classList.toggle("active", bookmarkedNames.has(key));
+    }
+    if(activeMdTab === "bookmarks") renderBookmarksScreen(container);
+    else if(screen === "list") renderListScreen(container);
+  }
 
   function escName(s){ return escapeHtml ? escapeHtml(s) : String(s); }
 
@@ -246,31 +422,43 @@ window.initMdEditorModule = function(deps){
   // индекс имён (без учёта регистра). Пустые папки (без .md ни в них
   // самих, ни во вложенных) в дерево не попадают.
   // ---------------------------------------------------------------------
-  function scanTree(dh){
-    return (async function(){
-      var node = { dirHandle: dh, name: "", folders: [], files: [], images: [] };
-      for await (var pair of dh.entries()){
-        var name = pair[0], handle = pair[1];
-        if(handle.kind === "file"){
-          if(/\.md$/i.test(name)) node.files.push({ name: name.replace(/\.md$/i, ""), handle: handle });
-          else if(IMAGE_EXT_RE.test(name)) node.images.push({ name: name, handle: handle });
-        } else if(handle.kind === "directory"){
-          var child = await scanTree(handle);
-          child.name = name;
-          // ссылка на родителя — нужна, чтобы жест "назад" внутри списка
-          // заметок поднимался на один уровень вверх, а не сразу в корень
-          // (см. pushMdNav в местах перехода по папкам ниже); у
-          // rootTree.parent остаётся undefined.
-          child.parent = node;
-          // папка остаётся в дереве, если внутри (в т.ч. вложенно) есть
-          // .md заметки, ПОДпапки или изображения — папка, где лежат
-          // только картинки для заметок (без единого .md), раньше молча
-          // выпадала из дерева и была не видна в списке; теперь видна.
-          if(child.files.length || child.folders.length || child.images.length) node.folders.push(child);
-        }
+  async function scanTree(dh){
+    var node = { dirHandle: dh, name: "", folders: [], files: [], images: [] };
+    // Подпапки собираем в список и сканируем их все ПАРАЛЛЕЛЬНО ниже —
+    // раньше for-await дожидался ПОЛНОГО скана одной вложенной папки
+    // (со всеми её вложенными подпапками) и только потом переходил к
+    // следующей; на дереве с несколькими папками время складывалось из
+    // всех подряд, и это была основная причина заметной паузы при каждом
+    // открытии "Моего блокнота"/подключении папки (см. ТЗ пользователя от
+    // 31.08 — "открываться должно всё мгновенно"). Сам перебор
+    // dh.entries() остаётся последовательным (это ограничение самого
+    // File System Access API — за раз можно получить только одну запись),
+    // но он быстрый: тут нет чтения содержимого файлов, только список имён.
+    var subdirs = [];
+    for await (var pair of dh.entries()){
+      var name = pair[0], handle = pair[1];
+      if(handle.kind === "file"){
+        if(/\.md$/i.test(name)) node.files.push({ name: name.replace(/\.md$/i, ""), handle: handle });
+        else if(IMAGE_EXT_RE.test(name)) node.images.push({ name: name, handle: handle });
+      } else if(handle.kind === "directory"){
+        subdirs.push({ name: name, handle: handle });
       }
-      return node;
-    })();
+    }
+    var children = await Promise.all(subdirs.map(function(sd){ return scanTree(sd.handle); }));
+    children.forEach(function(child, i){
+      child.name = subdirs[i].name;
+      // ссылка на родителя — нужна, чтобы жест "назад" внутри списка
+      // заметок поднимался на один уровень вверх, а не сразу в корень
+      // (см. pushMdNav в местах перехода по папкам ниже); у
+      // rootTree.parent остаётся undefined.
+      child.parent = node;
+      // папка остаётся в дереве, если внутри (в т.ч. вложенно) есть
+      // .md заметки, ПОДпапки или изображения — папка, где лежат
+      // только картинки для заметок (без единого .md), раньше молча
+      // выпадала из дерева и была не видна в списке; теперь видна.
+      if(child.files.length || child.folders.length || child.images.length) node.folders.push(child);
+    });
+    return node;
   }
 
   function buildIndex(node, index, imgIndex){
@@ -283,16 +471,137 @@ window.initMdEditorModule = function(deps){
     node.folders.forEach(function(fo){ buildIndex(fo, index, imgIndex); });
   }
 
+  // Цепочка имён папок от корня до узла (для узла-корня — пустой массив)
+  // — используется, чтобы после пересканирования (новый объект дерева,
+  // старые ссылки на узлы уже не годятся) найти "то же самое" место и не
+  // сбрасывать пользователя в корень, если он успел куда-то перейти, пока
+  // сканирование шло в фоне (см. rescan/shapeToStubNode ниже).
+  function folderPath(node){
+    var path = [];
+    var n = node;
+    while(n && n.parent){ path.unshift(n.name); n = n.parent; }
+    return path;
+  }
+  function findNodeByPath(root, path){
+    var n = root;
+    for(var i = 0; i < path.length; i++){
+      var found = null;
+      for(var j = 0; j < n.folders.length; j++){
+        if(n.folders[j].name === path[i]){ found = n.folders[j]; break; }
+      }
+      if(!found) return null;
+      n = found;
+    }
+    return n;
+  }
+
+  // "Форма" дерева без FileSystemHandle — только имена папок/заметок/
+  // картинок, поэтому спокойно кладётся в IndexedDB и мгновенно читается
+  // обратно при следующем открытии вкладки (см. shapeToStubNode и
+  // initFromStoredHandle ниже — ТЗ пользователя от 31.08: "открываться
+  // должно всё мгновенно").
+  function treeToShape(node){
+    var shape = {
+      folders: node.folders.map(treeToShape),
+      files: node.files.map(function(f){ return { name: f.name }; }),
+      images: (node.images || []).map(function(im){ return { name: im.name }; })
+    };
+    if(node.name) shape.name = node.name; // у корня имя пустое — не сохраняем
+    return shape;
+  }
+  // Обратное превращение — черновое дерево из кэша, по форме идентичное
+  // настоящему (те же folders/files/images/parent), но с handle: null у
+  // каждого файла/картинки. Список из такого дерева рисуется точно так
+  // же, как из настоящего (см. renderListScreen), просто клик по строке
+  // с ещё не готовым handle ждёт окончания настоящего сканирования (см.
+  // openNoteByEntry/openStubItemWhenReady) вместо мгновенной ошибки.
+  function shapeToStubNode(shape, parent){
+    var node = { dirHandle: null, name: shape.name || "", folders: [], files: [], images: [], stub: true };
+    if(parent) node.parent = parent;
+    node.folders = (shape.folders || []).map(function(fs){ return shapeToStubNode(fs, node); });
+    node.files = (shape.files || []).map(function(f){ return { name: f.name, handle: null }; });
+    node.images = (shape.images || []).map(function(im){ return { name: im.name, handle: null }; });
+    return node;
+  }
+
   async function rescan(){
+    // Раньше перенос "потерявшихся" картинок/mp3 (см. migrateStrayMediaFiles
+    // ниже) выполнялся ПЕРЕД построением дерева и блокировал появление
+    // списка заметок целиком — если файлов для переноса было много (каждый
+    // читается/пишется/удаляется ПО ОДНОМУ, последовательно), сканирование
+    // могло зависать на много секунд, и список не показывался вообще (см.
+    // ТЗ пользователя от 31.08). Само дерево .md заметок этой миграцией не
+    // затрагивается (переносятся только картинки/mp3, см.
+    // MEDIA_MOVE_EXT_RE), а imageIndex строится по ВСЕМУ дереву независимо
+    // от того, в какой конкретно папке физически лежит файл — поэтому
+    // список и открытие заметок с картинками корректны и без ожидания
+    // миграции. Сначала строим дерево/индекс (быстро, список появляется
+    // сразу), перенос запускаем следом, в фоне, не блокируя rescan().
     var tree = await scanTree(dirHandle);
     tree.name = "";
+    // Сохраняем текущее положение в дереве ДО того, как оно будет
+    // заменено новым объектом — актуально прежде всего для фонового
+    // пересканирования поверх мгновенно показанного кэша (см.
+    // initFromStoredHandle): пока оно шло, пользователь мог успеть зайти
+    // в какую-то папку, и после замены дерева его не должно откидывать
+    // обратно в корень.
+    var oldPath = currentDirNode ? folderPath(currentDirNode) : null;
     rootTree = tree;
-    currentDirNode = tree;
+    currentDirNode = oldPath ? (findNodeByPath(tree, oldPath) || tree) : tree;
     var idx = new Map();
     var imgIdx = new Map();
     buildIndex(tree, idx, imgIdx);
     nameIndex = idx;
     imageIndex = imgIdx;
+    // заметки, удалённые/переименованные снаружи приложения (не через
+    // commitRename, который сам переносит закладку на новое имя, см.
+    // ниже), могли оставить "осиротевшую" закладку — таких имён больше
+    // нет в свежепостроенном индексе, тихо убираем их из закладок здесь.
+    if(bookmarkedNames.size){
+      var prunedAny = false;
+      bookmarkedNames.forEach(function(key){
+        if(!idx.has(key)){ bookmarkedNames.delete(key); prunedAny = true; }
+      });
+      if(prunedAny) saveBookmarks();
+    }
+    migrateStrayMediaFiles().catch(function(){});
+    // Кэш "формы" дерева (см. treeToShape выше) — используется при
+    // СЛЕДУЮЩЕМ открытии вкладки, чтобы показать список мгновенно, ещё до
+    // окончания настоящего сканирования (см. initFromStoredHandle).
+    // Само сканирование при этом никогда не пропускается — кэш только
+    // ускоряет первую отрисовку, актуальность данных всегда сверяется
+    // заново.
+    idbSet("treeShape", treeToShape(tree)).catch(function(){});
+  }
+
+  // Клик по строке из мгновенно показанного кэша (см. shapeToStubNode
+  // выше), у которой ещё нет настоящего handle, — вместо ошибки просто
+  // ждём текущее фоновое сканирование (см. pendingRescanPromise) и
+  // открываем по имени уже из настоящего индекса. Название на экране от
+  // этого не меняется — просто открытие происходит на долю секунды позже,
+  // чем клик.
+  function openStubItemWhenReady(name, kind){
+    var p = pendingRescanPromise;
+    if(!p){
+      setStatus("Не удалось найти файл.", true);
+      return;
+    }
+    setStatus("Открываю…");
+    p.then(function(){
+      setStatus("");
+      var key = name.toLowerCase();
+      if(kind === "image"){
+        var im = imageIndex && imageIndex.get(key);
+        if(im) openImagePreview(im.fileHandle, im.name);
+        else setStatus("Файл не найден.", true);
+      } else {
+        var entry = nameIndex && nameIndex.get(key);
+        if(entry) openNoteByEntry(entry);
+        else setStatus("Заметка не найдена.", true);
+      }
+    }, function(){
+      setStatus("Не удалось обновить список. Попробуйте открыть заметку ещё раз.", true);
+    });
   }
 
   async function ensurePermissionSilently(handle){
@@ -302,11 +611,109 @@ window.initMdEditorModule = function(deps){
   }
 
   // ---------------------------------------------------------------------
+  // Папка "files" — единое место для всех вложений (картинок и mp3, см.
+  // MEDIA_MOVE_EXT_RE выше). Файлы этих расширений, лежащие где-то ещё в
+  // дереве (например, в самом корне — пользователь мог просто перетащить
+  // их туда через проводник), при каждом сканировании автоматически
+  // переносятся сюда (см. ТЗ пользователя от 31.08). Картинки в заметках
+  // ищутся по имени по всему дереву (см. imageIndex/buildIndex выше), а
+  // не по папке конкретной заметки — поэтому от их физического
+  // расположения ничего не зависит, переносить их безопасно.
+  // ---------------------------------------------------------------------
+  async function ensureFilesFolder(){
+    return await dirHandle.getDirectoryHandle(FILES_FOLDER_NAME, { create: true });
+  }
+
+  // рекурсивно собирает файлы нужных расширений по всему дереву (кроме
+  // самой папки "files" в корне — её содержимое не трогаем)
+  async function collectStrayMediaEntries(dh, isRootLevel, out){
+    for await (var pair of dh.entries()){
+      var name = pair[0], handle = pair[1];
+      if(handle.kind === "file"){
+        if(MEDIA_MOVE_EXT_RE.test(name)) out.push({ dh: dh, handle: handle, name: name });
+      } else if(handle.kind === "directory"){
+        if(isRootLevel && name === FILES_FOLDER_NAME) continue;
+        await collectStrayMediaEntries(handle, false, out);
+      }
+    }
+  }
+
+  // переносит один файл в "files" — копирует содержимое и удаляет
+  // оригинал; если в "files" УЖЕ есть файл с таким именем, ничего не
+  // перезаписывает и оставляет файл на старом месте (конфликт имён
+  // пользователь решает сам, переименовав один из файлов)
+  async function moveFileIntoFilesFolder(entry, filesDirHandle){
+    try{ await filesDirHandle.getFileHandle(entry.name); return false; }
+    catch(e){ /* такого имени в "files" ещё нет — переносим */ }
+    var file = await entry.handle.getFile();
+    var buf = await file.arrayBuffer();
+    var newHandle = await filesDirHandle.getFileHandle(entry.name, { create: true });
+    var writable = await newHandle.createWritable();
+    await writable.write(buf);
+    await writable.close();
+    await entry.dh.removeEntry(entry.name);
+    return true;
+  }
+
+  async function migrateStrayMediaFiles(){
+    if(!dirHandle) return;
+    var filesDirHandle;
+    try{ filesDirHandle = await ensureFilesFolder(); }catch(e){ return; }
+    var entries = [];
+    try{ await collectStrayMediaEntries(dirHandle, true, entries); }catch(e){ return; }
+    // Если несколько файлов из РАЗНЫХ папок называются одинаково — в
+    // "files" переезжает только первый (по порядку обхода), остальные
+    // остаются на месте, ровно как и раньше при последовательном переносе
+    // одного за другим (конфликт имён пользователь решает сам). Помечаем
+    // дубликаты здесь, ДО запуска параллельно, а не полагаемся на
+    // проверку "такое имя уже есть в files" внутри moveFileIntoFilesFolder
+    // — при параллельном переносе несколько таких проверок могли бы
+    // одновременно не увидеть друг друга и одинаково "выиграть" гонку.
+    var seenNames = new Set();
+    var toMigrate = [];
+    for(var i = 0; i < entries.length; i++){
+      var key = entries[i].name.toLowerCase();
+      if(seenNames.has(key)) continue;
+      seenNames.add(key);
+      toMigrate.push(entries[i]);
+    }
+    await Promise.all(toMigrate.map(function(entry){
+      return moveFileIntoFilesFolder(entry, filesDirHandle).catch(function(){
+        /* пропускаем один файл — не мешаем переносу остальных */
+      });
+    }));
+  }
+
+
+  // ---------------------------------------------------------------------
   // Точка входа — вызывается из switchSettingsTab при каждом открытии
   // вкладки. Состояние (dirHandle/дерево/открытая заметка) переживает
   // переключения между вкладками настроек в рамках одной сессии.
   // ---------------------------------------------------------------------
   function renderSettingsTabMdEditor(){
+    activeMdTab = "editor";
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    if(!initStarted){
+      initStarted = true;
+      container.innerHTML = '<div class="mdeditor-tab mdeditor-hint">Загрузка…</div>';
+      initFromStoredHandle();
+      return;
+    }
+    render();
+  }
+
+  // ---------------------------------------------------------------------
+  // Точка входа для вкладки "Закладки" (вторая боковая вкладка второго
+  // набора, settingsTabSet2Btn2 / "set2s_2") — та же папка (File System
+  // Access API), что и у "Моего блокнота" (см. activeMdTab выше), просто
+  // показывает плоский отфильтрованный список вместо дерева папок. Если
+  // папка ещё не выбрана — initFromStoredHandle() ниже сам заведёт на
+  // общий экран настройки (render() затем сам решит, что показать, см.
+  // выше).
+  // ---------------------------------------------------------------------
+  function renderSettingsTabMdBookmarks(){
+    activeMdTab = "bookmarks";
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     if(!initStarted){
@@ -319,22 +726,81 @@ window.initMdEditorModule = function(deps){
   }
 
   async function initFromStoredHandle(){
+    // fontSizeStep уже загружен и применён сразу при создании модуля
+    // (см. IIFE рядом с объявлением FONT_SIZE_BASE_PX выше) — здесь
+    // повторно грузить его не нужно.
     try{
       var stored = await idbGet("root");
       if(stored){
         dirHandle = stored;
         var ok = await ensurePermissionSilently(stored);
         if(ok){
-          await rescan();
-          // заметка, которую попросили открыть ИЗВНЕ ещё до того, как
-          // папка успела просканироваться (см. openNoteExternally ниже) —
-          // открываем её сразу вместо списка
+          // Запускаем загрузку CodeMirror в фоне ПРЯМО СЕЙЧАС, не дожидаясь
+          // первого открытия заметки — раньше первый клик по заметке всегда
+          // упирался в сетевой import() редактора (см. loadCM выше), теперь
+          // к этому моменту он обычно уже готов или почти готов (ТЗ
+          // пользователя от 31.08: "открываться должно всё мгновенно").
+          loadCM().catch(function(){});
+
           if(pendingExternalOpen){
+            // заметку попросили открыть ИЗВНЕ ещё до того, как папка
+            // успела просканироваться (см. openNoteExternally ниже) —
+            // список тут вообще не нужен, ждём настоящее сканирование и
+            // сразу открываем нужную заметку.
+            pendingRescanPromise = rescan();
+            await pendingRescanPromise;
+            pendingRescanPromise = null;
             var name = pendingExternalOpen;
             pendingExternalOpen = null;
             handleLinkClick(name);
             return;
           }
+
+          // Мгновенный показ списка из кэша ПРЕДЫДУЩЕГО сканирования (см.
+          // treeToShape/idbSet("treeShape") в rescan() выше), пока
+          // настоящее сканирование (теперь полностью параллельное, см.
+          // scanTree) идёт в фоне. Если кэша ещё нет (самый первый запуск
+          // после выбора папки) — просто ждём как раньше. Строки, для
+          // которых кэш ещё не подтверждён реальным сканированием, при
+          // клике не ломаются, а ждут его окончания (см.
+          // openStubItemWhenReady/openNoteByEntry) — свежие/удалённые
+          // заметки в любом случае появятся/пропадут из списка, как только
+          // настоящее сканирование закончится.
+          var cachedShape = null;
+          try{ cachedShape = await idbGet("treeShape"); }catch(e){}
+          var haveStub = false;
+          if(cachedShape){
+            try{
+              var stub = shapeToStubNode(cachedShape, null);
+              stub.name = "";
+              rootTree = stub;
+              currentDirNode = stub;
+              var sIdx = new Map(), sImgIdx = new Map();
+              buildIndex(stub, sIdx, sImgIdx);
+              nameIndex = sIdx;
+              imageIndex = sImgIdx;
+              haveStub = true;
+            }catch(e){ haveStub = false; }
+          }
+
+          pendingRescanPromise = rescan();
+
+          if(haveStub){
+            screen = "list";
+            render();
+            pendingRescanPromise.then(function(){
+              pendingRescanPromise = null;
+              // перерисовываем, только если пользователь всё ещё смотрит
+              // список (а не уже открыл заметку из кэша и т.п.) — заметку,
+              // открытую тем временем через openStubItemWhenReady, лишний
+              // render() тут не потревожит.
+              if(screen === "list") render();
+            }, function(){ pendingRescanPromise = null; });
+            return;
+          }
+
+          await pendingRescanPromise;
+          pendingRescanPromise = null;
           screen = "list";
           render();
           return;
@@ -372,6 +838,12 @@ window.initMdEditorModule = function(deps){
   function render(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
+    // вкладка "Закладки" (set2s_2) показывается вместо обычного списка,
+    // но только когда папка уже выбрана и просканирована (rootTree
+    // готов) — иначе (первый запуск/нужно заново подтвердить доступ)
+    // ниже сработает тот же экран настройки папки, что и у "Моего
+    // блокнота" (общий для обеих вкладок, см. activeMdTab выше).
+    if(activeMdTab === "bookmarks" && rootTree){ renderBookmarksScreen(container); return; }
     if(screen === "editor" && openFile) renderEditorScreen(container);
     else if(screen === "list" && currentDirNode) renderListScreen(container);
     else renderSetupScreen(container);
@@ -386,7 +858,7 @@ window.initMdEditorModule = function(deps){
       ? "Доступ к папке с заметками нужно подтвердить заново."
       : "Укажите папку с заметками (.md), чтобы начать.";
     container.innerHTML =
-      '<div class="mdeditor-tab">' +
+      '<div class="mdeditor-tab settings-content-bottom">' +
         '<h3 class="workbooks-title">Мой блокнот</h3>' +
         '<p class="mdeditor-hint">' + hint + '</p>' +
         '<div class="mdeditor-setup-row">' +
@@ -397,6 +869,8 @@ window.initMdEditorModule = function(deps){
       '</div>';
 
     document.getElementById("mdEditorAttachBtn").addEventListener("click", async function(){
+      if(attachPickerBusy) return;
+      attachPickerBusy = true;
       statusMessage = "";
       try{
         if(setupNeedsPermission && dirHandle){
@@ -419,13 +893,28 @@ window.initMdEditorModule = function(deps){
         }
         setupNeedsPermission = false;
         statusMessage = "Сканируем папку…"; statusIsError = false; render();
-        await rescan();
+        // редактор грузится параллельно со сканированием, а не только по
+        // первому клику на заметку (см. ТЗ пользователя от 31.08)
+        loadCM().catch(function(){});
+        pendingRescanPromise = rescan();
+        await pendingRescanPromise;
+        pendingRescanPromise = null;
         statusMessage = "";
         screen = "list";
         render();
       }catch(e){
         if(e && e.name === "AbortError") return;
-        statusMessage = "Не удалось получить доступ к папке."; statusIsError = true; render();
+        // Показываем настоящую причину (имя/текст ошибки браузера), а не
+        // один и тот же общий текст на любую проблему — иначе непонятно,
+        // где именно оно ломается: при выборе папки, при подтверждении
+        // доступа или уже при самом сканировании (см. ТЗ пользователя от
+        // 31.08 — по одной фразе "не удалось получить доступ" невозможно
+        // было разобрать, что происходит на самом деле).
+        var detail = e && (e.message || e.name) ? (e.name ? e.name + (e.message ? ": " + e.message : "") : e.message) : String(e);
+        statusMessage = "Не удалось получить доступ к папке" + (detail ? " (" + detail + ")" : "") + ".";
+        statusIsError = true; render();
+      }finally{
+        attachPickerBusy = false;
       }
     });
   }
@@ -499,22 +988,168 @@ window.initMdEditorModule = function(deps){
 
     var listEl = document.getElementById("mdEditorList");
     if(listEl){
-      items.forEach(function(it){
-        var row = document.createElement("button");
-        row.type = "button";
+      // Строки создаются БЕЗ индивидуальных слушателей (раньше на каждую
+      // заметку вешалось до 9: клик по строке, клик по кнопке закладки и
+      // 7 touch/mouse для долгого нажатия) — на блокноте с сотнями заметок
+      // это была заметная работа при каждой отрисовке списка (см. ТЗ
+      // пользователя от 31.08). Вместо этого ниже один делегированный
+      // набор слушателей на весь список (#mdEditorList) — строка находится
+      // по data-index через closest(), поведение то же самое.
+      items.forEach(function(it, idx){
+        // строка — <div>, а не <button> — заметкам (it.type==="file")
+        // нужна ВТОРАЯ, отдельно кликабельная зона справа от названия
+        // (кнопка закладки, см. ниже), а вложенный <button> внутри
+        // <button> — невалидная разметка; тот же приём (div-строка +
+        // кнопки действий внутри), что и у строк задач на вкладках задач,
+        // см. .task-row/.task-actions в my.js.
+        var row = document.createElement("div");
         row.className = "mdeditor-row";
+        row.dataset.index = String(idx);
+        var isNote = (it.type === "file");
         row.innerHTML = (it.type === "folder" ? FOLDER_ICON_SVG : it.type === "image" ? IMAGE_ICON_SVG : FILE_ICON_SVG) +
-          '<span class="mdeditor-row-name"></span>';
+          '<span class="mdeditor-row-name"></span>' +
+          (isNote ? '<button type="button" class="mdeditor-bookmark-btn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>' : '');
+        row.querySelector(".mdeditor-row-name").textContent = it.name;
+        if(isNote){
+          var key = it.name.toLowerCase();
+          var bmBtn = row.querySelector(".mdeditor-bookmark-btn");
+          var bookmarked = bookmarkedNames.has(key);
+          bmBtn.classList.toggle("active", bookmarked);
+          bmBtn.classList.toggle("visible", bookmarked || revealedBookmarkRows.has(key));
+        }
+        listEl.appendChild(row);
+      });
+
+      // ---- долгое нажатие (350мс) на строку заметки — тот же приём, что
+      // и раньше (таймер, сброс при заметном сдвиге пальца/курсора), но
+      // ОДНИМ набором слушателей на весь список вместо отдельного на
+      // каждую строку.
+      var LONG_PRESS_MS = 350, MOVE_CANCEL_PX = 10;
+      var pressTimer = null, pressStartXY = null, longPressFired = false;
+      function clearPressTimer(){ clearTimeout(pressTimer); pressTimer = null; }
+      function startPress(rowEl, x, y){
+        if(!rowEl) return;
+        var it = items[Number(rowEl.dataset.index)];
+        if(!it || it.type !== "file") return;
+        longPressFired = false;
+        pressStartXY = { x: x, y: y };
+        clearPressTimer();
+        pressTimer = setTimeout(function(){
+          longPressFired = true;
+          var key = it.name.toLowerCase();
+          revealedBookmarkRows.add(key);
+          var bmBtn = rowEl.querySelector(".mdeditor-bookmark-btn");
+          if(bmBtn) bmBtn.classList.add("visible");
+        }, LONG_PRESS_MS);
+      }
+      function movePress(x, y){
+        if(!pressStartXY) return;
+        var dx = x - pressStartXY.x, dy = y - pressStartXY.y;
+        if(Math.sqrt(dx*dx + dy*dy) > MOVE_CANCEL_PX) clearPressTimer();
+      }
+      listEl.addEventListener("touchstart", function(e){
+        var t = e.touches[0];
+        startPress(e.target.closest(".mdeditor-row"), t.clientX, t.clientY);
+      }, {passive:true});
+      listEl.addEventListener("touchmove", function(e){ var t = e.touches[0]; movePress(t.clientX, t.clientY); }, {passive:true});
+      listEl.addEventListener("touchend", clearPressTimer);
+      listEl.addEventListener("touchcancel", clearPressTimer);
+      listEl.addEventListener("mousedown", function(e){
+        startPress(e.target.closest(".mdeditor-row"), e.clientX, e.clientY);
+      });
+      listEl.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
+      listEl.addEventListener("mouseup", clearPressTimer);
+      listEl.addEventListener("mouseleave", clearPressTimer);
+
+      // ---- клик по строке (открыть/перейти) и по кнопке закладки —
+      // тоже один делегированный обработчик вместо двух на каждую строку.
+      listEl.addEventListener("click", function(e){
+        var rowEl = e.target.closest(".mdeditor-row");
+        if(!rowEl) return;
+        var it = items[Number(rowEl.dataset.index)];
+        if(!it) return;
+        if(e.target.closest(".mdeditor-bookmark-btn")){
+          toggleBookmarkNote(it.name);
+          return;
+        }
+        if(longPressFired){ longPressFired = false; return; }
+        if(it.type === "folder"){
+          var prevDirNode = currentDirNode;
+          pushMdNav(function(){ currentDirNode = prevDirNode; render(); });
+          currentDirNode = it.node;
+          render();
+        }
+        else if(it.type === "image"){
+          if(it.handle) openImagePreview(it.handle, it.name);
+          else openStubItemWhenReady(it.name, "image");
+        }
+        else { openNoteByEntry({ fileHandle: it.handle, dirHandle: node.dirHandle, name: it.name }); }
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Вкладка "Закладки" (вторая боковая вкладка второго набора,
+  // settingsTabSet2Btn2 / "set2s_2", см. renderSettingsTabMdBookmarks
+  // выше) — БОЛЬШЕ НЕ ЗАГЛУШКА: плоский список заметок, добавленных в
+  // закладки (см. bookmarkedNames/toggleBookmarkNote выше), в ТОМ ЖЕ
+  // стиле строки, что и обычный список "Моего блокнота" (см.
+  // renderListScreen выше) — просто без папок/картинок и без
+  // вложенности, сортировка та же (сперва имена не с цифры, по алфавиту,
+  // затем "числовые" имена тоже по алфавиту). Кнопка закладки у каждой
+  // строки здесь всегда видна и всегда "активна" (иначе заметки в этом
+  // списке бы не было) — клик по ней снимает закладку, и заметка сразу
+  // пропадает из списка (см. ТЗ пользователя), тем же переключателем
+  // toggleBookmarkNote, что и везде.
+  // ---------------------------------------------------------------------
+  function renderBookmarksScreen(container){
+    var items = [];
+    bookmarkedNames.forEach(function(key){
+      var entry = nameIndex && nameIndex.get(key);
+      if(entry) items.push({ name: entry.name, handle: entry.fileHandle, dirHandle: entry.dirHandle });
+    });
+    items.sort(function(a, b){
+      var da = /^\d/.test(a.name) ? 1 : 0;
+      var db = /^\d/.test(b.name) ? 1 : 0;
+      if(da !== db) return da - db;
+      return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
+    });
+
+    var html = '<div class="mdeditor-tab">';
+    html += '<h3 class="workbooks-title" style="margin:0 0 4px 0;">Закладки</h3>';
+    if(!items.length){
+      html += '<div class="mdeditor-empty">Пока нет ни одной заметки в закладках.<br>Чтобы добавить: удержите заметку в общем списке или нажмите на значок закладки в открытой заметке.</div>';
+    } else {
+      html += '<div class="mdeditor-list" id="mdBookmarksList"></div>';
+    }
+    html += '<div class="mdeditor-fab-row">';
+    html += '<button type="button" class="mdeditor-fab-btn" id="mdBookmarksHomeBtn" title="Наверх списка">' + HOME_ICON_SVG + '</button>';
+    html += '</div>';
+    html += '</div>';
+    container.innerHTML = html;
+
+    var homeBtn = document.getElementById("mdBookmarksHomeBtn");
+    if(homeBtn){
+      homeBtn.addEventListener("click", function(){
+        var sc = document.getElementById("settingsTabContent");
+        if(sc) sc.scrollTop = 0;
+      });
+    }
+
+    var listEl = document.getElementById("mdBookmarksList");
+    if(listEl){
+      items.forEach(function(it){
+        var row = document.createElement("div");
+        row.className = "mdeditor-row";
+        row.innerHTML = FILE_ICON_SVG + '<span class="mdeditor-row-name"></span>' +
+          '<button type="button" class="mdeditor-bookmark-btn active visible" title="Убрать из закладок">' + BOOKMARK_ICON_SVG + '</button>';
         row.querySelector(".mdeditor-row-name").textContent = it.name;
         row.addEventListener("click", function(){
-          if(it.type === "folder"){
-            var prevDirNode = currentDirNode;
-            pushMdNav(function(){ currentDirNode = prevDirNode; render(); });
-            currentDirNode = it.node;
-            render();
-          }
-          else if(it.type === "image"){ openImagePreview(it.handle, it.name); }
-          else { openNoteByEntry({ fileHandle: it.handle, dirHandle: node.dirHandle, name: it.name }); }
+          openNoteByEntry({ fileHandle: it.handle, dirHandle: it.dirHandle, name: it.name });
+        });
+        row.querySelector(".mdeditor-bookmark-btn").addEventListener("click", function(e){
+          e.stopPropagation();
+          toggleBookmarkNote(it.name);
         });
         listEl.appendChild(row);
       });
@@ -522,23 +1157,190 @@ window.initMdEditorModule = function(deps){
   }
 
   // ---------------------------------------------------------------------
+  // "Скрепка" в редакторе заметки (см. renderEditorScreen выше) — картинка
+  // из системного диалога копируется в папку "files" (создаётся, если её
+  // ещё нет) и сразу вставляется в документ как "![[имя]]" на месте
+  // курсора — тот же синтаксис вложенной картинки, что и везде в "Моём
+  // блокноте" (см. ImageWidget выше).
+  // ---------------------------------------------------------------------
+  // если файл с таким именем в "files" уже есть — не перезаписываем его,
+  // а подбираем свободное имя (" (2)", " (3)", ... перед расширением, как
+  // это обычно делают файловые менеджеры)
+  async function uniqueFileNameIn(dh, rawName){
+    var name = rawName || "image";
+    var dot = name.lastIndexOf(".");
+    var base = dot > 0 ? name.slice(0, dot) : name;
+    var ext = dot > 0 ? name.slice(dot) : "";
+    var candidate = name, n = 1;
+    for(;;){
+      try{ await dh.getFileHandle(candidate); }
+      catch(e){ return candidate; }
+      n++;
+      candidate = base + " (" + n + ")" + ext;
+    }
+  }
+
+  async function insertImageAtCursor(file){
+    if(!dirHandle || !cmView) return;
+    setStatus("Добавляем картинку…", false);
+    try{
+      var filesDirHandle = await ensureFilesFolder();
+      var name = await uniqueFileNameIn(filesDirHandle, file.name || "image");
+      var buf = await file.arrayBuffer();
+      var newHandle = await filesDirHandle.getFileHandle(name, { create: true });
+      var writable = await newHandle.createWritable();
+      await writable.write(buf);
+      await writable.close();
+      // сразу доступна по имени, как и остальные картинки (см.
+      // imageIndex/buildIndex выше) — без ожидания следующего rescan()
+      if(imageIndex) imageIndex.set(name.toLowerCase(), { fileHandle: newHandle, dirHandle: filesDirHandle, name: name });
+      var pos = cmView.state.selection.main.head;
+      var insertText = "![[" + name + "]]";
+      cmView.dispatch({
+        changes: { from: pos, to: pos, insert: insertText },
+        selection: { anchor: pos + insertText.length }
+      });
+      cmView.focus();
+      setStatus("", false);
+    }catch(e){
+      setStatus("Не удалось добавить картинку: " + (e && e.message ? e.message : e), true);
+    }
+  }
+
+
+  // ---------------------------------------------------------------------
   // Экран заметки: шапка (домик / заголовок-переименование / переключатель
   // режима) + хост CodeMirror 6, занимающий всё оставшееся место вкладки.
   // ---------------------------------------------------------------------
+
   function renderEditorScreen(container){
+    fontSizePanelOpen = false; // экран перерисован заново — попап "+"/"-" каждый раз стартует закрытым
+    formatPanelOpen = false; // и попап "Ж"/"К"/"П"/"Ч" тоже
     container.innerHTML =
       '<div class="mdeditor-tab mdeditor-editor-tab">' +
         '<div class="mdeditor-title-row" id="mdEditorTitleRow">' +
           '<span class="mdeditor-title" id="mdEditorTitle" title="Нажмите, чтобы переименовать"></span>' +
+          '<button type="button" class="mdeditor-bookmark-btn visible" id="mdEditorBookmarkBtn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>' +
         '</div>' +
+        '<div class="mdeditor-links-row" id="mdEditorLinksRow"></div>' +
         '<div class="mdeditor-status" id="mdEditorStatus"></div>' +
         '<div class="mdeditor-editor-host" id="mdEditorHost"></div>' +
+        '<input type="file" accept="image/*" id="mdEditorImageInput" style="display:none;">' +
         '<div class="mdeditor-fab-row">' +
+          '<span class="mdeditor-fontsize-wrap" id="mdEditorFormatWrap">' +
+            '<div class="mdeditor-fontsize-popup" id="mdEditorFormatPopup">' +
+              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="mdEditorFmtBoldBtn" title="Жирный">Ж</button>' +
+              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-italic" id="mdEditorFmtItalicBtn" title="Курсив">К</button>' +
+              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-underline" id="mdEditorFmtUnderlineBtn" title="Подчёркнутый">П</button>' +
+              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-strike" id="mdEditorFmtStrikeBtn" title="Зачёркнутый">Ч</button>' +
+            '</div>' +
+            '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="mdEditorFormatBtn" title="Форматирование выделенного текста">Ж</button>' +
+          '</span>' +
+          '<span class="mdeditor-fontsize-wrap" id="mdEditorFontSizeWrap">' +
+            '<div class="mdeditor-fontsize-popup" id="mdEditorFontSizePopup">' +
+              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="mdEditorFontPlusBtn" title="Крупнее">+</button>' +
+              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="mdEditorFontMinusBtn" title="Мельче">&minus;</button>' +
+            '</div>' +
+            '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="mdEditorFontSizeBtn" title="Размер шрифта">Аа</button>' +
+          '</span>' +
+          '<button type="button" class="mdeditor-fab-btn" id="mdEditorImageBtn" title="Вставить картинку">' + PAPERCLIP_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorModeBtn" title="Переключить режим кода">' + (codeMode ? EYE_ICON_SVG : CODE_ICON_SVG) + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn2" title="К списку заметок">' + HOME_ICON_SVG + '</button>' +
         '</div>' +
       '</div>';
     document.getElementById("mdEditorTitle").textContent = openFile.name;
+    applyFontSize();
+
+    // кнопка закладки в шапке — второй способ добавить/убрать заметку из
+    // закладок (см. ТЗ пользователя), всегда видна (класс "visible" уже в
+    // разметке выше), активность показана заливкой значка (см.
+    // .mdeditor-bookmark-btn.active в components.css) — та же пиктограмма
+    // и тот же переключатель toggleBookmarkNote, что и в общем списке/на
+    // вкладке "Закладки".
+    // Один делегированный обработчик клика по полю связей — переживает
+    // любое количество перерисовок содержимого строки (см. renderLinksField
+    // выше), в отличие от прежних addEventListener на каждый отдельный
+    // .mdeditor-links-item, которые терялись при повторной перерисовке.
+    var linksRow = document.getElementById("mdEditorLinksRow");
+    if(linksRow){
+      linksRow.addEventListener("click", function(ev){
+        var item = ev.target.closest ? ev.target.closest(".mdeditor-links-item") : null;
+        if(!item) return;
+        handleLinkClick(item.getAttribute("data-name"));
+      });
+    }
+    var editorBmBtn = document.getElementById("mdEditorBookmarkBtn");
+    if(editorBmBtn){
+      editorBmBtn.classList.toggle("active", bookmarkedNames.has(openFile.name.toLowerCase()));
+      editorBmBtn.addEventListener("click", function(e){
+        e.stopPropagation();
+        toggleBookmarkNote(openFile.name);
+      });
+    }
+
+    // "Аа" — левее скрепки (см. ТЗ пользователя от 31.08): клик открывает
+    // над кнопкой две временные "+"/"-", повторный клик по "Аа" их
+    // прячет — единственный способ закрыть попап (клик мимо НЕ закрывает
+    // его, так и было заказано). "+"/"-" меняют fontSizeStep на одну
+    // единицу (см. changeFontSizeStep выше) и сохраняются в IndexedDB, за
+    // исходный размер (шаг 0) принят текущий стандартный (см.
+    // FONT_SIZE_BASE_PX выше).
+    document.getElementById("mdEditorFontSizeBtn").addEventListener("click", function(){
+      fontSizePanelOpen = !fontSizePanelOpen;
+      var popup = document.getElementById("mdEditorFontSizePopup");
+      if(popup) popup.classList.toggle("open", fontSizePanelOpen);
+    });
+    document.getElementById("mdEditorFontPlusBtn").addEventListener("click", function(){ changeFontSizeStep(1); });
+    document.getElementById("mdEditorFontMinusBtn").addEventListener("click", function(){ changeFontSizeStep(-1); });
+
+    // "Ж" — форматирование выделенного текста, левее "Аа" (см. ТЗ
+    // пользователя от 31.08): та же механика попапа, что и у "Аа" (клик
+    // раскрывает столбик из четырёх кнопок над ней, повторный клик
+    // прячет), но при выборе конкретного стиля (Ж/К/П/Ч) попап
+    // ЗАКРЫВАЕТСЯ САМ — см. bindFormatBtn ниже. mousedown с
+    // preventDefault на самой "Ж" не обязателен (CodeMirror не теряет
+    // выделение при уходе фокуса), но не мешает и на всякий случай
+    // держит курсор/скролл редактора на месте.
+    document.getElementById("mdEditorFormatBtn").addEventListener("mousedown", function(e){ e.preventDefault(); });
+    document.getElementById("mdEditorFormatBtn").addEventListener("click", function(){
+      formatPanelOpen = !formatPanelOpen;
+      var popup = document.getElementById("mdEditorFormatPopup");
+      if(popup) popup.classList.toggle("open", formatPanelOpen);
+    });
+    function bindFormatBtn(id, prefix, suffix){
+      var btn = document.getElementById(id);
+      if(!btn) return;
+      btn.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      btn.addEventListener("click", function(){
+        wrapCmSelection(prefix, suffix);
+        formatPanelOpen = false;
+        var popup = document.getElementById("mdEditorFormatPopup");
+        if(popup) popup.classList.remove("open");
+      });
+    }
+    bindFormatBtn("mdEditorFmtBoldBtn", "**", "**");
+    bindFormatBtn("mdEditorFmtItalicBtn", "*", "*");
+    bindFormatBtn("mdEditorFmtUnderlineBtn", "++", "++");
+    bindFormatBtn("mdEditorFmtStrikeBtn", "~~", "~~");
+
+    // "скрепка" — правее "Аа", левее переключателя кода (см. ТЗ
+    // пользователя от 31.08), в том же стиле .mdeditor-fab-btn, что и
+    // остальные кнопки ряда. Вставляет картинку, выбранную через
+    // системный диалог, в место курсора — сама картинка при этом
+    // копируется в папку "files" (см. insertImageAtCursor ниже), как и
+    // mp3/картинки, "потерявшиеся" где-то ещё в дереве (см.
+    // migrateStrayMediaFiles выше).
+    document.getElementById("mdEditorImageBtn").addEventListener("click", function(){
+      var input = document.getElementById("mdEditorImageInput");
+      if(input) input.click();
+    });
+    document.getElementById("mdEditorImageInput").addEventListener("change", function(ev){
+      var file = ev.target.files && ev.target.files[0];
+      // сбрасываем value — иначе повторный выбор ТОГО ЖЕ файла подряд не
+      // порождает новое событие "change"
+      ev.target.value = "";
+      if(file) insertImageAtCursor(file);
+    });
 
     document.getElementById("mdEditorHomeBtn2").addEventListener("click", function(){
       var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
@@ -556,10 +1358,16 @@ window.initMdEditorModule = function(deps){
       setCodeMode(!codeMode);
       var btn = document.getElementById("mdEditorModeBtn");
       if(btn) btn.innerHTML = codeMode ? EYE_ICON_SVG : CODE_ICON_SVG;
+      // поле связей не показывается в режиме "с кодом" (см. ТЗ
+      // пользователя от 31.08) — сама разметка/список уже посчитаны,
+      // тут только скрыть/показать строку, без пересчёта.
+      applyLinksFieldVisibility();
     });
     document.getElementById("mdEditorTitle").addEventListener("click", startRename);
 
     mountEditor();
+    applyLinksFieldVisibility();
+    refreshLinksField();
   }
 
   function goHome(){
@@ -608,6 +1416,16 @@ window.initMdEditorModule = function(deps){
     }
     okBtn.addEventListener("click", function(){ finish(true); });
     cancelBtn.addEventListener("click", function(){ finish(false); });
+    // mousedown с preventDefault ДО click — иначе на телефоне первый тап по
+    // кнопке сначала уводит фокус с поля ввода (закрывается виртуальная
+    // клавиатура), из-за чего разметка сдвигается ДО того, как успевает
+    // сработать сам клик — палец в этот момент уже промахивается мимо
+    // сдвинувшейся кнопки, и клик пропадает: приходилось нажимать "птичку"
+    // второй раз, уже когда клавиатура закрыта и всё устоялось (ТЗ
+    // пользователя от 31.08). preventDefault на mousedown не даёт полю
+    // потерять фокус раньше времени, поэтому сдвига до клика не происходит.
+    okBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+    cancelBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
     input.addEventListener("keydown", function(ev){
       if(ev.key === "Enter"){ ev.preventDefault(); finish(true); }
       else if(ev.key === "Escape"){ ev.preventDefault(); finish(false); }
@@ -633,6 +1451,15 @@ window.initMdEditorModule = function(deps){
       var oldName = openFile.name;
       openFile.fileHandle = newHandle;
       openFile.name = newName;
+      // если переименованная заметка была в закладках — закладка следует
+      // за новым именем (ключ закладки — имя в нижнем регистре, см.
+      // bookmarkedNames выше), иначе rescan() ниже её просто не найдёт по
+      // старому ключу и молча уберёт как "осиротевшую" (см. rescan()).
+      if(bookmarkedNames.has(oldName.toLowerCase())){
+        bookmarkedNames.delete(oldName.toLowerCase());
+        bookmarkedNames.add(newName.toLowerCase());
+        saveBookmarks();
+      }
 
       await rescan();
       // rescan() пересобирает дерево и индекс с нуля — переоткрытая заметка
@@ -685,6 +1512,13 @@ window.initMdEditorModule = function(deps){
   // Открытие заметки / переход по [[ссылке]]
   // ---------------------------------------------------------------------
   function openNoteByEntry(entry){
+    // Запись из мгновенно показанного кэша (см. shapeToStubNode), для
+    // которой настоящее сканирование ещё не подобрало handle, — ждём его
+    // вместо попытки читать null как файл (см. openStubItemWhenReady).
+    if(!entry || !entry.fileHandle){
+      if(entry) openStubItemWhenReady(entry.name, "file");
+      return;
+    }
     // снимок состояния ДО открытия заметки — если открытие пришло по
     // [[ссылке]] снаружи модуля, регистрация подавляется (см. pushMdNav и
     // openNoteExternally выше), и "назад" вернёт прямо на вкладку/экран,
@@ -744,6 +1578,123 @@ window.initMdEditorModule = function(deps){
     var entry = nameIndex.get(trimmed.toLowerCase());
     if(entry) openNoteByEntry(entry);
     else createAndOpenNote(trimmed);
+  }
+
+  // ---------------------------------------------------------------------
+  // Поле связей заметки — строка под заголовком (см. #mdEditorLinksRow в
+  // renderEditorScreen выше), автоматически собранная из ИСХОДЯЩИХ
+  // [[ссылок]] текущего текста и ВХОДЯЩИХ ("обратных") ссылок — других
+  // заметок, у которых в тексте есть [[эта заметка]]. Сама по себе не
+  // редактируется — единственный способ убрать ссылку из поля — убрать
+  // её из текста заметки (своей или чужой), см. ТЗ пользователя от
+  // 31.08. Не показывается в режиме "с кодом" (см. applyLinksFieldVisibility
+  // и клик по mdEditorModeBtn выше).
+  // ---------------------------------------------------------------------
+
+  // Все обычные [[ссылки]] в тексте (без учёта встроенных картинок
+  // "![[имя]]" — та же логика различения по ведущему "!", что и в
+  // buildDecorations/imgRe ниже, но здесь достаточно простого
+  // negative lookbehind вместо ручного разбора claims). Возвращает
+  // ИМЕНА КАК НАПИСАНЫ в тексте (обрезанные по краям), без дедупликации.
+  var OUTGOING_LINK_RE = /(?<!!)\[\[([^\[\]\n]+)\]\]/g;
+  function extractOutgoingLinkNames(text){
+    var out = [];
+    if(!text) return out;
+    OUTGOING_LINK_RE.lastIndex = 0;
+    var m;
+    while((m = OUTGOING_LINK_RE.exec(text))){
+      var nm = m[1].trim();
+      if(nm) out.push(nm);
+      if(m[0].length === 0) OUTGOING_LINK_RE.lastIndex++;
+    }
+    return out;
+  }
+
+  // Каноническое имя для отображения: если заметка с таким именем
+  // существует — берём её реальное имя файла (правильный регистр),
+  // иначе показываем как набрано в тексте (ссылка на ещё не созданную
+  // заметку — клик по ней создаст её, см. handleLinkClick).
+  function resolveLinkDisplayName(rawName){
+    var trimmed = (rawName || "").trim();
+    if(!trimmed) return trimmed;
+    var entry = nameIndex ? nameIndex.get(trimmed.toLowerCase()) : null;
+    return entry ? entry.name : trimmed;
+  }
+
+  function applyLinksFieldVisibility(){
+    var row = document.getElementById("mdEditorLinksRow");
+    if(row) row.classList.toggle("code-hidden", codeMode);
+  }
+
+  function scheduleLinksFieldRefresh(){
+    if(linksDebounceTimer) clearTimeout(linksDebounceTimer);
+    linksDebounceTimer = setTimeout(function(){ refreshLinksField(); }, 700);
+  }
+
+  function sortedLinkNames(map){
+    var names = Array.from(map.values());
+    names.sort(function(a, b){ return a.localeCompare(b, "ru"); });
+    return names;
+  }
+
+  // Пересобирает и перерисовывает поле связей текущей открытой заметки —
+  // ТОЛЬКО исходящие [[ссылки]] из ЖИВОГО текста в CodeMirror, простым
+  // синхронным regex по уже загруженному тексту, без единого обращения к
+  // файловой системе.
+  //
+  // Раньше здесь ВТОРЫМ, асинхронным проходом досчитывались ещё и
+  // ВХОДЯЩИЕ ("обратные") ссылки — для этого при КАЖДОМ открытии заметки
+  // приходилось читать содержимое ВСЕХ .md файлов в блокноте целиком
+  // (см. историю правок). На больших блокнотах это означало десятки/сотни
+  // параллельных чтений файлов через File System Access API при каждом
+  // открытии заметки — и именно это оказалось причиной ощутимых зависаний
+  // (список переставал откликаться на нажатия, пока шёл обход) — см. ТЗ
+  // пользователя от 31.08: "не нужно пересчитывать все файлы сразу".
+  // Обратные ссылки убраны совсем, а не заменены на кэш — кэш всё равно
+  // потребовал бы хотя бы ОДИН полный обход всех файлов, чтобы его
+  // построить (та же тяжёлая операция, просто отложенная), а поддержание
+  // его в актуальном состоянии (правки в ЛЮБОЙ другой заметке могут
+  // добавить/убрать ссылку на текущую) потребовало бы либо пересчитывать
+  // его заново на каждое сохранение любого файла, либо жить с устаревшими
+  // данными — в обоих случаях выигрыш по сравнению с "просто не считать"
+  // сомнительный, а сложность заметно выше.
+  function refreshLinksField(){
+    if(!openFile) return;
+    var text = cmView ? cmView.state.doc.toString() : openFile.text;
+    var outgoingRaw = extractOutgoingLinkNames(text);
+    var selfKey = openFile.name.toLowerCase();
+    var map = new Map(); // ключ — имя в нижнем регистре, значение — имя для показа
+    outgoingRaw.forEach(function(raw){
+      var key = raw.toLowerCase();
+      if(!key || key === selfKey) return; // ссылка заметки саму на себя в поле не показываем
+      if(!map.has(key)) map.set(key, resolveLinkDisplayName(raw));
+    });
+    renderLinksField(sortedLinkNames(map));
+  }
+
+  function renderLinksField(names){
+    var row = document.getElementById("mdEditorLinksRow");
+    if(!row) return;
+    if(!names.length){
+      row.innerHTML = "";
+      applyLinksFieldVisibility();
+      return;
+    }
+    row.innerHTML = names.map(function(nm){
+      return '<span class="mdeditor-links-item" data-name="' + escapeHtml(nm) + '">' + escapeHtml(nm) + '</span>';
+    }).join('<span class="mdeditor-links-sep">|</span>');
+    // Клик обрабатывается ОДНИМ делегированным слушателем на самой строке
+    // #mdEditorLinksRow (см. renderEditorScreen ниже), а не отдельным
+    // addEventListener на каждый .mdeditor-links-item здесь — поле связей
+    // перерисовывается ДВАЖДЫ (сразу исходящие ссылки, затем ещё раз, когда
+    // подтянутся входящие, см. refreshLinksField выше), и старые
+    // прибиндженные сюда обработчики каждый раз молча терялись вместе со
+    // старой разметкой (innerHTML). Раньше именно из-за этого клик по
+    // ссылке в шапке иногда не срабатывал ("ничего не дало", см. ТЗ
+    // пользователя от 31.08) — переход по [[ссылке]] ПРЯМО В ТЕКСТЕ этой
+    // проблемы не имел, т.к. там клик ловится один раз на весь
+    // CodeMirror-хост (см. handleMouseDown), а не на сами ссылки.
+    applyLinksFieldVisibility();
   }
 
   // ---------------------------------------------------------------------
@@ -818,6 +1769,7 @@ window.initMdEditorModule = function(deps){
 
   function destroyEditor(){
     if(cmView){ cmView.destroy(); cmView = null; }
+    if(linksDebounceTimer){ clearTimeout(linksDebounceTimer); linksDebounceTimer = null; }
   }
 
   // ---------------------------------------------------------------------
@@ -982,6 +1934,11 @@ window.initMdEditorModule = function(deps){
     var boldMark = Decoration.mark({ class: "cm-md-bold" });
     var italicMark = Decoration.mark({ class: "cm-md-italic" });
     var highlightMark = Decoration.mark({ class: "cm-md-mark" });
+    // зачёркнутый ("~~текст~~") / подчёркнутый ("++текст++" — своё
+    // обозначение, см. кнопки "Ч"/"П" в renderEditorScreen и ТЗ
+    // пользователя от 31.08).
+    var strikeMark = Decoration.mark({ class: "cm-md-strike" });
+    var underlineMark = Decoration.mark({ class: "cm-md-underline" });
     var linkMark = Decoration.mark({ class: "cm-md-link" });
     // ссылка на Библию, найденная в свободном тексте ("Матфея 5:3" и т.п.,
     // см. SCRIPTURE_RE/findScriptureRefAt выше) — используется ТОТ ЖЕ
@@ -1153,6 +2110,8 @@ window.initMdEditorModule = function(deps){
 
       scanPair(/\*\*([^*\n]+?)\*\*/g, 2, boldMark);
       scanPair(/==([^=\n]+?)==/g, 2, highlightMark);
+      scanPair(/~~([^~\n]+?)~~/g, 2, strikeMark);
+      scanPair(/\+\+([^+\n]+?)\+\+/g, 2, underlineMark);
       scanPair(/\[\[([^\[\]\n]+)\]\]/g, 2, linkMark);
       scanPair(/\*([^*\n]+?)\*/g, 1, italicMark);
       scanPair(/_([^_\n]+?)_/g, 1, italicMark);
@@ -1286,7 +2245,7 @@ window.initMdEditorModule = function(deps){
           keymap.of(defaultKeymap.concat(historyKeymap, [indentWithTab])),
           EditorView.lineWrapping,
           livePreviewCompartment.of(codeMode ? [] : [makeLivePreviewExtension(cm)]),
-          EditorView.updateListener.of(function(u){ if(u.docChanged) scheduleAutosave(); }),
+          EditorView.updateListener.of(function(u){ if(u.docChanged){ scheduleAutosave(); scheduleLinksFieldRefresh(); } }),
           EditorView.domEventHandlers({ mousedown: handleMouseDown })
         ];
         var state = EditorState.create({ doc: openFile.text, extensions: extensions });
@@ -1301,7 +2260,16 @@ window.initMdEditorModule = function(deps){
 
   return {
     renderSettingsTabMdEditor: renderSettingsTabMdEditor,
+    renderSettingsTabMdBookmarks: renderSettingsTabMdBookmarks,
     flushPendingMdEditorEdit: flushPendingMdEditorEdit,
-    openNoteExternally: openNoteExternally
+    openNoteExternally: openNoteExternally,
+    // используются кнопками "Аа"/"Ж" на вкладках задач (см.
+    // initTaskGlobalToolbar в my.js и ТЗ пользователя от 31.08) — тот же
+    // общий размер шрифта и то же форматирование выделения, что и в
+    // "Моём блокноте".
+    getFontSizeStep: function(){ return fontSizeStep; },
+    changeFontSizeStep: changeFontSizeStep,
+    FONT_SIZE_MIN_STEP: FONT_SIZE_MIN_STEP,
+    FONT_SIZE_MAX_STEP: FONT_SIZE_MAX_STEP
   };
 };

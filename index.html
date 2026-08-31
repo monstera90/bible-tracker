@@ -127,6 +127,27 @@ window.addEventListener("error", function(e){
   <div class="settings-modal-frame">
     <div class="settings-modal-box" id="settingsModalBox">
       <div class="settings-tab-content" id="settingsTabContent"></div>
+      <!-- "Ж" (форматирование выделения) и "Аа" (размер шрифта, общий с
+           "Моим блокнотом") — слева от общей "+", в одном ряду с ней;
+           видимость включается тем же условием, что и у .task-add-fab
+           (см. switchSettingsTab в my.js), логика кнопок — в
+           initTaskGlobalToolbar (my.js), см. ТЗ пользователя от 31.08. -->
+      <span class="task-format-wrap" id="taskFormatWrap">
+        <div class="mdeditor-fontsize-popup" id="taskFormatPopup">
+          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="taskFmtBoldBtn" title="Жирный">Ж</button>
+          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-italic" id="taskFmtItalicBtn" title="Курсив">К</button>
+          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-underline" id="taskFmtUnderlineBtn" title="Подчёркнутый">П</button>
+          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-strike" id="taskFmtStrikeBtn" title="Зачёркнутый">Ч</button>
+        </div>
+        <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="taskFormatBtn" title="Форматирование выделенного текста">Ж</button>
+      </span>
+      <span class="task-fontsize-wrap" id="taskFontSizeWrap">
+        <div class="mdeditor-fontsize-popup" id="taskFontSizePopup">
+          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="taskFontPlusBtn" title="Крупнее">+</button>
+          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="taskFontMinusBtn" title="Мельче">&minus;</button>
+        </div>
+        <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="taskFontSizeBtn" title="Размер шрифта">Аа</button>
+      </span>
       <button type="button" class="task-add-fab" id="taskAddFab" title="Добавить задачу">+</button>
     </div>
     <!-- Стек вкладок настроек. Благодаря flex-direction:column-reverse в CSS
@@ -380,7 +401,17 @@ window.addEventListener("error", function(e){
           <line x1="8.5" y1="16" x2="14" y2="16"></line>
         </svg>
       </button>
-      <button class="settings-tab" id="settingsTabSet2Btn2" title="">2</button>
+      <!-- Вторая боковая вкладка второго набора (settingsTabSet2Btn2, "set2s_2")
+           — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "Закладки" — список заметок из
+           "Моего блокнота" (settingsTabSet2Btn1), отмеченных закладкой. См.
+           renderSettingsTabMdBookmarks в mdeditor.js и её отдельную ветку в
+           switchSettingsTab, по тому же принципу вынесена ДО общей проверки
+           на renderSettingsTabSet2Stub. -->
+      <button class="settings-tab" id="settingsTabSet2Btn2" title="Закладки">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6.5 3.5h11a1 1 0 0 1 1 1V21l-6.5-4-6.5 4V4.5a1 1 0 0 1 1-1z"></path>
+        </svg>
+      </button>
       <button class="settings-tab" id="settingsTabSet2Btn3" title="">3</button>
       <button class="settings-tab" id="settingsTabSet2Btn4" title="">4</button>
       <button class="settings-tab" id="settingsTabSet2Btn5" title="Разделение epub-файлов">
