@@ -1411,28 +1411,51 @@
     justify-content:center;
     margin-top:16px;
   }
+  /* Заголовок открытой заметки центрируется относительно ВСЕЙ строки
+     (обоих полей), а не относительно свободного места слева от кнопки
+     закладки — раньше .mdeditor-title стоял в обычном flex-потоке рядом
+     с кнопкой (flex:1 занимал место только ДО неё), из-за чего
+     центрирование текста (text-align:center) считалось от урезанной
+     ширины и заголовок визуально уезжал влево. Теперь кнопка закладки
+     вынута из потока (position:absolute, см. .mdeditor-title-row
+     .mdeditor-bookmark-btn ниже — не трогает базовое правило
+     .mdeditor-bookmark-btn, которое всё ещё используется в обычном
+     потоке в строках списка заметок) и просто лежит поверх правого края
+     строки, а .mdeditor-title занимает всю ширину строки целиком с
+     симметричными полями слева/справа (padding, зарезervировано под
+     кнопку с обеих сторон, чтобы центр текста совпадал с центром рамки).
+     Шрифт и размер — те же переменные, что и у текста самой заметки (см.
+     .mdeditor-editor-host .cm-editor ниже): раньше заголовок был на
+     отдельном декоративном шрифте (Trajan Pro/Cinzel) фиксированного
+     15px, из-за чего визуально казался набранным другим шрифтом/размером
+     (см. ТЗ пользователя от 31.08). */
   .mdeditor-title-row{
+    position:relative;
     display:flex;
     align-items:center;
-    gap:8px;
     margin-bottom:2px;
   }
   .mdeditor-title{
     flex:1;
     min-width:0;
-    font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
-    font-size:15px;
-    letter-spacing:.3px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
     color:var(--wood);
     text-align:center;
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
     cursor:text;
-    padding:2px 4px;
+    padding:2px 32px;
     border-radius:6px;
   }
   .mdeditor-title:hover{ background:var(--parchment-dark); }
+  .mdeditor-title-row .mdeditor-bookmark-btn{
+    position:absolute;
+    right:0;
+    top:50%;
+    transform:translateY(-50%);
+  }
   .mdeditor-title-input{
     flex:1;
     min-width:0;
@@ -1675,11 +1698,11 @@
   @media (hover:hover) and (pointer:fine){
     .mdeditor-bookmark-btn:hover{ background:var(--parchment-dark); }
   }
-  /* в шапке открытой заметки кнопка стоит рядом с заголовком (см.
-     .mdeditor-title-row выше) — свой отступ слева не нужен, gap строки
-     уже даёт 8px; flex-shrink:0 уже задан общим правилом выше, так что
-     кнопка не сжимается при длинном названии (само название обрезается
-     многоточием, см. .mdeditor-title). */
+  /* в шапке открытой заметки кнопка вынута из потока и лежит поверх
+     правого края строки (см. .mdeditor-title-row .mdeditor-bookmark-btn
+     выше) — правое поле .mdeditor-title под неё уже зарезервировано,
+     так что кнопка никогда не перекрывает текст названия (само название
+     обрезается многоточием, см. .mdeditor-title). */
   /* ---------- сама заметка: без рамки/фона-карточки — текст занимает всю
      полезную ширину вкладки, высота не ограничена (auto), растёт вместе с
      документом; прокручивает всё это #settingsTabContent целиком (см.

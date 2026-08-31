@@ -2013,7 +2013,15 @@
     CHECK_ICON_SVG: CHECK_ICON_SVG,
     ARROW_MOVE_ICON_SVG: ARROW_MOVE_ICON_SVG,
     createArchivedTaskWithText: createArchivedTaskWithText,
-    openTaskMoveTargetPicker: openTaskMoveTargetPicker
+    openTaskMoveTargetPicker: openTaskMoveTargetPicker,
+    // см. applyFontSize в mdeditor.js — пересчитывает подгонку кнопок
+    // (.task-actions) у уже отрисованных строк задач при любом изменении
+    // размера шрифта, включая асинхронное применение сохранённого размера
+    // при старте приложения (см. ТЗ пользователя от 31.08). Функция
+    // объявлена ниже (function-декларация, поднимается в начало этой же
+    // IIFE), поэтому ссылаться на неё здесь, до её текстового объявления,
+    // безопасно.
+    refitAllVisibleTaskBodies: refitAllVisibleTaskBodies
   });
   var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
   var renderSettingsTabMdBookmarks = MdEditor.renderSettingsTabMdBookmarks;
@@ -2056,8 +2064,12 @@
       });
     }
     function changeTaskFontSizeStep(delta){
+      // пересчёт подгонки кнопок (см. fitTaskActions выше) теперь встроен
+      // прямо в applyFontSize (mdeditor.js) — единая точка на ЛЮБОЕ
+      // изменение размера шрифта, а не только на клик "+"/"-" здесь, см.
+      // передачу refitAllVisibleTaskBodies в deps при вызове
+      // initMdEditorModule выше.
       MdEditor.changeFontSizeStep(delta);
-      refitAllVisibleTaskBodies(); // ширина текста изменилась — пересчитать подгонку кнопок (см. fitTaskActions выше)
     }
     if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ changeTaskFontSizeStep(1); });
     if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ changeTaskFontSizeStep(-1); });
@@ -3246,7 +3258,7 @@
     }
   }
   // Плавающая кнопка-язычок (.settings-fab, id=settingsGearBtn) стоит на
-  // ФИКСИРОВАННОЙ высоте — 25% экрана от его нижнего края (fabTop = 75%
+  // ФИКСИРОВАННОЙ высоте — у самого нижнего края экрана (fabTop = 100%
   // высоты окна браузера). Окно настроек привязано к НЕЙ, а не к верху
   // экрана: нижний край окна всегда на fabTop, а высота отсчитывается от
   // кнопки вверх фиксированным числом пикселей (см. WINDOW_H ниже) — то
@@ -3273,70 +3285,82 @@
 
     // Окно "пришито" снизу к кнопке-язычку (.settings-fab), а не сверху к
     // экрану: нижний край окна всегда стоит на фиксированной точке —
-    // 25% экрана от его нижнего края (fabTop = 75% высоты окна браузера),
-    // а высота отсчитывается от НЕЁ вверх — фиксированные 658px (WINDOW_H
-    // ниже), а не вниз от верхнего края экрана. Поэтому у окна больше нет
-    // "родного" верха: он вычисляется как fabTop − высота и выставляется
-    // через margin-top (естественное положение по CSS — 16px от верха
-    // оверлея, см. padding-top). Если 658px не помещается (см. minTop —
-    // не даём окну вылезти выше 16px от верха экрана), высота ужимается,
-    // но низ окна (а с ним и кнопка) всё равно остаётся ровно на fabTop —
-    // окно никогда не отрывается от кнопки, просто может быть короче
-    // 658px на маленьких экранах.
+    // у самого нижнего края экрана (fabTop = 100% высоты окна браузера),
+    // а верхний край растянут до самого верха оверлея (minTop, естественное
+    // положение по CSS — 16px от верха оверлея, см. padding-top). Ширина и
+    // высота окна больше не ограничены никаким фиксированным числом (ни
+    // WINDOW_H, ни CSS max-width/max-height) — окно всегда занимает всё
+    // доступное место между minTop и fabTop, то есть ограничено только
+    // реальным размером экрана пользователя, а не искусственным пределом.
     settingsModalBox.style.height = "";
     settingsModalBox.style.marginTop = "";
     var naturalTop = settingsModalBox.getBoundingClientRect().top; // 16px по CSS
-    var fabTop = window.innerHeight * 0.75;
-    var WINDOW_H = 658; // высота окна настроек, отсчитанная от кнопки вверх
+    // Кнопка-язычок (и вместе с ней всё окно, см. комментарий выше) была
+    // приклеена ровно к window.innerHeight — т.е. к самому нижнему краю
+    // вьюпорта. На андроиде с жестовой навигацией там же поверх стоит
+    // системная плашка управления (тот самый серый "пилюлеобразный"
+    // индикатор снизу экрана) — кнопка пряталась под ней. Высота этой
+    // плашки замерена по присланному скриншоту (в оригинальном размере,
+    // 1220×718): область под системную навигацию — сплошная светлая
+    // полоса от y=670 до нижнего края кадра (y=718) — ровно 48px. На
+    // это же число теперь и поднимаем fabTop, чтобы кнопка (и низ окна)
+    // всегда стояли выше этой плашки, а не под ней.
+    var ANDROID_NAV_BAR_H = 55; // px, замерено по скриншоту пользователя + 20px, чтобы поднять кнопку-язычок (.settings-fab) выше; уменьшено на 15px, затем поднято на 2px
+    var fabTop = window.innerHeight - ANDROID_NAV_BAR_H;
     var minTop = naturalTop; // не даём окну вылезти выше верхнего края оверлея
-    var desiredTop = fabTop - WINDOW_H;
-    if(desiredTop < minTop) desiredTop = minTop;
+    // Высота окна больше не фиксируется числом (раньше — 658px, WINDOW_H):
+    // окно всегда растягивается на всё доступное место между верхом
+    // оверлея (minTop) и кнопкой-язычком (fabTop) — ограничена только
+    // реальной высотой экрана пользователя.
+    var desiredTop = minTop;
     var desired = fabTop - desiredTop;
 
     settingsModalBox.style.marginTop = (desiredTop - naturalTop) + "px";
     settingsModalBox.style.height = desired + "px";
-    // Размер (толщина) каждого язычка вертикального стека — единая
-    // переменная --settings-tab-size на .settings-modal-frame (её читают
-    // #settingsTabs .settings-tab). Считаем её здесь: высота окна настроек
-    // (desired, только что зафиксирована выше), минус промежутки между 9
-    // язычками стопки (9 вкладок задач: red/inbox/next/projects/waiting/
-    // council/read/someday/archive — считаем все 9, а не только сейчас
-    // видимые), по 1px gap между соседними — это 8 промежутков, — и делим
-    // остаток на 9. Так каждый язычок получает фиксированный размер,
-    // который не меняется от того, сколько из 9 сейчас реально показано.
-    var totalTabs = 9;
-    var gapsPx = (totalTabs - 1) * 1;
-    var tabUnit = (desired - gapsPx) / totalTabs;
-    if(tabUnit > 0) frame.style.setProperty("--settings-tab-size", tabUnit + "px");
+    // Высота язычков вертикального стека (#settingsTabs .settings-tab)
+    // больше не считается здесь — она зафиксирована в CSS (68px, не
+    // зависит от высоты окна настроек, см. .settings-tab в modals.css).
 
     // Ширина вкладок горизонтального ряда под окном (шестерёнка + карта
-    // дней года + 3 заглушки, см. .settings-tabs-gear в modals.css) —
-    // отдельная переменная --settings-tab-size-h, т.к. этот ряд зависит от
-    // ШИРИНЫ окна настроек, а не от высоты. Сейчас в ряд помещается ровно
-    // 5 вкладок, поэтому делим ширину окна на 5 (и 4 промежутка по 1px
-    // между ними, как и в вертикальном стеке).
-    var totalHTabs = 5;
-    var gapsHPx = (totalHTabs - 1) * 1;
-    var boxWidth = settingsModalBox.getBoundingClientRect().width;
-    // Резервируем ещё 1px в конце ряда — там, где ряд стыкуется с
-    // кнопкой-язычком, чтобы получившийся зазор оказался ровно под
-    // вертикальным лавандовым швом (правым краем окна), а не правее него.
-    var tabHUnit = (boxWidth - gapsHPx - 1) / totalHTabs;
-    if(tabHUnit > 0) frame.style.setProperty("--settings-tab-size-h", tabHUnit + "px");
+    // дней года + 3 заглушки, см. .settings-tab-gear в modals.css) больше
+    // не считается здесь — она зафиксирована в CSS (68px на вкладку, не
+    // зависит от ширины окна настроек, раньше делилась поровну между
+    // 5 вкладками через переменную --settings-tab-size-h).
 
     // Кнопка-язычок теперь полноразмерная: её толщина (width) — те же
     // 54px, что и у обычных вертикальных язычков, а длина (height) — те
     // же 54px, что и толщина (height) язычков нижнего ряда (см.
     // .settings-tab-gear в modals.css) — так кнопка визуально продолжает
-    // именно нижний ряд, а не торчит выше его. Раньше здесь бралось
-    // значение --settings-tab-size-h (длина/ширина язычков нижнего ряда,
-    // а не их толщина) — из-за этого кнопка получалась заметно выше
-    // самого ряда. Стоит вплотную к углу рамки (без зазора) — сам зазор
-    // уже учтён в ширине ряда выше.
+    // именно нижний ряд, а не торчит выше его.
+    // По вертикали кнопка по-прежнему стоит вплотную к нижнему краю рамки
+    // (без зазора) — это совпадает с верхним краем нижнего ряда вкладок,
+    // т.к. оба стоят на одной высоте под рамкой.
+    // По горизонтали же кнопка раньше стояла у правого края РАМКИ
+    // (frameRect.right) — а рамка растянута на всю доступную ширину
+    // экрана (см. .settings-modal-frame{width:100%} в modals.css), тогда
+    // как сам нижний ряд вкладок (.settings-tabs-gear) занимает лишь
+    // часть этой ширины слева (левый край рамки, left:0) и заметно короче
+    // — между последней вкладкой ряда и кнопкой получался большой
+    // произвольный зазор. Теперь кнопка ставится не от края рамки, а
+    // вплотную к правому краю ИМЕННО видимого нижнего ряда — с тем же
+    // зазором в 1px, что и между соседними вкладками внутри ряда
+    // (gap:1px в .settings-tabs-gear), — так кнопка визуально продолжает
+    // ряд, а не торчит поодаль от него. Наборов вкладок два
+    // (#settingsTabsGear / #settingsTabsGearSet2, см.
+    // applySettingsTabSetVisibility) — виден всегда только один, второй
+    // скрыт через display:none и не имеет размеров, поэтому просто берём
+    // тот, чья ширина больше нуля.
     var settingsGearBtn = document.getElementById("settingsGearBtn");
     if(settingsGearBtn){
       var frameRect = frame.getBoundingClientRect();
-      settingsGearBtn.style.left = Math.round(frameRect.right) + "px";
+      var gearRow = document.getElementById("settingsTabsGear");
+      var gearRow2 = document.getElementById("settingsTabsGearSet2");
+      var gearRowRect = gearRow ? gearRow.getBoundingClientRect() : null;
+      if(!gearRowRect || gearRowRect.width === 0){
+        gearRowRect = gearRow2 ? gearRow2.getBoundingClientRect() : null;
+      }
+      var gearRowRight = (gearRowRect && gearRowRect.width > 0) ? gearRowRect.right : frameRect.left;
+      settingsGearBtn.style.left = Math.round(gearRowRight + 1) + "px";
       settingsGearBtn.style.top = Math.round(frameRect.bottom) + "px";
     }
   }
@@ -5435,7 +5459,14 @@
     // служебный символ-якорь мог оказаться где угодно в тексте (браузер
     // иногда сохраняет его перед впечатанным текстом, а не только в
     // начале) — вырезаем все вхождения, это не пользовательский ввод
-    return text.split(EMPTY_ANCHOR_CHAR).join("");
+    text = text.split(EMPTY_ANCHOR_CHAR).join("");
+    // браузер сам подменяет обычный пробел на NBSP в contenteditable, когда
+    // в момент набора этот пробел оказывается последним символом строки —
+    // невидимо на экране, но ломает измерение последней строки текста в
+    // fitTaskActions (см. normalizeNbsp/linkifyHtml выше, там же — почему).
+    // Приводим к обычному пробелу уже при сохранении правок, чтобы он не
+    // попадал в сохранённый текст заново.
+    return normalizeNbsp(text);
   }
   function renderYearDayNoteEdit(dayTs, noteText){
     var wrap = document.getElementById("yearDayNoteSection");
@@ -5728,8 +5759,31 @@
   // к дню, личные комментарии, текст/комментарии задач) — см.
   // formatObsidianHtml/formatInline выше, где и находится вся реальная
   // логика.
+  // NBSP (U+00A0) и родственные ей "неразрывные" пробельные символы
+  // (узкий неразрывный U+202F, "figure space" U+2007) визуально неотличимы
+  // от обычного пробела, но, в отличие от него, НЕ схлопываются в конце
+  // визуальной строки — из-за этого Range.getClientRects() в fitTaskActions
+  // (см. ниже) засчитывает такой пробел в ширину последней строки текста,
+  // хотя на экране после него ничего не видно, и кнопки задачи ошибочно
+  // уходят на отдельную строку, даже когда места на вид достаточно (см. ТЗ
+  // пользователя от 31.08 — "не планировать повторение вначале месяца",
+  // подтверждено измерением скриншота и прямым тестом в браузере: реальный
+  // зазор после последней строки и ширина, нужная кнопкам, отличались там
+  // буквально на ширину одного пробельного символа). Такой символ обычно
+  // попадает в текст не по воле пользователя: браузер сам подставляет NBSP
+  // вместо обычного пробела в contenteditable, если в момент набора этот
+  // пробел оказывается последним символом (см. getEditableNoteText ниже —
+  // там же вырезаем его при СОХРАНЕНИИ новых правок), а также он нередко
+  // приходит при вставке текста, скопированного из других приложений.
+  // Приводим к обычному пробелу и здесь, при ПОКАЗЕ текста — чтобы уже
+  // сохранённые ранее задачи с таким "невидимым" лишним пробелом починились
+  // сразу, без необходимости открывать и заново сохранять их вручную.
+  var NBSP_LIKE_RE = /[\u00A0\u202F\u2007]/g;
+  function normalizeNbsp(s){
+    return s ? s.replace(NBSP_LIKE_RE, " ") : s;
+  }
   function linkifyHtml(s){
-    return formatObsidianHtml(s);
+    return formatObsidianHtml(normalizeNbsp(s));
   }
 
   function getAllGoals(){
@@ -6752,7 +6806,24 @@
     var actionsWidth = actions.offsetWidth;
     var actionsHeight = actions.offsetHeight;
     var availableAfter = bodyRect.right - lastRect.right - gap;
-    if(actionsWidth <= availableAfter){
+    // Запас на случаи "почти впритык" (см. ТЗ пользователя от 31.08 — "не
+    // планировать повторение вначале месяца"): getBoundingClientRect/
+    // getClientRects дают дробные (субпиксельные) значения, а offsetWidth
+    // у actions — всегда округлённое целое, так что сравнение их напрямую
+    // само по себе даёт погрешность около 1px то в одну, то в другую
+    // сторону в зависимости от реального хинтинга шрифта на конкретном
+    // устройстве. Кроме того, у каждой иконки есть прозрачный отступ между
+    // краем кликабельной кнопки (22px) и самим видимым символом (15px) —
+    // то есть первые ~3.5px слева от группы кнопок и так пустые. Поэтому
+    // сравниваем не впритык, а с небольшим запасом (VISUAL_SLACK_PX) — так,
+    // если реально не хватает буквально пары пикселей, кнопки останутся на
+    // строке текста (лёгкое визуальное "впритык" в прозрачной кайме иконки
+    // незаметно), а не уйдут вниз отдельной строкой при том, что на глаз
+    // место есть. Настоящую нехватку места (не на пару пикселей, а по
+    // существу) запас, конечно, не замаскирует — перенос вниз по-прежнему
+    // происходит.
+    var VISUAL_SLACK_PX = 4;
+    if(actionsWidth - VISUAL_SLACK_PX <= availableAfter){
       var top = lastRect.top - bodyRect.top + (lastRect.height - actionsHeight) / 2;
       actions.style.top = Math.max(0, top) + "px";
       body.style.paddingBottom = "";
