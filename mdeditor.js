@@ -56,6 +56,22 @@ window.initMdEditorModule = function(deps){
   // старым (по умолчанию) размером — без этого вызова кнопки остаются
   // подогнаны под УЖЕ неверную (старую) разбивку текста на строки.
   var refitAllVisibleTaskBodies = deps.refitAllVisibleTaskBodies || function(){};
+  // "Закладки" — теперь синхронизируются в облаке вместе с остальными
+  // данными приложения (см. ТЗ пользователя от 01.09), поэтому источник
+  // истины для них — не IndexedDB (локальна для устройства/браузера, см.
+  // idbGet/idbSet выше), а тот же state my.js, что и у переключателей
+  // настроек: getSyncedBookmarkNames читает текущий список имён из state
+  // (без сети, синхронно — state уже загружен из localStorage к моменту
+  // инициализации этого модуля), setSyncedBookmark пишет в state ОДНО имя
+  // разом (true/false) и сама планирует и локальное сохранение, и
+  // облачную отправку (saveLocalState/scheduleCloudPush внутри my.js) —
+  // тем же путём, каким устроена вся остальная синхронизация в
+  // приложении. Каждое имя — отдельный ключ state (как отдельная глава в
+  // остальном state), поэтому слияние с облаком идёт ПОИМЕННО, а не
+  // целым списком — закладка, добавленная на одном устройстве, не теряет
+  // закладку, добавленную тем временем на другом.
+  var getSyncedBookmarkNames = deps.getSyncedBookmarkNames || function(){ return []; };
+  var setSyncedBookmark = deps.setSyncedBookmark || function(){};
 
   // Ищет библейскую ссылку в строке, под которой находится offset (символ
   // клика) — используется и для decorations (см. makeLivePreviewExtension),
@@ -233,6 +249,18 @@ window.initMdEditorModule = function(deps){
   // ещё в дереве — например, в корне — автоматически переносятся сюда).
   var FILES_FOLDER_NAME = "files";
   var MEDIA_MOVE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp|mp3)$/i;
+  // "Продолжить с той же заметки и с того же места" (см. ТЗ пользователя от
+  // 01.09) — состояние {screen, name, cursorPos, scrollPercent, updatedAt}.
+  // Хранится и в IndexedDB (idbSet("lastNote", ...), быстрый локальный кэш),
+  // и файлом ".mdeditor-state.json" в корне синхронизируемой папки — этот
+  // файл едет вместе с остальными заметками через Syncthing на другое
+  // устройство, поэтому при холодном старте побеждает та копия (диск или
+  // IndexedDB), у которой updatedAt новее (см. readDocStateFromDisk/
+  // initFromStoredHandle ниже). screen === "list" означает, что пользователь
+  // сам ушёл на список ("домой") — тогда холодный старт должен показать
+  // список, а не автоматически открывать заметку (см. goHome ниже).
+  var docState = { screen: null, name: null, cursorPos: 0, scrollPercent: null, updatedAt: 0 };
+  var STATE_FILE_NAME = ".mdeditor-state.json";
   var screen = "setup";          // "setup" | "list" | "editor"
   var setupNeedsPermission = false;
   // Защита от повторного открытия диалога выбора папки, пока предыдущий
@@ -245,6 +273,7 @@ window.initMdEditorModule = function(deps){
   var statusMessage = "", statusIsError = false;
   var openFile = null;           // {fileHandle,dirHandle,name,text,dirty}
   var cmView = null;
+  var mdEditorImageResizeObserver = null; // пересчёт cm-md-image-float при изменении ширины редактора, см. mountEditor/destroyEditor
   // Какая из ДВУХ боковых вкладок второго набора сейчас показывает
   // содержимое этого модуля — "editor" для "Моего блокнота" (set2s_1:
   // список папок/заметок или открытая заметка, старое поведение) и
@@ -376,17 +405,30 @@ window.initMdEditorModule = function(deps){
     }
     applyFontSize();
   }).catch(function(){ applyFontSize(); });
-  // закладки — тем же приёмом, что и fontSizeStep выше: грузятся сразу,
-  // не дожидаясь открытия вкладки "Мой блокнот"/"Закладки", и если
-  // какой-то экран уже успел отрисоваться без них (initStarted уже true),
-  // перерисовываем его повторно, чтобы кнопки закладки сразу показали
-  // верное состояние.
-  idbGet("bookmarks").then(function(savedNames){
-    if(Array.isArray(savedNames)) bookmarkedNames = new Set(savedNames);
-    if(initStarted) render();
-  }).catch(function(){});
-  function saveBookmarks(){
-    idbSet("bookmarks", Array.from(bookmarkedNames)).catch(function(){});
+  // закладки — теперь читаются из синхронизируемого state my.js (см.
+  // getSyncedBookmarkNames/setSyncedBookmark выше), а не из IndexedDB:
+  // state уже загружен из localStorage синхронно к моменту вызова
+  // initMdEditorModule, поэтому, в отличие от fontSizeStep выше, здесь
+  // не нужно ждать асинхронного idbGet — значение доступно сразу же.
+  bookmarkedNames = new Set(getSyncedBookmarkNames());
+  // Одноразовая миграция закладок, оставшихся в IndexedDB с ДО того, как
+  // они стали синхронизироваться в облаке (см. ТЗ пользователя от
+  // 01.09) — если в синхронизируемом state закладок ещё нет, а в
+  // IndexedDB что-то лежит, переносим их туда. Сразу же очищаем сам
+  // ключ IndexedDB (idbSet("bookmarks", [])) — иначе, если человек потом
+  // ДЕЙСТВИТЕЛЬНО уберёт все закладки (то есть в state и вправду 0), эта
+  // же миграция при следующем запуске снова прочитала бы старый ключ и
+  // ошибочно вернула бы удалённые закладки обратно.
+  if(bookmarkedNames.size === 0){
+    idbGet("bookmarks").then(function(savedNames){
+      if(!Array.isArray(savedNames) || !savedNames.length) return;
+      savedNames.forEach(function(n){
+        bookmarkedNames.add(n);
+        setSyncedBookmark(n, true);
+      });
+      idbSet("bookmarks", []).catch(function(){});
+      if(initStarted) render();
+    }).catch(function(){});
   }
   // Переключает принадлежность заметки к закладкам и точечно обновляет
   // все места, где её кнопка закладки сейчас видна — БЕЗ полной
@@ -396,8 +438,10 @@ window.initMdEditorModule = function(deps){
   // "живого" редактора.
   function toggleBookmarkNote(name){
     var key = name.toLowerCase();
+    var nowBookmarked;
     if(bookmarkedNames.has(key)){
       bookmarkedNames.delete(key);
+      nowBookmarked = false;
       // при снятии закладки кнопка должна вернуться к дефолтному скрытому
       // состоянию в общем списке, а не просто стать "неактивной" — иначе
       // она осталась бы видна (пустым контуром) там, где её когда-то
@@ -406,13 +450,40 @@ window.initMdEditorModule = function(deps){
       revealedBookmarkRows.delete(key);
     } else {
       bookmarkedNames.add(key);
+      nowBookmarked = true;
     }
-    saveBookmarks();
+    setSyncedBookmark(key, nowBookmarked);
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     if(screen === "editor" && openFile && openFile.name.toLowerCase() === key){
       var hdrBtn = document.getElementById("mdEditorBookmarkBtn");
       if(hdrBtn) hdrBtn.classList.toggle("active", bookmarkedNames.has(key));
+    }
+    if(activeMdTab === "bookmarks") renderBookmarksScreen(container);
+    else if(screen === "list") renderListScreen(container);
+  }
+
+  // Вызывается снаружи (см. rerenderAllFromState в my.js) каждый раз,
+  // когда облачная синхронизация приносит state, отличающийся от
+  // локального — например, закладку добавили на другом устройстве.
+  // Перечитывает список закладок из state и, если сейчас открыт список
+  // заметок или сама вкладка "Закладки"/открытая заметка с изменившейся
+  // отметкой, перерисовывает нужное место — тем же точечным способом,
+  // что и toggleBookmarkNote выше (никогда не трогая "живой" редактор
+  // ради самой заметки, только её кнопку закладки).
+  function refreshBookmarksFromState(){
+    var fresh = new Set(getSyncedBookmarkNames());
+    var changed = fresh.size !== bookmarkedNames.size;
+    if(!changed){
+      fresh.forEach(function(k){ if(!bookmarkedNames.has(k)) changed = true; });
+    }
+    if(!changed) return;
+    bookmarkedNames = fresh;
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    if(screen === "editor" && openFile){
+      var hdrBtn = document.getElementById("mdEditorBookmarkBtn");
+      if(hdrBtn) hdrBtn.classList.toggle("active", bookmarkedNames.has(openFile.name.toLowerCase()));
     }
     if(activeMdTab === "bookmarks") renderBookmarksScreen(container);
     else if(screen === "list") renderListScreen(container);
@@ -575,17 +646,16 @@ window.initMdEditorModule = function(deps){
     buildIndex(tree, idx, imgIdx);
     nameIndex = idx;
     imageIndex = imgIdx;
-    // заметки, удалённые/переименованные снаружи приложения (не через
-    // commitRename, который сам переносит закладку на новое имя, см.
-    // ниже), могли оставить "осиротевшую" закладку — таких имён больше
-    // нет в свежепостроенном индексе, тихо убираем их из закладок здесь.
-    if(bookmarkedNames.size){
-      var prunedAny = false;
-      bookmarkedNames.forEach(function(key){
-        if(!idx.has(key)){ bookmarkedNames.delete(key); prunedAny = true; }
-      });
-      if(prunedAny) saveBookmarks();
-    }
+    // заметки, отсутствующие локально на ЭТОМ устройстве (не синхронизированы
+    // Syncthing'ом сюда, либо переименованы/удалены), больше не выкидывают
+    // закладку из общего (облачного) списка — она синхронизируется в
+    // облаке вместе с остальными данными (см. getSyncedBookmarkNames/
+    // setSyncedBookmark выше), поэтому не может быть удалена только на
+    // основании того, что файла нет именно здесь: он вполне может быть
+    // на другом устройстве. renderBookmarksScreen сам тихо пропускает
+    // такие имена (см. entry && ... ниже) — они просто временно не
+    // отображаются в списке этого устройства.
+
     migrateStrayMediaFiles().catch(function(){});
     // Кэш "формы" дерева (см. treeToShape выше) — используется при
     // СЛЕДУЮЩЕМ открытии вкладки, чтобы показать список мгновенно, ещё до
@@ -602,26 +672,29 @@ window.initMdEditorModule = function(deps){
   // открываем по имени уже из настоящего индекса. Название на экране от
   // этого не меняется — просто открытие происходит на долю секунды позже,
   // чем клик.
-  function openStubItemWhenReady(name, kind){
+  function openStubItemWhenReady(name, kind, restorePos, silentFallback, scrollPercent){
     var p = pendingRescanPromise;
     if(!p){
+      if(silentFallback){ screen = "list"; render(); return; }
       setStatus("Не удалось найти файл.", true);
       return;
     }
-    setStatus("Открываю…");
+    if(!silentFallback) setStatus("Открываю…");
     p.then(function(){
       setStatus("");
       var key = name.toLowerCase();
       if(kind === "image"){
         var im = imageIndex && imageIndex.get(key);
         if(im) openImagePreview(im.fileHandle, im.name);
-        else setStatus("Файл не найден.", true);
+        else if(!silentFallback) setStatus("Файл не найден.", true);
       } else {
         var entry = nameIndex && nameIndex.get(key);
-        if(entry) openNoteByEntry(entry);
+        if(entry) openNoteByEntry(entry, restorePos, undefined, scrollPercent);
+        else if(silentFallback){ screen = "list"; render(); }
         else setStatus("Заметка не найдена.", true);
       }
     }, function(){
+      if(silentFallback){ screen = "list"; render(); return; }
       setStatus("Не удалось обновить список. Попробуйте открыть заметку ещё раз.", true);
     });
   }
@@ -807,9 +880,42 @@ window.initMdEditorModule = function(deps){
 
           pendingRescanPromise = rescan();
 
+          // "Продолжить с той же заметки" (см. persistDocStateNow/
+          // flushDocStateNow/scheduleDocStateSave выше) — читаем ОДИН раз
+          // здесь, до ветвления на haveStub/не-haveStub, и используем в
+          // обеих ветках ниже. Читаем СРАЗУ ДВЕ копии состояния — локальную
+          // из IndexedDB и файловую с диска (.mdeditor-state.json,
+          // см. readDocStateFromDisk) — и берём ту, что новее по updatedAt:
+          // файловая копия могла приехать через Syncthing с ДРУГОГО
+          // устройства уже после того, как это устройство в последний раз
+          // писало в свою собственную IndexedDB (см. ТЗ пользователя от
+          // 01.09, пункт 3). Если заметки с таким именем не нашлось
+          // (переименована/удалена со времени последнего запуска) —
+          // openStubItemWhenReady с silentFallback=true сам вернёт на
+          // список, без сообщения об ошибке (см. ниже). screen !== "editor"
+          // (например, пользователь в прошлый раз явно ушёл на список
+          // кнопкой "домой" — см. goHome) означает, что автоматически
+          // открывать заметку не нужно (см. ТЗ, пункт 2).
+          var diskStatePromise = readDocStateFromDisk();
+          var localState = null;
+          try{ localState = await idbGet("lastNote"); }catch(e){}
+          var diskState = null;
+          try{ diskState = await diskStatePromise; }catch(e){}
+          var resolvedState = localState;
+          if(diskState && (!localState || (diskState.updatedAt || 0) > (localState.updatedAt || 0))){
+            resolvedState = diskState;
+          }
+          for(var k in resolvedState){ if(resolvedState.hasOwnProperty(k)) docState[k] = resolvedState[k]; }
+          var lastNote = docState;
+
           if(haveStub){
-            screen = "list";
-            render();
+            var resumedFromStub = (lastNote.screen === "editor" && lastNote.name) ? nameIndex.get(lastNote.name.toLowerCase()) : null;
+            if(resumedFromStub){
+              openNoteByEntry(resumedFromStub, lastNote.cursorPos, true, lastNote.scrollPercent);
+            } else {
+              screen = "list";
+              render();
+            }
             pendingRescanPromise.then(function(){
               pendingRescanPromise = null;
               // перерисовываем, только если пользователь всё ещё смотрит
@@ -823,8 +929,13 @@ window.initMdEditorModule = function(deps){
 
           await pendingRescanPromise;
           pendingRescanPromise = null;
-          screen = "list";
-          render();
+          var resumedEntry = (lastNote.screen === "editor" && lastNote.name) ? nameIndex.get(lastNote.name.toLowerCase()) : null;
+          if(resumedEntry){
+            openNoteByEntry(resumedEntry, lastNote.cursorPos, undefined, lastNote.scrollPercent);
+          } else {
+            screen = "list";
+            render();
+          }
           return;
         }
         setupNeedsPermission = true;
@@ -922,8 +1033,14 @@ window.initMdEditorModule = function(deps){
         await pendingRescanPromise;
         pendingRescanPromise = null;
         statusMessage = "";
-        screen = "list";
-        render();
+        // "продолжить с той же заметки" (см. ТЗ пользователя от 01.09) —
+        // этот экран показывается именно тогда, когда после закрытия
+        // приложения разрешение на папку пришлось подтверждать заново
+        // (setupNeedsPermission) или папка выбирается впервые; в обоих
+        // случаях нужно попытаться вернуться на последнюю открытую
+        // заметку, а не молча сбрасывать на список (см.
+        // resumeLastNoteOrShowList выше).
+        await resumeLastNoteOrShowList();
       }catch(e){
         if(e && e.name === "AbortError") return;
         // Показываем настоящую причину (имя/текст ошибки браузера), а не
@@ -1399,6 +1516,16 @@ window.initMdEditorModule = function(deps){
     currentDirNode = rootTree;
     screen = "list";
     render();
+    // Явный уход на список ("домой") — при следующем холодном старте нужно
+    // показать список, а НЕ снова открыть заметку, из которой ушли (см. ТЗ
+    // пользователя от 01.09, пункт 2). persistDocStateNow пишет это сразу,
+    // без дебаунса — как и остальные явные переходы (см. openNoteByEntry).
+    persistDocStateNow({ screen: "list", name: null, cursorPos: 0, scrollPercent: null });
+    // не ждём дебаунс на запись файла (см. scheduleDiskStateWrite выше) —
+    // это осознанный уход на список, а не рядовая правка текста, пишем на
+    // диск сразу же, чтобы другое устройство тоже увидело "список" при
+    // следующей синхронизации Syncthing.
+    writeDocStateToDiskNow();
   }
 
   // Жест/кнопка "назад" внутри "Моего блокнота" теперь не обрабатывается
@@ -1473,14 +1600,21 @@ window.initMdEditorModule = function(deps){
       var oldName = openFile.name;
       openFile.fileHandle = newHandle;
       openFile.name = newName;
+      // "продолжить с той же заметки" хранит имя заметки (см. docState
+      // выше) — без этого холодный старт после переименования искал бы
+      // заметку под старым, уже не существующим именем.
+      flushDocStateNow();
       // если переименованная заметка была в закладках — закладка следует
       // за новым именем (ключ закладки — имя в нижнем регистре, см.
-      // bookmarkedNames выше), иначе rescan() ниже её просто не найдёт по
-      // старому ключу и молча уберёт как "осиротевшую" (см. rescan()).
+      // bookmarkedNames выше); теперь это два отдельных ключа
+      // синхронизируемого state (см. setSyncedBookmark), поэтому старое
+      // имя явно снимается с закладок, а не просто перестаёт
+      // встречаться в индексе.
       if(bookmarkedNames.has(oldName.toLowerCase())){
         bookmarkedNames.delete(oldName.toLowerCase());
         bookmarkedNames.add(newName.toLowerCase());
-        saveBookmarks();
+        setSyncedBookmark(oldName.toLowerCase(), false);
+        setSyncedBookmark(newName.toLowerCase(), true);
       }
 
       await rescan();
@@ -1562,13 +1696,13 @@ window.initMdEditorModule = function(deps){
     dirHandle.requestPermission({ mode: "readwrite" }).catch(function(){});
   }
 
-  function openNoteByEntry(entry){
+  function openNoteByEntry(entry, restorePos, silentFallback, scrollPercent){
     reverifyWritePermissionOnce();
     // Запись из мгновенно показанного кэша (см. shapeToStubNode), для
     // которой настоящее сканирование ещё не подобрало handle, — ждём его
     // вместо попытки читать null как файл (см. openStubItemWhenReady).
     if(!entry || !entry.fileHandle){
-      if(entry) openStubItemWhenReady(entry.name, "file");
+      if(entry) openStubItemWhenReady(entry.name, "file", restorePos, silentFallback, scrollPercent);
       return;
     }
     // снимок состояния ДО открытия заметки — если открытие пришло по
@@ -1587,13 +1721,25 @@ window.initMdEditorModule = function(deps){
     flushAutosaveNow();
     destroyEditor();
     entry.fileHandle.getFile().then(function(f){ return f.text(); }).then(function(text){
-      openFile = { fileHandle: entry.fileHandle, dirHandle: entry.dirHandle, name: entry.name, text: text, dirty: false };
+      var pos = typeof restorePos === "number" ? Math.max(0, Math.min(restorePos, text.length)) : 0;
+      var pct = typeof scrollPercent === "number" ? Math.max(0, Math.min(1, scrollPercent)) : null;
+      openFile = { fileHandle: entry.fileHandle, dirHandle: entry.dirHandle, name: entry.name, text: text, dirty: false, cursorPos: pos, scrollPercent: pct };
       screen = "editor";
       render();
+      // "продолжить с той же заметки" (см. flushDocStateNow/scheduleDocStateSave
+      // ниже) — помечаем эту заметку как текущую сразу при открытии, не
+      // дожидаясь первого редактирования: если пользователь просто закроет
+      // приложение, ничего не поправив, холодный старт всё равно вернёт
+      // сюда же.
+      persistDocStateNow({ screen: "editor", name: entry.name, cursorPos: pos, scrollPercent: pct });
+      // как и в goHome — это осознанная навигация, не рядовая правка текста
+      // под дебаунсом; пишем на диск сразу (см. writeDocStateToDiskNow).
+      writeDocStateToDiskNow();
     }).catch(function(){
       setStatus("Не удалось открыть заметку.", true);
     });
   }
+
 
   // Клик по [[ссылке]] на несуществующую заметку — сразу создаём пустой
   // файл в корне и открываем его (решение согласовано с пользователем).
@@ -1887,8 +2033,188 @@ window.initMdEditorModule = function(deps){
     });
   }
 
+  // ---------------------------------------------------------------------
+  // "Продолжить с той же заметки и с того же места" (см. ТЗ пользователя
+  // от 01.09) — отдельно от автосохранения ТЕКСТА В ФАЙЛ: здесь запоминаем,
+  // какая заметка сейчас открыта (или что пользователь ушёл на список),
+  // курсор И реальную прокрутку (в процентах — так, что "то же место"
+  // остаётся тем же и на устройстве с другой шириной экрана/переносом
+  // строк, где абсолютный пиксель ничего не значит), чтобы при следующем
+  // холодном старте (в т.ч. на ДРУГОМ устройстве через Syncthing — см.
+  // writeDocStateToDiskNow/readDocStateFromDisk ниже) открыть то же самое
+  // место (см. initFromStoredHandle). Нарочно не завязано на
+  // openFile.dirty/успешность записи текста файла — позицию надо помнить,
+  // даже если пользователь просто прокручивал/кликал, не меняя текста, и
+  // даже если сама запись текста в файл в этот момент не удалась.
+  var docStateSaveTimer = null;
+  // Ссылка на #settingsTabContent и на конкретную функцию-обработчик,
+  // навешанную на его "scroll" в mountEditor() — нужна, чтобы снять именно
+  // этот слушатель в destroyEditor() и не плодить дубликаты при каждом
+  // повторном открытии заметки/перемонтировании редактора (см. mountEditor).
+  var mdEditorScrollContainer = null;
+  var mdEditorScrollHandler = null;
+  function persistDocStateNow(patch){
+    for(var k in patch){ if(patch.hasOwnProperty(k)) docState[k] = patch[k]; }
+    docState.updatedAt = Date.now();
+    idbSet("lastNote", docState).catch(function(){});
+    scheduleDiskStateWrite();
+  }
+  // Реальная прокрутка редактора В ПРОЦЕНТАХ от прокручиваемой высоты —
+  // именно это, а не только позиция курсора, нужно, чтобы "то же место"
+  // восстанавливалось и при простом чтении/прокрутке без единого клика
+  // (см. переписку с пользователем от 01.09, пункт 1: раньше запоминалась
+  // только позиция курсора, которая при чтении без правок вообще не
+  // менялась, поэтому после возврата вкладки видно было самое начало).
+  // ИСПРАВЛЕНО (01.09, вторая попытка): у .mdeditor-editor-host/.cm-editor
+  // нет своего overflow/ограничения по высоте — редактор растягивается на
+  // всю высоту текста, поэтому cmView.scrollDOM физически никогда не
+  // скроллится (scrollHeight===clientHeight у него всегда, max<=0 — эта
+  // функция раньше всегда возвращала 0, а восстановление ниже в mountEditor
+  // по той же причине никогда не срабатывало и откатывалось на позицию
+  // курсора). Реальная прокрутка, которую видит пользователь, происходит на
+  // #settingsTabContent — том же самом элементе, что прокручивает список
+  // заметок (см. renderListScreen выше, комментарий про "домик"). Считаем
+  // процент по нему.
+  function currentScrollPercent(){
+    var sc = document.getElementById("settingsTabContent");
+    if(!sc) return null;
+    var max = sc.scrollHeight - sc.clientHeight;
+    if(max <= 0) return 0;
+    return Math.max(0, Math.min(1, sc.scrollTop / max));
+  }
+  function flushDocStateNow(){
+    if(docStateSaveTimer){ clearTimeout(docStateSaveTimer); docStateSaveTimer = null; }
+    if(!openFile || !cmView) return;
+    var pos = cmView.state.selection.main.head;
+    var pct = currentScrollPercent();
+    // ВАЖНО: mountEditor() при повторном монтировании (см. ниже) читает
+    // позицию курсора/прокрутки НАПРЯМУЮ из openFile, а не из docState —
+    // а повторное монтирование происходит не только на холодном старте, но
+    // и при обычном переключении вкладок НАСТРОЕК внутри приложения
+    // (switchSettingsTab в my.js вызывает flushPendingMdEditorEdit, а
+    // затем при возврате на вкладку "Мой блокнот" — render(), который
+    // каждый раз пересоздаёт DOM редактора и вызывает mountEditor() заново,
+    // см. renderEditorScreen). Раньше openFile.cursorPos/scrollPercent
+    // обновлялись только один раз, в момент открытия заметки, поэтому
+    // прокрутка при обычном переключении вкладок внутри приложения
+    // терялась, даже если сама заметка никуда не закрывалась. Держим оба
+    // места (openFile — для немедленного перемонтирования, docState — для
+    // холодного старта/синхронизации между устройствами) в актуальном
+    // состоянии одновременно.
+    //
+    // (Пробовали ещё view.scrollSnapshot() — не подходит: по документации
+    // CodeMirror сам метод честно предупреждает "only affects the editor's
+    // own scrollable element, not parents", а прокручивается у нас именно
+    // родитель, #settingsTabContent, а не cmView.scrollDOM — см.
+    // currentScrollPercent ниже. Настоящая причина сброса была не в
+    // способе восстановления, а в том, что flushPendingMdEditorEdit не
+    // завершал жизненный цикл предыдущего cmView, см. эту функцию и
+    // destroyEditor.)
+    openFile.cursorPos = pos;
+    openFile.scrollPercent = pct;
+    persistDocStateNow({
+      screen: "editor",
+      name: openFile.name,
+      cursorPos: pos,
+      scrollPercent: pct
+    });
+  }
+  function scheduleDocStateSave(){
+    if(docStateSaveTimer) clearTimeout(docStateSaveTimer);
+    docStateSaveTimer = setTimeout(flushDocStateNow, 500);
+  }
+
+  // ---------------------------------------------------------------------
+  // Синхронизация "того же места" МЕЖДУ УСТРОЙСТВАМИ (см. ТЗ пользователя
+  // от 01.09, пункт 3) — IndexedDB локальна для устройства/браузера и сама
+  // по себе никуда не переезжает. Пишем то же самое состояние ЕЩЁ И
+  // маленьким json-файлом в корень выбранной папки — раз пользователь и так
+  // синхронизирует эту папку через Syncthing (форк на Android), файл
+  // приедет на другое устройство сам, без какой-либо новой инфраструктуры.
+  // Имя файла с точки ("." в начале) не попадает под /\.md$/i и
+  // IMAGE_EXT_RE (см. scanTree выше), поэтому в списке заметок/картинок не
+  // отображается. Запись на диск дебаунсится (реже, чем в IndexedDB — это
+  // настоящий файловый I/O) и форсируется в flushAutosaveNow вместе с
+  // остальным автосохранением (см. ниже), чтобы гарантированно попасть на
+  // диск ДО сворачивания/закрытия вкладки, а не потеряться в замороженном
+  // таймере (та же причина, что и у visibilitychange/pagehide выше).
+  var diskStateWriteTimer = null;
+  function writeDocStateToDiskNow(){
+    if(diskStateWriteTimer){ clearTimeout(diskStateWriteTimer); diskStateWriteTimer = null; }
+    if(!dirHandle) return;
+    var payload = JSON.stringify(docState);
+    dirHandle.getFileHandle(STATE_FILE_NAME, { create: true }).then(function(fh){
+      return fh.createWritable();
+    }).then(function(w){
+      return w.write(payload).then(function(){ return w.close(); });
+    }).catch(function(){
+      // синхронизация позиции — вспомогательная функция, не мешаем
+      // основной работе (тексту заметок), если она не удалась
+    });
+  }
+  function scheduleDiskStateWrite(){
+    if(diskStateWriteTimer) clearTimeout(diskStateWriteTimer);
+    diskStateWriteTimer = setTimeout(writeDocStateToDiskNow, 1000);
+  }
+  // Читает состояние, записанное ЛЮБЫМ устройством (в т.ч. этим же) в файл
+  // на диске — вызывается один раз при холодном старте (см.
+  // initFromStoredHandle), результат сверяется по updatedAt с копией из
+  // IndexedDB, побеждает более свежая (см. там же).
+  // "Продолжить с той же заметки и с того же места" после того, как
+  // rootTree только что просканирован — общая логика, вынесенная из
+  // initFromStoredHandle (ветка без кэшированного stub-дерева, см. там же),
+  // чтобы её же можно было переиспользовать из renderSetupScreen: раньше
+  // холодный старт, требующий повторного requestPermission() (пользователь
+  // должен САМ нажать на скрепку, см. ТЗ пользователя от 01.09, пункт 4),
+  // просто открывал список заметок, вообще не читая docState — восстановление
+  // срабатывало только в "тихой" ветке (ensurePermissionSilently === true).
+  // Именно поэтому "продолжить с той же заметки" переживало переключение
+  // вкладок (docState живёт в памяти модуля, см. выше), но не переживало
+  // закрытие всего приложения, если разрешение на папку приходилось
+  // подтверждать заново.
+  function resumeLastNoteOrShowList(){
+    var diskStatePromise = readDocStateFromDisk();
+    var localState = null;
+    return Promise.resolve().then(function(){
+      try{ return idbGet("lastNote"); }catch(e){ return null; }
+    }).then(function(v){
+      localState = v;
+      return diskStatePromise;
+    }).catch(function(){
+      return diskStatePromise;
+    }).then(function(diskState){
+      var resolvedState = localState;
+      if(diskState && (!localState || (diskState.updatedAt || 0) > (localState.updatedAt || 0))){
+        resolvedState = diskState;
+      }
+      for(var k in resolvedState){ if(resolvedState.hasOwnProperty(k)) docState[k] = resolvedState[k]; }
+      var lastNote = docState;
+      var resumedEntry = (lastNote.screen === "editor" && lastNote.name) ? nameIndex.get(lastNote.name.toLowerCase()) : null;
+      if(resumedEntry){
+        openNoteByEntry(resumedEntry, lastNote.cursorPos, undefined, lastNote.scrollPercent);
+      } else {
+        screen = "list";
+        render();
+      }
+    });
+  }
+
+  function readDocStateFromDisk(){
+    if(!dirHandle) return Promise.resolve(null);
+    return dirHandle.getFileHandle(STATE_FILE_NAME, { create: false }).then(function(fh){
+      return fh.getFile();
+    }).then(function(f){ return f.text(); }).then(function(text){
+      try{
+        var parsed = JSON.parse(text);
+        return (parsed && typeof parsed === "object") ? parsed : null;
+      }catch(e){ return null; }
+    }).catch(function(){ return null; });
+  }
+
   function flushAutosaveNow(){
     if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
+    flushDocStateNow();
+    writeDocStateToDiskNow();
     if(!openFile || !cmView || !openFile.dirty) return;
     var text = stripStraySlashBeforeLinks(stripInvisibleSpaces(cmView.state.doc.toString()));
     var fileRef = openFile;
@@ -1909,14 +2235,44 @@ window.initMdEditorModule = function(deps){
   }
 
   // вызывается из общего блока flush* в switchSettingsTab (my.js) при
-  // любом уходе со вкладки настроек
+  // любом уходе со вкладки настроек.
+  // ИСПРАВЛЕНО (01.09, четвёртая попытка): раньше здесь только сохранялось
+  // состояние (flushAutosaveNow), а сам cmView оставался висеть "живым",
+  // хотя его DOM тут же подменялся содержимым другой вкладки настроек
+  // (switchSettingsTab перезаписывает #settingsTabContent.innerHTML сразу
+  // после этого вызова). Из-за этого при СЛЕДУЮЩЕМ вызове
+  // flushPendingMdEditorEdit (когда пользователь уходит уже СО ВТОРОЙ
+  // вкладки, например уходит с "Закладок" обратно на "Мой блокнот") здесь
+  // видели тот же самый, но уже "протухший" cmView (проверка "if(!openFile
+  // || !cmView) return" в flushDocStateNow его не отсекала) и на этом
+  // основании ещё раз считали currentScrollPercent() — а физически
+  // #settingsTabContent в этот момент содержит DOM СОВСЕМ ДРУГОЙ вкладки
+  // (той, с которой уходим), а не редактор. В итоге только что правильно
+  // сохранённая позиция заметки перезатиралась мусорным значением (обычно
+  // 0, т.к. чужая вкладка обычно ещё не прокручена) ещё ДО того, как
+  // mountEditor() успевал её восстановить при возврате — то есть
+  // восстановление ломалось на ровном месте при каждом переключении.
+  // Заодно "протухший" cmView, ни разу не уничтоженный, мог продолжать
+  // слать измерения от старого (уже отсоединённого от DOM) редактора,
+  // что и объясняет замеченные отступы сверху/снизу при новом монтировании.
+  // Решение: полноценно завершать жизненный цикл редактора здесь же, сразу
+  // после сохранения — destroyEditor() обнуляет cmView, так что повторный
+  // вызов этой функции (с другой, чужой вкладки) становится безопасным
+  // no-op'ом благодаря той же самой проверке "if(!cmView) return".
   function flushPendingMdEditorEdit(){
     flushAutosaveNow();
+    destroyEditor();
   }
 
   function destroyEditor(){
     if(cmView){ cmView.destroy(); cmView = null; }
+    if(mdEditorImageResizeObserver){ mdEditorImageResizeObserver.disconnect(); mdEditorImageResizeObserver = null; }
     if(linksDebounceTimer){ clearTimeout(linksDebounceTimer); linksDebounceTimer = null; }
+    if(mdEditorScrollContainer && mdEditorScrollHandler){
+      mdEditorScrollContainer.removeEventListener("scroll", mdEditorScrollHandler);
+    }
+    mdEditorScrollContainer = null;
+    mdEditorScrollHandler = null;
   }
 
   // ---------------------------------------------------------------------
@@ -1960,6 +2316,36 @@ window.initMdEditorModule = function(deps){
     // rescan/buildIndex выше) и кэшируется в imageUrlCache по имени, чтобы
     // не перечитывать файл на каждую перестройку decorations (она
     // происходит при любом изменении документа, даже не в этой строке). ----
+    // Обтекание текстом (см. .cm-md-image-float в components.css). Порог
+    // в 150px — не CSS (обычный float обтекается при ЛЮБОМ оставшемся
+    // месте, хоть 5px, и текст превращается в узкую нечитаемую колонку),
+    // поэтому решение "включать float или нет" считаем сами: доступная
+    // ширина строки минус фактическая ширина картинки (⩽600px, см.
+    // .cm-md-image-wrap) должна быть не меньше порога. wrap.parentElement
+    // — это сам .cm-line редактора: его clientWidth не зависит от того,
+    // floated картинка внутри него или нет (float не меняет ширину
+    // собственного родителя), так что измерение не "скачет" при
+    // переключении класса туда-обратно.
+    var IMAGE_FLOAT_MIN_GAP = 150;
+    var IMAGE_MAX_WIDTH = 600;
+    function applyImageFloatLayout(wrap){
+      var img = wrap.querySelector(".cm-md-image");
+      var line = wrap.parentElement;
+      if(!img || !img.naturalWidth || !line) return;
+      var lineWidth = line.clientWidth;
+      if(!lineWidth) return;
+      var imgWidth = Math.min(img.naturalWidth, IMAGE_MAX_WIDTH, lineWidth);
+      wrap.classList.toggle("cm-md-image-float", (lineWidth - imgWidth) >= IMAGE_FLOAT_MIN_GAP);
+    }
+    // Пересчёт всех картинок сразу — при изменении ширины редактора
+    // (поворот планшета, изменение ширины окна настроек и т.п., см.
+    // ResizeObserver в mountEditor). Картинки, которые ещё не
+    // загрузились (img.naturalWidth === 0), applyImageFloatLayout молча
+    // пропускает — досчитаются сами по своему load (ниже).
+    function relayoutImageFloats(host){
+      var wraps = host.querySelectorAll(".cm-md-image-wrap");
+      for(var i = 0; i < wraps.length; i++) applyImageFloatLayout(wraps[i]);
+    }
     function ImageWidget(name){ this.name = name; }
     ImageWidget.prototype = Object.create(WidgetType.prototype);
     ImageWidget.prototype.eq = function(other){ return other.name === this.name; };
@@ -1969,6 +2355,14 @@ window.initMdEditorModule = function(deps){
       var img = document.createElement("img");
       img.className = "cm-md-image";
       img.alt = this.name;
+      // Реальный размер (а значит и решение float/block) известен только
+      // после загрузки — до этого картинка либо ещё не выбрана из кэша
+      // (imageUrlCache), либо .cm-md-image-loading-заглушка вообще без
+      // <img>. requestAnimationFrame — чтобы clientWidth строки успел
+      // посчитаться после того, как виджет реально встал в DOM.
+      img.addEventListener("load", function(){
+        requestAnimationFrame(function(){ applyImageFloatLayout(wrap); });
+      });
       wrap.appendChild(img);
       loadImageInto(this.name, img, wrap);
       return wrap;
@@ -2392,11 +2786,77 @@ window.initMdEditorModule = function(deps){
           keymap.of(defaultKeymap.concat(historyKeymap, [indentWithTab])),
           EditorView.lineWrapping,
           livePreviewCompartment.of(codeMode ? [] : [makeLivePreviewExtension(cm)]),
-          EditorView.updateListener.of(function(u){ if(u.docChanged){ scheduleAutosave(); scheduleLinksFieldRefresh(); } }),
+          EditorView.updateListener.of(function(u){
+            if(u.docChanged){
+              // Реальное нажатие клавиши — в отличие от открытия заметки
+              // кликом (см. openNoteByEntry), при автоматическом
+              // восстановлении последней заметки на холодном старте (см.
+              // initFromStoredHandle) открытие происходит БЕЗ клика, так
+              // что там reverifyWritePermissionOnce() мог не сработать
+              // (нет user activation). Здесь же, на docChanged, activation
+              // гарантированно есть — это подстраховка именно для такого
+              // автовосстановленного случая.
+              reverifyWritePermissionOnce();
+              scheduleAutosave();
+              scheduleLinksFieldRefresh();
+            }
+            if(u.docChanged || u.selectionSet) scheduleDocStateSave();
+          }),
           EditorView.domEventHandlers({ mousedown: handleMouseDown })
         ];
-        var state = EditorState.create({ doc: openFile.text, extensions: extensions });
+        var initialPos = Math.max(0, Math.min(openFile.cursorPos || 0, openFile.text.length));
+        var state = EditorState.create({ doc: openFile.text, selection: { anchor: initialPos }, extensions: extensions });
         cmView = new EditorView({ state: state, parent: host });
+        // Ширина редактора может измениться не только от ввода текста
+        // (что и так пересчитывает decorations) — поворот планшета,
+        // изменение ширины окна настроек (layoutSettingsModal в my.js) и
+        // т.п. тоже должны пересчитать float/block-режим у уже
+        // вставленных картинок (см. cm-md-image-float в components.css).
+        if(mdEditorImageResizeObserver){ mdEditorImageResizeObserver.disconnect(); mdEditorImageResizeObserver = null; }
+        if(typeof ResizeObserver !== "undefined"){
+          mdEditorImageResizeObserver = new ResizeObserver(function(){ relayoutImageFloats(host); });
+          mdEditorImageResizeObserver.observe(host);
+        }
+        // Обычная прокрутка БЕЗ клика/движения курсора (просто чтение) тоже
+        // должна запоминаться — иначе "то же место" остаётся только позицией
+        // курсора, которая при чтении не меняется вовсе (см. ТЗ пользователя
+        // от 01.09, пункт 1: после сворачивания/возврата вкладки заметка
+        // оказывалась прокручена в начало, хотя курсор и правда стоял там же,
+        // где его в последний раз кто-то поставил).
+        // ИСПРАВЛЕНО (01.09, вторая попытка): слушать нужно НЕ
+        // cmView.scrollDOM (у .cm-editor нет ограничения по высоте, он
+        // растёт на весь текст и физически никогда не скроллится — см.
+        // currentScrollPercent выше), а #settingsTabContent — реальный
+        // прокручиваемый элемент вкладки. Слушатель снимается в
+        // destroyEditor() при уходе с заметки/вкладки, чтобы не копились
+        // дубликаты при каждом повторном mountEditor().
+        var scrollContainer = document.getElementById("settingsTabContent");
+        if(scrollContainer){
+          if(mdEditorScrollContainer && mdEditorScrollHandler){
+            mdEditorScrollContainer.removeEventListener("scroll", mdEditorScrollHandler);
+          }
+          mdEditorScrollHandler = function(){ scheduleDocStateSave(); };
+          mdEditorScrollContainer = scrollContainer;
+          scrollContainer.addEventListener("scroll", mdEditorScrollHandler, { passive: true });
+        }
+        // Восстановление позиции при открытии/перемонтировании —
+        // приоритет у сохранённого процента прокрутки (openFile.
+        // scrollPercent), а если его нет (совсем новая заметка) —
+        // scrollIntoView по позиции курсора. (Пробовали cmView.
+        // scrollSnapshot() — не годится для нашего случая, см. комментарий
+        // в flushDocStateNow: он работает только с прокруткой самого
+        // редактора, а не объемлющего #settingsTabContent.)
+        var restorePercent = openFile.scrollPercent;
+        requestAnimationFrame(function(){
+          if(!cmView) return;
+          var sc = document.getElementById("settingsTabContent");
+          var max = sc ? sc.scrollHeight - sc.clientHeight : 0;
+          if(sc && typeof restorePercent === "number" && max > 0){
+            sc.scrollTop = restorePercent * max;
+          } else {
+            cmView.dispatch({ effects: EditorView.scrollIntoView(initialPos, { y: "center" }) });
+          }
+        });
       }catch(e){
         setStatus("Не удалось запустить редактор: " + (e && e.message ? e.message : e), true);
       }
@@ -2450,6 +2910,10 @@ window.initMdEditorModule = function(deps){
     renderSettingsTabMdBookmarks: renderSettingsTabMdBookmarks,
     flushPendingMdEditorEdit: flushPendingMdEditorEdit,
     openNoteExternally: openNoteExternally,
+    // вызывается извне (см. rerenderAllFromState в my.js) после того, как
+    // облачная синхронизация приносит state, отличающийся от локального —
+    // например, закладку добавили на другом устройстве.
+    refreshBookmarksFromState: refreshBookmarksFromState,
     // используются кнопками "Аа"/"Ж" на вкладках задач (см.
     // initTaskGlobalToolbar в my.js и ТЗ пользователя от 31.08) — тот же
     // общий размер шрифта и то же форматирование выделения, что и в

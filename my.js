@@ -752,6 +752,40 @@
     scheduleCloudPush();
   }
 
+  // ===================== ЗАКЛАДКИ "МОЕГО БЛОКНОТА" (md-заметки) =====================
+  // Раньше жили только в IndexedDB (см. mdeditor.js), локально для этого
+  // устройства/браузера — теперь синхронизируются в облаке вместе со
+  // всеми остальными данными приложения (см. ТЗ пользователя от 01.09),
+  // тем же путём и тем же способом, что и переключатели настроек выше:
+  // каждое имя заметки — отдельный ключ этого же state с префиксом
+  // MD_BOOKMARK_PREFIX (по тому же принципу, что и отдельная глава —
+  // отдельный ключ chapterKey выше), поэтому слияние с облаком идёт
+  // ПОИМЕННО: закладка, добавленная на одном устройстве между двумя
+  // синхронизациями, не теряется из-за закладки, добавленной тем временем
+  // на другом. Само наличие заметки ЛОКАЛЬНО на конкретном устройстве
+  // (файл может быть ещё не синхронизирован туда через Syncthing) эти
+  // функции не проверяют — этим занимается mdeditor.js при отображении
+  // списка (см. renderBookmarksScreen там же): закладка на несуществующий
+  // локально файл просто не показывается, а не удаляется отсюда.
+  var MD_BOOKMARK_PREFIX = "__mdBookmark:";
+  function getSyncedBookmarkNames(){
+    var names = [];
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf(MD_BOOKMARK_PREFIX) === 0 && state[k] && state[k].c) names.push(k.slice(MD_BOOKMARK_PREFIX.length));
+    });
+    return names;
+  }
+  function setSyncedBookmark(name, bookmarked){
+    // как и у остальных булевых значений в state (см.
+    // setColorMarkEnabled выше) — снятие закладки пишется как {c:false,...},
+    // а не удалением ключа: если ключ просто удалить, при следующем
+    // слиянии со старой облачной копией (ещё с {c:true,...} и более
+    // ранней меткой времени) закладка неожиданно вернулась бы обратно.
+    state[MD_BOOKMARK_PREFIX + name] = {c: !!bookmarked, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+  }
+
   // ===================== ДОПОЛНИТЕЛЬНЫЕ АНИМАЦИИ =====================
   // Настройка "Включить дополнительные анимации" (вкладка настроек,
   // шестерёнка). Пока управляет только диагональной "волной" открытия/
@@ -1621,6 +1655,13 @@
     renderGoalsSection();
     renderAddGoalMenu();
     refreshYearGridIfOpen();
+    // "Закладки" md-редактора тоже часть этого же state (см.
+    // getSyncedBookmarkNames/setSyncedBookmark выше) — после слияния с
+    // облаком (единственный случай, когда rerenderAllFromState вообще
+    // вызывается) нужно перечитать их и, если открыт список заметок/
+    // вкладка "Закладки", перерисовать (см. refreshBookmarksFromState в
+    // mdeditor.js).
+    if(MdEditor && MdEditor.refreshBookmarksFromState) MdEditor.refreshBookmarksFromState();
   }
 
   // ===================== СБРОС ПРОГРЕССА =====================
@@ -2021,7 +2062,13 @@
     // объявлена ниже (function-декларация, поднимается в начало этой же
     // IIFE), поэтому ссылаться на неё здесь, до её текстового объявления,
     // безопасно.
-    refitAllVisibleTaskBodies: refitAllVisibleTaskBodies
+    refitAllVisibleTaskBodies: refitAllVisibleTaskBodies,
+    // закладки "Моего блокнота" — теперь синхронизируются в облаке через
+    // тот же state/saveLocalState/scheduleCloudPush, что и остальные
+    // данные приложения (см. getSyncedBookmarkNames/setSyncedBookmark
+    // выше и ТЗ пользователя от 01.09).
+    getSyncedBookmarkNames: getSyncedBookmarkNames,
+    setSyncedBookmark: setSyncedBookmark
   });
   var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
   var renderSettingsTabMdBookmarks = MdEditor.renderSettingsTabMdBookmarks;
@@ -3221,7 +3268,15 @@
     settingsModalBox.style.marginTop = "";
     var gearBtn = document.getElementById("settingsGearBtn");
     if(gearBtn) gearBtn.classList.add("is-open");
-    switchSettingsTab(getShowAllTasksEnabled() ? "red" : "gear");
+    // "продолжить с того же места" (см. getResumeSettingsState выше) —
+    // вместо того, чтобы всегда открывать окно на вкладке "настройки"/
+    // "красные" задачи, показываем набор и вкладку, на которых человек
+    // остановился в прошлый раз, даже если приложение успели закрыть
+    // полностью.
+    var resume = getResumeSettingsState();
+    settingsActiveTabSet = resume.set;
+    applySettingsTabSetVisibility();
+    switchSettingsTab(resume.tab);
     var extraAnim = getExtraAnimationsEnabled();
     if(extraAnim){
       // Геометрию волны (updateSettingsWaveGeometry) нельзя мерить прямо
@@ -3365,6 +3420,11 @@
     }
   }
   function closeSettingsModal(){
+    // сбрасываем ограничитель цикла язычка-кнопки (см.
+    // fabDidSwitchSetSinceOpen выше) на КАЖДОМ закрытии, независимо от
+    // того, чем оно вызвано (язычок, клик мимо окна, жест "назад") — так
+    // следующее открытие снова начинает цикл с самого начала.
+    fabDidSwitchSetSinceOpen = false;
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
@@ -3431,6 +3491,10 @@
     if(SETTINGS_SIDE_ORDER_1.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(tab) !== -1 ||
        SETTINGS_SIDE_ORDER_2.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_2.indexOf(tab) !== -1){
       settingsLastStackTab = tab;
+      // тоже в localStorage — settingsLastStackTab сам живёт только в
+      // памяти вкладки и не переживает перезапуск приложения (см.
+      // getResumeSettingsState/SETTINGS_LAST_TAB_KEY выше).
+      try{ localStorage.setItem(SETTINGS_LAST_TAB_KEY, tab); }catch(e){}
     }
     var gearBtn = document.getElementById("settingsTabGearBtn");
     var yearBtn = document.getElementById("settingsTabYearBtn");
@@ -4010,6 +4074,23 @@
   // хранится — следующее открытие всегда начинается с набора 1 (см. ветку
   // "иначе" в обработчике клика).
   var settingsActiveTabSet = 1;
+  // Запоминает набор вкладок (1 или 2) и саму последнюю реальную вкладку
+  // (см. settingsLastStackTab ниже) в localStorage, а не только в памяти —
+  // переживает закрытие всего приложения (см. ТЗ пользователя от 01.09,
+  // пункт 2: "при открытии приложения пусть всегда запускается та же
+  // вкладка, на которой человек был в последний раз", независимо от того,
+  // включены ли дополнительные вкладки/инструменты). Читается в
+  // getResumeSettingsState ниже.
+  var SETTINGS_LAST_SET_KEY = "bibleSettingsLastTabSet_v1";
+  var SETTINGS_LAST_TAB_KEY = "bibleSettingsLastTab_v1";
+  // Взводится после первого переключения набора язычком-кнопкой
+  // (settingsGearBtn) с момента, как блокнот был открыт, и сбрасывается
+  // при каждом закрытии (см. closeSettingsModal) — ограничивает цикл
+  // язычка ДВУМЯ шагами вместо бесконечного 1<->2 (см. ТЗ пользователя от
+  // 01.09, пункт 1): открытие показывает последний использованный набор,
+  // следующий клик переключает на другой набор, а клик ПОСЛЕ этого уже
+  // сворачивает окно, а не возвращает обратно.
+  var fabDidSwitchSetSinceOpen = false;
   // Полный порядок позиций в каждом из 4 стеков (боковой/нижний × набор
   // 1/2), от первого места до последнего — используется и для запоминания
   // позиции (см. settingsLastStackTab), и для поиска "того же места" в
@@ -4069,6 +4150,7 @@
     if(set1Bottom) set1Bottom.style.display = showSet1 ? "" : "none";
     if(set2Side) set2Side.style.display = showSet1 ? "none" : "";
     if(set2Bottom) set2Bottom.style.display = showSet1 ? "none" : "";
+    try{ localStorage.setItem(SETTINGS_LAST_SET_KEY, String(settingsActiveTabSet)); }catch(e){}
   }
   // вызывается кликом по язычку-кнопке, когда блокнот уже открыт —
   // переключает набор и открывает вкладку нового набора на той же позиции,
@@ -4088,6 +4170,37 @@
       target = "gear";
     }
     switchSettingsTab(target);
+  }
+
+  // "Продолжить с того же места" (см. ТЗ пользователя от 01.09, пункт 2) —
+  // вычисляет, какой набор и какую именно вкладку нужно показать при
+  // ОТКРЫТИИ окна настроек (вызывается из openSettingsModal ниже, поэтому
+  // действует одинаково независимо от того, чем именно вызвано открытие:
+  // язычком-кнопкой или программно после промежуточной модалки), опираясь
+  // на то, что сохранено в localStorage (см. SETTINGS_LAST_SET_KEY/
+  // SETTINGS_LAST_TAB_KEY выше) — в отличие от settingsActiveTabSet/
+  // settingsLastStackTab, эти сохранённые значения переживают полное
+  // закрытие приложения. С проверкой, что сохранённая вкладка сейчас
+  // вообще доступна (набор 2 разблокирован кодом, вкладки задач набора 1
+  // не спрятаны галочкой "Показать все мои задачи") — если недоступна,
+  // используется вкладка по умолчанию того же набора, как и раньше.
+  function getResumeSettingsState(){
+    var savedTab = null, savedSet = 1;
+    try{ savedTab = localStorage.getItem(SETTINGS_LAST_TAB_KEY); }catch(e){}
+    try{ savedSet = (localStorage.getItem(SETTINGS_LAST_SET_KEY) === "2") ? 2 : 1; }catch(e){}
+    if(savedSet === 2 && !isSet2Unlocked()){ savedSet = 1; savedTab = null; }
+    if(savedTab && TASK_TAB_IDS.hasOwnProperty(savedTab) && !getShowAllTasksEnabled()){
+      savedTab = null;
+    }
+    if(savedTab){
+      var belongsToSet1 = SETTINGS_SIDE_ORDER_1.indexOf(savedTab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(savedTab) !== -1;
+      var belongsToSet2 = SETTINGS_SIDE_ORDER_2.indexOf(savedTab) !== -1 || SETTINGS_BOTTOM_ORDER_2.indexOf(savedTab) !== -1;
+      if((savedSet === 1 && !belongsToSet1) || (savedSet === 2 && !belongsToSet2)) savedTab = null;
+    }
+    if(!savedTab){
+      savedTab = (savedSet === 1) ? (getShowAllTasksEnabled() ? "red" : "gear") : "set2b_1";
+    }
+    return { set: savedSet, tab: savedTab };
   }
 
   function renderSettingsTabGear(){
@@ -4378,19 +4491,23 @@
   if(settingsGearBtn) settingsGearBtn.addEventListener("click", function(){
     if(settingsModalOverlay && settingsModalOverlay.classList.contains("open")){
       // блокнот уже открыт: если второй набор вкладок разблокирован кодом —
-      // переключаем набор по кругу (1 -> 2 -> 1 -> ...), блокнот не
-      // закрывается. Если не разблокирован — второго набора для этого
-      // пользователя как будто не существует, поэтому повторный клик по
-      // язычку просто сворачивает блокнот (как обычное закрытие).
-      if(isSet2Unlocked()){
+      // ОДИН раз переключаем набор (см. fabDidSwitchSetSinceOpen выше), а
+      // при следующем клике сворачиваем блокнот, а не крутим набор дальше
+      // по кругу (см. ТЗ пользователя от 01.09, пункт 1: полный цикл
+      // "набор, на котором остановились -> другой набор -> сворачивание").
+      // Если второй набор не разблокирован — второго набора для этого
+      // пользователя как будто не существует, поэтому клик по язычку
+      // сразу сворачивает блокнот (как и раньше).
+      if(isSet2Unlocked() && !fabDidSwitchSetSinceOpen){
         cycleSettingsTabSet();
+        fabDidSwitchSetSinceOpen = true;
       } else {
         closeSettingsModal();
       }
     } else {
-      // новое открытие всегда начинается с первого набора вкладок
-      settingsActiveTabSet = 1;
-      applySettingsTabSetVisibility();
+      // открытие показывает набор и вкладку, на которых человек
+      // остановился в прошлый раз (см. openSettingsModal/
+      // getResumeSettingsState выше) — переживает и закрытие приложения.
       openSettingsModal();
     }
   });
