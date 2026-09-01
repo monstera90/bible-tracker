@@ -1811,14 +1811,45 @@ window.initMdEditorModule = function(deps){
     return !!(e && (e.name === "InvalidStateError" || e.name === "NotReadableError") &&
       /state had changed since it was read from disk/i.test((e.message || "")));
   }
-  function writeFileText(fileRef, text, isRetry){
+  // Отдельный случай (в отличие от isStaleHandleError выше) — планшеты
+  // Android чаще ЗАМОРАЖИВАЮТ вкладку в фоне, а не убивают её целиком (в
+  // отличие от телефонов с меньшим запасом RAM): JS-состояние (dirHandle,
+  // openFile) остаётся как есть, но SAF-провайдер (отдельный процесс ОС,
+  // через который Android резолвит content-URI под хендлами) тем временем
+  // может быть перезапущен системой независимо от вкладки. Первая же
+  // попытка записи после разморозки вкладки иногда попадает на ещё не
+  // "прогретый" провайдер и кидает DOMException NotFoundError ("A
+  // requested file or directory could not be found..."), хотя реального
+  // отзыва разрешения нет (queryPermission() в этот момент всё ещё вернул
+  // бы "granted") — лечится так же, как и stale handle выше: заново
+  // получить свежий fileHandle у dirHandle и повторить запись, но с
+  // небольшой задержкой перед повтором (провайдеру нужна доля секунды на
+  // переподключение) и до двух попыток вместо одной, т.к. это не
+  // одномоментная "порча" хендла, а именно гонка с ещё не готовым
+  // провайдером.
+  function isTransientNotFoundError(e){
+    return !!(e && e.name === "NotFoundError" &&
+      /could not be found/i.test((e.message || "")));
+  }
+  function delay(ms){ return new Promise(function(res){ setTimeout(res, ms); }); }
+  function writeFileText(fileRef, text, attempt){
+    attempt = attempt || 0;
     return fileRef.fileHandle.createWritable().then(function(w){
       return w.write(text).then(function(){ return w.close(); });
     }).catch(function(e){
-      if(isStaleHandleError(e) && !isRetry && fileRef.dirHandle && fileRef.name){
+      var canRetry = fileRef.dirHandle && fileRef.name && attempt < 2;
+      if(canRetry && isStaleHandleError(e)){
         return fileRef.dirHandle.getFileHandle(fileRef.name, { create:false }).then(function(freshHandle){
           fileRef.fileHandle = freshHandle;
-          return writeFileText(fileRef, text, true);
+          return writeFileText(fileRef, text, attempt + 1);
+        });
+      }
+      if(canRetry && isTransientNotFoundError(e)){
+        return delay(250 * (attempt + 1)).then(function(){
+          return fileRef.dirHandle.getFileHandle(fileRef.name, { create:false }).then(function(freshHandle){
+            fileRef.fileHandle = freshHandle;
+            return writeFileText(fileRef, text, attempt + 1);
+          });
         });
       }
       throw e;
@@ -2341,6 +2372,46 @@ window.initMdEditorModule = function(deps){
     }).catch(function(e){
       setStatus("Не удалось загрузить редактор (нужен интернет при первом запуске): " + (e && e.message ? e.message : e), true);
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // Сброс несохранённых правок ПЕРЕД уходом вкладки в фон — раньше
+  // автосохранение срабатывало только по debounce-таймеру (700мс) и при
+  // явной навигации внутри самого редактора (goHome, смена заметки),
+  // поэтому правка, сделанная прямо перед сворачиванием/переключением
+  // приложений на планшете, могла попасть ровно в то окно, где Android
+  // замораживает вкладку, не дав debounce-таймеру сработать. visibilitychange
+  // в "hidden" срабатывает синхронно и раньше, чем ОС успевает заморозить
+  // страницу, pagehide — подстраховка на случай, если вкладку не просто
+  // сворачивают, а закрывают/выгружают. Оба события дёшевы при "нечего
+  // сохранять" (flushAutosaveNow сам проверяет openFile.dirty).
+  document.addEventListener("visibilitychange", function(){
+    if(document.visibilityState === "hidden") flushAutosaveNow();
+  });
+  window.addEventListener("pagehide", function(){ flushAutosaveNow(); });
+
+  // При возврате вкладки из фона (см. комментарий у isTransientNotFoundError
+  // выше) SAF-провайдер на планшетах иногда ещё не "прогрелся" — обычный
+  // queryPermission() тут не помогает, он спрашивает про разрешение, а не
+  // про готовность провайдера резолвить документ. Пробуем один раз тихо
+  // прогреть провайдер безобидным чтением каталога files сразу после
+  // возврата, чтобы, если он ещё не готов, наткнуться на NotFoundError
+  // именно здесь (без всякого влияния на пользователя), а не в момент
+  // следующего автосохранения. Ошибку намеренно проглатываем — это только
+  // попытка прогрева, не диагностика.
+  document.addEventListener("visibilitychange", function(){
+    if(document.visibilityState === "visible" && dirHandle){
+      ensureFilesFolder().catch(function(){});
+    }
+  });
+
+  // Просим постоянное (persistent) хранилище для origin — это не влияет
+  // напрямую на разрешение SAF на папку с заметками, но снижает риск,
+  // что браузер под давлением на память сам решит вытеснить данные origin'а
+  // (IndexedDB и с ним — сохранённый dirHandle), что было бы уже настоящей
+  // потерей доступа, а не временной. Дешёвая подстраховка, без гарантии.
+  if(navigator.storage && navigator.storage.persist){
+    navigator.storage.persist().catch(function(){});
   }
 
   return {
