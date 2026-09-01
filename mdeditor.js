@@ -49,6 +49,13 @@ window.initMdEditorModule = function(deps){
   var ARROW_MOVE_ICON_SVG = deps.ARROW_MOVE_ICON_SVG || "";
   var createArchivedTaskWithText = deps.createArchivedTaskWithText || null;
   var openTaskMoveTargetPicker = deps.openTaskMoveTargetPicker || null;
+  // пересчёт подгонки кнопок задач (см. fitTaskActions/refitAllVisibleTaskBodies
+  // в my.js) — нужен здесь же, а не только в initTaskGlobalToolbar (my.js), т.к.
+  // размер шрифта может смениться АСИНХРОННО ниже (idbGet("fontSizeStep") при
+  // старте приложения), в момент, когда вкладка задач уже отрисована со
+  // старым (по умолчанию) размером — без этого вызова кнопки остаются
+  // подогнаны под УЖЕ неверную (старую) разбивку текста на строки.
+  var refitAllVisibleTaskBodies = deps.refitAllVisibleTaskBodies || function(){};
 
   // Ищет библейскую ссылку в строке, под которой находится offset (символ
   // клика) — используется и для decorations (см. makeLivePreviewExtension),
@@ -334,9 +341,24 @@ window.initMdEditorModule = function(deps){
   var fontSizePanelOpen = false; // временные кнопки "+"/"-" сейчас показаны?
   var formatPanelOpen = false; // попап "Ж"/"К"/"П"/"Ч" сейчас показан?
 
+  // Пересчитывает подгонку кнопок ВСЕХ уже отрисованных строк задач при
+  // каждом изменении размера шрифта — не только по клику "Аа"/"+"/"-"
+  // (changeFontSizeStep ниже), но и при самом первом, АСИНХРОННОМ
+  // применении сохранённого размера при старте (см. idbGet ниже): до того,
+  // как он придёт из IndexedDB, задачи успевают отрисоваться с временным
+  // размером по умолчанию (FONT_SIZE_BASE_PX, шаг 0) — см. комментарий
+  // выше про "короткое время показывались бы со старым размером". Именно
+  // в этот момент .task-actions (см. fitTaskActions в my.js) уже
+  // подогнаны под ЭТУ, временную, разбивку текста на строки; когда чуть
+  // позже применяется настоящий сохранённый размер и текст перетекает
+  // по-другому, без повторного вызова refitAllVisibleTaskBodies кнопки
+  // остаются на старом месте — отсюда и лишний перенос кнопок на
+  // отдельную строку даже там, где после реального размера шрифта места
+  // достаточно (см. ТЗ пользователя от 31.08).
   function applyFontSize(){
     var px = (FONT_SIZE_BASE_PX + fontSizeStep * FONT_SIZE_STEP_PX) + "px";
     document.documentElement.style.setProperty("--mdeditor-font-size", px);
+    refitAllVisibleTaskBodies();
   }
   function changeFontSizeStep(delta){
     var next = fontSizeStep + delta;
@@ -1739,7 +1761,9 @@ window.initMdEditorModule = function(deps){
   function scheduleAutosave(){
     if(!openFile) return;
     openFile.dirty = true;
-    setStatus("Сохранение…", false);
+    // сохраняется молча (см. ТЗ пользователя от 31.08) — статус
+    // "Сохранение…" больше не показывается, только реальная ошибка
+    // сохранения (см. setStatus(..., true) в flushAutosaveNow ниже).
     if(saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(function(){ flushAutosaveNow(); }, 700);
   }
@@ -1759,17 +1783,34 @@ window.initMdEditorModule = function(deps){
     return str.replace(INVISIBLE_SPACE_RE, " ");
   }
 
+  // У части заметок в тексте остался лишний "/" прямо перед [[ссылкой]] —
+  // след старого формата ссылок на тему (см. ТЗ пользователя от 31.08,
+  // скриншот с "/[[себялюбие]]"): само по себе "/" здесь ничего не
+  // значит и в текущем формате [[Название]] не участвует, поэтому просто
+  // убирается, чтобы получилось "[[Название]]". Чистится тем же приёмом,
+  // что и невидимые пробелы выше — при каждом автосохранении.
+  var STRAY_SLASH_BEFORE_LINK_RE = /\/\[\[/g;
+  function stripStraySlashBeforeLinks(str){
+    return str.replace(STRAY_SLASH_BEFORE_LINK_RE, "[[");
+  }
+
   function flushAutosaveNow(){
     if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
     if(!openFile || !cmView || !openFile.dirty) return;
-    var text = stripInvisibleSpaces(cmView.state.doc.toString());
+    var text = stripStraySlashBeforeLinks(stripInvisibleSpaces(cmView.state.doc.toString()));
     var fileRef = openFile;
     fileRef.dirty = false;
     openFile.fileHandle.createWritable().then(function(w){
       return w.write(text).then(function(){ return w.close(); });
     }).then(function(){
       fileRef.text = text;
-      if(openFile === fileRef) setStatus("Сохранено.", false);
+      // сохраняется молча (см. ТЗ пользователя от 31.08) — раньше здесь
+      // показывалось "Сохранено.", теперь просто гасим статус (пустая
+      // строка), ничего не показывая. Не убираем вызов setStatus совсем,
+      // а не оставляем прежний текст: если до этого показывалась ошибка
+      // предыдущей попытки сохранения, успешное сохранение должно её
+      // погасить, а не оставить висеть навсегда.
+      if(openFile === fileRef) setStatus("", false);
     }).catch(function(e){
       fileRef.dirty = true;
       if(openFile === fileRef) setStatus("Не удалось сохранить: " + (e && e.message ? e.message : e), true);
