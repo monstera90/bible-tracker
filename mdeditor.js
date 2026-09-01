@@ -1533,7 +1533,37 @@ window.initMdEditorModule = function(deps){
   // ---------------------------------------------------------------------
   // Открытие заметки / переход по [[ссылке]]
   // ---------------------------------------------------------------------
+  // ---------------------------------------------------------------------
+  // Переактивация ПРАВА НА ЗАПИСЬ реальным requestPermission() — один раз
+  // за сессию, при первом клике по заметке (см. переписку с пользователем:
+  // подтверждено тестированием, что именно это чинит проблему). Дело в
+  // том, что queryPermission() при холодном старте (см.
+  // ensurePermissionSilently/initFromStoredHandle выше) читает
+  // ЗАКЭШИРОВАННУЮ запись о разрешении внутри Chrome и на части
+  // Android-планшетов возвращает "granted" даже тогда, когда фактический
+  // грант на запись у SAF-провайдера ОС уже не активен — из-за этого
+  // список заметок открывается нормально (чтение работает), но ПЕРВАЯ ЖЕ
+  // попытка записи падает с NotFoundError. requestPermission(), в отличие
+  // от queryPermission(), действительно сверяется с ОС — это тот самый
+  // вызов, что срабатывает при нажатии "подтвердить доступ" на экране
+  // настройки папки (см. renderSetupScreen выше). Вызываем его здесь же,
+  // но автоматически, при первом клике по заметке в сессии — открытие
+  // заметки уже гарантированно происходит по клику пользователя, так что
+  // "user activation" для этого вызова есть. Не await'им и не блокируем
+  // открытие заметки: если разрешение и так рабочее, requestPermission()
+  // резолвится почти мгновенно и без всякого диалога (диалог показывается,
+  // только если текущее состояние — "prompt", а не "granted"); если нет —
+  // ошибка при необходимости всё ещё проявится при автосохранении, как и
+  // раньше, просто это теперь редкий случай, а не постоянный.
+  var writePermissionReverified = false;
+  function reverifyWritePermissionOnce(){
+    if(writePermissionReverified || !dirHandle || !dirHandle.requestPermission) return;
+    writePermissionReverified = true;
+    dirHandle.requestPermission({ mode: "readwrite" }).catch(function(){});
+  }
+
   function openNoteByEntry(entry){
+    reverifyWritePermissionOnce();
     // Запись из мгновенно показанного кэша (см. shapeToStubNode), для
     // которой настоящее сканирование ещё не подобрало handle, — ждём его
     // вместо попытки читать null как файл (см. openStubItemWhenReady).
@@ -1568,6 +1598,7 @@ window.initMdEditorModule = function(deps){
   // Клик по [[ссылке]] на несуществующую заметку — сразу создаём пустой
   // файл в корне и открываем его (решение согласовано с пользователем).
   async function createAndOpenNote(name){
+    reverifyWritePermissionOnce();
     try{
       var fh = await dirHandle.getFileHandle(name + ".md", { create: true });
       var w = await fh.createWritable();
