@@ -1794,15 +1794,44 @@ window.initMdEditorModule = function(deps){
     return str.replace(STRAY_SLASH_BEFORE_LINK_RE, "[[");
   }
 
+  // Планшеты (в первую очередь Android, Storage Access Framework) иногда
+  // сами "протухают" уже выданный FileSystemFileHandle — как правило,
+  // после сворачивания приложения или любого изменения файла в обход
+  // самого хендла (например, синхронизация облака). Попытка
+  // createWritable()/write() на таком хендле кидает DOMException
+  // "An operation that depends on state cached in an interface object
+  // was made but the state had changed since it was read from disk."
+  // Сам по себе хендл при этом не "лечится" — единственный выход:
+  // заново получить свежий хендл на тот же файл у родительской папки
+  // (fileRef.dirHandle+fileRef.name) и повторить запись уже с ним.
+  // Делаем это один раз (isRetry защищает от бесконечного цикла) — если
+  // и повторная попытка не поможет, значит дело не в протухшем хендле,
+  // а в чём-то другом, и ошибку показываем как есть.
+  function isStaleHandleError(e){
+    return !!(e && (e.name === "InvalidStateError" || e.name === "NotReadableError") &&
+      /state had changed since it was read from disk/i.test((e.message || "")));
+  }
+  function writeFileText(fileRef, text, isRetry){
+    return fileRef.fileHandle.createWritable().then(function(w){
+      return w.write(text).then(function(){ return w.close(); });
+    }).catch(function(e){
+      if(isStaleHandleError(e) && !isRetry && fileRef.dirHandle && fileRef.name){
+        return fileRef.dirHandle.getFileHandle(fileRef.name, { create:false }).then(function(freshHandle){
+          fileRef.fileHandle = freshHandle;
+          return writeFileText(fileRef, text, true);
+        });
+      }
+      throw e;
+    });
+  }
+
   function flushAutosaveNow(){
     if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
     if(!openFile || !cmView || !openFile.dirty) return;
     var text = stripStraySlashBeforeLinks(stripInvisibleSpaces(cmView.state.doc.toString()));
     var fileRef = openFile;
     fileRef.dirty = false;
-    openFile.fileHandle.createWritable().then(function(w){
-      return w.write(text).then(function(){ return w.close(); });
-    }).then(function(){
+    writeFileText(fileRef, text).then(function(){
       fileRef.text = text;
       // сохраняется молча (см. ТЗ пользователя от 31.08) — раньше здесь
       // показывалось "Сохранено.", теперь просто гасим статус (пустая
