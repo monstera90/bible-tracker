@@ -2286,6 +2286,43 @@ window.initMdEditorModule = function(deps){
   // под курсором (см. handleMouseDown) — не зависит от decorations и
   // работает в обоих режимах.
   // ---------------------------------------------------------------------
+
+  // ---- встроенные картинки: обтекание текстом (см. .cm-md-image-float в
+  // components.css). Вынесено на уровень модуля (а не внутрь
+  // makeLivePreviewExtension), т.к. relayoutImageFloats вызывается также
+  // из mountEditor() через ResizeObserver — при ширине редактора,
+  // изменившейся не из-за ввода текста (поворот планшета, изменение
+  // ширины окна настроек и т.п.). ----
+  // Порог в 150px — не CSS (обычный float обтекается при ЛЮБОМ оставшемся
+  // месте, хоть 5px, и текст превращается в узкую нечитаемую колонку),
+  // поэтому решение "включать float или нет" считаем сами: доступная
+  // ширина строки минус фактическая ширина картинки (⩽600px, см.
+  // .cm-md-image-wrap) должна быть не меньше порога. wrap.parentElement
+  // — это сам .cm-line редактора: его clientWidth не зависит от того,
+  // floated картинка внутри него или нет (float не меняет ширину
+  // собственного родителя), так что измерение не "скачет" при
+  // переключении класса туда-обратно.
+  var IMAGE_FLOAT_MIN_GAP = 150;
+  var IMAGE_MAX_WIDTH = 600;
+  function applyImageFloatLayout(wrap){
+    var img = wrap.querySelector(".cm-md-image");
+    var line = wrap.parentElement;
+    if(!img || !img.naturalWidth || !line) return;
+    var lineWidth = line.clientWidth;
+    if(!lineWidth) return;
+    var imgWidth = Math.min(img.naturalWidth, IMAGE_MAX_WIDTH, lineWidth);
+    wrap.classList.toggle("cm-md-image-float", (lineWidth - imgWidth) >= IMAGE_FLOAT_MIN_GAP);
+  }
+  // Пересчёт всех картинок сразу — при изменении ширины редактора
+  // (поворот планшета, изменение ширины окна настроек и т.п., см.
+  // ResizeObserver в mountEditor). Картинки, которые ещё не
+  // загрузились (img.naturalWidth === 0), applyImageFloatLayout молча
+  // пропускает — досчитаются сами по своему load (ниже).
+  function relayoutImageFloats(host){
+    var wraps = host.querySelectorAll(".cm-md-image-wrap");
+    for(var i = 0; i < wraps.length; i++) applyImageFloatLayout(wraps[i]);
+  }
+
   function makeLivePreviewExtension(cm){
     var Decoration = cm.view.Decoration, ViewPlugin = cm.view.ViewPlugin, WidgetType = cm.view.WidgetType;
     var RangeSetBuilder = cm.state.RangeSetBuilder;
@@ -2315,37 +2352,9 @@ window.initMdEditorModule = function(deps){
     // Obsidian). Сама картинка читается лениво через imageIndex (см.
     // rescan/buildIndex выше) и кэшируется в imageUrlCache по имени, чтобы
     // не перечитывать файл на каждую перестройку decorations (она
-    // происходит при любом изменении документа, даже не в этой строке). ----
-    // Обтекание текстом (см. .cm-md-image-float в components.css). Порог
-    // в 150px — не CSS (обычный float обтекается при ЛЮБОМ оставшемся
-    // месте, хоть 5px, и текст превращается в узкую нечитаемую колонку),
-    // поэтому решение "включать float или нет" считаем сами: доступная
-    // ширина строки минус фактическая ширина картинки (⩽600px, см.
-    // .cm-md-image-wrap) должна быть не меньше порога. wrap.parentElement
-    // — это сам .cm-line редактора: его clientWidth не зависит от того,
-    // floated картинка внутри него или нет (float не меняет ширину
-    // собственного родителя), так что измерение не "скачет" при
-    // переключении класса туда-обратно.
-    var IMAGE_FLOAT_MIN_GAP = 150;
-    var IMAGE_MAX_WIDTH = 600;
-    function applyImageFloatLayout(wrap){
-      var img = wrap.querySelector(".cm-md-image");
-      var line = wrap.parentElement;
-      if(!img || !img.naturalWidth || !line) return;
-      var lineWidth = line.clientWidth;
-      if(!lineWidth) return;
-      var imgWidth = Math.min(img.naturalWidth, IMAGE_MAX_WIDTH, lineWidth);
-      wrap.classList.toggle("cm-md-image-float", (lineWidth - imgWidth) >= IMAGE_FLOAT_MIN_GAP);
-    }
-    // Пересчёт всех картинок сразу — при изменении ширины редактора
-    // (поворот планшета, изменение ширины окна настроек и т.п., см.
-    // ResizeObserver в mountEditor). Картинки, которые ещё не
-    // загрузились (img.naturalWidth === 0), applyImageFloatLayout молча
-    // пропускает — досчитаются сами по своему load (ниже).
-    function relayoutImageFloats(host){
-      var wraps = host.querySelectorAll(".cm-md-image-wrap");
-      for(var i = 0; i < wraps.length; i++) applyImageFloatLayout(wraps[i]);
-    }
+    // происходит при любом изменении документа, даже не в этой строке).
+    // applyImageFloatLayout/relayoutImageFloats вынесены на уровень
+    // модуля — см. выше перед makeLivePreviewExtension. ----
     function ImageWidget(name){ this.name = name; }
     ImageWidget.prototype = Object.create(WidgetType.prototype);
     ImageWidget.prototype.eq = function(other){ return other.name === this.name; };
