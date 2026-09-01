@@ -5,10 +5,10 @@
 
   *{box-sizing:border-box;}
 
-  html{ overflow-x:hidden; }
+  html{ overflow-x:hidden; background:var(--bg-bottom); }
   body{
     margin:0;
-    padding:0 0 20px 0;
+    padding:0 0 calc(20px + env(safe-area-max-inset-bottom, 24px)) 0;
     overflow-x:hidden;
     background:
       radial-gradient(ellipse at top, var(--bg-top) 0%, var(--bg-mid) 60%, var(--bg-bottom) 100%);
