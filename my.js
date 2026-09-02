@@ -1716,6 +1716,19 @@
     // вкладка "Закладки", перерисовать (см. refreshBookmarksFromState в
     // mdeditor.js).
     if(MdEditor && MdEditor.refreshBookmarksFromState) MdEditor.refreshBookmarksFromState();
+    // Если сейчас открыта одна из вкладок задач (red/inbox/next/projects/
+    // waiting/read/someday/archive) — её тоже нужно перерисовать из
+    // свежего state: rerenderAllFromState вызывается только после
+    // слияния с облаком (см. doCloudSync ниже), а раньше эта функция
+    // вкладки задач не трогала вовсе. Из-за этого, если на другом
+    // устройстве в момент прихода данных как раз была открыта вкладка
+    // задач, отметка "выполнено"/перенос между вкладками с первого
+    // устройства подтягивались в state, но не показывались на экране,
+    // пока вкладку не переключали туда-обратно вручную.
+    if(settingsModalOverlay && settingsModalOverlay.classList.contains("open") &&
+       TASK_TAB_IDS.hasOwnProperty(currentSettingsTab)){
+      renderSettingsTabTask(currentSettingsTab);
+    }
   }
 
   // ===================== СБРОС ПРОГРЕССА =====================
@@ -1955,6 +1968,37 @@
   });
   window.addEventListener("offline", function(){ refreshStatusBase(); });
   if(syncId) doCloudSync();
+
+  // И saveLocalState (localStorage), И scheduleCloudPush (облако) —
+  // отложенные через setTimeout (300мс и 1500мс соответственно), чтобы
+  // не дёргать запись на каждое нажатие клавиши. Проблема: если
+  // отметить задачу выполненной/перенести между вкладками и сразу же
+  // свернуть приложение или заблокировать телефон (обычная привычка —
+  // "отметил и убрал в карман"), мобильный браузер может заморозить
+  // вкладку раньше, чем сработают эти таймеры — и изменение не попадёт
+  // ни в localStorage, ни тем более в облако, а значит не подтянется ни
+  // на одном другом устройстве. visibilitychange с состоянием "hidden"
+  // (а не beforeunload — он на мобильных ненадёжен, особенно в PWA)
+  // срабатывает как раз в момент сворачивания, пока страница ещё жива,
+  // и это единственный надёжный момент, чтобы сбросить оба таймера и
+  // сохранить/отправить немедленно. pagehide — подстраховка на случай
+  // реального закрытия вкладки/приложения.
+  function flushPendingSyncNow(){
+    if(saveTimer){
+      clearTimeout(saveTimer);
+      saveTimer = null;
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+    }
+    if(pushTimer){
+      clearTimeout(pushTimer);
+      pushTimer = null;
+      doCloudSync();
+    }
+  }
+  document.addEventListener("visibilitychange", function(){
+    if(document.visibilityState === "hidden") flushPendingSyncNow();
+  });
+  window.addEventListener("pagehide", flushPendingSyncNow);
 
   // ===================== МОДАЛЬНОЕ ОКНО СИНХРОНИЗАЦИИ =====================
   var modalOverlay = document.getElementById("modalOverlay");
