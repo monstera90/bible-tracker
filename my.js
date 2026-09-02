@@ -489,6 +489,60 @@
   var UPDATES_DISABLED_KEY = "bibleUpdatesDisabled_v1";
   var GOALS_EXPANDED_KEY = "bibleGoalsBandExpanded_v1";
   var FAB_VISIBLE_KEY = "bibleSettingsFabVisible_v1";
+  // Настройка "Скрывать статус бар PWA-приложения" (вкладка настроек,
+  // шестерёнка) — как и FAB_VISIBLE_KEY, это локальный флаг конкретного
+  // устройства/браузера, не синхронизируется в облако и не попадает в
+  // экспорт (статус-бар — свойство экрана этого устройства, а не данных
+  // пользователя). Технически включает/выключает Fullscreen API
+  // (см. applyStatusBarFullscreen ниже): на Android это реально прячет
+  // системный статус-бар; на iOS Fullscreen API для PWA с домашнего экрана
+  // почти не работает — там ограничение платформы, обойти нечем.
+  var HIDE_STATUS_BAR_KEY = "bibleHideStatusBar_v1";
+  function getHideStatusBarEnabled(){
+    try{ return localStorage.getItem(HIDE_STATUS_BAR_KEY) === "1"; }catch(e){ return false; }
+  }
+  function setHideStatusBarEnabled(value){
+    try{ localStorage.setItem(HIDE_STATUS_BAR_KEY, value ? "1" : "0"); }catch(e){}
+    applyStatusBarFullscreen(value);
+  }
+  // Сам вызов Fullscreen API. При enable=true пытается войти в полноэкранный
+  // режим — вызов должен идти либо из обработчика пользовательского жеста
+  // (клик по галочке), либо из armHideStatusBarAutoRetry ниже (первый тап
+  // после запуска, если автозапуск при старте страницы браузер заблокировал
+  // как жест-независимый вызов). При enable=false выходит из полноэкранного
+  // режима, если он был включён.
+  function applyStatusBarFullscreen(enable){
+    var el = document.documentElement;
+    if(enable){
+      var req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+      if(req && !document.fullscreenElement && !document.webkitFullscreenElement){
+        try{
+          var p = req.call(el);
+          if(p && p.catch) p.catch(function(){});
+        }catch(e){}
+      }
+    } else {
+      var exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+      if(exit && (document.fullscreenElement || document.webkitFullscreenElement)){
+        try{ exit.call(document); }catch(e){}
+      }
+    }
+  }
+  // Автозапуск при старте приложения (см. "ЗАПУСК" внизу файла) часто
+  // не считается "жестом пользователя", и браузер тихо отклоняет
+  // requestFullscreen. На этот случай — одноразовый слушатель первого тапа/
+  // клика по странице, который довключит полноэкранный режим, если он ещё
+  // не сработал. Снимает сам себя после первого срабатывания.
+  function armHideStatusBarAutoRetry(){
+    if(!getHideStatusBarEnabled()) return;
+    function tryOnce(){
+      document.removeEventListener("click", tryOnce, true);
+      document.removeEventListener("touchend", tryOnce, true);
+      if(getHideStatusBarEnabled()) applyStatusBarFullscreen(true);
+    }
+    document.addEventListener("click", tryOnce, true);
+    document.addEventListener("touchend", tryOnce, true);
+  }
   // Локальный (не синхронизируемый и не попадающий в экспорт) флаг доступа
   // ко второму набору вкладок — только на этом устройстве/в этом браузере.
   // Это не защита данных, а просто способ спрятать не нужные большинству
@@ -4212,6 +4266,7 @@
     var colorMarkOn = getColorMarkEnabled();
     var showAllTasksOn = getShowAllTasksEnabled();
     var extraAnimOn = getExtraAnimationsEnabled();
+    var hideStatusBarOn = getHideStatusBarEnabled();
     var bibleQuotesOn = getBibleQuotesEnabled();
     var customCommentsOn = getCustomCommentsEnabled();
     var customVerse = getCustomVerse();
@@ -4228,7 +4283,8 @@
       '</div>' +
       '<div class="settings-row"><span>Включить личные комментарии в шапке сайта</span><input type="checkbox" id="settingsCustomCommentsCb"' + (customCommentsOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row" style="border-bottom:none;"><span>Включить дополнительные анимации</span><input type="checkbox" id="settingsExtraAnimCb"' + (extraAnimOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row"><span>Включить дополнительные анимации</span><input type="checkbox" id="settingsExtraAnimCb"' + (extraAnimOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row" style="border-bottom:none;"><span>Скрывать статус бар PWA-приложения</span><input type="checkbox" id="settingsHideStatusBarCb"' + (hideStatusBarOn ? " checked" : "") + '></div>' +
       (showAllTasksOn ? '<button class="modal-btn" id="settingsImportTasksBtn" style="margin-top:16px;">Восстановить задачи из .txt</button>' : '') +
       '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:' + (showAllTasksOn ? "10px" : "16px") + ';">Добавить для себя цель</button>' +
       '<button class="modal-btn" id="settingsVersionsBtn" style="margin-top:10px;">Версии</button>' +
@@ -4314,6 +4370,12 @@
 
     document.getElementById("settingsExtraAnimCb").addEventListener("change", function(){
       setExtraAnimationsEnabled(this.checked);
+    });
+
+    document.getElementById("settingsHideStatusBarCb").addEventListener("change", function(){
+      // Сам клик по галочке — жест пользователя, поэтому вход в fullscreen
+      // сработает сразу же, без необходимости в armHideStatusBarAutoRetry.
+      setHideStatusBarEnabled(this.checked);
     });
 
     document.getElementById("settingsAddGoalBtn").addEventListener("click", function(){
@@ -7537,6 +7599,10 @@
   })();
 
   // ===================== ЗАПУСК =====================
+  if(getHideStatusBarEnabled()){
+    applyStatusBarFullscreen(true);
+    armHideStatusBarAutoRetry();
+  }
   initQuote();
   initPage();
   ensureFirstReadInitialized();
