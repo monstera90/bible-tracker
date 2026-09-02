@@ -6883,13 +6883,13 @@
 
     editable.addEventListener("blur", function(){
       var restoreScroll = guardTaskListScroll();
+      var newText = getEditableNoteText(editable);
+      setCommentText(id, newText.trim());
+      editable.contentEditable = "false";
       setTimeout(function(){
-        if(!editable.isContentEditable || !document.body.contains(editable)) return;
-        var newText = getEditableNoteText(editable);
-        setCommentText(id, newText.trim());
-        renderCommentRowView(id);
+        if(document.body.contains(body)) renderCommentRowView(id);
         restoreScroll();
-      }, 0);
+      }, 500);
     });
 
     body.querySelector(".comment-delete-btn").addEventListener("click", function(){
@@ -7151,8 +7151,14 @@
   function guardTaskListScroll(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return function(){};
+    var savedScroll = container.scrollTop;
     logScrollDebug("blur:start");
-    var onScroll = function(){ logScrollDebug("container scroll"); };
+    var onScroll = function(){
+      logScrollDebug("container scroll");
+      // Подстраховка: если гипотеза (не удалять узел сразу) не убрала сброс
+      // целиком, хотя бы откатываем его сразу же, а не оставляем как есть.
+      if(container.scrollTop !== savedScroll) container.scrollTop = savedScroll;
+    };
     var onWinScroll = function(){ logScrollDebug("window scroll"); };
     var onResize = function(){ logScrollDebug("resize"); };
     container.addEventListener("scroll", onScroll);
@@ -7166,7 +7172,10 @@
       window.removeEventListener("resize", onResize);
       if(window.visualViewport) window.visualViewport.removeEventListener("resize", onResize);
     }, 2000);
-    return function(){ logScrollDebug("restore-called"); };
+    return function(){
+      logScrollDebug("restore-called");
+      if(document.body.contains(container) && container.scrollTop !== savedScroll) container.scrollTop = savedScroll;
+    };
   }
   function renderTaskTabList(tabKey){
     var container = document.getElementById("settingsTabContent");
@@ -7428,13 +7437,21 @@
     // обычно уже перерисована ими, и здесь просто нечего делать.
     editable.addEventListener("blur", function(){
       var restoreScroll = guardTaskListScroll();
+      // ГИПОТЕЗА по логу диагностики: браузер откладывает собственный
+      // "прокрутить каретку в видимую область" уже ПОСЛЕ blur — и если к
+      // моменту его срабатывания сам contenteditable-узел уже удалён (см.
+      // renderTaskRowView ниже, который раньше вызывался тут же), браузер
+      // откатывает scrollTop контейнера к 0. Проверяем: не удаляем узел
+      // сразу — только гасим редактируемость, а полную перерисовку строки
+      // откладываем до момента, когда это окно риска (по логу — ~150-200мс
+      // после resize) точно пройдёт.
+      var newText = getEditableNoteText(editable);
+      setTaskText(id, newText.trim());
+      editable.contentEditable = "false";
       setTimeout(function(){
-        if(!editable.isContentEditable || !document.body.contains(editable)) return;
-        var newText = getEditableNoteText(editable);
-        setTaskText(id, newText.trim());
-        renderTaskRowView(id, tabKey);
+        if(document.body.contains(body)) renderTaskRowView(id, tabKey);
         restoreScroll();
-      }, 0);
+      }, 500);
     });
 
     bindTaskRowActions(body, id, tabKey);
@@ -7711,13 +7728,13 @@
 
       editable.addEventListener("blur", function(){
         var restoreScroll = guardTaskListScroll();
+        var newText = getEditableNoteText(editable);
+        setTaskText(id, newText.trim());
+        editable.contentEditable = "false";
         setTimeout(function(){
-          if(!editable.isContentEditable || !document.body.contains(editable)) return;
-          var newText = getEditableNoteText(editable);
-          setTaskText(id, newText.trim());
-          renderRowView(id);
+          if(document.body.contains(body)) renderRowView(id);
           restoreScroll();
-        }, 0);
+        }, 500);
       });
 
       bindRowActions(body, id);
