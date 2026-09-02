@@ -3568,6 +3568,15 @@
     // пустой, но на итоговую высоту это больше не влияет).
     var content = document.getElementById("settingsTabContent");
     if(content && !content.innerHTML.trim()) renderSettingsTabGear();
+    // Пока ниже временно снимается высота окна (style.height = ""), контент
+    // на миг перестаёт скроллиться (весь помещается) — браузер сам обнуляет
+    // scrollTop, и после возврата высоты назад он остаётся нулевым (баг со
+    // скроллом списка задач при закрытии клавиатуры, ТЗ от 02.09: реальная
+    // причина была здесь, а не в самом contenteditable — guardTaskListScroll
+    // в debug.js эту потерю ловил и откатывал реактивно, отсюда был виден
+    // рывок). Запоминаем и восстанавливаем явно, чтобы скролл не терялся
+    // вовсе, а не чинился постфактум.
+    var savedContentScroll = content ? content.scrollTop : 0;
 
     // Окно "пришито" снизу к кнопке-язычку (.settings-fab), а не сверху к
     // экрану: нижний край окна всегда стоит на фиксированной точке —
@@ -3603,6 +3612,7 @@
 
     settingsModalBox.style.marginTop = (desiredTop - naturalTop) + "px";
     settingsModalBox.style.height = desired + "px";
+    if(content) content.scrollTop = savedContentScroll;
     // Высота язычков вертикального стека (#settingsTabs .settings-tab)
     // больше не считается здесь — она зафиксирована в CSS (68px, не
     // зависит от высоты окна настроек, см. .settings-tab в modals.css).
