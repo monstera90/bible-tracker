@@ -1725,8 +1725,23 @@
     // задач, отметка "выполнено"/перенос между вкладками с первого
     // устройства подтягивались в state, но не показывались на экране,
     // пока вкладку не переключали туда-обратно вручную.
+    // Если прямо СЕЙЧАС редактируется текст задачи (открыта клавиатура,
+    // фокус в contenteditable-поле, см. renderTaskRowEdit) — не
+    // перерисовываем вкладку: renderSettingsTabTask пересобирает список
+    // целиком через innerHTML, что уничтожает и заново создаёт то самое
+    // редактируемое поле — на мобильных это тут же закрывает клавиатуру
+    // и обрывает ввод (задача от 02.09: "создаю задачу, клавиатура
+    // появляется и сразу скрывается"). Фоновая синхронизация не настолько
+    // срочная, чтобы ради неё прерывать набор текста — сам текст при
+    // этом никуда не денется (saveTaskData уже сохранил его в state и
+    // localStorage до пуша), а актуальный вид вкладка получит сама, как
+    // только редактирование завершится (blur там же в renderTaskRowEdit)
+    // или произойдёт следующий настоящий повод перерисовать список.
+    var activeTaskEdit = document.activeElement;
+    var isEditingTaskNow = !!(activeTaskEdit && activeTaskEdit.classList &&
+      activeTaskEdit.classList.contains("task-editable"));
     if(settingsModalOverlay && settingsModalOverlay.classList.contains("open") &&
-       TASK_TAB_IDS.hasOwnProperty(currentSettingsTab)){
+       TASK_TAB_IDS.hasOwnProperty(currentSettingsTab) && !isEditingTaskNow){
       renderSettingsTabTask(currentSettingsTab);
     }
   }
@@ -7071,11 +7086,23 @@
   function renderTaskTabList(tabKey){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
+    // Полная пересборка списка ниже (innerHTML) сама по себе всегда
+    // приводит скролл контейнера к верху — нормально при настоящем
+    // переключении вкладки (см. switchSettingsTab, там scrollTop и так
+    // уже обнулён ДО этого вызова), но эта же функция вызывается и в
+    // ФОНЕ — например, после каждой облачной синхронизации (см.
+    // rerenderAllFromState), в том числе от собственной правки
+    // пользователя. Без сохранения позиции список каждый раз "прыгал" бы
+    // в начало прямо во время просмотра/пролистывания. Запоминаем и
+    // возвращаем — при настоящем переключении вкладки это просто вернёт
+    // те же 0 обратно, поведение не меняется.
+    var preservedScrollTop = container.scrollTop;
     var tasks = getTasksForTab(tabKey);
     var rowsHtml = tasks.map(function(t){ return buildTaskRowHtml(t); }).join("");
     container.innerHTML =
       '<div class="task-list task-grid-list" id="taskListWrap">' + rowsHtml + '</div>' +
       (tasks.length === 0 ? '<div class="task-empty">Здесь пока нет задач.</div>' : '');
+    container.scrollTop = preservedScrollTop;
     tasks.forEach(function(t){ bindTaskRow(t.id, tabKey); });
 
     var fab = document.getElementById("taskAddFab");
@@ -7648,6 +7675,9 @@
   function renderTaskArchiveTab(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
+    // см. пояснение у preservedScrollTop в renderTaskTabList выше — та же
+    // причина (эта функция тоже вызывается в фоне из rerenderAllFromState)
+    var preservedScrollTop = container.scrollTop;
     var all = getArchivedTasksAll();
     var shown = all.slice(0, TASK_ARCHIVE_MAX_SHOWN);
     var rowsHtml = shown.map(function(t){
@@ -7665,6 +7695,7 @@
     container.innerHTML =
       '<div class="task-list task-grid-list">' + rowsHtml + '</div>' +
       (shown.length === 0 ? '<div class="task-empty">Архив пуст.</div>' : '');
+    container.scrollTop = preservedScrollTop;
     Array.prototype.forEach.call(container.querySelectorAll(".task-archive-body"), function(body){
       fitTaskActions(body);
     });
