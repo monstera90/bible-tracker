@@ -1793,10 +1793,13 @@
     return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2,10);
   }
 
-  function fetchCloudBlob(id){
-    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + ".json", {
-      method:"GET"
-    }, 8000).then(function(res){
+  function fetchCloudBlob(id, opts){
+    var fetchOpts = { method:"GET" };
+    // keepalive для GET безопасен всегда (тела нет, лимит в 64KB на
+    // keepalive-запросы его не касается) — в отличие от putCloudBlob,
+    // здесь проверка размера не нужна.
+    if(opts && opts.keepalive) fetchOpts.keepalive = true;
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + ".json", fetchOpts, 8000).then(function(res){
       if(!res.ok) throw new Error("fetch_failed_" + res.status);
       return res.json();
     }).then(function(data){
@@ -1828,7 +1831,17 @@
     });
   }
 
-  function putCloudBlob(id, data){
+  // keepalive-запросы браузер обязуется довести до конца в фоне даже
+  // после выгрузки страницы, но только если тело укладывается в лимит
+  // ~64KB (совокупно по всем keepalive-запросам разом, спецификация
+  // Fetch). Наше state может вырасти больше (заметки, задачи), поэтому
+  // keepalive нельзя ставить безусловно — превышающий лимит запрос
+  // браузер не отправит вовсе (упадёт сразу, ещё до сети). Берём запас
+  // от 64KB на неточность .size у Blob/другие keepalive-запросы, которые
+  // могли не успеть отработать.
+  var KEEPALIVE_BODY_LIMIT = 60000;
+
+  function putCloudBlob(id, data, opts){
     // Каждая запись в облако обновляет метку "последней активности" этого
     // кода синхронизации — от неё считается годовой срок хранения (см.
     // fetchCloudBlob). Метка добавляется только в отправляемую копию,
@@ -1837,11 +1850,26 @@
     var src = data || {};
     Object.keys(src).forEach(function(k){ payload[k] = src[k]; });
     payload[LAST_ACTIVE_STATE_KEY] = {c:true, t:Date.now()};
-    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + ".json", {
+    var body = JSON.stringify(payload);
+    var fetchOpts = {
       method:"PUT",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify(payload)
-    }, 15000).then(function(res){
+      body: body
+    };
+    if(opts && opts.keepalive){
+      // .length у строки — это UTF-16 code units, не байты; для
+      // кириллицы (заметки, задачи) это занизит размер. Считаем реальный
+      // байтовый размер через Blob, иначе рискуем поставить keepalive на
+      // запрос, который браузер молча не отправит.
+      var byteSize = new Blob([body]).size;
+      if(byteSize < KEEPALIVE_BODY_LIMIT){
+        fetchOpts.keepalive = true;
+      }
+      // Если не влезло — отправляем как обычный fetch. Хуже, чем ничего
+      // не делать, это не сделает: без keepalive шанс не долететь при
+      // сворачивании/блокировке остаётся тем же, что и был.
+    }
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + ".json", fetchOpts, 15000).then(function(res){
       if(!res.ok) throw new Error("put_failed_" + res.status);
       return true;
     });
@@ -1907,13 +1935,18 @@
   var syncRetryTimer = null;
   var SYNC_RETRY_DELAYS = [5000, 15000, 40000, 90000];
 
-  function doCloudSync(){
+  // urgent=true — вызов из flushPendingSyncNow (страница уже скрывается/
+  // выгружается): и GET, и завершающий PUT в этом проходе идут с
+  // keepalive, чтобы браузер долетел с ними в фоне, даже если сама
+  // страница будет заморожена/закрыта секундой позже (см. putCloudBlob
+  // про лимит тела и комментарий у visibilitychange ниже).
+  function doCloudSync(urgent){
     if(!syncId) { setSyncState("off"); return; }
     if(!navigator.onLine){ setSyncState("offline"); return; }
     if(syncInProgress) return;
     syncInProgress = true;
     setSyncState("syncing");
-    fetchCloudBlob(syncId).then(function(cloudData){
+    fetchCloudBlob(syncId, {keepalive: urgent}).then(function(cloudData){
       var merged = mergeStates(state, cloudData);
       var localChanged = !statesEqual(merged, state);
       var cloudChanged = !statesEqual(merged, cloudData);
@@ -1925,7 +1958,7 @@
         setTimeout(function(){ setNoTransitions(false); }, 50);
       }
       if(cloudChanged){
-        return putCloudBlob(syncId, merged);
+        return putCloudBlob(syncId, merged, {keepalive: urgent});
       }
     }).then(function(){
       syncRetryCount = 0;
@@ -1983,6 +2016,18 @@
   // и это единственный надёжный момент, чтобы сбросить оба таймера и
   // сохранить/отправить немедленно. pagehide — подстраховка на случай
   // реального закрытия вкладки/приложения.
+  //
+  // Самого сброса таймеров недостаточно: обычный fetch не гарантирует
+  // завершение запроса, если браузер в этот момент замораживает/выгружает
+  // страницу (типичный случай — блокировка экрана сразу после переноса
+  // задачи). Поэтому doCloudSync(true) здесь просит keepalive у обоих
+  // сетевых запросов этого прохода (см. doCloudSync/putCloudBlob выше) —
+  // это явно говорит браузеру довести запрос до конца в фоне, даже если
+  // сама страница уже не активна. Если ровно в этот момент уже идёт
+  // другой (не keepalive) проход синхронизации — doCloudSync тихо выйдет
+  // по syncInProgress, и этот шанс достанется retry по SYNC_RETRY_DELAYS
+  // или следующей обычной синхронизации; здесь это осознанно не
+  // усложняется.
   function flushPendingSyncNow(){
     if(saveTimer){
       clearTimeout(saveTimer);
@@ -1992,7 +2037,7 @@
     if(pushTimer){
       clearTimeout(pushTimer);
       pushTimer = null;
-      doCloudSync();
+      doCloudSync(true);
     }
   }
   document.addEventListener("visibilitychange", function(){
