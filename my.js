@@ -7119,39 +7119,54 @@
   }
 
   // ===================== ВКЛАДКИ ЗАДАЧ: ОТРИСОВКА =====================
-  // На части мобильных браузеров/WebView, когда contenteditable-поле теряет
-  // фокус НЕ на другую кнопку/поле, а "в никуда" (тап по пустому месту
-  // строки другой задачи, где нет обработчика клика), экранная клавиатура
-  // закрывается с задержкой, и в процессе браузер сам плавно скроллит
-  // контейнер списка задач (в итоге — к началу списка). ТЗ пользователя от
-  // 02.09: "дописал задачу, нажал на другую задачу/пустое место — список
-  // прыгает в начало".
-  //
-  // Первая попытка (переустановить scrollTop через setTimeout(0) и ещё раз
-  // позже) не помогла — момент сброса не фиксирован. Вторая попытка (слушать
-  // "scroll" и мгновенно откатывать) убрала сам прыжок, но открыла другую
-  // проблему: пока браузер плавно анимирует свой скролл, а мы каждый раз
-  // дёргаем его обратно, это видно как мелкие подёргивания (много мелких
-  // "боёв" за позицию вместо одного прыжка).
-  //
-  // Поэтому вместо борьбы постфактум просто НЕ ДАЁМ контейнеру прокручиваться
-  // всё время, пока клавиатура закрывается: временно убираем возможность
-  // скролла (overflow), браузеру нечего анимировать — и восстанавливаем
-  // scrollTop уже один раз, когда снимаем блокировку.
+  // ВРЕМЕННО (диагностика ТЗ пользователя от 02.09 — прыжок/подёргивания
+  // списка задач при потере фокуса в никуда): три попытки вслепую бороться
+  // со скроллом (переустановка scrollTop через таймауты, затем через
+  // "scroll"-слушатель, затем через overflow:hidden) либо не помогали, либо
+  // становилось хуже — значит, реальная причина не там, где предполагалось,
+  // и дальше гадать без данных бессмысленно. Вместо очередной правки — чистая
+  // диагностика: логируем в видимую на экране панель (аналог window.onerror
+  // из index.html, только без остановки работы) scrollTop контейнера,
+  // window.scrollY и высоту visualViewport на каждое событие "scroll"/
+  // "resize" в течение 2 секунд после blur. Как только причина станет видна
+  // из лога — эту панель и вызовы logScrollDebug убрать.
+  var scrollDebugBox = null;
+  function logScrollDebug(label){
+    if(!scrollDebugBox){
+      scrollDebugBox = document.createElement("div");
+      scrollDebugBox.style.cssText = "position:fixed;left:4px;right:4px;bottom:4px;max-height:40vh;overflow:auto;" +
+        "background:rgba(0,0,0,0.85);color:#0f0;font:10px monospace;padding:6px;z-index:999999;white-space:pre-wrap;";
+      document.body.appendChild(scrollDebugBox);
+    }
+    var container = document.getElementById("settingsTabContent");
+    var line = (Date.now() % 100000) + " " + label +
+      " scrollTop=" + (container ? container.scrollTop : "?") +
+      " winY=" + window.scrollY +
+      " vvH=" + (window.visualViewport ? Math.round(window.visualViewport.height) : "?");
+    var p = document.createElement("div");
+    p.textContent = line;
+    scrollDebugBox.appendChild(p);
+    scrollDebugBox.scrollTop = scrollDebugBox.scrollHeight;
+  }
   function guardTaskListScroll(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return function(){};
-    var savedScroll = container.scrollTop;
-    var prevOverflowY = container.style.overflowY;
-    container.style.overflowY = "hidden";
+    logScrollDebug("blur:start");
+    var onScroll = function(){ logScrollDebug("container scroll"); };
+    var onWinScroll = function(){ logScrollDebug("window scroll"); };
+    var onResize = function(){ logScrollDebug("resize"); };
+    container.addEventListener("scroll", onScroll);
+    window.addEventListener("scroll", onWinScroll);
+    window.addEventListener("resize", onResize);
+    if(window.visualViewport) window.visualViewport.addEventListener("resize", onResize);
     setTimeout(function(){
-      if(!document.body.contains(container)) return;
-      container.style.overflowY = prevOverflowY;
-      container.scrollTop = savedScroll;
-    }, 700);
-    return function(){
-      if(document.body.contains(container)) container.scrollTop = savedScroll;
-    };
+      logScrollDebug("guard:end");
+      container.removeEventListener("scroll", onScroll);
+      window.removeEventListener("scroll", onWinScroll);
+      window.removeEventListener("resize", onResize);
+      if(window.visualViewport) window.visualViewport.removeEventListener("resize", onResize);
+    }, 2000);
+    return function(){ logScrollDebug("restore-called"); };
   }
   function renderTaskTabList(tabKey){
     var container = document.getElementById("settingsTabContent");
