@@ -4447,6 +4447,7 @@
     var bibleQuotesOn = getBibleQuotesEnabled();
     var customCommentsOn = getCustomCommentsEnabled();
     var customVerse = getCustomVerse();
+    var debugModeOn = window.Debug ? window.Debug.isEnabled() : false;
     container.innerHTML =
       '<div class="settings-row"><span>Добавить дополнительный счётчик</span><input type="checkbox" id="settingsHourCb"' + (hourOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" id="settingsHourNotesRow" style="' + (hourOn ? "" : "display:none;") + '"><span>Добавить комментарий в дополнительный счётчик</span><input type="checkbox" id="settingsHourNotesCb"' + (hourNotesOn ? " checked" : "") + '></div>' +
@@ -4461,7 +4462,8 @@
       '<div class="settings-row"><span>Включить личные комментарии в шапке сайта</span><input type="checkbox" id="settingsCustomCommentsCb"' + (customCommentsOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить дополнительные анимации</span><input type="checkbox" id="settingsExtraAnimCb"' + (extraAnimOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row" style="border-bottom:none;"><span>Включить полноэкранный режим</span><input type="checkbox" id="settingsHideStatusBarCb"' + (hideStatusBarOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row"><span>Включить полноэкранный режим</span><input type="checkbox" id="settingsHideStatusBarCb"' + (hideStatusBarOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row" style="border-bottom:none;"><span>Включить режим отладки</span><input type="checkbox" id="settingsDebugModeCb"' + (debugModeOn ? " checked" : "") + '></div>' +
       (showAllTasksOn ? '<button class="modal-btn" id="settingsImportTasksBtn" style="margin-top:16px;">Восстановить задачи из .txt</button>' : '') +
       '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:' + (showAllTasksOn ? "10px" : "16px") + ';">Добавить для себя цель</button>' +
       '<button class="modal-btn" id="settingsVersionsBtn" style="margin-top:10px;">Версии</button>' +
@@ -4553,6 +4555,12 @@
       // Сам клик по галочке — жест пользователя, поэтому вход в fullscreen
       // сработает сразу же, без необходимости в armHideStatusBarAutoRetry.
       setHideStatusBarEnabled(this.checked);
+    });
+
+    document.getElementById("settingsDebugModeCb").addEventListener("change", function(){
+      // Логика режима отладки (localStorage-флаг + панель логов) живёт в
+      // debug.js, здесь только передаём галочку туда.
+      if(window.Debug) window.Debug.setEnabled(this.checked);
     });
 
     document.getElementById("settingsAddGoalBtn").addEventListener("click", function(){
@@ -6882,7 +6890,7 @@
     });
 
     editable.addEventListener("blur", function(){
-      var restoreScroll = guardTaskListScroll();
+      var restoreScroll = window.Debug.guardTaskListScroll();
       var newText = getEditableNoteText(editable);
       setCommentText(id, newText.trim());
       editable.contentEditable = "false";
@@ -7119,64 +7127,10 @@
   }
 
   // ===================== ВКЛАДКИ ЗАДАЧ: ОТРИСОВКА =====================
-  // ВРЕМЕННО (диагностика ТЗ пользователя от 02.09 — прыжок/подёргивания
-  // списка задач при потере фокуса в никуда): три попытки вслепую бороться
-  // со скроллом (переустановка scrollTop через таймауты, затем через
-  // "scroll"-слушатель, затем через overflow:hidden) либо не помогали, либо
-  // становилось хуже — значит, реальная причина не там, где предполагалось,
-  // и дальше гадать без данных бессмысленно. Вместо очередной правки — чистая
-  // диагностика: логируем в видимую на экране панель (аналог window.onerror
-  // из index.html, только без остановки работы) scrollTop контейнера,
-  // window.scrollY и высоту visualViewport на каждое событие "scroll"/
-  // "resize" в течение 2 секунд после blur. Как только причина станет видна
-  // из лога — эту панель и вызовы logScrollDebug убрать.
-  var scrollDebugBox = null;
-  function logScrollDebug(label){
-    if(!scrollDebugBox){
-      scrollDebugBox = document.createElement("div");
-      scrollDebugBox.style.cssText = "position:fixed;left:4px;right:4px;bottom:4px;max-height:40vh;overflow:auto;" +
-        "background:rgba(0,0,0,0.85);color:#0f0;font:10px monospace;padding:6px;z-index:999999;white-space:pre-wrap;";
-      document.body.appendChild(scrollDebugBox);
-    }
-    var container = document.getElementById("settingsTabContent");
-    var line = (Date.now() % 100000) + " " + label +
-      " scrollTop=" + (container ? container.scrollTop : "?") +
-      " winY=" + window.scrollY +
-      " vvH=" + (window.visualViewport ? Math.round(window.visualViewport.height) : "?");
-    var p = document.createElement("div");
-    p.textContent = line;
-    scrollDebugBox.appendChild(p);
-    scrollDebugBox.scrollTop = scrollDebugBox.scrollHeight;
-  }
-  function guardTaskListScroll(){
-    var container = document.getElementById("settingsTabContent");
-    if(!container) return function(){};
-    var savedScroll = container.scrollTop;
-    logScrollDebug("blur:start");
-    var onScroll = function(){
-      logScrollDebug("container scroll");
-      // Подстраховка: если гипотеза (не удалять узел сразу) не убрала сброс
-      // целиком, хотя бы откатываем его сразу же, а не оставляем как есть.
-      if(container.scrollTop !== savedScroll) container.scrollTop = savedScroll;
-    };
-    var onWinScroll = function(){ logScrollDebug("window scroll"); };
-    var onResize = function(){ logScrollDebug("resize"); };
-    container.addEventListener("scroll", onScroll);
-    window.addEventListener("scroll", onWinScroll);
-    window.addEventListener("resize", onResize);
-    if(window.visualViewport) window.visualViewport.addEventListener("resize", onResize);
-    setTimeout(function(){
-      logScrollDebug("guard:end");
-      container.removeEventListener("scroll", onScroll);
-      window.removeEventListener("scroll", onWinScroll);
-      window.removeEventListener("resize", onResize);
-      if(window.visualViewport) window.visualViewport.removeEventListener("resize", onResize);
-    }, 2000);
-    return function(){
-      logScrollDebug("restore-called");
-      if(document.body.contains(container) && container.scrollTop !== savedScroll) container.scrollTop = savedScroll;
-    };
-  }
+  // Защита от прыжка/подёргивания списка задач при потере фокуса в никуда
+  // (см. ТЗ пользователя от 02.09) — сама защита и её диагностический лог
+  // (видимая панель, включается галочкой "Включить режим отладки") живут в
+  // debug.js, см. Debug.guardTaskListScroll().
   function renderTaskTabList(tabKey){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -7436,7 +7390,7 @@
     // bindTaskRowActions), так что до срабатывания этого таймера строка
     // обычно уже перерисована ими, и здесь просто нечего делать.
     editable.addEventListener("blur", function(){
-      var restoreScroll = guardTaskListScroll();
+      var restoreScroll = window.Debug.guardTaskListScroll();
       // ГИПОТЕЗА по логу диагностики: браузер откладывает собственный
       // "прокрутить каретку в видимую область" уже ПОСЛЕ blur — и если к
       // моменту его срабатывания сам contenteditable-узел уже удалён (см.
@@ -7727,7 +7681,7 @@
       });
 
       editable.addEventListener("blur", function(){
-        var restoreScroll = guardTaskListScroll();
+        var restoreScroll = window.Debug.guardTaskListScroll();
         var newText = getEditableNoteText(editable);
         setTaskText(id, newText.trim());
         editable.contentEditable = "false";
