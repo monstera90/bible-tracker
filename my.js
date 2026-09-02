@@ -1866,8 +1866,21 @@
     Object.keys(src).forEach(function(k){ payload[k] = src[k]; });
     payload[LAST_ACTIVE_STATE_KEY] = {c:true, t:Date.now()};
     var body = JSON.stringify(payload);
+    // ВАЖНО: метод именно PATCH, а не PUT. PUT в Firebase Realtime
+    // Database замещает узел /syncs/<id> ЦЕЛИКОМ содержимым body — если в
+    // payload нет какого-то ключа, который есть на сервере, он пропадает.
+    // PATCH обновляет только перечисленные в body дочерние ключи, не
+    // трогая остальные (см. doCloudSync ниже — туда теперь и передаётся
+    // не весь state, а только реально изменившиеся ключи). Это устраняет
+    // классическую гонку двух устройств: раньше, если между нашим чтением
+    // облака и нашей записью другое устройство успевало записать своё
+    // изменение (например, пометить задачу удалённой), наш PUT всего
+    // локального state отменял эту чужую запись — задача "восстанавливалась"
+    // из полного снапшота, вычисленного ещё ДО того, как мы про неё
+    // узнали. При PATCH с ключами, которых мы не трогали, мы вообще не
+    // отправляем — и стереть их не можем, кто бы их туда ни записал.
     var fetchOpts = {
-      method:"PUT",
+      method:"PATCH",
       headers:{"Content-Type":"application/json"},
       body: body
     };
@@ -1891,7 +1904,7 @@
   }
 
   // отдельного "создания" Firebase не требует — запись по случайному ID
-  // сама создаёт узел при первом PUT
+  // сама создаёт узел при первом PATCH
   function createCloudBlob(initialData){
     var id = generateSyncId();
     return putCloudBlob(id, initialData).then(function(){ return id; });
@@ -1917,6 +1930,23 @@
       if(a[k].c !== b[k].c || a[k].t !== b[k].t) return false;
     }
     return true;
+  }
+
+  // Сравнение ПО ЗНАЧЕНИЮ (не по ссылке, в отличие от statesEqual выше,
+  // которая полагается на то, что mergeStates переиспользует исходные
+  // объекты) — нужно, чтобы найти именно те ключи, которые реально
+  // отличаются от того, что мы только что прочитали из облака, и
+  // отправить в putCloudBlob (PATCH) только их. См. подробное пояснение
+  // про гонку двух устройств у putCloudBlob.
+  function recordsEqual(a, b){
+    return JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+  }
+  function buildStateDelta(merged, cloudData){
+    var delta = {};
+    Object.keys(merged || {}).forEach(function(k){
+      if(!recordsEqual(merged[k], cloudData ? cloudData[k] : undefined)) delta[k] = merged[k];
+    });
+    return delta;
   }
 
   var syncStatusPill = document.getElementById("syncStatusPill");
@@ -2000,7 +2030,11 @@
         setTimeout(function(){ setNoTransitions(false); }, 50);
       }
       if(cloudChanged){
-        return putCloudBlob(syncId, merged, {keepalive: urgent});
+        // Раньше здесь отправлялся весь merged (полный локальный state) —
+        // см. подробное объяснение гонки у putCloudBlob. Теперь отправляем
+        // только реально отличающиеся от только что прочитанного cloudData
+        // ключи — putCloudBlob шлёт их через PATCH, не трогая остальное.
+        return putCloudBlob(syncId, buildStateDelta(merged, cloudData), {keepalive: urgent});
       }
     }).then(function(){
       syncRetryCount = 0;
