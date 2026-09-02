@@ -986,10 +986,76 @@ window.initMdEditorModule = function(deps){
   // Экран выбора/переподтверждения папки — виден при первом запуске
   // вкладки (пока путь не указан) и если браузер отозвал разрешение.
   // ---------------------------------------------------------------------
+  // Android WebView-браузеры без полноценного Chromium (например, Hermit)
+  // заявляют showDirectoryPicker в window, но не реализуют сам системный
+  // пикер папок — вызов падает с NotAllowedError про активацию, даже если
+  // клик был настоящим (см. ТЗ пользователя от 01.09: работает в Chrome,
+  // не работает в Hermit). "; wv)" в UA — стандартный маркер WebView с
+  // Android 5.0+; по нему предупреждаем заранее и даём точную причину при
+  // отказе вместо голого текста ошибки браузера (см. catch ниже).
+  var IS_LIKELY_UNSUPPORTED_WEBVIEW = /;\s*wv\)/i.test(navigator.userAgent);
+
+  // ---------------------------------------------------------------------
+  // Отладочный снимок окружения — по прямому запросу пользователя от 02.09
+  // ("нужен какой-то отладчик в коде, который покажет, что происходит").
+  // Общего сообщения об ошибке недостаточно, чтобы различить причину:
+  // снимаем navigator.userActivation.isActive СИНХРОННО в момент клика
+  // (единственный момент, когда это значение вообще что-то значит — см.
+  // MDN про transient activation) — если оно true, а showDirectoryPicker
+  // всё равно падает с NotAllowedError, значит клик тут ни при чём, дело
+  // в самой реализации браузера. При отказе дополнительно пробуем
+  // showOpenFilePicker() ТОЙ ЖЕ активацией: если он срабатывает, а
+  // showDirectoryPicker нет — ломается именно выбор ПАПКИ, а не File
+  // System Access целиком (см. обсуждение в Chromium про Android:
+  // https://groups.google.com/a/chromium.org/g/blink-dev/c/x3IcFv2jY6c).
+  // У Hermit нет встроенных devtools под рукой, поэтому результат
+  // выводится прямо на экране (см. renderSetupScreen ниже), а не в
+  // консоль.
+  var lastDebugSnapshot = null;
+
+  function captureEnvSnapshot(){
+    return {
+      ua: navigator.userAgent,
+      secure: window.isSecureContext,
+      hasDirPicker: ("showDirectoryPicker" in window),
+      hasOpenPicker: ("showOpenFilePicker" in window),
+      activationIsActive: navigator.userActivation ? navigator.userActivation.isActive : "API недоступен",
+      activationHasBeenActive: navigator.userActivation ? navigator.userActivation.hasBeenActive : "API недоступен",
+      standalone: !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches),
+      looksLikeWebView: IS_LIKELY_UNSUPPORTED_WEBVIEW
+    };
+  }
+
+  function formatDebugSnapshot(s){
+    if(!s) return "";
+    var lines = [
+      "User-Agent: " + s.ua,
+      "Secure context: " + s.secure,
+      "showDirectoryPicker в window: " + s.hasDirPicker,
+      "showOpenFilePicker в window: " + s.hasOpenPicker,
+      "userActivation.isActive в момент клика: " + s.activationIsActive,
+      "userActivation.hasBeenActive: " + s.activationHasBeenActive,
+      "display-mode: standalone: " + s.standalone,
+      'Похоже на WebView по UA ("; wv)"): ' + s.looksLikeWebView
+    ];
+    if("dirPickerResult" in s) lines.push("Результат showDirectoryPicker: " + s.dirPickerResult);
+    if("openPickerTest" in s) lines.push("Доп. тест showOpenFilePicker(): " + s.openPickerTest);
+    return lines.join("\n");
+  }
+
   function renderSetupScreen(container){
     var hint = setupNeedsPermission
       ? "Доступ к папке с заметками нужно подтвердить заново."
       : "Укажите папку с заметками (.md), чтобы начать.";
+    if(IS_LIKELY_UNSUPPORTED_WEBVIEW){
+      hint += " Похоже, это браузер на основе Android WebView (например, Hermit) — такие браузеры обычно не умеют показывать системный выбор папки. Если кнопка ниже не сработает, откройте эту страницу в Chrome.";
+    }
+    var debugBlock = (lastDebugSnapshot && statusIsError)
+      ? '<details class="mdeditor-hint" style="margin-top:10px;">' +
+          '<summary style="cursor:pointer;">Подробности (отладка)</summary>' +
+          '<pre style="white-space:pre-wrap;word-break:break-all;font-size:12px;margin-top:6px;">' + escName(formatDebugSnapshot(lastDebugSnapshot)) + '</pre>' +
+        '</details>'
+      : '';
     container.innerHTML =
       '<div class="mdeditor-tab settings-content-bottom">' +
         '<h3 class="workbooks-title">Мой блокнот</h3>' +
@@ -999,12 +1065,15 @@ window.initMdEditorModule = function(deps){
             (setupNeedsPermission ? "Подтвердить доступ" : "Выбрать папку") + '">' + PAPERCLIP_ICON_SVG + '</button>' +
         '</div>' +
         (statusMessage ? '<p class="mdeditor-hint' + (statusIsError ? ' error' : '') + '" style="margin-top:10px;' + (statusIsError ? 'color:var(--status-err,#c0392b);' : '') + '">' + escName(statusMessage) + '</p>' : '') +
+        debugBlock +
       '</div>';
 
     document.getElementById("mdEditorAttachBtn").addEventListener("click", async function(){
       if(attachPickerBusy) return;
       attachPickerBusy = true;
       statusMessage = "";
+      var snap = captureEnvSnapshot();
+      lastDebugSnapshot = snap;
       try{
         if(setupNeedsPermission && dirHandle){
           var perm = await dirHandle.requestPermission({ mode: "readwrite" });
@@ -1016,7 +1085,28 @@ window.initMdEditorModule = function(deps){
             statusMessage = "Этот браузер не поддерживает выбор папки (нужен Chrome или Edge, на Android или на компьютере).";
             statusIsError = true; render(); return;
           }
-          var handle = await window.showDirectoryPicker({ mode: "readwrite" });
+          var handle;
+          try{
+            handle = await window.showDirectoryPicker({ mode: "readwrite" });
+            snap.dirPickerResult = "успех";
+          }catch(pickerErr){
+            snap.dirPickerResult = (pickerErr && pickerErr.name) + (pickerErr && pickerErr.message ? (": " + pickerErr.message) : "");
+            // Доп. тест ТОЙ ЖЕ активацией — см. комментарий про
+            // lastDebugSnapshot выше.
+            if(pickerErr && pickerErr.name === "NotAllowedError" && ("showOpenFilePicker" in window)){
+              try{
+                await window.showOpenFilePicker({ multiple:false });
+                snap.openPickerTest = "сработал (диалог открылся) — проблема именно в выборе ПАПКИ";
+              }catch(secErr){
+                if(secErr && secErr.name === "AbortError"){
+                  snap.openPickerTest = "сработал (диалог открылся, отменено) — проблема именно в выборе ПАПКИ";
+                } else {
+                  snap.openPickerTest = "тоже отказал: " + (secErr && secErr.name) + (secErr && secErr.message ? (": " + secErr.message) : "");
+                }
+              }
+            }
+            throw pickerErr;
+          }
           dirHandle = handle;
           try{ await idbSet("root", handle); }catch(e){}
           // новая папка — старые URL картинок из прошлой библиотеки больше
@@ -1043,6 +1133,19 @@ window.initMdEditorModule = function(deps){
         await resumeLastNoteOrShowList();
       }catch(e){
         if(e && e.name === "AbortError") return;
+        // NotAllowedError именно на ПЕРВОМ выборе папки (не на переподтверждении
+        // прав уже сохранённого dirHandle — см. IS_LIKELY_UNSUPPORTED_WEBVIEW
+        // выше) — это не отказ пользователя, а браузер, который заявляет
+        // showDirectoryPicker, но не реализует сам системный диалог (Hermit и
+        // другие WebView-обёртки без полноценного Chromium). Полный разбор —
+        // в lastDebugSnapshot, выводится ниже блоком "Подробности (отладка)"
+        // (запрос пользователя на отладчик от 02.09).
+        if(e && e.name === "NotAllowedError" && !(setupNeedsPermission && dirHandle)){
+          statusMessage = "Этот браузер не даёт открыть системный выбор папки" +
+            (IS_LIKELY_UNSUPPORTED_WEBVIEW ? " — так бывает в браузерах на основе Android WebView (например, Hermit)." : ".") +
+            " Откройте эту страницу в Chrome или Edge. Подробности — ниже.";
+          statusIsError = true; render(); return;
+        }
         // Показываем настоящую причину (имя/текст ошибки браузера), а не
         // один и тот же общий текст на любую проблему — иначе непонятно,
         // где именно оно ломается: при выборе папки, при подтверждении
