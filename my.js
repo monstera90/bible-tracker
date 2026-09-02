@@ -6890,7 +6890,6 @@
         renderCommentRowView(id);
         restoreScroll();
       }, 0);
-      setTimeout(restoreScroll, 350);
     });
 
     body.querySelector(".comment-delete-btn").addEventListener("click", function(){
@@ -7128,16 +7127,31 @@
   // контейнера списка задач обратно к 0 (кнопки не дают этого эффекта,
   // т.к. сами забирают фокус на себя, и клавиатура ведёт себя иначе). ТЗ
   // пользователя от 02.09: "дописал задачу, нажал на другую задачу/пустое
-  // место — список прыгает в начало". Запоминаем позицию в момент blur и
-  // переустанавливаем её ещё раз чуть позже (когда клавиатура уже точно
-  // закрылась), перекрывая такой поздний сброс.
+  // место — список прыгает в начало".
+  //
+  // Момент этого сброса не фиксирован и может повториться несколько раз
+  // за время закрытия клавиатуры (первая попытка через setTimeout(0)/350мс
+  // это подтвердила — прыжок стал "плавнее", но не пропал: значит, сброс
+  // случался ПОЗЖЕ, чем наши тайминги). Поэтому вместо гадания с
+  // таймаутами держим позицию "под замком": слушаем сам scroll контейнера
+  // и мгновенно возвращаем сохранённое значение при любом отклонении —
+  // сколько бы раз и в какой бы момент браузер её ни сбросил, — и снимаем
+  // замок только через достаточно большое время (когда клавиатура уже
+  // точно закрылась и анимация улеглась).
   function guardTaskListScroll(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return function(){};
     var savedScroll = container.scrollTop;
-    return function(){
-      if(document.body.contains(container)) container.scrollTop = savedScroll;
-    };
+    var active = true;
+    function pin(){
+      if(active && container.scrollTop !== savedScroll) container.scrollTop = savedScroll;
+    }
+    container.addEventListener("scroll", pin);
+    setTimeout(function(){
+      active = false;
+      container.removeEventListener("scroll", pin);
+    }, 700);
+    return pin;
   }
   function renderTaskTabList(tabKey){
     var container = document.getElementById("settingsTabContent");
@@ -7406,7 +7420,6 @@
         renderTaskRowView(id, tabKey);
         restoreScroll();
       }, 0);
-      setTimeout(restoreScroll, 350);
     });
 
     bindTaskRowActions(body, id, tabKey);
@@ -7690,7 +7703,6 @@
           renderRowView(id);
           restoreScroll();
         }, 0);
-        setTimeout(restoreScroll, 350);
       });
 
       bindRowActions(body, id);
