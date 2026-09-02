@@ -7141,7 +7141,23 @@
   // (см. ТЗ пользователя от 02.09) — сама защита и её диагностический лог
   // (видимая панель, включается галочкой "Включить режим отладки") живут в
   // debug.js, см. Debug.guardTaskListScroll().
-  function renderTaskTabList(tabKey){
+  // anchorTaskId (необязательный) — id задачи, ради которой вызвана
+  // пересборка (например, клик по кружку приоритета на Red, где от
+  // отметки зависит и состав, и порядок строк, см. getTasksForTab). Без
+  // него — при обычных вызовах (переключение вкладки, фоновая
+  // синхронизация) — сохраняется прежнее поведение: сырой container.scrollTop.
+  // ЭТОГО ДОСТАТОЧНО, только пока порядок/состав строк ВЫШЕ сохранённой
+  // позиции не меняется. На Red клик по кружку меняет группу задачи (red
+  // сверху, yellow ниже, см. сортировку в getTasksForTab) — строка может
+  // уйти далеко от места клика, а старый scrollTop продолжает указывать на
+  // тот же пиксель, но там теперь ДРУГАЯ задача — отсюда и был "прыжок"
+  // (ТЗ пользователя от 02.09, второй случай на Red). Настоящий корень
+  // всех виденных до этого прыжков со скроллом один и тот же: где-то
+  // сохраняли сырой scrollTop, предполагая, что содержимое НАД видимой
+  // областью не меняется, а оно менялось — здесь вместо этого держим
+  // строку-якорь на том же визуальном месте на экране, чем бы ни было
+  // вызвано изменение списка.
+  function renderTaskTabList(tabKey, anchorTaskId){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     // Полная пересборка списка ниже (innerHTML) сама по себе всегда
@@ -7155,13 +7171,27 @@
     // возвращаем — при настоящем переключении вкладки это просто вернёт
     // те же 0 обратно, поведение не меняется.
     var preservedScrollTop = container.scrollTop;
+    var anchorRowOld = anchorTaskId ? container.querySelector('.task-row[data-id="' + anchorTaskId + '"]') : null;
+    var anchorVisualOffset = null;
+    if(anchorRowOld) anchorVisualOffset = anchorRowOld.getBoundingClientRect().top - container.getBoundingClientRect().top;
     var tasks = getTasksForTab(tabKey);
     var rowsHtml = tasks.map(function(t){ return buildTaskRowHtml(t); }).join("");
     container.innerHTML =
       '<div class="task-list task-grid-list" id="taskListWrap">' + rowsHtml + '</div>' +
       (tasks.length === 0 ? '<div class="task-empty">Здесь пока нет задач.</div>' : '');
-    container.scrollTop = preservedScrollTop;
     tasks.forEach(function(t){ bindTaskRow(t.id, tabKey); });
+    if(anchorVisualOffset != null){
+      container.scrollTop = 0; // база для измерения абсолютного положения строки в списке
+      var anchorRowNew = container.querySelector('.task-row[data-id="' + anchorTaskId + '"]');
+      if(anchorRowNew){
+        var anchorAbsTop = anchorRowNew.getBoundingClientRect().top - container.getBoundingClientRect().top;
+        container.scrollTop = anchorAbsTop - anchorVisualOffset;
+      } else {
+        container.scrollTop = preservedScrollTop;
+      }
+    } else {
+      container.scrollTop = preservedScrollTop;
+    }
 
     var fab = document.getElementById("taskAddFab");
     if(fab){
@@ -7339,7 +7369,7 @@
         // openTaskNextPicker) — там же полная пересборка не грозит багом
         // именно потому, что обновляет только свою строку.
         var effectiveTab = tabKey || task.c.tab;
-        if(effectiveTab === "red") renderTaskTabList(effectiveTab);
+        if(effectiveTab === "red") renderTaskTabList(effectiveTab, id);
         else renderTaskRowView(id, tabKey);
       });
     }
