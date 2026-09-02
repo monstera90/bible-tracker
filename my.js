@@ -197,6 +197,129 @@
   // выполниться.
   var LINKIFY_URL_RE = /((?:https?:\/\/|www\.)[^\s<]+)/gi;
   var LINKIFY_TRAIL_RE = /[.,;:!?)\]}'"]+$/;
+
+  // ===================== ЗАГОЛОВКИ ВСТАВЛЕННЫХ ССЫЛОК =====================
+  // Голая ссылка (см. LINKIFY_URL_RE выше) показывается не самим адресом, а
+  // человекочитаемым заголовком: для YouTube — настоящее название видео
+  // (сеть, официальный oEmbed, без ключей), для jw.org — эвристика по slug
+  // в самом URL (без сети), для остального — просто домен (сознательно без
+  // сети: проект не использует сторонние CORS-прокси, а свой сервер не
+  // держит). autoLinkTitle вызывается синхронно из formatInline/decorateLine
+  // (mdeditor.js) на каждую перестройку — поэтому кеш обязателен, а сетевой
+  // запрос YouTube асинхронный: до его завершения возвращается временная
+  // заглушка (домен), точечное обновление уже отрисованных ссылок — через
+  // onLinkTitleResolved (см. initAutoFormatting ниже и registerLinkNode в
+  // mdeditor.js).
+  //
+  // linkTitleCache: href -> {title} (готово) | "pending" (запрос идёт) |
+  // "error" (упал, ждёт повтора при следующей успешной синхронизации).
+  var linkTitleCache = new Map();
+  var linkTitleListeners = [];
+  function onLinkTitleResolved(cb){ linkTitleListeners.push(cb); }
+  function notifyLinkTitleResolved(href){
+    linkTitleListeners.forEach(function(cb){ try{ cb(href); }catch(e){} });
+  }
+
+  // ссылки YouTube, у которых oEmbed-запрос упал (сеть недоступна и т.п.) —
+  // не голое число, а именно Set самих адресов: чтобы при восстановлении
+  // сети знать, ЧТО именно перезапросить (см. retryUnresolvedYoutubeLinks).
+  var unresolvedYoutubeLinks = new Set();
+
+  function extractYoutubeId(href){
+    var m = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/i.exec(href);
+    return m ? m[1] : null;
+  }
+
+  function hostLabel(href){
+    try{
+      return new URL(href).hostname.replace(/^www\./i, "");
+    }catch(e){
+      return href;
+    }
+  }
+
+  // адреса, откуда приходят публикации/статьи — заголовок вытаскивается из
+  // самого URL, без сети: обычно это человекочитаемый slug в пути
+  // публикации/статьи ("/ru/библиотека/.../название-статьи/") либо параметр
+  // "q=" у поисковых ссылок. Хвостовые чисто цифровые сегменты (id
+  // публикаций/изданий) отбрасываются — в них нет ничего читаемого.
+  function publicationTitleFromUrl(href){
+    try{
+      var u = new URL(href);
+      var q = u.searchParams.get("q");
+      var raw = q || "";
+      if(!raw){
+        var segs = u.pathname.split("/").filter(Boolean);
+        while(segs.length && /^\d+$/.test(segs[segs.length - 1])) segs.pop();
+        raw = segs.length ? segs[segs.length - 1] : "";
+      }
+      if(!raw) return null;
+      try{ raw = decodeURIComponent(raw); }catch(e2){}
+      raw = raw.replace(/[-_]+/g, " ").trim();
+      if(!raw) return null;
+      return raw.charAt(0).toUpperCase() + raw.slice(1);
+    }catch(e){
+      return null;
+    }
+  }
+
+  function autoLinkTitle(href){
+    var yid = extractYoutubeId(href);
+    if(yid){
+      var cached = linkTitleCache.get(href);
+      if(cached && cached !== "pending" && cached !== "error") return { text: cached.title };
+      ensureYoutubeTitle(href);
+      return { text: hostLabel(href) }; // временная заглушка на время загрузки
+    }
+    if(/(^|\.)jw\.org$/i.test(hostLabel(href))){
+      return { text: publicationTitleFromUrl(href) || hostLabel(href) };
+    }
+    return { text: hostLabel(href) };
+  }
+
+  // ВАЖНО: используется fetchWithTimeout, объявленная гораздо ниже по файлу
+  // (раздел "ОБЛАЧНАЯ СИНХРОНИЗАЦИЯ") — это безопасно: она объявлена как
+  // function-декларация (`function fetchWithTimeout(...)`), а не через var,
+  // поэтому поднимается (hoisting) в начало этой же IIFE и доступна здесь
+  // независимо от текстового порядка объявлений в файле.
+  function ensureYoutubeTitle(href){
+    var st = linkTitleCache.get(href);
+    if(st && st !== "error") return; // уже получено или запрос уже идёт
+    linkTitleCache.set(href, "pending");
+    unresolvedYoutubeLinks.delete(href);
+    fetchWithTimeout("https://www.youtube.com/oembed?format=json&url=" + encodeURIComponent(href), {}, 8000)
+      .then(function(r){ if(!r.ok) throw new Error("bad_status"); return r.json(); })
+      .then(function(data){
+        linkTitleCache.set(href, { title: data.title || hostLabel(href) });
+        unresolvedYoutubeLinks.delete(href);
+        notifyLinkTitleResolved(href);
+      })
+      .catch(function(){
+        linkTitleCache.set(href, "error");
+        unresolvedYoutubeLinks.add(href);
+        // сама толкает синхронизацию, не дожидаясь, пока её вызовет что-то
+        // другое — если оффлайн, scheduleCloudPush сама уйдёт в "offline"
+        // внутри doCloudSync без последствий; когда сеть вернётся,
+        // существующий слушатель "online" и так вызовет doCloudSync(), а
+        // её успех подхватит повтор (см. retryUnresolvedYoutubeLinks и её
+        // единственный вызов в doCloudSync).
+        scheduleCloudPush();
+      });
+  }
+
+  // Повторная попытка получить заголовки YouTube-ссылок, упавшие ранее —
+  // вызывается ИЗ ОДНОГО МЕСТА: сразу после успешного завершения
+  // doCloudSync (см. ниже, ветка "synced").
+  function retryUnresolvedYoutubeLinks(){
+    if(!unresolvedYoutubeLinks.size) return;
+    var hrefs = Array.from(unresolvedYoutubeLinks);
+    unresolvedYoutubeLinks.clear();
+    hrefs.forEach(function(href){
+      linkTitleCache.delete(href); // сброс "error"
+      ensureYoutubeTitle(href);
+    });
+  }
+
   // Единая функция ИНЛАЙН-форматирования одной строки (без переносов) —
   // ссылки на Библию, [[ссылки на заметки]], обычные URL, **жирный**,
   // *курсив*/_курсив_, ==выделение==. Работает на СЫРОМ (неэкранированном)
@@ -271,7 +394,8 @@
         if(!core) return;
         tryClaim(a, a + core.length, function(){
           var href = /^https?:\/\//i.test(core) ? core : "https://" + core;
-          return '<a href="' + href + '" target="_blank" rel="noopener noreferrer" class="auto-link">' + escapeHtml(core) + '</a>';
+          var info = autoLinkTitle(href);
+          return '<a href="' + href + '" target="_blank" rel="noopener noreferrer" class="auto-link resource-link" data-auto-href="' + escapeHtml(href) + '">' + escapeHtml(info.text) + '</a>';
         });
       })(mUrl[0], mUrl.index);
       if(mUrl[0].length === 0) LINKIFY_URL_RE.lastIndex++;
@@ -475,6 +599,22 @@
       ev.preventDefault();
       switchSettingsTab("set2s_1");
       if(MdEditor && MdEditor.openNoteExternally) MdEditor.openNoteExternally(name);
+    });
+
+    // точечное обновление уже отрисованных ссылок (span/a.resource-link,
+    // см. formatInline выше) при получении реального заголовка (сейчас
+    // единственный источник — YouTube oEmbed, см. ensureYoutubeTitle) —
+    // без этого ссылка так и осталась бы показывать временную заглушку
+    // (домен) до следующей полной перерисовки вкладки. Сравнение через
+    // getAttribute, а не через CSS-селектор с подставленным URL — избегаем
+    // экранирования спецсимволов в селекторе.
+    onLinkTitleResolved(function(href){
+      var info = linkTitleCache.get(href);
+      if(!info || info === "pending" || info === "error") return;
+      var els = root.querySelectorAll(".resource-link");
+      els.forEach(function(el){
+        if(el.getAttribute("data-auto-href") === href) el.textContent = info.title;
+      });
     });
   })();
 
@@ -2040,6 +2180,7 @@
       syncRetryCount = 0;
       clearTimeout(syncRetryTimer);
       setSyncState("synced");
+      retryUnresolvedYoutubeLinks(); // повтор упавших ранее запросов заголовков YouTube (см. выше)
       // Успешно синхронизировались — если за время этого цикла набежало
       // ещё одно изменение (см. pendingPushAfterSync у scheduleCloudPush),
       // сразу запускаем новый цикл, а не ждём следующего изменения задачи.
@@ -2299,7 +2440,12 @@
     // данные приложения (см. getSyncedBookmarkNames/setSyncedBookmark
     // выше и ТЗ пользователя от 01.09).
     getSyncedBookmarkNames: getSyncedBookmarkNames,
-    setSyncedBookmark: setSyncedBookmark
+    setSyncedBookmark: setSyncedBookmark,
+    // заголовки вставленных ссылок (YouTube/публикации/домен, см. выше) —
+    // общий резолвер и подписка на его асинхронное обновление, чтобы live-
+    // preview блокнота показывал те же заголовки, что и остальные вкладки.
+    autoLinkTitle: autoLinkTitle,
+    onLinkTitleResolved: onLinkTitleResolved
   });
   var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
   var renderSettingsTabMdBookmarks = MdEditor.renderSettingsTabMdBookmarks;

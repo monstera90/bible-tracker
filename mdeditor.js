@@ -2426,6 +2426,36 @@ window.initMdEditorModule = function(deps){
     for(var i = 0; i < wraps.length; i++) applyImageFloatLayout(wraps[i]);
   }
 
+  // ---- заголовки вставленных ссылок (см. LinkWidget/getLinkWidget внутри
+  // makeLivePreviewExtension ниже) — реестр реально смонтированных DOM-
+  // узлов на уровне модуля, а не внутри makeLivePreviewExtension, т.к. она
+  // вызывается заново при каждом mountEditor()/переключении режима "без
+  // кода"/"с кодом" (см. mountEditor/setCodeMode ниже): подписка на
+  // deps.onLinkTitleResolved должна случиться РОВНО ОДИН РАЗ за всё время
+  // жизни модуля, иначе на каждый повторный вызов копился бы ещё один
+  // обработчик и заголовок обновлялся бы по нескольку раз подряд. Сам
+  // реестр обновлять DOM точечно, без пересборки decorations, тоже может в
+  // любой момент — CodeMirror decorations нельзя точечно пересчитать без
+  // полного docChanged, а тут достаточно поменять textContent. ----
+  var linkNodesByHref = new Map(); // href -> Set<HTMLElement>
+  function registerLinkNode(href, el){
+    var set = linkNodesByHref.get(href);
+    if(!set){ set = new Set(); linkNodesByHref.set(href, set); }
+    set.add(el);
+  }
+  function unregisterLinkNode(href, el){
+    var set = linkNodesByHref.get(href);
+    if(set){ set.delete(el); if(!set.size) linkNodesByHref.delete(href); }
+  }
+  if(deps.onLinkTitleResolved){
+    deps.onLinkTitleResolved(function(href){
+      var set = linkNodesByHref.get(href);
+      if(!set) return;
+      var info = deps.autoLinkTitle(href); // текущий (уже свежий) текст
+      set.forEach(function(el){ el.textContent = info.text; });
+    });
+  }
+
   function makeLivePreviewExtension(cm){
     var Decoration = cm.view.Decoration, ViewPlugin = cm.view.ViewPlugin, WidgetType = cm.view.WidgetType;
     var RangeSetBuilder = cm.state.RangeSetBuilder;
@@ -2513,6 +2543,43 @@ window.initMdEditorModule = function(deps){
         wrapEl.classList.add("cm-md-image-missing");
         wrapEl.textContent = "🖼 " + name + " — не удалось загрузить";
       });
+    }
+
+    // ---- заголовок вставленной ссылки (YouTube/публикации/домен, см.
+    // autoLinkTitle в my.js, передан сюда как deps.autoLinkTitle) — по
+    // образцу ImageWidget выше, но проще (не читает файлы, ссылка уже
+    // готова: настоящий <a target="_blank">, клик обрабатывает браузер
+    // нативно, свой обработчик не нужен). Текст внутри уже смонтированного
+    // узла не пересоздаётся новым экземпляром виджета — обновляется прямо
+    // в DOM через registerLinkNode/onLinkTitleResolved (см. реестр на
+    // уровне модуля выше), поэтому eq() ниже сравнивает и текст тоже: пока
+    // текст совпадает, CodeMirror переиспользует старый DOM-узел (и он
+    // остаётся в реестре), а как только текст обновится — старый виджет
+    // выпадет из кеша (см. getLinkWidget), CodeMirror пересоздаст DOM,
+    // сработает destroy() старого узла и toDOM() нового.
+    function LinkWidget(href, initialText){
+      this.href = href;
+      this.text = initialText;
+    }
+    LinkWidget.prototype = Object.create(WidgetType.prototype);
+    LinkWidget.prototype.eq = function(other){ return other.href === this.href && other.text === this.text; };
+    LinkWidget.prototype.toDOM = function(){
+      var a = document.createElement("a");
+      a.href = this.href;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.className = "auto-link resource-link";
+      a.textContent = this.text;
+      registerLinkNode(this.href, a);
+      return a;
+    };
+    LinkWidget.prototype.destroy = function(dom){ unregisterLinkNode(this.href, dom); };
+    LinkWidget.prototype.ignoreEvent = function(){ return true; }; // как у ImageWidget/TaskActionsWidget — не мешать клику браузера по <a>
+    var linkWidgetCache = new Map(); // href -> LinkWidget (текст внутри не подменяем в существующем экземпляре — см. eq() выше)
+    function getLinkWidget(href, text){
+      var w = linkWidgetCache.get(href);
+      if(!w || w.text !== text){ w = new LinkWidget(href, text); linkWidgetCache.set(href, w); }
+      return w;
     }
 
     // ---- кнопки задачи "- [ ] текст" (см. TASK_LINE_RE выше) — те же
@@ -2759,6 +2826,32 @@ window.initMdEditorModule = function(deps){
           })(mScr.index, mScr.index + mScr[0].length);
           if(mScr[0].length === 0) SCRIPTURE_RE.lastIndex++;
         }
+      }
+
+      // обычные ссылки http(s)://, www. (тот же приём "заявок", что и у
+      // остальных блоков decorateLine) — строго ПОСЛЕ ссылок на Библию и
+      // ПЕРЕД scanPair(**жирный** и т.д.) ниже: иначе "_"/"*", случайно
+      // попавшие в query-строку URL, перехватились бы italic-регэкспами
+      // раньше, чем URL успеет заявить на себя весь диапазон. Заголовок —
+      // через deps.autoLinkTitle (см. my.js): для YouTube асинхронно (сеть,
+      // временная заглушка на время загрузки), для остального сразу.
+      var urlRe = /((?:https?:\/\/|www\.)[^\s<]+)/gi, mUrl;
+      var LINKIFY_TRAIL_RE = /[.,;:!?)\]}'"]+$/; // тот же паттерн отсечения хвостовой пунктуации, что и в my.js
+      urlRe.lastIndex = 0;
+      while((mUrl = urlRe.exec(lineText))){
+        (function(raw0, a){
+          var trailM = raw0.match(LINKIFY_TRAIL_RE);
+          var trail = trailM ? trailM[0] : "";
+          var core = trail ? raw0.slice(0, raw0.length - trail.length) : raw0;
+          if(!core) return;
+          var b = a + core.length;
+          tryClaim(a, b, function(){
+            var href = /^https?:\/\//i.test(core) ? core : "https://" + core;
+            var info = deps.autoLinkTitle ? deps.autoLinkTitle(href) : { text: href };
+            builder.add(lineFrom + a, lineFrom + b, Decoration.replace({ widget: getLinkWidget(href, info.text) }));
+          });
+        })(mUrl[0], mUrl.index);
+        if(mUrl[0].length === 0) urlRe.lastIndex++;
       }
 
       scanPair(/\*\*([^*\n]+?)\*\*/g, 2, boldMark);

@@ -1808,6 +1808,15 @@
     text-decoration:none;
     cursor:pointer;
   }
+  /* заголовок вставленной ссылки (YouTube/публикации/просто домен, см.
+     autoLinkTitle в my.js) — тот же цвет/поведение, что у соседних правил
+     выше: специально не заводим новый оттенок, чтобы визуально ссылки
+     воспринимались одним семейством. */
+  .auto-link.resource-link{
+    color:#8a6fd8;
+    text-decoration:none;
+    cursor:pointer;
+  }
   .cm-md-h1, .cm-md-h2, .cm-md-h3{ font-weight:bold; }
   .cm-md-h1{ font-size:1.5em; }
   .cm-md-h2{ font-size:1.28em; }
