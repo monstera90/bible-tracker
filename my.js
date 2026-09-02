@@ -4284,7 +4284,7 @@
       '<div class="settings-row"><span>Включить личные комментарии в шапке сайта</span><input type="checkbox" id="settingsCustomCommentsCb"' + (customCommentsOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить дополнительные анимации</span><input type="checkbox" id="settingsExtraAnimCb"' + (extraAnimOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row" style="border-bottom:none;"><span>Скрывать статус бар PWA-приложения</span><input type="checkbox" id="settingsHideStatusBarCb"' + (hideStatusBarOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row" style="border-bottom:none;"><span>Включить полноэкранный режим</span><input type="checkbox" id="settingsHideStatusBarCb"' + (hideStatusBarOn ? " checked" : "") + '></div>' +
       (showAllTasksOn ? '<button class="modal-btn" id="settingsImportTasksBtn" style="margin-top:16px;">Восстановить задачи из .txt</button>' : '') +
       '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:' + (showAllTasksOn ? "10px" : "16px") + ';">Добавить для себя цель</button>' +
       '<button class="modal-btn" id="settingsVersionsBtn" style="margin-top:10px;">Версии</button>' +
@@ -6270,9 +6270,16 @@
     return {id: id, c: rec.c, t: rec.t};
   }
   function saveTaskData(id, data){
-    var rec = state["task:" + id];
-    var t = (rec && typeof rec.t === "number") ? rec.t : Date.now();
-    state["task:" + id] = {c: data, t: t};
+    // ВАЖНО: t всегда должен быть временем ИМЕННО этой записи, а не
+    // "унаследованным" от старой версии — mergeStates сравнивает записи
+    // по t (last-write-wins), и если t не обновлять при каждом изменении
+    // (перенос вкладки, флажок, отметка выполнено), то на другом
+    // устройстве при слиянии t совпадёт со старой облачной копией и
+    // локальная (устаревшая) версия победит вместо свежей из облака —
+    // изменения не подтянутся. Порядок задач в списках теперь также
+    // определяется временем последнего изменения, а не только создания —
+    // это ожидаемый побочный эффект (недавно тронутая задача поднимается).
+    state["task:" + id] = {c: data, t: Date.now()};
     saveLocalState();
     scheduleCloudPush();
   }
@@ -6451,8 +6458,11 @@
     return {id: id, c: rec.c, t: rec.t};
   }
   function saveCommentData(id, data, createdAt){
+    // Та же причина, что и в saveTaskData выше: t должен отражать время
+    // ПОСЛЕДНЕГО изменения этой записи, иначе редактирование комментария
+    // не подтянется на другом устройстве при слиянии (см. mergeStates).
     var rec = state["comment:" + id];
-    var t = (rec && typeof rec.t === "number") ? rec.t : (createdAt || Date.now());
+    var t = rec ? Date.now() : (createdAt || Date.now());
     state["comment:" + id] = {c: data, t: t};
     saveLocalState();
     scheduleCloudPush();
@@ -6906,7 +6916,7 @@
     var tasks = getTasksForTab(tabKey);
     var rowsHtml = tasks.map(function(t){ return buildTaskRowHtml(t); }).join("");
     container.innerHTML =
-      '<div class="task-list" id="taskListWrap">' + rowsHtml + '</div>' +
+      '<div class="task-list task-grid-list" id="taskListWrap">' + rowsHtml + '</div>' +
       (tasks.length === 0 ? '<div class="task-empty">Здесь пока нет задач.</div>' : '');
     tasks.forEach(function(t){ bindTaskRow(t.id, tabKey); });
 
@@ -7495,7 +7505,7 @@
       '</div>';
     }).join("");
     container.innerHTML =
-      '<div class="task-list">' + rowsHtml + '</div>' +
+      '<div class="task-list task-grid-list">' + rowsHtml + '</div>' +
       (shown.length === 0 ? '<div class="task-empty">Архив пуст.</div>' : '');
     Array.prototype.forEach.call(container.querySelectorAll(".task-archive-body"), function(body){
       fitTaskActions(body);

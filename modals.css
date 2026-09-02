@@ -946,6 +946,48 @@
     font-style:italic;
   }
 
+  /* ---------- многоколоночная раскладка списков задач на широких экранах
+     (ТЗ пользователя от 02.09) — только реальные вкладки задач (inbox…
+     archive, отрисовываются renderTaskTabList/renderTaskArchiveTab в
+     my.js, они помечают свой контейнер доп. классом .task-grid-list —
+     список комментариев и экран "Все задачи проекта" тоже используют
+     .task-list, но этот класс не получают и остаются одноколоночными,
+     их не просили менять).
+
+     Пороги подобраны как кратные 2×/3×/4× от CSS-ширины вьюпорта
+     смартфона пользователя (POCO X6 Pro, 394px CSS-viewport при
+     реальном разрешении 1220×2712 и pixel ratio 3.1 — типичный экран
+     Xiaomi/POCO этого класса). Порядок задач не меняется — тот же DOM-
+     порядок (новые/недавно изменённые сверху, старые снизу, см.
+     getTasksForTab/getArchivedTasksAll в my.js), при заливке в грид он
+     построчно распределяется по колонкам слева направо, сверху вниз,
+     прокрутка страницы остаётся вертикальной как и была.
+
+     Верхняя граница строки (.task-row, обычно отделяет её от
+     предыдущей задачи в одноколоночном списке) в гриде means не то же
+     самое — рисуется у КАЖДОЙ ячейки, а не только у первой в общем
+     списке, иначе задачи в правых колонках визуально "слипались" бы
+     без отделения друг от друга. У самой первой ГРИД-строки (первые N
+     ячеек, N = число колонок) она снимается отдельным правилом
+     (:nth-child(-n+N)) — как верхний край всего списка. */
+  @media (min-width:788px){
+    .task-grid-list{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0,1fr));
+      column-gap:16px;
+    }
+    .task-grid-list .task-row{ border-top:1px solid var(--groove-shadow); }
+    .task-grid-list .task-row:nth-child(-n+2){ border-top:none; }
+  }
+  @media (min-width:1182px){
+    .task-grid-list{ grid-template-columns:repeat(3, minmax(0,1fr)); }
+    .task-grid-list .task-row:nth-child(-n+3){ border-top:none; }
+  }
+  @media (min-width:1576px){
+    .task-grid-list{ grid-template-columns:repeat(4, minmax(0,1fr)); }
+    .task-grid-list .task-row:nth-child(-n+4){ border-top:none; }
+  }
+
   /* Приклеена к правому нижнему углу окна настроек и не уезжает при
      прокрутке списка задач, т.к. лежит вне #settingsTabContent
      (settings-modal-box — position:relative). Оформлена в том же стиле и
