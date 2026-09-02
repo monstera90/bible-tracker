@@ -6882,12 +6882,15 @@
     });
 
     editable.addEventListener("blur", function(){
+      var restoreScroll = guardTaskListScroll();
       setTimeout(function(){
         if(!editable.isContentEditable || !document.body.contains(editable)) return;
         var newText = getEditableNoteText(editable);
         setCommentText(id, newText.trim());
         renderCommentRowView(id);
+        restoreScroll();
       }, 0);
+      setTimeout(restoreScroll, 350);
     });
 
     body.querySelector(".comment-delete-btn").addEventListener("click", function(){
@@ -7117,6 +7120,25 @@
   }
 
   // ===================== ВКЛАДКИ ЗАДАЧ: ОТРИСОВКА =====================
+  // На части мобильных браузеров/WebView, когда contenteditable-поле теряет
+  // фокус НЕ на другую кнопку/поле, а "в никуда" (тап по пустому месту
+  // строки другой задачи, где нет обработчика клика), экранная клавиатура
+  // закрывается с задержкой — и уже ПОСЛЕ того, как наш код успевает
+  // перерисовать строку, браузер сам сбрасывает scrollTop прокручиваемого
+  // контейнера списка задач обратно к 0 (кнопки не дают этого эффекта,
+  // т.к. сами забирают фокус на себя, и клавиатура ведёт себя иначе). ТЗ
+  // пользователя от 02.09: "дописал задачу, нажал на другую задачу/пустое
+  // место — список прыгает в начало". Запоминаем позицию в момент blur и
+  // переустанавливаем её ещё раз чуть позже (когда клавиатура уже точно
+  // закрылась), перекрывая такой поздний сброс.
+  function guardTaskListScroll(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return function(){};
+    var savedScroll = container.scrollTop;
+    return function(){
+      if(document.body.contains(container)) container.scrollTop = savedScroll;
+    };
+  }
   function renderTaskTabList(tabKey){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -7376,12 +7398,15 @@
     // bindTaskRowActions), так что до срабатывания этого таймера строка
     // обычно уже перерисована ими, и здесь просто нечего делать.
     editable.addEventListener("blur", function(){
+      var restoreScroll = guardTaskListScroll();
       setTimeout(function(){
         if(!editable.isContentEditable || !document.body.contains(editable)) return;
         var newText = getEditableNoteText(editable);
         setTaskText(id, newText.trim());
         renderTaskRowView(id, tabKey);
+        restoreScroll();
       }, 0);
+      setTimeout(restoreScroll, 350);
     });
 
     bindTaskRowActions(body, id, tabKey);
@@ -7657,12 +7682,15 @@
       });
 
       editable.addEventListener("blur", function(){
+        var restoreScroll = guardTaskListScroll();
         setTimeout(function(){
           if(!editable.isContentEditable || !document.body.contains(editable)) return;
           var newText = getEditableNoteText(editable);
           setTaskText(id, newText.trim());
           renderRowView(id);
+          restoreScroll();
         }, 0);
+        setTimeout(restoreScroll, 350);
       });
 
       bindRowActions(body, id);
