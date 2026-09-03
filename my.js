@@ -243,10 +243,22 @@
   // публикации/статьи ("/ru/библиотека/.../название-статьи/") либо параметр
   // "q=" у поисковых ссылок. Хвостовые чисто цифровые сегменты (id
   // публикаций/изданий) отбрасываются — в них нет ничего читаемого.
+  //
+  // Отдельный случай — ссылки вида "/finder?...&docid=NNNNNNN" (см.
+  // scriptureRefLink выше — тем же способом собираются ссылки на главу
+  // Библии для открытия в приложении JW Library): единственный
+  // идентифицирующий параметр там — чисто цифровой docid, из него без
+  // обращения к серверу никакого человекочитаемого заголовка не достать
+  // (в отличие от "q=" у поисковых ссылок или slug в пути обычной статьи).
+  // Раньше такие ссылки проваливались в общий разбор пути и подписывались
+  // как "Finder" (последний сегмент пути) — путает с настоящим заголовком
+  // публикации. Подписываем их просто "JW Library" — по названию
+  // приложения, в которое они и ведут.
   function publicationTitleFromUrl(href){
     try{
       var u = new URL(href);
       var q = u.searchParams.get("q");
+      if(!q && /\/finder$/i.test(u.pathname)) return "JW Library";
       var raw = q || "";
       if(!raw){
         var segs = u.pathname.split("/").filter(Boolean);
@@ -559,6 +571,17 @@
       if(applying) return;
       applying = true;
       try{ walk(root); } finally { applying = false; }
+      // Кнопки строки задачи/комментария (.task-actions) позиционируются
+      // вручную по фактической ширине текста (см. fitTaskActions ниже) —
+      // если этот проход что-то поменял в тексте (обернул ссылку короче,
+      // чем был сырой URL, скрыл "**"/"[[" markdown и т.п.), уже
+      // расставленные кнопки могли остаться под СТАРУЮ, более длинную
+      // раскладку строк. Пересчитываем их заново каждый раз — дёшево
+      // (пустой .querySelectorAll(".task-body"), если открыта не вкладка
+      // задач/архива/комментариев) и не порождает новых mutation-записей
+      // для ЭТОГО наблюдателя (тот следит только за childList/
+      // characterData, а не за style/attributes).
+      refitAllVisibleTaskBodies();
     }
 
     // если ВСЕ мутации этой пачки пришли изнутри игнорируемых поддеревьев
@@ -612,9 +635,16 @@
       var info = linkTitleCache.get(href);
       if(!info || info === "pending" || info === "error") return;
       var els = root.querySelectorAll(".resource-link");
+      var changed = false;
       els.forEach(function(el){
-        if(el.getAttribute("data-auto-href") === href) el.textContent = info.title;
+        if(el.getAttribute("data-auto-href") === href){ el.textContent = info.title; changed = true; }
       });
+      // та же причина, что у refitAllVisibleTaskBodies() в runPass() выше:
+      // текст заголовка сменился (заглушка-домен -> настоящее название
+      // видео), значит могла смениться и разбивка строк — если это
+      // произошло внутри текста задачи/комментария, кнопки нужно
+      // переставить заново.
+      if(changed) refitAllVisibleTaskBodies();
     });
   })();
 
