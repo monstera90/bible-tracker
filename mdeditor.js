@@ -221,6 +221,16 @@ window.initMdEditorModule = function(deps){
       '<path d="M2 12c2.5-5 7-8 10-8s7.5 3 10 8c-2.5 5-7 8-10 8s-7.5-3-10-8z"></path>' +
       '<circle cx="12" cy="12" r="3"></circle>' +
     '</svg>';
+  // корзина — кнопка "удалить неиспользуемые файлы" (см. openCleanupDialog
+  // ниже, ТЗ пользователя от 04.09), только в корне списка
+  var TRASH_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M4 7h16"></path>' +
+      '<path d="M9 7V4.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V7"></path>' +
+      '<path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"></path>' +
+      '<path d="M10 11v6"></path>' +
+      '<path d="M14 11v6"></path>' +
+    '</svg>';
 
   // ---------------------------------------------------------------------
   // IndexedDB — хранение directory handle между сессиями. FileSystem*Handle
@@ -840,6 +850,127 @@ window.initMdEditorModule = function(deps){
     }));
   }
 
+  // ---------------------------------------------------------------------
+  // "Удалить неиспользуемые файлы" (см. кнопка-корзина в renderListScreen,
+  // ТЗ пользователя от 04.09) — если заметка с картинкой была удалена НЕ
+  // через это приложение (например, файл .md стёрт прямо в системе, а
+  // Syncthing разнёс удаление на другие устройства), сама картинка в
+  // "files" остаётся сиротой навсегда — её никто и никогда больше не
+  // упоминает ни в одной заметке. Ищем такие файлы и удаляем их СРАЗУ, без
+  // подтверждения по каждому файлу (см. ТЗ пользователя от 05.09: папку
+  // "files" использует только этот блокнот, а раз файл не встретился ни в
+  // одной заметке — включая все остальные, где та же картинка могла быть
+  // вставлена ещё раз, см. collectReferencedMediaNames ниже — значит он
+  // точно больше нигде не нужен).
+  //
+  // "Использованным" файл считается, если хоть где-то в тексте хоть
+  // одной заметки встречается его точное имя в синтаксисе вставки
+  // картинки ![[имя.ext]] (см. imgRe в decorations ниже — тот же
+  // синтаксис, тот же способ его найти). Расширения, которых это
+  // касается — те же, что переносятся в "files" при сканировании (см.
+  // MEDIA_MOVE_EXT_RE выше: картинки и mp3) — остальные типы файлов,
+  // если вдруг оказались в "files" вручную, не трогаем: не наша папка,
+  // не нам её убирать.
+  // ---------------------------------------------------------------------
+  var CLEANUP_EMBED_RE = /!\[\[([^\[\]\n]+)\]\]/g;
+
+  async function collectReferencedMediaNames(){
+    var referenced = new Set();
+    if(!nameIndex) return referenced;
+    var entries = Array.from(nameIndex.values());
+    for(var i = 0; i < entries.length; i++){
+      var text;
+      try{
+        var file = await entries[i].fileHandle.getFile();
+        text = await file.text();
+      }catch(e){
+        // не удалось прочитать саму заметку — просто не учитываем её
+        // ссылки, на итог это не влияет иначе, чем недосчитаться какой-то
+        // одной ссылки
+        continue;
+      }
+      var re = new RegExp(CLEANUP_EMBED_RE.source, "g"), m;
+      while((m = re.exec(text))){
+        var nm = m[1].trim();
+        if(nm) referenced.add(nm.toLowerCase());
+      }
+    }
+    return referenced;
+  }
+
+  async function findOrphanedFiles(){
+    var filesDirHandle = await ensureFilesFolder();
+    var referenced = await collectReferencedMediaNames();
+    var orphans = [];
+    for await (var pair of filesDirHandle.entries()){
+      var name = pair[0], handle = pair[1];
+      if(handle.kind !== "file") continue;
+      if(!MEDIA_MOVE_EXT_RE.test(name)) continue;
+      if(!referenced.has(name.toLowerCase())) orphans.push({ name: name });
+    }
+    orphans.sort(function(a, b){ return a.name.localeCompare(b.name, "ru", { sensitivity: "base" }); });
+    return { filesDirHandle: filesDirHandle, orphans: orphans };
+  }
+
+  // Та же подложка поверх .settings-modal-box, что и у полноэкранного
+  // просмотра картинки (см. openImagePreview и .mdeditor-image-overlay/
+  // .mdeditor-cleanup-overlay в components.css) — но здесь только статус
+  // и итог, без списка на подтверждение: найденные сироты удаляются сразу
+  // же, по клику на кнопку-корзину.
+  async function openCleanupDialog(){
+    var box = document.querySelector(".settings-modal-box");
+    if(!box) return;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML = '<div class="mdeditor-cleanup-title">Ищем и удаляем неиспользуемые файлы…</div>';
+    overlay.appendChild(card);
+    box.appendChild(overlay);
+
+    function close(){
+      if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }
+    overlay.addEventListener("click", function(ev){
+      if(ev.target === overlay) close();
+    });
+
+    function renderMessage(msg){
+      card.innerHTML = '<div class="mdeditor-cleanup-title"></div>' +
+        '<div class="mdeditor-cleanup-actions"><button type="button" class="mdeditor-cleanup-cancel" id="mdEditorCleanupClose">Закрыть</button></div>';
+      card.querySelector(".mdeditor-cleanup-title").textContent = msg;
+      var btn = document.getElementById("mdEditorCleanupClose");
+      if(btn) btn.addEventListener("click", close);
+    }
+
+    var result;
+    try{
+      result = await findOrphanedFiles();
+    }catch(e){
+      renderMessage("Не удалось проверить файлы: " + (e && e.message ? e.message : String(e)));
+      return;
+    }
+
+    if(!result.orphans.length){
+      renderMessage("Неиспользуемых файлов не найдено.");
+      return;
+    }
+
+    var failedNames = [];
+    for(var i = 0; i < result.orphans.length; i++){
+      try{ await result.filesDirHandle.removeEntry(result.orphans[i].name); }
+      catch(e){ failedNames.push(result.orphans[i].name); }
+    }
+    var doneMsg = failedNames.length
+      ? ("Удалено " + (result.orphans.length - failedNames.length) + " из " + result.orphans.length + ". Не удалось: " + failedNames.join(", "))
+      : ("Удалено файлов: " + result.orphans.length + ".");
+    renderMessage(doneMsg);
+    // rescan() пересобирает imageIndex с нуля — без этого удалённые файлы
+    // могли бы остаться в старом индексе до следующего обычного
+    // пересканирования. render() не вызываем — список заметок этим не
+    // затрагивается (папка "files" и так скрыта, см. renderListScreen).
+    rescan().catch(function(){});
+  }
 
   // ---------------------------------------------------------------------
   // Точка входа — вызывается из switchSettingsTab при каждом открытии
@@ -1234,7 +1365,19 @@ window.initMdEditorModule = function(deps){
   // ---------------------------------------------------------------------
   function renderListScreen(container){
     var node = currentDirNode;
-    var folderItems = node.folders.map(function(fo){ return { type: "folder", name: fo.name, node: fo }; });
+    // папка "files" (см. FILES_FOLDER_NAME/ensureFilesFolder выше) —
+    // служебное хранилище вложений, отдельной заметки в ней нет; и любые
+    // папки, чьё имя начинается с точки (".название") — служебные по
+    // соглашению (см. ТЗ пользователя от 04.09). Обе категории просто не
+    // попадают в отображаемый список — buildIndex/scanTree их не
+    // исключают, заметки внутри них по-прежнему находятся по [[ссылкам]]
+    // и переходам, фильтр только здесь, на отрисовке.
+    var visibleFolders = node.folders.filter(function(fo){
+      if(fo.name === FILES_FOLDER_NAME) return false;
+      if(fo.name.charAt(0) === ".") return false;
+      return true;
+    });
+    var folderItems = visibleFolders.map(function(fo){ return { type: "folder", name: fo.name, node: fo }; });
     var fileItems = node.files.map(function(f){ return { type: "file", name: f.name, handle: f.handle }; });
     // изображения (из "отдельной папки" рядом с заметками, см. scanTree) —
     // отдельной группой ПОСЛЕ заметок, тем же алфавитным порядком; клик
@@ -1264,6 +1407,14 @@ window.initMdEditorModule = function(deps){
       html += '<div class="mdeditor-list" id="mdEditorList"></div>';
     }
     html += '<div class="mdeditor-fab-row">';
+    // "удалить неиспользуемые файлы" — только в корне: папка "files" (см.
+    // FILES_FOLDER_NAME выше) одна на весь блокнот, а не на текущую
+    // подпапку, поэтому кнопка показывает то же самое в любом месте
+    // дерева — нет смысла дублировать её на каждом уровне (см. ТЗ
+    // пользователя от 04.09).
+    if(isRoot){
+      html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorCleanupBtn" title="Удалить неиспользуемые файлы">' + TRASH_ICON_SVG + '</button>';
+    }
     // "домик" теперь ВСЕГДА активен (не disabled даже в корне) — раньше в
     // корне списка кнопка была просто неактивной заглушкой; теперь клик по
     // ней в корне прокручивает список к самому началу (полезно, когда
@@ -1273,6 +1424,11 @@ window.initMdEditorModule = function(deps){
     html += '</div>';
     html += '</div>';
     container.innerHTML = html;
+
+    var cleanupBtn = document.getElementById("mdEditorCleanupBtn");
+    if(cleanupBtn){
+      cleanupBtn.addEventListener("click", function(){ openCleanupDialog(); });
+    }
 
     var homeBtn = document.getElementById("mdEditorHomeBtn");
     if(homeBtn){
@@ -1506,15 +1662,45 @@ window.initMdEditorModule = function(deps){
     render();
   }
 
+  // Читает даты одной заметки, не читая файл целиком — метаданные всегда
+  // лежат в первых байтах (строка "%%meta:ДД.ММ.ГГГГ:ДД.ММ.ГГГГ%%" не
+  // длиннее ~35 символов, см. META_LINE_RE выше), поэтому достаточно
+  // File.slice() на небольшой кусок в начале, а не f.text() на весь файл.
+  // Раньше здесь читался ПОЛНЫЙ текст каждой заметки — на блокноте с
+  // сотнями заметок (см. ТЗ пользователя от 31.08 про производительность
+  // списка) это было либо очень медленно, либо браузер на телефоне не
+  // тянул сотни одновременных чтений целых файлов и вкладка "Забытые
+  // заметки" зависала на "Загрузка…" навсегда (ТЗ пользователя от 05.09).
+  var META_SNIFF_BYTES = 64;
+  async function readNoteDatesFast(entry){
+    try{
+      var f = await entry.fileHandle.getFile();
+      var head = await f.slice(0, META_SNIFF_BYTES).text();
+      return getNoteDatesRu(head);
+    }catch(e){
+      // не удалось прочитать — считаем как заметку без метаданных
+      // (виртуальная "давность 6 месяцев", см. getNoteDatesRu выше), а не
+      // роняем всю загрузку списка из-за одного файла
+      return getNoteDatesRu("");
+    }
+  }
+
   async function loadForgottenNotesData(){
     var entries = nameIndex ? Array.from(nameIndex.values()) : [];
-    var results = await Promise.all(entries.map(async function(entry){
-      var text = "";
-      try{ var f = await entry.fileHandle.getFile(); text = await f.text(); }catch(e){}
-      var dates = getNoteDatesRu(text);
-      var d = parseRuDate(dates.updated);
-      return { name: entry.name, entry: entry, updatedTs: d ? d.getTime() : 0 };
-    }));
+    // пачками по 20, а не всё разом единым Promise.all — при сотнях
+    // заметок разом открывать сотни файловых хендлов ненадёжно на
+    // мобильных браузерах (см. пояснение выше у readNoteDatesFast)
+    var BATCH_SIZE = 20;
+    var results = [];
+    for(var i = 0; i < entries.length; i += BATCH_SIZE){
+      var batch = entries.slice(i, i + BATCH_SIZE);
+      var batchResults = await Promise.all(batch.map(async function(entry){
+        var dates = await readNoteDatesFast(entry);
+        var d = parseRuDate(dates.updated);
+        return { name: entry.name, entry: entry, updatedTs: d ? d.getTime() : 0 };
+      }));
+      results = results.concat(batchResults);
+    }
     // самые старые (давно не редактированные) — сверху списка
     results.sort(function(a, b){ return a.updatedTs - b.updatedTs; });
     return results;
@@ -1528,6 +1714,14 @@ window.initMdEditorModule = function(deps){
         if(activeMdTab !== "forgotten") return;
         forgottenNotesData = data;
         render();
+      }).catch(function(e){
+        // раньше при любой ошибке внутри загрузки экран так и оставался
+        // молча висеть на "Загрузка…" без объяснений (непойманный отказ
+        // промиса, см. ТЗ пользователя от 05.09) — теперь хотя бы видно,
+        // что что-то пошло не так, и можно повторить
+        if(activeMdTab !== "forgotten") return;
+        container.innerHTML = '<div class="mdeditor-tab mdeditor-hint">Не удалось прочитать список заметок' +
+          (e && e.message ? " (" + escName(e.message) + ")" : "") + '.</div>';
       });
       return;
     }
