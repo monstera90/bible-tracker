@@ -1724,12 +1724,54 @@ window.initMdEditorModule = function(deps){
   // укладывается в доли секунды даже на большой библиотеке; переключение
   // пилюль внутри уже открытой вкладки только перефильтровывает уже
   // прочитанное.
+  // Пороги — календарные месяцы (setMonth), а не фиксированное число дней:
+  // "2 месяца назад" от 31 марта и от 30 апреля — разные даты, и это
+  // важнее на длинных интервалах (полгода/год), чем на "2 неделях" раньше.
+  // Фильтрация — ПОЛОСАМИ (band), не кумулятивная: пилюля "2 мес."
+  // показывает заметки, не открывавшиеся от 2 до 6 месяцев (до границы
+  // следующей пилюли), "6 мес." — от 6 месяцев до года, "1 год" — год и
+  // дальше без верхней границы. Раньше было кумулятивно ("не открывалось
+  // ХОТЯ БЫ N назад"), из-за чего "2 мес." включала в себя всё то же, что
+  // и "6 мес."/"1 год", и пилюли выглядели одинаково (ТЗ пользователя от
+  // 05.09, схема с полосами на таймлайне).
+  function monthsAgoTs(n){
+    var d = new Date();
+    d.setMonth(d.getMonth() - n);
+    return d.getTime();
+  }
   var FORGOTTEN_PERIODS = [
-    { key: "2w", label: "2 нед.", days: 14 },
-    { key: "3m", label: "3 мес.", days: 91 },
-    { key: "6m", label: "6 мес.", days: 182 }
+    { key: "2m", label: "2 мес.", months: 2 },
+    { key: "6m", label: "6 мес.", months: 6 },
+    { key: "1y", label: "1 год", months: 12 }
   ];
-  var forgottenSelectedPeriod = "2w";
+  // Полоса для пилюли под индексом periodIndex — от её порога до порога
+  // следующей по старшинству пилюли (у последней верхней границы нет,
+  // см. пояснение у самой фильтрации ниже). Вынесено в отдельную функцию,
+  // т.к. используется дважды: для самого списка на экране и для
+  // автовыбора первой непустой пилюли при заходе на вкладку (см.
+  // renderSettingsTabForgottenNotes, ТЗ пользователя от 05.09).
+  function filterForgottenByPeriod(items, periodIndex){
+    var period = FORGOTTEN_PERIODS[periodIndex];
+    var thresholdTs = monthsAgoTs(period.months);
+    var nextPeriod = FORGOTTEN_PERIODS[periodIndex + 1];
+    var nextThresholdTs = nextPeriod ? monthsAgoTs(nextPeriod.months) : null;
+    return items.filter(function(it){
+      if(it.openedTs > thresholdTs) return false;
+      if(nextThresholdTs !== null && it.openedTs <= nextThresholdTs) return false;
+      return true;
+    });
+  }
+  // Первая непустая пилюля (по возрастанию давности) для данного набора
+  // заметок, или -1, если пусты все три полосы (в теории невозможно, если
+  // в библиотеке вообще есть заметки, — учтено экраном как отдельный
+  // случай, см. renderForgottenNotesScreen).
+  function pickFirstNonEmptyPeriodIndex(items){
+    for(var i = 0; i < FORGOTTEN_PERIODS.length; i++){
+      if(filterForgottenByPeriod(items, i).length > 0) return i;
+    }
+    return -1;
+  }
+  var forgottenSelectedPeriod = "2m";
   var forgottenNotesData = null; // null — ещё не прочитано (см. loadForgottenNotesData) в этом заходе на вкладку; после — { items, matchedCount, total }
   // защита от повторного запуска чтения поверх уже идущего (см. пояснение
   // у renderForgottenNotesScreen ниже — раньше двойной render() в
@@ -1752,7 +1794,7 @@ window.initMdEditorModule = function(deps){
       initFromStoredHandle();
       return;
     }
-    forgottenSelectedPeriod = "2w";
+    forgottenSelectedPeriod = "2m";
     forgottenNotesData = null;
     render();
   }
@@ -1812,6 +1854,19 @@ window.initMdEditorModule = function(deps){
         // пока читали — могли уйти с вкладки; тогда результат уже не нужен
         if(activeMdTab !== "forgotten") return;
         forgottenNotesData = data;
+        // Автовыбор пилюли ровно один раз, сразу после свежей загрузки
+        // (не при каждой перерисовке — переключение вкладок сбрасывает
+        // forgottenSelectedPeriod на "2m" и обнуляет forgottenNotesData
+        // выше, в renderSettingsTabForgottenNotes, так что этот блок
+        // выполняется один раз на заход на вкладку): если у "2 мес."
+        // пусто — переключаемся на "6 мес.", если и там пусто — на
+        // "1 год". Если пусты все три полосы — оставляем последнюю
+        // пилюлю ("1 год") выбранной, экран покажет отдельное сообщение
+        // о том, что забытых заметок вообще нет ни в одной полосе (ТЗ
+        // пользователя от 05.09: такого не может быть, но на всякий
+        // случай обработано явно, а не тихо остаётся на пустой "2 мес.").
+        var autoIndex = pickFirstNonEmptyPeriodIndex(data.items);
+        forgottenSelectedPeriod = FORGOTTEN_PERIODS[autoIndex >= 0 ? autoIndex : FORGOTTEN_PERIODS.length - 1].key;
         render();
       }).catch(function(e){
         forgottenLoadPromise = null;
@@ -1827,32 +1882,56 @@ window.initMdEditorModule = function(deps){
       return;
     }
 
-    var period = FORGOTTEN_PERIODS.filter(function(p){ return p.key === forgottenSelectedPeriod; })[0] || FORGOTTEN_PERIODS[0];
-    var thresholdTs = Date.now() - period.days * 24 * 60 * 60 * 1000;
-    var items = forgottenNotesData.items.filter(function(it){ return it.openedTs <= thresholdTs; });
+    var periodIndex = 0;
+    for(var pi = 0; pi < FORGOTTEN_PERIODS.length; pi++){
+      if(FORGOTTEN_PERIODS[pi].key === forgottenSelectedPeriod){ periodIndex = pi; break; }
+    }
+    var items = filterForgottenByPeriod(forgottenNotesData.items, periodIndex);
 
     // Счётчик покрытия индекса дат открытия (ТЗ пользователя от 05.09):
     // "315/315" — у всех заметок уже есть настоящая дата открытия;
     // "308/315" — у 7 её ещё нет (используется виртуальная "6 месяцев
     // назад", см. loadForgottenNotesData), они станут учтены сами по себе,
-    // как только пользователь их откроет хотя бы раз.
-    var coverageLine = '<div class="mdeditor-hint" style="margin:0 0 8px 0;font-size:0.85em;opacity:0.7;">' +
+    // как только пользователь их откроет хотя бы раз. Строка не нужна,
+    // когда список пуст — там просто нечего "покрывать" на экране (ТЗ
+    // пользователя от 05.09).
+    var coverageLine = !items.length ? "" : '<div class="mdeditor-hint" style="margin:8px 0 0 0;font-size:0.85em;opacity:0.7;">' +
       'Данные об открытии: ' + forgottenNotesData.matchedCount + '/' + forgottenNotesData.total +
       (forgottenNotesData.matchedCount < forgottenNotesData.total ? ' (для остальных — оценка «6 мес.»)' : '') +
       '</div>';
 
-    var html = '<div class="mdeditor-tab settings-content-bottom">';
+    // Пилюли переключателя периода вынесены из обычного потока вкладки
+    // (были в самом низу, после списка и строки покрытия, прижаты через
+    // margin-top:auto у .settings-content-bottom — до них приходилось
+    // докручивать длинный список) — теперь это отдельный плавающий ряд
+    // (.mdeditor-forgotten-pills, см. modals.css), который всегда виден
+    // поверх списка независимо от прокрутки, тем же приёмом, что и
+    // .mdeditor-fab-row (position:absolute от .settings-modal-box, ТЗ
+    // пользователя от 05.09). Кнопки внутри — те же .review-pill, что и
+    // раньше, стиль не меняется.
+    var pillsHtml = '<div class="mdeditor-forgotten-pills" id="mdForgottenPills">' + FORGOTTEN_PERIODS.map(function(p){
+      return '<button type="button" class="review-pill' + (p.key === forgottenSelectedPeriod ? " active" : "") + '" data-period="' + p.key + '">' + escName(p.label) + '</button>';
+    }).join("") + '</div>';
+
+    var html = '<div class="mdeditor-tab mdeditor-forgotten-tab">';
     html += '<h3 class="workbooks-title" style="margin:0 0 4px 0;">Забытые заметки</h3>';
-    html += coverageLine;
     if(!items.length){
-      html += '<div class="mdeditor-empty">За выбранный период забытых заметок нет.</div>';
+      // Крайний случай (в теории невозможен, если в библиотеке вообще
+      // есть заметки, — см. пояснение у pickFirstNonEmptyPeriodIndex
+      // выше): пусты ВСЕ три полосы, а не только выбранная сейчас —
+      // тогда обычное "за период нет" вводило бы в заблуждение (можно
+      // было бы подумать, что стоит попробовать другую пилюлю), поэтому
+      // отдельное сообщение (ТЗ пользователя от 05.09).
+      var allEmpty = pickFirstNonEmptyPeriodIndex(forgottenNotesData.items) === -1;
+      html += '<div class="mdeditor-empty">' + (allEmpty ?
+        'Забытых заметок нет ни в одной из полос — похоже, все заметки открывались недавно.' :
+        'За выбранный период забытых заметок нет.') + '</div>';
     } else {
       html += '<div class="mdeditor-list" id="mdForgottenList"></div>';
     }
-    html += '<div class="review-pills" id="mdForgottenPills">' + FORGOTTEN_PERIODS.map(function(p){
-      return '<button type="button" class="review-pill' + (p.key === forgottenSelectedPeriod ? " active" : "") + '" data-period="' + p.key + '">' + escName(p.label) + '</button>';
-    }).join("") + '</div>';
+    html += coverageLine;
     html += '</div>';
+    html += pillsHtml;
     container.innerHTML = html;
 
     var listEl = document.getElementById("mdForgottenList");
