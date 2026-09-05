@@ -78,38 +78,67 @@ window.initMdEditorModule = function(deps){
   var recordNoteCreated = deps.recordNoteCreated || function(){};
 
   // ---------------------------------------------------------------------
-  // Метаданные заметки (дата создания/редактирования) — ТЗ пользователя от
-  // 04.09. Хранятся ПЕРВОЙ строкой самого .md файла в служебном формате
-  // "%%meta:ДД.ММ.ГГГГ:ДД.ММ.ГГГГ%%" (создание:редактирование) — часть
-  // обычного документа CodeMirror, поэтому видны как есть в режиме "с
-  // кодом" и скрываются decoration'ом в режиме "без кода" (см.
-  // decorateLine/META_LINE_RE ниже в makeLivePreviewExtension). Само поле
-  // над текстом заметки (#mdEditorDatesRow, см. renderEditorScreen) — это
-  // ОТДЕЛЬНЫЙ, нередактируемый элемент интерфейса, просто прочитавший эти
-  // даты; сама строка метаданных не редактируется вручную.
+  // Метаданные заметки (дата создания/редактирования[/открытия]) — ТЗ
+  // пользователя от 04.09, дата открытия добавлена 05.09. Хранятся ПЕРВОЙ
+  // строкой самого .md файла в служебном формате
+  // "%%meta:ДД.ММ.ГГГГ:ДД.ММ.ГГГГ[:ДД.ММ.ГГГГ]%%" (создание:редактирование
+  // [:открытие]) — часть обычного документа CodeMirror, поэтому видны как
+  // есть в режиме "с кодом" и скрываются decoration'ом в режиме "без кода"
+  // (см. decorateLine/META_LINE_RE ниже в makeLivePreviewExtension). Само
+  // поле над текстом заметки (#mdEditorDatesRow, см. renderEditorScreen) —
+  // это ОТДЕЛЬНЫЙ, нередактируемый элемент интерфейса, просто прочитавший
+  // эти даты; сама строка метаданных не редактируется вручную.
+  //
+  // "%%...%%" — родной синтаксис комментария Obsidian (скрыт в Reading
+  // View, виден серым в Source/Live Preview), поэтому сама эта строка не
+  // портит открытие заметок в настоящем Obsidian. Но это ОБЫЧНАЯ первая
+  // строка документа, а не YAML frontmatter (не "---"), поэтому если у
+  // заметки, перенесённой из Obsidian, УЖЕ есть свой frontmatter
+  // ("---\n...\n---" первой секцией) — при первом автосохранении здесь
+  // (см. flushAutosaveNow) наша строка допишется ПЕРЕД ним, и Obsidian
+  // перестанет распознавать этот frontmatter как properties (первой
+  // строкой файла у него по спецификации должно быть "---"). На сами
+  // данные пользователя это не влияет (ничего не удаляется, страница
+  // читается как обычный текст), но это стоит иметь в виду при переносе
+  // существующего Obsidian-vault — при желании можно отдельно обсудить
+  // защиту от этого случая.
+  //
+  // Дата открытия НЕ показывается пользователю нигде в интерфейсе (ТЗ
+  // 05.09) — только хранится на будущее внутри самого файла (третье поле)
+  // и используется для сортировки "Забытых заметок" через быстрый
+  // отдельный индекс (см. openedIndex ниже), а не через чтение этого поля
+  // из каждого файла на диске.
   //
   // Заметки, созданные ДО появления этой функции, не трогаются на диске,
   // пока их не откроют и не отредактируют хотя бы раз (см. ТЗ) — метаданные
   // им проставляются при первом реальном автосохранении текста (см.
   // flushAutosaveNow). До этого момента для них НИГДЕ (ни в поле дат, ни в
   // "Забытых заметках") используется виртуальная "давность 6 месяцев" —
-  // см. virtualLegacyDatePairRu() ниже: обе даты равны (сегодня минус 6
-  // месяцев), пересчитываются каждый раз заново от текущей даты (то есть
-  // не "застывают" в прошлом, а всегда остаются "6 месяцев назад").
-  var META_LINE_RE = /^%%meta:(\d{2}\.\d{2}\.\d{4}):(\d{2}\.\d{2}\.\d{4})%%\n?/;
+  // см. virtualLegacyDatePairRu()/virtualLegacyOpenedMs() ниже: даты равны
+  // (сегодня минус 6 месяцев), пересчитываются каждый раз заново от
+  // текущей даты (то есть не "застывают" в прошлом, а всегда остаются
+  // "6 месяцев назад").
+  var META_LINE_RE = /^%%meta:(\d{2}\.\d{2}\.\d{4}):(\d{2}\.\d{2}\.\d{4})(?::(\d{2}\.\d{2}\.\d{4}))?%%\n?/;
   function pad2(n){ return (n < 10 ? "0" : "") + n; }
   function formatDateRu(d){
     return pad2(d.getDate()) + "." + pad2(d.getMonth() + 1) + "." + d.getFullYear();
   }
   function todayRu(){ return formatDateRu(new Date()); }
-  function buildMetaLine(created, updated){ return "%%meta:" + created + ":" + updated + "%%\n"; }
+  // opened необязателен — вызовы buildMetaLine ДО появления этой функции
+  // (и код, которому дата открытия не важна) продолжают писать 2-польный
+  // формат; следующее реальное автосохранение (flushAutosaveNow) само
+  // допишет 3-е поле.
+  function buildMetaLine(created, updated, opened){
+    return "%%meta:" + created + ":" + updated + (opened ? ":" + opened : "") + "%%\n";
+  }
   // распарсенные метаданные из НАЧАЛА текста заметки, либо null, если их
   // ещё нет (старая заметка, ни разу не редактированная после появления
-  // этой функции)
+  // этой функции). opened === null, если заметка ещё в старом 2-польном
+  // формате (записана до 05.09, но уже была хоть раз отредактирована).
   function parseNoteMeta(text){
     var m = META_LINE_RE.exec(text || "");
     if(!m) return null;
-    return { created: m[1], updated: m[2], raw: m[0] };
+    return { created: m[1], updated: m[2], opened: m[3] || null, raw: m[0] };
   }
   // виртуальная пара дат для заметок без метаданных — см. пояснение выше
   function virtualLegacyDatePairRu(){
@@ -117,6 +146,13 @@ window.initMdEditorModule = function(deps){
     d.setMonth(d.getMonth() - 6);
     var s = formatDateRu(d);
     return { created: s, updated: s };
+  }
+  // то же самое, но как ms-таймстамп — для заметок без записи в openedIndex
+  // (см. loadForgottenNotesData ниже)
+  function virtualLegacyOpenedMs(){
+    var d = new Date();
+    d.setMonth(d.getMonth() - 6);
+    return d.getTime();
   }
   // даты заметки для отображения/расчётов — реальные метаданные, если они
   // есть, иначе виртуальная "давность 6 месяцев" (см. выше)
@@ -273,6 +309,50 @@ window.initMdEditorModule = function(deps){
         tx.oncomplete = function(){ resolve(); };
         tx.onerror = function(){ reject(tx.error); };
       });
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Индекс дат открытия заметок (ТЗ пользователя от 05.09) — один маленький
+  // объект { "имя заметки в нижнем регистре": ms-таймстамп } в IndexedDB
+  // (ключ OPENED_INDEX_KEY), а не отдельный файл на диске через SAF: сама
+  // задача была в том, чтобы "Забытые заметки" не трогали диск на каждый
+  // файл (см. loadForgottenNotesData ниже) — чтение ОДНОГО ключа
+  // IndexedDB кардинально быстрее, чем 315 отдельных getFile() через
+  // SAF-провайдер, и укладывается в доли секунды. Дублирующая копия даты
+  // открытия ВНУТРИ самого .md файла (3-е поле строки метаданных, см.
+  // buildMetaLine/parseNoteMeta выше) пишется на будущее (на случай,
+  // если этот индекс когда-то понадобится восстановить) — но пишется не
+  // сразу при открытии (это означало бы диск-запись на каждый простой
+  // просмотр заметки), а заодно со следующим реальным автосохранением
+  // текста (см. flushAutosaveNow), так что может немного отставать от
+  // реальной последней даты открытия — это нормально, авторитетный
+  // источник для сортировки и для счётчика "N/M" — именно этот индекс,
+  // а не содержимое файлов.
+  var OPENED_INDEX_KEY = "openedIndex";
+  var openedIndexCache = null;    // объект после первой загрузки за сессию
+  var openedIndexLoadPromise = null;
+  function loadOpenedIndex(){
+    if(openedIndexCache) return Promise.resolve(openedIndexCache);
+    if(!openedIndexLoadPromise){
+      openedIndexLoadPromise = idbGet(OPENED_INDEX_KEY).then(function(v){
+        openedIndexCache = (v && typeof v === "object") ? v : {};
+        openedIndexLoadPromise = null;
+        return openedIndexCache;
+      });
+    }
+    return openedIndexLoadPromise;
+  }
+  // вызывается из openNoteByEntry/createAndOpenNote при каждом открытии —
+  // не блокирует открытие заметки (запись в IndexedDB уходит в фоне);
+  // ошибка записи молча игнорируется (не критично — при следующем
+  // открытии "Забытых" просто останется чуть более старая метка)
+  function recordNoteOpened(name){
+    var key = (name || "").toLowerCase();
+    if(!key) return;
+    loadOpenedIndex().then(function(idx){
+      idx[key] = Date.now();
+      idbSet(OPENED_INDEX_KEY, idx).catch(function(){});
     });
   }
 
@@ -1163,6 +1243,9 @@ window.initMdEditorModule = function(deps){
   function render(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
+    if(window.Debug && activeMdTab === "forgotten"){
+      window.Debug.log("forgotten:render() called", { hasRootTree: !!rootTree, screen: screen });
+    }
     // вкладка "Закладки" (set2s_2) показывается вместо обычного списка,
     // но только когда папка уже выбрана и просканирована (rootTree
     // готов) — иначе (первый запуск/нужно заново подтвердить доступ)
@@ -1631,26 +1714,38 @@ window.initMdEditorModule = function(deps){
   // (.review-pill/.review-pills, см. renderReviewTabContent в my.js: клик
   // по пилюле пересчитывает список сразу, без переоткрытия вкладки).
   //
-  // "Забытая" = дата последнего редактирования заметки (см.
-  // getNoteDatesRu выше) старше выбранного периода. Список — ВСЕ заметки
+  // "Забытая" = дата последнего ОТКРЫТИЯ заметки (не редактирования, ТЗ
+  // пользователя от 05.09) старше выбранного периода. Список — ВСЕ заметки
   // во всех папках (тот же плоский nameIndex, что и для [[ссылок]]), не
-  // только текущая. Даты читаются из файлов ОДИН раз при каждом открытии
-  // вкладки (см. forgottenNotesData ниже, сбрасывается в null при каждом
-  // заходе на вкладку) — переключение пилюль внутри уже открытой вкладки
-  // только перефильтровывает уже прочитанное, без повторного чтения с
-  // диска.
+  // только текущая. Даты открытия берутся ОДИН раз при каждом открытии
+  // вкладки из openedIndex (см. forgottenNotesData/loadOpenedIndex ниже,
+  // сбрасывается в null при каждом заходе на вкладку) — это чтение одного
+  // маленького объекта из IndexedDB, а не файлов с диска, поэтому
+  // укладывается в доли секунды даже на большой библиотеке; переключение
+  // пилюль внутри уже открытой вкладки только перефильтровывает уже
+  // прочитанное.
   var FORGOTTEN_PERIODS = [
     { key: "2w", label: "2 нед.", days: 14 },
     { key: "3m", label: "3 мес.", days: 91 },
     { key: "6m", label: "6 мес.", days: 182 }
   ];
   var forgottenSelectedPeriod = "2w";
-  var forgottenNotesData = null; // null — ещё не прочитано с диска в этом заходе на вкладку
+  var forgottenNotesData = null; // null — ещё не прочитано (см. loadForgottenNotesData) в этом заходе на вкладку; после — { items, matchedCount, total }
+  // защита от повторного запуска чтения поверх уже идущего (см. пояснение
+  // у renderForgottenNotesScreen ниже — раньше двойной render() в
+  // initFromStoredHandle из-за кэша-"слепка" запускал loadForgottenNotesData
+  // ДВАЖДЫ параллельно, что и было настоящей причиной затянутой загрузки)
+  var forgottenLoadPromise = null;
 
   function renderSettingsTabForgottenNotes(){
     activeMdTab = "forgotten";
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
+    if(window.Debug) window.Debug.log("forgotten:open", {
+      initStarted: initStarted,
+      hasRootTree: !!rootTree,
+      nameIndexSize: nameIndex ? nameIndex.size : -1
+    });
     if(!initStarted){
       initStarted = true;
       container.innerHTML = '<div class="mdeditor-tab mdeditor-hint">Загрузка…</div>';
@@ -1662,64 +1757,70 @@ window.initMdEditorModule = function(deps){
     render();
   }
 
-  // Читает даты одной заметки, не читая файл целиком — метаданные всегда
-  // лежат в первых байтах (строка "%%meta:ДД.ММ.ГГГГ:ДД.ММ.ГГГГ%%" не
-  // длиннее ~35 символов, см. META_LINE_RE выше), поэтому достаточно
-  // File.slice() на небольшой кусок в начале, а не f.text() на весь файл.
-  // Раньше здесь читался ПОЛНЫЙ текст каждой заметки — на блокноте с
-  // сотнями заметок (см. ТЗ пользователя от 31.08 про производительность
-  // списка) это было либо очень медленно, либо браузер на телефоне не
-  // тянул сотни одновременных чтений целых файлов и вкладка "Забытые
-  // заметки" зависала на "Загрузка…" навсегда (ТЗ пользователя от 05.09).
-  var META_SNIFF_BYTES = 64;
-  async function readNoteDatesFast(entry){
-    try{
-      var f = await entry.fileHandle.getFile();
-      var head = await f.slice(0, META_SNIFF_BYTES).text();
-      return getNoteDatesRu(head);
-    }catch(e){
-      // не удалось прочитать — считаем как заметку без метаданных
-      // (виртуальная "давность 6 месяцев", см. getNoteDatesRu выше), а не
-      // роняем всю загрузку списка из-за одного файла
-      return getNoteDatesRu("");
-    }
-  }
-
+  // Больше не читает ни одного файла с диска (см. ТЗ пользователя от
+  // 05.09) — раньше здесь по очереди/пулом открывался КАЖДЫЙ .md через SAF
+  // только чтобы прочитать пару байт метаданных, и даже с пулом воркеров
+  // это были десятки секунд на большой библиотеке (315 файлов, лог сессии).
+  // Теперь сортировка идёт по ДРУГОМУ полю — по дате ПОСЛЕДНЕГО ОТКРЫТИЯ
+  // заметки (не редактирования), а она уже лежит в openedIndex
+  // (IndexedDB, см. loadOpenedIndex/recordNoteOpened выше) — одно чтение
+  // одного маленького объекта вместо 315 отдельных IPC-вызовов к
+  // системному провайдеру, что и укладывается в доли секунды.
+  //
+  // Заметки, которых ещё нет в openedIndex (ни разу не открывались с тех
+  // пор, как индекс начал вестись, — типичный случай для всей существующей
+  // библиотеки при первом запуске этой версии) получают виртуальную
+  // "давность 6 месяцев" — тот же приём, что и у дат создания/редактирования
+  // для по-настоящему старых заметок (см. virtualLegacyOpenedMs выше):
+  // пересчитывается заново от сегодняшней даты при каждом заходе на
+  // вкладку, а не застывает раз и навсегда. Реальная дата открытия
+  // появится сама, как только пользователь когда-нибудь откроет эту
+  // заметку (см. recordNoteOpened).
   async function loadForgottenNotesData(){
     var entries = nameIndex ? Array.from(nameIndex.values()) : [];
-    // пачками по 20, а не всё разом единым Promise.all — при сотнях
-    // заметок разом открывать сотни файловых хендлов ненадёжно на
-    // мобильных браузерах (см. пояснение выше у readNoteDatesFast)
-    var BATCH_SIZE = 20;
-    var results = [];
-    for(var i = 0; i < entries.length; i += BATCH_SIZE){
-      var batch = entries.slice(i, i + BATCH_SIZE);
-      var batchResults = await Promise.all(batch.map(async function(entry){
-        var dates = await readNoteDatesFast(entry);
-        var d = parseRuDate(dates.updated);
-        return { name: entry.name, entry: entry, updatedTs: d ? d.getTime() : 0 };
-      }));
-      results = results.concat(batchResults);
-    }
-    // самые старые (давно не редактированные) — сверху списка
-    results.sort(function(a, b){ return a.updatedTs - b.updatedTs; });
-    return results;
+    var t0 = Date.now();
+    if(window.Debug) window.Debug.log("forgotten:load:start", { count: entries.length });
+    var openedIndex = await loadOpenedIndex();
+    var virtualMs = virtualLegacyOpenedMs();
+    var matchedCount = 0;
+    var results = entries.map(function(entry){
+      var key = entry.name.toLowerCase();
+      var hasReal = Object.prototype.hasOwnProperty.call(openedIndex, key) && typeof openedIndex[key] === "number";
+      if(hasReal) matchedCount++;
+      return { name: entry.name, entry: entry, openedTs: hasReal ? openedIndex[key] : virtualMs };
+    });
+    // самые старые (давно не открывавшиеся) — сверху списка
+    results.sort(function(a, b){ return a.openedTs - b.openedTs; });
+    if(window.Debug) window.Debug.log("forgotten:load:done", { totalMs: Date.now() - t0, count: results.length, matched: matchedCount });
+    return { items: results, matchedCount: matchedCount, total: entries.length };
   }
 
   function renderForgottenNotesScreen(container){
     if(forgottenNotesData === null){
+      if(window.Debug) window.Debug.log("forgotten:render:loading-branch", { alreadyInFlight: !!forgottenLoadPromise });
       container.innerHTML = '<div class="mdeditor-tab mdeditor-hint">Загрузка…</div>';
-      loadForgottenNotesData().then(function(data){
+      // если чтение уже идёт (см. forgottenLoadPromise выше) — просто
+      // подписываемся на РЕЗУЛЬТАТ ТОГО ЖЕ вызова, а не запускаем вторую
+      // независимую загрузку поверх первой (именно это раньше и
+      // происходило при двойном render() из initFromStoredHandle, см.
+      // пояснение у forgottenLoadPromise выше)
+      if(!forgottenLoadPromise){
+        forgottenLoadPromise = loadForgottenNotesData();
+      }
+      forgottenLoadPromise.then(function(data){
+        forgottenLoadPromise = null;
         // пока читали — могли уйти с вкладки; тогда результат уже не нужен
         if(activeMdTab !== "forgotten") return;
         forgottenNotesData = data;
         render();
       }).catch(function(e){
+        forgottenLoadPromise = null;
         // раньше при любой ошибке внутри загрузки экран так и оставался
         // молча висеть на "Загрузка…" без объяснений (непойманный отказ
         // промиса, см. ТЗ пользователя от 05.09) — теперь хотя бы видно,
         // что что-то пошло не так, и можно повторить
         if(activeMdTab !== "forgotten") return;
+        if(window.Debug) window.Debug.log("forgotten:load:CATCH (не должно было сюда дойти после withTimeout)", e && (e.message || String(e)));
         container.innerHTML = '<div class="mdeditor-tab mdeditor-hint">Не удалось прочитать список заметок' +
           (e && e.message ? " (" + escName(e.message) + ")" : "") + '.</div>';
       });
@@ -1728,10 +1829,21 @@ window.initMdEditorModule = function(deps){
 
     var period = FORGOTTEN_PERIODS.filter(function(p){ return p.key === forgottenSelectedPeriod; })[0] || FORGOTTEN_PERIODS[0];
     var thresholdTs = Date.now() - period.days * 24 * 60 * 60 * 1000;
-    var items = forgottenNotesData.filter(function(it){ return it.updatedTs <= thresholdTs; });
+    var items = forgottenNotesData.items.filter(function(it){ return it.openedTs <= thresholdTs; });
+
+    // Счётчик покрытия индекса дат открытия (ТЗ пользователя от 05.09):
+    // "315/315" — у всех заметок уже есть настоящая дата открытия;
+    // "308/315" — у 7 её ещё нет (используется виртуальная "6 месяцев
+    // назад", см. loadForgottenNotesData), они станут учтены сами по себе,
+    // как только пользователь их откроет хотя бы раз.
+    var coverageLine = '<div class="mdeditor-hint" style="margin:0 0 8px 0;font-size:0.85em;opacity:0.7;">' +
+      'Данные об открытии: ' + forgottenNotesData.matchedCount + '/' + forgottenNotesData.total +
+      (forgottenNotesData.matchedCount < forgottenNotesData.total ? ' (для остальных — оценка «6 мес.»)' : '') +
+      '</div>';
 
     var html = '<div class="mdeditor-tab settings-content-bottom">';
     html += '<h3 class="workbooks-title" style="margin:0 0 4px 0;">Забытые заметки</h3>';
+    html += coverageLine;
     if(!items.length){
       html += '<div class="mdeditor-empty">За выбранный период забытых заметок нет.</div>';
     } else {
@@ -2226,6 +2338,7 @@ window.initMdEditorModule = function(deps){
       var pct = typeof scrollPercent === "number" ? Math.max(0, Math.min(1, scrollPercent)) : null;
       openFile = { fileHandle: entry.fileHandle, dirHandle: entry.dirHandle, name: entry.name, text: text, dirty: false, cursorPos: pos, scrollPercent: pct };
       screen = "editor";
+      recordNoteOpened(entry.name);
       render();
       // "продолжить с той же заметки" (см. flushDocStateNow/scheduleDocStateSave
       // ниже) — помечаем эту заметку как текущую сразу при открытии, не
@@ -2254,7 +2367,7 @@ window.initMdEditorModule = function(deps){
       // отличие от старых заметок, которым метаданные проставляются
       // только при первом реальном редактировании (см. flushAutosaveNow)
       var today = todayRu();
-      var initialText = buildMetaLine(today, today);
+      var initialText = buildMetaLine(today, today, today);
       await w.write(initialText);
       await w.close();
       nameIndex.set(name.toLowerCase(), { fileHandle: fh, dirHandle: dirHandle, name: name });
@@ -2262,6 +2375,7 @@ window.initMdEditorModule = function(deps){
       // "Карта дней года" (my.js) — ссылка на новую заметку появляется в
       // дне её СОЗДАНИЯ (см. ТЗ пользователя от 04.09), не редактирования
       recordNoteCreated(name);
+      recordNoteOpened(name);
       var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
       pushMdNav(function(){
         flushAutosaveNow();
@@ -2728,18 +2842,26 @@ window.initMdEditorModule = function(deps){
     if(!openFile || !cmView || !openFile.dirty) return;
     var raw = stripStraySlashBeforeLinks(stripInvisibleSpaces(cmView.state.doc.toString()));
 
-    // Метаданные (дата создания/редактирования, ТЗ пользователя от 04.09):
-    // на каждое реальное сохранение текста проставляем/обновляем строку
-    // метаданных в начале документа. Если она уже есть — дата создания
-    // остаётся прежней, дата редактирования становится сегодняшней (если
-    // ещё не сегодняшняя). Если её нет (старая заметка, первое
-    // редактирование после появления этой функции) — заводим её сейчас:
-    // настоящая дата создания неизвестна, поэтому обе даты — сегодняшние.
+    // Метаданные (дата создания/редактирования/открытия, ТЗ пользователя
+    // от 04.09, открытие добавлено 05.09): на каждое реальное сохранение
+    // текста проставляем/обновляем строку метаданных в начале документа.
+    // Если она уже есть — дата создания остаётся прежней, дата
+    // редактирования становится сегодняшней (если ещё не сегодняшняя).
+    // Если её нет (старая заметка, первое редактирование после появления
+    // этой функции) — заводим её сейчас: настоящая дата создания
+    // неизвестна, поэтому обе даты — сегодняшние. Дата открытия берётся
+    // из openedIndexCache (см. recordNoteOpened выше) — она уже проставлена
+    // туда самим открытием этой заметки, ещё до первого редактирования, —
+    // а не читается заново с диска; это же попутно апгрейдит старые
+    // 2-польные строки метаданных до 3-польных.
     var meta = parseNoteMeta(raw);
     var today = todayRu();
     var bodyText = meta ? raw.slice(meta.raw.length) : raw;
     var createdForMeta = meta ? meta.created : today;
-    var metaLine = buildMetaLine(createdForMeta, today);
+    var openedKey = (openFile.name || "").toLowerCase();
+    var openedTsForMeta = (openedIndexCache && openedIndexCache[openedKey]) ? openedIndexCache[openedKey] : Date.now();
+    var openedForMeta = formatDateRu(new Date(openedTsForMeta));
+    var metaLine = buildMetaLine(createdForMeta, today, openedForMeta);
     var text = metaLine + bodyText;
 
     // Если строка метаданных изменилась (появилась впервые или обновилась
@@ -3155,7 +3277,7 @@ window.initMdEditorModule = function(deps){
     // отдельным нередактируемым полем #mdEditorDatesRow, см.
     // renderEditorScreen/refreshDatesField) — ТЗ пользователя от 04.09:
     // "отображать можно, разве что в коде, в тексте не нужно".
-    var META_LINE_EXACT_RE = /^%%meta:\d{2}\.\d{2}\.\d{4}:\d{2}\.\d{2}\.\d{4}%%$/;
+    var META_LINE_EXACT_RE = /^%%meta:\d{2}\.\d{2}\.\d{4}:\d{2}\.\d{2}\.\d{4}(?::\d{2}\.\d{2}\.\d{4})?%%$/;
     var hiddenMetaLineDeco = Decoration.line({ attributes: { class: "cm-md-meta-hidden" } });
 
     function decorateLine(builder, lineText, lineFrom, isParaStart, prevIsTaskLine, nextIsTaskLine){
