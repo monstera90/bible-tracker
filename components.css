@@ -1777,8 +1777,22 @@
      скрыта в режиме "без кода" (сами даты показаны отдельным полем
      #mdEditorDatesRow, см. .mdeditor-dates-row ниже), но остаётся частью
      документа, поэтому видна как есть в режиме "с кодом" (ТЗ пользователя
-     от 04.09) */
-  .cm-md-meta-hidden{ display:none; }
+     от 04.09).
+     БАГ (найден пользователем 05.09, диагностирован через debug.js:
+     logMeta): класс cm-md-meta-hidden навешивался на строку верно (decoration
+     отрабатывала правильно), но display:none не применялся —
+     getComputedStyle показывал "block". Причина та же, что описана выше у
+     .mdeditor-editor-host .cm-line{padding:0} (строка ~1741): у CodeMirror 6
+     есть свой .cm-line{display:block}, добавляемый в <head> в рантайме при
+     монтировании редактора — то есть ПОЗЖЕ, чем этот файл. При одинаковой
+     специфичности (у обоих правил — один класс) побеждает то, что позже в
+     документе, а значит правило самого CodeMirror. Раньше это не было
+     замечено, т.к. проверяли !important и медиа-запросы, а не специфичность
+     против внутреннего стиля библиотеки. Решение — как и у .cm-md-quote/
+     .cm-md-task-line ниже: поднять специфичность до .cm-line.cm-md-meta-hidden
+     (два класса), это надёжно перебивает встроенный .cm-line независимо от
+     порядка вставки стилей в документ. */
+  .cm-line.cm-md-meta-hidden{ display:none; }
   /* элементы разметки в режиме "без кода" (см. mdeditor.js) — жирный,
      курсив, выделение и заголовки живут внутри одного и того же
      редактируемого поля, decorations только скрывают служебные символы,
@@ -2025,4 +2039,61 @@
     background:transparent;
     border:1px solid var(--groove-shadow);
     color:var(--ink-soft);
+  }
+  /* подтверждающая ("Создать") и опасная ("Удалить") кнопки того же
+     диалога — тот же .mdeditor-cleanup-cancel базово, только акцентный
+     цвет (см. openNewNoteDialog/confirmDeleteNote в mdeditor.js, ТЗ
+     пользователя от 05.09). */
+  .mdeditor-cleanup-primary{
+    background:var(--xp-green);
+    border-color:var(--xp-green-dark, var(--groove-shadow));
+    color:#12351f;
+  }
+  .mdeditor-cleanup-danger{
+    background:transparent;
+    border-color:var(--danger, #c0392b);
+    color:var(--danger, #c0392b);
+  }
+  /* поле ввода имени новой заметки (см. openNewNoteDialog в mdeditor.js) —
+     тот же диалог-карточка .mdeditor-cleanup-card, что и у "Удалить
+     неиспользуемые файлы" выше. */
+  .mdeditor-cleanup-input{
+    width:100%;
+    box-sizing:border-box;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:14px;
+    color:var(--ink);
+    background:var(--parchment);
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    padding:8px 10px;
+    margin-bottom:12px;
+  }
+  /* ---------- крестик удаления заметки — СЛЕВА от кнопки закладки в
+     строке общего списка (см. .mdeditor-bookmark-btn выше), появляется/
+     скрывается ТЕМ ЖЕ долгим нажатием (revealedBookmarkRows в
+     mdeditor.js), но, в отличие от закладки, никогда не остаётся видимым
+     "навсегда" — только временно, после долгого нажатия (ТЗ пользователя
+     от 05.09). Иконка (DELETE_ICON_SVG) — та же, что и у "Удалить
+     навсегда" в архиве задач (.task-delete-btn в modals.css), передана в
+     mdeditor.js через deps, не своя копия. ---------- */
+  .mdeditor-delete-btn{
+    visibility:hidden;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:26px;height:26px;
+    flex-shrink:0;
+    padding:0;
+    border:none;
+    border-radius:6px;
+    background:transparent;
+    color:var(--danger, #c0392b);
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .mdeditor-delete-btn svg{ width:16px; height:16px; }
+  .mdeditor-delete-btn.visible{ visibility:visible; }
+  @media (hover:hover) and (pointer:fine){
+    .mdeditor-delete-btn:hover{ background:var(--parchment-dark); }
   }

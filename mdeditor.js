@@ -47,6 +47,10 @@ window.initMdEditorModule = function(deps){
   // перенос ОДНОСТОРОННИЙ, отметка "[x]" отправляет в архив).
   var CHECK_ICON_SVG = deps.CHECK_ICON_SVG || "";
   var ARROW_MOVE_ICON_SVG = deps.ARROW_MOVE_ICON_SVG || "";
+  // крестик удаления заметки в общем списке (см. renderListScreen ниже) —
+  // та же иконка, что и у "Удалить навсегда" в архиве задач (my.js),
+  // передана через deps, а не своя копия.
+  var DELETE_ICON_SVG = deps.DELETE_ICON_SVG || "";
   var createArchivedTaskWithText = deps.createArchivedTaskWithText || null;
   var openTaskMoveTargetPicker = deps.openTaskMoveTargetPicker || null;
   // пересчёт подгонки кнопок задач (см. fitTaskActions/refitAllVisibleTaskBodies
@@ -112,12 +116,17 @@ window.initMdEditorModule = function(deps){
   // Заметки, созданные ДО появления этой функции, не трогаются на диске,
   // пока их не откроют и не отредактируют хотя бы раз (см. ТЗ) — метаданные
   // им проставляются при первом реальном автосохранении текста (см.
-  // flushAutosaveNow). До этого момента для них НИГДЕ (ни в поле дат, ни в
-  // "Забытых заметках") используется виртуальная "давность 6 месяцев" —
-  // см. virtualLegacyDatePairRu()/virtualLegacyOpenedMs() ниже: даты равны
-  // (сегодня минус 6 месяцев), пересчитываются каждый раз заново от
-  // текущей даты (то есть не "застывают" в прошлом, а всегда остаются
-  // "6 месяцев назад").
+  // flushAutosaveNow). До этого момента в поле дат используется виртуальная
+  // "давность 6 месяцев" — см. LEGACY_META_DATE_RU/virtualLegacyDatePairRu()
+  // ниже. ВАЖНО (баг, найден пользователем 05.09): эта дата — ОДНА
+  // ЗАФИКСИРОВАННАЯ константа (посчитана один раз, на день введения этой
+  // функции), а НЕ "сегодня минус 6 месяцев" пересчитываемая каждый день —
+  // иначе разные заметки, впервые открытые/отредактированные в разные дни,
+  // получали бы РАЗНЫЕ "даты создания", что бессмысленно (это не настоящая
+  // история, а условная общая метка "старая заметка"). В "Забытых
+  // заметках" (см. virtualLegacyOpenedMs ниже) используется отдельная,
+  // по-прежнему рекалькулируемая версия — там это лишь порядок сортировки,
+  // а не значение, которое пишется на диск и должно быть стабильным.
   var META_LINE_RE = /^%%meta:(\d{2}\.\d{2}\.\d{4}):(\d{2}\.\d{2}\.\d{4})(?::(\d{2}\.\d{2}\.\d{4}))?%%\n?/;
   function pad2(n){ return (n < 10 ? "0" : "") + n; }
   function formatDateRu(d){
@@ -140,12 +149,17 @@ window.initMdEditorModule = function(deps){
     if(!m) return null;
     return { created: m[1], updated: m[2], opened: m[3] || null, raw: m[0] };
   }
+  // Фиксированная дата-заглушка для старых заметок без метастроки —
+  // посчитана ОДИН РАЗ (день введения этой функции, 05.09.2026, минус
+  // 6 месяцев) и одинакова для всех таких заметок, когда бы их ни открыли
+  // или отредактировали (см. пояснение выше). Раньше пересчитывалась как
+  // "сегодня минус 6 месяцев" при каждом вызове — из-за этого разные
+  // заметки получали разные "даты создания" в зависимости от дня первого
+  // редактирования (баг, найден пользователем 05.09).
+  var LEGACY_META_DATE_RU = "05.03.2026";
   // виртуальная пара дат для заметок без метаданных — см. пояснение выше
   function virtualLegacyDatePairRu(){
-    var d = new Date();
-    d.setMonth(d.getMonth() - 6);
-    var s = formatDateRu(d);
-    return { created: s, updated: s };
+    return { created: LEGACY_META_DATE_RU, updated: LEGACY_META_DATE_RU };
   }
   // то же самое, но как ms-таймстамп — для заметок без записи в openedIndex
   // (см. loadForgottenNotesData ниже)
@@ -256,6 +270,14 @@ window.initMdEditorModule = function(deps){
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M2 12c2.5-5 7-8 10-8s7.5 3 10 8c-2.5 5-7 8-10 8s-7.5-3-10-8z"></path>' +
       '<circle cx="12" cy="12" r="3"></circle>' +
+    '</svg>';
+  // "+" — кнопка "новая заметка" в ряду плавающих кнопок списка (см.
+  // renderListScreen/openNewNoteDialog ниже, ТЗ пользователя от 05.09),
+  // слева от домика.
+  var PLUS_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<line x1="12" y1="5" x2="12" y2="19"></line>' +
+      '<line x1="5" y1="12" x2="19" y2="12"></line>' +
     '</svg>';
   // корзина — кнопка "удалить неиспользуемые файлы" (см. openCleanupDialog
   // ниже, ТЗ пользователя от 04.09), только в корне списка
@@ -1490,14 +1512,10 @@ window.initMdEditorModule = function(deps){
       html += '<div class="mdeditor-list" id="mdEditorList"></div>';
     }
     html += '<div class="mdeditor-fab-row">';
-    // "удалить неиспользуемые файлы" — только в корне: папка "files" (см.
-    // FILES_FOLDER_NAME выше) одна на весь блокнот, а не на текущую
-    // подпапку, поэтому кнопка показывает то же самое в любом месте
-    // дерева — нет смысла дублировать её на каждом уровне (см. ТЗ
-    // пользователя от 04.09).
-    if(isRoot){
-      html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorCleanupBtn" title="Удалить неиспользуемые файлы">' + TRASH_ICON_SVG + '</button>';
-    }
+    // "+" — новая заметка в ТЕКУЩЕЙ папке (node, не обязательно корень,
+    // см. openNewNoteDialog ниже, ТЗ пользователя от 05.09) — сразу слева
+    // от домика, есть на любом уровне дерева.
+    html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorNewNoteBtn" title="Новая заметка">' + PLUS_ICON_SVG + '</button>';
     // "домик" теперь ВСЕГДА активен (не disabled даже в корне) — раньше в
     // корне списка кнопка была просто неактивной заглушкой; теперь клик по
     // ней в корне прокручивает список к самому началу (полезно, когда
@@ -1508,9 +1526,9 @@ window.initMdEditorModule = function(deps){
     html += '</div>';
     container.innerHTML = html;
 
-    var cleanupBtn = document.getElementById("mdEditorCleanupBtn");
-    if(cleanupBtn){
-      cleanupBtn.addEventListener("click", function(){ openCleanupDialog(); });
+    var newNoteBtn = document.getElementById("mdEditorNewNoteBtn");
+    if(newNoteBtn){
+      newNoteBtn.addEventListener("click", function(){ openNewNoteDialog(node); });
     }
 
     var homeBtn = document.getElementById("mdEditorHomeBtn");
@@ -1553,9 +1571,14 @@ window.initMdEditorModule = function(deps){
         row.className = "mdeditor-row";
         row.dataset.index = String(idx);
         var isNote = (it.type === "file");
+        // крестик удаления — СЛЕВА от кнопки закладки, той же кнопкой
+        // долгого нажатия и появляется/скрывается вместе с ней (см.
+        // startPress ниже, ТЗ пользователя от 05.09); в отличие от
+        // закладки не остаётся видимым для уже добавленных в закладки
+        // заметок — только временно, после долгого нажатия.
         row.innerHTML = (it.type === "folder" ? FOLDER_ICON_SVG : it.type === "image" ? IMAGE_ICON_SVG : FILE_ICON_SVG) +
           '<span class="mdeditor-row-name"></span>' +
-          (isNote ? '<button type="button" class="mdeditor-bookmark-btn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>' : '');
+          (isNote ? '<button type="button" class="mdeditor-delete-btn" title="Удалить">' + DELETE_ICON_SVG + '</button><button type="button" class="mdeditor-bookmark-btn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>' : '');
         row.querySelector(".mdeditor-row-name").textContent = it.name;
         if(isNote){
           var key = it.name.toLowerCase();
@@ -1563,6 +1586,8 @@ window.initMdEditorModule = function(deps){
           var bookmarked = bookmarkedNames.has(key);
           bmBtn.classList.toggle("active", bookmarked);
           bmBtn.classList.toggle("visible", bookmarked || revealedBookmarkRows.has(key));
+          var delBtn = row.querySelector(".mdeditor-delete-btn");
+          delBtn.classList.toggle("visible", revealedBookmarkRows.has(key));
         }
         listEl.appendChild(row);
       });
@@ -1587,6 +1612,8 @@ window.initMdEditorModule = function(deps){
           revealedBookmarkRows.add(key);
           var bmBtn = rowEl.querySelector(".mdeditor-bookmark-btn");
           if(bmBtn) bmBtn.classList.add("visible");
+          var delBtn = rowEl.querySelector(".mdeditor-delete-btn");
+          if(delBtn) delBtn.classList.add("visible");
         }, LONG_PRESS_MS);
       }
       function movePress(x, y){
@@ -1608,6 +1635,28 @@ window.initMdEditorModule = function(deps){
       listEl.addEventListener("mouseup", clearPressTimer);
       listEl.addEventListener("mouseleave", clearPressTimer);
 
+      // ---- скрытие крестика/закладки, раскрытых долгим нажатием (ТЗ
+      // пользователя от 05.09: "не исчезают, так и висят") — раньше
+      // revealedBookmarkRows очищался только при снятии закладки или
+      // удалении заметки, а от простого тапа мимо кнопок никак не
+      // скрывался. Прячет ВСЕ раскрытые строки разом (обычно раскрыта
+      // одна), кнопка закладки при этом остаётся видна, если заметка
+      // реально в закладках — прячется только временная "раскрытость".
+      function hideRevealedBookmarkRows(){
+        if(!revealedBookmarkRows.size) return;
+        revealedBookmarkRows.clear();
+        var rows = listEl.querySelectorAll(".mdeditor-row");
+        rows.forEach(function(rowEl){
+          var it = items[Number(rowEl.dataset.index)];
+          if(!it || it.type !== "file") return;
+          var key = it.name.toLowerCase();
+          var bmBtn = rowEl.querySelector(".mdeditor-bookmark-btn");
+          if(bmBtn) bmBtn.classList.toggle("visible", bookmarkedNames.has(key));
+          var delBtn = rowEl.querySelector(".mdeditor-delete-btn");
+          if(delBtn) delBtn.classList.remove("visible");
+        });
+      }
+
       // ---- клик по строке (открыть/перейти) и по кнопке закладки —
       // тоже один делегированный обработчик вместо двух на каждую строку.
       listEl.addEventListener("click", function(e){
@@ -1615,10 +1664,18 @@ window.initMdEditorModule = function(deps){
         if(!rowEl) return;
         var it = items[Number(rowEl.dataset.index)];
         if(!it) return;
+        if(e.target.closest(".mdeditor-delete-btn")){
+          longPressFired = false;
+          confirmDeleteNote(it, node);
+          return;
+        }
         if(e.target.closest(".mdeditor-bookmark-btn")){
           toggleBookmarkNote(it.name);
           return;
         }
+        // клик по строке НЕ по этим двум кнопкам — раскрытые иконки
+        // (если есть) больше не нужны, прячем их.
+        hideRevealedBookmarkRows();
         if(longPressFired){ longPressFired = false; return; }
         if(it.type === "folder"){
           var prevDirNode = currentDirNode;
@@ -1632,7 +1689,125 @@ window.initMdEditorModule = function(deps){
         }
         else { openNoteByEntry({ fileHandle: it.handle, dirHandle: node.dirHandle, name: it.name }); }
       });
+
+      // тап мимо самого списка (по заголовку, по кнопкам "+"/"домик",
+      // по пустому месту вкладки) — та же самая ситуация, прячем.
+      container.addEventListener("click", function(e){
+        if(!e.target.closest(".mdeditor-row")) hideRevealedBookmarkRows();
+      });
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // Диалог "Новая заметка" (кнопка "+" в mdeditor-fab-row, ТЗ пользователя
+  // от 05.09) — тот же приём overlay/card поверх .settings-modal-box, что
+  // и у openCleanupDialog выше. Заметка создаётся в ТЕКУЩЕЙ папке
+  // (targetNode), а не всегда в корне — в отличие от createAndOpenNote,
+  // вызванного по клику на [[несуществующую ссылку]] (там root — осознанно,
+  // см. комментарий у createAndOpenNote ниже).
+  // ---------------------------------------------------------------------
+  function openNewNoteDialog(targetNode){
+    var box = document.querySelector(".settings-modal-box");
+    if(!box) return;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title">Имя новой заметки</div>' +
+      '<input type="text" class="mdeditor-cleanup-input" id="mdEditorNewNoteInput">' +
+      '<div class="mdeditor-cleanup-actions">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="mdEditorNewNoteCancel">Отмена</button>' +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="mdEditorNewNoteCreate">Создать</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    box.appendChild(overlay);
+
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+
+    var input = document.getElementById("mdEditorNewNoteInput");
+    input.focus();
+
+    function submit(){
+      var name = (input.value || "").trim();
+      if(!name) return;
+      if(nameIndex.has(name.toLowerCase())){
+        input.style.borderColor = "var(--danger, #c0392b)";
+        return;
+      }
+      close();
+      createAndOpenNote(name, targetNode);
+    }
+    document.getElementById("mdEditorNewNoteCancel").addEventListener("click", close);
+    document.getElementById("mdEditorNewNoteCreate").addEventListener("click", submit);
+    // mousedown с preventDefault ДО click — тот же приём, что и у кнопок
+    // переименования (см. startRename ниже), чтобы тап на телефоне не
+    // промахивался мимо кнопки при закрытии клавиатуры.
+    document.getElementById("mdEditorNewNoteCreate").addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+    input.addEventListener("keydown", function(ev){
+      if(ev.key === "Enter"){ ev.preventDefault(); submit(); }
+      else if(ev.key === "Escape"){ ev.preventDefault(); close(); }
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Удаление заметки из общего списка — крестик, появляющийся вместе с
+  // кнопкой закладки по долгому нажатию (см. renderListScreen выше, ТЗ
+  // пользователя от 05.09). Подтверждение — тот же overlay/card, что и у
+  // openNewNoteDialog/openCleanupDialog выше.
+  // ---------------------------------------------------------------------
+  function confirmDeleteNote(it, node){
+    var box = document.querySelector(".settings-modal-box");
+    if(!box) return;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title"></div>' +
+      '<div class="mdeditor-cleanup-actions">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="mdEditorDeleteNoteCancel">Отмена</button>' +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-danger" id="mdEditorDeleteNoteConfirm">Удалить</button>' +
+      '</div>';
+    card.querySelector(".mdeditor-cleanup-title").textContent = 'Удалить заметку «' + it.name + '»?';
+    overlay.appendChild(card);
+    box.appendChild(overlay);
+
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+    document.getElementById("mdEditorDeleteNoteCancel").addEventListener("click", close);
+    document.getElementById("mdEditorDeleteNoteConfirm").addEventListener("click", function(){
+      close();
+      deleteNoteEntry(it, node);
+    });
+  }
+
+  // Собственно удаление: с диска, из дерева/индекса имён, из закладок (если
+  // была) — и точечная перерисовка списка (тот же контейнер, что и у
+  // остальных экранов "Моего блокнота").
+  async function deleteNoteEntry(it, node){
+    var key = it.name.toLowerCase();
+    try{
+      await node.dirHandle.removeEntry(it.name + ".md");
+    }catch(e){
+      setStatus("Не удалось удалить заметку: " + (e && e.message ? e.message : e), true);
+      return;
+    }
+    var idx = -1;
+    for(var i = 0; i < node.files.length; i++){
+      if(node.files[i].name.toLowerCase() === key){ idx = i; break; }
+    }
+    if(idx !== -1) node.files.splice(idx, 1);
+    nameIndex.delete(key);
+    if(bookmarkedNames.has(key)){
+      bookmarkedNames.delete(key);
+      setSyncedBookmark(key, false);
+    }
+    revealedBookmarkRows.delete(key);
+    idbSet("treeShape", treeToShape(rootTree)).catch(function(){});
+    var container = document.getElementById("settingsTabContent");
+    if(container) renderListScreen(container);
   }
 
   // ---------------------------------------------------------------------
@@ -2402,6 +2577,17 @@ window.initMdEditorModule = function(deps){
     // openNoteExternally выше), и "назад" вернёт прямо на вкладку/экран,
     // откуда кликнули по ссылке, а не в список заметок блокнота.
     var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
+    // позиция прокрутки списка (или экрана закладок/забытых заметок) на
+    // момент открытия заметки — раньше при возврате назад список всегда
+    // перерисовывался с нуля и прокрутка сбрасывалась в начало (баг
+    // найден пользователем 05.09: "должен открываться с того места, где
+    // я открыл заметку"). #settingsTabContent — тот же элемент, что
+    // реально скроллится (см. homeBtn выше), а не сам список внутри.
+    var prevScrollTop = null;
+    if(prevScreen === "list"){
+      var scrollHost = document.getElementById("settingsTabContent");
+      if(scrollHost) prevScrollTop = scrollHost.scrollTop;
+    }
     pushMdNav(function(){
       flushAutosaveNow();
       destroyEditor();
@@ -2409,6 +2595,10 @@ window.initMdEditorModule = function(deps){
       currentDirNode = prevDirNode;
       screen = prevScreen;
       render();
+      if(prevScrollTop !== null){
+        var restoredScrollHost = document.getElementById("settingsTabContent");
+        if(restoredScrollHost) restoredScrollHost.scrollTop = prevScrollTop;
+      }
     });
     flushAutosaveNow();
     destroyEditor();
@@ -2435,11 +2625,15 @@ window.initMdEditorModule = function(deps){
 
 
   // Клик по [[ссылке]] на несуществующую заметку — сразу создаём пустой
-  // файл в корне и открываем его (решение согласовано с пользователем).
-  async function createAndOpenNote(name){
+  // файл и открываем его (решение согласовано с пользователем). Без
+  // targetNode (вызов из handleLinkClick) файл создаётся в КОРНЕ, как и
+  // раньше; кнопка "+" в renderListScreen (ТЗ пользователя от 05.09)
+  // передаёт targetNode = ТЕКУЩАЯ папка списка, где её нажали.
+  async function createAndOpenNote(name, targetNode){
+    var target = targetNode || rootTree;
     reverifyWritePermissionOnce();
     try{
-      var fh = await dirHandle.getFileHandle(name + ".md", { create: true });
+      var fh = await target.dirHandle.getFileHandle(name + ".md", { create: true });
       var w = await fh.createWritable();
       // новая заметка сразу получает метаданные (дата создания = дата
       // редактирования = сегодня, см. ТЗ пользователя от 04.09) — в
@@ -2449,13 +2643,18 @@ window.initMdEditorModule = function(deps){
       var initialText = buildMetaLine(today, today, today);
       await w.write(initialText);
       await w.close();
-      nameIndex.set(name.toLowerCase(), { fileHandle: fh, dirHandle: dirHandle, name: name });
-      rootTree.files.push({ name: name, handle: fh });
+      nameIndex.set(name.toLowerCase(), { fileHandle: fh, dirHandle: target.dirHandle, name: name });
+      target.files.push({ name: name, handle: fh });
       // "Карта дней года" (my.js) — ссылка на новую заметку появляется в
       // дне её СОЗДАНИЯ (см. ТЗ пользователя от 04.09), не редактирования
       recordNoteCreated(name);
       recordNoteOpened(name);
       var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
+      var prevScrollTop = null;
+      if(prevScreen === "list"){
+        var scrollHost = document.getElementById("settingsTabContent");
+        if(scrollHost) prevScrollTop = scrollHost.scrollTop;
+      }
       pushMdNav(function(){
         flushAutosaveNow();
         destroyEditor();
@@ -2463,10 +2662,14 @@ window.initMdEditorModule = function(deps){
         currentDirNode = prevDirNode;
         screen = prevScreen;
         render();
+        if(prevScrollTop !== null){
+          var restoredScrollHost = document.getElementById("settingsTabContent");
+          if(restoredScrollHost) restoredScrollHost.scrollTop = prevScrollTop;
+        }
       });
       flushAutosaveNow();
       destroyEditor();
-      openFile = { fileHandle: fh, dirHandle: dirHandle, name: name, text: initialText, dirty: false };
+      openFile = { fileHandle: fh, dirHandle: target.dirHandle, name: name, text: initialText, dirty: false };
       screen = "editor";
       render();
     }catch(e){
@@ -2927,16 +3130,21 @@ window.initMdEditorModule = function(deps){
     // Если она уже есть — дата создания остаётся прежней, дата
     // редактирования становится сегодняшней (если ещё не сегодняшняя).
     // Если её нет (старая заметка, первое редактирование после появления
-    // этой функции) — заводим её сейчас: настоящая дата создания
-    // неизвестна, поэтому обе даты — сегодняшние. Дата открытия берётся
-    // из openedIndexCache (см. recordNoteOpened выше) — она уже проставлена
-    // туда самим открытием этой заметки, ещё до первого редактирования, —
-    // а не читается заново с диска; это же попутно апгрейдит старые
-    // 2-польные строки метаданных до 3-польных.
+    // этой функции) — заводим её сейчас. Настоящая дата создания
+    // неизвестна, НО до этого самого момента пользователь уже видел в
+    // поле дат виртуальную "давность 6 месяцев" (см. virtualLegacyDatePairRu
+    // выше) как дату создания — поэтому фиксируем именно её, а не сегодня,
+    // иначе дата создания на глазах пользователя "перескакивала" бы на
+    // сегодняшний день прямо в момент первого редактирования (баг,
+    // замечен пользователем 05.09). Дата редактирования — всегда сегодня.
+    // Дата открытия берётся из openedIndexCache (см. recordNoteOpened
+    // выше) — она уже проставлена туда самим открытием этой заметки, ещё
+    // до первого редактирования, — а не читается заново с диска; это же
+    // попутно апгрейдит старые 2-польные строки метаданных до 3-польных.
     var meta = parseNoteMeta(raw);
     var today = todayRu();
     var bodyText = meta ? raw.slice(meta.raw.length) : raw;
-    var createdForMeta = meta ? meta.created : today;
+    var createdForMeta = meta ? meta.created : virtualLegacyDatePairRu().created;
     var openedKey = (openFile.name || "").toLowerCase();
     var openedTsForMeta = (openedIndexCache && openedIndexCache[openedKey]) ? openedIndexCache[openedKey] : Date.now();
     var openedForMeta = formatDateRu(new Date(openedTsForMeta));
@@ -3357,6 +3565,15 @@ window.initMdEditorModule = function(deps){
     // renderEditorScreen/refreshDatesField) — ТЗ пользователя от 04.09:
     // "отображать можно, разве что в коде, в тексте не нужно".
     var META_LINE_EXACT_RE = /^%%meta:\d{2}\.\d{2}\.\d{4}:\d{2}\.\d{2}\.\d{4}(?::\d{2}\.\d{2}\.\d{4})?%%$/;
+    // Возврат к line-декорации + CSS-классу (.cm-md-meta-hidden в
+    // components.css, display:none — правило там ЕСТЬ и работает).
+    // Предыдущая попытка (Decoration.replace с block:true) ломала
+    // редактор с первого же нажатия клавиши: CodeMirror 6 запрещает
+    // блочные decorations, объявленные из ViewPlugin ("RangeError: Block
+    // decorations may not be specified via plugins") — их можно отдавать
+    // только из StateField. Настоящая причина видимости строки была не
+    // в CSS и не в способе скрытия, а в стартовой позиции курсора (см.
+    // initialPos/minCursorPos в mountEditor) — она уже исправлена.
     var hiddenMetaLineDeco = Decoration.line({ attributes: { class: "cm-md-meta-hidden" } });
 
     function decorateLine(builder, lineText, lineFrom, isParaStart, prevIsTaskLine, nextIsTaskLine){
@@ -3666,7 +3883,19 @@ window.initMdEditorModule = function(deps){
           }),
           EditorView.domEventHandlers({ mousedown: handleMouseDown })
         ];
-        var initialPos = Math.max(0, Math.min(openFile.cursorPos || 0, openFile.text.length));
+        // Курсор по умолчанию (cursorPos не задан/равен 0) не должен
+        // попадать НИЖЕ конца скрытой строки метаданных — иначе он
+        // физически стоит в самом начале документа, то есть внутри этой
+        // строки (визуально она скрыта, display:none в components.css,
+        // но позиция в документе никуда не делась). Первый же набранный
+        // символ вставлялся прямо туда, портил точный формат
+        // "%%meta:...%%" и строка становилась видимой — баг найден
+        // пользователем 05.09 ("отображается после начала
+        // редактирования"), причина была не в CSS, а именно в стартовой
+        // позиции курсора.
+        var metaMatchForCursor = META_LINE_RE.exec(openFile.text || "");
+        var minCursorPos = metaMatchForCursor ? metaMatchForCursor[0].length : 0;
+        var initialPos = Math.max(minCursorPos, Math.min(openFile.cursorPos || 0, openFile.text.length));
         var state = EditorState.create({ doc: openFile.text, selection: { anchor: initialPos }, extensions: extensions });
         cmView = new EditorView({ state: state, parent: host });
         // Ширина редактора может измениться не только от ввода текста

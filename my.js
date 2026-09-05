@@ -2455,6 +2455,10 @@
     // у обычных задач на вкладках задач (см. ТЗ пользователя от 30.08).
     CHECK_ICON_SVG: CHECK_ICON_SVG,
     ARROW_MOVE_ICON_SVG: ARROW_MOVE_ICON_SVG,
+    // крестик удаления заметки в общем списке (см. renderListScreen в
+    // mdeditor.js, ТЗ пользователя от 05.09) — та же пиктограмма, что и у
+    // "Удалить навсегда" в архиве задач (.task-delete-btn выше), а не своя.
+    DELETE_ICON_SVG: DELETE_ICON_SVG,
     createArchivedTaskWithText: createArchivedTaskWithText,
     openTaskMoveTargetPicker: openTaskMoveTargetPicker,
     // см. applyFontSize в mdeditor.js — пересчитывает подгонку кнопок

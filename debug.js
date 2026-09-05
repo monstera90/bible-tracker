@@ -52,8 +52,10 @@
     if (panelEl) return panelEl;
     panelEl = document.createElement("div");
     panelEl.id = "debugLogPanel";
+    // Наверху экрана, а не внизу — внизу панель перекрывала кнопки
+    // интерфейса и мешала на них нажимать (замечено пользователем 05.09).
     panelEl.style.cssText =
-      "position:fixed;left:4px;right:4px;bottom:4px;max-height:40vh;overflow:auto;" +
+      "position:fixed;left:4px;right:4px;top:4px;max-height:40vh;overflow:auto;" +
       "background:rgba(0,0,0,0.85);color:#0f0;font:10px monospace;padding:6px;" +
       "z-index:999999;white-space:pre-wrap;";
     document.body.appendChild(panelEl);
