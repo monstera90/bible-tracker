@@ -2475,10 +2475,20 @@
     // общий резолвер и подписка на его асинхронное обновление, чтобы live-
     // preview блокнота показывал те же заголовки, что и остальные вкладки.
     autoLinkTitle: autoLinkTitle,
-    onLinkTitleResolved: onLinkTitleResolved
+    onLinkTitleResolved: onLinkTitleResolved,
+    // регистрация факта создания новой заметки — для поля "новые заметки"
+    // в "Карте дней года" (см. recordNoteCreated/getNoteCreationsForDay
+    // ниже и ТЗ пользователя от 04.09); функция объявлена ниже, но
+    // ссылаться на неё здесь безопасно по той же причине, что и у
+    // refitAllVisibleTaskBodies выше (function-декларация, поднимается в
+    // начало этой же IIFE)
+    recordNoteCreated: recordNoteCreated
   });
   var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
   var renderSettingsTabMdBookmarks = MdEditor.renderSettingsTabMdBookmarks;
+  // "Забытые заметки" (4-я вкладка вертикального стека второго набора,
+  // set2s_4 — ТЗ пользователя от 04.09), см. switchSettingsTab ниже
+  var renderSettingsTabForgottenNotes = MdEditor.renderSettingsTabForgottenNotes;
   var flushPendingMdEditorEdit = MdEditor.flushPendingMdEditorEdit;
   initTaskGlobalToolbar();
 
@@ -3967,6 +3977,13 @@
     // вынесена ДО общей проверки на renderSettingsTabSet2Stub по тому же
     // принципу, что и остальные уже не-заглушки этого набора выше.
     else if(tab === "set2s_2") renderSettingsTabMdBookmarks();
+    // 4-я вкладка вертикального стека второго набора (set2s_4) — ЭТО
+    // БОЛЬШЕ НЕ ЗАГЛУШКА: "Забытые заметки" — список заметок, давно не
+    // редактировавшихся (см. renderSettingsTabForgottenNotes в
+    // mdeditor.js), тем же способом вынесена ДО общей проверки на
+    // renderSettingsTabSet2Stub, что и остальные уже не-заглушки этого
+    // набора (ТЗ пользователя от 04.09).
+    else if(tab === "set2s_4") renderSettingsTabForgottenNotes();
     else if(tab === "set2s_5") renderSettingsTabEpubSplit();
     else if(tab === "set2s_6") renderSettingsTabImgResize();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
@@ -5905,6 +5922,10 @@
     var moods = moodsByDay[dayTs] || [];
     var goalsDone = goalsByDay[dayTs] || [];
     var tasksDone = tasksByDay[dayTs] || [];
+    // новые заметки "Моего блокнота", созданные в этот день (см.
+    // getNoteCreationsForDay/recordNoteCreated выше и ТЗ пользователя от
+    // 04.09) — независимая запись под днём СОЗДАНИЯ, не редактирования
+    var notesCreated = getNoteCreationsForDay(dayTs);
 
     var d = new Date(dayTs);
     var weekdayLabel = WEEKDAY_NAMES_FULL[d.getDay()];
@@ -5931,6 +5952,18 @@
           ' <span class="year-day-goal-source">— ' + escapeHtml(TASK_TAB_TITLES[t.tab] || t.tab || "") + '</span></div>';
       }).join("");
       rows += '<div class="year-day-stat-row"><span class="year-day-stat-icon">✅</span><span>Выполненные задачи:' + tasksHtml + '</span></div>';
+    }
+    if(notesCreated.length){
+      // formatInline — тот же формат "[[ссылка]]", что и везде в
+      // приложении (см. formatInline выше): клик по ней уже подхватывается
+      // общим делегированным обработчиком на #settingsTabContent
+      // (переключает на "Мой блокнот" и открывает нужную заметку, создавая
+      // её заново, если она была с тех пор удалена/переименована — как и
+      // у любой другой [[ссылки]] в приложении).
+      var notesHtml = notesCreated.map(function(n){
+        return '<div class="year-day-goal-item">' + formatInline("[[" + n.name + "]]") + '</div>';
+      }).join("");
+      rows += '<div class="year-day-stat-row"><span class="year-day-stat-icon">📝</span><span>Новые заметки:' + notesHtml + '</span></div>';
     }
     if(moods.length){
       var moodHtml = moods.map(function(m){ return m.emoji + " " + escapeHtml(m.label); }).join(", ");
@@ -6943,6 +6976,40 @@
       (byDay[day] = byDay[day] || []).push(rec.c.text);
     });
     return byDay;
+  }
+
+  // ---- новые заметки "Моего блокнота" в "Карте дней года"
+  // ("notecreated:<деньСоздания>-<rand>") — тот же принцип, что и у
+  // yearcomment: выше: независимая запись под днём СОЗДАНИЯ заметки (ТЗ
+  // пользователя от 04.09), дальнейшее переименование/редактирование/
+  // удаление самой заметки эту запись не трогает. Вызывается из
+  // deps.recordNoteCreated (см. initMdEditorModule выше) внутри
+  // createAndOpenNote в mdeditor.js — то есть именно в момент создания,
+  // не редактирования.
+  function genNoteCreatedId(dayTs){
+    return "notecreated:" + dayTs + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  }
+  function recordNoteCreated(name){
+    var dayTs = startOfDay(Date.now());
+    var key = genNoteCreatedId(dayTs);
+    state[key] = {c: {name: name}, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+    refreshYearGridIfOpen();
+  }
+  // заметки, созданные в конкретный день — для детализации дня в "Карте
+  // дней года" (см. renderYearDayDetail)
+  function getNoteCreationsForDay(dayTs){
+    var prefix = "notecreated:" + dayTs + "-";
+    var list = [];
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf(prefix) !== 0) return;
+      var rec = state[k];
+      if(!rec || !rec.c || !rec.c.name) return;
+      list.push({key: k, name: rec.c.name, t: rec.t});
+    });
+    list.sort(function(a,b){ return a.t - b.t; });
+    return list;
   }
 
   // ===================== ВКЛАДКА "КОММЕНТАРИИ" (extra2): ОТРИСОВКА =====================

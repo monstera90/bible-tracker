@@ -72,6 +72,65 @@ window.initMdEditorModule = function(deps){
   // закладку, добавленную тем временем на другом.
   var getSyncedBookmarkNames = deps.getSyncedBookmarkNames || function(){ return []; };
   var setSyncedBookmark = deps.setSyncedBookmark || function(){};
+  // регистрация факта создания новой заметки — для поля "новые заметки" в
+  // "Карте дней года" (my.js), см. createAndOpenNote ниже и ТЗ пользователя
+  // от 04.09. Необязателен (если deps его не передал — просто no-op).
+  var recordNoteCreated = deps.recordNoteCreated || function(){};
+
+  // ---------------------------------------------------------------------
+  // Метаданные заметки (дата создания/редактирования) — ТЗ пользователя от
+  // 04.09. Хранятся ПЕРВОЙ строкой самого .md файла в служебном формате
+  // "%%meta:ДД.ММ.ГГГГ:ДД.ММ.ГГГГ%%" (создание:редактирование) — часть
+  // обычного документа CodeMirror, поэтому видны как есть в режиме "с
+  // кодом" и скрываются decoration'ом в режиме "без кода" (см.
+  // decorateLine/META_LINE_RE ниже в makeLivePreviewExtension). Само поле
+  // над текстом заметки (#mdEditorDatesRow, см. renderEditorScreen) — это
+  // ОТДЕЛЬНЫЙ, нередактируемый элемент интерфейса, просто прочитавший эти
+  // даты; сама строка метаданных не редактируется вручную.
+  //
+  // Заметки, созданные ДО появления этой функции, не трогаются на диске,
+  // пока их не откроют и не отредактируют хотя бы раз (см. ТЗ) — метаданные
+  // им проставляются при первом реальном автосохранении текста (см.
+  // flushAutosaveNow). До этого момента для них НИГДЕ (ни в поле дат, ни в
+  // "Забытых заметках") используется виртуальная "давность 6 месяцев" —
+  // см. virtualLegacyDatePairRu() ниже: обе даты равны (сегодня минус 6
+  // месяцев), пересчитываются каждый раз заново от текущей даты (то есть
+  // не "застывают" в прошлом, а всегда остаются "6 месяцев назад").
+  var META_LINE_RE = /^%%meta:(\d{2}\.\d{2}\.\d{4}):(\d{2}\.\d{2}\.\d{4})%%\n?/;
+  function pad2(n){ return (n < 10 ? "0" : "") + n; }
+  function formatDateRu(d){
+    return pad2(d.getDate()) + "." + pad2(d.getMonth() + 1) + "." + d.getFullYear();
+  }
+  function todayRu(){ return formatDateRu(new Date()); }
+  function buildMetaLine(created, updated){ return "%%meta:" + created + ":" + updated + "%%\n"; }
+  // распарсенные метаданные из НАЧАЛА текста заметки, либо null, если их
+  // ещё нет (старая заметка, ни разу не редактированная после появления
+  // этой функции)
+  function parseNoteMeta(text){
+    var m = META_LINE_RE.exec(text || "");
+    if(!m) return null;
+    return { created: m[1], updated: m[2], raw: m[0] };
+  }
+  // виртуальная пара дат для заметок без метаданных — см. пояснение выше
+  function virtualLegacyDatePairRu(){
+    var d = new Date();
+    d.setMonth(d.getMonth() - 6);
+    var s = formatDateRu(d);
+    return { created: s, updated: s };
+  }
+  // даты заметки для отображения/расчётов — реальные метаданные, если они
+  // есть, иначе виртуальная "давность 6 месяцев" (см. выше)
+  function getNoteDatesRu(text){
+    var meta = parseNoteMeta(text);
+    return meta ? { created: meta.created, updated: meta.updated } : virtualLegacyDatePairRu();
+  }
+  // разбор "ДД.ММ.ГГГГ" в Date (полночь) — нужен для сравнения давности
+  // (см. "Забытые заметки", renderSettingsTabForgottenNotes ниже)
+  function parseRuDate(s){
+    var m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(s || "");
+    if(!m) return null;
+    return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  }
 
   // Ищет библейскую ссылку в строке, под которой находится offset (символ
   // клика) — используется и для decorations (см. makeLivePreviewExtension),
@@ -460,6 +519,7 @@ window.initMdEditorModule = function(deps){
       if(hdrBtn) hdrBtn.classList.toggle("active", bookmarkedNames.has(key));
     }
     if(activeMdTab === "bookmarks") renderBookmarksScreen(container);
+    else if(activeMdTab === "forgotten") renderForgottenNotesScreen(container);
     else if(screen === "list") renderListScreen(container);
   }
 
@@ -486,6 +546,7 @@ window.initMdEditorModule = function(deps){
       if(hdrBtn) hdrBtn.classList.toggle("active", bookmarkedNames.has(openFile.name.toLowerCase()));
     }
     if(activeMdTab === "bookmarks") renderBookmarksScreen(container);
+    else if(activeMdTab === "forgotten") renderForgottenNotesScreen(container);
     else if(screen === "list") renderListScreen(container);
   }
 
@@ -977,6 +1038,11 @@ window.initMdEditorModule = function(deps){
     // ниже сработает тот же экран настройки папки, что и у "Моего
     // блокнота" (общий для обеих вкладок, см. activeMdTab выше).
     if(activeMdTab === "bookmarks" && rootTree){ renderBookmarksScreen(container); return; }
+    // вкладка "Забытые заметки" (set2s_4, ТЗ пользователя от 04.09) — по
+    // тому же принципу, что и "Закладки" выше: отдельный экран поверх
+    // обычного списка/редактора, показывается только когда папка уже
+    // выбрана и просканирована.
+    if(activeMdTab === "forgotten" && rootTree){ renderForgottenNotesScreen(container); return; }
     if(screen === "editor" && openFile) renderEditorScreen(container);
     else if(screen === "list" && currentDirNode) renderListScreen(container);
     else renderSetupScreen(container);
@@ -1399,6 +1465,129 @@ window.initMdEditorModule = function(deps){
   }
 
   // ---------------------------------------------------------------------
+  // Вкладка "Забытые заметки" (4-я вкладка вертикального стека второго
+  // набора, set2s_4 — ТЗ пользователя от 04.09). Стиль текста/кнопок/
+  // подписей взят у "Объединение заметок" (см. workbooks-title и
+  // .settings-content-bottom в jwlmerge.js), строка списка — тот же вид,
+  // что и в "Моём блокноте" (.mdeditor-row/.mdeditor-list, включая
+  // закладку по долгому нажатию, см. renderListScreen выше), пилюли
+  // периода — тот же вид и поведение, что и на вкладке "Обзор"
+  // (.review-pill/.review-pills, см. renderReviewTabContent в my.js: клик
+  // по пилюле пересчитывает список сразу, без переоткрытия вкладки).
+  //
+  // "Забытая" = дата последнего редактирования заметки (см.
+  // getNoteDatesRu выше) старше выбранного периода. Список — ВСЕ заметки
+  // во всех папках (тот же плоский nameIndex, что и для [[ссылок]]), не
+  // только текущая. Даты читаются из файлов ОДИН раз при каждом открытии
+  // вкладки (см. forgottenNotesData ниже, сбрасывается в null при каждом
+  // заходе на вкладку) — переключение пилюль внутри уже открытой вкладки
+  // только перефильтровывает уже прочитанное, без повторного чтения с
+  // диска.
+  var FORGOTTEN_PERIODS = [
+    { key: "2w", label: "2 нед.", days: 14 },
+    { key: "3m", label: "3 мес.", days: 91 },
+    { key: "6m", label: "6 мес.", days: 182 }
+  ];
+  var forgottenSelectedPeriod = "2w";
+  var forgottenNotesData = null; // null — ещё не прочитано с диска в этом заходе на вкладку
+
+  function renderSettingsTabForgottenNotes(){
+    activeMdTab = "forgotten";
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    if(!initStarted){
+      initStarted = true;
+      container.innerHTML = '<div class="mdeditor-tab mdeditor-hint">Загрузка…</div>';
+      initFromStoredHandle();
+      return;
+    }
+    forgottenSelectedPeriod = "2w";
+    forgottenNotesData = null;
+    render();
+  }
+
+  async function loadForgottenNotesData(){
+    var entries = nameIndex ? Array.from(nameIndex.values()) : [];
+    var results = await Promise.all(entries.map(async function(entry){
+      var text = "";
+      try{ var f = await entry.fileHandle.getFile(); text = await f.text(); }catch(e){}
+      var dates = getNoteDatesRu(text);
+      var d = parseRuDate(dates.updated);
+      return { name: entry.name, entry: entry, updatedTs: d ? d.getTime() : 0 };
+    }));
+    // самые старые (давно не редактированные) — сверху списка
+    results.sort(function(a, b){ return a.updatedTs - b.updatedTs; });
+    return results;
+  }
+
+  function renderForgottenNotesScreen(container){
+    if(forgottenNotesData === null){
+      container.innerHTML = '<div class="mdeditor-tab mdeditor-hint">Загрузка…</div>';
+      loadForgottenNotesData().then(function(data){
+        // пока читали — могли уйти с вкладки; тогда результат уже не нужен
+        if(activeMdTab !== "forgotten") return;
+        forgottenNotesData = data;
+        render();
+      });
+      return;
+    }
+
+    var period = FORGOTTEN_PERIODS.filter(function(p){ return p.key === forgottenSelectedPeriod; })[0] || FORGOTTEN_PERIODS[0];
+    var thresholdTs = Date.now() - period.days * 24 * 60 * 60 * 1000;
+    var items = forgottenNotesData.filter(function(it){ return it.updatedTs <= thresholdTs; });
+
+    var html = '<div class="mdeditor-tab settings-content-bottom">';
+    html += '<h3 class="workbooks-title" style="margin:0 0 4px 0;">Забытые заметки</h3>';
+    if(!items.length){
+      html += '<div class="mdeditor-empty">За выбранный период забытых заметок нет.</div>';
+    } else {
+      html += '<div class="mdeditor-list" id="mdForgottenList"></div>';
+    }
+    html += '<div class="review-pills" id="mdForgottenPills">' + FORGOTTEN_PERIODS.map(function(p){
+      return '<button type="button" class="review-pill' + (p.key === forgottenSelectedPeriod ? " active" : "") + '" data-period="' + p.key + '">' + escName(p.label) + '</button>';
+    }).join("") + '</div>';
+    html += '</div>';
+    container.innerHTML = html;
+
+    var listEl = document.getElementById("mdForgottenList");
+    if(listEl){
+      items.forEach(function(it){
+        var row = document.createElement("div");
+        row.className = "mdeditor-row";
+        var key = it.name.toLowerCase();
+        var bookmarked = bookmarkedNames.has(key);
+        row.innerHTML = FILE_ICON_SVG + '<span class="mdeditor-row-name"></span>' +
+          '<button type="button" class="mdeditor-bookmark-btn' + (bookmarked ? " active visible" : "") + '" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>';
+        row.querySelector(".mdeditor-row-name").textContent = it.name;
+        row.addEventListener("click", function(){
+          // см. пояснение выше про activeMdTab — без этого render() после
+          // открытия заметки продолжил бы показывать список "Забытых",
+          // а не саму заметку (тот же приём нужен и в renderBookmarksScreen,
+          // но её не трогаем — не входит в эту задачу)
+          activeMdTab = "editor";
+          openNoteByEntry(it.entry);
+        });
+        row.querySelector(".mdeditor-bookmark-btn").addEventListener("click", function(e){
+          e.stopPropagation();
+          // сама перерисовка строки (снятие/наведение "активности" кнопки)
+          // происходит внутри toggleBookmarkNote — она уже знает про
+          // activeMdTab === "forgotten" (см. правку в toggleBookmarkNote
+          // выше) и сама вызовет renderForgottenNotesScreen заново
+          toggleBookmarkNote(it.name);
+        });
+        listEl.appendChild(row);
+      });
+    }
+
+    Array.prototype.forEach.call(container.querySelectorAll(".review-pill"), function(btn){
+      btn.addEventListener("click", function(){
+        forgottenSelectedPeriod = btn.getAttribute("data-period");
+        render();
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------
   // "Скрепка" в редакторе заметки (см. renderEditorScreen выше) — картинка
   // из системного диалога копируется в папку "files" (создаётся, если её
   // ещё нет) и сразу вставляется в документ как "![[имя]]" на месте
@@ -1464,6 +1653,7 @@ window.initMdEditorModule = function(deps){
           '<span class="mdeditor-title" id="mdEditorTitle" title="Нажмите, чтобы переименовать"></span>' +
           '<button type="button" class="mdeditor-bookmark-btn visible" id="mdEditorBookmarkBtn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>' +
         '</div>' +
+        '<div class="mdeditor-dates-row" id="mdEditorDatesRow"></div>' +
         '<div class="mdeditor-links-row" id="mdEditorLinksRow"></div>' +
         '<div class="mdeditor-status" id="mdEditorStatus"></div>' +
         '<div class="mdeditor-editor-host" id="mdEditorHost"></div>' +
@@ -1610,6 +1800,20 @@ window.initMdEditorModule = function(deps){
     mountEditor();
     applyLinksFieldVisibility();
     refreshLinksField();
+    refreshDatesField();
+  }
+
+  // Поле дат над заметкой (#mdEditorDatesRow, см. renderEditorScreen выше)
+  // — просто две даты через " · ", без подписей, по центру (ТЗ
+  // пользователя от 04.09): дата создания слева, редактирования справа,
+  // совпадают, если заметку ни разу не редактировали. Источник — метаданные
+  // из текста заметки, либо виртуальная "давность 6 месяцев" для старых
+  // заметок без метаданных (см. getNoteDatesRu выше).
+  function refreshDatesField(){
+    var row = document.getElementById("mdEditorDatesRow");
+    if(!row || !openFile) return;
+    var dates = getNoteDatesRu(openFile.text);
+    row.textContent = dates.created + " · " + dates.updated;
   }
 
   function goHome(){
@@ -1851,10 +2055,19 @@ window.initMdEditorModule = function(deps){
     try{
       var fh = await dirHandle.getFileHandle(name + ".md", { create: true });
       var w = await fh.createWritable();
-      await w.write("");
+      // новая заметка сразу получает метаданные (дата создания = дата
+      // редактирования = сегодня, см. ТЗ пользователя от 04.09) — в
+      // отличие от старых заметок, которым метаданные проставляются
+      // только при первом реальном редактировании (см. flushAutosaveNow)
+      var today = todayRu();
+      var initialText = buildMetaLine(today, today);
+      await w.write(initialText);
       await w.close();
       nameIndex.set(name.toLowerCase(), { fileHandle: fh, dirHandle: dirHandle, name: name });
       rootTree.files.push({ name: name, handle: fh });
+      // "Карта дней года" (my.js) — ссылка на новую заметку появляется в
+      // дне её СОЗДАНИЯ (см. ТЗ пользователя от 04.09), не редактирования
+      recordNoteCreated(name);
       var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
       pushMdNav(function(){
         flushAutosaveNow();
@@ -1866,7 +2079,7 @@ window.initMdEditorModule = function(deps){
       });
       flushAutosaveNow();
       destroyEditor();
-      openFile = { fileHandle: fh, dirHandle: dirHandle, name: name, text: "", dirty: false };
+      openFile = { fileHandle: fh, dirHandle: dirHandle, name: name, text: initialText, dirty: false };
       screen = "editor";
       render();
     }catch(e){
@@ -2319,11 +2532,39 @@ window.initMdEditorModule = function(deps){
     flushDocStateNow();
     writeDocStateToDiskNow();
     if(!openFile || !cmView || !openFile.dirty) return;
-    var text = stripStraySlashBeforeLinks(stripInvisibleSpaces(cmView.state.doc.toString()));
+    var raw = stripStraySlashBeforeLinks(stripInvisibleSpaces(cmView.state.doc.toString()));
+
+    // Метаданные (дата создания/редактирования, ТЗ пользователя от 04.09):
+    // на каждое реальное сохранение текста проставляем/обновляем строку
+    // метаданных в начале документа. Если она уже есть — дата создания
+    // остаётся прежней, дата редактирования становится сегодняшней (если
+    // ещё не сегодняшняя). Если её нет (старая заметка, первое
+    // редактирование после появления этой функции) — заводим её сейчас:
+    // настоящая дата создания неизвестна, поэтому обе даты — сегодняшние.
+    var meta = parseNoteMeta(raw);
+    var today = todayRu();
+    var bodyText = meta ? raw.slice(meta.raw.length) : raw;
+    var createdForMeta = meta ? meta.created : today;
+    var metaLine = buildMetaLine(createdForMeta, today);
+    var text = metaLine + bodyText;
+
+    // Если строка метаданных изменилась (появилась впервые или обновилась
+    // дата редактирования) — отражаем это и в самом документе редактора
+    // (cmView), иначе следующее открытие "с кодом"/следующее автосохранение
+    // снова увидят вчерашнюю дату. Это само по себе — ещё одно изменение
+    // документа (docChanged), поэтому вызовет один дополнительный,
+    // самозавершающийся цикл автосохранения (см. scheduleAutosave в
+    // updateListener) — не более одного раза в день на заметку, не проблема.
+    if(text !== raw){
+      var oldMetaLen = meta ? meta.raw.length : 0;
+      cmView.dispatch({ changes: { from: 0, to: oldMetaLen, insert: metaLine } });
+    }
+
     var fileRef = openFile;
     fileRef.dirty = false;
     writeFileText(fileRef, text).then(function(){
       fileRef.text = text;
+      if(openFile === fileRef) refreshDatesField();
       // сохраняется молча (см. ТЗ пользователя от 31.08) — раньше здесь
       // показывалось "Сохранено.", теперь просто гасим статус (пустая
       // строка), ничего не показывая. Не убираем вызов setStatus совсем,
@@ -2714,6 +2955,14 @@ window.initMdEditorModule = function(deps){
     var imageLineDeco = Decoration.line({ attributes: { class: "cm-md-image-line" } });
     var hideDeco = Decoration.replace({});
     var bulletDeco = Decoration.replace({ widget: bulletWidgetInstance });
+    // строка метаданных (дата создания/редактирования, см. META_LINE_RE
+    // выше в начале модуля) — ВСЕГДА первая строка документа, если есть.
+    // В режиме "без кода" полностью скрывается (сами даты показаны
+    // отдельным нередактируемым полем #mdEditorDatesRow, см.
+    // renderEditorScreen/refreshDatesField) — ТЗ пользователя от 04.09:
+    // "отображать можно, разве что в коде, в тексте не нужно".
+    var META_LINE_EXACT_RE = /^%%meta:\d{2}\.\d{2}\.\d{4}:\d{2}\.\d{2}\.\d{4}%%$/;
+    var hiddenMetaLineDeco = Decoration.line({ attributes: { class: "cm-md-meta-hidden" } });
 
     function decorateLine(builder, lineText, lineFrom, isParaStart, prevIsTaskLine, nextIsTaskLine){
       if(lineText.trim() === ""){
@@ -2907,12 +3156,25 @@ window.initMdEditorModule = function(deps){
           // напрямую по документу, а не по уже пройденным строкам этого
           // цикла, чтобы работало одинаково с любого места прокрутки, а не
           // только с самого верха заметки.
+          // строка метаданных (см. META_LINE_EXACT_RE выше) — только если
+          // она реально первая строка документа, полностью скрывается,
+          // остальная разметка/decorations для неё не считаются
+          if(line.from === 0 && META_LINE_EXACT_RE.test(line.text)){
+            builder.add(line.from, line.from, hiddenMetaLineDeco);
+            if(line.to >= vr.to || line.to >= doc.length) break;
+            pos = line.to + 1;
+            continue;
+          }
           var isParaStart = line.text.trim() !== "";
           if(isParaStart && line.from !== 0){
             var prevText = doc.lineAt(line.from - 1).text;
             isParaStart = prevText.trim() === "" ||
               /^(#{1,3})(\s+)/.test(prevText) ||
-              /^\s*!\[\[[^\[\]\n]+\]\]\s*$/.test(prevText);
+              /^\s*!\[\[[^\[\]\n]+\]\]\s*$/.test(prevText) ||
+              // скрытая строка метаданных (см. выше) не должна считаться
+              // "непустым" предыдущим абзацем — иначе самый первый видимый
+              // абзац заметки навсегда терял бы "красную строку"
+              (doc.lineAt(line.from - 1).from === 0 && META_LINE_EXACT_RE.test(prevText));
           }
           // соседняя строка документа (не обязательно видимая) — тоже
           // задача "- [ ]"/"- [x]"? см. taskSepTopDeco/taskSepBottomDeco
@@ -3113,6 +3375,9 @@ window.initMdEditorModule = function(deps){
   return {
     renderSettingsTabMdEditor: renderSettingsTabMdEditor,
     renderSettingsTabMdBookmarks: renderSettingsTabMdBookmarks,
+    // "Забытые заметки" (set2s_4, ТЗ пользователя от 04.09) — см.
+    // renderSettingsTabForgottenNotes выше
+    renderSettingsTabForgottenNotes: renderSettingsTabForgottenNotes,
     flushPendingMdEditorEdit: flushPendingMdEditorEdit,
     openNoteExternally: openNoteExternally,
     // вызывается извне (см. rerenderAllFromState в my.js) после того, как
