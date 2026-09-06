@@ -598,13 +598,26 @@ window.initMdEditorModule = function(deps){
       return dirHandle.entries ? walkEntries(dirHandle) : Promise.resolve();
     }
     async function walkEntries(dirHandle){
-      for await (var entry of dirHandle.entries()){
-        var name = entry[0], handle = entry[1];
-        if(handle.kind === "directory"){
-          await walkEntries(handle);
-        } else if(handle.kind === "file" && IMAGE_EXT_RE.test(name)){
-          newIndex.set(name.toLowerCase(), { handle: handle, name: name });
+      // Правка 06.09: ошибка чтения ОДНОЙ подпапки/файла (например, права
+      // пропали именно на неё, или временный сбой файловой системы)
+      // раньше роняла весь обход целиком — .catch() у всей цепочки внизу
+      // ловил это, и newIndex НИКОГДА не применялся (imageIndex оставался
+      // старым), из-за чего файлы, добавленные в папку после последнего
+      // ПОЛНОСТЬЮ успешного скана, навсегда оставались заглушкой, хотя
+      // реально лежали на диске. Теперь сбой одной подпапки просто
+      // пропускает её (с логом в Debug) и не мешает остальному дереву —
+      // всё, что реально прочиталось, попадает в индекс.
+      try{
+        for await (var entry of dirHandle.entries()){
+          var name = entry[0], handle = entry[1];
+          if(handle.kind === "directory"){
+            await walkEntries(handle);
+          } else if(handle.kind === "file" && IMAGE_EXT_RE.test(name)){
+            newIndex.set(name.toLowerCase(), { handle: handle, name: name });
+          }
         }
+      } catch(e){
+        if(window.Debug) window.Debug.log("buildImageIndex: подпапка \"" + (dirHandle && dirHandle.name) + "\" не прочиталась целиком: " + (e && e.message ? e.message : e));
       }
     }
     return walk(imagesDirHandle).then(function(){
@@ -3884,11 +3897,25 @@ window.initMdEditorModule = function(deps){
 
   function handleMouseDown(ev, view){
     if(ev.button !== 0 || ev.altKey || ev.ctrlKey || ev.metaKey) return false;
+    // Клик-переход по [[ссылкам]]/стихам работает только в режиме
+    // просмотра ("глаз", codeMode === false). В режиме кода текст
+    // редактируется как есть (видна и синтаксическая обвязка "[[",
+    // "![[" и т.п.) — переход по клику там мешает ставить курсор,
+    // поэтому в codeMode целиком отключён (ТЗ пользователя от 06.09).
+    if(codeMode) return false;
     var pos = view.posAtCoords({ x: ev.clientX, y: ev.clientY });
     if(pos == null) return false;
     var line = view.state.doc.lineAt(pos);
     var offset = pos - line.from;
-    var re = /\[\[([^\[\]\n]+)\]\]/g;
+    // (?<!!) — не совпадать с внутренней частью "![[имя]]" (встроенная
+    // картинка): без этого клик по картинке (виджет в режиме просмотра
+    // мапится курсором на "[[имя]]" внутри "![[имя]]") ошибочно попадал
+    // сюда как обычная ссылка на заметку и, если такой заметки не было,
+    // создавал пустой документ через handleLinkClick. Картинки кликом
+    // никогда не должны открывать/создавать заметку — ни в режиме кода,
+    // ни в режиме просмотра (в режиме кода сюда не доходит из-за
+    // возврата выше, а в режиме просмотра — благодаря этому лукбихайнду).
+    var re = /(?<!!)\[\[([^\[\]\n]+)\]\]/g;
     var m;
     while((m = re.exec(line.text))){
       var a = m.index, b = a + m[0].length;

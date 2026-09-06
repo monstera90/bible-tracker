@@ -42,7 +42,12 @@
     try {
       localStorage.setItem(DEBUG_MODE_KEY, value ? "1" : "0");
     } catch (e) {}
-    if (!value) hidePanel();
+    if (!value) {
+      hidePanel();
+      stopImageLineWatch();
+    } else {
+      startImageLineWatch();
+    }
   }
 
   // Видимая на экране панель логов — аналог window.onerror из index.html
@@ -162,4 +167,94 @@
     clear: clear,
     guardTaskListScroll: guardTaskListScroll
   };
+
+  // ---------------------------------------------------------------------
+  // ВРЕМЕННО (ТЗ пользователя от 06.09): непонятно, откуда берётся
+  // визуальный отступ сверху/снизу картинки в "Моём блокноте" (режим
+  // просмотра) — правка padding у .cm-md-image-line в components.css
+  // (8px → 4px → 2px) визуально ничего не поменяла, хотя по всем файлам
+  // проекта (components/modals/theme/base/footer.css, index.html)
+  // конкурирующего правила не найдено. Этот блок ничего не чинит и не
+  // подменяет — только замеряет, что браузер РЕАЛЬНО применил к строке с
+  // картинкой (computed style) и какая у неё РЕАЛЬНАЯ высота на экране
+  // (getBoundingClientRect), плюс то же самое для соседних строк — часто
+  // "отступ вокруг картинки" на глаз на самом деле оказывается отступом
+  // соседней текстовой строки. Само себя устанавливает через
+  // MutationObserver, без единой правки в my.js/mdeditor.js — включается/
+  // выключается той же галочкой "Включить режим отладки", что и остальной
+  // Debug.log() (см. setEnabled выше). Убрать вместе с остальным
+  // диагностическим кодом этой задачи, когда причина найдена.
+  // ---------------------------------------------------------------------
+  var imageLineObserver = null;
+
+  function inspectImageLine(el) {
+    if (!isEnabled()) return;
+    var cs = window.getComputedStyle(el);
+    var wrap = el.querySelector(".cm-md-image-wrap");
+    var img = el.querySelector(".cm-md-image, .cm-md-image-missing, .cm-md-image-loading");
+    var wrapCs = wrap ? window.getComputedStyle(wrap) : null;
+    var imgCs = img ? window.getComputedStyle(img) : null;
+    log("imgline class", el.className);
+    log("imgline padding t/b", cs.paddingTop + " / " + cs.paddingBottom);
+    log("imgline lineHeight/fontSize", cs.lineHeight + " / " + cs.fontSize);
+    if (wrapCs) log("wrap margin t/b + display", wrapCs.marginTop + "/" + wrapCs.marginBottom + " " + wrapCs.display);
+    if (imgCs) log("img margin+border t/b", (imgCs.marginTop + "+" + imgCs.borderTopWidth) + " / " + (imgCs.marginBottom + "+" + imgCs.borderBottomWidth));
+
+    var lineRect = el.getBoundingClientRect();
+    log("imgline rect", { top: Math.round(lineRect.top), bottom: Math.round(lineRect.bottom), height: Math.round(lineRect.height) });
+    log("imgline border t/b", cs.borderTopWidth + " / " + cs.borderBottomWidth);
+    log("imgline children count", el.children.length);
+    for (var ci = 0; ci < el.children.length; ci++) {
+      var child = el.children[ci];
+      var childRect = child.getBoundingClientRect();
+      var childCs = window.getComputedStyle(child);
+      log(
+        "child[" + ci + "] " + child.tagName + "." + child.className,
+        { top: Math.round(childRect.top), bottom: Math.round(childRect.bottom), height: Math.round(childRect.height), display: childCs.display, margin: childCs.marginTop + "/" + childCs.marginBottom }
+      );
+    }
+    log("imgline outerHTML", el.outerHTML.slice(0, 500));
+    if (wrap) {
+      var wrapRect = wrap.getBoundingClientRect();
+      log("wrap rect", { top: Math.round(wrapRect.top), bottom: Math.round(wrapRect.bottom), height: Math.round(wrapRect.height) });
+      log("gap line-top..wrap-top / wrap-bottom..line-bottom", Math.round(wrapRect.top - lineRect.top) + " / " + Math.round(lineRect.bottom - wrapRect.bottom));
+    }
+
+    var prev = el.previousElementSibling, next = el.nextElementSibling;
+    if (prev) {
+      var prevCs = window.getComputedStyle(prev);
+      var prevRect = prev.getBoundingClientRect();
+      log("prev line class/padding/rect.bottom", prev.className + " | " + prevCs.paddingTop + "/" + prevCs.paddingBottom + " | " + Math.round(prevRect.bottom));
+      log("gap prev.bottom..imgline.top", Math.round(lineRect.top - prevRect.bottom));
+    }
+    if (next) {
+      var nextCs = window.getComputedStyle(next);
+      var nextRect = next.getBoundingClientRect();
+      log("next line class/padding/rect.top", next.className + " | " + nextCs.paddingTop + "/" + nextCs.paddingBottom + " | " + Math.round(nextRect.top));
+      log("gap imgline.bottom..next.top", Math.round(nextRect.top - lineRect.bottom));
+    }
+  }
+
+  function startImageLineWatch() {
+    if (imageLineObserver) return;
+    imageLineObserver = new MutationObserver(function () {
+      if (!isEnabled()) return;
+      var lines = document.querySelectorAll(".cm-md-image-line");
+      for (var i = 0; i < lines.length; i++) {
+        var el = lines[i];
+        if (el._debugInspected) continue; // не спамить панель на каждый ререндер decorations
+        el._debugInspected = true;
+        inspectImageLine(el);
+      }
+    });
+    imageLineObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function stopImageLineWatch() {
+    if (!imageLineObserver) return;
+    imageLineObserver.disconnect();
+    imageLineObserver = null;
+  }
+
+  if (isEnabled()) startImageLineWatch();
 })();
