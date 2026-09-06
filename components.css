@@ -1959,19 +1959,33 @@
     align-items:center;
     justify-content:center;
     gap:8px;
-    aspect-ratio:16/9;
-    max-width:100%;
+    /* Правка 06.09 №4: назад к width:100% (как у обычной .cm-md-image-wrap/
+       .cm-md-image) — те же тонкие поля, что у остального текста заметки,
+       на любом экране, без подгонки под конкретный размер. Высота теперь
+       фиксированная в px, а не через aspect-ratio от ширины — при width:100%
+       на широком экране aspect-ratio дал бы либо слишком высокий (на
+       телефоне), либо слишком широкий (на планшете/десктопе) блок; простая
+       фиксированная высота одинаково скромного размера везде. */
+    width:100%;
+    height:120px;
     box-sizing:border-box;
     padding:8px 14px;
     background:transparent;
     border:1px solid var(--groove-shadow);
     border-radius:8px;
+    overflow:hidden;
   }
+  /* min-width:0 обязателен: без него flex-элемент по умолчанию не
+     сжимается меньше ширины своего содержимого (min-width:auto), и
+     white-space:nowrap + text-overflow:ellipsis ниже не срабатывают —
+     длинное имя файла раздвигает .cm-md-image-missing шире экрана
+     вместо того, чтобы обрезаться многоточием. */
   .cm-md-image-missing-caption{
+    min-width:0;
     font-family:"Palatino Linotype",Georgia,serif;
     font-size:.85em;
     font-style:italic;
-    color:var(--ink-soft);
+    color:var(--ink-soft, #6b5d4f);
     text-align:center;
     overflow:hidden;
     text-overflow:ellipsis;
@@ -1992,7 +2006,7 @@
     background:transparent;
     border:1px solid var(--groove-shadow);
     border-radius:6px;
-    color:var(--wood);
+    color:var(--wood, #6b5d4f);
     cursor:pointer;
     -webkit-tap-highlight-color:transparent;
   }

@@ -570,6 +570,14 @@ window.initMdEditorModule = function(deps){
         if(ok){
           return buildImageIndex().then(maybeRunImageCleanup);
         }
+        // ok=false: плейсхолдеры уже могли смонтироваться ДО того, как этот
+        // асинхронный запрос успел определить реальный imagesDirPermission
+        // (при первом рендере заметки imagesDirHandle ещё null, поэтому
+        // подпись плейсхолдера в этот момент — "папка не была подключена");
+        // без этого вызова она так и останется неверной ("не была
+        // подключена" вместо "нажмите, чтобы переподключить") до следующего
+        // ручного действия — правка 06.09.
+        refreshMountedImageNodes();
       });
     }).catch(function(){});
   }
@@ -603,6 +611,15 @@ window.initMdEditorModule = function(deps){
       imageIndex = newIndex;
       imageIndexBuilt = true;
       imageIndexBuilding = false;
+      // Сбрасываем только кэш НЕУДАЧНЫХ попыток (error:true) — успешные
+      // url-записи трогать не нужно, blob-URL всё ещё валиден. Без этого
+      // сброса loadImageInto (см. выше) навсегда отдаёт плейсхолдер для
+      // файла, который хоть раз не нашёлся в индексе, даже после
+      // успешного переподключения папки (правка 06.09, баг с "мёртвым"
+      // плейсхолдером после клика по скрепке внутри самого плейсхолдера).
+      imageUrlCache.forEach(function(v, k){
+        if(v && v.error) imageUrlCache.delete(k);
+      });
       refreshMountedImageNodes();
     }).catch(function(e){
       imageIndexBuilding = false;
@@ -617,20 +634,57 @@ window.initMdEditorModule = function(deps){
   // (см. .cm-md-image-missing* в components.css), без акцентного цвета
   // (это обычное ожидаемое состояние, не ошибка). Кнопка-скрепка —
   // та же иконка, что и у кнопки "прикрепить"/выбрать папку, запускает
-  // (пере)подключение папки тем же путём, что и обычная кнопка в списке
-  // заметок (см. reconnectImagesFolder). На уровне модуля (не внутри
+  // (пере)подключение папки — но своим отдельным путём, без системного
+  // диалога выбора папки, если её уже подключали раньше (см.
+  // reconnectPlaceholderImagesFolder ниже; кнопка в списке заметок
+  // использует другой путь, reconnectImagesFolder/pickNewImagesFolder). На
+  // уровне модуля (не внутри
   // makeLivePreviewExtension), т.к. вызывается и из ImageWidget (там), и
   // из refreshMountedImageNodes (здесь, вне CodeMirror-области видимости).
+  // Подпись внутри плейсхолдера объясняет ИМЕННО состояние подключения
+  // папки (общее для всех плейсхолдеров сразу, не про конкретный файл) —
+  // правка 06.09 по просьбе пользователя, раньше подпись всегда была
+  // именем файла. Три состояния:
+  // 1) imagesDirHandle нет вообще — папку ни разу не подключали;
+  // 2) handle есть, но imagesDirPermission не "granted" — папку уже
+  //    подключали раньше на этом устройстве, но браузер отозвал права
+  //    (например, после закрытия PWA свайпом);
+  // 3) handle есть и права granted — это НЕ про подключение, папка
+  //    работает, просто конкретно этого файла в ней не нашлось (старое
+  //    поведение: показываем имя файла).
+  // Правка 06.09 №3, по просьбе пользователя: раньше подпись показывала
+  // разный текст в зависимости из состояния (не подключена / нет прав /
+  // не найден конкретный файл, с именем файла последним пунктом) — на
+  // практике в тесном плейсхолдере подпись с длинным (иногда хэш-подобным)
+  // именем файла или длинным пояснением визуально не помещалась и просто
+  // не показывалась. Заменено на один короткий фиксированный текст —
+  // действие кнопки (переподключить/запросить права на папку) везде одно
+  // и то же, разбирать причину пользователю не обязательно.
+  function imagePlaceholderCaption(name){
+    return "Подключить изображения снова";
+  }
   function buildImagePlaceholder(wrapEl, name){
     wrapEl.className = "cm-md-image-wrap cm-md-image-missing";
+    var title = imagesDirHandle ? "Переподключить папку с изображениями" : "Подключить папку с изображениями";
     wrapEl.innerHTML =
       '<span class="cm-md-image-missing-caption"></span>' +
-      '<button type="button" class="cm-md-image-missing-btn" title="Подключить папку с изображениями">' + PAPERCLIP_ICON_SVG + '</button>';
-    wrapEl.querySelector(".cm-md-image-missing-caption").textContent = name;
+      '<button type="button" class="cm-md-image-missing-btn" title="' + title + '">' + PAPERCLIP_ICON_SVG + '</button>';
+    var captionEl = wrapEl.querySelector(".cm-md-image-missing-caption");
+    captionEl.textContent = imagePlaceholderCaption(name);
+    // Правка 06.09 №4: стиль подписи задан ЗДЕСЬ, напрямую через .style, а
+    // не только через класс .cm-md-image-missing-caption в CSS — подпись
+    // трижды подряд не показывалась на устройстве пользователя при том,
+    // что класс и цвет в CSS были на вид верными; раз причина не находится
+    // по коду, инлайн-стиль исключает саму возможность, что её перебивает
+    // какое-то не найденное правило каскада (специфичность инлайн-стиля
+    // выше любого класса).
+    captionEl.style.cssText = "min-width:0;font-family:'Palatino Linotype',Georgia,serif;" +
+      "font-size:13px;font-style:italic;color:#6b5d4f;text-align:center;" +
+      "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;";
     wrapEl.querySelector(".cm-md-image-missing-btn").addEventListener("click", function(ev){
       ev.preventDefault();
       ev.stopPropagation();
-      reconnectImagesFolder();
+      reconnectPlaceholderImagesFolder();
     });
   }
   // Подменяет содержимое wrapEl на настоящую картинку — общая точка и
@@ -810,13 +864,52 @@ window.initMdEditorModule = function(deps){
     return pickNewImagesFolder();
   }
 
-  // Точка входа для кнопки "Папка с изображениями" (renderListScreen) и
-  // для кнопки-скрепки на плейсхолдере отсутствующей картинки (раздел 9
-  // ТЗ) — те же места не ждут результата, поэтому промис просто
-  // игнорируется; см. ensureImagesReady выше для мест, которым результат
-  // нужен (insertImageAtCursor).
+  // Точка входа для кнопки "Папка с изображениями" (renderListScreen) —
+  // те же места не ждут результата, поэтому промис просто игнорируется;
+  // см. ensureImagesReady выше для мест, которым результат нужен
+  // (insertImageAtCursor).
   function reconnectImagesFolder(){
     ensureImagesReady();
+  }
+
+  // Отдельная точка входа СПЕЦИАЛЬНО для кнопки-скрепки на плейсхолдере
+  // отсутствующей картинки (правка 06.09, по просьбе пользователя) — в
+  // отличие от reconnectImagesFolder/ensureImagesReady, эта версия
+  // НИКОГДА сама не открывает системный диалог выбора папки
+  // (showDirectoryPicker), кроме единственного случая, когда handle вообще
+  // ни разу не сохранялся (папку никогда не подключали — тогда выбирать
+  // просто нечего, см. imagePlaceholderCaption выше). Если же handle уже
+  // есть, но браузер отозвал права (частый случай после закрытия PWA
+  // свайпом) — просто переспрашивает права на ТОТ ЖЕ handle
+  // (requestPermission), пользователю остаётся только подтвердить
+  // системный диалог браузера, без повторного указания папки на диске
+  // (это уже даёт кнопка "Папка с изображениями... (сменить)" в списке
+  // заметок, см. pickNewImagesFolder — здесь дублировать её поведение не
+  // нужно).
+  function reconnectPlaceholderImagesFolder(){
+    if(!imagesDirHandle || !imagesDirHandle.requestPermission){
+      pickNewImagesFolder();
+      return;
+    }
+    // requestPermission() зовём СРАЗУ, синхронно из обработчика клика, без
+    // предварительного queryPermission()/await — промежуточный await между
+    // кликом и requestPermission() в некоторых браузерах "гасит" активацию
+    // от жеста пользователя, и системный диалог подтверждения прав тогда
+    // тихо не появляется вовсе (правка 06.09: раньше здесь сначала звался
+    // verifyImagesPermission, который сам делает queryPermission → await →
+    // requestPermission — именно этот лишний await и терял активацию).
+    // Папку заново выбирать не нужно — handle уже сохранён, спрашиваем
+    // права на него же.
+    imagesDirHandle.requestPermission(IMAGES_PERMISSION_OPTS).then(function(state){
+      imagesDirPermission = (state === "granted") ? "granted" : "prompt";
+      renderImagesFolderControls();
+      if(state === "granted") return buildImageIndex().then(maybeRunImageCleanup);
+      refreshMountedImageNodes(); // обновить подписи плейсхолдеров даже без успеха
+    }).catch(function(){
+      imagesDirPermission = "prompt";
+      renderImagesFolderControls();
+      refreshMountedImageNodes();
+    });
   }
 
   // Перерисовывает ТОЛЬКО кнопку/статус папки с изображениями в текущем
