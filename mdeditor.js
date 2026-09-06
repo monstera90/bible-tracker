@@ -942,9 +942,23 @@ window.initMdEditorModule = function(deps){
   // посчитать не из чего, и можно случайно удалить то, что используется в
   // заметках, ещё не подтянутых из офлайн-кэша/облака) — вызывается после
   // buildImageIndex() и после готовности notesMap (см. initNotesModule).
+  //
+  // ВАЖНО: buildImageIndex() перед этим уже успел синхронно запустить
+  // refreshMountedImageNodes(), а значит для только что показанных
+  // картинок в imageLoadPromises (см. loadImageInto) прямо сейчас могут
+  // висеть незавершённые getFile()-чтения. Если сразу после этого
+  // cleanupOrphanedImages() начнёт удалять другие файлы В ТОЙ ЖЕ папке —
+  // конкурентное чтение+удаление внутри одной директории на некоторых
+  // файловых системах (особенно облачно-синхронизируемых) подвисает
+  // навсегда, и картинка так и остаётся в состоянии "загрузка". Поэтому
+  // ждём завершения ВСЕХ уже запущенных чтений и только потом запускаем
+  // корзину — чтение и удаление в одной папке больше никогда не идут
+  // одновременно.
   function maybeRunImageCleanup(){
     if(imagesDirHandle && imagesDirPermission === "granted" && notesReady && imageIndexBuilt){
-      cleanupOrphanedImages();
+      Promise.all(Array.from(imageLoadPromises.values())).then(function(){
+        cleanupOrphanedImages();
+      });
     }
   }
 
