@@ -419,6 +419,13 @@ window.initMdEditorModule = function(deps){
   // ---------------------------------------------------------------------
   var initStarted = false;
   var notesReady = false;        // true после первой загрузки локального кэша заметок
+  // Кэш грузится сразу при старте модуля (см. preloadNotesCache/вызов внизу
+  // файла), а не лениво по первому открытию вкладки, как было раньше —
+  // иначе "Мой блокнот" был единственным местом в приложении, где список
+  // на экране не появлялся мгновенно (задачи всегда доступны сразу, т.к.
+  // их state читается синхронно из localStorage при загрузке страницы;
+  // у заметок IndexedDB асинхронна по своей природе, но раз она стартует
+  // заранее, к моменту реального открытия вкладки уже готова).
   var notesMap = new Map();
   var rootTree = null;           // {name, path, folders:[...], files:[{name,id}], parent}
   var currentDirNode = null;     // текущая открытая "папка" в списке
@@ -600,6 +607,101 @@ window.initMdEditorModule = function(deps){
     }).catch(function(e){
       imageIndexBuilding = false;
       setStatus("Не удалось прочитать папку с изображениями: " + (e && e.message ? e.message : e), true);
+    });
+  }
+
+  // Собирает разметку плейсхолдера прямо внутри wrapEl (переиспользуем
+  // тот же <span>, а не пересоздаём его — иначе он выпал бы из
+  // imageNodesByName). Форма/цвет — раздел 9 ТЗ: прямоугольник 16:9,
+  // скруглённые углы, прозрачный фон, тонкая рамка в тон обычной
+  // (см. .cm-md-image-missing* в components.css), без акцентного цвета
+  // (это обычное ожидаемое состояние, не ошибка). Кнопка-скрепка —
+  // та же иконка, что и у кнопки "прикрепить"/выбрать папку, запускает
+  // (пере)подключение папки тем же путём, что и обычная кнопка в списке
+  // заметок (см. reconnectImagesFolder). На уровне модуля (не внутри
+  // makeLivePreviewExtension), т.к. вызывается и из ImageWidget (там), и
+  // из refreshMountedImageNodes (здесь, вне CodeMirror-области видимости).
+  function buildImagePlaceholder(wrapEl, name){
+    wrapEl.className = "cm-md-image-wrap cm-md-image-missing";
+    wrapEl.innerHTML =
+      '<span class="cm-md-image-missing-caption"></span>' +
+      '<button type="button" class="cm-md-image-missing-btn" title="Подключить папку с изображениями">' + PAPERCLIP_ICON_SVG + '</button>';
+    wrapEl.querySelector(".cm-md-image-missing-caption").textContent = name;
+    wrapEl.querySelector(".cm-md-image-missing-btn").addEventListener("click", function(ev){
+      ev.preventDefault();
+      ev.stopPropagation();
+      reconnectImagesFolder();
+    });
+  }
+  // Подменяет содержимое wrapEl на настоящую картинку — общая точка и
+  // для первого показа, и для "починки" плейсхолдера на месте (см.
+  // refreshMountedImageNodes ниже).
+  function setWrapToImage(wrapEl, url, name){
+    wrapEl.className = "cm-md-image-wrap";
+    wrapEl.innerHTML = "";
+    var img = document.createElement("img");
+    img.className = "cm-md-image";
+    img.alt = name;
+    // Реальный размер (а значит и решение float/block) известен только
+    // после загрузки. requestAnimationFrame — чтобы clientWidth строки
+    // успел посчитаться после того, как узел реально встал в DOM.
+    img.addEventListener("load", function(){
+      requestAnimationFrame(function(){ applyImageFloatLayout(wrapEl); });
+    });
+    img.src = url;
+    wrapEl.appendChild(img);
+    if(wrapEl.mdImageEntry) wrapEl.mdImageEntry.loaded = true;
+  }
+  // Множество имён, для которых сейчас уже идёт чтение файла (getFile()) —
+  // ключ и здесь, и в imageUrlCache/imageIndex один и тот же
+  // (имя_в_нижнем_регистре). Нужно, чтобы НЕ запускать второе параллельное
+  // чтение того же файла, если loadImageInto вызвали на него ещё раз, пока
+  // первое чтение не завершилось (например, из-за повторного
+  // refreshMountedImageNodes — см. cleanupOrphanedImages ниже: если бы оба
+  // чтения пошли параллельно с разными handle на один файл, конкурентный
+  // обход директории мог подвесить оба навсегда, оставляя wrap в
+  // состоянии "loading" без кнопки и без картинки).
+  var imageLoadPromises = new Map();
+  function loadImageInto(name, wrapEl){
+    var key = name.toLowerCase();
+    var cached = imageUrlCache.get(key);
+    if(cached){
+      if(cached.url) setWrapToImage(wrapEl, cached.url, name);
+      else {
+        buildImagePlaceholder(wrapEl, name);
+        if(wrapEl.mdImageEntry) wrapEl.mdImageEntry.loaded = false;
+      }
+      return;
+    }
+    var found = imageIndex && imageIndex.get(key);
+    if(!found){
+      imageUrlCache.set(key, { error: true });
+      buildImagePlaceholder(wrapEl, name);
+      if(wrapEl.mdImageEntry) wrapEl.mdImageEntry.loaded = false;
+      return;
+    }
+    wrapEl.className = "cm-md-image-wrap cm-md-image-loading";
+    wrapEl.innerHTML = "";
+    var pending = imageLoadPromises.get(key);
+    if(!pending){
+      pending = found.handle.getFile().then(function(f){
+        var result = { url: URL.createObjectURL(f) };
+        imageUrlCache.set(key, result);
+        return result;
+      }).catch(function(){
+        var result = { error: true };
+        imageUrlCache.set(key, result);
+        return result;
+      });
+      pending.then(function(){ imageLoadPromises.delete(key); });
+      imageLoadPromises.set(key, pending);
+    }
+    pending.then(function(result){
+      if(result.url) setWrapToImage(wrapEl, result.url, name);
+      else {
+        buildImagePlaceholder(wrapEl, name);
+        if(wrapEl.mdImageEntry) wrapEl.mdImageEntry.loaded = false;
+      }
     });
   }
 
@@ -809,6 +911,7 @@ window.initMdEditorModule = function(deps){
     if(imageCleanupInFlight) return Promise.resolve();
     imageCleanupInFlight = true;
     var referenced = collectReferencedMediaNames();
+    var deletedAny = false;
     async function walkAndClean(dirHandle){
       for await (var entry of dirHandle.entries()){
         var name = entry[0], handle = entry[1];
@@ -816,16 +919,21 @@ window.initMdEditorModule = function(deps){
           await walkAndClean(handle);
         } else if(handle.kind === "file" && IMAGE_EXT_RE.test(name)){
           if(!referenced.has(name.toLowerCase())){
-            try{ await dirHandle.removeEntry(name); }catch(e){ /* права/гонка — пропускаем молча */ }
+            try{ await dirHandle.removeEntry(name); deletedAny = true; }catch(e){ /* права/гонка — пропускаем молча */ }
           }
         }
       }
     }
     return walkAndClean(imagesDirHandle).then(function(){
       imageCleanupInFlight = false;
-      // сироты могли включать файлы, уже попавшие в imageIndex — пересканируем,
-      // чтобы индекс не указывал на удалённые handle
-      return buildImageIndex();
+      // Пересканируем индекс, только если что-то реально удалили — если
+      // сирот не было, индекс и так уже актуален (его только что построил
+      // buildImageIndex перед вызовом корзины), а лишний повторный обход
+      // папки только заново дёргал бы refreshMountedImageNodes() ещё раз
+      // поверх уже загружающихся картинок (см. imageLoadPromises выше —
+      // само по себе это теперь безопасно, но обход папки всё равно не
+      // нужен, если удалять было нечего).
+      if(deletedAny) return buildImageIndex();
     }).catch(function(){ imageCleanupInFlight = false; });
   }
 
@@ -1121,6 +1229,23 @@ window.initMdEditorModule = function(deps){
         if(!rec.deleted && rec.name) nameIndex.set(rec.name.toLowerCase(), id);
       });
     }).catch(function(){});
+  }
+
+  // Единая точка предзагрузки: вызывается один раз при старте модуля (см.
+  // низ файла), а также из initNotesModule на случай, если синхронизация
+  // была настроена уже ПОСЛЕ старта модуля (тогда getSyncId() при первом
+  // вызове внизу файла ещё возвращал null, и предзагрузка не запускалась).
+  // notesCachePreloadPromise защищает от повторной загрузки — второй и
+  // последующие вызовы просто возвращают тот же промис.
+  var notesCachePreloadPromise = null;
+  function preloadNotesCache(){
+    if(notesCachePreloadPromise) return notesCachePreloadPromise;
+    notesCachePreloadPromise = loadNotesCache().then(function(){
+      rebuildTree();
+      notesReady = true;
+      maybeRunImageCleanup(); // папка картинок могла быть готова раньше notesMap
+    });
+    return notesCachePreloadPromise;
   }
 
   // ---- дерево папок из notesMap.path (раздел 2 ТЗ: "папка" — это просто
@@ -1677,11 +1802,8 @@ window.initMdEditorModule = function(deps){
       render();
       return;
     }
-    loadNotesCache().then(function(){
-      rebuildTree();
-      notesReady = true;
+    preloadNotesCache().then(function(){
       resumeLastNoteOrShowList();
-      maybeRunImageCleanup(); // папка картинок могла быть готова раньше notesMap (см. loadStoredImagesDirHandle)
       syncNotesOnTabEnter();
     });
   }
@@ -3215,76 +3337,13 @@ window.initMdEditorModule = function(deps){
       if(!w){ w = new ImageWidget(name); imageWidgetCache.set(name, w); }
       return w;
     }
-    // Собирает разметку плейсхолдера прямо внутри wrapEl (переиспользуем
-    // тот же <span>, а не пересоздаём его — иначе он выпал бы из
-    // imageNodesByName). Форма/цвет — раздел 9 ТЗ: прямоугольник 16:9,
-    // скруглённые углы, прозрачный фон, тонкая рамка в тон обычной
-    // (см. .cm-md-image-missing* в components.css), без акцентного цвета
-    // (это обычное ожидаемое состояние, не ошибка). Кнопка-скрепка —
-    // та же иконка, что и у кнопки "прикрепить"/выбрать папку, запускает
-    // (пере)подключение папки тем же путём, что и обычная кнопка в списке
-    // заметок (см. reconnectImagesFolder).
-    function buildImagePlaceholder(wrapEl, name){
-      wrapEl.className = "cm-md-image-wrap cm-md-image-missing";
-      wrapEl.innerHTML =
-        '<span class="cm-md-image-missing-caption"></span>' +
-        '<button type="button" class="cm-md-image-missing-btn" title="Подключить папку с изображениями">' + PAPERCLIP_ICON_SVG + '</button>';
-      wrapEl.querySelector(".cm-md-image-missing-caption").textContent = name;
-      wrapEl.querySelector(".cm-md-image-missing-btn").addEventListener("click", function(ev){
-        ev.preventDefault();
-        ev.stopPropagation();
-        reconnectImagesFolder();
-      });
-    }
-    // Подменяет содержимое wrapEl на настоящую картинку — общая точка и
-    // для первого показа, и для "починки" плейсхолдера на месте (см.
-    // refreshMountedImageNodes).
-    function setWrapToImage(wrapEl, url, name){
-      wrapEl.className = "cm-md-image-wrap";
-      wrapEl.innerHTML = "";
-      var img = document.createElement("img");
-      img.className = "cm-md-image";
-      img.alt = name;
-      // Реальный размер (а значит и решение float/block) известен только
-      // после загрузки. requestAnimationFrame — чтобы clientWidth строки
-      // успел посчитаться после того, как узел реально встал в DOM.
-      img.addEventListener("load", function(){
-        requestAnimationFrame(function(){ applyImageFloatLayout(wrapEl); });
-      });
-      img.src = url;
-      wrapEl.appendChild(img);
-      if(wrapEl.mdImageEntry) wrapEl.mdImageEntry.loaded = true;
-    }
-    function loadImageInto(name, wrapEl){
-      var key = name.toLowerCase();
-      var cached = imageUrlCache.get(key);
-      if(cached){
-        if(cached.url) setWrapToImage(wrapEl, cached.url, name);
-        else {
-          buildImagePlaceholder(wrapEl, name);
-          if(wrapEl.mdImageEntry) wrapEl.mdImageEntry.loaded = false;
-        }
-        return;
-      }
-      var found = imageIndex && imageIndex.get(key);
-      if(!found){
-        imageUrlCache.set(key, { error: true });
-        buildImagePlaceholder(wrapEl, name);
-        if(wrapEl.mdImageEntry) wrapEl.mdImageEntry.loaded = false;
-        return;
-      }
-      wrapEl.className = "cm-md-image-wrap cm-md-image-loading";
-      wrapEl.innerHTML = "";
-      found.handle.getFile().then(function(f){
-        var url = URL.createObjectURL(f);
-        imageUrlCache.set(key, { url: url });
-        setWrapToImage(wrapEl, url, name);
-      }).catch(function(){
-        imageUrlCache.set(key, { error: true });
-        buildImagePlaceholder(wrapEl, name);
-        if(wrapEl.mdImageEntry) wrapEl.mdImageEntry.loaded = false;
-      });
-    }
+    // buildImagePlaceholder/setWrapToImage/loadImageInto вынесены на
+    // уровень модуля (см. выше, рядом с registerImageNode) — они не
+    // используют ничего из CodeMirror и должны быть видны также из
+    // refreshMountedImageNodes, который живёт на уровне модуля, а не
+    // внутри makeLivePreviewExtension (исправление бага "loadImageInto is
+    // not defined": функции звались оттуда, но были объявлены только
+    // здесь, во вложенной области видимости).
 
     // ---- заголовок вставленной ссылки (YouTube/публикации/домен, см.
     // autoLinkTitle в my.js, передан сюда как deps.autoLinkTitle) — по
@@ -3875,6 +3934,17 @@ window.initMdEditorModule = function(deps){
   // модуля, независимо от того, открыта ли вкладка "Мой блокнот" прямо
   // сейчас (см. loadStoredImagesDirHandle выше).
   loadStoredImagesDirHandle();
+
+  // Кэш заметок (см. preloadNotesCache выше) — тоже сразу при запуске
+  // модуля, тем же приёмом: тогда к моменту, когда пользователь реально
+  // откроет вкладку "Мой блокнот" (или "Закладки"/"Забытые заметки"),
+  // notesMap уже готов и рендер списка мгновенный — офлайн из локального
+  // кэша, онлайн так же мгновенно из него же, а сверка с облаком идёт уже
+  // потом, в фоне (см. syncNotesOnTabEnter). Без syncId (синхронизация не
+  // настроена) не запускаем — тогда нечем расшифровывать, и initNotesModule
+  // сам вызовет preloadNotesCache() позже, когда/если синхронизацию
+  // настроят.
+  if(getSyncId()) preloadNotesCache();
 
   return {
     renderSettingsTabMdEditor: renderSettingsTabMdEditor,
