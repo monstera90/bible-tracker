@@ -1914,9 +1914,9 @@
      ".mdeditor-editor-host .cm-line{ padding:0; }" выше (тот же самый
      приём и та же причина, что и у .cm-md-quote, см. комментарий там):
      реальная строка в DOM получает оба класса разом ("cm-line
-     cm-md-image-line"), и без явного .cm-line здесь padding:2px 0 просто
+     cm-md-image-line"), и без явного .cm-line здесь padding:8px 0 просто
      не применялся — обнулялся более специфичным правилом. */
-  .mdeditor-editor-host .cm-line.cm-md-image-line{ line-height:0; padding:2px 0; }
+  .mdeditor-editor-host .cm-line.cm-md-image-line{ line-height:0; padding:8px 0; }
   /* CodeMirror сам добавляет по невидимому <img class="cm-widgetBuffer">
      непосредственно перед и после атомарного replace-виджета (нашей
      картинки) — это его внутренний механизм, чтобы курсор можно было
@@ -1926,10 +1926,14 @@
      "битую картинку" дефолтного размера (~18px КАЖДЫЙ, т.е. ~36px
      суммарно) — это и была реальная причина большого отступа сверху/
      снизу картинки, а вовсе не padding у .cm-md-image-line выше (найдено
-     через диагностику в debug.js, ТЗ пользователя от 06.09; см. также
-     TASK_MDNOTES_CLOUD.md). width/height:0 схлопывают буфер визуально,
-     не убирая его из DOM — позиционирование курсора CodeMirror продолжает
-     работать, т.к. зависит от самого узла, а не от его размера. */
+     через диагностику в debug.js, ТЗ пользователя от 06.09). width/
+     height:0 схлопывают буфер визуально, не убирая его из DOM —
+     позиционирование курсора CodeMirror продолжает работать, т.к.
+     зависит от самого узла, а не от его размера. Селектор нарочно
+     ограничен ИМЕННО .cm-md-image-line — у cm-widgetBuffer рядом с
+     другими виджетами (например LinkWidget в обычном тексте) это
+     обнуление не нужно и может помешать курсору внутри текста, поэтому
+     здесь его трогать нельзя. */
   .mdeditor-editor-host .cm-line.cm-md-image-line .cm-widgetBuffer{
     display:inline-block;
     width:0;
@@ -1971,6 +1975,7 @@
     height:auto;
     border-radius:8px;
     border:1px solid var(--groove-shadow);
+    cursor:zoom-in;
   }
   .cm-md-image-loading{
     display:block;
@@ -2048,6 +2053,35 @@
   @media (hover:hover) and (pointer:fine){
     .cm-md-image-missing-btn:hover{ background:var(--parchment-dark); }
   }
+  /* ---------- полноэкранный просмотр вставленной в заметку картинки
+     (клик по .cm-md-image выше, см. openImageViewer/setWrapToImage в
+     mdeditor.js) — отдельный оверлей прямо в document.body (не внутри
+     .settings-modal-box), поэтому z-index выше модалок настроек
+     (.settings-modal-overlay/.modal-overlay — 1000/1001, см. modals.css).
+     Масштаб/перетаскивание задаются через transform в JS (translate+scale),
+     здесь только базовый вид и курсоры. ---------- */
+  .mdeditor-imgview-overlay{
+    position:fixed;
+    inset:0;
+    z-index:2000;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+    background:rgba(10,7,4,.92);
+    cursor:zoom-out;
+    touch-action:none;
+  }
+  .mdeditor-imgview-img{
+    max-width:100%;
+    max-height:100%;
+    border-radius:0;
+    cursor:grab;
+    user-select:none;
+    -webkit-user-drag:none;
+    touch-action:none;
+  }
+  .mdeditor-imgview-img.mdeditor-imgview-dragging{ cursor:grabbing; }
   /* ---------- задача Obsidian-формата "- [ ] текст" / "- [x] текст" в
      "Моём блокноте", режим "без кода" (см. TASK_LINE_RE/decorateLine/
      TaskActionsWidget в mdeditor.js) — оформлена и работает как строка

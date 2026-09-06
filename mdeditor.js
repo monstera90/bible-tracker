@@ -716,6 +716,15 @@ window.initMdEditorModule = function(deps){
       requestAnimationFrame(function(){ applyImageFloatLayout(wrapEl); });
     });
     img.src = url;
+    // Клик по картинке в заметке — полноэкранный просмотр с зумом (см.
+    // openImageViewer ниже). stopPropagation, чтобы клик не долетал до
+    // общего обработчика редактора (handleMouseDown) — тот и так
+    // игнорирует этот виджет (ignoreEvent у ImageWidget), но на всякий
+    // случай, раз здесь вешаем свой независимый слушатель.
+    img.addEventListener("click", function(ev){
+      ev.stopPropagation();
+      openImageViewer(url, name);
+    });
     wrapEl.appendChild(img);
     if(wrapEl.mdImageEntry) wrapEl.mdImageEntry.loaded = true;
   }
@@ -785,6 +794,149 @@ window.initMdEditorModule = function(deps){
         loadImageInto(entry.name, entry.wrap);
       });
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // Полноэкранный просмотр вставленной в заметку картинки (клик по
+  // .cm-md-image, см. setWrapToImage выше). Масштаб — колёсиком мыши или
+  // сведением/разведением пальцев, перетаскивание — мышью или пальцем
+  // (единый код через Pointer Events: и мышь, и палец приходят одним и
+  // тем же набором событий, второй одновременный указатель — это щипок).
+  // Выход — клик мимо картинки (по фону) или кнопка/жест "Назад" на
+  // Android; клик по самой картинке просмотр не закрывает.
+  //
+  // "Назад" регистрируется в ОБЩЕМ стеке навигации приложения через
+  // window.AppNav.push (см. pushMdNav выше и window.AppNav в my.js) — тем
+  // же приёмом, что и открытие самой заметки (openNoteById). Раньше здесь
+  // был отдельный самодельный history.pushState/popstate — из-за этого
+  // ОДНО нажатие "назад" срабатывало сразу в двух местах: и в своём
+  // слушателе (закрывал просмотр), и в общем слушателе my.js (снимал со
+  // стека и откатывал шаг "открыть заметку"), так что "назад" закрывало
+  // просмотр И одновременно уводило в список заметок за одно нажатие.
+  // Через AppNav такого нет: это одна запись в ОДНОМ общем стеке, "назад"
+  // снимает только её.
+  //
+  // Клик мимо картинки закрывает оверлей напрямую, не трогая историю —
+  // как и у остальных "отмен по клику" в этом файле (см. finish(false) в
+  // startRename): оставшаяся запись в стеке потом съест один лишующий
+  // назад, который ничего не покажет — тот же принятый в этом файле
+  // компромисс, что и у отмены переименования, а не баг именно здесь.
+  // ---------------------------------------------------------------------
+  var imgViewerState = null; // не null, пока оверлей открыт
+  function closeImageViewer(){
+    var st = imgViewerState;
+    if(!st) return;
+    imgViewerState = null;
+    if(st.overlay.parentNode) st.overlay.parentNode.removeChild(st.overlay);
+  }
+  function openImageViewer(url, name){
+    if(imgViewerState) closeImageViewer();
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-imgview-overlay";
+    var img = document.createElement("img");
+    img.className = "mdeditor-imgview-img";
+    img.alt = name || "";
+    overlay.appendChild(img);
+    document.body.appendChild(overlay);
+
+    var scale = 1, tx = 0, ty = 0, fitW = 0, fitH = 0;
+    function applyTransform(){
+      img.style.transform = "translate(" + tx + "px," + ty + "px) scale(" + scale + ")";
+    }
+    // Размер картинки "по размеру экрана" (до зума) — нужен для того,
+    // чтобы ограничивать перетаскивание (clamp ниже), меряем без
+    // текущего transform, иначе зум/сдвиг исказили бы измерение.
+    function measureFit(){
+      var prevTransform = img.style.transform;
+      img.style.transform = "none";
+      var r = img.getBoundingClientRect();
+      fitW = r.width; fitH = r.height;
+      img.style.transform = prevTransform;
+    }
+    function clamp(){
+      var vw = window.innerWidth, vh = window.innerHeight;
+      var maxX = Math.max(0, (fitW * scale - vw) / 2);
+      var maxY = Math.max(0, (fitH * scale - vh) / 2);
+      tx = Math.max(-maxX, Math.min(maxX, tx));
+      ty = Math.max(-maxY, Math.min(maxY, ty));
+    }
+    // Держит одну и ту же точку картинки под курсором/пальцами при смене
+    // масштаба (иначе зум "уезжал" бы от того места, куда смотрит
+    // пользователь) — prevX/prevY и newX/newY совпадают для колёсика
+    // мыши (курсор не двигается), но различаются при щипке (двигаются
+    // оба пальца, и середина между ними вместе с ними).
+    function zoomAt(prevX, prevY, newX, newY, factor){
+      var cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+      var ix = (prevX - cx - tx) / scale, iy = (prevY - cy - ty) / scale;
+      scale = Math.max(1, Math.min(8, scale * factor));
+      tx = (newX - cx) - ix * scale;
+      ty = (newY - cy) - iy * scale;
+      if(scale <= 1){ scale = 1; tx = 0; ty = 0; }
+      clamp();
+      applyTransform();
+    }
+    img.addEventListener("load", measureFit);
+    img.src = url;
+    if(img.complete) measureFit();
+
+    img.addEventListener("wheel", function(ev){
+      ev.preventDefault();
+      var factor = Math.exp(-ev.deltaY * 0.0015);
+      zoomAt(ev.clientX, ev.clientY, ev.clientX, ev.clientY, factor);
+    }, { passive: false });
+
+    var activePointers = new Map(); // pointerId -> {x,y}, 1 = перетаскивание, 2 = щипок
+    var pinchPrevDist = 0, pinchPrevMid = null;
+    function midOf(a, b){ return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+    function distOf(a, b){ return Math.hypot(a.x - b.x, a.y - b.y); }
+    img.addEventListener("pointerdown", function(ev){
+      ev.stopPropagation();
+      img.setPointerCapture(ev.pointerId);
+      activePointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      if(activePointers.size === 2){
+        var pts = Array.from(activePointers.values());
+        pinchPrevDist = distOf(pts[0], pts[1]);
+        pinchPrevMid = midOf(pts[0], pts[1]);
+      }
+      img.classList.add("mdeditor-imgview-dragging");
+    });
+    img.addEventListener("pointermove", function(ev){
+      if(!activePointers.has(ev.pointerId)) return;
+      var prev = activePointers.get(ev.pointerId);
+      activePointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      if(activePointers.size === 1){
+        tx += ev.clientX - prev.x;
+        ty += ev.clientY - prev.y;
+        clamp();
+        applyTransform();
+      } else if(activePointers.size === 2){
+        var pts = Array.from(activePointers.values());
+        var newDist = distOf(pts[0], pts[1]);
+        var newMid = midOf(pts[0], pts[1]);
+        if(pinchPrevDist > 0 && pinchPrevMid){
+          zoomAt(pinchPrevMid.x, pinchPrevMid.y, newMid.x, newMid.y, newDist / pinchPrevDist);
+        }
+        pinchPrevDist = newDist;
+        pinchPrevMid = newMid;
+      }
+    });
+    function endPointer(ev){
+      activePointers.delete(ev.pointerId);
+      if(activePointers.size < 2){ pinchPrevDist = 0; pinchPrevMid = null; }
+      if(activePointers.size === 0) img.classList.remove("mdeditor-imgview-dragging");
+    }
+    img.addEventListener("pointerup", endPointer);
+    img.addEventListener("pointercancel", endPointer);
+
+    // Клик по самой картинке просмотр не закрывает (иначе им нельзя было
+    // бы пользоваться) — закрытие только по клику вне картинки, на фон.
+    img.addEventListener("click", function(ev){ ev.stopPropagation(); });
+    overlay.addEventListener("click", function(){ closeImageViewer(); });
+
+    if(window.AppNav && typeof window.AppNav.push === "function"){
+      window.AppNav.push(closeImageViewer);
+    }
+    imgViewerState = { overlay: overlay };
   }
 
   // Разовое предупреждение (раздел 8 ТЗ) — тот же приём карточки поверх
