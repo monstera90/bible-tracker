@@ -727,9 +727,8 @@ window.initMdEditorModule = function(deps){
     return "Указать папку с локальными изображениями";
   }
 
-  // Подбирает свободное имя файла картинки вида "имя (2).ext", "имя (3).ext"
-  // — тем же приёмом, что и suggestFreeName() для имён заметок выше, но с
-  // сохранением расширения.
+  // Подбирает свободное имя файла картинки вида "имя (2).ext", "имя (3).ext",
+  // с сохранением расширения.
   function suggestFreeImageName(name){
     var extM = /^(.*)(\.[^.]+)$/.exec(name);
     var base = extM ? extM[1] : name, ext = extM ? extM[2] : "";
@@ -1324,103 +1323,42 @@ window.initMdEditorModule = function(deps){
     return rec;
   }
 
-  // Подбирает свободное имя вида "имя (2)", "имя (3)", ... — используется,
-  // когда пользователь выбирает "Переименовать" при конфликте имени во
-  // время импорта (раздел 5 ТЗ) вместо ввода имени вручную с нуля.
-  function suggestFreeName(name){
-    var m = /^(.*) \((\d+)\)$/.exec(name);
-    var base = m ? m[1] : name;
-    var n = m ? Number(m[2]) + 1 : 2;
-    var candidate;
-    do{
-      candidate = base + " (" + n + ")";
-      n++;
-    } while(isNoteNameTaken(candidate));
-    return candidate;
-  }
-
   // ---------------------------------------------------------------------
-  // Диалог конфликта имени при импорте (раздел 5 ТЗ: "спросить
-  // пользователя, что делать" — явно запрещены молчаливая перезапись и
-  // молчаливое переименование). Тот же приём карточки поверх окна
-  // настроек, что и у openNewNoteDialog/confirmDeleteNote выше
-  // (.mdeditor-cleanup-overlay/-card). При импорте .zip с несколькими
-  // конфликтами показывается по одному, если не отмечена галочка
-  // "применить ко всем следующим" — тогда выбранное действие применяется
-  // без дальнейших вопросов к оставшимся конфликтам этого же импорта.
-  // Возвращает Promise<{action:"replace"|"rename"|"skip", newName, applyToAll}>.
+  // Подтверждение перезаписи при импорте (раздел 5 ТЗ пересмотрен
+  // пользователем 06.09: вместо диалога "что делать с ЭТОЙ заметкой" по
+  // каждому конфликту — импорт всегда заменяет заметки, совпавшие по
+  // имени, текстом из файла/архива. Если совпадений вообще нет — импорт
+  // идёт молча, без единого диалога. Если хотя бы одно совпадение есть —
+  // одно общее предупреждение на весь импорт, до того как что-либо
+  // изменится: пользователь либо подтверждает замену всех совпавших
+  // разом, либо отменяет весь импорт целиком (частичной отмены нет).
+  // Тот же приём карточки поверх окна настроек, что и у
+  // openNewNoteDialog/confirmDeleteNote выше (.mdeditor-cleanup-overlay/
+  // -card). Возвращает Promise<boolean> (true — подтверждено).
   // ---------------------------------------------------------------------
-  function resolveNameConflict(name, remainingCount){
+  function showOverwriteConfirmDialog(count){
     return new Promise(function(resolve){
       var box = document.querySelector(".settings-modal-box");
-      if(!box){ resolve({ action: "skip", applyToAll: false }); return; }
+      if(!box){ resolve(false); return; }
       var overlay = document.createElement("div");
       overlay.className = "mdeditor-cleanup-overlay";
       var card = document.createElement("div");
       card.className = "mdeditor-cleanup-card";
       card.innerHTML =
         '<div class="mdeditor-cleanup-title"></div>' +
-        '<div class="mdeditor-cleanup-actions mdeditor-cleanup-actions-wrap" id="mdEditorConflictActions">' +
-          '<button type="button" class="mdeditor-cleanup-cancel" id="mdEditorConflictSkip">Пропустить</button>' +
-          '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="mdEditorConflictRename">Переименовать</button>' +
-          '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-danger" id="mdEditorConflictReplace">Заменить</button>' +
-        '</div>' +
-        (remainingCount > 1 ?
-          '<label class="mdeditor-cleanup-checkbox-row">' +
-            '<input type="checkbox" id="mdEditorConflictApplyAll">' +
-            '<span>Применить ко всем следующим конфликтам (' + remainingCount + ')</span>' +
-          '</label>' : '');
-      card.querySelector(".mdeditor-cleanup-title").textContent = 'Заметка «' + name + '» уже существует.';
+        '<div class="mdeditor-cleanup-actions">' +
+          '<button type="button" class="mdeditor-cleanup-cancel" id="mdEditorOverwriteCancel">Отмена</button>' +
+          '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-danger" id="mdEditorOverwriteOk">Заменить</button>' +
+        '</div>';
+      card.querySelector(".mdeditor-cleanup-title").textContent = count === 1
+        ? 'Заметка с таким именем уже есть в блокноте — она будет заменена версией из файла. Продолжить?'
+        : 'Заметок с такими же именами уже ' + count + ' — они будут заменены версиями из файла/архива. Продолжить?';
       overlay.appendChild(card);
       box.appendChild(overlay);
-
       function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
-      function applyAll(){
-        var cb = document.getElementById("mdEditorConflictApplyAll");
-        return !!(cb && cb.checked);
-      }
-      document.getElementById("mdEditorConflictSkip").addEventListener("click", function(){
-        var aa = applyAll(); close(); resolve({ action: "skip", applyToAll: aa });
-      });
-      document.getElementById("mdEditorConflictReplace").addEventListener("click", function(){
-        var aa = applyAll(); close(); resolve({ action: "replace", applyToAll: aa });
-      });
-      document.getElementById("mdEditorConflictRename").addEventListener("click", function(){
-        var aa = applyAll();
-        var suggested = suggestFreeName(name);
-        card.innerHTML =
-          '<div class="mdeditor-cleanup-title">Новое имя заметки</div>' +
-          '<input type="text" class="mdeditor-cleanup-input" id="mdEditorConflictRenameInput">' +
-          '<div class="mdeditor-cleanup-actions">' +
-            '<button type="button" class="mdeditor-cleanup-cancel" id="mdEditorConflictRenameCancel">Отмена</button>' +
-            '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="mdEditorConflictRenameOk">Сохранить</button>' +
-          '</div>';
-        var input = document.getElementById("mdEditorConflictRenameInput");
-        input.value = suggested;
-        input.focus();
-        input.select();
-        function submitRename(){
-          var newName = (input.value || "").trim();
-          if(!newName){ return; }
-          if(isNoteNameTaken(newName)){
-            input.style.borderColor = "var(--danger, #c0392b)";
-            return;
-          }
-          close();
-          resolve({ action: "rename", newName: newName, applyToAll: aa });
-        }
-        document.getElementById("mdEditorConflictRenameCancel").addEventListener("click", function(){
-          close(); resolve({ action: "skip", applyToAll: aa });
-        });
-        document.getElementById("mdEditorConflictRenameOk").addEventListener("click", submitRename);
-        input.addEventListener("keydown", function(ev){
-          if(ev.key === "Enter"){ ev.preventDefault(); submitRename(); }
-          else if(ev.key === "Escape"){ ev.preventDefault(); close(); resolve({ action: "skip", applyToAll: aa }); }
-        });
-      });
-      overlay.addEventListener("click", function(ev){
-        if(ev.target === overlay){ close(); resolve({ action: "skip", applyToAll: false }); }
-      });
+      document.getElementById("mdEditorOverwriteCancel").addEventListener("click", function(){ close(); resolve(false); });
+      document.getElementById("mdEditorOverwriteOk").addEventListener("click", function(){ close(); resolve(true); });
+      overlay.addEventListener("click", function(ev){ if(ev.target === overlay){ close(); resolve(false); } });
     });
   }
 
@@ -1447,53 +1385,41 @@ window.initMdEditorModule = function(deps){
     overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
   }
 
-  // Импортирует последовательно набор записей {name, path, text}
-  // (одна для .md-файла, несколько для .zip — см. вызовы ниже). Конфликты
-  // имени разрешаются по очереди через resolveNameConflict, если не
-  // включено "применить ко всем" (тогда — rememberedChoice без вопросов).
-  // Возвращает Promise<{imported, replaced, skipped}>.
+  // Импортирует набор записей {name, path, text} (одна для .md-файла,
+  // несколько для .zip — см. вызовы ниже). Раздел 5 ТЗ пересмотрен
+  // пользователем 06.09: конфликт имени больше не разбирается по одной
+  // заметке за раз — заметки, совпавшие по имени с уже существующими,
+  // всегда ЗАМЕНЯЮТСЯ текстом из импорта. Если совпадений вообще нет —
+  // импорт применяется сразу, без единого диалога (см.
+  // showOverwriteConfirmDialog выше). Если совпадения есть — сначала одно
+  // общее предупреждение на весь импорт; отмена — отменяет импорт
+  // целиком, ничего не меняя (частичного импорта при отмене нет).
+  // Возвращает Promise<{imported, replaced, cancelled}>.
   function importNoteEntries(entries){
-    var imported = 0, replaced = 0, skipped = 0;
-    var rememberedChoice = null; // {action, newName?} — если applyToAll был отмечен
-    var i = 0;
-    function next(){
-      if(i >= entries.length) return Promise.resolve({ imported: imported, replaced: replaced, skipped: skipped });
-      var entry = entries[i++];
-      var name = entry.name, path = entry.path, text = entry.text;
-      if(!isNoteNameTaken(name)){
-        createImportedNoteRecord(name, path, text);
-        imported++;
-        return next();
-      }
-      var decisionPromise;
-      if(rememberedChoice){
-        // "rename" из применённого ко всем решения — суффикс подбирается
-        // заново для каждого конфликта, конкретное имя из первого раза не
-        // переиспользуется (см. resolveNameConflict/suggestFreeName).
-        decisionPromise = Promise.resolve({
-          action: rememberedChoice.action,
-          newName: rememberedChoice.action === "rename" ? suggestFreeName(name) : undefined,
-          applyToAll: true
-        });
-      } else {
-        decisionPromise = resolveNameConflict(name, entries.length - i + 1);
-      }
-      return decisionPromise.then(function(decision){
-        if(decision.applyToAll && !rememberedChoice) rememberedChoice = { action: decision.action };
-        if(decision.action === "replace"){
-          var existingId = nameIndex.get(name.toLowerCase());
-          if(existingId) editNoteRecordText(existingId, text);
-          replaced++;
-        } else if(decision.action === "rename"){
-          createImportedNoteRecord(decision.newName, path, text);
-          imported++;
-        } else {
-          skipped++;
-        }
-        return next();
-      });
+    var conflictCount = 0;
+    for(var j = 0; j < entries.length; j++){
+      if(isNoteNameTaken(entries[j].name)) conflictCount++;
     }
-    return next();
+    function applyEntries(){
+      var imported = 0, replaced = 0;
+      entries.forEach(function(entry){
+        var name = entry.name, path = entry.path, text = entry.text;
+        var existingId = isNoteNameTaken(name) ? nameIndex.get(name.toLowerCase()) : null;
+        if(existingId){
+          editNoteRecordText(existingId, text);
+          replaced++;
+        } else {
+          createImportedNoteRecord(name, path, text);
+          imported++;
+        }
+      });
+      return { imported: imported, replaced: replaced, cancelled: false };
+    }
+    if(!conflictCount) return Promise.resolve(applyEntries());
+    return showOverwriteConfirmDialog(conflictCount).then(function(confirmed){
+      if(!confirmed) return { imported: 0, replaced: 0, cancelled: true };
+      return applyEntries();
+    });
   }
 
   // Обрабатывает выбранный пользователем файл (.md или .zip) — точка входа
@@ -1523,12 +1449,15 @@ window.initMdEditorModule = function(deps){
           return;
         }
         return importNoteEntries(entries).then(function(summary){
+          if(summary.cancelled){
+            setStatus("Импорт отменён.", false);
+            return;
+          }
           rebuildTree();
           var container = document.getElementById("settingsTabContent");
           if(container) render();
           setStatus("Импортировано: " + summary.imported +
-            (summary.replaced ? ", заменено: " + summary.replaced : "") +
-            (summary.skipped ? ", пропущено: " + summary.skipped : "") + ".", false);
+            (summary.replaced ? ", заменено: " + summary.replaced : "") + ".", false);
           if(result.hasOtherFiles){
             showImportInfoDialog("В архиве были и другие файлы (например, картинки) — они не перенесены. Изображения в «Моём блокноте» подключаются отдельно, через папку картинок.");
           }
@@ -1543,11 +1472,14 @@ window.initMdEditorModule = function(deps){
         var noteName = file.name.replace(/\.md$/i, "").trim() || "Без названия";
         return importNoteEntries([{ name: noteName, path: targetNode ? targetNode.path : "", text: text }]);
       }).then(function(summary){
+        if(summary.cancelled){
+          setStatus("Загрузка отменена.", false);
+          return;
+        }
         rebuildTree();
         render();
-        if(summary.imported) setStatus("Заметка загружена.", false);
-        else if(summary.replaced) setStatus("Заметка заменена.", false);
-        else setStatus("Загрузка отменена.", false);
+        if(summary.replaced) setStatus("Заметка заменена.", false);
+        else setStatus("Заметка загружена.", false);
       }).catch(function(e){
         setStatus("Не удалось прочитать файл: " + (e && e.message ? e.message : e), true);
       });
