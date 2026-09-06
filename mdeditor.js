@@ -29,6 +29,7 @@
    версии @codemirror/state под /view и /commands.
    =========================================================================== */
 
+
 window.initMdEditorModule = function(deps){
   "use strict";
   var escapeHtml = deps.escapeHtml;
@@ -53,33 +54,31 @@ window.initMdEditorModule = function(deps){
   var DELETE_ICON_SVG = deps.DELETE_ICON_SVG || "";
   var createArchivedTaskWithText = deps.createArchivedTaskWithText || null;
   var openTaskMoveTargetPicker = deps.openTaskMoveTargetPicker || null;
-  // пересчёт подгонки кнопок задач (см. fitTaskActions/refitAllVisibleTaskBodies
-  // в my.js) — нужен здесь же, а не только в initTaskGlobalToolbar (my.js), т.к.
-  // размер шрифта может смениться АСИНХРОННО ниже (idbGet("fontSizeStep") при
-  // старте приложения), в момент, когда вкладка задач уже отрисована со
-  // старым (по умолчанию) размером — без этого вызова кнопки остаются
-  // подогнаны под УЖЕ неверную (старую) разбивку текста на строки.
   var refitAllVisibleTaskBodies = deps.refitAllVisibleTaskBodies || function(){};
-  // "Закладки" — теперь синхронизируются в облаке вместе с остальными
-  // данными приложения (см. ТЗ пользователя от 01.09), поэтому источник
-  // истины для них — не IndexedDB (локальна для устройства/браузера, см.
-  // idbGet/idbSet выше), а тот же state my.js, что и у переключателей
-  // настроек: getSyncedBookmarkNames читает текущий список имён из state
-  // (без сети, синхронно — state уже загружен из localStorage к моменту
-  // инициализации этого модуля), setSyncedBookmark пишет в state ОДНО имя
-  // разом (true/false) и сама планирует и локальное сохранение, и
-  // облачную отправку (saveLocalState/scheduleCloudPush внутри my.js) —
-  // тем же путём, каким устроена вся остальная синхронизация в
-  // приложении. Каждое имя — отдельный ключ state (как отдельная глава в
-  // остальном state), поэтому слияние с облаком идёт ПОИМЕННО, а не
-  // целым списком — закладка, добавленная на одном устройстве, не теряет
-  // закладку, добавленную тем временем на другом.
   var getSyncedBookmarkNames = deps.getSyncedBookmarkNames || function(){ return []; };
   var setSyncedBookmark = deps.setSyncedBookmark || function(){};
-  // регистрация факта создания новой заметки — для поля "новые заметки" в
-  // "Карте дней года" (my.js), см. createAndOpenNote ниже и ТЗ пользователя
-  // от 04.09. Необязателен (если deps его не передал — просто no-op).
   var recordNoteCreated = deps.recordNoteCreated || function(){};
+  // ---------------------------------------------------------------------
+  // ОБЛАЧНОЕ ХРАНЕНИЕ ЗАМЕТОК С ШИФРОВАНИЕМ (см. TASK_MDNOTES_CLOUD.md,
+  // шаг 1 "Ядро", 05.09). Firebase-специфика (URL, /syncs/<id>) осознанно
+  // остаётся внутри my.js — сюда передаются только узкие функции, уже
+  // привязанные к ветке /notes(Meta) ТЕКУЩЕГО syncId устройства (раздел 2
+  // ТЗ: "свой fetchCloudBlob-подобный запрос для /notes").
+  // ---------------------------------------------------------------------
+  var getSyncId = deps.getSyncId || function(){ return null; };
+  var openSyncModal = deps.openSyncModal || function(){};
+  var fetchCloudPath = deps.fetchCloudPath || function(){ return Promise.reject(new Error("no_sync")); };
+  var patchCloud = deps.patchCloud || function(){ return Promise.reject(new Error("no_sync")); };
+  var deleteCloudPath = deps.deleteCloudPath || function(){ return Promise.reject(new Error("no_sync")); };
+  var generateId = deps.generateId || function(){ return "n" + Date.now().toString(36) + Math.random().toString(36).slice(2,10); };
+  var NOTES_PUSH_DEBOUNCE_MS = deps.notesPushDebounceMs || 400;
+  var NOTES_RETRY_DELAYS = deps.notesRetryDelays || [5000, 15000, 40000, 90000];
+  function isOnline(){ return navigator.onLine; }
+  // Импорт/экспорт .md/.zip заметок (TASK_MDNOTES_CLOUD.md, шаг 2) —
+  // используем общий самописный ZIP-парсер проекта напрямую через window,
+  // тем же способом, каким его используют workbooks.js/s89fill.js (свой
+  // экземпляр deps сюда не заводим, MiniZip — общая утилита без состояния).
+  var MiniZip = window.MiniZip || null;
 
   // ---------------------------------------------------------------------
   // Метаданные заметки (дата создания/редактирования[/открытия]) — ТЗ
@@ -289,6 +288,16 @@ window.initMdEditorModule = function(deps){
       '<path d="M10 11v6"></path>' +
       '<path d="M14 11v6"></path>' +
     '</svg>';
+  // стрелка вниз в лоток — "скачать" (см. downloadSingleNote/downloadAllNotesZip
+  // ниже, ТЗ TASK_MDNOTES_CLOUD.md раздел 6): одна и та же пиктограмма для
+  // скачивания и одной заметки (кнопка в шапке открытой заметки), и всего
+  // блокнота целиком (кнопка внизу общего списка).
+  var DOWNLOAD_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M12 3v11"></path>' +
+      '<path d="M7.5 10.5L12 15l4.5-4.5"></path>' +
+      '<path d="M4.5 18.5h15"></path>' +
+    '</svg>';
 
   // ---------------------------------------------------------------------
   // IndexedDB — хранение directory handle между сессиями. FileSystem*Handle
@@ -400,61 +409,80 @@ window.initMdEditorModule = function(deps){
   // открытой страницы — так же, как у настоящего Obsidian, вкладка не
   // "забывает" открытую заметку, просто уходя на соседнюю вкладку настроек)
   // ---------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------
+  // Состояние модуля (живёт между переключениями вкладок в рамках одной
+  // открытой страницы). ЗАМЕТКИ (см. TASK_MDNOTES_CLOUD.md) — единственный
+  // источник истины: notesMap, Map noteId -> {id,name,path,text,t,deleted}.
+  // Дерево папок каждый раз ПЕРЕСТРАИВАЕТСЯ из notesMap (см.
+  // buildTreeFromNotes ниже), а не обходом файловой системы, как раньше.
+  // ---------------------------------------------------------------------
   var initStarted = false;
-  var dirHandle = null;          // FileSystemDirectoryHandle корня
-  var rootTree = null;           // {dirHandle, name, folders:[...], files:[{name,handle}]}
+  var notesReady = false;        // true после первой загрузки локального кэша заметок
+  var notesMap = new Map();
+  var rootTree = null;           // {name, path, folders:[...], files:[{name,id}], parent}
   var currentDirNode = null;     // текущая открытая "папка" в списке
-  var nameIndex = null;          // Map: имя_в_нижнем_регистре -> {fileHandle,dirHandle,name}
-  var imageIndex = null;         // Map: имя_файла.ext (в нижнем регистре) -> {fileHandle,dirHandle,name}
-  // Кэш уже прочитанных картинок: имя.ext (в нижнем регистре) ->
-  // {url} | {error:true}. Живёт, пока открыта вкладка/страница — так
-  // повторные decorations (buildDecorations пересчитывается на каждое
-  // изменение документа, даже в другом месте заметки) не перечитывают и не
-  // перекодируют один и тот же файл заново. Чистится при выборе новой папки
-  // (см. клик по скрепке в renderSetupScreen ниже).
+  var nameIndex = new Map();     // имя_в_нижнем_регистре -> noteId (уникальность имени по всему дереву, раздел 2 ТЗ)
+  // Индекс картинок (TASK_MDNOTES_CLOUD.md, шаг 3, 05.09) —
+  // имя_в_нижнем_регистре -> {handle: FileSystemFileHandle, name}, строится
+  // рекурсивным обходом отдельной папки с изображениями (см.
+  // buildImageIndex/imagesDirHandle ниже). До первого подключения папки (или
+  // пока не подтверждены права после перезапуска) остаётся пустым — decorations
+  // (см. makeLivePreviewExtension) ничего не находят и показывают плейсхолдер
+  // "не найдено" (см. loadImageInto/ImageWidget).
+  var imageIndex = new Map();
   var imageUrlCache = new Map();
   var IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp)$/i;
-  // единая папка для всех вложений (картинок и mp3) — см.
-  // migrateStrayMediaFiles/ensureFilesFolder и insertImageAtCursor ниже
-  // (ТЗ пользователя от 31.08: файлы этих расширений, "потерявшиеся" где-то
-  // ещё в дереве — например, в корне — автоматически переносятся сюда).
-  var FILES_FOLDER_NAME = "files";
-  var MEDIA_MOVE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp|mp3)$/i;
-  // "Продолжить с той же заметки и с того же места" (см. ТЗ пользователя от
-  // 01.09) — состояние {screen, name, cursorPos, scrollPercent, updatedAt}.
-  // Хранится и в IndexedDB (idbSet("lastNote", ...), быстрый локальный кэш),
-  // и файлом ".mdeditor-state.json" в корне синхронизируемой папки — этот
-  // файл едет вместе с остальными заметками через Syncthing на другое
-  // устройство, поэтому при холодном старте побеждает та копия (диск или
-  // IndexedDB), у которой updatedAt новее (см. readDocStateFromDisk/
-  // initFromStoredHandle ниже). screen === "list" означает, что пользователь
-  // сам ушёл на список ("домой") — тогда холодный старт должен показать
-  // список, а не автоматически открывать заметку (см. goHome ниже).
-  var docState = { screen: null, name: null, cursorPos: 0, scrollPercent: null, updatedAt: 0 };
-  var STATE_FILE_NAME = ".mdeditor-state.json";
-  var screen = "setup";          // "setup" | "list" | "editor"
-  var setupNeedsPermission = false;
-  // Защита от повторного открытия диалога выбора папки, пока предыдущий
-  // ещё не закрыт — браузер разрешает только ОДИН одновременно открытый
-  // showDirectoryPicker()/requestPermission() и на повторный вызов кидает
-  // "File picker already active". Раньше двойное нажатие на скрепку
-  // (например, двойной тап на телефоне) приводило именно к этой ошибке —
-  // см. ТЗ пользователя от 31.08.
+  // ---------------------------------------------------------------------
+  // Отдельная папка с локальными изображениями (раздел 8 ТЗ) — независима
+  // от облачного хранения текста заметок: картинки НИКОГДА не идут в
+  // Firebase (лимит бесплатного Storage мал и платный), между устройствами
+  // пользователь переносит их сам (Syncthing и т.п.). Доступ — тот же
+  // File System Access API, что раньше использовался для папки самих
+  // заметок (см. историю проекта), но теперь только для картинок и с
+  // правами "readwrite" (нужны для автономной корзины сирот, раздел 10).
+  // ---------------------------------------------------------------------
+  var imagesDirHandle = null;      // FileSystemDirectoryHandle | null
+  var imagesDirName = null;        // handle.name, для показа в кнопке
+  var imagesDirPermission = "none"; // "none" (нет сохранённого handle) | "prompt" | "denied" | "granted"
+  var imageIndexBuilt = false;     // хоть раз просканировали успешно
+  var imageIndexBuilding = false;
+  // реестр смонтированных DOM-узлов картинки/плейсхолдера — тем же приёмом,
+  // что и linkNodesByHref у ссылок (см. ниже, makeLivePreviewExtension):
+  // позволяет ПОДМЕНИТЬ плейсхолдер на настоящую картинку на месте, без
+  // пересборки decorations, когда папка подключается уже после того, как
+  // заметка отрисована (раздел 9 ТЗ: "без перезагрузки заметки целиком").
+  var imageNodesByName = new Map(); // имя_в_нижнем_регистре -> Set<{wrap, img}>
+  function registerImageNode(name, entry){
+    var set = imageNodesByName.get(name);
+    if(!set){ set = new Set(); imageNodesByName.set(name, set); }
+    set.add(entry);
+  }
+  function unregisterImageNode(name, entry){
+    var set = imageNodesByName.get(name);
+    if(set){ set.delete(entry); if(!set.size) imageNodesByName.delete(name); }
+  }
+  var IMAGES_DIR_HANDLE_KEY = "imagesDirHandle";
+  var IMAGES_WARNED_KEY = "imagesCleanupWarned";
+  var imageCleanupInFlight = false;
+  // "Продолжить с той же заметки и с того же места" — по решению
+  // пользователя от 05.09 (переход на облако) это ТЕПЕРЬ ЛОКАЛЬНАЯ функция
+  // устройства, а не синхронизируется между устройствами (раньше ехала
+  // файлом через Syncthing вместе с самими заметками — этого канала больше
+  // нет). Хранится только в IndexedDB (idbSet("lastNote", ...)).
+  var docState = { screen: null, id: null, name: null, cursorPos: 0, scrollPercent: null, updatedAt: 0 };
+  var screen = "setup";          // "setup" (нет синхронизации/не готово) | "list" | "editor"
   var attachPickerBusy = false;
   var statusMessage = "", statusIsError = false;
-  var openFile = null;           // {fileHandle,dirHandle,name,text,dirty}
+  var openFile = null;           // {id,name,path,text,dirty,cursorPos,scrollPercent}
   var cmView = null;
   var mdEditorImageResizeObserver = null; // пересчёт cm-md-image-float при изменении ширины редактора, см. mountEditor/destroyEditor
   // Какая из ДВУХ боковых вкладок второго набора сейчас показывает
-  // содержимое этого модуля — "editor" для "Моего блокнота" (set2s_1:
-  // список папок/заметок или открытая заметка, старое поведение) и
-  // "bookmarks" для вкладки "Закладки" (set2s_2, см.
-  // renderSettingsTabMdBookmarks/renderBookmarksScreen ниже). Обе вкладки
-  // делят один и тот же rootTree/nameIndex/openFile — заметка, открытая
-  // из закладок, открывается тем же экраном "editor", что и обычно (см.
-  // render() ниже), поэтому отдельного состояния "screen" для закладок не
-  // требуется — важно только, какая вкладка АКТИВНА для показа списка.
+  // содержимое этого модуля — "editor" для "Моего блокнота" (set2s_1) и
+  // "bookmarks" для вкладки "Закладки" (set2s_2). Обе вкладки делят один и
+  // тот же notesMap/nameIndex/openFile.
   var activeMdTab = "editor";
+
   // ---- закладки заметок (см. ТЗ пользователя: вкладка "Закладки",
   // долгое нажатие в общем списке, кнопка в шапке открытой заметки) —
   // множество имён заметок в нижнем регистре (имена внутри одного
@@ -490,6 +518,322 @@ window.initMdEditorModule = function(deps){
     });
     cmView.focus();
   }
+
+  // ---------------------------------------------------------------------
+  // Папка с локальными изображениями (раздел 8 ТЗ) — подключение,
+  // повторное подтверждение прав, рекурсивное сканирование, автономная
+  // корзина сирот (раздел 10). Права запрашиваются в режиме "readwrite" —
+  // "только чтение" хватило бы для показа картинок, но корзина ниже должна
+  // уметь удалять файлы.
+  // ---------------------------------------------------------------------
+  var IMAGES_PERMISSION_OPTS = { mode: "readwrite" };
+  // queryPermission — без пользовательского жеста (можно звать при
+  // старте приложения); requestPermission требует жеста, поэтому
+  // requestIfNeeded=true разрешено передавать только из обработчика клика.
+  function verifyImagesPermission(handle, requestIfNeeded){
+    if(!handle || !handle.queryPermission) return Promise.resolve(false);
+    return handle.queryPermission(IMAGES_PERMISSION_OPTS).then(function(state){
+      if(state === "granted") return true;
+      if(!requestIfNeeded || !handle.requestPermission) return false;
+      return handle.requestPermission(IMAGES_PERMISSION_OPTS).then(function(state2){
+        return state2 === "granted";
+      });
+    }).catch(function(){ return false; });
+  }
+
+  // Вызывается один раз при старте модуля (см. конец файла) — молча
+  // проверяет права на РАНЕЕ сохранённый handle, без системного диалога и
+  // без жеста пользователя. Если прав уже нет — просто оставляет
+  // imagesDirPermission не "granted"; кнопка/плейсхолдер (см. renderListScreen/
+  // ImageWidget) в этом случае предложат подключить папку заново кликом.
+  function loadStoredImagesDirHandle(){
+    idbGet(IMAGES_DIR_HANDLE_KEY).then(function(handle){
+      if(!handle){ imagesDirPermission = "none"; return; }
+      imagesDirHandle = handle;
+      imagesDirName = handle.name;
+      return verifyImagesPermission(handle, false).then(function(ok){
+        imagesDirPermission = ok ? "granted" : "prompt";
+        if(ok){
+          return buildImageIndex().then(maybeRunImageCleanup);
+        }
+      });
+    }).catch(function(){});
+  }
+
+  // Рекурсивный обход папки с изображениями — собирает ПЛОСКИЙ индекс
+  // имя_в_нижнем_регистре -> {handle, name} по всем вложенным подпапкам
+  // (раздел 8 ТЗ: "поиск... по всем подпапкам рекурсивно"), без привязки к
+  // какой-либо конкретной подпапке (в отличие от старой схемы с
+  // обязательной "files"). Коллизия имени между разными подпапками
+  // (одинаковое имя файла в двух местах) разрешается в пользу
+  // последнего найденного — на практике это не должно происходить, т.к.
+  // ![[имя]] в заметках и так не различает подпапки.
+  function buildImageIndex(){
+    if(!imagesDirHandle) return Promise.resolve();
+    imageIndexBuilding = true;
+    var newIndex = new Map();
+    function walk(dirHandle){
+      return dirHandle.entries ? walkEntries(dirHandle) : Promise.resolve();
+    }
+    async function walkEntries(dirHandle){
+      for await (var entry of dirHandle.entries()){
+        var name = entry[0], handle = entry[1];
+        if(handle.kind === "directory"){
+          await walkEntries(handle);
+        } else if(handle.kind === "file" && IMAGE_EXT_RE.test(name)){
+          newIndex.set(name.toLowerCase(), { handle: handle, name: name });
+        }
+      }
+    }
+    return walk(imagesDirHandle).then(function(){
+      imageIndex = newIndex;
+      imageIndexBuilt = true;
+      imageIndexBuilding = false;
+      refreshMountedImageNodes();
+    }).catch(function(e){
+      imageIndexBuilding = false;
+      setStatus("Не удалось прочитать папку с изображениями: " + (e && e.message ? e.message : e), true);
+    });
+  }
+
+  // Точечно подгружает картинку в УЖЕ смонтированные плейсхолдеры/узлы
+  // (см. imageNodesByName/registerImageNode выше) после того, как индекс
+  // пересобрался — без пересборки CodeMirror decorations и без перезагрузки
+  // заметки целиком (раздел 9 ТЗ). Чинит только те узлы, у которых сейчас
+  // нет валидного <img> (плейсхолдер "не найдено") — уже загруженную
+  // картинку трогать незачем.
+  function refreshMountedImageNodes(){
+    imageNodesByName.forEach(function(set, key){
+      set.forEach(function(entry){
+        if(entry.loaded) return;
+        loadImageInto(entry.name, entry.wrap);
+      });
+    });
+  }
+
+  // Разовое предупреждение (раздел 8 ТЗ) — тот же приём карточки поверх
+  // окна настроек, что и у остальных диалогов блокнота
+  // (.mdeditor-cleanup-overlay/-card, см. openNewNoteDialog/confirmDeleteNote).
+  function showImagesFirstConnectWarning(callback){
+    var box = document.querySelector(".settings-modal-box");
+    if(!box){ callback(true); return; }
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title">Изображения, которых нет в заметках, будут удаляться из этой папки. Продолжить?</div>' +
+      '<div class="mdeditor-cleanup-actions">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="mdEditorImgWarnCancel">Отмена</button>' +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="mdEditorImgWarnOk">Продолжить</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    box.appendChild(overlay);
+    function close(result){
+      if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      callback(result);
+    }
+    document.getElementById("mdEditorImgWarnCancel").addEventListener("click", function(){ close(false); });
+    document.getElementById("mdEditorImgWarnOk").addEventListener("click", function(){ close(true); });
+  }
+
+  // Открывает системный диалог выбора папки. Показывает разовое
+  // предупреждение ПЕРЕД первым же подключением на этом устройстве (флаг
+  // в IndexedDB, раздел 8 ТЗ) — при отмене предупреждения папка не
+  // сохраняется (можно попробовать снова тем же кликом). Показ
+  // предупреждения не повторяется, даже если папку потом переподключат
+  // заново после отзыва прав (флаг не сбрасывается). Возвращает
+  // Promise<boolean> — true, если папка в итоге подключена с правами
+  // (нужно кнопке-скрепке "Вставить картинку", см. insertImageAtCursor
+  // ниже, чтобы дождаться результата перед открытием выбора файла).
+  function pickNewImagesFolder(){
+    if(!window.showDirectoryPicker){
+      setStatus("Браузер не поддерживает выбор папки с изображениями.", true);
+      return Promise.resolve(false);
+    }
+    return window.showDirectoryPicker(IMAGES_PERMISSION_OPTS).then(function(handle){
+      return new Promise(function(resolve){
+        function proceed(){
+          imagesDirHandle = handle;
+          imagesDirName = handle.name;
+          imagesDirPermission = "granted";
+          idbSet(IMAGES_DIR_HANDLE_KEY, handle).catch(function(){});
+          buildImageIndex().then(function(){
+            maybeRunImageCleanup();
+            renderImagesFolderControls();
+            resolve(true);
+          });
+        }
+        idbGet(IMAGES_WARNED_KEY).then(function(warned){
+          if(warned){ proceed(); return; }
+          showImagesFirstConnectWarning(function(confirmed){
+            if(!confirmed){ resolve(false); return; } // отмена — папка не подключается, флаг не трогаем
+            idbSet(IMAGES_WARNED_KEY, true).catch(function(){});
+            proceed();
+          });
+        });
+      });
+    }).catch(function(e){
+      if(e && e.name !== "AbortError"){ // системный диалог закрыт пользователем — не ошибка
+        setStatus("Не удалось выбрать папку: " + (e && e.message ? e.message : e), true);
+      }
+      return false;
+    });
+  }
+
+  // Пробует молча/через жест подтвердить права на РАНЕЕ сохранённый
+  // handle, и только если это не удалось — открывает системный диалог
+  // выбора папки. Возвращает Promise<boolean> (см. pickNewImagesFolder).
+  function ensureImagesReady(){
+    if(imagesDirHandle){
+      return verifyImagesPermission(imagesDirHandle, true).then(function(ok){
+        if(ok){
+          imagesDirPermission = "granted";
+          return buildImageIndex().then(function(){
+            maybeRunImageCleanup();
+            renderImagesFolderControls();
+            return true;
+          });
+        }
+        return pickNewImagesFolder();
+      });
+    }
+    return pickNewImagesFolder();
+  }
+
+  // Точка входа для кнопки "Папка с изображениями" (renderListScreen) и
+  // для кнопки-скрепки на плейсхолдере отсутствующей картинки (раздел 9
+  // ТЗ) — те же места не ждут результата, поэтому промис просто
+  // игнорируется; см. ensureImagesReady выше для мест, которым результат
+  // нужен (insertImageAtCursor).
+  function reconnectImagesFolder(){
+    ensureImagesReady();
+  }
+
+  // Перерисовывает ТОЛЬКО кнопку/статус папки с изображениями в текущем
+  // списке заметок (если он сейчас на экране) — не весь список целиком,
+  // чтобы не терять прокрутку/раскрытые состояния строк.
+  function renderImagesFolderControls(){
+    var btn = document.getElementById("mdEditorImagesDirBtn");
+    if(btn) btn.textContent = imagesFolderButtonLabel();
+  }
+  function imagesFolderButtonLabel(){
+    if(imagesDirPermission === "granted" && imagesDirName){
+      return "Папка с изображениями: «" + imagesDirName + "» (сменить)";
+    }
+    if(imagesDirName){
+      return "Подключить папку с изображениями заново («" + imagesDirName + "»)";
+    }
+    return "Указать папку с локальными изображениями";
+  }
+
+  // Подбирает свободное имя файла картинки вида "имя (2).ext", "имя (3).ext"
+  // — тем же приёмом, что и suggestFreeName() для имён заметок выше, но с
+  // сохранением расширения.
+  function suggestFreeImageName(name){
+    var extM = /^(.*)(\.[^.]+)$/.exec(name);
+    var base = extM ? extM[1] : name, ext = extM ? extM[2] : "";
+    var m = /^(.*) \((\d+)\)$/.exec(base);
+    var stem = m ? m[1] : base;
+    var n = m ? Number(m[2]) + 1 : 2;
+    var candidate;
+    do{
+      candidate = stem + " (" + n + ")" + ext;
+      n++;
+    } while(imageIndex.has(candidate.toLowerCase()));
+    return candidate;
+  }
+
+  // Копирует выбранный файл В КОРЕНЬ подключённой папки с изображениями
+  // (раздел 8 ТЗ: без принудительной подпапки) и вставляет "![[имя]]" в
+  // позицию курсора текущей заметки. Имя, уже занятое в imageIndex (в т.ч.
+  // в другой подпапке — индекс плоский по всей папке), получает суффикс
+  // "(2)" и т.д. через suggestFreeImageName выше, а не молча
+  // перезаписывает существующий файл.
+  function insertImageAtCursor(file){
+    if(!cmView || !imagesDirHandle) return;
+    var finalName = imageIndex.has(file.name.toLowerCase()) ? suggestFreeImageName(file.name) : file.name;
+    imagesDirHandle.getFileHandle(finalName, { create: true }).then(function(fileHandle){
+      return fileHandle.createWritable().then(function(writable){
+        return writable.write(file).then(function(){ return writable.close(); });
+      }).then(function(){ return fileHandle; });
+    }).then(function(fileHandle){
+      imageIndex.set(finalName.toLowerCase(), { handle: fileHandle, name: finalName });
+      var sel = cmView.state.selection.main;
+      var insertText = "![[" + finalName + "]]";
+      cmView.dispatch({
+        changes: { from: sel.from, to: sel.to, insert: insertText },
+        selection: { anchor: sel.from + insertText.length }
+      });
+      cmView.focus();
+    }).catch(function(e){
+      setStatus("Не удалось сохранить картинку: " + (e && e.message ? e.message : e), true);
+    });
+  }
+
+  // Множество имён картинок, реально встречающихся в тексте заметок
+  // (![[имя]], тот же регэксп, что и у decorateLine/imgRe в
+  // makeLivePreviewExtension ниже) — по ВСЕМ заметкам пользователя,
+  // источник текста — notesMap (облачные/кэшированные записи), а не файлы
+  // на диске (раздел 10 ТЗ: старая логика читала это через
+  // fileHandle.getFile() по nameIndex, теперь заметки и так уже в памяти).
+  var MEDIA_REF_RE = /!\[\[([^\[\]\n]+)\]\]/g;
+  function collectReferencedMediaNames(){
+    var names = new Set();
+    notesMap.forEach(function(rec){
+      if(!rec || rec.deleted || !rec.text) return;
+      MEDIA_REF_RE.lastIndex = 0;
+      var m;
+      while((m = MEDIA_REF_RE.exec(rec.text))){
+        names.add(m[1].trim().toLowerCase());
+        if(m[0].length === 0) MEDIA_REF_RE.lastIndex++;
+      }
+    });
+    return names;
+  }
+
+  // Корзина неиспользуемых картинок (раздел 10 ТЗ, замена старого
+  // openCleanupDialog) — работает молча и полностью автономно: без
+  // диалога подтверждения, без списка на экране. Условие запуска — папка
+  // с картинками подключена (imagesDirHandle && "granted"); если не
+  // подключена, эта функция просто не вызывается (см. maybeRunImageCleanup
+  // ниже) — ни сообщений, ни disabled-состояний пользователю не показываем.
+  function cleanupOrphanedImages(){
+    if(!imagesDirHandle || imagesDirPermission !== "granted") return Promise.resolve();
+    if(imageCleanupInFlight) return Promise.resolve();
+    imageCleanupInFlight = true;
+    var referenced = collectReferencedMediaNames();
+    async function walkAndClean(dirHandle){
+      for await (var entry of dirHandle.entries()){
+        var name = entry[0], handle = entry[1];
+        if(handle.kind === "directory"){
+          await walkAndClean(handle);
+        } else if(handle.kind === "file" && IMAGE_EXT_RE.test(name)){
+          if(!referenced.has(name.toLowerCase())){
+            try{ await dirHandle.removeEntry(name); }catch(e){ /* права/гонка — пропускаем молча */ }
+          }
+        }
+      }
+    }
+    return walkAndClean(imagesDirHandle).then(function(){
+      imageCleanupInFlight = false;
+      // сироты могли включать файлы, уже попавшие в imageIndex — пересканируем,
+      // чтобы индекс не указывал на удалённые handle
+      return buildImageIndex();
+    }).catch(function(){ imageCleanupInFlight = false; });
+  }
+
+  // Запускает корзину сирот, только когда есть и подключённая папка
+  // картинок, и уже загруженный список заметок (иначе "неиспользуемых"
+  // посчитать не из чего, и можно случайно удалить то, что используется в
+  // заметках, ещё не подтянутых из офлайн-кэша/облака) — вызывается после
+  // buildImageIndex() и после готовности notesMap (см. initNotesModule).
+  function maybeRunImageCleanup(){
+    if(imagesDirHandle && imagesDirPermission === "granted" && notesReady && imageIndexBuilt){
+      cleanupOrphanedImages();
+    }
+  }
+
   var livePreviewCompartment = null;
   var codeMode = false;
   var saveTimer = null;
@@ -684,64 +1028,126 @@ window.initMdEditorModule = function(deps){
   }
 
   // ---------------------------------------------------------------------
-  // Сканирование директории: рекурсивно собираем дерево .md файлов и
-  // индекс имён (без учёта регистра). Пустые папки (без .md ни в них
-  // самих, ни во вложенных) в дерево не попадают.
+  // ОБЛАЧНОЕ ХРАНЕНИЕ ЗАМЕТОК (TASK_MDNOTES_CLOUD.md, шаг 1 "Ядро").
+  // Формат узла в облаке:
+  //   /syncs/<id>/notesMeta/<noteId> = { t: <ms>, deleted: true|false }
+  //   /syncs/<id>/notes/<noteId>     = { iv: "<base64>", data: "<base64>" }
+  // notesMeta — ОТКРЫТЫМ текстом (id + время правки + флаг удаления) — это
+  // и есть "лёгкий запрос" из раздела 4.1 ТЗ: один GET по всем заметкам без
+  // единого байта текста. notes/<id> — шифроблок AES-GCM-256 (ключ —
+  // SHA-256(syncId), раздел 1 ТЗ), внутри JSON {name, path, text}: решено
+  // шифровать name и path вместе с текстом одним и тем же ключом/IV.
   // ---------------------------------------------------------------------
-  async function scanTree(dh){
-    var node = { dirHandle: dh, name: "", folders: [], files: [], images: [] };
-    // Подпапки собираем в список и сканируем их все ПАРАЛЛЕЛЬНО ниже —
-    // раньше for-await дожидался ПОЛНОГО скана одной вложенной папки
-    // (со всеми её вложенными подпапками) и только потом переходил к
-    // следующей; на дереве с несколькими папками время складывалось из
-    // всех подряд, и это была основная причина заметной паузы при каждом
-    // открытии "Моего блокнота"/подключении папки (см. ТЗ пользователя от
-    // 31.08 — "открываться должно всё мгновенно"). Сам перебор
-    // dh.entries() остаётся последовательным (это ограничение самого
-    // File System Access API — за раз можно получить только одну запись),
-    // но он быстрый: тут нет чтения содержимого файлов, только список имён.
-    var subdirs = [];
-    for await (var pair of dh.entries()){
-      var name = pair[0], handle = pair[1];
-      if(handle.kind === "file"){
-        if(/\.md$/i.test(name)) node.files.push({ name: name.replace(/\.md$/i, ""), handle: handle });
-        else if(IMAGE_EXT_RE.test(name)) node.images.push({ name: name, handle: handle });
-      } else if(handle.kind === "directory"){
-        subdirs.push({ name: name, handle: handle });
+
+  // ---- шифрование ----
+  var notesCryptoKeyPromise = null, notesCryptoSyncId = null;
+  function getNotesCryptoKey(){
+    var id = getSyncId();
+    if(!id) return Promise.reject(new Error("no_sync"));
+    if(notesCryptoKeyPromise && notesCryptoSyncId === id) return notesCryptoKeyPromise;
+    notesCryptoSyncId = id;
+    notesCryptoKeyPromise = crypto.subtle.digest("SHA-256", new TextEncoder().encode(id)).then(function(hash){
+      return crypto.subtle.importKey("raw", hash, {name:"AES-GCM"}, false, ["encrypt","decrypt"]);
+    });
+    return notesCryptoKeyPromise;
+  }
+  function b64FromBuf(buf){
+    var bytes = new Uint8Array(buf), bin = "";
+    for(var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  function bufFromB64(b64){
+    var bin = atob(b64), arr = new Uint8Array(bin.length);
+    for(var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr.buffer;
+  }
+  // Свой случайный IV (12 байт) на каждую операцию — не переиспользуется
+  // (раздел 1 ТЗ).
+  function encryptNotePayload(payload){
+    return getNotesCryptoKey().then(function(key){
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      var data = new TextEncoder().encode(JSON.stringify(payload));
+      return crypto.subtle.encrypt({name:"AES-GCM", iv:iv}, key, data).then(function(cipher){
+        return { iv: b64FromBuf(iv.buffer), data: b64FromBuf(cipher) };
+      });
+    });
+  }
+  function decryptNotePayload(enc){
+    return getNotesCryptoKey().then(function(key){
+      return crypto.subtle.decrypt({name:"AES-GCM", iv: new Uint8Array(bufFromB64(enc.iv))}, key, bufFromB64(enc.data)).then(function(buf){
+        return JSON.parse(new TextDecoder().decode(buf));
+      });
+    });
+  }
+
+  // ---- локальный офлайн-кэш заметок (IndexedDB) — расшифрованные
+  // заметки, чтобы список/чтение работали сразу при холодном старте без
+  // сети (раздел 3 ТЗ) ----
+  var NOTES_CACHE_KEY = "notesCache_v1";
+  var notesCacheSaveTimer = null;
+  function persistNotesCache(){
+    var plain = {};
+    notesMap.forEach(function(rec, id){ plain[id] = rec; });
+    idbSet(NOTES_CACHE_KEY, plain).catch(function(){});
+  }
+  function scheduleNotesCachePersist(){
+    if(notesCacheSaveTimer) clearTimeout(notesCacheSaveTimer);
+    notesCacheSaveTimer = setTimeout(persistNotesCache, 300);
+  }
+  // Принудительный, немедленный сброс этого debounce — вызывается при
+  // visibilitychange/pagehide (см. ниже), тем же приёмом, что и
+  // flushPendingSyncNow у общего state в my.js (там localStorage.setItem
+  // делается синхронно в обход debounce). Без этого правка, сделанная
+  // офлайн прямо перед сворачиванием/заморозкой вкладки, могла бы не
+  // попасть ни в облако (сети нет), ни в этот локальный кэш (300мс
+  // таймер не успел сработать) — и потеряться безвозвратно.
+  function flushNotesCacheNow(){
+    if(notesCacheSaveTimer){ clearTimeout(notesCacheSaveTimer); notesCacheSaveTimer = null; }
+    persistNotesCache();
+  }
+  function loadNotesCache(){
+    return idbGet(NOTES_CACHE_KEY).then(function(plain){
+      if(!plain || typeof plain !== "object") return;
+      Object.keys(plain).forEach(function(id){
+        var rec = plain[id];
+        if(!rec) return;
+        notesMap.set(id, rec);
+        if(!rec.deleted && rec.name) nameIndex.set(rec.name.toLowerCase(), id);
+      });
+    }).catch(function(){});
+  }
+
+  // ---- дерево папок из notesMap.path (раздел 2 ТЗ: "папка" — это просто
+  // общий префикс path у нескольких заметок, реальной файловой системы
+  // больше нет) ----
+  function buildTreeFromNotes(){
+    var root = { name: "", path: "", folders: [], files: [] };
+    var folderCache = { "": root };
+    function getFolderNode(pathStr){
+      pathStr = pathStr || "";
+      if(folderCache[pathStr]) return folderCache[pathStr];
+      var parts = pathStr.split("/").filter(Boolean);
+      var cur = root, curPath = "";
+      for(var i = 0; i < parts.length; i++){
+        curPath = curPath ? curPath + "/" + parts[i] : parts[i];
+        if(folderCache[curPath]){ cur = folderCache[curPath]; continue; }
+        var node = { name: parts[i], path: curPath, folders: [], files: [], parent: cur };
+        cur.folders.push(node);
+        folderCache[curPath] = node;
+        cur = node;
       }
+      return cur;
     }
-    var children = await Promise.all(subdirs.map(function(sd){ return scanTree(sd.handle); }));
-    children.forEach(function(child, i){
-      child.name = subdirs[i].name;
-      // ссылка на родителя — нужна, чтобы жест "назад" внутри списка
-      // заметок поднимался на один уровень вверх, а не сразу в корень
-      // (см. pushMdNav в местах перехода по папкам ниже); у
-      // rootTree.parent остаётся undefined.
-      child.parent = node;
-      // папка остаётся в дереве, если внутри (в т.ч. вложенно) есть
-      // .md заметки, ПОДпапки или изображения — папка, где лежат
-      // только картинки для заметок (без единого .md), раньше молча
-      // выпадала из дерева и была не видна в списке; теперь видна.
-      if(child.files.length || child.folders.length || child.images.length) node.folders.push(child);
+    notesMap.forEach(function(rec, id){
+      if(!rec || rec.deleted || !rec.name) return;
+      var folder = getFolderNode(rec.path);
+      folder.files.push({ name: rec.name, id: id });
     });
-    return node;
+    return root;
   }
-
-  function buildIndex(node, index, imgIndex){
-    node.files.forEach(function(f){
-      index.set(f.name.toLowerCase(), { fileHandle: f.handle, dirHandle: node.dirHandle, name: f.name });
-    });
-    node.images.forEach(function(im){
-      imgIndex.set(im.name.toLowerCase(), { fileHandle: im.handle, dirHandle: node.dirHandle, name: im.name });
-    });
-    node.folders.forEach(function(fo){ buildIndex(fo, index, imgIndex); });
-  }
-
-  // Цепочка имён папок от корня до узла (для узла-корня — пустой массив)
-  // — используется, чтобы после пересканирования (новый объект дерева,
-  // старые ссылки на узлы уже не годятся) найти "то же самое" место и не
-  // сбрасывать пользователя в корень, если он успел куда-то перейти, пока
-  // сканирование шло в фоне (см. rescan/shapeToStubNode ниже).
+  // Цепочка имён папок от корня до узла — используется, чтобы после
+  // перестроения дерева (новый объект, старые ссылки на узлы не годятся)
+  // найти "то же самое" место, а не сбрасывать пользователя в корень.
   function folderPath(node){
     var path = [];
     var n = node;
@@ -760,325 +1166,540 @@ window.initMdEditorModule = function(deps){
     }
     return n;
   }
-
-  // "Форма" дерева без FileSystemHandle — только имена папок/заметок/
-  // картинок, поэтому спокойно кладётся в IndexedDB и мгновенно читается
-  // обратно при следующем открытии вкладки (см. shapeToStubNode и
-  // initFromStoredHandle ниже — ТЗ пользователя от 31.08: "открываться
-  // должно всё мгновенно").
-  function treeToShape(node){
-    var shape = {
-      folders: node.folders.map(treeToShape),
-      files: node.files.map(function(f){ return { name: f.name }; }),
-      images: (node.images || []).map(function(im){ return { name: im.name }; })
-    };
-    if(node.name) shape.name = node.name; // у корня имя пустое — не сохраняем
-    return shape;
-  }
-  // Обратное превращение — черновое дерево из кэша, по форме идентичное
-  // настоящему (те же folders/files/images/parent), но с handle: null у
-  // каждого файла/картинки. Список из такого дерева рисуется точно так
-  // же, как из настоящего (см. renderListScreen), просто клик по строке
-  // с ещё не готовым handle ждёт окончания настоящего сканирования (см.
-  // openNoteByEntry/openStubItemWhenReady) вместо мгновенной ошибки.
-  function shapeToStubNode(shape, parent){
-    var node = { dirHandle: null, name: shape.name || "", folders: [], files: [], images: [], stub: true };
-    if(parent) node.parent = parent;
-    node.folders = (shape.folders || []).map(function(fs){ return shapeToStubNode(fs, node); });
-    node.files = (shape.files || []).map(function(f){ return { name: f.name, handle: null }; });
-    node.images = (shape.images || []).map(function(im){ return { name: im.name, handle: null }; });
-    return node;
-  }
-
-  async function rescan(){
-    // Раньше перенос "потерявшихся" картинок/mp3 (см. migrateStrayMediaFiles
-    // ниже) выполнялся ПЕРЕД построением дерева и блокировал появление
-    // списка заметок целиком — если файлов для переноса было много (каждый
-    // читается/пишется/удаляется ПО ОДНОМУ, последовательно), сканирование
-    // могло зависать на много секунд, и список не показывался вообще (см.
-    // ТЗ пользователя от 31.08). Само дерево .md заметок этой миграцией не
-    // затрагивается (переносятся только картинки/mp3, см.
-    // MEDIA_MOVE_EXT_RE), а imageIndex строится по ВСЕМУ дереву независимо
-    // от того, в какой конкретно папке физически лежит файл — поэтому
-    // список и открытие заметок с картинками корректны и без ожидания
-    // миграции. Сначала строим дерево/индекс (быстро, список появляется
-    // сразу), перенос запускаем следом, в фоне, не блокируя rescan().
-    var tree = await scanTree(dirHandle);
-    tree.name = "";
-    // Сохраняем текущее положение в дереве ДО того, как оно будет
-    // заменено новым объектом — актуально прежде всего для фонового
-    // пересканирования поверх мгновенно показанного кэша (см.
-    // initFromStoredHandle): пока оно шло, пользователь мог успеть зайти
-    // в какую-то папку, и после замены дерева его не должно откидывать
-    // обратно в корень.
+  function rebuildTree(){
     var oldPath = currentDirNode ? folderPath(currentDirNode) : null;
-    rootTree = tree;
-    currentDirNode = oldPath ? (findNodeByPath(tree, oldPath) || tree) : tree;
-    var idx = new Map();
-    var imgIdx = new Map();
-    buildIndex(tree, idx, imgIdx);
-    nameIndex = idx;
-    imageIndex = imgIdx;
-    // заметки, отсутствующие локально на ЭТОМ устройстве (не синхронизированы
-    // Syncthing'ом сюда, либо переименованы/удалены), больше не выкидывают
-    // закладку из общего (облачного) списка — она синхронизируется в
-    // облаке вместе с остальными данными (см. getSyncedBookmarkNames/
-    // setSyncedBookmark выше), поэтому не может быть удалена только на
-    // основании того, что файла нет именно здесь: он вполне может быть
-    // на другом устройстве. renderBookmarksScreen сам тихо пропускает
-    // такие имена (см. entry && ... ниже) — они просто временно не
-    // отображаются в списке этого устройства.
-
-    migrateStrayMediaFiles().catch(function(){});
-    // Кэш "формы" дерева (см. treeToShape выше) — используется при
-    // СЛЕДУЮЩЕМ открытии вкладки, чтобы показать список мгновенно, ещё до
-    // окончания настоящего сканирования (см. initFromStoredHandle).
-    // Само сканирование при этом никогда не пропускается — кэш только
-    // ускоряет первую отрисовку, актуальность данных всегда сверяется
-    // заново.
-    idbSet("treeShape", treeToShape(tree)).catch(function(){});
+    rootTree = buildTreeFromNotes();
+    currentDirNode = oldPath ? (findNodeByPath(rootTree, oldPath) || rootTree) : rootTree;
+  }
+  // Уникальность имени по ВСЕМУ дереву без учёта регистра (раздел 2 ТЗ:
+  // перелинковка [[имя]] требует, чтобы двух заметок с одинаковым именем
+  // не существовало одновременно).
+  function isNoteNameTaken(name, exceptId){
+    var id = nameIndex.get((name || "").toLowerCase());
+    return !!(id && id !== exceptId);
   }
 
-  // Клик по строке из мгновенно показанного кэша (см. shapeToStubNode
-  // выше), у которой ещё нет настоящего handle, — вместо ошибки просто
-  // ждём текущее фоновое сканирование (см. pendingRescanPromise) и
-  // открываем по имени уже из настоящего индекса. Название на экране от
-  // этого не меняется — просто открытие происходит на долю секунды позже,
-  // чем клик.
-  function openStubItemWhenReady(name, kind, restorePos, silentFallback, scrollPercent){
-    var p = pendingRescanPromise;
-    if(!p){
-      if(silentFallback){ screen = "list"; render(); return; }
-      setStatus("Не удалось найти файл.", true);
-      return;
-    }
-    if(!silentFallback) setStatus("Открываю…");
-    p.then(function(){
-      setStatus("");
-      var key = name.toLowerCase();
-      if(kind === "image"){
-        var im = imageIndex && imageIndex.get(key);
-        if(im) openImagePreview(im.fileHandle, im.name);
-        else if(!silentFallback) setStatus("Файл не найден.", true);
-      } else {
-        var entry = nameIndex && nameIndex.get(key);
-        if(entry) openNoteByEntry(entry, restorePos, undefined, scrollPercent);
-        else if(silentFallback){ screen = "list"; render(); }
-        else setStatus("Заметка не найдена.", true);
+  // ---- CRUD над notesMap — синхронные, локальные правки; в облако уходят
+  // debounce-пушем (см. ниже, раздел 3 ТЗ) ----
+  var dirtyNoteIds = new Set();
+  function markNoteDirty(id){
+    dirtyNoteIds.add(id);
+    scheduleNotesCachePersist();
+    scheduleNotesCloudPush();
+  }
+  function createNoteRecord(name, path){
+    var id = generateId();
+    var today = todayRu();
+    var text = buildMetaLine(today, today, today);
+    var rec = { id: id, name: name, path: path || "", text: text, t: Date.now() };
+    notesMap.set(id, rec);
+    nameIndex.set(name.toLowerCase(), id);
+    markNoteDirty(id);
+    return rec;
+  }
+  function renameNoteRecord(id, newName){
+    var rec = notesMap.get(id);
+    if(!rec) return false;
+    nameIndex.delete(rec.name.toLowerCase());
+    rec.name = newName;
+    rec.t = Date.now();
+    nameIndex.set(newName.toLowerCase(), id);
+    markNoteDirty(id);
+    return true;
+  }
+  function editNoteRecordText(id, newText){
+    var rec = notesMap.get(id);
+    if(!rec) return;
+    rec.text = newText;
+    rec.t = Date.now();
+    markNoteDirty(id);
+  }
+  function deleteNoteRecord(id){
+    var rec = notesMap.get(id);
+    if(!rec) return;
+    nameIndex.delete(rec.name.toLowerCase());
+    rec.deleted = true;
+    rec.t = Date.now();
+    markNoteDirty(id);
+  }
+  // Правки в тексте ДРУГИХ заметок при переименовании (замена [[старое]] на
+  // [[новое]] — существовавшая и раньше фича, см. историю правок) — теперь
+  // просто синхронный проход по notesMap в памяти, без файлового I/O.
+  function propagateRenameInMemory(oldName, newName){
+    var esc = oldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    var re = new RegExp("\\[\\[(" + esc + ")\\]\\]", "gi");
+    notesMap.forEach(function(rec, id){
+      if(rec.deleted || !rec.text) return;
+      re.lastIndex = 0;
+      if(!re.test(rec.text)) return;
+      re.lastIndex = 0;
+      rec.text = rec.text.replace(re, "[[" + newName + "]]");
+      rec.t = Date.now();
+      markNoteDirty(id);
+      if(openFile && openFile.id === id){
+        openFile.text = rec.text;
+        if(cmView) cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: rec.text } });
       }
-    }, function(){
-      if(silentFallback){ screen = "list"; render(); return; }
-      setStatus("Не удалось обновить список. Попробуйте открыть заметку ещё раз.", true);
     });
   }
 
-  async function ensurePermissionSilently(handle){
+  // ---------------------------------------------------------------------
+  // ИМПОРТ / ЭКСПОРТ .md И .zip (TASK_MDNOTES_CLOUD.md, шаг 2 "Интерфейс
+  // списка", раздел 5-7 ТЗ). Кнопки — последние элементы прокручиваемого
+  // списка заметок, см. renderListScreen ниже; кнопка скачивания ОДНОЙ
+  // заметки — в шапке открытой заметки, см. renderEditorScreen.
+  // ---------------------------------------------------------------------
+
+  // Скачивание произвольного Blob — общий приём (createObjectURL + клик по
+  // временной невидимой ссылке), используется и для .md, и для .zip ниже.
+  function triggerBlobDownload(blob, filename){
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){
+      if(a.parentNode) a.parentNode.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 0);
+  }
+
+  // Заметка -> имя файла .md внутри архива, с учётом её "папки" (path,
+  // см. buildTreeFromNotes выше) — сохраняем структуру дерева в zip
+  // (раздел 6 ТЗ: "с сохранением структуры папок через MiniZip.createZip").
+  function noteZipEntryName(rec){
+    return (rec.path ? rec.path + "/" : "") + rec.name + ".md";
+  }
+
+  // Раздел 6 ТЗ: скачать ОДНУ открытую заметку как .md-файл — кнопка в
+  // шапке экрана редактора (см. renderEditorScreen).
+  function downloadSingleNote(){
+    if(!openFile) return;
+    var blob = new Blob([openFile.text], { type: "text/markdown;charset=utf-8" });
+    triggerBlobDownload(blob, openFile.name + ".md");
+  }
+
+  // Раздел 6 ТЗ: скачать ВСЕ заметки пользователя как .zip, расшифровывая
+  // на лету (заметки в памяти, notesMap, УЖЕ расшифрованы — шифруется
+  // только то, что уходит/приходит из Firebase, см. encryptNotePayload/
+  // decryptNotePayload выше) — с сохранением структуры папок.
+  function downloadAllNotesZip(){
+    if(!MiniZip){
+      setStatus("Не удалось собрать .zip: модуль ZIP не загружен.", true);
+      return;
+    }
+    var files = [];
+    notesMap.forEach(function(rec){
+      if(!rec || rec.deleted || !rec.name) return;
+      files.push({ name: noteZipEntryName(rec), data: new TextEncoder().encode(rec.text || "") });
+    });
+    if(!files.length){
+      setStatus("Заметок пока нет — нечего скачивать.", true);
+      return;
+    }
     try{
-      return (await handle.queryPermission({ mode: "readwrite" })) === "granted";
-    }catch(e){ return false; }
+      var zipBytes = MiniZip.createZip(files);
+      var blob = new Blob([zipBytes], { type: "application/zip" });
+      triggerBlobDownload(blob, "Мой блокнот.zip");
+    }catch(e){
+      setStatus("Не удалось собрать .zip: " + (e && e.message ? e.message : e), true);
+    }
+  }
+
+  // ---- импорт: создание записи заметки БЕЗ форсирования строки метаданных
+  // (в отличие от createNoteRecord выше, которая пишет её сразу для
+  // ЗАВЕДОМО новой пустой заметки) — импортированный текст сохраняется как
+  // есть; своя строка метаданных допишется при первом реальном
+  // автосохранении, как и у любой "старой" заметки без неё (см.
+  // parseNoteMeta/virtualLegacyDatePairRu выше). ----
+  function createImportedNoteRecord(name, path, text){
+    var id = generateId();
+    var rec = { id: id, name: name, path: path || "", text: text || "", t: Date.now() };
+    notesMap.set(id, rec);
+    nameIndex.set(name.toLowerCase(), id);
+    markNoteDirty(id);
+    recordNoteCreated(name);
+    return rec;
+  }
+
+  // Подбирает свободное имя вида "имя (2)", "имя (3)", ... — используется,
+  // когда пользователь выбирает "Переименовать" при конфликте имени во
+  // время импорта (раздел 5 ТЗ) вместо ввода имени вручную с нуля.
+  function suggestFreeName(name){
+    var m = /^(.*) \((\d+)\)$/.exec(name);
+    var base = m ? m[1] : name;
+    var n = m ? Number(m[2]) + 1 : 2;
+    var candidate;
+    do{
+      candidate = base + " (" + n + ")";
+      n++;
+    } while(isNoteNameTaken(candidate));
+    return candidate;
   }
 
   // ---------------------------------------------------------------------
-  // Папка "files" — единое место для всех вложений (картинок и mp3, см.
-  // MEDIA_MOVE_EXT_RE выше). Файлы этих расширений, лежащие где-то ещё в
-  // дереве (например, в самом корне — пользователь мог просто перетащить
-  // их туда через проводник), при каждом сканировании автоматически
-  // переносятся сюда (см. ТЗ пользователя от 31.08). Картинки в заметках
-  // ищутся по имени по всему дереву (см. imageIndex/buildIndex выше), а
-  // не по папке конкретной заметки — поэтому от их физического
-  // расположения ничего не зависит, переносить их безопасно.
+  // Диалог конфликта имени при импорте (раздел 5 ТЗ: "спросить
+  // пользователя, что делать" — явно запрещены молчаливая перезапись и
+  // молчаливое переименование). Тот же приём карточки поверх окна
+  // настроек, что и у openNewNoteDialog/confirmDeleteNote выше
+  // (.mdeditor-cleanup-overlay/-card). При импорте .zip с несколькими
+  // конфликтами показывается по одному, если не отмечена галочка
+  // "применить ко всем следующим" — тогда выбранное действие применяется
+  // без дальнейших вопросов к оставшимся конфликтам этого же импорта.
+  // Возвращает Promise<{action:"replace"|"rename"|"skip", newName, applyToAll}>.
   // ---------------------------------------------------------------------
-  async function ensureFilesFolder(){
-    return await dirHandle.getDirectoryHandle(FILES_FOLDER_NAME, { create: true });
-  }
+  function resolveNameConflict(name, remainingCount){
+    return new Promise(function(resolve){
+      var box = document.querySelector(".settings-modal-box");
+      if(!box){ resolve({ action: "skip", applyToAll: false }); return; }
+      var overlay = document.createElement("div");
+      overlay.className = "mdeditor-cleanup-overlay";
+      var card = document.createElement("div");
+      card.className = "mdeditor-cleanup-card";
+      card.innerHTML =
+        '<div class="mdeditor-cleanup-title"></div>' +
+        '<div class="mdeditor-cleanup-actions mdeditor-cleanup-actions-wrap" id="mdEditorConflictActions">' +
+          '<button type="button" class="mdeditor-cleanup-cancel" id="mdEditorConflictSkip">Пропустить</button>' +
+          '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="mdEditorConflictRename">Переименовать</button>' +
+          '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-danger" id="mdEditorConflictReplace">Заменить</button>' +
+        '</div>' +
+        (remainingCount > 1 ?
+          '<label class="mdeditor-cleanup-checkbox-row">' +
+            '<input type="checkbox" id="mdEditorConflictApplyAll">' +
+            '<span>Применить ко всем следующим конфликтам (' + remainingCount + ')</span>' +
+          '</label>' : '');
+      card.querySelector(".mdeditor-cleanup-title").textContent = 'Заметка «' + name + '» уже существует.';
+      overlay.appendChild(card);
+      box.appendChild(overlay);
 
-  // рекурсивно собирает файлы нужных расширений по всему дереву (кроме
-  // самой папки "files" в корне — её содержимое не трогаем)
-  async function collectStrayMediaEntries(dh, isRootLevel, out){
-    for await (var pair of dh.entries()){
-      var name = pair[0], handle = pair[1];
-      if(handle.kind === "file"){
-        if(MEDIA_MOVE_EXT_RE.test(name)) out.push({ dh: dh, handle: handle, name: name });
-      } else if(handle.kind === "directory"){
-        if(isRootLevel && name === FILES_FOLDER_NAME) continue;
-        await collectStrayMediaEntries(handle, false, out);
+      function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+      function applyAll(){
+        var cb = document.getElementById("mdEditorConflictApplyAll");
+        return !!(cb && cb.checked);
       }
-    }
-  }
-
-  // переносит один файл в "files" — копирует содержимое и удаляет
-  // оригинал; если в "files" УЖЕ есть файл с таким именем, ничего не
-  // перезаписывает и оставляет файл на старом месте (конфликт имён
-  // пользователь решает сам, переименовав один из файлов)
-  async function moveFileIntoFilesFolder(entry, filesDirHandle){
-    try{ await filesDirHandle.getFileHandle(entry.name); return false; }
-    catch(e){ /* такого имени в "files" ещё нет — переносим */ }
-    var file = await entry.handle.getFile();
-    var buf = await file.arrayBuffer();
-    var newHandle = await filesDirHandle.getFileHandle(entry.name, { create: true });
-    var writable = await newHandle.createWritable();
-    await writable.write(buf);
-    await writable.close();
-    await entry.dh.removeEntry(entry.name);
-    return true;
-  }
-
-  async function migrateStrayMediaFiles(){
-    if(!dirHandle) return;
-    var filesDirHandle;
-    try{ filesDirHandle = await ensureFilesFolder(); }catch(e){ return; }
-    var entries = [];
-    try{ await collectStrayMediaEntries(dirHandle, true, entries); }catch(e){ return; }
-    // Если несколько файлов из РАЗНЫХ папок называются одинаково — в
-    // "files" переезжает только первый (по порядку обхода), остальные
-    // остаются на месте, ровно как и раньше при последовательном переносе
-    // одного за другим (конфликт имён пользователь решает сам). Помечаем
-    // дубликаты здесь, ДО запуска параллельно, а не полагаемся на
-    // проверку "такое имя уже есть в files" внутри moveFileIntoFilesFolder
-    // — при параллельном переносе несколько таких проверок могли бы
-    // одновременно не увидеть друг друга и одинаково "выиграть" гонку.
-    var seenNames = new Set();
-    var toMigrate = [];
-    for(var i = 0; i < entries.length; i++){
-      var key = entries[i].name.toLowerCase();
-      if(seenNames.has(key)) continue;
-      seenNames.add(key);
-      toMigrate.push(entries[i]);
-    }
-    await Promise.all(toMigrate.map(function(entry){
-      return moveFileIntoFilesFolder(entry, filesDirHandle).catch(function(){
-        /* пропускаем один файл — не мешаем переносу остальных */
+      document.getElementById("mdEditorConflictSkip").addEventListener("click", function(){
+        var aa = applyAll(); close(); resolve({ action: "skip", applyToAll: aa });
       });
-    }));
+      document.getElementById("mdEditorConflictReplace").addEventListener("click", function(){
+        var aa = applyAll(); close(); resolve({ action: "replace", applyToAll: aa });
+      });
+      document.getElementById("mdEditorConflictRename").addEventListener("click", function(){
+        var aa = applyAll();
+        var suggested = suggestFreeName(name);
+        card.innerHTML =
+          '<div class="mdeditor-cleanup-title">Новое имя заметки</div>' +
+          '<input type="text" class="mdeditor-cleanup-input" id="mdEditorConflictRenameInput">' +
+          '<div class="mdeditor-cleanup-actions">' +
+            '<button type="button" class="mdeditor-cleanup-cancel" id="mdEditorConflictRenameCancel">Отмена</button>' +
+            '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="mdEditorConflictRenameOk">Сохранить</button>' +
+          '</div>';
+        var input = document.getElementById("mdEditorConflictRenameInput");
+        input.value = suggested;
+        input.focus();
+        input.select();
+        function submitRename(){
+          var newName = (input.value || "").trim();
+          if(!newName){ return; }
+          if(isNoteNameTaken(newName)){
+            input.style.borderColor = "var(--danger, #c0392b)";
+            return;
+          }
+          close();
+          resolve({ action: "rename", newName: newName, applyToAll: aa });
+        }
+        document.getElementById("mdEditorConflictRenameCancel").addEventListener("click", function(){
+          close(); resolve({ action: "skip", applyToAll: aa });
+        });
+        document.getElementById("mdEditorConflictRenameOk").addEventListener("click", submitRename);
+        input.addEventListener("keydown", function(ev){
+          if(ev.key === "Enter"){ ev.preventDefault(); submitRename(); }
+          else if(ev.key === "Escape"){ ev.preventDefault(); close(); resolve({ action: "skip", applyToAll: aa }); }
+        });
+      });
+      overlay.addEventListener("click", function(ev){
+        if(ev.target === overlay){ close(); resolve({ action: "skip", applyToAll: false }); }
+      });
+    });
   }
 
-  // ---------------------------------------------------------------------
-  // "Удалить неиспользуемые файлы" (см. кнопка-корзина в renderListScreen,
-  // ТЗ пользователя от 04.09) — если заметка с картинкой была удалена НЕ
-  // через это приложение (например, файл .md стёрт прямо в системе, а
-  // Syncthing разнёс удаление на другие устройства), сама картинка в
-  // "files" остаётся сиротой навсегда — её никто и никогда больше не
-  // упоминает ни в одной заметке. Ищем такие файлы и удаляем их СРАЗУ, без
-  // подтверждения по каждому файлу (см. ТЗ пользователя от 05.09: папку
-  // "files" использует только этот блокнот, а раз файл не встретился ни в
-  // одной заметке — включая все остальные, где та же картинка могла быть
-  // вставлена ещё раз, см. collectReferencedMediaNames ниже — значит он
-  // точно больше нигде не нужен).
-  //
-  // "Использованным" файл считается, если хоть где-то в тексте хоть
-  // одной заметки встречается его точное имя в синтаксисе вставки
-  // картинки ![[имя.ext]] (см. imgRe в decorations ниже — тот же
-  // синтаксис, тот же способ его найти). Расширения, которых это
-  // касается — те же, что переносятся в "files" при сканировании (см.
-  // MEDIA_MOVE_EXT_RE выше: картинки и mp3) — остальные типы файлов,
-  // если вдруг оказались в "files" вручную, не трогаем: не наша папка,
-  // не нам её убирать.
-  // ---------------------------------------------------------------------
-  var CLEANUP_EMBED_RE = /!\[\[([^\[\]\n]+)\]\]/g;
-
-  async function collectReferencedMediaNames(){
-    var referenced = new Set();
-    if(!nameIndex) return referenced;
-    var entries = Array.from(nameIndex.values());
-    for(var i = 0; i < entries.length; i++){
-      var text;
-      try{
-        var file = await entries[i].fileHandle.getFile();
-        text = await file.text();
-      }catch(e){
-        // не удалось прочитать саму заметку — просто не учитываем её
-        // ссылки, на итог это не влияет иначе, чем недосчитаться какой-то
-        // одной ссылки
-        continue;
-      }
-      var re = new RegExp(CLEANUP_EMBED_RE.source, "g"), m;
-      while((m = re.exec(text))){
-        var nm = m[1].trim();
-        if(nm) referenced.add(nm.toLowerCase());
-      }
-    }
-    return referenced;
-  }
-
-  async function findOrphanedFiles(){
-    var filesDirHandle = await ensureFilesFolder();
-    var referenced = await collectReferencedMediaNames();
-    var orphans = [];
-    for await (var pair of filesDirHandle.entries()){
-      var name = pair[0], handle = pair[1];
-      if(handle.kind !== "file") continue;
-      if(!MEDIA_MOVE_EXT_RE.test(name)) continue;
-      if(!referenced.has(name.toLowerCase())) orphans.push({ name: name });
-    }
-    orphans.sort(function(a, b){ return a.name.localeCompare(b.name, "ru", { sensitivity: "base" }); });
-    return { filesDirHandle: filesDirHandle, orphans: orphans };
-  }
-
-  // Та же подложка поверх .settings-modal-box, что и у полноэкранного
-  // просмотра картинки (см. openImagePreview и .mdeditor-image-overlay/
-  // .mdeditor-cleanup-overlay в components.css) — но здесь только статус
-  // и итог, без списка на подтверждение: найденные сироты удаляются сразу
-  // же, по клику на кнопку-корзину.
-  async function openCleanupDialog(){
+  // Простое информационное окно с одной кнопкой "Понятно" — тот же
+  // .mdeditor-cleanup-card, что и у диалогов выше, но без выбора (раздел 5
+  // ТЗ: предупреждение, что картинки/прочие файлы из архива не перенесены).
+  function showImportInfoDialog(message){
     var box = document.querySelector(".settings-modal-box");
     if(!box) return;
     var overlay = document.createElement("div");
     overlay.className = "mdeditor-cleanup-overlay";
     var card = document.createElement("div");
     card.className = "mdeditor-cleanup-card";
-    card.innerHTML = '<div class="mdeditor-cleanup-title">Ищем и удаляем неиспользуемые файлы…</div>';
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title"></div>' +
+      '<div class="mdeditor-cleanup-actions">' +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="mdEditorImportInfoOk">Понятно</button>' +
+      '</div>';
+    card.querySelector(".mdeditor-cleanup-title").textContent = message;
     overlay.appendChild(card);
     box.appendChild(overlay);
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    document.getElementById("mdEditorImportInfoOk").addEventListener("click", close);
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+  }
 
-    function close(){
-      if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
+  // Импортирует последовательно набор записей {name, path, text}
+  // (одна для .md-файла, несколько для .zip — см. вызовы ниже). Конфликты
+  // имени разрешаются по очереди через resolveNameConflict, если не
+  // включено "применить ко всем" (тогда — rememberedChoice без вопросов).
+  // Возвращает Promise<{imported, replaced, skipped}>.
+  function importNoteEntries(entries){
+    var imported = 0, replaced = 0, skipped = 0;
+    var rememberedChoice = null; // {action, newName?} — если applyToAll был отмечен
+    var i = 0;
+    function next(){
+      if(i >= entries.length) return Promise.resolve({ imported: imported, replaced: replaced, skipped: skipped });
+      var entry = entries[i++];
+      var name = entry.name, path = entry.path, text = entry.text;
+      if(!isNoteNameTaken(name)){
+        createImportedNoteRecord(name, path, text);
+        imported++;
+        return next();
+      }
+      var decisionPromise;
+      if(rememberedChoice){
+        // "rename" из применённого ко всем решения — суффикс подбирается
+        // заново для каждого конфликта, конкретное имя из первого раза не
+        // переиспользуется (см. resolveNameConflict/suggestFreeName).
+        decisionPromise = Promise.resolve({
+          action: rememberedChoice.action,
+          newName: rememberedChoice.action === "rename" ? suggestFreeName(name) : undefined,
+          applyToAll: true
+        });
+      } else {
+        decisionPromise = resolveNameConflict(name, entries.length - i + 1);
+      }
+      return decisionPromise.then(function(decision){
+        if(decision.applyToAll && !rememberedChoice) rememberedChoice = { action: decision.action };
+        if(decision.action === "replace"){
+          var existingId = nameIndex.get(name.toLowerCase());
+          if(existingId) editNoteRecordText(existingId, text);
+          replaced++;
+        } else if(decision.action === "rename"){
+          createImportedNoteRecord(decision.newName, path, text);
+          imported++;
+        } else {
+          skipped++;
+        }
+        return next();
+      });
     }
-    overlay.addEventListener("click", function(ev){
-      if(ev.target === overlay) close();
+    return next();
+  }
+
+  // Обрабатывает выбранный пользователем файл (.md или .zip) — точка входа
+  // для кнопки "Загрузить .md или .zip" (см. renderListScreen ниже).
+  // targetNode — текущая открытая "папка" (одиночный .md кладётся в неё;
+  // структура папок ИЗ .zip самодостаточна и используется как есть,
+  // раздел 5 ТЗ, поэтому targetNode для .zip не участвует).
+  function handleImportFile(file, targetNode){
+    var lowerName = (file.name || "").toLowerCase();
+    if(lowerName.endsWith(".zip")){
+      if(!MiniZip){
+        setStatus("Не удалось прочитать .zip: модуль ZIP не загружен.", true);
+        return;
+      }
+      file.arrayBuffer().then(function(buf){
+        return MiniZip.extractMarkdownFiles(buf);
+      }).then(function(result){
+        var entries = result.mdFiles.map(function(f){
+          var slash = f.path.lastIndexOf("/");
+          var dir = slash >= 0 ? f.path.slice(0, slash) : "";
+          var base = slash >= 0 ? f.path.slice(slash + 1) : f.path;
+          var noteName = base.replace(/\.md$/i, "").trim() || "Без названия";
+          return { name: noteName, path: dir, text: f.text };
+        });
+        if(!entries.length){
+          setStatus("В архиве не найдено файлов .md.", true);
+          return;
+        }
+        return importNoteEntries(entries).then(function(summary){
+          rebuildTree();
+          var container = document.getElementById("settingsTabContent");
+          if(container) render();
+          setStatus("Импортировано: " + summary.imported +
+            (summary.replaced ? ", заменено: " + summary.replaced : "") +
+            (summary.skipped ? ", пропущено: " + summary.skipped : "") + ".", false);
+          if(result.hasOtherFiles){
+            showImportInfoDialog("В архиве были и другие файлы (например, картинки) — они не перенесены. Изображения в «Моём блокноте» подключаются отдельно, через папку картинок.");
+          }
+        });
+      }).catch(function(e){
+        setStatus("Не удалось прочитать .zip: " + (e && e.message ? e.message : e), true);
+      });
+      return;
+    }
+    if(lowerName.endsWith(".md")){
+      file.text().then(function(text){
+        var noteName = file.name.replace(/\.md$/i, "").trim() || "Без названия";
+        return importNoteEntries([{ name: noteName, path: targetNode ? targetNode.path : "", text: text }]);
+      }).then(function(summary){
+        rebuildTree();
+        render();
+        if(summary.imported) setStatus("Заметка загружена.", false);
+        else if(summary.replaced) setStatus("Заметка заменена.", false);
+        else setStatus("Загрузка отменена.", false);
+      }).catch(function(e){
+        setStatus("Не удалось прочитать файл: " + (e && e.message ? e.message : e), true);
+      });
+      return;
+    }
+    setStatus("Выберите файл .md или .zip.", true);
+  }
+
+  // ---- облачный пуш: debounce + повтор с нарастающей паузой, тот же
+  // принцип, что и у общего state, но полностью НЕЗАВИСИМЫЙ цикл (раздел 2
+  // ТЗ) ----
+  var notesPushTimer = null, notesRetryTimer = null, notesRetryCount = 0;
+  var notesSyncInProgress = false, notesPendingPushAfterSync = false;
+  function scheduleNotesCloudPush(){
+    if(!getSyncId()) return;
+    clearTimeout(notesRetryTimer); notesRetryCount = 0;
+    if(notesSyncInProgress){ notesPendingPushAfterSync = true; return; }
+    clearTimeout(notesPushTimer);
+    notesPushTimer = setTimeout(function(){ pushDirtyNotes(false); }, NOTES_PUSH_DEBOUNCE_MS);
+  }
+  // urgent=true — уход со страницы/заметки, просим keepalive у сети (тот
+  // же приём, что и у flushPendingSyncNow в my.js, раздел 3 ТЗ).
+  function pushDirtyNotes(urgent){
+    if(!getSyncId() || !isOnline()) return Promise.resolve();
+    if(notesSyncInProgress){ notesPendingPushAfterSync = true; return Promise.resolve(); }
+    var ids = Array.from(dirtyNoteIds);
+    if(!ids.length) return Promise.resolve();
+    notesSyncInProgress = true;
+    var patch = {};
+    return Promise.all(ids.map(function(id){
+      var rec = notesMap.get(id);
+      if(!rec) return null;
+      if(rec.deleted){
+        patch["notesMeta/" + id] = { t: rec.t, deleted: true };
+        return deleteCloudPath("notes/" + id, { keepalive: urgent }).catch(function(){});
+      }
+      return encryptNotePayload({ name: rec.name, path: rec.path, text: rec.text }).then(function(enc){
+        patch["notes/" + id] = enc;
+        patch["notesMeta/" + id] = { t: rec.t, deleted: false };
+      });
+    })).then(function(){
+      return patchCloud(patch, { keepalive: urgent });
+    }).then(function(){
+      ids.forEach(function(id){ dirtyNoteIds.delete(id); });
+      notesRetryCount = 0;
+      clearTimeout(notesRetryTimer);
+      if(notesPendingPushAfterSync){ notesPendingPushAfterSync = false; scheduleNotesCloudPush(); }
+    }).catch(function(){
+      if(notesRetryCount < NOTES_RETRY_DELAYS.length){
+        var d = NOTES_RETRY_DELAYS[notesRetryCount]; notesRetryCount++;
+        clearTimeout(notesRetryTimer);
+        notesRetryTimer = setTimeout(function(){ pushDirtyNotes(false); }, d);
+      }
+    }).finally(function(){
+      notesSyncInProgress = false;
     });
+  }
 
-    function renderMessage(msg){
-      card.innerHTML = '<div class="mdeditor-cleanup-title"></div>' +
-        '<div class="mdeditor-cleanup-actions"><button type="button" class="mdeditor-cleanup-cancel" id="mdEditorCleanupClose">Закрыть</button></div>';
-      card.querySelector(".mdeditor-cleanup-title").textContent = msg;
-      var btn = document.getElementById("mdEditorCleanupClose");
-      if(btn) btn.addEventListener("click", close);
-    }
-
-    var result;
-    try{
-      result = await findOrphanedFiles();
-    }catch(e){
-      renderMessage("Не удалось проверить файлы: " + (e && e.message ? e.message : String(e)));
-      return;
-    }
-
-    if(!result.orphans.length){
-      renderMessage("Неиспользуемых файлов не найдено.");
-      return;
-    }
-
-    var failedNames = [];
-    for(var i = 0; i < result.orphans.length; i++){
-      try{ await result.filesDirHandle.removeEntry(result.orphans[i].name); }
-      catch(e){ failedNames.push(result.orphans[i].name); }
-    }
-    var doneMsg = failedNames.length
-      ? ("Удалено " + (result.orphans.length - failedNames.length) + " из " + result.orphans.length + ". Не удалось: " + failedNames.join(", "))
-      : ("Удалено файлов: " + result.orphans.length + ".");
-    renderMessage(doneMsg);
-    // rescan() пересобирает imageIndex с нуля — без этого удалённые файлы
-    // могли бы остаться в старом индексе до следующего обычного
-    // пересканирования. render() не вызываем — список заметок этим не
-    // затрагивается (папка "files" и так скрыта, см. renderListScreen).
-    rescan().catch(function(){});
+  // ---- облачный пул: раздел 4.1 ТЗ — сначала лёгкий запрос метаданных,
+  // текст только у заметок, где облачная t новее локальной ----
+  function syncNotesFromCloud(){
+    if(!getSyncId() || !isOnline()) return Promise.resolve();
+    return fetchCloudPath("notesMeta").then(function(meta){
+      meta = meta || {};
+      var toFetch = [];
+      // раздел 4.1 ТЗ: "открытая заметка... должна обновиться" — если
+      // ИМЕННО открытая сейчас в редакторе заметка пришла удалённой с
+      // другого устройства, редактор придётся закрыть; делаем это уже
+      // после того, как notesMap приведён в порядок, см. .then ниже.
+      var openFileDeletedRemotely = false;
+      Object.keys(meta).forEach(function(id){
+        var cloudEntry = meta[id] || {};
+        var local = notesMap.get(id);
+        var cloudT = typeof cloudEntry.t === "number" ? cloudEntry.t : 0;
+        var localT = local ? (local.t || 0) : -1;
+        if(cloudT <= localT) return;
+        if(cloudEntry.deleted){
+          if(local && local.name) nameIndex.delete(local.name.toLowerCase());
+          notesMap.set(id, { id: id, deleted: true, t: cloudT, name: local && local.name, path: local && local.path, text: "" });
+          if(openFile && openFile.id === id && !openFile.dirty) openFileDeletedRemotely = true;
+        } else {
+          toFetch.push(id);
+        }
+      });
+      var fetchPromise = !toFetch.length ? Promise.resolve() : Promise.all(toFetch.map(function(id){
+        return fetchCloudPath("notes/" + id).then(function(enc){
+          if(!enc) return;
+          return decryptNotePayload(enc).then(function(payload){
+            var existing = notesMap.get(id);
+            if(existing && existing.name) nameIndex.delete(existing.name.toLowerCase());
+            notesMap.set(id, { id: id, name: payload.name, path: payload.path, text: payload.text, t: meta[id].t });
+            nameIndex.set(payload.name.toLowerCase(), id);
+            // Заметка, обновлённая с другого устройства, в этот момент
+            // открыта в редакторе на этом — подхватываем текст на месте,
+            // без пересборки всего экрана. Пропускаем, если в ней есть
+            // несохранённые локальные правки (dirty — автосохранение ещё
+            // не сбросило их в notesMap): иначе рискуем стереть то, что
+            // пользователь только что печатает. В этом случае облачная
+            // версия просто останется в notesMap и проиграет при
+            // следующем локальном flushAutosaveNow/pushDirtyNotes (t
+            // пользователя будет свежее) — тем же принципом LWW, что и у
+            // раздела 4.
+            if(openFile && openFile.id === id && !openFile.dirty && cmView){
+              openFile.text = payload.text;
+              openFile.path = payload.path;
+              cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: payload.text } });
+              refreshDatesField();
+            }
+          });
+        }).catch(function(){ /* пропускаем одну заметку — не мешаем остальным */ });
+      }));
+      return fetchPromise.then(function(){
+        persistNotesCache();
+        if(openFileDeletedRemotely){
+          openFile = null;
+          destroyEditor();
+          screen = "list";
+          setStatus("Эта заметка была удалена на другом устройстве.", false);
+        }
+      });
+    });
   }
 
   // ---------------------------------------------------------------------
-  // Точка входа — вызывается из switchSettingsTab при каждом открытии
-  // вкладки. Состояние (dirHandle/дерево/открытая заметка) переживает
+  // Точки входа вкладок — вызываются из switchSettingsTab при каждом
+  // открытии. Состояние (notesMap/открытая заметка) переживает
   // переключения между вкладками настроек в рамках одной сессии.
   // ---------------------------------------------------------------------
+  // раздел 4.1 ТЗ: лёгкая сверка с облаком (метаданные всех заметок, точечно
+  // текст только у изменившихся, см. syncNotesFromCloud) — обязательна при
+  // КАЖДОМ переходе на вкладку "Мой блокнот"/"Закладки"/"Забытые заметки",
+  // а не только при самом первом её открытии за сессию (это было упущено —
+  // initNotesModule ниже запускался лишь один раз, под флагом initStarted,
+  // и на повторные заходы на вкладку сверка вообще не срабатывала). Не
+  // блокирует немедленный локальный рендер из кэша — сверка идёт фоном,
+  // экран обновляется только если результат реально что-то изменил и мы
+  // всё ещё на подходящем экране (список/закладки/забытые — не поверх
+  // активно открытого редактора, см. проверку ниже и обновление самой
+  // открытой заметки внутри syncNotesFromCloud).
+  function syncNotesOnTabEnter(){
+    if(!getSyncId() || !notesReady) return;
+    syncNotesFromCloud().then(function(){
+      rebuildTree();
+      maybeRunImageCleanup(); // свежие заметки с облака могли изменить список используемых картинок
+      // "Забытые заметки" кэширует список в forgottenNotesData (см. выше) и
+      // сам его не перечитывает при простом render() — без явного сброса
+      // фоновая сверка не долистнула бы туда новые/удалённые заметки.
+      if(activeMdTab === "forgotten") forgottenNotesData = null;
+      if(screen === "list" || activeMdTab === "bookmarks" || activeMdTab === "forgotten") render();
+    });
+  }
+
   function renderSettingsTabMdEditor(){
     activeMdTab = "editor";
     var container = document.getElementById("settingsTabContent");
@@ -1086,21 +1707,12 @@ window.initMdEditorModule = function(deps){
     if(!initStarted){
       initStarted = true;
       container.innerHTML = '<div class="mdeditor-tab mdeditor-hint">Загрузка…</div>';
-      initFromStoredHandle();
+      initNotesModule();
       return;
     }
     render();
+    syncNotesOnTabEnter();
   }
-
-  // ---------------------------------------------------------------------
-  // Точка входа для вкладки "Закладки" (вторая боковая вкладка второго
-  // набора, settingsTabSet2Btn2 / "set2s_2") — та же папка (File System
-  // Access API), что и у "Моего блокнота" (см. activeMdTab выше), просто
-  // показывает плоский отфильтрованный список вместо дерева папок. Если
-  // папка ещё не выбрана — initFromStoredHandle() ниже сам заведёт на
-  // общий экран настройки (render() затем сам решит, что показать, см.
-  // выше).
-  // ---------------------------------------------------------------------
   function renderSettingsTabMdBookmarks(){
     activeMdTab = "bookmarks";
     var container = document.getElementById("settingsTabContent");
@@ -1108,154 +1720,38 @@ window.initMdEditorModule = function(deps){
     if(!initStarted){
       initStarted = true;
       container.innerHTML = '<div class="mdeditor-tab mdeditor-hint">Загрузка…</div>';
-      initFromStoredHandle();
+      initNotesModule();
       return;
     }
     render();
+    syncNotesOnTabEnter();
   }
 
-  async function initFromStoredHandle(){
-    // fontSizeStep уже загружен и применён сразу при создании модуля
-    // (см. IIFE рядом с объявлением FONT_SIZE_BASE_PX выше) — здесь
-    // повторно грузить его не нужно.
-    try{
-      var stored = await idbGet("root");
-      if(stored){
-        dirHandle = stored;
-        var ok = await ensurePermissionSilently(stored);
-        if(ok){
-          // Запускаем загрузку CodeMirror в фоне ПРЯМО СЕЙЧАС, не дожидаясь
-          // первого открытия заметки — раньше первый клик по заметке всегда
-          // упирался в сетевой import() редактора (см. loadCM выше), теперь
-          // к этому моменту он обычно уже готов или почти готов (ТЗ
-          // пользователя от 31.08: "открываться должно всё мгновенно").
-          loadCM().catch(function(){});
-
-          if(pendingExternalOpen){
-            // заметку попросили открыть ИЗВНЕ ещё до того, как папка
-            // успела просканироваться (см. openNoteExternally ниже) —
-            // список тут вообще не нужен, ждём настоящее сканирование и
-            // сразу открываем нужную заметку.
-            pendingRescanPromise = rescan();
-            await pendingRescanPromise;
-            pendingRescanPromise = null;
-            var name = pendingExternalOpen;
-            pendingExternalOpen = null;
-            handleLinkClick(name);
-            return;
-          }
-
-          // Мгновенный показ списка из кэша ПРЕДЫДУЩЕГО сканирования (см.
-          // treeToShape/idbSet("treeShape") в rescan() выше), пока
-          // настоящее сканирование (теперь полностью параллельное, см.
-          // scanTree) идёт в фоне. Если кэша ещё нет (самый первый запуск
-          // после выбора папки) — просто ждём как раньше. Строки, для
-          // которых кэш ещё не подтверждён реальным сканированием, при
-          // клике не ломаются, а ждут его окончания (см.
-          // openStubItemWhenReady/openNoteByEntry) — свежие/удалённые
-          // заметки в любом случае появятся/пропадут из списка, как только
-          // настоящее сканирование закончится.
-          var cachedShape = null;
-          try{ cachedShape = await idbGet("treeShape"); }catch(e){}
-          var haveStub = false;
-          if(cachedShape){
-            try{
-              var stub = shapeToStubNode(cachedShape, null);
-              stub.name = "";
-              rootTree = stub;
-              currentDirNode = stub;
-              var sIdx = new Map(), sImgIdx = new Map();
-              buildIndex(stub, sIdx, sImgIdx);
-              nameIndex = sIdx;
-              imageIndex = sImgIdx;
-              haveStub = true;
-            }catch(e){ haveStub = false; }
-          }
-
-          pendingRescanPromise = rescan();
-
-          // "Продолжить с той же заметки" (см. persistDocStateNow/
-          // flushDocStateNow/scheduleDocStateSave выше) — читаем ОДИН раз
-          // здесь, до ветвления на haveStub/не-haveStub, и используем в
-          // обеих ветках ниже. Читаем СРАЗУ ДВЕ копии состояния — локальную
-          // из IndexedDB и файловую с диска (.mdeditor-state.json,
-          // см. readDocStateFromDisk) — и берём ту, что новее по updatedAt:
-          // файловая копия могла приехать через Syncthing с ДРУГОГО
-          // устройства уже после того, как это устройство в последний раз
-          // писало в свою собственную IndexedDB (см. ТЗ пользователя от
-          // 01.09, пункт 3). Если заметки с таким именем не нашлось
-          // (переименована/удалена со времени последнего запуска) —
-          // openStubItemWhenReady с silentFallback=true сам вернёт на
-          // список, без сообщения об ошибке (см. ниже). screen !== "editor"
-          // (например, пользователь в прошлый раз явно ушёл на список
-          // кнопкой "домой" — см. goHome) означает, что автоматически
-          // открывать заметку не нужно (см. ТЗ, пункт 2).
-          var diskStatePromise = readDocStateFromDisk();
-          var localState = null;
-          try{ localState = await idbGet("lastNote"); }catch(e){}
-          var diskState = null;
-          try{ diskState = await diskStatePromise; }catch(e){}
-          var resolvedState = localState;
-          if(diskState && (!localState || (diskState.updatedAt || 0) > (localState.updatedAt || 0))){
-            resolvedState = diskState;
-          }
-          for(var k in resolvedState){ if(resolvedState.hasOwnProperty(k)) docState[k] = resolvedState[k]; }
-          var lastNote = docState;
-
-          if(haveStub){
-            var resumedFromStub = (lastNote.screen === "editor" && lastNote.name) ? nameIndex.get(lastNote.name.toLowerCase()) : null;
-            if(resumedFromStub){
-              openNoteByEntry(resumedFromStub, lastNote.cursorPos, true, lastNote.scrollPercent);
-            } else {
-              screen = "list";
-              render();
-            }
-            pendingRescanPromise.then(function(){
-              pendingRescanPromise = null;
-              // перерисовываем, только если пользователь всё ещё смотрит
-              // список (а не уже открыл заметку из кэша и т.п.) — заметку,
-              // открытую тем временем через openStubItemWhenReady, лишний
-              // render() тут не потревожит.
-              if(screen === "list") render();
-            }, function(){ pendingRescanPromise = null; });
-            return;
-          }
-
-          await pendingRescanPromise;
-          pendingRescanPromise = null;
-          var resumedEntry = (lastNote.screen === "editor" && lastNote.name) ? nameIndex.get(lastNote.name.toLowerCase()) : null;
-          if(resumedEntry){
-            openNoteByEntry(resumedEntry, lastNote.cursorPos, undefined, lastNote.scrollPercent);
-          } else {
-            screen = "list";
-            render();
-          }
-          return;
-        }
-        setupNeedsPermission = true;
-        screen = "setup";
-        render();
-        return;
-      }
-    }catch(e){}
-    setupNeedsPermission = false;
-    screen = "setup";
-    render();
+  // Загрузка локального кэша (мгновенно, офлайн) + первая фоновая сверка с
+  // облаком, см. syncNotesOnTabEnter выше (тот же вызов используется и здесь,
+  // и при каждом последующем переходе на вкладку). Без syncId вкладка не
+  // работает (раздел 1 ТЗ) — экран объясняет это и предлагает настроить
+  // синхронизацию, а не заводит отдельный контур.
+  function initNotesModule(){
+    if(!getSyncId()){
+      screen = "setup";
+      render();
+      return;
+    }
+    loadNotesCache().then(function(){
+      rebuildTree();
+      notesReady = true;
+      resumeLastNoteOrShowList();
+      maybeRunImageCleanup(); // папка картинок могла быть готова раньше notesMap (см. loadStoredImagesDirHandle)
+      syncNotesOnTabEnter();
+    });
   }
 
-  // Открывает заметку по имени СНАРУЖИ модуля — используется, когда клик
-  // по [[ссылке]] произошёл НЕ внутри "Моего блокнота" (например, в
-  // тексте задачи GTD на другой вкладке, см. initAutoFormatting в my.js):
-  // сначала вызывающий код переключает вкладку настроек на "Мой блокнот"
-  // (switchSettingsTab("set2s_1") — обычный публичный API my.js), а сразу
-  // следом — этот метод. Поведение то же, что и у клика по [[ссылке]]
-  // ВНУТРИ самого блокнота (см. handleLinkClick выше), включая
-  // автосоздание отсутствующей заметки. Если инициализация (выбор папки/
-  // сканирование) ещё не завершилась — запоминает имя и открывает его
-  // сразу по готовности (см. конец initFromStoredHandle выше).
+  // Открывает заметку по имени СНАРУЖИ модуля (клик по [[ссылке]] из
+  // другой вкладки, см. handleLinkClick/initAutoFormatting в my.js).
   function openNoteExternally(name){
     suppressNextNavPush = true;
-    if(!nameIndex){
+    if(!notesReady){
       pendingExternalOpen = name;
       return;
     }
@@ -1285,246 +1781,122 @@ window.initMdEditorModule = function(deps){
   }
 
   // ---------------------------------------------------------------------
-  // Экран выбора/переподтверждения папки — виден при первом запуске
-  // вкладки (пока путь не указан) и если браузер отозвал разрешение.
+  // Экран "нет синхронизации" / загрузки — заметки доступны и работают
+  // ТОЛЬКО если на устройстве уже настроена обычная синхронизация (раздел
+  // 1 ТЗ): без неё нет syncId, а значит и ключа шифрования.
   // ---------------------------------------------------------------------
-  // Android WebView-браузеры без полноценного Chromium (например, Hermit)
-  // заявляют showDirectoryPicker в window, но не реализуют сам системный
-  // пикер папок — вызов падает с NotAllowedError про активацию, даже если
-  // клик был настоящим (см. ТЗ пользователя от 01.09: работает в Chrome,
-  // не работает в Hermit). "; wv)" в UA — стандартный маркер WebView с
-  // Android 5.0+; по нему предупреждаем заранее и даём точную причину при
-  // отказе вместо голого текста ошибки браузера (см. catch ниже).
-  var IS_LIKELY_UNSUPPORTED_WEBVIEW = /;\s*wv\)/i.test(navigator.userAgent);
-
-  // ---------------------------------------------------------------------
-  // Отладочный снимок окружения — по прямому запросу пользователя от 02.09
-  // ("нужен какой-то отладчик в коде, который покажет, что происходит").
-  // Общего сообщения об ошибке недостаточно, чтобы различить причину:
-  // снимаем navigator.userActivation.isActive СИНХРОННО в момент клика
-  // (единственный момент, когда это значение вообще что-то значит — см.
-  // MDN про transient activation) — если оно true, а showDirectoryPicker
-  // всё равно падает с NotAllowedError, значит клик тут ни при чём, дело
-  // в самой реализации браузера. При отказе дополнительно пробуем
-  // showOpenFilePicker() ТОЙ ЖЕ активацией: если он срабатывает, а
-  // showDirectoryPicker нет — ломается именно выбор ПАПКИ, а не File
-  // System Access целиком (см. обсуждение в Chromium про Android:
-  // https://groups.google.com/a/chromium.org/g/blink-dev/c/x3IcFv2jY6c).
-  // У Hermit нет встроенных devtools под рукой, поэтому результат
-  // выводится прямо на экране (см. renderSetupScreen ниже), а не в
-  // консоль.
-  var lastDebugSnapshot = null;
-
-  function captureEnvSnapshot(){
-    return {
-      ua: navigator.userAgent,
-      secure: window.isSecureContext,
-      hasDirPicker: ("showDirectoryPicker" in window),
-      hasOpenPicker: ("showOpenFilePicker" in window),
-      activationIsActive: navigator.userActivation ? navigator.userActivation.isActive : "API недоступен",
-      activationHasBeenActive: navigator.userActivation ? navigator.userActivation.hasBeenActive : "API недоступен",
-      standalone: !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches),
-      looksLikeWebView: IS_LIKELY_UNSUPPORTED_WEBVIEW
-    };
-  }
-
-  function formatDebugSnapshot(s){
-    if(!s) return "";
-    var lines = [
-      "User-Agent: " + s.ua,
-      "Secure context: " + s.secure,
-      "showDirectoryPicker в window: " + s.hasDirPicker,
-      "showOpenFilePicker в window: " + s.hasOpenPicker,
-      "userActivation.isActive в момент клика: " + s.activationIsActive,
-      "userActivation.hasBeenActive: " + s.activationHasBeenActive,
-      "display-mode: standalone: " + s.standalone,
-      'Похоже на WebView по UA ("; wv)"): ' + s.looksLikeWebView
-    ];
-    if("dirPickerResult" in s) lines.push("Результат showDirectoryPicker: " + s.dirPickerResult);
-    if("openPickerTest" in s) lines.push("Доп. тест showOpenFilePicker(): " + s.openPickerTest);
-    return lines.join("\n");
-  }
-
   function renderSetupScreen(container){
-    var hint = setupNeedsPermission
-      ? "Доступ к папке с заметками нужно подтвердить заново."
-      : "Укажите папку с заметками (.md), чтобы начать.";
-    if(IS_LIKELY_UNSUPPORTED_WEBVIEW){
-      hint += " Похоже, это браузер на основе Android WebView (например, Hermit) — такие браузеры обычно не умеют показывать системный выбор папки. Если кнопка ниже не сработает, откройте эту страницу в Chrome.";
+    if(!getSyncId()){
+      container.innerHTML =
+        '<div class="mdeditor-tab settings-content-bottom">' +
+          '<h3 class="workbooks-title">Мой блокнот</h3>' +
+          '<p class="mdeditor-hint">Заметки хранятся в облаке и шифруются кодом синхронизации устройства. Сначала настройте обычную синхронизацию, а затем вернитесь на эту вкладку.</p>' +
+          '<div class="mdeditor-setup-row">' +
+            '<button type="button" class="task-import-attach-btn" id="mdEditorOpenSyncBtn" title="Настроить синхронизацию">' + PAPERCLIP_ICON_SVG + '</button>' +
+          '</div>' +
+          (statusMessage ? '<p class="mdeditor-hint' + (statusIsError ? " error" : "") + '" style="margin-top:10px;' + (statusIsError ? "color:var(--status-err,#c0392b);" : "") + '">' + escName(statusMessage) + '</p>' : "") +
+        '</div>';
+      var btn = document.getElementById("mdEditorOpenSyncBtn");
+      if(btn) btn.addEventListener("click", function(){
+        if(attachPickerBusy) return;
+        attachPickerBusy = true;
+        try{ openSyncModal(); } finally { attachPickerBusy = false; }
+      });
+      return;
     }
-    var debugBlock = (lastDebugSnapshot && statusIsError)
-      ? '<details class="mdeditor-hint" style="margin-top:10px;">' +
-          '<summary style="cursor:pointer;">Подробности (отладка)</summary>' +
-          '<pre style="white-space:pre-wrap;word-break:break-all;font-size:12px;margin-top:6px;">' + escName(formatDebugSnapshot(lastDebugSnapshot)) + '</pre>' +
-        '</details>'
-      : '';
-    container.innerHTML =
-      '<div class="mdeditor-tab settings-content-bottom">' +
-        '<h3 class="workbooks-title">Мой блокнот</h3>' +
-        '<p class="mdeditor-hint">' + hint + '</p>' +
-        '<div class="mdeditor-setup-row">' +
-          '<button type="button" class="task-import-attach-btn" id="mdEditorAttachBtn" title="' +
-            (setupNeedsPermission ? "Подтвердить доступ" : "Выбрать папку") + '">' + PAPERCLIP_ICON_SVG + '</button>' +
-        '</div>' +
-        (statusMessage ? '<p class="mdeditor-hint' + (statusIsError ? ' error' : '') + '" style="margin-top:10px;' + (statusIsError ? 'color:var(--status-err,#c0392b);' : '') + '">' + escName(statusMessage) + '</p>' : '') +
-        debugBlock +
-      '</div>';
-
-    document.getElementById("mdEditorAttachBtn").addEventListener("click", async function(){
-      if(attachPickerBusy) return;
-      attachPickerBusy = true;
-      statusMessage = "";
-      var snap = captureEnvSnapshot();
-      lastDebugSnapshot = snap;
-      try{
-        if(setupNeedsPermission && dirHandle){
-          var perm = await dirHandle.requestPermission({ mode: "readwrite" });
-          if(perm !== "granted"){
-            statusMessage = "Доступ не предоставлен."; statusIsError = true; render(); return;
-          }
-        } else {
-          if(!("showDirectoryPicker" in window)){
-            statusMessage = "Этот браузер не поддерживает выбор папки (нужен Chrome или Edge, на Android или на компьютере).";
-            statusIsError = true; render(); return;
-          }
-          var handle;
-          try{
-            handle = await window.showDirectoryPicker({ mode: "readwrite" });
-            snap.dirPickerResult = "успех";
-          }catch(pickerErr){
-            snap.dirPickerResult = (pickerErr && pickerErr.name) + (pickerErr && pickerErr.message ? (": " + pickerErr.message) : "");
-            // Доп. тест ТОЙ ЖЕ активацией — см. комментарий про
-            // lastDebugSnapshot выше.
-            if(pickerErr && pickerErr.name === "NotAllowedError" && ("showOpenFilePicker" in window)){
-              try{
-                await window.showOpenFilePicker({ multiple:false });
-                snap.openPickerTest = "сработал (диалог открылся) — проблема именно в выборе ПАПКИ";
-              }catch(secErr){
-                if(secErr && secErr.name === "AbortError"){
-                  snap.openPickerTest = "сработал (диалог открылся, отменено) — проблема именно в выборе ПАПКИ";
-                } else {
-                  snap.openPickerTest = "тоже отказал: " + (secErr && secErr.name) + (secErr && secErr.message ? (": " + secErr.message) : "");
-                }
-              }
-            }
-            throw pickerErr;
-          }
-          dirHandle = handle;
-          try{ await idbSet("root", handle); }catch(e){}
-          // новая папка — старые URL картинок из прошлой библиотеки больше
-          // не нужны и указывают на чужие файлы, освобождаем память
-          imageUrlCache.forEach(function(v){ if(v && v.url) URL.revokeObjectURL(v.url); });
-          imageUrlCache.clear();
-        }
-        setupNeedsPermission = false;
-        statusMessage = "Сканируем папку…"; statusIsError = false; render();
-        // редактор грузится параллельно со сканированием, а не только по
-        // первому клику на заметку (см. ТЗ пользователя от 31.08)
-        loadCM().catch(function(){});
-        pendingRescanPromise = rescan();
-        await pendingRescanPromise;
-        pendingRescanPromise = null;
-        statusMessage = "";
-        // "продолжить с той же заметки" (см. ТЗ пользователя от 01.09) —
-        // этот экран показывается именно тогда, когда после закрытия
-        // приложения разрешение на папку пришлось подтверждать заново
-        // (setupNeedsPermission) или папка выбирается впервые; в обоих
-        // случаях нужно попытаться вернуться на последнюю открытую
-        // заметку, а не молча сбрасывать на список (см.
-        // resumeLastNoteOrShowList выше).
-        await resumeLastNoteOrShowList();
-      }catch(e){
-        if(e && e.name === "AbortError") return;
-        // NotAllowedError именно на ПЕРВОМ выборе папки (не на переподтверждении
-        // прав уже сохранённого dirHandle — см. IS_LIKELY_UNSUPPORTED_WEBVIEW
-        // выше) — это не отказ пользователя, а браузер, который заявляет
-        // showDirectoryPicker, но не реализует сам системный диалог (Hermit и
-        // другие WebView-обёртки без полноценного Chromium). Полный разбор —
-        // в lastDebugSnapshot, выводится ниже блоком "Подробности (отладка)"
-        // (запрос пользователя на отладчик от 02.09).
-        if(e && e.name === "NotAllowedError" && !(setupNeedsPermission && dirHandle)){
-          statusMessage = "Этот браузер не даёт открыть системный выбор папки" +
-            (IS_LIKELY_UNSUPPORTED_WEBVIEW ? " — так бывает в браузерах на основе Android WebView (например, Hermit)." : ".") +
-            " Откройте эту страницу в Chrome или Edge. Подробности — ниже.";
-          statusIsError = true; render(); return;
-        }
-        // Показываем настоящую причину (имя/текст ошибки браузера), а не
-        // один и тот же общий текст на любую проблему — иначе непонятно,
-        // где именно оно ломается: при выборе папки, при подтверждении
-        // доступа или уже при самом сканировании (см. ТЗ пользователя от
-        // 31.08 — по одной фразе "не удалось получить доступ" невозможно
-        // было разобрать, что происходит на самом деле).
-        var detail = e && (e.message || e.name) ? (e.name ? e.name + (e.message ? ": " + e.message : "") : e.message) : String(e);
-        statusMessage = "Не удалось получить доступ к папке" + (detail ? " (" + detail + ")" : "") + ".";
-        statusIsError = true; render();
-      }finally{
-        attachPickerBusy = false;
-      }
-    });
+    container.innerHTML = '<div class="mdeditor-tab mdeditor-hint">Загрузка…</div>';
   }
 
   // ---------------------------------------------------------------------
-  // Экран списка тем: алфавитный список внутри текущей "папки" — файлы
-  // из вложенных папок в общий список НЕ попадают, вместо них показывается
-  // сама папка (см. ТЗ пользователя); "домик" всегда ведёт в корень.
+  // Экран списка тем: алфавитный список внутри текущей "папки" (то есть
+  // внутри общего префикса path, см. buildTreeFromNotes выше) — файлы из
+  // вложенных папок в общий список НЕ попадают, вместо них показывается
+  // сама папка; "домик" всегда ведёт в корень.
   // ---------------------------------------------------------------------
   function renderListScreen(container){
     var node = currentDirNode;
-    // папка "files" (см. FILES_FOLDER_NAME/ensureFilesFolder выше) —
-    // служебное хранилище вложений, отдельной заметки в ней нет; и любые
-    // папки, чьё имя начинается с точки (".название") — служебные по
-    // соглашению (см. ТЗ пользователя от 04.09). Обе категории просто не
-    // попадают в отображаемый список — buildIndex/scanTree их не
-    // исключают, заметки внутри них по-прежнему находятся по [[ссылкам]]
-    // и переходам, фильтр только здесь, на отрисовке.
     var visibleFolders = node.folders.filter(function(fo){
-      if(fo.name === FILES_FOLDER_NAME) return false;
-      if(fo.name.charAt(0) === ".") return false;
-      return true;
+      return fo.name.charAt(0) !== ".";
     });
     var folderItems = visibleFolders.map(function(fo){ return { type: "folder", name: fo.name, node: fo }; });
-    var fileItems = node.files.map(function(f){ return { type: "file", name: f.name, handle: f.handle }; });
-    // изображения (из "отдельной папки" рядом с заметками, см. scanTree) —
-    // отдельной группой ПОСЛЕ заметок, тем же алфавитным порядком; клик
-    // открывает картинку крупно поверх вкладки (см. openImagePreview)
-    var imageItems = (node.images || []).map(function(im){ return { type: "image", name: im.name, handle: im.handle }; });
+    var fileItems = node.files.map(function(f){ return { type: "file", name: f.name, id: f.id }; });
     folderItems.sort(function(a, b){ return a.name.localeCompare(b.name, "ru", { sensitivity: "base" }); });
-    // заметки, чьё имя начинается с цифры (даты вроде "04.2025",
-    // "2026-04-27" и т.п.), — отдельной группой В КОНЦЕ списка, а не в
-    // начале, как получалось при простой алфавитной сортировке (цифры
-    // сортируются раньше букв). Внутри каждой из двух групп порядок
-    // остаётся прежним — алфавитным/хронологическим.
     fileItems.sort(function(a, b){
       var da = /^\d/.test(a.name) ? 1 : 0;
       var db = /^\d/.test(b.name) ? 1 : 0;
       if(da !== db) return da - db;
       return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
     });
-    imageItems.sort(function(a, b){ return a.name.localeCompare(b.name, "ru", { sensitivity: "base" }); });
-    var items = folderItems.concat(fileItems).concat(imageItems);
+    var items = folderItems.concat(fileItems);
 
     var isRoot = (node === rootTree);
+    // Есть ли хоть одна незыделенная заметка ВООБЩЕ (не только в текущей
+    // папке) — определяет, показывать ли кнопку "Скачать .zip" (раздел 7
+    // ТЗ: скачивать целиком нечего, пока заметок нет вообще ни одной).
+    // Кнопка "Загрузить" показывается всегда, включая самый первый пустой
+    // экран (раздел 7 ТЗ).
+    var hasAnyNotes = false;
+    notesMap.forEach(function(rec){ if(rec && !rec.deleted && rec.name) hasAnyNotes = true; });
     var html = '<div class="mdeditor-tab">';
     html += '<h3 class="workbooks-title" style="margin:0 0 4px 0;">' + (isRoot ? "Мой блокнот" : escName(node.name)) + '</h3>';
     if(!items.length){
-      html += '<div class="mdeditor-empty">' + (isRoot ? "В этой папке нет .md заметок." : "Здесь пока пусто.") + '</div>';
+      html += '<div class="mdeditor-empty">' + (isRoot ? "Заметок пока нет." : "Здесь пока пусто.") + '</div>';
     } else {
       html += '<div class="mdeditor-list" id="mdEditorList"></div>';
     }
+    // Строка статуса — сюда попадают результаты импорта/экспорта
+    // (см. handleImportFile/downloadAllNotesZip выше): "Импортировано: N",
+    // ошибки чтения файла и т.п. Тот же #mdEditorStatus/setStatus, что и в
+    // экране открытой заметки, просто на этом экране своя копия разметки.
+    html += '<div class="mdeditor-status" id="mdEditorStatus"></div>';
+    // Кнопки загрузки/скачивания — часть обычного потока страницы, НЕ
+    // floating (раздел 7 ТЗ: "физически являются последними элементами
+    // прокручиваемого списка"), поэтому просто идут дальше по разметке
+    // .mdeditor-tab, а не в .mdeditor-fab-row (тот — position:absolute).
+    // Стиль переиспользован у "Начать"/"Скачать" остальных вкладок
+    // (.workbooks-run-btn, components.css), как и попросили — свой стиль
+    // не изобретаем.
+    html += '<div class="mdeditor-list-actions">';
+    html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="mdEditorImportBtn">Загрузить .md или .zip, содержащий файлы .md</button>';
+    if(hasAnyNotes){
+      html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="mdEditorExportZipBtn">Скачать .zip, содержащий файлы .md</button>';
+    }
+    // Папка с изображениями (раздел 8 ТЗ) — отдельная от всего, что
+    // связано с самими заметками, но показывается только в корне списка
+    // (не имеет смысла повторять в каждой вложенной "папке" заметок).
+    // Подпись меняется в зависимости от состояния (см.
+    // imagesFolderButtonLabel/renderImagesFolderControls выше).
+    if(isRoot){
+      html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="mdEditorImagesDirBtn">' + escName(imagesFolderButtonLabel()) + '</button>';
+    }
+    html += '</div>';
+    html += '<input type="file" accept=".md,.zip,text/markdown,application/zip" id="mdEditorImportInput" style="display:none;">';
     html += '<div class="mdeditor-fab-row">';
-    // "+" — новая заметка в ТЕКУЩЕЙ папке (node, не обязательно корень,
-    // см. openNewNoteDialog ниже, ТЗ пользователя от 05.09) — сразу слева
-    // от домика, есть на любом уровне дерева.
     html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorNewNoteBtn" title="Новая заметка">' + PLUS_ICON_SVG + '</button>';
-    // "домик" теперь ВСЕГДА активен (не disabled даже в корне) — раньше в
-    // корне списка кнопка была просто неактивной заглушкой; теперь клик по
-    // ней в корне прокручивает список к самому началу (полезно, когда
-    // список длинный и прокручен вниз), а вне корня — как и раньше,
-    // возвращает в корень.
     html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn" title="К списку заметок">' + HOME_ICON_SVG + '</button>';
     html += '</div>';
     html += '</div>';
     container.innerHTML = html;
+
+    var importInput = document.getElementById("mdEditorImportInput");
+    var importBtn = document.getElementById("mdEditorImportBtn");
+    if(importBtn && importInput){
+      importBtn.addEventListener("click", function(){ importInput.click(); });
+      importInput.addEventListener("change", function(){
+        var file = importInput.files && importInput.files[0];
+        importInput.value = ""; // разрешаем выбрать тот же файл ещё раз
+        if(file) handleImportFile(file, node);
+      });
+    }
+    var exportZipBtn = document.getElementById("mdEditorExportZipBtn");
+    if(exportZipBtn){
+      exportZipBtn.addEventListener("click", downloadAllNotesZip);
+    }
+
+    var imagesDirBtn = document.getElementById("mdEditorImagesDirBtn");
+    if(imagesDirBtn){
+      imagesDirBtn.addEventListener("click", reconnectImagesFolder);
+    }
 
     var newNoteBtn = document.getElementById("mdEditorNewNoteBtn");
     if(newNoteBtn){
@@ -1540,11 +1912,6 @@ window.initMdEditorModule = function(deps){
           currentDirNode = rootTree;
           render();
         } else {
-          // прокручивается #settingsTabContent целиком (тот же приём, что
-          // и везде в проекте, см. switchSettingsTab в my.js) — а НЕ
-          // .mdeditor-list, у которого своей прокрутки нет: список внутри
-          // просто растягивает содержимое, и физически скроллится именно
-          // #settingsTabContent
           var sc = document.getElementById("settingsTabContent");
           if(sc) sc.scrollTop = 0;
         }
@@ -1553,32 +1920,14 @@ window.initMdEditorModule = function(deps){
 
     var listEl = document.getElementById("mdEditorList");
     if(listEl){
-      // Строки создаются БЕЗ индивидуальных слушателей (раньше на каждую
-      // заметку вешалось до 9: клик по строке, клик по кнопке закладки и
-      // 7 touch/mouse для долгого нажатия) — на блокноте с сотнями заметок
-      // это была заметная работа при каждой отрисовке списка (см. ТЗ
-      // пользователя от 31.08). Вместо этого ниже один делегированный
-      // набор слушателей на весь список (#mdEditorList) — строка находится
-      // по data-index через closest(), поведение то же самое.
       items.forEach(function(it, idx){
-        // строка — <div>, а не <button> — заметкам (it.type==="file")
-        // нужна ВТОРАЯ, отдельно кликабельная зона справа от названия
-        // (кнопка закладки, см. ниже), а вложенный <button> внутри
-        // <button> — невалидная разметка; тот же приём (div-строка +
-        // кнопки действий внутри), что и у строк задач на вкладках задач,
-        // см. .task-row/.task-actions в my.js.
         var row = document.createElement("div");
         row.className = "mdeditor-row";
         row.dataset.index = String(idx);
         var isNote = (it.type === "file");
-        // крестик удаления — СЛЕВА от кнопки закладки, той же кнопкой
-        // долгого нажатия и появляется/скрывается вместе с ней (см.
-        // startPress ниже, ТЗ пользователя от 05.09); в отличие от
-        // закладки не остаётся видимым для уже добавленных в закладки
-        // заметок — только временно, после долгого нажатия.
-        row.innerHTML = (it.type === "folder" ? FOLDER_ICON_SVG : it.type === "image" ? IMAGE_ICON_SVG : FILE_ICON_SVG) +
+        row.innerHTML = (it.type === "folder" ? FOLDER_ICON_SVG : FILE_ICON_SVG) +
           '<span class="mdeditor-row-name"></span>' +
-          (isNote ? '<button type="button" class="mdeditor-delete-btn" title="Удалить">' + DELETE_ICON_SVG + '</button><button type="button" class="mdeditor-bookmark-btn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>' : '');
+          (isNote ? '<button type="button" class="mdeditor-delete-btn" title="Удалить">' + DELETE_ICON_SVG + '</button><button type="button" class="mdeditor-bookmark-btn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>' : "");
         row.querySelector(".mdeditor-row-name").textContent = it.name;
         if(isNote){
           var key = it.name.toLowerCase();
@@ -1592,10 +1941,6 @@ window.initMdEditorModule = function(deps){
         listEl.appendChild(row);
       });
 
-      // ---- долгое нажатие (350мс) на строку заметки — тот же приём, что
-      // и раньше (таймер, сброс при заметном сдвиге пальца/курсора), но
-      // ОДНИМ набором слушателей на весь список вместо отдельного на
-      // каждую строку.
       var LONG_PRESS_MS = 350, MOVE_CANCEL_PX = 10;
       var pressTimer = null, pressStartXY = null, longPressFired = false;
       function clearPressTimer(){ clearTimeout(pressTimer); pressTimer = null; }
@@ -1635,13 +1980,6 @@ window.initMdEditorModule = function(deps){
       listEl.addEventListener("mouseup", clearPressTimer);
       listEl.addEventListener("mouseleave", clearPressTimer);
 
-      // ---- скрытие крестика/закладки, раскрытых долгим нажатием (ТЗ
-      // пользователя от 05.09: "не исчезают, так и висят") — раньше
-      // revealedBookmarkRows очищался только при снятии закладки или
-      // удалении заметки, а от простого тапа мимо кнопок никак не
-      // скрывался. Прячет ВСЕ раскрытые строки разом (обычно раскрыта
-      // одна), кнопка закладки при этом остаётся видна, если заметка
-      // реально в закладках — прячется только временная "раскрытость".
       function hideRevealedBookmarkRows(){
         if(!revealedBookmarkRows.size) return;
         revealedBookmarkRows.clear();
@@ -1657,8 +1995,6 @@ window.initMdEditorModule = function(deps){
         });
       }
 
-      // ---- клик по строке (открыть/перейти) и по кнопке закладки —
-      // тоже один делегированный обработчик вместо двух на каждую строку.
       listEl.addEventListener("click", function(e){
         var rowEl = e.target.closest(".mdeditor-row");
         if(!rowEl) return;
@@ -1673,8 +2009,6 @@ window.initMdEditorModule = function(deps){
           toggleBookmarkNote(it.name);
           return;
         }
-        // клик по строке НЕ по этим двум кнопкам — раскрытые иконки
-        // (если есть) больше не нужны, прячем их.
         hideRevealedBookmarkRows();
         if(longPressFired){ longPressFired = false; return; }
         if(it.type === "folder"){
@@ -1682,30 +2016,17 @@ window.initMdEditorModule = function(deps){
           pushMdNav(function(){ currentDirNode = prevDirNode; render(); });
           currentDirNode = it.node;
           render();
+        } else {
+          openNoteById(it.id);
         }
-        else if(it.type === "image"){
-          if(it.handle) openImagePreview(it.handle, it.name);
-          else openStubItemWhenReady(it.name, "image");
-        }
-        else { openNoteByEntry({ fileHandle: it.handle, dirHandle: node.dirHandle, name: it.name }); }
       });
 
-      // тап мимо самого списка (по заголовку, по кнопкам "+"/"домик",
-      // по пустому месту вкладки) — та же самая ситуация, прячем.
       container.addEventListener("click", function(e){
         if(!e.target.closest(".mdeditor-row")) hideRevealedBookmarkRows();
       });
     }
   }
 
-  // ---------------------------------------------------------------------
-  // Диалог "Новая заметка" (кнопка "+" в mdeditor-fab-row, ТЗ пользователя
-  // от 05.09) — тот же приём overlay/card поверх .settings-modal-box, что
-  // и у openCleanupDialog выше. Заметка создаётся в ТЕКУЩЕЙ папке
-  // (targetNode), а не всегда в корне — в отличие от createAndOpenNote,
-  // вызванного по клику на [[несуществующую ссылку]] (там root — осознанно,
-  // см. комментарий у createAndOpenNote ниже).
-  // ---------------------------------------------------------------------
   function openNewNoteDialog(targetNode){
     var box = document.querySelector(".settings-modal-box");
     if(!box) return;
@@ -1732,18 +2053,15 @@ window.initMdEditorModule = function(deps){
     function submit(){
       var name = (input.value || "").trim();
       if(!name) return;
-      if(nameIndex.has(name.toLowerCase())){
+      if(isNoteNameTaken(name)){
         input.style.borderColor = "var(--danger, #c0392b)";
         return;
       }
       close();
-      createAndOpenNote(name, targetNode);
+      createAndOpenNoteInPath(name, targetNode);
     }
     document.getElementById("mdEditorNewNoteCancel").addEventListener("click", close);
     document.getElementById("mdEditorNewNoteCreate").addEventListener("click", submit);
-    // mousedown с preventDefault ДО click — тот же приём, что и у кнопок
-    // переименования (см. startRename ниже), чтобы тап на телефоне не
-    // промахивался мимо кнопки при закрытии клавиатуры.
     document.getElementById("mdEditorNewNoteCreate").addEventListener("mousedown", function(ev){ ev.preventDefault(); });
     input.addEventListener("keydown", function(ev){
       if(ev.key === "Enter"){ ev.preventDefault(); submit(); }
@@ -1783,52 +2101,25 @@ window.initMdEditorModule = function(deps){
     });
   }
 
-  // Собственно удаление: с диска, из дерева/индекса имён, из закладок (если
-  // была) — и точечная перерисовка списка (тот же контейнер, что и у
-  // остальных экранов "Моего блокнота").
-  async function deleteNoteEntry(it, node){
+  function deleteNoteEntry(it, node){
     var key = it.name.toLowerCase();
-    try{
-      await node.dirHandle.removeEntry(it.name + ".md");
-    }catch(e){
-      setStatus("Не удалось удалить заметку: " + (e && e.message ? e.message : e), true);
-      return;
-    }
-    var idx = -1;
-    for(var i = 0; i < node.files.length; i++){
-      if(node.files[i].name.toLowerCase() === key){ idx = i; break; }
-    }
-    if(idx !== -1) node.files.splice(idx, 1);
-    nameIndex.delete(key);
+    deleteNoteRecord(it.id);
     if(bookmarkedNames.has(key)){
       bookmarkedNames.delete(key);
       setSyncedBookmark(key, false);
     }
     revealedBookmarkRows.delete(key);
-    idbSet("treeShape", treeToShape(rootTree)).catch(function(){});
+    rebuildTree();
     var container = document.getElementById("settingsTabContent");
     if(container) renderListScreen(container);
   }
 
-  // ---------------------------------------------------------------------
-  // Вкладка "Закладки" (вторая боковая вкладка второго набора,
-  // settingsTabSet2Btn2 / "set2s_2", см. renderSettingsTabMdBookmarks
-  // выше) — БОЛЬШЕ НЕ ЗАГЛУШКА: плоский список заметок, добавленных в
-  // закладки (см. bookmarkedNames/toggleBookmarkNote выше), в ТОМ ЖЕ
-  // стиле строки, что и обычный список "Моего блокнота" (см.
-  // renderListScreen выше) — просто без папок/картинок и без
-  // вложенности, сортировка та же (сперва имена не с цифры, по алфавиту,
-  // затем "числовые" имена тоже по алфавиту). Кнопка закладки у каждой
-  // строки здесь всегда видна и всегда "активна" (иначе заметки в этом
-  // списке бы не было) — клик по ней снимает закладку, и заметка сразу
-  // пропадает из списка (см. ТЗ пользователя), тем же переключателем
-  // toggleBookmarkNote, что и везде.
-  // ---------------------------------------------------------------------
   function renderBookmarksScreen(container){
     var items = [];
     bookmarkedNames.forEach(function(key){
-      var entry = nameIndex && nameIndex.get(key);
-      if(entry) items.push({ name: entry.name, handle: entry.fileHandle, dirHandle: entry.dirHandle });
+      var id = nameIndex.get(key);
+      var rec = id ? notesMap.get(id) : null;
+      if(rec && !rec.deleted) items.push({ name: rec.name, id: id });
     });
     items.sort(function(a, b){
       var da = /^\d/.test(a.name) ? 1 : 0;
@@ -1867,7 +2158,7 @@ window.initMdEditorModule = function(deps){
           '<button type="button" class="mdeditor-bookmark-btn active visible" title="Убрать из закладок">' + BOOKMARK_ICON_SVG + '</button>';
         row.querySelector(".mdeditor-row-name").textContent = it.name;
         row.addEventListener("click", function(){
-          openNoteByEntry({ fileHandle: it.handle, dirHandle: it.dirHandle, name: it.name });
+          openNoteById(it.id);
         });
         row.querySelector(".mdeditor-bookmark-btn").addEventListener("click", function(e){
           e.stopPropagation();
@@ -1958,45 +2249,27 @@ window.initMdEditorModule = function(deps){
     activeMdTab = "forgotten";
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
-    if(window.Debug) window.Debug.log("forgotten:open", {
-      initStarted: initStarted,
-      hasRootTree: !!rootTree,
-      nameIndexSize: nameIndex ? nameIndex.size : -1
-    });
     if(!initStarted){
       initStarted = true;
       container.innerHTML = '<div class="mdeditor-tab mdeditor-hint">Загрузка…</div>';
-      initFromStoredHandle();
+      initNotesModule();
       return;
     }
     forgottenSelectedPeriod = "2m";
     forgottenNotesData = null;
     render();
+    syncNotesOnTabEnter();
   }
 
-  // Больше не читает ни одного файла с диска (см. ТЗ пользователя от
-  // 05.09) — раньше здесь по очереди/пулом открывался КАЖДЫЙ .md через SAF
-  // только чтобы прочитать пару байт метаданных, и даже с пулом воркеров
-  // это были десятки секунд на большой библиотеке (315 файлов, лог сессии).
-  // Теперь сортировка идёт по ДРУГОМУ полю — по дате ПОСЛЕДНЕГО ОТКРЫТИЯ
-  // заметки (не редактирования), а она уже лежит в openedIndex
-  // (IndexedDB, см. loadOpenedIndex/recordNoteOpened выше) — одно чтение
-  // одного маленького объекта вместо 315 отдельных IPC-вызовов к
-  // системному провайдеру, что и укладывается в доли секунды.
-  //
-  // Заметки, которых ещё нет в openedIndex (ни разу не открывались с тех
-  // пор, как индекс начал вестись, — типичный случай для всей существующей
-  // библиотеки при первом запуске этой версии) получают виртуальную
-  // "давность 6 месяцев" — тот же приём, что и у дат создания/редактирования
-  // для по-настоящему старых заметок (см. virtualLegacyOpenedMs выше):
-  // пересчитывается заново от сегодняшней даты при каждом заходе на
-  // вкладку, а не застывает раз и навсегда. Реальная дата открытия
-  // появится сама, как только пользователь когда-нибудь откроет эту
-  // заметку (см. recordNoteOpened).
+  // Не читает ни одного файла и не обращается к сети — просто проход по
+  // notesMap в памяти (раздел 05.09 ТЗ про производительность этой
+  // вкладки полностью применим и здесь: заметки уже загружены заранее).
   async function loadForgottenNotesData(){
-    var entries = nameIndex ? Array.from(nameIndex.values()) : [];
-    var t0 = Date.now();
-    if(window.Debug) window.Debug.log("forgotten:load:start", { count: entries.length });
+    var entries = [];
+    notesMap.forEach(function(rec, id){
+      if(!rec || rec.deleted || !rec.name) return;
+      entries.push({ name: rec.name, id: id });
+    });
     var openedIndex = await loadOpenedIndex();
     var virtualMs = virtualLegacyOpenedMs();
     var matchedCount = 0;
@@ -2004,11 +2277,9 @@ window.initMdEditorModule = function(deps){
       var key = entry.name.toLowerCase();
       var hasReal = Object.prototype.hasOwnProperty.call(openedIndex, key) && typeof openedIndex[key] === "number";
       if(hasReal) matchedCount++;
-      return { name: entry.name, entry: entry, openedTs: hasReal ? openedIndex[key] : virtualMs };
+      return { name: entry.name, entry: entry.id, openedTs: hasReal ? openedIndex[key] : virtualMs };
     });
-    // самые старые (давно не открывавшиеся) — сверху списка
     results.sort(function(a, b){ return a.openedTs - b.openedTs; });
-    if(window.Debug) window.Debug.log("forgotten:load:done", { totalMs: Date.now() - t0, count: results.length, matched: matchedCount });
     return { items: results, matchedCount: matchedCount, total: entries.length };
   }
 
@@ -2125,7 +2396,7 @@ window.initMdEditorModule = function(deps){
           // а не саму заметку (тот же приём нужен и в renderBookmarksScreen,
           // но её не трогаем — не входит в эту задачу)
           activeMdTab = "editor";
-          openNoteByEntry(it.entry);
+          openNoteById(it.entry);
         });
         row.querySelector(".mdeditor-bookmark-btn").addEventListener("click", function(e){
           e.stopPropagation();
@@ -2146,63 +2417,6 @@ window.initMdEditorModule = function(deps){
       });
     });
   }
-
-  // ---------------------------------------------------------------------
-  // "Скрепка" в редакторе заметки (см. renderEditorScreen выше) — картинка
-  // из системного диалога копируется в папку "files" (создаётся, если её
-  // ещё нет) и сразу вставляется в документ как "![[имя]]" на месте
-  // курсора — тот же синтаксис вложенной картинки, что и везде в "Моём
-  // блокноте" (см. ImageWidget выше).
-  // ---------------------------------------------------------------------
-  // если файл с таким именем в "files" уже есть — не перезаписываем его,
-  // а подбираем свободное имя (" (2)", " (3)", ... перед расширением, как
-  // это обычно делают файловые менеджеры)
-  async function uniqueFileNameIn(dh, rawName){
-    var name = rawName || "image";
-    var dot = name.lastIndexOf(".");
-    var base = dot > 0 ? name.slice(0, dot) : name;
-    var ext = dot > 0 ? name.slice(dot) : "";
-    var candidate = name, n = 1;
-    for(;;){
-      try{ await dh.getFileHandle(candidate); }
-      catch(e){ return candidate; }
-      n++;
-      candidate = base + " (" + n + ")" + ext;
-    }
-  }
-
-  async function insertImageAtCursor(file){
-    if(!dirHandle || !cmView) return;
-    setStatus("Добавляем картинку…", false);
-    try{
-      var filesDirHandle = await ensureFilesFolder();
-      var name = await uniqueFileNameIn(filesDirHandle, file.name || "image");
-      var buf = await file.arrayBuffer();
-      var newHandle = await filesDirHandle.getFileHandle(name, { create: true });
-      var writable = await newHandle.createWritable();
-      await writable.write(buf);
-      await writable.close();
-      // сразу доступна по имени, как и остальные картинки (см.
-      // imageIndex/buildIndex выше) — без ожидания следующего rescan()
-      if(imageIndex) imageIndex.set(name.toLowerCase(), { fileHandle: newHandle, dirHandle: filesDirHandle, name: name });
-      var pos = cmView.state.selection.main.head;
-      var insertText = "![[" + name + "]]";
-      cmView.dispatch({
-        changes: { from: pos, to: pos, insert: insertText },
-        selection: { anchor: pos + insertText.length }
-      });
-      cmView.focus();
-      setStatus("", false);
-    }catch(e){
-      setStatus("Не удалось добавить картинку: " + (e && e.message ? e.message : e), true);
-    }
-  }
-
-
-  // ---------------------------------------------------------------------
-  // Экран заметки: шапка (домик / заголовок-переименование / переключатель
-  // режима) + хост CodeMirror 6, занимающий всё оставшееся место вкладки.
-  // ---------------------------------------------------------------------
 
   function renderEditorScreen(container){
     fontSizePanelOpen = false; // экран перерисован заново — попап "+"/"-" каждый раз стартует закрытым
@@ -2236,6 +2450,7 @@ window.initMdEditorModule = function(deps){
             '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="mdEditorFontSizeBtn" title="Размер шрифта">Аа</button>' +
           '</span>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorImageBtn" title="Вставить картинку">' + PAPERCLIP_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-fab-btn" id="mdEditorDownloadBtn" title="Скачать .md">' + DOWNLOAD_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorModeBtn" title="Переключить режим кода">' + (codeMode ? EYE_ICON_SVG : CODE_ICON_SVG) + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn2" title="К списку заметок">' + HOME_ICON_SVG + '</button>' +
         '</div>' +
@@ -2317,22 +2532,38 @@ window.initMdEditorModule = function(deps){
 
     // "скрепка" — правее "Аа", левее переключателя кода (см. ТЗ
     // пользователя от 31.08), в том же стиле .mdeditor-fab-btn, что и
-    // остальные кнопки ряда. Вставляет картинку, выбранную через
-    // системный диалог, в место курсора — сама картинка при этом
-    // копируется в папку "files" (см. insertImageAtCursor ниже), как и
-    // mp3/картинки, "потерявшиеся" где-то ещё в дереве (см.
-    // migrateStrayMediaFiles выше).
+    // остальные кнопки ряда. Вставляет картинку, выбранную через системный
+    // диалог, в место курсора — сама картинка при этом копируется В КОРЕНЬ
+    // папки с изображениями (раздел 8 ТЗ: без принудительной подпапки
+    // "files", в отличие от старой схемы) через insertImageAtCursor ниже.
+    // Если папка ещё не подключена (или её права пришлось запрашивать
+    // заново) — сначала пробуем добиться готовности тем же кликом
+    // (ensureImagesReady, см. выше), и только при успехе открываем выбор
+    // файла. В редком случае, когда сохранённый handle потерял права И
+    // пришлось бы показать ЕЩЁ и системный диалог выбора папки в рамках
+    // ТОГО ЖЕ клика — браузер может не засчитать это как пользовательский
+    // жест дважды подряд; тогда просто просим повторить клик (см. catch
+    // ниже) — не критично, но подпись кнопки уже покажет актуальное
+    // состояние после первой попытки.
     document.getElementById("mdEditorImageBtn").addEventListener("click", function(){
-      var input = document.getElementById("mdEditorImageInput");
-      if(input) input.click();
+      ensureImagesReady().then(function(ok){
+        if(!ok){
+          setStatus("Чтобы вставлять картинки, подключите папку с изображениями (кнопка в общем списке заметок).", true);
+          return;
+        }
+        var input = document.getElementById("mdEditorImageInput");
+        if(input) input.click();
+      });
     });
-    document.getElementById("mdEditorImageInput").addEventListener("change", function(ev){
-      var file = ev.target.files && ev.target.files[0];
-      // сбрасываем value — иначе повторный выбор ТОГО ЖЕ файла подряд не
-      // порождает новое событие "change"
-      ev.target.value = "";
+    document.getElementById("mdEditorImageInput").addEventListener("change", function(){
+      var input = document.getElementById("mdEditorImageInput");
+      var file = input.files && input.files[0];
+      input.value = ""; // разрешаем выбрать тот же файл ещё раз
       if(file) insertImageAtCursor(file);
     });
+
+    document.getElementById("mdEditorDownloadBtn").addEventListener("click", downloadSingleNote);
+
 
     document.getElementById("mdEditorHomeBtn2").addEventListener("click", function(){
       var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
@@ -2378,21 +2609,13 @@ window.initMdEditorModule = function(deps){
 
   function goHome(){
     flushAutosaveNow();
+    pushDirtyNotes(true);
     destroyEditor();
     openFile = null;
     currentDirNode = rootTree;
     screen = "list";
     render();
-    // Явный уход на список ("домой") — при следующем холодном старте нужно
-    // показать список, а НЕ снова открыть заметку, из которой ушли (см. ТЗ
-    // пользователя от 01.09, пункт 2). persistDocStateNow пишет это сразу,
-    // без дебаунса — как и остальные явные переходы (см. openNoteByEntry).
-    persistDocStateNow({ screen: "list", name: null, cursorPos: 0, scrollPercent: null });
-    // не ждём дебаунс на запись файла (см. scheduleDiskStateWrite выше) —
-    // это осознанный уход на список, а не рядовая правка текста, пишем на
-    // диск сразу же, чтобы другое устройство тоже увидело "список" при
-    // следующей синхронизации Syncthing.
-    writeDocStateToDiskNow();
+    persistDocStateNow({ screen: "list", id: null, name: null, cursorPos: 0, scrollPercent: null });
   }
 
   // Жест/кнопка "назад" внутри "Моего блокнота" теперь не обрабатывается
@@ -2448,141 +2671,44 @@ window.initMdEditorModule = function(deps){
     });
   }
 
-  async function commitRename(newNameRaw){
+  function commitRename(newNameRaw){
     var newName = (newNameRaw || "").trim();
     if(!newName || newName === openFile.name){ render(); return; }
-    var key = newName.toLowerCase();
-    if(nameIndex.has(key)){
+    if(isNoteNameTaken(newName, openFile.id)){
       setStatusAndRerenderTitle("Заметка с таким именем уже есть.", true);
       return;
     }
-    setStatusAndRerenderTitle("Переименование…", false);
-    try{
-      var dh = openFile.dirHandle;
-      var newHandle = await dh.getFileHandle(newName + ".md", { create: true });
-      var writable = await newHandle.createWritable();
-      await writable.write(openFile.text);
-      await writable.close();
-      await dh.removeEntry(openFile.name + ".md");
-      var oldName = openFile.name;
-      openFile.fileHandle = newHandle;
-      openFile.name = newName;
-      // "продолжить с той же заметки" хранит имя заметки (см. docState
-      // выше) — без этого холодный старт после переименования искал бы
-      // заметку под старым, уже не существующим именем.
-      flushDocStateNow();
-      // если переименованная заметка была в закладках — закладка следует
-      // за новым именем (ключ закладки — имя в нижнем регистре, см.
-      // bookmarkedNames выше); теперь это два отдельных ключа
-      // синхронизируемого state (см. setSyncedBookmark), поэтому старое
-      // имя явно снимается с закладок, а не просто перестаёт
-      // встречаться в индексе.
-      if(bookmarkedNames.has(oldName.toLowerCase())){
-        bookmarkedNames.delete(oldName.toLowerCase());
-        bookmarkedNames.add(newName.toLowerCase());
-        setSyncedBookmark(oldName.toLowerCase(), false);
-        setSyncedBookmark(newName.toLowerCase(), true);
-      }
-
-      await rescan();
-      // rescan() пересобирает дерево и индекс с нуля — переоткрытая заметка
-      // (уже с новым именем) в нём уже есть.
-      setStatusAndRerenderTitle("Обновляем ссылки в остальных заметках…", false);
-      await propagateRename(oldName, newName);
-      setStatusAndRerenderTitle("Переименовано.", false);
-      render();
-    }catch(e){
-      setStatusAndRerenderTitle("Не удалось переименовать: " + (e && e.message ? e.message : e), true);
-      render();
+    var oldName = openFile.name;
+    renameNoteRecord(openFile.id, newName);
+    openFile.name = newName;
+    if(bookmarkedNames.has(oldName.toLowerCase())){
+      bookmarkedNames.delete(oldName.toLowerCase());
+      bookmarkedNames.add(newName.toLowerCase());
+      setSyncedBookmark(oldName.toLowerCase(), false);
+      setSyncedBookmark(newName.toLowerCase(), true);
     }
+    propagateRenameInMemory(oldName, newName);
+    rebuildTree();
+    setStatusAndRerenderTitle("Переименовано.", false);
+    render();
   }
 
   function setStatusAndRerenderTitle(msg, isError){
     setStatus(msg, isError);
   }
 
-  // Проходит по ВСЕМ .md файлам директории (по актуальному nameIndex,
-  // построенному rescan()) и заменяет точные совпадения [[старое_имя]]
-  // (без учёта регистра) на [[новое_имя]] — выполняется асинхронно, не
-  // блокируя ввод в открытой заметке.
-  async function propagateRename(oldName, newName){
-    var esc = oldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    var re = new RegExp("\\[\\[(" + esc + ")\\]\\]", "gi");
-    var entries = Array.from(nameIndex.values());
-    for(var i = 0; i < entries.length; i++){
-      var entry = entries[i];
-      try{
-        var file = await entry.fileHandle.getFile();
-        var text = await file.text();
-        re.lastIndex = 0;
-        if(!re.test(text)) continue;
-        re.lastIndex = 0;
-        var updated = text.replace(re, "[[" + newName + "]]");
-        var w = await entry.fileHandle.createWritable();
-        await w.write(updated);
-        await w.close();
-        if(openFile && entry.name.toLowerCase() === openFile.name.toLowerCase() && entry.fileHandle === openFile.fileHandle){
-          openFile.text = updated;
-          if(cmView){
-            cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: updated } });
-          }
-        }
-      }catch(e){ /* пропускаем файл, если не удалось прочитать/записать */ }
-    }
-  }
-
   // ---------------------------------------------------------------------
-  // Открытие заметки / переход по [[ссылке]]
+  // Открытие заметки — id вместо fileHandle/dirHandle (раздел 2 ТЗ). Закрытие
+  // ПРЕДЫДУЩЕЙ открытой заметки шлёт её в облако немедленно (раздел 4.1 ТЗ:
+  // "при закрытии открытой заметки"), не дожидаясь debounce.
   // ---------------------------------------------------------------------
-  // ---------------------------------------------------------------------
-  // Переактивация ПРАВА НА ЗАПИСЬ реальным requestPermission() — один раз
-  // за сессию, при первом клике по заметке (см. переписку с пользователем:
-  // подтверждено тестированием, что именно это чинит проблему). Дело в
-  // том, что queryPermission() при холодном старте (см.
-  // ensurePermissionSilently/initFromStoredHandle выше) читает
-  // ЗАКЭШИРОВАННУЮ запись о разрешении внутри Chrome и на части
-  // Android-планшетов возвращает "granted" даже тогда, когда фактический
-  // грант на запись у SAF-провайдера ОС уже не активен — из-за этого
-  // список заметок открывается нормально (чтение работает), но ПЕРВАЯ ЖЕ
-  // попытка записи падает с NotFoundError. requestPermission(), в отличие
-  // от queryPermission(), действительно сверяется с ОС — это тот самый
-  // вызов, что срабатывает при нажатии "подтвердить доступ" на экране
-  // настройки папки (см. renderSetupScreen выше). Вызываем его здесь же,
-  // но автоматически, при первом клике по заметке в сессии — открытие
-  // заметки уже гарантированно происходит по клику пользователя, так что
-  // "user activation" для этого вызова есть. Не await'им и не блокируем
-  // открытие заметки: если разрешение и так рабочее, requestPermission()
-  // резолвится почти мгновенно и без всякого диалога (диалог показывается,
-  // только если текущее состояние — "prompt", а не "granted"); если нет —
-  // ошибка при необходимости всё ещё проявится при автосохранении, как и
-  // раньше, просто это теперь редкий случай, а не постоянный.
-  var writePermissionReverified = false;
-  function reverifyWritePermissionOnce(){
-    if(writePermissionReverified || !dirHandle || !dirHandle.requestPermission) return;
-    writePermissionReverified = true;
-    dirHandle.requestPermission({ mode: "readwrite" }).catch(function(){});
-  }
-
-  function openNoteByEntry(entry, restorePos, silentFallback, scrollPercent){
-    reverifyWritePermissionOnce();
-    // Запись из мгновенно показанного кэша (см. shapeToStubNode), для
-    // которой настоящее сканирование ещё не подобрало handle, — ждём его
-    // вместо попытки читать null как файл (см. openStubItemWhenReady).
-    if(!entry || !entry.fileHandle){
-      if(entry) openStubItemWhenReady(entry.name, "file", restorePos, silentFallback, scrollPercent);
+  function openNoteById(id, restorePos, scrollPercent){
+    var rec = notesMap.get(id);
+    if(!rec || rec.deleted){
+      setStatus("Заметка не найдена.", true);
       return;
     }
-    // снимок состояния ДО открытия заметки — если открытие пришло по
-    // [[ссылке]] снаружи модуля, регистрация подавляется (см. pushMdNav и
-    // openNoteExternally выше), и "назад" вернёт прямо на вкладку/экран,
-    // откуда кликнули по ссылке, а не в список заметок блокнота.
     var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
-    // позиция прокрутки списка (или экрана закладок/забытых заметок) на
-    // момент открытия заметки — раньше при возврате назад список всегда
-    // перерисовывался с нуля и прокрутка сбрасывалась в начало (баг
-    // найден пользователем 05.09: "должен открываться с того места, где
-    // я открыл заметку"). #settingsTabContent — тот же элемент, что
-    // реально скроллится (см. homeBtn выше), а не сам список внутри.
     var prevScrollTop = null;
     if(prevScreen === "list"){
       var scrollHost = document.getElementById("settingsTabContent");
@@ -2590,6 +2716,7 @@ window.initMdEditorModule = function(deps){
     }
     pushMdNav(function(){
       flushAutosaveNow();
+      pushDirtyNotes(true);
       destroyEditor();
       openFile = prevOpenFile;
       currentDirNode = prevDirNode;
@@ -2601,88 +2728,60 @@ window.initMdEditorModule = function(deps){
       }
     });
     flushAutosaveNow();
+    pushDirtyNotes(true);
     destroyEditor();
-    entry.fileHandle.getFile().then(function(f){ return f.text(); }).then(function(text){
-      var pos = typeof restorePos === "number" ? Math.max(0, Math.min(restorePos, text.length)) : 0;
-      var pct = typeof scrollPercent === "number" ? Math.max(0, Math.min(1, scrollPercent)) : null;
-      openFile = { fileHandle: entry.fileHandle, dirHandle: entry.dirHandle, name: entry.name, text: text, dirty: false, cursorPos: pos, scrollPercent: pct };
-      screen = "editor";
-      recordNoteOpened(entry.name);
-      render();
-      // "продолжить с той же заметки" (см. flushDocStateNow/scheduleDocStateSave
-      // ниже) — помечаем эту заметку как текущую сразу при открытии, не
-      // дожидаясь первого редактирования: если пользователь просто закроет
-      // приложение, ничего не поправив, холодный старт всё равно вернёт
-      // сюда же.
-      persistDocStateNow({ screen: "editor", name: entry.name, cursorPos: pos, scrollPercent: pct });
-      // как и в goHome — это осознанная навигация, не рядовая правка текста
-      // под дебаунсом; пишем на диск сразу (см. writeDocStateToDiskNow).
-      writeDocStateToDiskNow();
-    }).catch(function(){
-      setStatus("Не удалось открыть заметку.", true);
-    });
+    var pos = typeof restorePos === "number" ? Math.max(0, Math.min(restorePos, rec.text.length)) : 0;
+    var pct = typeof scrollPercent === "number" ? Math.max(0, Math.min(1, scrollPercent)) : null;
+    openFile = { id: id, name: rec.name, path: rec.path, text: rec.text, dirty: false, cursorPos: pos, scrollPercent: pct };
+    screen = "editor";
+    recordNoteOpened(rec.name);
+    render();
+    persistDocStateNow({ screen: "editor", id: id, name: rec.name, cursorPos: pos, scrollPercent: pct });
   }
 
-
-  // Клик по [[ссылке]] на несуществующую заметку — сразу создаём пустой
-  // файл и открываем его (решение согласовано с пользователем). Без
-  // targetNode (вызов из handleLinkClick) файл создаётся в КОРНЕ, как и
-  // раньше; кнопка "+" в renderListScreen (ТЗ пользователя от 05.09)
-  // передаёт targetNode = ТЕКУЩАЯ папка списка, где её нажали.
-  async function createAndOpenNote(name, targetNode){
-    var target = targetNode || rootTree;
-    reverifyWritePermissionOnce();
-    try{
-      var fh = await target.dirHandle.getFileHandle(name + ".md", { create: true });
-      var w = await fh.createWritable();
-      // новая заметка сразу получает метаданные (дата создания = дата
-      // редактирования = сегодня, см. ТЗ пользователя от 04.09) — в
-      // отличие от старых заметок, которым метаданные проставляются
-      // только при первом реальном редактировании (см. flushAutosaveNow)
-      var today = todayRu();
-      var initialText = buildMetaLine(today, today, today);
-      await w.write(initialText);
-      await w.close();
-      nameIndex.set(name.toLowerCase(), { fileHandle: fh, dirHandle: target.dirHandle, name: name });
-      target.files.push({ name: name, handle: fh });
-      // "Карта дней года" (my.js) — ссылка на новую заметку появляется в
-      // дне её СОЗДАНИЯ (см. ТЗ пользователя от 04.09), не редактирования
-      recordNoteCreated(name);
-      recordNoteOpened(name);
-      var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
-      var prevScrollTop = null;
-      if(prevScreen === "list"){
-        var scrollHost = document.getElementById("settingsTabContent");
-        if(scrollHost) prevScrollTop = scrollHost.scrollTop;
-      }
-      pushMdNav(function(){
-        flushAutosaveNow();
-        destroyEditor();
-        openFile = prevOpenFile;
-        currentDirNode = prevDirNode;
-        screen = prevScreen;
-        render();
-        if(prevScrollTop !== null){
-          var restoredScrollHost = document.getElementById("settingsTabContent");
-          if(restoredScrollHost) restoredScrollHost.scrollTop = prevScrollTop;
-        }
-      });
-      flushAutosaveNow();
-      destroyEditor();
-      openFile = { fileHandle: fh, dirHandle: target.dirHandle, name: name, text: initialText, dirty: false };
-      screen = "editor";
-      render();
-    }catch(e){
-      setStatus("Не удалось создать заметку: " + (e && e.message ? e.message : e), true);
+  function createAndOpenNoteInPath(name, targetNode){
+    var path = targetNode ? targetNode.path : "";
+    if(isNoteNameTaken(name)){
+      setStatus("Заметка с таким именем уже есть.", true);
+      return;
     }
+    var rec = createNoteRecord(name, path);
+    recordNoteCreated(name);
+    recordNoteOpened(name);
+    rebuildTree();
+    var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
+    var prevScrollTop = null;
+    if(prevScreen === "list"){
+      var scrollHost = document.getElementById("settingsTabContent");
+      if(scrollHost) prevScrollTop = scrollHost.scrollTop;
+    }
+    pushMdNav(function(){
+      flushAutosaveNow();
+      pushDirtyNotes(true);
+      destroyEditor();
+      openFile = prevOpenFile;
+      currentDirNode = prevDirNode;
+      screen = prevScreen;
+      render();
+      if(prevScrollTop !== null){
+        var restoredScrollHost = document.getElementById("settingsTabContent");
+        if(restoredScrollHost) restoredScrollHost.scrollTop = prevScrollTop;
+      }
+    });
+    flushAutosaveNow();
+    pushDirtyNotes(true);
+    destroyEditor();
+    openFile = { id: rec.id, name: rec.name, path: rec.path, text: rec.text, dirty: false };
+    screen = "editor";
+    render();
   }
 
   function handleLinkClick(name){
     var trimmed = (name || "").trim();
-    if(!trimmed || !nameIndex) return;
-    var entry = nameIndex.get(trimmed.toLowerCase());
-    if(entry) openNoteByEntry(entry);
-    else createAndOpenNote(trimmed);
+    if(!trimmed || !notesReady) return;
+    var id = nameIndex.get(trimmed.toLowerCase());
+    if(id) openNoteById(id);
+    else createAndOpenNoteInPath(trimmed, null);
   }
 
   // ---------------------------------------------------------------------
@@ -2715,15 +2814,12 @@ window.initMdEditorModule = function(deps){
     return out;
   }
 
-  // Каноническое имя для отображения: если заметка с таким именем
-  // существует — берём её реальное имя файла (правильный регистр),
-  // иначе показываем как набрано в тексте (ссылка на ещё не созданную
-  // заметку — клик по ней создаст её, см. handleLinkClick).
   function resolveLinkDisplayName(rawName){
     var trimmed = (rawName || "").trim();
     if(!trimmed) return trimmed;
-    var entry = nameIndex ? nameIndex.get(trimmed.toLowerCase()) : null;
-    return entry ? entry.name : trimmed;
+    var id = nameIndex.get(trimmed.toLowerCase());
+    var rec = id ? notesMap.get(id) : null;
+    return rec ? rec.name : trimmed;
   }
 
   function applyLinksFieldVisibility(){
@@ -2803,38 +2899,6 @@ window.initMdEditorModule = function(deps){
   }
 
   // ---------------------------------------------------------------------
-  // Просмотр картинки крупно — по клику на строку-изображение в списке
-  // тем/папок. Полупрозрачная подложка поверх ВСЕГО settings-modal-box
-  // (см. .mdeditor-image-overlay в components.css), закрывается по клику
-  // в любом месте. Object URL создаётся заново при каждом открытии и
-  // освобождается при закрытии (файл может быть большим, не держим ссылку
-  // дольше, чем реально показываем).
-  // ---------------------------------------------------------------------
-  function openImagePreview(handle, name){
-    var box = document.querySelector(".settings-modal-box");
-    if(!box) return;
-    var overlay = document.createElement("div");
-    overlay.className = "mdeditor-image-overlay";
-    var img = document.createElement("img");
-    img.alt = name;
-    overlay.appendChild(img);
-    var objectUrl = null;
-    function close(){
-      if(objectUrl) URL.revokeObjectURL(objectUrl);
-      overlay.removeEventListener("click", close);
-      if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
-    }
-    overlay.addEventListener("click", close);
-    box.appendChild(overlay);
-    handle.getFile().then(function(f){
-      objectUrl = URL.createObjectURL(f);
-      img.src = objectUrl;
-    }).catch(function(){
-      overlay.textContent = "Не удалось открыть «" + name + "».";
-    });
-  }
-
-  // ---------------------------------------------------------------------
   // Автосохранение — пишем на диск через createWritable()/write()/close()
   // с небольшой задержкой после последнего изменения; принудительный сброс
   // (flushAutosaveNow) вызывается перед уходом со вкладки/сменой заметки —
@@ -2877,110 +2941,21 @@ window.initMdEditorModule = function(deps){
     return str.replace(STRAY_SLASH_BEFORE_LINK_RE, "[[");
   }
 
-  // Планшеты (в первую очередь Android, Storage Access Framework) иногда
-  // сами "протухают" уже выданный FileSystemFileHandle — как правило,
-  // после сворачивания приложения или любого изменения файла в обход
-  // самого хендла (например, синхронизация облака). Попытка
-  // createWritable()/write() на таком хендле кидает DOMException
-  // "An operation that depends on state cached in an interface object
-  // was made but the state had changed since it was read from disk."
-  // Сам по себе хендл при этом не "лечится" — единственный выход:
-  // заново получить свежий хендл на тот же файл у родительской папки
-  // (fileRef.dirHandle+fileRef.name) и повторить запись уже с ним.
-  // Делаем это один раз (isRetry защищает от бесконечного цикла) — если
-  // и повторная попытка не поможет, значит дело не в протухшем хендле,
-  // а в чём-то другом, и ошибку показываем как есть.
-  function isStaleHandleError(e){
-    return !!(e && (e.name === "InvalidStateError" || e.name === "NotReadableError") &&
-      /state had changed since it was read from disk/i.test((e.message || "")));
-  }
-  // Отдельный случай (в отличие от isStaleHandleError выше) — планшеты
-  // Android чаще ЗАМОРАЖИВАЮТ вкладку в фоне, а не убивают её целиком (в
-  // отличие от телефонов с меньшим запасом RAM): JS-состояние (dirHandle,
-  // openFile) остаётся как есть, но SAF-провайдер (отдельный процесс ОС,
-  // через который Android резолвит content-URI под хендлами) тем временем
-  // может быть перезапущен системой независимо от вкладки. Первая же
-  // попытка записи после разморозки вкладки иногда попадает на ещё не
-  // "прогретый" провайдер и кидает DOMException NotFoundError ("A
-  // requested file or directory could not be found..."), хотя реального
-  // отзыва разрешения нет (queryPermission() в этот момент всё ещё вернул
-  // бы "granted") — лечится так же, как и stale handle выше: заново
-  // получить свежий fileHandle у dirHandle и повторить запись, но с
-  // небольшой задержкой перед повтором (провайдеру нужна доля секунды на
-  // переподключение) и до двух попыток вместо одной, т.к. это не
-  // одномоментная "порча" хендла, а именно гонка с ещё не готовым
-  // провайдером.
-  function isTransientNotFoundError(e){
-    return !!(e && e.name === "NotFoundError" &&
-      /could not be found/i.test((e.message || "")));
-  }
-  function delay(ms){ return new Promise(function(res){ setTimeout(res, ms); }); }
-  function writeFileText(fileRef, text, attempt){
-    attempt = attempt || 0;
-    return fileRef.fileHandle.createWritable().then(function(w){
-      return w.write(text).then(function(){ return w.close(); });
-    }).catch(function(e){
-      var canRetry = fileRef.dirHandle && fileRef.name && attempt < 2;
-      if(canRetry && isStaleHandleError(e)){
-        return fileRef.dirHandle.getFileHandle(fileRef.name, { create:false }).then(function(freshHandle){
-          fileRef.fileHandle = freshHandle;
-          return writeFileText(fileRef, text, attempt + 1);
-        });
-      }
-      if(canRetry && isTransientNotFoundError(e)){
-        return delay(250 * (attempt + 1)).then(function(){
-          return fileRef.dirHandle.getFileHandle(fileRef.name, { create:false }).then(function(freshHandle){
-            fileRef.fileHandle = freshHandle;
-            return writeFileText(fileRef, text, attempt + 1);
-          });
-        });
-      }
-      throw e;
-    });
-  }
-
   // ---------------------------------------------------------------------
-  // "Продолжить с той же заметки и с того же места" (см. ТЗ пользователя
-  // от 01.09) — отдельно от автосохранения ТЕКСТА В ФАЙЛ: здесь запоминаем,
-  // какая заметка сейчас открыта (или что пользователь ушёл на список),
-  // курсор И реальную прокрутку (в процентах — так, что "то же место"
-  // остаётся тем же и на устройстве с другой шириной экрана/переносом
-  // строк, где абсолютный пиксель ничего не значит), чтобы при следующем
-  // холодном старте (в т.ч. на ДРУГОМ устройстве через Syncthing — см.
-  // writeDocStateToDiskNow/readDocStateFromDisk ниже) открыть то же самое
-  // место (см. initFromStoredHandle). Нарочно не завязано на
-  // openFile.dirty/успешность записи текста файла — позицию надо помнить,
-  // даже если пользователь просто прокручивал/кликал, не меняя текста, и
-  // даже если сама запись текста в файл в этот момент не удалась.
-  var docStateSaveTimer = null;
-  // Ссылка на #settingsTabContent и на конкретную функцию-обработчик,
-  // навешанную на его "scroll" в mountEditor() — нужна, чтобы снять именно
-  // этот слушатель в destroyEditor() и не плодить дубликаты при каждом
-  // повторном открытии заметки/перемонтировании редактора (см. mountEditor).
+  // "Продолжить с той же заметки и с того же места" — по решению
+  // пользователя от 05.09 (переход на облако) ТОЛЬКО локально на этом
+  // устройстве: раньше это ехало файлом .mdeditor-state.json вместе с
+  // самими заметками через Syncthing — этого канала больше нет, а
+  // заводить для него отдельный облачный путь пользователь не захотел.
+  // ---------------------------------------------------------------------
   var mdEditorScrollContainer = null;
   var mdEditorScrollHandler = null;
+  var docStateSaveTimer = null;
   function persistDocStateNow(patch){
     for(var k in patch){ if(patch.hasOwnProperty(k)) docState[k] = patch[k]; }
     docState.updatedAt = Date.now();
     idbSet("lastNote", docState).catch(function(){});
-    scheduleDiskStateWrite();
   }
-  // Реальная прокрутка редактора В ПРОЦЕНТАХ от прокручиваемой высоты —
-  // именно это, а не только позиция курсора, нужно, чтобы "то же место"
-  // восстанавливалось и при простом чтении/прокрутке без единого клика
-  // (см. переписку с пользователем от 01.09, пункт 1: раньше запоминалась
-  // только позиция курсора, которая при чтении без правок вообще не
-  // менялась, поэтому после возврата вкладки видно было самое начало).
-  // ИСПРАВЛЕНО (01.09, вторая попытка): у .mdeditor-editor-host/.cm-editor
-  // нет своего overflow/ограничения по высоте — редактор растягивается на
-  // всю высоту текста, поэтому cmView.scrollDOM физически никогда не
-  // скроллится (scrollHeight===clientHeight у него всегда, max<=0 — эта
-  // функция раньше всегда возвращала 0, а восстановление ниже в mountEditor
-  // по той же причине никогда не срабатывало и откатывалось на позицию
-  // курсора). Реальная прокрутка, которую видит пользователь, происходит на
-  // #settingsTabContent — том же самом элементе, что прокручивает список
-  // заметок (см. renderListScreen выше, комментарий про "домик"). Считаем
-  // процент по нему.
   function currentScrollPercent(){
     var sc = document.getElementById("settingsTabContent");
     if(!sc) return null;
@@ -2993,154 +2968,45 @@ window.initMdEditorModule = function(deps){
     if(!openFile || !cmView) return;
     var pos = cmView.state.selection.main.head;
     var pct = currentScrollPercent();
-    // ВАЖНО: mountEditor() при повторном монтировании (см. ниже) читает
-    // позицию курсора/прокрутки НАПРЯМУЮ из openFile, а не из docState —
-    // а повторное монтирование происходит не только на холодном старте, но
-    // и при обычном переключении вкладок НАСТРОЕК внутри приложения
-    // (switchSettingsTab в my.js вызывает flushPendingMdEditorEdit, а
-    // затем при возврате на вкладку "Мой блокнот" — render(), который
-    // каждый раз пересоздаёт DOM редактора и вызывает mountEditor() заново,
-    // см. renderEditorScreen). Раньше openFile.cursorPos/scrollPercent
-    // обновлялись только один раз, в момент открытия заметки, поэтому
-    // прокрутка при обычном переключении вкладок внутри приложения
-    // терялась, даже если сама заметка никуда не закрывалась. Держим оба
-    // места (openFile — для немедленного перемонтирования, docState — для
-    // холодного старта/синхронизации между устройствами) в актуальном
-    // состоянии одновременно.
-    //
-    // (Пробовали ещё view.scrollSnapshot() — не подходит: по документации
-    // CodeMirror сам метод честно предупреждает "only affects the editor's
-    // own scrollable element, not parents", а прокручивается у нас именно
-    // родитель, #settingsTabContent, а не cmView.scrollDOM — см.
-    // currentScrollPercent ниже. Настоящая причина сброса была не в
-    // способе восстановления, а в том, что flushPendingMdEditorEdit не
-    // завершал жизненный цикл предыдущего cmView, см. эту функцию и
-    // destroyEditor.)
     openFile.cursorPos = pos;
     openFile.scrollPercent = pct;
-    persistDocStateNow({
-      screen: "editor",
-      name: openFile.name,
-      cursorPos: pos,
-      scrollPercent: pct
-    });
+    persistDocStateNow({ screen: "editor", id: openFile.id, name: openFile.name, cursorPos: pos, scrollPercent: pct });
   }
   function scheduleDocStateSave(){
     if(docStateSaveTimer) clearTimeout(docStateSaveTimer);
     docStateSaveTimer = setTimeout(flushDocStateNow, 500);
   }
-
-  // ---------------------------------------------------------------------
-  // Синхронизация "того же места" МЕЖДУ УСТРОЙСТВАМИ (см. ТЗ пользователя
-  // от 01.09, пункт 3) — IndexedDB локальна для устройства/браузера и сама
-  // по себе никуда не переезжает. Пишем то же самое состояние ЕЩЁ И
-  // маленьким json-файлом в корень выбранной папки — раз пользователь и так
-  // синхронизирует эту папку через Syncthing (форк на Android), файл
-  // приедет на другое устройство сам, без какой-либо новой инфраструктуры.
-  // Имя файла с точки ("." в начале) не попадает под /\.md$/i и
-  // IMAGE_EXT_RE (см. scanTree выше), поэтому в списке заметок/картинок не
-  // отображается. Запись на диск дебаунсится (реже, чем в IndexedDB — это
-  // настоящий файловый I/O) и форсируется в flushAutosaveNow вместе с
-  // остальным автосохранением (см. ниже), чтобы гарантированно попасть на
-  // диск ДО сворачивания/закрытия вкладки, а не потеряться в замороженном
-  // таймере (та же причина, что и у visibilitychange/pagehide выше).
-  var diskStateWriteTimer = null;
-  function writeDocStateToDiskNow(){
-    if(diskStateWriteTimer){ clearTimeout(diskStateWriteTimer); diskStateWriteTimer = null; }
-    if(!dirHandle) return;
-    var payload = JSON.stringify(docState);
-    dirHandle.getFileHandle(STATE_FILE_NAME, { create: true }).then(function(fh){
-      return fh.createWritable();
-    }).then(function(w){
-      return w.write(payload).then(function(){ return w.close(); });
-    }).catch(function(){
-      // синхронизация позиции — вспомогательная функция, не мешаем
-      // основной работе (тексту заметок), если она не удалась
-    });
-  }
-  function scheduleDiskStateWrite(){
-    if(diskStateWriteTimer) clearTimeout(diskStateWriteTimer);
-    diskStateWriteTimer = setTimeout(writeDocStateToDiskNow, 1000);
-  }
-  // Читает состояние, записанное ЛЮБЫМ устройством (в т.ч. этим же) в файл
-  // на диске — вызывается один раз при холодном старте (см.
-  // initFromStoredHandle), результат сверяется по updatedAt с копией из
-  // IndexedDB, побеждает более свежая (см. там же).
-  // "Продолжить с той же заметки и с того же места" после того, как
-  // rootTree только что просканирован — общая логика, вынесенная из
-  // initFromStoredHandle (ветка без кэшированного stub-дерева, см. там же),
-  // чтобы её же можно было переиспользовать из renderSetupScreen: раньше
-  // холодный старт, требующий повторного requestPermission() (пользователь
-  // должен САМ нажать на скрепку, см. ТЗ пользователя от 01.09, пункт 4),
-  // просто открывал список заметок, вообще не читая docState — восстановление
-  // срабатывало только в "тихой" ветке (ensurePermissionSilently === true).
-  // Именно поэтому "продолжить с той же заметки" переживало переключение
-  // вкладок (docState живёт в памяти модуля, см. выше), но не переживало
-  // закрытие всего приложения, если разрешение на папку приходилось
-  // подтверждать заново.
+  // Только это устройство (см. решение пользователя от 05.09) — просто
+  // читаем IndexedDB, файла на диске больше нет вовсе.
   function resumeLastNoteOrShowList(){
-    var diskStatePromise = readDocStateFromDisk();
-    var localState = null;
-    return Promise.resolve().then(function(){
-      try{ return idbGet("lastNote"); }catch(e){ return null; }
-    }).then(function(v){
-      localState = v;
-      return diskStatePromise;
-    }).catch(function(){
-      return diskStatePromise;
-    }).then(function(diskState){
-      var resolvedState = localState;
-      if(diskState && (!localState || (diskState.updatedAt || 0) > (localState.updatedAt || 0))){
-        resolvedState = diskState;
+    return idbGet("lastNote").then(function(v){
+      if(v && typeof v === "object"){
+        for(var k in v){ if(v.hasOwnProperty(k)) docState[k] = v[k]; }
       }
-      for(var k in resolvedState){ if(resolvedState.hasOwnProperty(k)) docState[k] = resolvedState[k]; }
-      var lastNote = docState;
-      var resumedEntry = (lastNote.screen === "editor" && lastNote.name) ? nameIndex.get(lastNote.name.toLowerCase()) : null;
-      if(resumedEntry){
-        openNoteByEntry(resumedEntry, lastNote.cursorPos, undefined, lastNote.scrollPercent);
+      if(docState.screen === "editor" && docState.id && notesMap.has(docState.id) && !notesMap.get(docState.id).deleted){
+        openNoteById(docState.id, docState.cursorPos, docState.scrollPercent);
       } else {
         screen = "list";
         render();
       }
+    }).catch(function(){
+      screen = "list";
+      render();
     });
   }
 
-  function readDocStateFromDisk(){
-    if(!dirHandle) return Promise.resolve(null);
-    return dirHandle.getFileHandle(STATE_FILE_NAME, { create: false }).then(function(fh){
-      return fh.getFile();
-    }).then(function(f){ return f.text(); }).then(function(text){
-      try{
-        var parsed = JSON.parse(text);
-        return (parsed && typeof parsed === "object") ? parsed : null;
-      }catch(e){ return null; }
-    }).catch(function(){ return null; });
-  }
-
+  // ---------------------------------------------------------------------
+  // Автосохранение — теперь просто обновляет notesMap в памяти и ставит
+  // заметку "грязной" для облачного пуша (раздел 3 ТЗ), вместо записи на
+  // диск через createWritable()/write()/close(); никакой ретрай-логики на
+  // случай "протухшего" handle больше не нужно — handle'ов не осталось.
+  // ---------------------------------------------------------------------
   function flushAutosaveNow(){
     if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
     flushDocStateNow();
-    writeDocStateToDiskNow();
     if(!openFile || !cmView || !openFile.dirty) return;
     var raw = stripStraySlashBeforeLinks(stripInvisibleSpaces(cmView.state.doc.toString()));
 
-    // Метаданные (дата создания/редактирования/открытия, ТЗ пользователя
-    // от 04.09, открытие добавлено 05.09): на каждое реальное сохранение
-    // текста проставляем/обновляем строку метаданных в начале документа.
-    // Если она уже есть — дата создания остаётся прежней, дата
-    // редактирования становится сегодняшней (если ещё не сегодняшняя).
-    // Если её нет (старая заметка, первое редактирование после появления
-    // этой функции) — заводим её сейчас. Настоящая дата создания
-    // неизвестна, НО до этого самого момента пользователь уже видел в
-    // поле дат виртуальную "давность 6 месяцев" (см. virtualLegacyDatePairRu
-    // выше) как дату создания — поэтому фиксируем именно её, а не сегодня,
-    // иначе дата создания на глазах пользователя "перескакивала" бы на
-    // сегодняшний день прямо в момент первого редактирования (баг,
-    // замечен пользователем 05.09). Дата редактирования — всегда сегодня.
-    // Дата открытия берётся из openedIndexCache (см. recordNoteOpened
-    // выше) — она уже проставлена туда самим открытием этой заметки, ещё
-    // до первого редактирования, — а не читается заново с диска; это же
-    // попутно апгрейдит старые 2-польные строки метаданных до 3-польных.
     var meta = parseNoteMeta(raw);
     var today = todayRu();
     var bodyText = meta ? raw.slice(meta.raw.length) : raw;
@@ -3151,63 +3017,24 @@ window.initMdEditorModule = function(deps){
     var metaLine = buildMetaLine(createdForMeta, today, openedForMeta);
     var text = metaLine + bodyText;
 
-    // Если строка метаданных изменилась (появилась впервые или обновилась
-    // дата редактирования) — отражаем это и в самом документе редактора
-    // (cmView), иначе следующее открытие "с кодом"/следующее автосохранение
-    // снова увидят вчерашнюю дату. Это само по себе — ещё одно изменение
-    // документа (docChanged), поэтому вызовет один дополнительный,
-    // самозавершающийся цикл автосохранения (см. scheduleAutosave в
-    // updateListener) — не более одного раза в день на заметку, не проблема.
     if(text !== raw){
       var oldMetaLen = meta ? meta.raw.length : 0;
       cmView.dispatch({ changes: { from: 0, to: oldMetaLen, insert: metaLine } });
     }
 
-    var fileRef = openFile;
-    fileRef.dirty = false;
-    writeFileText(fileRef, text).then(function(){
-      fileRef.text = text;
-      if(openFile === fileRef) refreshDatesField();
-      // сохраняется молча (см. ТЗ пользователя от 31.08) — раньше здесь
-      // показывалось "Сохранено.", теперь просто гасим статус (пустая
-      // строка), ничего не показывая. Не убираем вызов setStatus совсем,
-      // а не оставляем прежний текст: если до этого показывалась ошибка
-      // предыдущей попытки сохранения, успешное сохранение должно её
-      // погасить, а не оставить висеть навсегда.
-      if(openFile === fileRef) setStatus("", false);
-    }).catch(function(e){
-      fileRef.dirty = true;
-      if(openFile === fileRef) setStatus("Не удалось сохранить: " + (e && e.message ? e.message : e), true);
-    });
+    openFile.dirty = false;
+    openFile.text = text;
+    editNoteRecordText(openFile.id, text);
+    refreshDatesField();
+    setStatus("", false);
   }
 
-  // вызывается из общего блока flush* в switchSettingsTab (my.js) при
-  // любом уходе со вкладки настроек.
-  // ИСПРАВЛЕНО (01.09, четвёртая попытка): раньше здесь только сохранялось
-  // состояние (flushAutosaveNow), а сам cmView оставался висеть "живым",
-  // хотя его DOM тут же подменялся содержимым другой вкладки настроек
-  // (switchSettingsTab перезаписывает #settingsTabContent.innerHTML сразу
-  // после этого вызова). Из-за этого при СЛЕДУЮЩЕМ вызове
-  // flushPendingMdEditorEdit (когда пользователь уходит уже СО ВТОРОЙ
-  // вкладки, например уходит с "Закладок" обратно на "Мой блокнот") здесь
-  // видели тот же самый, но уже "протухший" cmView (проверка "if(!openFile
-  // || !cmView) return" в flushDocStateNow его не отсекала) и на этом
-  // основании ещё раз считали currentScrollPercent() — а физически
-  // #settingsTabContent в этот момент содержит DOM СОВСЕМ ДРУГОЙ вкладки
-  // (той, с которой уходим), а не редактор. В итоге только что правильно
-  // сохранённая позиция заметки перезатиралась мусорным значением (обычно
-  // 0, т.к. чужая вкладка обычно ещё не прокручена) ещё ДО того, как
-  // mountEditor() успевал её восстановить при возврате — то есть
-  // восстановление ломалось на ровном месте при каждом переключении.
-  // Заодно "протухший" cmView, ни разу не уничтоженный, мог продолжать
-  // слать измерения от старого (уже отсоединённого от DOM) редактора,
-  // что и объясняет замеченные отступы сверху/снизу при новом монтировании.
-  // Решение: полноценно завершать жизненный цикл редактора здесь же, сразу
-  // после сохранения — destroyEditor() обнуляет cmView, так что повторный
-  // вызов этой функции (с другой, чужой вкладки) становится безопасным
-  // no-op'ом благодаря той же самой проверке "if(!cmView) return".
+  // Уход со вкладки "Мой блокнот"/"Закладки" на другую вкладку настроек, при
+  // открытой заметке — тоже "уход с экрана редактора" (раздел 4.1 ТЗ),
+  // поэтому шлёт правки в облако немедленно, а не по debounce.
   function flushPendingMdEditorEdit(){
     flushAutosaveNow();
+    pushDirtyNotes(true);
     destroyEditor();
   }
 
@@ -3327,31 +3154,34 @@ window.initMdEditorModule = function(deps){
     // ---- встроенные картинки: ![[имя.ext]] (тот же двойной-скобочный
     // синтаксис, что и у ссылок на заметки [[имя]], плюс "!" — как в
     // Obsidian). Сама картинка читается лениво через imageIndex (см.
-    // rescan/buildIndex выше) и кэшируется в imageUrlCache по имени, чтобы
-    // не перечитывать файл на каждую перестройку decorations (она
-    // происходит при любом изменении документа, даже не в этой строке).
-    // applyImageFloatLayout/relayoutImageFloats вынесены на уровень
-    // модуля — см. выше перед makeLivePreviewExtension. ----
+    // buildImageIndex/imagesDirHandle выше) и кэшируется в imageUrlCache по
+    // имени, чтобы не перечитывать файл на каждую перестройку decorations
+    // (она происходит при любом изменении документа, даже не в этой
+    // строке). applyImageFloatLayout/relayoutImageFloats вынесены на
+    // уровень модуля — см. выше перед makeLivePreviewExtension.
+    //
+    // Плейсхолдер отсутствующей картинки (раздел 9 ТЗ) — показывается,
+    // если папка с картинками не подключена ИЛИ подключена, но именно этот
+    // файл в ней не найден. wrap регистрируется в imageNodesByName (см.
+    // выше), чтобы после успешного подключения папки (см.
+    // refreshMountedImageNodes) картинка могла подгрузиться НА МЕСТО
+    // плейсхолдера, без пересборки decorations и без перезагрузки заметки
+    // целиком. ----
     function ImageWidget(name){ this.name = name; }
     ImageWidget.prototype = Object.create(WidgetType.prototype);
     ImageWidget.prototype.eq = function(other){ return other.name === this.name; };
     ImageWidget.prototype.toDOM = function(){
       var wrap = document.createElement("span");
       wrap.className = "cm-md-image-wrap";
-      var img = document.createElement("img");
-      img.className = "cm-md-image";
-      img.alt = this.name;
-      // Реальный размер (а значит и решение float/block) известен только
-      // после загрузки — до этого картинка либо ещё не выбрана из кэша
-      // (imageUrlCache), либо .cm-md-image-loading-заглушка вообще без
-      // <img>. requestAnimationFrame — чтобы clientWidth строки успел
-      // посчитаться после того, как виджет реально встал в DOM.
-      img.addEventListener("load", function(){
-        requestAnimationFrame(function(){ applyImageFloatLayout(wrap); });
-      });
-      wrap.appendChild(img);
-      loadImageInto(this.name, img, wrap);
+      var entry = { wrap: wrap, name: this.name, loaded: false };
+      wrap.mdImageEntry = entry;
+      registerImageNode(this.name.toLowerCase(), entry);
+      loadImageInto(this.name, wrap);
       return wrap;
+    };
+    ImageWidget.prototype.destroy = function(dom){
+      var entry = dom.mdImageEntry;
+      if(entry) unregisterImageNode(this.name.toLowerCase(), entry);
     };
     ImageWidget.prototype.ignoreEvent = function(){ return true; };
     var imageWidgetCache = new Map(); // имя -> ImageWidget (переиспользуем, чтобы eq() совпадал между перестройками)
@@ -3360,32 +3190,74 @@ window.initMdEditorModule = function(deps){
       if(!w){ w = new ImageWidget(name); imageWidgetCache.set(name, w); }
       return w;
     }
-    function loadImageInto(name, imgEl, wrapEl){
+    // Собирает разметку плейсхолдера прямо внутри wrapEl (переиспользуем
+    // тот же <span>, а не пересоздаём его — иначе он выпал бы из
+    // imageNodesByName). Форма/цвет — раздел 9 ТЗ: прямоугольник 16:9,
+    // скруглённые углы, прозрачный фон, тонкая рамка в тон обычной
+    // (см. .cm-md-image-missing* в components.css), без акцентного цвета
+    // (это обычное ожидаемое состояние, не ошибка). Кнопка-скрепка —
+    // та же иконка, что и у кнопки "прикрепить"/выбрать папку, запускает
+    // (пере)подключение папки тем же путём, что и обычная кнопка в списке
+    // заметок (см. reconnectImagesFolder).
+    function buildImagePlaceholder(wrapEl, name){
+      wrapEl.className = "cm-md-image-wrap cm-md-image-missing";
+      wrapEl.innerHTML =
+        '<span class="cm-md-image-missing-caption"></span>' +
+        '<button type="button" class="cm-md-image-missing-btn" title="Подключить папку с изображениями">' + PAPERCLIP_ICON_SVG + '</button>';
+      wrapEl.querySelector(".cm-md-image-missing-caption").textContent = name;
+      wrapEl.querySelector(".cm-md-image-missing-btn").addEventListener("click", function(ev){
+        ev.preventDefault();
+        ev.stopPropagation();
+        reconnectImagesFolder();
+      });
+    }
+    // Подменяет содержимое wrapEl на настоящую картинку — общая точка и
+    // для первого показа, и для "починки" плейсхолдера на месте (см.
+    // refreshMountedImageNodes).
+    function setWrapToImage(wrapEl, url, name){
+      wrapEl.className = "cm-md-image-wrap";
+      wrapEl.innerHTML = "";
+      var img = document.createElement("img");
+      img.className = "cm-md-image";
+      img.alt = name;
+      // Реальный размер (а значит и решение float/block) известен только
+      // после загрузки. requestAnimationFrame — чтобы clientWidth строки
+      // успел посчитаться после того, как узел реально встал в DOM.
+      img.addEventListener("load", function(){
+        requestAnimationFrame(function(){ applyImageFloatLayout(wrapEl); });
+      });
+      img.src = url;
+      wrapEl.appendChild(img);
+      if(wrapEl.mdImageEntry) wrapEl.mdImageEntry.loaded = true;
+    }
+    function loadImageInto(name, wrapEl){
       var key = name.toLowerCase();
       var cached = imageUrlCache.get(key);
       if(cached){
-        if(cached.url) imgEl.src = cached.url;
-        else { wrapEl.classList.add("cm-md-image-missing"); wrapEl.textContent = "🖼 " + name + " — файл не найден"; }
+        if(cached.url) setWrapToImage(wrapEl, cached.url, name);
+        else {
+          buildImagePlaceholder(wrapEl, name);
+          if(wrapEl.mdImageEntry) wrapEl.mdImageEntry.loaded = false;
+        }
         return;
       }
-      var entry = imageIndex && imageIndex.get(key);
-      if(!entry){
+      var found = imageIndex && imageIndex.get(key);
+      if(!found){
         imageUrlCache.set(key, { error: true });
-        wrapEl.classList.add("cm-md-image-missing");
-        wrapEl.textContent = "🖼 " + name + " — файл не найден";
+        buildImagePlaceholder(wrapEl, name);
+        if(wrapEl.mdImageEntry) wrapEl.mdImageEntry.loaded = false;
         return;
       }
-      wrapEl.classList.add("cm-md-image-loading");
-      entry.fileHandle.getFile().then(function(f){
+      wrapEl.className = "cm-md-image-wrap cm-md-image-loading";
+      wrapEl.innerHTML = "";
+      found.handle.getFile().then(function(f){
         var url = URL.createObjectURL(f);
         imageUrlCache.set(key, { url: url });
-        wrapEl.classList.remove("cm-md-image-loading");
-        imgEl.src = url;
+        setWrapToImage(wrapEl, url, name);
       }).catch(function(){
         imageUrlCache.set(key, { error: true });
-        wrapEl.classList.remove("cm-md-image-loading");
-        wrapEl.classList.add("cm-md-image-missing");
-        wrapEl.textContent = "🖼 " + name + " — не удалось загрузить";
+        buildImagePlaceholder(wrapEl, name);
+        if(wrapEl.mdImageEntry) wrapEl.mdImageEntry.loaded = false;
       });
     }
 
@@ -3867,15 +3739,6 @@ window.initMdEditorModule = function(deps){
           livePreviewCompartment.of(codeMode ? [] : [makeLivePreviewExtension(cm)]),
           EditorView.updateListener.of(function(u){
             if(u.docChanged){
-              // Реальное нажатие клавиши — в отличие от открытия заметки
-              // кликом (см. openNoteByEntry), при автоматическом
-              // восстановлении последней заметки на холодном старте (см.
-              // initFromStoredHandle) открытие происходит БЕЗ клика, так
-              // что там reverifyWritePermissionOnce() мог не сработать
-              // (нет user activation). Здесь же, на docChanged, activation
-              // гарантированно есть — это подстраховка именно для такого
-              // автовосстановленного случая.
-              reverifyWritePermissionOnce();
               scheduleAutosave();
               scheduleLinksFieldRefresh();
             }
@@ -3956,35 +3819,21 @@ window.initMdEditorModule = function(deps){
     });
   }
 
-  // ---------------------------------------------------------------------
-  // Сброс несохранённых правок ПЕРЕД уходом вкладки в фон — раньше
-  // автосохранение срабатывало только по debounce-таймеру (700мс) и при
-  // явной навигации внутри самого редактора (goHome, смена заметки),
-  // поэтому правка, сделанная прямо перед сворачиванием/переключением
-  // приложений на планшете, могла попасть ровно в то окно, где Android
-  // замораживает вкладку, не дав debounce-таймеру сработать. visibilitychange
-  // в "hidden" срабатывает синхронно и раньше, чем ОС успевает заморозить
-  // страницу, pagehide — подстраховка на случай, если вкладку не просто
-  // сворачивают, а закрывают/выгружают. Оба события дёшевы при "нечего
-  // сохранять" (flushAutosaveNow сам проверяет openFile.dirty).
+  // Сброс несохранённых правок и немедленная отправка в облако ПЕРЕД
+  // уходом вкладки в фон/закрытием (раздел 4.1 ТЗ: "переключение вкладки
+  // настроек, сворачивание приложения" — тот же список случаев, что и у
+  // flushPendingSyncNow в my.js).
   document.addEventListener("visibilitychange", function(){
-    if(document.visibilityState === "hidden") flushAutosaveNow();
-  });
-  window.addEventListener("pagehide", function(){ flushAutosaveNow(); });
-
-  // При возврате вкладки из фона (см. комментарий у isTransientNotFoundError
-  // выше) SAF-провайдер на планшетах иногда ещё не "прогрелся" — обычный
-  // queryPermission() тут не помогает, он спрашивает про разрешение, а не
-  // про готовность провайдера резолвить документ. Пробуем один раз тихо
-  // прогреть провайдер безобидным чтением каталога files сразу после
-  // возврата, чтобы, если он ещё не готов, наткнуться на NotFoundError
-  // именно здесь (без всякого влияния на пользователя), а не в момент
-  // следующего автосохранения. Ошибку намеренно проглатываем — это только
-  // попытка прогрева, не диагностика.
-  document.addEventListener("visibilitychange", function(){
-    if(document.visibilityState === "visible" && dirHandle){
-      ensureFilesFolder().catch(function(){});
+    if(document.visibilityState === "hidden"){
+      flushAutosaveNow();
+      flushNotesCacheNow();
+      pushDirtyNotes(true);
     }
+  });
+  window.addEventListener("pagehide", function(){
+    flushAutosaveNow();
+    flushNotesCacheNow();
+    pushDirtyNotes(true);
   });
 
   // Просим постоянное (persistent) хранилище для origin — это не влияет
@@ -3995,6 +3844,12 @@ window.initMdEditorModule = function(deps){
   if(navigator.storage && navigator.storage.persist){
     navigator.storage.persist().catch(function(){});
   }
+
+  // Папка с изображениями (раздел 8 ТЗ) не завязана на syncId/облако —
+  // пробуем молча поднять права на ранее выбранную папку сразу при запуске
+  // модуля, независимо от того, открыта ли вкладка "Мой блокнот" прямо
+  // сейчас (см. loadStoredImagesDirHandle выше).
+  loadStoredImagesDirHandle();
 
   return {
     renderSettingsTabMdEditor: renderSettingsTabMdEditor,
@@ -4015,6 +3870,19 @@ window.initMdEditorModule = function(deps){
     getFontSizeStep: function(){ return fontSizeStep; },
     changeFontSizeStep: changeFontSizeStep,
     FONT_SIZE_MIN_STEP: FONT_SIZE_MIN_STEP,
-    FONT_SIZE_MAX_STEP: FONT_SIZE_MAX_STEP
+    FONT_SIZE_MAX_STEP: FONT_SIZE_MAX_STEP,
+    // Восстановление сети (раздел 3 ТЗ TASK_MDNOTES_CLOUD.md): pushDirtyNotes
+    // сам по себе выходит молча, если сеть недоступна (isOnline()===false),
+    // и НЕ ставит ретрай в этом случае — ретраи через NOTES_RETRY_DELAYS
+    // планируются только после реально неудавшегося сетевого запроса (см.
+    // .catch() внутри pushDirtyNotes). Значит, накопленные dirtyNoteIds сами
+    // по себе не отправятся при возврате сети — нужен внешний толчок.
+    // Вызывается из window "online" в my.js, тем же приёмом, что и
+    // doCloudSync там же (сброс счётчика ретраев + немедленный вызов).
+    retryNotesPushOnReconnect: function(){
+      notesRetryCount = 0;
+      clearTimeout(notesRetryTimer);
+      pushDirtyNotes(false);
+    }
   };
 };

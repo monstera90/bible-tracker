@@ -1645,6 +1645,25 @@
     flex-direction:column;
     margin-top:4px;
   }
+  /* ---------- кнопки загрузки/скачивания заметок (TASK_MDNOTES_CLOUD.md,
+     раздел 7) — часть обычного потока страницы под списком, НЕ floating и
+     не закреплены: чтобы их увидеть, список нужно докрутить до конца, как
+     и попросили. Стиль переиспользован у "Начать"/"Скачать" остальных
+     вкладок (.workbooks-run-btn выше) — свой не изобретаем, только
+     раскладка в столбик вместо пары в ряд (у workbooks-actions-row два
+     равных по ширине соседа, здесь — до двух кнопок друг под другом,
+     порядок важен: сначала загрузка, потом скачивание, см. mdeditor.js). ---------- */
+  .mdeditor-list-actions{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    margin-top:16px;
+  }
+  .mdeditor-list-action-btn{
+    width:100%;
+    box-sizing:border-box;
+    text-align:center;
+  }
   .mdeditor-row{
     display:flex;
     align-items:center;
@@ -1925,11 +1944,61 @@
     border-radius:8px;
     background:var(--parchment-dark);
   }
+  /* ---------- плейсхолдер отсутствующей картинки (TASK_MDNOTES_CLOUD.md,
+     раздел 9, 05.09) — показывается, если папка с изображениями не
+     подключена, или подключена, но именно этот файл в ней не найден (см.
+     buildImagePlaceholder в mdeditor.js). Встраивается в общий стиль
+     приложения, НЕ выделяется акцентным/предупреждающим цветом — это
+     обычное ожидаемое состояние, а не ошибка (ТЗ). Прямоугольник 16:9,
+     скруглённые углы — как у обычной вставленной картинки (.cm-md-image
+     выше), прозрачный фон и тонкая рамка в тон обычной рамки элементов
+     приложения (var(--groove-shadow), тот же цвет, что и у .cm-md-image/
+     .mdeditor-fab-btn). ---------- */
   .cm-md-image-missing{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    aspect-ratio:16/9;
+    max-width:100%;
+    box-sizing:border-box;
+    padding:8px 14px;
+    background:transparent;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+  }
+  .cm-md-image-missing-caption{
     font-family:"Palatino Linotype",Georgia,serif;
     font-size:.85em;
     font-style:italic;
     color:var(--ink-soft);
+    text-align:center;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  /* кнопка-скрепка внутри плейсхолдера — тот же визуальный язык, что и
+     остальные плавающие кнопки блокнота (.mdeditor-fab-btn в этом же
+     файле), но меньше и без тени (это часть содержимого строки, а не
+     плавающий элемент поверх текста). По нажатию запускает
+     (пере)подключение папки с изображениями (см. reconnectImagesFolder в
+     mdeditor.js) — тот же путь, что и у обычной кнопки в списке заметок. */
+  .cm-md-image-missing-btn{
+    flex-shrink:0;
+    width:26px;height:26px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    background:transparent;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    color:var(--wood);
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .cm-md-image-missing-btn svg{ width:14px; height:14px; }
+  @media (hover:hover) and (pointer:fine){
+    .cm-md-image-missing-btn:hover{ background:var(--parchment-dark); }
   }
   /* ---------- задача Obsidian-формата "- [ ] текст" / "- [x] текст" в
      "Моём блокноте", режим "без кода" (см. TASK_LINE_RE/decorateLine/
@@ -1990,11 +2059,15 @@
     border-radius:8px;
     box-shadow:0 10px 30px rgba(0,0,0,.5);
   }
-  /* ---------- диалог "Удалить неиспользуемые файлы" (папка "files", см.
-     openCleanupDialog/findOrphanedFiles в mdeditor.js, ТЗ пользователя от
-     04.09) — тот же приём полноэкранной подложки поверх .settings-modal-box,
-     что и у .mdeditor-image-overlay выше, но со скроллящейся карточкой
-     (список файлов может быть длинным) вместо одной картинки. ---------- */
+  /* ---------- общая карточка-диалог поверх .settings-modal-box (тот же
+     приём полноэкранной подложки, что и у .mdeditor-image-overlay выше) —
+     переименование/удаление заметки (startRename/confirmDeleteNote в
+     mdeditor.js), а с 05.09 (TASK_MDNOTES_CLOUD.md, шаг 3) ещё и разовое
+     предупреждение при первом подключении папки с изображениями
+     (showImagesFirstConnectWarning) — старая "Удалить неиспользуемые
+     файлы" (папка "files", ТЗ от 04.09) отсюда убрана: корзина сирот
+     теперь работает автономно и без диалога (см. cleanupOrphanedImages в
+     mdeditor.js). ---------- */
   .mdeditor-cleanup-overlay{
     position:absolute;
     inset:0;
@@ -2028,6 +2101,26 @@
     display:flex;
     justify-content:center;
     gap:10px;
+  }
+  /* модификатор для диалога конфликта имени при импорте (три кнопки, см.
+     resolveNameConflict в mdeditor.js, TASK_MDNOTES_CLOUD.md раздел 5) —
+     та же .mdeditor-cleanup-actions, но с переносом строк: три подписи
+     ("Пропустить"/"Переименовать"/"Заменить") в один ряд шириной карточки
+     (320px) не помещаются. */
+  .mdeditor-cleanup-actions-wrap{
+    flex-wrap:wrap;
+  }
+  /* галочка "применить ко всем следующим конфликтам" того же диалога —
+     обычная подпись рядом с чекбоксом, без нового визуального языка. */
+  .mdeditor-cleanup-checkbox-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-top:12px;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:12px;
+    color:var(--ink-soft);
+    cursor:pointer;
   }
   .mdeditor-cleanup-cancel{
     padding:8px 16px;

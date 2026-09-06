@@ -2080,6 +2080,42 @@
     return putCloudBlob(id, initialData).then(function(){ return id; });
   }
 
+  // ---------------------------------------------------------------------
+  // Ветка /notes(Meta) для облачных заметок "Моего блокнота" (см.
+  // TASK_MDNOTES_CLOUD.md, раздел 2) — свой, полностью НЕЗАВИСИМЫЙ от
+  // общего state цикл синхронизации (mdeditor.js ведёт собственный
+  // debounce/повтор), но переиспользует fetchWithTimeout и PATCH-приём
+  // putCloudBlob (она поддерживает ключи со слэшами — Firebase трактует их
+  // как relative-путь при multi-location update, значит один и тот же
+  // putCloudBlob(id, {"notes/x": ..., "notesMeta/x": ...}) обновляет сразу
+  // обе ветки одним запросом).
+  // ---------------------------------------------------------------------
+  function fetchNotesCloudPath(relPath, opts){
+    if(!syncId) return Promise.reject(new Error("no_sync"));
+    var fetchOpts = { method: "GET" };
+    if(opts && opts.keepalive) fetchOpts.keepalive = true;
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(syncId) + "/" + relPath + ".json", fetchOpts, 8000).then(function(res){
+      if(!res.ok) throw new Error("fetch_failed_" + res.status);
+      return res.json();
+    });
+  }
+  function deleteNotesCloudPath(relPath, opts){
+    if(!syncId) return Promise.reject(new Error("no_sync"));
+    var fetchOpts = { method: "DELETE" };
+    if(opts && opts.keepalive) fetchOpts.keepalive = true;
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(syncId) + "/" + relPath + ".json", fetchOpts, 8000).then(function(res){
+      if(!res.ok) throw new Error("delete_failed_" + res.status);
+      return true;
+    });
+  }
+  function patchNotesCloud(patchObj, opts){
+    if(!syncId) return Promise.reject(new Error("no_sync"));
+    return putCloudBlob(syncId, patchObj, opts);
+  }
+  function generateNoteId(){
+    return "n" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }
+
   function mergeStates(local, cloud){
     var merged = {}, keys = {};
     Object.keys(local||{}).forEach(function(k){ keys[k]=true; });
@@ -2256,6 +2292,12 @@
     syncRetryCount = 0;
     clearTimeout(syncRetryTimer);
     doCloudSync();
+    // Раздел 3 ТЗ TASK_MDNOTES_CLOUD.md: у заметок свой независимый
+    // облачный цикл (см. deps.notesRetryDelays/initMdEditorModule выше),
+    // doCloudSync его не трогает — без этого вызова правки, накопленные
+    // офлайн в dirtyNoteIds, не отправились бы сами по себе при
+    // восстановлении сети (см. retryNotesPushOnReconnect в mdeditor.js).
+    if(MdEditor && MdEditor.retryNotesPushOnReconnect) MdEditor.retryNotesPushOnReconnect();
   });
   window.addEventListener("offline", function(){ refreshStatusBase(); });
   if(syncId) doCloudSync();
@@ -2486,7 +2528,22 @@
     // ссылаться на неё здесь безопасно по той же причине, что и у
     // refitAllVisibleTaskBodies выше (function-декларация, поднимается в
     // начало этой же IIFE)
-    recordNoteCreated: recordNoteCreated
+    recordNoteCreated: recordNoteCreated,
+    // ---------------------------------------------------------------------
+    // Облачное хранение заметок с шифрованием (см. TASK_MDNOTES_CLOUD.md,
+    // шаг 1 "Ядро") — только эти узкие функции, привязанные к ветке
+    // /notes(Meta) ТЕКУЩЕГО syncId, а не сам syncId и не URL Firebase:
+    // Firebase-специфика остаётся здесь, в my.js (см. fetchNotesCloudPath/
+    // deleteNotesCloudPath/patchNotesCloud/generateNoteId выше).
+    // ---------------------------------------------------------------------
+    getSyncId: function(){ return syncId; },
+    openSyncModal: openModal,
+    fetchCloudPath: fetchNotesCloudPath,
+    patchCloud: patchNotesCloud,
+    deleteCloudPath: deleteNotesCloudPath,
+    generateId: generateNoteId,
+    notesPushDebounceMs: PUSH_DEBOUNCE_MS,
+    notesRetryDelays: SYNC_RETRY_DELAYS
   });
   var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
   var renderSettingsTabMdBookmarks = MdEditor.renderSettingsTabMdBookmarks;

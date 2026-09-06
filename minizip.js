@@ -189,6 +189,36 @@
     return null;
   }
 
+  // Достаёт из ПРОИЗВОЛЬНОГО .zip все записи с расширением .md как текст
+  // (UTF-8), сохраняя путь записи внутри архива (папки — как есть, без
+  // ведущего "/"). В отличие от extractDocxDocumentXml, не привязана к
+  // одному фиксированному имени файла — обходит центральный каталог
+  // целиком (см. TASK_MDNOTES_CLOUD.md, раздел 5: импорт .zip заметок в
+  // "Моём блокноте", mdeditor.js). Записи-каталоги (имя оканчивается на
+  // "/", у них нет собственного содержимого) пропускаются молча — это не
+  // файлы, а не "прочие файлы", о которых нужно предупреждать.
+  // Возвращает { mdFiles: [{path, text}], hasOtherFiles: boolean } —
+  // hasOtherFiles true, если в архиве, помимо .md, встретился хотя бы один
+  // РЕАЛЬНЫЙ файл другого типа (картинка и т.п.) — вызывающий код (см.
+  // раздел 5 ТЗ) должен в этом случае предупредить пользователя, что эти
+  // файлы не перенесены.
+  async function extractMarkdownFiles(zipData) {
+    const bytes = zipData instanceof Uint8Array ? zipData : new Uint8Array(zipData);
+    const entries = readCentralDirectory(bytes);
+    const mdFiles = [];
+    let hasOtherFiles = false;
+    for (const [name, entry] of entries) {
+      if (name.endsWith("/")) continue; // запись-каталог, не файл
+      if (/\.md$/i.test(name)) {
+        const dataBytes = await extractEntry(bytes, entry);
+        mdFiles.push({ path: name, text: new TextDecoder("utf-8").decode(dataBytes) });
+      } else {
+        hasOtherFiles = true;
+      }
+    }
+    return { mdFiles: mdFiles, hasOtherFiles: hasOtherFiles };
+  }
+
   // ---------------------------------------------------------------------
   // Запись ZIP (метод STORE - без сжатия). Нужна для сборки .xlsx на
   // выходе: .xlsx - тоже просто zip-архив с XML внутри, а хранение файлов
@@ -325,5 +355,6 @@
     extractDocxTitle: extractDocxTitle,
     decodeXmlEntities: decodeXmlEntities,
     createZip: createZip,
+    extractMarkdownFiles: extractMarkdownFiles,
   };
 })(typeof window !== "undefined" ? window : globalThis);
