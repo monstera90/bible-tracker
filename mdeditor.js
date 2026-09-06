@@ -500,6 +500,13 @@ window.initMdEditorModule = function(deps){
   // долгое нажатие раскрывает её для добавления). Живёт только в памяти,
   // сама принадлежность к закладкам хранится в bookmarkedNames выше.
   var revealedBookmarkRows = new Set();
+  // те же долгие нажатия, но для СТРОК-ПАПОК в общем списке (см. ТЗ
+  // пользователя от 06.09: крестик удаления, как у заметок, только для
+  // удаления папки целиком со всем её содержимым) — отдельный Set, чтобы
+  // не путать ключи с именами заметок: у папки ключ — её `path` (уникален
+  // и стабилен в пределах дерева, в отличие от имени, которое не
+  // проверяется на уникальность между папками).
+  var revealedFolderDeleteRows = new Set();
 
   // Оборачивает текущее выделение в CodeMirror маркерами форматирования
   // (см. кнопки "Ж"/"К"/"П"/"Ч" в renderEditorScreen выше и ТЗ
@@ -1859,7 +1866,9 @@ window.initMdEditorModule = function(deps){
         var isNote = (it.type === "file");
         row.innerHTML = (it.type === "folder" ? FOLDER_ICON_SVG : FILE_ICON_SVG) +
           '<span class="mdeditor-row-name"></span>' +
-          (isNote ? '<button type="button" class="mdeditor-delete-btn" title="Удалить">' + DELETE_ICON_SVG + '</button><button type="button" class="mdeditor-bookmark-btn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>' : "");
+          (isNote ?
+            '<button type="button" class="mdeditor-delete-btn" title="Удалить">' + DELETE_ICON_SVG + '</button><button type="button" class="mdeditor-bookmark-btn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>' :
+            '<button type="button" class="mdeditor-delete-btn" title="Удалить папку">' + DELETE_ICON_SVG + '</button>');
         row.querySelector(".mdeditor-row-name").textContent = it.name;
         if(isNote){
           var key = it.name.toLowerCase();
@@ -1869,6 +1878,9 @@ window.initMdEditorModule = function(deps){
           bmBtn.classList.toggle("visible", bookmarked || revealedBookmarkRows.has(key));
           var delBtn = row.querySelector(".mdeditor-delete-btn");
           delBtn.classList.toggle("visible", revealedBookmarkRows.has(key));
+        } else {
+          var folderDelBtn = row.querySelector(".mdeditor-delete-btn");
+          folderDelBtn.classList.toggle("visible", revealedFolderDeleteRows.has(it.node.path));
         }
         listEl.appendChild(row);
       });
@@ -1879,18 +1891,24 @@ window.initMdEditorModule = function(deps){
       function startPress(rowEl, x, y){
         if(!rowEl) return;
         var it = items[Number(rowEl.dataset.index)];
-        if(!it || it.type !== "file") return;
+        if(!it || (it.type !== "file" && it.type !== "folder")) return;
         longPressFired = false;
         pressStartXY = { x: x, y: y };
         clearPressTimer();
         pressTimer = setTimeout(function(){
           longPressFired = true;
-          var key = it.name.toLowerCase();
-          revealedBookmarkRows.add(key);
-          var bmBtn = rowEl.querySelector(".mdeditor-bookmark-btn");
-          if(bmBtn) bmBtn.classList.add("visible");
-          var delBtn = rowEl.querySelector(".mdeditor-delete-btn");
-          if(delBtn) delBtn.classList.add("visible");
+          if(it.type === "file"){
+            var key = it.name.toLowerCase();
+            revealedBookmarkRows.add(key);
+            var bmBtn = rowEl.querySelector(".mdeditor-bookmark-btn");
+            if(bmBtn) bmBtn.classList.add("visible");
+            var delBtn = rowEl.querySelector(".mdeditor-delete-btn");
+            if(delBtn) delBtn.classList.add("visible");
+          } else {
+            revealedFolderDeleteRows.add(it.node.path);
+            var folderDelBtn = rowEl.querySelector(".mdeditor-delete-btn");
+            if(folderDelBtn) folderDelBtn.classList.add("visible");
+          }
         }, LONG_PRESS_MS);
       }
       function movePress(x, y){
@@ -1913,17 +1931,23 @@ window.initMdEditorModule = function(deps){
       listEl.addEventListener("mouseleave", clearPressTimer);
 
       function hideRevealedBookmarkRows(){
-        if(!revealedBookmarkRows.size) return;
+        if(!revealedBookmarkRows.size && !revealedFolderDeleteRows.size) return;
         revealedBookmarkRows.clear();
+        revealedFolderDeleteRows.clear();
         var rows = listEl.querySelectorAll(".mdeditor-row");
         rows.forEach(function(rowEl){
           var it = items[Number(rowEl.dataset.index)];
-          if(!it || it.type !== "file") return;
-          var key = it.name.toLowerCase();
-          var bmBtn = rowEl.querySelector(".mdeditor-bookmark-btn");
-          if(bmBtn) bmBtn.classList.toggle("visible", bookmarkedNames.has(key));
-          var delBtn = rowEl.querySelector(".mdeditor-delete-btn");
-          if(delBtn) delBtn.classList.remove("visible");
+          if(!it) return;
+          if(it.type === "file"){
+            var key = it.name.toLowerCase();
+            var bmBtn = rowEl.querySelector(".mdeditor-bookmark-btn");
+            if(bmBtn) bmBtn.classList.toggle("visible", bookmarkedNames.has(key));
+            var delBtn = rowEl.querySelector(".mdeditor-delete-btn");
+            if(delBtn) delBtn.classList.remove("visible");
+          } else {
+            var folderDelBtn = rowEl.querySelector(".mdeditor-delete-btn");
+            if(folderDelBtn) folderDelBtn.classList.remove("visible");
+          }
         });
       }
 
@@ -1934,7 +1958,8 @@ window.initMdEditorModule = function(deps){
         if(!it) return;
         if(e.target.closest(".mdeditor-delete-btn")){
           longPressFired = false;
-          confirmDeleteNote(it, node);
+          if(it.type === "folder") confirmDeleteFolder(it, node);
+          else confirmDeleteNote(it, node);
           return;
         }
         if(e.target.closest(".mdeditor-bookmark-btn")){
@@ -2041,6 +2066,74 @@ window.initMdEditorModule = function(deps){
       setSyncedBookmark(key, false);
     }
     revealedBookmarkRows.delete(key);
+    rebuildTree();
+    var container = document.getElementById("settingsTabContent");
+    if(container) renderListScreen(container);
+  }
+
+  // ---------------------------------------------------------------------
+  // Удаление папки целиком — тот же крестик по долгому нажатию, что и у
+  // заметок (ТЗ пользователя от 06.09), только удаляет ВСЕ заметки, чей
+  // `path` совпадает с папкой или лежит внутри неё (включая вложенные
+  // подпапки) — папки как отдельной сущности в хранилище нет (раздел 2
+  // ТЗ: папка — это просто общий префикс `path`, см. buildTreeFromNotes),
+  // поэтому "удалить папку" на практике значит "удалить эти заметки".
+  // ---------------------------------------------------------------------
+  function collectNoteIdsInFolder(folderPathStr){
+    var ids = [];
+    notesMap.forEach(function(rec, id){
+      if(!rec || rec.deleted || !rec.name) return;
+      if(rec.path === folderPathStr || (rec.path && rec.path.indexOf(folderPathStr + "/") === 0)){
+        ids.push(id);
+      }
+    });
+    return ids;
+  }
+
+  function confirmDeleteFolder(it, node){
+    var box = document.querySelector(".settings-modal-box");
+    if(!box) return;
+    var count = collectNoteIdsInFolder(it.node.path).length;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title"></div>' +
+      '<div class="mdeditor-cleanup-actions">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="mdEditorDeleteFolderCancel">Отмена</button>' +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-danger" id="mdEditorDeleteFolderConfirm">Удалить</button>' +
+      '</div>';
+    card.querySelector(".mdeditor-cleanup-title").textContent = count > 0
+      ? 'Удалить папку «' + it.name + '» и все заметки внутри неё (' + count + ')? Это нельзя отменить.'
+      : 'Удалить пустую папку «' + it.name + '»?';
+    overlay.appendChild(card);
+    box.appendChild(overlay);
+
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+    document.getElementById("mdEditorDeleteFolderCancel").addEventListener("click", close);
+    document.getElementById("mdEditorDeleteFolderConfirm").addEventListener("click", function(){
+      close();
+      deleteFolderEntry(it, node);
+    });
+  }
+
+  function deleteFolderEntry(it, node){
+    var ids = collectNoteIdsInFolder(it.node.path);
+    ids.forEach(function(id){
+      var rec = notesMap.get(id);
+      if(rec){
+        var key = rec.name.toLowerCase();
+        if(bookmarkedNames.has(key)){
+          bookmarkedNames.delete(key);
+          setSyncedBookmark(key, false);
+        }
+        revealedBookmarkRows.delete(key);
+      }
+      deleteNoteRecord(id);
+    });
+    revealedFolderDeleteRows.delete(it.node.path);
     rebuildTree();
     var container = document.getElementById("settingsTabContent");
     if(container) renderListScreen(container);

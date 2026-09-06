@@ -2102,26 +2102,6 @@
     justify-content:center;
     gap:10px;
   }
-  /* модификатор для диалога конфликта имени при импорте (три кнопки, см.
-     resolveNameConflict в mdeditor.js, TASK_MDNOTES_CLOUD.md раздел 5) —
-     та же .mdeditor-cleanup-actions, но с переносом строк: три подписи
-     ("Пропустить"/"Переименовать"/"Заменить") в один ряд шириной карточки
-     (320px) не помещаются. */
-  .mdeditor-cleanup-actions-wrap{
-    flex-wrap:wrap;
-  }
-  /* галочка "применить ко всем следующим конфликтам" того же диалога —
-     обычная подпись рядом с чекбоксом, без нового визуального языка. */
-  .mdeditor-cleanup-checkbox-row{
-    display:flex;
-    align-items:center;
-    gap:8px;
-    margin-top:12px;
-    font-family:"Segoe UI","Tahoma",sans-serif;
-    font-size:12px;
-    color:var(--ink-soft);
-    cursor:pointer;
-  }
   .mdeditor-cleanup-cancel{
     padding:8px 16px;
     border-radius:6px;
@@ -2162,14 +2142,16 @@
     padding:8px 10px;
     margin-bottom:12px;
   }
-  /* ---------- крестик удаления заметки — СЛЕВА от кнопки закладки в
-     строке общего списка (см. .mdeditor-bookmark-btn выше), появляется/
-     скрывается ТЕМ ЖЕ долгим нажатием (revealedBookmarkRows в
+  /* ---------- крестик удаления — СЛЕВА от кнопки закладки в строке
+     заметки (см. .mdeditor-bookmark-btn выше) либо единственная кнопка в
+     строке папки (папки закладок не имеют) — появляется/скрывается ТЕМ
+     ЖЕ долгим нажатием (revealedBookmarkRows/revealedFolderDeleteRows в
      mdeditor.js), но, в отличие от закладки, никогда не остаётся видимым
      "навсегда" — только временно, после долгого нажатия (ТЗ пользователя
-     от 05.09). Иконка (DELETE_ICON_SVG) — та же, что и у "Удалить
-     навсегда" в архиве задач (.task-delete-btn в modals.css), передана в
-     mdeditor.js через deps, не своя копия. ---------- */
+     от 05.09, для папок — от 06.09). Иконка (DELETE_ICON_SVG) — та же,
+     что и у "Удалить навсегда" в архиве задач (.task-delete-btn в
+     modals.css), передана в mdeditor.js через deps, не своя копия.
+     ---------- */
   .mdeditor-delete-btn{
     visibility:hidden;
     display:inline-flex;
