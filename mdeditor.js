@@ -1970,7 +1970,16 @@ window.initMdEditorModule = function(deps){
 
     var imagesDirBtn = document.getElementById("mdEditorImagesDirBtn");
     if(imagesDirBtn){
-      imagesDirBtn.addEventListener("click", reconnectImagesFolder);
+      // В отличие от кнопки-скрепки на плейсхолдере (reconnectImagesFolder,
+      // которая сначала пробует молча переподтвердить УЖЕ выбранную папку и
+      // только при неудаче открывает диалог выбора) — эта кнопка всегда
+      // должна дать выбрать папку заново, ту же или другую (раздел 8 ТЗ,
+      // см. также правку про две кнопки: "Указать/Подключить заново"). Если
+      // звать здесь reconnectImagesFolder/ensureImagesReady и права на
+      // текущую папку уже granted, диалог вообще не появится — снаружи это
+      // выглядело как "кнопка не реагирует". pickNewImagesFolder всегда
+      // открывает системный диалог выбора папки напрямую.
+      imagesDirBtn.addEventListener("click", pickNewImagesFolder);
     }
 
     var newNoteBtn = document.getElementById("mdEditorNewNoteBtn");
