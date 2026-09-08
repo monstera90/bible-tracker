@@ -387,13 +387,13 @@ window.initEpubSplitModule = function(deps){
     // чтобы после запуска не приходилось тянуться наверх экрана: обе
     // кнопки всегда рядом внизу вкладки.
     container.innerHTML =
-      '<div class="settings-content-bottom">' +
-        '<div class="workbooks-title">Разделение epub-файлов</div>' +
-        '<p style="opacity:.7;font-size:.9em;margin-top:2px;">Извлечёт текст из книги в формате .epub и разделит его на несколько .txt-файлов (по границам абзацев/предложений, без разрыва внутри них) — удобно грузить по частям как источники в NotebookLM.</p>' +
-        '<p style="margin-bottom:4px;">Файл и число частей</p>' +
+      '<div class="settings-content-bottom epubsplit-tab">' +
+        '<div class="common-tab-title">Разделение epub-файлов</div>' +
+        '<p style="opacity:.7;font-family:\'Palatino Linotype\',Georgia,serif;font-size:var(--mdeditor-font-size, 15.5px);margin-top:2px;">Извлечёт текст из книги в формате .epub и разделит его на несколько .txt-файлов (по границам абзацев/предложений, без разрыва внутри них) — удобно грузить по частям как источники в NotebookLM.</p>' +
+        '<p style="margin-bottom:4px;font-family:\'Palatino Linotype\',Georgia,serif;font-size:var(--mdeditor-font-size, 15.5px);">Файл и число частей</p>' +
         '<div class="task-import-file-row">' +
-          '<button type="button" class="task-import-attach-btn" id="epubSplitAttachBtn" title="Прикрепить файл">' + PAPERCLIP_ICON_SVG + '</button>' +
-          '<button type="button" class="task-import-attach-btn" id="epubSplitPartsBtn" title="Число частей">' + SPLIT_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-fab-btn" id="epubSplitAttachBtn" title="Прикрепить файл">' + PAPERCLIP_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-fab-btn" id="epubSplitPartsBtn" title="Число частей">' + SPLIT_ICON_SVG + '</button>' +
           '<span id="epubSplitFileName" class="task-import-file-name">Файл не выбран, частей: ' + PARTS_DEFAULT + '</span>' +
         '</div>' +
         '<input type="file" accept=".epub" id="epubSplitFileInput" style="display:none;">' +

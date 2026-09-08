@@ -58,7 +58,17 @@
      Диаграмма выше остаётся без изменений — она отрисовывается
      отдельным блоком перед этим и не входит в .settings-content-bottom,
      поэтому не сдвигается вниз вместе с вопросом. */
-  .mood-tab-checkin p{ margin-bottom:4px; }
+  /* ТЗ пользователя от 08.09: раньше вопрос был голым <p> без своего
+     стиля (см. пояснение в mood.js, buildMoodCheckinBlockHtml) — теперь
+     тот же шрифт/размер, что и у заголовков вкладок (.subtitle-extract-
+     title и др., единый шрифт проекта), по центру, отступ до кнопок
+     настроения — 8px (было 4px). */
+  .mood-tab-checkin p{
+    margin:0 0 8px 0;
+    text-align:center;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
+  }
   /* Окно настроек (.settings-modal-box) уже само по себе уже, чем
      отдельная модалка (.modal-box, max-width:420px), поэтому сетка из 6
      кнопок настроения здесь чуть плотнее: тот же грид в 3 колонки/2 ряда
@@ -70,14 +80,12 @@
   #settingsTabContent .mood-checkin-item .emoji{ font-size:22px; }
   #settingsTabContent .mood-checkin-item .label{ font-size:10px; }
 
-  .mood-diagram-title{
-    text-align:center;
-    font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
-    font-size:15px;
-    letter-spacing:.5px;
-    color:var(--wood);
-    margin:0 0 4px 0;
-  }
+  /* ТЗ пользователя от 08.09: заголовок диаграммы настроения раньше был
+     на своём классе .mood-diagram-title (декоративный Trajan Pro), затем
+     переведён на общий шрифт заголовков вкладок — по следующему ТЗ (тот
+     же день) разметка в mood.js переключена прямо на общий класс
+     .common-tab-title (см. ниже по файлу), поэтому свой класс здесь
+     больше не нужен. */
   .mood-diagram-empty{
     text-align:center;
     font-size:14px;
@@ -93,10 +101,12 @@
     margin:0 0 4px 0;
   }
   /* сетка слотов для прикреплённых файлов (скрепка + имя + статус) —
-     два слота в ряд, всего 4 ряда на 8 файлов. Кнопка-скрепка и подпись
-     переиспользуют .task-import-attach-btn/.task-import-file-name из
-     modals.css (тот же стиль, что и во вкладке "Объединение заметок",
-     см. jwlmerge.js), здесь только сетка и обрезка длинных имён. */
+     два слота в ряд, всего 4 ряда на 8 файлов. Подпись переиспользует
+     .task-import-file-name из modals.css, кнопка-скрепка — .mdeditor-fab-btn
+     (квадрат 32x32, тот же размер, что и в образце "Извлечение субтитров",
+     правка от 07.09 — раньше была на .task-import-attach-btn, 40x40, как
+     во вкладке "Объединение заметок", см. jwlmerge.js), здесь только сетка
+     и обрезка длинных имён. */
   .workbooks-files-grid{
     display:grid;
     grid-template-columns:1fr 1fr;
@@ -115,10 +125,21 @@
   }
   .workbooks-file-slot-body .task-import-file-name{
     display:block;
-    font-size:.85em;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
+  }
+  /* то же самое для вкладки "Разделение epub-файлов" — она переиспользует
+     .task-import-file-row/.task-import-file-name из modals.css (тот же
+     класс, что и у экрана импорта задач), поэтому размер задаём именно
+     через .epubsplit-tab, а не в самом .task-import-file-name — иначе
+     затронули бы и экран импорта задач (правка от 08.09, наследование
+     шрифта чтения заметок вместо фиксированного .9em). */
+  .epubsplit-tab .task-import-file-name{
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
   }
   .workbooks-link-status{
     font-size:11.5px;
@@ -143,6 +164,44 @@
     display:flex;
     gap:10px;
     margin-top:16px;
+    /* Отступ от кнопок до нижнего края окна — 8px, как у плавающей
+       панели вкладки "Извлечение субтитров" (.subtitle-controls-fab,
+       bottom:8px). У .settings-modal-box нет своего нижнего padding
+       (см. modals.css), поэтому этот margin и есть весь зазор до края
+       (правка от 07.09, приведение вкладок workbooks/s89fill/jwlmerge/
+       epubsplit/imgresize к единому стилю с образцом). */
+    margin-bottom:8px;
+  }
+  /* Высота и шрифт "Начать"/"Скачать" — как у кнопки "Скачать" образца
+     (.subtitle-download-btn, класс .mdeditor-fab-btn — квадрат 32x32):
+     те же height/box-sizing/флекс-центрирование, только с текстом внутри
+     вместо иконки, поэтому горизонтальный padding сохранён от базовых
+     .workbooks-run-btn/.workbooks-result-btn, а вертикальный убран (его
+     роль теперь играет фиксированная высота). Правило нарочно добавлено
+     не в сами базовые классы, а именно сюда, под .workbooks-actions-row —
+     эти же базовые классы использует и "Мои заметки" (.mdeditor-list-
+     action-btn), которого эта правка касаться не должна. Сам образец
+     ("Извлечение субтитров") тоже не задет — там нет .workbooks-actions-row,
+     своя кнопка "Начать" (.subtitle-start-btn) уже имеет такую же высоту
+     отдельным правилом (см. ниже по файлу). */
+  .workbooks-actions-row .workbooks-run-btn{
+    height:32px;
+    box-sizing:border-box;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:0 14px;
+    font-family:"Palatino Linotype",Georgia,serif;
+  }
+  .workbooks-actions-row .workbooks-result-btn{
+    height:32px;
+    box-sizing:border-box;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:0 12px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:14px;
   }
   .workbooks-run-btn{
     display:block;
@@ -210,7 +269,8 @@
     align-items:center;
     gap:8px;
     margin-top:10px;
-    font-size:12.5px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
     color:var(--ink-soft);
   }
   .s89-year-input{
@@ -224,96 +284,292 @@
   }
 
   /* ---------- извлечение субтитров (вкладка settingsTabSet2GearBtn4,
-     "set2b_4") — заголовок и подсказка в том же стиле, что и у
-     .workbooks-title/вкладки "Извлечение информации из графиков";
-     кнопка-скрепка выбора файла переиспользует .task-import-attach-btn
-     из modals.css (тот же стиль, что и во вкладке "Объединение
-     заметок"), но раскладка строки своя — см. .subtitle-file-row ---------- */
+     "set2b_4") — по ТЗ пользователя от 07.09 весь текст вкладки (заголовок,
+     подсказка, статус файла, подписи кнопок и сама область чтения) сведён к
+     ОДНОМУ шрифту — "Palatino Linotype"/Georgia, тому же, что и в "Моём
+     блокноте" (.mdeditor-tab и соседи, см. выше) — раньше заголовок был на
+     декоративном .workbooks-title (Trajan Pro), а область чтения — вовсе
+     моноширинным Courier New. Заголовок поэтому получил свой класс,
+     а не общий .workbooks-title — чтобы не задеть другие вкладки, которые
+     тот переиспользуют; "Начать" переопределён точечно через
+     .subtitle-start-btn ниже, тем же приёмом, каким .imgresize-tab
+     переопределяет шрифт у общих классов этой же вкладки (см. ниже по
+     файлу) — сам .workbooks-run-btn остаётся нетронутым для всех прочих
+     вкладок. Кнопка-скрепка выбора файла переиспользует .mdeditor-fab-btn
+     — тот же квадрат 32x32, что у кнопок "Моих заметок" (раньше была на
+     .task-import-attach-btn из modals.css, другого размера, как во вкладке
+     "Объединение заметок" — это и давало разнобой размеров в одном ряду).
+
+     Правка от 07.09 (третий заход): статус файла и ряд кнопок ("i" /
+     "Начать" / скрепка / "Скачать" / "Скопировать" / заглушка) больше не
+     занимают свою собственную часть высоты окна (раньше — обычный
+     flex-item внутри .settings-content-bottom, поджимающий область
+     чтения). Теперь это .subtitle-controls-fab — плавающий блок,
+     position:absolute от .settings-modal-box, ТОЧНО тем же приёмом, что
+     и .mdeditor-fab-row у "Моих заметок" (см. ниже по файлу): сам блок
+     pointer-events:none, а статус-пилюля и кнопки внутри — pointer-events:
+     auto каждая по отдельности, поэтому между ними текст области чтения,
+     когда до неё доскроллено, виден и кликабелен как обычно, скрыт только
+     ровно за самими элементами управления — тот самый "текст ходит
+     свободно под кнопками", как в "Моих заметках". "Аа" здесь убрана
+     вовсе (ТЗ пользователя от 07.09) — размер по-прежнему берётся из
+     общей переменной --mdeditor-font-size, просто без своего органа
+     управления на этой вкладке. ---------- */
+  /* ТЗ пользователя от 07.09 (пятый заход): заголовок вкладки должен
+     выглядеть ТОЧНО как заголовок открытой заметки в "Моих заметках"
+     (.mdeditor-title выше по файлу) — раньше здесь были свои
+     font-size:15px и letter-spacing:.5px (в .mdeditor-title их нет:
+     размер там берётся из общей переменной --mdeditor-font-size, без
+     разрядки). Убираем letter-spacing и переводим размер на ту же
+     переменную, остальное (шрифт/цвет/центрирование) уже совпадало.
+     Под заголовком — линия-разделитель тем же цветом/толщиной, что и
+     остальные разделители проекта (var(--groove-shadow), 1px solid —
+     см. .mdeditor-links-row/.year-day-stat-row выше по файлу), отделяет
+     заголовок от текста результата ниже.
+
+     ТЗ пользователя от 08.09: класс сделан по-настоящему общим — раньше
+     назывался .subtitle-extract-title (по имени вкладки-образца
+     "Извлечение субтитров", откуда он появился), теперь переименован в
+     .common-tab-title и той же разметкой пользуются все заголовки вкладок
+     из списка ТЗ: "Объединение заметок", "Заполнение бланков",
+     "Извлечение информации", "Разделение epub", "Изменение размера
+     изображения" (jwlmerge/s89fill/workbooks/epubsplit/imgresize.js — там
+     просто переименован класс в разметке), "Мои заметки"/"Закладки"/
+     "Забытые заметки" (mdeditor.js — раньше свой класс .mdeditor-list-
+     title, теперь удалён, разметка переключена сюда) и "Диаграмма
+     настроения" (mood.js — раньше свой класс .mood-diagram-title, тоже
+     удалён и заменён). "Карта дней года" (my.js) переключена сюда же, но
+     только тот один заголовок, что стоит в шапке самой вкладки (.year-
+     grid-tab-header) — там нужен свой отступ/выравнивание, см. точечное
+     переопределение у .year-grid-tab-header ниже по файлу; остальные три
+     места, где переиспользуется класс .year-grid-tab-title ("Версии",
+     заголовок дня в модалке дня года, "Все задачи проекта") в это ТЗ не
+     входили и намеренно оставлены на прежнем декоративном стиле — сам
+     класс .year-grid-tab-title поэтому не удалён, только вкладка "Карта
+     дней года" из него выведена. */
+  .common-tab-title{
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
+    font-weight:bold;
+    color:var(--wood);
+    text-align:center;
+    /* тот же отступ сверху, что слева/справа у окна (padding:8px у
+       .settings-modal-box, modals.css) — раньше заголовок начинался
+       вплотную к верхнему краю (у окна нет верхнего padding), ТЗ
+       пользователя от 07.09, п.5. */
+    margin:8px 0 0 0;
+    padding-bottom:6px;
+    border-bottom:1px solid var(--groove-shadow);
+  }
   .subtitle-extract-hint{
+    font-family:"Palatino Linotype",Georgia,serif;
     font-size:12.5px;
     color:var(--ink-soft);
     text-align:center;
     line-height:1.4;
     margin:4px 0 0 0;
   }
-  /* результат — сразу под подсказкой и тянется на всё оставшееся место
-     (обычный flex-item в #settingsTabContent, см. modals.css), поэтому
-     без width/max-height — их отдаёт flex; resize:vertical оставлен на
-     случай, если человек всё же захочет руками сделать поле выше */
+  /* результат — сразу под заголовком, обычный блочный элемент в общем
+     потоке #settingsTabContent (он и прокручивается целиком, у самой
+     области чтения больше нет своей внутренней прокрутки — тем же
+     приёмом, что и .mdeditor-editor-host/.cm-editor у "Моих заметок":
+     там тоже нет внутреннего скролла, скроллится вся вкладка). Высота —
+     auto, растёт вместе с текстом (JS выставляет её вручную по
+     scrollHeight при каждой смене текста, см. autoResizeSubtitleOutput в
+     renderSettingsTabSubtitleExtract в my.js) — то же самое, что "рост
+     вместе с документом" у CodeMirror. Шрифт, размер и межстрочный
+     интервал — те же переменная и значение, что и у текста заметки в
+     "Моих заметках" (.mdeditor-editor-host .cm-scroller выше:
+     line-height:1.4) — раньше здесь стояло 1.5, из-за чего строки шли
+     заметно свободнее, чем в блокноте (ТЗ пользователя от 07.09, третий
+     заход); "Аа" на этой вкладке убрана, но сам размер по-прежнему
+     регулируется той же общей переменной --mdeditor-font-size (см.
+     applyFontSize в mdeditor.js), просто из "Моих заметок".
+     "Туман" (маска-градиент сверху/снизу) убран вместе со своей
+     прокруткой — вместо него снизу обычный padding, достаточный, чтобы
+     последние строки текста не оставались навсегда под плавающей панелью
+     кнопок (.subtitle-controls-fab ниже), тем же приёмом, что и
+     padding-bottom:40px у .cm-content в блокноте. Горизонтальных отступов
+     по-прежнему нет — край текста совпадает с краем окна, как в блокноте
+     (.mdeditor-editor-host .cm-line{padding:0}), только отступ самого
+     окна (padding:16px у .settings-modal-box, см. modals.css). */
   .subtitle-extract-output{
+    display:block;
     box-sizing:border-box;
+    width:100%;
     margin-top:14px;
-    flex:1 1 100px;
-    min-height:100px;
-    font-family:"Courier New",monospace;
-    font-size:13px;
-    line-height:1.5;
-    padding:10px;
-    border:1px solid var(--groove-shadow);
-    border-radius:8px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
+    line-height:1.4;
+    padding:4px 0 84px 0;
+    border:none;
+    overflow:hidden;
+    /* #settingsTabContent — flex-column (modals.css), а у блочного
+       элемента overflow:hidden обнуляет "автоматический минимальный
+       размер" по спецификации flexbox (для overflow≠visible он 0, а не
+       min-content) — без этого браузер вместо прокрутки родителя просто
+       сжимал бы элемент под доступное место, обнуляя ручную высоту от
+       autoResizeOutput в my.js. flex-shrink:0 запрещает сжатие ниже
+       заданной JS высоты, тогда контент превышает высоту
+       #settingsTabContent и включается его overflow-y:auto — тот же
+       результат, что даёт overflow:visible у .cm-scroller в "Моём
+       блокноте" (см. components.css выше), только другим способом
+       (07.09, проверка правки предыдущего агента). */
+    flex-shrink:0;
     background:var(--parchment);
     color:var(--ink);
-    resize:vertical;
   }
-  /* строка выбора файла: скрепка прижата к правому краю (удобнее
-     дотягиваться большим пальцем), слева от неё — одна строка на две
-     роли, имя файла ДО запуска и статус операции ПОСЛЕ (см. setFileStatus
-     в renderSettingsTabSubtitleExtract) — сама строка и кнопки под ней
-     обёрнуты снаружи в .settings-content-bottom (см. modals.css) и
-     прижаты к низу окна целиком */
-  .subtitle-file-row{
+  /* ---------- ТЗ пользователя от 07.09 (пятый заход): красная строка и
+     отступы между абзацами результата — как в тексте заметки "Моего
+     блокнота". Там это делают построчные decorations CodeMirror
+     (cm-md-para-start/cm-md-blank-line, см. components.css выше) — они
+     требуют, чтобы каждая строка была отдельным DOM-узлом, чего у
+     простого textarea нет (text-indent у textarea действует только на
+     самую первую строку всего текста, не на каждый абзац после \n\n).
+     Поэтому .subtitle-extract-output теперь не <textarea>, а <div>: JS
+     (renderOutputText в my.js) режет текст на абзацы и оборачивает
+     каждый в <p>, а сами правила ниже — прямой аналог тех же двух
+     decorations заметок, просто через margin вместо укороченной пустой
+     строки:
+     - text-indent:1ch у каждого <p> — то же значение, что и у
+       .cm-md-para-start (красная строка);
+     - margin-top:0.7em у всех, кроме первого <p> — та же величина, что
+       и line-height:0.7 у пустой строки-разделителя .cm-md-blank-line
+       (при line-height:1.4 обычной строки лишняя пустая строка добавляет
+       ровно 0.7em сверх обычного межстрочного интервала — здесь тот же
+       эффект получаем напрямую через margin, без искусственной пустой
+       строки). em — от font-size самого элемента, то есть подстраивается
+       под --mdeditor-font-size так же, как и в блокноте. ---------- */
+  .subtitle-extract-output p{
+    margin:0;
+    text-indent:1ch;
+  }
+  .subtitle-extract-output p + p{
+    margin-top:0.7em;
+  }
+  /* пустое состояние (раньше — атрибут placeholder у textarea) — div не
+     поддерживает placeholder, показываем текст-заглушку через ::before,
+     класс навешивает/снимает renderOutputText в my.js. Без text-indent —
+     это служебная подсказка, а не абзац текста. */
+  .subtitle-extract-output.is-empty::before{
+    content:"Извлечённый текст появится здесь…";
+    color:var(--ink-soft);
+  }
+  /* ---------- панель управления вкладки (правка от 07.09, третий заход):
+     статус-пилюля + ряд кнопок, плавают над областью чтения тем же
+     приёмом, что и .mdeditor-fab-row у "Моих заметок" — position:
+     absolute от .settings-modal-box (см. .mdeditor-fab-row ниже по файлу),
+     сам блок pointer-events:none, поэтому клики по нему "проваливаются"
+     сквозь пустые промежутки к тексту под ним, а каждый дочерний элемент
+     (пилюля статуса, каждая кнопка) сам возвращает себе pointer-events:
+     auto — см. правило ниже. ---------- */
+  .subtitle-controls-fab{
+    position:absolute;
+    left:16px;
+    right:16px;
+    bottom:8px;
     display:flex;
-    align-items:center;
-    gap:10px;
-    margin-top:10px;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:8px;
+    pointer-events:none;
+    z-index:5;
   }
+  /* статус файла/операции — раньше просто строка текста в общем ряду,
+     теперь плавает поверх текста результата, поэтому нужен собственный
+     непрозрачный фон-пилюля (тот же приём, что у .sync-status), иначе имя
+     файла/статус читался бы поверх извлечённых субтитров нечитаемой
+     мешаниной. */
   .subtitle-file-status{
-    flex:1;
-    min-width:0;
+    box-sizing:border-box;
+    max-width:100%;
+    pointer-events:auto;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    padding:5px 10px;
+    box-shadow:0 2px 6px rgba(0,0,0,.28);
+    font-family:"Palatino Linotype",Georgia,serif;
     font-size:.9em;
+    color:var(--ink);
     opacity:.8;
     word-break:break-word;
   }
   .subtitle-file-status.success{ opacity:1; color:var(--status-ok); }
   .subtitle-file-status.error{ opacity:1; color:var(--danger); }
-  /* "Начать" и "Скопировать субтитры" — рядом, по образцу
-     .workbooks-actions-row (там "Начать"+"Скачать") */
-  .subtitle-actions-row{
+  /* Пустая пилюля не показывается вовсе (ТЗ пользователя от 07.09,
+     четвёртый заход: убрать текст-заглушку "Файл не выбран" — пока
+     сказать нечего, самой пилюли тоже нет, см. setFileStatus/разметку в
+     my.js). Как только там появляется текст (имя файла, "Готово —
+     извлечено реплик: N." и т.п.) — пилюля показывается как обычно. */
+  .subtitle-file-status:empty{ display:none; }
+  /* ряд кнопок: "i" / "Начать" / скрепка / "Скачать" / "Скопировать" /
+     заглушка — каждая по отдельности возвращает себе pointer-events:auto
+     (родитель .subtitle-controls-fab — none), поэтому пустое место между
+     кнопками не перехватывает клики/скролл по тексту под ним. */
+  .subtitle-action-row{
     display:flex;
-    align-items:stretch;
+    align-items:center;
     gap:10px;
-    margin-top:10px;
+    width:100%;
   }
-  /* квадратная кнопка копирования (общепринятая пиктограмма — два листа
-     внахлёст, см. COPY_ICON_SVG в my.js): пока субтитры не извлечены —
-     обычный контурный стиль (как .workbooks-result-btn), неактивна; как
-     только текст извлечён, renderSettingsTabSubtitleExtract добавляет
-     класс "ready" — та же залитая заливка, что и у рабочей кнопки
-     "Начать" (.workbooks-run-btn / .subtitle-actions-row .workbooks-run-btn) */
-  .subtitle-copy-btn{
-    flex-shrink:0;
-    width:48px;
+  .subtitle-action-row > *{ pointer-events:auto; }
+  /* "Начать" — единственная не квадратная кнопка ряда, тянется на всё
+     оставшееся место между "i" и скрепкой (flex:1 уже есть у общего
+     .workbooks-run-btn, здесь только высота/шрифт под квадратных соседей —
+     та же высота 32px, что и у них). Шрифт — единый Palatino Linotype/
+     Georgia вкладки (см. блок-комментарий выше), не трогая общий
+     .workbooks-run-btn, которым пользуются другие вкладки. */
+  .subtitle-start-btn{
+    height:32px;
+    box-sizing:border-box;
     display:flex;
     align-items:center;
     justify-content:center;
-    padding:0;
-    border:1px solid var(--wood);
-    border-radius:8px;
-    background:transparent;
-    color:var(--wood);
-    cursor:pointer;
+    padding:0 14px;
+    font-family:"Palatino Linotype",Georgia,serif;
   }
-  .subtitle-copy-btn svg{ width:20px; height:20px; }
-  .subtitle-copy-btn:active{ background:var(--wood); color:var(--parchment); }
-  .subtitle-copy-btn:disabled{ opacity:.5; cursor:default; }
-  .subtitle-copy-btn:disabled:active{ background:transparent; color:var(--wood); }
+  /* кнопка копирования (общепринятая пиктограмма — два листа внахлёст,
+     COPY_ICON_SVG в my.js): размер/базовый стиль — общий .mdeditor-fab-btn,
+     тот же квадрат 32x32, что у остальных кнопок ряда. Пока субтитры не
+     извлечены — обычный контурный вид fab-btn, неактивна; как только текст
+     извлечён, renderSettingsTabSubtitleExtract добавляет класс "ready" —
+     та же залитая заливка, что и у рабочей кнопки "Начать"
+     (.subtitle-start-btn). */
   .subtitle-copy-btn.ready{
     background:var(--wood);
     color:var(--parchment);
     border-color:var(--wood-dark);
-    opacity:1;
   }
   .subtitle-copy-btn.ready:active{ background:var(--wood-dark); }
+  /* кнопка "Скачать" (теперь разворачивается в "md"/"txt" — см.
+     .mdeditor-fontsize-wrap/-popup ниже по файлу, ТЗ пользователя от
+     07.09, четвёртый заход) получает ту же заливку "ready", что и
+     копирование, как только субтитры извлечены (см. setDownloadReady в
+     my.js). Сами кнопки "md"/"txt" внутри попапа остаются обычным
+     контурным .mdeditor-fab-btn — заливку получает только сама
+     кнопка-переключатель, как и было с одиночной кнопкой раньше. */
+  .subtitle-download-btn.ready{
+    background:var(--wood);
+    color:var(--parchment);
+    border-color:var(--wood-dark);
+  }
+  .subtitle-download-btn.ready:active{ background:var(--wood-dark); }
+  /* кнопка "Сохранить в Мои заметки" (справа от копирования, ТЗ
+     пользователя от 07.09) — та же пиктограмка DOWNLOAD_ICON_SVG, что и у
+     "Скачать" выше, но развёрнутая на 90°: у стрелки ">" в .toggle-check
+     (см. выше по файлу) rotate(90deg) даёт стрелку вниз, значит на
+     пиктограмке, где стрелка и так смотрит вниз, rotate(-90deg) даёт
+     стрелку вправо — тот же смысл "переслать/сохранить", только не на
+     диск, а в заметку. Заливка "ready" — тот же язык, что у copy/download
+     рядом. */
+  .subtitle-save-note-btn svg{ transform:rotate(-90deg); }
+  .subtitle-save-note-btn.ready{
+    background:var(--wood);
+    color:var(--parchment);
+    border-color:var(--wood-dark);
+  }
+  .subtitle-save-note-btn.ready:active{ background:var(--wood-dark); }
 
   /* ---------- изменение размера изображения (вкладка settingsTabSet2Btn6,
      "set2s_6", см. renderSettingsTabImgResize в imgresize.js) ----------
@@ -357,6 +613,15 @@
   .imgresize-tab .settings-row{
     border-bottom:none;
   }
+  /* Подписи "Ширина:"/"Высота:"/"Сохранять пропорции" наследуют .settings-row
+     из modals.css — там font-family уже Palatino Linotype/Georgia (совпадает
+     с шрифтом заметок), но font-size зафиксирован на 14.5px. По ТЗ
+     пользователя от 08.09 размер должен браться от шрифта чтения заметок
+     ("Аа"), поэтому переопределяем ИСКЛЮЧИТЕЛЬНО внутри .imgresize-tab —
+     .settings-row в остальных местах (вкладка настроек) не трогаем. */
+  .imgresize-tab .settings-row{
+    font-size:var(--mdeditor-font-size, 15.5px);
+  }
   /* Раньше (до правки выше) граница между строками визуально "съедала"
      разницу, поэтому промежуток между скрепкой и полем "Ширина" (~12px —
      это просто padding-top у ПЕРВОЙ строки .settings-row, у элемента ПЕРЕД
@@ -375,27 +640,22 @@
   .imgresize-tab .settings-row + .settings-row{
     padding-top:0;
   }
-  /* Заголовок (.workbooks-title) и сами строки .settings-row (подписи
-     "Ширина:"/"Высота:"/"Сохранять пропорции") уже используют нужные
-     шрифт И размер сами по себе — трогать их незачем. А вот подсказку и
-     строку статуса файла эта вкладка ПЕРЕИСПОЛЬЗУЕТ из вкладки
-     "Извлечение субтитров" (.subtitle-extract-hint/.subtitle-file-status),
-     а кнопки "Начать"/"Скачать" — из вкладки "Извлечение информации из
-     графиков" (.workbooks-run-btn/.workbooks-result-btn, см.
-     renderSettingsTabImgResize в imgresize.js); ни у одного из этих
-     четырёх классов исходно нет ни своего font-family, ни нужного
-     font-size, поэтому все они визуально отличались от строки "Сохранять
-     пропорции". Переопределяем ОБА свойства — и семейство, и размер — на
-     точные значения из .settings-row (14.5px), но ИСКЛЮЧИТЕЛЬНО внутри
-     .imgresize-tab (см. обёртку в imgresize.js), чтобы не изменить заодно
-     и вид вкладок "Извлечение субтитров"/"Извлечение информации из
-     графиков", которые эти же общие классы используют без изменений. */
+  /* Заголовок (с 07.09 — общий с образцом, теперь класс .common-tab-title,
+     см. renderSettingsTabImgResize) уже использует нужные шрифт и размер сам
+     по себе — трогать незачем. Подсказку и строку статуса файла эта
+     вкладка ПЕРЕИСПОЛЬЗУЕТ из вкладки "Извлечение субтитров"
+     (.subtitle-extract-hint/.subtitle-file-status, фиксированные там на
+     12.5px, — сам образец не трогаем). По ТЗ пользователя от 08.09 их
+     размер здесь должен наследоваться от шрифта чтения заметок (тот же,
+     что регулирует "Аа"), поэтому переопределяем ИСКЛЮЧИТЕЛЬНО внутри
+     .imgresize-tab на var(--mdeditor-font-size). Кнопки "Начать"/"Скачать"
+     больше не переопределяем здесь отдельно — у них теперь общий для всех
+     пяти вкладок фиксированный размер 14px (см. .workbooks-actions-row
+     выше по файлу), без привязки к .settings-row. */
   .imgresize-tab .subtitle-extract-hint,
-  .imgresize-tab .subtitle-file-status,
-  .imgresize-tab .workbooks-run-btn,
-  .imgresize-tab .workbooks-result-btn{
+  .imgresize-tab .subtitle-file-status{
     font-family:"Palatino Linotype",Georgia,serif;
-    font-size:14.5px;
+    font-size:var(--mdeditor-font-size, 15.5px);
   }
 
   .mood-diagram-wrap{
@@ -827,6 +1087,13 @@
     margin:0 0 10px 0;
   }
 
+  /* Декоративный стиль — используется НЕ только в заголовке самой вкладки
+     "Карта дней года" (см. ниже отдельный override), но и в трёх других
+     местах: "Версии" (renderSettingsTabVersions), заголовок дня в модалке
+     дня года (день недели, renderYearDayModal) и "Все задачи проекта"
+     (renderTaskProjectModal) — их эта правка не касалась (ТЗ пользователя
+     от 08.09 просило только "Карту дней года"), поэтому здесь стиль
+     остаётся прежним. */
   .year-grid-tab-title{
     text-align:left;
     font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
@@ -834,6 +1101,23 @@
     letter-spacing:.5px;
     color:var(--wood);
     margin:0;
+  }
+  /* ТЗ пользователя от 08.09: заголовок именно вкладки "Карта дней года"
+     (my.js, renderSettingsTabYearGrid — единственный из четырёх мест выше,
+     что использовало .year-grid-tab-title, названный в списке заголовков
+     для объединения) переключён в разметке на общий класс .common-tab-title
+     (см. выше по файлу — Palatino Linotype/Georgia, --mdeditor-font-size,
+     жирный, как у остальных заголовков вкладок). Он единственный из шести
+     стоит внутри flex-строки с кнопкой-счётчиком (.year-grid-tab-header,
+     justify-content:space-between), поэтому оставшиеся по умолчанию у
+     .common-tab-title центрирование/отступ-сверху/разделитель здесь не
+     нужны и сброшены точечно, тем же приёмом, что и у .imgresize-tab
+     выше по файлу. */
+  .year-grid-tab-header .common-tab-title{
+    text-align:left;
+    margin:0;
+    padding-bottom:0;
+    border-bottom:none;
   }
 
   /* счётчик "дней с отметками" — компактная кнопка справа от заголовка;
@@ -1384,7 +1668,7 @@
   }
 
 
-  /* ---------- "Мой блокнот" (вкладка settingsTabSet2Btn1,
+  /* ---------- "Мои заметки" (вкладка settingsTabSet2Btn1,
      "set2s_1", md-редактор в стиле Obsidian, см. mdeditor.js) — шрифт
      нарочно тот же самый, что и во вкладке "Изменение размера изображения"
      (.imgresize-tab выше): "Palatino Linotype"/Georgia, по прямой просьбе
@@ -1450,6 +1734,15 @@
     border-radius:6px;
   }
   .mdeditor-title:hover{ background:var(--parchment-dark); }
+  /* Заголовки вкладок "Мои заметки" (список заметок и папок, корень и
+     вложенные), "Закладки" и "Забытые заметки" — раньше был свой класс
+     .mdeditor-list-title (шрифт/размер/цвет как у .mdeditor-title выше,
+     но без интерактивных свойств — статический заголовок экрана, не
+     кликабельное поле переименования). ТЗ пользователя от 08.09 (второй
+     заход): вместо дублирования стиля в своём классе разметка в
+     mdeditor.js переключена прямо на общий класс .common-tab-title (см.
+     выше по файлу) — тот же шрифт/размер/жирность, что и у остальных
+     заголовков вкладок из списка ТЗ, свой класс здесь больше не нужен. */
   .mdeditor-title-row .mdeditor-bookmark-btn{
     position:absolute;
     right:0;
@@ -1478,7 +1771,7 @@
     cursor:pointer;
     -webkit-tap-highlight-color:transparent;
   }
-  .mdeditor-title-confirm{ background:var(--xp-green); color:#12351f; }
+  .mdeditor-title-confirm{ background:var(--wood); color:var(--parchment); }
   .mdeditor-title-cancel{ background:transparent; color:var(--danger, #c0392b); }
   /* ---------- поле дат заметки (создание/редактирование, см.
      #mdEditorDatesRow в mdeditor.js: renderEditorScreen/refreshDatesField)
@@ -1585,16 +1878,32 @@
   /* :hover обёрнут в (hover:hover) — на тач-устройствах (нет настоящего
      hover) браузер иначе применяет :hover сразу по тапу и снимает его не
      сразу (а то и вовсе "залипает" до следующего тапа куда-то ещё) — на
-     экране списка заметок это и была та самая зелёная подсветка "домика"
-     при обычном нажатии, которую попросили убрать (см. ТЗ пользователя):
-     теперь :hover реально работает только там, где есть настоящее
-     наведение мышью, на тач-устройствах кнопка просто нажимается без
-     зависающей подсветки. */
+     экране списка заметок это и давало зависающую подсветку "домика" при
+     обычном нажатии (теперь :hover реально работает только там, где есть
+     настоящее наведение мышью, на тач-устройствах кнопка просто
+     нажимается без зависающей подсветки). Сама заливка при наведении —
+     инверсия (фон wood/текст parchment), тот же приём, что у "ready" на
+     кнопке копирования субтитров и у других залитых кнопок проекта, а не
+     var(--xp-green) — зелёный тут больше не используется (ТЗ пользователя
+     от 07.09, п.4). */
   @media (hover:hover) and (pointer:fine){
-    .mdeditor-fab-btn:hover{ background:var(--xp-green); }
+    .mdeditor-fab-btn:hover{ background:var(--wood); color:var(--parchment); }
   }
   .mdeditor-fab-btn:disabled{ opacity:.35; cursor:default; }
-  .mdeditor-fab-btn:disabled:hover{ background:#fffef8; }
+  .mdeditor-fab-btn:disabled:hover{ background:#fffef8; color:var(--wood); }
+  /* состояние "нажата" для переключаемых кнопок-квадратов (не путать с
+     псевдоклассом :active — это именно застёгнутый toggle-стиль, держится
+     до повторного клика). Та же залитая заливка, что и у "ready"
+     (.subtitle-copy-btn.ready и т.п.) — общий язык проекта для "включено"/
+     "активно". Первое применение — кнопка "i" (INFO_ICON_SVG, my.js) во
+     вкладке "Извлечение субтитров"; задумана как переиспользуемая и для
+     будущих кнопок-переключателей .mdeditor-fab-btn в других местах. */
+  .mdeditor-fab-btn.pressed{
+    background:var(--wood);
+    color:var(--parchment);
+    border-color:var(--wood-dark);
+  }
+  .mdeditor-fab-btn.pressed:active{ background:var(--wood-dark); }
   /* текстовое содержимое кнопки (вместо svg-иконки) — "Аа"/"+"/"-" (см.
      mdeditor-fontsize-wrap ниже, ТЗ пользователя от 31.08): свой размер
      шрифта, чуть меньше, чем в самой заметке, чтобы "Аа" уместилась в
@@ -1605,7 +1914,7 @@
     font-weight:bold;
   }
   /* лица кнопок попапа форматирования ("Ж"/"К"/"П"/"Ч") — общие для
-     "Моего блокнота" и вкладок задач (см. .mdeditor-format-popup ниже,
+     "Моих заметок" и вкладок задач (см. .mdeditor-format-popup ниже,
      .task-format-wrap в modals.css, ТЗ пользователя от 31.08): буква
      сама показывает применяемый стиль. */
   .fmt-btn-bold{ font-weight:bold; }
@@ -1636,7 +1945,8 @@
      группы — по алфавиту ---------- */
   .mdeditor-empty{
     text-align:center;
-    font-size:14px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
     color:var(--ink-soft);
     padding:20px 0;
   }
@@ -1839,7 +2149,7 @@
   /* ссылка на Библию — ОДИН общий стиль на весь проект (тот же цвет, что
      и у [[ссылок на заметки]] выше, без подчёркивания), используется
      ОДНИМ и тем же классом ("auto-link scripture-link") везде, где такие
-     ссылки распознаются: и в "Моём блокноте" (см. scriptureLinkMark в
+     ссылки распознаются: и в "Моих заметках" (см. scriptureLinkMark в
      mdeditor.js), и в "Карте дней года"/задачах/комментариях (см.
      scripturifyHtml в my.js), и на любой другой вкладке — через общий
      автоматический механизм (initAutoScriptureLinks в my.js). Раньше
@@ -1852,7 +2162,7 @@
     text-decoration:none;
     cursor:pointer;
   }
-  /* [[ссылка на заметку "Моего блокнота"]], встреченная вне самого
+  /* [[ссылка на заметку "Моих заметок"]], встреченная вне самого
      блокнота (см. formatInline в my.js) — тот же цвет/без подчёркивания,
      что и у ссылок на Библию и у внутренних [[ссылок]] в самом блокноте
      (.cm-md-link выше); клик обрабатывается делегированно на
@@ -2083,7 +2393,7 @@
   }
   .mdeditor-imgview-img.mdeditor-imgview-dragging{ cursor:grabbing; }
   /* ---------- задача Obsidian-формата "- [ ] текст" / "- [x] текст" в
-     "Моём блокноте", режим "без кода" (см. TASK_LINE_RE/decorateLine/
+     "Моих заметках", режим "без кода" (см. TASK_LINE_RE/decorateLine/
      TaskActionsWidget в mdeditor.js) — оформлена и работает как строка
      обычной задачи на вкладках задач: те же классы .task-actions/
      .task-icon-btn (см. .task-row/.task-actions в modals.css), поэтому
@@ -2200,9 +2510,9 @@
      цвет (см. openNewNoteDialog/confirmDeleteNote в mdeditor.js, ТЗ
      пользователя от 05.09). */
   .mdeditor-cleanup-primary{
-    background:var(--xp-green);
-    border-color:var(--xp-green-dark, var(--groove-shadow));
-    color:#12351f;
+    background:var(--wood);
+    border-color:var(--wood-dark);
+    color:var(--parchment);
   }
   .mdeditor-cleanup-danger{
     background:transparent;
@@ -2254,3 +2564,86 @@
   @media (hover:hover) and (pointer:fine){
     .mdeditor-delete-btn:hover{ background:var(--parchment-dark); }
   }
+
+  /* ---------- вкладка "Обзор" (extra3, my.js — renderReviewTabContent) —
+     переключатель периода "1 нед./1 мес./3 мес." и список цифр под ним.
+     Раньше своего стиля не было вовсе (голый браузерный шрифт). ТЗ
+     пользователя от 08.09: шрифт должен наследоваться от области чтения
+     в "Моих заметках" — используем ту же переменную --mdeditor-font-size,
+     что и там (.mdeditor-editor-host .cm-editor и другие такие места):
+     меняется размер там — меняется и здесь.
+
+     Правка от 08.09 (второй заход): первая версия задавала шрифт только
+     на обёртке .review-stats-list и полагалась на наследование в дочерних
+     .review-stat-row/.review-stat-value — эффекта не было (видимо, что-то
+     в разметке модалки настроек переопределяет шрифт с более высокой
+     специфичностью, тем же приёмом, что и #settingsTabContent .mood-
+     checkin-grid выше по файлу против голого .mood-checkin-grid). Поэтому
+     теперь: (1) весь блок целиком под #settingsTabContent — специфичность
+     ID+класс перебивает любой конкурирующий голый класс; (2) шрифт задан
+     явно на каждом текстовом элементе (.review-stat-row и .review-stat-
+     value отдельно), а не только на обёртке.
+
+     Правка от 08.09 (третий заход): .review-pills раньше сидела в
+     обычном потоке с margin-bottom:8px (приём .workbooks-actions-row,
+     расчёт на то, что у .settings-modal-box нет своего нижнего padding
+     и box плотно облегает контент). Приём ломался, когда контента мало
+     и box выше своего содержимого — пилюли повисали посреди окна вместо
+     низа. Заменено на position:absolute/bottom:8px от .settings-modal-
+     box, тем же приёмом, что и .subtitle-controls-fab/.mdeditor-fab-row
+     — держит пилюли у низа окна независимо от объёма статистики;
+     .review-stats-list получила padding-bottom под высоту этой панели.
+     Заодно неактивная пилюля перестала быть прозрачной (была
+     background:transparent) — раз панель теперь плавает поверх списка
+     при скролле, сквозь прозрачный фон читался бы текст статистики под
+     ней; фон сделан непрозрачным, тем же приёмом, что у .sync-status/
+     .subtitle-file-status. ---------- */
+  #settingsTabContent .review-stats-list{
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
+    color:var(--ink);
+    padding-bottom:56px;
+  }
+  #settingsTabContent .review-stat-row{
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    padding:6px 0;
+    border-bottom:1px solid var(--groove-shadow);
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
+  }
+  #settingsTabContent .review-stat-row:last-child{ border-bottom:none; }
+  #settingsTabContent .review-stat-value{
+    color:var(--wood);
+    font-weight:bold;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
+  }
+  #settingsTabContent .review-pills{
+    position:absolute;
+    left:16px;
+    right:16px;
+    bottom:8px;
+    display:flex;
+    gap:8px;
+    margin:0;
+  }
+  #settingsTabContent .review-pill{
+    flex:1;
+    padding:8px 6px;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    background:var(--parchment);
+    box-shadow:0 2px 6px rgba(0,0,0,.15);
+    color:var(--wood);
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
+    cursor:pointer;
+  }
+  #settingsTabContent .review-pill.active{
+    background:var(--wood);
+    color:var(--parchment);
+    border-color:var(--wood-dark);
+  }
+  #settingsTabContent .review-pill:active{ filter:brightness(.96); }

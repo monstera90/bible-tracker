@@ -997,7 +997,7 @@ window.initJwlMergeModule = function(deps){
   function fileRowHtml(idx){
     return '' +
       '<div class="workbooks-file-slot">' +
-        '<button type="button" class="task-import-attach-btn" id="jwlMergeAttachBtn' + idx + '" title="Прикрепить файл">' + PAPERCLIP_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="jwlMergeAttachBtn' + idx + '" title="Прикрепить файл">' + PAPERCLIP_ICON_SVG + '</button>' +
         '<div class="workbooks-file-slot-body">' +
           '<span id="jwlMergeFileName' + idx + '" class="task-import-file-name">Файл ' + idx + '</span>' +
         '</div>' +
@@ -1012,19 +1012,19 @@ window.initJwlMergeModule = function(deps){
     var selectedFile1 = null, selectedFile2 = null, resultBlob = null, resultName = "merged.jwlibrary";
 
     container.innerHTML =
-      '<div class="settings-content-bottom">' +
-        '<h3 class="workbooks-title">Объединение заметок</h3>' +
-        '<p style="opacity:.7;font-size:.9em;margin-top:2px;">Объединит два файла резервной копии JW Library (.jwlibrary) в один — общие заметки, подчёркивания, закладки и теги сольются без дублей, при конфликте берётся более свежая версия.</p>' +
+      '<div class="settings-content-bottom jwlmerge-tab">' +
+        '<h3 class="common-tab-title">Объединение заметок</h3>' +
+        '<p style="opacity:.7;font-family:\'Palatino Linotype\',Georgia,serif;font-size:var(--mdeditor-font-size, 15.5px);margin-top:2px;">Объединит два файла резервной копии JW Library (.jwlibrary) в один — общие заметки, подчёркивания, закладки и теги сольются без дублей, при конфликте берётся более свежая версия.</p>' +
         '<div class="workbooks-files-grid">' +
           fileRowHtml(1) +
           fileRowHtml(2) +
         '</div>' +
+        '<div id="jwlMergeStatus" style="margin-top:10px;"></div>' +
+        '<div id="jwlMergeStats" style="margin-top:8px;"></div>' +
         '<div class="workbooks-actions-row">' +
           '<button class="workbooks-run-btn" id="jwlMergeStartBtn" disabled>Начать</button>' +
           '<button class="workbooks-result-btn workbooks-download-btn" id="jwlMergeSaveBtn" disabled>Скачать</button>' +
         '</div>' +
-        '<div id="jwlMergeStatus" style="margin-top:10px;"></div>' +
-        '<div id="jwlMergeStats" style="margin-top:8px;"></div>' +
       '</div>';
 
     var startBtn = document.getElementById("jwlMergeStartBtn");

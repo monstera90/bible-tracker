@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Вкладка "Мой блокнот" (первая боковая вкладка второго набора,
+   Вкладка "Мои заметки" (первая боковая вкладка второго набора,
    settingsTabSet2Btn1 / "set2s_1") — работа с .md заметками в стиле
    Obsidian. Вынесена в отдельный файл по тому же образцу, что и
    Workbooks/JwlMerge/EpubSplit/ImgResize (см. my.js).
@@ -421,7 +421,7 @@ window.initMdEditorModule = function(deps){
   var notesReady = false;        // true после первой загрузки локального кэша заметок
   // Кэш грузится сразу при старте модуля (см. preloadNotesCache/вызов внизу
   // файла), а не лениво по первому открытию вкладки, как было раньше —
-  // иначе "Мой блокнот" был единственным местом в приложении, где список
+  // иначе "Мои заметки" был единственным местом в приложении, где список
   // на экране не появлялся мгновенно (задачи всегда доступны сразу, т.к.
   // их state читается синхронно из localStorage при загрузке страницы;
   // у заметок IndexedDB асинхронна по своей природе, но раз она стартует
@@ -485,7 +485,7 @@ window.initMdEditorModule = function(deps){
   var cmView = null;
   var mdEditorImageResizeObserver = null; // пересчёт cm-md-image-float при изменении ширины редактора, см. mountEditor/destroyEditor
   // Какая из ДВУХ боковых вкладок второго набора сейчас показывает
-  // содержимое этого модуля — "editor" для "Моего блокнота" (set2s_1) и
+  // содержимое этого модуля — "editor" для "Моих заметок" (set2s_1) и
   // "bookmarks" для вкладки "Закладки" (set2s_2). Обе вкладки делят один и
   // тот же notesMap/nameIndex/openFile.
   var activeMdTab = "editor";
@@ -1260,7 +1260,7 @@ window.initMdEditorModule = function(deps){
   // FONT_SIZE_BASE_PX. Сохраняется в IndexedDB (как и dirHandle выше),
   // поэтому переживает перезапуск приложения — грузится и применяется
   // сразу при создании модуля (см. IIFE сразу после объявлений ниже), а
-  // не только при первом открытии вкладки "Мой блокнот", иначе задачи,
+  // не только при первом открытии вкладки "Мои заметки", иначе задачи,
   // открытые раньше блокнота, короткое время показывались бы со старым
   // размером. ----
   var FONT_SIZE_BASE_PX = 15.5;
@@ -1297,7 +1297,7 @@ window.initMdEditorModule = function(deps){
     applyFontSize();
     idbSet("fontSizeStep", fontSizeStep).catch(function(){});
   }
-  // применяется сразу, не дожидаясь открытия вкладки "Мой блокнот" (см.
+  // применяется сразу, не дожидаясь открытия вкладки "Мои заметки" (см.
   // пояснение выше) — idbGet/idbSet объявлены ниже как function-декларации
   // и поэтому уже доступны здесь благодаря hoisting.
   idbGet("fontSizeStep").then(function(savedStep){
@@ -1394,7 +1394,7 @@ window.initMdEditorModule = function(deps){
 
   function escName(s){ return escapeHtml ? escapeHtml(s) : String(s); }
 
-  // Регистрирует один шаг навигации внутри "Моего блокнота" в общем стеке
+  // Регистрирует один шаг навигации внутри "Моих заметок" в общем стеке
   // "назад" (см. window.AppNav в my.js) — если он есть; съедает ОДНО
   // ожидающее подавление (см. suppressNextNavPush выше), чтобы переход,
   // пришедший снаружи по [[ссылке]], не задваивал запись в истории.
@@ -1590,10 +1590,10 @@ window.initMdEditorModule = function(deps){
     scheduleNotesCachePersist();
     scheduleNotesCloudPush();
   }
-  function createNoteRecord(name, path){
+  function createNoteRecord(name, path, initialBody){
     var id = generateId();
     var today = todayRu();
-    var text = buildMetaLine(today, today, today);
+    var text = buildMetaLine(today, today, today) + (initialBody || "");
     var rec = { id: id, name: name, path: path || "", text: text, t: Date.now() };
     notesMap.set(id, rec);
     nameIndex.set(name.toLowerCase(), id);
@@ -1705,7 +1705,7 @@ window.initMdEditorModule = function(deps){
     try{
       var zipBytes = MiniZip.createZip(files);
       var blob = new Blob([zipBytes], { type: "application/zip" });
-      triggerBlobDownload(blob, "Мой блокнот.zip");
+      triggerBlobDownload(blob, "Мои заметки.zip");
     }catch(e){
       setStatus("Не удалось собрать .zip: " + (e && e.message ? e.message : e), true);
     }
@@ -1863,7 +1863,7 @@ window.initMdEditorModule = function(deps){
           setStatus("Импортировано: " + summary.imported +
             (summary.replaced ? ", заменено: " + summary.replaced : "") + ".", false);
           if(result.hasOtherFiles){
-            showImportInfoDialog("В архиве были и другие файлы (например, картинки) — они не перенесены. Изображения в «Моём блокноте» подключаются отдельно, через папку картинок.");
+            showImportInfoDialog("В архиве были и другие файлы (например, картинки) — они не перенесены. Изображения в «Моих заметках» подключаются отдельно, через папку картинок.");
           }
         });
       }).catch(function(e){
@@ -2014,7 +2014,7 @@ window.initMdEditorModule = function(deps){
   // ---------------------------------------------------------------------
   // раздел 4.1 ТЗ: лёгкая сверка с облаком (метаданные всех заметок, точечно
   // текст только у изменившихся, см. syncNotesFromCloud) — обязательна при
-  // КАЖДОМ переходе на вкладку "Мой блокнот"/"Закладки"/"Забытые заметки",
+  // КАЖДОМ переходе на вкладку "Мои заметки"/"Закладки"/"Забытые заметки",
   // а не только при самом первом её открытии за сессию (это было упущено —
   // initNotesModule ниже запускался лишь один раз, под флагом initStarted,
   // и на повторные заходы на вкладку сверка вообще не срабатывала). Не
@@ -2122,7 +2122,7 @@ window.initMdEditorModule = function(deps){
     if(!getSyncId()){
       container.innerHTML =
         '<div class="mdeditor-tab settings-content-bottom">' +
-          '<h3 class="workbooks-title">Мой блокнот</h3>' +
+          '<h3 class="common-tab-title">Мои заметки</h3>' +
           '<p class="mdeditor-hint">Заметки хранятся в облаке и шифруются кодом синхронизации устройства. Сначала настройте обычную синхронизацию, а затем вернитесь на эту вкладку.</p>' +
           '<div class="mdeditor-setup-row">' +
             '<button type="button" class="task-import-attach-btn" id="mdEditorOpenSyncBtn" title="Настроить синхронизацию">' + PAPERCLIP_ICON_SVG + '</button>' +
@@ -2171,7 +2171,7 @@ window.initMdEditorModule = function(deps){
     var hasAnyNotes = false;
     notesMap.forEach(function(rec){ if(rec && !rec.deleted && rec.name) hasAnyNotes = true; });
     var html = '<div class="mdeditor-tab">';
-    html += '<h3 class="workbooks-title" style="margin:0 0 4px 0;">' + (isRoot ? "Мой блокнот" : escName(node.name)) + '</h3>';
+    html += '<h3 class="common-tab-title">' + (isRoot ? "Мои заметки" : escName(node.name)) + '</h3>';
     if(!items.length){
       html += '<div class="mdeditor-empty">' + (isRoot ? "Заметок пока нет." : "Здесь пока пусто.") + '</div>';
     } else {
@@ -2557,7 +2557,7 @@ window.initMdEditorModule = function(deps){
     });
 
     var html = '<div class="mdeditor-tab">';
-    html += '<h3 class="workbooks-title" style="margin:0 0 4px 0;">Закладки</h3>';
+    html += '<h3 class="common-tab-title">Закладки</h3>';
     if(!items.length){
       html += '<div class="mdeditor-empty">Пока нет ни одной заметки в закладках.<br>Чтобы добавить: удержите заметку в общем списке или нажмите на значок закладки в открытой заметке.</div>';
     } else {
@@ -2602,7 +2602,7 @@ window.initMdEditorModule = function(deps){
   // набора, set2s_4 — ТЗ пользователя от 04.09). Стиль текста/кнопок/
   // подписей взят у "Объединение заметок" (см. workbooks-title и
   // .settings-content-bottom в jwlmerge.js), строка списка — тот же вид,
-  // что и в "Моём блокноте" (.mdeditor-row/.mdeditor-list, включая
+  // что и в "Моих заметках" (.mdeditor-row/.mdeditor-list, включая
   // закладку по долгому нажатию, см. renderListScreen выше), пилюли
   // периода — тот же вид и поведение, что и на вкладке "Обзор"
   // (.review-pill/.review-pills, см. renderReviewTabContent в my.js: клик
@@ -2788,7 +2788,7 @@ window.initMdEditorModule = function(deps){
     }).join("") + '</div>';
 
     var html = '<div class="mdeditor-tab mdeditor-forgotten-tab">';
-    html += '<h3 class="workbooks-title" style="margin:0 0 4px 0;">Забытые заметки</h3>';
+    html += '<h3 class="common-tab-title">Забытые заметки</h3>';
     if(!items.length){
       // Крайний случай (в теории невозможен, если в библиотеке вообще
       // есть заметки, — см. пояснение у pickFirstNonEmptyPeriodIndex
@@ -3046,7 +3046,7 @@ window.initMdEditorModule = function(deps){
     persistDocStateNow({ screen: "list", id: null, name: null, cursorPos: 0, scrollPercent: null });
   }
 
-  // Жест/кнопка "назад" внутри "Моего блокнота" теперь не обрабатывается
+  // Жест/кнопка "назад" внутри "Моих заметок" теперь не обрабатывается
   // отдельной функцией — каждый шаг навигации (открытие/закрытие заметки,
   // переход в папку/из папки, начало переименования) сам регистрирует
   // свою отмену в общем стеке навигации в момент перехода (см. pushMdNav
@@ -3202,6 +3202,49 @@ window.initMdEditorModule = function(deps){
     openFile = { id: rec.id, name: rec.name, path: rec.path, text: rec.text, dirty: false };
     screen = "editor";
     render();
+  }
+
+  // Создаёт заметку с ГОТОВЫМ телом текста (а не пустую, как
+  // createAndOpenNoteInPath выше) и сразу открывает её на редактирование —
+  // используется кнопкой "Сохранить в Мои заметки" вкладки "Извлечение
+  // субтитров" в my.js (ТЗ пользователя от 07.09). Заметка всегда создаётся
+  // в корне дерева, как и при создании по клику на несуществующую
+  // [[ссылку]] (см. handleLinkClick ниже) — своего выбора папки у кнопки
+  // нет. Проверка занятого имени — на стороне вызывающего (см.
+  // isNoteNameTaken в публичном API), чтобы модалка ввода имени в my.js
+  // могла подсветить поле и не закрываться, не переключая вкладку заранее.
+  function createAndOpenNoteWithText(name, text){
+    if(isNoteNameTaken(name)) return false;
+    var rec = createNoteRecord(name, "", text);
+    recordNoteCreated(name);
+    recordNoteOpened(name);
+    rebuildTree();
+    var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
+    var prevScrollTop = null;
+    if(prevScreen === "list"){
+      var scrollHost = document.getElementById("settingsTabContent");
+      if(scrollHost) prevScrollTop = scrollHost.scrollTop;
+    }
+    pushMdNav(function(){
+      flushAutosaveNow();
+      pushDirtyNotes(true);
+      destroyEditor();
+      openFile = prevOpenFile;
+      currentDirNode = prevDirNode;
+      screen = prevScreen;
+      render();
+      if(prevScrollTop !== null){
+        var restoredScrollHost = document.getElementById("settingsTabContent");
+        if(restoredScrollHost) restoredScrollHost.scrollTop = prevScrollTop;
+      }
+    });
+    flushAutosaveNow();
+    pushDirtyNotes(true);
+    destroyEditor();
+    openFile = { id: rec.id, name: rec.name, path: rec.path, text: rec.text, dirty: false };
+    screen = "editor";
+    render();
+    return true;
   }
 
   function handleLinkClick(name){
@@ -3457,7 +3500,7 @@ window.initMdEditorModule = function(deps){
     setStatus("", false);
   }
 
-  // Уход со вкладки "Мой блокнот"/"Закладки" на другую вкладку настроек, при
+  // Уход со вкладки "Мои заметки"/"Закладки" на другую вкладку настроек, при
   // открытой заметке — тоже "уход с экрана редактора" (раздел 4.1 ТЗ),
   // поэтому шлёт правки в облако немедленно, а не по debounce.
   function flushPendingMdEditorEdit(){
@@ -4226,13 +4269,13 @@ window.initMdEditorModule = function(deps){
 
   // Папка с изображениями (раздел 8 ТЗ) не завязана на syncId/облако —
   // пробуем молча поднять права на ранее выбранную папку сразу при запуске
-  // модуля, независимо от того, открыта ли вкладка "Мой блокнот" прямо
+  // модуля, независимо от того, открыта ли вкладка "Мои заметки" прямо
   // сейчас (см. loadStoredImagesDirHandle выше).
   loadStoredImagesDirHandle();
 
   // Кэш заметок (см. preloadNotesCache выше) — тоже сразу при запуске
   // модуля, тем же приёмом: тогда к моменту, когда пользователь реально
-  // откроет вкладку "Мой блокнот" (или "Закладки"/"Забытые заметки"),
+  // откроет вкладку "Мои заметки" (или "Закладки"/"Забытые заметки"),
   // notesMap уже готов и рендер списка мгновенный — офлайн из локального
   // кэша, онлайн так же мгновенно из него же, а сверка с облаком идёт уже
   // потом, в фоне (см. syncNotesOnTabEnter). Без syncId (синхронизация не
@@ -4244,6 +4287,11 @@ window.initMdEditorModule = function(deps){
   return {
     renderSettingsTabMdEditor: renderSettingsTabMdEditor,
     renderSettingsTabMdBookmarks: renderSettingsTabMdBookmarks,
+    // Кнопка "Сохранить в Мои заметки" вкладки "Извлечение субтитров" (см.
+    // my.js, ТЗ пользователя от 07.09): создать заметку с готовым текстом и
+    // проверить занятость имени ДО переключения вкладки и создания.
+    createAndOpenNoteWithText: createAndOpenNoteWithText,
+    isNoteNameTaken: isNoteNameTaken,
     // "Забытые заметки" (set2s_4, ТЗ пользователя от 04.09) — см.
     // renderSettingsTabForgottenNotes выше
     renderSettingsTabForgottenNotes: renderSettingsTabForgottenNotes,
@@ -4256,7 +4304,7 @@ window.initMdEditorModule = function(deps){
     // используются кнопками "Аа"/"Ж" на вкладках задач (см.
     // initTaskGlobalToolbar в my.js и ТЗ пользователя от 31.08) — тот же
     // общий размер шрифта и то же форматирование выделения, что и в
-    // "Моём блокноте".
+    // "Моих заметках".
     getFontSizeStep: function(){ return fontSizeStep; },
     changeFontSizeStep: changeFontSizeStep,
     FONT_SIZE_MIN_STEP: FONT_SIZE_MIN_STEP,

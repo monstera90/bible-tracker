@@ -341,7 +341,7 @@
   // раньше. Порядок сканирования ниже намеренно совпадает с decorateLine
   // (ссылки → **жирный** → ==выделение== → *курсив*) — поэтому, например,
   // [[ссылка]] ВНУТРИ **жирного** не получает своего отдельного
-  // оформления, ровно как и в живом просмотре "Моего блокнота" (решётки/
+  // оформления, ровно как и в живом просмотре "Моих заметок" (решётки/
   // скобки внутри выделения остаются как есть, без вложенной разметки).
   //
   // Используется и явно (см. formatObsidianHtml/linkifyHtml ниже — для
@@ -376,7 +376,7 @@
       }
     }
 
-    // [[ссылки на заметки "Моего блокнота"]] — клик обрабатывается ОДНИМ
+    // [[ссылки на заметки "Моих заметок"]] — клик обрабатывается ОДНИМ
     // общим делегированным обработчиком на #settingsTabContent (см.
     // initAutoFormatting ниже): переключает вкладку настроек на "Мой
     // блокнот" и сразу открывает эту заметку (создаёт её, если такой ещё
@@ -427,7 +427,7 @@
     scanPair(/==([^=\n]+?)==/g, "fmt-mark");
     // зачёркнутый ("~~текст~~") / подчёркнутый ("++текст++" — своё
     // обозначение, в обычном markdown подчёркивания нет) — та же кнопка
-    // форматирования, что и в "Моём блокноте" (см. wrapEditableSelection
+    // форматирования, что и в "Моих заметках" (см. wrapEditableSelection
     // ниже и ТЗ пользователя от 31.08).
     scanPair(/~~([^~\n]+?)~~/g, "fmt-strike");
     scanPair(/\+\+([^+\n]+?)\+\+/g, "fmt-underline");
@@ -451,10 +451,10 @@
   // formatInline внутри каждой строки. Блочные признаки, их приоритет и
   // "красная строка" у первой строки абзаца (после пустой строки или
   // заголовка) — то же самое, что и в decorateLine в mdeditor.js: один и
-  // тот же язык разметки должен выглядеть одинаково и в "Моём блокноте", и
+  // тот же язык разметки должен выглядеть одинаково и в "Моих заметках", и
   // здесь. Единственное, что тут НЕ поддерживается — встроенные картинки
   // "![[имя]]" (они завязаны на файловую систему, открытую только внутри
-  // "Моего блокнота"; здесь просто останутся видимым текстом).
+  // "Моих заметок"; здесь просто останутся видимым текстом).
   function formatObsidianHtml(rawText){
     if(rawText == null || rawText === "") return "";
     var lines = String(rawText).split("\n");
@@ -519,14 +519,14 @@
   //  - script/style/textarea/input — там либо нет осмысленного текста в
   //    виде узлов, либо это чисто служебное содержимое;
   //  - любой contenteditable-элемент (в т.ч. вложенный) — сюда попадают и
-  //    поле CodeMirror в "Моём блокноте" (там уже СВОЙ отдельный механизм
+  //    поле CodeMirror в "Моих заметках" (там уже СВОЙ отдельный механизм
   //    форматирования и ссылок, см. mdeditor.js — трогать DOM снаружи во
   //    время редактирования CodeMirror нельзя, поломает его модель), и
   //    поля редактирования комментария/задачи/дня года (contenteditable
   //    div, см. renderYearDayNoteEdit и т.п.) — там во время правки лежит
   //    ЧИСТЫЙ текст, который потом считывается обратно; вставленный <a>/
   //    <span> испортил бы его при сохранении;
-  //  - "функция часов" (индикатор "4:05 / 10:55" вверху "Моего блокнота",
+  //  - "функция часов" (индикатор "4:05 / 10:55" вверху "Моих заметок",
   //    см. renderHourBars) — это числа графика чтения, а не текст заметок,
   //    формировать из них ссылки/форматирование не нужно; она и так вне
   //    подозрений: там нет текстовых узлов с "**"/"[["/ссылками на Библию.
@@ -608,7 +608,7 @@
 
     // клик по [[ссылке на заметку]] (см. formatInline выше — span.note-link
     // с data-note-link) в ЛЮБОМ месте #settingsTabContent, не только внутри
-    // "Моего блокнота": переключает вкладку настроек на "Мой блокнот" и
+    // "Моих заметок": переключает вкладку настроек на "Мои заметки" и
     // сразу открывает эту заметку (создаёт, если такой ещё нет — как и при
     // клике на такую же ссылку ВНУТРИ самого блокнота, см.
     // openNoteExternally в mdeditor.js). Один делегированный обработчик на
@@ -1100,13 +1100,13 @@
   // см. renderSettingsTabImgResize в imgresize.js и её отдельную ветку в
   // switchSettingsTab ниже, по тому же принципу вынесена ДО общей проверки
   // на renderSettingsTabSet2Stub. set2s_1 (первая боковая) — ЭТО БОЛЬШЕ НЕ
-  // ЗАГЛУШКА: это вкладка "Мой блокнот" — работа с .md заметками
+  // ЗАГЛУШКА: это вкладка "Мои заметки" — работа с .md заметками
   // в стиле Obsidian (папка через File System Access API, редактор на
   // CodeMirror 6 с decorations, ссылки [[Название]] между заметками), см.
   // renderSettingsTabMdEditor в mdeditor.js и её отдельную ветку в
   // switchSettingsTab ниже, по тому же принципу вынесена ДО общей проверки
   // на renderSettingsTabSet2Stub. set2s_2 (вторая боковая) — ТОЖЕ УЖЕ НЕ
-  // ЗАГЛУШКА: это вкладка "Закладки" — список заметок из "Моего блокнота"
+  // ЗАГЛУШКА: это вкладка "Закладки" — список заметок из "Моих заметок"
   // (set2s_1), отмеченных закладкой (долгим нажатием в общем списке или
   // кнопкой в шапке открытой заметки), см. renderSettingsTabMdBookmarks в
   // mdeditor.js и её отдельную ветку в switchSettingsTab ниже, по тому же
@@ -1154,6 +1154,16 @@
   // "Скопировать субтитры" вкладки "Извлечение субтитров" (см.
   // renderSettingsTabSubtitleExtract ниже)
   var COPY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="13" rx="1.5"></rect><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h3"></path></svg>';
+  // пиктограмма "i" в кружке — общая для всего проекта (кнопка
+  // "Информация" вкладки "Извлечение субтитров", см. renderSettingsTab-
+  // SubtitleExtract ниже; задумана как переиспользуемая и в других
+  // вкладках/местах — новые места просто ссылаются на эту же константу).
+  var INFO_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"></circle><path d="M12 11v6"></path><circle cx="12" cy="7.7" r="1" fill="currentColor" stroke="none"></circle></svg>';
+  // стрелка вниз в лоток — "скачать" (та же пиктограмма, что и DOWNLOAD_-
+  // ICON_SVG в mdeditor.js/«Мои заметки», скопирована сюда, т.к. my.js не
+  // имеет доступа к внутренним константам модуля). Пока без функции — кнопка
+  // "Скачать" вкладки "Извлечение субтитров" сейчас заглушка (см. ниже).
+  var DOWNLOAD_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"></path><path d="M7.5 10.5L12 15l4.5-4.5"></path><path d="M4.5 18.5h15"></path></svg>';
   var TASK_ARCHIVE_MAX_SHOWN = 50;
 
   function getShowAllTasksEnabled(){
@@ -2081,7 +2091,7 @@
   }
 
   // ---------------------------------------------------------------------
-  // Ветка /notes(Meta) для облачных заметок "Моего блокнота" (см.
+  // Ветка /notes(Meta) для облачных заметок "Моих заметок" (см.
   // TASK_MDNOTES_CLOUD.md, раздел 2) — свой, полностью НЕЗАВИСИМЫЙ от
   // общего state цикл синхронизации (mdeditor.js ведёт собственный
   // debounce/повтор), но переиспользует fetchWithTimeout и PATCH-приём
@@ -2474,7 +2484,7 @@
   var renderSettingsTabImgResize = ImgResize.renderSettingsTabImgResize;
 
   // ===================== МОЙ ПОЧТОВЫЙ БЛОКНОТ (md-редактор) =====================
-  // Логика вкладки "Мой блокнот" (первая боковая вкладка второго
+  // Логика вкладки "Мои заметки" (первая боковая вкладка второго
   // набора, settingsTabSet2Btn1 / "set2s_1") вынесена в отдельный файл
   // mdeditor.js (см. index.html и sw.js) — по тому же образцу, что и
   // ImgResize/EpubSplit выше. flushPendingMdEditorEdit сохраняет несохранённые
@@ -2511,7 +2521,7 @@
     // IIFE), поэтому ссылаться на неё здесь, до её текстового объявления,
     // безопасно.
     refitAllVisibleTaskBodies: refitAllVisibleTaskBodies,
-    // закладки "Моего блокнота" — теперь синхронизируются в облаке через
+    // закладки "Моих заметок" — теперь синхронизируются в облаке через
     // тот же state/saveLocalState/scheduleCloudPush, что и остальные
     // данные приложения (см. getSyncedBookmarkNames/setSyncedBookmark
     // выше и ТЗ пользователя от 01.09).
@@ -2561,7 +2571,7 @@
   // редактирования ПРЯМО СЕЙЧАС (в один момент времени редактируется не
   // больше одной строки — остальные при этом уже сохранены, см.
   // flushPendingTaskEdits/flushPendingCommentEdits). "Аа" использует ТОТ
-  // ЖЕ fontSizeStep, что и "Мой блокнот" (см. MdEditor.changeFontSizeStep
+  // ЖЕ fontSizeStep, что и "Мои заметки" (см. MdEditor.changeFontSizeStep
   // в mdeditor.js) — единица размера, стало быть, общая на оба места (см.
   // ТЗ пользователя от 31.08).
   // ---------------------------------------------------------------------
@@ -3971,6 +3981,7 @@
     flushPendingTaskEdits();
     flushPendingCommentEdits();
     flushPendingMdEditorEdit();
+    destroySubtitleScrollListener();
     // запоминаем позицию только если это реальная вкладка одного из двух
     // стеков (бокового или нижнего, набор 1 или 2) — служебные экраны вроде
     // "versions"/"import"/"resetConfirm" (открываются кнопками ВНУТРИ
@@ -4457,32 +4468,171 @@
   // modals.css), а строка выбора файла и ряд кнопок обёрнуты в
   // .settings-content-bottom и всегда прижаты к низу окна — не нужно
   // тянуться за ними пальцем, даже когда результат уже показан.
+  // Ключ для сохранения последних извлечённых субтитров в localStorage
+  // (ТЗ пользователя от 07.09, п.6): текст в области чтения переживает не
+  // только переключение вкладок, но и закрытие всего приложения — при
+  // следующем открытии вкладки subtitle-extract-output снова показывает
+  // тот же текст, пока не будет успешно извлечён новый (см.
+  // renderSettingsTabSubtitleExtract ниже).
+  var SUBTITLE_EXTRACT_TEXT_KEY = "bibleSubtitleExtractedText_v1";
+  // Позиция прокрутки вкладки (ТЗ пользователя от 07.09, п.7: "Мой
+  // блокнот" переживает закрытие приложения и открывается с того же
+  // места, а "Извлечение субтитров" — каждый раз с начала, это неудобно).
+  // Тот же приём, что и currentScrollPercent/restorePercent в mdeditor.js
+  // (см. flushDocStateNow там же), но проще: здесь нет ни курсора, ни
+  // конкретного документа — только процент прокрутки общего контейнера
+  // #settingsTabContent, сохранённый в localStorage (без IndexedDB — та
+  // в этом файле не используется, а связываться с ней ради одного числа
+  // незачем).
+  var SUBTITLE_EXTRACT_SCROLL_KEY = "bibleSubtitleExtractScroll_v1";
+  var subtitleScrollContainer = null;
+  var subtitleScrollHandler = null;
+  var subtitleScrollSaveTimer = null;
+  function saveSubtitleScrollNow(){
+    if(subtitleScrollSaveTimer){ clearTimeout(subtitleScrollSaveTimer); subtitleScrollSaveTimer = null; }
+    var sc = document.getElementById("settingsTabContent");
+    if(!sc) return;
+    var max = sc.scrollHeight - sc.clientHeight;
+    var pct = max > 0 ? Math.max(0, Math.min(1, sc.scrollTop / max)) : 0;
+    try{ localStorage.setItem(SUBTITLE_EXTRACT_SCROLL_KEY, String(pct)); }catch(e){}
+  }
+  function scheduleSubtitleScrollSave(){
+    if(subtitleScrollSaveTimer) clearTimeout(subtitleScrollSaveTimer);
+    subtitleScrollSaveTimer = setTimeout(saveSubtitleScrollNow, 500);
+  }
+  // Снимает слушатель скролла (и сбрасывает несохранённый debounce-таймер
+  // без потери данных — сохраняет немедленно) при уходе с вкладки, чтобы
+  // прокрутка ДРУГИХ вкладок не перезаписывала сохранённую позицию
+  // субтитров и чтобы не копились дубликаты слушателей на
+  // #settingsTabContent при повторных заходах на вкладку. Вызывается из
+  // switchSettingsTab безусловно, тем же приёмом, что и
+  // flushPendingMdEditorEdit там же.
+  function destroySubtitleScrollListener(){
+    if(subtitleScrollSaveTimer){ saveSubtitleScrollNow(); }
+    if(subtitleScrollContainer && subtitleScrollHandler){
+      subtitleScrollContainer.removeEventListener("scroll", subtitleScrollHandler);
+    }
+    subtitleScrollContainer = null;
+    subtitleScrollHandler = null;
+  }
+  // Текст, который раньше жил в шапке вкладки (.subtitle-extract-hint) —
+  // теперь по кнопке "i" (см. ниже) показывается прямо в области чтения,
+  // из шапки убран (ТЗ пользователя от 07.09).
+  var SUBTITLE_INFO_TEXT = "Выберите видео (.mp4) со встроенной текстовой дорожкой субтитров — текст будет извлечён сразу на месте, без выхода в интернет.";
   function renderSettingsTabSubtitleExtract(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     var selectedFile = null;
     var extractedText = "";
+    try{ extractedText = localStorage.getItem(SUBTITLE_EXTRACT_TEXT_KEY) || ""; }catch(e){}
+    // Заголовок на общем классе .common-tab-title (переименован из
+    // .subtitle-extract-title, ТЗ пользователя от 08.09 — назывался по
+    // имени этой вкладки-образца, хотя класс общий для шести заголовков,
+    // см. components.css), а не общем .workbooks-title — единый Palatino
+    // Linotype/Georgia по всей вкладке (ТЗ пользователя от 07.09), без
+    // декоративного Trajan Pro и без влияния на другие вкладки,
+    // использующие .workbooks-title.
+    //
+    // Правка от 07.09 (третий заход): статус файла и ряд кнопок больше не
+    // занимают свою часть высоты окна — .subtitle-controls-fab плавает над
+    // текстом результата тем же приёмом, что и .mdeditor-fab-row у "Моего
+    // блокнота" (position:absolute от .settings-modal-box, см.
+    // components.css), а сама область результата — обычный блок в общем
+    // потоке #settingsTabContent, растёт вместе с текстом (см.
+    // autoResizeOutput ниже) — прокручивается вся вкладка целиком, без
+    // собственной прокрутки у textarea и без "тумана"-маски. "Аа" с этой
+    // вкладки убрана вовсе — размер по-прежнему берётся из общей
+    // переменной --mdeditor-font-size, просто без своего органа
+    // управления здесь (регулируется из "Моих заметок").
     container.innerHTML =
-      '<div class="workbooks-title">Извлечение субтитров</div>' +
-      '<p class="subtitle-extract-hint">Выберите видео (.mp4) со встроенной текстовой дорожкой субтитров — текст будет извлечён сразу на месте, без выхода в интернет.</p>' +
-      '<textarea class="subtitle-extract-output" id="srtOutput" readonly placeholder="Извлечённый текст появится здесь…"></textarea>' +
-      '<div class="settings-content-bottom">' +
-        '<div class="subtitle-file-row">' +
-          '<span id="srtFileStatus" class="subtitle-file-status">Файл не выбран</span>' +
-          '<button type="button" class="task-import-attach-btn" id="srtAttachBtn" title="Выбрать файл">' + PAPERCLIP_ICON_SVG + '</button>' +
+      '<div class="common-tab-title">Извлечение субтитров</div>' +
+      '<div class="subtitle-extract-output is-empty" id="srtOutput"></div>' +
+      '<div class="subtitle-controls-fab" id="srtControlsFab">' +
+        // Статус-пилюля начинается пустой (ТЗ пользователя от 07.09,
+        // четвёртый заход: убрать "Файл не выбран" — пока нечего сказать,
+        // пилюля не нужна вовсе). Пустой <span> схлопывается через
+        // .subtitle-file-status:empty в components.css, появляется, как
+        // только setFileStatus вставит текст (имя файла, "Готово —
+        // извлечено реплик: N." и т.п.).
+        '<span id="srtFileStatus" class="subtitle-file-status"></span>' +
+        '<div class="subtitle-action-row">' +
+          '<button type="button" class="mdeditor-fab-btn" id="srtInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
+          '<button type="button" class="workbooks-run-btn subtitle-start-btn" id="srtStartBtn" disabled>Начать</button>' +
+          '<button type="button" class="mdeditor-fab-btn" id="srtAttachBtn" title="Выбрать файл">' + PAPERCLIP_ICON_SVG + '</button>' +
+          // "Скачать" разворачивается в "md"/"txt" тем же приёмом, что и
+          // "Аа" в .mdeditor-fontsize-wrap/-popup у "Моих заметок" (см.
+          // components.css): клик по самой кнопке открывает попап из двух
+          // кнопок СТОЛБИКОМ над ней, клик по формату скачивает и сам
+          // закрывает попап (как "Ж"/"К"/"П"/"Ч" там же), повторный клик
+          // по самой кнопке — тоже закрывает (ТЗ пользователя от 07.09).
+          '<span class="mdeditor-fontsize-wrap" id="srtDownloadWrap">' +
+            '<div class="mdeditor-fontsize-popup" id="srtDownloadPopup">' +
+              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="srtDownloadMdBtn" title="Скачать .md" disabled>md</button>' +
+              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="srtDownloadTxtBtn" title="Скачать .txt" disabled>txt</button>' +
+            '</div>' +
+            '<button type="button" class="mdeditor-fab-btn subtitle-download-btn" id="srtDownloadBtn" title="Скачать" disabled>' + DOWNLOAD_ICON_SVG + '</button>' +
+          '</span>' +
+          '<button type="button" class="mdeditor-fab-btn subtitle-copy-btn" id="srtCopyBtn" title="Скопировать субтитры" disabled>' + COPY_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-fab-btn subtitle-save-note-btn" id="srtSaveNoteBtn" title="Сохранить в Мои заметки" disabled>' + DOWNLOAD_ICON_SVG + '</button>' +
         '</div>' +
-        '<input type="file" accept=".mp4,video/mp4" id="srtFileInput" style="display:none;">' +
-        '<div class="subtitle-actions-row">' +
-          '<button type="button" class="workbooks-run-btn" id="srtStartBtn" disabled>Начать</button>' +
-          '<button type="button" class="subtitle-copy-btn" id="srtCopyBtn" title="Скопировать субтитры" disabled>' + COPY_ICON_SVG + '</button>' +
-        '</div>' +
-      '</div>';
+      '</div>' +
+      '<input type="file" accept=".mp4,video/mp4" id="srtFileInput" style="display:none;">';
 
     var fileInput = document.getElementById("srtFileInput");
     var fileStatusEl = document.getElementById("srtFileStatus");
     var startBtn = document.getElementById("srtStartBtn");
     var copyBtn = document.getElementById("srtCopyBtn");
+    var saveNoteBtn = document.getElementById("srtSaveNoteBtn");
+    var infoBtn = document.getElementById("srtInfoBtn");
     var outputEl = document.getElementById("srtOutput");
+    var downloadBtn = document.getElementById("srtDownloadBtn");
+    var downloadPopup = document.getElementById("srtDownloadPopup");
+    var downloadMdBtn = document.getElementById("srtDownloadMdBtn");
+    var downloadTxtBtn = document.getElementById("srtDownloadTxtBtn");
+    var downloadPanelOpen = false;
+    // Область результата больше не имеет фиксированной высоты/своей
+    // прокрутки (см. .subtitle-extract-output в components.css) — высоту
+    // выставляем вручную по содержимому при каждой смене текста, чтобы
+    // элемент рос вместе с текстом, а прокручивалась вся вкладка целиком
+    // (тот же эффект, что и у CodeMirror в "Моих заметках", где скролл
+    // тоже отдан внешнему контейнеру).
+    function autoResizeOutput(){
+      outputEl.style.height = "auto";
+      outputEl.style.height = outputEl.scrollHeight + "px";
+    }
+    // Кнопка "i": по нажатию область чтения показывает статичный текст
+    // подсказки вместо извлечённых субтитров/заглушки, повторное нажатие
+    // возвращает как было. Если за это время успешно извлеклись новые
+    // субтитры (см. startBtn click ниже) — кнопка сама "отжимается" и
+    // область переключается на результат, показывать подсказку дальше
+    // незачем (ТЗ пользователя от 07.09).
+    var infoVisible = false;
+    // Раньше просто outputEl.value = text (textarea). Теперь outputEl —
+    // <div>: каждый абзац (разделены "\n\n" при извлечении, см.
+    // buildSubtitleText выше) оборачивается в свой <p>, чтобы CSS мог
+    // дать каждому красную строку и отступ от соседнего абзаца (те же
+    // text-indent/margin, что и у абзацев заметки в "Моих заметках", см.
+    // .subtitle-extract-output в components.css). Перенос строки внутри
+    // одного абзаца (одиночный "\n", если такой встретится) — через
+    // <br>, а не отдельный <p>. Пустой текст — просто пустой div, плейсхолдер
+    // рисует CSS через класс is-empty (.subtitle-extract-output.is-empty::before).
+    function showOutputText(){
+      var text = infoVisible ? SUBTITLE_INFO_TEXT : extractedText;
+      outputEl.classList.toggle("is-empty", !text);
+      if(!text){
+        outputEl.innerHTML = "";
+      } else {
+        outputEl.innerHTML = text.split(/\n\s*\n/).map(function(para){
+          return "<p>" + escapeHtml(para).replace(/\n/g, "<br>") + "</p>";
+        }).join("");
+      }
+      autoResizeOutput();
+    }
+    infoBtn.addEventListener("click", function(){
+      infoVisible = !infoVisible;
+      infoBtn.classList.toggle("pressed", infoVisible);
+      showOutputText();
+    });
 
     // Одна и та же строка слева от скрепки играет две роли — имя файла
     // (нейтральный цвет) и статус операции (успех/ошибка подсвечиваются),
@@ -4497,25 +4647,83 @@
       copyBtn.disabled = !ready;
       copyBtn.classList.toggle("ready", !!ready);
     }
+    function setSaveNoteReady(ready){
+      saveNoteBtn.disabled = !ready;
+      saveNoteBtn.classList.toggle("ready", !!ready);
+    }
+    // Та же готовность, что и у копирования (есть извлечённый текст) —
+    // включает саму кнопку "Скачать" и оба формата в попапе разом.
+    function setDownloadReady(ready){
+      downloadBtn.disabled = !ready;
+      downloadMdBtn.disabled = !ready;
+      downloadTxtBtn.disabled = !ready;
+      downloadBtn.classList.toggle("ready", !!ready);
+    }
+    // Скачивание текста результата как файла — имя берём от исходного
+    // видео (без расширения), чтобы .md/.txt легко было соотнести с
+    // видео, из которого извлекли; если файл ещё не выбирали (открыли
+    // вкладку сразу с сохранённым текстом от прошлого раза) — нейтральное
+    // имя по умолчанию.
+    function downloadSubtitleAs(ext, mime){
+      if(!extractedText) return;
+      var base = selectedFile ? selectedFile.name.replace(/\.[^./]+$/, "") : "субтитры";
+      var blob = new Blob([extractedText], { type: mime + ";charset=utf-8" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = base + "." + ext;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+    }
+    // "Скачать" — та же механика попапа, что у "Аа"/"Ж" в "Моих заметках"
+    // (см. .mdeditor-fontsize-wrap/-popup в components.css): клик по самой
+    // кнопке открывает/закрывает попап, клик по формату скачивает и сам
+    // закрывает попап следом (как "Ж"/"К"/"П"/"Ч" там же).
+    downloadBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
+    downloadBtn.addEventListener("click", function(){
+      downloadPanelOpen = !downloadPanelOpen;
+      downloadPopup.classList.toggle("open", downloadPanelOpen);
+    });
+    function bindDownloadFormatBtn(btn, ext, mime){
+      btn.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      btn.addEventListener("click", function(){
+        downloadSubtitleAs(ext, mime);
+        downloadPanelOpen = false;
+        downloadPopup.classList.remove("open");
+      });
+    }
+    bindDownloadFormatBtn(downloadMdBtn, "md", "text/markdown");
+    bindDownloadFormatBtn(downloadTxtBtn, "txt", "text/plain");
+    // Восстанавливаем последний сохранённый текст сразу при открытии
+    // вкладки — до выбора нового файла область чтения показывает именно
+    // его (localStorage, см. SUBTITLE_EXTRACT_TEXT_KEY выше). Кнопка "i"
+    // при открытии вкладки всегда отжата (infoVisible=false по умолчанию).
+    showOutputText();
+    setCopyReady(!!extractedText);
+    setDownloadReady(!!extractedText);
+    setSaveNoteReady(!!extractedText);
 
     document.getElementById("srtAttachBtn").addEventListener("click", function(){
       fileInput.click();
     });
     fileInput.addEventListener("change", function(){
       selectedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
-      setFileStatus(selectedFile ? selectedFile.name : "Файл не выбран");
+      setFileStatus(selectedFile ? selectedFile.name : "");
       startBtn.disabled = !selectedFile;
-      extractedText = "";
-      outputEl.value = "";
-      setCopyReady(false);
+      // Текст в области чтения НЕ сбрасывается здесь (ТЗ пользователя от
+      // 07.09, п.6) — старые субтитры остаются видны, пока извлечение из
+      // нового файла не завершится успешно (см. startBtn click ниже).
     });
 
     startBtn.addEventListener("click", function(){
       if(!selectedFile) return;
       startBtn.disabled = true;
-      setCopyReady(false);
-      outputEl.value = "";
-      extractedText = "";
+      // Старый текст (свой или сохранённый ранее) НЕ стирается здесь —
+      // остаётся в области чтения на время обработки и заменяется только
+      // при успешном извлечении из нового файла (ТЗ пользователя от
+      // 07.09, п.6).
       setFileStatus("Читаем файл…");
       var readPromise = (typeof selectedFile.arrayBuffer === "function")
         ? selectedFile.arrayBuffer()
@@ -4528,19 +4736,26 @@
       readPromise.then(function(buf){
         setFileStatus("Ищем дорожку субтитров…");
         var cues = extractSubtitleCuesFromMp4(buf);
-        extractedText = reflowSubtitleCues(cues);
-        outputEl.value = extractedText;
+        var newText = reflowSubtitleCues(cues);
         startBtn.disabled = false;
-        if(extractedText){
+        if(newText){
+          extractedText = newText;
+          // Успешное извлечение "отжимает" кнопку "i", если она была
+          // нажата, и показывает результат вместо подсказки (ТЗ
+          // пользователя от 07.09, второй заход).
+          infoVisible = false;
+          infoBtn.classList.remove("pressed");
+          showOutputText();
           setCopyReady(true);
+          setDownloadReady(true);
+          setSaveNoteReady(true);
+          try{ localStorage.setItem(SUBTITLE_EXTRACT_TEXT_KEY, extractedText); }catch(e){}
           setFileStatus("Готово — извлечено реплик: " + cues.length + ".", "success");
         } else {
-          setCopyReady(false);
           setFileStatus("Дорожка субтитров в этом видео пуста.", "error");
         }
       }).catch(function(err){
         startBtn.disabled = false;
-        setCopyReady(false);
         console.error("Извлечение субтитров: ошибка", err);
         var detail = err && err.message ? err.message : String(err);
         setFileStatus("Не удалось извлечь субтитры: " + detail + ".", "error");
@@ -4549,14 +4764,118 @@
 
     copyBtn.addEventListener("click", function(){
       if(!extractedText) return;
-      outputEl.focus();
-      outputEl.select();
-      outputEl.setSelectionRange(0, 99999);
+      // Основной путь — clipboard.writeText прямо из строки extractedText,
+      // ему не важно, что теперь outputEl — <div>, а не <textarea>
+      // (раньше выделение через .select()/.setSelectionRange нужно было
+      // только для execCommand-фолбэка ниже — у div таких методов нет,
+      // поэтому для фолбэка выделяем содержимое вручную через
+      // Selection/Range API).
       if(navigator.clipboard && navigator.clipboard.writeText){
         navigator.clipboard.writeText(extractedText).catch(function(){});
+      } else {
+        try{
+          var range = document.createRange();
+          range.selectNodeContents(outputEl);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          document.execCommand("copy");
+          sel.removeAllRanges();
+        }catch(e){}
       }
-      try{ document.execCommand("copy"); }catch(e){}
       setFileStatus("Скопировано в буфер обмена.", "success");
+    });
+
+    saveNoteBtn.addEventListener("click", function(){
+      if(!extractedText) return;
+      openSubtitleSaveNoteDialog(extractedText);
+    });
+
+    // Восстановление позиции прокрутки и слежение за ней — в самом конце,
+    // после того как весь контент вкладки (включая уже показанный
+    // extractedText) отрисован и autoResizeOutput() выставил итоговую
+    // высоту textarea, иначе scrollHeight ещё не отражает реальный размер
+    // (см. showOutputText/autoResizeOutput выше). switchSettingsTab
+    // обнуляет scrollTop ДО вызова этого рендера (см. switchSettingsTab
+    // в этом файле) — requestAnimationFrame здесь всегда выполняется уже
+    // ПОСЛЕ этого обнуления, тем же приёмом, что и восстановление позиции
+    // заметки в mountEditor (mdeditor.js).
+    var restoreScrollPercent = null;
+    try{
+      var storedScrollPct = localStorage.getItem(SUBTITLE_EXTRACT_SCROLL_KEY);
+      if(storedScrollPct !== null) restoreScrollPercent = parseFloat(storedScrollPct);
+    }catch(e){}
+    var scrollContainer = document.getElementById("settingsTabContent");
+    if(scrollContainer){
+      subtitleScrollHandler = function(){ scheduleSubtitleScrollSave(); };
+      subtitleScrollContainer = scrollContainer;
+      scrollContainer.addEventListener("scroll", subtitleScrollHandler, { passive: true });
+    }
+    requestAnimationFrame(function(){
+      var sc = document.getElementById("settingsTabContent");
+      if(!sc) return;
+      var max = sc.scrollHeight - sc.clientHeight;
+      if(typeof restoreScrollPercent === "number" && !isNaN(restoreScrollPercent) && max > 0){
+        sc.scrollTop = restoreScrollPercent * max;
+      }
+    });
+  }
+
+  // Модалка ввода имени заметки для кнопки "Сохранить в Мои заметки" —
+  // тот же общий вид карточки поверх .settings-modal-box (.mdeditor-
+  // cleanup-overlay/-card/-input/-actions), что и у "Новой заметки" в
+  // самом "Моих заметках" (openNewNoteDialog в mdeditor.js), объявлена
+  // здесь отдельно, потому что готовый текст субтитров должен попасть
+  // ГОТОВЫМ телом новой заметки, а не в пустую (см.
+  // MdEditor.createAndOpenNoteWithText в mdeditor.js). После
+  // подтверждения имени переключает вкладку настроек на "Мои заметки" —
+  // тем же вызовом switchSettingsTab("set2s_1"), каким это делает клик по
+  // [[ссылке]] из другой вкладки (см. root.addEventListener("click", ...)
+  // выше в initAutoFormatting) — и сразу открывает созданную заметку на
+  // редактирование.
+  function openSubtitleSaveNoteDialog(text){
+    if(!settingsModalBox) return;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title">Имя новой заметки</div>' +
+      '<input type="text" class="mdeditor-cleanup-input" id="srtSaveNoteInput">' +
+      '<div class="mdeditor-cleanup-actions">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="srtSaveNoteCancel">Отмена</button>' +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="srtSaveNoteCreate">Создать</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    settingsModalBox.appendChild(overlay);
+
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+
+    var input = document.getElementById("srtSaveNoteInput");
+    input.focus();
+
+    function submit(){
+      var name = (input.value || "").trim();
+      if(!name) return;
+      // Проверка занятого имени ДО закрытия модалки/переключения вкладки —
+      // как и в openNewNoteDialog (mdeditor.js), просто подсвечиваем поле
+      // и не закрываем, вместо того чтобы уже переключиться на "Мой
+      // блокнот" и там показать ошибку.
+      if(MdEditor && MdEditor.isNoteNameTaken && MdEditor.isNoteNameTaken(name)){
+        input.style.borderColor = "var(--danger, #c0392b)";
+        return;
+      }
+      close();
+      switchSettingsTab("set2s_1");
+      if(MdEditor && MdEditor.createAndOpenNoteWithText) MdEditor.createAndOpenNoteWithText(name, text);
+    }
+    document.getElementById("srtSaveNoteCancel").addEventListener("click", close);
+    document.getElementById("srtSaveNoteCreate").addEventListener("click", submit);
+    document.getElementById("srtSaveNoteCreate").addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+    input.addEventListener("keydown", function(ev){
+      if(ev.key === "Enter"){ ev.preventDefault(); submit(); }
+      else if(ev.key === "Escape"){ ev.preventDefault(); close(); }
     });
   }
 
@@ -5983,7 +6302,7 @@
     var moods = moodsByDay[dayTs] || [];
     var goalsDone = goalsByDay[dayTs] || [];
     var tasksDone = tasksByDay[dayTs] || [];
-    // новые заметки "Моего блокнота", созданные в этот день (см.
+    // новые заметки "Моих заметок", созданные в этот день (см.
     // getNoteCreationsForDay/recordNoteCreated выше и ТЗ пользователя от
     // 04.09) — независимая запись под днём СОЗДАНИЯ, не редактирования
     var notesCreated = getNoteCreationsForDay(dayTs);
@@ -6018,7 +6337,7 @@
       // formatInline — тот же формат "[[ссылка]]", что и везде в
       // приложении (см. formatInline выше): клик по ней уже подхватывается
       // общим делегированным обработчиком на #settingsTabContent
-      // (переключает на "Мой блокнот" и открывает нужную заметку, создавая
+      // (переключает на "Мои заметки" и открывает нужную заметку, создавая
       // её заново, если она была с тех пор удалена/переименована — как и
       // у любой другой [[ссылки]] в приложении).
       var notesHtml = notesCreated.map(function(n){
@@ -6340,7 +6659,7 @@
 
     container.innerHTML =
       '<div class="year-grid-tab-header">' +
-        '<div class="year-grid-tab-title">Карта дней года</div>' +
+        '<div class="common-tab-title">Карта дней года</div>' +
         '<button class="year-grid-active-days-btn" id="yearGridActiveDaysBtn" title="Дней с отметками за последние 365 дней">' + built.activeDays + '</button>' +
       '</div>' +
       '<div class="year-grid-v-scroll" id="yearGridVScroll">' + legendHtml + built.html + '</div>';
@@ -6797,7 +7116,7 @@
     saveTaskData(id, {text: text, tab: homeTab, checked: false, checkedAt: null, completionKey: null, nextForProjectId: null, flag: flag});
     return id;
   }
-  // Задача, отмеченная "[x]" прямо в "Моём блокноте" (см. TaskActionsWidget
+  // Задача, отмеченная "[x]" прямо в "Моих заметках" (см. TaskActionsWidget
   // в mdeditor.js) — создаётся СРАЗУ уже закрытой, той же записью в архиве,
   // что получилась бы, отметь пользователь галочку у обычной задачи (см.
   // checkTaskDone ниже): текст + отметка времени сохраняются ещё и в
@@ -7039,7 +7358,7 @@
     return byDay;
   }
 
-  // ---- новые заметки "Моего блокнота" в "Карте дней года"
+  // ---- новые заметки "Моих заметок" в "Карте дней года"
   // ("notecreated:<деньСоздания>-<rand>") — тот же принцип, что и у
   // yearcomment: выше: независимая запись под днём СОЗДАНИЯ заметки (ТЗ
   // пользователя от 04.09), дальнейшее переименование/редактирование/
@@ -7794,7 +8113,7 @@
 
   // Тот же пикер выбора вкладки-назначения, что и openTaskMovePicker выше,
   // но БЕЗ привязки к уже существующей задаче — используется переносом
-  // задачи "- [ ] текст" из "Моего блокнота" (см. TaskActionsWidget в
+  // задачи "- [ ] текст" из "Моих заметок" (см. TaskActionsWidget в
   // mdeditor.js): задачи с таким id ещё нет, она создаётся заново, с нуля,
   // в момент выбора вкладки. Перенос ОДНОСТОРОННИЙ: сама заметка не
   // меняется, и обратно с получившейся задачей никак не связана — после
@@ -8140,7 +8459,7 @@
   // который тоже должен отменяться "назад" — переключение вкладки (в т.ч.
   // ПРОГРАММНОЕ, как при клике по [[ссылке]] в комментарии/задаче/"Карте
   // дней года", см. initAutoFormatting выше), или шаг навигации внутри
-  // самой вкладки (папка -> заметка в "Моём блокноте", см. mdeditor.js) —
+  // самой вкладки (папка -> заметка в "Моих заметках", см. mdeditor.js) —
   // одной ловушки стало не хватать: "назад" либо перехватывался не тем
   // экраном, либо закрывал всё окно настроек целиком, пропуская вкладку,
   // с которой реально был совершён переход. Именно так выглядел баг:

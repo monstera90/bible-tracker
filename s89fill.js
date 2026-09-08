@@ -180,9 +180,9 @@ window.initS89FillModule = function(deps){
     var generatedFiles = null; // [{ name, blob }] | null
 
     container.innerHTML =
-      '<div class="settings-content-bottom">' +
-        '<h3 class="workbooks-title">Заполнение бланков S-89</h3>' +
-        '<p style="opacity:.7;font-size:.9em;margin-top:2px;">Прикрепите подложку-бланк (картинку) и ссылку на гугл-документ с графиком — для каждого подходящего задания будет создан отдельный заполненный бланк.</p>' +
+      '<div class="settings-content-bottom s89fill-tab">' +
+        '<h3 class="common-tab-title">Заполнение бланков S-89</h3>' +
+        '<p style="opacity:.7;font-family:\'Palatino Linotype\',Georgia,serif;font-size:var(--mdeditor-font-size, 15.5px);margin-top:2px;">Прикрепите подложку-бланк (картинку) и ссылку на гугл-документ с графиком — для каждого подходящего задания будет создан отдельный заполненный бланк.</p>' +
         '<div class="s89-year-row">' +
           '<label for="s89YearInput">Год начала отсчёта:</label>' +
           '<input type="number" id="s89YearInput" class="s89-year-input" value="' + startYear + '">' +
@@ -195,7 +195,7 @@ window.initS89FillModule = function(deps){
                 (templateInfo ? escapeHtml(templateInfo.name) : "Файл не выбран") +
               '</span>' +
             '</div>' +
-            '<button type="button" class="task-import-attach-btn" id="s89TemplateAttachBtn" title="Выбрать подложку">' + PAPERCLIP_ICON_SVG + '</button>' +
+            '<button type="button" class="mdeditor-fab-btn" id="s89TemplateAttachBtn" title="Выбрать подложку">' + PAPERCLIP_ICON_SVG + '</button>' +
             '<input type="file" id="s89TemplateInput" style="display:none;">' +
           '</div>' +
           '<div class="workbooks-file-slot">' +
@@ -204,7 +204,7 @@ window.initS89FillModule = function(deps){
               '<input type="text" id="s89DocumentInput" class="workbooks-link-inline-input" ' +
                 'style="display:none;" placeholder="Ссылка на документ" value="' + escapeHtml(documentLink) + '">' +
             '</div>' +
-            '<button type="button" class="task-import-attach-btn" id="s89DocumentAttachBtn" title="Ссылка на документ">' + PAPERCLIP_ICON_SVG + '</button>' +
+            '<button type="button" class="mdeditor-fab-btn" id="s89DocumentAttachBtn" title="Ссылка на документ">' + PAPERCLIP_ICON_SVG + '</button>' +
           '</div>' +
         '</div>' +
         '<div class="workbooks-actions-row">' +

@@ -75,11 +75,11 @@ window.initImgResizeModule = function(deps){
 
     container.innerHTML =
       '<div class="settings-content-bottom imgresize-tab">' +
-        '<h3 class="workbooks-title">Изменение размера изображения</h3>' +
+        '<h3 class="common-tab-title">Изменение размера изображения</h3>' +
         '<p class="subtitle-extract-hint">Прикрепите изображение (.jpg или .png), задайте нужные ширину и высоту в пикселях и нажмите «Начать».</p>' +
         '<div class="subtitle-file-row">' +
           '<span id="imgResizeFileStatus" class="subtitle-file-status">Файл не загружен</span>' +
-          '<button type="button" class="task-import-attach-btn" id="imgResizeAttachBtn" title="Прикрепить файл">' + PAPERCLIP_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-fab-btn" id="imgResizeAttachBtn" title="Прикрепить файл">' + PAPERCLIP_ICON_SVG + '</button>' +
         '</div>' +
         '<input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" id="imgResizeFileInput" style="display:none;">' +
         '<div class="settings-row">' +

@@ -325,14 +325,16 @@
       return '<div class="mood-checkin-item" data-mood="' + c.key + '">' +
         '<span class="emoji">' + c.emoji + '</span><span class="label">' + c.label + '</span></div>';
     }).join("");
-    // Вопрос — обычный <p> без своего класса, специально: так он получает
-    // те же унаследованные шрифт/размер (body: Palatino Linotype/Georgia/
-    // Times New Roman, 16px), что и вопрос "Точно сбросить весь прогресс
-    // чтения и начать сначала?" на вкладке resetConfirm (см.
-    // renderSettingsTabResetConfirm) — там это тоже голый <p> внутри
-    // .settings-content-bottom без переопределений шрифта. Расстояние до
-    // кнопок под ним стягивается стилями .mood-tab-checkin в components.css
-    // (там же и уменьшенная сетка для этого узкого окна).
+    // Вопрос — обычный <p> без своего класса, но стилизуется через селектор
+    // .mood-tab-checkin p в components.css (ТЗ пользователя от 08.09: тот
+    // же шрифт/размер, что и у заголовка "Диаграмма настроения" выше,
+    // центрирование, отступ 8px до кнопок) — родительский класс
+    // .mood-tab-checkin делает это точечным, поэтому вопрос "Точно сбросить
+    // весь прогресс чтения и начать сначала?" на вкладке resetConfirm (см.
+    // renderSettingsTabResetConfirm), у которого нет этого класса на
+    // родителе, не затронут и остаётся на унаследованном шрифте body.
+    // Расстояние до кнопок под ним стягивается стилями .mood-tab-checkin в
+    // components.css (там же и уменьшенная сетка для этого узкого окна).
     return (
       '<div class="settings-content-bottom mood-tab-checkin">' +
       '<p>Что ты сейчас чувствуешь?</p>' +
@@ -386,7 +388,7 @@
       var title = "Диаграмма настроения " + formatMoodPeriodLabel(totalDays) +
         " - всего " + sessionsCount + " " + pluralRu(sessionsCount, MARK_FORMS) + " настроения";
       diagramHtml =
-        '<div class="mood-diagram-title">' + escapeHtml(title) + '</div>' +
+        '<div class="common-tab-title">' + escapeHtml(title) + '</div>' +
         '<div class="mood-diagram-wrap" id="moodDiagramWrap"></div>' +
         '<div class="mood-diagram-reset-row"><button class="mood-diagram-reset-btn" id="mMoodResetBtn2">Сбросить данные настроения</button></div>';
     }

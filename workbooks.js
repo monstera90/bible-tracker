@@ -282,7 +282,7 @@
               'style="display:none;" placeholder="Ссылка на документ" value="' + escapeHtml(link || "") + '">' +
             '<div id="workbooksLinkStatus' + idx + '" class="workbooks-link-status"></div>' +
           '</div>' +
-          '<button type="button" class="task-import-attach-btn" id="workbooksAttachBtn' + idx + '" title="Ссылка на документ">' + PAPERCLIP_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-fab-btn" id="workbooksAttachBtn' + idx + '" title="Ссылка на документ">' + PAPERCLIP_ICON_SVG + '</button>' +
         '</div>';
     }
 
@@ -304,13 +304,13 @@
 
       container.innerHTML =
         '<div class="workbooks-tab settings-content-bottom">' +
-          '<h3 class="workbooks-title">Извлечение информации из графиков</h3>' +
+          '<h3 class="common-tab-title">Извлечение информации из графиков</h3>' +
           '<div class="workbooks-files-grid">' + slotsHtml + '</div>' +
+          '<div id="workbooksRunSummary" class="workbooks-run-summary"></div>' +
           '<div class="workbooks-actions-row">' +
             '<button type="button" id="workbooksRunBtn" class="workbooks-run-btn">Начать</button>' +
             '<button type="button" id="workbooksDownloadBtn" class="workbooks-result-btn workbooks-download-btn" disabled>Скачать</button>' +
           '</div>' +
-          '<div id="workbooksRunSummary" class="workbooks-run-summary"></div>' +
         '</div>';
 
       for(var j = 0; j < LINKS_COUNT; j++){
