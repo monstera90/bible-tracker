@@ -2677,6 +2677,21 @@
   .mdeditor-list-grid .mdeditor-delete-btn{ right:30px; }
   .mdeditor-list-grid .mdeditor-delete-btn:last-child{ right:2px; }
 
+  /* ---------- список закладок (#mdBookmarksList, renderBookmarksScreen в
+     mdeditor.js) растёт СНИЗУ ВВЕРХ (settings-content-bottom прижимает
+     весь блок к нижнему краю окна) — обычная нижняя черта у каждой
+     строки (.mdeditor-row border-bottom, задаётся выше) в таком списке
+     смотрится наоборот: у самой нижней (последней) закладки, вплотную к
+     краю экрана, оставалась лишняя черта, которая ничего не отделяет (ТЗ
+     пользователя от 08.09). Переносим черту на верх строки, а верхнюю
+     (первую) закладку — единственную, над которой линия ничего бы не
+     отделяла от заголовка — оставляем вовсе без неё. ---------- */
+  #mdBookmarksList .mdeditor-row{
+    border-bottom:none;
+    border-top:1px solid var(--groove-shadow);
+  }
+  #mdBookmarksList .mdeditor-row:first-child{ border-top:none; }
+
   /* ---------- вкладка "Обзор" (extra3, my.js — renderReviewTabContent) —
      переключатель периода "1 нед./1 мес./3 мес." и список цифр под ним.
      Раньше своего стиля не было вовсе (голый браузерный шрифт). ТЗ

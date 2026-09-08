@@ -58,6 +58,16 @@ window.initMdEditorModule = function(deps){
   var getSyncedBookmarkNames = deps.getSyncedBookmarkNames || function(){ return []; };
   var setSyncedBookmark = deps.setSyncedBookmark || function(){};
   var recordNoteCreated = deps.recordNoteCreated || function(){};
+  // Единая точка входа для переключения вкладок настроек (см. switchSettingsTab
+  // в my.js) — нужна здесь, чтобы клик по заметке из "Закладок"/"Забытых"
+  // (вложенных экранов поверх set2s_2/set2s_4) переключал подсветку вкладки
+  // на "Мой блокнот" (set2s_1) точно так же, как это делает клик по [[ссылке]]
+  // из другой вкладки в my.js. Раньше эти экраны просто выставляли внутреннюю
+  // activeMdTab = "editor" напрямую — render() внутри модуля после этого
+  // рисовал открытую заметку правильно, но currentSettingsTab/DOM-подсветка
+  // боковых иконок в my.js про это ничего не знали и оставались на прежней
+  // вкладке (ТЗ пользователя от 08.09: "выделение не переключилось").
+  var switchSettingsTab = deps.switchSettingsTab || function(){};
   // ---------------------------------------------------------------------
   // ОБЛАЧНОЕ ХРАНЕНИЕ ЗАМЕТОК С ШИФРОВАНИЕМ (см. TASK_MDNOTES_CLOUD.md,
   // шаг 1 "Ядро", 05.09). Firebase-специфика (URL, /syncs/<id>) осознанно
@@ -2608,19 +2618,8 @@ window.initMdEditorModule = function(deps){
     } else {
       html += '<div class="mdeditor-list" id="mdBookmarksList"></div>';
     }
-    html += '<div class="mdeditor-fab-row">';
-    html += '<button type="button" class="mdeditor-fab-btn" id="mdBookmarksHomeBtn" title="Наверх списка">' + HOME_ICON_SVG + '</button>';
-    html += '</div>';
     html += '</div>';
     container.innerHTML = html;
-
-    var homeBtn = document.getElementById("mdBookmarksHomeBtn");
-    if(homeBtn){
-      homeBtn.addEventListener("click", function(){
-        var sc = document.getElementById("settingsTabContent");
-        if(sc) sc.scrollTop = 0;
-      });
-    }
 
     var listEl = document.getElementById("mdBookmarksList");
     if(listEl){
@@ -2631,6 +2630,16 @@ window.initMdEditorModule = function(deps){
           '<button type="button" class="mdeditor-bookmark-btn active visible" title="Убрать из закладок">' + BOOKMARK_ICON_SVG + '</button>';
         row.querySelector(".mdeditor-row-name").textContent = it.name;
         row.addEventListener("click", function(){
+          // switchSettingsTab("set2s_1") — тот же вызов, что и у клика по
+          // [[ссылке]] из другой вкладки в my.js: переключает и внутренний
+          // activeMdTab (через renderSettingsTabMdEditor), и DOM-подсветку
+          // боковой иконки "Мой блокнот"/currentSettingsTab в my.js. Просто
+          // activeMdTab = "editor" (как было раньше) чинило только отрисовку
+          // ВНУТРИ вкладки (см. render() и его проверку activeMdTab ===
+          // "bookmarks" РАНЬШЕ screen/openFile) — снаружи иконка "Закладки"
+          // оставалась подсвеченной (ТЗ пользователя от 08.09: "выделение не
+          // переключилось").
+          switchSettingsTab("set2s_1");
           openNoteById(it.id);
         });
         row.querySelector(".mdeditor-bookmark-btn").addEventListener("click", function(e){
@@ -2864,11 +2873,12 @@ window.initMdEditorModule = function(deps){
           '<button type="button" class="mdeditor-bookmark-btn' + (bookmarked ? " active visible" : "") + '" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>';
         row.querySelector(".mdeditor-row-name").textContent = it.name;
         row.addEventListener("click", function(){
-          // см. пояснение выше про activeMdTab — без этого render() после
-          // открытия заметки продолжил бы показывать список "Забытых",
-          // а не саму заметку (тот же приём нужен и в renderBookmarksScreen,
-          // но её не трогаем — не входит в эту задачу)
-          activeMdTab = "editor";
+          // switchSettingsTab("set2s_1") — тот же фикс, что и в
+          // renderBookmarksScreen выше (ТЗ пользователя от 08.09: подсветка
+          // боковой иконки в my.js не переключалась при открытии заметки из
+          // "Забытых"/"Закладок", т.к. менялась только внутренняя
+          // activeMdTab, а не currentSettingsTab/DOM-класс "active" в my.js).
+          switchSettingsTab("set2s_1");
           openNoteById(it.entry);
         });
         row.querySelector(".mdeditor-bookmark-btn").addEventListener("click", function(e){
