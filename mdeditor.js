@@ -514,6 +514,18 @@ window.initMdEditorModule = function(deps){
   // и стабилен в пределах дерева, в отличие от имени, которое не
   // проверяется на уникальность между папками).
   var revealedFolderDeleteRows = new Set();
+  // ---- слушатель прокрутки, скрывающий временно раскрытые кнопки
+  // (revealedBookmarkRows/revealedFolderDeleteRows выше) при прокрутке
+  // списка "Мои заметки" (ТЗ пользователя от 08.09, второй заход по шагу
+  // 1: держал палец, появились кнопки — начал скроллить — кнопки должны
+  // спрятаться). Хранится тем же приёмом, что и mdEditorScrollContainer/
+  // mdEditorScrollHandler ниже (у редактора заметки) — старый слушатель
+  // снимается перед тем, как повесить новый, иначе при каждом
+  // renderListScreen() на #settingsTabContent копился бы очередной
+  // дубликат (сам контейнер не пересоздаётся между рендерами вкладки,
+  // меняется только его innerHTML).
+  var mdListRevealScrollContainer = null;
+  var mdListRevealScrollHandler = null;
 
   // Оборачивает текущее выделение в CodeMirror маркерами форматирования
   // (см. кнопки "Ж"/"К"/"П"/"Ч" в renderEditorScreen выше и ТЗ
@@ -2175,7 +2187,7 @@ window.initMdEditorModule = function(deps){
     if(!items.length){
       html += '<div class="mdeditor-empty">' + (isRoot ? "Заметок пока нет." : "Здесь пока пусто.") + '</div>';
     } else {
-      html += '<div class="mdeditor-list" id="mdEditorList"></div>';
+      html += '<div class="mdeditor-list mdeditor-list-grid" id="mdEditorList"></div>';
     }
     // Строка статуса — сюда попадают результаты импорта/экспорта
     // (см. handleImportFile/downloadAllNotesZip выше): "Импортировано: N",
@@ -2384,6 +2396,24 @@ window.initMdEditorModule = function(deps){
       container.addEventListener("click", function(e){
         if(!e.target.closest(".mdeditor-row")) hideRevealedBookmarkRows();
       });
+
+      // Прокрутка списка тоже должна прятать раскрытые кнопки — иначе
+      // после долгого нажатия они остаются висеть поверх соседних строк
+      // и во время скролла (ТЗ пользователя от 08.09). Слушатель — на
+      // #settingsTabContent (реальный прокручиваемый элемент вкладки, не
+      // сам .mdeditor-list), тем же приёмом снятия старого перед новым,
+      // что и у mdEditorScrollContainer/mdEditorScrollHandler в редакторе
+      // заметки (см. ниже по файлу) — иначе при каждом renderListScreen()
+      // копился бы очередной дубликат слушателя на одном и том же узле.
+      var scrollHost = document.getElementById("settingsTabContent");
+      if(scrollHost){
+        if(mdListRevealScrollContainer && mdListRevealScrollHandler){
+          mdListRevealScrollContainer.removeEventListener("scroll", mdListRevealScrollHandler);
+        }
+        mdListRevealScrollHandler = function(){ hideRevealedBookmarkRows(); };
+        mdListRevealScrollContainer = scrollHost;
+        scrollHost.addEventListener("scroll", mdListRevealScrollHandler, { passive: true });
+      }
     }
   }
 
@@ -2556,8 +2586,23 @@ window.initMdEditorModule = function(deps){
       return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
     });
 
+    // ---- ТЗ пользователя от 08.09 (шаг 2): список закладок прижат к
+    // нижней части окна вкладки — при малом числе закладок под заголовком
+    // остаётся пустое место, а сам список растёт вверх от нижнего края по
+    // мере добавления новых закладок ("заполняется снизу"). Заголовок при
+    // этом должен оставаться на обычном месте сверху, поэтому в отличие
+    // от остального mdeditor.js (там на экран приходится один .mdeditor-
+    // tab) здесь их два, оба — прямые дети #settingsTabContent: первый —
+    // просто заголовок в обычном потоке, второй — сам список с классом
+    // settings-content-bottom (margin-top:auto у #settingsTabContent —
+    // flex-column, тот же приём, что и у renderSetupScreen выше и у
+    // отметки настроения в mood.js). Порядок внутри списка не меняется —
+    // как и раньше, по алфавиту; "снизу" — это про положение всего блока
+    // в окне, а не про порядок добавления закладок.
     var html = '<div class="mdeditor-tab">';
     html += '<h3 class="common-tab-title">Закладки</h3>';
+    html += '</div>';
+    html += '<div class="mdeditor-tab settings-content-bottom">';
     if(!items.length){
       html += '<div class="mdeditor-empty">Пока нет ни одной заметки в закладках.<br>Чтобы добавить: удержите заметку в общем списке или нажмите на значок закладки в открытой заметке.</div>';
     } else {
@@ -2801,7 +2846,7 @@ window.initMdEditorModule = function(deps){
         'Забытых заметок нет ни в одной из полос — похоже, все заметки открывались недавно.' :
         'За выбранный период забытых заметок нет.') + '</div>';
     } else {
-      html += '<div class="mdeditor-list" id="mdForgottenList"></div>';
+      html += '<div class="mdeditor-list mdeditor-list-grid" id="mdForgottenList"></div>';
     }
     html += coverageLine;
     html += '</div>';

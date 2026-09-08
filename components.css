@@ -115,7 +115,7 @@
   }
   .workbooks-file-slot{
     display:flex;
-    align-items:center;
+    align-items:flex-start;
     gap:8px;
     min-width:0;
   }
@@ -123,10 +123,20 @@
     min-width:0;
     flex:1;
   }
+  /* line-height:32px — та же высота, что у кнопки-скрепки (.mdeditor-fab-btn,
+     32x32), чтобы первая строка (имя файла) центрировалась в той же
+     высоте, что и скрепка, и совпадала с ней по вертикали; align-items
+     у .workbooks-file-slot выше переключён с center на flex-start — иначе
+     центр всего двухстрочного блока (имя + .workbooks-link-status с
+     постоянно зарезервированными 14px) не совпадал с центром кнопки, из-за
+     чего надпись выглядела смещённой относительно скрепки (правка от 08.09,
+     скрепка не трогалась). Строка статуса продолжает идти следующей
+     строкой, на выравнивание не влияет. */
   .workbooks-file-slot-body .task-import-file-name{
     display:block;
     font-family:"Palatino Linotype",Georgia,serif;
     font-size:var(--mdeditor-font-size, 15.5px);
+    line-height:32px;
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
@@ -583,6 +593,26 @@
      получает ТОЧНО тот же шрифт и размер, что и подпись "Сохранять
      пропорции" — просто потому что это один и тот же класс .settings-row,
      а не потому что где-то отдельно продублированы те же значения. */
+  /* Ряд "статус файла + скрепка" (subtitle-file-row в imgresize.js) — класс
+     использовался в разметке, но не был определён в CSS, поэтому скрепка
+     проваливалась под пилюлю статуса вместо ряда с ней (баг от 08.09).
+     Тот же приём выравнивания, что и у .settings-row ниже: подпись слева,
+     управляющий элемент справа за счёт justify-content:space-between —
+     скрепка оказывается ровно над правым краем полей "Ширина"/"Высота". */
+  .imgresize-tab .subtitle-file-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    /* без собственного отступа: промежуток до поля "Ширина" уже даёт
+       padding-top ПЕРВОЙ строки .settings-row (~12px, см. пояснение
+       ниже) — тот же рычаг, каким выровнены промежутки между самими
+       полями. Раньше здесь стояли ещё 10px margin-bottom СВЕРХУ этого
+       padding-top, отчего отступ до "Ширины" был заметно больше, чем
+       между "Шириной" и "Высотой" (ТЗ пользователя от 08.09, вкладка
+       "Разделение epub-файлов" — образец единого малого зазора). */
+    margin-bottom:0;
+  }
   .imgresize-dim-input{
     width:70px;
     flex-shrink:0;
@@ -656,6 +686,29 @@
   .imgresize-tab .subtitle-file-status{
     font-family:"Palatino Linotype",Georgia,serif;
     font-size:var(--mdeditor-font-size, 15.5px);
+  }
+  /* У образца (.subtitle-extract-hint, "Извлечение субтитров") нет
+     нижнего отступа (margin:4px 0 0 0) — там после подсказки сразу идёт
+     область результата, которая сама начинает свой блок. Здесь же следом
+     идёт пилюля статуса файла вплотную к тексту, без всякого зазора (ТЗ
+     пользователя от 08.09). Добавляем нижний отступ ИСКЛЮЧИТЕЛЬНО внутри
+     .imgresize-tab — 12px, тот же зазор, что и между полями формы ниже
+     (см. .settings-row + .settings-row), чтобы вся вкладка шла в одном
+     ритме, как во вкладке "Разделение epub-файлов". */
+  .imgresize-tab .subtitle-extract-hint{
+    margin-bottom:12px;
+  }
+  /* Отступ перед "Начать"/"Скачать" (.workbooks-actions-row, общий класс
+     для всех пяти малых вкладок) по умолчанию 16px margin-top — вместе с
+     padding-bottom последней строки .settings-row ("Сохранять пропорции",
+     ~12px) давал слишком большой суммарный зазор. Обнуляем margin-top
+     ИСКЛЮЧИТЕЛЬНО внутри .imgresize-tab — тогда, как и у промежутков
+     между полями выше, весь зазор задаёт только padding-bottom строки
+     сверху, тот же 12px-ритм по всей вкладке. Другие вкладки, использующие
+     .workbooks-actions-row (workbooks/s89fill/jwlmerge/epubsplit), не
+     затронуты. */
+  .imgresize-tab .workbooks-actions-row{
+    margin-top:0;
   }
 
   .mood-diagram-wrap{
@@ -1084,7 +1137,13 @@
     align-items:center;
     justify-content:space-between;
     gap:10px;
-    margin:0 0 10px 0;
+    /* верхний отступ 8px — тот же стандартный отступ, что даёт margin-top
+       у .common-tab-title в остальных вкладках (компенсирует отсутствие
+       верхнего padding у .settings-modal-box, см. .common-tab-title выше
+       по файлу); здесь margin-top у самого заголовка обнулён (см.
+       .year-grid-tab-header .common-tab-title ниже), поэтому отступ
+       перенесён на контейнер шапки (ТЗ пользователя от 08.09) */
+    margin:8px 0 10px 0;
   }
 
   /* Декоративный стиль — используется НЕ только в заголовке самой вкладки
@@ -1955,6 +2014,24 @@
     flex-direction:column;
     margin-top:4px;
   }
+  /* ---------- сетка из нескольких колонок для списка заметок/папок (ТЗ
+     пользователя от 08.09): на ширине телефона в строку помещается 2
+     заметки/папки, на вдвое более широком экране — 3, ещё шире — 4.
+     auto-fill сам считает, сколько колонок шириной minmax(...) поместится
+     в доступную ширину — точные пороги (2/3/4) поэтому не жёстко заданы
+     числом медиа-запросов, а получаются из ширины одной колонки; если на
+     практике деление на колонки будет выглядеть не так, как хотелось —
+     достаточно поменять 150px здесь. Компаунд-селектор (два класса)
+     — чтобы правило гарантированно перебивало display:flex у базового
+     .mdeditor-list выше независимо от порядка в файле. Используется
+     только в "Моих заметках" и "Забытых заметках" (см. mdeditor.js,
+     renderListScreen/renderForgottenNotesScreen) — "Закладки" сохраняют
+     список в один столбец, этот класс туда не добавлен. ---------- */
+  .mdeditor-list.mdeditor-list-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(150px, 1fr));
+    column-gap:4px;
+  }
   /* ---------- кнопки загрузки/скачивания заметок (TASK_MDNOTES_CLOUD.md,
      раздел 7) — часть обычного потока страницы под списком, НЕ floating и
      не закреплены: чтобы их увидеть, список нужно докрутить до конца, как
@@ -1975,11 +2052,14 @@
     text-align:center;
   }
   .mdeditor-row{
+    position:relative;
     display:flex;
     align-items:center;
-    gap:10px;
+    gap:6px;
     width:100%;
-    padding:10px 0;
+    min-width:0;
+    box-sizing:border-box;
+    padding:10px 4px 10px 0;
     border:none;
     border-bottom:1px solid var(--groove-shadow);
     background:transparent;
@@ -1989,8 +2069,20 @@
     text-align:left;
     cursor:pointer;
     -webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none;
+    user-select:none;
+    -webkit-touch-callout:none;
   }
-  .mdeditor-row:hover{ background:var(--parchment-dark); }
+  /* hover только на устройствах, где он в принципе есть (мышь) — на
+     тачскрине браузер эмулирует :hover после касания и не снимает его
+     сразу, из-за чего последняя нажатая строка списка оставалась
+     подсвеченной "навсегда" (до следующего тапа по ней же), пока рядом
+     тапали по другим строкам (ТЗ пользователя от 08.09). Остальные
+     :hover в этом файле (.mdeditor-bookmark-btn/-delete-btn и др.) уже
+     были в этой обёртке — этому правилу её просто не хватало. */
+  @media (hover:hover) and (pointer:fine){
+    .mdeditor-row:hover{ background:var(--parchment-dark); }
+  }
   .mdeditor-row svg{ width:19px; height:19px; flex-shrink:0; color:var(--wood); }
   .mdeditor-row-name{
     flex:1;
@@ -2564,6 +2656,26 @@
   @media (hover:hover) and (pointer:fine){
     .mdeditor-delete-btn:hover{ background:var(--parchment-dark); }
   }
+  /* ---------- строка внутри сетки колонок (.mdeditor-list-grid, см. выше) —
+     колонка узкая, тратить её ширину на постоянно зарезервированное место
+     под закладку/крестик (как в одноколоночном списке) нечем: снимаем обе
+     кнопки с потока и кладём поверх правого края строки. Кнопка закладки
+     справа вплотную к краю; крестик удаления — левее неё (виден только у
+     заметок, у папок это единственная кнопка в строке — :last-child, тогда
+     она садится туда же, к самому краю). Обе по умолчанию невидимы
+     (visibility:hidden наследуется от базовых правил выше), появляются
+     только по долгому нажатию/если заметка уже в закладках — тогда могут
+     лечь поверх уже обрезанного многоточием названия, это допустимо (ТЗ
+     пользователя от 08.09), кнопки не показываются постоянно. ---------- */
+  .mdeditor-list-grid .mdeditor-bookmark-btn,
+  .mdeditor-list-grid .mdeditor-delete-btn{
+    position:absolute;
+    top:50%;
+    transform:translateY(-50%);
+  }
+  .mdeditor-list-grid .mdeditor-bookmark-btn{ right:2px; }
+  .mdeditor-list-grid .mdeditor-delete-btn{ right:30px; }
+  .mdeditor-list-grid .mdeditor-delete-btn:last-child{ right:2px; }
 
   /* ---------- вкладка "Обзор" (extra3, my.js — renderReviewTabContent) —
      переключатель периода "1 нед./1 мес./3 мес." и список цифр под ним.

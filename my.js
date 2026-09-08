@@ -2469,7 +2469,21 @@
   // Workbooks/JwlMerge выше.
   var S89Fill = window.initS89FillModule({
     escapeHtml: escapeHtml,
-    PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG
+    PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG,
+    // ---------------------------------------------------------------------
+    // Подложка (шаблон-картинка) теперь хранится в облаке, тем же кодом
+    // синхронизации, что и остальные данные (ТЗ пользователя от 08.09) —
+    // по тому же приёму, что и облачные заметки у MdEditor выше: узкие
+    // функции, привязанные к текущему syncId, Firebase-специфика (URL,
+    // формат хранения) остаётся здесь. Свой путь в дереве — "s89Template"
+    // (не "notes"/"notesMeta") через ту же PATCH-запись putCloudBlob,
+    // которая умеет relative-пути со слэшами. Realtime Database — просто
+    // JSON-дерево без понятия "тип файла": картинка хранится строкой
+    // (base64 data:URL), как и текст заметок.
+    // ---------------------------------------------------------------------
+    getSyncId: function(){ return syncId; },
+    fetchCloudPath: fetchNotesCloudPath,
+    patchCloud: patchNotesCloud
   });
   var renderSettingsTabS89Fill = S89Fill.renderSettingsTabS89Fill;
 
