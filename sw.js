@@ -6,7 +6,7 @@
 // что sw.js изменился, скачать новую версию в фоне и подготовить её к
 // установке — без этого шага обновление не будет обнаружено автоматически.
 
-const APP_VERSION = "v0.32.2";
+const APP_VERSION = "v0.33.0";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Список файлов, которые нужны странице для полностью офлайн-работы.
@@ -36,6 +36,7 @@ const ASSETS = [
   "./s89fill.js",
   "./imgresize.js",
   "./mdeditor.js",
+  "./search.js",
   "./DejaVuSans.ttf",
   "./icon-192x192.png",
   "./icon-512x512.png"

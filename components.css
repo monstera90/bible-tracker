@@ -2774,3 +2774,100 @@
     border-color:var(--wood-dark);
   }
   #settingsTabContent .review-pill:active{ filter:brightness(.96); }
+
+  /* ===========================================================================
+     Вкладка "Поиск" (третья боковая вкладка второго набора,
+     settingsTabSet2Btn3, "set2s_3" — см. search.js, ТЗ пользователя от
+     08.09). Заголовок+поле ввода — обычный поток (первый .mdeditor-tab,
+     как везде), результаты — второй .mdeditor-tab.settings-content-bottom
+     (тот же приём margin-top:auto, что и у списка закладок/статистики
+     "Обзора" — прижимает блок к низу окна, пока результатов мало, и
+     просто уходит в обычный скролл #settingsTabContent, как только они
+     не помещаются). Кнопки внизу — переиспользуют готовый .mdeditor-fab-
+     row/.mdeditor-fab-btn (тот же отступ 8px, тот же размер 32x32, то же
+     "нажатое" состояние .pressed, что и у переключателей режима в другом
+     месте проекта) — ничего нового под сами кнопки заводить не пришлось.
+     =========================================================================== */
+  /* поле ввода — сразу под заголовком, тот же стиль, что и у поля
+     переименования заметки (.mdeditor-title-input), просто на всю ширину
+     вкладки, а не рядом с кнопками закладки/подтверждения */
+  .search-input-row{ margin-top:6px; }
+  .search-input{
+    width:100%;
+    box-sizing:border-box;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:14px;
+    color:var(--ink);
+    background:var(--parchment);
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    padding:7px 9px;
+  }
+  /* column-reverse: результат кладём в разметке в обычном порядке (лучший
+     — первым), но визуально он оказывается САМЫМ НИЖНИМ, ближе всего к
+     кнопкам поиска — остальные растут вверх от него, ровно как попросили
+     ("выдача формируется снизу вверх... самый первый результат прямо
+     рядом с кнопками"). padding-bottom (высота ряда кнопок + отступ) —
+     чтобы этот самый первый результат не оказывался частично под
+     кнопками (в отличие от текста заметки в .mdeditor-editor-host,
+     которому уехать под кнопки — нормально; здесь по нему как раз
+     удобнее всего нажимать, когда он внизу, поэтому под него
+     зарезервировано место, тем же приёмом, что и у .review-stats-list
+     выше по файлу под панель пилюль периода).
+     .settings-content-bottom (родитель, определён в modals.css) сама
+     занимается прижатием к низу окна, пока результатов мало. */
+  .search-results{
+    display:flex;
+    flex-direction:column-reverse;
+    padding-bottom:48px;
+  }
+  .search-empty{
+    text-align:center;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
+    color:var(--ink-soft);
+    padding:20px 0;
+  }
+  /* карточка заметки в результатах поиска */
+  .search-result-card{
+    font-family:"Palatino Linotype",Georgia,serif;
+    background:var(--parchment);
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    padding:8px 10px;
+    margin-top:8px;
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .search-result-card:active{ filter:brightness(.97); }
+  .search-result-title{
+    font-size:var(--mdeditor-font-size, 15.5px);
+    color:var(--wood);
+    font-weight:bold;
+    margin-bottom:4px;
+  }
+  .search-result-fragment{
+    font-size:13.5px;
+    line-height:1.4;
+    color:var(--ink);
+  }
+  .search-result-fragment + .search-result-fragment{ margin-top:4px; }
+  /* задачи в результатах поиска — обычные .task-row/.task-body (см.
+     modals.css), просто с отступом сверху между строками, как и везде в
+     списках задач */
+  .search-results .task-row{ margin-top:8px; }
+  .search-results .task-row:first-child{ margin-top:0; }
+  /* декоративная подсветка найденного слова — бледно-сиреневый
+     текстовыделитель (тот же оттенок, что и лиловый акцент приложения,
+     см. theme-color в index.html), используется и здесь (в превью-
+     фрагментах заметок и в тексте задач), и в самом редакторе заметок
+     (см. .search-highlight-mark в mdeditor.js: CodeMirror Decoration.mark
+     с тем же именем класса — оформление общее для обоих случаев). Чисто
+     декоративное: ничего не меняет в разметке/функциях задачи или
+     заметки. */
+  .search-highlight-mark{
+    background:rgba(143,127,184,.32);
+    border-radius:3px;
+    padding:0 1px;
+    color:inherit;
+  }

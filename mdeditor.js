@@ -2104,6 +2104,20 @@ window.initMdEditorModule = function(deps){
 
   // Открывает заметку по имени СНАРУЖИ модуля (клик по [[ссылке]] из
   // другой вкладки, см. handleLinkClick/initAutoFormatting в my.js).
+  // Плоский список всех незаметок для вкладки "Поиск" (search.js, ТЗ
+  // пользователя от 08.09) — id/имя/текст, без служебных полей. Пусто, пока
+  // notesMap ещё не готов (нет синхронизации/кэш не загружен) — search.js
+  // в этом случае просто ничего не найдёт, как и остальные вкладки этого
+  // модуля до готовности notesReady.
+  function getSearchableNotes(){
+    var out = [];
+    if(!notesReady) return out;
+    notesMap.forEach(function(rec){
+      if(rec && !rec.deleted && rec.name) out.push({ id: rec.id, name: rec.name, text: rec.text || "" });
+    });
+    return out;
+  }
+
   function openNoteExternally(name){
     suppressNextNavPush = true;
     if(!notesReady){
@@ -3185,12 +3199,26 @@ window.initMdEditorModule = function(deps){
   // ПРЕДЫДУЩЕЙ открытой заметки шлёт её в облако немедленно (раздел 4.1 ТЗ:
   // "при закрытии открытой заметки"), не дожидаясь debounce.
   // ---------------------------------------------------------------------
-  function openNoteById(id, restorePos, scrollPercent){
+  // searchHighlightWords/searchHighlightForNoteId (ТЗ пользователя от
+  // 08.09, вкладка "Поиск" в search.js) — необязательный 4-й параметр
+  // openNoteById: список слов (уже разбитых/приведённых к нижнему
+  // регистру запроса), найденных при поиске по заметкам. Запоминаются
+  // здесь и используются один раз при следующем mountEditor() ниже, чтобы
+  // декоративно подсветить бледно-сиреневым все их вхождения в открытом
+  // документе (без влияния на форматирование/функции, см. ТЗ) — само
+  // выделение живёт, пока эта конкретная заметка открыта, и не
+  // пересчитывается заново при обычном открытии той же заметки не из
+  // поиска (highlightWords тогда просто не передан/пуст).
+  var searchHighlightWords = [];
+  var searchHighlightForNoteId = null;
+  function openNoteById(id, restorePos, scrollPercent, highlightWords){
     var rec = notesMap.get(id);
     if(!rec || rec.deleted){
       setStatus("Заметка не найдена.", true);
       return;
     }
+    searchHighlightWords = (highlightWords && highlightWords.length) ? highlightWords : [];
+    searchHighlightForNoteId = searchHighlightWords.length ? id : null;
     var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
     var prevScrollTop = null;
     if(prevScreen === "list"){
@@ -4192,6 +4220,33 @@ window.initMdEditorModule = function(deps){
     });
   }
 
+  // ---------------------------------------------------------------------
+  // Поиск вхождений слов из searchHighlightWords в тексте документа —
+  // тот же алгоритм префиксного совпадения по границам слова, что и в
+  // search.js (ищем "заметка"/"заметки" по префиксу "заметк"): слово
+  // документа подходит, если оно НАЧИНАЕТСЯ с одного из искомых слов.
+  // Возвращает массив {from,to} по всем найденным словам, отсортированный
+  // по позиции — ровно то, что нужно RangeSetBuilder ниже (принимает
+  // диапазоны только по возрастанию, без пересечений).
+  // ---------------------------------------------------------------------
+  var SEARCH_WORD_TOKEN_RE = /[a-zA-Zа-яёА-ЯЁ0-9]+/g;
+  function findSearchHighlightRanges(text, words){
+    var ranges = [];
+    if(!text || !words || !words.length) return ranges;
+    SEARCH_WORD_TOKEN_RE.lastIndex = 0;
+    var m;
+    while((m = SEARCH_WORD_TOKEN_RE.exec(text))){
+      var lower = m[0].toLowerCase();
+      for(var i = 0; i < words.length; i++){
+        if(lower.indexOf(words[i]) === 0){
+          ranges.push({ from: m.index, to: m.index + m[0].length });
+          break;
+        }
+      }
+    }
+    return ranges;
+  }
+
   function mountEditor(){
     var hostAtCallTime = document.getElementById("mdEditorHost");
     if(!hostAtCallTime || !openFile) return;
@@ -4223,6 +4278,24 @@ window.initMdEditorModule = function(deps){
           }),
           EditorView.domEventHandlers({ mousedown: handleMouseDown })
         ];
+        // Декоративная подсветка слов, найденных через вкладку "Поиск" (см.
+        // openNoteById/searchHighlightWords выше) — отдельный, независимый
+        // от makeLivePreviewExtension слой decorations: считается ОДИН раз
+        // от текста документа на момент открытия (обычное чтение результата
+        // поиска, а не одновременное редактирование с подсветкой вживую), не
+        // влияет ни на сам текст, ни на остальные decorations. Полностью
+        // decoration-only (Decoration.mark, без replace/widget), поэтому
+        // безопасно накладывается поверх любого из markdown-декораций выше.
+        if(searchHighlightForNoteId === openFile.id && searchHighlightWords.length){
+          var Decoration = cm.view.Decoration;
+          var RangeSetBuilder = cm.state.RangeSetBuilder;
+          var hlBuilder = new RangeSetBuilder();
+          var hlMark = Decoration.mark({ class: "search-highlight-mark" });
+          findSearchHighlightRanges(openFile.text, searchHighlightWords).forEach(function(r){
+            hlBuilder.add(r.from, r.to, hlMark);
+          });
+          extensions.push(EditorView.decorations.of(hlBuilder.finish()));
+        }
         // Курсор по умолчанию (cursorPos не задан/равен 0) не должен
         // попадать НИЖЕ конца скрытой строки метаданных — иначе он
         // физически стоит в самом начале документа, то есть внутри этой
@@ -4352,6 +4425,12 @@ window.initMdEditorModule = function(deps){
     renderSettingsTabForgottenNotes: renderSettingsTabForgottenNotes,
     flushPendingMdEditorEdit: flushPendingMdEditorEdit,
     openNoteExternally: openNoteExternally,
+    // используются вкладкой "Поиск" (search.js, ТЗ пользователя от 08.09):
+    // openNoteById — открыть найденную заметку (4-й параметр — слова для
+    // декоративной подсветки, см. searchHighlightWords выше);
+    // getSearchableNotes — плоский список заметок для самого поиска.
+    openNoteById: openNoteById,
+    getSearchableNotes: getSearchableNotes,
     // вызывается извне (см. rerenderAllFromState в my.js) после того, как
     // облачная синхронизация приносит state, отличающийся от локального —
     // например, закладку добавили на другом устройстве.

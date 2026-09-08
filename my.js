@@ -1070,7 +1070,7 @@
   };
   // ===== ВТОРОЙ НАБОР ВКЛАДОК (заглушки) =====
   // Полный дубль первого набора: 9 боковых + 5 нижних язычков (см. разметку
-  // в index.html, .settingsTabsSet2 / .settingsTabsGearSet2). 10 из 14 —
+  // в index.html, .settingsTabsSet2 / .settingsTabsGearSet2). 7 из 14 —
   // всё ещё просто заглушки без функций (см. renderSettingsTabSet2Stub
   // ниже); ключи специально с префиксом "set2" — тем же, что и остальные
   // (TASK_TAB_IDS/EXTRA_TAB_IDS), участвуют в общем переключателе
@@ -1111,6 +1111,12 @@
   // кнопкой в шапке открытой заметки), см. renderSettingsTabMdBookmarks в
   // mdeditor.js и её отдельную ветку в switchSettingsTab ниже, по тому же
   // принципу вынесена ДО общей проверки на renderSettingsTabSet2Stub.
+  // set2s_3 (третья боковая) — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: это вкладка
+  // "Поиск" — два независимых режима, "Поиск по задачам" и "Поиск по
+  // заметкам" (переключаются кнопками внизу вкладки), см. search.js
+  // (renderSettingsTabSearch) и её отдельную ветку в switchSettingsTab
+  // ниже, по тому же принципу вынесена ДО общей проверки на
+  // renderSettingsTabSet2Stub (ТЗ пользователя от 08.09).
   var SET2_TAB_IDS = {
     set2s_1: "settingsTabSet2Btn1", set2s_2: "settingsTabSet2Btn2", set2s_3: "settingsTabSet2Btn3",
     set2s_4: "settingsTabSet2Btn4", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
@@ -2581,6 +2587,37 @@
   // set2s_4 — ТЗ пользователя от 04.09), см. switchSettingsTab ниже
   var renderSettingsTabForgottenNotes = MdEditor.renderSettingsTabForgottenNotes;
   var flushPendingMdEditorEdit = MdEditor.flushPendingMdEditorEdit;
+
+  // ===================== ПОИСК =====================
+  // Логика вкладки "Поиск" (третья боковая вкладка второго набора,
+  // settingsTabSet2Btn3 / "set2s_3") вынесена в отдельный файл search.js
+  // (см. index.html и sw.js) — по тому же образцу, что и MdEditor выше.
+  // ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА (ТЗ пользователя от 08.09) — два независимых
+  // режима: "Поиск по задачам" и "Поиск по заметкам" (переключаются
+  // кнопками внизу вкладки, см. search.js). Иконки-пиктограммы приходят
+  // геттерами, а не готовыми строками — PENCIL_ICON_SVG объявляется в
+  // этом файле НИЖЕ по тексту (var, не function — не поднимается), геттер
+  // читает её уже готовой на момент реального клика, а не в момент
+  // создания модуля здесь.
+  var Search = window.initSearchModule({
+    escapeHtml: escapeHtml,
+    switchSettingsTab: switchSettingsTab,
+    openNoteById: MdEditor.openNoteById,
+    getSearchableNotes: MdEditor.getSearchableNotes,
+    // архив (выполненные задачи) в поиске не участвует — по ТЗ
+    getSearchableTasks: function(){
+      return getAllTasks().filter(function(t){ return t.c.checked !== true; });
+    },
+    renderTaskRowEdit: renderTaskRowEdit,
+    bindTaskRowActions: bindTaskRowActions,
+    fitTaskActions: fitTaskActions,
+    getPencilIcon: function(){ return PENCIL_ICON_SVG; },
+    getCheckIcon: function(){ return CHECK_ICON_SVG; },
+    getMoveIcon: function(){ return ARROW_MOVE_ICON_SVG; },
+    getNextIcon: function(){ return LINK_NEXT_ICON_SVG; }
+  });
+  var renderSettingsTabSearch = Search.renderSettingsTabSearch;
+
   initTaskGlobalToolbar();
 
   // ---------------------------------------------------------------------
@@ -4069,6 +4106,12 @@
     // вынесена ДО общей проверки на renderSettingsTabSet2Stub по тому же
     // принципу, что и остальные уже не-заглушки этого набора выше.
     else if(tab === "set2s_2") renderSettingsTabMdBookmarks();
+    // третья боковая вкладка второго набора (set2s_3) — ЭТО БОЛЬШЕ НЕ
+    // ЗАГЛУШКА: вкладка "Поиск" (поиск по задачам/поиск по заметкам, см.
+    // search.js, ТЗ пользователя от 08.09) — тем же способом вынесена ДО
+    // общей проверки на renderSettingsTabSet2Stub, что и остальные уже
+    // не-заглушки этого набора выше.
+    else if(tab === "set2s_3") renderSettingsTabSearch();
     // 4-я вкладка вертикального стека второго набора (set2s_4) — ЭТО
     // БОЛЬШЕ НЕ ЗАГЛУШКА: "Забытые заметки" — список заметок, давно не
     // редактировавшихся (см. renderSettingsTabForgottenNotes в
@@ -7949,7 +7992,14 @@
   }
   window.addEventListener("resize", refitAllVisibleTaskBodies);
 
-  function renderTaskRowView(id, tabKey){
+  // onAfterAction (необязательный, 3-й параметр) — используется вкладкой
+  // "Поиск" (search.js, ТЗ пользователя от 08.09): вызовы archive/move из
+  // результатов поиска не должны перерисовывать реальную вкладку-хранилище
+  // задачи (это стёрло бы список результатов) — вместо этого search.js
+  // передаёт свой колбэк, который просто убирает строку из выдачи. Везде,
+  // где onAfterAction не передан (обычные вкладки задач), поведение не
+  // меняется — используется renderTaskTabList, как раньше.
+  function renderTaskRowView(id, tabKey, onAfterAction){
     var body = document.querySelector('.task-body[data-id="' + id + '"]');
     var task = getTaskById(id);
     if(!body || !task) return;
@@ -7967,8 +8017,8 @@
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + task.id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
       '</span>';
-    body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderTaskRowEdit(id, tabKey); });
-    bindTaskRowActions(body, id, tabKey);
+    body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderTaskRowEdit(id, tabKey, onAfterAction); });
+    bindTaskRowActions(body, id, tabKey, onAfterAction);
     fitTaskActions(body);
   }
 
@@ -7978,7 +8028,7 @@
   // сам (через flushPendingTaskEdits внутри каждого обработчика), поэтому
   // эти кнопки должны работать одинаково в обоих режимах и не пропадать,
   // пока идёт редактирование
-  function bindTaskRowActions(body, id, tabKey){
+  function bindTaskRowActions(body, id, tabKey, onAfterAction){
     var task = getTaskById(id);
     if(!task) return;
     // галочка "в архив" — делает ровно то же, что раньше делала отметка
@@ -7988,11 +8038,12 @@
       doneBtn.addEventListener("click", function(){
         flushPendingTaskEdits();
         checkTaskDone(id); // одна и та же задача — закрывается везде разом
-        renderTaskTabList(tabKey || task.c.tab);
+        if(onAfterAction) onAfterAction();
+        else renderTaskTabList(tabKey || task.c.tab);
       });
     }
     var moveBtn = body.querySelector(".task-move-btn");
-    if(moveBtn) moveBtn.addEventListener("click", function(){ openTaskMovePicker(id, tabKey); });
+    if(moveBtn) moveBtn.addEventListener("click", function(){ openTaskMovePicker(id, tabKey, onAfterAction); });
     var nextBtn = body.querySelector(".task-next-btn");
     if(nextBtn) nextBtn.addEventListener("click", function(){ openTaskNextPicker(id, tabKey); });
     var dot = body.querySelector(".task-flag-dot");
@@ -8013,7 +8064,7 @@
         // именно потому, что обновляет только свою строку.
         var effectiveTab = tabKey || task.c.tab;
         if(effectiveTab === "red") renderTaskTabList(effectiveTab, id);
-        else renderTaskRowView(id, tabKey);
+        else renderTaskRowView(id, tabKey, onAfterAction);
       });
     }
   }
@@ -8025,7 +8076,7 @@
   // (архивировать/перенести/приоритет и т.д.), в отличие от прежнего
   // варианта, во время редактирования не пропадают — только карандашик,
   // ему тут не место, пока и так идёт редактирование.
-  function renderTaskRowEdit(id, tabKey){
+  function renderTaskRowEdit(id, tabKey, onAfterAction){
     var body = document.querySelector('.task-body[data-id="' + id + '"]');
     var task = getTaskById(id);
     if(!body || !task) return;
@@ -8095,17 +8146,17 @@
       setTaskText(id, newText.trim());
       editable.contentEditable = "false";
       setTimeout(function(){
-        if(document.body.contains(body)) renderTaskRowView(id, tabKey);
+        if(document.body.contains(body)) renderTaskRowView(id, tabKey, onAfterAction);
         restoreScroll();
       }, 500);
     });
 
-    bindTaskRowActions(body, id, tabKey);
+    bindTaskRowActions(body, id, tabKey, onAfterAction);
   }
 
   // сетка выбора вкладки-назначения — как у выбора цвета цели
   // (openGoalColorPicker), только квадратики с иконками вкладок
-  function openTaskMovePicker(id, tabKey){
+  function openTaskMovePicker(id, tabKey, onAfterAction){
     var task = getTaskById(id);
     if(!task) return;
     var buttons = TASK_MOVE_TARGET_TABS.map(function(key){
@@ -8123,10 +8174,8 @@
         var newTab = btn.getAttribute("data-tab");
         moveTaskToTab(id, newTab);
         closeModal();
-        // возвращаемся туда, где реально была открыта карточка (может
-        // быть вкладка-витрина Red, а не настоящая домашняя вкладка
-        // задачи — см. пояснение у getTasksForTab)
-        renderTaskTabList(tabKey || task.c.tab);
+        if(onAfterAction) onAfterAction();
+        else renderTaskTabList(tabKey || task.c.tab);
       });
     });
   }
