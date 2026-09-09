@@ -11,31 +11,31 @@
     {
       title:"Еврейско-арамейские Писания",
       books:[
-        ["Бытие",50],["Исход",40],["Левит",27],["Числа",36],["Второзаконие",34],
-        ["Иисус Навин",24],["Судей",21],["Руфь",4],["1 Самуила",31],["2 Самуила",24],
-        ["1 Царей",22],["2 Царей",25],["1 Летопись",29],["2 Летопись",36],["Ездра",10],
-        ["Неемия",13],["Эсфирь",10],["Иов",42],["Псалмы",150],["Притчи",31],
-        ["Экклезиаст",12],["Песня Соломона",8],["Исаия",66],["Иеремия",52],["Плач Иеремии",5],
-        ["Иезекииль",48],["Даниил",12],["Осия",14],["Иоиль",3],["Амос",9],
-        ["Авдий",1],["Иона",4],["Михей",7],["Наум",3],["Аввакум",3],
-        ["Софония",3],["Аггей",2],["Захария",14],["Малахия",4]
+        ["Бытие","Бт",50],["Исход","Исх",40],["Левит","Лв",27],["Числа","Чс",36],["Второзаконие","Вт",34],
+        ["Иисус Навин","ИсН",24],["Судей","Сд",21],["Руфь","Рф",4],["1 Самуила","1См",31],["2 Самуила","2См",24],
+        ["1 Царей","1Цр",22],["2 Царей","2Цр",25],["1 Летопись","1Лт",29],["2 Летопись","2Лт",36],["Ездра","Езд",10],
+        ["Неемия","Не",13],["Эсфирь","Эсф",10],["Иов","Иов",42],["Псалмы","Пс",150],["Притчи","Пр",31],
+        ["Экклезиаст","Эк",12],["Песня Соломона","Псн",8],["Исаия","Иса",66],["Иеремия","Иер",52],["Плач Иеремии","Пл",5],
+        ["Иезекииль","Иез",48],["Даниил","Дан",12],["Осия","Ос",14],["Иоиль","Ил",3],["Амос","Ам",9],
+        ["Авдий","Авд",1],["Иона","Ион",4],["Михей","Мх",7],["Наум","На",3],["Аввакум","Авв",3],
+        ["Софония","Сф",3],["Аггей","Аг",2],["Захария","Зх",14],["Малахия","Мл",4]
       ]
     },
     {
       title:"Христианские Греческие Писания",
       books:[
-        ["Матфея",28],["Марка",16],["Луки",24],["Иоанна",21],["Деяния",28],
-        ["Римлянам",16],["1 Коринфянам",16],["2 Коринфянам",13],["Галатам",6],["Эфесянам",6],
-        ["Филиппийцам",4],["Колоссянам",4],["1 Фессалоникийцам",5],["2 Фессалоникийцам",3],["1 Тимофею",6],
-        ["2 Тимофею",4],["Титу",3],["Филимону",1],["Евреям",13],["Иакова",5],
-        ["1 Петра",5],["2 Петра",3],["1 Иоанна",5],["2 Иоанна",1],["3 Иоанна",1],
-        ["Иуды",1],["Откровение",22]
+        ["Матфея","Мф",28],["Марка","Мк",16],["Луки","Лк",24],["Иоанна","Ин",21],["Деяния","Де",28],
+        ["Римлянам","Рм",16],["1 Коринфянам","1Кр",16],["2 Коринфянам","2Кр",13],["Галатам","Гл",6],["Эфесянам","Эф",6],
+        ["Филиппийцам","Фп",4],["Колоссянам","Кл",4],["1 Фессалоникийцам","1Фс",5],["2 Фессалоникийцам","2Фс",3],["1 Тимофею","1Тм",6],
+        ["2 Тимофею","2Тм",4],["Титу","Тит",3],["Филимону","Фм",1],["Евреям","Евр",13],["Иакова","Иак",5],
+        ["1 Петра","1Пт",5],["2 Петра","2Пт",3],["1 Иоанна","1Ин",5],["2 Иоанна","2Ин",1],["3 Иоанна","3Ин",1],
+        ["Иуды","Иуды",1],["Откровение","Отк",22]
       ]
     }
   ];
 
   var TOTAL_CHAPTERS = 0;
-  sections.forEach(function(s){ s.books.forEach(function(b){ TOTAL_CHAPTERS += b[1]; }); });
+  sections.forEach(function(s){ s.books.forEach(function(b){ TOTAL_CHAPTERS += b[2]; }); });
 
   // ===================== ССЫЛКА НА ГЛАВУ (JW Finder) =====================
   // Порядок книг в sections совпадает с канонической нумерацией 1-66
@@ -1518,12 +1518,130 @@
 
   // ===================== ПОСТРОЕНИЕ СТРАНИЦЫ (DocumentFragment) =====================
   var booksContainer = document.getElementById("booksContainer");
+  var mainEl = document.querySelector("main");
   var overallFill = document.getElementById("overallFill");
   var overallText = document.getElementById("overallText");
   var bookMeta = {};
   var chapterInputs = {};
 
+  // ===================== КОЛИЧЕСТВО КОЛОНОК ДЛЯ КНИГ =====================
+  // Настройка "Количество колонок для книг" (вкладка настроек, шестерёнка,
+  // три чекбокса 1/2/3, всегда ровно один активен) — как и
+  // HIDE_STATUS_BAR_KEY, это локальный флаг конкретного устройства/браузера
+  // (не синхронизируется в облако и не попадает в экспорт): число колонок
+  // зависит от физической ширины экрана этого устройства, а не от данных
+  // пользователя. Значение применяется как есть, независимо от текущей
+  // ширины экрана — а уже CSS (components.css, точка перелома
+  // BOOK_COLUMNS_WIDE_MQ) решает, как именно его показать: на широких
+  // экранах 2-3 колонки — это обычные полноразмерные карточки книг через
+  // CSS multi-column (раскрытие одной книги не тянет соседей по высоте,
+  // как было бы в CSS Grid, — следующие книги просто перетекают в соседний
+  // столбец, см. .book-card{break-inside:avoid}). На узких экранах
+  // (смартфон) те же 2-3 колонки переключают список в компактную сетку
+  // маленьких плиток с сокращёнными названиями (.book-abbr) — полноразмерная
+  // карточка туда физически не влезает; разворачивание плитки (класс
+  // .book-open на .book-card, см. обработчик клика по .book-header ниже)
+  // показывает книгу как обычно, во всю ширину.
+  var BOOK_COLUMNS_KEY = "bibleBookColumns_v1";
+  var BOOK_COLUMNS_WIDE_MQ = "(min-width:860px)";
+  function getBookColumnsDefault(){
+    var mq = window.matchMedia ? window.matchMedia(BOOK_COLUMNS_WIDE_MQ) : null;
+    return (mq && mq.matches) ? 2 : 1;
+  }
+  function getBookColumns(){
+    var v = null;
+    try{ v = localStorage.getItem(BOOK_COLUMNS_KEY); }catch(e){}
+    if(v === "1" || v === "2" || v === "3") return parseInt(v, 10);
+    return getBookColumnsDefault();
+  }
+  function setBookColumns(n){
+    try{ localStorage.setItem(BOOK_COLUMNS_KEY, String(n)); }catch(e){}
+    applyBookColumns();
+  }
+  function applyBookColumns(){
+    var n = String(getBookColumns());
+    if(mainEl) mainEl.setAttribute("data-book-columns", n);
+    requestAnimationFrame(refreshAllBookNameFits);
+  }
+
+  // ===================== АВТОСОКРАЩЕНИЕ НАЗВАНИЙ КНИГ =====================
+  // В компактных плитках (2-3 колонки на узком экране, книга свёрнута)
+  // название книги должно показываться полностью, если оно влезает
+  // («Бытие», «Исход», «Левит», «Числа» и т.п.), и сокращаться, только
+  // если реально не помещается. Сокращение — по словам, как в обычном
+  // русском библиографическом сокращении: слово, которое пришлось урезать,
+  // получает точку («Песня Соломона» → «Песн. Сол.», «1 Фессалоникийцам» →
+  // «1 Фессалон.» — короткие токены вроде "1"/"2" не трогаем, им и так
+  // некуда сокращаться). Не влезающие целиком слова ужимаются по одному
+  // символу за раз, каждый раз то, которое сейчас самое длинное, — это
+  // даёт сбалансированный результат, а не "съедает" целиком только
+  // последнее слово. Ширина мерится через canvas тем же шрифтом, что и
+  // .book-name; окончательная обрезка каждого укороченного слова
+  // дополнительно "откусывает" гласные с конца, чтобы обрезка
+  // заканчивалась на согласной, а не выглядела как случайный обрубок.
+  // Полное название хранится в data-full и не перезаписывается —
+  // обрезается только видимый textContent.
+  var VOWELS_RU = "аеёиоуыэюяАЕЁИОУЫЭЮЯ";
+  function isVowelChar(ch){ return VOWELS_RU.indexOf(ch) !== -1; }
+
+  var bookNameMeasureCtx = null;
+  function measureTextWidth(text, font){
+    if(!bookNameMeasureCtx){
+      bookNameMeasureCtx = document.createElement("canvas").getContext("2d");
+    }
+    bookNameMeasureCtx.font = font;
+    return bookNameMeasureCtx.measureText(text).width;
+  }
+
+  var BOOK_NAME_MIN_WORD_LEN = 1;
+  function fitBookNameWords(full, avail, font){
+    var words = full.split(" ");
+    function render(lens){
+      return words.map(function(w, i){
+        return lens[i] >= w.length ? w : (w.slice(0, Math.max(lens[i], 1)) + ".");
+      }).join(" ");
+    }
+    var lens = words.map(function(w){ return w.length; });
+    var guard = 0;
+    while(measureTextWidth(render(lens), font) > avail && guard < 500){
+      guard++;
+      var idx = -1, longest = BOOK_NAME_MIN_WORD_LEN;
+      for(var i = 0; i < lens.length; i++){
+        if(lens[i] > BOOK_NAME_MIN_WORD_LEN && lens[i] > longest){ longest = lens[i]; idx = i; }
+      }
+      if(idx === -1) break; // все слова уже на минимуме — дальше сжимать некуда
+      lens[idx]--;
+    }
+    return words.map(function(w, i){
+      if(lens[i] >= w.length) return w; // не сокращалось
+      var t = w.slice(0, lens[i]);
+      while(t.length > 1 && isVowelChar(t.charAt(t.length - 1))) t = t.slice(0, -1);
+      return t + ".";
+    }).join(" ");
+  }
+
+  function fitBookNameText(el){
+    var full = el.dataset.full;
+    if(full == null) return;
+    var avail = el.clientWidth;
+    if(!avail){ el.textContent = full; return; }
+    var cs = getComputedStyle(el);
+    var font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + "/" + cs.lineHeight + " " + cs.fontFamily;
+    if(measureTextWidth(full, font) <= avail){
+      el.textContent = full;
+      return;
+    }
+    el.textContent = fitBookNameWords(full, avail, font);
+  }
+
+  function refreshAllBookNameFits(){
+    if(!booksContainer) return;
+    var nameEls = booksContainer.querySelectorAll(".book-name");
+    Array.prototype.forEach.call(nameEls, function(el){ fitBookNameText(el); });
+  }
+
   function initPage(){
+    applyBookColumns();
     var frag = document.createDocumentFragment();
     var bookNumber = 0; // сквозная нумерация книг 1..66 для ссылок JW Finder
     sections.forEach(function(section){
@@ -1533,7 +1651,7 @@
       frag.appendChild(label);
 
       section.books.forEach(function(book){
-        var bookName = book[0], chapterCount = book[1];
+        var bookName = book[0], bookAbbr = book[1], chapterCount = book[2];
         bookNumber++;
         var thisBookNumber = bookNumber; // фиксируем для замыканий ниже
         checkedPerBook[bookName] = 0;
@@ -1553,6 +1671,16 @@
         var nameEl = document.createElement("div");
         nameEl.className = "book-name";
         nameEl.textContent = bookName;
+        nameEl.dataset.full = bookName;
+
+        // Сокращённое название — видно только в компактном режиме списка
+        // книг на узких экранах (см. "Количество колонок для книг" в
+        // настройках, .books-compact в components.css); в обычном режиме
+        // всегда скрыт через display:none, полноразмерная карточка его не
+        // использует вовсе.
+        var abbrEl = document.createElement("div");
+        abbrEl.className = "book-abbr";
+        abbrEl.textContent = bookAbbr;
 
         var countEl = document.createElement("div");
         countEl.className = "book-count";
@@ -1562,6 +1690,7 @@
         toggleEl.innerHTML = "<span>&gt;</span>";
 
         headerContent.appendChild(nameEl);
+        headerContent.appendChild(abbrEl);
         headerContent.appendChild(countEl);
         headerContent.appendChild(toggleEl);
         headerEl.appendChild(fillEl);
@@ -1701,6 +1830,8 @@
         headerEl.addEventListener("click", function(){
           var isOpen = chaptersContainer.classList.toggle("open");
           headerEl.classList.toggle("expanded", isOpen);
+          card.classList.toggle("book-open", isOpen);
+          requestAnimationFrame(function(){ fitBookNameText(nameEl); });
           if(isOpen){
             // Высота берётся из заранее посчитанного кэша (см. кэширование
             // после монтирования всех карточек ниже), а не измеряется через
@@ -1730,6 +1861,7 @@
     // подключен к документу). Дальше эта высота переиспользуется при каждом
     // клике на книгу вместо повторного дорогого измерения.
     cacheAllChapterGridHeights();
+    requestAnimationFrame(refreshAllBookNameFits);
 
     addHideProgressButton();
   }
@@ -1752,6 +1884,7 @@
     clearTimeout(chapterGridResizeTimer);
     chapterGridResizeTimer = setTimeout(function(){
       cacheAllChapterGridHeights();
+      refreshAllBookNameFits();
       Object.keys(bookMeta).forEach(function(bookName){
         var meta = bookMeta[bookName];
         if(!meta || !meta.card) return;
@@ -1788,6 +1921,7 @@
     nameEl.className = "book-name";
     nameEl.id = "hideProgressToggleText";
     nameEl.textContent = hideCompletedActive ? "Показать прочитанное" : "Скрыть прочитанное";
+    nameEl.dataset.full = nameEl.textContent;
     var countEl = document.createElement("div");
     countEl.className = "book-count";
     countEl.id = "hideProgressCountBadge";
@@ -1831,7 +1965,11 @@
     saveLocalState();
     scheduleCloudPush();
     var textEl = document.getElementById("hideProgressToggleText");
-    if(textEl) textEl.textContent = hideCompletedActive ? "Показать прочитанное" : "Скрыть прочитанное";
+    if(textEl){
+      textEl.textContent = hideCompletedActive ? "Показать прочитанное" : "Скрыть прочитанное";
+      textEl.dataset.full = textEl.textContent;
+      fitBookNameText(textEl);
+    }
     applyHideCompletedBooks();
   }
 
@@ -1942,7 +2080,7 @@
     var now = Date.now();
     sections.forEach(function(section){
       section.books.forEach(function(book){
-        var bookName = book[0], chapterCount = book[1];
+        var bookName = book[0], chapterCount = book[2];
         checkedPerBook[bookName] = 0;
         for(var c=1;c<=chapterCount;c++){
           state[chapterKey(bookName,c)] = {c:false, t:now};
@@ -1981,6 +2119,33 @@
   // Не имеет отношения к пользовательским данным.
   var LAST_ACTIVE_STATE_KEY = "__syncLastActive";
   var SYNC_EXPIRY_MS = 365 * 24 * 60 * 60 * 1000; // 365 дней
+
+  // ЗАПОЛНИТЬ: имя бакета Firebase Storage ТОГО ЖЕ проекта, что и
+  // FIREBASE_DB_URL выше (Firebase Console → Storage → показывается
+  // над списком файлов, вида gs://<бакет> — сюда без "gs://"; обычно
+  // <project-id>.appspot.com или <project-id>.firebasestorage.app).
+  // Storage нужно включить в консоли (если ещё не включён) и выставить
+  // такие же открытые правила, как у Realtime Database (read, write: if
+  // true) — иначе запросы ниже (READER_PLAN.md, шаг 3) будут падать с 403.
+  var FIREBASE_STORAGE_BUCKET = "ЗАПОЛНИ-МЕНЯ.appspot.com";
+  var FIREBASE_STORAGE_URL = "https://firebasestorage.googleapis.com/v0/b/" + FIREBASE_STORAGE_BUCKET + "/o/";
+
+  // Случайный ID этого браузера/устройства, живёт в localStorage
+  // (переустановка PWA/очистка данных сайта создаст новый — это ожидаемо,
+  // "устройство" здесь означает "эта копия данных приложения", а не
+  // физическое железо). Нужен реестру файлов (READER_PLAN.md, шаг 3),
+  // чтобы отличать, кто добавил файл и кто уже подтвердил получение.
+  var DEVICE_ID_KEY = "bibleDeviceId_v1";
+  var deviceId = null;
+  function getDeviceId(){
+    if(deviceId) return deviceId;
+    deviceId = localStorage.getItem(DEVICE_ID_KEY);
+    if(!deviceId){
+      deviceId = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      localStorage.setItem(DEVICE_ID_KEY, deviceId);
+    }
+    return deviceId;
+  }
 
   function fetchWithTimeout(url, options, timeoutMs){
     var ctrl = new AbortController();
@@ -2263,6 +2428,8 @@
       clearTimeout(syncRetryTimer);
       setSyncState("synced");
       retryUnresolvedYoutubeLinks(); // повтор упавших ранее запросов заголовков YouTube (см. выше)
+      touchDeviceRegistry(); // отмечаемся живым устройством для реестра файлов (READER_PLAN.md, шаг 3)
+      syncFilesRegistry(); // фоновая сверка реестра книг с другими устройствами (см. ниже)
       // Успешно синхронизировались — если за время этого цикла набежало
       // ещё одно изменение (см. pendingPushAfterSync у scheduleCloudPush),
       // сразу запускаем новый цикл, а не ждём следующего изменения задачи.
@@ -2602,7 +2769,7 @@
   var Search = window.initSearchModule({
     escapeHtml: escapeHtml,
     switchSettingsTab: switchSettingsTab,
-    openNoteById: MdEditor.openNoteById,
+    openNoteByIdExternally: MdEditor.openNoteByIdExternally,
     getSearchableNotes: MdEditor.getSearchableNotes,
     // архив (выполненные задачи) в поиске не участвует — по ТЗ
     getSearchableTasks: function(){
@@ -4121,6 +4288,12 @@
     else if(tab === "set2s_4") renderSettingsTabForgottenNotes();
     else if(tab === "set2s_5") renderSettingsTabEpubSplit();
     else if(tab === "set2s_6") renderSettingsTabImgResize();
+    // седьмая боковая вкладка второго набора (set2s_7) — будущий список
+    // fb2-книг (Этап D, шаг 7 READER_PLAN.md) ещё не реализован, но, в
+    // отличие от остальных заглушек ниже, эта уже не совсем пустая: кнопка
+    // загрузки книг и хранилище books/ (OPFS) подготовлены заранее (шаг 2)
+    // — см. renderSettingsTabBooksStub ниже.
+    else if(tab === "set2s_7") renderSettingsTabBooksStub();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
 
@@ -4154,11 +4327,418 @@
   // ===== ВТОРОЙ НАБОР ВКЛАДОК (заглушки) =====
   // Все 14 вкладок второго набора (9 боковых + 5 нижних, см. SET2_TAB_IDS/
   // SET2_EXTRA_TAB_IDS выше) пока показывают один и тот же текст — функции
-  // под них появятся позже.
+  // под них появятся позже. Исключение — set2s_7, см. renderSettingsTabBooksStub
+  // ниже (READER_PLAN.md, шаг 2).
   function renderSettingsTabSet2Stub(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     container.innerHTML = '<div class="mood-diagram-empty">Вкладка пока не запрограммирована.<br>Контент появится позже.</div>';
+  }
+
+  // ===========================================================================
+  // Хранилище книг books/ (OPFS) — READER_PLAN.md, Этап A, шаг 2 (09.09).
+  // Сам список fb2-книг (вкладка set2s_7) появится только в Этапе D, шаге 7 —
+  // но модель хранения и кнопка загрузки готовятся уже здесь, тем же приёмом
+  // без диалога/прав, что и images/ в mdeditor.js (см. getImagesDirHandle
+  // там, тот же комментарий про отсутствие queryPermission/requestPermission
+  // у OPFS применим и тут). Из mdeditor.js это НЕ переиспользуется напрямую —
+  // модуль mdeditor.js целиком про заметки/картинки и не знает про книги;
+  // когда появится полноценный books.js (шаг 7), эти функции стоит перенести
+  // туда без изменения сигнатур.
+  // ===========================================================================
+  var booksDirHandle = null;      // FileSystemDirectoryHandle | null (подпапка books/ в OPFS)
+  var booksDirReadyPromise = null; // промис текущего/последнего getBooksDirHandle()
+  function getBooksDirHandle(){
+    if(booksDirHandle) return Promise.resolve(booksDirHandle);
+    if(!booksDirReadyPromise){
+      if(!navigator.storage || !navigator.storage.getDirectory){
+        booksDirReadyPromise = Promise.reject(new Error("Браузер не поддерживает OPFS."));
+      } else {
+        booksDirReadyPromise = navigator.storage.getDirectory().then(function(root){
+          return root.getDirectoryHandle("books", { create: true });
+        }).then(function(handle){
+          booksDirHandle = handle;
+          return handle;
+        }).catch(function(e){
+          booksDirReadyPromise = null; // разрешаем попробовать ещё раз позже
+          throw e;
+        });
+      }
+    }
+    return booksDirReadyPromise;
+  }
+
+  // Хэш содержимого файла (SHA-256, hex) — основа дедупликации книг
+  // (раздел "Шаг 2" READER_PLAN.md: "по хэшу содержимого файла, не по
+  // имени"). buffer — ArrayBuffer.
+  function sha256Hex(buffer){
+    return crypto.subtle.digest("SHA-256", buffer).then(function(digest){
+      var bytes = new Uint8Array(digest), hex = "";
+      for(var i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, "0");
+      return hex;
+    });
+  }
+
+  // Простой JSON-манифест хэш -> имя файла внутри books/ — минимальная
+  // локальная дедупликация ДО того, как появится общий реестр файлов с
+  // синхронизацией между устройствами (Этап A, шаг 3, Firebase). Имя
+  // файла манифеста начинается с точки — будущий список книг (шаг 7)
+  // отфильтрует его тем же приёмом, каким сейчас список папок в "Моих
+  // заметках" прячет скрытые записи (см. renderListScreen в mdeditor.js:
+  // fo.name.charAt(0) !== ".").
+  var BOOKS_MANIFEST_NAME = ".manifest.json";
+  function loadBooksManifest(dir){
+    return dir.getFileHandle(BOOKS_MANIFEST_NAME, { create: false }).then(function(fh){
+      return fh.getFile().then(function(f){ return f.text(); });
+    }).then(function(text){
+      try{
+        var m = JSON.parse(text);
+        return (m && typeof m === "object") ? m : {};
+      }catch(e){ return {}; }
+    }).catch(function(){ return {}; }); // манифеста ещё нет (первая книга) — пустой
+  }
+  function saveBooksManifest(dir, manifest){
+    return dir.getFileHandle(BOOKS_MANIFEST_NAME, { create: true }).then(function(fh){
+      return fh.createWritable();
+    }).then(function(w){
+      return w.write(JSON.stringify(manifest)).then(function(){ return w.close(); });
+    });
+  }
+
+  // Подбирает свободное ИМЯ файла (не хэш) — на случай, если разные по
+  // содержимому книги (например, другое издание той же книги) называются
+  // одинаково: раздел "Шаг 2" ТЗ прямо просит сохранить оба под разными
+  // внутренними именами, а не считать их дублем. Тот же приём "(2)",
+  // "(3)", что и у картинок в mdeditor.js (suggestFreeImageName).
+  function suggestFreeBookName(name, takenNamesLower){
+    var extM = /^(.*)(\.[^.]+)$/.exec(name);
+    var base = extM ? extM[1] : name, ext = extM ? extM[2] : "";
+    var m = /^(.*) \((\d+)\)$/.exec(base);
+    var stem = m ? m[1] : base;
+    var n = m ? Number(m[2]) + 1 : 2;
+    var candidate;
+    do{
+      candidate = stem + " (" + n + ")" + ext;
+      n++;
+    } while(takenNamesLower.has(candidate.toLowerCase()));
+    return candidate;
+  }
+
+  // Сохраняет один файл книги в books/ (OPFS) с дедупликацией по хэшу
+  // содержимого. bytes — Uint8Array. Возвращает Promise<{added, name, hash,
+  // size}> — added=false, если файл с таким же СОДЕРЖИМЫМ уже был сохранён
+  // раньше (name — имя, под которым он реально лежит на диске). hash/size
+  // добавлены (READER_PLAN.md, шаг 3) — вызывающему коду они нужны, чтобы
+  // зарегистрировать файл в облачном реестре (см. registerBookInRegistry
+  // ниже), не пересчитывая хэш повторно.
+  function saveBookFile(name, bytes){
+    var buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    return getBooksDirHandle().then(function(dir){
+      return sha256Hex(buf).then(function(hash){
+        return loadBooksManifest(dir).then(function(manifest){
+          if(manifest[hash]){
+            return { added: false, name: manifest[hash], hash: hash, size: bytes.byteLength };
+          }
+          var takenNamesLower = new Set(Object.keys(manifest).map(function(h){
+            return manifest[h].toLowerCase();
+          }));
+          var finalName = takenNamesLower.has(name.toLowerCase()) ? suggestFreeBookName(name, takenNamesLower) : name;
+          return dir.getFileHandle(finalName, { create: true }).then(function(fh){
+            return fh.createWritable();
+          }).then(function(w){
+            return w.write(bytes).then(function(){ return w.close(); });
+          }).then(function(){
+            manifest[hash] = finalName;
+            return saveBooksManifest(dir, manifest).then(function(){
+              return { added: true, name: finalName, hash: hash, size: bytes.byteLength };
+            });
+          });
+        });
+      });
+    });
+  }
+
+  // =====================================================================
+  // Реестр файлов + временное реле через Firebase Storage
+  // (READER_PLAN.md, Этап A, шаг 3, 09.09).
+  //
+  // Ветка /syncs/<syncId>/files/<хэш> — по одной записи на файл книги:
+  // {hash, size, name, addedBy, addedAt, uploadedAt, confirmedBy}, где
+  // confirmedBy — словарь {deviceId: true}. Синхронизируется ТЕМ ЖЕ
+  // PATCH-механизмом дельт, что и заметки — переиспользуются уже
+  // существующие fetchNotesCloudPath/patchNotesCloud/deleteNotesCloudPath
+  // (они универсальны: работают с любым relPath под текущим syncId,
+  // несмотря на название "Notes" — см. комментарий у них выше), без
+  // единой правки самого PATCH-приёма putCloudBlob.
+  //
+  // Сами байты файла временно живут в Firebase Storage — Realtime
+  // Database знает только реестр (хэш/размер/имя/кто подтвердил), не
+  // содержимое. Устройство, у которого файл есть локально, заливает его
+  // в Storage сразу, как только видит в реестре, что кто-то из ИЗВЕСТНЫХ
+  // устройств ещё не подтвердил получение (см. syncFilesRegistry). Файл
+  // удаляется из Storage, как только подтвердили ВСЕ известные
+  // устройства, либо через FILE_RELAY_TTL_MS после заливки — что раньше;
+  // сама запись реестра (хэш/имя/размер) при этом не удаляется, теряется
+  // только временная копия байтов в Storage.
+  //
+  // "Известные устройства" — записи в /syncs/<syncId>/devices/<id> с
+  // недавней активностью (см. touchDeviceRegistry/DEVICE_KNOWN_WINDOW_MS
+  // ниже): устройство считается известным, пока с него была хоть одна
+  // успешная синхронизация в пределах этого окна — так надолго выключенное
+  // или удалённое устройство рано или поздно перестаёт блокировать
+  // удаление байтов из Storage.
+  // =====================================================================
+  var FILE_RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 дней
+  var DEVICE_KNOWN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
+
+  function touchDeviceRegistry(){
+    if(!syncId) return Promise.resolve();
+    var patch = {};
+    patch["devices/" + getDeviceId()] = { t: Date.now() };
+    return patchNotesCloud(patch).catch(function(){});
+  }
+
+  function storageObjectPath(hash){ return "syncFiles/" + hash; }
+
+  function uploadFileToStorage(hash, bytes){
+    var path = encodeURIComponent(storageObjectPath(hash));
+    return fetchWithTimeout(FIREBASE_STORAGE_URL + path + "?uploadType=media", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: bytes
+    }, 30000).then(function(res){
+      if(!res.ok) throw new Error("storage_upload_failed_" + res.status);
+      return true;
+    });
+  }
+  function downloadFileFromStorage(hash){
+    var path = encodeURIComponent(storageObjectPath(hash));
+    return fetchWithTimeout(FIREBASE_STORAGE_URL + path + "?alt=media", { method: "GET" }, 30000).then(function(res){
+      if(!res.ok) throw new Error("storage_download_failed_" + res.status);
+      return res.arrayBuffer();
+    });
+  }
+  function deleteFileFromStorage(hash){
+    var path = encodeURIComponent(storageObjectPath(hash));
+    return fetchWithTimeout(FIREBASE_STORAGE_URL + path, { method: "DELETE" }, 15000).then(function(res){
+      // 404 здесь не ошибка — байты уже удалены (другим устройством,
+      // например) или так и не заливались; удаление идемпотентно.
+      if(!res.ok && res.status !== 404) throw new Error("storage_delete_failed_" + res.status);
+      return true;
+    });
+  }
+
+  // Регистрирует только что добавленный локально файл книги в облачном
+  // реестре — вызывается из handleImportBooksFile ниже сразу после
+  // saveBookFile с added:true. Если запись с этим хэшем уже есть (кто-то
+  // другой уже добавил тот же файл раньше нас) — не перезаписываем её.
+  function registerBookInRegistry(hash, name, size){
+    if(!syncId) return Promise.resolve();
+    return fetchNotesCloudPath("files/" + hash).catch(function(){ return null; }).then(function(existing){
+      if(existing) return;
+      var entry = {
+        hash: hash, size: size, name: name,
+        addedBy: getDeviceId(), addedAt: Date.now(),
+        uploadedAt: null, confirmedBy: {}
+      };
+      entry.confirmedBy[getDeviceId()] = true; // у добавившего устройства файл уже есть
+      var patch = {};
+      patch["files/" + hash] = entry;
+      return patchNotesCloud(patch);
+    }).then(function(){
+      return syncFilesRegistry(); // сразу попробовать залить байты, если кто-то уже ждёт (см. ниже)
+    }).catch(function(){});
+  }
+
+  // Главная точка сверки — вызывается фоном после каждой успешной
+  // синхронизации (doCloudSync) и при каждом открытии вкладки книг (см.
+  // renderSettingsTabBooksStub). Не блокирует UI, все ошибки по
+  // отдельным файлам гасятся точечно (одна неудача не должна прерывать
+  // обработку остальных записей реестра).
+  var filesRegistrySyncInProgress = false;
+  function syncFilesRegistry(){
+    if(!syncId || !navigator.onLine) return Promise.resolve();
+    if(filesRegistrySyncInProgress) return Promise.resolve();
+    filesRegistrySyncInProgress = true;
+    var myId = getDeviceId();
+    return Promise.all([
+      fetchNotesCloudPath("files").catch(function(){ return null; }),
+      fetchNotesCloudPath("devices").catch(function(){ return null; }),
+      getBooksDirHandle().then(loadBooksManifest).catch(function(){ return {}; })
+    ]).then(function(results){
+      var registry = results[0] || {}, devices = results[1] || {}, manifest = results[2] || {};
+      var localHashes = {}; // hash -> true, что реально есть в books/ на этом устройстве
+      Object.keys(manifest).forEach(function(h){ localHashes[h] = true; });
+      var now = Date.now();
+      var knownDeviceIds = Object.keys(devices).filter(function(id){
+        var t = devices[id] && typeof devices[id].t === "number" ? devices[id].t : 0;
+        return (now - t) <= DEVICE_KNOWN_WINDOW_MS;
+      });
+
+      var chores = Object.keys(registry).map(function(hash){
+        var entry = registry[hash] || {};
+        var confirmedBy = entry.confirmedBy || {};
+        var haveLocally = !!localHashes[hash];
+
+        // 1) У нас файла нет — скачиваем из Storage и подтверждаем получение.
+        if(!haveLocally){
+          return downloadFileFromStorage(hash).then(function(buf){
+            return saveBookFile(entry.name || hash, new Uint8Array(buf));
+          }).then(function(){
+            var patch = {};
+            patch["files/" + hash + "/confirmedBy/" + myId] = true;
+            return patchNotesCloud(patch);
+          }).catch(function(){
+            // байтов ещё нет в Storage (никто пока не залил) или сеть
+            // подвела — не страшно, попробуем на следующей сверке
+          });
+        }
+
+        // 2) Файл у нас есть. Если не все известные устройства подтвердили
+        // получение и байты сейчас не лежат в Storage (или уже больше не
+        // нужны, но мы почему-то ещё не заливали) — заливаем.
+        var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; });
+        if(missingConfirmations && !entry.uploadedAt){
+          return getBooksDirHandle().then(function(dir){
+            return dir.getFileHandle(manifest[hash], { create: false });
+          }).then(function(fh){
+            return fh.getFile();
+          }).then(function(file){
+            return file.arrayBuffer();
+          }).then(function(buf){
+            return uploadFileToStorage(hash, buf);
+          }).then(function(){
+            var patch = {};
+            patch["files/" + hash + "/uploadedAt"] = now;
+            return patchNotesCloud(patch);
+          }).catch(function(){});
+        }
+
+        // 3) Байты залиты и либо подтвердили все известные устройства,
+        // либо истёк 7-дневный срок — удаляем временную копию из Storage.
+        if(entry.uploadedAt && (!missingConfirmations || (now - entry.uploadedAt) > FILE_RELAY_TTL_MS)){
+          return deleteFileFromStorage(hash).then(function(){
+            var patch = {};
+            patch["files/" + hash + "/uploadedAt"] = null;
+            return patchNotesCloud(patch);
+          }).catch(function(){});
+        }
+
+        return null;
+      });
+
+      return Promise.all(chores);
+    }).catch(function(){}).finally(function(){
+      filesRegistrySyncInProgress = false;
+    });
+  }
+
+  // Обрабатывает выбранный файл — точка входа для кнопки "Загрузить fb2
+  // или zip книг" (см. renderSettingsTabBooksStub ниже). Одиночный .fb2
+  // сохраняется как есть; .zip разбирается через MiniZip.extractAllFiles
+  // (произвольные бинарные записи, см. minizip.js) — из него берутся
+  // только записи с расширением .fb2, остальное молча пропускается (сам
+  // архив может быть просто "пачкой" из нескольких книг). Файлы
+  // сохраняются ПОСЛЕДОВАТЕЛЬНО, не параллельно: saveBookFile читает и
+  // переписывает один и тот же файл-манифест — при параллельных вызовах
+  // это гонка (последняя запись манифеста молча стёрла бы предыдущую).
+  function handleImportBooksFile(file, setStatusFn){
+    var lowerName = (file.name || "").toLowerCase();
+    if(lowerName.endsWith(".fb2")){
+      file.arrayBuffer().then(function(buf){
+        return saveBookFile(file.name, new Uint8Array(buf));
+      }).then(function(result){
+        setStatusFn(result.added ? "Книга сохранена." :
+          "Такая книга уже была загружена раньше (файл \u00AB" + result.name + "\u00BB).", false);
+        // Регистрация в облачном реестре (READER_PLAN.md, шаг 3) — только
+        // для реально новых файлов; не блокирует статус-сообщение выше.
+        if(result.added) registerBookInRegistry(result.hash, result.name, result.size);
+      }).catch(function(e){
+        setStatusFn("Не удалось сохранить книгу: " + (e && e.message ? e.message : e), true);
+      });
+      return;
+    }
+    if(lowerName.endsWith(".zip")){
+      if(!window.MiniZip || !window.MiniZip.extractAllFiles){
+        setStatusFn("Не удалось прочитать .zip: модуль ZIP не загружен.", true);
+        return;
+      }
+      file.arrayBuffer().then(function(buf){
+        return window.MiniZip.extractAllFiles(buf);
+      }).then(function(files){
+        var fb2Files = files.filter(function(f){ return /\.fb2$/i.test(f.path); });
+        if(!fb2Files.length){
+          setStatusFn("В архиве не найдено файлов .fb2.", true);
+          return;
+        }
+        var added = 0, skipped = 0;
+        function next(i){
+          if(i >= fb2Files.length){
+            setStatusFn("Загружено книг: " + added + (skipped ? ", уже было: " + skipped : "") + ".", false);
+            return;
+          }
+          var entry = fb2Files[i];
+          var baseName = entry.path.slice(entry.path.lastIndexOf("/") + 1);
+          saveBookFile(baseName, entry.data).then(function(result){
+            if(result.added){ added++; registerBookInRegistry(result.hash, result.name, result.size); }
+            else skipped++;
+            next(i + 1);
+          }).catch(function(e){
+            setStatusFn("Не удалось сохранить \u00AB" + baseName + "\u00BB: " + (e && e.message ? e.message : e), true);
+          });
+        }
+        next(0);
+      }).catch(function(e){
+        setStatusFn("Не удалось прочитать .zip: " + (e && e.message ? e.message : e), true);
+      });
+      return;
+    }
+    setStatusFn("Выберите файл .fb2 или .zip.", true);
+  }
+
+  // Седьмая боковая вкладка второго набора (set2s_7) — заглушка,
+  // расширенная заранее кнопкой загрузки книг (READER_PLAN.md, шаг 2):
+  // сам список fb2-книг появится только в Этапе D (шаг 7), но файлы уже
+  // можно класть в books/ (OPFS) — они никуда не денутся к моменту, когда
+  // список будет реализован. Разметка — тот же набор классов, что и у
+  // пустого экрана "Моих заметок"/кнопок списка (mdeditor-tab/-empty/
+  // -status/-list-actions/-list-action-btn, components.css) — свой стиль
+  // не изобретаем.
+  function renderSettingsTabBooksStub(){
+    // Лёгкая фоновая сверка реестра файлов при каждом заходе на вкладку
+    // (READER_PLAN.md, шаг 3) — тем же приёмом, что и syncNotesOnTabEnter
+    // у "Моих заметок"; не блокирует немедленный рендер ниже.
+    syncFilesRegistry();
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var html = '<div class="mdeditor-tab">';
+    html += '<h3 class="common-tab-title">Книги</h3>';
+    html += '<div class="mdeditor-empty">Список книг появится позже.<br>Загруженные сейчас файлы никуда не денутся.</div>';
+    html += '<div class="mdeditor-status" id="booksStubStatus"></div>';
+    html += '<div class="mdeditor-list-actions">';
+    html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="booksStubImportBtn">Загрузить fb2 или zip книг</button>';
+    html += '</div>';
+    html += '<input type="file" accept=".fb2,.zip,application/zip" id="booksStubImportInput" style="display:none;">';
+    html += '</div>';
+    container.innerHTML = html;
+
+    var statusEl = document.getElementById("booksStubStatus");
+    function setBooksStubStatus(msg, isError){
+      if(!statusEl) return;
+      statusEl.textContent = msg || "";
+      statusEl.classList.toggle("error", !!isError);
+    }
+
+    var input = document.getElementById("booksStubImportInput");
+    var btn = document.getElementById("booksStubImportBtn");
+    if(btn && input){
+      btn.addEventListener("click", function(){ input.click(); });
+      input.addEventListener("change", function(){
+        var file = input.files && input.files[0];
+        input.value = ""; // разрешаем выбрать тот же файл ещё раз
+        if(file) handleImportBooksFile(file, setBooksStubStatus);
+      });
+    }
   }
 
   // ===== ИЗВЛЕЧЕНИЕ СУБТИТРОВ (четвёртая нижняя вкладка второго набора,
@@ -5094,10 +5674,19 @@
     var customCommentsOn = getCustomCommentsEnabled();
     var customVerse = getCustomVerse();
     var debugModeOn = window.Debug ? window.Debug.isEnabled() : false;
+    var bookCols = getBookColumns();
     container.innerHTML =
       '<div class="settings-row"><span>Добавить дополнительный счётчик</span><input type="checkbox" id="settingsHourCb"' + (hourOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" id="settingsHourNotesRow" style="' + (hourOn ? "" : "display:none;") + '"><span>Добавить комментарий в дополнительный счётчик</span><input type="checkbox" id="settingsHourNotesCb"' + (hourNotesOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row settings-row-book-cols">' +
+        '<span>Количество колонок для книг</span>' +
+        '<div class="settings-book-cols-options">' +
+          '<label class="settings-book-cols-opt"><input type="checkbox" id="settingsBookCols1" data-cols="1"' + (bookCols === 1 ? " checked" : "") + '><span>1</span></label>' +
+          '<label class="settings-book-cols-opt"><input type="checkbox" id="settingsBookCols2" data-cols="2"' + (bookCols === 2 ? " checked" : "") + '><span>2</span></label>' +
+          '<label class="settings-book-cols-opt"><input type="checkbox" id="settingsBookCols3" data-cols="3"' + (bookCols === 3 ? " checked" : "") + '><span>3</span></label>' +
+        '</div>' +
+      '</div>' +
       '<div class="settings-row"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить библейские стихи в шапке приложения</span><input type="checkbox" id="settingsBibleQuotesCb"' + (bibleQuotesOn ? " checked" : "") + '></div>' +
       '<div class="settings-verse-block" id="settingsCustomVerseRow" style="' + (bibleQuotesOn ? "" : "display:none;") + '">' +
@@ -5181,6 +5770,27 @@
       goalsExpanded = true;
       try{ localStorage.setItem(GOALS_EXPANDED_KEY, "1"); }catch(e){}
       renderGoalsSection();
+    });
+
+    var bookColsInputs = [
+      document.getElementById("settingsBookCols1"),
+      document.getElementById("settingsBookCols2"),
+      document.getElementById("settingsBookCols3")
+    ];
+    bookColsInputs.forEach(function(inp){
+      inp.addEventListener("change", function(){
+        if(!this.checked){
+          // Ровно один вариант должен быть активен всегда — повторный клик
+          // по уже выбранному варианту его не снимает.
+          this.checked = true;
+          return;
+        }
+        var chosen = this;
+        bookColsInputs.forEach(function(other){
+          if(other !== chosen) other.checked = false;
+        });
+        setBookColumns(parseInt(chosen.getAttribute("data-cols"), 10));
+      });
     });
 
     document.getElementById("settingsColorMarkCb").addEventListener("change", function(){

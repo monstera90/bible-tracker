@@ -451,17 +451,23 @@ window.initMdEditorModule = function(deps){
   var imageUrlCache = new Map();
   var IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp)$/i;
   // ---------------------------------------------------------------------
-  // Отдельная папка с локальными изображениями (раздел 8 ТЗ) — независима
-  // от облачного хранения текста заметок: картинки НИКОГДА не идут в
-  // Firebase (лимит бесплатного Storage мал и платный), между устройствами
-  // пользователь переносит их сам (Syncthing и т.п.). Доступ — тот же
-  // File System Access API, что раньше использовался для папки самих
-  // заметок (см. историю проекта), но теперь только для картинок и с
-  // правами "readwrite" (нужны для автономной корзины сирот, раздел 10).
+  // Папка с локальными изображениями (READER_PLAN.md, Этап A, шаг 1, 09.09)
+  // — независима от облачного хранения текста заметок: картинки НИКОГДА не
+  // идут в Firebase Realtime Database напрямую (см. Этап B/реестр файлов),
+  // между устройствами синхронизируются отдельно. Раньше это была папка на
+  // диске пользователя через File System Access API (showDirectoryPicker) —
+  // с системным диалогом выбора, ручным переподключением после отзыва прав
+  // и заглушкой-плейсхолдером на этот случай. Теперь это подпапка `images/`
+  // в OPFS (Origin Private File System, `navigator.storage.getDirectory()`)
+  // — область, которую сам пользователь через файловый менеджер не видит и
+  // не выбирает; создаётся автоматически при первом обращении, доступ к ней
+  // не запрашивается и не может быть отозван браузером, поэтому весь код
+  // "прав"/"переподключения папки" ниже (в отличие от старой версии) не
+  // нужен — есть просто handle, который либо уже получен, либо ещё
+  // получается (см. getImagesDirHandle).
   // ---------------------------------------------------------------------
-  var imagesDirHandle = null;      // FileSystemDirectoryHandle | null
-  var imagesDirName = null;        // handle.name, для показа в кнопке
-  var imagesDirPermission = "none"; // "none" (нет сохранённого handle) | "prompt" | "denied" | "granted"
+  var imagesDirHandle = null;      // FileSystemDirectoryHandle | null (подпапка images/ в OPFS)
+  var imagesDirReadyPromise = null; // промис текущего/последнего getImagesDirHandle()
   var imageIndexBuilt = false;     // хоть раз просканировали успешно
   var imageIndexBuilding = false;
   // реестр смонтированных DOM-узлов картинки/плейсхолдера — тем же приёмом,
@@ -479,7 +485,6 @@ window.initMdEditorModule = function(deps){
     var set = imageNodesByName.get(name);
     if(set){ set.delete(entry); if(!set.size) imageNodesByName.delete(name); }
   }
-  var IMAGES_DIR_HANDLE_KEY = "imagesDirHandle";
   var IMAGES_WARNED_KEY = "imagesCleanupWarned";
   var imageCleanupInFlight = false;
   // "Продолжить с той же заметки и с того же места" — по решению
@@ -556,52 +561,48 @@ window.initMdEditorModule = function(deps){
   }
 
   // ---------------------------------------------------------------------
-  // Папка с локальными изображениями (раздел 8 ТЗ) — подключение,
-  // повторное подтверждение прав, рекурсивное сканирование, автономная
-  // корзина сирот (раздел 10). Права запрашиваются в режиме "readwrite" —
-  // "только чтение" хватило бы для показа картинок, но корзина ниже должна
-  // уметь удалять файлы.
+  // Доступ к папке `images/` в OPFS (READER_PLAN.md, шаг 1, 09.09).
+  // navigator.storage.getDirectory() возвращает корень origin-приватного
+  // хранилища без диалога и без запроса прав — getDirectoryHandle с
+  // {create:true} создаёт подпапку `images/`, если её ещё не было. Никакого
+  // queryPermission/requestPermission здесь не нужно: OPFS не спрашивает
+  // разрешения и не отзывает их (в отличие от File System Access API,
+  // который использовался раньше) — по крайней мере на устройстве получить
+  // handle получится всегда, если только сам браузер не поддерживает OPFS
+  // вовсе. imagesDirReadyPromise — чтобы параллельные вызовы (например,
+  // клик по скрепке "Вставить картинку" сразу после старта модуля) не
+  // порождали несколько параллельных getDirectoryHandle().
   // ---------------------------------------------------------------------
-  var IMAGES_PERMISSION_OPTS = { mode: "readwrite" };
-  // queryPermission — без пользовательского жеста (можно звать при
-  // старте приложения); requestPermission требует жеста, поэтому
-  // requestIfNeeded=true разрешено передавать только из обработчика клика.
-  function verifyImagesPermission(handle, requestIfNeeded){
-    if(!handle || !handle.queryPermission) return Promise.resolve(false);
-    return handle.queryPermission(IMAGES_PERMISSION_OPTS).then(function(state){
-      if(state === "granted") return true;
-      if(!requestIfNeeded || !handle.requestPermission) return false;
-      return handle.requestPermission(IMAGES_PERMISSION_OPTS).then(function(state2){
-        return state2 === "granted";
-      });
-    }).catch(function(){ return false; });
+  function getImagesDirHandle(){
+    if(imagesDirHandle) return Promise.resolve(imagesDirHandle);
+    if(!imagesDirReadyPromise){
+      if(!navigator.storage || !navigator.storage.getDirectory){
+        imagesDirReadyPromise = Promise.reject(new Error("Браузер не поддерживает OPFS."));
+      } else {
+        imagesDirReadyPromise = navigator.storage.getDirectory().then(function(root){
+          return root.getDirectoryHandle("images", { create: true });
+        }).then(function(handle){
+          imagesDirHandle = handle;
+          return handle;
+        }).catch(function(e){
+          imagesDirReadyPromise = null; // разрешаем попробовать ещё раз позже
+          throw e;
+        });
+      }
+    }
+    return imagesDirReadyPromise;
   }
 
-  // Вызывается один раз при старте модуля (см. конец файла) — молча
-  // проверяет права на РАНЕЕ сохранённый handle, без системного диалога и
-  // без жеста пользователя. Если прав уже нет — просто оставляет
-  // imagesDirPermission не "granted"; кнопка/плейсхолдер (см. renderListScreen/
-  // ImageWidget) в этом случае предложат подключить папку заново кликом.
-  function loadStoredImagesDirHandle(){
-    idbGet(IMAGES_DIR_HANDLE_KEY).then(function(handle){
-      if(!handle){ imagesDirPermission = "none"; return; }
-      imagesDirHandle = handle;
-      imagesDirName = handle.name;
-      return verifyImagesPermission(handle, false).then(function(ok){
-        imagesDirPermission = ok ? "granted" : "prompt";
-        if(ok){
-          return buildImageIndex().then(maybeRunImageCleanup);
-        }
-        // ok=false: плейсхолдеры уже могли смонтироваться ДО того, как этот
-        // асинхронный запрос успел определить реальный imagesDirPermission
-        // (при первом рендере заметки imagesDirHandle ещё null, поэтому
-        // подпись плейсхолдера в этот момент — "папка не была подключена");
-        // без этого вызова она так и останется неверной ("не была
-        // подключена" вместо "нажмите, чтобы переподключить") до следующего
-        // ручного действия — правка 06.09.
-        refreshMountedImageNodes();
-      });
-    }).catch(function(){});
+  // Вызывается один раз при старте модуля (см. конец файла) — получает
+  // handle папки images/ в OPFS и сразу же строит индекс картинок и
+  // запускает корзину сирот, если пора (см. maybeRunImageCleanup ниже).
+  // Никакого системного диалога и жеста пользователя для этого не нужно.
+  function initImagesStorage(){
+    return getImagesDirHandle().then(function(){
+      return buildImageIndex().then(maybeRunImageCleanup);
+    }).catch(function(e){
+      if(window.Debug) window.Debug.log("initImagesStorage: " + (e && e.message ? e.message : e));
+    });
   }
 
   // Рекурсивный обход папки с изображениями — собирает ПЛОСКИЙ индекс
@@ -667,60 +668,34 @@ window.initMdEditorModule = function(deps){
   // imageNodesByName). Форма/цвет — раздел 9 ТЗ: прямоугольник 16:9,
   // скруглённые углы, прозрачный фон, тонкая рамка в тон обычной
   // (см. .cm-md-image-missing* в components.css), без акцентного цвета
-  // (это обычное ожидаемое состояние, не ошибка). Кнопка-скрепка —
-  // та же иконка, что и у кнопки "прикрепить"/выбрать папку, запускает
-  // (пере)подключение папки — но своим отдельным путём, без системного
-  // диалога выбора папки, если её уже подключали раньше (см.
-  // reconnectPlaceholderImagesFolder ниже; кнопка в списке заметок
-  // использует другой путь, reconnectImagesFolder/pickNewImagesFolder). На
-  // уровне модуля (не внутри
-  // makeLivePreviewExtension), т.к. вызывается и из ImageWidget (там), и
-  // из refreshMountedImageNodes (здесь, вне CodeMirror-области видимости).
-  // Подпись внутри плейсхолдера объясняет ИМЕННО состояние подключения
-  // папки (общее для всех плейсхолдеров сразу, не про конкретный файл) —
-  // правка 06.09 по просьбе пользователя, раньше подпись всегда была
-  // именем файла. Три состояния:
-  // 1) imagesDirHandle нет вообще — папку ни разу не подключали;
-  // 2) handle есть, но imagesDirPermission не "granted" — папку уже
-  //    подключали раньше на этом устройстве, но браузер отозвал права
-  //    (например, после закрытия PWA свайпом);
-  // 3) handle есть и права granted — это НЕ про подключение, папка
-  //    работает, просто конкретно этого файла в ней не нашлось (старое
-  //    поведение: показываем имя файла).
-  // Правка 06.09 №3, по просьбе пользователя: раньше подпись показывала
-  // разный текст в зависимости из состояния (не подключена / нет прав /
-  // не найден конкретный файл, с именем файла последним пунктом) — на
-  // практике в тесном плейсхолдере подпись с длинным (иногда хэш-подобным)
-  // именем файла или длинным пояснением визуально не помещалась и просто
-  // не показывалась. Заменено на один короткий фиксированный текст —
-  // действие кнопки (переподключить/запросить права на папку) везде одно
-  // и то же, разбирать причину пользователю не обязательно.
-  function imagePlaceholderCaption(name){
-    return "Подключить изображения снова";
-  }
+  // (это обычное ожидаемое состояние, не ошибка). На уровне модуля (не
+  // внутри makeLivePreviewExtension), т.к. вызывается и из ImageWidget
+  // (там), и из refreshMountedImageNodes (здесь, вне CodeMirror-области
+  // видимости).
+  // С переходом на OPFS (READER_PLAN.md, шаг 1, 09.09) папка `images/`
+  // доступна всегда и не требует подключения/переподтверждения прав —
+  // единственная причина показать эту заглушку теперь в том, что файла с
+  // таким именем реально нет в OPFS (был удалён, или ссылка битая).
+  // Кнопки-скрепки для переподключения папки здесь больше нет — нечего
+  // переподключать (раньше была, см. историю проекта:
+  // reconnectPlaceholderImagesFolder/pickNewImagesFolder — оба убраны в
+  // этом же шаге).
   function buildImagePlaceholder(wrapEl, name){
     wrapEl.className = "cm-md-image-wrap cm-md-image-missing";
-    var title = imagesDirHandle ? "Переподключить папку с изображениями" : "Подключить папку с изображениями";
-    wrapEl.innerHTML =
-      '<span class="cm-md-image-missing-caption"></span>' +
-      '<button type="button" class="cm-md-image-missing-btn" title="' + title + '">' + PAPERCLIP_ICON_SVG + '</button>';
+    wrapEl.innerHTML = '<span class="cm-md-image-missing-caption"></span>';
     var captionEl = wrapEl.querySelector(".cm-md-image-missing-caption");
-    captionEl.textContent = imagePlaceholderCaption(name);
-    // Правка 06.09 №4: стиль подписи задан ЗДЕСЬ, напрямую через .style, а
-    // не только через класс .cm-md-image-missing-caption в CSS — подпись
-    // трижды подряд не показывалась на устройстве пользователя при том,
-    // что класс и цвет в CSS были на вид верными; раз причина не находится
-    // по коду, инлайн-стиль исключает саму возможность, что её перебивает
-    // какое-то не найденное правило каскада (специфичность инлайн-стиля
-    // выше любого класса).
+    captionEl.textContent = "Изображение не найдено";
+    // Правка 06.09 №4 (сохранена и здесь): стиль подписи задан ЗДЕСЬ,
+    // напрямую через .style, а не только через класс
+    // .cm-md-image-missing-caption в CSS — подпись трижды подряд не
+    // показывалась на устройстве пользователя при том, что класс и цвет в
+    // CSS были на вид верными; раз причина не находится по коду,
+    // инлайн-стиль исключает саму возможность, что её перебивает какое-то
+    // не найденное правило каскада (специфичность инлайн-стиля выше
+    // любого класса).
     captionEl.style.cssText = "min-width:0;font-family:'Palatino Linotype',Georgia,serif;" +
       "font-size:13px;font-style:italic;color:#6b5d4f;text-align:center;" +
       "overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;";
-    wrapEl.querySelector(".cm-md-image-missing-btn").addEventListener("click", function(ev){
-      ev.preventDefault();
-      ev.stopPropagation();
-      reconnectPlaceholderImagesFolder();
-    });
   }
   // Подменяет содержимое wrapEl на настоящую картинку — общая точка и
   // для первого показа, и для "починки" плейсхолдера на месте (см.
@@ -987,133 +962,15 @@ window.initMdEditorModule = function(deps){
     document.getElementById("mdEditorImgWarnOk").addEventListener("click", function(){ close(true); });
   }
 
-  // Открывает системный диалог выбора папки. Показывает разовое
-  // предупреждение ПЕРЕД первым же подключением на этом устройстве (флаг
-  // в IndexedDB, раздел 8 ТЗ) — при отмене предупреждения папка не
-  // сохраняется (можно попробовать снова тем же кликом). Показ
-  // предупреждения не повторяется, даже если папку потом переподключат
-  // заново после отзыва прав (флаг не сбрасывается). Возвращает
-  // Promise<boolean> — true, если папка в итоге подключена с правами
-  // (нужно кнопке-скрепке "Вставить картинку", см. insertImageAtCursor
-  // ниже, чтобы дождаться результата перед открытием выбора файла).
-  function pickNewImagesFolder(){
-    if(!window.showDirectoryPicker){
-      setStatus("Браузер не поддерживает выбор папки с изображениями.", true);
-      return Promise.resolve(false);
-    }
-    return window.showDirectoryPicker(IMAGES_PERMISSION_OPTS).then(function(handle){
-      return new Promise(function(resolve){
-        function proceed(){
-          imagesDirHandle = handle;
-          imagesDirName = handle.name;
-          imagesDirPermission = "granted";
-          idbSet(IMAGES_DIR_HANDLE_KEY, handle).catch(function(){});
-          buildImageIndex().then(function(){
-            maybeRunImageCleanup();
-            renderImagesFolderControls();
-            resolve(true);
-          });
-        }
-        idbGet(IMAGES_WARNED_KEY).then(function(warned){
-          if(warned){ proceed(); return; }
-          showImagesFirstConnectWarning(function(confirmed){
-            if(!confirmed){ resolve(false); return; } // отмена — папка не подключается, флаг не трогаем
-            idbSet(IMAGES_WARNED_KEY, true).catch(function(){});
-            proceed();
-          });
-        });
-      });
-    }).catch(function(e){
-      if(e && e.name !== "AbortError"){ // системный диалог закрыт пользователем — не ошибка
-        setStatus("Не удалось выбрать папку: " + (e && e.message ? e.message : e), true);
-      }
-      return false;
-    });
-  }
-
-  // Пробует молча/через жест подтвердить права на РАНЕЕ сохранённый
-  // handle, и только если это не удалось — открывает системный диалог
-  // выбора папки. Возвращает Promise<boolean> (см. pickNewImagesFolder).
+  // Гарантирует, что handle папки images/ в OPFS получен, прежде чем
+  // открывать выбор файла картинки (кнопка-скрепка "Вставить картинку", см.
+  // insertImageAtCursor ниже) — обычно он уже получен при старте модуля
+  // (см. initImagesStorage), это просто подстраховка на случай, если клик
+  // пришёлся раньше, чем тот успел отработать. Никакого системного диалога
+  // выбора папки и никакого пользовательского жеста для этого не нужно —
+  // единственная причина вернуть false — реальная ошибка доступа к OPFS.
   function ensureImagesReady(){
-    if(imagesDirHandle){
-      return verifyImagesPermission(imagesDirHandle, true).then(function(ok){
-        if(ok){
-          imagesDirPermission = "granted";
-          return buildImageIndex().then(function(){
-            maybeRunImageCleanup();
-            renderImagesFolderControls();
-            return true;
-          });
-        }
-        return pickNewImagesFolder();
-      });
-    }
-    return pickNewImagesFolder();
-  }
-
-  // Точка входа для кнопки "Папка с изображениями" (renderListScreen) —
-  // те же места не ждут результата, поэтому промис просто игнорируется;
-  // см. ensureImagesReady выше для мест, которым результат нужен
-  // (insertImageAtCursor).
-  function reconnectImagesFolder(){
-    ensureImagesReady();
-  }
-
-  // Отдельная точка входа СПЕЦИАЛЬНО для кнопки-скрепки на плейсхолдере
-  // отсутствующей картинки (правка 06.09, по просьбе пользователя) — в
-  // отличие от reconnectImagesFolder/ensureImagesReady, эта версия
-  // НИКОГДА сама не открывает системный диалог выбора папки
-  // (showDirectoryPicker), кроме единственного случая, когда handle вообще
-  // ни разу не сохранялся (папку никогда не подключали — тогда выбирать
-  // просто нечего, см. imagePlaceholderCaption выше). Если же handle уже
-  // есть, но браузер отозвал права (частый случай после закрытия PWA
-  // свайпом) — просто переспрашивает права на ТОТ ЖЕ handle
-  // (requestPermission), пользователю остаётся только подтвердить
-  // системный диалог браузера, без повторного указания папки на диске
-  // (это уже даёт кнопка "Папка с изображениями... (сменить)" в списке
-  // заметок, см. pickNewImagesFolder — здесь дублировать её поведение не
-  // нужно).
-  function reconnectPlaceholderImagesFolder(){
-    if(!imagesDirHandle || !imagesDirHandle.requestPermission){
-      pickNewImagesFolder();
-      return;
-    }
-    // requestPermission() зовём СРАЗУ, синхронно из обработчика клика, без
-    // предварительного queryPermission()/await — промежуточный await между
-    // кликом и requestPermission() в некоторых браузерах "гасит" активацию
-    // от жеста пользователя, и системный диалог подтверждения прав тогда
-    // тихо не появляется вовсе (правка 06.09: раньше здесь сначала звался
-    // verifyImagesPermission, который сам делает queryPermission → await →
-    // requestPermission — именно этот лишний await и терял активацию).
-    // Папку заново выбирать не нужно — handle уже сохранён, спрашиваем
-    // права на него же.
-    imagesDirHandle.requestPermission(IMAGES_PERMISSION_OPTS).then(function(state){
-      imagesDirPermission = (state === "granted") ? "granted" : "prompt";
-      renderImagesFolderControls();
-      if(state === "granted") return buildImageIndex().then(maybeRunImageCleanup);
-      refreshMountedImageNodes(); // обновить подписи плейсхолдеров даже без успеха
-    }).catch(function(){
-      imagesDirPermission = "prompt";
-      renderImagesFolderControls();
-      refreshMountedImageNodes();
-    });
-  }
-
-  // Перерисовывает ТОЛЬКО кнопку/статус папки с изображениями в текущем
-  // списке заметок (если он сейчас на экране) — не весь список целиком,
-  // чтобы не терять прокрутку/раскрытые состояния строк.
-  function renderImagesFolderControls(){
-    var btn = document.getElementById("mdEditorImagesDirBtn");
-    if(btn) btn.textContent = imagesFolderButtonLabel();
-  }
-  function imagesFolderButtonLabel(){
-    if(imagesDirPermission === "granted" && imagesDirName){
-      return "Папка с изображениями: «" + imagesDirName + "» (сменить)";
-    }
-    if(imagesDirName){
-      return "Подключить папку с изображениями заново («" + imagesDirName + "»)";
-    }
-    return "Указать папку с локальными изображениями";
+    return getImagesDirHandle().then(function(){ return true; }).catch(function(){ return false; });
   }
 
   // Подбирает свободное имя файла картинки вида "имя (2).ext", "имя (3).ext",
@@ -1182,45 +1039,73 @@ window.initMdEditorModule = function(deps){
 
   // Корзина неиспользуемых картинок (раздел 10 ТЗ, замена старого
   // openCleanupDialog) — работает молча и полностью автономно: без
-  // диалога подтверждения, без списка на экране. Условие запуска — папка
-  // с картинками подключена (imagesDirHandle && "granted"); если не
-  // подключена, эта функция просто не вызывается (см. maybeRunImageCleanup
-  // ниже) — ни сообщений, ни disabled-состояний пользователю не показываем.
+  // диалога подтверждения по существу удаления, без списка на экране.
+  // Условие запуска — папка images/ в OPFS получена (imagesDirHandle); с
+  // переходом на OPFS (READER_PLAN.md, шаг 1) прав на неё больше нет и
+  // проверять нечего — единственное, что здесь остаётся синхронизировать с
+  // пользователем — разовое предупреждение о самом факте автоудаления (см.
+  // ниже), т.к. раньше оно было завязано на клик по кнопке подключения
+  // папки, а такой кнопки больше нет.
   function cleanupOrphanedImages(){
-    if(!imagesDirHandle || imagesDirPermission !== "granted") return Promise.resolve();
+    if(!imagesDirHandle) return Promise.resolve();
     if(imageCleanupInFlight) return Promise.resolve();
     imageCleanupInFlight = true;
-    var referenced = collectReferencedMediaNames();
-    var deletedAny = false;
-    async function walkAndClean(dirHandle){
-      for await (var entry of dirHandle.entries()){
-        var name = entry[0], handle = entry[1];
-        if(handle.kind === "directory"){
-          await walkAndClean(handle);
-        } else if(handle.kind === "file" && IMAGE_EXT_RE.test(name)){
-          if(!referenced.has(name.toLowerCase())){
-            try{ await dirHandle.removeEntry(name); deletedAny = true; }catch(e){ /* права/гонка — пропускаем молча */ }
+    function runDeletion(){
+      var referenced = collectReferencedMediaNames();
+      var deletedAny = false;
+      async function walkAndClean(dirHandle){
+        for await (var entry of dirHandle.entries()){
+          var name = entry[0], handle = entry[1];
+          if(handle.kind === "directory"){
+            await walkAndClean(handle);
+          } else if(handle.kind === "file" && IMAGE_EXT_RE.test(name)){
+            if(!referenced.has(name.toLowerCase())){
+              try{ await dirHandle.removeEntry(name); deletedAny = true; }catch(e){ /* гонка — пропускаем молча */ }
+            }
           }
         }
       }
+      return walkAndClean(imagesDirHandle).then(function(){
+        imageCleanupInFlight = false;
+        // Пересканируем индекс, только если что-то реально удалили — если
+        // сирот не было, индекс и так уже актуален (его только что
+        // построил buildImageIndex перед вызовом корзины), а лишний
+        // повторный обход папки только заново дёргал бы
+        // refreshMountedImageNodes() ещё раз поверх уже загружающихся
+        // картинок (см. imageLoadPromises выше — само по себе это теперь
+        // безопасно, но обход папки всё равно не нужен, если удалять
+        // было нечего).
+        if(deletedAny) return buildImageIndex();
+      }).catch(function(){ imageCleanupInFlight = false; });
     }
-    return walkAndClean(imagesDirHandle).then(function(){
-      imageCleanupInFlight = false;
-      // Пересканируем индекс, только если что-то реально удалили — если
-      // сирот не было, индекс и так уже актуален (его только что построил
-      // buildImageIndex перед вызовом корзины), а лишний повторный обход
-      // папки только заново дёргал бы refreshMountedImageNodes() ещё раз
-      // поверх уже загружающихся картинок (см. imageLoadPromises выше —
-      // само по себе это теперь безопасно, но обход папки всё равно не
-      // нужен, если удалять было нечего).
-      if(deletedAny) return buildImageIndex();
-    }).catch(function(){ imageCleanupInFlight = false; });
+    // Разовое предупреждение (раздел 8 ТЗ): раньше показывалось перед
+    // ПЕРВЫМ ЖЕ подключением папки на этом устройстве (клик по кнопке —
+    // гарантированно было куда встроить карточку, см.
+    // showImagesFirstConnectWarning выше). С OPFS (шаг 1, 09.09) доступ к
+    // папке получается автоматически, без клика — поэтому показываем
+    // предупреждение перед первым же запуском корзины, но только если
+    // сейчас открыто окно настроек (есть куда встроить карточку); если нет
+    // — просто пропускаем удаление в этот раз и попробуем снова при
+    // следующей проверке (см. maybeRunImageCleanup), когда пользователь
+    // окажется на вкладке заметок.
+    return idbGet(IMAGES_WARNED_KEY).then(function(warned){
+      if(warned) return runDeletion();
+      var box = document.querySelector(".settings-modal-box");
+      if(!box){ imageCleanupInFlight = false; return; }
+      return new Promise(function(resolve){
+        showImagesFirstConnectWarning(function(confirmed){
+          if(!confirmed){ imageCleanupInFlight = false; resolve(); return; }
+          idbSet(IMAGES_WARNED_KEY, true).catch(function(){});
+          resolve(runDeletion());
+        });
+      });
+    });
   }
 
-  // Запускает корзину сирот, только когда есть и подключённая папка
-  // картинок, и уже загруженный список заметок (иначе "неиспользуемых"
-  // посчитать не из чего, и можно случайно удалить то, что используется в
-  // заметках, ещё не подтянутых из офлайн-кэша/облака) — вызывается после
+  // Запускает корзину сирот, только когда есть и папка картинок (OPFS), и
+  // уже загруженный список заметок (иначе "неиспользуемых" посчитать не
+  // из чего, и можно случайно удалить то, что используется в заметках, ещё
+  // не подтянутых из офлайн-кэша/облака) — вызывается после
   // buildImageIndex() и после готовности notesMap (см. initNotesModule).
   //
   // ВАЖНО: buildImageIndex() перед этим уже успел синхронно запустить
@@ -1228,14 +1113,13 @@ window.initMdEditorModule = function(deps){
   // картинок в imageLoadPromises (см. loadImageInto) прямо сейчас могут
   // висеть незавершённые getFile()-чтения. Если сразу после этого
   // cleanupOrphanedImages() начнёт удалять другие файлы В ТОЙ ЖЕ папке —
-  // конкурентное чтение+удаление внутри одной директории на некоторых
-  // файловых системах (особенно облачно-синхронизируемых) подвисает
+  // конкурентное чтение+удаление внутри одной директории подвисает
   // навсегда, и картинка так и остаётся в состоянии "загрузка". Поэтому
   // ждём завершения ВСЕХ уже запущенных чтений и только потом запускаем
   // корзину — чтение и удаление в одной папке больше никогда не идут
   // одновременно.
   function maybeRunImageCleanup(){
-    if(imagesDirHandle && imagesDirPermission === "granted" && notesReady && imageIndexBuilt){
+    if(imagesDirHandle && notesReady && imageIndexBuilt){
       Promise.all(Array.from(imageLoadPromises.values())).then(function(){
         cleanupOrphanedImages();
       });
@@ -1914,6 +1798,71 @@ window.initMdEditorModule = function(deps){
     setStatus("Выберите файл .md или .zip.", true);
   }
 
+  // Обрабатывает .zip с картинками — точка входа для кнопки "Загрузить
+  // zip картинок" (см. renderListScreen выше, READER_PLAN.md, шаг 2). В
+  // отличие от handleImportFile (заметки, MiniZip.extractMarkdownFiles),
+  // здесь нужны произвольные БИНАРНЫЕ записи архива —
+  // MiniZip.extractAllFiles (minizip.js), с фильтром по IMAGE_EXT_RE уже
+  // здесь, а не в minizip.js. Файлы кладутся В КОРЕНЬ images/ (OPFS), той
+  // же логикой разрешения конфликта имён, что и вставка одной картинки
+  // через скрепку (suggestFreeImageName/insertImageAtCursor выше) —
+  // запись из архива, чьё имя уже занято в imageIndex, получает суффикс
+  // "(2)" и т.д., а не молча перезаписывает существующий файл. Структура
+  // папок внутри архива не сохраняется (папка images/ плоская по смыслу,
+  // см. imageIndex/buildImageIndex) — берётся только имя файла без пути.
+  // Файлы записываются последовательно, не параллельно: suggestFreeImageName
+  // читает imageIndex, который здесь же и пополняется по ходу — при
+  // параллельной записи два одноимённых файла из одного архива могли бы
+  // получить одно и то же предложенное имя "(2)" и затереть друг друга.
+  function handleImportImagesZip(file){
+    if(!MiniZip || !MiniZip.extractAllFiles){
+      setStatus("Не удалось прочитать .zip: модуль ZIP не загружен.", true);
+      return;
+    }
+    ensureImagesReady().then(function(ready){
+      if(!ready){
+        setStatus("Не удалось получить доступ к хранилищу картинок.", true);
+        return;
+      }
+      return file.arrayBuffer().then(function(buf){
+        return MiniZip.extractAllFiles(buf);
+      }).then(function(entries){
+        var imageEntries = entries.filter(function(e){ return IMAGE_EXT_RE.test(e.path); });
+        var otherCount = entries.length - imageEntries.length;
+        if(!imageEntries.length){
+          setStatus("В архиве не найдено картинок.", true);
+          return;
+        }
+        var added = 0;
+        function next(i){
+          if(i >= imageEntries.length){
+            refreshMountedImageNodes();
+            setStatus("Загружено картинок: " + added +
+              (otherCount ? " (пропущено файлов другого типа: " + otherCount + ")" : "") + ".", false);
+            return;
+          }
+          var entry = imageEntries[i];
+          var baseName = entry.path.slice(entry.path.lastIndexOf("/") + 1);
+          var finalName = imageIndex.has(baseName.toLowerCase()) ? suggestFreeImageName(baseName) : baseName;
+          imagesDirHandle.getFileHandle(finalName, { create: true }).then(function(fileHandle){
+            return fileHandle.createWritable().then(function(writable){
+              return writable.write(entry.data).then(function(){ return writable.close(); });
+            }).then(function(){ return fileHandle; });
+          }).then(function(fileHandle){
+            imageIndex.set(finalName.toLowerCase(), { handle: fileHandle, name: finalName });
+            added++;
+            next(i + 1);
+          }).catch(function(e){
+            setStatus("Не удалось сохранить \"" + baseName + "\": " + (e && e.message ? e.message : e), true);
+          });
+        }
+        next(0);
+      });
+    }).catch(function(e){
+      setStatus("Не удалось прочитать .zip: " + (e && e.message ? e.message : e), true);
+    });
+  }
+
   // ---- облачный пуш: debounce + повтор с нарастающей паузой, тот же
   // принцип, что и у общего state, но полностью НЕЗАВИСИМЫЙ цикл (раздел 2
   // ТЗ) ----
@@ -2127,6 +2076,18 @@ window.initMdEditorModule = function(deps){
     handleLinkClick(name);
   }
 
+  // То же самое, что и openNoteExternally выше, но по id и с подсветкой —
+  // для вкладки "Поиск" (search.js, ТЗ пользователя от 08.09, второй
+  // заход): переход туда уже сам по себе один шаг "назад" (switchSettingsTab
+  // на set2s_3, см. my.js) — без suppressNextNavPush список заметок
+  // добавил бы ЕЩЁ один шаг (list -> editor, см. pushMdNav), и "назад" из
+  // открытой заметки вёл бы сперва в список заметок, а не сразу в
+  // результаты поиска, как попросили.
+  function openNoteByIdExternally(id, highlightWords){
+    suppressNextNavPush = true;
+    openNoteById(id, null, null, highlightWords);
+  }
+
   function render(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -2230,16 +2191,17 @@ window.initMdEditorModule = function(deps){
     if(hasAnyNotes){
       html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="mdEditorExportZipBtn">Скачать .zip, содержащий файлы .md</button>';
     }
-    // Папка с изображениями (раздел 8 ТЗ) — отдельная от всего, что
-    // связано с самими заметками, но показывается только в корне списка
-    // (не имеет смысла повторять в каждой вложенной "папке" заметок).
-    // Подпись меняется в зависимости от состояния (см.
-    // imagesFolderButtonLabel/renderImagesFolderControls выше).
-    if(isRoot){
-      html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="mdEditorImagesDirBtn">' + escName(imagesFolderButtonLabel()) + '</button>';
-    }
+    // Кнопка "Указать папку с локальными изображениями" убрана
+    // (READER_PLAN.md, шаг 1, 09.09) — картинки теперь в OPFS (images/),
+    // доступ к которой не выбирается пользователем и не требует кнопки.
+    // "Загрузить zip картинок" (READER_PLAN.md, шаг 2, 09.09) — тот же
+    // стиль/размер/расположение, что и у кнопки загрузки заметок выше, но
+    // не завязана на неё: распаковывает .zip и кладёт все картинки прямо
+    // в images/ (OPFS), см. handleImportImagesZip ниже.
+    html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="mdEditorImportImagesZipBtn">Загрузить zip картинок</button>';
     html += '</div>';
     html += '<input type="file" accept=".md,.zip,text/markdown,application/zip" id="mdEditorImportInput" style="display:none;">';
+    html += '<input type="file" accept=".zip,application/zip" id="mdEditorImportImagesZipInput" style="display:none;">';
     html += '<div class="mdeditor-fab-row">';
     html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorNewNoteBtn" title="Новая заметка">' + PLUS_ICON_SVG + '</button>';
     html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn" title="К списку заметок">' + HOME_ICON_SVG + '</button>';
@@ -2262,18 +2224,15 @@ window.initMdEditorModule = function(deps){
       exportZipBtn.addEventListener("click", downloadAllNotesZip);
     }
 
-    var imagesDirBtn = document.getElementById("mdEditorImagesDirBtn");
-    if(imagesDirBtn){
-      // В отличие от кнопки-скрепки на плейсхолдере (reconnectImagesFolder,
-      // которая сначала пробует молча переподтвердить УЖЕ выбранную папку и
-      // только при неудаче открывает диалог выбора) — эта кнопка всегда
-      // должна дать выбрать папку заново, ту же или другую (раздел 8 ТЗ,
-      // см. также правку про две кнопки: "Указать/Подключить заново"). Если
-      // звать здесь reconnectImagesFolder/ensureImagesReady и права на
-      // текущую папку уже granted, диалог вообще не появится — снаружи это
-      // выглядело как "кнопка не реагирует". pickNewImagesFolder всегда
-      // открывает системный диалог выбора папки напрямую.
-      imagesDirBtn.addEventListener("click", pickNewImagesFolder);
+    var importImagesZipBtn = document.getElementById("mdEditorImportImagesZipBtn");
+    var importImagesZipInput = document.getElementById("mdEditorImportImagesZipInput");
+    if(importImagesZipBtn && importImagesZipInput){
+      importImagesZipBtn.addEventListener("click", function(){ importImagesZipInput.click(); });
+      importImagesZipInput.addEventListener("change", function(){
+        var file = importImagesZipInput.files && importImagesZipInput.files[0];
+        importImagesZipInput.value = ""; // разрешаем выбрать тот же файл ещё раз
+        if(file) handleImportImagesZip(file);
+      });
     }
 
     var newNoteBtn = document.getElementById("mdEditorNewNoteBtn");
@@ -3030,22 +2989,16 @@ window.initMdEditorModule = function(deps){
     // "скрепка" — правее "Аа", левее переключателя кода (см. ТЗ
     // пользователя от 31.08), в том же стиле .mdeditor-fab-btn, что и
     // остальные кнопки ряда. Вставляет картинку, выбранную через системный
-    // диалог, в место курсора — сама картинка при этом копируется В КОРЕНЬ
-    // папки с изображениями (раздел 8 ТЗ: без принудительной подпапки
-    // "files", в отличие от старой схемы) через insertImageAtCursor ниже.
-    // Если папка ещё не подключена (или её права пришлось запрашивать
-    // заново) — сначала пробуем добиться готовности тем же кликом
-    // (ensureImagesReady, см. выше), и только при успехе открываем выбор
-    // файла. В редком случае, когда сохранённый handle потерял права И
-    // пришлось бы показать ЕЩЁ и системный диалог выбора папки в рамках
-    // ТОГО ЖЕ клика — браузер может не засчитать это как пользовательский
-    // жест дважды подряд; тогда просто просим повторить клик (см. catch
-    // ниже) — не критично, но подпись кнопки уже покажет актуальное
-    // состояние после первой попытки.
+    // диалог выбора файла, в место курсора — сама картинка при этом
+    // копируется В КОРЕНЬ папки images/ в OPFS (без принудительной
+    // подпапки) через insertImageAtCursor ниже. ensureImagesReady на
+    // практике почти всегда уже готов мгновенно (handle получен ещё при
+    // старте модуля, см. initImagesStorage) — здесь просто подстраховка на
+    // случай самого первого клика до его завершения.
     document.getElementById("mdEditorImageBtn").addEventListener("click", function(){
       ensureImagesReady().then(function(ok){
         if(!ok){
-          setStatus("Чтобы вставлять картинки, подключите папку с изображениями (кнопка в общем списке заметок).", true);
+          setStatus("Не удалось получить доступ к хранилищу изображений в этом браузере.", true);
           return;
         }
         var input = document.getElementById("mdEditorImageInput");
@@ -4386,20 +4339,21 @@ window.initMdEditorModule = function(deps){
     pushDirtyNotes(true);
   });
 
-  // Просим постоянное (persistent) хранилище для origin — это не влияет
-  // напрямую на разрешение SAF на папку с заметками, но снижает риск,
-  // что браузер под давлением на память сам решит вытеснить данные origin'а
-  // (IndexedDB и с ним — сохранённый dirHandle), что было бы уже настоящей
-  // потерей доступа, а не временной. Дешёвая подстраховка, без гарантии.
+  // Просим постоянное (persistent) хранилище для origin — снижает риск,
+  // что браузер под давлением на память сам решит вытеснить данные
+  // origin'а (в т.ч. содержимое OPFS — папку images/, см. ниже), что было
+  // бы уже настоящей потерей данных, а не временной. Дешёвая подстраховка,
+  // без гарантии — вызывается тем же способом, что и раньше.
   if(navigator.storage && navigator.storage.persist){
     navigator.storage.persist().catch(function(){});
   }
 
-  // Папка с изображениями (раздел 8 ТЗ) не завязана на syncId/облако —
-  // пробуем молча поднять права на ранее выбранную папку сразу при запуске
+  // Папка с изображениями (READER_PLAN.md, шаг 1, 09.09) не завязана на
+  // syncId/облако — получаем handle images/ в OPFS сразу при запуске
   // модуля, независимо от того, открыта ли вкладка "Мои заметки" прямо
-  // сейчас (см. loadStoredImagesDirHandle выше).
-  loadStoredImagesDirHandle();
+  // сейчас (см. initImagesStorage выше). В отличие от старой версии
+  // (loadStoredImagesDirHandle) — без прав и без системного диалога.
+  initImagesStorage();
 
   // Кэш заметок (см. preloadNotesCache выше) — тоже сразу при запуске
   // модуля, тем же приёмом: тогда к моменту, когда пользователь реально
@@ -4426,10 +4380,12 @@ window.initMdEditorModule = function(deps){
     flushPendingMdEditorEdit: flushPendingMdEditorEdit,
     openNoteExternally: openNoteExternally,
     // используются вкладкой "Поиск" (search.js, ТЗ пользователя от 08.09):
-    // openNoteById — открыть найденную заметку (4-й параметр — слова для
-    // декоративной подсветки, см. searchHighlightWords выше);
+    // openNoteByIdExternally — открыть найденную заметку без лишнего шага
+    // "назад" на список заметок (подавляет pushMdNav внутри openNoteById,
+    // тем же приёмом, что и openNoteExternally выше; 2-й параметр — слова
+    // для декоративной подсветки, см. searchHighlightWords выше);
     // getSearchableNotes — плоский список заметок для самого поиска.
-    openNoteById: openNoteById,
+    openNoteByIdExternally: openNoteByIdExternally,
     getSearchableNotes: getSearchableNotes,
     // вызывается извне (см. rerenderAllFromState в my.js) после того, как
     // облачная синхронизация приносит state, отличающийся от локального —

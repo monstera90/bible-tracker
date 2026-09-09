@@ -1596,12 +1596,29 @@
 
   .book-name{
     flex:1;
+    min-width:0;
     font-weight:bold;
     font-size:20px;
     color:var(--ink);
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
+  }
+
+  /* Больше не переключается на .book-abbr в компактном режиме — вместо
+     этого my.js сам обрезает текст .book-name до реально влезающей длины
+     (canvas-замер + обрезка по согласной, см. fitBookNameText/
+     refreshAllBookNameFits в my.js), поэтому короткие названия («Бытие»,
+     «Исход», «Левит», «Числа») остаются полными, а длинные обрезаются
+     ровно настолько, насколько не влезли. .book-abbr оставлен в разметке
+     как ничем не используемый резерв — всегда скрыт. */
+  .book-abbr{
+    display:none;
+    flex:1;
+    font-weight:bold;
+    font-size:20px;
+    color:var(--ink);
+    text-align:left;
   }
 
   .book-count{
@@ -1724,6 +1741,88 @@
     color:#3d0b0e;
     font-weight:bold;
     box-shadow:inset 0 -3px 5px rgba(60,0,0,.35), inset 0 2px 2px rgba(255,255,255,.5);
+  }
+
+  /* =============================================================
+     Количество колонок для книг (настройка в вкладке "Шестерёнка",
+     my.js — getBookColumns/applyBookColumns, три чекбокса 1/2/3).
+     Значение хранится как data-book-columns на <main> и не зависит от
+     ширины экрана — одно и то же число 2 или 3 выглядит по-разному в
+     зависимости от того, широкий сейчас экран или узкий (см. два
+     @media-блока ниже). При значении "1" ничего не переопределяется —
+     список остаётся точно таким, как раньше (.book-card на всю ширину,
+     один под другим).
+     ============================================================= */
+
+  /* --- широкий экран: полноразмерные карточки книг, 2 или 3 колонки ---
+     CSS multi-column, а не Grid: раскрытие одной книги увеличивает её
+     высоту, но НЕ тянет за собой высоту соседей "по строке" (как было бы
+     в Grid, где высота строки равна высоте самого высокого элемента) —
+     следующие по списку книги просто перетекают в соседний столбец. */
+  @media (min-width:860px){
+    main[data-book-columns="2"],
+    main[data-book-columns="3"]{
+      max-width:1180px;
+    }
+    main[data-book-columns="2"]#booksContainer,
+    main[data-book-columns="3"]#booksContainer{
+      display:block;
+      column-gap:14px;
+    }
+    main[data-book-columns="2"]#booksContainer{ columns:2; }
+    main[data-book-columns="3"]#booksContainer{ columns:3; }
+    main[data-book-columns="2"] .section-label,
+    main[data-book-columns="3"] .section-label{
+      column-span:all;
+    }
+    main[data-book-columns="2"] .book-card,
+    main[data-book-columns="3"] .book-card{
+      break-inside:avoid;
+      margin-bottom:14px;
+    }
+  }
+
+  /* --- узкий экран (смартфон): компактная сетка плиток ---
+     Полноразмерная карточка книги на телефоне в 2-3 колонки физически не
+     влезает, поэтому свёрнутая книга показывает уменьшенную версию:
+     .book-name остаётся видимым, но my.js подгоняет его текст под
+     реальную ширину плитки (полностью, если помещается, иначе обрезает
+     по факту помещения — см. fitBookNameText), и прячет стрелку
+     .toggle-check. Разворачивание книги (класс .book-open на .book-card,
+     см. my.js) возвращает её к обычному виду на всю ширину — точно как в
+     однoколоночном режиме. */
+  @media (max-width:859px){
+    main[data-book-columns="2"]#booksContainer,
+    main[data-book-columns="3"]#booksContainer{
+      display:grid;
+      gap:8px;
+    }
+    main[data-book-columns="2"]#booksContainer{
+      grid-template-columns:repeat(2, minmax(0,1fr));
+    }
+    main[data-book-columns="3"]#booksContainer{
+      grid-template-columns:repeat(3, minmax(0,1fr));
+    }
+    main[data-book-columns="2"] .section-label,
+    main[data-book-columns="3"] .section-label{
+      grid-column:1 / -1;
+    }
+    main[data-book-columns="2"] .book-card,
+    main[data-book-columns="3"] .book-card{
+      min-width:0;
+    }
+    /* .book-name показывается всегда (включая свёрнутое состояние) —
+       нужный вариант (полное название или обрезанное по факту помещения)
+       вычисляет и подставляет my.js, см. fitBookNameText/
+       refreshAllBookNameFits. .book-abbr больше не задействован. */
+    main[data-book-columns="2"] .book-header:not(.expanded) .toggle-check,
+    main[data-book-columns="3"] .book-header:not(.expanded) .toggle-check{
+      display:none;
+    }
+    main[data-book-columns="2"] .book-card.book-open,
+    main[data-book-columns="3"] .book-card.book-open{
+      grid-column:1 / -1;
+    }
   }
 
 
@@ -2386,11 +2485,14 @@
     background:var(--parchment-dark);
   }
   /* ---------- плейсхолдер отсутствующей картинки (TASK_MDNOTES_CLOUD.md,
-     раздел 9, 05.09) — показывается, если папка с изображениями не
-     подключена, или подключена, но именно этот файл в ней не найден (см.
-     buildImagePlaceholder в mdeditor.js). Встраивается в общий стиль
-     приложения, НЕ выделяется акцентным/предупреждающим цветом — это
-     обычное ожидаемое состояние, а не ошибка (ТЗ). Прямоугольник 16:9,
+     раздел 9, 05.09; с READER_PLAN.md шаг 1, 09.09 — папка картинок теперь
+     OPFS, доступ к ней всегда есть, поэтому единственная причина показать
+     эту заглушку — файла с таким именем реально нет в images/, см.
+     buildImagePlaceholder в mdeditor.js). Кнопки-скрепки для переподключения
+     папки внутри плейсхолдера больше нет — переподключать нечего.
+     Встраивается в общий стиль приложения, НЕ выделяется акцентным/
+     предупреждающим цветом — это обычное ожидаемое состояние, а не ошибка
+     (ТЗ). Прямоугольник 16:9,
      скруглённые углы — как у обычной вставленной картинки (.cm-md-image
      выше), прозрачный фон и тонкая рамка в тон обычной рамки элементов
      приложения (var(--groove-shadow), тот же цвет, что и у .cm-md-image/
@@ -2431,29 +2533,6 @@
     overflow:hidden;
     text-overflow:ellipsis;
     white-space:nowrap;
-  }
-  /* кнопка-скрепка внутри плейсхолдера — тот же визуальный язык, что и
-     остальные плавающие кнопки блокнота (.mdeditor-fab-btn в этом же
-     файле), но меньше и без тени (это часть содержимого строки, а не
-     плавающий элемент поверх текста). По нажатию запускает
-     (пере)подключение папки с изображениями (см. reconnectImagesFolder в
-     mdeditor.js) — тот же путь, что и у обычной кнопки в списке заметок. */
-  .cm-md-image-missing-btn{
-    flex-shrink:0;
-    width:26px;height:26px;
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    background:transparent;
-    border:1px solid var(--groove-shadow);
-    border-radius:6px;
-    color:var(--wood, #6b5d4f);
-    cursor:pointer;
-    -webkit-tap-highlight-color:transparent;
-  }
-  .cm-md-image-missing-btn svg{ width:14px; height:14px; }
-  @media (hover:hover) and (pointer:fine){
-    .cm-md-image-missing-btn:hover{ background:var(--parchment-dark); }
   }
   /* ---------- полноэкранный просмотр вставленной в заметку картинки
      (клик по .cm-md-image выше, см. openImageViewer/setWrapToImage в
@@ -2547,8 +2626,12 @@
      приём полноэкранной подложки, что и у .mdeditor-image-overlay выше) —
      переименование/удаление заметки (startRename/confirmDeleteNote в
      mdeditor.js), а с 05.09 (TASK_MDNOTES_CLOUD.md, шаг 3) ещё и разовое
-     предупреждение при первом подключении папки с изображениями
-     (showImagesFirstConnectWarning) — старая "Удалить неиспользуемые
+     предупреждение перед первым запуском корзины сирот
+     (showImagesFirstConnectWarning; с READER_PLAN.md шаг 1, 09.09 —
+     папка images/ в OPFS доступна автоматически, поэтому предупреждение
+     больше не привязано к подключению папки, а показывается перед первым
+     реальным удалением файлов, см. cleanupOrphanedImages в mdeditor.js) —
+     старая "Удалить неиспользуемые
      файлы" (папка "files", ТЗ от 04.09) отсюда убрана: корзина сирот
      теперь работает автономно и без диалога (см. cleanupOrphanedImages в
      mdeditor.js). ---------- */

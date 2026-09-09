@@ -95,22 +95,22 @@
     text-decoration:none;
   }
   .version-history-item:hover{ background:var(--parchment-dark); }
-  .version-history-item.selected{ background:var(--xp-green); font-weight:bold; }
+  .version-history-item.selected{ background:var(--wood); color:var(--parchment); font-weight:bold; }
   .version-history-update-item{
     display:block;
     width:100%;
     text-align:left;
     padding:10px 14px;
     border:none;
-    background:var(--xp-green);
+    background:var(--wood);
     font-family:"Segoe UI","Tahoma",sans-serif;
     font-size:13px;
     font-weight:bold;
-    color:#12351f;
+    color:var(--parchment);
     cursor:pointer;
     text-decoration:none;
   }
-  .version-history-update-item:hover{ filter:brightness(1.05); }
+  .version-history-update-item:hover{ background:var(--wood-dark); }
   .version-history-empty{
     padding:12px 14px;
     font-size:12.5px;
@@ -446,6 +446,31 @@
   }
   .settings-row input[type=checkbox]{ width:22px;height:22px;flex-shrink:0; }
 
+  /* "Количество колонок для книг" (см. renderSettingsTabGear в my.js) —
+     подпись сверху, три чекбокса 1/2/3 в ряд снизу; логика "ровно один
+     активен" — в JS, здесь только раскладка. Подпись занимает всю ширину
+     строки, поэтому .settings-row переключается в колонку вместо обычного
+     "подпись слева — галочка справа" */
+  .settings-row-book-cols{
+    flex-direction:column;
+    align-items:stretch;
+    gap:8px;
+  }
+  .settings-book-cols-options{
+    display:flex;
+    gap:18px;
+  }
+  .settings-book-cols-opt{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    cursor:pointer;
+    font-family:"Segoe UI","Tahoma",sans-serif;
+    font-size:14px;
+    color:var(--ink);
+  }
+  .settings-book-cols-opt input[type=checkbox]{ width:20px;height:20px;flex-shrink:0; }
+
   /* блок ввода своего ключевого стиха — появляется под галочкой "Включить
      библейские стихи…" (см. renderSettingsTabGear в my.js), тот же отступ
      снизу, что и у обычной .settings-row */
@@ -579,7 +604,7 @@
     color:var(--ink);
     cursor:pointer;
   }
-  .modal-btn-grid button:hover{ background:var(--xp-green); }
+  .modal-btn-grid button:hover{ background:var(--wood); color:var(--parchment); }
   .modal-btn-center{ text-align:center; }
   .modal-btn.primary{
     background:var(--wood);
@@ -1094,7 +1119,7 @@
      .mdeditor-fab-btn (components.css): на тач-устройствах :hover иначе
      "залипает" после обычного нажатия. */
   @media (hover:hover) and (pointer:fine){
-    .task-add-fab:hover{ background:var(--xp-green); }
+    .task-add-fab:hover{ background:var(--wood); color:var(--parchment); }
   }
   .task-add-fab:active{ transform:scale(.95); }
 
@@ -1187,7 +1212,7 @@
     text-align:center;
   }
   .task-picker-grid button svg{ width:22px; height:22px; }
-  .task-picker-grid button:hover{ background:var(--xp-green); }
+  .task-picker-grid button:hover{ background:var(--wood); color:var(--parchment); }
   .task-picker-grid button.current{ background:var(--wood); color:var(--parchment); }
 
   /* ---------- восстановление задач из .txt ---------- */
@@ -1210,7 +1235,7 @@
     cursor:pointer;
   }
   .task-import-attach-btn svg{ width:20px; height:20px; }
-  .task-import-attach-btn:hover{ background:var(--xp-green); }
+  .task-import-attach-btn:hover{ background:var(--wood); color:var(--parchment); }
   .task-import-file-name{
     font-size:.9em;
     opacity:.8;

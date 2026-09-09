@@ -219,6 +219,26 @@
     return { mdFiles: mdFiles, hasOtherFiles: hasOtherFiles };
   }
 
+  // Достаёт из ПРОИЗВОЛЬНОГО .zip ВСЕ записи как бинарные данные (Uint8Array),
+  // без фильтра по расширению - в отличие от extractMarkdownFiles выше.
+  // Нужна там, где заранее неизвестно/не важно расширение (READER_PLAN.md,
+  // шаг 2: "Загрузить zip картинок" и "Загрузить fb2 или zip книг" -
+  // вызывающий код сам фильтрует нужные записи по расширению после
+  // распаковки). Записи-каталоги (имя оканчивается на "/") пропускаются
+  // молча, как и в extractMarkdownFiles. Возвращает
+  // [{path, data: Uint8Array}].
+  async function extractAllFiles(zipData) {
+    const bytes = zipData instanceof Uint8Array ? zipData : new Uint8Array(zipData);
+    const entries = readCentralDirectory(bytes);
+    const files = [];
+    for (const [name, entry] of entries) {
+      if (name.endsWith("/")) continue; // запись-каталог, не файл
+      const dataBytes = await extractEntry(bytes, entry);
+      files.push({ path: name, data: dataBytes });
+    }
+    return files;
+  }
+
   // ---------------------------------------------------------------------
   // Запись ZIP (метод STORE - без сжатия). Нужна для сборки .xlsx на
   // выходе: .xlsx - тоже просто zip-архив с XML внутри, а хранение файлов
@@ -356,5 +376,6 @@
     decodeXmlEntities: decodeXmlEntities,
     createZip: createZip,
     extractMarkdownFiles: extractMarkdownFiles,
+    extractAllFiles: extractAllFiles,
   };
 })(typeof window !== "undefined" ? window : globalThis);
