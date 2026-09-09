@@ -1568,19 +1568,23 @@
   // В компактных плитках (2-3 колонки на узком экране, книга свёрнута)
   // название книги должно показываться полностью, если оно влезает
   // («Бытие», «Исход», «Левит», «Числа» и т.п.), и сокращаться, только
-  // если реально не помещается. Сокращение — по словам, как в обычном
-  // русском библиографическом сокращении: слово, которое пришлось урезать,
-  // получает точку («Песня Соломона» → «Песн. Сол.», «1 Фессалоникийцам» →
-  // «1 Фессалон.» — короткие токены вроде "1"/"2" не трогаем, им и так
-  // некуда сокращаться). Не влезающие целиком слова ужимаются по одному
-  // символу за раз, каждый раз то, которое сейчас самое длинное, — это
-  // даёт сбалансированный результат, а не "съедает" целиком только
-  // последнее слово. Ширина мерится через canvas тем же шрифтом, что и
-  // .book-name; окончательная обрезка каждого укороченного слова
-  // дополнительно "откусывает" гласные с конца, чтобы обрезка
-  // заканчивалась на согласной, а не выглядела как случайный обрубок.
-  // Полное название хранится в data-full и не перезаписывается —
-  // обрезается только видимый textContent.
+  // если реально не помещается. Средний вариант — сокращение по словам,
+  // как в обычном русском библиографическом сокращении: слово, которое
+  // пришлось урезать, получает точку («Песня Соломона» → «Песн. Сол.»,
+  // «1 Фессалоникийцам» → «1 Фессалон.» — короткие токены вроде "1"/"2"
+  // не трогаем). Не влезающие целиком слова ужимаются по одному символу
+  // за раз (каждый раз то, которое сейчас самое длинное — даёт
+  // сбалансированный результат), но не короче BOOK_NAME_MIN_WORD_LEN: при
+  // очень тесной сетке (3 колонки на узком телефоне) обрубать слова до
+  // одной буквы с точкой ("Ч.", "1…") выглядит как мусор, а не как
+  // сокращение. Если даже на этом минимуме пословный вариант не
+  // помещается — используем готовое короткое сокращение книги (то самое
+  // .book-abbr, "Бт"/"Исх"/"1См", без точек), а не режем дальше. Ширина
+  // мерится через canvas тем же шрифтом, что и .book-name; окончательная
+  // обрезка каждого укороченного слова дополнительно "откусывает" гласные
+  // с конца, чтобы обрезка заканчивалась на согласной. Полное название и
+  // короткое сокращение хранятся в data-full/data-abbr и не
+  // перезаписываются — меняется только видимый textContent.
   var VOWELS_RU = "аеёиоуыэюяАЕЁИОУЫЭЮЯ";
   function isVowelChar(ch){ return VOWELS_RU.indexOf(ch) !== -1; }
 
@@ -1593,7 +1597,7 @@
     return bookNameMeasureCtx.measureText(text).width;
   }
 
-  var BOOK_NAME_MIN_WORD_LEN = 1;
+  var BOOK_NAME_MIN_WORD_LEN = 3;
   function fitBookNameWords(full, avail, font){
     var words = full.split(" ");
     function render(lens){
@@ -1603,8 +1607,10 @@
     }
     var lens = words.map(function(w){ return w.length; });
     var guard = 0;
-    while(measureTextWidth(render(lens), font) > avail && guard < 500){
+    var fits = false;
+    while(guard < 500){
       guard++;
+      if(measureTextWidth(render(lens), font) <= avail){ fits = true; break; }
       var idx = -1, longest = BOOK_NAME_MIN_WORD_LEN;
       for(var i = 0; i < lens.length; i++){
         if(lens[i] > BOOK_NAME_MIN_WORD_LEN && lens[i] > longest){ longest = lens[i]; idx = i; }
@@ -1612,17 +1618,19 @@
       if(idx === -1) break; // все слова уже на минимуме — дальше сжимать некуда
       lens[idx]--;
     }
-    return words.map(function(w, i){
+    var text = words.map(function(w, i){
       if(lens[i] >= w.length) return w; // не сокращалось
       var t = w.slice(0, lens[i]);
       while(t.length > 1 && isVowelChar(t.charAt(t.length - 1))) t = t.slice(0, -1);
       return t + ".";
     }).join(" ");
+    return {text: text, fits: fits};
   }
 
   function fitBookNameText(el){
     var full = el.dataset.full;
     if(full == null) return;
+    var abbr = el.dataset.abbr;
     var avail = el.clientWidth;
     if(!avail){ el.textContent = full; return; }
     var cs = getComputedStyle(el);
@@ -1631,7 +1639,20 @@
       el.textContent = full;
       return;
     }
-    el.textContent = fitBookNameWords(full, avail, font);
+    var wordFit = fitBookNameWords(full, avail, font);
+    if(wordFit.fits){
+      el.textContent = wordFit.text;
+      return;
+    }
+    // Даже минимальная пословная обрезка не влезла — тесно настолько, что
+    // читаемое сокращение по словам невозможно. Переходим на готовое
+    // короткое сокращение книги без точек, если оно есть и помещается,
+    // иначе используем лучшее, что получилось.
+    if(abbr && measureTextWidth(abbr, font) <= avail){
+      el.textContent = abbr;
+      return;
+    }
+    el.textContent = abbr || wordFit.text;
   }
 
   function refreshAllBookNameFits(){
@@ -1672,6 +1693,7 @@
         nameEl.className = "book-name";
         nameEl.textContent = bookName;
         nameEl.dataset.full = bookName;
+        nameEl.dataset.abbr = bookAbbr;
 
         // Сокращённое название — видно только в компактном режиме списка
         // книг на узких экранах (см. "Количество колонок для книг" в
