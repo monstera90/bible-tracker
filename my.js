@@ -1862,19 +1862,51 @@
 
     // Самый широкий возможный счётчик во всём проекте — "150 / 150"
     // (Псалмы, 150 глав, все прочитаны) шире любого другого "X / Y".
-    var countWidth = measureTextWidth("150 / 150", countFont, "0px") + 16; // +паддинг пилюли (.book-count{padding:2px 8px})
+    //
+    // ИСПРАВЛЕНО 11.09 (ТЗ пользователя — "1См"/"2См"/"1Цр"/"2Цр"/"Иов"/
+    // "Иса"/"Иер"/"Иез"/"ИсН" показывались обрезанными до 2 букв на узком
+    // 3-колоночном экране, хотя data-abbr для них — готовые 3-буквенные
+    // коды). Истинная причина НЕ в кэше и не в опечатке в данных — коды
+    // в sections[] были верны с самого начала. Причина в геометрии:
+    // --book-compact-min (гарантия "готовое сокращение всегда влезает")
+    // считался по СТАРЫМ, слишком щедрым отступам компактного режима, а
+    // сама плитка колонки на узком экране (394px, 3 колонки) физически
+    // может быть ýже этой гарантии — components.css намеренно клэмпит
+    // ширину колонки через min() до реально доступной доли экрана (см.
+    // комментарий в components.css у @media(max-width:859px), правка от
+    // 10.09 про переполнение), а не наоборот. Как только реальная колонка
+    // становится ýже гарантии, my.js (ensureWholeCharsFit) добросовестно
+    // подрезает текст по одному символу, что и давало на вид "случайные"
+    // 2-буквенные обрубки — не у всех книг сразу, а только у тех, где
+    // конкретная ширина конкретного счётчика ("11 / 52" и т.п.) и форма
+    // букв кода (широкие "Ц"/"Н"/"М") в сумме чуть-чуть не влезали в
+    // оставшееся место. Настоящее исправление — не в данных книг, а в
+    // высвобождении места вокруг названия в компактном режиме: пилюля
+    // счётчика в компактном режиме получила свой собственный, более узкий
+    // паддинг (components.css, @media(max-width:859px) — padding:2px 6px
+    // вместо общих 2px 8px), а padding/gap самого .book-header-content там
+    // же уменьшены с 0 10px/6px до 0 6px/4px. Освобождённые ~14px уходят
+    // напрямую в бюджет .book-name и снимают дефицит ширины для всех
+    // кодов книг, включая самый широкий во всём проекте — "Иуды" (4 буквы).
+    var countTextWidth = measureTextWidth("150 / 150", countFont, "0px");
+    var wideCountPillPadding = 16;    // .book-count{padding:2px 8px} — обычный (широкий) режим, не менялся
+    var compactCountPillPadding = 12; // .book-count.compact-count{padding:2px 6px} — components.css, @media(max-width:859px)
+    var wideCountWidth = countTextWidth + wideCountPillPadding;
+    var compactCountWidth = countTextWidth + compactCountPillPadding;
     var toggleWidth = 26; // .toggle-check
     var wideGap = 10;          // .book-header-content{gap:10px} — полноразмерная карточка
     var wideHeaderPadding = 28; // .book-header-content{padding:0 14px}, с двух сторон — полноразмерная карточка
     // Компактный режим (2/3 колонки на узком экране, components.css,
     // блок @media(max-width:859px)) — там же .book-header-content получает
-    // уменьшенные padding:0 10px / gap:6px безусловно (ТЗ от 11.09: 3
-    // колонки должны помещаться на самом узком современном телефоне,
-    // эталон — Poco X6 Pro, 394px). Эти цифры здесь и в CSS должны
-    // совпадать один в один — иначе получится рассинхрон (JS резервирует
-    // место под одни отступы, а рендерится с другими).
-    var compactGap = 6;
-    var compactHeaderPadding = 20; // components.css: .book-header-content{padding:0 10px} в компактном режиме — правка от 10.09, второй заход
+    // уменьшенные padding:0 6px / gap:2px безусловно (ТЗ от 11.09, третий
+    // заход — расстояние между надписью и счётчиком в компактном режиме
+    // уменьшено вдвое, было 4px; до этого — второй заход, прежние 0 10px/6px
+    // не оставляли места готовым 3-буквенным кодам, см. комментарий выше).
+    // Эти цифры здесь и в CSS должны совпадать один в один — иначе получится
+    // рассинхрон (JS резервирует место под одни отступы, а рендерится с
+    // другими).
+    var compactGap = 2;
+    var compactHeaderPadding = 12; // components.css: .book-header-content{padding:0 6px} в компактном режиме — правка от 11.09, второй заход
 
     // Широкая карточка: видны имя + счётчик + стрелка-переключатель — два
     // зазора между тремя детьми.
@@ -1882,12 +1914,12 @@
     // column-width в components.css унаследуют неограниченную величину и
     // колонка сможет стать шире 358px на широких экранах (ТЗ, full, п.2).
     var wideMin = Math.min(
-      Math.ceil(maxFullWidth + countWidth + toggleWidth + wideGap*2 + wideHeaderPadding + BOOK_NAME_SAFETY_MARGIN),
+      Math.ceil(maxFullWidth + wideCountWidth + toggleWidth + wideGap*2 + wideHeaderPadding + BOOK_NAME_SAFETY_MARGIN),
       BOOK_FULL_MAX_WIDTH
     );
     // Компактная плитка: стрелка скрыта (components.css,
     // .book-header:not(.expanded) .toggle-check), один зазор имя-счётчик.
-    var compactMin = Math.ceil(maxAbbrWidth + countWidth + compactGap + compactHeaderPadding + BOOK_NAME_SAFETY_MARGIN);
+    var compactMin = Math.ceil(maxAbbrWidth + compactCountWidth + compactGap + compactHeaderPadding + BOOK_NAME_SAFETY_MARGIN);
 
     mainEl.style.setProperty("--book-col-min", wideMin + "px");
     mainEl.style.setProperty("--book-compact-min", compactMin + "px");
@@ -1950,16 +1982,19 @@
   // medium (fitBookNameMedium — обрезка самого длинного слова до
   // согласной, одна точка), если предельно обрезанный вариант помещается;
   // иначе готовый короткий код.
-  // allowMedium=false (ТЗ от 10.09, финальный шаг — 3 колонки): полностью
-  // пропускает уровень medium, даже если он для конкретной короткой книги
-  // технически поместился бы — при 3 колонках плитка настолько узкая, что
-  // medium помещается ТОЛЬКО у части книг (у которых само слово короткое),
-  // и в сетке получался разнобой — часть карточек с точкой ("Ос.",
-  // "Авв.", "Пр."), часть без (готовый код "Бт", "1Лт"), визуально
-  // неряшливо. Пользователь сверил и подтвердил список готовых коротких
-  // кодов (data-abbr в sections[] — тот же, что уже был) как верный и
-  // исчерпывающий именно для этой ширины — используем full-или-abbr без
-  // компромиссного medium.
+  // allowMedium=false (3 колонки): abbr-only, полностью пропускает и
+  // medium, и full — даже если full или medium для конкретной короткой
+  // книги технически поместились бы. При 3 колонках плитка настолько
+  // узкая, что full/medium помещаются ТОЛЬКО у части книг (у которых
+  // само слово короткое: "Руфь", "Осия", "Наум", "Аггей", "Иона",
+  // "Амос", "Луки", "Титу" и т.п.), и в сетке получался разнобой — часть
+  // карточек с полным словом или "слово."-сокращением, часть с готовым
+  // кодом ("Бт", "1Лт"), визуально неряшливо (баг-фикс 11.09 — до этого
+  // full-проверка была ВНЕ if(allowMedium) и всё равно проходила).
+  // Пользователь сверил и подтвердил список готовых коротких кодов
+  // (data-abbr в sections[] — тот же, что уже был) как верный и
+  // исчерпывающий именно для этой ширины — используем ТОЛЬКО abbr, без
+  // full и без medium.
   function renderBookNamePerItem(el, font, letterSpacing, allowMedium){
     var full = el.dataset.full;
     if(full == null) return;
@@ -1976,13 +2011,13 @@
       }
       return;
     }
-    var fullMargin = BOOK_FULL_SAFETY_OVERRIDE.hasOwnProperty(full) ? BOOK_FULL_SAFETY_OVERRIDE[full] : BOOK_NAME_SAFETY_MARGIN;
-    var fullBoxWidth = el.clientWidth - fullMargin;
-    if(measureTextWidth(full, font, letterSpacing) <= fullBoxWidth){
-      el.textContent = full;
-      return;
-    }
     if(allowMedium){
+      var fullMargin = BOOK_FULL_SAFETY_OVERRIDE.hasOwnProperty(full) ? BOOK_FULL_SAFETY_OVERRIDE[full] : BOOK_NAME_SAFETY_MARGIN;
+      var fullBoxWidth = el.clientWidth - fullMargin;
+      if(measureTextWidth(full, font, letterSpacing) <= fullBoxWidth){
+        el.textContent = full;
+        return;
+      }
       var medium = fitBookNameMedium(full, boxWidth, font, letterSpacing);
       if(medium.fits){
         el.textContent = ensureWholeCharsFit(medium.text, boxWidth, font, letterSpacing);
@@ -2038,6 +2073,46 @@
     });
   }
 
+  // ТЗ от 11.09 (скриншоты пользователя, повторное сообщение после
+  // BOOK_MEDIUM_OVERRIDE/BOOK_FULL_SAFETY_OVERRIDE выше не помогли — те
+  // варианты тоже не влезали рядом со счётчиком): по прямой инструкции
+  // переносим счётчик на отдельную строку ПОД названием для этих трёх
+  // карточек (класс .count-below — components.css, main[data-book-
+  // columns="2"/"3"] .book-header(-content).count-below), освобождая
+  // имени почти всю ширину карточки вместо доли, оставшейся после
+  // пилюли счётчика и стрелки. Класс ставится один раз при построении
+  // карточки (ниже, initPage) и остаётся в DOM всегда — включается и
+  // выключается чисто через CSS по data-book-columns (в обычном
+  // однoколоночном режиме этого атрибута со значением 2/3 нет, поэтому
+  // там ничего не меняется — имени и так достаточно места).
+  var BOOK_COUNT_BELOW_NAME = {
+    "2 Самуила": true,
+    "1 Коринфянам": true,
+    "2 Коринфянам": true
+  };
+
+  // ТЗ от 11.09 (скриншоты пользователя): первая версия этой правки
+  // переносила счётчик на отдельную строку ПОД названием (класс
+  // .count-below) — пользователь забраковал результат как уродливый.
+  // Взамен: счётчик остаётся НА МЕСТЕ (верхний правый угол строки, где
+  // и был), но выводится из потока flex и накладывается ПОВЕРХ
+  // .book-name (класс .overlay-count — components.css, main[data-book-
+  // columns="2"/"3"]), а не делит с ним ширину строки. .book-name из-за
+  // этого получает почти всю ширину (делит её только со стрелкой
+  // .toggle-check, которая остаётся в потоке как обычно) — если имя всё
+  // равно длиннее, его конец визуально уходит под полупрозрачную пилюлю
+  // счётчика, а не переносится строкой ниже и не обрезается. Класс
+  // ставится один раз при построении карточки (ниже, initPage) и
+  // остаётся в DOM всегда — включается и выключается чисто через CSS по
+  // data-book-columns (в обычном однoколоночном режиме этого атрибута
+  // со значением 2/3 нет, поэтому там ничего не меняется — имени и так
+  // достаточно места).
+  var BOOK_NAME_OVERLAP_COUNT = {
+    "2 Самуила": true,
+    "1 Коринфянам": true,
+    "2 Коринфянам": true
+  };
+
   function initPage(){
     applyBookColumns();
     var frag = document.createDocumentFragment();
@@ -2065,6 +2140,9 @@
 
         var headerContent = document.createElement("div");
         headerContent.className = "book-header-content";
+        if(BOOK_NAME_OVERLAP_COUNT[bookName]){
+          headerContent.classList.add("overlay-count");
+        }
 
         var nameEl = document.createElement("div");
         nameEl.className = "book-name";
