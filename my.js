@@ -1536,12 +1536,19 @@
   // экранах 2-3 колонки — это обычные полноразмерные карточки книг через
   // CSS multi-column (раскрытие одной книги не тянет соседей по высоте,
   // как было бы в CSS Grid, — следующие книги просто перетекают в соседний
-  // столбец, см. .book-card{break-inside:avoid}). На узких экранах
-  // (смартфон) те же 2-3 колонки переключают список в компактную сетку
-  // маленьких плиток с сокращёнными названиями (.book-abbr) — полноразмерная
-  // карточка туда физически не влезает; разворачивание плитки (класс
-  // .book-open на .book-card, см. обработчик клика по .book-header ниже)
-  // показывает книгу как обычно, во всю ширину.
+  // столбец, см. .book-card{break-inside:avoid}); минимальная ширина
+  // колонки (--book-col-min, computeBookCardMinWidths ниже) подобрана так,
+  // что полное название всегда помещается — сокращение здесь не нужно
+  // вовсе, а если колонок выбрано больше, чем помещается при этой
+  // ширине, CSS сам уменьшит их число. На узких экранах (смартфон) те же
+  // 2-3 колонки переключают список в компактную сетку маленьких плиток —
+  // полноразмерная карточка туда физически не влезает, поэтому текст
+  // .book-name подгоняется по месту (см. АВТОСОКРАЩЕНИЕ НАЗВАНИЙ КНИГ
+  // ниже), а минимальная ширина плитки (--book-compact-min) гарантирует,
+  // что даже готовое короткое сокращение книги не обрежется дальше самого
+  // себя; разворачивание плитки (класс .book-open на .book-card, см.
+  // обработчик клика по .book-header ниже) показывает книгу как обычно,
+  // во всю ширину.
   var BOOK_COLUMNS_KEY = "bibleBookColumns_v1";
   var BOOK_COLUMNS_WIDE_MQ = "(min-width:860px)";
   function getBookColumnsDefault(){
@@ -1564,101 +1571,597 @@
     requestAnimationFrame(refreshAllBookNameFits);
   }
 
+  // Узкий экран (тот же порог, что и components.css, @media(max-width:859px))
+  // + выбрано 2 или 3 колонки — именно тогда включается компактная сетка
+  // маленьких плиток (см. комментарий выше про BOOK_COLUMNS_WIDE_MQ).
+  // ТЗ от 10.09, пятый заход (четвёртый заход не сработал — см. ниже):
+  // компактная сетка решает уровень (full/medium/short) ДЛЯ КАЖДОЙ
+  // карточки ОТДЕЛЬНО (renderBookNamePerItem), а не одним общим уровнем
+  // на весь грид, как широкая сетка (decideBookGridLevel). Причина:
+  // единый уровень на всю сетку топит ВСЕ карточки до короткого кода
+  // из-за одной-единственной книги с длинным словом ("1 Фессалоникийцам")
+  // — даже предельно обрезанный вид этого одного названия не помещается в
+  // узкую плитку 2-3 колонок, а значит уровень 2 не проходит ни для кого
+  // во всём гриде, хотя «Бытие»/«Исход» и т.п. спокойно поместились бы
+  // сами по себе. Поэтому в компактной сетке каждая карточка меряется по
+  // своей собственной ширине бокса (та же у всех, т.к. колонки равные) и
+  // получает то, что реально влезает именно её тексту — «Бытие» может
+  // остаться полным, а «1 Фессалоникийцам» уйти сразу в «1 Фесс.» — это
+  // ожидаемо, а не "разнобой": в отличие от широкой сетки, здесь у
+  // соседних плиток и так разные пропорции текста и счётчика.
+  function isCompactBookGrid(){
+    var cols = getBookColumns();
+    if(cols !== 2 && cols !== 3) return false;
+    var mq = window.matchMedia ? window.matchMedia(BOOK_COLUMNS_WIDE_MQ) : null;
+    return !(mq && mq.matches);
+  }
+
   // ===================== АВТОСОКРАЩЕНИЕ НАЗВАНИЙ КНИГ =====================
-  // В компактных плитках (2-3 колонки на узком экране, книга свёрнута)
-  // название книги должно показываться полностью, если оно влезает
-  // («Бытие», «Исход», «Левит», «Числа» и т.п.), и сокращаться, только
-  // если реально не помещается. Средний вариант — сокращение по словам,
-  // как в обычном русском библиографическом сокращении: слово, которое
-  // пришлось урезать, получает точку («Песня Соломона» → «Песн. Сол.»,
-  // «1 Фессалоникийцам» → «1 Фессалон.» — короткие токены вроде "1"/"2"
-  // не трогаем). Не влезающие целиком слова ужимаются по одному символу
-  // за раз (каждый раз то, которое сейчас самое длинное — даёт
-  // сбалансированный результат), но не короче BOOK_NAME_MIN_WORD_LEN: при
-  // очень тесной сетке (3 колонки на узком телефоне) обрубать слова до
-  // одной буквы с точкой ("Ч.", "1…") выглядит как мусор, а не как
-  // сокращение. Если даже на этом минимуме пословный вариант не
-  // помещается — используем готовое короткое сокращение книги (то самое
-  // .book-abbr, "Бт"/"Исх"/"1См", без точек), а не режем дальше. Ширина
-  // мерится через canvas тем же шрифтом, что и .book-name; окончательная
-  // обрезка каждого укороченного слова дополнительно "откусывает" гласные
-  // с конца, чтобы обрезка заканчивалась на согласной. Полное название и
-  // короткое сокращение хранятся в data-full/data-abbr и не
-  // перезаписываются — меняется только видимый textContent.
+  // Переписано 10.09, версия 2 (первая версия того же дня решала уровень
+  // ОТДЕЛЬНО для каждой книги — по факту помещается её текст или нет — из-
+  // за чего в одной и той же сетке могли одновременно оказаться полные
+  // названия, "слово."-сокращения и голые короткие коды: разнобой,
+  // выглядит неряшливо). Теперь уровень выбирается ОДИН РАЗ для всей сетки
+  // целиком (decideBookGridLevel), по единой ширине бокса — она у всех
+  // книг в текущей раскладке одинакова (см. canonicalBookBoxWidth) — и
+  // применяется ко всем элементам сетки одинаково (renderBookNameAtLevel).
+  // Число колонок (кнопки 1/2/3 в настройках) на выбор уровня НЕ влияет
+  // напрямую — только косвенно, через то, какой шириной оборачивается
+  // бокс книги при разном числе колонок и разном экране.
+  //
+  //   1) Полное название — показывается, если при данной ширине бокса
+  //      САМОЕ ДЛИННОЕ полное название КНИГИ во всей сетке помещается
+  //      целиком. Кнопка "Показать/Скрыть прочитанное" рендерится тем же
+  //      .book-name в том же гриде (см. addHideProgressButton), но в
+  //      выборе уровня НЕ участвует и получает его независимо от книг —
+  //      у неё своя лесенка ступеней (см. п.4 ниже и
+  //      renderSkipMediumEntry), которая сама подбирает влезающий вариант
+  //      на любом уровне; раньше её длинный full-текст мог утянуть вниз
+  //      всю сетку книг, даже если каждое название книги влезало целиком
+  //      (TZ_book_grid_levels_bug.md, раздел 2 — full/medium при 1
+  //      колонке).
+  //   2) "Среднее" сокращение — только для названий из НЕСКОЛЬКИХ слов:
+  //      ужимается РОВНО ОДНО слово (самое длинное), второе слово не
+  //      трогается. Обрезка всегда заканчивается на согласной (гласные
+  //      "откусываются" с конца) и ставится РОВНО ОДНА точка — например
+  //      «1 Фессалоникийцам» → «1 Фессалоникийц.». Двух точек в названии
+  //      быть не должно: если сокращения одного слова до минимума всё
+  //      равно не хватает самому неудобному названию в сетке — вся сетка
+  //      уходит на уровень 3, а не на точку у второго слова. Для отдельных
+  //      книг можно задать вручную "правильный" вид среднего сокращения —
+  //      см. BOOK_MEDIUM_OVERRIDE. ТЗ от 10.09 (medium, п.3): однословные
+  //      названия («Бытие» → «Быт.», «Филимону» → «Филим.») ТОЖЕ проходят
+  //      это правило, а не показывают сразу короткий код — правило "одно
+  //      слово, одна точка" тривиально для них, обрезаемое слово всегда
+  //      единственное. Элементы без среднего представления
+  //      (data-skip-medium) — исключение из общего правила: у кнопки
+  //      "Показать/Скрыть прочитанное" своя лесенка готовых ступеней, см.
+  //      HIDE_PROGRESS_STEPS_BY_FULL ниже, а не автоматическая обрезка.
+  //   3) Готовое короткое сокращение книги (data-abbr, "Бт"/"Исх"/"1См" —
+  //      второй элемент в sections[].books[], без точек).
+  //
+  // Ширина мерится через скрытый DOM-элемент с теми же CSS-свойствами, что
+  // и у настоящего .book-name (не canvas.measureText — тот только
+  // приближённо имитирует реальный шрифт браузера и иногда занижал
+  // ширину на несколько пикселей). Полное название и короткое сокращение
+  // хранятся в data-full/data-abbr и не перезаписываются — меняется
+  // только видимый textContent.
   var VOWELS_RU = "аеёиоуыэюяАЕЁИОУЫЭЮЯ";
   function isVowelChar(ch){ return VOWELS_RU.indexOf(ch) !== -1; }
-
-  var bookNameMeasureCtx = null;
-  function measureTextWidth(text, font){
-    if(!bookNameMeasureCtx){
-      bookNameMeasureCtx = document.createElement("canvas").getContext("2d");
-    }
-    bookNameMeasureCtx.font = font;
-    return bookNameMeasureCtx.measureText(text).width;
+  // Обрезает слово до length символов, затем откусывает гласные с конца —
+  // обрезка всегда заканчивается на согласной, никогда на гласной.
+  function truncateWordToConsonant(word, length){
+    var t = word.slice(0, Math.max(length, 1));
+    while(t.length > 1 && isVowelChar(t.charAt(t.length - 1))) t = t.slice(0, -1);
+    return t;
   }
+  // Ручные "правильные" варианты среднего сокращения для отдельных
+  // двусловных книг — заполняется точечно, по сообщениям пользователя.
+  // Пока пусто — используется автоматическая обрезка самого длинного
+  // слова, см. fitBookNameMedium ниже. Единственное готовое значение
+  // (не лесенка, а один фиксированный текст) — на случай, когда нужна
+  // ровно одна замена без вариантов по ширине; для лесенки нескольких
+  // вариантов см. BOOK_MEDIUM_STEPS сразу под ней.
+  var BOOK_MEDIUM_OVERRIDE = {};
 
+  // Лесенка ручных вариантов среднего сокращения для двусловных книг, где
+  // общее правило ("обрезать только одно, самое длинное слово", см.
+  // fitBookNameMedium) не годится:
+  //   - "Иисус Навин" — оба слова одной длины (5 букв), общее правило
+  //     трогает только первое ("Иисус" → "Иис."), второе слово ("Навин")
+  //     никогда не сокращается;
+  //   - "Песня Соломона" — общее правило трогает только более длинное
+  //     слово ("Соломона" → "Сол."), а "Песня" остаётся нетронутым;
+  // в обоих случаях, если минимальный вариант с ОДНИМ обрезанным словом
+  // всё равно не помещается, ужать дальше по общему правилу нечем — падает
+  // сразу в готовый короткий код. ТЗ пользователя (10.09): для узких плиток
+  // нужна собственная лесенка, где укорачивается и второе слово тоже — от
+  // самого длинного варианта к самому короткому, перебирается сверху вниз
+  // до первого влезающего (та же механика, что у HIDE_PROGRESS_TEXTS.steps
+  // выше).
+  var BOOK_MEDIUM_STEPS = {
+    "Иисус Навин": ["Иис. Нав.", "Иис. Н."],
+    "Песня Соломона": ["Песня Сол.", "Песн. Сол.", "Пес. Сол."]
+  };
+
+  // Элементы .book-name в сетке книг, которые НЕ являются книгами из
+  // sections[], но рендерятся в том же гриде той же вёрсткой и должны
+  // получать тот же общий уровень сокращения — сейчас это ровно один
+  // элемент, кнопка "Показать/Скрыть прочитанное" (см.
+  // addHideProgressButton). Единый источник её full/abbr-текстов — чтобы
+  // не разъезжались значения в разных местах кода и в расчёте порогов
+  // (computeBookCardMinWidths) ниже.
+  // steps — лесенка ступеней среднего уровня для этой кнопки (ТЗ, раздел
+  // "Показать прочитанное"/"Скрыть прочитанное"): в отличие от общего
+  // правила книг (обрезается только одно, самое длинное слово), тут могут
+  // обрезаться ОБА слова поочерёдно. По убыванию ширины, от самой длинной
+  // ступени к самой короткой; первые три варианта — присланные автором,
+  // новые ступени заменять/добавлять только по его точечным сообщениям,
+  // не придумывать самостоятельно.
+  var HIDE_PROGRESS_TEXTS = {
+    show: {full:"Показать прочитанное", abbr:"ПП", steps:["Показ. проч.", "Пок. проч.", "Пок. пр."]},
+    hide: {full:"Скрыть прочитанное",   abbr:"СП", steps:["Скрыт. проч.", "Скр. проч.", "Скр. пр."]}
+  };
+  // Лукап ступеней по текущему full-тексту (он переключается между show/
+  // hide в textEl.dataset.full, см. toggleHideCompletedBooks) — используется
+  // в renderBookNameAtLevel/decideBookGridLevel вместо BOOK_MEDIUM_OVERRIDE
+  // для этого конкретного элемента (data-skip-medium).
+  var HIDE_PROGRESS_STEPS_BY_FULL = {};
+  [HIDE_PROGRESS_TEXTS.show, HIDE_PROGRESS_TEXTS.hide].forEach(function(t){
+    HIDE_PROGRESS_STEPS_BY_FULL[t.full] = t.steps;
+  });
+
+  // Раньше здесь был canvas.measureText — он лишь ПРИБЛИЖЁННО имитирует
+  // реальный шрифт браузера, и на практике иногда занижал ширину текста
+  // на несколько пикселей (даже с учётом letter-spacing), из-за чего
+  // JS считал текст влезающим, а реальный DOM-рендер обрезал последнюю
+  // букву прямо по границе бокса. Настоящий скрытый DOM-элемент с теми
+  // же CSS-свойствами рендерится ТОЧНО так же, как настоящий .book-name,
+  // так что расхождений между "посчитали" и "показали" больше нет.
+  var bookNameMeasureProbe = null;
+  function measureTextWidth(text, font, letterSpacing){
+    if(!bookNameMeasureProbe){
+      bookNameMeasureProbe = document.createElement("span");
+      var s = bookNameMeasureProbe.style;
+      s.position = "absolute";
+      s.visibility = "hidden";
+      s.pointerEvents = "none";
+      s.whiteSpace = "nowrap";
+      s.left = "-9999px";
+      s.top = "-9999px";
+      document.body.appendChild(bookNameMeasureProbe);
+    }
+    bookNameMeasureProbe.style.font = font;
+    bookNameMeasureProbe.style.letterSpacing = letterSpacing || "0px";
+    bookNameMeasureProbe.textContent = text;
+    return bookNameMeasureProbe.getBoundingClientRect().width;
+  }
+  // небольшой запас на погрешности субпиксельного округления
+  var BOOK_NAME_SAFETY_MARGIN = 2;
+
+  // ТЗ от 10.09 (full-контейнер, п.2): жёсткий потолок ширины одной
+  // колонки/карточки книги — НЕ пересчитывается динамически, в отличие от
+  // --book-col-min ниже. 358 = 394 (CSS-ширина экрана Poco X6 Pro,
+  // эталон) − 36 (main{padding:0 18px} слева+справа), взято по самому
+  // длинному тексту сетки — кнопке "Показать прочитанное" (см.
+  // HIDE_PROGRESS_TEXTS). При избытке места экран должен получать больше
+  // колонок, а не колонки шире этого предела.
+  var BOOK_FULL_MAX_WIDTH = 358;
+
+  // Минимальная длина, до которой ужимается ЕДИНСТВЕННОЕ обрезаемое слово
+  // уровня 2 (см. комментарий выше) — короче не режем, чтобы не получить
+  // мусор вроде "Ч." с точкой на одной букве.
   var BOOK_NAME_MIN_WORD_LEN = 3;
-  function fitBookNameWords(full, avail, font){
+  // Сокращает РОВНО ОДНО слово (самое длинное) из full, пока текст не
+  // поместится в avail, либо пока это слово не дойдёт до минимума длины.
+  // Остальные слова названия не трогаются — см. правило "одна точка" выше.
+  function fitBookNameMedium(full, avail, font, letterSpacing){
+    var override = BOOK_MEDIUM_OVERRIDE[full];
+    if(override){
+      return {text: override, fits: measureTextWidth(override, font, letterSpacing) <= avail};
+    }
+    var steps = BOOK_MEDIUM_STEPS[full];
+    if(steps && steps.length){
+      for(var si = 0; si < steps.length; si++){
+        if(measureTextWidth(steps[si], font, letterSpacing) <= avail){ return {text: steps[si], fits: true}; }
+      }
+      return {text: steps[steps.length - 1], fits: false};
+    }
+    // ТЗ от 10.09 (medium, п.3): однословные названия ("Филимону" →
+    // "Филим.") тоже проходят это правило, не только многословные — раньше
+    // здесь был ранний выход при words.length<2, убран.
     var words = full.split(" ");
-    function render(lens){
+    var idx = 0, longest = words[0].length;
+    for(var i = 1; i < words.length; i++){
+      if(words[i].length > longest){ longest = words[i].length; idx = i; }
+    }
+    var minLen = Math.min(BOOK_NAME_MIN_WORD_LEN, words[idx].length);
+    function render(len){
       return words.map(function(w, i){
-        return lens[i] >= w.length ? w : (w.slice(0, Math.max(lens[i], 1)) + ".");
+        return (i === idx && len < w.length) ? (truncateWordToConsonant(w, len) + ".") : w;
       }).join(" ");
     }
-    var lens = words.map(function(w){ return w.length; });
-    var guard = 0;
-    var fits = false;
-    while(guard < 500){
-      guard++;
-      if(measureTextWidth(render(lens), font) <= avail){ fits = true; break; }
-      var idx = -1, longest = BOOK_NAME_MIN_WORD_LEN;
-      for(var i = 0; i < lens.length; i++){
-        if(lens[i] > BOOK_NAME_MIN_WORD_LEN && lens[i] > longest){ longest = lens[i]; idx = i; }
-      }
-      if(idx === -1) break; // все слова уже на минимуме — дальше сжимать некуда
-      lens[idx]--;
+    var bestText = full, fits = false;
+    for(var len = words[idx].length - 1; len >= minLen; len--){
+      bestText = render(len);
+      if(measureTextWidth(bestText, font, letterSpacing) <= avail){ fits = true; break; }
     }
-    var text = words.map(function(w, i){
-      if(lens[i] >= w.length) return w; // не сокращалось
-      var t = w.slice(0, lens[i]);
-      while(t.length > 1 && isVowelChar(t.charAt(t.length - 1))) t = t.slice(0, -1);
-      return t + ".";
-    }).join(" ");
-    return {text: text, fits: fits};
+    return {text: bestText, fits: fits};
   }
 
-  function fitBookNameText(el){
-    var full = el.dataset.full;
-    if(full == null) return;
-    var abbr = el.dataset.abbr;
-    var avail = el.clientWidth;
-    if(!avail){ el.textContent = full; return; }
+  // Динамические минимальные ширины боксов книги — считаются один раз по
+  // РЕАЛЬНОМУ шрифту (после того как хотя бы одна карточка уже в DOM) и
+  // применяются в components.css через CSS-переменные --book-col-min/
+  // --book-compact-min (ТЗ от 10.09, п.1 и п.2):
+  //   --book-col-min — широкий экран (≥860px), полноразмерная карточка:
+  //     минимальная ширина колонки, при которой ЛЮБОЕ полное название
+  //     книги гарантированно помещается без сокращения — что бы
+  //     пользователь ни выбрал (1/2/3 колонки), название видно целиком;
+  //     если колонок выбрано больше, чем помещается при этой минимальной
+  //     ширине, CSS (column-count+column-width) сам уменьшит их число, а
+  //     не сожмёт колонку — см. components.css.
+  //   --book-compact-min — узкий экран, компактная плитка (свёрнутая
+  //     книга, 2-3 колонки): минимальная ширина, при которой ГОТОВОЕ
+  //     короткое сокращение книги (data-abbr) гарантированно помещается —
+  //     "нижняя граница" размера бокса, чтобы сокращение не пришлось
+  //     обрезать ещё сильнее самого сокращения.
+  function computeBookCardMinWidths(){
+    if(!booksContainer || !mainEl) return;
+    var sampleNameEl = booksContainer.querySelector(".book-name");
+    var sampleCountEl = booksContainer.querySelector(".book-count");
+    if(!sampleNameEl || !sampleCountEl) return;
+    var nameCs = getComputedStyle(sampleNameEl);
+    var nameFont = nameCs.fontStyle + " " + nameCs.fontWeight + " " + nameCs.fontSize + "/" + nameCs.lineHeight + " " + nameCs.fontFamily;
+    var nameLetterSpacing = nameCs.letterSpacing;
+    var countCs = getComputedStyle(sampleCountEl);
+    var countFont = countCs.fontStyle + " " + countCs.fontWeight + " " + countCs.fontSize + "/" + countCs.lineHeight + " " + countCs.fontFamily;
+
+    var maxFullWidth = 0, maxAbbrWidth = 0;
+    sections.forEach(function(s){
+      s.books.forEach(function(b){
+        var wFull = measureTextWidth(b[0], nameFont, nameLetterSpacing);
+        if(wFull > maxFullWidth) maxFullWidth = wFull;
+        var wAbbr = measureTextWidth(b[1], nameFont, nameLetterSpacing);
+        if(wAbbr > maxAbbrWidth) maxAbbrWidth = wAbbr;
+      });
+    });
+    // Кнопка "Показать/Скрыть прочитанное" рендерится в том же гриде той
+    // же вёрсткой (см. HIDE_PROGRESS_TEXTS) — учитываем её тексты в тех же
+    // порогах, иначе она может не влезть при значении, посчитанном только
+    // по книгам.
+    [HIDE_PROGRESS_TEXTS.show, HIDE_PROGRESS_TEXTS.hide].forEach(function(t){
+      var wFull = measureTextWidth(t.full, nameFont, nameLetterSpacing);
+      if(wFull > maxFullWidth) maxFullWidth = wFull;
+      var wAbbr = measureTextWidth(t.abbr, nameFont, nameLetterSpacing);
+      if(wAbbr > maxAbbrWidth) maxAbbrWidth = wAbbr;
+    });
+
+    // Самый широкий возможный счётчик во всём проекте — "150 / 150"
+    // (Псалмы, 150 глав, все прочитаны) шире любого другого "X / Y".
+    var countWidth = measureTextWidth("150 / 150", countFont, "0px") + 16; // +паддинг пилюли (.book-count{padding:2px 8px})
+    var toggleWidth = 26; // .toggle-check
+    var wideGap = 10;          // .book-header-content{gap:10px} — полноразмерная карточка
+    var wideHeaderPadding = 28; // .book-header-content{padding:0 14px}, с двух сторон — полноразмерная карточка
+    // Компактный режим (2/3 колонки на узком экране, components.css,
+    // блок @media(max-width:859px)) — там же .book-header-content получает
+    // уменьшенные padding:0 10px / gap:6px безусловно (ТЗ от 11.09: 3
+    // колонки должны помещаться на самом узком современном телефоне,
+    // эталон — Poco X6 Pro, 394px). Эти цифры здесь и в CSS должны
+    // совпадать один в один — иначе получится рассинхрон (JS резервирует
+    // место под одни отступы, а рендерится с другими).
+    var compactGap = 6;
+    var compactHeaderPadding = 20; // components.css: .book-header-content{padding:0 10px} в компактном режиме — правка от 10.09, второй заход
+
+    // Широкая карточка: видны имя + счётчик + стрелка-переключатель — два
+    // зазора между тремя детьми.
+    // Потолок 358px (BOOK_FULL_MAX_WIDTH выше) — иначе main{max-width} и
+    // column-width в components.css унаследуют неограниченную величину и
+    // колонка сможет стать шире 358px на широких экранах (ТЗ, full, п.2).
+    var wideMin = Math.min(
+      Math.ceil(maxFullWidth + countWidth + toggleWidth + wideGap*2 + wideHeaderPadding + BOOK_NAME_SAFETY_MARGIN),
+      BOOK_FULL_MAX_WIDTH
+    );
+    // Компактная плитка: стрелка скрыта (components.css,
+    // .book-header:not(.expanded) .toggle-check), один зазор имя-счётчик.
+    var compactMin = Math.ceil(maxAbbrWidth + countWidth + compactGap + compactHeaderPadding + BOOK_NAME_SAFETY_MARGIN);
+
+    mainEl.style.setProperty("--book-col-min", wideMin + "px");
+    mainEl.style.setProperty("--book-compact-min", compactMin + "px");
+  }
+
+  // Финальная подстраховка: что бы ни выбрала логика выше (полное имя,
+  // пословное сокращение или готовый абрив), последний символ иногда мог
+  // обрезаться визуально ПОПОЛАМ (clip ровно по границе бокса). Эта
+  // функция ничего не решает сама — просто гарантирует, что на экран
+  // попадают только целые буквы: если строка чуть-чуть не влезает,
+  // отрезает по одному символу с конца, а не полбуквы.
+  function ensureWholeCharsFit(text, avail, font, letterSpacing){
+    while(text.length > 0 && measureTextWidth(text, font, letterSpacing) > avail){
+      text = text.slice(0, -1);
+    }
+    return text;
+  }
+
+  // Ширина шрифта берётся с ЛЮБОГО .book-name — все они используют одни и
+  // те же CSS-свойства (font, letter-spacing), поэтому неважно, с какого
+  // конкретно элемента её снять.
+  function measureBookNameFont(el){
     var cs = getComputedStyle(el);
-    var font = cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + "/" + cs.lineHeight + " " + cs.fontFamily;
-    if(measureTextWidth(full, font) <= avail){
+    return {
+      font: cs.fontStyle + " " + cs.fontWeight + " " + cs.fontSize + "/" + cs.lineHeight + " " + cs.fontFamily,
+      letterSpacing: cs.letterSpacing
+    };
+  }
+
+  // Ширина бокса книги ОДНА И ТА ЖЕ у всех карточек в текущей раскладке
+  // (одинаковое число колонок, одинаковая ширина экрана) — поэтому вместо
+  // измерения el.clientWidth у КАЖДОГО элемента по отдельности (что и
+  // приводило к разнобою уровней между соседними карточками при малейшей
+  // погрешности измерения) берём её ОДИН раз с первого попавшегося
+  // .book-name и используем эту единую ширину для решения уровня целиком
+  // по всей сетке.
+  function canonicalBookBoxWidth(){
+    if(!booksContainer) return 0;
+    var el = booksContainer.querySelector(".book-name");
+    if(!el) return 0;
+    return el.clientWidth - BOOK_NAME_SAFETY_MARGIN;
+  }
+
+  // До какой минимальной ширины можно ужать уровень 2 (среднее сокращение)
+  // для конкретного full-имени — т.е. текст при максимальной обрезке
+  // самого длинного слова до BOOK_NAME_MIN_WORD_LEN. null — если у этого
+  // full вообще нет уровня 2 (однословное название).
+  function minimalMediumWidth(full, font, letterSpacing){
+    var words = full.split(" ");
+    var override = BOOK_MEDIUM_OVERRIDE[full];
+    if(override != null) return measureTextWidth(override, font, letterSpacing);
+    var steps = BOOK_MEDIUM_STEPS[full];
+    if(steps && steps.length){
+      return measureTextWidth(steps[steps.length - 1], font, letterSpacing);
+    }
+    var idx = 0, longest = words[0].length;
+    for(var i = 1; i < words.length; i++){
+      if(words[i].length > longest){ longest = words[i].length; idx = i; }
+    }
+    var minLen = Math.min(BOOK_NAME_MIN_WORD_LEN, words[idx].length);
+    var text = words.map(function(w, i){
+      return (i === idx && minLen < w.length) ? (truncateWordToConsonant(w, minLen) + ".") : w;
+    }).join(" ");
+    return measureTextWidth(text, font, letterSpacing);
+  }
+
+  // Все full-тексты, которые сейчас реально показаны в сетке книг —
+  // включая кнопку "Показать/Скрыть прочитанное" (см. её komментарий выше,
+  // HIDE_PROGRESS_TEXTS) — по факту DOM, а не только по статическому
+  // списку sections, чтобы ничего не рассинхронизировалось.
+  function collectGridFullTexts(){
+    if(!booksContainer) return [];
+    var out = [];
+    Array.prototype.forEach.call(booksContainer.querySelectorAll(".book-name"), function(el){
+      if(el.dataset.full != null){
+        out.push({full: el.dataset.full, skipMedium: !!el.dataset.skipMedium});
+      }
+    });
+    return out;
+  }
+
+  // Диагностика TZ_book_grid_levels_bug.md, раздел 2 (full/medium при 1
+  // колонке) — временно, до подтверждения причины расхождения. Показывает
+  // фактические canonicalBookBoxWidth()/maxFullWidth(/maxMinimalMedium) и
+  // выбранный level в момент вызова decideBookGridLevel — видно только при
+  // включённой галочке "Включить режим отладки" (вкладка настроек
+  // "Шестерёнка"), см. debug.js. Не влияет на обычных пользователей: пока
+  // галочка выключена, Debug.log ничего не делает.
+  function logBookGridLevelDecision(level, boxWidth, maxFullWidth, maxMinimalMedium){
+    if(!window.Debug) return;
+    window.Debug.log("decideBookGridLevel: cols=" + getBookColumns() +
+      " boxWidth=" + boxWidth.toFixed(1) +
+      " maxFullWidth=" + maxFullWidth.toFixed(1) +
+      (maxMinimalMedium != null ? " maxMinimalMedium=" + maxMinimalMedium.toFixed(1) : "") +
+      " -> level=" + level);
+  }
+
+  // Решает ОДИН уровень (1/2/3) для ВСЕЙ сетки книг по единой ширине
+  // бокса — см. заголовочный комментарий раздела "АВТОСОКРАЩЕНИЕ НАЗВАНИЙ
+  // КНИГ" выше.
+  // ТЗ от 10.09 (TZ_book_grid_levels_bug.md, раздел 2 — full/medium при 1
+  // колонке), исправлено: элементы с data-skip-medium (сейчас только кнопка
+  // "Показать/Скрыть прочитанное") больше НЕ участвуют в выборе общего
+  // уровня сетки. У такого элемента есть своя независимая лесенка ступеней
+  // (HIDE_PROGRESS_STEPS_BY_FULL) — она подбирает подходящий по ширине
+  // вариант САМА, при любом уровне 1/2/3 (см. renderSkipMediumEntry ниже),
+  // поэтому ей не нужно, чтобы вся сетка "нарочно" просела до уровня 2/3
+  // ради неё. Раньше длинный full-текст кнопки ("Показать прочитанное")
+  // почти всегда не помещался в бокс книги при 1 колонке — это тянуло вниз
+  // ВЕСЬ грид и показывало сокращения типа "Быт."/"Исх." даже там, где
+  // полное название книги спокойно влезало само по себе.
+  function decideBookGridLevel(boxWidth, font, letterSpacing){
+    var items = collectGridFullTexts().filter(function(it){ return !it.skipMedium; });
+    if(!items.length) return 1;
+
+    var maxFullWidth = 0;
+    items.forEach(function(it){
+      var w = measureTextWidth(it.full, font, letterSpacing);
+      if(w > maxFullWidth) maxFullWidth = w;
+    });
+    if(boxWidth >= maxFullWidth){
+      logBookGridLevelDecision(1, boxWidth, maxFullWidth, null);
+      return 1;
+    }
+
+    // Уровень 2 годится для всей сетки, только если ДАЖЕ у самого
+    // неудобного многословного названия минимальный (предельно обрезанный)
+    // вариант среднего сокращения помещается в текущую ширину бокса.
+    // Однословные названия в этом сравнении не участвуют — на уровне 2 они
+    // и так просто показывают готовый короткий код, это не сужает порог.
+    var maxMinimalMedium = 0, hasMedium = false;
+    items.forEach(function(it){
+      var mw = minimalMediumWidth(it.full, font, letterSpacing);
+      if(mw == null) return;
+      hasMedium = true;
+      if(mw > maxMinimalMedium) maxMinimalMedium = mw;
+    });
+    if(hasMedium && boxWidth >= maxMinimalMedium){
+      logBookGridLevelDecision(2, boxWidth, maxFullWidth, maxMinimalMedium);
+      return 2;
+    }
+
+    logBookGridLevelDecision(3, boxWidth, maxFullWidth, maxMinimalMedium);
+    return 3;
+  }
+
+  // Отрисовка элемента с data-skip-medium (сейчас — кнопка "Показать/
+  // Скрыть прочитанное") — НЕЗАВИСИМО от общего уровня сетки (см.
+  // decideBookGridLevel выше: такие элементы больше не участвуют в его
+  // выборе). Показывает full целиком, если влезает; иначе идёт по своей
+  // лесенке ступеней (HIDE_PROGRESS_STEPS_BY_FULL) сверху вниз и берёт
+  // первую влезающую; если ступеней нет вообще — готовый короткий код.
+  function renderSkipMediumEntry(el, boxWidth, font, letterSpacing){
+    var full = el.dataset.full;
+    var abbr = el.dataset.abbr;
+    if(measureTextWidth(full, font, letterSpacing) <= boxWidth){
       el.textContent = full;
       return;
     }
-    var wordFit = fitBookNameWords(full, avail, font);
-    if(wordFit.fits){
-      el.textContent = wordFit.text;
+    var steps = HIDE_PROGRESS_STEPS_BY_FULL[full];
+    if(steps && steps.length){
+      var chosen = steps[steps.length - 1];
+      for(var si = 0; si < steps.length; si++){
+        if(measureTextWidth(steps[si], font, letterSpacing) <= boxWidth){ chosen = steps[si]; break; }
+      }
+      el.textContent = ensureWholeCharsFit(chosen, boxWidth, font, letterSpacing);
       return;
     }
-    // Даже минимальная пословная обрезка не влезла — тесно настолько, что
-    // читаемое сокращение по словам невозможно. Переходим на готовое
-    // короткое сокращение книги без точек, если оно есть и помещается,
-    // иначе используем лучшее, что получилось.
-    if(abbr && measureTextWidth(abbr, font) <= avail){
-      el.textContent = abbr;
+    el.textContent = ensureWholeCharsFit(abbr || full, boxWidth, font, letterSpacing);
+  }
+
+  // Рендерит ОДИН элемент под уже решённый для всей сетки уровень
+  // (используется ТОЛЬКО широкой сеткой — см. fitBookNameText ниже).
+  function renderBookNameAtLevel(el, level, boxWidth, font, letterSpacing){
+    var full = el.dataset.full;
+    if(full == null) return;
+    if(el.dataset.skipMedium){
+      renderSkipMediumEntry(el, boxWidth, font, letterSpacing);
       return;
     }
-    el.textContent = abbr || wordFit.text;
+    var abbr = el.dataset.abbr;
+    if(level === 1){
+      el.textContent = ensureWholeCharsFit(full, boxWidth, font, letterSpacing);
+      return;
+    }
+    if(level === 2){
+      var medium = fitBookNameMedium(full, boxWidth, font, letterSpacing);
+      el.textContent = ensureWholeCharsFit(medium.text, boxWidth, font, letterSpacing);
+      return;
+    }
+    el.textContent = ensureWholeCharsFit(abbr || full, boxWidth, font, letterSpacing);
+  }
+
+  // Рендерит ОДИН элемент компактной сетки по СВОЕЙ СОБСТВЕННОЙ ширине —
+  // уровень (full/medium/short) решается для каждой карточки отдельно, а
+  // не одним общим на весь грид (см. комментарий у isCompactBookGrid
+  // выше, ТЗ от 10.09, пятый заход): full, если влезает целиком; иначе
+  // medium (fitBookNameMedium — обрезка самого длинного слова до
+  // согласной, одна точка), если предельно обрезанный вариант помещается;
+  // иначе готовый короткий код.
+  // allowMedium=false (ТЗ от 10.09, финальный шаг — 3 колонки): полностью
+  // пропускает уровень medium, даже если он для конкретной короткой книги
+  // технически поместился бы — при 3 колонках плитка настолько узкая, что
+  // medium помещается ТОЛЬКО у части книг (у которых само слово короткое),
+  // и в сетке получался разнобой — часть карточек с точкой ("Ос.",
+  // "Авв.", "Пр."), часть без (готовый код "Бт", "1Лт"), визуально
+  // неряшливо. Пользователь сверил и подтвердил список готовых коротких
+  // кодов (data-abbr в sections[] — тот же, что уже был) как верный и
+  // исчерпывающий именно для этой ширины — используем full-или-abbr без
+  // компромиссного medium.
+  function renderBookNamePerItem(el, font, letterSpacing, allowMedium){
+    var full = el.dataset.full;
+    if(full == null) return;
+    var boxWidth = el.clientWidth - BOOK_NAME_SAFETY_MARGIN;
+    if(boxWidth <= 0){ el.textContent = full; return; }
+    var abbr = el.dataset.abbr;
+    if(el.dataset.skipMedium){
+      if(allowMedium){
+        renderSkipMediumEntry(el, boxWidth, font, letterSpacing);
+      } else if(measureTextWidth(full, font, letterSpacing) <= boxWidth){
+        el.textContent = full;
+      } else {
+        el.textContent = ensureWholeCharsFit(abbr || full, boxWidth, font, letterSpacing);
+      }
+      return;
+    }
+    if(measureTextWidth(full, font, letterSpacing) <= boxWidth){
+      el.textContent = full;
+      return;
+    }
+    if(allowMedium){
+      var medium = fitBookNameMedium(full, boxWidth, font, letterSpacing);
+      if(medium.fits){
+        el.textContent = ensureWholeCharsFit(medium.text, boxWidth, font, letterSpacing);
+        return;
+      }
+    }
+    el.textContent = ensureWholeCharsFit(abbr || full, boxWidth, font, letterSpacing);
+  }
+
+  // Компактная сетка 2 колонки — full/medium/short по месту (см.
+  // renderBookNamePerItem выше); 3 колонки — самая узкая плитка, medium
+  // (с точкой) отключён совсем, см. комментарий у renderBookNamePerItem
+  // (ТЗ от 10.09, финальный шаг).
+  function compactBookGridAllowsMedium(){
+    return getBookColumns() !== 3;
+  }
+
+  // Точечный пересчёт ОДНОГО элемента (например, при смене счётчика
+  // прочитанных глав — см. updateBookProgress). В широкой сетке уровень
+  // решаем заново по канонической ширине всей сетки, а не по этому
+  // элементу — иначе именно он мог бы выпасть из общего уровня; в
+  // компактной сетке (см. isCompactBookGrid) уровень и так решается по
+  // каждой карточке отдельно, поэтому пересчитываем только сам элемент.
+  function fitBookNameText(el){
+    if(!el || el.dataset.full == null) return;
+    var m = measureBookNameFont(el);
+    if(isCompactBookGrid()){
+      renderBookNamePerItem(el, m.font, m.letterSpacing, compactBookGridAllowsMedium());
+      return;
+    }
+    var boxWidth = canonicalBookBoxWidth();
+    if(boxWidth <= 0) boxWidth = el.clientWidth - BOOK_NAME_SAFETY_MARGIN;
+    if(boxWidth <= 0){ el.textContent = el.dataset.full; return; }
+    var level = decideBookGridLevel(boxWidth, m.font, m.letterSpacing);
+    var ownWidth = el.clientWidth - BOOK_NAME_SAFETY_MARGIN;
+    renderBookNameAtLevel(el, level, ownWidth > 0 ? ownWidth : boxWidth, m.font, m.letterSpacing);
   }
 
   function refreshAllBookNameFits(){
     if(!booksContainer) return;
     var nameEls = booksContainer.querySelectorAll(".book-name");
-    Array.prototype.forEach.call(nameEls, function(el){ fitBookNameText(el); });
+    if(!nameEls.length) return;
+    var m = measureBookNameFont(nameEls[0]);
+    if(isCompactBookGrid()){
+      var allowMedium = compactBookGridAllowsMedium();
+      Array.prototype.forEach.call(nameEls, function(el){
+        renderBookNamePerItem(el, m.font, m.letterSpacing, allowMedium);
+      });
+      return;
+    }
+    var boxWidth = canonicalBookBoxWidth();
+    if(boxWidth <= 0) return;
+    var level = decideBookGridLevel(boxWidth, m.font, m.letterSpacing);
+    Array.prototype.forEach.call(nameEls, function(el){
+      var ownWidth = el.clientWidth - BOOK_NAME_SAFETY_MARGIN;
+      renderBookNameAtLevel(el, level, ownWidth > 0 ? ownWidth : boxWidth, m.font, m.letterSpacing);
+
+    });
+  }
+  // если шрифт дозагрузится позже первого замера (веб-шрифт ещё не был
+  // готов на момент rAF), пересчитываем ещё раз, когда он точно готов —
+  // иначе однажды подобранный текст может стать чуть шире факта.
+  if(document.fonts && document.fonts.ready){
+    document.fonts.ready.then(function(){
+      computeBookCardMinWidths();
+      refreshAllBookNameFits();
+    });
   }
 
   function initPage(){
@@ -1695,15 +2198,6 @@
         nameEl.dataset.full = bookName;
         nameEl.dataset.abbr = bookAbbr;
 
-        // Сокращённое название — видно только в компактном режиме списка
-        // книг на узких экранах (см. "Количество колонок для книг" в
-        // настройках, .books-compact в components.css); в обычном режиме
-        // всегда скрыт через display:none, полноразмерная карточка его не
-        // использует вовсе.
-        var abbrEl = document.createElement("div");
-        abbrEl.className = "book-abbr";
-        abbrEl.textContent = bookAbbr;
-
         var countEl = document.createElement("div");
         countEl.className = "book-count";
 
@@ -1712,7 +2206,6 @@
         toggleEl.innerHTML = "<span>&gt;</span>";
 
         headerContent.appendChild(nameEl);
-        headerContent.appendChild(abbrEl);
         headerContent.appendChild(countEl);
         headerContent.appendChild(toggleEl);
         headerEl.appendChild(fillEl);
@@ -1871,7 +2364,7 @@
         card.appendChild(chaptersContainer);
         frag.appendChild(card);
 
-        bookMeta[bookName] = {fillEl:fillEl, countEl:countEl, chapterCount:chapterCount, card:card, grid:grid, gridHeight:null};
+        bookMeta[bookName] = {fillEl:fillEl, countEl:countEl, nameEl:nameEl, chapterCount:chapterCount, card:card, grid:grid, gridHeight:null};
         updateBookProgress(bookName);
       });
     });
@@ -1883,6 +2376,7 @@
     // подключен к документу). Дальше эта высота переиспользуется при каждом
     // клике на книгу вместо повторного дорогого измерения.
     cacheAllChapterGridHeights();
+    computeBookCardMinWidths();
     requestAnimationFrame(refreshAllBookNameFits);
 
     addHideProgressButton();
@@ -1942,8 +2436,11 @@
     var nameEl = document.createElement("div");
     nameEl.className = "book-name";
     nameEl.id = "hideProgressToggleText";
-    nameEl.textContent = hideCompletedActive ? "Показать прочитанное" : "Скрыть прочитанное";
-    nameEl.dataset.full = nameEl.textContent;
+    var hpt0 = hideCompletedActive ? HIDE_PROGRESS_TEXTS.show : HIDE_PROGRESS_TEXTS.hide;
+    nameEl.textContent = hpt0.full;
+    nameEl.dataset.full = hpt0.full;
+    nameEl.dataset.abbr = hpt0.abbr;
+    nameEl.dataset.skipMedium = "1";
     var countEl = document.createElement("div");
     countEl.className = "book-count";
     countEl.id = "hideProgressCountBadge";
@@ -1988,9 +2485,11 @@
     scheduleCloudPush();
     var textEl = document.getElementById("hideProgressToggleText");
     if(textEl){
-      textEl.textContent = hideCompletedActive ? "Показать прочитанное" : "Скрыть прочитанное";
-      textEl.dataset.full = textEl.textContent;
-      fitBookNameText(textEl);
+      var hpt1 = hideCompletedActive ? HIDE_PROGRESS_TEXTS.show : HIDE_PROGRESS_TEXTS.hide;
+      textEl.textContent = hpt1.full;
+      textEl.dataset.full = hpt1.full;
+      textEl.dataset.abbr = hpt1.abbr;
+      refreshAllBookNameFits();
     }
     applyHideCompletedBooks();
   }
@@ -2001,6 +2500,16 @@
     var pct = meta.chapterCount ? Math.round((checked/meta.chapterCount)*100) : 0;
     meta.fillEl.style.width = pct + "%";
     meta.countEl.textContent = checked + " / " + meta.chapterCount;
+    // БАГ "съедаются буквы" (ТЗ от 10.09): .book-count — сосед .book-name
+    // по той же flex-строке (.book-header-content). Раньше при отметке
+    // главы менялся только текст счётчика, а .book-name пересчитывался
+    // только при первой отрисовке/смене колонок/resize — если число цифр
+    // в счётчике менялось ("9 / 24" → "10 / 24"), его пилюля становилась
+    // шире и отбирала часть места у названия, но подобранный текст
+    // названия оставался прежним: CSS (overflow:hidden;text-overflow:clip)
+    // просто обрезал вылезший хвост, иногда ровно посередине буквы. Дёшево
+    // пересчитываем подгонку тут же, при каждом изменении счётчика.
+    if(meta.nameEl) fitBookNameText(meta.nameEl);
     if(hideCompletedActive && meta.card){
       meta.card.style.display = (meta.chapterCount > 0 && checked === meta.chapterCount) ? "none" : "";
     }

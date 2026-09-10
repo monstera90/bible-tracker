@@ -1558,6 +1558,7 @@
     border-radius:6px;
     box-shadow:0 2px 6px rgba(60,39,22,.25);
     overflow:hidden;
+    container-type:inline-size;
   }
 
   /* book header IS the progress bar */
@@ -1602,24 +1603,16 @@
     color:var(--ink);
     white-space:nowrap;
     overflow:hidden;
-    text-overflow:ellipsis;
+    text-overflow:clip; /* никакого "…" — текст уже подогнан в my.js */
   }
 
-  /* Больше не переключается на .book-abbr в компактном режиме — вместо
-     этого my.js сам обрезает текст .book-name до реально влезающей длины
-     (canvas-замер + обрезка по согласной, см. fitBookNameText/
-     refreshAllBookNameFits в my.js), поэтому короткие названия («Бытие»,
-     «Исход», «Левит», «Числа») остаются полными, а длинные обрезаются
-     ровно настолько, насколько не влезли. .book-abbr оставлен в разметке
-     как ничем не используемый резерв — всегда скрыт. */
-  .book-abbr{
-    display:none;
-    flex:1;
-    font-weight:bold;
-    font-size:20px;
-    color:var(--ink);
-    text-align:left;
-  }
+  /* my.js сам подгоняет текст .book-name до реально влезающей длины —
+     полное название → среднее (одно слово, одна точка) → готовое короткое
+     сокращение книги (см. АВТОСОКРАЩЕНИЕ НАЗВАНИЙ КНИГ / fitBookNameText в
+     my.js), поэтому короткие названия («Бытие», «Исход», «Левит», «Числа»)
+     остаются полными, а длинные обрезаются ровно настолько, насколько не
+     влезли. Отдельного элемента под сокращение (было .book-abbr) больше
+     нет — вместо него my.js меняет textContent прямо у .book-name. */
 
   .book-count{
     font-size:12.5px;
@@ -1758,19 +1751,40 @@
      CSS multi-column, а не Grid: раскрытие одной книги увеличивает её
      высоту, но НЕ тянет за собой высоту соседей "по строке" (как было бы
      в Grid, где высота строки равна высоте самого высокого элемента) —
-     следующие по списку книги просто перетекают в соседний столбец. */
+     следующие по списку книги просто перетекают в соседний столбец.
+
+     ТЗ от 10.09, п.1: на широком экране название должно влезать ПОЛНОСТЬЮ
+     при любом числе колонок — вместо фиксированной ширины колонки задаём
+     и column-count (сколько выбрал пользователь), и column-width
+     (--book-col-min, px — считается в my.js, computeBookCardMinWidths, по
+     самому длинному полному названию книги реальным шрифтом). Спецификация
+     CSS multi-column гарантирует, что колонка не станет ýже column-width:
+     если экрану не хватает места на заданное число колонок при этой
+     ширине, браузер сам уменьшит их число — а не сожмёт колонку до
+     обрезки текста. max-width контейнера считается от той же переменной,
+     чтобы при большом числе колонок карточки не растягивались шире, чем
+     нужно, но не мельче гарантированного минимума ("используй больше
+     места, если нужно" — но не больше, чем нужно). */
   @media (min-width:860px){
-    main[data-book-columns="2"],
+    main[data-book-columns="2"]{
+      max-width:calc(2*var(--book-col-min, 380px) + 14px + 40px);
+    }
     main[data-book-columns="3"]{
-      max-width:1180px;
+      max-width:calc(3*var(--book-col-min, 380px) + 28px + 40px);
     }
     main[data-book-columns="2"]#booksContainer,
     main[data-book-columns="3"]#booksContainer{
       display:block;
       column-gap:14px;
     }
-    main[data-book-columns="2"]#booksContainer{ columns:2; }
-    main[data-book-columns="3"]#booksContainer{ columns:3; }
+    main[data-book-columns="2"]#booksContainer{
+      column-count:2;
+      column-width:var(--book-col-min, 380px);
+    }
+    main[data-book-columns="3"]#booksContainer{
+      column-count:3;
+      column-width:var(--book-col-min, 380px);
+    }
     main[data-book-columns="2"] .section-label,
     main[data-book-columns="3"] .section-label{
       column-span:all;
@@ -1795,13 +1809,39 @@
     main[data-book-columns="2"]#booksContainer,
     main[data-book-columns="3"]#booksContainer{
       display:grid;
-      gap:8px;
+      gap:6px;
     }
+    /* Нижняя граница ширины плитки (--book-compact-min, my.js,
+       computeBookCardMinWidths) — минимум, при котором даже готовое
+       короткое сокращение книги ("Бт"/"1См"/"Иуды") гарантированно
+       помещается рядом со счётчиком; сокращать его дальше некуда, поэтому
+       плитка не должна стать ýже этого порога (ТЗ от 10.09, п.2, "размеры
+       бокса от"). Верхняя граница ("до") — сам смысл сокращённого режима:
+       как только реальная плитка становится шире, чем нужно для полного
+       названия, my.js (fitBookNameText) сам покажет его целиком. */
+    /* minmax(min(X, равная-доля), 1fr) — а не просто minmax(X, 1fr):
+       --book-compact-min (my.js, computeBookCardMinWidths) — это ОЦЕНКА
+       "с запасом" (полноразмерный шрифт .book-name 20px + пилюля счётчика
+       под самый широкий возможный случай "150 / 150"), а не гарантия. На
+       части экранов эта оценка оказывается шире, чем реально есть места
+       под N равных колонок — а у repeat(N, minmax(X,1fr)) с фиксированным
+       числом колонок нижняя граница X является ЖЁСТКИМ полом: браузер (в
+       отличие от auto-fill/auto-fit) не имеет права ни уменьшить число
+       колонок, ни сжать трек ýже X, поэтому сетка просто вылезает за
+       пределы экрана целиком (кнопки обрезаются/уезжают вбок — баг от
+       10.09, ТЗ пользователя "не влезают в экран все кнопки").
+       min(var(--book-compact-min,86px), calc((100% - gap*(N-1))/N)) не
+       даёт нижней границе трека стать шире, чем контейнер реально может
+       дать при делении поровну на N колонок — трек в худшем случае просто
+       равен своей доле контейнера (переполнения нет никогда), а при
+       нехватке места под полный текст сокращения дальнейшую подгонку, как
+       и раньше, доделывает my.js (fitBookNameText по el.clientWidth) —
+       переполнение по горизонтали устранено, а не сдвинуто чуть дальше. */
     main[data-book-columns="2"]#booksContainer{
-      grid-template-columns:repeat(2, minmax(0,1fr));
+      grid-template-columns:repeat(2, minmax(min(var(--book-compact-min, 86px), calc((100% - 6px)/2)), 1fr));
     }
     main[data-book-columns="3"]#booksContainer{
-      grid-template-columns:repeat(3, minmax(0,1fr));
+      grid-template-columns:repeat(3, minmax(min(var(--book-compact-min, 86px), calc((100% - 12px)/3)), 1fr));
     }
     main[data-book-columns="2"] .section-label,
     main[data-book-columns="3"] .section-label{
@@ -1812,12 +1852,46 @@
       min-width:0;
     }
     /* .book-name показывается всегда (включая свёрнутое состояние) —
-       нужный вариант (полное название или обрезанное по факту помещения)
-       вычисляет и подставляет my.js, см. fitBookNameText/
-       refreshAllBookNameFits. .book-abbr больше не задействован. */
+       нужный вариант (полное название, среднее сокращение или готовый
+       короткий код) вычисляет и подставляет my.js, см. fitBookNameText/
+       refreshAllBookNameFits.
+       ТЗ от 10.09, четвёртый заход (отменяет третий заход того же дня):
+       компактная сетка снова проходит через общий алгоритм уровней
+       (decideBookGridLevel/renderBookNameAtLevel в my.js) с реальной
+       узкой шириной плитки — вместо жёсткого data-abbr теперь постепенное
+       "слово."-сокращение (обрезка до согласной, одна точка), подобранное
+       под фактически доступное место. Базовый overflow:hidden/
+       text-overflow:clip у .book-name (см. правило .book-name выше по
+       файлу) здесь больше не отключается — посимвольная подгонка
+       (ensureWholeCharsFit) снова гарантирует, что текст всегда помещается
+       в бокс, наезжать на пилюлю счётчика больше нечему. */
     main[data-book-columns="2"] .book-header:not(.expanded) .toggle-check,
     main[data-book-columns="3"] .book-header:not(.expanded) .toggle-check{
       display:none;
+    }
+    /* Уменьшенные отступы — фиксированные для компактного режима (2/3
+       колонки на узком экране) целиком, БЕЗ отдельного @container-порога:
+       раньше они включались только при ширине плитки ≤160px через
+       @container, а --book-compact-min в my.js всегда считался по этим
+       же уменьшенным цифрам — при плитке шире 160px, но всё ещё уже
+       "полноразмерной", получался рассинхрон (JS резервировал место под
+       маленькие отступы, а CSS фактически применял большие, из
+       полноразмерного .book-header-content). Одни и те же цифры (сейчас —
+       padding 0 10px, gap 6px) везде — и здесь, и в computeBookCardMinWidths
+       (my.js, compactHeaderPadding) — компактный режим применяется целиком
+       по data-book-columns, а не по случайно пересечённому порогу ширины
+       контейнера. Были 0 14px / gap 10px (как в полноразмерной карточке),
+       затем 0 8px (правка от 10.09), сейчас увеличено до 0 10px (правка от
+       10.09, второй заход — "увеличь отступы немного слева и справа,
+       посмотрим как будет").
+       ТЗ от 11.09: 3 колонки должны помещаться на самом узком современном
+       телефоне (эталон — Poco X6 Pro, CSS-ширина экрана 394px); граница
+       переполнения дополнительно подстрахована min()-клампом в
+       grid-template-columns ниже (см. правку от 10.09 выше по файлу). */
+    main[data-book-columns="2"] .book-header-content,
+    main[data-book-columns="3"] .book-header-content{
+      padding:0 10px;
+      gap:6px;
     }
     main[data-book-columns="2"] .book-card.book-open,
     main[data-book-columns="3"] .book-card.book-open{
