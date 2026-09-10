@@ -1826,15 +1826,16 @@
       });
     });
     // Кнопка "Показать/Скрыть прочитанное" рендерится в том же гриде той
-    // же вёрсткой (см. HIDE_PROGRESS_TEXTS) — учитываем её тексты в тех же
-    // порогах, иначе она может не влезть при значении, посчитанном только
-    // по книгам.
-    [HIDE_PROGRESS_TEXTS.show, HIDE_PROGRESS_TEXTS.hide].forEach(function(t){
-      var wFull = measureTextWidth(t.full, nameFont, nameLetterSpacing);
-      if(wFull > maxFullWidth) maxFullWidth = wFull;
-      var wAbbr = measureTextWidth(t.abbr, nameFont, nameLetterSpacing);
-      if(wAbbr > maxAbbrWidth) maxAbbrWidth = wAbbr;
-    });
+    // же вёрсткой (см. HIDE_PROGRESS_TEXTS), но НЕ учитывается здесь: её
+    // полная фраза заметно длиннее любого названия книги и раздувала бы
+    // ширину колонки (--book-col-min/--book-compact-min) для ВСЕЙ сетки
+    // ради одного элемента, из-за чего на широком экране могло не влезать
+    // заявленное число колонок с реальными названиями книг (ТЗ от 10.09,
+    // "3 колонки на планшете" — раньше не влезали). Это безопасно убрать:
+    // сама кнопка уже независимо решает, что показать при нехватке места
+    // (renderSkipMediumEntry — full → своя лесенка HIDE_PROGRESS_STEPS_BY_FULL
+    // → abbr с посимвольной подгонкой), так же как decideBookGridLevel
+    // (см. комментарий выше) уже исключает её из выбора уровня для книг.
 
     // Самый широкий возможный счётчик во всём проекте — "150 / 150"
     // (Псалмы, 150 глав, все прочитаны) шире любого другого "X / Y".
