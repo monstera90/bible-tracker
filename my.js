@@ -1574,21 +1574,12 @@
   // Узкий экран (тот же порог, что и components.css, @media(max-width:859px))
   // + выбрано 2 или 3 колонки — именно тогда включается компактная сетка
   // маленьких плиток (см. комментарий выше про BOOK_COLUMNS_WIDE_MQ).
-  // ТЗ от 10.09, пятый заход (четвёртый заход не сработал — см. ниже):
-  // компактная сетка решает уровень (full/medium/short) ДЛЯ КАЖДОЙ
-  // карточки ОТДЕЛЬНО (renderBookNamePerItem), а не одним общим уровнем
-  // на весь грид, как широкая сетка (decideBookGridLevel). Причина:
-  // единый уровень на всю сетку топит ВСЕ карточки до короткого кода
-  // из-за одной-единственной книги с длинным словом ("1 Фессалоникийцам")
-  // — даже предельно обрезанный вид этого одного названия не помещается в
-  // узкую плитку 2-3 колонок, а значит уровень 2 не проходит ни для кого
-  // во всём гриде, хотя «Бытие»/«Исход» и т.п. спокойно поместились бы
-  // сами по себе. Поэтому в компактной сетке каждая карточка меряется по
-  // своей собственной ширине бокса (та же у всех, т.к. колонки равные) и
-  // получает то, что реально влезает именно её тексту — «Бытие» может
-  // остаться полным, а «1 Фессалоникийцам» уйти сразу в «1 Фесс.» — это
-  // ожидаемо, а не "разнобой": в отличие от широкой сетки, здесь у
-  // соседних плиток и так разные пропорции текста и счётчика.
+  // Уровень (full/medium/short) решается ДЛЯ КАЖДОЙ карточки ОТДЕЛЬНО
+  // (renderBookNamePerItem) — с 11.09 так делает и широкая сетка тоже, см.
+  // "АВТОСОКРАЩЕНИЕ НАЗВАНИЙ КНИГ" ниже; здесь, в компактной сетке, отличие
+  // только в allowMedium (см. compactBookGridAllowsMedium ниже — при 3
+  // колонках на узком экране medium полностью отключён, а не просто
+  // "решается отдельно").
   function isCompactBookGrid(){
     var cols = getBookColumns();
     if(cols !== 2 && cols !== 3) return false;
@@ -1597,45 +1588,47 @@
   }
 
   // ===================== АВТОСОКРАЩЕНИЕ НАЗВАНИЙ КНИГ =====================
-  // Переписано 10.09, версия 2 (первая версия того же дня решала уровень
-  // ОТДЕЛЬНО для каждой книги — по факту помещается её текст или нет — из-
-  // за чего в одной и той же сетке могли одновременно оказаться полные
-  // названия, "слово."-сокращения и голые короткие коды: разнобой,
-  // выглядит неряшливо). Теперь уровень выбирается ОДИН РАЗ для всей сетки
-  // целиком (decideBookGridLevel), по единой ширине бокса — она у всех
-  // книг в текущей раскладке одинакова (см. canonicalBookBoxWidth) — и
-  // применяется ко всем элементам сетки одинаково (renderBookNameAtLevel).
+  // Переписано 11.09, версия 3 (правит версию 2 от 10.09 — см. её мотивацию
+  // ниже). Уровень решается для КАЖДОЙ карточки ОТДЕЛЬНО, по её собственной
+  // ширине (renderBookNamePerItem) — как в широкой сетке, так и в
+  // компактной. Версия 2 (10.09) решала ОДИН уровень на весь грид сразу,
+  // по самому длинному названию во всей сетке — сделано было затем, чтобы
+  // избежать разнобоя (одновременно полные названия, "слово."-сокращения и
+  // голые короткие коды в одной сетке). Но при 3 узких колонках это
+  // означало, что единственное длинное название ("1 Фессалоникийцам" и
+  // т.п.) утягивало вниз ВСЕ карточки, включая короткие, которым места
+  // хватает с запасом ("Быт."/"Исх." вместо "Бытие"/"Исход") — ТЗ от
+  // 11.09: "для такой ширины контейнеров должны быть полные названия".
+  // Разнобой (часть карточек полные, часть сокращены из-за одного-двух
+  // по-настоящему длинных названий) принят как меньшее зло по сравнению со
+  // сплошной обрезкой коротких названий там, где им хватает места.
   // Число колонок (кнопки 1/2/3 в настройках) на выбор уровня НЕ влияет
   // напрямую — только косвенно, через то, какой шириной оборачивается
   // бокс книги при разном числе колонок и разном экране.
   //
-  //   1) Полное название — показывается, если при данной ширине бокса
-  //      САМОЕ ДЛИННОЕ полное название КНИГИ во всей сетке помещается
-  //      целиком. Кнопка "Показать/Скрыть прочитанное" рендерится тем же
-  //      .book-name в том же гриде (см. addHideProgressButton), но в
-  //      выборе уровня НЕ участвует и получает его независимо от книг —
-  //      у неё своя лесенка ступеней (см. п.4 ниже и
-  //      renderSkipMediumEntry), которая сама подбирает влезающий вариант
-  //      на любом уровне; раньше её длинный full-текст мог утянуть вниз
-  //      всю сетку книг, даже если каждое название книги влезало целиком
-  //      (TZ_book_grid_levels_bug.md, раздел 2 — full/medium при 1
-  //      колонке).
+  //   1) Полное название — показывается, если при ширине СВОЕЙ карточки
+  //      её полное название помещается целиком. Кнопка "Показать/Скрыть
+  //      прочитанное" рендерится тем же .book-name в том же гриде (см.
+  //      addHideProgressButton), но имеет свою отдельную лесенку ступеней
+  //      (см. п.4 ниже и renderSkipMediumEntry), а не общее правило
+  //      "полное → среднее → короткое" — у неё изначально нет среднего
+  //      сокращения в привычном смысле (data-skip-medium).
   //   2) "Среднее" сокращение — только для названий из НЕСКОЛЬКИХ слов:
   //      ужимается РОВНО ОДНО слово (самое длинное), второе слово не
   //      трогается. Обрезка всегда заканчивается на согласной (гласные
   //      "откусываются" с конца) и ставится РОВНО ОДНА точка — например
   //      «1 Фессалоникийцам» → «1 Фессалоникийц.». Двух точек в названии
   //      быть не должно: если сокращения одного слова до минимума всё
-  //      равно не хватает самому неудобному названию в сетке — вся сетка
-  //      уходит на уровень 3, а не на точку у второго слова. Для отдельных
-  //      книг можно задать вручную "правильный" вид среднего сокращения —
-  //      см. BOOK_MEDIUM_OVERRIDE. ТЗ от 10.09 (medium, п.3): однословные
-  //      названия («Бытие» → «Быт.», «Филимону» → «Филим.») ТОЖЕ проходят
-  //      это правило, а не показывают сразу короткий код — правило "одно
-  //      слово, одна точка" тривиально для них, обрезаемое слово всегда
-  //      единственное. Элементы без среднего представления
-  //      (data-skip-medium) — исключение из общего правила: у кнопки
-  //      "Показать/Скрыть прочитанное" своя лесенка готовых ступеней, см.
+  //      равно не хватает, карточка уходит на уровень 3, а не на точку у
+  //      второго слова. Для отдельных книг можно задать вручную
+  //      "правильный" вид среднего сокращения — см. BOOK_MEDIUM_OVERRIDE.
+  //      ТЗ от 10.09 (medium, п.3): однословные названия («Бытие» →
+  //      «Быт.», «Филимону» → «Филим.») ТОЖЕ проходят это правило, а не
+  //      показывают сразу короткий код — правило "одно слово, одна точка"
+  //      тривиально для них, обрезаемое слово всегда единственное.
+  //      Элементы без среднего представления (data-skip-medium) —
+  //      исключение из общего правила: у кнопки "Показать/Скрыть
+  //      прочитанное" своя лесенка готовых ступеней, см.
   //      HIDE_PROGRESS_STEPS_BY_FULL ниже, а не автоматическая обрезка.
   //   3) Готовое короткое сокращение книги (data-abbr, "Бт"/"Исх"/"1См" —
   //      второй элемент в sections[].books[], без точек).
@@ -1704,8 +1697,8 @@
   };
   // Лукап ступеней по текущему full-тексту (он переключается между show/
   // hide в textEl.dataset.full, см. toggleHideCompletedBooks) — используется
-  // в renderBookNameAtLevel/decideBookGridLevel вместо BOOK_MEDIUM_OVERRIDE
-  // для этого конкретного элемента (data-skip-medium).
+  // в renderSkipMediumEntry вместо BOOK_MEDIUM_OVERRIDE для этого
+  // конкретного элемента (data-skip-medium).
   var HIDE_PROGRESS_STEPS_BY_FULL = {};
   [HIDE_PROGRESS_TEXTS.show, HIDE_PROGRESS_TEXTS.hide].forEach(function(t){
     HIDE_PROGRESS_STEPS_BY_FULL[t.full] = t.steps;
@@ -1802,8 +1795,9 @@
   //     НЕ зависит от этой переменной) — --book-col-min остался только
   //     потолком max-width контейнера (чтобы карточки не растягивались
   //     бесконечно на сверхширoких экранах), обрезка текста при нехватке
-  //     места решается отдельно по факту (decideBookGridLevel/
-  //     renderBookNameAtLevel, по реальной итоговой ширине колонки).
+  //     места решается отдельно по факту, поэлементно (renderBookNamePerItem,
+  //     по реальной итоговой ширине конкретной карточки — см.
+  //     "АВТОСОКРАЩЕНИЕ НАЗВАНИЙ КНИГ" ниже).
   //   --book-compact-min — узкий экран, компактная плитка (свёрнутая
   //     книга, 2-3 колонки): минимальная ширина, при которой ГОТОВОЕ
   //     короткое сокращение книги (data-abbr) гарантированно помещается —
@@ -1838,8 +1832,7 @@
     // "3 колонки на планшете" — раньше не влезали). Это безопасно убрать:
     // сама кнопка уже независимо решает, что показать при нехватке места
     // (renderSkipMediumEntry — full → своя лесенка HIDE_PROGRESS_STEPS_BY_FULL
-    // → abbr с посимвольной подгонкой), так же как decideBookGridLevel
-    // (см. комментарий выше) уже исключает её из выбора уровня для книг.
+    // → abbr с посимвольной подгонкой) — не завязана на этот расчёт.
 
     // Самый широкий возможный счётчик во всём проекте — "150 / 150"
     // (Псалмы, 150 глав, все прочитаны) шире любого другого "X / Y".
@@ -1898,129 +1891,13 @@
     };
   }
 
-  // Ширина бокса книги ОДНА И ТА ЖЕ у всех карточек в текущей раскладке
-  // (одинаковое число колонок, одинаковая ширина экрана) — поэтому вместо
-  // измерения el.clientWidth у КАЖДОГО элемента по отдельности (что и
-  // приводило к разнобою уровней между соседними карточками при малейшей
-  // погрешности измерения) берём её ОДИН раз с первого попавшегося
-  // .book-name и используем эту единую ширину для решения уровня целиком
-  // по всей сетке.
-  function canonicalBookBoxWidth(){
-    if(!booksContainer) return 0;
-    var el = booksContainer.querySelector(".book-name");
-    if(!el) return 0;
-    return el.clientWidth - BOOK_NAME_SAFETY_MARGIN;
-  }
-
-  // До какой минимальной ширины можно ужать уровень 2 (среднее сокращение)
-  // для конкретного full-имени — т.е. текст при максимальной обрезке
-  // самого длинного слова до BOOK_NAME_MIN_WORD_LEN. null — если у этого
-  // full вообще нет уровня 2 (однословное название).
-  function minimalMediumWidth(full, font, letterSpacing){
-    var words = full.split(" ");
-    var override = BOOK_MEDIUM_OVERRIDE[full];
-    if(override != null) return measureTextWidth(override, font, letterSpacing);
-    var steps = BOOK_MEDIUM_STEPS[full];
-    if(steps && steps.length){
-      return measureTextWidth(steps[steps.length - 1], font, letterSpacing);
-    }
-    var idx = 0, longest = words[0].length;
-    for(var i = 1; i < words.length; i++){
-      if(words[i].length > longest){ longest = words[i].length; idx = i; }
-    }
-    var minLen = Math.min(BOOK_NAME_MIN_WORD_LEN, words[idx].length);
-    var text = words.map(function(w, i){
-      return (i === idx && minLen < w.length) ? (truncateWordToConsonant(w, minLen) + ".") : w;
-    }).join(" ");
-    return measureTextWidth(text, font, letterSpacing);
-  }
-
-  // Все full-тексты, которые сейчас реально показаны в сетке книг —
-  // включая кнопку "Показать/Скрыть прочитанное" (см. её komментарий выше,
-  // HIDE_PROGRESS_TEXTS) — по факту DOM, а не только по статическому
-  // списку sections, чтобы ничего не рассинхронизировалось.
-  function collectGridFullTexts(){
-    if(!booksContainer) return [];
-    var out = [];
-    Array.prototype.forEach.call(booksContainer.querySelectorAll(".book-name"), function(el){
-      if(el.dataset.full != null){
-        out.push({full: el.dataset.full, skipMedium: !!el.dataset.skipMedium});
-      }
-    });
-    return out;
-  }
-
-  // Диагностика TZ_book_grid_levels_bug.md, раздел 2 (full/medium при 1
-  // колонке) — временно, до подтверждения причины расхождения. Показывает
-  // фактические canonicalBookBoxWidth()/maxFullWidth(/maxMinimalMedium) и
-  // выбранный level в момент вызова decideBookGridLevel — видно только при
-  // включённой галочке "Включить режим отладки" (вкладка настроек
-  // "Шестерёнка"), см. debug.js. Не влияет на обычных пользователей: пока
-  // галочка выключена, Debug.log ничего не делает.
-  function logBookGridLevelDecision(level, boxWidth, maxFullWidth, maxMinimalMedium){
-    if(!window.Debug) return;
-    window.Debug.log("decideBookGridLevel: cols=" + getBookColumns() +
-      " boxWidth=" + boxWidth.toFixed(1) +
-      " maxFullWidth=" + maxFullWidth.toFixed(1) +
-      (maxMinimalMedium != null ? " maxMinimalMedium=" + maxMinimalMedium.toFixed(1) : "") +
-      " -> level=" + level);
-  }
-
-  // Решает ОДИН уровень (1/2/3) для ВСЕЙ сетки книг по единой ширине
-  // бокса — см. заголовочный комментарий раздела "АВТОСОКРАЩЕНИЕ НАЗВАНИЙ
-  // КНИГ" выше.
-  // ТЗ от 10.09 (TZ_book_grid_levels_bug.md, раздел 2 — full/medium при 1
-  // колонке), исправлено: элементы с data-skip-medium (сейчас только кнопка
-  // "Показать/Скрыть прочитанное") больше НЕ участвуют в выборе общего
-  // уровня сетки. У такого элемента есть своя независимая лесенка ступеней
-  // (HIDE_PROGRESS_STEPS_BY_FULL) — она подбирает подходящий по ширине
-  // вариант САМА, при любом уровне 1/2/3 (см. renderSkipMediumEntry ниже),
-  // поэтому ей не нужно, чтобы вся сетка "нарочно" просела до уровня 2/3
-  // ради неё. Раньше длинный full-текст кнопки ("Показать прочитанное")
-  // почти всегда не помещался в бокс книги при 1 колонке — это тянуло вниз
-  // ВЕСЬ грид и показывало сокращения типа "Быт."/"Исх." даже там, где
-  // полное название книги спокойно влезало само по себе.
-  function decideBookGridLevel(boxWidth, font, letterSpacing){
-    var items = collectGridFullTexts().filter(function(it){ return !it.skipMedium; });
-    if(!items.length) return 1;
-
-    var maxFullWidth = 0;
-    items.forEach(function(it){
-      var w = measureTextWidth(it.full, font, letterSpacing);
-      if(w > maxFullWidth) maxFullWidth = w;
-    });
-    if(boxWidth >= maxFullWidth){
-      logBookGridLevelDecision(1, boxWidth, maxFullWidth, null);
-      return 1;
-    }
-
-    // Уровень 2 годится для всей сетки, только если ДАЖЕ у самого
-    // неудобного многословного названия минимальный (предельно обрезанный)
-    // вариант среднего сокращения помещается в текущую ширину бокса.
-    // Однословные названия в этом сравнении не участвуют — на уровне 2 они
-    // и так просто показывают готовый короткий код, это не сужает порог.
-    var maxMinimalMedium = 0, hasMedium = false;
-    items.forEach(function(it){
-      var mw = minimalMediumWidth(it.full, font, letterSpacing);
-      if(mw == null) return;
-      hasMedium = true;
-      if(mw > maxMinimalMedium) maxMinimalMedium = mw;
-    });
-    if(hasMedium && boxWidth >= maxMinimalMedium){
-      logBookGridLevelDecision(2, boxWidth, maxFullWidth, maxMinimalMedium);
-      return 2;
-    }
-
-    logBookGridLevelDecision(3, boxWidth, maxFullWidth, maxMinimalMedium);
-    return 3;
-  }
 
   // Отрисовка элемента с data-skip-medium (сейчас — кнопка "Показать/
-  // Скрыть прочитанное") — НЕЗАВИСИМО от общего уровня сетки (см.
-  // decideBookGridLevel выше: такие элементы больше не участвуют в его
-  // выборе). Показывает full целиком, если влезает; иначе идёт по своей
-  // лесенке ступеней (HIDE_PROGRESS_STEPS_BY_FULL) сверху вниз и берёт
-  // первую влезающую; если ступеней нет вообще — готовый короткий код.
+  // Скрыть прочитанное") — у неё нет обычного "среднего" сокращения,
+  // вместо него собственная лесенка готовых ступеней. Показывает full
+  // целиком, если влезает; иначе идёт по лесенке ступеней
+  // (HIDE_PROGRESS_STEPS_BY_FULL) сверху вниз и берёт первую влезающую;
+  // если ступеней нет вообще — готовый короткий код.
   function renderSkipMediumEntry(el, boxWidth, font, letterSpacing){
     var full = el.dataset.full;
     var abbr = el.dataset.abbr;
@@ -2035,28 +1912,6 @@
         if(measureTextWidth(steps[si], font, letterSpacing) <= boxWidth){ chosen = steps[si]; break; }
       }
       el.textContent = ensureWholeCharsFit(chosen, boxWidth, font, letterSpacing);
-      return;
-    }
-    el.textContent = ensureWholeCharsFit(abbr || full, boxWidth, font, letterSpacing);
-  }
-
-  // Рендерит ОДИН элемент под уже решённый для всей сетки уровень
-  // (используется ТОЛЬКО широкой сеткой — см. fitBookNameText ниже).
-  function renderBookNameAtLevel(el, level, boxWidth, font, letterSpacing){
-    var full = el.dataset.full;
-    if(full == null) return;
-    if(el.dataset.skipMedium){
-      renderSkipMediumEntry(el, boxWidth, font, letterSpacing);
-      return;
-    }
-    var abbr = el.dataset.abbr;
-    if(level === 1){
-      el.textContent = ensureWholeCharsFit(full, boxWidth, font, letterSpacing);
-      return;
-    }
-    if(level === 2){
-      var medium = fitBookNameMedium(full, boxWidth, font, letterSpacing);
-      el.textContent = ensureWholeCharsFit(medium.text, boxWidth, font, letterSpacing);
       return;
     }
     el.textContent = ensureWholeCharsFit(abbr || full, boxWidth, font, letterSpacing);
@@ -2118,24 +1973,21 @@
   }
 
   // Точечный пересчёт ОДНОГО элемента (например, при смене счётчика
-  // прочитанных глав — см. updateBookProgress). В широкой сетке уровень
-  // решаем заново по канонической ширине всей сетки, а не по этому
-  // элементу — иначе именно он мог бы выпасть из общего уровня; в
-  // компактной сетке (см. isCompactBookGrid) уровень и так решается по
-  // каждой карточке отдельно, поэтому пересчитываем только сам элемент.
+  // прочитанных глав — см. updateBookProgress). Уровень (full/medium/short)
+  // решается для КАЖДОЙ карточки отдельно по её собственной ширине — как в
+  // широкой, так и в компактной сетке (ТЗ от 11.09, правит решение от
+  // 10.09 ниже): единый уровень на весь грид по самому длинному названию
+  // означал, что одно длинное название ("1 Фессалоникийцам" и т.п.) при 3
+  // узких колонках утягивало вниз ВСЕ карточки, включая короткие, которым
+  // места хватает с запасом ("Быт."/"Исх." вместо "Бытие"/"Исход" даже при
+  // явно достаточной ширине колонки). При 2 широких колонках это было
+  // незаметно — места хватало даже самым длинным названиям, поэтому общий
+  // уровень почти всегда совпадал с тем, что дал бы поэлементный расчёт.
   function fitBookNameText(el){
     if(!el || el.dataset.full == null) return;
     var m = measureBookNameFont(el);
-    if(isCompactBookGrid()){
-      renderBookNamePerItem(el, m.font, m.letterSpacing, compactBookGridAllowsMedium());
-      return;
-    }
-    var boxWidth = canonicalBookBoxWidth();
-    if(boxWidth <= 0) boxWidth = el.clientWidth - BOOK_NAME_SAFETY_MARGIN;
-    if(boxWidth <= 0){ el.textContent = el.dataset.full; return; }
-    var level = decideBookGridLevel(boxWidth, m.font, m.letterSpacing);
-    var ownWidth = el.clientWidth - BOOK_NAME_SAFETY_MARGIN;
-    renderBookNameAtLevel(el, level, ownWidth > 0 ? ownWidth : boxWidth, m.font, m.letterSpacing);
+    var allowMedium = isCompactBookGrid() ? compactBookGridAllowsMedium() : true;
+    renderBookNamePerItem(el, m.font, m.letterSpacing, allowMedium);
   }
 
   function refreshAllBookNameFits(){
@@ -2143,20 +1995,9 @@
     var nameEls = booksContainer.querySelectorAll(".book-name");
     if(!nameEls.length) return;
     var m = measureBookNameFont(nameEls[0]);
-    if(isCompactBookGrid()){
-      var allowMedium = compactBookGridAllowsMedium();
-      Array.prototype.forEach.call(nameEls, function(el){
-        renderBookNamePerItem(el, m.font, m.letterSpacing, allowMedium);
-      });
-      return;
-    }
-    var boxWidth = canonicalBookBoxWidth();
-    if(boxWidth <= 0) return;
-    var level = decideBookGridLevel(boxWidth, m.font, m.letterSpacing);
+    var allowMedium = isCompactBookGrid() ? compactBookGridAllowsMedium() : true;
     Array.prototype.forEach.call(nameEls, function(el){
-      var ownWidth = el.clientWidth - BOOK_NAME_SAFETY_MARGIN;
-      renderBookNameAtLevel(el, level, ownWidth > 0 ? ownWidth : boxWidth, m.font, m.letterSpacing);
-
+      renderBookNamePerItem(el, m.font, m.letterSpacing, allowMedium);
     });
   }
   // если шрифт дозагрузится позже первого замера (веб-шрифт ещё не был
