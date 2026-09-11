@@ -2743,6 +2743,35 @@
     text-overflow:ellipsis;
     white-space:nowrap;
   }
+  /* ---------- Экран чтения книги (READER_PLAN.md, Этап D, шаги 11-12, 11.09) ----------
+     Сплошной скролл всей книги. Тот же шрифт/размер, что и в "Моём блокноте"
+     (--mdeditor-font-size, см. applyFontSize в mdeditor.js) — здесь нет
+     CodeMirror (.cm-editor), поэтому .mdeditor-editor-host .cm-editor выше
+     сюда не попадает, значения продублированы на новом селекторе. Картинки
+     переиспользуют .cm-md-image (та же рамка/скругление, что в заметках),
+     см. renderBookReaderText в my.js. .book-reader-tab — тот же приём, что
+     .mdeditor-tab (display:block, БЕЗ flex:1/min-height:0): текст и нижний
+     ряд кнопок — часть одного обычного потока, прокручиваются вместе внутри
+     #settingsTabContent, а сам .mdeditor-fab-row всё равно "приклеен" к низу
+     окна через position:absolute от .settings-modal-box (modals.css). */
+  .book-reader-tab{
+    display:block;
+    font-family:"Palatino Linotype",Georgia,serif;
+  }
+  .book-reader{
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
+    line-height:1.4;
+    color:var(--ink);
+    padding:2px 0 40px 0;
+  }
+  .book-reader-chapter-title{
+    margin:24px 0 10px 0;
+    font-family:"Palatino Linotype",Georgia,serif;
+  }
+  .book-reader-chapter:first-child .book-reader-chapter-title{ margin-top:0; }
+  .book-reader-p{ margin:0 0 10px 0; text-indent:1ch; }
+  .book-reader .cm-md-image{ margin:10px 0; }
   /* ---------- полноэкранный просмотр вставленной в заметку картинки
      (клик по .cm-md-image выше, см. openImageViewer/setWrapToImage в
      mdeditor.js) — отдельный оверлей прямо в document.body (не внутри

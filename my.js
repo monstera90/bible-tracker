@@ -5598,6 +5598,7 @@
         row.className = "mdeditor-row";
         row.innerHTML = TASK_MOVE_ICON_SVG("read") + '<span class="mdeditor-row-name"></span>';
         row.querySelector(".mdeditor-row-name").textContent = it.name;
+        row.addEventListener("click", function(){ openBookReader(it.name); });
         listEl.appendChild(row);
       });
     }).catch(function(e){
@@ -5625,6 +5626,307 @@
         });
       });
     }
+  }
+
+  // ===================== ЭКРАН ЧТЕНИЯ (READER_PLAN.md, Этап D, шаг 11, 11.09) =====================
+  // Сплошной скролл ВСЕЙ книги (все главы подряд в одном потоке, каждая со
+  // своим заголовком) + отдельный режим "список глав" внутри ТОГО ЖЕ экрана
+  // (переключение — switchBookReaderMode ниже), без отдельной вкладки/модалки
+  // (см. ТЗ). Шрифт — тот же CSS-механизм, что у "Моего блокнота"
+  // (--mdeditor-font-size, applyFontSize в mdeditor.js) — здесь ничего своего
+  // не заводим, просто используем переменную (components.css, .book-reader).
+  // Картинки — тот же класс .cm-md-image, что у вставленных картинок заметок,
+  // просто с src на blob-URL из images-карты fb2parse.js.
+  //
+  // Нижние кнопки Аа/Главы/Домик/Flibusta — READER_PLAN.md, Этап D, шаг 12
+  // (11.09), тот же стиль/размер/расположение, что у нижних кнопок "Моих
+  // заметок" (.mdeditor-fab-row/-fab-btn, position:absolute от
+  // .settings-modal-box — см. bindBookReaderFabRow ниже). "Аа" использует
+  // ТОТ ЖЕ fontSizeStep, что и заметки/задачи (MdEditor.changeFontSizeStep,
+  // тем же приёмом, что initTaskGlobalToolbar выше). Шаг 13 (выделение ->
+  // заметка книги) НЕ реализован — по прямому указанию пользователя.
+  //
+  // Восстановление прокрутки при "назад" — тем же приёмом, что prevScrollTop в
+  // openNoteById (mdeditor.js): сырой scrollTop контейнера #settingsTabContent
+  // (а не процент, как в mdeditor.js — там понадобился процент из-за
+  // растущего .cm-scroller; здесь высота книги стабильна между рендерами
+  // одного режима, поэтому пиксельного значения достаточно).
+  var bookReaderState = null; // {hash, name, chapters, imageUrls, mode, textScrollTop, chaptersScrollTop}
+  var bookReaderFontSizePanelOpen = false;
+
+  // Пиктограммы кнопок ридера — тот же стиль viewBox 24x24/stroke=currentColor,
+  // что и везде в проекте. HOME_ICON_SVG физически дублирует контур домика из
+  // mdeditor.js (тот не передаётся через deps наружу, а заводить деп ради
+  // одной иконки не стоит) — визуально это ОДНА и та же пиктограмма.
+  var READER_HOME_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M4 11.5L12 4l8 7.5"></path>' +
+      '<path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"></path>' +
+      '<path d="M10 20v-5h4v5"></path>' +
+    '</svg>';
+  // "Главы" — список (три строки), в режиме списка глав кнопка переключается
+  // на READER_TEXT_ICON_SVG (раскрытая книга) — тот же приём переключения
+  // иконки на кнопке, что у mdEditorModeBtn (EYE/CODE) в mdeditor.js.
+  var READER_CHAPTERS_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<line x1="4" y1="6" x2="20" y2="6"></line>' +
+      '<line x1="4" y1="12" x2="20" y2="12"></line>' +
+      '<line x1="4" y1="18" x2="20" y2="18"></line>' +
+    '</svg>';
+  var READER_TEXT_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M4 5c3-1.5 6-1.5 8 0v14c-2-1.5-5-1.5-8 0V5z"></path>' +
+      '<path d="M20 5c-3-1.5-6-1.5-8 0v14c2-1.5 5-1.5 8 0V5z"></path>' +
+    '</svg>';
+  // Flibusta (Этап E, ещё не подключён) — глобус/меридианы, обозначает
+  // внешний каталог; кнопка пока только показывает статус-сообщение.
+  var READER_FLIBUSTA_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+      '<circle cx="12" cy="12" r="9"></circle>' +
+      '<line x1="3" y1="12" x2="21" y2="12"></line>' +
+      '<path d="M12 3c2.5 2.5 2.5 15.5 0 18"></path>' +
+      '<path d="M12 3c-2.5 2.5-2.5 15.5 0 18"></path>' +
+    '</svg>';
+
+  // XML-декларация в начале fb2 (<?xml ... encoding="windows-1251"?>) всегда
+  // ASCII-совместима, поэтому кодировку можно прочитать декодированием первых
+  // байт как iso-8859-1 (1 байт = 1 символ, латиница/цифры не искажаются) ДО
+  // того, как решать, чем декодировать весь файл. Большинство fb2 в рунете —
+  // windows-1251, TextDecoder поддерживает это имя напрямую.
+  function decodeFb2Buffer(buffer){
+    var head = new TextDecoder("iso-8859-1").decode(new Uint8Array(buffer, 0, Math.min(200, buffer.byteLength)));
+    var m = /encoding\s*=\s*["']([\w-]+)["']/i.exec(head);
+    var enc = m ? m[1].toLowerCase() : "utf-8";
+    try{ return new TextDecoder(enc).decode(buffer); }
+    catch(e){ return new TextDecoder("utf-8").decode(buffer); } // неизвестная браузеру кодировка — пробуем utf-8, лучше кривой текст, чем ничего
+  }
+
+  function revokeBookReaderImages(){
+    if(!bookReaderState || !bookReaderState.imageUrls) return;
+    Object.keys(bookReaderState.imageUrls).forEach(function(id){
+      try{ URL.revokeObjectURL(bookReaderState.imageUrls[id]); }catch(e){}
+    });
+  }
+
+  function openBookReader(name){
+    // Подчищаем картинки предыдущей открытой книги, если она осталась
+    // "подвешенной" в памяти (например, после клика "Домик" — см.
+    // bindBookReaderFabRow ниже — без возврата "назад" в ту книгу).
+    if(bookReaderState) revokeBookReaderImages();
+    var container = document.getElementById("settingsTabContent");
+    var prevScrollTop = container ? container.scrollTop : 0;
+    getBooksDirHandle().then(function(dir){
+      return dir.getFileHandle(name);
+    }).then(function(fh){
+      return fh.getFile();
+    }).then(function(file){
+      return file.arrayBuffer();
+    }).then(function(buf){
+      return sha256Hex(buf).then(function(hash){
+        var parsed = Fb2Parse.parseFb2(decodeFb2Buffer(buf));
+        return {hash: hash, parsed: parsed};
+      });
+    }).then(function(res){
+      var imageUrls = {};
+      Object.keys(res.parsed.images).forEach(function(id){
+        var img = res.parsed.images[id];
+        try{
+          var bin = atob(img.base64);
+          var bytes = new Uint8Array(bin.length);
+          for(var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          imageUrls[id] = URL.createObjectURL(new Blob([bytes], {type: img.contentType || "image/jpeg"}));
+        }catch(e){ /* битая картинка в binary — просто не покажем */ }
+      });
+      bookReaderState = {
+        hash: res.hash, name: name,
+        chapters: res.parsed.chapters, imageUrls: imageUrls,
+        mode: "text", textScrollTop: 0, chaptersScrollTop: 0
+      };
+      window.AppNav.push(function(){
+        revokeBookReaderImages();
+        bookReaderState = null;
+        renderSettingsTabBooks();
+        var c = document.getElementById("settingsTabContent");
+        if(c) c.scrollTop = prevScrollTop;
+      });
+      renderBookReader();
+    }).catch(function(e){
+      var statusEl = document.getElementById("booksStatus");
+      if(statusEl){
+        statusEl.textContent = "Не удалось открыть книгу: " + (e && e.message ? e.message : e);
+        statusEl.classList.add("error");
+      }
+    });
+  }
+
+  function renderRunsHtml(runs){
+    return runs.map(function(r){
+      var t = escapeHtml(r.text);
+      if(r.bold) t = "<b>" + t + "</b>";
+      if(r.italic) t = "<i>" + t + "</i>";
+      return t;
+    }).join("");
+  }
+
+  function renderBookReader(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container || !bookReaderState) return;
+    if(bookReaderState.mode === "chapters") renderBookReaderChapters(container);
+    else renderBookReaderText(container);
+  }
+
+  // Общий нижний ряд кнопок (шаг 12) — одна и та же разметка в обоих режимах
+  // (текст/главы), просто с разной иконкой/подсказкой у кнопки "Главы" (см.
+  // READER_CHAPTERS_ICON_SVG/READER_TEXT_ICON_SVG выше). position:absolute
+  // у .mdeditor-fab-row — от .settings-modal-box (components.css), поэтому
+  // ряд остаётся приклеенным к низу окна настроек независимо от прокрутки
+  // #settingsTabContent — тем же приёмом, что .mdeditor-fab-row в
+  // renderEditorScreen (mdeditor.js).
+  function bookReaderFabRowHtml(){
+    var chaptersMode = bookReaderState.mode === "chapters";
+    return (
+      '<div class="mdeditor-status" id="bookReaderStatus"></div>' +
+      '<div class="mdeditor-fab-row">' +
+        '<button type="button" class="mdeditor-fab-btn" id="bookReaderFlibustaBtn" title="Flibusta">' + READER_FLIBUSTA_ICON_SVG + '</button>' +
+        '<span class="mdeditor-fontsize-wrap" id="bookReaderFontSizeWrap">' +
+          '<div class="mdeditor-fontsize-popup" id="bookReaderFontSizePopup">' +
+            '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontPlusBtn" title="Крупнее">+</button>' +
+            '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontMinusBtn" title="Мельче">&minus;</button>' +
+          '</div>' +
+          '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontSizeBtn" title="Размер шрифта">Аа</button>' +
+        '</span>' +
+        '<button type="button" class="mdeditor-fab-btn" id="bookReaderChaptersBtn" title="' + (chaptersMode ? "К тексту" : "Главы") + '">' +
+          (chaptersMode ? READER_TEXT_ICON_SVG : READER_CHAPTERS_ICON_SVG) +
+        '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="bookReaderHomeBtn" title="К списку книг">' + READER_HOME_ICON_SVG + '</button>' +
+      '</div>'
+    );
+  }
+
+  // Обработчики нижнего ряда — навешиваются заново после каждого рендера
+  // (innerHTML пересоздаёт узлы), тем же приёмом, что renderEditorScreen в
+  // mdeditor.js навешивает их на mdEditorFontSizeBtn/mdEditorHomeBtn2 и т.п.
+  function bindBookReaderFabRow(){
+    bookReaderFontSizePanelOpen = false; // попап "+"/"-" каждый раз стартует закрытым (та же причина, что у fontSizePanelOpen в renderEditorScreen)
+    var fontBtn = document.getElementById("bookReaderFontSizeBtn");
+    var fontPopup = document.getElementById("bookReaderFontSizePopup");
+    var fontPlusBtn = document.getElementById("bookReaderFontPlusBtn");
+    var fontMinusBtn = document.getElementById("bookReaderFontMinusBtn");
+    if(fontBtn){
+      fontBtn.addEventListener("click", function(){
+        bookReaderFontSizePanelOpen = !bookReaderFontSizePanelOpen;
+        if(fontPopup) fontPopup.classList.toggle("open", bookReaderFontSizePanelOpen);
+      });
+    }
+    // Тот же fontSizeStep, что у "Моего блокнота"/задач (см.
+    // initTaskGlobalToolbar выше) — единица размера общая на всё приложение.
+    if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ MdEditor.changeFontSizeStep(1); });
+    if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ MdEditor.changeFontSizeStep(-1); });
+
+    var chaptersBtn = document.getElementById("bookReaderChaptersBtn");
+    if(chaptersBtn){
+      chaptersBtn.addEventListener("click", function(){
+        switchBookReaderMode(bookReaderState.mode === "chapters" ? "text" : "chapters");
+      });
+    }
+
+    // "Домик" — к списку книг. Действие ВПЕРЁД (как goHome в mdeditor.js):
+    // само не откатывает историю, а добавляет свой шаг "назад" (снимок
+    // текущего состояния ридера), чтобы системное "назад" после клика по
+    // "Домику" вернуло именно в эту книгу на этом же месте. Картинки НЕ
+    // освобождаются здесь — снимок может понадобиться при возврате; они
+    // освобождаются либо при реальном выходе из ридера (см. openBookReader),
+    // либо подчищаются как подвисшие при следующем openBookReader.
+    var homeBtn = document.getElementById("bookReaderHomeBtn");
+    if(homeBtn){
+      homeBtn.addEventListener("click", function(){
+        var snapshot = bookReaderState;
+        window.AppNav.push(function(){
+          bookReaderState = snapshot;
+          renderBookReader();
+        });
+        bookReaderState = null;
+        renderSettingsTabBooks();
+      });
+    }
+
+    // Flibusta (Этап E) — заглушка с понятным сообщением, не блокирует
+    // остальной ридер (см. ТЗ, READER_PLAN.md шаг 12).
+    var flibustaBtn = document.getElementById("bookReaderFlibustaBtn");
+    if(flibustaBtn){
+      flibustaBtn.addEventListener("click", function(){
+        var status = document.getElementById("bookReaderStatus");
+        if(status) status.textContent = "Подключение к каталогу Flibusta появится позже (Этап E).";
+      });
+    }
+  }
+
+  function renderBookReaderText(container){
+    var html = '<div class="book-reader-tab">' + bookReaderFabRowHtml() + '<div class="book-reader">';
+    bookReaderState.chapters.forEach(function(ch, idx){
+      html += '<div class="book-reader-chapter" id="bookChapter_' + idx + '">';
+      if(ch.title) html += '<h4 class="book-reader-chapter-title">' + escapeHtml(ch.title) + '</h4>';
+      ch.blocks.forEach(function(block){
+        if(block.type === "image"){
+          var url = block.imageId ? bookReaderState.imageUrls[block.imageId] : null;
+          if(url) html += '<img class="cm-md-image" src="' + url + '">';
+        } else {
+          html += '<p class="book-reader-p">' + renderRunsHtml(block.runs) + '</p>';
+        }
+      });
+      html += '</div>';
+    });
+    html += '</div></div>';
+    container.innerHTML = html;
+    requestAnimationFrame(function(){ container.scrollTop = bookReaderState.textScrollTop || 0; });
+    bindBookReaderFabRow();
+  }
+
+  function renderBookReaderChapters(container){
+    var html = '<div class="mdeditor-tab book-reader-tab"><h3 class="common-tab-title">' + escapeHtml(bookReaderState.name) + ' — главы</h3>';
+    html += '<div class="mdeditor-list" id="bookChaptersList">';
+    bookReaderState.chapters.forEach(function(ch, idx){
+      html += '<div class="mdeditor-row" data-idx="' + idx + '"><span class="mdeditor-row-name">' +
+        escapeHtml(ch.title || ("Глава " + (idx + 1))) + '</span></div>';
+    });
+    html += '</div>' + bookReaderFabRowHtml() + '</div>';
+    container.innerHTML = html;
+    requestAnimationFrame(function(){ container.scrollTop = bookReaderState.chaptersScrollTop || 0; });
+    var listEl = document.getElementById("bookChaptersList");
+    if(listEl){
+      listEl.querySelectorAll(".mdeditor-row").forEach(function(row){
+        row.addEventListener("click", function(){
+          jumpToChapterFromChaptersList(parseInt(row.getAttribute("data-idx"), 10));
+        });
+      });
+    }
+    bindBookReaderFabRow();
+  }
+
+  // Переключение текст <-> список глав — кнопка "Главы" (см.
+  // bindBookReaderFabRow выше, шаг 12). Каждый переход — свой шаг "назад" со
+  // своим восстановлением сохранённой прокрутки режима, тем же приёмом, что
+  // prevScrollTop в openNoteById (mdeditor.js).
+  function switchBookReaderMode(mode){
+    if(!bookReaderState || bookReaderState.mode === mode) return;
+    var container = document.getElementById("settingsTabContent");
+    var prevMode = bookReaderState.mode;
+    if(container){
+      if(prevMode === "text") bookReaderState.textScrollTop = container.scrollTop;
+      else bookReaderState.chaptersScrollTop = container.scrollTop;
+    }
+    window.AppNav.push(function(){ bookReaderState.mode = prevMode; renderBookReader(); });
+    bookReaderState.mode = mode;
+    renderBookReader();
+  }
+
+  function jumpToChapterFromChaptersList(idx){
+    switchBookReaderMode("text");
+    requestAnimationFrame(function(){
+      var el = document.getElementById("bookChapter_" + idx);
+      var container = document.getElementById("settingsTabContent");
+      if(el && container) container.scrollTop = el.offsetTop;
+    });
   }
 
   // ===== ИЗВЛЕЧЕНИЕ СУБТИТРОВ (четвёртая нижняя вкладка второго набора,
