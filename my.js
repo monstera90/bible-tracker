@@ -5435,9 +5435,14 @@
   //                книга ни разу не открывалась в ридере.
   //   bookmarks  — [{id, position, addedAt}] — закладки на полях (шаг 15).
   //   underlines — [{id, position, addedAt, movedToNote}] — подчёркивания
-  //                (шаг 13); НИКОГДА не удаляются, только добавляются;
-  //                movedToNote — true, если уже дописано в конец заметки
-  //                книги (чтобы не задваивать при повторном проходе).
+  //                (шаг 13, реализовано 11.09); НИКОГДА не удаляются, только
+  //                добавляются; movedToNote — true, если уже дописано в
+  //                конец заметки книги (чтобы не задваивать при повторном
+  //                проходе). position здесь — {ch, blk, s, e}: индекс главы,
+  //                индекс блока внутри ch.blocks (см. Fb2Parse) и начало/
+  //                конец диапазона в координатах ПЛОСКОГО текста абзаца
+  //                (конкатенация block.runs[].text) — см.
+  //                resolveSelectionToBlockPosition/renderRunsHtml ниже.
   //   noteId     — id заметки книги в "Моём блокноте" (mdeditor.js),
   //                создаётся один раз при первом подчёркивании (шаг 13) и
   //                дальше переиспользуется; null, пока заметки ещё нет.
@@ -5463,7 +5468,7 @@
   // Всегда возвращает объект (с дефолтами) — коду ридера (Этап D) не нужно
   // самому подставлять пустые значения при первом открытии книги.
   function getOrCreateBookState(hash){
-    return getBookState(hash) || {position: null, bookmarks: [], underlines: [], noteId: null};
+    return getBookState(hash) || {position: null, bookmarks: [], underlines: [], noteId: null, images: []};
   }
   function saveBookState(hash, data){
     // t — всегда время именно этого сохранения, та же причина, что и у
@@ -5504,6 +5509,48 @@
     var data = getOrCreateBookState(hash);
     data.noteId = noteId;
     saveBookState(hash, data);
+  }
+
+  // Иллюстрации, отправленные в заметку книги (READER_PLAN.md, Этап D,
+  // шаг 14, 11.09) — кнопка-кнопка по центру верхнего края картинки (см.
+  // renderBookReaderText/toggleBookReaderImagePin ниже). Каждая запись —
+  // {id, ch, blk, imageId, savedName, addedAt}: ch/blk — та же адресация,
+  // что и у position подчёркиваний (глава + индекс блока в ch.blocks);
+  // savedName — реальное имя файла в images/ (OPFS), может отличаться от
+  // сгенерированного при коллизии имён (suggestFreeImageName в
+  // mdeditor.js). В отличие от подчёркиваний, записи здесь УДАЛЯЮТСЯ при
+  // повторном нажатии на кнопку — открепление реально стирает и файл, и
+  // ссылку в заметке, а не просто "гасит" отметку.
+  function getBookImageEntry(hash, ch, blk){
+    var data = getBookState(hash);
+    if(!data || !data.images) return null;
+    return data.images.filter(function(it){ return it.ch === ch && it.blk === blk; })[0] || null;
+  }
+  function addBookImageEntry(hash, ch, blk, imageId, savedName){
+    var data = getOrCreateBookState(hash);
+    if(!data.images) data.images = [];
+    var rec = {id: genBookRecordId(), ch: ch, blk: blk, imageId: imageId, savedName: savedName, addedAt: Date.now()};
+    data.images.push(rec);
+    saveBookState(hash, data);
+  }
+  function removeBookImageEntry(hash, ch, blk){
+    var data = getOrCreateBookState(hash);
+    if(!data.images) data.images = [];
+    data.images = data.images.filter(function(it){ return !(it.ch === ch && it.blk === blk); });
+    saveBookState(hash, data);
+  }
+  function isBookImagePinned(hash, ch, blk){
+    return !!getBookImageEntry(hash, ch, blk);
+  }
+  // Расширение файла по MIME-типу картинки из fb2 (<binary content-type=…>)
+  // — jpeg/png самые частые, остальное на всякий случай.
+  function extFromImageContentType(ct){
+    if(/png/i.test(ct)) return ".png";
+    if(/gif/i.test(ct)) return ".gif";
+    if(/webp/i.test(ct)) return ".webp";
+    if(/svg/i.test(ct)) return ".svg";
+    if(/bmp/i.test(ct)) return ".bmp";
+    return ".jpg";
   }
 
   // Плоский список файлов books/ (OPFS) — READER_PLAN.md, Этап D, шаг 9
@@ -5643,8 +5690,12 @@
   // заметок" (.mdeditor-fab-row/-fab-btn, position:absolute от
   // .settings-modal-box — см. bindBookReaderFabRow ниже). "Аа" использует
   // ТОТ ЖЕ fontSizeStep, что и заметки/задачи (MdEditor.changeFontSizeStep,
-  // тем же приёмом, что initTaskGlobalToolbar выше). Шаг 13 (выделение ->
-  // заметка книги) НЕ реализован — по прямому указанию пользователя.
+  // тем же приёмом, что initTaskGlobalToolbar выше).
+  //
+  // Шаг 13 (выделение -> заметка книги, реализовано 11.09) — см.
+  // bindBookReaderSelectionOnce/resolveSelectionToBlockPosition/
+  // addUnderlineFromSelection дальше в этом разделе, после
+  // jumpToChapterFromChaptersList.
   //
   // Восстановление прокрутки при "назад" — тем же приёмом, что prevScrollTop в
   // openNoteById (mdeditor.js): сырой scrollTop контейнера #settingsTabContent
@@ -5653,6 +5704,12 @@
   // одного режима, поэтому пиксельного значения достаточно).
   var bookReaderState = null; // {hash, name, chapters, imageUrls, mode, textScrollTop, chaptersScrollTop}
   var bookReaderFontSizePanelOpen = false;
+  // "Взведена" ли кнопка "Выделение" (шаг 13, доработка 11.09, см.
+  // READER_SELECT_ICON_SVG выше) — сбрасывается при каждом полном рендере
+  // ридера (bindBookReaderFabRow), тем же приёмом, что и
+  // bookReaderFontSizePanelOpen; отдельно гасится после одного
+  // выделения (см. disarmBookReaderSelection ниже).
+  var bookReaderSelectionArmed = false;
 
   // Пиктограммы кнопок ридера — тот же стиль viewBox 24x24/stroke=currentColor,
   // что и везде в проекте. HOME_ICON_SVG физически дублирует контур домика из
@@ -5686,6 +5743,33 @@
       '<line x1="3" y1="12" x2="21" y2="12"></line>' +
       '<path d="M12 3c2.5 2.5 2.5 15.5 0 18"></path>' +
       '<path d="M12 3c-2.5 2.5-2.5 15.5 0 18"></path>' +
+    '</svg>';
+  // Кнопка-кнопка "прикрепить иллюстрацию к заметке книги" (READER_PLAN.md,
+  // Этап D, шаг 14, 11.09) — канцелярская кнопка, которой прикалывают лист:
+  // головка (кружок) + игла вниз. Бесцветная в обычном состоянии; класс
+  // .pinned (components.css) красит в var(--danger) и заливает головку
+  // сплошным цветом — "воткнутая" кнопка (см. renderBookReaderText/
+  // toggleBookReaderImagePin ниже).
+  var READER_PIN_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<circle cx="12" cy="7.2" r="4.2"></circle>' +
+      '<line x1="12" y1="11.4" x2="12" y2="20.5"></line>' +
+    '</svg>';
+  // Кнопка "Выделение" (READER_PLAN.md, Этап D, шаг 13, доработка 11.09) —
+  // маркер, оставляющий след на бумаге. До этой доработки любое выделение
+  // текста в ридере (см. handleBookReaderSelectionSettled ниже) сразу
+  // становилось подчёркиванием — это мешало обычному выделению текста
+  // (например, для копирования). Теперь подчёркивание срабатывает только
+  // когда кнопка "взведена" (см. bookReaderSelectionArmed) — одно
+  // выделение расходует взвод, для следующего нужно нажать кнопку снова
+  // (см. bindBookReaderFabRow/disarmBookReaderSelection ниже). Активное
+  // состояние — тот же переиспользуемый класс .pressed, что у кнопки "i"
+  // во вкладке "Извлечение субтитров".
+  var READER_SELECT_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M4 20h6"></path>' +
+      '<path d="M6.5 17.5L16 8l3 3-9.5 9.5H6.5v-3z"></path>' +
+      '<path d="M14 6l4 4"></path>' +
     '</svg>';
 
   // XML-декларация в начале fb2 (<?xml ... encoding="windows-1251"?>) всегда
@@ -5727,19 +5811,24 @@
         return {hash: hash, parsed: parsed};
       });
     }).then(function(res){
-      var imageUrls = {};
+      var imageUrls = {}, imageBytes = {};
       Object.keys(res.parsed.images).forEach(function(id){
         var img = res.parsed.images[id];
         try{
           var bin = atob(img.base64);
           var bytes = new Uint8Array(bin.length);
           for(var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          imageUrls[id] = URL.createObjectURL(new Blob([bytes], {type: img.contentType || "image/jpeg"}));
+          var contentType = img.contentType || "image/jpeg";
+          imageUrls[id] = URL.createObjectURL(new Blob([bytes], {type: contentType}));
+          // Сырые байты — нужны только для "прикрепить к заметке" (шаг 14,
+          // см. toggleBookReaderImagePin ниже); blob-URL для этого не годится,
+          // т.к. запись в OPFS требует самих байт, а не ссылки на них.
+          imageBytes[id] = {bytes: bytes, contentType: contentType};
         }catch(e){ /* битая картинка в binary — просто не покажем */ }
       });
       bookReaderState = {
         hash: res.hash, name: name,
-        chapters: res.parsed.chapters, imageUrls: imageUrls,
+        chapters: res.parsed.chapters, imageUrls: imageUrls, imageBytes: imageBytes,
         mode: "text", textScrollTop: 0, chaptersScrollTop: 0
       };
       window.AppNav.push(function(){
@@ -5759,13 +5848,52 @@
     });
   }
 
-  function renderRunsHtml(runs){
-    return runs.map(function(r){
-      var t = escapeHtml(r.text);
-      if(r.bold) t = "<b>" + t + "</b>";
-      if(r.italic) t = "<i>" + t + "</i>";
-      return t;
-    }).join("");
+  // ranges (необязательный 2-й параметр, READER_PLAN.md, шаг 13, 11.09) —
+  // отсортированный список НЕпересекающихся [start,end) в координатах
+  // ПЛОСКОГО текста абзаца (конкатенация runs[].text, теми же координатами,
+  // что использует resolveSelectionToBlockPosition/getBookUnderlineRangesForBlock
+  // ниже) — те куски текста, что нужно обернуть в <mark class="book-reader-
+  // underline"> (подчёркивания книги), поверх уже имеющегося жирного/курсива.
+  // Без ranges — прежнее поведение без изменений (единственный вызов раньше,
+  // до шага 13, ranges не передавал).
+  function renderRunsHtml(runs, ranges){
+    if(!ranges || !ranges.length){
+      return runs.map(function(r){
+        var t = escapeHtml(r.text);
+        if(r.bold) t = "<b>" + t + "</b>";
+        if(r.italic) t = "<i>" + t + "</i>";
+        return t;
+      }).join("");
+    }
+    var html = "", offset = 0;
+    runs.forEach(function(r){
+      var text = r.text, len = text.length, runStart = offset, pos = 0;
+      while(pos < len){
+        var globalPos = runStart + pos;
+        var active = null;
+        for(var i = 0; i < ranges.length; i++){
+          if(globalPos >= ranges[i][0] && globalPos < ranges[i][1]){ active = ranges[i]; break; }
+        }
+        var segEnd;
+        if(active){
+          segEnd = Math.min(len, active[1] - runStart);
+        } else {
+          segEnd = len;
+          for(var j = 0; j < ranges.length; j++){
+            var relStart = ranges[j][0] - runStart;
+            if(relStart > pos && relStart < segEnd) segEnd = relStart;
+          }
+        }
+        var t = escapeHtml(text.slice(pos, segEnd));
+        if(r.bold) t = "<b>" + t + "</b>";
+        if(r.italic) t = "<i>" + t + "</i>";
+        if(active) t = '<mark class="book-reader-underline">' + t + '</mark>';
+        html += t;
+        pos = segEnd;
+      }
+      offset += len;
+    });
+    return html;
   }
 
   function renderBookReader(){
@@ -5795,6 +5923,7 @@
           '</div>' +
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontSizeBtn" title="Размер шрифта">Аа</button>' +
         '</span>' +
+        '<button type="button" class="mdeditor-fab-btn" id="bookReaderSelectBtn" title="Выделить текст">' + READER_SELECT_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderChaptersBtn" title="' + (chaptersMode ? "К тексту" : "Главы") + '">' +
           (chaptersMode ? READER_TEXT_ICON_SVG : READER_CHAPTERS_ICON_SVG) +
         '</button>' +
@@ -5808,6 +5937,7 @@
   // mdeditor.js навешивает их на mdEditorFontSizeBtn/mdEditorHomeBtn2 и т.п.
   function bindBookReaderFabRow(){
     bookReaderFontSizePanelOpen = false; // попап "+"/"-" каждый раз стартует закрытым (та же причина, что у fontSizePanelOpen в renderEditorScreen)
+    bookReaderSelectionArmed = false; // кнопка "Выделение" каждый раз стартует невзведённой
     var fontBtn = document.getElementById("bookReaderFontSizeBtn");
     var fontPopup = document.getElementById("bookReaderFontSizePopup");
     var fontPlusBtn = document.getElementById("bookReaderFontPlusBtn");
@@ -5822,6 +5952,22 @@
     // initTaskGlobalToolbar выше) — единица размера общая на всё приложение.
     if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ MdEditor.changeFontSizeStep(1); });
     if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ MdEditor.changeFontSizeStep(-1); });
+
+    // Кнопка "Выделение" (шаг 13, доработка 11.09) — чистый toggle: клик
+    // взводит/снимает взвод. Пока не взведена, выделение текста в ридере
+    // работает как обычное браузерное выделение (например, для копирования)
+    // и не трогает заметку книги — см. guard в handleBookReaderSelectionSettled
+    // ниже. Снятие взвода при повторном клике (передумал) заодно снимает и
+    // текущее браузерное выделение, чтобы не осталось "зависшего" выделения
+    // без взвода.
+    var selectBtn = document.getElementById("bookReaderSelectBtn");
+    if(selectBtn){
+      selectBtn.addEventListener("click", function(){
+        bookReaderSelectionArmed = !bookReaderSelectionArmed;
+        selectBtn.classList.toggle("pressed", bookReaderSelectionArmed);
+        if(!bookReaderSelectionArmed && window.getSelection) window.getSelection().removeAllRanges();
+      });
+    }
 
     var chaptersBtn = document.getElementById("bookReaderChaptersBtn");
     if(chaptersBtn){
@@ -5866,12 +6012,30 @@
     bookReaderState.chapters.forEach(function(ch, idx){
       html += '<div class="book-reader-chapter" id="bookChapter_' + idx + '">';
       if(ch.title) html += '<h4 class="book-reader-chapter-title">' + escapeHtml(ch.title) + '</h4>';
-      ch.blocks.forEach(function(block){
+      ch.blocks.forEach(function(block, bi){
         if(block.type === "image"){
           var url = block.imageId ? bookReaderState.imageUrls[block.imageId] : null;
-          if(url) html += '<img class="cm-md-image" src="' + url + '">';
+          if(url){
+            // Шаг 14 (READER_PLAN.md, Этап D, 11.09): .book-reader-image-wrap
+            // даёт position:relative для кнопки-кнопки, центрированной по
+            // верхнему краю картинки (components.css). data-ch/data-blk/
+            // data-img — та же адресация, что у подчёркиваний (см.
+            // bindBookReaderImages/toggleBookReaderImagePin ниже).
+            var pinned = isBookImagePinned(bookReaderState.hash, idx, bi);
+            html += '<div class="book-reader-image-wrap" data-ch="' + idx + '" data-blk="' + bi + '" data-img="' + escapeHtml(block.imageId) + '">' +
+              '<img class="cm-md-image book-reader-image" src="' + url + '">' +
+              '<button type="button" class="book-reader-pin-btn' + (pinned ? ' pinned' : '') +
+                '" title="' + (pinned ? "Убрать из заметки" : "Отправить в заметку") + '">' + READER_PIN_ICON_SVG + '</button>' +
+            '</div>';
+          }
         } else {
-          html += '<p class="book-reader-p">' + renderRunsHtml(block.runs) + '</p>';
+          // id/data-ch/data-blk (шаг 13) — по ним resolveSelectionToBlockPosition
+          // ниже находит абзац выделения и его координаты (idx = глава, bi =
+          // индекс блока внутри ch.blocks — стабилен независимо от типа
+          // соседних блоков, т.к. это просто позиция в исходном массиве).
+          var ranges = getBookUnderlineRangesForBlock(bookReaderState.hash, idx, bi);
+          html += '<p class="book-reader-p" id="bookP_' + idx + '_' + bi + '" data-ch="' + idx + '" data-blk="' + bi + '">' +
+            renderRunsHtml(block.runs, ranges) + '</p>';
         }
       });
       html += '</div>';
@@ -5880,6 +6044,43 @@
     container.innerHTML = html;
     requestAnimationFrame(function(){ container.scrollTop = bookReaderState.textScrollTop || 0; });
     bindBookReaderFabRow();
+    bindBookReaderSelectionOnce();
+    bindBookReaderImages();
+  }
+
+  // Шаг 14 (READER_PLAN.md, Этап D, 11.09): тап по самой картинке открывает
+  // тот же полноэкранный просмотрщик с зумом, что и у картинок в "Моём
+  // блокноте" (MdEditor.openImageViewer, экспортирована специально для
+  // этого) — своего просмотрщика в ридере не заводим. Кнопка-кнопка —
+  // отдельный обработчик со stopPropagation, чтобы клик по ней не долетал
+  // до <img> и не открывал просмотрщик заодно.
+  function bindBookReaderImages(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container || !bookReaderState) return;
+    var wraps = container.querySelectorAll(".book-reader-image-wrap");
+    for(var i = 0; i < wraps.length; i++){
+      (function(wrap){
+        var ch = parseInt(wrap.getAttribute("data-ch"), 10);
+        var blk = parseInt(wrap.getAttribute("data-blk"), 10);
+        var imageId = wrap.getAttribute("data-img");
+        var img = wrap.querySelector(".book-reader-image");
+        var pinBtn = wrap.querySelector(".book-reader-pin-btn");
+        if(img){
+          img.addEventListener("click", function(){
+            var url = bookReaderState.imageUrls[imageId];
+            if(url && MdEditor && MdEditor.openImageViewer){
+              MdEditor.openImageViewer(url, (bookReaderState.name || "").replace(/\.fb2$/i, ""));
+            }
+          });
+        }
+        if(pinBtn){
+          pinBtn.addEventListener("click", function(ev){
+            ev.stopPropagation();
+            toggleBookReaderImagePin(ch, blk, imageId, pinBtn);
+          });
+        }
+      })(wraps[i]);
+    }
   }
 
   function renderBookReaderChapters(container){
@@ -5927,6 +6128,323 @@
       var container = document.getElementById("settingsTabContent");
       if(el && container) container.scrollTop = el.offsetTop;
     });
+  }
+
+  // ===================== ВЫДЕЛЕНИЕ -> ЗАМЕТКА КНИГИ (READER_PLAN.md, Этап D,
+  // шаг 13, 11.09) =====================
+  // При первом выделении в открытой книге — диалог с именем заметки;
+  // заметка создаётся один раз (MdEditor.createNoteSilently, БЕЗ перехода на
+  // экран редактора — пользователь остаётся в ридере) и id запоминается в
+  // модели книги (setBookNoteId, см. выше). Каждое новое подчёркивание —
+  // включая самое первое — дописывается в конец этой заметки через
+  // MdEditor.appendTextToNoteId, без анализа существующего содержимого.
+  // Подчёркивание сохраняется в модели книги (addBookUnderline) и остаётся
+  // визуально подсвеченным при повторном чтении (см. ranges в
+  // renderBookReaderText выше). Если то же самое место (точное совпадение
+  // {ch,blk,s,e}) уже подчёркивалось раньше — повторно в заметку не
+  // добавляется (см. already ниже).
+  //
+  // Слушатель — один document-level "selectionchange" с debounce (не
+  // mouseup/touchend по отдельности: на телесенсорных устройствах выделение
+  // часто ещё "доводится" ручками после touchend, mouseup там вообще не
+  // стреляет) — включается один раз лениво, при первом открытии книги.
+  var bookReaderSelectionBound = false;
+  var bookReaderSelectionTimer = null;
+  function bindBookReaderSelectionOnce(){
+    if(bookReaderSelectionBound) return;
+    bookReaderSelectionBound = true;
+    document.addEventListener("selectionchange", function(){
+      clearTimeout(bookReaderSelectionTimer);
+      bookReaderSelectionTimer = setTimeout(handleBookReaderSelectionSettled, 300);
+    });
+  }
+
+  // Подчёркивания текущей книги для одного абзаца (блока) — отсортированный
+  // список НЕпересекающихся [start,end) в координатах плоского текста этого
+  // абзаца, для renderRunsHtml выше. Возвращает null, если подсвечивать
+  // нечего (renderRunsHtml без ranges работает по старому быстрому пути).
+  function getBookUnderlineRangesForBlock(hash, ch, blk){
+    var data = getBookState(hash);
+    if(!data || !data.underlines || !data.underlines.length) return null;
+    var ranges = data.underlines.filter(function(u){
+      return u.position && u.position.ch === ch && u.position.blk === blk;
+    }).map(function(u){ return [u.position.s, u.position.e]; });
+    if(!ranges.length) return null;
+    ranges.sort(function(a, b){ return a[0] - b[0]; });
+    // Схлопываем пересекающиеся диапазоны на всякий случай (в норме не
+    // должно происходить — новые подчёркивания дедуплицируются по точному
+    // совпадению позиции, см. addUnderlineFromSelection ниже, но частичное
+    // перекрытие двух РАЗНЫХ выделений теоретически возможно).
+    var merged = [];
+    ranges.forEach(function(r){
+      var last = merged[merged.length - 1];
+      if(last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+      else merged.push(r.slice());
+    });
+    return merged;
+  }
+
+  // Ближайший предок-абзац книжного ридера у текстового узла/элемента.
+  function closestBookP(node){
+    var el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+    return el ? el.closest(".book-reader-p") : null;
+  }
+
+  // Range.startContainer/startOffset (и аналогично end*) могут указывать
+  // либо на текстовый узел (offset = индекс символа), либо на элемент
+  // (offset = индекс дочернего узла, например когда выделение начинается
+  // ровно на границе <b>/<i>) — приводим оба случая к реальному текстовому
+  // узлу + смещению в нём.
+  function resolveTextPosition(container, offset){
+    if(container.nodeType === Node.TEXT_NODE) return {node: container, offset: offset};
+    var child = container.childNodes[offset];
+    if(child){
+      var walker = document.createTreeWalker(child, NodeFilter.SHOW_TEXT, null);
+      var first = walker.nextNode();
+      if(first) return {node: first, offset: 0};
+    }
+    // child без текстовых узлов (граница в самом конце абзаца и т.п.) —
+    // берём последний текстовый узел контейнера, в его конце.
+    var walkerAll = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+    var last = null, n;
+    while((n = walkerAll.nextNode())) last = n;
+    if(last) return {node: last, offset: last.textContent.length};
+    return null;
+  }
+
+  // Смещение (node,offset) в координатах ПЛОСКОГО текста элемента root
+  // (сумма длин всех текстовых узлов ДО node, плюс offset внутри него) —
+  // те же координаты, что использует renderRunsHtml/
+  // getBookUnderlineRangesForBlock выше, независимо от вложенности <b>/<i>.
+  function textOffsetWithin(root, node, offset){
+    var sum = 0;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var cur;
+    while((cur = walker.nextNode())){
+      if(cur === node) return sum + offset;
+      sum += cur.textContent.length;
+    }
+    return sum;
+  }
+
+  // Выделение -> {ch, blk, s, e}, либо null, если оба конца выделения не
+  // попадают в ОДИН и тот же абзац книжного ридера (выделение через
+  // несколько абзацев пока не поддерживается — position привязана к одному
+  // блоку, см. комментарий у модели состояния книги выше).
+  function resolveSelectionToBlockPosition(range){
+    var startPos = resolveTextPosition(range.startContainer, range.startOffset);
+    var endPos = resolveTextPosition(range.endContainer, range.endOffset);
+    if(!startPos || !endPos) return null;
+    var pStart = closestBookP(startPos.node);
+    var pEnd = closestBookP(endPos.node);
+    if(!pStart || !pEnd || pStart !== pEnd) return null;
+    var ch = parseInt(pStart.getAttribute("data-ch"), 10);
+    var blk = parseInt(pStart.getAttribute("data-blk"), 10);
+    var s = textOffsetWithin(pStart, startPos.node, startPos.offset);
+    var e = textOffsetWithin(pStart, endPos.node, endPos.offset);
+    if(e <= s) return null;
+    return {ch: ch, blk: blk, s: s, e: e};
+  }
+
+  // Перерисовывает innerHTML ОДНОГО абзаца (без перерисовки всего ридера,
+  // чтобы не сбрасывать scrollTop, к которому пользователь сейчас читает) —
+  // вызывается сразу после того, как подчёркивание сохранено в модели книги.
+  function refreshBookReaderParagraphHighlight(ch, blk){
+    if(!bookReaderState || bookReaderState.mode !== "text") return;
+    var pEl = document.getElementById("bookP_" + ch + "_" + blk);
+    var chapter = bookReaderState.chapters[ch];
+    var block = chapter && chapter.blocks[blk];
+    if(!pEl || !block) return;
+    var ranges = getBookUnderlineRangesForBlock(bookReaderState.hash, ch, blk);
+    pEl.innerHTML = renderRunsHtml(block.runs, ranges);
+  }
+
+  // Диалог ввода имени заметки книги — тот же общий вид карточки, что у
+  // openSubtitleSaveNoteDialog выше (.mdeditor-cleanup-overlay/-card/
+  // -input/-actions), но БЕЗ переключения вкладки/экрана: заметка создаётся
+  // тихо, пользователь остаётся в ридере (см. MdEditor.createNoteSilently).
+  // onSubmit(name) должен вернуть false, если имя занято (тогда поле
+  // подсвечивается и диалог не закрывается, как и в openSubtitleSaveNoteDialog),
+  // и true/undefined при успехе.
+  function openBookUnderlineNameDialog(onSubmit){
+    if(!settingsModalBox) return;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title">Имя заметки для подчёркиваний и иллюстраций из этой книги</div>' +
+      '<input type="text" class="mdeditor-cleanup-input" id="bookNoteNameInput">' +
+      '<div class="mdeditor-cleanup-actions">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="bookNoteNameCancel">Отмена</button>' +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="bookNoteNameCreate">Создать</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    settingsModalBox.appendChild(overlay);
+
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+
+    var input = document.getElementById("bookNoteNameInput");
+    // Имя книги (без расширения) как разумное имя заметки по умолчанию —
+    // пользователь может стереть и вписать своё, поле сразу выделено.
+    if(bookReaderState && bookReaderState.name) input.value = bookReaderState.name.replace(/\.fb2$/i, "");
+    input.focus();
+    input.select();
+
+    function submit(){
+      var name = (input.value || "").trim();
+      if(!name) return;
+      var ok = onSubmit(name);
+      if(ok === false){
+        input.style.borderColor = "var(--danger, #c0392b)";
+        return;
+      }
+      close();
+    }
+    document.getElementById("bookNoteNameCancel").addEventListener("click", close);
+    document.getElementById("bookNoteNameCreate").addEventListener("click", submit);
+    document.getElementById("bookNoteNameCreate").addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+    input.addEventListener("keydown", function(ev){
+      if(ev.key === "Enter"){ ev.preventDefault(); submit(); }
+      else if(ev.key === "Escape"){ ev.preventDefault(); close(); }
+    });
+  }
+
+  // Снимает взвод кнопки "Выделение" (шаг 13, доработка 11.09) — вызывается
+  // после того, как выделение реально израсходовано (подчёркивание добавлено
+  // или место уже было подчёркнуто раньше), чтобы для следующего
+  // подчёркивания пользователь снова нажал кнопку. При неудачном выделении
+  // (например, через несколько абзацев — см. handleBookReaderSelectionSettled)
+  // взвод НЕ снимается, чтобы можно было сразу попробовать ещё раз в
+  // пределах одного абзаца без повторного нажатия кнопки.
+  function disarmBookReaderSelection(){
+    bookReaderSelectionArmed = false;
+    var btn = document.getElementById("bookReaderSelectBtn");
+    if(btn) btn.classList.remove("pressed");
+  }
+
+  // Главная точка входа: новое подчёркивание с уже известной позицией/
+  // текстом — заводит заметку книги при необходимости (диалог имени), иначе
+  // сразу дописывает в существующую; дедуплицирует точные повторы позиции.
+  function addUnderlineFromSelection(ch, blk, s, e, text){
+    var hash = bookReaderState.hash;
+    var data = getOrCreateBookState(hash);
+    var already = data.underlines.filter(function(u){
+      return u.position && u.position.ch === ch && u.position.blk === blk && u.position.s === s && u.position.e === e;
+    })[0];
+    if(already){
+      // То же самое место уже подчёркивалось раньше (повторное чтение) —
+      // текст и так уже подсвечен, в заметку повторно не добавляем.
+      if(window.getSelection) window.getSelection().removeAllRanges();
+      disarmBookReaderSelection();
+      return;
+    }
+    function finishWithNoteId(noteId){
+      var underlineId = addBookUnderline(hash, {ch: ch, blk: blk, s: s, e: e});
+      MdEditor.appendTextToNoteId(noteId, text.trim());
+      markBookUnderlineMovedToNote(hash, underlineId);
+      refreshBookReaderParagraphHighlight(ch, blk);
+      if(window.getSelection) window.getSelection().removeAllRanges();
+      disarmBookReaderSelection();
+    }
+    if(data.noteId){
+      finishWithNoteId(data.noteId);
+    } else {
+      openBookUnderlineNameDialog(function(name){
+        if(!MdEditor || !MdEditor.createNoteSilently) return false;
+        var noteId = MdEditor.createNoteSilently(name);
+        if(!noteId) return false; // имя занято
+        setBookNoteId(hash, noteId);
+        finishWithNoteId(noteId);
+        return true;
+      });
+    }
+  }
+
+  // ===================== ИЛЛЮСТРАЦИИ -> ЗАМЕТКА КНИГИ (READER_PLAN.md,
+  // Этап D, шаг 14, 11.09) =====================
+  // Та же заметка книги, что и у подчёркиваний (data.noteId, см. выше) —
+  // диалог имени всплывает только при самом первом обращении к заметке
+  // (что раньше случится — подчёркивание или картинка, неважно), дальше
+  // переиспользуется. Добавление — копия картинки в images/ (OPFS) через
+  // MdEditor.saveImageBytes и "![[имя]]" в САМЫЙ КОНЕЦ заметки через уже
+  // существующую MdEditor.appendTextToNoteId (она сама даёт одну пустую
+  // строку перед новым содержимым, если тело не пустое, — то же поведение,
+  // что нужно и здесь). Повторное нажатие на ту же картинку — открепление:
+  // MdEditor.removeTextFromNoteId убирает ссылку из заметки,
+  // MdEditor.deleteImageFile стирает сам файл из images/, запись убирается
+  // из модели книги (removeBookImageEntry) — картинка не остаётся мусором,
+  // корзина сирот здесь не нужна.
+  function toggleBookReaderImagePin(ch, blk, imageId, btnEl){
+    if(!bookReaderState) return;
+    var hash = bookReaderState.hash;
+    var existing = getBookImageEntry(hash, ch, blk);
+    if(existing){
+      var data = getOrCreateBookState(hash);
+      if(data.noteId && MdEditor && MdEditor.removeTextFromNoteId){
+        MdEditor.removeTextFromNoteId(data.noteId, "![[" + existing.savedName + "]]");
+      }
+      if(MdEditor && MdEditor.deleteImageFile) MdEditor.deleteImageFile(existing.savedName);
+      removeBookImageEntry(hash, ch, blk);
+      if(btnEl){
+        btnEl.classList.remove("pinned");
+        btnEl.title = "Отправить в заметку";
+      }
+      return;
+    }
+    var imgData = bookReaderState.imageBytes ? bookReaderState.imageBytes[imageId] : null;
+    if(!imgData || !MdEditor || !MdEditor.saveImageBytes) return;
+    function finishWithNoteId(noteId){
+      var baseName = (bookReaderState.name || "book").replace(/\.fb2$/i, "") +
+        " " + (ch + 1) + "-" + (blk + 1) + extFromImageContentType(imgData.contentType);
+      MdEditor.saveImageBytes(baseName, imgData.bytes, imgData.contentType).then(function(finalName){
+        MdEditor.appendTextToNoteId(noteId, "![[" + finalName + "]]");
+        addBookImageEntry(hash, ch, blk, imageId, finalName);
+        if(btnEl){
+          btnEl.classList.add("pinned");
+          btnEl.title = "Убрать из заметки";
+        }
+      }).catch(function(e){
+        var status = document.getElementById("bookReaderStatus");
+        if(status) status.textContent = "Не удалось сохранить иллюстрацию: " + (e && e.message ? e.message : e);
+      });
+    }
+    var data2 = getOrCreateBookState(hash);
+    if(data2.noteId){
+      finishWithNoteId(data2.noteId);
+    } else {
+      openBookUnderlineNameDialog(function(name){
+        if(!MdEditor.createNoteSilently) return false;
+        var noteId = MdEditor.createNoteSilently(name);
+        if(!noteId) return false; // имя занято
+        setBookNoteId(hash, noteId);
+        finishWithNoteId(noteId);
+        return true;
+      });
+    }
+  }
+
+  // Debounce-обработчик "selectionchange" (см. bindBookReaderSelectionOnce
+  // выше) — реагирует только пока открыт ридер в текстовом режиме и выделение
+  // реально лежит внутри .book-reader.
+  function handleBookReaderSelectionSettled(){
+    if(!bookReaderState || bookReaderState.mode !== "text") return;
+    if(!bookReaderSelectionArmed) return; // кнопка "Выделение" не взведена (шаг 13, доработка 11.09) — обычное выделение текста, заметку не трогаем
+    var sel = window.getSelection();
+    if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    var range = sel.getRangeAt(0);
+    var text = range.toString();
+    if(!text || !text.trim()) return;
+    var readerEl = document.querySelector(".book-reader");
+    if(!readerEl || !readerEl.contains(range.commonAncestorContainer)) return;
+    var pos = resolveSelectionToBlockPosition(range);
+    if(!pos){
+      var statusEl = document.getElementById("bookReaderStatus");
+      if(statusEl) statusEl.textContent = "Пока можно подчёркивать текст только в пределах одного абзаца.";
+      return;
+    }
+    addUnderlineFromSelection(pos.ch, pos.blk, pos.s, pos.e, text);
   }
 
   // ===== ИЗВЛЕЧЕНИЕ СУБТИТРОВ (четвёртая нижняя вкладка второго набора,

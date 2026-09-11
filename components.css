@@ -2772,6 +2772,50 @@
   .book-reader-chapter:first-child .book-reader-chapter-title{ margin-top:0; }
   .book-reader-p{ margin:0 0 10px 0; text-indent:1ch; }
   .book-reader .cm-md-image{ margin:10px 0; }
+  /* ---------- Иллюстрация -> заметка книги (READER_PLAN.md, Этап D, шаг 14,
+     11.09). .book-reader-image-wrap — только для position:relative, без
+     своих отступов (margin по-прежнему на .cm-md-image внутри, см. выше).
+     Кнопка-кнопка (READER_PIN_ICON_SVG, my.js) сидит по центру ВЕРХНЕГО
+     края картинки — наполовину на картинке, наполовину над ней (transform
+     -50% по обеим осям от угла top:0/left:50%), тем же круглым базовым
+     видом, что .mdeditor-fab-btn (фон #fffef8, тонкая рамка/тень), но
+     round, не квадрат — 8px radius кнопок-квадратов здесь неуместен.
+     Обычное состояние — бесцветная (var(--wood), тот же язык кнопок
+     блокнота); .pinned — var(--danger), головка иконки (circle) заливается
+     сплошным цветом через currentColor — "воткнутая" кнопка. ---------- */
+  .book-reader-image-wrap{
+    position:relative;
+    display:block;
+  }
+  .book-reader-pin-btn{
+    position:absolute;
+    top:0; left:50%;
+    transform:translate(-50%,-50%);
+    width:30px; height:30px;
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    color:var(--wood);
+    cursor:pointer;
+    box-shadow:0 2px 6px rgba(0,0,0,.28);
+    -webkit-tap-highlight-color:transparent;
+    z-index:1;
+  }
+  .book-reader-pin-btn svg{ width:16px; height:16px; }
+  @media (hover:hover) and (pointer:fine){
+    .book-reader-pin-btn:hover{ background:var(--wood); color:var(--parchment); }
+  }
+  .book-reader-pin-btn.pinned{
+    color:var(--danger, #c0392b);
+    border-color:var(--danger, #c0392b);
+  }
+  .book-reader-pin-btn.pinned svg circle{ fill:currentColor; }
+  @media (hover:hover) and (pointer:fine){
+    .book-reader-pin-btn.pinned:hover{ background:#fffef8; color:var(--danger, #c0392b); }
+  }
   /* ---------- полноэкранный просмотр вставленной в заметку картинки
      (клик по .cm-md-image выше, см. openImageViewer/setWrapToImage в
      mdeditor.js) — отдельный оверлей прямо в document.body (не внутри

@@ -1043,6 +1043,45 @@ window.initMdEditorModule = function(deps){
     });
   }
 
+  // READER_PLAN.md, Этап D, шаг 14 (11.09) — та же запись файла в корень
+  // images/ (OPFS) и то же разрешение коллизий имён (suggestFreeImageName),
+  // что и у insertImageAtCursor выше, но БЕЗ курсора CodeMirror и БЕЗ
+  // вставки "![[имя]]" куда бы то ни было — вызывающий код (книжный ридер,
+  // my.js) сам решает, в какую заметку дописать ссылку (см.
+  // toggleBookReaderImagePin/appendTextToNoteId). Принимает сырые байты
+  // (Uint8Array) вместо File — у ридера нет File, картинка распакована из
+  // base64 внутри fb2. Возвращает Promise<string> — реальное сохранённое
+  // имя (могло получить суффикс "(2)" при коллизии).
+  function saveImageBytes(name, bytes, contentType){
+    return ensureImagesReady().then(function(ready){
+      if(!ready || !imagesDirHandle) throw new Error("Папка изображений недоступна.");
+      var finalName = imageIndex.has(name.toLowerCase()) ? suggestFreeImageName(name) : name;
+      return imagesDirHandle.getFileHandle(finalName, { create: true }).then(function(fileHandle){
+        return fileHandle.createWritable().then(function(writable){
+          return writable.write(new Blob([bytes], { type: contentType })).then(function(){ return writable.close(); });
+        }).then(function(){ return fileHandle; });
+      }).then(function(fileHandle){
+        imageIndex.set(finalName.toLowerCase(), { handle: fileHandle, name: finalName });
+        return finalName;
+      });
+    });
+  }
+
+  // Открепление иллюстрации (READER_PLAN.md, Этап D, шаг 14) — в отличие от
+  // обычной корзины сирот (cleanupOrphanedImages, отложенная и молчаливая),
+  // здесь файл удаляется СРАЗУ И ЯВНО по требованию (второе нажатие на
+  // кнопку-кнопку в ридере), а не когда-нибудь потом фоново. Ошибка (файла
+  // уже нет — например, гонка с корзиной сирот) не считается сбоем: цель
+  // "файла с этим именем в images/ быть не должно" уже достигнута.
+  function deleteImageFile(name){
+    return getImagesDirHandle().then(function(dir){
+      return dir.removeEntry(name).catch(function(){});
+    }).then(function(){
+      imageIndex.delete(name.toLowerCase());
+      refreshMountedImageNodes();
+    });
+  }
+
   // Множество имён картинок, реально встречающихся в тексте заметок
   // (![[имя]], тот же регэксп, что и у decorateLine/imgRe в
   // makeLivePreviewExtension ниже) — по ВСЕМ заметкам пользователя,
@@ -3417,6 +3456,80 @@ window.initMdEditorModule = function(deps){
     return true;
   }
 
+  // Создаёт заметку с ПУСТЫМ телом и НЕ переключает экран на редактор —
+  // используется книжным ридером (my.js, READER_PLAN.md, Этап D, шаг 13):
+  // заметка книги создаётся один раз при первом подчёркивании, пользователь
+  // при этом остаётся в ридере (в отличие от createAndOpenNoteWithText выше,
+  // которая создана для кнопки "Сохранить в Мои заметки" и специально
+  // переключает на экран редактирования). Сам текст подчёркиваний дописывается
+  // отдельно через appendTextToNoteId ниже. Проверка занятого имени — тем же
+  // приёмом, что у createAndOpenNoteWithText (на стороне вызывающего доступна
+  // через isNoteNameTaken в публичном API). Возвращает id новой заметки или
+  // null, если имя уже занято.
+  function createNoteSilently(name){
+    if(isNoteNameTaken(name)) return null;
+    var rec = createNoteRecord(name, "");
+    recordNoteCreated(name);
+    rebuildTree();
+    return rec.id;
+  }
+
+  // Дописывает текст в САМЫЙ КОНЕЦ существующей заметки по id, без анализа/
+  // сопоставления текущего содержимого (READER_PLAN.md, шаг 13: каждое новое
+  // подчёркивание дописывается так, даже если пользователь менял заметку
+  // вручную). Разделитель — одна пустая строка ПЕРЕД добавляемым текстом,
+  // кроме случая, когда тело заметки после строки метаданных ещё пустое
+  // (самая первая запись) — тогда без лишней пустой строки сразу после
+  // %%meta:...%%. Если заметка сейчас открыта в редакторе — обновляет и
+  // openFile.text, и сам CodeMirror-документ, тем же приёмом, что
+  // propagateRenameInMemory выше. Возвращает false, если заметка не найдена.
+  function appendTextToNoteId(id, extra){
+    var rec = notesMap.get(id);
+    if(!rec) return false;
+    var m = META_LINE_RE.exec(rec.text || "");
+    var metaLen = m ? m[0].length : 0;
+    var head = rec.text.slice(0, metaLen);
+    var body = rec.text.slice(metaLen);
+    var sep = body.trim().length ? "\n\n" : "";
+    var newText = head + body + sep + extra;
+    editNoteRecordText(id, newText);
+    if(openFile && openFile.id === id){
+      openFile.text = newText;
+      if(cmView) cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: newText } });
+    }
+    return true;
+  }
+
+  // Обратная операция к appendTextToNoteId — открепление иллюстрации
+  // (READER_PLAN.md, Этап D, шаг 14): убирает ровно ОДНО вхождение exact
+  // ("![[имя]]") из текста заметки. Сначала пробует убрать вместе с
+  // пустой строкой-разделителем ПЕРЕД ней (ровно то, что appendTextToNoteId
+  // добавил при вставке) — так после удаления не остаётся двойного
+  // пустого места; если такой связки не нашлось (например, это была самая
+  // первая запись в заметке, без разделителя, или пользователь потом сам
+  // отредактировал текст вокруг) — убирает просто exact без разделителя.
+  // Возвращает false, если заметка не найдена или exact в ней не найден.
+  function removeTextFromNoteId(id, exact){
+    var rec = notesMap.get(id);
+    if(!rec) return false;
+    var text = rec.text || "";
+    var withSep = "\n\n" + exact;
+    var idx = text.indexOf(withSep);
+    var cut = withSep;
+    if(idx === -1){
+      idx = text.indexOf(exact);
+      cut = exact;
+      if(idx === -1) return false;
+    }
+    var newText = text.slice(0, idx) + text.slice(idx + cut.length);
+    editNoteRecordText(id, newText);
+    if(openFile && openFile.id === id){
+      openFile.text = newText;
+      if(cmView) cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: newText } });
+    }
+    return true;
+  }
+
   function handleLinkClick(name){
     var trimmed = (name || "").trim();
     if(!trimmed || !notesReady) return;
@@ -4508,6 +4621,22 @@ window.initMdEditorModule = function(deps){
     // проверить занятость имени ДО переключения вкладки и создания.
     createAndOpenNoteWithText: createAndOpenNoteWithText,
     isNoteNameTaken: isNoteNameTaken,
+    // READER_PLAN.md, Этап D, шаг 13 (книжный ридер, my.js): создать пустую
+    // заметку книги без перехода на экран редактора, затем дописывать в неё
+    // текст подчёркиваний по мере чтения — см. createNoteSilently/
+    // appendTextToNoteId выше.
+    createNoteSilently: createNoteSilently,
+    appendTextToNoteId: appendTextToNoteId,
+    // READER_PLAN.md, Этап D, шаг 14 (11.09) — иллюстрации книги в той же
+    // заметке: openImageViewer — тот же полноэкранный просмотр с зумом,
+    // что и у картинок в "Моём блокноте" (ридер своего не заводит);
+    // saveImageBytes/deleteImageFile — запись/удаление файла в images/
+    // (OPFS) по сырым байтам, без привязки к курсору редактора;
+    // removeTextFromNoteId — обратная операция к appendTextToNoteId.
+    openImageViewer: openImageViewer,
+    saveImageBytes: saveImageBytes,
+    deleteImageFile: deleteImageFile,
+    removeTextFromNoteId: removeTextFromNoteId,
     // "Забытые заметки" (set2s_4, ТЗ пользователя от 04.09) — см.
     // renderSettingsTabForgottenNotes выше
     renderSettingsTabForgottenNotes: renderSettingsTabForgottenNotes,
