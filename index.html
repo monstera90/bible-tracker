@@ -513,6 +513,12 @@ window.addEventListener("error", function(e){
 <script src="minizip.js"></script>
 <script src="minixlsx.js"></script>
 <script src="docxparse.js"></script>
+<!-- fb2parse.js — READER_PLAN.md, Этап D, шаг 10: разбор fb2 в главы/абзацы/
+     картинки для будущего экрана-ридера (шаг 11, пока не реализован — сам
+     по себе этот файл ничего не рисует). Как и остальные "библиотеки без
+     UI" здесь, должен идти ПОСЛЕ minizip.js: переиспользует
+     MiniZip.decodeXmlEntities, своей копии не заводит. -->
+<script src="fb2parse.js"></script>
 <script src="workbookparse.js"></script>
 <script src="workbooks.js"></script>
 <script src="jwlmerge.js"></script>

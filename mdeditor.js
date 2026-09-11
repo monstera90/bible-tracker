@@ -663,6 +663,33 @@ window.initMdEditorModule = function(deps){
     });
   }
 
+  // READER_PLAN.md, Этап B, шаг 5 (11.09) — плоский список байтов всех
+  // картинок для общего ZIP-бэкапа (кнопка "Скачать" в модалке
+  // синхронизации, см. bindExportButton в my.js). Переиспользует уже
+  // построенный imageIndex (см. buildImageIndex выше) — если индекс ещё
+  // не готов (экспорт запущен раньше initImagesStorage), сперва строит
+  // его. Подпапки в индексе уже развёрнуты в плоский список (см.
+  // комментарий у buildImageIndex) — в архив картинки кладутся тем же
+  // плоским списком, без вложенных путей. Возвращает
+  // Promise<Array<{name, data:Uint8Array}>>, при ошибке — пустой массив
+  // (не должна ронять остальной экспорт).
+  function getImageFilesForExport(){
+    return getImagesDirHandle().then(function(){
+      return imageIndexBuilt ? Promise.resolve() : buildImageIndex();
+    }).then(function(){
+      var entries = [];
+      imageIndex.forEach(function(item){ entries.push(item); });
+      return Promise.all(entries.map(function(item){
+        return item.handle.getFile().then(function(f){ return f.arrayBuffer(); }).then(function(buf){
+          return { name: item.name, data: new Uint8Array(buf) };
+        });
+      }));
+    }).catch(function(e){
+      if(window.Debug) window.Debug.log("getImageFilesForExport: " + (e && e.message ? e.message : e));
+      return [];
+    });
+  }
+
   // Собирает разметку плейсхолдера прямо внутри wrapEl (переиспользуем
   // тот же <span>, а не пересоздаём его — иначе он выпал бы из
   // imageNodesByName). Форма/цвет — раздел 9 ТЗ: прямоугольник 16:9,
@@ -1590,6 +1617,23 @@ window.initMdEditorModule = function(deps){
     triggerBlobDownload(blob, openFile.name + ".md");
   }
 
+  // Плоский список {name, data:Uint8Array} по всем незаметкам-неудалённым
+  // записям notesMap, с сохранением структуры папок в имени (см.
+  // noteZipEntryName выше) — общий код для кнопки "Скачать все заметки"
+  // (downloadAllNotesZip ниже, раздел 6 ТЗ) и для общего ZIP-бэкапа
+  // (READER_PLAN.md, Этап B, шаг 5, 11.09; см. getNotesFilesForExport в
+  // публичном API и bindExportButton в my.js). Заметки в памяти уже
+  // расшифрованы (см. комментарий у downloadAllNotesZip) — здесь никакой
+  // отдельной расшифровки не требуется.
+  function buildNotesFileList(){
+    var files = [];
+    notesMap.forEach(function(rec){
+      if(!rec || rec.deleted || !rec.name) return;
+      files.push({ name: noteZipEntryName(rec), data: new TextEncoder().encode(rec.text || "") });
+    });
+    return files;
+  }
+
   // Раздел 6 ТЗ: скачать ВСЕ заметки пользователя как .zip, расшифровывая
   // на лету (заметки в памяти, notesMap, УЖЕ расшифрованы — шифруется
   // только то, что уходит/приходит из Firebase, см. encryptNotePayload/
@@ -1599,11 +1643,7 @@ window.initMdEditorModule = function(deps){
       setStatus("Не удалось собрать .zip: модуль ZIP не загружен.", true);
       return;
     }
-    var files = [];
-    notesMap.forEach(function(rec){
-      if(!rec || rec.deleted || !rec.name) return;
-      files.push({ name: noteZipEntryName(rec), data: new TextEncoder().encode(rec.text || "") });
-    });
+    var files = buildNotesFileList();
     if(!files.length){
       setStatus("Заметок пока нет — нечего скачивать.", true);
       return;
@@ -1730,6 +1770,42 @@ window.initMdEditorModule = function(deps){
       if(!confirmed) return { imported: 0, replaced: 0, cancelled: true };
       return applyEntries();
     });
+  }
+
+  // READER_PLAN.md, Этап B, шаг 6 (11.09) — категория "Заметки" выборочного
+  // импорта общего ZIP-бэкапа (см. applyImportSelection в my.js). В отличие
+  // от importNoteEntries выше (которая заменяет только заметки, СОВПАВШИЕ
+  // по имени, и оставляет остальные как есть), эта категория полностью
+  // заменяет заметки на устройстве: сначала мягко удаляются (deleteNoteRecord
+  // — штатный уход в синхронизацию как soft-delete) вообще ВСЕ текущие
+  // заметки, затем все записи из архива добавляются как новые
+  // (createImportedNoteRecord), без диалога подтверждения — пользователь
+  // уже подтвердил замену на экране выбора категорий импорта. entries —
+  // [{name, path, text}], тот же формат, что строит handleImportFile из
+  // MiniZip.extractMarkdownFiles.
+  function replaceAllNotesFromEntries(entries){
+    var existingIds = [];
+    notesMap.forEach(function(rec, id){
+      if(rec && !rec.deleted) existingIds.push(id);
+    });
+    existingIds.forEach(function(id){
+      var rec = notesMap.get(id);
+      if(rec){
+        var key = rec.name.toLowerCase();
+        if(bookmarkedNames.has(key)){
+          bookmarkedNames.delete(key);
+          setSyncedBookmark(key, false);
+        }
+        revealedBookmarkRows.delete(key);
+      }
+      deleteNoteRecord(id);
+    });
+    entries.forEach(function(entry){
+      createImportedNoteRecord(entry.name, entry.path, entry.text);
+    });
+    rebuildTree();
+    var container = document.getElementById("settingsTabContent");
+    if(container) render();
   }
 
   // Обрабатывает выбранный пользователем файл (.md или .zip) — точка входа
@@ -1860,6 +1936,59 @@ window.initMdEditorModule = function(deps){
       });
     }).catch(function(e){
       setStatus("Не удалось прочитать .zip: " + (e && e.message ? e.message : e), true);
+    });
+  }
+
+  // READER_PLAN.md, Этап B, шаг 6 (11.09) — стирает ВСЕ записи в корне
+  // images/ (OPFS), включая вложенные подпапки (buildImageIndex ходит по
+  // ним рекурсивно, поэтому удаление подпапок делаем recursive:true) —
+  // подготовка к категории "Картинки заметок" выборочного импорта общего
+  // ZIP-бэкапа (см. replaceAllImagesFromEntries ниже).
+  function clearImagesDir(){
+    return getImagesDirHandle().then(function(dir){
+      var names = [];
+      async function collect(){
+        for await (var entry of dir.entries()){ names.push(entry[0]); }
+      }
+      return collect().then(function(){
+        return names.reduce(function(p, name){
+          return p.then(function(){
+            return dir.removeEntry(name, { recursive: true }).catch(function(){});
+          });
+        }, Promise.resolve());
+      });
+    });
+  }
+
+  // READER_PLAN.md, Этап B, шаг 6 (11.09) — категория "Картинки заметок"
+  // выборочного импорта общего ZIP-бэкапа (см. applyImportSelection в
+  // my.js): полностью заменяет содержимое images/ файлами из архива.
+  // Сначала стирает всё текущее (clearImagesDir выше), затем пишет файлы
+  // ПОСЛЕДОВАТЕЛЬНО (не параллельно — та же причина, что и у
+  // handleImportImagesZip выше: imageIndex пополняется по ходу записи) в
+  // корень images/ — в архиве картинки и так плоские (см.
+  // getImageFilesForExport), поэтому вложенные пути не восстанавливаются.
+  // entries — [{name, data:Uint8Array}].
+  function replaceAllImagesFromEntries(entries){
+    return getImagesDirHandle().then(function(){
+      return clearImagesDir();
+    }).then(function(){
+      imageIndex = new Map();
+      function next(i){
+        if(i >= entries.length) return Promise.resolve();
+        var entry = entries[i];
+        return imagesDirHandle.getFileHandle(entry.name, { create: true }).then(function(fh){
+          return fh.createWritable().then(function(w){
+            return w.write(entry.data).then(function(){ return w.close(); });
+          }).then(function(){ return fh; });
+        }).then(function(fh){
+          imageIndex.set(entry.name.toLowerCase(), { handle: fh, name: entry.name });
+          return next(i + 1);
+        });
+      }
+      return next(0);
+    }).then(function(){
+      refreshMountedImageNodes();
     });
   }
 
@@ -2190,6 +2319,11 @@ window.initMdEditorModule = function(deps){
     html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="mdEditorImportBtn">Загрузить .md или .zip, содержащий файлы .md</button>';
     if(hasAnyNotes){
       html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="mdEditorExportZipBtn">Скачать .zip, содержащий файлы .md</button>';
+      // Шаг 7 READER_PLAN.md (11.09): уточнение, что это сухие .md-файлы без
+      // картинок и медиа — сама кнопка и её поведение не меняются, отдельно
+      // от общего ZIP-бэкапа (модалка синхронизации, там папки notes/tasks/
+      // images/books/ вместе).
+      html += '<p class="mdeditor-hint" style="margin:4px 0 0 0;">Это сухие .md-файлы заметок, без картинок и другого медиа.</p>';
     }
     // Кнопка "Указать папку с локальными изображениями" убрана
     // (READER_PLAN.md, шаг 1, 09.09) — картинки теперь в OPFS (images/),
@@ -4387,6 +4521,19 @@ window.initMdEditorModule = function(deps){
     // getSearchableNotes — плоский список заметок для самого поиска.
     openNoteByIdExternally: openNoteByIdExternally,
     getSearchableNotes: getSearchableNotes,
+    // READER_PLAN.md, Этап B, шаг 5 (11.09) — для общего ZIP-бэкапа
+    // (кнопка "Скачать" в модалке синхронизации, см. bindExportButton в
+    // my.js): getNotesFilesForExport — синхронный список файлов заметок
+    // (те же данные, что уходят в "Мои заметки.zip", см.
+    // buildNotesFileList/downloadAllNotesZip выше); getImageFilesForExport —
+    // асинхронный список байтов картинок из OPFS (см. выше).
+    getNotesFilesForExport: function(){ return buildNotesFileList(); },
+    getImageFilesForExport: getImageFilesForExport,
+    // READER_PLAN.md, Этап B, шаг 6 (11.09) — для категорий "Заметки"/
+    // "Картинки заметок" выборочного импорта общего ZIP-бэкапа, см.
+    // applyImportSelection в my.js.
+    replaceAllNotesFromEntries: replaceAllNotesFromEntries,
+    replaceAllImagesFromEntries: replaceAllImagesFromEntries,
     // вызывается извне (см. rerenderAllFromState в my.js) после того, как
     // облачная синхронизация приносит state, отличающийся от локального —
     // например, закладку добавили на другом устройстве.

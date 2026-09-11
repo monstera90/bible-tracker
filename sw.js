@@ -6,7 +6,7 @@
 // что sw.js изменился, скачать новую версию в фоне и подготовить её к
 // установке — без этого шага обновление не будет обнаружено автоматически.
 
-const APP_VERSION = "v0.33.8";
+const APP_VERSION = "v0.33.10";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Список файлов, которые нужны странице для полностью офлайн-работы.
@@ -27,6 +27,7 @@ const ASSETS = [
   "./minizip.js",
   "./minixlsx.js",
   "./docxparse.js",
+  "./fb2parse.js",
   "./workbookparse.js",
   "./workbooks.js",
   "./jwlmerge.js",

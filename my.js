@@ -1741,8 +1741,18 @@
     bookNameMeasureProbe.textContent = text;
     return bookNameMeasureProbe.getBoundingClientRect().width;
   }
-  // небольшой запас на погрешности субпиксельного округления
-  var BOOK_NAME_SAFETY_MARGIN = 2;
+  // небольшой запас на погрешности субпиксельного округления — уменьшен до
+  // 0 (ТЗ от 11.09, седьмой заход: "дать тексту больше свободы подходить
+  // к пилюле вплотную"). ВАЖНО: этот margin — реальный корень ВСЕХ жалоб
+  // на "лишний зазор"/"слишком тесные отступы" в компактном режиме за
+  // 11.09 (заходы 2-6 выше и в components.css) — казавшийся зазор между
+  // названием и пилюлей на самом деле создавали не padding/gap, а именно
+  // эти отнятые 2px перед подгонкой текста. Пользователь подтвердил
+  // результат при 0 — держать на 0, НЕ восстанавливать по своей
+  // инициативе. Возвращать (до 1-2px) только если пользователь САМ
+  // явно попросит после того, как реально увидит обрезанную пополам
+  // букву на устройстве (баг, ради которого margin изначально появился).
+  var BOOK_NAME_SAFETY_MARGIN = 0;
 
   // ТЗ от 11.09 (широкая 3-колоночная раскладка ≥860px, скриншот
   // пользователя): полные "1 Коринфянам"/"2 Коринфянам" реально влезают
@@ -1887,7 +1897,9 @@
     // вместо общих 2px 8px), а padding/gap самого .book-header-content там
     // же уменьшены с 0 10px/6px до 0 6px/4px. Освобождённые ~14px уходят
     // напрямую в бюджет .book-name и снимают дефицит ширины для всех
-    // кодов книг, включая самый широкий во всём проекте — "Иуды" (4 буквы).
+    // кодов книг, включая самый широкий во всём проекте — "Иуды" (4 буквы,
+    // 11.09 шестой заход — при padding 0 8px запаса хватает и без
+    // сокращения "Иуды"→"Иуд", пятый заход отменён).
     var countTextWidth = measureTextWidth("150 / 150", countFont, "0px");
     var wideCountPillPadding = 16;    // .book-count{padding:2px 8px} — обычный (широкий) режим, не менялся
     var compactCountPillPadding = 12; // .book-count.compact-count{padding:2px 6px} — components.css, @media(max-width:859px)
@@ -1898,15 +1910,15 @@
     var wideHeaderPadding = 28; // .book-header-content{padding:0 14px}, с двух сторон — полноразмерная карточка
     // Компактный режим (2/3 колонки на узком экране, components.css,
     // блок @media(max-width:859px)) — там же .book-header-content получает
-    // уменьшенные padding:0 6px / gap:2px безусловно (ТЗ от 11.09, третий
-    // заход — расстояние между надписью и счётчиком в компактном режиме
-    // уменьшено вдвое, было 4px; до этого — второй заход, прежние 0 10px/6px
-    // не оставляли места готовым 3-буквенным кодам, см. комментарий выше).
+    // padding:0 10px / gap:2px безусловно (ТЗ от 11.09, седьмой заход —
+    // было 0 8px (пятый заход), пробуем 0 10px вместе с обнулённым
+    // BOOK_NAME_SAFETY_MARGIN выше; до этого шестой заход подтвердил, что
+    // 0 8px хватает без сокращения "Иуды"→"Иуд").
     // Эти цифры здесь и в CSS должны совпадать один в один — иначе получится
     // рассинхрон (JS резервирует место под одни отступы, а рендерится с
     // другими).
     var compactGap = 2;
-    var compactHeaderPadding = 12; // components.css: .book-header-content{padding:0 6px} в компактном режиме — правка от 11.09, второй заход
+    var compactHeaderPadding = 20; // components.css: .book-header-content{padding:0 10px} в компактном режиме — правка от 11.09, седьмой заход
 
     // Широкая карточка: видны имя + счётчик + стрелка-переключатель — два
     // зазора между тремя детьми.
@@ -3650,14 +3662,42 @@
   function exportSectionHtml(){
     return '<div class="modal-section">' +
       '<button class="modal-btn" id="mExportData">Экспортировать личные данные</button>' +
-      '<p class="modal-note">Скачает ZIP-архив со всеми вашими данными (прогресс чтения, настроение, достижение целей).</p>' +
+      '<p class="modal-note">Скачает ZIP-архив со всеми вашими данными: прогресс чтения, настроение, достижение целей, задачи, заметки (с картинками) и книги.</p>' +
       '</div>';
   }
+  // READER_PLAN.md, Этап B, шаг 5 (11.09): раньше архив содержал только
+  // data.json (rawState.data и так уже включает записи задач ("task:*"),
+  // но только как технический снимок для восстановления — отдельная
+  // папка tasks/ ниже нужна как читаемая копия, тем же принципом, что и
+  // остальные разделы data.json). Теперь дополнительно кладём в архив:
+  // notes/ (заметки "Мой блокнот", через MdEditor.getNotesFilesForExport —
+  // те же данные, что и в "Мои заметки.zip", см. downloadAllNotesZip в
+  // mdeditor.js), tasks/tasks.json (getAllTasks() как есть), images/
+  // (картинки заметок из OPFS, через MdEditor.getImageFilesForExport) и
+  // books/ (книги из OPFS, через getBookFilesForExport выше). Без оглядки
+  // на обратную совместимость со старыми копиями (раздел ТЗ — пользователей
+  // с локальными копиями пока нет). Сбор картинок/книг асинхронный (чтение
+  // OPFS), поэтому вся функция теперь ждёт Promise.all и на время сборки
+  // блокирует кнопку — на устройстве с большой библиотекой книг/картинок
+  // это может занять заметное время, и повторный клик собрал бы архив
+  // дважды параллельно.
   function bindExportButton(){
     var btn = document.getElementById("mExportData");
     if(!btn) return;
     btn.addEventListener("click", function(){
-      try{
+      if(btn.disabled) return;
+      var originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Собираю архив…";
+      Promise.all([
+        MdEditor && MdEditor.getImageFilesForExport ? MdEditor.getImageFilesForExport() : Promise.resolve([]),
+        getBookFilesForExport()
+      ]).then(function(results){
+        var imageFiles = results[0] || [];
+        var bookFiles = results[1] || [];
+        var noteFiles = (MdEditor && MdEditor.getNotesFilesForExport) ? MdEditor.getNotesFilesForExport() : [];
+        var taskFiles = [{name: "tasks.json", data: new TextEncoder().encode(JSON.stringify(getAllTasks(), null, 2))}];
+
         var data = buildExportData();
         var encoder = new TextEncoder();
         var jsonBytes = encoder.encode(JSON.stringify(data, null, 2));
@@ -3671,12 +3711,23 @@
           "- moodCounter.dailyMoodLog: по дням, какое настроение отмечалось\n" +
           "- goalCompletions.dailyLog: по дням, какие задачи личных целей были отмечены выполненными (название цели и текст задачи) — эти записи сохраняются, даже если сама цель потом была удалена или галочка снята\n" +
           "- rawState: технический снимок для восстановления через кнопку «Импортировать личные данные» в самом приложении (прогресс-бары, ячейки по датам и всё остальное восстанавливаются именно из него)\n" +
-          "Этот файл можно отдать нейросети для анализа корреляций между чтением, отмеченным временем и настроением.\n"
+          "Этот файл можно отдать нейросети для анализа корреляций между чтением, отмеченным временем и настроением.\n" +
+          "Папка notes/ — заметки «Моего блокнота» (.md, со структурой папок).\n" +
+          "Папка tasks/ — задачи (tasks.json), читаемая копия того же, что уже есть в rawState.data.\n" +
+          "Папка images/ — картинки, вставленные в заметки.\n" +
+          "Папка books/ — загруженные книги (fb2 и др.).\n"
         );
-        var blob = buildZipBlob([
+
+        var zipFiles = [
           {name:"data.json", content:jsonBytes},
           {name:"README.txt", content:readmeBytes}
-        ]);
+        ];
+        noteFiles.forEach(function(f){ zipFiles.push({name:"notes/" + f.name, content:f.data}); });
+        taskFiles.forEach(function(f){ zipFiles.push({name:"tasks/" + f.name, content:f.data}); });
+        imageFiles.forEach(function(f){ zipFiles.push({name:"images/" + f.name, content:f.data}); });
+        bookFiles.forEach(function(f){ zipFiles.push({name:"books/" + f.name, content:f.data}); });
+
+        var blob = buildZipBlob(zipFiles);
         var url = URL.createObjectURL(blob);
         var a = document.createElement("a");
         a.href = url;
@@ -3685,79 +3736,107 @@
         a.click();
         document.body.removeChild(a);
         setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
-      }catch(e){
+      }).catch(function(e){
         console.error("Ошибка экспорта:", e);
         alert("Не удалось собрать архив с данными. Попробуйте ещё раз.");
-      }
+      }).finally(function(){
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      });
     });
   }
 
   // ===================== ИМПОРТ ЛИЧНЫХ ДАННЫХ =====================
   // Читает файл, экспортированный кнопкой "Экспортировать личные данные"
-  // (сам ZIP-архив или извлечённый из него data.json), и полностью
-  // заменяет данные на этом устройстве содержимым rawState.data.
-  // Импорт всегда заменяет, а не объединяет локальные данные — по тем же
-  // причинам, по которым подключение по коду синхронизации тоже больше не
-  // выполняет объединение (см. joinWithCode): слепое объединение по
-  // временным меткам может оставить "победителем" случайные/тестовые
-  // отметки вместо настоящих данных.
+  // (сам ZIP-архив, собранный bindExportButton, или, для старых копий,
+  // извлечённый из него data.json), и даёт пользователю выбрать, ЧТО
+  // именно восстановить. READER_PLAN.md, Этап B, шаг 6 (11.09): раньше
+  // импорт был "всё или ничего" (полная замена state содержимым
+  // rawState.data) — теперь при выборе ZIP-архива показываются галочки
+  // только по тем категориям, что реально нашлись внутри: "Заметки"
+  // (notes/), "Задачи" (task:*/taskcompletion:* внутри rawState.data),
+  // "Картинки заметок" (images/), "Книги" (books/) и "Всё остальное"
+  // (сам rawState.data, за вычетом ключей задач — прогресс чтения,
+  // счётчик часов, настроение, цели, комментарии, настройки). При выборе
+  // одного data.json (без остальных папок — старые копии, либо файл,
+  // извлечённый вручную из архива) доступна только категория "Всё
+  // остальное" (и "Задачи", если в нём есть ключи задач). Каждая
+  // отмеченная категория ПОЛНОСТЬЮ заменяет то, что есть на устройстве —
+  // без слияния (по тем же причинам, по которым подключение по коду
+  // синхронизации тоже больше не выполняет объединение, см. joinWithCode:
+  // слепое объединение по временным меткам может оставить "победителем"
+  // случайные/тестовые отметки вместо настоящих данных); неотмеченные
+  // категории на устройстве не трогаются, даже если для них в архиве
+  // есть более свежие данные.
 
-  // Достаёт текстовое содержимое файла data.json из ZIP-архива.
-  // Поддерживает и несжатые записи (STORED, метод 0 — как создаёт наш
-  // buildZipBlob), и сжатые (DEFLATE, метод 8 — как у обычных ZIP-архиваторов),
-  // читая центральный каталог архива, чтобы не зависеть от того, чем именно
-  // архив был создан.
-  function extractDataJsonFromZip(arrayBuffer){
-    return new Promise(function(resolve, reject){
-      try{
-        var bytes = new Uint8Array(arrayBuffer);
-        var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-        var eocdOffset = -1;
-        var scanFrom = Math.max(0, bytes.length - 65557);
-        for(var i = bytes.length - 22; i >= scanFrom; i--){
-          if(view.getUint32(i, true) === 0x06054b50){ eocdOffset = i; break; }
-        }
-        if(eocdOffset === -1){ reject(new Error("not_zip")); return; }
-        var entryCount = view.getUint16(eocdOffset + 10, true);
-        var centralOffset = view.getUint32(eocdOffset + 16, true);
-        var decoder = new TextDecoder();
-        var pos = centralOffset, target = null;
-        for(var e = 0; e < entryCount; e++){
-          if(view.getUint32(pos, true) !== 0x02014b50) break;
-          var method = view.getUint16(pos + 10, true);
-          var compSize = view.getUint32(pos + 20, true);
-          var nameLen = view.getUint16(pos + 28, true);
-          var extraLen = view.getUint16(pos + 30, true);
-          var commentLen = view.getUint16(pos + 32, true);
-          var localOffset = view.getUint32(pos + 42, true);
-          var name = decoder.decode(bytes.subarray(pos + 46, pos + 46 + nameLen));
-          if(/data\.json$/i.test(name)){ target = {method:method, compSize:compSize, localOffset:localOffset}; }
-          pos += 46 + nameLen + extraLen + commentLen;
-        }
-        if(!target){ reject(new Error("no_data_json")); return; }
-        var lNameLen = view.getUint16(target.localOffset + 26, true);
-        var lExtraLen = view.getUint16(target.localOffset + 28, true);
-        var dataStart = target.localOffset + 30 + lNameLen + lExtraLen;
-        var compBytes = bytes.subarray(dataStart, dataStart + target.compSize);
-        if(target.method === 0){
-          resolve(decoder.decode(compBytes));
-        } else if(target.method === 8 && typeof DecompressionStream !== "undefined"){
-          var stream = new Response(compBytes).body.pipeThrough(new DecompressionStream("deflate-raw"));
-          new Response(stream).text().then(resolve).catch(reject);
-        } else {
-          reject(new Error("unsupported_method"));
-        }
-      }catch(err){ reject(err); }
-    });
+  function isTaskStateKey(k){
+    return k.indexOf("task:") === 0 || k.indexOf("taskcompletion:") === 0;
   }
 
-  function readImportFile(file){
+  // Разбирает выбранный файл целиком: и .json (просто текст), и .zip
+  // (через MiniZip.extractAllFiles — тот же универсальный разбор
+  // произвольного .zip, что уже используют handleImportImagesZip в
+  // mdeditor.js и handleImportBooksFile выше, поэтому отдельный
+  // самописный разбор центрального каталога здесь больше не нужен и убран:
+  // extractAllFiles уже умеет и STORED, и DEFLATE). Возвращает
+  // Promise<{rawStateData, noteEntries, imageEntries, bookEntries}>.
+  function readImportArchive(file){
+    var lowerName = (file.name || "").toLowerCase();
+    var isJson = lowerName.endsWith(".json") || file.type === "application/json";
+    if(isJson){
+      return file.text().then(function(text){
+        var parsed;
+        try{ parsed = JSON.parse(text); }catch(e){ throw new Error("bad_json"); }
+        if(!parsed || !parsed.rawState || typeof parsed.rawState.data !== "object"){
+          throw new Error("no_raw_state");
+        }
+        return { rawStateData: parsed.rawState.data, noteEntries: [], imageEntries: [], bookEntries: [] };
+      });
+    }
+    if(!window.MiniZip || !window.MiniZip.extractAllFiles){
+      return Promise.reject(new Error("no_zip_module"));
+    }
     return file.arrayBuffer().then(function(buf){
-      var isJson = /\.json$/i.test(file.name) || file.type === "application/json";
-      if(isJson){
-        return new TextDecoder().decode(buf);
+      return window.MiniZip.extractAllFiles(buf);
+    }).then(function(entries){
+      var decoder = new TextDecoder();
+      var dataEntry = null;
+      entries.forEach(function(e){ if(/(^|\/)data\.json$/i.test(e.path)) dataEntry = e; });
+      if(!dataEntry) throw new Error("no_data_json");
+      var parsed;
+      try{ parsed = JSON.parse(decoder.decode(dataEntry.data)); }catch(e){ throw new Error("bad_json"); }
+      if(!parsed || !parsed.rawState || typeof parsed.rawState.data !== "object"){
+        throw new Error("no_raw_state");
       }
-      return extractDataJsonFromZip(buf);
+
+      var noteEntries = [];
+      entries.forEach(function(e){
+        if(e.path.indexOf("notes/") !== 0 || !/\.md$/i.test(e.path)) return;
+        var rel = e.path.slice("notes/".length);
+        var slash = rel.lastIndexOf("/");
+        var dir = slash >= 0 ? rel.slice(0, slash) : "";
+        var base = slash >= 0 ? rel.slice(slash + 1) : rel;
+        var noteName = base.replace(/\.md$/i, "").trim() || "Без названия";
+        noteEntries.push({ name: noteName, path: dir, text: decoder.decode(e.data) });
+      });
+
+      var imageEntries = [];
+      entries.forEach(function(e){
+        if(e.path.indexOf("images/") !== 0) return;
+        var rel = e.path.slice("images/".length);
+        if(!rel) return;
+        imageEntries.push({ name: rel.slice(rel.lastIndexOf("/") + 1), data: e.data });
+      });
+
+      var bookEntries = [];
+      entries.forEach(function(e){
+        if(e.path.indexOf("books/") !== 0) return;
+        var rel = e.path.slice("books/".length);
+        if(!rel) return;
+        bookEntries.push({ name: rel.slice(rel.lastIndexOf("/") + 1), data: e.data });
+      });
+
+      return { rawStateData: parsed.rawState.data, noteEntries: noteEntries, imageEntries: imageEntries, bookEntries: bookEntries };
     });
   }
 
@@ -3765,7 +3844,7 @@
     return '<div class="modal-section">' +
       '<button class="modal-btn" id="mImportData">Импортировать личные данные</button>' +
       '<input type="file" id="mImportFileInput" accept=".zip,.json,application/json,application/zip" style="display:none">' +
-      '<p class="modal-note">Восстановит прогресс чтения, настроение и остальные данные из файла, полученного кнопкой «Экспортировать личные данные» (можно выбрать сам ZIP-архив или файл data.json из него). Данные, которые уже есть на этом устройстве, будут заменены.</p>' +
+      '<p class="modal-note">Восстановит данные из файла, полученного кнопкой «Экспортировать личные данные» (ZIP-архив или, для старых копий, файл data.json). После выбора файла можно будет отметить, что именно восстановить — каждая отмеченная категория полностью заменит то, что уже есть на этом устройстве.</p>' +
       '</div>';
   }
 
@@ -3778,17 +3857,13 @@
       var file = input.files && input.files[0];
       input.value = "";
       if(!file) return;
-      readImportFile(file).then(function(text){
-        var parsed;
-        try{ parsed = JSON.parse(text); }catch(e){ throw new Error("bad_json"); }
-        if(!parsed || !parsed.rawState || typeof parsed.rawState.data !== "object"){
-          throw new Error("no_raw_state");
-        }
-        renderImportConfirmScreen(parsed.rawState.data);
+      readImportArchive(file).then(function(payload){
+        renderImportCategoriesScreen(payload);
       }).catch(function(err){
         console.error("Ошибка импорта:", err);
         var msg = "Не удалось прочитать файл. Убедитесь, что выбран ZIP-архив или data.json, полученные экспортом из этого приложения.";
         if(err && err.message === "no_raw_state") msg = "В этом файле нет данных для восстановления (возможно, он экспортирован старой версией приложения). Экспортируйте данные заново с другого устройства.";
+        if(err && err.message === "no_zip_module") msg = "Не удалось прочитать .zip: модуль ZIP не загружен.";
         modalBox.innerHTML = modalHeader("Не получилось импортировать", msg) + '<button class="modal-btn primary" id="mBack">Назад</button>';
         bindClose();
         document.getElementById("mBack").addEventListener("click", renderModalHome);
@@ -3796,47 +3871,129 @@
     });
   }
 
-  function renderImportConfirmScreen(importedState){
-    modalBox.innerHTML = modalHeader("Внимание",
-        "Все данные, которые сейчас есть на этом устройстве, будут удалены и заменены данными из этого файла. Объединение с текущими данными не выполняется — отменить действие после импорта будет нельзя.") +
-      '<button class="modal-btn danger" id="mImportConfirm">Да, удалить текущие данные и импортировать</button>' +
+  // Категории — в порядке показа; countFrom указывает, из какого массива
+  // payload считать число найденных элементов для подписи (null — у
+  // категории нет отдельного списка файлов, она про ключи rawState.data).
+  var IMPORT_CATEGORY_DEFS = [
+    { key: "notes", label: "Заметки", countFrom: "noteEntries" },
+    { key: "tasks", label: "Задачи", countFrom: null },
+    { key: "images", label: "Картинки заметок", countFrom: "imageEntries" },
+    { key: "books", label: "Книги", countFrom: "bookEntries" },
+    { key: "all", label: "Всё остальное (прогресс чтения, счётчик часов, настроение, цели, комментарии)", countFrom: null }
+  ];
+
+  // Какие категории реально нашлись в разобранном архиве (payload — из
+  // readImportArchive выше) — по ним и показываются галочки на экране
+  // выбора (раздел ТЗ Шага 6: "показывать галочки только по тем папкам,
+  // что реально нашлись в архиве").
+  function importPayloadCategories(payload){
+    var taskKeysFound = Object.keys(payload.rawStateData).some(isTaskStateKey);
+    return IMPORT_CATEGORY_DEFS.filter(function(def){
+      if(def.key === "notes") return payload.noteEntries.length > 0;
+      if(def.key === "images") return payload.imageEntries.length > 0;
+      if(def.key === "books") return payload.bookEntries.length > 0;
+      if(def.key === "tasks") return taskKeysFound;
+      return true; // "all" — data.json (и в нём rawState.data) есть у любого валидного файла
+    });
+  }
+
+  function renderImportCategoriesScreen(payload){
+    var categories = importPayloadCategories(payload);
+    var rows = categories.map(function(def){
+      var count = def.countFrom ? payload[def.countFrom].length : null;
+      var label = def.label + (count != null ? " (" + count + ")" : "");
+      return '<div class="settings-row"><span>' + escapeHtml(label) + '</span><input type="checkbox" class="mImportCat" data-cat="' + def.key + '" checked></div>';
+    }).join("");
+    modalBox.innerHTML = modalHeader("Что восстановить",
+        "Отметьте, что восстановить из файла. Каждая отмеченная категория полностью заменит то, что есть на этом устройстве — объединения с текущими данными нет, отменить действие после импорта будет нельзя.") +
+      '<div class="modal-section">' + rows + '</div>' +
+      '<button class="modal-btn danger" id="mImportConfirm">Импортировать отмеченное</button>' +
       '<button class="modal-btn" id="mBack">Отмена</button>';
     bindClose();
     document.getElementById("mBack").addEventListener("click", renderModalHome);
     document.getElementById("mImportConfirm").addEventListener("click", function(){
-      applyImportedState(importedState);
+      var checked = Array.prototype.slice.call(modalBox.querySelectorAll(".mImportCat:checked"))
+        .map(function(cb){ return cb.dataset.cat; });
+      if(!checked.length){
+        alert("Отметьте хотя бы одну категорию для восстановления.");
+        return;
+      }
+      var selection = {};
+      checked.forEach(function(k){ selection[k] = true; });
+      applyImportSelection(payload, selection);
     });
   }
 
-  function applyImportedState(importedState){
-    state = importedState;
-    saveLocalState();
-    setNoTransitions(true);
-    rerenderAllFromState();
-    setTimeout(function(){ setNoTransitions(false); }, 50);
-    if(syncId){
-      // Устройство отвязывается от прежнего кода синхронизации: старый код
-      // остаётся привязан к прежним (потенциально некорректным/тестовым)
-      // облачным данным, и его нельзя молча переиспользовать для только
-      // что импортированных данных — ни отправка без объединения, ни тем
-      // более обычная автосинхронизация с объединением по временным меткам
-      // (см. doCloudSync) для этого не подходят. Поэтому синхронизация
-      // просто отключается, а дальше пользователю сразу предлагается
-      // создать новый код — уже для восстановленных данных.
-      syncId = null;
-      localStorage.removeItem(SYNC_ID_KEY);
+  // Применяет отмеченные пользователем категории (selection — объект вида
+  // {all,tasks,notes,images,books}, см. renderImportCategoriesScreen).
+  // "Задачи" и "Всё остальное" — обе технически часть одного
+  // rawState.data, поэтому здесь их явно разносят по ключам: "Всё
+  // остальное" применяет все ключи rawState.data, КРОМЕ
+  // task:*/taskcompletion:*, "Задачи" — только их; так снятая галочка
+  // "Задачи" не трогает текущие задачи на устройстве, даже если "Всё
+  // остальное" отмечено, и наоборот. Заметки/картинки/книги — через
+  // отдельные функции replaceAll*FromEntries (mdeditor.js/выше), каждая
+  // полностью заменяет соответствующее хранилище.
+  function applyImportSelection(payload, selection){
+    if(selection.all || selection.tasks){
+      var newState = {};
+      Object.keys(state).forEach(function(k){
+        var isTask = isTaskStateKey(k);
+        if(isTask && !selection.tasks) newState[k] = state[k];
+        if(!isTask && !selection.all) newState[k] = state[k];
+      });
+      Object.keys(payload.rawStateData).forEach(function(k){
+        var isTask = isTaskStateKey(k);
+        if(isTask && selection.tasks) newState[k] = payload.rawStateData[k];
+        if(!isTask && selection.all) newState[k] = payload.rawStateData[k];
+      });
+      state = newState;
+      saveLocalState();
     }
-    refreshStatusBase();
-    renderImportDoneScreen();
+
+    if(selection.notes && MdEditor && MdEditor.replaceAllNotesFromEntries){
+      MdEditor.replaceAllNotesFromEntries(payload.noteEntries);
+    }
+
+    var jobs = [];
+    if(selection.images && MdEditor && MdEditor.replaceAllImagesFromEntries){
+      jobs.push(MdEditor.replaceAllImagesFromEntries(payload.imageEntries));
+    }
+    if(selection.books){
+      jobs.push(replaceAllBooksFromEntries(payload.bookEntries));
+    }
+
+    modalBox.innerHTML = modalHeader("Восстанавливаю…", "Это может занять некоторое время, если в архиве много картинок или книг.");
+    Promise.all(jobs).then(function(){
+      setNoTransitions(true);
+      rerenderAllFromState();
+      setTimeout(function(){ setNoTransitions(false); }, 50);
+      // Шаг 7 READER_PLAN.md (критичный фикс, 11.09): импорт НЕ должен
+      // трогать syncId — ни сбрасывать, ни менять. Ключ шифрования заметок
+      // в облаке — SHA-256(syncId), обнуление кода после импорта означало
+      // бы потерю доступа к уже зашифрованным в облаке заметкам. Раньше
+      // здесь был сброс syncId при selection.all — убран целиком.
+      refreshStatusBase();
+      renderImportDoneScreen();
+    }).catch(function(e){
+      console.error("Ошибка импорта:", e);
+      modalBox.innerHTML = modalHeader("Не получилось завершить импорт",
+          "Часть отмеченных данных могла не восстановиться: " + (e && e.message ? e.message : e)) +
+        '<button class="modal-btn primary" id="mBack">Закрыть</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", closeModal);
+    });
   }
 
   function renderImportDoneScreen(){
-    modalBox.innerHTML = modalHeader("Данные восстановлены",
-        "Прогресс на этом устройстве обновлён. Синхронизация с прежним кодом отключена — при желании создайте новый код для этих данных.") +
-      '<button class="modal-btn primary" id="mImportCreateCode">Создать новый код синхронизации</button>' +
-      '<button class="modal-btn" id="mDone">Закрыть без синхронизации</button>';
+    // Шаг 7 READER_PLAN.md (11.09): раньше здесь была отдельная ветка для
+    // fullState (импорт категории "Всего остального") с предложением
+    // создать новый код синхронизации, т.к. импорт сбрасывал syncId. Импорт
+    // больше не трогает syncId ни при каких условиях — ветка убрана,
+    // экран теперь один и тот же для любого набора восстановленных категорий.
+    modalBox.innerHTML = modalHeader("Данные восстановлены", "Отмеченные данные восстановлены на этом устройстве.") +
+      '<button class="modal-btn primary" id="mDone">Готово</button>';
     bindClose();
-    document.getElementById("mImportCreateCode").addEventListener("click", handleCreateCode);
     document.getElementById("mDone").addEventListener("click", closeModal);
   }
 
@@ -3895,7 +4052,11 @@
     var holder = document.getElementById(holderId);
     if(!holder) return;
     holder.innerHTML = '<p class="modal-note">' + label + '</p><div id="qrHolder"></div>' +
-      '<div class="code-row"><input type="text" id="codeText" readonly value="' + code + '"><button id="codeCopy">Копировать</button></div>';
+      '<div class="code-row"><input type="text" id="codeText" readonly value="' + code + '"><button id="codeCopy">Копировать</button></div>' +
+      // Шаг 7 READER_PLAN.md (11.09): код синхронизации — это ещё и ключ
+      // шифрования заметок в облаке (SHA-256(syncId)), поэтому предупреждение
+      // о секретности стоит именно там, где код показывается пользователю.
+      '<p class="modal-note">Никому не сообщайте этот код: через него происходит шифрование всех ваших данных в облаке, включая заметки.</p>';
     try{
       new QRCode(document.getElementById("qrHolder"), {text: code, width: 200, height: 200, colorDark: "#2e2418", colorLight: "#fbf4e2"});
     }catch(e){
@@ -4771,12 +4932,12 @@
     else if(tab === "set2s_4") renderSettingsTabForgottenNotes();
     else if(tab === "set2s_5") renderSettingsTabEpubSplit();
     else if(tab === "set2s_6") renderSettingsTabImgResize();
-    // седьмая боковая вкладка второго набора (set2s_7) — будущий список
-    // fb2-книг (Этап D, шаг 7 READER_PLAN.md) ещё не реализован, но, в
-    // отличие от остальных заглушек ниже, эта уже не совсем пустая: кнопка
-    // загрузки книг и хранилище books/ (OPFS) подготовлены заранее (шаг 2)
-    // — см. renderSettingsTabBooksStub ниже.
-    else if(tab === "set2s_7") renderSettingsTabBooksStub();
+    // седьмая боковая вкладка второго набора (set2s_7) — ЭТО БОЛЬШЕ НЕ
+    // ЗАГЛУШКА (READER_PLAN.md, Этап D, шаг 9, 11.09): список fb2-книг из
+    // books/ (OPFS), тем же способом вынесена ДО общей проверки на
+    // renderSettingsTabSet2Stub, что и остальные уже не-заглушки этого
+    // набора выше — см. renderSettingsTabBooks ниже.
+    else if(tab === "set2s_7") renderSettingsTabBooks();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
 
@@ -4808,10 +4969,11 @@
   }
 
   // ===== ВТОРОЙ НАБОР ВКЛАДОК (заглушки) =====
-  // Все 14 вкладок второго набора (9 боковых + 5 нижних, см. SET2_TAB_IDS/
-  // SET2_EXTRA_TAB_IDS выше) пока показывают один и тот же текст — функции
-  // под них появятся позже. Исключение — set2s_7, см. renderSettingsTabBooksStub
-  // ниже (READER_PLAN.md, шаг 2).
+  // Оставшиеся вкладки второго набора пока показывают один и тот же текст —
+  // функции под них появятся позже. set2s_7 («Книги») выведена из их числа
+  // и вынесена ДО этой проверки (см. switchSettingsTab выше) — READER_PLAN.md,
+  // Этап D, шаг 9 (11.09): это уже полноценный список книг, а не заглушка,
+  // см. renderSettingsTabBooks ниже.
   function renderSettingsTabSet2Stub(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -4941,6 +5103,82 @@
     });
   }
 
+  // READER_PLAN.md, Этап B, шаг 5 (11.09) — плоский список байтов всех
+  // книг для общего ZIP-бэкапа (см. bindExportButton ниже). Файл манифеста
+  // дедупликации (BOOKS_MANIFEST_NAME, служебный, не книга) исключается.
+  // books/ — плоская папка без вложенных подпапок (в отличие от images/ в
+  // mdeditor.js), поэтому обход без рекурсии; тот же стиль for-await по
+  // dirHandle.entries(), что и buildImageIndex в mdeditor.js. Возвращает
+  // Promise<Array<{name, data:Uint8Array}>>, при ошибке — пустой массив
+  // (не должна ронять остальной экспорт).
+  function getBookFilesForExport(){
+    return getBooksDirHandle().then(function(dir){
+      var handles = [];
+      async function collect(){
+        for await (var entry of dir.entries()){
+          var name = entry[0], handle = entry[1];
+          if(handle.kind === "file" && name !== BOOKS_MANIFEST_NAME) handles.push({name: name, handle: handle});
+        }
+      }
+      return collect().then(function(){
+        return Promise.all(handles.map(function(item){
+          return item.handle.getFile().then(function(f){ return f.arrayBuffer(); }).then(function(buf){
+            return { name: item.name, data: new Uint8Array(buf) };
+          });
+        }));
+      });
+    }).catch(function(e){
+      if(window.Debug) window.Debug.log("getBookFilesForExport: " + (e && e.message ? e.message : e));
+      return [];
+    });
+  }
+
+  // READER_PLAN.md, Этап B, шаг 6 (11.09) — стирает ВСЕ файлы в books/
+  // (OPFS), включая файл-манифест дедупликации (он пересобирается заново
+  // при следующем saveBookFile) — подготовка к категории "Книги"
+  // выборочного импорта общего ZIP-бэкапа (см. replaceAllBooksFromEntries
+  // ниже). books/ — плоская папка (см. getBookFilesForExport выше), но
+  // removeEntry всё равно вызывается с recursive:true на случай, если
+  // там когда-нибудь окажется подпапка.
+  function clearBooksDir(){
+    return getBooksDirHandle().then(function(dir){
+      var names = [];
+      async function collect(){
+        for await (var entry of dir.entries()){ names.push(entry[0]); }
+      }
+      return collect().then(function(){
+        return names.reduce(function(p, name){
+          return p.then(function(){
+            return dir.removeEntry(name, { recursive: true }).catch(function(){});
+          });
+        }, Promise.resolve());
+      });
+    });
+  }
+
+  // READER_PLAN.md, Этап B, шаг 6 (11.09) — категория "Книги" выборочного
+  // импорта общего ZIP-бэкапа (см. applyImportSelection ниже): полностью
+  // заменяет содержимое books/ файлами из архива. Сначала стирает всё
+  // текущее (clearBooksDir выше), затем сохраняет файлы из архива
+  // ПОСЛЕДОВАТЕЛЬНО — та же причина, что и у handleImportBooksFile ниже
+  // (saveBookFile читает/переписывает общий файл-манифест, параллельные
+  // вызовы устроили бы гонку) — и регистрирует их в облачном реестре
+  // (registerBookInRegistry), как при обычной загрузке книги. entries —
+  // [{name, data:Uint8Array}].
+  function replaceAllBooksFromEntries(entries){
+    return clearBooksDir().then(function(){
+      function next(i){
+        if(i >= entries.length) return Promise.resolve();
+        var entry = entries[i];
+        return saveBookFile(entry.name, entry.data).then(function(result){
+          if(result.added) registerBookInRegistry(result.hash, result.name, result.size);
+          return next(i + 1);
+        });
+      }
+      return next(0);
+    });
+  }
+
   // =====================================================================
   // Реестр файлов + временное реле через Firebase Storage
   // (READER_PLAN.md, Этап A, шаг 3, 09.09).
@@ -5035,7 +5273,7 @@
 
   // Главная точка сверки — вызывается фоном после каждой успешной
   // синхронизации (doCloudSync) и при каждом открытии вкладки книг (см.
-  // renderSettingsTabBooksStub). Не блокирует UI, все ошибки по
+  // renderSettingsTabBooks). Не блокирует UI, все ошибки по
   // отдельным файлам гасятся точечно (одна неудача не должна прерывать
   // обработку остальных записей реестра).
   var filesRegistrySyncInProgress = false;
@@ -5117,7 +5355,7 @@
   }
 
   // Обрабатывает выбранный файл — точка входа для кнопки "Загрузить fb2
-  // или zip книг" (см. renderSettingsTabBooksStub ниже). Одиночный .fb2
+  // или zip книг" (см. renderSettingsTabBooks ниже). Одиночный .fb2
   // сохраняется как есть; .zip разбирается через MiniZip.extractAllFiles
   // (произвольные бинарные записи, см. minizip.js) — из него берутся
   // только записи с расширением .fb2, остальное молча пропускается (сам
@@ -5179,15 +5417,146 @@
     setStatusFn("Выберите файл .fb2 или .zip.", true);
   }
 
-  // Седьмая боковая вкладка второго набора (set2s_7) — заглушка,
-  // расширенная заранее кнопкой загрузки книг (READER_PLAN.md, шаг 2):
-  // сам список fb2-книг появится только в Этапе D (шаг 7), но файлы уже
-  // можно класть в books/ (OPFS) — они никуда не денутся к моменту, когда
-  // список будет реализован. Разметка — тот же набор классов, что и у
-  // пустого экрана "Моих заметок"/кнопок списка (mdeditor-tab/-empty/
-  // -status/-list-actions/-list-action-btn, components.css) — свой стиль
-  // не изобретаем.
-  function renderSettingsTabBooksStub(){
+  // ===================== МОДЕЛЬ СОСТОЯНИЯ КНИГИ (READER_PLAN.md, Этап C, шаг 8) =====================
+  // Одна запись на книгу, привязанная к ХЭШУ файла (не к имени —
+  // переименование файла не должно обнулять прогресс; хэш — тот же
+  // sha256Hex, что уже считается в saveBookFile/handleImportBooksFile
+  // выше и используется реестром файлов, см. 5183/5257). Хранится в общем
+  // state под ключом "book:<hash>" — тем же приёмом {c, t}, что и задачи
+  // (см. saveTaskData выше): попадает под уже существующий общий цикл
+  // синхронизации (mergeStates/buildStateDelta/doCloudSync) без единой
+  // новой строчки кода PATCH — просто новый префикс ключей в том же state.
+  //
+  // c = {position, bookmarks, underlines, noteId}
+  //   position   — место, на котором пользователь остановился при чтении;
+  //                точная форма (глава+абзац/смещение) зависит от того, что
+  //                вернёт парсер fb2 (Этап D, шаг 10, ещё не реализован) —
+  //                пока хранится как есть, opaque-значение; null, пока
+  //                книга ни разу не открывалась в ридере.
+  //   bookmarks  — [{id, position, addedAt}] — закладки на полях (шаг 15).
+  //   underlines — [{id, position, addedAt, movedToNote}] — подчёркивания
+  //                (шаг 13); НИКОГДА не удаляются, только добавляются;
+  //                movedToNote — true, если уже дописано в конец заметки
+  //                книги (чтобы не задваивать при повторном проходе).
+  //   noteId     — id заметки книги в "Моём блокноте" (mdeditor.js),
+  //                создаётся один раз при первом подчёркивании (шаг 13) и
+  //                дальше переиспользуется; null, пока заметки ещё нет.
+  //
+  // ИЗВЕСТНОЕ ОГРАНИЧЕНИЕ (см. READER_PLAN.md, шаг 18): категория
+  // импорта/экспорта "Книги" пока знает только про файлы books/, ключи
+  // book:<hash> при импорте/экспорте временно попадают в категорию "Всё
+  // остальное" — доработка запланирована отдельным шагом.
+  function bookStateKey(hash){
+    return "book:" + hash;
+  }
+  function isBookStateKey(k){
+    return k.indexOf("book:") === 0;
+  }
+  function genBookRecordId(){
+    return "bk" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+  }
+  function getBookState(hash){
+    var rec = state[bookStateKey(hash)];
+    if(!rec || !rec.c) return null;
+    return rec.c;
+  }
+  // Всегда возвращает объект (с дефолтами) — коду ридера (Этап D) не нужно
+  // самому подставлять пустые значения при первом открытии книги.
+  function getOrCreateBookState(hash){
+    return getBookState(hash) || {position: null, bookmarks: [], underlines: [], noteId: null};
+  }
+  function saveBookState(hash, data){
+    // t — всегда время именно этого сохранения, та же причина, что и у
+    // saveTaskData выше (last-write-wins при слиянии между устройствами).
+    state[bookStateKey(hash)] = {c: data, t: Date.now()};
+    saveLocalState();
+    scheduleCloudPush();
+  }
+  function setBookPosition(hash, position){
+    var data = getOrCreateBookState(hash);
+    data.position = position;
+    saveBookState(hash, data);
+  }
+  function addBookBookmark(hash, position){
+    var data = getOrCreateBookState(hash);
+    var rec = {id: genBookRecordId(), position: position, addedAt: Date.now()};
+    data.bookmarks.push(rec);
+    saveBookState(hash, data);
+    return rec.id;
+  }
+  // Подчёркивания не удаляются (см. комментарий у c выше) — только
+  // добавляются и помечаются перенесёнными в заметку.
+  function addBookUnderline(hash, position){
+    var data = getOrCreateBookState(hash);
+    var rec = {id: genBookRecordId(), position: position, addedAt: Date.now(), movedToNote: false};
+    data.underlines.push(rec);
+    saveBookState(hash, data);
+    return rec.id;
+  }
+  function markBookUnderlineMovedToNote(hash, underlineId){
+    var data = getOrCreateBookState(hash);
+    var u = data.underlines.filter(function(item){ return item.id === underlineId; })[0];
+    if(!u) return;
+    u.movedToNote = true;
+    saveBookState(hash, data);
+  }
+  function setBookNoteId(hash, noteId){
+    var data = getOrCreateBookState(hash);
+    data.noteId = noteId;
+    saveBookState(hash, data);
+  }
+
+  // Плоский список файлов books/ (OPFS) — READER_PLAN.md, Этап D, шаг 9
+  // (11.09). Исключает служебный файл-манифест дедупликации
+  // (BOOKS_MANIFEST_NAME) и любые другие файлы, начинающиеся с точки, тем
+  // же приёмом, что и renderListScreen в mdeditor.js прячет скрытые записи
+  // в "Моих заметках" (см. комментарий у BOOKS_MANIFEST_NAME выше). Тот же
+  // порядок сортировки, что и у заметок там же: имена, начинающиеся с
+  // цифры, — в конец списка, остальное — по алфавиту (localeCompare, ru,
+  // sensitivity "base"). books/ — плоская папка без вложенных подпапок
+  // (см. getBookFilesForExport выше), поэтому обход без рекурсии.
+  // Возвращает Promise<Array<{name}>>.
+  function listBooksEntries(){
+    return getBooksDirHandle().then(function(dir){
+      var out = [];
+      async function collect(){
+        for await (var entry of dir.entries()){
+          var name = entry[0], handle = entry[1];
+          if(handle.kind !== "file") continue;
+          if(name.charAt(0) === ".") continue; // манифест и любые др. служебные файлы
+          out.push({name: name});
+        }
+      }
+      return collect().then(function(){
+        out.sort(function(a, b){
+          var da = /^\d/.test(a.name) ? 1 : 0;
+          var db = /^\d/.test(b.name) ? 1 : 0;
+          if(da !== db) return da - db;
+          return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
+        });
+        return out;
+      });
+    });
+  }
+
+  // Седьмая боковая вкладка второго набора (set2s_7) — READER_PLAN.md,
+  // Этап D, шаг 9 (11.09). ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: список fb2-книг из
+  // books/ (OPFS), тем же образцом разметки, что и списки заметок/задач
+  // (mdeditor-tab/-empty/-status/-list/-list-grid/-row/-row-name/
+  // -list-actions/-list-action-btn, components.css) — свой стиль не
+  // изобретаем, см. renderListScreen в mdeditor.js. Пиктограмма строки —
+  // тот же контур раскрытой книги, что и у вкладки Read/пикера "Перенести
+  // задачу" (TASK_MOVE_ICONS.read выше), вместо новой пиктограммы.
+  //
+  // Открытие книги (сам ридер, Этап D, шаг 10 и далее READER_PLAN.md) пока
+  // не реализовано — эта вкладка сознательно ограничена только списком и
+  // загрузкой, по прямой границе шага 9. Так же сознательно здесь пока нет
+  // удаления книги (в отличие от заметок, где строку можно раскрыть долгим
+  // нажатием) — удаление файла книги затронуло бы облачный реестр файлов
+  // (см. registerBookInRegistry/syncFilesRegistry выше), для которого пока
+  // не существует парной функции "разрегистрировать"; оставлено на
+  // отдельный шаг, чтобы не проектировать это решение по ходу дела.
+  function renderSettingsTabBooks(){
     // Лёгкая фоновая сверка реестра файлов при каждом заходе на вкладку
     // (READER_PLAN.md, шаг 3) — тем же приёмом, что и syncNotesOnTabEnter
     // у "Моих заметок"; не блокирует немедленный рендер ниже.
@@ -5196,30 +5565,64 @@
     if(!container) return;
     var html = '<div class="mdeditor-tab">';
     html += '<h3 class="common-tab-title">Книги</h3>';
-    html += '<div class="mdeditor-empty">Список книг появится позже.<br>Загруженные сейчас файлы никуда не денутся.</div>';
-    html += '<div class="mdeditor-status" id="booksStubStatus"></div>';
+    html += '<div class="mdeditor-list mdeditor-list-grid" id="booksList"></div>';
+    html += '<div class="mdeditor-status" id="booksStatus"></div>';
     html += '<div class="mdeditor-list-actions">';
-    html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="booksStubImportBtn">Загрузить fb2 или zip книг</button>';
+    html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="booksImportBtn">Загрузить fb2 или zip книг</button>';
     html += '</div>';
-    html += '<input type="file" accept=".fb2,.zip,application/zip" id="booksStubImportInput" style="display:none;">';
+    html += '<input type="file" accept=".fb2,.zip,application/zip" id="booksImportInput" style="display:none;">';
     html += '</div>';
     container.innerHTML = html;
 
-    var statusEl = document.getElementById("booksStubStatus");
-    function setBooksStubStatus(msg, isError){
+    var statusEl = document.getElementById("booksStatus");
+    function setBooksStatus(msg, isError){
       if(!statusEl) return;
       statusEl.textContent = msg || "";
       statusEl.classList.toggle("error", !!isError);
     }
 
-    var input = document.getElementById("booksStubImportInput");
-    var btn = document.getElementById("booksStubImportBtn");
+    // Список — асинхронный (чтение OPFS), поэтому заполняется отдельно от
+    // немедленного рендера разметки выше; тот же контейнер #booksList и
+    // как пустой экран (mdeditor-empty), и как список (mdeditor-list),
+    // просто с разными классами — без пересоздания узла.
+    var listEl = document.getElementById("booksList");
+    listBooksEntries().then(function(items){
+      if(!document.getElementById("booksList")) return; // вкладку успели покинуть
+      if(!items.length){
+        listEl.className = "mdeditor-empty";
+        listEl.textContent = "Книг пока нет.";
+        return;
+      }
+      items.forEach(function(it){
+        var row = document.createElement("div");
+        row.className = "mdeditor-row";
+        row.innerHTML = TASK_MOVE_ICON_SVG("read") + '<span class="mdeditor-row-name"></span>';
+        row.querySelector(".mdeditor-row-name").textContent = it.name;
+        listEl.appendChild(row);
+      });
+    }).catch(function(e){
+      setBooksStatus("Не удалось прочитать список книг: " + (e && e.message ? e.message : e), true);
+    });
+
+    var input = document.getElementById("booksImportInput");
+    var btn = document.getElementById("booksImportBtn");
     if(btn && input){
       btn.addEventListener("click", function(){ input.click(); });
       input.addEventListener("change", function(){
         var file = input.files && input.files[0];
         input.value = ""; // разрешаем выбрать тот же файл ещё раз
-        if(file) handleImportBooksFile(file, setBooksStubStatus);
+        if(!file) return;
+        handleImportBooksFile(file, function(msg, isError){
+          // Новая книга могла добавиться — перерисовываем вкладку целиком
+          // (список читается заново из OPFS), затем на свежей разметке
+          // показываем статус этого импорта.
+          renderSettingsTabBooks();
+          var freshStatus = document.getElementById("booksStatus");
+          if(freshStatus){
+            freshStatus.textContent = msg || "";
+            freshStatus.classList.toggle("error", !!isError);
+          }
+        });
       });
     }
   }
