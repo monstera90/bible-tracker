@@ -1016,6 +1016,37 @@ window.initMdEditorModule = function(deps){
     return candidate;
   }
 
+  // Отдаёт blob-URL картинки по имени (та же папка images/ и тот же кэш
+  // URL — imageUrlCache/imageIndex/imageLoadPromises, — что использует
+  // "Мой блокнот" для превью "![[имя]]" в живом просмотре, см.
+  // loadImageInto выше) — используется задачами/комментариями (my.js,
+  // hydrateTaskImages) для показа вставленных туда картинок без
+  // собственного доступа к внутренностям этого модуля. Promise<string|null>
+  // (null — картинки с таким именем нет в images/ или её не удалось
+  // прочитать).
+  function getImageBlobUrl(name){
+    var key = name.toLowerCase();
+    var cached = imageUrlCache.get(key);
+    if(cached) return Promise.resolve(cached.url || null);
+    var found = imageIndex && imageIndex.get(key);
+    if(!found) return Promise.resolve(null);
+    var pending = imageLoadPromises.get(key);
+    if(!pending){
+      pending = found.handle.getFile().then(function(f){
+        var result = { url: URL.createObjectURL(f) };
+        imageUrlCache.set(key, result);
+        return result;
+      }).catch(function(){
+        var result = { error: true };
+        imageUrlCache.set(key, result);
+        return result;
+      });
+      pending.then(function(){ imageLoadPromises.delete(key); });
+      imageLoadPromises.set(key, pending);
+    }
+    return pending.then(function(result){ return result.url || null; });
+  }
+
   // Копирует выбранный файл В КОРЕНЬ подключённой папки с изображениями
   // (раздел 8 ТЗ: без принудительной подпапки) и вставляет "![[имя]]" в
   // позицию курсора текущей заметки. Имя, уже занятое в imageIndex (в т.ч.
@@ -4637,6 +4668,11 @@ window.initMdEditorModule = function(deps){
     saveImageBytes: saveImageBytes,
     deleteImageFile: deleteImageFile,
     removeTextFromNoteId: removeTextFromNoteId,
+    // используется задачами/комментариями (my.js, hydrateTaskImages) —
+    // тот же кэш blob-URL картинок из images/ (OPFS), что и у превью
+    // "Моих заметок", без повторного чтения файла (см. getImageBlobUrl
+    // выше).
+    getImageBlobUrl: getImageBlobUrl,
     // "Забытые заметки" (set2s_4, ТЗ пользователя от 04.09) — см.
     // renderSettingsTabForgottenNotes выше
     renderSettingsTabForgottenNotes: renderSettingsTabForgottenNotes,

@@ -1095,13 +1095,15 @@
      "Моём блокноте" (.mdeditor-fab-btn/-fontsize-popup в components.css,
      переиспользуются как есть), просто в собственных обёртках слева от
      общей "+" (.task-add-fab выше), в одном ряду с ней: форматирование —
-     левее размера шрифта, размер шрифта — левее "+" (см. ТЗ пользователя
-     от 31.08). Видимость включается тем же условием, что и у
-     .task-add-fab (см. switchSettingsTab в my.js). */
+     левее размера шрифта, размер шрифта — левее скрепки (.task-attach-wrap
+     ниже), скрепка — левее "+" (тот же порядок кнопок, что и в
+     .mdeditor-fab-row "Моих заметок": Ж → Аа → скрепка). Видимость
+     включается тем же условием, что и у .task-add-fab (см.
+     switchSettingsTab в my.js). */
   .task-fontsize-wrap{
     display:none;
     position:absolute;
-    right:48px;
+    right:88px;
     bottom:8px;
     z-index:5;
   }
@@ -1109,11 +1111,22 @@
   .task-format-wrap{
     display:none;
     position:absolute;
-    right:88px;
+    right:128px;
     bottom:8px;
     z-index:5;
   }
   .task-format-wrap.visible{ display:flex; }
+  /* скрепка — между "Аа" и общей "+" (см. index.html и ТЗ пользователя,
+     та же логика попапа не нужна: сразу открывает системный диалог выбора
+     файла, см. initTaskGlobalToolbar в my.js) */
+  .task-attach-wrap{
+    display:none;
+    position:absolute;
+    right:48px;
+    bottom:8px;
+    z-index:5;
+  }
+  .task-attach-wrap.visible{ display:flex; }
   .task-add-fab.visible{ display:flex; }
   /* :hover обёрнут в (hover:hover) — та же причина, что и у "домика" в
      .mdeditor-fab-btn (components.css): на тач-устройствах :hover иначе
@@ -1128,20 +1141,20 @@
      (тот же приём, что и у "Версий", см. renderSettingsTabVersions в
      my.js), поэтому размер и позиционирование окна настроек, к которому
      он принадлежит, не трогаем — просто вписываемся в оставшуюся высоту
-     этого контейнера. Сверху всегда строка самого проекта (не
-     прокручивается вместе со списком), ниже — единственная
-     прокручиваемая область: либо привязанные next-задачи, либо (в режиме
-     "attach") список для привязки существующей задачи. */
+     этого контейнера. Неподвижен только заголовок экрана (h3.common-tab-
+     title "Все задачи проекта" в разметке my.js) — вся остальная область
+     ниже прокручиваемая (.task-project-area), включая название самого
+     проекта (тоже h3.common-tab-title, но вставлено ПЕРВЫМ элементом
+     ВНУТРИ этой области, а не отдельной строкой над ней, ТЗ пользователя
+     от 12.09) — оно уезжает вместе со списком при скролле. Ниже названия —
+     либо привязанные next-задачи, либо (в режиме "attach") список для
+     привязки существующей задачи. */
   .task-project-modal-body{
     flex:1 1 auto;
     min-height:0;
     display:flex;
     flex-direction:column;
     overflow:hidden; /* прокручивается только область ниже, не весь #settingsTabContent */
-  }
-  .task-project-project-row{
-    flex:0 0 auto;
-    margin-bottom:4px;
   }
   .task-project-area{
     flex:1 1 auto;
@@ -1153,37 +1166,28 @@
   }
   .task-project-area::-webkit-scrollbar{ display:none; width:0; height:0; }
 
-  /* две круглые кнопки внизу окна — "прикрепить существующую" (звенья) и
-     "новая задача" (+), в том же стиле и на том же месте, что и общая
-     .task-add-fab (см. выше), только их здесь две в ряд: звенья слева от
-     плюса. Активный режим "attach" подсвечивает кнопку звеньев тем же
-     сочетанием цветов, что и активный язычок вкладки (.settings-tab.active). */
-  .task-project-fab{
+  /* Ряд из пяти квадратных кнопок внизу окна (ТЗ пользователя от 12.09) —
+     тот же вид/размер, что у "Ж"/"Аа"/скрепки/"+" на остальных вкладках
+     задач (см. .mdeditor-fab-btn/.task-add-fab выше): слева направо —
+     "прикрепить существующую" (звенья, САМАЯ ЛЕВАЯ) → "Ж" → "Аа" (обе —
+     те же самые глобальные #taskFormatWrap/#taskFontSizeWrap, что и
+     везде, здесь просто не скрываются, см. openTaskNextPicker в my.js) →
+     скрепка (тоже глобальная, #taskAttachWrap) → "новая задача" (+, тот
+     же класс .task-add-fab, что и общая кнопка, для одинакового вида, но
+     свой DOM-узел со своей логикой создания задачи, см. my.js). Только
+     "+" целиком берёт вид от класса .task-add-fab (своя позиция ему тут
+     не нужна — тот же right:8/bottom:8, что и у общей кнопки), а
+     "звенья" — свой узел с собственным позиционированием (см. ниже);
+     Ж/Аа/скрепка уже стилизованы там, где определены. Подсветка
+     активного режима "attach" у "звеньев" — общий .pressed
+     (.mdeditor-fab-btn.pressed в components.css), тот же приём, что и у
+     кнопки "i" во вкладке "Извлечение субтитров". */
+  .task-project-fab-link{
     position:absolute;
-    bottom:14px;
-    width:44px;height:44px;
-    border-radius:50%;
-    border:1px solid var(--groove-shadow);
-    background:var(--wood);
-    color:var(--parchment);
-    cursor:pointer;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    box-shadow:2px 2px 5px rgba(0,0,0,.3);
+    right:168px;
+    bottom:8px;
     z-index:5;
   }
-  .task-project-fab:hover{ filter:brightness(1.08); }
-  .task-project-fab:active{ transform:scale(.95); }
-  .task-project-fab-create{
-    right:14px;
-    font-size:24px;
-    font-weight:bold;
-    line-height:1;
-  }
-  .task-project-fab-link{ right:66px; }
-  .task-project-fab-link svg{ width:20px; height:20px; }
-  .task-project-fab-link.active{ filter:brightness(1.15); box-shadow:0 0 0 2px var(--parchment) inset, 2px 2px 5px rgba(0,0,0,.3); }
 
   /* сетка выбора вкладки-назначения (перенос задачи) — переиспользует
      общее модальное окно (modalOverlay/modalBox), тот же приём, что и у

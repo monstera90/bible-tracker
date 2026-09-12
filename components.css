@@ -2772,6 +2772,21 @@
   .book-reader-chapter:first-child .book-reader-chapter-title{ margin-top:0; }
   .book-reader-p{ margin:0 0 10px 0; text-indent:1ch; }
   .book-reader .cm-md-image{ margin:10px 0; }
+  /* ---------- Подчёркивание книги (READER_PLAN.md, Этап D, шаг 13, 11.09).
+     Без этого правила <mark> красится браузером по умолчанию в чистый
+     жёлтый — режет глаз и не подстраивается под тему. var(--gold-light) —
+     тот же приглушённый пастельный акцент, что уже используется в проекте
+     для hover-подсветки (components.css выше), и он меняется вместе с
+     остальной палитрой при смене темы (data-theme). color:inherit — текст
+     остаётся тем же, что и вокруг (var(--ink) абзаца), никакого чёрного
+     поверх пастельного фона, как у браузерного дефолта. ---------- */
+  .book-reader-underline{
+    background:var(--gold-light);
+    color:inherit;
+    border-radius:2px;
+    padding:0 1px;
+    cursor:pointer;
+  }
   /* ---------- Иллюстрация -> заметка книги (READER_PLAN.md, Этап D, шаг 14,
      11.09). .book-reader-image-wrap — только для position:relative, без
      своих отступов (margin по-прежнему на .cm-md-image внутри, см. выше).
@@ -2816,6 +2831,64 @@
   @media (hover:hover) and (pointer:fine){
     .book-reader-pin-btn.pinned:hover{ background:#fffef8; color:var(--danger, #c0392b); }
   }
+  /* ---------- Кнопка-урна снятия подчёркивания (READER_PLAN.md, Этап D,
+     шаг 13, доработка 11.09). Появляется рядом с тапнутым <mark
+     class="book-reader-underline"> (см. showBookReaderUnderlineTrashBtn в
+     my.js) — тот же круглый базовый вид, что .book-reader-pin-btn, но
+     сразу окрашена в var(--danger) (действие необратимо удаляет
+     подчёркивание, в отличие от pin-кнопки с двумя равноценными
+     состояниями). Позиционируется абсолютно от .settings-modal-box (JS
+     сам считает left/top через getBoundingClientRect — см. my.js), поэтому
+     здесь только сам вид и центрирование над точкой (переданной как
+     left/top угла подчёркивания) через transform. ---------- */
+  .book-reader-underline-trash-btn{
+    position:absolute;
+    transform:translate(-50%,-100%) translateY(-6px);
+    width:32px; height:32px;
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    color:var(--danger, #c0392b);
+    cursor:pointer;
+    box-shadow:0 2px 6px rgba(0,0,0,.28);
+    -webkit-tap-highlight-color:transparent;
+    z-index:5;
+  }
+  .book-reader-underline-trash-btn svg{ width:17px; height:17px; }
+  @media (hover:hover) and (pointer:fine){
+    .book-reader-underline-trash-btn:hover{ background:var(--danger, #c0392b); color:#fffef8; }
+  }
+  /* ---------- картинка, вставленная в текст задачи/комментария кнопкой-
+     скрепкой ("![[имя]]", см. formatInline/hydrateTaskImages в my.js) —
+     компактная встроенная миниатюра, а не во всю ширину, как .cm-md-image
+     ниже в "Моих заметках": здесь картинка стоит ПОСРЕДИ строки обычного
+     текста задачи, а не отдельным блочным абзацем. Пока настоящая
+     картинка не подгружена из images/ (OPFS, асинхронно) — временный
+     плейсхолдер с иконкой скрепки (см. formatInline); после подгрузки
+     hydrateTaskImages подставляет <img> и вешает клик — тот же
+     полноэкранный просмотр с зумом, что и в "Моих заметках"
+     (MdEditor.openImageViewer). ---------- */
+  .task-img-wrap{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:40px;height:40px;
+    vertical-align:middle;
+    margin:0 2px;
+    border-radius:6px;
+    border:1px solid var(--groove-shadow);
+    background:#fffef8;
+    color:var(--wood);
+    overflow:hidden;
+    cursor:default;
+  }
+  .task-img-wrap svg{ width:16px; height:16px; opacity:.6; }
+  .task-img-wrap.task-img-loaded{ cursor:pointer; border-color:transparent; }
+  .task-img-wrap img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .task-img-wrap.task-img-missing{ opacity:.4; }
   /* ---------- полноэкранный просмотр вставленной в заметку картинки
      (клик по .cm-md-image выше, см. openImageViewer/setWrapToImage в
      mdeditor.js) — отдельный оверлей прямо в document.body (не внутри

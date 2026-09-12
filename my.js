@@ -376,6 +376,26 @@
       }
     }
 
+    // "![[имя]]" — вставленная картинка (задачи/комментарии, кнопка-
+    // скрепка, см. initTaskGlobalToolbar ниже) — тот же синтаксис, что и в
+    // "Моих заметках". Сканируется ДО [[ссылок на заметки]] ниже — иначе
+    // "!" остался бы снаружи как текст, а "[[имя]]" по ошибке стал бы
+    // ссылкой на заметку (tryClaim — "кто заявил раньше", см. комментарий
+    // к formatInline выше). Рендерит только временный плейсхолдер
+    // (.task-img-wrap) — сама картинка (blob-URL из images/ OPFS)
+    // подставляется асинхронно отдельной функцией hydrateTaskImages ниже:
+    // formatInline синхронная, а чтение файла из OPFS — Promise.
+    var imgRe = /!\[\[([^\[\]\n]+)\]\]/g, mImg;
+    imgRe.lastIndex = 0;
+    while((mImg = imgRe.exec(text))){
+      (function(a, b, name){
+        tryClaim(a, b, function(){
+          return '<span class="task-img-wrap" data-img-name="' + escapeHtml(name) + '">' + PAPERCLIP_ICON_SVG + '</span>';
+        });
+      })(mImg.index, mImg.index + mImg[0].length, mImg[1].trim());
+      if(mImg[0].length === 0) imgRe.lastIndex++;
+    }
+
     // [[ссылки на заметки "Моих заметок"]] — клик обрабатывается ОДНИМ
     // общим делегированным обработчиком на #settingsTabContent (см.
     // initAutoFormatting ниже): переключает вкладку настроек на "Мой
@@ -452,9 +472,11 @@
   // "красная строка" у первой строки абзаца (после пустой строки или
   // заголовка) — то же самое, что и в decorateLine в mdeditor.js: один и
   // тот же язык разметки должен выглядеть одинаково и в "Моих заметках", и
-  // здесь. Единственное, что тут НЕ поддерживается — встроенные картинки
-  // "![[имя]]" (они завязаны на файловую систему, открытую только внутри
-  // "Моих заметок"; здесь просто останутся видимым текстом).
+  // здесь — включая встроенные картинки "![[имя]]" (см. formatInline выше
+  // и кнопка-скрепка в initTaskGlobalToolbar ниже): в отличие от "Моих
+  // заметок" (CodeMirror, картинка — во всю ширину отдельным абзацем),
+  // здесь она компактная миниатюра ПОСРЕДИ строки обычного текста (см.
+  // .task-img-wrap в components.css).
   function formatObsidianHtml(rawText){
     if(rawText == null || rawText === "") return "";
     var lines = String(rawText).split("\n");
@@ -582,6 +604,38 @@
       // для ЭТОГО наблюдателя (тот следит только за childList/
       // characterData, а не за style/attributes).
       refitAllVisibleTaskBodies();
+      hydrateTaskImages(root);
+    }
+
+    // Асинхронная подстановка картинок, вставленных в задачи/комментарии
+    // кнопкой-скрепкой (см. "![[имя]]" в formatInline выше) — тот же
+    // принцип, что у "Моих заметок" (loadImageInto в mdeditor.js): сама
+    // картинка читается из images/ (OPFS) асинхронно, поэтому formatInline
+    // (синхронная функция) рисует только временный плейсхолдер
+    // (.task-img-wrap с иконкой скрепки внутри) — эта функция донаходит
+    // такие плейсхолдеры и заменяет их на <img>. Вызывается после каждого
+    // прохода runPass выше — срабатывает на ЛЮБОЙ вкладке автоматически,
+    // тем же MutationObserver, что и остальное инлайн-форматирование.
+    // data-img-loaded ставится СРАЗУ, ещё до разрешения промиса — иначе
+    // повторный проход (например, от соседней мутации DOM), пока картинка
+    // ещё читается, запустил бы для неё второе параллельное чтение того же
+    // файла.
+    function hydrateTaskImages(scopeRoot){
+      if(typeof MdEditor === "undefined" || !MdEditor.getImageBlobUrl) return;
+      var wraps = scopeRoot.querySelectorAll('.task-img-wrap[data-img-name]:not([data-img-loaded])');
+      for(var i = 0; i < wraps.length; i++){
+        (function(wrap){
+          var name = wrap.getAttribute("data-img-name");
+          wrap.setAttribute("data-img-loaded", "1");
+          MdEditor.getImageBlobUrl(name).then(function(url){
+            if(!document.body.contains(wrap)) return;
+            if(!url){ wrap.classList.add("task-img-missing"); return; }
+            wrap.innerHTML = '<img src="' + url + '" alt="' + escapeHtml(name) + '">';
+            wrap.classList.add("task-img-loaded");
+            wrap.addEventListener("click", function(){ MdEditor.openImageViewer(url, name); });
+          });
+        })(wraps[i]);
+      }
     }
 
     // если ВСЕ мутации этой пачки пришли изнутри игнорируемых поддеревьев
@@ -2559,9 +2613,21 @@
     var activeTaskEdit = document.activeElement;
     var isEditingTaskNow = !!(activeTaskEdit && activeTaskEdit.classList &&
       activeTaskEdit.classList.contains("task-editable"));
-    if(settingsModalOverlay && settingsModalOverlay.classList.contains("open") &&
-       TASK_TAB_IDS.hasOwnProperty(currentSettingsTab) && !isEditingTaskNow){
-      renderSettingsTabTask(currentSettingsTab);
+    if(settingsModalOverlay && settingsModalOverlay.classList.contains("open") && !isEditingTaskNow){
+      // Экран "Все задачи проекта" (openTaskNextPicker) — не обычная вкладка:
+      // currentSettingsTab всё это время остаётся "projects", но содержимое
+      // #settingsTabContent подменено на конкретный проект + его next-задачи.
+      // Раньше это условие сразу звало renderSettingsTabTask(currentSettingsTab)
+      // и, если такой экран был открыт, затирало его обратно на список всех
+      // проектов, как только приходила фоновая синхронизация (ТЗ пользователя
+      // от 11.09: "добавил задачу в проекте, кликнул мимо — приложение само
+      // вышло к списку проектов"; добавление задачи запускает scheduleCloudPush,
+      // а blur снимает guard isEditingTaskNow выше — синхронизация, подоспевшая
+      // именно в этот момент, и перерисовывала не тот экран). Если сейчас
+      // открыт этот экран — перерисовываем ЕГО же (activeProjectPickerRerender),
+      // а не список проектов.
+      if(activeProjectPickerRerender) activeProjectPickerRerender();
+      else if(TASK_TAB_IDS.hasOwnProperty(currentSettingsTab)) renderSettingsTabTask(currentSettingsTab);
     }
   }
 
@@ -3283,17 +3349,35 @@
   initTaskGlobalToolbar();
 
   // ---------------------------------------------------------------------
-  // Глобальные "Ж" (форматирование выделения) и "Аа" (размер шрифта) на
-  // вкладках задач (см. #taskFormatWrap/#taskFontSizeWrap в index.html) —
-  // одна кнопка на всё приложение, а не по одной на строку, поэтому
-  // применяется к тому task-editable/comment-editable, что открыт для
-  // редактирования ПРЯМО СЕЙЧАС (в один момент времени редактируется не
-  // больше одной строки — остальные при этом уже сохранены, см.
-  // flushPendingTaskEdits/flushPendingCommentEdits). "Аа" использует ТОТ
-  // ЖЕ fontSizeStep, что и "Мои заметки" (см. MdEditor.changeFontSizeStep
-  // в mdeditor.js) — единица размера, стало быть, общая на оба места (см.
-  // ТЗ пользователя от 31.08).
+  // Глобальные "Ж" (форматирование выделения), "Аа" (размер шрифта) и
+  // скрепка (вставка картинки) на вкладках задач (см. #taskFormatWrap/
+  // #taskFontSizeWrap/#taskAttachWrap в index.html) — по одной кнопке на
+  // всё приложение, а не по одной на строку, поэтому применяются к тому
+  // .task-editable, что открыт для редактирования ПРЯМО СЕЙЧАС (в один
+  // момент времени редактируется не больше одной строки — остальные при
+  // этом уже сохранены, см. flushPendingTaskEdits/flushPendingCommentEdits).
+  // "Аа" использует ТОТ ЖЕ fontSizeStep, что и "Мои заметки" (см.
+  // MdEditor.changeFontSizeStep в mdeditor.js) — единица размера, стало
+  // быть, общая на оба места (см. ТЗ пользователя от 31.08). Скрепка —
+  // тот же принцип "![[имя]]"/images/ (OPFS), что и там же (см.
+  // MdEditor.saveImageBytes/getImageBlobUrl), добавлена позже (см. ТЗ
+  // пользователя от 11.09).
   // ---------------------------------------------------------------------
+  // Пока открыт системный диалог выбора файла для скрепки (см.
+  // taskAttachBtn ниже) — поле .task-editable ТЕРЯЕТ фокус (blur), а blur
+  // у него — сигнал "пользователь закончил редактировать", запускающий
+  // сохранение текста и перерисовку строки ОБРАТНО в обычный вид (см. три
+  // обработчика blur — renderTaskRowEdit/renderCommentRowEdit/renderRowEdit
+  // в openTaskNextPicker). Раз сама вставка "![[имя]]" происходит уже
+  // ПОСЛЕ того, как файл выбран и сохранён (асинхронно) — к этому моменту
+  // старый .task-editable, в который метили, был бы уже удалён из DOM,
+  // и вставлять было бы уже некуда (найден баг от 12.09 — картинка молча
+  // не появлялась). Флаг взводится перед открытием диалога и держит все
+  // три blur-обработчика "на паузе" (см. ранний return в каждом из них),
+  // пока не разрешится промис вставки — тогда и заново фокусируемый (см.
+  // insertTextIntoTaskEditable) editable остаётся в DOM живым.
+  var taskAttachDialogOpen = false;
+
   function initTaskGlobalToolbar(){
     // preventDefault на mousedown — чтобы контент-эдитабл не терял фокус/
     // выделение раньше, чем сработает click (иначе к моменту click строка
@@ -3353,6 +3437,98 @@
     bindTaskFmtBtn("taskFmtItalicBtn", "*", "*");
     bindTaskFmtBtn("taskFmtUnderlineBtn", "++", "++");
     bindTaskFmtBtn("taskFmtStrikeBtn", "~~", "~~");
+
+    // --- скрепка (вставка картинки, тот же принцип "![[имя]]"/OPFS
+    // images/, что и "Аа"/"Ж" выше — общий с "Моими заметками", через
+    // MdEditor.saveImageBytes/getImageBlobUrl, см. mdeditor.js) ---
+    var attachBtn = document.getElementById("taskAttachBtn");
+    var attachInput = document.getElementById("taskAttachInput");
+    stopMousedown(attachBtn);
+    // Куда вставлять "![[имя]]" после выбора файла — захватывается В
+    // МОМЕНТ клика по скрепке, ДО открытия системного диалога выбора
+    // файла: после его закрытия фокус/выделение внутри contenteditable-
+    // поля на практике часто теряются (особенно на мобильных), так что
+    // спрашивать про них уже поздно — держим тут.
+    var taskImageInsertTarget = null;
+    if(attachBtn){
+      attachBtn.addEventListener("click", function(){
+        var editable = document.querySelector(".task-editable");
+        if(!editable) return;
+        var range = null;
+        var sel = window.getSelection();
+        if(sel && sel.rangeCount > 0){
+          var r = sel.getRangeAt(0);
+          if(editable.contains(r.commonAncestorContainer)) range = r.cloneRange();
+        }
+        taskImageInsertTarget = { editable: editable, range: range };
+        // взводим ДО открытия диалога — сам клик по input уже вызывает
+        // blur у editable (см. taskAttachDialogOpen выше)
+        taskAttachDialogOpen = true;
+        if(attachInput) attachInput.click();
+      });
+    }
+    if(attachInput){
+      // пользователь закрыл диалог, ничего не выбрав — снимаем флаг сразу,
+      // иначе редактирование осталось бы "на паузе" навсегда
+      attachInput.addEventListener("cancel", function(){
+        taskAttachDialogOpen = false;
+      });
+      attachInput.addEventListener("change", function(){
+        var file = attachInput.files && attachInput.files[0];
+        attachInput.value = ""; // разрешаем выбрать тот же файл ещё раз
+        var target = taskImageInsertTarget;
+        taskImageInsertTarget = null;
+        if(!file || !target){
+          taskAttachDialogOpen = false;
+          return;
+        }
+        var reader = new FileReader();
+        reader.onload = function(){
+          var bytes = new Uint8Array(reader.result);
+          MdEditor.saveImageBytes(file.name, bytes, file.type).then(function(finalName){
+            insertTextIntoTaskEditable(target.editable, target.range, "![[" + finalName + "]]");
+          }).catch(function(){
+            // не удалось сохранить картинку — хотя бы возвращаем фокус в
+            // editable, чтобы редактирование не осталось "подвешенным"
+            if(target.editable && document.body.contains(target.editable)) target.editable.focus();
+          }).then(function(){
+            taskAttachDialogOpen = false;
+          });
+        };
+        reader.onerror = function(){ taskAttachDialogOpen = false; };
+        reader.readAsArrayBuffer(file);
+      });
+    }
+  }
+
+  // Вставка произвольного текста в contenteditable-поле задачи/комментария
+  // в заранее захваченную позицию курсора (см. taskImageInsertTarget выше
+  // в initTaskGlobalToolbar) — используется кнопкой-скрепкой. Без
+  // сохранённого range (или если сохранённый узел уже не в DOM — строка
+  // успела перерисоваться, пока шёл выбор файла) вставляет в конец поля,
+  // тем же приёмом, что и wrapEditableSelection выше, только не оборачивая
+  // выделение, а просто вставляя текст в точку.
+  function insertTextIntoTaskEditable(editable, range, text){
+    if(!editable || !document.body.contains(editable)) return;
+    editable.focus();
+    var sel = window.getSelection();
+    var useRange = range;
+    if(!useRange || !document.body.contains(useRange.startContainer)){
+      useRange = document.createRange();
+      useRange.selectNodeContents(editable);
+      useRange.collapse(false);
+    }
+    sel.removeAllRanges();
+    sel.addRange(useRange);
+    useRange.deleteContents();
+    var node = document.createTextNode(text);
+    useRange.insertNode(node);
+    var newRange = document.createRange();
+    newRange.setStartAfter(node);
+    newRange.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+    editable.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
   // оборачивает ВЫДЕЛЕННЫЙ прямо сейчас текст (внутри того
@@ -4630,9 +4806,27 @@
     // остановился в прошлый раз, даже если приложение успели закрыть
     // полностью.
     var resume = getResumeSettingsState();
+    // "Продолжить с того же места" распространяется и на экран "Все задачи
+    // проекта" (openTaskNextPicker) — читаем сохранённую позицию ДО
+    // switchSettingsTab ниже: он сам вызовет обычный рендер списка
+    // проектов, который штатно стирает эту запись (см.
+    // clearProjectPickerResumeState в renderTaskTabList), так что после
+    // switchSettingsTab читать уже нечего.
+    var pickerStateToResume = (resume.tab === "projects") ? loadProjectPickerResumeState() : null;
     settingsActiveTabSet = resume.set;
     applySettingsTabSetVisibility();
     switchSettingsTab(resume.tab);
+    if(pickerStateToResume){
+      var proj = getTaskById(pickerStateToResume.projectId);
+      if(proj && proj.c && proj.c.tab === "projects" && proj.c.checked !== true){
+        // если экран был открыт — тут же поверх подменяем список проектов
+        // этим экраном, так же, как это делает клик по кнопке-цепочке на
+        // строке проекта
+        openTaskNextPicker(pickerStateToResume.projectId, "projects", pickerStateToResume.scrollTop);
+      } else {
+        clearProjectPickerResumeState();
+      }
+    }
     var extraAnim = getExtraAnimationsEnabled();
     if(extraAnim){
       // Геометрию волны (updateSettingsWaveGeometry) нельзя мерить прямо
@@ -4844,6 +5038,10 @@
     var isRealSwitch = settingsWasOpen && prevTab !== tab && !suppressNavPush;
 
     currentSettingsTab = tab;
+    // любое переключение вкладки (в т.ч. повторный клик по "Projects") —
+    // это и есть штатный выход с экрана "Все задачи проекта" (см.
+    // openTaskNextPicker ниже и activeProjectPickerRerender выше)
+    activeProjectPickerRerender = null;
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
@@ -4891,12 +5089,14 @@
     var isCommentsTab = (tab === "extra2" && getCustomCommentsEnabled());
     var showTaskFab = TASK_MOVABLE_TABS.indexOf(tab) !== -1 || isCommentsTab;
     if(addFab) addFab.classList.toggle("visible", showTaskFab);
-    // "Ж"/"Аа" видны в тех же случаях, что и "+" (см. ТЗ пользователя от
-    // 31.08 — обе кнопки стоят в одном ряду с ней).
+    // "Ж"/"Аа"/скрепка видны в тех же случаях, что и "+" (см. ТЗ
+    // пользователя от 31.08 — все стоят в одном ряду с ней).
     var formatWrap = document.getElementById("taskFormatWrap");
     var fontSizeWrap = document.getElementById("taskFontSizeWrap");
+    var attachWrap = document.getElementById("taskAttachWrap");
     if(formatWrap) formatWrap.classList.toggle("visible", showTaskFab);
     if(fontSizeWrap) fontSizeWrap.classList.toggle("visible", showTaskFab);
+    if(attachWrap) attachWrap.classList.toggle("visible", showTaskFab);
     if(tab === "mood"){ renderSettingsTabMood(); }
     else if(tab === "year") renderSettingsTabYear();
     else if(tab === "versions") renderSettingsTabVersions();
@@ -5435,10 +5635,15 @@
   //                книга ни разу не открывалась в ридере.
   //   bookmarks  — [{id, position, addedAt}] — закладки на полях (шаг 15).
   //   underlines — [{id, position, addedAt, movedToNote}] — подчёркивания
-  //                (шаг 13, реализовано 11.09); НИКОГДА не удаляются, только
-  //                добавляются; movedToNote — true, если уже дописано в
-  //                конец заметки книги (чтобы не задваивать при повторном
-  //                проходе). position здесь — {ch, blk, s, e}: индекс главы,
+  //                (шаг 13, реализовано 11.09; доработка 11.09 — снятие через
+  //                плавающую кнопку-урну, см. removeBookUnderline/
+  //                deleteBookUnderline ниже: теперь удаляются явным
+  //                действием пользователя, просто не пропадают сами по
+  //                себе); movedToNote — true, если уже дописано в конец
+  //                заметки книги (чтобы не задваивать при повторном
+  //                проходе, а при снятии — понять, есть ли вообще смысл
+  //                пытаться убрать текст из заметки). position здесь —
+  //                {ch, blk, s, e}: индекс главы,
   //                индекс блока внутри ch.blocks (см. Fb2Parse) и начало/
   //                конец диапазона в координатах ПЛОСКОГО текста абзаца
   //                (конкатенация block.runs[].text) — см.
@@ -5489,8 +5694,8 @@
     saveBookState(hash, data);
     return rec.id;
   }
-  // Подчёркивания не удаляются (см. комментарий у c выше) — только
-  // добавляются и помечаются перенесёнными в заметку.
+  // Подчёркивания добавляются и помечаются перенесёнными в заметку; снятие —
+  // отдельной функцией removeBookUnderline чуть ниже (доработка 11.09).
   function addBookUnderline(hash, position){
     var data = getOrCreateBookState(hash);
     var rec = {id: genBookRecordId(), position: position, addedAt: Date.now(), movedToNote: false};
@@ -5504,6 +5709,22 @@
     if(!u) return;
     u.movedToNote = true;
     saveBookState(hash, data);
+  }
+  // Снятие подчёркивания (READER_PLAN.md, шаг 13, доработка 11.09: плавающая
+  // кнопка-урна при тапе на уже подчёркнутый текст) — единственное место,
+  // физически удаляющее запись из data.underlines. Возвращает удалённую
+  // запись (нужна вызывающему для movedToNote/position, см.
+  // deleteBookUnderline ниже) или null, если id не найден.
+  function removeBookUnderline(hash, underlineId){
+    var data = getOrCreateBookState(hash);
+    var idx = -1;
+    for(var i = 0; i < data.underlines.length; i++){
+      if(data.underlines[i].id === underlineId){ idx = i; break; }
+    }
+    if(idx === -1) return null;
+    var removed = data.underlines.splice(idx, 1)[0];
+    saveBookState(hash, data);
+    return removed;
   }
   function setBookNoteId(hash, noteId){
     var data = getOrCreateBookState(hash);
@@ -5771,6 +5992,19 @@
       '<path d="M6.5 17.5L16 8l3 3-9.5 9.5H6.5v-3z"></path>' +
       '<path d="M14 6l4 4"></path>' +
     '</svg>';
+  // Плавающая кнопка-урна над подчёркиванием (READER_PLAN.md, шаг 13,
+  // доработка 11.09) — тап по уже подчёркнутому фрагменту показывает эту
+  // кнопку рядом с ним (см. showBookReaderUnderlineTrashBtn ниже), тап по
+  // ней снимает подчёркивание. Тот же язык иконок, что и остальные кнопки
+  // ридера.
+  var READER_TRASH_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M5 7h14"></path>' +
+      '<path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>' +
+      '<path d="M7 7l1 13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-13"></path>' +
+      '<line x1="10" y1="11" x2="10" y2="17"></line>' +
+      '<line x1="14" y1="11" x2="14" y2="17"></line>' +
+    '</svg>';
 
   // XML-декларация в начале fb2 (<?xml ... encoding="windows-1251"?>) всегда
   // ASCII-совместима, поэтому кодировку можно прочитать декодированием первых
@@ -5848,12 +6082,15 @@
     });
   }
 
-  // ranges (необязательный 2-й параметр, READER_PLAN.md, шаг 13, 11.09) —
-  // отсортированный список НЕпересекающихся [start,end) в координатах
-  // ПЛОСКОГО текста абзаца (конкатенация runs[].text, теми же координатами,
-  // что использует resolveSelectionToBlockPosition/getBookUnderlineRangesForBlock
-  // ниже) — те куски текста, что нужно обернуть в <mark class="book-reader-
-  // underline"> (подчёркивания книги), поверх уже имеющегося жирного/курсива.
+  // ranges (необязательный 2-й параметр, READER_PLAN.md, шаг 13, 11.09;
+  // формат {s,e,id} — доработка 11.09, id понадобился кнопке-урне) —
+  // отсортированный список объектов {s,e,id} в координатах ПЛОСКОГО текста
+  // абзаца (конкатенация runs[].text, теми же координатами, что использует
+  // resolveSelectionToBlockPosition/getBookUnderlineRangesForBlock ниже) —
+  // те куски текста, что нужно обернуть в <mark class="book-reader-
+  // underline" data-underline-id="..."> (подчёркивания книги), поверх уже
+  // имеющегося жирного/курсива. id на <mark> — по нему показывается
+  // плавающая кнопка-урна при тапе (см. bindBookReaderUnderlineClicks ниже).
   // Без ranges — прежнее поведение без изменений (единственный вызов раньше,
   // до шага 13, ranges не передавал).
   function renderRunsHtml(runs, ranges){
@@ -5872,22 +6109,22 @@
         var globalPos = runStart + pos;
         var active = null;
         for(var i = 0; i < ranges.length; i++){
-          if(globalPos >= ranges[i][0] && globalPos < ranges[i][1]){ active = ranges[i]; break; }
+          if(globalPos >= ranges[i].s && globalPos < ranges[i].e){ active = ranges[i]; break; }
         }
         var segEnd;
         if(active){
-          segEnd = Math.min(len, active[1] - runStart);
+          segEnd = Math.min(len, active.e - runStart);
         } else {
           segEnd = len;
           for(var j = 0; j < ranges.length; j++){
-            var relStart = ranges[j][0] - runStart;
+            var relStart = ranges[j].s - runStart;
             if(relStart > pos && relStart < segEnd) segEnd = relStart;
           }
         }
         var t = escapeHtml(text.slice(pos, segEnd));
         if(r.bold) t = "<b>" + t + "</b>";
         if(r.italic) t = "<i>" + t + "</i>";
-        if(active) t = '<mark class="book-reader-underline">' + t + '</mark>';
+        if(active) t = '<mark class="book-reader-underline" data-underline-id="' + escapeHtml(active.id) + '">' + t + '</mark>';
         html += t;
         pos = segEnd;
       }
@@ -5938,6 +6175,7 @@
   function bindBookReaderFabRow(){
     bookReaderFontSizePanelOpen = false; // попап "+"/"-" каждый раз стартует закрытым (та же причина, что у fontSizePanelOpen в renderEditorScreen)
     bookReaderSelectionArmed = false; // кнопка "Выделение" каждый раз стартует невзведённой
+    removeBookReaderUnderlineTrashBtn(); // кнопка-урна (доработка 11.09) тоже не переживает полный рендер — та же причина
     var fontBtn = document.getElementById("bookReaderFontSizeBtn");
     var fontPopup = document.getElementById("bookReaderFontSizePopup");
     var fontPlusBtn = document.getElementById("bookReaderFontPlusBtn");
@@ -6046,6 +6284,7 @@
     bindBookReaderFabRow();
     bindBookReaderSelectionOnce();
     bindBookReaderImages();
+    bindBookReaderUnderlineClicks();
   }
 
   // Шаг 14 (READER_PLAN.md, Этап D, 11.09): тап по самой картинке открывает
@@ -6160,28 +6399,29 @@
   }
 
   // Подчёркивания текущей книги для одного абзаца (блока) — отсортированный
-  // список НЕпересекающихся [start,end) в координатах плоского текста этого
-  // абзаца, для renderRunsHtml выше. Возвращает null, если подсвечивать
-  // нечего (renderRunsHtml без ranges работает по старому быстрому пути).
+  // список {s,e,id} в координатах плоского текста этого абзаца, для
+  // renderRunsHtml выше. id каждой записи (доработка 11.09) нужен, чтобы
+  // <mark> в разметке нёс data-underline-id — по нему плавающая кнопка-урна
+  // (bindBookReaderUnderlineClicks ниже) узнаёт, какую именно запись снимать.
+  // Возвращает null, если подсвечивать нечего (renderRunsHtml без ranges
+  // работает по старому быстрому пути).
+  //
+  // Диапазоны НЕ схлопываются: точные повторы позиции дедуплицируются на
+  // входе (addUnderlineFromSelection), а частичное пересечение двух РАЗНЫХ
+  // выделений — тот же теоретический край-кейс, что был и раньше (см.
+  // старый комментарий про merge); раз тут нужен id на каждый сегмент для
+  // кнопки-урны, схлопывать больше нельзя — в этом редком случае просто
+  // активным считается первый диапазон по возрастанию s (см. цикл в
+  // renderRunsHtml).
   function getBookUnderlineRangesForBlock(hash, ch, blk){
     var data = getBookState(hash);
     if(!data || !data.underlines || !data.underlines.length) return null;
     var ranges = data.underlines.filter(function(u){
       return u.position && u.position.ch === ch && u.position.blk === blk;
-    }).map(function(u){ return [u.position.s, u.position.e]; });
+    }).map(function(u){ return {s: u.position.s, e: u.position.e, id: u.id}; });
     if(!ranges.length) return null;
-    ranges.sort(function(a, b){ return a[0] - b[0]; });
-    // Схлопываем пересекающиеся диапазоны на всякий случай (в норме не
-    // должно происходить — новые подчёркивания дедуплицируются по точному
-    // совпадению позиции, см. addUnderlineFromSelection ниже, но частичное
-    // перекрытие двух РАЗНЫХ выделений теоретически возможно).
-    var merged = [];
-    ranges.forEach(function(r){
-      var last = merged[merged.length - 1];
-      if(last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
-      else merged.push(r.slice());
-    });
-    return merged;
+    ranges.sort(function(a, b){ return a.s - b.s; });
+    return ranges;
   }
 
   // Ближайший предок-абзац книжного ридера у текстового узла/элемента.
@@ -6360,6 +6600,130 @@
         return true;
       });
     }
+  }
+
+  // ===================== СНЯТИЕ ПОДЧЁРКИВАНИЯ — КНОПКА-УРНА (READER_PLAN.md,
+  // Этап D, шаг 13, доработка 11.09) =====================
+  // Тап по уже подчёркнутому фрагменту (<mark class="book-reader-underline">,
+  // data-underline-id на нём — см. renderRunsHtml/getBookUnderlineRangesForBlock
+  // выше) показывает рядом круглую плавающую кнопку с иконкой урны
+  // (READER_TRASH_ICON_SVG). Тап по кнопке:
+  //   1) снимает подчёркивание из модели книги (removeBookUnderline) —
+  //      навсегда, в отличие от прежнего поведения "никогда не удаляются";
+  //   2) если текст этого подчёркивания успел попасть в заметку книги
+  //      (movedToNote) — пытается убрать его оттуда ТЕМ ЖЕ приёмом, что и
+  //      открепление иллюстрации (шаг 14): MdEditor.removeTextFromNoteId
+  //      ищет ТОЧНОЕ совпадение текста. Если пользователь уже отредактировал
+  //      этот кусок в заметке вручную — точного совпадения не будет,
+  //      removeTextFromNoteId вернёт false и заметку не тронет (это
+  //      ожидаемое поведение по ТЗ, не ошибка) — подчёркивание в самом
+  //      тексте книги при этом всё равно снимается;
+  //   3) перерисовывает абзац (refreshBookReaderParagraphHighlight) — без
+  //      полного рендера ридера, чтобы не сбрасывать scrollTop.
+  //
+  // Кнопка позиционируется абсолютно от .settings-modal-box (тот же приём,
+  // что диалоги имени заметки/очистки — settingsModalBox.appendChild), а не
+  // добавляется внутрь #settingsTabContent, — иначе её съело бы обнуление
+  // innerHTML при следующем рендере абзаца. Из-за этого при скролле текста
+  // или клике вне кнопки/урны она просто скрывается (см.
+  // bindBookReaderUnderlineDismissOnce ниже), а не остаётся "прилипшей" не
+  // на своём месте.
+
+  // Плоский текст блока (конкатенация runs[].text) — те же координаты, что
+  // s/e у подчёркивания; нужен, чтобы восстановить исходный текст выделения
+  // по position и проверить/убрать его в заметке.
+  function flatBlockText(block){
+    return block.runs.map(function(r){ return r.text; }).join("");
+  }
+
+  var bookReaderUnderlineTrashBtn = null;
+  function removeBookReaderUnderlineTrashBtn(){
+    if(bookReaderUnderlineTrashBtn && bookReaderUnderlineTrashBtn.parentNode){
+      bookReaderUnderlineTrashBtn.parentNode.removeChild(bookReaderUnderlineTrashBtn);
+    }
+    bookReaderUnderlineTrashBtn = null;
+  }
+
+  function showBookReaderUnderlineTrashBtn(markEl, hash, underlineId, ch, blk){
+    removeBookReaderUnderlineTrashBtn();
+    if(!settingsModalBox) return;
+    var rect = markEl.getBoundingClientRect();
+    var boxRect = settingsModalBox.getBoundingClientRect();
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "book-reader-underline-trash-btn";
+    btn.title = "Убрать подчёркивание";
+    btn.innerHTML = READER_TRASH_ICON_SVG;
+    btn.style.left = (rect.left - boxRect.left + rect.width / 2) + "px";
+    btn.style.top = (rect.top - boxRect.top) + "px";
+    settingsModalBox.appendChild(btn);
+    bookReaderUnderlineTrashBtn = btn;
+    btn.addEventListener("click", function(ev){
+      ev.stopPropagation();
+      deleteBookUnderline(hash, underlineId, ch, blk);
+      removeBookReaderUnderlineTrashBtn();
+    });
+  }
+
+  // Собственно снятие: см. пункты 1-3 в комментарии к разделу выше.
+  function deleteBookUnderline(hash, underlineId, ch, blk){
+    var removed = removeBookUnderline(hash, underlineId);
+    if(!removed) return;
+    var data = getBookState(hash);
+    if(removed.movedToNote && data && data.noteId && MdEditor && MdEditor.removeTextFromNoteId){
+      var chapter = bookReaderState && bookReaderState.chapters[ch];
+      var block = chapter && chapter.blocks[blk];
+      if(block){
+        var text = flatBlockText(block).slice(removed.position.s, removed.position.e).trim();
+        // Результат намеренно игнорируется: false означает "в заметке уже
+        // не точно такой текст" (правка пользователем) — заметку в этом
+        // случае трогать не нужно, это не ошибка.
+        MdEditor.removeTextFromNoteId(data.noteId, text);
+      }
+    }
+    refreshBookReaderParagraphHighlight(ch, blk);
+  }
+
+  // Клик по <mark> — открывает кнопку-урну; игнорируем, если это конец
+  // протяжённого выделения (drag) — иначе обычное выделение текста внутри
+  // уже подчёркнутого фрагмента (например, для копирования) конфликтовало
+  // бы с открытием кнопки при каждом отпускании пальца/мыши.
+  function bindBookReaderUnderlineClicks(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container || !bookReaderState) return;
+    container.querySelectorAll(".book-reader-underline").forEach(function(mark){
+      mark.addEventListener("click", function(ev){
+        var sel = window.getSelection();
+        if(sel && !sel.isCollapsed && sel.toString()) return;
+        ev.stopPropagation();
+        var pEl = mark.closest(".book-reader-p");
+        if(!pEl) return;
+        var ch = parseInt(pEl.getAttribute("data-ch"), 10);
+        var blk = parseInt(pEl.getAttribute("data-blk"), 10);
+        var underlineId = mark.getAttribute("data-underline-id");
+        showBookReaderUnderlineTrashBtn(mark, bookReaderState.hash, underlineId, ch, blk);
+      });
+    });
+    bindBookReaderUnderlineDismissOnce();
+  }
+
+  // Скрытие кнопки-урны вне тапа по ней самой/по подчёркиванию — один
+  // document-level слушатель, тем же приёмом (лениво, один раз), что
+  // bindBookReaderSelectionOnce выше. "scroll" не всплывает — слушаем в
+  // фазе перехвата (capture=true), чтобы поймать скролл #settingsTabContent.
+  var bookReaderUnderlineDismissBound = false;
+  function bindBookReaderUnderlineDismissOnce(){
+    if(bookReaderUnderlineDismissBound) return;
+    bookReaderUnderlineDismissBound = true;
+    document.addEventListener("click", function(ev){
+      if(!bookReaderUnderlineTrashBtn) return;
+      if(ev.target === bookReaderUnderlineTrashBtn) return;
+      if(ev.target.closest && ev.target.closest(".book-reader-underline")) return;
+      removeBookReaderUnderlineTrashBtn();
+    });
+    document.addEventListener("scroll", function(){
+      if(bookReaderUnderlineTrashBtn) removeBookReaderUnderlineTrashBtn();
+    }, true);
   }
 
   // ===================== ИЛЛЮСТРАЦИИ -> ЗАМЕТКА КНИГИ (READER_PLAN.md,
@@ -7286,11 +7650,47 @@
   // чтобы понять, что сейчас открыт md-редактор (set2s_1) и стоит сначала
   // спросить у него, не обработает ли он жест "назад" сам, внутри вкладки.
   var currentSettingsTab = "gear";
+  // ссылка на функцию перерисовки экрана "Все задачи проекта"
+  // (openTaskNextPicker), если он сейчас открыт поверх вкладки "projects" —
+  // иначе null. currentSettingsTab при этом остаётся "projects" (см.
+  // openTaskNextPicker ниже), поэтому обычных признаков вкладки недостаточно,
+  // чтобы отличить этот экран от простого списка проектов (см. использование
+  // в rerenderAllFromState и обнуление в switchSettingsTab).
+  var activeProjectPickerRerender = null;
   // взводится ТОЛЬКО на время восстановления предыдущей вкладки функцией
   // из стека навигации (см. window.AppNav.push в switchSettingsTab ниже),
   // чтобы сам этот восстанавливающий вызов switchSettingsTab не породил
   // новую запись поверх себя же.
   var suppressNavPush = false;
+  // Сохранение положения экрана "Все задачи проекта" в localStorage —
+  // переживает полное закрытие/сворачивание приложения (а не только
+  // внутрисессионные действия). Хранится id проекта + позиция скролла;
+  // читается при каждом открытии окна настроек (см. openSettingsModal),
+  // если "продолжить с того же места" (getResumeSettingsState) указывает
+  // на вкладку "projects". Очищается как "нормальный выход" с экрана в
+  // самом начале обычного рендера списка проектов (см. renderTaskTabList) —
+  // то есть при любом настоящем переходе на другую вкладку/повторном
+  // клике по "Projects".
+  var PROJECT_PICKER_RESUME_KEY = "bibleProjectPickerResume_v1";
+  function saveProjectPickerResumeState(projectId, scrollTop){
+    try{ localStorage.setItem(PROJECT_PICKER_RESUME_KEY, JSON.stringify({ projectId: projectId, scrollTop: scrollTop })); }catch(e){}
+  }
+  function loadProjectPickerResumeState(){
+    try{
+      var raw = localStorage.getItem(PROJECT_PICKER_RESUME_KEY);
+      if(!raw) return null;
+      var data = JSON.parse(raw);
+      if(!data || !data.projectId) return null;
+      return data;
+    }catch(e){ return null; }
+  }
+  function clearProjectPickerResumeState(){
+    try{ localStorage.removeItem(PROJECT_PICKER_RESUME_KEY); }catch(e){}
+  }
+  // debounce для сохранения позиции скролла (см. openTaskNextPicker) —
+  // не пишем в localStorage на каждый пиксель прокрутки
+  var projectPickerScrollSaveTimer = null;
+  var projectPickerScrollHandler = null;
   // ищет вкладку с той же позицией (индексом), что и tab, но в ДРУГОМ
   // наборе и в том же стеке (боковой -> боковой, нижний -> нижний).
   // Возвращает null, если позиция не распознана (такого пока не бывает,
@@ -9902,6 +10302,10 @@
     });
 
     editable.addEventListener("blur", function(){
+      // открыт диалог выбора файла для скрепки — не выходим из
+      // редактирования, иначе вставлять картинку станет некуда (см.
+      // taskAttachDialogOpen выше)
+      if(taskAttachDialogOpen) return;
       var restoreScroll = window.Debug.guardTaskListScroll();
       var newText = getEditableNoteText(editable);
       setCommentText(id, newText.trim());
@@ -10162,6 +10566,7 @@
   function renderTaskTabList(tabKey, anchorTaskId){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
+    if(tabKey === "projects") clearProjectPickerResumeState();
     // Полная пересборка списка ниже (innerHTML) сама по себе всегда
     // приводит скролл контейнера к верху — нормально при настоящем
     // переключении вкладки (см. switchSettingsTab, там scrollTop и так
@@ -10308,6 +10713,30 @@
   }
   window.addEventListener("resize", refitAllVisibleTaskBodies);
 
+  // копирование текста задачи (кнопка-пиктограмма .task-copy-btn, см.
+  // bindTaskRowActions ниже) — тот же приём, что и у копирования субтитров
+  // (см. copyBtn в renderSettingsTabSubtitleExtract): основной путь —
+  // navigator.clipboard.writeText, фолбэк — скрытая textarea + execCommand
+  // для браузеров/контекстов без Clipboard API.
+  function copyTaskTextToClipboard(text){
+    if(!text) return;
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).catch(function(){});
+      return;
+    }
+    try{
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }catch(e){}
+  }
+
   // onAfterAction (необязательный, 3-й параметр) — используется вкладкой
   // "Поиск" (search.js, ТЗ пользователя от 08.09): вызовы archive/move из
   // результатов поиска не должны перерисовывать реальную вкладку-хранилище
@@ -10330,6 +10759,7 @@
         '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
+        '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + task.id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
       '</span>';
@@ -10360,6 +10790,23 @@
     }
     var moveBtn = body.querySelector(".task-move-btn");
     if(moveBtn) moveBtn.addEventListener("click", function(){ openTaskMovePicker(id, tabKey, onAfterAction); });
+    // копирование текста задачи в буфер обмена (ТЗ пользователя от 11.09) —
+    // тот же приём copyToClipboard/фолбэк через execCommand, что и у
+    // srtCopyBtn при извлечении субтитров (см. 7278 выше), но без отдельной
+    // строки статуса — вместо неё на секунду-другую меняем саму иконку на
+    // галочку, прямо как обратная связь у кнопки.
+    var copyBtn = body.querySelector(".task-copy-btn");
+    if(copyBtn){
+      copyBtn.addEventListener("click", function(){
+        flushPendingTaskEdits();
+        var current = getTaskById(id);
+        copyTaskTextToClipboard(current && current.c.text ? current.c.text : "");
+        copyBtn.innerHTML = CHECK_ICON_SVG;
+        setTimeout(function(){
+          if(document.body.contains(copyBtn)) copyBtn.innerHTML = COPY_ICON_SVG;
+        }, 1200);
+      });
+    }
     var nextBtn = body.querySelector(".task-next-btn");
     if(nextBtn) nextBtn.addEventListener("click", function(){ openTaskNextPicker(id, tabKey); });
     var dot = body.querySelector(".task-flag-dot");
@@ -10404,6 +10851,7 @@
       '<span class="task-actions">' +
         '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
+        '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
       '</span>';
@@ -10449,6 +10897,10 @@
     // bindTaskRowActions), так что до срабатывания этого таймера строка
     // обычно уже перерисована ими, и здесь просто нечего делать.
     editable.addEventListener("blur", function(){
+      // открыт диалог выбора файла для скрепки — не выходим из
+      // редактирования, иначе вставлять картинку станет некуда (см.
+      // taskAttachDialogOpen выше)
+      if(taskAttachDialogOpen) return;
       var restoreScroll = window.Debug.guardTaskListScroll();
       // ГИПОТЕЗА по логу диагностики: браузер откладывает собственный
       // "прокрутить каретку в видимую область" уже ПОСЛЕ blur — и если к
@@ -10532,12 +10984,15 @@
   // возврат к списку проектов происходит так же, как и вход сюда: через
   // повторный клик по язычку "Projects" (switchSettingsTab("projects")
   // безусловно перерисовывает список проектов поверх этого экрана).
-  function openTaskNextPicker(projectId, tabKey){
+  function openTaskNextPicker(projectId, tabKey, resumeScrollTop){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
 
     var mode = "linked"; // "linked" — обычный вид (проект + next-задачи),
                           // "attach" — выбор существующей задачи для привязки
+    // взводится только на самый первый render() этого открытия — см.
+    // восстановление resumeScrollTop и сохранение позиции ниже
+    var isFirstRender = true;
 
     function getLinkedTasks(){
       return getTasksForTab("next").filter(function(t){ return t.c.nextForProjectId === projectId; });
@@ -10558,7 +11013,22 @@
     // явному запросу через кнопку-звено. ---------- */
     function render(){
       flushPendingTaskEdits();
-      var projectHtml = '<div class="task-row" data-id="' + projectId + '"><div class="task-body" data-id="' + projectId + '"></div></div>';
+      var projectTask = getTaskById(projectId);
+      // Название проекта — часть ПРОКРУЧИВАЕМОЙ области ниже (см.
+      // container.innerHTML ниже: вставляется ПЕРВЫМ элементом внутри
+      // .task-project-area, а не в отдельной фиксированной строке над ней,
+      // ТЗ пользователя от 12.09) — уезжает вместе со списком next-задач
+      // при скролле. Неподвижен только сам заголовок экрана ("Все задачи
+      // проекта" выше). Без кнопок управления (редактировать/в архив/
+      // перенести/копировать/приоритет): всё это уже есть у самой
+      // задачи-проекта в списке проектов — управлять проектом отсюда
+      // больше нельзя, только читать название и работать со связанными
+      // next-задачами. Тот же класс .common-tab-title, что у заголовка
+      // экрана над ним и у заголовков "Закладки"/"Мои заметки" — с тем же
+      // тонким разделителем снизу.
+      var projectNameHtml = '<h3 class="common-tab-title">' +
+        (projectTask && projectTask.c.text ? linkifyHtml(projectTask.c.text) : '<span class="task-text-placeholder">Без названия</span>') +
+        '</h3>';
       var areaHtml;
       if(mode === "attach"){
         var available = getAvailableTasks();
@@ -10566,39 +11036,57 @@
           var label = t.c.text ? escapeHtml(t.c.text) : "Без названия";
           return '<button type="button" class="version-history-item" data-avail-id="' + t.id + '">' + label + '</button>';
         }).join("");
-        areaHtml = '<div class="task-list">' + availableHtml + '</div>' +
+        areaHtml = projectNameHtml + '<div class="task-list">' + availableHtml + '</div>' +
           (available.length === 0 ? '<div class="task-empty">Нет доступных задач.</div>' : '');
       } else {
         var linked = getLinkedTasks();
         var linkedHtml = linked.map(function(t){
           return '<div class="task-row" data-id="' + t.id + '"><div class="task-body" data-id="' + t.id + '"></div></div>';
         }).join("");
-        areaHtml = '<div class="task-list">' + linkedHtml + '</div>' +
+        areaHtml = projectNameHtml + '<div class="task-list">' + linkedHtml + '</div>' +
           (linked.length === 0 ? '<div class="task-empty">Пока нет задач, привязанных к проекту.</div>' : '');
       }
       container.innerHTML =
-        '<div class="year-grid-tab-title" style="margin-bottom:12px;">Все задачи проекта</div>' +
+        '<h3 class="common-tab-title">Все задачи проекта</h3>' +
         '<div class="task-project-modal-body">' +
-          '<div class="task-list task-project-project-row">' + projectHtml + '</div>' +
           '<div class="task-project-area" id="taskProjectArea">' + areaHtml + '</div>' +
         '</div>' +
-        '<button type="button" class="task-project-fab task-project-fab-link' + (mode === "attach" ? " active" : "") + '" id="taskProjectLinkFab" title="Прикрепить существующую задачу">' + LINK_NEXT_ICON_SVG + '</button>' +
-        '<button type="button" class="task-project-fab task-project-fab-create" id="taskProjectCreateFab" title="Новая задача">+</button>';
+        // "новая задача" (+) — визуально та же самая общая .task-add-fab
+        // (тот же класс, тот же угол, тот же квадратный вид, что и на
+        // остальных вкладках задач), просто отдельный DOM-узел со своим id
+        // и своим обработчиком: у "+" здесь своя логика создания задачи,
+        // привязанной к проекту, отличная от обычного добавления в список
+        // (см. taskProjectCreateFab ниже). Настоящая глобальная
+        // .task-add-fab (#taskAddFab) на этом экране по-прежнему скрыта
+        // (см. globalFab ниже) — иначе они бы наложились друг на друга.
+        // "Прикрепить существующую" (звенья) — та же квадратная кнопка
+        // (.mdeditor-fab-btn, тот же вид, что у Ж/Аа/скрепки/"+" везде в
+        // приложении), поставлена ЛЕВЕЕ ВСЕХ кнопок ряда — левее "Ж" (ТЗ
+        // пользователя от 12.09) — со своим позиционированием
+        // (.task-project-fab-link в modals.css). Подсветка активного
+        // режима "attach" — общий класс .pressed (см. .mdeditor-fab-btn.
+        // pressed в components.css), тот же приём, что и у кнопки "i" во
+        // вкладке "Извлечение субтитров".
+        '<button type="button" class="mdeditor-fab-btn task-project-fab-link' + (mode === "attach" ? " pressed" : "") + '" id="taskProjectLinkFab" title="Прикрепить существующую задачу">' + LINK_NEXT_ICON_SVG + '</button>' +
+        '<button type="button" class="task-add-fab visible" id="taskProjectCreateFab" title="Новая задача">+</button>';
 
-      // глобальная "+" (task-add-fab) относится к обычным вкладкам —
-      // здесь вместо неё две свои кнопки, поэтому её прячем; она сама
-      // вернётся при выходе (switchSettingsTab выставляет видимость
-      // заново для каждой вкладки). "Ж"/"Аа" прячем туда же — они
-      // визуально попадали бы ровно в то место, где здесь стоят свои
-      // круглые кнопки (.task-project-fab-link/-create, см. выше).
+      // Глобальные "Ж"/"Аа"/скрепка (см. #taskFormatWrap/#taskFontSizeWrap/
+      // #taskAttachWrap) здесь НЕ прячем (ТЗ пользователя от 12.09) — они
+      // уже видимы, т.к. switchSettingsTab выставляет им visible=true для
+      // вкладки "projects" (см. TASK_MOVABLE_TABS) ДО вызова этой функции,
+      // и применяются к тому же .task-editable, что и везде (см.
+      // renderRowEdit ниже). Прячем только настоящую глобальную "+"
+      // (#taskAddFab) — вместо неё здесь своя кнопка с другой логикой
+      // создания задачи (taskProjectCreateFab выше, тот же класс
+      // .task-add-fab для одинакового вида); она сама вернётся при выходе
+      // (switchSettingsTab выставляет видимость заново для каждой вкладки).
       var globalFab = document.getElementById("taskAddFab");
       if(globalFab) globalFab.classList.remove("visible");
-      var globalFormatWrap = document.getElementById("taskFormatWrap");
-      var globalFontSizeWrap = document.getElementById("taskFontSizeWrap");
-      if(globalFormatWrap) globalFormatWrap.classList.remove("visible");
-      if(globalFontSizeWrap) globalFontSizeWrap.classList.remove("visible");
 
-      renderRowView(projectId);
+      // Название проекта уже вставлено выше (projectNameHtml) — без
+      // кнопок управления (см. комментарий у projectNameHtml), поэтому
+      // renderRowView (с полным набором кнопок) для него больше не
+      // вызывается, только для связанных next-задач ниже.
       if(mode !== "attach"){
         getLinkedTasks().forEach(function(t){ renderRowView(t.id); });
       }
@@ -10639,6 +11127,17 @@
         render();
         renderRowEdit(nid);
       });
+
+      // сохранение позиции скролла (см. PROJECT_PICKER_RESUME_KEY выше) —
+      // только на самый первый рендер этого открытия: тут же восстанавливаем
+      // resumeScrollTop, если экран открыт через "продолжить с того же
+      // места" (см. openSettingsModal). Дальнейшие изменения позиции —
+      // уже через слушатель скролла ниже, а не через повторные render().
+      if(isFirstRender){
+        isFirstRender = false;
+        if(resumeScrollTop) container.scrollTop = resumeScrollTop;
+        saveProjectPickerResumeState(projectId, container.scrollTop);
+      }
     }
 
     // строка привязанной задачи (и сама строка проекта наверху) — те же
@@ -10658,6 +11157,7 @@
           '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
+          '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
         '</span>';
       body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderRowEdit(id); });
@@ -10679,6 +11179,18 @@
       }
       var moveBtn = body.querySelector(".task-move-btn");
       if(moveBtn) moveBtn.addEventListener("click", function(){ openRowMovePicker(id); });
+      var copyBtn = body.querySelector(".task-copy-btn");
+      if(copyBtn){
+        copyBtn.addEventListener("click", function(){
+          flushPendingTaskEdits();
+          var current = getTaskById(id);
+          copyTaskTextToClipboard(current && current.c.text ? current.c.text : "");
+          copyBtn.innerHTML = CHECK_ICON_SVG;
+          setTimeout(function(){
+            if(document.body.contains(copyBtn)) copyBtn.innerHTML = COPY_ICON_SVG;
+          }, 1200);
+        });
+      }
       var dot = body.querySelector(".task-flag-dot");
       if(dot){
         dot.addEventListener("click", function(e){
@@ -10704,6 +11216,7 @@
         '<span class="task-actions">' +
           '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
+          '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
         '</span>';
       var editable = document.getElementById("taskEditable_" + id);
@@ -10738,6 +11251,10 @@
       });
 
       editable.addEventListener("blur", function(){
+        // открыт диалог выбора файла для скрепки — не выходим из
+        // редактирования, иначе вставлять картинку станет некуда (см.
+        // taskAttachDialogOpen выше)
+        if(taskAttachDialogOpen) return;
         var restoreScroll = window.Debug.guardTaskListScroll();
         var newText = getEditableNoteText(editable);
         setTaskText(id, newText.trim());
@@ -10777,6 +11294,25 @@
       });
     }
 
+    // слушатель скролла — сохраняет позицию по мере прокрутки (debounce,
+    // см. PROJECT_PICKER_RESUME_KEY выше). Вешаем на #settingsTabContent
+    // один раз за вызов: сам узел не пересоздаётся при render() (меняется
+    // только innerHTML), а старый обработчик от прошлого открытия пикера
+    // снимаем, чтобы не копились дубли.
+    if(projectPickerScrollHandler) container.removeEventListener("scroll", projectPickerScrollHandler);
+    projectPickerScrollHandler = function(){
+      if(projectPickerScrollSaveTimer) clearTimeout(projectPickerScrollSaveTimer);
+      projectPickerScrollSaveTimer = setTimeout(function(){
+        saveProjectPickerResumeState(projectId, container.scrollTop);
+      }, 200);
+    };
+    container.addEventListener("scroll", projectPickerScrollHandler);
+
+    // регистрируем render() как "текущий экран" для rerenderAllFromState
+    // (см. activeProjectPickerRerender выше) — иначе фоновая синхронизация,
+    // подоспевшая, пока этот экран открыт, затирала бы его обратно на
+    // список всех проектов
+    activeProjectPickerRerender = render;
     render();
   }
 
