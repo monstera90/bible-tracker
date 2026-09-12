@@ -3971,9 +3971,11 @@
   // rawState.data) — теперь при выборе ZIP-архива показываются галочки
   // только по тем категориям, что реально нашлись внутри: "Заметки"
   // (notes/), "Задачи" (task:*/taskcompletion:* внутри rawState.data),
-  // "Картинки заметок" (images/), "Книги" (books/) и "Всё остальное"
-  // (сам rawState.data, за вычетом ключей задач — прогресс чтения,
-  // счётчик часов, настроение, цели, комментарии, настройки). При выборе
+  // "Картинки заметок" (images/), "Книги" (файлы books/ и/или ключи
+  // book:<хэш> внутри rawState.data — Шаг 18 READER_PLAN.md) и "Всё
+  // остальное" (сам rawState.data, за вычетом ключей задач и ключей книг —
+  // прогресс чтения, счётчик часов, настроение, цели, комментарии,
+  // настройки). При выборе
   // одного data.json (без остальных папок — старые копии, либо файл,
   // извлечённый вручную из архива) доступна только категория "Всё
   // остальное" (и "Задачи", если в нём есть ключи задач). Каждая
@@ -4104,10 +4106,16 @@
   // что реально нашлись в архиве").
   function importPayloadCategories(payload){
     var taskKeysFound = Object.keys(payload.rawStateData).some(isTaskStateKey);
+    // Шаг 18 READER_PLAN.md (12.09): ключи book:<хэш> (модель состояния
+    // книги, см. isBookStateKey) — часть категории "Книги" наравне с
+    // файлами books/, поэтому категория показывается и если найдены только
+    // ключи состояния, без самих файлов (например, книга ещё не скачана на
+    // это устройство, но прогресс/закладки к ней уже пришли из облака).
+    var bookKeysFound = Object.keys(payload.rawStateData).some(isBookStateKey);
     return IMPORT_CATEGORY_DEFS.filter(function(def){
       if(def.key === "notes") return payload.noteEntries.length > 0;
       if(def.key === "images") return payload.imageEntries.length > 0;
-      if(def.key === "books") return payload.bookEntries.length > 0;
+      if(def.key === "books") return payload.bookEntries.length > 0 || bookKeysFound;
       if(def.key === "tasks") return taskKeysFound;
       return true; // "all" — data.json (и в нём rawState.data) есть у любого валидного файла
     });
@@ -4142,26 +4150,32 @@
 
   // Применяет отмеченные пользователем категории (selection — объект вида
   // {all,tasks,notes,images,books}, см. renderImportCategoriesScreen).
-  // "Задачи" и "Всё остальное" — обе технически часть одного
-  // rawState.data, поэтому здесь их явно разносят по ключам: "Всё
-  // остальное" применяет все ключи rawState.data, КРОМЕ
-  // task:*/taskcompletion:*, "Задачи" — только их; так снятая галочка
-  // "Задачи" не трогает текущие задачи на устройстве, даже если "Всё
-  // остальное" отмечено, и наоборот. Заметки/картинки/книги — через
+  // "Задачи", "Книги" (ключи book:<хэш>, Шаг 18 READER_PLAN.md, 12.09) и
+  // "Всё остальное" — все три технически часть одного rawState.data,
+  // поэтому здесь их явно разносят по ключам на три непересекающиеся
+  // группы: "Всё остальное" применяет все ключи rawState.data, КРОМЕ
+  // task:*/taskcompletion:* и book:*; "Задачи" — только task:*/
+  // taskcompletion:*; "Книги" — только book:*. Так снятая галочка у любой
+  // из трёх категорий не трогает соответствующие данные на устройстве,
+  // даже если остальные две отмечены. Заметки/картинки/файлы книг — через
   // отдельные функции replaceAll*FromEntries (mdeditor.js/выше), каждая
   // полностью заменяет соответствующее хранилище.
   function applyImportSelection(payload, selection){
-    if(selection.all || selection.tasks){
+    if(selection.all || selection.tasks || selection.books){
       var newState = {};
       Object.keys(state).forEach(function(k){
         var isTask = isTaskStateKey(k);
+        var isBook = isBookStateKey(k);
         if(isTask && !selection.tasks) newState[k] = state[k];
-        if(!isTask && !selection.all) newState[k] = state[k];
+        else if(isBook && !selection.books) newState[k] = state[k];
+        else if(!isTask && !isBook && !selection.all) newState[k] = state[k];
       });
       Object.keys(payload.rawStateData).forEach(function(k){
         var isTask = isTaskStateKey(k);
+        var isBook = isBookStateKey(k);
         if(isTask && selection.tasks) newState[k] = payload.rawStateData[k];
-        if(!isTask && selection.all) newState[k] = payload.rawStateData[k];
+        else if(isBook && selection.books) newState[k] = payload.rawStateData[k];
+        else if(!isTask && !isBook && selection.all) newState[k] = payload.rawStateData[k];
       });
       state = newState;
       saveLocalState();
@@ -5701,10 +5715,10 @@
   //                создаётся один раз при первом подчёркивании (шаг 13) и
   //                дальше переиспользуется; null, пока заметки ещё нет.
   //
-  // ИЗВЕСТНОЕ ОГРАНИЧЕНИЕ (см. READER_PLAN.md, шаг 18): категория
-  // импорта/экспорта "Книги" пока знает только про файлы books/, ключи
-  // book:<hash> при импорте/экспорте временно попадают в категорию "Всё
-  // остальное" — доработка запланирована отдельным шагом.
+  // READER_PLAN.md, Шаг 18 (12.09, выполнено): категория импорта/экспорта
+  // "Книги" включает и файлы books/, и эти ключи book:<hash> — см.
+  // isBookStateKey ниже, importPayloadCategories/applyImportSelection в
+  // разделе "ИМПОРТ ЛИЧНЫХ ДАННЫХ" выше.
   function bookStateKey(hash){
     return "book:" + hash;
   }
@@ -5722,7 +5736,23 @@
   // Всегда возвращает объект (с дефолтами) — коду ридера (Этап D) не нужно
   // самому подставлять пустые значения при первом открытии книги.
   function getOrCreateBookState(hash){
-    return getBookState(hash) || {position: null, bookmarks: [], underlines: [], noteId: null, images: []};
+    return getBookState(hash) || {position: null, bookmarks: [], underlines: [], noteId: null, images: [], bookName: null};
+  }
+  // Название книги в состоянии (ТЗ пользователя от 12.09: закладки/
+  // подчёркивания должны быть видны в списке независимо от того, скачан ли
+  // физический файл книги на ЭТО устройство) — записывается устройством, у
+  // которого файл есть (см. вызов в openBookReader ниже), и дальше
+  // синхронизируется в облако вместе с остальным book:<hash> тем же общим
+  // механизмом state, что и у задач — без всякой зависимости от Firebase
+  // Storage/реестра файлов. Устройство, где файла ещё нет, читает это поле
+  // из уже пришедшего state и может показать закладку в общем списке
+  // "Закладки", даже если открыть саму книгу пока нечем (см.
+  // getBookMarginBookmarksForList/openBookAtMarginBookmark ниже).
+  function ensureBookNameSynced(hash, name){
+    var data = getOrCreateBookState(hash);
+    if(data.bookName === name) return;
+    data.bookName = name;
+    saveBookState(hash, data);
   }
   function saveBookState(hash, data){
     // t — всегда время именно этого сохранения, та же причина, что и у
@@ -6230,6 +6260,7 @@
       // bookReaderState целиком, минуя openBookReader). Применяется
       // РОВНО ОДИН РАЗ в renderBookReaderText (см. ниже) и сразу
       // обнуляется там же.
+      ensureBookNameSynced(res.hash, name);
       var savedBookState = getBookState(res.hash);
       bookReaderState = {
         hash: res.hash, name: name,
@@ -6869,7 +6900,11 @@
       openBookBookmarkNameDialog(function(name){ finish(name, true); });
     } else {
       openBookBookmarkUpdateMainConfirm(
-        function(){ openBookBookmarkNameDialog(function(name){ finish(name, true); }); },
+        // "Да, обновить" — это ОБНОВЛЕНИЕ той же основной закладки на новую
+        // позицию, а не создание новой сущности с новым именем (ТЗ
+        // пользователя от 12.09) — имя переносится со старой закладки как
+        // есть, диалог имени здесь не нужен.
+        function(){ finish(existingMain.name, true); },
         function(){ openBookBookmarkNameDialog(function(name){ finish(name, false); }); }
       );
     }
@@ -7167,16 +7202,21 @@
       hashes.push(k.slice("book:".length));
     });
     if(!hashes.length){ callback([]); return; }
+    // Локальный манифест OPFS читаем best-effort: он нужен только как
+    // запасной источник имени для закладок, сделанных ДО поля bookName
+    // (см. ensureBookNameSynced выше) — его отсутствие/ошибка чтения
+    // (например, браузер без OPFS) не должна прятать закладки, у которых
+    // имя уже есть в самом state.
     getBooksDirHandle().then(function(dir){
       return loadBooksManifest(dir);
-    }).then(function(manifest){
+    }).catch(function(){ return {}; }).then(function(manifest){
       var items = [];
       hashes.forEach(function(hash){
-        var name = manifest[hash];
-        if(!name) return; // файла книги сейчас нет локально
         var data = getBookState(hash);
+        var name = (data && data.bookName) || manifest[hash];
+        if(!name) return; // имя книги неизвестно ни из state, ни из локального манифеста
         data.bookmarks.forEach(function(b){
-          items.push({type: "book", hash: hash, bookmarkId: b.id, position: b.position, addedAt: b.addedAt, bookName: name, name: b.name, isMain: !!b.isMain});
+          items.push({type: "book", hash: hash, bookmarkId: b.id, position: b.position, addedAt: b.addedAt, bookName: name, name: b.name, isMain: !!b.isMain, availableLocally: !!manifest[hash]});
         });
       });
       callback(items);
@@ -7191,10 +7231,23 @@
   function openBookAtMarginBookmark(hash, position){
     getBooksDirHandle().then(function(dir){
       return loadBooksManifest(dir);
-    }).then(function(manifest){
+    }).catch(function(){ return {}; }).then(function(manifest){
       var name = manifest[hash];
-      if(!name) return; // файла книги сейчас нет локально — открыть нечего
-      switchSettingsTab("set2s_7");
+      switchSettingsTab("set2s_7"); // рендерит renderSettingsTabBooks — #booksStatus уже в DOM
+      if(!name){
+        // Закладка синхронизирована и видна в общем списке (см.
+        // getBookMarginBookmarksForList выше — она не зависит от наличия
+        // файла), но сам файл книги на ЭТОМ устройстве ещё не появился:
+        // передача байтов идёт отдельным, более медленным путём через
+        // реестр Firebase Storage (см. syncFilesRegistry). Открыть книгу
+        // здесь пока нечем — сообщаем об этом явно, а не бездействуем молча.
+        var statusEl = document.getElementById("booksStatus");
+        if(statusEl){
+          statusEl.textContent = "Эта книга ещё не скачана на это устройство — закладка сохранена, но открыть книгу пока нечем. Она появится здесь автоматически, как только синхронизируется, либо загрузите файл книги вручную.";
+          statusEl.classList.add("error");
+        }
+        return;
+      }
       return openBookReader(name).then(function(){
         requestAnimationFrame(function(){
           var el = document.getElementById("bookP_" + position.ch + "_" + position.blk);
@@ -11498,9 +11551,15 @@
     // одному проекту, из ЛЮБОЙ вкладки-хранилища, кроме "projects" (сам
     // проект не может быть next-действием для другого проекта)
     function getAvailableTasks(){
+      // новые сверху — тот же порядок (по createdAt, по убыванию), что и
+      // во всех остальных списках задач (см. getTasksForTab выше);
+      // getAllTasks() сам по себе отсортирован по t (времени последнего
+      // изменения, по возрастанию), и без пересортировки только что
+      // созданные/ещё не привязанные задачи оказывались бы в самом низу
+      // списка для привязки.
       return getAllTasks().filter(function(t){
         return t.c.checked !== true && t.c.tab !== "projects" && !t.c.nextForProjectId;
-      });
+      }).sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
     }
 
     // ---------- сверху всегда сам проект, ниже — либо привязанные к нему
@@ -11510,6 +11569,13 @@
     // явному запросу через кнопку-звено. ---------- */
     function render(){
       flushPendingTaskEdits();
+      // Полная пересборка ниже (container.innerHTML) сама по себе обнуляет
+      // scrollTop — сохраняем и возвращаем позицию при каждом render() после
+      // первого, иначе список "прыгает" в начало при любом действии (галочка
+      // "в архив", приоритет, перенос и т.п.) — тот же приём, что уже
+      // применён в renderTaskTabList/renderTaskArchiveTab (см.
+      // preservedScrollTop там).
+      var preservedScrollTop = isFirstRender ? null : container.scrollTop;
       var projectTask = getTaskById(projectId);
       // Название проекта — часть ПРОКРУЧИВАЕМОЙ области ниже (см.
       // container.innerHTML ниже: вставляется ПЕРВЫМ элементом внутри
@@ -11634,6 +11700,8 @@
         isFirstRender = false;
         if(resumeScrollTop) container.scrollTop = resumeScrollTop;
         saveProjectPickerResumeState(projectId, container.scrollTop);
+      } else if(preservedScrollTop != null){
+        container.scrollTop = preservedScrollTop;
       }
     }
 

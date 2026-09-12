@@ -2890,12 +2890,26 @@ window.initMdEditorModule = function(deps){
       // закладок-заметок — просто имя заметки, как и раньше.
       var nameEl = row.querySelector(".mdeditor-row-name");
       if(it.type === "book"){
+        // display:flex/column — гарантия того, что имя закладки и название
+        // книги стоят одно НАД другим (первая строка/вторая строка), а не
+        // рядом на одной строке, независимо от того, что зададут внешние
+        // .mdeditor-row-name-main/-sub в components.css (ТЗ пользователя,
+        // название книги должно быть именно второй строкой, ниже).
+        nameEl.style.display = "flex";
+        nameEl.style.flexDirection = "column";
         var mainSpan = document.createElement("span");
         mainSpan.className = "mdeditor-row-name-main";
         mainSpan.textContent = it.name || it.bookName;
         var subSpan = document.createElement("span");
         subSpan.className = "mdeditor-row-name-sub";
-        subSpan.textContent = it.bookName;
+        subSpan.style.fontSize = "0.85em";
+        subSpan.style.opacity = "0.7";
+        // availableLocally=false (my.js, getBookMarginBookmarksForList) —
+        // закладка синхронизирована, но файл книги на ЭТОМ устройстве ещё
+        // не скачан (реестр Firebase Storage синхронизирует байты отдельно
+        // и медленнее, чем саму запись закладки) — сообщаем об этом прямо в
+        // списке, не только по клику (см. openBookMarginBookmark в my.js).
+        subSpan.textContent = it.bookName + (it.availableLocally === false ? " — нет на этом устройстве" : "");
         nameEl.appendChild(mainSpan);
         nameEl.appendChild(subSpan);
       } else {
