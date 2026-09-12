@@ -7176,7 +7176,7 @@
         if(!name) return; // файла книги сейчас нет локально
         var data = getBookState(hash);
         data.bookmarks.forEach(function(b){
-          items.push({hash: hash, bookmarkId: b.id, position: b.position, addedAt: b.addedAt, bookName: name, name: b.name, isMain: !!b.isMain});
+          items.push({type: "book", hash: hash, bookmarkId: b.id, position: b.position, addedAt: b.addedAt, bookName: name, name: b.name, isMain: !!b.isMain});
         });
       });
       callback(items);
