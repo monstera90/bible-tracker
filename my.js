@@ -5119,6 +5119,83 @@
   // верхний край окна не "прыгает" при переключении вкладок. Если
   // содержимое вкладки не помещается, прокручивается #settingsTabContent
   // (без видимого индикатора прокрутки, см. CSS).
+
+  // ===================== ЗАПОМИНАНИЕ СКРОЛЛА ВКЛАДОК (ТЗ 12.09) =====================
+  // Общая функция для ЛЮБОЙ вкладки #settingsTabContent — тем же приёмом,
+  // что currentScrollPercent/persistDocStateNow/scheduleDocStateSave в
+  // mdeditor.js (там для одной открытой заметки, здесь — для вкладки
+  // целиком): ПРОЦЕНТ скролла (0..1), а не абсолютные пиксели, потому что
+  // высота содержимого между рендерами вкладки может отличаться (задача
+  // добавилась/удалилась и т.п.). В отличие от mdeditor.js, где сам
+  // скролл-контейнер (.cm-scroller) пересоздаётся при каждом открытии
+  // заметки и слушатель приходится вешать/снимать заново — здесь
+  // #settingsTabContent один и тот же DOM-узел на всё время жизни
+  // страницы (просто меняется innerHTML), поэтому слушатель достаточно
+  // повесить ОДИН раз при старте (initTabScrollTracking, вызывается в
+  // самом низу файла, см. "ЗАПУСК").
+  //
+  // Хранится в localStorage одним общим объектом {tab: percent} — тем же
+  // способом, что и остальные точечные scroll-позиции в этом файле
+  // (SUBTITLE_EXTRACT_SCROLL_KEY, PROJECT_PICKER_SCROLL_MAP_KEY), поэтому
+  // переживает полное закрытие приложения, а не только переключение
+  // вкладок внутри одной сессии.
+  //
+  // Подключена пока к двум местам, как просил пользователь: все вкладки
+  // задач (TASK_TAB_IDS, ниже) и список книг (set2s_7, только в режиме
+  // списка — см. renderSettingsTabBooks; сам экран чтения книги живёт по
+  // своей, более сложной схеме восстановления места, см. bookReaderState
+  // выше, её трогать не нужно). Остальные вкладки (mdeditor, поиск,
+  // забытые заметки и т.п.) уже либо имеют свою систему восстановления
+  // позиции, либо не нуждаются в ней — чтобы подключить сюда ещё
+  // какую-то вкладку, достаточно вызвать restoreTabScroll(tab) в нужном
+  // месте её рендера (см. пример ниже, в renderSettingsTabBooks) и
+  // добавить её ключ в TAB_SCROLL_AUTO_TABS.
+  var TAB_SCROLL_STATE_KEY = "tabScrollPercents_v1";
+  var tabScrollPercents = {}; // {tabKey: 0..1}, читается один раз при старте
+  (function loadTabScrollPercents(){
+    try{
+      var raw = localStorage.getItem(TAB_SCROLL_STATE_KEY);
+      if(raw) tabScrollPercents = JSON.parse(raw) || {};
+    }catch(e){}
+  })();
+  var tabScrollSaveTimer = null;
+  function scheduleTabScrollSave(){
+    if(tabScrollSaveTimer) clearTimeout(tabScrollSaveTimer);
+    tabScrollSaveTimer = setTimeout(function(){
+      tabScrollSaveTimer = null;
+      try{ localStorage.setItem(TAB_SCROLL_STATE_KEY, JSON.stringify(tabScrollPercents)); }catch(e){}
+    }, 500);
+  }
+  // Вкладки, для которых scrollTop не сбрасывается в 0 при переключении, а
+  // восстанавливается из tabScrollPercents (см. switchSettingsTab ниже).
+  var TAB_SCROLL_AUTO_TABS = Object.keys(TASK_TAB_IDS).concat(["set2s_7"]);
+  function initTabScrollTracking(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    container.addEventListener("scroll", function(){
+      var max = container.scrollHeight - container.clientHeight;
+      var pct = max > 0 ? Math.max(0, Math.min(1, container.scrollTop / max)) : 0;
+      tabScrollPercents[currentSettingsTab] = pct;
+      scheduleTabScrollSave();
+    }, { passive: true });
+  }
+  // Восстанавливает сохранённую позицию скролла вкладки. Для синхронно
+  // рендерящихся вкладок (все вкладки задач) достаточно вызвать сразу
+  // после рендера — читаем scrollHeight внутри requestAnimationFrame,
+  // чтобы браузер успел применить свежую разметку. Для АСИНХРОННО
+  // дорисовывающихся вкладок (например, список книг, читается из OPFS)
+  // этого недостаточно — там нужен отдельный вызов из места, где
+  // содержимое реально появилось в DOM (см. renderSettingsTabBooks).
+  function restoreTabScroll(tab){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var pct = tabScrollPercents[tab];
+    requestAnimationFrame(function(){
+      var max = container.scrollHeight - container.clientHeight;
+      container.scrollTop = (pct && max > 0) ? pct * max : 0;
+    });
+  }
+
   function switchSettingsTab(tab){
     // Реальное переключение вкладки внутри УЖЕ открытого окна настроек —
     // отдельный "экран" с точки зрения "назад" (см. window.AppNav выше),
@@ -5136,9 +5213,15 @@
     var isRealSwitch = settingsWasOpen && prevTab !== tab && !suppressNavPush;
 
     currentSettingsTab = tab;
-    // любое переключение вкладки (в т.ч. повторный клик по "Projects") —
-    // это и есть штатный выход с экрана "Все задачи проекта" (см.
-    // openTaskNextPicker ниже и activeProjectPickerRerender выше)
+    // "Отвязываем" ссылку на предыдущий рендер экрана "Все задачи проекта"
+    // от rerenderAllFromState (activeProjectPickerRerender выше) — она
+    // валидна только пока этот экран РЕАЛЬНО показан в #settingsTabContent.
+    // Если переключаемся именно на "projects" и есть запомненный проект
+    // (activeProjectPickerId, см. openTaskNextPicker/"Домик" ниже — ТЗ
+    // пользователя от 12.09, седьмой заход: "неудобно перезаходить"),
+    // openTaskNextPicker ниже сам перезапишет её актуальным render(); во
+    // всех остальных случаях (другая вкладка, список проектов через
+    // "Домик") экран действительно покидается — обнуляем.
     activeProjectPickerRerender = null;
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
@@ -5182,7 +5265,15 @@
       if(btn) btn.classList.toggle("active", tab === key);
     });
     var container = document.getElementById("settingsTabContent");
-    if(container) container.scrollTop = 0;
+    // Вкладки из TAB_SCROLL_AUTO_TABS (задачи + список книг) сами
+    // восстанавливают свою позицию скролла ниже, после рендера (см.
+    // restoreTabScroll) — им сбрасывать scrollTop сейчас не нужно, а для
+    // set2s_7 в режиме чтения книги (bookReaderState) это вообще сделал
+    // бы renderBookReader() по-своему чуть ниже. Для всех остальных
+    // вкладок поведение прежнее — сброс к началу перед их собственным
+    // рендером.
+    var isAutoScrollTab = TAB_SCROLL_AUTO_TABS.indexOf(tab) !== -1;
+    if(container && !isAutoScrollTab) container.scrollTop = 0;
     var addFab = document.getElementById("taskAddFab");
     var isCommentsTab = (tab === "extra2" && getCustomCommentsEnabled());
     var showTaskFab = TASK_MOVABLE_TABS.indexOf(tab) !== -1 || isCommentsTab;
@@ -5201,6 +5292,16 @@
     else if(tab === "import") renderSettingsTabImportPicker();
     else if(tab === "resetConfirm") renderSettingsTabResetConfirm();
     else if(tab === "moodResetConfirm") renderSettingsTabMoodResetConfirm();
+    // "Projects" — если внутри неё уже была открыта карточка конкретного
+    // проекта ("Все задачи проекта", см. openTaskNextPicker и
+    // activeProjectPickerId ниже) и её не закрывали явно кнопкой-домиком —
+    // повторный заход на вкладку возвращает именно её, а не список всех
+    // проектов заново (ТЗ пользователя от 12.09, седьмой заход, тот же
+    // принцип, что и у "Книг" ниже, set2s_7). activeProjectPickerId, в
+    // отличие от activeProjectPickerRerender выше, НЕ обнуляется при уходе
+    // с вкладки — переживает переключение на любые другие вкладки, как
+    // bookReaderState у книг.
+    else if(tab === "projects" && activeProjectPickerId) openTaskNextPicker(activeProjectPickerId, "projects");
     else if(TASK_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabTask(tab);
     else if(EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabExtra(tab);
     else if(tab === "set2b_1") renderSettingsTabWorkbooks();
@@ -5247,6 +5348,17 @@
     }
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
+
+    // Вкладки задач рендерятся синхронно (innerHTML уже собран строкой
+    // выше, к этому моменту готов) — восстанавливаем скролл сразу. Для
+    // set2s_7 (список книг) восстановление вызывается отдельно, из самого
+    // renderSettingsTabBooks, потому что список дорисовывается позже,
+    // асинхронно (см. там). "Projects" пропускается, если вместо списка
+    // сейчас открыта карточка проекта (activeProjectPickerId, см. выше) —
+    // там свой, отдельный скролл-контейнер #taskProjectArea (не
+    // #settingsTabContent), с собственной памятью позиции (см.
+    // openTaskNextPicker/getSavedProjectScrollTop).
+    if(TASK_TAB_IDS.hasOwnProperty(tab) && !(tab === "projects" && activeProjectPickerId)) restoreTabScroll(tab);
 
     if(isRealSwitch && window.AppNav){
       window.AppNav.push(function(){
@@ -6007,11 +6119,18 @@
     // как пустой экран (mdeditor-empty), и как список (mdeditor-list),
     // просто с разными классами — без пересоздания узла.
     var listEl = document.getElementById("booksList");
+    // Список — асинхронный (OPFS), поэтому высота #settingsTabContent
+    // известна только ПОСЛЕ того, как строки реально попали в DOM —
+    // восстанавливаем скролл списка (ТЗ 12.09, см. TAB_SCROLL_AUTO_TABS/
+    // restoreTabScroll выше) именно здесь, а не в switchSettingsTab, и во
+    // всех трёх исходах (список/пусто/ошибка), чтобы вкладка не оставалась
+    // в положении от прошлой вкладки, если что-то пошло не так.
     listBooksEntries().then(function(items){
       if(!document.getElementById("booksList")) return; // вкладку успели покинуть
       if(!items.length){
         listEl.className = "mdeditor-empty";
         listEl.textContent = "Книг пока нет.";
+        restoreTabScroll("set2s_7");
         return;
       }
       items.forEach(function(it){
@@ -6022,8 +6141,10 @@
         row.addEventListener("click", function(){ openBookReader(it.name); });
         listEl.appendChild(row);
       });
+      restoreTabScroll("set2s_7");
     }).catch(function(e){
       setBooksStatus("Не удалось прочитать список книг: " + (e && e.message ? e.message : e), true);
+      restoreTabScroll("set2s_7");
     });
 
     var input = document.getElementById("booksImportInput");
@@ -8143,6 +8264,14 @@
   // чтобы отличить этот экран от простого списка проектов (см. использование
   // в rerenderAllFromState и обнуление в switchSettingsTab).
   var activeProjectPickerRerender = null;
+  // id проекта, чья карточка "Все задачи проекта" открыта последней —
+  // тем же приёмом, что bookReaderState у книг (ТЗ пользователя от 12.09,
+  // седьмой заход): в отличие от activeProjectPickerRerender выше, ЭТА
+  // память переживает уход на любые другие вкладки (обнуляется только
+  // явным выходом через кнопку-домик на самом экране, см. openTaskNextPicker
+  // ниже) — именно она позволяет switchSettingsTab открыть по клику на
+  // "Projects" ту же карточку проекта, а не список всех проектов заново.
+  var activeProjectPickerId = null;
   // взводится ТОЛЬКО на время восстановления предыдущей вкладки функцией
   // из стека навигации (см. window.AppNav.push в switchSettingsTab ниже),
   // чтобы сам этот восстанавливающий вызов switchSettingsTab не породил
@@ -11743,6 +11872,16 @@
         // режима "attach" — общий класс .pressed (см. .mdeditor-fab-btn.
         // pressed в components.css), тот же приём, что и у кнопки "i" во
         // вкладке "Извлечение субтитров".
+        // "Домик" — назад к списку всех проектов (ТЗ пользователя от
+        // 12.09, седьмой заход): та же READER_HOME_ICON_SVG, что и у
+        // книг (см. bookReaderHomeBtn выше — своя копия контура домика,
+        // тем же приёмом, что и там, т.к. HOME_ICON_SVG самого
+        // mdeditor.js наружу не отдаётся). Позиционирование —
+        // .task-project-fab-home в modals.css (ЕЩЁ НЕ ДОБАВЛЕНО — нужны
+        // components.css/modals.css, чтобы поставить её рядом с
+        // .task-project-fab-link по месту, без них кнопка будет наложена
+        // на соседние).
+        '<button type="button" class="mdeditor-fab-btn task-project-fab-home" id="taskProjectHomeBtn" title="К списку проектов">' + READER_HOME_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn task-project-fab-link' + (mode === "attach" ? " pressed" : "") + '" id="taskProjectLinkFab" title="Прикрепить существующую задачу">' + LINK_NEXT_ICON_SVG + '</button>' +
         '<button type="button" class="task-add-fab visible" id="taskProjectCreateFab" title="Новая задача">+</button>';
 
@@ -11786,6 +11925,27 @@
           });
         });
       }
+
+      // "Домик" — реальный, осознанный выход к списку всех проектов (в
+      // отличие от простого переключения на другую вкладку и обратно —
+      // см. activeProjectPickerId выше, теперь ТОЛЬКО эта кнопка чистит
+      // память о том, какой проект был открыт). Действие ВПЕРЁД, тем же
+      // приёмом, что у "Домика" книг (bookReaderHomeBtn) и заметок
+      // (mdEditorHomeBtn) — само не откатывает историю, а добавляет свой
+      // шаг "назад" (снимок projectId), чтобы системное "назад" после
+      // клика вернуло именно в эту карточку проекта.
+      document.getElementById("taskProjectHomeBtn").addEventListener("click", function(){
+        flushPendingTaskEdits();
+        var snapshotId = projectId;
+        window.AppNav.push(function(){
+          activeProjectPickerId = snapshotId;
+          openTaskNextPicker(snapshotId, "projects");
+        });
+        activeProjectPickerId = null;
+        activeProjectPickerRerender = null;
+        clearProjectPickerResumeState();
+        renderTaskTabList("projects");
+      });
 
       document.getElementById("taskProjectLinkFab").addEventListener("click", function(){
         flushPendingTaskEdits();
@@ -12020,6 +12180,7 @@
     // (renderTaskTabList/renderTaskArchiveTab): защита от прыжка скролла —
     // guardTaskListScroll() в blur-обработчике (см. renderRowEdit выше), а
     // не то, что именно делает render() при пересборке.
+    activeProjectPickerId = projectId;
     activeProjectPickerRerender = render;
     render();
   }
@@ -12201,6 +12362,7 @@
   renderGoalsSection();
   renderAddGoalMenu();
   refreshSettingsTabsVisibility();
+  initTabScrollTracking();
   setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); checkHourBoundaries(); refreshYearGridIfOpen(); }, 30 * 60 * 1000);
   checkUpdateSnoozeExpiry();
 
