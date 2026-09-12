@@ -6505,6 +6505,27 @@
   function renderBookReader(){
     var container = document.getElementById("settingsTabContent");
     if(!container || !bookReaderState) return;
+    // Запоминаем позицию ТОГО, что сейчас реально показано в контейнере,
+    // ПЕРЕД любой перерисовкой — не только при смене режима текст<->главы
+    // (см. switchBookReaderMode ниже, она это уже делала для своего
+    // случая), но и при обычном возврате на вкладку «Книги» после ухода
+    // на другую вкладку настроек (ТЗ пользователя от 12.09, восьмой
+    // заход: "всегда оказываюсь в самом начале книги, если возвращаюсь на
+    // вкладку"). Раньше bookReaderState.restorePosition срабатывал РОВНО
+    // ОДИН РАЗ — сразу после openBookReader — а откат при его отсутствии
+    // (container.scrollTop = bookReaderState.textScrollTop || 0, см.
+    // renderBookReaderText) видел textScrollTop, обновляемый только
+    // switchBookReaderMode, то есть 0 при любом ДРУГОМ поводе для
+    // рендера. Определяем режим ПО СОДЕРЖИМОМУ контейнера (а не по
+    // bookReaderState.mode — он к этому моменту уже мог смениться на
+    // целевой, см. switchBookReaderMode), поэтому здесь не путаемся с её
+    // собственным сохранением prevMode.
+    if(container.querySelector(".book-reader-p, .book-reader-image-wrap")){
+      var prevPos = currentBookReaderPosition(container);
+      if(prevPos) bookReaderState.restorePosition = prevPos;
+    } else if(container.querySelector("#bookChaptersList")){
+      bookReaderState.chaptersScrollTop = container.scrollTop;
+    }
     // Флашим/снимаем слушатель ДО перерисовки — на момент вызова
     // innerHTML контейнера ещё старый (см. currentBookReaderPosition
     // выше), поэтому debounce-сохранение здесь ловит последнюю позицию
