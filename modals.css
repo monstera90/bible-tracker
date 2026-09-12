@@ -967,6 +967,20 @@
   .task-text-view{
     word-break:break-word;
   }
+  /* Ограничение длинной задачи по высоте (ТЗ пользователя от 12.09) — не
+     более TASK_CLAMP_LINES строк (см. my.js), дальше текст обрезается
+     визуально, а показать его целиком можно значком-шевроном
+     (.task-expand-btn, первый в .task-actions, см. renderTaskRowView/
+     updateTaskExpandBtn в my.js). Класс добавляется в JS только пока
+     задача НЕ развёрнута — сам чек "обрезалось ли реально" тоже там же
+     (scrollHeight > clientHeight), здесь только сама обрезка. */
+  .task-text-view.task-text-clamped{
+    display:-webkit-box;
+    -webkit-box-orient:vertical;
+    -webkit-line-clamp:7;
+    line-clamp:7;
+    overflow:hidden;
+  }
   /* группа кнопок (карандаш/галочка/стрелочка/next/приоритет) —
      top/right выставляются в JS (см. fitTaskActions в my.js), здесь
      только сама "коробка" и внутреннее выравнивание. */
@@ -999,6 +1013,12 @@
     -webkit-tap-highlight-color:transparent;
   }
   .task-icon-btn svg{ width:15px; height:15px; }
+  /* значок-шеврон "показать полностью" (.task-expand-btn) — тот же
+     .task-icon-btn, что и остальные кнопки строки задачи, только сам
+     переворачивается на 180° в развёрнутом состоянии (класс .is-expanded
+     ставит updateTaskExpandBtn в my.js) вместо отдельной иконки "свернуть" */
+  .task-expand-btn svg{ transition:transform .15s ease; }
+  .task-expand-btn.is-expanded svg{ transform:rotate(180deg); }
   .task-editable{
     outline:none;
     white-space:pre-wrap;

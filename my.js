@@ -1214,6 +1214,11 @@
   // "Скопировать субтитры" вкладки "Извлечение субтитров" (см.
   // renderSettingsTabSubtitleExtract ниже)
   var COPY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="13" rx="1.5"></rect><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h3"></path></svg>';
+  // шеврон "вниз" — кнопка "показать полностью"/"свернуть" у длинных
+  // задач (.task-expand-btn, см. renderTaskRowView), при развороте
+  // переворачивается на 180° через CSS-класс .is-expanded (.task-expand-btn
+  // в modals.css), отдельной иконки для свёрнутого состояния не нужно
+  var CHEVRON_DOWN_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>';
   // пиктограмма "i" в кружке — общая для всего проекта (кнопка
   // "Информация" вкладки "Извлечение субтитров", см. renderSettingsTab-
   // SubtitleExtract ниже; задумана как переиспользуемая и в других
@@ -5172,7 +5177,16 @@
     // books/ (OPFS), тем же способом вынесена ДО общей проверки на
     // renderSettingsTabSet2Stub, что и остальные уже не-заглушки этого
     // набора выше — см. renderSettingsTabBooks ниже.
-    else if(tab === "set2s_7") renderSettingsTabBooks();
+    // Возврат на вкладку "Книги" после ухода на другую вкладку настроек
+    // (ТЗ пользователя от 12.09) — если книга уже была открыта (bookReaderState
+    // не сброшен, память ридера жива), показываем именно её и тот же режим
+    // (текст/главы), а не список книг заново; bookReaderState сбрасывается в
+    // null только при реальном выходе из книги (см. "Домик"/AppNav-колбэк в
+    // openBookReader выше), переключение вкладок его не трогает.
+    else if(tab === "set2s_7"){
+      if(bookReaderState) renderBookReader();
+      else renderSettingsTabBooks();
+    }
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
 
@@ -5722,19 +5736,26 @@
     data.position = position;
     saveBookState(hash, data);
   }
-  function addBookBookmark(hash, position){
+  function addBookBookmark(hash, position, name, isMain){
     var data = getOrCreateBookState(hash);
-    var rec = {id: genBookRecordId(), position: position, addedAt: Date.now()};
+    var rec = {id: genBookRecordId(), position: position, addedAt: Date.now(), name: name || "", isMain: !!isMain};
     data.bookmarks.push(rec);
     saveBookState(hash, data);
     return rec.id;
   }
-  // Снятие закладки на полях (READER_PLAN.md, Этап D, шаг 15, 11.09) — в
-  // отличие от подчёркиваний (никогда не удаляются, см. комментарий у c
-  // выше) закладки можно свободно убирать: повторное долгое нажатие на уже
-  // отмеченный абзац в ридере (см. toggleBookReaderMarginBookmark ниже) или
-  // клик по активной пиктограмме закладки в общей вкладке "Закладки" (см.
-  // deps.removeBookMarginBookmark, передаётся в mdeditor.js).
+  // Основная закладка книги (пиктограмма-корона в общем списке "Закладки",
+  // см. saveBookReaderBookmark ниже) — максимум одна на книгу; при выборе
+  // "обновить основную" старая удаляется, прежде чем добавить новую.
+  function getMainBookBookmark(hash){
+    var data = getBookState(hash);
+    if(!data || !data.bookmarks) return null;
+    return data.bookmarks.filter(function(b){ return b.isMain; })[0] || null;
+  }
+  // Снятие закладки (READER_PLAN.md, Этап D, шаг 15; переработано 12.09) —
+  // в отличие от подчёркиваний (никогда не удаляются, см. комментарий у c
+  // выше) закладки можно свободно убирать: клик по активной пиктограмме
+  // закладки в общей вкладке "Закладки" (см. deps.removeBookMarginBookmark,
+  // передаётся в mdeditor.js).
   function removeBookBookmark(hash, bookmarkId){
     var data = getOrCreateBookState(hash);
     data.bookmarks = data.bookmarks.filter(function(b){ return b.id !== bookmarkId; });
@@ -6097,6 +6118,12 @@
       '<path d="M12 3c2.5 2.5 2.5 15.5 0 18"></path>' +
       '<path d="M12 3c-2.5 2.5-2.5 15.5 0 18"></path>' +
     '</svg>';
+  // Закладка (ТЗ от 12.09) — кнопка в нижнем ряду, см.
+  // saveBookReaderBookmark/bookReaderFabRowHtml.
+  var READER_BOOKMARK_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M6 3h12v18l-6-4-6 4V3z"></path>' +
+    '</svg>';
   // Кнопка-кнопка "прикрепить иллюстрацию к заметке книги" (READER_PLAN.md,
   // Этап D, шаг 14, 11.09) — канцелярская кнопка, которой прикалывают лист:
   // головка (кружок) + игла вниз. Бесцветная в обычном состоянии; класс
@@ -6313,6 +6340,7 @@
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontSizeBtn" title="Размер шрифта">Аа</button>' +
         '</span>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderSelectBtn" title="Выделить текст">' + READER_SELECT_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="bookReaderBookmarkBtn" title="Сохранить закладку">' + READER_BOOKMARK_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderChaptersBtn" title="' + (chaptersMode ? "К тексту" : "Главы") + '">' +
           (chaptersMode ? READER_TEXT_ICON_SVG : READER_CHAPTERS_ICON_SVG) +
         '</button>' +
@@ -6358,6 +6386,9 @@
         if(!bookReaderSelectionArmed && window.getSelection) window.getSelection().removeAllRanges();
       });
     }
+
+    var bookmarkBtn = document.getElementById("bookReaderBookmarkBtn");
+    if(bookmarkBtn) bookmarkBtn.addEventListener("click", saveBookReaderBookmark);
 
     var chaptersBtn = document.getElementById("bookReaderChaptersBtn");
     if(chaptersBtn){
@@ -6429,11 +6460,12 @@
           // индекс блока внутри ch.blocks — стабилен независимо от типа
           // соседних блоков, т.к. это просто позиция в исходном массиве).
           var ranges = getBookUnderlineRangesForBlock(bookReaderState.hash, idx, bi);
-          // Закладка на полях (шаг 15) — класс .book-reader-p-bookmarked
-          // (components.css) даёт левую полоску-акцент на весь абзац,
-          // визуально "закладку на полях"; сам класс переключается точечно
-          // после долгого нажатия (см. toggleBookReaderMarginBookmark ниже)
-          // без перерисовки всего ридера, здесь — только начальный рендер.
+          // Закладка (шаг 15; переработано 12.09) — класс
+          // .book-reader-p-bookmarked (components.css) даёт левую
+          // полоску-акцент на абзац, на котором стоит закладка; закладки
+          // теперь добавляются только кнопкой в нижнем ряду (см.
+          // saveBookReaderBookmark выше), сюда просто читаются заново при
+          // каждом рендере текста.
           var isBookmarked = !!getBookBookmarkForBlock(bookReaderState.hash, idx, bi);
           html += '<p class="book-reader-p' + (isBookmarked ? ' book-reader-p-bookmarked' : '') +
             '" id="bookP_' + idx + '_' + bi + '" data-ch="' + idx + '" data-blk="' + bi + '">' +
@@ -6470,7 +6502,6 @@
     bindBookReaderFabRow();
     bindBookReaderSelectionOnce();
     bindBookReaderImages();
-    bindBookReaderBookmarkLongPress();
     bindBookReaderUnderlineClicks();
   }
 
@@ -6738,6 +6769,112 @@
     });
   }
 
+  // ===================== ЗАКЛАДКА ЧЕРЕЗ КНОПКУ В НИЖНЕМ РЯДУ (ТЗ
+  // пользователя от 12.09, заменяет прежние закладки на полях по долгому
+  // нажатию) =====================
+  // Тот же приём разметки, что и у openBookUnderlineNameDialog выше
+  // (mdeditor-cleanup-overlay/-card/-title/-input/-actions).
+  function openBookBookmarkNameDialog(onSubmit){
+    if(!settingsModalBox) return;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title">Название закладки</div>' +
+      '<input type="text" class="mdeditor-cleanup-input" id="bookBookmarkNameInput">' +
+      '<div class="mdeditor-cleanup-actions">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="bookBookmarkNameCancel">Отмена</button>' +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="bookBookmarkNameSave">Сохранить</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    settingsModalBox.appendChild(overlay);
+
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+
+    var input = document.getElementById("bookBookmarkNameInput");
+    input.focus();
+
+    function submit(){
+      var name = (input.value || "").trim();
+      if(!name) return;
+      onSubmit(name);
+      close();
+    }
+    document.getElementById("bookBookmarkNameCancel").addEventListener("click", close);
+    document.getElementById("bookBookmarkNameSave").addEventListener("click", submit);
+    document.getElementById("bookBookmarkNameSave").addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+    input.addEventListener("keydown", function(ev){
+      if(ev.key === "Enter"){ ev.preventDefault(); submit(); }
+      else if(ev.key === "Escape"){ ev.preventDefault(); close(); }
+    });
+  }
+
+  // Спрашивается только если у книги уже есть основная закладка (см.
+  // getMainBookBookmark выше) — "Да" удаляет старую основную и новая
+  // закладка займёт её место (пиктограмма-корона), "Нет" добавляет новую
+  // как обычную (без короны), рядом со старой основной.
+  function openBookBookmarkUpdateMainConfirm(onYes, onNo){
+    if(!settingsModalBox) return;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title">Обновить основную закладку? Старая основная закладка будет удалена, а эта станет основной.</div>' +
+      '<div class="mdeditor-cleanup-actions">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="bookBookmarkMainNo">Нет, добавить обычной</button>' +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="bookBookmarkMainYes">Да, обновить</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    settingsModalBox.appendChild(overlay);
+
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+    document.getElementById("bookBookmarkMainNo").addEventListener("click", function(){ close(); onNo(); });
+    document.getElementById("bookBookmarkMainYes").addEventListener("click", function(){ close(); onYes(); });
+  }
+
+  // Точка входа — кнопка "закладка" в нижнем ряду ридера (см.
+  // bookReaderFabRowHtml/bindBookReaderFabRow ниже). Позиция — ТЕКУЩЕЕ
+  // место чтения (currentBookReaderPosition, тот же приём, что и
+  // запоминание позиции при прокрутке, см. выше), а не абзац под пальцем —
+  // в отличие от прежних закладок на полях, это не привязано к тому, где
+  // именно на экране находится курсор/палец.
+  function saveBookReaderBookmark(){
+    if(!bookReaderState) return;
+    var container = document.getElementById("settingsTabContent");
+    var pos = container ? currentBookReaderPosition(container) : null;
+    if(!pos){
+      var status0 = document.getElementById("bookReaderStatus");
+      if(status0) status0.textContent = "Закладку можно сохранить только в режиме чтения текста.";
+      return;
+    }
+    var hash = bookReaderState.hash;
+    function finish(name, isMain){
+      if(isMain){
+        var oldMain = getMainBookBookmark(hash);
+        if(oldMain) removeBookBookmark(hash, oldMain.id);
+      }
+      addBookBookmark(hash, pos, name, isMain);
+      var status = document.getElementById("bookReaderStatus");
+      if(status) status.textContent = "Закладка «" + name + "» сохранена — см. вкладку «Закладки».";
+      if(navigator.vibrate){ try{ navigator.vibrate(15); }catch(e){} }
+    }
+    var existingMain = getMainBookBookmark(hash);
+    if(!existingMain){
+      // Первая закладка книги — становится основной автоматически, без
+      // лишнего вопроса пользователю.
+      openBookBookmarkNameDialog(function(name){ finish(name, true); });
+    } else {
+      openBookBookmarkUpdateMainConfirm(
+        function(){ openBookBookmarkNameDialog(function(name){ finish(name, true); }); },
+        function(){ openBookBookmarkNameDialog(function(name){ finish(name, false); }); }
+      );
+    }
+  }
+
   // Снимает взвод кнопки "Выделение" (шаг 13, доработка 11.09) — вызывается
   // после того, как выделение реально израсходовано (подчёркивание добавлено
   // или место уже было подчёркнуто раньше), чтобы для следующего
@@ -6998,83 +7135,19 @@
     addUnderlineFromSelection(pos.ch, pos.blk, pos.s, pos.e, text);
   }
 
-  // ===================== ЗАКЛАДКИ НА ПОЛЯХ (READER_PLAN.md, Этап D, шаг 15,
-  // 11.09) =====================
-  // Долгое нажатие на абзац (Pointer Events — единый обработчик для мыши и
-  // тача, в отличие от подчёркивания шага 13 выше, для закладки НЕ нужно
-  // взводить отдельную кнопку) добавляет/снимает закладку на полях этого
-  // абзаца — toggle, в отличие от подчёркиваний (те никогда не удаляются,
-  // см. комментарий у модели книги выше). position закладки — просто
-  // {ch, blk}, весь абзац целиком (в отличие от подчёркиваний с их s/e).
-  //
-  // Долгое нажатие определяется таймером (BOOK_BOOKMARK_LONGPRESS_MS) —
-  // если за это время указатель ушёл дальше BOOK_BOOKMARK_MOVE_TOLERANCE px
-  // (например, пользователь начал скроллить, а не держит абзац) — таймер
-  // отменяется, обычный скролл не мешаем. Обработчики навешиваются заново
-  // после каждого рендера текста (innerHTML пересоздаёт узлы), тем же
-  // приёмом, что и bindBookReaderImages выше.
-  var BOOK_BOOKMARK_LONGPRESS_MS = 550;
-  var BOOK_BOOKMARK_MOVE_TOLERANCE = 10;
-  function bindBookReaderBookmarkLongPress(){
-    var container = document.getElementById("settingsTabContent");
-    if(!container || !bookReaderState) return;
-    var ps = container.querySelectorAll(".book-reader-p");
-    for(var i = 0; i < ps.length; i++){
-      (function(pEl){
-        var timer = null, startX = 0, startY = 0, firedLongPress = false;
-        function clearTimer(){ if(timer){ clearTimeout(timer); timer = null; } }
-        pEl.addEventListener("pointerdown", function(ev){
-          if(ev.pointerType === "mouse" && ev.button !== 0) return; // только левая кнопка мыши; тач/перо — как есть
-          firedLongPress = false;
-          startX = ev.clientX; startY = ev.clientY;
-          clearTimer();
-          timer = setTimeout(function(){
-            timer = null;
-            firedLongPress = true;
-            var ch = parseInt(pEl.getAttribute("data-ch"), 10);
-            var blk = parseInt(pEl.getAttribute("data-blk"), 10);
-            toggleBookReaderMarginBookmark(ch, blk, pEl);
-          }, BOOK_BOOKMARK_LONGPRESS_MS);
-        });
-        pEl.addEventListener("pointermove", function(ev){
-          if(!timer) return;
-          if(Math.abs(ev.clientX - startX) > BOOK_BOOKMARK_MOVE_TOLERANCE || Math.abs(ev.clientY - startY) > BOOK_BOOKMARK_MOVE_TOLERANCE){
-            clearTimer();
-          }
-        });
-        pEl.addEventListener("pointerup", clearTimer);
-        pEl.addEventListener("pointercancel", clearTimer);
-        pEl.addEventListener("pointerleave", clearTimer);
-        // На части тач-браузеров долгое нажатие само по себе открывает
-        // системное контекстное меню (выделение/копирование) — глушим его
-        // только когда наше долгое нажатие реально сработало, чтобы не
-        // трогать обычное поведение коротких нажатий/тапов.
-        pEl.addEventListener("contextmenu", function(ev){
-          if(firedLongPress){ ev.preventDefault(); firedLongPress = false; }
-        });
-      })(ps[i]);
-    }
-  }
+  // ===================== ЗАКЛАДКИ КНИГИ (READER_PLAN.md, Этап D, шаг 15,
+  // 11.09; переработано — кнопка вместо долгого нажатия) =====================
+  // Закладка сохраняет ТЕКУЩЕЕ место чтения (тот же {ch, blk}, что и
+  // запоминание позиции — см. currentBookReaderPosition выше) по нажатию на
+  // кнопку в нижнем ряду (см. saveBookReaderBookmark ниже), а не долгим
+  // нажатием на конкретный абзац — прежний вариант с долгим нажатием
+  // признан неинтуитивным и убран целиком (11.09). У каждой книги может
+  // быть одна ОСНОВНАЯ закладка (isMain, пиктограмма-корона в общем списке
+  // "Закладки") и любое число обычных — пользователь сам решает, обновлять
+  // ли основную при сохранении новой (см. openBookBookmarkUpdateMainConfirm
+  // ниже) или добавить рядом. Диалог имени — openBookBookmarkNameDialog.
 
-  // Точечно переключает класс .book-reader-p-bookmarked на уже
-  // отрисованном абзаце — без перерисовки всего ридера (та же причина, что
-  // у refreshBookReaderParagraphHighlight выше: не сбрасывать scrollTop).
-  function toggleBookReaderMarginBookmark(ch, blk, pEl){
-    if(!bookReaderState) return;
-    var hash = bookReaderState.hash;
-    var existing = getBookBookmarkForBlock(hash, ch, blk);
-    if(existing){
-      removeBookBookmark(hash, existing.id);
-    } else {
-      addBookBookmark(hash, {ch: ch, blk: blk});
-    }
-    if(pEl) pEl.classList.toggle("book-reader-p-bookmarked", !existing);
-    var status = document.getElementById("bookReaderStatus");
-    if(status) status.textContent = existing ? "Закладка на полях снята." : "Добавлена закладка на полях — см. вкладку «Закладки».";
-    if(navigator.vibrate){ try{ navigator.vibrate(15); }catch(e){} }
-  }
-
-  // Плоский список ВСЕХ книжных закладок на полях по всем книгам сразу —
+  // Плоский список ВСЕХ книжных закладок по всем книгам сразу —
   // для объединённого экрана "Закладки" в mdeditor.js (см.
   // deps.getBookMarginBookmarks/renderBookmarksScreen там же). Имя книги
   // разрешается через манифест дедупликации (loadBooksManifest) по хэшу —
@@ -7084,7 +7157,7 @@
   // подтянулась через реестр — см. syncFilesRegistry выше), тихо
   // пропускается — та же логика, что и у закладок-заметок на
   // несуществующий локально файл (см. MD_BOOKMARK_PREFIX выше).
-  // callback(items), items: [{hash, bookmarkId, position, addedAt, bookName}]
+  // callback(items), items: [{hash, bookmarkId, position, addedAt, bookName, name, isMain}]
   function getBookMarginBookmarksForList(callback){
     var hashes = [];
     Object.keys(state).forEach(function(k){
@@ -7103,7 +7176,7 @@
         if(!name) return; // файла книги сейчас нет локально
         var data = getBookState(hash);
         data.bookmarks.forEach(function(b){
-          items.push({hash: hash, bookmarkId: b.id, position: b.position, addedAt: b.addedAt, bookName: name});
+          items.push({hash: hash, bookmarkId: b.id, position: b.position, addedAt: b.addedAt, bookName: name, name: b.name, isMain: !!b.isMain});
         });
       });
       callback(items);
@@ -10497,6 +10570,12 @@
   // включена — тот же визуальный язык (контур, currentColor), что и у
   // остальных пиктограмм вкладок.
   var COMMENT_TAB_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H8l-4 4V5z"></path><path d="M8 10h8"></path><path d="M8 13h5"></path></svg>';
+  // Обрезка по строкам + шеврон "показать полностью" — тот же приём, что
+  // у обычных задач (см. TASK_CLAMP_LINES/expandedTaskIds ниже в разделе
+  // "ВКЛАДКИ ЗАДАЧ: ОТРИСОВКА"), но у комментариев своя карта развёрнутых
+  // id — id-пространство комментариев отдельное от задач, использовать
+  // ту же карту было бы неверно.
+  var expandedCommentIds = {};
   var REVIEW_TAB_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19V10"></path><path d="M12 19V5"></path><path d="M19 19v-7"></path></svg>';
   var CROSS_SMALL_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>';
 
@@ -10567,17 +10646,28 @@
     var comment = getCommentById(id);
     if(!body || !comment) return;
     var textHtml = comment.c.text ? linkifyHtml(comment.c.text) : '<span class="task-text-placeholder">Новый комментарий</span>';
+    // Развёрнутые комментарии (expandedCommentIds) рисуются без обрезки —
+    // та же логика, что у renderTaskRowView (см. isExpanded там).
+    var isExpanded = !!expandedCommentIds[id];
     body.innerHTML =
-      '<span class="task-text-view">' + textHtml + '</span>' +
+      '<span class="task-text-view' + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
       '<span class="task-actions">' +
+        '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn comment-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn comment-delete-btn" title="Удалить">' + CROSS_SMALL_ICON_SVG + '</button>' +
       '</span>';
+    body.querySelector(".task-expand-btn").addEventListener("click", function(e){
+      e.stopPropagation();
+      if(expandedCommentIds[id]) delete expandedCommentIds[id];
+      else expandedCommentIds[id] = true;
+      renderCommentRowView(id);
+    });
     body.querySelector(".comment-edit-btn").addEventListener("click", function(){ renderCommentRowEdit(id); });
     body.querySelector(".comment-delete-btn").addEventListener("click", function(){
       deleteCommentPermanently(id);
       renderCommentsTab();
     });
+    updateTaskExpandBtn(body, id, expandedCommentIds);
     fitTaskActions(body);
   }
 
@@ -10884,6 +10974,16 @@
   // областью не меняется, а оно менялось — здесь вместо этого держим
   // строку-якорь на том же визуальном месте на экране, чем бы ни было
   // вызвано изменение списка.
+  // Задачи длиннее TASK_CLAMP_LINES строк обрезаются по высоте
+  // (.task-text-clamped, line-clamp в modals.css) — значок-шеврон в группе
+  // .task-actions (см. renderTaskRowView/updateTaskExpandBtn) разворачивает
+  // текст полностью. Какие задачи сейчас развёрнуты — держим только в
+  // памяти на время открытой вкладки, не сохраняем (как и режим
+  // редактирования строки): при переключении вкладки/перезапуске список
+  // просто снова начинает свёрнутым.
+  var expandedTaskIds = {};
+  var TASK_CLAMP_LINES = 7;
+
   function renderTaskTabList(tabKey, anchorTaskId){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -10985,6 +11085,21 @@
     var actions = body.querySelector(".task-actions");
     var textEl = body.querySelector(".task-text-view") || body.querySelector(".task-editable");
     if(!actions || !textEl) return;
+    // Текст, обрезанный по TASK_CLAMP_LINES строкам (.task-text-clamped) и
+    // реально не помещающийся (scrollHeight > clientHeight) — line-clamp
+    // только визуально прячет лишние строки, сама раскладка текста внутри
+    // происходит как обычно, так что Range.getClientRects() у textEl ниже
+    // всё равно вернул бы координаты СКРЫТЫХ строк далеко за пределами
+    // видимой (обрезанной) области. Поэтому здесь, как и в ветке "не
+    // влезло" ниже, кнопки безусловно уводим под текст, но опираемся на
+    // clientHeight текста (видимую, обрезанную высоту), а не на измерение
+    // последней строки.
+    if(textEl.classList.contains("task-text-clamped") && textEl.scrollHeight > textEl.clientHeight + 1){
+      var actionsHeightClamped = actions.offsetHeight;
+      actions.style.top = (textEl.clientHeight + 4) + "px";
+      body.style.paddingBottom = (actionsHeightClamped + 4) + "px";
+      return;
+    }
     var lastRect = getLastLineRect(textEl);
     var bodyRect = body.getBoundingClientRect();
     if(!lastRect || !bodyRect.width){
@@ -11030,7 +11145,22 @@
   // ничего не найдёт, безвредно.
   function refitAllVisibleTaskBodies(){
     var bodies = document.querySelectorAll(".task-body");
-    for(var i = 0; i < bodies.length; i++) fitTaskActions(bodies[i]);
+    for(var i = 0; i < bodies.length; i++){
+      var body = bodies[i];
+      // ширина строки могла измениться (ресайз/смена размера шрифта) — а
+      // значит и то, сколько строк текста реально влезает в те же
+      // TASK_CLAMP_LINES строк, поэтому видимость значка-шеврона нужно
+      // пересчитать заново, до подгонки кнопок под (возможно новую)
+      // видимую высоту текста. Комментарии (#commentListWrap) держат своё
+      // развёрнутое состояние в отдельной карте (expandedCommentIds) —
+      // те же id, что у задач, не пересекаются по смыслу.
+      var id = body.getAttribute("data-id");
+      if(id){
+        var expandedMap = body.closest("#commentListWrap") ? expandedCommentIds : expandedTaskIds;
+        updateTaskExpandBtn(body, id, expandedMap);
+      }
+      fitTaskActions(body);
+    }
   }
   window.addEventListener("resize", refitAllVisibleTaskBodies);
 
@@ -11074,9 +11204,15 @@
     var placeholder = isProjectsTab ? "Новый проект" : "Новая задача";
     var textHtml = task.c.text ? linkifyHtml(task.c.text) : '<span class="task-text-placeholder">' + placeholder + '</span>';
     var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
+    // Развёрнутые задачи (expandedTaskIds) рисуются без обрезки — иначе
+    // нельзя ни прочитать текст целиком, ни (что важнее) корректно
+    // определить через scrollHeight/clientHeight, что обрезка больше не
+    // нужна, когда задачу укоротили редактированием (см. updateTaskExpandBtn).
+    var isExpanded = !!expandedTaskIds[id];
     body.innerHTML =
-      '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + '">' + textHtml + '</span>' +
+      '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
       '<span class="task-actions">' +
+        '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
@@ -11086,7 +11222,34 @@
       '</span>';
     body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderTaskRowEdit(id, tabKey, onAfterAction); });
     bindTaskRowActions(body, id, tabKey, onAfterAction);
+    updateTaskExpandBtn(body, id);
     fitTaskActions(body);
+  }
+
+  // Значок-шеврон "показать полностью"/"свернуть" — первый в группе
+  // .task-actions, виден только когда текст задачи реально не помещается в
+  // TASK_CLAMP_LINES строк. Обрезку можно проверить только после того, как
+  // браузер уже отрисовал строку (scrollHeight/clientHeight), поэтому в
+  // разметке выше кнопка сразу рисуется скрытой (style="display:none"), а
+  // видимость и подпись выставляет эта функция — вызывается из
+  // renderTaskRowView сразу после отрисовки и из refitAllVisibleTaskBodies
+  // при ресайзе/смене размера шрифта (см. TASK_CLAMP_LINES выше), в обоих
+  // случаях ДО fitTaskActions, чтобы тот уже мерил строку с учётом
+  // добавленной/убранной кнопки.
+  function updateTaskExpandBtn(body, id, expandedMap){
+    expandedMap = expandedMap || expandedTaskIds;
+    var btn = body.querySelector(".task-expand-btn");
+    var textEl = body.querySelector(".task-text-view");
+    if(!btn || !textEl) return;
+    var isExpanded = !!expandedMap[id];
+    var overflowing = textEl.classList.contains("task-text-clamped") && textEl.scrollHeight > textEl.clientHeight + 1;
+    if(!overflowing && !isExpanded){
+      btn.style.display = "none";
+      return;
+    }
+    btn.style.display = "";
+    btn.classList.toggle("is-expanded", isExpanded);
+    btn.title = isExpanded ? "Свернуть" : "Показать полностью";
   }
 
   // кнопки переноса/архивации/next-привязки/приоритета — общие для
@@ -11098,6 +11261,19 @@
   function bindTaskRowActions(body, id, tabKey, onAfterAction){
     var task = getTaskById(id);
     if(!task) return;
+    // шеврон "показать полностью"/"свернуть" (см. renderTaskRowView/
+    // updateTaskExpandBtn) — просто переключает expandedTaskIds и
+    // перерисовывает СВОЮ же строку; никакого влияния на остальной список
+    // (в отличие от done/move/flag) — полная пересборка тут не нужна
+    var expandBtn = body.querySelector(".task-expand-btn");
+    if(expandBtn){
+      expandBtn.addEventListener("click", function(e){
+        e.stopPropagation();
+        if(expandedTaskIds[id]) delete expandedTaskIds[id];
+        else expandedTaskIds[id] = true;
+        renderTaskRowView(id, tabKey, onAfterAction);
+      });
+    }
     // галочка "в архив" — делает ровно то же, что раньше делала отметка
     // чекбокса (снять её обратно можно только извлечением из архива)
     var doneBtn = body.querySelector(".task-done-btn");
@@ -11472,17 +11648,30 @@
       if(!body || !task) return;
       var textHtml = task.c.text ? linkifyHtml(task.c.text) : '<span class="task-text-placeholder">Новая задача</span>';
       var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
+      // Обрезка по строкам + шеврон "показать полностью" — та же карта
+      // expandedTaskIds, что и в обычных вкладках задач (см.
+      // renderTaskRowView): это те же самые задачи, тот же id, так что
+      // развёрнутость здесь и там — одно и то же состояние.
+      var isExpanded = !!expandedTaskIds[id];
       body.innerHTML =
-        '<span class="task-text-view">' + textHtml + '</span>' +
+        '<span class="task-text-view' + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
         '<span class="task-actions">' +
+          '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
         '</span>';
+      body.querySelector(".task-expand-btn").addEventListener("click", function(e){
+        e.stopPropagation();
+        if(expandedTaskIds[id]) delete expandedTaskIds[id];
+        else expandedTaskIds[id] = true;
+        renderRowView(id);
+      });
       body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderRowEdit(id); });
       bindRowActions(body, id);
+      updateTaskExpandBtn(body, id);
       fitTaskActions(body);
     }
 
@@ -11654,12 +11843,19 @@
     var preservedScrollTop = container.scrollTop;
     var all = getArchivedTasksAll();
     var shown = all.slice(0, TASK_ARCHIVE_MAX_SHOWN);
+    // Обрезка по строкам + шеврон "показать полностью" — тот же приём и та
+    // же карта expandedTaskIds, что у невыполненных задач (см. раздел
+    // "ВКЛАДКИ ЗАДАЧ: ОТРИСОВКА" выше): архивная запись — та же самая
+    // задача, тот же id, так что развёрнутость логично не сбрасывается
+    // при архивации/извлечении.
     var rowsHtml = shown.map(function(t){
       var label = t.c.text ? escapeHtml(t.c.text) : "Без названия";
+      var isExpanded = !!expandedTaskIds[t.id];
       return '<div class="task-row" data-id="' + t.id + '">' +
         '<div class="task-body task-archive-body" data-id="' + t.id + '">' +
-          '<span class="task-text-view task-archive-text">' + label + '</span>' +
+          '<span class="task-text-view task-archive-text' + (isExpanded ? '' : ' task-text-clamped') + '">' + label + '</span>' +
           '<span class="task-actions">' +
+            '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
             '<button type="button" class="task-icon-btn task-restore-btn" data-id="' + t.id + '" title="Извлечь из архива">' + RESTORE_ICON_SVG + '</button>' +
             '<button type="button" class="task-icon-btn task-delete-btn" data-id="' + t.id + '" title="Удалить навсегда">' + DELETE_ICON_SVG + '</button>' +
           '</span>' +
@@ -11671,6 +11867,20 @@
       (shown.length === 0 ? '<div class="task-empty">Архив пуст.</div>' : '');
     container.scrollTop = preservedScrollTop;
     Array.prototype.forEach.call(container.querySelectorAll(".task-archive-body"), function(body){
+      var id = body.getAttribute("data-id");
+      var expandBtn = body.querySelector(".task-expand-btn");
+      if(expandBtn){
+        expandBtn.addEventListener("click", function(e){
+          e.stopPropagation();
+          if(expandedTaskIds[id]) delete expandedTaskIds[id];
+          else expandedTaskIds[id] = true;
+          var textEl = body.querySelector(".task-archive-text");
+          if(textEl) textEl.classList.toggle("task-text-clamped", !expandedTaskIds[id]);
+          updateTaskExpandBtn(body, id);
+          fitTaskActions(body);
+        });
+      }
+      updateTaskExpandBtn(body, id);
       fitTaskActions(body);
     });
     Array.prototype.forEach.call(container.querySelectorAll(".task-restore-btn"), function(btn){

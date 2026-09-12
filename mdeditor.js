@@ -274,6 +274,13 @@ window.initMdEditorModule = function(deps){
       '<line x1="7.5" y1="7" x2="14.5" y2="7"></line>' +
       '<line x1="7.5" y1="10.2" x2="14.5" y2="10.2"></line>' +
     '</svg>';
+  // Корона — основная закладка книги (ТЗ от 12.09, addBookBookmark/
+  // getMainBookBookmark в my.js), вместо BOOK_BOOKMARK_ICON_SVG у той
+  // единственной закладки на книгу, что отмечена как основная.
+  var CROWN_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M4 18h16l-1.5-9-4 3-2.5-5-2.5 5-4-3L4 18z"></path>' +
+    '</svg>';
   // папка — переиспользуем ровно тот же контур, что и у вкладки-заглушки
   // "projects" (#settingsTabProjectsBtn в index.html), для единообразия
   var FOLDER_ICON_SVG =
@@ -2852,7 +2859,7 @@ window.initMdEditorModule = function(deps){
       html += '<h3 class="common-tab-title">Закладки</h3>';
       html += '</div>';
       html += '<div class="mdeditor-tab settings-content-bottom" id="mdBookmarksBottom">';
-      html += '<div class="mdeditor-empty" id="mdBookmarksEmpty" style="display:none;">Пока нет ни одной закладки.<br>Чтобы добавить: удержите заметку в общем списке или нажмите на значок закладки в открытой заметке — либо долгим нажатием на абзац в открытой книге.</div>';
+      html += '<div class="mdeditor-empty" id="mdBookmarksEmpty" style="display:none;">Пока нет ни одной закладки.<br>Чтобы добавить: удержите заметку в общем списке или нажмите на значок закладки в открытой заметке — либо на кнопку закладки в нижнем ряду при чтении книги.</div>';
       html += '<div class="mdeditor-list" id="mdBookmarksList" style="display:none;"></div>';
       html += '</div>';
       container.innerHTML = html;
@@ -2871,14 +2878,29 @@ window.initMdEditorModule = function(deps){
     items.forEach(function(it){
       var row = document.createElement("div");
       row.className = "mdeditor-row";
-      var icon = it.type === "book" ? BOOK_BOOKMARK_ICON_SVG : FILE_ICON_SVG;
+      // Основная закладка книги (it.isMain, см. getMainBookBookmark в
+      // my.js) — корона вместо обычной пиктограммы закрытой книги (ТЗ от
+      // 12.09); закладки-заметки эту развилку не затрагивают.
+      var icon = it.type === "book" ? (it.isMain ? CROWN_ICON_SVG : BOOK_BOOKMARK_ICON_SVG) : FILE_ICON_SVG;
       row.innerHTML = icon + '<span class="mdeditor-row-name"></span>' +
         '<button type="button" class="mdeditor-bookmark-btn active visible" title="Убрать из закладок">' + BOOKMARK_ICON_SVG + '</button>';
-      // Название книжной закладки — имя КНИГИ (не текст абзаца, см.
-      // READER_PLAN.md, шаг 15) — bookName уже подставлен my.js
-      // (getBookMarginBookmarks, там же разрешается актуальное имя файла
-      // через манифест дедупликации, на случай переименования).
-      row.querySelector(".mdeditor-row-name").textContent = it.type === "book" ? it.bookName : it.name;
+      // Книжная закладка теперь показывает СВОЁ имя (введённое пользователем
+      // при сохранении, см. openBookBookmarkNameDialog в my.js) первой
+      // строкой, а название книги — второй, мельче (ТЗ от 12.09). У
+      // закладок-заметок — просто имя заметки, как и раньше.
+      var nameEl = row.querySelector(".mdeditor-row-name");
+      if(it.type === "book"){
+        var mainSpan = document.createElement("span");
+        mainSpan.className = "mdeditor-row-name-main";
+        mainSpan.textContent = it.name || it.bookName;
+        var subSpan = document.createElement("span");
+        subSpan.className = "mdeditor-row-name-sub";
+        subSpan.textContent = it.bookName;
+        nameEl.appendChild(mainSpan);
+        nameEl.appendChild(subSpan);
+      } else {
+        nameEl.textContent = it.name;
+      }
       row.addEventListener("click", function(){
         if(it.type === "book"){
           // openBookMarginBookmark сама переключает вкладку на книги и

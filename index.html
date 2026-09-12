@@ -463,7 +463,22 @@ window.addEventListener("error", function(e){
           <path d="M21.5 18v2.5h-2.5"></path>
         </svg>
       </button>
-      <button class="settings-tab" id="settingsTabSet2Btn7" title="">7</button>
+      <!-- Седьмая боковая вкладка второго набора (settingsTabSet2Btn7, "set2s_7")
+           — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "Мои книги" — хранилище книг
+           (OPFS, books/) и переход в экран чтения fb2/epub. См.
+           renderSettingsTabBooks в my.js (PROJECT_MAP_MYJS.md, строка 5885)
+           и её ветку в switchSettingsTab, по тому же принципу вынесена ДО
+           общей проверки на renderSettingsTabSet2Stub. -->
+      <button class="settings-tab" id="settingsTabSet2Btn7" title="Мои книги">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="13" height="19" rx="1.3"></rect>
+          <line x1="5.3" y1="2.5" x2="5.3" y2="21.5" stroke-width="1.2"></line>
+          <text x="10.5" y="10.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="none" stroke="var(--icon-halo)" stroke-width="3.2" paint-order="stroke fill">epub</text>
+          <text x="10.5" y="10.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="currentColor" stroke="none">epub</text>
+          <text x="10.5" y="18.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="none" stroke="var(--icon-halo)" stroke-width="3.2" paint-order="stroke fill">fb2</text>
+          <text x="10.5" y="18.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="currentColor" stroke="none">fb2</text>
+        </svg>
+      </button>
       <button class="settings-tab" id="settingsTabSet2Btn8" title="">8</button>
       <button class="settings-tab" id="settingsTabSet2Btn9" title="">9</button>
     </div>
