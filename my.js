@@ -5229,6 +5229,40 @@
     flushPendingCommentEdits();
     flushPendingMdEditorEdit();
     destroySubtitleScrollListener();
+    // Уход из экрана чтения книги (set2s_7, bookReaderState) на ЛЮБУЮ
+    // другую вкладку — фикс от 12.09 (ТЗ пользователя, девятый заход:
+    // "переносит в какую-то другую часть книги... но не то место, где я
+    // оставлял скрол"). Раньше текущая позиция читалась заново только при
+    // ВОЗВРАТЕ на "Книги" (см. renderBookReader ниже) — но к этому моменту
+    // #settingsTabContent уже показывает чужую вкладку, а не текст книги,
+    // поэтому currentBookReaderPosition там всегда возвращал null, и
+    // renderBookReaderText откатывался на bookReaderState.textScrollTop
+    // (не обновлявшийся с момента открытия книги, то есть 0/устаревшее
+    // значение) вместо места, где пользователь реально остановился —
+    // именно поэтому книга каждый раз открывалась в одном и том же месте,
+    // а не там, где был оставлен скролл. Читаем позицию ЗДЕСЬ, пока
+    // контейнер ещё показывает текст/главы книги (до того, как ниже по
+    // функции его перезапишет рендер целевой вкладки), и кладём её и в
+    // restorePosition (применится один раз при следующем renderBookReaderText/
+    // renderBookReaderChapters), и в textScrollTop/chaptersScrollTop (запасной
+    // путь), и сразу в постоянное хранилище (setBookPosition) — на случай
+    // перезапуска приложения раньше следующего дебаунса.
+    if(prevTab === "set2s_7" && tab !== "set2s_7" && bookReaderState){
+      var leavingReaderContainer = document.getElementById("settingsTabContent");
+      if(leavingReaderContainer){
+        if(bookReaderState.mode === "chapters"){
+          bookReaderState.chaptersScrollTop = leavingReaderContainer.scrollTop;
+        } else {
+          var leavingBookPos = currentBookReaderPosition(leavingReaderContainer);
+          if(leavingBookPos){
+            bookReaderState.restorePosition = leavingBookPos;
+            bookReaderState.textScrollTop = leavingReaderContainer.scrollTop;
+            setBookPosition(bookReaderState.hash, leavingBookPos);
+          }
+        }
+      }
+      destroyBookReaderScrollListener();
+    }
     // запоминаем позицию только если это реальная вкладка одного из двух
     // стеков (бокового или нижнего, набор 1 или 2) — служебные экраны вроде
     // "versions"/"import"/"resetConfirm" (открываются кнопками ВНУТРИ
