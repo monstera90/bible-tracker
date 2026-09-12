@@ -69,6 +69,22 @@ window.initMdEditorModule = function(deps){
   // вкладке (ТЗ пользователя от 08.09: "выделение не переключилось").
   var switchSettingsTab = deps.switchSettingsTab || function(){};
   // ---------------------------------------------------------------------
+  // Книжные закладки "на полях" (READER_PLAN.md, Этап D, шаг 15, 11.09) —
+  // сами данные и хранилище книг живут в my.js (см. bookStateKey/
+  // getBookMarginBookmarksForList и т.д. там же), сюда передаются только
+  // три узкие функции, тем же приёмом, что и облачные заметки ниже:
+  // getBookMarginBookmarks(cb) — асинхронно отдаёт плоский список записей
+  // {hash, bookmarkId, position, addedAt, bookName} по ВСЕМ книгам сразу
+  // (используется в renderBookmarksScreen ниже, объединённо с закладками-
+  // заметками); openBookMarginBookmark(hash, position) — переключает на
+  // вкладку книг и прокручивает ридер к нужному абзацу;
+  // removeBookMarginBookmark(hash, bookmarkId) — снимает закладку (клик по
+  // активной пиктограмме закладки в списке, тот же приём, что и
+  // toggleBookmarkNote у обычных заметок).
+  var getBookMarginBookmarks = deps.getBookMarginBookmarks || function(cb){ cb([]); };
+  var openBookMarginBookmark = deps.openBookMarginBookmark || function(){};
+  var removeBookMarginBookmark = deps.removeBookMarginBookmark || function(){};
+  // ---------------------------------------------------------------------
   // ОБЛАЧНОЕ ХРАНЕНИЕ ЗАМЕТОК С ШИФРОВАНИЕМ (см. TASK_MDNOTES_CLOUD.md,
   // шаг 1 "Ядро", 05.09). Firebase-специфика (URL, /syncs/<id>) осознанно
   // остаётся внутри my.js — сюда передаются только узкие функции, уже
@@ -244,6 +260,19 @@ window.initMdEditorModule = function(deps){
   var BOOKMARK_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M6.5 3.5h11a1 1 0 0 1 1 1V21l-6.5-4-6.5 4V4.5a1 1 0 0 1 1-1z"></path>' +
+    '</svg>';
+  // миниатюра ЗАКРЫТОЙ книги (READER_PLAN.md, Этап D, шаг 15, 11.09) —
+  // отличает книжные закладки "на полях" от закладок-заметок в общем
+  // списке "Закладки" (BOOKMARK_ICON_SVG выше). Сознательно другой контур,
+  // не READER_TEXT_ICON_SVG (раскрытая книга, my.js) — та означает
+  // "переключиться на текст книги" в самом ридере, здесь нужна именно
+  // ЗАКРЫТАЯ книга как нейтральная пиктограмма типа записи в списке.
+  var BOOK_BOOKMARK_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M4.5 4.5a1.5 1.5 0 0 1 1.5-1.5h12.5v18H6a1.5 1.5 0 0 1-1.5-1.5v-15z"></path>' +
+      '<path d="M18.5 3v18"></path>' +
+      '<line x1="7.5" y1="7" x2="14.5" y2="7"></line>' +
+      '<line x1="7.5" y1="10.2" x2="14.5" y2="10.2"></line>' +
     '</svg>';
   // папка — переиспользуем ровно тот же контур, что и у вкладки-заглушки
   // "projects" (#settingsTabProjectsBtn в index.html), для единообразия
@@ -1120,17 +1149,29 @@ window.initMdEditorModule = function(deps){
   // на диске (раздел 10 ТЗ: старая логика читала это через
   // fileHandle.getFile() по nameIndex, теперь заметки и так уже в памяти).
   var MEDIA_REF_RE = /!\[\[([^\[\]\n]+)\]\]/g;
+  // Задачи/комментарии (my.js) тоже могут содержать вставленную картинку
+  // "![[имя]]" (кнопка-скрепка, см. initTaskGlobalToolbar в my.js) — раньше
+  // сюда попадали только тексты заметок notesMap, из-за чего картинка,
+  // вставленная ТОЛЬКО в задачу, считалась "сиротой" и удалялась отсюда же,
+  // ниже, при каждом перезапуске приложения. deps.getExternalMediaTexts
+  // (my.js) отдаёт массив таких текстов — сканируем тем же MEDIA_REF_RE.
+  var getExternalMediaTexts = deps.getExternalMediaTexts || function(){ return []; };
   function collectReferencedMediaNames(){
     var names = new Set();
-    notesMap.forEach(function(rec){
-      if(!rec || rec.deleted || !rec.text) return;
+    function scanText(text){
+      if(!text) return;
       MEDIA_REF_RE.lastIndex = 0;
       var m;
-      while((m = MEDIA_REF_RE.exec(rec.text))){
+      while((m = MEDIA_REF_RE.exec(text))){
         names.add(m[1].trim().toLowerCase());
         if(m[0].length === 0) MEDIA_REF_RE.lastIndex++;
       }
+    }
+    notesMap.forEach(function(rec){
+      if(!rec || rec.deleted || !rec.text) return;
+      scanText(rec.text);
     });
+    getExternalMediaTexts().forEach(scanText);
     return names;
   }
 
@@ -2759,73 +2800,136 @@ window.initMdEditorModule = function(deps){
     if(container) renderListScreen(container);
   }
 
-  function renderBookmarksScreen(container){
+  // Закладки-заметки (без книжных, см. ниже) — та же сортировка, что и
+  // раньше (цифры в конце, иначе по алфавиту, ru).
+  function collectNoteBookmarkItems(){
     var items = [];
     bookmarkedNames.forEach(function(key){
       var id = nameIndex.get(key);
       var rec = id ? notesMap.get(id) : null;
-      if(rec && !rec.deleted) items.push({ name: rec.name, id: id });
+      if(rec && !rec.deleted) items.push({ type: "note", name: rec.name, id: id });
     });
+    return items;
+  }
+
+  function sortBookmarkItems(items){
     items.sort(function(a, b){
-      var da = /^\d/.test(a.name) ? 1 : 0;
-      var db = /^\d/.test(b.name) ? 1 : 0;
+      var na = a.type === "note" ? a.name : a.bookName;
+      var nb = b.type === "note" ? b.name : b.bookName;
+      var da = /^\d/.test(na) ? 1 : 0;
+      var db = /^\d/.test(nb) ? 1 : 0;
       if(da !== db) return da - db;
-      return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
+      return na.localeCompare(nb, "ru", { sensitivity: "base" });
     });
+    return items;
+  }
 
-    // ---- ТЗ пользователя от 08.09 (шаг 2): список закладок прижат к
-    // нижней части окна вкладки — при малом числе закладок под заголовком
-    // остаётся пустое место, а сам список растёт вверх от нижнего края по
-    // мере добавления новых закладок ("заполняется снизу"). Заголовок при
-    // этом должен оставаться на обычном месте сверху, поэтому в отличие
-    // от остального mdeditor.js (там на экран приходится один .mdeditor-
-    // tab) здесь их два, оба — прямые дети #settingsTabContent: первый —
-    // просто заголовок в обычном потоке, второй — сам список с классом
-    // settings-content-bottom (margin-top:auto у #settingsTabContent —
-    // flex-column, тот же приём, что и у renderSetupScreen выше и у
-    // отметки настроения в mood.js). Порядок внутри списка не меняется —
-    // как и раньше, по алфавиту; "снизу" — это про положение всего блока
-    // в окне, а не про порядок добавления закладок.
-    var html = '<div class="mdeditor-tab">';
-    html += '<h3 class="common-tab-title">Закладки</h3>';
-    html += '</div>';
-    html += '<div class="mdeditor-tab settings-content-bottom">';
-    if(!items.length){
-      html += '<div class="mdeditor-empty">Пока нет ни одной заметки в закладках.<br>Чтобы добавить: удержите заметку в общем списке или нажмите на значок закладки в открытой заметке.</div>';
-    } else {
-      html += '<div class="mdeditor-list" id="mdBookmarksList"></div>';
+  // Строит и монтирует сам список закладок (обе категории вперемешку,
+  // отсортированные вместе — см. sortBookmarkItems выше) внутрь уже
+  // существующего контейнера #mdBookmarksList/#mdBookmarksEmpty ИЛИ
+  // (isFirstPaint=true) отрисовывает всю разметку экрана заново — см.
+  // renderBookmarksScreen ниже: первый проход рисует разметку целиком
+  // (пока книжные закладки ещё не подъехали асинхронно из OPFS), второй
+  // проход (после getBookMarginBookmarks) просто перестраивает список.
+  function renderBookmarksList(container, items, isFirstPaint){
+    sortBookmarkItems(items);
+    if(isFirstPaint){
+      // ---- ТЗ пользователя от 08.09 (шаг 2): список закладок прижат к
+      // нижней части окна вкладки — при малом числе закладок под
+      // заголовком остаётся пустое место, а сам список растёт вверх от
+      // нижнего края по мере добавления новых закладок ("заполняется
+      // снизу"). Заголовок при этом должен оставаться на обычном месте
+      // сверху, поэтому в отличие от остального mdeditor.js (там на экран
+      // приходится один .mdeditor-tab) здесь их два, оба — прямые дети
+      // #settingsTabContent: первый — просто заголовок в обычном потоке,
+      // второй — сам список с классом settings-content-bottom
+      // (margin-top:auto у #settingsTabContent — flex-column, тот же
+      // приём, что и у renderSetupScreen выше и у отметки настроения в
+      // mood.js). Порядок внутри списка не меняется — как и раньше, по
+      // алфавиту; "снизу" — это про положение всего блока в окне, а не про
+      // порядок добавления закладок.
+      var html = '<div class="mdeditor-tab">';
+      html += '<h3 class="common-tab-title">Закладки</h3>';
+      html += '</div>';
+      html += '<div class="mdeditor-tab settings-content-bottom" id="mdBookmarksBottom">';
+      html += '<div class="mdeditor-empty" id="mdBookmarksEmpty" style="display:none;">Пока нет ни одной закладки.<br>Чтобы добавить: удержите заметку в общем списке или нажмите на значок закладки в открытой заметке — либо долгим нажатием на абзац в открытой книге.</div>';
+      html += '<div class="mdeditor-list" id="mdBookmarksList" style="display:none;"></div>';
+      html += '</div>';
+      container.innerHTML = html;
     }
-    html += '</div>';
-    container.innerHTML = html;
-
+    var emptyEl = document.getElementById("mdBookmarksEmpty");
     var listEl = document.getElementById("mdBookmarksList");
-    if(listEl){
-      items.forEach(function(it){
-        var row = document.createElement("div");
-        row.className = "mdeditor-row";
-        row.innerHTML = FILE_ICON_SVG + '<span class="mdeditor-row-name"></span>' +
-          '<button type="button" class="mdeditor-bookmark-btn active visible" title="Убрать из закладок">' + BOOKMARK_ICON_SVG + '</button>';
-        row.querySelector(".mdeditor-row-name").textContent = it.name;
-        row.addEventListener("click", function(){
-          // switchSettingsTab("set2s_1") — тот же вызов, что и у клика по
-          // [[ссылке]] из другой вкладки в my.js: переключает и внутренний
-          // activeMdTab (через renderSettingsTabMdEditor), и DOM-подсветку
-          // боковой иконки "Мой блокнот"/currentSettingsTab в my.js. Просто
-          // activeMdTab = "editor" (как было раньше) чинило только отрисовку
-          // ВНУТРИ вкладки (см. render() и его проверку activeMdTab ===
-          // "bookmarks" РАНЬШЕ screen/openFile) — снаружи иконка "Закладки"
-          // оставалась подсвеченной (ТЗ пользователя от 08.09: "выделение не
-          // переключилось").
-          switchSettingsTab("set2s_1");
-          openNoteById(it.id);
-        });
-        row.querySelector(".mdeditor-bookmark-btn").addEventListener("click", function(e){
-          e.stopPropagation();
-          toggleBookmarkNote(it.name);
-        });
-        listEl.appendChild(row);
-      });
+    if(!listEl || !emptyEl) return; // экран успели покинуть между проходами
+    listEl.innerHTML = "";
+    if(!items.length){
+      emptyEl.style.display = "";
+      listEl.style.display = "none";
+      return;
     }
+    emptyEl.style.display = "none";
+    listEl.style.display = "";
+    items.forEach(function(it){
+      var row = document.createElement("div");
+      row.className = "mdeditor-row";
+      var icon = it.type === "book" ? BOOK_BOOKMARK_ICON_SVG : FILE_ICON_SVG;
+      row.innerHTML = icon + '<span class="mdeditor-row-name"></span>' +
+        '<button type="button" class="mdeditor-bookmark-btn active visible" title="Убрать из закладок">' + BOOKMARK_ICON_SVG + '</button>';
+      // Название книжной закладки — имя КНИГИ (не текст абзаца, см.
+      // READER_PLAN.md, шаг 15) — bookName уже подставлен my.js
+      // (getBookMarginBookmarks, там же разрешается актуальное имя файла
+      // через манифест дедупликации, на случай переименования).
+      row.querySelector(".mdeditor-row-name").textContent = it.type === "book" ? it.bookName : it.name;
+      row.addEventListener("click", function(){
+        if(it.type === "book"){
+          // openBookMarginBookmark сама переключает вкладку на книги и
+          // прокручивает ридер к нужному абзацу (my.js) — здесь дополнительно
+          // ничего переключать не нужно (в отличие от заметок ниже, где
+          // switchSettingsTab нужен явно для подсветки боковой иконки).
+          openBookMarginBookmark(it.hash, it.position);
+          return;
+        }
+        // switchSettingsTab("set2s_1") — тот же вызов, что и у клика по
+        // [[ссылке]] из другой вкладки в my.js: переключает и внутренний
+        // activeMdTab (через renderSettingsTabMdEditor), и DOM-подсветку
+        // боковой иконки "Мой блокнот"/currentSettingsTab в my.js. Просто
+        // activeMdTab = "editor" (как было раньше) чинило только отрисовку
+        // ВНУТРИ вкладки (см. render() и его проверку activeMdTab ===
+        // "bookmarks" РАНЬШЕ screen/openFile) — снаружи иконка "Закладки"
+        // оставалась подсвеченной (ТЗ пользователя от 08.09: "выделение не
+        // переключилось").
+        switchSettingsTab("set2s_1");
+        openNoteById(it.id);
+      });
+      row.querySelector(".mdeditor-bookmark-btn").addEventListener("click", function(e){
+        e.stopPropagation();
+        if(it.type === "book"){
+          removeBookMarginBookmark(it.hash, it.bookmarkId);
+          items = items.filter(function(x){ return x !== it; });
+          renderBookmarksList(container, items, false);
+          return;
+        }
+        toggleBookmarkNote(it.name);
+      });
+      listEl.appendChild(row);
+    });
+  }
+
+  // Экран "Закладки" — заметки рисуются сразу (синхронно, из уже
+  // загруженных в память notesMap/bookmarkedNames), книжные закладки "на
+  // полях" (READER_PLAN.md, шаг 15) подъезжают следом асинхронно (чтение
+  // манифеста книг в OPFS через getBookMarginBookmarks, my.js) и
+  // перестраивают список вторым проходом — той же двухфазной схемой, что
+  // renderSettingsTabBooks в my.js рисует список книг. activeMdTab-проверка
+  // в колбэке — на случай, если пользователь успел уйти со вкладки
+  // "Закладки" до того, как OPFS ответил.
+  function renderBookmarksScreen(container){
+    var noteItems = collectNoteBookmarkItems();
+    renderBookmarksList(container, noteItems.slice(), true);
+    getBookMarginBookmarks(function(bookItems){
+      if(activeMdTab !== "bookmarks") return;
+      if(document.getElementById("settingsTabContent") !== container) return;
+      renderBookmarksList(container, noteItems.concat(bookItems), false);
+    });
   }
 
   // ---------------------------------------------------------------------

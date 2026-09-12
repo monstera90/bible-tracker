@@ -3239,8 +3239,30 @@
   // правки в открытой заметке при уходе со вкладки — вызывается в общем блоке
   // flush* в начале switchSettingsTab, тем же приёмом, что и
   // flushPendingCommentEdits и т.п.
+  // Тексты задач и комментариев, которые тоже могут содержать вставленную
+  // картинку "![[имя]]" (кнопка-скрепка, см. initTaskGlobalToolbar выше) —
+  // нужно "корзине сирот" в mdeditor.js (collectReferencedMediaNames), та
+  // до сих пор сканировала на предмет "![[имя]]" только тексты заметок
+  // "Моего блокнота" (notesMap). Из-за этого картинка, вставленная ТОЛЬКО в
+  // задачу/комментарий (а не в заметку), считалась неиспользуемой и
+  // молча удалялась из images/ (OPFS) при каждом перезапуске приложения
+  // (maybeRunImageCleanup вызывается один раз при старте модуля) — хотя
+  // миниатюра картинки в самой задаче была видна и открывалась. Функция
+  // объявлена ниже (getAllTasks/getAllComments), но ссылаться на неё здесь
+  // безопасно — function-декларация поднимается в начало этой же IIFE, тем
+  // же приёмом, что и refitAllVisibleTaskBodies выше.
+  function collectTaskAndCommentTextsForMediaScan(){
+    var texts = [];
+    getAllTasks().forEach(function(t){ if(t.c && t.c.text) texts.push(t.c.text); });
+    getAllComments().forEach(function(c){ if(c.c && c.c.text) texts.push(c.c.text); });
+    return texts;
+  }
   var MdEditor = window.initMdEditorModule({
     escapeHtml: escapeHtml,
+    // см. collectTaskAndCommentTextsForMediaScan выше — картинки,
+    // вставленные в задачи/комментарии, тоже должны считаться
+    // "используемыми" для корзины сирот в mdeditor.js.
+    getExternalMediaTexts: collectTaskAndCommentTextsForMediaScan,
     PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG,
     // то же распознавание ссылок на Библию, что и в "Карте дней года" (см.
     // SCRIPTURE_RE/BOOK_ALIASES/scriptureRefLink выше) — regexSource
@@ -3293,6 +3315,19 @@
     // по [[ссылке]] из другой вкладки (см. switchSettingsTab ниже и ТЗ
     // пользователя от 08.09).
     switchSettingsTab: switchSettingsTab,
+    // ---------------------------------------------------------------------
+    // Книжные закладки "на полях" (READER_PLAN.md, Этап D, шаг 15, 11.09) —
+    // сами данные и OPFS-манифест книг живут здесь, в my.js
+    // (getBookMarginBookmarksForList/openBookAtMarginBookmark/
+    // removeBookBookmark — все определены в разделе "ЗАКЛАДКИ НА ПОЛЯХ"
+    // выше, до этого места видны за счёт подъёма function-деклараций, как и
+    // остальные такие ссылки в этом объекте); mdeditor.js получает только
+    // три узкие точки входа, чтобы отрисовать книжные закладки вперемешку с
+    // закладками-заметками в общей вкладке "Закладки" (см.
+    // renderBookmarksScreen в mdeditor.js).
+    getBookMarginBookmarks: getBookMarginBookmarksForList,
+    openBookMarginBookmark: openBookAtMarginBookmark,
+    removeBookMarginBookmark: removeBookBookmark,
     // ---------------------------------------------------------------------
     // Облачное хранение заметок с шифрованием (см. TASK_MDNOTES_CLOUD.md,
     // шаг 1 "Ядро") — только эти узкие функции, привязанные к ветке
@@ -5694,6 +5729,29 @@
     saveBookState(hash, data);
     return rec.id;
   }
+  // Снятие закладки на полях (READER_PLAN.md, Этап D, шаг 15, 11.09) — в
+  // отличие от подчёркиваний (никогда не удаляются, см. комментарий у c
+  // выше) закладки можно свободно убирать: повторное долгое нажатие на уже
+  // отмеченный абзац в ридере (см. toggleBookReaderMarginBookmark ниже) или
+  // клик по активной пиктограмме закладки в общей вкладке "Закладки" (см.
+  // deps.removeBookMarginBookmark, передаётся в mdeditor.js).
+  function removeBookBookmark(hash, bookmarkId){
+    var data = getOrCreateBookState(hash);
+    data.bookmarks = data.bookmarks.filter(function(b){ return b.id !== bookmarkId; });
+    saveBookState(hash, data);
+  }
+  // Закладка на полях конкретного абзаца текущей книги, если она есть —
+  // position закладок здесь всегда {ch, blk} (весь абзац целиком, в
+  // отличие от подчёркиваний, у которых ещё есть s/e — диапазон внутри
+  // абзаца). Используется и при отрисовке (класс .book-reader-p-bookmarked,
+  // см. renderBookReaderText), и при долгом нажатии (toggle, см. ниже).
+  function getBookBookmarkForBlock(hash, ch, blk){
+    var data = getBookState(hash);
+    if(!data || !data.bookmarks) return null;
+    return data.bookmarks.filter(function(b){
+      return b.position && b.position.ch === ch && b.position.blk === blk;
+    })[0] || null;
+  }
   // Подчёркивания добавляются и помечаются перенесёнными в заметку; снятие —
   // отдельной функцией removeBookUnderline чуть ниже (доработка 11.09).
   function addBookUnderline(hash, position){
@@ -5923,7 +5981,81 @@
   // (а не процент, как в mdeditor.js — там понадобился процент из-за
   // растущего .cm-scroller; здесь высота книги стабильна между рендерами
   // одного режима, поэтому пиксельного значения достаточно).
-  var bookReaderState = null; // {hash, name, chapters, imageUrls, mode, textScrollTop, chaptersScrollTop}
+  var bookReaderState = null; // {hash, name, chapters, imageUrls, mode, textScrollTop, chaptersScrollTop, restorePosition}
+  // Шаг 16 (READER_PLAN.md, Этап D): запоминание места чтения — тем же
+  // приёмом, что docState/persistDocStateNow/scheduleDocStateSave в
+  // mdeditor.js, только якорь не курсор+процент, а конкретный абзац/
+  // картинка {ch, blk} (та же адресация data-ch/data-blk, что уже
+  // используется у подчёркиваний/картинок выше) — устойчивее к смене
+  // размера шрифта между сессиями, чем процент прокрутки. Хранится не в
+  // отдельном ключе, а прямо в модели книги (position, см.
+  // setBookPosition выше) — попадает в общую облачную синхронизацию
+  // бесплатно, тем же путём, что и bookmarks/underlines там же.
+  // restorePosition (поле bookReaderState выше) — сохранённая позиция,
+  // которую нужно применить РОВНО ОДИН РАЗ, при первом рендере текста
+  // сразу после открытия книги (см. openBookReader/renderBookReaderText
+  // ниже); дальше при переключениях режима работает обычный textScrollTop
+  // (в памяти, как и раньше).
+  var bookReaderScrollContainer = null;
+  var bookReaderScrollHandler = null;
+  var bookReaderPositionSaveTimer = null;
+  // Абзац/картинка {ch, blk}, чьё начало (offsetTop) последним не
+  // превышает текущий scrollTop контейнера — тот же приём, что
+  // jumpToChapterFromChaptersList ниже использует для перехода к главе,
+  // только гранулярность — абзац, а не глава. По умолчанию (пока
+  // scrollTop не дошёл ни до одного блока) — самый первый блок книги.
+  function currentBookReaderPosition(container){
+    var blocks = container.querySelectorAll(".book-reader-p, .book-reader-image-wrap");
+    if(!blocks.length) return null;
+    var best = blocks[0];
+    for(var i = 0; i < blocks.length; i++){
+      if(blocks[i].offsetTop <= container.scrollTop) best = blocks[i];
+      else break;
+    }
+    var ch = parseInt(best.getAttribute("data-ch"), 10);
+    var blk = parseInt(best.getAttribute("data-blk"), 10);
+    if(isNaN(ch) || isNaN(blk)) return null;
+    return {ch: ch, blk: blk};
+  }
+  // Обратная операция — прокручивает контейнер так, чтобы блок {ch, blk}
+  // оказался наверху. Возвращает false, если блок не найден (например,
+  // сохранённая позиция битая или файл книги успел измениться между
+  // открытиями) — тогда вызывающий код молча откатывается на позицию по
+  // умолчанию (см. renderBookReaderText ниже), книга просто открывается с
+  // начала вместо падения с ошибкой.
+  function scrollBookReaderToPosition(container, position){
+    if(!position) return false;
+    var el = container.querySelector('[data-ch="' + position.ch + '"][data-blk="' + position.blk + '"]');
+    if(!el) return false;
+    container.scrollTop = el.offsetTop;
+    return true;
+  }
+  function flushBookReaderPositionNow(){
+    if(bookReaderPositionSaveTimer){ clearTimeout(bookReaderPositionSaveTimer); bookReaderPositionSaveTimer = null; }
+    if(!bookReaderState) return;
+    var container = document.getElementById("settingsTabContent");
+    var pos = container ? currentBookReaderPosition(container) : null;
+    if(pos) setBookPosition(bookReaderState.hash, pos);
+  }
+  function scheduleBookReaderPositionSave(){
+    if(bookReaderPositionSaveTimer) clearTimeout(bookReaderPositionSaveTimer);
+    bookReaderPositionSaveTimer = setTimeout(flushBookReaderPositionNow, 500);
+  }
+  // Снимает слушатель прокрутки (с немедленным сбросом несохранённого
+  // debounce, без потери позиции) — тем же приёмом и по тем же причинам,
+  // что destroySubtitleScrollListener выше: вызывается перед ЛЮБЫМ
+  // рендером ридера (см. renderBookReader ниже) и при полном выходе из
+  // ридера (homeBtn/AppNav-колбэк в openBookReader), иначе слушатель
+  // остался бы висеть на #settingsTabContent и после ухода с книги —
+  // контейнер общий на всё приложение и не пересоздаётся между экранами.
+  function destroyBookReaderScrollListener(){
+    if(bookReaderPositionSaveTimer) flushBookReaderPositionNow();
+    if(bookReaderScrollContainer && bookReaderScrollHandler){
+      bookReaderScrollContainer.removeEventListener("scroll", bookReaderScrollHandler);
+    }
+    bookReaderScrollContainer = null;
+    bookReaderScrollHandler = null;
+  }
   var bookReaderFontSizePanelOpen = false;
   // "Взведена" ли кнопка "Выделение" (шаг 13, доработка 11.09, см.
   // READER_SELECT_ICON_SVG выше) — сбрасывается при каждом полном рендере
@@ -6030,10 +6162,15 @@
     // Подчищаем картинки предыдущей открытой книги, если она осталась
     // "подвешенной" в памяти (например, после клика "Домик" — см.
     // bindBookReaderFabRow ниже — без возврата "назад" в ту книгу).
-    if(bookReaderState) revokeBookReaderImages();
+    if(bookReaderState){ destroyBookReaderScrollListener(); revokeBookReaderImages(); }
     var container = document.getElementById("settingsTabContent");
     var prevScrollTop = container ? container.scrollTop : 0;
-    getBooksDirHandle().then(function(dir){
+    // return — READER_PLAN.md, шаг 15 (11.09): openBookAtMarginBookmark
+    // (см. ниже) должен дождаться, пока книга реально откроется и
+    // распарсится, прежде чем прокручивать к нужному абзацу; остальные
+    // вызовы (клик по строке в списке книг) этот промис просто игнорируют,
+    // как и раньше.
+    return getBooksDirHandle().then(function(dir){
       return dir.getFileHandle(name);
     }).then(function(fh){
       return fh.getFile();
@@ -6060,12 +6197,21 @@
           imageBytes[id] = {bytes: bytes, contentType: contentType};
         }catch(e){ /* битая картинка в binary — просто не покажем */ }
       });
+      // Шаг 16 — сохранённая позиция чтения (см. setBookPosition/
+      // getBookState выше) читается один раз здесь, при открытии книги
+      // "с нуля" (не из снимка "Домика" — тот восстанавливает готовый
+      // bookReaderState целиком, минуя openBookReader). Применяется
+      // РОВНО ОДИН РАЗ в renderBookReaderText (см. ниже) и сразу
+      // обнуляется там же.
+      var savedBookState = getBookState(res.hash);
       bookReaderState = {
         hash: res.hash, name: name,
         chapters: res.parsed.chapters, imageUrls: imageUrls, imageBytes: imageBytes,
-        mode: "text", textScrollTop: 0, chaptersScrollTop: 0
+        mode: "text", textScrollTop: 0, chaptersScrollTop: 0,
+        restorePosition: (savedBookState && savedBookState.position) || null
       };
       window.AppNav.push(function(){
+        destroyBookReaderScrollListener();
         revokeBookReaderImages();
         bookReaderState = null;
         renderSettingsTabBooks();
@@ -6136,6 +6282,12 @@
   function renderBookReader(){
     var container = document.getElementById("settingsTabContent");
     if(!container || !bookReaderState) return;
+    // Флашим/снимаем слушатель ДО перерисовки — на момент вызова
+    // innerHTML контейнера ещё старый (см. currentBookReaderPosition
+    // выше), поэтому debounce-сохранение здесь ловит последнюю позицию
+    // именно того режима, который сейчас покидаем (та же логика, что
+    // textScrollTop/chaptersScrollTop в switchBookReaderMode ниже).
+    destroyBookReaderScrollListener();
     if(bookReaderState.mode === "chapters") renderBookReaderChapters(container);
     else renderBookReaderText(container);
   }
@@ -6224,6 +6376,11 @@
     var homeBtn = document.getElementById("bookReaderHomeBtn");
     if(homeBtn){
       homeBtn.addEventListener("click", function(){
+        // renderSettingsTabBooks() ниже, в отличие от renderBookReader(),
+        // не снимает слушатель прокрутки сам — контейнер общий, поэтому
+        // без этого он остался бы висеть и на экране списка книг (см.
+        // destroyBookReaderScrollListener выше).
+        destroyBookReaderScrollListener();
         var snapshot = bookReaderState;
         window.AppNav.push(function(){
           bookReaderState = snapshot;
@@ -6272,7 +6429,14 @@
           // индекс блока внутри ch.blocks — стабилен независимо от типа
           // соседних блоков, т.к. это просто позиция в исходном массиве).
           var ranges = getBookUnderlineRangesForBlock(bookReaderState.hash, idx, bi);
-          html += '<p class="book-reader-p" id="bookP_' + idx + '_' + bi + '" data-ch="' + idx + '" data-blk="' + bi + '">' +
+          // Закладка на полях (шаг 15) — класс .book-reader-p-bookmarked
+          // (components.css) даёт левую полоску-акцент на весь абзац,
+          // визуально "закладку на полях"; сам класс переключается точечно
+          // после долгого нажатия (см. toggleBookReaderMarginBookmark ниже)
+          // без перерисовки всего ридера, здесь — только начальный рендер.
+          var isBookmarked = !!getBookBookmarkForBlock(bookReaderState.hash, idx, bi);
+          html += '<p class="book-reader-p' + (isBookmarked ? ' book-reader-p-bookmarked' : '') +
+            '" id="bookP_' + idx + '_' + bi + '" data-ch="' + idx + '" data-blk="' + bi + '">' +
             renderRunsHtml(block.runs, ranges) + '</p>';
         }
       });
@@ -6280,10 +6444,33 @@
     });
     html += '</div></div>';
     container.innerHTML = html;
-    requestAnimationFrame(function(){ container.scrollTop = bookReaderState.textScrollTop || 0; });
+    requestAnimationFrame(function(){
+      // Шаг 16: сохранённая позиция чтения применяется РОВНО ОДИН РАЗ,
+      // сразу после открытия книги (restorePosition обнуляется тут же,
+      // независимо от успеха — повторные рендеры текстового режима в
+      // этой сессии дальше идут через обычный textScrollTop, как и
+      // раньше). scrollBookReaderToPosition возвращает false на битой/
+      // устаревшей позиции — тогда используется обычный откат к
+      // textScrollTop (0 при первом открытии, то есть начало книги).
+      var restored = false;
+      if(bookReaderState.restorePosition){
+        restored = scrollBookReaderToPosition(container, bookReaderState.restorePosition);
+        bookReaderState.restorePosition = null;
+      }
+      if(!restored) container.scrollTop = bookReaderState.textScrollTop || 0;
+      // Слежение за прокруткой — только в текстовом режиме (в "главах"
+      // читательская позиция не копится, см. currentBookReaderPosition
+      // выше, ей нужны .book-reader-p/.book-reader-image-wrap, которых
+      // там нет). Снимается перед ЛЮБЫМ следующим рендером ридера, см.
+      // destroyBookReaderScrollListener/renderBookReader выше.
+      bookReaderScrollHandler = function(){ scheduleBookReaderPositionSave(); };
+      bookReaderScrollContainer = container;
+      container.addEventListener("scroll", bookReaderScrollHandler, { passive: true });
+    });
     bindBookReaderFabRow();
     bindBookReaderSelectionOnce();
     bindBookReaderImages();
+    bindBookReaderBookmarkLongPress();
     bindBookReaderUnderlineClicks();
   }
 
@@ -6809,6 +6996,140 @@
       return;
     }
     addUnderlineFromSelection(pos.ch, pos.blk, pos.s, pos.e, text);
+  }
+
+  // ===================== ЗАКЛАДКИ НА ПОЛЯХ (READER_PLAN.md, Этап D, шаг 15,
+  // 11.09) =====================
+  // Долгое нажатие на абзац (Pointer Events — единый обработчик для мыши и
+  // тача, в отличие от подчёркивания шага 13 выше, для закладки НЕ нужно
+  // взводить отдельную кнопку) добавляет/снимает закладку на полях этого
+  // абзаца — toggle, в отличие от подчёркиваний (те никогда не удаляются,
+  // см. комментарий у модели книги выше). position закладки — просто
+  // {ch, blk}, весь абзац целиком (в отличие от подчёркиваний с их s/e).
+  //
+  // Долгое нажатие определяется таймером (BOOK_BOOKMARK_LONGPRESS_MS) —
+  // если за это время указатель ушёл дальше BOOK_BOOKMARK_MOVE_TOLERANCE px
+  // (например, пользователь начал скроллить, а не держит абзац) — таймер
+  // отменяется, обычный скролл не мешаем. Обработчики навешиваются заново
+  // после каждого рендера текста (innerHTML пересоздаёт узлы), тем же
+  // приёмом, что и bindBookReaderImages выше.
+  var BOOK_BOOKMARK_LONGPRESS_MS = 550;
+  var BOOK_BOOKMARK_MOVE_TOLERANCE = 10;
+  function bindBookReaderBookmarkLongPress(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container || !bookReaderState) return;
+    var ps = container.querySelectorAll(".book-reader-p");
+    for(var i = 0; i < ps.length; i++){
+      (function(pEl){
+        var timer = null, startX = 0, startY = 0, firedLongPress = false;
+        function clearTimer(){ if(timer){ clearTimeout(timer); timer = null; } }
+        pEl.addEventListener("pointerdown", function(ev){
+          if(ev.pointerType === "mouse" && ev.button !== 0) return; // только левая кнопка мыши; тач/перо — как есть
+          firedLongPress = false;
+          startX = ev.clientX; startY = ev.clientY;
+          clearTimer();
+          timer = setTimeout(function(){
+            timer = null;
+            firedLongPress = true;
+            var ch = parseInt(pEl.getAttribute("data-ch"), 10);
+            var blk = parseInt(pEl.getAttribute("data-blk"), 10);
+            toggleBookReaderMarginBookmark(ch, blk, pEl);
+          }, BOOK_BOOKMARK_LONGPRESS_MS);
+        });
+        pEl.addEventListener("pointermove", function(ev){
+          if(!timer) return;
+          if(Math.abs(ev.clientX - startX) > BOOK_BOOKMARK_MOVE_TOLERANCE || Math.abs(ev.clientY - startY) > BOOK_BOOKMARK_MOVE_TOLERANCE){
+            clearTimer();
+          }
+        });
+        pEl.addEventListener("pointerup", clearTimer);
+        pEl.addEventListener("pointercancel", clearTimer);
+        pEl.addEventListener("pointerleave", clearTimer);
+        // На части тач-браузеров долгое нажатие само по себе открывает
+        // системное контекстное меню (выделение/копирование) — глушим его
+        // только когда наше долгое нажатие реально сработало, чтобы не
+        // трогать обычное поведение коротких нажатий/тапов.
+        pEl.addEventListener("contextmenu", function(ev){
+          if(firedLongPress){ ev.preventDefault(); firedLongPress = false; }
+        });
+      })(ps[i]);
+    }
+  }
+
+  // Точечно переключает класс .book-reader-p-bookmarked на уже
+  // отрисованном абзаце — без перерисовки всего ридера (та же причина, что
+  // у refreshBookReaderParagraphHighlight выше: не сбрасывать scrollTop).
+  function toggleBookReaderMarginBookmark(ch, blk, pEl){
+    if(!bookReaderState) return;
+    var hash = bookReaderState.hash;
+    var existing = getBookBookmarkForBlock(hash, ch, blk);
+    if(existing){
+      removeBookBookmark(hash, existing.id);
+    } else {
+      addBookBookmark(hash, {ch: ch, blk: blk});
+    }
+    if(pEl) pEl.classList.toggle("book-reader-p-bookmarked", !existing);
+    var status = document.getElementById("bookReaderStatus");
+    if(status) status.textContent = existing ? "Закладка на полях снята." : "Добавлена закладка на полях — см. вкладку «Закладки».";
+    if(navigator.vibrate){ try{ navigator.vibrate(15); }catch(e){} }
+  }
+
+  // Плоский список ВСЕХ книжных закладок на полях по всем книгам сразу —
+  // для объединённого экрана "Закладки" в mdeditor.js (см.
+  // deps.getBookMarginBookmarks/renderBookmarksScreen там же). Имя книги
+  // разрешается через манифест дедупликации (loadBooksManifest) по хэшу —
+  // единственное надёжное сопоставление хэш->текущее имя файла, устойчивое
+  // к переименованию (ТЗ, шаг 8: модель книги привязана к хэшу, не к
+  // имени). Книга, файла которой сейчас нет локально (например, ещё не
+  // подтянулась через реестр — см. syncFilesRegistry выше), тихо
+  // пропускается — та же логика, что и у закладок-заметок на
+  // несуществующий локально файл (см. MD_BOOKMARK_PREFIX выше).
+  // callback(items), items: [{hash, bookmarkId, position, addedAt, bookName}]
+  function getBookMarginBookmarksForList(callback){
+    var hashes = [];
+    Object.keys(state).forEach(function(k){
+      if(!isBookStateKey(k)) return;
+      var rec = state[k];
+      if(!rec || !rec.c || !rec.c.bookmarks || !rec.c.bookmarks.length) return;
+      hashes.push(k.slice("book:".length));
+    });
+    if(!hashes.length){ callback([]); return; }
+    getBooksDirHandle().then(function(dir){
+      return loadBooksManifest(dir);
+    }).then(function(manifest){
+      var items = [];
+      hashes.forEach(function(hash){
+        var name = manifest[hash];
+        if(!name) return; // файла книги сейчас нет локально
+        var data = getBookState(hash);
+        data.bookmarks.forEach(function(b){
+          items.push({hash: hash, bookmarkId: b.id, position: b.position, addedAt: b.addedAt, bookName: name});
+        });
+      });
+      callback(items);
+    }).catch(function(){ callback([]); });
+  }
+
+  // Открывает книгу по хэшу (актуальное имя файла — через манифест, см.
+  // выше) и прокручивает к абзацу закладки — точка входа из общей вкладки
+  // "Закладки" (клик по книжной закладке, см. mdeditor.js). Переключает
+  // вкладку настроек на "Книги" (set2s_7) тем же способом, что и клик по
+  // [[ссылке]]/заметке-закладке переключает на "Мой блокнот" (set2s_1).
+  function openBookAtMarginBookmark(hash, position){
+    getBooksDirHandle().then(function(dir){
+      return loadBooksManifest(dir);
+    }).then(function(manifest){
+      var name = manifest[hash];
+      if(!name) return; // файла книги сейчас нет локально — открыть нечего
+      switchSettingsTab("set2s_7");
+      return openBookReader(name).then(function(){
+        requestAnimationFrame(function(){
+          var el = document.getElementById("bookP_" + position.ch + "_" + position.blk);
+          var container = document.getElementById("settingsTabContent");
+          if(el && container) container.scrollTop = el.offsetTop;
+        });
+      });
+    });
   }
 
   // ===== ИЗВЛЕЧЕНИЕ СУБТИТРОВ (четвёртая нижняя вкладка второго набора,

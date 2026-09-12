@@ -2771,6 +2771,21 @@
   }
   .book-reader-chapter:first-child .book-reader-chapter-title{ margin-top:0; }
   .book-reader-p{ margin:0 0 10px 0; text-indent:1ch; }
+  /* Закладка на полях абзаца (READER_PLAN.md, Этап D, шаг 15, 11.09) —
+     .book-reader не имеет горизонтальных отступов (padding:2px 0 40px 0
+     выше), и #settingsTabContent тоже не гарантирует запас слева, поэтому
+     НЕ используем отрицательный margin/абсолютное позиционирование за
+     пределы .book-reader-p (риск горизонтального скролла на узких
+     экранах) — вместо этого просто border-left + небольшой padding-left
+     ВНУТРИ самого абзаца. Текст абзаца из-за этого сдвигается на пару
+     пикселей вправо относительно обычных абзацев — сознательный компромисс
+     ради надёжной вёрстки на мобильном экране. text-indent у .book-reader-p
+     выше не мешает: он про отступ первой строки текста, здесь же сдвигается
+     сам бокс абзаца целиком через padding.*/
+  .book-reader-p-bookmarked{
+    padding-left:10px;
+    border-left:3px solid var(--gold, #b08d3f);
+  }
   .book-reader .cm-md-image{ margin:10px 0; }
   /* ---------- Подчёркивание книги (READER_PLAN.md, Этап D, шаг 13, 11.09).
      Без этого правила <mark> красится браузером по умолчанию в чистый
