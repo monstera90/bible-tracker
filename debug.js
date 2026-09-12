@@ -45,24 +45,82 @@
     if (!value) {
       hidePanel();
       stopImageLineWatch();
+      stopTaskScrollWatch();
     } else {
       startImageLineWatch();
+      startTaskScrollWatch();
     }
   }
 
   // Видимая на экране панель логов — аналог window.onerror из index.html
   // (тот выводит JS-ошибки на экран), но для произвольных отладочных
   // сообщений, которые сам код помечает через Debug.log(...).
+  var logLines = []; // полный текст лога, для кнопки "скопировать" ниже —
+  // на фото/скриншоте панели часть строк перекрывается другими элементами
+  // экрана и мелкий шрифт плохо распознаётся, точный текст надёжнее.
   function ensurePanel() {
     if (panelEl) return panelEl;
     panelEl = document.createElement("div");
     panelEl.id = "debugLogPanel";
     // Наверху экрана, а не внизу — внизу панель перекрывала кнопки
     // интерфейса и мешала на них нажимать (замечено пользователем 05.09).
+    // Полупрозрачная (фон 0.35 вместо 0.85) и "прозрачная для кликов"
+    // (pointer-events:none) — панель лежит поверх интерфейса ТОЛЬКО чтобы
+    // показывать текст, сама панель клики/тапы не перехватывает, они
+    // проходят насквозь к кнопкам под ней (ТЗ пользователя от 12.09).
+    // Панель себя не скроллит вручную (scrollTop выставляется кодом ниже
+    // на каждую новую строку) — отключённые pointer-events на это не
+    // влияют, а прокрутить её пальцем, чтобы прочитать более ранние
+    // строки, тоже больше нельзя — поэтому и нужна кнопка "скопировать"
+    // ниже, а не попытка визуально прочитать панель целиком.
     panelEl.style.cssText =
-      "position:fixed;left:4px;right:4px;top:4px;max-height:40vh;overflow:auto;" +
-      "background:rgba(0,0,0,0.85);color:#0f0;font:10px monospace;padding:6px;" +
-      "z-index:999999;white-space:pre-wrap;";
+      "position:fixed;left:4px;right:4px;top:4px;max-height:55vh;overflow:auto;" +
+      "background:rgba(0,0,0,0.35);color:#0f0;font:10px monospace;padding:6px;" +
+      "z-index:999999;white-space:pre-wrap;pointer-events:none;";
+
+    // Кнопка "скопировать весь лог" — единственный интерактивный элемент
+    // на всей панели (pointer-events:auto точечно перебивает none у
+    // родителя, это штатно работает в CSS). Копирует ПОЛНЫЙ текст лога
+    // (logLines), а не только то, что видно в обрезанной по высоте
+    // панели — так в буфер попадают и более ранние строки, уехавшие
+    // вверх за пределы видимой области.
+    var copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.textContent = "⧉ копировать лог";
+    copyBtn.style.cssText =
+      "position:sticky;top:0;left:0;display:block;margin-bottom:4px;" +
+      "pointer-events:auto;background:#111;color:#0f0;border:1px solid #0f0;" +
+      "font:10px monospace;padding:3px 8px;z-index:1;";
+    copyBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var text = logLines.join("\n");
+      function done(ok) {
+        copyBtn.textContent = ok ? "✓ скопировано" : "не удалось скопировать";
+        setTimeout(function () {
+          copyBtn.textContent = "⧉ копировать лог";
+        }, 1500);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+        return;
+      }
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        done(true);
+      } catch (err) {
+        done(false);
+      }
+    });
+    panelEl.appendChild(copyBtn);
+
     document.body.appendChild(panelEl);
     return panelEl;
   }
@@ -70,6 +128,7 @@
   function hidePanel() {
     if (panelEl && panelEl.parentNode) panelEl.parentNode.removeChild(panelEl);
     panelEl = null;
+    logLines = [];
   }
 
   function safeStringify(data) {
@@ -94,6 +153,7 @@
       " " +
       label +
       (data !== undefined ? " " + safeStringify(data) : "");
+    logLines.push(line);
     var p = document.createElement("div");
     p.textContent = line;
     panel.appendChild(p);
@@ -105,7 +165,15 @@
 
   // Очистить видимую панель логов, не выключая режим отладки.
   function clear() {
-    if (panelEl) panelEl.innerHTML = "";
+    logLines = [];
+    if (panelEl) {
+      panelEl.innerHTML = "";
+      // кнопку "скопировать" innerHTML="" тоже стирает — пересоздаём панель
+      // с нуля тем же приёмом, что и при первом показе.
+      panelEl.parentNode.removeChild(panelEl);
+      panelEl = null;
+      ensurePanel();
+    }
   }
 
   // guardTaskListScroll() — защита от прыжка/подёргивания списка задач при
@@ -256,5 +324,265 @@
     imageLineObserver = null;
   }
 
-  if (isEnabled()) startImageLineWatch();
+  // ---------------------------------------------------------------------
+  // ВРЕМЕННО (ТЗ пользователя от 12.09, второй заход): раздел "Все задачи
+  // проекта" (openTaskNextPicker в my.js) и вкладки задач вообще — прыжок
+  // #settingsTabContent.scrollTop в начало, когда отредактировал задачу и
+  // нажал мимо (например, на другую задачу, чтобы текущая сохранилась).
+  // В my.js уже есть два обходных манёвра (Debug.guardTaskListScroll()
+  // ниже + свой отдельный RAF-сторож прямо в openTaskNextPicker) — прыжок
+  // всё равно проскакивает, значит настоящий источник ещё не найден.
+  //
+  // Этот блок ничего не чинит — только смотрит, ОТКУДА реально приходит
+  // сброс, тремя независимыми способами:
+  // 1) Перехватывает scrollTop контейнера #settingsTabContent через
+  //    собственный get/set (Object.defineProperty прямо на узле, без
+  //    трогания прототипа) — это ловит ЛЮБУЮ запись в scrollTop, кто бы
+  //    её ни сделал: наш код, чужой код, или сам браузер (например, при
+  //    схлопывании высоты — см. layoutSettingsModal). К каждой записи
+  //    цепляется короткий кусок Error().stack (2-4 строки, с номерами
+  //    строк my.js) — по нему будет видно, какая именно функция это
+  //    сделала, даже если это анонимная функция без имени.
+  // 2) MutationObserver на самом контейнере (childList, subtree:true) —
+  //    отличает ПОЛНУЮ пересборку списка (container.innerHTML = ...,
+  //    мутация прямо на контейнере, много добавленных/удалённых узлов) от
+  //    точечного обновления одной строки (мутация глубже, на конкретном
+  //    .task-body, один узел) — само по себе браузер обнуляет scrollTop
+  //    только при полной пересборке ИЛИ при схлопывании высоты, так что
+  //    это ключевой сигнал.
+  // 3) focus/blur на .task-editable (capture-фаза, эти события не
+  //    всплывают) + window/visualViewport resize (закрытие клавиатуры на
+  //    мобильном меняет высоту именно так) — чтобы видеть, в каком
+  //    порядке относительно смены фокуса приходит resize и мутация DOM.
+  //
+  // Всё это льётся в общую панель Debug.log в порядке появления — при
+  // повторении бага (отредактировать задачу → тапнуть на другую) в панели
+  // будет видна вся цепочка событий с точностью до строки my.js, которая
+  // обнулила scrollTop. Включается/выключается той же галочкой "Включить
+  // режим отладки". Убрать вместе с остальным диагностическим кодом этой
+  // задачи, когда причина найдена.
+  // ---------------------------------------------------------------------
+  var scrollWatchContainer = null;
+  var scrollWatchContainerObserver = null;
+  var scrollWatchListenersInstalled = false;
+  var scrollWatchLastKnown = null; // последнее известное значение scrollTop
+  var scrollWatchPollHandle = null;
+  var scrollWatchOrigGet = null; // "сырой" геттер прототипа, в обход нашего перехватчика
+
+  // scrollTop определён через getter/setter где-то в цепочке прототипов
+  // (обычно на Element.prototype, но это не гарантировано во всех
+  // браузерах) — getOwnPropertyDescriptor смотрит только на сам объект,
+  // поэтому поднимаемся по цепочке, пока не найдём его.
+  function findScrollTopDescriptor(obj) {
+    var proto = obj;
+    while (proto) {
+      var d = Object.getOwnPropertyDescriptor(proto, "scrollTop");
+      if (d) return d;
+      proto = Object.getPrototypeOf(proto);
+    }
+    return null;
+  }
+
+  // короткий "откуда вызвано" — несколько строк стека (пропускаем первую,
+  // саму эту функцию), без полного трейса — в панели логов на мобильном и
+  // так тесно. Не трогаем текст самого стека, кроме обрезки длины: номера
+  // строк/имена функций в нём и есть то, ради чего это всё затевалось.
+  function shortStack(skip) {
+    var e = new Error();
+    if (!e.stack) return "(нет stack)";
+    var lines = e.stack.split("\n").slice(skip || 2, (skip || 2) + 4);
+    return lines.join(" <- ").slice(0, 400);
+  }
+
+  function installScrollTopWatch(container) {
+    if (scrollWatchContainer === container) return;
+    if (scrollWatchContainer) uninstallScrollTopWatch();
+    var descriptor = findScrollTopDescriptor(container);
+    if (!descriptor || !descriptor.get || !descriptor.set) {
+      log("scrollWatch: не удалось найти дескриптор scrollTop, слежение отключено");
+      return;
+    }
+    scrollWatchContainer = container;
+    scrollWatchOrigGet = descriptor.get;
+    scrollWatchLastKnown = descriptor.get.call(container);
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      get: function () {
+        return descriptor.get.call(this);
+      },
+      set: function (v) {
+        var before = descriptor.get.call(this);
+        if (v !== before) {
+          log("scrollTop СВОИМ JS: " + before + " -> " + v, shortStack(3));
+        }
+        scrollWatchLastKnown = v;
+        return descriptor.set.call(this, v);
+      }
+    });
+    log("scrollWatch: перехватчик scrollTop поставлен на #settingsTabContent");
+    startScrollPoll();
+  }
+
+  function uninstallScrollTopWatch() {
+    stopScrollPoll();
+    if (!scrollWatchContainer) return;
+    try {
+      delete scrollWatchContainer.scrollTop; // возвращает поведение прототипа
+    } catch (e) {}
+    scrollWatchContainer = null;
+    scrollWatchOrigGet = null;
+  }
+
+  // ГЛАВНОЕ ДОПОЛНЕНИЕ: наш перехватчик выше ловит только явные
+  // присваивания вида "container.scrollTop = X" из JS. Если браузер сам,
+  // в обход любого JS-кода, меняет фактическую прокрутку контейнера
+  // (например, компенсируя появление/скрытие виртуальной клавиатуры, или
+  // из-за внутреннего рефлоу при схлопывании высоты) — такое изменение
+  // НЕ проходит через наш set() и осталось бы полностью незамеченным. Раз
+  // в предыдущем прогоне ни одной строки "scrollTop СВОИМ JS" в логе не
+  // появилось, а scrollTop всё равно обнулился — подозрение именно на
+  // это. Поэтому опрашиваем "сырое" значение на каждом кадре
+  // (requestAnimationFrame) и сравниваем с последним известным: если оно
+  // изменилось без прохождения через наш set() — значит, это браузер, а
+  // не наш код.
+  function startScrollPoll() {
+    if (scrollWatchPollHandle) return;
+    function tick() {
+      if (!scrollWatchContainer || !scrollWatchOrigGet) {
+        scrollWatchPollHandle = null;
+        return;
+      }
+      var current = scrollWatchOrigGet.call(scrollWatchContainer);
+      if (current !== scrollWatchLastKnown) {
+        log("scrollTop БЕЗ JS-set (похоже, браузер сам): " + scrollWatchLastKnown + " -> " + current);
+        scrollWatchLastKnown = current;
+      }
+      scrollWatchPollHandle = requestAnimationFrame(tick);
+    }
+    scrollWatchPollHandle = requestAnimationFrame(tick);
+  }
+
+  function stopScrollPoll() {
+    if (scrollWatchPollHandle) {
+      cancelAnimationFrame(scrollWatchPollHandle);
+      scrollWatchPollHandle = null;
+    }
+  }
+
+  // Сворачиваем однотипные мутации в одну итоговую строку за пачку (браузер
+  // и так доставляет все мутации одного синхронного блока кода одним
+  // вызовом колбэка) — иначе полная пересборка списка из десятка задач
+  // выглядит как полтора десятка одинаковых строк "task-body" подряд и
+  // выталкивает из панели самые важные (и самые ранние) строки диагностики.
+  function watchContainerMutations(container) {
+    if (scrollWatchContainerObserver) scrollWatchContainerObserver.disconnect();
+    scrollWatchContainerObserver = new MutationObserver(function (mutations) {
+      var onContainer = null;
+      var taskBodyCount = 0;
+      var otherCount = 0;
+      mutations.forEach(function (m) {
+        if (m.type !== "childList") return;
+        if (m.addedNodes.length === 0 && m.removedNodes.length === 0) return;
+        if (m.target === container) {
+          onContainer = { added: m.addedNodes.length, removed: m.removedNodes.length };
+        } else if (m.target.className && String(m.target.className).indexOf("task-body") !== -1) {
+          taskBodyCount++;
+        } else {
+          otherCount++;
+        }
+      });
+      if (onContainer) log("DOM: ПОЛНАЯ пересборка #settingsTabContent (innerHTML=)", onContainer);
+      if (taskBodyCount) log("DOM: точечных .task-body обновлений", taskBodyCount);
+      if (otherCount) log("DOM: прочих мутаций", otherCount);
+    });
+    scrollWatchContainerObserver.observe(container, { childList: true, subtree: true });
+  }
+
+  function installFocusBlurWatch() {
+    if (scrollWatchListenersInstalled) return;
+    scrollWatchListenersInstalled = true;
+    document.addEventListener(
+      "focus",
+      function (e) {
+        var t = e.target;
+        if (t && t.classList && t.classList.contains("task-editable")) {
+          log("focus -> task-editable", t.id || t.getAttribute("data-task-id"));
+        }
+      },
+      true
+    );
+    document.addEventListener(
+      "blur",
+      function (e) {
+        var t = e.target;
+        if (t && t.classList && t.classList.contains("task-editable")) {
+          log("blur <- task-editable", t.id || t.getAttribute("data-task-id"));
+        }
+      },
+      true
+    );
+    window.addEventListener("resize", function () {
+      var c = scrollWatchContainer;
+      log("window resize", {
+        innerHeight: window.innerHeight,
+        scrollTop: c ? c.scrollTop : "(нет контейнера)"
+      });
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", function () {
+        var c = scrollWatchContainer;
+        log("visualViewport resize", {
+          vvHeight: Math.round(window.visualViewport.height),
+          scrollTop: c ? c.scrollTop : "(нет контейнера)"
+        });
+      });
+    }
+  }
+
+  // Сам контейнер #settingsTabContent — статический узел разметки (только
+  // его innerHTML переписывается при смене вкладки), но окно настроек
+  // могло ещё ни разу не открыться к моменту включения галочки — поэтому
+  // ищем контейнер и по MutationObserver на body (тот же приём, что и у
+  // imageLineObserver выше), и сразу же при старте, если он уже есть.
+  var scrollWatchBootObserver = null;
+  function startTaskScrollWatch() {
+    installFocusBlurWatch();
+    var existing = document.getElementById("settingsTabContent");
+    if (existing) {
+      installScrollTopWatch(existing);
+      watchContainerMutations(existing);
+      return;
+    }
+    if (scrollWatchBootObserver) return;
+    scrollWatchBootObserver = new MutationObserver(function () {
+      if (!isEnabled()) return;
+      var el = document.getElementById("settingsTabContent");
+      if (el) {
+        installScrollTopWatch(el);
+        watchContainerMutations(el);
+      }
+    });
+    scrollWatchBootObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function stopTaskScrollWatch() {
+    uninstallScrollTopWatch();
+    if (scrollWatchContainerObserver) {
+      scrollWatchContainerObserver.disconnect();
+      scrollWatchContainerObserver = null;
+    }
+    if (scrollWatchBootObserver) {
+      scrollWatchBootObserver.disconnect();
+      scrollWatchBootObserver = null;
+    }
+    // focus/blur/resize-слушатели намеренно не снимаем — они сами по себе
+    // ничего не показывают и не логируют, пока isEnabled() === false
+    // (log() внутри них — no-op), снимать и заново вешать их при каждом
+    // переключении галочки просто не нужно.
+  }
+
+  if (isEnabled()) {
+    startImageLineWatch();
+    startTaskScrollWatch();
+  }
 })();

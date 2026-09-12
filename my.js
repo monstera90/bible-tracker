@@ -5034,11 +5034,6 @@
     }
   }
   function closeSettingsModal(){
-    // сбрасываем ограничитель цикла язычка-кнопки (см.
-    // fabDidSwitchSetSinceOpen выше) на КАЖДОМ закрытии, независимо от
-    // того, чем оно вызвано (язычок, клик мимо окна, жест "назад") — так
-    // следующее открытие снова начинает цикл с самого начала.
-    fabDidSwitchSetSinceOpen = false;
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
@@ -8041,12 +8036,15 @@
 
   // Какой набор вкладок сейчас показан — 1 (боковые/нижние из #settingsTabs
   // и #settingsTabsGear) или 2 (заглушки из #settingsTabsSet2/
-  // #settingsTabsGearSet2). Плавающая кнопка-язычок (#settingsGearBtn)
-  // переключает их по кругу: закрыто -> набор 1 -> набор 2 -> набор 1 ->
-  // ... (см. cycleSettingsTabSet и обработчик клика по settingsGearBtn
-  // ниже). При каждом закрытии блокнота (клик мимо него) выбор набора не
-  // хранится — следующее открытие всегда начинается с набора 1 (см. ветку
-  // "иначе" в обработчике клика).
+  // #settingsTabsGearSet2). Плавающая кнопка-язычок (#settingsGearBtn) —
+  // короткий клик: закрыто -> открыто (набор, на котором остановились в
+  // прошлый раз) -> клик снова -> другой набор -> клик снова -> опять
+  // первый -> ... и так по кругу БЕЗ ограничения числа переключений, пока
+  // блокнот не закрыт (см. cycleSettingsTabSet и обработчик клика по
+  // settingsGearBtn ниже; ТЗ пользователя от 12.09). Закрыть блокнот
+  // короткий клик по язычку больше не может, пока разблокирован второй
+  // набор — для этого клик МИМО окна (см. settingsModalOverlay ниже) или
+  // долгое удержание самого язычка (100 мс, см. FAB_LONGPRESS_MS ниже).
   var settingsActiveTabSet = 1;
   // Запоминает набор вкладок (1 или 2) и саму последнюю реальную вкладку
   // (см. settingsLastStackTab ниже) в localStorage, а не только в памяти —
@@ -8057,14 +8055,6 @@
   // getResumeSettingsState ниже.
   var SETTINGS_LAST_SET_KEY = "bibleSettingsLastTabSet_v1";
   var SETTINGS_LAST_TAB_KEY = "bibleSettingsLastTab_v1";
-  // Взводится после первого переключения набора язычком-кнопкой
-  // (settingsGearBtn) с момента, как блокнот был открыт, и сбрасывается
-  // при каждом закрытии (см. closeSettingsModal) — ограничивает цикл
-  // язычка ДВУМЯ шагами вместо бесконечного 1<->2 (см. ТЗ пользователя от
-  // 01.09, пункт 1): открытие показывает последний использованный набор,
-  // следующий клик переключает на другой набор, а клик ПОСЛЕ этого уже
-  // сворачивает окно, а не возвращает обратно.
-  var fabDidSwitchSetSinceOpen = false;
   // Полный порядок позиций в каждом из 4 стеков (боковой/нижний × набор
   // 1/2), от первого места до последнего — используется и для запоминания
   // позиции (см. settingsLastStackTab), и для поиска "того же места" в
@@ -8544,29 +8534,64 @@
   }
 
   var settingsGearBtn = document.getElementById("settingsGearBtn");
-  if(settingsGearBtn) settingsGearBtn.addEventListener("click", function(){
-    if(settingsModalOverlay && settingsModalOverlay.classList.contains("open")){
-      // блокнот уже открыт: если второй набор вкладок разблокирован кодом —
-      // ОДИН раз переключаем набор (см. fabDidSwitchSetSinceOpen выше), а
-      // при следующем клике сворачиваем блокнот, а не крутим набор дальше
-      // по кругу (см. ТЗ пользователя от 01.09, пункт 1: полный цикл
-      // "набор, на котором остановились -> другой набор -> сворачивание").
-      // Если второй набор не разблокирован — второго набора для этого
-      // пользователя как будто не существует, поэтому клик по язычку
-      // сразу сворачивает блокнот (как и раньше).
-      if(isSet2Unlocked() && !fabDidSwitchSetSinceOpen){
-        cycleSettingsTabSet();
-        fabDidSwitchSetSinceOpen = true;
-      } else {
-        closeSettingsModal();
-      }
-    } else {
-      // открытие показывает набор и вкладку, на которых человек
-      // остановился в прошлый раз (см. openSettingsModal/
-      // getResumeSettingsState выше) — переживает и закрытие приложения.
-      openSettingsModal();
+  if(settingsGearBtn){
+    // Долгое удержание язычка сворачивает уже открытый блокнот (ТЗ
+    // пользователя от 12.09) — второй способ закрыть его, помимо клика
+    // мимо окна, раз короткий клик по язычку теперь только крутит набор
+    // вкладок по кругу и сам никогда не закрывает (см. обработчик клика
+    // ниже).
+    var FAB_LONGPRESS_MS = 100;
+    var fabLongPressTimer = null;
+    var fabLongPressFired = false;
+
+    function clearFabLongPressTimer(){
+      if(fabLongPressTimer){ clearTimeout(fabLongPressTimer); fabLongPressTimer = null; }
     }
-  });
+
+    settingsGearBtn.addEventListener("pointerdown", function(){
+      fabLongPressFired = false;
+      clearFabLongPressTimer();
+      // Удержание значимо, только пока блокнот уже открыт — если он
+      // закрыт, обычный короткий клик и так его откроет, таймер заводить
+      // незачем (и не нужно мешать обычному открытию).
+      if(!(settingsModalOverlay && settingsModalOverlay.classList.contains("open"))) return;
+      fabLongPressTimer = setTimeout(function(){
+        fabLongPressTimer = null;
+        fabLongPressFired = true;
+        closeSettingsModal();
+      }, FAB_LONGPRESS_MS);
+    });
+    ["pointerup", "pointerleave", "pointercancel"].forEach(function(evt){
+      settingsGearBtn.addEventListener(evt, clearFabLongPressTimer);
+    });
+
+    settingsGearBtn.addEventListener("click", function(){
+      // Долгое удержание уже само закрыло блокнот в pointerdown-таймере
+      // выше — браузер всё равно посылает следом обычный click при
+      // отпускании, его нужно проглотить, а не открывать блокнот заново.
+      if(fabLongPressFired){ fabLongPressFired = false; return; }
+      if(settingsModalOverlay && settingsModalOverlay.classList.contains("open")){
+        // блокнот уже открыт: короткий клик всегда переключает набор
+        // вкладок по кругу (набор 1 <-> набор 2 <-> ...), пока второй
+        // набор разблокирован кодом — без ограничения числа переключений
+        // (см. cycleSettingsTabSet выше). Закрытие теперь только через
+        // клик мимо окна или долгое удержание язычка (см. выше).
+        if(isSet2Unlocked()){
+          cycleSettingsTabSet();
+        } else {
+          // второго набора для этого пользователя как будто не
+          // существует — крутить нечего, поэтому короткий клик по
+          // язычку по-прежнему сворачивает блокнот (как и раньше).
+          closeSettingsModal();
+        }
+      } else {
+        // открытие показывает набор и вкладку, на которых человек
+        // остановился в прошлый раз (см. openSettingsModal/
+        // getResumeSettingsState выше) — переживает и закрытие приложения.
+        openSettingsModal();
+      }
+    });
+  }
 
   // Ставим язычок-кнопку в угол окна настроек сразу при загрузке страницы
   // (а не только при первом открытии окна) и держим его там при ресайзе/
@@ -11834,6 +11859,34 @@
         // taskAttachDialogOpen выше)
         if(taskAttachDialogOpen) return;
         var restoreScroll = window.Debug.guardTaskListScroll();
+        // ТЗ пользователя от 12.09 (правка после первой попытки): одноразовое
+        // восстановление scrollTop ровно через 500мс не помогло — на этом
+        // экране откат позиции, похоже, связан со сворачиванием мобильной
+        // клавиатуры после blur и может случиться позже и не строго один
+        // раз, а не только в узком окне сразу после blur, как у обычных
+        // задач. Вместо одной точки восстановления — "сторож" на
+        // requestAnimationFrame: на каждом кадре возвращает scrollTop
+        // контейнера к значению на момент blur, пока не пройдёт разумное
+        // окно (см. ниже) или пока пользователь сам не начнёт прокручивать
+        // (тогда сторож сразу снимается, чтобы не мешать обычному скроллу).
+        var savedScrollTop = container.scrollTop;
+        var guardDeadline = Date.now() + 1200;
+        var guardStopped = false;
+        function stopScrollGuard(){
+          guardStopped = true;
+          container.removeEventListener("touchstart", stopScrollGuard);
+          container.removeEventListener("wheel", stopScrollGuard);
+        }
+        container.addEventListener("touchstart", stopScrollGuard, {passive: true});
+        container.addEventListener("wheel", stopScrollGuard, {passive: true});
+        function guardTick(){
+          if(guardStopped) return;
+          if(Date.now() > guardDeadline){ stopScrollGuard(); return; }
+          if(container.scrollTop !== savedScrollTop) container.scrollTop = savedScrollTop;
+          requestAnimationFrame(guardTick);
+        }
+        requestAnimationFrame(guardTick);
+
         var newText = getEditableNoteText(editable);
         setTaskText(id, newText.trim());
         editable.contentEditable = "false";
