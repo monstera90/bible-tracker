@@ -186,14 +186,31 @@
   //
   // Вызывается в my.js на "blur" редактируемого поля задачи/комментария;
   // возвращает функцию restore(), которую нужно вызвать после того, как
-  // поле перерисовано обратно в обычный вид.
-  function guardTaskListScroll() {
-    var container = document.getElementById("settingsTabContent");
+  // поле перерисовано обратно в обычный вид. Необязательный параметр
+  // container — какой именно элемент сторожить: по умолчанию
+  // #settingsTabContent (так для обычных вкладок задач/комментариев — там
+  // скроллится именно он), но на экране "Все задачи проекта" (openTaskNextPicker
+  // в my.js) реальный скролл-контейнер вложенный — #taskProjectArea
+  // (.task-project-area, overflow-y:auto в modals.css); у самого
+  // #settingsTabContent там overflow:hidden через .task-project-modal-body,
+  // и scrollTop всегда 0 — сторожить его бессмысленно, поэтому my.js
+  // передаёт туда #taskProjectArea явно (см. 12.09, пятый заход — до этого
+  // защита молча не работала именно на этом экране).
+  function guardTaskListScroll(container) {
+    container = container || document.getElementById("settingsTabContent");
     if (!container) return function () {};
     var savedScroll = container.scrollTop;
     function snapshot() {
+      // ДОБАВЛЕНО (третий заход): в двух прогонах подряд scrollTop был 0
+      // ВЕЗДЕ, от первой до последней строки — то есть тест проходил на
+      // экране, где контейнеру физически нечего было скроллить (список
+      // помещался целиком). Без scrollHeight/clientHeight это было видно
+      // только "на глаз", постфактум, разбором лога. scrollHeight >
+      // clientHeight здесь и значит "было что терять".
       return {
         scrollTop: container.scrollTop,
+        scrollHeight: container.scrollHeight,
+        clientHeight: container.clientHeight,
         winY: window.scrollY,
         vvH: window.visualViewport ? Math.round(window.visualViewport.height) : "?"
       };
@@ -369,18 +386,24 @@
   var scrollWatchPollHandle = null;
   var scrollWatchOrigGet = null; // "сырой" геттер прототипа, в обход нашего перехватчика
 
-  // scrollTop определён через getter/setter где-то в цепочке прототипов
-  // (обычно на Element.prototype, но это не гарантировано во всех
-  // браузерах) — getOwnPropertyDescriptor смотрит только на сам объект,
-  // поэтому поднимаемся по цепочке, пока не найдём его.
-  function findScrollTopDescriptor(obj) {
+  // scrollTop/innerHTML определены через getter/setter где-то в цепочке
+  // прототипов (обычно на Element.prototype/Node.prototype, но это не
+  // гарантировано во всех браузерах) — getOwnPropertyDescriptor смотрит
+  // только на сам объект, поэтому поднимаемся по цепочке, пока не найдём
+  // его. Раньше эта функция была заточена только под scrollTop
+  // (findScrollTopDescriptor) — обобщена 12.09 (второй заход), чтобы тем
+  // же приёмом перехватывать и innerHTML (см. installInnerHTMLWatch ниже).
+  function findPropDescriptor(obj, propName) {
     var proto = obj;
     while (proto) {
-      var d = Object.getOwnPropertyDescriptor(proto, "scrollTop");
+      var d = Object.getOwnPropertyDescriptor(proto, propName);
       if (d) return d;
       proto = Object.getPrototypeOf(proto);
     }
     return null;
+  }
+  function findScrollTopDescriptor(obj) {
+    return findPropDescriptor(obj, "scrollTop");
   }
 
   // короткий "откуда вызвано" — несколько строк стека (пропускаем первую,
@@ -431,6 +454,53 @@
     } catch (e) {}
     scrollWatchContainer = null;
     scrollWatchOrigGet = null;
+  }
+
+  // ДОБАВЛЕНО 12.09 (второй заход): предыдущий прогон лога показал, что
+  // ни "scrollTop СВОИМ JS", ни "scrollTop БЕЗ JS-set" ни разу не
+  // сработали за всю сессию — то есть scrollTop контейнера ни разу не
+  // менялся за время записи лога (снимки во всех событиях, включая
+  // blur:start, показывали 0). Это значит, что тот прогон не застал
+  // самого прыжка — список либо и так был у самого верха, либо сброс
+  // произошёл ДО того, как включили галочку отладки. Чтобы поймать
+  // настоящий момент, нужно знать не только КОГДА меняется scrollTop, но
+  // и КТО именно переписывает innerHTML контейнера (полная пересборка
+  // сама по себе всегда обнуляет scrollTop — вопрос в том, какой вызов
+  // это делает и восстанавливает ли он позицию после). Тем же приёмом,
+  // что и scrollTop выше — свой get/set прямо на узле контейнера,
+  // перехватывает любую запись в innerHTML и печатает короткий stack
+  // (номера строк my.js), не трогая сам вызов.
+  var innerHTMLWatchContainer = null;
+
+  function installInnerHTMLWatch(container) {
+    if (innerHTMLWatchContainer === container) return;
+    if (innerHTMLWatchContainer) uninstallInnerHTMLWatch();
+    var descriptor = findPropDescriptor(container, "innerHTML");
+    if (!descriptor || !descriptor.get || !descriptor.set) {
+      log("innerHTMLWatch: не удалось найти дескриптор innerHTML, слежение отключено");
+      return;
+    }
+    innerHTMLWatchContainer = container;
+    Object.defineProperty(container, "innerHTML", {
+      configurable: true,
+      get: function () {
+        return descriptor.get.call(this);
+      },
+      set: function (v) {
+        var rawScroll = scrollWatchOrigGet ? scrollWatchOrigGet.call(container) : container.scrollTop;
+        log("innerHTML= (scrollTop до записи=" + rawScroll + ")", shortStack(3));
+        return descriptor.set.call(this, v);
+      }
+    });
+    log("innerHTMLWatch: перехватчик innerHTML поставлен на #settingsTabContent");
+  }
+
+  function uninstallInnerHTMLWatch() {
+    if (!innerHTMLWatchContainer) return;
+    try {
+      delete innerHTMLWatchContainer.innerHTML; // возвращает поведение прототипа
+    } catch (e) {}
+    innerHTMLWatchContainer = null;
   }
 
   // ГЛАВНОЕ ДОПОЛНЕНИЕ: наш перехватчик выше ловит только явные
@@ -491,9 +561,20 @@
           otherCount++;
         }
       });
-      if (onContainer) log("DOM: ПОЛНАЯ пересборка #settingsTabContent (innerHTML=)", onContainer);
-      if (taskBodyCount) log("DOM: точечных .task-body обновлений", taskBodyCount);
-      if (otherCount) log("DOM: прочих мутаций", otherCount);
+      // ДОБАВЛЕНО 12.09: сырое значение scrollTop прямо в момент мутации —
+      // раньше эти строки лога не содержали scrollTop вообще, и по ним
+      // было невозможно понять, менялось ли что-то именно в этот момент
+      // или нет (приходилось гадать по соседним строкам). scrollWatchOrigGet
+      // — тот самый "сырой" геттер (мимо нашего перехватчика), см. выше.
+      var rawScrollNow = scrollWatchOrigGet ? scrollWatchOrigGet.call(container) : container.scrollTop;
+      if (onContainer) {
+        onContainer.scrollTopNow = rawScrollNow;
+        onContainer.scrollHeight = container.scrollHeight;
+        onContainer.clientHeight = container.clientHeight;
+        log("DOM: ПОЛНАЯ пересборка #settingsTabContent (innerHTML=)", onContainer);
+      }
+      if (taskBodyCount) log("DOM: точечных .task-body обновлений " + taskBodyCount + ", scrollTop=" + rawScrollNow);
+      if (otherCount) log("DOM: прочих мутаций " + otherCount + ", scrollTop=" + rawScrollNow);
     });
     scrollWatchContainerObserver.observe(container, { childList: true, subtree: true });
   }
@@ -550,6 +631,7 @@
     var existing = document.getElementById("settingsTabContent");
     if (existing) {
       installScrollTopWatch(existing);
+      installInnerHTMLWatch(existing);
       watchContainerMutations(existing);
       return;
     }
@@ -559,6 +641,7 @@
       var el = document.getElementById("settingsTabContent");
       if (el) {
         installScrollTopWatch(el);
+        installInnerHTMLWatch(el);
         watchContainerMutations(el);
       }
     });
@@ -567,6 +650,7 @@
 
   function stopTaskScrollWatch() {
     uninstallScrollTopWatch();
+    uninstallInnerHTMLWatch();
     if (scrollWatchContainerObserver) {
       scrollWatchContainerObserver.disconnect();
       scrollWatchContainerObserver = null;

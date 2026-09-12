@@ -2631,6 +2631,15 @@
       // именно в этот момент, и перерисовывала не тот экран). Если сейчас
       // открыт этот экран — перерисовываем ЕГО же (activeProjectPickerRerender),
       // а не список проектов.
+      // ВРЕМЕННО (ТЗ пользователя от 12.09, третий заход): именно этот
+      // путь уже один раз ловил похожую гонку (см. комментарий выше, ТЗ
+      // от 11.09) — isEditingTaskNow снимается синхронно в blur ДО того,
+      // как строка успевает перерисоваться обратно (см. setTimeout 500мс
+      // в renderRowEdit/blur), и фоновая синхронизация, подоспевшая
+      // именно в эту паузу, попадает сюда. Лог — no-op при выключенной
+      // галочке отладки. Убрать вместе с остальным диагностическим кодом
+      // этой задачи, когда причина найдена.
+      if (window.Debug) window.Debug.log("rerenderAllFromState: activeProjectPickerRerender=" + !!activeProjectPickerRerender);
       if(activeProjectPickerRerender) activeProjectPickerRerender();
       else if(TASK_TAB_IDS.hasOwnProperty(currentSettingsTab)) renderSettingsTabTask(currentSettingsTab);
     }
@@ -4940,6 +4949,14 @@
     // если окно ещё ни разу не открывали (иначе #settingsTabContent
     // пустой, но на итоговую высоту это больше не влияет).
     var content = document.getElementById("settingsTabContent");
+    // Экран "Все задачи проекта" (openTaskNextPicker) — свой вложенный
+    // скролл-контейнер: #settingsTabContent там overflow:hidden через
+    // .task-project-modal-body и сам никогда не скроллится (см. modals.css),
+    // реальный скролл — у #taskProjectArea. Схлопывание/восстановление
+    // высоты окна ниже (style.height = "") просаживается по flex-цепочке и
+    // до него тоже, так что его scrollTop нужно спасать той же техникой,
+    // что и у content.
+    var projectArea = document.getElementById("taskProjectArea");
     if(content && !content.innerHTML.trim()) renderSettingsTabGear();
     // Пока ниже временно снимается высота окна (style.height = ""), контент
     // на миг перестаёт скроллиться (весь помещается) — браузер сам обнуляет
@@ -4950,6 +4967,8 @@
     // рывок). Запоминаем и восстанавливаем явно, чтобы скролл не терялся
     // вовсе, а не чинился постфактум.
     var savedContentScroll = content ? content.scrollTop : 0;
+    var savedProjectAreaScroll = projectArea ? projectArea.scrollTop : null;
+    if (window.Debug) window.Debug.log("layoutSettingsModal: старт, scrollTop до схлопывания=" + savedContentScroll + " scrollHeight/clientHeight=" + (content ? content.scrollHeight + "/" + content.clientHeight : "(нет content)"));
 
     // Окно "пришито" снизу к кнопке-язычку (.settings-fab), а не сверху к
     // экрану: нижний край окна всегда стоит на фиксированной точке —
@@ -4985,7 +5004,37 @@
 
     settingsModalBox.style.marginTop = (desiredTop - naturalTop) + "px";
     settingsModalBox.style.height = desired + "px";
-    if(content) content.scrollTop = savedContentScroll;
+    if(content){
+      // ИСПРАВЛЕНИЕ (ТЗ пользователя от 12.09, четвёртый заход): именно
+      // здесь была настоящая причина "мгновенного прыжка" списка задач
+      // проекта — не в rerenderAllFromState/фоновой синхронизации (см.
+      // правку в openTaskNextPicker выше, она чинит другой, более редкий
+      // случай), а в этой самой функции. Она вызывается из window
+      // resize-слушателя ниже с задержкой 120мс ПОСЛЕ blur — а blur
+      // редактируемого поля закрывает мобильную клавиатуру, что само по
+      // себе всегда бросает resize. То есть эта функция срабатывает
+      // практически сразу после того, как пользователь заканчивает
+      // редактирование и тапает мимо — что и ощущается как "мгновенно".
+      //
+      // Сам механизм: выше временно снимается фиксированная высота окна
+      // (style.height = ""), из-за чего #settingsTabContent на миг
+      // перестаёт быть скроллящимся (весь список умещается) — код уже
+      // ПЫТАЛСЯ решить это раньше (см. savedContentScroll выше), но
+      // восстанавливал scrollTop СРАЗУ после возврата style.height,
+      // БЕЗ принудительного пересчёта layout между ними. Браузер применяет
+      // новую высоту (reflow) лениво — если между "вернули высоту" и
+      // "выставили scrollTop" не заставить его пересчитать размеры прямо
+      // сейчас, scrollTop выставляется ещё по СТАРЫМ (схлопнутым) размерам
+      // контейнера и обрезается обратно до 0, даже несмотря на то что мы
+      // явно пытаемся вернуть прежнее значение. Чтение любого
+      // layout-свойства (offsetHeight) между этими двумя строками
+      // заставляет браузер пересчитать размеры НЕМЕДЛЕННО, до того как
+      // мы запишем scrollTop — тогда восстановление срабатывает по-настоящему.
+      void content.offsetHeight; // форсируем reflow с уже восстановленной высотой окна
+      content.scrollTop = savedContentScroll;
+      if(projectArea && savedProjectAreaScroll != null) projectArea.scrollTop = savedProjectAreaScroll;
+      if (window.Debug) window.Debug.log("layoutSettingsModal: конец, scrollTop сейчас=" + content.scrollTop + " (хотели=" + savedContentScroll + ") scrollHeight/clientHeight=" + content.scrollHeight + "/" + content.clientHeight);
+    }
     // Высота язычков вертикального стека (#settingsTabs .settings-tab)
     // больше не считается здесь — она зафиксирована в CSS (68px, не
     // зависит от высоты окна настроек, см. .settings-tab в modals.css).
@@ -8124,10 +8173,37 @@
   function clearProjectPickerResumeState(){
     try{ localStorage.removeItem(PROJECT_PICKER_RESUME_KEY); }catch(e){}
   }
+  // Отдельная память позиции скролла — на каждый ПРОЕКТ, а не на "последнее
+  // открытие экрана" (см. PROJECT_PICKER_RESUME_KEY выше, у него другое
+  // назначение и он специально стирается при обычном выходе с экрана). Эта
+  // карта ничем не стирается вовсе (в т.ч. при удалении проекта — лишняя
+  // запись на давно удалённый id ничего не стоит, десяток байт) — переживает
+  // и переключение вкладок, и закрытие приложения: при ЛЮБОМ повторном
+  // открытии "Все задачи проекта" для того же проекта (клик по кнопке-звену,
+  // переход [[по ссылке]], возврат после другой вкладки) список сам
+  // восстанавливает то место, где его последний раз оставили — не только
+  // когда это "продолжить с того же места" после полного перезапуска
+  // приложения (ТЗ пользователя от 12.09, шестой заход).
+  var PROJECT_PICKER_SCROLL_MAP_KEY = "bibleProjectPickerScrollMap_v1";
+  function getSavedProjectScrollTop(projectId){
+    try{
+      var raw = localStorage.getItem(PROJECT_PICKER_SCROLL_MAP_KEY);
+      var map = raw ? JSON.parse(raw) : null;
+      if(!map || typeof map[projectId] !== "number") return null;
+      return map[projectId];
+    }catch(e){ return null; }
+  }
+  function setSavedProjectScrollTop(projectId, scrollTop){
+    try{
+      var raw = localStorage.getItem(PROJECT_PICKER_SCROLL_MAP_KEY);
+      var map = raw ? JSON.parse(raw) : {};
+      map[projectId] = scrollTop;
+      localStorage.setItem(PROJECT_PICKER_SCROLL_MAP_KEY, JSON.stringify(map));
+    }catch(e){}
+  }
   // debounce для сохранения позиции скролла (см. openTaskNextPicker) —
   // не пишем в localStorage на каждый пиксель прокрутки
   var projectPickerScrollSaveTimer = null;
-  var projectPickerScrollHandler = null;
   // ищет вкладку с той же позицией (индексом), что и tab, но в ДРУГОМ
   // наборе и в том же стеке (боковой -> боковой, нижний -> нижний).
   // Возвращает null, если позиция не распознана (такого пока не бывает,
@@ -11562,6 +11638,13 @@
   function openTaskNextPicker(projectId, tabKey, resumeScrollTop){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
+    // Явный resumeScrollTop (см. openSettingsModal — "продолжить с того же
+    // места" после полного перезапуска приложения) сильнее, но при обычном
+    // входе через кнопку-звено на строке проекта его никто не передаёт —
+    // тогда подставляем сюда то, что запомнили для ЭТОГО проекта в прошлый
+    // раз (см. getSavedProjectScrollTop выше): переживает переключение
+    // вкладок и закрытие приложения, не только "резюме" всего экрана целиком.
+    if(resumeScrollTop == null) resumeScrollTop = getSavedProjectScrollTop(projectId);
 
     var mode = "linked"; // "linked" — обычный вид (проект + next-задачи),
                           // "attach" — выбор существующей задачи для привязки
@@ -11594,13 +11677,18 @@
     // явному запросу через кнопку-звено. ---------- */
     function render(){
       flushPendingTaskEdits();
-      // Полная пересборка ниже (container.innerHTML) сама по себе обнуляет
-      // scrollTop — сохраняем и возвращаем позицию при каждом render() после
-      // первого, иначе список "прыгает" в начало при любом действии (галочка
-      // "в архив", приоритет, перенос и т.п.) — тот же приём, что уже
-      // применён в renderTaskTabList/renderTaskArchiveTab (см.
-      // preservedScrollTop там).
-      var preservedScrollTop = isFirstRender ? null : container.scrollTop;
+      // НАСТОЯЩАЯ причина прыжка (найдена по modals.css): скроллится не
+      // #settingsTabContent (container), а вложенная .task-project-area
+      // (#taskProjectArea) — у #settingsTabContent тут overflow:hidden
+      // через обёртку .task-project-modal-body, сам он на этом экране
+      // никогда не скроллится, scrollTop у него всегда 0. Раньше здесь
+      // (и в guardTaskListScroll/layoutSettingsModal) сохранялся именно
+      // scrollTop контейнера — то есть всегда 0, поэтому ничего и не
+      // помогало. Сохраняем позицию у СТАРОГО #taskProjectArea (пока он ещё
+      // не заменён через container.innerHTML ниже), тот же приём, что и в
+      // renderTaskTabList/renderTaskArchiveTab (см. preservedScrollTop там).
+      var oldArea = document.getElementById("taskProjectArea");
+      var preservedScrollTop = isFirstRender ? null : (oldArea ? oldArea.scrollTop : null);
       var projectTask = getTaskById(projectId);
       // Название проекта — часть ПРОКРУЧИВАЕМОЙ области ниже (см.
       // container.innerHTML ниже: вставляется ПЕРВЫМ элементом внутри
@@ -11717,16 +11805,33 @@
       });
 
       // сохранение позиции скролла (см. PROJECT_PICKER_RESUME_KEY выше) —
-      // только на самый первый рендер этого открытия: тут же восстанавливаем
-      // resumeScrollTop, если экран открыт через "продолжить с того же
-      // места" (см. openSettingsModal). Дальнейшие изменения позиции —
-      // уже через слушатель скролла ниже, а не через повторные render().
+      // область, у которой сохраняем/восстанавливаем позицию, — НАСТОЯЩИЙ
+      // скролл-контейнер #taskProjectArea (см. комментарий у
+      // preservedScrollTop выше), а не #settingsTabContent. На самый первый
+      // рендер этого открытия тут же восстанавливаем resumeScrollTop, если
+      // экран открыт через "продолжить с того же места" (см.
+      // openSettingsModal). Дальнейшие изменения позиции — через слушатель
+      // скролла на area, навешенный здесь же: сам узел #taskProjectArea
+      // пересоздаётся при каждом render() (container.innerHTML= выше), так
+      // что слушатель навешиваем заново на каждый рендер — старый узел
+      // уходит из DOM вместе со своим слушателем, копиться им негде.
+      var area = document.getElementById("taskProjectArea");
+      if(area){
+        area.addEventListener("scroll", function(){
+          if(projectPickerScrollSaveTimer) clearTimeout(projectPickerScrollSaveTimer);
+          projectPickerScrollSaveTimer = setTimeout(function(){
+            saveProjectPickerResumeState(projectId, area.scrollTop);
+            setSavedProjectScrollTop(projectId, area.scrollTop);
+          }, 200);
+        });
+      }
       if(isFirstRender){
         isFirstRender = false;
-        if(resumeScrollTop) container.scrollTop = resumeScrollTop;
-        saveProjectPickerResumeState(projectId, container.scrollTop);
-      } else if(preservedScrollTop != null){
-        container.scrollTop = preservedScrollTop;
+        if(area && resumeScrollTop) area.scrollTop = resumeScrollTop;
+        saveProjectPickerResumeState(projectId, area ? area.scrollTop : 0);
+        setSavedProjectScrollTop(projectId, area ? area.scrollTop : 0);
+      } else if(preservedScrollTop != null && area){
+        area.scrollTop = preservedScrollTop;
       }
     }
 
@@ -11858,35 +11963,19 @@
         // редактирования, иначе вставлять картинку станет некуда (см.
         // taskAttachDialogOpen выше)
         if(taskAttachDialogOpen) return;
-        var restoreScroll = window.Debug.guardTaskListScroll();
-        // ТЗ пользователя от 12.09 (правка после первой попытки): одноразовое
-        // восстановление scrollTop ровно через 500мс не помогло — на этом
-        // экране откат позиции, похоже, связан со сворачиванием мобильной
-        // клавиатуры после blur и может случиться позже и не строго один
-        // раз, а не только в узком окне сразу после blur, как у обычных
-        // задач. Вместо одной точки восстановления — "сторож" на
-        // requestAnimationFrame: на каждом кадре возвращает scrollTop
-        // контейнера к значению на момент blur, пока не пройдёт разумное
-        // окно (см. ниже) или пока пользователь сам не начнёт прокручивать
-        // (тогда сторож сразу снимается, чтобы не мешать обычному скроллу).
-        var savedScrollTop = container.scrollTop;
-        var guardDeadline = Date.now() + 1200;
-        var guardStopped = false;
-        function stopScrollGuard(){
-          guardStopped = true;
-          container.removeEventListener("touchstart", stopScrollGuard);
-          container.removeEventListener("wheel", stopScrollGuard);
-        }
-        container.addEventListener("touchstart", stopScrollGuard, {passive: true});
-        container.addEventListener("wheel", stopScrollGuard, {passive: true});
-        function guardTick(){
-          if(guardStopped) return;
-          if(Date.now() > guardDeadline){ stopScrollGuard(); return; }
-          if(container.scrollTop !== savedScrollTop) container.scrollTop = savedScrollTop;
-          requestAnimationFrame(guardTick);
-        }
-        requestAnimationFrame(guardTick);
-
+        // На этом экране настоящий скролл-контейнер — #taskProjectArea, а
+        // не #settingsTabContent (см. modals.css: .task-project-modal-body
+        // сам overflow:hidden, скроллится только вложенная .task-project-
+        // area) — без явного параметра guardTaskListScroll сторожил бы не
+        // тот элемент (у #settingsTabContent scrollTop тут всегда 0).
+        var restoreScroll = window.Debug.guardTaskListScroll(document.getElementById("taskProjectArea"));
+        // ГИПОТЕЗА по логу диагностики: браузер откладывает собственный
+        // "прокрутить каретку в видимую область" уже ПОСЛЕ blur — и если к
+        // моменту его срабатывания сам contenteditable-узел уже удалён, браузер
+        // откатывает scrollTop контейнера к 0. Проверяем: не удаляем узел
+        // сразу — только гасим редактируемость, а полную перерисовку строки
+        // откладываем до момента, когда это окно риска точно пройдёт. Тот же
+        // приём, что и в renderTaskRowEdit у обычных задач.
         var newText = getEditableNoteText(editable);
         setTaskText(id, newText.trim());
         editable.contentEditable = "false";
@@ -11925,24 +12014,12 @@
       });
     }
 
-    // слушатель скролла — сохраняет позицию по мере прокрутки (debounce,
-    // см. PROJECT_PICKER_RESUME_KEY выше). Вешаем на #settingsTabContent
-    // один раз за вызов: сам узел не пересоздаётся при render() (меняется
-    // только innerHTML), а старый обработчик от прошлого открытия пикера
-    // снимаем, чтобы не копились дубли.
-    if(projectPickerScrollHandler) container.removeEventListener("scroll", projectPickerScrollHandler);
-    projectPickerScrollHandler = function(){
-      if(projectPickerScrollSaveTimer) clearTimeout(projectPickerScrollSaveTimer);
-      projectPickerScrollSaveTimer = setTimeout(function(){
-        saveProjectPickerResumeState(projectId, container.scrollTop);
-      }, 200);
-    };
-    container.addEventListener("scroll", projectPickerScrollHandler);
-
-    // регистрируем render() как "текущий экран" для rerenderAllFromState
-    // (см. activeProjectPickerRerender выше) — иначе фоновая синхронизация,
-    // подоспевшая, пока этот экран открыт, затирала бы его обратно на
-    // список всех проектов
+    // регистрируем render() как обработчик "текущего экрана" для
+    // rerenderAllFromState (см. activeProjectPickerRerender выше) — та же
+    // полная пересборка + preservedScrollTop, что и у обычных задач
+    // (renderTaskTabList/renderTaskArchiveTab): защита от прыжка скролла —
+    // guardTaskListScroll() в blur-обработчике (см. renderRowEdit выше), а
+    // не то, что именно делает render() при пересборке.
     activeProjectPickerRerender = render;
     render();
   }
