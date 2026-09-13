@@ -602,6 +602,11 @@ window.addEventListener("error", function(e){
 <script src="imgresize.js"></script>
 <script src="mdeditor.js"></script>
 <script src="search.js"></script>
+<!-- flibusta.js — READER_PLAN.md, Этап E, шаг 17: подключение к OPDS-
+     каталогу для скачивания книг; должен идти ПОСЛЕ minizip.js — при
+     скачивании fb2.zip переиспользует MiniZip.extractAllFiles, своей
+     копии не заводит. -->
+<script src="flibusta.js"></script>
 <script src="debug.js"></script>
 <script src="my.js"></script>
 

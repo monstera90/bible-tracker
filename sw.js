@@ -6,7 +6,7 @@
 // что sw.js изменился, скачать новую версию в фоне и подготовить её к
 // установке — без этого шага обновление не будет обнаружено автоматически.
 
-const APP_VERSION = "v0.35.4";
+const APP_VERSION = "v0.35.1";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -49,6 +49,7 @@ const ASSETS = [
   "./imgresize.js",
   "./mdeditor.js",
   "./search.js",
+  "./flibusta.js",
   "./DejaVuSans.ttf",
   "./icon-192x192.png",
   "./icon-512x512.png"

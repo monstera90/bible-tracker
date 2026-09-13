@@ -3607,6 +3607,24 @@
   });
   var renderSettingsTabSearch = Search.renderSettingsTabSearch;
 
+  // ===================== FLIBUSTA (flibusta.js) =====================
+  // READER_PLAN.md, Этап E, шаг 17 (13.09) — кнопка "Flibusta" в нижнем
+  // ряду экрана чтения книги (см. bookReaderFlibustaBtn ниже) теперь
+  // открывает настоящий OPDS-каталог вместо заглушки со статус-сообщением.
+  // saveBookFile/registerBookInRegistry — ТЕ ЖЕ функции, что и у ручной
+  // загрузки книги (см. "Хранилище книг books/ (OPFS)" выше) — скачанная
+  // книга проходит ту же дедупликацию по хэшу и попадает в тот же реестр
+  // файлов (Этап A, шаг 3), то есть появляется и на остальных устройствах.
+  // getModalBox — геттер, а не готовое значение: settingsModalBox (var)
+  // присваивается ниже по файлу и на момент ЭТОЙ строки ещё undefined —
+  // тот же приём, что и getPencilIcon/getCheckIcon у Search выше.
+  var Flibusta = window.initFlibustaModule({
+    escapeHtml: escapeHtml,
+    getModalBox: function(){ return settingsModalBox; },
+    saveBookFile: saveBookFile,
+    registerBookInRegistry: registerBookInRegistry
+  });
+
   initTaskGlobalToolbar();
 
   // ---------------------------------------------------------------------
@@ -6608,8 +6626,8 @@
       '<path d="M4 5c3-1.5 6-1.5 8 0v14c-2-1.5-5-1.5-8 0V5z"></path>' +
       '<path d="M20 5c-3-1.5-6-1.5-8 0v14c2-1.5 5-1.5 8 0V5z"></path>' +
     '</svg>';
-  // Flibusta (Этап E, ещё не подключён) — глобус/меридианы, обозначает
-  // внешний каталог; кнопка пока только показывает статус-сообщение.
+  // Flibusta (Этап E, подключено 13.09, см. flibusta.js) — глобус/
+  // меридианы, обозначает внешний каталог.
   var READER_FLIBUSTA_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
       '<circle cx="12" cy="12" r="9"></circle>' +
@@ -6978,14 +6996,12 @@
       });
     }
 
-    // Flibusta (Этап E) — заглушка с понятным сообщением, не блокирует
-    // остальной ридер (см. ТЗ, READER_PLAN.md шаг 12).
+    // Flibusta (Этап E, шаг 17, 13.09) — открывает настоящий OPDS-каталог
+    // (flibusta.js) поверх окна настроек; сам ридер при этом не трогается
+    // и остаётся под каталогом (закрытие каталога просто убирает оверлей).
     var flibustaBtn = document.getElementById("bookReaderFlibustaBtn");
     if(flibustaBtn){
-      flibustaBtn.addEventListener("click", function(){
-        var status = document.getElementById("bookReaderStatus");
-        if(status) status.textContent = "Подключение к каталогу Flibusta появится позже (Этап E).";
-      });
+      flibustaBtn.addEventListener("click", function(){ Flibusta.openFlibustaCatalog(); });
     }
   }
 
