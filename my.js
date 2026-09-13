@@ -118,11 +118,54 @@
   // Полные альтернативные написания названий книг, которые реально
   // встречаются в текстах, но отличаются от канонического имени в
   // sections/BOOK_NUMBERS выше (поэтому не покрываются циклом по
-  // Object.keys(BOOK_NUMBERS) чуть выше SIMPLE_STEMS) — например, "Исайя"
-  // (с "й") наравне с "Исаия": раньше такое написание вообще не
-  // распознавалось как ссылка на Библию (см. ТЗ пользователя от 31.08).
+  // Object.keys(BOOK_NUMBERS) чуть выше SIMPLE_STEMS). Сюда же с 13.09
+  // добавлены формы РОДИТЕЛЬНОГО падежа полных названий книг — например,
+  // "Иисуса Навина 1:8" наравне с "Иисус Навин 1:8" (см. ТЗ пользователя
+  // от 13.09): в разговорной/письменной практике книгу часто называют так,
+  // как её называют внутри фразы "Книга ИМЯ" (родительный падеж), даже без
+  // самого слова "Книга" перед ссылкой. Только для книг, чьё каноническое
+  // название в sections стоит в ИМЕНИТЕЛЬНОМ падеже — Евангелия и Послания
+  // (Матфея, Иакова, Титу и т.п.) уже названы так, как выглядит формальная
+  // ссылка ("от Матфея", "к Титу"), склонять их не нужно. Не покрывает
+  // остальные падежи (дательный/предложный и т.п.) — этого достаточно не
+  // было в реальных текстах пользователя, добавлять по мере необходимости.
   var ALT_FULL_NAMES = {
-    "Исаия":["Исайя"]
+    "Бытие":["Бытия"],
+    "Исход":["Исхода"],
+    "Левит":["Левита"],
+    "Числа":["Чисел"],
+    "Второзаконие":["Второзакония"],
+    "Иисус Навин":["Иисуса Навина"],
+    "Руфь":["Руфи"],
+    "1 Летопись":["1 Летописи"],
+    "2 Летопись":["2 Летописи"],
+    "Ездра":["Ездры"],
+    "Неемия":["Неемии"],
+    "Эсфирь":["Эсфири"],
+    "Иов":["Иова"],
+    "Псалмы":["Псалмов"],
+    "Притчи":["Притчей"],
+    "Экклезиаст":["Экклезиаста"],
+    "Песня Соломона":["Песни Соломона"],
+    "Исаия":["Исайя","Исаии","Исайи"],
+    "Иеремия":["Иеремии"],
+    "Плач Иеремии":["Плача Иеремии"],
+    "Иезекииль":["Иезекииля"],
+    "Даниил":["Даниила"],
+    "Осия":["Осии"],
+    "Иоиль":["Иоиля"],
+    "Амос":["Амоса"],
+    "Авдий":["Авдия"],
+    "Иона":["Ионы"],
+    "Михей":["Михея"],
+    "Наум":["Наума"],
+    "Аввакум":["Аввакума"],
+    "Софония":["Софонии"],
+    "Аггей":["Аггея"],
+    "Захария":["Захарии"],
+    "Малахия":["Малахии"],
+    "Деяния":["Деяний"],
+    "Откровение":["Откровения"]
   };
   Object.keys(ALT_FULL_NAMES).forEach(function(canonical){
     ALT_FULL_NAMES[canonical].forEach(function(alt){ addAlias(alt, canonical); });
@@ -151,7 +194,7 @@
   // Двусловные сокращения (Иис. Нав., Пл. Иер.) — вариант с точками и
   // "слитный" вариант без них.
   var MULTI_WORD_ALIASES = {
-    "Иисус Навин":["Иис. Нав."],
+    "Иисус Навин":["Иис. Нав.", "Иис. Н."],
     "Плач Иеремии":["Пл. Иер."]
   };
   Object.keys(MULTI_WORD_ALIASES).forEach(function(canonical){
@@ -186,6 +229,22 @@
       "g"
     );
   })();
+
+  // Продолжения списка ссылок БЕЗ повтора названия книги — например
+  // "Пс. 16:8; 112:1, 6—8": после первой полной ссылки (книга+глава[:стих])
+  // дальше в скобке идут ещё ссылки той же книги без имени книги (см.
+  // скриншот пользователя от 13.09 — такие хвосты вообще не подсвечивались).
+  // Две отдельные разметки-"хвоста":
+  //   1) через ";" — новая ГЛАВА той же книги, с необязательным стихом/
+  //      диапазоном стихов ("; 112:1", "; 3");
+  //   2) через "," — ещё один стих/диапазон стихов В ТЕКУЩЕЙ главе
+  //      ("112:1, 6—8" — второй кусок это стихи 6-8 всё той же 112 главы).
+  // Обе — со sticky-флагом ("y"): matchable строго с позиции lastIndex,
+  // сразу после предыдущего распознанного куска, без пропуска текста между
+  // ними — иначе случайные ";"/"," в произвольном месте текста тоже стали
+  // бы захватываться как продолжение ссылки.
+  var SEMI_CONT_RE = /;\s*(\d{1,3})(?:[:.](\d{1,3})(?:\s*[-–—]\s*(\d{1,3}))?)?/y;
+  var COMMA_CONT_RE = /,\s*(\d{1,3})(?:\s*[-–—]\s*(\d{1,3}))?/y;
 
   // ===================== ФОРМАТИРОВАНИЕ В СТИЛЕ OBSIDIAN =====================
   // ссылки http(s)://, www. — конечная пунктуация сразу после ссылки
@@ -372,6 +431,54 @@
             return '<a href="' + link + '" target="_blank" rel="noopener noreferrer" class="auto-link scripture-link">' + escapeHtml(raw) + '</a>';
           });
         })(mScr.index, mScr.index + mScr[0].length, mScr);
+
+        // Хвосты того же списка ссылок без повтора книги (см.
+        // SEMI_CONT_RE/COMMA_CONT_RE выше) — только если у только что
+        // распознанной ссылки есть каноническое название книги.
+        var canonicalForCont = BOOK_ALIASES[mScr[1]];
+        if(canonicalForCont){
+          var contPos = mScr.index + mScr[0].length;
+          var contChapter = Number(mScr[2]);
+          var contHasVerse = !!mScr[3];
+          var guard = 0;
+          while(guard++ < 50){
+            SEMI_CONT_RE.lastIndex = contPos;
+            var mSemi = SEMI_CONT_RE.exec(text);
+            if(mSemi){
+              (function(a, b, chapter, v1, v2){
+                tryClaim(a, b, function(){
+                  var link = scriptureRefLink(canonicalForCont, chapter, v1, v2);
+                  var raw = text.slice(a, b);
+                  if(!link) return escapeHtml(raw);
+                  return '<a href="' + link + '" target="_blank" rel="noopener noreferrer" class="auto-link scripture-link">' + escapeHtml(raw) + '</a>';
+                });
+              })(contPos, contPos + mSemi[0].length, Number(mSemi[1]), mSemi[2] ? Number(mSemi[2]) : undefined, mSemi[3] ? Number(mSemi[3]) : undefined);
+              contChapter = Number(mSemi[1]);
+              contHasVerse = !!mSemi[2];
+              contPos += mSemi[0].length;
+              continue;
+            }
+            if(contHasVerse){
+              COMMA_CONT_RE.lastIndex = contPos;
+              var mComma = COMMA_CONT_RE.exec(text);
+              if(mComma){
+                (function(a, b, v1, v2){
+                  tryClaim(a, b, function(){
+                    var link = scriptureRefLink(canonicalForCont, contChapter, v1, v2);
+                    var raw = text.slice(a, b);
+                    if(!link) return escapeHtml(raw);
+                    return '<a href="' + link + '" target="_blank" rel="noopener noreferrer" class="auto-link scripture-link">' + escapeHtml(raw) + '</a>';
+                  });
+                })(contPos, contPos + mComma[0].length, Number(mComma[1]), mComma[2] ? Number(mComma[2]) : undefined);
+                contPos += mComma[0].length;
+                continue;
+              }
+            }
+            break;
+          }
+          if(contPos > SCRIPTURE_RE.lastIndex) SCRIPTURE_RE.lastIndex = contPos;
+        }
+
         if(mScr[0].length === 0) SCRIPTURE_RE.lastIndex++;
       }
     }
