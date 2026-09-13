@@ -1262,8 +1262,11 @@
   };
   // а вот КУДА реально можно перенести задачу стрелочкой (пикер
   // "Перенести задачу") — без red, т.к. принадлежность к Red определяется
-  // не вкладкой-домом, а цветной отметкой слева от чекбокса
-  var TASK_MOVE_TARGET_TABS = ["worktasks","inbox","next","projects","waiting","read","council","someday","jointtasks"];
+  // не вкладкой-домом, а цветной отметкой слева от чекбокса. С 13.09 по
+  // тому же принципу убрана и worktasks — она стала витриной (см.
+  // getTasksForTab/toggleTaskInWork), принадлежность определяется
+  // пиктограммой-чемоданчиком (inWork), а не вкладкой-домом.
+  var TASK_MOVE_TARGET_TABS = ["inbox","next","projects","waiting","read","council","someday","jointtasks"];
   var TASK_MOVE_ICONS = {
     red: '<path d="M5 3v18"></path><path d="M5 4h11l-2.5 4L16 12H5"></path>',
     // портфель — вкладка-заглушка "Задачи в работе" / "worktasks" (ТЗ
@@ -10722,6 +10725,16 @@
   //                     отметка задачи выполненной прямо на вкладке Red
   //                     закрывает тот же самый task:<id> — и он пропадает
   //                     отовсюду разом, это одна и та же запись, не копия.
+  //   inWork          — пиктограмма-чемоданчик (true/false), НЕЗАВИСИМАЯ от
+  //                     flag (ТЗ пользователя от 13.09): простой toggle
+  //                     (не цикл, см. toggleTaskInWork), доступен у КАЖДОЙ
+  //                     задачи на ЛЮБОЙ вкладке. Вкладка "Задачи в работе"
+  //                     (worktasks) устроена ТОЧНО как Red — витрина, не
+  //                     хранилище: показывает любую незакрытую задачу с
+  //                     inWork===true, независимо от её реальной домашней
+  //                     вкладки (см. getTasksForTab). Залита — задача видна
+  //                     на worktasks; сняли заливку — исчезла оттуда, но
+  //                     осталась на своей настоящей вкладке.
   function genTaskId(){
     return "tk" + Date.now() + Math.random().toString(36).slice(2,7);
   }
@@ -10774,19 +10787,24 @@
     var id = genTaskId();
     // на вкладке Red своего хранилища нет (см. пояснение выше) — такая
     // задача реально уходит в inbox, но сразу получает красную отметку,
-    // поэтому продолжает быть видна на Red
-    var homeTab = (tab === "red") ? "inbox" : tab;
+    // поэтому продолжает быть видна на Red. Тем же приёмом устроена и
+    // "Задачи в работе" (worktasks, ТЗ от 13.09) — своего хранилища тоже
+    // нет, задача реально уходит в next, но сразу получает inWork=true,
+    // поэтому продолжает быть видна на worktasks (и одновременно — на next).
+    var homeTab = (tab === "red") ? "inbox" : (tab === "worktasks" ? "next" : tab);
     var flag = (tab === "red") ? "red" : null;
-    saveTaskData(id, {text: "", tab: homeTab, checked: false, checkedAt: null, completionKey: null, nextForProjectId: null, flag: flag});
+    var inWork = (tab === "worktasks");
+    saveTaskData(id, {text: "", tab: homeTab, checked: false, checkedAt: null, completionKey: null, nextForProjectId: null, flag: flag, inWork: inWork});
     return id;
   }
   // как createTask, но сразу с готовым текстом — для массового
   // восстановления задач из .txt (см. renderSettingsTabImportFile)
   function createTaskWithText(tab, text){
     var id = genTaskId();
-    var homeTab = (tab === "red") ? "inbox" : tab;
+    var homeTab = (tab === "red") ? "inbox" : (tab === "worktasks" ? "next" : tab);
     var flag = (tab === "red") ? "red" : null;
-    saveTaskData(id, {text: text, tab: homeTab, checked: false, checkedAt: null, completionKey: null, nextForProjectId: null, flag: flag});
+    var inWork = (tab === "worktasks");
+    saveTaskData(id, {text: text, tab: homeTab, checked: false, checkedAt: null, completionKey: null, nextForProjectId: null, flag: flag, inWork: inWork});
     return id;
   }
   // Задача, отмеченная "[x]" прямо в "Моих заметках" (см. TaskActionsWidget
@@ -10800,10 +10818,22 @@
     var ts = Date.now();
     var completionKey = "taskcompletion:" + ts + "-" + Math.random().toString(36).slice(2,7);
     state[completionKey] = {c: {text: text || "Без названия", tab: "inbox"}, t: ts};
-    saveTaskData(id, {text: text, tab: "inbox", checked: true, checkedAt: ts, completionKey: completionKey, nextForProjectId: null, flag: null});
+    saveTaskData(id, {text: text, tab: "inbox", checked: true, checkedAt: ts, completionKey: completionKey, nextForProjectId: null, flag: null, inWork: false});
     return id;
   }
   function getTasksForTab(tab){
+    if(tab === "worktasks"){
+      // витрина по пиктограмме-чемоданчику (см. toggleTaskInWork) — та же
+      // схема, что и у Red чуть ниже: показывает ЛЮБУЮ незакрытую задачу с
+      // inWork===true, из какой бы вкладки она ни была, плюс на всякий
+      // случай задачи с «настоящим» tab==="worktasks" (могли остаться из
+      // более старой версии данных, когда worktasks ещё была обычным
+      // местом хранения, до ТЗ от 13.09 про пиктограмму-чемоданчик)
+      return getAllTasks().filter(function(t){
+        if(t.c.checked === true) return false;
+        return t.c.tab === "worktasks" || t.c.inWork === true;
+      }).sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
+    }
     if(tab === "red"){
       // витрина: любая незакрытая задача с красной/жёлтой отметкой, из
       // какой бы вкладки она ни была — плюс на всякий случай задачи с
@@ -10859,6 +10889,17 @@
     task.c.flag = next;
     saveTaskData(id, task.c);
     return next;
+  }
+  // пиктограмма-чемоданчик слева... точнее в ряду .task-actions (см.
+  // renderTaskRowView/renderTaskRowEdit) — простой toggle (не цикл, как у
+  // cycleTaskFlag выше), независимый от flag. Возвращает новое значение
+  // (true/false). ТЗ пользователя от 13.09.
+  function toggleTaskInWork(id){
+    var task = getTaskById(id);
+    if(!task) return null;
+    task.c.inWork = !task.c.inWork;
+    saveTaskData(id, task.c);
+    return task.c.inWork;
   }
   function checkTaskDone(id){
     var task = getTaskById(id);
@@ -11739,6 +11780,7 @@
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
+        '<button type="button" class="task-icon-btn task-worktasks-btn' + (task.c.inWork ? " active" : "") + '" data-id="' + task.id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + task.id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
       '</span>';
     body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderTaskRowEdit(id, tabKey, onAfterAction); });
@@ -11827,6 +11869,22 @@
     }
     var nextBtn = body.querySelector(".task-next-btn");
     if(nextBtn) nextBtn.addEventListener("click", function(){ openTaskNextPicker(id, tabKey); });
+    // пиктограмма-чемоданчик — toggle inWork (см. toggleTaskInWork). Та же
+    // логика точечного/полного обновления, что и у флажка чуть ниже: на
+    // витрине "Задачи в работе" состав списка зависит от inWork, поэтому
+    // там нужна полная пересборка (задача может тут же исчезнуть/появиться),
+    // на остальных вкладках — точечное обновление своей строки.
+    var worktasksBtn = body.querySelector(".task-worktasks-btn");
+    if(worktasksBtn){
+      worktasksBtn.addEventListener("click", function(e){
+        e.stopPropagation();
+        flushPendingTaskEdits();
+        toggleTaskInWork(id);
+        var effectiveTab = tabKey || task.c.tab;
+        if(effectiveTab === "worktasks") renderTaskTabList(effectiveTab, id);
+        else renderTaskRowView(id, tabKey, onAfterAction);
+      });
+    }
     var dot = body.querySelector(".task-flag-dot");
     if(dot){
       dot.addEventListener("click", function(e){
@@ -11871,6 +11929,7 @@
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
+        '<button type="button" class="task-icon-btn task-worktasks-btn' + (task.c.inWork ? " active" : "") + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
       '</span>';
     var editable = document.getElementById("taskEditable_" + id);
@@ -12286,6 +12345,7 @@
           '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
+          '<button type="button" class="task-icon-btn task-worktasks-btn' + (task.c.inWork ? " active" : "") + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
         '</span>';
       body.querySelector(".task-expand-btn").addEventListener("click", function(e){
@@ -12326,6 +12386,15 @@
           }, 1200);
         });
       }
+      var worktasksBtn = body.querySelector(".task-worktasks-btn");
+      if(worktasksBtn){
+        worktasksBtn.addEventListener("click", function(e){
+          e.stopPropagation();
+          flushPendingTaskEdits();
+          toggleTaskInWork(id);
+          renderRowView(id);
+        });
+      }
       var dot = body.querySelector(".task-flag-dot");
       if(dot){
         dot.addEventListener("click", function(e){
@@ -12352,6 +12421,7 @@
           '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
+          '<button type="button" class="task-icon-btn task-worktasks-btn' + (task.c.inWork ? " active" : "") + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
         '</span>';
       var editable = document.getElementById("taskEditable_" + id);

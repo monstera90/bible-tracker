@@ -1028,6 +1028,21 @@
     -webkit-tap-highlight-color:transparent;
   }
   .task-icon-btn svg{ width:15px; height:15px; }
+  /* пиктограмма-чемоданчик "В работе" (.task-worktasks-btn, ТЗ
+     пользователя от 13.09, toggleTaskInWork в my.js) — обычное
+     (не залитое) состояние ничем не отличается от остальных кнопок
+     строки (.task-icon-btn, currentColor → var(--wood), уже меняется
+     вместе с темой). Залитое состояние — тот же язык проекта для
+     "включено"/"активно", что и у .mdeditor-fab-btn.pressed
+     (components.css): заливка var(--wood)/var(--parchment) вместо
+     фиксированного цвета, как у .task-flag-dot.flag-red/flag-yellow —
+     здесь именно ТЕМА, а не своя постоянная краска, поэтому меняется
+     вместе с палитрой (data-theme 1..7, см. theme.css). */
+  .task-icon-btn.task-worktasks-btn.active{
+    background:var(--wood);
+    color:var(--parchment);
+    border-radius:50%;
+  }
   /* значок-шеврон "показать полностью" (.task-expand-btn) — тот же
      .task-icon-btn, что и остальные кнопки строки задачи, только сам
      переворачивается на 180° в развёрнутом состоянии (класс .is-expanded
