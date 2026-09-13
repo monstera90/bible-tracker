@@ -5588,8 +5588,8 @@
     else if(tab === "set2s_5") renderSettingsTabEpubSplit();
     else if(tab === "set2s_6") renderSettingsTabImgResize();
     // седьмая боковая вкладка второго набора (set2s_7) — ЭТО БОЛЬШЕ НЕ
-    // ЗАГЛУШКА (READER_PLAN.md, Этап D, шаг 9, 11.09): список fb2-книг из
-    // books/ (OPFS), тем же способом вынесена ДО общей проверки на
+    // ЗАГЛУШКА (READER_PLAN.md, Этап D, шаг 9, 11.09): список книг (fb2/epub)
+    // из books/ (OPFS), тем же способом вынесена ДО общей проверки на
     // renderSettingsTabSet2Stub, что и остальные уже не-заглушки этого
     // набора выше — см. renderSettingsTabBooks ниже.
     // Возврат на вкладку "Книги" после ухода на другую вкладку настроек
@@ -6041,18 +6041,23 @@
     });
   }
 
-  // Обрабатывает выбранный файл — точка входа для кнопки "Загрузить fb2
-  // или zip книг" (см. renderSettingsTabBooks ниже). Одиночный .fb2
-  // сохраняется как есть; .zip разбирается через MiniZip.extractAllFiles
+  // Обрабатывает выбранный файл — точка входа для кнопки "Загрузить fb2,
+  // epub или zip книг" (см. renderSettingsTabBooks ниже). Одиночный .fb2
+  // или .epub сохраняется как есть (сам разбор формата — на этапе
+  // ОТКРЫТИЯ книги, см. parseBookBuffer ниже, здесь файл только копируется
+  // в books/ байт-в-байт); .zip разбирается через MiniZip.extractAllFiles
   // (произвольные бинарные записи, см. minizip.js) — из него берутся
-  // только записи с расширением .fb2, остальное молча пропускается (сам
-  // архив может быть просто "пачкой" из нескольких книг). Файлы
+  // записи с расширением .fb2 ИЛИ .epub, остальное молча пропускается (сам
+  // архив может быть просто "пачкой" из нескольких книг разных форматов;
+  // отдельный .epub внутри такого zip — это вложенный zip-архив, который
+  // здесь не разворачивается ещё на один уровень, а сохраняется как файл
+  // книги целиком, ровно как если бы его загрузили по одному). Файлы
   // сохраняются ПОСЛЕДОВАТЕЛЬНО, не параллельно: saveBookFile читает и
   // переписывает один и тот же файл-манифест — при параллельных вызовах
   // это гонка (последняя запись манифеста молча стёрла бы предыдущую).
   function handleImportBooksFile(file, setStatusFn){
     var lowerName = (file.name || "").toLowerCase();
-    if(lowerName.endsWith(".fb2")){
+    if(lowerName.endsWith(".fb2") || lowerName.endsWith(".epub")){
       file.arrayBuffer().then(function(buf){
         return saveBookFile(file.name, new Uint8Array(buf));
       }).then(function(result){
@@ -6074,18 +6079,18 @@
       file.arrayBuffer().then(function(buf){
         return window.MiniZip.extractAllFiles(buf);
       }).then(function(files){
-        var fb2Files = files.filter(function(f){ return /\.fb2$/i.test(f.path); });
-        if(!fb2Files.length){
-          setStatusFn("В архиве не найдено файлов .fb2.", true);
+        var bookFiles = files.filter(function(f){ return /\.(fb2|epub)$/i.test(f.path); });
+        if(!bookFiles.length){
+          setStatusFn("В архиве не найдено файлов .fb2 или .epub.", true);
           return;
         }
         var added = 0, skipped = 0;
         function next(i){
-          if(i >= fb2Files.length){
+          if(i >= bookFiles.length){
             setStatusFn("Загружено книг: " + added + (skipped ? ", уже было: " + skipped : "") + ".", false);
             return;
           }
-          var entry = fb2Files[i];
+          var entry = bookFiles[i];
           var baseName = entry.path.slice(entry.path.lastIndexOf("/") + 1);
           saveBookFile(baseName, entry.data).then(function(result){
             if(result.added){ added++; registerBookInRegistry(result.hash, result.name, result.size); }
@@ -6101,7 +6106,7 @@
       });
       return;
     }
-    setStatusFn("Выберите файл .fb2 или .zip.", true);
+    setStatusFn("Выберите файл .fb2, .epub или .zip.", true);
   }
 
   // ===================== МОДЕЛЬ СОСТОЯНИЯ КНИГИ (READER_PLAN.md, Этап C, шаг 8) =====================
@@ -6368,8 +6373,8 @@
   }
 
   // Седьмая боковая вкладка второго набора (set2s_7) — READER_PLAN.md,
-  // Этап D, шаг 9 (11.09). ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: список fb2-книг из
-  // books/ (OPFS), тем же образцом разметки, что и списки заметок/задач
+  // Этап D, шаг 9 (11.09; поддержка epub — добавлена позже). ЭТО БОЛЬШЕ НЕ
+  // ЗАГЛУШКА: список книг (fb2/epub) из books/ (OPFS), тем же образцом разметки, что и списки заметок/задач
   // (mdeditor-tab/-empty/-status/-list/-list-grid/-row/-row-name/
   // -list-actions/-list-action-btn, components.css) — свой стиль не
   // изобретаем, см. renderListScreen в mdeditor.js. Пиктограмма строки —
@@ -6396,9 +6401,9 @@
     html += '<div class="mdeditor-list mdeditor-list-grid" id="booksList"></div>';
     html += '<div class="mdeditor-status" id="booksStatus"></div>';
     html += '<div class="mdeditor-list-actions">';
-    html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="booksImportBtn">Загрузить fb2 или zip книг</button>';
+    html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="booksImportBtn">Загрузить fb2, epub или zip книг</button>';
     html += '</div>';
-    html += '<input type="file" accept=".fb2,.zip,application/zip" id="booksImportInput" style="display:none;">';
+    html += '<input type="file" accept=".fb2,.epub,.zip,application/zip" id="booksImportInput" style="display:none;">';
     html += '</div>';
     container.innerHTML = html;
 
@@ -6672,6 +6677,37 @@
     catch(e){ return new TextDecoder("utf-8").decode(buffer); } // неизвестная браузеру кодировка — пробуем utf-8, лучше кривой текст, чем ничего
   }
 
+  // Общая точка входа для обоих форматов книг — по расширению имени файла
+  // выбирает нужный парсер и приводит результат к ОДНОМУ И ТОМУ ЖЕ
+  // контракту {chapters, images} (см. шапки fb2parse.js и epubparse.js) —
+  // весь остальной код экрана чтения ниже (renderRunsHtml,
+  // renderBookReaderText, закладки на полях, подчёркивания, иллюстрации)
+  // работает с этим контрактом одинаково для обоих форматов и не завязан
+  // на конкретный формат файла. Всегда возвращает Promise: у fb2 сам разбор
+  // синхронный (decodeFb2Buffer + Fb2Parse.parseFb2 — работают с уже
+  // скачанными байтами файла напрямую), но оборачивается в Promise.resolve
+  // для единообразия с epub, где разбор асинхронный (нужно сначала
+  // распаковать zip через MiniZip, см. epubparse.js).
+  function parseBookBuffer(name, buffer){
+    var lowerName = (name || "").toLowerCase();
+    if(lowerName.endsWith(".epub")){
+      if(!window.EpubParse || !window.EpubParse.parseEpub){
+        return Promise.reject(new Error("Модуль разбора epub (epubparse.js) не загружен."));
+      }
+      return window.EpubParse.parseEpub(buffer);
+    }
+    return Promise.resolve(Fb2Parse.parseFb2(decodeFb2Buffer(buffer)));
+  }
+
+  // Имя книги без расширения формата (.fb2/.epub) — общее место вместо
+  // нескольких точечных .replace(/\.fb2$/i, "") по файлу (список глав,
+  // заметка от иллюстрации, имя файла картинки при экспорте в заметку),
+  // чтобы добавление ещё одного формата книг не требовало искать их все
+  // заново по всему my.js.
+  function stripBookExt(name){
+    return (name || "").replace(/\.(fb2|epub)$/i, "");
+  }
+
   function revokeBookReaderImages(){
     if(!bookReaderState || !bookReaderState.imageUrls) return;
     Object.keys(bookReaderState.imageUrls).forEach(function(id){
@@ -6699,8 +6735,9 @@
       return file.arrayBuffer();
     }).then(function(buf){
       return sha256Hex(buf).then(function(hash){
-        var parsed = Fb2Parse.parseFb2(decodeFb2Buffer(buf));
-        return {hash: hash, parsed: parsed};
+        return parseBookBuffer(name, buf).then(function(parsed){
+          return {hash: hash, parsed: parsed};
+        });
       });
     }).then(function(res){
       var imageUrls = {}, imageBytes = {};
@@ -7044,7 +7081,7 @@
           img.addEventListener("click", function(){
             var url = bookReaderState.imageUrls[imageId];
             if(url && MdEditor && MdEditor.openImageViewer){
-              MdEditor.openImageViewer(url, (bookReaderState.name || "").replace(/\.fb2$/i, ""));
+              MdEditor.openImageViewer(url, stripBookExt(bookReaderState.name));
             }
           });
         }
@@ -7266,7 +7303,7 @@
     var input = document.getElementById("bookNoteNameInput");
     // Имя книги (без расширения) как разумное имя заметки по умолчанию —
     // пользователь может стереть и вписать своё, поле сразу выделено.
-    if(bookReaderState && bookReaderState.name) input.value = bookReaderState.name.replace(/\.fb2$/i, "");
+    if(bookReaderState && bookReaderState.name) input.value = stripBookExt(bookReaderState.name);
     input.focus();
     input.select();
 
@@ -7604,7 +7641,7 @@
     var imgData = bookReaderState.imageBytes ? bookReaderState.imageBytes[imageId] : null;
     if(!imgData || !MdEditor || !MdEditor.saveImageBytes) return;
     function finishWithNoteId(noteId){
-      var baseName = (bookReaderState.name || "book").replace(/\.fb2$/i, "") +
+      var baseName = stripBookExt(bookReaderState.name || "book") +
         " " + (ch + 1) + "-" + (blk + 1) + extFromImageContentType(imgData.contentType);
       MdEditor.saveImageBytes(baseName, imgData.bytes, imgData.contentType).then(function(finalName){
         MdEditor.appendTextToNoteId(noteId, "![[" + finalName + "]]");

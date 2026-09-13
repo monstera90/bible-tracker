@@ -587,6 +587,11 @@ window.addEventListener("error", function(e){
      UI" здесь, должен идти ПОСЛЕ minizip.js: переиспользует
      MiniZip.decodeXmlEntities, своей копии не заводит. -->
 <script src="fb2parse.js"></script>
+<!-- epubparse.js — разбор .epub в ту же структуру глав/абзацев/картинок,
+     что и fb2parse.js выше (см. общий контракт в шапке файла) — тоже
+     должен идти ПОСЛЕ minizip.js: переиспользует MiniZip.extractAllFiles
+     (распаковка zip) и MiniZip.decodeXmlEntities, своих копий не заводит. -->
+<script src="epubparse.js"></script>
 <script src="workbookparse.js"></script>
 <script src="workbooks.js"></script>
 <script src="jwlmerge.js"></script>
