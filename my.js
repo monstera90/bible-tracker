@@ -1117,7 +1117,8 @@
   // 13.09): приподнимает последнюю карточку списка над плавающими
   // кнопками (+/домик и т.п.), когда список прокручен до самого низа.
   // Используется вкладками задач (renderTaskTabList, включая "Мои
-  // проекты") и вкладкой "Комментарии" (renderCommentsTab) — везде, где
+  // проекты"), вкладкой "Комментарии" (renderCommentsTab) и экраном "Все
+  // задачи проекта" (openTaskNextPicker, добавлено позже) — везде, где
   // над списком висит .task-add-fab/.task-project-fab-home. Архивная
   // вкладка (renderTaskArchiveTab) не получает её — там этих кнопок нет
   // (archive не входит в TASK_MOVABLE_TABS, см. syncTaskFabRowForTab).
@@ -7019,6 +7020,14 @@
   // Перерисовывает innerHTML ОДНОГО абзаца (без перерисовки всего ридера,
   // чтобы не сбрасывать scrollTop, к которому пользователь сейчас читает) —
   // вызывается сразу после того, как подчёркивание сохранено в модели книги.
+  // pEl.innerHTML= ниже пересоздаёт <mark class="book-reader-underline">
+  // этого абзаца заново — старые обработчики клика (см.
+  // bindBookReaderUnderlineClicks) вместе со старыми узлами уничтожаются, а
+  // новые узлы клика не получают вовсе. Раньше это чинилось только полным
+  // рендером ридера (переключение вкладки и обратно) — теперь сразу же
+  // перепривязываем клики ЛОКАЛЬНО, только внутри этого абзаца (scope=pEl),
+  // чтобы кнопка-урна появлялась по тапу сразу после создания подчёркивания,
+  // а не только после ухода со вкладки и возврата (ТЗ пользователя от 13.09).
   function refreshBookReaderParagraphHighlight(ch, blk){
     if(!bookReaderState || bookReaderState.mode !== "text") return;
     var pEl = document.getElementById("bookP_" + ch + "_" + blk);
@@ -7027,6 +7036,7 @@
     if(!pEl || !block) return;
     var ranges = getBookUnderlineRangesForBlock(bookReaderState.hash, ch, blk);
     pEl.innerHTML = renderRunsHtml(block.runs, ranges);
+    bindBookReaderUnderlineClicks(pEl);
   }
 
   // Диалог ввода имени заметки книги — тот же общий вид карточки, что у
@@ -7313,8 +7323,19 @@
   // протяжённого выделения (drag) — иначе обычное выделение текста внутри
   // уже подчёркнутого фрагмента (например, для копирования) конфликтовало
   // бы с открытием кнопки при каждом отпускании пальца/мыши.
-  function bindBookReaderUnderlineClicks(){
-    var container = document.getElementById("settingsTabContent");
+  // scope — необязательный элемент, внутри которого искать <mark> (по
+  // умолчанию — весь #settingsTabContent, как раньше); передаётся отдельным
+  // абзацем из refreshBookReaderParagraphHighlight (см. ниже, правка от
+  // 13.09): pEl.innerHTML= там пересоздаёт <mark>-элементы абзаца заново,
+  // и без повторного вызова этой функции именно для НИХ у новых меток не
+  // было обработчика клика вовсе (кнопка-урна не появлялась сразу после
+  // создания подчёркивания — только после ухода со вкладки и возврата,
+  // когда срабатывал полный рендер ридера и bindBookReaderUnderlineClicks()
+  // без scope заново обходил ВСЕ метки). Вызов со scope=pEl трогает только
+  // метки этого абзаца — на остальные, уже привязанные раньше полным
+  // рендером, обработчик по второму разу не вешается.
+  function bindBookReaderUnderlineClicks(scope){
+    var container = scope || document.getElementById("settingsTabContent");
     if(!container || !bookReaderState) return;
     container.querySelectorAll(".book-reader-underline").forEach(function(mark){
       mark.addEventListener("click", function(ev){
@@ -11942,14 +11963,16 @@
           var label = t.c.text ? escapeHtml(t.c.text) : "Без названия";
           return '<button type="button" class="version-history-item" data-avail-id="' + t.id + '">' + label + '</button>';
         }).join("");
-        areaHtml = projectNameHtml + '<div class="task-list">' + availableHtml + '</div>' +
+        areaHtml = projectNameHtml + '<div class="task-list">' + availableHtml +
+          (available.length === 0 ? '' : TASK_LIST_BOTTOM_SPACER_HTML) + '</div>' +
           (available.length === 0 ? '<div class="task-empty">Нет доступных задач.</div>' : '');
       } else {
         var linked = getLinkedTasks();
         var linkedHtml = linked.map(function(t){
           return '<div class="task-row" data-id="' + t.id + '"><div class="task-body" data-id="' + t.id + '"></div></div>';
         }).join("");
-        areaHtml = projectNameHtml + '<div class="task-list">' + linkedHtml + '</div>' +
+        areaHtml = projectNameHtml + '<div class="task-list">' + linkedHtml +
+          (linked.length === 0 ? '' : TASK_LIST_BOTTOM_SPACER_HTML) + '</div>' +
           (linked.length === 0 ? '<div class="task-empty">Пока нет задач, привязанных к проекту.</div>' : '');
       }
       container.innerHTML =
