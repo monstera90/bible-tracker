@@ -3103,6 +3103,37 @@
     border-color:var(--danger, #c0392b);
     color:var(--danger, #c0392b);
   }
+  /* Список пунктов вертикальным столбиком — вариант .mdeditor-cleanup-actions
+     для диалогов с 2+ равноправными действиями (не "да/нет", а "выбери
+     один из списка"), не в ряд, а друг под другом. Сделан специально под
+     будущее расширение (ТЗ пользователя от 13.09, файл через "Поделиться":
+     сейчас у .mp4 в списке всего один пункт, позже добавятся другие) — в
+     ряд длинный список кнопок не поместился бы. См.
+     openSharedFileActionList в my.js. */
+  .mdeditor-cleanup-actions-list{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .mdeditor-cleanup-list-btn{
+    width:100%;
+    box-sizing:border-box;
+    padding:10px 14px;
+    border-radius:6px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:13.5px;
+    text-align:center;
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+    background:transparent;
+    border:1px solid var(--groove-shadow);
+    color:var(--ink);
+  }
+  .mdeditor-cleanup-list-btn:active{
+    background:var(--wood);
+    border-color:var(--wood-dark);
+    color:var(--parchment);
+  }
   /* поле ввода имени новой заметки (см. openNewNoteDialog в mdeditor.js) —
      тот же диалог-карточка .mdeditor-cleanup-card, что и у "Удалить
      неиспользуемые файлы" выше. */

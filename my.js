@@ -12827,6 +12827,166 @@
     arm(document.getElementById("settingsModalOverlay"), function(){ closeSettingsModal(); });
   })();
 
+  // ===================== ПОЛУЧЕНИЕ ФАЙЛОВ ЧЕРЕЗ "ПОДЕЛИТЬСЯ" (Web Share
+  // Target, ТЗ пользователя от 13.09) =====================
+  // Схема целиком: manifest.json (share_target) заставляет Android
+  // предлагать это приложение в системном меню "Поделиться" для .fb2/
+  // .epub/.mp4; Android шлёт POST с файлом на "./share-target" — этот
+  // запрос перехватывает sw.js (у приложения нет бэкенда, POST больше
+  // некому обработать), кладёт файл во временный кэш (SHARE_TARGET_CACHE/
+  // SHARE_TARGET_KEY, см. sw.js) и отвечает редиректом на
+  // "./index.html?shared=1". checkForSharedFile ниже (вызывается один раз
+  // при каждом запуске страницы, см. "ЗАПУСК") видит этот параметр,
+  // забирает файл из кэша, тут же его оттуда стирает и чистит адресную
+  // строку — дальше решение о том, что делать с файлом, целиком в
+  // handleSharedFile.
+  //
+  // Открытие нужной вкладки настроек "с холодного старта" (окно настроек
+  // до этого могло вообще ни разу не открываться в этом запуске) — общая
+  // обёртка, а не прямой switchSettingsTab, потому что просто
+  // switchSettingsTab не откроет сам оверлей окна и не переключит
+  // settingsActiveTabSet на второй набор, где живут все три нужные вкладки
+  // (Книги/Разделение epub/Извлечение субтитров).
+  function openSettingsTabDirect(tab){
+    var alreadyOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay &&
+      settingsModalOverlay.classList.contains("open");
+    if(!alreadyOpen) openSettingsModal();
+    settingsActiveTabSet = 2;
+    applySettingsTabSetVisibility();
+    switchSettingsTab(tab);
+  }
+
+  // Подставляет File в реальный <input type="file"> и дёргает на нём
+  // "change" — так вкладки-приёмники (субтитры/epub-split) обрабатывают
+  // расшаренный файл ТОЧНО тем же кодом, что и обычный ручной выбор файла
+  // (имя показывается в статусе, кнопка "Начать" разблокируется), без
+  // копирования их внутренней логики сюда.
+  function assignFileToInput(inputEl, file){
+    if(!inputEl) return;
+    try{
+      var dt = new DataTransfer();
+      dt.items.add(file);
+      inputEl.files = dt.files;
+      inputEl.dispatchEvent(new Event("change", { bubbles: true }));
+    }catch(e){}
+  }
+
+  // .fb2 (и выбор "Добавить как книгу" для .epub, см. handleSharedFile
+  // ниже) — сразу переиспользует handleImportBooksFile, тем же колбэком
+  // статуса, что и кнопка "Загрузить" на вкладке "Книги" (см.
+  // renderSettingsTabBooks выше).
+  function importSharedBook(file){
+    openSettingsTabDirect("set2s_7");
+    handleImportBooksFile(file, function(msg, isError){
+      renderSettingsTabBooks();
+      var freshStatus = document.getElementById("booksStatus");
+      if(freshStatus){
+        freshStatus.textContent = msg || "";
+        freshStatus.classList.toggle("error", !!isError);
+      }
+    });
+  }
+  function openSharedEpubSplit(file){
+    openSettingsTabDirect("set2s_5");
+    assignFileToInput(document.getElementById("epubSplitFileInput"), file);
+  }
+  function openSharedSubtitleExtract(file){
+    openSettingsTabDirect("set2b_4");
+    assignFileToInput(document.getElementById("srtFileInput"), file);
+  }
+
+  // Диалог выбора одного из нескольких действий для расшаренного файла —
+  // список СТОЛБИКОМ (.mdeditor-cleanup-actions-list в components.css), а
+  // не пара кнопок в ряд, как у openBookBookmarkUpdateMainConfirm выше:
+  // сейчас у .mp4 всего один пункт, но список специально сделан
+  // расширяемым под будущие функции для .mp4 (ТЗ пользователя от 13.09) —
+  // добавление новых пунктов не потребует другого диалога. items —
+  // [{label, onClick}]. Тот же общий вид карточки
+  // (.mdeditor-cleanup-overlay/-card/-title), что и у остальных диалогов
+  // этого файла — добавляется прямо в settingsModalBox, поэтому окно
+  // настроек должно быть уже открыто к моменту вызова (см. handleSharedFile).
+  function openSharedFileActionList(title, items){
+    if(!settingsModalBox) return;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    var itemsHtml = items.map(function(it, i){
+      return '<button type="button" class="mdeditor-cleanup-list-btn" data-idx="' + i + '">' + escapeHtml(it.label) + '</button>';
+    }).join("");
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title">' + escapeHtml(title) + '</div>' +
+      '<div class="mdeditor-cleanup-actions-list">' + itemsHtml + '</div>' +
+      '<div class="mdeditor-cleanup-actions" style="margin-top:10px;">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="sharedFileActionCancel">Отмена</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    settingsModalBox.appendChild(overlay);
+
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+    document.getElementById("sharedFileActionCancel").addEventListener("click", close);
+    Array.prototype.forEach.call(card.querySelectorAll("[data-idx]"), function(btn){
+      btn.addEventListener("click", function(){
+        var idx = parseInt(btn.getAttribute("data-idx"), 10);
+        close();
+        items[idx].onClick();
+      });
+    });
+  }
+
+  // Точка входа — по расширению файла решает, что показать. .fb2 и .mp4
+  // (пока с единственным пунктом) идут по единой схеме с .epub, чтобы
+  // позже, когда для .mp4 появятся другие функции, ничего не пришлось
+  // переделывать (ТЗ пользователя от 13.09, третий заход) — по факту
+  // сейчас .fb2 вообще не спрашивает выбор (пункт один и заранее известен).
+  function handleSharedFile(file){
+    var lower = (file.name || "").toLowerCase();
+    if(/\.fb2$/.test(lower)){
+      importSharedBook(file);
+      return;
+    }
+    if(/\.epub$/.test(lower)){
+      openSettingsModal();
+      openSharedFileActionList("Файл \u00AB" + file.name + "\u00BB — что сделать?", [
+        { label: "Добавить как книгу", onClick: function(){ importSharedBook(file); } },
+        { label: "Разделить на части (для NotebookLM)", onClick: function(){ openSharedEpubSplit(file); } }
+      ]);
+      return;
+    }
+    if(/\.mp4$/.test(lower)){
+      openSettingsModal();
+      openSharedFileActionList("Видео \u00AB" + file.name + "\u00BB — что сделать?", [
+        { label: "Извлечение субтитров", onClick: function(){ openSharedSubtitleExtract(file); } }
+      ]);
+      return;
+    }
+    // Другие расширения сюда дойти не должны — accept в manifest.json
+    // ограничивает выбор файла в системном диалоге "Поделиться" именно
+    // этими тремя форматами.
+  }
+
+  // Вызывается один раз при каждом запуске страницы (см. "ЗАПУСК" ниже).
+  // Чистит "?shared=1" из адресной строки СРАЗУ, независимо от исхода
+  // чтения кэша — чтобы обновление страницы или случайный повторный заход
+  // не пытались забрать уже забранный (и стёртый) файл заново.
+  function checkForSharedFile(){
+    if(!/[?&]shared=1(?:&|$)/.test(location.search)) return;
+    try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
+    if(!("caches" in window)) return;
+    caches.open("share-target-temp").then(function(cache){
+      return cache.match("shared-file").then(function(response){
+        if(!response) return;
+        return response.blob().then(function(blob){
+          var name = "";
+          try{ name = decodeURIComponent(response.headers.get("X-Shared-File-Name") || ""); }catch(e){}
+          cache.delete("shared-file");
+          handleSharedFile(new File([blob], name || "shared-file", { type: blob.type }));
+        });
+      });
+    }).catch(function(e){ if(window.Debug) window.Debug.log("checkForSharedFile: " + (e && e.message ? e.message : e)); });
+  }
+
   // ===================== ЗАПУСК =====================
   if(getHideStatusBarEnabled()){
     applyStatusBarFullscreen(true);
@@ -12852,5 +13012,6 @@
   initTabScrollTracking();
   setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); checkHourBoundaries(); refreshYearGridIfOpen(); }, 30 * 60 * 1000);
   checkUpdateSnoozeExpiry();
+  checkForSharedFile();
 
 })();
