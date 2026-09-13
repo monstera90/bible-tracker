@@ -52,15 +52,6 @@ window.initMdEditorModule = function(deps){
   // та же иконка, что и у "Удалить навсегда" в архиве задач (my.js),
   // передана через deps, а не своя копия.
   var DELETE_ICON_SVG = deps.DELETE_ICON_SVG || "";
-  // Общий на всё приложение переключатель "перенос длинных строк" (ТЗ
-  // пользователя от 13.09) — само состояние и класс .text-wrap-on на
-  // <html> живут в my.js (isTextWrapEnabled/toggleTextWrap), здесь только
-  // читаем текущее значение при монтировании CodeMirror (см. mountEditor)
-  // и дёргаем переключатель по клику кнопки (см. renderEditorScreen); сам
-  // CodeMirror реагирует на изменение через setLineWrapEnabled ниже,
-  // которую my.js вызывает из toggleTextWrap.
-  var isTextWrapEnabled = deps.isTextWrapEnabled || function(){ return false; };
-  var toggleTextWrap = deps.toggleTextWrap || function(){};
   var createArchivedTaskWithText = deps.createArchivedTaskWithText || null;
   var openTaskMoveTargetPicker = deps.openTaskMoveTargetPicker || null;
   var refitAllVisibleTaskBodies = deps.refitAllVisibleTaskBodies || function(){};
@@ -369,22 +360,6 @@ window.initMdEditorModule = function(deps){
       '<path d="M4 20h6"></path>' +
       '<path d="M6.5 17.5L16 8l3 3-9.5 9.5H6.5v-3z"></path>' +
       '<path d="M14 6l4 4"></path>' +
-    '</svg>';
-  // "Перенос длинных строк" — общий на всё приложение переключатель (ТЗ
-  // пользователя от 13.09, см. isTextWrapEnabled/toggleTextWrap ниже, оба
-  // приходят из deps, реализация — в my.js): та же самая пиктограмма
-  // используется и здесь, и в нижней панели задач (index.html), и в ридере
-  // книг (my.js) — физически продублирована в каждом месте (тот же принцип,
-  // что и у HIGHLIGHT_ICON_SVG выше — заводить деп ради одной иконки не
-  // стоит). Кнопка НЕ меняет вид в зависимости от состояния (по требованию
-  // пользователя) — просто вызывает toggleTextWrap() при клике, одинаково
-  // во всех трёх местах.
-  var WRAP_ICON_SVG =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
-      '<line x1="3" y1="6" x2="21" y2="6"></line>' +
-      '<line x1="3" y1="12" x2="21" y2="12"></line>' +
-      '<path d="M3 18h13a3 3 0 0 0 0-6h-2"></path>' +
-      '<path d="M13.5 9.5l-2.5 2.5 2.5 2.5"></path>' +
     '</svg>';
 
   // ---------------------------------------------------------------------
@@ -1314,7 +1289,6 @@ window.initMdEditorModule = function(deps){
   }
 
   var livePreviewCompartment = null;
-  var wrapCompartment = null; // перенос длинных строк (см. setLineWrapEnabled ниже)
   var codeMode = false;
   var saveTimer = null;
   // ---- поле связей заметки (см. refreshLinksField/renderLinksField
@@ -3314,7 +3288,6 @@ window.initMdEditorModule = function(deps){
           '</span>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorImageBtn" title="Вставить картинку">' + PAPERCLIP_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorModeBtn" title="Переключить режим кода">' + (codeMode ? EYE_ICON_SVG : CODE_ICON_SVG) + '</button>' +
-          '<button type="button" class="mdeditor-fab-btn" id="mdEditorWrapBtn" title="Перенос длинных строк">' + WRAP_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn2" title="К списку заметок">' + HOME_ICON_SVG + '</button>' +
         '</div>' +
       '</div>';
@@ -3471,13 +3444,6 @@ window.initMdEditorModule = function(deps){
       // пользователя от 31.08) — сама разметка/список уже посчитаны,
       // тут только скрыть/показать строку, без пересчёта.
       applyLinksFieldVisibility();
-    });
-    // Кнопка "перенос" — без попапа и без смены значка/подсветки (ТЗ
-    // пользователя от 13.09: "ничего не нужно показывать на кнопке, просто
-    // действие выполнять и всё"), просто переключает общее состояние —
-    // toggleTextWrap (my.js) сам вызовет setLineWrapEnabled здесь же.
-    document.getElementById("mdEditorWrapBtn").addEventListener("click", function(){
-      toggleTextWrap();
     });
     document.getElementById("mdEditorTitle").addEventListener("click", startRename);
 
@@ -4690,20 +4656,6 @@ window.initMdEditorModule = function(deps){
     });
   }
 
-  // Вызывается из my.js (toggleTextWrap) при клике по кнопке переноса —
-  // ЛЮБОЙ из трёх кнопок (задачи/заметки/книга, см. ТЗ пользователя от
-  // 13.09: перенос переключается сразу везде одним действием). Если
-  // редактор сейчас не смонтирован (другая вкладка/заметка не открыта) —
-  // безопасно ничего не делает: при следующем mountEditor() состояние
-  // будет прочитано заново через isTextWrapEnabled().
-  function setLineWrapEnabled(value){
-    if(!cmView || !cmModules || !wrapCompartment) return;
-    var EditorView = cmModules.view.EditorView;
-    cmView.dispatch({
-      effects: wrapCompartment.reconfigure(value ? [EditorView.lineWrapping] : [])
-    });
-  }
-
   // ---------------------------------------------------------------------
   // Поиск вхождений слов из searchHighlightWords в тексте документа —
   // тот же алгоритм префиксного совпадения по границам слова, что и в
@@ -4748,16 +4700,10 @@ window.initMdEditorModule = function(deps){
         var defaultKeymap = cm.commands.defaultKeymap, indentWithTab = cm.commands.indentWithTab;
 
         livePreviewCompartment = new Compartment();
-        wrapCompartment = new Compartment();
         var extensions = [
           history(),
           keymap.of(defaultKeymap.concat(historyKeymap, [indentWithTab])),
-          // Перенос длинных строк — ТЕПЕРЬ не всегда включён (ТЗ пользователя
-          // от 13.09, общий переключатель на всё приложение, см.
-          // isTextWrapEnabled/setLineWrapEnabled): читаем текущее состояние
-          // на момент монтирования, дальше меняется только через
-          // wrapCompartment.reconfigure в setLineWrapEnabled.
-          wrapCompartment.of(isTextWrapEnabled() ? [EditorView.lineWrapping] : []),
+          EditorView.lineWrapping,
           livePreviewCompartment.of(codeMode ? [] : [makeLivePreviewExtension(cm)]),
           EditorView.updateListener.of(function(u){
             if(u.docChanged){
@@ -4932,11 +4878,6 @@ window.initMdEditorModule = function(deps){
     // "Моих заметок", без повторного чтения файла (см. getImageBlobUrl
     // выше).
     getImageBlobUrl: getImageBlobUrl,
-    // Общий переключатель "перенос длинных строк" (ТЗ пользователя от
-    // 13.09) — вызывается из my.js (toggleTextWrap) при клике по ЛЮБОЙ из
-    // трёх кнопок (задачи/заметки/книга), чтобы CodeMirror отреагировал,
-    // если сейчас открыт редактор заметки; см. wrapCompartment выше.
-    setLineWrapEnabled: setLineWrapEnabled,
     // "Забытые заметки" (set2s_4, ТЗ пользователя от 04.09) — см.
     // renderSettingsTabForgottenNotes выше
     renderSettingsTabForgottenNotes: renderSettingsTabForgottenNotes,
