@@ -979,8 +979,24 @@
     line-height:1.5;
     color:var(--ink);
   }
+  /* Перенос длинных строк (ТЗ пользователя от 13.09, общий переключатель
+     на всё приложение — см. .text-wrap-on ниже, класс на <html>, ставится
+     из toggleTextWrap в my.js). По умолчанию (класса нет) — БЕЗ переноса:
+     white-space:pre (не nowrap — реальные переводы строки в тексте задачи
+     сохраняются, схлопывается только перенос ДЛИННОЙ строки), длинная
+     строка доступна через собственный горизонтальный скролл узла
+     (overflow-x:auto), а не скролл всей вкладки. .task-text-clamped
+     (ограничение по числу строк ниже) при выключенном переносе фактически
+     не у дел — с одной нескладывающейся строкой клампить нечего, это не
+     баг, просто нечего обрезать. */
   .task-text-view{
     word-break:break-word;
+    white-space:pre;
+    overflow-x:auto;
+  }
+  html.text-wrap-on .task-text-view{
+    white-space:pre-wrap;
+    overflow-x:visible;
   }
   /* Ограничение длинной задачи по высоте (ТЗ пользователя от 12.09) — не
      более TASK_CLAMP_LINES строк (см. my.js), дальше текст обрезается
@@ -1051,10 +1067,18 @@
   .task-expand-btn.is-expanded svg{ transform:rotate(180deg); }
   .task-editable{
     outline:none;
-    white-space:pre-wrap;
+    /* см. .task-text-view выше — тот же переключатель .text-wrap-on,
+       по умолчанию БЕЗ переноса длинной строки (pre, не nowrap: реальные
+       переводы строки при редактировании сохраняются). */
+    white-space:pre;
+    overflow-x:auto;
     word-break:break-word;
     cursor:text;
     min-height:1.5em;
+  }
+  html.text-wrap-on .task-editable{
+    white-space:pre-wrap;
+    overflow-x:visible;
   }
   /* В режиме редактирования текст-заглушка ("Новая задача…"/"Новый
      проект…") намеренно НЕ показывается — только мигающий курсор в
@@ -1170,6 +1194,18 @@
     z-index:5;
   }
   .task-format-wrap.visible{ display:flex; }
+  /* "Перенос длинных строк" (ТЗ пользователя от 13.09) — общий на всё
+     приложение переключатель (см. toggleTextWrap в my.js), левее "Ж" в том
+     же ряду с шагом 40px (см. пояснение выше). Без своего попапа — один
+     клик сразу переключает состояние сразу в трёх местах приложения. */
+  .task-wrap-toggle-wrap{
+    display:none;
+    position:absolute;
+    right:248px;
+    bottom:8px;
+    z-index:5;
+  }
+  .task-wrap-toggle-wrap.visible{ display:flex; }
   /* текстовыделитель — та же функция и та же иконка, что и в "Моём
      блокноте" (см. HIGHLIGHT_ICON_SVG в mdeditor.js, тут своя копия svg
      прямо в index.html — иконка используется один раз, заводить деп ради

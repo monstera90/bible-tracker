@@ -37,6 +37,40 @@
   var TOTAL_CHAPTERS = 0;
   sections.forEach(function(s){ s.books.forEach(function(b){ TOTAL_CHAPTERS += b[2]; }); });
 
+  // ===================== ПЕРЕНОС ДЛИННЫХ СТРОК (общий переключатель) =====================
+  // Единая на всё приложение настройка (ТЗ пользователя от 13.09): нажатие
+  // кнопки в НИЖНЕЙ панели любого из трёх мест — задачи/комментарии,
+  // "Мой блокнот", экран чтения книги — включает перенос СРАЗУ ВЕЗДЕ;
+  // повторное нажатие сразу везде его убирает. По умолчанию ВЫКЛЮЧЕНО (без
+  // переноса — длинная строка целиком в одну визуальную строку, доступную
+  // через собственный горизонтальный скролл узла, см. .text-wrap-on в
+  // modals.css/components.css). Сама кнопка нигде не меняет свой значок
+  // или подсветку под текущее состояние — только выполняет переключение
+  // (ТЗ пользователя от 13.09).
+  //
+  // CSS-часть (задачи/комментарии, книга) читает состояние через класс
+  // .text-wrap-on на <html>. CodeMirror ("Мой блокнот") до CSS не
+  // достаёт — его перенос переключается программно, через
+  // MdEditor.setLineWrapEnabled (см. initMdEditorModule ниже, deps
+  // isTextWrapEnabled/toggleTextWrap).
+  var TEXT_WRAP_STORAGE_KEY = "bibleTextWrapEnabled_v1";
+  var textWrapEnabled = false;
+  (function loadTextWrapEnabled(){
+    try{ textWrapEnabled = localStorage.getItem(TEXT_WRAP_STORAGE_KEY) === "1"; }catch(e){ textWrapEnabled = false; }
+    document.documentElement.classList.toggle("text-wrap-on", textWrapEnabled);
+  })();
+  function isTextWrapEnabled(){ return textWrapEnabled; }
+  function toggleTextWrap(){
+    textWrapEnabled = !textWrapEnabled;
+    try{ localStorage.setItem(TEXT_WRAP_STORAGE_KEY, textWrapEnabled ? "1" : "0"); }catch(e){}
+    document.documentElement.classList.toggle("text-wrap-on", textWrapEnabled);
+    // MdEditor объявляется ниже (var, поднимается) — к моменту реального
+    // клика по любой из трёх кнопок модуль уже полностью инициализирован.
+    if(typeof MdEditor !== "undefined" && MdEditor && MdEditor.setLineWrapEnabled){
+      MdEditor.setLineWrapEnabled(textWrapEnabled);
+    }
+  }
+
   // ===================== ССЫЛКА НА ГЛАВУ (JW Finder) =====================
   // Порядок книг в sections совпадает с канонической нумерацией 1-66
   // (Бытие=1 ... Откровение=66), поэтому номер книги — это просто её
@@ -1267,10 +1301,12 @@
     var fontSizeWrap = document.getElementById("taskFontSizeWrap");
     var highlightWrap = document.getElementById("taskHighlightWrap");
     var attachWrap = document.getElementById("taskAttachWrap");
+    var wrapToggleWrap = document.getElementById("taskWrapToggleWrap");
     if(formatWrap) formatWrap.classList.toggle("visible", showTaskFab);
     if(fontSizeWrap) fontSizeWrap.classList.toggle("visible", showTaskFab);
     if(highlightWrap) highlightWrap.classList.toggle("visible", showTaskFab);
     if(attachWrap) attachWrap.classList.toggle("visible", showTaskFab);
+    if(wrapToggleWrap) wrapToggleWrap.classList.toggle("visible", showTaskFab);
 
     // Заглушка-домик — на любой вкладке задач с рядом кнопок (не на
     // карточке проекта: там openTaskNextPicker рисует свою, кликабельную
@@ -3568,7 +3604,13 @@
     deleteCloudPath: deleteNotesCloudPath,
     generateId: generateNoteId,
     notesPushDebounceMs: PUSH_DEBOUNCE_MS,
-    notesRetryDelays: SYNC_RETRY_DELAYS
+    notesRetryDelays: SYNC_RETRY_DELAYS,
+    // Общий переключатель "перенос длинных строк" (ТЗ пользователя от
+    // 13.09, см. раздел выше) — mdeditor.js читает isTextWrapEnabled() при
+    // монтировании CodeMirror и вызывает toggleTextWrap() по клику своей
+    // кнопки; в ответ my.js сам дёргает MdEditor.setLineWrapEnabled.
+    isTextWrapEnabled: isTextWrapEnabled,
+    toggleTextWrap: toggleTextWrap
   });
   var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
   var renderSettingsTabMdBookmarks = MdEditor.renderSettingsTabMdBookmarks;
@@ -3713,6 +3755,14 @@
         wrapEditableSelection("==", "==");
       });
     }
+
+    // --- "Перенос длинных строк" — общий на всё приложение переключатель
+    // (ТЗ пользователя от 13.09, см. toggleTextWrap выше): без попапа, без
+    // смены значка/подсветки — просто переключает состояние сразу и здесь,
+    // и в "Моём блокноте", и в ридере книг. ---
+    var wrapToggleBtn = document.getElementById("taskWrapToggleBtn");
+    stopMousedown(wrapToggleBtn);
+    if(wrapToggleBtn) wrapToggleBtn.addEventListener("click", toggleTextWrap);
 
     // --- скрепка (вставка картинки, тот же принцип "![[имя]]"/OPFS
     // images/, что и "Аа"/"Ж" выше — общий с "Моими заметками", через
@@ -6645,6 +6695,19 @@
       '<path d="M6.5 17.5L16 8l3 3-9.5 9.5H6.5v-3z"></path>' +
       '<path d="M14 6l4 4"></path>' +
     '</svg>';
+  // "Перенос длинных строк" (ТЗ пользователя от 13.09) — общий на всё
+  // приложение переключатель (см. toggleTextWrap/isTextWrapEnabled выше),
+  // та же самая пиктограмма физически продублирована в index.html (нижняя
+  // панель задач) и в mdeditor.js (WRAP_ICON_SVG, "Мой блокнот") — тот же
+  // принцип, что и у READER_SELECT_ICON_SVG/HIGHLIGHT_ICON_SVG выше. Кнопка
+  // нигде не меняет вид под текущее состояние — просто переключает его.
+  var READER_WRAP_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<line x1="3" y1="6" x2="21" y2="6"></line>' +
+      '<line x1="3" y1="12" x2="21" y2="12"></line>' +
+      '<path d="M3 18h13a3 3 0 0 0 0-6h-2"></path>' +
+      '<path d="M13.5 9.5l-2.5 2.5 2.5 2.5"></path>' +
+    '</svg>';
   // Плавающая кнопка-урна над подчёркиванием (READER_PLAN.md, шаг 13,
   // доработка 11.09) — тап по уже подчёркнутому фрагменту показывает эту
   // кнопку рядом с ним (см. showBookReaderUnderlineTrashBtn ниже), тап по
@@ -6866,6 +6929,7 @@
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderChaptersBtn" title="' + (chaptersMode ? "К тексту" : "Главы") + '">' +
           (chaptersMode ? READER_TEXT_ICON_SVG : READER_CHAPTERS_ICON_SVG) +
         '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="bookReaderWrapBtn" title="Перенос длинных строк">' + READER_WRAP_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderHomeBtn" title="К списку книг">' + READER_HOME_ICON_SVG + '</button>' +
       '</div>'
     );
@@ -6915,6 +6979,13 @@
         switchBookReaderMode(bookReaderState.mode === "chapters" ? "text" : "chapters");
       });
     }
+
+    // "Перенос" — без попапа и без смены значка/подсветки (ТЗ пользователя
+    // от 13.09), просто переключает общее для всего приложения состояние
+    // (см. toggleTextWrap выше — сразу применяется и здесь, и в задачах, и
+    // в "Моём блокноте").
+    var wrapBtn = document.getElementById("bookReaderWrapBtn");
+    if(wrapBtn) wrapBtn.addEventListener("click", toggleTextWrap);
 
     // "Домик" — к списку книг. Действие ВПЕРЁД (как goHome в mdeditor.js):
     // само не откатывает историю, а добавляет свой шаг "назад" (снимок

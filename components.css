@@ -2809,7 +2809,23 @@
     font-family:"Palatino Linotype",Georgia,serif;
   }
   .book-reader-chapter:first-child .book-reader-chapter-title{ margin-top:0; }
-  .book-reader-p{ margin:0 0 10px 0; text-indent:1ch; }
+  /* Перенос длинных строк (ТЗ пользователя от 13.09, общий переключатель
+     на всё приложение — см. .text-wrap-on ниже, класс на <html>, ставится
+     из toggleTextWrap в my.js). По умолчанию (класса нет) — БЕЗ переноса:
+     абзац в одну визуальную строку, скролл — свой собственный
+     (overflow-x:auto), а не скролл всей страницы (та же осторожность, что
+     и у .book-reader-p-bookmarked ниже — .book-reader без горизонтальных
+     отступов, поэтому скролл держим строго внутри самого абзаца). */
+  .book-reader-p{
+    margin:0 0 10px 0;
+    text-indent:1ch;
+    white-space:nowrap;
+    overflow-x:auto;
+  }
+  html.text-wrap-on .book-reader-p{
+    white-space:normal;
+    overflow-x:visible;
+  }
   /* Закладка на полях абзаца (READER_PLAN.md, Этап D, шаг 15, 11.09) —
      .book-reader не имеет горизонтальных отступов (padding:2px 0 40px 0
      выше), и #settingsTabContent тоже не гарантирует запас слева, поэтому
