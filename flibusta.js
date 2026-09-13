@@ -49,6 +49,16 @@
 
   var DEFAULT_OPDS_URL = "http://flibusta.net/opds";
   var OPDS_URL_KEY = "flibustaOpdsUrl_v1";
+  // Опциональный CORS-прокси (ТЗ пользователя от 13.09, доработка после
+  // первого теста "не работает"). Публичный сторонний сервис, а не свой
+  // сервер — пользователь явно выбрал этот путь после объяснения разницы
+  // (свой сервер поднимать неудобно, расширение браузера — не решение для
+  // Android/PWA). Шаблон с плейсхолдером {url}, чтобы подошёл любой
+  // публичный прокси с любым форматом адреса, а не один захардкоженный
+  // (публичные прокси нестабильны — исчезают/ограничивают частоту запросов
+  // без предупреждения, см. переписку с пользователем). Пусто по умолчанию
+  // — поведение без прокси не меняется, пока пользователь сам не заполнит.
+  var PROXY_TEMPLATE_KEY = "flibustaProxyTemplate_v1";
 
   function initFlibustaModule(deps){
     deps = deps || {};
@@ -65,8 +75,31 @@
       try{ localStorage.setItem(OPDS_URL_KEY, url); }catch(e){}
     }
 
+    function getSavedProxyTemplate(){
+      try{ return localStorage.getItem(PROXY_TEMPLATE_KEY) || ""; }
+      catch(e){ return ""; }
+    }
+    function saveProxyTemplate(tmpl){
+      try{ localStorage.setItem(PROXY_TEMPLATE_KEY, tmpl); }catch(e){}
+    }
+
     function resolveUrl(href, baseUrl){
       try{ return new URL(href, baseUrl).href; }catch(e){ return href; }
+    }
+
+    // Оборачивает адрес через прокси-шаблон, ЕСЛИ он задан пользователем.
+    // Используется ТОЛЬКО для fetch() (фид/пагинация/скачивание файла) —
+    // ссылка "Открыть в браузере" (резервный путь при неудаче) намеренно
+    // ведёт на ОРИГИНАЛЬНЫЙ адрес напрямую: обычная навигация браузера не
+    // подчиняется CORS вообще (это ограничение именно fetch/чтения ответа
+    // из JS), поэтому проксировать её незачем и не стоит — лишний прыжок
+    // через чужой сервер может там, наоборот, помешать.
+    function applyProxy(url){
+      var tmpl = getSavedProxyTemplate();
+      if(!tmpl) return url;
+      return tmpl.indexOf("{url}") !== -1 ?
+        tmpl.replace("{url}", encodeURIComponent(url)) :
+        tmpl + encodeURIComponent(url); // короткая форма без плейсхолдера — прокси просто дописывается спереди
     }
 
     // В браузере отказ CORS, блокировка смешанного контента и обычный
@@ -206,12 +239,21 @@
           'Официальный адрес не всегда доступен из браузера — можно указать рабочее зеркало.' +
         '</div>' +
         '<input type="text" class="mdeditor-cleanup-input" id="flibustaUrlInput" value="' + escapeHtml(urlValue) + '">' +
+        '<div style="opacity:.75;font-size:.88em;margin:10px 0 4px;">' +
+          'CORS-прокси (необязательно) — если каталог не открывается напрямую из браузера. ' +
+          'Публичный сторонний сервис (не наш сервер): все запросы к каталогу и файлам книг ' +
+          'пойдут через него. Формат — адрес с плейсхолдером <code>{url}</code> вместо ссылки, ' +
+          'например <code>https://corsproxy.io/?url={url}</code>; если плейсхолдера нет, ссылка ' +
+          'просто дописывается в конец адреса. Пусто — без прокси, как сейчас.' +
+        '</div>' +
+        '<input type="text" class="mdeditor-cleanup-input" id="flibustaProxyInput" placeholder="напр. https://corsproxy.io/?url={url}" value="' + escapeHtml(getSavedProxyTemplate()) + '">' +
         '<div class="mdeditor-status" id="flibustaSetupStatus"></div>' +
         '<div class="mdeditor-cleanup-actions">' +
           '<button type="button" class="mdeditor-cleanup-cancel" id="flibustaSetupCancel">Закрыть</button>' +
           '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="flibustaSetupGo">Подключиться</button>' +
         '</div>';
       var input = document.getElementById("flibustaUrlInput");
+      var proxyInput = document.getElementById("flibustaProxyInput");
       document.getElementById("flibustaSetupCancel").addEventListener("click", close);
       document.getElementById("flibustaSetupGo").addEventListener("click", submit);
       input.addEventListener("keydown", function(ev){
@@ -221,6 +263,7 @@
         var url = (input.value || "").trim();
         if(!url) return;
         saveOpdsUrl(url);
+        saveProxyTemplate((proxyInput.value || "").trim());
         loadLevel(card, url, "Flibusta");
       }
     }
@@ -238,8 +281,8 @@
         '<div style="opacity:.75;font-size:.9em;word-break:break-all;">Адрес: ' + escapeHtml(url) + '</div>' +
         '<div class="mdeditor-status error">' + escapeHtml(msg) + ' — вероятно, каталог недоступен из ' +
           'этого браузера (ограничение CORS или смешанного http/https-контента). Это известное ' +
-          'ограничение PWA без собственного сервера-посредника — можно попробовать другой адрес ' +
-          'или рабочее зеркало.</div>' +
+          'ограничение PWA без собственного сервера-посредника — можно попробовать другой адрес, ' +
+          'рабочее зеркало, или указать CORS-прокси (кнопка «Изменить адрес» ниже).</div>' +
         '<div class="mdeditor-cleanup-actions">' +
           '<button type="button" class="mdeditor-cleanup-cancel" id="flibustaErrChangeUrl">Изменить адрес</button>' +
           '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="flibustaErrRetry">Повторить</button>' +
@@ -257,7 +300,7 @@
 
     function loadLevel(card, url, title){
       renderLoadingScreen(card, title);
-      fetch(url).then(function(res){
+      fetch(applyProxy(url)).then(function(res){
         if(!res.ok) throw new Error("Сервер ответил HTTP " + res.status);
         return res.text();
       }).then(function(text){
@@ -353,7 +396,7 @@
           moreBtn.addEventListener("click", function(){
             moreBtn.disabled = true;
             moreBtn.textContent = "Загрузка…";
-            fetch(nextHref).then(function(res){
+            fetch(applyProxy(nextHref)).then(function(res){
               if(!res.ok) throw new Error("Сервер ответил HTTP " + res.status);
               return res.text();
             }).then(function(text){
@@ -371,9 +414,9 @@
       }
 
       function downloadBook(entry, link){
-        var href = resolveUrl(link.href, feedUrl);
+        var href = resolveUrl(link.href, feedUrl); // оригинальный адрес — для fetch ниже оборачивается прокси, а вот window.open в catch (см. ниже) намеренно использует ИМЕННО его, не через прокси
         setListStatus("Скачивание «" + entry.title + "»…", false);
-        fetch(href).then(function(res){
+        fetch(applyProxy(href)).then(function(res){
           if(!res.ok) throw new Error("Сервер ответил HTTP " + res.status);
           return res.arrayBuffer();
         }).then(function(buf){
