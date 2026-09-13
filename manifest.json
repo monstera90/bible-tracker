@@ -31,8 +31,7 @@
             ".epub",
             ".mp4",
             "video/mp4",
-            "application/epub+zip",
-            "application/x-fictionbook+xml"
+            "application/epub+zip"
           ]
         }
       ]
