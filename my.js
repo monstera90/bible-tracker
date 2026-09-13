@@ -1084,24 +1084,36 @@
   // Список ключей вкладок задач в том же порядке, в каком они идут в DOM
   // (см. index.html, .settings-tabs) — используется и для показа/скрытия
   // ярлычков по галочке "Показать все мои задачи", и для переключения
-  // между ними в switchSettingsTab. "council" — новая вкладка-список
-  // задач между waiting и read, оформлена и работает так же, как next
-  // (см. TASK_MOVABLE_TABS/TASK_MOVE_TARGET_TABS ниже); название нигде
-  // текстом не выводится (см. TASK_TAB_TITLES.council).
+  // между ними в switchSettingsTab. "council" — вкладка-список задач,
+  // оформлена и работает так же, как next (см. TASK_MOVABLE_TABS/
+  // TASK_MOVE_TARGET_TABS ниже); название показывается только в сетке
+  // переноса (TASK_TAB_TITLES.council), ТЗ пользователя от 13.09.
+  //
+  // 13.09 — добавлены две вкладки-заглушки "worktasks"/"jointtasks"
+  // (ТЗ пользователя): устроены и работают ТОЧНО так же, как council/next
+  // (обычный список задач через общий renderTaskTabList) — "заглушка"
+  // здесь означает только то, что у них нет своего особого экрана, как,
+  // например, у "Моих книг". Порядок вкладок (см. TASK_MOVABLE_TABS/
+  // TASK_MOVE_TARGET_TABS ниже) — по ТЗ пользователя: worktasks — первая,
+  // jointtasks — последняя, council переставлена ПОСЛЕ read (была между
+  // waiting и read).
   var TASK_TAB_IDS = {
+    worktasks: "settingsTabWorkTasksBtn",
     red: "settingsTabRedBtn",
     inbox: "settingsTabInboxBtn",
     next: "settingsTabNextBtn",
     projects: "settingsTabProjectsBtn",
     waiting: "settingsTabWaitingBtn",
-    council: "settingsTabCouncilBtn",
     read: "settingsTabReadBtn",
+    council: "settingsTabCouncilBtn",
     someday: "settingsTabSomedayBtn",
+    jointtasks: "settingsTabJointTasksBtn",
     archive: "settingsTabArchiveBtn"
   };
   var TASK_TAB_TITLES = {
-    red: "Red", inbox: "Inbox", next: "Next", projects: "Projects",
-    waiting: "Waiting", council: "", read: "Read", someday: "Someday", archive: "Archive"
+    worktasks: "Work tasks", red: "Red", inbox: "Inbox", next: "Next", projects: "Projects",
+    waiting: "Waiting", read: "Read", council: "Council", someday: "Someday",
+    jointtasks: "Joint tasks", archive: "Archive"
   };
   // вкладки-списки задач, между которыми можно переносить задачу стрелочкой
   // (без архива — туда задача попадает только через отметку чекбокса).
@@ -1110,7 +1122,7 @@
   // "red" в качестве места хранения (реального taskа.c.tab) больше нет:
   // Red — это витрина по цветной отметке (см. TASK_MOVE_TARGET_TABS ниже,
   // getTasksForTab и cycleTaskFlag).
-  var TASK_MOVABLE_TABS = ["red","inbox","next","projects","waiting","council","read","someday"];
+  var TASK_MOVABLE_TABS = ["worktasks","red","inbox","next","projects","waiting","read","council","someday","jointtasks"];
 
   // Невидимая распорка в конце списка — тем же приёмом, что и на "Карте
   // дней года" (см. year-grid-v-spacer-row выше, ТЗ пользователя от
@@ -1251,9 +1263,13 @@
   // а вот КУДА реально можно перенести задачу стрелочкой (пикер
   // "Перенести задачу") — без red, т.к. принадлежность к Red определяется
   // не вкладкой-домом, а цветной отметкой слева от чекбокса
-  var TASK_MOVE_TARGET_TABS = ["inbox","next","projects","waiting","council","read","someday"];
+  var TASK_MOVE_TARGET_TABS = ["worktasks","inbox","next","projects","waiting","read","council","someday","jointtasks"];
   var TASK_MOVE_ICONS = {
     red: '<path d="M5 3v18"></path><path d="M5 4h11l-2.5 4L16 12H5"></path>',
+    // портфель — вкладка-заглушка "Задачи в работе" / "worktasks" (ТЗ
+    // пользователя от 13.09), та же svg, что и в #settingsTabWorkTasksBtn
+    // в index.html
+    worktasks: '<path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path><rect x="3" y="7" width="18" height="12" rx="2"></rect><path d="M3 12h18"></path>',
     inbox: '<path d="M4 12h4l2 3h4l2-3h4"></path><path d="M4 12l1.5-7h13L20 12"></path><path d="M4 12v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6"></path>',
     next: '<path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path>',
     projects: '<path d="M4 6a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6z"></path>',
@@ -1265,8 +1281,26 @@
     read: '<path d="M12 7c-1.8-1-4.5-1.3-7-1.3v10c2.5 0 4.7.3 7 1.3"></path><path d="M12 7c1.8-1 4.5-1.3 7-1.3v10c-2.5 0-4.7.3-7 1.3"></path><path d="M12 7v10"></path>',
     // та же стрелочка, что у next, повёрнута на 90° против часовой стрелки,
     // чтобы указывать вверх (см. #settingsTabSomedayBtn в index.html)
-    someday: '<g transform="rotate(-90 12 12)"><path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path></g>'
+    someday: '<g transform="rotate(-90 12 12)"><path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path></g>',
+    // два человечка — вкладка-заглушка "Совместные задачи" / "jointtasks"
+    // (ТЗ пользователя от 13.09), та же svg, что и в
+    // #settingsTabJointTasksBtn в index.html; геометрия одного человечка
+    // взята из "council" выше, просто уменьшена и сдвоена
+    jointtasks: '<circle cx="8" cy="8" r="2.3"></circle><path d="M3.5 19c0-3 2-5.3 4.5-5.3s4.5 2.3 4.5 5.3"></path><circle cx="16" cy="8" r="2.3"></circle><path d="M11.5 19c0-3 2-5.3 4.5-5.3s4.5 2.3 4.5 5.3"></path>',
+    // речевой пузырь с тремя точками — используется НЕ как обычная
+    // вкладка-список (extra2/"Комментарии" не входит в TASK_MOVE_TARGET_TABS
+    // выше, у неё своё, отдельное хранилище, см. openTaskMovePicker/
+    // openRowMovePicker ниже, ТЗ пользователя от 13.09), а как
+    // дополнительный пункт именно в сетке "Перенести задачу" — там задача
+    // не перекладывается, а конвертируется в комментарий
+    // (convertTaskToComment ниже). Три точки — тем же приёмом заливки, что
+    // и точка над "i" в INFO_ICON_SVG (fill=currentColor, а не линия).
+    extra2: '<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-4 4v-4H6a2 2 0 0 1-2-2V6z"></path><circle cx="8.5" cy="10" r="0.9" fill="currentColor" stroke="none"></circle><circle cx="12" cy="10" r="0.9" fill="currentColor" stroke="none"></circle><circle cx="15.5" cy="10" r="0.9" fill="currentColor" stroke="none"></circle>'
   };
+  // подпись для "Комментарии" в сетке "Перенести задачу" — только там;
+  // сама вкладка extra2 (личные комментарии) свою заголовочную надпись
+  // берёт из своей разметки (renderCommentsTab), сюда не относится
+  TASK_TAB_TITLES.extra2 = "Comments";
   var TASK_MOVE_ICON_SVG = function(key){
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + (TASK_MOVE_ICONS[key] || "") + '</svg>';
   };
@@ -5455,7 +5489,19 @@
     // null только при реальном выходе из книги (см. "Домик"/AppNav-колбэк в
     // openBookReader выше), переключение вкладок его не трогает.
     else if(tab === "set2s_7"){
+      var isFirstBooksVisitThisSession = !booksTabVisitedThisSession;
+      booksTabVisitedThisSession = true;
       if(bookReaderState) renderBookReader();
+      else if(isFirstBooksVisitThisSession && getLastOpenedBookName()){
+        // Фикс от 13.09 — см. комментарий у LAST_OPENED_BOOK_KEY выше.
+        // Показываем список сразу (не оставлять пустой экран, пока книга
+        // грузится из OPFS и парсится), openBookReader сам подменит его на
+        // текст книги, когда будет готово; если книги вдруг больше нет
+        // (переустановка/очистка OPFS) — openBookReader сам покажет ошибку
+        // поверх уже отрисованного списка (см. её catch внутри).
+        renderSettingsTabBooks();
+        openBookReader(getLastOpenedBookName());
+      }
       else renderSettingsTabBooks();
     }
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
@@ -5987,6 +6033,33 @@
   // "Книги" включает и файлы books/, и эти ключи book:<hash> — см.
   // isBookStateKey ниже, importPayloadCategories/applyImportSelection в
   // разделе "ИМПОРТ ЛИЧНЫХ ДАННЫХ" выше.
+  //
+  // Имя ПОСЛЕДНЕЙ открытой книги — в localStorage, а не только в памяти
+  // (bookReaderState ниже), тем же приёмом, что и SETTINGS_LAST_TAB_KEY
+  // (см. выше). Фикс от 13.09 (ТЗ пользователя: "периодически при нажатии
+  // на вкладку 'Мои книги' всё равно возвращает в список, а должно
+  // показывать последнюю книгу — чаще всего так и есть, но в редких
+  // случаях..."). Причина редких случаев: bookReaderState — обычная
+  // переменная модуля, она переживает переключение вкладок настроек, но
+  // НЕ переживает перезапуск скрипта — а мобильные браузеры периодически
+  // перезагружают фоновую/свёрнутую вкладку PWA сами, без явного действия
+  // пользователя. До этой правки при такой "невидимой" перезагрузке
+  // вкладка "Мои книги" (set2s_7) восстанавливалась (SETTINGS_LAST_TAB_KEY
+  // это уже умеет), а вот САМА книга — нет: bookReaderState после
+  // перезапуска пуст, и ветка set2s_7 в switchSettingsTab (ниже) молча
+  // откатывалась на список. Теперь при первом за это открытие приложения
+  // заходе на set2s_7 (см. booksTabVisitedThisSession ниже), если книга
+  // ещё не открыта в памяти, но есть запомненное имя — книга подхватывается
+  // автоматически через openBookReader. Внутри уже идущей сессии, если
+  // пользователь сам вышел в список (кнопка "Домик"/системное "назад"),
+  // это НЕ переоткрывает книгу заново — только самый первый заход.
+  var LAST_OPENED_BOOK_KEY = "bibleLastOpenedBook_v1";
+  function saveLastOpenedBookName(name){
+    try{ localStorage.setItem(LAST_OPENED_BOOK_KEY, name); }catch(e){}
+  }
+  function getLastOpenedBookName(){
+    try{ return localStorage.getItem(LAST_OPENED_BOOK_KEY); }catch(e){ return null; }
+  }
   function bookStateKey(hash){
     return "book:" + hash;
   }
@@ -6311,6 +6384,15 @@
   // растущего .cm-scroller; здесь высота книги стабильна между рендерами
   // одного режима, поэтому пиксельного значения достаточно).
   var bookReaderState = null; // {hash, name, chapters, imageUrls, mode, textScrollTop, chaptersScrollTop, restorePosition}
+  // true после первого захода на вкладку "Мои книги" (set2s_7) в рамках
+  // ТЕКУЩЕГО запуска скрипта — см. switchSettingsTab, ветка set2s_7 и
+  // LAST_OPENED_BOOK_KEY выше. Пока false, отсутствие bookReaderState
+  // трактуется как "скрипт только что перезапустился, книгу из памяти
+  // потеряли" и книга подхватывается автоматически по запомненному имени;
+  // после первого захода (успешного или нет) — как обычный сознательный
+  // выход пользователя в список (кнопка "Домик"/"назад"), список и
+  // остаётся.
+  var booksTabVisitedThisSession = false;
   // Шаг 16 (READER_PLAN.md, Этап D): запоминание места чтения — тем же
   // приёмом, что docState/persistDocStateNow/scheduleDocStateSave в
   // mdeditor.js, только якорь не курсор+процент, а конкретный абзац/
@@ -6533,6 +6615,12 @@
       // РОВНО ОДИН РАЗ в renderBookReaderText (см. ниже) и сразу
       // обнуляется там же.
       ensureBookNameSynced(res.hash, name);
+      // Запоминаем, что именно эта книга открыта последней (см.
+      // LAST_OPENED_BOOK_KEY/saveLastOpenedBookName выше) — нужно для
+      // автоматического восстановления книги при заходе на вкладку "Мои
+      // книги" после "невидимой" перезагрузки фоновой вкладки браузером
+      // (см. switchSettingsTab, ветка set2s_7).
+      saveLastOpenedBookName(name);
       var savedBookState = getBookState(res.hash);
       bookReaderState = {
         hash: res.hash, name: name,
@@ -9905,8 +9993,15 @@
       rows += '<div class="year-day-stat-row"><span class="year-day-stat-icon">🎯</span><span>Выполненные задачи целей:' + goalsHtml + '</span></div>';
     }
     if(tasksDone.length){
+      // ТЗ пользователя от 13.09: в этом списке показываем только первые
+      // три строки текста задачи (сама задача при этом никак не
+      // укорачивается — здесь просто визуальная обрезка через
+      // .year-day-task-item, см. components.css, тем же приёмом line-clamp,
+      // что нигде в проекте раньше не применялся, поэтому свой отдельный
+      // класс, а не общий .year-day-goal-item — тот делят с "целями" и
+      // "заметками" выше/ниже, которые обрезать не просили).
       var tasksHtml = tasksDone.map(function(t){
-        return '<div class="year-day-goal-item">' + escapeHtml(t.text || "Без названия") +
+        return '<div class="year-day-goal-item year-day-task-item">' + escapeHtml(t.text || "Без названия") +
           ' <span class="year-day-goal-source">— ' + escapeHtml(TASK_TAB_TITLES[t.tab] || t.tab || "") + '</span></div>';
       }).join("");
       rows += '<div class="year-day-stat-row"><span class="year-day-stat-icon">✅</span><span>Выполненные задачи:' + tasksHtml + '</span></div>';
@@ -10885,6 +10980,27 @@
     refreshHeaderQuote();
   }
 
+  // Перенос задачи в "Комментарии" через сетку "Перенести задачу"
+  // (openTaskMovePicker/openRowMovePicker, ТЗ пользователя от 13.09):
+  // задачи и комментарии — два разных хранилища ("task:"/"comment:"), моve-
+  // TaskToTab сюда не годится — вместо перекладки задачи создаётся НОВАЯ
+  // запись комментария с тем же текстом, а сама задача удаляется
+  // безвозвратно (deleteTaskPermanently, как крестик в архиве) — обратной
+  // связи с исходной задачей нет. Картинки, вставленные в задачу
+  // ("![[имя]]", кнопка-скрепка) — по ТЗ НЕ переносятся: соответствующие
+  // плейсхолдеры вырезаются из текста тем же регулярным выражением, что и
+  // в formatInline (imgRe, см. выше); сами файлы в OPFS images/ не трогаем
+  // — если больше нигде не упомянуты, их уберёт обычная корзина сирот.
+  var TASK_TO_COMMENT_IMG_RE = /!\[\[([^\[\]\n]+)\]\]/g;
+  function convertTaskToComment(taskId){
+    var task = getTaskById(taskId);
+    if(!task) return;
+    var text = (task.c.text || "").replace(TASK_TO_COMMENT_IMG_RE, "").trim();
+    var id = createComment();
+    setCommentText(id, text);
+    deleteTaskPermanently(taskId);
+  }
+
   // ---- независимые копии в "Карте дней года" ("yearcomment:<деньСоздания>-<rand>") ----
   function genYearCommentId(dayTs){
     return "yearcomment:" + dayTs + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
@@ -11829,7 +11945,17 @@
   function openTaskMovePicker(id, tabKey, onAfterAction){
     var task = getTaskById(id);
     if(!task) return;
-    var buttons = TASK_MOVE_TARGET_TABS.map(function(key){
+    // "Комментарии" (extra2) — отдельный пункт ТОЛЬКО в этой сетке (ТЗ
+    // пользователя от 13.09): это не обычная вкладка-список задач, поэтому
+    // не входит в TASK_MOVE_TARGET_TABS выше (тот массив используется ещё
+    // и импортом из .txt, и созданием новой задачи из "Моего блокнота" —
+    // там конвертация в комментарий не нужна). Показывается только если
+    // сама вкладка "Комментарии" включена в настройках (см.
+    // getCustomCommentsEnabled) — иначе задача исчезала бы в скрытую
+    // вкладку.
+    var targetKeys = TASK_MOVE_TARGET_TABS.slice();
+    if(getCustomCommentsEnabled()) targetKeys.push("extra2");
+    var buttons = targetKeys.map(function(key){
       var isCurrent = key === task.c.tab;
       return '<button type="button" data-tab="' + key + '"' + (isCurrent ? ' class="current"' : '') + '>' +
         TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key]) + '</span></button>';
@@ -11842,7 +11968,8 @@
     Array.prototype.forEach.call(modalBox.querySelectorAll("[data-tab]"), function(btn){
       btn.addEventListener("click", function(){
         var newTab = btn.getAttribute("data-tab");
-        moveTaskToTab(id, newTab);
+        if(newTab === "extra2") convertTaskToComment(id);
+        else moveTaskToTab(id, newTab);
         closeModal();
         if(onAfterAction) onAfterAction();
         else renderTaskTabList(tabKey || task.c.tab);
@@ -12295,7 +12422,11 @@
     function openRowMovePicker(id){
       var task = getTaskById(id);
       if(!task) return;
-      var buttons = TASK_MOVE_TARGET_TABS.map(function(key){
+      // "Комментарии" — тот же особый пункт, что и в openTaskMovePicker
+      // выше (ТЗ пользователя от 13.09), см. комментарий там же.
+      var targetKeys = TASK_MOVE_TARGET_TABS.slice();
+      if(getCustomCommentsEnabled()) targetKeys.push("extra2");
+      var buttons = targetKeys.map(function(key){
         var isCurrent = key === task.c.tab;
         return '<button type="button" data-tab="' + key + '"' + (isCurrent ? ' class="current"' : '') + '>' +
           TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key]) + '</span></button>';
@@ -12307,7 +12438,9 @@
       modalOverlay.classList.add("open");
       Array.prototype.forEach.call(modalBox.querySelectorAll("[data-tab]"), function(btn){
         btn.addEventListener("click", function(){
-          moveTaskToTab(id, btn.getAttribute("data-tab"));
+          var newTab = btn.getAttribute("data-tab");
+          if(newTab === "extra2") convertTaskToComment(id);
+          else moveTaskToTab(id, newTab);
           closeModal();
           render();
         });

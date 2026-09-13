@@ -1298,13 +1298,34 @@
     cursor:default;
   }
 
+  /* размер шрифта — та же общая переменная --mdeditor-font-size, что и у
+     "Моих заметок"/задач/экрана чтения книги (ТЗ пользователя от 13.09:
+     "Карта дней года" должна наследовать шрифт, выбранный кнопкой "Аа" в
+     любой другой части приложения); своей кнопки "Аа" на этом экране нет и
+     не нужно — тем же приёмом, что и у "Извлечения субтитров" выше по
+     файлу (см. комментарий у .common-tab-title/.subtitle-extract-output). */
   .year-day-goal-item{
     padding:3px 0 3px 0;
-    font-size:13px;
+    font-size:var(--mdeditor-font-size, 15.5px);
   }
   .year-day-goal-source{
     color:var(--ink-soft);
     font-size:12px;
+  }
+  /* ТЗ пользователя от 13.09: у выполненных задач ("✅ Выполненные задачи")
+     показываем только первые три строки текста, остальное — под
+     троеточием; сама задача нигде не укорачивается, это чисто визуальная
+     обрезка (line-clamp), поэтому свой класс, а не общий .year-day-goal-
+     item выше — тот делят "цели" и "новые заметки", которые обрезать не
+     просили. -webkit-box/-webkit-line-clamp — стандартный кроссбраузерный
+     (несмотря на префикс) способ добавить "..." после N строк без своего
+     JS-подсчёта высоты. */
+  .year-day-task-item{
+    display:-webkit-box;
+    -webkit-box-orient:vertical;
+    -webkit-line-clamp:3;
+    overflow:hidden;
+    line-height:1.4;
   }
 
   .year-day-modal-title{
@@ -1321,7 +1342,7 @@
     gap:10px;
     padding:9px 4px;
     font-family:"Palatino Linotype",Georgia,serif;
-    font-size:14px;
+    font-size:var(--mdeditor-font-size, 15.5px);
     color:var(--ink);
   }
   /* разделитель — только МЕЖДУ строками (граница сверху у всех кроме
@@ -1332,7 +1353,7 @@
   .year-day-stat-icon{ font-size:17px; width:22px; text-align:center; flex-shrink:0; }
   .year-day-empty{
     text-align:center;
-    font-size:13.5px;
+    font-size:var(--mdeditor-font-size, 15.5px);
     color:var(--ink-soft);
     padding:8px 4px 2px 4px;
     font-style:italic;
@@ -2097,7 +2118,14 @@
     overflow:hidden;
     text-overflow:ellipsis;
     cursor:text;
-    padding:2px 32px;
+    /* ТЗ пользователя от 13.09: справа теперь ДВЕ кнопки (крестик удаления
+       + закладка, 26px каждая, см. .mdeditor-title-row .mdeditor-delete-btn/
+       -bookmark-btn ниже) вместо одной — правое поле увеличено, чтобы
+       обрезанный многоточием текст заголовка по-прежнему никогда не
+       заезжал под кнопки; левое поле держим тем же (60px), иначе видимый
+       центр текста снова уедет в сторону (см. комментарий выше про
+       симметричные поля). */
+    padding:2px 60px;
     border-radius:6px;
   }
   .mdeditor-title:hover{ background:var(--parchment-dark); }
@@ -2113,6 +2141,16 @@
   .mdeditor-title-row .mdeditor-bookmark-btn{
     position:absolute;
     right:0;
+    top:50%;
+    transform:translateY(-50%);
+  }
+  /* крестик удаления — слева от закладки, тем же приёмом позиционирования
+     (вынут из потока, вертикально по центру строки), тот же отступ 28px,
+     что и в .mdeditor-list-grid ниже по файлу (26px ширина кнопки + 2px) —
+     ТЗ пользователя от 13.09. */
+  .mdeditor-title-row .mdeditor-delete-btn{
+    position:absolute;
+    right:28px;
     top:50%;
     transform:translateY(-50%);
   }
@@ -2443,9 +2481,10 @@
   }
   /* в шапке открытой заметки кнопка вынута из потока и лежит поверх
      правого края строки (см. .mdeditor-title-row .mdeditor-bookmark-btn
-     выше) — правое поле .mdeditor-title под неё уже зарезервировано,
-     так что кнопка никогда не перекрывает текст названия (само название
-     обрезается многоточием, см. .mdeditor-title). */
+     выше, и .mdeditor-title-row .mdeditor-delete-btn — крестик удаления
+     левее неё, ТЗ пользователя от 13.09) — правое поле .mdeditor-title под
+     обе уже зарезервировано, так что кнопки никогда не перекрывают текст
+     названия (само название обрезается многоточием, см. .mdeditor-title). */
   /* ---------- сама заметка: без рамки/фона-карточки — текст занимает всю
      полезную ширину вкладки, высота не ограничена (auto), растёт вместе с
      документом; прокручивает всё это #settingsTabContent целиком (см.

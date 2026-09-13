@@ -2745,6 +2745,23 @@ window.initMdEditorModule = function(deps){
 
   function deleteNoteEntry(it, node){
     var key = it.name.toLowerCase();
+    // Крестик в шапке ОТКРЫТОЙ заметки (ТЗ пользователя от 13.09) удаляет
+    // ту же заметку, что сейчас в редакторе — экран нужно сперва аккуратно
+    // закрыть (та же уборка, что у "Домика"/goHome выше, кроме
+    // flushAutosaveNow/pushDirtyNotes — сохранять и слать в облако правки
+    // в СЕЙЧАС УДАЛЯЕМУЮ запись незачем, достаточно снять таймер), иначе
+    // renderListScreen ниже подменит #settingsTabContent целиком, а
+    // CodeMirror (cmView) и его слушатели останутся висеть отсоединёнными
+    // от DOM, и screen/openFile так и будут указывать на уже удалённую
+    // заметку. При удалении из общего списка (обычный путь, крестик по
+    // долгому нажатию) screen уже "list"/openFile уже null — условие
+    // просто не сработает.
+    if(screen === "editor" && openFile && openFile.id === it.id){
+      if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
+      destroyEditor();
+      openFile = null;
+      screen = "list";
+    }
     deleteNoteRecord(it.id);
     if(bookmarkedNames.has(key)){
       bookmarkedNames.delete(key);
@@ -3242,6 +3259,7 @@ window.initMdEditorModule = function(deps){
       '<div class="mdeditor-tab mdeditor-editor-tab">' +
         '<div class="mdeditor-title-row" id="mdEditorTitleRow">' +
           '<span class="mdeditor-title" id="mdEditorTitle" title="Нажмите, чтобы переименовать"></span>' +
+          '<button type="button" class="mdeditor-delete-btn visible" id="mdEditorDeleteBtn" title="Удалить заметку">' + DELETE_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-bookmark-btn visible" id="mdEditorBookmarkBtn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>' +
         '</div>' +
         '<div class="mdeditor-dates-row" id="mdEditorDatesRow"></div>' +
@@ -3300,6 +3318,21 @@ window.initMdEditorModule = function(deps){
       editorBmBtn.addEventListener("click", function(e){
         e.stopPropagation();
         toggleBookmarkNote(openFile.name);
+      });
+    }
+    // Крестик удаления — второй способ удалить заметку (ТЗ пользователя от
+    // 13.09), слева от закладки. Переиспользует тот же диалог
+    // подтверждения и ту же deleteNoteEntry, что и крестик в общем списке
+    // (см. confirmDeleteNote/deleteNoteEntry ниже) — второй параметр там
+    // node, строка списка, которой здесь нет, передаём null: он и в списке
+    // никак не используется внутри deleteNoteEntry. deleteNoteEntry сама
+    // умеет закрыть редактор, если удаляемая заметка сейчас в нём открыта
+    // (см. её начало).
+    var editorDelBtn = document.getElementById("mdEditorDeleteBtn");
+    if(editorDelBtn){
+      editorDelBtn.addEventListener("click", function(e){
+        e.stopPropagation();
+        if(openFile) confirmDeleteNote(openFile, null);
       });
     }
 

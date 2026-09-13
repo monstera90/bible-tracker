@@ -700,7 +700,10 @@
      потоке текста, а не отдельная кнопка справа */
   .year-day-note-view{
     font-family:"Palatino Linotype",Georgia,serif;
-    font-size:14px;
+    /* ТЗ пользователя от 13.09 — тот же приём и та же переменная, что у
+       .year-day-stat-row/.year-day-goal-item в components.css: комментарий
+       дня наследует общий шрифт "Аа", своего органа управления здесь нет */
+    font-size:var(--mdeditor-font-size, 15.5px);
     line-height:1.5;
     color:var(--ink);
   }

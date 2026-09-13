@@ -186,6 +186,20 @@ window.addEventListener("error", function(e){
          перенесены внутрь вкладки настроек как кнопки (см.
          renderSettingsTabGear в my.js). -->
     <div class="settings-tabs" id="settingsTabs">
+      <!-- Вкладка-заглушка "Задачи в работе" / "worktasks" (ТЗ пользователя
+           от 13.09) — устроена и работает точно как council/next (обычный
+           список задач через общий renderTaskTabList, см. TASK_TAB_IDS в
+           my.js), просто ещё без своего особого экрана. Пиктограмма —
+           портфель, та же svg, что и TASK_MOVE_ICONS.worktasks в my.js
+           (сетка "Перенести задачу"). Первая в списке — по порядку вкладок
+           из ТЗ. -->
+      <button class="settings-tab task-tab" id="settingsTabWorkTasksBtn" data-task="worktasks" title="worktasks" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path>
+          <rect x="3" y="7" width="18" height="12" rx="2"></rect>
+          <path d="M3 12h18"></path>
+        </svg>
+      </button>
       <!-- Пиктограмма — сплошной красный кружок (не значок-флажок, как
            раньше): цвет взят из цветной отметки приоритета задач,
            см. .task-flag-dot.flag-red в modals.css (#e0392b/#a52a1e) —
@@ -223,19 +237,6 @@ window.addEventListener("error", function(e){
           <path d="M17 3c0 4-3 5-5 6 2 1 5 2 5 6"></path>
         </svg>
       </button>
-      <!-- Новая вкладка-список задач "council" — устроена и оформлена
-           точно как next (кнопка "+", добавление/редактирование задач,
-           разделители, отступы — вся отрисовка идёт через тот же общий
-           renderTaskTabList, см. TASK_TAB_IDS в my.js). Название нарочно
-           нигде не выводится текстом (title пустой, как у вкладок-
-           заглушек settingsTabExtra*) — только простая пиктограмма
-           человечка. -->
-      <button class="settings-tab task-tab" id="settingsTabCouncilBtn" data-task="council" title="" style="display:none;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="7.5" r="3"></circle>
-          <path d="M5 21c0-4 3-7 7-7s7 3 7 7"></path>
-        </svg>
-      </button>
       <!-- Раскрытая книга: раньше корешок и створки были заметно вытянуты
            по высоте (13.6 в высоту при развороте всего 12 в ширину, да
            ещё и слабый изгиб делал страницы визуально узкими "лепестками",
@@ -254,6 +255,20 @@ window.addEventListener("error", function(e){
           <path d="M12 7v10"></path>
         </svg>
       </button>
+      <!-- Вкладка-список задач "council" — устроена и оформлена точно как
+           next (кнопка "+", добавление/редактирование задач, разделители,
+           отступы — вся отрисовка идёт через тот же общий
+           renderTaskTabList, см. TASK_TAB_IDS в my.js). 13.09 — переставлена
+           СЮДА, после read (была между waiting и read), и получила
+           видимое название "Council" — но только в сетке "Перенести
+           задачу" (TASK_TAB_TITLES.council в my.js), title у самой кнопки
+           намеренно пустой, как и раньше. -->
+      <button class="settings-tab task-tab" id="settingsTabCouncilBtn" data-task="council" title="" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="7.5" r="3"></circle>
+          <path d="M5 21c0-4 3-7 7-7s7 3 7 7"></path>
+        </svg>
+      </button>
       <!-- Пиктограмма — та же стрелочка, что и у Next (см. #settingsTabNextBtn
            выше), просто повёрнута на 90° против часовой стрелки (rotate(-90)
            вокруг центра 12,12), чтобы указывать вверх, а не вправо. -->
@@ -263,6 +278,21 @@ window.addEventListener("error", function(e){
             <path d="M5 12h13"></path>
             <path d="M13 6l6 6-6 6"></path>
           </g>
+        </svg>
+      </button>
+      <!-- Вкладка-заглушка "Совместные задачи" / "jointtasks" (ТЗ
+           пользователя от 13.09) — тем же принципом, что и worktasks выше:
+           обычный список задач через renderTaskTabList, пиктограмма — те
+           же два человечка, что и TASK_MOVE_ICONS.jointtasks в my.js.
+           Последняя перед archive — archive должна оставаться самым
+           последним элементом в DOM (см. #settingsTabs .settings-tab:last-child
+           в modals.css — линия-срез верхнего края стека). -->
+      <button class="settings-tab task-tab" id="settingsTabJointTasksBtn" data-task="jointtasks" title="jointtasks" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="8" r="2.3"></circle>
+          <path d="M3.5 19c0-3 2-5.3 4.5-5.3s4.5 2.3 4.5 5.3"></path>
+          <circle cx="16" cy="8" r="2.3"></circle>
+          <path d="M11.5 19c0-3 2-5.3 4.5-5.3s4.5 2.3 4.5 5.3"></path>
         </svg>
       </button>
       <button class="settings-tab task-tab" id="settingsTabArchiveBtn" data-task="archive" title="archive" style="display:none;">
