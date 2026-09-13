@@ -1111,6 +1111,73 @@
   // Red — это витрина по цветной отметке (см. TASK_MOVE_TARGET_TABS ниже,
   // getTasksForTab и cycleTaskFlag).
   var TASK_MOVABLE_TABS = ["red","inbox","next","projects","waiting","council","read","someday"];
+
+  // Невидимая распорка в конце списка — тем же приёмом, что и на "Карте
+  // дней года" (см. year-grid-v-spacer-row выше, ТЗ пользователя от
+  // 13.09): приподнимает последнюю карточку списка над плавающими
+  // кнопками (+/домик и т.п.), когда список прокручен до самого низа.
+  // Используется вкладками задач (renderTaskTabList, включая "Мои
+  // проекты") и вкладкой "Комментарии" (renderCommentsTab) — везде, где
+  // над списком висит .task-add-fab/.task-project-fab-home. Архивная
+  // вкладка (renderTaskArchiveTab) не получает её — там этих кнопок нет
+  // (archive не входит в TASK_MOVABLE_TABS, см. syncTaskFabRowForTab).
+  var TASK_LIST_BOTTOM_SPACER_HTML = '<div class="task-list-bottom-spacer"></div>';
+
+  // Синк ряда кнопок "домик/+/скрепка/Аа/текстовыделитель/Ж" под текущую
+  // вкладку задач (ТЗ пользователя от 13.09, расширено 13.09: раньше
+  // неактивный домик-заглушка показывался только на списке "Мои проекты",
+  // теперь — на любой вкладке задач с этим рядом, чтобы порядок кнопок
+  // везде совпадал с "Моим блокнотом", см. mdeditor.js). Показ заглушки —
+  // тот же вид, что у активного домика на экране "Все задачи проекта"
+  // (READER_HOME_ICON_SVG/.task-project-fab-home), просто не реагирует на
+  // клик. Вынесено в отдельную функцию, а не оставлено инлайном в
+  // switchSettingsTab, т.к. вызывается ещё и из обработчика "Домика" в
+  // openTaskNextPicker (см. там) — та кнопка возвращает к списку проектов
+  // через renderTaskTabList("projects") напрямую, минуя switchSettingsTab
+  // (сознательно, чтобы не плодить лишний шаг истории), и раньше это
+  // оставляло "+" спрятанной (её прячет globalFab в openTaskNextPicker).
+  function syncTaskFabRowForTab(tab){
+    var addFab = document.getElementById("taskAddFab");
+    var isCommentsTab = (tab === "extra2" && getCustomCommentsEnabled());
+    var showTaskFab = TASK_MOVABLE_TABS.indexOf(tab) !== -1 || isCommentsTab;
+    if(addFab) addFab.classList.toggle("visible", showTaskFab);
+    // скрепка/Аа/текстовыделитель/Ж видны в тех же случаях, что и "+" (см.
+    // ТЗ пользователя от 31.08 — все стоят в одном ряду с ней).
+    var formatWrap = document.getElementById("taskFormatWrap");
+    var fontSizeWrap = document.getElementById("taskFontSizeWrap");
+    var highlightWrap = document.getElementById("taskHighlightWrap");
+    var attachWrap = document.getElementById("taskAttachWrap");
+    if(formatWrap) formatWrap.classList.toggle("visible", showTaskFab);
+    if(fontSizeWrap) fontSizeWrap.classList.toggle("visible", showTaskFab);
+    if(highlightWrap) highlightWrap.classList.toggle("visible", showTaskFab);
+    if(attachWrap) attachWrap.classList.toggle("visible", showTaskFab);
+
+    // Заглушка-домик — на любой вкладке задач с рядом кнопок (не на
+    // карточке проекта: там openTaskNextPicker рисует свою, кликабельную
+    // копию и сам прячет и её, и globalFab). Создаётся один раз лениво и
+    // кладётся соседом #taskAddFab (вне #settingsTabContent — переживает
+    // innerHTML= списка задач).
+    var homeStub = document.getElementById("taskFabHomeStub");
+    if(showTaskFab){
+      if(!homeStub && addFab && addFab.parentNode){
+        homeStub = document.createElement("button");
+        homeStub.type = "button";
+        homeStub.id = "taskFabHomeStub";
+        homeStub.className = "mdeditor-fab-btn task-project-fab-home";
+        homeStub.tabIndex = -1;
+        homeStub.setAttribute("aria-disabled", "true");
+        homeStub.innerHTML = READER_HOME_ICON_SVG;
+        addFab.parentNode.insertBefore(homeStub, addFab);
+      }
+      if(homeStub) homeStub.classList.add("visible");
+    } else if(homeStub){
+      homeStub.classList.remove("visible");
+    }
+    // "+" всегда стоит рядом с местом "домика" (right:48, тот же угол,
+    // что и на "Все задачи проекта") — сам угол (right:8) везде теперь
+    // занят заглушкой-домиком выше.
+    if(addFab) addFab.classList.toggle("task-add-fab-shifted", showTaskFab);
+  }
   // 2 вкладки-заглушки в горизонтальном ряду рядом со вкладкой настроек
   // (было 3 — одну отдали под вкладку диаграммы настроения, см.
   // settingsTabMoodBtn/switchSettingsTab ниже, см. также
@@ -3398,17 +3465,21 @@
   initTaskGlobalToolbar();
 
   // ---------------------------------------------------------------------
-  // Глобальные "Ж" (форматирование выделения), "Аа" (размер шрифта) и
-  // скрепка (вставка картинки) на вкладках задач (см. #taskFormatWrap/
-  // #taskFontSizeWrap/#taskAttachWrap в index.html) — по одной кнопке на
-  // всё приложение, а не по одной на строку, поэтому применяются к тому
-  // .task-editable, что открыт для редактирования ПРЯМО СЕЙЧАС (в один
-  // момент времени редактируется не больше одной строки — остальные при
-  // этом уже сохранены, см. flushPendingTaskEdits/flushPendingCommentEdits).
+  // Глобальные "Ж" (форматирование выделения), "Аа" (размер шрифта),
+  // текстовыделитель и скрепка (вставка картинки) на вкладках задач (см.
+  // #taskFormatWrap/#taskFontSizeWrap/#taskHighlightWrap/#taskAttachWrap
+  // в index.html) — по одной кнопке на всё приложение, а не по одной на
+  // строку, поэтому применяются к тому .task-editable, что открыт для
+  // редактирования ПРЯМО СЕЙЧАС (в один момент времени редактируется не
+  // больше одной строки — остальные при этом уже сохранены, см.
+  // flushPendingTaskEdits/flushPendingCommentEdits).
   // "Аа" использует ТОТ ЖЕ fontSizeStep, что и "Мои заметки" (см.
   // MdEditor.changeFontSizeStep в mdeditor.js) — единица размера, стало
-  // быть, общая на оба места (см. ТЗ пользователя от 31.08). Скрепка —
-  // тот же принцип "![[имя]]"/images/ (OPFS), что и там же (см.
+  // быть, общая на оба места (см. ТЗ пользователя от 31.08). Текстовыделитель
+  // — та же функция wrapEditableSelection("==","=="), что и у "Ж"/"К"/"П"/
+  // "Ч", просто без попапа (added 13.09, та же иконка, что и в "Моём
+  // блокноте", см. HIGHLIGHT_ICON_SVG в mdeditor.js). Скрепка — тот же
+  // принцип "![[имя]]"/images/ (OPFS), что и там же (см.
   // MdEditor.saveImageBytes/getImageBlobUrl), добавлена позже (см. ТЗ
   // пользователя от 11.09).
   // ---------------------------------------------------------------------
@@ -3486,6 +3557,17 @@
     bindTaskFmtBtn("taskFmtItalicBtn", "*", "*");
     bindTaskFmtBtn("taskFmtUnderlineBtn", "++", "++");
     bindTaskFmtBtn("taskFmtStrikeBtn", "~~", "~~");
+
+    // --- текстовыделитель (та же функция, что и "Ж"/"К"/"П"/"Ч" выше, но
+    // без попапа — один клик сразу оборачивает выделение, тот же приём,
+    // что и у HIGHLIGHT_ICON_SVG-кнопки в "Моём блокноте", см. mdeditor.js) ---
+    var highlightBtn = document.getElementById("taskHighlightBtn");
+    stopMousedown(highlightBtn);
+    if(highlightBtn){
+      highlightBtn.addEventListener("click", function(){
+        wrapEditableSelection("==", "==");
+      });
+    }
 
     // --- скрепка (вставка картинки, тот же принцип "![[имя]]"/OPFS
     // images/, что и "Аа"/"Ж" выше — общий с "Моими заметками", через
@@ -5308,18 +5390,13 @@
     // рендером.
     var isAutoScrollTab = TAB_SCROLL_AUTO_TABS.indexOf(tab) !== -1;
     if(container && !isAutoScrollTab) container.scrollTop = 0;
-    var addFab = document.getElementById("taskAddFab");
-    var isCommentsTab = (tab === "extra2" && getCustomCommentsEnabled());
-    var showTaskFab = TASK_MOVABLE_TABS.indexOf(tab) !== -1 || isCommentsTab;
-    if(addFab) addFab.classList.toggle("visible", showTaskFab);
-    // "Ж"/"Аа"/скрепка видны в тех же случаях, что и "+" (см. ТЗ
-    // пользователя от 31.08 — все стоят в одном ряду с ней).
-    var formatWrap = document.getElementById("taskFormatWrap");
-    var fontSizeWrap = document.getElementById("taskFontSizeWrap");
-    var attachWrap = document.getElementById("taskAttachWrap");
-    if(formatWrap) formatWrap.classList.toggle("visible", showTaskFab);
-    if(fontSizeWrap) fontSizeWrap.classList.toggle("visible", showTaskFab);
-    if(attachWrap) attachWrap.classList.toggle("visible", showTaskFab);
+    // Вынесено в отдельную функцию syncTaskFabRowForTab (13.09, см. её
+    // определение выше) — тот же синк нужен ещё и кнопке "Домик" на экране
+    // "Все задачи проекта": она возвращается к списку проектов НЕ через
+    // switchSettingsTab (см. openTaskNextPicker — сознательно, чтобы не
+    // плодить лишний шаг истории), поэтому раньше "+" (спрятанная там же,
+    // см. globalFab в openTaskNextPicker) при возврате не восстанавливалась.
+    syncTaskFabRowForTab(tab);
     if(tab === "mood"){ renderSettingsTabMood(); }
     else if(tab === "year") renderSettingsTabYear();
     else if(tab === "versions") renderSettingsTabVersions();
@@ -6221,8 +6298,9 @@
   // ТОТ ЖЕ fontSizeStep, что и заметки/задачи (MdEditor.changeFontSizeStep,
   // тем же приёмом, что initTaskGlobalToolbar выше).
   //
-  // Шаг 13 (выделение -> заметка книги, реализовано 11.09) — см.
-  // bindBookReaderSelectionOnce/resolveSelectionToBlockPosition/
+  // Шаг 13 (выделение -> заметка книги, реализовано 11.09; доработка 13.09
+  // — порядок действий "выделил, затем нажал кнопку") — см.
+  // handleBookReaderSelectionSettled/resolveSelectionToBlockPosition/
   // addUnderlineFromSelection дальше в этом разделе, после
   // jumpToChapterFromChaptersList.
   //
@@ -6307,12 +6385,6 @@
     bookReaderScrollHandler = null;
   }
   var bookReaderFontSizePanelOpen = false;
-  // "Взведена" ли кнопка "Выделение" (шаг 13, доработка 11.09, см.
-  // READER_SELECT_ICON_SVG выше) — сбрасывается при каждом полном рендере
-  // ридера (bindBookReaderFabRow), тем же приёмом, что и
-  // bookReaderFontSizePanelOpen; отдельно гасится после одного
-  // выделения (см. disarmBookReaderSelection ниже).
-  var bookReaderSelectionArmed = false;
 
   // Пиктограммы кнопок ридера — тот же стиль viewBox 24x24/stroke=currentColor,
   // что и везде в проекте. HOME_ICON_SVG физически дублирует контур домика из
@@ -6364,16 +6436,16 @@
       '<circle cx="12" cy="7.2" r="4.2"></circle>' +
       '<line x1="12" y1="11.4" x2="12" y2="20.5"></line>' +
     '</svg>';
-  // Кнопка "Выделение" (READER_PLAN.md, Этап D, шаг 13, доработка 11.09) —
-  // маркер, оставляющий след на бумаге. До этой доработки любое выделение
-  // текста в ридере (см. handleBookReaderSelectionSettled ниже) сразу
-  // становилось подчёркиванием — это мешало обычному выделению текста
-  // (например, для копирования). Теперь подчёркивание срабатывает только
-  // когда кнопка "взведена" (см. bookReaderSelectionArmed) — одно
-  // выделение расходует взвод, для следующего нужно нажать кнопку снова
-  // (см. bindBookReaderFabRow/disarmBookReaderSelection ниже). Активное
-  // состояние — тот же переиспользуемый класс .pressed, что у кнопки "i"
-  // во вкладке "Извлечение субтитров".
+  // Кнопка "Выделение" (READER_PLAN.md, Этап D, шаг 13; доработка 13.09 —
+  // тот же порядок действий, что и у кнопки "Маркер" в "Моём блокноте",
+  // mdeditor.js: сначала пользователь выделяет текст пальцем/мышью как
+  // обычно, ЗАТЕМ жмёт эту кнопку — она читает текущее выделение и сразу
+  // подчёркивает его (см. handleBookReaderSelectionSettled ниже). Раньше
+  // кнопка сама "взводилась" перед выделением — от этого отказались:
+  // одинаковый порядок действий с "Моим блокнотом" проще запомнить.
+  // mousedown с preventDefault (см. bindBookReaderFabRow ниже) — чтобы
+  // клик по кнопке не сбрасывал уже сделанное выделение текста до того,
+  // как сработает click.
   var READER_SELECT_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M4 20h6"></path>' +
@@ -6605,7 +6677,6 @@
   // mdeditor.js навешивает их на mdEditorFontSizeBtn/mdEditorHomeBtn2 и т.п.
   function bindBookReaderFabRow(){
     bookReaderFontSizePanelOpen = false; // попап "+"/"-" каждый раз стартует закрытым (та же причина, что у fontSizePanelOpen в renderEditorScreen)
-    bookReaderSelectionArmed = false; // кнопка "Выделение" каждый раз стартует невзведённой
     removeBookReaderUnderlineTrashBtn(); // кнопка-урна (доработка 11.09) тоже не переживает полный рендер — та же причина
     var fontBtn = document.getElementById("bookReaderFontSizeBtn");
     var fontPopup = document.getElementById("bookReaderFontSizePopup");
@@ -6622,20 +6693,18 @@
     if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ MdEditor.changeFontSizeStep(1); });
     if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ MdEditor.changeFontSizeStep(-1); });
 
-    // Кнопка "Выделение" (шаг 13, доработка 11.09) — чистый toggle: клик
-    // взводит/снимает взвод. Пока не взведена, выделение текста в ридере
-    // работает как обычное браузерное выделение (например, для копирования)
-    // и не трогает заметку книги — см. guard в handleBookReaderSelectionSettled
-    // ниже. Снятие взвода при повторном клике (передумал) заодно снимает и
-    // текущее браузерное выделение, чтобы не осталось "зависшего" выделения
-    // без взвода.
+    // Кнопка "Выделение" (шаг 13; доработка 13.09 — тот же порядок
+    // действий, что у кнопки "Маркер" в "Моём блокноте", mdeditor.js):
+    // пользователь сначала выделяет текст обычным браузерным выделением,
+    // затем жмёт кнопку — handleBookReaderSelectionSettled читает текущее
+    // выделение и сразу подчёркивает его. mousedown с preventDefault — то
+    // же самое, зачем это нужно кнопкам форматирования в mdeditor.js:
+    // клик по кнопке иначе сбросил бы выделение текста до срабатывания
+    // click.
     var selectBtn = document.getElementById("bookReaderSelectBtn");
     if(selectBtn){
-      selectBtn.addEventListener("click", function(){
-        bookReaderSelectionArmed = !bookReaderSelectionArmed;
-        selectBtn.classList.toggle("pressed", bookReaderSelectionArmed);
-        if(!bookReaderSelectionArmed && window.getSelection) window.getSelection().removeAllRanges();
-      });
+      selectBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+      selectBtn.addEventListener("click", handleBookReaderSelectionSettled);
     }
 
     var bookmarkBtn = document.getElementById("bookReaderBookmarkBtn");
@@ -6751,7 +6820,6 @@
       container.addEventListener("scroll", bookReaderScrollHandler, { passive: true });
     });
     bindBookReaderFabRow();
-    bindBookReaderSelectionOnce();
     bindBookReaderImages();
     bindBookReaderUnderlineClicks();
   }
@@ -6839,7 +6907,9 @@
   }
 
   // ===================== ВЫДЕЛЕНИЕ -> ЗАМЕТКА КНИГИ (READER_PLAN.md, Этап D,
-  // шаг 13, 11.09) =====================
+  // шаг 13, 11.09; доработка 13.09 — порядок действий изменён на "выделил,
+  // затем нажал кнопку", тот же, что у кнопки "Маркер" в "Моём блокноте")
+  // =====================
   // При первом выделении в открытой книге — диалог с именем заметки;
   // заметка создаётся один раз (MdEditor.createNoteSilently, БЕЗ перехода на
   // экран редактора — пользователь остаётся в ридере) и id запоминается в
@@ -6852,20 +6922,11 @@
   // {ch,blk,s,e}) уже подчёркивалось раньше — повторно в заметку не
   // добавляется (см. already ниже).
   //
-  // Слушатель — один document-level "selectionchange" с debounce (не
-  // mouseup/touchend по отдельности: на телесенсорных устройствах выделение
-  // часто ещё "доводится" ручками после touchend, mouseup там вообще не
-  // стреляет) — включается один раз лениво, при первом открытии книги.
-  var bookReaderSelectionBound = false;
-  var bookReaderSelectionTimer = null;
-  function bindBookReaderSelectionOnce(){
-    if(bookReaderSelectionBound) return;
-    bookReaderSelectionBound = true;
-    document.addEventListener("selectionchange", function(){
-      clearTimeout(bookReaderSelectionTimer);
-      bookReaderSelectionTimer = setTimeout(handleBookReaderSelectionSettled, 300);
-    });
-  }
+  // Точка входа — клик по кнопке "Выделение" (см. bindBookReaderFabRow
+  // выше), а не автоматический слушатель "selectionchange" (так было до
+  // 13.09) — пользователь сам решает момент, когда уже готовое выделение
+  // текста нужно превратить в подчёркивание, тем же приёмом, что и кнопки
+  // форматирования "Моего блокнота" (mdeditor.js).
 
   // Подчёркивания текущей книги для одного абзаца (блока) — отсортированный
   // список {s,e,id} в координатах плоского текста этого абзаца, для
@@ -7130,19 +7191,6 @@
     }
   }
 
-  // Снимает взвод кнопки "Выделение" (шаг 13, доработка 11.09) — вызывается
-  // после того, как выделение реально израсходовано (подчёркивание добавлено
-  // или место уже было подчёркнуто раньше), чтобы для следующего
-  // подчёркивания пользователь снова нажал кнопку. При неудачном выделении
-  // (например, через несколько абзацев — см. handleBookReaderSelectionSettled)
-  // взвод НЕ снимается, чтобы можно было сразу попробовать ещё раз в
-  // пределах одного абзаца без повторного нажатия кнопки.
-  function disarmBookReaderSelection(){
-    bookReaderSelectionArmed = false;
-    var btn = document.getElementById("bookReaderSelectBtn");
-    if(btn) btn.classList.remove("pressed");
-  }
-
   // Главная точка входа: новое подчёркивание с уже известной позицией/
   // текстом — заводит заметку книги при необходимости (диалог имени), иначе
   // сразу дописывает в существующую; дедуплицирует точные повторы позиции.
@@ -7156,7 +7204,6 @@
       // То же самое место уже подчёркивалось раньше (повторное чтение) —
       // текст и так уже подсвечен, в заметку повторно не добавляем.
       if(window.getSelection) window.getSelection().removeAllRanges();
-      disarmBookReaderSelection();
       return;
     }
     function finishWithNoteId(noteId){
@@ -7165,7 +7212,6 @@
       markBookUnderlineMovedToNote(hash, underlineId);
       refreshBookReaderParagraphHighlight(ch, blk);
       if(window.getSelection) window.getSelection().removeAllRanges();
-      disarmBookReaderSelection();
     }
     if(data.noteId){
       finishWithNoteId(data.noteId);
@@ -7287,9 +7333,9 @@
   }
 
   // Скрытие кнопки-урны вне тапа по ней самой/по подчёркиванию — один
-  // document-level слушатель, тем же приёмом (лениво, один раз), что
-  // bindBookReaderSelectionOnce выше. "scroll" не всплывает — слушаем в
-  // фазе перехвата (capture=true), чтобы поймать скролл #settingsTabContent.
+  // document-level слушатель, включается лениво, один раз. "scroll" не
+  // всплывает — слушаем в фазе перехвата (capture=true), чтобы поймать
+  // скролл #settingsTabContent.
   var bookReaderUnderlineDismissBound = false;
   function bindBookReaderUnderlineDismissOnce(){
     if(bookReaderUnderlineDismissBound) return;
@@ -7368,12 +7414,12 @@
     }
   }
 
-  // Debounce-обработчик "selectionchange" (см. bindBookReaderSelectionOnce
-  // выше) — реагирует только пока открыт ридер в текстовом режиме и выделение
-  // реально лежит внутри .book-reader.
+  // Обработчик клика по кнопке "Выделение" (доработка 13.09, см.
+  // bindBookReaderFabRow выше) — реагирует только пока открыт ридер в
+  // текстовом режиме и текущее браузерное выделение реально лежит внутри
+  // .book-reader.
   function handleBookReaderSelectionSettled(){
     if(!bookReaderState || bookReaderState.mode !== "text") return;
-    if(!bookReaderSelectionArmed) return; // кнопка "Выделение" не взведена (шаг 13, доработка 11.09) — обычное выделение текста, заметку не трогаем
     var sel = window.getSelection();
     if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
     var range = sel.getRangeAt(0);
@@ -10948,7 +10994,7 @@
     var comments = getAllComments();
     var rowsHtml = comments.map(function(c){ return buildCommentRowHtml(c); }).join("");
     container.innerHTML =
-      '<div class="task-list" id="commentListWrap">' + rowsHtml + '</div>' +
+      '<div class="task-list" id="commentListWrap">' + rowsHtml + TASK_LIST_BOTTOM_SPACER_HTML + '</div>' +
       (comments.length === 0 ? '<div class="task-empty">Здесь пока нет комментариев.</div>' : '');
     comments.forEach(function(c){ renderCommentRowView(c.id); });
 
@@ -11343,7 +11389,7 @@
     var tasks = getTasksForTab(tabKey);
     var rowsHtml = tasks.map(function(t){ return buildTaskRowHtml(t); }).join("");
     container.innerHTML =
-      '<div class="task-list task-grid-list" id="taskListWrap">' + rowsHtml + '</div>' +
+      '<div class="task-list task-grid-list" id="taskListWrap">' + rowsHtml + TASK_LIST_BOTTOM_SPACER_HTML + '</div>' +
       (tasks.length === 0 ? '<div class="task-empty">Здесь пока нет задач.</div>' : '');
     tasks.forEach(function(t){ bindTaskRow(t.id, tabKey); });
     if(anchorVisualOffset != null){
@@ -11912,30 +11958,37 @@
           '<div class="task-project-area" id="taskProjectArea">' + areaHtml + '</div>' +
         '</div>' +
         // "новая задача" (+) — визуально та же самая общая .task-add-fab
-        // (тот же класс, тот же угол, тот же квадратный вид, что и на
-        // остальных вкладках задач), просто отдельный DOM-узел со своим id
-        // и своим обработчиком: у "+" здесь своя логика создания задачи,
+        // (тот же класс, тот же квадратный вид, что и на остальных
+        // вкладках задач), просто отдельный DOM-узел со своим id и своим
+        // обработчиком: у "+" здесь своя логика создания задачи,
         // привязанной к проекту, отличная от обычного добавления в список
-        // (см. taskProjectCreateFab ниже). Настоящая глобальная
-        // .task-add-fab (#taskAddFab) на этом экране по-прежнему скрыта
-        // (см. globalFab ниже) — иначе они бы наложились друг на друга.
+        // (см. taskProjectCreateFab ниже). УГОЛ (right:8) у неё теперь не
+        // тот же, что у обычной .task-add-fab на других вкладках — здесь
+        // угол занят "Домиком" (см. ниже), а "+" сдвинута своим id-
+        // селектором (#taskProjectCreateFab в modals.css, доработка
+        // 13.09). Настоящая глобальная .task-add-fab (#taskAddFab) на
+        // этом экране по-прежнему скрыта (см. globalFab ниже) — иначе они
+        // бы наложились друг на друга.
         // "Прикрепить существующую" (звенья) — та же квадратная кнопка
         // (.mdeditor-fab-btn, тот же вид, что у Ж/Аа/скрепки/"+" везде в
-        // приложении), поставлена ЛЕВЕЕ ВСЕХ кнопок ряда — левее "Ж" (ТЗ
-        // пользователя от 12.09) — со своим позиционированием
-        // (.task-project-fab-link в modals.css). Подсветка активного
-        // режима "attach" — общий класс .pressed (см. .mdeditor-fab-btn.
-        // pressed в components.css), тот же приём, что и у кнопки "i" во
-        // вкладке "Извлечение субтитров".
+        // приложении), поставлена ЛЕВЕЕ ВСЕХ кнопок ряда (ТЗ пользователя
+        // от 12.09, сдвинута ещё левее 13.09, когда угол отдали "Домику")
+        // — со своим позиционированием (.task-project-fab-link в
+        // modals.css). Подсветка активного режима "attach" — общий класс
+        // .pressed (см. .mdeditor-fab-btn.pressed в components.css), тот
+        // же приём, что и у кнопки "i" во вкладке "Извлечение субтитров".
         // "Домик" — назад к списку всех проектов (ТЗ пользователя от
         // 12.09, седьмой заход): та же READER_HOME_ICON_SVG, что и у
         // книг (см. bookReaderHomeBtn выше — своя копия контура домика,
         // тем же приёмом, что и там, т.к. HOME_ICON_SVG самого
-        // mdeditor.js наружу не отдаётся). Позиционирование —
-        // .task-project-fab-home в modals.css (ЕЩЁ НЕ ДОБАВЛЕНО — нужны
-        // components.css/modals.css, чтобы поставить её рядом с
-        // .task-project-fab-link по месту, без них кнопка будет наложена
-        // на соседние).
+        // mdeditor.js наружу не отдаётся). Правый угол ряда (right:8) —
+        // доработка 13.09: порядок кнопок с одинаковой функцией должен
+        // совпадать с "Моим блокнотом" (mdeditor.js), где "Домик" всегда
+        // самая правая/крайняя кнопка ряда — раньше стояла самой левой
+        // (right:208), теперь угол её, а "+"/"звенья" сдвинуты левее (см.
+        // .task-project-fab-home в modals.css, там же — почему без
+        // position:absolute кнопка ещё и оставляла пустую полосу снизу
+        // экрана, "подбородок").
         '<button type="button" class="mdeditor-fab-btn task-project-fab-home" id="taskProjectHomeBtn" title="К списку проектов">' + READER_HOME_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn task-project-fab-link' + (mode === "attach" ? " pressed" : "") + '" id="taskProjectLinkFab" title="Прикрепить существующую задачу">' + LINK_NEXT_ICON_SVG + '</button>' +
         '<button type="button" class="task-add-fab visible" id="taskProjectCreateFab" title="Новая задача">+</button>';
@@ -11952,6 +12005,11 @@
       // (switchSettingsTab выставляет видимость заново для каждой вкладки).
       var globalFab = document.getElementById("taskAddFab");
       if(globalFab) globalFab.classList.remove("visible");
+      // Заглушка-домик остальных вкладок задач (см. syncTaskFabRowForTab) —
+      // здесь свой, кликабельный домик (taskProjectHomeBtn выше), заглушка
+      // в том же углу была бы лишней/перекрывала бы его.
+      var homeStubHide = document.getElementById("taskFabHomeStub");
+      if(homeStubHide) homeStubHide.classList.remove("visible");
 
       // Название проекта уже вставлено выше (projectNameHtml) — без
       // кнопок управления (см. комментарий у projectNameHtml), поэтому
@@ -12000,6 +12058,10 @@
         activeProjectPickerRerender = null;
         clearProjectPickerResumeState();
         renderTaskTabList("projects");
+        // Возврат идёт в обход switchSettingsTab (см. комментарий выше) —
+        // поэтому ряд кнопок "+/заглушка-домик" синкаем сюда явно, иначе
+        // "+" осталась бы спрятанной (её прятал globalFab чуть выше).
+        syncTaskFabRowForTab("projects");
       });
 
       document.getElementById("taskProjectLinkFab").addEventListener("click", function(){

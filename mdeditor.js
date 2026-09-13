@@ -344,6 +344,23 @@ window.initMdEditorModule = function(deps){
       '<path d="M7.5 10.5L12 15l4.5-4.5"></path>' +
       '<path d="M4.5 18.5h15"></path>' +
     '</svg>';
+  // Маркер (выделитель текста) — та же пиктограмма, что READER_SELECT_ICON_SVG
+  // в my.js (кнопка "Выделить текст" у книжного ридера): физически
+  // продублирована здесь тем же приёмом, что и READER_HOME_ICON_SVG/HOME_ICON_SVG
+  // (заводить деп ради одной иконки не стоит) — визуально одна и та же
+  // пиктограмма в двух местах проекта. В отличие от ридера книг (кнопка
+  // "взводится", затем выделение текста), здесь кнопка работает как и
+  // остальные кнопки форматирования (Ж/К/П/Ч): сначала выделяешь текст в
+  // редакторе, затем жмёшь кнопку — она оборачивает выделение в "==...=="
+  // (см. bindFormatBtn/wrapCmSelection выше, синтаксис "==" уже
+  // поддержан decorations — см. highlightMark/scanPair в
+  // makeLivePreviewExtension ниже, класс .cm-md-mark в components.css).
+  var HIGHLIGHT_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M4 20h6"></path>' +
+      '<path d="M6.5 17.5L16 8l3 3-9.5 9.5H6.5v-3z"></path>' +
+      '<path d="M14 6l4 4"></path>' +
+    '</svg>';
 
   // ---------------------------------------------------------------------
   // IndexedDB — хранение directory handle между сессиями. FileSystem*Handle
@@ -3233,6 +3250,7 @@ window.initMdEditorModule = function(deps){
         '<div class="mdeditor-editor-host" id="mdEditorHost"></div>' +
         '<input type="file" accept="image/*" id="mdEditorImageInput" style="display:none;">' +
         '<div class="mdeditor-fab-row">' +
+          '<button type="button" class="mdeditor-fab-btn" id="mdEditorDownloadBtn" title="Скачать .md">' + DOWNLOAD_ICON_SVG + '</button>' +
           '<span class="mdeditor-fontsize-wrap" id="mdEditorFormatWrap">' +
             '<div class="mdeditor-fontsize-popup" id="mdEditorFormatPopup">' +
               '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="mdEditorFmtBoldBtn" title="Жирный">Ж</button>' +
@@ -3242,6 +3260,7 @@ window.initMdEditorModule = function(deps){
             '</div>' +
             '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="mdEditorFormatBtn" title="Форматирование выделенного текста">Ж</button>' +
           '</span>' +
+          '<button type="button" class="mdeditor-fab-btn" id="mdEditorHighlightBtn" title="Выделить текст">' + HIGHLIGHT_ICON_SVG + '</button>' +
           '<span class="mdeditor-fontsize-wrap" id="mdEditorFontSizeWrap">' +
             '<div class="mdeditor-fontsize-popup" id="mdEditorFontSizePopup">' +
               '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="mdEditorFontPlusBtn" title="Крупнее">+</button>' +
@@ -3250,7 +3269,6 @@ window.initMdEditorModule = function(deps){
             '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="mdEditorFontSizeBtn" title="Размер шрифта">Аа</button>' +
           '</span>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorImageBtn" title="Вставить картинку">' + PAPERCLIP_ICON_SVG + '</button>' +
-          '<button type="button" class="mdeditor-fab-btn" id="mdEditorDownloadBtn" title="Скачать .md">' + DOWNLOAD_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorModeBtn" title="Переключить режим кода">' + (codeMode ? EYE_ICON_SVG : CODE_ICON_SVG) + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn2" title="К списку заметок">' + HOME_ICON_SVG + '</button>' +
         '</div>' +
@@ -3329,6 +3347,20 @@ window.initMdEditorModule = function(deps){
     bindFormatBtn("mdEditorFmtItalicBtn", "*", "*");
     bindFormatBtn("mdEditorFmtUnderlineBtn", "++", "++");
     bindFormatBtn("mdEditorFmtStrikeBtn", "~~", "~~");
+
+    // "Маркер" — отдельная кнопка на самой панели (не в попапе "Ж"), тот же
+    // внешний вид, что у кнопки "Выделить текст" в книжном ридере (см.
+    // HIGHLIGHT_ICON_SVG выше). В отличие от ридера книг кнопка не
+    // "взводится" — сначала выделяешь текст в редакторе, потом жмёшь кнопку,
+    // и она сразу оборачивает выделение в "==...==" (та же механика
+    // выделения, что и у Ж/К/П/Ч, см. wrapCmSelection/bindFormatBtn выше).
+    // mousedown с preventDefault — чтобы клик по кнопке не сбрасывал
+    // выделение в CodeMirror до срабатывания click.
+    var highlightBtn = document.getElementById("mdEditorHighlightBtn");
+    if(highlightBtn){
+      highlightBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      highlightBtn.addEventListener("click", function(){ wrapCmSelection("==", "=="); });
+    }
 
     // "скрепка" — правее "Аа", левее переключателя кода (см. ТЗ
     // пользователя от 31.08), в том же стиле .mdeditor-fab-btn, что и
