@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 2.1 (14.09)
+   Версия: 2.2 (14.09)
    =========================================================================== */
 
 (function(){
@@ -3459,6 +3459,18 @@
   });
   var renderSettingsTabImgResize = ImgResize.renderSettingsTabImgResize;
 
+  // Реестр адаптеров синхронизации файлов (books/images) по kind. Должен
+  // существовать ДО инициализации MdEditor ниже — тот регистрирует свой
+  // адаптер ("images") синхронно во время initMdEditorModule (см.
+  // registerFileRegistryAdapter в deps и баг от 14.09: FILE_REGISTRY_ADAPTERS
+  // раньше объявлялся ниже по файлу, initMdEditorModule успевал вызваться
+  // до этого объявления — TypeError "Cannot set properties of undefined
+  // (setting 'images')").
+  var FILE_REGISTRY_ADAPTERS = {};
+  function registerFileRegistryAdapter(kind, adapters){
+    FILE_REGISTRY_ADAPTERS[kind] = adapters;
+  }
+
   // ===================== МОЙ ПОЧТОВЫЙ БЛОКНОТ (md-редактор) =====================
   // Логика вкладки "Мои заметки" (первая боковая вкладка второго
   // набора, settingsTabSet2Btn1 / "set2s_1") вынесена в отдельный файл
@@ -6179,12 +6191,9 @@
   // Реестр адаптеров по kind — заполняется ниже: "books" сразу тут же (в
   // этом файле), "images" регистрируется из mdeditor.js через
   // registerFileRegistryAdapter в deps (см. initMdEditorModule ниже и
-  // группу "Облачная синхронизация картинок" в mdeditor.js).
-  var FILE_REGISTRY_ADAPTERS = {};
-  function registerFileRegistryAdapter(kind, adapters){
-    FILE_REGISTRY_ADAPTERS[kind] = adapters;
-  }
-
+  // группу "Облачная синхронизация картинок" в mdeditor.js). Само
+  // объявление FILE_REGISTRY_ADAPTERS/registerFileRegistryAdapter вынесено
+  // выше, перед инициализацией MdEditor — см. комментарий там.
   FILE_REGISTRY_ADAPTERS.books = {
     getLocalManifest: function(){ return getBooksDirHandle().then(loadBooksManifest); },
     saveIncoming: function(hash, name, bytes){ return saveBookFile(name, bytes); },
