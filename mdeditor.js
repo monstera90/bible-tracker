@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 2.0 (14.09)
    Вкладка "Мои заметки" (первая боковая вкладка второго набора,
    settingsTabSet2Btn1 / "set2s_1") — работа с .md заметками в стиле
    Obsidian. Вынесена в отдельный файл по тому же образцу, что и
@@ -504,10 +505,91 @@ window.initMdEditorModule = function(deps){
   var imageUrlCache = new Map();
   var IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp)$/i;
   // ---------------------------------------------------------------------
+  // Манифест хэшей картинок (ТЗ пользователя от 14.09: облачная
+  // синхронизация картинок заметок нужна так же, как у книг). Тот же
+  // приём, что и у books/.manifest.json в my.js (см. "ХРАНИЛИЩЕ КНИГ" —
+  // getBooksDirHandle/loadBooksManifest/sha256Hex): плоский JSON
+  // hash -> имя файла В КОРНЕ images/, обновляется при каждом добавлении/
+  // удалении. Ведётся ВСЕГДА, а не только при включённой синхронизации —
+  // так же, как манифест дедупликации книг: это локальная инфраструктура,
+  // облако лишь читает её через адаптер "images" (см. конец файла,
+  // registerFileRegistryAdapter). Своя копия sha256Hex — тот же принцип
+  // независимых копий мелких утилит, что и у ZIP-ридеров epubsplit.js/
+  // jwlmerge.js.
+  // ---------------------------------------------------------------------
+  var IMAGES_MANIFEST_NAME = ".manifest.json";
+  function sha256Hex(buffer){
+    return crypto.subtle.digest("SHA-256", buffer).then(function(digest){
+      var bytes = new Uint8Array(digest), hex = "";
+      for(var i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, "0");
+      return hex;
+    });
+  }
+  function loadImagesManifest(dir){
+    return dir.getFileHandle(IMAGES_MANIFEST_NAME, { create: false }).then(function(fh){
+      return fh.getFile().then(function(f){ return f.text(); });
+    }).then(function(text){
+      try{
+        var m = JSON.parse(text);
+        return (m && typeof m === "object") ? m : {};
+      }catch(e){ return {}; }
+    }).catch(function(){ return {}; }); // манифеста ещё нет (первая картинка) — пустой
+  }
+  function saveImagesManifest(dir, manifest){
+    return dir.getFileHandle(IMAGES_MANIFEST_NAME, { create: true }).then(function(fh){
+      return fh.createWritable();
+    }).then(function(w){
+      return w.write(JSON.stringify(manifest)).then(function(){ return w.close(); });
+    });
+  }
+  // Считает хэш buf (ArrayBuffer), прописывает hash->finalName в манифест
+  // и регистрирует файл в облачном реестре (deps.registerFileInRegistry,
+  // no-op без активной синхронизации — см. my.js). Вызывается после
+  // КАЖДОЙ успешной записи файла в images/ — insertImageAtCursor/
+  // saveImageBytes/handleImportImagesZip/replaceAllImagesFromEntries.
+  function recordImageAdded(finalName, buf){
+    return sha256Hex(buf).then(function(hash){
+      return getImagesDirHandle().then(function(dir){
+        return loadImagesManifest(dir).then(function(manifest){
+          manifest[hash] = finalName;
+          return saveImagesManifest(dir, manifest);
+        });
+      }).then(function(){
+        if(deps.registerFileInRegistry) deps.registerFileInRegistry("images", hash, finalName, buf.byteLength);
+        return hash;
+      });
+    }).catch(function(e){
+      if(window.Debug) window.Debug.log("recordImageAdded(" + finalName + "): " + (e && e.message ? e.message : e));
+    });
+  }
+  // Убирает finalName из манифеста и (если удалось найти хэш) ставит
+  // тумбстоун в облаке — вызывается из deleteImageFile и cleanupOrphanedImages
+  // ПОСЛЕ того, как файл реально стёрт с диска.
+  function recordImageRemoved(finalName){
+    return getImagesDirHandle().then(function(dir){
+      return loadImagesManifest(dir).then(function(manifest){
+        var hash = null;
+        Object.keys(manifest).forEach(function(h){
+          if(manifest[h] === finalName){ hash = h; delete manifest[h]; }
+        });
+        return saveImagesManifest(dir, manifest).then(function(){ return hash; });
+      });
+    }).then(function(hash){
+      if(hash && deps.registerFileDeletion) deps.registerFileDeletion("images", hash);
+    }).catch(function(e){
+      if(window.Debug) window.Debug.log("recordImageRemoved(" + finalName + "): " + (e && e.message ? e.message : e));
+    });
+  }
+  // ---------------------------------------------------------------------
   // Папка с локальными изображениями (READER_PLAN.md, Этап A, шаг 1, 09.09)
-  // — независима от облачного хранения текста заметок: картинки НИКОГДА не
-  // идут в Firebase Realtime Database напрямую (см. Этап B/реестр файлов),
-  // между устройствами синхронизируются отдельно. Раньше это была папка на
+  // — независима от облачного хранения текста заметок: содержимое картинок
+  // никогда не идёт в Firebase Realtime Database напрямую — база знает
+  // только реестр хэшей (см. "ХРАНИЛИЩЕ КНИГ"/файлы реле в my.js). С 14.09
+  // (ТЗ пользователя) сами байты картинок ВРЕМЕННО и В ЗАШИФРОВАННОМ виде
+  // всё же ретранслируются через Firebase Storage между устройствами (см.
+  // registerFileRegistryAdapter("images", ...) в конце этого файла) — до
+  // этой правки было буквально "никогда", теперь это относится только к
+  // Realtime Database, не к Storage-реле. Раньше это была папка на
   // диске пользователя через File System Access API (showDirectoryPicker) —
   // с системным диалогом выбора, ручным переподключением после отзыва прав
   // и заглушкой-плейсхолдером на этот случай. Теперь это подпапка `images/`
@@ -732,11 +814,21 @@ window.initMdEditorModule = function(deps){
     }).then(function(){
       var entries = [];
       imageIndex.forEach(function(item){ entries.push(item); });
+      // Каждый файл читаем со своим .catch: сбой одного файла (например,
+      // гонка с корзиной сирот, физически удаляющей файл в этот же момент)
+      // не должен ронять Promise.all целиком и обнулять экспорт остальных,
+      // исправных картинок (баг от 14.09) — сбойный файл просто пропускаем
+      // (null), затем отфильтровываем пропуски.
       return Promise.all(entries.map(function(item){
         return item.handle.getFile().then(function(f){ return f.arrayBuffer(); }).then(function(buf){
           return { name: item.name, data: new Uint8Array(buf) };
+        }).catch(function(e){
+          if(window.Debug) window.Debug.log("getImageFilesForExport (" + item.name + "): " + (e && e.message ? e.message : e));
+          return null;
         });
-      }));
+      })).then(function(results){
+        return results.filter(function(r){ return r !== null; });
+      });
     }).catch(function(e){
       if(window.Debug) window.Debug.log("getImageFilesForExport: " + (e && e.message ? e.message : e));
       return [];
@@ -1109,19 +1201,25 @@ window.initMdEditorModule = function(deps){
   function insertImageAtCursor(file){
     if(!cmView || !imagesDirHandle) return;
     var finalName = imageIndex.has(file.name.toLowerCase()) ? suggestFreeImageName(file.name) : file.name;
-    imagesDirHandle.getFileHandle(finalName, { create: true }).then(function(fileHandle){
-      return fileHandle.createWritable().then(function(writable){
-        return writable.write(file).then(function(){ return writable.close(); });
-      }).then(function(){ return fileHandle; });
-    }).then(function(fileHandle){
-      imageIndex.set(finalName.toLowerCase(), { handle: fileHandle, name: finalName });
-      var sel = cmView.state.selection.main;
-      var insertText = "![[" + finalName + "]]";
-      cmView.dispatch({
-        changes: { from: sel.from, to: sel.to, insert: insertText },
-        selection: { anchor: sel.from + insertText.length }
+    // Читаем байты один раз (не file напрямую в writable.write) — тот же
+    // ArrayBuffer идёт и на запись, и на хэш для облачного манифеста
+    // (recordImageAdded, ТЗ пользователя от 14.09).
+    file.arrayBuffer().then(function(buf){
+      return imagesDirHandle.getFileHandle(finalName, { create: true }).then(function(fileHandle){
+        return fileHandle.createWritable().then(function(writable){
+          return writable.write(buf).then(function(){ return writable.close(); });
+        }).then(function(){ return fileHandle; });
+      }).then(function(fileHandle){
+        imageIndex.set(finalName.toLowerCase(), { handle: fileHandle, name: finalName });
+        recordImageAdded(finalName, buf);
+        var sel = cmView.state.selection.main;
+        var insertText = "![[" + finalName + "]]";
+        cmView.dispatch({
+          changes: { from: sel.from, to: sel.to, insert: insertText },
+          selection: { anchor: sel.from + insertText.length }
+        });
+        cmView.focus();
       });
-      cmView.focus();
     }).catch(function(e){
       setStatus("Не удалось сохранить картинку: " + (e && e.message ? e.message : e), true);
     });
@@ -1146,6 +1244,8 @@ window.initMdEditorModule = function(deps){
         }).then(function(){ return fileHandle; });
       }).then(function(fileHandle){
         imageIndex.set(finalName.toLowerCase(), { handle: fileHandle, name: finalName });
+        var buf = bytes.buffer ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) : bytes;
+        recordImageAdded(finalName, buf);
         return finalName;
       });
     });
@@ -1163,6 +1263,7 @@ window.initMdEditorModule = function(deps){
     }).then(function(){
       imageIndex.delete(name.toLowerCase());
       refreshMountedImageNodes();
+      return recordImageRemoved(name); // тумбстоун в облаке (ТЗ пользователя от 14.09)
     });
   }
 
@@ -1180,6 +1281,29 @@ window.initMdEditorModule = function(deps){
   // ниже, при каждом перезапуске приложения. deps.getExternalMediaTexts
   // (my.js) отдаёт массив таких текстов — сканируем тем же MEDIA_REF_RE.
   var getExternalMediaTexts = deps.getExternalMediaTexts || function(){ return []; };
+  // Флаг "список используемых картинок мог измениться с прошлого прохода
+  // корзины сирот" (ТЗ пользователя от 14.09, оптимизация производительности
+  // без риска дрейфа — полный обход OPFS-папки images/ дорог, поэтому
+  // пропускаем его, если точно ничего не менялось; сам расчёт referenced
+  // при реальном запуске по-прежнему считается заново из notesMap, а не
+  // из накопленного счётчика — это и защищает от дрейфа). true по
+  // умолчанию — первый запуск после старта модуля всегда полноценный.
+  // Взводится: markNoteDirty (ЛЮБая локальная правка текста заметки —
+  // создание/правка/автосохранение/удаление/импорт/восстановление/
+  // дописывание книжных иллюстраций — все они проходят через одну эту
+  // функцию, см. выше) и syncNotesFromCloud (правки, пришедшие с другого
+  // устройства, notesMap.set там в обход markNoteDirty — иначе получили
+  // бы лишний пуш чужой правки обратно в облако). Сбрасывается в false
+  // только после реально завершённого обхода папки в cleanupOrphanedImages.
+  // ПРОБЕЛ: картинки, вставленные ТОЛЬКО в задачу/комментарий (my.js,
+  // кнопка-скрепка в initTaskGlobalToolbar) — этот флаг не взводят, т.к.
+  // markNoteDirty живёt в mdeditor.js и о правках задач не знает; со
+  // стороны my.js нужен симметричный вызов markReferencedNamesDirty()
+  // (или её экспорт из публичного API) там, где меняется текст
+  // задачи/комментария с вставленной картинкой — иначе такая правка не
+  // будет учтена оптимизацией до следующего перезапуска приложения.
+  var referencedNamesDirty = true;
+  function markReferencedNamesDirty(){ referencedNamesDirty = true; }
   function collectReferencedMediaNames(){
     var names = new Set();
     function scanText(text){
@@ -1211,9 +1335,23 @@ window.initMdEditorModule = function(deps){
   function cleanupOrphanedImages(){
     if(!imagesDirHandle) return Promise.resolve();
     if(imageCleanupInFlight) return Promise.resolve();
+    // Оптимизация производительности (ТЗ пользователя от 14.09): полный
+    // рекурсивный обход OPFS-папки images/ ниже (walkAndClean) может быть
+    // дорогим при большой папке — фризы. Если с прошлого ПОЛНОСТЬЮ
+    // завершённого прохода ни одна заметка не менялась (ни локально, ни с
+    // облака — см. markReferencedNamesDirty у markNoteDirty и в
+    // syncNotesFromCloud), список используемых картинок точно тот же, что
+    // и в прошлый раз — обходить диск заново незачем, пропускаем.
+    if(!referencedNamesDirty) return Promise.resolve();
     imageCleanupInFlight = true;
     function runDeletion(){
       var referenced = collectReferencedMediaNames();
+      // Флаг сбрасываем СРАЗУ после снятия снимка referenced (а не после
+      // асинхронного обхода ниже) — любая правка заметки, случившаяся уже
+      // ПОСЛЕ этого снимка (пока идёт обход диска), взведёт флаг заново
+      // через markNoteDirty/syncNotesFromCloud и будет учтена на
+      // следующем проходе, а не потеряется.
+      referencedNamesDirty = false;
       var deletedAny = false;
       async function walkAndClean(dirHandle){
         for await (var entry of dirHandle.entries()){
@@ -1222,7 +1360,11 @@ window.initMdEditorModule = function(deps){
             await walkAndClean(handle);
           } else if(handle.kind === "file" && IMAGE_EXT_RE.test(name)){
             if(!referenced.has(name.toLowerCase())){
-              try{ await dirHandle.removeEntry(name); deletedAny = true; }catch(e){ /* гонка — пропускаем молча */ }
+              try{
+                await dirHandle.removeEntry(name);
+                deletedAny = true;
+                await recordImageRemoved(name); // тумбстоун в облаке (ТЗ пользователя от 14.09)
+              }catch(e){ /* гонка — пропускаем молча */ }
             }
           }
         }
@@ -1657,6 +1799,7 @@ window.initMdEditorModule = function(deps){
     dirtyNoteIds.add(id);
     scheduleNotesCachePersist();
     scheduleNotesCloudPush();
+    markReferencedNamesDirty(); // ТЗ пользователя от 14.09, см. комментарий у флага ниже
   }
   function createNoteRecord(name, path, initialBody){
     var id = generateId();
@@ -2061,6 +2204,8 @@ window.initMdEditorModule = function(deps){
             }).then(function(){ return fileHandle; });
           }).then(function(fileHandle){
             imageIndex.set(finalName.toLowerCase(), { handle: fileHandle, name: finalName });
+            recordImageAdded(finalName, entry.data.buffer ?
+              entry.data.buffer.slice(entry.data.byteOffset, entry.data.byteOffset + entry.data.byteLength) : entry.data);
             added++;
             next(i + 1);
           }).catch(function(e){
@@ -2118,7 +2263,9 @@ window.initMdEditorModule = function(deps){
           }).then(function(){ return fh; });
         }).then(function(fh){
           imageIndex.set(entry.name.toLowerCase(), { handle: fh, name: entry.name });
-          return next(i + 1);
+          var buf = entry.data.buffer ?
+            entry.data.buffer.slice(entry.data.byteOffset, entry.data.byteOffset + entry.data.byteLength) : entry.data;
+          return recordImageAdded(entry.name, buf).then(function(){ return next(i + 1); });
         });
       }
       return next(0);
@@ -2180,7 +2327,13 @@ window.initMdEditorModule = function(deps){
   // ---- облачный пул: раздел 4.1 ТЗ — сначала лёгкий запрос метаданных,
   // текст только у заметок, где облачная t новее локальной ----
   function syncNotesFromCloud(){
-    if(!getSyncId() || !isOnline()) return Promise.resolve();
+    if(!getSyncId() || !isOnline()) return Promise.resolve({ hadFetchError: false });
+    // hadFetchError: true, если хотя бы одна заметка не подтянулась ниже
+    // (см. .catch у fetchCloudPath("notes/"+id)) — сообщаем об этом наружу,
+    // чтобы syncNotesOnTabEnter мог пропустить корзину сирот в этом цикле:
+    // notesMap в таком случае неполон, и cleanupOrphanedImages могла бы
+    // ошибочно счесть используемую картинку сиротой (баг от 14.09).
+    var hadFetchError = false;
     return fetchCloudPath("notesMeta").then(function(meta){
       meta = meta || {};
       var toFetch = [];
@@ -2198,6 +2351,7 @@ window.initMdEditorModule = function(deps){
         if(cloudEntry.deleted){
           if(local && local.name) nameIndex.delete(local.name.toLowerCase());
           notesMap.set(id, { id: id, deleted: true, t: cloudT, name: local && local.name, path: local && local.path, text: "" });
+          markReferencedNamesDirty(); // удалённое с другого устройства могло освободить картинку
           if(openFile && openFile.id === id && !openFile.dirty) openFileDeletedRemotely = true;
         } else {
           toFetch.push(id);
@@ -2211,6 +2365,7 @@ window.initMdEditorModule = function(deps){
             if(existing && existing.name) nameIndex.delete(existing.name.toLowerCase());
             notesMap.set(id, { id: id, name: payload.name, path: payload.path, text: payload.text, t: meta[id].t });
             nameIndex.set(payload.name.toLowerCase(), id);
+            markReferencedNamesDirty(); // текст с другого устройства мог добавить/убрать ![[картинку]]
             // Заметка, обновлённая с другого устройства, в этот момент
             // открыта в редакторе на этом — подхватываем текст на месте,
             // без пересборки всего экрана. Пропускаем, если в ней есть
@@ -2228,7 +2383,11 @@ window.initMdEditorModule = function(deps){
               refreshDatesField();
             }
           });
-        }).catch(function(){ /* пропускаем одну заметку — не мешаем остальным */ });
+        }).catch(function(){
+          // пропускаем одну заметку — не мешаем остальным; сам факт
+          // пропуска фиксируем во внешнем флаге (см. hadFetchError выше)
+          hadFetchError = true;
+        });
       }));
       return fetchPromise.then(function(){
         persistNotesCache();
@@ -2238,6 +2397,7 @@ window.initMdEditorModule = function(deps){
           screen = "list";
           setStatus("Эта заметка была удалена на другом устройстве.", false);
         }
+        return { hadFetchError: hadFetchError };
       });
     });
   }
@@ -2260,9 +2420,20 @@ window.initMdEditorModule = function(deps){
   // открытой заметки внутри syncNotesFromCloud).
   function syncNotesOnTabEnter(){
     if(!getSyncId() || !notesReady) return;
-    syncNotesFromCloud().then(function(){
+    // Сверка реестра картинок (ТЗ пользователя от 14.09) — та же лёгкая
+    // фоновая проверка, что и у книг в renderSettingsTabBooks (my.js), не
+    // блокирует рендер списка заметок ниже.
+    if(deps.syncFileRegistry) deps.syncFileRegistry("images").then(buildImageIndex);
+    syncNotesFromCloud().then(function(result){
       rebuildTree();
-      maybeRunImageCleanup(); // свежие заметки с облака могли изменить список используемых картинок
+      // Если хотя бы одна заметка не подтянулась (result.hadFetchError) —
+      // notesMap неполон, и collectReferencedMediaNames недосчитается
+      // картинок из непришедшего текста. Лучше пропустить корзину сирот в
+      // этом цикле и попробовать на следующей сверке, чем удалить
+      // реально используемую картинку (баг от 14.09).
+      if(!result || !result.hadFetchError){
+        maybeRunImageCleanup(); // свежие заметки с облака могли изменить список используемых картинок
+      }
       // "Забытые заметки" кэширует список в forgottenNotesData (см. выше) и
       // сам его не перечитывает при простом render() — без явного сброса
       // фоновая сверка не долистнула бы туда новые/удалённые заметки.
@@ -4838,6 +5009,71 @@ window.initMdEditorModule = function(deps){
   // (loadStoredImagesDirHandle) — без прав и без системного диалога.
   initImagesStorage();
 
+  // ---------------------------------------------------------------------
+  // Облачная синхронизация картинок (ТЗ пользователя от 14.09) — тот же
+  // реестр+реле, что уже был у книг в my.js, теперь обобщённый на "kind".
+  // Регистрируем адаптер СРАЗУ при старте модуля (до первой реальной
+  // синхронизации — deps.syncFileRegistry("images") до регистрации адаптера
+  // просто no-op, см. my.js), а не только при заходе на вкладку заметок:
+  // картинки, вставленные в задачи (кнопка-скрепка в my.js), тоже должны
+  // участвовать в синке, даже если пользователь ни разу не открывал "Мой
+  // блокнот" на этом устройстве.
+  //
+  // Скачанный файл пишется РОВНО под именем из реестра (entry.name), БЕЗ
+  // suggestFreeImageName — имя картинки жёстко зашито в текст заметки как
+  // "![[имя]]", подмена его на "(2)" при заливке молча сломала бы ссылку.
+  // Это создаёт узкий теоретический риск: если два устройства независимо
+  // (до первой синхронизации) создали РАЗНОЕ содержимое под ОДНИМ именем —
+  // при скачивании create:true перезапишет локальный файл содержимым с
+  // другого устройства. На практике имена картинок это UUID-подобные/
+  // оригинальные имена файлов с телефона, коллизия по имени при разном
+  // содержимом крайне маловероятна — тот же компромисс, что и у книг
+  // (suggestFreeBookName там решает похожую, но менее болезненную задачу,
+  // т.к. имя книги ни на что не ссылается).
+  // ---------------------------------------------------------------------
+  if(deps.registerFileRegistryAdapter){
+    deps.registerFileRegistryAdapter("images", {
+      getLocalManifest: function(){ return getImagesDirHandle().then(loadImagesManifest); },
+      saveIncoming: function(hash, name, bytes){
+        return getImagesDirHandle().then(function(dir){
+          return dir.getFileHandle(name, { create: true });
+        }).then(function(fh){
+          return fh.createWritable().then(function(w){
+            return w.write(bytes).then(function(){ return w.close(); });
+          }).then(function(){ return fh; });
+        }).then(function(fh){
+          imageIndex.set(name.toLowerCase(), { handle: fh, name: name });
+          return getImagesDirHandle().then(function(dir){
+            return loadImagesManifest(dir).then(function(manifest){
+              manifest[hash] = name;
+              return saveImagesManifest(dir, manifest);
+            });
+          });
+        }).then(function(){
+          refreshMountedImageNodes();
+        });
+      },
+      readLocalBytes: function(hash, name){
+        return getImagesDirHandle().then(function(dir){
+          return dir.getFileHandle(name, { create: false });
+        }).then(function(fh){ return fh.getFile(); }).then(function(f){ return f.arrayBuffer(); });
+      },
+      removeLocal: function(hash, name){
+        return getImagesDirHandle().then(function(dir){
+          return dir.removeEntry(name).catch(function(){}).then(function(){
+            return loadImagesManifest(dir).then(function(manifest){
+              delete manifest[hash];
+              return saveImagesManifest(dir, manifest);
+            });
+          });
+        }).then(function(){
+          imageIndex.delete(name.toLowerCase());
+          refreshMountedImageNodes();
+        });
+      }
+    });
+  }
+
   // Кэш заметок (см. preloadNotesCache выше) — тоже сразу при запуске
   // модуля, тем же приёмом: тогда к моменту, когда пользователь реально
   // откроет вкладку "Мои заметки" (или "Закладки"/"Забытые заметки"),
@@ -4899,6 +5135,15 @@ window.initMdEditorModule = function(deps){
     // асинхронный список байтов картинок из OPFS (см. выше).
     getNotesFilesForExport: function(){ return buildNotesFileList(); },
     getImageFilesForExport: getImageFilesForExport,
+    // ТЗ пользователя от 14.09 — корзина сирот пропускает полный обход
+    // OPFS-папки images/, если с прошлого прохода ни одна заметка не
+    // менялась (см. referencedNamesDirty/markReferencedNamesDirty выше).
+    // Эта оптимизация не видит правок текста ВНЕ mdeditor.js — картинку,
+    // вставленную ТОЛЬКО в задачу/комментарий (кнопка-скрепка,
+    // initTaskGlobalToolbar в my.js), нужно явно пометить отсюда, иначе
+    // корзина сирот может не заметить её появление/исчезновение до
+    // следующего перезапуска приложения.
+    markMediaReferencesDirty: markReferencedNamesDirty,
     // READER_PLAN.md, Этап B, шаг 6 (11.09) — для категорий "Заметки"/
     // "Картинки заметок" выборочного импорта общего ZIP-бэкапа, см.
     // applyImportSelection в my.js.

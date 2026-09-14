@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 2.1 (14.09)
    =========================================================================== */
 
 (function(){
@@ -3216,7 +3217,8 @@
       setSyncState("synced");
       retryUnresolvedYoutubeLinks(); // повтор упавших ранее запросов заголовков YouTube (см. выше)
       touchDeviceRegistry(); // отмечаемся живым устройством для реестра файлов (READER_PLAN.md, шаг 3)
-      syncFilesRegistry(); // фоновая сверка реестра книг с другими устройствами (см. ниже)
+      syncFileRegistry("books"); // фоновая сверка реестра книг с другими устройствами (см. выше)
+      syncFileRegistry("images"); // то же для картинок заметок (ТЗ пользователя от 14.09) — no-op, пока mdeditor.js не зарегистрировал адаптер (см. registerFileRegistryAdapter в deps)
       // Успешно синхронизировались — если за время этого цикла набежало
       // ещё одно изменение (см. pendingPushAfterSync у scheduleCloudPush),
       // сразу запускаем новый цикл, а не ждём следующего изменения задачи.
@@ -3568,7 +3570,20 @@
     deleteCloudPath: deleteNotesCloudPath,
     generateId: generateNoteId,
     notesPushDebounceMs: PUSH_DEBOUNCE_MS,
-    notesRetryDelays: SYNC_RETRY_DELAYS
+    notesRetryDelays: SYNC_RETRY_DELAYS,
+    // ---------------------------------------------------------------------
+    // Облачное реле файлов (шифрование + TTL + тумбстоуны удаления, см.
+    // раздел "Реестр файлов + временное реле через Firebase Storage" выше,
+    // ТЗ пользователя от 14.09: та же синхронизация, что у книг, нужна и
+    // картинкам заметок). mdeditor.js регистрирует свой адаптер под
+    // kind:"images" (см. "Облачная синхронизация картинок" в mdeditor.js)
+    // и дальше пользуется этими тремя узкими точками входа — сам Firebase/
+    // ключ шифрования остаются здесь.
+    // ---------------------------------------------------------------------
+    registerFileRegistryAdapter: registerFileRegistryAdapter,
+    registerFileInRegistry: registerFileInRegistry,
+    registerFileDeletion: registerFileDeletion,
+    syncFileRegistry: syncFileRegistry
   });
   var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
   var renderSettingsTabMdBookmarks = MdEditor.renderSettingsTabMdBookmarks;
@@ -5885,27 +5900,43 @@
   }
 
   // =====================================================================
-  // Реестр файлов + временное реле через Firebase Storage
-  // (READER_PLAN.md, Этап A, шаг 3, 09.09).
+  // Реестр файлов + временное реле через Firebase Storage — ОБОБЩЁННЫЙ,
+  // на несколько "пространств" (kind: "books", "images", ...), каждое
+  // ведёт свой независимый реестр и свои временные копии в Storage, чтобы
+  // хэши книг и картинок не путались между собой (READER_PLAN.md, Этап A,
+  // шаг 3, 09.09; обобщение + шифрование + удаление — 14.09, ТЗ
+  // пользователя: облачная синхронизация книг и картинок заметок).
   //
-  // Ветка /syncs/<syncId>/files/<хэш> — по одной записи на файл книги:
-  // {hash, size, name, addedBy, addedAt, uploadedAt, confirmedBy}, где
-  // confirmedBy — словарь {deviceId: true}. Синхронизируется ТЕМ ЖЕ
-  // PATCH-механизмом дельт, что и заметки — переиспользуются уже
-  // существующие fetchNotesCloudPath/patchNotesCloud/deleteNotesCloudPath
+  // Ветка /syncs/<syncId>/files/<kind>/<хэш> — по одной записи на файл:
+  // {hash, size, name, addedBy, addedAt, uploadedAt, confirmedBy,
+  // deletedAt, deletedBy}, где confirmedBy — словарь {deviceId: true}.
+  // Синхронизируется ТЕМ ЖЕ PATCH-механизмом дельт, что и заметки —
+  // переиспользуются уже существующие fetchNotesCloudPath/patchNotesCloud
   // (они универсальны: работают с любым relPath под текущим syncId,
-  // несмотря на название "Notes" — см. комментарий у них выше), без
-  // единой правки самого PATCH-приёма putCloudBlob.
+  // несмотря на название "Notes" — см. комментарий у них выше).
   //
-  // Сами байты файла временно живут в Firebase Storage — Realtime
-  // Database знает только реестр (хэш/размер/имя/кто подтвердил), не
-  // содержимое. Устройство, у которого файл есть локально, заливает его
-  // в Storage сразу, как только видит в реестре, что кто-то из ИЗВЕСТНЫХ
-  // устройств ещё не подтвердил получение (см. syncFilesRegistry). Файл
-  // удаляется из Storage, как только подтвердили ВСЕ известные
-  // устройства, либо через FILE_RELAY_TTL_MS после заливки — что раньше;
+  // Сами байты файла временно живут в Firebase Storage В ЗАШИФРОВАННОМ
+  // виде (см. encryptFileBytes/decryptFileBytes ниже — тот же приём
+  // ключа, что у заметок: AES-GCM, ключ = SHA-256(syncId), см.
+  // getNotesCryptoKey в mdeditor.js) — Firebase не видит ни содержимого,
+  // ни типа файла (путь в Storage — просто хэш, без расширения/
+  // content-type, тело — случайные байты). Realtime Database знает только
+  // реестр (хэш/размер/имя/кто подтвердил), тоже не содержимое.
+  // Устройство, у которого файл есть локально, заливает его в Storage
+  // сразу, как только видит в реестре, что кто-то из ИЗВЕСТНЫХ устройств
+  // ещё не подтвердил получение (см. syncFileRegistry). Файл удаляется из
+  // Storage, как только подтвердили ВСЕ известные устройства, либо через
+  // FILE_RELAY_TTL_MS ПОСЛЕ ЗАЛИВКИ (не после добавления) — что раньше;
   // сама запись реестра (хэш/имя/размер) при этом не удаляется, теряется
   // только временная копия байтов в Storage.
+  //
+  // Удаление файла (тумбстоун): вызывающая сторона помечает запись
+  // deletedAt/deletedBy (registerFileDeletion) — остальные устройства при
+  // следующей сверке видят deletedAt и, если файл у них есть локально,
+  // удаляют его СВОИМ adapters.removeLocal, ничего никуда не заливая.
+  // Сама запись реестра остаётся (как надгробие) — так последующие
+  // устройства, которые ещё не видели файл вообще, тоже не станут его
+  // скачивать (haveLocally=false, но deletedAt уже стоит — see ниже).
   //
   // "Известные устройства" — записи в /syncs/<syncId>/devices/<id> с
   // недавней активностью (см. touchDeviceRegistry/DEVICE_KNOWN_WINDOW_MS
@@ -5914,7 +5945,7 @@
   // или удалённое устройство рано или поздно перестаёт блокировать
   // удаление байтов из Storage.
   // =====================================================================
-  var FILE_RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 дней
+  var FILE_RELAY_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 дня ПОСЛЕ ЗАЛИВКИ байтов в Storage
   var DEVICE_KNOWN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
 
   function touchDeviceRegistry(){
@@ -5924,28 +5955,65 @@
     return patchNotesCloud(patch).catch(function(){});
   }
 
-  function storageObjectPath(hash){ return "syncFiles/" + hash; }
+  // ---- шифрование байтов файла для реле (тот же ключ, что у заметок:
+  // SHA-256(syncId) -> AES-GCM-256, см. getNotesCryptoKey в mdeditor.js).
+  // Свой IV на каждую операцию, хранится ПЕРВЫМИ 12 байтами тела в
+  // Storage (не в реестре) — Storage получает один непрозрачный блоб. ----
+  var fileCryptoKeyPromise = null, fileCryptoSyncId = null;
+  function getFileCryptoKey(){
+    if(!syncId) return Promise.reject(new Error("no_sync"));
+    if(fileCryptoKeyPromise && fileCryptoSyncId === syncId) return fileCryptoKeyPromise;
+    fileCryptoSyncId = syncId;
+    fileCryptoKeyPromise = crypto.subtle.digest("SHA-256", new TextEncoder().encode(syncId)).then(function(hash){
+      return crypto.subtle.importKey("raw", hash, {name:"AES-GCM"}, false, ["encrypt","decrypt"]);
+    });
+    return fileCryptoKeyPromise;
+  }
+  function encryptFileBytes(buf){
+    return getFileCryptoKey().then(function(key){
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      return crypto.subtle.encrypt({name:"AES-GCM", iv:iv}, key, buf).then(function(cipher){
+        var out = new Uint8Array(iv.byteLength + cipher.byteLength);
+        out.set(iv, 0);
+        out.set(new Uint8Array(cipher), iv.byteLength);
+        return out;
+      });
+    });
+  }
+  function decryptFileBytes(bytes){
+    return getFileCryptoKey().then(function(key){
+      var arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+      var iv = arr.slice(0, 12), cipher = arr.slice(12);
+      return crypto.subtle.decrypt({name:"AES-GCM", iv:iv}, key, cipher);
+    });
+  }
 
-  function uploadFileToStorage(hash, bytes){
-    var path = encodeURIComponent(storageObjectPath(hash));
-    return fetchWithTimeout(FIREBASE_STORAGE_URL + path + "?uploadType=media", {
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: bytes
-    }, 30000).then(function(res){
+  function storageObjectPath(kind, hash){ return "syncFiles/" + kind + "/" + hash; }
+
+  function uploadFileToStorage(kind, hash, bytes){
+    return encryptFileBytes(bytes).then(function(encBytes){
+      var path = encodeURIComponent(storageObjectPath(kind, hash));
+      return fetchWithTimeout(FIREBASE_STORAGE_URL + path + "?uploadType=media", {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: encBytes
+      }, 30000);
+    }).then(function(res){
       if(!res.ok) throw new Error("storage_upload_failed_" + res.status);
       return true;
     });
   }
-  function downloadFileFromStorage(hash){
-    var path = encodeURIComponent(storageObjectPath(hash));
+  function downloadFileFromStorage(kind, hash){
+    var path = encodeURIComponent(storageObjectPath(kind, hash));
     return fetchWithTimeout(FIREBASE_STORAGE_URL + path + "?alt=media", { method: "GET" }, 30000).then(function(res){
       if(!res.ok) throw new Error("storage_download_failed_" + res.status);
       return res.arrayBuffer();
+    }).then(function(encBuf){
+      return decryptFileBytes(encBuf);
     });
   }
-  function deleteFileFromStorage(hash){
-    var path = encodeURIComponent(storageObjectPath(hash));
+  function deleteFileFromStorage(kind, hash){
+    var path = encodeURIComponent(storageObjectPath(kind, hash));
     return fetchWithTimeout(FIREBASE_STORAGE_URL + path, { method: "DELETE" }, 15000).then(function(res){
       // 404 здесь не ошибка — байты уже удалены (другим устройством,
       // например) или так и не заливались; удаление идемпотентно.
@@ -5954,46 +6022,89 @@
     });
   }
 
-  // Регистрирует только что добавленный локально файл книги в облачном
-  // реестре — вызывается из handleImportBooksFile ниже сразу после
-  // saveBookFile с added:true. Если запись с этим хэшем уже есть (кто-то
-  // другой уже добавил тот же файл раньше нас) — не перезаписываем её.
-  function registerBookInRegistry(hash, name, size){
+  // Регистрирует только что добавленный локально файл (книгу/картинку) в
+  // облачном реестре пространства kind — вызывается сразу после
+  // сохранения файла локально с added:true. Если запись с этим хэшем уже
+  // есть (кто-то другой уже добавил тот же файл раньше нас) — не
+  // перезаписываем её (кроме случая, когда она была тумбстоуном: если её
+  // же удалили и тут же заново добавили тем же содержимым — снимаем
+  // deletedAt, см. ниже).
+  function registerFileInRegistry(kind, hash, name, size){
     if(!syncId) return Promise.resolve();
-    return fetchNotesCloudPath("files/" + hash).catch(function(){ return null; }).then(function(existing){
-      if(existing) return;
+    return fetchNotesCloudPath("files/" + kind + "/" + hash).catch(function(){ return null; }).then(function(existing){
+      var patch = {};
+      if(existing){
+        if(existing.deletedAt){
+          // Файл был удалён где-то, но у нас снова появился (импорт того
+          // же содержимого) — считаем это новым добавлением, снимаем
+          // тумбстоун, иначе следующая сверка тут же удалит его обратно.
+          patch["files/" + kind + "/" + hash + "/deletedAt"] = null;
+          patch["files/" + kind + "/" + hash + "/deletedBy"] = null;
+          patch["files/" + kind + "/" + hash + "/confirmedBy/" + getDeviceId()] = true;
+          return patchNotesCloud(patch);
+        }
+        return null;
+      }
       var entry = {
         hash: hash, size: size, name: name,
         addedBy: getDeviceId(), addedAt: Date.now(),
         uploadedAt: null, confirmedBy: {}
       };
       entry.confirmedBy[getDeviceId()] = true; // у добавившего устройства файл уже есть
-      var patch = {};
-      patch["files/" + hash] = entry;
+      patch["files/" + kind + "/" + hash] = entry;
       return patchNotesCloud(patch);
     }).then(function(){
-      return syncFilesRegistry(); // сразу попробовать залить байты, если кто-то уже ждёт (см. ниже)
+      return syncFileRegistry(kind); // сразу попробовать залить байты, если кто-то уже ждёт
     }).catch(function(){});
   }
 
-  // Главная точка сверки — вызывается фоном после каждой успешной
-  // синхронизации (doCloudSync) и при каждом открытии вкладки книг (см.
-  // renderSettingsTabBooks). Не блокирует UI, все ошибки по
-  // отдельным файлам гасятся точечно (одна неудача не должна прерывать
+  // Помечает файл удалённым в реестре (тумбстоун) — вызывающая сторона
+  // (deleteBookFile/аналог для картинок) уже удалила файл ЛОКАЛЬНО на этом
+  // устройстве до вызова этой функции; остальные устройства подхватят
+  // deletedAt на следующей сверке (см. syncFileRegistry ниже) и удалят
+  // файл у себя тоже. Заодно best-effort стираем временную копию байтов
+  // из Storage прямо сейчас, не дожидаясь TTL — смысла держать её больше
+  // нет, кто угодно с кодом синхронизации уже мог её скачать.
+  function registerFileDeletion(kind, hash){
+    if(!syncId) return Promise.resolve();
+    var patch = {};
+    patch["files/" + kind + "/" + hash + "/deletedAt"] = Date.now();
+    patch["files/" + kind + "/" + hash + "/deletedBy"] = getDeviceId();
+    return patchNotesCloud(patch).then(function(){
+      return deleteFileFromStorage(kind, hash).catch(function(){});
+    }).catch(function(){});
+  }
+
+  // Главная точка сверки одного пространства (kind) — вызывается фоном
+  // после каждой успешной синхронизации (doCloudSync, для "books") и при
+  // каждом открытии соответствующего экрана. Не блокирует UI, все ошибки
+  // по отдельным файлам гасятся точечно (одна неудача не должна прерывать
   // обработку остальных записей реестра).
-  var filesRegistrySyncInProgress = false;
-  function syncFilesRegistry(){
+  //
+  // adapters — мост к конкретному локальному хранилищу:
+  //   getLocalManifest() -> Promise<{hash: name}>  — что реально есть
+  //     локально в этом пространстве прямо сейчас;
+  //   saveIncoming(hash, name, bytes:Uint8Array) -> Promise — записать
+  //     скачанный (уже расшифрованный) файл локально;
+  //   readLocalBytes(hash, name) -> Promise<ArrayBuffer> — прочитать байты
+  //     локального файла для заливки;
+  //   removeLocal(hash, name) -> Promise — удалить локальный файл (ответ
+  //     на чужой тумбстоун).
+  var fileRegistrySyncInProgress = {}; // kind -> bool
+  function syncFileRegistry(kind, adapters){
+    adapters = adapters || FILE_REGISTRY_ADAPTERS[kind];
+    if(!adapters) return Promise.resolve();
     if(!syncId || !navigator.onLine) return Promise.resolve();
-    if(filesRegistrySyncInProgress) return Promise.resolve();
-    filesRegistrySyncInProgress = true;
+    if(fileRegistrySyncInProgress[kind]) return Promise.resolve();
+    fileRegistrySyncInProgress[kind] = true;
     var myId = getDeviceId();
     return Promise.all([
-      fetchNotesCloudPath("files").catch(function(){ return null; }),
+      fetchNotesCloudPath("files/" + kind).catch(function(){ return null; }),
       fetchNotesCloudPath("devices").catch(function(){ return null; }),
-      getBooksDirHandle().then(loadBooksManifest).catch(function(){ return {}; })
+      adapters.getLocalManifest().catch(function(){ return {}; })
     ]).then(function(results){
       var registry = results[0] || {}, devices = results[1] || {}, manifest = results[2] || {};
-      var localHashes = {}; // hash -> true, что реально есть в books/ на этом устройстве
+      var localHashes = {}; // hash -> true, что реально есть локально на этом устройстве
       Object.keys(manifest).forEach(function(h){ localHashes[h] = true; });
       var now = Date.now();
       var knownDeviceIds = Object.keys(devices).filter(function(id){
@@ -6006,13 +6117,24 @@
         var confirmedBy = entry.confirmedBy || {};
         var haveLocally = !!localHashes[hash];
 
-        // 1) У нас файла нет — скачиваем из Storage и подтверждаем получение.
+        // 0) Тумбстоун: файл где-то удалили. Если он ещё есть у нас —
+        // удаляем локально и на этом всё, ни скачивать, ни заливать
+        // больше не нужно. Если его и так уже нет — тоже нечего делать.
+        if(entry.deletedAt){
+          if(haveLocally){
+            return adapters.removeLocal(hash, manifest[hash]).catch(function(){});
+          }
+          return null;
+        }
+
+        // 1) У нас файла нет — скачиваем из Storage (расшифровывается
+        // внутри downloadFileFromStorage) и подтверждаем получение.
         if(!haveLocally){
-          return downloadFileFromStorage(hash).then(function(buf){
-            return saveBookFile(entry.name || hash, new Uint8Array(buf));
+          return downloadFileFromStorage(kind, hash).then(function(buf){
+            return adapters.saveIncoming(hash, entry.name || hash, new Uint8Array(buf));
           }).then(function(){
             var patch = {};
-            patch["files/" + hash + "/confirmedBy/" + myId] = true;
+            patch["files/" + kind + "/" + hash + "/confirmedBy/" + myId] = true;
             return patchNotesCloud(patch);
           }).catch(function(){
             // байтов ещё нет в Storage (никто пока не залил) или сеть
@@ -6025,27 +6147,22 @@
         // нужны, но мы почему-то ещё не заливали) — заливаем.
         var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; });
         if(missingConfirmations && !entry.uploadedAt){
-          return getBooksDirHandle().then(function(dir){
-            return dir.getFileHandle(manifest[hash], { create: false });
-          }).then(function(fh){
-            return fh.getFile();
-          }).then(function(file){
-            return file.arrayBuffer();
-          }).then(function(buf){
-            return uploadFileToStorage(hash, buf);
+          return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
+            return uploadFileToStorage(kind, hash, buf);
           }).then(function(){
             var patch = {};
-            patch["files/" + hash + "/uploadedAt"] = now;
+            patch["files/" + kind + "/" + hash + "/uploadedAt"] = now;
             return patchNotesCloud(patch);
           }).catch(function(){});
         }
 
         // 3) Байты залиты и либо подтвердили все известные устройства,
-        // либо истёк 7-дневный срок — удаляем временную копию из Storage.
+        // либо истёк FILE_RELAY_TTL_MS после заливки — удаляем временную
+        // копию из Storage.
         if(entry.uploadedAt && (!missingConfirmations || (now - entry.uploadedAt) > FILE_RELAY_TTL_MS)){
-          return deleteFileFromStorage(hash).then(function(){
+          return deleteFileFromStorage(kind, hash).then(function(){
             var patch = {};
-            patch["files/" + hash + "/uploadedAt"] = null;
+            patch["files/" + kind + "/" + hash + "/uploadedAt"] = null;
             return patchNotesCloud(patch);
           }).catch(function(){});
         }
@@ -6055,9 +6172,34 @@
 
       return Promise.all(chores);
     }).catch(function(){}).finally(function(){
-      filesRegistrySyncInProgress = false;
+      fileRegistrySyncInProgress[kind] = false;
     });
   }
+
+  // Реестр адаптеров по kind — заполняется ниже: "books" сразу тут же (в
+  // этом файле), "images" регистрируется из mdeditor.js через
+  // registerFileRegistryAdapter в deps (см. initMdEditorModule ниже и
+  // группу "Облачная синхронизация картинок" в mdeditor.js).
+  var FILE_REGISTRY_ADAPTERS = {};
+  function registerFileRegistryAdapter(kind, adapters){
+    FILE_REGISTRY_ADAPTERS[kind] = adapters;
+  }
+
+  FILE_REGISTRY_ADAPTERS.books = {
+    getLocalManifest: function(){ return getBooksDirHandle().then(loadBooksManifest); },
+    saveIncoming: function(hash, name, bytes){ return saveBookFile(name, bytes); },
+    readLocalBytes: function(hash, name){
+      return getBooksDirHandle().then(function(dir){
+        return dir.getFileHandle(name, { create: false });
+      }).then(function(fh){ return fh.getFile(); }).then(function(file){ return file.arrayBuffer(); });
+    },
+    removeLocal: function(hash, name){ return deleteBookFileLocal(hash, name); }
+  };
+
+  // Обратная совместимость по именам (на случай, если где-то в другом
+  // месте кода остался старый вызов) — теперь просто зовут books-версию.
+  function registerBookInRegistry(hash, name, size){ return registerFileInRegistry("books", hash, name, size); }
+  function syncFilesRegistry(){ return syncFileRegistry("books"); }
 
   // Обрабатывает выбранный файл — точка входа для кнопки "Загрузить fb2,
   // epub или zip книг" (см. renderSettingsTabBooks ниже). Одиночный .fb2
@@ -6379,14 +6521,67 @@
         }
       }
       return collect().then(function(){
-        out.sort(function(a, b){
-          var da = /^\d/.test(a.name) ? 1 : 0;
-          var db = /^\d/.test(b.name) ? 1 : 0;
-          if(da !== db) return da - db;
-          return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
+        return loadBooksManifest(dir).then(function(manifest){
+          // hash нужен для удаления (см. deleteBookEntry ниже — тумбстоун
+          // в облачном реестре ставится по хэшу, не по имени файла).
+          var nameToHash = {};
+          Object.keys(manifest).forEach(function(h){ nameToHash[manifest[h]] = h; });
+          out.forEach(function(it){ it.hash = nameToHash[it.name] || null; });
+          out.sort(function(a, b){
+            var da = /^\d/.test(a.name) ? 1 : 0;
+            var db = /^\d/.test(b.name) ? 1 : 0;
+            if(da !== db) return da - db;
+            return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
+          });
+          return out;
         });
-        return out;
       });
+    });
+  }
+
+  // Удаление ОДНОЙ книги (ТЗ пользователя от 14.09: крестик по долгому
+  // нажатию, как у заметок — см. confirmDeleteBook/renderSettingsTabBooks
+  // ниже). Стирает файл из OPFS books/ и запись о нём из манифеста
+  // дедупликации; НЕ трогает book:<hash> в общем state (закладки/
+  // подчёркивания/заметка книги) — они намеренно живут независимо от
+  // наличия самого файла на устройстве (см. ensureBookNameSynced выше:
+  // закладка видна в общем списке, даже если книгу ещё не скачали) —
+  // удаление файла не должно стирать чужие закладки на эту книгу.
+  function deleteBookFileLocal(hash, name){
+    return getBooksDirHandle().then(function(dir){
+      return dir.removeEntry(name, { recursive: true }).catch(function(){}).then(function(){
+        return loadBooksManifest(dir).then(function(manifest){
+          Object.keys(manifest).forEach(function(h){
+            if(h === hash || manifest[h] === name) delete manifest[h];
+          });
+          return saveBooksManifest(dir, manifest);
+        });
+      });
+    }).then(function(){
+      if(getLastOpenedBookName() === name) saveLastOpenedBookName("");
+    });
+  }
+
+  // Точка входа кнопки-крестика: удаляет локально и сразу же ставит
+  // тумбстоун в облачном реестре (registerFileDeletion), чтобы остальные
+  // устройства подхватили удаление на следующей сверке (см.
+  // syncFileRegistry, ветка deletedAt). Возвращает Promise<{ok, message}> —
+  // вызывающий код (confirmDeleteBook) сам решает, когда перерисовывать
+  // вкладку и куда деть сообщение об ошибке.
+  function deleteBookEntry(item){
+    if(!item || !item.hash){
+      // Файл без хэша в манифесте (не должно случаться, но не рискуем
+      // молча ничего не сделать) — просто убираем локально, без облака.
+      return getBooksDirHandle().then(function(dir){
+        return dir.removeEntry(item.name, { recursive: true }).catch(function(){});
+      }).then(function(){ return {ok: true}; });
+    }
+    return deleteBookFileLocal(item.hash, item.name).then(function(){
+      return registerFileDeletion("books", item.hash);
+    }).then(function(){
+      return {ok: true};
+    }).catch(function(e){
+      return {ok: false, message: "Не удалось удалить книгу: " + (e && e.message ? e.message : e)};
     });
   }
 
@@ -6407,11 +6602,57 @@
   // (см. registerBookInRegistry/syncFilesRegistry выше), для которого пока
   // не существует парной функции "разрегистрировать"; оставлено на
   // отдельный шаг, чтобы не проектировать это решение по ходу дела.
+  // Крестик удаления книги раскрывается долгим нажатием на карточку —
+  // ровно тот же приём (таймер/порог сдвига пальца, класс "visible" на
+  // .mdeditor-delete-btn), что и у заметок в mdeditor.js
+  // (revealedBookmarkRows/startPress/movePress в renderListScreen, ТЗ
+  // пользователя от 14.09: "посмотри, такой крестик уже есть в списке
+  // заметок"). Свой Set, не общий с mdeditor.js — разные экраны, разный
+  // список карточек.
+  var revealedBookDeleteRows = new Set();
+
+  function confirmDeleteBook(item){
+    var box = document.querySelector(".settings-modal-box");
+    if(!box) return;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title"></div>' +
+      '<div class="mdeditor-cleanup-actions">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="bookDeleteCancel">Отмена</button>' +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-danger" id="bookDeleteConfirm">Удалить</button>' +
+      '</div>';
+    card.querySelector(".mdeditor-cleanup-title").textContent = 'Удалить книгу «' + item.name + '»? Она удалится и на других устройствах при следующей синхронизации.';
+    overlay.appendChild(card);
+    box.appendChild(overlay);
+
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+    document.getElementById("bookDeleteCancel").addEventListener("click", close);
+    document.getElementById("bookDeleteConfirm").addEventListener("click", function(){
+      close();
+      revealedBookDeleteRows.delete(item.name.toLowerCase());
+      deleteBookEntry(item).then(function(result){
+        if(!document.getElementById("booksList")) return; // вкладку успели покинуть
+        renderSettingsTabBooks();
+        if(!result.ok){
+          var freshStatus = document.getElementById("booksStatus");
+          if(freshStatus){
+            freshStatus.textContent = result.message;
+            freshStatus.classList.add("error");
+          }
+        }
+      });
+    });
+  }
+
   function renderSettingsTabBooks(){
     // Лёгкая фоновая сверка реестра файлов при каждом заходе на вкладку
     // (READER_PLAN.md, шаг 3) — тем же приёмом, что и syncNotesOnTabEnter
     // у "Моих заметок"; не блокирует немедленный рендер ниже.
-    syncFilesRegistry();
+    syncFileRegistry("books");
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     var html = '<div class="mdeditor-tab">';
@@ -6451,14 +6692,82 @@
         restoreTabScroll("set2s_7");
         return;
       }
-      items.forEach(function(it){
+      items.forEach(function(it, idx){
         var row = document.createElement("div");
         row.className = "mdeditor-row";
-        row.innerHTML = TASK_MOVE_ICON_SVG("read") + '<span class="mdeditor-row-name"></span>';
+        row.dataset.index = String(idx);
+        row.innerHTML = TASK_MOVE_ICON_SVG("read") + '<span class="mdeditor-row-name"></span>' +
+          '<button type="button" class="mdeditor-delete-btn" title="Удалить">' + DELETE_ICON_SVG + '</button>';
         row.querySelector(".mdeditor-row-name").textContent = it.name;
-        row.addEventListener("click", function(){ openBookReader(it.name); });
+        var key = it.name.toLowerCase();
+        var delBtn = row.querySelector(".mdeditor-delete-btn");
+        delBtn.classList.toggle("visible", revealedBookDeleteRows.has(key));
         listEl.appendChild(row);
       });
+
+      // Долгое нажатие раскрывает крестик — тот же приём, что у заметок
+      // (mdeditor.js renderListScreen: LONG_PRESS_MS/MOVE_CANCEL_PX,
+      // touchstart/touchmove/mousedown, отмена по сдвигу пальца).
+      var LONG_PRESS_MS = 350, MOVE_CANCEL_PX = 10;
+      var pressTimer = null, pressStartXY = null, longPressFired = false;
+      function clearPressTimer(){ clearTimeout(pressTimer); pressTimer = null; }
+      function startPress(rowEl, x, y){
+        if(!rowEl) return;
+        var it = items[Number(rowEl.dataset.index)];
+        if(!it) return;
+        longPressFired = false;
+        pressStartXY = { x: x, y: y };
+        clearPressTimer();
+        pressTimer = setTimeout(function(){
+          longPressFired = true;
+          revealedBookDeleteRows.add(it.name.toLowerCase());
+          var delBtn = rowEl.querySelector(".mdeditor-delete-btn");
+          if(delBtn) delBtn.classList.add("visible");
+        }, LONG_PRESS_MS);
+      }
+      function movePress(x, y){
+        if(!pressStartXY) return;
+        var dx = x - pressStartXY.x, dy = y - pressStartXY.y;
+        if(Math.sqrt(dx*dx + dy*dy) > MOVE_CANCEL_PX) clearPressTimer();
+      }
+      listEl.addEventListener("touchstart", function(e){
+        var t = e.touches[0];
+        startPress(e.target.closest(".mdeditor-row"), t.clientX, t.clientY);
+      }, {passive:true});
+      listEl.addEventListener("touchmove", function(e){ var t = e.touches[0]; movePress(t.clientX, t.clientY); }, {passive:true});
+      listEl.addEventListener("touchend", clearPressTimer);
+      listEl.addEventListener("touchcancel", clearPressTimer);
+      listEl.addEventListener("mousedown", function(e){
+        startPress(e.target.closest(".mdeditor-row"), e.clientX, e.clientY);
+      });
+      listEl.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
+      listEl.addEventListener("mouseup", clearPressTimer);
+      listEl.addEventListener("mouseleave", clearPressTimer);
+
+      function hideRevealedBookDeleteRows(){
+        if(!revealedBookDeleteRows.size) return;
+        revealedBookDeleteRows.clear();
+        listEl.querySelectorAll(".mdeditor-delete-btn").forEach(function(btn){ btn.classList.remove("visible"); });
+      }
+
+      listEl.addEventListener("click", function(e){
+        var rowEl = e.target.closest(".mdeditor-row");
+        if(!rowEl) return;
+        var it = items[Number(rowEl.dataset.index)];
+        if(!it) return;
+        if(e.target.closest(".mdeditor-delete-btn")){
+          longPressFired = false;
+          confirmDeleteBook(it);
+          return;
+        }
+        if(longPressFired){ longPressFired = false; return; }
+        if(revealedBookDeleteRows.size){ hideRevealedBookDeleteRows(); return; }
+        openBookReader(it.name);
+      });
+      container.addEventListener("click", function(e){
+        if(!e.target.closest(".mdeditor-row")) hideRevealedBookDeleteRows();
+      });
+
       restoreTabScroll("set2s_7");
     }).catch(function(e){
       setBooksStatus("Не удалось прочитать список книг: " + (e && e.message ? e.message : e), true);
@@ -10965,6 +11274,8 @@
     var flag = (tab === "red") ? "red" : null;
     var inWork = (tab === "worktasks");
     saveTaskData(id, {text: text, tab: homeTab, checked: false, checkedAt: null, completionKey: null, nextForProjectId: null, flag: flag, inWork: inWork});
+    // см. пояснение у setTaskText выше
+    if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
     return id;
   }
   // Задача, отмеченная "[x]" прямо в "Моих заметках" (см. TaskActionsWidget
@@ -11030,6 +11341,13 @@
     if(!task) return;
     task.c.text = text;
     saveTaskData(id, task.c);
+    // ТЗ пользователя от 14.09 — корзина сирот картинок (mdeditor.js)
+    // пропускает дорогой обход OPFS, если ни одна заметка/задача/
+    // комментарий не менялись с прошлого прохода; текст задачи мог
+    // содержать "![[имя]]" (кнопка-скрепка), поэтому любая правка текста
+    // задачи обязана взводить этот флаг — см. markMediaReferencesDirty в
+    // mdeditor.js.
+    if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
   }
   function moveTaskToTab(id, newTab){
     var task = getTaskById(id);
@@ -11098,6 +11416,9 @@
     state["task:" + id] = {c: null, t: Date.now()};
     saveLocalState();
     scheduleCloudPush();
+    // см. пояснение у setTaskText выше — удаление задачи тоже может
+    // освободить картинку, вставленную только в неё
+    if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
   }
   // выполненные задачи по дням (ключи "taskcompletion:", не удаляются —
   // используются и в детализации дня "Карты дней года", и в экспорте)
@@ -11171,6 +11492,8 @@
     }
     saveCommentData(id, comment.c);
     refreshHeaderQuote();
+    // см. пояснение у setTaskText выше
+    if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
   }
   // безвозвратное удаление — не трогает уже сделанную копию в "Карте дней
   // года" (см. пояснение выше)
@@ -11179,6 +11502,8 @@
     saveLocalState();
     scheduleCloudPush();
     refreshHeaderQuote();
+    // см. пояснение у setTaskText выше
+    if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
   }
 
   // Перенос задачи в "Комментарии" через сетку "Перенести задачу"
