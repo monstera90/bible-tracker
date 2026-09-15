@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 3.2 (15.09)
+   Версия: 3.3 (15.09)
    =========================================================================== */
 
 (function(){
@@ -7469,11 +7469,22 @@
       '<path d="M12 3c2.5 2.5 2.5 15.5 0 18"></path>' +
       '<path d="M12 3c-2.5 2.5-2.5 15.5 0 18"></path>' +
     '</svg>';
-  // Закладка (ТЗ от 12.09) — кнопка в нижнем ряду, см.
-  // saveBookReaderBookmark/bookReaderFabRowHtml.
+  // Закладка (ТЗ от 12.09; со знаком "+" — 15.09) — кнопка в нижнем ряду,
+  // см. saveBookReaderBookmark/bookReaderFabRowHtml.
   var READER_BOOKMARK_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M6 3h12v18l-6-4-6 4V3z"></path>' +
+    '</svg>';
+  // Та же закладка, только со знаком "+" слева (ТЗ пользователя от 15.09) —
+  // кнопка добавления ОТДЕЛЬНОЙ закладки (не основной, положение не
+  // обновляется повторным нажатием, в отличие от READER_BOOKMARK_ICON_SVG
+  // выше). Контур закладки — тот же путь, что и READER_BOOKMARK_ICON_SVG,
+  // просто сдвинут на 3px вправо, чтобы слева осталось место под "+".
+  var READER_BOOKMARK_ADD_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M1.5 12h6"></path>' +
+      '<path d="M4.5 9v6"></path>' +
+      '<path d="M9 3h12v18l-6-4-6 4V3z"></path>' +
     '</svg>';
   // Кнопка-кнопка "прикрепить иллюстрацию к заметке книги" (READER_PLAN.md,
   // Этап D, шаг 14, 11.09) — канцелярская кнопка, которой прикалывают лист:
@@ -7751,7 +7762,8 @@
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontSizeBtn" title="Размер шрифта">Аа</button>' +
         '</span>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderSelectBtn" title="Выделить текст">' + READER_SELECT_ICON_SVG + '</button>' +
-        '<button type="button" class="mdeditor-fab-btn" id="bookReaderBookmarkBtn" title="Сохранить закладку">' + READER_BOOKMARK_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="bookReaderBookmarkAddBtn" title="Добавить отдельную закладку">' + READER_BOOKMARK_ADD_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="bookReaderBookmarkBtn" title="Обновить основную закладку">' + READER_BOOKMARK_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderChaptersBtn" title="' + (chaptersMode ? "К тексту" : "Главы") + '">' +
           (chaptersMode ? READER_TEXT_ICON_SVG : READER_CHAPTERS_ICON_SVG) +
         '</button>' +
@@ -7797,6 +7809,9 @@
 
     var bookmarkBtn = document.getElementById("bookReaderBookmarkBtn");
     if(bookmarkBtn) bookmarkBtn.addEventListener("click", saveBookReaderBookmark);
+
+    var bookmarkAddBtn = document.getElementById("bookReaderBookmarkAddBtn");
+    if(bookmarkAddBtn) bookmarkAddBtn.addEventListener("click", addSeparateBookReaderBookmark);
 
     var chaptersBtn = document.getElementById("bookReaderChaptersBtn");
     if(chaptersBtn){
@@ -8188,78 +8203,35 @@
 
   // ===================== ЗАКЛАДКА ЧЕРЕЗ КНОПКУ В НИЖНЕМ РЯДУ (ТЗ
   // пользователя от 12.09, заменяет прежние закладки на полях по долгому
-  // нажатию) =====================
-  // Тот же приём разметки, что и у openBookUnderlineNameDialog выше
-  // (mdeditor-cleanup-overlay/-card/-title/-input/-actions).
-  function openBookBookmarkNameDialog(onSubmit){
-    if(!settingsModalBox) return;
-    var overlay = document.createElement("div");
-    overlay.className = "mdeditor-cleanup-overlay";
-    var card = document.createElement("div");
-    card.className = "mdeditor-cleanup-card";
-    card.innerHTML =
-      '<div class="mdeditor-cleanup-title">Название закладки</div>' +
-      '<input type="text" class="mdeditor-cleanup-input" id="bookBookmarkNameInput">' +
-      '<div class="mdeditor-cleanup-actions">' +
-        '<button type="button" class="mdeditor-cleanup-cancel" id="bookBookmarkNameCancel">Отмена</button>' +
-        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="bookBookmarkNameSave">Сохранить</button>' +
-      '</div>';
-    overlay.appendChild(card);
-    settingsModalBox.appendChild(overlay);
-
-    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
-    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
-
-    var input = document.getElementById("bookBookmarkNameInput");
-    input.focus();
-
-    function submit(){
-      var name = (input.value || "").trim();
-      if(!name) return;
-      onSubmit(name);
-      close();
-    }
-    document.getElementById("bookBookmarkNameCancel").addEventListener("click", close);
-    document.getElementById("bookBookmarkNameSave").addEventListener("click", submit);
-    document.getElementById("bookBookmarkNameSave").addEventListener("mousedown", function(ev){ ev.preventDefault(); });
-    input.addEventListener("keydown", function(ev){
-      if(ev.key === "Enter"){ ev.preventDefault(); submit(); }
-      else if(ev.key === "Escape"){ ev.preventDefault(); close(); }
-    });
-  }
-
-  // Спрашивается только если у книги уже есть основная закладка (см.
-  // getMainBookBookmark выше) — "Да" удаляет старую основную и новая
-  // закладка займёт её место (пиктограмма раскрытой книги), "Нет" добавляет
-  // новую как обычную (пиктограмма закрытой книги), рядом со старой основной.
-  function openBookBookmarkUpdateMainConfirm(onYes, onNo){
-    if(!settingsModalBox) return;
-    var overlay = document.createElement("div");
-    overlay.className = "mdeditor-cleanup-overlay";
-    var card = document.createElement("div");
-    card.className = "mdeditor-cleanup-card";
-    card.innerHTML =
-      '<div class="mdeditor-cleanup-title">Обновить основную закладку? Старая основная закладка будет удалена, а эта станет основной.</div>' +
-      '<div class="mdeditor-cleanup-actions">' +
-        '<button type="button" class="mdeditor-cleanup-cancel" id="bookBookmarkMainNo">Нет, добавить обычной</button>' +
-        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="bookBookmarkMainYes">Да, обновить</button>' +
-      '</div>';
-    overlay.appendChild(card);
-    settingsModalBox.appendChild(overlay);
-
-    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
-    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
-    document.getElementById("bookBookmarkMainNo").addEventListener("click", function(){ close(); onNo(); });
-    document.getElementById("bookBookmarkMainYes").addEventListener("click", function(){ close(); onYes(); });
+  // нажатию; переработано 15.09 — оба диалога, "Название закладки" и
+  // "Обновить основную?", убраны целиком) =====================
+  // Имя закладки — автоматически, первые 4-5 слов абзаца, на котором она
+  // ставится (ТЗ пользователя от 15.09, ручной ввод больше не нужен). Если
+  // позиция пришлась на картинку (firstVisibleBookBlockPosition умеет
+  // вернуть и .book-reader-image-wrap) — текста нет, имя просто
+  // "Иллюстрация".
+  function bookmarkNameFromPosition(pos){
+    var chapter = bookReaderState.chapters[pos.ch];
+    var block = chapter && chapter.blocks[pos.blk];
+    if(!block) return "Закладка";
+    if(block.type === "image") return "Иллюстрация";
+    var text = flatBlockText(block).trim();
+    if(!text) return "Закладка";
+    return text.split(/\s+/).slice(0, 5).join(" ");
   }
 
   // Точка входа — кнопка "закладка" в нижнем ряду ридера (см.
-  // bookReaderFabRowHtml/bindBookReaderFabRow ниже). Позиция — ТЕКУЩЕЕ
+  // bookReaderFabRowHtml/bindBookReaderFabRow выше). Позиция — ТЕКУЩЕЕ
   // место, реально видимое первым на экране в момент нажатия кнопки
   // (firstVisibleBookBlockPosition, см. выше — экранные координаты, а не
   // накопленный scrollTop), а не абзац под пальцем — в отличие от прежних
   // закладок на полях, это не привязано к тому, где именно на экране
-  // находится курсор/палец.
+  // находится курсор/палец. Кнопка ВСЕГДА работает с ОСНОВНОЙ закладкой
+  // книги (ТЗ от 15.09): если основная уже есть — старая снимается (и в
+  // данных, и на полях текста), новая ставится на текущем месте — то есть
+  // повторное нажатие просто переставляет основную закладку туда, где
+  // сейчас читаешь. Отдельные (не основные) закладки эта кнопка не трогает
+  // — для них своя кнопка слева, см. addSeparateBookReaderBookmark ниже.
   function saveBookReaderBookmark(){
     if(!bookReaderState) return;
     var container = document.getElementById("settingsTabContent");
@@ -8270,35 +8242,43 @@
       return;
     }
     var hash = bookReaderState.hash;
-    function finish(name, isMain){
-      if(isMain){
-        var oldMain = getMainBookBookmark(hash);
-        if(oldMain){
-          removeBookBookmark(hash, oldMain.id);
-          removeBookReaderBookmarkMarkById(oldMain.id);
-        }
-      }
-      var newId = addBookBookmark(hash, pos, name, isMain);
-      setBookReaderBookmarkMarkInDom(pos.ch, pos.blk, newId);
-      var status = document.getElementById("bookReaderStatus");
-      if(status) status.textContent = "Закладка «" + name + "» сохранена — см. вкладку «Закладки».";
-      if(navigator.vibrate){ try{ navigator.vibrate(15); }catch(e){} }
+    var oldMain = getMainBookBookmark(hash);
+    if(oldMain){
+      removeBookBookmark(hash, oldMain.id);
+      removeBookReaderBookmarkMarkById(oldMain.id);
     }
-    var existingMain = getMainBookBookmark(hash);
-    if(!existingMain){
-      // Первая закладка книги — становится основной автоматически, без
-      // лишнего вопроса пользователю.
-      openBookBookmarkNameDialog(function(name){ finish(name, true); });
-    } else {
-      openBookBookmarkUpdateMainConfirm(
-        // "Да, обновить" — это ОБНОВЛЕНИЕ той же основной закладки на новую
-        // позицию, а не создание новой сущности с новым именем (ТЗ
-        // пользователя от 12.09) — имя переносится со старой закладки как
-        // есть, диалог имени здесь не нужен.
-        function(){ finish(existingMain.name, true); },
-        function(){ openBookBookmarkNameDialog(function(name){ finish(name, false); }); }
-      );
+    var name = bookmarkNameFromPosition(pos);
+    var newId = addBookBookmark(hash, pos, name, true);
+    setBookReaderBookmarkMarkInDom(pos.ch, pos.blk, newId);
+    var status = document.getElementById("bookReaderStatus");
+    if(status) status.textContent = "Основная закладка «" + name + "» сохранена — см. вкладку «Закладки».";
+    if(navigator.vibrate){ try{ navigator.vibrate(15); }catch(e){} }
+  }
+
+  // Кнопка слева от основной закладки (пиктограмма со знаком "+", ТЗ от
+  // 15.09) — добавляет ОТДЕЛЬНУЮ закладку на текущем месте, никак не
+  // затрагивая основную и другие отдельные закладки: каждое нажатие — это
+  // новая самостоятельная запись, её положение дальше никогда не
+  // обновляется. Выглядит и снимается так же, как и основная (та же
+  // пиктограмма на полях текста, тот же клик-для-снятия, та же строка во
+  // вкладке "Закладки") — разница только в том, что повторные нажатия этой
+  // кнопки не трогают уже существующие закладки, а плодят новые.
+  function addSeparateBookReaderBookmark(){
+    if(!bookReaderState) return;
+    var container = document.getElementById("settingsTabContent");
+    var pos = container ? firstVisibleBookBlockPosition(container) : null;
+    if(!pos){
+      var status0 = document.getElementById("bookReaderStatus");
+      if(status0) status0.textContent = "Закладку можно сохранить только в режиме чтения текста.";
+      return;
     }
+    var hash = bookReaderState.hash;
+    var name = bookmarkNameFromPosition(pos);
+    var newId = addBookBookmark(hash, pos, name, false);
+    setBookReaderBookmarkMarkInDom(pos.ch, pos.blk, newId);
+    var status = document.getElementById("bookReaderStatus");
+    if(status) status.textContent = "Закладка «" + name + "» сохранена — см. вкладку «Закладки».";
+    if(navigator.vibrate){ try{ navigator.vibrate(15); }catch(e){} }
   }
 
   // Главная точка входа: новое подчёркивание с уже известной позицией/
@@ -8619,16 +8599,20 @@
   }
 
   // ===================== ЗАКЛАДКИ КНИГИ (READER_PLAN.md, Этап D, шаг 15,
-  // 11.09; переработано — кнопка вместо долгого нажатия) =====================
+  // 11.09; переработано — кнопка вместо долгого нажатия; диалоги убраны,
+  // имя автоматическое — 15.09) =====================
   // Закладка сохраняет ТЕКУЩЕЕ место чтения (тот же {ch, blk}, что и
   // запоминание позиции — см. currentBookReaderPosition выше) по нажатию на
   // кнопку в нижнем ряду (см. saveBookReaderBookmark ниже), а не долгим
   // нажатием на конкретный абзац — прежний вариант с долгим нажатием
   // признан неинтуитивным и убран целиком (11.09). У каждой книги может
-  // быть одна ОСНОВНАЯ закладка (isMain, пиктограмма раскрытой книги в общем списке
-  // "Закладки") и любое число обычных — пользователь сам решает, обновлять
-  // ли основную при сохранении новой (см. openBookBookmarkUpdateMainConfirm
-  // ниже) или добавить рядом. Диалог имени — openBookBookmarkNameDialog.
+  // быть одна ОСНОВНАЯ закладка (isMain, пиктограмма раскрытой книги в
+  // общем списке "Закладки") — кнопка "закладка" в нижнем ряду всегда
+  // переставляет именно её на текущее место (saveBookReaderBookmark), и
+  // любое число ОТДЕЛЬНЫХ — кнопка со знаком "+" рядом всегда добавляет
+  // новую, не трогая существующие (addSeparateBookReaderBookmark). Имя —
+  // автоматически из первых слов абзаца (bookmarkNameFromPosition), без
+  // диалогов.
 
   // Плоский список ВСЕХ книжных закладок по всем книгам сразу —
   // для объединённого экрана "Закладки" в mdeditor.js (см.
@@ -14023,7 +14007,7 @@
 
   // Диалог выбора одного из нескольких действий для расшаренного файла —
   // список СТОЛБИКОМ (.mdeditor-cleanup-actions-list в components.css), а
-  // не пара кнопок в ряд, как у openBookBookmarkUpdateMainConfirm выше:
+  // не пара кнопок в ряд, как у обычных диалогов-подтверждений выше:
   // сейчас у .mp4 всего один пункт, но список специально сделан
   // расширяемым под будущие функции для .mp4 (ТЗ пользователя от 13.09) —
   // добавление новых пунктов не потребует другого диалога. items —

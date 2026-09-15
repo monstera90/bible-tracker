@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 1.0 (15.09)
+   Версия: 1.1 (15.09)
    Основные UI-компоненты: индикатор синхронизации, полосы прогресса
    (общий прогресс, счётчики часов), личные цели, список книг и глав
    =========================================================================== */
@@ -2821,31 +2821,33 @@
      пиктограмму в поле страницы специально не заводим (поля очень узкие),
      редкое наложение на конец первой строки не страшно (сознательно, по
      ТЗ). Клик по пиктограмме снимает закладку целиком — my.js,
-     bindBookReaderBookmarkMarkClick/setBookReaderBookmarkMarkInDom. Тот же
-     круглый базовый вид, что у .book-reader-pin-btn/
-     .book-reader-underline-trash-btn ниже, только меньше и в акцентном
-     var(--gold) — том же цвете, что раньше был у border-left полоски.
-     ---------- */
+     bindBookReaderBookmarkMarkClick/setBookReaderBookmarkMarkInDom.
+     ВАЖНО: это та же пиктограмма закладки, что и везде в проекте (см.
+     .mdeditor-bookmark-btn в этом файле, "Мой блокнот") — плоская, без
+     кружка-подложки и без золота, просто заливка контура currentColor =
+     var(--wood), тем же языком, что и остальные монохромные иконки
+     (.book-reader-pin-btn и т.п. используют отдельный круглый вид ТОЛЬКО
+     потому, что сидят поверх картинки, а не поверх обычного текста — здесь
+     этот вид неуместен, ТЗ пользователя от 15.09). ---------- */
   .book-reader-bookmark-mark{
     position:absolute;
-    top:-2px; right:-2px;
-    width:20px; height:20px;
-    padding:0;
-    display:flex;
+    top:0; right:0;
+    display:inline-flex;
     align-items:center;
     justify-content:center;
-    border-radius:50%;
-    background:#fffef8;
-    border:1px solid var(--groove-shadow);
-    color:var(--gold, #b08d3f);
+    width:22px; height:22px;
+    padding:0;
+    border:none;
+    border-radius:6px;
+    background:transparent;
+    color:var(--wood);
     cursor:pointer;
-    box-shadow:0 1px 4px rgba(0,0,0,.22);
     -webkit-tap-highlight-color:transparent;
     z-index:1;
   }
-  .book-reader-bookmark-mark svg{ width:12px; height:12px; }
+  .book-reader-bookmark-mark svg{ width:16px; height:16px; fill:currentColor; }
   @media (hover:hover) and (pointer:fine){
-    .book-reader-bookmark-mark:hover{ background:var(--gold, #b08d3f); color:#fffef8; }
+    .book-reader-bookmark-mark:hover{ background:var(--parchment-dark); }
   }
   .book-reader .cm-md-image{ margin:10px 0; }
   /* ---------- Подчёркивание книги (READER_PLAN.md, Этап D, шаг 13, 11.09).
