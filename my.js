@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 2.2 (14.09)
+   Версия: 3.0 (15.09)
    =========================================================================== */
 
 (function(){
@@ -814,6 +814,12 @@
   var STORAGE_KEY = "bibleReadingProgress_v2";
   var OLD_STORAGE_KEY = "bibleReadingProgress_v1";
   var SYNC_ID_KEY = "bibleReadingSyncId_v1";
+  // TASK_SHARED_TASKS, Шаг 1: групповая привязка "Общих задач" — отдельный
+  // от личной синхронизации механизм (свой код/QR, свой groupId), хранится
+  // так же, как syncId — строкой/объектом в localStorage, без отдельного
+  // ключа шифрования (групповой ключ выводится на лету как SHA-256(groupId),
+  // см. TASK_SHARED_TASKS.md раздел 3 "Шифрование").
+  var SHARED_GROUP_KEY = "bibleSharedGroup_v1";
   var MIGRATED_KEY = "__migrated_v2";
   var CELEBRATION_SHOWN_KEY = "bibleCelebrationShown_v1";
   var UPDATE_DISMISSED_KEY = "bibleUpdateDismissedVersion_v1";
@@ -1077,6 +1083,10 @@
 
   var state = loadState();
   var syncId = localStorage.getItem(SYNC_ID_KEY) || null;
+  // sharedGroup: {groupId, role: 'admin'|'member'} | null — см. раздел
+  // "ГРУППОВАЯ ПРИВЯЗКА «ОБЩИХ ЗАДАЧ»" ниже (loadSharedGroup объявлена там,
+  // но доступна здесь по подъёму объявлений функций в пределах замыкания).
+  var sharedGroup = loadSharedGroup();
 
   // Инкрементальные счётчики
   var totalChecked = 0;
@@ -1272,6 +1282,12 @@
     if(fontSizeWrap) fontSizeWrap.classList.toggle("visible", showTaskFab);
     if(highlightWrap) highlightWrap.classList.toggle("visible", showTaskFab);
     if(attachWrap) attachWrap.classList.toggle("visible", showTaskFab);
+    // "глаз" (скрыть задачи, привязанные к проектам, см.
+    // initTaskGlobalToolbar/taskHideLinkedBtn выше) — в отличие от
+    // соседних кнопок ряда видна только на самой вкладке "Next", не на
+    // любой вкладке задач (ТЗ пользователя от 14.09).
+    var hideLinkedWrap = document.getElementById("taskHideLinkedWrap");
+    if(hideLinkedWrap) hideLinkedWrap.classList.toggle("visible", tab === "next");
 
     // Заглушка-домик — на любой вкладке задач с рядом кнопок (не на
     // карточке проекта: там openTaskNextPicker рисует свою, кликабельную
@@ -1416,6 +1432,12 @@
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + (TASK_MOVE_ICONS[key] || "") + '</svg>';
   };
   var ARROW_MOVE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path></svg>';
+  // "В начало"/"В конец списка" (ТЗ пользователя от 14.09) — та же самая
+  // пиктограмма-стрелочка, что и ARROW_MOVE_ICON_SVG выше, просто
+  // повёрнутая через CSS-transform на самом <svg> (-90°/90°), без отдельной
+  // отрисовки. См. moveTaskToEdge/moveCommentToEdge.
+  var ARROW_TOP_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(-90deg)"><path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path></svg>';
+  var ARROW_BOTTOM_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(90deg)"><path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path></svg>';
   // галочка "перенести в архив" — заменяет собой прежний чекбокс задачи,
   // делает ровно то же самое (см. .task-done-btn в renderTaskRowView)
   var CHECK_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"></path></svg>';
@@ -3355,6 +3377,428 @@
   }
   function bindClose(){ var btn = document.getElementById("mClose"); if(btn) btn.addEventListener("click", closeModal); }
 
+  // ===================== ГРУППОВАЯ ПРИВЯЗКА «ОБЩИХ ЗАДАЧ» (TASK_SHARED_TASKS,
+  // Шаги 1-2, 14.09) =====================
+  // Код привязки / групповой код — отдельный от личного sync-кода механизм
+  // (см. TASK_SHARED_TASKS.md, раздел 1 "Термины"): не даёт доступа ни к
+  // чему личному, groupId так же не хранится с отдельным секретным ключом —
+  // групповой ключ шифрования выводится на лету как SHA-256(groupId), сам
+  // groupId живёт в state.sharedGroup (см. переменную sharedGroup выше).
+  //
+  // Шаг 1 устанавливает пару groupId+роль на обоих устройствах через
+  // одноразовый код привязки. Шаг 2 добавляет обязательные диалоги вокруг
+  // этого обмена (п. 2.2.1/2.3.2/2.3.4/2.5/2.6 ТЗ) — предупреждения и
+  // подтверждения, тексты дословно из ТЗ. Оба шага НЕ трогают задачи:
+  // перенос задач участника во "Входящие" (2.3.5) и переключение вкладки
+  // "Общие задачи" на общий источник данных — задача Шага 3, отмечено ниже
+  // явным TODO в finalizeGroupJoin(). Логика самой отвязки/отписки
+  // (удаление данных группы и т.п.) — задача Шага 5, здесь только диалоги
+  // с заглушками-обработчиками.
+
+  var FIREBASE_PAIRINGS_PATH = "/pairings";
+  var FIREBASE_GROUPS_PATH = "/groups";
+  // /pairings/<pairCode> — одноразовая передача секрета, а не долгоживущий
+  // канал синхронизации (в отличие от /syncs/<id> с годовым SYNC_EXPIRY_MS
+  // выше) — поэтому срок жизни короткий, а не год.
+  var PAIRING_EXPIRY_MS = 20 * 60 * 1000; // 20 минут
+
+  // Диалог "Что подключить" (п. 2.3.2 ТЗ) спроектирован как список, а не
+  // хардкод одного пункта — сейчас один элемент, в будущем может стать
+  // больше без переверстки диалога (renderGroupJoinChecklist ниже).
+  var GROUP_JOIN_ITEMS = [
+    { key: "tasks", label: "Общие задачи" }
+  ];
+
+  // Код привязки проверяется (startGroupJoin) раньше диалогов — если код
+  // невалиден/истёк, нет смысла показывать чеклист и предупреждение.
+  // pendingGroupJoin хранит результат этой проверки между экранами диалога
+  // (chеклист → предупреждение → finalizeGroupJoin), пока пользователь не
+  // подтвердит или не отменит подключение.
+  var pendingGroupJoin = null;
+
+
+  function loadSharedGroup(){
+    try{
+      var raw = localStorage.getItem(SHARED_GROUP_KEY);
+      return raw ? JSON.parse(raw) : null;
+    }catch(e){ return null; }
+  }
+  function saveSharedGroup(group){
+    sharedGroup = group;
+    try{
+      if(group) localStorage.setItem(SHARED_GROUP_KEY, JSON.stringify(group));
+      else localStorage.removeItem(SHARED_GROUP_KEY);
+    }catch(e){}
+  }
+
+  function generatePairCode(){
+    // короткий код в своём собственном пространстве имён — не путать по
+    // формату с личным sync-кодом (generateSyncId выше)
+    return "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+  function generateGroupId(){
+    return "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  }
+
+  function createPairing(pairCode, groupId, adminDeviceId){
+    var payload = {
+      groupId: groupId,
+      adminDeviceId: adminDeviceId,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + PAIRING_EXPIRY_MS
+    };
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_PAIRINGS_PATH + "/" + encodeURIComponent(pairCode) + ".json", {
+      method: "PUT",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    }, 8000).then(function(res){
+      if(!res.ok) throw new Error("pairing_create_failed_" + res.status);
+      return true;
+    });
+  }
+
+  function fetchPairing(pairCode){
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_PAIRINGS_PATH + "/" + encodeURIComponent(pairCode) + ".json", {method:"GET"}, 8000).then(function(res){
+      if(!res.ok) throw new Error("pairing_fetch_failed_" + res.status);
+      return res.json();
+    }).then(function(data){
+      // Firebase отдаёт null (не 404), если по пути ничего нет — тот же
+      // приём, что и у fetchCloudBlob выше.
+      if(data === null || data === undefined) throw new Error("not_found");
+      if(typeof data.expiresAt === "number" && Date.now() > data.expiresAt){
+        return deletePairing(pairCode).catch(function(){}).then(function(){
+          throw new Error("expired");
+        });
+      }
+      return data;
+    });
+  }
+
+  function deletePairing(pairCode){
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_PAIRINGS_PATH + "/" + encodeURIComponent(pairCode) + ".json", {
+      method:"DELETE"
+    }, 8000).then(function(res){
+      if(!res.ok) throw new Error("pairing_delete_failed_" + res.status);
+      return true;
+    });
+  }
+
+  // /groups/<groupId>/members/<deviceId> — {role, joinedAt}, см.
+  // TASK_SHARED_TASKS.md раздел 3.1. Список/объект, а не единственное
+  // поле — задел под будущее поднятие MAX_GROUP_MEMBERS (не часть этого шага).
+  function writeGroupMember(groupId, memberDeviceId, role){
+    var payload = { role: role, joinedAt: Date.now() };
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/members/" + encodeURIComponent(memberDeviceId) + ".json", {
+      method: "PUT",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    }, 8000).then(function(res){
+      if(!res.ok) throw new Error("group_member_write_failed_" + res.status);
+      return true;
+    });
+  }
+
+  // Точка входа для будущей кнопки "Синхронизация" на вкладке "Общие
+  // задачи" (Шаг 4) — пока ничего в UI её не вызывает.
+  function openGroupPairingModal(){
+    modalOverlay.classList.add("open");
+    renderGroupPairingHome();
+  }
+
+  function renderGroupPairingHome(){
+    stopCamera();
+    modalBox.innerHTML = modalHeader("Общие задачи — привязка",
+        "Подключите ещё одно устройство к вкладке «Общие задачи».") +
+      '<button class="modal-btn primary" id="mGroupCreate">Это первое устройство — создать код привязки</button>' +
+      '<button class="modal-btn" id="mGroupJoin">У меня есть код привязки с другого устройства</button>';
+    bindClose();
+    document.getElementById("mGroupCreate").addEventListener("click", renderGroupCreateWarning);
+    document.getElementById("mGroupJoin").addEventListener("click", renderGroupJoinScreen);
+  }
+
+  // п. 2.2.1 ТЗ — текст дословный, кнопки "Продолжить"/"Отмена".
+  function renderGroupCreateWarning(){
+    modalBox.innerHTML = modalHeader("Внимание",
+        "Задачи с этой вкладки станут видны всем, кто подключится к общим задачам.") +
+      '<button class="modal-btn primary" id="mGroupCreateContinue">Продолжить</button>' +
+      '<button class="modal-btn" id="mBack">Отмена</button>';
+    bindClose();
+    document.getElementById("mBack").addEventListener("click", renderGroupPairingHome);
+    document.getElementById("mGroupCreateContinue").addEventListener("click", handleCreateGroupPairCode);
+  }
+
+  function handleCreateGroupPairCode(){
+    modalBox.innerHTML = modalHeader("Создаём код…", "Секунду, подключаемся к облачному хранилищу.");
+    bindClose();
+    if(!navigator.onLine){
+      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для создания кода привязки нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderGroupPairingHome);
+      return;
+    }
+    var groupId = generateGroupId();
+    var pairCode = generatePairCode();
+    createPairing(pairCode, groupId, getDeviceId()).then(function(){
+      return writeGroupMember(groupId, getDeviceId(), "admin");
+    }).then(function(){
+      saveSharedGroup({groupId: groupId, role: "admin"});
+      modalBox.innerHTML = modalHeader("Код создан", "Отсканируйте этот QR-код на другом устройстве (в этой же панели, кнопка «У меня есть код») — или введите код текстом. Код действует ограниченное время.") +
+        '<div id="mGroupNewQrHolder"></div><button class="modal-btn primary" id="mDone">Готово</button>';
+      bindClose();
+      loadQrLib().then(function(){
+        showCodeAndQR("mGroupNewQrHolder", pairCode, "Код привязки:",
+          "Этот код действует ограниченное время и предназначен только для подключения к общим задачам — доступа к личным данным он не даёт.");
+      }).catch(function(){
+        document.getElementById("mGroupNewQrHolder").innerHTML = '<p class="modal-note error">Не удалось загрузить QR-код.</p>';
+      });
+      document.getElementById("mDone").addEventListener("click", closeModal);
+    }).catch(function(err){
+      console.error(err);
+      modalBox.innerHTML = modalHeader("Не удалось создать код",
+        "Возможно, временно недоступен облачный сервис синхронизации. Попробуйте ещё раз чуть позже.") +
+        '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderGroupPairingHome);
+    });
+  }
+
+  function renderGroupJoinScreen(){
+    modalBox.innerHTML = modalHeader("Подключение по коду привязки", "Отсканируйте QR-код с первого устройства камерой или введите код вручную.") +
+      '<button class="modal-btn primary" id="mScan">Сканировать QR-код</button>' +
+      '<button class="modal-btn" id="mManual">Ввести код вручную</button>' +
+      '<button class="modal-btn" id="mBack">Назад</button>';
+    bindClose();
+    document.getElementById("mScan").addEventListener("click", renderGroupScanScreen);
+    document.getElementById("mManual").addEventListener("click", renderGroupManualScreen);
+    document.getElementById("mBack").addEventListener("click", renderGroupPairingHome);
+  }
+
+  function renderGroupManualScreen(){
+    modalBox.innerHTML = modalHeader("Ввод кода вручную", "Введите код привязки с первого устройства.") +
+      '<div class="code-row"><input type="text" id="groupManualCodeInput" placeholder="код привязки"></div>' +
+      '<button class="modal-btn primary" id="mSubmit">Подключить</button>' +
+      '<button class="modal-btn" id="mBack">Назад</button>' +
+      '<div class="modal-note" id="mGroupJoinNote"></div>';
+    bindClose();
+    document.getElementById("mBack").addEventListener("click", renderGroupJoinScreen);
+    document.getElementById("mSubmit").addEventListener("click", function(){
+      var val = document.getElementById("groupManualCodeInput").value.trim();
+      if(val) startGroupJoin(val);
+    });
+  }
+
+  function renderGroupScanScreen(){
+    modalBox.innerHTML = modalHeader("Сканирование QR-кода", "Наведите камеру на QR-код с первого устройства.") +
+      '<div class="scan-video-wrap"><video id="scanVideo" playsinline autoplay muted></video><div class="scan-frame"></div></div>' +
+      '<canvas id="scanCanvas" style="display:none;"></canvas>' +
+      '<button class="modal-btn" id="mManualFallback">Ввести код вручную вместо этого</button>' +
+      '<button class="modal-btn" id="mBack">Назад</button>' +
+      '<div class="modal-note" id="mScanNote"></div>';
+    bindClose();
+    document.getElementById("mBack").addEventListener("click", function(){ stopCamera(); renderGroupJoinScreen(); });
+    document.getElementById("mManualFallback").addEventListener("click", function(){ stopCamera(); renderGroupManualScreen(); });
+
+    var video = document.getElementById("scanVideo");
+    var canvas = document.getElementById("scanCanvas");
+    var note = document.getElementById("mScanNote");
+
+    loadJsqrLib().then(function(){
+      if(typeof jsQR !== "function"){
+        note.className = "modal-note error";
+        note.textContent = "Не удалось загрузить модуль сканирования. Введите код вручную.";
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}})
+        .then(function(stream){
+          activeStream = stream;
+          video.srcObject = stream;
+          video.play();
+          scanRAF = requestAnimationFrame(tick);
+        }).catch(function(err){
+          console.error(err);
+          note.className = "modal-note error";
+          note.textContent = "Не удалось получить доступ к камере. Введите код вручную.";
+        });
+
+      function tick(){
+        if(video.readyState === video.HAVE_ENOUGH_DATA){
+          var w = 320, h = 240;
+          canvas.width = w; canvas.height = h;
+          var ctx = canvas.getContext("2d");
+          ctx.drawImage(video, 0, 0, w, h);
+          var imageData = ctx.getImageData(0, 0, w, h);
+          var result = jsQR(imageData.data, imageData.width, imageData.height, {inversionAttempts:"dontInvert"});
+          if(result && result.data){
+            stopCamera();
+            note.className = "modal-note success";
+            note.textContent = "Код распознан!";
+            startGroupJoin(result.data);
+            return;
+          }
+        }
+        scanRAF = requestAnimationFrame(tick);
+      }
+    }).catch(function(){
+      note.className = "modal-note error";
+      note.textContent = "Не удалось загрузить сканер (нет интернета?). Введите код вручную.";
+    });
+  }
+
+  // Шаг 1: проверяет код у сервера (тот же самый вызов, что раньше сразу
+  // подключал устройство) — если код валиден, дальше идут диалоги Шага 2,
+  // а не немедленное подключение.
+  function startGroupJoin(pairCode){
+    pairCode = (pairCode||"").trim();
+    if(!pairCode) return;
+    modalBox.innerHTML = modalHeader("Подключаемся…", "Проверяем код привязки.");
+    bindClose();
+    if(!navigator.onLine){
+      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для подключения нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderGroupJoinScreen);
+      return;
+    }
+    fetchPairing(pairCode).then(function(pairing){
+      pendingGroupJoin = { pairCode: pairCode, groupId: pairing.groupId };
+      renderGroupJoinChecklist();
+    }).catch(function(err){
+      console.error(err);
+      var msg = "Не удалось подключиться. Проверьте код и подключение к интернету.";
+      if(String(err.message||"").indexOf("not_found") !== -1) msg = "Код не найден. Проверьте, что он введён без ошибок.";
+      if(String(err.message||"").indexOf("expired") !== -1) msg = "Этот код больше не действует — срок его действия истёк. Попросите создать новый код на первом устройстве.";
+      modalBox.innerHTML = modalHeader("Не получилось подключиться", msg) + '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderGroupJoinScreen);
+    });
+  }
+
+  function cancelGroupJoin(){
+    pendingGroupJoin = null;
+    renderGroupPairingHome();
+  }
+
+  // п. 2.3.2 ТЗ — диалог "Что подключить", список с чекбоксами (сейчас один
+  // пункт, см. GROUP_JOIN_ITEMS выше), кнопки "Подключить"/"Отмена". Пункты
+  // собираются в pendingGroupJoin.items — сейчас ни на что не влияют (один
+  // источник данных, реализуется в Шаге 3), но диалог уже не хардкодит их.
+  function renderGroupJoinChecklist(){
+    if(!pendingGroupJoin) return renderGroupPairingHome();
+    var rows = GROUP_JOIN_ITEMS.map(function(item){
+      return '<div class="settings-row"><span>' + escapeHtml(item.label) + '</span><input type="checkbox" class="mGroupJoinItem" data-item="' + item.key + '" checked></div>';
+    }).join("");
+    modalBox.innerHTML = modalHeader("Что подключить", null) +
+      '<div class="modal-section">' + rows + '</div>' +
+      '<button class="modal-btn primary" id="mGroupJoinNext">Подключить</button>' +
+      '<button class="modal-btn" id="mBack">Отмена</button>';
+    bindClose();
+    document.getElementById("mBack").addEventListener("click", cancelGroupJoin);
+    document.getElementById("mGroupJoinNext").addEventListener("click", function(){
+      var checked = Array.prototype.slice.call(modalBox.querySelectorAll(".mGroupJoinItem:checked"))
+        .map(function(cb){ return cb.dataset.item; });
+      if(!checked.length){
+        alert("Отметьте хотя бы один пункт для подключения.");
+        return;
+      }
+      pendingGroupJoin.items = checked;
+      renderGroupJoinWarning();
+    });
+  }
+
+  // п. 2.3.4 ТЗ — предупреждение из двух частей, текст дословный, кнопки
+  // "Подключиться"/"Отмена".
+  function renderGroupJoinWarning(){
+    if(!pendingGroupJoin) return renderGroupPairingHome();
+    modalBox.innerHTML = modalHeader("Внимание",
+        "Ваши текущие задачи на этой вкладке будут перемещены во «Входящие». Задачи, которые уже есть в общих задачах, станут видны вам.") +
+      '<button class="modal-btn danger" id="mGroupJoinConfirm">Подключиться</button>' +
+      '<button class="modal-btn" id="mBack">Отмена</button>';
+    bindClose();
+    document.getElementById("mBack").addEventListener("click", cancelGroupJoin);
+    document.getElementById("mGroupJoinConfirm").addEventListener("click", finalizeGroupJoin);
+  }
+
+  // п. 2.3.5 ТЗ. TODO Шаг 3: перед/вместе с регистрацией участника нужно
+  // перенести локальные задачи вкладки jointtasks во "Входящие" (тем же
+  // механизмом, что moveTaskToTab) и переключить вкладку на чтение из
+  // /groups/<groupId>/tasks вместо локального CRUD — этот шаг того
+  // намеренно не делает (пользователь попросил не переходить к Шагу 3),
+  // здесь только сама регистрация участника в группе (то, что уже умел
+  // Шаг 1), выполненная теперь после диалогов выше, а не сразу по вводу кода.
+  function finalizeGroupJoin(){
+    if(!pendingGroupJoin) return renderGroupPairingHome();
+    var pairCode = pendingGroupJoin.pairCode;
+    var groupId = pendingGroupJoin.groupId;
+    modalBox.innerHTML = modalHeader("Подключаемся…", "Регистрируем устройство в группе.");
+    bindClose();
+    writeGroupMember(groupId, getDeviceId(), "member").then(function(){
+      // код одноразовый (см. PAIRING_EXPIRY_MS выше) — подчищаем сразу
+      // после использования, не дожидаясь истечения срока
+      deletePairing(pairCode).catch(function(){});
+      saveSharedGroup({groupId: groupId, role: "member"});
+      pendingGroupJoin = null;
+      modalBox.innerHTML = modalHeader("Подключено", "Устройство подключено к общим задачам.") +
+        '<button class="modal-btn primary" id="mDone">Готово</button>';
+      bindClose();
+      document.getElementById("mDone").addEventListener("click", closeModal);
+    }).catch(function(err){
+      console.error(err);
+      modalBox.innerHTML = modalHeader("Не получилось подключиться",
+        "Не удалось зарегистрировать устройство в группе. Проверьте подключение к интернету и попробуйте ещё раз.") +
+        '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", cancelGroupJoin);
+    });
+  }
+
+  // ===================== ОТВЯЗКА / ОТПИСКА — ДИАЛОГИ (TASK_SHARED_TASKS,
+  // Шаг 2) =====================
+  // Только диалоги с финальными текстами из п. 2.5/2.6 ТЗ. Сама логика
+  // (удаление данных группы, перенос данных админа в локальное хранилище
+  // при 0 участников, возврат вкладки в локальный режим) — Шаг 5;
+  // обработчики ниже — заглушки. Пока ничего в UI не вызывает эти функции —
+  // кнопки "Отвязать пользователя"/"Отписаться от общих задач" появятся в
+  // Шаге 4.
+
+  function groupActionNotImplementedYet(){
+    modalBox.innerHTML = modalHeader("Пока не реализовано",
+        "Эта часть механизма общих задач появится на следующем шаге доработки (Шаг 5 из TASK_SHARED_TASKS.md).") +
+      '<button class="modal-btn primary" id="mDone">Понятно</button>';
+    bindClose();
+    document.getElementById("mDone").addEventListener("click", closeModal);
+  }
+
+  // п. 2.5 ТЗ — видна только админу. Текст и три кнопки дословно из ТЗ.
+  function renderGroupUnlinkConfirm(){
+    modalBox.innerHTML = modalHeader("Отвязать пользователя?",
+        "Участник потеряет доступ к общим задачам. Что сделать с данными группы?") +
+      '<button class="modal-btn" id="mUnlinkKeep">Без удаления</button>' +
+      '<button class="modal-btn danger" id="mUnlinkDelete">С удалением</button>' +
+      '<button class="modal-btn" id="mBack">Отмена</button>';
+    bindClose();
+    document.getElementById("mBack").addEventListener("click", closeModal);
+    // TODO Шаг 5: handleGroupUnlinkKeepData — участник теряет доступ, его
+    // вкладка возвращается в локальный CRUD с нуля, данные группы у админа
+    // остаются целиком.
+    document.getElementById("mUnlinkKeep").addEventListener("click", groupActionNotImplementedYet);
+    // TODO Шаг 5: handleGroupUnlinkDeleteData — общие задачи и архив группы
+    // удаляются из облака полностью.
+    document.getElementById("mUnlinkDelete").addEventListener("click", groupActionNotImplementedYet);
+  }
+
+  // п. 2.6 ТЗ — видна только участнику. Текст и две кнопки дословно из ТЗ.
+  function renderGroupUnsubscribeConfirm(){
+    modalBox.innerHTML = modalHeader("Отписка",
+        "Вы уверены, что хотите отписаться от общих задач?") +
+      '<button class="modal-btn danger" id="mUnsubConfirm">Отписаться</button>' +
+      '<button class="modal-btn" id="mBack">Отмена</button>';
+    bindClose();
+    document.getElementById("mBack").addEventListener("click", closeModal);
+    // TODO Шаг 5: handleGroupUnsubscribeConfirmed — данные группы не
+    // трогаются, участник просто теряет доступ, вкладка возвращается в
+    // режим "до привязки".
+    document.getElementById("mUnsubConfirm").addEventListener("click", groupActionNotImplementedYet);
+  }
+
   // ===================== СЧЁТЧИК НАСТРОЕНИЯ =====================
   // Логика счётчика настроения и построения диаграммы вынесена в отдельный
   // файл mood.js (см. index.html и sw.js). Модуль создаётся здесь же —
@@ -3756,6 +4200,36 @@
     if(highlightBtn){
       highlightBtn.addEventListener("click", function(){
         wrapEditableSelection("==", "==");
+      });
+    }
+
+    // --- "глаз" — скрыть/показать на вкладке "Next" задачи, которые уже
+    // привязаны к какому-то проекту (nextForProjectId, см. фильтр в
+    // renderTaskTabList и NEXT_HIDE_LINKED_KEY выше). Сама задача при этом
+    // никуда не удаляется — просто не выводится в списке; повторный клик
+    // возвращает её обратно. Разметка — #taskHideLinkedWrap/
+    // #taskHideLinkedBtn в index.html, перед #taskFormatWrap ("Ж"), т.е.
+    // слева от неё — по месту в ТЗ пользователя от 15.09 (span намеренно
+    // с классом "task-highlight-wrap", см. комментарий в index.html). В
+    // отличие от остальных кнопок ряда видима не на любой вкладке задач,
+    // а только на "Next" — см. отдельный toggle в syncTaskFabRowForTab (а
+    // не в showTaskFab там же).
+    var hideLinkedBtn = document.getElementById("taskHideLinkedBtn");
+    stopMousedown(hideLinkedBtn);
+    function updateHideLinkedBtnState(){
+      if(!hideLinkedBtn) return;
+      var active = getNextHideLinkedTasks();
+      hideLinkedBtn.classList.toggle("pressed", active);
+      hideLinkedBtn.title = active
+        ? "Показать задачи, привязанные к проектам"
+        : "Скрыть задачи, привязанные к проектам";
+    }
+    updateHideLinkedBtnState();
+    if(hideLinkedBtn){
+      hideLinkedBtn.addEventListener("click", function(){
+        setNextHideLinkedTasks(!getNextHideLinkedTasks());
+        updateHideLinkedBtnState();
+        renderTaskTabList("next");
       });
     }
 
@@ -4559,15 +5033,21 @@
     }
   }
 
-  function showCodeAndQR(holderId, code, label){
+  function showCodeAndQR(holderId, code, label, warningText){
     var holder = document.getElementById(holderId);
     if(!holder) return;
+    // Шаг 7 READER_PLAN.md (11.09): код синхронизации — это ещё и ключ
+    // шифрования заметок в облаке (SHA-256(syncId)), поэтому предупреждение
+    // о секретности стоит именно там, где код показывается пользователю.
+    // warningText — необязательный параметр (TASK_SHARED_TASKS, Шаг 1,
+    // 14.09): у кода привязки "Общих задач" смысл предупреждения другой
+    // (см. renderGroupPairingHome/handleCreateGroupPairCode ниже), поэтому
+    // текст можно переопределить; по умолчанию — прежнее предупреждение про
+    // личный sync-код, чтобы оба существующих вызова не трогать.
+    var warning = warningText || "Никому не сообщайте этот код: через него происходит шифрование всех ваших данных в облаке, включая заметки.";
     holder.innerHTML = '<p class="modal-note">' + label + '</p><div id="qrHolder"></div>' +
       '<div class="code-row"><input type="text" id="codeText" readonly value="' + code + '"><button id="codeCopy">Копировать</button></div>' +
-      // Шаг 7 READER_PLAN.md (11.09): код синхронизации — это ещё и ключ
-      // шифрования заметок в облаке (SHA-256(syncId)), поэтому предупреждение
-      // о секретности стоит именно там, где код показывается пользователю.
-      '<p class="modal-note">Никому не сообщайте этот код: через него происходит шифрование всех ваших данных в облаке, включая заметки.</p>';
+      '<p class="modal-note">' + warning + '</p>';
     try{
       new QRCode(document.getElementById("qrHolder"), {text: code, width: 200, height: 200, colorDark: "#2e2418", colorLight: "#fbf4e2"});
     }catch(e){
@@ -11345,6 +11825,21 @@
       return t.c.tab === "next" && t.c.checked !== true && t.c.nextForProjectId === projectId;
     });
   }
+  // Кнопка "глаз" внизу вкладки "Next" (слева от "Ж", см.
+  // initTaskGlobalToolbar/taskHideLinkedBtn ниже, ТЗ пользователя от
+  // 14.09): скрывает на вкладке "Next" задачи, у которых заполнен
+  // nextForProjectId (т.е. они уже привязаны к какому-то проекту) — сами
+  // задачи никуда не деваются, просто не попадают в rowsHtml при
+  // renderTaskTabList("next"), см. там. Повторный клик снова их
+  // показывает. Значение переживает перезагрузку страницы (localStorage),
+  // как и другие подобные переключатели (см. bibleDebugMode_v1 в debug.js).
+  var NEXT_HIDE_LINKED_KEY = "bibleNextHideLinkedTasks_v1";
+  function getNextHideLinkedTasks(){
+    try{ return localStorage.getItem(NEXT_HIDE_LINKED_KEY) === "1"; }catch(e){ return false; }
+  }
+  function setNextHideLinkedTasks(val){
+    try{ localStorage.setItem(NEXT_HIDE_LINKED_KEY, val ? "1" : "0"); }catch(e){}
+  }
   function setTaskText(id, text){
     var task = getTaskById(id);
     if(!task) return;
@@ -11363,6 +11858,32 @@
     if(!task || task.c.tab === newTab) return;
     task.c.tab = newTab;
     if(newTab !== "next") task.c.nextForProjectId = null;
+    saveTaskData(id, task.c);
+  }
+  // "В начало"/"В конец списка" (пиктограммы ARROW_TOP_ICON_SVG/
+  // ARROW_BOTTOM_ICON_SVG, ТЗ пользователя от 14.09). Порядок задач во всех
+  // списках определяется полем createdAt (см. подробное пояснение у
+  // saveTaskData выше — это уже стабильная, не завязанная на правки текста
+  // точка сортировки), поэтому переставить задачу на край списка — просто
+  // присвоить ей createdAt за пределами диапазона всех остальных задач:
+  // больше максимума (top) или меньше минимума (bottom). Список при этом не
+  // обязательно физически "самый первый/последний" на экране — например, на
+  // Red/"Задачи в работе" сортировка ещё и группирует по отметке/inWork (см.
+  // getTasksForTab), так что "в начало" здесь означает "в начало своей
+  // группы", что и ожидается. Сам вызывающий код передаёт этот же id как
+  // якорь перерисовки (см. renderTaskTabList/anchorTaskId), поэтому видимая
+  // позиция экрана не скачет ни в начало, ни в конец списка.
+  function moveTaskToEdge(id, edge){
+    var task = getTaskById(id);
+    if(!task) return;
+    var all = getAllTasks();
+    function keyOf(t){ return t.c.createdAt != null ? t.c.createdAt : t.t; }
+    var edgeKey = all.reduce(function(acc, t){
+      if(t.id === id) return acc;
+      var k = keyOf(t);
+      return edge === "top" ? Math.max(acc, k) : Math.min(acc, k);
+    }, keyOf(task));
+    task.c.createdAt = edge === "top" ? edgeKey + 1 : edgeKey - 1;
     saveTaskData(id, task.c);
   }
   // цветная отметка слева от чекбокса: нет отметки → red → yellow → нет
@@ -11467,7 +11988,18 @@
         list.push({id: k.slice(8), c: state[k].c, t: state[k].t});
       }
     });
-    list.sort(function(a,b){ return b.t - a.t; });
+    // По умолчанию порядок — по t (время последнего изменения, как и
+    // раньше). "В начало"/"В конец списка" (ТЗ пользователя от 14.09, см.
+    // moveCommentToEdge ниже) выставляет c.orderKey — отдельное поле,
+    // специально НЕ трогающее сам t, потому что t здесь одновременно ещё и
+    // поле last-write-wins для облачного слияния (см. saveCommentData) —
+    // искусственно двигать его в прошлое/будущее ради одной лишь
+    // перестановки в списке было бы небезопасно для синхронизации.
+    list.sort(function(a,b){
+      var oa = a.c.orderKey != null ? a.c.orderKey : a.t;
+      var ob = b.c.orderKey != null ? b.c.orderKey : b.t;
+      return ob - oa;
+    });
     return list;
   }
   function getCommentById(id){
@@ -11503,6 +12035,21 @@
     refreshHeaderQuote();
     // см. пояснение у setTaskText выше
     if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
+  }
+  // "В начало"/"В конец списка" — та же идея, что и у moveTaskToEdge выше,
+  // но своим отдельным полем c.orderKey (см. пояснение у getAllComments).
+  function moveCommentToEdge(id, edge){
+    var comment = getCommentById(id);
+    if(!comment) return;
+    var all = getAllComments();
+    function keyOf(c){ return c.c.orderKey != null ? c.c.orderKey : c.t; }
+    var edgeKey = all.reduce(function(acc, c){
+      if(c.id === id) return acc;
+      var k = keyOf(c);
+      return edge === "top" ? Math.max(acc, k) : Math.min(acc, k);
+    }, keyOf(comment));
+    comment.c.orderKey = edge === "top" ? edgeKey + 1 : edgeKey - 1;
+    saveCommentData(id, comment.c);
   }
   // безвозвратное удаление — не трогает уже сделанную копию в "Карте дней
   // года" (см. пояснение выше)
@@ -11660,15 +12207,37 @@
     }
   }
 
-  function renderCommentsTab(){
+  // anchorCommentId (необязательный) — та же идея, что и anchorTaskId у
+  // renderTaskTabList (см. пояснение там): при "В начало"/"В конец списка"
+  // (moveCommentToEdge) состав списка не меняется, только порядок — без
+  // якоря голая пересборка (container.innerHTML=) всегда бросала бы скролл
+  // к нулю, а с якорем та же самая строка остаётся на том же визуальном
+  // месте экрана, даже если в списке она уехала совсем в другое место.
+  function renderCommentsTab(anchorCommentId){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
+    var preservedScrollTop = container.scrollTop;
+    var anchorRowOld = anchorCommentId ? container.querySelector('.task-row[data-id="' + anchorCommentId + '"]') : null;
+    var anchorVisualOffset = null;
+    if(anchorRowOld) anchorVisualOffset = anchorRowOld.getBoundingClientRect().top - container.getBoundingClientRect().top;
     var comments = getAllComments();
     var rowsHtml = comments.map(function(c){ return buildCommentRowHtml(c); }).join("");
     container.innerHTML =
       '<div class="task-list" id="commentListWrap">' + rowsHtml + TASK_LIST_BOTTOM_SPACER_HTML + '</div>' +
       (comments.length === 0 ? '<div class="task-empty">Здесь пока нет комментариев.</div>' : '');
     comments.forEach(function(c){ renderCommentRowView(c.id); });
+    if(anchorVisualOffset != null){
+      container.scrollTop = 0; // база для измерения абсолютного положения строки в списке
+      var anchorRowNew = container.querySelector('.task-row[data-id="' + anchorCommentId + '"]');
+      if(anchorRowNew){
+        var anchorAbsTop = anchorRowNew.getBoundingClientRect().top - container.getBoundingClientRect().top;
+        container.scrollTop = anchorAbsTop - anchorVisualOffset;
+      } else {
+        container.scrollTop = preservedScrollTop;
+      }
+    } else {
+      container.scrollTop = preservedScrollTop;
+    }
 
     var fab = document.getElementById("taskAddFab");
     if(fab){
@@ -11710,6 +12279,8 @@
       '<span class="task-actions">' +
         '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn comment-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
+        '<button type="button" class="task-icon-btn comment-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
+        '<button type="button" class="task-icon-btn comment-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn comment-delete-btn" title="Удалить">' + CROSS_SMALL_ICON_SVG + '</button>' +
       '</span>';
     body.querySelector(".task-expand-btn").addEventListener("click", function(e){
@@ -11719,6 +12290,14 @@
       renderCommentRowView(id);
     });
     body.querySelector(".comment-edit-btn").addEventListener("click", function(){ renderCommentRowEdit(id); });
+    body.querySelector(".comment-top-btn").addEventListener("click", function(){
+      moveCommentToEdge(id, "top");
+      renderCommentsTab(id);
+    });
+    body.querySelector(".comment-bottom-btn").addEventListener("click", function(){
+      moveCommentToEdge(id, "bottom");
+      renderCommentsTab(id);
+    });
     body.querySelector(".comment-delete-btn").addEventListener("click", function(){
       deleteCommentPermanently(id);
       renderCommentsTab();
@@ -11735,6 +12314,8 @@
     body.innerHTML =
       '<div class="task-editable" id="commentEditable_' + id + '" contenteditable="true" data-comment-id="' + id + '"></div>' +
       '<span class="task-actions">' +
+        '<button type="button" class="task-icon-btn comment-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
+        '<button type="button" class="task-icon-btn comment-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn comment-delete-btn" title="Удалить">' + CROSS_SMALL_ICON_SVG + '</button>' +
       '</span>';
     var editable = document.getElementById("commentEditable_" + id);
@@ -11783,6 +12364,16 @@
       }, 500);
     });
 
+    body.querySelector(".comment-top-btn").addEventListener("click", function(){
+      flushPendingCommentEdits();
+      moveCommentToEdge(id, "top");
+      renderCommentsTab(id);
+    });
+    body.querySelector(".comment-bottom-btn").addEventListener("click", function(){
+      flushPendingCommentEdits();
+      moveCommentToEdge(id, "bottom");
+      renderCommentsTab(id);
+    });
     body.querySelector(".comment-delete-btn").addEventListener("click", function(){
       deleteCommentPermanently(id);
       renderCommentsTab();
@@ -12059,6 +12650,15 @@
     var anchorVisualOffset = null;
     if(anchorRowOld) anchorVisualOffset = anchorRowOld.getBoundingClientRect().top - container.getBoundingClientRect().top;
     var tasks = getTasksForTab(tabKey);
+    // Кнопка "глаз" (см. NEXT_HIDE_LINKED_KEY/taskHideLinkedBtn) — только
+    // для самой вкладки "Next". Фильтр — здесь, а не внутри
+    // getTasksForTab("next"), т.к. openTaskNextPicker тоже зовёт
+    // getTasksForTab("next") напрямую (для списка next-действий КОНКРЕТНОГО
+    // проекта, см. там) и должен по-прежнему видеть привязанные задачи
+    // независимо от этого переключателя.
+    if(tabKey === "next" && getNextHideLinkedTasks()){
+      tasks = tasks.filter(function(t){ return !t.c.nextForProjectId; });
+    }
     var rowsHtml = tasks.map(function(t){ return buildTaskRowHtml(t); }).join("");
     container.innerHTML =
       '<div class="task-list task-grid-list" id="taskListWrap">' + rowsHtml + TASK_LIST_BOTTOM_SPACER_HTML + '</div>' +
@@ -12272,6 +12872,8 @@
         '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
+        '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
+        '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
         '<button type="button" class="task-icon-btn task-worktasks-btn' + (task.c.inWork ? " active" : "") + '" data-id="' + task.id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
@@ -12344,6 +12946,29 @@
     }
     var moveBtn = body.querySelector(".task-move-btn");
     if(moveBtn) moveBtn.addEventListener("click", function(){ openTaskMovePicker(id, tabKey, onAfterAction); });
+    // "В начало"/"В конец списка" (ТЗ пользователя от 14.09, см.
+    // moveTaskToEdge) — передаём id самой задачи анкером перерисовки
+    // (тем же приёмом, что и клик по кружку приоритета на Red чуть ниже),
+    // чтобы после перестановки экран не прыгал ни в начало, ни в конец
+    // списка, а оставался на том же визуальном месте.
+    var topBtn = body.querySelector(".task-top-btn");
+    if(topBtn){
+      topBtn.addEventListener("click", function(){
+        flushPendingTaskEdits();
+        moveTaskToEdge(id, "top");
+        if(onAfterAction) onAfterAction();
+        else renderTaskTabList(tabKey || task.c.tab, id);
+      });
+    }
+    var bottomBtn = body.querySelector(".task-bottom-btn");
+    if(bottomBtn){
+      bottomBtn.addEventListener("click", function(){
+        flushPendingTaskEdits();
+        moveTaskToEdge(id, "bottom");
+        if(onAfterAction) onAfterAction();
+        else renderTaskTabList(tabKey || task.c.tab, id);
+      });
+    }
     // копирование текста задачи в буфер обмена (ТЗ пользователя от 11.09) —
     // тот же приём copyToClipboard/фолбэк через execCommand, что и у
     // srtCopyBtn при извлечении субтитров (см. 7278 выше), но без отдельной
@@ -12421,6 +13046,8 @@
       '<span class="task-actions">' +
         '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
+        '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
+        '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
         '<button type="button" class="task-icon-btn task-worktasks-btn' + (task.c.inWork ? " active" : "") + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
@@ -12838,6 +13465,8 @@
           '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
+          '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
+          '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-worktasks-btn' + (task.c.inWork ? " active" : "") + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
@@ -12868,6 +13497,26 @@
       }
       var moveBtn = body.querySelector(".task-move-btn");
       if(moveBtn) moveBtn.addEventListener("click", function(){ openRowMovePicker(id); });
+      // "В начало"/"В конец списка" — та же идея, что и у обычных вкладок
+      // задач (см. bindTaskRowActions), здесь render() и так сохраняет
+      // scrollTop контейнера (см. preservedScrollTop выше), поэтому экран
+      // не прыгает ни в начало, ни в конец списка.
+      var topBtn = body.querySelector(".task-top-btn");
+      if(topBtn){
+        topBtn.addEventListener("click", function(){
+          flushPendingTaskEdits();
+          moveTaskToEdge(id, "top");
+          render();
+        });
+      }
+      var bottomBtn = body.querySelector(".task-bottom-btn");
+      if(bottomBtn){
+        bottomBtn.addEventListener("click", function(){
+          flushPendingTaskEdits();
+          moveTaskToEdge(id, "bottom");
+          render();
+        });
+      }
       var copyBtn = body.querySelector(".task-copy-btn");
       if(copyBtn){
         copyBtn.addEventListener("click", function(){
@@ -12914,6 +13563,8 @@
         '<span class="task-actions">' +
           '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
+          '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
+          '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-worktasks-btn' + (task.c.inWork ? " active" : "") + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +

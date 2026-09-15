@@ -1,5 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
+<!-- index.html
+     Версия: 1.0 (15.09) -->
 <head>
 <meta charset="UTF-8">
 <script>
@@ -127,6 +129,22 @@ window.addEventListener("error", function(e){
   <div class="settings-modal-frame">
     <div class="settings-modal-box" id="settingsModalBox">
       <div class="settings-tab-content" id="settingsTabContent"></div>
+      <!-- "глаз" — скрыть/показать на вкладке "Next" задачи, уже
+           привязанные к проекту (c.nextForProjectId), см.
+           getNextHideLinkedTasks/taskHideLinkedBtn в initTaskGlobalToolbar
+           (my.js), ТЗ пользователя от 15.09. Левее "Ж" (.task-format-wrap
+           ниже). Класс span'а — намеренно переиспользованный
+           "task-highlight-wrap" (своего "task-hide-linked-wrap" в CSS нет
+           и заводить его тут смысла нет: правила показа по умолчанию/
+           .visible нужны один в один такие же, как у соседних кнопок
+           ряда). В отличие от остальных кнопок этого ряда видимость
+           переключается не общим условием showTaskFab, а отдельно —
+           только когда открыта именно вкладка "next" (см.
+           syncTaskFabRowForTab в my.js). Без попапа; .pressed и title
+           навешиваются в JS. -->
+      <span class="task-highlight-wrap" id="taskHideLinkedWrap">
+        <button type="button" class="mdeditor-fab-btn" id="taskHideLinkedBtn" title="Скрыть задачи, привязанные к проектам"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"></path><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"></path><path d="M6.61 6.61C4.07 8.36 2 12 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"></path><path d="M2 2l20 20"></path></svg></button>
+      </span>
       <!-- "Ж" (форматирование выделения) и "Аа" (размер шрифта, общий с
            "Моим блокнотом") — слева от общей "+", в одном ряду с ней;
            видимость включается тем же условием, что и у .task-add-fab
