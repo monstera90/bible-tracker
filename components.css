@@ -2071,6 +2071,13 @@
   .mdeditor-tab{
     font-family:"Palatino Linotype",Georgia,serif;
     display:block;
+    /* horizontal:8px — тот же отступ, что раньше давал padding окна
+       (.settings-modal-box, теперь обнулён на этой вкладке, см. modals.css).
+       Отступ поднят на уровень всей вкладки (а не только текста заметки),
+       чтобы кнопки импорта/экспорта заметок получили тот же отступ, что и
+       текст — единственное исключение по-прежнему .cm-md-image-wrap и
+       .book-reader-image-wrap, у которых свой отрицательный margin. */
+    padding:0 8px;
   }
   .mdeditor-hint{
     font-size:12.5px;
@@ -2506,12 +2513,7 @@
     color:var(--ink);
   }
   .mdeditor-editor-host .cm-scroller{ font-family:inherit; line-height:1.4; overflow:visible; }
-  /* horizontal:8px — тот же отступ, что раньше давал padding окна
-     (.settings-modal-box, теперь обнулён на этой вкладке, см. modals.css);
-     .cm-md-image-line/.cm-md-image-wrap ниже по-прежнему вылезают наружу
-     отрицательным margin'ом и теперь реально долетают до рамки окна, т.к.
-     #settingsTabContent больше не обрезает их раньше времени. */
-  .mdeditor-editor-host .cm-content{ padding:2px 8px 40px 8px; }
+  .mdeditor-editor-host .cm-content{ padding:2px 0 40px 0; }
   /* Вот где на самом деле сидел "лишний" отступ слева, который прошлая
      правка .cm-content не трогала: у CodeMirror 6 есть СВОЙ базовый стиль
      на .cm-line (внутренний, из пакета @codemirror/view, добавляется в
@@ -2826,18 +2828,20 @@
   .book-reader-tab{
     display:block;
     font-family:"Palatino Linotype",Georgia,serif;
+    /* horizontal:8px — тот же отступ, что раньше давал padding окна
+       (.settings-modal-box, теперь обнулён на этой вкладке, см. modals.css).
+       На уровне всей вкладки, а не только .book-reader — чтобы кнопка
+       "Загрузить fb2, epub или zip книг" получила тот же отступ, что и
+       текст главы; .book-reader-image-wrap по-прежнему выходит за него
+       отрицательным margin'ом. */
+    padding:0 8px;
   }
   .book-reader{
     font-family:"Palatino Linotype",Georgia,serif;
     font-size:var(--mdeditor-font-size, 15.5px);
     line-height:1.4;
     color:var(--ink);
-    /* horizontal:8px — тот же отступ, что раньше давал padding окна
-       (.settings-modal-box, теперь обнулён на этой вкладке, см. modals.css);
-       .book-reader-image-wrap ниже по-прежнему вылезает наружу отрицательным
-       margin'ом и теперь реально долетает до рамки окна, т.к. #settingsTabContent
-       больше не обрезает её раньше времени. */
-    padding:2px 8px 40px 8px;
+    padding:2px 0 40px 0;
   }
   .book-reader-chapter-title{
     margin:24px 0 10px 0;

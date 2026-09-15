@@ -265,6 +265,16 @@
   .settings-modal-box:has(> #settingsTabContent > .mdeditor-tab) .mdeditor-fab-row{
     right:16px;
   }
+  /* .settings-tabs-gear (нижний ряд "лежачих" вкладок) — тоже абсолютно
+     спозиционирован от этого же окна (right:1px от padding-box). По той же
+     причине, что и .mdeditor-fab-row выше, он съехал на 8px вправо —
+     возвращаем на место той же добавкой. Видим сразу на обеих вкладках
+     (список селекторов), т.к. ряд общий для всего окна, а не часть
+     контента конкретной вкладки. */
+  .settings-modal-box:has(> #settingsTabContent > .mdeditor-tab) .settings-tabs-gear,
+  .settings-modal-box:has(> #settingsTabContent > .book-reader-tab) .settings-tabs-gear{
+    right:9px;
+  }
   /* см. комментарий у @media (max-width:600px) выше: на телефоне у окна
      больше нет ни верхнего, ни левого отступа (оно стоит вплотную к
      верхнему и левому краю экрана) — левый верхний угол из правила выше
