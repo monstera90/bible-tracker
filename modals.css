@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 1.0 (15.09)
    Модальные окна: история версий, настройки (шестерёнка), синхронизация
    (QR/скан), отключение анимаций при массовых операциях
    =========================================================================== */
@@ -271,6 +272,18 @@
     -ms-overflow-style:none;
   }
   #settingsTabContent::-webkit-scrollbar{ display:none; width:0; height:0; }
+  /* ---------- фикс картинок книги "не в край" (15.09) ----------
+     .book-reader-image-wrap (components.css) вылезает отрицательным
+     margin наружу, чтобы добраться до настоящей рамки окна
+     (.settings-modal-box, там overflow:hidden — правильная точка
+     обрезки). Но #settingsTabContent сам НЕ имеет горизонтального
+     padding и стоит вплотную к внутреннему краю padding'а окна — его
+     собственный overflow-x:hidden обрезает картинку раньше, чем она
+     доходит до рамки, и остаётся зазор ровно в padding окна. Снимаем
+     obrезку только на вкладке ридера книги (:has, поддерживается
+     везде, где есть остальной проект) — на всех прочих вкладках
+     overflow-x:hidden остаётся как было, текста нигде не касается. */
+  #settingsTabContent:has(> .book-reader-tab){ overflow-x:visible; }
   /* Контент некоторых экранов (импорт задач, подтверждения сброса,
      версии, а также вкладки-инструменты epub/картинка/S-89/субтитры,
      отметка настроения) прижат к нижнему краю области настроек — так
@@ -1014,6 +1027,19 @@
     color:var(--ink-soft);
     font-style:italic;
   }
+  /* Подпись "Создал/Выполнил" у общих задач (TASK_SHARED_TASKS.md, п. 2.4,
+     Шаг 4, 15.09) — своя строка НАД текстом задачи (.task-text-view), не
+     трогает измерение последней строки текста в fitTaskActions (my.js) —
+     та опирается только на textEl, лишние сиблинги до него ни на что не
+     влияют. Рисуется, только когда у задачи есть task.c.createdBy — это
+     поле есть ТОЛЬКО у общих задач (см. createGroupTask/
+     migrateAdminGroupTasksIfNeeded в my.js), личные задачи его никогда не
+     получают, поэтому отдельная проверка на вкладку/tabKey не нужна. */
+  .task-joint-signature{
+    font-size:12px;
+    color:var(--ink-soft);
+    margin-bottom:2px;
+  }
   .task-text-red{ color:#c0392b; }
   .task-icon-btn{
     display:inline-flex;
@@ -1227,6 +1253,64 @@
     z-index:5;
   }
   .task-hide-linked-wrap.visible{ display:flex; }
+  /* Кнопка-меню "настройки вкладки" (TASK_SHARED_TASKS.md, Шаг 4, 15.09) —
+     самая левая кнопка общего ряда, но видна ТОЛЬКО на вкладке "Общие
+     задачи" (jointtasks), не на любой вкладке задач — тем же приёмом, что
+     и .task-hide-linked-wrap выше (своя видимость по конкретной вкладке,
+     см. syncTaskFabRowForTab в my.js). Следующий шаг после "глаза"
+     (248+40=288), тот же ряд с шагом 40px, что описан в комментарии у
+     .task-fontsize-wrap выше. */
+  .task-joint-menu-wrap{
+    display:none;
+    position:absolute;
+    right:288px;
+    bottom:8px;
+    z-index:5;
+  }
+  .task-joint-menu-wrap.visible{ display:flex; }
+  /* Попап меню — НЕ .mdeditor-fontsize-popup (тот верстает столбик
+     квадратных 32×32 кнопок-иконок, не подходит для текстовых пунктов
+     переменной длины вроде "Отвязать пользователя"). Раскрывается вверх
+     от кнопки (bottom:calc(100% + 8px), тот же принцип, что и у
+     .mdeditor-fontsize-popup), прижат к правому краю кнопки, чтобы не
+     вылезать за край окна настроек. Содержимое (список пунктов) целиком
+     собирается в JS (renderTaskJointMenu, my.js) — состав зависит от
+     состояния группы (до привязки/админ/участник, см. п. 2.1 ТЗ),
+     поэтому в разметке (index.html) попап изначально пустой. */
+  .task-joint-menu-popup{
+    display:none;
+    position:absolute;
+    right:0;
+    bottom:calc(100% + 8px);
+    flex-direction:column;
+    gap:4px;
+    min-width:220px;
+    padding:6px;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    box-shadow:0 2px 6px rgba(0,0,0,.28);
+    z-index:6;
+  }
+  .task-joint-menu-popup.open{ display:flex; }
+  .task-joint-menu-popup button{
+    display:block;
+    width:100%;
+    text-align:left;
+    padding:8px 10px;
+    background:transparent;
+    border:none;
+    border-radius:6px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:14px;
+    color:var(--ink);
+    cursor:pointer;
+    white-space:nowrap;
+    -webkit-tap-highlight-color:transparent;
+  }
+  @media (hover:hover) and (pointer:fine){
+    .task-joint-menu-popup button:hover{ background:#f4ead0; }
+  }
   /* кнопка сортировки Red по отметке (.task-red-sort-wrap/taskRedSortBtn
      в index.html, RED_SORT_BY_FLAG_KEY/getRedSortByFlag/setRedSortByFlag
      в my.js, ТЗ пользователя от 15.09). Делит слот right:248 с "глазом"
