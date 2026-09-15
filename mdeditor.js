@@ -362,6 +362,14 @@ window.initMdEditorModule = function(deps){
       '<path d="M6.5 17.5L16 8l3 3-9.5 9.5H6.5v-3z"></path>' +
       '<path d="M14 6l4 4"></path>' +
     '</svg>';
+  // Кнопка "Поделиться" в полноэкранном просмотре картинки (openImageViewer
+  // ниже) — стандартная андроид-пиктограмма "коробка со стрелкой вверх".
+  var SHARE_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M12 15V4"></path>' +
+      '<path d="M7.5 8.5L12 4l4.5 4.5"></path>' +
+      '<path d="M5 12v6.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V12"></path>' +
+    '</svg>';
 
   // ---------------------------------------------------------------------
   // IndexedDB — хранение directory handle между сессиями. FileSystem*Handle
@@ -1007,6 +1015,30 @@ window.initMdEditorModule = function(deps){
     imgViewerState = null;
     if(st.overlay.parentNode) st.overlay.parentNode.removeChild(st.overlay);
   }
+  // Кнопка "Поделиться" в полноэкранном просмотре (ТЗ пользователя от
+  // 15.09) — работает и для картинок заметок, и для картинок книжного
+  // ридера, и для картинок задач: все они попадают сюда через один и тот
+  // же openImageViewer(url, name), где url — blob:-ссылка на файл из OPFS
+  // (см. loadImageUrl/imageUrlCache выше). fetch по blob:-ссылке отдаёт
+  // обратно тот же Blob без повторного чтения файла с диска — так из
+  // ссылки восстанавливается File для navigator.share. Кнопка добавляется
+  // в разметку только если браузер вообще поддерживает Web Share API —
+  // на неподдерживающих браузерах (десктоп, старые Android-браузеры) её
+  // просто нет, вместо неактивной кнопки с алертом.
+  function shareViewedImage(url, name){
+    var fileName = name || "image.jpg";
+    fetch(url).then(function(r){ return r.blob(); }).then(function(blob){
+      var file = new File([blob], fileName, { type: blob.type || "image/jpeg" });
+      if(navigator.canShare && !navigator.canShare({ files: [file] })){
+        return;
+      }
+      return navigator.share({ files: [file], title: fileName });
+    }).catch(function(err){
+      // AbortError — пользователь сам закрыл системное меню "Поделиться",
+      // это не ошибка.
+      if(err && err.name !== "AbortError") console.error("Не удалось поделиться картинкой:", err);
+    });
+  }
   function openImageViewer(url, name){
     if(imgViewerState) closeImageViewer();
     var overlay = document.createElement("div");
@@ -1015,6 +1047,21 @@ window.initMdEditorModule = function(deps){
     img.className = "mdeditor-imgview-img";
     img.alt = name || "";
     overlay.appendChild(img);
+    if(navigator.share){
+      var shareBtn = document.createElement("button");
+      shareBtn.type = "button";
+      shareBtn.className = "mdeditor-imgview-share-btn";
+      shareBtn.title = "Поделиться";
+      shareBtn.innerHTML = SHARE_ICON_SVG;
+      shareBtn.style.cssText = "position:fixed;top:16px;right:16px;width:44px;height:44px;" +
+        "border-radius:50%;background:rgba(0,0,0,0.55);border:none;color:#fff;" +
+        "display:flex;align-items:center;justify-content:center;z-index:10001;padding:0;";
+      shareBtn.addEventListener("click", function(ev){
+        ev.stopPropagation();
+        shareViewedImage(url, name);
+      });
+      overlay.appendChild(shareBtn);
+    }
     document.body.appendChild(overlay);
 
     var scale = 1, tx = 0, ty = 0, fitW = 0, fitH = 0;
@@ -3680,6 +3727,16 @@ window.initMdEditorModule = function(deps){
     okBtn.type = "button"; okBtn.className = "mdeditor-title-confirm"; okBtn.title = "Сохранить имя"; okBtn.innerHTML = "&#10003;";
     var cancelBtn = document.createElement("button");
     cancelBtn.type = "button"; cancelBtn.className = "mdeditor-title-cancel"; cancelBtn.title = "Отмена"; cancelBtn.innerHTML = "&times;";
+
+    // На время редактирования заголовка крестик удаления и пиктограмма
+    // закладки временно скрываются — иначе появляющаяся галочка
+    // сохранения оказывается под кнопкой удаления (ТЗ пользователя
+    // от 15.09). Возврат к обычному виду — через render() внутри finish()
+    // ниже, который перерисовывает всю шапку заново.
+    var delBtn = document.getElementById("mdEditorDeleteBtn");
+    var bmBtn = document.getElementById("mdEditorBookmarkBtn");
+    if(delBtn) delBtn.style.display = "none";
+    if(bmBtn) bmBtn.style.display = "none";
 
     row.replaceChild(input, titleEl);
     row.appendChild(okBtn);

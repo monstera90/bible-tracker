@@ -1140,20 +1140,23 @@
     z-index:5;
     -webkit-tap-highlight-color:transparent;
   }
-  /* Ряд из шести кнопок на обычных вкладках задач (порядок исправлен
+  /* Ряд из семи кнопок на обычных вкладках задач (порядок исправлен
      13.09, под "Мой блокнот" — см. пояснение у "Домика" ниже), считая от
      правого нижнего угла ВЛЕВО, шаг 40px: "Домик" (пустышка, right:8) →
      "+" (.task-add-fab.task-add-fab-shifted, 48) → скрепка (.task-attach-
      wrap, 88) → "Аа" (.task-fontsize-wrap, 128) → текстовыделитель
-     (.task-highlight-wrap, 168) → "Ж" (.task-format-wrap, 208). Тот же
-     порядок, что и в "Моём блокноте" (mdeditor.js, .mdeditor-fab-row):
-     там это просто flex-row и "Домик" — последний в DOM, здесь у каждой
-     кнопки своя абсолютная позиция, поэтому порядок задаётся значениями
-     right. "Аа"/"Ж"/текстовыделитель — те же кнопки/попапы (либо тот же
-     принцип "выделил-нажал"), что и в "Моём блокноте" (.mdeditor-fab-btn/
-     -fontsize-popup в components.css, переиспользуются как есть), просто
-     в собственных обёртках. Видимость всех — тем же условием, что и у
-     .task-add-fab (см. syncTaskFabRowForTab в my.js). */
+     (.task-highlight-wrap, 168) → "Ж" (.task-format-wrap, 208) → "глаз"
+     (.task-hide-linked-wrap, 248, видна только на вкладке "Next", см.
+     ниже). Тот же порядок, что и в "Моём блокноте" (mdeditor.js,
+     .mdeditor-fab-row): там это просто flex-row и "Домик" — последний в
+     DOM, здесь у каждой кнопки своя абсолютная позиция, поэтому порядок
+     задаётся значениями right. "Аа"/"Ж"/текстовыделитель — те же кнопки/
+     попапы (либо тот же принцип "выделил-нажал"), что и в "Моём
+     блокноте" (.mdeditor-fab-btn/-fontsize-popup в components.css,
+     переиспользуются как есть), просто в собственных обёртках.
+     Видимость всех — тем же условием, что и у .task-add-fab (см.
+     syncTaskFabRowForTab в my.js), кроме "глаза" — у него отдельное
+     условие (только вкладка "Next"). */
   .task-fontsize-wrap{
     display:none;
     position:absolute;
@@ -1184,6 +1187,24 @@
     z-index:5;
   }
   .task-highlight-wrap.visible{ display:flex; }
+  /* "глаз" — скрыть/показать на вкладке "Next" задачи, уже привязанные к
+     проекту (см. taskHideLinkedWrap/taskHideLinkedBtn в index.html,
+     initTaskGlobalToolbar/NEXT_HIDE_LINKED_KEY в my.js, ТЗ пользователя
+     от 15.09). Раньше переиспользовал класс .task-highlight-wrap
+     (только ради общих правил показа/.visible) — из-за этого получал ТОТ
+     ЖЕ right:168px, что и текстовыделитель, и оказывался ровно под ним,
+     физически невидим и некликабелен. Теперь отдельный класс со своим
+     right — следующий шаг в общем ряду (248 = 208 + 40, левее "Ж").
+     .pressed и title навешиваются в JS (не связано с .visible — .visible
+     только показывает/прячет саму кнопку по вкладке). */
+  .task-hide-linked-wrap{
+    display:none;
+    position:absolute;
+    right:248px;
+    bottom:8px;
+    z-index:5;
+  }
+  .task-hide-linked-wrap.visible{ display:flex; }
   /* скрепка — между "Аа" и "+" (см. index.html и ТЗ пользователя, та же
      логика попапа не нужна: сразу открывает системный диалог выбора
      файла, см. initTaskGlobalToolbar в my.js) */

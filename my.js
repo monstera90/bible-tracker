@@ -4209,11 +4209,13 @@
     // никуда не удаляется — просто не выводится в списке; повторный клик
     // возвращает её обратно. Разметка — #taskHideLinkedWrap/
     // #taskHideLinkedBtn в index.html, перед #taskFormatWrap ("Ж"), т.е.
-    // слева от неё — по месту в ТЗ пользователя от 15.09 (span намеренно
-    // с классом "task-highlight-wrap", см. комментарий в index.html). В
-    // отличие от остальных кнопок ряда видима не на любой вкладке задач,
-    // а только на "Next" — см. отдельный toggle в syncTaskFabRowForTab (а
-    // не в showTaskFab там же).
+    // слева от неё — по месту в ТЗ пользователя от 15.09 (span со своим
+    // классом "task-hide-linked-wrap" в modals.css, right:248 — см.
+    // комментарий в index.html/modals.css про баг с прежним
+    // переиспользованным классом "task-highlight-wrap"). В отличие от
+    // остальных кнопок ряда видима не на любой вкладке задач, а только на
+    // "Next" — см. отдельный toggle в syncTaskFabRowForTab (а не в
+    // showTaskFab там же).
     var hideLinkedBtn = document.getElementById("taskHideLinkedBtn");
     stopMousedown(hideLinkedBtn);
     function updateHideLinkedBtnState(){
@@ -12946,18 +12948,31 @@
     }
     var moveBtn = body.querySelector(".task-move-btn");
     if(moveBtn) moveBtn.addEventListener("click", function(){ openTaskMovePicker(id, tabKey, onAfterAction); });
-    // "В начало"/"В конец списка" (ТЗ пользователя от 14.09, см.
-    // moveTaskToEdge) — передаём id самой задачи анкером перерисовки
-    // (тем же приёмом, что и клик по кружку приоритета на Red чуть ниже),
-    // чтобы после перестановки экран не прыгал ни в начало, ни в конец
-    // списка, а оставался на том же визуальном месте.
+    // "В начало"/"В конец списка" (moveTaskToEdge). ИСПРАВЛЕНО (15.09): раньше
+    // сюда передавался id задачи анкером перерисовки — та же техника, что и у
+    // кружка приоритета на Red чуть ниже (renderTaskTabList вычисляет, куда
+    // должен встать scrollTop, чтобы САМА перемещённая строка осталась на том
+    // же визуальном месте на экране). Для Red это работает, потому что кружок
+    // приоритета двигает задачу в пределах списка. А moveTaskToEdge — это
+    // ВСЕГДА перестановка в самый край (createdAt = максимум+1 либо
+    // минимум-1), то есть новая абсолютная позиция строки — ВСЕГДА ровно 0
+    // (верх) или ровно конец списка. Если до нажатия строка была видна не в
+    // самом верху экрана, требуемый scrollTop для "верха" получался
+    // отрицательным — браузер зажимает такой scrollTop в 0, и это выглядит
+    // именно как "перебросило в начало списка", хотя на самом деле никакого
+    // фонового пересинка тут ни при чём, дело в самой формуле анкера.
+    // Убрали передачу анкера — теперь используется тот же простой и уже
+    // проверенный приём, что у соседней кнопки "в архив" чуть выше и у экрана
+    // "Все задачи проекта" (там этой проблемы никогда не было): просто
+    // сохраняем/восстанавливаем текущий container.scrollTop как есть, не
+    // пытаясь угадать новую позицию переехавшей строки.
     var topBtn = body.querySelector(".task-top-btn");
     if(topBtn){
       topBtn.addEventListener("click", function(){
         flushPendingTaskEdits();
         moveTaskToEdge(id, "top");
         if(onAfterAction) onAfterAction();
-        else renderTaskTabList(tabKey || task.c.tab, id);
+        else renderTaskTabList(tabKey || task.c.tab);
       });
     }
     var bottomBtn = body.querySelector(".task-bottom-btn");
@@ -12966,7 +12981,7 @@
         flushPendingTaskEdits();
         moveTaskToEdge(id, "bottom");
         if(onAfterAction) onAfterAction();
-        else renderTaskTabList(tabKey || task.c.tab, id);
+        else renderTaskTabList(tabKey || task.c.tab);
       });
     }
     // копирование текста задачи в буфер обмена (ТЗ пользователя от 11.09) —
