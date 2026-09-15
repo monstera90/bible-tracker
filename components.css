@@ -2506,7 +2506,12 @@
     color:var(--ink);
   }
   .mdeditor-editor-host .cm-scroller{ font-family:inherit; line-height:1.4; overflow:visible; }
-  .mdeditor-editor-host .cm-content{ padding:2px 0 40px 0; }
+  /* horizontal:8px — тот же отступ, что раньше давал padding окна
+     (.settings-modal-box, теперь обнулён на этой вкладке, см. modals.css);
+     .cm-md-image-line/.cm-md-image-wrap ниже по-прежнему вылезают наружу
+     отрицательным margin'ом и теперь реально долетают до рамки окна, т.к.
+     #settingsTabContent больше не обрезает их раньше времени. */
+  .mdeditor-editor-host .cm-content{ padding:2px 8px 40px 8px; }
   /* Вот где на самом деле сидел "лишний" отступ слева, который прошлая
      правка .cm-content не трогала: у CodeMirror 6 есть СВОЙ базовый стиль
      на .cm-line (внутренний, из пакета @codemirror/view, добавляется в
@@ -2827,7 +2832,12 @@
     font-size:var(--mdeditor-font-size, 15.5px);
     line-height:1.4;
     color:var(--ink);
-    padding:2px 0 40px 0;
+    /* horizontal:8px — тот же отступ, что раньше давал padding окна
+       (.settings-modal-box, теперь обнулён на этой вкладке, см. modals.css);
+       .book-reader-image-wrap ниже по-прежнему вылезает наружу отрицательным
+       margin'ом и теперь реально долетает до рамки окна, т.к. #settingsTabContent
+       больше не обрезает её раньше времени. */
+    padding:2px 8px 40px 8px;
   }
   .book-reader-chapter-title{
     margin:24px 0 10px 0;
