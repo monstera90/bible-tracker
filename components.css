@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 1.0 (15.09)
    Основные UI-компоненты: индикатор синхронизации, полосы прогресса
    (общий прогресс, счётчики часов), личные цели, список книг и глав
    =========================================================================== */
@@ -2809,21 +2810,42 @@
     font-family:"Palatino Linotype",Georgia,serif;
   }
   .book-reader-chapter:first-child .book-reader-chapter-title{ margin-top:0; }
-  .book-reader-p{ margin:0 0 10px 0; text-indent:1ch; }
-  /* Закладка на полях абзаца (READER_PLAN.md, Этап D, шаг 15, 11.09) —
-     .book-reader не имеет горизонтальных отступов (padding:2px 0 40px 0
-     выше), и #settingsTabContent тоже не гарантирует запас слева, поэтому
-     НЕ используем отрицательный margin/абсолютное позиционирование за
-     пределы .book-reader-p (риск горизонтального скролла на узких
-     экранах) — вместо этого просто border-left + небольшой padding-left
-     ВНУТРИ самого абзаца. Текст абзаца из-за этого сдвигается на пару
-     пикселей вправо относительно обычных абзацев — сознательный компромисс
-     ради надёжной вёрстки на мобильном экране. text-indent у .book-reader-p
-     выше не мешает: он про отступ первой строки текста, здесь же сдвигается
-     сам бокс абзаца целиком через padding.*/
-  .book-reader-p-bookmarked{
-    padding-left:10px;
-    border-left:3px solid var(--gold, #b08d3f);
+  .book-reader-p{ margin:0 0 10px 0; text-indent:1ch; position:relative; }
+  /* ---------- Закладка на полях абзаца (READER_PLAN.md, Этап D, шаг 15,
+     11.09; переработано 15.09 — пиктограмма справа вместо левой полоски
+     border-left, ТЗ пользователя: полоска слева была неудобной). position:
+     relative у .book-reader-p выше — точка отсчёта для пиктограммы
+     .book-reader-bookmark-mark ниже, которая садится в правый верхний угол
+     абзаца, поверх первой строки текста — .book-reader не имеет
+     горизонтальных отступов (padding:2px 0 40px 0 выше), запаса под
+     пиктограмму в поле страницы специально не заводим (поля очень узкие),
+     редкое наложение на конец первой строки не страшно (сознательно, по
+     ТЗ). Клик по пиктограмме снимает закладку целиком — my.js,
+     bindBookReaderBookmarkMarkClick/setBookReaderBookmarkMarkInDom. Тот же
+     круглый базовый вид, что у .book-reader-pin-btn/
+     .book-reader-underline-trash-btn ниже, только меньше и в акцентном
+     var(--gold) — том же цвете, что раньше был у border-left полоски.
+     ---------- */
+  .book-reader-bookmark-mark{
+    position:absolute;
+    top:-2px; right:-2px;
+    width:20px; height:20px;
+    padding:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:50%;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    color:var(--gold, #b08d3f);
+    cursor:pointer;
+    box-shadow:0 1px 4px rgba(0,0,0,.22);
+    -webkit-tap-highlight-color:transparent;
+    z-index:1;
+  }
+  .book-reader-bookmark-mark svg{ width:12px; height:12px; }
+  @media (hover:hover) and (pointer:fine){
+    .book-reader-bookmark-mark:hover{ background:var(--gold, #b08d3f); color:#fffef8; }
   }
   .book-reader .cm-md-image{ margin:10px 0; }
   /* ---------- Подчёркивание книги (READER_PLAN.md, Этап D, шаг 13, 11.09).

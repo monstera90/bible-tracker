@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 3.0 (15.09)
+   Версия: 3.2 (15.09)
    =========================================================================== */
 
 (function(){
@@ -1464,6 +1464,15 @@
   // имеет доступа к внутренним константам модуля). Пока без функции — кнопка
   // "Скачать" вкладки "Извлечение субтитров" сейчас заглушка (см. ниже).
   var DOWNLOAD_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"></path><path d="M7.5 10.5L12 15l4.5-4.5"></path><path d="M4.5 18.5h15"></path></svg>';
+  // "глаз" открытый/перечёркнутый — два состояния кнопки #taskHideLinkedBtn
+  // (см. updateHideLinkedBtnState в initTaskGlobalToolbar, ТЗ пользователя
+  // от 15.09 #2): задачи ПОКАЗАНЫ -> открытый глаз (EYE_ICON_SVG), задачи
+  // СКРЫТЫ -> перечёркнутый (EYE_OFF_ICON_SVG, тот же путь, что раньше был
+  // единственной статичной иконкой кнопки в index.html). Состояние теперь
+  // видно по самой иконке, а не по закраске фона (.pressed сюда больше не
+  // навешивается).
+  var EYE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+  var EYE_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"></path><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"></path><path d="M6.61 6.61C4.07 8.36 2 12 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"></path><path d="M2 2l20 20"></path></svg>';
   var TASK_ARCHIVE_MAX_SHOWN = 50;
 
   function getShowAllTasksEnabled(){
@@ -1571,19 +1580,16 @@
   // страницы/установленного приложения строка сверху была коричневой
   // независимо от того, какая тема реально выбрана.
   function syncThemeColorMeta(){
-    // getComputedStyle() форсирует немедленный синхронный пересчёт стилей
-    // ("forced reflow") — если вызвать его сразу же после смены атрибута
-    // data-theme, браузер не может отложить пересчёт до следующего кадра,
-    // как он обычно делает, и это добавляет небольшую синхронную паузу
-    // прямо в момент переключения темы. Откладываем чтение на следующий
-    // кадр через requestAnimationFrame — визуально разницы нет (следующий
-    // кадр всё равно ещё не отрисован), а поток не блокируется прямо сейчас.
-    requestAnimationFrame(function(){
-      var wood = getComputedStyle(document.documentElement).getPropertyValue("--wood").trim();
-      if(!wood) return;
-      var meta = document.querySelector('meta[name="theme-color"]');
-      if(meta) meta.setAttribute("content", wood);
-    });
+    // Раньше чтение --wood откладывалось на requestAnimationFrame (чтобы не
+    // форсировать синхронный reflow сразу после смены data-theme) — но это
+    // давало окно, где обновление могло не долетать до статус-бара (ТЗ
+    // пользователя от 15.09: шапка перекрашивалась, а статус-бар оставался
+    // цветом темы по умолчанию). Читаем сразу, синхронно: reflow здесь
+    // стоит мизерную паузу раз в смену темы, а не каждый кадр.
+    var wood = getComputedStyle(document.documentElement).getPropertyValue("--wood").trim();
+    if(!wood) return;
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if(meta) meta.setAttribute("content", wood);
   }
 
   function selectTheme(themeId){
@@ -4221,7 +4227,12 @@
     function updateHideLinkedBtnState(){
       if(!hideLinkedBtn) return;
       var active = getNextHideLinkedTasks();
-      hideLinkedBtn.classList.toggle("pressed", active);
+      // ИЗМЕНЕНО (15.09 #2): раньше состояние показывала закраска фона
+      // (.pressed, как у "Аа"/"Ж"/текстовыделителя) — по ТЗ пользователя
+      // фон закрашивать не нужно, вместо этого сама иконка переключается
+      // между открытым и перечёркнутым глазом (EYE_ICON_SVG/
+      // EYE_OFF_ICON_SVG выше).
+      hideLinkedBtn.innerHTML = active ? EYE_OFF_ICON_SVG : EYE_ICON_SVG;
       hideLinkedBtn.title = active
         ? "Показать задачи, привязанные к проектам"
         : "Скрыть задачи, привязанные к проектам";
@@ -6880,7 +6891,7 @@
     saveBookState(hash, data);
     return rec.id;
   }
-  // Основная закладка книги (пиктограмма-корона в общем списке "Закладки",
+  // Основная закладка книги (пиктограмма раскрытой книги в общем списке "Закладки",
   // см. saveBookReaderBookmark ниже) — максимум одна на книгу; при выборе
   // "обновить основную" старая удаляется, прежде чем добавить новую.
   function getMainBookBookmark(hash){
@@ -7361,6 +7372,29 @@
     if(isNaN(ch) || isNaN(blk)) return null;
     return {ch: ch, blk: blk};
   }
+  // Абзац/картинка, реально отображающиеся ПЕРВЫМИ на экране в момент
+  // вызова (ТЗ пользователя от 15.09) — в отличие от currentBookReaderPosition
+  // выше (которая мерит через offsetTop/scrollTop и годится для запоминания
+  // места чтения между сессиями), здесь сравниваются экранные координаты
+  // (getBoundingClientRect) прямо в момент нажатия кнопки закладки: ищем
+  // первый блок, чей нижний край ещё не ушёл выше верхней границы
+  // контейнера. Раньше закладка сохранялась через currentBookReaderPosition
+  // и могла осесть на абзаце, который к моменту нажатия уже прокрутился за
+  // верхний край экрана — эта функция всегда даёт первый видимый.
+  function firstVisibleBookBlockPosition(container){
+    var blocks = container.querySelectorAll(".book-reader-p, .book-reader-image-wrap");
+    if(!blocks.length) return null;
+    var top = container.getBoundingClientRect().top;
+    var best = blocks[0];
+    for(var i = 0; i < blocks.length; i++){
+      best = blocks[i];
+      if(blocks[i].getBoundingClientRect().bottom > top) break;
+    }
+    var ch = parseInt(best.getAttribute("data-ch"), 10);
+    var blk = parseInt(best.getAttribute("data-blk"), 10);
+    if(isNaN(ch) || isNaN(blk)) return null;
+    return {ch: ch, blk: blk};
+  }
   // Обратная операция — прокручивает контейнер так, чтобы блок {ch, blk}
   // оказался наверху. Возвращает false, если блок не найден (например,
   // сохранённая позиция битая или файл книги успел измениться между
@@ -7832,16 +7866,25 @@
           // индекс блока внутри ch.blocks — стабилен независимо от типа
           // соседних блоков, т.к. это просто позиция в исходном массиве).
           var ranges = getBookUnderlineRangesForBlock(bookReaderState.hash, idx, bi);
-          // Закладка (шаг 15; переработано 12.09) — класс
-          // .book-reader-p-bookmarked (components.css) даёт левую
-          // полоску-акцент на абзац, на котором стоит закладка; закладки
-          // теперь добавляются только кнопкой в нижнем ряду (см.
-          // saveBookReaderBookmark выше), сюда просто читаются заново при
-          // каждом рендере текста.
-          var isBookmarked = !!getBookBookmarkForBlock(bookReaderState.hash, idx, bi);
-          html += '<p class="book-reader-p' + (isBookmarked ? ' book-reader-p-bookmarked' : '') +
+          // Закладка (шаг 15; переработано 12.09, пиктограмма справа —
+          // 15.09) — раньше абзац с закладкой получал класс
+          // .book-reader-p-bookmarked (левая полоска-акцент); теперь вместо
+          // неё поверх первой строки абзаца, у правого края, рисуется
+          // пиктограмма закладки (.book-reader-bookmark-mark, тот же контур
+          // READER_BOOKMARK_ICON_SVG, что и у кнопки "Сохранить закладку" в
+          // нижнем ряду) — клик по ней снимает закладку целиком (см.
+          // bindBookReaderBookmarkMarkClick ниже). Поля страницы узкие,
+          // поэтому пиктограмма условно "поверх" текста, а не строго на
+          // поле — специально по ТЗ пользователя, редкое наложение на конец
+          // первой строки не страшно. Закладки добавляются кнопкой в нижнем
+          // ряду (см. saveBookReaderBookmark выше), сюда просто читаются
+          // заново при каждом рендере текста.
+          var bm = getBookBookmarkForBlock(bookReaderState.hash, idx, bi);
+          html += '<p class="book-reader-p' +
             '" id="bookP_' + idx + '_' + bi + '" data-ch="' + idx + '" data-blk="' + bi + '">' +
-            renderRunsHtml(block.runs, ranges) + '</p>';
+            renderRunsHtml(block.runs, ranges) +
+            (bm ? '<button type="button" class="book-reader-bookmark-mark" data-bookmark-id="' + escapeHtml(bm.id) + '" title="Убрать закладку">' + READER_BOOKMARK_ICON_SVG + '</button>' : '') +
+            '</p>';
         }
       });
       html += '</div>';
@@ -7874,6 +7917,7 @@
     bindBookReaderFabRow();
     bindBookReaderImages();
     bindBookReaderUnderlineClicks();
+    bindBookReaderBookmarkMarks();
   }
 
   // Шаг 14 (READER_PLAN.md, Этап D, 11.09): тап по самой картинке открывает
@@ -8186,8 +8230,8 @@
 
   // Спрашивается только если у книги уже есть основная закладка (см.
   // getMainBookBookmark выше) — "Да" удаляет старую основную и новая
-  // закладка займёт её место (пиктограмма-корона), "Нет" добавляет новую
-  // как обычную (без короны), рядом со старой основной.
+  // закладка займёт её место (пиктограмма раскрытой книги), "Нет" добавляет
+  // новую как обычную (пиктограмма закрытой книги), рядом со старой основной.
   function openBookBookmarkUpdateMainConfirm(onYes, onNo){
     if(!settingsModalBox) return;
     var overlay = document.createElement("div");
@@ -8211,14 +8255,15 @@
 
   // Точка входа — кнопка "закладка" в нижнем ряду ридера (см.
   // bookReaderFabRowHtml/bindBookReaderFabRow ниже). Позиция — ТЕКУЩЕЕ
-  // место чтения (currentBookReaderPosition, тот же приём, что и
-  // запоминание позиции при прокрутке, см. выше), а не абзац под пальцем —
-  // в отличие от прежних закладок на полях, это не привязано к тому, где
-  // именно на экране находится курсор/палец.
+  // место, реально видимое первым на экране в момент нажатия кнопки
+  // (firstVisibleBookBlockPosition, см. выше — экранные координаты, а не
+  // накопленный scrollTop), а не абзац под пальцем — в отличие от прежних
+  // закладок на полях, это не привязано к тому, где именно на экране
+  // находится курсор/палец.
   function saveBookReaderBookmark(){
     if(!bookReaderState) return;
     var container = document.getElementById("settingsTabContent");
-    var pos = container ? currentBookReaderPosition(container) : null;
+    var pos = container ? firstVisibleBookBlockPosition(container) : null;
     if(!pos){
       var status0 = document.getElementById("bookReaderStatus");
       if(status0) status0.textContent = "Закладку можно сохранить только в режиме чтения текста.";
@@ -8228,9 +8273,13 @@
     function finish(name, isMain){
       if(isMain){
         var oldMain = getMainBookBookmark(hash);
-        if(oldMain) removeBookBookmark(hash, oldMain.id);
+        if(oldMain){
+          removeBookBookmark(hash, oldMain.id);
+          removeBookReaderBookmarkMarkById(oldMain.id);
+        }
       }
-      addBookBookmark(hash, pos, name, isMain);
+      var newId = addBookBookmark(hash, pos, name, isMain);
+      setBookReaderBookmarkMarkInDom(pos.ch, pos.blk, newId);
       var status = document.getElementById("bookReaderStatus");
       if(status) status.textContent = "Закладка «" + name + "» сохранена — см. вкладку «Закладки».";
       if(navigator.vibrate){ try{ navigator.vibrate(15); }catch(e){} }
@@ -8423,6 +8472,67 @@
     }, true);
   }
 
+  // Пиктограмма закладки поверх абзаца (.book-reader-bookmark-mark, ТЗ
+  // пользователя от 15.09) — клик снимает закладку целиком (и в тексте
+  // книги, и во вкладке "Закладки"): переиспользуемый обработчик, вешается
+  // и при полном рендере текста (bindBookReaderBookmarkMarks — все
+  // пиктограммы сразу), и точечно на одну свежедобавленную кнопку
+  // (setBookReaderBookmarkMarkInDom ниже, тем же приёмом, что showBookReaderUnderlineTrashBtn
+  // делает для урны подчёркивания). stopPropagation — чтобы клик по
+  // пиктограмме не улетал в обработчик выделения текста на самом абзаце.
+  function bindBookReaderBookmarkMarkClick(btn){
+    btn.addEventListener("click", function(ev){
+      ev.stopPropagation();
+      if(!bookReaderState) return;
+      var bookmarkId = btn.getAttribute("data-bookmark-id");
+      if(!bookmarkId) return;
+      removeBookBookmark(bookReaderState.hash, bookmarkId);
+      btn.remove();
+    });
+  }
+  // Полный обход всех пиктограмм закладок после рендера текста (тем же
+  // приёмом, что bindBookReaderUnderlineClicks/bindBookReaderImages выше).
+  function bindBookReaderBookmarkMarks(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    container.querySelectorAll(".book-reader-bookmark-mark").forEach(function(btn){
+      bindBookReaderBookmarkMarkClick(btn);
+    });
+  }
+  // Точечно добавляет пиктограмму закладки на уже отрисованный абзац —
+  // нужна сразу после saveBookReaderBookmark ниже, БЕЗ полного повторного
+  // рендера текста (иначе слетел бы текущий скролл читателя). Если на
+  // абзаце уже была своя пиктограмма (редкий случай нескольких закладок на
+  // одном абзаце) — просто переставляет data-bookmark-id на новую закладку,
+  // саму кнопку не дублирует.
+  function setBookReaderBookmarkMarkInDom(ch, blk, bookmarkId){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var pEl = container.querySelector('.book-reader-p[data-ch="' + ch + '"][data-blk="' + blk + '"]');
+    if(!pEl) return;
+    var existing = pEl.querySelector(".book-reader-bookmark-mark");
+    if(existing){ existing.setAttribute("data-bookmark-id", bookmarkId); return; }
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "book-reader-bookmark-mark";
+    btn.title = "Убрать закладку";
+    btn.setAttribute("data-bookmark-id", bookmarkId);
+    btn.innerHTML = READER_BOOKMARK_ICON_SVG;
+    bindBookReaderBookmarkMarkClick(btn);
+    pEl.appendChild(btn);
+  }
+  // Точечно убирает пиктограмму закладки по её id — нужна в
+  // saveBookReaderBookmark ниже, когда при сохранении НОВОЙ основной
+  // закладки старая основная снимается автоматически (та же ситуация, что
+  // removeBookReaderBookmarkMarkById и setBookReaderBookmarkMarkInDom
+  // выше решают парой: снять старую пиктограмму, поставить новую).
+  function removeBookReaderBookmarkMarkById(bookmarkId){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var el = container.querySelector('.book-reader-bookmark-mark[data-bookmark-id="' + bookmarkId + '"]');
+    if(el) el.remove();
+  }
+
   // ===================== ИЛЛЮСТРАЦИИ -> ЗАМЕТКА КНИГИ (READER_PLAN.md,
   // Этап D, шаг 14, 11.09) =====================
   // Та же заметка книги, что и у подчёркиваний (data.noteId, см. выше) —
@@ -8515,7 +8625,7 @@
   // кнопку в нижнем ряду (см. saveBookReaderBookmark ниже), а не долгим
   // нажатием на конкретный абзац — прежний вариант с долгим нажатием
   // признан неинтуитивным и убран целиком (11.09). У каждой книги может
-  // быть одна ОСНОВНАЯ закладка (isMain, пиктограмма-корона в общем списке
+  // быть одна ОСНОВНАЯ закладка (isMain, пиктограмма раскрытой книги в общем списке
   // "Закладки") и любое число обычных — пользователь сам решает, обновлять
   // ли основную при сохранении новой (см. openBookBookmarkUpdateMainConfirm
   // ниже) или добавить рядом. Диалог имени — openBookBookmarkNameDialog.

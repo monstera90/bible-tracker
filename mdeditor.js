@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 2.1 (14.09)
+   Версия: 2.3 (15.09)
    Вкладка "Мои заметки" (первая боковая вкладка второго набора,
    settingsTabSet2Btn1 / "set2s_1") — работа с .md заметками в стиле
    Obsidian. Вынесена в отдельный файл по тому же образцу, что и
@@ -275,12 +275,16 @@ window.initMdEditorModule = function(deps){
       '<line x1="7.5" y1="7" x2="14.5" y2="7"></line>' +
       '<line x1="7.5" y1="10.2" x2="14.5" y2="10.2"></line>' +
     '</svg>';
-  // Корона — основная закладка книги (ТЗ от 12.09, addBookBookmark/
-  // getMainBookBookmark в my.js), вместо BOOK_BOOKMARK_ICON_SVG у той
-  // единственной закладки на книгу, что отмечена как основная.
-  var CROWN_ICON_SVG =
+  // Раскрытая книга — основная закладка книги (ТЗ от 12.09, addBookBookmark/
+  // getMainBookBookmark в my.js), вместо BOOK_BOOKMARK_ICON_SVG (закрытая
+  // книга) у той единственной закладки на книгу, что отмечена как основная.
+  // Раньше здесь была корона (CROWN_ICON_SVG) — убрана полностью 15.09
+  // (неудобная пиктограмма, ТЗ пользователя).
+  var OPEN_BOOK_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M4 18h16l-1.5-9-4 3-2.5-5-2.5 5-4-3L4 18z"></path>' +
+      '<path d="M12 6.2c-1.8-1.4-4.1-2.2-6.5-2.2a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1c2.4 0 4.7.8 6.5 2.2"></path>' +
+      '<path d="M12 6.2c1.8-1.4 4.1-2.2 6.5-2.2a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1c-2.4 0-4.7.8-6.5 2.2"></path>' +
+      '<path d="M12 6.2V21.2"></path>' +
     '</svg>';
   // папка — переиспользуем ровно тот же контур, что и у вкладки-заглушки
   // "projects" (#settingsTabProjectsBtn в index.html), для единообразия
@@ -1024,7 +1028,9 @@ window.initMdEditorModule = function(deps){
   // ссылки восстанавливается File для navigator.share. Кнопка добавляется
   // в разметку только если браузер вообще поддерживает Web Share API —
   // на неподдерживающих браузерах (десктоп, старые Android-браузеры) её
-  // просто нет, вместо неактивной кнопки с алертом.
+  // просто нет, вместо неактивной кнопки с алертом. Правка от 15.09:
+  // кнопка перенесена из правого верхнего угла в правый нижний — до
+  // верхнего угла неудобно дотягиваться одной рукой при просмотре.
   function shareViewedImage(url, name){
     var fileName = name || "image.jpg";
     fetch(url).then(function(r){ return r.blob(); }).then(function(blob){
@@ -1053,7 +1059,7 @@ window.initMdEditorModule = function(deps){
       shareBtn.className = "mdeditor-imgview-share-btn";
       shareBtn.title = "Поделиться";
       shareBtn.innerHTML = SHARE_ICON_SVG;
-      shareBtn.style.cssText = "position:fixed;top:16px;right:16px;width:44px;height:44px;" +
+      shareBtn.style.cssText = "position:fixed;bottom:16px;right:16px;width:44px;height:44px;" +
         "border-radius:50%;background:rgba(0,0,0,0.55);border:none;color:#fff;" +
         "display:flex;align-items:center;justify-content:center;z-index:10001;padding:0;";
       shareBtn.addEventListener("click", function(ev){
@@ -3142,7 +3148,7 @@ window.initMdEditorModule = function(deps){
       // Основная закладка книги (it.isMain, см. getMainBookBookmark в
       // my.js) — корона вместо обычной пиктограммы закрытой книги (ТЗ от
       // 12.09); закладки-заметки эту развилку не затрагивают.
-      var icon = it.type === "book" ? (it.isMain ? CROWN_ICON_SVG : BOOK_BOOKMARK_ICON_SVG) : FILE_ICON_SVG;
+      var icon = it.type === "book" ? (it.isMain ? OPEN_BOOK_ICON_SVG : BOOK_BOOKMARK_ICON_SVG) : FILE_ICON_SVG;
       row.innerHTML = icon + '<span class="mdeditor-row-name"></span>' +
         '<button type="button" class="mdeditor-bookmark-btn active visible" title="Убрать из закладок">' + BOOKMARK_ICON_SVG + '</button>';
       // Книжная закладка теперь показывает СВОЁ имя (введённое пользователем

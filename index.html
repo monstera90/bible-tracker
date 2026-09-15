@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 1.0 (15.09) -->
+     Версия: 1.4 (15.09) -->
 <head>
 <meta charset="UTF-8">
 <script>
@@ -143,10 +143,15 @@ window.addEventListener("error", function(e){
            ряду левее "Ж"). В отличие от остальных кнопок этого ряда
            видимость переключается не общим условием showTaskFab, а
            отдельно — только когда открыта именно вкладка "next" (см.
-           syncTaskFabRowForTab в my.js). Без попапа; .pressed и title
-           навешиваются в JS. -->
+           syncTaskFabRowForTab в my.js). Без попапа; фон НЕ закрашивается
+           (в отличие от .pressed у остальных кнопок этого ряда, ТЗ
+           пользователя от 15.09 #2) — вместо этого сама иконка/title
+           переключаются между "открытый глаз" (задачи показаны) и
+           "перечёркнутый глаз" (задачи скрыты) прямо в JS
+           (updateHideLinkedBtnState/EYE_ICON_SVG/EYE_OFF_ICON_SVG в
+           my.js), поэтому здесь кнопка изначально пустая. -->
       <span class="task-hide-linked-wrap" id="taskHideLinkedWrap">
-        <button type="button" class="mdeditor-fab-btn" id="taskHideLinkedBtn" title="Скрыть задачи, привязанные к проектам"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"></path><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"></path><path d="M6.61 6.61C4.07 8.36 2 12 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"></path><path d="M2 2l20 20"></path></svg></button>
+        <button type="button" class="mdeditor-fab-btn" id="taskHideLinkedBtn" title="Скрыть задачи, привязанные к проектам"></button>
       </span>
       <!-- "Ж" (форматирование выделения) и "Аа" (размер шрифта, общий с
            "Моим блокнотом") — слева от общей "+", в одном ряду с ней;
@@ -196,8 +201,9 @@ window.addEventListener("error", function(e){
     </div>
     <!-- Стек вкладок настроек. Благодаря flex-direction:column-reverse в CSS
          (.settings-tabs) первый элемент в DOM оказывается самым НИЖНИМ, а
-         последний — самым ВЕРХНИМ. Порядок снизу вверх: red, inbox, next,
-         projects, waiting, council, read, someday, archive — видны только
+         последний — самым ВЕРХНИМ. Порядок снизу вверх: worktasks, red,
+         inbox, next, projects, waiting, read, council, jointtasks, someday,
+         archive — видны только
          если в настройках включена галочка "Показать все мои задачи"
          (см. refreshSettingsTabsVisibility в my.js). Вкладка настроек
          (шестерёнка) в этом стеке не участвует — она вынесена отдельным
@@ -239,10 +245,17 @@ window.addEventListener("error", function(e){
           <path d="M4 12v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6"></path>
         </svg>
       </button>
+      <!-- Пиктограмма — след стопы (ТЗ пользователя от 15.09, по
+           присланному образцу): только контур (stroke, без fill), как и
+           у остальных вкладок этого набора — пальцы четырьмя кружками
+           убывающего размера, свод/пятка одним наклонным эллипсом. -->
       <button class="settings-tab task-tab" id="settingsTabNextBtn" data-task="next" title="next" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 12h13"></path>
-          <path d="M13 6l6 6-6 6"></path>
+          <ellipse cx="10.8" cy="15.5" rx="4.6" ry="6.2" transform="rotate(-12 10.8 15.5)"></ellipse>
+          <circle cx="7.7" cy="5.4" r="2.1"></circle>
+          <circle cx="11.4" cy="4.3" r="1.5"></circle>
+          <circle cx="14.3" cy="4.7" r="1.15"></circle>
+          <circle cx="16.5" cy="5.9" r="0.9"></circle>
         </svg>
       </button>
       <button class="settings-tab task-tab" id="settingsTabProjectsBtn" data-task="projects" title="projects" style="display:none;">
@@ -290,30 +303,43 @@ window.addEventListener("error", function(e){
           <path d="M5 21c0-4 3-7 7-7s7 3 7 7"></path>
         </svg>
       </button>
-      <!-- Пиктограмма — та же стрелочка, что и у Next (см. #settingsTabNextBtn
-           выше), просто повёрнута на 90° против часовой стрелки (rotate(-90)
-           вокруг центра 12,12), чтобы указывать вверх, а не вправо. -->
-      <button class="settings-tab task-tab" id="settingsTabSomedayBtn" data-task="someday" title="someday" style="display:none;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <g transform="rotate(-90 12 12)">
-            <path d="M5 12h13"></path>
-            <path d="M13 6l6 6-6 6"></path>
-          </g>
-        </svg>
-      </button>
       <!-- Вкладка-заглушка "Совместные задачи" / "jointtasks" (ТЗ
            пользователя от 13.09) — тем же принципом, что и worktasks выше:
            обычный список задач через renderTaskTabList, пиктограмма — те
            же два человечка, что и TASK_MOVE_ICONS.jointtasks в my.js.
-           Последняя перед archive — archive должна оставаться самым
-           последним элементом в DOM (см. #settingsTabs .settings-tab:last-child
-           в modals.css — линия-срез верхнего края стека). -->
+           С 15.09 переставлена сюда, перед someday (была после неё) —
+           ТЗ пользователя от 15.09. -->
       <button class="settings-tab task-tab" id="settingsTabJointTasksBtn" data-task="jointtasks" title="jointtasks" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="8" cy="8" r="2.3"></circle>
           <path d="M3.5 19c0-3 2-5.3 4.5-5.3s4.5 2.3 4.5 5.3"></path>
           <circle cx="16" cy="8" r="2.3"></circle>
           <path d="M11.5 19c0-3 2-5.3 4.5-5.3s4.5 2.3 4.5 5.3"></path>
+        </svg>
+      </button>
+      <!-- Пиктограмма — календарь со знаком вопроса (ТЗ пользователя от
+           15.09, по присланному образцу): только контур (currentColor,
+           цвет берётся из темы, как и у всех соседних иконок), 3 кольца
+           крепления сверху, линия-разделитель шапки календаря, "?" с
+           отдельной закрашенной точкой внизу. С 15.09 (ТЗ пользователя) —
+           небольшой зазор сверху между линией-разделителем и "?" (линия
+           сдвинута выше, y=7.7 вместо 9, а не сам знак — чтобы не менять
+           его размер/положение) и зазор снизу между "?" и точкой (у
+           знака чуть укорочен самый кончик хвостика, петля не тронута).
+           До 15.09 здесь была повёрнутая стрелка (общий контур со старой
+           иконкой Next, см. #settingsTabNextBtn выше). Последняя перед
+           archive — archive должна оставаться самым последним элементом
+           в DOM (см. #settingsTabs .settings-tab:last-child в modals.css
+           — линия-срез верхнего края стека). -->
+      <button class="settings-tab task-tab" id="settingsTabSomedayBtn" data-task="someday" title="someday" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="8" y1="3" x2="8" y2="6.5"></line>
+          <line x1="12" y1="3" x2="12" y2="6.5"></line>
+          <line x1="16" y1="3" x2="16" y2="6.5"></line>
+          <rect x="4" y="5" width="16" height="15" rx="1.5"></rect>
+          <line x1="4" y1="7.7" x2="20" y2="7.7"></line>
+          <path d="M9.6 12.5c0-1.5 1.1-2.6 2.5-2.6s2.4 1 2.4 2.3c0 1.1-.6 1.7-1.5 2.3-.5.5-.8.85-1 .95"></path>
+          <circle cx="12" cy="17.6" r="0.95" fill="currentColor" stroke="none"></circle>
         </svg>
       </button>
       <button class="settings-tab task-tab" id="settingsTabArchiveBtn" data-task="archive" title="archive" style="display:none;">
