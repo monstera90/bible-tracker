@@ -8118,10 +8118,33 @@
   }
 
   function revokeBookReaderImages(){
+    // С 15.09 imageUrls — это data:-URL (см. openBookReader выше), а не
+    // blob:-URL, так что отзыв через createObjectURL/revokeObjectURL
+    // тут больше не нужен (data:-URL ничего не держит в памяти сверх самой
+    // строки, GC подберёт вместе с bookReaderState). Функцию и её вызовы
+    // оставляем как есть (дешёвый no-op на data:-URL) — чтобы не занимать
+    // отдельным ревью то место, где revokeBookReaderImages() вызывается.
     if(!bookReaderState || !bookReaderState.imageUrls) return;
     Object.keys(bookReaderState.imageUrls).forEach(function(id){
       try{ URL.revokeObjectURL(bookReaderState.imageUrls[id]); }catch(e){}
     });
+  }
+
+  // Ленивый декод ОДНОЙ картинки книги в байты (atob + побайтовый
+  // Uint8Array — тот самый тяжёлый путь, который раньше синхронно
+  // выполнялся для ВСЕХ картинок сразу при открытии книги, см. комментарий
+  // в openBookReader выше, 15.09). Нужен только для "прикрепить
+  // иллюстрацию к заметке" (toggleBookReaderImagePin), поэтому вызывается
+  // по клику, на конкретный imageId, а не заранее.
+  function getBookReaderImageBytes(imageId){
+    var entry = bookReaderState && bookReaderState.imageBase64 ? bookReaderState.imageBase64[imageId] : null;
+    if(!entry) return null;
+    try{
+      var bin = atob(entry.base64);
+      var bytes = new Uint8Array(bin.length);
+      for(var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return {bytes: bytes, contentType: entry.contentType};
+    }catch(e){ return null; }
   }
 
   function openBookReader(name){
@@ -8160,23 +8183,34 @@
       });
     }).then(function(res){
       var _tImg = performance.now();
-      var imageUrls = {}, imageBytes = {};
+      // ОПТИМИЗАЦИЯ (15.09, диагностика скорости открытия длинных книг) —
+      // раньше здесь для КАЖДОЙ из картинок сразу делали atob() + ручной
+      // побайтовый for-цикл charCodeAt в Uint8Array + Blob +
+      // createObjectURL — то есть полностью декодировали ВСЕ картинки
+      // книги (в логе видно, что это давало ~половину времени открытия
+      // 100-мегабайтного epub с 664 картинками). Но для ПОКАЗА картинки в
+      // <img src="..."> декодировать её в байты самим не нужно вообще —
+      // достаточно data:-URL с тем же base64, что уже лежит в
+      // res.parsed.images[id].base64: браузер decode'ит его сам, лениво,
+      // только для реально видимых <img> (то, что и хотелось — "не
+      // декодировать всё сразу"). Тяжёлый путь (atob + побайтовый
+      // Uint8Array) нужен ТОЛЬКО для "прикрепить иллюстрацию к заметке"
+      // (шаг 14, toggleBookReaderImagePin ниже, т.к. запись в OPFS через
+      // MdEditor.saveImageBytes требует именно байт) — он идёт по клику,
+      // на ОДНУ картинку, а не на все 664 разом. Поэтому вместо
+      // imageBytes{bytes,contentType} на все картинки сразу теперь
+      // bookReaderState.imageBase64{base64,contentType} (дёшево — просто
+      // ссылки на уже распарсенные строки, без копирования) и byte-массив
+      // считается лениво в getBookReaderImageBytes ниже.
+      var imageUrls = {}, imageBase64 = {};
       Object.keys(res.parsed.images).forEach(function(id){
         var img = res.parsed.images[id];
-        try{
-          var bin = atob(img.base64);
-          var bytes = new Uint8Array(bin.length);
-          for(var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          var contentType = img.contentType || "image/jpeg";
-          imageUrls[id] = URL.createObjectURL(new Blob([bytes], {type: contentType}));
-          // Сырые байты — нужны только для "прикрепить к заметке" (шаг 14,
-          // см. toggleBookReaderImagePin ниже); blob-URL для этого не годится,
-          // т.к. запись в OPFS требует самих байт, а не ссылки на них.
-          imageBytes[id] = {bytes: bytes, contentType: contentType};
-        }catch(e){ /* битая картинка в binary — просто не покажем */ }
+        var contentType = img.contentType || "image/jpeg";
+        imageUrls[id] = "data:" + contentType + ";base64," + img.base64;
+        imageBase64[id] = {base64: img.base64, contentType: contentType};
       });
-      if(window.Debug) window.Debug.log("openBookReader[" + name + "]: декодирование картинок заняло " + Math.round(performance.now() - _tImg) + "мс");
-      _dbg("картинки декодированы, до renderBookReader()");
+      if(window.Debug) window.Debug.log("openBookReader[" + name + "]: подготовка ссылок на картинки заняла " + Math.round(performance.now() - _tImg) + "мс");
+      _dbg("ссылки на картинки готовы, до renderBookReader()");
       // Шаг 16 — сохранённая позиция чтения (см. setBookPosition/
       // getBookState выше) читается один раз здесь, при открытии книги
       // "с нуля" (не из снимка "Домика" — тот восстанавливает готовый
@@ -8193,7 +8227,7 @@
       var savedBookState = getBookState(res.hash);
       bookReaderState = {
         hash: res.hash, name: name,
-        chapters: res.parsed.chapters, imageUrls: imageUrls, imageBytes: imageBytes,
+        chapters: res.parsed.chapters, imageUrls: imageUrls, imageBase64: imageBase64,
         mode: "text", textScrollTop: 0, chaptersScrollTop: 0,
         restorePosition: (savedBookState && savedBookState.position) || null
       };
@@ -9109,7 +9143,9 @@
       }
       return;
     }
-    var imgData = bookReaderState.imageBytes ? bookReaderState.imageBytes[imageId] : null;
+    // Байты декодируются ЛЕНИВО, только тут, только для ОДНОЙ картинки —
+    // см. комментарий про imageBase64 в openBookReader выше (15.09).
+    var imgData = getBookReaderImageBytes(imageId);
     if(!imgData || !MdEditor || !MdEditor.saveImageBytes) return;
     function finishWithNoteId(noteId){
       var baseName = stripBookExt(bookReaderState.name || "book") +
