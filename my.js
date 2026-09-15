@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 4.0 (15.09)
+   Версия: 5.0 (15.09)
    =========================================================================== */
 
 (function(){
@@ -1293,6 +1293,14 @@
     // любой вкладке задач (ТЗ пользователя от 14.09).
     var hideLinkedWrap = document.getElementById("taskHideLinkedWrap");
     if(hideLinkedWrap) hideLinkedWrap.classList.toggle("visible", tab === "next");
+    // Кнопка-меню "настройки вкладки" (TASK_SHARED_TASKS.md, Шаг 4) — тем
+    // же приёмом, что и "глаз" выше: видна только на самой вкладке "Общие
+    // задачи", не на любой вкладке задач. Содержимое попапа (см.
+    // renderTaskJointMenu, раздел «ГРУППОВАЯ ПРИВЯЗКА «ОБЩИХ ЗАДАЧ»»)
+    // перестраивается заново при каждом открытии попапа, не здесь —
+    // достаточно просто показать/скрыть саму кнопку.
+    var jointMenuWrap = document.getElementById("taskJointMenuWrap");
+    if(jointMenuWrap) jointMenuWrap.classList.toggle("visible", tab === "jointtasks");
     // кнопка сортировки Red по отметке (ТЗ пользователя от 15.09) — делит
     // тот же слот в ряду с "глазом" выше (см. комментарий в modals.css у
     // .task-red-sort-wrap), видна только на самой вкладке "Red".
@@ -3522,8 +3530,9 @@
     });
   }
 
-  // Точка входа для будущей кнопки "Синхронизация" на вкладке "Общие
-  // задачи" (Шаг 4) — пока ничего в UI её не вызывает.
+  // Точка входа для кнопки "Синхронизация" в меню "настройки вкладки" на
+  // вкладке "Общие задачи" (см. renderTaskJointMenu ниже, TASK_SHARED_TASKS.md,
+  // Шаг 4 — раньше (Шаги 1-3) ничего в UI её не вызывало).
   function openGroupPairingModal(){
     modalOverlay.classList.add("open");
     renderGroupPairingHome();
@@ -3783,6 +3792,46 @@
         '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", cancelGroupJoin);
+    });
+  }
+
+  // Собирает содержимое выпадающего меню "настройки вкладки" (кнопка
+  // #taskJointMenuBtn, самая левая в общем ряду вкладки "Общие задачи" —
+  // см. index.html/modals.css, TASK_SHARED_TASKS.md, Шаг 4, п. 2.1 ТЗ).
+  // Состав пунктов зависит от текущего состояния группы:
+  //   - до привязки (sharedGroup === null) — только "Синхронизация";
+  //   - админ (sharedGroup.role === "admin") — "Отвязать пользователя" +
+  //     "Архив общих задач". Видна сразу после создания кода привязки, не
+  //     дожидаясь подключения первого участника (isGroupTasksActive() тут
+  //     намеренно НЕ используется — та завязана ещё и на миграцию данных,
+  //     п. 3.5 ТЗ, это другая, более узкая проверка).
+  //   - участник (sharedGroup.role === "member") — "Отписаться от общих
+  //     задач" + "Архив общих задач".
+  // Вызывается заново перед КАЖДЫМ открытием попапа (см. initTaskGlobalToolbar
+  // выше), не один раз — состояние группы могло измениться, пока попап был
+  // закрыт.
+  function renderTaskJointMenu(){
+    var popup = document.getElementById("taskJointMenuPopup");
+    if(!popup) return;
+    var items = [];
+    if(!sharedGroup){
+      items.push({id:"mtjSync", label:"Синхронизация", action:openGroupPairingModal});
+    } else if(sharedGroup.role === "admin"){
+      items.push({id:"mtjUnlink", label:"Отвязать пользователя", action:openGroupUnlinkModal});
+      items.push({id:"mtjArchive", label:"Архив общих задач", action:openGroupJointArchiveModal});
+    } else if(sharedGroup.role === "member"){
+      items.push({id:"mtjUnsub", label:"Отписаться от общих задач", action:openGroupUnsubscribeModal});
+      items.push({id:"mtjArchive", label:"Архив общих задач", action:openGroupJointArchiveModal});
+    }
+    popup.innerHTML = items.map(function(it){
+      return '<button type="button" id="' + it.id + '">' + escapeHtml(it.label) + '</button>';
+    }).join("");
+    items.forEach(function(it){
+      var btn = document.getElementById(it.id);
+      if(btn) btn.addEventListener("click", function(){
+        popup.classList.remove("open");
+        it.action();
+      });
     });
   }
 
@@ -4177,9 +4226,10 @@
   // Только диалоги с финальными текстами из п. 2.5/2.6 ТЗ. Сама логика
   // (удаление данных группы, перенос данных админа в локальное хранилище
   // при 0 участников, возврат вкладки в локальный режим) — Шаг 5;
-  // обработчики ниже — заглушки. Пока ничего в UI не вызывает эти функции —
-  // кнопки "Отвязать пользователя"/"Отписаться от общих задач" появятся в
-  // Шаге 4.
+  // обработчики кнопок подтверждения ниже — по-прежнему заглушки
+  // (groupActionNotImplementedYet). Сами диалоги теперь вызываются из меню
+  // "настройки вкладки" (см. openGroupUnlinkModal/openGroupUnsubscribeModal
+  // ниже и renderTaskJointMenu выше, TASK_SHARED_TASKS.md, Шаг 4).
 
   function groupActionNotImplementedYet(){
     modalBox.innerHTML = modalHeader("Пока не реализовано",
@@ -4219,6 +4269,30 @@
     // трогаются, участник просто теряет доступ, вкладка возвращается в
     // режим "до привязки".
     document.getElementById("mUnsubConfirm").addEventListener("click", groupActionNotImplementedYet);
+  }
+
+  // TASK_SHARED_TASKS, Шаг 4 (15.09): обёртки, вызываемые из меню
+  // "настройки вкладки" (renderTaskJointMenu выше) — открывают модалку
+  // (modalOverlay) и рендерят соответствующий экран; сами render-функции
+  // выше этого не делают (раньше их вообще ничего не вызывало).
+  function openGroupUnlinkModal(){
+    modalOverlay.classList.add("open");
+    renderGroupUnlinkConfirm();
+  }
+  function openGroupUnsubscribeModal(){
+    modalOverlay.classList.add("open");
+    renderGroupUnsubscribeConfirm();
+  }
+  // Архив общих задач — Шаг 6 (ещё не сделан), пока заглушка тем же
+  // приёмом, что и groupActionNotImplementedYet выше, только со своим
+  // текстом (другой номер шага).
+  function openGroupJointArchiveModal(){
+    modalOverlay.classList.add("open");
+    modalBox.innerHTML = modalHeader("Пока не реализовано",
+        "Архив общих задач появится на следующем шаге доработки (Шаг 6 из TASK_SHARED_TASKS.md).") +
+      '<button class="modal-btn primary" id="mDone">Понятно</button>';
+    bindClose();
+    document.getElementById("mDone").addEventListener("click", closeModal);
   }
 
   // ===================== СЧЁТЧИК НАСТРОЕНИЯ =====================
@@ -4587,6 +4661,25 @@
     }
     if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ changeTaskFontSizeStep(1); });
     if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ changeTaskFontSizeStep(-1); });
+
+    // --- "⋮" — меню "настройки вкладки" (TASK_SHARED_TASKS.md, Шаг 4) ---
+    // Самая левая кнопка ряда, видна только на вкладке "Общие задачи" (см.
+    // .task-joint-menu-wrap в modals.css / syncTaskFabRowForTab выше).
+    // Попап пересобирается заново (renderTaskJointMenu, см. раздел
+    // «ГРУППОВАЯ ПРИВЯЗКА «ОБЩИХ ЗАДАЧ»») перед КАЖДЫМ открытием — состав
+    // пунктов зависит от состояния группы, которое могло измениться, пока
+    // попап был закрыт (например, участник отвязался в фоне).
+    var jointMenuPanelOpen = false;
+    var jointMenuBtn = document.getElementById("taskJointMenuBtn");
+    var jointMenuPopup = document.getElementById("taskJointMenuPopup");
+    stopMousedown(jointMenuBtn);
+    if(jointMenuBtn){
+      jointMenuBtn.addEventListener("click", function(){
+        jointMenuPanelOpen = !jointMenuPanelOpen;
+        if(jointMenuPanelOpen) renderTaskJointMenu();
+        if(jointMenuPopup) jointMenuPopup.classList.toggle("open", jointMenuPanelOpen);
+      });
+    }
 
     // --- "Ж" (форматирование выделения) ---
     var formatPanelOpen = false;
@@ -8038,6 +8131,12 @@
     if(bookReaderState){ destroyBookReaderScrollListener(); revokeBookReaderImages(); }
     var container = document.getElementById("settingsTabContent");
     var prevScrollTop = container ? container.scrollTop : 0;
+    // ВРЕМЕННО (диагностика скорости открытия длинных книг, 15.09) — таймеры
+    // через window.Debug.log, убрать после того, как найдём узкое место.
+    var _dbgT0 = performance.now();
+    function _dbg(label){
+      if(window.Debug) window.Debug.log("openBookReader[" + name + "]: " + label + " +" + Math.round(performance.now() - _dbgT0) + "мс");
+    }
     // return — READER_PLAN.md, шаг 15 (11.09): openBookAtMarginBookmark
     // (см. ниже) должен дождаться, пока книга реально откроется и
     // распарсится, прежде чем прокручивать к нужному абзацу; остальные
@@ -8050,12 +8149,17 @@
     }).then(function(file){
       return file.arrayBuffer();
     }).then(function(buf){
+      _dbg("файл прочитан, " + buf.byteLength + " байт");
       return sha256Hex(buf).then(function(hash){
+        _dbg("хэш посчитан");
+        var _tParse = performance.now();
         return parseBookBuffer(name, buf).then(function(parsed){
+          if(window.Debug) window.Debug.log("openBookReader[" + name + "]: parseBookBuffer занял " + Math.round(performance.now() - _tParse) + "мс, глав=" + parsed.chapters.length + ", блоков=" + parsed.chapters.reduce(function(s,c){return s+c.blocks.length;},0) + ", картинок=" + Object.keys(parsed.images).length);
           return {hash: hash, parsed: parsed};
         });
       });
     }).then(function(res){
+      var _tImg = performance.now();
       var imageUrls = {}, imageBytes = {};
       Object.keys(res.parsed.images).forEach(function(id){
         var img = res.parsed.images[id];
@@ -8071,6 +8175,8 @@
           imageBytes[id] = {bytes: bytes, contentType: contentType};
         }catch(e){ /* битая картинка в binary — просто не покажем */ }
       });
+      if(window.Debug) window.Debug.log("openBookReader[" + name + "]: декодирование картинок заняло " + Math.round(performance.now() - _tImg) + "мс");
+      _dbg("картинки декодированы, до renderBookReader()");
       // Шаг 16 — сохранённая позиция чтения (см. setBookPosition/
       // getBookState выше) читается один раз здесь, при открытии книги
       // "с нуля" (не из снимка "Домика" — тот восстанавливает готовый
@@ -8100,6 +8206,7 @@
         if(c) c.scrollTop = prevScrollTop;
       });
       renderBookReader();
+      _dbg("renderBookReader() вернул управление (innerHTML уже выставлен синхронно)");
     }).catch(function(e){
       var statusEl = document.getElementById("booksStatus");
       if(statusEl){
@@ -8308,6 +8415,8 @@
   }
 
   function renderBookReaderText(container){
+    // ВРЕМЕННО (диагностика скорости открытия длинных книг, 15.09).
+    var _tBuild = performance.now();
     var html = '<div class="book-reader-tab">' + bookReaderFabRowHtml() + '<div class="book-reader">';
     bookReaderState.chapters.forEach(function(ch, idx){
       html += '<div class="book-reader-chapter" id="bookChapter_' + idx + '">';
@@ -8358,7 +8467,10 @@
       html += '</div>';
     });
     html += '</div></div>';
+    if(window.Debug) window.Debug.log("renderBookReaderText: сборка HTML-строки заняла " + Math.round(performance.now() - _tBuild) + "мс, длина строки=" + html.length);
+    var _tInner = performance.now();
     container.innerHTML = html;
+    if(window.Debug) window.Debug.log("renderBookReaderText: container.innerHTML= (парсинг+layout браузером) занял " + Math.round(performance.now() - _tInner) + "мс");
     requestAnimationFrame(function(){
       // Шаг 16: сохранённая позиция чтения применяется РОВНО ОДИН РАЗ,
       // сразу после открытия книги (restorePosition обнуляется тут же,
@@ -13587,7 +13699,25 @@
     // определить через scrollHeight/clientHeight, что обрезка больше не
     // нужна, когда задачу укоротили редактированием (см. updateTaskExpandBtn).
     var isExpanded = !!expandedTaskIds[id];
+    // Подпись "Создал/Выполнил" (TASK_SHARED_TASKS.md, п. 2.4, Шаг 4) —
+    // только у общих задач: task.c.createdBy проставляется ТОЛЬКО при
+    // создании общей задачи (createGroupTask/migrateAdminGroupTasksIfNeeded,
+    // см. раздел «ОБЩИЕ ЗАДАЧИ: ХРАНЕНИЕ И CRUD»), у личных задач этого поля
+    // никогда нет — отдельно проверять tabKey==="jointtasks" не нужно.
+    // completedBy практически всегда null здесь: как только задача отмечена
+    // выполненной, она пропадает из getGroupTasksForTab (см. там же) — но
+    // код не полагается на это молча, а проверяет поле явно, на случай
+    // будущих изменений фильтрации.
+    var jointSignatureHtml = "";
+    if(task.c.createdBy){
+      var meId = getDeviceId();
+      var createdByLabel = task.c.createdBy === meId ? "Вы" : "Второй участник";
+      jointSignatureHtml = '<div class="task-joint-signature">Создал: ' + escapeHtml(createdByLabel) +
+        (task.c.completedBy ? " · Выполнил: " + escapeHtml(task.c.completedBy === meId ? "Вы" : "Второй участник") : "") +
+        '</div>';
+    }
     body.innerHTML =
+      jointSignatureHtml +
       '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
       '<span class="task-actions">' +
         '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
