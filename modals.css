@@ -918,11 +918,13 @@
   }
   .task-row:first-child{ border-top:none; }
   /* цветная отметка приоритета — теперь стоит в конце строки, после
-     стрелочки переноса (см. разметку в renderTaskRowView в my.js): нет
-     отметки (пустой кружок) → red → yellow → снова нет отметки (см.
-     cycleTaskFlag в my.js). Любая задача с red/yellow дополнительно
-     показывается на вкладке Red, независимо от того, в какой вкладке она
-     реально живёт.
+     стрелочки переноса (см. разметку в renderTaskRowView в my.js). ИЗМЕНЕНО
+     (ТЗ пользователя от 15.09): клик по кружку — цикл red→yellow→red→…
+     (из "нет отметки" клик даёт red, но обратно кликом уже не возвращается,
+     см. cycleTaskFlag в my.js); снять отметку совсем можно только долгим
+     нажатием (250мс, см. clearTaskFlag/bindTapOrHold в my.js). Любая задача
+     с red/yellow дополнительно показывается на вкладке Red, независимо от
+     того, в какой вкладке она реально живёт.
      Кликабельная область (кнопка) нарочно крупнее, чем сам видимый
      кружок — чтобы легко попадать пальцем, — но сама кнопка прозрачная и
      никак не видна; виден только маленький внутренний кружок
@@ -1028,20 +1030,29 @@
     -webkit-tap-highlight-color:transparent;
   }
   .task-icon-btn svg{ width:15px; height:15px; }
-  /* пиктограмма-чемоданчик "В работе" (.task-worktasks-btn, ТЗ
-     пользователя от 13.09, toggleTaskInWork в my.js) — обычное
-     (не залитое) состояние ничем не отличается от остальных кнопок
-     строки (.task-icon-btn, currentColor → var(--wood), уже меняется
-     вместе с темой). Залитое состояние — тот же язык проекта для
-     "включено"/"активно", что и у .mdeditor-fab-btn.pressed
-     (components.css): заливка var(--wood)/var(--parchment) вместо
-     фиксированного цвета, как у .task-flag-dot.flag-red/flag-yellow —
-     здесь именно ТЕМА, а не своя постоянная краска, поэтому меняется
-     вместе с палитрой (data-theme 1..7, см. theme.css). */
+  /* пиктограмма-чемоданчик "В работе" (.task-worktasks-btn,
+     cycleTaskWorkState в my.js) — обычное (не залитое, "off") состояние
+     ничем не отличается от остальных кнопок строки (.task-icon-btn,
+     currentColor → var(--wood), уже меняется вместе с темой). Залитое
+     состояние ("work") — тот же язык проекта для "включено"/"активно",
+     что и у .mdeditor-fab-btn.pressed (components.css): заливка
+     var(--wood)/var(--parchment) вместо фиксированного цвета, как у
+     .task-flag-dot.flag-red/flag-yellow — здесь именно ТЕМА, а не своя
+     постоянная краска, поэтому меняется вместе с палитрой (data-theme
+     1..7, см. theme.css). ИЗМЕНЕНО (ТЗ пользователя от 15.09): добавлено
+     третье состояние "check" ("нужно проверить") — по описанию
+     пользователя "пиктограмма наоборот: тонкий круг и внутри не залитый
+     чемодан", т.е. ровно обратное "active": не заливка, а только тонкое
+     кольцо-обводка вокруг НЕзалитой (обычной) пиктограммы. */
   .task-icon-btn.task-worktasks-btn.active{
     background:var(--wood);
     color:var(--parchment);
     border-radius:50%;
+  }
+  .task-icon-btn.task-worktasks-btn.needs-check{
+    border:1.5px solid var(--wood);
+    border-radius:50%;
+    box-sizing:border-box;
   }
   /* значок-шеврон "показать полностью" (.task-expand-btn) — тот же
      .task-icon-btn, что и остальные кнопки строки задачи, только сам
@@ -1140,23 +1151,30 @@
     z-index:5;
     -webkit-tap-highlight-color:transparent;
   }
-  /* Ряд из семи кнопок на обычных вкладках задач (порядок исправлен
-     13.09, под "Мой блокнот" — см. пояснение у "Домика" ниже), считая от
-     правого нижнего угла ВЛЕВО, шаг 40px: "Домик" (пустышка, right:8) →
-     "+" (.task-add-fab.task-add-fab-shifted, 48) → скрепка (.task-attach-
+  /* Ряд из кнопок на обычных вкладках задач (порядок исправлен 13.09, под
+     "Мой блокнот" — см. пояснение у "Домика" ниже), считая от правого
+     нижнего угла ВЛЕВО, шаг 40px: "Домик" (пустышка, right:8) → "+"
+     (.task-add-fab.task-add-fab-shifted, 48) → скрепка (.task-attach-
      wrap, 88) → "Аа" (.task-fontsize-wrap, 128) → текстовыделитель
      (.task-highlight-wrap, 168) → "Ж" (.task-format-wrap, 208) → "глаз"
-     (.task-hide-linked-wrap, 248, видна только на вкладке "Next", см.
-     ниже). Тот же порядок, что и в "Моём блокноте" (mdeditor.js,
-     .mdeditor-fab-row): там это просто flex-row и "Домик" — последний в
-     DOM, здесь у каждой кнопки своя абсолютная позиция, поэтому порядок
-     задаётся значениями right. "Аа"/"Ж"/текстовыделитель — те же кнопки/
-     попапы (либо тот же принцип "выделил-нажал"), что и в "Моём
-     блокноте" (.mdeditor-fab-btn/-fontsize-popup в components.css,
-     переиспользуются как есть), просто в собственных обёртках.
-     Видимость всех — тем же условием, что и у .task-add-fab (см.
-     syncTaskFabRowForTab в my.js), кроме "глаза" — у него отдельное
-     условие (только вкладка "Next"). */
+     (.task-hide-linked-wrap, 248, видна только на вкладке "Next") ИЛИ
+     кнопка сортировки (.task-red-sort-wrap, ТОТ ЖЕ right:248 — видна
+     только на вкладке "Red", ТЗ пользователя от 15.09: делят одно и то же
+     место в ряду, т.к. никогда не показываются одновременно, см.
+     syncTaskFabRowForTab в my.js) → кнопка-подсказка "i" (.task-info-wrap,
+     288, ТЗ пользователя от 15.09 — единственная в этом ряду видна на
+     ВСЕХ вкладках задач сразу, поэтому она специально leftmost: остальные
+     то появляются, то исчезают в зависимости от вкладки, а "i" должна
+     оставаться на одном месте всегда). Тот же порядок, что и в "Моём
+     блокноте" (mdeditor.js, .mdeditor-fab-row): там это просто flex-row и
+     "Домик" — последний в DOM, здесь у каждой кнопки своя абсолютная
+     позиция, поэтому порядок задаётся значениями right. "Аа"/"Ж"/
+     текстовыделитель — те же кнопки/попапы (либо тот же принцип "выделил-
+     нажал"), что и в "Моём блокноте" (.mdeditor-fab-btn/-fontsize-popup в
+     components.css, переиспользуются как есть), просто в собственных
+     обёртках. Видимость всех — тем же условием, что и у .task-add-fab
+     (см. syncTaskFabRowForTab в my.js), кроме "глаза" и сортировки — у
+     них своё условие по конкретной вкладке ("Next"/"Red"). */
   .task-fontsize-wrap{
     display:none;
     position:absolute;
@@ -1209,6 +1227,42 @@
     z-index:5;
   }
   .task-hide-linked-wrap.visible{ display:flex; }
+  /* кнопка сортировки Red по отметке (.task-red-sort-wrap/taskRedSortBtn
+     в index.html, RED_SORT_BY_FLAG_KEY/getRedSortByFlag/setRedSortByFlag
+     в my.js, ТЗ пользователя от 15.09). Делит слот right:248 с "глазом"
+     выше — оба показываются каждый на своей вкладке ("Next"/"Red") и
+     никогда одновременно, см. комментарий к общему ряду выше. Как и у
+     "глаза", фон НЕ закрашивается через общий .pressed — переключается
+     сама иконка/title в JS (updateRedSortBtnState в my.js), а не через
+     .visible (та только показывает/прячет кнопку по вкладке). Иконка —
+     два жетона фиксированного цвета (тот же приём, что у .task-flag-dot.
+     flag-red/flag-yellow чуть выше: не currentColor/тема, а постоянная
+     краска), свёрстана прямо в index.html. */
+  .task-red-sort-wrap{
+    display:none;
+    position:absolute;
+    right:248px;
+    bottom:8px;
+    z-index:5;
+  }
+  .task-red-sort-wrap.visible{ display:flex; }
+  /* кнопка-подсказка "i" (.task-info-wrap/taskInfoBtn в index.html,
+     renderTaskInfoScreen в my.js, ТЗ пользователя от 15.09) — открывает
+     полноэкранную инструкцию по кнопкам задач (тем же приёмом, что и
+     "Все задачи проекта"/ридер книги: подменяет #settingsTabContent
+     целиком). Единственная кнопка этого ряда, видимая на ВСЕХ вкладках
+     задач сразу (то же условие, что у .task-add-fab, а не узкое условие
+     "глаза"/сортировки) — поэтому её место 288 — новый крайний левый шаг
+     в ряду (288 = 248 + 40), чтобы её позиция не менялась от того,
+     появляется ли слева от неё "глаз"/сортировка или нет. */
+  .task-info-wrap{
+    display:none;
+    position:absolute;
+    right:288px;
+    bottom:8px;
+    z-index:5;
+  }
+  .task-info-wrap.visible{ display:flex; }
   /* скрепка — между "Аа" и "+" (см. index.html и ТЗ пользователя, та же
      логика попапа не нужна: сразу открывает системный диалог выбора
      файла, см. initTaskGlobalToolbar в my.js) */
@@ -1228,6 +1282,88 @@
     .task-add-fab:hover{ background:var(--wood); color:var(--parchment); }
   }
   .task-add-fab:active{ transform:scale(.95); }
+
+  /* Экран-инструкция "Кнопки задач" (renderTaskInfoScreen в my.js, ТЗ
+     пользователя от 15.09) — тем же приёмом, что и "Все задачи проекта"/
+     ридер книги: подменяет #settingsTabContent целиком, внизу только один
+     настоящий "домик" (.mdeditor-fab-row/-btn из components.css,
+     переиспользуются как есть). Сплошной список без разделителей —
+     "заметка, только информативнее" (дословно из ТЗ): все .task-info-item
+     идут подряд с одним и тем же отступом снизу, без <hr>/подзаголовков
+     между ними. */
+  .task-info-body{
+    padding:14px 16px 76px;
+    overflow-y:auto;
+    height:100%;
+    box-sizing:border-box;
+    line-height:1.45;
+    color:var(--ink);
+  }
+  .task-info-item{
+    display:flex;
+    align-items:flex-start;
+    gap:12px;
+    margin-bottom:18px;
+  }
+  /* пиктограмма пункта нарочно крупнее настоящей кнопки строки (там 15px
+     внутри 22px, см. .task-icon-btn svg выше) — "увеличенный рисунок", как
+     в ТЗ. Стрелочка переноса увеличена ещё вдвое отдельным модификатором
+     (.task-info-icon-lg) — по ТЗ пользователя именно у неё "в два раза
+     увеличенный рисунок", раз уж под ней идёт целый список вкладок. */
+  .task-info-icon{
+    flex-shrink:0;
+    width:26px;height:26px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color:var(--wood);
+  }
+  .task-info-icon svg{ width:22px; height:22px; }
+  .task-info-icon-lg svg{ width:32px; height:32px; }
+  .task-info-text{ padding-top:2px; }
+  /* декоративные копии реальных кнопок строки задачи (чемоданчик/кружок-
+     флажок в трёх состояниях) — те же классы, что и в
+     renderTaskRowView/.task-flag-dot, чтобы вид совпадал 1-в-1 с настоящими
+     кнопками. pointer-events:none — на всякий случай доп. подстраховка;
+     основная гарантия "не нажимается" в том, что это не <button>, а <span>
+     без единого обработчика (см. renderTaskInfoScreen в my.js). */
+  .task-info-item .task-icon-btn,
+  .task-info-item .task-flag-dot{
+    display:inline-flex;
+    pointer-events:none;
+    vertical-align:middle;
+    margin:0 2px;
+  }
+  /* ряд декоративных вкладок под описанием переноса — "рисунки вкладок, но
+     не в полный рост" (ТЗ пользователя): уменьшенная копия формы настоящего
+     язычка (.settings-tab в этом же файле, 45×68) со всеми пиктограммами
+     вкладок-приёмников (см. TASK_MOVE_TARGET_TABS/TASK_MOVE_ICON_SVG в
+     my.js) — просто декор, ничего не открывает. */
+  .task-info-tabs-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin:10px 0 4px 38px;
+  }
+  .task-info-tab-mini{
+    width:34px;height:50px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:3px;
+    background:var(--parchment);
+    color:var(--wood);
+    border:1px solid var(--groove-shadow);
+    border-radius:0 12px 12px 0;
+    box-shadow:1px 1px 3px rgba(0,0,0,.25);
+    font-size:8px;
+    line-height:1.1;
+    text-align:center;
+    padding:2px;
+    box-sizing:border-box;
+  }
+  .task-info-tab-mini svg{ width:16px; height:16px; }
 
   /* Экран "Все задачи проекта" (openTaskNextPicker в my.js) — не
      отдельное окно, а замена содержимого прямо в #settingsTabContent

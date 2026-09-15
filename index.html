@@ -150,6 +150,34 @@ window.addEventListener("error", function(e){
            "перечёркнутый глаз" (задачи скрыты) прямо в JS
            (updateHideLinkedBtnState/EYE_ICON_SVG/EYE_OFF_ICON_SVG в
            my.js), поэтому здесь кнопка изначально пустая. -->
+      <!-- "i" — подсказка "Кнопки задач" (.task-info-wrap/taskInfoBtn,
+           renderTaskInfoScreen в my.js, ТЗ пользователя от 15.09).
+           Единственная в этом ряду видна на ВСЕХ вкладках задач сразу
+           (то же условие showTaskFab, что и у .task-add-fab, а не узкое
+           условие "только Next"/"только Red" — см. syncTaskFabRowForTab в
+           my.js), поэтому её место — новый крайний левый шаг ряда (288 =
+           248 + 40). Иконка — тот же INFO_ICON_SVG, что и у остальных
+           info-кнопок проекта (см. my.js), своя копия svg прямо тут по
+           тому же принципу, что у "Ж"/"Аа"/текстовыделителя выше. -->
+      <span class="task-info-wrap" id="taskInfoWrap">
+        <button type="button" class="mdeditor-fab-btn" id="taskInfoBtn" title="Что означают кнопки задач"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"></circle><path d="M12 11v6"></path><circle cx="12" cy="7.7" r="1" fill="currentColor" stroke="none"></circle></svg></button>
+      </span>
+      <!-- кнопка сортировки Red по отметке (.task-red-sort-wrap/
+           taskRedSortBtn, RED_SORT_BY_FLAG_KEY/getRedSortByFlag/
+           setRedSortByFlag в my.js, ТЗ пользователя от 15.09). Делит слот
+           right:248 с "глазом" ниже — видна только на вкладке "Red" (там
+           "глаз" не показывается, и наоборот на "Next"), поэтому одно и то
+           же место в ряду не конфликтует, см. syncTaskFabRowForTab в
+           my.js. Фон НЕ закрашивается через общий .pressed — вместо этого
+           title переключается в JS (updateRedSortBtnState), сама иконка не
+           меняется. Иконка — два жетона: снизу жёлтый, сверху красный
+           (перекрывает жёлтый меньше чем наполовину, "жёлтый выглядывает
+           больше чем на половину", дословно из ТЗ) — фиксированные цвета,
+           совпадают с .task-flag-dot.flag-red/flag-yellow (modals.css), а
+           не currentColor/тема. -->
+      <span class="task-red-sort-wrap" id="taskRedSortWrap">
+        <button type="button" class="mdeditor-fab-btn" id="taskRedSortBtn" title="Сортировать по отметке (сначала красные)"><svg viewBox="0 0 24 24"><circle cx="9" cy="14" r="6.5" fill="#f2b705" stroke="#b8860b" stroke-width="1"></circle><circle cx="15.5" cy="10.5" r="6.5" fill="#e0392b" stroke="#a52a1e" stroke-width="1"></circle></svg></button>
+      </span>
       <span class="task-hide-linked-wrap" id="taskHideLinkedWrap">
         <button type="button" class="mdeditor-fab-btn" id="taskHideLinkedBtn" title="Скрыть задачи, привязанные к проектам"></button>
       </span>

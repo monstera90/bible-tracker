@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 3.4 (15.09)
+   Версия: 4.0 (15.09)
    =========================================================================== */
 
 (function(){
@@ -1282,12 +1282,22 @@
     if(fontSizeWrap) fontSizeWrap.classList.toggle("visible", showTaskFab);
     if(highlightWrap) highlightWrap.classList.toggle("visible", showTaskFab);
     if(attachWrap) attachWrap.classList.toggle("visible", showTaskFab);
+    // "i" (подсказка "Кнопки задач", ТЗ пользователя от 15.09) — в отличие
+    // от "глаза"/сортировки ниже видна на ЛЮБОЙ вкладке задач, тем же
+    // условием, что и вся остальная скрепка/Аа/Ж/текстовыделитель выше.
+    var infoWrap = document.getElementById("taskInfoWrap");
+    if(infoWrap) infoWrap.classList.toggle("visible", showTaskFab);
     // "глаз" (скрыть задачи, привязанные к проектам, см.
     // initTaskGlobalToolbar/taskHideLinkedBtn выше) — в отличие от
     // соседних кнопок ряда видна только на самой вкладке "Next", не на
     // любой вкладке задач (ТЗ пользователя от 14.09).
     var hideLinkedWrap = document.getElementById("taskHideLinkedWrap");
     if(hideLinkedWrap) hideLinkedWrap.classList.toggle("visible", tab === "next");
+    // кнопка сортировки Red по отметке (ТЗ пользователя от 15.09) — делит
+    // тот же слот в ряду с "глазом" выше (см. комментарий в modals.css у
+    // .task-red-sort-wrap), видна только на самой вкладке "Red".
+    var redSortWrap = document.getElementById("taskRedSortWrap");
+    if(redSortWrap) redSortWrap.classList.toggle("visible", tab === "red");
 
     // Заглушка-домик — на любой вкладке задач с рядом кнопок (не на
     // карточке проекта: там openTaskNextPicker рисует свою, кликабельную
@@ -1388,7 +1398,7 @@
   // "Перенести задачу") — без red, т.к. принадлежность к Red определяется
   // не вкладкой-домом, а цветной отметкой слева от чекбокса. С 13.09 по
   // тому же принципу убрана и worktasks — она стала витриной (см.
-  // getTasksForTab/toggleTaskInWork), принадлежность определяется
+  // getTasksForTab/cycleTaskWorkState), принадлежность определяется
   // пиктограммой-чемоданчиком (inWork), а не вкладкой-домом.
   var TASK_MOVE_TARGET_TABS = ["inbox","next","projects","waiting","read","council","someday","jointtasks"];
   var TASK_MOVE_ICONS = {
@@ -1459,6 +1469,10 @@
   // SubtitleExtract ниже; задумана как переиспользуемая и в других
   // вкладках/местах — новые места просто ссылаются на эту же константу).
   var INFO_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"></circle><path d="M12 11v6"></path><circle cx="12" cy="7.7" r="1" fill="currentColor" stroke="none"></circle></svg>';
+  // те же два жетона, что и у #taskRedSortBtn в index.html (ТЗ
+  // пользователя от 15.09) — держим одну копию тут для инструкции
+  // (renderTaskInfoScreen), чтобы не разъехались при правках.
+  var SORT_FLAG_ICON_SVG = '<svg viewBox="0 0 24 24"><circle cx="9" cy="14" r="6.5" fill="#f2b705" stroke="#b8860b" stroke-width="1"></circle><circle cx="15.5" cy="10.5" r="6.5" fill="#e0392b" stroke="#a52a1e" stroke-width="1"></circle></svg>';
   // стрелка вниз в лоток — "скачать" (та же пиктограмма, что и DOWNLOAD_-
   // ICON_SVG в mdeditor.js/«Мои заметки», скопирована сюда, т.к. my.js не
   // имеет доступа к внутренним константам модуля). Пока без функции — кнопка
@@ -3298,6 +3312,10 @@
     // офлайн в dirtyNoteIds, не отправились бы сами по себе при
     // восстановлении сети (см. retryNotesPushOnReconnect в mdeditor.js).
     if(MdEditor && MdEditor.retryNotesPushOnReconnect) MdEditor.retryNotesPushOnReconnect();
+    // Общие задачи (TASK_SHARED_TASKS, Шаг 3) — свой независимый от syncId
+    // цикл (см. refreshJointTasksData/pushGroupTasksNow выше), поэтому
+    // подхватываем reconnect отдельным вызовом, а не через doCloudSync.
+    refreshJointTasksData();
   });
   window.addEventListener("offline", function(){ refreshStatusBase(); });
   if(syncId) doCloudSync();
@@ -3548,6 +3566,13 @@
       return writeGroupMember(groupId, getDeviceId(), "admin");
     }).then(function(){
       saveSharedGroup({groupId: groupId, role: "admin"});
+      // п. 3.5 ТЗ — до подключения первого участника isGroupTasksActive()
+      // для role:"admin" остаётся false (см. пояснение в разделе «ОБЩИЕ
+      // ЗАДАЧИ: ХРАНЕНИЕ И CRUD» ниже), так что этот вызов пока не переключит
+      // источник данных — просто заранее заводит цикл проверки на случай,
+      // если участник успеет подключиться ещё до того, как админ откроет
+      // вкладку сам.
+      refreshJointTasksData();
       modalBox.innerHTML = modalHeader("Код создан", "Отсканируйте этот QR-код на другом устройстве (в этой же панели, кнопка «У меня есть код») — или введите код текстом. Код действует ограниченное время.") +
         '<div id="mGroupNewQrHolder"></div><button class="modal-btn primary" id="mDone">Готово</button>';
       bindClose();
@@ -3723,13 +3748,14 @@
     document.getElementById("mGroupJoinConfirm").addEventListener("click", finalizeGroupJoin);
   }
 
-  // п. 2.3.5 ТЗ. TODO Шаг 3: перед/вместе с регистрацией участника нужно
-  // перенести локальные задачи вкладки jointtasks во "Входящие" (тем же
-  // механизмом, что moveTaskToTab) и переключить вкладку на чтение из
-  // /groups/<groupId>/tasks вместо локального CRUD — этот шаг того
-  // намеренно не делает (пользователь попросил не переходить к Шагу 3),
-  // здесь только сама регистрация участника в группе (то, что уже умел
-  // Шаг 1), выполненная теперь после диалогов выше, а не сразу по вводу кода.
+  // п. 2.3.5 ТЗ (Шаг 3 TASK_SHARED_TASKS, 15.09): перед переключением
+  // вкладки на общий источник данных переносим ЛОКАЛЬНЫЕ задачи вкладки
+  // jointtasks во "Входящие" тем же механизмом, что и обычный перенос
+  // между вкладками (moveTaskToTab) — делаем это ДО saveSharedGroup ниже:
+  // как только sharedGroup станет не-null у участника (isGroupTasksActive
+  // для role:"member" всегда true, см. выше), getTasksForTab("jointtasks")
+  // перестанет видеть локальные записи вовсе, переносить их дальше будет
+  // некуда. Сама регистрация участника в группе — то, что уже умел Шаг 1.
   function finalizeGroupJoin(){
     if(!pendingGroupJoin) return renderGroupPairingHome();
     var pairCode = pendingGroupJoin.pairCode;
@@ -3740,7 +3766,11 @@
       // код одноразовый (см. PAIRING_EXPIRY_MS выше) — подчищаем сразу
       // после использования, не дожидаясь истечения срока
       deletePairing(pairCode).catch(function(){});
+      getAllTasks().filter(function(t){ return t.c.tab === "jointtasks"; }).forEach(function(t){
+        moveTaskToTab(t.id, "inbox");
+      });
       saveSharedGroup({groupId: groupId, role: "member"});
+      refreshJointTasksData();
       pendingGroupJoin = null;
       modalBox.innerHTML = modalHeader("Подключено", "Устройство подключено к общим задачам.") +
         '<button class="modal-btn primary" id="mDone">Готово</button>';
@@ -3754,6 +3784,392 @@
       bindClose();
       document.getElementById("mBack").addEventListener("click", cancelGroupJoin);
     });
+  }
+
+  // ===================== ОБЩИЕ ЗАДАЧИ: ХРАНЕНИЕ И CRUD (TASK_SHARED_TASKS,
+  // Шаг 3, 15.09) =====================
+  // /groups/<groupId>/tasks/<id> — модель данных из п. 3.1 ТЗ. Каждая
+  // задача — отдельная запись {c: <зашифрованный JSON или null>, t}, та
+  // же форма {c,t}, что и у личных "task:<id>" в общем state, но с двумя
+  // отличиями:
+  //   1) c — НЕ сам объект, а base64 от AES-GCM-шифра его JSON-сериализации
+  //      (ключ = SHA-256(groupId), см. getGroupCryptoKey ниже — тот же
+  //      приём, что у encryptFileBytes/decryptFileBytes выше, только для
+  //      произвольного JSON, а не байтов файла). c === null — тумбстоун
+  //      удаления, как и в личном state, шифровать нечего.
+  //   2) Эти записи НЕ живут в общем `state` и не участвуют в личной
+  //      синхронизации/экспорте — у них свой, полностью отдельный
+  //      локальный кэш (groupTasksState, ниже) и свой облачный цикл.
+  //
+  // Расшифрованное содержимое задачи (c после decryptGroupContent) — та
+  // же форма, что у личной задачи (text/tab/checked/checkedAt/
+  // completionKey/nextForProjectId/flag/inWork/createdAt, см. «ВКЛАДКИ
+  // ЗАДАЧ: ХРАНЕНИЕ» ниже), плюс два новых поля из п. 2.4/3.1 ТЗ:
+  // createdBy/completedBy (id устройства, см. getDeviceId). tab у общих
+  // задач всегда "jointtasks", completionKey всегда null — личный
+  // механизм "taskcompletion:" (карта дней года) сюда не относится.
+  //
+  // Отправка изменений в облако — НЕ через сравнение содержимого
+  // (buildStateDelta/recordsEqual выше): шифрование даёт каждый раз новый
+  // шифротекст даже для одинаковых данных (случайный IV на операцию), так
+  // что сравнивать шифротексты бессмысленно. Вместо этого — явный набор
+  // "грязных" id (groupTasksDirty), тот же приём, что у dirtyNoteIds в
+  // облачном цикле заметок mdeditor.js.
+  //
+  // Источник данных вкладки (п. 3.3 ТЗ) переключается МИНИМАЛЬНО
+  // инвазивно: сам рендер вкладки (renderTaskTabList и всё, что вызывается
+  // из него — bindTaskRowActions/renderTaskRowEdit и т.п., см. «ВКЛАДКИ
+  // ЗАДАЧ: ОТРИСОВКА») не тронут вовсе. Дальше по файлу подменены только
+  // низкоуровневые функции хранения — getTaskById/saveTaskData/
+  // getTasksForTab/createTask/deleteTaskPermanently/checkTaskDone/
+  // restoreTaskFromArchive/moveTaskToTab (см. «ВКЛАДКИ ЗАДАЧ: ХРАНЕНИЕ»
+  // ниже) — они проверяют isGroupTaskId(id) (по префиксу "gt", группа
+  // задач генерирует id через genGroupTaskId ниже, отдельно от личного
+  // genTaskId) и/или isGroupTasksActive() и молча ведут себя как раньше,
+  // если группа не активна.
+
+  // п. 3.5 ТЗ: задачи админа становятся общими не в момент создания кода
+  // привязки, а РОВНО когда реально подключился первый участник — до
+  // этого у админа jointtasks обязана оставаться обычным локальным CRUD
+  // (иначе его собственные, уже существующие задачи вкладки пропали бы из
+  // виду, пока не появится хотя бы один участник). Поэтому "активность"
+  // группового источника данных для роли admin зависит не только от
+  // sharedGroup, а ещё и от того, состоялась ли миграция локальных задач
+  // в группу (см. migrateAdminGroupTasksIfNeeded/isAdminMigrationDone
+  // ниже) — у участника (role: "member") группа активна сразу же, как
+  // только он подключился (сама группа к этому моменту уже существует и
+  // администрируется кем-то другим).
+  function isGroupTasksActive(){
+    if(!sharedGroup || !sharedGroup.groupId) return false;
+    if(sharedGroup.role === "member") return true;
+    return isAdminMigrationDone(sharedGroup.groupId);
+  }
+
+  function isGroupTaskId(id){
+    return typeof id === "string" && id.indexOf("gt") === 0;
+  }
+
+  function genGroupTaskId(){
+    return "gt" + Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+  }
+
+  // ---- шифрование содержимого общих задач: SHA-256(groupId) -> AES-GCM-256
+  // (тот же приём, что у getFileCryptoKey/encryptFileBytes/decryptFileBytes
+  // выше — там ключ файлов SHA-256(syncId), здесь SHA-256(groupId) — но
+  // здесь шифруется JSON-текст задачи, а не байты файла, поэтому нужны
+  // свои bytesToBase64/base64ToBytes — Realtime Database хранит только
+  // JSON-совместимые значения, "сырые" байты в него не положить). ----
+  var groupCryptoKeyPromise = null, groupCryptoKeyGroupId = null;
+  function getGroupCryptoKey(groupId){
+    if(!groupId) return Promise.reject(new Error("no_group"));
+    if(groupCryptoKeyPromise && groupCryptoKeyGroupId === groupId) return groupCryptoKeyPromise;
+    groupCryptoKeyGroupId = groupId;
+    groupCryptoKeyPromise = crypto.subtle.digest("SHA-256", new TextEncoder().encode(groupId)).then(function(hash){
+      return crypto.subtle.importKey("raw", hash, {name:"AES-GCM"}, false, ["encrypt","decrypt"]);
+    });
+    return groupCryptoKeyPromise;
+  }
+  function bytesToBase64(bytes){
+    var bin = "", arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    for(var i=0;i<arr.length;i++) bin += String.fromCharCode(arr[i]);
+    return btoa(bin);
+  }
+  function base64ToBytes(b64){
+    var bin = atob(b64), arr = new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  }
+  function encryptGroupContent(groupId, contentObj){
+    var buf = new TextEncoder().encode(JSON.stringify(contentObj));
+    return getGroupCryptoKey(groupId).then(function(key){
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      return crypto.subtle.encrypt({name:"AES-GCM", iv:iv}, key, buf).then(function(cipher){
+        var out = new Uint8Array(iv.byteLength + cipher.byteLength);
+        out.set(iv, 0);
+        out.set(new Uint8Array(cipher), iv.byteLength);
+        return bytesToBase64(out);
+      });
+    });
+  }
+  function decryptGroupContent(groupId, b64){
+    var arr = base64ToBytes(b64);
+    var iv = arr.slice(0,12), cipher = arr.slice(12);
+    return getGroupCryptoKey(groupId).then(function(key){
+      return crypto.subtle.decrypt({name:"AES-GCM", iv:iv}, key, cipher).then(function(plainBuf){
+        return JSON.parse(new TextDecoder().decode(plainBuf));
+      });
+    });
+  }
+
+  // ---- локальный кэш расшифрованных общих задач (офлайн-поведение из
+  // раздела 3 ТЗ: вкладка всегда показывает последнее известное локально
+  // состояние, без отдельного индикатора "нет сети") ----
+  var GROUP_TASKS_CACHE_KEY_PREFIX = "bibleGroupTasksCache_v1_";
+  var groupTasksState = {};       // id -> {c, t}, расшифровано
+  var groupTasksLoadedFor = null; // groupId, под который сейчас загружен кэш выше
+  var groupTasksDirty = {};       // id -> true, копится между пушами (см. пояснение про шифрование выше)
+
+  function groupTasksCacheKey(groupId){ return GROUP_TASKS_CACHE_KEY_PREFIX + groupId; }
+  function loadGroupTasksCache(groupId){
+    if(groupTasksLoadedFor === groupId) return;
+    groupTasksState = {};
+    try{
+      var raw = localStorage.getItem(groupTasksCacheKey(groupId));
+      if(raw) groupTasksState = JSON.parse(raw) || {};
+    }catch(e){ groupTasksState = {}; }
+    groupTasksLoadedFor = groupId;
+  }
+  function saveGroupTasksCacheLocal(){
+    if(!sharedGroup) return;
+    try{ localStorage.setItem(groupTasksCacheKey(sharedGroup.groupId), JSON.stringify(groupTasksState)); }catch(e){}
+  }
+
+  function getAllGroupTasks(){
+    if(!sharedGroup) return [];
+    loadGroupTasksCache(sharedGroup.groupId);
+    var list = [];
+    Object.keys(groupTasksState).forEach(function(id){
+      var rec = groupTasksState[id];
+      if(rec && rec.c) list.push({id:id, c:rec.c, t:rec.t});
+    });
+    return list;
+  }
+  function getGroupTaskById(id){
+    if(!sharedGroup) return null;
+    loadGroupTasksCache(sharedGroup.groupId);
+    var rec = groupTasksState[id];
+    if(!rec || !rec.c) return null;
+    return {id:id, c:rec.c, t:rec.t};
+  }
+  function saveGroupTaskData(id, data){
+    if(!sharedGroup) return;
+    loadGroupTasksCache(sharedGroup.groupId);
+    // та же причина, что у createdAt в личном saveTaskData ниже — стабильная
+    // позиция в списке, не прыгает при каждой правке
+    if(data.createdAt == null){
+      var existing = groupTasksState[id];
+      data.createdAt = (existing && existing.c && existing.c.createdAt != null) ? existing.c.createdAt : Date.now();
+    }
+    groupTasksState[id] = {c:data, t:Date.now()};
+    saveGroupTasksCacheLocal();
+    groupTasksDirty[id] = true;
+    scheduleGroupTasksPush();
+  }
+  function getGroupTasksForTab(){
+    return getAllGroupTasks().filter(function(t){ return t.c.checked !== true; })
+      .sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
+  }
+  function createGroupTask(){
+    var id = genGroupTaskId();
+    saveGroupTaskData(id, {text:"", tab:"jointtasks", checked:false, checkedAt:null,
+      completionKey:null, nextForProjectId:null, flag:null, inWork:false,
+      createdBy:getDeviceId(), completedBy:null});
+    return id;
+  }
+  function deleteGroupTaskPermanently(id){
+    if(!sharedGroup) return;
+    loadGroupTasksCache(sharedGroup.groupId);
+    groupTasksState[id] = {c:null, t:Date.now()};
+    saveGroupTasksCacheLocal();
+    groupTasksDirty[id] = true;
+    scheduleGroupTasksPush();
+    if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
+  }
+  // Отметка общей задачи выполненной — п. 2.4 ТЗ. ⚠️ Шаг 6 ещё не сделан:
+  // перевода в "Архив общих задач" (/groups/<groupId>/archive) пока нет,
+  // задача просто перестаёт показываться (checked:true отфильтровывается
+  // getGroupTasksForTab), но не теряется — ровно как вели себя личные
+  // вкладки задач до появления их архива. completedBy проставляется здесь
+  // же (п. 2.4 — второе авторское поле, отдельное от createdBy).
+  function checkGroupTaskDone(id){
+    var task = getGroupTaskById(id);
+    if(!task || task.c.checked) return;
+    task.c.checked = true;
+    task.c.checkedAt = Date.now();
+    task.c.completedBy = getDeviceId();
+    saveGroupTaskData(id, task.c);
+  }
+
+  // ---- облачный цикл общих задач: свой, полностью независимый от личного
+  // doCloudSync/syncId (см. п.0 ТЗ — фича не использует личный sync-код и
+  // не завязана на него) ----
+  var GROUP_TASKS_PUSH_DEBOUNCE_MS = 400;
+  var groupTasksPushTimer = null;
+  function scheduleGroupTasksPush(){
+    if(!sharedGroup) return;
+    clearTimeout(groupTasksPushTimer);
+    groupTasksPushTimer = setTimeout(pushGroupTasksNow, GROUP_TASKS_PUSH_DEBOUNCE_MS);
+  }
+  function pushGroupTasksNow(){
+    if(!sharedGroup) return Promise.resolve();
+    var groupId = sharedGroup.groupId;
+    var ids = Object.keys(groupTasksDirty);
+    if(!ids.length) return Promise.resolve();
+    groupTasksDirty = {};
+    return Promise.all(ids.map(function(id){
+      var rec = groupTasksState[id];
+      if(!rec) return null;
+      if(rec.c === null){
+        var tomb = {}; tomb[id] = {c:null, t:rec.t};
+        return tomb;
+      }
+      return encryptGroupContent(groupId, rec.c).then(function(b64){
+        var out = {}; out[id] = {c:b64, t:rec.t};
+        return out;
+      });
+    })).then(function(parts){
+      var payload = {};
+      parts.forEach(function(p){ if(p) Object.keys(p).forEach(function(k){ payload[k] = p[k]; }); });
+      if(!Object.keys(payload).length) return;
+      return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/tasks.json", {
+        method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload)
+      }, 15000).then(function(res){
+        if(!res.ok) throw new Error("group_tasks_put_failed_" + res.status);
+      });
+    }).catch(function(err){
+      console.error("Не удалось отправить общие задачи в облако:", err);
+      // не теряем изменения — возвращаем их обратно в очередь "грязных",
+      // следующий scheduleGroupTasksPush (новая правка) или ручной вызов
+      // refreshJointTasksData (открытие вкладки, событие "online") подхватит
+      ids.forEach(function(id){ groupTasksDirty[id] = true; });
+    });
+  }
+  function fetchGroupTasksRaw(groupId){
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/tasks.json", {method:"GET"}, 10000).then(function(res){
+      if(!res.ok) throw new Error("group_tasks_fetch_failed_" + res.status);
+      return res.json();
+    });
+  }
+  // Слияние по last-write-wins (t), как mergeStates у личного state — но
+  // применяется по одной записи и с расшифровкой, а не как единая PATCH-
+  // дельта (см. пояснение про шифрование/dirty-набор в шапке раздела).
+  function pullGroupTasksNow(){
+    if(!sharedGroup) return Promise.resolve();
+    var groupId = sharedGroup.groupId;
+    loadGroupTasksCache(groupId);
+    return fetchGroupTasksRaw(groupId).then(function(cloudRaw){
+      cloudRaw = cloudRaw || {};
+      var ids = Object.keys(cloudRaw);
+      return Promise.all(ids.map(function(id){
+        var cloudRec = cloudRaw[id];
+        if(!cloudRec) return null;
+        var localRec = groupTasksState[id];
+        if(localRec && localRec.t >= cloudRec.t) return null; // локальная версия не старше — пропускаем
+        if(cloudRec.c === null) return {id:id, rec:{c:null, t:cloudRec.t}};
+        return decryptGroupContent(groupId, cloudRec.c).then(function(obj){
+          return {id:id, rec:{c:obj, t:cloudRec.t}};
+        }).catch(function(err){
+          console.error("Не удалось расшифровать общую задачу", id, err);
+          return null;
+        });
+      })).then(function(results){
+        var changed = false;
+        results.forEach(function(r){
+          if(!r) return;
+          groupTasksState[r.id] = r.rec;
+          changed = true;
+        });
+        if(changed){
+          saveGroupTasksCacheLocal();
+          rerenderJointTasksTabIfOpen();
+        }
+      });
+    });
+  }
+
+  function fetchGroupMembers(groupId){
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/members.json", {method:"GET"}, 8000).then(function(res){
+      if(!res.ok) throw new Error("group_members_fetch_failed_" + res.status);
+      return res.json();
+    });
+  }
+
+  // п. 3.5 ТЗ — см. пояснение у isGroupTasksActive выше. Флаг миграции
+  // хранится в localStorage per-groupId (не в sharedGroup — переживает
+  // повторные saveSharedGroup, хотя в рамках одного groupId это и так не
+  // происходит).
+  var GROUP_ADMIN_MIGRATED_KEY_PREFIX = "bibleGroupAdminMigrated_v1_";
+  function isAdminMigrationDone(groupId){
+    try{ return localStorage.getItem(GROUP_ADMIN_MIGRATED_KEY_PREFIX + groupId) === "1"; }catch(e){ return false; }
+  }
+  function markAdminMigrationDone(groupId){
+    try{ localStorage.setItem(GROUP_ADMIN_MIGRATED_KEY_PREFIX + groupId, "1"); }catch(e){}
+  }
+  // Переносит ТЕКУЩИЕ локальные задачи вкладки jointtasks админа в
+  // /groups/<groupId>/tasks, как только видит, что у группы появился хотя
+  // бы один участник (см. fetchGroupMembers) — до этого момента у
+  // устройства нет иного способа узнать о присоединении участника (нет
+  // push-уведомлений), поэтому проверка ленивая: см. вызовы
+  // refreshJointTasksData ниже (открытие вкладки, событие "online").
+  // После успешного переноса локальные записи тушатся (c:null) — они
+  // полностью заменяются облачными.
+  function migrateAdminGroupTasksIfNeeded(){
+    if(!sharedGroup || sharedGroup.role !== "admin") return Promise.resolve();
+    var groupId = sharedGroup.groupId;
+    if(isAdminMigrationDone(groupId)) return Promise.resolve();
+    return fetchGroupMembers(groupId).then(function(members){
+      var count = members ? Object.keys(members).length : 1;
+      if(count < 2) return; // участник ещё не подключился — рано
+      var localJoint = getAllTasks().filter(function(t){ return t.c.tab === "jointtasks"; });
+      return Promise.all(localJoint.map(function(t){
+        var id = genGroupTaskId();
+        var content = {
+          text: t.c.text, tab: "jointtasks", checked: !!t.c.checked, checkedAt: t.c.checkedAt || null,
+          completionKey: null, nextForProjectId: null, flag: t.c.flag || null, inWork: !!t.c.inWork,
+          createdBy: getDeviceId(), completedBy: t.c.checked ? getDeviceId() : null,
+          createdAt: t.c.createdAt != null ? t.c.createdAt : t.t
+        };
+        return encryptGroupContent(groupId, content).then(function(b64){
+          var out = {}; out[id] = {c:b64, t:Date.now()};
+          return out;
+        });
+      })).then(function(parts){
+        var payload = {};
+        parts.forEach(function(p){ Object.keys(p).forEach(function(k){ payload[k] = p[k]; }); });
+        var pushPromise = Object.keys(payload).length ?
+          fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/tasks.json", {
+            method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload)
+          }, 15000).then(function(res){
+            if(!res.ok) throw new Error("group_tasks_migrate_failed_" + res.status);
+          }) : Promise.resolve();
+        return pushPromise.then(function(){
+          // локальные копии больше не нужны — теперь это общие задачи в
+          // облаке (та же схема мягкого удаления, c:null, что и у
+          // deleteTaskPermanently)
+          localJoint.forEach(function(t){ state["task:" + t.id] = {c:null, t:Date.now()}; });
+          if(localJoint.length){ saveLocalState(); scheduleCloudPush(); }
+          markAdminMigrationDone(groupId);
+        });
+      });
+    }).catch(function(err){
+      console.error("Не удалось перенести локальные общие задачи в группу:", err);
+    });
+  }
+
+  // Перерисовывает вкладку "Общие задачи", если она сейчас открыта — та же
+  // защита от прерывания редактирования, что и в rerenderAllFromState
+  // (не разрушаем открытое поле ввода фоновым обновлением).
+  function rerenderJointTasksTabIfOpen(){
+    if(currentSettingsTab !== "jointtasks") return;
+    if(!settingsModalOverlay || !settingsModalOverlay.classList.contains("open")) return;
+    var activeEl = document.activeElement;
+    var isEditingNow = !!(activeEl && activeEl.classList && activeEl.classList.contains("task-editable"));
+    if(isEditingNow) return;
+    renderTaskTabList("jointtasks");
+  }
+
+  // Единая точка входа для "освежить общие задачи" — вызывается при
+  // открытии вкладки (см. renderTaskTabList) и при восстановлении сети
+  // (см. обработчик "online" выше по файлу); НЕ завязана на doCloudSync/
+  // syncId (личная синхронизация может быть вообще не настроена).
+  function refreshJointTasksData(){
+    if(!sharedGroup) return;
+    var chain = (sharedGroup.role === "admin" && !isAdminMigrationDone(sharedGroup.groupId))
+      ? migrateAdminGroupTasksIfNeeded() : Promise.resolve();
+    chain.then(function(){
+      if(isGroupTasksActive()) return pullGroupTasksNow();
+    }).catch(function(err){ console.error(err); });
+    if(Object.keys(groupTasksDirty).length) pushGroupTasksNow();
   }
 
   // ===================== ОТВЯЗКА / ОТПИСКА — ДИАЛОГИ (TASK_SHARED_TASKS,
@@ -4243,6 +4659,43 @@
         setNextHideLinkedTasks(!getNextHideLinkedTasks());
         updateHideLinkedBtnState();
         renderTaskTabList("next");
+      });
+    }
+
+    // --- кнопка сортировки Red по отметке (ТЗ пользователя от 15.09) —
+    // делит слот в ряду с "глазом" выше (см. комментарий в modals.css у
+    // .task-red-sort-wrap), видна только на вкладке "Red" (отдельный
+    // toggle в syncTaskFabRowForTab). Сама иконка (два жетона) не
+    // меняется — переключается только title, тем же приёмом, что и у
+    // "глаза" выше, только там ещё меняется innerHTML.
+    var redSortBtn = document.getElementById("taskRedSortBtn");
+    stopMousedown(redSortBtn);
+    function updateRedSortBtnState(){
+      if(!redSortBtn) return;
+      var active = getRedSortByFlag();
+      redSortBtn.title = active
+        ? "Обычный порядок (по дате добавления)"
+        : "Сортировать по отметке (сначала красные)";
+    }
+    updateRedSortBtnState();
+    if(redSortBtn){
+      redSortBtn.addEventListener("click", function(){
+        setRedSortByFlag(!getRedSortByFlag());
+        updateRedSortBtnState();
+        renderTaskTabList("red");
+      });
+    }
+
+    // --- "i" — подсказка "Кнопки задач" (ТЗ пользователя от 15.09),
+    // видна на любой вкладке задач (см. showTaskFab в
+    // syncTaskFabRowForTab). Открывает полноэкранную инструкцию тем же
+    // приёмом, что и "Все задачи проекта" (renderTaskInfoScreen ниже).
+    var infoBtn = document.getElementById("taskInfoBtn");
+    stopMousedown(infoBtn);
+    if(infoBtn){
+      infoBtn.addEventListener("click", function(){
+        flushPendingTaskEdits();
+        renderTaskInfoScreen();
       });
     }
 
@@ -11772,6 +12225,12 @@
   //                     (из вкладки "projects"), для которой это next-действие
   //   flag            — цветная отметка слева от чекбокса: null (нет
   //                     отметки, бледно-сиреневый кружок) | "red" | "yellow".
+  //                     ИЗМЕНЕНО (ТЗ пользователя от 15.09): короткий клик по
+  //                     кружку больше не проходит через null — цикл только
+  //                     red→yellow→red→… (см. cycleTaskFlag), войти в цикл с
+  //                     null клик всё ещё может (даёт red), а вот выйти обратно
+  //                     в null кликом уже нельзя — снять отметку можно только
+  //                     долгим нажатием, см. clearTaskFlag/bindTapOrHold.
   //                     Вкладка Red — не отдельное хранилище, а витрина:
   //                     показывает ЛЮБУЮ незакрытую задачу с flag "red" или
   //                     "yellow", независимо от того, в какой реальной
@@ -11779,16 +12238,25 @@
   //                     отметка задачи выполненной прямо на вкладке Red
   //                     закрывает тот же самый task:<id> — и он пропадает
   //                     отовсюду разом, это одна и та же запись, не копия.
-  //   inWork          — пиктограмма-чемоданчик (true/false), НЕЗАВИСИМАЯ от
-  //                     flag (ТЗ пользователя от 13.09): простой toggle
-  //                     (не цикл, см. toggleTaskInWork), доступен у КАЖДОЙ
-  //                     задачи на ЛЮБОЙ вкладке. Вкладка "Задачи в работе"
-  //                     (worktasks) устроена ТОЧНО как Red — витрина, не
-  //                     хранилище: показывает любую незакрытую задачу с
-  //                     inWork===true, независимо от её реальной домашней
-  //                     вкладки (см. getTasksForTab). Залита — задача видна
-  //                     на worktasks; сняли заливку — исчезла оттуда, но
-  //                     осталась на своей настоящей вкладке.
+  //                     Группировка списка Red по цвету (красные сверху)
+  //                     сама по себе больше не включена по умолчанию — см.
+  //                     RED_SORT_BY_FLAG_KEY/taskRedSortBtn — пользователь
+  //                     включает её сам кнопкой в нижнем ряду, когда нужно.
+  //   inWork          — пиктограмма-чемоданчик: false/undefined (не в работе,
+  //                     старые задачи могли иметь true — читается как "work",
+  //                     см. getTaskWorkState) | "work" (в работе) | "check"
+  //                     (нужно проверить). ИЗМЕНЕНО (ТЗ пользователя от
+  //                     15.09): раньше был простым toggle, теперь клик — цикл
+  //                     off→work→check→work→check→… (обратно в off кликом не
+  //                     возвращается), долгое нажатие сбрасывает в off (см.
+  //                     cycleTaskWorkState/clearTaskWorkState/bindTapOrHold).
+  //                     НЕЗАВИСИМАЯ от flag, доступна у КАЖДОЙ задачи на
+  //                     ЛЮБОЙ вкладке. Вкладка "Задачи в работе" (worktasks)
+  //                     устроена ТОЧНО как Red — витрина, не хранилище:
+  //                     показывает любую незакрытую задачу с getTaskWorkState
+  //                     !== "off", независимо от её реальной домашней вкладки
+  //                     (см. getTasksForTab) — то есть остаётся на витрине и
+  //                     в состоянии "нужно проверить", не только "в работе".
   function genTaskId(){
     return "tk" + Date.now() + Math.random().toString(36).slice(2,7);
   }
@@ -11803,11 +12271,18 @@
     return list;
   }
   function getTaskById(id){
+    // TASK_SHARED_TASKS, Шаг 3: id общей задачи (префикс "gt", см.
+    // genGroupTaskId/isGroupTaskId в разделе «ОБЩИЕ ЗАДАЧИ: ХРАНЕНИЕ И
+    // CRUD») живёт в отдельном облачном хранилище, не в этом state —
+    // минимально инвазивная подмена источника данных для всего
+    // остального рендера вкладок (см. пояснение там же).
+    if(isGroupTaskId(id)) return getGroupTaskById(id);
     var rec = state["task:" + id];
     if(!rec || !rec.c) return null;
     return {id: id, c: rec.c, t: rec.t};
   }
   function saveTaskData(id, data){
+    if(isGroupTaskId(id)) return saveGroupTaskData(id, data);
     // ВАЖНО: t всегда должен быть временем ИМЕННО этой записи, а не
     // "унаследованным" от старой версии — mergeStates сравнивает записи
     // по t (last-write-wins), и если t не обновлять при каждом изменении
@@ -11838,6 +12313,10 @@
     scheduleCloudPush();
   }
   function createTask(tab){
+    // TASK_SHARED_TASKS, Шаг 3 — если устройство привязано к группе и
+    // группа уже активна как источник данных (см. isGroupTasksActive),
+    // новая задача вкладки "Общие задачи" создаётся в облаке, а не локально.
+    if(tab === "jointtasks" && isGroupTasksActive()) return createGroupTask();
     var id = genTaskId();
     // на вкладке Red своего хранилища нет (см. пояснение выше) — такая
     // задача реально уходит в inbox, но сразу получает красную отметку,
@@ -11852,7 +12331,10 @@
     return id;
   }
   // как createTask, но сразу с готовым текстом — для массового
-  // восстановления задач из .txt (см. renderSettingsTabImportFile)
+  // восстановления задач из .txt (см. renderSettingsTabImportFile).
+  // Группового варианта намеренно нет: это восстановление ИЗ ЛИЧНОГО
+  // экспорта, а общие задачи в личный экспорт не попадают (см. раздел
+  // «ОБЩИЕ ЗАДАЧИ: ХРАНЕНИЕ И CRUD» — свой, отдельный от state источник).
   function createTaskWithText(tab, text){
     var id = genTaskId();
     var homeTab = (tab === "red") ? "inbox" : (tab === "worktasks" ? "next" : tab);
@@ -11878,32 +12360,52 @@
     return id;
   }
   function getTasksForTab(tab){
+    // TASK_SHARED_TASKS, Шаг 3 — переключение источника данных (п. 3.3 ТЗ):
+    // если группа активна (см. isGroupTasksActive), список этой вкладки
+    // берётся из облака, а не из локального state. Пока группа не активна
+    // (ещё не привязаны, или админ до подключения первого участника — см.
+    // п. 3.5) — поведение прежнее, ветка ниже даже не задета.
+    if(tab === "jointtasks" && isGroupTasksActive()){
+      return getGroupTasksForTab();
+    }
     if(tab === "worktasks"){
-      // витрина по пиктограмме-чемоданчику (см. toggleTaskInWork) — та же
+      // витрина по пиктограмме-чемоданчику (см. getTaskWorkState) — та же
       // схема, что и у Red чуть ниже: показывает ЛЮБУЮ незакрытую задачу с
-      // inWork===true, из какой бы вкладки она ни была, плюс на всякий
-      // случай задачи с «настоящим» tab==="worktasks" (могли остаться из
-      // более старой версии данных, когда worktasks ещё была обычным
-      // местом хранения, до ТЗ от 13.09 про пиктограмму-чемоданчик)
+      // getTaskWorkState()!=="off" (в работе ИЛИ нужно проверить), из
+      // какой бы вкладки она ни была, плюс на всякий случай задачи с
+      // «настоящим» tab==="worktasks" (могли остаться из более старой
+      // версии данных, когда worktasks ещё была обычным местом хранения,
+      // до ТЗ от 13.09 про пиктограмму-чемоданчик)
       return getAllTasks().filter(function(t){
         if(t.c.checked === true) return false;
-        return t.c.tab === "worktasks" || t.c.inWork === true;
+        return t.c.tab === "worktasks" || getTaskWorkState(t) !== "off";
       }).sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
     }
     if(tab === "red"){
       // витрина: любая незакрытая задача с красной/жёлтой отметкой, из
       // какой бы вкладки она ни была — плюс на всякий случай задачи с
       // «настоящим» tab==="red" (могли остаться из более старой версии
-      // данных, когда red ещё была обычным местом хранения)
-      return getAllTasks().filter(function(t){
+      // данных, когда red ещё была обычным местом хранения).
+      // ИЗМЕНЕНО (ТЗ пользователя от 15.09): группировка по цвету (красные
+      // сверху) больше не включена всегда — по умолчанию список идёт в
+      // обычном порядке по дате добавления, как и остальные вкладки;
+      // группировку по флажку пользователь включает сам кнопкой
+      // taskRedSortBtn (см. RED_SORT_BY_FLAG_KEY/getRedSortByFlag ниже).
+      var redList = getAllTasks().filter(function(t){
         if(t.c.checked === true) return false;
         return t.c.tab === "red" || t.c.flag === "red" || t.c.flag === "yellow";
-      }).sort(function(a,b){
-        var pa = a.c.flag === "red" ? 0 : 1;
-        var pb = b.c.flag === "red" ? 0 : 1;
-        if(pa !== pb) return pa - pb;
-        return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t);
       });
+      if(getRedSortByFlag()){
+        redList.sort(function(a,b){
+          var pa = a.c.flag === "red" ? 0 : 1;
+          var pb = b.c.flag === "red" ? 0 : 1;
+          if(pa !== pb) return pa - pb;
+          return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t);
+        });
+      } else {
+        redList.sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
+      }
+      return redList;
     }
     return getAllTasks().filter(function(t){ return t.c.tab === tab && t.c.checked !== true; })
       .sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
@@ -11952,6 +12454,18 @@
   function moveTaskToTab(id, newTab){
     var task = getTaskById(id);
     if(!task || task.c.tab === newTab) return;
+    // TASK_SHARED_TASKS, Шаг 3 — перенос задачи МЕЖДУ личным state и
+    // облачным хранилищем группы через этот универсальный механизм
+    // намеренно не поддерживается (в ТЗ такого переноса нет, а без явной
+    // конвертации содержимого между двумя хранилищами это был бы источник
+    // потери данных). На практике обычно и так недостижимо из UI: личная
+    // задача не может получить newTab==="jointtasks", пока группа активна
+    // (jointtasks в этом случае не обычное хранилище — см.
+    // isGroupTasksActive), а общая задача (isGroupTaskId) в этой функции
+    // всегда имеет tab==="jointtasks", так что переносить её "из" некуда
+    // кроме как через этот явный запрет.
+    if(isGroupTaskId(id)) return;
+    if(newTab === "jointtasks" && isGroupTasksActive()) return;
     task.c.tab = newTab;
     if(newTab !== "next") task.c.nextForProjectId = null;
     saveTaskData(id, task.c);
@@ -11982,30 +12496,128 @@
     task.c.createdAt = edge === "top" ? edgeKey + 1 : edgeKey - 1;
     saveTaskData(id, task.c);
   }
-  // цветная отметка слева от чекбокса: нет отметки → red → yellow → нет
-  // отметки. Возвращает новое значение (null/"red"/"yellow").
+  // цветная отметка слева от чекбокса. ИЗМЕНЕНО (ТЗ пользователя от
+  // 15.09): короткий клик — цикл red→yellow→red→… (из null клик даёт red,
+  // но обратно в null кликом больше не возвращается); снять отметку
+  // совсем можно только долгим нажатием (см. clearTaskFlag ниже,
+  // bindTapOrHold — общий тап/холд-хелпер). Возвращает новое значение
+  // ("red"/"yellow").
   function cycleTaskFlag(id){
     var task = getTaskById(id);
     if(!task) return null;
-    var order = [null, "red", "yellow"];
-    var idx = order.indexOf(task.c.flag || null);
-    var next = order[(idx + 1) % order.length];
+    var next = (task.c.flag === "red") ? "yellow" : "red";
     task.c.flag = next;
     saveTaskData(id, task.c);
     return next;
   }
-  // пиктограмма-чемоданчик слева... точнее в ряду .task-actions (см.
-  // renderTaskRowView/renderTaskRowEdit) — простой toggle (не цикл, как у
-  // cycleTaskFlag выше), независимый от flag. Возвращает новое значение
-  // (true/false). ТЗ пользователя от 13.09.
-  function toggleTaskInWork(id){
+  // Долгое нажатие на кружок-флажок — сброс отметки в null. Пара к
+  // cycleTaskFlag выше.
+  function clearTaskFlag(id){
     var task = getTaskById(id);
     if(!task) return null;
-    task.c.inWork = !task.c.inWork;
+    task.c.flag = null;
     saveTaskData(id, task.c);
-    return task.c.inWork;
+    return null;
+  }
+  // Нормализует поле c.inWork к одному из трёх состояний — старые задачи
+  // могли получить булево true ещё до этой правки (простой toggle, ТЗ от
+  // 13.09), читаем его как "work", чтобы они не потерялись.
+  function getTaskWorkState(task){
+    var v = task && task.c ? task.c.inWork : null;
+    if(v === "check") return "check";
+    if(v === true || v === "work") return "work";
+    return "off";
+  }
+  // пиктограмма-чемоданчик (см. renderTaskRowView/renderTaskRowEdit) —
+  // независима от flag. ИЗМЕНЕНО (ТЗ пользователя от 15.09): раньше был
+  // простым toggle (true/false, см. историю правок), теперь короткий клик
+  // — цикл off→work→check→work→check→… (обратно в off кликом не
+  // возвращается), долгое нажатие сбрасывает в off (см. clearTaskWorkState
+  // ниже, тот же bindTapOrHold, что и у cycleTaskFlag). Возвращает новое
+  // значение ("work"/"check").
+  function cycleTaskWorkState(id){
+    var task = getTaskById(id);
+    if(!task) return null;
+    var st = getTaskWorkState(task);
+    var next = (st === "off") ? "work" : (st === "work" ? "check" : "work");
+    task.c.inWork = next;
+    saveTaskData(id, task.c);
+    return next;
+  }
+  // Долгое нажатие на чемоданчик — сброс в off. Пара к cycleTaskWorkState.
+  function clearTaskWorkState(id){
+    var task = getTaskById(id);
+    if(!task) return null;
+    task.c.inWork = false;
+    saveTaskData(id, task.c);
+    return "off";
+  }
+  // класс кнопки-чемоданчика по текущему состоянию — общий для всех мест,
+  // где рисуется .task-worktasks-btn (renderTaskRowView/renderTaskRowEdit/
+  // renderRowView в openTaskNextPicker), чтобы вид не разъехался между
+  // ними. "work" — залитый кружок (как раньше .active), "check" — тонкое
+  // кольцо вокруг незалитой пиктограммы (см. .needs-check в modals.css).
+  function taskWorktasksBtnClass(task){
+    var st = getTaskWorkState(task);
+    if(st === "work") return " active";
+    if(st === "check") return " needs-check";
+    return "";
+  }
+  // Тап/долгое нажатие (250мс) — общий хелпер для чемоданчика и кружка-
+  // флажка (ТЗ пользователя от 15.09): короткий клик даёт onTap (шаг
+  // цикла), удержание — onHold (сброс отметки). Тот же приём, что и у
+  // долгого нажатия по главе Библии (см. LONG_PRESS_MS/pressTimer/
+  // MOVE_CANCEL_PX в chapters-grid выше), просто вынесен в переиспользуемую
+  // функцию — нужен сразу двум кнопкам и сразу в двух местах (обычные
+  // вкладки задач и "Все задачи проекта", см. bindTaskRowActions/
+  // bindRowActions). sdvig пальца/мыши больше MOVE_CANCEL_PX отменяет
+  // удержание, как и в исходном приёме.
+  function bindTapOrHold(el, onTap, onHold){
+    if(!el) return;
+    var HOLD_MS = 250, MOVE_CANCEL_PX = 10;
+    var timer = null, holdFired = false, startXY = null;
+    function clearTimer(){ clearTimeout(timer); timer = null; }
+    function start(x, y){
+      holdFired = false;
+      startXY = {x:x, y:y};
+      clearTimer();
+      timer = setTimeout(function(){ holdFired = true; onHold(); }, HOLD_MS);
+    }
+    function move(x, y){
+      if(!startXY) return;
+      var dx = x - startXY.x, dy = y - startXY.y;
+      if(Math.sqrt(dx*dx + dy*dy) > MOVE_CANCEL_PX) clearTimer();
+    }
+    el.addEventListener("touchstart", function(e){ var t = e.touches[0]; start(t.clientX, t.clientY); }, {passive:true});
+    el.addEventListener("touchmove", function(e){ var t = e.touches[0]; move(t.clientX, t.clientY); }, {passive:true});
+    el.addEventListener("touchend", clearTimer);
+    el.addEventListener("touchcancel", clearTimer);
+    el.addEventListener("mousedown", function(e){ start(e.clientX, e.clientY); });
+    el.addEventListener("mousemove", function(e){ move(e.clientX, e.clientY); });
+    el.addEventListener("mouseup", clearTimer);
+    // click приходит и после обычного тапа, и (на тач-устройствах) следом
+    // за уже сработавшим долгим нажатием — если оно уже сработало, этот
+    // click просто гасим, а не выполняем ещё и onTap поверх него.
+    el.addEventListener("click", function(e){
+      e.stopPropagation();
+      if(holdFired){ holdFired = false; return; }
+      onTap();
+    });
+  }
+  // Хранилище переключателя "сортировать Red по отметке" (taskRedSortBtn,
+  // см. index.html/initTaskGlobalToolbar) — тот же приём, что и
+  // NEXT_HIDE_LINKED_KEY у "глаза" вкладки Next чуть ниже.
+  var RED_SORT_BY_FLAG_KEY = "bibleRedSortByFlag_v1";
+  function getRedSortByFlag(){
+    try{ return localStorage.getItem(RED_SORT_BY_FLAG_KEY) === "1"; }catch(e){ return false; }
+  }
+  function setRedSortByFlag(val){
+    try{ localStorage.setItem(RED_SORT_BY_FLAG_KEY, val ? "1" : "0"); }catch(e){}
   }
   function checkTaskDone(id){
+    // Общая задача — свой путь (нет личного completionKey/"Карты дней
+    // года", есть completedBy, см. п. 2.4 ТЗ и checkGroupTaskDone выше).
+    if(isGroupTaskId(id)) return checkGroupTaskDone(id);
     var task = getTaskById(id);
     if(!task || task.c.checked) return;
     var ts = Date.now();
@@ -12017,6 +12629,9 @@
     saveTaskData(id, task.c);
   }
   function restoreTaskFromArchive(id){
+    // Архив общих задач — Шаг 6 (ещё не сделан), сюда пока не должно
+    // попадать: защита на случай будущей ошибки монтирования UI.
+    if(isGroupTaskId(id)) return;
     var task = getTaskById(id);
     if(!task || !task.c.checked) return;
     if(task.c.completionKey){
@@ -12034,6 +12649,7 @@
   // она есть — иначе отметка о выполнении осталась бы навсегда висеть в
   // "Карте дней года", хотя самой задачи уже нет.
   function deleteTaskPermanently(id){
+    if(isGroupTaskId(id)) return deleteGroupTaskPermanently(id);
     var task = getTaskById(id);
     if(!task) return;
     if(task.c.completionKey){
@@ -12731,6 +13347,16 @@
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     if(tabKey === "projects") clearProjectPickerResumeState();
+    // TASK_SHARED_TASKS, Шаг 3 — при каждом открытии/перерисовке вкладки
+    // "Общие задачи" освежаем данные из облака в фоне (см.
+    // refreshJointTasksData выше): сам рендер ниже использует то, что уже
+    // есть в локальном кэше ПРЯМО СЕЙЧАС (офлайн-поведение из раздела 3
+    // ТЗ — вкладка не ждёт сеть), а если придут изменения — сработает
+    // rerenderJointTasksTabIfOpen внутри pullGroupTasksNow. Вызывается
+    // безусловно (не только при isGroupTasksActive()) — у role:"admin" до
+    // подключения первого участника это ещё и единственный способ узнать,
+    // что участник подключился (см. migrateAdminGroupTasksIfNeeded).
+    if(tabKey === "jointtasks" && sharedGroup) refreshJointTasksData();
     // Полная пересборка списка ниже (innerHTML) сама по себе всегда
     // приводит скролл контейнера к верху — нормально при настоящем
     // переключении вкладки (см. switchSettingsTab, там scrollTop и так
@@ -12972,7 +13598,7 @@
         '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
-        '<button type="button" class="task-icon-btn task-worktasks-btn' + (task.c.inWork ? " active" : "") + '" data-id="' + task.id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+        '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + task.id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + task.id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
       '</span>';
     body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderTaskRowEdit(id, tabKey, onAfterAction); });
@@ -13007,12 +13633,84 @@
     btn.title = isExpanded ? "Свернуть" : "Показать полностью";
   }
 
-  // кнопки переноса/архивации/next-привязки/приоритета — общие для
-  // обычного вида строки (renderTaskRowView) и режима редактирования
-  // (renderTaskRowEdit): без явной дискеты сохранения текст сохраняется
-  // сам (через flushPendingTaskEdits внутри каждого обработчика), поэтому
-  // эти кнопки должны работать одинаково в обоих режимах и не пропадать,
-  // пока идёт редактирование
+  // Полноэкранная инструкция "Кнопки задач" (ТЗ пользователя от 15.09) —
+  // открывается кнопкой "i" из общего ряда (см. taskInfoBtn в
+  // initTaskGlobalToolbar). Подменяет #settingsTabContent целиком, тем же
+  // приёмом, что и "Все задачи проекта" (openTaskNextPicker) и ридер
+  // книги: свой собственный "домик" внизу вместо общего ряда кнопок,
+  // никакой другой кнопки на экране нет и работать не должна — все
+  // остальные пиктограммы тут просто нарисованы (<span>, не <button>, без
+  // единого обработчика) для наглядности. currentSettingsTab НЕ меняем
+  // (остаётся той вкладкой задач, с которой открыли — тот же приём, что и
+  // у openTaskNextPicker), "домик" внизу возвращает именно туда.
+  function renderTaskInfoScreen(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    syncTaskFabRowForTab(null); // прячет весь обычный ряд кнопок вкладки
+    var returnTab = currentSettingsTab;
+
+    function iconRow(svg, big, html){
+      return '<div class="task-info-item"><div class="task-info-icon' + (big ? " task-info-icon-lg" : "") + '">' + svg + '</div><div class="task-info-text">' + html + '</div></div>';
+    }
+
+    var moveTabsKeys = TASK_MOVE_TARGET_TABS.slice();
+    if(getCustomCommentsEnabled()) moveTabsKeys.push("extra2");
+    var moveTabsHtml = '<div class="task-info-tabs-row">' + moveTabsKeys.map(function(key){
+      return '<div class="task-info-tab-mini">' + TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key] || key) + '</span></div>';
+    }).join("") + '</div>';
+
+    var html = '';
+    html += iconRow(CHEVRON_DOWN_ICON_SVG, false, "Разворачивает длинную задачу целиком (у коротких задач не появляется). Повторное нажатие сворачивает обратно.");
+    html += iconRow(PENCIL_ICON_SVG, false, "Открывает текст задачи для редактирования.");
+    html += iconRow(CHECK_ICON_SVG, false, "Отмечает задачу выполненной и переносит её в архив.");
+    html += iconRow(ARROW_MOVE_ICON_SVG, true, "Перенос задач работает между вкладками:" + moveTabsHtml);
+    html += iconRow(ARROW_TOP_ICON_SVG, false, "Переносит задачу в самое начало списка.");
+    html += iconRow(ARROW_BOTTOM_ICON_SVG, false, "Переносит задачу в самый конец списка.");
+    html += iconRow(COPY_ICON_SVG, false, "Копирует текст задачи в буфер обмена.");
+    html += iconRow(LINK_NEXT_ICON_SVG, false, "Только на вкладке «Проекты»: открывает список всех next-задач, привязанных к этому проекту.");
+    html += iconRow(
+      TASK_MOVE_ICON_SVG("worktasks"), false,
+      "Чемоданчик отмечает задачу «в работе». Нажатие переключает по кругу: " +
+      '<span class="task-icon-btn task-worktasks-btn">' + TASK_MOVE_ICON_SVG("worktasks") + '</span> не в работе → ' +
+      '<span class="task-icon-btn task-worktasks-btn active">' + TASK_MOVE_ICON_SVG("worktasks") + '</span> в работе → ' +
+      '<span class="task-icon-btn task-worktasks-btn needs-check">' + TASK_MOVE_ICON_SVG("worktasks") + '</span> нужно проверить — и снова «в работе», по кругу. ' +
+      "Долгое нажатие (около четверти секунды) снимает отметку совсем."
+    );
+    html += iconRow(
+      '<span class="task-flag-dot" style="pointer-events:none;"><span class="task-flag-dot-inner"></span></span>', false,
+      "Цветной кружок — отметка приоритета. Нажатие переключает по кругу: " +
+      '<span class="task-flag-dot flag-red"><span class="task-flag-dot-inner"></span></span> красная → ' +
+      '<span class="task-flag-dot flag-yellow"><span class="task-flag-dot-inner"></span></span> жёлтая — и снова красная, по кругу. ' +
+      "Долгое нажатие снимает отметку совсем. Любая отмеченная задача, из какой бы вкладки она ни была, дополнительно показывается на вкладке «Red»."
+    );
+    html += iconRow(SORT_FLAG_ICON_SVG, false, "Кнопка в нижнем ряду только на вкладке «Red»: включает сортировку списка — сначала красные отметки, потом жёлтые. Повторное нажатие возвращает обычный порядок по дате добавления.");
+
+    container.innerHTML =
+      '<h3 class="common-tab-title">Кнопки задач</h3>' +
+      '<div class="task-info-body">' + html + '</div>' +
+      '<div class="mdeditor-fab-row">' +
+        '<button type="button" class="mdeditor-fab-btn" id="taskInfoHomeBtn" title="Назад к задачам">' + READER_HOME_ICON_SVG + '</button>' +
+      '</div>';
+
+    // пока открыт этот экран, фоновая синхронизация (rerenderAllFromState)
+    // не должна тихо подменять его списком задач — тот же приём, что и у
+    // openTaskNextPicker (см. activeProjectPickerRerender там же).
+    activeProjectPickerRerender = renderTaskInfoScreen;
+
+    var homeBtn = document.getElementById("taskInfoHomeBtn");
+    if(homeBtn){
+      homeBtn.addEventListener("click", function(){
+        // "Действие ВПЕРЁД": не откатывает системную историю, а сама
+        // добавляет свой шаг "назад" — снимок текущего экрана инструкции
+        // (тот же приём, что и у openTaskNextPicker/ридера книги).
+        window.AppNav.push(function(){ renderTaskInfoScreen(); });
+        activeProjectPickerRerender = null;
+        renderTaskTabList(returnTab);
+        syncTaskFabRowForTab(returnTab);
+      });
+    }
+  }
+
   function bindTaskRowActions(body, id, tabKey, onAfterAction){
     var task = getTaskById(id);
     if(!task) return;
@@ -13097,41 +13795,51 @@
     }
     var nextBtn = body.querySelector(".task-next-btn");
     if(nextBtn) nextBtn.addEventListener("click", function(){ openTaskNextPicker(id, tabKey); });
-    // пиктограмма-чемоданчик — toggle inWork (см. toggleTaskInWork). Та же
-    // логика точечного/полного обновления, что и у флажка чуть ниже: на
-    // витрине "Задачи в работе" состав списка зависит от inWork, поэтому
-    // там нужна полная пересборка (задача может тут же исчезнуть/появиться),
-    // на остальных вкладках — точечное обновление своей строки.
+    // пиктограмма-чемоданчик. На витрине "Задачи в работе" состав списка
+    // зависит от inWork, поэтому там нужна полная пересборка (задача может
+    // тут же исчезнуть/появиться), на остальных вкладках — точечное
+    // обновление своей строки. ИЗМЕНЕНО (ТЗ пользователя от 15.09): тап —
+    // шаг цикла (см. cycleTaskWorkState), долгое нажатие (250мс,
+    // bindTapOrHold) — сброс (clearTaskWorkState). "check" — тоже витрина
+    // worktasks (см.
+    // getTasksForTab), поэтому перерисовка та же, что и раньше у "work".
     var worktasksBtn = body.querySelector(".task-worktasks-btn");
     if(worktasksBtn){
-      worktasksBtn.addEventListener("click", function(e){
-        e.stopPropagation();
-        flushPendingTaskEdits();
-        toggleTaskInWork(id);
+      var afterWorktasksChange = function(){
         var effectiveTab = tabKey || task.c.tab;
         if(effectiveTab === "worktasks") renderTaskTabList(effectiveTab, id);
         else renderTaskRowView(id, tabKey, onAfterAction);
+      };
+      bindTapOrHold(worktasksBtn, function(){
+        flushPendingTaskEdits();
+        cycleTaskWorkState(id);
+        afterWorktasksChange();
+      }, function(){
+        flushPendingTaskEdits();
+        clearTaskWorkState(id);
+        afterWorktasksChange();
       });
     }
+    // ИЗМЕНЕНО (ТЗ пользователя от 15.09): тап — шаг цикла (cycleTaskFlag,
+    // red↔yellow), долгое нажатие — сброс (clearTaskFlag). На Red состав и
+    // порядок строк зависят от отметки (getTasksForTab), поэтому там без
+    // полной пересборки списка не обойтись; на остальных вкладках — только
+    // сама строка, тем же приёмом, что и раньше (см. историю правок).
     var dot = body.querySelector(".task-flag-dot");
     if(dot){
-      dot.addEventListener("click", function(e){
-        e.stopPropagation();
-        flushPendingTaskEdits();
-        cycleTaskFlag(id);
-        // на Red состав и порядок строк зависят от отметки (getTasksForTab),
-        // поэтому там без полной пересборки списка не обойтись. На
-        // остальных вкладках отметка не влияет ни на состав, ни на порядок —
-        // полная пересборка была лишней и давала видимый рывок/смещение
-        // всего списка (пересоздаются все строки и пересчитывается позиция
-        // кнопок у каждой, см. fitTaskActions), хотя меняется только цвет
-        // кружка одной строки. Обновляем точечно, как и у такого же клика
-        // на экране "Все задачи проекта" (см. renderRowView в
-        // openTaskNextPicker) — там же полная пересборка не грозит багом
-        // именно потому, что обновляет только свою строку.
+      var afterFlagChange = function(){
         var effectiveTab = tabKey || task.c.tab;
         if(effectiveTab === "red") renderTaskTabList(effectiveTab, id);
         else renderTaskRowView(id, tabKey, onAfterAction);
+      };
+      bindTapOrHold(dot, function(){
+        flushPendingTaskEdits();
+        cycleTaskFlag(id);
+        afterFlagChange();
+      }, function(){
+        flushPendingTaskEdits();
+        clearTaskFlag(id);
+        afterFlagChange();
       });
     }
   }
@@ -13159,7 +13867,7 @@
         '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
-        '<button type="button" class="task-icon-btn task-worktasks-btn' + (task.c.inWork ? " active" : "") + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+        '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
       '</span>';
     var editable = document.getElementById("taskEditable_" + id);
@@ -13577,7 +14285,7 @@
           '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
-          '<button type="button" class="task-icon-btn task-worktasks-btn' + (task.c.inWork ? " active" : "") + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+          '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
         '</span>';
       body.querySelector(".task-expand-btn").addEventListener("click", function(e){
@@ -13638,21 +14346,29 @@
           }, 1200);
         });
       }
+      // ИЗМЕНЕНО (ТЗ пользователя от 15.09) — тот же цикл тап/долгое
+      // нажатие, что и в bindTaskRowActions выше (bindTapOrHold).
       var worktasksBtn = body.querySelector(".task-worktasks-btn");
       if(worktasksBtn){
-        worktasksBtn.addEventListener("click", function(e){
-          e.stopPropagation();
+        bindTapOrHold(worktasksBtn, function(){
           flushPendingTaskEdits();
-          toggleTaskInWork(id);
+          cycleTaskWorkState(id);
+          renderRowView(id);
+        }, function(){
+          flushPendingTaskEdits();
+          clearTaskWorkState(id);
           renderRowView(id);
         });
       }
       var dot = body.querySelector(".task-flag-dot");
       if(dot){
-        dot.addEventListener("click", function(e){
-          e.stopPropagation();
+        bindTapOrHold(dot, function(){
           flushPendingTaskEdits();
           cycleTaskFlag(id);
+          renderRowView(id);
+        }, function(){
+          flushPendingTaskEdits();
+          clearTaskFlag(id);
           renderRowView(id);
         });
       }
@@ -13675,7 +14391,7 @@
           '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
-          '<button type="button" class="task-icon-btn task-worktasks-btn' + (task.c.inWork ? " active" : "") + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+          '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
         '</span>';
       var editable = document.getElementById("taskEditable_" + id);
