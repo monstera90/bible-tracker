@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 13.3 (16.09)
+   Версия: 16.0 (16.09)
    =========================================================================== */
 
 (function(){
@@ -924,14 +924,14 @@
   function getBibleQuotesEnabled(){ var r = state[BIBLE_QUOTES_ENABLED_KEY]; return !!(r && r.c); }
   function setBibleQuotesEnabled(value){
     state[BIBLE_QUOTES_ENABLED_KEY] = {c: value, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
     refreshHeaderQuote();
   }
   function getCustomCommentsEnabled(){ var r = state[CUSTOM_COMMENTS_ENABLED_KEY]; return !!(r && r.c); }
   function setCustomCommentsEnabled(value){
     state[CUSTOM_COMMENTS_ENABLED_KEY] = {c: value, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
     refreshHeaderQuote();
   }
@@ -943,7 +943,7 @@
     text = (text || "").trim();
     ref = (ref || "").trim();
     state[CUSTOM_VERSE_KEY] = {c: (text ? {text:text, ref:ref} : null), t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
     refreshHeaderQuote();
   }
@@ -1109,8 +1109,33 @@
   function saveLocalState(){
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function(){
+      saveTimer = null;
       try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
     }, 300);
+  }
+
+  // Немедленное синхронное сохранение в localStorage, В ОБХОД 300мс
+  // debounce'а saveLocalState выше (ТЗ пользователя,
+  // TASK_FIX_TASK_IMAGE_LOSS.md, п.1-2). Для редких дискретных действий
+  // (чекбоксы, создание/удаление/перенос задачи и заметки, переключатели
+  // настроек и т.п. — см. Шаг 2 того же ТЗ) 300мс окно незащищённости
+  // debounce'а неоправданно — в отличие от непрерывного набора текста
+  // с клавиатуры, для которого сам debounce и задуман (саму текстовую
+  // правку .task-editable/.comment-editable по-прежнему сохраняет
+  // debounced saveLocalState — см. setTaskText/renderTaskRowEdit,
+  // текст коммитится в state только по blur, а не на каждое нажатие
+  // клавиши, так что здесь трогать нечего). Отменяет уже запланированный
+  // отложенный save, если он был — состояние уже записано прямо сейчас,
+  // откладывать больше нечего. Используется почти везде, где раньше был
+  // saveLocalState() — по сути весь код, кроме initQuote (ежедневная
+  // ротация цитаты при заходе, не пользовательское действие),
+  // ensureFirstReadInitialized (лениво вычисляемое поле) и слияния внутри
+  // doCloudSync (фоновая синхронизация, не прямое действие пользователя) —
+  // там 300мс debounce сознательно оставлен.
+  function saveLocalStateNow(){
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
   }
 
   function chapterKey(bookName, chapterNum){
@@ -1157,7 +1182,7 @@
   }
   function setColorMarkEnabled(value){
     state["__colorMarkChapters"] = {c: value, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
 
@@ -1191,7 +1216,7 @@
     // слиянии со старой облачной копией (ещё с {c:true,...} и более
     // ранней меткой времени) закладка неожиданно вернулась бы обратно.
     state[MD_BOOKMARK_PREFIX + name] = {c: !!bookmarked, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
 
@@ -1207,7 +1232,7 @@
   }
   function setExtraAnimationsEnabled(value){
     state["__extraAnimations"] = {c: value, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
 
@@ -1536,7 +1561,7 @@
   }
   function setShowAllTasksEnabled(value){
     state["__showAllTasks"] = {c: value, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
   function applyChapterColorClass(item, clr){
@@ -1593,7 +1618,7 @@
     input.checked = newChecked;
     applyChapterColorClass(item, newChecked ? newColor : null);
 
-    saveLocalState();
+    saveLocalStateNow();
     updateBookProgress(bookName);
     updateHideProgressBadge();
     updateOverallProgress();
@@ -1649,7 +1674,7 @@
 
   function selectTheme(themeId){
     state[THEME_KEY] = {c: themeId, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     applyThemeToPage(themeId);
     scheduleCloudPush();
   }
@@ -2640,7 +2665,7 @@
                 checkedPerBook[bookName]--;
                 totalChecked--;
               }
-              saveLocalState();
+              saveLocalStateNow();
               updateBookProgress(bookName);
               updateHideProgressBadge();
               updateOverallProgress();
@@ -2800,7 +2825,7 @@
   function toggleHideCompletedBooks(){
     hideCompletedActive = !hideCompletedActive;
     state["__hideCompletedBooks"] = {c: hideCompletedActive, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
     var textEl = document.getElementById("hideProgressToggleText");
     if(textEl){
@@ -2961,7 +2986,7 @@
     totalChecked = 0;
     state["__lastReadExcludedToday"] = {c:null, t:now};
     state["__firstRead"] = {c:null, t:now};
-    saveLocalState();
+    saveLocalStateNow();
     rerenderAllFromState();
     try{ localStorage.removeItem(CELEBRATION_SHOWN_KEY); }catch(e){}
     setTimeout(function(){ setNoTransitions(false); }, 50);
@@ -3462,6 +3487,24 @@
     if(window.Debug) window.Debug.log("beforeunload");
     flushPendingSyncNow();
   });
+
+  // ⚠️ ДОБАВЛЕНО (16.09, TASK_FIX_TASK_IMAGE_LOSS.md, Шаг 4): подстраховка,
+  // не зависящая ни от одного unload-события выше — периодический таймер,
+  // который досохраняет накопившееся, если по каким-то причинам ни
+  // немедленное сохранение (saveLocalStateNow, Шаги 1-2 того же ТЗ), ни
+  // один из трёх lifecycle-обработчиков не сработали. Сам по себе дешёвый
+  // и "не гоняется вхолостую" — реальная запись в localStorage происходит,
+  // только когда есть незавершённый debounced saveTimer (оставлен
+  // намеренно только для не-пользовательских действий: initQuote,
+  // ensureFirstReadInitialized, слияние внутри doCloudSync — см. раздел
+  // «ХРАНЕНИЕ (с дебаунсом)»); в остальное время просто читает переменную.
+  var PERIODIC_SAVE_CHECK_MS = 2500;
+  setInterval(function(){
+    if(saveTimer){
+      if(window.Debug) window.Debug.log("periodicSaveCheck: обнаружен отложенный saveTimer, досохраняю немедленно");
+      saveLocalStateNow();
+    }
+  }, PERIODIC_SAVE_CHECK_MS);
 
   // ===================== МОДАЛЬНОЕ ОКНО СИНХРОНИЗАЦИИ =====================
   var modalOverlay = document.getElementById("modalOverlay");
@@ -4476,7 +4519,7 @@
           // облаке (та же схема мягкого удаления, c:null, что и у
           // deleteTaskPermanently)
           localJoint.forEach(function(t){ state["task:" + t.id] = {c:null, t:Date.now()}; });
-          if(localJoint.length){ saveLocalState(); scheduleCloudPush(); }
+          if(localJoint.length){ saveLocalStateNow(); scheduleCloudPush(); }
           markAdminMigrationDone(groupId);
         });
       });
@@ -4698,7 +4741,7 @@
         }, t: Date.now()};
         changed = true;
       });
-      if(changed){ saveLocalState(); scheduleCloudPush(); }
+      if(changed){ saveLocalStateNow(); scheduleCloudPush(); }
     });
   }
 
@@ -5474,6 +5517,29 @@
     sel.removeAllRanges();
     sel.addRange(newRange);
     editable.dispatchEvent(new Event("input", { bubbles: true }));
+
+    // ТЗ пользователя, TASK_FIX_TASK_IMAGE_LOSS.md, п.1: раньше вставка
+    // картинки скрепкой ничем не отличалась от обычного набора текста —
+    // сохранение текста задачи в state происходило только по blur
+    // (см. editable.addEventListener("blur", ...) в renderTaskRowEdit), а
+    // само состояние на диск уходило через общий 300мс debounce
+    // saveLocalState. Вставка картинки — редкое дискретное действие
+    // (не часть потока нажатий клавиш), и именно после него пользователь
+    // чаще всего сразу уходит из приложения (выбор файла открывал системный
+    // диалог) — окно в 300мс, рассчитанное на подавление серии нажатий
+    // клавиш, для этого случая неоправданно и совпадало с потерей задачи/
+    // картинки при обновлении страницы сразу после вставки. Поэтому здесь,
+    // сразу после вставки текста с "![[имя]]", записываем текст задачи в
+    // state немедленно, не дожидаясь blur поля — setTaskText сама уходит в
+    // saveTaskData, которая теперь (см. Шаг 2 того же ТЗ) сохраняет в
+    // localStorage синхронно, минуя debounce. Работает только для задач (у
+    // этого поля есть data-task-id — см. renderTaskRowEdit); для
+    // комментариев кнопки-скрепки нет (см. PROJECT_MAP_MYJS.md, раздел про
+    // картинки в задачах).
+    var taskIdForImmediateSave = editable.getAttribute("data-task-id");
+    if(taskIdForImmediateSave){
+      setTaskText(taskIdForImmediateSave, getEditableNoteText(editable).trim());
+    }
   }
 
   // оборачивает ВЫДЕЛЕННЫЙ прямо сейчас текст (внутри того
@@ -6083,7 +6149,7 @@
         else if(!isTask && !isBook && selection.all) newState[k] = payload.rawStateData[k];
       });
       state = newState;
-      saveLocalState();
+      saveLocalStateNow();
     }
 
     if(selection.notes && MdEditor && MdEditor.replaceAllNotesFromEntries){
@@ -6368,7 +6434,7 @@
       state = incoming;
       syncId = id;
       localStorage.setItem(SYNC_ID_KEY, id);
-      saveLocalState();
+      saveLocalStateNow();
       setNoTransitions(true);
       rerenderAllFromState();
       setTimeout(function(){ setNoTransitions(false); }, 50);
@@ -8221,7 +8287,7 @@
     // t — всегда время именно этого сохранения, та же причина, что и у
     // saveTaskData выше (last-write-wins при слиянии между устройствами).
     state[bookStateKey(hash)] = {c: data, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
   function setBookPosition(hash, position){
@@ -11521,7 +11587,7 @@
   function isHourNotesEnabled(){ var r = state[HOUR_NOTES_ENABLED_KEY]; return !!(r && r.c); }
   function setHourNotesEnabled(value){
     state[HOUR_NOTES_ENABLED_KEY] = {c: value, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
 
@@ -11539,7 +11605,7 @@
   function setHourNoteForDay(dayTs, text, skipGridRefresh){
     var trimmed = (text || "").trim();
     state[hourNoteKeyForDay(dayTs)] = {c: trimmed ? trimmed : null, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
     // при сохранении прямо из карточки дня (см. renderYearDayNoteEdit) сброс
     // к общей сетке не нужен — пользователь должен оставаться на этом же
@@ -11616,7 +11682,7 @@
   function addHourLogEntry(minutes){
     var id = "hourlog:" + Date.now() + "-" + Math.random().toString(36).slice(2,8);
     state[id] = {c: minutes, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
     refreshYearGridIfOpen();
   }
@@ -11626,7 +11692,7 @@
   // период закрылся и подневная разбивка исходных записей стала недоступна
   function recordMonthSegment(periodStart, totalMinutes, baselineMinutes){
     state["hoursegment:" + periodStart] = {c: totalMinutes, t: Date.now(), baseline: baselineMinutes || 0};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
   function getClosedMonthSegments(){
@@ -11694,7 +11760,7 @@
     setHourState(HOUR_MONTH_PERIOD_KEY, now);
     setHourState(HOUR_MONTH_DEFERRED_KEY, null);
     setHourState(HOUR_YEAR_DEFERRED_KEY, null);
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
     renderHourBars();
     renderHourCounterMenu();
@@ -11708,7 +11774,7 @@
     setHourState(HOUR_MONTH_DEFERRED_KEY, null);
     setHourState(HOUR_YEAR_DEFERRED_KEY, null);
     pruneStaleHourLogs(Date.now() + 1);
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
     renderHourBars();
     renderHourCounterMenu();
@@ -11750,7 +11816,7 @@
     // статистики за скользящий месяц (см. pruneOldHourLogsForStats) и
     // больше не участвуют в подсчёте текущего периода — все суммы
     // фильтруются по актуальному periodStart
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
     renderHourBars();
   }
@@ -11973,7 +12039,7 @@
     });
     document.getElementById("mHourMonthNo").addEventListener("click", function(){
       setHourState(HOUR_MONTH_DEFERRED_KEY, periodStart);
-      saveLocalState(); scheduleCloudPush();
+      saveLocalStateNow(); scheduleCloudPush();
       updateHourResetButtonVisibility();
       closeModal();
     });
@@ -11994,7 +12060,7 @@
     });
     document.getElementById("mHourYearNo").addEventListener("click", function(){
       setHourState(HOUR_YEAR_DEFERRED_KEY, yearStart);
-      saveLocalState(); scheduleCloudPush();
+      saveLocalStateNow(); scheduleCloudPush();
       updateHourResetButtonVisibility();
       closeModal();
     });
@@ -12129,7 +12195,7 @@
       state[key] = {c: prevMinutes + dayTotals[day], t: Date.now()};
     });
     if(removed){
-      saveLocalState();
+      saveLocalStateNow();
       scheduleCloudPush();
     }
   }
@@ -12861,7 +12927,7 @@
   }
   function setGoalsReducedView(value){
     state["__goalsReducedView"] = {c: value, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
 
@@ -12921,12 +12987,12 @@
   }
   function saveGoal(goalId, data){
     state["goal:" + goalId] = {c: data, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
   function deleteGoal(goalId){
     state["goal:" + goalId] = {c: null, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
   function createNewGoal(){
@@ -13088,7 +13154,7 @@
           var ts = Date.now();
           state["goalcompletion:" + ts + "-" + Math.random().toString(36).slice(2,7)] =
             {c: {goalTitle: g.title || "Без названия", taskText: g.tasks[idx].text || ""}, t: ts};
-          saveLocalState();
+          saveLocalStateNow();
           scheduleCloudPush();
         }
       });
@@ -13268,7 +13334,7 @@
       data.createdAt = existing ? existing.t : Date.now();
     }
     state["task:" + id] = {c: data, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
   function createTask(tab){
@@ -13624,7 +13690,7 @@
       state[task.c.completionKey] = {c: null, t: Date.now()};
     }
     state["task:" + id] = {c: null, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
     // см. пояснение у setTaskText выше — удаление задачи тоже может
     // освободить картинку, вставленную только в неё
@@ -13694,7 +13760,7 @@
     var rec = state["comment:" + id];
     var t = rec ? Date.now() : (createdAt || Date.now());
     state["comment:" + id] = {c: data, t: t};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
   function createComment(){
@@ -13735,7 +13801,7 @@
   // года" (см. пояснение выше)
   function deleteCommentPermanently(id){
     state["comment:" + id] = {c: null, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
     refreshHeaderQuote();
     // см. пояснение у setTaskText выше
@@ -13770,7 +13836,7 @@
   function createYearCommentCopy(dayTs, text){
     var key = genYearCommentId(dayTs);
     state[key] = {c: {text: text}, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
     refreshYearGridIfOpen();
     return key;
@@ -13792,12 +13858,12 @@
     var rec = state[key];
     var t = (rec && typeof rec.t === "number") ? rec.t : Date.now();
     state[key] = {c: (trimmed ? {text: trimmed} : null), t: t};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
   function deleteYearCommentPermanently(key){
     state[key] = {c: null, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
   }
   // все копии-комментарии по дням — для экспорта (см. buildExportData)
@@ -13829,7 +13895,7 @@
     var dayTs = startOfDay(Date.now());
     var key = genNoteCreatedId(dayTs);
     state[key] = {c: {name: name}, t: Date.now()};
-    saveLocalState();
+    saveLocalStateNow();
     scheduleCloudPush();
     refreshYearGridIfOpen();
   }
