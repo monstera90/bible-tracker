@@ -1,11 +1,21 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 2.0 (15.09) -->
+     Версия: 2.1 (16.09) -->
 <head>
 <meta charset="UTF-8">
 <script>
 window.addEventListener("error", function(e){
+  // "ResizeObserver loop..." (обе формулировки: "limit exceeded" и
+  // "completed with undelivered notifications") — не настоящая ошибка, а
+  // безобидное предупреждение браузера о том, что колбэк ResizeObserver не
+  // успел отработать за один кадр; приложение при этом продолжает работать
+  // штатно. На части мобильных/планшетных браузеров это предупреждение
+  // почему-то долетает как полноценное событие "error" (на столе так не
+  // бывает) — отсюда красная плашка на планшете без видимой причины и без
+  // связи с последними правками. Глушим только это сообщение, остальные
+  // ошибки по-прежнему выводятся на экран как раньше.
+  if(e.message && e.message.indexOf("ResizeObserver loop") === 0) return;
   var box = document.createElement("div");
   box.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#c0392b;color:#fff;padding:12px;font:12px monospace;white-space:pre-wrap;max-height:60vh;overflow:auto;";
   box.textContent = "JS ERROR: " + e.message + "\n" + (e.filename||"") + ":" + e.lineno + ":" + e.colno + "\n" + (e.error && e.error.stack ? e.error.stack : "");
