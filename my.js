@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 8.1 (16.09)
+   Версия: 10.0 (16.09)
    =========================================================================== */
 
 (function(){
@@ -2977,16 +2977,6 @@
   // Не имеет отношения к пользовательским данным.
   var LAST_ACTIVE_STATE_KEY = "__syncLastActive";
   var SYNC_EXPIRY_MS = 365 * 24 * 60 * 60 * 1000; // 365 дней
-
-  // ЗАПОЛНИТЬ: имя бакета Firebase Storage ТОГО ЖЕ проекта, что и
-  // FIREBASE_DB_URL выше (Firebase Console → Storage → показывается
-  // над списком файлов, вида gs://<бакет> — сюда без "gs://"; обычно
-  // <project-id>.appspot.com или <project-id>.firebasestorage.app).
-  // Storage нужно включить в консоли (если ещё не включён) и выставить
-  // такие же открытые правила, как у Realtime Database (read, write: if
-  // true) — иначе запросы ниже (READER_PLAN.md, шаг 3) будут падать с 403.
-  var FIREBASE_STORAGE_BUCKET = "ЗАПОЛНИ-МЕНЯ.appspot.com";
-  var FIREBASE_STORAGE_URL = "https://firebasestorage.googleapis.com/v0/b/" + FIREBASE_STORAGE_BUCKET + "/o/";
 
   // Случайный ID этого браузера/устройства, живёт в localStorage
   // (переустановка PWA/очистка данных сайта создаст новый — это ожидаемо,
@@ -7458,12 +7448,16 @@
   }
 
   // =====================================================================
-  // Реестр файлов + временное реле через Firebase Storage — ОБОБЩЁННЫЙ,
-  // на несколько "пространств" (kind: "books", "images", ...), каждое
-  // ведёт свой независимый реестр и свои временные копии в Storage, чтобы
-  // хэши книг и картинок не путались между собой (READER_PLAN.md, Этап A,
-  // шаг 3, 09.09; обобщение + шифрование + удаление — 14.09, ТЗ
-  // пользователя: облачная синхронизация книг и картинок заметок).
+  // Реестр файлов + временное реле байтов через Realtime Database —
+  // ОБОБЩЁННЫЙ, на несколько "пространств" (kind: "books", "images", ...),
+  // каждое ведёт свой независимый реестр и свои временные копии байтов,
+  // чтобы хэши книг и картинок не путались между собой (READER_PLAN.md,
+  // Этап A, шаг 3, 09.09; обобщение + шифрование + удаление — 14.09;
+  // транспорт байт пересажен со Firebase Storage на RTDB — 16.09,
+  // TASK_FILE_SYNC_RTDB.md раздел 1: с 3 февраля 2026 Storage требует
+  // привязку платёжного аккаунта даже в рамках бесплатного лимита, автор
+  // на это не пошёл — теперь ВСЁ, включая байты файлов, идёт только через
+  // Realtime Database).
   //
   // Ветка /syncs/<syncId>/files/<kind>/<хэш> — по одной записи на файл:
   // {hash, size, name, addedBy, addedAt, uploadedAt, confirmedBy,
@@ -7473,20 +7467,39 @@
   // (они универсальны: работают с любым relPath под текущим syncId,
   // несмотря на название "Notes" — см. комментарий у них выше).
   //
-  // Сами байты файла временно живут в Firebase Storage В ЗАШИФРОВАННОМ
-  // виде (см. encryptFileBytes/decryptFileBytes ниже — тот же приём
-  // ключа, что у заметок: AES-GCM, ключ = SHA-256(syncId), см.
-  // getNotesCryptoKey в mdeditor.js) — Firebase не видит ни содержимого,
-  // ни типа файла (путь в Storage — просто хэш, без расширения/
-  // content-type, тело — случайные байты). Realtime Database знает только
-  // реестр (хэш/размер/имя/кто подтвердил), тоже не содержимое.
-  // Устройство, у которого файл есть локально, заливает его в Storage
+  // Сами байты файла временно живут в ветке /syncs/<syncId>/fileBlobs/
+  // <kind>/<хэш> — base64 от ЗАШИФРОВАННЫХ байт (см.
+  // encryptFileBytes/decryptFileBytes ниже — тот же приём ключа, что у
+  // заметок: AES-GCM, ключ = SHA-256(syncId), см. getNotesCryptoKey в
+  // mdeditor.js; base64 — через bytesToBase64/base64ToBytes выше, RTDB не
+  // хранит сырые байты, только JSON-совместимые значения). Firebase не
+  // видит ни содержимого, ни типа файла — значение по этому пути просто
+  // случайная на вид base64-строка. Realtime Database знает только реестр
+  // (хэш/размер/имя/кто подтвердил), тоже не содержимое.
+  //
+  // ⚠️ КРИТИЧНО (TASK_FILE_SYNC_RTDB.md, раздел 4.2/10): к ветке
+  // fileBlobs (и к самому узлу /syncs/<id>/fileBlobs целиком) НИГДЕ не
+  // должно быть постоянной подписки on('value', ...) — только точечное
+  // разовое чтение (fetchNotesCloudPath ниже — обычный одноразовый GET,
+  // не SDK-listener). RTDB рассылает весь узел целиком при любом
+  // изменении внутри него при живой подписке — если байты файлов
+  // окажутся под on(), каждое устройство будет получать мегабайтные
+  // blob'ы целиком при каждой синхронизации, даже если файл ему не нужен.
+  //
+  // Устройство, у которого файл есть локально, заливает его в fileBlobs
   // сразу, как только видит в реестре, что кто-то из ИЗВЕСТНЫХ устройств
-  // ещё не подтвердил получение (см. syncFileRegistry). Файл удаляется из
-  // Storage, как только подтвердили ВСЕ известные устройства, либо через
-  // FILE_RELAY_TTL_MS ПОСЛЕ ЗАЛИВКИ (не после добавления) — что раньше;
-  // сама запись реестра (хэш/имя/размер) при этом не удаляется, теряется
-  // только временная копия байтов в Storage.
+  // ещё не подтвердил получение (см. syncFileRegistry). ОСНОВНОЙ путь
+  // удаления байт из fileBlobs — раздел 3.4: получатель удаляет их СРАЗУ
+  // после успешного скачивания+сохранения (не дожидаясь ни подтверждений
+  // остальных, ни TTL) — см. пункт "1)" внутри syncFileRegistry. Это
+  // значит, что при нескольких ЗНАЮЩИХ устройствах, ещё не подтвердивших
+  // получение, файл достаётся только первому, кто успел скачать; для
+  // остальных заливка повторится позже по заявке (fileRequests, раздел
+  // 4.3 — этого узла и логики пока нет, это следующий шаг). Отдельно,
+  // FILE_RELAY_TTL_MS ПОСЛЕ ЗАЛИВКИ (не после добавления) — запасной
+  // механизм на случай, если байты вообще никто не забрал (пункт "3)"
+  // ниже); сама запись реестра (хэш/имя/размер) при удалении байт не
+  // трогается, теряется только временная копия.
   //
   // Удаление файла (тумбстоун): вызывающая сторона помечает запись
   // deletedAt/deletedBy (registerFileDeletion) — остальные устройства при
@@ -7501,10 +7514,26 @@
   // ниже): устройство считается известным, пока с него была хоть одна
   // успешная синхронизация в пределах этого окна — так надолго выключенное
   // или удалённое устройство рано или поздно перестаёт блокировать
-  // удаление байтов из Storage.
+  // удаление байтов из fileBlobs.
   // =====================================================================
-  var FILE_RELAY_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 дня ПОСЛЕ ЗАЛИВКИ байтов в Storage
+  var FILE_RELAY_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 дня ПОСЛЕ ЗАЛИВКИ байтов в fileBlobs
   var DEVICE_KNOWN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
+
+  // Лимит размера файла для облачного синка (TASK_FILE_SYNC_RTDB.md,
+  // раздел 7 — порог согласован с автором 16.09: 7 МБ). Оценка в ТЗ:
+  // RTDB ограничивает одну строку 10 МБ, один write через SDK — 16 МБ; с
+  // учётом base64 (+≈33% к размеру) и слоя шифрования практический
+  // потолок на исходный, ЕЩЁ НЕ закодированный и НЕзашифрованный файл —
+  // около 6-7 МБ. Файл больше лимита синхронизацию просто пропускает
+  // (остаётся только локальным, как и раньше) — см. gate в начале
+  // registerFileInRegistry ниже; вызывающий код (handleImportBooksFile и
+  // т.п.) сам решает, показывать ли пользователю FILE_SYNC_SIZE_WARNING.
+  var FILE_SYNC_SIZE_LIMIT_BYTES = 7 * 1024 * 1024;
+  var FILE_SYNC_SIZE_WARNING = "Файл слишком большой и не будет синхронизирован автоматически. Перенесите его на другие устройства вручную.";
+  var FILE_FORMS = ["файл", "файла", "файлов"];
+  function fileExceedsSyncSizeLimit(size){
+    return typeof size === "number" && size > FILE_SYNC_SIZE_LIMIT_BYTES;
+  }
 
   function touchDeviceRegistry(){
     if(!syncId) return Promise.resolve();
@@ -7546,36 +7575,36 @@
     });
   }
 
-  function storageObjectPath(kind, hash){ return "syncFiles/" + kind + "/" + hash; }
+  // Путь к байтам ОТНОСИТЕЛЬНО /syncs/<syncId>/ — для
+  // fetchNotesCloudPath/patchNotesCloud/deleteNotesCloudPath (см. выше),
+  // те же, что и для реестра/заметок, только под своей веткой fileBlobs.
+  function fileBlobCloudPath(kind, hash){ return "fileBlobs/" + kind + "/" + hash; }
 
-  function uploadFileToStorage(kind, hash, bytes){
+  // Заливает файл в RTDB как одноразовую точечную запись (PATCH одного
+  // ключа через patchNotesCloud) — НЕ через подписку, см. предупреждение
+  // в комментарии к разделу выше.
+  function uploadFileToCloud(kind, hash, bytes){
     return encryptFileBytes(bytes).then(function(encBytes){
-      var path = encodeURIComponent(storageObjectPath(kind, hash));
-      return fetchWithTimeout(FIREBASE_STORAGE_URL + path + "?uploadType=media", {
-        method: "POST",
-        headers: { "Content-Type": "application/octet-stream" },
-        body: encBytes
-      }, 30000);
-    }).then(function(res){
-      if(!res.ok) throw new Error("storage_upload_failed_" + res.status);
+      var patch = {};
+      patch[fileBlobCloudPath(kind, hash)] = bytesToBase64(encBytes);
+      return patchNotesCloud(patch);
+    }).then(function(){
       return true;
     });
   }
-  function downloadFileFromStorage(kind, hash){
-    var path = encodeURIComponent(storageObjectPath(kind, hash));
-    return fetchWithTimeout(FIREBASE_STORAGE_URL + path + "?alt=media", { method: "GET" }, 30000).then(function(res){
-      if(!res.ok) throw new Error("storage_download_failed_" + res.status);
-      return res.arrayBuffer();
-    }).then(function(encBuf){
-      return decryptFileBytes(encBuf);
+  // Точечное разовое чтение (fetchNotesCloudPath = обычный GET, не
+  // SDK-listener) — вызывать только в момент, когда файл реально
+  // понадобился, не в фоновом on()-цикле.
+  function downloadFileFromCloud(kind, hash){
+    return fetchNotesCloudPath(fileBlobCloudPath(kind, hash)).then(function(b64){
+      if(!b64) throw new Error("blob_not_found");
+      return decryptFileBytes(base64ToBytes(b64));
     });
   }
-  function deleteFileFromStorage(kind, hash){
-    var path = encodeURIComponent(storageObjectPath(kind, hash));
-    return fetchWithTimeout(FIREBASE_STORAGE_URL + path, { method: "DELETE" }, 15000).then(function(res){
-      // 404 здесь не ошибка — байты уже удалены (другим устройством,
-      // например) или так и не заливались; удаление идемпотентно.
-      if(!res.ok && res.status !== 404) throw new Error("storage_delete_failed_" + res.status);
+  function deleteFileFromCloud(kind, hash){
+    // DELETE по несуществующему пути в RTDB — не ошибка (там и так уже
+    // ничего нет), удаление естественно идемпотентно.
+    return deleteNotesCloudPath(fileBlobCloudPath(kind, hash)).then(function(){
       return true;
     });
   }
@@ -7589,6 +7618,11 @@
   // deletedAt, см. ниже).
   function registerFileInRegistry(kind, hash, name, size){
     if(!syncId) return Promise.resolve();
+    // Раздел 7 ТЗ: файл больше лимита в облачный реестр не отправляем
+    // вообще — остаётся только локальным. Сам файл при этом уже сохранён
+    // локально вызывающим кодом (saveBookFile и т.п.) ДО этого вызова —
+    // это не трогаем, отказываемся только от облачной части.
+    if(fileExceedsSyncSizeLimit(size)) return Promise.resolve({skipped: true, reason: "size_limit"});
     return fetchNotesCloudPath("files/" + kind + "/" + hash).catch(function(){ return null; }).then(function(existing){
       var patch = {};
       if(existing){
@@ -7629,7 +7663,7 @@
     patch["files/" + kind + "/" + hash + "/deletedAt"] = Date.now();
     patch["files/" + kind + "/" + hash + "/deletedBy"] = getDeviceId();
     return patchNotesCloud(patch).then(function(){
-      return deleteFileFromStorage(kind, hash).catch(function(){});
+      return deleteFileFromCloud(kind, hash).catch(function(){});
     }).catch(function(){});
   }
 
@@ -7685,28 +7719,35 @@
           return null;
         }
 
-        // 1) У нас файла нет — скачиваем из Storage (расшифровывается
-        // внутри downloadFileFromStorage) и подтверждаем получение.
+        // 1) У нас файла нет — скачиваем из fileBlobs (расшифровывается
+        // внутри downloadFileFromCloud), сохраняем локально и СРАЗУ ЖЕ
+        // удаляем байты из облака (раздел 3.4/4.4 ТЗ: это основной путь
+        // удаления, TTL в блоке 3) ниже — только подстраховка на случай,
+        // если файл вообще никто не забрал). uploadedAt заодно сбрасываем
+        // в том же PATCH — байтов больше нет, флаг не должен врать.
         if(!haveLocally){
-          return downloadFileFromStorage(kind, hash).then(function(buf){
+          return downloadFileFromCloud(kind, hash).then(function(buf){
             return adapters.saveIncoming(hash, entry.name || hash, new Uint8Array(buf));
+          }).then(function(){
+            return deleteFileFromCloud(kind, hash).catch(function(){});
           }).then(function(){
             var patch = {};
             patch["files/" + kind + "/" + hash + "/confirmedBy/" + myId] = true;
+            patch["files/" + kind + "/" + hash + "/uploadedAt"] = null;
             return patchNotesCloud(patch);
           }).catch(function(){
-            // байтов ещё нет в Storage (никто пока не залил) или сеть
+            // байтов ещё нет в fileBlobs (никто пока не залил) или сеть
             // подвела — не страшно, попробуем на следующей сверке
           });
         }
 
         // 2) Файл у нас есть. Если не все известные устройства подтвердили
-        // получение и байты сейчас не лежат в Storage (или уже больше не
+        // получение и байты сейчас не лежат в fileBlobs (или уже больше не
         // нужны, но мы почему-то ещё не заливали) — заливаем.
         var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; });
         if(missingConfirmations && !entry.uploadedAt){
           return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
-            return uploadFileToStorage(kind, hash, buf);
+            return uploadFileToCloud(kind, hash, buf);
           }).then(function(){
             var patch = {};
             patch["files/" + kind + "/" + hash + "/uploadedAt"] = now;
@@ -7716,9 +7757,9 @@
 
         // 3) Байты залиты и либо подтвердили все известные устройства,
         // либо истёк FILE_RELAY_TTL_MS после заливки — удаляем временную
-        // копию из Storage.
+        // копию из fileBlobs.
         if(entry.uploadedAt && (!missingConfirmations || (now - entry.uploadedAt) > FILE_RELAY_TTL_MS)){
-          return deleteFileFromStorage(kind, hash).then(function(){
+          return deleteFileFromCloud(kind, hash).then(function(){
             var patch = {};
             patch["files/" + kind + "/" + hash + "/uploadedAt"] = null;
             return patchNotesCloud(patch);
@@ -7776,10 +7817,17 @@
       file.arrayBuffer().then(function(buf){
         return saveBookFile(file.name, new Uint8Array(buf));
       }).then(function(result){
-        setStatusFn(result.added ? "Книга сохранена." :
-          "Такая книга уже была загружена раньше (файл \u00AB" + result.name + "\u00BB).", false);
+        if(result.added){
+          var msg = "Книга сохранена.";
+          if(fileExceedsSyncSizeLimit(result.size)) msg += " " + FILE_SYNC_SIZE_WARNING;
+          setStatusFn(msg, false);
+        } else {
+          setStatusFn("Такая книга уже была загружена раньше (файл \u00AB" + result.name + "\u00BB).", false);
+        }
         // Регистрация в облачном реестре (READER_PLAN.md, шаг 3) — только
         // для реально новых файлов; не блокирует статус-сообщение выше.
+        // Файлы больше FILE_SYNC_SIZE_LIMIT_BYTES регистрация сама пропустит
+        // (см. gate в registerFileInRegistry) — вызов всё равно безопасен.
         if(result.added) registerBookInRegistry(result.hash, result.name, result.size);
       }).catch(function(e){
         setStatusFn("Не удалось сохранить книгу: " + (e && e.message ? e.message : e), true);
@@ -7799,16 +7847,22 @@
           setStatusFn("В архиве не найдено файлов .fb2 или .epub.", true);
           return;
         }
-        var added = 0, skipped = 0;
+        var added = 0, skipped = 0, tooBig = 0;
         function next(i){
           if(i >= bookFiles.length){
-            setStatusFn("Загружено книг: " + added + (skipped ? ", уже было: " + skipped : "") + ".", false);
+            var msg = "Загружено книг: " + added + (skipped ? ", уже было: " + skipped : "") + ".";
+            if(tooBig) msg += " Слишком большие для автосинхронизации, перенесите вручную: " + tooBig + " " + pluralRu(tooBig, FILE_FORMS) + ".";
+            setStatusFn(msg, false);
             return;
           }
           var entry = bookFiles[i];
           var baseName = entry.path.slice(entry.path.lastIndexOf("/") + 1);
           saveBookFile(baseName, entry.data).then(function(result){
-            if(result.added){ added++; registerBookInRegistry(result.hash, result.name, result.size); }
+            if(result.added){
+              added++;
+              if(fileExceedsSyncSizeLimit(result.size)) tooBig++;
+              registerBookInRegistry(result.hash, result.name, result.size);
+            }
             else skipped++;
             next(i + 1);
           }).catch(function(e){
