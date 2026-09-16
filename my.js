@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 17.0 (16.09)
+   Версия: 18.0 (16.09)
    =========================================================================== */
 
 (function(){
@@ -813,6 +813,31 @@
   // ===================== ХРАНЕНИЕ (с дебаунсом) =====================
   var STORAGE_KEY = "bibleReadingProgress_v2";
   var OLD_STORAGE_KEY = "bibleReadingProgress_v1";
+  // ⚠️ ДОБАВЛЕНО (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md — новый
+  // разбор логов от пользователя после того, как Шаги 1-4 того ТЗ уже были
+  // сделаны). Разбор размера state (см. диагностику ниже, у `var state =
+  // loadState()`) показал: state["notes:*"] (тексты заметок "Моего
+  // блокнота") — ~2.3 млн символов из ~2.6 млн общих, то есть ~88% всего
+  // объёма, который раньше писался ОДНОЙ строкой JSON.stringify(state) в
+  // STORAGE_KEY. На устройстве пользователя это стабильно превышает квоту
+  // localStorage (лог: "Failed to execute 'setItem' ... exceeded the
+  // quota"), а поскольку запись была ОДНА на весь `state`, переполнение
+  // из-за заметок роняло ЦЕЛИКОМ и её — вместе с задачами и только что
+  // вставленной картинкой, которые сами по себе крошечные и без заметок
+  // прекрасно уместились бы. NOTES_STORAGE_KEY — отдельный ключ localStorage
+  // только для "notes:<id>" (см. splitStateForLocalStorage/
+  // writeStateToLocalStorage/loadState ниже): запись теперь идёт ДВУМЯ
+  // независимыми localStorage.setItem — если пухлые заметки не влезли и
+  // упали с QuotaExceededError, это больше не утаскивает за собой сохранение
+  // задач/картинок, которое идёт отдельным вызовом. Заметки при этом
+  // по-прежнему хранятся и локально (не только в облаке, см.
+  // PROJECT_MAP_MDEDITOR.md про облачное хранение текста заметок) — просто
+  // в собственном ключе, который не топит задачи, если сам не влезает.
+  // Структура `state` в памяти НЕ меняется — весь остальной код (включая
+  // mdeditor.js через deps.getState()) как читал/писал `state["notes:" +
+  // id]` в единый объект, так и продолжает читать/писать, не зная о
+  // разделении на диске.
+  var NOTES_STORAGE_KEY = "bibleReadingProgress_v2_notes";
   var SYNC_ID_KEY = "bibleReadingSyncId_v1";
   // TASK_SHARED_TASKS, Шаг 1: групповая привязка "Общих задач" — отдельный
   // от личной синхронизации механизм (свой код/QR, свой groupId), хранится
@@ -1136,6 +1161,55 @@
   var totalChecked = 0;
   var checkedPerBook = {};
 
+  // ⚠️ ДОБАВЛЕНО (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md — см.
+  // пояснение у NOTES_STORAGE_KEY выше). Делит объект state на две части:
+  // "notes" — только ключи "notes:<id>" (тексты заметок "Моего блокнота",
+  // основной объём), "main" — всё остальное (задачи, чек-листы, цели,
+  // счётчик часов, метаданные заметок notesMeta:/notecreated: — они
+  // маленькие, специально оставлены в main, чтобы список заметок оставался
+  // доступен даже если сам текст заметок не поместился). Форма самого
+  // `state` в памяти не меняется — деление только для записи на диск.
+  function splitStateForLocalStorage(stateObj){
+    var main = {};
+    var notes = {};
+    Object.keys(stateObj).forEach(function(k){
+      if(k.indexOf("notes:") === 0){
+        notes[k] = stateObj[k];
+      }else{
+        main[k] = stateObj[k];
+      }
+    });
+    return {main: main, notes: notes};
+  }
+
+  // ⚠️ ДОБАВЛЕНО (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md). Общая
+  // точка записи `state` в localStorage — используется saveLocalState,
+  // saveLocalStateNow и flushPendingSyncNow (раньше в каждом из трёх мест
+  // был свой дублирующийся localStorage.setItem(STORAGE_KEY, ...)). Пишет
+  // ДВУМЯ независимыми localStorage.setItem — под STORAGE_KEY (всё, кроме
+  // заметок) и под NOTES_STORAGE_KEY (только заметки) — каждая со своим
+  // try/catch: ошибка (например, QuotaExceededError) в одной записи не
+  // мешает второй. label — префикс в Debug.log, чтобы в логе было видно,
+  // какой вызывающий код привёл к записи (сохранены прежние тексты
+  // сообщений по смыслу, теперь общие для всех трёх мест).
+  function writeStateToLocalStorage(label){
+    var split = splitStateForLocalStorage(state);
+    try{
+      var mainJson = JSON.stringify(split.main);
+      localStorage.setItem(STORAGE_KEY, mainJson);
+      if(window.Debug) window.Debug.log(label + ": записано (основное), размер=" + mainJson.length);
+    }catch(e){
+      if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное — задачи/цели/настройки): " + (e && e.message ? e.message : e));
+    }
+    try{
+      var notesJson = JSON.stringify(split.notes);
+      localStorage.setItem(NOTES_STORAGE_KEY, notesJson);
+      if(window.Debug) window.Debug.log(label + ": записано (заметки), размер=" + notesJson.length);
+    }catch(e){
+      if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (заметки — локальный кэш; в облаке заметки сохраняются отдельно и этой ошибкой не затрагиваются): " + (e && e.message ? e.message : e));
+    }
+  }
+
   var saveTimer = null;
   function saveLocalState(){
     clearTimeout(saveTimer);
@@ -1148,14 +1222,9 @@
       // QuotaExceededError, если state уже большой) — первый кандидат. Раньше
       // catch(e){} молча глотал её — теперь логируем факт и причину падения,
       // чтобы это стало видно в логе, а не оставалось невидимым молчаливым
-      // отказом.
-      try{
-        var json = JSON.stringify(state);
-        localStorage.setItem(STORAGE_KEY, json);
-        if(window.Debug) window.Debug.log("saveLocalState: записано, размер=" + json.length);
-      }catch(e){
-        if(window.Debug) window.Debug.log("saveLocalState: ОШИБКА записи: " + (e && e.message ? e.message : e));
-      }
+      // отказом. С 16.09 (второй раз в тот же день) запись разбита на
+      // main/notes — см. writeStateToLocalStorage выше.
+      writeStateToLocalStorage("saveLocalState");
     }, 300);
   }
 
@@ -1183,14 +1252,11 @@
     // ⚠️ ДИАГНОСТИКА (16.09, см. пояснение у saveLocalState выше) — та же
     // причина: раньше ошибка записи (в т.ч. переполнение квоты) проглатывалась
     // молча именно здесь, в точке немедленного сохранения текста задачи/
-    // картинки, где потеря особенно чувствительна.
-    try{
-      var json = JSON.stringify(state);
-      localStorage.setItem(STORAGE_KEY, json);
-      if(window.Debug) window.Debug.log("saveLocalStateNow: записано, размер=" + json.length);
-    }catch(e){
-      if(window.Debug) window.Debug.log("saveLocalStateNow: ОШИБКА записи: " + (e && e.message ? e.message : e));
-    }
+    // картинки, где потеря особенно чувствительна. С 16.09 (второй раз в
+    // тот же день) запись разбита на main/notes — см.
+    // writeStateToLocalStorage выше: переполнение квоты заметками теперь
+    // не мешает записаться только что вставленной картинке/задаче.
+    writeStateToLocalStorage("saveLocalStateNow");
   }
 
   function chapterKey(bookName, chapterNum){
@@ -1207,7 +1273,34 @@
       // выглядело бы как полная потеря ВСЕХ задач, а не одной — раз
       // симптом именно точечный (одна задача), этот лог нужен в первую
       // очередь чтобы ИСКЛЮЧИТЬ этот вариант, а не потому что он вероятен.
-      if(raw){ return JSON.parse(raw); }
+      if(raw){
+        var parsed = JSON.parse(raw);
+        // ⚠️ ДОБАВЛЕНО (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md —
+        // см. пояснение у NOTES_STORAGE_KEY выше). С этой правки заметки
+        // ("notes:<id>") пишутся в отдельный ключ NOTES_STORAGE_KEY — здесь
+        // они подмешиваются обратно в тот же объект state, так что для
+        // остального кода (включая mdeditor.js) ничего не меняется: он
+        // по-прежнему видит один общий объект со всеми ключами. Если у
+        // пользователя ещё остались старые записи, где notes:* были
+        // сохранены внутри STORAGE_KEY (до этой правки) — они никуда не
+        // денутся, просто останутся в `parsed` как есть; NOTES_STORAGE_KEY
+        // может ещё не существовать при самом первом запуске после
+        // обновления, это нормально (Object.keys по пустому/отсутствующему
+        // просто ничего не добавит). Ошибка разбора NOTES_STORAGE_KEY не
+        // должна ронять загрузку остального state (задач) — если заметки
+        // из локального кэша не читаются, они всё равно подтянутся из
+        // облака при следующей синхронизации.
+        var notesRaw = localStorage.getItem(NOTES_STORAGE_KEY);
+        if(notesRaw){
+          try{
+            var notesParsed = JSON.parse(notesRaw);
+            Object.keys(notesParsed).forEach(function(k){ parsed[k] = notesParsed[k]; });
+          }catch(e){
+            if(window.Debug) window.Debug.log("loadState: ОШИБКА разбора NOTES_STORAGE_KEY (" + (e && e.message ? e.message : e) + ") — локальный кэш заметок не подхвачен, подтянутся из облака при синхронизации");
+          }
+        }
+        return parsed;
+      }
     }catch(e){
       if(window.Debug) window.Debug.log("loadState: ОШИБКА разбора localStorage (" + (e && e.message ? e.message : e) + ") — состояние будет считаться отсутствующим/потребует миграции");
     }
@@ -3531,13 +3624,13 @@
     if(saveTimer){
       clearTimeout(saveTimer);
       saveTimer = null;
-      try{
-        var flushJson = JSON.stringify(state);
-        localStorage.setItem(STORAGE_KEY, flushJson);
-        if(window.Debug) window.Debug.log("flushPendingSyncNow: localStorage сохранён, размер=" + flushJson.length + ", задач=" + getAllTasks().length);
-      }catch(e){
-        if(window.Debug) window.Debug.log("flushPendingSyncNow: ошибка localStorage.setItem: " + (e && e.message ? e.message : e));
-      }
+      // С 16.09 (продолжение TASK_FIX_TASK_IMAGE_LOSS.md, второй раз в тот
+      // же день) запись разбита на main/notes — см.
+      // writeStateToLocalStorage выше: если заметки не влезли в квоту, это
+      // больше не топит за собой задачи/картинки, для которых и существует
+      // этот flush.
+      writeStateToLocalStorage("flushPendingSyncNow");
+      if(window.Debug) window.Debug.log("flushPendingSyncNow: задач=" + getAllTasks().length);
     }
     if(pushTimer){
       clearTimeout(pushTimer);
