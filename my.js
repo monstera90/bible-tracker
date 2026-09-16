@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 16.0 (16.09)
+   Версия: 17.0 (16.09)
    =========================================================================== */
 
 (function(){
@@ -3333,6 +3333,7 @@
       touchDeviceRegistry(); // отмечаемся живым устройством для реестра файлов (READER_PLAN.md, шаг 3)
       syncFileRegistry("books"); // фоновая сверка реестра книг с другими устройствами (см. выше)
       syncFileRegistry("images"); // то же для картинок заметок (ТЗ пользователя от 14.09; TASK_FILE_SYNC_RTDB.md, шаг 5, 16.09) — адаптер "images" зарегистрирован в mdeditor.js (registerFileRegistryAdapter в deps) и использует тот же RTDB-транспорт, что и книги
+      syncGroupImageRegistry(); // групповой канал картинок общих задач (TASK_FILE_SYNC_RTDB.md, раздел 4.5, Шаг 7, 16.09) — гейтится внутри на sharedGroup, вызов здесь не завязан на открытую вкладку "Общие задачи" (см. также вызов в refreshJointTasksData)
       // Успешно синхронизировались — если за время этого цикла набежало
       // ещё одно изменение (см. pendingPushAfterSync у scheduleCloudPush),
       // сразу запускаем новый цикл, а не ждём следующего изменения задачи.
@@ -4566,6 +4567,13 @@
     // подстраховка для архива — тот же приём, что и у groupTasksDirty
     // чуть выше (см. пояснение у pullGroupArchiveNow, Шаг 6).
     if(Object.keys(groupArchiveDirty).length) pushGroupArchiveNow();
+    // ⚠️ ДОБАВЛЕНО 16.09 (TASK_FILE_SYNC_RTDB.md, раздел 4.5, Шаг 7):
+    // тот же цикл опроса группы — подходящее место для сверки группового
+    // канала картинок (см. syncGroupImageRegistry выше). Функция сама
+    // гейтится на sharedGroup/getFileSyncEnabled/navigator.onLine, здесь
+    // без доп. условий — как и syncFileRegistry("images") в doCloudSync
+    // для личного канала.
+    syncGroupImageRegistry();
   }
 
   // ===================== ОТВЯЗКА / ОТПИСКА — ДИАЛОГИ И ЛОГИКА (TASK_SHARED_TASKS,
@@ -4656,7 +4664,15 @@
     var base = FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId);
     return Promise.all([
       fetchWithTimeout(base + "/tasks.json", {method:"DELETE"}, 10000),
-      fetchWithTimeout(base + "/archive.json", {method:"DELETE"}, 10000)
+      fetchWithTimeout(base + "/archive.json", {method:"DELETE"}, 10000),
+      // ⚠️ ДОБАВЛЕНО 16.09 (TASK_FILE_SYNC_RTDB.md, раздел 4.5, Шаг 7):
+      // "данные группы" при варианте "С удалением" — это ещё и групповой
+      // канал картинок (files/fileBlobs/fileRequests под images) — сносим
+      // разом всю ветку, точечные тумбстоуны (registerFileDeletionFromGroup)
+      // здесь избыточны, группа целиком перестаёт существовать.
+      fetchWithTimeout(base + "/files.json", {method:"DELETE"}, 10000),
+      fetchWithTimeout(base + "/fileBlobs.json", {method:"DELETE"}, 10000),
+      fetchWithTimeout(base + "/fileRequests.json", {method:"DELETE"}, 10000)
     ]).then(function(results){
       results.forEach(function(res){ if(!res.ok) throw new Error("group_data_delete_failed_" + res.status); });
       return true;
@@ -4742,6 +4758,47 @@
         changed = true;
       });
       if(changed){ saveLocalStateNow(); scheduleCloudPush(); }
+      // ⚠️ ДОБАВЛЕНО 16.09 (TASK_FILE_SYNC_RTDB.md, раздел 4.5, Шаг 7):
+      // картинки ("![[имя]]"), на которые остались ссылки в только что
+      // перенесённых задачах/архиве — переезжают из группового реестра
+      // канала в ЛИЧНЫЙ (/syncs/<id>/files/images), иначе после переноса
+      // задача останется видна, а картинка внутри недостижима ни по
+      // одному из каналов (групповой канал больше не читается — sharedGroup
+      // обнуляется сразу после этой функции, см. returnJointTasksTabToLocalMode).
+      // Переезжает только ЗАПИСЬ в реестре/канале синхронизации — сами
+      // байты на диске не трогаем: если админ когда-либо видел картинку
+      // (миниатюра открывалась), она уже лежит у него локально в OPFS
+      // благодаря syncGroupImageRegistry (см. выше) — если же локально
+      // её всё-таки нет (устройство ни разу не подтягивало байты), для
+      // такого хэша просто нечего регистрировать, это ожидаемое
+      // ограничение (см. пояснение в самом ТЗ, раздел 4.5).
+      var adapters = FILE_REGISTRY_ADAPTERS.images;
+      if(adapters){
+        var names = {}, re = /!\[\[([^\[\]\n]+)\]\]/g, m;
+        contents.concat(archiveContents).forEach(function(content){
+          if(!content || !content.text) return;
+          re.lastIndex = 0;
+          while((m = re.exec(content.text))){
+            names[m[1]] = true;
+            if(m[0].length === 0) re.lastIndex++;
+          }
+        });
+        var wantedNames = Object.keys(names);
+        if(wantedNames.length){
+          adapters.getLocalManifest().catch(function(){ return {}; }).then(function(manifest){
+            manifest = manifest || {};
+            var nameToHash = {};
+            Object.keys(manifest).forEach(function(h){ nameToHash[manifest[h]] = h; });
+            return Promise.all(wantedNames.map(function(name){
+              var hash = nameToHash[name];
+              if(!hash) return null; // локально этой картинки нет — переносить нечего (см. пояснение выше)
+              return adapters.readLocalBytes(hash, name).then(function(buf){
+                return registerFileInRegistry("images", hash, name, buf.byteLength);
+              }).catch(function(){});
+            }));
+          }).catch(function(){});
+        }
+      }
     });
   }
 
@@ -8076,6 +8133,339 @@
       return Promise.all(chores);
     }).catch(function(){}).finally(function(){
       fileRegistrySyncInProgress[kind] = false;
+    });
+  }
+
+  // =====================================================================
+  // ⚠️ ДОБАВЛЕНО 16.09 (TASK_FILE_SYNC_RTDB.md, раздел 4.5, Шаг 7 —
+  // последний шаг ТЗ): ГРУППОВОЙ канал для картинок, вставленных в общие
+  // задачи (вкладка "Общие задачи"/jointtasks и её архив). Личный канал
+  // выше (реестр /syncs/<syncId>/files|fileBlobs|fileRequests/images,
+  // ключ шифрования SHA-256(syncId)) для них не годится — участники
+  // группы намеренно не имеют доступа к чужому syncId (см. раздел 4.5
+  // ТЗ и TASK_SHARED_TASKS.md, раздел 1 "Термины"). Поэтому здесь —
+  // зеркало того же самого механизма (реестр/реле байт/заявки, тот же
+  // FILE_RELAY_TTL_MS, те же ограничения на on()-подписки), только под
+  // /groups/<groupId>/ вместо /syncs/<syncId>/, kind всегда "images"
+  // (книги в общих задачах невозможны — там только текст с "![[...]]"),
+  // ключ шифрования — groupCryptoKey (SHA-256(groupId), уже
+  // используется для текста общих задач, getGroupCryptoKey выше).
+  // Локальное хранилище (OPFS images/) ОДНО на оба канала — файл
+  // адресуется по хэшу содержимого независимо от того, откуда на него
+  // ссылаются; личный и групповой реестр — это просто две независимые
+  // "витрины" одного и того же локального адаптера FILE_REGISTRY_ADAPTERS.images
+  // (getLocalManifest/saveIncoming/readLocalBytes/removeLocal, тот же
+  // объект, что используется syncFileRegistry("images") выше).
+  // =====================================================================
+
+  // ---- генерические PATCH/GET/DELETE-обёртки под /groups/<groupId>/ —
+  // тот же приём, что fetchNotesCloudPath/patchNotesCloud/
+  // deleteNotesCloudPath выше под /syncs/<syncId>/, но параметризовано
+  // groupId (группа не хранится в замыкании одной переменной так же
+  // однозначно, как syncId — группа явно передаётся вызывающим кодом).
+  // Не переиспользуем putCloudBlob напрямую — она добавляет
+  // LAST_ACTIVE_STATE_KEY (метка годового срока хранения ЛИЧНОГО кода
+  // синхронизации), это чужая семантика для ветки /groups/.
+  function fetchGroupCloudPath(groupId, relPath, opts){
+    if(!groupId) return Promise.reject(new Error("no_group"));
+    var fetchOpts = { method: "GET" };
+    if(opts && opts.keepalive) fetchOpts.keepalive = true;
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/" + relPath + ".json", fetchOpts, 8000).then(function(res){
+      if(!res.ok) throw new Error("fetch_failed_" + res.status);
+      return res.json();
+    });
+  }
+  function deleteGroupCloudPath(groupId, relPath, opts){
+    if(!groupId) return Promise.reject(new Error("no_group"));
+    var fetchOpts = { method: "DELETE" };
+    if(opts && opts.keepalive) fetchOpts.keepalive = true;
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/" + relPath + ".json", fetchOpts, 8000).then(function(res){
+      if(!res.ok) throw new Error("delete_failed_" + res.status);
+      return true;
+    });
+  }
+  function patchGroupCloud(groupId, patchObj, opts){
+    if(!groupId) return Promise.reject(new Error("no_group"));
+    var fetchOpts = {
+      method: "PATCH",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(patchObj || {})
+    };
+    if(opts && opts.keepalive) fetchOpts.keepalive = true;
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + ".json", fetchOpts, 15000).then(function(res){
+      if(!res.ok) throw new Error("group_patch_failed_" + res.status);
+      return true;
+    });
+  }
+
+  // ---- шифрование БАЙТ файла групповым ключом — тот же ключ, что и у
+  // текста общих задач (getGroupCryptoKey выше, SHA-256(groupId)), но
+  // здесь шифруются сырые байты картинки, а не JSON (тот же приём, что
+  // у encryptFileBytes/decryptFileBytes для личного канала выше,
+  // отличается только источник ключа). ----
+  function encryptGroupFileBytes(groupId, buf){
+    return getGroupCryptoKey(groupId).then(function(key){
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      return crypto.subtle.encrypt({name:"AES-GCM", iv:iv}, key, buf).then(function(cipher){
+        var out = new Uint8Array(iv.byteLength + cipher.byteLength);
+        out.set(iv, 0);
+        out.set(new Uint8Array(cipher), iv.byteLength);
+        return out;
+      });
+    });
+  }
+  function decryptGroupFileBytes(groupId, bytes){
+    return getGroupCryptoKey(groupId).then(function(key){
+      var arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+      var iv = arr.slice(0, 12), cipher = arr.slice(12);
+      return crypto.subtle.decrypt({name:"AES-GCM", iv:iv}, key, cipher);
+    });
+  }
+
+  // ---- байты в /groups/<groupId>/fileBlobs/images/<hash> — те же
+  // ограничения, что у личного fileBlobCloudPath выше: НИКАКОГО on() на
+  // этот узел, только точечный GET/DELETE в момент реальной надобности
+  // (bytesToBase64Async/base64ToBytesAsync — те же chunked-хелперы, что
+  // и у личного канала, ничего группового им не нужно). ----
+  function groupFileBlobCloudPath(hash){ return "fileBlobs/images/" + hash; }
+  function uploadFileToGroupCloud(groupId, hash, bytes){
+    return encryptGroupFileBytes(groupId, bytes).then(function(encBytes){
+      return bytesToBase64Async(encBytes);
+    }).then(function(b64){
+      var patch = {};
+      patch[groupFileBlobCloudPath(hash)] = b64;
+      return patchGroupCloud(groupId, patch);
+    }).then(function(){ return true; });
+  }
+  function downloadFileFromGroupCloud(groupId, hash){
+    return fetchGroupCloudPath(groupId, groupFileBlobCloudPath(hash)).then(function(b64){
+      if(!b64) throw new Error("blob_not_found");
+      return base64ToBytesAsync(b64);
+    }).then(function(bytes){
+      return decryptGroupFileBytes(groupId, bytes);
+    });
+  }
+  function deleteFileFromGroupCloud(groupId, hash){
+    return deleteGroupCloudPath(groupId, groupFileBlobCloudPath(hash)).then(function(){ return true; });
+  }
+
+  // ---- заявки на повторную заливку, /groups/<groupId>/fileRequests/images/<hash>
+  // — то же самое, что fileRequestCloudPath/requestFileFromCloud/
+  // clearFileRequest у личного канала (раздел 4.3 ТЗ), только под
+  // групповой веткой. На этот узел, как и на files/, постоянный опрос
+  // допустим (маленькие записи, не байты). ----
+  function groupFileRequestCloudPath(hash){ return "fileRequests/images/" + hash; }
+  function requestFileFromGroupCloud(groupId, hash){
+    if(!groupId) return Promise.resolve();
+    var patch = {};
+    patch[groupFileRequestCloudPath(hash)] = { by: getDeviceId(), at: Date.now() };
+    return patchGroupCloud(groupId, patch).catch(function(){});
+  }
+  function clearGroupFileRequest(groupId, hash){
+    if(!groupId) return Promise.resolve();
+    return deleteGroupCloudPath(groupId, groupFileRequestCloudPath(hash)).catch(function(){});
+  }
+
+  // Регистрирует картинку в ГРУППОВОМ реестре (зеркало
+  // registerFileInRegistry выше) — вызывается изнутри syncGroupImageRegistry
+  // ниже, когда сверка обнаруживает ссылку "![[имя]]" в тексте общей
+  // задачи/архива, для которой локально есть файл (по хэшу из манифеста
+  // адаптера "images"), но записи в групповом реестре ещё нет. В отличие
+  // от личного канала, сюда НЕТ прямого вызова из mdeditor.js в момент
+  // вставки картинки — mdeditor.js не знает, на какой вкладке (личной
+  // или jointtasks) открыта редактируемая задача, поэтому определение
+  // канала сделано ленивым, "по факту" — сканированием текста задач,
+  // как и предлагает раздел 4.5 ТЗ ("Практически: collectTaskAndCommentTextsForMediaScan
+  // — подходящее место, чтобы разделить картинки на группы каналов").
+  function registerFileInGroupRegistry(groupId, hash, name, size){
+    if(!groupId || !getFileSyncEnabled()) return Promise.resolve();
+    if(fileExceedsSyncSizeLimit(size)) return Promise.resolve({skipped: true, reason: "size_limit"});
+    return fetchGroupCloudPath(groupId, "files/images/" + hash).catch(function(){ return null; }).then(function(existing){
+      var patch = {};
+      if(existing){
+        if(existing.deletedAt){
+          patch["files/images/" + hash + "/deletedAt"] = null;
+          patch["files/images/" + hash + "/deletedBy"] = null;
+          patch["files/images/" + hash + "/confirmedBy/" + getDeviceId()] = true;
+          return patchGroupCloud(groupId, patch);
+        }
+        return null;
+      }
+      var entry = {
+        hash: hash, size: size, name: name,
+        addedBy: getDeviceId(), addedAt: Date.now(),
+        uploadedAt: null, confirmedBy: {}
+      };
+      entry.confirmedBy[getDeviceId()] = true; // у добавившего устройства файл уже есть локально
+      patch["files/images/" + hash] = entry;
+      return patchGroupCloud(groupId, patch);
+    }).catch(function(){});
+  }
+
+  // Тумбстоун в групповом реестре + немедленное удаление временной копии
+  // байт — зеркало registerFileDeletion выше. Используется точечно при
+  // отвязке/удалении группы (см. deleteGroupTasksAndArchive ниже, где
+  // проще снести всю ветку разом) — здесь пригодится, если понадобится
+  // точечное удаление одной картинки из группового канала в будущем.
+  function registerFileDeletionFromGroup(groupId, hash){
+    if(!groupId || !getFileSyncEnabled()) return Promise.resolve();
+    var patch = {};
+    patch["files/images/" + hash + "/deletedAt"] = Date.now();
+    patch["files/images/" + hash + "/deletedBy"] = getDeviceId();
+    return patchGroupCloud(groupId, patch).then(function(){
+      return deleteFileFromGroupCloud(groupId, hash).catch(function(){});
+    }).catch(function(){});
+  }
+
+  // Достаёт имена картинок ("![[имя]]"), встречающиеся в текстах общих
+  // задач + их архива ТЕКУЩЕЙ группы — свой маленький regex-сканер,
+  // самодостаточный (не зависит от порядка объявления TASK_TO_COMMENT_IMG_RE
+  // ниже по файлу — та же схема "!\[\[([^\[\]\n]+)\]\]", что и everywhere
+  // else в этом файле, см. imgRe в formatInline).
+  function collectGroupImageNames(){
+    if(!sharedGroup) return [];
+    var names = {}, re = /!\[\[([^\[\]\n]+)\]\]/g, m;
+    var texts = [];
+    getAllGroupTasks().forEach(function(t){ if(t.c && t.c.text) texts.push(t.c.text); });
+    getAllGroupArchivedTasks().forEach(function(t){ if(t.c && t.c.text) texts.push(t.c.text); });
+    texts.forEach(function(text){
+      re.lastIndex = 0;
+      while((m = re.exec(text))){
+        names[m[1]] = true;
+        if(m[0].length === 0) re.lastIndex++;
+      }
+    });
+    return Object.keys(names);
+  }
+
+  // Главная точка сверки группового канала картинок — зеркало
+  // syncFileRegistry(kind) выше, но: 1) kind всегда "images"; 2) путь —
+  // /groups/<groupId>/... вместо /syncs/<syncId>/...; 3) "известные
+  // устройства" — это участники группы (/groups/<groupId>/members,
+  // самоочищающийся список — removeGroupMember уже убирает ушедших, в
+  // отличие от личного /syncs/<id>/devices, которому нужна отдельная
+  // 30-дневная эвристика DEVICE_KNOWN_WINDOW_MS); 4) ПЕРЕД обычной
+  // сверкой реестра — шаг 0: регистрирует в групповом реестре хэши,
+  // которые уже упомянуты в тексте общих задач/архива ("![[имя]]"), но
+  // ещё не попали в реестр (см. registerFileInGroupRegistry выше и
+  // пояснение там про ленивое определение канала). Вызывается из
+  // refreshJointTasksData (тот же цикл опроса, что и текст общих задач)
+  // — см. вызов там.
+  var groupFileRegistrySyncInProgress = {}; // groupId -> bool
+  function syncGroupImageRegistry(){
+    if(!sharedGroup || !sharedGroup.groupId) return Promise.resolve();
+    if(!navigator.onLine || !getFileSyncEnabled()) return Promise.resolve();
+    var adapters = FILE_REGISTRY_ADAPTERS.images;
+    if(!adapters) return Promise.resolve();
+    var groupId = sharedGroup.groupId;
+    if(groupFileRegistrySyncInProgress[groupId]) return Promise.resolve();
+    groupFileRegistrySyncInProgress[groupId] = true;
+    var myId = getDeviceId();
+    return adapters.getLocalManifest().catch(function(){ return {}; }).then(function(manifest){
+      manifest = manifest || {};
+      var nameToHash = {};
+      Object.keys(manifest).forEach(function(h){ nameToHash[manifest[h]] = h; });
+      var referencedNames = collectGroupImageNames();
+      return fetchGroupCloudPath(groupId, "files/images").catch(function(){ return null; }).then(function(registrySoFar){
+        registrySoFar = registrySoFar || {};
+        // Шаг 0: локально известные картинки, упомянутые в общих задачах,
+        // но ещё не зарегистрированные в групповом реестре (ни нами, ни
+        // кем-то другим, кто мог их тоже иметь локально) — регистрируем.
+        // fileExceedsSyncSizeLimit проверяется внутри registerFileInGroupRegistry.
+        var toRegister = referencedNames.map(function(name){ return nameToHash[name]; })
+          .filter(function(hash){ return hash && !registrySoFar[hash]; });
+        return Promise.all(toRegister.map(function(hash){
+          return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
+            return registerFileInGroupRegistry(groupId, hash, manifest[hash], buf.byteLength);
+          }).catch(function(){});
+        })).then(function(){
+          // Реестр мог измениться после шага 0 — перечитываем перед
+          // основной сверкой, чтобы не спутать только что добавленные
+          // нами записи с "ещё не пришедшими".
+          return Promise.all([
+            fetchGroupCloudPath(groupId, "files/images").catch(function(){ return null; }),
+            fetchGroupMembers(groupId).catch(function(){ return null; }),
+            fetchGroupCloudPath(groupId, "fileRequests/images").catch(function(){ return null; })
+          ]);
+        });
+      });
+    }).then(function(results){
+      var registry = (results && results[0]) || {}, members = (results && results[1]) || {}, requests = (results && results[2]) || {};
+      return adapters.getLocalManifest().catch(function(){ return {}; }).then(function(manifest){
+        manifest = manifest || {};
+        var localHashes = {};
+        Object.keys(manifest).forEach(function(h){ localHashes[h] = true; });
+        var knownDeviceIds = Object.keys(members || {}); // самоочищающийся список — см. пояснение выше
+
+        var chores = Object.keys(registry).map(function(hash){
+          var entry = registry[hash] || {};
+          var confirmedBy = entry.confirmedBy || {};
+          var haveLocally = !!localHashes[hash];
+          var pendingRequest = requests[hash] || null;
+
+          // 0) тумбстоун
+          if(entry.deletedAt){
+            if(haveLocally){
+              return adapters.removeLocal(hash, manifest[hash]).catch(function(){});
+            }
+            return null;
+          }
+
+          // 1) у нас файла нет локально — скачиваем, сохраняем, сразу
+          // удаляем временную копию из облака (раздел 3.4 ТЗ), при
+          // отсутствии байт — заявка (раздел 4.3).
+          if(!haveLocally){
+            return downloadFileFromGroupCloud(groupId, hash).catch(function(err){
+              if(err && err.message === "blob_not_found" && (!pendingRequest || pendingRequest.by !== myId)){
+                requestFileFromGroupCloud(groupId, hash);
+              }
+              throw err;
+            }).then(function(buf){
+              return adapters.saveIncoming(hash, entry.name || hash, new Uint8Array(buf));
+            }).then(function(){
+              return deleteFileFromGroupCloud(groupId, hash).catch(function(){});
+            }).then(function(){
+              var patch = {};
+              patch["files/images/" + hash + "/confirmedBy/" + myId] = true;
+              patch["files/images/" + hash + "/uploadedAt"] = null;
+              return patchGroupCloud(groupId, patch);
+            }).then(function(){
+              return (pendingRequest && pendingRequest.by === myId) ? clearGroupFileRequest(groupId, hash) : null;
+            }).catch(function(){});
+          }
+
+          // 2) файл есть локально — заливаем, если байт сейчас нет в
+          // fileBlobs и (не все известные участники подтвердили ИЛИ есть
+          // чужая заявка).
+          var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; });
+          if(!entry.uploadedAt && (missingConfirmations || pendingRequest)){
+            return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
+              return uploadFileToGroupCloud(groupId, hash, buf);
+            }).then(function(){
+              var patch = {};
+              patch["files/images/" + hash + "/uploadedAt"] = Date.now();
+              return patchGroupCloud(groupId, patch);
+            }).catch(function(){});
+          }
+
+          // 3) байты залиты и (все известные подтвердили и нет чужой
+          // заявки) ИЛИ истёк FILE_RELAY_TTL_MS после заливки — чистим
+          // временную копию (тот же TTL, что у личного канала, раздел 4.4/4.5).
+          if(entry.uploadedAt && !pendingRequest && (!missingConfirmations || (Date.now() - entry.uploadedAt) > FILE_RELAY_TTL_MS)){
+            return deleteFileFromGroupCloud(groupId, hash).then(function(){
+              var patch = {};
+              patch["files/images/" + hash + "/uploadedAt"] = null;
+              return patchGroupCloud(groupId, patch);
+            }).catch(function(){});
+          }
+
+          return null;
+        });
+
+        return Promise.all(chores);
+      });
+    }).catch(function(){}).finally(function(){
+      groupFileRegistrySyncInProgress[groupId] = false;
     });
   }
 
