@@ -262,7 +262,8 @@
      с этой точкой автоматически; теперь, когда padding окна на вкладке
      блокнота обнулён, компенсируем те же 8px явно здесь, иначе кнопки
      уедут на 8px ближе к правому краю. */
-  .settings-modal-box:has(> #settingsTabContent > .mdeditor-tab) .mdeditor-fab-row{
+  .settings-modal-box:has(> #settingsTabContent > .mdeditor-tab) .mdeditor-fab-row,
+  .settings-modal-box:has(> #settingsTabContent > .book-reader-tab) .mdeditor-fab-row{
     right:16px;
   }
   /* .settings-tabs-gear (нижний ряд "лежачих" вкладок) — тоже абсолютно

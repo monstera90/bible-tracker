@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 1.4 (15.09) -->
+     Версия: 2.0 (15.09) -->
 <head>
 <meta charset="UTF-8">
 <script>
@@ -129,6 +129,25 @@ window.addEventListener("error", function(e){
   <div class="settings-modal-frame">
     <div class="settings-modal-box" id="settingsModalBox">
       <div class="settings-tab-content" id="settingsTabContent"></div>
+      <!-- Кнопка-меню "настройки вкладки" — самая левая в общем ряду
+           (TASK_SHARED_TASKS.md, Шаг 4, 15.09). Видна ТОЛЬКО на вкладке
+           "Общие задачи" (jointtasks), не на любой вкладке задач — тем же
+           приёмом, что и "глаз" ниже (task-hide-linked-wrap): своя
+           видимость по конкретной вкладке, не общим условием showTaskFab
+           (см. syncTaskFabRowForTab в my.js). Следующий шаг в общем ряду
+           после "глаза" (right:288 = 248+40, тот же шаг 40px, см.
+           modals.css). Попап (#taskJointMenuPopup) — свой класс
+           (.task-joint-menu-popup), НЕ переиспользует .mdeditor-fontsize-
+           popup: тот рассчитан на столбик квадратных 32×32 кнопок
+           ("+"/"-"), а здесь список текстовых пунктов переменной длины
+           ("Синхронизация"/"Отвязать пользователя"/…), состав которых
+           зависит от состояния группы и собирается в JS
+           (renderTaskJointMenu, см. раздел "ГРУППОВАЯ ПРИВЯЗКА «ОБЩИХ
+           ЗАДАЧ»" в my.js) — здесь попап изначально пустой. -->
+      <span class="task-joint-menu-wrap" id="taskJointMenuWrap">
+        <div class="task-joint-menu-popup" id="taskJointMenuPopup"></div>
+        <button type="button" class="mdeditor-fab-btn" id="taskJointMenuBtn" title="Настройки вкладки"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.4"></circle><circle cx="12" cy="12" r="1.4"></circle><circle cx="12" cy="19" r="1.4"></circle></svg></button>
+      </span>
       <!-- "глаз" — скрыть/показать на вкладке "Next" задачи, уже
            привязанные к проекту (c.nextForProjectId), см.
            getNextHideLinkedTasks/taskHideLinkedBtn в initTaskGlobalToolbar

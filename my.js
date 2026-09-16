@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 5.0 (15.09)
+   Версия: 6.0 (16.09)
    =========================================================================== */
 
 (function(){
@@ -4213,31 +4213,39 @@
   // syncId (личная синхронизация может быть вообще не настроена).
   function refreshJointTasksData(){
     if(!sharedGroup) return;
-    var chain = (sharedGroup.role === "admin" && !isAdminMigrationDone(sharedGroup.groupId))
-      ? migrateAdminGroupTasksIfNeeded() : Promise.resolve();
-    chain.then(function(){
-      if(isGroupTasksActive()) return pullGroupTasksNow();
-    }).catch(function(err){ console.error(err); });
+    if(sharedGroup.role === "member"){
+      // Шаг 5: у отвязки нет push-уведомления участнику — единственный
+      // способ узнать, что админ его отвязал (см. handleGroupUnlinkKeepData/
+      // handleGroupUnlinkDeleteData), это переспросить сервер тем же
+      // циклом опроса, что и обычная подтяжка задач ниже.
+      checkGroupMembershipStillValid().then(function(stillMember){
+        if(!stillMember){ returnJointTasksTabToLocalMode(); return; }
+        return pullGroupTasksNow();
+      }).catch(function(err){ console.error(err); });
+    } else {
+      var chain = !isAdminMigrationDone(sharedGroup.groupId)
+        ? migrateAdminGroupTasksIfNeeded() : Promise.resolve();
+      chain.then(function(){
+        if(isGroupTasksActive()) return pullGroupTasksNow();
+      }).catch(function(err){ console.error(err); });
+    }
     if(Object.keys(groupTasksDirty).length) pushGroupTasksNow();
   }
 
-  // ===================== ОТВЯЗКА / ОТПИСКА — ДИАЛОГИ (TASK_SHARED_TASKS,
-  // Шаг 2) =====================
-  // Только диалоги с финальными текстами из п. 2.5/2.6 ТЗ. Сама логика
-  // (удаление данных группы, перенос данных админа в локальное хранилище
-  // при 0 участников, возврат вкладки в локальный режим) — Шаг 5;
-  // обработчики кнопок подтверждения ниже — по-прежнему заглушки
-  // (groupActionNotImplementedYet). Сами диалоги теперь вызываются из меню
-  // "настройки вкладки" (см. openGroupUnlinkModal/openGroupUnsubscribeModal
-  // ниже и renderTaskJointMenu выше, TASK_SHARED_TASKS.md, Шаг 4).
-
-  function groupActionNotImplementedYet(){
-    modalBox.innerHTML = modalHeader("Пока не реализовано",
-        "Эта часть механизма общих задач появится на следующем шаге доработки (Шаг 5 из TASK_SHARED_TASKS.md).") +
-      '<button class="modal-btn primary" id="mDone">Понятно</button>';
-    bindClose();
-    document.getElementById("mDone").addEventListener("click", closeModal);
-  }
+  // ===================== ОТВЯЗКА / ОТПИСКА — ДИАЛОГИ И ЛОГИКА (TASK_SHARED_TASKS,
+  // Шаги 2 и 5) =====================
+  // Диалоги (тексты дословно из п. 2.5/2.6 ТЗ) — Шаг 2. Сама логика ниже —
+  // Шаг 5: удаление/сохранение данных группы, перенос данных админа в
+  // личное локальное хранилище при уходе последнего участника, возврат
+  // вкладки в локальный режим (returnJointTasksTabToLocalMode), а также
+  // обнаружение отвязки на СТОРОНЕ УЧАСТНИКА (у отвязки нет push-
+  // уведомления — участник не получает сигнал в момент, когда админ его
+  // отвязал, поэтому проверка идёт пассивно, тем же циклом опроса, что и
+  // остальной обмен с группой — см. checkGroupMembershipStillValid,
+  // встроенную в refreshJointTasksData выше). Сами диалоги вызываются из
+  // меню "настройки вкладки" (см. openGroupUnlinkModal/
+  // openGroupUnsubscribeModal ниже и renderTaskJointMenu выше,
+  // TASK_SHARED_TASKS.md, Шаг 4).
 
   // п. 2.5 ТЗ — видна только админу. Текст и три кнопки дословно из ТЗ.
   function renderGroupUnlinkConfirm(){
@@ -4248,13 +4256,8 @@
       '<button class="modal-btn" id="mBack">Отмена</button>';
     bindClose();
     document.getElementById("mBack").addEventListener("click", closeModal);
-    // TODO Шаг 5: handleGroupUnlinkKeepData — участник теряет доступ, его
-    // вкладка возвращается в локальный CRUD с нуля, данные группы у админа
-    // остаются целиком.
-    document.getElementById("mUnlinkKeep").addEventListener("click", groupActionNotImplementedYet);
-    // TODO Шаг 5: handleGroupUnlinkDeleteData — общие задачи и архив группы
-    // удаляются из облака полностью.
-    document.getElementById("mUnlinkDelete").addEventListener("click", groupActionNotImplementedYet);
+    document.getElementById("mUnlinkKeep").addEventListener("click", handleGroupUnlinkKeepData);
+    document.getElementById("mUnlinkDelete").addEventListener("click", handleGroupUnlinkDeleteData);
   }
 
   // п. 2.6 ТЗ — видна только участнику. Текст и две кнопки дословно из ТЗ.
@@ -4265,10 +4268,7 @@
       '<button class="modal-btn" id="mBack">Отмена</button>';
     bindClose();
     document.getElementById("mBack").addEventListener("click", closeModal);
-    // TODO Шаг 5: handleGroupUnsubscribeConfirmed — данные группы не
-    // трогаются, участник просто теряет доступ, вкладка возвращается в
-    // режим "до привязки".
-    document.getElementById("mUnsubConfirm").addEventListener("click", groupActionNotImplementedYet);
+    document.getElementById("mUnsubConfirm").addEventListener("click", handleGroupUnsubscribeConfirmed);
   }
 
   // TASK_SHARED_TASKS, Шаг 4 (15.09): обёртки, вызываемые из меню
@@ -4283,9 +4283,236 @@
     modalOverlay.classList.add("open");
     renderGroupUnsubscribeConfirm();
   }
-  // Архив общих задач — Шаг 6 (ещё не сделан), пока заглушка тем же
-  // приёмом, что и groupActionNotImplementedYet выше, только со своим
-  // текстом (другой номер шага).
+
+  // ---- Шаг 5: облачные операции над группой, используемые обоими
+  // сценариями отвязки ----
+
+  // Убирает запись участника из /groups/<groupId>/members — общая часть
+  // и для "Отвязать" (админ убирает участника), и для "Отписаться"
+  // (участник убирает сам себя).
+  function removeGroupMember(groupId, memberDeviceId){
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/members/" + encodeURIComponent(memberDeviceId) + ".json", {
+      method: "DELETE"
+    }, 8000).then(function(res){
+      if(!res.ok) throw new Error("group_member_remove_failed_" + res.status);
+      return true;
+    });
+  }
+
+  // Убирает из группы всех участников, кроме админа (сейчас
+  // MAX_GROUP_MEMBERS=1, так что это ровно один-единственный участник, но
+  // код не хардкодит это число — переберёт всех, кто найдётся).
+  function removeAllNonAdminGroupMembers(groupId){
+    return fetchGroupMembers(groupId).then(function(members){
+      members = members || {};
+      var memberIds = Object.keys(members).filter(function(devId){
+        var m = members[devId];
+        return !m || m.role !== "admin";
+      });
+      return Promise.all(memberIds.map(function(devId){ return removeGroupMember(groupId, devId); }));
+    });
+  }
+
+  // "С удалением" (п. 2.5 ТЗ) — общие задачи и архив группы удаляются из
+  // облака полностью. Архива как отдельного хранилища пока физически нет
+  // (Шаг 6 не сделан, см. openGroupJointArchiveModal) — DELETE по пустому
+  // пути в Firebase просто ничего не находит и завершается успешно, так
+  // что заранее готовим и эту часть на будущее, без доп. проверок.
+  function deleteGroupTasksAndArchive(groupId){
+    var base = FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId);
+    return Promise.all([
+      fetchWithTimeout(base + "/tasks.json", {method:"DELETE"}, 10000),
+      fetchWithTimeout(base + "/archive.json", {method:"DELETE"}, 10000)
+    ]).then(function(results){
+      results.forEach(function(res){ if(!res.ok) throw new Error("group_data_delete_failed_" + res.status); });
+      return true;
+    });
+  }
+
+  // "Без удаления" (п. 2.5 ТЗ): участник теряет доступ, но данные группы
+  // не стираются из облака — вместо этого, раз участников не осталось
+  // (MAX_GROUP_MEMBERS=1 — после отвязки их 0), они переносятся в личное
+  // локальное хранилище админа тем же путём, что и обычные личные задачи
+  // (state["task:<id>"], см. «ВКЛАДКИ ЗАДАЧ: ХРАНЕНИЕ» ниже), чтобы не
+  // остаться недоступными: групповая запись в Firebase при этом НЕ
+  // удаляется, но админ её больше не читает и не пишет (сразу после этой
+  // функции его sharedGroup обнуляется, см. returnJointTasksTabToLocalMode)
+  // — при следующей привязке создаётся новая группа с новым groupId,
+  // старая просто больше никем не используется. Отмеченные (checked)
+  // общие задачи переносятся тоже, с восстановлением личной записи
+  // "taskcompletion:…" — иначе они бы просто исчезли из вида вместо того,
+  // чтобы попасть в личный архив, как и остальные закрытые задачи.
+  function migrateGroupTasksToLocalForAdmin(groupId){
+    return fetchGroupTasksRaw(groupId).then(function(raw){
+      raw = raw || {};
+      var ids = Object.keys(raw);
+      return Promise.all(ids.map(function(id){
+        var rec = raw[id];
+        if(!rec || rec.c === null || rec.c === undefined) return null;
+        return decryptGroupContent(groupId, rec.c).catch(function(err){
+          console.error("Не удалось расшифровать общую задачу при переносе локально:", id, err);
+          return null;
+        });
+      }));
+    }).then(function(contents){
+      var changed = false;
+      contents.forEach(function(content){
+        if(!content) return;
+        var newId = genTaskId();
+        var localContent = {
+          text: content.text, tab: "jointtasks", checked: !!content.checked,
+          checkedAt: content.checkedAt || null, completionKey: null,
+          nextForProjectId: null, flag: content.flag || null, inWork: !!content.inWork,
+          createdAt: content.createdAt != null ? content.createdAt : Date.now()
+        };
+        if(localContent.checked){
+          var ts = localContent.checkedAt || Date.now();
+          var completionKey = "taskcompletion:" + ts + "-" + Math.random().toString(36).slice(2,7);
+          state[completionKey] = {c: {text: localContent.text || "Без названия", tab: "jointtasks"}, t: ts};
+          localContent.completionKey = completionKey;
+        }
+        state["task:" + newId] = {c: localContent, t: Date.now()};
+        changed = true;
+      });
+      if(changed){ saveLocalState(); scheduleCloudPush(); }
+    });
+  }
+
+  // Общая точка выхода из группового режима вкладки "Общие задачи" — и для
+  // админа (после отвязки участника), и для участника (после отписки или
+  // после того, как его отвязал админ, см. checkGroupMembershipStillValid
+  // в refreshJointTasksData выше). Подчищает локальный кэш общих задач
+  // именно ЭТОЙ группы (groupTasksState в памяти сбрасывается независимо
+  // от того, чей это был groupId — второй раз тот же groupId уже никем не
+  // используется) и обнуляет sharedGroup — дальше вкладка "Общие задачи"
+  // автоматически становится обычным локальным CRUD (isGroupTasksActive()
+  // вернёт false, см. «ОБЩИЕ ЗАДАЧИ: ХРАНЕНИЕ И CRUD» выше), без какого-
+  // либо отдельного переключателя.
+  function returnJointTasksTabToLocalMode(){
+    var prevGroupId = sharedGroup ? sharedGroup.groupId : null;
+    saveSharedGroup(null);
+    if(prevGroupId){
+      try{ localStorage.removeItem(groupTasksCacheKey(prevGroupId)); }catch(e){}
+      try{ localStorage.removeItem(GROUP_ADMIN_MIGRATED_KEY_PREFIX + prevGroupId); }catch(e){}
+    }
+    groupTasksState = {};
+    groupTasksDirty = {};
+    groupTasksLoadedFor = null;
+    clearTimeout(groupTasksPushTimer);
+    var popup = document.getElementById("taskJointMenuPopup");
+    if(popup) popup.classList.remove("open");
+    rerenderJointTasksTabIfOpen();
+  }
+
+  // Пассивная проверка "я всё ещё в группе?" — у отвязки нет push-сигнала
+  // участнику, поэтому единственный способ узнать о ней — переспросить
+  // сервер (тем же циклом опроса, что и остальной обмен с группой, см.
+  // refreshJointTasksData выше: открытие вкладки + событие "online").
+  // Сбой сети НЕ считается отвязкой (иначе временное отсутствие
+  // подключения рвало бы доступ на ровном месте) — в этом случае просто
+  // считаем, что участник всё ещё в группе, и пробуем снова при следующей
+  // возможности.
+  function checkGroupMembershipStillValid(){
+    if(!sharedGroup || sharedGroup.role !== "member") return Promise.resolve(true);
+    var groupId = sharedGroup.groupId;
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/members/" + encodeURIComponent(getDeviceId()) + ".json", {method:"GET"}, 8000).then(function(res){
+      if(!res.ok) throw new Error("group_membership_check_failed_" + res.status);
+      return res.json();
+    }).then(function(data){
+      return data !== null && data !== undefined;
+    }).catch(function(err){
+      console.error("Не удалось проверить членство в группе:", err);
+      return true;
+    });
+  }
+
+  // ---- Шаг 5: обработчики кнопок диалогов (вместо прежних заглушек
+  // groupActionNotImplementedYet) ----
+
+  function handleGroupUnlinkKeepData(){
+    if(!sharedGroup || sharedGroup.role !== "admin") return closeModal();
+    var groupId = sharedGroup.groupId;
+    modalBox.innerHTML = modalHeader("Отвязываем…", "Секунду.");
+    bindClose();
+    if(!navigator.onLine){
+      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для отвязки участника нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderGroupUnlinkConfirm);
+      return;
+    }
+    removeAllNonAdminGroupMembers(groupId).then(function(){
+      return migrateGroupTasksToLocalForAdmin(groupId);
+    }).then(function(){
+      returnJointTasksTabToLocalMode();
+      modalBox.innerHTML = modalHeader("Готово", "Участник отвязан. Общие задачи сохранены и перенесены в ваш личный список на вкладке «Общие задачи».") +
+        '<button class="modal-btn primary" id="mDone">Понятно</button>';
+      bindClose();
+      document.getElementById("mDone").addEventListener("click", closeModal);
+    }).catch(function(err){
+      console.error(err);
+      modalBox.innerHTML = modalHeader("Не удалось отвязать участника", "Проверьте подключение к интернету и попробуйте ещё раз.") +
+        '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderGroupUnlinkConfirm);
+    });
+  }
+
+  function handleGroupUnlinkDeleteData(){
+    if(!sharedGroup || sharedGroup.role !== "admin") return closeModal();
+    var groupId = sharedGroup.groupId;
+    modalBox.innerHTML = modalHeader("Удаляем…", "Секунду.");
+    bindClose();
+    if(!navigator.onLine){
+      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для отвязки участника нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderGroupUnlinkConfirm);
+      return;
+    }
+    removeAllNonAdminGroupMembers(groupId).then(function(){
+      return deleteGroupTasksAndArchive(groupId);
+    }).then(function(){
+      returnJointTasksTabToLocalMode();
+      modalBox.innerHTML = modalHeader("Готово", "Участник отвязан, общие задачи и архив группы удалены.") +
+        '<button class="modal-btn primary" id="mDone">Понятно</button>';
+      bindClose();
+      document.getElementById("mDone").addEventListener("click", closeModal);
+    }).catch(function(err){
+      console.error(err);
+      modalBox.innerHTML = modalHeader("Не удалось выполнить отвязку", "Проверьте подключение к интернету и попробуйте ещё раз.") +
+        '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderGroupUnlinkConfirm);
+    });
+  }
+
+  function handleGroupUnsubscribeConfirmed(){
+    if(!sharedGroup || sharedGroup.role !== "member") return closeModal();
+    var groupId = sharedGroup.groupId;
+    modalBox.innerHTML = modalHeader("Отписываемся…", "Секунду.");
+    bindClose();
+    if(!navigator.onLine){
+      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для отписки нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderGroupUnsubscribeConfirm);
+      return;
+    }
+    removeGroupMember(groupId, getDeviceId()).then(function(){
+      returnJointTasksTabToLocalMode();
+      modalBox.innerHTML = modalHeader("Готово", "Вы отписались от общих задач.") +
+        '<button class="modal-btn primary" id="mDone">Понятно</button>';
+      bindClose();
+      document.getElementById("mDone").addEventListener("click", closeModal);
+    }).catch(function(err){
+      console.error(err);
+      modalBox.innerHTML = modalHeader("Не удалось отписаться", "Проверьте подключение к интернету и попробуйте ещё раз.") +
+        '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderGroupUnsubscribeConfirm);
+    });
+  }
+
+  // Архив общих задач — Шаг 6 (ещё не сделан), пока просто заглушка с
+  // текстом про этот шаг.
   function openGroupJointArchiveModal(){
     modalOverlay.classList.add("open");
     modalBox.innerHTML = modalHeader("Пока не реализовано",

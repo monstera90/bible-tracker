@@ -2713,9 +2713,9 @@
        блок ничем не обрезается. Именно .cm-md-image-float ниже НЕ
        трогаем — это картинка, обтекаемая текстом сбоку, а не
        полноширинная, растягивать её в край было бы странно. */
-    width:calc(100% + 32px);
-    max-width:calc(100% + 32px);
-    margin:0 -16px;
+    width:calc(100% + 16px);
+    max-width:calc(100% + 16px);
+    margin:0 -8px;
   }
   /* обтекание текстом — включается из mdeditor.js (см.
      applyImageFloatLayout) только когда после картинки (⩽600px) по
@@ -2888,6 +2888,20 @@
     .book-reader-bookmark-mark:hover{ background:var(--parchment-dark); }
   }
   .book-reader .cm-md-image{ margin:10px 0; }
+  /* ---------- убрать сиреневую окантовку слева/справа у картинок, сидящих
+     край-в-край (15.09) — .cm-md-image взят из общего "карточного" стиля
+     (border со всех 4 сторон), но когда картинка растянута в край экрана
+     (.book-reader-image-wrap и обычный, НЕ float, .cm-md-image-wrap —
+     см. их же full-bleed правила выше), левая/правая грань рамки рисуется
+     ровно по краю экрана и выглядит как лишняя цветная полоска. Плавающий
+     вариант (.cm-md-image-float) НЕ full-bleed и рамку сохраняет
+     целиком — селектор его нарочно не задевает. ---------- */
+  .book-reader-image-wrap .cm-md-image,
+  .cm-md-image-wrap:not(.cm-md-image-float) .cm-md-image{
+    border-left:none;
+    border-right:none;
+    border-radius:0;
+  }
   /* ---------- Подчёркивание книги (READER_PLAN.md, Этап D, шаг 13, 11.09).
      Без этого правила <mark> красится браузером по умолчанию в чистый
      жёлтый — режет глаз и не подстраивается под тему. var(--gold-light) —
@@ -2925,8 +2939,8 @@
        (position:relative тут же) и центрируется через left:50% —
        симметричное расширение на 16px в обе стороны не сдвигает её
        центр, менять её CSS не нужно. */
-    width:calc(100% + 32px);
-    margin:0 -16px;
+    width:calc(100% + 16px);
+    margin:0 -8px;
   }
   .book-reader-pin-btn{
     position:absolute;
