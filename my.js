@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 13.0 (16.09)
+   Версия: 13.1 (16.09)
    =========================================================================== */
 
 (function(){
@@ -1083,6 +1083,18 @@
 
   var state = loadState();
   var syncId = localStorage.getItem(SYNC_ID_KEY) || null;
+  // ⚠️ ДОБАВЛЕНО (16.09, ТЗ пользователя — пропадали картинки из личных
+  // задач): пока не настроена синхронизация — `state` и так локальный и
+  // полный, ждать нечего, готов сразу. Если синхронизация настроена —
+  // становится true после ПЕРВОГО завершённого в этой сессии цикла
+  // doCloudSync (успех/оффлайн/окончательная ошибка, см. сам doCloudSync
+  // ниже) — до этого момента `state` может быть устаревшим локальным
+  // кэшем, ещё не догнавшим облако. Читается корзиной сирот в mdeditor.js
+  // (см. isTaskStateReady в deps при initMdEditorModule и cleanupOrphanedImages
+  // там же) — без этого флага чистка неиспользуемых картинок могла принять
+  // задачу, добавленную на другом устройстве и ещё не подтянутую сюда, за
+  // отсутствующую и удалить её картинку как "сироту".
+  var initialTaskSyncSettled = !syncId;
   // sharedGroup: {groupId, role: 'admin'|'member'} | null — см. раздел
   // "ГРУППОВАЯ ПРИВЯЗКА «ОБЩИХ ЗАДАЧ»" ниже (loadSharedGroup объявлена там,
   // но доступна здесь по подъёму объявлений функций в пределах замыкания).
@@ -3247,9 +3259,23 @@
   // keepalive, чтобы браузер долетел с ними в фоне, даже если сама
   // страница будет заморожена/закрыта секундой позже (см. putCloudBlob
   // про лимит тела и комментарий у visibilitychange ниже).
+  // См. initialTaskSyncSettled выше — вызывается из ЛЮБОЙ завершающей ветки
+  // doCloudSync (успех/оффлайн/истёкший код/временная ошибка): дальше ждать
+  // нечего, "первый цикл синхронизации задач в этой сессии" в любом случае
+  // закончился. Идемпотентна — повторные вызовы (например, при следующих
+  // ретраях после временной ошибки) ничего не делают, если уже settled.
+  // retryImageCleanup дёргается только на ПЕРВОМ реальном переключении
+  // флага — если корзина сирот в mdeditor.js что-то отложила из-за гонки
+  // (см. isTaskStateReady в cleanupOrphanedImages там же), это её шанс
+  // повторить попытку, не дожидаясь следующей правки заметки.
+  function settleInitialTaskSync(){
+    if(initialTaskSyncSettled) return;
+    initialTaskSyncSettled = true;
+    if(MdEditor && MdEditor.retryImageCleanup) MdEditor.retryImageCleanup();
+  }
   function doCloudSync(urgent){
     if(!syncId) { setSyncState("off"); return; }
-    if(!navigator.onLine){ setSyncState("offline"); return; }
+    if(!navigator.onLine){ setSyncState("offline"); settleInitialTaskSync(); return; }
     if(syncInProgress) return;
     syncInProgress = true;
     setSyncState("syncing");
@@ -3275,6 +3301,7 @@
       syncRetryCount = 0;
       clearTimeout(syncRetryTimer);
       setSyncState("synced");
+      settleInitialTaskSync();
       retryUnresolvedYoutubeLinks(); // повтор упавших ранее запросов заголовков YouTube (см. выше)
       touchDeviceRegistry(); // отмечаемся живым устройством для реестра файлов (READER_PLAN.md, шаг 3)
       syncFileRegistry("books"); // фоновая сверка реестра книг с другими устройствами (см. выше)
@@ -3300,11 +3327,13 @@
         syncId = null;
         localStorage.removeItem(SYNC_ID_KEY);
         setSyncState("off");
+        settleInitialTaskSync();
         refreshStatusBase();
         alert("Синхронизация на этом устройстве отключена: данные на сервере были удалены, так как этим кодом не пользовались больше года. Локальный прогресс сохранён — при необходимости создайте новый код синхронизации.");
         return;
       }
       setSyncState("error");
+      settleInitialTaskSync();
       // не заставляем пользователя перепривязывать устройство вручную —
       // сами повторяем попытку с нарастающей паузой (сбой чаще всего
       // временный: сеть моргнула или разросшийся объём данных долго грузится)
@@ -4925,6 +4954,12 @@
     // вставленные в задачи/комментарии, тоже должны считаться
     // "используемыми" для корзины сирот в mdeditor.js.
     getExternalMediaTexts: collectTaskAndCommentTextsForMediaScan,
+    // 16.09, ТЗ пользователя — см. initialTaskSyncSettled/settleInitialTaskSync
+    // выше и isTaskStateReady в cleanupOrphanedImages (mdeditor.js): пока
+    // облачная синхронизация задач не завершила в этой сессии хотя бы один
+    // цикл, collectTaskAndCommentTextsForMediaScan выше может недосчитаться
+    // задачи с другого устройства — корзина сирот должна подождать.
+    isTaskStateReady: function(){ return initialTaskSyncSettled; },
     PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG,
     // то же распознавание ссылок на Библию, что и в "Карте дней года" (см.
     // SCRIPTURE_RE/BOOK_ALIASES/scriptureRefLink выше) — regexSource

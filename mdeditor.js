@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 2.4 (16.09)
+   Версия: 2.5 (16.09)
    Вкладка "Мои заметки" (первая боковая вкладка второго набора,
    settingsTabSet2Btn1 / "set2s_1") — работа с .md заметками в стиле
    Obsidian. Вынесена в отдельный файл по тому же образцу, что и
@@ -1411,6 +1411,25 @@ window.initMdEditorModule = function(deps){
   function cleanupOrphanedImages(){
     if(!imagesDirHandle) return Promise.resolve();
     if(imageCleanupInFlight) return Promise.resolve();
+    // ⚠️ ИСПРАВЛЕНО (16.09, ТЗ пользователя — пропадали картинки из личных
+    // задач): getExternalMediaTexts (collectTaskAndCommentTextsForMediaScan
+    // в my.js) читает `state` синхронно и НЕ знает, что при старте
+    // приложения `state` — это локальный кэш, а облачная синхронизация
+    // задач (doCloudSync в my.js) в этот момент ещё может идти по сети.
+    // mdeditor.js готовится к своей первой чистке полностью локально
+    // (OPFS+IndexedDB, без сети) и обычно успевает РАНЬШЕ, чем долетит
+    // ответ doCloudSync — снимок "используемых" картинок в этот момент не
+    // содержит задачу/комментарий, добавленные на другом устройстве, и её
+    // картинка удаляется как "сирота", хотя реально используется (тот же
+    // класс гонки, что и hadFetchError у заметок в syncNotesFromCloud, но
+    // для облака ЗАДАЧ, о котором mdeditor.js раньше вообще не знал).
+    // deps.isTaskStateReady (передаётся из my.js) — true, если синхронизация
+    // задач не настроена вовсе, либо хотя бы один цикл doCloudSync в этой
+    // сессии уже завершился (успехом, оффлайном или окончательной ошибкой).
+    // my.js сам зовёт deps.retryImageCleanup (см. публичный API ниже) сразу
+    // после того, как флаг становится true — чтобы отложенная в эту секунду
+    // чистка не потерялась до следующего изменения заметки.
+    if(deps.isTaskStateReady && !deps.isTaskStateReady()) return Promise.resolve();
     // Оптимизация производительности (ТЗ пользователя от 14.09): полный
     // рекурсивный обход OPFS-папки images/ ниже (walkAndClean) может быть
     // дорогим при большой папке — фризы. Если с прошлого ПОЛНОСТЬЮ
@@ -5270,6 +5289,12 @@ window.initMdEditorModule = function(deps){
       notesRetryCount = 0;
       clearTimeout(notesRetryTimer);
       pushDirtyNotes(false);
-    }
+    },
+    // 16.09 — см. isTaskStateReady в cleanupOrphanedImages выше: my.js
+    // вызывает это сразу после того, как первый цикл doCloudSync в сессии
+    // завершился, чтобы чистка, отложенная из-за гонки, повторилась не
+    // дожидаясь следующей правки заметки (referencedNamesDirty к этому
+    // моменту всё ещё true — сама чистка ни разу не запускалась).
+    retryImageCleanup: maybeRunImageCleanup
   };
 };
