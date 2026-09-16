@@ -1083,6 +1083,37 @@
 
   var state = loadState();
   if(window.Debug) window.Debug.log("Старт приложения: из localStorage прочитано задач=" + Object.keys(state).filter(function(k){ return k.indexOf("task:") === 0; }).length);
+  // ⚠️ ДИАГНОСТИКА (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md —
+  // найдена причина: localStorage.setItem(STORAGE_KEY,...) стабильно падает
+  // с QuotaExceededError, см. логи пользователя, поэтому НИ ОДНО локальное
+  // сохранение личных задач физически не долетает до диска). Прежде чем
+  // чинить (сокращать state или переносить хранение на IndexedDB с
+  // большей квотой), нужно знать, что именно его раздуло — разбивка по
+  // группе ключей (общий префикс до ":", либо весь ключ, если двоеточия
+  // нет) с суммарным размером JSON.stringify каждой группы, топ-10 по
+  // размеру. Разовый проход при старте, только если включена галочка
+  // отладки — дорогой (проходит по всем ключам и сериализует каждый), не
+  // гонять его на каждую правку.
+  if(window.Debug && window.Debug.isEnabled && window.Debug.isEnabled()){
+    try{
+      var sizeByGroup = {};
+      Object.keys(state).forEach(function(k){
+        var group = k.indexOf(":") !== -1 ? k.slice(0, k.indexOf(":")) : k;
+        var sz = 0;
+        try{ sz = JSON.stringify(state[k]).length; }catch(e){}
+        sizeByGroup[group] = (sizeByGroup[group] || 0) + sz;
+      });
+      var totalSize = 0;
+      try{ totalSize = JSON.stringify(state).length; }catch(e){}
+      var sortedGroups = Object.keys(sizeByGroup).sort(function(a,b){ return sizeByGroup[b] - sizeByGroup[a]; });
+      window.Debug.log("Разбор размера state: всего=" + totalSize + " байт(символов), групп=" + sortedGroups.length);
+      sortedGroups.slice(0, 10).forEach(function(g){
+        window.Debug.log("  state[\"" + g + ":*\"] — " + sizeByGroup[g] + " символов");
+      });
+    }catch(e){
+      if(window.Debug) window.Debug.log("Разбор размера state: ошибка — " + (e && e.message ? e.message : e));
+    }
+  }
   var syncId = localStorage.getItem(SYNC_ID_KEY) || null;
   // ⚠️ ДОБАВЛЕНО (16.09, ТЗ пользователя — пропадали картинки из личных
   // задач): пока не настроена синхронизация — `state` и так локальный и
