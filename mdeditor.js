@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 2.3 (15.09)
+   Версия: 2.4 (16.09)
    Вкладка "Мои заметки" (первая боковая вкладка второго набора,
    settingsTabSet2Btn1 / "set2s_1") — работа с .md заметками в стиле
    Obsidian. Вынесена в отдельный файл по тому же образцу, что и
@@ -530,6 +530,10 @@ window.initMdEditorModule = function(deps){
   // jwlmerge.js.
   // ---------------------------------------------------------------------
   var IMAGES_MANIFEST_NAME = ".manifest.json";
+  // Для предупреждения о превышении лимита синхронизации (раздел 7 ТЗ
+  // TASK_FILE_SYNC_RTDB.md, шаг 5, 16.09) — та же форма множественного
+  // числа, что и FILE_FORMS у книг в my.js, только для картинок.
+  var IMAGE_FORMS = ["картинка", "картинки", "картинок"];
   function sha256Hex(buffer){
     return crypto.subtle.digest("SHA-256", buffer).then(function(digest){
       var bytes = new Uint8Array(digest), hex = "";
@@ -594,14 +598,16 @@ window.initMdEditorModule = function(deps){
   }
   // ---------------------------------------------------------------------
   // Папка с локальными изображениями (READER_PLAN.md, Этап A, шаг 1, 09.09)
-  // — независима от облачного хранения текста заметок: содержимое картинок
-  // никогда не идёт в Firebase Realtime Database напрямую — база знает
-  // только реестр хэшей (см. "ХРАНИЛИЩЕ КНИГ"/файлы реле в my.js). С 14.09
-  // (ТЗ пользователя) сами байты картинок ВРЕМЕННО и В ЗАШИФРОВАННОМ виде
-  // всё же ретранслируются через Firebase Storage между устройствами (см.
-  // registerFileRegistryAdapter("images", ...) в конце этого файла) — до
-  // этой правки было буквально "никогда", теперь это относится только к
-  // Realtime Database, не к Storage-реле. Раньше это была папка на
+  // — независима от облачного хранения ТЕКСТА заметок (тот идёт отдельным
+  // путём, см. "Облачное хранение заметок" ниже). Сами байты картинок
+  // ВРЕМЕННО и В ЗАШИФРОВАННОМ виде ретранслируются между устройствами
+  // через Realtime Database (см. registerFileRegistryAdapter("images", ...)
+  // в конце этого файла) — тот же реестр+реле (`files`/`fileBlobs`/
+  // `fileRequests`), что и у книг в my.js (TASK_FILE_SYNC_RTDB.md).
+  // Firebase Storage в проекте не используется вообще (отменён ещё на
+  // уровне решения, раздел 1 того ТЗ) — байты идут base64-строкой прямо в
+  // RTDB, точечным GET/PATCH/DELETE, без постоянной подписки на fileBlobs.
+  // Раньше это была папка на
   // диске пользователя через File System Access API (showDirectoryPicker) —
   // с системным диалогом выбора, ручным переподключением после отзыва прав
   // и заглушкой-плейсхолдером на этот случай. Теперь это подпапка `images/`
@@ -1281,6 +1287,14 @@ window.initMdEditorModule = function(deps){
           selection: { anchor: sel.from + insertText.length }
         });
         cmView.focus();
+        // Раздел 7 ТЗ (TASK_FILE_SYNC_RTDB.md, шаг 5, 16.09): картинка
+        // больше лимита сохранится локально как обычно (гейт внутри
+        // registerFileInRegistry в my.js её просто не отправит в облачный
+        // реестр), но пользователя об этом стоит предупредить — тем же
+        // текстом, что и у книг (handleImportBooksFile в my.js).
+        if(deps.fileExceedsSyncSizeLimit && deps.fileExceedsSyncSizeLimit(buf.byteLength)){
+          setStatus(deps.getFileSyncSizeWarning ? deps.getFileSyncSizeWarning() : "Файл слишком большой и не будет синхронизирован автоматически.", false);
+        }
       });
     }).catch(function(e){
       setStatus("Не удалось сохранить картинку: " + (e && e.message ? e.message : e), true);
@@ -2249,12 +2263,21 @@ window.initMdEditorModule = function(deps){
           setStatus("В архиве не найдено картинок.", true);
           return;
         }
-        var added = 0;
+        var added = 0, tooBig = 0;
         function next(i){
           if(i >= imageEntries.length){
             refreshMountedImageNodes();
-            setStatus("Загружено картинок: " + added +
-              (otherCount ? " (пропущено файлов другого типа: " + otherCount + ")" : "") + ".", false);
+            var msg = "Загружено картинок: " + added +
+              (otherCount ? " (пропущено файлов другого типа: " + otherCount + ")" : "") + ".";
+            // Раздел 7 ТЗ (TASK_FILE_SYNC_RTDB.md, шаг 5, 16.09) — тот же
+            // приём, что у пакетного импорта книг (handleImportBooksFile,
+            // my.js): гейт по размеру срабатывает сам по себе внутри
+            // registerFileInRegistry, здесь только сводное предупреждение.
+            if(tooBig && deps.fileExceedsSyncSizeLimit){
+              msg += " Слишком большие для автосинхронизации, перенесите вручную: " + tooBig +
+                " " + (deps.pluralRu ? deps.pluralRu(tooBig, IMAGE_FORMS) : "картинок") + ".";
+            }
+            setStatus(msg, false);
             return;
           }
           var entry = imageEntries[i];
@@ -2268,6 +2291,7 @@ window.initMdEditorModule = function(deps){
             imageIndex.set(finalName.toLowerCase(), { handle: fileHandle, name: finalName });
             recordImageAdded(finalName, entry.data.buffer ?
               entry.data.buffer.slice(entry.data.byteOffset, entry.data.byteOffset + entry.data.byteLength) : entry.data);
+            if(deps.fileExceedsSyncSizeLimit && deps.fileExceedsSyncSizeLimit(entry.data.byteLength)) tooBig++;
             added++;
             next(i + 1);
           }).catch(function(e){
@@ -3173,9 +3197,10 @@ window.initMdEditorModule = function(deps){
         subSpan.style.opacity = "0.7";
         // availableLocally=false (my.js, getBookMarginBookmarksForList) —
         // закладка синхронизирована, но файл книги на ЭТОМ устройстве ещё
-        // не скачан (реестр Firebase Storage синхронизирует байты отдельно
-        // и медленнее, чем саму запись закладки) — сообщаем об этом прямо в
-        // списке, не только по клику (см. openBookMarginBookmark в my.js).
+        // не скачан (реле байтов через RTDB, см. "ХРАНИЛИЩЕ КНИГ" в my.js,
+        // синхронизирует файл отдельно и медленнее, чем саму запись
+        // закладки) — сообщаем об этом прямо в списке, не только по клику
+        // (см. openBookMarginBookmark в my.js).
         subSpan.textContent = it.bookName + (it.availableLocally === false ? " — нет на этом устройстве" : "");
         nameEl.appendChild(mainSpan);
         nameEl.appendChild(subSpan);

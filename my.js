@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 10.0 (16.09)
+   Версия: 12.0 (16.09)
    =========================================================================== */
 
 (function(){
@@ -3278,7 +3278,7 @@
       retryUnresolvedYoutubeLinks(); // повтор упавших ранее запросов заголовков YouTube (см. выше)
       touchDeviceRegistry(); // отмечаемся живым устройством для реестра файлов (READER_PLAN.md, шаг 3)
       syncFileRegistry("books"); // фоновая сверка реестра книг с другими устройствами (см. выше)
-      syncFileRegistry("images"); // то же для картинок заметок (ТЗ пользователя от 14.09) — no-op, пока mdeditor.js не зарегистрировал адаптер (см. registerFileRegistryAdapter в deps)
+      syncFileRegistry("images"); // то же для картинок заметок (ТЗ пользователя от 14.09; TASK_FILE_SYNC_RTDB.md, шаг 5, 16.09) — адаптер "images" зарегистрирован в mdeditor.js (registerFileRegistryAdapter в deps) и использует тот же RTDB-транспорт, что и книги
       // Успешно синхронизировались — если за время этого цикла набежало
       // ещё одно изменение (см. pendingPushAfterSync у scheduleCloudPush),
       // сразу запускаем новый цикл, а не ждём следующего изменения задачи.
@@ -5017,7 +5017,20 @@
     registerFileRegistryAdapter: registerFileRegistryAdapter,
     registerFileInRegistry: registerFileInRegistry,
     registerFileDeletion: registerFileDeletion,
-    syncFileRegistry: syncFileRegistry
+    syncFileRegistry: syncFileRegistry,
+    // Лимит размера файла (раздел 7 ТЗ TASK_FILE_SYNC_RTDB.md) — теперь
+    // нужен и картинкам заметок (шаг 5, 16.09), не только книгам:
+    // fileExceedsSyncSizeLimit — function-декларация, безопасно ссылаться
+    // здесь напрямую (поднимается в начало IIFE, см. комментарий у
+    // recordNoteCreated выше про тот же приём). FILE_SYNC_SIZE_WARNING —
+    // обычная var-константа со строкой, присваивается ЗНАЧЕНИЕ которой
+    // ниже по файлу, ПОСЛЕ этого объекта deps — передавать её значение
+    // напрямую здесь означало бы поймать undefined (тот же класс бага,
+    // что и с FILE_REGISTRY_ADAPTERS выше), поэтому — геттер, как
+    // getModalBox/getPencilIcon у Flibusta/Search.
+    pluralRu: pluralRu,
+    fileExceedsSyncSizeLimit: fileExceedsSyncSizeLimit,
+    getFileSyncSizeWarning: function(){ return FILE_SYNC_SIZE_WARNING; }
   });
   var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
   var renderSettingsTabMdBookmarks = MdEditor.renderSettingsTabMdBookmarks;
@@ -7535,8 +7548,34 @@
     return typeof size === "number" && size > FILE_SYNC_SIZE_LIMIT_BYTES;
   }
 
+  // Тумблер-настройка "Включить облачную синхронизацию изображений и
+  // книг" (TASK_FILE_SYNC_RTDB.md, раздел 5, шаг 6, 16.09) — по умолчанию
+  // выключен. Это ЛОКАЛЬНЫЙ флаг конкретного устройства/браузера (как
+  // HIDE_STATUS_BAR_KEY выше), а не часть облачного state: у слабого
+  // устройства файловый синк можно оставить выключенным, даже если на
+  // остальных устройствах той же связки он включён — раздача байтов не
+  // требует, чтобы ВСЕ устройства его включили (см. registerFileInRegistry/
+  // syncFileRegistry ниже — они просто не видят конкретное устройство
+  // держателем/получателем, пока у него флаг выключен). Обычный текстовый
+  // синк (заметки/задачи/цели и т.п.) от этого флага не зависит вообще —
+  // гейт стоит ТОЛЬКО внутри функций раздела 4 (реестр/реле/заявки байтов):
+  // touchDeviceRegistry, registerFileInRegistry, registerFileDeletion,
+  // syncFileRegistry — единая точка на каждую, дальше по цепочке вызовов
+  // (requestFileFromCloud/clearFileRequest и т.п.) ничего отдельно не
+  // проверяет, т.к. вызывается только изнутри уже прогейченных функций.
+  // Один и тот же флаг выключает разом оба канала — личный (4.1-4.4) и
+  // групповой для картинок общих задач (4.5, шаг 7) — отдельного тумблера
+  // под группу заводить не нужно (см. раздел 5 ТЗ).
+  var FILE_SYNC_ENABLED_KEY = "bibleFileSyncEnabled_v1";
+  function getFileSyncEnabled(){
+    try{ return localStorage.getItem(FILE_SYNC_ENABLED_KEY) === "1"; }catch(e){ return false; }
+  }
+  function setFileSyncEnabled(value){
+    try{ localStorage.setItem(FILE_SYNC_ENABLED_KEY, value ? "1" : "0"); }catch(e){}
+  }
+
   function touchDeviceRegistry(){
-    if(!syncId) return Promise.resolve();
+    if(!syncId || !getFileSyncEnabled()) return Promise.resolve();
     var patch = {};
     patch["devices/" + getDeviceId()] = { t: Date.now() };
     return patchNotesCloud(patch).catch(function(){});
@@ -7617,7 +7656,7 @@
   // же удалили и тут же заново добавили тем же содержимым — снимаем
   // deletedAt, см. ниже).
   function registerFileInRegistry(kind, hash, name, size){
-    if(!syncId) return Promise.resolve();
+    if(!syncId || !getFileSyncEnabled()) return Promise.resolve();
     // Раздел 7 ТЗ: файл больше лимита в облачный реестр не отправляем
     // вообще — остаётся только локальным. Сам файл при этом уже сохранён
     // локально вызывающим кодом (saveBookFile и т.п.) ДО этого вызова —
@@ -7658,7 +7697,7 @@
   // из Storage прямо сейчас, не дожидаясь TTL — смысла держать её больше
   // нет, кто угодно с кодом синхронизации уже мог её скачать.
   function registerFileDeletion(kind, hash){
-    if(!syncId) return Promise.resolve();
+    if(!syncId || !getFileSyncEnabled()) return Promise.resolve();
     var patch = {};
     patch["files/" + kind + "/" + hash + "/deletedAt"] = Date.now();
     patch["files/" + kind + "/" + hash + "/deletedBy"] = getDeviceId();
@@ -7682,20 +7721,58 @@
   //     локального файла для заливки;
   //   removeLocal(hash, name) -> Promise — удалить локальный файл (ответ
   //     на чужой тумбстоун).
+  // ---- Заявки на повторную заливку (раздел 4.3 ТЗ, 16.09) ----------
+  // /syncs/<syncId>/fileRequests/<kind>/<hash> — одна небольшая запись
+  // {by: deviceId, at: timestamp}, НЕ список (см. ограничение ниже).
+  // В отличие от fileBlobs, на этот узел МОЖНО держать постоянный on() —
+  // он всегда лёгкий (факт заявки, не байты) — но пока используется тем
+  // же точечным GET, что и остальной реестр (см. syncFileRegistry).
+  //
+  // Зачем это нужно ОТДЕЛЬНО от confirmedBy-цикла выше: confirmedBy
+  // считает файл больше не нужным к раздаче, как только КАЖДОЕ известное
+  // устройство хоть раз его подтвердило — после этого байты из fileBlobs
+  // удаляются (правило 3.4/TTL) и следующая сверка уже не заливает их
+  // заново. Если устройство, уже когда-то подтвердившее получение,
+  // ПОЗЖЕ теряет локальную копию (стёрли вручную, слетело хранилище) —
+  // само по себе confirmedBy=true никогда не станет false, и без явной
+  // заявки ни одно устройство-держатель больше не узнает, что байты нужны
+  // снова. Тот же случай — устройство, которое не входило в число
+  // "известных" на момент первой раздачи (не заходило 30+ дней,
+  // DEVICE_KNOWN_WINDOW_MS) и включилось уже после того, как все
+  // остальные забрали файл и он удалился из fileBlobs.
+  //
+  // Ограничение (ожидаемое, не баг, см. ТЗ): запись ОДНА на хэш, не
+  // список заявителей — если файл одновременно понадобился двум
+  // устройствам, вторая заявка перезапишет первую, и владелец узнает
+  // только про последнего заявителя. Раздача — точечная (см. правило
+  // 3.3), не рассылка всем сразу.
+  function fileRequestCloudPath(kind, hash){ return "fileRequests/" + kind + "/" + hash; }
+  function requestFileFromCloud(kind, hash){
+    if(!syncId) return Promise.resolve();
+    var patch = {};
+    patch[fileRequestCloudPath(kind, hash)] = { by: getDeviceId(), at: Date.now() };
+    return patchNotesCloud(patch).catch(function(){});
+  }
+  function clearFileRequest(kind, hash){
+    if(!syncId) return Promise.resolve();
+    return deleteNotesCloudPath(fileRequestCloudPath(kind, hash)).catch(function(){});
+  }
+
   var fileRegistrySyncInProgress = {}; // kind -> bool
   function syncFileRegistry(kind, adapters){
     adapters = adapters || FILE_REGISTRY_ADAPTERS[kind];
     if(!adapters) return Promise.resolve();
-    if(!syncId || !navigator.onLine) return Promise.resolve();
+    if(!syncId || !navigator.onLine || !getFileSyncEnabled()) return Promise.resolve();
     if(fileRegistrySyncInProgress[kind]) return Promise.resolve();
     fileRegistrySyncInProgress[kind] = true;
     var myId = getDeviceId();
     return Promise.all([
       fetchNotesCloudPath("files/" + kind).catch(function(){ return null; }),
       fetchNotesCloudPath("devices").catch(function(){ return null; }),
+      fetchNotesCloudPath("fileRequests/" + kind).catch(function(){ return null; }),
       adapters.getLocalManifest().catch(function(){ return {}; })
     ]).then(function(results){
-      var registry = results[0] || {}, devices = results[1] || {}, manifest = results[2] || {};
+      var registry = results[0] || {}, devices = results[1] || {}, requests = results[2] || {}, manifest = results[3] || {};
       var localHashes = {}; // hash -> true, что реально есть локально на этом устройстве
       Object.keys(manifest).forEach(function(h){ localHashes[h] = true; });
       var now = Date.now();
@@ -7708,6 +7785,7 @@
         var entry = registry[hash] || {};
         var confirmedBy = entry.confirmedBy || {};
         var haveLocally = !!localHashes[hash];
+        var pendingRequest = requests[hash] || null; // {by, at} или нет заявки
 
         // 0) Тумбстоун: файл где-то удалили. Если он ещё есть у нас —
         // удаляем локально и на этом всё, ни скачивать, ни заливать
@@ -7725,8 +7803,16 @@
         // удаления, TTL в блоке 3) ниже — только подстраховка на случай,
         // если файл вообще никто не забрал). uploadedAt заодно сбрасываем
         // в том же PATCH — байтов больше нет, флаг не должен врать.
+        // Если байтов в fileBlobs не оказалось СОВСЕМ (не просто сеть
+        // подвела) — раздел 4.3: пишем заявку, если своей ещё нет,
+        // чтобы держатель файла узнал, что байты снова нужны.
         if(!haveLocally){
-          return downloadFileFromCloud(kind, hash).then(function(buf){
+          return downloadFileFromCloud(kind, hash).catch(function(err){
+            if(err && err.message === "blob_not_found" && (!pendingRequest || pendingRequest.by !== myId)){
+              requestFileFromCloud(kind, hash);
+            }
+            throw err; // дальше по цепочке скачивать/сохранять нечего
+          }).then(function(buf){
             return adapters.saveIncoming(hash, entry.name || hash, new Uint8Array(buf));
           }).then(function(){
             return deleteFileFromCloud(kind, hash).catch(function(){});
@@ -7735,17 +7821,23 @@
             patch["files/" + kind + "/" + hash + "/confirmedBy/" + myId] = true;
             patch["files/" + kind + "/" + hash + "/uploadedAt"] = null;
             return patchNotesCloud(patch);
+          }).then(function(){
+            // Файл наконец забрали — если это была НАША заявка, снимаем её.
+            return (pendingRequest && pendingRequest.by === myId) ? clearFileRequest(kind, hash) : null;
           }).catch(function(){
-            // байтов ещё нет в fileBlobs (никто пока не залил) или сеть
-            // подвела — не страшно, попробуем на следующей сверке
+            // байтов ещё нет в fileBlobs (никто пока не залил, или залить
+            // некому/некогда — заявка уже записана выше) или сеть подвела
+            // — не страшно, попробуем на следующей сверке
           });
         }
 
-        // 2) Файл у нас есть. Если не все известные устройства подтвердили
-        // получение и байты сейчас не лежат в fileBlobs (или уже больше не
-        // нужны, но мы почему-то ещё не заливали) — заливаем.
+        // 2) Файл у нас есть. Заливаем, если байтов сейчас нет в
+        // fileBlobs, и либо не все известные устройства подтвердили
+        // получение (обычная первая раздача), либо на файл есть чужая
+        // заявка (раздел 4.3 — кому-то он снова понадобился, независимо
+        // от того, что он мог уже когда-то его подтверждать).
         var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; });
-        if(missingConfirmations && !entry.uploadedAt){
+        if(!entry.uploadedAt && (missingConfirmations || pendingRequest)){
           return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
             return uploadFileToCloud(kind, hash, buf);
           }).then(function(){
@@ -7755,10 +7847,15 @@
           }).catch(function(){});
         }
 
-        // 3) Байты залиты и либо подтвердили все известные устройства,
-        // либо истёк FILE_RELAY_TTL_MS после заливки — удаляем временную
-        // копию из fileBlobs.
-        if(entry.uploadedAt && (!missingConfirmations || (now - entry.uploadedAt) > FILE_RELAY_TTL_MS)){
+        // 3) Байты залиты и либо подтвердили все известные устройства
+        // (и нет чужой заявки), либо истёк FILE_RELAY_TTL_MS после
+        // заливки — удаляем временную копию из fileBlobs. Заявку (если
+        // есть) при этом не трогаем — её снимает только сам заявитель
+        // после того, как реально скачает файл (см. блок 1 выше); если
+        // никто не online прямо сейчас, чтобы скачать, заявка провисит
+        // до следующего раза, когда одновременно окажутся online и
+        // заявитель, и держатель — это ожидаемое ограничение (раздел 4.3).
+        if(entry.uploadedAt && !pendingRequest && (!missingConfirmations || (now - entry.uploadedAt) > FILE_RELAY_TTL_MS)){
           return deleteFileFromCloud(kind, hash).then(function(){
             var patch = {};
             patch["files/" + kind + "/" + hash + "/uploadedAt"] = null;
@@ -10847,6 +10944,7 @@
     var showAllTasksOn = getShowAllTasksEnabled();
     var extraAnimOn = getExtraAnimationsEnabled();
     var hideStatusBarOn = getHideStatusBarEnabled();
+    var fileSyncOn = getFileSyncEnabled(); // TASK_FILE_SYNC_RTDB.md, раздел 5, шаг 6
     var bibleQuotesOn = getBibleQuotesEnabled();
     var customCommentsOn = getCustomCommentsEnabled();
     var customVerse = getCustomVerse();
@@ -10875,6 +10973,7 @@
       '<div class="settings-row"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить дополнительные анимации</span><input type="checkbox" id="settingsExtraAnimCb"' + (extraAnimOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить полноэкранный режим</span><input type="checkbox" id="settingsHideStatusBarCb"' + (hideStatusBarOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row"><span>Включить облачную синхронизацию изображений и книг (может медленно работать на слабых устройствах)</span><input type="checkbox" id="settingsFileSyncCb"' + (fileSyncOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" style="border-bottom:none;"><span>Включить режим отладки</span><input type="checkbox" id="settingsDebugModeCb"' + (debugModeOn ? " checked" : "") + '></div>' +
       (showAllTasksOn ? '<button class="modal-btn" id="settingsImportTasksBtn" style="margin-top:16px;">Восстановить задачи из .txt</button>' : '') +
       '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:' + (showAllTasksOn ? "10px" : "16px") + ';">Добавить для себя цель</button>' +
@@ -10988,6 +11087,16 @@
       // Сам клик по галочке — жест пользователя, поэтому вход в fullscreen
       // сработает сразу же, без необходимости в armHideStatusBarAutoRetry.
       setHideStatusBarEnabled(this.checked);
+    });
+
+    document.getElementById("settingsFileSyncCb").addEventListener("change", function(){
+      // TASK_FILE_SYNC_RTDB.md, раздел 5, шаг 6 — сам гейт живёт внутри
+      // touchDeviceRegistry/registerFileInRegistry/registerFileDeletion/
+      // syncFileRegistry (см. выше), здесь только сохраняем флаг. Включение
+      // не запускает синк немедленно — он подхватится обычным циклом при
+      // следующей успешной синхронизации (doCloudSync) или следующем заходе
+      // на вкладку "Мои книги"/"Мои заметки", как и раньше.
+      setFileSyncEnabled(this.checked);
     });
 
     document.getElementById("settingsDebugModeCb").addEventListener("change", function(){
