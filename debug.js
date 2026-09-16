@@ -1,4 +1,5 @@
 // debug.js — общее место для отладочного кода "Графика чтения Библии".
+// Версия: 1.0 (16.09)
 //
 // НАЗНАЧЕНИЕ: если задача не решается с первого раза и нужна диагностика
 // прямо на устройстве пользователя (на мобильном нет консоли), временный
@@ -46,9 +47,11 @@
       hidePanel();
       stopImageLineWatch();
       stopTaskScrollWatch();
+      stopFreezeWatch();
     } else {
       startImageLineWatch();
       startTaskScrollWatch();
+      startFreezeWatch();
     }
   }
 
@@ -665,8 +668,141 @@
     // переключении галочки просто не нужно.
   }
 
+  // ---------------------------------------------------------------------
+  // ДОБАВЛЕНО (диагностика фризов интерфейса, ТЗ от 16.09): общий детектор
+  // зависаний главного потока — не привязан к конкретной функции, поэтому
+  // работает уже сейчас, до того как виновник найден в коде. Рабочая
+  // гипотеза (TASK_FILE_SYNC_RTDB.md, шаги 1-6 уже сделаны, шаг 7 — нет):
+  // синхронизация файлов книг/картинок (`fileBlobs`) идёт через RTDB, и по
+  // разделу 4.2 того ТЗ на узел `fileBlobs` НИГДЕ не должно быть
+  // постоянного `on('value', ...)` — только точечный `get()`. Если это
+  // правило где-то нарушено (или соблюдено, но расшифровка/декодирование
+  // large base64 blob всё равно идёт синхронно в основном потоке), Firebase
+  // при каждом изменении узла присылает его целиком — decode+decrypt
+  // мегабайтного blob'а синхронно и есть механика фриза. Три независимых
+  // сигнала, друг друга не заменяют:
+  // 1) PerformanceObserver('longtask') — браузер сам сообщает о синхронных
+  //    задачах длиннее ~50мс (стандартный порог Long Task API).
+  // 2) Разрыв между кадрами requestAnimationFrame — ловит и то, что
+  //    браузер не посчитал "long task" (например, серию мелких вызовов).
+  // 3) Обёртка window.fetch и WebSocket, включая размер входящих
+  //    WebSocket-сообщений — Firebase RTDB обычно ходит именно через
+  //    WebSocket, и ненормально большое входящее сообщение (десятки/сотни
+  //    КБ и больше) в момент фриза — прямая улика в пользу гипотезы выше
+  //    (весь `fileBlobs` пришёл разом вместо точечного файла).
+  // Включается/выключается той же галочкой "Включить режим отладки".
+  // Убрать вместе с остальным диагностическим кодом этой задачи, когда
+  // причина найдена.
+  // ---------------------------------------------------------------------
+  var longTaskObserver = null;
+  var frameWatchHandle = null;
+  var frameWatchLast = null;
+  var netWatchInstalled = false;
+  var WS_MSG_SIZE_WARN = 20000; // символов — заведомо больше одной картинки-миниатюры
+
+  function startFreezeWatch() {
+    // 1. Long Task API
+    if (!longTaskObserver && typeof PerformanceObserver !== "undefined") {
+      try {
+        longTaskObserver = new PerformanceObserver(function (list) {
+          if (!isEnabled()) return;
+          list.getEntries().forEach(function (entry) {
+            log("LONGTASK " + Math.round(entry.duration) + "мс", {
+              start: Math.round(entry.startTime),
+              name: entry.name
+            });
+          });
+        });
+        longTaskObserver.observe({ entryTypes: ["longtask"] });
+      } catch (e) {
+        log("freezeWatch: PerformanceObserver('longtask') недоступен", String(e));
+      }
+    }
+
+    // 2. Разрыв между кадрами — обычный кадр ~16мс, порог ниже это заметный
+    // на глаз фриз, а не рядовой джиттер.
+    if (!frameWatchHandle) {
+      frameWatchLast = performance.now();
+      var FRAME_GAP_THRESHOLD_MS = 150;
+      var frameTick = function () {
+        var now = performance.now();
+        var gap = now - frameWatchLast;
+        if (gap > FRAME_GAP_THRESHOLD_MS && isEnabled()) {
+          log("FREEZE (разрыв между кадрами) " + Math.round(gap) + "мс");
+        }
+        frameWatchLast = now;
+        frameWatchHandle = requestAnimationFrame(frameTick);
+      };
+      frameWatchHandle = requestAnimationFrame(frameTick);
+    }
+
+    // 3. Сеть — устанавливается один раз навсегда (как focus/blur-слушатели
+    // выше), сама обёртка ничего не логирует, пока isEnabled() === false,
+    // поэтому снимать её при выключении галочки не нужно.
+    if (!netWatchInstalled) {
+      netWatchInstalled = true;
+      if (window.fetch) {
+        var origFetch = window.fetch;
+        window.fetch = function () {
+          var url = arguments[0] && arguments[0].url ? arguments[0].url : arguments[0];
+          var t0 = performance.now();
+          if (isEnabled()) log("fetch start", String(url).slice(0, 120));
+          return origFetch.apply(this, arguments).then(
+            function (res) {
+              if (isEnabled()) log("fetch done " + Math.round(performance.now() - t0) + "мс", String(url).slice(0, 120));
+              return res;
+            },
+            function (err) {
+              if (isEnabled()) log("fetch error " + Math.round(performance.now() - t0) + "мс", String(err));
+              throw err;
+            }
+          );
+        };
+      }
+      if (window.WebSocket) {
+        var OrigWS = window.WebSocket;
+        var WrappedWS = function (url, protocols) {
+          var ws = protocols !== undefined ? new OrigWS(url, protocols) : new OrigWS(url);
+          var t0 = performance.now();
+          if (isEnabled()) log("WebSocket open", String(url).slice(0, 120));
+          ws.addEventListener("message", function (ev) {
+            if (!isEnabled()) return;
+            var size = ev && ev.data ? (ev.data.length || (ev.data.byteLength || 0)) : 0;
+            if (size > WS_MSG_SIZE_WARN) {
+              log("WebSocket БОЛЬШОЕ сообщение " + size + " симв.", String(url).slice(0, 120));
+            }
+          });
+          ws.addEventListener("close", function () {
+            if (isEnabled()) log("WebSocket close после " + Math.round(performance.now() - t0) + "мс", String(url).slice(0, 120));
+          });
+          return ws;
+        };
+        WrappedWS.prototype = OrigWS.prototype;
+        WrappedWS.CONNECTING = OrigWS.CONNECTING;
+        WrappedWS.OPEN = OrigWS.OPEN;
+        WrappedWS.CLOSING = OrigWS.CLOSING;
+        WrappedWS.CLOSED = OrigWS.CLOSED;
+        window.WebSocket = WrappedWS;
+      }
+    }
+  }
+
+  function stopFreezeWatch() {
+    if (longTaskObserver) {
+      longTaskObserver.disconnect();
+      longTaskObserver = null;
+    }
+    if (frameWatchHandle) {
+      cancelAnimationFrame(frameWatchHandle);
+      frameWatchHandle = null;
+    }
+    // fetch/WebSocket обёртки не снимаем — см. комментарий в startFreezeWatch.
+  }
+
   if (isEnabled()) {
     startImageLineWatch();
     startTaskScrollWatch();
+    startFreezeWatch();
+    startFreezeWatch();
   }
 })();
