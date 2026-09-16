@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 12.0 (16.09)
+   Версия: 13.0 (16.09)
    =========================================================================== */
 
 (function(){
@@ -7619,13 +7619,65 @@
   // те же, что и для реестра/заметок, только под своей веткой fileBlobs.
   function fileBlobCloudPath(kind, hash){ return "fileBlobs/" + kind + "/" + hash; }
 
+  // ⚠️ 16.09, диагностика фризов интерфейса: обычные bytesToBase64/
+  // base64ToBytes (см. выше, используются для текста общих задач —
+  // килобайты) кодируют/декодируют ОДНИМ синхронным циклом, побайтно
+  // (String.fromCharCode на каждый байт с конкатенацией строки). На
+  // тексте это незаметно, но на байтах ФАЙЛА, вплоть до
+  // FILE_SYNC_SIZE_LIMIT_BYTES (7 МБ ≈ 7 млн итераций), это была
+  // многосекундная синхронная работа прямо в основном потоке — интерфейс
+  // полностью зависал на всё это время при заливке файла в облако
+  // (uploadFileToCloud) и при скачивании (downloadFileFromCloud). Именно
+  // это и было причиной фризов при облачной загрузке/выгрузке файлов.
+  // Ниже — chunked-версии СПЕЦИАЛЬНО для байтового реле файлов: обрабатывают
+  // данные пачками по B64_CHUNK_BYTES и между пачками отдают управление
+  // event loop'у через setTimeout(0) — сам процесс занимает чуть больше
+  // "по часам", зато ни один синхронный кусок не превышает долей
+  // миллисекунды, и браузер успевает рисовать кадры/реагировать на тапы
+  // между пачками. Текстовые bytesToBase64/base64ToBytes выше не тронуты —
+  // там данных всегда мало, chunking там не нужен.
+  var B64_CHUNK_BYTES = 65536; // 64 КБ/пачка — с большим запасом ниже порога Long Task API (50мс) даже на слабом устройстве
+  function bytesToBase64Async(bytes){
+    var arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    return new Promise(function(resolve){
+      var parts = [], i = 0;
+      function step(){
+        var end = Math.min(i + B64_CHUNK_BYTES, arr.length);
+        // fromCharCode.apply на пачке — на порядок быстрее, чем посимвольная
+        // конкатенация, но именно разбивка на пачки с setTimeout между ними
+        // и есть то, что не даёт интерфейсу зависнуть целиком на большом файле.
+        parts.push(String.fromCharCode.apply(null, arr.subarray(i, end)));
+        i = end;
+        if(i < arr.length) setTimeout(step, 0);
+        else resolve(btoa(parts.join("")));
+      }
+      step();
+    });
+  }
+  function base64ToBytesAsync(b64){
+    var bin = atob(b64); // сам atob нативный и быстрый, не блокирует ощутимо
+    return new Promise(function(resolve){
+      var arr = new Uint8Array(bin.length), i = 0;
+      function step(){
+        var end = Math.min(i + B64_CHUNK_BYTES, bin.length);
+        for(var j=i;j<end;j++) arr[j] = bin.charCodeAt(j);
+        i = end;
+        if(i < bin.length) setTimeout(step, 0);
+        else resolve(arr);
+      }
+      step();
+    });
+  }
+
   // Заливает файл в RTDB как одноразовую точечную запись (PATCH одного
   // ключа через patchNotesCloud) — НЕ через подписку, см. предупреждение
   // в комментарии к разделу выше.
   function uploadFileToCloud(kind, hash, bytes){
     return encryptFileBytes(bytes).then(function(encBytes){
+      return bytesToBase64Async(encBytes);
+    }).then(function(b64){
       var patch = {};
-      patch[fileBlobCloudPath(kind, hash)] = bytesToBase64(encBytes);
+      patch[fileBlobCloudPath(kind, hash)] = b64;
       return patchNotesCloud(patch);
     }).then(function(){
       return true;
@@ -7637,7 +7689,9 @@
   function downloadFileFromCloud(kind, hash){
     return fetchNotesCloudPath(fileBlobCloudPath(kind, hash)).then(function(b64){
       if(!b64) throw new Error("blob_not_found");
-      return decryptFileBytes(base64ToBytes(b64));
+      return base64ToBytesAsync(b64);
+    }).then(function(bytes){
+      return decryptFileBytes(bytes);
     });
   }
   function deleteFileFromCloud(kind, hash){
