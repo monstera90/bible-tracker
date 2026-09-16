@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 13.2 (16.09)
+   Версия: 13.3 (16.09)
    =========================================================================== */
 
 (function(){
@@ -1082,6 +1082,7 @@
 
 
   var state = loadState();
+  if(window.Debug) window.Debug.log("Старт приложения: из localStorage прочитано задач=" + Object.keys(state).filter(function(k){ return k.indexOf("task:") === 0; }).length);
   var syncId = localStorage.getItem(SYNC_ID_KEY) || null;
   // ⚠️ ДОБАВЛЕНО (16.09, ТЗ пользователя — пропадали картинки из личных
   // задач): пока не настроена синхронизация — `state` и так локальный и
@@ -3280,6 +3281,7 @@
     syncInProgress = true;
     setSyncState("syncing");
     fetchCloudBlob(syncId, {keepalive: urgent}).then(function(cloudData){
+      if(window.Debug) window.Debug.log("doCloudSync: получено с облака, задач в облаке=" + Object.keys(cloudData || {}).filter(function(k){ return k.indexOf("task:") === 0; }).length + ", задач локально=" + getAllTasks().length);
       var merged = mergeStates(state, cloudData);
       var localChanged = !statesEqual(merged, state);
       var cloudChanged = !statesEqual(merged, cloudData);
@@ -3410,6 +3412,7 @@
   // открытых редактируемых полей ПЕРЕД сохранением state — тем же приёмом,
   // что и в switchSettingsTab (см. flushPendingTaskEdits и соседей там же).
   function flushPendingSyncNow(){
+    if(window.Debug) window.Debug.log("flushPendingSyncNow: старт, saveTimer=" + !!saveTimer + " pushTimer=" + !!pushTimer);
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
@@ -3418,7 +3421,12 @@
     if(saveTimer){
       clearTimeout(saveTimer);
       saveTimer = null;
-      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+      try{
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        if(window.Debug) window.Debug.log("flushPendingSyncNow: localStorage сохранён, задач=" + getAllTasks().length);
+      }catch(e){
+        if(window.Debug) window.Debug.log("flushPendingSyncNow: ошибка localStorage.setItem: " + (e && e.message ? e.message : e));
+      }
     }
     if(pushTimer){
       clearTimeout(pushTimer);
@@ -3426,10 +3434,34 @@
       doCloudSync(true);
     }
   }
+  // ⚠️ ДОБАВЛЕНО (16.09, ТЗ пользователя — задача и картинка пропадали
+  // после обновления страницы даже ПОСЛЕ потери фокуса, то есть после
+  // setTaskText): диагностика показала, что дело может быть не в открытых
+  // полях (см. комментарий выше), а в том, что visibilitychange/pagehide
+  // на конкретном браузере/устройстве могут не успевать сработать ДО
+  // разрушения страницы при обычном обновлении (F5/pull-to-refresh) —
+  // тогда даже синхронный localStorage.setItem внутри flushPendingSyncNow
+  // просто не запускается. beforeunload закомментирован в объяснении выше
+  // как "ненадёжный на мобильных", но именно для случая ЯВНОГО обновления
+  // страницы (а не сворачивания/блокировки экрана) он на практике часто
+  // срабатывает ТАМ, где не сработал visibilitychange — добавлен как
+  // третья, дополнительная подстраховка (не замена, а вдобавок к двум
+  // остальным). Временный Debug.log на все три обработчика — чтобы по
+  // логу (вкладка "Шестерёнка" → "Включить режим отладки") было видно,
+  // какой из трёх реально сработал на этом устройстве при обновлении
+  // страницы, и сработал ли хоть один.
   document.addEventListener("visibilitychange", function(){
+    if(window.Debug) window.Debug.log("visibilitychange -> " + document.visibilityState);
     if(document.visibilityState === "hidden") flushPendingSyncNow();
   });
-  window.addEventListener("pagehide", flushPendingSyncNow);
+  window.addEventListener("pagehide", function(){
+    if(window.Debug) window.Debug.log("pagehide");
+    flushPendingSyncNow();
+  });
+  window.addEventListener("beforeunload", function(){
+    if(window.Debug) window.Debug.log("beforeunload");
+    flushPendingSyncNow();
+  });
 
   // ===================== МОДАЛЬНОЕ ОКНО СИНХРОНИЗАЦИИ =====================
   var modalOverlay = document.getElementById("modalOverlay");
