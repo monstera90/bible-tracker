@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 6.0 (16.09)
+   Версия: 8.1 (16.09)
    =========================================================================== */
 
 (function(){
@@ -1432,21 +1432,41 @@
     // #settingsTabJointTasksBtn в index.html; геометрия одного человечка
     // взята из "council" выше, просто уменьшена и сдвоена
     jointtasks: '<circle cx="8" cy="8" r="2.3"></circle><path d="M3.5 19c0-3 2-5.3 4.5-5.3s4.5 2.3 4.5 5.3"></path><circle cx="16" cy="8" r="2.3"></circle><path d="M11.5 19c0-3 2-5.3 4.5-5.3s4.5 2.3 4.5 5.3"></path>',
-    // речевой пузырь с тремя точками — используется НЕ как обычная
-    // вкладка-список (extra2/"Комментарии" не входит в TASK_MOVE_TARGET_TABS
-    // выше, у неё своё, отдельное хранилище, см. openTaskMovePicker/
-    // openRowMovePicker ниже, ТЗ пользователя от 13.09), а как
-    // дополнительный пункт именно в сетке "Перенести задачу" — там задача
-    // не перекладывается, а конвертируется в комментарий
-    // (convertTaskToComment ниже). Три точки — тем же приёмом заливки, что
-    // и точка над "i" в INFO_ICON_SVG (fill=currentColor, а не линия).
-    extra2: '<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-4 4v-4H6a2 2 0 0 1-2-2V6z"></path><circle cx="8.5" cy="10" r="0.9" fill="currentColor" stroke="none"></circle><circle cx="12" cy="10" r="0.9" fill="currentColor" stroke="none"></circle><circle cx="15.5" cy="10" r="0.9" fill="currentColor" stroke="none"></circle>'
+    // запасной вариант на случай, если настоящей кнопки ещё нет в DOM
+    // (см. TASK_MOVE_ICON_SVG ниже) — держим её в актуальном виде на
+    // всякий случай, но в обычной работе не используется: реальная
+    // иконка вкладки Comments — COMMENT_TAB_ICON_SVG ниже по файлу
+    // (refreshExtra2TabAppearance), именно её и наследует эта сетка
+    extra2: '<path d="M4 5h16v11H8l-4 4V5z"></path><path d="M8 10h8"></path><path d="M8 13h5"></path>'
   };
   // подпись для "Комментарии" в сетке "Перенести задачу" — только там;
   // сама вкладка extra2 (личные комментарии) свою заголовочную надпись
   // берёт из своей разметки (renderCommentsTab), сюда не относится
   TASK_TAB_TITLES.extra2 = "Comments";
+  // id настоящей кнопки-вкладки в DOM для каждого ключа — чтобы иконка
+  // сетки "Перенести задачу" (см. openTaskMovePicker/openRowMovePicker)
+  // и мини-иконки в инструкции "Кнопки задач" (renderTaskInfoScreen)
+  // ВСЕГДА брались с настоящей вкладки, а не со своей отдельной копии.
+  // ТЗ пользователя от 16.09 — до этого была рассинхронизация: у
+  // Comments/extra2 в этой сетке рисовался пузырь с тремя точками, а
+  // настоящая вкладка (см. refreshExtra2TabAppearance ниже) —
+  // прямоугольный пузырь с двумя строками. Теперь источник правды один —
+  // сама вкладка; поменяешь иконку кнопки (COMMENT_TAB_ICON_SVG / у
+  // остальных вкладок — прямо в index.html) — она сама подхватится и
+  // здесь, без ручной правки второй копии.
+  function taskTabIconDomId(key){
+    return key === "extra2" ? EXTRA_TAB_IDS.extra2 : TASK_TAB_IDS[key];
+  }
   var TASK_MOVE_ICON_SVG = function(key){
+    var domId = taskTabIconDomId(key);
+    var btn = domId && document.getElementById(domId);
+    var svgEl = btn && btn.querySelector("svg");
+    // outerHTML — просто читаем разметку строкой, ничего в DOM не
+    // трогаем; querySelector("svg") достаёт именно иконку, даже если у
+    // кнопки в разметке есть что-то ещё, кроме неё
+    if(svgEl) return svgEl.outerHTML;
+    // запасной вариант — настоящей кнопки ещё нет в DOM (или у неё пока
+    // пусто, как у выключенной Comments, см. refreshExtra2TabAppearance)
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + (TASK_MOVE_ICONS[key] || "") + '</svg>';
   };
   var ARROW_MOVE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path></svg>';
@@ -3420,12 +3440,11 @@
   // Шаг 1 устанавливает пару groupId+роль на обоих устройствах через
   // одноразовый код привязки. Шаг 2 добавляет обязательные диалоги вокруг
   // этого обмена (п. 2.2.1/2.3.2/2.3.4/2.5/2.6 ТЗ) — предупреждения и
-  // подтверждения, тексты дословно из ТЗ. Оба шага НЕ трогают задачи:
+  // подтверждения, тексты дословно из ТЗ. Оба шага сами НЕ трогали задачи:
   // перенос задач участника во "Входящие" (2.3.5) и переключение вкладки
-  // "Общие задачи" на общий источник данных — задача Шага 3, отмечено ниже
-  // явным TODO в finalizeGroupJoin(). Логика самой отвязки/отписки
-  // (удаление данных группы и т.п.) — задача Шага 5, здесь только диалоги
-  // с заглушками-обработчиками.
+  // "Общие задачи" на общий источник данных сделаны Шагом 3 (см.
+  // finalizeGroupJoin ниже). Логика самой отвязки/отписки (удаление
+  // данных группы и т.п.) сделана Шагом 5 — здесь только диалоги.
 
   var FIREBASE_PAIRINGS_PATH = "/pairings";
   var FIREBASE_GROUPS_PATH = "/groups";
@@ -3818,10 +3837,10 @@
       items.push({id:"mtjSync", label:"Синхронизация", action:openGroupPairingModal});
     } else if(sharedGroup.role === "admin"){
       items.push({id:"mtjUnlink", label:"Отвязать пользователя", action:openGroupUnlinkModal});
-      items.push({id:"mtjArchive", label:"Архив общих задач", action:openGroupJointArchiveModal});
+      items.push({id:"mtjArchive", label:"Архив общих задач", action:openGroupJointArchiveTab});
     } else if(sharedGroup.role === "member"){
       items.push({id:"mtjUnsub", label:"Отписаться от общих задач", action:openGroupUnsubscribeModal});
-      items.push({id:"mtjArchive", label:"Архив общих задач", action:openGroupJointArchiveModal});
+      items.push({id:"mtjArchive", label:"Архив общих задач", action:openGroupJointArchiveTab});
     }
     popup.innerHTML = items.map(function(it){
       return '<button type="button" id="' + it.id + '">' + escapeHtml(it.label) + '</button>';
@@ -4024,19 +4043,29 @@
     scheduleGroupTasksPush();
     if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
   }
-  // Отметка общей задачи выполненной — п. 2.4 ТЗ. ⚠️ Шаг 6 ещё не сделан:
-  // перевода в "Архив общих задач" (/groups/<groupId>/archive) пока нет,
-  // задача просто перестаёт показываться (checked:true отфильтровывается
-  // getGroupTasksForTab), но не теряется — ровно как вели себя личные
-  // вкладки задач до появления их архива. completedBy проставляется здесь
-  // же (п. 2.4 — второе авторское поле, отдельное от createdBy).
+  // Отметка общей задачи выполненной — п. 2.4 ТЗ. completedBy проставляется
+  // здесь же (второе авторское поле, отдельное от createdBy). С Шага 6
+  // (16.09) задача при этом реально ПЕРЕНОСИТСЯ в "Архив общих задач" —
+  // тот же id, но запись переезжает из /groups/<groupId>/tasks в
+  // /groups/<groupId>/archive (см. блок "ОБЩИЕ ЗАДАЧИ: АРХИВ" ниже), а не
+  // просто помечается checked:true внутри одного и того же хранилища, как
+  // у личных задач (см. getArchivedTasksAll) — так и задумано п. 3.1 ТЗ
+  // (архив — отдельный облачный путь). Тумбстоун в /tasks делаем через
+  // уже существующий deleteGroupTaskPermanently — экономит дублирование
+  // кода тумбстоуна/дирти/пуша.
   function checkGroupTaskDone(id){
+    if(!sharedGroup) return;
     var task = getGroupTaskById(id);
     if(!task || task.c.checked) return;
     task.c.checked = true;
     task.c.checkedAt = Date.now();
     task.c.completedBy = getDeviceId();
-    saveGroupTaskData(id, task.c);
+    loadGroupArchiveCache(sharedGroup.groupId);
+    groupArchiveState[id] = {c: task.c, t: Date.now()};
+    saveGroupArchiveCacheLocal();
+    groupArchiveDirty[id] = true;
+    scheduleGroupArchivePush();
+    deleteGroupTaskPermanently(id);
   }
 
   // ---- облачный цикл общих задач: свой, полностью независимый от личного
@@ -4124,6 +4153,196 @@
         }
       });
     });
+  }
+
+  // ===================== ОБЩИЕ ЗАДАЧИ: АРХИВ (TASK_SHARED_TASKS, Шаг 6,
+  // 16.09) =====================
+  // /groups/<groupId>/archive/<id> — отдельный от /tasks облачный путь
+  // (п. 3.1 ТЗ), та же форма записи {c,t} и то же шифрование групповым
+  // ключом (encryptGroupContent/decryptGroupContent выше — ключ один и
+  // тот же для обоих путей, SHA-256(groupId)). Свой локальный кэш, свой
+  // "грязный" набор, свой независимый push/pull — устроено ТОЧНО как
+  // groupTasksState/groupTasksDirty/pushGroupTasksNow/pullGroupTasksNow
+  // выше, только путь в Firebase "/archive.json" вместо "/tasks.json".
+  // id записи — тот же, что был у активной задачи (переезжает, не
+  // создаётся заново, см. checkGroupTaskDone выше).
+  var GROUP_ARCHIVE_CACHE_KEY_PREFIX = "bibleGroupArchiveCache_v1_";
+  var groupArchiveState = {};
+  var groupArchiveLoadedFor = null;
+  var groupArchiveDirty = {};
+
+  function groupArchiveCacheKey(groupId){ return GROUP_ARCHIVE_CACHE_KEY_PREFIX + groupId; }
+  function loadGroupArchiveCache(groupId){
+    if(groupArchiveLoadedFor === groupId) return;
+    groupArchiveState = {};
+    try{
+      var raw = localStorage.getItem(groupArchiveCacheKey(groupId));
+      if(raw) groupArchiveState = JSON.parse(raw) || {};
+    }catch(e){ groupArchiveState = {}; }
+    groupArchiveLoadedFor = groupId;
+  }
+  function saveGroupArchiveCacheLocal(){
+    if(!sharedGroup) return;
+    try{ localStorage.setItem(groupArchiveCacheKey(sharedGroup.groupId), JSON.stringify(groupArchiveState)); }catch(e){}
+  }
+  function getAllGroupArchivedTasks(){
+    if(!sharedGroup) return [];
+    loadGroupArchiveCache(sharedGroup.groupId);
+    var list = [];
+    Object.keys(groupArchiveState).forEach(function(id){
+      var rec = groupArchiveState[id];
+      if(rec && rec.c) list.push({id:id, c:rec.c, t:rec.t});
+    });
+    return list;
+  }
+  // источник данных для renderTaskArchiveTab(true) — та же сортировка
+  // (свежие сверху по checkedAt), что и у личного getArchivedTasksAll.
+  function getGroupArchivedTasksAll(){
+    return getAllGroupArchivedTasks().sort(function(a,b){ return (b.c.checkedAt||0) - (a.c.checkedAt||0); });
+  }
+  function getGroupArchivedTaskById(id){
+    if(!sharedGroup) return null;
+    loadGroupArchiveCache(sharedGroup.groupId);
+    var rec = groupArchiveState[id];
+    if(!rec || !rec.c) return null;
+    return {id:id, c:rec.c, t:rec.t};
+  }
+  // "Извлечь из архива" (стрелочка) для общей задачи — кнопка в
+  // renderTaskArchiveTab(true) вызывает эту функцию напрямую (не
+  // restoreTaskFromArchive — та только для личных задач). Возвращает
+  // запись обратно в /groups/<groupId>/tasks через уже существующий
+  // saveGroupTaskData (дирти/пуш этого пути он берёт на себя сам),
+  // completedBy сбрасывается — как completionKey у личной задачи при
+  // восстановлении (см. restoreTaskFromArchive).
+  function restoreGroupTaskFromArchive(id){
+    if(!sharedGroup) return;
+    loadGroupArchiveCache(sharedGroup.groupId);
+    var rec = groupArchiveState[id];
+    if(!rec || !rec.c) return;
+    var content = rec.c;
+    content.checked = false;
+    content.checkedAt = null;
+    content.completedBy = null;
+    saveGroupTaskData(id, content);
+    groupArchiveState[id] = {c: null, t: Date.now()};
+    saveGroupArchiveCacheLocal();
+    groupArchiveDirty[id] = true;
+    scheduleGroupArchivePush();
+  }
+  // "Удалить навсегда" (крестик) для общей задачи из архива — тушит
+  // запись ИМЕННО в /groups/<groupId>/archive (не путать с
+  // deleteGroupTaskPermanently выше — та про /tasks, активные задачи).
+  function deleteGroupArchivedTaskPermanently(id){
+    if(!sharedGroup) return;
+    loadGroupArchiveCache(sharedGroup.groupId);
+    groupArchiveState[id] = {c: null, t: Date.now()};
+    saveGroupArchiveCacheLocal();
+    groupArchiveDirty[id] = true;
+    scheduleGroupArchivePush();
+    if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
+  }
+
+  var GROUP_ARCHIVE_PUSH_DEBOUNCE_MS = 400;
+  var groupArchivePushTimer = null;
+  function scheduleGroupArchivePush(){
+    if(!sharedGroup) return;
+    clearTimeout(groupArchivePushTimer);
+    groupArchivePushTimer = setTimeout(pushGroupArchiveNow, GROUP_ARCHIVE_PUSH_DEBOUNCE_MS);
+  }
+  function pushGroupArchiveNow(){
+    if(!sharedGroup) return Promise.resolve();
+    var groupId = sharedGroup.groupId;
+    var ids = Object.keys(groupArchiveDirty);
+    if(!ids.length) return Promise.resolve();
+    groupArchiveDirty = {};
+    return Promise.all(ids.map(function(id){
+      var rec = groupArchiveState[id];
+      if(!rec) return null;
+      if(rec.c === null){
+        var tomb = {}; tomb[id] = {c:null, t:rec.t};
+        return tomb;
+      }
+      return encryptGroupContent(groupId, rec.c).then(function(b64){
+        var out = {}; out[id] = {c:b64, t:rec.t};
+        return out;
+      });
+    })).then(function(parts){
+      var payload = {};
+      parts.forEach(function(p){ if(p) Object.keys(p).forEach(function(k){ payload[k] = p[k]; }); });
+      if(!Object.keys(payload).length) return;
+      return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/archive.json", {
+        method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload)
+      }, 15000).then(function(res){
+        if(!res.ok) throw new Error("group_archive_put_failed_" + res.status);
+      });
+    }).catch(function(err){
+      console.error("Не удалось отправить архив общих задач в облако:", err);
+      ids.forEach(function(id){ groupArchiveDirty[id] = true; });
+    });
+  }
+  function fetchGroupArchiveRaw(groupId){
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/archive.json", {method:"GET"}, 10000).then(function(res){
+      if(!res.ok) throw new Error("group_archive_fetch_failed_" + res.status);
+      return res.json();
+    });
+  }
+  // Пулл архива НЕ входит в refreshJointTasksData (тот освежает только
+  // /tasks при открытии вкладки/событии "online") — архив тянется лениво,
+  // только когда реально открыт экран архива (см. openGroupJointArchiveTab
+  // ниже), чтобы не гонять лишний трафик на каждое открытие обычной
+  // вкладки "Общие задачи". Пуш "грязных" записей архива, наоборот, не
+  // ждёт открытия экрана — идёт сам по scheduleGroupArchivePush (дебаунс),
+  // плюс подстраховка в refreshJointTasksData (см. там), тем же приёмом,
+  // что и у groupTasksDirty.
+  function pullGroupArchiveNow(){
+    if(!sharedGroup) return Promise.resolve();
+    var groupId = sharedGroup.groupId;
+    loadGroupArchiveCache(groupId);
+    return fetchGroupArchiveRaw(groupId).then(function(cloudRaw){
+      cloudRaw = cloudRaw || {};
+      var ids = Object.keys(cloudRaw);
+      return Promise.all(ids.map(function(id){
+        var cloudRec = cloudRaw[id];
+        if(!cloudRec) return null;
+        var localRec = groupArchiveState[id];
+        if(localRec && localRec.t >= cloudRec.t) return null;
+        if(cloudRec.c === null) return {id:id, rec:{c:null, t:cloudRec.t}};
+        return decryptGroupContent(groupId, cloudRec.c).then(function(obj){
+          return {id:id, rec:{c:obj, t:cloudRec.t}};
+        }).catch(function(err){
+          console.error("Не удалось расшифровать архивную общую задачу", id, err);
+          return null;
+        });
+      })).then(function(results){
+        var changed = false;
+        results.forEach(function(r){
+          if(!r) return;
+          groupArchiveState[r.id] = r.rec;
+          changed = true;
+        });
+        if(changed){
+          saveGroupArchiveCacheLocal();
+          rerenderJointArchiveTabIfOpen();
+        }
+      });
+    });
+  }
+  // Перерисовывает экран "Архив общих задач", если он сейчас открыт — та
+  // же защита, что у rerenderJointTasksTabIfOpen выше (архив не
+  // редактируется инлайн, но проверка "модалка открыта" всё равно нужна).
+  function rerenderJointArchiveTabIfOpen(){
+    if(currentSettingsTab !== "jointArchive") return;
+    if(!settingsModalOverlay || !settingsModalOverlay.classList.contains("open")) return;
+    renderTaskArchiveTab(true);
+  }
+  // Точка входа из меню "настройки вкладки" (см. renderTaskJointMenu
+  // выше, пункт "Архив общих задач") — открывает экран архива тем же
+  // приёмом, что и "Версии"/другие служебные экраны (switchSettingsTab +
+  // запись в стек AppNav, см. switchSettingsTab), затем лениво подтягивает
+  // свежие данные из облака (см. пояснение у pullGroupArchiveNow выше).
+  function openGroupJointArchiveTab(){
+    switchSettingsTab("jointArchive");
+    if(sharedGroup) pullGroupArchiveNow().catch(function(err){ console.error(err); });
   }
 
   function fetchGroupMembers(groupId){
@@ -4230,6 +4449,9 @@
       }).catch(function(err){ console.error(err); });
     }
     if(Object.keys(groupTasksDirty).length) pushGroupTasksNow();
+    // подстраховка для архива — тот же приём, что и у groupTasksDirty
+    // чуть выше (см. пояснение у pullGroupArchiveNow, Шаг 6).
+    if(Object.keys(groupArchiveDirty).length) pushGroupArchiveNow();
   }
 
   // ===================== ОТВЯЗКА / ОТПИСКА — ДИАЛОГИ И ЛОГИКА (TASK_SHARED_TASKS,
@@ -4314,10 +4536,8 @@
   }
 
   // "С удалением" (п. 2.5 ТЗ) — общие задачи и архив группы удаляются из
-  // облака полностью. Архива как отдельного хранилища пока физически нет
-  // (Шаг 6 не сделан, см. openGroupJointArchiveModal) — DELETE по пустому
-  // пути в Firebase просто ничего не находит и завершается успешно, так
-  // что заранее готовим и эту часть на будущее, без доп. проверок.
+  // облака полностью: /tasks и /archive (см. блок "ОБЩИЕ ЗАДАЧИ: АРХИВ",
+  // Шаг 6) — оба пути реальные с 16.09.
   function deleteGroupTasksAndArchive(groupId){
     var base = FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId);
     return Promise.all([
@@ -4338,23 +4558,40 @@
   // удаляется, но админ её больше не читает и не пишет (сразу после этой
   // функции его sharedGroup обнуляется, см. returnJointTasksTabToLocalMode)
   // — при следующей привязке создаётся новая группа с новым groupId,
-  // старая просто больше никем не используется. Отмеченные (checked)
-  // общие задачи переносятся тоже, с восстановлением личной записи
-  // "taskcompletion:…" — иначе они бы просто исчезли из вида вместо того,
-  // чтобы попасть в личный архив, как и остальные закрытые задачи.
+  // старая просто больше никем не используется.
+  // ⚠️ Правка 16.09 (вместе с Шагом 6): "данные группы" из п. 2.5 ТЗ — это
+  // не только /tasks, но и /archive (с Шага 6 отметка выполненной
+  // РЕАЛЬНО переносит запись в отдельный путь /groups/<groupId>/archive,
+  // см. checkGroupTaskDone/раздел «ОБЩИЕ ЗАДАЧИ: АРХИВ» — она больше не
+  // остаётся в /tasks с checked:true). Раньше эта функция читала только
+  // fetchGroupTasksRaw и потому архив группы при "без удаления" молча
+  // терялся бы в облаке (админ его больше не читает после сброса
+  // sharedGroup, а в личный архив ничего не попадало). Теперь тянутся оба
+  // пути параллельно, архивные записи переносятся в личный архив СРАЗУ как
+  // уже выполненные (checked:true) — с восстановлением личной записи
+  // "taskcompletion:…", тем же приёмом, что и у обычной checkTaskDone.
   function migrateGroupTasksToLocalForAdmin(groupId){
-    return fetchGroupTasksRaw(groupId).then(function(raw){
-      raw = raw || {};
-      var ids = Object.keys(raw);
-      return Promise.all(ids.map(function(id){
-        var rec = raw[id];
-        if(!rec || rec.c === null || rec.c === undefined) return null;
-        return decryptGroupContent(groupId, rec.c).catch(function(err){
-          console.error("Не удалось расшифровать общую задачу при переносе локально:", id, err);
-          return null;
-        });
-      }));
-    }).then(function(contents){
+    return Promise.all([
+      fetchGroupTasksRaw(groupId),
+      fetchGroupArchiveRaw(groupId)
+    ]).then(function(raws){
+      var tasksRaw = raws[0] || {}, archiveRaw = raws[1] || {};
+      function decryptAll(raw, label){
+        return Promise.all(Object.keys(raw).map(function(id){
+          var rec = raw[id];
+          if(!rec || rec.c === null || rec.c === undefined) return null;
+          return decryptGroupContent(groupId, rec.c).catch(function(err){
+            console.error("Не удалось расшифровать " + label + " при переносе локально:", id, err);
+            return null;
+          });
+        }));
+      }
+      return Promise.all([
+        decryptAll(tasksRaw, "общую задачу"),
+        decryptAll(archiveRaw, "архивную общую задачу")
+      ]);
+    }).then(function(pair){
+      var contents = pair[0], archiveContents = pair[1];
       var changed = false;
       contents.forEach(function(content){
         if(!content) return;
@@ -4372,6 +4609,22 @@
           localContent.completionKey = completionKey;
         }
         state["task:" + newId] = {c: localContent, t: Date.now()};
+        changed = true;
+      });
+      // Архивные записи группы — уже выполненные задачи, переносим сразу
+      // как checked:true (см. пояснение выше).
+      archiveContents.forEach(function(content){
+        if(!content) return;
+        var newId = genTaskId();
+        var ts = content.checkedAt || Date.now();
+        var completionKey = "taskcompletion:" + ts + "-" + Math.random().toString(36).slice(2,7);
+        state[completionKey] = {c: {text: content.text || "Без названия", tab: "jointtasks"}, t: ts};
+        state["task:" + newId] = {c: {
+          text: content.text, tab: "jointtasks", checked: true,
+          checkedAt: ts, completionKey: completionKey,
+          nextForProjectId: null, flag: content.flag || null, inWork: !!content.inWork,
+          createdAt: content.createdAt != null ? content.createdAt : ts
+        }, t: Date.now()};
         changed = true;
       });
       if(changed){ saveLocalState(); scheduleCloudPush(); }
@@ -4394,11 +4647,23 @@
     if(prevGroupId){
       try{ localStorage.removeItem(groupTasksCacheKey(prevGroupId)); }catch(e){}
       try{ localStorage.removeItem(GROUP_ADMIN_MIGRATED_KEY_PREFIX + prevGroupId); }catch(e){}
+      // ⚠️ ИСПРАВЛЕНО (правка после ревью): раньше кэш АРХИВА группы (Шаг 6,
+      // появился позже этой функции) тут не сбрасывался вовсе — если на
+      // момент отвязки/отписки оставались неотправленные "грязные" записи
+      // архива (groupArchiveDirty), они переживали returnJointTasksTabToLocalMode
+      // и при привязке к СЛЕДУЮЩЕЙ группе могли уйти (переехав по
+      // groupId) в архив уже новой, не имеющей к ним отношения группы —
+      // см. groupArchiveDirty-подстраховку в refreshJointTasksData.
+      try{ localStorage.removeItem(groupArchiveCacheKey(prevGroupId)); }catch(e){}
     }
     groupTasksState = {};
     groupTasksDirty = {};
     groupTasksLoadedFor = null;
     clearTimeout(groupTasksPushTimer);
+    groupArchiveState = {};
+    groupArchiveDirty = {};
+    groupArchiveLoadedFor = null;
+    clearTimeout(groupArchivePushTimer);
     var popup = document.getElementById("taskJointMenuPopup");
     if(popup) popup.classList.remove("open");
     rerenderJointTasksTabIfOpen();
@@ -4509,17 +4774,6 @@
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderGroupUnsubscribeConfirm);
     });
-  }
-
-  // Архив общих задач — Шаг 6 (ещё не сделан), пока просто заглушка с
-  // текстом про этот шаг.
-  function openGroupJointArchiveModal(){
-    modalOverlay.classList.add("open");
-    modalBox.innerHTML = modalHeader("Пока не реализовано",
-        "Архив общих задач появится на следующем шаге доработки (Шаг 6 из TASK_SHARED_TASKS.md).") +
-      '<button class="modal-btn primary" id="mDone">Понятно</button>';
-    bindClose();
-    document.getElementById("mDone").addEventListener("click", closeModal);
   }
 
   // ===================== СЧЁТЧИК НАСТРОЕНИЯ =====================
@@ -4662,6 +4916,17 @@
     var texts = [];
     getAllTasks().forEach(function(t){ if(t.c && t.c.text) texts.push(t.c.text); });
     getAllComments().forEach(function(c){ if(c.c && c.c.text) texts.push(c.c.text); });
+    // ⚠️ ИСПРАВЛЕНО (правка после ревью): общие задачи (и их архив) живут в
+    // своём хранилище (groupTasksState/groupArchiveState, TASK_SHARED_TASKS),
+    // не в state — раньше эта функция их не видела вовсе. Картинка,
+    // вставленная кнопкой-скрепкой ТОЛЬКО в общую задачу (вкладка "Общие
+    // задачи" её тоже показывает), считалась неиспользуемой и могла быть
+    // молча удалена из images/ (OPFS) при чистке "сирот" — хотя миниатюра
+    // в самой задаче видна и открывается.
+    if(sharedGroup){
+      getAllGroupTasks().forEach(function(t){ if(t.c && t.c.text) texts.push(t.c.text); });
+      getAllGroupArchivedTasks().forEach(function(t){ if(t.c && t.c.text) texts.push(t.c.text); });
+    }
     return texts;
   }
   var MdEditor = window.initMdEditorModule({
@@ -4896,15 +5161,24 @@
     // «ГРУППОВАЯ ПРИВЯЗКА «ОБЩИХ ЗАДАЧ»») перед КАЖДЫМ открытием — состав
     // пунктов зависит от состояния группы, которое могло измениться, пока
     // попап был закрыт (например, участник отвязался в фоне).
-    var jointMenuPanelOpen = false;
+    // ⚠️ ИСПРАВЛЕНО (правка после ревью): раньше состояние "открыт/закрыт"
+    // держалось в отдельной переменной jointMenuPanelOpen, а клик по пункту
+    // меню (см. renderTaskJointMenu ниже) снимал класс "open" с попапа
+    // напрямую, эту переменную не трогая — после выбора пункта переменная
+    // оставалась true, и следующий клик по кнопке "⋮" её тут же гасил в
+    // false, ничего не открывая (нужен был ещё один, второй клик). Теперь
+    // источник истины — сам класс "open" на попапе (как и было в паре
+    // "Ж"/formatPanelOpen выше, но там переменная синхронно сбрасывается
+    // при выборе пункта, а тут пункты собираются в другой функции без
+    // доступа к этой переменной, поэтому проще не дублировать состояние).
     var jointMenuBtn = document.getElementById("taskJointMenuBtn");
     var jointMenuPopup = document.getElementById("taskJointMenuPopup");
     stopMousedown(jointMenuBtn);
     if(jointMenuBtn){
       jointMenuBtn.addEventListener("click", function(){
-        jointMenuPanelOpen = !jointMenuPanelOpen;
-        if(jointMenuPanelOpen) renderTaskJointMenu();
-        if(jointMenuPopup) jointMenuPopup.classList.toggle("open", jointMenuPanelOpen);
+        var willOpen = !jointMenuPopup || !jointMenuPopup.classList.contains("open");
+        if(willOpen) renderTaskJointMenu();
+        if(jointMenuPopup) jointMenuPopup.classList.toggle("open", willOpen);
       });
     }
 
@@ -6856,6 +7130,12 @@
     if(tab === "mood"){ renderSettingsTabMood(); }
     else if(tab === "year") renderSettingsTabYear();
     else if(tab === "versions") renderSettingsTabVersions();
+    // "Архив общих задач" (меню "настройки вкладки" на jointtasks, см.
+    // openGroupJointArchiveTab/TASK_SHARED_TASKS.md Шаг 6) — служебный
+    // экран того же рода, что и "versions" чуть выше: открывается кнопкой
+    // изнутри другой вкладки, не имеет своего постоянного язычка, кладётся
+    // в стек AppNav как обычно (см. isRealSwitch ниже).
+    else if(tab === "jointArchive") renderTaskArchiveTab(true);
     else if(tab === "import") renderSettingsTabImportPicker();
     else if(tab === "resetConfirm") renderSettingsTabResetConfirm();
     else if(tab === "moodResetConfirm") renderSettingsTabMoodResetConfirm();
@@ -12861,7 +13141,14 @@
   function moveTaskToEdge(id, edge){
     var task = getTaskById(id);
     if(!task) return;
-    var all = getAllTasks();
+    // ⚠️ ИСПРАВЛЕНО (правка после ревью): раньше здесь всегда бралось
+    // getAllTasks() (только ЛИЧНЫЕ задачи из state) — для общей задачи
+    // (isGroupTaskId) это чужой, не связанный с ней набор: позиция
+    // считалась относительно личных задач пользователя со всех вкладок
+    // вместо других общих задач. Остальные функции этого раздела
+    // (saveTaskData/getTasksForTab/checkTaskDone/deleteTaskPermanently и
+    // т.д.) эту развилку уже делают — здесь её не было.
+    var all = isGroupTaskId(id) ? getAllGroupTasks() : getAllTasks();
     function keyOf(t){ return t.c.createdAt != null ? t.c.createdAt : t.t; }
     var edgeKey = all.reduce(function(acc, t){
       if(t.id === id) return acc;
@@ -13004,8 +13291,10 @@
     saveTaskData(id, task.c);
   }
   function restoreTaskFromArchive(id){
-    // Архив общих задач — Шаг 6 (ещё не сделан), сюда пока не должно
-    // попадать: защита на случай будущей ошибки монтирования UI.
+    // Общая задача (id с префиксом "gt") сюда попасть не должна —
+    // renderTaskArchiveTab(true) вызывает restoreGroupTaskFromArchive
+    // напрямую (см. блок "ОБЩИЕ ЗАДАЧИ: АРХИВ", Шаг 6). Просто защита на
+    // случай ошибки монтирования UI.
     if(isGroupTaskId(id)) return;
     var task = getTaskById(id);
     if(!task || !task.c.checked) return;
@@ -13948,6 +14237,26 @@
   // передаёт свой колбэк, который просто убирает строку из выдачи. Везде,
   // где onAfterAction не передан (обычные вкладки задач), поведение не
   // меняется — используется renderTaskTabList, как раньше.
+  // Подпись "Создал/Выполнил" (TASK_SHARED_TASKS.md, п. 2.4) — только у
+  // общих задач: content.createdBy проставляется ТОЛЬКО при создании общей
+  // задачи (createGroupTask/migrateAdminGroupTasksIfNeeded, см. раздел
+  // «ОБЩИЕ ЗАДАЧИ: ХРАНЕНИЕ И CRUD») — у личных задач этого поля никогда
+  // нет, отдельно проверять tabKey==="jointtasks"/isGroupTaskId(id) не
+  // нужно. Общий хелпер (16.09, Шаг 6): раньше подпись собиралась только
+  // инлайн внутри renderTaskRowView (Шаг 4) — теперь так же нужна и в
+  // "Архиве общих задач" (renderTaskArchiveTab(true)), где completedBy уже
+  // не null практически всегда (задача архивируется как раз в момент
+  // выполнения, см. checkGroupTaskDone) — вынесено сюда, чтобы не
+  // дублировать формирование метки "Вы"/"Второй участник".
+  function buildTaskJointSignatureHtml(content){
+    if(!content.createdBy) return "";
+    var meId = getDeviceId();
+    var createdByLabel = content.createdBy === meId ? "Вы" : "Второй участник";
+    return '<div class="task-joint-signature">Создал: ' + escapeHtml(createdByLabel) +
+      (content.completedBy ? " · Выполнил: " + escapeHtml(content.completedBy === meId ? "Вы" : "Второй участник") : "") +
+      '</div>';
+  }
+
   function renderTaskRowView(id, tabKey, onAfterAction){
     var body = document.querySelector('.task-body[data-id="' + id + '"]');
     var task = getTaskById(id);
@@ -13962,23 +14271,7 @@
     // определить через scrollHeight/clientHeight, что обрезка больше не
     // нужна, когда задачу укоротили редактированием (см. updateTaskExpandBtn).
     var isExpanded = !!expandedTaskIds[id];
-    // Подпись "Создал/Выполнил" (TASK_SHARED_TASKS.md, п. 2.4, Шаг 4) —
-    // только у общих задач: task.c.createdBy проставляется ТОЛЬКО при
-    // создании общей задачи (createGroupTask/migrateAdminGroupTasksIfNeeded,
-    // см. раздел «ОБЩИЕ ЗАДАЧИ: ХРАНЕНИЕ И CRUD»), у личных задач этого поля
-    // никогда нет — отдельно проверять tabKey==="jointtasks" не нужно.
-    // completedBy практически всегда null здесь: как только задача отмечена
-    // выполненной, она пропадает из getGroupTasksForTab (см. там же) — но
-    // код не полагается на это молча, а проверяет поле явно, на случай
-    // будущих изменений фильтрации.
-    var jointSignatureHtml = "";
-    if(task.c.createdBy){
-      var meId = getDeviceId();
-      var createdByLabel = task.c.createdBy === meId ? "Вы" : "Второй участник";
-      jointSignatureHtml = '<div class="task-joint-signature">Создал: ' + escapeHtml(createdByLabel) +
-        (task.c.completedBy ? " · Выполнил: " + escapeHtml(task.c.completedBy === meId ? "Вы" : "Второй участник") : "") +
-        '</div>';
-    }
+    var jointSignatureHtml = buildTaskJointSignatureHtml(task.c);
     body.innerHTML =
       jointSignatureHtml +
       '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
@@ -14899,14 +15192,25 @@
   // Разметка и подгонка кнопок под последнюю строку текста — та же
   // механика (.task-row/.task-body/.task-actions + fitTaskActions), что и
   // у невыполненных задач (см. renderTaskRowView), просто без карандаша и
-  // приоритета: сюда идут только стрелочка и крестик. ----------
-  function renderTaskArchiveTab(){
+  // приоритета: сюда идут только стрелочка и крестик.
+  //
+  // isGroup (Шаг 6, 16.09, TASK_SHARED_TASKS.md, п. 2.4/3.3 ТЗ): тот же
+  // самый рендер переиспользуется для "Архива общих задач" — источник
+  // списка и функции восстановления/удаления подменяются на групповые
+  // (getGroupArchivedTasksAll/restoreGroupTaskFromArchive/
+  // deleteGroupArchivedTaskPermanently), разметка строк не меняется ни на
+  // йоту. Вызывается либо как renderTaskArchiveTab() из
+  // renderSettingsTabTask("archive") (личный архив, свой постоянный
+  // язычок), либо как renderTaskArchiveTab(true) из switchSettingsTab
+  // (tab==="jointArchive", служебный экран без своего язычка, см. там же
+  // и openGroupJointArchiveTab). ----------
+  function renderTaskArchiveTab(isGroup){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     // см. пояснение у preservedScrollTop в renderTaskTabList выше — та же
     // причина (эта функция тоже вызывается в фоне из rerenderAllFromState)
     var preservedScrollTop = container.scrollTop;
-    var all = getArchivedTasksAll();
+    var all = isGroup ? getGroupArchivedTasksAll() : getArchivedTasksAll();
     var shown = all.slice(0, TASK_ARCHIVE_MAX_SHOWN);
     // Обрезка по строкам + шеврон "показать полностью" — тот же приём и та
     // же карта expandedTaskIds, что у невыполненных задач (см. раздел
@@ -14916,8 +15220,14 @@
     var rowsHtml = shown.map(function(t){
       var label = t.c.text ? escapeHtml(t.c.text) : "Без названия";
       var isExpanded = !!expandedTaskIds[t.id];
+      // isGroup: та же подпись "Создал: … · Выполнил: …", что и на активной
+      // вкладке (п. 2.4 ТЗ — подпись нужна у КАЖДОЙ общей задачи, архив не
+      // исключение); у личного архива createdBy нет вовсе, buildTaskJointSignatureHtml
+      // сама вернёт "" — отдельно проверять isGroup здесь не нужно.
+      var archiveJointSignatureHtml = buildTaskJointSignatureHtml(t.c);
       return '<div class="task-row" data-id="' + t.id + '">' +
         '<div class="task-body task-archive-body" data-id="' + t.id + '">' +
+          archiveJointSignatureHtml +
           '<span class="task-text-view task-archive-text' + (isExpanded ? '' : ' task-text-clamped') + '">' + label + '</span>' +
           '<span class="task-actions">' +
             '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
@@ -14927,9 +15237,15 @@
         '</div>' +
       '</div>';
     }).join("");
+    // Заголовок — только у группового экрана: у личного архива своя
+    // постоянная кнопка-язычок уже говорит, что это архив (см. пояснение
+    // у renderTaskArchiveTab выше), а у "jointArchive" такого язычка нет —
+    // тот же приём заголовка, что у renderSettingsTabVersions.
+    var titleHtml = isGroup ? '<div class="year-grid-tab-title" style="margin-bottom:12px;">Архив общих задач</div>' : '';
     container.innerHTML =
+      titleHtml +
       '<div class="task-list task-grid-list">' + rowsHtml + '</div>' +
-      (shown.length === 0 ? '<div class="task-empty">Архив пуст.</div>' : '');
+      (shown.length === 0 ? '<div class="task-empty">' + (isGroup ? 'Архив общих задач пуст.' : 'Архив пуст.') + '</div>' : '');
     container.scrollTop = preservedScrollTop;
     Array.prototype.forEach.call(container.querySelectorAll(".task-archive-body"), function(body){
       var id = body.getAttribute("data-id");
@@ -14951,15 +15267,15 @@
     Array.prototype.forEach.call(container.querySelectorAll(".task-restore-btn"), function(btn){
       btn.addEventListener("click", function(){
         var id = btn.getAttribute("data-id");
-        restoreTaskFromArchive(id);
-        renderTaskArchiveTab();
+        if(isGroup) restoreGroupTaskFromArchive(id); else restoreTaskFromArchive(id);
+        renderTaskArchiveTab(isGroup);
       });
     });
     Array.prototype.forEach.call(container.querySelectorAll(".task-delete-btn"), function(btn){
       btn.addEventListener("click", function(){
         var id = btn.getAttribute("data-id");
-        deleteTaskPermanently(id);
-        renderTaskArchiveTab();
+        if(isGroup) deleteGroupArchivedTaskPermanently(id); else deleteTaskPermanently(id);
+        renderTaskArchiveTab(isGroup);
       });
     });
   }
