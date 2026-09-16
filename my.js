@@ -1110,7 +1110,21 @@
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function(){
       saveTimer = null;
-      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+      // ⚠️ ДИАГНОСТИКА (16.09, TASK_FIX_TASK_IMAGE_LOSS.md, продолжение —
+      // картинка/задача пропадает у ЛИЧНЫХ задач, но не у общих; общие не
+      // проходят через localStorage.setItem(STORAGE_KEY,...) вообще, а
+      // личные — только через него, поэтому ошибка записи (например,
+      // QuotaExceededError, если state уже большой) — первый кандидат. Раньше
+      // catch(e){} молча глотал её — теперь логируем факт и причину падения,
+      // чтобы это стало видно в логе, а не оставалось невидимым молчаливым
+      // отказом.
+      try{
+        var json = JSON.stringify(state);
+        localStorage.setItem(STORAGE_KEY, json);
+        if(window.Debug) window.Debug.log("saveLocalState: записано, размер=" + json.length);
+      }catch(e){
+        if(window.Debug) window.Debug.log("saveLocalState: ОШИБКА записи: " + (e && e.message ? e.message : e));
+      }
     }, 300);
   }
 
@@ -1135,7 +1149,17 @@
   function saveLocalStateNow(){
     clearTimeout(saveTimer);
     saveTimer = null;
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+    // ⚠️ ДИАГНОСТИКА (16.09, см. пояснение у saveLocalState выше) — та же
+    // причина: раньше ошибка записи (в т.ч. переполнение квоты) проглатывалась
+    // молча именно здесь, в точке немедленного сохранения текста задачи/
+    // картинки, где потеря особенно чувствительна.
+    try{
+      var json = JSON.stringify(state);
+      localStorage.setItem(STORAGE_KEY, json);
+      if(window.Debug) window.Debug.log("saveLocalStateNow: записано, размер=" + json.length);
+    }catch(e){
+      if(window.Debug) window.Debug.log("saveLocalStateNow: ОШИБКА записи: " + (e && e.message ? e.message : e));
+    }
   }
 
   function chapterKey(bookName, chapterNum){
@@ -1145,8 +1169,17 @@
   function loadState(){
     try{
       var raw = localStorage.getItem(STORAGE_KEY);
+      // ⚠️ ДИАГНОСТИКА (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md) —
+      // если JSON.parse ниже упадёт (повреждённая/оборванная запись —
+      // например, устройство было убито ОС посреди localStorage.setItem),
+      // раньше это молча проваливалось в миграцию/пустой state, то есть
+      // выглядело бы как полная потеря ВСЕХ задач, а не одной — раз
+      // симптом именно точечный (одна задача), этот лог нужен в первую
+      // очередь чтобы ИСКЛЮЧИТЬ этот вариант, а не потому что он вероятен.
       if(raw){ return JSON.parse(raw); }
-    }catch(e){}
+    }catch(e){
+      if(window.Debug) window.Debug.log("loadState: ОШИБКА разбора localStorage (" + (e && e.message ? e.message : e) + ") — состояние будет считаться отсутствующим/потребует миграции");
+    }
 
     // миграция со старой версии — единожды
     try{
@@ -3308,6 +3341,26 @@
     fetchCloudBlob(syncId, {keepalive: urgent}).then(function(cloudData){
       if(window.Debug) window.Debug.log("doCloudSync: получено с облака, задач в облаке=" + Object.keys(cloudData || {}).filter(function(k){ return k.indexOf("task:") === 0; }).length + ", задач локально=" + getAllTasks().length);
       var merged = mergeStates(state, cloudData);
+      // ⚠️ ДИАГНОСТИКА (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md —
+      // картинка/текст личной задачи пропадает именно на устройстве, где
+      // была добавлена, а общие задачи, идущие МИМО этого слияния, не
+      // страдают). Явная проверка "регрессии" ПЕРЕД тем, как merged
+      // заменит state: для каждой личной задачи, у которой ДО слияния был
+      // непустой текст, сверяем текст ПОСЛЕ слияния — если он стал короче
+      // (в частности пропало "![[") или вовсе пуст, это лог с id и обоими
+      // вариантами текста целиком, а не только фактом расхождения — чтобы
+      // при следующем разборе не гадать, откуда взялась более старая
+      // версия (пришла из cloudData, или сам merge её не должен был
+      // выбрать, но выбрал).
+      Object.keys(state || {}).forEach(function(k){
+        if(k.indexOf("task:") !== 0) return;
+        var before = state[k], after = merged[k];
+        var beforeText = before && before.c && before.c.text || "";
+        var afterText = after && after.c && after.c.text || "";
+        if(beforeText && afterText.length < beforeText.length){
+          if(window.Debug) window.Debug.log("doCloudSync: РЕГРЕССИЯ ТЕКСТА у " + k + " — было (t=" + before.t + "): \"" + beforeText + "\", стало (t=" + (after && after.t) + "): \"" + afterText + "\"");
+        }
+      });
       var localChanged = !statesEqual(merged, state);
       var cloudChanged = !statesEqual(merged, cloudData);
       state = merged;
@@ -3448,8 +3501,9 @@
       clearTimeout(saveTimer);
       saveTimer = null;
       try{
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        if(window.Debug) window.Debug.log("flushPendingSyncNow: localStorage сохранён, задач=" + getAllTasks().length);
+        var flushJson = JSON.stringify(state);
+        localStorage.setItem(STORAGE_KEY, flushJson);
+        if(window.Debug) window.Debug.log("flushPendingSyncNow: localStorage сохранён, размер=" + flushJson.length + ", задач=" + getAllTasks().length);
       }catch(e){
         if(window.Debug) window.Debug.log("flushPendingSyncNow: ошибка localStorage.setItem: " + (e && e.message ? e.message : e));
       }
@@ -5595,7 +5649,14 @@
     // картинки в задачах).
     var taskIdForImmediateSave = editable.getAttribute("data-task-id");
     if(taskIdForImmediateSave){
-      setTaskText(taskIdForImmediateSave, getEditableNoteText(editable).trim());
+      var immediateText = getEditableNoteText(editable).trim();
+      // ⚠️ ДИАГНОСТИКА (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md) —
+      // фиксируем, что именно ушло в setTaskText сразу после вставки
+      // картинки: id задачи, длина текста и реально ли в нём есть "![[",
+      // чтобы при следующем разборе лога было видно, действительно ли этот
+      // вызов произошёл и с каким текстом, а не гадать по косвенным признакам.
+      if(window.Debug) window.Debug.log("insertTextIntoTaskEditable: setTaskText(" + taskIdForImmediateSave + "), длина=" + immediateText.length + ", есть картинка=" + (immediateText.indexOf("![[") !== -1));
+      setTaskText(taskIdForImmediateSave, immediateText);
     }
   }
 
@@ -13723,7 +13784,17 @@
       var existing = state["task:" + id];
       data.createdAt = existing ? existing.t : Date.now();
     }
-    state["task:" + id] = {c: data, t: Date.now()};
+    var savedAt = Date.now();
+    state["task:" + id] = {c: data, t: savedAt};
+    // ⚠️ ДИАГНОСТИКА (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md) —
+    // единая точка сохранения текста/данных задачи: фиксируем id, t и
+    // длину текста ПРЯМО ПЕРЕД записью в localStorage — если после
+    // перезагрузки в логе (после reload) окажется другой t/текст для того
+    // же id, значит проблема НЕ в этой точке (она отработала верно), а в
+    // том, что случилось дальше (localStorage.setItem не удался — см. лог
+    // saveLocalStateNow — либо облачный merge при следующей загрузке
+    // страницы переписал это значение чем-то более старым).
+    if(window.Debug) window.Debug.log("saveTaskData(" + id + "): t=" + savedAt + ", длина текста=" + (data.text ? data.text.length : 0) + ", есть картинка=" + (data.text && data.text.indexOf("![[") !== -1));
     saveLocalStateNow();
     scheduleCloudPush();
   }
