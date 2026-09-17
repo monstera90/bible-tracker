@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 18.7 (17.09, шестой проход — регрессия исправлена)
+   Версия: 18.4 (17.09, третий проход)
    =========================================================================== */
 
 (function(){
@@ -1439,139 +1439,14 @@
   // запасной путь: тот же старый localStorage.setItem(NOTES_STORAGE_KEY),
   // что и раньше (лучше маленький шанс переполнить общую квоту, чем
   // потерять заметки совсем на устройствах без IndexedDB).
-  // ⚠️ ДОБАВЛЕНО (17.09, пятый проход, TASK_FIX_TASK_IMAGE_LOSS.md).
-  // removeItem+повтор (18.5) не спас: после чистого старта (STORAGE_KEY
-  // пуст, "записано (основное), размер=46") первая же запись ПОСЛЕ
-  // подмешивания 406 задач из облака падает по квоте — ДАЖЕ после
-  // removeItem+повтора. Значит проблема уже не в старом раздутом мусоре
-  // конкретно в STORAGE_KEY (тот теперь чист с самого начала), а либо (а)
-  // смёрженный main сам по себе больше, чем реально доступно места в
-  // квоте origin'а на этом устройстве прямо сейчас, либо (б) место жрёт
-  // что-то ДРУГОЕ — localStorage делит квоту на весь origin, а ключей
-  // там десятки (SUBTITLE_EXTRACT_TEXT_KEY — кэш извлечённых субтитров,
-  // groupTasksCacheKey/groupArchiveCacheKey — кэш общих задач/архива на
-  // группу, PROJECT_PICKER_SCROLL_MAP_KEY и т.п.) — любой из них мог
-  // раздуться независимо от всей этой истории с notes/main. Гадать
-  // дальше вслепую бессмысленно — эта функция считает РЕАЛЬНЫЙ размер
-  // ВСЕХ ключей localStorage (а не только STORAGE_KEY/split.main, как
-  // раньше делала "Разбор размера state") и показывает топ-10 по размеру,
-  // чтобы в следующем логе было видно, что именно съедает квоту.
-  function logLocalStorageFullUsage(label){
-    if(!(window.Debug && window.Debug.isEnabled && window.Debug.isEnabled())) return;
-    try{
-      var entries = [];
-      var total = 0;
-      for(var i=0; i<localStorage.length; i++){
-        var k = localStorage.key(i);
-        var v = "";
-        try{ v = localStorage.getItem(k) || ""; }catch(e){}
-        var len = (k ? k.length : 0) + v.length;
-        total += len;
-        entries.push({k:k, len:len});
-      }
-      entries.sort(function(a,b){ return b.len - a.len; });
-      window.Debug.log(label + ": ВСЕ ключи localStorage (весь origin, не только " + STORAGE_KEY + "), всего=" + total + " символов, ключей=" + entries.length);
-      entries.slice(0, 10).forEach(function(e){
-        window.Debug.log("  localStorage[\"" + e.k + "\"] — " + e.len + " символов");
-      });
-    }catch(e){
-      if(window.Debug) window.Debug.log(label + ": ошибка разбора localStorage целиком — " + (e && e.message ? e.message : e));
-    }
-  }
-
-  // ⚠️ ДОБАВЛЕНО (17.09, шестой проход, TASK_FIX_TASK_IMAGE_LOSS.md).
-  // Лог пятого прохода показал: провальная попытка записи весила
-  // mainJson.length=25 075 546 символов — то есть ~25 МЛН символов, а не
-  // разумные для "main" 0.2-0.6 МБ. Это НЕ старый мусор (removeItem уже
-  // отработал, STORAGE_KEY стартует пустым) — что-то внутри самого
-  // split.main (не notes/notesMeta, те уже отдельно) раздуто на два
-  // порядка больше ожидаемого. Разбор по той же схеме, что и "Разбор
-  // размера state" при старте (группировка по префиксу до ":"), но
-  // конкретно для split.main в момент провала записи — чтобы увидеть,
-  // какая именно группа ключей виновата, а не гадать дальше.
-  function logSplitMainBreakdown(label, mainObj){
-    if(!(window.Debug && window.Debug.isEnabled && window.Debug.isEnabled())) return;
-    try{
-      var sizeByGroup = {};
-      var groupHasColon = {};
-      Object.keys(mainObj).forEach(function(k){
-        var hasColon = k.indexOf(":") !== -1;
-        var group = hasColon ? k.slice(0, k.indexOf(":")) : k;
-        if(hasColon) groupHasColon[group] = true;
-        var sz = 0;
-        try{ sz = JSON.stringify(mainObj[k]).length; }catch(e){}
-        sizeByGroup[group] = (sizeByGroup[group] || 0) + sz;
-      });
-      var sortedGroups = Object.keys(sizeByGroup).sort(function(a,b){ return sizeByGroup[b] - sizeByGroup[a]; });
-      window.Debug.log(label + ": разбор split.main по группам (ключей=" + Object.keys(mainObj).length + ", групп=" + sortedGroups.length + ")");
-      sortedGroups.slice(0, 10).forEach(function(g){
-        var label2 = groupHasColon[g] ? ("\"" + g + ":*\"") : ("\"" + g + "\" (один ключ, без двоеточия)");
-        window.Debug.log("  split.main[" + label2 + "] — " + sizeByGroup[g] + " символов");
-      });
-    }catch(e){
-      if(window.Debug) window.Debug.log(label + ": ошибка разбора split.main — " + (e && e.message ? e.message : e));
-    }
-  }
-
   function writeStateToLocalStorage(label){
     var split = splitStateForLocalStorage(state);
-    var mainJson = "";
     try{
-      mainJson = JSON.stringify(split.main);
+      var mainJson = JSON.stringify(split.main);
       localStorage.setItem(STORAGE_KEY, mainJson);
       if(window.Debug) window.Debug.log(label + ": записано (основное), размер=" + mainJson.length);
     }catch(e){
-      // ⚠️ ДОБАВЛЕНО (17.09, четвёртый проход, TASK_FIX_TASK_IMAGE_LOSS.md).
-      // Лог показал: на устройстве пользователя `setItem(STORAGE_KEY, ...)`
-      // падает с QuotaExceededError КАЖДЫЙ раз, даже когда split.main сам по
-      // себе крошечный (~0.2-0.6 МБ) — потому что в STORAGE_KEY на диске всё
-      // ещё лежит старое раздутое значение (со времён, когда notes писались
-      // туда же одним куском, до появления splitStateForLocalStorage) и НИ
-      // РАЗУ не было успешно перезаписано. Похоже, конкретно этот браузер/
-      // WebView при setItem поверх уже существующего раздутого ключа не
-      // учитывает корректно, что старое значение освобождается при замене —
-      // требует места под старое+новое одновременно и падает, даже если
-      // итоговое значение меньше.
-      //
-      // ⚠️ ИСПРАВЛЕНО (17.09, шестой проход) — КРИТИЧНАЯ РЕГРЕССИЯ от версии
-      // выше: removeItem выполнялся БЕЗУСЛОВНО перед повтором. Когда новое
-      // значение само по себе огромное (лог: 25 075 546 символов — то есть
-      // проблема НЕ "старый мусор мешает записать маленькое", а "само новое
-      // значение раздуто на два порядка"), повтор после removeItem тоже
-      // гарантированно падает — но removeItem УЖЕ стёр единственную рабочую
-      // (пусть и старую) копию main на диске. В результате КАЖДАЯ загрузка
-      // страницы стартовала с пустого STORAGE_KEY — отсюда и жалоба
-      // пользователя: свёрнутость прочитанных книг, состояния окон и даже
-      // обычные задачи без картинок перестали переживать обновление —
-      // раньше они хотя бы были видны (пусть не всегда свежие), теперь
-      // исчезали КАЖДЫЙ раз. Фикс: removeItem+повтор выполняется ТОЛЬКО
-      // если новое значение само по себе не заведомо огромное (порог с
-      // большим запасом выше практической квоты localStorage) — то есть
-      // только тогда, когда есть реальный шанс, что дело было в старом
-      // мусоре, а не в этом. Если mainJson сам по себе за пределами
-      // разумного — removeItem НЕ трогаем (сохраняем то, что было на диске,
-      // не делаем хуже) и вместо повтора разбираем, что именно раздуло
-      // split.main, чтобы искать причину прицельно.
-      if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное — задачи/цели/настройки), размер попытки=" + mainJson.length + ": " + (e && e.message ? e.message : e));
-      var MAIN_SANE_RETRY_LIMIT = 4500000; // символов — с большим запасом выше практической квоты localStorage (~5 МБ = ~5 млн симв.); если main больше этого, removeItem заведомо не поможет и только уничтожит рабочую копию на диске
-      if(mainJson.length > MAIN_SANE_RETRY_LIMIT){
-        if(window.Debug) window.Debug.log(label + ": mainJson заведомо огромный (" + mainJson.length + " симв., лимит для retry=" + MAIN_SANE_RETRY_LIMIT + ") — removeItem+повтор НЕ выполняется, старое значение на диске СОХРАНЕНО как есть, ищу причину раздутия");
-        logSplitMainBreakdown(label, split.main);
-      }else{
-        if(window.Debug) window.Debug.log(label + ": пробую removeItem+повтор");
-        try{
-          localStorage.removeItem(STORAGE_KEY);
-          localStorage.setItem(STORAGE_KEY, mainJson);
-          if(window.Debug) window.Debug.log(label + ": записано (основное, после removeItem+повтора), размер=" + mainJson.length);
-        }catch(e2){
-          if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное) даже после removeItem+повтора, размер попытки=" + mainJson.length + ": " + (e2 && e2.message ? e2.message : e2));
-          // 17.09, пятый проход — см. пояснение у logLocalStorageFullUsage
-          // выше: раз removeItem+повтор своего же ключа не спас, размер
-          // самого main уже недостаточное объяснение — нужен разбор ВСЕХ
-          // ключей origin'а, не только STORAGE_KEY.
-          logLocalStorageFullUsage(label);
-        }
-      }
+      if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное — задачи/цели/настройки): " + (e && e.message ? e.message : e));
     }
     notesIdbWriteAll(split.notes).then(function(){
       if(window.Debug) window.Debug.log(label + ": записано (заметки, IndexedDB), ключей=" + Object.keys(split.notes).length);
