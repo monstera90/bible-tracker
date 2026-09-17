@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 19.0 (17.09, четвёртый проход)
+   Версия: 19.1 (17.09, пятый проход)
    =========================================================================== */
 
 (function(){
@@ -1526,21 +1526,46 @@
       if(window.Debug) window.Debug.log(label + ": записано (основное), размер=" + mainJson.length);
     }catch(e){
       if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное — задачи/цели/настройки), размер попытки=" + (mainJson ? mainJson.length : "?") + ": " + (e && e.message ? e.message : e));
-      // Первая попытка провалилась. Если новое значение само по себе не
-      // раздуто — считаем, что мешает старое значение, уже лежащее на
-      // диске (см. пояснение у MAIN_SANE_RETRY_LIMIT выше), и пробуем
-      // расчистить место под него одним removeItem+повтором. Если же само
-      // mainJson огромно — removeItem НЕ делаем (нельзя стирать
-      // единственную рабочую копию перед заведомо провальным повтором),
-      // вместо этого сразу разбираем, что именно его раздуло.
+      // Первая попытка провалилась. ⚠️ РАНЬШЕ здесь просто делался
+      // removeItem(STORAGE_KEY) и повтор — это уже пробовали (в другой
+      // сессии) и ОТКАТИЛИ: если повтор тоже проваливался (например,
+      // потому что смёрженное из облака состояние само огромное), диск
+      // оставался ПУСТЫМ — приложение стартовало так, будто пользователь
+      // никогда ничего не читал и не отмечал. removeItem без резервной
+      // копии — это риск полностью стереть данные ради попытки чинить
+      // квоту, что хуже, чем оставить их устаревшими на диске.
+      //
+      // Новая схема — без такого риска: перед removeItem запоминаем то,
+      // что СЕЙЧАС реально лежит на диске (oldRaw). Если новое значение
+      // само по себе не раздуто, пробуем removeItem+повтор. Если повтор
+      // тоже не удался — не оставляем диск пустым, а записываем oldRaw
+      // ОБРАТНО (это ровно то же значение, что уже успешно лежало на
+      // диске до этой попытки, — раз оно там было, оно и поместится
+      // снова). Итог в худшем случае: новые изменения в этот раз не
+      // сохранились (как и раньше, до всего фикса), но старые данные
+      // пользователя НЕ теряются — то есть новая схема не может быть
+      // хуже старого поведения, только лучше или так же.
       if(mainJson && mainJson.length <= MAIN_SANE_RETRY_LIMIT){
-        try{
-          localStorage.removeItem(STORAGE_KEY);
-          localStorage.setItem(STORAGE_KEY, mainJson);
-          if(window.Debug) window.Debug.log(label + ": записано (основное, после removeItem+повтора), размер=" + mainJson.length);
-        }catch(e2){
-          if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное) даже после removeItem+повтора: " + (e2 && e2.message ? e2.message : e2));
-          logLocalStorageFullUsage(label);
+        var oldRaw = null;
+        var hadOldRaw = false;
+        try{ oldRaw = localStorage.getItem(STORAGE_KEY); hadOldRaw = true; }catch(eRead){
+          if(window.Debug) window.Debug.log(label + ": не удалось прочитать текущее значение перед removeItem — retry пропущен, чтобы не рисковать: " + (eRead && eRead.message ? eRead.message : eRead));
+        }
+        if(hadOldRaw){
+          try{
+            localStorage.removeItem(STORAGE_KEY);
+            localStorage.setItem(STORAGE_KEY, mainJson);
+            if(window.Debug) window.Debug.log(label + ": записано (основное, после removeItem+повтора), размер=" + mainJson.length);
+          }catch(e2){
+            if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное) даже после removeItem+повтора — восстанавливаю то, что было на диске, чтобы не остаться с пустыми данными: " + (e2 && e2.message ? e2.message : e2));
+            try{
+              if(oldRaw !== null) localStorage.setItem(STORAGE_KEY, oldRaw);
+              if(window.Debug) window.Debug.log(label + ": старое значение восстановлено на диске, новые изменения из этой попытки НЕ сохранены");
+            }catch(e3){
+              if(window.Debug) window.Debug.log(label + ": КРИТИЧНО — не удалось восстановить даже старое значение: " + (e3 && e3.message ? e3.message : e3));
+            }
+            logLocalStorageFullUsage(label);
+          }
         }
       }else{
         logSplitMainBreakdown(label, split.main);
