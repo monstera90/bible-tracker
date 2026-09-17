@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 18.4 (17.09, третий проход)
+   Версия: 19.0 (17.09, четвёртый проход)
    =========================================================================== */
 
 (function(){
@@ -1411,6 +1411,85 @@
   // (или плоские "notes:<id>", если они когда-нибудь появятся) окажется
   // на месте как ни в чём не бывало.
   var NOTES_BULK_KEYS = {"notes": true, "notesMeta": true};
+
+  // ⚠️ ДОБАВЛЕНО (TASK_FIX_TASK_IMAGE_LOSS.md, продолжение — теперь не
+  // пропадают картинки, а вообще ничего не сохраняется: пользователь
+  // скрывает прочитанные книги, обновляет страницу — они снова видны).
+  // Причина та же, что и раньше: setItem(STORAGE_KEY, mainJson) вызывается
+  // ПОВЕРХ уже лежащего на диске старого, более крупного значения. На
+  // некоторых устройствах/WebView проверка квоты в этот момент не
+  // учитывает, что старое значение освобождается при замене, — ведёт себя
+  // так, будто нужно место под старое+новое одновременно, и падает
+  // QuotaExceededError, даже когда mainJson сам по себе маленький. Раз
+  // запись ни разу не проходит, старое раздутое значение НИКОГДА не
+  // перезаписывается — бага навсегда.
+  //
+  // Фикс: если первая попытка провалилась и НОВОЕ значение само по себе
+  // разумного размера (ниже MAIN_SANE_RETRY_LIMIT) — считаем, что дело
+  // именно в старом мусоре на диске: делаем localStorage.removeItem и
+  // повторяем setItem тем же mainJson. Лимит — специально с большим
+  // запасом от практической квоты, чтобы НЕ удалять старое значение перед
+  // заведомо провальным повтором в противоположном случае (когда раздуто
+  // само новое mainJson) — иначе можно потерять единственную рабочую копию
+  // данных вообще без всякой пользы (это была реальная регрессия в одной
+  // из прошлых версий этого фикса).
+  var MAIN_SANE_RETRY_LIMIT = 4500000;
+
+  // Разбивка объекта по группам ключей (общий префикс до ":", либо весь
+  // ключ, если двоеточия нет) с суммарным размером JSON.stringify каждой
+  // группы, топ-10 по размеру. Тот же приём, что у диагностики "Разбор
+  // размера state" при старте (см. var state = loadState() выше) — вынесен
+  // отдельной функцией, чтобы им можно было воспользоваться и здесь, когда
+  // отказала запись именно split.main.
+  function logSplitMainBreakdown(label, mainObj){
+    if(!window.Debug) return;
+    try{
+      var sizeByGroup = {};
+      var groupHasColon = {};
+      Object.keys(mainObj).forEach(function(k){
+        var hasColon = k.indexOf(":") !== -1;
+        var group = hasColon ? k.slice(0, k.indexOf(":")) : k;
+        if(hasColon) groupHasColon[group] = true;
+        var sz = 0;
+        try{ sz = JSON.stringify(mainObj[k]).length; }catch(e){}
+        sizeByGroup[group] = (sizeByGroup[group] || 0) + sz;
+      });
+      var sortedGroups = Object.keys(sizeByGroup).sort(function(a,b){ return sizeByGroup[b] - sizeByGroup[a]; });
+      window.Debug.log(label + ": разбор split.main по группам, групп=" + sortedGroups.length);
+      sortedGroups.slice(0, 10).forEach(function(g){
+        var lbl = groupHasColon[g] ? ("\"" + g + ":*\"") : ("\"" + g + "\" (один ключ, без двоеточия)");
+        window.Debug.log("  main[" + lbl + "] — " + sizeByGroup[g] + " символов");
+      });
+    }catch(e){
+      window.Debug.log(label + ": разбор split.main — ошибка: " + (e && e.message ? e.message : e));
+    }
+  }
+
+  // Считает реальный размер КАЖДОГО ключа localStorage на этом origin (не
+  // только STORAGE_KEY) и логирует топ-10 по размеру — на случай, если
+  // квоту жрёт не split.main, а что-то постороннее (SUBTITLE_EXTRACT_TEXT_KEY,
+  // groupTasksCacheKey и т.п.).
+  function logLocalStorageFullUsage(label){
+    if(!window.Debug) return;
+    try{
+      var sizes = [];
+      var total = 0;
+      for(var i = 0; i < localStorage.length; i++){
+        var k = localStorage.key(i);
+        var v = localStorage.getItem(k) || "";
+        sizes.push({key: k, size: v.length});
+        total += v.length;
+      }
+      sizes.sort(function(a,b){ return b.size - a.size; });
+      window.Debug.log(label + ": ВСЕ ключи localStorage (весь origin), всего=" + total + " символов, ключей=" + sizes.length);
+      sizes.slice(0, 10).forEach(function(s){
+        window.Debug.log("  localStorage[\"" + s.key + "\"] — " + s.size + " символов");
+      });
+    }catch(e){
+      window.Debug.log(label + ": разбор localStorage — ошибка: " + (e && e.message ? e.message : e));
+    }
+  }
+
   function splitStateForLocalStorage(stateObj){
     var main = {};
     var notes = {};
@@ -1446,7 +1525,26 @@
       localStorage.setItem(STORAGE_KEY, mainJson);
       if(window.Debug) window.Debug.log(label + ": записано (основное), размер=" + mainJson.length);
     }catch(e){
-      if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное — задачи/цели/настройки): " + (e && e.message ? e.message : e));
+      if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное — задачи/цели/настройки), размер попытки=" + (mainJson ? mainJson.length : "?") + ": " + (e && e.message ? e.message : e));
+      // Первая попытка провалилась. Если новое значение само по себе не
+      // раздуто — считаем, что мешает старое значение, уже лежащее на
+      // диске (см. пояснение у MAIN_SANE_RETRY_LIMIT выше), и пробуем
+      // расчистить место под него одним removeItem+повтором. Если же само
+      // mainJson огромно — removeItem НЕ делаем (нельзя стирать
+      // единственную рабочую копию перед заведомо провальным повтором),
+      // вместо этого сразу разбираем, что именно его раздуло.
+      if(mainJson && mainJson.length <= MAIN_SANE_RETRY_LIMIT){
+        try{
+          localStorage.removeItem(STORAGE_KEY);
+          localStorage.setItem(STORAGE_KEY, mainJson);
+          if(window.Debug) window.Debug.log(label + ": записано (основное, после removeItem+повтора), размер=" + mainJson.length);
+        }catch(e2){
+          if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное) даже после removeItem+повтора: " + (e2 && e2.message ? e2.message : e2));
+          logLocalStorageFullUsage(label);
+        }
+      }else{
+        logSplitMainBreakdown(label, split.main);
+      }
     }
     notesIdbWriteAll(split.notes).then(function(){
       if(window.Debug) window.Debug.log(label + ": записано (заметки, IndexedDB), ключей=" + Object.keys(split.notes).length);
