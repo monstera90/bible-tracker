@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 18.5 (17.09, четвёртый проход)
+   Версия: 18.6 (17.09, пятый проход — диагностика)
    =========================================================================== */
 
 (function(){
@@ -1439,6 +1439,46 @@
   // запасной путь: тот же старый localStorage.setItem(NOTES_STORAGE_KEY),
   // что и раньше (лучше маленький шанс переполнить общую квоту, чем
   // потерять заметки совсем на устройствах без IndexedDB).
+  // ⚠️ ДОБАВЛЕНО (17.09, пятый проход, TASK_FIX_TASK_IMAGE_LOSS.md).
+  // removeItem+повтор (18.5) не спас: после чистого старта (STORAGE_KEY
+  // пуст, "записано (основное), размер=46") первая же запись ПОСЛЕ
+  // подмешивания 406 задач из облака падает по квоте — ДАЖЕ после
+  // removeItem+повтора. Значит проблема уже не в старом раздутом мусоре
+  // конкретно в STORAGE_KEY (тот теперь чист с самого начала), а либо (а)
+  // смёрженный main сам по себе больше, чем реально доступно места в
+  // квоте origin'а на этом устройстве прямо сейчас, либо (б) место жрёт
+  // что-то ДРУГОЕ — localStorage делит квоту на весь origin, а ключей
+  // там десятки (SUBTITLE_EXTRACT_TEXT_KEY — кэш извлечённых субтитров,
+  // groupTasksCacheKey/groupArchiveCacheKey — кэш общих задач/архива на
+  // группу, PROJECT_PICKER_SCROLL_MAP_KEY и т.п.) — любой из них мог
+  // раздуться независимо от всей этой истории с notes/main. Гадать
+  // дальше вслепую бессмысленно — эта функция считает РЕАЛЬНЫЙ размер
+  // ВСЕХ ключей localStorage (а не только STORAGE_KEY/split.main, как
+  // раньше делала "Разбор размера state") и показывает топ-10 по размеру,
+  // чтобы в следующем логе было видно, что именно съедает квоту.
+  function logLocalStorageFullUsage(label){
+    if(!(window.Debug && window.Debug.isEnabled && window.Debug.isEnabled())) return;
+    try{
+      var entries = [];
+      var total = 0;
+      for(var i=0; i<localStorage.length; i++){
+        var k = localStorage.key(i);
+        var v = "";
+        try{ v = localStorage.getItem(k) || ""; }catch(e){}
+        var len = (k ? k.length : 0) + v.length;
+        total += len;
+        entries.push({k:k, len:len});
+      }
+      entries.sort(function(a,b){ return b.len - a.len; });
+      window.Debug.log(label + ": ВСЕ ключи localStorage (весь origin, не только " + STORAGE_KEY + "), всего=" + total + " символов, ключей=" + entries.length);
+      entries.slice(0, 10).forEach(function(e){
+        window.Debug.log("  localStorage[\"" + e.k + "\"] — " + e.len + " символов");
+      });
+    }catch(e){
+      if(window.Debug) window.Debug.log(label + ": ошибка разбора localStorage целиком — " + (e && e.message ? e.message : e));
+    }
+  }
+
   function writeStateToLocalStorage(label){
     var split = splitStateForLocalStorage(state);
     var mainJson = "";
@@ -1466,13 +1506,18 @@
       // логируется отдельно, и на этот раз диск гарантированно чист (не
       // должно быть хуже, чем раньше, когда там навсегда стоял раздутый
       // блок): следующая попытка сохранения уже будет писать в пустое место.
-      if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное — задачи/цели/настройки): " + (e && e.message ? e.message : e) + " — пробую removeItem+повтор");
+      if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное — задачи/цели/настройки), размер попытки=" + mainJson.length + ": " + (e && e.message ? e.message : e) + " — пробую removeItem+повтор");
       try{
         localStorage.removeItem(STORAGE_KEY);
         localStorage.setItem(STORAGE_KEY, mainJson);
         if(window.Debug) window.Debug.log(label + ": записано (основное, после removeItem+повтора), размер=" + mainJson.length);
       }catch(e2){
-        if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное) даже после removeItem+повтора: " + (e2 && e2.message ? e2.message : e2));
+        if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное) даже после removeItem+повтора, размер попытки=" + mainJson.length + ": " + (e2 && e2.message ? e2.message : e2));
+        // 17.09, пятый проход — см. пояснение у logLocalStorageFullUsage
+        // выше: раз removeItem+повтор своего же ключа не спас, размер
+        // самого main уже недостаточное объяснение — нужен разбор ВСЕХ
+        // ключей origin'а, не только STORAGE_KEY.
+        logLocalStorageFullUsage(label);
       }
     }
     notesIdbWriteAll(split.notes).then(function(){
