@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 18.4 (17.09, третий проход)
+   Версия: 18.5 (17.09, четвёртый проход)
    =========================================================================== */
 
 (function(){
@@ -1441,12 +1441,39 @@
   // потерять заметки совсем на устройствах без IndexedDB).
   function writeStateToLocalStorage(label){
     var split = splitStateForLocalStorage(state);
+    var mainJson = "";
     try{
-      var mainJson = JSON.stringify(split.main);
+      mainJson = JSON.stringify(split.main);
       localStorage.setItem(STORAGE_KEY, mainJson);
       if(window.Debug) window.Debug.log(label + ": записано (основное), размер=" + mainJson.length);
     }catch(e){
-      if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное — задачи/цели/настройки): " + (e && e.message ? e.message : e));
+      // ⚠️ ДОБАВЛЕНО (17.09, четвёртый проход, TASK_FIX_TASK_IMAGE_LOSS.md).
+      // Лог показал: на устройстве пользователя `setItem(STORAGE_KEY, ...)`
+      // падает с QuotaExceededError КАЖДЫЙ раз, даже когда split.main сам по
+      // себе крошечный (~0.2-0.6 МБ) — потому что в STORAGE_KEY на диске всё
+      // ещё лежит старое раздутое значение (со времён, когда notes писались
+      // туда же одним куском, до появления splitStateForLocalStorage) и НИ
+      // РАЗУ не было успешно перезаписано. Похоже, конкретно этот браузер/
+      // WebView при setItem поверх уже существующего раздутого ключа не
+      // учитывает корректно, что старое значение освобождается при замене —
+      // требует места под старое+новое одновременно и падает, даже если
+      // итоговое значение меньше. Раньше здесь только логировалась ошибка и
+      // запись молча не повторялась — старый раздутый блок так и оставался
+      // навсегда, вместе со всеми новыми задачами/картинками, которые в него
+      // ни разу не попадали. Теперь: если первая попытка упала — явно
+      // удаляем старое значение (localStorage.removeItem) и пробуем записать
+      // маленькое новое ещё раз. Если и это не поможет — вторая ошибка
+      // логируется отдельно, и на этот раз диск гарантированно чист (не
+      // должно быть хуже, чем раньше, когда там навсегда стоял раздутый
+      // блок): следующая попытка сохранения уже будет писать в пустое место.
+      if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное — задачи/цели/настройки): " + (e && e.message ? e.message : e) + " — пробую removeItem+повтор");
+      try{
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.setItem(STORAGE_KEY, mainJson);
+        if(window.Debug) window.Debug.log(label + ": записано (основное, после removeItem+повтора), размер=" + mainJson.length);
+      }catch(e2){
+        if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное) даже после removeItem+повтора: " + (e2 && e2.message ? e2.message : e2));
+      }
     }
     notesIdbWriteAll(split.notes).then(function(){
       if(window.Debug) window.Debug.log(label + ": записано (заметки, IndexedDB), ключей=" + Object.keys(split.notes).length);
