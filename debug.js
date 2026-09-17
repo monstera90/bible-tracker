@@ -1,5 +1,5 @@
 // debug.js — общее место для отладочного кода "Графика чтения Библии".
-// Версия: 1.0 (16.09)
+// Версия: 1.1 (17.09)
 //
 // НАЗНАЧЕНИЕ: если задача не решается с первого раза и нужна диагностика
 // прямо на устройстве пользователя (на мобильном нет консоли), временный
@@ -61,6 +61,109 @@
   var logLines = []; // полный текст лога, для кнопки "скопировать" ниже —
   // на фото/скриншоте панели часть строк перекрывается другими элементами
   // экрана и мелкий шрифт плохо распознаётся, точный текст надёжнее.
+
+  // ⚠️ ДОБАВЛЕНО (17.09, TASK_FIX_TASK_IMAGE_LOSS.md, продолжение): панель
+  // выше живёт только в памяти вкладки — при любом обновлении страницы
+  // (а баг именно в том, что происходит МЕЖДУ обновлениями, иногда с
+  // задержкой до минуты) весь лог этого промежутка терялся ещё до того,
+  // как его можно было прочитать. Здесь — отдельный, маленький и НЕ
+  // связанный с основным state журнал: каждая строка лога (пока включена
+  // галочка) дублируется в свой ключ localStorage, обрезанный по числу
+  // строк. При следующей загрузке страницы, если галочка всё ещё
+  // включена, этот журнал ПРОШЛОЙ сессии показывается первым в панели (с
+  // явным разделителем), а сам ключ обнуляется под текущую сессию — то
+  // есть на каждой перезагрузке видно ровно то, что произошло МЕЖДУ ней и
+  // предыдущей, без накопления вручную. Пишется в СВОЙ ключ, не в
+  // STORAGE_KEY/NOTES_STORAGE_KEY из my.js — переполнение квоты этим
+  // журналом (try/catch ниже) никак не пересекается с задачами/картинками
+  // и не может их утопить, как это уже было с notes:* (см. my.js).
+  var DEBUG_PERSIST_KEY = "bibleDebugPersistLog_v1";
+  var DEBUG_PERSIST_MAX_LINES = 150;
+  var persistedLines = null; // строки ТЕКУЩЕЙ сессии, накапливаются сюда же, что пишется в localStorage
+  // Пишем в localStorage не на КАЖДУЮ строку лога (детекторы фризов/сети
+  // могут сыпать строками пачками — сама синхронная запись на каждую
+  // добавила бы джиттер и исказила бы то, что эти же детекторы измеряют),
+  // а не чаще раза в PERSIST_WRITE_THROTTLE_MS — но обязательно ДОПИСЫВАЕМ
+  // немедленно перед возможной выгрузкой страницы (см. три слушателя
+  // ниже), чтобы не потерять как раз последние строки перед перезагрузкой
+  // — то, ради чего весь этот журнал и заводился.
+  var PERSIST_WRITE_THROTTLE_MS = 300;
+  var persistWriteTimer = null;
+  var persistWritePending = false;
+
+  function flushPersistedLines() {
+    persistWritePending = false;
+    if (persistedLines === null) return;
+    try {
+      localStorage.setItem(DEBUG_PERSIST_KEY, JSON.stringify(persistedLines));
+    } catch (e) {
+      // Некритично — журнал этой конкретной строки просто не переживёт
+      // следующую перезагрузку, само приложение это ронять не должно.
+    }
+  }
+
+  function loadPersistedLines() {
+    try {
+      var raw = localStorage.getItem(DEBUG_PERSIST_KEY);
+      if (!raw) return [];
+      var arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function persistLine(line) {
+    if (persistedLines === null) persistedLines = [];
+    persistedLines.push(line);
+    if (persistedLines.length > DEBUG_PERSIST_MAX_LINES) {
+      persistedLines = persistedLines.slice(persistedLines.length - DEBUG_PERSIST_MAX_LINES);
+    }
+    if (!persistWritePending) {
+      persistWritePending = true;
+      clearTimeout(persistWriteTimer);
+      persistWriteTimer = setTimeout(flushPersistedLines, PERSIST_WRITE_THROTTLE_MS);
+    }
+  }
+
+  // Подстраховка на выгрузку страницы — те же три события, что my.js уже
+  // использует для своего saveLocalState (см. TASK_FIX_TASK_IMAGE_LOSS.md):
+  // на разных мобильных браузерах надёжно срабатывает не один и тот же из
+  // них, поэтому все три сразу, а не один "самый правильный".
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden" && persistWritePending) flushPersistedLines();
+  });
+  window.addEventListener("pagehide", function () {
+    if (persistWritePending) flushPersistedLines();
+  });
+  window.addEventListener("beforeunload", function () {
+    if (persistWritePending) flushPersistedLines();
+  });
+
+  // Добавляет строку в панель НАПРЯМУЮ (logLines + DOM), БЕЗ повторной
+  // записи в persistLine — иначе строки прошлой сессии переписывались бы
+  // в журнал текущей на каждой загрузке и накапливались бы бесконечно.
+  function appendRawLine(line) {
+    var panel = ensurePanel();
+    logLines.push(line);
+    var p = document.createElement("div");
+    p.textContent = line;
+    panel.appendChild(p);
+    panel.scrollTop = panel.scrollHeight;
+  }
+
+  // Вызывается один раз при старте (см. низ файла) — показывает журнал,
+  // накопленный ДО этой загрузки страницы, явно помеченным блоком поверх
+  // обычного лога текущей сессии, и обнуляет ключ под неё.
+  function showPreviousSessionLog() {
+    var prev = loadPersistedLines();
+    if (!prev.length) return;
+    appendRawLine("═══ ЛОГ ДО ЭТОЙ ЗАГРУЗКИ СТРАНИЦЫ (" + prev.length + " строк) ═══");
+    prev.forEach(function (line) { appendRawLine(line); });
+    appendRawLine("═══ ТЕКУЩАЯ ЗАГРУЗКА ═══");
+    try { localStorage.removeItem(DEBUG_PERSIST_KEY); } catch (e) {}
+    persistedLines = [];
+  }
   function ensurePanel() {
     if (panelEl) return panelEl;
     panelEl = document.createElement("div");
@@ -132,6 +235,11 @@
     if (panelEl && panelEl.parentNode) panelEl.parentNode.removeChild(panelEl);
     panelEl = null;
     logLines = [];
+    // Галочка выключена явно пользователем — журнал прошлой сессии больше
+    // не нужен и не должен неожиданно всплыть, если галочку включат снова
+    // сильно позже, по несвязанному поводу.
+    persistedLines = [];
+    try { localStorage.removeItem(DEBUG_PERSIST_KEY); } catch (e) {}
   }
 
   function safeStringify(data) {
@@ -157,6 +265,7 @@
       label +
       (data !== undefined ? " " + safeStringify(data) : "");
     logLines.push(line);
+    persistLine(line);
     var p = document.createElement("div");
     p.textContent = line;
     panel.appendChild(p);
@@ -169,6 +278,8 @@
   // Очистить видимую панель логов, не выключая режим отладки.
   function clear() {
     logLines = [];
+    persistedLines = [];
+    try { localStorage.removeItem(DEBUG_PERSIST_KEY); } catch (e) {}
     if (panelEl) {
       panelEl.innerHTML = "";
       // кнопку "скопировать" innerHTML="" тоже стирает — пересоздаём панель
@@ -800,6 +911,7 @@
   }
 
   if (isEnabled()) {
+    showPreviousSessionLog();
     startImageLineWatch();
     startTaskScrollWatch();
     startFreezeWatch();
