@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 18.2 (17.09)
+   Версия: 18.4 (17.09, третий проход)
    =========================================================================== */
 
 (function(){
@@ -1309,9 +1309,20 @@
   // единственное, что ограничено квотой localStorage.
   if(window.Debug && window.Debug.isEnabled && window.Debug.isEnabled()){
     try{
+      // 17.09 (второй проход): раньше строка лога ниже ВСЕГДА дописывала
+      // ":*" к имени группы, даже если реальный ключ был одиночным, без
+      // двоеточия (например "notes" целиком, а не серия "notes:<id>") —
+      // это и запутало предыдущий разбор: "state[\"notes:*\"]" выглядело
+      // как явное подтверждение множества плоских ключей "notes:<id>",
+      // хотя на самом деле могло быть (и оказалось) одним-единственным
+      // ключом "notes" без двоеточия. Теперь группа по одиночному ключу
+      // помечается явно — без ":*" и с пометкой "(один ключ)".
       var sizeByGroup = {};
+      var groupHasColon = {};
       Object.keys(state).forEach(function(k){
-        var group = k.indexOf(":") !== -1 ? k.slice(0, k.indexOf(":")) : k;
+        var hasColon = k.indexOf(":") !== -1;
+        var group = hasColon ? k.slice(0, k.indexOf(":")) : k;
+        if(hasColon) groupHasColon[group] = true;
         var sz = 0;
         try{ sz = JSON.stringify(state[k]).length; }catch(e){}
         sizeByGroup[group] = (sizeByGroup[group] || 0) + sz;
@@ -1321,7 +1332,8 @@
       var sortedGroups = Object.keys(sizeByGroup).sort(function(a,b){ return sizeByGroup[b] - sizeByGroup[a]; });
       window.Debug.log("Разбор размера state: всего=" + totalSize + " байт(символов), групп=" + sortedGroups.length);
       sortedGroups.slice(0, 10).forEach(function(g){
-        window.Debug.log("  state[\"" + g + ":*\"] — " + sizeByGroup[g] + " символов");
+        var label = groupHasColon[g] ? ("\"" + g + ":*\"") : ("\"" + g + "\" (один ключ, без двоеточия)");
+        window.Debug.log("  state[" + label + "] — " + sizeByGroup[g] + " символов");
       });
     }catch(e){
       if(window.Debug) window.Debug.log("Разбор размера state: ошибка — " + (e && e.message ? e.message : e));
@@ -1357,11 +1369,53 @@
   // маленькие, специально оставлены в main, чтобы список заметок оставался
   // доступен даже если сам текст заметок не поместился). Форма самого
   // `state` в памяти не меняется — деление только для записи на диск.
+  // ⚠️ ДОБАВЛЕНО (17.09, второй проход — "фикс" версии 18.2 не сработал,
+  // пользователь поймал это в персистентном логе debug.js: "ОШИБКА записи
+  // (основное)... exceeded the quota" на КАЖДОЙ загрузке, притом
+  // "заметки подгружены из IndexedDB, ключей=0" — то есть в notes/IndexedDB
+  // не уезжало вообще ничего, и весь объём заметок так и оставался в
+  // "основном" (main) куске, топя именно его запись).
+  //
+  // Причина: фильтр ниже (`k.indexOf("notes:") === 0`) ловит только ПЛОСКИЕ
+  // ключи вида "notes:<id>" — так его писали 16.09/17.09 в предположении,
+  // что именно так mdeditor.js хранит текст заметок в общем `state`
+  // (см. старые пояснения у NOTES_STORAGE_KEY выше). Но `doCloudSync`
+  // (см. ниже, fetchCloudBlob + mergeStates) читает ВЕСЬ узел
+  // `syncs/<syncId>.json` целиком, а `patchNotesCloud` (используется
+  // mdeditor.js) пишет заметки по путям вида "notes/<id>" — Firebase
+  // трактует слэш в ключе PATCH как вложенный путь, то есть физически
+  // создаёт в этом же узле ДОЧЕРНИЙ объект `notes` (и аналогично
+  // `notesMeta`), а не плоские ключи "notes:<id>". Значит облачный ответ
+  // содержит `cloudData.notes = {<id>: ..., ...}` — ОДИН ключ "notes"
+  // (без двоеточия!) со ВСЕМ облачным объёмом заметок внутри. `mergeStates`
+  // ничего не знает про эту особенность — она просто объединяет ключи
+  // верхнего уровня local/cloud, и раз в локальном `state` плоского ключа
+  // "notes" (без двоеточия) нет, приходит `merged["notes"] = cloudData.notes`
+  // целиком. Фильтр "notes:" (с двоеточием) эту "notes" (без двоеточия)
+  // не ловит — весь объём молча утекает в `main` и топит его запись в
+  // localStorage ровно так же, как топил до всего этого рефакторинга.
+  // Тот факт, что ошибка стала стабильной (было "то есть, то нет" из-за
+  // расчёта в NOTES_STORAGE_KEY выше, стало — на КАЖДОЙ загрузке), это
+  // подтверждает: раньше объём заметок то влезал в общую квоту, то нет,
+  // а теперь эта "notes"-заглушка сидит в main постоянно и без вариантов
+  // топит его одна.
+  //
+  // Фикс: ловим ОБА варианта — и плоские "notes:<id>"/"notesMeta:<id>"
+  // (на случай, если они где-то всё же встречаются), и целиковые ключи
+  // "notes"/"notesMeta" (реальный источник объёма, судя по логу). Целиковый
+  // объект уходит в IndexedDB одним ключом "notes"/"notesMeta" — сами
+  // notesIdbWriteAll/notesIdbGetAll ничего не знают о форме значения и уже
+  // умеют писать/читать по ключу как есть, правок там не требуется:
+  // на следующей загрузке loadNotesAsync подмешает его обратно в `state`
+  // тем же присваиванием `state[k] = notesObj[k]`, и `state.notes`
+  // (или плоские "notes:<id>", если они когда-нибудь появятся) окажется
+  // на месте как ни в чём не бывало.
+  var NOTES_BULK_KEYS = {"notes": true, "notesMeta": true};
   function splitStateForLocalStorage(stateObj){
     var main = {};
     var notes = {};
     Object.keys(stateObj).forEach(function(k){
-      if(k.indexOf("notes:") === 0){
+      if(k.indexOf("notes:") === 0 || k.indexOf("notesMeta:") === 0 || NOTES_BULK_KEYS[k]){
         notes[k] = stateObj[k];
       }else{
         main[k] = stateObj[k];
@@ -3520,6 +3574,75 @@
     return "n" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   }
 
+  // ⚠️ ДОБАВЛЕНО (17.09, третий проход — после загрузки mdeditor.js в чат
+  // подтвердилась ТОЧНАЯ причина бага из TASK_FIX_TASK_IMAGE_LOSS.md,
+  // предположение из второго прохода того же дня). `fetchCloudBlob(syncId)`
+  // ниже читает ВЕСЬ узел `syncs/<syncId>.json` целиком — а в этот же узел,
+  // помимо обычных плоских ключей вида "task:<id>"/"goal:<id>"/... (с
+  // которыми и работает mergeStates), несколько СОВСЕМ ДРУГИХ модулей
+  // пишут свои собственные вложенные поддеревья через тот же
+  // putCloudBlob/patchNotesCloud, просто с ключами-путями через слэш:
+  //  - mdeditor.js (см. pushDirtyNotes/syncNotesFromCloud там же) —
+  //    "notes/<id>" и "notesMeta/<id>" (зашифрованный текст заметок
+  //    «Моего блокнота» + метаданные). У mdeditor.js есть СВОЙ полностью
+  //    независимый цикл синхронизации этих веток (та же пара функций) и
+  //    свой ПОЛНОСТЬЮ ОТДЕЛЬНЫЙ локальный офлайн-кэш в СОБСТВЕННОЙ
+  //    IndexedDB (`mdEditorDB`, ключ `notesCache_v1`, см. persistNotesCache/
+  //    loadNotesCache в mdeditor.js) — не через `state`/`deps.getState()`
+  //    вообще. Более раннее предположение (16-17.09, см. пояснения у
+  //    NOTES_STORAGE_KEY выше), что mdeditor.js читает/пишет
+  //    `state["notes:" + id]`, было ОШИБОЧНЫМ (написано по памяти/
+  //    предположению, без сверки с реальным mdeditor.js) — сверка кода
+  //    подтвердила: такого ключа в `state` нигде не пишет НИКТО, ни
+  //    my.js, ни mdeditor.js.
+  //  - файловый реестр (см. "ХРАНИЛИЩЕ КНИГ books/ (OPFS)" выше) — "files/
+  //    <kind>/<hash>/...", "devices/<id>", "fileRequests/<kind>/<hash>".
+  //  - S89Fill — "s89Template" (см. явный комментарий об этом у
+  //    initS89FillModule выше — "не notes/notesMeta").
+  // `mergeStates` ничего не знает об этих зарезервированных путях — она
+  // тупо объединяет ВСЕ ключи верхнего уровня local/cloud. Поскольку в
+  // ЛОКАЛЬНОМ `state` плоского ключа "notes" (без двоеточия) нет,
+  // получается `merged["notes"] = cloudData.notes` — ОДНИМ ключом
+  // целиком весь объём заметок всех устройств (у пользователя это и есть
+  // те самые ~2.3 млн символов "notes:*" из диагностики, ошибочно принятые
+  // за множество плоских ключей). Это абсолютно мёртвый груз в `state` —
+  // его никто и никогда оттуда не читает (mdeditor.js работает со своим
+  // notesMap/notesCache_v1, my.js вообще не занимается текстом заметок) —
+  // но `splitStateForLocalStorage` (см. выше) всё равно не считает его
+  // "notes:"-веткой (нет двоеточия) и кладёт в `main`, топя его запись в
+  // localStorage квотой ровно как до всего рефакторинга 16-17.09.
+  //
+  // Правильный фикс — не подмешивать эти ветки в `state` ВООБЩЕ, а не
+  // просто перекладывать их в IndexedDB (второй проход того же дня уже
+  // сделал это как подстраховку в splitStateForLocalStorage — она
+  // остаётся, но теперь это просто защита "на всякий случай", а не
+  // единственный барьер). Список веток ниже — по факту всех текущих
+  // putCloudBlob/patchNotesCloud(patch[...]) в этом файле (17.09); если в
+  // будущем появится новый модуль с собственным облачным поддеревом —
+  // его нужно будет дописать сюда же.
+  var CLOUD_RESERVED_SUBTREES = {
+    "notes": true, "notesMeta": true,      // mdeditor.js — текст заметок «Моего блокнота»
+    "devices": true,                        // touchDeviceRegistry — реестр устройств
+    "files": true,                          // syncFileRegistry("books"/"images") — реестр файлов
+    "fileRequests": true,                   // тот же реестр — запросы на докачку байтов
+    "s89Template": true                     // S89Fill — подложка бланка S-89
+  };
+  function stripCloudReservedSubtrees(cloudData, label){
+    if(!cloudData) return cloudData;
+    var out = null;
+    Object.keys(cloudData).forEach(function(k){
+      if(CLOUD_RESERVED_SUBTREES[k]){
+        if(!out){
+          out = {};
+          Object.keys(cloudData).forEach(function(k2){ out[k2] = cloudData[k2]; });
+        }
+        delete out[k];
+        if(window.Debug) window.Debug.log((label || "stripCloudReservedSubtrees") + ": исключена зарезервированная ветка облака \"" + k + "\" (свой отдельный цикл синхронизации, в общий state не подмешивается)");
+      }
+    });
+    return out || cloudData;
+  }
+
   function mergeStates(local, cloud){
     var merged = {}, keys = {};
     Object.keys(local||{}).forEach(function(k){ keys[k]=true; });
@@ -3643,6 +3766,7 @@
     syncInProgress = true;
     setSyncState("syncing");
     fetchCloudBlob(syncId, {keepalive: urgent}).then(function(cloudData){
+      cloudData = stripCloudReservedSubtrees(cloudData, "doCloudSync");
       if(window.Debug) window.Debug.log("doCloudSync: получено с облака, задач в облаке=" + Object.keys(cloudData || {}).filter(function(k){ return k.indexOf("task:") === 0; }).length + ", задач локально=" + getAllTasks().length);
       var merged = mergeStates(state, cloudData);
       // ⚠️ ДИАГНОСТИКА (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md —
@@ -6843,6 +6967,17 @@
       return;
     }
     fetchCloudBlob(id).then(function(cloudData){
+      // 17.09 (третий проход): та же причина, что и в doCloudSync — полный
+      // fetchCloudBlob тащит сюда и "notes"/"notesMeta"/"files"/"devices"/
+      // "fileRequests"/"s89Template" (см. stripCloudReservedSubtrees выше).
+      // Здесь это даже опаснее, чем в doCloudSync: ниже `state = incoming`
+      // заменяет state ЦЕЛИКОМ, без mergeStates — без фильтра эти ветки
+      // гарантированно осели бы в state и точно так же уронили бы
+      // ближайший же saveLocalStateNow() квотой. putCloudBlob ниже —
+      // PATCH, не PUT (см. пояснение там же), так что отсутствие этих
+      // ключей в `incoming` ничего не удалит на сервере — PATCH просто не
+      // тронет то, чего нет в теле запроса.
+      cloudData = stripCloudReservedSubtrees(cloudData, "joinWithCode");
       // Полная замена локальных данных облачными — без объединения (merge).
       // Раньше здесь вызывался mergeStates(state, cloudData), который сравнивал
       // временные метки по каждому ключу и мог оставить "победителем" случайные
