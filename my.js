@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 18.1 (17.09)
+   Версия: 18.2 (17.09)
    =========================================================================== */
 
 (function(){
@@ -838,6 +838,191 @@
   // id]` в единый объект, так и продолжает читать/писать, не зная о
   // разделении на диске.
   var NOTES_STORAGE_KEY = "bibleReadingProgress_v2_notes";
+  // ⚠️ ДОБАВЛЕНО (17.09, TASK_FIX_TASK_IMAGE_LOSS.md, продолжение —
+  // свежий лог от пользователя с ВЫКЛЮЧЕННОЙ синхронизацией). Разбивка
+  // на STORAGE_KEY/NOTES_STORAGE_KEY выше (16.09) держалась на
+  // предположении, что у каждого ключа localStorage СВОЯ квота — это
+  // неверно: квота localStorage ОБЩАЯ на весь источник (origin), а не
+  // на ключ, поэтому переполнение из-за заметок топит запись ОСНОВНОГО
+  // ключа точно так же, просто не в том же вызове setItem. Свежий лог
+  // это подтвердил буквально: "ОШИБКА записи (основное — задачи/цели/
+  // настройки)... exceeded the quota" — на каждой из двух подряд идущих
+  // загрузок, то есть запись задач/картинок падает СТАБИЛЬНО, а не
+  // изредка. Арифметика бьёт почти один в один: у пользователя всего
+  // ~2 627 094 символов (main ~307569 + notes ~2 319 525), это
+  // ~5.01 МБ как UTF-16 (символ = 2 байта) — то есть общий объём лежит
+  // буквально на волосок (~11 КБ) выше классической квоты localStorage
+  // в 5 МБ, которую использует немало мобильных браузеров/WebView.
+  // Заметок относительно немного, но каждая запись заметки в "Моём
+  // блокноте" по чуть-чуть двигает эту сумму то в одну, то в другую
+  // сторону от границы — этим объясняется и то, почему баг то
+  // воспроизводился, то нет, независимо от синхронизации: дело не в
+  // логике сохранения, а в том, помещается ли state ЦЕЛИКОМ (main+notes
+  // вместе) в квоту origin'а именно в этот момент.
+  //
+  // Единственное надёжное решение — не пытаться и дальше делить один и
+  // тот же (переполненный) бюджет localStorage на всё более мелкие
+  // ключи, а перенести заметки ("notes:<id>", ~88% объёма и единственная
+  // часть state, которая продолжит расти) в IndexedDB — у неё
+  // на порядки больше квота (десятки/сотни МБ, а не 5), и она не делит
+  // лимит с localStorage. STORAGE_KEY (задачи/картинки/настройки) при
+  // этом остаётся в localStorage как есть — сам по себе, без заметок,
+  // он маленький (~0.6 МБ) и легко умещается с большим запасом.
+  //
+  // Структура `state` в памяти по-прежнему НЕ меняется — mdeditor.js
+  // (через deps.getState()) как читал/писал `state["notes:" + id]` в
+  // общий объект, так и продолжает, не зная о хранилище на диске.
+  // Меняется только ГДЕ это физически лежит на диске и КОГДА появляется
+  // в `state` при старте — раньше синхронно (localStorage.getItem
+  // мгновенный), теперь асинхронно (IndexedDB — см. loadNotesFromIdb
+  // ниже, вызывается сразу после `var state = loadState()`). Пока этот
+  // асинхронный подгруз не завершился, `state["notes:*"]` короткое время
+  // отсутствует — то же самое (безопасное) состояние, которое уже было
+  // возможно и раньше при ошибке разбора NOTES_STORAGE_KEY: остальной
+  // код (задачи, картинки) от этого не зависит, а "Мой блокнот"
+  // при необходимости подтянет текст из облака при синхронизации.
+  //
+  // Миграция старых данных — один раз при первом запуске этой версии:
+  // если в localStorage ещё лежит NOTES_STORAGE_KEY (заметки, попавшие
+  // туда правкой от 16.09), он читается, содержимое переносится в
+  // IndexedDB, и ТОЛЬКО ПОСЛЕ подтверждённой успешной записи туда ключ
+  // удаляется из localStorage (см. migrateNotesFromLocalStorage ниже) —
+  // если по каким-то причинам IndexedDB недоступна/запись не удалась,
+  // ключ в localStorage НЕ трогаем, старое поведение (splitStateFor...)
+  // остаётся рабочим запасным путём, данные не теряются.
+  var NOTES_IDB_NAME = "bibleNotesDB_v1";
+  var NOTES_IDB_STORE = "notes";
+  var notesIdbPromise = null;
+
+  function openNotesIdb() {
+    if (notesIdbPromise) return notesIdbPromise;
+    notesIdbPromise = new Promise(function (resolve, reject) {
+      if (!window.indexedDB) { reject(new Error("indexedDB недоступен в этом браузере")); return; }
+      var req = indexedDB.open(NOTES_IDB_NAME, 1);
+      req.onupgradeneeded = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains(NOTES_IDB_STORE)) db.createObjectStore(NOTES_IDB_STORE);
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error || new Error("indexedDB.open упал")); };
+    });
+    return notesIdbPromise;
+  }
+
+  // Читает ВСЕ заметки разом — используется один раз при старте.
+  // Ключи в хранилище — те же строки "notes:<id>", что и в state, без
+  // преобразований, чтобы merge в state был прямым присваиванием.
+  function notesIdbGetAll() {
+    return openNotesIdb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(NOTES_IDB_STORE, "readonly");
+        var store = tx.objectStore(NOTES_IDB_STORE);
+        var out = {};
+        var keysReq = store.openCursor();
+        keysReq.onsuccess = function (e) {
+          var cursor = e.target.result;
+          if (cursor) {
+            out[cursor.key] = cursor.value;
+            cursor.continue();
+          } else {
+            resolve(out);
+          }
+        };
+        keysReq.onerror = function () { reject(keysReq.error); };
+      });
+    });
+  }
+
+  // Пишет текущий набор заметок в IndexedDB одной транзакцией: обновляет/
+  // создаёт все переданные ключи и удаляет те, что были в хранилище
+  // раньше, но исчезли из state (заметка удалена пользователем) — список
+  // прежних ключей хранит lastKnownNoteIdbKeys, обновляется тут же после
+  // успеха, чтобы следующий вызов знал актуальный набор для сравнения.
+  var lastKnownNoteIdbKeys = null; // null — ещё не знаем (до первого чтения/записи)
+  function notesIdbWriteAll(notesObj) {
+    return openNotesIdb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(NOTES_IDB_STORE, "readwrite");
+        var store = tx.objectStore(NOTES_IDB_STORE);
+        var newKeys = Object.keys(notesObj);
+        if (lastKnownNoteIdbKeys) {
+          lastKnownNoteIdbKeys.forEach(function (k) {
+            if (newKeys.indexOf(k) === -1) store.delete(k);
+          });
+        }
+        newKeys.forEach(function (k) { store.put(notesObj[k], k); });
+        tx.oncomplete = function () {
+          lastKnownNoteIdbKeys = newKeys;
+          resolve();
+        };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+
+  // Разовая миграция: старый локальный кэш заметок (NOTES_STORAGE_KEY,
+  // введён правкой от 16.09) переносится в IndexedDB, ключ из
+  // localStorage удаляется ТОЛЬКО при подтверждённом успехе записи —
+  // см. пояснение у NOTES_STORAGE_KEY выше. Возвращает Promise<object>
+  // (перенесённые заметки, для немедленного merge в state — не ждать
+  // отдельного notesIdbGetAll сразу следом).
+  function migrateNotesFromLocalStorage() {
+    var notesRaw;
+    try {
+      notesRaw = localStorage.getItem(NOTES_STORAGE_KEY);
+    } catch (e) {
+      return Promise.resolve(null);
+    }
+    if (!notesRaw) return Promise.resolve(null);
+    var notesParsed;
+    try {
+      notesParsed = JSON.parse(notesRaw);
+    } catch (e) {
+      if (window.Debug) window.Debug.log("migrateNotesFromLocalStorage: ОШИБКА разбора старого NOTES_STORAGE_KEY (" + (e && e.message ? e.message : e) + ") — миграция пропущена, подтянутся из облака");
+      return Promise.resolve(null);
+    }
+    return notesIdbWriteAll(notesParsed).then(function () {
+      try { localStorage.removeItem(NOTES_STORAGE_KEY); } catch (e) {}
+      if (window.Debug) window.Debug.log("migrateNotesFromLocalStorage: перенесено в IndexedDB, ключей=" + Object.keys(notesParsed).length + ", старый ключ localStorage удалён");
+      return notesParsed;
+    }).catch(function (e) {
+      if (window.Debug) window.Debug.log("migrateNotesFromLocalStorage: ОШИБКА записи в IndexedDB (" + (e && e.message ? e.message : e) + ") — старый ключ localStorage НЕ трогаем, остаётся рабочим запасным путём");
+      return null;
+    });
+  }
+
+  // Вызывается один раз сразу после `var state = loadState()` (см. ниже).
+  // Либо мигрирует старый локальный кэш (см. выше), либо, если его нет
+  // (уже мигрировано или новое устройство), читает заметки из IndexedDB
+  // напрямую — в обоих случаях результат подмешивается в общий `state`
+  // тем же присваиванием, что раньше делал синхронный merge в
+  // loadState(). Ошибки IndexedDB (например, недоступна в этом браузере)
+  // не должны ронять остальной state — заметки просто подтянутся из
+  // облака при синхронизации, как и раньше при ошибке разбора кэша.
+  function loadNotesAsync() {
+    migrateNotesFromLocalStorage().then(function (migrated) {
+      if (migrated) {
+        Object.keys(migrated).forEach(function (k) { state[k] = migrated[k]; });
+        if (window.Debug) window.Debug.log("loadNotesAsync: заметки подмешаны в state после миграции, ключей=" + Object.keys(migrated).length);
+        // Событие для mdeditor.js (или любого другого кода) — если "Мой
+        // блокнот" успел отрисовать список ДО того, как заметки
+        // подмешались в state (маловероятно, IndexedDB обычно быстрее
+        // самого первого взаимодействия пользователя, но не гарантия),
+        // можно на него подписаться и перерисовать список. my.js сам
+        // ничего не перерисовывает — не знает о внутренностях mdeditor.js.
+        try { document.dispatchEvent(new CustomEvent("bibleNotesReady")); } catch (e) {}
+        return;
+      }
+      notesIdbGetAll().then(function (notesObj) {
+        lastKnownNoteIdbKeys = Object.keys(notesObj);
+        Object.keys(notesObj).forEach(function (k) { state[k] = notesObj[k]; });
+        if (window.Debug) window.Debug.log("loadNotesAsync: заметки подгружены из IndexedDB, ключей=" + lastKnownNoteIdbKeys.length);
+        try { document.dispatchEvent(new CustomEvent("bibleNotesReady")); } catch (e) {}
+      }).catch(function (e) {
+        if (window.Debug) window.Debug.log("loadNotesAsync: ОШИБКА чтения IndexedDB (" + (e && e.message ? e.message : e) + ") — заметки локально недоступны в этой сессии, подтянутся из облака при синхронизации");
+      });
+    });
+  }
   var SYNC_ID_KEY = "bibleReadingSyncId_v1";
   // TASK_SHARED_TASKS, Шаг 1: групповая привязка "Общих задач" — отдельный
   // от личной синхронизации механизм (свой код/QR, свой groupId), хранится
@@ -1107,18 +1292,21 @@
 
 
   var state = loadState();
+  loadNotesAsync(); // 17.09: заметки теперь в IndexedDB, подгружаются асинхронно и подмешиваются в этот же state — см. объяснение у NOTES_STORAGE_KEY/loadNotesAsync выше.
   if(window.Debug) window.Debug.log("Старт приложения: из localStorage прочитано задач=" + Object.keys(state).filter(function(k){ return k.indexOf("task:") === 0; }).length);
   // ⚠️ ДИАГНОСТИКА (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md —
-  // найдена причина: localStorage.setItem(STORAGE_KEY,...) стабильно падает
-  // с QuotaExceededError, см. логи пользователя, поэтому НИ ОДНО локальное
-  // сохранение личных задач физически не долетает до диска). Прежде чем
-  // чинить (сокращать state или переносить хранение на IndexedDB с
-  // большей квотой), нужно знать, что именно его раздуло — разбивка по
-  // группе ключей (общий префикс до ":", либо весь ключ, если двоеточия
-  // нет) с суммарным размером JSON.stringify каждой группы, топ-10 по
-  // размеру. Разовый проход при старте, только если включена галочка
-  // отладки — дорогой (проходит по всем ключам и сериализует каждый), не
-  // гонять его на каждую правку.
+  // разбивка по группе ключей (общий префикс до ":", либо весь ключ, если
+  // двоеточия нет) с суммарным размером JSON.stringify каждой группы,
+  // топ-10 по размеру. Разовый проход при старте, только если включена
+  // галочка отладки — дорогой (проходит по всем ключам и сериализует
+  // каждый), не гонять его на каждую правку.
+  // 17.09: с переездом заметок в IndexedDB (см. NOTES_STORAGE_KEY выше)
+  // этот разбор запускается ДО того, как loadNotesAsync() успевает их
+  // подмешать (тот асинхронный, а это — сразу, синхронно) — то есть
+  // "state[notes:*]" в этом отчёте больше не покажет реальный объём
+  // заметок пользователя, только то, что уже успело в IndexedDB и
+  // main-часть (задачи/картинки/настройки), которая теперь и есть
+  // единственное, что ограничено квотой localStorage.
   if(window.Debug && window.Debug.isEnabled && window.Debug.isEnabled()){
     try{
       var sizeByGroup = {};
@@ -1186,12 +1374,17 @@
   // точка записи `state` в localStorage — используется saveLocalState,
   // saveLocalStateNow и flushPendingSyncNow (раньше в каждом из трёх мест
   // был свой дублирующийся localStorage.setItem(STORAGE_KEY, ...)). Пишет
-  // ДВУМЯ независимыми localStorage.setItem — под STORAGE_KEY (всё, кроме
-  // заметок) и под NOTES_STORAGE_KEY (только заметки) — каждая со своим
-  // try/catch: ошибка (например, QuotaExceededError) в одной записи не
-  // мешает второй. label — префикс в Debug.log, чтобы в логе было видно,
-  // какой вызывающий код привёл к записи (сохранены прежние тексты
-  // сообщений по смыслу, теперь общие для всех трёх мест).
+  // ОСНОВНОЕ (всё, кроме заметок) в localStorage под STORAGE_KEY —
+  // маленькое (~0.6 МБ у пользователя), с большим запасом от квоты.
+  // Заметки (17.09 — см. подробное объяснение у NOTES_STORAGE_KEY выше:
+  // общая квота localStorage делится НЕ по ключам, а на весь origin,
+  // поэтому оставлять их в localStorage вторым ключом не решало
+  // проблему) пишутся в IndexedDB — она асинхронная, поэтому эта запись
+  // не блокирует и не может провалить запись основного (та уже
+  // завершена синхронно строкой выше). Если IndexedDB недоступна —
+  // запасной путь: тот же старый localStorage.setItem(NOTES_STORAGE_KEY),
+  // что и раньше (лучше маленький шанс переполнить общую квоту, чем
+  // потерять заметки совсем на устройствах без IndexedDB).
   function writeStateToLocalStorage(label){
     var split = splitStateForLocalStorage(state);
     try{
@@ -1201,13 +1394,18 @@
     }catch(e){
       if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (основное — задачи/цели/настройки): " + (e && e.message ? e.message : e));
     }
-    try{
-      var notesJson = JSON.stringify(split.notes);
-      localStorage.setItem(NOTES_STORAGE_KEY, notesJson);
-      if(window.Debug) window.Debug.log(label + ": записано (заметки), размер=" + notesJson.length);
-    }catch(e){
-      if(window.Debug) window.Debug.log(label + ": ОШИБКА записи (заметки — локальный кэш; в облаке заметки сохраняются отдельно и этой ошибкой не затрагиваются): " + (e && e.message ? e.message : e));
-    }
+    notesIdbWriteAll(split.notes).then(function(){
+      if(window.Debug) window.Debug.log(label + ": записано (заметки, IndexedDB), ключей=" + Object.keys(split.notes).length);
+    }).catch(function(e){
+      if(window.Debug) window.Debug.log(label + ": ОШИБКА записи заметок в IndexedDB (" + (e && e.message ? e.message : e) + ") — пробую запасной путь localStorage");
+      try{
+        var notesJson = JSON.stringify(split.notes);
+        localStorage.setItem(NOTES_STORAGE_KEY, notesJson);
+        if(window.Debug) window.Debug.log(label + ": записано (заметки, запасной путь localStorage), размер=" + notesJson.length);
+      }catch(e2){
+        if(window.Debug) window.Debug.log(label + ": ОШИБКА записи заметок (заметки — локальный кэш; в облаке заметки сохраняются отдельно и этой ошибкой не затрагиваются): " + (e2 && e2.message ? e2.message : e2));
+      }
+    });
   }
 
   var saveTimer = null;
@@ -1275,30 +1473,12 @@
       // очередь чтобы ИСКЛЮЧИТЬ этот вариант, а не потому что он вероятен.
       if(raw){
         var parsed = JSON.parse(raw);
-        // ⚠️ ДОБАВЛЕНО (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md —
-        // см. пояснение у NOTES_STORAGE_KEY выше). С этой правки заметки
-        // ("notes:<id>") пишутся в отдельный ключ NOTES_STORAGE_KEY — здесь
-        // они подмешиваются обратно в тот же объект state, так что для
-        // остального кода (включая mdeditor.js) ничего не меняется: он
-        // по-прежнему видит один общий объект со всеми ключами. Если у
-        // пользователя ещё остались старые записи, где notes:* были
-        // сохранены внутри STORAGE_KEY (до этой правки) — они никуда не
-        // денутся, просто останутся в `parsed` как есть; NOTES_STORAGE_KEY
-        // может ещё не существовать при самом первом запуске после
-        // обновления, это нормально (Object.keys по пустому/отсутствующему
-        // просто ничего не добавит). Ошибка разбора NOTES_STORAGE_KEY не
-        // должна ронять загрузку остального state (задач) — если заметки
-        // из локального кэша не читаются, они всё равно подтянутся из
-        // облака при следующей синхронизации.
-        var notesRaw = localStorage.getItem(NOTES_STORAGE_KEY);
-        if(notesRaw){
-          try{
-            var notesParsed = JSON.parse(notesRaw);
-            Object.keys(notesParsed).forEach(function(k){ parsed[k] = notesParsed[k]; });
-          }catch(e){
-            if(window.Debug) window.Debug.log("loadState: ОШИБКА разбора NOTES_STORAGE_KEY (" + (e && e.message ? e.message : e) + ") — локальный кэш заметок не подхвачен, подтянутся из облака при синхронизации");
-          }
-        }
+        // 17.09: заметки ("notes:<id>") сюда больше не подмешиваются —
+        // они переехали в IndexedDB (см. подробное объяснение у
+        // NOTES_STORAGE_KEY выше) и, в отличие от localStorage, читаются
+        // только асинхронно. Их подгружает и подмешивает в `state`
+        // loadNotesAsync() — вызывается сразу после `var state =
+        // loadState()` ниже, отдельно от этой синхронной функции.
         return parsed;
       }
     }catch(e){
