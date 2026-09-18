@@ -1,7 +1,11 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 20.0 (17.09, седьмой проход)
+   Версия: 20.1 (18.09) — диагностика для расследования "картинка не
+   передаётся между устройствами" (window.Debug.log в hydrateTaskImages/
+   __retryTaskImageHydration/syncFileRegistry) + фикс проглатываемого
+   reject в hydrateTaskImages (getImageBlobUrl().then без .catch) +
+   диагностика шторма дублирующихся fetch к одному URL (fetchWithTimeout)
    =========================================================================== */
 
 (function(){
@@ -737,10 +741,27 @@
           wrap.setAttribute("data-img-loaded", "1");
           MdEditor.getImageBlobUrl(name).then(function(url){
             if(!document.body.contains(wrap)) return;
-            if(!url){ wrap.classList.add("task-img-missing"); return; }
+            if(!url){
+              if(window.Debug) window.Debug.log("hydrateTaskImages: файла \"" + name + "\" пока нет локально (getImageBlobUrl вернул пусто) — ставлю task-img-missing, ждём syncFileRegistry/__retryTaskImageHydration");
+              wrap.classList.add("task-img-missing");
+              return;
+            }
             wrap.innerHTML = '<img src="' + url + '" alt="' + escapeHtml(name) + '">';
             wrap.classList.add("task-img-loaded");
             wrap.addEventListener("click", function(){ MdEditor.openImageViewer(url, name); });
+          }).catch(function(err){
+            // ⚠️ ДОБАВЛЕНО (диагностика 18.09): раньше промис не имел .catch —
+            // если getImageBlobUrl зареджектится (а не просто резолвится
+            // пустым), ошибка глушилась молча, task-img-missing НЕ
+            // проставлялся (он ставится только внутри .then выше), а
+            // data-img-loaded уже стоит с самого начала — в итоге обёртка
+            // навсегда выпадала и из обычного runPass, и из
+            // window.__retryTaskImageHydration (тот ищет строго
+            // .task-img-missing). Теперь при реальной ошибке тоже ставим
+            // task-img-missing, чтобы retry её нашёл.
+            if(!document.body.contains(wrap)) return;
+            if(window.Debug) window.Debug.log("hydrateTaskImages: getImageBlobUrl(\"" + name + "\") зареджектился — " + (err && err.message ? err.message : err) + " — ставлю task-img-missing, чтобы retry мог подхватить");
+            wrap.classList.add("task-img-missing");
           });
         })(wraps[i]);
       }
@@ -768,13 +789,20 @@
         for(var i = 0; i < wraps.length; i++){
           if(wraps[i].getAttribute("data-img-name") === name) matched.push(wraps[i]);
         }
+        // ⚠️ ДОБАВЛЕНО (диагностика 18.09): подтверждаем сам факт вызова и
+        // сколько "сдавшихся" обёрток нашлось по этому имени — без этого
+        // лога из логов нельзя было понять, доходит ли вообще вызов из
+        // syncFileRegistry сюда, и совпадает ли data-img-name с entry.name.
+        if(window.Debug) window.Debug.log("__retryTaskImageHydration(\"" + name + "\"): всего task-img-missing на странице=" + wraps.length + ", совпало по имени=" + matched.length);
         if(!matched.length) return;
         matched.forEach(function(wrap){
           wrap.removeAttribute("data-img-loaded");
           wrap.classList.remove("task-img-missing");
         });
         hydrateTaskImages(root);
-      }catch(e){}
+      }catch(e){
+        if(window.Debug) window.Debug.log("__retryTaskImageHydration(\"" + name + "\"): ошибка — " + (e && e.message ? e.message : e));
+      }
     };
 
     // если ВСЕ мутации этой пачки пришли изнутри игнорируемых поддеревьев
@@ -3585,12 +3613,32 @@
     return deviceId;
   }
 
+  // ⚠️ ДОБАВЛЕНО (диагностика 18.09): счётчик одновременных запросов к
+  // ОДНОМУ и тому же URL — ловим шторм дублирующихся fetch (в логе
+  // пользователя — ~30 почти одновременных запросов к syncs/<id>.json за
+  // ~90мс, без единой связанной строки лога рядом, то есть не от явного
+  // клика/сохранения). Логируем только САМ ФАКТ пересечения (когда к URL
+  // уже летит другой запрос) вместе с обрывком стека — этого достаточно,
+  // чтобы найти вызывающую функцию, не расставляя label на каждый из ~25
+  // вызовов fetchWithTimeout по всему файлу.
+  var fetchWithTimeoutInFlight = {};
   function fetchWithTimeout(url, options, timeoutMs){
+    var already = fetchWithTimeoutInFlight[url] || 0;
+    if(already > 0 && window.Debug){
+      var stack = (new Error()).stack || "";
+      var stackLines = stack.split("\n").slice(1, 4).join(" <- ").replace(/\s+/g, " ");
+      window.Debug.log("fetchWithTimeout: ДУБЛЬ — к \"" + url + "\" уже летит " + already + " запрос(ов), добавляю ещё один. Вызвано из: " + stackLines);
+    }
+    fetchWithTimeoutInFlight[url] = already + 1;
     var ctrl = new AbortController();
     var timer = setTimeout(function(){ ctrl.abort(); }, timeoutMs || 8000);
     options = options || {};
     options.signal = ctrl.signal;
-    return fetch(url, options).finally(function(){ clearTimeout(timer); });
+    return fetch(url, options).finally(function(){
+      clearTimeout(timer);
+      fetchWithTimeoutInFlight[url] = (fetchWithTimeoutInFlight[url] || 1) - 1;
+      if(fetchWithTimeoutInFlight[url] <= 0) delete fetchWithTimeoutInFlight[url];
+    });
   }
 
   function generateSyncId(){
@@ -8749,7 +8797,15 @@
             }
             throw err; // дальше по цепочке скачивать/сохранять нечего
           }).then(function(buf){
-            return adapters.saveIncoming(hash, entry.name || hash, new Uint8Array(buf));
+            return adapters.saveIncoming(hash, entry.name || hash, new Uint8Array(buf)).then(function(saveResult){
+              // ⚠️ ДОБАВЛЕНО (диагностика 18.09): подтверждаем сам факт, что
+              // байты дошли и adapters.saveIncoming успешно отработал на
+              // ЭТОМ устройстве — без этого лога нельзя было отличить
+              // "докачка вообще не завершилась (нестабильная сеть)" от
+              // "докачалась, но retry/hydrate не сработал".
+              if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): saveIncoming успешно, hash=" + hash + ", name=" + (entry.name || "(нет, использован hash)") + ", байт=" + (buf && buf.byteLength));
+              return saveResult;
+            });
           }).then(function(){
             // ⚠️ ДОБАВЛЕНО (17.09): файл реально сохранён локально ТОЛЬКО
             // сейчас — если задача с "![[имя]]" уже отрисовалась раньше
@@ -8760,7 +8816,9 @@
             // полной перезагрузки страницы. kind !== "images" (например,
             // "books") эта функция сама по имени просто не найдёт — вызов
             // безопасен для любого kind.
-            try{ if(window.__retryTaskImageHydration) window.__retryTaskImageHydration(entry.name || hash); }catch(eHydrate){}
+            try{ if(window.__retryTaskImageHydration) window.__retryTaskImageHydration(entry.name || hash); }catch(eHydrate){
+              if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): __retryTaskImageHydration бросил исключение — " + (eHydrate && eHydrate.message ? eHydrate.message : eHydrate));
+            }
             return deleteFileFromCloud(kind, hash).catch(function(){});
           }).then(function(){
             var patch = {};
@@ -8770,10 +8828,16 @@
           }).then(function(){
             // Файл наконец забрали — если это была НАША заявка, снимаем её.
             return (pendingRequest && pendingRequest.by === myId) ? clearFileRequest(kind, hash) : null;
-          }).catch(function(){
+          }).catch(function(errChore){
             // байтов ещё нет в fileBlobs (никто пока не залил, или залить
             // некому/некогда — заявка уже записана выше) или сеть подвела
-            // — не страшно, попробуем на следующей сверке
+            // — не страшно, попробуем на следующей сверке.
+            // ⚠️ ДОБАВЛЕНО (диагностика 18.09): раньше эта ветка ничего не
+            // логировала — по логам нельзя было понять, дошла ли докачка
+            // до конца в конкретном тесте, или отвалилась (и на каком шаге:
+            // сама сеть/downloadFileFromCloud, adapters.saveIncoming,
+            // deleteFileFromCloud или запись confirmedBy).
+            if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): сверка hash=" + hash + " (name=" + (entry.name || "?") + ") не завершилась — " + (errChore && errChore.message ? errChore.message : errChore));
           });
         }
 
