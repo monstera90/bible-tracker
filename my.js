@@ -1,6 +1,18 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 22.2 (18.09) — точечная правка: syncFileRegistry и групповая
+   syncGroupImageRegistry больше не запускают downloadFileFromCloud/
+   uploadFileToCloud СРАЗУ на все хэши реестра разом (было — Object.keys
+   (registry).map(...) + Promise.all, все fetch стартуют одновременно) —
+   теперь идут пачками по FILE_SYNC_DOWNLOAD_CONCURRENCY=4 через новый
+   runWithLimit. По логу пользователя (лог2__2_.txt): при ~40 картинках в
+   реестре это давало ~40 одновременных fetch к Firebase, часть не
+   укладывалась в таймаут fetchWithTimeout (8000мс) просто из-за
+   перегрузки — "fetch error 8003..8022мс AbortError" сразу за пачкой
+   "fetch start". Файл, который реально был в fileBlobs, из-за этого мог
+   так и не докачаться — попытка обрывалась раньше, чем до неё доходила
+   очередь на медленной сети.
    Версия: 22.1 (18.09) — точечная правка: syncFileRegistry больше не шлёт
    отдельный patchNotesCloud на КАЖДЫЙ хэш с blob_not_found (requestFileFromCloud) —
    заявка на файл теперь копится в тот же pendingRegistryPatch и уходит одним
@@ -8799,6 +8811,42 @@
   }
 
   var fileRegistrySyncInProgress = {}; // kind -> bool
+  // ⚠️ ДОБАВЛЕНО (18.09, по логу лог2__2_.txt): без ограничения concurrency
+  // syncFileRegistry запускала downloadFileFromCloud/uploadFileToCloud
+  // СРАЗУ на все хэши реестра разом (Object.keys(registry).map(...) — все
+  // промисы стартуют одновременно, Promise.all только ждёт). При большой
+  // библиотеке картинок (~40 файлов) это давало ~40 одновременных fetch к
+  // Firebase; часть из них не укладывалась в таймаут fetchWithTimeout
+  // (8000мс, см. выше) просто из-за перегрузки — в логе это видно как
+  // серия "fetch error 8003..8022мс AbortError" сразу за пачкой "fetch
+  // start" без промежутка. Файл, который реально есть в fileBlobs, из-за
+  // этого мог так и не докачаться — попытка обрывалась по таймауту раньше,
+  // чем до неё доходила очередь на слабой сети/canale. runWithLimit ниже
+  // обрабатывает элементы пачками по `limit` штук — следующий элемент
+  // стартует только когда освобождается слот, а не все сразу.
+  function runWithLimit(items, limit, worker){
+    var idx = 0, active = 0, total = items.length;
+    return new Promise(function(resolve){
+      if(!total){ resolve(); return; }
+      var finished = 0;
+      function settleOne(){
+        finished++;
+        active--;
+        if(finished >= total){ resolve(); return; }
+        pump();
+      }
+      function pump(){
+        while(active < limit && idx < total){
+          var item = items[idx++];
+          active++;
+          Promise.resolve().then(function(){ return worker(item); }).catch(function(){}).then(settleOne);
+        }
+      }
+      pump();
+    });
+  }
+  var FILE_SYNC_DOWNLOAD_CONCURRENCY = 4; // не слишком мало (не топтаться), не слишком много (не топить Firebase/себя же)
+
   function syncFileRegistry(kind, adapters){
     adapters = adapters || FILE_REGISTRY_ADAPTERS[kind];
     if(!adapters) return Promise.resolve();
@@ -8834,7 +8882,8 @@
         return (now - t) <= DEVICE_KNOWN_WINDOW_MS;
       });
 
-      var chores = Object.keys(registry).map(function(hash){
+      var choreHashes = Object.keys(registry);
+      function runChore(hash){
         var entry = registry[hash] || {};
         var confirmedBy = entry.confirmedBy || {};
         var haveLocally = !!localHashes[hash];
@@ -8959,9 +9008,9 @@
         }
 
         return null;
-      });
+      }
 
-      return Promise.all(chores).then(function(){
+      return runWithLimit(choreHashes, FILE_SYNC_DOWNLOAD_CONCURRENCY, runChore).then(function(){
         // Единственный PATCH на весь цикл сверки — вместо одного на
         // каждый файл (см. комментарий у pendingRegistryPatch выше).
         if(Object.keys(pendingRegistryPatch).length){
@@ -9237,7 +9286,8 @@
         // выше: один общий PATCH на весь цикл вместо одного на каждый hash.
         var pendingGroupPatch = {};
 
-        var chores = Object.keys(registry).map(function(hash){
+        var groupChoreHashes = Object.keys(registry);
+        function runGroupChore(hash){
           var entry = registry[hash] || {};
           var confirmedBy = entry.confirmedBy || {};
           var haveLocally = !!localHashes[hash];
@@ -9294,9 +9344,12 @@
           }
 
           return null;
-        });
+        }
 
-        return Promise.all(chores).then(function(){
+        // ⚠️ ДОБАВЛЕНО (18.09, тот же фикс, что и в syncFileRegistry выше) —
+        // тот же риск шторма параллельных fetch при большой библиотеке
+        // общих картинок группы.
+        return runWithLimit(groupChoreHashes, FILE_SYNC_DOWNLOAD_CONCURRENCY, runGroupChore).then(function(){
           if(Object.keys(pendingGroupPatch).length){
             return patchGroupCloud(groupId, pendingGroupPatch).catch(function(){});
           }
