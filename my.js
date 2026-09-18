@@ -1,6 +1,30 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 23.0 (18.09) — структурная правка: syncFileRegistry раньше сверял
+   ТОЛЬКО хэши, уже известные облачному реестру (Object.keys(registry)) —
+   если картинка (в т.ч. вставленная в задачу) была сохранена локально,
+   когда галочка «синхронизация файлов через облако» была выключена, или
+   registerFileInRegistry в момент вставки почему-то молча не отработал —
+   её хэш никогда не попадал в files/<kind>/*, и ни один цикл сверки, ни на
+   этом устройстве, ни тем более на другом, не мог о ней узнать: локальный
+   манифест никогда не сравнивался с облачным реестром в обратную сторону.
+   Симптом ровно как в ТЗ пользователя: картинка видна на устройстве, где
+   задача создана (файл физически на диске), и не появляется больше нигде,
+   сколько ни жди. Добавлен отдельный (тоже ограниченный по параллелизму
+   через runWithLimit) проход — новая функция runBackfillChore внутри
+   syncFileRegistry: для каждого хэша, который есть в локальном манифесте,
+   но которого нет в облачном registry, читает байты (adapters.readLocalBytes)
+   и вызывает тот же registerFileInRegistry, что и обычная точка вставки
+   картинки (recordImageAdded в mdeditor.js) — вся остальная логика (лимит
+   размера, чужой тумбстоун, гонка с другим добавившим устройством,
+   условие getFileSyncEnabled()) переиспользуется без дублирования. Сама
+   заливка байт в fileBlobs произойдёт не в этом же проходе, а на следующей
+   сверке (пункт "2)" ниже увидит новую запись реестра с missingConfirmations)
+   — задержка в один цикл, не критично. Работает для обоих kind (images/
+   books) и для ЛЮБЫХ уже существующих задач/заметок с картинками — не
+   требует какой-либо отметки в самих задачах, достаточно того, что файл
+   физически лежит в локальном хранилище (OPFS) добавившего устройства.
    Версия: 22.2 (18.09) — точечная правка: syncFileRegistry и групповая
    syncGroupImageRegistry больше не запускают downloadFileFromCloud/
    uploadFileToCloud СРАЗУ на все хэши реестра разом (было — Object.keys
@@ -9010,7 +9034,32 @@
         return null;
       }
 
-      return runWithLimit(choreHashes, FILE_SYNC_DOWNLOAD_CONCURRENCY, runChore).then(function(){
+      // ⚠️ ДОБАВЛЕНО (18.09, ТЗ пользователя, версия 23.0) — см. шапку файла.
+      // choreHashes выше — это ТОЛЬКО то, что уже знает облачный registry.
+      // Отдельно ищем локально известные хэши (из adapters.getLocalManifest()),
+      // которых в registry нет вообще — именно они и есть картинки/книги,
+      // которые физически существуют на этом устройстве, но никогда не
+      // "докладывались" облаку (сохранены при выключенной галочке синка,
+      // или регистрация в момент вставки молча не удалась). getFileSyncEnabled()
+      // уже проверен в самом начале syncFileRegistry — сюда мы попадаем,
+      // только если галочка сейчас включена, как и просил пользователь.
+      var localOnlyHashes = Object.keys(manifest).filter(function(h){ return !registry[h]; });
+      function runBackfillChore(hash){
+        return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
+          var bytes = buf && buf.byteLength !== undefined ? buf.byteLength : (buf ? buf.length : 0);
+          return registerFileInRegistry(kind, hash, manifest[hash], bytes);
+        }).catch(function(eBackfill){
+          // Не страшно — попробуем на следующей сверке; чаще всего это либо
+          // временная ошибка чтения локального файла, либо registerFileInRegistry
+          // сам решил ничего не делать (лимит размера, offline и т.п.).
+          if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): backfill-регистрация hash=" + hash + " (name=" + (manifest[hash] || "?") + ") не удалась — " + (eBackfill && eBackfill.message ? eBackfill.message : eBackfill));
+        });
+      }
+
+      return Promise.all([
+        runWithLimit(choreHashes, FILE_SYNC_DOWNLOAD_CONCURRENCY, runChore),
+        runWithLimit(localOnlyHashes, FILE_SYNC_DOWNLOAD_CONCURRENCY, runBackfillChore)
+      ]).then(function(){
         // Единственный PATCH на весь цикл сверки — вместо одного на
         // каждый файл (см. комментарий у pendingRegistryPatch выше).
         if(Object.keys(pendingRegistryPatch).length){
