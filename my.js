@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 19.2 (17.09, шестой проход)
+   Версия: 20.0 (17.09, седьмой проход)
    =========================================================================== */
 
 (function(){
@@ -745,6 +745,37 @@
         })(wraps[i]);
       }
     }
+
+    // ⚠️ ДОБАВЛЕНО (17.09, найдено по логам синхронизации между
+    // устройствами): картинка в задаче докачивается сильно ПОЗЖЕ, чем
+    // отрисовывается сама задача (текст синхронный, картинка —
+    // syncFileRegistry, отдельный медленный сетевой цикл, счёт на
+    // секунды). hydrateTaskImages выше срабатывает ОДИН раз при первом
+    // появлении .task-img-wrap в DOM: если на тот момент файла ещё нет
+    // локально, ставит "task-img-missing" НАВСЕГДА — data-img-loaded не
+    // даёт повторить попытку, даже когда файл потом реально докачается.
+    // Эта функция — узкая лазейка для повторной попытки ИМЕННО по имени
+    // файла, вызывается снаружи (см. syncFileRegistry) сразу после того,
+    // как файл реально сохранён локально. Снимает клеймо только у уже
+    // "сдавшихся" (.task-img-missing) обёрток с этим именем — у ещё не
+    // тронутых (без data-img-loaded) и так сработает обычный runPass, у
+    // уже успешно показанных (.task-img-loaded) трогать нечего.
+    window.__retryTaskImageHydration = function(name){
+      if(!name) return;
+      try{
+        var wraps = root.querySelectorAll('.task-img-wrap.task-img-missing[data-img-name]');
+        var matched = [];
+        for(var i = 0; i < wraps.length; i++){
+          if(wraps[i].getAttribute("data-img-name") === name) matched.push(wraps[i]);
+        }
+        if(!matched.length) return;
+        matched.forEach(function(wrap){
+          wrap.removeAttribute("data-img-loaded");
+          wrap.classList.remove("task-img-missing");
+        });
+        hydrateTaskImages(root);
+      }catch(e){}
+    };
 
     // если ВСЕ мутации этой пачки пришли изнутри игнорируемых поддеревьев
     // (типичный случай — пользователь просто печатает в contenteditable-поле
@@ -8720,6 +8751,16 @@
           }).then(function(buf){
             return adapters.saveIncoming(hash, entry.name || hash, new Uint8Array(buf));
           }).then(function(){
+            // ⚠️ ДОБАВЛЕНО (17.09): файл реально сохранён локально ТОЛЬКО
+            // сейчас — если задача с "![[имя]]" уже отрисовалась раньше
+            // (обычное дело, текст синхронизируется намного быстрее, чем
+            // сюда доходит очередь) и её картинка уже "сдалась"
+            // (task-img-missing, см. window.__retryTaskImageHydration
+            // выше), даём ей ещё одну попытку прямо сейчас, не дожидаясь
+            // полной перезагрузки страницы. kind !== "images" (например,
+            // "books") эта функция сама по имени просто не найдёт — вызов
+            // безопасен для любого kind.
+            try{ if(window.__retryTaskImageHydration) window.__retryTaskImageHydration(entry.name || hash); }catch(eHydrate){}
             return deleteFileFromCloud(kind, hash).catch(function(){});
           }).then(function(){
             var patch = {};
