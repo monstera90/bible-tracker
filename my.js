@@ -1,17 +1,19 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 20.2 (18.09) — диагностика для расследования "картинка не
-   передаётся между устройствами" (window.Debug.log в hydrateTaskImages/
-   __retryTaskImageHydration/syncFileRegistry) + фикс проглатываемого
-   reject в hydrateTaskImages (getImageBlobUrl().then без .catch) +
-   диагностика шторма дублирующихся fetch к одному URL (fetchWithTimeout)
-   + НАЙДЕН И ПОЧИНЕН реальный источник тормозов: syncFileRegistry и
-   syncGroupImageRegistry слали ОТДЕЛЬНЫЙ PATCH на КАЖДЫЙ файл реестра
-   (confirmedBy/uploadedAt) — при ~40 файлах это давало ~40 почти
-   одновременных запросов к syncs/<id>.json (подтверждено логом
-   пользователя: до 42 параллельных ДУБЛЕЙ). Теперь все патчи цикла
-   копятся в один объект и уходят одним PATCH в конце сверки.
+   Версия: 22.0 (18.09) — ТЗ пользователя: 1) картинка больше НЕ удаляется
+   из fileBlobs сразу после скачивания (syncFileRegistry, пункт "1)") —
+   единственный путь удаления теперь TTL/подтверждения всех известных
+   устройств (пункт "3)"), чтобы любая задача (личная или общая),
+   ссылающаяся на тот же хэш, успевала скачать картинку в те же 3 дня
+   (FILE_RELAY_TTL_MS), а не только первое устройство; 2) временное
+   отключение облачной синхронизации КНИГ вынесено в отдельную галочку
+   настроек "Включить синхронизацию книг (тестируется)" (`settingsBooksSyncCb`
+   в renderSettingsTabGear, новые getBooksSyncEnabled/setBooksSyncEnabled,
+   по умолчанию выключено) — isBooksCloudSyncTemporarilyDisabled() теперь
+   читает этот флаг вместо хардкода true; гейт в registerFileInRegistry/
+   registerFileDeletion/syncFileRegistry по kind==="books" (на "images" не
+   влияет). Сжатие самих байт картинок — в mdeditor.js (compressImageBytes).
    =========================================================================== */
 
 (function(){
@@ -8437,18 +8439,23 @@
   //
   // Устройство, у которого файл есть локально, заливает его в fileBlobs
   // сразу, как только видит в реестре, что кто-то из ИЗВЕСТНЫХ устройств
-  // ещё не подтвердил получение (см. syncFileRegistry). ОСНОВНОЙ путь
-  // удаления байт из fileBlobs — раздел 3.4: получатель удаляет их СРАЗУ
-  // после успешного скачивания+сохранения (не дожидаясь ни подтверждений
-  // остальных, ни TTL) — см. пункт "1)" внутри syncFileRegistry. Это
-  // значит, что при нескольких ЗНАЮЩИХ устройствах, ещё не подтвердивших
-  // получение, файл достаётся только первому, кто успел скачать; для
-  // остальных заливка повторится позже по заявке (fileRequests, раздел
-  // 4.3 — этого узла и логики пока нет, это следующий шаг). Отдельно,
-  // FILE_RELAY_TTL_MS ПОСЛЕ ЗАЛИВКИ (не после добавления) — запасной
-  // механизм на случай, если байты вообще никто не забрал (пункт "3)"
-  // ниже); сама запись реестра (хэш/имя/размер) при удалении байт не
-  // трогается, теряется только временная копия.
+  // ещё не подтвердил получение (см. syncFileRegistry).
+  // ⚠️ ИЗМЕНЕНО (18.09, ТЗ пользователя): раньше здесь был отдельный
+  // "основной путь удаления" — получатель стирал байты из fileBlobs СРАЗУ
+  // после успешного скачивания+сохранения, не дожидаясь ни подтверждений
+  // остальных устройств, ни TTL (см. пункт "1)" внутри syncFileRegistry).
+  // Из-за этого при нескольких ЗНАЮЩИХ устройствах/задачах, ссылающихся на
+  // тот же хэш, файл достигал только первого, кто успел скачать — для
+  // остальных заливка повторялась заново по заявке (fileRequests), уже
+  // ПОСЛЕ того, как держатель узнавал, что байты снова нужны. Теперь
+  // скачивание НЕ трогает байты в fileBlobs вообще — единственный путь их
+  // удаления это пункт "3)" ниже: пока не истёк FILE_RELAY_TTL_MS (3 дня)
+  // после заливки И (если известные устройства ещё не подтвердили все до
+  // одного), байты остаются в облаке независимо от того, кто уже успел их
+  // забрать — так любая другая задача (личная или общая), ссылающаяся на
+  // тот же хэш, тоже успевает скачать картинку в пределах этого окна.
+  // Сама запись реестра (хэш/имя/размер) при удалении байт не трогается,
+  // теряется только временная копия в fileBlobs.
   //
   // Удаление файла (тумбстоун): вызывающая сторона помечает запись
   // deletedAt/deletedBy (registerFileDeletion) — остальные устройства при
@@ -8509,6 +8516,38 @@
   function setFileSyncEnabled(value){
     try{ localStorage.setItem(FILE_SYNC_ENABLED_KEY, value ? "1" : "0"); }catch(e){}
   }
+
+  // ⚠️ ДОБАВЛЕНО (18.09, ТЗ пользователя, пункт 3): временное полное
+  // отключение облачной синхронизации КНИГ (kind === "books") — не
+  // связано с общим тумблером getFileSyncEnabled выше и не трогает
+  // "images" вообще. Единая точка гейта — вынесена в отдельную функцию
+  // (а не разбросанные проверки kind==="books" по трём местам), чтобы
+  // включить книги обратно было тривиально. Гейт стоит в тех же трёх
+  // функциях, что и getFileSyncEnabled (registerFileInRegistry/
+  // registerFileDeletion/syncFileRegistry) — при true книги полностью
+  // выпадают из реестра/реле байт: не регистрируются, не заливаются, не
+  // скачиваются, не удаляются по тумбстоуну. Уже лежащие в облаке с
+  // прошлого раза записи это не трогает — они просто перестают
+  // опрашиваться, пока флаг включён.
+  // ⚠️ ИЗМЕНЕНО (18.09, тем же чатом, второй проход): раньше функция
+  // всегда возвращала true (жёстко). Теперь это отдельная галочка
+  // настроек "Включить синхронизацию книг (тестируется)"
+  // (`settingsBooksSyncCb` в renderSettingsTabGear, локальный флаг
+  // устройства через localStorage — тот же приём, что у
+  // FILE_SYNC_ENABLED_KEY выше, а не часть облачного state) — по
+  // умолчанию ВЫКЛЮЧЕНА (книги остаются отключены, пока не включат явно
+  // для теста), но пользователь может включить синхронизацию книг сам,
+  // не дожидаясь правки кода. Общий тумблер `getFileSyncEnabled` всё
+  // равно должен быть включён — оба флага проверяются по отдельности в
+  // одних и тех же трёх точках гейта.
+  var BOOKS_SYNC_ENABLED_KEY = "bibleBooksSyncEnabled_v1";
+  function getBooksSyncEnabled(){
+    try{ return localStorage.getItem(BOOKS_SYNC_ENABLED_KEY) === "1"; }catch(e){ return false; }
+  }
+  function setBooksSyncEnabled(value){
+    try{ localStorage.setItem(BOOKS_SYNC_ENABLED_KEY, value ? "1" : "0"); }catch(e){}
+  }
+  function isBooksCloudSyncTemporarilyDisabled(){ return !getBooksSyncEnabled(); }
 
   function touchDeviceRegistry(){
     if(!syncId || !getFileSyncEnabled()) return Promise.resolve();
@@ -8647,6 +8686,7 @@
   // deletedAt, см. ниже).
   function registerFileInRegistry(kind, hash, name, size){
     if(!syncId || !getFileSyncEnabled()) return Promise.resolve();
+    if(kind === "books" && isBooksCloudSyncTemporarilyDisabled()) return Promise.resolve();
     // Раздел 7 ТЗ: файл больше лимита в облачный реестр не отправляем
     // вообще — остаётся только локальным. Сам файл при этом уже сохранён
     // локально вызывающим кодом (saveBookFile и т.п.) ДО этого вызова —
@@ -8688,6 +8728,7 @@
   // нет, кто угодно с кодом синхронизации уже мог её скачать.
   function registerFileDeletion(kind, hash){
     if(!syncId || !getFileSyncEnabled()) return Promise.resolve();
+    if(kind === "books" && isBooksCloudSyncTemporarilyDisabled()) return Promise.resolve();
     var patch = {};
     patch["files/" + kind + "/" + hash + "/deletedAt"] = Date.now();
     patch["files/" + kind + "/" + hash + "/deletedBy"] = getDeviceId();
@@ -8753,6 +8794,7 @@
     adapters = adapters || FILE_REGISTRY_ADAPTERS[kind];
     if(!adapters) return Promise.resolve();
     if(!syncId || !navigator.onLine || !getFileSyncEnabled()) return Promise.resolve();
+    if(kind === "books" && isBooksCloudSyncTemporarilyDisabled()) return Promise.resolve();
     if(fileRegistrySyncInProgress[kind]) return Promise.resolve();
     fileRegistrySyncInProgress[kind] = true;
     var myId = getDeviceId();
@@ -8800,14 +8842,16 @@
         }
 
         // 1) У нас файла нет — скачиваем из fileBlobs (расшифровывается
-        // внутри downloadFileFromCloud), сохраняем локально и СРАЗУ ЖЕ
-        // удаляем байты из облака (раздел 3.4/4.4 ТЗ: это основной путь
-        // удаления, TTL в блоке 3) ниже — только подстраховка на случай,
-        // если файл вообще никто не забрал). uploadedAt заодно сбрасываем
-        // в том же PATCH — байтов больше нет, флаг не должен врать.
-        // Если байтов в fileBlobs не оказалось СОВСЕМ (не просто сеть
-        // подвела) — раздел 4.3: пишем заявку, если своей ещё нет,
-        // чтобы держатель файла узнал, что байты снова нужны.
+        // внутри downloadFileFromCloud) и сохраняем локально. ⚠️ ИЗМЕНЕНО
+        // (18.09, ТЗ пользователя, пункт 2): раньше здесь же байты СРАЗУ
+        // удалялись из облака — теперь не трогаем fileBlobs вообще, они
+        // остаются лежать в облаке до TTL/подтверждений всех известных
+        // устройств (см. пункт "3)" ниже), чтобы любая другая задача
+        // (личная или общая), у которой файла ещё нет, тоже успела его
+        // скачать в пределах тех же 3 дней, а не только самое первое
+        // устройство. Если байтов в fileBlobs не оказалось СОВСЕМ (не
+        // просто сеть подвела) — раздел 4.3: пишем заявку, если своей ещё
+        // нет, чтобы держатель файла узнал, что байты снова нужны.
         if(!haveLocally){
           return downloadFileFromCloud(kind, hash).catch(function(err){
             if(err && err.message === "blob_not_found" && (!pendingRequest || pendingRequest.by !== myId)){
@@ -8837,11 +8881,14 @@
             try{ if(window.__retryTaskImageHydration) window.__retryTaskImageHydration(entry.name || hash); }catch(eHydrate){
               if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): __retryTaskImageHydration бросил исключение — " + (eHydrate && eHydrate.message ? eHydrate.message : eHydrate));
             }
-            return deleteFileFromCloud(kind, hash).catch(function(){});
+            // Байты в fileBlobs больше НЕ удаляем здесь (см. пункт "1)"
+            // выше) — только отмечаем, что это устройство подтвердило
+            // получение; сами байты уберёт пункт "3)" ниже, когда придёт
+            // время (TTL или все известные устройства подтвердили).
+            return null;
           }).then(function(){
             var patch = {};
             patch["files/" + kind + "/" + hash + "/confirmedBy/" + myId] = true;
-            patch["files/" + kind + "/" + hash + "/uploadedAt"] = null;
             Object.keys(patch).forEach(function(k){ pendingRegistryPatch[k] = patch[k]; });
           }).then(function(){
             // Файл наконец забрали — если это была НАША заявка, снимаем её.
@@ -12309,6 +12356,7 @@
     var extraAnimOn = getExtraAnimationsEnabled();
     var hideStatusBarOn = getHideStatusBarEnabled();
     var fileSyncOn = getFileSyncEnabled(); // TASK_FILE_SYNC_RTDB.md, раздел 5, шаг 6
+    var booksSyncOn = getBooksSyncEnabled(); // ТЗ пользователя от 18.09 — временный тестовый тумблер
     var bibleQuotesOn = getBibleQuotesEnabled();
     var customCommentsOn = getCustomCommentsEnabled();
     var customVerse = getCustomVerse();
@@ -12338,6 +12386,7 @@
       '<div class="settings-row"><span>Включить дополнительные анимации</span><input type="checkbox" id="settingsExtraAnimCb"' + (extraAnimOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить полноэкранный режим</span><input type="checkbox" id="settingsHideStatusBarCb"' + (hideStatusBarOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить облачную синхронизацию изображений и книг (может медленно работать на слабых устройствах)</span><input type="checkbox" id="settingsFileSyncCb"' + (fileSyncOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row" id="settingsBooksSyncRow" style="' + (fileSyncOn ? "" : "display:none;") + '"><span>Включить синхронизацию книг (тестируется)</span><input type="checkbox" id="settingsBooksSyncCb"' + (booksSyncOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" style="border-bottom:none;"><span>Включить режим отладки</span><input type="checkbox" id="settingsDebugModeCb"' + (debugModeOn ? " checked" : "") + '></div>' +
       (showAllTasksOn ? '<button class="modal-btn" id="settingsImportTasksBtn" style="margin-top:16px;">Восстановить задачи из .txt</button>' : '') +
       '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:' + (showAllTasksOn ? "10px" : "16px") + ';">Добавить для себя цель</button>' +
@@ -12461,6 +12510,20 @@
       // следующей успешной синхронизации (doCloudSync) или следующем заходе
       // на вкладку "Мои книги"/"Мои заметки", как и раньше.
       setFileSyncEnabled(this.checked);
+      // ТЗ пользователя от 18.09 — строка с тестовым тумблером книг видна
+      // только когда включён общий тумблер (без него книги synced не будут
+      // в любом случае — оба флага проверяются независимо в одних и тех
+      // же точках гейта).
+      var row = document.getElementById("settingsBooksSyncRow");
+      if(row) row.style.display = this.checked ? "" : "none";
+    });
+
+    document.getElementById("settingsBooksSyncCb").addEventListener("change", function(){
+      // ТЗ пользователя от 18.09 — временный тестовый тумблер, замена
+      // хардкода true в isBooksCloudSyncTemporarilyDisabled(). Сам гейт —
+      // в тех же трёх точках, что и общий getFileSyncEnabled
+      // (registerFileInRegistry/registerFileDeletion/syncFileRegistry).
+      setBooksSyncEnabled(this.checked);
     });
 
     document.getElementById("settingsDebugModeCb").addEventListener("change", function(){
