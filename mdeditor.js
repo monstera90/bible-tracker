@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 2.5 (16.09)
+   Версия: 3.0 (18.09)
    Вкладка "Мои заметки" (первая боковая вкладка второго набора,
    settingsTabSet2Btn1 / "set2s_1") — работа с .md заметками в стиле
    Obsidian. Вынесена в отдельный файл по тому же образцу, что и
@@ -577,6 +577,71 @@ window.initMdEditorModule = function(deps){
     }).catch(function(e){
       if(window.Debug) window.Debug.log("recordImageAdded(" + finalName + "): " + (e && e.message ? e.message : e));
     });
+  }
+  // ⚠️ ДОБАВЛЕНО (18.09, найдена настоящая причина TASK_FIX_TASK_IMAGE_LOSS.md,
+  // четырнадцатый проход). Манифест .manifest.json пополняется ТОЛЬКО изнутри
+  // recordImageAdded — то есть только для картинок, вставленных ПОСЛЕ того,
+  // как появился сам хэш-манифест (14.09). У картинок, оказавшихся в
+  // images/ (OPFS) любым более ранним путём (вставлены до 14.09, до перехода
+  // на OPFS 09.09, или recordImageAdded по какой-то причине не отработал) —
+  // хэша в манифесте нет и никогда не появится сам собой: файл при этом
+  // прекрасно виден и отображается локально (imageIndex/buildImageIndex
+  // ищут по ИМЕНИ, без хэша), поэтому на устройстве-источнике всё выглядит
+  // нормально. А my.js:syncFileRegistry берёт список хэшей для облачного
+  // backfill (версия 23.0) СТРОГО из этого манифеста (Object.keys(manifest))
+  // — если хэша там нет, файла для облака как бы не существует вообще,
+  // сколько ни жди циклов синхронизации. Сам backfill в my.js (23.0)
+  // работает верно — ему просто ни разу не давали полный список.
+  //
+  // reconcileImagesManifest досчитывает недостающее: сверяет имена файлов,
+  // реально лежащих в images/ (imageIndex, обход по факту), с именами,
+  // уже упомянутыми как значения в манифесте — для каждого "лишнего" файла
+  // считает хэш и дописывает в манифест. Вызывается из адаптера
+  // getLocalManifest (см. registerFileRegistryAdapter("images", ...) ниже),
+  // то есть перед КАЖДОЙ облачной сверкой my.js:syncFileRegistry — но
+  // реально досчитывает файлы только один раз за сессию (memoized-промис
+  // manifestReconcilePromise), дальше новые файлы и так сразу попадают в
+  // манифест через recordImageAdded в момент вставки.
+  var manifestReconcilePromise = null;
+  function reconcileImagesManifest(dir){
+    if(manifestReconcilePromise) return manifestReconcilePromise;
+    manifestReconcilePromise = (imageIndexBuilt ? Promise.resolve() : buildImageIndex()).then(function(){
+      return loadImagesManifest(dir).then(function(manifest){
+        var knownNames = {}; // имя_в_нижнем_регистре -> true, уже есть как значение в манифесте
+        Object.keys(manifest).forEach(function(h){
+          if(manifest[h]) knownNames[String(manifest[h]).toLowerCase()] = true;
+        });
+        var missing = [];
+        imageIndex.forEach(function(item){
+          if(!knownNames[item.name.toLowerCase()]) missing.push(item);
+        });
+        if(!missing.length) return manifest;
+        var chain = Promise.resolve();
+        missing.forEach(function(item){
+          chain = chain.then(function(){
+            return item.handle.getFile().then(function(f){ return f.arrayBuffer(); }).then(function(buf){
+              return sha256Hex(buf).then(function(hash){
+                // Если хэш уже занят другим именем (дубликат содержимого,
+                // добавленный раньше и уже учтённый) — не перетираем,
+                // манифест хранит одно имя на хэш, второе имя всё равно
+                // ссылается на те же байты.
+                if(!manifest[hash]) manifest[hash] = item.name;
+              });
+            }).catch(function(e){
+              if(window.Debug) window.Debug.log("reconcileImagesManifest (" + item.name + "): " + (e && e.message ? e.message : e));
+            });
+          });
+        });
+        return chain.then(function(){
+          return saveImagesManifest(dir, manifest).then(function(){ return manifest; });
+        });
+      });
+    }).catch(function(e){
+      manifestReconcilePromise = null; // разрешаем повторить на следующей сверке
+      if(window.Debug) window.Debug.log("reconcileImagesManifest: " + (e && e.message ? e.message : e));
+      return loadImagesManifest(dir);
+    });
+    return manifestReconcilePromise;
   }
   // Убирает finalName из манифеста и (если удалось найти хэш) ставит
   // тумбстоун в облаке — вызывается из deleteImageFile и cleanupOrphanedImages
@@ -5149,7 +5214,13 @@ window.initMdEditorModule = function(deps){
   // ---------------------------------------------------------------------
   if(deps.registerFileRegistryAdapter){
     deps.registerFileRegistryAdapter("images", {
-      getLocalManifest: function(){ return getImagesDirHandle().then(loadImagesManifest); },
+      // ⚠️ ИЗМЕНЕНО (18.09) — раньше здесь стоял loadImagesManifest напрямую
+      // (читал .manifest.json как есть, без сверки с реальной папкой) —
+      // из-за этого backfill в my.js (syncFileRegistry, версия 23.0) никогда
+      // не видел картинки, вставленные до появления хэш-манифеста (14.09):
+      // файл физически лежит в images/, но в .manifest.json о нём ни строчки.
+      // См. reconcileImagesManifest выше — причина и разбор там.
+      getLocalManifest: function(){ return getImagesDirHandle().then(reconcileImagesManifest); },
       saveIncoming: function(hash, name, bytes){
         return getImagesDirHandle().then(function(dir){
           return dir.getFileHandle(name, { create: true });

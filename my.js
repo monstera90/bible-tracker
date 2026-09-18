@@ -1,6 +1,21 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 24.0 (18.09) — структурная правка (ТЗ пользователя): реализован
+   перенос задач кнопкой-стрелочкой между личными вкладками и «Общими
+   задачами» (раньше был явно запрещён — выбор папки в пикере переноса
+   ничего не делал). Т.к. личные задачи и общие задачи живут в двух разных
+   хранилищах (localStorage/облако личного state vs зашифрованный
+   /groups/<groupId>/tasks), перенос сделан через явное копирование:
+   moveTaskToTab при переходе через границу хранилищ теперь зовёт одну из
+   двух новых функций — movePersonalTaskToGroup (личная → общая, только
+   пока isGroupTasksActive()) или moveGroupTaskToPersonal (общая → любая
+   личная вкладка) — каждая создаёт новую запись в целевом хранилище с тем
+   же текстом/флажком/статусом «в работе» и permanently удаляет исходную
+   (тумбстоуном, как обычное удаление задачи). Служебные поля, привязанные
+   к конкретному хранилищу (createdBy/completedBy общей задачи,
+   completionKey/nextForProjectId личной), не переносятся — задача в новом
+   месте стартует с нуля, как только что созданная.
    Версия: 23.0 (18.09) — структурная правка: syncFileRegistry раньше сверял
    ТОЛЬКО хэши, уже известные облачному реестру (Object.keys(registry)) —
    если картинка (в т.ч. вставленная в задачу) была сохранена локально,
@@ -14835,21 +14850,61 @@
   function moveTaskToTab(id, newTab){
     var task = getTaskById(id);
     if(!task || task.c.tab === newTab) return;
-    // TASK_SHARED_TASKS, Шаг 3 — перенос задачи МЕЖДУ личным state и
-    // облачным хранилищем группы через этот универсальный механизм
-    // намеренно не поддерживается (в ТЗ такого переноса нет, а без явной
-    // конвертации содержимого между двумя хранилищами это был бы источник
-    // потери данных). На практике обычно и так недостижимо из UI: личная
-    // задача не может получить newTab==="jointtasks", пока группа активна
-    // (jointtasks в этом случае не обычное хранилище — см.
-    // isGroupTasksActive), а общая задача (isGroupTaskId) в этой функции
-    // всегда имеет tab==="jointtasks", так что переносить её "из" некуда
-    // кроме как через этот явный запрет.
-    if(isGroupTaskId(id)) return;
-    if(newTab === "jointtasks" && isGroupTasksActive()) return;
+    // TASK_SHARED_TASKS — перенос задачи МЕЖДУ личным state и облачным
+    // хранилищем группы (ТЗ пользователя от 18.09): т.к. это два разных
+    // хранилища (localStorage/облако личного стейта vs зашифрованный
+    // /groups/<groupId>/tasks), простой сменой поля c.tab не обойтись —
+    // вместо этого создаём новую запись в целевом хранилище с тем же
+    // содержимым и удаляем исходную (полностью, тумбстоуном, как обычное
+    // удаление задачи) — см. movePersonalTaskToGroup/moveGroupTaskToPersonal
+    // ниже.
+    if(isGroupTaskId(id)){
+      if(newTab === "jointtasks") return; // уже общая задача — переносить некуда
+      moveGroupTaskToPersonal(id, newTab);
+      return;
+    }
+    if(newTab === "jointtasks" && isGroupTasksActive()){
+      movePersonalTaskToGroup(id);
+      return;
+    }
     task.c.tab = newTab;
     if(newTab !== "next") task.c.nextForProjectId = null;
     saveTaskData(id, task.c);
+  }
+  // Перенос ОБЩЕЙ задачи в личное хранилище, на вкладку newTab (любая, кроме
+  // "jointtasks" — та проверка уже сделана в moveTaskToTab выше). Создаёт
+  // новую личную задачу с тем же текстом/отметками (та же логика
+  // homeTab/flag/inWork для вкладок "red"/"worktasks", что и в createTask)
+  // и permanently удаляет исходную общую запись (тумбстоуном в
+  // /groups/<groupId>/tasks — deleteGroupTaskPermanently). Поля, привязанные
+  // к своему хранилищу (createdBy/completedBy у общей задачи,
+  // completionKey/nextForProjectId — ссылаются на записи в конкретном
+  // state), в перенос не берутся — задача в новом хранилище живёт с нуля.
+  function moveGroupTaskToPersonal(id, newTab){
+    var task = getGroupTaskById(id);
+    if(!task) return;
+    var homeTab = (newTab === "red") ? "inbox" : (newTab === "worktasks" ? "next" : newTab);
+    var flag = (newTab === "red") ? "red" : (task.c.flag || null);
+    var inWork = (newTab === "worktasks") ? true : !!task.c.inWork;
+    var newId = genTaskId();
+    saveTaskData(newId, {text: task.c.text || "", tab: homeTab, checked: false, checkedAt: null,
+      completionKey: null, nextForProjectId: null, flag: flag, inWork: inWork});
+    deleteGroupTaskPermanently(id);
+    return newId;
+  }
+  // Перенос ЛИЧНОЙ задачи в общее хранилище группы (вкладка "Общие задачи") —
+  // зеркально moveGroupTaskToPersonal выше: новая общая задача (createdBy —
+  // текущее устройство, completedBy пусто) + permanently удаляем исходную
+  // личную запись.
+  function movePersonalTaskToGroup(id){
+    var task = getTaskById(id);
+    if(!task) return;
+    var newId = genGroupTaskId();
+    saveGroupTaskData(newId, {text: task.c.text || "", tab: "jointtasks", checked: false, checkedAt: null,
+      completionKey: null, nextForProjectId: null, flag: task.c.flag || null, inWork: !!task.c.inWork,
+      createdBy: getDeviceId(), completedBy: null});
+    deleteTaskPermanently(id);
+    return newId;
   }
   // "В начало"/"В конец списка" (пиктограммы ARROW_TOP_ICON_SVG/
   // ARROW_BOTTOM_ICON_SVG, ТЗ пользователя от 14.09). Порядок задач во всех
