@@ -1,11 +1,17 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 20.1 (18.09) — диагностика для расследования "картинка не
+   Версия: 20.2 (18.09) — диагностика для расследования "картинка не
    передаётся между устройствами" (window.Debug.log в hydrateTaskImages/
    __retryTaskImageHydration/syncFileRegistry) + фикс проглатываемого
    reject в hydrateTaskImages (getImageBlobUrl().then без .catch) +
    диагностика шторма дублирующихся fetch к одному URL (fetchWithTimeout)
+   + НАЙДЕН И ПОЧИНЕН реальный источник тормозов: syncFileRegistry и
+   syncGroupImageRegistry слали ОТДЕЛЬНЫЙ PATCH на КАЖДЫЙ файл реестра
+   (confirmedBy/uploadedAt) — при ~40 файлах это давало ~40 почти
+   одновременных запросов к syncs/<id>.json (подтверждено логом
+   пользователя: до 42 параллельных ДУБЛЕЙ). Теперь все патчи цикла
+   копятся в один объект и уходят одним PATCH в конце сверки.
    =========================================================================== */
 
 (function(){
@@ -8750,6 +8756,18 @@
     if(fileRegistrySyncInProgress[kind]) return Promise.resolve();
     fileRegistrySyncInProgress[kind] = true;
     var myId = getDeviceId();
+    // ⚠️ ДОБАВЛЕНО (18.09, по логу пользователя): раньше КАЖДЫЙ chore
+    // (на каждый hash реестра) слал СВОЙ отдельный patchNotesCloud —
+    // при ~40 файлах в реестре это давало ~40 почти одновременных PATCH
+    // к одному и тому же узлу syncs/<id>.json (см.
+    // fetchWithTimeout-диагностику: "ДУБЛЬ — уже летит N запрос(ов)",
+    // N доходило до 42) — именно это и подвешивало интерфейс на
+    // секунды сразу после переключения вкладки. Firebase PATCH умеет
+    // multi-location update одним запросом (ключи со слэшами), поэтому
+    // теперь каждый chore просто ДОПИСЫВАЕТ свои ключи в общий
+    // pendingRegistryPatch, а один-единственный patchNotesCloud с ним
+    // уходит в самом конце цикла, после Promise.all(chores).
+    var pendingRegistryPatch = {};
     return Promise.all([
       fetchNotesCloudPath("files/" + kind).catch(function(){ return null; }),
       fetchNotesCloudPath("devices").catch(function(){ return null; }),
@@ -8824,7 +8842,7 @@
             var patch = {};
             patch["files/" + kind + "/" + hash + "/confirmedBy/" + myId] = true;
             patch["files/" + kind + "/" + hash + "/uploadedAt"] = null;
-            return patchNotesCloud(patch);
+            Object.keys(patch).forEach(function(k){ pendingRegistryPatch[k] = patch[k]; });
           }).then(function(){
             // Файл наконец забрали — если это была НАША заявка, снимаем её.
             return (pendingRequest && pendingRequest.by === myId) ? clearFileRequest(kind, hash) : null;
@@ -8851,9 +8869,7 @@
           return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
             return uploadFileToCloud(kind, hash, buf);
           }).then(function(){
-            var patch = {};
-            patch["files/" + kind + "/" + hash + "/uploadedAt"] = now;
-            return patchNotesCloud(patch);
+            pendingRegistryPatch["files/" + kind + "/" + hash + "/uploadedAt"] = now;
           }).catch(function(){});
         }
 
@@ -8867,16 +8883,20 @@
         // заявитель, и держатель — это ожидаемое ограничение (раздел 4.3).
         if(entry.uploadedAt && !pendingRequest && (!missingConfirmations || (now - entry.uploadedAt) > FILE_RELAY_TTL_MS)){
           return deleteFileFromCloud(kind, hash).then(function(){
-            var patch = {};
-            patch["files/" + kind + "/" + hash + "/uploadedAt"] = null;
-            return patchNotesCloud(patch);
+            pendingRegistryPatch["files/" + kind + "/" + hash + "/uploadedAt"] = null;
           }).catch(function(){});
         }
 
         return null;
       });
 
-      return Promise.all(chores);
+      return Promise.all(chores).then(function(){
+        // Единственный PATCH на весь цикл сверки — вместо одного на
+        // каждый файл (см. комментарий у pendingRegistryPatch выше).
+        if(Object.keys(pendingRegistryPatch).length){
+          return patchNotesCloud(pendingRegistryPatch).catch(function(){});
+        }
+      });
     }).catch(function(){}).finally(function(){
       fileRegistrySyncInProgress[kind] = false;
     });
@@ -9142,6 +9162,9 @@
         var localHashes = {};
         Object.keys(manifest).forEach(function(h){ localHashes[h] = true; });
         var knownDeviceIds = Object.keys(members || {}); // самоочищающийся список — см. пояснение выше
+        // ⚠️ ДОБАВЛЕНО (18.09) — тот же приём, что и в syncFileRegistry
+        // выше: один общий PATCH на весь цикл вместо одного на каждый hash.
+        var pendingGroupPatch = {};
 
         var chores = Object.keys(registry).map(function(hash){
           var entry = registry[hash] || {};
@@ -9171,10 +9194,8 @@
             }).then(function(){
               return deleteFileFromGroupCloud(groupId, hash).catch(function(){});
             }).then(function(){
-              var patch = {};
-              patch["files/images/" + hash + "/confirmedBy/" + myId] = true;
-              patch["files/images/" + hash + "/uploadedAt"] = null;
-              return patchGroupCloud(groupId, patch);
+              pendingGroupPatch["files/images/" + hash + "/confirmedBy/" + myId] = true;
+              pendingGroupPatch["files/images/" + hash + "/uploadedAt"] = null;
             }).then(function(){
               return (pendingRequest && pendingRequest.by === myId) ? clearGroupFileRequest(groupId, hash) : null;
             }).catch(function(){});
@@ -9188,9 +9209,7 @@
             return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
               return uploadFileToGroupCloud(groupId, hash, buf);
             }).then(function(){
-              var patch = {};
-              patch["files/images/" + hash + "/uploadedAt"] = Date.now();
-              return patchGroupCloud(groupId, patch);
+              pendingGroupPatch["files/images/" + hash + "/uploadedAt"] = Date.now();
             }).catch(function(){});
           }
 
@@ -9199,16 +9218,18 @@
           // временную копию (тот же TTL, что у личного канала, раздел 4.4/4.5).
           if(entry.uploadedAt && !pendingRequest && (!missingConfirmations || (Date.now() - entry.uploadedAt) > FILE_RELAY_TTL_MS)){
             return deleteFileFromGroupCloud(groupId, hash).then(function(){
-              var patch = {};
-              patch["files/images/" + hash + "/uploadedAt"] = null;
-              return patchGroupCloud(groupId, patch);
+              pendingGroupPatch["files/images/" + hash + "/uploadedAt"] = null;
             }).catch(function(){});
           }
 
           return null;
         });
 
-        return Promise.all(chores);
+        return Promise.all(chores).then(function(){
+          if(Object.keys(pendingGroupPatch).length){
+            return patchGroupCloud(groupId, pendingGroupPatch).catch(function(){});
+          }
+        });
       });
     }).catch(function(){}).finally(function(){
       groupFileRegistrySyncInProgress[groupId] = false;
