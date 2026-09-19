@@ -1,5 +1,6 @@
 // syncengine_groupbinding.js
-// Версия: 1.0 (19.09)
+// Версия: 1.1 (19.09) — только диагностика: save/remove/syncNow пишут строку в
+// журнал (opts.log). Логика не менялась.
 //
 // TASK_UNIFIED_SYNC.md, Шаг 3: связка «групповой облачный путь ↔ sync-engine ↔
 // транспорт ↔ локальный кэш my.js». Первый реальный потребитель движка.
@@ -219,14 +220,17 @@
     }
 
     function save(id, data) {
+      log('GroupBinding:' + name + ' save ' + id);
       return engine.saveRecord(ensure().storeId, id, data);
     }
 
     function remove(id) {
+      log('GroupBinding:' + name + ' remove ' + id);
       return engine.deleteRecord(ensure().storeId, id);
     }
 
     function syncNow() {
+      log('GroupBinding:' + name + ' syncNow');
       return transport.syncNow(ensure().storeId);
     }
 

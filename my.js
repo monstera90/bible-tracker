@@ -1,6 +1,11 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 25.1 (19.09) — только диагностика (в журнал отладки, логика не
+   менялась) после ручной проверки Шага 3: doCloudSync пишет старт/время/итог/
+   ОШИБКУ (раньше ошибка шла только в console.error, а в журнал — нет), какие
+   task:-ключи уходят в облако; refreshJointTasksData и
+   rerenderJointTasksTabIfOpen пишут, что и почему (не) сделали.
    Версия: 25.0 (19.09) — структурная правка (TASK_UNIFIED_SYNC.md, Шаг 3):
    ОБЩИЕ ЗАДАЧИ (/groups/<groupId>/tasks) переведены на sync-engine
    (syncengine.js + syncengine_transport.js + syncengine_groupcrypto.js +
@@ -4085,12 +4090,17 @@
   function doCloudSync(urgent){
     if(!syncId) { setSyncState("off"); return; }
     if(!navigator.onLine){ setSyncState("offline"); settleInitialTaskSync(); return; }
-    if(syncInProgress) return;
+    if(syncInProgress){
+      if(window.Debug) window.Debug.log("doCloudSync: пропущен — предыдущий цикл ещё идёт");
+      return;
+    }
     syncInProgress = true;
     setSyncState("syncing");
+    var syncT0 = Date.now();
+    if(window.Debug) window.Debug.log("doCloudSync: старт" + (urgent ? " (urgent)" : ""));
     fetchCloudBlob(syncId, {keepalive: urgent}).then(function(cloudData){
       cloudData = stripCloudReservedSubtrees(cloudData, "doCloudSync");
-      if(window.Debug) window.Debug.log("doCloudSync: получено с облака, задач в облаке=" + Object.keys(cloudData || {}).filter(function(k){ return k.indexOf("task:") === 0; }).length + ", задач локально=" + getAllTasks().length);
+      if(window.Debug) window.Debug.log("doCloudSync: получено с облака за " + (Date.now() - syncT0) + " мс, задач в облаке=" + Object.keys(cloudData || {}).filter(function(k){ return k.indexOf("task:") === 0; }).length + ", задач локально=" + getAllTasks().length);
       var merged = mergeStates(state, cloudData);
       // ⚠️ ДИАГНОСТИКА (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md —
       // картинка/текст личной задачи пропадает именно на устройстве, где
@@ -4114,6 +4124,13 @@
       });
       var localChanged = !statesEqual(merged, state);
       var cloudChanged = !statesEqual(merged, cloudData);
+      // дельта считается один раз: и для журнала, и для отправки ниже
+      var cloudDelta = cloudChanged ? buildStateDelta(merged, cloudData) : null;
+      if(window.Debug){
+        var deltaKeys = cloudDelta ? Object.keys(cloudDelta) : [];
+        var deltaTaskKeys = deltaKeys.filter(function(k){ return k.indexOf("task:") === 0; });
+        window.Debug.log("doCloudSync: слияние — локально изменилось=" + localChanged + ", в облако уйдёт ключей=" + deltaKeys.length + " (из них task:=" + deltaTaskKeys.length + (deltaTaskKeys.length ? ": " + deltaTaskKeys.slice(0, 5).join(", ") : "") + ")");
+      }
       state = merged;
       if(localChanged){
         saveLocalState();
@@ -4126,9 +4143,10 @@
         // см. подробное объяснение гонки у putCloudBlob. Теперь отправляем
         // только реально отличающиеся от только что прочитанного cloudData
         // ключи — putCloudBlob шлёт их через PATCH, не трогая остальное.
-        return putCloudBlob(syncId, buildStateDelta(merged, cloudData), {keepalive: urgent});
+        return putCloudBlob(syncId, cloudDelta, {keepalive: urgent});
       }
     }).then(function(){
+      if(window.Debug) window.Debug.log("doCloudSync: завершён успешно за " + (Date.now() - syncT0) + " мс");
       syncRetryCount = 0;
       clearTimeout(syncRetryTimer);
       setSyncState("synced");
@@ -4151,6 +4169,7 @@
       }
     }).catch(function(err){
       console.error("Ошибка синхронизации:", err);
+      if(window.Debug) window.Debug.log("doCloudSync: ОШИБКА за " + (Date.now() - syncT0) + " мс — " + (err && err.name ? err.name + ": " : "") + (err && err.message ? err.message : err) + " (повторов уже было: " + syncRetryCount + " из " + SYNC_RETRY_DELAYS.length + ")");
       // Код истёк (данные на сервере удалены за неактивностью дольше года,
       // см. fetchCloudBlob) — повторять попытки бессмысленно, кода больше
       // не существует. Отключаем синхронизацию на этом устройстве, локальный
@@ -5358,11 +5377,12 @@
   // защита от прерывания редактирования, что и в rerenderAllFromState
   // (не разрушаем открытое поле ввода фоновым обновлением).
   function rerenderJointTasksTabIfOpen(){
-    if(currentSettingsTab !== "jointtasks") return;
-    if(!settingsModalOverlay || !settingsModalOverlay.classList.contains("open")) return;
+    if(currentSettingsTab !== "jointtasks"){ syncEngineLog("Общие задачи: перерисовка пропущена — открыта другая вкладка (" + currentSettingsTab + ")"); return; }
+    if(!settingsModalOverlay || !settingsModalOverlay.classList.contains("open")){ syncEngineLog("Общие задачи: перерисовка пропущена — окно настроек закрыто"); return; }
     var activeEl = document.activeElement;
     var isEditingNow = !!(activeEl && activeEl.classList && activeEl.classList.contains("task-editable"));
-    if(isEditingNow) return;
+    if(isEditingNow){ syncEngineLog("Общие задачи: перерисовка пропущена — сейчас идёт редактирование строки"); return; }
+    syncEngineLog("Общие задачи: перерисовка вкладки после приёма чужих правок");
     renderTaskTabList("jointtasks");
   }
 
@@ -5372,6 +5392,7 @@
   // syncId (личная синхронизация может быть вообще не настроена).
   function refreshJointTasksData(){
     if(!sharedGroup) return;
+    syncEngineLog("refreshJointTasksData: role=" + sharedGroup.role + ", активна=" + isGroupTasksActive() + ", online=" + navigator.onLine);
     if(sharedGroup.role === "member"){
       // Шаг 5: у отвязки нет push-уведомления участнику — единственный
       // способ узнать, что админ его отвязал (см. handleGroupUnlinkKeepData/

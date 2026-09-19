@@ -1,5 +1,8 @@
 // syncengine_transport.js
-// Версия: 1.0 (18.09)
+// Версия: 1.1 (19.09) — только диагностика (в журнал, через opts.log, теперь
+// пишутся и УСПЕШНЫЕ push/pull, событие dirty, пропущенный фоновый push);
+// логика не менялась. Раньше в журнал попадали только ошибки, поэтому по нему
+// нельзя было отличить «не отправлялось» от «отправилось, но не дошло».
 //
 // TASK_UNIFIED_SYNC.md, Шаг 2, часть 1 из 3: транспорт sync-engine поверх
 // Firebase Realtime Database (REST, как везде в my.js — без SDK).
@@ -216,7 +219,12 @@
       if (autoPush && !offDirty) {
         offDirty = engine.on('dirty', function (e) {
           var st = attached.get(e.storeId);
-          if (st) schedulePush(st);
+          if (st) {
+            log('SyncEngineTransport "' + e.storeId + '": dirty ' + e.recordId + ' → push через ' + debounceMs + ' мс');
+            schedulePush(st);
+          } else {
+            log('SyncEngineTransport: dirty для неподключённого store "' + e.storeId + '" (запись ' + e.recordId + ') — push НЕ запланирован');
+          }
         });
       }
     }
@@ -233,7 +241,10 @@
     // push из таймера: store мог быть отключён, а любая ошибка — только в лог
     // (pushNow сетевые ошибки и так не бросает; это страховка от необработанного reject).
     function backgroundPush(st) {
-      if (destroyed || attached.get(st.storeId) !== st) return;
+      if (destroyed || attached.get(st.storeId) !== st) {
+        log('SyncEngineTransport фоновый push "' + st.storeId + '" пропущен: store отключён или транспорт уничтожен');
+        return;
+      }
       pushNow(st.storeId).catch(function (err) {
         log('SyncEngineTransport фоновый push "' + st.storeId + '": ' + errMessage(err));
       });
@@ -312,12 +323,20 @@
       // Дополняем записями из сверки syncNow (локально новее облака, но dirty-флаг потерян).
       var byId = new Map();
       dirty.forEach(function (r) { byId.set(r.id, r); });
+      var dirtyCount = dirty.length;
+      var extraCount = st.extra.size;
       st.extra.forEach(function (r, id) {
         var cur = byId.get(id);
         if (!cur || cur.updatedAt < r.updatedAt) byId.set(id, r);
       });
       st.extra.clear();
-      return pushRecords(st, Array.from(byId.values()), pushOpts);
+      var toSend = Array.from(byId.values());
+      var pushT0 = Date.now();
+      log('SyncEngineTransport push "' + st.storeId + '": старт, к отправке ' + toSend.length + ' зап. (dirty=' + dirtyCount + ', из сверки=' + extraCount + ')');
+      var pushRes = await pushRecords(st, toSend, pushOpts);
+      log('SyncEngineTransport push "' + st.storeId + '": итог — отправлено ' + pushRes.pushed + ', не ушло ' + pushRes.failed.length +
+        (pushRes.error ? ', ОШИБКА ' + errMessage(pushRes.error) : '') + ', ' + (Date.now() - pushT0) + ' мс');
+      return pushRes;
     }
 
     /**
@@ -376,6 +395,8 @@
 
     async function pullInternal(st) {
       var out = { applied: 0, skipped: 0, undecryptable: [], invalid: [], cloudTimes: {}, error: null };
+      var pullT0 = Date.now();
+      log('SyncEngineTransport pull "' + st.storeId + '": старт');
       var raw;
       try {
         var res = await request(st.url, { method: 'GET' }, pullTimeoutMs, true);
@@ -430,6 +451,8 @@
         emitter.emit('warning', { storeId: st.storeId, kind: 'invalid', ids: out.invalid });
       }
       if (out.applied) emitter.emit('pulled', { storeId: st.storeId, applied: out.applied });
+      log('SyncEngineTransport pull "' + st.storeId + '": итог — в облаке ' + ids.length + ' зап., применено ' + out.applied +
+        ', пропущено ' + out.skipped + ', нечитаемых ' + out.undecryptable.length + ', невалидных ' + out.invalid.length + ', ' + (Date.now() - pullT0) + ' мс');
       return out;
     }
 
