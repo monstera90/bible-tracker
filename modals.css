@@ -1,5 +1,10 @@
 /* ===========================================================================
    modals.css
+   Версия: 2.0 (19.09) — структурная правка: новый класс .task-info-wrap-far; ряд
+   кнопок задач пересчитан под угол 7px и шаг 39px (32+7): домик 7, "+" 46,
+   скрепка 85, "Аа" 124, выделитель 163, "Ж" 202, режим чтения 241, кнопка-
+   контекст (глаз/сортировка/меню/звенья) 280, "i" 280 либо 319 (см. класс).
+   bottom рядов 8px -> 7px, gap плашек "Забытых заметок" 7px.
    Версия: 1.2 (16.09)
    Модальные окна: история версий, настройки (шестерёнка), синхронизация
    (QR/скан), отключение анимаций при массовых операциях
@@ -959,9 +964,9 @@
     position:absolute;
     left:8px;
     right:8px;
-    bottom:8px;
+    bottom:7px;
     display:flex;
-    gap:8px;
+    gap:7px;
     z-index:5;
   }
   .mdeditor-forgotten-pills .review-pill{
@@ -1229,8 +1234,8 @@
   .task-add-fab{
     display:none;
     position:absolute;
-    right:8px;
-    bottom:8px;
+    right:7px;
+    bottom:7px;
     width:32px;height:32px;
     border-radius:8px;
     border:1px solid var(--groove-shadow);
@@ -1284,16 +1289,16 @@
   .task-fontsize-wrap{
     display:none;
     position:absolute;
-    right:128px;
-    bottom:8px;
+    right:124px;
+    bottom:7px;
     z-index:5;
   }
   .task-fontsize-wrap.visible{ display:flex; }
   .task-format-wrap{
     display:none;
     position:absolute;
-    right:208px;
-    bottom:8px;
+    right:202px;
+    bottom:7px;
     z-index:5;
   }
   .task-format-wrap.visible{ display:flex; }
@@ -1306,8 +1311,8 @@
   .task-highlight-wrap{
     display:none;
     position:absolute;
-    right:168px;
-    bottom:8px;
+    right:163px;
+    bottom:7px;
     z-index:5;
   }
   .task-highlight-wrap.visible{ display:flex; }
@@ -1346,8 +1351,8 @@
   .task-reading-wrap{
     display:none;
     position:absolute;
-    right:248px;
-    bottom:8px;
+    right:241px;
+    bottom:7px;
     z-index:5;
   }
   .task-reading-wrap.visible{ display:flex; }
@@ -1363,8 +1368,8 @@
   .task-hide-linked-wrap{
     display:none;
     position:absolute;
-    right:328px;
-    bottom:8px;
+    right:280px;
+    bottom:7px;
     z-index:5;
   }
   .task-hide-linked-wrap.visible{ display:flex; }
@@ -1382,8 +1387,8 @@
   .task-joint-menu-wrap{
     display:none;
     position:absolute;
-    right:328px;
-    bottom:8px;
+    right:280px;
+    bottom:7px;
     z-index:5;
   }
   .task-joint-menu-wrap.visible{ display:flex; }
@@ -1454,8 +1459,8 @@
   .task-red-sort-wrap{
     display:none;
     position:absolute;
-    right:328px;
-    bottom:8px;
+    right:280px;
+    bottom:7px;
     z-index:5;
   }
   .task-red-sort-wrap.visible{ display:flex; }
@@ -1472,19 +1477,25 @@
   .task-info-wrap{
     display:none;
     position:absolute;
-    right:288px;
-    bottom:8px;
+    right:280px;
+    bottom:7px;
     z-index:5;
   }
   .task-info-wrap.visible{ display:flex; }
+  /* 19.09 (ТЗ пользователя): на вкладках Next/Red/"Общие задачи" и на экране
+     "Все задачи проекта" кнопка-контекст ("глаз"/сортировка/меню/звенья)
+     стоит ближе к "Ж" (right:280), а "i" — левее неё (right:319). Класс
+     вешает JS: syncTaskFabRowForTab и openTaskNextPicker (my.js). На остальных
+     вкладках задач класса нет — "i" остаётся на right:280 без дырки в ряду. */
+  .task-info-wrap.task-info-wrap-far{ right:319px; }
   /* скрепка — между "Аа" и "+" (см. index.html и ТЗ пользователя, та же
      логика попапа не нужна: сразу открывает системный диалог выбора
      файла, см. initTaskGlobalToolbar в my.js) */
   .task-attach-wrap{
     display:none;
     position:absolute;
-    right:88px;
-    bottom:8px;
+    right:85px;
+    bottom:7px;
     z-index:5;
   }
   .task-attach-wrap.visible{ display:flex; }
@@ -1630,8 +1641,8 @@
      render() (my.js), тем же приёмом, что у globalFab/homeStubHide там же. */
   .task-project-fab-link{
     position:absolute;
-    right:248px;
-    bottom:8px;
+    right:280px;
+    bottom:7px;
     z-index:5;
   }
   /* "+" этого экрана (см. #taskProjectCreateFab в my.js) — тот же класс
@@ -1643,7 +1654,7 @@
      на остальных вкладках задач (.task-add-fab-shifted ниже) — угол там
      тоже занят домиком, теперь уже общим для всех вкладок. */
   #taskProjectCreateFab{
-    right:48px;
+    right:46px;
   }
   /* "Домик" (#taskProjectHomeBtn) — правый угол ряда (доработка 13.09:
      раньше стояла самой левой, но в "Моём блокноте" — mdeditor.js —
@@ -1656,8 +1667,8 @@
      над кнопкой без текста ("подбородок"). */
   .task-project-fab-home{
     position:absolute;
-    right:8px;
-    bottom:8px;
+    right:7px;
+    bottom:7px;
     z-index:5;
   }
 
@@ -1677,8 +1688,8 @@
   #taskFabHomeStub{
     display:none;
     position:absolute;
-    right:8px;
-    bottom:8px;
+    right:7px;
+    bottom:7px;
     z-index:5;
     cursor:default;
     pointer-events:none;
@@ -1689,7 +1700,7 @@
      выше) на то же место, что и на экране "Все задачи проекта" (right:48,
      см. #taskProjectCreateFab выше) — угол теперь всегда занят домиком,
      а не только на списке "Мои проекты" (доработка 13.09). */
-  .task-add-fab.task-add-fab-shifted{ right:48px; }
+  .task-add-fab.task-add-fab-shifted{ right:46px; }
 
   /* сетка выбора вкладки-назначения (перенос задачи) — переиспользует
      общее модальное окно (modalOverlay/modalBox), тот же приём, что и у

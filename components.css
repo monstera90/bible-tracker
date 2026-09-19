@@ -1,5 +1,9 @@
 /* ===========================================================================
    components.css
+   Версия: 3.0 (19.09) — структурная правка: новый класс .books-list-tab (кнопка
+   импорта на вкладке "Книги" прижата к низу); нижние отступы/промежутки рядов
+   кнопок 8px -> 7px (.mdeditor-fab-row, .mdeditor-fontsize-popup, .review-pills,
+   .subtitle-controls-fab, .workbooks-actions-row, .mood-checkin-grid во вкладке).
    Версия: 2.1 (15.09)
    Основные UI-компоненты: индикатор синхронизации, полосы прогресса
    (общий прогресс, счётчики часов), личные цели, список книг и глав
@@ -76,7 +80,10 @@
      (см. .mood-checkin-grid выше), но с уменьшенными отступами и
      размером содержимого — пропорции те же, просто немного компактнее,
      чтобы уверенно помещаться по ширине и на узких экранах. */
-  #settingsTabContent .mood-checkin-grid{ gap:6px; }
+  /* 19.09 (ТЗ пользователя): нижний ряд кнопок настроения — 7px от нижнего
+     края окна (как у нижних рядов остальных вкладок); без этого действовал
+     общий margin-bottom:10px у .mood-checkin-grid выше. */
+  #settingsTabContent .mood-checkin-grid{ gap:6px; margin-bottom:7px; }
   #settingsTabContent .mood-checkin-item{ padding:8px 3px; }
   #settingsTabContent .mood-checkin-item .emoji{ font-size:22px; }
   #settingsTabContent .mood-checkin-item .label{ font-size:10px; }
@@ -181,7 +188,7 @@
        (см. modals.css), поэтому этот margin и есть весь зазор до края
        (правка от 07.09, приведение вкладок workbooks/s89fill/jwlmerge/
        epubsplit/imgresize к единому стилю с образцом). */
-    margin-bottom:8px;
+    margin-bottom:7px;
   }
   /* Высота и шрифт "Начать"/"Скачать" — как у кнопки "Скачать" образца
      (.subtitle-download-btn, класс .mdeditor-fab-btn — квадрат 32x32):
@@ -478,7 +485,7 @@
     position:absolute;
     left:16px;
     right:16px;
-    bottom:8px;
+    bottom:7px;
     display:flex;
     flex-direction:column;
     align-items:flex-start;
@@ -2262,13 +2269,15 @@
      кнопками может быть частично скрыт — это ожидаемо и не проблема. Домик
      — правее переключателя режима. right уменьшен с 16px до 8px — весь
      ряд (а значит и переключатель код/без кода, который стоит левее
-     домика в этом же ряду) сдвинут чуть правее, ближе к краю окна. ---------- */
+     домика в этом же ряду) сдвинут чуть правее, ближе к краю окна.
+     19.09 (ТЗ пользователя): right/bottom/gap — везде 7px (было 8px), так же
+     на вкладках задач и в ридере книг (см. modals.css). ---------- */
   .mdeditor-fab-row{
     position:absolute;
-    right:8px;
-    bottom:8px;
+    right:7px;
+    bottom:7px;
     display:flex;
-    gap:8px;
+    gap:7px;
     pointer-events:none;
     z-index:5;
   }
@@ -2348,9 +2357,9 @@
     display:none;
     position:absolute;
     left:0;
-    bottom:calc(100% + 8px);
+    bottom:calc(100% + 7px);
     flex-direction:column;
-    gap:8px;
+    gap:7px;
   }
   .mdeditor-fontsize-popup.open{ display:flex; }
   /* ---------- список тем/папок (экран без открытой заметки) — папки
@@ -2404,6 +2413,26 @@
     width:100%;
     box-sizing:border-box;
     text-align:center;
+  }
+  /* Вкладка "Книги" (renderSettingsTabBooks в my.js, ТЗ пользователя от
+     19.09): кнопка "Загрузить fb2, epub или zip книг" опущена к самому низу
+     окна, 7px от нижней границы. Вкладка (.mdeditor-tab, display:block)
+     растягивается на всю высоту #settingsTabContent (flex-column, см.
+     modals.css) и сама становится flex-column — тогда margin-top:auto у
+     блока кнопки прижимает его вниз, пока список короткий; когда список
+     длиннее окна, вкладка просто растёт, и кнопка идёт в конце списка,
+     как раньше (докрутить до конца). padding-top держит зазор 16px до
+     списка в этом случае. Только для этой вкладки — у "Моих заметок" тот же
+     .mdeditor-list-actions остаётся как был. */
+  .mdeditor-tab.books-list-tab{
+    display:flex;
+    flex-direction:column;
+    flex:1 0 auto;
+  }
+  .books-list-tab .mdeditor-list-actions{
+    margin-top:auto;
+    padding-top:16px;
+    margin-bottom:7px;
   }
   .mdeditor-row{
     position:relative;
@@ -3377,7 +3406,7 @@
     position:absolute;
     left:16px;
     right:16px;
-    bottom:8px;
+    bottom:7px;
     display:flex;
     gap:8px;
     margin:0;

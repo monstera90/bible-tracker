@@ -1,6 +1,11 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 25.2 (19.09) — ряд кнопок задач под 7px (ТЗ пользователя): на экране
+   "Все задачи проекта" добавлена кнопка режима чтения ("полноэкранный
+   режим"), "i" сдвигается левее кнопки-контекста (класс task-info-wrap-far,
+   syncTaskFabRowForTab/openTaskNextPicker); вкладка "Книги" получила класс
+   books-list-tab (кнопка импорта прижата к низу). Логика данных не менялась.
    Версия: 25.1 (19.09) — только диагностика (в журнал отладки, логика не
    менялась) после ручной проверки Шага 3: doCloudSync пишет старт/время/итог/
    ОШИБКУ (раньше ошибка шла только в console.error, а в журнал — нет), какие
@@ -1998,9 +2003,10 @@
     // applyReadingModeVisual/READING_MODE_KEY выше) — тем же условием,
     // что и "i" выше: видна на ЛЮБОЙ вкладке задач. Экран "Все задачи
     // проекта" (openTaskNextPicker ниже) syncTaskFabRowForTab не
-    // вызывает при входе, поэтому там эта кнопка прячется явно, отдельной
-    // строкой в самом openTaskNextPicker (слот right:248 там занят
-    // кнопкой-звеном, .task-project-fab-link).
+    // вызывает при входе, поэтому там эта кнопка (как и "i") включается
+    // явно, отдельными строками в самом openTaskNextPicker (с 19.09 —
+    // ТЗ пользователя: кнопка режима чтения показывается и там, звенья
+    // стоят левее неё, right:280 в modals.css).
     var readingWrap = document.getElementById("taskReadingWrap");
     if(readingWrap) readingWrap.classList.toggle("visible", showTaskFab);
     // "глаз" (скрыть задачи, привязанные к проектам, см.
@@ -2022,6 +2028,17 @@
     // .task-red-sort-wrap), видна только на самой вкладке "Red".
     var redSortWrap = document.getElementById("taskRedSortWrap");
     if(redSortWrap) redSortWrap.classList.toggle("visible", tab === "red");
+    // ТЗ пользователя от 19.09: на вкладках, где есть своя кнопка-контекст
+    // ("глаз" на Next, сортировка на Red, меню на "Общих задачах"), она
+    // стоит рядом с кнопкой режима чтения, а "i" — левее неё (см.
+    // .task-info-wrap-far в modals.css). На остальных вкладках задач "i"
+    // остаётся рядом с режимом чтения, без дырки в ряду. Ставим явно
+    // булевым toggle — при любом выходе с экрана "Все задачи проекта"
+    // (там класс включает openTaskNextPicker) он сбрасывается сам.
+    if(infoWrap){
+      infoWrap.classList.toggle("task-info-wrap-far",
+        tab === "next" || tab === "red" || tab === "jointtasks");
+    }
 
     // Заглушка-домик — на любой вкладке задач с рядом кнопок (не на
     // карточке проекта: там openTaskNextPicker рисует свою, кликабельную
@@ -6336,10 +6353,11 @@
     // --- кнопка режима чтения (ТЗ пользователя от 18.09) — см.
     // READING_MODE_KEY/getReadingModeActive/setReadingModeActive/
     // applyReadingModeVisual выше. Видна на любой вкладке задач (тем же
-    // условием showTaskFab, что и "i" выше), кроме экрана "Все задачи
-    // проекта" (там слот занят кнопкой-звеном, см. openTaskNextPicker
-    // ниже). Глобальный флаг — переключается здесь, но действует
-    // одинаково на любом экране приложения, не только на вкладках задач.
+    // условием showTaskFab, что и "i" выше), а с 19.09 и на экране "Все
+    // задачи проекта" (см. openTaskNextPicker ниже — там её включает
+    // openTaskNextPicker, звенья стоят левее). Глобальный флаг —
+    // переключается здесь, но действует одинаково на любом экране
+    // приложения, не только на вкладках задач.
     var readingBtn = document.getElementById("taskReadingBtn");
     stopMousedown(readingBtn);
     applyReadingModeVisual();
@@ -10016,7 +10034,7 @@
     syncFileRegistry("books");
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
-    var html = '<div class="mdeditor-tab">';
+    var html = '<div class="mdeditor-tab books-list-tab">';
     html += '<h3 class="common-tab-title">Книги</h3>';
     html += '<div class="mdeditor-list mdeditor-list-grid" id="booksList"></div>';
     html += '<div class="mdeditor-status" id="booksStatus"></div>';
@@ -16778,16 +16796,23 @@
       // в том же углу была бы лишней/перекрывала бы его.
       var homeStubHide = document.getElementById("taskFabHomeStub");
       if(homeStubHide) homeStubHide.classList.remove("visible");
-      // Кнопка режима чтения (right:248, ТЗ пользователя от 18.09) —
-      // прячем явно: на этом экране тот же слот в ряду занят кнопкой-
-      // звеном (.task-project-fab-link выше), а syncTaskFabRowForTab
-      // здесь не вызывается (см. комментарий у globalFab выше), поэтому
-      // без этой строки кнопка осталась бы видна с прошлой вкладки и
-      // рисовалась бы поверх звена. Возвращается сама — switchSettingsTab
-      // выставляет видимость заново для каждой вкладки задач (тем же
-      // приёмом, что и у "+"/домика выше).
-      var readingWrapHide = document.getElementById("taskReadingWrap");
-      if(readingWrapHide) readingWrapHide.classList.remove("visible");
+      // Кнопка режима чтения ("полноэкранный режим", right:241) —
+      // ТЗ пользователя от 19.09: на этом экране она теперь тоже есть.
+      // Раньше её прятали (слот right:248 делила кнопка-звено), теперь
+      // звенья сдвинуты на right:280, а слева от "Ж" идут: режим чтения
+      // (241) → звенья (280) → "i" (319). syncTaskFabRowForTab здесь не
+      // вызывается (см. комментарий у globalFab выше), поэтому обе кнопки
+      // включаем явно — не полагаясь на то, что они остались видны с
+      // прошлой вкладки. Возвращаются на свои места сами —
+      // switchSettingsTab выставляет видимость/класс заново для каждой
+      // вкладки задач (тем же приёмом, что и у "+"/домика выше).
+      var readingWrapShow = document.getElementById("taskReadingWrap");
+      if(readingWrapShow) readingWrapShow.classList.add("visible");
+      var infoWrapShow = document.getElementById("taskInfoWrap");
+      if(infoWrapShow){
+        infoWrapShow.classList.add("visible");
+        infoWrapShow.classList.add("task-info-wrap-far");
+      }
 
       // Название проекта уже вставлено выше (projectNameHtml) — без
       // кнопок управления (см. комментарий у projectNameHtml), поэтому
