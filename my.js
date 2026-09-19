@@ -1,6 +1,13 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 28.0 (19.09) — структурная правка: (1) списки задач по createdAt по
+   ВОЗРАСТАНИЮ — новая задача внизу (getTasksForTab/getGroupTasksForTab,
+   moveTaskToEdge «в начало/в конец» поменяны местами, вставка в «+»); (2) вкладки
+   задач (кроме архива) без сохранённой позиции открываются снизу
+   (restoreTabScroll), разовый сброс старых позиций (migrateTaskTabScrollToBottomFirst,
+   ключ taskListOrderAsc_v1); (3) initTaskKeyboardLift — поле задачи поднимается
+   над клавиатурой без сдвига вкладок (virtualKeyboard.overlaysContent + boundingRect).
    Версия: 27.0 (19.09) — структурная правка: клик по язычку больше не связан с
    режимом чтения; новая кнопка режима чтения #readingModeFabBtn слева от язычка
    (initReadingModeFab; видна при включённом режиме чтения и закрытом окне,
@@ -5018,7 +5025,7 @@
   }
   function getGroupTasksForTab(){
     return getAllGroupTasks().filter(function(t){ return t.c.checked !== true; })
-      .sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
+      .sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
   }
   function createGroupTask(){
     var id = genGroupTaskId();
@@ -8168,6 +8175,18 @@
   // Вкладки, для которых scrollTop не сбрасывается в 0 при переключении, а
   // восстанавливается из tabScrollPercents (см. switchSettingsTab ниже).
   var TAB_SCROLL_AUTO_TABS = Object.keys(TASK_TAB_IDS).concat(["set2s_7"]);
+  // Разовый сброс запомненных позиций вкладок задач (19.09): порядок списков
+  // перевернули (новые внизу), старые проценты относились к прежнему порядку —
+  // после сброса каждая вкладка один раз откроется снизу, дальше как обычно.
+  (function migrateTaskTabScrollToBottomFirst(){
+    var FLAG = "taskListOrderAsc_v1";
+    try{
+      if(localStorage.getItem(FLAG) === "1") return;
+      Object.keys(TASK_TAB_IDS).forEach(function(k){ delete tabScrollPercents[k]; });
+      localStorage.setItem(TAB_SCROLL_STATE_KEY, JSON.stringify(tabScrollPercents));
+      localStorage.setItem(FLAG, "1");
+    }catch(e){}
+  })();
   function initTabScrollTracking(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -8189,8 +8208,25 @@
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     var pct = tabScrollPercents[tab];
+    // ТЗ пользователя от 19.09: у вкладок задач (кроме архива — там порядок
+    // «новые сверху» по дате выполнения) без сохранённой позиции список
+    // открывается СНИЗУ (новые задачи теперь в конце); сохранённая позиция
+    // работает как раньше.
+    var defaultBottom = (pct == null) && TASK_TAB_IDS.hasOwnProperty(tab) && tab !== "archive";
     requestAnimationFrame(function(){
       var max = container.scrollHeight - container.clientHeight;
+      if(defaultBottom){
+        container.scrollTop = max > 0 ? max : 0;
+        // картинки задач подгружаются чуть позже и меняют высоту — если
+        // пользователь ещё ничего не листал, доводим до нового низа
+        var setTo = container.scrollTop;
+        setTimeout(function(){
+          if(Math.abs(container.scrollTop - setTo) > 1) return;
+          var max2 = container.scrollHeight - container.clientHeight;
+          if(max2 > setTo) container.scrollTop = max2;
+        }, 250);
+        return;
+      }
       container.scrollTop = (pct && max > 0) ? pct * max : 0;
     });
   }
@@ -14995,7 +15031,7 @@
       return getAllTasks().filter(function(t){
         if(t.c.checked === true) return false;
         return t.c.tab === "worktasks" || getTaskWorkState(t) !== "off";
-      }).sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
+      }).sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
     }
     if(tab === "red"){
       // витрина: любая незакрытая задача с красной/жёлтой отметкой, из
@@ -15016,15 +15052,15 @@
           var pa = a.c.flag === "red" ? 0 : 1;
           var pb = b.c.flag === "red" ? 0 : 1;
           if(pa !== pb) return pa - pb;
-          return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t);
+          return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t);
         });
       } else {
-        redList.sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
+        redList.sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
       }
       return redList;
     }
     return getAllTasks().filter(function(t){ return t.c.tab === tab && t.c.checked !== true; })
-      .sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
+      .sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
   }
   function getArchivedTasksAll(){
     return getAllTasks().filter(function(t){ return t.c.checked === true; })
@@ -15226,9 +15262,11 @@
     var edgeKey = all.reduce(function(acc, t){
       if(t.id === id) return acc;
       var k = keyOf(t);
-      return edge === "top" ? Math.max(acc, k) : Math.min(acc, k);
+      // с 19.09 списки идут по createdAt по ВОЗРАСТАНИЮ (новые задачи внизу):
+      // «в начало» — меньше минимума, «в конец» — больше максимума
+      return edge === "top" ? Math.min(acc, k) : Math.max(acc, k);
     }, keyOf(task));
-    task.c.createdAt = edge === "top" ? edgeKey + 1 : edgeKey - 1;
+    task.c.createdAt = edge === "top" ? edgeKey - 1 : edgeKey + 1;
     saveTaskData(id, task.c);
   }
   // цветная отметка слева от чекбокса. ИЗМЕНЕНО (ТЗ пользователя от
@@ -16152,12 +16190,20 @@
           if(emptyMsg) emptyMsg.remove();
           var holder = document.createElement("div");
           holder.innerHTML = buildTaskRowHtml(getTaskById(id));
-          wrap.insertBefore(holder.firstChild, wrap.firstChild);
+          // ТЗ пользователя от 19.09: новая задача — В КОНЕЦ списка (перед
+          // невидимой распоркой), список идёт по createdAt по возрастанию
+          wrap.insertBefore(holder.firstChild, wrap.querySelector(".task-list-bottom-spacer"));
           bindTaskRow(id, tabKey);
+          var listScroller = document.getElementById("settingsTabContent");
+          if(listScroller) listScroller.scrollTop = listScroller.scrollHeight;
           renderTaskRowEdit(id, tabKey);
         } else {
           renderTaskTabList(tabKey);
-          requestAnimationFrame(function(){ renderTaskRowEdit(id, tabKey); });
+          requestAnimationFrame(function(){
+            var sc = document.getElementById("settingsTabContent");
+            if(sc) sc.scrollTop = sc.scrollHeight;
+            renderTaskRowEdit(id, tabKey);
+          });
         }
       };
     }
@@ -17016,6 +17062,9 @@
         saveTaskData(nid, t.c);
         mode = "linked";
         render();
+        // новая задача теперь в конце списка привязанных (19.09) — прокручиваем к ней
+        var projArea = document.getElementById("taskProjectArea");
+        if(projArea) projArea.scrollTop = projArea.scrollHeight;
         renderRowEdit(nid);
       });
 
@@ -17389,6 +17438,115 @@
       });
     });
   }
+
+  // ===================== ПОДЪЁМ ЗАДАЧИ НАД КЛАВИАТУРОЙ (ТЗ 19.09) =====================
+  // Новая/редактируемая задача внизу списка оказывалась под экранной
+  // клавиатурой, а браузер (Chrome), чтобы показать поле, СДВИГАЛ ВЕСЬ
+  // экран вверх — вместе с рядами вкладок и плавающей кнопкой. Здесь то же
+  // самое делаем сами и по-другому: пока в фокусе поле задачи
+  // (.task-editable), включаем navigator.virtualKeyboard.overlaysContent —
+  // клавиатура тогда ПЕРЕКРЫВАЕТ страницу, ничего не изменяя в размерах и
+  // ничего не двигая (вкладки остаются на месте и просто прячутся за
+  // клавиатурой), — а высоту клавиатуры берём из virtualKeyboard.boundingRect
+  // (измеряется живьём, не считается на глаз). Чтобы было куда прокручивать,
+  // в конец области чтения на время ввода добавляется распорка высотой в
+  // перекрытую клавиатурой часть, и область прокручивается ровно настолько,
+  // чтобы низ строки задачи (текст + её кнопки) стоял над клавиатурой.
+  // Работает только там, где есть VirtualKeyboard API (Chrome/Edge на
+  // Android); без него ничего не делаем — браузер ведёт себя как раньше.
+  (function initTaskKeyboardLift(){
+    var vk = navigator.virtualKeyboard;
+    if(!vk) return;
+    var MARGIN_PX = 8;          // зазор между низом строки и клавиатурой
+    var RELEASE_DELAY_MS = 250; // фокус может тут же перейти на другую строку
+    var activeEditable = null;
+    var releaseTimer = null;
+    var liftSpacer = null;
+
+    function isTaskEditable(el){ return !!(el && el.classList && el.classList.contains("task-editable")); }
+    function getScrollBox(el){
+      return el.closest("#taskProjectArea") || document.getElementById("settingsTabContent");
+    }
+    function kbRect(){
+      var r = vk.boundingRect;
+      return (r && r.height > 0) ? r : null;
+    }
+    function removeSpacer(){
+      if(liftSpacer && liftSpacer.parentNode) liftSpacer.parentNode.removeChild(liftSpacer);
+      liftSpacer = null;
+    }
+    function setSpacer(box, px){
+      if(!liftSpacer || liftSpacer.parentNode !== box){
+        removeSpacer();
+        liftSpacer = document.createElement("div");
+        liftSpacer.setAttribute("aria-hidden", "true");
+        liftSpacer.style.cssText = "flex:0 0 auto;width:1px;pointer-events:none;";
+        box.appendChild(liftSpacer);
+      }
+      liftSpacer.style.height = Math.round(px) + "px";
+    }
+    function release(){
+      removeSpacer();
+      activeEditable = null;
+      try{ vk.overlaysContent = false; }catch(e){}
+    }
+    function applyLift(){
+      var el = activeEditable;
+      if(!el) return;
+      if(!document.body.contains(el)){ release(); return; } // строку перерисовали/убрали
+      var box = getScrollBox(el);
+      if(!box) return;
+      var r = kbRect();
+      if(!r){ removeSpacer(); return; }
+      var boxRect = box.getBoundingClientRect();
+      // сколько области чтения перекрыто клавиатурой (в режиме чтения низ окна
+      // у самого края экрана — перекрытие больше, чем в обычном, где снизу 47px)
+      var overlap = Math.max(0, boxRect.bottom - r.top);
+      setSpacer(box, overlap);
+      var row = el.closest(".task-row") || el;
+      var rowRect = row.getBoundingClientRect();
+      var limit = r.top - MARGIN_PX;
+      var need = rowRect.bottom - limit;              // на сколько поднять
+      var maxUp = rowRect.top - boxRect.top;          // верх строки не уводим за верх области
+      if(need > maxUp){
+        // строка выше области (очень длинный текст): ориентируемся на строку с кареткой
+        var sel = window.getSelection();
+        var caretBottom = 0;
+        if(sel && sel.rangeCount){
+          var cr = sel.getRangeAt(0).getBoundingClientRect();
+          if(cr && cr.bottom > 0) caretBottom = cr.bottom;
+        }
+        need = caretBottom ? (caretBottom - limit) : maxUp;
+      }
+      if(need > 1) box.scrollTop += need;
+    }
+
+    document.addEventListener("focusin", function(e){
+      if(!isTaskEditable(e.target)) return;
+      clearTimeout(releaseTimer);
+      activeEditable = e.target;
+      // до появления клавиатуры: иначе браузер успеет сдвинуть экран сам
+      try{ vk.overlaysContent = true; }catch(err){}
+      requestAnimationFrame(applyLift);
+    });
+    document.addEventListener("focusout", function(e){
+      if(!isTaskEditable(e.target)) return;
+      clearTimeout(releaseTimer);
+      releaseTimer = setTimeout(function(){
+        if(isTaskEditable(document.activeElement)) return;
+        release();
+      }, RELEASE_DELAY_MS);
+    });
+    // клавиатура появилась/исчезла/сменила высоту (в т.ч. переключение раскладки)
+    vk.addEventListener("geometrychange", function(){
+      if(activeEditable) applyLift();
+      else removeSpacer();
+    });
+    // при наборе строка растёт (перенос на новую строку) — держим низ над клавиатурой
+    document.addEventListener("input", function(e){
+      if(activeEditable && e.target === activeEditable) requestAnimationFrame(applyLift);
+    }, true);
+  })();
 
   // ===================== НАЗАД (единый стек навигации) =====================
   // Раньше у страницы вообще не было записей в истории браузера, поэтому
