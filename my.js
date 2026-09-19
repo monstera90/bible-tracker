@@ -1,6 +1,16 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 29.2 (19.09) — строка «ДУБЛЬ» в fetchWithTimeout стала короткой
+   (~80 символов вместо ~500: путь без хоста + только имена вызывающих функций,
+   без URL и номеров строк) — они забивали буфер лога (150 строк) и не давали
+   увидеть остальное. Смысл диагностики тот же: кто шлёт дубль и сколько уже летит.
+   Версия: 29.1 (19.09) — только диагностика: putCloudBlob пишет в журнал, ЧТО
+   именно он отправляет (число ключей, размер, первые ключи) — по журналу
+   устройства Б видно поток параллельных PATCH в /syncs/<syncId>.json из
+   patchNotesCloud (по 1–15 с каждый, часть — таймаут 15 с), а кто их
+   порождает (заметки / реестр файлов / запросы файлов), из журнала не видно:
+   стек в Debug обрезан до 3 кадров.
    Версия: 29.0 (19.09) — структурная правка: (1) вкладка «Комментарии» — то же
    поведение, что у задач (по возрастанию/новый внизу, открывается снизу,
    подъём над клавиатурой; migrateCommentsScrollToBottomFirst); (2) крестик
@@ -3798,9 +3808,16 @@
   function fetchWithTimeout(url, options, timeoutMs){
     var already = fetchWithTimeoutInFlight[url] || 0;
     if(already > 0 && window.Debug){
-      var stack = (new Error()).stack || "";
-      var stackLines = stack.split("\n").slice(1, 4).join(" <- ").replace(/\s+/g, " ");
-      window.Debug.log("fetchWithTimeout: ДУБЛЬ — к \"" + url + "\" уже летит " + already + " запрос(ов), добавляю ещё один. Вызвано из: " + stackLines);
+      // строка НАМЕРЕННО короткая (см. 29.2): путь без хоста Firebase и только
+      // имена трёх вызывающих функций (кадр 0 — «Error», кадр 1 — сама
+      // fetchWithTimeout); у анонимных кадров вместо имени стоит URL файла —
+      // такие сворачиваем в «λ»
+      var stackNames = ((new Error()).stack || "").split("\n").slice(2, 5).map(function(l){
+        var m = /at\s+([^\s(]+)/.exec(l);
+        return (m && m[1].indexOf("/") === -1) ? m[1] : "λ";
+      }).join("<-");
+      var shortUrl = (typeof FIREBASE_DB_URL === "string" && url.indexOf(FIREBASE_DB_URL) === 0) ? url.slice(FIREBASE_DB_URL.length) : url;
+      window.Debug.log("ДУБЛЬ +1 к " + already + ": " + shortUrl.slice(0, 70) + " ← " + stackNames);
     }
     fetchWithTimeoutInFlight[url] = already + 1;
     var ctrl = new AbortController();
@@ -3876,6 +3893,10 @@
     Object.keys(src).forEach(function(k){ payload[k] = src[k]; });
     payload[LAST_ACTIVE_STATE_KEY] = {c:true, t:Date.now()};
     var body = JSON.stringify(payload);
+    if(window.Debug){
+      var pKeys = Object.keys(payload).filter(function(k){ return k !== LAST_ACTIVE_STATE_KEY; });
+      window.Debug.log("putCloudBlob: ключей=" + pKeys.length + ", ~" + body.length + " симв., первые: " + pKeys.slice(0, 4).join(", ") + (pKeys.length > 4 ? ", …" : ""));
+    }
     // ВАЖНО: метод именно PATCH, а не PUT. PUT в Firebase Realtime
     // Database замещает узел /syncs/<id> ЦЕЛИКОМ содержимым body — если в
     // payload нет какого-то ключа, который есть на сервере, он пропадает.

@@ -1,4 +1,8 @@
 // debug.js — общее место для отладочного кода "Графика чтения Библии".
+// Версия: 1.2 (19.09) — в панели лога вторая кнопка «⧉ последние N»: копирует
+// последние COPY_LAST_LINES строк, но не больше COPY_LAST_MAX_CHARS символов
+// (пояснение у констант ниже). Код копирования в буфер вынесен в
+// copyTextToClipboard, обе кнопки лежат в одной липкой полосе сверху панели.
 // Версия: 1.1 (17.09)
 //
 // НАЗНАЧЕНИЕ: если задача не решается с первого раза и нужна диагностика
@@ -164,6 +168,61 @@
     try { localStorage.removeItem(DEBUG_PERSIST_KEY); } catch (e) {}
     persistedLines = [];
   }
+  // ⚠️ ДОБАВЛЕНО (19.09): вторая кнопка панели — «последние N строк». Полный
+  // лог не всегда доезжает целиком: 19.09 файл с логом дошёл до чата обрезанным
+  // РОВНО на 20 000 символов (на полуслове, без блока «ТЕКУЩАЯ ЗАГРУЗКА») —
+  // часть ПОСЛЕ перезагрузки страницы, ради которой лог и снимался, терялась.
+  // Буфер обмена Android тут не при чём (у него практический предел порядка
+  // 1 МБ) — узким местом оказался приём текста в чате. Поэтому вторая кнопка
+  // берёт последние COPY_LAST_LINES строк, но целыми строками и не больше
+  // COPY_LAST_MAX_CHARS символов с конца (что наступит раньше) — с запасом до
+  // 20 000 на строку-заголовок. Значения — константы здесь, при необходимости
+  // правятся в одном месте.
+  var COPY_LAST_LINES = 100;
+  var COPY_LAST_MAX_CHARS = 18000;
+
+  function buildLastLinesText() {
+    var chosen = [];
+    var size = 0;
+    for (var i = logLines.length - 1; i >= 0 && chosen.length < COPY_LAST_LINES; i--) {
+      var line = logLines[i];
+      if (size + line.length + 1 > COPY_LAST_MAX_CHARS) {
+        // одна-единственная строка длиннее потолка — берём её хвост, иначе
+        // кнопка вообще ничего бы не скопировала
+        if (!chosen.length) chosen.push(line.slice(-COPY_LAST_MAX_CHARS));
+        break;
+      }
+      chosen.push(line);
+      size += line.length + 1;
+    }
+    chosen.reverse();
+    return "… (последние " + chosen.length + " из " + logLines.length +
+      " строк лога, не больше " + COPY_LAST_MAX_CHARS + " символов)\n" + chosen.join("\n");
+  }
+
+  // Копирование текста в буфер обмена: navigator.clipboard, а если его нет —
+  // запасной путь через скрытый textarea + execCommand. done(true/false).
+  function copyTextToClipboard(text, done) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+      return;
+    }
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      done(true);
+    } catch (err) {
+      done(false);
+    }
+  }
+
   function ensurePanel() {
     if (panelEl) return panelEl;
     panelEl = document.createElement("div");
@@ -184,48 +243,38 @@
       "background:rgba(0,0,0,0.35);color:#0f0;font:10px monospace;padding:6px;" +
       "z-index:999999;white-space:pre-wrap;pointer-events:none;";
 
-    // Кнопка "скопировать весь лог" — единственный интерактивный элемент
-    // на всей панели (pointer-events:auto точечно перебивает none у
-    // родителя, это штатно работает в CSS). Копирует ПОЛНЫЙ текст лога
-    // (logLines), а не только то, что видно в обрезанной по высоте
-    // панели — так в буфер попадают и более ранние строки, уехавшие
-    // вверх за пределы видимой области.
-    var copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.textContent = "⧉ копировать лог";
-    copyBtn.style.cssText =
-      "position:sticky;top:0;left:0;display:block;margin-bottom:4px;" +
-      "pointer-events:auto;background:#111;color:#0f0;border:1px solid #0f0;" +
-      "font:10px monospace;padding:3px 8px;z-index:1;";
-    copyBtn.addEventListener("click", function (e) {
-      e.stopPropagation();
-      var text = logLines.join("\n");
-      function done(ok) {
-        copyBtn.textContent = ok ? "✓ скопировано" : "не удалось скопировать";
-        setTimeout(function () {
-          copyBtn.textContent = "⧉ копировать лог";
-        }, 1500);
-      }
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
-        return;
-      }
-      try {
-        var ta = document.createElement("textarea");
-        ta.value = text;
-        ta.style.position = "fixed";
-        ta.style.opacity = "0";
-        document.body.appendChild(ta);
-        ta.focus();
-        ta.select();
-        document.execCommand("copy");
-        document.body.removeChild(ta);
-        done(true);
-      } catch (err) {
-        done(false);
-      }
-    });
-    panelEl.appendChild(copyBtn);
+    // Кнопки копирования — единственные интерактивные элементы на всей
+    // панели (pointer-events:auto точечно перебивает none у родителя, это
+    // штатно работает в CSS). Обе лежат в одной липкой полосе сверху:
+    //  1) «копировать лог» — ПОЛНЫЙ текст лога (logLines), а не только то,
+    //     что видно в обрезанной по высоте панели — так в буфер попадают и
+    //     более ранние строки, уехавшие вверх за пределы видимой области;
+    //  2) «последние N» (19.09) — только хвост лога, см. COPY_LAST_LINES /
+    //     COPY_LAST_MAX_CHARS выше.
+    var btnBar = document.createElement("div");
+    btnBar.style.cssText =
+      "position:sticky;top:0;left:0;display:flex;flex-wrap:wrap;gap:4px;" +
+      "margin-bottom:4px;pointer-events:none;z-index:1;";
+    function addCopyButton(label, getText) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = label;
+      btn.style.cssText =
+        "pointer-events:auto;background:#111;color:#0f0;border:1px solid #0f0;" +
+        "font:10px monospace;padding:3px 8px;";
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var text = getText();
+        copyTextToClipboard(text, function (ok) {
+          btn.textContent = ok ? "✓ скопировано, " + text.length + " симв." : "не удалось скопировать";
+          setTimeout(function () { btn.textContent = label; }, 2000);
+        });
+      });
+      btnBar.appendChild(btn);
+    }
+    addCopyButton("⧉ копировать лог", function () { return logLines.join("\n"); });
+    addCopyButton("⧉ последние " + COPY_LAST_LINES, buildLastLinesText);
+    panelEl.appendChild(btnBar);
 
     document.body.appendChild(panelEl);
     return panelEl;
