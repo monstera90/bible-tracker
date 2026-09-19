@@ -1,5 +1,11 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 3.3 (19.09) — confirmDeleteNote/confirmDeleteFolder/
+   showOverwriteConfirmDialog/showImagesFirstConnectWarning переведены с
+   карточки .mdeditor-cleanup-overlay/-card на единую плашку-подтверждение
+   my.js (window.AppConfirmBar.open/close) — та же плашка теперь и у
+   удаления задачи в my.js. Сигнатуры функций не изменились (Promise/
+   callback — как раньше).
    Версия: 3.2 (19.09) — режим «оффлайн» (ТЗ пользователя от 19.09, галочка
    «Использовать приложение в оффлайн режиме» в my.js): isOnline() теперь берёт
    deps.isNetworkAvailable (navigator.onLine && !режим оффлайн), поэтому облачный
@@ -1262,30 +1268,15 @@ window.initMdEditorModule = function(deps){
     imgViewerState = { overlay: overlay };
   }
 
-  // Разовое предупреждение (раздел 8 ТЗ) — тот же приём карточки поверх
-  // окна настроек, что и у остальных диалогов блокнота
-  // (.mdeditor-cleanup-overlay/-card, см. openNewNoteDialog/confirmDeleteNote).
+  // Разовое предупреждение (раздел 8 ТЗ) — с 19.09 единая плашка-
+  // подтверждение my.js (window.AppConfirmBar, см. её же у confirmDeleteNote
+  // ниже), раньше была карточка .mdeditor-cleanup-overlay/-card.
   function showImagesFirstConnectWarning(callback){
-    var box = document.querySelector(".settings-modal-box");
-    if(!box){ callback(true); return; }
-    var overlay = document.createElement("div");
-    overlay.className = "mdeditor-cleanup-overlay";
-    var card = document.createElement("div");
-    card.className = "mdeditor-cleanup-card";
-    card.innerHTML =
-      '<div class="mdeditor-cleanup-title">Изображения, которых нет в заметках, будут удаляться из этой папки. Продолжить?</div>' +
-      '<div class="mdeditor-cleanup-actions">' +
-        '<button type="button" class="mdeditor-cleanup-cancel" id="mdEditorImgWarnCancel">Отмена</button>' +
-        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="mdEditorImgWarnOk">Продолжить</button>' +
-      '</div>';
-    overlay.appendChild(card);
-    box.appendChild(overlay);
-    function close(result){
-      if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
-      callback(result);
-    }
-    document.getElementById("mdEditorImgWarnCancel").addEventListener("click", function(){ close(false); });
-    document.getElementById("mdEditorImgWarnOk").addEventListener("click", function(){ close(true); });
+    window.AppConfirmBar.open(
+      "Изображения, которых нет в заметках, будут удаляться из этой папки. Продолжить?",
+      function(){ callback(true); },
+      { yesTitle:"Продолжить", onCancel:function(){ callback(false); } }
+    );
   }
 
   // Гарантирует, что handle папки images/ в OPFS получен, прежде чем
@@ -2141,33 +2132,19 @@ window.initMdEditorModule = function(deps){
   // одно общее предупреждение на весь импорт, до того как что-либо
   // изменится: пользователь либо подтверждает замену всех совпавших
   // разом, либо отменяет весь импорт целиком (частичной отмены нет).
-  // Тот же приём карточки поверх окна настроек, что и у
-  // openNewNoteDialog/confirmDeleteNote выше (.mdeditor-cleanup-overlay/
-  // -card). Возвращает Promise<boolean> (true — подтверждено).
+  // С 19.09 единая плашка-подтверждение my.js (window.AppConfirmBar), раньше
+  // была карточка .mdeditor-cleanup-overlay/-card, как у openNewNoteDialog
+  // выше. Возвращает Promise<boolean> (true — подтверждено).
   // ---------------------------------------------------------------------
   function showOverwriteConfirmDialog(count){
     return new Promise(function(resolve){
-      var box = document.querySelector(".settings-modal-box");
-      if(!box){ resolve(false); return; }
-      var overlay = document.createElement("div");
-      overlay.className = "mdeditor-cleanup-overlay";
-      var card = document.createElement("div");
-      card.className = "mdeditor-cleanup-card";
-      card.innerHTML =
-        '<div class="mdeditor-cleanup-title"></div>' +
-        '<div class="mdeditor-cleanup-actions">' +
-          '<button type="button" class="mdeditor-cleanup-cancel" id="mdEditorOverwriteCancel">Отмена</button>' +
-          '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-danger" id="mdEditorOverwriteOk">Заменить</button>' +
-        '</div>';
-      card.querySelector(".mdeditor-cleanup-title").textContent = count === 1
+      var text = count === 1
         ? 'Заметка с таким именем уже есть в блокноте — она будет заменена версией из файла. Продолжить?'
         : 'Заметок с такими же именами уже ' + count + ' — они будут заменены версиями из файла/архива. Продолжить?';
-      overlay.appendChild(card);
-      box.appendChild(overlay);
-      function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
-      document.getElementById("mdEditorOverwriteCancel").addEventListener("click", function(){ close(); resolve(false); });
-      document.getElementById("mdEditorOverwriteOk").addEventListener("click", function(){ close(); resolve(true); });
-      overlay.addEventListener("click", function(ev){ if(ev.target === overlay){ close(); resolve(false); } });
+      window.AppConfirmBar.open(text, function(){ resolve(true); }, {
+        yesTitle: "Заменить",
+        onCancel: function(){ resolve(false); }
+      });
     });
   }
 
@@ -3076,33 +3053,16 @@ window.initMdEditorModule = function(deps){
   // ---------------------------------------------------------------------
   // Удаление заметки из общего списка — крестик, появляющийся вместе с
   // кнопкой закладки по долгому нажатию (см. renderListScreen выше, ТЗ
-  // пользователя от 05.09). Подтверждение — тот же overlay/card, что и у
-  // openNewNoteDialog/openCleanupDialog выше.
+  // пользователя от 05.09). С 19.09 подтверждение — единая плашка my.js
+  // (window.AppConfirmBar), раньше была карточка .mdeditor-cleanup-overlay/
+  // -card, как у openNewNoteDialog/openCleanupDialog ниже.
   // ---------------------------------------------------------------------
   function confirmDeleteNote(it, node){
-    var box = document.querySelector(".settings-modal-box");
-    if(!box) return;
-    var overlay = document.createElement("div");
-    overlay.className = "mdeditor-cleanup-overlay";
-    var card = document.createElement("div");
-    card.className = "mdeditor-cleanup-card";
-    card.innerHTML =
-      '<div class="mdeditor-cleanup-title"></div>' +
-      '<div class="mdeditor-cleanup-actions">' +
-        '<button type="button" class="mdeditor-cleanup-cancel" id="mdEditorDeleteNoteCancel">Отмена</button>' +
-        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-danger" id="mdEditorDeleteNoteConfirm">Удалить</button>' +
-      '</div>';
-    card.querySelector(".mdeditor-cleanup-title").textContent = 'Удалить заметку «' + it.name + '»?';
-    overlay.appendChild(card);
-    box.appendChild(overlay);
-
-    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
-    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
-    document.getElementById("mdEditorDeleteNoteCancel").addEventListener("click", close);
-    document.getElementById("mdEditorDeleteNoteConfirm").addEventListener("click", function(){
-      close();
-      deleteNoteEntry(it, node);
-    });
+    window.AppConfirmBar.open(
+      'Удалить заметку «' + it.name + '»?',
+      function(){ deleteNoteEntry(it, node); },
+      { yesTitle:"Удалить" }
+    );
   }
 
   function deleteNoteEntry(it, node){
@@ -3155,32 +3115,11 @@ window.initMdEditorModule = function(deps){
   }
 
   function confirmDeleteFolder(it, node){
-    var box = document.querySelector(".settings-modal-box");
-    if(!box) return;
     var count = collectNoteIdsInFolder(it.node.path).length;
-    var overlay = document.createElement("div");
-    overlay.className = "mdeditor-cleanup-overlay";
-    var card = document.createElement("div");
-    card.className = "mdeditor-cleanup-card";
-    card.innerHTML =
-      '<div class="mdeditor-cleanup-title"></div>' +
-      '<div class="mdeditor-cleanup-actions">' +
-        '<button type="button" class="mdeditor-cleanup-cancel" id="mdEditorDeleteFolderCancel">Отмена</button>' +
-        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-danger" id="mdEditorDeleteFolderConfirm">Удалить</button>' +
-      '</div>';
-    card.querySelector(".mdeditor-cleanup-title").textContent = count > 0
+    var text = count > 0
       ? 'Удалить папку «' + it.name + '» и все заметки внутри неё (' + count + ')? Это нельзя отменить.'
       : 'Удалить пустую папку «' + it.name + '»?';
-    overlay.appendChild(card);
-    box.appendChild(overlay);
-
-    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
-    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
-    document.getElementById("mdEditorDeleteFolderCancel").addEventListener("click", close);
-    document.getElementById("mdEditorDeleteFolderConfirm").addEventListener("click", function(){
-      close();
-      deleteFolderEntry(it, node);
-    });
+    window.AppConfirmBar.open(text, function(){ deleteFolderEntry(it, node); }, { yesTitle:"Удалить" });
   }
 
   function deleteFolderEntry(it, node){

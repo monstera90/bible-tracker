@@ -1,6 +1,24 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 33.0 (19.09) — структурная правка: единая плашка-подтверждение
+   "да/нет" на всё приложение — openAppConfirmBar/closeAppConfirmBar
+   (window.AppConfirmBar.open/close для mdeditor.js), заменяет прежнюю
+   task-delete-confirm (была только у удаления задачи) и убирает нативный
+   confirm()/карточки-оверлеи в части мест. Плашка прижата к ПРАВОМУ краю
+   экрана (не по центру) — кнопки крестик/галочка всегда в одном месте
+   экрана, длинный текст переносится на 2-3 строки и растягивает плашку
+   влево; затемнение всего экрана позади (клик = отмена). Переведены:
+   openTaskDeleteConfirm (my.js), confirmDeleteBook (my.js),
+   confirmJoinWithCode (my.js, был отдельным экраном модалки — теперь
+   плашка поверх текущего экрана), отключение устройства от синхронизации
+   и удаление цели (my.js, были нативным confirm()), отписка от общих
+   задач (openGroupUnsubscribeModal/renderGroupUnsubscribeConfirm, my.js),
+   confirmDeleteNote/confirmDeleteFolder/showOverwriteConfirmDialog/
+   showImagesFirstConnectWarning (mdeditor.js, были карточками
+   .mdeditor-cleanup-*). НЕ тронуты (по ТЗ пользователя от 19.09): счётчик
+   часов (openRemoveHourCounterConfirm), «Отвязать пользователя»
+   (renderGroupUnlinkConfirm), вкладки настроек resetConfirm/moodResetConfirm.
    Версия: 32.0 (19.09) — структурная правка: режим «оффлайн» (ТЗ пользователя от
    19.09: приложение «съело» много мобильного трафика, пока синхронизация в
    разработке). Новая галочка настроек «Использовать приложение в оффлайн режиме»
@@ -5671,27 +5689,35 @@
     document.getElementById("mUnlinkDelete").addEventListener("click", handleGroupUnlinkDeleteData);
   }
 
-  // п. 2.6 ТЗ — видна только участнику. Текст и две кнопки дословно из ТЗ.
+  // п. 2.6 ТЗ — видна только участнику. С 19.09 (ТЗ пользователя: перевод
+  // диалогов "да/нет" на единый стиль) сам вопрос — общая плашка
+  // openAppConfirmBar, а не экран модалки: модалка (modalOverlay/modalBox)
+  // открывается только ПОСЛЕ согласия, для экранов "Отписываемся…"/
+  // "Готово"/ошибка (см. handleGroupUnsubscribeConfirmed) — так плашка и
+  // затемнение модалки не накладываются друг на друга.
   function renderGroupUnsubscribeConfirm(){
-    modalBox.innerHTML = modalHeader("Отписка",
-        "Вы уверены, что хотите отписаться от общих задач?") +
-      '<button class="modal-btn danger" id="mUnsubConfirm">Отписаться</button>' +
-      '<button class="modal-btn" id="mBack">Отмена</button>';
-    bindClose();
-    document.getElementById("mBack").addEventListener("click", closeModal);
-    document.getElementById("mUnsubConfirm").addEventListener("click", handleGroupUnsubscribeConfirmed);
+    openAppConfirmBar(
+      "Вы уверены, что хотите отписаться от общих задач?",
+      function(){
+        modalOverlay.classList.add("open");
+        handleGroupUnsubscribeConfirmed();
+      },
+      { yesTitle:"Отписаться" }
+    );
   }
 
   // TASK_SHARED_TASKS, Шаг 4 (15.09): обёртки, вызываемые из меню
-  // "настройки вкладки" (renderTaskJointMenu выше) — открывают модалку
-  // (modalOverlay) и рендерят соответствующий экран; сами render-функции
-  // выше этого не делают (раньше их вообще ничего не вызывало).
+  // "настройки вкладки" (renderTaskJointMenu выше). "Отвязать пользователя"
+  // — прежняя модалка (renderGroupUnlinkConfirm, не переведена на общий
+  // стиль по ТЗ пользователя от 19.09 — три равноправные кнопки и длинное
+  // описание в одну строку/плашку не укладываются). "Отписаться" — плашка
+  // (renderGroupUnsubscribeConfirm выше), модалку открывать здесь уже не
+  // нужно — она откроется сама после подтверждения.
   function openGroupUnlinkModal(){
     modalOverlay.classList.add("open");
     renderGroupUnlinkConfirm();
   }
   function openGroupUnsubscribeModal(){
-    modalOverlay.classList.add("open");
     renderGroupUnsubscribeConfirm();
   }
 
@@ -5991,7 +6017,10 @@
     if(!isNetworkAvailable()){
       modalBox.innerHTML = modalHeader(noNetworkTitle(), noNetworkHint("отписки")) + '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
-      document.getElementById("mBack").addEventListener("click", renderGroupUnsubscribeConfirm);
+      // renderGroupUnsubscribeConfirm теперь открывает плашку (не экран
+      // модалки) — сперва закрываем текущую модалку, иначе плашка встанет
+      // поверх неё, а не вместо
+      document.getElementById("mBack").addEventListener("click", function(){ closeModal(); renderGroupUnsubscribeConfirm(); });
       return;
     }
     removeGroupMember(groupId, getDeviceId()).then(function(){
@@ -6005,7 +6034,7 @@
       modalBox.innerHTML = modalHeader("Не удалось отписаться", "Проверьте подключение к интернету и попробуйте ещё раз.") +
         '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
-      document.getElementById("mBack").addEventListener("click", renderGroupUnsubscribeConfirm);
+      document.getElementById("mBack").addEventListener("click", function(){ closeModal(); renderGroupUnsubscribeConfirm(); });
     });
   }
 
@@ -7416,11 +7445,12 @@
         if(note) note.textContent = "Синхронизация запущена…";
       });
       document.getElementById("mDisconnect").addEventListener("click", function(){
-        if(!confirm("Отключить это устройство от синхронизации? Локальный прогресс сохранится.")) return;
-        syncId = null;
-        localStorage.removeItem(SYNC_ID_KEY);
-        refreshStatusBase();
-        renderModalHome();
+        openAppConfirmBar("Отключить это устройство от синхронизации? Локальный прогресс сохранится.", function(){
+          syncId = null;
+          localStorage.removeItem(SYNC_ID_KEY);
+          refreshStatusBase();
+          renderModalHome();
+        }, { yesTitle:"Отключить" });
       });
       bindExportButton();
       bindImportButton();
@@ -7578,13 +7608,11 @@
   function confirmJoinWithCode(id){
     id = (id||"").trim();
     if(!id) return;
-    modalBox.innerHTML = modalHeader("Внимание",
-        "Все данные, которые сейчас есть на этом устройстве, будут удалены и заменены данными из облака по этому коду. Совмещение (объединение) данных больше не выполняется — отменить это действие после подключения будет нельзя.") +
-      '<button class="modal-btn danger" id="mJoinConfirm">Да, удалить данные на этом устройстве и подключиться</button>' +
-      '<button class="modal-btn" id="mBack">Отмена</button>';
-    bindClose();
-    document.getElementById("mBack").addEventListener("click", renderJoinScreen);
-    document.getElementById("mJoinConfirm").addEventListener("click", function(){ joinWithCode(id); });
+    openAppConfirmBar(
+      "Все данные, которые сейчас есть на этом устройстве, будут удалены и заменены данными из облака по этому коду. Совмещение (объединение) данных больше не выполняется — отменить это действие после подключения будет нельзя.",
+      function(){ joinWithCode(id); },
+      { yesTitle:"Да, удалить данные и подключиться" }
+    );
   }
 
   function joinWithCode(id){
@@ -8280,7 +8308,7 @@
   // аргумента (именно вызовом, не как обработчик события — иначе quick
   // получил бы объект события).
   function closeSettingsModal(quick){
-    closeTaskDeleteConfirm();
+    closeAppConfirmBar();
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
@@ -8475,7 +8503,7 @@
     var isRealSwitch = settingsWasOpen && prevTab !== tab && !suppressNavPush;
 
     currentSettingsTab = tab;
-    closeTaskDeleteConfirm();
+    closeAppConfirmBar();
     // "Отвязываем" ссылку на предыдущий рендер экрана "Все задачи проекта"
     // от rerenderAllFromState (activeProjectPickerRerender выше) — она
     // валидна только пока этот экран РЕАЛЬНО показан в #settingsTabContent.
@@ -10321,40 +10349,24 @@
   var revealedBookDeleteRows = new Set();
 
   function confirmDeleteBook(item){
-    var box = document.querySelector(".settings-modal-box");
-    if(!box) return;
-    var overlay = document.createElement("div");
-    overlay.className = "mdeditor-cleanup-overlay";
-    var card = document.createElement("div");
-    card.className = "mdeditor-cleanup-card";
-    card.innerHTML =
-      '<div class="mdeditor-cleanup-title"></div>' +
-      '<div class="mdeditor-cleanup-actions">' +
-        '<button type="button" class="mdeditor-cleanup-cancel" id="bookDeleteCancel">Отмена</button>' +
-        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-danger" id="bookDeleteConfirm">Удалить</button>' +
-      '</div>';
-    card.querySelector(".mdeditor-cleanup-title").textContent = 'Удалить книгу «' + item.name + '»? Она удалится и на других устройствах при следующей синхронизации.';
-    overlay.appendChild(card);
-    box.appendChild(overlay);
-
-    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
-    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
-    document.getElementById("bookDeleteCancel").addEventListener("click", close);
-    document.getElementById("bookDeleteConfirm").addEventListener("click", function(){
-      close();
-      revealedBookDeleteRows.delete(item.name.toLowerCase());
-      deleteBookEntry(item).then(function(result){
-        if(!document.getElementById("booksList")) return; // вкладку успели покинуть
-        renderSettingsTabBooks();
-        if(!result.ok){
-          var freshStatus = document.getElementById("booksStatus");
-          if(freshStatus){
-            freshStatus.textContent = result.message;
-            freshStatus.classList.add("error");
+    openAppConfirmBar(
+      'Удалить книгу «' + item.name + '»? Она удалится и на других устройствах при следующей синхронизации.',
+      function(){
+        revealedBookDeleteRows.delete(item.name.toLowerCase());
+        deleteBookEntry(item).then(function(result){
+          if(!document.getElementById("booksList")) return; // вкладку успели покинуть
+          renderSettingsTabBooks();
+          if(!result.ok){
+            var freshStatus = document.getElementById("booksStatus");
+            if(freshStatus){
+              freshStatus.textContent = result.message;
+              freshStatus.classList.add("error");
+            }
           }
-        }
-      });
-    });
+        });
+      },
+      { yesTitle:"Удалить" }
+    );
   }
 
   function renderSettingsTabBooks(){
@@ -14977,10 +14989,11 @@
       renderGoalsSection();
     });
     document.getElementById("goalDeleteBtn").addEventListener("click", function(){
-      if(!confirm("Удалить эту цель вместе со всеми задачами?")) return;
-      deleteGoal(goalId);
-      closeModal();
-      renderGoalsSection();
+      openAppConfirmBar("Удалить эту цель вместе со всеми задачами?", function(){
+        deleteGoal(goalId);
+        closeModal();
+        renderGoalsSection();
+      }, { yesTitle:"Удалить" });
     });
   }
 
@@ -17842,60 +17855,105 @@
   // (верх клавиатуры — window.AppKeyboard.getTop(), см. initTaskKeyboardLift),
   // а если нет — на том же уровне у нижнего края (над системной плашкой).
   // Крестик архива (полное удаление из архива) остаётся без подтверждения.
-  var TASK_DELETE_CONFIRM_BOTTOM_NO_KB_PX = 59; // 47px системная плашка + 12px зазор
-  var TASK_DELETE_CONFIRM_GAP_PX = 10;          // зазор над клавиатурой
-  var taskDeleteConfirmEl = null;
-  var taskDeleteConfirmCleanup = null;
-  function taskDeleteBtnHtml(){
-    return '<button type="button" class="task-icon-btn task-delete-btn" title="Удалить">' + CROSS_SMALL_ICON_SVG + '</button>';
+  // ===================== ЕДИНАЯ ПЛАШКА-ПОДТВЕРЖДЕНИЕ (ТЗ 19.09) =====================
+  // Общий на всё приложение диалог "да/нет": одна плашка (перенос на 2-3
+  // строки, если текст длинный) с иконками крестик-отмена/галочка-да,
+  // затемнение всего экрана позади (клик по нему = отмена, как крестик).
+  // Прижата к ПРАВОМУ краю экрана (не по центру) — при любой длине текста
+  // кнопки остаются в одном и том же месте экрана, растёт/переносится
+  // только текст. По вертикали — у нижнего края экрана, либо над
+  // клавиатурой, если она открыта (window.AppKeyboard.getTop(), см.
+  // initTaskKeyboardLift ниже).
+  // Была раньше только у удаления задачи (openTaskDeleteConfirm), теперь
+  // используется везде: удаление задачи/заметки/папки/книги (my.js,
+  // mdeditor.js), предупреждение перед автоочисткой картинок и конфликт
+  // при импорте заметок (mdeditor.js), отключение синхронизации, удаление
+  // цели, отписка от общих задач, подключение с удалением локальных данных
+  // (my.js). mdeditor.js (подключается позже, без deps на этот момент)
+  // зовёт через window.AppConfirmBar.open/close.
+  var APP_CONFIRM_BAR_BOTTOM_NO_KB_PX = 59; // 47px системная плашка + 12px зазор
+  var APP_CONFIRM_BAR_GAP_PX = 10;          // зазор над клавиатурой
+  var appConfirmBarEl = null;
+  var appConfirmBarBackdropEl = null;
+  var appConfirmBarCleanup = null;
+  function closeAppConfirmBar(){
+    if(appConfirmBarCleanup){ appConfirmBarCleanup(); appConfirmBarCleanup = null; }
+    if(appConfirmBarEl && appConfirmBarEl.parentNode) appConfirmBarEl.parentNode.removeChild(appConfirmBarEl);
+    if(appConfirmBarBackdropEl && appConfirmBarBackdropEl.parentNode) appConfirmBarBackdropEl.parentNode.removeChild(appConfirmBarBackdropEl);
+    appConfirmBarEl = null;
+    appConfirmBarBackdropEl = null;
   }
-  function closeTaskDeleteConfirm(){
-    if(taskDeleteConfirmCleanup){ taskDeleteConfirmCleanup(); taskDeleteConfirmCleanup = null; }
-    if(taskDeleteConfirmEl && taskDeleteConfirmEl.parentNode) taskDeleteConfirmEl.parentNode.removeChild(taskDeleteConfirmEl);
-    taskDeleteConfirmEl = null;
-  }
-  function openTaskDeleteConfirm(onYes){
-    closeTaskDeleteConfirm();
+  // opts: {yesTitle, noTitle, onCancel, blurBeforeYes} — blurBeforeYes нужен
+  // там, где плашка могла встать над клавиатурой во время редактирования
+  // поля (иначе снятие фокуса при удалении происходит уже ПОСЛЕ действия).
+  function openAppConfirmBar(text, onYes, opts){
+    closeAppConfirmBar();
+    opts = opts || {};
+    var backdrop = document.createElement("div");
+    backdrop.className = "app-confirm-bar-backdrop";
+    document.body.appendChild(backdrop);
+    appConfirmBarBackdropEl = backdrop;
+
     var box = document.createElement("div");
-    box.className = "task-delete-confirm";
+    box.className = "app-confirm-bar";
     box.setAttribute("role", "alertdialog");
     box.innerHTML =
-      '<span class="task-delete-confirm-text">Удалить задачу?</span>' +
-      '<span class="task-delete-confirm-btns">' +
-        '<button type="button" class="mdeditor-fab-btn" id="taskDeleteNoBtn" title="Отмена">' + CROSS_SMALL_ICON_SVG + '</button>' +
-        '<button type="button" class="mdeditor-fab-btn" id="taskDeleteYesBtn" title="Удалить">' + CHECK_ICON_SVG + '</button>' +
+      '<span class="app-confirm-bar-text"></span>' +
+      '<span class="app-confirm-bar-btns">' +
+        '<button type="button" class="mdeditor-fab-btn" id="appConfirmBarNoBtn" title="' + escapeHtml(opts.noTitle || "Отмена") + '">' + CROSS_SMALL_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="appConfirmBarYesBtn" title="' + escapeHtml(opts.yesTitle || "Да") + '">' + CHECK_ICON_SVG + '</button>' +
       '</span>';
+    box.querySelector(".app-confirm-bar-text").textContent = text;
     document.body.appendChild(box);
-    taskDeleteConfirmEl = box;
+    appConfirmBarEl = box;
+
     function place(){
       var kbTop = (window.AppKeyboard && window.AppKeyboard.getTop) ? window.AppKeyboard.getTop() : null;
       var bottom = (kbTop != null)
-        ? Math.max(0, window.innerHeight - kbTop) + TASK_DELETE_CONFIRM_GAP_PX
-        : TASK_DELETE_CONFIRM_BOTTOM_NO_KB_PX;
+        ? Math.max(0, window.innerHeight - kbTop) + APP_CONFIRM_BAR_GAP_PX
+        : APP_CONFIRM_BAR_BOTTOM_NO_KB_PX;
       box.style.bottom = Math.round(bottom) + "px";
     }
     place();
     var vk = navigator.virtualKeyboard;
     if(vk) vk.addEventListener("geometrychange", place);
     window.addEventListener("resize", place);
-    window.addEventListener("popstate", closeTaskDeleteConfirm);
-    taskDeleteConfirmCleanup = function(){
+    window.addEventListener("popstate", closeAppConfirmBar);
+    appConfirmBarCleanup = function(){
       if(vk) vk.removeEventListener("geometrychange", place);
       window.removeEventListener("resize", place);
-      window.removeEventListener("popstate", closeTaskDeleteConfirm);
+      window.removeEventListener("popstate", closeAppConfirmBar);
     };
-    // нажатие на плашку не должно отнимать фокус у поля (иначе клавиатура
-    // закроется и плашка «поедет»)
+    // нажатие на плашку/затемнение не должно отнимать фокус у поля (иначе
+    // клавиатура закроется и плашка «поедет»)
     box.addEventListener("mousedown", function(e){ e.preventDefault(); });
-    document.getElementById("taskDeleteNoBtn").addEventListener("click", closeTaskDeleteConfirm);
-    document.getElementById("taskDeleteYesBtn").addEventListener("click", function(){
-      closeTaskDeleteConfirm();
-      // если правилась именно эта строка — сначала штатно снимаем фокус
-      // (сохранение/снятие подъёма над клавиатурой), потом удаляем
-      var ae = document.activeElement;
-      if(ae && ae.isContentEditable && ae.blur) ae.blur();
+    backdrop.addEventListener("mousedown", function(e){ e.preventDefault(); });
+    backdrop.addEventListener("click", function(){
+      closeAppConfirmBar();
+      if(opts.onCancel) opts.onCancel();
+    });
+    document.getElementById("appConfirmBarNoBtn").addEventListener("click", function(){
+      closeAppConfirmBar();
+      if(opts.onCancel) opts.onCancel();
+    });
+    document.getElementById("appConfirmBarYesBtn").addEventListener("click", function(){
+      closeAppConfirmBar();
+      if(opts.blurBeforeYes){
+        var ae = document.activeElement;
+        if(ae && ae.isContentEditable && ae.blur) ae.blur();
+      }
       onYes();
     });
+  }
+  window.AppConfirmBar = { open: openAppConfirmBar, close: closeAppConfirmBar };
+
+  function taskDeleteBtnHtml(){
+    return '<button type="button" class="task-icon-btn task-delete-btn" title="Удалить">' + CROSS_SMALL_ICON_SVG + '</button>';
+  }
+  // если правилась именно эта строка — сначала штатно снимаем фокус
+  // (сохранение/снятие подъёма над клавиатурой), потом удаляем
+  function openTaskDeleteConfirm(onYes){
+    openAppConfirmBar("Удалить задачу?", onYes, { yesTitle:"Удалить", blurBeforeYes:true });
   }
   // крестик в строке: mousedown не отнимает фокус у редактируемого поля
   // (клавиатура остаётся открытой — плашка встанет над ней)

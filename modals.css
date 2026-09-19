@@ -1,5 +1,13 @@
 /* ===========================================================================
    modals.css
+   Версия: 2.8 (19.09) — структурная правка: .task-delete-confirm(-btns)
+   удалены, вместо них единый класс .app-confirm-bar(-text/-btns) +
+   .app-confirm-bar-backdrop (затемнение) — общая плашка-подтверждение
+   "да/нет" для всего приложения (my.js, window.AppConfirmBar). Плашка
+   прижата к правому краю экрана (right, не center) — кнопки всегда в
+   одном месте экрана, длинный текст переносится на 2-3 строки и растягивает
+   плашку влево, а не сдвигает кнопки.
+   Версия: 2.7 (19.09) — кнопка-язычок .settings-fab: область нажатия увеличена на 8px вверх и влево (псевдоэлемент ::before), убрана анимация нажатия (:active scale).
    Версия: 2.6 (19.09) — исправлено: в этой шапке внутри комментария стояли подряд символы «звёздочка» и «слэш» (в перечне классов .reminder-field...), они преждевременно закрывали комментарий, и базовое правило .settings-fab (кнопка-язычок) выпадало из CSS.
    Версия: 2.5 (19.09) — структурная правка: напоминания задач (ТЗ 19.09). Новые классы:
    .task-reminder-btn.active (часы в закрашенном круге, как .task-worktasks-btn.active),
@@ -80,7 +88,7 @@
     -webkit-appearance:none;
     appearance:none;
     -webkit-tap-highlight-color:transparent;
-    transition:transform .15s ease, opacity .15s ease, background .15s ease;
+    transition:opacity .15s ease, background .15s ease;
   }
   @media (hover:hover) and (pointer:fine){
     .settings-fab:hover{
@@ -92,22 +100,38 @@
     }
   }
   .reading-mode-fab svg{ width:22px; height:22px; }
-  /* Плашка подтверждения удаления задачи (my.js, openTaskDeleteConfirm, ТЗ
-     19.09): один ряд — надпись слева, справа кнопки «крестик» (отмена) и
-     «галочка» (удалить); по центру экрана по горизонтали, у самого низа
-     (bottom выставляет JS — над клавиатурой, если она открыта). Поверх окна
-     настроек (z-index окна 1000, язычка 1001). */
-  .task-delete-confirm{
+  /* Единая плашка-подтверждение "да/нет" на всё приложение (my.js,
+     openAppConfirmBar/closeAppConfirmBar/window.AppConfirmBar, ТЗ 19.09).
+     Раньше была только у удаления задачи (.task-delete-confirm), теперь
+     это общий класс для всех диалогов вида "да/нет": удаление задачи/
+     заметки/папки/книги, предупреждение перед автоочисткой картинок,
+     конфликт при импорте заметок, отключение синхронизации, удаление
+     цели, отписка от общих задач, подключение с удалением локальных
+     данных.
+     Затемнение (.app-confirm-bar-backdrop) — на весь экран, клик по нему
+     закрывает плашку так же, как крестик-отмена.
+     Сама плашка НЕ по центру экрана — прижата к правому краю (right, не
+     left:50%/transform): при длинном тексте (перенос на 2-3 строки)
+     ширина плашки растёт влево, а кнопки справа остаются на том же самом
+     месте экрана. По вертикали (bottom) — тот же приём, что и раньше:
+     считает JS, у нижнего края экрана, либо над клавиатурой, если она
+     открыта (window.AppKeyboard.getTop()). Поверх окна настроек (z-index
+     окна 1000, язычка 1001, затемнения 1099, самой плашки 1100). */
+  .app-confirm-bar-backdrop{
     position:fixed;
-    left:50%;
-    transform:translateX(-50%);
+    inset:0;
+    background:rgba(20,14,8,.86);
+    z-index:1099;
+  }
+  .app-confirm-bar{
+    position:fixed;
+    right:12px;
     z-index:1100;
     display:flex;
     align-items:center;
-    justify-content:space-between;
+    justify-content:flex-end;
     gap:16px;
     box-sizing:border-box;
-    min-width:240px;
     max-width:calc(100vw - 24px);
     padding:8px 8px 8px 16px;
     background:var(--parchment);
@@ -117,14 +141,31 @@
     font-family:"Palatino Linotype",Georgia,serif;
     font-size:16px;
     color:var(--ink);
-    white-space:nowrap;
   }
-  .task-delete-confirm-btns{ display:flex; gap:7px; flex-shrink:0; }
+  .app-confirm-bar-text{
+    white-space:normal;
+    text-align:right;
+  }
+  .app-confirm-bar-btns{ display:flex; gap:7px; flex-shrink:0; }
   .settings-fab.is-open{
     background:var(--parchment);
     opacity:1;
   }
-  .settings-fab:active{ transform:scale(.95); }
+  /* Анимация нажатия (уменьшение до 95% при удержании) убрана по просьбе
+     пользователя: при долгом удержании язычка кнопка больше не «проседает».
+     Область нажатия шире видимой кнопки на 8px вверх и на 8px влево — за
+     счёт невидимого псевдоэлемента: нажатие по нему считается нажатием по
+     самой кнопке (те же обработчики в my.js), а рисуется он прозрачным.
+     Вправо и вниз не расширяем — там край экрана. Кнопка режима чтения
+     (.reading-mode-fab) не расширяется, чтобы не залезать на соседей. */
+  .settings-fab:not(.reading-mode-fab)::before{
+    content:"";
+    position:absolute;
+    top:-8px;
+    left:-8px;
+    right:0;
+    bottom:0;
+  }
 
   .version-history-item{
     display:block;
