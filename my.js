@@ -1,6 +1,14 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 27.0 (19.09) — структурная правка: клик по язычку больше не связан с
+   режимом чтения; новая кнопка режима чтения #readingModeFabBtn слева от язычка
+   (initReadingModeFab; видна при включённом режиме чтения и закрытом окне,
+   позиция — layoutSettingsModal, показ — applyReadingModeVisual). Диагностика
+   26.4 убрана. Исправлено: get/setReadingModeActive читали localStorage по
+   ключу undefined при стартовом вызове (var READING_MODE_KEY ниже по файлу).
+   Версия: 26.4 (19.09) — только диагностика (Debug.log): клик по язычку, открытие окна,
+   включение режима чтения (со стеком) — для бага «язычок не выключает режим чтения».
    Версия: 26.3 (19.09) — клик по кнопке-язычку (settingsGearBtn) выключает режим чтения.
    Версия: 26.2 (19.09) — layoutSettingsModal: в режиме чтения кнопка-язычок
    стоит на своём обычном месте (top = высота экрана - ANDROID_NAV_BAR_H, left
@@ -2444,6 +2452,8 @@
     var visible = isSettingsFabVisible();
     var fab = document.getElementById("settingsGearBtn");
     if(fab) fab.style.display = visible ? "" : "none";
+    var readingFab = document.getElementById("readingModeFabBtn");
+    if(readingFab) readingFab.style.display = (visible && getReadingModeActive()) ? "" : "none";
     var toggleBtn = document.getElementById("fabToggleBtn");
     if(toggleBtn) toggleBtn.textContent = visible ? "Убрать плавающую кнопку" : "Включить плавающую кнопку";
   }
@@ -8063,6 +8073,12 @@
       if(readingFull) settingsModalOverlay.classList.add("reading-mode-active");
       settingsGearBtn.style.left = Math.round(gearRowRight + 1) + "px";
       settingsGearBtn.style.top = Math.round(fabTopPx) + "px";
+      // кнопка режима чтения — вплотную слева от язычка (45px + зазор 1px)
+      var readingFabBtn = document.getElementById("readingModeFabBtn");
+      if(readingFabBtn){
+        readingFabBtn.style.left = Math.round(gearRowRight + 1 - 46) + "px";
+        readingFabBtn.style.top = Math.round(fabTopPx) + "px";
+      }
     }
   }
   function closeSettingsModal(){
@@ -13064,11 +13080,6 @@
       // выше — браузер всё равно посылает следом обычный click при
       // отпускании, его нужно проглотить, а не открывать блокнот заново.
       if(fabLongPressFired){ fabLongPressFired = false; return; }
-      // ТЗ пользователя от 19.09: нажатие на язычок выключает режим чтения
-      // (окно открывается/переключает набор уже в обычном виде). Через
-      // toggleReadingMode — единую точку переключения (флаг + иконки +
-      // высота окна + подгонка кнопок строк).
-      if(getReadingModeActive()) toggleReadingMode();
       if(settingsModalOverlay && settingsModalOverlay.classList.contains("open")){
         // блокнот уже открыт: короткий клик всегда переключает набор
         // вкладок по кругу (набор 1 <-> набор 2 <-> ...), пока второй
@@ -13091,6 +13102,27 @@
       }
     });
   }
+
+  // Кнопка режима чтения слева от язычка (ТЗ пользователя от 19.09): клик по
+  // самому язычку с режимом чтения больше не связан. Стиль — тот же класс
+  // .settings-fab (размер, прозрачность, цвет), плюс .reading-mode-fab
+  // (размер пиктограммы, modals.css). Пока окно открыто в режиме чтения,
+  // её (как и язычок) закрывает окно/прячет CSS; когда окно закрыто (в т.ч.
+  // системным «назад») — видна. Клик выключает режим чтения, и applyReading-
+  // ModeVisual тут же прячет кнопку. Положение — layoutSettingsModal.
+  (function initReadingModeFab(){
+    if(document.getElementById("readingModeFabBtn")) return;
+    var b = document.createElement("button");
+    b.type = "button";
+    b.id = "readingModeFabBtn";
+    b.className = "settings-fab reading-mode-fab";
+    b.title = "Выключить режим чтения";
+    b.style.display = "none";
+    b.innerHTML = READING_BOOK_ICON_SVG;
+    b.addEventListener("click", function(){ toggleReadingMode(); });
+    document.body.appendChild(b);
+    applyReadingModeVisual();
+  })();
 
   // Ставим язычок-кнопку в угол окна настроек сразу при загрузке страницы
   // (а не только при первом открытии окна) и держим его там при ресайзе/
@@ -15034,11 +15066,16 @@
   // перезагрузку страницы (localStorage), как и соседний
   // NEXT_HIDE_LINKED_KEY выше.
   var READING_MODE_KEY = "bibleReadingMode_v1";
+  // Ключ — литерал внутри функций, а не READING_MODE_KEY: initTaskGlobalToolbar
+  // (и applyReadingModeVisual в нём) вызывается при старте РАНЬШЕ, чем
+  // выполнится строка var READING_MODE_KEY выше (var не поднимается вместе со
+  // значением) — тогда стартовое применение читало localStorage по ключу
+  // undefined и режим чтения на загрузке не подхватывался.
   function getReadingModeActive(){
-    try{ return localStorage.getItem(READING_MODE_KEY) === "1"; }catch(e){ return false; }
+    try{ return localStorage.getItem("bibleReadingMode_v1") === "1"; }catch(e){ return false; }
   }
   function setReadingModeActive(val){
-    try{ localStorage.setItem(READING_MODE_KEY, val ? "1" : "0"); }catch(e){}
+    try{ localStorage.setItem("bibleReadingMode_v1", val ? "1" : "0"); }catch(e){}
   }
   // Применяет текущее состояние режима чтения к разметке: класс на
   // оверлее (CSS прячет ряды вкладок и обнуляет отступы под них, см.
@@ -15052,6 +15089,11 @@
     var active = getReadingModeActive();
     var overlay = document.getElementById("settingsModalOverlay");
     if(overlay) overlay.classList.toggle("reading-mode-active", active);
+    // Кнопка режима чтения слева от язычка (readingModeFabBtn, ТЗ от 19.09):
+    // существует всегда, пока режим чтения включён (и язычок вообще показан);
+    // пока окно открыто, её закрывает растянутое окно/прячет modals.css.
+    var readingFab = document.getElementById("readingModeFabBtn");
+    if(readingFab) readingFab.style.display = (active && isSettingsFabVisible()) ? "" : "none";
     var btn = document.getElementById("taskReadingBtn");
     if(btn){
       btn.innerHTML = active ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG;
