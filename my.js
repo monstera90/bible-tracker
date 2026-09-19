@@ -1,6 +1,16 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 31.0 (19.09) — структурная правка: напоминание для задачи на конкретные
+   дату и время (ТЗ пользователя от 19.09). Новое поле задачи c.remindAt (мс),
+   пиктограмма-часы .task-reminder-btn (два состояния, крайняя справа; ряд справа
+   налево теперь: напоминание, чемодан, кружок приоритета, копировать — во всех
+   строках задач, в т.ч. на экране «Все задачи проекта» и в результатах поиска),
+   все задачи с напоминанием попадают и на вкладку с чемоданчиком (getTasksForTab).
+   Функции: getTaskReminderAt/hasTaskReminder/setTaskReminder/clearTaskReminder/
+   taskReminderBtnHtml/openTaskReminderDialog/getRemindableTasks/openReminderTask,
+   иконка CLOCK_ICON_SVG. Сама логика уведомлений — в новом файле notifications.js
+   (initNotificationsModule; Notifications.start() в «ЗАПУСК»).
    Версия: 30.1 (19.09) — структурная правка (TASK_UNIFIED_SYNC.md, Шаг 4.2):
    перенос общей задачи между /tasks и /archive стал ОДНОЙ атомарной операцией
    движка. checkGroupTaskDone («выполнено»: /tasks → /archive) и
@@ -2303,6 +2313,8 @@
   // делает ровно то же самое (см. .task-done-btn в renderTaskRowView)
   var CHECK_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"></path></svg>';
   var LINK_NEXT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"></path><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"></path></svg>';
+  // часы — пиктограмма напоминания (.task-reminder-btn, см. taskReminderBtnHtml)
+  var CLOCK_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg>';
   var RESTORE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>';
   var DELETE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>';
   var PAPERCLIP_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>';
@@ -6202,6 +6214,7 @@
     getMoveIcon: function(){ return ARROW_MOVE_ICON_SVG; },
     getNextIcon: function(){ return LINK_NEXT_ICON_SVG; },
     getCrossIcon: function(){ return CROSS_SMALL_ICON_SVG; },
+    getReminderBtnHtml: taskReminderBtnHtml,
     // кнопка режима чтения на вкладке "Поиск" (ТЗ пользователя от 19.09) —
     // тот же переключатель и та же иконка (.reading-mode-btn), что в
     // редакторе заметок/ридере книг, см. toggleReadingMode ниже по файлу
@@ -6210,6 +6223,24 @@
     applyReadingModeVisual: applyReadingModeVisual
   });
   var renderSettingsTabSearch = Search.renderSettingsTabSearch;
+
+  // ===================== УВЕДОМЛЕНИЯ (notifications.js) =====================
+  // ТЗ пользователя от 19.09 — напоминание для задачи на дату и время; все
+  // уведомления приложения (и будущие тоже) — в этом файле (см. его шапку:
+  // диалог даты/времени, планировщик, показ, клик по уведомлению). Здесь
+  // только связка с задачами: getRemindableTasks/openReminderTask/
+  // openTaskReminderDialog (см. «пиктограмма-чемоданчик» в разделе ВКЛАДКИ
+  // ЗАДАЧ: ХРАНЕНИЕ) — function-декларации, поднимаются в начало IIFE.
+  // Notifications.start() вызывается один раз в «ЗАПУСК».
+  var Notifications = window.initNotificationsModule({
+    modalBox: modalBox,
+    modalOverlay: modalOverlay,
+    modalHeader: modalHeader,
+    bindClose: bindClose,
+    closeModal: closeModal,
+    getRemindableTasks: getRemindableTasks,
+    openTaskFromReminder: openReminderTask
+  });
 
   // ===================== FLIBUSTA (flibusta.js) =====================
   // READER_PLAN.md, Этап E, шаг 17 (13.09) — кнопка "Flibusta" в нижнем
@@ -15121,7 +15152,9 @@
       // до ТЗ от 13.09 про пиктограмму-чемоданчик)
       return getAllTasks().filter(function(t){
         if(t.c.checked === true) return false;
-        return t.c.tab === "worktasks" || getTaskWorkState(t) !== "off";
+        // ТЗ пользователя от 19.09: задача с напоминанием (c.remindAt) тоже
+        // показывается на этой вкладке — вместе с отмеченными чемоданчиком
+        return t.c.tab === "worktasks" || getTaskWorkState(t) !== "off" || hasTaskReminder(t);
       }).sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
     }
     if(tab === "red"){
@@ -15307,7 +15340,8 @@
     var inWork = (newTab === "worktasks") ? true : !!task.c.inWork;
     var newId = genTaskId();
     saveTaskData(newId, {text: task.c.text || "", tab: homeTab, checked: false, checkedAt: null,
-      completionKey: null, nextForProjectId: null, flag: flag, inWork: inWork});
+      completionKey: null, nextForProjectId: null, flag: flag, inWork: inWork,
+      remindAt: getTaskReminderAt(task)});
     deleteGroupTaskPermanently(id);
     return newId;
   }
@@ -15321,6 +15355,7 @@
     var newId = genGroupTaskId();
     saveGroupTaskData(newId, {text: task.c.text || "", tab: "jointtasks", checked: false, checkedAt: null,
       completionKey: null, nextForProjectId: null, flag: task.c.flag || null, inWork: !!task.c.inWork,
+      remindAt: getTaskReminderAt(task),
       createdBy: getDeviceId(), completedBy: null});
     deleteTaskPermanently(id);
     return newId;
@@ -15427,6 +15462,76 @@
     if(st === "check") return " needs-check";
     return "";
   }
+  // ---- напоминание для задачи (ТЗ пользователя от 19.09) ----
+  // c.remindAt — время напоминания в мс (локальное время устройства);
+  // null/нет поля — напоминания нет. Два состояния пиктограммы-часов:
+  // нет / стоит (закрашенный круг, как «в работе» у чемодана). Показ самих
+  // уведомлений — notifications.js. Задачи с напоминанием попадают на
+  // вкладку с чемоданчиком (см. getTasksForTab, ветка worktasks).
+  function getTaskReminderAt(task){
+    var v = task && task.c ? task.c.remindAt : null;
+    return (typeof v === "number" && isFinite(v) && v > 0) ? v : null;
+  }
+  function hasTaskReminder(task){ return getTaskReminderAt(task) != null; }
+  function setTaskReminder(id, ts){
+    var task = getTaskById(id);
+    if(!task) return false;
+    task.c.remindAt = ts;
+    saveTaskData(id, task.c);
+    return true;
+  }
+  // возвращает true, если напоминание действительно было и снято
+  function clearTaskReminder(id){
+    var task = getTaskById(id);
+    if(!task || !hasTaskReminder(task)) return false;
+    task.c.remindAt = null;
+    saveTaskData(id, task.c);
+    Notifications.schedule();
+    return true;
+  }
+  // разметка кнопки-часов — общая для всех мест, где рисуется строка задачи
+  // (renderTaskRowView/renderTaskRowEdit/renderRowView/renderRowEdit)
+  function taskReminderBtnHtml(task){
+    var at = getTaskReminderAt(task);
+    return '<button type="button" class="task-icon-btn task-reminder-btn' + (at ? ' active' : '') + '" data-id="' + task.id + '" title="' +
+      (at ? escapeHtml('Напоминание: ' + Notifications.formatReminder(at)) : 'Напоминание') + '">' + CLOCK_ICON_SVG + '</button>';
+  }
+  // открывает диалог даты/времени; onDone — перерисовка строки/списка
+  function openTaskReminderDialog(id, onDone){
+    var task = getTaskById(id);
+    if(!task) return;
+    Notifications.openReminderDialog({
+      currentTs: getTaskReminderAt(task),
+      onSave: function(ts){ setTaskReminder(id, ts); if(onDone) onDone(); },
+      onClear: function(){ clearTaskReminder(id); if(onDone) onDone(); }
+    });
+  }
+  // задачи, за сроками которых следит notifications.js: личные + общие
+  // (если группа активна)
+  function getRemindableTasks(){
+    var list = getAllTasks();
+    if(isGroupTasksActive()){
+      try{ list = list.concat(getAllGroupTasks()); }catch(e){}
+    }
+    return list;
+  }
+  // клик по уведомлению (notifications.js): открыть окно задач на вкладке
+  // с напоминаниями («чемоданчик»; у общих задач — «Общие задачи») и
+  // подвести список к нужной строке
+  function openReminderTask(id){
+    var tab = isGroupTaskId(id) ? "jointtasks" : "worktasks";
+    var alreadyOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay &&
+      settingsModalOverlay.classList.contains("open");
+    if(!alreadyOpen) openSettingsModal();
+    settingsActiveTabSet = 1;
+    applySettingsTabSetVisibility();
+    switchSettingsTab(tab);
+    setTimeout(function(){
+      var row = document.querySelector('.task-body[data-id="' + id + '"]');
+      if(row && row.scrollIntoView) row.scrollIntoView({block: "center"});
+    }, 200);
+  }
+
   // Тап/долгое нажатие (250мс) — общий хелпер для чемоданчика и кружка-
   // флажка (ТЗ пользователя от 15.09): короткий клик даёт onTap (шаг
   // цикла), удержание — onHold (сброс отметки). Тот же приём, что и у
@@ -16503,10 +16608,11 @@
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
-        '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
-        '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + task.id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+        '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + task.id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
+        '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + task.id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+        taskReminderBtnHtml(task) +
       '</span>';
     body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderTaskRowEdit(id, tabKey, onAfterAction); });
     bindTaskRowActions(body, id, tabKey, onAfterAction);
@@ -16574,8 +16680,15 @@
     html += iconRow(ARROW_MOVE_ICON_SVG, true, "Перенос задач работает между вкладками:" + moveTabsHtml);
     html += iconRow(ARROW_TOP_ICON_SVG, false, "Переносит задачу в самое начало списка.");
     html += iconRow(ARROW_BOTTOM_ICON_SVG, false, "Переносит задачу в самый конец списка.");
-    html += iconRow(COPY_ICON_SVG, false, "Копирует текст задачи в буфер обмена.");
     html += iconRow(LINK_NEXT_ICON_SVG, false, "Только на вкладке «Проекты»: открывает список всех next-задач, привязанных к этому проекту.");
+    html += iconRow(COPY_ICON_SVG, false, "Копирует текст задачи в буфер обмена.");
+    html += iconRow(
+      '<span class="task-flag-dot" style="pointer-events:none;"><span class="task-flag-dot-inner"></span></span>', false,
+      "Цветной кружок — отметка приоритета. Нажатие переключает по кругу: " +
+      '<span class="task-flag-dot flag-red"><span class="task-flag-dot-inner"></span></span> красная → ' +
+      '<span class="task-flag-dot flag-yellow"><span class="task-flag-dot-inner"></span></span> жёлтая — и снова красная, по кругу. ' +
+      "Долгое нажатие снимает отметку совсем. Любая отмеченная задача, из какой бы вкладки она ни была, дополнительно показывается на вкладке «Red»."
+    );
     html += iconRow(
       TASK_MOVE_ICON_SVG("worktasks"), false,
       "Чемоданчик отмечает задачу «в работе». Нажатие переключает по кругу: " +
@@ -16585,11 +16698,11 @@
       "Долгое нажатие (около четверти секунды) снимает отметку совсем."
     );
     html += iconRow(
-      '<span class="task-flag-dot" style="pointer-events:none;"><span class="task-flag-dot-inner"></span></span>', false,
-      "Цветной кружок — отметка приоритета. Нажатие переключает по кругу: " +
-      '<span class="task-flag-dot flag-red"><span class="task-flag-dot-inner"></span></span> красная → ' +
-      '<span class="task-flag-dot flag-yellow"><span class="task-flag-dot-inner"></span></span> жёлтая — и снова красная, по кругу. ' +
-      "Долгое нажатие снимает отметку совсем. Любая отмеченная задача, из какой бы вкладки она ни была, дополнительно показывается на вкладке «Red»."
+      CLOCK_ICON_SVG, false,
+      "Напоминание на конкретные дату и время. Нажатие открывает выбор даты и времени, повторное нажатие на уже стоящем напоминании — изменить их (там же есть «Удалить напоминание»). Долгое нажатие снимает напоминание сразу. Два состояния: " +
+      '<span class="task-icon-btn task-reminder-btn">' + CLOCK_ICON_SVG + '</span> напоминания нет, ' +
+      '<span class="task-icon-btn task-reminder-btn active">' + CLOCK_ICON_SVG + '</span> напоминание стоит. ' +
+      "Все задачи с напоминанием дополнительно показываются на вкладке с чемоданчиком."
     );
     html += iconRow(SORT_FLAG_ICON_SVG, false, "Кнопка в нижнем ряду только на вкладке «Red»: включает сортировку списка — сначала красные отметки, потом жёлтые. Повторное нажатие возвращает обычный порядок по дате добавления.");
 
@@ -16759,6 +16872,28 @@
         afterFlagChange();
       });
     }
+    // часы «напоминание» (ТЗ пользователя от 19.09): тап — выбор даты и
+    // времени (повторный тап на уже стоящем напоминании — изменение; в
+    // диалоге есть «Удалить напоминание»), долгое нажатие (как у чемодана и
+    // кружка приоритета) — снять напоминание, а если его не было — тот же
+    // диалог. На вкладке с чемоданчиком состав списка зависит от
+    // напоминаний (getTasksForTab), поэтому там полная пересборка.
+    var reminderBtn = body.querySelector(".task-reminder-btn");
+    if(reminderBtn){
+      var afterReminderChange = function(){
+        var effectiveTab = tabKey || task.c.tab;
+        if(effectiveTab === "worktasks") renderTaskTabList(effectiveTab, id);
+        else renderTaskRowView(id, tabKey, onAfterAction);
+      };
+      bindTapOrHold(reminderBtn, function(){
+        flushPendingTaskEdits();
+        openTaskReminderDialog(id, afterReminderChange);
+      }, function(){
+        flushPendingTaskEdits();
+        if(clearTaskReminder(id)) afterReminderChange();
+        else openTaskReminderDialog(id, afterReminderChange);
+      });
+    }
   }
 
   // редактирование текста задачи — без отдельной дискеты сохранения:
@@ -16783,10 +16918,11 @@
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
-        '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
-        '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+        '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
+        '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+        taskReminderBtnHtml(task) +
       '</span>';
     var editable = document.getElementById("taskEditable_" + id);
     if(!editable) return;
@@ -17239,8 +17375,9 @@
           '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
-          '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
+          '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+          taskReminderBtnHtml(task) +
         '</span>';
       body.querySelector(".task-expand-btn").addEventListener("click", function(e){
         e.stopPropagation();
@@ -17333,6 +17470,19 @@
           renderRowView(id);
         });
       }
+      // часы «напоминание» (ТЗ пользователя от 19.09) — та же логика, что и
+      // в bindTaskRowActions выше (тап: диалог, долгое нажатие: снять)
+      var reminderBtn = body.querySelector(".task-reminder-btn");
+      if(reminderBtn){
+        bindTapOrHold(reminderBtn, function(){
+          flushPendingTaskEdits();
+          openTaskReminderDialog(id, function(){ renderRowView(id); });
+        }, function(){
+          flushPendingTaskEdits();
+          if(clearTaskReminder(id)) renderRowView(id);
+          else openTaskReminderDialog(id, function(){ renderRowView(id); });
+        });
+      }
     }
 
     // редактирование текста — без отдельной дискеты: текст сохраняется
@@ -17353,8 +17503,9 @@
           '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
-          '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
+          '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+          taskReminderBtnHtml(task) +
         '</span>';
       var editable = document.getElementById("taskEditable_" + id);
       if(!editable) return;
@@ -18021,5 +18172,6 @@
   setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); checkHourBoundaries(); refreshYearGridIfOpen(); }, 30 * 60 * 1000);
   checkUpdateSnoozeExpiry();
   checkForSharedFile();
+  Notifications.start();
 
 })();

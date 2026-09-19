@@ -1,5 +1,9 @@
 /* ===========================================================================
    modals.css
+   Версия: 2.5 (19.09) — структурная правка: напоминания задач (ТЗ 19.09). Новые классы:
+   .task-reminder-btn.active (часы в закрашенном круге, как .task-worktasks-btn.active),
+   .reminder-fields/.reminder-field*/.reminder-hidden-input/.reminder-error (диалог
+   даты и времени, notifications.js), .app-reminder-banner (плашка внутри приложения).
    Версия: 2.4 (19.09) — кружок приоритета (.task-flag-dot-inner) 9px -> 12px.
    Версия: 2.3 (19.09) — .task-delete-confirm: плашка «Удалить задачу?» (крестик/галочка).
    Версия: 2.2 (19.09) — .reading-mode-fab: размер пиктограммы кнопки режима чтения
@@ -1209,6 +1213,71 @@
     border:1.5px solid var(--wood);
     border-radius:50%;
     box-sizing:border-box;
+  }
+  /* пиктограмма-часы "напоминание" (.task-reminder-btn, notifications.js) —
+     два состояния, третьего нет: обычное (нет напоминания) — как остальные
+     кнопки строки; стоит напоминание (.active) — часы в закрашенном круге,
+     тот же приём и те же цвета темы, что у .task-worktasks-btn.active. */
+  .task-icon-btn.task-reminder-btn.active{
+    background:var(--wood);
+    color:var(--parchment);
+    border-radius:50%;
+  }
+  /* диалог выбора даты и времени (openReminderDialog в notifications.js): две
+     кнопки-поля; сами нативные окна Android открывают скрытые input'ы */
+  .reminder-fields{
+    position:relative;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    margin-bottom:12px;
+  }
+  .reminder-field{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    width:100%;
+    padding:10px 12px;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    color:var(--ink);
+    cursor:pointer;
+    text-align:left;
+  }
+  .reminder-field-label{ font-size:14px; color:var(--ink-soft); }
+  .reminder-field-value{ font-size:16px; font-weight:bold; text-align:right; }
+  .reminder-hidden-input{
+    position:absolute;
+    left:0;bottom:0;
+    width:1px;height:1px;
+    padding:0;border:0;
+    opacity:0;
+    pointer-events:none;
+  }
+  .modal-box p.reminder-error{
+    color:var(--danger);
+    font-size:14px;
+    margin:0 0 10px 0;
+  }
+  /* плашка внутри приложения (showBanner в notifications.js) — запасной путь,
+     когда системное уведомление недоступно */
+  .app-reminder-banner{
+    position:fixed;
+    top:12px;left:12px;right:12px;
+    max-width:420px;
+    margin:0 auto;
+    padding:12px 14px;
+    background:var(--wood);
+    color:var(--parchment);
+    border-radius:8px;
+    box-shadow:0 6px 20px rgba(0,0,0,.4);
+    font-size:15px;
+    line-height:1.4;
+    cursor:pointer;
+    z-index:1200;
   }
   /* значок-шеврон "показать полностью" (.task-expand-btn) — тот же
      .task-icon-btn, что и остальные кнопки строки задачи, только сам

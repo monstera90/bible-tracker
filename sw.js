@@ -6,7 +6,7 @@
 // что sw.js изменился, скачать новую версию в фоне и подготовить её к
 // установке — без этого шага обновление не будет обнаружено автоматически.
 
-const APP_VERSION = "v0.36.16";
+const APP_VERSION = "v0.36.17";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -53,6 +53,7 @@ const ASSETS = [
   "./imgresize.js",
   "./mdeditor.js",
   "./search.js",
+  "./notifications.js",
   "./flibusta.js",
   "./DejaVuSans.ttf",
   "./icon-192x192.png",
@@ -162,6 +163,43 @@ self.addEventListener("fetch", (event) => {
       return cached || networkFetch;
     })
   );
+});
+
+// Клик по уведомлению-напоминанию (notifications.js). id задачи кладём во
+// временный кэш REMINDER_CLICK_CACHE (тот же приём, что у share-target —
+// адресная строка не нужна, поэтому холодный запуск работает офлайн), затем
+// фокусируем уже открытое окно и будим страницу сообщением REMINDER_CLICK
+// либо открываем приложение заново; страница сама забирает запись из кэша
+// (consumePendingClick) и открывает вкладку с задачей.
+const REMINDER_CLICK_CACHE = "reminder-click-temp";
+const REMINDER_CLICK_KEY = "click";
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const taskId = event.notification.data && event.notification.data.taskId;
+  event.waitUntil((async () => {
+    try {
+      if (taskId) {
+        const cache = await caches.open(REMINDER_CLICK_CACHE);
+        await cache.put(
+          REMINDER_CLICK_KEY,
+          new Response(JSON.stringify({ taskId: taskId, at: Date.now() }), {
+            headers: { "Content-Type": "application/json" }
+          })
+        );
+      }
+    } catch (e) {}
+    const clientList = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of clientList) {
+      if ("focus" in client) {
+        try {
+          client.postMessage({ type: "REMINDER_CLICK" });
+          return await client.focus();
+        } catch (e) {}
+      }
+    }
+    if (self.clients.openWindow) return self.clients.openWindow("./");
+  })());
 });
 
 // страница просит "активируйся уже" после того, как пользователь

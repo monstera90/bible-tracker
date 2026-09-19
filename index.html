@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 2.3 (19.09) — подключён notifications.js (уведомления/напоминания
+     задач, ТЗ пользователя от 19.09).
      Версия: 2.2 (19.09) -->
 <head>
 <meta charset="UTF-8">
@@ -742,6 +744,12 @@ window.addEventListener("error", function(e){
      копии не заводит. -->
 <script src="flibusta.js"></script>
 <script src="debug.js"></script>
+<!-- notifications.js — напоминания для задач (ТЗ пользователя от 19.09) и все
+     будущие уведомления приложения: диалог даты/времени, планировщик, показ.
+     Должен идти ДО my.js — my.js создаёт модуль при загрузке
+     (initNotificationsModule); сам файл на другие скрипты при загрузке не
+     ссылается. -->
+<script src="notifications.js"></script>
 <!-- syncengine*.js — TASK_UNIFIED_SYNC.md, Шаги 1-3: единый sync-engine.
      syncengine.js (движок), syncengine_groupcrypto.js (шифрование групповым
      ключом), syncengine_transport.js (Realtime Database),

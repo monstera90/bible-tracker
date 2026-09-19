@@ -1,4 +1,8 @@
 // syncengine_groupbinding.js
+// Версия: 1.2 (19.09) — Шаг 4.2: moveTo(targetBinding, id, data) — перенос записи
+// из этого binding в другой одним вызовом движка (engine.moveRecord), и
+// ensureStoreId(); put адаптера стал «всё или ничего» (если cache.save() бросил —
+// запись в кэше возвращается к прежней). Остальная логика не менялась.
 // Версия: 1.1 (19.09) — только диагностика: save/remove/syncNow пишут строку в
 // журнал (opts.log). Логика не менялась.
 //
@@ -85,6 +89,9 @@
    * binding:
    *   save(id, data)     -> Promise<record>   создать/изменить запись
    *   remove(id)         -> Promise<record>   soft-delete (тумбстоун)
+   *   moveTo(target, id, data) -> Promise<{target, tombstone}>  перенос в другой
+   *                        binding одним вызовом движка (шаг 4.2)
+   *   ensureStoreId()    -> string            привязать store к группе, отдать storeId
    *   syncNow()          -> Promise<{pull, push}>  pull → сверка → push
    *   pushNow(opts)      -> Promise<{pushed, failed, error}>
    *   detach()                                отключиться от текущей группы
@@ -154,8 +161,17 @@
         put: function (record) {
           return runNow(function () {
             var st = open();
+            var had = Object.prototype.hasOwnProperty.call(st, record.id);
+            var prev = st[record.id];
             st[record.id] = { c: record.deleted ? null : record.data, t: record.updatedAt };
-            cache.save();
+            try {
+              cache.save();
+            } catch (err) {
+              // put — «всё или ничего» (на этом стоит откат engine.moveRecord):
+              // если кэш не смог сохраниться, возвращаем прежнее содержимое.
+              if (had) st[record.id] = prev; else delete st[record.id];
+              throw err;
+            }
           });
         },
       };
@@ -229,6 +245,28 @@
       return engine.deleteRecord(ensure().storeId, id);
     }
 
+    // Публичный вариант ensure(): привязывает store к текущей группе (если ещё
+    // не привязан) и отдаёт его storeId. Нужен moveTo другого binding'а.
+    function ensureStoreId() {
+      return ensure().storeId;
+    }
+
+    // Шаг 4.2: перенос записи ИЗ этого binding В targetBinding (например,
+    // tasks → archive) одним вызовом движка: запись в целевом store + тумбстоун
+    // в этом, см. engine.moveRecord (те же гарантии: обе локальные записи
+    // синхронно, одна метка updatedAt, dirty — только если обе легли, откат
+    // при частичном сбое). Оба binding должны работать на одном engine и одной
+    // группе; иначе — исключение до любых записей.
+    function moveTo(targetBinding, id, data) {
+      if (!targetBinding || typeof targetBinding.ensureStoreId !== 'function') {
+        throw new Error('[GroupBinding:' + name + '] moveTo: targetBinding обязателен');
+      }
+      var fromId = ensure().storeId;
+      var toId = targetBinding.ensureStoreId();
+      log('GroupBinding:' + name + ' moveTo ' + toId + ' ' + id);
+      return engine.moveRecord(fromId, toId, id, data);
+    }
+
     function syncNow() {
       log('GroupBinding:' + name + ' syncNow');
       return transport.syncNow(ensure().storeId);
@@ -247,6 +285,8 @@
     return {
       save: save,
       remove: remove,
+      moveTo: moveTo,
+      ensureStoreId: ensureStoreId,
       syncNow: syncNow,
       pushNow: pushNow,
       detach: detach,

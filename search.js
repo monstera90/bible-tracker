@@ -1,5 +1,10 @@
 /* ===========================================================================
    search.js
+   Версия: 2.5 (19.09) — в строке результата по задачам добавлена пиктограмма-часы
+   «напоминание» (крайняя справа, правее кружка приоритета; ТЗ пользователя от
+   19.09). Разметку даёт деп getReminderBtnHtml (taskReminderBtnHtml из my.js),
+   логику — bindTaskRowActions. Чемодана и «копировать» в этой строке, как и
+   раньше, нет.
    Версия: 2.4 (19.09) — в строке результата по задачам добавлен крестик «удалить задачу»
    (слева от карандаша; логику и подтверждение даёт bindTaskRowActions из my.js, деп getCrossIcon).
    Версия: 2.3 (19.09) — кнопка режима чтения на вкладке "Поиск" (ТЗ пользователя
@@ -61,6 +66,7 @@ window.initSearchModule = function(deps){
   var getMoveIcon = deps.getMoveIcon || function(){ return ""; };
   var getNextIcon = deps.getNextIcon || function(){ return ""; };
   var getCrossIcon = deps.getCrossIcon || function(){ return ""; };
+  var getReminderBtnHtml = deps.getReminderBtnHtml || function(){ return ""; };
   // Кнопка режима чтения (ТЗ пользователя от 19.09) — та же единая точка
   // переключения, что у заметок/книг/задач в my.js. Иконку и title кнопке
   // ставит applyReadingModeVisual (кнопка рендерится пустой, узнаётся по
@@ -482,6 +488,7 @@ window.initSearchModule = function(deps){
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + getMoveIcon() + '</button>' +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + getNextIcon() + '</button>' : '') +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
+        getReminderBtnHtml(found) +
       '</span>';
     var onAfterAction = function(){ removeSearchTaskRow(id); };
     body.querySelector(".task-edit-btn").addEventListener("click", function(){

@@ -1,4 +1,6 @@
 // syncengine.js
+// Версия: 2.1 (19.09) — moveRecord: атомарный перенос записи между двумя store
+// (TASK_UNIFIED_SYNC.md, шаг 4.2). Остальное без изменений.
 // Версия: 2.0 (18.09)
 //
 // Единая точка мутации данных для всего проекта (TASK_UNIFIED_SYNC.md, шаг 1).
@@ -13,6 +15,9 @@
 // engine.getStoreConfig. Тесты гоняются без сети — см. syncengine_test.js.
 //
 // v2.0 (шаг 2): добавлен getStoreConfig(storeId) — единственное изменение API.
+// v2.1 (шаг 4.2): добавлен moveRecord(fromStoreId, toStoreId, recordId, data) —
+// перенос записи между store одним вызовом (запись в целевой store + soft-delete
+// в исходном), см. комментарий у функции.
 //
 // Требования "не висеть во время синка" и "синк без ручного обновления
 // страницы" (см. TASK_UNIFIED_SYNC.md) для этого файла означают:
@@ -68,6 +73,23 @@
         setTimeout(resolve, 0);
       }
     });
+  }
+
+  // Выполняет fn СРАЗУ (синхронно) и заворачивает результат/исключение в Promise.
+  function callNow(fn) {
+    try {
+      return Promise.resolve(fn());
+    } catch (err) {
+      return Promise.reject(err);
+    }
+  }
+
+  // Promise -> Promise<{ok:true,value}|{ok:false,error}> — не отклоняется никогда.
+  function settle(p) {
+    return p.then(
+      function (value) { return { ok: true, value: value }; },
+      function (error) { return { ok: false, error: error }; }
+    );
   }
 
   // ---- Простой event emitter ------------------------------------------------
@@ -193,6 +215,97 @@
       return record;
     }
 
+    /**
+     * moveRecord(fromStoreId, toStoreId, recordId, data) -> Promise<{target, tombstone}>
+     * Атомарный перенос записи между двумя store (шаг 4.2): в целевой store
+     * пишется запись с данными `data`, в исходном — тумбстоун (soft-delete),
+     * ОДНИМ вызовом. Раньше это были два независимых шага в вызывающем коде
+     * (saveRecord в одном store + deleteRecord в другом): между ними можно было
+     * остановиться (сбой, закрытая вкладка) и получить запись сразу в обоих
+     * store или ни в одном.
+     *
+     * Гарантии:
+     *  1. Оба store проверяются ДО любой записи (не зарегистрирован / совпадают
+     *     — ничего не изменилось).
+     *  2. Обе локальные записи стартуют СИНХРОННО внутри вызова, до первого
+     *     await (тот же контракт, что у saveRecord: отрисовка сразу после
+     *     вызова уже видит и новую запись, и тумбстоун).
+     *  3. Обе записи получают ОДНУ и ту же метку updatedAt (одно чтение clock) —
+     *     на другом устройстве перенос упорядочивается одинаково в обоих store.
+     *  4. Dirty-флаги ставятся ТОЛЬКО когда обе записи легли; событие 'dirty'
+     *     идёт сначала для целевого store, потом для исходного (транспорт
+     *     стартует отправку в этом порядке: сначала «новый дом», потом
+     *     погашение старого).
+     *  5. Если одна из двух записей не легла — вторая откатывается к тому, что
+     *     было до вызова (если запись в store не существовала — остаётся
+     *     тумбстоун с той же меткой, локальный и без dirty), dirty не ставится,
+     *     вызов бросает исключение (в тексте — «откат выполнен» или «откат НЕ
+     *     выполнен»). Пока dirty не поставлен, в облако ничего не уходит.
+     * Сетевая отправка остаётся ДВУМЯ push (у store разные облачные пути) —
+     * это забота транспорта, движок про сеть не знает.
+     */
+    async function moveRecord(fromStoreId, toStoreId, recordId, data) {
+      validateRecordId(recordId);
+      var from = getStoreOrThrow(fromStoreId);
+      var to = getStoreOrThrow(toStoreId);
+      if (fromStoreId === toStoreId) {
+        throw new Error('[SyncEngine] moveRecord: исходный и целевой store совпадают (' + fromStoreId + ')');
+      }
+      var ts = clock();
+      var target = { id: recordId, data: data, deleted: false, updatedAt: ts };
+      var tombstone = { id: recordId, data: null, deleted: true, updatedAt: ts };
+
+      // Всё ниже до await выполняется синхронно. Сначала снимок «как было»
+      // (для отката), потом обе записи.
+      var prevTo = settle(callNow(function () { return to.storage.get(recordId); }));
+      var prevFrom = settle(callNow(function () { return from.storage.get(recordId); }));
+      var putTo = settle(callNow(function () { return to.storage.put(target); }));
+      var putFrom = settle(callNow(function () { return from.storage.put(tombstone); }));
+
+      var r = await Promise.all([prevTo, prevFrom, putTo, putFrom]);
+      var prevToR = r[0], prevFromR = r[1], putToR = r[2], putFromR = r[3];
+
+      if (putToR.ok && putFromR.ok) {
+        to.dirty.set(recordId, true);
+        from.dirty.set(recordId, true);
+        emitter.emit('dirty', { storeId: toStoreId, recordId: recordId, record: target });
+        emitter.emit('dirty', { storeId: fromStoreId, recordId: recordId, record: tombstone });
+        return { target: target, tombstone: tombstone };
+      }
+
+      // Сбой (частичный или полный). Стороны, где put удался, откатываем
+      // обязательно; на стороне, где put упал, пробуем вернуть прежнее
+      // состояние «на всякий случай» (адаптер мог успеть записать до ошибки) —
+      // неудача такого отката не считается сбоем отката.
+      var failure = !putToR.ok ? putToR.error : putFromR.error;
+      var rb = await Promise.all([
+        rollbackSide(to, recordId, prevToR, ts, putToR.ok),
+        rollbackSide(from, recordId, prevFromR, ts, putFromR.ok),
+      ]);
+      var rollbackNote = '';
+      if (putToR.ok || putFromR.ok) {
+        rollbackNote = (rb[0] && rb[1])
+          ? ' (откат выполнен)'
+          : ' (⚠️ откат НЕ выполнен — состояние двух store может расходиться)';
+      }
+      throw new Error('[SyncEngine] moveRecord ' + fromStoreId + ' → ' + toStoreId + ', запись "' +
+        recordId + '": ' + (failure && failure.message ? failure.message : String(failure)) + rollbackNote);
+    }
+
+    // Возвращает Promise<boolean> — «с этой стороной всё в порядке».
+    // prevR — результат settle() от storage.get ДО записи: {ok, value};
+    // applied — put этой стороны удался (тогда откат обязателен). Записи не
+    // было (null) — стереть нельзя (в контракте storage нет delete), поэтому
+    // кладём тумбстоун (только если сторона успела лечь).
+    function rollbackSide(store, recordId, prevR, ts, applied) {
+      if (!prevR.ok) return Promise.resolve(!applied); // прежнее состояние неизвестно
+      if (!prevR.value && !applied) return Promise.resolve(true); // нечего возвращать
+      var back = prevR.value || { id: recordId, data: null, deleted: true, updatedAt: ts };
+      return settle(callNow(function () { return store.storage.put(back); })).then(function (x) {
+        return applied ? x.ok : true;
+      });
+    }
+
     /** getRecord(storeId, recordId) -> Promise<record|null> */
     async function getRecord(storeId, recordId) {
       return getStoreOrThrow(storeId).storage.get(recordId);
@@ -292,6 +405,7 @@
       getStoreConfig: getStoreConfig,
       saveRecord: saveRecord,
       deleteRecord: deleteRecord,
+      moveRecord: moveRecord,
       getRecord: getRecord,
       listRecords: listRecords,
       getDirty: getDirty,
