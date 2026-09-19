@@ -1,15 +1,24 @@
 /* ===========================================================================
    notifications.js
+   Версия: 2.0 (19.09) — структурная правка: диалог напоминания переделан из
+   модального окна в компактную плашку (как единая плашка-подтверждение
+   openAppConfirmBar в my.js): прижата к правому краю, стоит над клавиатурой
+   (если она открыта) либо у нижнего края, затемнение позади. Ряд слева
+   направо: круглый пузырь даты (иконка календаря, после выбора — число), овальный
+   пузырь времени (иконка часов, после выбора — 8:00/23:00), крестик-отмена,
+   галочка-сохранить. Клик мимо (по затемнению) = крестик. Кнопки «Удалить
+   напоминание» в плашке нет — напоминание снимается долгим нажатием на часы в строке
+   задачи. Новые внутренние функции: closeBar, placeBar.
    Версия: 1.0 (19.09) — новый файл. ТЗ пользователя от 19.09: напоминание для
    задачи на конкретные дату и время. ВСЕ уведомления приложения (в том числе
    будущие) живут в этом файле — my.js лишь хранит поле задачи и рисует
    пиктограмму-часы.
 
    Что здесь есть сейчас:
-   1) Диалог выбора даты и времени (openReminderDialog). Два поля-кнопки
+   1) Плашка выбора даты и времени (openReminderDialog). Два пузыря
       «Дата»/«Время»; по нажатию открывается НАТИВНОЕ окно Android (календарь /
       часы — как в приложениях Google), поэтому свой календарь не пишем.
-      Скрытые <input type="date">/<input type="time"> лежат в самом диалоге,
+      Скрытые <input type="date">/<input type="time"> лежат в самой плашке,
       showPicker() зовётся прямо из клика по кнопке (нужен жест пользователя).
    2) Планировщик (start/schedule/tick): раз в ≤30 сек и точно к ближайшему
       сроку проверяет задачи с полем c.remindAt (мс, локальное время) и
@@ -39,7 +48,8 @@
    ({id: remindAt}, только на этом устройстве): если срок поменяли — значение
    отличается и уведомление сработает заново.
 
-   Контракт deps: modalBox, modalOverlay, modalHeader, bindClose, closeModal,
+   Контракт deps: modalBox, modalOverlay, modalHeader, bindClose, closeModal
+   (после v2.0 плашкой не используются, оставлены для совместимости),
    getRemindableTasks() -> [{id, c}], openTaskFromReminder(id).
    Экспорт: start, schedule, openReminderDialog, formatReminder, isSupported,
    showBanner.
@@ -291,7 +301,34 @@ window.initNotificationsModule = function(deps){
     tick();
   }
 
-  // ------------------------------------------------------------------ диалог
+  // ------------------------------------------------------------------ плашка
+
+  var ICON_CROSS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>';
+  var ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"></path></svg>';
+  var ICON_CLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg>';
+  var ICON_CALENDAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="14.5" rx="2"></rect><path d="M4 10h16"></path><path d="M8 3.5V7"></path><path d="M16 3.5V7"></path></svg>';
+
+  // те же отступы, что у единой плашки-подтверждения в my.js (openAppConfirmBar)
+  var BAR_BOTTOM_NO_KB_PX = 59; // 47px системная плашка + 12px зазор
+  var BAR_GAP_PX = 10;          // зазор над клавиатурой
+  var barEl = null, backdropEl = null, barCleanup = null;
+
+  function closeBar(){
+    if(barCleanup){ barCleanup(); barCleanup = null; }
+    if(barEl && barEl.parentNode) barEl.parentNode.removeChild(barEl);
+    if(backdropEl && backdropEl.parentNode) backdropEl.parentNode.removeChild(backdropEl);
+    barEl = null;
+    backdropEl = null;
+  }
+
+  // по вертикали: над клавиатурой, если она открыта, иначе у нижнего края
+  function placeBar(el){
+    var kbTop = (window.AppKeyboard && window.AppKeyboard.getTop) ? window.AppKeyboard.getTop() : null;
+    var bottom = (kbTop != null)
+      ? Math.max(0, window.innerHeight - kbTop) + BAR_GAP_PX
+      : BAR_BOTTOM_NO_KB_PX;
+    el.style.bottom = Math.round(bottom) + "px";
+  }
 
   function openNativePicker(input){
     try{
@@ -300,70 +337,111 @@ window.initNotificationsModule = function(deps){
     try{ input.focus(); input.click(); }catch(e){}
   }
 
-  // opts: {currentTs (число|null), onSave(ts), onClear()}
+  // opts: {currentTs (число|null), onSave(ts), onClear()} — onClear сейчас не
+  // вызывается (кнопки «Удалить» в плашке нет), оставлен в контракте
   function openReminderDialog(opts){
+    closeBar();
     var hasCurrent = typeof opts.currentTs === "number" && opts.currentTs > 0;
-    var startTs = hasCurrent ? opts.currentTs : defaultTimestamp();
-    var selDate = toDateValue(startTs);
-    var selTime = toTimeValue(startTs);
+    // пока ничего не выбрано — в пузырях иконки; у стоящего напоминания — его значения
+    var selDate = hasCurrent ? toDateValue(opts.currentTs) : "";
+    var selTime = hasCurrent ? toTimeValue(opts.currentTs) : "";
 
-    modalBox.innerHTML =
-      modalHeader("Напоминание", "Выберите дату и время.") +
-      '<div class="reminder-fields">' +
-        '<button type="button" class="reminder-field" id="mRemDateBtn"><span class="reminder-field-label">Дата</span><span class="reminder-field-value" id="mRemDateVal"></span></button>' +
-        '<button type="button" class="reminder-field" id="mRemTimeBtn"><span class="reminder-field-label">Время</span><span class="reminder-field-value" id="mRemTimeVal"></span></button>' +
-        '<input type="date" class="reminder-hidden-input" id="mRemDateInput" tabindex="-1" aria-hidden="true">' +
-        '<input type="time" class="reminder-hidden-input" id="mRemTimeInput" tabindex="-1" aria-hidden="true">' +
-      '</div>' +
-      '<p class="reminder-error" id="mRemError" style="display:none;">Это время уже прошло — выберите будущее.</p>' +
-      '<button type="button" class="modal-btn primary" id="mRemSave">Сохранить</button>' +
-      (hasCurrent ? '<button type="button" class="modal-btn danger" id="mRemClear">Удалить напоминание</button>' : '') +
-      '<button type="button" class="modal-btn" id="mRemCancel">Отмена</button>';
-    bindClose();
-    modalOverlay.classList.add("open");
+    backdropEl = document.createElement("div");
+    backdropEl.className = "app-confirm-bar-backdrop";
+    document.body.appendChild(backdropEl);
 
-    var dateInput = document.getElementById("mRemDateInput");
-    var timeInput = document.getElementById("mRemTimeInput");
-    var dateVal = document.getElementById("mRemDateVal");
-    var timeVal = document.getElementById("mRemTimeVal");
-    var errorEl = document.getElementById("mRemError");
+    var bar = document.createElement("div");
+    bar.className = "app-confirm-bar app-reminder-bar";
+    bar.setAttribute("role", "dialog");
+    bar.innerHTML =
+      '<button type="button" class="reminder-bubble reminder-bubble-date" id="mRemDateBtn" title="Дата"></button>' +
+      '<button type="button" class="reminder-bubble reminder-bubble-time" id="mRemTimeBtn" title="Время"></button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="mRemCancel" title="Отмена">' + ICON_CROSS + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="mRemSave" title="Сохранить">' + ICON_CHECK + '</button>' +
+      '<input type="date" class="reminder-hidden-input" id="mRemDateInput" tabindex="-1" aria-hidden="true">' +
+      '<input type="time" class="reminder-hidden-input" id="mRemTimeInput" tabindex="-1" aria-hidden="true">';
+    document.body.appendChild(bar);
+    barEl = bar;
+
+    var dateBtn = bar.querySelector("#mRemDateBtn");
+    var timeBtn = bar.querySelector("#mRemTimeBtn");
+    var dateInput = bar.querySelector("#mRemDateInput");
+    var timeInput = bar.querySelector("#mRemTimeInput");
     dateInput.min = toDateValue(Date.now());
 
     function refresh(){
+      // значение в input — только если оно выбрано: пустой input открывает
+      // нативное окно на «сегодня/сейчас», а change сработает при любом выборе
       dateInput.value = selDate;
       timeInput.value = selTime;
-      var ts = parseLocal(selDate, selTime);
-      dateVal.textContent = isNaN(ts) ? "—" : formatDateLong(ts);
-      timeVal.textContent = selTime || "—";
-      errorEl.style.display = "none";
+      if(selDate){
+        dateBtn.textContent = String(parseInt(selDate.slice(8, 10), 10));
+        dateBtn.title = formatDateLong(parseLocal(selDate, "00:00"));
+        dateBtn.classList.add("is-set");
+      }else{
+        dateBtn.innerHTML = ICON_CALENDAR;
+        dateBtn.title = "Дата";
+        dateBtn.classList.remove("is-set");
+      }
+      if(selTime){
+        timeBtn.textContent = parseInt(selTime.slice(0, 2), 10) + ":" + selTime.slice(3, 5);
+        timeBtn.title = "Время " + selTime;
+        timeBtn.classList.add("is-set");
+      }else{
+        timeBtn.innerHTML = ICON_CLOCK;
+        timeBtn.title = "Время";
+        timeBtn.classList.remove("is-set");
+      }
+      dateBtn.classList.remove("is-invalid");
+      timeBtn.classList.remove("is-invalid");
     }
     refresh();
 
-    document.getElementById("mRemDateBtn").addEventListener("click", function(){ openNativePicker(dateInput); });
-    document.getElementById("mRemTimeBtn").addEventListener("click", function(){ openNativePicker(timeInput); });
-    dateInput.addEventListener("change", function(){ if(dateInput.value) selDate = dateInput.value; refresh(); });
-    timeInput.addEventListener("change", function(){ if(timeInput.value) selTime = timeInput.value; refresh(); });
+    placeBar(bar);
+    var vk = navigator.virtualKeyboard;
+    var onPlace = function(){ placeBar(bar); };
+    if(vk) vk.addEventListener("geometrychange", onPlace);
+    window.addEventListener("resize", onPlace);
+    window.addEventListener("popstate", closeBar);
+    barCleanup = function(){
+      if(vk) vk.removeEventListener("geometrychange", onPlace);
+      window.removeEventListener("resize", onPlace);
+      window.removeEventListener("popstate", closeBar);
+    };
 
-    document.getElementById("mRemSave").addEventListener("click", function(){
+    // нажатие на плашку/затемнение не отнимает фокус у поля задачи (иначе
+    // клавиатура закроется и плашка «поедет»)
+    bar.addEventListener("mousedown", function(e){ e.preventDefault(); });
+    backdropEl.addEventListener("mousedown", function(e){ e.preventDefault(); });
+    backdropEl.addEventListener("click", closeBar);
+    bar.querySelector("#mRemCancel").addEventListener("click", closeBar);
+
+    dateBtn.addEventListener("click", function(){ openNativePicker(dateInput); });
+    timeBtn.addEventListener("click", function(){ openNativePicker(timeInput); });
+    function onDate(){ if(dateInput.value){ selDate = dateInput.value; refresh(); } }
+    function onTime(){ if(timeInput.value){ selTime = timeInput.value; refresh(); } }
+    dateInput.addEventListener("change", onDate);
+    dateInput.addEventListener("input", onDate);
+    timeInput.addEventListener("change", onTime);
+    timeInput.addEventListener("input", onTime);
+
+    function markInvalid(dateBad, timeBad){
+      dateBtn.classList.toggle("is-invalid", !!dateBad);
+      timeBtn.classList.toggle("is-invalid", !!timeBad);
+    }
+    bar.querySelector("#mRemSave").addEventListener("click", function(){
+      if(!selDate || !selTime){ markInvalid(!selDate, !selTime); return; }
       var ts = parseLocal(selDate, selTime);
       if(isNaN(ts) || ts <= Date.now()){
-        errorEl.style.display = "";
+        // время уже прошло: если дата — сегодня, виновато время, иначе подсвечиваем оба
+        markInvalid(selDate !== toDateValue(Date.now()), true);
         return;
       }
       requestPermissionIfNeeded(); // здесь ещё жест пользователя
-      closeModal();
+      closeBar();
       if(opts.onSave) opts.onSave(ts);
       schedule();
     });
-    var clearBtn = document.getElementById("mRemClear");
-    if(clearBtn){
-      clearBtn.addEventListener("click", function(){
-        closeModal();
-        if(opts.onClear) opts.onClear();
-        schedule();
-      });
-    }
-    document.getElementById("mRemCancel").addEventListener("click", closeModal);
   }
 
   return {

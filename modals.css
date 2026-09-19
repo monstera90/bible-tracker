@@ -1,5 +1,9 @@
 /* ===========================================================================
    modals.css
+   Версия: 3.0 (19.09) — структурная правка: диалог напоминания (notifications.js) переделан в плашку. Удалены
+   .reminder-fields, .reminder-field, .reminder-field-label, .reminder-field-value и правило для p.reminder-error; добавлены
+   .app-reminder-bar (модификатор к .app-confirm-bar), .reminder-bubble, .reminder-bubble-date (круглый пузырь даты),
+   .reminder-bubble-time (овальный пузырь времени), состояния .is-set и .is-invalid.
    Версия: 2.8 (19.09) — структурная правка: .task-delete-confirm(-btns)
    удалены, вместо них единый класс .app-confirm-bar(-text/-btns) +
    .app-confirm-bar-backdrop (затемнение) — общая плашка-подтверждение
@@ -1265,32 +1269,53 @@
     color:var(--parchment);
     border-radius:50%;
   }
-  /* диалог выбора даты и времени (openReminderDialog в notifications.js): две
-     кнопки-поля; сами нативные окна Android открывают скрытые input'ы */
-  .reminder-fields{
-    position:relative;
-    display:flex;
-    flex-direction:column;
+  /* плашка выбора даты и времени (openReminderDialog в notifications.js).
+     Класс .app-reminder-bar добавляется к .app-confirm-bar (правый край, над
+     клавиатурой, затемнение .app-confirm-bar-backdrop — всё оттуда). Ряд:
+     круглый пузырь даты, овальный пузырь времени, крестик и галочка (те же
+     .mdeditor-fab-btn, что и у плашки-подтверждения). Пока значение не
+     выбрано — в пузыре иконка (обводка); выбрано — заливка цветом темы и
+     число/время. .is-invalid — красная подсветка при сохранении без
+     значения или со временем в прошлом. */
+  .app-confirm-bar.app-reminder-bar{
+    right:8px;
     gap:8px;
-    margin-bottom:12px;
+    padding:8px;
   }
-  .reminder-field{
-    display:flex;
+  .reminder-bubble{
+    box-sizing:border-box;
+    display:inline-flex;
     align-items:center;
-    justify-content:space-between;
-    gap:12px;
-    width:100%;
-    padding:10px 12px;
-    background:#fffef8;
-    border:1px solid var(--groove-shadow);
-    border-radius:6px;
+    justify-content:center;
+    flex-shrink:0;
+    height:40px;
+    padding:0;
+    border:1.5px solid var(--wood);
+    background:var(--parchment);
+    color:var(--wood);
     font-family:"Palatino Linotype",Georgia,serif;
-    color:var(--ink);
+    font-size:16px;
+    font-weight:bold;
+    line-height:1;
     cursor:pointer;
-    text-align:left;
+    -webkit-tap-highlight-color:transparent;
   }
-  .reminder-field-label{ font-size:14px; color:var(--ink-soft); }
-  .reminder-field-value{ font-size:16px; font-weight:bold; text-align:right; }
+  .reminder-bubble svg{ width:22px; height:22px; }
+  .reminder-bubble-date{ width:40px; border-radius:50%; }
+  .reminder-bubble-time{ min-width:72px; padding:0 14px; border-radius:20px; }
+  .reminder-bubble.is-set{
+    background:var(--wood);
+    color:var(--parchment);
+  }
+  .reminder-bubble.is-invalid{
+    border-color:var(--danger);
+    color:var(--danger);
+  }
+  .reminder-bubble.is-set.is-invalid{
+    background:var(--danger);
+    border-color:var(--danger);
+    color:var(--parchment);
+  }
   .reminder-hidden-input{
     position:absolute;
     left:0;bottom:0;
@@ -1298,11 +1323,6 @@
     padding:0;border:0;
     opacity:0;
     pointer-events:none;
-  }
-  .modal-box p.reminder-error{
-    color:var(--danger);
-    font-size:14px;
-    margin:0 0 10px 0;
   }
   /* плашка внутри приложения (showBanner в notifications.js) — запасной путь,
      когда системное уведомление недоступно */
