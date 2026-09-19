@@ -1,6 +1,22 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 25.0 (19.09) — структурная правка (TASK_UNIFIED_SYNC.md, Шаг 3):
+   ОБЩИЕ ЗАДАЧИ (/groups/<groupId>/tasks) переведены на sync-engine
+   (syncengine.js + syncengine_transport.js + syncengine_groupcrypto.js +
+   новый syncengine_groupbinding.js). Удалены groupTasksDirty,
+   scheduleGroupTasksPush, pushGroupTasksNow, pullGroupTasksNow — «записать
+   задачу локально» и «поставить на отправку» теперь один вызов
+   (saveGroupTaskData/deleteGroupTaskPermanently → binding.save/remove).
+   Добавлены getSyncEngineRuntime/getGroupTasksBinding/syncGroupTasksNow/
+   saveGroupTaskDataP/logGroupTasksSyncError/syncEngineLog. refreshJointTasksData
+   зовёт syncGroupTasksNow (pull → сверка → push) вместо pull + проверки
+   dirty; returnJointTasksTabToLocalMode отключает binding от группы;
+   migrateAdminGroupTasksIfNeeded больше не PATCH-ит /tasks в обход — пишет
+   через движок с детерминированными id ("gt_"+id личной задачи), помечает
+   миграцию выполненной только после подтверждённой отправки. Облачный путь,
+   формат {c,t} и шифрование прежние — участники на старой версии не
+   ломаются. Архив общих задач (/archive), личные задачи и заметки не тронуты.
    Версия: 24.0 (18.09) — структурная правка (ТЗ пользователя): реализован
    перенос задач кнопкой-стрелочкой между личными вкладками и «Общими
    задачами» (раньше был явно запрещён — выбор папки в пикере переноса
@@ -1973,6 +1989,15 @@
     // условием, что и вся остальная скрепка/Аа/Ж/текстовыделитель выше.
     var infoWrap = document.getElementById("taskInfoWrap");
     if(infoWrap) infoWrap.classList.toggle("visible", showTaskFab);
+    // Кнопка режима чтения (ТЗ пользователя от 18.09, см.
+    // applyReadingModeVisual/READING_MODE_KEY выше) — тем же условием,
+    // что и "i" выше: видна на ЛЮБОЙ вкладке задач. Экран "Все задачи
+    // проекта" (openTaskNextPicker ниже) syncTaskFabRowForTab не
+    // вызывает при входе, поэтому там эта кнопка прячется явно, отдельной
+    // строкой в самом openTaskNextPicker (слот right:248 там занят
+    // кнопкой-звеном, .task-project-fab-link).
+    var readingWrap = document.getElementById("taskReadingWrap");
+    if(readingWrap) readingWrap.classList.toggle("visible", showTaskFab);
     // "глаз" (скрыть задачи, привязанные к проектам, см.
     // initTaskGlobalToolbar/taskHideLinkedBtn выше) — в отличие от
     // соседних кнопок ряда видна только на самой вкладке "Next", не на
@@ -2201,6 +2226,16 @@
   // навешивается).
   var EYE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
   var EYE_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"></path><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"></path><path d="M6.61 6.61C4.07 8.36 2 12 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"></path><path d="M2 2l20 20"></path></svg>';
+  // Открытая книга — та же форма, что и READER_TEXT_ICON_SVG (кнопка
+  // "К тексту" ридера, ниже) — два переключаемых состояния кнопки
+  // #taskReadingBtn (см. applyReadingModeVisual, ТЗ пользователя от
+  // 18.09): режим чтения ВЫКЛЮЧЕН (по умолчанию) -> книга перечёркнута
+  // по диагонали (READING_BOOK_OFF_ICON_SVG), режим чтения ВКЛЮЧЕН ->
+  // обычная открытая книга без перечёркивания (READING_BOOK_ICON_SVG).
+  // Тот же приём переключения иконки по состоянию, что у "глаза" выше
+  // (innerHTML целиком, не CSS-класс).
+  var READING_BOOK_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c3-1.5 6-1.5 8 0v14c-2-1.5-5-1.5-8 0V5z"></path><path d="M20 5c-3-1.5-6-1.5-8 0v14c2-1.5 5-1.5 8 0V5z"></path></svg>';
+  var READING_BOOK_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c3-1.5 6-1.5 8 0v14c-2-1.5-5-1.5-8 0V5z"></path><path d="M20 5c-3-1.5-6-1.5-8 0v14c2-1.5 5-1.5 8 0V5z"></path><line x1="3" y1="21" x2="21" y2="3"></line></svg>';
   var TASK_ARCHIVE_MAX_SHOWN = 50;
 
   function getShowAllTasksEnabled(){
@@ -4157,7 +4192,7 @@
     // восстановлении сети (см. retryNotesPushOnReconnect в mdeditor.js).
     if(MdEditor && MdEditor.retryNotesPushOnReconnect) MdEditor.retryNotesPushOnReconnect();
     // Общие задачи (TASK_SHARED_TASKS, Шаг 3) — свой независимый от syncId
-    // цикл (см. refreshJointTasksData/pushGroupTasksNow выше), поэтому
+    // цикл (см. refreshJointTasksData/syncGroupTasksNow выше), поэтому
     // подхватываем reconnect отдельным вызовом, а не через doCloudSync.
     refreshJointTasksData();
   });
@@ -4765,9 +4800,12 @@
   // Отправка изменений в облако — НЕ через сравнение содержимого
   // (buildStateDelta/recordsEqual выше): шифрование даёт каждый раз новый
   // шифротекст даже для одинаковых данных (случайный IV на операцию), так
-  // что сравнивать шифротексты бессмысленно. Вместо этого — явный набор
-  // "грязных" id (groupTasksDirty), тот же приём, что у dirtyNoteIds в
-  // облачном цикле заметок mdeditor.js.
+  // что сравнивать шифротексты бессмысленно. С 19.09 (TASK_UNIFIED_SYNC.md,
+  // Шаг 3) это делает sync-engine (syncengine*.js): «записать задачу
+  // локально» и «поставить на отправку» — один вызов (saveGroupTaskData/
+  // deleteGroupTaskPermanently ниже), отдельного «грязного» набора,
+  // который надо помнить проставить, больше нет (см. блок «облачный цикл
+  // общих задач» ниже). До 19.09 здесь был явный набор groupTasksDirty.
   //
   // Источник данных вкладки (п. 3.3 ТЗ) переключается МИНИМАЛЬНО
   // инвазивно: сам рендер вкладки (renderTaskTabList и всё, что вызывается
@@ -4860,7 +4898,6 @@
   var GROUP_TASKS_CACHE_KEY_PREFIX = "bibleGroupTasksCache_v1_";
   var groupTasksState = {};       // id -> {c, t}, расшифровано
   var groupTasksLoadedFor = null; // groupId, под который сейчас загружен кэш выше
-  var groupTasksDirty = {};       // id -> true, копится между пушами (см. пояснение про шифрование выше)
 
   function groupTasksCacheKey(groupId){ return GROUP_TASKS_CACHE_KEY_PREFIX + groupId; }
   function loadGroupTasksCache(groupId){
@@ -4894,8 +4931,14 @@
     if(!rec || !rec.c) return null;
     return {id:id, c:rec.c, t:rec.t};
   }
-  function saveGroupTaskData(id, data){
-    if(!sharedGroup) return;
+  // ЕДИНСТВЕННАЯ точка записи общей задачи (Шаг 3, 19.09): binding.save
+  // пишет в groupTasksState (через адаптер движка — синхронно, отрисовка
+  // сразу после вызова уже видит новую запись) И ставит запись на отправку
+  // одним вызовом. Возвращает Promise (нужен только миграции админа ниже,
+  // чтобы дождаться постановки в очередь); saveGroupTaskData — обёртка для
+  // всех остальных мест, тип возврата у неё прежний (undefined).
+  function saveGroupTaskDataP(id, data){
+    if(!sharedGroup) return null;
     loadGroupTasksCache(sharedGroup.groupId);
     // та же причина, что у createdAt в личном saveTaskData ниже — стабильная
     // позиция в списке, не прыгает при каждой правке
@@ -4903,10 +4946,11 @@
       var existing = groupTasksState[id];
       data.createdAt = (existing && existing.c && existing.c.createdAt != null) ? existing.c.createdAt : Date.now();
     }
-    groupTasksState[id] = {c:data, t:Date.now()};
-    saveGroupTasksCacheLocal();
-    groupTasksDirty[id] = true;
-    scheduleGroupTasksPush();
+    return getGroupTasksBinding().save(id, data);
+  }
+  function saveGroupTaskData(id, data){
+    var p = saveGroupTaskDataP(id, data);
+    if(p) p.catch(logGroupTasksSyncError);
   }
   function getGroupTasksForTab(){
     return getAllGroupTasks().filter(function(t){ return t.c.checked !== true; })
@@ -4922,10 +4966,8 @@
   function deleteGroupTaskPermanently(id){
     if(!sharedGroup) return;
     loadGroupTasksCache(sharedGroup.groupId);
-    groupTasksState[id] = {c:null, t:Date.now()};
-    saveGroupTasksCacheLocal();
-    groupTasksDirty[id] = true;
-    scheduleGroupTasksPush();
+    // тумбстоун {c:null,t} + постановка на отправку — один вызов (Шаг 3, 19.09)
+    getGroupTasksBinding().remove(id).catch(logGroupTasksSyncError);
     if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
   }
   // Отметка общей задачи выполненной — п. 2.4 ТЗ. completedBy проставляется
@@ -4956,87 +4998,92 @@
   // ---- облачный цикл общих задач: свой, полностью независимый от личного
   // doCloudSync/syncId (см. п.0 ТЗ — фича не использует личный sync-код и
   // не завязана на него) ----
-  var GROUP_TASKS_PUSH_DEBOUNCE_MS = 400;
-  var groupTasksPushTimer = null;
-  function scheduleGroupTasksPush(){
-    if(!sharedGroup) return;
-    clearTimeout(groupTasksPushTimer);
-    groupTasksPushTimer = setTimeout(pushGroupTasksNow, GROUP_TASKS_PUSH_DEBOUNCE_MS);
+  //
+  // С 19.09 (TASK_UNIFIED_SYNC.md, Шаг 3) — на sync-engine. Раньше здесь была
+  // ручная система: groupTasksDirty + scheduleGroupTasksPush/pushGroupTasksNow/
+  // pullGroupTasksNow, где «грязный» флаг нужно было проставлять руками в
+  // каждом месте изменения задачи (отсюда баги «не отметилась у другого
+  // участника»). Теперь запись задачи и постановка на отправку — один вызов
+  // binding.save()/remove() (syncengine_groupbinding.js), а отправку
+  // (debounce, повтор после сетевой ошибки) и приём (last-write-wins по t,
+  // расшифровка по одной записи, тумбстоуны БЕЗ поля c — Realtime Database не
+  // хранит null) делает транспорт движка (syncengine_transport.js).
+  // Облачный путь и формат прежние — /groups/<groupId>/tasks/<id> = {c,t},
+  // шифрование SHA-256(groupId) → AES-GCM (syncengine_groupcrypto.js, формат
+  // сверен с encryptGroupContent/decryptGroupContent выше) — участники на
+  // старой версии приложения продолжают работать.
+  //
+  // Один движок и один транспорт на приложение (getSyncEngineRuntime) — шаг 4
+  // (архив общих задач) заведёт рядом второй binding с name:"archive" на том
+  // же движке, без нового кода push/pull.
+  var syncEngineRuntime = null;   // {engine, transport}
+  var groupTasksBinding = null;
+  function syncEngineLog(msg){
+    if(window.Debug) window.Debug.log(msg);
   }
-  function pushGroupTasksNow(){
-    if(!sharedGroup) return Promise.resolve();
-    var groupId = sharedGroup.groupId;
-    var ids = Object.keys(groupTasksDirty);
-    if(!ids.length) return Promise.resolve();
-    groupTasksDirty = {};
-    return Promise.all(ids.map(function(id){
-      var rec = groupTasksState[id];
-      if(!rec) return null;
-      if(rec.c === null){
-        var tomb = {}; tomb[id] = {c:null, t:rec.t};
-        return tomb;
-      }
-      return encryptGroupContent(groupId, rec.c).then(function(b64){
-        var out = {}; out[id] = {c:b64, t:rec.t};
-        return out;
-      });
-    })).then(function(parts){
-      var payload = {};
-      parts.forEach(function(p){ if(p) Object.keys(p).forEach(function(k){ payload[k] = p[k]; }); });
-      if(!Object.keys(payload).length) return;
-      return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/tasks.json", {
-        method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload)
-      }, 15000).then(function(res){
-        if(!res.ok) throw new Error("group_tasks_put_failed_" + res.status);
-      });
-    }).catch(function(err){
-      console.error("Не удалось отправить общие задачи в облако:", err);
-      // не теряем изменения — возвращаем их обратно в очередь "грязных",
-      // следующий scheduleGroupTasksPush (новая правка) или ручной вызов
-      // refreshJointTasksData (открытие вкладки, событие "online") подхватит
-      ids.forEach(function(id){ groupTasksDirty[id] = true; });
+  function getSyncEngineRuntime(){
+    if(syncEngineRuntime) return syncEngineRuntime;
+    if(!window.SyncEngine || !window.SyncEngineTransport || !window.SyncEngineGroupCrypto || !window.SyncEngineGroupBinding){
+      // громко, а не тихо: без движка правка общей задачи осталась бы только
+      // локальной и никогда не дошла бы до других участников
+      throw new Error("sync-engine не загружен: syncengine*.js должны быть подключены в index.html до my.js");
+    }
+    var engine = window.SyncEngine.createEngine();
+    var transport = window.SyncEngineTransport.createTransport({
+      engine: engine, dbUrl: FIREBASE_DB_URL, allowProductionPaths: true, log: syncEngineLog
     });
+    syncEngineRuntime = {engine: engine, transport: transport};
+    return syncEngineRuntime;
+  }
+  function getGroupTasksBinding(){
+    if(groupTasksBinding) return groupTasksBinding;
+    var rt = getSyncEngineRuntime();
+    groupTasksBinding = window.SyncEngineGroupBinding.createGroupBinding({
+      engine: rt.engine,
+      transport: rt.transport,
+      makeHooks: window.SyncEngineGroupCrypto.makeGroupHooks,
+      name: "tasks",
+      groupsPath: FIREBASE_GROUPS_PATH,
+      getGroupId: function(){ return sharedGroup && sharedGroup.groupId ? sharedGroup.groupId : null; },
+      // синхронный локальный кэш: читает отрисовка (getAllGroupTasks и др.),
+      // пишет ТОЛЬКО адаптер движка через save/remove/приём чужих правок
+      cache: {
+        load: loadGroupTasksCache,
+        get: function(){ return groupTasksState; },
+        save: saveGroupTasksCacheLocal
+      },
+      // pull применил чужие правки — перерисовать вкладку (с защитой от
+      // прерывания редактирования, см. rerenderJointTasksTabIfOpen)
+      onRemoteChange: rerenderJointTasksTabIfOpen,
+      log: syncEngineLog
+    });
+    return groupTasksBinding;
+  }
+  function logGroupTasksSyncError(err){
+    console.error("Общие задачи: ошибка синхронизации:", err);
+    syncEngineLog("Общие задачи: ошибка синхронизации — " + (err && err.message ? err.message : err));
+  }
+  // pull → сверка → push одним вызовом (см. transport.syncNow): приём чужих
+  // правок И отправка своих, включая записи, у которых dirty-флаг потерялся
+  // при перезагрузке страницы. Сетевые ошибки не бросает — возвращает
+  // результат {pull:{error,...}, push:{error,failed,...}}; при любой другой
+  // ошибке (нет группы, движок не загружен) логирует и возвращает null.
+  function syncGroupTasksNow(){
+    if(!sharedGroup) return Promise.resolve(null);
+    try{
+      return getGroupTasksBinding().syncNow().catch(function(err){
+        logGroupTasksSyncError(err);
+        return null;
+      });
+    }catch(err){
+      logGroupTasksSyncError(err);
+      return Promise.resolve(null);
+    }
   }
   function fetchGroupTasksRaw(groupId){
     return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/tasks.json", {method:"GET"}, 10000).then(function(res){
       if(!res.ok) throw new Error("group_tasks_fetch_failed_" + res.status);
       return res.json();
-    });
-  }
-  // Слияние по last-write-wins (t), как mergeStates у личного state — но
-  // применяется по одной записи и с расшифровкой, а не как единая PATCH-
-  // дельта (см. пояснение про шифрование/dirty-набор в шапке раздела).
-  function pullGroupTasksNow(){
-    if(!sharedGroup) return Promise.resolve();
-    var groupId = sharedGroup.groupId;
-    loadGroupTasksCache(groupId);
-    return fetchGroupTasksRaw(groupId).then(function(cloudRaw){
-      cloudRaw = cloudRaw || {};
-      var ids = Object.keys(cloudRaw);
-      return Promise.all(ids.map(function(id){
-        var cloudRec = cloudRaw[id];
-        if(!cloudRec) return null;
-        var localRec = groupTasksState[id];
-        if(localRec && localRec.t >= cloudRec.t) return null; // локальная версия не старше — пропускаем
-        if(cloudRec.c === null) return {id:id, rec:{c:null, t:cloudRec.t}};
-        return decryptGroupContent(groupId, cloudRec.c).then(function(obj){
-          return {id:id, rec:{c:obj, t:cloudRec.t}};
-        }).catch(function(err){
-          console.error("Не удалось расшифровать общую задачу", id, err);
-          return null;
-        });
-      })).then(function(results){
-        var changed = false;
-        results.forEach(function(r){
-          if(!r) return;
-          groupTasksState[r.id] = r.rec;
-          changed = true;
-        });
-        if(changed){
-          saveGroupTasksCacheLocal();
-          rerenderJointTasksTabIfOpen();
-        }
-      });
     });
   }
 
@@ -5048,6 +5095,8 @@
   // тот же для обоих путей, SHA-256(groupId)). Свой локальный кэш, свой
   // "грязный" набор, свой независимый push/pull — устроено ТОЧНО как
   // groupTasksState/groupTasksDirty/pushGroupTasksNow/pullGroupTasksNow
+  // (так /tasks было устроено ДО 19.09 — с Шага 3 на sync-engine, архив
+  // переедет на него отдельным Шагом 4 и пока остаётся на ручной схеме)
   // выше, только путь в Firebase "/archive.json" вместо "/tasks.json".
   // id записи — тот же, что был у активной задачи (переезжает, не
   // создаётся заново, см. checkGroupTaskDone выше).
@@ -5178,7 +5227,7 @@
   // вкладки "Общие задачи". Пуш "грязных" записей архива, наоборот, не
   // ждёт открытия экрана — идёт сам по scheduleGroupArchivePush (дебаунс),
   // плюс подстраховка в refreshJointTasksData (см. там), тем же приёмом,
-  // что и у groupTasksDirty.
+  // что был у groupTasksDirty до Шага 3 (19.09).
   function pullGroupArchiveNow(){
     if(!sharedGroup) return Promise.resolve();
     var groupId = sharedGroup.groupId;
@@ -5264,35 +5313,41 @@
       var count = members ? Object.keys(members).length : 1;
       if(count < 2) return; // участник ещё не подключился — рано
       var localJoint = getAllTasks().filter(function(t){ return t.c.tab === "jointtasks"; });
-      return Promise.all(localJoint.map(function(t){
-        var id = genGroupTaskId();
-        var content = {
+      // Шаг 3 (19.09): запись идёт через sync-engine (saveGroupTaskDataP), а не
+      // прямым PATCH в обход. id детерминированный ("gt_" + id личной задачи;
+      // "_" на третьем месте не может выдать genGroupTaskId, так что с
+      // обычными id общих задач не пересечётся), а не случайный
+      // genGroupTaskId(): если отправка сорвалась или страницу
+      // закрыли до markAdminMigrationDone, повторная миграция пишет в ТЕ ЖЕ
+      // записи, а не плодит дубли. Записи, которые уже есть в групповом кэше
+      // (в т.ч. уже отредактированные участником), повторно не перезаписываем.
+      loadGroupTasksCache(groupId);
+      var saves = [];
+      localJoint.forEach(function(t){
+        var id = "gt_" + t.id;
+        if(groupTasksState[id]) return;
+        saves.push(saveGroupTaskDataP(id, {
           text: t.c.text, tab: "jointtasks", checked: !!t.c.checked, checkedAt: t.c.checkedAt || null,
           completionKey: null, nextForProjectId: null, flag: t.c.flag || null, inWork: !!t.c.inWork,
           createdBy: getDeviceId(), completedBy: t.c.checked ? getDeviceId() : null,
           createdAt: t.c.createdAt != null ? t.c.createdAt : t.t
-        };
-        return encryptGroupContent(groupId, content).then(function(b64){
-          var out = {}; out[id] = {c:b64, t:Date.now()};
-          return out;
-        });
-      })).then(function(parts){
-        var payload = {};
-        parts.forEach(function(p){ Object.keys(p).forEach(function(k){ payload[k] = p[k]; }); });
-        var pushPromise = Object.keys(payload).length ?
-          fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/tasks.json", {
-            method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload)
-          }, 15000).then(function(res){
-            if(!res.ok) throw new Error("group_tasks_migrate_failed_" + res.status);
-          }) : Promise.resolve();
-        return pushPromise.then(function(){
-          // локальные копии больше не нужны — теперь это общие задачи в
-          // облаке (та же схема мягкого удаления, c:null, что и у
-          // deleteTaskPermanently)
-          localJoint.forEach(function(t){ state["task:" + t.id] = {c:null, t:Date.now()}; });
-          if(localJoint.length){ saveLocalStateNow(); scheduleCloudPush(); }
-          markAdminMigrationDone(groupId);
-        });
+        }));
+      });
+      // дожидаемся именно постановки в очередь (dirty выставляется движком
+      // на микротакт позже локальной записи), затем syncNow: он отправит и
+      // dirty, и записи с потерянным dirty-флагом, и вернёт результат
+      return Promise.all(saves).then(function(){
+        return syncGroupTasksNow();
+      }).then(function(res){
+        if(!res || res.pull.error || res.push.error || (res.push.failed && res.push.failed.length)){
+          throw new Error("group_tasks_migrate_sync_failed");
+        }
+        // локальные копии больше не нужны — теперь это общие задачи в
+        // облаке (та же схема мягкого удаления, c:null, что и у
+        // deleteTaskPermanently)
+        localJoint.forEach(function(t){ state["task:" + t.id] = {c:null, t:Date.now()}; });
+        if(localJoint.length){ saveLocalStateNow(); scheduleCloudPush(); }
+        markAdminMigrationDone(groupId);
       });
     }).catch(function(err){
       console.error("Не удалось перенести локальные общие задачи в группу:", err);
@@ -5324,18 +5379,20 @@
       // циклом опроса, что и обычная подтяжка задач ниже.
       checkGroupMembershipStillValid().then(function(stillMember){
         if(!stillMember){ returnJointTasksTabToLocalMode(); return; }
-        return pullGroupTasksNow();
+        return syncGroupTasksNow();
       }).catch(function(err){ console.error(err); });
     } else {
       var chain = !isAdminMigrationDone(sharedGroup.groupId)
         ? migrateAdminGroupTasksIfNeeded() : Promise.resolve();
       chain.then(function(){
-        if(isGroupTasksActive()) return pullGroupTasksNow();
+        if(isGroupTasksActive()) return syncGroupTasksNow();
       }).catch(function(err){ console.error(err); });
     }
-    if(Object.keys(groupTasksDirty).length) pushGroupTasksNow();
-    // подстраховка для архива — тот же приём, что и у groupTasksDirty
-    // чуть выше (см. пояснение у pullGroupArchiveNow, Шаг 6).
+    // Шаг 3 (19.09): syncGroupTasksNow = pull → сверка → push — отправка
+    // накопленных (в т.ч. потерянных при перезагрузке) правок общих задач
+    // входит в него, отдельной проверки «есть ли грязные» больше нет.
+    // Подстраховка для архива (он пока на старом механизме, Шаг 4) — как
+    // раньше, см. пояснение у pullGroupArchiveNow, Шаг 6.
     if(Object.keys(groupArchiveDirty).length) pushGroupArchiveNow();
     // ⚠️ ДОБАВЛЕНО 16.09 (TASK_FILE_SYNC_RTDB.md, раздел 4.5, Шаг 7):
     // тот же цикл опроса группы — подходящее место для сверки группового
@@ -5584,6 +5641,10 @@
   // либо отдельного переключателя.
   function returnJointTasksTabToLocalMode(){
     var prevGroupId = sharedGroup ? sharedGroup.groupId : null;
+    // Шаг 3 (19.09): отключить sync-engine от группы ДО сброса кэша — иначе
+    // отложенный push/повтор после сетевой ошибки мог бы отправить в облако
+    // (уже отвязанной/удалённой) группы то, что осталось в очереди
+    if(groupTasksBinding) groupTasksBinding.detach();
     saveSharedGroup(null);
     if(prevGroupId){
       try{ localStorage.removeItem(groupTasksCacheKey(prevGroupId)); }catch(e){}
@@ -5598,9 +5659,7 @@
       try{ localStorage.removeItem(groupArchiveCacheKey(prevGroupId)); }catch(e){}
     }
     groupTasksState = {};
-    groupTasksDirty = {};
     groupTasksLoadedFor = null;
-    clearTimeout(groupTasksPushTimer);
     groupArchiveState = {};
     groupArchiveDirty = {};
     groupArchiveLoadedFor = null;
@@ -6250,6 +6309,23 @@
       infoBtn.addEventListener("click", function(){
         flushPendingTaskEdits();
         renderTaskInfoScreen();
+      });
+    }
+
+    // --- кнопка режима чтения (ТЗ пользователя от 18.09) — см.
+    // READING_MODE_KEY/getReadingModeActive/setReadingModeActive/
+    // applyReadingModeVisual выше. Видна на любой вкладке задач (тем же
+    // условием showTaskFab, что и "i" выше), кроме экрана "Все задачи
+    // проекта" (там слот занят кнопкой-звеном, см. openTaskNextPicker
+    // ниже). Глобальный флаг — переключается здесь, но действует
+    // одинаково на любом экране приложения, не только на вкладках задач.
+    var readingBtn = document.getElementById("taskReadingBtn");
+    stopMousedown(readingBtn);
+    applyReadingModeVisual();
+    if(readingBtn){
+      readingBtn.addEventListener("click", function(){
+        setReadingModeActive(!getReadingModeActive());
+        applyReadingModeVisual();
       });
     }
 
@@ -7672,6 +7748,12 @@
 
   function openSettingsModal(){
     refreshSettingsTabsVisibility();
+    // Режим чтения (ТЗ пользователя от 18.09) — оверлей (#settingsModalOverlay)
+    // существует в DOM всегда, поэтому applyReadingModeVisual уже
+    // отработала один раз при initTaskGlobalToolbar (загрузка страницы);
+    // повторный вызов здесь — просто подстраховка (идемпотентна), на
+    // случай если что-то между вызовами сбросило класс.
+    applyReadingModeVisual();
     settingsModalBox.style.height = "";
     settingsModalBox.style.marginTop = "";
     var gearBtn = document.getElementById("settingsGearBtn");
@@ -14834,6 +14916,42 @@
   function setNextHideLinkedTasks(val){
     try{ localStorage.setItem(NEXT_HIDE_LINKED_KEY, val ? "1" : "0"); }catch(e){}
   }
+  // Режим чтения (ТЗ пользователя от 18.09) — глобальный флаг, не привязан
+  // ни к заметке/книге/задаче конкретно: скрывает боковой и нижний ряды
+  // вкладок окна настроек (#settingsTabs/#settingsTabsSet2/
+  // .settings-tabs-gear, см. .reading-mode-active в modals.css) и
+  // растягивает область содержимого на освободившееся место — работает
+  // одинаково на ЛЮБОМ экране (заметка, книга, список задач), а не только
+  // там, где есть кнопка-переключатель (.task-reading-wrap/taskReadingBtn,
+  // см. initTaskGlobalToolbar ниже). Включить можно на одной вкладке,
+  // выключить — на другой, состояние одно на всё приложение. Переживает
+  // перезагрузку страницы (localStorage), как и соседний
+  // NEXT_HIDE_LINKED_KEY выше.
+  var READING_MODE_KEY = "bibleReadingMode_v1";
+  function getReadingModeActive(){
+    try{ return localStorage.getItem(READING_MODE_KEY) === "1"; }catch(e){ return false; }
+  }
+  function setReadingModeActive(val){
+    try{ localStorage.setItem(READING_MODE_KEY, val ? "1" : "0"); }catch(e){}
+  }
+  // Применяет текущее состояние режима чтения к разметке: класс на
+  // оверлее (CSS прячет ряды вкладок и обнуляет отступы под них, см.
+  // .reading-mode-active в modals.css) + иконка/title кнопки-
+  // переключателя, если она сейчас на экране (её может не быть — см.
+  // openTaskNextPicker ниже, экран "Все задачи проекта"). Вызывается и
+  // при клике по кнопке, и один раз при открытии окна настроек
+  // (openSettingsModal ниже) — чтобы состояние, оставшееся с прошлого
+  // раза, сразу отражалось в разметке.
+  function applyReadingModeVisual(){
+    var active = getReadingModeActive();
+    var overlay = document.getElementById("settingsModalOverlay");
+    if(overlay) overlay.classList.toggle("reading-mode-active", active);
+    var btn = document.getElementById("taskReadingBtn");
+    if(btn){
+      btn.innerHTML = active ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG;
+      btn.title = active ? "Выключить режим чтения" : "Включить режим чтения";
+    }
+  }
   function setTaskText(id, text){
     var task = getTaskById(id);
     if(!task) return;
@@ -15797,7 +15915,7 @@
     // refreshJointTasksData выше): сам рендер ниже использует то, что уже
     // есть в локальном кэше ПРЯМО СЕЙЧАС (офлайн-поведение из раздела 3
     // ТЗ — вкладка не ждёт сеть), а если придут изменения — сработает
-    // rerenderJointTasksTabIfOpen внутри pullGroupTasksNow. Вызывается
+    // rerenderJointTasksTabIfOpen (onRemoteChange у binding общих задач). Вызывается
     // безусловно (не только при isGroupTasksActive()) — у role:"admin" до
     // подключения первого участника это ещё и единственный способ узнать,
     // что участник подключился (см. migrateAdminGroupTasksIfNeeded).
@@ -16639,6 +16757,16 @@
       // в том же углу была бы лишней/перекрывала бы его.
       var homeStubHide = document.getElementById("taskFabHomeStub");
       if(homeStubHide) homeStubHide.classList.remove("visible");
+      // Кнопка режима чтения (right:248, ТЗ пользователя от 18.09) —
+      // прячем явно: на этом экране тот же слот в ряду занят кнопкой-
+      // звеном (.task-project-fab-link выше), а syncTaskFabRowForTab
+      // здесь не вызывается (см. комментарий у globalFab выше), поэтому
+      // без этой строки кнопка осталась бы видна с прошлой вкладки и
+      // рисовалась бы поверх звена. Возвращается сама — switchSettingsTab
+      // выставляет видимость заново для каждой вкладки задач (тем же
+      // приёмом, что и у "+"/домика выше).
+      var readingWrapHide = document.getElementById("taskReadingWrap");
+      if(readingWrapHide) readingWrapHide.classList.remove("visible");
 
       // Название проекта уже вставлено выше (projectNameHtml) — без
       // кнопок управления (см. комментарий у projectNameHtml), поэтому

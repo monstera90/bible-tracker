@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 2.1 (16.09) -->
+     Версия: 2.2 (19.09) -->
 <head>
 <meta charset="UTF-8">
 <script>
@@ -142,13 +142,14 @@ window.addEventListener("error", function(e){
       <!-- Кнопка-меню "настройки вкладки" — самая левая в общем ряду
            (TASK_SHARED_TASKS.md, Шаг 4, 15.09). Видна ТОЛЬКО на вкладке
            "Общие задачи" (jointtasks), не на любой вкладке задач — тем же
-           приёмом, что и "глаз" ниже (task-hide-linked-wrap): своя
-           видимость по конкретной вкладке, не общим условием showTaskFab
-           (см. syncTaskFabRowForTab в my.js). Следующий шаг в общем ряду
-           после "глаза" (right:288 = 248+40, тот же шаг 40px, см.
-           modals.css). Попап (#taskJointMenuPopup) — свой класс
-           (.task-joint-menu-popup), НЕ переиспользует .mdeditor-fontsize-
-           popup: тот рассчитан на столбик квадратных 32×32 кнопок
+           приёмом, что и "глаз"/сортировка ниже (task-hide-linked-wrap/
+           task-red-sort-wrap): своя видимость по конкретной вкладке, не
+           общим условием showTaskFab (см. syncTaskFabRowForTab в my.js).
+           right:328 — тот же слот, что у "глаза" и сортировки (ТЗ
+           пользователя от 18.09: втроём делят одно место, все три вкладки
+           взаимно исключают друг друга). Попап (#taskJointMenuPopup) —
+           свой класс (.task-joint-menu-popup), НЕ переиспользует .mdeditor-
+           fontsize-popup: тот рассчитан на столбик квадратных 32×32 кнопок
            ("+"/"-"), а здесь список текстовых пунктов переменной длины
            ("Синхронизация"/"Отвязать пользователя"/…), состав которых
            зависит от состояния группы и собирается в JS
@@ -161,42 +162,71 @@ window.addEventListener("error", function(e){
       <!-- "глаз" — скрыть/показать на вкладке "Next" задачи, уже
            привязанные к проекту (c.nextForProjectId), см.
            getNextHideLinkedTasks/taskHideLinkedBtn в initTaskGlobalToolbar
-           (my.js), ТЗ пользователя от 15.09. Левее "Ж" (.task-format-wrap
-           ниже). Класс span'а — отдельный "task-hide-linked-wrap"
-           (modals.css): раньше здесь переиспользовался "task-highlight-
-           wrap" ради общих правил показа/.visible, но вместе с ними
-           заодно наследовался и его right:168px — та же позиция, что у
-           текстовыделителя (.task-highlight-wrap ниже), из-за чего кнопка
-           оказывалась ровно под ним и была не видна и некликабельна.
-           Теперь свой класс со своим right (248, следующий шаг в общем
-           ряду левее "Ж"). В отличие от остальных кнопок этого ряда
-           видимость переключается не общим условием showTaskFab, а
-           отдельно — только когда открыта именно вкладка "next" (см.
-           syncTaskFabRowForTab в my.js). Без попапа; фон НЕ закрашивается
-           (в отличие от .pressed у остальных кнопок этого ряда, ТЗ
-           пользователя от 15.09 #2) — вместо этого сама иконка/title
-           переключаются между "открытый глаз" (задачи показаны) и
-           "перечёркнутый глаз" (задачи скрыты) прямо в JS
+           (my.js), ТЗ пользователя от 15.09. Класс span'а — отдельный
+           "task-hide-linked-wrap" (modals.css): раньше здесь
+           переиспользовался "task-highlight-wrap" ради общих правил
+           показа/.visible, но вместе с ними заодно наследовался и его
+           right:168px — та же позиция, что у текстовыделителя
+           (.task-highlight-wrap ниже), из-за чего кнопка оказывалась
+           ровно под ним и была не видна и некликабельна. Теперь свой
+           класс со своим right — 328 (ТЗ пользователя от 18.09: переехала
+           сюда с прежнего 248, тот слот теперь занят кнопкой режима
+           чтения, .task-reading-wrap ниже; на 328 делит слот с
+           .task-red-sort-wrap/.task-joint-menu-wrap — все три взаимно
+           исключают друг друга по вкладке). В отличие от остальных кнопок
+           этого ряда видимость переключается не общим условием
+           showTaskFab, а отдельно — только когда открыта именно вкладка
+           "next" (см. syncTaskFabRowForTab в my.js). Без попапа; фон НЕ
+           закрашивается (в отличие от .pressed у остальных кнопок этого
+           ряда, ТЗ пользователя от 15.09 #2) — вместо этого сама
+           иконка/title переключаются между "открытый глаз" (задачи
+           показаны) и "перечёркнутый глаз" (задачи скрыты) прямо в JS
            (updateHideLinkedBtnState/EYE_ICON_SVG/EYE_OFF_ICON_SVG в
            my.js), поэтому здесь кнопка изначально пустая. -->
       <!-- "i" — подсказка "Кнопки задач" (.task-info-wrap/taskInfoBtn,
            renderTaskInfoScreen в my.js, ТЗ пользователя от 15.09).
            Единственная в этом ряду видна на ВСЕХ вкладках задач сразу
            (то же условие showTaskFab, что и у .task-add-fab, а не узкое
-           условие "только Next"/"только Red" — см. syncTaskFabRowForTab в
-           my.js), поэтому её место — новый крайний левый шаг ряда (288 =
-           248 + 40). Иконка — тот же INFO_ICON_SVG, что и у остальных
-           info-кнопок проекта (см. my.js), своя копия svg прямо тут по
-           тому же принципу, что у "Ж"/"Аа"/текстовыделителя выше. -->
+           условие "только Next"/"только Red"/"только Общие задачи" — см.
+           syncTaskFabRowForTab в my.js), поэтому её место — фиксированный
+           right:288, не делит слот ни с чем. Иконка — тот же INFO_ICON_SVG,
+           что и у остальных info-кнопок проекта (см. my.js), своя копия
+           svg прямо тут по тому же принципу, что у "Ж"/"Аа"/
+           текстовыделителя выше. -->
       <span class="task-info-wrap" id="taskInfoWrap">
         <button type="button" class="mdeditor-fab-btn" id="taskInfoBtn" title="Что означают кнопки задач"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"></circle><path d="M12 11v6"></path><circle cx="12" cy="7.7" r="1" fill="currentColor" stroke="none"></circle></svg></button>
+      </span>
+      <!-- кнопка режима чтения (.task-reading-wrap/taskReadingBtn, ТЗ
+           пользователя от 18.09) — переключает глобальный режим чтения
+           (см. READING_MODE_KEY/applyReadingModeVisual в my.js): прячет
+           боковой/нижний ряды вкладок окна настроек, область содержимого
+           растягивается на освободившееся место — работает на ЛЮБОМ
+           экране приложения (заметки/книги/любая вкладка задач), не
+           только там, где есть эта кнопка. Стоит на right:248 — слот
+           между "i" (288) и "Ж" (208), тот же, что раньше делили "глаз"/
+           сортировка (переехали на 328, см. их комментарии выше). Видна
+           на любой вкладке задач (то же условие showTaskFab, что и у "i"
+           выше), КРОМЕ экрана "Все задачи проекта" — там этот слот занят
+           кнопкой-звеном этого экрана (.task-project-fab-link ниже по
+           файлу); явное скрытие — в openTaskNextPicker/my.js. Фон НЕ
+           закрашивается через общий .pressed — вместо этого переключается
+           сама иконка (открытая книга/перечёркнутая книга, тем же
+           приёмом, что и у "глаза" выше — innerHTML целиком, см.
+           applyReadingModeVisual/READING_BOOK_ICON_SVG/
+           READING_BOOK_OFF_ICON_SVG в my.js), поэтому здесь кнопка
+           изначально пустая. -->
+      <span class="task-reading-wrap" id="taskReadingWrap">
+        <button type="button" class="mdeditor-fab-btn" id="taskReadingBtn" title="Включить режим чтения"></button>
       </span>
       <!-- кнопка сортировки Red по отметке (.task-red-sort-wrap/
            taskRedSortBtn, RED_SORT_BY_FLAG_KEY/getRedSortByFlag/
            setRedSortByFlag в my.js, ТЗ пользователя от 15.09). Делит слот
-           right:248 с "глазом" ниже — видна только на вкладке "Red" (там
-           "глаз" не показывается, и наоборот на "Next"), поэтому одно и то
-           же место в ряду не конфликтует, см. syncTaskFabRowForTab в
+           right:328 с "глазом" выше и с кнопкой-меню "Общие задачи" ниже
+           (ТЗ пользователя от 18.09 — переехала сюда с прежнего 248
+           вместе с "глазом", тот слот занят кнопкой режима чтения выше) —
+           видна только на вкладке "Red" (там "глаз" не показывается, и
+           наоборот на "Next", и наоборот на "Общие задачи"), поэтому одно
+           и то же место в ряду не конфликтует, см. syncTaskFabRowForTab в
            my.js. Фон НЕ закрашивается через общий .pressed — вместо этого
            title переключается в JS (updateRedSortBtnState), сама иконка не
            меняется. Иконка — два жетона: снизу жёлтый, сверху красный
@@ -712,6 +742,18 @@ window.addEventListener("error", function(e){
      копии не заводит. -->
 <script src="flibusta.js"></script>
 <script src="debug.js"></script>
+<!-- syncengine*.js — TASK_UNIFIED_SYNC.md, Шаги 1-3: единый sync-engine.
+     syncengine.js (движок), syncengine_groupcrypto.js (шифрование групповым
+     ключом), syncengine_transport.js (Realtime Database),
+     syncengine_groupbinding.js (связка «облачный путь группы ↔ движок ↔
+     локальный кэш my.js», Шаг 3). Все четыре должны идти ДО my.js — он
+     создаёт движок при первом обращении к общим задачам; между собой
+     порядок не важен (файлы друг на друга при загрузке не ссылаются,
+     объекты друг другу передаёт my.js). -->
+<script src="syncengine.js"></script>
+<script src="syncengine_groupcrypto.js"></script>
+<script src="syncengine_transport.js"></script>
+<script src="syncengine_groupbinding.js"></script>
 <script src="my.js"></script>
 
 </body>

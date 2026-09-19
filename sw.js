@@ -6,7 +6,7 @@
 // что sw.js изменился, скачать новую версию в фоне и подготовить её к
 // установке — без этого шага обновление не будет обнаружено автоматически.
 
-const APP_VERSION = "v0.35.57";
+const APP_VERSION = "v0.36.0";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -32,6 +32,10 @@ const ASSETS = [
   "./footer.css",
   "./modals.css",
   "./debug.js",
+  "./syncengine.js",
+  "./syncengine_groupcrypto.js",
+  "./syncengine_transport.js",
+  "./syncengine_groupbinding.js",
   "./my.js",
   "./mood.js",
   "./minizip.js",
