@@ -1,6 +1,11 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 26.0 (19.09) — структурная правка: новая функция toggleReadingMode
+   (единая точка переключения режима чтения; applyReadingModeVisual теперь
+   обновляет все кнопки с классом .reading-mode-btn). Кнопка режима чтения
+   добавлена в нижний ряд ридера книг (между Flibusta и "Аа") и, через deps
+   toggleReadingMode/applyReadingModeVisual, в редактор заметок (mdeditor.js).
    Версия: 25.3 (19.09) — режим чтения на весь экран (ТЗ пользователя):
    layoutSettingsModal не резервирует нижние 47px, если на оверлее включён
    reading-mode-active; клик по кнопке режима чтения пересчитывает высоту
@@ -6011,6 +6016,10 @@
     // IIFE), поэтому ссылаться на неё здесь, до её текстового объявления,
     // безопасно.
     refitAllVisibleTaskBodies: refitAllVisibleTaskBodies,
+    // кнопка режима чтения в редакторе заметки (ТЗ пользователя от 19.09) —
+    // обе function-декларации, поднимаются в начало IIFE (как выше).
+    toggleReadingMode: toggleReadingMode,
+    applyReadingModeVisual: applyReadingModeVisual,
     // закладки "Моих заметок" — теперь синхронизируются в облаке через
     // тот же state/saveLocalState/scheduleCloudPush, что и остальные
     // данные приложения (см. getSyncedBookmarkNames/setSyncedBookmark
@@ -6367,12 +6376,9 @@
     applyReadingModeVisual();
     if(readingBtn){
       readingBtn.addEventListener("click", function(){
-        setReadingModeActive(!getReadingModeActive());
-        applyReadingModeVisual();
-        // ТЗ пользователя от 19.09: в режиме чтения окно занимает весь экран
-        // до нижнего края (без запаса под кнопку-язычок) — высоту окна
-        // пересчитываем сразу, а не при следующем ресайзе/открытии.
-        layoutSettingsModal();
+        // toggleReadingMode (ниже по файлу) заодно пересчитывает высоту окна
+        // — в режиме чтения оно занимает весь экран до нижнего края.
+        toggleReadingMode();
       });
     }
 
@@ -10694,6 +10700,7 @@
       '<div class="mdeditor-status" id="bookReaderStatus"></div>' +
       '<div class="mdeditor-fab-row">' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderFlibustaBtn" title="Flibusta">' + READER_FLIBUSTA_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="bookReaderReadingBtn" title="Режим чтения"></button>' +
         '<span class="mdeditor-fontsize-wrap" id="bookReaderFontSizeWrap">' +
           '<div class="mdeditor-fontsize-popup" id="bookReaderFontSizePopup">' +
             '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontPlusBtn" title="Крупнее">+</button>' +
@@ -10792,6 +10799,18 @@
     if(flibustaBtn){
       flibustaBtn.addEventListener("click", function(){ Flibusta.openFlibustaCatalog(); });
     }
+
+    // Кнопка режима чтения (ТЗ пользователя от 19.09) — между Flibusta и
+    // "Аа", тот же переключатель, что и на вкладках задач/в редакторе
+    // заметки (toggleReadingMode). mousedown с preventDefault — как у
+    // "Выделения" выше: клик не должен сбрасывать выделение текста книги.
+    // Иконку/title ставит applyReadingModeVisual (кнопка рендерится пустой).
+    var readingBtn = document.getElementById("bookReaderReadingBtn");
+    if(readingBtn){
+      readingBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+      readingBtn.addEventListener("click", function(){ toggleReadingMode(); });
+    }
+    applyReadingModeVisual();
   }
 
   function renderBookReaderText(container){
@@ -15005,6 +15024,23 @@
       btn.innerHTML = active ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG;
       btn.title = active ? "Выключить режим чтения" : "Включить режим чтения";
     }
+    // Те же кнопки в нижних рядах редактора заметки (mdeditor.js) и ридера
+    // книг (bookReaderFabRowHtml) — ТЗ пользователя от 19.09; узнаются по
+    // классу .reading-mode-btn, рендерятся пустыми, иконку/title ставит эта
+    // функция (одно место на все кнопки режима чтения).
+    Array.prototype.forEach.call(document.querySelectorAll(".reading-mode-btn"), function(b){
+      b.innerHTML = active ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG;
+      b.title = active ? "Выключить режим чтения" : "Включить режим чтения";
+    });
+  }
+  // Единая точка переключения режима чтения — вкладки задач, редактор
+  // заметки и ридер книг зовут её же: флаг + класс на оверлее/иконки +
+  // пересчёт высоты окна (в режиме чтения окно до нижнего края экрана,
+  // см. layoutSettingsModal).
+  function toggleReadingMode(){
+    setReadingModeActive(!getReadingModeActive());
+    applyReadingModeVisual();
+    layoutSettingsModal();
   }
   function setTaskText(id, text){
     var task = getTaskById(id);

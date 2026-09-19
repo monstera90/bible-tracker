@@ -1,5 +1,7 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 3.1 (19.09) — кнопка режима чтения в нижнем ряду редактора заметки
+   (между "Скачать .md" и "Ж"); deps: toggleReadingMode, applyReadingModeVisual.
    Версия: 3.0 (18.09)
    Вкладка "Мои заметки" (первая боковая вкладка второго набора,
    settingsTabSet2Btn1 / "set2s_1") — работа с .md заметками в стиле
@@ -56,6 +58,13 @@ window.initMdEditorModule = function(deps){
   var createArchivedTaskWithText = deps.createArchivedTaskWithText || null;
   var openTaskMoveTargetPicker = deps.openTaskMoveTargetPicker || null;
   var refitAllVisibleTaskBodies = deps.refitAllVisibleTaskBodies || function(){};
+  // Режим чтения (ТЗ пользователя от 19.09) — сам флаг/оверлей/пересчёт
+  // высоты окна живут в my.js (toggleReadingMode), здесь только кнопка в
+  // нижнем ряду редактора заметки: между "Скачать .md" и "Ж". Иконку/title
+  // кнопке выставляет applyReadingModeVisual из my.js (по классу
+  // .reading-mode-btn) — одно место на все такие кнопки приложения.
+  var toggleReadingMode = deps.toggleReadingMode || function(){};
+  var applyReadingModeVisual = deps.applyReadingModeVisual || function(){};
   var getSyncedBookmarkNames = deps.getSyncedBookmarkNames || function(){ return []; };
   var setSyncedBookmark = deps.setSyncedBookmark || function(){};
   var recordNoteCreated = deps.recordNoteCreated || function(){};
@@ -3611,6 +3620,7 @@ window.initMdEditorModule = function(deps){
         '<input type="file" accept="image/*" id="mdEditorImageInput" style="display:none;">' +
         '<div class="mdeditor-fab-row">' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorDownloadBtn" title="Скачать .md">' + DOWNLOAD_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="mdEditorReadingBtn" title="Режим чтения"></button>' +
           '<span class="mdeditor-fontsize-wrap" id="mdEditorFormatWrap">' +
             '<div class="mdeditor-fontsize-popup" id="mdEditorFormatPopup">' +
               '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="mdEditorFmtBoldBtn" title="Жирный">Ж</button>' +
@@ -3764,6 +3774,18 @@ window.initMdEditorModule = function(deps){
     });
 
     document.getElementById("mdEditorDownloadBtn").addEventListener("click", downloadSingleNote);
+
+    // Кнопка режима чтения (ТЗ пользователя от 19.09) — тот же переключатель,
+    // что и на вкладках задач/в ридере книг (см. toggleReadingMode в my.js).
+    // mousedown с preventDefault — как у остальных кнопок ряда: не забирает
+    // фокус/выделение у CodeMirror. Иконку и title ставит
+    // applyReadingModeVisual (кнопка при рендере пустая).
+    var readingBtn = document.getElementById("mdEditorReadingBtn");
+    if(readingBtn){
+      readingBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      readingBtn.addEventListener("click", function(){ toggleReadingMode(); });
+    }
+    applyReadingModeVisual();
 
 
     document.getElementById("mdEditorHomeBtn2").addEventListener("click", function(){
