@@ -1,6 +1,19 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 29.0 (19.09) — структурная правка: (1) вкладка «Комментарии» — то же
+   поведение, что у задач (по возрастанию/новый внизу, открывается снизу,
+   подъём над клавиатурой; migrateCommentsScrollToBottomFirst); (2) крестик
+   «удалить задачу» с подтверждением слева от карандаша во всех строках задач
+   (taskDeleteBtnHtml/bindTaskDeleteBtn/openTaskDeleteConfirm/
+   closeTaskDeleteConfirm; плашка над клавиатурой, window.AppKeyboard.getTop);
+   (3) initTaskKeyboardLift возвращён к версии 28.0 (проверена пользователем),
+   28.1 (якорь оверлея) откатана.
+   Версия: 28.1 (19.09) — initTaskKeyboardLift переделан по скриншоту пользователя
+   (окно сжималось до верха клавиатуры, вкладки вставали над ней): к
+   overlaysContent добавлен «якорь» оверлея (фикс. высота на время ввода) и
+   расчёт верха клавиатуры без VirtualKeyboard API; всё снимается только когда
+   клавиатура убрана; в журнал отладки пишется «kbLift: …».
    Версия: 28.0 (19.09) — структурная правка: (1) списки задач по createdAt по
    ВОЗРАСТАНИЮ — новая задача внизу (getTasksForTab/getGroupTasksForTab,
    moveTaskToEdge «в начало/в конец» поменяны местами, вставка в «+»); (2) вкладки
@@ -6159,6 +6172,7 @@
     getCheckIcon: function(){ return CHECK_ICON_SVG; },
     getMoveIcon: function(){ return ARROW_MOVE_ICON_SVG; },
     getNextIcon: function(){ return LINK_NEXT_ICON_SVG; },
+    getCrossIcon: function(){ return CROSS_SMALL_ICON_SVG; },
     // кнопка режима чтения на вкладке "Поиск" (ТЗ пользователя от 19.09) —
     // тот же переключатель и та же иконка (.reading-mode-btn), что в
     // редакторе заметок/ридере книг, см. toggleReadingMode ниже по файлу
@@ -8089,6 +8103,7 @@
     }
   }
   function closeSettingsModal(){
+    closeTaskDeleteConfirm();
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
@@ -8174,7 +8189,7 @@
   }
   // Вкладки, для которых scrollTop не сбрасывается в 0 при переключении, а
   // восстанавливается из tabScrollPercents (см. switchSettingsTab ниже).
-  var TAB_SCROLL_AUTO_TABS = Object.keys(TASK_TAB_IDS).concat(["set2s_7"]);
+  var TAB_SCROLL_AUTO_TABS = Object.keys(TASK_TAB_IDS).concat(["set2s_7", "extra2"]);
   // Разовый сброс запомненных позиций вкладок задач (19.09): порядок списков
   // перевернули (новые внизу), старые проценты относились к прежнему порядку —
   // после сброса каждая вкладка один раз откроется снизу, дальше как обычно.
@@ -8183,6 +8198,18 @@
     try{
       if(localStorage.getItem(FLAG) === "1") return;
       Object.keys(TASK_TAB_IDS).forEach(function(k){ delete tabScrollPercents[k]; });
+      localStorage.setItem(TAB_SCROLL_STATE_KEY, JSON.stringify(tabScrollPercents));
+      localStorage.setItem(FLAG, "1");
+    }catch(e){}
+  })();
+  // то же для вкладки «Комментарии» (extra2): порядок перевернули, а старая
+  // запомненная позиция там могла быть записана слушателем скролла (он пишет
+  // позицию для любой вкладки)
+  (function migrateCommentsScrollToBottomFirst(){
+    var FLAG = "commentsOrderAsc_v1";
+    try{
+      if(localStorage.getItem(FLAG) === "1") return;
+      delete tabScrollPercents["extra2"];
       localStorage.setItem(TAB_SCROLL_STATE_KEY, JSON.stringify(tabScrollPercents));
       localStorage.setItem(FLAG, "1");
     }catch(e){}
@@ -8212,7 +8239,7 @@
     // «новые сверху» по дате выполнения) без сохранённой позиции список
     // открывается СНИЗУ (новые задачи теперь в конце); сохранённая позиция
     // работает как раньше.
-    var defaultBottom = (pct == null) && TASK_TAB_IDS.hasOwnProperty(tab) && tab !== "archive";
+    var defaultBottom = (pct == null) && ((TASK_TAB_IDS.hasOwnProperty(tab) && tab !== "archive") || tab === "extra2");
     requestAnimationFrame(function(){
       var max = container.scrollHeight - container.clientHeight;
       if(defaultBottom){
@@ -8248,6 +8275,7 @@
     var isRealSwitch = settingsWasOpen && prevTab !== tab && !suppressNavPush;
 
     currentSettingsTab = tab;
+    closeTaskDeleteConfirm();
     // "Отвязываем" ссылку на предыдущий рендер экрана "Все задачи проекта"
     // от rerenderAllFromState (activeProjectPickerRerender выше) — она
     // валидна только пока этот экран РЕАЛЬНО показан в #settingsTabContent.
@@ -8440,7 +8468,8 @@
     // там свой, отдельный скролл-контейнер #taskProjectArea (не
     // #settingsTabContent), с собственной памятью позиции (см.
     // openTaskNextPicker/getSavedProjectScrollTop).
-    if(TASK_TAB_IDS.hasOwnProperty(tab) && !(tab === "projects" && activeProjectPickerId)) restoreTabScroll(tab);
+    if((TASK_TAB_IDS.hasOwnProperty(tab) && !(tab === "projects" && activeProjectPickerId)) ||
+       (tab === "extra2" && getCustomCommentsEnabled())) restoreTabScroll(tab);
 
     if(isRealSwitch && window.AppNav){
       window.AppNav.push(function(){
@@ -15482,10 +15511,12 @@
     // поле last-write-wins для облачного слияния (см. saveCommentData) —
     // искусственно двигать его в прошлое/будущее ради одной лишь
     // перестановки в списке было бы небезопасно для синхронизации.
+    // С 19.09 (ТЗ пользователя, как у задач) — по ВОЗРАСТАНИЮ: новый/
+    // изменённый комментарий внизу списка.
     list.sort(function(a,b){
       var oa = a.c.orderKey != null ? a.c.orderKey : a.t;
       var ob = b.c.orderKey != null ? b.c.orderKey : b.t;
-      return ob - oa;
+      return oa - ob;
     });
     return list;
   }
@@ -15533,9 +15564,10 @@
     var edgeKey = all.reduce(function(acc, c){
       if(c.id === id) return acc;
       var k = keyOf(c);
-      return edge === "top" ? Math.max(acc, k) : Math.min(acc, k);
+      // список по возрастанию (19.09): «в начало» — меньше минимума
+      return edge === "top" ? Math.min(acc, k) : Math.max(acc, k);
     }, keyOf(comment));
-    comment.c.orderKey = edge === "top" ? edgeKey + 1 : edgeKey - 1;
+    comment.c.orderKey = edge === "top" ? edgeKey - 1 : edgeKey + 1;
     saveCommentData(id, comment.c);
   }
   // безвозвратное удаление — не трогает уже сделанную копию в "Карте дней
@@ -15737,11 +15769,18 @@
           if(emptyMsg) emptyMsg.remove();
           var holder = document.createElement("div");
           holder.innerHTML = buildCommentRowHtml(getCommentById(id));
-          wrap.insertBefore(holder.firstChild, wrap.firstChild);
+          // ТЗ 19.09: новый комментарий — в КОНЕЦ списка (перед распоркой)
+          wrap.insertBefore(holder.firstChild, wrap.querySelector(".task-list-bottom-spacer"));
+          var commentScroller = document.getElementById("settingsTabContent");
+          if(commentScroller) commentScroller.scrollTop = commentScroller.scrollHeight;
           renderCommentRowEdit(id);
         } else {
           renderCommentsTab();
-          requestAnimationFrame(function(){ renderCommentRowEdit(id); });
+          requestAnimationFrame(function(){
+            var sc = document.getElementById("settingsTabContent");
+            if(sc) sc.scrollTop = sc.scrollHeight;
+            renderCommentRowEdit(id);
+          });
         }
       };
     }
@@ -16396,6 +16435,7 @@
       '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
       '<span class="task-actions">' +
         '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
+        taskDeleteBtnHtml() +
         '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
@@ -16466,6 +16506,7 @@
 
     var html = '';
     html += iconRow(CHEVRON_DOWN_ICON_SVG, false, "Разворачивает длинную задачу целиком (у коротких задач не появляется). Повторное нажатие сворачивает обратно.");
+    html += iconRow(CROSS_SMALL_ICON_SVG, false, "Удаляет задачу насовсем — только после подтверждения: плашка «Удалить задачу?» с крестиком (отмена) и галочкой (удалить). Из архива задачу удаляет отдельный крестик.");
     html += iconRow(PENCIL_ICON_SVG, false, "Открывает текст задачи для редактирования.");
     html += iconRow(CHECK_ICON_SVG, false, "Отмечает задачу выполненной и переносит её в архив.");
     html += iconRow(ARROW_MOVE_ICON_SVG, true, "Перенос задач работает между вкладками:" + moveTabsHtml);
@@ -16539,6 +16580,15 @@
       doneBtn.addEventListener("click", function(){
         flushPendingTaskEdits();
         checkTaskDone(id); // одна и та же задача — закрывается везде разом
+        if(onAfterAction) onAfterAction();
+        else renderTaskTabList(tabKey || task.c.tab);
+      });
+    }
+    // крестик «удалить задачу» (с подтверждением, см. openTaskDeleteConfirm)
+    var deleteBtn = body.querySelector(".task-delete-btn");
+    if(deleteBtn){
+      bindTaskDeleteBtn(deleteBtn, function(){
+        deleteTaskPermanently(id);
         if(onAfterAction) onAfterAction();
         else renderTaskTabList(tabKey || task.c.tab);
       });
@@ -16666,6 +16716,7 @@
     body.innerHTML =
       '<div class="task-editable' + (isProjectsTab ? ' task-editable-project' : '') + '" id="taskEditable_' + id + '" contenteditable="true" data-task-id="' + id + '"></div>' +
       '<span class="task-actions">' +
+        taskDeleteBtnHtml() +
         '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
@@ -17119,6 +17170,7 @@
         '<span class="task-text-view' + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
         '<span class="task-actions">' +
           '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
+          taskDeleteBtnHtml() +
           '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
@@ -17149,6 +17201,13 @@
         doneBtn.addEventListener("click", function(){
           flushPendingTaskEdits();
           checkTaskDone(id);
+          render();
+        });
+      }
+      var deleteBtn = body.querySelector(".task-delete-btn");
+      if(deleteBtn){
+        bindTaskDeleteBtn(deleteBtn, function(){
+          deleteTaskPermanently(id);
           render();
         });
       }
@@ -17226,6 +17285,7 @@
       body.innerHTML =
         '<div class="task-editable" id="taskEditable_' + id + '" contenteditable="true" data-task-id="' + id + '"></div>' +
         '<span class="task-actions">' +
+          taskDeleteBtnHtml() +
           '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
@@ -17439,23 +17499,105 @@
     });
   }
 
+  // ===================== УДАЛЕНИЕ ЗАДАЧИ С ПОДТВЕРЖДЕНИЕМ (ТЗ 19.09) =====================
+  // Крестик слева от карандаша (.task-delete-btn) во всех строках задач на
+  // любых вкладках (обычные вкладки, «Все задачи проекта», результаты
+  // поиска; в режиме редактирования — крайний слева) удаляет задачу НАСОВСЕМ,
+  // но только после подтверждения: плашка «Удалить задачу?» + крестик (отмена)
+  // + галочка (удалить), один ряд, по центру экрана по горизонтали. Стоит не
+  // посреди экрана, а у самого низа — над клавиатурой, если она открыта
+  // (верх клавиатуры — window.AppKeyboard.getTop(), см. initTaskKeyboardLift),
+  // а если нет — на том же уровне у нижнего края (над системной плашкой).
+  // Крестик архива (полное удаление из архива) остаётся без подтверждения.
+  var TASK_DELETE_CONFIRM_BOTTOM_NO_KB_PX = 59; // 47px системная плашка + 12px зазор
+  var TASK_DELETE_CONFIRM_GAP_PX = 10;          // зазор над клавиатурой
+  var taskDeleteConfirmEl = null;
+  var taskDeleteConfirmCleanup = null;
+  function taskDeleteBtnHtml(){
+    return '<button type="button" class="task-icon-btn task-delete-btn" title="Удалить">' + CROSS_SMALL_ICON_SVG + '</button>';
+  }
+  function closeTaskDeleteConfirm(){
+    if(taskDeleteConfirmCleanup){ taskDeleteConfirmCleanup(); taskDeleteConfirmCleanup = null; }
+    if(taskDeleteConfirmEl && taskDeleteConfirmEl.parentNode) taskDeleteConfirmEl.parentNode.removeChild(taskDeleteConfirmEl);
+    taskDeleteConfirmEl = null;
+  }
+  function openTaskDeleteConfirm(onYes){
+    closeTaskDeleteConfirm();
+    var box = document.createElement("div");
+    box.className = "task-delete-confirm";
+    box.setAttribute("role", "alertdialog");
+    box.innerHTML =
+      '<span class="task-delete-confirm-text">Удалить задачу?</span>' +
+      '<span class="task-delete-confirm-btns">' +
+        '<button type="button" class="mdeditor-fab-btn" id="taskDeleteNoBtn" title="Отмена">' + CROSS_SMALL_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="taskDeleteYesBtn" title="Удалить">' + CHECK_ICON_SVG + '</button>' +
+      '</span>';
+    document.body.appendChild(box);
+    taskDeleteConfirmEl = box;
+    function place(){
+      var kbTop = (window.AppKeyboard && window.AppKeyboard.getTop) ? window.AppKeyboard.getTop() : null;
+      var bottom = (kbTop != null)
+        ? Math.max(0, window.innerHeight - kbTop) + TASK_DELETE_CONFIRM_GAP_PX
+        : TASK_DELETE_CONFIRM_BOTTOM_NO_KB_PX;
+      box.style.bottom = Math.round(bottom) + "px";
+    }
+    place();
+    var vk = navigator.virtualKeyboard;
+    if(vk) vk.addEventListener("geometrychange", place);
+    window.addEventListener("resize", place);
+    window.addEventListener("popstate", closeTaskDeleteConfirm);
+    taskDeleteConfirmCleanup = function(){
+      if(vk) vk.removeEventListener("geometrychange", place);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("popstate", closeTaskDeleteConfirm);
+    };
+    // нажатие на плашку не должно отнимать фокус у поля (иначе клавиатура
+    // закроется и плашка «поедет»)
+    box.addEventListener("mousedown", function(e){ e.preventDefault(); });
+    document.getElementById("taskDeleteNoBtn").addEventListener("click", closeTaskDeleteConfirm);
+    document.getElementById("taskDeleteYesBtn").addEventListener("click", function(){
+      closeTaskDeleteConfirm();
+      // если правилась именно эта строка — сначала штатно снимаем фокус
+      // (сохранение/снятие подъёма над клавиатурой), потом удаляем
+      var ae = document.activeElement;
+      if(ae && ae.isContentEditable && ae.blur) ae.blur();
+      onYes();
+    });
+  }
+  // крестик в строке: mousedown не отнимает фокус у редактируемого поля
+  // (клавиатура остаётся открытой — плашка встанет над ней)
+  function bindTaskDeleteBtn(btn, onYes){
+    btn.addEventListener("mousedown", function(e){ e.preventDefault(); });
+    btn.addEventListener("click", function(e){
+      e.stopPropagation();
+      openTaskDeleteConfirm(onYes);
+    });
+  }
+
   // ===================== ПОДЪЁМ ЗАДАЧИ НАД КЛАВИАТУРОЙ (ТЗ 19.09) =====================
   // Новая/редактируемая задача внизу списка оказывалась под экранной
   // клавиатурой, а браузер (Chrome), чтобы показать поле, СДВИГАЛ ВЕСЬ
   // экран вверх — вместе с рядами вкладок и плавающей кнопкой. Здесь то же
-  // самое делаем сами и по-другому: пока в фокусе поле задачи
+  // самое делаем сами и по-другому: пока в фокусе поле задачи/комментария
   // (.task-editable), включаем navigator.virtualKeyboard.overlaysContent —
   // клавиатура тогда ПЕРЕКРЫВАЕТ страницу, ничего не изменяя в размерах и
   // ничего не двигая (вкладки остаются на месте и просто прячутся за
   // клавиатурой), — а высоту клавиатуры берём из virtualKeyboard.boundingRect
-  // (измеряется живьём, не считается на глаз). Чтобы было куда прокручивать,
-  // в конец области чтения на время ввода добавляется распорка высотой в
-  // перекрытую клавиатурой часть, и область прокручивается ровно настолько,
-  // чтобы низ строки задачи (текст + её кнопки) стоял над клавиатурой.
-  // Работает только там, где есть VirtualKeyboard API (Chrome/Edge на
-  // Android); без него ничего не делаем — браузер ведёт себя как раньше.
+  // (измеряется живьём). Чтобы было куда прокручивать, в конец области чтения
+  // на время ввода добавляется распорка высотой в перекрытую клавиатурой
+  // часть, и область прокручивается ровно настолько, чтобы низ строки
+  // (текст + её кнопки) стоял над клавиатурой. Работает только там, где есть
+  // VirtualKeyboard API (Chrome/Edge на Android). window.AppKeyboard.getTop()
+  // — верх клавиатуры (px от верха вьюпорта) или null; нужен окну
+  // подтверждения удаления задачи (openTaskDeleteConfirm).
   (function initTaskKeyboardLift(){
     var vk = navigator.virtualKeyboard;
+    window.AppKeyboard = {
+      getTop: function(){
+        var r = vk && vk.boundingRect;
+        return (r && r.height > 0) ? r.top : null;
+      }
+    };
     if(!vk) return;
     var MARGIN_PX = 8;          // зазор между низом строки и клавиатурой
     var RELEASE_DELAY_MS = 250; // фокус может тут же перейти на другую строку
@@ -17539,6 +17681,7 @@
     });
     // клавиатура появилась/исчезла/сменила высоту (в т.ч. переключение раскладки)
     vk.addEventListener("geometrychange", function(){
+      if(activeEditable && !document.body.contains(activeEditable)){ release(); return; }
       if(activeEditable) applyLift();
       else removeSpacer();
     });

@@ -1,5 +1,7 @@
 /* ===========================================================================
    search.js
+   Версия: 2.4 (19.09) — в строке результата по задачам добавлен крестик «удалить задачу»
+   (слева от карандаша; логику и подтверждение даёт bindTaskRowActions из my.js, деп getCrossIcon).
    Версия: 2.3 (19.09) — кнопка режима чтения на вкладке "Поиск" (ТЗ пользователя
    от 19.09): крайняя слева в нижнем ряду, левее "Поиск по задачам"/"Поиск по
    заметкам" (их позиции не сдвинулись). Тот же переключатель и та же иконка
@@ -58,6 +60,7 @@ window.initSearchModule = function(deps){
   var getCheckIcon = deps.getCheckIcon || function(){ return ""; };
   var getMoveIcon = deps.getMoveIcon || function(){ return ""; };
   var getNextIcon = deps.getNextIcon || function(){ return ""; };
+  var getCrossIcon = deps.getCrossIcon || function(){ return ""; };
   // Кнопка режима чтения (ТЗ пользователя от 19.09) — та же единая точка
   // переключения, что у заметок/книг/задач в my.js. Иконку и title кнопке
   // ставит applyReadingModeVisual (кнопка рендерится пустой, узнаётся по
@@ -473,6 +476,7 @@ window.initSearchModule = function(deps){
     body.innerHTML =
       '<span class="task-text-view">' + (text ? html : '<span class="task-text-placeholder">Новая задача</span>') + '</span>' +
       '<span class="task-actions">' +
+        '<button type="button" class="task-icon-btn task-delete-btn" title="Удалить">' + getCrossIcon() + '</button>' +
         '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + getPencilIcon() + '</button>' +
         '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + getCheckIcon() + '</button>' +
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + getMoveIcon() + '</button>' +
