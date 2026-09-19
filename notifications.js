@@ -1,5 +1,21 @@
 /* ===========================================================================
    notifications.js
+   Версия: 3.1 (19.09) — структурная правка: у системного уведомления две
+   кнопки — «✓ Готово» (action "done": задача выполнена) и «Отложить» (action
+   "snooze": открывается задача и над ней карточка с пузырями 30/60/2/8/24), плюс
+   вибрация (NOTIFY_VIBRATE) и renotify. Новые функции getNotificationActions,
+   handleNotificationAction.
+   Парная правка sw.js сделана: notificationclick кладёт в кэш "reminder-click-temp"
+   {taskId, action, at} (см. consumePendingClick).
+   Версия: 3.0 (19.09) — структурная правка: карточка-напоминание внутри
+   приложения (showTaskCard/hideTaskCard) — текст задачи +
+   пузыри «отложить» 30, 60 (минут) и 2, 8, 24 (часов) + крестик (закрыть) +
+   галочка (задача выполнена). Показывается: когда напоминание сработало при
+   открытом приложении (системное уведомление в этом случае не дублируется),
+   когда системных уведомлений нет (нет разрешения), и после клика по
+   системному уведомлению (Android не умеет в уведомлении столько кнопок —
+   поэтому после клика открывается задача и над ней эта карточка). Новые деп-ы:
+   snoozeTask(id, ts), completeTask(id).
    Версия: 2.1 (19.09) — плашка: высота пузырей = высота кнопок крестик/галочка
    (замер в момент показа, CSS-переменная --rb); затемнения нет (клик мимо — по
    документу, гасится и означает отмену); плашка стоит НАД кнопкой-часами задачи
@@ -56,7 +72,8 @@
 
    Контракт deps: modalBox, modalOverlay, modalHeader, bindClose, closeModal
    (после v2.0 плашкой не используются, оставлены для совместимости),
-   getRemindableTasks() -> [{id, c}], openTaskFromReminder(id).
+   getRemindableTasks() -> [{id, c}], openTaskFromReminder(id),
+   snoozeTask(id, ts) — новый срок напоминания, completeTask(id) — задача выполнена.
    Экспорт: start, schedule, openReminderDialog, formatReminder, isSupported,
    showBanner.
    =========================================================================== */
@@ -70,6 +87,8 @@ window.initNotificationsModule = function(deps){
   var closeModal = deps.closeModal;
   var getRemindableTasks = deps.getRemindableTasks;
   var openTaskFromReminder = deps.openTaskFromReminder || function(){};
+  var snoozeTask = deps.snoozeTask || function(){};
+  var completeTask = deps.completeTask || function(){};
 
   var FIRED_KEY = "taskRemindersFired_v1";
   var FIRED_KEEP_MS = 60 * 24 * 60 * 60 * 1000; // забываем записи старше ~двух месяцев
@@ -77,6 +96,7 @@ window.initNotificationsModule = function(deps){
   var CLICK_KEY = "click";
   var TICK_MAX_MS = 30000;
   var MAX_SINGLE_NOTIFICATIONS = 8;
+  var NOTIFY_VIBRATE = [250, 120, 250, 120, 500]; // рисунок вибрации, мс (вибрация/пауза/...)
   var LATE_MS = 2 * 60 * 1000;                  // «просрочено» — дописываем исходное время
 
   function log(msg){
@@ -182,24 +202,165 @@ window.initNotificationsModule = function(deps){
       });
     }
     return new Promise(function(resolve){
-      var n = new Notification(title, options);
+      // конструктор Notification не принимает actions (TypeError) — убираем
+      var plain = {};
+      Object.keys(options).forEach(function(k){ if(k !== "actions") plain[k] = options[k]; });
+      var n = new Notification(title, plain);
       n.onclick = function(){
         try{ window.focus(); }catch(e){}
-        if(options.data && options.data.taskId) openTaskFromReminder(options.data.taskId);
+        if(options.data && options.data.taskId) openFromNotification(options.data.taskId);
         n.close();
       };
       resolve();
     });
   }
 
+  // ----------------------------------------------- карточка-напоминание
+
+  var SNOOZE_OPTIONS = [
+    {label: "30", minutes: 30,      title: "Отложить на 30 минут"},
+    {label: "60", minutes: 60,      title: "Отложить на 60 минут"},
+    {label: "2",  minutes: 2 * 60,  title: "Отложить на 2 часа", afterSep: true},
+    {label: "8",  minutes: 8 * 60,  title: "Отложить на 8 часов"},
+    {label: "24", minutes: 24 * 60, title: "Отложить на 24 часа"}
+  ];
+  var stackEl = null;
+  var cardEls = {}; // taskId -> элемент карточки
+
+  function ensureStack(){
+    if(stackEl && stackEl.parentNode) return stackEl;
+    stackEl = document.createElement("div");
+    stackEl.className = "app-reminder-stack";
+    document.body.appendChild(stackEl);
+    return stackEl;
+  }
+  function hideTaskCard(id){
+    var el = cardEls[id];
+    if(el && el.parentNode) el.parentNode.removeChild(el);
+    delete cardEls[id];
+    if(stackEl && !stackEl.children.length && stackEl.parentNode){
+      stackEl.parentNode.removeChild(stackEl);
+      stackEl = null;
+    }
+  }
+
+  // text — уже очищенный текст задачи; at — исходный срок (для подписи просроченных)
+  function showTaskCard(id, text, at){
+    hideTaskCard(id);
+    var body = text;
+    if(at && Date.now() - at > LATE_MS) body += "\n(" + formatReminder(at) + ")";
+    var card = document.createElement("div");
+    card.className = "app-reminder-card";
+    var textEl = document.createElement("div");
+    textEl.className = "app-reminder-card-text";
+    textEl.textContent = body;
+    card.appendChild(textEl);
+
+    var row = document.createElement("div");
+    row.className = "app-reminder-card-row";
+    SNOOZE_OPTIONS.forEach(function(o){
+      if(o.afterSep){
+        var sep = document.createElement("span");
+        sep.className = "app-reminder-card-sep";
+        row.appendChild(sep);
+      }
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "reminder-bubble reminder-bubble-snooze";
+      b.textContent = o.label;
+      b.title = o.title;
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        hideTaskCard(id);
+        snoozeTask(id, Date.now() + o.minutes * 60000);
+        schedule();
+      });
+      row.appendChild(b);
+    });
+    var spacer = document.createElement("span");
+    spacer.className = "app-reminder-card-spacer";
+    row.appendChild(spacer);
+    var closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "mdeditor-fab-btn";
+    closeBtn.title = "Закрыть";
+    closeBtn.innerHTML = ICON_CROSS;
+    closeBtn.addEventListener("click", function(e){ e.stopPropagation(); hideTaskCard(id); });
+    row.appendChild(closeBtn);
+    var doneBtn = document.createElement("button");
+    doneBtn.type = "button";
+    doneBtn.className = "mdeditor-fab-btn";
+    doneBtn.title = "Задача выполнена";
+    doneBtn.innerHTML = ICON_CHECK;
+    doneBtn.addEventListener("click", function(e){
+      e.stopPropagation();
+      hideTaskCard(id);
+      completeTask(id);
+      schedule();
+    });
+    row.appendChild(doneBtn);
+    card.appendChild(row);
+
+    // тап по тексту — открыть задачу (карточка закрывается)
+    textEl.addEventListener("click", function(){
+      hideTaskCard(id);
+      openTaskFromReminder(id);
+    });
+    ensureStack().appendChild(card);
+    cardEls[id] = card;
+    // размер пузырей = размер кнопок крестик/галочка
+    var h = doneBtn.getBoundingClientRect().height;
+    if(h > 0) card.style.setProperty("--rb", Math.round(h * 10) / 10 + "px");
+  }
+
+  function findTask(id){
+    var list = [];
+    try{ list = getRemindableTasks() || []; }catch(e){}
+    for(var i = 0; i < list.length; i++){ if(list[i].id === id) return list[i]; }
+    return null;
+  }
+
+  // две кнопки уведомления (Chrome для Android показывает не больше двух;
+  // Notification.maxActions = 0 — кнопок нет вообще)
+  function getNotificationActions(){
+    var max = (typeof Notification !== "undefined" && typeof Notification.maxActions === "number") ? Notification.maxActions : 2;
+    var all = [
+      {action: "done", title: "✓ Готово"},
+      {action: "snooze", title: "Отложить"}
+    ];
+    return all.slice(0, Math.max(0, max));
+  }
+
+  // что делать после клика по уведомлению или его кнопке
+  function handleNotificationAction(id, action){
+    if(action === "done"){
+      var t = findTask(id);
+      var text = t ? cleanText(t.c && t.c.text) : "";
+      completeTask(id);
+      schedule();
+      showBanner("Задача выполнена" + (text ? ": " + text : ""));
+      return;
+    }
+    openFromNotification(id); // «Отложить» и клик по самому уведомлению
+  }
+
+  // клик по системному уведомлению: открыть задачу и показать над ней карточку
+  function openFromNotification(id){
+    openTaskFromReminder(id);
+    var t = findTask(id);
+    if(t && !(t.c && t.c.checked === true)) showTaskCard(id, cleanText(t.c && t.c.text), null);
+  }
+
   function notifyTask(task, at){
     var id = task.id;
-    var body = cleanText(task.c && task.c.text);
+    var text = cleanText(task.c && task.c.text);
+    // приложение открыто и на виду — системное уведомление не нужно (оно
+    // только продублировало бы карточку): показываем карточку с кнопками
+    if(document.visibilityState === "visible"){ showTaskCard(id, text, at); return; }
+    var body = text;
     if(Date.now() - at > LATE_MS) body += "\n(" + formatReminder(at) + ")";
     var canSystem = isSupported() && Notification.permission === "granted";
-    var fallback = function(){
-      showBanner("Напоминание: " + body, function(){ openTaskFromReminder(id); }, true);
-    };
+    var fallback = function(){ showTaskCard(id, text, at); };
     if(!canSystem){ fallback(); return; }
     showSystemNotification("Напоминание", {
       body: body,
@@ -207,7 +368,10 @@ window.initNotificationsModule = function(deps){
       icon: "./icon-192x192.png",
       badge: "./icon-192x192.png",
       data: {taskId: id},
-      requireInteraction: true
+      requireInteraction: true,
+      vibrate: NOTIFY_VIBRATE,
+      renotify: true, // тот же tag (повторное срабатывание после отсрочки) снова подаст сигнал
+      actions: getNotificationActions()
     }).catch(function(e){
       log("showNotification: " + (e && e.message ? e.message : e));
       fallback();
@@ -285,7 +449,7 @@ window.initNotificationsModule = function(deps){
         if(!resp) return;
         return resp.json().then(function(data){
           cache.delete(CLICK_KEY);
-          if(data && data.taskId) openTaskFromReminder(data.taskId);
+          if(data && data.taskId) handleNotificationAction(data.taskId, data.action || "");
         });
       });
     }).catch(function(e){ log("consumePendingClick: " + (e && e.message ? e.message : e)); });

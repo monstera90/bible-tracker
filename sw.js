@@ -239,13 +239,19 @@ const REMINDER_CLICK_KEY = "click";
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const taskId = event.notification.data && event.notification.data.taskId;
+  // кнопка уведомления: "done" («✓ Готово») / "snooze" («Отложить»); "" — клик по
+  // самому уведомлению. Страница разбирает действие в notifications.js
+  // (consumePendingClick → handleNotificationAction). Приложение выводим на
+  // экран при любом действии: данные задач лежат на странице, service worker до
+  // них не дотягивается, а свёрнутая вкладка может быть заморожена.
+  const action = event.action || "";
   event.waitUntil((async () => {
     try {
       if (taskId) {
         const cache = await caches.open(REMINDER_CLICK_CACHE);
         await cache.put(
           REMINDER_CLICK_KEY,
-          new Response(JSON.stringify({ taskId: taskId, at: Date.now() }), {
+          new Response(JSON.stringify({ taskId: taskId, action: action, at: Date.now() }), {
             headers: { "Content-Type": "application/json" }
           })
         );
