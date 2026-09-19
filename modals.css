@@ -1,8 +1,9 @@
 /* ===========================================================================
    modals.css
+   Версия: 2.6 (19.09) — исправлено: в этой шапке внутри комментария стояли подряд символы «звёздочка» и «слэш» (в перечне классов .reminder-field...), они преждевременно закрывали комментарий, и базовое правило .settings-fab (кнопка-язычок) выпадало из CSS.
    Версия: 2.5 (19.09) — структурная правка: напоминания задач (ТЗ 19.09). Новые классы:
    .task-reminder-btn.active (часы в закрашенном круге, как .task-worktasks-btn.active),
-   .reminder-fields/.reminder-field*/.reminder-hidden-input/.reminder-error (диалог
+   .reminder-fields, .reminder-field (и его части), .reminder-hidden-input, .reminder-error (диалог
    даты и времени, notifications.js), .app-reminder-banner (плашка внутри приложения).
    Версия: 2.4 (19.09) — кружок приоритета (.task-flag-dot-inner) 9px -> 12px.
    Версия: 2.3 (19.09) — .task-delete-confirm: плашка «Удалить задачу?» (крестик/галочка).
