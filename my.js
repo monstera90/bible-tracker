@@ -1,6 +1,32 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 30.1 (19.09) — структурная правка (TASK_UNIFIED_SYNC.md, Шаг 4.2):
+   перенос общей задачи между /tasks и /archive стал ОДНОЙ атомарной операцией
+   движка. checkGroupTaskDone («выполнено»: /tasks → /archive) и
+   restoreGroupTaskFromArchive («извлечь из архива»: /archive → /tasks) зовут
+   binding.moveTo(...) → engine.moveRecord: запись в целевой store + тумбстоун в
+   исходном одним вызовом (обе локальные записи синхронно, одна метка t, dirty
+   только если обе легли, откат при частичном сбое) — вместо двух независимых
+   шагов save + remove. Добавлены logGroupMoveError, rerenderAfterGroupMoveFailure.
+   Содержимое переносимой задачи копируется (Object.assign), а не мутируется
+   прямо в кэше исходного store — при откате исходная запись остаётся целой.
+   Версия: 30.0 (19.09) — структурная правка (TASK_UNIFIED_SYNC.md, Шаг 4.1):
+   АРХИВ общих задач (/groups/<groupId>/archive) переведён на sync-engine —
+   второй binding (name:"archive") на том же движке/транспорте, что и /tasks
+   (см. пояснение у getGroupTasksBinding, Шаг 3). Удалены groupArchiveDirty,
+   scheduleGroupArchivePush, pushGroupArchiveNow, pullGroupArchiveNow —
+   restoreGroupTaskFromArchive/deleteGroupArchivedTaskPermanently теперь
+   зовут getGroupArchiveBinding().remove(id) (запись+постановка на отправку
+   одним вызовом), openGroupJointArchiveTab зовёт syncGroupArchiveNow() (pull
+   → сверка → push) вместо ручного pullGroupArchiveNow. checkGroupTaskDone
+   пишет в архив через getGroupArchiveBinding().save(id, task.c) — но это
+   ВСЁ ЕЩЁ два отдельных вызова (save в архив + deleteGroupTaskPermanently),
+   не одна атомарная операция — это Шаг 4.2. fetchGroupArchiveRaw и
+   encryptGroupContent/decryptGroupContent оставлены — их использует
+   migrateGroupTasksToLocalForAdmin (разовое чтение при отвязке «без
+   удаления», не часть цикла push/pull). returnJointTasksTabToLocalMode
+   отключает оба binding'а от группы. Облачный путь и формат {c,t} прежние.
    Версия: 29.2 (19.09) — строка «ДУБЛЬ» в fetchWithTimeout стала короткой
    (~80 символов вместо ~500: путь без хоста + только имена вызывающих функций,
    без URL и номеров строк) — они забивали буфер лога (150 строк) и не давали
@@ -31,6 +57,14 @@
    (restoreTabScroll), разовый сброс старых позиций (migrateTaskTabScrollToBottomFirst,
    ключ taskListOrderAsc_v1); (3) initTaskKeyboardLift — поле задачи поднимается
    над клавиатурой без сдвига вкладок (virtualKeyboard.overlaysContent + boundingRect).
+   Версия: 27.2 (19.09) — долгое удержание язычка при ВЫКЛЮЧЕННЫХ доп. анимациях
+   закрывает окно мгновенно: closeSettingsModal(true) на время снятия класса
+   "open" гасит CSS-transition оверлея/рамки (инлайн transition:none + reflow,
+   возврат в следующем кадре). Укороченная волна 27.1 остаётся для включённых.
+   Версия: 27.1 (19.09) — долгое удержание язычка: порог FAB_LONGPRESS_MS 100 -> 250 мс
+   (как в ТЗ), а «долго отрабатывает» было из-за 400-мс волны закрытия поверх
+   удержания — теперь в этом пути волна укорочена (SETTINGS_WAVE_FAST_DURATION =
+   120 мс, closeSettingsModal(true), animateSettingsWave(..., durationMs)).
    Версия: 27.0 (19.09) — структурная правка: клик по язычку больше не связан с
    режимом чтения; новая кнопка режима чтения #readingModeFabBtn слева от язычка
    (initReadingModeFab; видна при включённом режиме чтения и закрытом окне,
@@ -5082,22 +5116,39 @@
   // /groups/<groupId>/archive (см. блок "ОБЩИЕ ЗАДАЧИ: АРХИВ" ниже), а не
   // просто помечается checked:true внутри одного и того же хранилища, как
   // у личных задач (см. getArchivedTasksAll) — так и задумано п. 3.1 ТЗ
-  // (архив — отдельный облачный путь). Тумбстоун в /tasks делаем через
-  // уже существующий deleteGroupTaskPermanently — экономит дублирование
-  // кода тумбстоуна/дирти/пуша.
+  // (архив — отдельный облачный путь). С Шага 4.2 (19.09) перенос — одна
+  // атомарная операция движка (запись в архив + тумбстоун в /tasks, см. ниже).
   function checkGroupTaskDone(id){
     if(!sharedGroup) return;
     var task = getGroupTaskById(id);
     if(!task || task.c.checked) return;
-    task.c.checked = true;
-    task.c.checkedAt = Date.now();
-    task.c.completedBy = getDeviceId();
-    loadGroupArchiveCache(sharedGroup.groupId);
-    groupArchiveState[id] = {c: task.c, t: Date.now()};
-    saveGroupArchiveCacheLocal();
-    groupArchiveDirty[id] = true;
-    scheduleGroupArchivePush();
-    deleteGroupTaskPermanently(id);
+    // Копия, а не правка task.c на месте: task.c — объект прямо из кэша /tasks,
+    // и при откате (см. engine.moveRecord) исходная запись должна остаться
+    // такой, какой была.
+    var content = Object.assign({}, task.c);
+    content.checked = true;
+    content.checkedAt = Date.now();
+    content.completedBy = getDeviceId();
+    // Шаг 4.2 (19.09): ОДИН вызов движка — запись в архив + тумбстоун в /tasks
+    // (engine.moveRecord через binding.moveTo). Обе локальные записи
+    // происходят синхронно внутри вызова, поэтому перерисовка сразу после
+    // checkGroupTaskDone уже видит задачу в архиве и не видит в списке.
+    getGroupTasksBinding().moveTo(getGroupArchiveBinding(), id, content)
+      .catch(function(err){ logGroupMoveError("выполнено: /tasks → /archive", id, err); });
+    // как раньше (через deleteGroupTaskPermanently): пересчёт ссылок на медиа
+    if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
+  }
+  function logGroupMoveError(what, id, err){
+    console.error("Общие задачи: перенос не удался (" + what + "):", err);
+    syncEngineLog("Общие задачи: перенос не удался (" + what + ") " + id + " — " + (err && err.message ? err.message : err));
+    rerenderAfterGroupMoveFailure();
+  }
+  // Движок откатил локальные записи после сбоя переноса, а интерфейс уже
+  // успел отрисовать «перенесённое» состояние (отрисовка идёт сразу после
+  // синхронной части вызова) — перерисовываем оба экрана по откаченному кэшу.
+  function rerenderAfterGroupMoveFailure(){
+    try{ rerenderJointTasksTabIfOpen(); }catch(e){}
+    try{ rerenderJointArchiveTabIfOpen(); }catch(e){}
   }
 
   // ---- облачный цикл общих задач: свой, полностью независимый от личного
@@ -5118,9 +5169,9 @@
   // сверен с encryptGroupContent/decryptGroupContent выше) — участники на
   // старой версии приложения продолжают работать.
   //
-  // Один движок и один транспорт на приложение (getSyncEngineRuntime) — шаг 4
-  // (архив общих задач) заведёт рядом второй binding с name:"archive" на том
-  // же движке, без нового кода push/pull.
+  // Один движок и один транспорт на приложение (getSyncEngineRuntime) — Шаг
+  // 4.1 (19.09) завёл рядом второй binding, name:"archive" (getGroupArchiveBinding
+  // ниже), без нового кода push/pull — тот же syncengine_groupbinding.js.
   var syncEngineRuntime = null;   // {engine, transport}
   var groupTasksBinding = null;
   function syncEngineLog(msg){
@@ -5192,23 +5243,62 @@
     });
   }
 
-  // ===================== ОБЩИЕ ЗАДАЧИ: АРХИВ (TASK_SHARED_TASKS, Шаг 6,
-  // 16.09) =====================
-  // /groups/<groupId>/archive/<id> — отдельный от /tasks облачный путь
-  // (п. 3.1 ТЗ), та же форма записи {c,t} и то же шифрование групповым
-  // ключом (encryptGroupContent/decryptGroupContent выше — ключ один и
-  // тот же для обоих путей, SHA-256(groupId)). Свой локальный кэш, свой
-  // "грязный" набор, свой независимый push/pull — устроено ТОЧНО как
-  // groupTasksState/groupTasksDirty/pushGroupTasksNow/pullGroupTasksNow
-  // (так /tasks было устроено ДО 19.09 — с Шага 3 на sync-engine, архив
-  // переедет на него отдельным Шагом 4 и пока остаётся на ручной схеме)
-  // выше, только путь в Firebase "/archive.json" вместо "/tasks.json".
-  // id записи — тот же, что был у активной задачи (переезжает, не
-  // создаётся заново, см. checkGroupTaskDone выше).
+  // ===================== ОБЩИЕ ЗАДАЧИ: АРХИВ (TASK_UNIFIED_SYNC.md, Шаг 4.1,
+  // 19.09) =====================
+  // /groups/<groupId>/archive/<id> — отдельный от /tasks облачный путь, та же
+  // форма записи {c,t} и то же шифрование групповым ключом (SHA-256(groupId)
+  // → AES-GCM, syncengine_groupcrypto.js). С Шага 4.1 — второй binding
+  // (name:"archive") на ТОМ ЖЕ движке/транспорте, что и /tasks (см.
+  // getGroupTasksBinding выше) — getGroupArchiveBinding/logGroupArchiveSyncError/
+  // syncGroupArchiveNow ниже зеркальны своим аналогам для /tasks. id записи —
+  // тот же, что был у активной задачи (переезжает, не создаётся заново, см.
+  // checkGroupTaskDone выше).
+  var groupArchiveBinding = null;
+  function getGroupArchiveBinding(){
+    if(groupArchiveBinding) return groupArchiveBinding;
+    var rt = getSyncEngineRuntime();
+    groupArchiveBinding = window.SyncEngineGroupBinding.createGroupBinding({
+      engine: rt.engine,
+      transport: rt.transport,
+      makeHooks: window.SyncEngineGroupCrypto.makeGroupHooks,
+      name: "archive",
+      groupsPath: FIREBASE_GROUPS_PATH,
+      getGroupId: function(){ return sharedGroup && sharedGroup.groupId ? sharedGroup.groupId : null; },
+      // синхронный локальный кэш: читает отрисовка (getAllGroupArchivedTasks
+      // и др. ниже), пишет ТОЛЬКО адаптер движка через save/remove/приём
+      // чужих правок
+      cache: {
+        load: loadGroupArchiveCache,
+        get: function(){ return groupArchiveState; },
+        save: saveGroupArchiveCacheLocal
+      },
+      // pull применил чужие правки — перерисовать экран архива, если открыт
+      onRemoteChange: rerenderJointArchiveTabIfOpen,
+      log: syncEngineLog
+    });
+    return groupArchiveBinding;
+  }
+  function logGroupArchiveSyncError(err){
+    console.error("Архив общих задач: ошибка синхронизации:", err);
+    syncEngineLog("Архив общих задач: ошибка синхронизации — " + (err && err.message ? err.message : err));
+  }
+  // pull → сверка → push одним вызовом — см. пояснение у syncGroupTasksNow
+  // выше, тот же приём для архива.
+  function syncGroupArchiveNow(){
+    if(!sharedGroup) return Promise.resolve(null);
+    try{
+      return getGroupArchiveBinding().syncNow().catch(function(err){
+        logGroupArchiveSyncError(err);
+        return null;
+      });
+    }catch(err){
+      logGroupArchiveSyncError(err);
+      return Promise.resolve(null);
+    }
+  }
   var GROUP_ARCHIVE_CACHE_KEY_PREFIX = "bibleGroupArchiveCache_v1_";
   var groupArchiveState = {};
   var groupArchiveLoadedFor = null;
-  var groupArchiveDirty = {};
 
   function groupArchiveCacheKey(groupId){ return GROUP_ARCHIVE_CACHE_KEY_PREFIX + groupId; }
   function loadGroupArchiveCache(groupId){
@@ -5249,121 +5339,44 @@
   // "Извлечь из архива" (стрелочка) для общей задачи — кнопка в
   // renderTaskArchiveTab(true) вызывает эту функцию напрямую (не
   // restoreTaskFromArchive — та только для личных задач). Возвращает
-  // запись обратно в /groups/<groupId>/tasks через уже существующий
-  // saveGroupTaskData (дирти/пуш этого пути он берёт на себя сам),
+  // запись обратно в /groups/<groupId>/tasks одной атомарной операцией
+  // движка (Шаг 4.2: запись в /tasks + тумбстоун в /archive),
   // completedBy сбрасывается — как completionKey у личной задачи при
   // восстановлении (см. restoreTaskFromArchive).
   function restoreGroupTaskFromArchive(id){
     if(!sharedGroup) return;
     loadGroupArchiveCache(sharedGroup.groupId);
+    loadGroupTasksCache(sharedGroup.groupId);
     var rec = groupArchiveState[id];
     if(!rec || !rec.c) return;
-    var content = rec.c;
+    // копия — см. пояснение у checkGroupTaskDone
+    var content = Object.assign({}, rec.c);
     content.checked = false;
     content.checkedAt = null;
     content.completedBy = null;
-    saveGroupTaskData(id, content);
-    groupArchiveState[id] = {c: null, t: Date.now()};
-    saveGroupArchiveCacheLocal();
-    groupArchiveDirty[id] = true;
-    scheduleGroupArchivePush();
+    // та же стабильная позиция в списке, что даёт saveGroupTaskDataP
+    if(content.createdAt == null) content.createdAt = Date.now();
+    // Шаг 4.2 (19.09): ОДИН вызов движка — запись в /tasks + тумбстоун в
+    // /archive (раньше: saveGroupTaskData, затем отдельный remove в архиве).
+    getGroupArchiveBinding().moveTo(getGroupTasksBinding(), id, content)
+      .catch(function(err){ logGroupMoveError("извлечь из архива: /archive → /tasks", id, err); });
   }
   // "Удалить навсегда" (крестик) для общей задачи из архива — тушит
   // запись ИМЕННО в /groups/<groupId>/archive (не путать с
   // deleteGroupTaskPermanently выше — та про /tasks, активные задачи).
   function deleteGroupArchivedTaskPermanently(id){
     if(!sharedGroup) return;
-    loadGroupArchiveCache(sharedGroup.groupId);
-    groupArchiveState[id] = {c: null, t: Date.now()};
-    saveGroupArchiveCacheLocal();
-    groupArchiveDirty[id] = true;
-    scheduleGroupArchivePush();
+    getGroupArchiveBinding().remove(id).catch(logGroupArchiveSyncError);
     if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
   }
-
-  var GROUP_ARCHIVE_PUSH_DEBOUNCE_MS = 400;
-  var groupArchivePushTimer = null;
-  function scheduleGroupArchivePush(){
-    if(!sharedGroup) return;
-    clearTimeout(groupArchivePushTimer);
-    groupArchivePushTimer = setTimeout(pushGroupArchiveNow, GROUP_ARCHIVE_PUSH_DEBOUNCE_MS);
-  }
-  function pushGroupArchiveNow(){
-    if(!sharedGroup) return Promise.resolve();
-    var groupId = sharedGroup.groupId;
-    var ids = Object.keys(groupArchiveDirty);
-    if(!ids.length) return Promise.resolve();
-    groupArchiveDirty = {};
-    return Promise.all(ids.map(function(id){
-      var rec = groupArchiveState[id];
-      if(!rec) return null;
-      if(rec.c === null){
-        var tomb = {}; tomb[id] = {c:null, t:rec.t};
-        return tomb;
-      }
-      return encryptGroupContent(groupId, rec.c).then(function(b64){
-        var out = {}; out[id] = {c:b64, t:rec.t};
-        return out;
-      });
-    })).then(function(parts){
-      var payload = {};
-      parts.forEach(function(p){ if(p) Object.keys(p).forEach(function(k){ payload[k] = p[k]; }); });
-      if(!Object.keys(payload).length) return;
-      return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/archive.json", {
-        method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload)
-      }, 15000).then(function(res){
-        if(!res.ok) throw new Error("group_archive_put_failed_" + res.status);
-      });
-    }).catch(function(err){
-      console.error("Не удалось отправить архив общих задач в облако:", err);
-      ids.forEach(function(id){ groupArchiveDirty[id] = true; });
-    });
-  }
+  // Разовое (не часть цикла push/pull) чтение сырых записей архива —
+  // нужно ТОЛЬКО migrateGroupTasksToLocalForAdmin (перенос при отвязке
+  // «без удаления», см. ниже); транспорт движка со своим pull её не
+  // заменяет, т.к. там нужны именно чужие/все записи группы целиком.
   function fetchGroupArchiveRaw(groupId){
     return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/archive.json", {method:"GET"}, 10000).then(function(res){
       if(!res.ok) throw new Error("group_archive_fetch_failed_" + res.status);
       return res.json();
-    });
-  }
-  // Пулл архива НЕ входит в refreshJointTasksData (тот освежает только
-  // /tasks при открытии вкладки/событии "online") — архив тянется лениво,
-  // только когда реально открыт экран архива (см. openGroupJointArchiveTab
-  // ниже), чтобы не гонять лишний трафик на каждое открытие обычной
-  // вкладки "Общие задачи". Пуш "грязных" записей архива, наоборот, не
-  // ждёт открытия экрана — идёт сам по scheduleGroupArchivePush (дебаунс),
-  // плюс подстраховка в refreshJointTasksData (см. там), тем же приёмом,
-  // что был у groupTasksDirty до Шага 3 (19.09).
-  function pullGroupArchiveNow(){
-    if(!sharedGroup) return Promise.resolve();
-    var groupId = sharedGroup.groupId;
-    loadGroupArchiveCache(groupId);
-    return fetchGroupArchiveRaw(groupId).then(function(cloudRaw){
-      cloudRaw = cloudRaw || {};
-      var ids = Object.keys(cloudRaw);
-      return Promise.all(ids.map(function(id){
-        var cloudRec = cloudRaw[id];
-        if(!cloudRec) return null;
-        var localRec = groupArchiveState[id];
-        if(localRec && localRec.t >= cloudRec.t) return null;
-        if(cloudRec.c === null) return {id:id, rec:{c:null, t:cloudRec.t}};
-        return decryptGroupContent(groupId, cloudRec.c).then(function(obj){
-          return {id:id, rec:{c:obj, t:cloudRec.t}};
-        }).catch(function(err){
-          console.error("Не удалось расшифровать архивную общую задачу", id, err);
-          return null;
-        });
-      })).then(function(results){
-        var changed = false;
-        results.forEach(function(r){
-          if(!r) return;
-          groupArchiveState[r.id] = r.rec;
-          changed = true;
-        });
-        if(changed){
-          saveGroupArchiveCacheLocal();
-          rerenderJointArchiveTabIfOpen();
-        }
-      });
     });
   }
   // Перерисовывает экран "Архив общих задач", если он сейчас открыт — та
@@ -5378,10 +5391,10 @@
   // выше, пункт "Архив общих задач") — открывает экран архива тем же
   // приёмом, что и "Версии"/другие служебные экраны (switchSettingsTab +
   // запись в стек AppNav, см. switchSettingsTab), затем лениво подтягивает
-  // свежие данные из облака (см. пояснение у pullGroupArchiveNow выше).
+  // свежие данные из облака — syncGroupArchiveNow (pull → сверка → push).
   function openGroupJointArchiveTab(){
     switchSettingsTab("jointArchive");
-    if(sharedGroup) pullGroupArchiveNow().catch(function(err){ console.error(err); });
+    if(sharedGroup) syncGroupArchiveNow();
   }
 
   function fetchGroupMembers(groupId){
@@ -5498,9 +5511,11 @@
     // Шаг 3 (19.09): syncGroupTasksNow = pull → сверка → push — отправка
     // накопленных (в т.ч. потерянных при перезагрузке) правок общих задач
     // входит в него, отдельной проверки «есть ли грязные» больше нет.
-    // Подстраховка для архива (он пока на старом механизме, Шаг 4) — как
-    // раньше, см. пояснение у pullGroupArchiveNow, Шаг 6.
-    if(Object.keys(groupArchiveDirty).length) pushGroupArchiveNow();
+    // Шаг 4.1 (19.09): та же подстраховка для архива — syncGroupArchiveNow
+    // тоже лечит потерянные при перезагрузке dirty-флаги архива, не ждёт
+    // открытия экрана "Архив общих задач" (тот всё равно зовёт её же, см.
+    // openGroupJointArchiveTab, но лениво — только при открытии).
+    if(isGroupTasksActive()) syncGroupArchiveNow();
     // ⚠️ ДОБАВЛЕНО 16.09 (TASK_FILE_SYNC_RTDB.md, раздел 4.5, Шаг 7):
     // тот же цикл опроса группы — подходящее место для сверки группового
     // канала картинок (см. syncGroupImageRegistry выше). Функция сама
@@ -5748,29 +5763,22 @@
   // либо отдельного переключателя.
   function returnJointTasksTabToLocalMode(){
     var prevGroupId = sharedGroup ? sharedGroup.groupId : null;
-    // Шаг 3 (19.09): отключить sync-engine от группы ДО сброса кэша — иначе
-    // отложенный push/повтор после сетевой ошибки мог бы отправить в облако
-    // (уже отвязанной/удалённой) группы то, что осталось в очереди
+    // Шаг 3 (19.09), Шаг 4.1 (19.09): отключить оба binding'а sync-engine
+    // (tasks И archive) от группы ДО сброса кэша — иначе отложенный push/
+    // повтор после сетевой ошибки мог бы отправить в облако (уже
+    // отвязанной/удалённой) группы то, что осталось в очереди
     if(groupTasksBinding) groupTasksBinding.detach();
+    if(groupArchiveBinding) groupArchiveBinding.detach();
     saveSharedGroup(null);
     if(prevGroupId){
       try{ localStorage.removeItem(groupTasksCacheKey(prevGroupId)); }catch(e){}
       try{ localStorage.removeItem(GROUP_ADMIN_MIGRATED_KEY_PREFIX + prevGroupId); }catch(e){}
-      // ⚠️ ИСПРАВЛЕНО (правка после ревью): раньше кэш АРХИВА группы (Шаг 6,
-      // появился позже этой функции) тут не сбрасывался вовсе — если на
-      // момент отвязки/отписки оставались неотправленные "грязные" записи
-      // архива (groupArchiveDirty), они переживали returnJointTasksTabToLocalMode
-      // и при привязке к СЛЕДУЮЩЕЙ группе могли уйти (переехав по
-      // groupId) в архив уже новой, не имеющей к ним отношения группы —
-      // см. groupArchiveDirty-подстраховку в refreshJointTasksData.
       try{ localStorage.removeItem(groupArchiveCacheKey(prevGroupId)); }catch(e){}
     }
     groupTasksState = {};
     groupTasksLoadedFor = null;
     groupArchiveState = {};
-    groupArchiveDirty = {};
     groupArchiveLoadedFor = null;
-    clearTimeout(groupArchivePushTimer);
     var popup = document.getElementById("taskJointMenuPopup");
     if(popup) popup.classList.remove("open");
     rerenderJointTasksTabIfOpen();
@@ -7774,6 +7782,10 @@
   // к этому углу, визуально неотличимо.
   var settingsWaveRAF = null;
   var SETTINGS_WAVE_DURATION = 400; // мс, см. обсуждение с пользователем
+  // Схлопывание окна по долгому удержанию язычка (см. FAB_LONGPRESS_MS): 400 мс
+  // обычной волны ПОВЕРХ самого удержания давали ощущение «отрабатывает очень
+  // долго», поэтому в этом пути волна укорочена (эффект тот же, только быстрее).
+  var SETTINGS_WAVE_FAST_DURATION = 120; // мс
   // Геометрия волны в px, в координатах рамки (0,0 — её левый верхний
   // угол); пересчитывается в updateSettingsWaveGeometry перед каждым
   // запуском волны. minX/minY/maxX/maxY — прямоугольник, который нужно
@@ -7846,13 +7858,13 @@
   // false — обратная волна: рамка схлопывается t=1->0 (честно до
   // полного нуля, чтобы гарантированно стянуться в точку у кнопки и
   // исчезнуть), подложка одновременно гаснет opacity 1->0.
-  function animateSettingsWave(opening, onDone){
+  function animateSettingsWave(opening, onDone, durationMs){
     if(settingsWaveRAF){ cancelAnimationFrame(settingsWaveRAF); settingsWaveRAF = null; }
     updateSettingsWaveGeometry();
     var start = null;
     function frame(now){
       if(start === null) start = now;
-      var p = Math.min(1, (now - start) / SETTINGS_WAVE_DURATION);
+      var p = Math.min(1, (now - start) / (durationMs || SETTINGS_WAVE_DURATION));
       var t = opening ? p : (1 - p);
       setSettingsWaveClip(t);
       settingsModalOverlay.style.opacity = String(t);
@@ -8123,7 +8135,11 @@
       }
     }
   }
-  function closeSettingsModal(){
+  // quick=true (только из долгого удержания язычка, см. FAB_LONGPRESS_MS) —
+  // укороченная волна закрытия; во всех остальных местах вызывается без
+  // аргумента (именно вызовом, не как обработчик события — иначе quick
+  // получил бы объект события).
+  function closeSettingsModal(quick){
     closeTaskDeleteConfirm();
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
@@ -8139,6 +8155,29 @@
           settingsModalFrame.style.clipPath = "";
           settingsModalFrame.style.webkitClipPath = "";
         }
+      }, quick === true ? SETTINGS_WAVE_FAST_DURATION : undefined);
+    } else if(quick === true){
+      // Долгое удержание язычка при ВЫКЛЮЧЕННЫХ дополнительных анимациях —
+      // закрываем мгновенно. Сам JS тут ничего не ждёт, но оверлей скрыт
+      // через opacity/visibility (см. .settings-modal-overlay в modals.css),
+      // и CSS-transition на них растягивал закрытие даже без волны. Поэтому
+      // на время снятия класса "open" гасим переходы инлайном, принудительно
+      // применяем стили (offsetHeight) и в следующем кадре возвращаем
+      // переходы обратно стилям из CSS — обычное закрытие/открытие не
+      // затрагивается.
+      var ov = settingsModalOverlay;
+      ov.style.transition = "none";
+      if(settingsModalFrame) settingsModalFrame.style.transition = "none";
+      ov.classList.remove("open");
+      ov.style.opacity = "";
+      if(settingsModalFrame){
+        settingsModalFrame.style.clipPath = "";
+        settingsModalFrame.style.webkitClipPath = "";
+      }
+      void ov.offsetHeight;
+      requestAnimationFrame(function(){
+        ov.style.transition = "";
+        if(settingsModalFrame) settingsModalFrame.style.transition = "";
       });
     } else {
       settingsModalOverlay.classList.remove("open");
@@ -12577,7 +12616,7 @@
   // settingsGearBtn ниже; ТЗ пользователя от 12.09). Закрыть блокнот
   // короткий клик по язычку больше не может, пока разблокирован второй
   // набор — для этого клик МИМО окна (см. settingsModalOverlay ниже) или
-  // долгое удержание самого язычка (100 мс, см. FAB_LONGPRESS_MS ниже).
+  // долгое удержание самого язычка (250 мс, см. FAB_LONGPRESS_MS ниже).
   var settingsActiveTabSet = 1;
   // Запоминает набор вкладок (1 или 2) и саму последнюю реальную вкладку
   // (см. settingsLastStackTab ниже) в localStorage, а не только в памяти —
@@ -13136,7 +13175,9 @@
     // мимо окна, раз короткий клик по язычку теперь только крутит набор
     // вкладок по кругу и сам никогда не закрывает (см. обработчик клика
     // ниже).
-    var FAB_LONGPRESS_MS = 100;
+    // Порог удержания — 250 мс (ТЗ пользователя от 19.09; раньше стояло 100 мс —
+    // слишком мало: медленный обычный тап срабатывал как удержание).
+    var FAB_LONGPRESS_MS = 250;
     var fabLongPressTimer = null;
     var fabLongPressFired = false;
 
@@ -13154,7 +13195,7 @@
       fabLongPressTimer = setTimeout(function(){
         fabLongPressTimer = null;
         fabLongPressFired = true;
-        closeSettingsModal();
+        closeSettingsModal(true);
       }, FAB_LONGPRESS_MS);
     });
     ["pointerup", "pointerleave", "pointercancel"].forEach(function(evt){
