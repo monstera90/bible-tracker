@@ -1,5 +1,10 @@
 /* ===========================================================================
    search.js
+   Версия: 2.3 (19.09) — кнопка режима чтения на вкладке "Поиск" (ТЗ пользователя
+   от 19.09): крайняя слева в нижнем ряду, левее "Поиск по задачам"/"Поиск по
+   заметкам" (их позиции не сдвинулись). Тот же переключатель и та же иконка
+   (.reading-mode-btn), что в редакторе заметок/ридере книг — приходят деп-ами
+   toggleReadingMode/applyReadingModeVisual из my.js.
    Версия: 2.2 (15.09)
    Вкладка "Поиск" (третья боковая вкладка второго набора,
    settingsTabSet2Btn3 / "set2s_3") — ТЗ пользователя от 08.09. Раньше была
@@ -53,6 +58,12 @@ window.initSearchModule = function(deps){
   var getCheckIcon = deps.getCheckIcon || function(){ return ""; };
   var getMoveIcon = deps.getMoveIcon || function(){ return ""; };
   var getNextIcon = deps.getNextIcon || function(){ return ""; };
+  // Кнопка режима чтения (ТЗ пользователя от 19.09) — та же единая точка
+  // переключения, что у заметок/книг/задач в my.js. Иконку и title кнопке
+  // ставит applyReadingModeVisual (кнопка рендерится пустой, узнаётся по
+  // классу .reading-mode-btn).
+  var toggleReadingMode = deps.toggleReadingMode || function(){};
+  var applyReadingModeVisual = deps.applyReadingModeVisual || function(){};
 
   // ---------------------------------------------------------------------
   // Алгоритм совпадения — см. пояснение в шапке файла. WORD_TOKEN_RE —
@@ -174,6 +185,7 @@ window.initSearchModule = function(deps){
         '</div>' +
       '</div>' +
       '<div class="mdeditor-fab-row">' +
+        '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="searchReadingBtn" title="Режим чтения"></button>' +
         '<button type="button" class="mdeditor-fab-btn" id="searchTasksBtn" title="Поиск по задачам">' + SEARCH_TASKS_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="searchNotesBtn" title="Поиск по заметкам">' + SEARCH_NOTES_ICON_SVG + '</button>' +
       '</div>';
@@ -181,6 +193,14 @@ window.initSearchModule = function(deps){
     var input = document.getElementById("searchQueryInput");
     var tasksBtn = document.getElementById("searchTasksBtn");
     var notesBtn = document.getElementById("searchNotesBtn");
+    var readingBtn = document.getElementById("searchReadingBtn");
+    if(readingBtn){
+      // mousedown с preventDefault — чтобы нажатие не отнимало фокус у поля
+      // поиска (клавиатура не прыгает), как у той же кнопки в заметках/книгах.
+      readingBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+      readingBtn.addEventListener("click", function(){ toggleReadingMode(); });
+    }
+    applyReadingModeVisual();
 
     function runActiveSearch(){
       lastQuery = input.value;

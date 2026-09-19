@@ -1,6 +1,10 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 26.2 (19.09) — layoutSettingsModal: в режиме чтения кнопка-язычок
+   стоит на своём обычном месте (top = высота экрана - ANDROID_NAV_BAR_H, left
+   меряется с временно снятым классом reading-mode-active), а не по низу
+   рамки — раньше при закрытом окне («назад») она оставалась за краем экрана.
    Версия: 26.1 (19.09) — режим чтения: toggleReadingMode пересчитывает подгонку
    кнопок строк задач (refitAllVisibleTaskBodies) — раньше кнопки "плыли" при
    смене ширины области; в deps initSearchModule добавлены toggleReadingMode/
@@ -8035,6 +8039,17 @@
     // тот, чья ширина больше нуля.
     var settingsGearBtn = document.getElementById("settingsGearBtn");
     if(settingsGearBtn){
+      // ТЗ пользователя от 19.09: в режиме чтения кнопка стоит на СВОЁМ
+      // обычном месте (как без режима чтения) — растянутое до низа экрана
+      // окно просто закрывает её собой (пока окно открыто, кнопка ещё и
+      // скрыта, см. modals.css), а когда окно закрыто (например, кнопкой
+      // "назад") — она видна там же, где всегда. Раньше её ставили по
+      // низу рамки: в режиме чтения он равен низу экрана (кнопка уезжала за
+      // экран), а нижний ряд вкладок скрыт (display:none, ширина 0), поэтому
+      // левый край считался от края рамки. Теперь: top — как в обычном
+      // режиме (fabTop), а левый край меряем, на миг сняв класс режима
+      // чтения (без перерисовки — всё в одном синхронном проходе).
+      if(readingFull) settingsModalOverlay.classList.remove("reading-mode-active");
       var frameRect = frame.getBoundingClientRect();
       var gearRow = document.getElementById("settingsTabsGear");
       var gearRow2 = document.getElementById("settingsTabsGearSet2");
@@ -8043,8 +8058,10 @@
         gearRowRect = gearRow2 ? gearRow2.getBoundingClientRect() : null;
       }
       var gearRowRight = (gearRowRect && gearRowRect.width > 0) ? gearRowRect.right : frameRect.left;
+      var fabTopPx = readingFull ? (window.innerHeight - ANDROID_NAV_BAR_H) : frameRect.bottom;
+      if(readingFull) settingsModalOverlay.classList.add("reading-mode-active");
       settingsGearBtn.style.left = Math.round(gearRowRight + 1) + "px";
-      settingsGearBtn.style.top = Math.round(frameRect.bottom) + "px";
+      settingsGearBtn.style.top = Math.round(fabTopPx) + "px";
     }
   }
   function closeSettingsModal(){
