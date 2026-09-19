@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 3.1 (19.09) — пузыри плашки напоминания: высота из переменной --rb (JS ставит её равной высоте кнопок крестик/галочка), размеры иконки/шрифта/овала считаются от неё; плашка позиционируется JS (left/top), затемнения у неё больше нет.
    Версия: 3.0 (19.09) — структурная правка: диалог напоминания (notifications.js) переделан в плашку. Удалены
    .reminder-fields, .reminder-field, .reminder-field-label, .reminder-field-value и правило для p.reminder-error; добавлены
    .app-reminder-bar (модификатор к .app-confirm-bar), .reminder-bubble, .reminder-bubble-date (круглый пузырь даты),
@@ -1271,7 +1272,7 @@
   }
   /* плашка выбора даты и времени (openReminderDialog в notifications.js).
      Класс .app-reminder-bar добавляется к .app-confirm-bar (правый край, над
-     клавиатурой, затемнение .app-confirm-bar-backdrop — всё оттуда). Ряд:
+     клавиатурой — базовые стили оттуда; с 3.1 затемнения нет, left/top ставит JS над кнопкой-часами). Ряд:
      круглый пузырь даты, овальный пузырь времени, крестик и галочка (те же
      .mdeditor-fab-btn, что и у плашки-подтверждения). Пока значение не
      выбрано — в пузыре иконка (обводка); выбрано — заливка цветом темы и
@@ -1288,21 +1289,21 @@
     align-items:center;
     justify-content:center;
     flex-shrink:0;
-    height:40px;
+    height:var(--rb, 32px);
     padding:0;
     border:1.5px solid var(--wood);
     background:var(--parchment);
     color:var(--wood);
     font-family:"Palatino Linotype",Georgia,serif;
-    font-size:16px;
+    font-size:calc(var(--rb, 32px) * .45);
     font-weight:bold;
     line-height:1;
     cursor:pointer;
     -webkit-tap-highlight-color:transparent;
   }
-  .reminder-bubble svg{ width:22px; height:22px; }
-  .reminder-bubble-date{ width:40px; border-radius:50%; }
-  .reminder-bubble-time{ min-width:72px; padding:0 14px; border-radius:20px; }
+  .reminder-bubble svg{ width:calc(var(--rb, 32px) * .58); height:calc(var(--rb, 32px) * .58); }
+  .reminder-bubble-date{ width:var(--rb, 32px); border-radius:50%; }
+  .reminder-bubble-time{ min-width:calc(var(--rb, 32px) * 1.9); padding:0 calc(var(--rb, 32px) * .35); border-radius:calc(var(--rb, 32px) / 2); }
   .reminder-bubble.is-set{
     background:var(--wood);
     color:var(--parchment);

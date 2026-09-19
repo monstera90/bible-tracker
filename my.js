@@ -1,6 +1,8 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 33.1 (19.09) — openTaskReminderDialog передаёт в плашку напоминания
+   якорь anchorEl (кнопка-часы этой задачи), над которым она встаёт.
    Версия: 33.0 (19.09) — структурная правка: единая плашка-подтверждение
    "да/нет" на всё приложение — openAppConfirmBar/closeAppConfirmBar
    (window.AppConfirmBar.open/close для mdeditor.js), заменяет прежнюю
@@ -15633,7 +15635,15 @@
   function openTaskReminderDialog(id, onDone){
     var task = getTaskById(id);
     if(!task) return;
+    // плашка встаёт над часами этой задачи: берём первую ВИДИМУЮ кнопку с её id
+    // (после flushPendingTaskEdits строка могла перерисоваться — ищем заново)
+    var anchorEl = null;
+    var cands = document.querySelectorAll('.task-reminder-btn[data-id="' + id + '"]');
+    for(var i = 0; i < cands.length; i++){
+      if(cands[i].offsetParent !== null){ anchorEl = cands[i]; break; }
+    }
     Notifications.openReminderDialog({
+      anchorEl: anchorEl,
       currentTs: getTaskReminderAt(task),
       onSave: function(ts){ setTaskReminder(id, ts); if(onDone) onDone(); },
       onClear: function(){ clearTaskReminder(id); if(onDone) onDone(); }

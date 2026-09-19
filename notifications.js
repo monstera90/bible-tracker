@@ -1,5 +1,11 @@
 /* ===========================================================================
    notifications.js
+   Версия: 2.1 (19.09) — плашка: высота пузырей = высота кнопок крестик/галочка
+   (замер в момент показа, CSS-переменная --rb); затемнения нет (клик мимо — по
+   документу, гасится и означает отмену); плашка стоит НАД кнопкой-часами задачи
+   (opts.anchorEl из my.js), серединой ровно над ней, смещается только если у
+   края экрана не помещается; следует за прокруткой; нет якоря — как раньше у
+   нижнего края/над клавиатурой.
    Версия: 2.0 (19.09) — структурная правка: диалог напоминания переделан из
    модального окна в компактную плашку (как единая плашка-подтверждение
    openAppConfirmBar в my.js): прижата к правому краю, стоит над клавиатурой
@@ -311,23 +317,45 @@ window.initNotificationsModule = function(deps){
   // те же отступы, что у единой плашки-подтверждения в my.js (openAppConfirmBar)
   var BAR_BOTTOM_NO_KB_PX = 59; // 47px системная плашка + 12px зазор
   var BAR_GAP_PX = 10;          // зазор над клавиатурой
-  var barEl = null, backdropEl = null, barCleanup = null;
+  var barEl = null, barCleanup = null;
 
   function closeBar(){
     if(barCleanup){ barCleanup(); barCleanup = null; }
     if(barEl && barEl.parentNode) barEl.parentNode.removeChild(barEl);
-    if(backdropEl && backdropEl.parentNode) backdropEl.parentNode.removeChild(backdropEl);
     barEl = null;
-    backdropEl = null;
   }
 
-  // по вертикали: над клавиатурой, если она открыта, иначе у нижнего края
-  function placeBar(el){
+  // Положение плашки. Есть якорь (кнопка-часы): середина плашки ровно над
+  // серединой кнопки, смещаем по горизонтали только если у края экрана не
+  // помещается; по вертикали — прямо над кнопкой, а если сверху нет места —
+  // под ней. Якоря нет (или он пропал из DOM) — у нижнего края / над клавиатурой.
+  var EDGE_PX = 8;      // минимальный зазор до края экрана
+  var ANCHOR_GAP_PX = 6;
+  function placeBar(el, anchor){
     var kbTop = (window.AppKeyboard && window.AppKeyboard.getTop) ? window.AppKeyboard.getTop() : null;
-    var bottom = (kbTop != null)
-      ? Math.max(0, window.innerHeight - kbTop) + BAR_GAP_PX
-      : BAR_BOTTOM_NO_KB_PX;
-    el.style.bottom = Math.round(bottom) + "px";
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var limitBottom = (kbTop != null) ? kbTop : vh;
+    var r = (anchor && anchor.isConnected) ? anchor.getBoundingClientRect() : null;
+    if(!r || (r.width === 0 && r.height === 0)){
+      var bottom = (kbTop != null)
+        ? Math.max(0, vh - kbTop) + BAR_GAP_PX
+        : BAR_BOTTOM_NO_KB_PX;
+      el.style.left = "auto";
+      el.style.right = "8px";
+      el.style.top = "auto";
+      el.style.bottom = Math.round(bottom) + "px";
+      return;
+    }
+    var w = el.offsetWidth, h = el.offsetHeight;
+    var left = r.left + r.width / 2 - w / 2;
+    left = Math.max(EDGE_PX, Math.min(left, vw - w - EDGE_PX));
+    var top = r.top - ANCHOR_GAP_PX - h;
+    if(top < EDGE_PX) top = r.bottom + ANCHOR_GAP_PX;               // сверху не влезает — под кнопкой
+    if(top + h > limitBottom - EDGE_PX) top = Math.max(EDGE_PX, limitBottom - EDGE_PX - h);
+    el.style.right = "auto";
+    el.style.bottom = "auto";
+    el.style.left = Math.round(left) + "px";
+    el.style.top = Math.round(top) + "px";
   }
 
   function openNativePicker(input){
@@ -337,7 +365,7 @@ window.initNotificationsModule = function(deps){
     try{ input.focus(); input.click(); }catch(e){}
   }
 
-  // opts: {currentTs (число|null), onSave(ts), onClear()} — onClear сейчас не
+  // opts: {anchorEl (кнопка-часы|null), currentTs (число|null), onSave(ts), onClear()} — onClear сейчас не
   // вызывается (кнопки «Удалить» в плашке нет), оставлен в контракте
   function openReminderDialog(opts){
     closeBar();
@@ -346,12 +374,9 @@ window.initNotificationsModule = function(deps){
     var selDate = hasCurrent ? toDateValue(opts.currentTs) : "";
     var selTime = hasCurrent ? toTimeValue(opts.currentTs) : "";
 
-    backdropEl = document.createElement("div");
-    backdropEl.className = "app-confirm-bar-backdrop";
-    document.body.appendChild(backdropEl);
-
     var bar = document.createElement("div");
     bar.className = "app-confirm-bar app-reminder-bar";
+    var anchor = opts.anchorEl || null;
     bar.setAttribute("role", "dialog");
     bar.innerHTML =
       '<button type="button" class="reminder-bubble reminder-bubble-date" id="mRemDateBtn" title="Дата"></button>' +
@@ -362,6 +387,10 @@ window.initNotificationsModule = function(deps){
       '<input type="time" class="reminder-hidden-input" id="mRemTimeInput" tabindex="-1" aria-hidden="true">';
     document.body.appendChild(bar);
     barEl = bar;
+    // высота пузырей = высота кнопок крестик/галочка (их размер задаёт
+    // .mdeditor-fab-btn в components.css) — замеряем и отдаём в CSS
+    var fabH = bar.querySelector("#mRemCancel").getBoundingClientRect().height;
+    if(fabH > 0) bar.style.setProperty("--rb", Math.round(fabH * 10) / 10 + "px");
 
     var dateBtn = bar.querySelector("#mRemDateBtn");
     var timeBtn = bar.querySelector("#mRemTimeBtn");
@@ -394,26 +423,39 @@ window.initNotificationsModule = function(deps){
       }
       dateBtn.classList.remove("is-invalid");
       timeBtn.classList.remove("is-invalid");
+      if(barEl === bar) placeBar(bar, anchor); // ширина плашки могла измениться
     }
     refresh();
 
-    placeBar(bar);
+    placeBar(bar, anchor);
     var vk = navigator.virtualKeyboard;
-    var onPlace = function(){ placeBar(bar); };
+    var onPlace = function(){ placeBar(bar, anchor); };
     if(vk) vk.addEventListener("geometrychange", onPlace);
     window.addEventListener("resize", onPlace);
+    window.addEventListener("scroll", onPlace, true); // список задач прокручивается — плашка следует за часами
     window.addEventListener("popstate", closeBar);
+    // клик мимо плашки = отмена (как крестик); сам клик гасим, чтобы он не
+    // сработал на том, что под пальцем. Подключаем на следующем такте: клик,
+    // открывший плашку, ещё не закончил распространяться
+    var onOutside = function(e){
+      if(bar.contains(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeBar();
+    };
+    var outsideTimer = setTimeout(function(){ document.addEventListener("click", onOutside, true); }, 0);
     barCleanup = function(){
+      clearTimeout(outsideTimer);
+      document.removeEventListener("click", onOutside, true);
       if(vk) vk.removeEventListener("geometrychange", onPlace);
       window.removeEventListener("resize", onPlace);
+      window.removeEventListener("scroll", onPlace, true);
       window.removeEventListener("popstate", closeBar);
     };
 
-    // нажатие на плашку/затемнение не отнимает фокус у поля задачи (иначе
-    // клавиатура закроется и плашка «поедет»)
+    // нажатие на плашку не отнимает фокус у поля задачи (иначе клавиатура
+    // закроется и всё «поедет»)
     bar.addEventListener("mousedown", function(e){ e.preventDefault(); });
-    backdropEl.addEventListener("mousedown", function(e){ e.preventDefault(); });
-    backdropEl.addEventListener("click", closeBar);
     bar.querySelector("#mRemCancel").addEventListener("click", closeBar);
 
     dateBtn.addEventListener("click", function(){ openNativePicker(dateInput); });
