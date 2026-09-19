@@ -1,6 +1,10 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 26.1 (19.09) — режим чтения: toggleReadingMode пересчитывает подгонку
+   кнопок строк задач (refitAllVisibleTaskBodies) — раньше кнопки "плыли" при
+   смене ширины области; в deps initSearchModule добавлены toggleReadingMode/
+   applyReadingModeVisual (под кнопку на вкладке "Поиск").
    Версия: 26.0 (19.09) — структурная правка: новая функция toggleReadingMode
    (единая точка переключения режима чтения; applyReadingModeVisual теперь
    обновляет все кнопки с классом .reading-mode-btn). Кнопка режима чтения
@@ -6132,7 +6136,13 @@
     getPencilIcon: function(){ return PENCIL_ICON_SVG; },
     getCheckIcon: function(){ return CHECK_ICON_SVG; },
     getMoveIcon: function(){ return ARROW_MOVE_ICON_SVG; },
-    getNextIcon: function(){ return LINK_NEXT_ICON_SVG; }
+    getNextIcon: function(){ return LINK_NEXT_ICON_SVG; },
+    // кнопка режима чтения на вкладке "Поиск" (ТЗ пользователя от 19.09) —
+    // тот же переключатель и та же иконка (.reading-mode-btn), что в
+    // редакторе заметок/ридере книг, см. toggleReadingMode ниже по файлу
+    // (function-декларации, поднимаются в начало IIFE).
+    toggleReadingMode: toggleReadingMode,
+    applyReadingModeVisual: applyReadingModeVisual
   });
   var renderSettingsTabSearch = Search.renderSettingsTabSearch;
 
@@ -15041,6 +15051,15 @@
     setReadingModeActive(!getReadingModeActive());
     applyReadingModeVisual();
     layoutSettingsModal();
+    // ТЗ пользователя от 19.09 ("в режиме чтения плывут кнопки"): ряды
+    // вкладок прячутся/показываются и область содержимого меняет ШИРИНУ без
+    // события window.resize — а подгонка кнопок строк задач (fitTaskActions)
+    // считается по ширине строки и раньше пересчитывалась только на resize/
+    // смене размера шрифта, поэтому кнопки оставались там, где были при
+    // старой ширине (уезжали на соседнюю строку). Пересчитываем сразу и ещё
+    // раз в следующий кадр — на случай, если браузер довёл раскладку позже.
+    refitAllVisibleTaskBodies();
+    if(window.requestAnimationFrame) window.requestAnimationFrame(refitAllVisibleTaskBodies);
   }
   function setTaskText(id, text){
     var task = getTaskById(id);
