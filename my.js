@@ -1,17 +1,57 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 25.2 (19.09) — ИСПРАВЛЕНИЕ в doCloudSync (найдено по журналу
-   отладки устройства А): «повторный цикл, если за время синхронизации набежала
-   правка» (pendingPushAfterSync) не срабатывал НИКОГДА — из ветки «synced»
-   вызывался scheduleCloudPush(), но syncInProgress сбрасывается только в
-   .finally(), которое выполняется ПОСЛЕ этой ветки, поэтому scheduleCloudPush
-   видел «цикл ещё идёт», снова взводил флаг и выходил, ничего не запланировав.
-   Итог: правка, сделанная во время идущего цикла (например, текст новой задачи
-   по blur, пока цикл на 7,5 с отправляет её пустую версию), оставалась только
-   на устройстве до следующего события. Теперь таймер повторного цикла
-   ставится напрямую (setTimeout(doCloudSync, PUSH_DEBOUNCE_MS)) — к моменту его
-   срабатывания .finally() уже отработало. В журнал добавлен размер дельты.
+   Версия: 29.0 (19.09) — структурная правка: (1) вкладка «Комментарии» — то же
+   поведение, что у задач (по возрастанию/новый внизу, открывается снизу,
+   подъём над клавиатурой; migrateCommentsScrollToBottomFirst); (2) крестик
+   «удалить задачу» с подтверждением слева от карандаша во всех строках задач
+   (taskDeleteBtnHtml/bindTaskDeleteBtn/openTaskDeleteConfirm/
+   closeTaskDeleteConfirm; плашка над клавиатурой, window.AppKeyboard.getTop);
+   (3) initTaskKeyboardLift возвращён к версии 28.0 (проверена пользователем),
+   28.1 (якорь оверлея) откатана.
+   Версия: 28.1 (19.09) — initTaskKeyboardLift переделан по скриншоту пользователя
+   (окно сжималось до верха клавиатуры, вкладки вставали над ней): к
+   overlaysContent добавлен «якорь» оверлея (фикс. высота на время ввода) и
+   расчёт верха клавиатуры без VirtualKeyboard API; всё снимается только когда
+   клавиатура убрана; в журнал отладки пишется «kbLift: …».
+   Версия: 28.0 (19.09) — структурная правка: (1) списки задач по createdAt по
+   ВОЗРАСТАНИЮ — новая задача внизу (getTasksForTab/getGroupTasksForTab,
+   moveTaskToEdge «в начало/в конец» поменяны местами, вставка в «+»); (2) вкладки
+   задач (кроме архива) без сохранённой позиции открываются снизу
+   (restoreTabScroll), разовый сброс старых позиций (migrateTaskTabScrollToBottomFirst,
+   ключ taskListOrderAsc_v1); (3) initTaskKeyboardLift — поле задачи поднимается
+   над клавиатурой без сдвига вкладок (virtualKeyboard.overlaysContent + boundingRect).
+   Версия: 27.0 (19.09) — структурная правка: клик по язычку больше не связан с
+   режимом чтения; новая кнопка режима чтения #readingModeFabBtn слева от язычка
+   (initReadingModeFab; видна при включённом режиме чтения и закрытом окне,
+   позиция — layoutSettingsModal, показ — applyReadingModeVisual). Диагностика
+   26.4 убрана. Исправлено: get/setReadingModeActive читали localStorage по
+   ключу undefined при стартовом вызове (var READING_MODE_KEY ниже по файлу).
+   Версия: 26.4 (19.09) — только диагностика (Debug.log): клик по язычку, открытие окна,
+   включение режима чтения (со стеком) — для бага «язычок не выключает режим чтения».
+   Версия: 26.3 (19.09) — клик по кнопке-язычку (settingsGearBtn) выключает режим чтения.
+   Версия: 26.2 (19.09) — layoutSettingsModal: в режиме чтения кнопка-язычок
+   стоит на своём обычном месте (top = высота экрана - ANDROID_NAV_BAR_H, left
+   меряется с временно снятым классом reading-mode-active), а не по низу
+   рамки — раньше при закрытом окне («назад») она оставалась за краем экрана.
+   Версия: 26.1 (19.09) — режим чтения: toggleReadingMode пересчитывает подгонку
+   кнопок строк задач (refitAllVisibleTaskBodies) — раньше кнопки "плыли" при
+   смене ширины области; в deps initSearchModule добавлены toggleReadingMode/
+   applyReadingModeVisual (под кнопку на вкладке "Поиск").
+   Версия: 26.0 (19.09) — структурная правка: новая функция toggleReadingMode
+   (единая точка переключения режима чтения; applyReadingModeVisual теперь
+   обновляет все кнопки с классом .reading-mode-btn). Кнопка режима чтения
+   добавлена в нижний ряд ридера книг (между Flibusta и "Аа") и, через deps
+   toggleReadingMode/applyReadingModeVisual, в редактор заметок (mdeditor.js).
+   Версия: 25.3 (19.09) — режим чтения на весь экран (ТЗ пользователя):
+   layoutSettingsModal не резервирует нижние 47px, если на оверлее включён
+   reading-mode-active; клик по кнопке режима чтения пересчитывает высоту
+   окна сразу. Кнопка-язычок прячется в modals.css.
+   Версия: 25.2 (19.09) — ряд кнопок задач под 7px (ТЗ пользователя): на экране
+   "Все задачи проекта" добавлена кнопка режима чтения ("полноэкранный
+   режим"), "i" сдвигается левее кнопки-контекста (класс task-info-wrap-far,
+   syncTaskFabRowForTab/openTaskNextPicker); вкладка "Книги" получила класс
+   books-list-tab (кнопка импорта прижата к низу). Логика данных не менялась.
    Версия: 25.1 (19.09) — только диагностика (в журнал отладки, логика не
    менялась) после ручной проверки Шага 3: doCloudSync пишет старт/время/итог/
    ОШИБКУ (раньше ошибка шла только в console.error, а в журнал — нет), какие
@@ -2009,9 +2049,10 @@
     // applyReadingModeVisual/READING_MODE_KEY выше) — тем же условием,
     // что и "i" выше: видна на ЛЮБОЙ вкладке задач. Экран "Все задачи
     // проекта" (openTaskNextPicker ниже) syncTaskFabRowForTab не
-    // вызывает при входе, поэтому там эта кнопка прячется явно, отдельной
-    // строкой в самом openTaskNextPicker (слот right:248 там занят
-    // кнопкой-звеном, .task-project-fab-link).
+    // вызывает при входе, поэтому там эта кнопка (как и "i") включается
+    // явно, отдельными строками в самом openTaskNextPicker (с 19.09 —
+    // ТЗ пользователя: кнопка режима чтения показывается и там, звенья
+    // стоят левее неё, right:280 в modals.css).
     var readingWrap = document.getElementById("taskReadingWrap");
     if(readingWrap) readingWrap.classList.toggle("visible", showTaskFab);
     // "глаз" (скрыть задачи, привязанные к проектам, см.
@@ -2033,6 +2074,17 @@
     // .task-red-sort-wrap), видна только на самой вкладке "Red".
     var redSortWrap = document.getElementById("taskRedSortWrap");
     if(redSortWrap) redSortWrap.classList.toggle("visible", tab === "red");
+    // ТЗ пользователя от 19.09: на вкладках, где есть своя кнопка-контекст
+    // ("глаз" на Next, сортировка на Red, меню на "Общих задачах"), она
+    // стоит рядом с кнопкой режима чтения, а "i" — левее неё (см.
+    // .task-info-wrap-far в modals.css). На остальных вкладках задач "i"
+    // остаётся рядом с режимом чтения, без дырки в ряду. Ставим явно
+    // булевым toggle — при любом выходе с экрана "Все задачи проекта"
+    // (там класс включает openTaskNextPicker) он сбрасывается сам.
+    if(infoWrap){
+      infoWrap.classList.toggle("task-info-wrap-far",
+        tab === "next" || tab === "red" || tab === "jointtasks");
+    }
 
     // Заглушка-домик — на любой вкладке задач с рядом кнопок (не на
     // карточке проекта: там openTaskNextPicker рисует свою, кликабельную
@@ -2420,6 +2472,8 @@
     var visible = isSettingsFabVisible();
     var fab = document.getElementById("settingsGearBtn");
     if(fab) fab.style.display = visible ? "" : "none";
+    var readingFab = document.getElementById("readingModeFabBtn");
+    if(readingFab) readingFab.style.display = (visible && getReadingModeActive()) ? "" : "none";
     var toggleBtn = document.getElementById("fabToggleBtn");
     if(toggleBtn) toggleBtn.textContent = visible ? "Убрать плавающую кнопку" : "Включить плавающую кнопку";
   }
@@ -4140,7 +4194,7 @@
       if(window.Debug){
         var deltaKeys = cloudDelta ? Object.keys(cloudDelta) : [];
         var deltaTaskKeys = deltaKeys.filter(function(k){ return k.indexOf("task:") === 0; });
-        window.Debug.log("doCloudSync: слияние — локально изменилось=" + localChanged + ", в облако уйдёт ключей=" + deltaKeys.length + " (~" + (cloudDelta ? JSON.stringify(cloudDelta).length : 0) + " симв.; из них task:=" + deltaTaskKeys.length + (deltaTaskKeys.length ? ": " + deltaTaskKeys.slice(0, 5).join(", ") : "") + ")");
+        window.Debug.log("doCloudSync: слияние — локально изменилось=" + localChanged + ", в облако уйдёт ключей=" + deltaKeys.length + " (из них task:=" + deltaTaskKeys.length + (deltaTaskKeys.length ? ": " + deltaTaskKeys.slice(0, 5).join(", ") : "") + ")");
       }
       state = merged;
       if(localChanged){
@@ -4176,15 +4230,7 @@
       // время сбоя сети.
       if(pendingPushAfterSync){
         pendingPushAfterSync = false;
-        // ВАЖНО: scheduleCloudPush() отсюда звать нельзя — syncInProgress
-        // здесь ещё true (сбрасывается в .finally() ниже, оно выполняется
-        // ПОСЛЕ этой ветки), и scheduleCloudPush снова взвела бы флаг и
-        // вышла, ничего не запланировав (правка так и оставалась на
-        // устройстве). Ставим таймер сами: к его срабатыванию finally уже
-        // отработало, и doCloudSync не выйдет по syncInProgress.
-        if(window.Debug) window.Debug.log("doCloudSync: за время цикла были новые правки — повторный цикл через " + PUSH_DEBOUNCE_MS + " мс");
-        clearTimeout(pushTimer);
-        pushTimer = setTimeout(doCloudSync, PUSH_DEBOUNCE_MS);
+        scheduleCloudPush();
       }
     }).catch(function(err){
       console.error("Ошибка синхронизации:", err);
@@ -4992,7 +5038,7 @@
   }
   function getGroupTasksForTab(){
     return getAllGroupTasks().filter(function(t){ return t.c.checked !== true; })
-      .sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
+      .sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
   }
   function createGroupTask(){
     var id = genGroupTaskId();
@@ -6009,6 +6055,10 @@
     // IIFE), поэтому ссылаться на неё здесь, до её текстового объявления,
     // безопасно.
     refitAllVisibleTaskBodies: refitAllVisibleTaskBodies,
+    // кнопка режима чтения в редакторе заметки (ТЗ пользователя от 19.09) —
+    // обе function-декларации, поднимаются в начало IIFE (как выше).
+    toggleReadingMode: toggleReadingMode,
+    applyReadingModeVisual: applyReadingModeVisual,
     // закладки "Моих заметок" — теперь синхронизируются в облаке через
     // тот же state/saveLocalState/scheduleCloudPush, что и остальные
     // данные приложения (см. getSyncedBookmarkNames/setSyncedBookmark
@@ -6121,7 +6171,14 @@
     getPencilIcon: function(){ return PENCIL_ICON_SVG; },
     getCheckIcon: function(){ return CHECK_ICON_SVG; },
     getMoveIcon: function(){ return ARROW_MOVE_ICON_SVG; },
-    getNextIcon: function(){ return LINK_NEXT_ICON_SVG; }
+    getNextIcon: function(){ return LINK_NEXT_ICON_SVG; },
+    getCrossIcon: function(){ return CROSS_SMALL_ICON_SVG; },
+    // кнопка режима чтения на вкладке "Поиск" (ТЗ пользователя от 19.09) —
+    // тот же переключатель и та же иконка (.reading-mode-btn), что в
+    // редакторе заметок/ридере книг, см. toggleReadingMode ниже по файлу
+    // (function-декларации, поднимаются в начало IIFE).
+    toggleReadingMode: toggleReadingMode,
+    applyReadingModeVisual: applyReadingModeVisual
   });
   var renderSettingsTabSearch = Search.renderSettingsTabSearch;
 
@@ -6355,17 +6412,19 @@
     // --- кнопка режима чтения (ТЗ пользователя от 18.09) — см.
     // READING_MODE_KEY/getReadingModeActive/setReadingModeActive/
     // applyReadingModeVisual выше. Видна на любой вкладке задач (тем же
-    // условием showTaskFab, что и "i" выше), кроме экрана "Все задачи
-    // проекта" (там слот занят кнопкой-звеном, см. openTaskNextPicker
-    // ниже). Глобальный флаг — переключается здесь, но действует
-    // одинаково на любом экране приложения, не только на вкладках задач.
+    // условием showTaskFab, что и "i" выше), а с 19.09 и на экране "Все
+    // задачи проекта" (см. openTaskNextPicker ниже — там её включает
+    // openTaskNextPicker, звенья стоят левее). Глобальный флаг —
+    // переключается здесь, но действует одинаково на любом экране
+    // приложения, не только на вкладках задач.
     var readingBtn = document.getElementById("taskReadingBtn");
     stopMousedown(readingBtn);
     applyReadingModeVisual();
     if(readingBtn){
       readingBtn.addEventListener("click", function(){
-        setReadingModeActive(!getReadingModeActive());
-        applyReadingModeVisual();
+        // toggleReadingMode (ниже по файлу) заодно пересчитывает высоту окна
+        // — в режиме чтения оно занимает весь экран до нижнего края.
+        toggleReadingMode();
       });
     }
 
@@ -7927,8 +7986,15 @@
     // полоса от y=670 до нижнего края кадра (y=718) — ровно 48px. На
     // это же число теперь и поднимаем fabTop, чтобы кнопка (и низ окна)
     // всегда стояли выше этой плашки, а не под ней.
+    // Режим чтения (ТЗ пользователя от 19.09): окно растягивается до самого
+    // нижнего края экрана, а кнопка-язычок под ним скрыта (см. modals.css) —
+    // поэтому запас под неё/системную плашку (ANDROID_NAV_BAR_H ниже) в этом
+    // режиме не резервируем. Признак берём с самого оверлея (класс ставит
+    // applyReadingModeVisual), а не из localStorage — так расчёт не зависит
+    // от порядка инициализации переменных файла.
+    var readingFull = !!(settingsModalOverlay && settingsModalOverlay.classList.contains("reading-mode-active"));
     var ANDROID_NAV_BAR_H = 47; // px, замерено по скриншоту пользователя + 20px, чтобы поднять кнопку-язычок (.settings-fab) выше; уменьшено на 15px, затем поднято на 2px, затем опущено ещё на 8px (вместе с рядами вкладок и кнопкой — см. .settings-tabs/.settings-tabs-gear в modals.css), чтобы у окна не было "дыры" между его нижним краем и рядами
-    var fabTop = window.innerHeight - ANDROID_NAV_BAR_H;
+    var fabTop = window.innerHeight - (readingFull ? 0 : ANDROID_NAV_BAR_H);
     var minTop = naturalTop; // не даём окну вылезти выше верхнего края оверлея
     // Высота окна больше не фиксируется числом (раньше — 658px, WINDOW_H):
     // окно всегда растягивается на всё доступное место между верхом
@@ -8005,6 +8071,17 @@
     // тот, чья ширина больше нуля.
     var settingsGearBtn = document.getElementById("settingsGearBtn");
     if(settingsGearBtn){
+      // ТЗ пользователя от 19.09: в режиме чтения кнопка стоит на СВОЁМ
+      // обычном месте (как без режима чтения) — растянутое до низа экрана
+      // окно просто закрывает её собой (пока окно открыто, кнопка ещё и
+      // скрыта, см. modals.css), а когда окно закрыто (например, кнопкой
+      // "назад") — она видна там же, где всегда. Раньше её ставили по
+      // низу рамки: в режиме чтения он равен низу экрана (кнопка уезжала за
+      // экран), а нижний ряд вкладок скрыт (display:none, ширина 0), поэтому
+      // левый край считался от края рамки. Теперь: top — как в обычном
+      // режиме (fabTop), а левый край меряем, на миг сняв класс режима
+      // чтения (без перерисовки — всё в одном синхронном проходе).
+      if(readingFull) settingsModalOverlay.classList.remove("reading-mode-active");
       var frameRect = frame.getBoundingClientRect();
       var gearRow = document.getElementById("settingsTabsGear");
       var gearRow2 = document.getElementById("settingsTabsGearSet2");
@@ -8013,11 +8090,20 @@
         gearRowRect = gearRow2 ? gearRow2.getBoundingClientRect() : null;
       }
       var gearRowRight = (gearRowRect && gearRowRect.width > 0) ? gearRowRect.right : frameRect.left;
+      var fabTopPx = readingFull ? (window.innerHeight - ANDROID_NAV_BAR_H) : frameRect.bottom;
+      if(readingFull) settingsModalOverlay.classList.add("reading-mode-active");
       settingsGearBtn.style.left = Math.round(gearRowRight + 1) + "px";
-      settingsGearBtn.style.top = Math.round(frameRect.bottom) + "px";
+      settingsGearBtn.style.top = Math.round(fabTopPx) + "px";
+      // кнопка режима чтения — вплотную слева от язычка (45px + зазор 1px)
+      var readingFabBtn = document.getElementById("readingModeFabBtn");
+      if(readingFabBtn){
+        readingFabBtn.style.left = Math.round(gearRowRight + 1 - 46) + "px";
+        readingFabBtn.style.top = Math.round(fabTopPx) + "px";
+      }
     }
   }
   function closeSettingsModal(){
+    closeTaskDeleteConfirm();
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
@@ -8103,7 +8189,31 @@
   }
   // Вкладки, для которых scrollTop не сбрасывается в 0 при переключении, а
   // восстанавливается из tabScrollPercents (см. switchSettingsTab ниже).
-  var TAB_SCROLL_AUTO_TABS = Object.keys(TASK_TAB_IDS).concat(["set2s_7"]);
+  var TAB_SCROLL_AUTO_TABS = Object.keys(TASK_TAB_IDS).concat(["set2s_7", "extra2"]);
+  // Разовый сброс запомненных позиций вкладок задач (19.09): порядок списков
+  // перевернули (новые внизу), старые проценты относились к прежнему порядку —
+  // после сброса каждая вкладка один раз откроется снизу, дальше как обычно.
+  (function migrateTaskTabScrollToBottomFirst(){
+    var FLAG = "taskListOrderAsc_v1";
+    try{
+      if(localStorage.getItem(FLAG) === "1") return;
+      Object.keys(TASK_TAB_IDS).forEach(function(k){ delete tabScrollPercents[k]; });
+      localStorage.setItem(TAB_SCROLL_STATE_KEY, JSON.stringify(tabScrollPercents));
+      localStorage.setItem(FLAG, "1");
+    }catch(e){}
+  })();
+  // то же для вкладки «Комментарии» (extra2): порядок перевернули, а старая
+  // запомненная позиция там могла быть записана слушателем скролла (он пишет
+  // позицию для любой вкладки)
+  (function migrateCommentsScrollToBottomFirst(){
+    var FLAG = "commentsOrderAsc_v1";
+    try{
+      if(localStorage.getItem(FLAG) === "1") return;
+      delete tabScrollPercents["extra2"];
+      localStorage.setItem(TAB_SCROLL_STATE_KEY, JSON.stringify(tabScrollPercents));
+      localStorage.setItem(FLAG, "1");
+    }catch(e){}
+  })();
   function initTabScrollTracking(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -8125,8 +8235,25 @@
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     var pct = tabScrollPercents[tab];
+    // ТЗ пользователя от 19.09: у вкладок задач (кроме архива — там порядок
+    // «новые сверху» по дате выполнения) без сохранённой позиции список
+    // открывается СНИЗУ (новые задачи теперь в конце); сохранённая позиция
+    // работает как раньше.
+    var defaultBottom = (pct == null) && ((TASK_TAB_IDS.hasOwnProperty(tab) && tab !== "archive") || tab === "extra2");
     requestAnimationFrame(function(){
       var max = container.scrollHeight - container.clientHeight;
+      if(defaultBottom){
+        container.scrollTop = max > 0 ? max : 0;
+        // картинки задач подгружаются чуть позже и меняют высоту — если
+        // пользователь ещё ничего не листал, доводим до нового низа
+        var setTo = container.scrollTop;
+        setTimeout(function(){
+          if(Math.abs(container.scrollTop - setTo) > 1) return;
+          var max2 = container.scrollHeight - container.clientHeight;
+          if(max2 > setTo) container.scrollTop = max2;
+        }, 250);
+        return;
+      }
       container.scrollTop = (pct && max > 0) ? pct * max : 0;
     });
   }
@@ -8148,6 +8275,7 @@
     var isRealSwitch = settingsWasOpen && prevTab !== tab && !suppressNavPush;
 
     currentSettingsTab = tab;
+    closeTaskDeleteConfirm();
     // "Отвязываем" ссылку на предыдущий рендер экрана "Все задачи проекта"
     // от rerenderAllFromState (activeProjectPickerRerender выше) — она
     // валидна только пока этот экран РЕАЛЬНО показан в #settingsTabContent.
@@ -8340,7 +8468,8 @@
     // там свой, отдельный скролл-контейнер #taskProjectArea (не
     // #settingsTabContent), с собственной памятью позиции (см.
     // openTaskNextPicker/getSavedProjectScrollTop).
-    if(TASK_TAB_IDS.hasOwnProperty(tab) && !(tab === "projects" && activeProjectPickerId)) restoreTabScroll(tab);
+    if((TASK_TAB_IDS.hasOwnProperty(tab) && !(tab === "projects" && activeProjectPickerId)) ||
+       (tab === "extra2" && getCustomCommentsEnabled())) restoreTabScroll(tab);
 
     if(isRealSwitch && window.AppNav){
       window.AppNav.push(function(){
@@ -10035,7 +10164,7 @@
     syncFileRegistry("books");
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
-    var html = '<div class="mdeditor-tab">';
+    var html = '<div class="mdeditor-tab books-list-tab">';
     html += '<h3 class="common-tab-title">Книги</h3>';
     html += '<div class="mdeditor-list mdeditor-list-grid" id="booksList"></div>';
     html += '<div class="mdeditor-status" id="booksStatus"></div>';
@@ -10680,6 +10809,7 @@
       '<div class="mdeditor-status" id="bookReaderStatus"></div>' +
       '<div class="mdeditor-fab-row">' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderFlibustaBtn" title="Flibusta">' + READER_FLIBUSTA_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="bookReaderReadingBtn" title="Режим чтения"></button>' +
         '<span class="mdeditor-fontsize-wrap" id="bookReaderFontSizeWrap">' +
           '<div class="mdeditor-fontsize-popup" id="bookReaderFontSizePopup">' +
             '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontPlusBtn" title="Крупнее">+</button>' +
@@ -10778,6 +10908,18 @@
     if(flibustaBtn){
       flibustaBtn.addEventListener("click", function(){ Flibusta.openFlibustaCatalog(); });
     }
+
+    // Кнопка режима чтения (ТЗ пользователя от 19.09) — между Flibusta и
+    // "Аа", тот же переключатель, что и на вкладках задач/в редакторе
+    // заметки (toggleReadingMode). mousedown с preventDefault — как у
+    // "Выделения" выше: клик не должен сбрасывать выделение текста книги.
+    // Иконку/title ставит applyReadingModeVisual (кнопка рендерится пустой).
+    var readingBtn = document.getElementById("bookReaderReadingBtn");
+    if(readingBtn){
+      readingBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+      readingBtn.addEventListener("click", function(){ toggleReadingMode(); });
+    }
+    applyReadingModeVisual();
   }
 
   function renderBookReaderText(container){
@@ -13026,6 +13168,27 @@
     });
   }
 
+  // Кнопка режима чтения слева от язычка (ТЗ пользователя от 19.09): клик по
+  // самому язычку с режимом чтения больше не связан. Стиль — тот же класс
+  // .settings-fab (размер, прозрачность, цвет), плюс .reading-mode-fab
+  // (размер пиктограммы, modals.css). Пока окно открыто в режиме чтения,
+  // её (как и язычок) закрывает окно/прячет CSS; когда окно закрыто (в т.ч.
+  // системным «назад») — видна. Клик выключает режим чтения, и applyReading-
+  // ModeVisual тут же прячет кнопку. Положение — layoutSettingsModal.
+  (function initReadingModeFab(){
+    if(document.getElementById("readingModeFabBtn")) return;
+    var b = document.createElement("button");
+    b.type = "button";
+    b.id = "readingModeFabBtn";
+    b.className = "settings-fab reading-mode-fab";
+    b.title = "Выключить режим чтения";
+    b.style.display = "none";
+    b.innerHTML = READING_BOOK_ICON_SVG;
+    b.addEventListener("click", function(){ toggleReadingMode(); });
+    document.body.appendChild(b);
+    applyReadingModeVisual();
+  })();
+
   // Ставим язычок-кнопку в угол окна настроек сразу при загрузке страницы
   // (а не только при первом открытии окна) и держим его там при ресайзе/
   // повороте экрана — см. layoutSettingsModal выше.
@@ -14897,7 +15060,7 @@
       return getAllTasks().filter(function(t){
         if(t.c.checked === true) return false;
         return t.c.tab === "worktasks" || getTaskWorkState(t) !== "off";
-      }).sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
+      }).sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
     }
     if(tab === "red"){
       // витрина: любая незакрытая задача с красной/жёлтой отметкой, из
@@ -14918,15 +15081,15 @@
           var pa = a.c.flag === "red" ? 0 : 1;
           var pb = b.c.flag === "red" ? 0 : 1;
           if(pa !== pb) return pa - pb;
-          return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t);
+          return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t);
         });
       } else {
-        redList.sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
+        redList.sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
       }
       return redList;
     }
     return getAllTasks().filter(function(t){ return t.c.tab === tab && t.c.checked !== true; })
-      .sort(function(a,b){ return (b.c.createdAt != null ? b.c.createdAt : b.t) - (a.c.createdAt != null ? a.c.createdAt : a.t); });
+      .sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
   }
   function getArchivedTasksAll(){
     return getAllTasks().filter(function(t){ return t.c.checked === true; })
@@ -14968,11 +15131,16 @@
   // перезагрузку страницы (localStorage), как и соседний
   // NEXT_HIDE_LINKED_KEY выше.
   var READING_MODE_KEY = "bibleReadingMode_v1";
+  // Ключ — литерал внутри функций, а не READING_MODE_KEY: initTaskGlobalToolbar
+  // (и applyReadingModeVisual в нём) вызывается при старте РАНЬШЕ, чем
+  // выполнится строка var READING_MODE_KEY выше (var не поднимается вместе со
+  // значением) — тогда стартовое применение читало localStorage по ключу
+  // undefined и режим чтения на загрузке не подхватывался.
   function getReadingModeActive(){
-    try{ return localStorage.getItem(READING_MODE_KEY) === "1"; }catch(e){ return false; }
+    try{ return localStorage.getItem("bibleReadingMode_v1") === "1"; }catch(e){ return false; }
   }
   function setReadingModeActive(val){
-    try{ localStorage.setItem(READING_MODE_KEY, val ? "1" : "0"); }catch(e){}
+    try{ localStorage.setItem("bibleReadingMode_v1", val ? "1" : "0"); }catch(e){}
   }
   // Применяет текущее состояние режима чтения к разметке: класс на
   // оверлее (CSS прячет ряды вкладок и обнуляет отступы под них, см.
@@ -14986,11 +15154,42 @@
     var active = getReadingModeActive();
     var overlay = document.getElementById("settingsModalOverlay");
     if(overlay) overlay.classList.toggle("reading-mode-active", active);
+    // Кнопка режима чтения слева от язычка (readingModeFabBtn, ТЗ от 19.09):
+    // существует всегда, пока режим чтения включён (и язычок вообще показан);
+    // пока окно открыто, её закрывает растянутое окно/прячет modals.css.
+    var readingFab = document.getElementById("readingModeFabBtn");
+    if(readingFab) readingFab.style.display = (active && isSettingsFabVisible()) ? "" : "none";
     var btn = document.getElementById("taskReadingBtn");
     if(btn){
       btn.innerHTML = active ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG;
       btn.title = active ? "Выключить режим чтения" : "Включить режим чтения";
     }
+    // Те же кнопки в нижних рядах редактора заметки (mdeditor.js) и ридера
+    // книг (bookReaderFabRowHtml) — ТЗ пользователя от 19.09; узнаются по
+    // классу .reading-mode-btn, рендерятся пустыми, иконку/title ставит эта
+    // функция (одно место на все кнопки режима чтения).
+    Array.prototype.forEach.call(document.querySelectorAll(".reading-mode-btn"), function(b){
+      b.innerHTML = active ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG;
+      b.title = active ? "Выключить режим чтения" : "Включить режим чтения";
+    });
+  }
+  // Единая точка переключения режима чтения — вкладки задач, редактор
+  // заметки и ридер книг зовут её же: флаг + класс на оверлее/иконки +
+  // пересчёт высоты окна (в режиме чтения окно до нижнего края экрана,
+  // см. layoutSettingsModal).
+  function toggleReadingMode(){
+    setReadingModeActive(!getReadingModeActive());
+    applyReadingModeVisual();
+    layoutSettingsModal();
+    // ТЗ пользователя от 19.09 ("в режиме чтения плывут кнопки"): ряды
+    // вкладок прячутся/показываются и область содержимого меняет ШИРИНУ без
+    // события window.resize — а подгонка кнопок строк задач (fitTaskActions)
+    // считается по ширине строки и раньше пересчитывалась только на resize/
+    // смене размера шрифта, поэтому кнопки оставались там, где были при
+    // старой ширине (уезжали на соседнюю строку). Пересчитываем сразу и ещё
+    // раз в следующий кадр — на случай, если браузер довёл раскладку позже.
+    refitAllVisibleTaskBodies();
+    if(window.requestAnimationFrame) window.requestAnimationFrame(refitAllVisibleTaskBodies);
   }
   function setTaskText(id, text){
     var task = getTaskById(id);
@@ -15092,9 +15291,11 @@
     var edgeKey = all.reduce(function(acc, t){
       if(t.id === id) return acc;
       var k = keyOf(t);
-      return edge === "top" ? Math.max(acc, k) : Math.min(acc, k);
+      // с 19.09 списки идут по createdAt по ВОЗРАСТАНИЮ (новые задачи внизу):
+      // «в начало» — меньше минимума, «в конец» — больше максимума
+      return edge === "top" ? Math.min(acc, k) : Math.max(acc, k);
     }, keyOf(task));
-    task.c.createdAt = edge === "top" ? edgeKey + 1 : edgeKey - 1;
+    task.c.createdAt = edge === "top" ? edgeKey - 1 : edgeKey + 1;
     saveTaskData(id, task.c);
   }
   // цветная отметка слева от чекбокса. ИЗМЕНЕНО (ТЗ пользователя от
@@ -15310,10 +15511,12 @@
     // поле last-write-wins для облачного слияния (см. saveCommentData) —
     // искусственно двигать его в прошлое/будущее ради одной лишь
     // перестановки в списке было бы небезопасно для синхронизации.
+    // С 19.09 (ТЗ пользователя, как у задач) — по ВОЗРАСТАНИЮ: новый/
+    // изменённый комментарий внизу списка.
     list.sort(function(a,b){
       var oa = a.c.orderKey != null ? a.c.orderKey : a.t;
       var ob = b.c.orderKey != null ? b.c.orderKey : b.t;
-      return ob - oa;
+      return oa - ob;
     });
     return list;
   }
@@ -15361,9 +15564,10 @@
     var edgeKey = all.reduce(function(acc, c){
       if(c.id === id) return acc;
       var k = keyOf(c);
-      return edge === "top" ? Math.max(acc, k) : Math.min(acc, k);
+      // список по возрастанию (19.09): «в начало» — меньше минимума
+      return edge === "top" ? Math.min(acc, k) : Math.max(acc, k);
     }, keyOf(comment));
-    comment.c.orderKey = edge === "top" ? edgeKey + 1 : edgeKey - 1;
+    comment.c.orderKey = edge === "top" ? edgeKey - 1 : edgeKey + 1;
     saveCommentData(id, comment.c);
   }
   // безвозвратное удаление — не трогает уже сделанную копию в "Карте дней
@@ -15565,11 +15769,18 @@
           if(emptyMsg) emptyMsg.remove();
           var holder = document.createElement("div");
           holder.innerHTML = buildCommentRowHtml(getCommentById(id));
-          wrap.insertBefore(holder.firstChild, wrap.firstChild);
+          // ТЗ 19.09: новый комментарий — в КОНЕЦ списка (перед распоркой)
+          wrap.insertBefore(holder.firstChild, wrap.querySelector(".task-list-bottom-spacer"));
+          var commentScroller = document.getElementById("settingsTabContent");
+          if(commentScroller) commentScroller.scrollTop = commentScroller.scrollHeight;
           renderCommentRowEdit(id);
         } else {
           renderCommentsTab();
-          requestAnimationFrame(function(){ renderCommentRowEdit(id); });
+          requestAnimationFrame(function(){
+            var sc = document.getElementById("settingsTabContent");
+            if(sc) sc.scrollTop = sc.scrollHeight;
+            renderCommentRowEdit(id);
+          });
         }
       };
     }
@@ -16018,12 +16229,20 @@
           if(emptyMsg) emptyMsg.remove();
           var holder = document.createElement("div");
           holder.innerHTML = buildTaskRowHtml(getTaskById(id));
-          wrap.insertBefore(holder.firstChild, wrap.firstChild);
+          // ТЗ пользователя от 19.09: новая задача — В КОНЕЦ списка (перед
+          // невидимой распоркой), список идёт по createdAt по возрастанию
+          wrap.insertBefore(holder.firstChild, wrap.querySelector(".task-list-bottom-spacer"));
           bindTaskRow(id, tabKey);
+          var listScroller = document.getElementById("settingsTabContent");
+          if(listScroller) listScroller.scrollTop = listScroller.scrollHeight;
           renderTaskRowEdit(id, tabKey);
         } else {
           renderTaskTabList(tabKey);
-          requestAnimationFrame(function(){ renderTaskRowEdit(id, tabKey); });
+          requestAnimationFrame(function(){
+            var sc = document.getElementById("settingsTabContent");
+            if(sc) sc.scrollTop = sc.scrollHeight;
+            renderTaskRowEdit(id, tabKey);
+          });
         }
       };
     }
@@ -16216,6 +16435,7 @@
       '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
       '<span class="task-actions">' +
         '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
+        taskDeleteBtnHtml() +
         '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
@@ -16286,6 +16506,7 @@
 
     var html = '';
     html += iconRow(CHEVRON_DOWN_ICON_SVG, false, "Разворачивает длинную задачу целиком (у коротких задач не появляется). Повторное нажатие сворачивает обратно.");
+    html += iconRow(CROSS_SMALL_ICON_SVG, false, "Удаляет задачу насовсем — только после подтверждения: плашка «Удалить задачу?» с крестиком (отмена) и галочкой (удалить). Из архива задачу удаляет отдельный крестик.");
     html += iconRow(PENCIL_ICON_SVG, false, "Открывает текст задачи для редактирования.");
     html += iconRow(CHECK_ICON_SVG, false, "Отмечает задачу выполненной и переносит её в архив.");
     html += iconRow(ARROW_MOVE_ICON_SVG, true, "Перенос задач работает между вкладками:" + moveTabsHtml);
@@ -16359,6 +16580,15 @@
       doneBtn.addEventListener("click", function(){
         flushPendingTaskEdits();
         checkTaskDone(id); // одна и та же задача — закрывается везде разом
+        if(onAfterAction) onAfterAction();
+        else renderTaskTabList(tabKey || task.c.tab);
+      });
+    }
+    // крестик «удалить задачу» (с подтверждением, см. openTaskDeleteConfirm)
+    var deleteBtn = body.querySelector(".task-delete-btn");
+    if(deleteBtn){
+      bindTaskDeleteBtn(deleteBtn, function(){
+        deleteTaskPermanently(id);
         if(onAfterAction) onAfterAction();
         else renderTaskTabList(tabKey || task.c.tab);
       });
@@ -16486,6 +16716,7 @@
     body.innerHTML =
       '<div class="task-editable' + (isProjectsTab ? ' task-editable-project' : '') + '" id="taskEditable_' + id + '" contenteditable="true" data-task-id="' + id + '"></div>' +
       '<span class="task-actions">' +
+        taskDeleteBtnHtml() +
         '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
@@ -16797,16 +17028,23 @@
       // в том же углу была бы лишней/перекрывала бы его.
       var homeStubHide = document.getElementById("taskFabHomeStub");
       if(homeStubHide) homeStubHide.classList.remove("visible");
-      // Кнопка режима чтения (right:248, ТЗ пользователя от 18.09) —
-      // прячем явно: на этом экране тот же слот в ряду занят кнопкой-
-      // звеном (.task-project-fab-link выше), а syncTaskFabRowForTab
-      // здесь не вызывается (см. комментарий у globalFab выше), поэтому
-      // без этой строки кнопка осталась бы видна с прошлой вкладки и
-      // рисовалась бы поверх звена. Возвращается сама — switchSettingsTab
-      // выставляет видимость заново для каждой вкладки задач (тем же
-      // приёмом, что и у "+"/домика выше).
-      var readingWrapHide = document.getElementById("taskReadingWrap");
-      if(readingWrapHide) readingWrapHide.classList.remove("visible");
+      // Кнопка режима чтения ("полноэкранный режим", right:241) —
+      // ТЗ пользователя от 19.09: на этом экране она теперь тоже есть.
+      // Раньше её прятали (слот right:248 делила кнопка-звено), теперь
+      // звенья сдвинуты на right:280, а слева от "Ж" идут: режим чтения
+      // (241) → звенья (280) → "i" (319). syncTaskFabRowForTab здесь не
+      // вызывается (см. комментарий у globalFab выше), поэтому обе кнопки
+      // включаем явно — не полагаясь на то, что они остались видны с
+      // прошлой вкладки. Возвращаются на свои места сами —
+      // switchSettingsTab выставляет видимость/класс заново для каждой
+      // вкладки задач (тем же приёмом, что и у "+"/домика выше).
+      var readingWrapShow = document.getElementById("taskReadingWrap");
+      if(readingWrapShow) readingWrapShow.classList.add("visible");
+      var infoWrapShow = document.getElementById("taskInfoWrap");
+      if(infoWrapShow){
+        infoWrapShow.classList.add("visible");
+        infoWrapShow.classList.add("task-info-wrap-far");
+      }
 
       // Название проекта уже вставлено выше (projectNameHtml) — без
       // кнопок управления (см. комментарий у projectNameHtml), поэтому
@@ -16875,6 +17113,9 @@
         saveTaskData(nid, t.c);
         mode = "linked";
         render();
+        // новая задача теперь в конце списка привязанных (19.09) — прокручиваем к ней
+        var projArea = document.getElementById("taskProjectArea");
+        if(projArea) projArea.scrollTop = projArea.scrollHeight;
         renderRowEdit(nid);
       });
 
@@ -16929,6 +17170,7 @@
         '<span class="task-text-view' + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
         '<span class="task-actions">' +
           '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
+          taskDeleteBtnHtml() +
           '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
@@ -16959,6 +17201,13 @@
         doneBtn.addEventListener("click", function(){
           flushPendingTaskEdits();
           checkTaskDone(id);
+          render();
+        });
+      }
+      var deleteBtn = body.querySelector(".task-delete-btn");
+      if(deleteBtn){
+        bindTaskDeleteBtn(deleteBtn, function(){
+          deleteTaskPermanently(id);
           render();
         });
       }
@@ -17036,6 +17285,7 @@
       body.innerHTML =
         '<div class="task-editable" id="taskEditable_' + id + '" contenteditable="true" data-task-id="' + id + '"></div>' +
         '<span class="task-actions">' +
+          taskDeleteBtnHtml() +
           '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
@@ -17248,6 +17498,198 @@
       });
     });
   }
+
+  // ===================== УДАЛЕНИЕ ЗАДАЧИ С ПОДТВЕРЖДЕНИЕМ (ТЗ 19.09) =====================
+  // Крестик слева от карандаша (.task-delete-btn) во всех строках задач на
+  // любых вкладках (обычные вкладки, «Все задачи проекта», результаты
+  // поиска; в режиме редактирования — крайний слева) удаляет задачу НАСОВСЕМ,
+  // но только после подтверждения: плашка «Удалить задачу?» + крестик (отмена)
+  // + галочка (удалить), один ряд, по центру экрана по горизонтали. Стоит не
+  // посреди экрана, а у самого низа — над клавиатурой, если она открыта
+  // (верх клавиатуры — window.AppKeyboard.getTop(), см. initTaskKeyboardLift),
+  // а если нет — на том же уровне у нижнего края (над системной плашкой).
+  // Крестик архива (полное удаление из архива) остаётся без подтверждения.
+  var TASK_DELETE_CONFIRM_BOTTOM_NO_KB_PX = 59; // 47px системная плашка + 12px зазор
+  var TASK_DELETE_CONFIRM_GAP_PX = 10;          // зазор над клавиатурой
+  var taskDeleteConfirmEl = null;
+  var taskDeleteConfirmCleanup = null;
+  function taskDeleteBtnHtml(){
+    return '<button type="button" class="task-icon-btn task-delete-btn" title="Удалить">' + CROSS_SMALL_ICON_SVG + '</button>';
+  }
+  function closeTaskDeleteConfirm(){
+    if(taskDeleteConfirmCleanup){ taskDeleteConfirmCleanup(); taskDeleteConfirmCleanup = null; }
+    if(taskDeleteConfirmEl && taskDeleteConfirmEl.parentNode) taskDeleteConfirmEl.parentNode.removeChild(taskDeleteConfirmEl);
+    taskDeleteConfirmEl = null;
+  }
+  function openTaskDeleteConfirm(onYes){
+    closeTaskDeleteConfirm();
+    var box = document.createElement("div");
+    box.className = "task-delete-confirm";
+    box.setAttribute("role", "alertdialog");
+    box.innerHTML =
+      '<span class="task-delete-confirm-text">Удалить задачу?</span>' +
+      '<span class="task-delete-confirm-btns">' +
+        '<button type="button" class="mdeditor-fab-btn" id="taskDeleteNoBtn" title="Отмена">' + CROSS_SMALL_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="taskDeleteYesBtn" title="Удалить">' + CHECK_ICON_SVG + '</button>' +
+      '</span>';
+    document.body.appendChild(box);
+    taskDeleteConfirmEl = box;
+    function place(){
+      var kbTop = (window.AppKeyboard && window.AppKeyboard.getTop) ? window.AppKeyboard.getTop() : null;
+      var bottom = (kbTop != null)
+        ? Math.max(0, window.innerHeight - kbTop) + TASK_DELETE_CONFIRM_GAP_PX
+        : TASK_DELETE_CONFIRM_BOTTOM_NO_KB_PX;
+      box.style.bottom = Math.round(bottom) + "px";
+    }
+    place();
+    var vk = navigator.virtualKeyboard;
+    if(vk) vk.addEventListener("geometrychange", place);
+    window.addEventListener("resize", place);
+    window.addEventListener("popstate", closeTaskDeleteConfirm);
+    taskDeleteConfirmCleanup = function(){
+      if(vk) vk.removeEventListener("geometrychange", place);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("popstate", closeTaskDeleteConfirm);
+    };
+    // нажатие на плашку не должно отнимать фокус у поля (иначе клавиатура
+    // закроется и плашка «поедет»)
+    box.addEventListener("mousedown", function(e){ e.preventDefault(); });
+    document.getElementById("taskDeleteNoBtn").addEventListener("click", closeTaskDeleteConfirm);
+    document.getElementById("taskDeleteYesBtn").addEventListener("click", function(){
+      closeTaskDeleteConfirm();
+      // если правилась именно эта строка — сначала штатно снимаем фокус
+      // (сохранение/снятие подъёма над клавиатурой), потом удаляем
+      var ae = document.activeElement;
+      if(ae && ae.isContentEditable && ae.blur) ae.blur();
+      onYes();
+    });
+  }
+  // крестик в строке: mousedown не отнимает фокус у редактируемого поля
+  // (клавиатура остаётся открытой — плашка встанет над ней)
+  function bindTaskDeleteBtn(btn, onYes){
+    btn.addEventListener("mousedown", function(e){ e.preventDefault(); });
+    btn.addEventListener("click", function(e){
+      e.stopPropagation();
+      openTaskDeleteConfirm(onYes);
+    });
+  }
+
+  // ===================== ПОДЪЁМ ЗАДАЧИ НАД КЛАВИАТУРОЙ (ТЗ 19.09) =====================
+  // Новая/редактируемая задача внизу списка оказывалась под экранной
+  // клавиатурой, а браузер (Chrome), чтобы показать поле, СДВИГАЛ ВЕСЬ
+  // экран вверх — вместе с рядами вкладок и плавающей кнопкой. Здесь то же
+  // самое делаем сами и по-другому: пока в фокусе поле задачи/комментария
+  // (.task-editable), включаем navigator.virtualKeyboard.overlaysContent —
+  // клавиатура тогда ПЕРЕКРЫВАЕТ страницу, ничего не изменяя в размерах и
+  // ничего не двигая (вкладки остаются на месте и просто прячутся за
+  // клавиатурой), — а высоту клавиатуры берём из virtualKeyboard.boundingRect
+  // (измеряется живьём). Чтобы было куда прокручивать, в конец области чтения
+  // на время ввода добавляется распорка высотой в перекрытую клавиатурой
+  // часть, и область прокручивается ровно настолько, чтобы низ строки
+  // (текст + её кнопки) стоял над клавиатурой. Работает только там, где есть
+  // VirtualKeyboard API (Chrome/Edge на Android). window.AppKeyboard.getTop()
+  // — верх клавиатуры (px от верха вьюпорта) или null; нужен окну
+  // подтверждения удаления задачи (openTaskDeleteConfirm).
+  (function initTaskKeyboardLift(){
+    var vk = navigator.virtualKeyboard;
+    window.AppKeyboard = {
+      getTop: function(){
+        var r = vk && vk.boundingRect;
+        return (r && r.height > 0) ? r.top : null;
+      }
+    };
+    if(!vk) return;
+    var MARGIN_PX = 8;          // зазор между низом строки и клавиатурой
+    var RELEASE_DELAY_MS = 250; // фокус может тут же перейти на другую строку
+    var activeEditable = null;
+    var releaseTimer = null;
+    var liftSpacer = null;
+
+    function isTaskEditable(el){ return !!(el && el.classList && el.classList.contains("task-editable")); }
+    function getScrollBox(el){
+      return el.closest("#taskProjectArea") || document.getElementById("settingsTabContent");
+    }
+    function kbRect(){
+      var r = vk.boundingRect;
+      return (r && r.height > 0) ? r : null;
+    }
+    function removeSpacer(){
+      if(liftSpacer && liftSpacer.parentNode) liftSpacer.parentNode.removeChild(liftSpacer);
+      liftSpacer = null;
+    }
+    function setSpacer(box, px){
+      if(!liftSpacer || liftSpacer.parentNode !== box){
+        removeSpacer();
+        liftSpacer = document.createElement("div");
+        liftSpacer.setAttribute("aria-hidden", "true");
+        liftSpacer.style.cssText = "flex:0 0 auto;width:1px;pointer-events:none;";
+        box.appendChild(liftSpacer);
+      }
+      liftSpacer.style.height = Math.round(px) + "px";
+    }
+    function release(){
+      removeSpacer();
+      activeEditable = null;
+      try{ vk.overlaysContent = false; }catch(e){}
+    }
+    function applyLift(){
+      var el = activeEditable;
+      if(!el) return;
+      if(!document.body.contains(el)){ release(); return; } // строку перерисовали/убрали
+      var box = getScrollBox(el);
+      if(!box) return;
+      var r = kbRect();
+      if(!r){ removeSpacer(); return; }
+      var boxRect = box.getBoundingClientRect();
+      // сколько области чтения перекрыто клавиатурой (в режиме чтения низ окна
+      // у самого края экрана — перекрытие больше, чем в обычном, где снизу 47px)
+      var overlap = Math.max(0, boxRect.bottom - r.top);
+      setSpacer(box, overlap);
+      var row = el.closest(".task-row") || el;
+      var rowRect = row.getBoundingClientRect();
+      var limit = r.top - MARGIN_PX;
+      var need = rowRect.bottom - limit;              // на сколько поднять
+      var maxUp = rowRect.top - boxRect.top;          // верх строки не уводим за верх области
+      if(need > maxUp){
+        // строка выше области (очень длинный текст): ориентируемся на строку с кареткой
+        var sel = window.getSelection();
+        var caretBottom = 0;
+        if(sel && sel.rangeCount){
+          var cr = sel.getRangeAt(0).getBoundingClientRect();
+          if(cr && cr.bottom > 0) caretBottom = cr.bottom;
+        }
+        need = caretBottom ? (caretBottom - limit) : maxUp;
+      }
+      if(need > 1) box.scrollTop += need;
+    }
+
+    document.addEventListener("focusin", function(e){
+      if(!isTaskEditable(e.target)) return;
+      clearTimeout(releaseTimer);
+      activeEditable = e.target;
+      // до появления клавиатуры: иначе браузер успеет сдвинуть экран сам
+      try{ vk.overlaysContent = true; }catch(err){}
+      requestAnimationFrame(applyLift);
+    });
+    document.addEventListener("focusout", function(e){
+      if(!isTaskEditable(e.target)) return;
+      clearTimeout(releaseTimer);
+      releaseTimer = setTimeout(function(){
+        if(isTaskEditable(document.activeElement)) return;
+        release();
+      }, RELEASE_DELAY_MS);
+    });
+    // клавиатура появилась/исчезла/сменила высоту (в т.ч. переключение раскладки)
+    vk.addEventListener("geometrychange", function(){
+      if(activeEditable && !document.body.contains(activeEditable)){ release(); return; }
+      if(activeEditable) applyLift();
+      else removeSpacer();
+    });
+    // при наборе строка растёт (перенос на новую строку) — держим низ над клавиатурой
+    document.addEventListener("input", function(e){
+      if(activeEditable && e.target === activeEditable) requestAnimationFrame(applyLift);
+    }, true);
+  })();
 
   // ===================== НАЗАД (единый стек навигации) =====================
   // Раньше у страницы вообще не было записей в истории браузера, поэтому
