@@ -1,6 +1,19 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 32.0 (19.09) — структурная правка: режим «оффлайн» (ТЗ пользователя от
+   19.09: приложение «съело» много мобильного трафика, пока синхронизация в
+   разработке). Новая галочка настроек «Использовать приложение в оффлайн режиме»
+   (renderSettingsTabGear, settingsOfflineModeCb) полностью отсекает приложению
+   доступ к интернету. Новый раздел «РЕЖИМ ОФФЛАЙН» в начале файла: isOfflineMode/
+   setOfflineMode/isNetworkAvailable/syncOfflineModeToServiceWorker/noNetworkTitle/
+   noNetworkHint, страховочная обёртка window.fetch (чужие origin отклоняются).
+   isNetworkAvailable() = navigator.onLine && !isOfflineMode() заменила
+   navigator.onLine во всех гейтах; обработчик «online» вынесен в
+   handleNetworkRestored (его же зовёт снятие галочки). fetchWithTimeout,
+   refreshJointTasksData, syncGroupTasksNow, syncGroupArchiveNow в оффлайн-режиме
+   выходят сразу; sync-engine получает canSync: isNetworkAvailable; mdeditor.js —
+   dep isNetworkAvailable. sw.js читает тот же флаг из кэша offline-mode-flag.
    Версия: 31.0 (19.09) — структурная правка: напоминание для задачи на конкретные
    дату и время (ТЗ пользователя от 19.09). Новое поле задачи c.remindAt (мс),
    пиктограмма-часы .task-reminder-btn (два состояния, крайняя справа; ряд справа
@@ -204,6 +217,84 @@
 
 (function(){
   "use strict";
+
+  // ===================== РЕЖИМ ОФФЛАЙН =====================
+  // ТЗ пользователя от 19.09: приложение «съело» много мобильного трафика,
+  // пока синхронизация в разработке — галочка настроек «Использовать
+  // приложение в оффлайн режиме» (renderSettingsTabGear, settingsOfflineModeCb)
+  // полностью отсекает приложению доступ к интернету.
+  // Флаг — локальный флаг УСТРОЙСТВА в localStorage (как FILE_SYNC_ENABLED_KEY),
+  // в облачный state не идёт. Три слоя, чтобы не полагаться на память о каждом
+  // месте, где приложение ходит в сеть:
+  //  1. isNetworkAvailable() = navigator.onLine && !isOfflineMode() стоит во всех
+  //     гейтах вместо голого navigator.onLine (и передаётся в mdeditor.js/
+  //     sync-engine через deps/canSync) — приложение ведёт себя ровно как при
+  //     реальном отсутствии сети: значок «оффлайн», без ошибок и повторов;
+  //  2. обёртка window.fetch ниже: любой запрос на ДРУГОЙ origin отклоняется
+  //     как при обрыве сети (страховка для кода, не знающего про флаг —
+  //     транспорт sync-engine по умолчанию, flibusta.js, workbooks.js и т.д.);
+  //     свои файлы (тот же origin) идут как обычно — из кэша service worker;
+  //  3. sw.js читает тот же флаг из кэша OFFLINE_MODE_SW_CACHE (service worker не
+  //     видит localStorage) и в этом режиме отвечает только из кэша: не
+  //     перекачивает файлы приложения при запуске и не ходит в сеть за чужими
+  //     адресами (esm.sh для CodeMirror, cdn.jsdelivr.net для QR).
+  var OFFLINE_MODE_KEY = "bibleOfflineMode_v1";
+  // имя кэша и ключ записи — те же константы в sw.js (OFFLINE_MODE_CACHE)
+  var OFFLINE_MODE_SW_CACHE = "offline-mode-flag";
+  var OFFLINE_MODE_SW_KEY = location.origin + "/__offline_mode_flag__";
+
+  function isOfflineMode(){
+    try{ return localStorage.getItem(OFFLINE_MODE_KEY) === "1"; }catch(e){ return false; }
+  }
+  // Кладёт/убирает запись-флаг в кэше, который читает sw.js. Вызывается при
+  // смене галочки и при КАЖДОМ запуске страницы (если кэш стёрли — флаг
+  // восстановится из localStorage).
+  function syncOfflineModeToServiceWorker(){
+    if(!window.caches) return Promise.resolve();
+    return caches.open(OFFLINE_MODE_SW_CACHE).then(function(cache){
+      return isOfflineMode()
+        ? cache.put(OFFLINE_MODE_SW_KEY, new Response("1"))
+        : cache.delete(OFFLINE_MODE_SW_KEY);
+    }).catch(function(){});
+  }
+  function setOfflineMode(value){
+    try{ localStorage.setItem(OFFLINE_MODE_KEY, value ? "1" : "0"); }catch(e){}
+    syncOfflineModeToServiceWorker();
+  }
+  // Единая замена navigator.onLine во всех гейтах приложения.
+  function isNetworkAvailable(){
+    return navigator.onLine && !isOfflineMode();
+  }
+  // Тексты диалогов «нужен интернет» — в оффлайн-режиме говорят про галочку,
+  // а не про «подключитесь к интернету».
+  function noNetworkTitle(){
+    return isOfflineMode() ? "Включён оффлайн режим" : "Нет подключения к интернету";
+  }
+  function noNetworkHint(what){
+    return isOfflineMode()
+      ? "Для " + what + " нужен интернет, а приложение работает в оффлайн режиме. Снимите галочку «Использовать приложение в оффлайн режиме» в настройках (вкладка с шестерёнкой) и попробуйте снова."
+      : "Для " + what + " нужен интернет. Подключитесь и попробуйте снова.";
+  }
+
+  (function installOfflineFetchGuard(){
+    if(typeof window.fetch !== "function" || window.__offlineFetchGuardInstalled) return;
+    window.__offlineFetchGuardInstalled = true;
+    var nativeFetch = window.fetch.bind(window);
+    window.fetch = function(input, init){
+      if(isOfflineMode()){
+        var target = null;
+        try{
+          var raw = (typeof input === "string") ? input : (input && input.url ? input.url : String(input));
+          target = new URL(raw, location.href);
+        }catch(e){}
+        if(target && /^https?:$/.test(target.protocol) && target.origin !== location.origin){
+          return Promise.reject(new TypeError("offline_mode: запрос к " + target.origin + " заблокирован режимом оффлайн"));
+        }
+      }
+      return nativeFetch(input, init);
+    };
+  })();
+  syncOfflineModeToServiceWorker();
 
   // ===================== ДАННЫЕ БИБЛИИ =====================
   var sections = [
@@ -3800,7 +3891,7 @@
     try{ localStorage.removeItem(CELEBRATION_SHOWN_KEY); }catch(e){}
     setTimeout(function(){ setNoTransitions(false); }, 50);
 
-    if(syncId && navigator.onLine){
+    if(syncId && isNetworkAvailable()){
       setSyncState("syncing");
       putCloudBlob(syncId, state).then(function(){ setSyncState("synced"); }).catch(function(){ setSyncState("error"); });
     }
@@ -3852,6 +3943,10 @@
   // вызовов fetchWithTimeout по всему файлу.
   var fetchWithTimeoutInFlight = {};
   function fetchWithTimeout(url, options, timeoutMs){
+    // режим оффлайн (см. раздел «РЕЖИМ ОФФЛАЙН»): все ~25 сетевых вызовов
+    // приложения идут через эту функцию — единая точка отсечки, до счётчика
+    // дублей и таймеров; вызывающие получают обычный reject, как при обрыве сети
+    if(isOfflineMode()) return Promise.reject(new Error("offline_mode"));
     var already = fetchWithTimeoutInFlight[url] || 0;
     if(already > 0 && window.Debug){
       // строка НАМЕРЕННО короткая (см. 29.2): путь без хоста Firebase и только
@@ -4154,7 +4249,7 @@
 
   function refreshStatusBase(){
     if(!syncId){ setSyncState("off"); return; }
-    if(!navigator.onLine){ setSyncState("offline"); return; }
+    if(!isNetworkAvailable()){ setSyncState("offline"); return; }
     setSyncState("synced");
   }
   refreshStatusBase();
@@ -4221,7 +4316,7 @@
   }
   function doCloudSync(urgent){
     if(!syncId) { setSyncState("off"); return; }
-    if(!navigator.onLine){ setSyncState("offline"); settleInitialTaskSync(); return; }
+    if(!isNetworkAvailable()){ setSyncState("offline"); settleInitialTaskSync(); return; }
     if(syncInProgress){
       if(window.Debug) window.Debug.log("doCloudSync: пропущен — предыдущий цикл ещё идёт");
       return;
@@ -4331,8 +4426,13 @@
     });
   }
 
-  window.addEventListener("online", function(){
+  // Сеть появилась (событие "online") ИЛИ снята галочка «Использовать
+  // приложение в оффлайн режиме» (renderSettingsTabGear) — одинаковый
+  // «толчок» всем независимым циклам синхронизации. В оффлайн-режиме выходит
+  // сразу (событие "online" при включённой галочке — просто обновляет значок).
+  function handleNetworkRestored(){
     refreshStatusBase();
+    if(!isNetworkAvailable()) return;
     syncRetryCount = 0;
     clearTimeout(syncRetryTimer);
     doCloudSync();
@@ -4346,7 +4446,8 @@
     // цикл (см. refreshJointTasksData/syncGroupTasksNow выше), поэтому
     // подхватываем reconnect отдельным вызовом, а не через doCloudSync.
     refreshJointTasksData();
-  });
+  }
+  window.addEventListener("online", handleNetworkRestored);
   window.addEventListener("offline", function(){ refreshStatusBase(); });
   if(syncId) doCloudSync();
 
@@ -4653,8 +4754,8 @@
   function handleCreateGroupPairCode(){
     modalBox.innerHTML = modalHeader("Создаём код…", "Секунду, подключаемся к облачному хранилищу.");
     bindClose();
-    if(!navigator.onLine){
-      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для создания кода привязки нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+    if(!isNetworkAvailable()){
+      modalBox.innerHTML = modalHeader(noNetworkTitle(), noNetworkHint("создания кода привязки")) + '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderGroupPairingHome);
       return;
@@ -4782,8 +4883,8 @@
     if(!pairCode) return;
     modalBox.innerHTML = modalHeader("Подключаемся…", "Проверяем код привязки.");
     bindClose();
-    if(!navigator.onLine){
-      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для подключения нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+    if(!isNetworkAvailable()){
+      modalBox.innerHTML = modalHeader(noNetworkTitle(), noNetworkHint("подключения")) + '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderGroupJoinScreen);
       return;
@@ -5198,7 +5299,11 @@
     }
     var engine = window.SyncEngine.createEngine();
     var transport = window.SyncEngineTransport.createTransport({
-      engine: engine, dbUrl: FIREBASE_DB_URL, allowProductionPaths: true, log: syncEngineLog
+      engine: engine, dbUrl: FIREBASE_DB_URL, allowProductionPaths: true, log: syncEngineLog,
+      // режим оффлайн: фоновые push и повторы транспорта не запускаются,
+      // правки остаются dirty до снятия галочки (handleNetworkRestored →
+      // refreshJointTasksData → syncGroupTasksNow отправит всё накопленное)
+      canSync: isNetworkAvailable
     });
     syncEngineRuntime = {engine: engine, transport: transport};
     return syncEngineRuntime;
@@ -5237,7 +5342,7 @@
   // результат {pull:{error,...}, push:{error,failed,...}}; при любой другой
   // ошибке (нет группы, движок не загружен) логирует и возвращает null.
   function syncGroupTasksNow(){
-    if(!sharedGroup) return Promise.resolve(null);
+    if(!sharedGroup || isOfflineMode()) return Promise.resolve(null);
     try{
       return getGroupTasksBinding().syncNow().catch(function(err){
         logGroupTasksSyncError(err);
@@ -5297,7 +5402,7 @@
   // pull → сверка → push одним вызовом — см. пояснение у syncGroupTasksNow
   // выше, тот же приём для архива.
   function syncGroupArchiveNow(){
-    if(!sharedGroup) return Promise.resolve(null);
+    if(!sharedGroup || isOfflineMode()) return Promise.resolve(null);
     try{
       return getGroupArchiveBinding().syncNow().catch(function(err){
         logGroupArchiveSyncError(err);
@@ -5503,7 +5608,8 @@
   // syncId (личная синхронизация может быть вообще не настроена).
   function refreshJointTasksData(){
     if(!sharedGroup) return;
-    syncEngineLog("refreshJointTasksData: role=" + sharedGroup.role + ", активна=" + isGroupTasksActive() + ", online=" + navigator.onLine);
+    if(isOfflineMode()) return; // режим оффлайн: ни проверки членства, ни синка группы
+    syncEngineLog("refreshJointTasksData: role=" + sharedGroup.role + ", активна=" + isGroupTasksActive() + ", online=" + isNetworkAvailable());
     if(sharedGroup.role === "member"){
       // Шаг 5: у отвязки нет push-уведомления участнику — единственный
       // способ узнать, что админ его отвязал (см. handleGroupUnlinkKeepData/
@@ -5531,7 +5637,7 @@
     // ⚠️ ДОБАВЛЕНО 16.09 (TASK_FILE_SYNC_RTDB.md, раздел 4.5, Шаг 7):
     // тот же цикл опроса группы — подходящее место для сверки группового
     // канала картинок (см. syncGroupImageRegistry выше). Функция сама
-    // гейтится на sharedGroup/getFileSyncEnabled/navigator.onLine, здесь
+    // гейтится на sharedGroup/getFileSyncEnabled/isNetworkAvailable(), здесь
     // без доп. условий — как и syncFileRegistry("images") в doCloudSync
     // для личного канала.
     syncGroupImageRegistry();
@@ -5826,8 +5932,8 @@
     var groupId = sharedGroup.groupId;
     modalBox.innerHTML = modalHeader("Отвязываем…", "Секунду.");
     bindClose();
-    if(!navigator.onLine){
-      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для отвязки участника нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+    if(!isNetworkAvailable()){
+      modalBox.innerHTML = modalHeader(noNetworkTitle(), noNetworkHint("отвязки участника")) + '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderGroupUnlinkConfirm);
       return;
@@ -5854,8 +5960,8 @@
     var groupId = sharedGroup.groupId;
     modalBox.innerHTML = modalHeader("Удаляем…", "Секунду.");
     bindClose();
-    if(!navigator.onLine){
-      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для отвязки участника нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+    if(!isNetworkAvailable()){
+      modalBox.innerHTML = modalHeader(noNetworkTitle(), noNetworkHint("отвязки участника")) + '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderGroupUnlinkConfirm);
       return;
@@ -5882,8 +5988,8 @@
     var groupId = sharedGroup.groupId;
     modalBox.innerHTML = modalHeader("Отписываемся…", "Секунду.");
     bindClose();
-    if(!navigator.onLine){
-      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для отписки нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+    if(!isNetworkAvailable()){
+      modalBox.innerHTML = modalHeader(noNetworkTitle(), noNetworkHint("отписки")) + '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderGroupUnsubscribeConfirm);
       return;
@@ -6068,6 +6174,9 @@
     // цикл, collectTaskAndCommentTextsForMediaScan выше может недосчитаться
     // задачи с другого устройства — корзина сирот должна подождать.
     isTaskStateReady: function(){ return initialTaskSyncSettled; },
+    // режим оффлайн: mdeditor.js использует это вместо navigator.onLine
+    // (isOnline в облачном цикле заметок — pushDirtyNotes/syncNotesFromCloud)
+    isNetworkAvailable: isNetworkAvailable,
     PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG,
     // то же распознавание ссылок на Библию, что и в "Карте дней года" (см.
     // SCRIPTURE_RE/BOOK_ALIASES/scriptureRefLink выше) — regexSource
@@ -7354,8 +7463,8 @@
   function handleCreateCode(){
     modalBox.innerHTML = modalHeader("Создаём код…", "Секунду, подключаемся к облачному хранилищу.");
     bindClose();
-    if(!navigator.onLine){
-      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для создания кода синхронизации нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+    if(!isNetworkAvailable()){
+      modalBox.innerHTML = modalHeader(noNetworkTitle(), noNetworkHint("создания кода синхронизации")) + '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderModalHome);
       return;
@@ -7483,8 +7592,8 @@
     if(!id) return;
     modalBox.innerHTML = modalHeader("Подключаемся…", "Загружаем данные из облака.");
     bindClose();
-    if(!navigator.onLine){
-      modalBox.innerHTML = modalHeader("Нет подключения к интернету", "Для подключения нужен интернет. Подключитесь и попробуйте снова.") + '<button class="modal-btn primary" id="mBack">Назад</button>';
+    if(!isNetworkAvailable()){
+      modalBox.innerHTML = modalHeader(noNetworkTitle(), noNetworkHint("подключения")) + '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderJoinScreen);
       return;
@@ -9231,7 +9340,7 @@
   function syncFileRegistry(kind, adapters){
     adapters = adapters || FILE_REGISTRY_ADAPTERS[kind];
     if(!adapters) return Promise.resolve();
-    if(!syncId || !navigator.onLine || !getFileSyncEnabled()) return Promise.resolve();
+    if(!syncId || !isNetworkAvailable() || !getFileSyncEnabled()) return Promise.resolve();
     if(kind === "books" && isBooksCloudSyncTemporarilyDisabled()) return Promise.resolve();
     if(fileRegistrySyncInProgress[kind]) return Promise.resolve();
     fileRegistrySyncInProgress[kind] = true;
@@ -9646,7 +9755,7 @@
   var groupFileRegistrySyncInProgress = {}; // groupId -> bool
   function syncGroupImageRegistry(){
     if(!sharedGroup || !sharedGroup.groupId) return Promise.resolve();
-    if(!navigator.onLine || !getFileSyncEnabled()) return Promise.resolve();
+    if(!isNetworkAvailable() || !getFileSyncEnabled()) return Promise.resolve();
     var adapters = FILE_REGISTRY_ADAPTERS.images;
     if(!adapters) return Promise.resolve();
     var groupId = sharedGroup.groupId;
@@ -12851,6 +12960,7 @@
     var showAllTasksOn = getShowAllTasksEnabled();
     var extraAnimOn = getExtraAnimationsEnabled();
     var hideStatusBarOn = getHideStatusBarEnabled();
+    var offlineModeOn = isOfflineMode(); // ТЗ пользователя от 19.09 — см. раздел «РЕЖИМ ОФФЛАЙН»
     var fileSyncOn = getFileSyncEnabled(); // TASK_FILE_SYNC_RTDB.md, раздел 5, шаг 6
     var booksSyncOn = getBooksSyncEnabled(); // ТЗ пользователя от 18.09 — временный тестовый тумблер
     var bibleQuotesOn = getBibleQuotesEnabled();
@@ -12881,6 +12991,7 @@
       '<div class="settings-row"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить дополнительные анимации</span><input type="checkbox" id="settingsExtraAnimCb"' + (extraAnimOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить полноэкранный режим</span><input type="checkbox" id="settingsHideStatusBarCb"' + (hideStatusBarOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row"><span>Использовать приложение в оффлайн режиме</span><input type="checkbox" id="settingsOfflineModeCb"' + (offlineModeOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить облачную синхронизацию изображений и книг (может медленно работать на слабых устройствах)</span><input type="checkbox" id="settingsFileSyncCb"' + (fileSyncOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" id="settingsBooksSyncRow" style="' + (fileSyncOn ? "" : "display:none;") + '"><span>Включить синхронизацию книг (тестируется)</span><input type="checkbox" id="settingsBooksSyncCb"' + (booksSyncOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" style="border-bottom:none;"><span>Включить режим отладки</span><input type="checkbox" id="settingsDebugModeCb"' + (debugModeOn ? " checked" : "") + '></div>' +
@@ -12996,6 +13107,15 @@
       // Сам клик по галочке — жест пользователя, поэтому вход в fullscreen
       // сработает сразу же, без необходимости в armHideStatusBarAutoRetry.
       setHideStatusBarEnabled(this.checked);
+    });
+
+    document.getElementById("settingsOfflineModeCb").addEventListener("change", function(){
+      // ТЗ пользователя от 19.09 — полное отсечение интернета (см. раздел
+      // «РЕЖИМ ОФФЛАЙН»). Сам гейт живёт в isNetworkAvailable/fetchWithTimeout/
+      // обёртке window.fetch/sw.js, здесь — флаг + значок + «толчок».
+      setOfflineMode(this.checked);
+      if(this.checked) refreshStatusBase();      // значок «оффлайн»
+      else handleNetworkRestored();              // как при появлении сети: синк всего накопленного
     });
 
     document.getElementById("settingsFileSyncCb").addEventListener("change", function(){

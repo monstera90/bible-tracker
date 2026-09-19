@@ -1,5 +1,11 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 3.2 (19.09) — режим «оффлайн» (ТЗ пользователя от 19.09, галочка
+   «Использовать приложение в оффлайн режиме» в my.js): isOnline() теперь берёт
+   deps.isNetworkAvailable (navigator.onLine && !режим оффлайн), поэтому облачный
+   цикл заметок (pushDirtyNotes/syncNotesFromCloud) молча пропускается; loadCM
+   сбрасывает закэшированный неудачный import(), чтобы после снятия галочки
+   CodeMirror можно было загрузить без перезагрузки страницы.
    Версия: 3.1 (19.09) — кнопка режима чтения в нижнем ряду редактора заметки
    (между "Скачать .md" и "Ж"); deps: toggleReadingMode, applyReadingModeVisual.
    Версия: 3.0 (18.09)
@@ -109,7 +115,8 @@ window.initMdEditorModule = function(deps){
   var generateId = deps.generateId || function(){ return "n" + Date.now().toString(36) + Math.random().toString(36).slice(2,10); };
   var NOTES_PUSH_DEBOUNCE_MS = deps.notesPushDebounceMs || 400;
   var NOTES_RETRY_DELAYS = deps.notesRetryDelays || [5000, 15000, 40000, 90000];
-  function isOnline(){ return navigator.onLine; }
+  // deps.isNetworkAvailable (my.js) = navigator.onLine && не включён режим оффлайн
+  function isOnline(){ return deps.isNetworkAvailable ? deps.isNetworkAvailable() : navigator.onLine; }
   // Импорт/экспорт .md/.zip заметок (TASK_MDNOTES_CLOUD.md, шаг 2) —
   // используем общий самописный ZIP-парсер проекта напрямую через window,
   // тем же способом, каким его используют workbooks.js/s89fill.js (свой
@@ -485,6 +492,11 @@ window.initMdEditorModule = function(deps){
     ]).then(function(mods){
       cmModules = { state: mods[0], view: mods[1], commands: mods[2] };
       return cmModules;
+    }, function(err){
+      // неудачный import() (нет сети / режим оффлайн, а в кэше CodeMirror ещё нет)
+      // не должен залипать до перезагрузки страницы — следующий вызов попробует снова
+      cmModulesPromise = null;
+      throw err;
     });
     return cmModulesPromise;
   }

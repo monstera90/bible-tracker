@@ -6,7 +6,7 @@
 // что sw.js изменился, скачать новую версию в фоне и подготовить её к
 // установке — без этого шага обновление не будет обнаружено автоматически.
 
-const APP_VERSION = "v0.36.17";
+const APP_VERSION = "v0.36.18";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -18,6 +18,62 @@ const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 // тем же ключом SHARE_TARGET_KEY.
 const SHARE_TARGET_CACHE = "share-target-temp";
 const SHARE_TARGET_KEY = "shared-file";
+
+// Режим «оффлайн» — галочка «Использовать приложение в оффлайн режиме» в
+// настройках (my.js: setOfflineMode / syncOfflineModeToServiceWorker).
+// Service worker не видит localStorage страницы, поэтому страница кладёт флаг
+// в отдельный кэш OFFLINE_MODE_CACHE (запись есть — режим включён, нет — выключен).
+// Имя кэша и ключ записи ДОЛЖНЫ совпадать с OFFLINE_MODE_SW_CACHE/
+// OFFLINE_MODE_SW_KEY в my.js. Пока режим включён, service worker:
+//  - отвечает на GET только из кэша, ничего не перекачивая из сети (ни файлы
+//    приложения при каждом запуске, ни чужие адреса — esm.sh, cdn.jsdelivr.net);
+//  - не устанавливает новую версию (install падает, браузер оставляет прежний
+//    service worker и его кэш) — ни 30+ файлов из ASSETS, ни фоновых загрузок.
+// Этот кэш не удаляется в activate (см. ниже) — иначе флаг терялся бы при
+// каждом обновлении; страница при запуске в любом случае восстанавливает его.
+const OFFLINE_MODE_CACHE = "offline-mode-flag";
+const OFFLINE_MODE_KEY = self.location.origin + "/__offline_mode_flag__";
+
+function isOfflineModeOn() {
+  // caches.match с cacheName НЕ создаёт кэш, если его нет
+  return caches.match(OFFLINE_MODE_KEY, { cacheName: OFFLINE_MODE_CACHE })
+    .then((hit) => !!hit, () => false);
+}
+
+// Ответ на запрос в режиме оффлайн, когда точного совпадения в кэше нет.
+// Свой адрес: то же без строки запроса (например ./index.html?shared=1 из
+// Web Share Target), для перехода по ссылке — сама страница. Чужой адрес и
+// всё остальное — 503 (ошибка загрузки, как при обрыве сети).
+function offlineModeFallback(request) {
+  const sameOrigin = new URL(request.url).origin === self.location.origin;
+  const lookup = sameOrigin
+    ? caches.match(request, { ignoreSearch: true })
+    : Promise.resolve(undefined);
+  return lookup.then((hit) => {
+    if (hit) return hit;
+    if (sameOrigin && request.mode === "navigate") {
+      return caches.match("./index.html").then((page) => page || offlineModeResponse());
+    }
+    return offlineModeResponse();
+  });
+}
+function offlineModeResponse() {
+  return new Response("", { status: 503, statusText: "Offline mode" });
+}
+
+// install в режиме оффлайн: если у приложения уже есть свой кэш — отказываемся
+// (иначе на самой первой установке, когда кэша ещё нет, приложение осталось бы
+// вообще без файлов).
+function refuseInstallInOfflineMode() {
+  return isOfflineModeOn().then((on) => {
+    if (!on) return;
+    return caches.keys().then((keys) => {
+      if (keys.some((k) => k.indexOf("bible-tracker-") === 0)) {
+        throw new Error("offline_mode: установка новой версии отложена");
+      }
+    });
+  });
+}
 
 // Список файлов, которые нужны странице для полностью офлайн-работы.
 // Если в репозиторий добавляются новые файлы (например, отдельный
@@ -62,7 +118,8 @@ const ASSETS = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
+    refuseInstallInOfflineMode()
+      .then(() => caches.open(CACHE_NAME))
       .then((cache) => {
         // ВАЖНО: обычный cache.addAll() делает fetch() с учётом HTTP-кэша
         // браузера — если сервер отдаёт файлы (например my.js) с
@@ -98,7 +155,7 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((key) => key !== CACHE_NAME)
+            .filter((key) => key !== CACHE_NAME && key !== OFFLINE_MODE_CACHE)
             .map((key) => caches.delete(key))
         )
       )
@@ -149,19 +206,24 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const networkFetch = fetch(event.request, { cache: "no-store" })
-        .then((response) => {
-          if (response && response.status === 200) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached);
+    isOfflineModeOn().then((offlineMode) =>
+      caches.match(event.request).then((cached) => {
+        // режим оффлайн (см. OFFLINE_MODE_CACHE выше): только кэш, без сети
+        if (offlineMode) return cached || offlineModeFallback(event.request);
 
-      return cached || networkFetch;
-    })
+        const networkFetch = fetch(event.request, { cache: "no-store" })
+          .then((response) => {
+            if (response && response.status === 200) {
+              const copy = response.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+            }
+            return response;
+          })
+          .catch(() => cached);
+
+        return cached || networkFetch;
+      })
+    )
   );
 });
 

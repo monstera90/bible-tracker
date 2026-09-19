@@ -1,4 +1,7 @@
 // syncengine_transport.js
+// Версия: 1.2 (19.09) — новая опция opts.canSync (режим «оффлайн» в my.js): пока она
+// возвращает false, фоновые push (по событию dirty и повторы после ошибки) не
+// запускаются, записи остаются dirty. Остальная логика не менялась.
 // Версия: 1.1 (19.09) — только диагностика (в журнал, через opts.log, теперь
 // пишутся и УСПЕШНЫЕ push/pull, событие dirty, пропущенный фоновый push);
 // логика не менялась. Раньше в журнал попадали только ошибки, поэтому по нему
@@ -124,6 +127,7 @@
    *   opts.pushTimeoutMs / pullTimeoutMs — 15000 / 10000
    *   opts.pushChunkSize        — записей в одном PATCH, 100
    *   opts.retryBaseMs / retryMaxMs — backoff повтора после сетевой ошибки, 2000 / 60000
+   *   opts.canSync              — функция() -> boolean; false = сеть запрещена (режим «оффлайн» в my.js): фоновые push не запускаются, записи остаются dirty (по умолчанию всегда true)
    *   opts.allowProductionPaths — false: только /__syncengine_test__/...
    *   opts.log                  — функция(строка) для отладки (window.Debug.log)
    */
@@ -145,6 +149,7 @@
     var pushChunkSize = opts.pushChunkSize || DEFAULT_PUSH_CHUNK;
     var retryBaseMs = opts.retryBaseMs || DEFAULT_RETRY_BASE_MS;
     var retryMaxMs = opts.retryMaxMs || DEFAULT_RETRY_MAX_MS;
+    var canSync = typeof opts.canSync === 'function' ? opts.canSync : function () { return true; };
     var allowProduction = !!opts.allowProductionPaths;
     var log = typeof opts.log === 'function' ? opts.log : function () {};
 
@@ -243,6 +248,12 @@
     function backgroundPush(st) {
       if (destroyed || attached.get(st.storeId) !== st) {
         log('SyncEngineTransport фоновый push "' + st.storeId + '" пропущен: store отключён или транспорт уничтожен');
+        return;
+      }
+      if (!canSync()) {
+        // режим «оффлайн»: не пытаемся и не планируем повтор — записи остаются dirty,
+        // их отправит syncNow/pushNow после снятия запрета
+        log('SyncEngineTransport фоновый push "' + st.storeId + '" пропущен: сеть запрещена (canSync=false), записи остаются dirty');
         return;
       }
       pushNow(st.storeId).catch(function (err) {
