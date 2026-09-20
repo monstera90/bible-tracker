@@ -1,5 +1,23 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 4.0 (19.09) — TASK_UNIFIED_SYNC.md, шаг 5.2: облачная синхронизация
+   заметок переведена на общий sync-engine (см. syncengine.js/
+   syncengine_notescrypto.js/syncengine_notesbinding.js, шаги 1 и 5.1).
+   Убраны markNoteDirty/dirtyNoteIds/scheduleNotesCloudPush/pushDirtyNotes/
+   syncNotesFromCloud и их таймеры — их место заняла единая точка мутации
+   binding.save/remove (см. "Sync-engine заметок" ниже) и binding.pushNow/
+   syncNow/retryPushOnReconnect. Формат данных в облаке, notesMap, IndexedDB-
+   кэш (notesCache_v1) НЕ изменились — меняется только "труба". Решения
+   пользователя из шага 5.2: (1) reconcile — выключен (ровно старое
+   поведение); (2) удаление тела заметки — одним PATCH со значением null
+   вместо отдельного DELETE (см. syncengine_notesbinding.js 1.1). my.js не
+   тронут — deps (fetchCloudPath/patchCloud/deleteCloudPath/getSyncId/
+   notesPushDebounceMs/notesRetryDelays) там уже были ровно те, что нужны
+   binding'у. getNotesCryptoKey/encryptNotePayload/decryptNotePayload (и их
+   b64FromBuf/bufFromB64) больше НЕ вызываются — шифрование теперь внутри
+   binding'а через syncengine_notescrypto.js; функции оставлены как мёртвый
+   код осознанно (уборка — шаг 14 общего ТЗ), не трогать формат — старые
+   офлайн-клиенты по-прежнему могут на них ссылаться до перезагрузки.
    Версия: 3.3 (19.09) — confirmDeleteNote/confirmDeleteFolder/
    showOverwriteConfirmDialog/showImagesFirstConnectWarning переведены с
    карточки .mdeditor-cleanup-overlay/-card на единую плашку-подтверждение
@@ -1441,17 +1459,20 @@ window.initMdEditorModule = function(deps){
   // при реальном запуске по-прежнему считается заново из notesMap, а не
   // из накопленного счётчика — это и защищает от дрейфа). true по
   // умолчанию — первый запуск после старта модуля всегда полноценный.
-  // Взводится: markNoteDirty (ЛЮБая локальная правка текста заметки —
-  // создание/правка/автосохранение/удаление/импорт/восстановление/
-  // дописывание книжных иллюстраций — все они проходят через одну эту
-  // функцию, см. выше) и syncNotesFromCloud (правки, пришедшие с другого
-  // устройства, notesMap.set там в обход markNoteDirty — иначе получили
-  // бы лишний пуш чужой правки обратно в облако). Сбрасывается в false
-  // только после реально завершённого обхода папки в cleanupOrphanedImages.
-  // ПРОБЕЛ: картинки, вставленные ТОЛЬКО в задачу/комментарий (my.js,
-  // кнопка-скрепка в initTaskGlobalToolbar) — этот флаг не взводят, т.к.
-  // markNoteDirty живёt в mdeditor.js и о правках задач не знает; со
-  // стороны my.js нужен симметричный вызов markReferencedNamesDirty()
+  // Взводится: каждая точка CRUD заметок (создание/правка/удаление/импорт/
+  // переименование/дописывание книжных иллюстраций — createNoteRecord/
+  // renameNoteRecord/editNoteRecordText/deleteNoteRecord/
+  // propagateRenameInMemory/createImportedNoteRecord, см. "Sync-engine
+  // заметок" выше — с шага 5.2 каждая из них зовёт markReferencedNamesDirty()
+  // явно, рядом с binding.save/remove) и handleNotesRemoteApplied (правки,
+  // пришедшие с другого устройства через binding — notesMap там уже обновлён
+  // адаптером движка, отдельного пуша чужой правки обратно в облако это не
+  // вызывает, т.к. mergeIncoming не трогает dirty входящей записи). Сбрасывается
+  // в false только после реально завершённого обхода папки в
+  // cleanupOrphanedImages. ПРОБЕЛ: картинки, вставленные ТОЛЬКО в задачу/
+  // комментарий (my.js, кнопка-скрепка в initTaskGlobalToolbar) — этот флаг
+  // не взводят сами по себе; со стороны my.js нужен симметричный вызов
+  // markReferencedNamesDirty()
   // (или её экспорт из публичного API) там, где меняется текст
   // задачи/комментария с вставленной картинкой — иначе такая правка не
   // будет учтена оптимизацией до следующего перезапуска приложения.
@@ -1808,6 +1829,12 @@ window.initMdEditorModule = function(deps){
   // ---------------------------------------------------------------------
 
   // ---- шифрование ----
+  // ⚠️ МЁРТВЫЙ КОД с шага 5.2 (19.09): getNotesCryptoKey/b64FromBuf/
+  // bufFromB64/encryptNotePayload/decryptNotePayload ниже больше НИКЕМ не
+  // вызываются — то же самое (тот же формат {iv, data}, тот же ключ
+  // SHA-256(syncId)) теперь делает syncengine_notescrypto.js внутри
+  // binding'а (см. "Sync-engine заметок" ниже, makeHooks). Оставлены
+  // намеренно нетронутыми, удаление — шаг 14 общего ТЗ (уборка), не сейчас.
   var notesCryptoKeyPromise = null, notesCryptoSyncId = null;
   function getNotesCryptoKey(){
     var id = getSyncId();
@@ -1964,49 +1991,96 @@ window.initMdEditorModule = function(deps){
     return !!(id && id !== exceptId);
   }
 
-  // ---- CRUD над notesMap — синхронные, локальные правки; в облако уходят
-  // debounce-пушем (см. ниже, раздел 3 ТЗ) ----
-  var dirtyNoteIds = new Set();
-  function markNoteDirty(id){
-    dirtyNoteIds.add(id);
-    scheduleNotesCachePersist();
-    scheduleNotesCloudPush();
-    markReferencedNamesDirty(); // ТЗ пользователя от 14.09, см. комментарий у флага ниже
+  // ---------------------------------------------------------------------
+  // Sync-engine заметок (TASK_UNIFIED_SYNC.md, шаг 5.2, поверх шага 5.1) —
+  // заменяет старую пару "dirtyNoteIds + markNoteDirty + pushDirtyNotes +
+  // syncNotesFromCloud". Единственная точка мутации теперь binding.save/
+  // remove (изменить и поставить в очередь на отправку — один вызов, как и
+  // у остальных сторов проекта). notesMap/IndexedDB-кэш/облачный формат не
+  // изменились — адаптер движка (syncengine_notesbinding.js) пишет в
+  // notesMap НА МЕСТЕ, синхронно внутри save()/remove() (контракт сверен
+  // тестами модуля). nameIndex и markReferencedNamesDirty остаются здесь —
+  // движок про них не знает.
+  // ---------------------------------------------------------------------
+  var binding = window.SyncEngineNotesBinding.createNotesBinding({
+    io: { fetchCloudPath: fetchCloudPath, patchCloud: patchCloud, deleteCloudPath: deleteCloudPath },
+    makeHooks: window.SyncEngineNotesCrypto.makeNotesHooks,
+    getSyncId: getSyncId,
+    notesMap: notesMap,
+    isOnline: isOnline,
+    debounceMs: NOTES_PUSH_DEBOUNCE_MS,
+    retryDelays: NOTES_RETRY_DELAYS,
+    // Решение пользователя (шаг 5.2, п.1): оставить выключенным — ровно
+    // старое поведение (syncNow = pull, без досылки "локально новее
+    // облака"); включать отдельным заходом после проверки очистки
+    // notesCache_v1 при смене syncId в my.js.
+    reconcile: false,
+    schedulePersist: scheduleNotesCachePersist,
+    persistNow: flushNotesCacheNow,
+    onRemoteApplied: handleNotesRemoteApplied,
+    log: function(msg){ if(window.Debug) window.Debug.log(msg); }
+  });
+
+  // Чужая правка, применённая pull'ом (см. onRemoteApplied в контракте
+  // binding'а) — notesMap уже обновлён адаптером ДО этого вызова; здесь
+  // только то, что раньше делал inline-код внутри syncNotesFromCloud:
+  // nameIndex, markReferencedNamesDirty (картинка могла появиться/
+  // пропасть), открытая заметка (обновить на месте или закрыть, если её
+  // удалили с другого устройства и в ней нет несохранённых правок).
+  // rebuildTree()/render() — за вызывающим кодом (syncNotesOnTabEnter),
+  // одним разом на весь пул, а не на каждую применённую запись отдельно.
+  function handleNotesRemoteApplied(evt){
+    var id = evt.id, rec = evt.rec, prev = evt.prev, deleted = evt.deleted;
+    if(prev && prev.name) nameIndex.delete(prev.name.toLowerCase());
+    if(!deleted && rec && rec.name) nameIndex.set(rec.name.toLowerCase(), id);
+    markReferencedNamesDirty();
+    if(!(openFile && openFile.id === id && !openFile.dirty)) return;
+    if(deleted){
+      openFile = null;
+      destroyEditor();
+      screen = "list";
+      setStatus("Эта заметка была удалена на другом устройстве.", false);
+    } else if(cmView && rec){
+      openFile.text = rec.text;
+      openFile.path = rec.path;
+      cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: rec.text } });
+      refreshDatesField();
+    }
   }
+
+  // ---- CRUD над notesMap — синхронные, локальные правки; в облако уходят
+  // debounce-пушем внутри binding'а (см. выше) ----
   function createNoteRecord(name, path, initialBody){
     var id = generateId();
     var today = todayRu();
     var text = buildMetaLine(today, today, today) + (initialBody || "");
-    var rec = { id: id, name: name, path: path || "", text: text, t: Date.now() };
-    notesMap.set(id, rec);
+    binding.save(id, { name: name, path: path || "", text: text });
+    var rec = notesMap.get(id);
     nameIndex.set(name.toLowerCase(), id);
-    markNoteDirty(id);
+    markReferencedNamesDirty();
     return rec;
   }
   function renameNoteRecord(id, newName){
     var rec = notesMap.get(id);
     if(!rec) return false;
     nameIndex.delete(rec.name.toLowerCase());
-    rec.name = newName;
-    rec.t = Date.now();
+    binding.save(id, { name: newName, path: rec.path, text: rec.text });
     nameIndex.set(newName.toLowerCase(), id);
-    markNoteDirty(id);
+    markReferencedNamesDirty();
     return true;
   }
   function editNoteRecordText(id, newText){
     var rec = notesMap.get(id);
     if(!rec) return;
-    rec.text = newText;
-    rec.t = Date.now();
-    markNoteDirty(id);
+    binding.save(id, { name: rec.name, path: rec.path, text: newText });
+    markReferencedNamesDirty();
   }
   function deleteNoteRecord(id){
     var rec = notesMap.get(id);
     if(!rec) return;
     nameIndex.delete(rec.name.toLowerCase());
-    rec.deleted = true;
-    rec.t = Date.now();
-    markNoteDirty(id);
+    binding.remove(id);
+    markReferencedNamesDirty();
   }
   // Правки в тексте ДРУГИХ заметок при переименовании (замена [[старое]] на
   // [[новое]] — существовавшая и раньше фича, см. историю правок) — теперь
@@ -2020,8 +2094,8 @@ window.initMdEditorModule = function(deps){
       if(!re.test(rec.text)) return;
       re.lastIndex = 0;
       rec.text = rec.text.replace(re, "[[" + newName + "]]");
-      rec.t = Date.now();
-      markNoteDirty(id);
+      binding.save(id, { name: rec.name, path: rec.path, text: rec.text });
+      markReferencedNamesDirty();
       if(openFile && openFile.id === id){
         openFile.text = rec.text;
         if(cmView) cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: rec.text } });
@@ -2115,10 +2189,10 @@ window.initMdEditorModule = function(deps){
   // parseNoteMeta/virtualLegacyDatePairRu выше). ----
   function createImportedNoteRecord(name, path, text){
     var id = generateId();
-    var rec = { id: id, name: name, path: path || "", text: text || "", t: Date.now() };
-    notesMap.set(id, rec);
+    binding.save(id, { name: name, path: path || "", text: text || "" });
+    var rec = notesMap.get(id);
     nameIndex.set(name.toLowerCase(), id);
-    markNoteDirty(id);
+    markReferencedNamesDirty();
     recordNoteCreated(name);
     return rec;
   }
@@ -2442,133 +2516,12 @@ window.initMdEditorModule = function(deps){
     });
   }
 
-  // ---- облачный пуш: debounce + повтор с нарастающей паузой, тот же
-  // принцип, что и у общего state, но полностью НЕЗАВИСИМЫЙ цикл (раздел 2
-  // ТЗ) ----
-  var notesPushTimer = null, notesRetryTimer = null, notesRetryCount = 0;
-  var notesSyncInProgress = false, notesPendingPushAfterSync = false;
-  function scheduleNotesCloudPush(){
-    if(!getSyncId()) return;
-    clearTimeout(notesRetryTimer); notesRetryCount = 0;
-    if(notesSyncInProgress){ notesPendingPushAfterSync = true; return; }
-    clearTimeout(notesPushTimer);
-    notesPushTimer = setTimeout(function(){ pushDirtyNotes(false); }, NOTES_PUSH_DEBOUNCE_MS);
-  }
-  // urgent=true — уход со страницы/заметки, просим keepalive у сети (тот
-  // же приём, что и у flushPendingSyncNow в my.js, раздел 3 ТЗ).
-  function pushDirtyNotes(urgent){
-    if(!getSyncId() || !isOnline()) return Promise.resolve();
-    if(notesSyncInProgress){ notesPendingPushAfterSync = true; return Promise.resolve(); }
-    var ids = Array.from(dirtyNoteIds);
-    if(!ids.length) return Promise.resolve();
-    notesSyncInProgress = true;
-    var patch = {};
-    return Promise.all(ids.map(function(id){
-      var rec = notesMap.get(id);
-      if(!rec) return null;
-      if(rec.deleted){
-        patch["notesMeta/" + id] = { t: rec.t, deleted: true };
-        return deleteCloudPath("notes/" + id, { keepalive: urgent }).catch(function(){});
-      }
-      return encryptNotePayload({ name: rec.name, path: rec.path, text: rec.text }).then(function(enc){
-        patch["notes/" + id] = enc;
-        patch["notesMeta/" + id] = { t: rec.t, deleted: false };
-      });
-    })).then(function(){
-      return patchCloud(patch, { keepalive: urgent });
-    }).then(function(){
-      ids.forEach(function(id){ dirtyNoteIds.delete(id); });
-      notesRetryCount = 0;
-      clearTimeout(notesRetryTimer);
-      if(notesPendingPushAfterSync){ notesPendingPushAfterSync = false; scheduleNotesCloudPush(); }
-    }).catch(function(){
-      if(notesRetryCount < NOTES_RETRY_DELAYS.length){
-        var d = NOTES_RETRY_DELAYS[notesRetryCount]; notesRetryCount++;
-        clearTimeout(notesRetryTimer);
-        notesRetryTimer = setTimeout(function(){ pushDirtyNotes(false); }, d);
-      }
-    }).finally(function(){
-      notesSyncInProgress = false;
-    });
-  }
-
-  // ---- облачный пул: раздел 4.1 ТЗ — сначала лёгкий запрос метаданных,
-  // текст только у заметок, где облачная t новее локальной ----
-  function syncNotesFromCloud(){
-    if(!getSyncId() || !isOnline()) return Promise.resolve({ hadFetchError: false });
-    // hadFetchError: true, если хотя бы одна заметка не подтянулась ниже
-    // (см. .catch у fetchCloudPath("notes/"+id)) — сообщаем об этом наружу,
-    // чтобы syncNotesOnTabEnter мог пропустить корзину сирот в этом цикле:
-    // notesMap в таком случае неполон, и cleanupOrphanedImages могла бы
-    // ошибочно счесть используемую картинку сиротой (баг от 14.09).
-    var hadFetchError = false;
-    return fetchCloudPath("notesMeta").then(function(meta){
-      meta = meta || {};
-      var toFetch = [];
-      // раздел 4.1 ТЗ: "открытая заметка... должна обновиться" — если
-      // ИМЕННО открытая сейчас в редакторе заметка пришла удалённой с
-      // другого устройства, редактор придётся закрыть; делаем это уже
-      // после того, как notesMap приведён в порядок, см. .then ниже.
-      var openFileDeletedRemotely = false;
-      Object.keys(meta).forEach(function(id){
-        var cloudEntry = meta[id] || {};
-        var local = notesMap.get(id);
-        var cloudT = typeof cloudEntry.t === "number" ? cloudEntry.t : 0;
-        var localT = local ? (local.t || 0) : -1;
-        if(cloudT <= localT) return;
-        if(cloudEntry.deleted){
-          if(local && local.name) nameIndex.delete(local.name.toLowerCase());
-          notesMap.set(id, { id: id, deleted: true, t: cloudT, name: local && local.name, path: local && local.path, text: "" });
-          markReferencedNamesDirty(); // удалённое с другого устройства могло освободить картинку
-          if(openFile && openFile.id === id && !openFile.dirty) openFileDeletedRemotely = true;
-        } else {
-          toFetch.push(id);
-        }
-      });
-      var fetchPromise = !toFetch.length ? Promise.resolve() : Promise.all(toFetch.map(function(id){
-        return fetchCloudPath("notes/" + id).then(function(enc){
-          if(!enc) return;
-          return decryptNotePayload(enc).then(function(payload){
-            var existing = notesMap.get(id);
-            if(existing && existing.name) nameIndex.delete(existing.name.toLowerCase());
-            notesMap.set(id, { id: id, name: payload.name, path: payload.path, text: payload.text, t: meta[id].t });
-            nameIndex.set(payload.name.toLowerCase(), id);
-            markReferencedNamesDirty(); // текст с другого устройства мог добавить/убрать ![[картинку]]
-            // Заметка, обновлённая с другого устройства, в этот момент
-            // открыта в редакторе на этом — подхватываем текст на месте,
-            // без пересборки всего экрана. Пропускаем, если в ней есть
-            // несохранённые локальные правки (dirty — автосохранение ещё
-            // не сбросило их в notesMap): иначе рискуем стереть то, что
-            // пользователь только что печатает. В этом случае облачная
-            // версия просто останется в notesMap и проиграет при
-            // следующем локальном flushAutosaveNow/pushDirtyNotes (t
-            // пользователя будет свежее) — тем же принципом LWW, что и у
-            // раздела 4.
-            if(openFile && openFile.id === id && !openFile.dirty && cmView){
-              openFile.text = payload.text;
-              openFile.path = payload.path;
-              cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: payload.text } });
-              refreshDatesField();
-            }
-          });
-        }).catch(function(){
-          // пропускаем одну заметку — не мешаем остальным; сам факт
-          // пропуска фиксируем во внешнем флаге (см. hadFetchError выше)
-          hadFetchError = true;
-        });
-      }));
-      return fetchPromise.then(function(){
-        persistNotesCache();
-        if(openFileDeletedRemotely){
-          openFile = null;
-          destroyEditor();
-          screen = "list";
-          setStatus("Эта заметка была удалена на другом устройстве.", false);
-        }
-        return { hadFetchError: hadFetchError };
-      });
-    });
-  }
+  // ---- облачный пуш/пул заметок — теперь целиком внутри binding'а
+  // (debounce/повтор с нарастающей паузой/лёгкий notesMeta+точечная
+  // загрузка тел — см. "Sync-engine заметок" выше и
+  // syncengine_notesbinding.js): binding.pushNow({keepalive})/
+  // binding.pullNow()/binding.syncNow() заменяют прежние
+  // scheduleNotesCloudPush/pushDirtyNotes/syncNotesFromCloud. ----
 
   // ---------------------------------------------------------------------
   // Точки входа вкладок — вызываются из switchSettingsTab при каждом
@@ -2576,30 +2529,30 @@ window.initMdEditorModule = function(deps){
   // переключения между вкладками настроек в рамках одной сессии.
   // ---------------------------------------------------------------------
   // раздел 4.1 ТЗ: лёгкая сверка с облаком (метаданные всех заметок, точечно
-  // текст только у изменившихся, см. syncNotesFromCloud) — обязательна при
-  // КАЖДОМ переходе на вкладку "Мои заметки"/"Закладки"/"Забытые заметки",
-  // а не только при самом первом её открытии за сессию (это было упущено —
-  // initNotesModule ниже запускался лишь один раз, под флагом initStarted,
-  // и на повторные заходы на вкладку сверка вообще не срабатывала). Не
-  // блокирует немедленный локальный рендер из кэша — сверка идёт фоном,
-  // экран обновляется только если результат реально что-то изменил и мы
-  // всё ещё на подходящем экране (список/закладки/забытые — не поверх
-  // активно открытого редактора, см. проверку ниже и обновление самой
-  // открытой заметки внутри syncNotesFromCloud).
+  // текст только у изменившихся, см. binding.syncNow()/pullNow выше) —
+  // обязательна при КАЖДОМ переходе на вкладку "Мои заметки"/"Закладки"/
+  // "Забытые заметки", а не только при самом первом её открытии за сессию
+  // (это было упущено — initNotesModule ниже запускался лишь один раз, под
+  // флагом initStarted, и на повторные заходы на вкладку сверка вообще не
+  // срабатывала). Не блокирует немедленный локальный рендер из кэша —
+  // сверка идёт фоном, экран обновляется только если результат реально
+  // что-то изменил и мы всё ещё на подходящем экране (список/закладки/
+  // забытые — не поверх активно открытого редактора; обновление самой
+  // открытой заметки — внутри handleNotesRemoteApplied выше).
   function syncNotesOnTabEnter(){
     if(!getSyncId() || !notesReady) return;
     // Сверка реестра картинок (ТЗ пользователя от 14.09) — та же лёгкая
     // фоновая проверка, что и у книг в renderSettingsTabBooks (my.js), не
     // блокирует рендер списка заметок ниже.
     if(deps.syncFileRegistry) deps.syncFileRegistry("images").then(buildImageIndex);
-    syncNotesFromCloud().then(function(result){
+    binding.syncNow().then(function(result){
       rebuildTree();
-      // Если хотя бы одна заметка не подтянулась (result.hadFetchError) —
+      // Если хотя бы одна заметка не подтянулась (result.pull.hadFetchError) —
       // notesMap неполон, и collectReferencedMediaNames недосчитается
       // картинок из непришедшего текста. Лучше пропустить корзину сирот в
       // этом цикле и попробовать на следующей сверке, чем удалить
       // реально используемую картинку (баг от 14.09).
-      if(!result || !result.hadFetchError){
+      if(!result || !result.pull || !result.pull.hadFetchError){
         maybeRunImageCleanup(); // свежие заметки с облака могли изменить список используемых картинок
       }
       // "Забытые заметки" кэширует список в forgottenNotesData (см. выше) и
@@ -3070,7 +3023,7 @@ window.initMdEditorModule = function(deps){
     // Крестик в шапке ОТКРЫТОЙ заметки (ТЗ пользователя от 13.09) удаляет
     // ту же заметку, что сейчас в редакторе — экран нужно сперва аккуратно
     // закрыть (та же уборка, что у "Домика"/goHome выше, кроме
-    // flushAutosaveNow/pushDirtyNotes — сохранять и слать в облако правки
+    // flushAutosaveNow/binding.pushNow — сохранять и слать в облако правки
     // в СЕЙЧАС УДАЛЯЕМУЮ запись незачем, достаточно снять таймер), иначе
     // renderListScreen ниже подменит #settingsTabContent целиком, а
     // CodeMirror (cmView) и его слушатели останутся висеть отсоединёнными
@@ -3783,7 +3736,7 @@ window.initMdEditorModule = function(deps){
 
   function goHome(){
     flushAutosaveNow();
-    pushDirtyNotes(true);
+    binding.pushNow({keepalive:true});
     destroyEditor();
     openFile = null;
     currentDirNode = rootTree;
@@ -3914,7 +3867,7 @@ window.initMdEditorModule = function(deps){
     }
     pushMdNav(function(){
       flushAutosaveNow();
-      pushDirtyNotes(true);
+      binding.pushNow({keepalive:true});
       destroyEditor();
       openFile = prevOpenFile;
       currentDirNode = prevDirNode;
@@ -3926,7 +3879,7 @@ window.initMdEditorModule = function(deps){
       }
     });
     flushAutosaveNow();
-    pushDirtyNotes(true);
+    binding.pushNow({keepalive:true});
     destroyEditor();
     var pos = typeof restorePos === "number" ? Math.max(0, Math.min(restorePos, rec.text.length)) : 0;
     var pct = typeof scrollPercent === "number" ? Math.max(0, Math.min(1, scrollPercent)) : null;
@@ -3955,7 +3908,7 @@ window.initMdEditorModule = function(deps){
     }
     pushMdNav(function(){
       flushAutosaveNow();
-      pushDirtyNotes(true);
+      binding.pushNow({keepalive:true});
       destroyEditor();
       openFile = prevOpenFile;
       currentDirNode = prevDirNode;
@@ -3967,7 +3920,7 @@ window.initMdEditorModule = function(deps){
       }
     });
     flushAutosaveNow();
-    pushDirtyNotes(true);
+    binding.pushNow({keepalive:true});
     destroyEditor();
     openFile = { id: rec.id, name: rec.name, path: rec.path, text: rec.text, dirty: false };
     screen = "editor";
@@ -3997,7 +3950,7 @@ window.initMdEditorModule = function(deps){
     }
     pushMdNav(function(){
       flushAutosaveNow();
-      pushDirtyNotes(true);
+      binding.pushNow({keepalive:true});
       destroyEditor();
       openFile = prevOpenFile;
       currentDirNode = prevDirNode;
@@ -4009,7 +3962,7 @@ window.initMdEditorModule = function(deps){
       }
     });
     flushAutosaveNow();
-    pushDirtyNotes(true);
+    binding.pushNow({keepalive:true});
     destroyEditor();
     openFile = { id: rec.id, name: rec.name, path: rec.path, text: rec.text, dirty: false };
     screen = "editor";
@@ -4349,7 +4302,7 @@ window.initMdEditorModule = function(deps){
   // поэтому шлёт правки в облако немедленно, а не по debounce.
   function flushPendingMdEditorEdit(){
     flushAutosaveNow();
-    pushDirtyNotes(true);
+    binding.pushNow({keepalive:true});
     destroyEditor();
   }
 
@@ -5138,13 +5091,13 @@ window.initMdEditorModule = function(deps){
     if(document.visibilityState === "hidden"){
       flushAutosaveNow();
       flushNotesCacheNow();
-      pushDirtyNotes(true);
+      binding.pushNow({keepalive:true});
     }
   });
   window.addEventListener("pagehide", function(){
     flushAutosaveNow();
     flushNotesCacheNow();
-    pushDirtyNotes(true);
+    binding.pushNow({keepalive:true});
   });
 
   // Просим постоянное (persistent) хранилище для origin — снижает риск,
@@ -5321,18 +5274,17 @@ window.initMdEditorModule = function(deps){
     changeFontSizeStep: changeFontSizeStep,
     FONT_SIZE_MIN_STEP: FONT_SIZE_MIN_STEP,
     FONT_SIZE_MAX_STEP: FONT_SIZE_MAX_STEP,
-    // Восстановление сети (раздел 3 ТЗ TASK_MDNOTES_CLOUD.md): pushDirtyNotes
-    // сам по себе выходит молча, если сеть недоступна (isOnline()===false),
-    // и НЕ ставит ретрай в этом случае — ретраи через NOTES_RETRY_DELAYS
-    // планируются только после реально неудавшегося сетевого запроса (см.
-    // .catch() внутри pushDirtyNotes). Значит, накопленные dirtyNoteIds сами
-    // по себе не отправятся при возврате сети — нужен внешний толчок.
+    // Восстановление сети (раздел 3 ТЗ TASK_MDNOTES_CLOUD.md): push сам по
+    // себе выходит молча, если сеть недоступна (isOnline()===false), и НЕ
+    // ставит ретрай в этом случае — ретраи планируются только после реально
+    // неудавшегося сетевого запроса (см. binding.pushNow/scheduleRetry в
+    // syncengine_notesbinding.js). Значит, накопленные dirty-записи сами по
+    // себе не отправятся при возврате сети — нужен внешний толчок.
     // Вызывается из window "online" в my.js, тем же приёмом, что и
-    // doCloudSync там же (сброс счётчика ретраев + немедленный вызов).
+    // doCloudSync там же (сброс счётчика ретраев + немедленный вызов) —
+    // теперь одним вызовом binding.retryPushOnReconnect().
     retryNotesPushOnReconnect: function(){
-      notesRetryCount = 0;
-      clearTimeout(notesRetryTimer);
-      pushDirtyNotes(false);
+      return binding.retryPushOnReconnect();
     },
     // 16.09 — см. isTaskStateReady в cleanupOrphanedImages выше: my.js
     // вызывает это сразу после того, как первый цикл doCloudSync в сессии

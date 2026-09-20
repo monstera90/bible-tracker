@@ -1,8 +1,18 @@
 /* ===========================================================================
    notifications.js
+   Версия: 3.3 (19.09) — из плашки выбора даты/времени убран крестик: остались
+   пузыри даты и времени и галочка; отмена — клик мимо плашки (или «Назад»).
+   Версия: 3.2 (19.09) — структурная правка: (1) вторая кнопка уведомления —
+   «Завтра» (action "tomorrow": напоминание переносится на завтра в то же время
+   суток, приложение выходит вперёд, плашка с новым сроком), вместо «Отложить»
+   (короткую отсрочку теперь делает системное меню Android; пузыри 30/60/2/8/24
+   остаются в карточке после клика по самому уведомлению); (2) при открытии
+   задачи из уведомления/карточки её текст мигает — серый/чёрный три раза
+   (flashTask, класс .task-text-flash в modals.css). Новые функции:
+   tomorrowSameTime, flashTask, openTaskAndFlash.
    Версия: 3.1 (19.09) — структурная правка: у системного уведомления две
    кнопки — «✓ Готово» (action "done": задача выполнена) и «Отложить» (action
-   "snooze": открывается задача и над ней карточка с пузырями 30/60/2/8/24), плюс
+   "snooze" — с 3.2 заменена на «Завтра»), плюс
    вибрация (NOTIFY_VIBRATE) и renotify. Новые функции getNotificationActions,
    handleNotificationAction.
    Парная правка sw.js сделана: notificationclick кладёт в кэш "reminder-click-temp"
@@ -304,13 +314,50 @@ window.initNotificationsModule = function(deps){
     // тап по тексту — открыть задачу (карточка закрывается)
     textEl.addEventListener("click", function(){
       hideTaskCard(id);
-      openTaskFromReminder(id);
+      openTaskAndFlash(id);
     });
     ensureStack().appendChild(card);
     cardEls[id] = card;
     // размер пузырей = размер кнопок крестик/галочка
     var h = doneBtn.getBoundingClientRect().height;
     if(h > 0) card.style.setProperty("--rb", Math.round(h * 10) / 10 + "px");
+  }
+
+  // ------------------------------------------- мигание текста задачи
+
+  // серый/чёрный три раза (CSS-анимация .task-text-flash), чтобы среди всех
+  // строк сразу было видно, какая задача пришла из уведомления. Строка
+  // появляется не сразу (переключение вкладки + прокрутка к ней в
+  // openReminderTask), поэтому ищем её до ~2.5 сек и стартуем не раньше
+  // чем через 350 мс, когда прокрутка уже встала на место
+  var FLASH_START_MIN_MS = 350;
+  var FLASH_GIVE_UP_MS = 2500;
+  function flashTask(id){
+    var startedAt = Date.now();
+    (function attempt(){
+      var el = null;
+      var rows = document.querySelectorAll('.task-body[data-id="' + id + '"]');
+      for(var i = 0; i < rows.length && !el; i++){
+        if(rows[i].offsetParent === null) continue;
+        el = rows[i].querySelector(".task-text-view") || rows[i].querySelector(".task-editable");
+      }
+      var waited = Date.now() - startedAt;
+      if(el && waited >= FLASH_START_MIN_MS){
+        el.classList.remove("task-text-flash");
+        void el.offsetWidth; // перезапуск анимации
+        el.classList.add("task-text-flash");
+        el.addEventListener("animationend", function done(){
+          el.classList.remove("task-text-flash");
+          el.removeEventListener("animationend", done);
+        });
+        return;
+      }
+      if(waited < FLASH_GIVE_UP_MS) setTimeout(attempt, 100);
+    })();
+  }
+  function openTaskAndFlash(id){
+    openTaskFromReminder(id);
+    flashTask(id);
   }
 
   function findTask(id){
@@ -320,15 +367,24 @@ window.initNotificationsModule = function(deps){
     return null;
   }
 
-  // две кнопки уведомления (Chrome для Android показывает не больше двух;
+  // две кнопки уведомления: «✓ Готово» и «Завтра» (Chrome для Android показывает не больше двух;
   // Notification.maxActions = 0 — кнопок нет вообще)
   function getNotificationActions(){
     var max = (typeof Notification !== "undefined" && typeof Notification.maxActions === "number") ? Notification.maxActions : 2;
     var all = [
       {action: "done", title: "✓ Готово"},
-      {action: "snooze", title: "Отложить"}
+      {action: "tomorrow", title: "Завтра"}
     ];
     return all.slice(0, Math.max(0, max));
+  }
+
+  // завтра в то же время суток, что было у напоминания (нет срока — как сейчас)
+  function tomorrowSameTime(baseTs){
+    var b = new Date(baseTs || Date.now());
+    var d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(b.getHours(), b.getMinutes(), 0, 0);
+    return d.getTime();
   }
 
   // что делать после клика по уведомлению или его кнопке
@@ -341,12 +397,21 @@ window.initNotificationsModule = function(deps){
       showBanner("Задача выполнена" + (text ? ": " + text : ""));
       return;
     }
-    openFromNotification(id); // «Отложить» и клик по самому уведомлению
+    if(action === "tomorrow"){
+      var task = findTask(id);
+      if(!task || (task.c && task.c.checked === true)) return;
+      var ts = tomorrowSameTime(getRemindAt(task));
+      snoozeTask(id, ts);
+      schedule();
+      showBanner("Напоминание перенесено на " + formatReminder(ts) + ": " + cleanText(task.c && task.c.text));
+      return;
+    }
+    openFromNotification(id); // клик по самому уведомлению
   }
 
   // клик по системному уведомлению: открыть задачу и показать над ней карточку
   function openFromNotification(id){
-    openTaskFromReminder(id);
+    openTaskAndFlash(id);
     var t = findTask(id);
     if(t && !(t.c && t.c.checked === true)) showTaskCard(id, cleanText(t.c && t.c.text), null);
   }
@@ -545,7 +610,6 @@ window.initNotificationsModule = function(deps){
     bar.innerHTML =
       '<button type="button" class="reminder-bubble reminder-bubble-date" id="mRemDateBtn" title="Дата"></button>' +
       '<button type="button" class="reminder-bubble reminder-bubble-time" id="mRemTimeBtn" title="Время"></button>' +
-      '<button type="button" class="mdeditor-fab-btn" id="mRemCancel" title="Отмена">' + ICON_CROSS + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="mRemSave" title="Сохранить">' + ICON_CHECK + '</button>' +
       '<input type="date" class="reminder-hidden-input" id="mRemDateInput" tabindex="-1" aria-hidden="true">' +
       '<input type="time" class="reminder-hidden-input" id="mRemTimeInput" tabindex="-1" aria-hidden="true">';
@@ -553,7 +617,7 @@ window.initNotificationsModule = function(deps){
     barEl = bar;
     // высота пузырей = высота кнопок крестик/галочка (их размер задаёт
     // .mdeditor-fab-btn в components.css) — замеряем и отдаём в CSS
-    var fabH = bar.querySelector("#mRemCancel").getBoundingClientRect().height;
+    var fabH = bar.querySelector("#mRemSave").getBoundingClientRect().height;
     if(fabH > 0) bar.style.setProperty("--rb", Math.round(fabH * 10) / 10 + "px");
 
     var dateBtn = bar.querySelector("#mRemDateBtn");
@@ -620,7 +684,6 @@ window.initNotificationsModule = function(deps){
     // нажатие на плашку не отнимает фокус у поля задачи (иначе клавиатура
     // закроется и всё «поедет»)
     bar.addEventListener("mousedown", function(e){ e.preventDefault(); });
-    bar.querySelector("#mRemCancel").addEventListener("click", closeBar);
 
     dateBtn.addEventListener("click", function(){ openNativePicker(dateInput); });
     timeBtn.addEventListener("click", function(){ openNativePicker(timeInput); });
