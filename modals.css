@@ -1,5 +1,9 @@
 /* ===========================================================================
    modals.css
+   Версия: 4.0 (20.09) — структурная правка (ТЗ пользователя от 20.09): новые
+   классы экрана «Форматирование заметок» (кнопка «i» в заметках, mdeditor.js):
+   .note-info-btn, .note-info-mark, .note-info-code, .note-info-sub,
+   .note-info-inline — рядом с .task-info-* (переиспользуют их).
    Версия: 3.1 (19.09) — пузыри плашки напоминания: высота из переменной --rb (JS ставит её равной высоте кнопок крестик/галочка), размеры иконки/шрифта/овала считаются от неё; плашка позиционируется JS (left/top), затемнения у неё больше нет.
    Версия: 3.0 (19.09) — структурная правка: диалог напоминания (notifications.js) переделан в плашку. Удалены
    .reminder-fields, .reminder-field, .reminder-field-label, .reminder-field-value и правило для p.reminder-error; добавлены
@@ -1777,6 +1781,64 @@
     box-sizing:border-box;
   }
   .task-info-tab-mini svg{ width:16px; height:16px; }
+
+  /* Экран-инструкция «Форматирование заметок» (openNoteInfoScreen/
+     renderNoteInfoScreen в mdeditor.js, кнопка «i» в нижнем ряду заметки, ТЗ
+     пользователя от 20.09) — те же .task-info-body/-item/-icon/-text, что у
+     «Кнопки задач» выше, плюс свои мелочи: .note-info-btn — нарисованная
+     копия настоящей кнопки ряда (26×26, не нажимается), .note-info-mark —
+     просто символ разметки в колонке значков (без рамки), .note-info-code —
+     кусок разметки в тексте пункта, .note-info-sub — строка «мини-кнопка +
+     что она ставит» внутри пункта (Ж/К/П/Ч), .note-info-inline — иконка
+     внутри строки текста. Стоят ПОСЛЕ .task-info-icon svg, чтобы размер
+     значка внутри .note-info-btn (15px) перебивал общие 22px. */
+  .note-info-btn{
+    width:26px;height:26px;
+    box-sizing:border-box;
+    flex-shrink:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    border-radius:7px;
+    color:var(--wood);
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:12px;
+    font-weight:bold;
+    line-height:1;
+    box-shadow:0 1px 3px rgba(0,0,0,.25);
+    pointer-events:none;
+  }
+  .note-info-btn svg{ width:15px; height:15px; }
+  .note-info-mark{
+    font-family:Consolas,"Courier New",monospace;
+    font-size:12px;
+    font-weight:bold;
+    line-height:1;
+    color:var(--wood);
+    white-space:nowrap;
+  }
+  .note-info-code{
+    font-family:Consolas,"Courier New",monospace;
+    font-size:.9em;
+    background:var(--parchment-dark, rgba(0,0,0,.07));
+    border-radius:4px;
+    padding:0 4px;
+    white-space:nowrap;
+  }
+  .note-info-sub{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-top:8px;
+  }
+  .note-info-inline{
+    display:inline-flex;
+    vertical-align:middle;
+    color:var(--wood);
+  }
+  .note-info-inline svg{ width:16px; height:16px; }
 
   /* Экран "Все задачи проекта" (openTaskNextPicker в my.js) — не
      отдельное окно, а замена содержимого прямо в #settingsTabContent

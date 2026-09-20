@@ -1,5 +1,28 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 6.0 (20.09) — структурная правка: белый экран после сворачивания
+   (п.2 ТЗ от 20.09) теперь сохраняет ТОЧНОЕ положение экрана — прокрутка
+   запоминается в пикселях в момент сворачивания (rememberScrollBeforeHide,
+   scrollBeforeHide) и возвращается на возврате и после перемонтирования
+   (applyScrollTop, restoreScrollAfterMount); пинок перерисовки больше не
+   прячет редактор через display:none (это могло сбросить прокрутку) — теперь
+   visibility; в лог отладки пишется прокрутка до/после. Не трогаем прокрутку,
+   если пользователь уже коснулся экрана.
+   Версия: 5.0 (20.09) — структурная правка (ТЗ пользователя от 20.09, пять
+   пунктов по заметкам/режиму чтения): (1) размер шрифта «Аа» теперь СВОЙ у
+   режима чтения и свой у обычного режима (fontSizeStep / fontSizeStepReading,
+   getActiveFontSizeStep; ключи IndexedDB fontSizeStep / fontSizeStepReading);
+   при входе/выходе из режима чтения my.js зовёт MdEditor.applyFontSize() —
+   шрифт сразу возвращается к тому, что был для этого режима; (2) белый экран
+   после сворачивания приложения с открытой заметкой — на возврат
+   (visibilitychange/pageshow) scheduleEditorRepairAfterResume перерисовывает
+   область и перемонтирует редактор (remountEditorInPlace) — то же, что
+   происходит при уходе на другую вкладку и возврате; (3) кнопка «i» в нижнем
+   ряду заметки — экран-инструкция по форматированию (openNoteInfoScreen/
+   closeNoteInfoScreen/renderNoteInfoScreen, флаг noteInfoOpen; deps
+   INFO_ICON_SVG); (4) ссылки [[ ]] в шапке заметки — по левому краю
+   (components.css, .mdeditor-links-row); (5) подъём текста над клавиатурой в
+   заметке — в my.js (initTaskKeyboardLift), здесь ничего не менялось.
    Версия: 4.0 (19.09) — TASK_UNIFIED_SYNC.md, шаг 5.2: облачная синхронизация
    заметок переведена на общий sync-engine (см. syncengine.js/
    syncengine_notescrypto.js/syncengine_notesbinding.js, шаги 1 и 5.1).
@@ -95,6 +118,9 @@ window.initMdEditorModule = function(deps){
   // .reading-mode-btn) — одно место на все такие кнопки приложения.
   var toggleReadingMode = deps.toggleReadingMode || function(){};
   var applyReadingModeVisual = deps.applyReadingModeVisual || function(){};
+  // Кнопка «i» в нижнем ряду редактора заметки (ТЗ пользователя от 20.09) —
+  // та же пиктограмма, что у «i» на вкладках задач (INFO_ICON_SVG в my.js).
+  var INFO_ICON_SVG = deps.INFO_ICON_SVG || "i";
   var getSyncedBookmarkNames = deps.getSyncedBookmarkNames || function(){ return []; };
   var setSyncedBookmark = deps.setSyncedBookmark || function(){};
   var recordNoteCreated = deps.recordNoteCreated || function(){};
@@ -756,6 +782,7 @@ window.initMdEditorModule = function(deps){
   // файлом через Syncthing вместе с самими заметками — этого канала больше
   // нет). Хранится только в IndexedDB (idbSet("lastNote", ...)).
   var docState = { screen: null, id: null, name: null, cursorPos: 0, scrollPercent: null, updatedAt: 0 };
+  var noteInfoOpen = false;       // открыт экран-инструкция «Форматирование заметок» поверх открытой заметки (кнопка «i»)
   var screen = "setup";          // "setup" (нет синхронизации/не готово) | "list" | "editor"
   var attachPickerBusy = false;
   var statusMessage = "", statusIsError = false;
@@ -1671,6 +1698,19 @@ window.initMdEditorModule = function(deps){
   var FONT_SIZE_MIN_STEP = -6;
   var FONT_SIZE_MAX_STEP = 12;
   var fontSizeStep = 0;
+  // ТЗ пользователя от 20.09: у режима чтения (полноэкранный режим, флаг и
+  // переключатель — в my.js, getReadingModeActive/toggleReadingMode) СВОЙ
+  // размер шрифта, независимый от обычного: регулировка «Аа» в режиме чтения
+  // не трогает обычный размер и наоборот; при входе/выходе из режима чтения
+  // размер сразу возвращается к тому, что был выставлен для ЭТОГО режима
+  // (my.js зовёт applyFontSize из toggleReadingMode). null — режим чтения ни
+  // разу не регулировали отдельно: пока так, он показывает тот же размер, что
+  // и обычный (чтобы после обновления шрифт не «прыгнул»); первая же правка в
+  // режиме чтения отталкивается от него и сохраняется уже отдельно. Оба
+  // размера по-прежнему ЕДИНЫЕ на всё приложение (заметки, задачи, книги,
+  // поиск — все читают одну переменную --mdeditor-font-size).
+  var fontSizeStepReading = null;
+  var getReadingModeActive = deps.getReadingModeActive || function(){ return false; };
   var fontSizePanelOpen = false; // временные кнопки "+"/"-" сейчас показаны?
   var formatPanelOpen = false; // попап "Ж"/"К"/"П"/"Ч" сейчас показан?
 
@@ -1688,25 +1728,38 @@ window.initMdEditorModule = function(deps){
   // остаются на старом месте — отсюда и лишний перенос кнопок на
   // отдельную строку даже там, где после реального размера шрифта места
   // достаточно (см. ТЗ пользователя от 31.08).
+  function clampFontSizeStep(v){
+    return Math.max(FONT_SIZE_MIN_STEP, Math.min(FONT_SIZE_MAX_STEP, v));
+  }
+  // шаг, действующий ПРЯМО СЕЙЧАС — по флагу режима чтения из my.js
+  function getActiveFontSizeStep(){
+    if(getReadingModeActive() && fontSizeStepReading !== null) return fontSizeStepReading;
+    return fontSizeStep;
+  }
   function applyFontSize(){
-    var px = (FONT_SIZE_BASE_PX + fontSizeStep * FONT_SIZE_STEP_PX) + "px";
+    var px = (FONT_SIZE_BASE_PX + getActiveFontSizeStep() * FONT_SIZE_STEP_PX) + "px";
     document.documentElement.style.setProperty("--mdeditor-font-size", px);
     refitAllVisibleTaskBodies();
   }
   function changeFontSizeStep(delta){
-    var next = fontSizeStep + delta;
+    var reading = getReadingModeActive();
+    var next = getActiveFontSizeStep() + delta;
     if(next < FONT_SIZE_MIN_STEP || next > FONT_SIZE_MAX_STEP) return;
-    fontSizeStep = next;
+    if(reading){
+      fontSizeStepReading = next;
+      idbSet("fontSizeStepReading", fontSizeStepReading).catch(function(){});
+    } else {
+      fontSizeStep = next;
+      idbSet("fontSizeStep", fontSizeStep).catch(function(){});
+    }
     applyFontSize();
-    idbSet("fontSizeStep", fontSizeStep).catch(function(){});
   }
   // применяется сразу, не дожидаясь открытия вкладки "Мои заметки" (см.
   // пояснение выше) — idbGet/idbSet объявлены ниже как function-декларации
   // и поэтому уже доступны здесь благодаря hoisting.
-  idbGet("fontSizeStep").then(function(savedStep){
-    if(typeof savedStep === "number" && isFinite(savedStep)){
-      fontSizeStep = Math.max(FONT_SIZE_MIN_STEP, Math.min(FONT_SIZE_MAX_STEP, savedStep));
-    }
+  Promise.all([idbGet("fontSizeStep"), idbGet("fontSizeStepReading")]).then(function(saved){
+    if(typeof saved[0] === "number" && isFinite(saved[0])) fontSizeStep = clampFontSizeStep(saved[0]);
+    if(typeof saved[1] === "number" && isFinite(saved[1])) fontSizeStepReading = clampFontSizeStep(saved[1]);
     applyFontSize();
   }).catch(function(){ applyFontSize(); });
   // закладки — теперь читаются из синхронизируемого state my.js (см.
@@ -2661,7 +2714,11 @@ window.initMdEditorModule = function(deps){
     // обычного списка/редактора, показывается только когда папка уже
     // выбрана и просканирована.
     if(activeMdTab === "forgotten" && rootTree){ renderForgottenNotesScreen(container); return; }
-    if(screen === "editor" && openFile) renderEditorScreen(container);
+    // экран-инструкция «i» живёт только поверх открытой заметки — ушли из неё
+    // (список, другая заметка, удаление) — флаг сам гаснет
+    if(screen !== "editor" || !openFile) noteInfoOpen = false;
+    if(screen === "editor" && openFile && noteInfoOpen) renderNoteInfoScreen(container);
+    else if(screen === "editor" && openFile) renderEditorScreen(container);
     else if(screen === "list" && currentDirNode) renderListScreen(container);
     else renderSetupScreen(container);
   }
@@ -3507,6 +3564,128 @@ window.initMdEditorModule = function(deps){
     });
   }
 
+  // ---------------------------------------------------------------------
+  // Экран-инструкция «Форматирование заметок» (кнопка «i» в нижнем ряду
+  // заметки, ТЗ пользователя от 20.09) — по образцу «Кнопки задач»
+  // (renderTaskInfoScreen в my.js, те же классы .task-info-* из modals.css):
+  // подменяет #settingsTabContent целиком, внизу один настоящий «домик»,
+  // остальные пиктограммы просто нарисованы (<span>, без обработчиков).
+  // Заметка при этом «закрывается» так же, как при уходе на другую вкладку
+  // (правки сброшены, редактор разобран, позиция курсора/прокрутки записана
+  // в openFile) и на возврате собирается заново через обычный render().
+  // ---------------------------------------------------------------------
+  function openNoteInfoScreen(){
+    if(!openFile) return;
+    var prevOpenFile = openFile;
+    flushAutosaveNow(); // текст + курсор + прокрутка
+    destroyEditor();
+    // «Действие ВПЕРЁД»: системная кнопка «назад» вернёт в заметку
+    pushMdNav(function(){
+      openFile = prevOpenFile;
+      screen = "editor";
+      noteInfoOpen = false;
+      render();
+    });
+    noteInfoOpen = true;
+    render();
+  }
+  function closeNoteInfoScreen(){
+    if(!noteInfoOpen || !openFile) return;
+    var prevOpenFile = openFile;
+    // возврат с экрана «i» в заметку — тоже шаг вперёд: «назад» из заметки
+    // снова открывает инструкцию (тот же приём, что у домика в renderTaskInfoScreen)
+    pushMdNav(function(){
+      flushAutosaveNow();
+      destroyEditor();
+      openFile = prevOpenFile;
+      screen = "editor";
+      noteInfoOpen = true;
+      render();
+    });
+    noteInfoOpen = false;
+    render();
+  }
+
+  function renderNoteInfoScreen(container){
+    // декоративная «кнопка» (26×26, как настоящая кнопка ряда) и «метка» —
+    // просто символ разметки без рамки; обе в колонке значков .task-info-icon
+    function btnIcon(inner, extraCls){
+      return '<span class="note-info-btn' + (extraCls ? " " + extraCls : "") + '">' + inner + '</span>';
+    }
+    function markIcon(txt){
+      return '<span class="note-info-mark">' + escapeHtml(txt) + '</span>';
+    }
+    function code(txt){
+      return '<span class="note-info-code">' + escapeHtml(txt) + '</span>';
+    }
+    function row(iconHtml, html){
+      return '<div class="task-info-item"><div class="task-info-icon">' + iconHtml + '</div><div class="task-info-text">' + html + '</div></div>';
+    }
+    // строка внутри пункта: мини-кнопка + что она ставит
+    function subRow(btnHtml, html){
+      return '<div class="note-info-sub">' + btnHtml + '<span>' + html + '</span></div>';
+    }
+    var doneIcon = '<span class="task-icon-btn">' + CHECK_ICON_SVG + '</span>';
+    var moveIcon = '<span class="task-icon-btn">' + ARROW_MOVE_ICON_SVG + '</span>';
+
+    var html = '';
+    // --- разметка в тексте ---
+    html += row(markIcon("#"),
+      "Заголовок: " + code("# ") + ", " + code("## ") + " или " + code("### ") +
+      " в начале строки (после знака — пробел). Чем меньше решёток, тем крупнее заголовок.");
+    html += row(markIcon(">"),
+      "Цитата: " + code("> ") + " в начале строки — вся строка оформляется как цитата.");
+    html += row(markIcon("•"),
+      "Список: " + code("- ") + " или " + code("* ") + " и пробел в начале строки — маркированный пункт; " +
+      code("1. ") + " или " + code("1) ") + " — нумерованный.");
+    html += row(markIcon("[ ]"),
+      "Задача прямо в заметке: " + code("- [ ] текст") + ". Справа от неё появляются две кнопки: " + doneIcon +
+      " — отметить выполненной (в заметке " + code("[ ]") + " станет " + code("[x]") +
+      ", а сама задача уйдёт в архив задач) и " + moveIcon +
+      " — перенести на выбранную вкладку задач (сама заметка не меняется, это односторонний перенос).");
+    html += row(markIcon("[["),
+      "Ссылка на другую заметку: " + code("[[название]]") + ". Нажатие открывает заметку с таким названием, а если её ещё нет — создаёт новую. " +
+      "Все заметки, на которые ссылается эта, показываются в шапке под названием — нажатие по названию тоже открывает её.");
+    html += row(btnIcon(PAPERCLIP_ICON_SVG),
+      "Картинка: " + code("![[имя.png]]") + ". Кнопка со скрепкой вставляет картинку в то место, где стоит курсор.");
+    html += row(markIcon("www"),
+      "Адреса сайтов (" + code("https://…") + ", " + code("www.…") + ") и ссылки на стихи Библии (например «Матфея 5:3») распознаются сами — ничего набирать не нужно.");
+
+    // --- выделенный текст: кнопки Ж / К / П / Ч и маркер ---
+    html += row(btnIcon("Ж", "fmt-btn-bold"),
+      "Оформление выделенного текста: сначала выделите текст, затем нажмите «Ж» — над ней раскроются четыре кнопки. " +
+      "То же самое можно набрать вручную:" +
+      subRow(btnIcon("Ж", "fmt-btn-bold"), code("**жирный**")) +
+      subRow(btnIcon("К", "fmt-btn-italic"), code("*курсив*") + " или " + code("_курсив_")) +
+      subRow(btnIcon("П", "fmt-btn-underline"), code("++подчёркнутый++")) +
+      subRow(btnIcon("Ч", "fmt-btn-strike"), code("~~зачёркнутый~~")));
+    html += row(btnIcon(HIGHLIGHT_ICON_SVG),
+      "Текстовыделитель: выделите текст и нажмите кнопку — он будет выделен цветом. В тексте это " + code("==выделенный==") + ".");
+
+    // --- остальные кнопки нижнего ряда ---
+    html += row(btnIcon(CODE_ICON_SVG),
+      "Переключает режим показа: без символов разметки (красиво оформленный текст) и «с кодом» — видны все " +
+      code("**") + ", " + code(">") + ", " + code("[[ ]]") + ". Удобно, когда нужно поправить сами символы. Иконка меняется на глаз " +
+      "(" + '<span class="note-info-inline">' + EYE_ICON_SVG + '</span>' + "), пока показан код.");
+    html += row(btnIcon("Аа"),
+      "Размер шрифта: «+» крупнее, «−» мельче, один и тот же на всех вкладках приложения. В режиме чтения (кнопка ниже) размер запоминается отдельно от обычного.");
+    html += row(btnIcon("", "reading-mode-btn"),
+      "Режим чтения: прячет ряды вкладок и растягивает окно на весь экран; повторное нажатие возвращает всё обратно.");
+    html += row(btnIcon(DOWNLOAD_ICON_SVG), "Скачивает эту заметку файлом .md.");
+    html += row(btnIcon(HOME_ICON_SVG), "Возвращает к списку заметок.");
+
+    container.innerHTML =
+      '<h3 class="common-tab-title">Форматирование заметок</h3>' +
+      '<div class="task-info-body">' + html + '</div>' +
+      '<div class="mdeditor-fab-row">' +
+        '<button type="button" class="mdeditor-fab-btn" id="mdEditorInfoHomeBtn" title="Назад к заметке">' + HOME_ICON_SVG + '</button>' +
+      '</div>';
+    container.scrollTop = 0;
+    applyReadingModeVisual(); // иконка декоративной кнопки режима чтения (.reading-mode-btn)
+    var homeBtn = document.getElementById("mdEditorInfoHomeBtn");
+    if(homeBtn) homeBtn.addEventListener("click", closeNoteInfoScreen);
+  }
+
   function renderEditorScreen(container){
     fontSizePanelOpen = false; // экран перерисован заново — попап "+"/"-" каждый раз стартует закрытым
     formatPanelOpen = false; // и попап "Ж"/"К"/"П"/"Ч" тоже
@@ -3523,6 +3702,7 @@ window.initMdEditorModule = function(deps){
         '<div class="mdeditor-editor-host" id="mdEditorHost"></div>' +
         '<input type="file" accept="image/*" id="mdEditorImageInput" style="display:none;">' +
         '<div class="mdeditor-fab-row">' +
+          '<button type="button" class="mdeditor-fab-btn" id="mdEditorInfoBtn" title="Как работает форматирование">' + INFO_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorDownloadBtn" title="Скачать .md">' + DOWNLOAD_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="mdEditorReadingBtn" title="Режим чтения"></button>' +
           '<span class="mdeditor-fontsize-wrap" id="mdEditorFormatWrap">' +
@@ -3678,6 +3858,17 @@ window.initMdEditorModule = function(deps){
     });
 
     document.getElementById("mdEditorDownloadBtn").addEventListener("click", downloadSingleNote);
+
+    // Кнопка «i» — экран-инструкция по форматированию (ТЗ пользователя от
+    // 20.09), тем же приёмом, что «i» на вкладках задач (renderTaskInfoScreen
+    // в my.js): подменяет содержимое вкладки, внизу один «домик» — назад к
+    // заметке. mousedown с preventDefault — как у остальных кнопок ряда, чтобы
+    // не забирать фокус/выделение у CodeMirror до самого клика.
+    var infoBtn = document.getElementById("mdEditorInfoBtn");
+    if(infoBtn){
+      infoBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      infoBtn.addEventListener("click", openNoteInfoScreen);
+    }
 
     // Кнопка режима чтения (ТЗ пользователя от 19.09) — тот же переключатель,
     // что и на вкладках задач/в ридере книг (см. toggleReadingMode в my.js).
@@ -3852,6 +4043,7 @@ window.initMdEditorModule = function(deps){
   var searchHighlightWords = [];
   var searchHighlightForNoteId = null;
   function openNoteById(id, restorePos, scrollPercent, highlightWords){
+    noteInfoOpen = false; // открывается заметка — экран «i» (если был) закрыт
     var rec = notesMap.get(id);
     if(!rec || rec.deleted){
       setStatus("Заметка не найдена.", true);
@@ -4304,6 +4496,7 @@ window.initMdEditorModule = function(deps){
     flushAutosaveNow();
     binding.pushNow({keepalive:true});
     destroyEditor();
+    noteInfoOpen = false; // экран «i» при уходе на другую вкладку не запоминается
   }
 
   function destroyEditor(){
@@ -5100,6 +5293,149 @@ window.initMdEditorModule = function(deps){
     binding.pushNow({keepalive:true});
   });
 
+  // ---------------------------------------------------------------------
+  // ТЗ пользователя от 20.09: «когда я сворачиваю приложение, а у меня
+  // открыта заметка, отображается белый экран; если сменить вкладку и
+  // вернуться — заметка снова нормально отображается». Область заметки —
+  // сам #settingsTabContent (у .cm-scroller overflow:visible, редактор
+  // растёт на весь текст и не прокручивается сам, см. components.css), а
+  // CodeMirror рисует только те строки, что попадают во «вьюпорт», который
+  // он меряет через rAF/наблюдатели — пока страница свёрнута, они стоят, и
+  // на возврате измерение остаётся устаревшим: строки не дорисованы (пустая
+  // область). Уход на другую вкладку и возврат лечит это тем, что редактор
+  // собирается заново — то же самое (мягко, по необходимости) делаем сами:
+  //   1) сразу на возврате — принудительное измерение CodeMirror + пинок
+  //      перерисовки области (display none/back с возвратом scrollTop);
+  //   2) через 150 и 600 мс проверяем, что видимые строки реально есть; если
+  //      область по-прежнему пуста — remountEditorInPlace (как при возврате
+  //      с другой вкладки: текст/курсор/прокрутка сохранены и восстановлены).
+  // Здоровый редактор не трогаем (в т.ч. пока открыт системный выбор картинки
+  // для скрепки — на возврате из него строки на месте и перемонтирования нет).
+  // Диагностика — в панель отладки (Debug.log, если включена галочка).
+  // ---------------------------------------------------------------------
+  // Положение экрана (ТЗ пользователя от 20.09, второй заход: «нужно, чтобы
+  // сохранялось предыдущее положение экрана, а не просто перерисовка»): ровно
+  // то место, где заметка была прокручена, запоминается В МОМЕНТ сворачивания
+  // (scrollBeforeHide, в пикселях — не в процентах, как при возврате с другой
+  // вкладки: процент считается от высоты, которую CodeMirror ещё только
+  // оценивает, и после сборки редактора «уезжает») и возвращается на возврате
+  // и после перемонтирования. Если пользователь успел сам коснуться экрана
+  // (touchstart/wheel/keydown) — его прокрутку не трогаем.
+  var resumeRepairTimers = [];
+  var scrollBeforeHide = null;
+  var userTouchedSinceResume = false;
+  ["touchstart", "wheel", "keydown"].forEach(function(evName){
+    document.addEventListener(evName, function(){ userTouchedSinceResume = true; }, true);
+  });
+  function editorIsShown(){
+    var host = document.getElementById("mdEditorHost");
+    return !!(host && cmView && openFile && screen === "editor" && !noteInfoOpen && host.getClientRects().length);
+  }
+  // true — редактор на экране, но ни одной видимой строки в области нет
+  function editorLooksBlank(){
+    var host = document.getElementById("mdEditorHost");
+    var sc = document.getElementById("settingsTabContent");
+    if(!host || !sc) return false;
+    var box = sc.getBoundingClientRect();
+    var lines = host.querySelectorAll(".cm-line");
+    if(!lines.length) return true;
+    for(var i = 0; i < lines.length; i++){
+      var r = lines[i].getBoundingClientRect();
+      if(r.height > 0 && r.bottom > box.top && r.top < box.bottom) return false;
+    }
+    return true;
+  }
+  function rememberScrollBeforeHide(){
+    var sc = document.getElementById("settingsTabContent");
+    scrollBeforeHide = (sc && editorIsShown()) ? sc.scrollTop : null;
+  }
+  // scrollTop назначается только после принудительного пересчёта раскладки —
+  // иначе браузер зажимает его по старым (ещё не пересчитанным) размерам
+  // (та же причина, что описана в layoutSettingsModal в my.js)
+  function applyScrollTop(top){
+    var sc = document.getElementById("settingsTabContent");
+    if(!sc || top === null || top === undefined) return;
+    void sc.offsetHeight;
+    sc.scrollTop = top;
+  }
+  function nudgeEditorRepaint(){
+    var host = document.getElementById("mdEditorHost");
+    var sc = document.getElementById("settingsTabContent");
+    if(!host || !cmView) return;
+    try{ cmView.requestMeasure(); }catch(e){}
+    var st = sc ? sc.scrollTop : 0;
+    // visibility, а не display:none — раскладка не меняется, прокрутка не сдвигается
+    host.style.visibility = "hidden";
+    void host.offsetHeight;
+    host.style.visibility = "";
+    void host.offsetHeight;
+    if(sc && sc.scrollTop !== st) sc.scrollTop = st;
+  }
+  // после remount редактор собирается асинхронно (loadCM().then в mountEditor) и
+  // высота документа устаканивается не сразу (картинки, виджеты) — ждём
+  // появления cmView и возвращаем прокрутку несколько раз с нарастающей паузой
+  function restoreScrollAfterMount(file, top){
+    if(top === null || top === undefined) return;
+    var tries = 0;
+    (function waitForEditor(){
+      if(openFile !== file || screen !== "editor" || noteInfoOpen) return;
+      if(!cmView){ if(++tries < 60) setTimeout(waitForEditor, 50); return; }
+      [0, 100, 300, 800].forEach(function(ms){
+        setTimeout(function(){
+          if(openFile !== file || screen !== "editor" || noteInfoOpen || userTouchedSinceResume) return;
+          applyScrollTop(top);
+          var sc = document.getElementById("settingsTabContent");
+          if(window.Debug) window.Debug.log("mdeditor: после перемонтирования вернула прокрутку " + top + " → " + (sc ? sc.scrollTop : "?") + " (через " + ms + " мс)");
+        }, ms);
+      });
+    })();
+  }
+  function remountEditorInPlace(top){
+    var container = document.getElementById("settingsTabContent");
+    if(!container || !openFile || screen !== "editor" || noteInfoOpen) return;
+    var file = openFile;
+    flushAutosaveNow(); // текст + курсор в openFile для mountEditor
+    destroyEditor();
+    render();
+    restoreScrollAfterMount(file, top);
+  }
+  function scheduleEditorRepairAfterResume(){
+    resumeRepairTimers.forEach(function(t){ clearTimeout(t); });
+    resumeRepairTimers = [];
+    if(!editorIsShown()) return;
+    var sc = document.getElementById("settingsTabContent");
+    var target = (scrollBeforeHide !== null) ? scrollBeforeHide : (sc ? sc.scrollTop : null);
+    userTouchedSinceResume = false;
+    if(window.Debug){
+      var host0 = document.getElementById("mdEditorHost");
+      window.Debug.log("mdeditor: возврат в приложение — прокрутка до сворачивания=" + scrollBeforeHide + ", сейчас=" + (sc ? sc.scrollTop : "?") +
+        ", высота=" + (sc ? sc.scrollHeight + "/" + sc.clientHeight : "?") + ", строк CodeMirror=" + (host0 ? host0.querySelectorAll(".cm-line").length : "?"));
+    }
+    nudgeEditorRepaint();
+    applyScrollTop(target);
+    [150, 600].forEach(function(ms){
+      resumeRepairTimers.push(setTimeout(function(){
+        if(!editorIsShown()) return;
+        var sc2 = document.getElementById("settingsTabContent");
+        var blank = editorLooksBlank();
+        if(window.Debug) window.Debug.log("mdeditor: проверка через " + ms + " мс — " + (blank ? "область пуста, перемонтирую редактор" : "строки на месте") + ", прокрутка=" + (sc2 ? sc2.scrollTop : "?") + ", ждали=" + target);
+        if(blank){ remountEditorInPlace(target); return; }
+        // строки на месте — если браузер при этом сбросил прокрутку, возвращаем её
+        if(!userTouchedSinceResume && sc2 && target !== null && Math.abs(sc2.scrollTop - target) > 2){
+          applyScrollTop(target);
+          if(window.Debug) window.Debug.log("mdeditor: прокрутка сбилась — вернула на " + target + " → " + sc2.scrollTop);
+        }
+        if(ms === 150) nudgeEditorRepaint();
+      }, ms));
+    });
+  }
+  document.addEventListener("visibilitychange", function(){
+    if(document.visibilityState === "hidden") rememberScrollBeforeHide();
+    else if(document.visibilityState === "visible") scheduleEditorRepairAfterResume();
+  });
+  window.addEventListener("pagehide", rememberScrollBeforeHide);
+  window.addEventListener("pageshow", function(){ scheduleEditorRepairAfterResume(); });
+
   // Просим постоянное (persistent) хранилище для origin — снижает риск,
   // что браузер под давлением на память сам решит вытеснить данные
   // origin'а (в т.ч. содержимое OPFS — папку images/, см. ниже), что было
@@ -5270,8 +5606,11 @@ window.initMdEditorModule = function(deps){
     // initTaskGlobalToolbar в my.js и ТЗ пользователя от 31.08) — тот же
     // общий размер шрифта и то же форматирование выделения, что и в
     // "Моих заметках".
-    getFontSizeStep: function(){ return fontSizeStep; },
+    getFontSizeStep: function(){ return getActiveFontSizeStep(); },
     changeFontSizeStep: changeFontSizeStep,
+    // ТЗ 20.09: my.js зовёт при входе/выходе из режима чтения (toggleReadingMode) —
+    // подставляет размер шрифта того режима, в который перешли.
+    applyFontSize: applyFontSize,
     FONT_SIZE_MIN_STEP: FONT_SIZE_MIN_STEP,
     FONT_SIZE_MAX_STEP: FONT_SIZE_MAX_STEP,
     // Восстановление сети (раздел 3 ТЗ TASK_MDNOTES_CLOUD.md): push сам по

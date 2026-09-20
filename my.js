@@ -1,6 +1,13 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 33.2 (20.09) — ТЗ пользователя от 20.09: (1) toggleReadingMode зовёт
+   MdEditor.applyFontSize() — у режима чтения свой размер шрифта «Аа» (логика в
+   mdeditor.js); в deps initMdEditorModule добавлены getReadingModeActive и
+   INFO_ICON_SVG (кнопка «i» в заметках); (5) initTaskKeyboardLift теперь
+   поднимает над клавиатурой и редактор заметок (isNoteEditable/
+   noteCaretBottom, слушатель selectionchange) — по месту каретки, вкладки не
+   двигаются.
    Версия: 33.1 (19.09) — openTaskReminderDialog передаёт в плашку напоминания
    якорь anchorEl (кнопка-часы этой задачи), над которым она встаёт.
    Версия: 33.0 (19.09) — структурная правка: единая плашка-подтверждение
@@ -6240,6 +6247,12 @@
     // обе function-декларации, поднимаются в начало IIFE (как выше).
     toggleReadingMode: toggleReadingMode,
     applyReadingModeVisual: applyReadingModeVisual,
+    // ТЗ пользователя от 20.09: свой размер шрифта у режима чтения — mdeditor.js
+    // (applyFontSize/changeFontSizeStep) спрашивает флаг режима чтения отсюда
+    // (function-декларация, поднимается в начало IIFE); INFO_ICON_SVG — значок
+    // кнопки «i» (экран «Форматирование заметок»), объявлен выше по файлу.
+    getReadingModeActive: getReadingModeActive,
+    INFO_ICON_SVG: INFO_ICON_SVG,
     // закладки "Моих заметок" — теперь синхронизируются в облаке через
     // тот же state/saveLocalState/scheduleCloudPush, что и остальные
     // данные приложения (см. getSyncedBookmarkNames/setSyncedBookmark
@@ -15410,6 +15423,12 @@
   function toggleReadingMode(){
     setReadingModeActive(!getReadingModeActive());
     applyReadingModeVisual();
+    // ТЗ пользователя от 20.09: у режима чтения СВОЙ размер шрифта — при
+    // входе/выходе сразу подставляем тот, что выставлен для нового режима
+    // (см. fontSizeStep/fontSizeStepReading в mdeditor.js). applyFontSize сам
+    // пересчитывает подгонку кнопок строк задач; ниже она зовётся ещё раз уже
+    // после смены ширины области — это не лишнее.
+    if(MdEditor && MdEditor.applyFontSize) MdEditor.applyFontSize();
     layoutSettingsModal();
     // ТЗ пользователя от 19.09 ("в режиме чтения плывут кнопки"): ряды
     // вкладок прячутся/показываются и область содержимого меняет ШИРИНУ без
@@ -17976,6 +17995,9 @@
   }
 
   // ===================== ПОДЪЁМ ЗАДАЧИ НАД КЛАВИАТУРОЙ (ТЗ 19.09) =====================
+  // С 20.09 то же самое делает и редактор заметок (CodeMirror, .cm-content в
+  // .mdeditor-editor-host): область чтения (#settingsTabContent) поднимается
+  // так, чтобы строка с кареткой была над клавиатурой, вкладки не двигаются.
   // Новая/редактируемая задача внизу списка оказывалась под экранной
   // клавиатурой, а браузер (Chrome), чтобы показать поле, СДВИГАЛ ВЕСЬ
   // экран вверх — вместе с рядами вкладок и плавающей кнопкой. Здесь то же
@@ -18007,6 +18029,30 @@
     var liftSpacer = null;
 
     function isTaskEditable(el){ return !!(el && el.classList && el.classList.contains("task-editable")); }
+    // ТЗ пользователя от 20.09: то же для заметок — редактор CodeMirror (его
+    // contenteditable — .cm-content внутри .mdeditor-editor-host). Область
+    // чтения та же (#settingsTabContent), но «строка» здесь не строка задачи, а
+    // место каретки — см. noteCaretBottom и ветку в applyLift.
+    function isNoteEditable(el){
+      return !!(el && el.classList && el.classList.contains("cm-content") && el.closest && el.closest(".mdeditor-editor-host"));
+    }
+    function isLiftEditable(el){ return isTaskEditable(el) || isNoteEditable(el); }
+    // низ каретки в заметке (px от верха вьюпорта) или 0, если определить нельзя
+    function noteCaretBottom(el){
+      var sel = window.getSelection();
+      if(!sel || !sel.rangeCount || !sel.focusNode || !el.contains(sel.focusNode)) return 0;
+      var rg = document.createRange();
+      try{ rg.setStart(sel.focusNode, sel.focusOffset); }catch(e){ return 0; }
+      rg.collapse(true);
+      var rects = rg.getClientRects();
+      var cr = rects.length ? rects[rects.length - 1] : rg.getBoundingClientRect();
+      if(cr && cr.height > 0) return cr.bottom;
+      // пустая строка/виджет: пустой прямоугольник — берём саму строку CodeMirror
+      var n = sel.focusNode;
+      var node = n.nodeType === 1 ? n : n.parentElement;
+      var line = node && node.closest ? node.closest(".cm-line") : null;
+      return line ? line.getBoundingClientRect().bottom : 0;
+    }
     function getScrollBox(el){
       return el.closest("#taskProjectArea") || document.getElementById("settingsTabContent");
     }
@@ -18046,6 +18092,16 @@
       // у самого края экрана — перекрытие больше, чем в обычном, где снизу 47px)
       var overlap = Math.max(0, boxRect.bottom - r.top);
       setSpacer(box, overlap);
+      if(isNoteEditable(el)){
+        // заметка: поднимаем область чтения так, чтобы строка с кареткой
+        // стояла над клавиатурой; вкладки/кнопки при этом не двигаются, едет
+        // только текст (клавиатура перекрывает страницу — overlaysContent)
+        var caretBottom = noteCaretBottom(el);
+        if(!caretBottom) return;
+        var needNote = caretBottom - (r.top - MARGIN_PX);
+        if(needNote > 1) box.scrollTop += needNote;
+        return;
+      }
       var row = el.closest(".task-row") || el;
       var rowRect = row.getBoundingClientRect();
       var limit = r.top - MARGIN_PX;
@@ -18065,7 +18121,7 @@
     }
 
     document.addEventListener("focusin", function(e){
-      if(!isTaskEditable(e.target)) return;
+      if(!isLiftEditable(e.target)) return;
       clearTimeout(releaseTimer);
       activeEditable = e.target;
       // до появления клавиатуры: иначе браузер успеет сдвинуть экран сам
@@ -18073,10 +18129,10 @@
       requestAnimationFrame(applyLift);
     });
     document.addEventListener("focusout", function(e){
-      if(!isTaskEditable(e.target)) return;
+      if(!isLiftEditable(e.target)) return;
       clearTimeout(releaseTimer);
       releaseTimer = setTimeout(function(){
-        if(isTaskEditable(document.activeElement)) return;
+        if(isLiftEditable(document.activeElement)) return;
         release();
       }, RELEASE_DELAY_MS);
     });
@@ -18090,6 +18146,14 @@
     document.addEventListener("input", function(e){
       if(activeEditable && e.target === activeEditable) requestAnimationFrame(applyLift);
     }, true);
+    // в заметке каретка двигается и без набора текста (тап в другое место,
+    // стрелки, перенос на новую строку виджетом) — следим за выделением, пока
+    // в фокусе редактор заметки; кадры склеиваем, чтобы не считать на каждое событие
+    var noteSelRaf = 0;
+    document.addEventListener("selectionchange", function(){
+      if(!activeEditable || !isNoteEditable(activeEditable) || noteSelRaf) return;
+      noteSelRaf = requestAnimationFrame(function(){ noteSelRaf = 0; applyLift(); });
+    });
   })();
 
   // ===================== НАЗАД (единый стек навигации) =====================

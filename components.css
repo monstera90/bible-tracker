@@ -1,5 +1,7 @@
 /* ===========================================================================
    components.css
+   Версия: 3.1 (20.09) — ТЗ пользователя от 20.09: .mdeditor-links-row (быстрые
+   ссылки [[ ]] в шапке заметки) выровнена по левому краю, была по центру.
    Версия: 3.0 (19.09) — структурная правка: новый класс .books-list-tab (кнопка
    импорта на вкладке "Книги" прижата к низу); нижние отступы/промежутки рядов
    кнопок 8px -> 7px (.mdeditor-fab-row, .mdeditor-fontsize-popup, .review-pills,
@@ -2218,7 +2220,9 @@
      (.code-hidden, см. applyLinksFieldVisibility). ---------- */
   .mdeditor-links-row{
     display:block;
-    text-align:center;
+    /* ТЗ пользователя от 20.09: быстрые ссылки в шапке заметки — по ЛЕВОМУ
+       краю (раньше center; строка дат над ней остаётся по центру) */
+    text-align:left;
     font-size:var(--mdeditor-font-size, 15.5px);
     line-height:1.4;
     color:var(--ink-soft);
