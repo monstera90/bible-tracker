@@ -1,6 +1,11 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 35.0 (21.09) — структурная правка (TASK_UNIFIED_SYNC.md, шаг 7, ТОЛЬКО диагностика):
+   в разделе «ЛИЧНЫЕ ЗАДАЧИ: ТЕНЕВАЯ ЗАПИСЬ В SYNC-ENGINE» добавлены personalTasksParityRun
+   (сверка state ↔ store ↔ облако по каждой задаче, отчёт текстом) и
+   registerPersonalParityDebugAction (кнопка «сверка личных задач (шаг 7)» в панели лога режима
+   отладки, Debug.registerAction). Логика сохранения/чтения задач НЕ менялась.
    Версия: 34.0 (20.09) — структурная правка (TASK_UNIFIED_SYNC.md, шаг 6): личные
    задачи "task:<id>" теперь параллельно пишутся ещё и в sync-engine — теневой store
    (syncengine_personalbinding.js). Старый state остаётся ЕДИНСТВЕННЫМ источником
@@ -5622,6 +5627,45 @@
       (rep.state.invalid ? ", некорректных в state " + rep.state.invalid : "");
   }
 
+  // ----- Шаг 7 (21.09): сверка личных задач (parity check) — ТОЛЬКО диагностика -----
+  // Сравнивает по каждой задаче три источника: старый state, новый теневой store этого
+  // устройства и ветку облака personalTasks (один GET через fetchNotesCloudPath, без
+  // расшифровки). Ничего не пишет: ни в state, ни в store, ни в облако; логика сохранения и
+  // чтения задач не затронута. Запуск — кнопка «▶ сверка личных задач (шаг 7)» в панели лога
+  // (галочка «Включить режим отладки»), потом «⧉ отчёт» копирует полный текст в буфер. В журнал
+  // идёт только короткая шапка (без текстов задач и syncId). Формат отчёта и правила
+  // «свежее/устойчивое» — syncengine_personalbinding.js (buildParityReport/formatParityReport).
+  // Запускать на КАЖДОМ устройстве аккаунта после сверки с облаком и сравнить «отпечаток облака».
+  var PERSONAL_PARITY_LABEL = "сверка личных задач (шаг 7)";
+  var personalParityRegistered = false;
+  function personalTasksParityRun(){
+    if(!personalShadowReady){
+      return Promise.resolve({
+        text: "Теневая запись личных задач не запущена (выключена флагом устройства " + PERSONAL_SHADOW_ENABLED_KEY +
+          "=0 или модули sync-engine не загружены) — сверять нечего.",
+        headline: "Сверка личных задач: теневая запись не запущена — сверять нечего"
+      });
+    }
+    var PB = window.SyncEnginePersonalBinding;
+    return getPersonalTasksBinding().parity(state, {
+      readCloud: function(){ return fetchNotesCloudPath(PERSONAL_SHADOW_CLOUD_BRANCH); }
+    }).then(function(r){
+      if(!r || !r.ok) throw (r && r.error) || new Error("сверка не удалась");
+      return {
+        text: PB.formatParityReport(r.value, {maxIssues: 40}),
+        headline: PB.formatParityHeadline(r.value)
+      };
+    });
+  }
+  // Идемпотентно: вызывается из initPersonalTasksShadow сразу и ещё раз через 2 с (если
+  // debug.js подключён позже my.js). Без window.Debug.registerAction ничего не делает.
+  function registerPersonalParityDebugAction(){
+    if(personalParityRegistered) return;
+    if(!window.Debug || typeof window.Debug.registerAction !== "function") return;
+    window.Debug.registerAction(PERSONAL_PARITY_LABEL, personalTasksParityRun);
+    personalParityRegistered = true;
+  }
+
   // Уборка после устройства со старой версией (до шага 6). Такое устройство при синхронизации
   // подмешало ветку облака personalTasks в свой state обычным ключом (как раньше fileBlobs/notes,
   // см. CLOUD_RESERVED_SUBTREES). Эта версия ветку из облака больше не подмешивает
@@ -5653,7 +5697,11 @@
       return;
     }
     personalShadowReady = true;
-    setTimeout(function(){ personalShadowReconcileNow(false, "старт", true); }, 2000);
+    registerPersonalParityDebugAction(); // шаг 7: кнопка сверки в панели отладки
+    setTimeout(function(){
+      registerPersonalParityDebugAction(); // на случай, если debug.js подключился позже
+      personalShadowReconcileNow(false, "старт", true);
+    }, 2000);
   }
 
   // ===================== ОБЩИЕ ЗАДАЧИ: АРХИВ (TASK_UNIFIED_SYNC.md, Шаг 4.1,

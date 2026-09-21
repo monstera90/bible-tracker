@@ -1,4 +1,10 @@
 // syncengine_personalbinding.js
+// Версия: 2.0 (21.09) — TASK_UNIFIED_SYNC.md, Шаг 7 (parity check): структурная правка —
+// добавлены `binding.parity(state, opts)` и чистые функции `buildParityReport`,
+// `formatParityReport`, `formatParityHeadline`, `summarizeCompletions` (см. раздел «Шаг 7»
+// ниже). ТОЛЬКО ДИАГНОСТИКА: parity ничего не пишет ни в store, ни в state, ни в облако
+// (облако — один GET через переданную снаружи `readCloud`); `save/remove/reconcile/diagnose`
+// не менялись.
 // Версия: 1.0 (20.09) — TASK_UNIFIED_SYNC.md, Шаг 6: личные задачи — «теневая» запись
 // в sync-engine. Новый файл.
 //
@@ -188,6 +194,379 @@
     };
   }
 
+  // ==========================================================================================
+  // Шаг 7 (21.09): сверка (parity check) старого state и нового store личных задач.
+  // ТОЛЬКО ДИАГНОСТИКА — всё ниже читает данные и строит отчёт; ничего не пишет.
+  //
+  // Три источника одной и той же записи (id задачи):
+  //   state — старый путь (`task:<id>` = {c, t}), единственный источник истины на шаге 7;
+  //   store — новый теневой store (IndexedDB) этого устройства;
+  //   облако — ветка `/syncs/<syncId>/personalTasks` (то, что успели отправить ВСЕ устройства
+  //            аккаунта; читается одним GET, содержимое НЕ расшифровывается — сверяются id,
+  //            метка `t` и признак «удалена»).
+  // Виды расхождений (kinds):
+  //   state ↔ store:  noStore (в store нет), storeOlder (в store старее), storeNewer (в store
+  //                   новее), deadMismatch (метка та же, жива/удалена не так), contentDiff
+  //                   (метка та же, поля не совпали), storeExtra (живая в store, в state нет),
+  //                   invalidState (запись state неверной формы);
+  //   store ↔ облако: notPushed (в облако не отправлено: живой записи там нет или она старее; удалённой
+  //                   записи, которой в облаке нет вообще, это НЕ касается), notPulled (из
+  //                   облака не принято: у store нет или старее), cloudDeadMismatch (метка та
+  //                   же, жива/удалена не так), invalidCloud (запись облака неверной формы).
+  // «Свежее» расхождение — самая новая метка записи моложе freshMs (по умолчанию 10 мин):
+  // правка могла ещё не доехать. «Устойчивое» — старше: так не должно быть, это и ищем.
+  // ==========================================================================================
+  var COMPLETION_PREFIX = 'taskcompletion:';
+  var DEFAULT_FRESH_MS = 10 * 60 * 1000;
+  var DEFAULT_TEXT_LEN = 30;
+
+  // 53-битный нестойкий хэш (cyrb53) — только чтобы сравнить наборы записей на разных
+  // устройствах «одним словом». Не криптография. Возвращает 10 hex-символов.
+  function hashString(str) {
+    var h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (var i = 0, ch; i < str.length; i++) {
+      ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    var hex = (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
+    while (hex.length < 14) hex = '0' + hex;
+    return hex.slice(-10);
+  }
+
+  // Отпечаток набора записей [{id, t, dead}] по строкам «id|t|d» (порядок не важен).
+  function fingerprintOf(list) {
+    var lines = list.map(function (e) { return e.id + '|' + e.t + '|' + (e.dead ? 1 : 0); }).sort();
+    return { count: lines.length, hash: hashString(lines.join('\n')) };
+  }
+
+  function snippetOf(c, maxLen) {
+    if (!c || typeof c !== 'object' || typeof c.text !== 'string') return '';
+    var s = c.text.replace(/\s+/g, ' ').trim();
+    return s.length > maxLen ? s.slice(0, maxLen) + '…' : s;
+  }
+
+  // Верхнеуровневые поля объекта задачи, значения которых различаются.
+  function diffFields(a, b) {
+    var keys = {};
+    [a, b].forEach(function (o) {
+      if (o && typeof o === 'object') Object.keys(o).forEach(function (k) { keys[k] = true; });
+    });
+    return Object.keys(keys).sort().filter(function (k) {
+      return stableStringify(a ? a[k] : undefined) !== stableStringify(b ? b[k] : undefined);
+    });
+  }
+
+  /**
+   * summarizeCompletions(stateObj, {taskPrefix, completionPrefix, sample}) -> сводка по записям
+   * `taskcompletion:*` («когда задачу выполняли» — «Карта дней года», экспорт). В store они НЕ
+   * входят (шаг 6), поэтому в сверку state ↔ store не попадают; сводка нужна для решения на
+   * шагах 8–9: можно ли хранить факт выполнения внутри самой задачи.
+   *   live/tombstones — живые/погашенные записи;
+   *   linked — живые, на которые ссылается completionKey какой-то живой задачи;
+   *   orphans (+orphanIds) — живые, на которые не ссылается ни одна живая задача;
+   *   brokenLinks (+brokenLinkIds) — живые задачи, чей completionKey указывает на
+   *     отсутствующую/погашенную запись;
+   *   checkedWithoutKey — отмеченные задачи без completionKey.
+   */
+  function summarizeCompletions(stateObj, o) {
+    o = o || {};
+    var taskPrefix = o.taskPrefix || DEFAULT_KEY_PREFIX;
+    var compPrefix = o.completionPrefix || COMPLETION_PREFIX;
+    var sample = typeof o.sample === 'number' ? o.sample : 5;
+    var st = stateObj || {};
+    var out = { total: 0, live: 0, tombstones: 0, linked: 0, orphans: 0, orphanIds: [],
+      brokenLinks: 0, brokenLinkIds: [], checkedWithoutKey: 0 };
+    var referenced = new Set();
+    var keys = Object.keys(st);
+    keys.forEach(function (k) {
+      if (k.indexOf(taskPrefix) !== 0) return;
+      var rec = st[k];
+      if (!rec || typeof rec !== 'object' || !rec.c || typeof rec.c !== 'object') return;
+      var ck = rec.c.completionKey;
+      if (typeof ck === 'string' && ck) {
+        referenced.add(ck);
+        var target = st[ck];
+        if (!target || typeof target !== 'object' || !target.c) {
+          out.brokenLinks += 1;
+          if (out.brokenLinkIds.length < sample) out.brokenLinkIds.push(k.slice(taskPrefix.length));
+        }
+      } else if (rec.c.checked) {
+        out.checkedWithoutKey += 1;
+      }
+    });
+    keys.forEach(function (k) {
+      if (k.indexOf(compPrefix) !== 0) return;
+      out.total += 1;
+      var rec = st[k];
+      if (!rec || typeof rec !== 'object' || !rec.c) { out.tombstones += 1; return; }
+      out.live += 1;
+      if (referenced.has(k)) out.linked += 1;
+      else {
+        out.orphans += 1;
+        if (out.orphanIds.length < sample) out.orphanIds.push(k.slice(compPrefix.length));
+      }
+    });
+    return out;
+  }
+
+  /**
+   * buildParityReport(input) -> report   (чистая функция: только читает input)
+   *   input.state    — объект state (или его копия с ключами task:* / taskcompletion:*)
+   *   input.records  — записи store: [{id, data, deleted, updatedAt}] (engine.listRecords, includeDeleted)
+   *   input.cloud    — ветка облака «id → {c, t}» | null (ветка пуста) | undefined (не проверялась)
+   *   input.cloudError — строка: облако читали, но не вышло (тогда сверка store ↔ облако пропускается)
+   *   input.now, input.freshMs, input.maxTextLen, input.keyPrefix, input.completions (false — без сводки)
+   *   input.meta     — {scope, cloudAttached, storageMode, cloudNote}: копируется в отчёт как есть
+   */
+  function buildParityReport(input) {
+    input = input || {};
+    var keyPrefix = input.keyPrefix || DEFAULT_KEY_PREFIX;
+    var now = typeof input.now === 'number' && isFinite(input.now) ? input.now : Date.now();
+    var freshMs = typeof input.freshMs === 'number' && input.freshMs >= 0 ? input.freshMs : DEFAULT_FRESH_MS;
+    var textLen = typeof input.maxTextLen === 'number' && input.maxTextLen > 0 ? input.maxTextLen : DEFAULT_TEXT_LEN;
+    var stateObj = input.state || {};
+    var records = Array.isArray(input.records) ? input.records : [];
+    var meta = input.meta || {};
+
+    // ---- разбор трёх источников ----
+    var st = new Map();
+    var invalidState = [];
+    Object.keys(stateObj).forEach(function (k) {
+      if (k.indexOf(keyPrefix) !== 0) return;
+      var id = k.slice(keyPrefix.length);
+      var rec = stateObj[k];
+      if (!isValidRecordId(id) || !rec || typeof rec !== 'object' || typeof rec.t !== 'number' || !isFinite(rec.t)) {
+        invalidState.push(id || k);
+        return;
+      }
+      st.set(id, { id: id, t: rec.t, dead: !rec.c, c: rec.c || null });
+    });
+    var tr = new Map();
+    records.forEach(function (r) {
+      tr.set(r.id, { id: r.id, t: r.updatedAt, dead: !!r.deleted, c: r.deleted ? null : r.data });
+    });
+    var cloudError = input.cloudError ? String(input.cloudError) : '';
+    var cloudChecked = input.cloud !== undefined && !cloudError;
+    var cl = new Map();
+    var invalidCloud = [];
+    if (cloudChecked && input.cloud !== null) {
+      if (typeof input.cloud !== 'object') {
+        cloudError = 'облако вернуло не объект';
+        cloudChecked = false;
+      } else {
+        Object.keys(input.cloud).forEach(function (id) {
+          var rec = input.cloud[id];
+          var ok = isValidRecordId(id) && rec && typeof rec === 'object' && typeof rec.t === 'number' && isFinite(rec.t) &&
+            (rec.c === undefined || rec.c === null || typeof rec.c === 'string');
+          if (!ok) { invalidCloud.push(id); return; }
+          cl.set(id, { id: id, t: rec.t, dead: !rec.c });
+        });
+      }
+    }
+
+    // ---- расхождения по id ----
+    var byId = new Map();
+    function issue(id) {
+      var x = byId.get(id);
+      if (!x) { x = { id: id, kinds: [], fields: [] }; byId.set(id, x); }
+      return x;
+    }
+    st.forEach(function (s, id) {
+      var t = tr.get(id);
+      var kind = null;
+      if (!t) kind = 'noStore';
+      else if (t.t < s.t) kind = 'storeOlder';
+      else if (t.t > s.t) kind = 'storeNewer';
+      else if (t.dead !== s.dead) kind = 'deadMismatch';
+      else if (!s.dead && stableStringify(t.c) !== stableStringify(s.c)) kind = 'contentDiff';
+      if (!kind) return;
+      var x = issue(id);
+      x.kinds.push(kind);
+      if (t && !s.dead && !t.dead) x.fields = diffFields(s.c, t.c);
+    });
+    tr.forEach(function (t, id) {
+      if (!st.has(id) && !t.dead) issue(id).kinds.push('storeExtra');
+    });
+    invalidState.forEach(function (id) { issue(id).kinds.push('invalidState'); });
+    if (cloudChecked) {
+      tr.forEach(function (t, id) {
+        var c = cl.get(id);
+        // Тумбстоун store, которого в облаке нет вообще, — НЕ расхождение: транспорт сознательно не
+        // отправляет удаления записей, которых в облаке никогда не было (старая история удалённых
+        // задач приезжает из state через reconcile без dirty, и так и остаётся только локальной).
+        if (!c) { if (!t.dead) issue(id).kinds.push('notPushed'); }
+        else if (c.t < t.t) issue(id).kinds.push('notPushed');
+        else if (c.t > t.t) issue(id).kinds.push('notPulled');
+        else if (c.dead !== t.dead) issue(id).kinds.push('cloudDeadMismatch');
+      });
+      cl.forEach(function (c, id) {
+        if (!tr.has(id)) issue(id).kinds.push('notPulled');
+      });
+      invalidCloud.forEach(function (id) { issue(id).kinds.push('invalidCloud'); });
+    }
+
+    // ---- оформление ----
+    var issues = [];
+    byId.forEach(function (x, id) {
+      var s = st.get(id), t = tr.get(id), c = cl.get(id);
+      x.s = s ? { t: s.t, dead: s.dead } : null;
+      x.t = t ? { t: t.t, dead: t.dead } : null;
+      x.c = c ? { t: c.t, dead: c.dead } : null;
+      x.text = snippetOf(s && !s.dead ? s.c : (t && !t.dead ? t.c : null), textLen);
+      var newest = -Infinity;
+      [x.s, x.t, x.c].forEach(function (src) { if (src && src.t > newest) newest = src.t; });
+      x.newest = newest === -Infinity ? null : newest;
+      x.fresh = x.newest !== null && now - x.newest < freshMs;
+      issues.push(x);
+    });
+    issues.sort(function (a, b) {
+      if (a.fresh !== b.fresh) return a.fresh ? 1 : -1; // устойчивые — первыми
+      var an = a.newest === null ? 0 : a.newest, bn = b.newest === null ? 0 : b.newest;
+      if (an !== bn) return bn - an;
+      return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0);
+    });
+    var counts = { total: issues.length, stable: 0, fresh: 0, byKind: {} };
+    issues.forEach(function (x) {
+      if (x.fresh) counts.fresh += 1; else counts.stable += 1;
+      x.kinds.forEach(function (k) { counts.byKind[k] = (counts.byKind[k] || 0) + 1; });
+    });
+    var verdict = !counts.total ? 'ok' : (counts.stable ? 'mismatch' : 'fresh');
+
+    function tally(map) {
+      var live = 0, tomb = 0;
+      map.forEach(function (e) { if (e.dead) tomb += 1; else live += 1; });
+      return { live: live, tombstones: tomb };
+    }
+    var stTally = tally(st), trTally = tally(tr), clTally = tally(cl);
+    var report = {
+      at: now,
+      freshMs: freshMs,
+      scope: meta.scope || null,
+      cloudAttached: !!meta.cloudAttached,
+      storageMode: meta.storageMode || null,
+      cloudChecked: cloudChecked,
+      cloudNote: cloudChecked ? '' : (cloudError || meta.cloudNote || 'не проверялось'),
+      state: { live: stTally.live, tombstones: stTally.tombstones, invalid: invalidState.length },
+      store: { live: trTally.live, tombstones: trTally.tombstones },
+      cloud: cloudChecked ? { live: clTally.live, tombstones: clTally.tombstones, invalid: invalidCloud.length } : null,
+      fingerprint: {
+        state: fingerprintOf(Array.from(st.values())),
+        store: fingerprintOf(Array.from(tr.values())),
+        cloud: cloudChecked ? fingerprintOf(Array.from(cl.values())) : null,
+      },
+      issues: issues,
+      counts: counts,
+      verdict: verdict,
+      completions: input.completions === false ? null : summarizeCompletions(stateObj, { taskPrefix: keyPrefix }),
+    };
+    return report;
+  }
+
+  var KIND_LABELS = {
+    noStore: 'нет в store',
+    storeOlder: 'в store старее',
+    storeNewer: 'в store новее',
+    storeExtra: 'лишняя в store',
+    deadMismatch: 'удалена/жива не так',
+    contentDiff: 'поля не совпали',
+    invalidState: 'некорректная запись в state',
+    notPushed: 'не отправлено в облако',
+    notPulled: 'из облака не принято',
+    cloudDeadMismatch: 'в облаке удалена/жива не так',
+    invalidCloud: 'некорректная запись в облаке',
+  };
+  var KIND_ORDER = ['noStore', 'storeOlder', 'storeNewer', 'storeExtra', 'deadMismatch', 'contentDiff', 'invalidState',
+    'notPushed', 'notPulled', 'cloudDeadMismatch', 'invalidCloud'];
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function fmtTime(ms) {
+    var d = new Date(ms);
+    return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+  }
+  function fmtSource(label, src) {
+    return label + ': ' + (src ? (src.dead ? 'удалена ' : 'жива ') + fmtTime(src.t) : '—');
+  }
+  function verdictText(rep) {
+    var mins = Math.round(rep.freshMs / 60000);
+    if (rep.verdict === 'ok') return 'РАСХОЖДЕНИЙ НЕТ';
+    if (rep.verdict === 'fresh') return 'ЕСТЬ ТОЛЬКО СВЕЖИЕ РАСХОЖДЕНИЯ (' + rep.counts.fresh + ', моложе ' + mins + ' мин) — повторить сверку через несколько минут';
+    return 'РАСХОЖДЕНИЯ: устойчивых ' + rep.counts.stable + ', свежих ' + rep.counts.fresh;
+  }
+  function summaryLines(rep) {
+    var lines = [];
+    lines.push('state: живых ' + rep.state.live + ', удалённых ' + rep.state.tombstones + (rep.state.invalid ? ', некорректных ' + rep.state.invalid : '') +
+      ' · отпечаток ' + rep.fingerprint.state.hash);
+    lines.push('store: живых ' + rep.store.live + ', удалённых ' + rep.store.tombstones + ' · отпечаток ' + rep.fingerprint.store.hash);
+    if (rep.cloud) {
+      lines.push('облако: живых ' + rep.cloud.live + ', удалённых ' + rep.cloud.tombstones + (rep.cloud.invalid ? ', некорректных ' + rep.cloud.invalid : '') +
+        ' · отпечаток ' + rep.fingerprint.cloud.hash);
+    } else {
+      lines.push('облако: не сверялось (' + rep.cloudNote + ')');
+    }
+    return lines;
+  }
+
+  /** Короткая шапка отчёта (3–4 строки, без текстов задач) — для журнала отладки. */
+  function formatParityHeadline(rep) {
+    var lines = ['Сверка личных задач: ' + verdictText(rep)];
+    summaryLines(rep).forEach(function (l) { lines.push(l); });
+    var kinds = KIND_ORDER.filter(function (k) { return rep.counts.byKind[k]; })
+      .map(function (k) { return KIND_LABELS[k] + ' ' + rep.counts.byKind[k]; });
+    if (kinds.length) lines.push('по видам: ' + kinds.join(', '));
+    return lines.join('\n');
+  }
+
+  /** Полный текстовый отчёт (для «скопировать» и отправки в чат). fopts.maxIssues — сколько расхождений показать. */
+  function formatParityReport(rep, fopts) {
+    fopts = fopts || {};
+    var maxIssues = typeof fopts.maxIssues === 'number' && fopts.maxIssues > 0 ? fopts.maxIssues : 40;
+    var lines = [];
+    lines.push('СВЕРКА ЛИЧНЫХ ЗАДАЧ (шаг 7) — ' + fmtTime(rep.at));
+    lines.push('Вердикт: ' + verdictText(rep));
+    lines.push('Область: ' + (rep.scope === 'local' ? 'local (нет syncId)' : 'syncId') + ', облако ' + (rep.cloudAttached ? 'подключено' : 'нет') +
+      ', хранилище ' + (rep.storageMode || '?'));
+    summaryLines(rep).forEach(function (l) { lines.push(l); });
+    var fp = rep.fingerprint;
+    if (fp.state.hash === fp.store.hash) lines.push('Отпечатки state и store совпадают');
+    else lines.push('Отпечатки state и store РАЗНЫЕ');
+    if (fp.cloud) {
+      lines.push('Отпечаток store ' + (fp.store.hash === fp.cloud.hash ? 'совпадает с облаком' : 'РАЗНЫЙ с облаком'));
+    }
+    var kinds = KIND_ORDER.filter(function (k) { return rep.counts.byKind[k]; })
+      .map(function (k) { return KIND_LABELS[k] + ' ' + rep.counts.byKind[k]; });
+    if (kinds.length) lines.push('По видам: ' + kinds.join(', '));
+    if (rep.issues.length) {
+      lines.push('');
+      lines.push('Расхождения (показано ' + Math.min(maxIssues, rep.issues.length) + ' из ' + rep.issues.length + ', устойчивые первыми):');
+      rep.issues.slice(0, maxIssues).forEach(function (x, i) {
+        var what = x.kinds.map(function (k) { return KIND_LABELS[k]; }).join(' + ');
+        if (x.fields.length) what += ' (поля: ' + x.fields.join(', ') + ')';
+        var cells = [x.kinds.indexOf('invalidState') !== -1 ? 'state: некорректная запись' : fmtSource('state', x.s), fmtSource('store', x.t)];
+        if (rep.cloud) cells.push(x.kinds.indexOf('invalidCloud') !== -1 ? 'облако: некорректная запись' : fmtSource('облако', x.c));
+        lines.push((i + 1) + '. [' + (x.fresh ? 'свежее' : 'УСТОЙЧИВОЕ') + '] ' + x.id + (x.text ? ' «' + x.text + '»' : '') + ' — ' + what);
+        lines.push('   ' + cells.join(' · '));
+      });
+      if (rep.issues.length > maxIssues) lines.push('… и ещё ' + (rep.issues.length - maxIssues) + ' (не показаны)');
+    }
+    var cp = rep.completions;
+    if (cp) {
+      lines.push('');
+      lines.push('НЕ ВХОДИТ В СВЕРКУ — taskcompletion:* (в store не пишутся): всего ' + cp.total + ', живых ' + cp.live + ', погашенных ' + cp.tombstones + '.');
+      lines.push('Из живых: привязано к живой задаче ' + cp.linked + ', «осиротевших» ' + cp.orphans +
+        (cp.orphanIds.length ? ' (' + cp.orphanIds.join(', ') + (cp.orphans > cp.orphanIds.length ? ', …' : '') + ')' : '') + '.');
+      lines.push('Задач со ссылкой на несуществующую запись ' + cp.brokenLinks +
+        (cp.brokenLinkIds.length ? ' (' + cp.brokenLinkIds.join(', ') + (cp.brokenLinks > cp.brokenLinkIds.length ? ', …' : '') + ')' : '') +
+        '; отмеченных задач без completionKey ' + cp.checkedWithoutKey + '.');
+    }
+    lines.push('');
+    lines.push('Пояснения: сверка содержимого облака — только id, метка и «удалена» (не расшифровывается). ' +
+      'Чтобы сверить устройства, запустите на каждом и сравните отпечаток облака: после сверки с облаком он должен совпасть.');
+    return lines.join('\n');
+  }
+
   /**
    * createPersonalBinding(opts) -> binding
    *   opts.engine         — экземпляр SyncEngine v2.2+ (нужен opts.updatedAt у saveRecord/deleteRecord)
@@ -205,6 +584,8 @@
    *   opts.now            — () => мс (тесты)
    *   opts.onRemoteChange — вызывается, когда pull применил чужие записи
    *   opts.onCloudSynced  — вызывается после каждой сверки с облаком (syncNow), с её результатом
+   *   opts.readCloud     — () => Promise<object|null>: только чтение ветки облака (один GET, без
+   *                         расшифровки) — нужна ТОЛЬКО для parity (шаг 7); без неё parity сверяет state ↔ store
    *   opts.log            — функция(строка) для отладки
    *
    * binding:
@@ -218,6 +599,9 @@
    *   scheduleCloudSync(delayMs)                                      отложенный syncNow (склеивается)
    *   pushNow(opts)                  -> Promise|null                  срочная отправка dirty
    *   diagnose(state)                -> Promise<{ok, value:report}>   сравнение state и store
+   *   parity(state, {readCloud, cloud, completions, freshMs, maxTextLen, now}) -> Promise<{ok, value:report}>
+   *                                     шаг 7: подробная сверка state ↔ store ↔ облако по каждой задаче
+   *                                     (см. buildParityReport); ничего не пишет
    *   whenIdle()                     -> Promise                        очередь опустела (тесты)
    *   getStoreId()/getScope()/isCloudAttached()/getStorageMode()
    *   detach(dropStorage)/destroy()
@@ -237,6 +621,7 @@
     var now = typeof opts.now === 'function' ? opts.now : Date.now;
     var onRemoteChange = typeof opts.onRemoteChange === 'function' ? opts.onRemoteChange : function () {};
     var onCloudSynced = typeof opts.onCloudSynced === 'function' ? opts.onCloudSynced : function () {};
+    var readCloudDefault = typeof opts.readCloud === 'function' ? opts.readCloud : null;
     var log = typeof opts.log === 'function' ? opts.log : function () {};
     var tag = 'PersonalBinding:' + name;
 
@@ -556,6 +941,75 @@
       });
     }
 
+    // ---- шаг 7: parity (только чтение) ---------------------------------------------------
+    // 1) state копируется СРАЗУ (правка во время сетевого запроса отчёт не искажает);
+    // 2) записи store читаются в общей очереди (как diagnose) — согласованный снимок;
+    // 3) облако читается ВНЕ очереди (сеть не должна задерживать записи) и только если область
+    //    привязана к облаку и сеть разрешена; ошибка чтения не роняет отчёт — уходит в cloudNote.
+    function snapshotForParity(stateObj, withCompletions, compPrefix) {
+      var snap = {};
+      Object.keys(stateObj || {}).forEach(function (k) {
+        if (k.indexOf(keyPrefix) === 0 || (withCompletions && k.indexOf(compPrefix) === 0)) {
+          try { snap[k] = cloneJson(stateObj[k]); } catch (e) { snap[k] = null; }
+        }
+      });
+      return snap;
+    }
+
+    function parity(stateObj, popts) {
+      popts = popts || {};
+      var withCompletions = popts.completions !== false;
+      var snap = snapshotForParity(stateObj, withCompletions, COMPLETION_PREFIX);
+      var readCloud = typeof popts.readCloud === 'function' ? popts.readCloud : readCloudDefault;
+      return safe('parity', async function () {
+        var att = ensure();
+        var records = await engine.listRecords(att.storeId, { includeDeleted: true });
+        return {
+          records: records,
+          meta: {
+            // в отчёте — «local» | «syncId», сам syncId (att.scope) в отчёт не попадает: его копируют в чат
+            scope: att.scope === 'local' ? 'local' : 'syncId',
+            cloudAttached: att.attached,
+            storageMode: att.storage && typeof att.storage.getMode === 'function' ? att.storage.getMode() : null,
+          },
+        };
+      }).then(async function (local) {
+        if (!local.ok) return local;
+        var input = {
+          state: snap,
+          records: local.value.records,
+          meta: local.value.meta,
+          keyPrefix: keyPrefix,
+          now: popts.now !== undefined ? popts.now : now(),
+          freshMs: popts.freshMs,
+          maxTextLen: popts.maxTextLen,
+          completions: withCompletions,
+        };
+        if (popts.cloud !== undefined) {
+          input.cloud = popts.cloud; // готовый снимок облака (тесты)
+        } else if (!local.value.meta.cloudAttached) {
+          input.meta.cloudNote = local.value.meta.scope === 'local' ? 'нет syncId — облако не подключено' : 'облако выключено флагом устройства';
+        } else if (!readCloud) {
+          input.meta.cloudNote = 'чтение облака не подключено';
+        } else if (!canSync()) {
+          input.meta.cloudNote = 'режим оффлайн';
+        } else {
+          try {
+            var raw = await readCloud();
+            input.cloud = raw === undefined ? null : raw;
+          } catch (err) {
+            input.cloudError = 'не удалось прочитать облако: ' + errMessage(err);
+          }
+        }
+        try {
+          return { ok: true, value: buildParityReport(input) };
+        } catch (err2) {
+          log(tag + ' parity: ОШИБКА — ' + errMessage(err2));
+          return { ok: false, error: err2 };
+        }
+      });
+    }
+
     function whenIdle() {
       var q = queue;
       return q.then(function () { return queue === q ? undefined : whenIdle(); });
@@ -580,6 +1034,7 @@
       scheduleCloudSync: scheduleCloudSync,
       pushNow: pushNow,
       diagnose: diagnose,
+      parity: parity,
       whenIdle: whenIdle,
       detach: detach,
       destroy: destroy,
@@ -597,5 +1052,9 @@
     createIdbStorage: createIdbStorage,
     createMemoryStorage: createMemoryStorage,
     isValidRecordId: isValidRecordId,
+    buildParityReport: buildParityReport,
+    formatParityReport: formatParityReport,
+    formatParityHeadline: formatParityHeadline,
+    summarizeCompletions: summarizeCompletions,
   };
 });

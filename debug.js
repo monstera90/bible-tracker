@@ -1,4 +1,13 @@
 // debug.js — общее место для отладочного кода "Графика чтения Библии".
+// Версия: 2.0 (21.09) — структурная правка (TASK_UNIFIED_SYNC.md, шаг 7): в `window.Debug`
+// добавлен `registerAction(label, run)` — кнопки-действия в липкой полосе панели лога
+// (рядом с «копировать лог»). Нужны для диагностики, которую надо запускать по нажатию,
+// а не по событию: `run()` возвращает Promise<строка | {text, headline}>; кнопка «▶ label»
+// запускает, `headline` (первые строки) пишется в журнал, полный `text` копируется второй
+// кнопкой «⧉ отчёт» (копирование идёт по её собственному нажатию — иначе после сетевого
+// ожидания браузер мог бы не разрешить запись в буфер). Кнопки есть только пока включена
+// галочка «Включить режим отладки» (панель существует только тогда). Первый потребитель —
+// «сверка личных задач» из my.js (раздел «ЛИЧНЫЕ ЗАДАЧИ: ТЕНЕВАЯ ЗАПИСЬ В SYNC-ENGINE»).
 // Версия: 1.2 (19.09) — в панели лога вторая кнопка «⧉ последние N»: копирует
 // последние COPY_LAST_LINES строк, но не больше COPY_LAST_MAX_CHARS символов
 // (пояснение у констант ниже). Код копирования в буфер вынесен в
@@ -32,6 +41,8 @@
 
   var DEBUG_MODE_KEY = "bibleDebugMode_v1";
   var panelEl = null;
+  var btnBarEl = null; // липкая полоса кнопок внутри panelEl (пересоздаётся вместе с панелью)
+  var actions = []; // кнопки-действия, зарегистрированные через registerAction (переживают пересоздание панели)
 
   // Включён ли режим отладки (галочка в настройках, вкладка "Шестерёнка").
   function isEnabled() {
@@ -223,6 +234,83 @@
     }
   }
 
+  // ⚠️ ДОБАВЛЕНО (21.09, TASK_UNIFIED_SYNC.md, шаг 7): кнопки-действия в панели лога. Устроено
+  // как две кнопки копирования выше (pointer-events:auto точечно, панель сама клики не ловит):
+  //  • «▶ <label>» — запускает run() (асинхронно, повторный тап во время работы игнорируется);
+  //    результат — строка или {text, headline}: headline (несколько коротких строк, без личных
+  //    данных) идёт в журнал, полный text запоминается;
+  //  • «⧉ отчёт (N симв.)» — появляется после первого удачного запуска, копирует запомненный
+  //    text. Копирование НЕ делается автоматически по окончании run(): после сетевого ожидания
+  //    у страницы может не остаться «свежего нажатия», и браузер отказал бы в записи в буфер.
+  function makeBarButton(label) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = label;
+    btn.style.cssText =
+      "pointer-events:auto;background:#111;color:#0f0;border:1px solid #0f0;" +
+      "font:10px monospace;padding:3px 8px;";
+    return btn;
+  }
+
+  function addActionButtons(action) {
+    if (!btnBarEl) return;
+    var runBtn = makeBarButton(action.running ? "… " + action.label : "▶ " + action.label);
+    var copyBtn = makeBarButton("");
+    copyBtn.style.display = "none";
+    function showCopyBtn() {
+      if (!action.lastText) return;
+      copyBtn.textContent = "⧉ отчёт (" + action.lastText.length + " симв.)";
+      copyBtn.style.display = "";
+    }
+    showCopyBtn();
+    runBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (action.running) return;
+      action.running = true;
+      runBtn.textContent = "… " + action.label;
+      Promise.resolve().then(function () { return action.run(); }).then(function (res) {
+        var isObj = res && typeof res === "object";
+        var text = isObj ? res.text : res;
+        action.lastText = typeof text === "string" ? text : safeStringify(text);
+        var headline = isObj && typeof res.headline === "string" ? res.headline : "";
+        if (headline) {
+          headline.split("\n").forEach(function (line) { log(line); });
+        } else {
+          log(action.label + ": готово, " + action.lastText.length + " симв.");
+        }
+        showCopyBtn();
+      }, function (err) {
+        log(action.label + ": ОШИБКА — " + (err && err.message ? err.message : String(err)));
+      }).then(function () {
+        action.running = false;
+        runBtn.textContent = "▶ " + action.label;
+      });
+    });
+    copyBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var text = action.lastText || "";
+      copyTextToClipboard(text, function (ok) {
+        copyBtn.textContent = ok ? "✓ скопировано" : "не удалось скопировать";
+        setTimeout(function () { copyBtn.textContent = "⧉ отчёт (" + text.length + " симв.)"; }, 2000);
+      });
+    });
+    btnBarEl.appendChild(runBtn);
+    btnBarEl.appendChild(copyBtn);
+  }
+
+  // Debug.registerAction(label, run) — зарегистрировать кнопку-действие. Повторная регистрация
+  // с тем же label заменяет run (не дублирует кнопку). Без включённого режима отладки кнопки
+  // нигде не видны (панели нет).
+  function registerAction(label, run) {
+    if (typeof label !== "string" || !label || typeof run !== "function") return;
+    for (var i = 0; i < actions.length; i++) {
+      if (actions[i].label === label) { actions[i].run = run; return; }
+    }
+    var action = { label: label, run: run, lastText: "", running: false };
+    actions.push(action);
+    if (btnBarEl) addActionButtons(action);
+  }
+
   function ensurePanel() {
     if (panelEl) return panelEl;
     panelEl = document.createElement("div");
@@ -274,6 +362,8 @@
     }
     addCopyButton("⧉ копировать лог", function () { return logLines.join("\n"); });
     addCopyButton("⧉ последние " + COPY_LAST_LINES, buildLastLinesText);
+    btnBarEl = btnBar;
+    actions.forEach(addActionButtons);
     panelEl.appendChild(btnBar);
 
     document.body.appendChild(panelEl);
@@ -283,6 +373,7 @@
   function hidePanel() {
     if (panelEl && panelEl.parentNode) panelEl.parentNode.removeChild(panelEl);
     panelEl = null;
+    btnBarEl = null;
     logLines = [];
     // Галочка выключена явно пользователем — журнал прошлой сессии больше
     // не нужен и не должен неожиданно всплыть, если галочку включат снова
@@ -413,7 +504,8 @@
     setEnabled: setEnabled,
     log: log,
     clear: clear,
-    guardTaskListScroll: guardTaskListScroll
+    guardTaskListScroll: guardTaskListScroll,
+    registerAction: registerAction
   };
 
   // ---------------------------------------------------------------------
