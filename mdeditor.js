@@ -1,5 +1,11 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 6.2 (21.09) — CodeMirror 6 теперь берётся из ЛОКАЛЬНОГО файла проекта
+   codemirror_bundle.js (state+view+commands в одном бандле, лежит рядом с
+   index.html и входит в ASSETS sw.js), а не с esm.sh при каждом запуске —
+   редактор работает без интернета. esm.sh остаётся запасным путём только на
+   случай, если локального файла в проекте ещё нет. Бандл собран один раз в
+   Termux (esbuild). Функций не добавилось/не убавилось.
    Версия: 6.1 (20.09) — ТЗ пользователя от 20.09: на вкладке «Закладки» у книжных
    закладок кнопка-карандаш «Редактировать» (openBookmarkRenameDialog,
    deps.renameBookMarginBookmark) — ручное имя закладки.
@@ -80,8 +86,9 @@
    курсор внутри них — почитать/убрать служебные символы можно, переключив
    документ в режим "с кодом". Это осознанное упрощение (см. ТЗ).
 
-   CodeMirror 6 подключается динамически (dynamic import()) с esm.sh —
-   пакетов ровно три: @codemirror/state, @codemirror/view,
+   CodeMirror 6 подключается динамически (dynamic import()) из локального
+   файла codemirror_bundle.js (с 21.09; раньше — с esm.sh, теперь только запасной
+   путь) — пакетов ровно три: @codemirror/state, @codemirror/view,
    @codemirror/commands (без @codemirror/lang-markdown — разметка достаточно
    простая и разбирается собственными регулярками, см. ниже), версии
    зафиксированы через ?deps=, чтобы esm.sh не подтянул конфликтующие
@@ -546,18 +553,35 @@ window.initMdEditorModule = function(deps){
   // Динамическая загрузка CodeMirror 6 (один раз на сессию)
   // ---------------------------------------------------------------------
   var cmModules = null, cmModulesPromise = null;
-  function loadCM(){
-    if(cmModulesPromise) return cmModulesPromise;
-    cmModulesPromise = Promise.all([
+  // Основной путь — локальный бандл (лежит в проекте, кэшируется вместе с остальными
+  // файлами, интернет не нужен). Он экспортирует ровно три пространства имён:
+  // state, view, commands (esbuild-бандл). esm.sh — запасной путь на
+  // случай, если файла codemirror_bundle.js в проекте ещё нет.
+  var CM_LOCAL_URL = "./codemirror_bundle.js";
+  function loadCMFromEsmSh(){
+    return Promise.all([
       import("https://esm.sh/@codemirror/state@6"),
       import("https://esm.sh/@codemirror/view@6?deps=@codemirror/state@6"),
       import("https://esm.sh/@codemirror/commands@6?deps=@codemirror/state@6,@codemirror/view@6")
     ]).then(function(mods){
-      cmModules = { state: mods[0], view: mods[1], commands: mods[2] };
+      return { state: mods[0], view: mods[1], commands: mods[2] };
+    });
+  }
+  function loadCM(){
+    if(cmModulesPromise) return cmModulesPromise;
+    cmModulesPromise = import(CM_LOCAL_URL).then(function(m){
+      if(!m || !m.state || !m.view || !m.commands) throw new Error("codemirror_bundle.js: нет экспортов state/view/commands");
+      return { state: m.state, view: m.view, commands: m.commands };
+    }).catch(function(localErr){
+      return loadCMFromEsmSh().catch(function(netErr){
+        throw new Error("не найден " + CM_LOCAL_URL + " (" + (localErr && localErr.message ? localErr.message : localErr) + ")");
+      });
+    }).then(function(mods){
+      cmModules = mods;
       return cmModules;
     }, function(err){
-      // неудачный import() (нет сети / режим оффлайн, а в кэше CodeMirror ещё нет)
-      // не должен залипать до перезагрузки страницы — следующий вызов попробует снова
+      // неудачная загрузка не должна залипать до перезагрузки страницы —
+      // следующий вызов попробует снова
       cmModulesPromise = null;
       throw err;
     });
@@ -5341,7 +5365,7 @@ window.initMdEditorModule = function(deps){
         setStatus("Не удалось запустить редактор: " + (e && e.message ? e.message : e), true);
       }
     }).catch(function(e){
-      setStatus("Не удалось загрузить редактор (нужен интернет при первом запуске): " + (e && e.message ? e.message : e), true);
+      setStatus("Не удалось загрузить редактор: " + (e && e.message ? e.message : e), true);
     });
   }
 
