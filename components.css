@@ -1,5 +1,8 @@
 /* ===========================================================================
    components.css
+   Версия: 3.2 (20.09) — ТЗ пользователя от 20.09: новый класс .book-reader-seg
+   (сегмент текста книги, content-visibility:auto); .mdeditor-fab-row и
+   .mdeditor-fontsize-popup — логические inset-inline-* (раскладка для левши).
    Версия: 3.1 (20.09) — ТЗ пользователя от 20.09: .mdeditor-links-row (быстрые
    ссылки [[ ]] в шапке заметки) выровнена по левому краю, была по центру.
    Версия: 3.0 (19.09) — структурная правка: новый класс .books-list-tab (кнопка
@@ -2278,7 +2281,7 @@
      на вкладках задач и в ридере книг (см. modals.css). ---------- */
   .mdeditor-fab-row{
     position:absolute;
-    right:7px;
+    inset-inline-end:7px;
     bottom:7px;
     display:flex;
     gap:7px;
@@ -2360,7 +2363,7 @@
   .mdeditor-fontsize-popup{
     display:none;
     position:absolute;
-    left:0;
+    inset-inline-start:0;
     bottom:calc(100% + 7px);
     flex-direction:column;
     gap:7px;
@@ -2895,6 +2898,24 @@
   }
   .book-reader-chapter:first-child .book-reader-chapter-title{ margin-top:0; }
   .book-reader-p{ margin:0 0 10px 0; text-indent:1ch; position:relative; }
+  /* ---------- Сегмент текста книги (ТЗ 20.09, ускорение открытия длинных
+     книг вроде Библии) — группа из ~40 соседних блоков (см.
+     renderBookReaderText в my.js). content-visibility:auto — браузер не
+     верстает и не рисует сегменты вне экрана; пока сегмент не сверстан, его
+     высота = contain-intrinsic-size: число символов (--seg-chars) *
+     --book-px-per-char (калибруется в calibrateBookReaderSegments) +
+     картинки (--seg-imgs) + запас; после первой верстки браузер запоминает
+     реальную высоту (ключевое слово auto). margin:0 -8px + padding:0 8px —
+     чтобы paint-containment (его подразумевает content-visibility) не
+     обрезал full-bleed картинки, которые вылезают за .book-reader на 8px
+     (см. .book-reader-image-wrap ниже): бокс сегмента ровно на ширину
+     .book-reader-tab. ---------- */
+  .book-reader-seg{
+    content-visibility:auto;
+    contain-intrinsic-size:auto 0px auto calc(var(--seg-chars, 0) * var(--book-px-per-char, 0.5px) + var(--seg-imgs, 0) * 260px + 24px);
+    margin:0 -8px;
+    padding:0 8px;
+  }
   /* ---------- Закладка на полях абзаца (READER_PLAN.md, Этап D, шаг 15,
      11.09; переработано 15.09 — пиктограмма справа вместо левой полоски
      border-left, ТЗ пользователя: полоска слева была неудобной). position:

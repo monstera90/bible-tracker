@@ -1,4 +1,9 @@
 // syncengine.js
+// Версия: 2.2 (20.09) — saveRecord/deleteRecord принимают необязательный 4-й/3-й аргумент
+// { updatedAt } — метку времени записи задаёт вызывающий код (TASK_UNIFIED_SYNC.md, шаг 6:
+// «теневая» запись личных задач должна нести ТУ ЖЕ метку, что и запись в старом state, иначе
+// на шаге 7 нельзя сверить наборы по времени). Без аргумента — как раньше (clock()); остальное
+// без изменений, обратная совместимость полная.
 // Версия: 2.1 (19.09) — moveRecord: атомарный перенос записи между двумя store
 // (TASK_UNIFIED_SYNC.md, шаг 4.2). Остальное без изменений.
 // Версия: 2.0 (18.09)
@@ -128,6 +133,19 @@
     }
   }
 
+  // Метка времени записи: opts.updatedAt (если передана — конечное число >= 0), иначе clock().
+  // Проверка идёт ДО любой записи: неверная метка не должна оставить полузаписанное состояние.
+  function resolveTimestamp(opts, clock) {
+    if (opts && opts.updatedAt !== undefined && opts.updatedAt !== null) {
+      var ts = opts.updatedAt;
+      if (typeof ts !== 'number' || !isFinite(ts) || ts < 0) {
+        throw new Error('[SyncEngine] opts.updatedAt должен быть конечным числом >= 0, получено: ' + ts);
+      }
+      return ts;
+    }
+    return clock();
+  }
+
   /**
    * createEngine(options?) -> engine
    * options.clock     — функция () => ms, по умолчанию Date.now (для тестов
@@ -189,26 +207,30 @@
     }
 
     /**
-     * saveRecord(storeId, recordId, data) -> Promise<record>
+     * saveRecord(storeId, recordId, data, opts?) -> Promise<record>
      * ЕДИНСТВЕННАЯ точка мутации: пишет локально И помечает на отправку
      * одним вызовом — между записью и dirty-флагом нет шага, который можно
      * забыть сделать в вызывающем коде.
+     * opts.updatedAt (v2.2) — метка времени записи, если её задаёт вызывающий
+     * код (шаг 6: «теневая» копия записи старого state с ТОЙ ЖЕ меткой t).
+     * По умолчанию — clock(). Неверное значение (не число, NaN, < 0) — исключение
+     * до любой записи.
      */
-    async function saveRecord(storeId, recordId, data) {
+    async function saveRecord(storeId, recordId, data, opts) {
       validateRecordId(recordId);
       var store = getStoreOrThrow(storeId);
-      var record = { id: recordId, data: data, deleted: false, updatedAt: clock() };
+      var record = { id: recordId, data: data, deleted: false, updatedAt: resolveTimestamp(opts, clock) };
       await store.storage.put(record);
       store.dirty.set(recordId, true);
       emitter.emit('dirty', { storeId: storeId, recordId: recordId, record: record });
       return record;
     }
 
-    /** deleteRecord(storeId, recordId) -> Promise<record> — soft-delete той же атомарной точкой. */
-    async function deleteRecord(storeId, recordId) {
+    /** deleteRecord(storeId, recordId, opts?) -> Promise<record> — soft-delete той же атомарной точкой (opts.updatedAt — как у saveRecord, v2.2). */
+    async function deleteRecord(storeId, recordId, opts) {
       validateRecordId(recordId);
       var store = getStoreOrThrow(storeId);
-      var record = { id: recordId, data: null, deleted: true, updatedAt: clock() };
+      var record = { id: recordId, data: null, deleted: true, updatedAt: resolveTimestamp(opts, clock) };
       await store.storage.put(record);
       store.dirty.set(recordId, true);
       emitter.emit('dirty', { storeId: storeId, recordId: recordId, record: record });

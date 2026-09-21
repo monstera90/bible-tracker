@@ -1,5 +1,9 @@
 /* ===========================================================================
    modals.css
+   Версия: 4.1 (20.09) — ТЗ пользователя от 20.09: горизонтальная геометрия окна
+   настроек, язычка и рядов кнопок переписана логическими свойствами
+   (inset-inline-*, padding-inline, border-*-*-radius); блок html.lefty в конце
+   файла — зеркальная раскладка для левши.
    Версия: 4.0 (20.09) — структурная правка (ТЗ пользователя от 20.09): новые
    классы экрана «Форматирование заметок» (кнопка «i» в заметках, mdeditor.js):
    .note-info-btn, .note-info-mark, .note-info-code, .note-info-sub,
@@ -68,7 +72,7 @@
      нажатии. */
   .settings-fab{
     position:fixed;
-    right:0;
+    inset-inline-end:0;
     /* 48px — высота системной плашки жестовой навигации на андроиде
        (замерено по скриншоту пользователя, см. ANDROID_NAV_BAR_H в
        layoutSettingsModal, my.js) — это лишь запасное положение до
@@ -85,11 +89,13 @@
     background:var(--groove-shadow);
     color:var(--wood);
     border-top:none;
-    border-left:none;
-    border-right:1px solid var(--groove-shadow);
+    border-inline-start:none;
+    border-inline-end:1px solid var(--groove-shadow);
     border-bottom:1px solid var(--groove-shadow);
-    border-radius:0 14px 0 14px;
-    box-shadow:2px 2px 5px rgba(0,0,0,.3);
+    border-radius:0;
+    border-start-end-radius:14px;
+    border-end-start-radius:14px;
+    box-shadow:calc(2px * var(--hand-sign, 1)) 2px 5px rgba(0,0,0,.3);
     cursor:pointer;
     z-index:1001;
     outline:none;
@@ -171,8 +177,8 @@
     content:"";
     position:absolute;
     top:-8px;
-    left:-8px;
-    right:0;
+    inset-inline-start:-8px;
+    inset-inline-end:0;
     bottom:0;
   }
 
@@ -230,7 +236,8 @@
     display:flex;
     align-items:flex-start;
     justify-content:flex-end;
-    padding:16px 57px 72px 16px;
+    padding-block:16px 72px;
+    padding-inline:16px 57px;
     z-index:1000;
     opacity:0;
     visibility:hidden;
@@ -257,7 +264,7 @@
      от отступов оверлея, поэтому её положение этим брейкпоинтом не
      затронуто. */
   @media (max-width:600px){
-    .settings-modal-overlay{ padding:0 45px 72px 0; }
+    .settings-modal-overlay{ padding-block:0 72px; padding-inline:0 45px; }
     /* На телефоне окно вплотную прижато к верхнему краю экрана (после
        снятия padding-top у оверлея выше) — верхнее скругление в этой
        точке больше не нужно, оно смотрелось бы как "оторванный" от
@@ -317,7 +324,10 @@
     position:relative;
     background:var(--parchment);
     border:1px solid var(--groove-shadow);
-    border-radius:10px 10px 0 10px;
+    border-radius:0;
+    border-start-start-radius:10px;
+    border-start-end-radius:10px;
+    border-end-start-radius:10px;
     width:100%;
     display:flex;
     flex-direction:column;
@@ -396,7 +406,7 @@
      основного правила .settings-modal-box (та же специфичность —
      решает порядок в файле). */
   @media (max-width:600px){
-    .settings-modal-box{ border-radius:0 0 0 10px; }
+    .settings-modal-box{ border-radius:0; border-end-start-radius:10px; }
   }
   #settingsTabContent{
     display:flex;
@@ -447,7 +457,7 @@
      свойствах нет специально. */
   .settings-tabs{
     position:absolute;
-    right:-45px;
+    inset-inline-end:-45px;
     bottom:0;
     display:flex;
     flex-direction:column-reverse;
@@ -471,12 +481,14 @@
        состоянии вкладки. */
     --icon-halo:var(--parchment);
     border:1px solid var(--groove-shadow);
-    border-left:none;
+    border-inline-start:none;
     border-top:none;
-    border-radius:0 14px 14px 0;
+    border-radius:0;
+    border-start-end-radius:14px;
+    border-end-end-radius:14px;
     font-size:32px;
     cursor:pointer;
-    box-shadow:2px 2px 5px rgba(0,0,0,.3);
+    box-shadow:calc(2px * var(--hand-sign, 1)) 2px 5px rgba(0,0,0,.3);
     padding:0;
     margin:0;
     outline:none;
@@ -558,7 +570,7 @@
      окном) идёт не сверху, а слева у каждой вкладки. */
   .settings-tabs-gear{
     position:absolute;
-    right:1px;
+    inset-inline-end:1px;
     bottom:-45px;
     display:flex;
     gap:1px;
@@ -566,7 +578,7 @@
   .settings-tab-gear{
     width:68px;height:45px;
     flex:0 0 68px;
-    border-left:1px solid var(--groove-shadow);
+    border-inline-start:1px solid var(--groove-shadow);
     border-top:none;
     border-radius:0 0 14px 14px;
   }
@@ -610,14 +622,14 @@
     display:none;
   }
   .settings-modal-overlay.reading-mode-active{
-    padding-right:0;
+    padding-inline-end:0;
     padding-bottom:0;
   }
   /* Режим чтения на весь экран (19.09): окно доходит до самого низа, поэтому
      нижнее скругление слева (10px) больше не нужно — иначе в углу экрана
      светился бы кусочек затемнённой подложки. */
   .settings-modal-overlay.reading-mode-active .settings-modal-box{
-    border-bottom-left-radius:0;
+    border-end-start-radius:0;
   }
   /* Кнопка-язычок (.settings-fab) не в оверлее — она position:fixed сама по
      себе, поэтому прячем её через :has() от body: только когда окно открыто
@@ -1426,7 +1438,7 @@
   .task-add-fab{
     display:none;
     position:absolute;
-    right:7px;
+    inset-inline-end:7px;
     bottom:7px;
     width:32px;height:32px;
     border-radius:8px;
@@ -1481,7 +1493,7 @@
   .task-fontsize-wrap{
     display:none;
     position:absolute;
-    right:124px;
+    inset-inline-end:124px;
     bottom:7px;
     z-index:5;
   }
@@ -1489,7 +1501,7 @@
   .task-format-wrap{
     display:none;
     position:absolute;
-    right:202px;
+    inset-inline-end:202px;
     bottom:7px;
     z-index:5;
   }
@@ -1503,7 +1515,7 @@
   .task-highlight-wrap{
     display:none;
     position:absolute;
-    right:163px;
+    inset-inline-end:163px;
     bottom:7px;
     z-index:5;
   }
@@ -1543,7 +1555,7 @@
   .task-reading-wrap{
     display:none;
     position:absolute;
-    right:241px;
+    inset-inline-end:241px;
     bottom:7px;
     z-index:5;
   }
@@ -1560,7 +1572,7 @@
   .task-hide-linked-wrap{
     display:none;
     position:absolute;
-    right:280px;
+    inset-inline-end:280px;
     bottom:7px;
     z-index:5;
   }
@@ -1579,7 +1591,7 @@
   .task-joint-menu-wrap{
     display:none;
     position:absolute;
-    right:280px;
+    inset-inline-end:280px;
     bottom:7px;
     z-index:5;
   }
@@ -1604,7 +1616,7 @@
   .task-joint-menu-popup{
     display:none;
     position:absolute;
-    left:0;
+    inset-inline-start:0;
     bottom:calc(100% + 8px);
     flex-direction:column;
     gap:4px;
@@ -1651,7 +1663,7 @@
   .task-red-sort-wrap{
     display:none;
     position:absolute;
-    right:280px;
+    inset-inline-end:280px;
     bottom:7px;
     z-index:5;
   }
@@ -1669,7 +1681,7 @@
   .task-info-wrap{
     display:none;
     position:absolute;
-    right:280px;
+    inset-inline-end:280px;
     bottom:7px;
     z-index:5;
   }
@@ -1679,14 +1691,14 @@
      стоит ближе к "Ж" (right:280), а "i" — левее неё (right:319). Класс
      вешает JS: syncTaskFabRowForTab и openTaskNextPicker (my.js). На остальных
      вкладках задач класса нет — "i" остаётся на right:280 без дырки в ряду. */
-  .task-info-wrap.task-info-wrap-far{ right:319px; }
+  .task-info-wrap.task-info-wrap-far{ inset-inline-end:319px; }
   /* скрепка — между "Аа" и "+" (см. index.html и ТЗ пользователя, та же
      логика попапа не нужна: сразу открывает системный диалог выбора
      файла, см. initTaskGlobalToolbar в my.js) */
   .task-attach-wrap{
     display:none;
     position:absolute;
-    right:85px;
+    inset-inline-end:85px;
     bottom:7px;
     z-index:5;
   }
@@ -1891,7 +1903,7 @@
      render() (my.js), тем же приёмом, что у globalFab/homeStubHide там же. */
   .task-project-fab-link{
     position:absolute;
-    right:280px;
+    inset-inline-end:280px;
     bottom:7px;
     z-index:5;
   }
@@ -1917,7 +1929,7 @@
      над кнопкой без текста ("подбородок"). */
   .task-project-fab-home{
     position:absolute;
-    right:7px;
+    inset-inline-end:7px;
     bottom:7px;
     z-index:5;
   }
@@ -1950,7 +1962,7 @@
      выше) на то же место, что и на экране "Все задачи проекта" (right:48,
      см. #taskProjectCreateFab выше) — угол теперь всегда занят домиком,
      а не только на списке "Мои проекты" (доработка 13.09). */
-  .task-add-fab.task-add-fab-shifted{ right:46px; }
+  .task-add-fab.task-add-fab-shifted{ inset-inline-end:46px; }
 
   /* сетка выбора вкладки-назначения (перенос задачи) — переиспользует
      общее модальное окно (modalOverlay/modalBox), тот же приём, что и у
@@ -2026,3 +2038,38 @@
 @media (prefers-reduced-motion: reduce){
     *{transition:none !important; animation:none !important;}
   }
+
+/* ===========================================================================
+   Зеркальная раскладка для левши (ТЗ 20.09) — класс .lefty на <html>,
+   переключается галочкой на вкладке настроек (my.js: setLeftHanded).
+   Никаких «левых» чисел здесь нет: вся горизонтальная геометрия скелета
+   (оверлей, вертикальный стек вкладок, нижний ряд, язычок .settings-fab,
+   ряды fab-кнопок, скругления углов) выше записана логическими свойствами
+   (inset-inline-*, padding-inline, border-*-*-radius, border-inline-*), а
+   здесь лишь меняется direction: у оверлея и язычка — на rtl (всё, что
+   привязано к «концу» строки, уходит на другую сторону), у самого окна и
+   его содержимого — обратно на ltr, чтобы текст, списки и редактор
+   остались как есть. Ряды fab-кнопок и всплывающие столбики (они живут
+   и в окне, и внутри #settingsTabContent) получают rtl прямо на себе —
+   их ЭЛЕМЕНТЫ снова ltr. Меняете отступ/ширину/позицию в обычной раскладке
+   — зеркальная подхватывает это сама. --hand-sign:-1 разворачивает
+   горизонтальный сдвиг теней вкладок/язычка (box-shadow: calc(2px *
+   var(--hand-sign, 1)) …). Отдельно из JS зеркалятся только положение
+   язычка/кнопки режима чтения (layoutSettingsModal) и волна открытия окна
+   (settingsWavePolygonAt). ========================================================================= */
+html.lefty{ --hand-sign:-1; }
+html.lefty .settings-modal-overlay,
+html.lefty .settings-fab{ direction:rtl; }
+html.lefty .settings-modal-box > *{ direction:ltr; }
+/* ряды fab-кнопок и одиночные кнопки, позиционируемые inset-inline-end
+   (селекторы по классу, а не по «ребёнок окна»: часть из них живёт внутри
+   #settingsTabContent) */
+html.lefty :is(.mdeditor-fab-row, .task-add-fab, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home){ direction:rtl; }
+html.lefty :is(.mdeditor-fab-row, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap) > *{ direction:ltr; }
+/* всплывающие столбики (inset-inline-start:0 — под rtl это правый край
+   обёртки, то есть зеркально обычной раскладке); удвоенный класс + тег —
+   чтобы перебить сброс «> *» выше, где попап — прямой ребёнок обёртки */
+html.lefty div.mdeditor-fontsize-popup.mdeditor-fontsize-popup,
+html.lefty div.task-joint-menu-popup.task-joint-menu-popup{ direction:rtl; }
+html.lefty .mdeditor-fontsize-popup > *,
+html.lefty .task-joint-menu-popup > *{ direction:ltr; }

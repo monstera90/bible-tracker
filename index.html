@@ -1,11 +1,20 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 2.4 (20.09) — подключены syncengine_personalcrypto.js и
+     syncengine_personalbinding.js (TASK_UNIFIED_SYNC.md, шаг 6: теневая запись
+     личных задач в sync-engine).
      Версия: 2.3 (19.09) — подключён notifications.js (уведомления/напоминания
      задач, ТЗ пользователя от 19.09).
      Версия: 2.2 (19.09) -->
 <head>
 <meta charset="UTF-8">
+<script>
+/* Раскладка для левши (ТЗ 20.09): класс ставится ДО первой отрисовки, иначе
+   язычок и окно настроек на миг мелькнули бы в обычной раскладке. Тот же
+   ключ и то же значение, что в my.js (LEFT_HAND_KEY, applyLeftHanded). */
+try{ if(localStorage.getItem("leftHandedLayout") === "1") document.documentElement.classList.add("lefty"); }catch(e){}
+</script>
 <script>
 window.addEventListener("error", function(e){
   // "ResizeObserver loop..." (обе формулировки: "limit exceeded" и
@@ -765,13 +774,18 @@ window.addEventListener("error", function(e){
      Само mdeditor.js может идти раньше (строка 739 выше) — он лишь
      ОПРЕДЕЛЯЕТ initMdEditorModule, не вызывает; между собой syncengine*.js
      порядок не важен (файлы друг на друга при загрузке не ссылаются,
-     объекты друг другу передаёт my.js/mdeditor.js). -->
+     объекты друг другу передаёт my.js/mdeditor.js). С 20.09 (шаг 6) добавлены
+     syncengine_personalcrypto.js (шифрование личным ключом SHA-256(syncId)) и
+     syncengine_personalbinding.js (теневой store личных задач, создаётся из
+     my.js при запуске) — тоже ДО my.js. -->
 <script src="syncengine.js"></script>
 <script src="syncengine_groupcrypto.js"></script>
 <script src="syncengine_transport.js"></script>
 <script src="syncengine_groupbinding.js"></script>
 <script src="syncengine_notescrypto.js"></script>
 <script src="syncengine_notesbinding.js"></script>
+<script src="syncengine_personalcrypto.js"></script>
+<script src="syncengine_personalbinding.js"></script>
 <script src="my.js"></script>
 
 </body>

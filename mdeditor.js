@@ -1,5 +1,8 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 6.1 (20.09) — ТЗ пользователя от 20.09: на вкладке «Закладки» у книжных
+   закладок кнопка-карандаш «Редактировать» (openBookmarkRenameDialog,
+   deps.renameBookMarginBookmark) — ручное имя закладки.
    Версия: 6.0 (20.09) — структурная правка: белый экран после сворачивания
    (п.2 ТЗ от 20.09) теперь сохраняет ТОЧНОЕ положение экрана — прокрутка
    запоминается в пикселях в момент сворачивания (rememberScrollBeforeHide,
@@ -150,6 +153,10 @@ window.initMdEditorModule = function(deps){
   var getBookMarginBookmarks = deps.getBookMarginBookmarks || function(cb){ cb([]); };
   var openBookMarginBookmark = deps.openBookMarginBookmark || function(){};
   var removeBookMarginBookmark = deps.removeBookMarginBookmark || function(){};
+  // renameBookMarginBookmark(hash, bookmarkId, name) -> true/false — ручное
+  // переименование книжной закладки (ТЗ 20.09, кнопка-карандаш в строке
+  // на вкладке «Закладки»); ручное имя имеет приоритет над автоматическим.
+  var renameBookMarginBookmark = deps.renameBookMarginBookmark || function(){ return false; };
   // ---------------------------------------------------------------------
   // ОБЛАЧНОЕ ХРАНЕНИЕ ЗАМЕТОК С ШИФРОВАНИЕМ (см. TASK_MDNOTES_CLOUD.md,
   // шаг 1 "Ядро", 05.09). Firebase-специфика (URL, /syncs/<id>) осознанно
@@ -324,6 +331,12 @@ window.initMdEditorModule = function(deps){
   // состояние — не отдельная иконка, а инверсия заливки (см.
   // .mdeditor-bookmark-btn.active в components.css: пустой контур —
   // не в закладках, залитый — в закладках).
+  // карандаш — кнопка «Редактировать» имя книжной закладки (ТЗ 20.09)
+  var PENCIL_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M12 20h9"></path>' +
+      '<path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>' +
+    '</svg>';
   var BOOKMARK_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M6.5 3.5h11a1 1 0 0 1 1 1V21l-6.5-4-6.5 4V4.5a1 1 0 0 1 1-1z"></path>' +
@@ -3018,6 +3031,45 @@ window.initMdEditorModule = function(deps){
     }
   }
 
+  // Диалог ручного имени книжной закладки (ТЗ 20.09) — тот же вид карточки,
+  // что и openNewNoteDialog. onSubmit(name) вызывается с непустым именем.
+  function openBookmarkRenameDialog(currentName, onSubmit){
+    var box = document.querySelector(".settings-modal-box");
+    if(!box) return;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title">Имя закладки</div>' +
+      '<input type="text" class="mdeditor-cleanup-input" id="mdBookmarkRenameInput">' +
+      '<div class="mdeditor-cleanup-actions">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="mdBookmarkRenameCancel">Отмена</button>' +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="mdBookmarkRenameOk">Сохранить</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    box.appendChild(overlay);
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+    var input = document.getElementById("mdBookmarkRenameInput");
+    input.value = currentName || "";
+    input.focus();
+    input.select();
+    function submit(){
+      var name = (input.value || "").trim();
+      if(!name){ input.style.borderColor = "var(--danger, #c0392b)"; return; }
+      close();
+      onSubmit(name);
+    }
+    document.getElementById("mdBookmarkRenameCancel").addEventListener("click", close);
+    document.getElementById("mdBookmarkRenameOk").addEventListener("click", submit);
+    document.getElementById("mdBookmarkRenameOk").addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+    input.addEventListener("keydown", function(ev){
+      if(ev.key === "Enter"){ ev.preventDefault(); submit(); }
+      else if(ev.key === "Escape"){ ev.preventDefault(); close(); }
+    });
+  }
+
   function openNewNoteDialog(targetNode){
     var box = document.querySelector(".settings-modal-box");
     if(!box) return;
@@ -3227,8 +3279,13 @@ window.initMdEditorModule = function(deps){
       // my.js) — корона вместо обычной пиктограммы закрытой книги (ТЗ от
       // 12.09); закладки-заметки эту развилку не затрагивают.
       var icon = it.type === "book" ? (it.isMain ? OPEN_BOOK_ICON_SVG : BOOK_BOOKMARK_ICON_SVG) : FILE_ICON_SVG;
-      row.innerHTML = icon + '<span class="mdeditor-row-name"></span>' +
-        '<button type="button" class="mdeditor-bookmark-btn active visible" title="Убрать из закладок">' + BOOKMARK_ICON_SVG + '</button>';
+      // У книжных закладок слева от кнопки «убрать» — карандаш «Редактировать»
+      // (ТЗ 20.09): ручное имя, приоритетнее автоматического.
+      var editBtnHtml = it.type === "book"
+        ? '<button type="button" class="mdeditor-bookmark-btn visible mdeditor-bookmark-edit-btn" title="Редактировать имя">' + PENCIL_ICON_SVG + '</button>'
+        : '';
+      row.innerHTML = icon + '<span class="mdeditor-row-name"></span>' + editBtnHtml +
+        '<button type="button" class="mdeditor-bookmark-btn active visible mdeditor-bookmark-remove-btn" title="Убрать из закладок">' + BOOKMARK_ICON_SVG + '</button>';
       // Книжная закладка теперь показывает СВОЁ имя (введённое пользователем
       // при сохранении, см. openBookBookmarkNameDialog в my.js) первой
       // строкой, а название книги — второй, мельче (ТЗ от 12.09). У
@@ -3282,7 +3339,19 @@ window.initMdEditorModule = function(deps){
         switchSettingsTab("set2s_1");
         openNoteById(it.id);
       });
-      row.querySelector(".mdeditor-bookmark-btn").addEventListener("click", function(e){
+      var editBtn = row.querySelector(".mdeditor-bookmark-edit-btn");
+      if(editBtn){
+        editBtn.addEventListener("click", function(e){
+          e.stopPropagation();
+          openBookmarkRenameDialog(it.name || it.bookName, function(newName){
+            if(renameBookMarginBookmark(it.hash, it.bookmarkId, newName) === false) return;
+            it.name = newName;
+            it.nameManual = true;
+            renderBookmarksList(container, items, false);
+          });
+        });
+      }
+      row.querySelector(".mdeditor-bookmark-remove-btn").addEventListener("click", function(e){
         e.stopPropagation();
         if(it.type === "book"){
           removeBookMarginBookmark(it.hash, it.bookmarkId);

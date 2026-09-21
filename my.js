@@ -1,6 +1,29 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 34.0 (20.09) — структурная правка (TASK_UNIFIED_SYNC.md, шаг 6): личные
+   задачи "task:<id>" теперь параллельно пишутся ещё и в sync-engine — теневой store
+   (syncengine_personalbinding.js). Старый state остаётся ЕДИНСТВЕННЫМ источником
+   истины: отрисовка, doCloudSync и mergeStates не менялись. Новый раздел «ЛИЧНЫЕ
+   ЗАДАЧИ: ТЕНЕВАЯ ЗАПИСЬ В SYNC-ENGINE»; хуки — saveTaskData, deleteTaskPermanently,
+   writeStateToLocalStorage (страховочная сверка), settleInitialTaskSync,
+   handleNetworkRestored, смена syncId, joinWithCode, applyImportSelection; облачная
+   ветка personalTasks внесена в CLOUD_RESERVED_SUBTREES (в state не попадает).
+   removeStrayPersonalTasksBranchFromState — при запуске и после импорта убирает из
+   state лишний ключ personalTasks, если его подмешало устройство со старой версией.
+   Версия: 33.3 (20.09) — ТЗ пользователя от 20.09: (1) кнопка-карандаш «Редактировать»
+   на вкладке «Закладки» — ручное имя книжной закладки (renameBookBookmark,
+   поле nameManual) приоритетнее автоматического и переезжает в новую основную
+   закладку при её переносе (saveBookReaderBookmark); (2) галочка «Зеркальное
+   отображение интерфейса для левши» (isLeftHanded/setLeftHanded, класс .lefty на
+   <html>, см. блок в конце modals.css; из JS зеркалятся только язычок/кнопка
+   режима чтения в layoutSettingsModal и волна settingsWavePolygonAt);
+   (3) ускорение открытия длинных книг: текст разбит на сегменты
+   (.book-reader-seg, content-visibility:auto), геометрия позиций считается
+   бинарным поиском по сегментам (currentBookReaderPosition/
+   firstVisibleBookBlockPosition/scrollBookReaderToPosition), картинки
+   грузятся лениво (data-lazy-img + IntersectionObserver, ленивые геттеры
+   imageUrls), закладки/подчёркивания раскладываются по ключу один раз.
    Версия: 33.2 (20.09) — ТЗ пользователя от 20.09: (1) toggleReadingMode зовёт
    MdEditor.applyFontSize() — у режима чтения свой размер шрифта «Аа» (логика в
    mdeditor.js); в deps initMdEditorModule добавлены getReadingModeActive и
@@ -1417,6 +1440,36 @@
   // системный статус-бар; на iOS Fullscreen API для PWA с домашнего экрана
   // почти не работает — там ограничение платформы, обойти нечем.
   var HIDE_STATUS_BAR_KEY = "bibleHideStatusBar_v1";
+  // ===================== ЗЕРКАЛЬНАЯ РАСКЛАДКА ДЛЯ ЛЕВШИ (ТЗ 20.09) =====================
+  // Галочка на вкладке настроек. Настройка ПО-УСТРОЙСТВУ (localStorage, как
+  // полноэкранный режим — телефон и планшет могут держать в разных руках),
+  // а не синхронизируется в облако. Сама раскладка зеркалится ЧИСТО В CSS:
+  // класс .lefty на <html> переключает direction:rtl у оверлея окна
+  // настроек/язычка/рядов кнопок, а все горизонтальные позиции скелета
+  // (вертикальный стек вкладок, нижний ряд, язычок-кнопка, ряды fab-кнопок,
+  // скругления углов) в modals.css/components.css записаны ЛОГИЧЕСКИМИ
+  // свойствами (inset-inline-end, border-start-end-radius…) — поэтому любое
+  // изменение размеров/отступов в обычной раскладке сразу действует и в
+  // зеркальной, отдельных «левых» чисел нигде нет (см. блок html.lefty в
+  // конце modals.css). Из JS зеркалятся только две вещи, где положение
+  // считается кодом: язычок/кнопка режима чтения (layoutSettingsModal) и
+  // волна открытия окна (settingsWavePolygonAt).
+  var LEFT_HAND_KEY = "leftHandedLayout";
+  function isLeftHanded(){
+    try{ return localStorage.getItem(LEFT_HAND_KEY) === "1"; }catch(e){ return false; }
+  }
+  function applyLeftHanded(value){
+    document.documentElement.classList.toggle("lefty", !!value);
+  }
+  function setLeftHanded(value){
+    try{ localStorage.setItem(LEFT_HAND_KEY, value ? "1" : "0"); }catch(e){}
+    applyLeftHanded(value);
+    // язычок и кнопка режима чтения позиционируются инлайн от рядов вкладок —
+    // пересчитываем после смены раскладки (function-декларация, ниже по файлу)
+    layoutSettingsModal();
+  }
+  applyLeftHanded(isLeftHanded());
+
   function getHideStatusBarEnabled(){
     try{ return localStorage.getItem(HIDE_STATUS_BAR_KEY) === "1"; }catch(e){ return false; }
   }
@@ -1897,6 +1950,10 @@
   // что и раньше (лучше маленький шанс переполнить общую квоту, чем
   // потерять заметки совсем на устройствах без IndexedDB).
   function writeStateToLocalStorage(label){
+    // TASK_UNIFIED_SYNC.md, шаг 6: любое сохранение state — повод сверить теневой store личных
+    // задач (отложенно, ничего не блокирует). Страховка от мест, меняющих task:* в обход
+    // saveTaskData/deleteTaskPermanently (миграции общих задач, приём с облака, импорт).
+    personalShadowTouch();
     var split = splitStateForLocalStorage(state);
     try{
       var mainJson = JSON.stringify(split.main);
@@ -4207,7 +4264,11 @@
                                              // сама функция fileBlobCloudPath была написана раньше,
                                              // но этот список собирался по памяти о "текущих
                                              // putCloudBlob/patchNotesCloud веток", а не по grep.
-    "s89Template": true                     // S89Fill — подложка бланка S-89
+    "s89Template": true,                    // S89Fill — подложка бланка S-89
+    "personalTasks": true                   // 20.09 (TASK_UNIFIED_SYNC.md, шаг 6): теневой store личных
+                                             // задач в sync-engine (syncengine_personalbinding.js,
+                                             // /syncs/<syncId>/personalTasks/<id> = {c,t}) — у него свой
+                                             // цикл (транспорт движка), в общий state НЕ подмешивается
   };
   function stripCloudReservedSubtrees(cloudData, label){
     if(!cloudData) return cloudData;
@@ -4339,6 +4400,7 @@
   function settleInitialTaskSync(){
     if(initialTaskSyncSettled) return;
     initialTaskSyncSettled = true;
+    personalShadowAfterFirstSync(); // шаг 6: первый цикл личной синхронизации закончен — можно сверять теневой store с облаком
     if(MdEditor && MdEditor.retryImageCleanup) MdEditor.retryImageCleanup();
   }
   function doCloudSync(urgent){
@@ -4431,6 +4493,7 @@
       if(String(err.message||"").indexOf("expired") !== -1){
         syncId = null;
         localStorage.removeItem(SYNC_ID_KEY);
+        personalShadowTouch(); // шаг 6: область теневого store сменилась (syncId → local)
         setSyncState("off");
         settleInitialTaskSync();
         refreshStatusBase();
@@ -4463,6 +4526,7 @@
     syncRetryCount = 0;
     clearTimeout(syncRetryTimer);
     doCloudSync();
+    personalShadowCloudSyncSoon(3000); // шаг 6: догнать теневой store личных задач (накопленные офлайн правки)
     // Раздел 3 ТЗ TASK_MDNOTES_CLOUD.md: у заметок свой независимый
     // облачный цикл (см. deps.notesRetryDelays/initMdEditorModule выше),
     // doCloudSync его не трогает — без этого вызова правки, накопленные
@@ -5387,6 +5451,211 @@
     });
   }
 
+  // ===================== ЛИЧНЫЕ ЗАДАЧИ: ТЕНЕВАЯ ЗАПИСЬ В SYNC-ENGINE (TASK_UNIFIED_SYNC.md,
+  // Шаг 6, 20.09) =====================
+  // Личные задачи по-прежнему живут в общем `state` ("task:<id>" = {c, t}) и
+  // синхронизируются блобом (doCloudSync/mergeStates) — ЭТО ЕДИНСТВЕННЫЙ ИСТОЧНИК
+  // ИСТИНЫ, отрисовка ничего не знает о новом store. Параллельно каждая мутация личной
+  // задачи пишется ещё и в «теневой» store sync-engine (syncengine_personalbinding.js,
+  // 1.0): «дублирующий дневник» для проверки на шаге 7 (parity) и переключения на шаге 8.
+  //
+  // Три канала записи в теневой store (все ловят ошибки сами и в старый путь не
+  // попадают — try/catch здесь и очередь внутри binding):
+  //  1. personalShadowSave/personalShadowRemove — из saveTaskData и deleteTaskPermanently
+  //     (единственные места записи task:* в обычной работе). Запись + dirty, отправка в
+  //     облако — сама (транспорт движка, debounce). Метка t — та же, что в state.
+  //  2. personalShadowTouch — из writeStateToLocalStorage (то есть после ЛЮБОГО
+  //     сохранения state, в т.ч. слияния doCloudSync, миграций общих задач,
+  //     смены syncId): отложенная (1.5 с) сверка «state → store» без dirty. Догоняет всё,
+  //     что изменили в обход канала 1.
+  //  3. personalShadowStateReplaced — после ПОЛНОЙ замены state (импорт, подключение по
+  //     коду): то же, но записи store, которых в state больше нет, гасятся тумбстоуном.
+  // Отправку в облако того, что попало в store без dirty (стартовое наполнение,
+  // приём с облака), делает syncNow (pull → сверка → push): после первого цикла
+  // doCloudSync, при возврате сети и после сверки, которая что-то записала.
+  //
+  // Облако: /syncs/<syncId>/personalTasks/<id> = {c, t}, шифрование личным ключом
+  // SHA-256(syncId) (syncengine_personalcrypto.js). Ветка внесена в
+  // CLOUD_RESERVED_SUBTREES — в state она не попадает. Без syncId store только локальный
+  // (область "local"), IndexedDB, не localStorage (квота).
+  //
+  // Флаги устройства (без интерфейса, только localStorage): biblePersonalShadow_v1="0" —
+  // теневая запись выключена целиком; biblePersonalShadowCloud_v1="0" — store только
+  // локальный, в облако не пишется.
+  //
+  // Журнал: строки «PersonalShadow …» — в конце сверки и после каждой сверки с облаком
+  // одна строка «state — живых/удалённых; store — живых/удалённых; расхождений нет |
+  // РАСХОЖДЕНИЯ …». Это и есть проверка «ничего не потерялось» на шаге 6.
+  var PERSONAL_SHADOW_ENABLED_KEY = "biblePersonalShadow_v1";
+  var PERSONAL_SHADOW_CLOUD_KEY = "biblePersonalShadowCloud_v1";
+  var PERSONAL_SHADOW_CLOUD_BRANCH = "personalTasks";
+  var PERSONAL_SHADOW_RECONCILE_DELAY_MS = 1500;
+  var personalTasksBinding = null;
+  var personalShadowReady = false;
+  var personalShadowReconcileTimer = null;
+
+  function isPersonalShadowEnabled(){
+    try{ return localStorage.getItem(PERSONAL_SHADOW_ENABLED_KEY) !== "0"; }catch(e){ return true; }
+  }
+  function isPersonalShadowCloudEnabled(){
+    try{ return localStorage.getItem(PERSONAL_SHADOW_CLOUD_KEY) !== "0"; }catch(e){ return true; }
+  }
+  function personalShadowErrText(err){
+    return err && err.message ? err.message : String(err);
+  }
+  function getPersonalTasksBinding(){
+    if(personalTasksBinding) return personalTasksBinding;
+    if(!window.SyncEnginePersonalBinding || !window.SyncEnginePersonalCrypto){
+      throw new Error("syncengine_personalbinding.js / syncengine_personalcrypto.js не загружены (index.html)");
+    }
+    var rt = getSyncEngineRuntime();
+    personalTasksBinding = window.SyncEnginePersonalBinding.createPersonalBinding({
+      engine: rt.engine,
+      transport: rt.transport,
+      makeHooks: window.SyncEnginePersonalCrypto.makePersonalHooks,
+      getSyncId: function(){ return syncId; },
+      name: "tasks",
+      keyPrefix: "task:",
+      syncsPath: FIREBASE_SYNCS_PATH,
+      cloudBranch: PERSONAL_SHADOW_CLOUD_BRANCH,
+      isCloudEnabled: isPersonalShadowCloudEnabled,
+      canSync: isNetworkAvailable, // режим оффлайн: ни push, ни сверок с облаком
+      onCloudSynced: personalShadowAfterCloudSync,
+      log: syncEngineLog
+    });
+    return personalTasksBinding;
+  }
+
+  // Канал 1: живая запись/тумбстоун. data копируется внутри binding сразу (объект задачи
+  // правится на месте, см. moveTaskToTab/cycleTaskFlag).
+  function personalShadowSave(id, data, t){
+    if(!personalShadowReady) return;
+    try{
+      getPersonalTasksBinding().save(id, data, t);
+    }catch(err){
+      syncEngineLog("PersonalShadow: save " + id + " — " + personalShadowErrText(err));
+    }
+  }
+  function personalShadowRemove(id, t){
+    if(!personalShadowReady) return;
+    try{
+      getPersonalTasksBinding().remove(id, t);
+    }catch(err){
+      syncEngineLog("PersonalShadow: remove " + id + " — " + personalShadowErrText(err));
+    }
+  }
+
+  // Канал 2: отложенная сверка «state → store».
+  function personalShadowTouch(){
+    if(!personalShadowReady) return;
+    clearTimeout(personalShadowReconcileTimer);
+    personalShadowReconcileTimer = setTimeout(function(){
+      personalShadowReconcileTimer = null;
+      personalShadowReconcileNow(false, "", false);
+    }, PERSONAL_SHADOW_RECONCILE_DELAY_MS);
+  }
+  // Канал 3: state заменён целиком.
+  function personalShadowStateReplaced(){
+    if(!personalShadowReady) return;
+    clearTimeout(personalShadowReconcileTimer);
+    personalShadowReconcileTimer = null;
+    personalShadowReconcileNow(true, "state заменён целиком", true);
+  }
+  function personalShadowReconcileNow(tombstoneMissing, label, verbose){
+    try{
+      getPersonalTasksBinding().reconcile(state, {tombstoneMissing: !!tombstoneMissing, verbose: !!verbose, cloudDelayMs: 2500}).then(function(){
+        if(label) personalShadowDiagnose(label);
+      });
+    }catch(err){
+      syncEngineLog("PersonalShadow: сверка — " + personalShadowErrText(err));
+    }
+  }
+
+  // Облако: сверка (pull → сверка → push) откладывается и склеивается внутри binding.
+  function personalShadowCloudSyncSoon(delayMs){
+    if(!personalShadowReady || !syncId || isOfflineMode()) return;
+    try{
+      getPersonalTasksBinding().scheduleCloudSync(delayMs);
+    }catch(err){
+      syncEngineLog("PersonalShadow: сверка с облаком — " + personalShadowErrText(err));
+    }
+  }
+  // Первый цикл doCloudSync закончился (settleInitialTaskSync): в state уже приехало то, что
+  // было в облаке — сверяем store и потом с облаком.
+  function personalShadowAfterFirstSync(){
+    if(!personalShadowReady) return;
+    personalShadowTouch();
+    personalShadowCloudSyncSoon(4000);
+  }
+  function personalShadowAfterCloudSync(res){
+    if(res && res.ok && res.value){
+      var pull = res.value.pull || {}, push = res.value.push || {};
+      syncEngineLog("PersonalShadow: сверка с облаком — принято " + (pull.applied || 0) + ", отправлено " + (push.pushed || 0) +
+        ((pull.error || push.error) ? ", ОШИБКА: " + personalShadowErrText(pull.error || push.error) : ""));
+    }
+    personalShadowDiagnose("после сверки с облаком");
+  }
+
+  // Диагностика: одна строка в журнал — сколько задач в state и в store и есть ли расхождения.
+  function personalShadowDiagnose(label){
+    try{
+      getPersonalTasksBinding().diagnose(state).then(function(r){
+        if(!r || !r.ok){ syncEngineLog("PersonalShadow [" + label + "]: диагностика не удалась"); return; }
+        syncEngineLog(formatPersonalShadowReport(label, r.value));
+      });
+    }catch(err){
+      syncEngineLog("PersonalShadow: диагностика — " + personalShadowErrText(err));
+    }
+  }
+  function formatPersonalShadowReport(label, rep){
+    function ids(list){ return list.length ? " (" + list.slice(0, 5).join(", ") + (list.length > 5 ? ", …" : "") + ")" : ""; }
+    var head = "PersonalShadow [" + label + "]: state — живых " + rep.state.live + ", удалённых " + rep.state.tombstones +
+      "; store — живых " + rep.store.live + ", удалённых " + rep.store.tombstones +
+      " (область " + (rep.scope === "local" ? "local" : "syncId") + ", облако " + (rep.cloud ? "да" : "нет") + ", хранилище " + rep.storageMode + ")";
+    if(rep.ok) return head + " — расхождений нет";
+    return head + " — РАСХОЖДЕНИЯ: нет в store " + rep.missingInStore.length + ids(rep.missingInStore) +
+      ", в store старее " + rep.olderInStore.length + ids(rep.olderInStore) +
+      ", в store новее " + rep.newerInStore.length + ids(rep.newerInStore) +
+      ", лишних в store " + rep.extraInStore.length + ids(rep.extraInStore) +
+      ", удалена/жива не так " + rep.deletedMismatch.length + ids(rep.deletedMismatch) +
+      ", текст не совпал " + rep.contentDiff.length + ids(rep.contentDiff) +
+      (rep.state.invalid ? ", некорректных в state " + rep.state.invalid : "");
+  }
+
+  // Уборка после устройства со старой версией (до шага 6). Такое устройство при синхронизации
+  // подмешало ветку облака personalTasks в свой state обычным ключом (как раньше fileBlobs/notes,
+  // см. CLOUD_RESERVED_SUBTREES). Эта версия ветку из облака больше не подмешивает
+  // (stripCloudReservedSubtrees), но уже лежащий в state ключ сама не уберёт — он остался бы мёртвым
+  // весом в localStorage и попал бы в экспорт data.json. Настоящая запись state всегда {c, t}
+  // (t — число); ветка облака — объект «id задачи → {c, t}» без собственного t. Удаляем только такой
+  // ключ, только под именем personalTasks. Обратно из облака он не вернётся (там его режет
+  // stripCloudReservedSubtrees), в облаке саму ветку это НЕ трогает (дельта строится по ключам
+  // merged, удалений не шлёт). Возвращает true, если ключ убран — сохранение остаётся за вызывающим.
+  function removeStrayPersonalTasksBranchFromState(){
+    var v = state[PERSONAL_SHADOW_CLOUD_BRANCH];
+    if(!v || typeof v !== "object" || typeof v.t === "number") return false;
+    delete state[PERSONAL_SHADOW_CLOUD_BRANCH];
+    if(window.Debug) window.Debug.log("Уборка state: удалён лишний ключ \"" + PERSONAL_SHADOW_CLOUD_BRANCH + "\" (его подмешало устройство со старой версией приложения)");
+    return true;
+  }
+
+  // Запуск (вызывается один раз из «ЗАПУСК» — все var раздела к этому моменту заведены).
+  // Первая сверка — через 2 с, чтобы не конкурировать с отрисовкой при старте.
+  function initPersonalTasksShadow(){
+    if(!isPersonalShadowEnabled()){
+      syncEngineLog("PersonalShadow: выключена флагом устройства (" + PERSONAL_SHADOW_ENABLED_KEY + "=0)");
+      return;
+    }
+    try{
+      getPersonalTasksBinding();
+    }catch(err){
+      syncEngineLog("PersonalShadow: не запущена — " + personalShadowErrText(err));
+      return;
+    }
+    personalShadowReady = true;
+    setTimeout(function(){ personalShadowReconcileNow(false, "старт", true); }, 2000);
+  }
+
   // ===================== ОБЩИЕ ЗАДАЧИ: АРХИВ (TASK_UNIFIED_SYNC.md, Шаг 4.1,
   // 19.09) =====================
   // /groups/<groupId>/archive/<id> — отдельный от /tasks облачный путь, та же
@@ -6290,6 +6559,7 @@
     getBookMarginBookmarks: getBookMarginBookmarksForList,
     openBookMarginBookmark: openBookAtMarginBookmark,
     removeBookMarginBookmark: removeBookBookmark,
+    renameBookMarginBookmark: renameBookBookmark,
     // ---------------------------------------------------------------------
     // Облачное хранение заметок с шифрованием (см. TASK_MDNOTES_CLOUD.md,
     // шаг 1 "Ядро") — только эти узкие функции, привязанные к ветке
@@ -7371,7 +7641,9 @@
         else if(!isTask && !isBook && selection.all) newState[k] = payload.rawStateData[k];
       });
       state = newState;
+      removeStrayPersonalTasksBranchFromState(); // экспорт со старого устройства мог унести лишний ключ personalTasks
       saveLocalStateNow();
+      personalShadowStateReplaced(); // шаг 6: импорт заменил задачи целиком — теневой store сверяется с погашением лишнего
     }
 
     if(selection.notes && MdEditor && MdEditor.replaceAllNotesFromEntries){
@@ -7463,6 +7735,7 @@
         openAppConfirmBar("Отключить это устройство от синхронизации? Локальный прогресс сохранится.", function(){
           syncId = null;
           localStorage.removeItem(SYNC_ID_KEY);
+          personalShadowTouch(); // шаг 6: область теневого store сменилась (syncId → local)
           refreshStatusBase();
           renderModalHome();
         }, { yesTitle:"Отключить" });
@@ -7517,6 +7790,7 @@
     createCloudBlob(state).then(function(id){
       syncId = id;
       localStorage.setItem(SYNC_ID_KEY, id);
+      personalShadowTouch(); // шаг 6: область теневого store сменилась (local → syncId)
       refreshStatusBase();
       modalBox.innerHTML = modalHeader("Код создан", "Отсканируйте этот QR-код на другом устройстве (в этой же панели, кнопка «У меня уже есть код») — или введите код текстом.") +
         '<div id="mNewQrHolder"></div><button class="modal-btn primary" id="mDone">Готово</button>';
@@ -7667,6 +7941,7 @@
       syncId = id;
       localStorage.setItem(SYNC_ID_KEY, id);
       saveLocalStateNow();
+      personalShadowStateReplaced(); // шаг 6: state заменён целиком — теневой store сверяется с погашением лишнего
       setNoTransitions(true);
       rerenderAllFromState();
       setTimeout(function(){ setNoTransitions(false); }, 50);
@@ -8015,18 +8290,26 @@
   // число точек полигона).
   function settingsWavePolygonAt(t){
     var g = settingsWaveGeom;
-    if(t <= 0) return "polygon(" + g.maxX + "px " + g.maxY + "px, " + g.maxX + "px " + g.maxY + "px, " + g.maxX + "px " + g.maxY + "px)";
+    // Раскладка для левши (ТЗ 20.09): окно и ряды вкладок стоят зеркально, а
+    // волна стартует из угла у язычка — то есть слева-снизу; все X-координаты
+    // полигона отражаются внутри прямоугольника [minX, maxX].
+    var lefty = isLeftHanded();
+    function mx(x){ return lefty ? (g.minX + g.maxX - x) : x; }
+    function poly(pts){
+      return "polygon(" + pts.map(function(p){ return mx(p[0]) + "px " + p[1] + "px"; }).join(", ") + ")";
+    }
+    if(t <= 0) return poly([[g.maxX, g.maxY], [g.maxX, g.maxY], [g.maxX, g.maxY]]);
     if(t >= 1) return "none";
     if(t <= 0.5){
       var s = t * 2; // 0..1
       var by = g.maxY - (g.maxY - g.minY) * s;
       var cx = g.maxX - (g.maxX - g.minX) * s;
-      return "polygon(" + g.maxX + "px " + g.maxY + "px, " + g.maxX + "px " + by + "px, " + cx + "px " + g.maxY + "px)";
+      return poly([[g.maxX, g.maxY], [g.maxX, by], [cx, g.maxY]]);
     }
     var q = (t - 0.5) * 2; // 0..1
     var topX = g.maxX - (g.maxX - g.minX) * q;
     var leftY = g.maxY - (g.maxY - g.minY) * q;
-    return "polygon(" + g.maxX + "px " + g.maxY + "px, " + g.maxX + "px " + g.minY + "px, " + topX + "px " + g.minY + "px, " + g.minX + "px " + leftY + "px, " + g.minX + "px " + g.maxY + "px)";
+    return poly([[g.maxX, g.maxY], [g.maxX, g.minY], [topX, g.minY], [g.minX, leftY], [g.minX, g.maxY]]);
   }
 
   function setSettingsWaveClip(t){
@@ -8305,15 +8588,32 @@
       if(!gearRowRect || gearRowRect.width === 0){
         gearRowRect = gearRow2 ? gearRow2.getBoundingClientRect() : null;
       }
-      var gearRowRight = (gearRowRect && gearRowRect.width > 0) ? gearRowRect.right : frameRect.left;
+      var hasGearRow = !!(gearRowRect && gearRowRect.width > 0);
+      var gearRowRight = hasGearRow ? gearRowRect.right : frameRect.left;
       var fabTopPx = readingFull ? (window.innerHeight - ANDROID_NAV_BAR_H) : frameRect.bottom;
       if(readingFull) settingsModalOverlay.classList.add("reading-mode-active");
-      settingsGearBtn.style.left = Math.round(gearRowRight + 1) + "px";
+      // Раскладка для левши (ТЗ 20.09): ряд вкладок уже стоит слева (см.
+      // html.lefty в modals.css, замеры выше — по реальным координатам), язычок
+      // ставится зеркально — вплотную СЛЕВА от ряда (тот же зазор 1px), а кнопка
+      // режима чтения — с другой стороны от язычка, вплотную к ряду: ровно
+      // отражение обычной схемы «язычок справа от ряда, кнопка режима чтения
+      // слева от язычка».
+      var fabW = settingsGearBtn.offsetWidth || 45;
+      var fabLeft, readingLeft;
+      if(isLeftHanded()){
+        var gearRowLeft = hasGearRow ? gearRowRect.left : frameRect.right;
+        fabLeft = gearRowLeft - 1 - fabW;
+        readingLeft = fabLeft + 46;
+      } else {
+        fabLeft = gearRowRight + 1;
+        readingLeft = gearRowRight + 1 - 46;
+      }
+      settingsGearBtn.style.left = Math.round(fabLeft) + "px";
       settingsGearBtn.style.top = Math.round(fabTopPx) + "px";
       // кнопка режима чтения — вплотную слева от язычка (45px + зазор 1px)
       var readingFabBtn = document.getElementById("readingModeFabBtn");
       if(readingFabBtn){
-        readingFabBtn.style.left = Math.round(gearRowRight + 1 - 46) + "px";
+        readingFabBtn.style.left = Math.round(readingLeft) + "px";
         readingFabBtn.style.top = Math.round(fabTopPx) + "px";
       }
     }
@@ -10134,12 +10434,33 @@
     data.position = position;
     saveBookState(hash, data);
   }
-  function addBookBookmark(hash, position, name, isMain){
+  // nameManual (ТЗ 20.09) — имя задано пользователем вручную (кнопка
+  // «Редактировать» на вкладке «Закладки», см. renameBookBookmark) и имеет
+  // приоритет над автоматическим: при переносе основной закладки
+  // (saveBookReaderBookmark) оно переезжает в новую запись, а не
+  // затирается именем из первых слов абзаца.
+  function addBookBookmark(hash, position, name, isMain, nameManual){
     var data = getOrCreateBookState(hash);
     var rec = {id: genBookRecordId(), position: position, addedAt: Date.now(), name: name || "", isMain: !!isMain};
+    if(nameManual) rec.nameManual = true;
     data.bookmarks.push(rec);
     saveBookState(hash, data);
     return rec.id;
+  }
+  // Ручное переименование книжной закладки (кнопка-карандаш на вкладке
+  // «Закладки», ТЗ 20.09). Пустое имя не принимается (возвращает false).
+  // Запись целиком уходит в облако через saveBookState — имя синхронизируется
+  // так же, как остальные поля закладки.
+  function renameBookBookmark(hash, bookmarkId, newName){
+    var name = String(newName || "").trim();
+    if(!name) return false;
+    var data = getOrCreateBookState(hash);
+    var b = data.bookmarks.filter(function(x){ return x.id === bookmarkId; })[0];
+    if(!b) return false;
+    b.name = name;
+    b.nameManual = true;
+    saveBookState(hash, data);
+    return true;
   }
   // Основная закладка книги (пиктограмма раскрытой книги в общем списке "Закладки",
   // см. saveBookReaderBookmark ниже) — максимум одна на книгу; при выборе
@@ -10593,13 +10914,51 @@
   // jumpToChapterFromChaptersList ниже использует для перехода к главе,
   // только гранулярность — абзац, а не глава. По умолчанию (пока
   // scrollTop не дошёл ни до одного блока) — самый первый блок книги.
+  // ТЗ 20.09 (ускорение открытия длинных книг): текст книги разбит на
+  // «сегменты» по BOOK_READER_SEG_SIZE блоков (.book-reader-seg, см.
+  // renderBookReaderText), у каждого content-visibility:auto — браузер не
+  // считает layout/paint сегментов вне экрана. Побочный эффект: запрос
+  // геометрии у потомка ПРОПУЩЕННОГО сегмента (offsetTop/getBoundingClientRect
+  // абзаца) заставил бы браузер сверстать этот сегмент целиком — а прежние
+  // функции ниже обходили ВСЕ блоки книги подряд. Поэтому теперь сначала
+  // бинарный поиск по самим сегментам (их собственные боксы дёшевы — размер
+  // берётся из contain-intrinsic-size), и только потом — линейный обход
+  // блоков ОДНОГО сегмента (он и так на экране).
+  // Верх элемента в координатах прокручиваемого содержимого контейнера
+  // (через getBoundingClientRect, а не offsetTop — не зависит от того, кто
+  // offsetParent у абзаца/сегмента).
+  function bookElTopInContainer(container, el){
+    return el.getBoundingClientRect().top - container.getBoundingClientRect().top - container.clientTop + container.scrollTop;
+  }
+  var BOOK_BLOCK_SELECTOR = ".book-reader-p, .book-reader-image-wrap";
+  // Абзац/картинка {ch, blk}, чьё начало последним не превышает текущий
+  // scrollTop контейнера (то же поведение, что и раньше, но через сегменты).
+  // По умолчанию (пока scrollTop не дошёл ни до одного блока) — самый
+  // первый блок книги.
   function currentBookReaderPosition(container){
-    var blocks = container.querySelectorAll(".book-reader-p, .book-reader-image-wrap");
+    var segs = container.querySelectorAll(".book-reader-seg");
+    if(!segs.length) return null;
+    var st = container.scrollTop;
+    var lo = 0, hi = segs.length - 1, found = 0;
+    while(lo <= hi){
+      var mid = (lo + hi) >> 1;
+      if(bookElTopInContainer(container, segs[mid]) <= st){ found = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    var seg = segs[found];
+    var blocks = seg.querySelectorAll(BOOK_BLOCK_SELECTOR);
     if(!blocks.length) return null;
     var best = blocks[0];
-    for(var i = 0; i < blocks.length; i++){
-      if(blocks[i].offsetTop <= container.scrollTop) best = blocks[i];
-      else break;
+    var segTop = bookElTopInContainer(container, seg);
+    if(segTop + seg.getBoundingClientRect().height <= st){
+      // scrollTop уже ниже конца этого сегмента (заголовок следующей главы) —
+      // последний блок сегмента, не трогая геометрию его (пропущенных) блоков
+      best = blocks[blocks.length - 1];
+    } else {
+      for(var i = 0; i < blocks.length; i++){
+        if(bookElTopInContainer(container, blocks[i]) <= st) best = blocks[i];
+        else break;
+      }
     }
     var ch = parseInt(best.getAttribute("data-ch"), 10);
     var blk = parseInt(best.getAttribute("data-blk"), 10);
@@ -10607,22 +10966,23 @@
     return {ch: ch, blk: blk};
   }
   // Абзац/картинка, реально отображающиеся ПЕРВЫМИ на экране в момент
-  // вызова (ТЗ пользователя от 15.09) — в отличие от currentBookReaderPosition
-  // выше (которая мерит через offsetTop/scrollTop и годится для запоминания
-  // места чтения между сессиями), здесь сравниваются экранные координаты
-  // (getBoundingClientRect) прямо в момент нажатия кнопки закладки: ищем
-  // первый блок, чей нижний край ещё не ушёл выше верхней границы
-  // контейнера. Раньше закладка сохранялась через currentBookReaderPosition
-  // и могла осесть на абзаце, который к моменту нажатия уже прокрутился за
-  // верхний край экрана — эта функция всегда даёт первый видимый.
+  // вызова (ТЗ пользователя от 15.09) — экранные координаты: первый блок,
+  // чей нижний край ещё не ушёл выше верхней границы контейнера.
   function firstVisibleBookBlockPosition(container){
-    var blocks = container.querySelectorAll(".book-reader-p, .book-reader-image-wrap");
-    if(!blocks.length) return null;
+    var segs = container.querySelectorAll(".book-reader-seg");
+    if(!segs.length) return null;
     var top = container.getBoundingClientRect().top;
-    var best = blocks[0];
+    var lo = 0, hi = segs.length - 1, found = segs.length - 1;
+    while(lo <= hi){
+      var mid = (lo + hi) >> 1;
+      if(segs[mid].getBoundingClientRect().bottom > top){ found = mid; hi = mid - 1; }
+      else lo = mid + 1;
+    }
+    var blocks = segs[found].querySelectorAll(BOOK_BLOCK_SELECTOR);
+    if(!blocks.length) return null;
+    var best = blocks[blocks.length - 1];
     for(var i = 0; i < blocks.length; i++){
-      best = blocks[i];
-      if(blocks[i].getBoundingClientRect().bottom > top) break;
+      if(blocks[i].getBoundingClientRect().bottom > top){ best = blocks[i]; break; }
     }
     var ch = parseInt(best.getAttribute("data-ch"), 10);
     var blk = parseInt(best.getAttribute("data-blk"), 10);
@@ -10633,13 +10993,31 @@
   // оказался наверху. Возвращает false, если блок не найден (например,
   // сохранённая позиция битая или файл книги успел измениться между
   // открытиями) — тогда вызывающий код молча откатывается на позицию по
-  // умолчанию (см. renderBookReaderText ниже), книга просто открывается с
-  // начала вместо падения с ошибкой.
+  // умолчанию (см. renderBookReaderText ниже).
+  // Двухшаговая прокрутка: сначала к верху СЕГМЕНТА (его бокс известен и
+  // без вёрстки содержимого), затем, когда сегмент отрисован, — точно к
+  // блоку (см. refine). refine принимает верх блока только если он лежит
+  // внутри бокса своего сегмента (защита от нулевых координат у ещё не
+  // сверстанного содержимого).
   function scrollBookReaderToPosition(container, position){
     if(!position) return false;
     var el = container.querySelector('[data-ch="' + position.ch + '"][data-blk="' + position.blk + '"]');
     if(!el) return false;
-    container.scrollTop = el.offsetTop;
+    var seg = el.closest(".book-reader-seg");
+    container.scrollTop = bookElTopInContainer(container, seg || el);
+    if(!seg) return true;
+    var tries = 0;
+    function refine(){
+      if(!el.isConnected || !seg.isConnected) return;
+      var segTop = bookElTopInContainer(container, seg);
+      var segH = seg.getBoundingClientRect().height;
+      var top = bookElTopInContainer(container, el);
+      if(top >= segTop - 2 && top <= segTop + segH + 2 && Math.abs(top - container.scrollTop) > 1){
+        container.scrollTop = top;
+      }
+      if(++tries < 3) requestAnimationFrame(refine);
+    }
+    requestAnimationFrame(refine);
     return true;
   }
   function flushBookReaderPositionNow(){
@@ -10660,7 +11038,9 @@
   // ридера (homeBtn/AppNav-колбэк в openBookReader), иначе слушатель
   // остался бы висеть на #settingsTabContent и после ухода с книги —
   // контейнер общий на всё приложение и не пересоздаётся между экранами.
+  var bookReaderImageObserver = null;
   function destroyBookReaderScrollListener(){
+    if(bookReaderImageObserver){ try{ bookReaderImageObserver.disconnect(); }catch(e){} bookReaderImageObserver = null; }
     if(bookReaderPositionSaveTimer) flushBookReaderPositionNow();
     if(bookReaderScrollContainer && bookReaderScrollHandler){
       bookReaderScrollContainer.removeEventListener("scroll", bookReaderScrollHandler);
@@ -10812,10 +11192,10 @@
     // строки, GC подберёт вместе с bookReaderState). Функцию и её вызовы
     // оставляем как есть (дешёвый no-op на data:-URL) — чтобы не занимать
     // отдельным ревью то место, где revokeBookReaderImages() вызывается.
-    if(!bookReaderState || !bookReaderState.imageUrls) return;
-    Object.keys(bookReaderState.imageUrls).forEach(function(id){
-      try{ URL.revokeObjectURL(bookReaderState.imageUrls[id]); }catch(e){}
-    });
+    // С 20.09 imageUrls — ленивые геттеры (см. openBookReader): обход значений
+    // здесь заставил бы собрать data:-строки ВСЕХ картинок книги, а отзывать
+    // нечего — поэтому тело пустое.
+    return;
   }
 
   // Ленивый декод ОДНОЙ картинки книги в байты (atob + побайтовый
@@ -10891,10 +11271,20 @@
       // ссылки на уже распарсенные строки, без копирования) и byte-массив
       // считается лениво в getBookReaderImageBytes ниже.
       var imageUrls = {}, imageBase64 = {};
+      // ТЗ 20.09: data:-строка собирается ЛЕНИВО, при первом обращении к
+      // imageUrls[id] (геттер) — раньше здесь конкатенировались base64-строки
+      // ВСЕХ картинок сразу (у книги на ~100 МБ это ~100 МБ лишних строк).
       Object.keys(res.parsed.images).forEach(function(id){
         var img = res.parsed.images[id];
         var contentType = img.contentType || "image/jpeg";
-        imageUrls[id] = "data:" + contentType + ";base64," + img.base64;
+        var cachedUrl = null;
+        Object.defineProperty(imageUrls, id, {
+          enumerable: true, configurable: true,
+          get: function(){
+            if(cachedUrl === null) cachedUrl = "data:" + contentType + ";base64," + img.base64;
+            return cachedUrl;
+          }
+        });
         imageBase64[id] = {base64: img.base64, contentType: contentType};
       });
       if(window.Debug) window.Debug.log("openBookReader[" + name + "]: подготовка ссылок на картинки заняла " + Math.round(performance.now() - _tImg) + "мс");
@@ -11073,8 +11463,16 @@
     }
     // Тот же fontSizeStep, что у "Моего блокнота"/задач (см.
     // initTaskGlobalToolbar выше) — единица размера общая на всё приложение.
-    if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ MdEditor.changeFontSizeStep(1); });
-    if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ MdEditor.changeFontSizeStep(-1); });
+    // После смены шрифта пересчитываем оценку высоты ещё не сверстанных
+    // сегментов (ТЗ 20.09, calibrateBookReaderSegments).
+    function recalibrateBookReaderSoon(){
+      setTimeout(function(){
+        var c = document.getElementById("settingsTabContent");
+        if(c && bookReaderState && bookReaderState.mode === "text") calibrateBookReaderSegments(c);
+      }, 80);
+    }
+    if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ MdEditor.changeFontSizeStep(1); recalibrateBookReaderSoon(); });
+    if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ MdEditor.changeFontSizeStep(-1); recalibrateBookReaderSoon(); });
 
     // Кнопка "Выделение" (шаг 13; доработка 13.09 — тот же порядок
     // действий, что у кнопки "Маркер" в "Моём блокноте", mdeditor.js):
@@ -11149,56 +11547,146 @@
     applyReadingModeVisual();
   }
 
+  // Размер сегмента (блоков) — единица content-visibility:auto, см. комментарий
+  // у currentBookReaderPosition и .book-reader-seg в components.css.
+  var BOOK_READER_SEG_SIZE = 40;
+
+  // Калибровка оценки высоты пропускаемых сегментов (ТЗ 20.09): пока сегмент
+  // не сверстан, его высота берётся из contain-intrinsic-size, а она
+  // считается как число символов * --book-px-per-char (+ картинки). Здесь
+  // мерим реальное значение px/символ на 3 «обычных» сегментах (без
+  // картинок): на миг включаем им content-visibility:visible, читаем высоту
+  // и возвращаем обратно — верстается только эта пара десятков абзацев.
+  function calibrateBookReaderSegments(container){
+    var reader = container.querySelector(".book-reader");
+    var segs = container.querySelectorAll(".book-reader-seg");
+    if(!reader || !segs.length) return;
+    var n = segs.length, sumH = 0, sumChars = 0, used = {};
+    [0.1, 0.5, 0.8].forEach(function(frac){
+      var start = Math.min(n - 1, Math.floor(n * frac));
+      for(var k = 0; k < 6; k++){
+        var idx = Math.min(n - 1, start + k);
+        if(used[idx]) continue;
+        var seg = segs[idx];
+        var chars = parseInt(seg.getAttribute("data-chars"), 10) || 0;
+        if(chars < 300 || seg.getAttribute("data-imgs") !== "0") continue;
+        used[idx] = true;
+        seg.style.contentVisibility = "visible";
+        var h = seg.getBoundingClientRect().height;
+        seg.style.contentVisibility = "";
+        if(h > 0){ sumH += h; sumChars += chars; }
+        break;
+      }
+    });
+    if(sumChars > 0){
+      var ppc = Math.max(0.05, Math.min(3, sumH / sumChars));
+      reader.style.setProperty("--book-px-per-char", ppc.toFixed(4) + "px");
+    }
+  }
+
+  // Картинки книги грузятся ЛЕНИВО (ТЗ 20.09): в HTML у <img> нет src, только
+  // data-lazy-img="id" — иначе строка HTML содержала бы base64 ВСЕХ картинок
+  // (у иллюстрированной книги на ~100 МБ это главный тормоз открытия).
+  // src ставится, когда картинка подходит к экрану ближе чем на 2500px.
+  function bindBookReaderLazyImages(container){
+    var imgs = container.querySelectorAll("img[data-lazy-img]");
+    if(!imgs.length) return;
+    function loadImg(img){
+      var id = img.getAttribute("data-lazy-img");
+      img.removeAttribute("data-lazy-img");
+      var url = bookReaderState && bookReaderState.imageUrls ? bookReaderState.imageUrls[id] : null;
+      if(url) img.src = url;
+    }
+    if(!("IntersectionObserver" in window)){
+      for(var i = 0; i < imgs.length; i++) loadImg(imgs[i]);
+      return;
+    }
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){
+        if(en.isIntersecting){ io.unobserve(en.target); loadImg(en.target); }
+      });
+    }, {root: container, rootMargin: "2500px 0px 2500px 0px"});
+    for(var j = 0; j < imgs.length; j++) io.observe(imgs[j]);
+    bookReaderImageObserver = io;
+  }
+
   function renderBookReaderText(container){
     // ВРЕМЕННО (диагностика скорости открытия длинных книг, 15.09).
     var _tBuild = performance.now();
+    // ТЗ 20.09: закладки/подчёркивания/прикреплённые картинки раскладываются
+    // по ключу "ch_blk" ОДИН раз — раньше на каждый из десятков тысяч блоков
+    // Библии заново делался filter() по всем трём массивам.
+    var hash = bookReaderState.hash;
+    var stateData = getBookState(hash);
+    var bmByBlock = {}, ulByBlock = {}, pinByBlock = {};
+    if(stateData){
+      (stateData.bookmarks || []).forEach(function(b){
+        if(!b.position) return;
+        var k = b.position.ch + "_" + b.position.blk;
+        if(!bmByBlock[k]) bmByBlock[k] = b; // как filter()[0] раньше — первая по порядку
+      });
+      (stateData.underlines || []).forEach(function(u){
+        if(!u.position) return;
+        var k = u.position.ch + "_" + u.position.blk;
+        (ulByBlock[k] = ulByBlock[k] || []).push({s: u.position.s, e: u.position.e, id: u.id});
+      });
+      Object.keys(ulByBlock).forEach(function(k){ ulByBlock[k].sort(function(a, b){ return a.s - b.s; }); });
+      (stateData.images || []).forEach(function(it){ pinByBlock[it.ch + "_" + it.blk] = true; });
+    }
     var html = '<div class="book-reader-tab">' + bookReaderFabRowHtml() + '<div class="book-reader">';
     bookReaderState.chapters.forEach(function(ch, idx){
       html += '<div class="book-reader-chapter" id="bookChapter_' + idx + '">';
       if(ch.title) html += '<h4 class="book-reader-chapter-title">' + escapeHtml(ch.title) + '</h4>';
+      // Сегмент — группа из BOOK_READER_SEG_SIZE соседних блоков ОДНОЙ главы
+      // (см. currentBookReaderPosition). data-chars/--seg-chars — число
+      // символов (оценка высоты), data-imgs/--seg-imgs — число картинок.
+      var segHtml = "", segBlocks = 0, segChars = 0, segImgs = 0;
+      function flushSeg(){
+        if(!segHtml) return;
+        html += '<div class="book-reader-seg" data-chars="' + segChars + '" data-imgs="' + segImgs +
+          '" style="--seg-chars:' + segChars + ';--seg-imgs:' + segImgs + '">' + segHtml + '</div>';
+        segHtml = ""; segBlocks = 0; segChars = 0; segImgs = 0;
+      }
       ch.blocks.forEach(function(block, bi){
+        var key = idx + "_" + bi;
         if(block.type === "image"){
-          var url = block.imageId ? bookReaderState.imageUrls[block.imageId] : null;
-          if(url){
+          var hasImg = !!(block.imageId && bookReaderState.imageBase64 && bookReaderState.imageBase64[block.imageId]);
+          if(hasImg){
             // Шаг 14 (READER_PLAN.md, Этап D, 11.09): .book-reader-image-wrap
             // даёт position:relative для кнопки-кнопки, центрированной по
             // верхнему краю картинки (components.css). data-ch/data-blk/
             // data-img — та же адресация, что у подчёркиваний (см.
             // bindBookReaderImages/toggleBookReaderImagePin ниже).
-            var pinned = isBookImagePinned(bookReaderState.hash, idx, bi);
-            html += '<div class="book-reader-image-wrap" data-ch="' + idx + '" data-blk="' + bi + '" data-img="' + escapeHtml(block.imageId) + '">' +
-              '<img class="cm-md-image book-reader-image" src="' + url + '">' +
+            var pinned = !!pinByBlock[key];
+            segHtml += '<div class="book-reader-image-wrap" data-ch="' + idx + '" data-blk="' + bi + '" data-img="' + escapeHtml(block.imageId) + '">' +
+              '<img class="cm-md-image book-reader-image" decoding="async" data-lazy-img="' + escapeHtml(block.imageId) + '">' +
               '<button type="button" class="book-reader-pin-btn' + (pinned ? ' pinned' : '') +
                 '" title="' + (pinned ? "Убрать из заметки" : "Отправить в заметку") + '">' + READER_PIN_ICON_SVG + '</button>' +
             '</div>';
+            segImgs++;
+            segBlocks++;
           }
         } else {
           // id/data-ch/data-blk (шаг 13) — по ним resolveSelectionToBlockPosition
           // ниже находит абзац выделения и его координаты (idx = глава, bi =
           // индекс блока внутри ch.blocks — стабилен независимо от типа
           // соседних блоков, т.к. это просто позиция в исходном массиве).
-          var ranges = getBookUnderlineRangesForBlock(bookReaderState.hash, idx, bi);
-          // Закладка (шаг 15; переработано 12.09, пиктограмма справа —
-          // 15.09) — раньше абзац с закладкой получал класс
-          // .book-reader-p-bookmarked (левая полоска-акцент); теперь вместо
-          // неё поверх первой строки абзаца, у правого края, рисуется
-          // пиктограмма закладки (.book-reader-bookmark-mark, тот же контур
-          // READER_BOOKMARK_ICON_SVG, что и у кнопки "Сохранить закладку" в
-          // нижнем ряду) — клик по ней снимает закладку целиком (см.
-          // bindBookReaderBookmarkMarkClick ниже). Поля страницы узкие,
-          // поэтому пиктограмма условно "поверх" текста, а не строго на
-          // поле — специально по ТЗ пользователя, редкое наложение на конец
-          // первой строки не страшно. Закладки добавляются кнопкой в нижнем
-          // ряду (см. saveBookReaderBookmark выше), сюда просто читаются
-          // заново при каждом рендере текста.
-          var bm = getBookBookmarkForBlock(bookReaderState.hash, idx, bi);
-          html += '<p class="book-reader-p' +
+          var ranges = ulByBlock[key] || null;
+          // Закладка (шаг 15; пиктограмма справа — 15.09) — поверх первой
+          // строки абзаца, у правого края; клик снимает закладку целиком
+          // (bindBookReaderBookmarkMarkClick).
+          var bm = bmByBlock[key];
+          for(var ri = 0; ri < block.runs.length; ri++) segChars += block.runs[ri].text.length;
+          segHtml += '<p class="book-reader-p' +
             '" id="bookP_' + idx + '_' + bi + '" data-ch="' + idx + '" data-blk="' + bi + '">' +
             renderRunsHtml(block.runs, ranges) +
             (bm ? '<button type="button" class="book-reader-bookmark-mark" data-bookmark-id="' + escapeHtml(bm.id) + '" title="Убрать закладку">' + READER_BOOKMARK_ICON_SVG + '</button>' : '') +
             '</p>';
+          segBlocks++;
         }
+        if(segBlocks >= BOOK_READER_SEG_SIZE) flushSeg();
       });
+      flushSeg();
       html += '</div>';
     });
     html += '</div></div>';
@@ -11206,6 +11694,9 @@
     var _tInner = performance.now();
     container.innerHTML = html;
     if(window.Debug) window.Debug.log("renderBookReaderText: container.innerHTML= (парсинг+layout браузером) занял " + Math.round(performance.now() - _tInner) + "мс");
+    var _tCal = performance.now();
+    calibrateBookReaderSegments(container);
+    if(window.Debug) window.Debug.log("renderBookReaderText: калибровка сегментов заняла " + Math.round(performance.now() - _tCal) + "мс, сегментов=" + container.querySelectorAll(".book-reader-seg").length);
     requestAnimationFrame(function(){
       // Шаг 16: сохранённая позиция чтения применяется РОВНО ОДИН РАЗ,
       // сразу после открытия книги (restorePosition обнуляется тут же,
@@ -11222,8 +11713,7 @@
       if(!restored) container.scrollTop = bookReaderState.textScrollTop || 0;
       // Слежение за прокруткой — только в текстовом режиме (в "главах"
       // читательская позиция не копится, см. currentBookReaderPosition
-      // выше, ей нужны .book-reader-p/.book-reader-image-wrap, которых
-      // там нет). Снимается перед ЛЮБЫМ следующим рендером ридера, см.
+      // выше). Снимается перед ЛЮБЫМ следующим рендером ридера, см.
       // destroyBookReaderScrollListener/renderBookReader выше.
       bookReaderScrollHandler = function(){ scheduleBookReaderPositionSave(); };
       bookReaderScrollContainer = container;
@@ -11231,6 +11721,7 @@
     });
     bindBookReaderFabRow();
     bindBookReaderImages();
+    bindBookReaderLazyImages(container);
     bindBookReaderUnderlineClicks();
     bindBookReaderBookmarkMarks();
   }
@@ -11313,7 +11804,7 @@
     requestAnimationFrame(function(){
       var el = document.getElementById("bookChapter_" + idx);
       var container = document.getElementById("settingsTabContent");
-      if(el && container) container.scrollTop = el.offsetTop;
+      if(el && container) container.scrollTop = bookElTopInContainer(container, el);
     });
   }
 
@@ -11547,8 +12038,11 @@
       removeBookBookmark(hash, oldMain.id);
       removeBookReaderBookmarkMarkById(oldMain.id);
     }
-    var name = bookmarkNameFromPosition(pos);
-    var newId = addBookBookmark(hash, pos, name, true);
+    // Ручное имя основной закладки (ТЗ 20.09) переживает её перенос на
+    // новое место: берём его у старой записи вместо автоимени.
+    var keepManual = !!(oldMain && oldMain.nameManual && oldMain.name);
+    var name = keepManual ? oldMain.name : bookmarkNameFromPosition(pos);
+    var newId = addBookBookmark(hash, pos, name, true, keepManual);
     setBookReaderBookmarkMarkInDom(pos.ch, pos.blk, newId);
     var status = document.getElementById("bookReaderStatus");
     if(status) status.textContent = "Основная закладка «" + name + "» сохранена — см. вкладку «Закладки».";
@@ -11950,7 +12444,7 @@
         var name = (data && data.bookName) || manifest[hash];
         if(!name) return; // имя книги неизвестно ни из state, ни из локального манифеста
         data.bookmarks.forEach(function(b){
-          items.push({type: "book", hash: hash, bookmarkId: b.id, position: b.position, addedAt: b.addedAt, bookName: name, name: b.name, isMain: !!b.isMain, availableLocally: !!manifest[hash]});
+          items.push({type: "book", hash: hash, bookmarkId: b.id, position: b.position, addedAt: b.addedAt, bookName: name, name: b.name, isMain: !!b.isMain, nameManual: !!b.nameManual, availableLocally: !!manifest[hash]});
         });
       });
       callback(items);
@@ -11984,9 +12478,8 @@
       }
       return openBookReader(name).then(function(){
         requestAnimationFrame(function(){
-          var el = document.getElementById("bookP_" + position.ch + "_" + position.blk);
           var container = document.getElementById("settingsTabContent");
-          if(el && container) container.scrollTop = el.offsetTop;
+          if(container) scrollBookReaderToPosition(container, position);
         });
       });
     });
@@ -13017,6 +13510,7 @@
       '<div class="settings-row"><span>Включить личные комментарии в шапке сайта</span><input type="checkbox" id="settingsCustomCommentsCb"' + (customCommentsOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить дополнительные анимации</span><input type="checkbox" id="settingsExtraAnimCb"' + (extraAnimOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row"><span>Зеркальное отображение интерфейса для левши</span><input type="checkbox" id="settingsLeftHandedCb"' + (isLeftHanded() ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить полноэкранный режим</span><input type="checkbox" id="settingsHideStatusBarCb"' + (hideStatusBarOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Использовать приложение в оффлайн режиме</span><input type="checkbox" id="settingsOfflineModeCb"' + (offlineModeOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить облачную синхронизацию изображений и книг (может медленно работать на слабых устройствах)</span><input type="checkbox" id="settingsFileSyncCb"' + (fileSyncOn ? " checked" : "") + '></div>' +
@@ -13128,6 +13622,10 @@
 
     document.getElementById("settingsExtraAnimCb").addEventListener("change", function(){
       setExtraAnimationsEnabled(this.checked);
+    });
+
+    document.getElementById("settingsLeftHandedCb").addEventListener("change", function(){
+      setLeftHanded(this.checked);
     });
 
     document.getElementById("settingsHideStatusBarCb").addEventListener("change", function(){
@@ -15222,6 +15720,10 @@
     }
     var savedAt = Date.now();
     state["task:" + id] = {c: data, t: savedAt};
+    // TASK_UNIFIED_SYNC.md, шаг 6: та же запись — в теневой store sync-engine, с ТОЙ ЖЕ меткой
+    // t. Только запись «в два места»: чтение по-прежнему из state, ошибки теневой части сюда
+    // не долетают (см. personalShadowSave).
+    personalShadowSave(id, data, savedAt);
     // ⚠️ ДИАГНОСТИКА (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md) —
     // единая точка сохранения текста/данных задачи: фиксируем id, t и
     // длину текста ПРЯМО ПЕРЕД записью в localStorage — если после
@@ -15788,7 +16290,9 @@
     if(task.c.completionKey){
       state[task.c.completionKey] = {c: null, t: Date.now()};
     }
-    state["task:" + id] = {c: null, t: Date.now()};
+    var deletedAt = Date.now();
+    state["task:" + id] = {c: null, t: deletedAt};
+    personalShadowRemove(id, deletedAt); // шаг 6: тумбстоун с той же меткой — в теневой store
     saveLocalStateNow();
     scheduleCloudPush();
     // см. пояснение у setTaskText выше — удаление задачи тоже может
@@ -18399,6 +18903,7 @@
   }
 
   // ===================== ЗАПУСК =====================
+  if(removeStrayPersonalTasksBranchFromState()) saveLocalState(); // шаг 6: лишний ключ от старой версии на другом устройстве
   if(getHideStatusBarEnabled()){
     applyStatusBarFullscreen(true);
     armHideStatusBarAutoRetry();
@@ -18425,5 +18930,6 @@
   checkUpdateSnoozeExpiry();
   checkForSharedFile();
   Notifications.start();
+  initPersonalTasksShadow();
 
 })();
