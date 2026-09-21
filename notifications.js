@@ -1,5 +1,6 @@
 /* ===========================================================================
    notifications.js
+   Версия: 3.4 (21.09) — галочка плашки даты/времени стала таким же круглым пузырём, как пузырь даты (класс `.reminder-bubble .reminder-bubble-date`, вместо `.mdeditor-fab-btn`); размер `--rb` замеряется временной пробной кнопкой `.mdeditor-fab-btn` внутри плашки.
    Версия: 3.3 (19.09) — из плашки выбора даты/времени убран крестик: остались
    пузыри даты и времени и галочка; отмена — клик мимо плашки (или «Назад»).
    Версия: 3.2 (19.09) — структурная правка: (1) вторая кнопка уведомления —
@@ -610,14 +611,20 @@ window.initNotificationsModule = function(deps){
     bar.innerHTML =
       '<button type="button" class="reminder-bubble reminder-bubble-date" id="mRemDateBtn" title="Дата"></button>' +
       '<button type="button" class="reminder-bubble reminder-bubble-time" id="mRemTimeBtn" title="Время"></button>' +
-      '<button type="button" class="mdeditor-fab-btn" id="mRemSave" title="Сохранить">' + ICON_CHECK + '</button>' +
+      '<button type="button" class="reminder-bubble reminder-bubble-date" id="mRemSave" title="Сохранить">' + ICON_CHECK + '</button>' +
       '<input type="date" class="reminder-hidden-input" id="mRemDateInput" tabindex="-1" aria-hidden="true">' +
       '<input type="time" class="reminder-hidden-input" id="mRemTimeInput" tabindex="-1" aria-hidden="true">';
     document.body.appendChild(bar);
     barEl = bar;
     // высота пузырей = высота кнопок крестик/галочка (их размер задаёт
     // .mdeditor-fab-btn в components.css) — замеряем и отдаём в CSS
-    var fabH = bar.querySelector("#mRemSave").getBoundingClientRect().height;
+    var probe = document.createElement("button");
+    probe.type = "button";
+    probe.className = "mdeditor-fab-btn";
+    probe.style.visibility = "hidden";
+    bar.appendChild(probe);
+    var fabH = probe.getBoundingClientRect().height;
+    bar.removeChild(probe);
     if(fabH > 0) bar.style.setProperty("--rb", Math.round(fabH * 10) / 10 + "px");
 
     var dateBtn = bar.querySelector("#mRemDateBtn");

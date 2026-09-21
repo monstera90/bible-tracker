@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 4.2 (21.09) — затемнение `.app-confirm-bar-backdrop` вдвое прозрачнее (alpha .86 → .43); у подтверждения удаления задачи затемнения нет вовсе (плашка `.app-reminder-bar` с двумя круглыми пузырями, см. my.js `openAppConfirmBar`, `opts.anchorEl`).
    Версия: 4.1 (20.09) — ТЗ пользователя от 20.09: горизонтальная геометрия окна
    настроек, язычка и рядов кнопок переписана логическими свойствами
    (inset-inline-*, padding-inline, border-*-*-radius); блок html.lefty в конце
@@ -135,7 +136,7 @@
   .app-confirm-bar-backdrop{
     position:fixed;
     inset:0;
-    background:rgba(20,14,8,.86);
+    background:rgba(20,14,8,.43);
     z-index:1099;
   }
   .app-confirm-bar{

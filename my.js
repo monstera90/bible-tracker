@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 37.0 (21.09) — структурная правка: подтверждение удаления задачи — плашка над крестиком без затемнения и без текста, две круглые кнопки-пузыря (крестик/галочка): `openAppConfirmBar` принимает `opts.anchorEl`, добавлены `measureFabBubblePx`, `placeAppConfirmBarAtAnchor`; `openTaskDeleteConfirm(onYes, anchorEl)`.
    Версия: 36.0 (21.09) — структурная правка: убрано ручное обновление (плашка/диалог
    «Доступна новая версия», строка «Обновить до v…» во вкладке «Версии»: удалены
    showUpdateBanner/hideUpdateBanner/checkUpdateSnoozeExpiry/openUpdateModal/
@@ -18480,6 +18481,48 @@
   var appConfirmBarEl = null;
   var appConfirmBarBackdropEl = null;
   var appConfirmBarCleanup = null;
+  // размер круглых пузырей = размер кнопки .mdeditor-fab-btn (замер пробной кнопкой внутри плашки)
+  function measureFabBubblePx(box){
+    var probe = document.createElement("button");
+    probe.type = "button";
+    probe.className = "mdeditor-fab-btn";
+    probe.style.visibility = "hidden";
+    box.appendChild(probe);
+    var h = probe.getBoundingClientRect().height;
+    box.removeChild(probe);
+    return Math.round(h * 10) / 10;
+  }
+  // Положение плашки над якорем (тот же алгоритм, что placeBar в notifications.js): середина
+  // плашки ровно над серединой якоря, по горизонтали смещается только у края экрана; сверху
+  // нет места — под якорем; якорь пропал из DOM — у нижнего края / над клавиатурой.
+  var APP_CONFIRM_BAR_EDGE_PX = 8;
+  var APP_CONFIRM_BAR_ANCHOR_GAP_PX = 6;
+  function placeAppConfirmBarAtAnchor(box, anchor){
+    var kbTop = (window.AppKeyboard && window.AppKeyboard.getTop) ? window.AppKeyboard.getTop() : null;
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var limitBottom = (kbTop != null) ? kbTop : vh;
+    var r = (anchor && anchor.isConnected) ? anchor.getBoundingClientRect() : null;
+    if(!r || (r.width === 0 && r.height === 0)){
+      var bottom = (kbTop != null)
+        ? Math.max(0, vh - kbTop) + APP_CONFIRM_BAR_GAP_PX
+        : APP_CONFIRM_BAR_BOTTOM_NO_KB_PX;
+      box.style.left = "auto";
+      box.style.right = "8px";
+      box.style.top = "auto";
+      box.style.bottom = Math.round(bottom) + "px";
+      return;
+    }
+    var w = box.offsetWidth, h = box.offsetHeight;
+    var left = r.left + r.width / 2 - w / 2;
+    left = Math.max(APP_CONFIRM_BAR_EDGE_PX, Math.min(left, vw - w - APP_CONFIRM_BAR_EDGE_PX));
+    var top = r.top - APP_CONFIRM_BAR_ANCHOR_GAP_PX - h;
+    if(top < APP_CONFIRM_BAR_EDGE_PX) top = r.bottom + APP_CONFIRM_BAR_ANCHOR_GAP_PX;
+    if(top + h > limitBottom - APP_CONFIRM_BAR_EDGE_PX) top = Math.max(APP_CONFIRM_BAR_EDGE_PX, limitBottom - APP_CONFIRM_BAR_EDGE_PX - h);
+    box.style.right = "auto";
+    box.style.bottom = "auto";
+    box.style.left = Math.round(left) + "px";
+    box.style.top = Math.round(top) + "px";
+  }
   function closeAppConfirmBar(){
     if(appConfirmBarCleanup){ appConfirmBarCleanup(); appConfirmBarCleanup = null; }
     if(appConfirmBarEl && appConfirmBarEl.parentNode) appConfirmBarEl.parentNode.removeChild(appConfirmBarEl);
@@ -18493,25 +18536,44 @@
   function openAppConfirmBar(text, onYes, opts){
     closeAppConfirmBar();
     opts = opts || {};
-    var backdrop = document.createElement("div");
-    backdrop.className = "app-confirm-bar-backdrop";
-    document.body.appendChild(backdrop);
-    appConfirmBarBackdropEl = backdrop;
+    // opts.anchorEl — режим «пузыри над кнопкой» (сейчас — удаление задачи): без
+    // затемнения и без текста, плашка в стиле .app-reminder-bar серединой над
+    // anchorEl, две круглые кнопки-пузыря (размер = пузырь даты, --rb);
+    // клик мимо плашки = отмена.
+    var anchor = opts.anchorEl || null;
+    var backdrop = null;
+    if(!anchor){
+      backdrop = document.createElement("div");
+      backdrop.className = "app-confirm-bar-backdrop";
+      document.body.appendChild(backdrop);
+      appConfirmBarBackdropEl = backdrop;
+    }
 
     var box = document.createElement("div");
-    box.className = "app-confirm-bar";
+    box.className = anchor ? "app-confirm-bar app-reminder-bar" : "app-confirm-bar";
     box.setAttribute("role", "alertdialog");
-    box.innerHTML =
-      '<span class="app-confirm-bar-text"></span>' +
-      '<span class="app-confirm-bar-btns">' +
-        '<button type="button" class="mdeditor-fab-btn" id="appConfirmBarNoBtn" title="' + escapeHtml(opts.noTitle || "Отмена") + '">' + CROSS_SMALL_ICON_SVG + '</button>' +
-        '<button type="button" class="mdeditor-fab-btn" id="appConfirmBarYesBtn" title="' + escapeHtml(opts.yesTitle || "Да") + '">' + CHECK_ICON_SVG + '</button>' +
-      '</span>';
-    box.querySelector(".app-confirm-bar-text").textContent = text;
-    document.body.appendChild(box);
+    if(anchor){
+      box.setAttribute("aria-label", text);
+      box.innerHTML =
+        '<button type="button" class="reminder-bubble reminder-bubble-date" id="appConfirmBarNoBtn" title="' + escapeHtml(opts.noTitle || "Отмена") + '">' + CROSS_SMALL_ICON_SVG + '</button>' +
+        '<button type="button" class="reminder-bubble reminder-bubble-date" id="appConfirmBarYesBtn" title="' + escapeHtml(opts.yesTitle || "Да") + '">' + CHECK_ICON_SVG + '</button>';
+      document.body.appendChild(box);
+      var bubblePx = measureFabBubblePx(box);
+      if(bubblePx > 0) box.style.setProperty("--rb", bubblePx + "px");
+    }else{
+      box.innerHTML =
+        '<span class="app-confirm-bar-text"></span>' +
+        '<span class="app-confirm-bar-btns">' +
+          '<button type="button" class="mdeditor-fab-btn" id="appConfirmBarNoBtn" title="' + escapeHtml(opts.noTitle || "Отмена") + '">' + CROSS_SMALL_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-fab-btn" id="appConfirmBarYesBtn" title="' + escapeHtml(opts.yesTitle || "Да") + '">' + CHECK_ICON_SVG + '</button>' +
+        '</span>';
+      box.querySelector(".app-confirm-bar-text").textContent = text;
+      document.body.appendChild(box);
+    }
     appConfirmBarEl = box;
 
     function place(){
+      if(anchor){ placeAppConfirmBarAtAnchor(box, anchor); return; }
       var kbTop = (window.AppKeyboard && window.AppKeyboard.getTop) ? window.AppKeyboard.getTop() : null;
       var bottom = (kbTop != null)
         ? Math.max(0, window.innerHeight - kbTop) + APP_CONFIRM_BAR_GAP_PX
@@ -18523,19 +18585,40 @@
     if(vk) vk.addEventListener("geometrychange", place);
     window.addEventListener("resize", place);
     window.addEventListener("popstate", closeAppConfirmBar);
+    var onOutside = null, outsideTimer = null;
+    if(anchor){
+      window.addEventListener("scroll", place, true); // список прокручивается — плашка следует за крестиком
+      // клик мимо плашки = отмена; сам клик гасим. Подключаем на следующем такте:
+      // клик, открывший плашку, ещё не закончил распространяться
+      onOutside = function(e){
+        if(box.contains(e.target)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeAppConfirmBar();
+        if(opts.onCancel) opts.onCancel();
+      };
+      outsideTimer = setTimeout(function(){ document.addEventListener("click", onOutside, true); }, 0);
+    }
     appConfirmBarCleanup = function(){
       if(vk) vk.removeEventListener("geometrychange", place);
       window.removeEventListener("resize", place);
       window.removeEventListener("popstate", closeAppConfirmBar);
+      if(anchor){
+        window.removeEventListener("scroll", place, true);
+        clearTimeout(outsideTimer);
+        document.removeEventListener("click", onOutside, true);
+      }
     };
     // нажатие на плашку/затемнение не должно отнимать фокус у поля (иначе
     // клавиатура закроется и плашка «поедет»)
     box.addEventListener("mousedown", function(e){ e.preventDefault(); });
-    backdrop.addEventListener("mousedown", function(e){ e.preventDefault(); });
-    backdrop.addEventListener("click", function(){
-      closeAppConfirmBar();
-      if(opts.onCancel) opts.onCancel();
-    });
+    if(backdrop){
+      backdrop.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      backdrop.addEventListener("click", function(){
+        closeAppConfirmBar();
+        if(opts.onCancel) opts.onCancel();
+      });
+    }
     document.getElementById("appConfirmBarNoBtn").addEventListener("click", function(){
       closeAppConfirmBar();
       if(opts.onCancel) opts.onCancel();
@@ -18556,8 +18639,8 @@
   }
   // если правилась именно эта строка — сначала штатно снимаем фокус
   // (сохранение/снятие подъёма над клавиатурой), потом удаляем
-  function openTaskDeleteConfirm(onYes){
-    openAppConfirmBar("Удалить задачу?", onYes, { yesTitle:"Удалить", blurBeforeYes:true });
+  function openTaskDeleteConfirm(onYes, anchorEl){
+    openAppConfirmBar("Удалить задачу?", onYes, { yesTitle:"Удалить", blurBeforeYes:true, anchorEl:anchorEl });
   }
   // крестик в строке: mousedown не отнимает фокус у редактируемого поля
   // (клавиатура остаётся открытой — плашка встанет над ней)
@@ -18565,7 +18648,7 @@
     btn.addEventListener("mousedown", function(e){ e.preventDefault(); });
     btn.addEventListener("click", function(e){
       e.stopPropagation();
-      openTaskDeleteConfirm(onYes);
+      openTaskDeleteConfirm(onYes, btn);
     });
   }
 
