@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 2.6 (21.09) — пятая нижняя вкладка второго набора (settingsTabSet2GearBtn5) больше не
+     заглушка «5» — вкладка «ИПКД» (title, число месяца подставляет my.js, updateIpkdTabIcon).
      Версия: 2.5 (21.09) — версия приложения переехала из подвала в левый верхний угол
      шапки (#appVersionText, стили .app-version в footer.css, без «заглушки» в разметке —
      текст подставляет my.js); убрана плашка «Доступна новая версия» (#updateWrap) —
@@ -704,7 +706,16 @@ window.addEventListener("error", function(e){
           <path d="M9.2 19.3l2.8 2.8 2.8-2.8"></path>
         </svg>
       </button>
-      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn5" title="">5</button>
+      <!-- Пятая "лежачая" вкладка второго набора (settingsTabSet2GearBtn5,
+           "set2b_5") — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "ИПКД" — ежедневное
+           чтение отдельного файла-публикации в формате epub (ТЗ пользователя
+           от 21.09, см. renderSettingsTabIpkd в my.js). Текстовое содержимое
+           (число месяца) проставляется в JS (updateIpkdTabIcon) — та же
+           цифровая пиктограмма, что у соседних заглушек
+           settingsTabSet2GearBtn8/9, только динамическая; заливка "вкладка
+           сегодня ещё не открывалась" — класс .ipkd-tab-unread (modals.css),
+           переключается там же. -->
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn5" title="ИПКД"></button>
     </div>
   </div>
 </div>

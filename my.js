@@ -1,6 +1,15 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 40.0 (21.09) — структурная правка (ТЗ пользователя от 21.09): пятая нижняя вкладка второго
+   набора (set2b_5, settingsTabSet2GearBtn5) больше не заглушка — вкладка «ИПКД»: ежедневное чтение
+   epub-публикации тем же экраном чтения, что и «Мои книги» (всегда открывается на сегодняшней главе,
+   кнопка «к сегодня» вместо «Домика», скрепка «заменить публикацию», пиктограмма вкладки — число месяца с
+   заливкой «сегодня не открывалась»). Новый раздел «ВКЛАДКА «ИПКД»» (IPKD_BOOK_NAME, bookReaderOwnerTab,
+   renderSettingsTabIpkd, bindIpkdReaderExtras, updateIpkdTabIcon и др.); правки в switchSettingsTab,
+   openBookReader, renderBookReader. При сведении: у ридера ИПКД нет шага «назад» в AppNav (иначе «назад»
+   крутилось по кругу); служебный .ipkd.epub не пишется в «последнюю открытую книгу» и не показывается
+   во вкладке «Мои книги»; уход с вкладки ИПКД снимает слушатель прокрутки и сохраняет позицию, как у «Книг».
    Версия: 39.0 (21.09) — структурная правка (ТЗ пользователя от 21.09): если напоминание задачи
    стоит на СЕГОДНЯШНИЙ день, вместо пиктограммы-часов на кнопке .task-reminder-btn пишется время
    («8:00», «23:05») — уменьшенная копия овального пузыря времени плашки напоминания (класс
@@ -8893,6 +8902,14 @@
     // (settingsModalOverlay ещё без класса "open", см. openSettingsModal)
     // в стек не попадает — иначе закрытие окна требовало бы лишнего
     // "назад".
+    // Пиктограмма вкладки "ИПКД" (settingsTabSet2GearBtn5, "set2b_5") —
+    // число месяца и заливка "не открыта сегодня" должны быть актуальны,
+    // даже если пользователь ещё ни разу не заходил на саму вкладку в этом
+    // открытии окна настроек — обновляем при КАЖДОМ переключении вкладок
+    // (дёшево, обычная проверка двух DOM-свойств), а не только изнутри
+    // renderSettingsTabIpkd (см. updateIpkdTabIcon ниже, ТЗ пользователя от
+    // 21.09).
+    updateIpkdTabIcon();
     var settingsWasOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay &&
       settingsModalOverlay.classList.contains("open");
     var prevTab = currentSettingsTab;
@@ -8934,7 +8951,11 @@
     // renderBookReaderChapters), и в textScrollTop/chaptersScrollTop (запасной
     // путь), и сразу в постоянное хранилище (setBookPosition) — на случай
     // перезапуска приложения раньше следующего дебаунса.
-    if(prevTab === "set2s_7" && tab !== "set2s_7" && bookReaderState){
+    // (то же и для ридера вкладки "ИПКД", set2b_5 — только когда в памяти
+    // именно её файл: если там "чужая" книга из "Мои книги", экран ИПКД —
+    // просто пустой экран/загрузка, сохранять с него нечего)
+    if(((prevTab === "set2s_7") || (prevTab === "set2b_5" && bookReaderState && bookReaderState.name === IPKD_BOOK_NAME)) &&
+       tab !== prevTab && bookReaderState){
       var leavingReaderContainer = document.getElementById("settingsTabContent");
       if(leavingReaderContainer){
         if(bookReaderState.mode === "chapters"){
@@ -9030,6 +9051,11 @@
     else if(tab === "set2b_2") renderSettingsTabS89Fill();
     else if(tab === "set2b_3") renderSettingsTabNotesMerge();
     else if(tab === "set2b_4") renderSettingsTabSubtitleExtract();
+    // пятая нижняя вкладка второго набора (set2b_5) — ЭТО БОЛЬШЕ НЕ
+    // ЗАГЛУШКА: вкладка "ИПКД" (ежедневное чтение epub-публикации, ТЗ
+    // пользователя от 21.09) — см. renderSettingsTabIpkd ниже, в разделе
+    // "ВКЛАДКА «ИПКД»" сразу после книжных закладок.
+    else if(tab === "set2b_5") renderSettingsTabIpkd();
     else if(tab === "set2s_1") renderSettingsTabMdEditor();
     // вторая боковая вкладка второго набора (set2s_2) — ЭТО БОЛЬШЕ НЕ
     // ЗАГЛУШКА: вкладка "Закладки" — плоский список заметок из "Моего
@@ -9065,6 +9091,15 @@
     // null только при реальном выходе из книги (см. "Домик"/AppNav-колбэк в
     // openBookReader выше), переключение вкладок его не трогает.
     else if(tab === "set2s_7"){
+      // Вкладка "ИПКД" (set2b_5) делит с "Мои книги" одну переменную
+      // bookReaderState — если в памяти осталась её публикация, здесь она
+      // показываться не должна (и владелец ридера снова "Мои книги").
+      bookReaderOwnerTab = "set2s_7";
+      if(bookReaderState && bookReaderState.name === IPKD_BOOK_NAME){
+        destroyBookReaderScrollListener();
+        revokeBookReaderImages();
+        bookReaderState = null;
+      }
       var isFirstBooksVisitThisSession = !booksTabVisitedThisSession;
       booksTabVisitedThisSession = true;
       if(bookReaderState) renderBookReader();
@@ -11382,7 +11417,10 @@
       // автоматического восстановления книги при заходе на вкладку "Мои
       // книги" после "невидимой" перезагрузки фоновой вкладки браузером
       // (см. switchSettingsTab, ветка set2s_7).
-      saveLastOpenedBookName(name);
+      // Служебный файл вкладки "ИПКД" (IPKD_BOOK_NAME) сюда не пишем — в
+      // "Мои книги" он не показывается, и при первом заходе туда
+      // автооткрытие по этому имени подсунуло бы публикацию в чужую вкладку.
+      if(name !== IPKD_BOOK_NAME) saveLastOpenedBookName(name);
       var savedBookState = getBookState(res.hash);
       bookReaderState = {
         hash: res.hash, name: name,
@@ -11390,11 +11428,22 @@
         mode: "text", textScrollTop: 0, chaptersScrollTop: 0,
         restorePosition: (savedBookState && savedBookState.position) || null
       };
-      window.AppNav.push(function(){
+      // Ридер вкладки "ИПКД" — сам корневой экран вкладки (списка книг, куда
+      // можно "вернуться", у неё нет): шаг "назад" для него НЕ кладётся —
+      // иначе колбэк ниже через renderBookReaderOwnerTab заново открывал бы
+      // ту же книгу и системное "назад" крутилось бы по кругу, не доходя до
+      // возврата на прошлую вкладку/закрытия окна настроек.
+      var ipkdRootScreen = (name === IPKD_BOOK_NAME && bookReaderOwnerTab === "set2b_5");
+      if(!ipkdRootScreen) window.AppNav.push(function(){
         destroyBookReaderScrollListener();
         revokeBookReaderImages();
         bookReaderState = null;
-        renderSettingsTabBooks();
+        // renderSettingsTabBooks() всегда — заменено на диспетчер по
+        // bookReaderOwnerTab (ТЗ пользователя от 21.09, вкладка "ИПКД",
+        // set2b_5): для обычных книг (set2s_7, значение по умолчанию)
+        // поведение не изменилось, renderBookReaderOwnerTab ниже так же
+        // зовёт renderSettingsTabBooks(). См. раздел "ВКЛАДКА «ИПКД»".
+        renderBookReaderOwnerTab();
         var c = document.getElementById("settingsTabContent");
         if(c) c.scrollTop = prevScrollTop;
       });
@@ -11492,6 +11541,13 @@
     destroyBookReaderScrollListener();
     if(bookReaderState.mode === "chapters") renderBookReaderChapters(container);
     else renderBookReaderText(container);
+    // Довесок поверх общей разметки для вкладки "ИПКД" (set2b_5, ТЗ
+    // пользователя от 21.09) — прячет неподходящую здесь кнопку "Домик" и
+    // добавляет свои (см. bindIpkdReaderExtras в разделе "ВКЛАДКА «ИПКД»"
+    // ниже). Условие на bookReaderOwnerTab, а не на bookReaderState.name,
+    // потому что renderBookReader вызывается и до, и после переключения
+    // текст/главы — владелец не меняется между ними в рамках одной книги.
+    if(bookReaderOwnerTab === "set2b_5") bindIpkdReaderExtras();
   }
 
   // Общий нижний ряд кнопок (шаг 12) — одна и та же разметка в обоих режимах
@@ -12562,6 +12618,284 @@
           var container = document.getElementById("settingsTabContent");
           if(container) scrollBookReaderToPosition(container, position);
         });
+      });
+    });
+  }
+
+  // ===== ВКЛАДКА "ИПКД" (пятая нижняя вкладка второго набора,
+  // settingsTabSet2GearBtn5 / "set2b_5", ТЗ пользователя от 21.09) =====
+  // Один и тот же файл-публикация в формате .epub с ежедневным чтением —
+  // день там уже размечен как отдельная глава (спайн-файл), заголовок главы
+  // — дата вида "1 апреля" (см. epubparse.js/parseBookBuffer). Читается ТЕМ
+  // ЖЕ самым экраном чтения, что и "Мои книги" (set2s_7) —
+  // openBookReader/renderBookReader/bookReaderFabRowHtml и все кнопки
+  // нижнего ряда (выделение -> заметка, обе закладки, шрифт, режим чтения,
+  // Flibusta, список глав) переиспользуются без единой собственной копии.
+  // Здесь только то, что у этой вкладки по-другому:
+  //   1) файл хранится под фиксированным служебным именем и спрятан из
+  //      общего списка книг (IPKD_BOOK_NAME ниже);
+  //   2) при каждом заходе на вкладку — принудительно сегодняшняя глава, а
+  //      не запомненное место чтения (openIpkdReaderToToday/
+  //      scrollIpkdReaderToToday);
+  //   3) кнопка "Домик" общего ряда тут не подходит (увела бы в чужой
+  //      список "Мои книги") — прячется, вместо неё отдельная кнопка "к
+  //      сегодня" (см. bindIpkdReaderExtras);
+  //   4) отдельная кнопка-скрепка в левом нижнем углу ридера — заменить файл
+  //      публикации (например, в начале нового года), тот же общий диалог
+  //      выбора файла, что и на пустом экране первой загрузки.
+
+  // Служебное имя файла в books/ (OPFS) — начинается с точки, поэтому
+  // listBooksEntries/renderSettingsTabBooks (set2s_7) его не покажет (та же
+  // конвенция, что и у BOOKS_MANIFEST_NAME выше — "любые др. служебные
+  // файлы"), а getBookFilesForExport по-прежнему включит в общий бэкап.
+  // Через хэш содержимого заводится обычная запись book:<hash> (закладки/
+  // подчёркивания/заметка книги, см. openBookReader) — она синхронизируется
+  // как у любой другой книги, независимо от этого имени; сам файл (байты) —
+  // нет, реестр файлов (registerBookInRegistry) сюда сознательно не
+  // подключается, публикация каждый раз добавляется на устройство вручную.
+  var IPKD_BOOK_NAME = ".ipkd.epub";
+  var IPKD_LAST_OPENED_KEY = "ipkdLastOpenedDate_v1";
+
+  // bookReaderOwnerTab — куда должен вернуться общий экран чтения
+  // (openBookReader выше, снимок AppNav при реальном "назад" — см. правку
+  // там же) при выходе из книги: "set2s_7" (общая библиотека "Мои книги",
+  // поведение по умолчанию, как было всегда) или "set2b_5" (эта вкладка).
+  // Кнопка "Домик" общего нижнего ряда (bindBookReaderFabRow) на этот флаг
+  // не завязана и на set2b_5 просто прячется (bindIpkdReaderExtras ниже) —
+  // трогать её сохранённый обработчик клика не пришлось.
+  var bookReaderOwnerTab = "set2s_7";
+  function renderBookReaderOwnerTab(){
+    if(bookReaderOwnerTab === "set2b_5") renderSettingsTabIpkd();
+    else renderSettingsTabBooks();
+  }
+
+  function ipkdFileExists(){
+    return getBooksDirHandle().then(function(dir){
+      return dir.getFileHandle(IPKD_BOOK_NAME, { create: false }).then(function(){ return true; }).catch(function(){ return false; });
+    }).catch(function(){ return false; });
+  }
+  function saveIpkdFile(bytes){
+    return getBooksDirHandle().then(function(dir){
+      return dir.getFileHandle(IPKD_BOOK_NAME, { create: true });
+    }).then(function(fh){
+      return fh.createWritable();
+    }).then(function(w){
+      return w.write(bytes).then(function(){ return w.close(); });
+    });
+  }
+
+  function ipkdTodayDateKey(){
+    var d = new Date();
+    function p2(n){ return (n < 10 ? "0" : "") + n; }
+    return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate());
+  }
+  function isIpkdOpenedToday(){
+    var v;
+    try{ v = localStorage.getItem(IPKD_LAST_OPENED_KEY); }catch(e){ v = null; }
+    return v === ipkdTodayDateKey();
+  }
+  function markIpkdOpenedToday(){
+    try{ localStorage.setItem(IPKD_LAST_OPENED_KEY, ipkdTodayDateKey()); }catch(e){}
+    updateIpkdTabIcon();
+  }
+  // Пиктограмма вкладки — просто число (тем же приёмом, что у соседних
+  // заглушек settingsTabSet2GearBtn8/9 в index.html — обычный текстовый
+  // узел в язычке, font-size:32px из .settings-tab, modals.css); заливка
+  // "не открыта сегодня" (.ipkd-tab-unread, modals.css) — var(--gold-light),
+  // тот же пастельный акцент темы, что и у подчёркиваний книги
+  // (.book-reader-underline, components.css), а не свой отдельный цвет —
+  // ТЗ пользователя от 21.09 ("цвет такой же... он наследуется из темы").
+  function updateIpkdTabIcon(){
+    var btn = document.getElementById("settingsTabSet2GearBtn5");
+    if(!btn) return;
+    btn.textContent = String(new Date().getDate());
+    btn.classList.toggle("ipkd-tab-unread", !isIpkdOpenedToday());
+  }
+
+  // Индекс главы, соответствующей сегодняшнему числу — по заголовку главы
+  // (ch.title, обычно "Среда, 1 апреля") либо, если заголовок это не дата
+  // (см. фолбэк ниже), по первому абзацу самой главы. Год в epub не указан
+  // — сравнение только по числу+месяцу. Границы \D вокруг числа — чтобы
+  // "1 апреля" не находилось внутри "21 апреля" (day — это ровно число, не
+  // произвольная подстрока).
+  //
+  // Особый случай: у ПЕРВОГО дня каждого месяца в этом epub внутри одной
+  // главы два заголовка подряд (<h1>Месяц</h1><h2>День недели, Число
+  // месяц</h2>) — epubparse.js (см. его шапку про "заголовок главы — первый
+  // попавшийся h1..h6") забирает в ch.title только "Месяц", не саму дату;
+  // дата при этом остаётся обычным абзацем внутри главы — отсюда фолбэк по
+  // первым блокам ниже (используется, только если по заголовкам ничего не
+  // нашлось).
+  function ipkdDateRegexForToday(){
+    var d = new Date();
+    return new RegExp("(^|\\D)" + d.getDate() + "[\\s\\u00A0]+" + MONTH_NAMES_FULL[d.getMonth()] + "(\\D|$)");
+  }
+  function ipkdChapterIndexForToday(chapters){
+    var re = ipkdDateRegexForToday();
+    for(var i = 0; i < chapters.length; i++){
+      if(chapters[i].title && re.test(chapters[i].title)) return i;
+    }
+    for(var j = 0; j < chapters.length; j++){
+      var blocks = chapters[j].blocks || [];
+      for(var k = 0; k < Math.min(3, blocks.length); k++){
+        if(blocks[k].type === "paragraph" && re.test(flatBlockText(blocks[k]))) return j;
+      }
+    }
+    return 0;
+  }
+  // Прокрутка к сегодняшней главе — тот же приём, что и
+  // jumpToChapterFromChaptersList выше (bookElTopInContainer/scrollTop
+  // контейнера #settingsTabContent), без записи отдельного шага "назад" —
+  // это не переход по клику из списка глав, а обычное открытие вкладки.
+  function scrollIpkdReaderToToday(){
+    if(!bookReaderState) return;
+    requestAnimationFrame(function(){
+      var idx = ipkdChapterIndexForToday(bookReaderState.chapters);
+      var el = document.getElementById("bookChapter_" + idx);
+      var container = document.getElementById("settingsTabContent");
+      if(el && container) container.scrollTop = bookElTopInContainer(container, el);
+    });
+  }
+  // Книга уже открыта этой сессией (bookReaderState жив, просто вернулись
+  // на вкладку) — принудительно текстовый режим (не список глав) и заново
+  // сегодняшний день, а не запомненная позиция чтения (в отличие от "Мои
+  // книги" — ТЗ пользователя от 21.09: "при переходе на эту вкладку всегда
+  // открывается сегодняшний день").
+  function openIpkdReaderToToday(){
+    bookReaderState.mode = "text";
+    renderBookReader();
+    scrollIpkdReaderToToday();
+  }
+
+  // Довесок поверх общей разметки ридера — вызывается из renderBookReader
+  // выше (см. правку там же) при bookReaderOwnerTab === "set2b_5", то есть
+  // после КАЖДОГО её рендера (переключение текст/главы, возврат на
+  // вкладку) — .innerHTML пересоздаёт узлы заново, поэтому и кнопки здесь
+  // создаются заново каждый раз, без проверок на дубли.
+  function bindIpkdReaderExtras(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    // "Домик" общего ряда увёл бы в чужой список "Мои книги" — прячем,
+    // вместо него своя кнопка чуть ниже (тот же слот в ряду, insertBefore).
+    var homeBtn = document.getElementById("bookReaderHomeBtn");
+    if(homeBtn) homeBtn.style.display = "none";
+    var fabRow = container.querySelector(".mdeditor-fab-row");
+    if(fabRow){
+      var todayBtn = document.createElement("button");
+      todayBtn.type = "button";
+      todayBtn.className = "mdeditor-fab-btn";
+      todayBtn.id = "ipkdTodayBtn";
+      todayBtn.title = "К сегодняшнему дню";
+      todayBtn.innerHTML = READER_HOME_ICON_SVG;
+      todayBtn.addEventListener("click", scrollIpkdReaderToToday);
+      fabRow.insertBefore(todayBtn, homeBtn || null);
+    }
+    // Скрепка "заменить публикацию" — левый нижний угол ридера, тот же
+    // отступ (7px), что и у общего ряда справа (components.css,
+    // .ipkd-swap-fab) — ТЗ пользователя от 21.09.
+    var readerTab = container.querySelector(".book-reader-tab");
+    if(readerTab){
+      var swapBtn = document.createElement("button");
+      swapBtn.type = "button";
+      swapBtn.className = "mdeditor-fab-btn ipkd-swap-fab";
+      swapBtn.id = "ipkdSwapBtn";
+      swapBtn.title = "Заменить публикацию";
+      swapBtn.innerHTML = PAPERCLIP_ICON_SVG;
+      readerTab.appendChild(swapBtn);
+      var input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".epub";
+      input.id = "ipkdSwapInput";
+      input.style.display = "none";
+      readerTab.appendChild(input);
+      swapBtn.addEventListener("click", function(){ input.click(); });
+      bindIpkdFileInput(input, true);
+    }
+  }
+
+  // Общий обработчик выбора файла — и для самой первой загрузки (пустой
+  // экран, renderIpkdEmptyScreen ниже), и для последующей замены публикации
+  // (кнопка-скрепка в ридере, bindIpkdReaderExtras выше): в обоих случаях
+  // результат один и тот же — файл кладётся под фиксированным именем
+  // (перезаписывая прежний, если был) и сразу открывается на сегодняшнем
+  // дне. isReplace — уже открытая книга есть в памяти, её нужно сперва
+  // отпустить (destroyBookReaderScrollListener/revokeBookReaderImages), тем
+  // же приёмом, что и в начале самого openBookReader выше.
+  function bindIpkdFileInput(input, isReplace){
+    input.addEventListener("change", function(){
+      var file = input.files && input.files[0];
+      input.value = "";
+      if(!file) return;
+      var statusEl = document.getElementById("booksStatus") || document.getElementById("bookReaderStatus");
+      function setStatus(msg, isError){
+        if(!statusEl) return;
+        statusEl.textContent = msg || "";
+        statusEl.classList.toggle("error", !!isError);
+      }
+      if(!/\.epub$/i.test(file.name || "")){
+        setStatus("Выберите файл .epub.", true);
+        return;
+      }
+      file.arrayBuffer().then(function(buf){
+        if(isReplace && bookReaderState){
+          destroyBookReaderScrollListener();
+          revokeBookReaderImages();
+          bookReaderState = null;
+        }
+        return saveIpkdFile(new Uint8Array(buf));
+      }).then(function(){
+        bookReaderOwnerTab = "set2b_5";
+        return openBookReader(IPKD_BOOK_NAME);
+      }).then(function(){
+        scrollIpkdReaderToToday();
+        markIpkdOpenedToday();
+      }).catch(function(e){
+        setStatus("Не удалось сохранить файл: " + (e && e.message ? e.message : e), true);
+      });
+    });
+  }
+
+  // Первый заход, публикация ещё не загружена — та же разметка-приём, что и
+  // у пустых списков (.mdeditor-empty), кнопка-скрепка в правом нижнем углу
+  // в общем стиле кнопок ридера (.mdeditor-fab-btn/.mdeditor-fab-row) — ТЗ
+  // пользователя от 21.09.
+  function renderIpkdEmptyScreen(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    container.innerHTML =
+      '<div class="mdeditor-tab">' +
+        '<div class="mdeditor-empty">Добавьте ИПКД в формате epub</div>' +
+        '<div class="mdeditor-status" id="booksStatus"></div>' +
+        '<div class="mdeditor-fab-row">' +
+          '<button type="button" class="mdeditor-fab-btn" id="ipkdAttachBtn" title="Выбрать файл">' + PAPERCLIP_ICON_SVG + '</button>' +
+        '</div>' +
+        '<input type="file" accept=".epub" id="ipkdSwapInput" style="display:none;">' +
+      '</div>';
+    var attachBtn = document.getElementById("ipkdAttachBtn");
+    var input = document.getElementById("ipkdSwapInput");
+    if(attachBtn && input) attachBtn.addEventListener("click", function(){ input.click(); });
+    if(input) bindIpkdFileInput(input, false);
+  }
+
+  // Пятая нижняя вкладка второго набора (set2b_5) — точка входа из
+  // switchSettingsTab (см. правку там же). markIpkdOpenedToday сразу при
+  // заходе, не только после успешной загрузки книги — заливка вкладки
+  // отмечает сам факт захода на неё сегодня, а не факт наличия файла.
+  function renderSettingsTabIpkd(){
+    bookReaderOwnerTab = "set2b_5";
+    markIpkdOpenedToday();
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    if(bookReaderState && bookReaderState.name === IPKD_BOOK_NAME){
+      openIpkdReaderToToday();
+      return;
+    }
+    container.innerHTML = '<div class="mdeditor-empty">Загрузка…</div>';
+    ipkdFileExists().then(function(exists){
+      if(currentSettingsTab !== "set2b_5" || !document.getElementById("settingsTabContent")) return; // вкладку успели покинуть (#settingsTabContent общий для всех вкладок и есть всегда — проверяем именно текущую вкладку)
+      if(!exists){ renderIpkdEmptyScreen(); return; }
+      openBookReader(IPKD_BOOK_NAME).then(function(){
+        scrollIpkdReaderToToday();
       });
     });
   }
