@@ -1,6 +1,16 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 36.0 (21.09) — структурная правка: убрано ручное обновление (плашка/диалог
+   «Доступна новая версия», строка «Обновить до v…» во вкладке «Версии»: удалены
+   showUpdateBanner/hideUpdateBanner/checkUpdateSnoozeExpiry/openUpdateModal/
+   renderManualUpdateOption и ключи UPDATE_DISMISSED_KEY, UPDATE_SNOOZE_KEY, UPDATES_DISABLED_KEY, SNOOZE_DURATION_MS);
+   sw.js сам ставит новую версию (skipWaiting), страница перезагружается, когда
+   приложение свернули. Версия приложения переехала из подвала в левый верхний угол
+   шапки (applyVersionToHeader вместо applyVersionToFooter; без «заглушки» v0.18.0 в
+   разметке; запасной источник — имя кэша sw). В журнал отладки — статус установки sw
+   (найдена версия / не удалась / какие файлы не скачались). Раздел
+   «SERVICE WORKER: АВТООБНОВЛЕНИЕ И ВЕРСИЯ В ШАПКЕ».
    Версия: 35.0 (21.09) — структурная правка (TASK_UNIFIED_SYNC.md, шаг 7, ТОЛЬКО диагностика):
    в разделе «ЛИЧНЫЕ ЗАДАЧИ: ТЕНЕВАЯ ЗАПИСЬ В SYNC-ENGINE» добавлены personalTasksParityRun
    (сверка state ↔ store ↔ облако по каждой задаче, отчёт текстом) и
@@ -1431,9 +1441,6 @@
   var SHARED_GROUP_KEY = "bibleSharedGroup_v1";
   var MIGRATED_KEY = "__migrated_v2";
   var CELEBRATION_SHOWN_KEY = "bibleCelebrationShown_v1";
-  var UPDATE_DISMISSED_KEY = "bibleUpdateDismissedVersion_v1";
-  var UPDATE_SNOOZE_KEY = "bibleUpdateSnoozeUntil_v1";
-  var UPDATES_DISABLED_KEY = "bibleUpdatesDisabled_v1";
   var GOALS_EXPANDED_KEY = "bibleGoalsBandExpanded_v1";
   var FAB_VISIBLE_KEY = "bibleSettingsFabVisible_v1";
   // Настройка "Скрывать статус бар PWA-приложения" (вкладка настроек,
@@ -1539,7 +1546,6 @@
     }
     return false;
   }
-  var SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000;
 
 
   // ===================== ЦИТАТЫ ДНЯ =====================
@@ -8021,147 +8027,166 @@
     document.getElementById("mDone").addEventListener("click", closeModal);
   }
 
-  // ===================== SERVICE WORKER И УВЕДОМЛЕНИЕ ОБ ОБНОВЛЕНИИ =====================
-  var pendingUpdateVersion = null, pendingRegistration = null;
+  // ===================== SERVICE WORKER: АВТООБНОВЛЕНИЕ И ВЕРСИЯ В ШАПКЕ =====================
+  // С 21.09 ручного обновления НЕТ: убраны плашка «Доступна новая версия», диалог
+  // «Да, обновить / Не сейчас / Больше не показывать», строка «Обновить до v…» во
+  // вкладке «Версии» и их ключи localStorage. sw.js сам активирует новую версию сразу
+  // после установки (install → skipWaiting). Страница делает три вещи:
+  //  1. показывает версию в левом верхнем углу шапки (#appVersionText). Источник —
+  //     APP_VERSION в sw.js (сообщение GET_VERSION); если service worker не ответил —
+  //     версия берётся из имени его кэша «bible-tracker-<версия>»; если нет и кэша —
+  //     «v—» (на этой странице service worker не установлен). Раньше в разметке
+  //     стояла «заглушка» v0.18.0, которая при молчащем service worker выглядела как
+  //     настоящая версия — теперь заглушки нет;
+  //  2. когда контроль перешёл к новой версии — перезагружает страницу, но НЕ посреди
+  //     работы: только когда приложение свернули/ушли со вкладки, да ещё через паузу
+  //     (успевают дописаться правки). Первая установка (страница раньше не была под
+  //     контролем service worker) перезагрузки не требует;
+  //  3. пишет в журнал отладки (Debug.log) всё, что помогает понять, почему новая
+  //     версия не встала: найдена/не установилась, какие файлы не скачались (отчёт
+  //     install из sw.js, кэш sw-install-report).
+  // Оффлайн режим (галочка в настройках) по-прежнему намеренно блокирует установку
+  // новой версии — см. «РЕЖИМ ОФФЛАЙН» в начале файла и sw.js.
+  var SW_REGISTRATION = null;
+  var SW_INSTALL_REPORT_CACHE = "sw-install-report";
+  var SW_INSTALL_REPORT_KEY = location.origin + "/__sw_install_report__";
+  var SW_VERSION_ANSWER_TIMEOUT_MS = 1500;
+  var SW_RELOAD_AWAY_DELAY_MS = 2500;
+  var SW_UPDATE_CHECK_MIN_GAP_MS = 60 * 60 * 1000;
+  var swVersionKnown = false;
+  var swLastUpdateCheck = 0;
 
-  function showUpdateBanner(version){
-    try{ if(localStorage.getItem(UPDATES_DISABLED_KEY) === "1") return; }catch(e){}
-    if(version && localStorage.getItem(UPDATE_DISMISSED_KEY) === version) return;
-    pendingUpdateVersion = version || null;
-    var wrap = document.getElementById("updateWrap");
-    if(wrap) wrap.classList.add("visible");
-  }
-  function hideUpdateBanner(){
-    var wrap = document.getElementById("updateWrap");
-    if(wrap) wrap.classList.remove("visible");
-  }
-  // если после нажатия "Не сейчас" прошли сутки — прячем баннер и больше
-  // не напоминаем про эту конкретную версию (до выхода следующей)
-  function checkUpdateSnoozeExpiry(){
-    var raw;
-    try{ raw = localStorage.getItem(UPDATE_SNOOZE_KEY); }catch(e){ return; }
-    if(!raw) return;
-    var rec;
-    try{ rec = JSON.parse(raw); }catch(e){ return; }
-    if(rec && rec.version && Date.now() >= rec.until){
-      try{ localStorage.setItem(UPDATE_DISMISSED_KEY, rec.version); }catch(e){}
-      try{ localStorage.removeItem(UPDATE_SNOOZE_KEY); }catch(e){}
-      hideUpdateBanner();
-    }
-  }
-  function openUpdateModal(){
-    var overlay = document.getElementById("modalOverlay"), box = document.getElementById("modalBox");
-    if(!overlay || !box) return;
-    function closeThis(){ overlay.classList.remove("open"); box.innerHTML = ""; }
-    box.innerHTML = modalHeader("Доступна новая версия", "Скачать новую версию этой страницы? Ваш прогресс чтения сохранится.") +
-      '<button class="modal-btn primary" id="mUpdYes">Да, обновить</button>' +
-      '<button class="modal-btn" id="mUpdNo">Не сейчас</button>' +
-      '<button class="modal-btn" id="mUpdNever">Больше не показывать это уведомление</button>';
-    var closeBtn = document.getElementById("mClose");
-    if(closeBtn) closeBtn.addEventListener("click", closeThis);
-    overlay.classList.add("open");
-    document.getElementById("mUpdYes").addEventListener("click", function(){
-      if(pendingRegistration && pendingRegistration.waiting){
-        pendingRegistration.waiting.postMessage("SKIP_WAITING");
-      } else { window.location.reload(); }
-      closeThis();
-    });
-    document.getElementById("mUpdNo").addEventListener("click", function(){
-      if(pendingUpdateVersion){
-        try{
-          localStorage.setItem(UPDATE_SNOOZE_KEY, JSON.stringify({
-            version: pendingUpdateVersion,
-            until: Date.now() + SNOOZE_DURATION_MS
-          }));
-        }catch(e){}
-      }
-      // баннер намеренно НЕ скрываем — по договорённости он остаётся
-      // виден ещё сутки, а затем прячется сам (см. checkUpdateSnoozeExpiry)
-      closeThis();
-    });
-    document.getElementById("mUpdNever").addEventListener("click", function(){
-      try{ localStorage.setItem(UPDATES_DISABLED_KEY, "1"); }catch(e){}
-      hideUpdateBanner(); closeThis();
-    });
+  // ключи убранных уведомлений об обновлении — чистим, чтобы не висели в localStorage
+  ["bibleUpdateDismissedVersion_v1", "bibleUpdateSnoozeUntil_v1", "bibleUpdatesDisabled_v1"].forEach(function(k){
+    try{ localStorage.removeItem(k); }catch(e){}
+  });
+
+  function swDebug(text){
+    try{ if(window.Debug) window.Debug.log(text); }catch(e){}
   }
 
-  var updateBar = document.getElementById("updateBar");
-  if(updateBar) updateBar.addEventListener("click", openUpdateModal);
-
-  // строка "обновить сейчас" в подвале — работает независимо от того,
-  // отключены ли всплывающие уведомления (см. UPDATES_DISABLED_KEY):
-  // человек всегда может проверить и обновиться вручную здесь
-  function renderManualUpdateOption(){
-    var row = document.getElementById("versionUpdateRow");
-    if(!row) return;
-    if(pendingRegistration && pendingRegistration.waiting){
-      var label = pendingUpdateVersion ? ("Обновить до v" + pendingUpdateVersion) : "Доступно обновление — обновить";
-      row.innerHTML = '<button class="version-history-update-item" id="versionUpdateBtn">' + label + '</button>';
-      var btn = document.getElementById("versionUpdateBtn");
-      if(btn){
-        btn.addEventListener("click", function(){
-          if(pendingRegistration && pendingRegistration.waiting){
-            pendingRegistration.waiting.postMessage("SKIP_WAITING");
-          } else {
-            window.location.reload();
-          }
-        });
-      }
-    } else {
-      row.innerHTML = "";
-    }
-  }
-
-  // версия в подвале подтягивается напрямую из sw.js через служебный
-  // запрос по MessageChannel — значит, менять её нужно только в одном
-  // месте (APP_VERSION в sw.js), а не отдельно ещё и в разметке
-  function applyVersionToFooter(version){
-    if(!version) return;
+  function applyVersionToHeader(version){
     var el = document.getElementById("appVersionText");
-    if(el) el.textContent = "v" + String(version).replace(/^v/i, "");
+    if(!el) return;
+    if(version){
+      swVersionKnown = true;
+      el.textContent = "v" + String(version).replace(/^v/i, "");
+    } else if(!swVersionKnown){
+      el.textContent = "v—";
+    }
+  }
+
+  function versionFromCacheNames(){
+    var prefix = "bible-tracker-";
+    if(!window.caches || !caches.keys) return Promise.resolve(null);
+    return caches.keys().then(function(keys){
+      var found = null;
+      keys.forEach(function(k){ if(k.indexOf(prefix) === 0) found = k.slice(prefix.length); });
+      return found;
+    }).catch(function(){ return null; });
   }
 
   function requestVersionFromSW(){
-    if(!("serviceWorker" in navigator) || !navigator.serviceWorker.controller) return;
+    var ctrl = ("serviceWorker" in navigator) ? navigator.serviceWorker.controller : null;
+    var answered = false;
+    function fallback(){
+      if(answered) return;
+      versionFromCacheNames().then(function(v){
+        if(!answered) applyVersionToHeader(v);
+      });
+    }
+    if(!ctrl){ fallback(); return; }
     try{
       var channel = new MessageChannel();
       channel.port1.onmessage = function(event){
         if(event.data && event.data.type === "VERSION"){
-          applyVersionToFooter(event.data.version);
+          answered = true;
+          applyVersionToHeader(event.data.version);
         }
       };
-      navigator.serviceWorker.controller.postMessage({type:"GET_VERSION"}, [channel.port2]);
-    }catch(e){}
+      ctrl.postMessage({type:"GET_VERSION"}, [channel.port2]);
+    }catch(e){ fallback(); return; }
+    setTimeout(fallback, SW_VERSION_ANSWER_TIMEOUT_MS);
+  }
+
+  // отчёт последней установки из sw.js: какие файлы не скачались (пусто — всё в порядке)
+  function logInstallReport(){
+    if(!window.caches || !window.Debug) return;
+    caches.match(SW_INSTALL_REPORT_KEY, { cacheName: SW_INSTALL_REPORT_CACHE }).then(function(res){
+      return res ? res.json() : null;
+    }).then(function(rep){
+      if(rep && rep.failed && rep.failed.length){
+        swDebug("SW " + rep.version + ": при установке не скачались файлы (" + rep.failed.length + "): " + rep.failed.join("; "));
+      }
+    }).catch(function(){});
+  }
+
+  // перезагрузка после смены версии — только когда приложение свёрнуто (см. п.2 выше)
+  var swReloadArmed = false, swReloadTimer = null;
+  function reloadWhenAway(){
+    if(swReloadArmed) return;
+    swReloadArmed = true;
+    function check(){
+      if(document.visibilityState === "hidden"){
+        if(!swReloadTimer){
+          swReloadTimer = setTimeout(function(){
+            swReloadTimer = null;
+            if(document.visibilityState === "hidden") window.location.reload();
+          }, SW_RELOAD_AWAY_DELAY_MS);
+        }
+      } else if(swReloadTimer){
+        clearTimeout(swReloadTimer);
+        swReloadTimer = null;
+      }
+    }
+    document.addEventListener("visibilitychange", check);
+    check();
+  }
+
+  // долго открытое приложение само не заметит новый sw.js (браузер проверяет его при
+  // загрузке страницы и раз в сутки) — при возврате в приложение проверяем не чаще
+  // раза в час; в оффлайн режиме и без сети не проверяем
+  function checkForSwUpdateOnReturn(){
+    if(document.visibilityState !== "visible" || !SW_REGISTRATION) return;
+    if(!isNetworkAvailable()) return;
+    if(Date.now() - swLastUpdateCheck < SW_UPDATE_CHECK_MIN_GAP_MS) return;
+    swLastUpdateCheck = Date.now();
+    try{ SW_REGISTRATION.update().catch(function(){}); }catch(e){}
   }
 
   if("serviceWorker" in navigator && (location.protocol === "http:" || location.protocol === "https:")){
-    navigator.serviceWorker.addEventListener("message", function(event){
-      if(event.data && event.data.type === "SW_VERSION") pendingUpdateVersion = event.data.version;
-    });
-    var reloadedAfterUpdate = false;
+    var swHadController = !!navigator.serviceWorker.controller;
+    requestVersionFromSW();
+    logInstallReport();
     navigator.serviceWorker.addEventListener("controllerchange", function(){
       requestVersionFromSW();
-      if(reloadedAfterUpdate) return;
-      reloadedAfterUpdate = true;
-      window.location.reload();
+      logInstallReport();
+      swDebug("SW: контроль перешёл к новой версии" + (swHadController ? " — страница перезагрузится, когда приложение свернут" : " (первая установка, перезагрузка не нужна)"));
+      if(!swHadController){ swHadController = true; return; }
+      reloadWhenAway();
     });
+    document.addEventListener("visibilitychange", checkForSwUpdateOnReturn);
     window.addEventListener("load", function(){
       navigator.serviceWorker.register("./sw.js").then(function(reg){
-        pendingRegistration = reg;
+        SW_REGISTRATION = reg;
+        swLastUpdateCheck = Date.now();
         requestVersionFromSW();
-        if(reg.waiting && navigator.serviceWorker.controller) showUpdateBanner(pendingUpdateVersion);
-        renderManualUpdateOption();
         reg.addEventListener("updatefound", function(){
-          var newWorker = reg.installing;
-          if(!newWorker) return;
-          newWorker.addEventListener("statechange", function(){
-            if(newWorker.state === "installed" && navigator.serviceWorker.controller){
-              showUpdateBanner(pendingUpdateVersion);
-              renderManualUpdateOption();
+          var worker = reg.installing;
+          if(!worker) return;
+          swDebug("SW: найдена новая версия, идёт установка");
+          worker.addEventListener("statechange", function(){
+            if(worker.state === "redundant"){
+              swDebug("SW: установка новой версии НЕ удалась (не скачался обязательный файл, либо включён оффлайн режим)");
+              logInstallReport();
             }
           });
         });
-      }).catch(function(err){ console.error("Не удалось зарегистрировать service worker:", err); });
+      }).catch(function(err){
+        console.error("Не удалось зарегистрировать service worker:", err);
+        swDebug("SW: регистрация не удалась — " + (err && err.message ? err.message : err));
+        requestVersionFromSW();
+      });
     });
   }
 
@@ -8228,11 +8253,9 @@
     container.innerHTML =
       '<div class="settings-content-bottom">' +
       '<div class="year-grid-tab-title" style="margin-bottom:12px;">Версии</div>' +
-      '<div id="versionUpdateRow"></div>' +
       '<div id="versionHistoryItems"></div>' +
       '<button class="modal-btn primary" id="mVersionReturnBtn" style="display:none;margin-top:12px;">Вернуться на выбранную версию</button>' +
       '</div>';
-    renderManualUpdateOption();
     renderVersionHistory();
     var returnBtn = document.getElementById("mVersionReturnBtn");
     if(returnBtn){
@@ -18974,8 +18997,7 @@
   renderAddGoalMenu();
   refreshSettingsTabsVisibility();
   initTabScrollTracking();
-  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkUpdateSnoozeExpiry(); checkHourBoundaries(); refreshYearGridIfOpen(); }, 30 * 60 * 1000);
-  checkUpdateSnoozeExpiry();
+  setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkHourBoundaries(); refreshYearGridIfOpen(); }, 30 * 60 * 1000);
   checkForSharedFile();
   Notifications.start();
   initPersonalTasksShadow();

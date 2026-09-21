@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 2.5 (21.09) — версия приложения переехала из подвала в левый верхний угол
+     шапки (#appVersionText, стили .app-version в footer.css, без «заглушки» в разметке —
+     текст подставляет my.js); убрана плашка «Доступна новая версия» (#updateWrap) —
+     ручного обновления больше нет, sw.js обновляется сам.
      Версия: 2.4 (20.09) — подключены syncengine_personalcrypto.js и
      syncengine_personalbinding.js (TASK_UNIFIED_SYNC.md, шаг 6: теневая запись
      личных задач в sync-engine).
@@ -51,6 +55,7 @@ window.addEventListener("error", function(e){
 <body>
 
 <header>
+  <div class="app-version" id="appVersionText"></div>
   <div class="sync-status" id="syncStatusPill" data-state="off">
     <span class="sync-dot"></span>
     <span id="syncStatusText">Настроить<br>синхронизацию</span>
@@ -105,13 +110,6 @@ window.addEventListener("error", function(e){
     </div>
   </div>
 
-  <div class="update-wrap" id="updateWrap">
-    <div class="xp-bar" id="updateBar">
-      <div class="update-fill"></div>
-      <div class="update-text" id="updateText">Доступна новая версия этого графика</div>
-    </div>
-  </div>
-
   <div class="goals-band" id="goalsBand">
     <div class="goals-list" id="goalsList"></div>
   </div>
@@ -128,7 +126,6 @@ window.addEventListener("error", function(e){
   </div>
 
   <div class="footer-line">
-    <div class="app-version" id="appVersionText">v0.18.0</div>
     <div class="fab-toggle" id="fabToggleBtn">Включить плавающую кнопку</div>
   </div>
 </footer>

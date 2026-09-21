@@ -5,11 +5,13 @@
 // "v0.6.0" -> "v0.7.0"). Именно эта строка заставляет браузер заметить,
 // что sw.js изменился и скачать новую версию в фоне.
 //
-// Обновление автоматическое: как только все файлы из ASSETS скачаны в новый
+// Обновление автоматическое: как только файлы из ASSETS скачаны в новый
 // кэш, install сам вызывает skipWaiting() — новая версия сразу становится
-// активной, без кнопки и без подтверждения пользователя.
+// активной, без кнопки и без подтверждения пользователя (ручного обновления
+// в приложении больше нет). Сбой скачивания необязательного файла установку не
+// срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.36.31";
+const APP_VERSION = "v0.36.32";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -36,6 +38,33 @@ const SHARE_TARGET_KEY = "shared-file";
 // каждом обновлении; страница при запуске в любом случае восстанавливает его.
 const OFFLINE_MODE_CACHE = "offline-mode-flag";
 const OFFLINE_MODE_KEY = self.location.origin + "/__offline_mode_flag__";
+
+// Отчёт о последней установке: какие файлы из ASSETS не скачались. Кладётся в
+// отдельный кэш (service worker не может «написать» странице, если та ещё не
+// открыта), страница читает его при запуске и пишет в журнал отладки (my.js,
+// logInstallReport). Имя кэша и ключ ДОЛЖНЫ совпадать с my.js. Этот кэш тоже
+// не удаляется в activate.
+const INSTALL_REPORT_CACHE = "sw-install-report";
+const INSTALL_REPORT_KEY = self.location.origin + "/__sw_install_report__";
+
+// Без этих файлов приложение не запустится вообще — если хоть один не скачался,
+// установка считается неудавшейся (как раньше). Сбой любого ДРУГОГО файла из
+// ASSETS установку больше не срывает: раньше один недоехавший на сервер файл
+// (например, забытый при выгрузке новый модуль) навсегда блокировал установку
+// ЛЮБОЙ новой версии — без сообщений и без кнопки обновления. Теперь новая
+// версия ставится, а список не скачавшихся файлов попадает в отчёт выше.
+const CRITICAL_ASSETS = ["./", "./index.html", "./my.js"];
+
+function writeInstallReport(failed) {
+  return caches.open(INSTALL_REPORT_CACHE)
+    .then((cache) => cache.put(
+      INSTALL_REPORT_KEY,
+      new Response(JSON.stringify({ version: APP_VERSION, at: Date.now(), failed: failed }), {
+        headers: { "Content-Type": "application/json" }
+      })
+    ))
+    .catch(() => {});
+}
 
 function isOfflineModeOn() {
   // caches.match с cacheName НЕ создаёт кэш, если его нет
@@ -134,29 +163,37 @@ self.addEventListener("install", (event) => {
         // может "закэшировать" ту же самую старую версию файла, даже
         // если на сервере уже лежит новая. Поэтому качаем каждый файл
         // явно в обход HTTP-кэша ({cache: "reload"}).
+        // Каждый файл качается независимо: сбой одного не отменяет остальные,
+        // результат — список не скачавшихся ("./файл (причина)").
         return Promise.all(
           ASSETS.map((url) =>
-            fetch(url, { cache: "reload" }).then((response) => {
-              if (!response.ok) throw new Error("Failed to fetch " + url);
-              return cache.put(url, response);
-            })
+            fetch(url, { cache: "reload" })
+              .then((response) => {
+                if (!response.ok) throw new Error("HTTP " + response.status);
+                return cache.put(url, response);
+              })
+              .then(
+                () => null,
+                (err) => ({ url: url, reason: String((err && err.message) || err) })
+              )
           )
         );
       })
-      .then(() => {
-        // сообщаем всем открытым вкладкам номер новой версии
-        return self.clients.matchAll({ includeUncontrolled: true }).then((clients) => {
-          clients.forEach((client) => {
-            client.postMessage({ type: "SW_VERSION", version: APP_VERSION });
-          });
+      .then((results) => {
+        const failed = results.filter(Boolean);
+        const criticalFailed = failed.filter((f) => CRITICAL_ASSETS.indexOf(f.url) !== -1);
+        return writeInstallReport(failed.map((f) => f.url + " (" + f.reason + ")")).then(() => {
+          if (criticalFailed.length) {
+            throw new Error("Failed to fetch " + criticalFailed.map((f) => f.url).join(", "));
+          }
         });
       })
       // автоматическая установка: не ждём, пока пользователь закроет
       // старые вкладки или нажмёт кнопку — сразу активируемся (в activate
       // ниже — clients.claim(), так что новая версия берёт под контроль и
-      // уже открытые страницы). До этой строки дойдём только если ВСЕ файлы
-      // скачались — при сбое install выше не сработает и прежняя версия
-      // продолжит работать.
+      // уже открытые страницы). До этой строки дойдём только если скачались
+      // все обязательные файлы — иначе install падает и прежняя версия
+      // продолжает работать.
       .then(() => self.skipWaiting())
   );
 });
@@ -167,7 +204,7 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((key) => key !== CACHE_NAME && key !== OFFLINE_MODE_CACHE)
+            .filter((key) => key !== CACHE_NAME && key !== OFFLINE_MODE_CACHE && key !== INSTALL_REPORT_CACHE)
             .map((key) => caches.delete(key))
         )
       )
@@ -282,9 +319,8 @@ self.addEventListener("notificationclick", (event) => {
   })());
 });
 
-// SKIP_WAITING оставлен для совместимости со старой страницей (my.js,
-// пока в нём есть кнопка/диалог обновления); либо страница спрашивает
-// текущую версию,
+// SKIP_WAITING больше никто не шлёт (кнопки обновления нет) — обработчик оставлен
+// на случай старой закэшированной страницы; страница спрашивает текущую версию,
 // чтобы показать её в подвале страницы (единственный источник истины —
 // APP_VERSION здесь, наверху этого файла)
 self.addEventListener("message", (event) => {
