@@ -1,5 +1,11 @@
 /* ===========================================================================
    modals.css
+   Версия: 6.0 (21.09) — структурная правка (ТЗ пользователя от 21.09): новый модификатор
+   `.task-icon-btn.task-reminder-btn.has-time` — напоминание на сегодня: вместо пиктограммы-часов
+   на кнопке время («8:00»), уменьшенная копия овального пузыря времени плашки напоминания;
+   фиксированная ширина под «00:00».
+   Версия: 5.1 (21.09) — `.app-bubble-grid`: 5 пузырей в ряду (5+4; в 10 ячейках сетки 5×2 остаётся место под 10-й пузырь).
+   Версия: 5.0 (21.09) — структурная правка: перенос задачи стрелочкой — плашка-сетка пузырей: новый модификатор `.app-bubble-grid` (к `.app-confirm-bar.app-reminder-bar`, 3 круглых пузыря в ряд, см. my.js `openAppBubbleGrid`). `.task-picker-grid` остаётся: им пользуются выбор вкладки в импорте из .txt и перенос из заметки.
    Версия: 4.2 (21.09) — затемнение `.app-confirm-bar-backdrop` вдвое прозрачнее (alpha .86 → .43); у подтверждения удаления задачи затемнения нет вовсе (плашка `.app-reminder-bar` с двумя круглыми пузырями, см. my.js `openAppConfirmBar`, `opts.anchorEl`).
    Версия: 4.1 (20.09) — ТЗ пользователя от 20.09: горизонтальная геометрия окна
    настроек, язычка и рядов кнопок переписана логическими свойствами
@@ -1287,6 +1293,27 @@
     color:var(--parchment);
     border-radius:50%;
   }
+  /* напоминание на СЕГОДНЯ (ТЗ пользователя от 21.09; класс ставит taskReminderBtnHtml в my.js
+     вместе с .active): вместо часов на кнопке — время («8:00», «23:05»), уменьшенная копия
+     овального пузыря времени плашки (.reminder-bubble-time.is-set): та же заливка
+     var(--wood)/var(--parchment), тот же шрифт и жирность. Пропорции — от высоты кнопки 22px
+     (у пузыря 32px шрифт .45 и боковой отступ .35 высоты, здесь 10px шрифта). Высота прежняя
+     (22px), кнопка становится шире (~35px). Ширина ФИКСИРОВАННАЯ: 5ch = ширина пяти цифр «0» —
+     с запасом под «00:00» (двоеточие уже цифры); так «0:00» и «23:59» выглядят одинаково.
+     tabular-nums — у всех цифр одна ширина (без этого у Georgia «старые» цифры разной ширины).
+     Соседние кнопки сдвигаются сами (.task-actions — inline-flex), подгонка под последнюю
+     строку текста (fitTaskActions в my.js) измеряет группу по offsetWidth. Другая дата — часы
+     в круге (правило выше), этот класс не ставится. */
+  .task-icon-btn.task-reminder-btn.has-time{
+    width:calc(5ch + 8px);
+    border-radius:11px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:10px;
+    font-weight:bold;
+    font-variant-numeric:tabular-nums lining-nums;
+    line-height:1;
+    white-space:nowrap;
+  }
   /* плашка выбора даты и времени (openReminderDialog в notifications.js).
      Класс .app-reminder-bar добавляется к .app-confirm-bar (правый край, над
      клавиатурой — базовые стили оттуда; с 3.1 затемнения нет, left/top ставит JS над кнопкой-часами). Ряд:
@@ -1319,6 +1346,17 @@
     -webkit-tap-highlight-color:transparent;
   }
   .reminder-bubble svg{ width:calc(var(--rb, 32px) * .58); height:calc(var(--rb, 32px) * .58); }
+  /* плашка-сетка пузырей — перенос задачи стрелочкой (openAppBubbleGrid в my.js): тот же вид,
+     что у плашки удаления, но пузыри (.reminder-bubble-date, только пиктограммы) стоят
+     сеткой по 5 в ряд (сейчас 5 сверху + 4 снизу, в 10-й ячейке — место под будущую вкладку;
+     ширину плашки задаёт число колонок, а не число пузырей); пузырь текущей вкладки — .is-set
+     (залит цветом темы) */
+  .app-confirm-bar.app-reminder-bar.app-bubble-grid{
+    display:grid;
+    grid-template-columns:repeat(5, var(--rb, 32px));
+    gap:8px;
+    justify-content:center;
+  }
   .reminder-bubble-date{ width:var(--rb, 32px); border-radius:50%; }
   .reminder-bubble-time{ min-width:calc(var(--rb, 32px) * 1.9); padding:0 calc(var(--rb, 32px) * .35); border-radius:calc(var(--rb, 32px) / 2); }
   .reminder-bubble.is-set{

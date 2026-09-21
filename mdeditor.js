@@ -1,5 +1,13 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 6.3 (21.09) — загрузка CodeMirror после обновления приложения больше не
+   требует ручных действий: loadCM делает до 4 попыток загрузить локальный
+   codemirror_bundle.js (обычный import(), затем чтение файла через fetch/Cache Storage
+   и import() из blob: — повторный import() того же адреса после сбоя браузер может не
+   повторять), а если и это не вышло — mountEditor сам повторяет загрузку в фоне
+   (событие online, смена service worker, возврат в приложение, таймер) и собирает
+   редактор без перезапуска. Функции добавлены: cmDelay, cmValidate, cmReadBundleText,
+   cmImportViaBlob, loadCMLocal, scheduleEditorAutoRetry.
    Версия: 6.2 (21.09) — CodeMirror 6 теперь берётся из ЛОКАЛЬНОГО файла проекта
    codemirror_bundle.js (state+view+commands в одном бандле, лежит рядом с
    index.html и входит в ASSETS sw.js), а не с esm.sh при каждом запуске —
@@ -567,25 +575,125 @@ window.initMdEditorModule = function(deps){
       return { state: mods[0], view: mods[1], commands: mods[2] };
     });
   }
+  // Повторные попытки загрузить локальный бандл (мс до попытки): сразу; через 0.7 с;
+  // через 1.8 с; через 4 с. Нужны в первые секунды после обновления приложения — новый
+  // mdeditor.js уже работает, а новый service worker ещё докачивает файлы в кэш.
+  var CM_RETRY_DELAYS = [0, 700, 1800, 4000];
+  var CM_LOADING_TEXT = "Загружаю редактор…";
+  function cmDelay(ms){
+    return new Promise(function(resolve){ setTimeout(resolve, ms); });
+  }
+  function cmValidate(m){
+    if(!m || !m.state || !m.view || !m.commands) throw new Error("codemirror_bundle.js: нет экспортов state/view/commands");
+    return { state: m.state, view: m.view, commands: m.commands };
+  }
+  // Текст бандла: сначала обычный fetch (через service worker/сеть), при неудаче —
+  // напрямую из Cache Storage (минуя service worker: там файл уже может лежать, даже
+  // если сам запрос по какой-то причине не прошёл).
+  function cmReadBundleText(bypassHttpCache){
+    function check(res){
+      if(!res || !res.ok) throw new Error("HTTP " + (res ? res.status : "нет ответа"));
+      return res.text().then(function(t){
+        if(!t || t.length < 1000 || t.charAt(0) === "<") throw new Error("файл пустой или не является JS");
+        return t;
+      });
+    }
+    return fetch(CM_LOCAL_URL, bypassHttpCache ? { cache: "reload" } : undefined).then(check).catch(function(fetchErr){
+      if(!window.caches || !window.caches.match) throw fetchErr;
+      return window.caches.match(CM_LOCAL_URL).then(check).catch(function(){ throw fetchErr; });
+    });
+  }
+  // import() из blob:-адреса — у него каждый раз новый адрес, поэтому не упирается в
+  // запомненный браузером неудачный import() того же ./codemirror_bundle.js.
+  // Бандл самодостаточный (esbuild, без внешних import), поэтому из blob: работает так же.
+  function cmImportViaBlob(bypassHttpCache){
+    return cmReadBundleText(bypassHttpCache).then(function(text){
+      var blobUrl = URL.createObjectURL(new Blob([text], { type: "text/javascript" }));
+      function revoke(){ try{ URL.revokeObjectURL(blobUrl); }catch(e){} }
+      return import(blobUrl).then(function(m){ revoke(); return m; }, function(err){ revoke(); throw err; });
+    });
+  }
+  function loadCMLocal(){
+    function attempt(i){
+      return cmDelay(CM_RETRY_DELAYS[i]).then(function(){
+        if(i === 1 && !statusMessage) setStatus(CM_LOADING_TEXT, false);
+        var p = (i === 0) ? import(CM_LOCAL_URL) : cmImportViaBlob(i >= 2);
+        return p.then(cmValidate);
+      }).catch(function(err){
+        if(i + 1 < CM_RETRY_DELAYS.length) return attempt(i + 1);
+        throw err;
+      });
+    }
+    return attempt(0);
+  }
   function loadCM(){
     if(cmModulesPromise) return cmModulesPromise;
-    cmModulesPromise = import(CM_LOCAL_URL).then(function(m){
-      if(!m || !m.state || !m.view || !m.commands) throw new Error("codemirror_bundle.js: нет экспортов state/view/commands");
-      return { state: m.state, view: m.view, commands: m.commands };
-    }).catch(function(localErr){
+    cmModulesPromise = loadCMLocal().catch(function(localErr){
       return loadCMFromEsmSh().catch(function(netErr){
-        throw new Error("не найден " + CM_LOCAL_URL + " (" + (localErr && localErr.message ? localErr.message : localErr) + ")");
+        throw new Error("не удалось загрузить " + CM_LOCAL_URL + " (" + (localErr && localErr.message ? localErr.message : localErr) + ")");
       });
     }).then(function(mods){
       cmModules = mods;
+      if(statusMessage === CM_LOADING_TEXT) setStatus("", false);
       return cmModules;
     }, function(err){
       // неудачная загрузка не должна залипать до перезагрузки страницы —
       // следующий вызов попробует снова
       cmModulesPromise = null;
+      if(statusMessage === CM_LOADING_TEXT) setStatus("", false);
       throw err;
     });
     return cmModulesPromise;
+  }
+
+  // Фоновая автоповторная загрузка редактора: если loadCM не справился (первые секунды
+  // после обновления, нет сети), mountEditor вызывает это, и редактор собирается сам, как
+  // только бандл становится доступен — по событию online, смене service worker (новая
+  // версия взяла управление и положила файл в кэш), возврату в приложение или таймеру
+  // (каждые 5 с, не более 12 раз). Прекращается, когда заметку закрыли/переключили.
+  var editorRetry = null;
+  function scheduleEditorAutoRetry(file){
+    if(editorRetry){ editorRetry.file = file; return; }
+    var st = { file: file, count: 0, busy: false, timer: null };
+    editorRetry = st;
+    var sw = (navigator.serviceWorker && navigator.serviceWorker.addEventListener) ? navigator.serviceWorker : null;
+    function onVisible(){ if(!document.hidden) trigger(); }
+    function stop(){
+      if(editorRetry !== st) return;
+      editorRetry = null;
+      clearTimeout(st.timer);
+      window.removeEventListener("online", trigger);
+      document.removeEventListener("visibilitychange", onVisible);
+      if(sw) sw.removeEventListener("controllerchange", trigger);
+    }
+    function next(){
+      clearTimeout(st.timer);
+      if(st.count >= 12){ stop(); return; }
+      st.timer = setTimeout(trigger, 5000);
+    }
+    function trigger(){
+      if(editorRetry !== st || st.busy) return;
+      if(!openFile || openFile !== st.file || cmView || !document.getElementById("mdEditorHost")){ stop(); return; }
+      st.busy = true;
+      st.count++;
+      clearTimeout(st.timer);
+      loadCM().then(function(){
+        st.busy = false;
+        var same = editorRetry === st && openFile === st.file && !cmView;
+        stop();
+        if(same){
+          if(statusIsError && String(statusMessage).indexOf("Не удалось загрузить редактор") === 0) setStatus("", false);
+          mountEditor();
+        }
+      }, function(){
+        st.busy = false;
+        next();
+      });
+    }
+    window.addEventListener("online", trigger);
+    document.addEventListener("visibilitychange", onVisible);
+    if(sw) sw.addEventListener("controllerchange", trigger);
+    next();
   }
 
   // ---------------------------------------------------------------------
@@ -5365,7 +5473,8 @@ window.initMdEditorModule = function(deps){
         setStatus("Не удалось запустить редактор: " + (e && e.message ? e.message : e), true);
       }
     }).catch(function(e){
-      setStatus("Не удалось загрузить редактор: " + (e && e.message ? e.message : e), true);
+      setStatus("Не удалось загрузить редактор: " + (e && e.message ? e.message : e) + ". Повторяю автоматически…", true);
+      scheduleEditorAutoRetry(fileAtMountTime);
     });
   }
 

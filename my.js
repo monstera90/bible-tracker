@@ -1,6 +1,15 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 39.0 (21.09) — структурная правка (ТЗ пользователя от 21.09): если напоминание задачи
+   стоит на СЕГОДНЯШНИЙ день, вместо пиктограммы-часов на кнопке .task-reminder-btn пишется время
+   («8:00», «23:05») — уменьшенная копия овального пузыря времени плашки напоминания (класс
+   .has-time, modals.css 6.0); ширина такой кнопки фиксированная под «00:00», чтобы «0:00» и «23:59»
+   не отличались размером. Напоминание на другую дату — по-прежнему часы в закрашенном круге. Новые
+   функции: isReminderToday, formatReminderTimeShort; изменены taskReminderBtnHtml и текст пункта
+   про часы в renderTaskInfoScreen.
+   Версия: 38.1 (21.09) — плашка переноса задачи: сетка 5 в ряд (5 сверху + 4 снизу, место под 10-й пузырь; `.app-bubble-grid` в modals.css 5.1), в коде — только комментарии.
+   Версия: 38.0 (21.09) — структурная правка: перенос задачи стрелочкой — вместо модального окна плашка-сетка круглых пузырей над стрелкой (только пиктограммы, выбор срабатывает сразу, без галочки): новая `openAppBubbleGrid` (стиль и позиционирование как у плашки удаления), `openTaskMovePicker(id, tabKey, onAfterAction, anchorEl)`/`openRowMovePicker(id, anchorEl)` переписаны, добавлен `taskMoveBubbleItems`; на кнопке-стрелке mousedown не отнимает фокус у редактируемой строки. `openTaskMoveTargetPicker` (перенос из заметки) и выбор вкладки в импорте — без изменений.
    Версия: 37.0 (21.09) — структурная правка: подтверждение удаления задачи — плашка над крестиком без затемнения и без текста, две круглые кнопки-пузыря (крестик/галочка): `openAppConfirmBar` принимает `opts.anchorEl`, добавлены `measureFabBubblePx`, `placeAppConfirmBarAtAnchor`; `openTaskDeleteConfirm(onYes, anchorEl)`.
    Версия: 36.0 (21.09) — структурная правка: убрано ручное обновление (плашка/диалог
    «Доступна новая версия», строка «Обновить до v…» во вкладке «Версии»: удалены
@@ -16192,8 +16201,9 @@
   }
   // ---- напоминание для задачи (ТЗ пользователя от 19.09) ----
   // c.remindAt — время напоминания в мс (локальное время устройства);
-  // null/нет поля — напоминания нет. Два состояния пиктограммы-часов:
-  // нет / стоит (закрашенный круг, как «в работе» у чемодана). Показ самих
+  // null/нет поля — напоминания нет. Состояния кнопки: нет (часы) / стоит на
+  // другую дату (часы в закрашенном круге, как «в работе» у чемодана) / стоит
+  // на СЕГОДНЯ (с 21.09: вместо часов — время, закрашенный овал .has-time). Показ самих
   // уведомлений — notifications.js. Задачи с напоминанием попадают на
   // вкладку с чемоданчиком (см. getTasksForTab, ветка worktasks).
   function getTaskReminderAt(task){
@@ -16219,10 +16229,23 @@
   }
   // разметка кнопки-часов — общая для всех мест, где рисуется строка задачи
   // (renderTaskRowView/renderTaskRowEdit/renderRowView/renderRowEdit)
+  // «сегодня» — по локальной дате устройства (как и сам c.remindAt)
+  function isReminderToday(ts){
+    var d = new Date(ts), n = new Date();
+    return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+  }
+  // «8:00» / «23:05» — тот же формат, что у пузыря времени в плашке (notifications.js,
+  // openReminderDialog): час без ведущего нуля, минуты из двух цифр
+  function formatReminderTimeShort(ts){
+    var d = new Date(ts), m = d.getMinutes();
+    return d.getHours() + ":" + (m < 10 ? "0" : "") + m;
+  }
   function taskReminderBtnHtml(task){
     var at = getTaskReminderAt(task);
-    return '<button type="button" class="task-icon-btn task-reminder-btn' + (at ? ' active' : '') + '" data-id="' + task.id + '" title="' +
-      (at ? escapeHtml('Напоминание: ' + Notifications.formatReminder(at)) : 'Напоминание') + '">' + CLOCK_ICON_SVG + '</button>';
+    // напоминание на сегодня — на кнопке время вместо часов (см. .has-time в modals.css)
+    var todayTime = (at && isReminderToday(at)) ? formatReminderTimeShort(at) : "";
+    return '<button type="button" class="task-icon-btn task-reminder-btn' + (at ? ' active' : '') + (todayTime ? ' has-time' : '') + '" data-id="' + task.id + '" title="' +
+      (at ? escapeHtml('Напоминание: ' + Notifications.formatReminder(at)) : 'Напоминание') + '">' + (todayTime || CLOCK_ICON_SVG) + '</button>';
   }
   // открывает диалог даты/времени; onDone — перерисовка строки/списка
   function openTaskReminderDialog(id, onDone){
@@ -17415,7 +17438,7 @@
     html += iconRow(CROSS_SMALL_ICON_SVG, false, "Удаляет задачу насовсем — только после подтверждения: плашка «Удалить задачу?» с крестиком (отмена) и галочкой (удалить). Из архива задачу удаляет отдельный крестик.");
     html += iconRow(PENCIL_ICON_SVG, false, "Открывает текст задачи для редактирования.");
     html += iconRow(CHECK_ICON_SVG, false, "Отмечает задачу выполненной и переносит её в архив.");
-    html += iconRow(ARROW_MOVE_ICON_SVG, true, "Перенос задач работает между вкладками:" + moveTabsHtml);
+    html += iconRow(ARROW_MOVE_ICON_SVG, true, "Открывает плашку с пиктограммами вкладок — нажатие на пиктограмму переносит задачу сразу. Перенос задач работает между вкладками:" + moveTabsHtml);
     html += iconRow(ARROW_TOP_ICON_SVG, false, "Переносит задачу в самое начало списка.");
     html += iconRow(ARROW_BOTTOM_ICON_SVG, false, "Переносит задачу в самый конец списка.");
     html += iconRow(LINK_NEXT_ICON_SVG, false, "Только на вкладке «Проекты»: открывает список всех next-задач, привязанных к этому проекту.");
@@ -17439,7 +17462,8 @@
       CLOCK_ICON_SVG, false,
       "Напоминание на конкретные дату и время. Нажатие открывает выбор даты и времени, повторное нажатие на уже стоящем напоминании — изменить их (там же есть «Удалить напоминание»). Долгое нажатие снимает напоминание сразу. Два состояния: " +
       '<span class="task-icon-btn task-reminder-btn">' + CLOCK_ICON_SVG + '</span> напоминания нет, ' +
-      '<span class="task-icon-btn task-reminder-btn active">' + CLOCK_ICON_SVG + '</span> напоминание стоит. ' +
+      '<span class="task-icon-btn task-reminder-btn active">' + CLOCK_ICON_SVG + '</span> напоминание стоит на другой день, ' +
+      '<span class="task-icon-btn task-reminder-btn active has-time">8:00</span> напоминание стоит на сегодня — вместо часов время. ' +
       "Все задачи с напоминанием дополнительно показываются на вкладке с чемоданчиком."
     );
     html += iconRow(SORT_FLAG_ICON_SVG, false, "Кнопка в нижнем ряду только на вкладке «Red»: включает сортировку списка — сначала красные отметки, потом жёлтые. Повторное нажатие возвращает обычный порядок по дате добавления.");
@@ -17507,7 +17531,12 @@
       });
     }
     var moveBtn = body.querySelector(".task-move-btn");
-    if(moveBtn) moveBtn.addEventListener("click", function(){ openTaskMovePicker(id, tabKey, onAfterAction); });
+    if(moveBtn){
+      // как у крестика: нажатие не отнимает фокус у редактируемой строки (плашка встанет
+      // над клавиатурой, а строка не перерисуется из-под неё)
+      moveBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      moveBtn.addEventListener("click", function(){ openTaskMovePicker(id, tabKey, onAfterAction, moveBtn); });
+    }
     // "В начало"/"В конец списка" (moveTaskToEdge). ИСПРАВЛЕНО (15.09): раньше
     // сюда передавался id задачи анкером перерисовки — та же техника, что и у
     // кружка приоритета на Red чуть ниже (renderTaskTabList вычисляет, куда
@@ -17744,41 +17773,39 @@
     bindTaskRowActions(body, id, tabKey, onAfterAction);
   }
 
-  // сетка выбора вкладки-назначения — как у выбора цвета цели
-  // (openGoalColorPicker), только квадратики с иконками вкладок
-  function openTaskMovePicker(id, tabKey, onAfterAction){
-    var task = getTaskById(id);
-    if(!task) return;
-    // "Комментарии" (extra2) — отдельный пункт ТОЛЬКО в этой сетке (ТЗ
-    // пользователя от 13.09): это не обычная вкладка-список задач, поэтому
-    // не входит в TASK_MOVE_TARGET_TABS выше (тот массив используется ещё
-    // и импортом из .txt, и созданием новой задачи из "Моего блокнота" —
-    // там конвертация в комментарий не нужна). Показывается только если
-    // сама вкладка "Комментарии" включена в настройках (см.
-    // getCustomCommentsEnabled) — иначе задача исчезала бы в скрытую
-    // вкладку.
+  // пункты плашки переноса — пиктограммы вкладок-назначений (без подписей; название
+  // остаётся только в title/aria-label). "Комментарии" (extra2) — отдельный пункт ТОЛЬКО
+  // в этой плашке (ТЗ пользователя от 13.09): это не обычная вкладка-список задач,
+  // поэтому не входит в TASK_MOVE_TARGET_TABS (тот массив используется ещё и импортом
+  // из .txt, и созданием новой задачи из "Моего блокнота" — там конвертация в
+  // комментарий не нужна). Показывается только если сама вкладка "Комментарии" включена
+  // в настройках (см. getCustomCommentsEnabled) — иначе задача исчезала бы в скрытую
+  // вкладку. Вкладок-назначений 8 (+ Comments = 9) — в сетке 5 в ряд это 5 сверху и 4 снизу, 10-я ячейка свободна (место под будущую вкладку; ширину плашки задаёт .app-bubble-grid в modals.css).
+  function taskMoveBubbleItems(task){
     var targetKeys = TASK_MOVE_TARGET_TABS.slice();
     if(getCustomCommentsEnabled()) targetKeys.push("extra2");
-    var buttons = targetKeys.map(function(key){
-      var isCurrent = key === task.c.tab;
-      return '<button type="button" data-tab="' + key + '"' + (isCurrent ? ' class="current"' : '') + '>' +
-        TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key]) + '</span></button>';
-    }).join("");
-    modalBox.innerHTML =
-      modalHeader("Перенести задачу") +
-      '<div class="task-picker-grid">' + buttons + '</div>';
-    bindClose();
-    modalOverlay.classList.add("open");
-    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-tab]"), function(btn){
-      btn.addEventListener("click", function(){
-        var newTab = btn.getAttribute("data-tab");
-        if(newTab === "extra2") convertTaskToComment(id);
-        else moveTaskToTab(id, newTab);
-        closeModal();
-        if(onAfterAction) onAfterAction();
-        else renderTaskTabList(tabKey || task.c.tab);
-      });
+    return targetKeys.map(function(key){
+      return { key: key, svg: TASK_MOVE_ICON_SVG(key), title: TASK_TAB_TITLES[key], current: key === task.c.tab };
     });
+  }
+
+  // перенос задачи стрелочкой (ТЗ пользователя от 21.09): не модальное окно, а плашка-сетка
+  // круглых пузырей серединой над стрелочкой (anchorEl) — см. openAppBubbleGrid. Нажатие на
+  // пиктограмму переносит задачу сразу, без галочки; нажатие на пиктограмму текущей вкладки
+  // просто закрывает плашку.
+  function openTaskMovePicker(id, tabKey, onAfterAction, anchorEl){
+    var task = getTaskById(id);
+    if(!task) return;
+    openAppBubbleGrid(anchorEl, taskMoveBubbleItems(task), function(newTab){
+      // строка могла быть в правке — плашка перед действием снимает фокус (blurBeforePick),
+      // текст при этом сохраняется, поэтому задачу берём заново
+      var cur = getTaskById(id) || task;
+      if(newTab === cur.c.tab) return;
+      if(newTab === "extra2") convertTaskToComment(id);
+      else moveTaskToTab(id, newTab);
+      if(onAfterAction) onAfterAction();
+      else renderTaskTabList(tabKey || cur.c.tab);
+    }, { label: "Перенести задачу", blurBeforePick: true });
   }
 
   // Тот же пикер выбора вкладки-назначения, что и openTaskMovePicker выше,
@@ -18149,7 +18176,10 @@
         });
       }
       var moveBtn = body.querySelector(".task-move-btn");
-      if(moveBtn) moveBtn.addEventListener("click", function(){ openRowMovePicker(id); });
+      if(moveBtn){
+        moveBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
+        moveBtn.addEventListener("click", function(){ openRowMovePicker(id, moveBtn); });
+      }
       // "В начало"/"В конец списка" — та же идея, что и у обычных вкладок
       // задач (см. bindTaskRowActions), здесь render() и так сохраняет
       // scrollTop контейнера (см. preservedScrollTop выше), поэтому экран
@@ -18311,36 +18341,19 @@
       bindRowActions(body, id);
     }
 
-    // "Перенести" для привязанной задачи — та же сетка вкладок, что и
-    // openTaskMovePicker (маленькая всплывающая модалка, как и везде в
-    // приложении), но после выбора возвращает не к вкладке настроек, а
-    // обратно к этому же экрану "Все задачи проекта"
-    function openRowMovePicker(id){
+    // "Перенести" для привязанной задачи — та же плашка-сетка пузырей над стрелочкой, что и
+    // openTaskMovePicker, но после выбора возвращает не к вкладке настроек, а обратно к
+    // этому же экрану "Все задачи проекта"
+    function openRowMovePicker(id, anchorEl){
       var task = getTaskById(id);
       if(!task) return;
-      // "Комментарии" — тот же особый пункт, что и в openTaskMovePicker
-      // выше (ТЗ пользователя от 13.09), см. комментарий там же.
-      var targetKeys = TASK_MOVE_TARGET_TABS.slice();
-      if(getCustomCommentsEnabled()) targetKeys.push("extra2");
-      var buttons = targetKeys.map(function(key){
-        var isCurrent = key === task.c.tab;
-        return '<button type="button" data-tab="' + key + '"' + (isCurrent ? ' class="current"' : '') + '>' +
-          TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key]) + '</span></button>';
-      }).join("");
-      modalBox.innerHTML =
-        modalHeader("Перенести задачу") +
-        '<div class="task-picker-grid">' + buttons + '</div>';
-      bindClose();
-      modalOverlay.classList.add("open");
-      Array.prototype.forEach.call(modalBox.querySelectorAll("[data-tab]"), function(btn){
-        btn.addEventListener("click", function(){
-          var newTab = btn.getAttribute("data-tab");
-          if(newTab === "extra2") convertTaskToComment(id);
-          else moveTaskToTab(id, newTab);
-          closeModal();
-          render();
-        });
-      });
+      openAppBubbleGrid(anchorEl, taskMoveBubbleItems(task), function(newTab){
+        var cur = getTaskById(id) || task;
+        if(newTab === cur.c.tab) return;
+        if(newTab === "extra2") convertTaskToComment(id);
+        else moveTaskToTab(id, newTab);
+        render();
+      }, { label: "Перенести задачу", blurBeforePick: true });
     }
 
     // регистрируем render() как обработчик "текущего экрана" для
@@ -18630,6 +18643,77 @@
         if(ae && ae.isContentEditable && ae.blur) ae.blur();
       }
       onYes();
+    });
+  }
+  // Плашка-сетка круглых пузырей над якорем — перенос задачи (openTaskMovePicker/
+  // openRowMovePicker, ТЗ пользователя от 21.09). Вид и позиционирование те же, что у
+  // подтверждения удаления (openAppConfirmBar с opts.anchorEl): плашка .app-reminder-bar без
+  // затемнения, серединой над якорем (стрелочкой), по горизонтали смещается только у края
+  // экрана (placeAppConfirmBarAtAnchor; нет места сверху — встаёт под якорь), следует за
+  // прокруткой, клик мимо плашки = отмена. Отличия: пузыри идут сеткой по 5 в ряд
+  // (.app-bubble-grid), только пиктограммы (название — в title/aria-label), выбор срабатывает
+  // сразу, без галочки. Одна общая плашка на приложение: открывает/закрывает те же
+  // appConfirmBarEl/closeAppConfirmBar, что и openAppConfirmBar.
+  // items: [{key, svg, title, current}] (current — пузырь залит цветом темы);
+  // onPick(key) — вызывается ПОСЛЕ закрытия плашки; opts: {label, onCancel, blurBeforePick}
+  // (blurBeforePick — снять фокус с редактируемой строки перед действием, как у удаления).
+  function openAppBubbleGrid(anchor, items, onPick, opts){
+    closeAppConfirmBar();
+    opts = opts || {};
+    var box = document.createElement("div");
+    box.className = "app-confirm-bar app-reminder-bar";
+    box.setAttribute("role", "dialog");
+    if(opts.label) box.setAttribute("aria-label", opts.label);
+    document.body.appendChild(box);
+    // размер пузыря — тот же замер, что у плашки удаления (до перехода в режим сетки)
+    var bubblePx = measureFabBubblePx(box);
+    if(bubblePx > 0) box.style.setProperty("--rb", bubblePx + "px");
+    box.classList.add("app-bubble-grid");
+    box.innerHTML = items.map(function(it){
+      var t = escapeHtml(it.title || "");
+      return '<button type="button" class="reminder-bubble reminder-bubble-date' + (it.current ? ' is-set' : '') +
+        '" data-key="' + escapeHtml(it.key) + '" title="' + t + '" aria-label="' + t + '">' + it.svg + '</button>';
+    }).join("");
+    appConfirmBarEl = box;
+
+    function place(){ placeAppConfirmBarAtAnchor(box, anchor); }
+    place();
+    var vk = navigator.virtualKeyboard;
+    if(vk) vk.addEventListener("geometrychange", place);
+    window.addEventListener("resize", place);
+    window.addEventListener("popstate", closeAppConfirmBar);
+    window.addEventListener("scroll", place, true); // список прокручивается — плашка следует за стрелочкой
+    // клик мимо плашки = отмена; сам клик гасим (в том числе повторный тап по стрелочке —
+    // он закрывает плашку). Подключаем на следующем такте: клик, открывший плашку, ещё не
+    // закончил распространяться
+    var onOutside = function(e){
+      if(box.contains(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeAppConfirmBar();
+      if(opts.onCancel) opts.onCancel();
+    };
+    var outsideTimer = setTimeout(function(){ document.addEventListener("click", onOutside, true); }, 0);
+    appConfirmBarCleanup = function(){
+      if(vk) vk.removeEventListener("geometrychange", place);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("popstate", closeAppConfirmBar);
+      window.removeEventListener("scroll", place, true);
+      clearTimeout(outsideTimer);
+      document.removeEventListener("click", onOutside, true);
+    };
+    // нажатие на плашку не должно отнимать фокус у поля (иначе клавиатура закроется и плашка «поедет»)
+    box.addEventListener("mousedown", function(e){ e.preventDefault(); });
+    box.addEventListener("click", function(e){
+      var btn = e.target && e.target.closest ? e.target.closest("[data-key]") : null;
+      if(!btn || !box.contains(btn)) return;
+      var key = btn.getAttribute("data-key");
+      closeAppConfirmBar();
+      if(opts.blurBeforePick){
+        var ae = document.activeElement;
+        if(ae && ae.isContentEditable && ae.blur) ae.blur();
+      }
+      onPick(key);
     });
   }
   window.AppConfirmBar = { open: openAppConfirmBar, close: closeAppConfirmBar };

@@ -1,6 +1,8 @@
 /* ===========================================================================
    footer.css
    Подвал страницы: кнопка сброса, переключатель тем, переключатель плавающей кнопки.
+   Версия: 1.1 (21.09) — цвет версии в шапке как у заголовка (--gold-light, как `header h1`
+   в base.css) вместо приглушённого --ink-soft с opacity .6 — цифры плохо читались.
    Версия: 1.0 (21.09) — версия приложения (.app-version) переехала из подвала в
    левый верхний угол шапки (index.html: первый элемент внутри <header>), шрифт мельче
    (8px вместо 11px). Стиль остался в этом файле, чтобы не трогать base.css.
@@ -90,8 +92,8 @@
     font-size:8px;
     line-height:1;
     letter-spacing:.2px;
-    color:var(--ink-soft);
-    opacity:.6;
+    color:var(--gold-light);
+    text-shadow:0 1px 2px rgba(0,0,0,.6);
     pointer-events:none;
     user-select:none;
     white-space:nowrap;
