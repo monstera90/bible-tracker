@@ -1,6 +1,16 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 41.0 (21.09) — структурная правка (TASK_UNIFIED_SYNC.md, шаг 8, cutover личных
+   задач): чтение личных задач можно переключить со state на новый store — за флагом
+   устройства biblePersonalCutover_v1 (по умолчанию ВЫКЛЮЧЕН, поведение как на шагах 6–7).
+   Раздел «ЛИЧНЫЕ ЗАДАЧИ: ТЕНЕВАЯ ЗАПИСЬ В SYNC-ENGINE», подраздел «Шаг 8»: «вид» в памяти
+   (personalView), personalViewSet/AbsorbState/Refresh/ApplySnapshot/MirrorAllToState,
+   бэкап перед включением (IndexedDB), кнопки панели отладки personalCutoverEnable/
+   personalCutoverDisable/personalCutoverRestoreBackup, сверка с облаком при возврате в
+   приложение. getAllTasks/getTaskById/saveTaskData читают через personalViewActive();
+   state остаётся запасным путём (пишется и зеркалится, doCloudSync не менялся, кроме
+   personalViewAbsorbState после слияния).
    Версия: 40.0 (21.09) — структурная правка (ТЗ пользователя от 21.09): пятая нижняя вкладка второго
    набора (set2b_5, settingsTabSet2GearBtn5) больше не заглушка — вкладка «ИПКД»: ежедневное чтение
    epub-публикации тем же экраном чтения, что и «Мои книги» (всегда открывается на сегодняшней главе,
@@ -2527,6 +2537,22 @@
   // "Скопировать субтитры" вкладки "Извлечение субтитров" (см.
   // renderSettingsTabSubtitleExtract ниже)
   var COPY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="13" rx="1.5"></rect><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h3"></path></svg>';
+  // общепринятая пиктограмма "поделиться" (три узла, соединённые линиями) —
+  // кнопка "Поделиться" в списке книг (renderBooksListItems/
+  // renderBooksCoverItems, ТЗ пользователя от 21.09) — открывает системное
+  // меню "Поделиться" Android через navigator.share (см. shareBookFile).
+  var SHARE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.6"></circle><circle cx="6" cy="12" r="2.6"></circle><circle cx="18" cy="19" r="2.6"></circle><line x1="8.3" y1="10.7" x2="15.7" y2="6.3"></line><line x1="8.3" y1="13.3" x2="15.7" y2="17.7"></line></svg>';
+  // заглушка-обложка (ТЗ пользователя от 21.09) — показывается в режиме
+  // "Обложки" списка книг, пока для книги ещё нет извлечённой реальной
+  // обложки (см. getBookCoverUrl/saveBookCoverIfMissing ниже) — простой
+  // силуэт закрытой книги, без претензии на конкретную обложку.
+  var BOOK_COVER_PLACEHOLDER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="1.5"></rect><path d="M4 7.5h16"></path><path d="M8 3v4.5"></path></svg>';
+  // переключатель режима списка книг (ТЗ пользователя от 21.09) — кнопка
+  // всегда изображает режим, В КОТОРЫЙ переключит клик (тот же язык, что и
+  // у READER_TEXT_ICON_SVG/READER_CHAPTERS_ICON_SVG выше для книг/глав):
+  // сетка — переход к обложкам, три линии — переход обратно к списку.
+  var BOOKS_VIEW_COVER_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>';
+  var BOOKS_VIEW_LIST_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>';
   // шеврон "вниз" — кнопка "показать полностью"/"свернуть" у длинных
   // задач (.task-expand-btn, см. renderTaskRowView), при развороте
   // переворачивается на 180° через CSS-класс .is-expanded (.task-expand-btn
@@ -4478,6 +4504,7 @@
         window.Debug.log("doCloudSync: слияние — локально изменилось=" + localChanged + ", в облако уйдёт ключей=" + deltaKeys.length + " (из них task:=" + deltaTaskKeys.length + (deltaTaskKeys.length ? ": " + deltaTaskKeys.slice(0, 5).join(", ") : "") + ")");
       }
       state = merged;
+      personalViewAbsorbState(false); // шаг 8: задачи, приехавшие блобом (старые устройства), — в вид до перерисовки
       if(localChanged){
         saveLocalState();
         setNoTransitions(true);
@@ -5483,6 +5510,9 @@
 
   // ===================== ЛИЧНЫЕ ЗАДАЧИ: ТЕНЕВАЯ ЗАПИСЬ В SYNC-ENGINE (TASK_UNIFIED_SYNC.md,
   // Шаг 6, 20.09) =====================
+  // ⚠️ С шага 8 (21.09) это уже не всегда так: при включённом флаге biblePersonalCutover_v1
+  // отрисовка читает личные задачи из «вида» на основе нового store (см. подраздел «Шаг 8»
+  // ниже); по умолчанию флаг выключен, и всё, что написано в этом абзаце, верно как раньше.
   // Личные задачи по-прежнему живут в общем `state` ("task:<id>" = {c, t}) и
   // синхронизируются блобом (doCloudSync/mergeStates) — ЭТО ЕДИНСТВЕННЫЙ ИСТОЧНИК
   // ИСТИНЫ, отрисовка ничего не знает о новом store. Параллельно каждая мутация личной
@@ -5551,6 +5581,7 @@
       isCloudEnabled: isPersonalShadowCloudEnabled,
       canSync: isNetworkAvailable, // режим оффлайн: ни push, ни сверок с облаком
       onCloudSynced: personalShadowAfterCloudSync,
+      onRemoteChange: personalViewOnRemoteChange, // шаг 8: чужие записи с облака → вид (только при включённом cutover)
       log: syncEngineLog
     });
     return personalTasksBinding;
@@ -5578,6 +5609,7 @@
   // Канал 2: отложенная сверка «state → store».
   function personalShadowTouch(){
     if(!personalShadowReady) return;
+    personalViewAbsorbState(true); // шаг 8: задачи, попавшие в state в обход saveTaskData (миграции, приём блоба), — сразу в вид
     clearTimeout(personalShadowReconcileTimer);
     personalShadowReconcileTimer = setTimeout(function(){
       personalShadowReconcileTimer = null;
@@ -5587,17 +5619,22 @@
   // Канал 3: state заменён целиком.
   function personalShadowStateReplaced(){
     if(!personalShadowReady) return;
+    if(personalCutoverOn) personalView.hydrated = false; // шаг 8: state заменён — пока сверка не закончится, читаем state
     clearTimeout(personalShadowReconcileTimer);
     personalShadowReconcileTimer = null;
-    personalShadowReconcileNow(true, "state заменён целиком", true);
+    personalShadowReconcileNow(true, "state заменён целиком", true, true);
   }
-  function personalShadowReconcileNow(tombstoneMissing, label, verbose){
+  // forceView (шаг 8): после сверки обязательно подтянуть вид из store (старт, замена state целиком).
+  function personalShadowReconcileNow(tombstoneMissing, label, verbose, forceView){
     try{
-      getPersonalTasksBinding().reconcile(state, {tombstoneMissing: !!tombstoneMissing, verbose: !!verbose, cloudDelayMs: 2500}).then(function(){
+      return getPersonalTasksBinding().reconcile(state, {tombstoneMissing: !!tombstoneMissing, verbose: !!verbose, cloudDelayMs: 2500}).then(function(r){
         if(label) personalShadowDiagnose(label);
+        personalViewAfterReconcile(r, !!forceView);
+        return r;
       });
     }catch(err){
       syncEngineLog("PersonalShadow: сверка — " + personalShadowErrText(err));
+      return Promise.resolve(null);
     }
   }
 
@@ -5708,6 +5745,447 @@
     return true;
   }
 
+  // ----- Шаг 8 (21.09): переключение ЧТЕНИЯ личных задач на новый store (cutover) -----
+  // Флаг устройства biblePersonalCutover_v1 = "1" — UI читает личные задачи из «вида» (personalView),
+  // иначе (по умолчанию) — из state, как на шагах 6–7. Включается/выключается кнопками в панели лога
+  // режима отладки (Debug.registerAction; видны только при включённой галочке «Включить режим
+  // отладки»): «включить чтение из store (шаг 8)», «вернуть чтение из state (откат шага 8)»,
+  // «вернуть задачи из бэкапа (шаг 8)». Откат — выключение флага: мгновенно, без перезагрузки.
+  //
+  // «Вид» (personalView) — синхронная копия в памяти: id → {c, t} (c === null — тумбстоун). UI читает
+  // задачи синхронно (getAllTasks/getTaskById), а store (IndexedDB) асинхронный — поэтому UI читает
+  // вид, а вид наполняется ТОЛЬКО правилом «побеждает запись с большей меткой t» (last-write-wins,
+  // как в движке): (1) локальные правки — saveTaskData/deleteTaskPermanently кладут запись и в вид
+  // сразу (personalViewSet); (2) store → вид — personalViewRefresh (снимок store, берёт только
+  // новее уже известного): после чужих записей, пришедших с облака (pull), при включении и после
+  // сверки, погасившей записи; (3) state → вид — personalViewAbsorbState: то, что старый путь
+  // (doCloudSync/блоб, устройства со старой версией, миграции общих задач, импорт) положил в state
+  // новее, чем знает вид. Вид никогда не откатывает запись на более старую и не удаляет записи
+  // (удаление — тумбстоун с новой меткой), поэтому порядок событий не важен.
+  //
+  // state остаётся ЗАПАСНЫМ путём (ТЗ шага 8: минимум один релиз): saveTaskData/deleteTaskPermanently
+  // по-прежнему пишут в него, doCloudSync/mergeStates по-прежнему гонят его блобом (для устройств со
+  // старой версией и для отката), а всё, что пришло в store с облака новее state, зеркалируется в
+  // state (personalViewApplySnapshot) — поэтому выключение флага возвращает актуальные данные, а
+  // экспорт data.json, миграции и doCloudSync видят те же задачи, что UI.
+  //
+  // Пока вид не готов (первые ~2 с после запуска, смена syncId, замена state целиком — импорт/
+  // подключение по коду) или флаг выключен — читается state (personalViewActive() === false).
+  // Отправку в облако новым путём не меняет ничего: save/remove → dirty → транспорт, как в шаге 6.
+  // Новое: при возврате в приложение (не чаще раза в минуту) запускается сверка с облаком
+  // (pull → сверка → push) — без неё чужие правки нового пути приходили бы только при запуске.
+  //
+  // Бэкап: ПЕРЕД включением все task:* (и taskcompletion:*) из state копируются в IndexedDB
+  // biblePersonalCutoverBackup_v1 (последние 3, проверяется чтением обратно); без бэкапа флаг не
+  // включается. «Вернуть задачи из бэкапа» только ДОБАВЛЯЕТ: живые задачи бэкапа, которых сейчас нет
+  // или они удалены (осознанно удалённое после бэкапа тоже вернётся) — как новые правки.
+  //
+  // Защита от потери: перед включением план (PB.buildCutoverPlan) показывает, что исчезнет/появится/
+  // изменится; если что-то ИСЧЕЗНЕТ — флаг не включается, пока кнопку не нажмут второй раз с тем же
+  // набором (5 минут). Импорт архива в этом режиме подчиняется тому же last-write-wins, что и с
+  // облаком: более старая версия задачи из архива не перезапишет более новую правку.
+  var PERSONAL_CUTOVER_KEY = "biblePersonalCutover_v1";
+  var PERSONAL_CUTOVER_BACKUP_DB = "biblePersonalCutoverBackup_v1";
+  var PERSONAL_CUTOVER_BACKUP_KEEP = 3;
+  var PERSONAL_CUTOVER_CONFIRM_MS = 5 * 60 * 1000;
+  var PERSONAL_CUTOVER_RERENDER_DELAY_MS = 30;
+  var PERSONAL_FOREGROUND_SYNC_MIN_MS = 60000;
+  var PERSONAL_CUTOVER_ENABLE_LABEL = "включить чтение из store (шаг 8)";
+  var PERSONAL_CUTOVER_DISABLE_LABEL = "вернуть чтение из state (откат шага 8)";
+  var PERSONAL_CUTOVER_RESTORE_LABEL = "вернуть задачи из бэкапа (шаг 8)";
+  var personalCutoverOn = readPersonalCutoverFlag();
+  var personalView = {scope: null, map: new Map(), hydrated: false};
+  var personalViewRefreshing = null;
+  var personalViewRefreshAgain = false;
+  var personalViewRerenderTimer = null;
+  var personalCutoverConfirm = null;
+  var personalCutoverActionsRegistered = false;
+  var personalForegroundBound = false;
+  var personalForegroundSyncAt = 0;
+  var personalBackupStore = null;
+
+  function readPersonalCutoverFlag(){
+    try{ return localStorage.getItem(PERSONAL_CUTOVER_KEY) === "1"; }catch(e){ return false; }
+  }
+  // true — флаг записан в localStorage. Включение без записи не действует (после перезагрузки флаг
+  // вернулся бы к старому значению); выключение действует в памяти всегда.
+  function writePersonalCutoverFlag(on){
+    var ok = true;
+    try{
+      localStorage.setItem(PERSONAL_CUTOVER_KEY, on ? "1" : "0");
+    }catch(e){
+      ok = false;
+      syncEngineLog("PersonalCutover: не удалось записать флаг устройства — " + personalShadowErrText(e));
+    }
+    if(ok || !on) personalCutoverOn = !!on;
+    return ok;
+  }
+
+  function personalCurrentScope(){ return syncId ? syncId : "local"; }
+  // Вид принадлежит области store (syncId | local): при смене syncId прежние записи чужие.
+  function personalViewEnsureScope(){
+    var cur = personalCurrentScope();
+    if(personalView.scope === cur) return;
+    personalView.scope = cur;
+    personalView.map = new Map();
+    personalView.hydrated = false;
+  }
+  function personalViewActive(){
+    return !!(personalCutoverOn && personalShadowReady && personalView.hydrated && personalView.scope === personalCurrentScope());
+  }
+  // Запись задачи как её видит UI (для saveTaskData: createdAt берётся из предыдущей версии).
+  function personalTaskRawRecord(id){
+    if(personalViewActive()) return personalView.map.get(id) || null;
+    return state["task:" + id] || null;
+  }
+  // Локальная правка (saveTaskData/deleteTaskPermanently): та же запись и та же метка, что в state.
+  function personalViewSet(id, c, t){
+    if(!personalCutoverOn || !personalShadowReady) return;
+    personalViewEnsureScope();
+    personalView.map.set(id, {c: c, t: t});
+  }
+  // state → вид (только вверх по метке). Возвращает, сколько записей вида обновлено.
+  function personalViewAbsorbState(rerender){
+    if(!personalCutoverOn || !personalShadowReady) return 0;
+    personalViewEnsureScope();
+    var n = 0;
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("task:") !== 0) return;
+      var rec = state[k];
+      if(!rec || typeof rec.t !== "number") return;
+      var id = k.slice(5), cur = personalView.map.get(id);
+      if(cur && cur.t >= rec.t) return;
+      personalView.map.set(id, {c: rec.c || null, t: rec.t});
+      n += 1;
+    });
+    if(n && rerender && personalViewActive()) personalViewScheduleRerender();
+    return n;
+  }
+  // Перерисовка списков — отложенная и склеенная: зовётся из мест, где state пишется посреди
+  // других операций (импорт, миграции). rerenderAllFromState сама не трогает поле, которое
+  // сейчас редактируют.
+  function personalViewScheduleRerender(){
+    if(personalViewRerenderTimer) return;
+    personalViewRerenderTimer = setTimeout(function(){
+      personalViewRerenderTimer = null;
+      try{
+        setNoTransitions(true);
+        rerenderAllFromState();
+        setTimeout(function(){ setNoTransitions(false); }, 50);
+      }catch(err){
+        syncEngineLog("PersonalCutover: перерисовка — " + personalShadowErrText(err));
+      }
+    }, PERSONAL_CUTOVER_RERENDER_DELAY_MS);
+  }
+
+  // store → вид (+ зеркало в state). Снимок берёт только записи новее известных виду.
+  function personalViewRefresh(reason){
+    if(!personalCutoverOn || !personalShadowReady) return Promise.resolve(null);
+    if(personalViewRefreshing){
+      personalViewRefreshAgain = true;
+      return personalViewRefreshing;
+    }
+    var binding;
+    try{
+      binding = getPersonalTasksBinding();
+    }catch(err){
+      syncEngineLog("PersonalCutover: " + personalShadowErrText(err));
+      return Promise.resolve(null);
+    }
+    personalViewRefreshing = binding.snapshot({filter: function(id, t, scope){
+      if(personalView.scope !== scope) return true; // область сменилась — вид сбросится при применении
+      var cur = personalView.map.get(id);
+      return !cur || cur.t < t;
+    }}).then(function(r){
+      personalViewRefreshing = null;
+      var res = null;
+      if(!r || !r.ok){
+        syncEngineLog("PersonalCutover [" + reason + "]: снимок store не получен — " + (r && r.error ? personalShadowErrText(r.error) : "неизвестная ошибка"));
+      }else{
+        try{
+          res = personalViewApplySnapshot(r.value, reason);
+        }catch(err){
+          syncEngineLog("PersonalCutover [" + reason + "]: применение снимка — " + personalShadowErrText(err));
+        }
+      }
+      if(personalViewRefreshAgain){
+        personalViewRefreshAgain = false;
+        personalViewRefresh("повтор");
+      }
+      return res;
+    });
+    return personalViewRefreshing;
+  }
+  function personalViewApplySnapshot(snap, reason){
+    if(!snap || snap.scope !== personalCurrentScope()){
+      syncEngineLog("PersonalCutover [" + reason + "]: снимок устарел (область сменилась) — пропущен");
+      return null;
+    }
+    personalViewEnsureScope();
+    var changed = 0, mirrored = 0;
+    snap.records.forEach(function(rec){
+      var cur = personalView.map.get(rec.id);
+      if(cur && cur.t >= rec.t) return;
+      var c = rec.dead ? null : rec.c;
+      personalView.map.set(rec.id, {c: c, t: rec.t});
+      changed += 1;
+      var k = "task:" + rec.id, sr = state[k];
+      if(!sr || typeof sr.t !== "number" || sr.t < rec.t){
+        state[k] = {c: c, t: rec.t}; // общий объект c: вид и state ссылаются на одну и ту же задачу
+        mirrored += 1;
+      }
+    });
+    var wasHydrated = personalView.hydrated;
+    personalView.hydrated = true;
+    if(mirrored){
+      saveLocalState();
+      scheduleCloudPush(); // запасной путь: блоб получает то же, что пришло новым путём (для старых устройств)
+      personalViewScheduleRerender();
+    }
+    if(changed || !wasHydrated){
+      syncEngineLog("PersonalCutover [" + reason + "]: из store в вид — " + changed + " зап., отражено в state — " + mirrored +
+        "; в виде живых " + personalViewLiveCount() + (wasHydrated ? "" : " (вид готов, чтение из store)"));
+    }
+    return {changed: changed, mirrored: mirrored};
+  }
+  function personalViewLiveCount(){
+    var n = 0;
+    personalView.map.forEach(function(rec){ if(rec && rec.c) n += 1; });
+    return n;
+  }
+  // Вид → state целиком (перед откатом): state гарантированно не отстаёт от того, что видел UI.
+  function personalViewMirrorAllToState(){
+    var n = 0;
+    personalView.map.forEach(function(rec, id){
+      var k = "task:" + id, sr = state[k];
+      if(!sr || typeof sr.t !== "number" || sr.t < rec.t){
+        state[k] = {c: rec.c, t: rec.t};
+        n += 1;
+      }
+    });
+    if(n){
+      saveLocalStateNow();
+      scheduleCloudPush();
+    }
+    return n;
+  }
+  // Сверка «state → store» что-то изменила / вид ещё не готов: подтянуть вид из store.
+  function personalViewAfterReconcile(r, force){
+    if(!personalCutoverOn) return;
+    var v = r && r.ok && r.value;
+    var needsHydration = !personalView.hydrated || personalView.scope !== personalCurrentScope();
+    if(force || needsHydration || (v && (v.written || v.tombstoned))) personalViewRefresh(force ? "после сверки" : "изменения state");
+  }
+  // Транспорт применил чужие записи с облака.
+  function personalViewOnRemoteChange(e){
+    personalViewRefresh("облако: принято " + (e && e.applied ? e.applied : "?"));
+  }
+  // Возврат в приложение — повод подтянуть чужие правки нового пути (не чаще раза в минуту).
+  function bindPersonalForegroundSync(){
+    if(personalForegroundBound || typeof document === "undefined") return;
+    personalForegroundBound = true;
+    document.addEventListener("visibilitychange", function(){
+      if(document.visibilityState !== "visible") return;
+      if(!personalCutoverOn || !personalShadowReady || !syncId) return;
+      var t = Date.now();
+      if(t - personalForegroundSyncAt < PERSONAL_FOREGROUND_SYNC_MIN_MS) return;
+      personalForegroundSyncAt = t;
+      personalShadowCloudSyncSoon(800);
+    });
+  }
+
+  // ----- бэкап личных задач перед включением (IndexedDB, отдельная база) -----
+  function createPersonalBackupStoreIdb(){
+    function open(){
+      return new Promise(function(resolve, reject){
+        if(typeof indexedDB === "undefined" || !indexedDB){ reject(new Error("IndexedDB недоступна — бэкап невозможен")); return; }
+        var req;
+        try{ req = indexedDB.open(PERSONAL_CUTOVER_BACKUP_DB, 1); }catch(e){ reject(e); return; }
+        req.onupgradeneeded = function(){
+          if(!req.result.objectStoreNames.contains("backups")) req.result.createObjectStore("backups", {keyPath: "ts"});
+        };
+        req.onsuccess = function(){ resolve(req.result); };
+        req.onerror = function(){ reject(req.error || new Error("idb_open_error")); };
+        req.onblocked = function(){ reject(new Error("idb_open_blocked")); };
+      });
+    }
+    function tx(mode, fn){
+      return open().then(function(db){
+        return new Promise(function(resolve, reject){
+          var t, out;
+          try{
+            t = db.transaction("backups", mode);
+            out = fn(t.objectStore("backups"));
+          }catch(e){
+            try{ db.close(); }catch(e2){}
+            reject(e);
+            return;
+          }
+          t.oncomplete = function(){ db.close(); resolve(out && out.result !== undefined ? out.result : undefined); };
+          t.onerror = t.onabort = function(){ db.close(); reject(t.error || new Error("idb_tx_error")); };
+        });
+      });
+    }
+    return {
+      put: function(entry, keep){
+        return tx("readwrite", function(store){
+          store.put(entry);
+          var keysReq = store.getAllKeys();
+          keysReq.onsuccess = function(){
+            var keys = keysReq.result.slice().sort(function(a, b){ return a - b; });
+            while(keys.length > keep) store.delete(keys.shift());
+          };
+        });
+      },
+      latest: function(){
+        return tx("readonly", function(store){ return store.getAll(); }).then(function(all){
+          var best = null;
+          (all || []).forEach(function(b){ if(!best || b.ts > best.ts) best = b; });
+          return best;
+        });
+      }
+    };
+  }
+  function getPersonalBackupStore(){
+    if(!personalBackupStore) personalBackupStore = createPersonalBackupStoreIdb();
+    return personalBackupStore;
+  }
+  function personalCloneJson(v){ return JSON.parse(JSON.stringify(v)); }
+  function personalCutoverMakeBackup(){
+    var tasks = {}, completions = {}, live = 0, dead = 0;
+    Object.keys(state).forEach(function(k){
+      var rec = state[k];
+      if(!rec || typeof rec !== "object") return;
+      if(k.indexOf("task:") === 0){
+        tasks[k] = {c: rec.c ? personalCloneJson(rec.c) : null, t: rec.t};
+        if(rec.c) live += 1; else dead += 1;
+      }else if(k.indexOf("taskcompletion:") === 0 && rec.c){
+        completions[k] = {c: personalCloneJson(rec.c), t: rec.t};
+      }
+    });
+    var entry = {ts: Date.now(), scope: syncId ? "syncId" : "local", tasks: tasks, completions: completions, live: live, dead: dead};
+    var store = getPersonalBackupStore();
+    return store.put(entry, PERSONAL_CUTOVER_BACKUP_KEEP).then(function(){
+      return store.latest();
+    }).then(function(b){
+      // бэкап засчитывается, только если читается обратно и записей столько же
+      if(!b || b.ts !== entry.ts || Object.keys(b.tasks || {}).length !== Object.keys(tasks).length){
+        throw new Error("бэкап не подтвердился при чтении обратно — включение отменено");
+      }
+      return {ts: entry.ts, live: live, dead: dead};
+    });
+  }
+
+  // ----- кнопки панели отладки -----
+  function personalCutoverEnable(){
+    var PB = window.SyncEnginePersonalBinding;
+    if(personalCutoverOn){
+      return Promise.resolve({text: "Чтение личных задач из store уже включено на этом устройстве.", headline: "Шаг 8: уже включено"});
+    }
+    if(!personalShadowReady || !PB || typeof PB.buildCutoverPlan !== "function"){
+      return Promise.resolve({
+        text: "Включить нельзя: теневая запись личных задач не запущена (выключена флагом устройства " + PERSONAL_SHADOW_ENABLED_KEY +
+          "=0, модули sync-engine не загружены или syncengine_personalbinding.js старее 3.0).",
+        headline: "Шаг 8: включить нельзя — теневая запись не запущена"
+      });
+    }
+    var binding = getPersonalTasksBinding();
+    var backupInfo = null;
+    return personalCutoverMakeBackup().then(function(info){
+      backupInfo = info;
+      return binding.reconcile(state, {verbose: true, cloudDelayMs: 2500});
+    }).then(function(rr){
+      if(!rr || !rr.ok) throw (rr && rr.error) || new Error("сверка state → store не удалась");
+      return binding.snapshot();
+    }).then(function(sr){
+      if(!sr || !sr.ok) throw (sr && sr.error) || new Error("снимок store не получен");
+      var plan = PB.buildCutoverPlan({state: state, records: sr.value.records});
+      var head = "Бэкап личных задач сохранён: " + backupInfo.live + " живых, " + backupInfo.dead + " удалённых (IndexedDB «" +
+        PERSONAL_CUTOVER_BACKUP_DB + "», хранится последних " + PERSONAL_CUTOVER_BACKUP_KEEP + ").\n";
+      var body = PB.formatCutoverPlan(plan, {maxItems: 10});
+      if(plan.disappear.length){
+        var nowMs = Date.now();
+        var confirmed = personalCutoverConfirm && personalCutoverConfirm.sig === plan.signature && (nowMs - personalCutoverConfirm.at) <= PERSONAL_CUTOVER_CONFIRM_MS;
+        if(!confirmed){
+          personalCutoverConfirm = {sig: plan.signature, at: nowMs};
+          return {
+            text: head + body + "\n\nНЕ ВКЛЮЧЕНО: часть задач исчезнет из списков. Если это ожидаемо (удалены/перенесены на другом устройстве) — " +
+              "нажмите эту же кнопку ещё раз в течение 5 минут; если нет — пришлите этот отчёт.",
+            headline: "Шаг 8: НЕ включено — из списков исчезли бы " + plan.disappear.length + " зад. (повторное нажатие подтвердит)"
+          };
+        }
+      }
+      personalCutoverConfirm = null;
+      if(!writePersonalCutoverFlag(true)) throw new Error("не удалось записать флаг устройства в localStorage — включение отменено");
+      personalViewEnsureScope();
+      personalViewAbsorbState(false);
+      return personalViewRefresh("включение").then(function(){
+        if(!personalView.hydrated){
+          writePersonalCutoverFlag(false);
+          throw new Error("store не удалось прочитать — включение отменено, чтение осталось из state");
+        }
+        personalViewScheduleRerender();
+        return {
+          text: head + body + "\n\nВКЛЮЧЕНО: списки задач читаются из нового store (в виде живых " + personalViewLiveCount() +
+            "). Откат — кнопка «" + PERSONAL_CUTOVER_DISABLE_LABEL + "». Проверьте вручную: число задач по вкладкам, что ни одна не исчезла и не задвоилась; " +
+            "на втором устройстве создайте, отметьте и перенесите по одной задаче.",
+          headline: "Шаг 8: ВКЛЮЧЕНО — в виде живых " + personalViewLiveCount() + ", бэкап " + backupInfo.live + "+" + backupInfo.dead
+        };
+      });
+    });
+  }
+  function personalCutoverDisable(){
+    if(!personalCutoverOn){
+      return Promise.resolve({text: "Чтение уже идёт из state (флаг выключен).", headline: "Шаг 8: уже выключено"});
+    }
+    var mirrored = personalViewMirrorAllToState();
+    var persisted = writePersonalCutoverFlag(false);
+    personalView.hydrated = false;
+    personalViewScheduleRerender();
+    return Promise.resolve({
+      text: "Чтение личных задач вернулось на state. В state дополнительно отражено записей вида: " + mirrored + "." +
+        (persisted ? "" : " ⚠️ Флаг не записался в localStorage — после перезагрузки чтение может снова включиться."),
+      headline: "Шаг 8: чтение из state, отражено в state " + mirrored + (persisted ? "" : " (флаг не сохранён!)")
+    });
+  }
+  function personalCutoverRestoreBackup(){
+    return getPersonalBackupStore().latest().then(function(b){
+      if(!b) return {text: "Бэкапов нет: он делается при включении чтения из store.", headline: "Шаг 8: бэкапов нет"};
+      var restored = [], present = 0, revived = 0;
+      Object.keys(b.tasks || {}).forEach(function(k){
+        var rec = b.tasks[k];
+        if(k.indexOf("task:") !== 0 || !rec || !rec.c) return;
+        var id = k.slice(5);
+        if(getTaskById(id)){ present += 1; return; }
+        var c = personalCloneJson(rec.c);
+        if(c.completionKey && b.completions && b.completions[c.completionKey]){
+          var cur = state[c.completionKey];
+          if(!cur || !cur.c){
+            state[c.completionKey] = {c: personalCloneJson(b.completions[c.completionKey].c), t: Date.now()};
+            revived += 1;
+          }
+        }
+        saveTaskData(id, c);
+        restored.push({id: id, text: (c.text || "").replace(/\s+/g, " ").trim().slice(0, 40)});
+      });
+      var lines = ["Бэкап от " + new Date(b.ts).toLocaleString() + " (область " + b.scope + "): живых задач " + b.live + ", удалённых " + b.dead + ".",
+        "Уже есть в списках: " + present + ". Возвращено (не было или было удалено): " + restored.length +
+        (revived ? ", восстановлено записей истории выполнения: " + revived : "") + "."];
+      restored.slice(0, 15).forEach(function(x){ lines.push("  • " + x.id + (x.text ? " «" + x.text + "»" : "")); });
+      if(restored.length > 15) lines.push("  … и ещё " + (restored.length - 15));
+      if(restored.length) lines.push("Если вы осознанно удаляли что-то после бэкапа — оно вернулось, удалите ещё раз.");
+      return {text: lines.join("\n"), headline: "Шаг 8: из бэкапа возвращено " + restored.length + " зад., уже были " + present};
+    });
+  }
+  function registerPersonalCutoverDebugActions(){
+    if(personalCutoverActionsRegistered) return;
+    if(!window.Debug || typeof window.Debug.registerAction !== "function") return;
+    window.Debug.registerAction(PERSONAL_CUTOVER_ENABLE_LABEL, personalCutoverEnable);
+    window.Debug.registerAction(PERSONAL_CUTOVER_DISABLE_LABEL, personalCutoverDisable);
+    window.Debug.registerAction(PERSONAL_CUTOVER_RESTORE_LABEL, personalCutoverRestoreBackup);
+    personalCutoverActionsRegistered = true;
+  }
+
   // Запуск (вызывается один раз из «ЗАПУСК» — все var раздела к этому моменту заведены).
   // Первая сверка — через 2 с, чтобы не конкурировать с отрисовкой при старте.
   function initPersonalTasksShadow(){
@@ -5723,9 +6201,18 @@
     }
     personalShadowReady = true;
     registerPersonalParityDebugAction(); // шаг 7: кнопка сверки в панели отладки
+    registerPersonalCutoverDebugActions(); // шаг 8: кнопки включения/отката чтения из store
+    bindPersonalForegroundSync();
+    if(personalCutoverOn){
+      // вид сразу равен state (то, что видит UI до готовности store); store подтянется после первой сверки
+      personalViewEnsureScope();
+      personalViewAbsorbState(false);
+    }
+    syncEngineLog("PersonalCutover: чтение личных задач — " + (personalCutoverOn ? "ИЗ STORE (флаг " + PERSONAL_CUTOVER_KEY + "=1; до готовности вида — из state)" : "из state (флаг выключен)"));
     setTimeout(function(){
       registerPersonalParityDebugAction(); // на случай, если debug.js подключился позже
-      personalShadowReconcileNow(false, "старт", true);
+      registerPersonalCutoverDebugActions();
+      personalShadowReconcileNow(false, "старт", true, true);
     }, 2000);
   }
 
@@ -10688,6 +11175,129 @@
     return ".jpg";
   }
 
+  // ===========================================================================
+  // Обложки книг (OPFS) — ТЗ пользователя от 21.09. Сознательно ОТДЕЛЬНАЯ
+  // папка book_covers/ (не books/) — реестр синхронизации файлов
+  // (registerFileInRegistry/syncFileRegistry выше) работает только с
+  // пространствами "books"/"images" по их именам; раз книги обложек в этот
+  // список не добавляем — они никогда не попадут ни в облачный реестр, ни
+  // на другие устройства, останутся только локальным кэшем на этом
+  // устройстве (именно так и было прямо запрошено). Файл называется
+  // "<hash книги>.<ext>" — по хэшу, а не по имени файла книги, поэтому
+  // переименование книги (см. renameBookFile ниже) не требует трогать
+  // обложку вообще.
+  var coversDirHandle = null;
+  var coversDirReadyPromise = null;
+  function getCoversDirHandle(){
+    if(coversDirHandle) return Promise.resolve(coversDirHandle);
+    if(!coversDirReadyPromise){
+      if(!navigator.storage || !navigator.storage.getDirectory){
+        coversDirReadyPromise = Promise.reject(new Error("Браузер не поддерживает OPFS."));
+      } else {
+        coversDirReadyPromise = navigator.storage.getDirectory().then(function(root){
+          return root.getDirectoryHandle("book_covers", { create: true });
+        }).then(function(handle){
+          coversDirHandle = handle;
+          return handle;
+        }).catch(function(e){
+          coversDirReadyPromise = null;
+          throw e;
+        });
+      }
+    }
+    return coversDirReadyPromise;
+  }
+  // Расширение обложки заранее неизвестно (см. extFromImageContentType
+  // выше) — перебираем по очереди все варианты, которые сами же и пишем в
+  // saveBookCoverIfMissing. Возвращает найденный FileSystemFileHandle или
+  // null, если для этого хэша обложки ещё нет.
+  function findBookCoverFile(dir, hash){
+    var exts = [".jpg", ".png", ".webp", ".gif", ".bmp", ".svg"];
+    function tryNext(i){
+      if(i >= exts.length) return null;
+      return dir.getFileHandle(hash + exts[i], { create: false }).catch(function(){
+        return tryNext(i + 1);
+      });
+    }
+    return Promise.resolve(tryNext(0));
+  }
+  // Кэш в памяти на текущую сессию (hash -> data:URL | null) — чтобы не
+  // перечитывать файл обложки из OPFS при каждой перерисовке списка книг
+  // (переключение вкладок туда-обратно, смена режима список/обложки).
+  var bookCoverUrlCache = {};
+  function getBookCoverUrl(hash){
+    if(!hash) return Promise.resolve(null);
+    if(bookCoverUrlCache.hasOwnProperty(hash)) return Promise.resolve(bookCoverUrlCache[hash]);
+    return getCoversDirHandle().then(function(dir){
+      return findBookCoverFile(dir, hash);
+    }).then(function(fh){
+      if(!fh){ bookCoverUrlCache[hash] = null; return null; }
+      return fh.getFile().then(function(f){ return f.arrayBuffer(); }).then(function(buf){
+        var dot = fh.name.lastIndexOf(".");
+        var ext = dot >= 0 ? fh.name.slice(dot + 1).toLowerCase() : "jpg";
+        var mime = "image/" + (ext === "jpg" ? "jpeg" : ext);
+        var url = "data:" + mime + ";base64," + bytesToBase64(new Uint8Array(buf));
+        bookCoverUrlCache[hash] = url;
+        return url;
+      });
+    }).catch(function(){ bookCoverUrlCache[hash] = null; return null; });
+  }
+  // Первая по порядку глав/блоков картинка книги — тот же самый кадр,
+  // который уже показывается первым при открытии книги в ридере (ТЗ
+  // пользователя от 21.09: "обложка уже отображается в начале
+  // отпарсенной книги"), поэтому отдельного разбора структуры
+  // epub (manifest cover-image)/fb2 (coverpage) не требуется.
+  function findFirstBookImageId(chapters){
+    for(var c = 0; c < chapters.length; c++){
+      var blocks = chapters[c].blocks;
+      for(var b = 0; b < blocks.length; b++){
+        if(blocks[b].type === "image" && blocks[b].imageId) return blocks[b].imageId;
+      }
+    }
+    return null;
+  }
+  // Сохраняет обложку книги в book_covers/ — вызывается из openBookReader
+  // при КАЖДОМ открытии книги, но реально пишет файл только один раз (при
+  // первом успешном открытии): если файл для этого хэша уже есть, не
+  // перезаписывает и не декодирует base64 повторно. base64/contentType —
+  // уже готовые строки из res.parsed.images (тот же формат, что и для
+  // <img src="data:...">, см. шапки fb2parse.js/epubparse.js), поэтому
+  // перекодировать саму картинку не нужно, только записать те же байты в
+  // файл. Best-effort: неудача (например, книга открыта в приватном табе
+  // без OPFS) не должна мешать чтению книги — все ошибки гасятся молча,
+  // при следующем открытии книги попробуем снова.
+  function saveBookCoverIfMissing(hash, base64, contentType){
+    if(!hash || !base64) return;
+    getCoversDirHandle().then(function(dir){
+      return findBookCoverFile(dir, hash).then(function(existing){
+        if(existing) return;
+        var ext = extFromImageContentType(contentType || "image/jpeg");
+        var bytes = base64ToBytes(base64);
+        return dir.getFileHandle(hash + ext, { create: true }).then(function(fh){
+          return fh.createWritable();
+        }).then(function(w){
+          return w.write(bytes).then(function(){ return w.close(); });
+        });
+      });
+    }).then(function(){
+      delete bookCoverUrlCache[hash]; // следующий рендер списка перечитает файл заново
+    }).catch(function(){});
+  }
+  // Удаляет закэшированную обложку книги (вызывается при удалении самой
+  // книги — см. deleteBookFileLocal ниже, — чтобы файлы в book_covers/ не
+  // копились без дела после удаления книги, на которую они ссылались).
+  function deleteBookCoverFile(hash){
+    if(!hash) return Promise.resolve();
+    return getCoversDirHandle().then(function(dir){
+      return findBookCoverFile(dir, hash).then(function(fh){
+        if(!fh) return;
+        return dir.removeEntry(fh.name).catch(function(){});
+      });
+    }).then(function(){
+      delete bookCoverUrlCache[hash];
+    }).catch(function(){});
+  }
+
   // Плоский список файлов books/ (OPFS) — READER_PLAN.md, Этап D, шаг 9
   // (11.09). Исключает служебный файл-манифест дедупликации
   // (BOOKS_MANIFEST_NAME) и любые другие файлы, начинающиеся с точки, тем
@@ -10748,6 +11358,11 @@
       });
     }).then(function(){
       if(getLastOpenedBookName() === name) saveLastOpenedBookName("");
+    }).then(function(){
+      // Обложка (book_covers/, вне реестра синхронизации) не участвует в
+      // манифесте books/ — чистим её отдельно, чтобы не копилась без дела
+      // после удаления книги, на которую она ссылалась.
+      return deleteBookCoverFile(hash);
     });
   }
 
@@ -10777,20 +11392,12 @@
   // Седьмая боковая вкладка второго набора (set2s_7) — READER_PLAN.md,
   // Этап D, шаг 9 (11.09; поддержка epub — добавлена позже). ЭТО БОЛЬШЕ НЕ
   // ЗАГЛУШКА: список книг (fb2/epub) из books/ (OPFS), тем же образцом разметки, что и списки заметок/задач
-  // (mdeditor-tab/-empty/-status/-list/-list-grid/-row/-row-name/
+  // (mdeditor-tab/-empty/-status/-list/-row/-row-name/
   // -list-actions/-list-action-btn, components.css) — свой стиль не
   // изобретаем, см. renderListScreen в mdeditor.js. Пиктограмма строки —
   // тот же контур раскрытой книги, что и у вкладки Read/пикера "Перенести
   // задачу" (TASK_MOVE_ICONS.read выше), вместо новой пиктограммы.
   //
-  // Открытие книги (сам ридер, Этап D, шаг 10 и далее READER_PLAN.md) пока
-  // не реализовано — эта вкладка сознательно ограничена только списком и
-  // загрузкой, по прямой границе шага 9. Так же сознательно здесь пока нет
-  // удаления книги (в отличие от заметок, где строку можно раскрыть долгим
-  // нажатием) — удаление файла книги затронуло бы облачный реестр файлов
-  // (см. registerBookInRegistry/syncFilesRegistry выше), для которого пока
-  // не существует парной функции "разрегистрировать"; оставлено на
-  // отдельный шаг, чтобы не проектировать это решение по ходу дела.
   // Крестик удаления книги раскрывается долгим нажатием на карточку —
   // ровно тот же приём (таймер/порог сдвига пальца, класс "visible" на
   // .mdeditor-delete-btn), что и у заметок в mdeditor.js
@@ -10798,7 +11405,25 @@
   // пользователя от 14.09: "посмотри, такой крестик уже есть в списке
   // заметок"). Свой Set, не общий с mdeditor.js — разные экраны, разный
   // список карточек.
+  //
+  // ТЗ пользователя от 21.09 — три доработки списка:
+  //  1) список в один столбец (а не два, как раньше — mdeditor-list-grid
+  //     убран отсюда, остался только у "Моих заметок"/"Забытых заметок");
+  //  2) второй режим просмотра — обложками (books-cover-grid ниже,
+  //     components.css), с переключателем в плавающем ряду кнопок внизу
+  //     (тот же .mdeditor-fab-row/-fab-btn, что у книг-ридера, см.
+  //     bookReaderFabRowHtml выше) — рядом декоративная заглушка-домик
+  //     (booksHomeStub, без обработчика клика, тот же приём, что и
+  //     .task-project-fab-home на экране "Все задачи проекта");
+  //  3) у долгого нажатия теперь три кнопки, а не одна — "Поделиться"
+  //     (shareBookFile, системное меню Android через navigator.share) и
+  //     "Переименовать" (openBookRenameDialog/renameBookFile) слева от
+  //     уже существовавшего крестика удаления.
   var revealedBookDeleteRows = new Set();
+  // "list" | "cover" — текущий режим показа списка книг, общий на всю
+  // сессию (сбрасывается в "list" при перезапуске скрипта — отдельно не
+  // сохраняем, не просили).
+  var booksViewMode = "list";
 
   function confirmDeleteBook(item){
     openAppConfirmBar(
@@ -10821,6 +11446,309 @@
     );
   }
 
+  // Кнопка "Поделиться" (ТЗ пользователя от 21.09) — системное меню
+  // Android "Поделиться" через navigator.share с самим файлом книги
+  // (не текстом/ссылкой), чтобы получатель мог сохранить именно fb2/epub.
+  // AbortError (пользователь просто закрыл системное меню) — не ошибка,
+  // тот же приём молчаливого игнорирования, что и в остальных местах
+  // проекта, где вызывается navigator.share.
+  function shareBookFile(item){
+    getBooksDirHandle().then(function(dir){
+      return dir.getFileHandle(item.name);
+    }).then(function(fh){
+      return fh.getFile();
+    }).then(function(file){
+      var shareFile;
+      try{ shareFile = new File([file], item.name, {type: file.type || "application/octet-stream"}); }
+      catch(e){ shareFile = file; }
+      if(!navigator.share) throw new Error("Этот браузер не поддерживает системное меню «Поделиться».");
+      if(navigator.canShare && !navigator.canShare({files: [shareFile]})){
+        throw new Error("Система не поддерживает отправку файла такого типа.");
+      }
+      return navigator.share({files: [shareFile], title: item.name});
+    }).catch(function(e){
+      if(e && e.name === "AbortError") return;
+      var statusEl = document.getElementById("booksStatus");
+      if(statusEl){
+        statusEl.textContent = "Не удалось поделиться книгой: " + (e && e.message ? e.message : e);
+        statusEl.classList.add("error");
+      }
+    });
+  }
+
+  // Диалог переименования — та же карточка .mdeditor-cleanup-*, что и у
+  // openBookUnderlineNameDialog выше (ввод имени заметки книги), без
+  // переключения экрана. Меняется только читаемое имя (без расширения) —
+  // формат файла (.fb2/.epub) сохраняется как есть.
+  function openBookRenameDialog(item){
+    if(!settingsModalBox) return;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title">Новое название книги</div>' +
+      '<input type="text" class="mdeditor-cleanup-input" id="bookRenameInput">' +
+      '<div class="mdeditor-cleanup-actions">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="bookRenameCancel">Отмена</button>' +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="bookRenameSave">Сохранить</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    settingsModalBox.appendChild(overlay);
+
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+
+    var input = document.getElementById("bookRenameInput");
+    input.value = stripBookExt(item.name);
+    input.focus();
+    input.select();
+
+    function submit(){
+      var base = (input.value || "").trim();
+      if(!base) return;
+      close();
+      renameBookFile(item, base).then(function(result){
+        if(!document.getElementById("booksList")) return; // вкладку успели покинуть
+        renderSettingsTabBooks();
+        if(!result.ok){
+          var freshStatus = document.getElementById("booksStatus");
+          if(freshStatus){
+            freshStatus.textContent = result.message;
+            freshStatus.classList.add("error");
+          }
+        }
+      });
+    }
+    document.getElementById("bookRenameCancel").addEventListener("click", close);
+    document.getElementById("bookRenameSave").addEventListener("click", submit);
+    document.getElementById("bookRenameSave").addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+    input.addEventListener("keydown", function(ev){
+      if(ev.key === "Enter") submit();
+      if(ev.key === "Escape") close();
+    });
+  }
+
+  // Переименование файла книги в books/ (OPFS) — своей операции rename() у
+  // FileSystemDirectoryHandle нет, поэтому: читаем байты старого файла,
+  // пишем их под новым именем, удаляем старый файл, правим запись в
+  // манифесте дедупликации (тот же hash, новое имя). Хэш (и, значит,
+  // обложка в book_covers/, файл которой назван по хэшу — см. раздел
+  // "Обложки книг" выше) не меняется, поэтому саму обложку трогать не
+  // нужно. bookName в общем state (ensureBookNameSynced) обновляем сразу —
+  // это то, что реально попадает в облачную синхронизацию для закладок на
+  // других устройствах; сама облачная ЗАПИСЬ О ФАЙЛЕ (files/books/<hash>/
+  // name) правится best-effort ниже, но другие устройства при обычной
+  // сверке реестра ориентируются на уже скачанное у СЕБЯ имя и сами
+  // переименование не подхватят — это только для новых загрузок файла "с
+  // нуля" на устройстве, где его ещё не было.
+  function renameBookFile(item, newBaseName){
+    var extM = /\.[^.]+$/.exec(item.name);
+    var ext = extM ? extM[0] : "";
+    var newName = newBaseName + ext;
+    if(newName === item.name) return Promise.resolve({ok: true, name: item.name});
+    return getBooksDirHandle().then(function(dir){
+      return loadBooksManifest(dir).then(function(manifest){
+        var takenNamesLower = new Set(Object.keys(manifest).map(function(h){ return manifest[h].toLowerCase(); }));
+        if(takenNamesLower.has(newName.toLowerCase())) newName = suggestFreeBookName(newName, takenNamesLower);
+        return dir.getFileHandle(item.name).then(function(oldFh){
+          return oldFh.getFile();
+        }).then(function(file){
+          return file.arrayBuffer();
+        }).then(function(buf){
+          return dir.getFileHandle(newName, { create: true }).then(function(newFh){
+            return newFh.createWritable();
+          }).then(function(w){
+            return w.write(buf).then(function(){ return w.close(); });
+          });
+        }).then(function(){
+          return dir.removeEntry(item.name).catch(function(){});
+        }).then(function(){
+          if(item.hash) manifest[item.hash] = newName;
+          return saveBooksManifest(dir, manifest);
+        }).then(function(){
+          return newName;
+        });
+      });
+    }).then(function(finalName){
+      if(getLastOpenedBookName() === item.name) saveLastOpenedBookName(finalName);
+      if(item.hash){
+        ensureBookNameSynced(item.hash, finalName);
+        if(syncId && getFileSyncEnabled() && !isBooksCloudSyncTemporarilyDisabled()){
+          var patch = {};
+          patch["files/books/" + item.hash + "/name"] = finalName;
+          patchNotesCloud(patch).catch(function(){});
+        }
+      }
+      return { ok: true, name: finalName };
+    }).catch(function(e){
+      return { ok: false, message: "Не удалось переименовать книгу: " + (e && e.message ? e.message : e) };
+    });
+  }
+
+  // Плавающий ряд кнопок внизу списка книг (ТЗ пользователя от 21.09) —
+  // тот же .mdeditor-fab-row, что и у книги-ридера (bookReaderFabRowHtml
+  // выше), с двумя кнопками: переключатель режима (кнопка всегда
+  // показывает режим, В КОТОРЫЙ переключит клик) и декоративная заглушка
+  // "домик" в самом углу — она НЕ функциональна на этом экране (мы и так
+  // уже в списке книг), поэтому обработчик клика на неё не вешается, как
+  // и на .task-project-fab-home там же по тому же принципу.
+  function booksFabRowHtml(){
+    var coverMode = booksViewMode === "cover";
+    return (
+      '<div class="mdeditor-fab-row">' +
+        '<button type="button" class="mdeditor-fab-btn" id="booksViewModeBtn" title="' + (coverMode ? "Список" : "Обложки") + '">' +
+          (coverMode ? BOOKS_VIEW_LIST_ICON_SVG : BOOKS_VIEW_COVER_ICON_SVG) +
+        '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="booksHomeStub" tabindex="-1" aria-disabled="true">' + READER_HOME_ICON_SVG + '</button>' +
+      '</div>'
+    );
+  }
+  function bindBooksFabRow(){
+    var modeBtn = document.getElementById("booksViewModeBtn");
+    if(modeBtn){
+      modeBtn.addEventListener("click", function(){
+        booksViewMode = (booksViewMode === "cover") ? "list" : "cover";
+        renderSettingsTabBooks();
+      });
+    }
+  }
+
+  // Скрывает раскрытые долгим нажатием кнопки строки/карточки (Поделиться/
+  // Переименовать/Удалить) — общая для обоих режимов списка, вызывается и
+  // при клике вне строки, и после самого действия.
+  function hideRevealedBookActionButtons(){
+    if(!revealedBookDeleteRows.size) return;
+    revealedBookDeleteRows.clear();
+    document.querySelectorAll("#booksList .mdeditor-share-btn.visible, #booksList .mdeditor-edit-btn.visible, #booksList .mdeditor-delete-btn.visible").forEach(function(btn){
+      btn.classList.remove("visible");
+    });
+  }
+
+  // Долгое нажатие (раскрывает три кнопки действий) + клики — общие для
+  // списка (.mdeditor-row) и сетки обложек (.book-cover-card): тот же
+  // приём (таймер/порог сдвига пальца), что был раньше только у крестика
+  // удаления, просто теперь раскрывает сразу три кнопки одним классом
+  // "visible" и содержит два новых действия (Поделиться/Переименовать).
+  function bindBooksRowActions(containerEl, items, isCoverMode){
+    var rowSelector = isCoverMode ? ".book-cover-card" : ".mdeditor-row";
+    var actionBtnSelector = ".mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn";
+    var LONG_PRESS_MS = 350, MOVE_CANCEL_PX = 10;
+    var pressTimer = null, pressStartXY = null, longPressFired = false;
+    function clearPressTimer(){ clearTimeout(pressTimer); pressTimer = null; }
+    function startPress(rowEl, x, y){
+      if(!rowEl) return;
+      var it = items[Number(rowEl.dataset.index)];
+      if(!it) return;
+      longPressFired = false;
+      pressStartXY = { x: x, y: y };
+      clearPressTimer();
+      pressTimer = setTimeout(function(){
+        longPressFired = true;
+        revealedBookDeleteRows.add(it.name.toLowerCase());
+        rowEl.querySelectorAll(actionBtnSelector).forEach(function(btn){ btn.classList.add("visible"); });
+      }, LONG_PRESS_MS);
+    }
+    function movePress(x, y){
+      if(!pressStartXY) return;
+      var dx = x - pressStartXY.x, dy = y - pressStartXY.y;
+      if(Math.sqrt(dx*dx + dy*dy) > MOVE_CANCEL_PX) clearPressTimer();
+    }
+    containerEl.addEventListener("touchstart", function(e){
+      var t = e.touches[0];
+      startPress(e.target.closest(rowSelector), t.clientX, t.clientY);
+    }, {passive:true});
+    containerEl.addEventListener("touchmove", function(e){ var t = e.touches[0]; movePress(t.clientX, t.clientY); }, {passive:true});
+    containerEl.addEventListener("touchend", clearPressTimer);
+    containerEl.addEventListener("touchcancel", clearPressTimer);
+    containerEl.addEventListener("mousedown", function(e){
+      startPress(e.target.closest(rowSelector), e.clientX, e.clientY);
+    });
+    containerEl.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
+    containerEl.addEventListener("mouseup", clearPressTimer);
+    containerEl.addEventListener("mouseleave", clearPressTimer);
+
+    containerEl.addEventListener("click", function(e){
+      var rowEl = e.target.closest(rowSelector);
+      if(!rowEl) return;
+      var it = items[Number(rowEl.dataset.index)];
+      if(!it) return;
+      if(e.target.closest(".mdeditor-delete-btn")){
+        longPressFired = false;
+        confirmDeleteBook(it);
+        return;
+      }
+      if(e.target.closest(".mdeditor-share-btn")){
+        longPressFired = false;
+        shareBookFile(it);
+        return;
+      }
+      if(e.target.closest(".mdeditor-edit-btn")){
+        longPressFired = false;
+        openBookRenameDialog(it);
+        return;
+      }
+      if(longPressFired){ longPressFired = false; return; }
+      if(revealedBookDeleteRows.size){ hideRevealedBookActionButtons(); return; }
+      openBookReader(it.name);
+    });
+  }
+
+  // Разметка одной строки списка (режим "Список") — icon+имя+три кнопки
+  // действий (поделиться/переименовать/удалить, слева направо, крестик
+  // удаления — крайний правый, как и раньше).
+  function renderBooksListItems(listEl, items){
+    items.forEach(function(it, idx){
+      var row = document.createElement("div");
+      row.className = "mdeditor-row";
+      row.dataset.index = String(idx);
+      row.innerHTML = TASK_MOVE_ICON_SVG("read") + '<span class="mdeditor-row-name"></span>' +
+        '<button type="button" class="mdeditor-share-btn" title="Поделиться">' + SHARE_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-edit-btn" title="Переименовать">' + PENCIL_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-delete-btn" title="Удалить">' + DELETE_ICON_SVG + '</button>';
+      row.querySelector(".mdeditor-row-name").textContent = it.name;
+      var revealed = revealedBookDeleteRows.has(it.name.toLowerCase());
+      row.querySelectorAll(".mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn").forEach(function(btn){
+        btn.classList.toggle("visible", revealed);
+      });
+      listEl.appendChild(row);
+    });
+    bindBooksRowActions(listEl, items, false);
+  }
+
+  // Разметка одной карточки сетки обложек (режим "Обложки") — заглушка
+  // сразу, реальная обложка (если уже извлечена, см. getBookCoverUrl выше)
+  // подставляется в неё асинхронно, по мере готовности каждой отдельно
+  // (не блокируя показ остальных карточек).
+  function renderBooksCoverItems(gridEl, items){
+    items.forEach(function(it, idx){
+      var card = document.createElement("div");
+      card.className = "book-cover-card";
+      card.dataset.index = String(idx);
+      var revealed = revealedBookDeleteRows.has(it.name.toLowerCase());
+      card.innerHTML =
+        '<div class="book-cover-thumb book-cover-placeholder" id="bookCoverThumb_' + idx + '">' + BOOK_COVER_PLACEHOLDER_SVG + '</div>' +
+        '<div class="book-cover-name"></div>' +
+        '<div class="book-cover-actions">' +
+          '<button type="button" class="mdeditor-share-btn' + (revealed ? " visible" : "") + '" title="Поделиться">' + SHARE_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-edit-btn' + (revealed ? " visible" : "") + '" title="Переименовать">' + PENCIL_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-delete-btn' + (revealed ? " visible" : "") + '" title="Удалить">' + DELETE_ICON_SVG + '</button>' +
+        '</div>';
+      card.querySelector(".book-cover-name").textContent = it.name;
+      gridEl.appendChild(card);
+      if(it.hash){
+        getBookCoverUrl(it.hash).then(function(url){
+          if(!url) return;
+          var thumb = document.getElementById("bookCoverThumb_" + idx);
+          if(!thumb) return;
+          thumb.classList.remove("book-cover-placeholder");
+          thumb.innerHTML = '<img src="' + url + '" alt="">';
+        });
+      }
+    });
+    bindBooksRowActions(gridEl, items, true);
+  }
+
   function renderSettingsTabBooks(){
     // Лёгкая фоновая сверка реестра файлов при каждом заходе на вкладку
     // (READER_PLAN.md, шаг 3) — тем же приёмом, что и syncNotesOnTabEnter
@@ -10828,16 +11756,19 @@
     syncFileRegistry("books");
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
+    var coverMode = booksViewMode === "cover";
     var html = '<div class="mdeditor-tab books-list-tab">';
     html += '<h3 class="common-tab-title">Книги</h3>';
-    html += '<div class="mdeditor-list mdeditor-list-grid" id="booksList"></div>';
+    html += '<div class="' + (coverMode ? "books-cover-grid" : "mdeditor-list") + '" id="booksList"></div>';
     html += '<div class="mdeditor-status" id="booksStatus"></div>';
     html += '<div class="mdeditor-list-actions">';
     html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="booksImportBtn">Загрузить fb2, epub или zip книг</button>';
     html += '</div>';
     html += '<input type="file" accept=".fb2,.epub,.zip,application/zip" id="booksImportInput" style="display:none;">';
+    html += booksFabRowHtml();
     html += '</div>';
     container.innerHTML = html;
+    bindBooksFabRow();
 
     var statusEl = document.getElementById("booksStatus");
     function setBooksStatus(msg, isError){
@@ -10848,8 +11779,8 @@
 
     // Список — асинхронный (чтение OPFS), поэтому заполняется отдельно от
     // немедленного рендера разметки выше; тот же контейнер #booksList и
-    // как пустой экран (mdeditor-empty), и как список (mdeditor-list),
-    // просто с разными классами — без пересоздания узла.
+    // как пустой экран (mdeditor-empty), и как список/сетка, просто с
+    // разными классами — без пересоздания узла.
     var listEl = document.getElementById("booksList");
     // Список — асинхронный (OPFS), поэтому высота #settingsTabContent
     // известна только ПОСЛЕ того, как строки реально попали в DOM —
@@ -10860,87 +11791,16 @@
     listBooksEntries().then(function(items){
       if(!document.getElementById("booksList")) return; // вкладку успели покинуть
       if(!items.length){
-        listEl.className = "mdeditor-empty";
+        listEl.className = coverMode ? "books-cover-grid mdeditor-empty" : "mdeditor-empty";
         listEl.textContent = "Книг пока нет.";
         restoreTabScroll("set2s_7");
         return;
       }
-      items.forEach(function(it, idx){
-        var row = document.createElement("div");
-        row.className = "mdeditor-row";
-        row.dataset.index = String(idx);
-        row.innerHTML = TASK_MOVE_ICON_SVG("read") + '<span class="mdeditor-row-name"></span>' +
-          '<button type="button" class="mdeditor-delete-btn" title="Удалить">' + DELETE_ICON_SVG + '</button>';
-        row.querySelector(".mdeditor-row-name").textContent = it.name;
-        var key = it.name.toLowerCase();
-        var delBtn = row.querySelector(".mdeditor-delete-btn");
-        delBtn.classList.toggle("visible", revealedBookDeleteRows.has(key));
-        listEl.appendChild(row);
-      });
-
-      // Долгое нажатие раскрывает крестик — тот же приём, что у заметок
-      // (mdeditor.js renderListScreen: LONG_PRESS_MS/MOVE_CANCEL_PX,
-      // touchstart/touchmove/mousedown, отмена по сдвигу пальца).
-      var LONG_PRESS_MS = 350, MOVE_CANCEL_PX = 10;
-      var pressTimer = null, pressStartXY = null, longPressFired = false;
-      function clearPressTimer(){ clearTimeout(pressTimer); pressTimer = null; }
-      function startPress(rowEl, x, y){
-        if(!rowEl) return;
-        var it = items[Number(rowEl.dataset.index)];
-        if(!it) return;
-        longPressFired = false;
-        pressStartXY = { x: x, y: y };
-        clearPressTimer();
-        pressTimer = setTimeout(function(){
-          longPressFired = true;
-          revealedBookDeleteRows.add(it.name.toLowerCase());
-          var delBtn = rowEl.querySelector(".mdeditor-delete-btn");
-          if(delBtn) delBtn.classList.add("visible");
-        }, LONG_PRESS_MS);
-      }
-      function movePress(x, y){
-        if(!pressStartXY) return;
-        var dx = x - pressStartXY.x, dy = y - pressStartXY.y;
-        if(Math.sqrt(dx*dx + dy*dy) > MOVE_CANCEL_PX) clearPressTimer();
-      }
-      listEl.addEventListener("touchstart", function(e){
-        var t = e.touches[0];
-        startPress(e.target.closest(".mdeditor-row"), t.clientX, t.clientY);
-      }, {passive:true});
-      listEl.addEventListener("touchmove", function(e){ var t = e.touches[0]; movePress(t.clientX, t.clientY); }, {passive:true});
-      listEl.addEventListener("touchend", clearPressTimer);
-      listEl.addEventListener("touchcancel", clearPressTimer);
-      listEl.addEventListener("mousedown", function(e){
-        startPress(e.target.closest(".mdeditor-row"), e.clientX, e.clientY);
-      });
-      listEl.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
-      listEl.addEventListener("mouseup", clearPressTimer);
-      listEl.addEventListener("mouseleave", clearPressTimer);
-
-      function hideRevealedBookDeleteRows(){
-        if(!revealedBookDeleteRows.size) return;
-        revealedBookDeleteRows.clear();
-        listEl.querySelectorAll(".mdeditor-delete-btn").forEach(function(btn){ btn.classList.remove("visible"); });
-      }
-
-      listEl.addEventListener("click", function(e){
-        var rowEl = e.target.closest(".mdeditor-row");
-        if(!rowEl) return;
-        var it = items[Number(rowEl.dataset.index)];
-        if(!it) return;
-        if(e.target.closest(".mdeditor-delete-btn")){
-          longPressFired = false;
-          confirmDeleteBook(it);
-          return;
-        }
-        if(longPressFired){ longPressFired = false; return; }
-        if(revealedBookDeleteRows.size){ hideRevealedBookDeleteRows(); return; }
-        openBookReader(it.name);
-      });
+      if(coverMode) renderBooksCoverItems(listEl, items);
+      else renderBooksListItems(listEl, items);
       container.addEventListener("click", function(e){
-        if(!e.target.closest(".mdeditor-row")) hideRevealedBookDeleteRows();
+        if(!e.target.closest(".mdeditor-row, .book-cover-card")) hideRevealedBookActionButtons();
       });
-
       restoreTabScroll("set2s_7");
     }).catch(function(e){
       setBooksStatus("Не удалось прочитать список книг: " + (e && e.message ? e.message : e), true);
@@ -11125,9 +11985,15 @@
     var tries = 0;
     function refine(){
       if(!el.isConnected || !seg.isConnected) return;
+      // ВАЖНО (22.09): сначала top — чтение геометрии потомка форсирует
+      // реальную вёрстку пропущенного сегмента (content-visibility:auto);
+      // segTop/segH читаем ПОСЛЕ, иначе это устаревшая оценка
+      // (contain-intrinsic-size), сравниваемая со свежим top — проверка
+      // границ её отбраковывала, и прокрутка замирала на верху сегмента
+      // (баг «соседняя строка»/закладка выше экрана).
+      var top = bookElTopInContainer(container, el);
       var segTop = bookElTopInContainer(container, seg);
       var segH = seg.getBoundingClientRect().height;
-      var top = bookElTopInContainer(container, el);
       if(top >= segTop - 2 && top <= segTop + segH + 2 && Math.abs(top - container.scrollTop) > 1){
         container.scrollTop = top;
       }
@@ -11416,6 +12282,18 @@
       });
       if(window.Debug) window.Debug.log("openBookReader[" + name + "]: подготовка ссылок на картинки заняла " + Math.round(performance.now() - _tImg) + "мс");
       _dbg("ссылки на картинки готовы, до renderBookReader()");
+      // Обложка (ТЗ пользователя от 21.09) — первая по порядку глав картинка
+      // уже распарсенной книги, тот же кадр, что реально показывается в
+      // начале текста; кэшируем в OPFS book_covers/ (вне реестра
+      // синхронизации, см. раздел "Обложки книг" выше) — не блокируем
+      // открытие книги, просто запускаем сохранение параллельно (пишет файл
+      // только один раз, при первом успешном открытии — см.
+      // saveBookCoverIfMissing).
+      var firstCoverImageId = findFirstBookImageId(res.parsed.chapters);
+      if(firstCoverImageId && res.parsed.images[firstCoverImageId]){
+        var coverSrc = res.parsed.images[firstCoverImageId];
+        saveBookCoverIfMissing(res.hash, coverSrc.base64, coverSrc.contentType);
+      }
       // Шаг 16 — сохранённая позиция чтения (см. setBookPosition/
       // getBookState выше) читается один раз здесь, при открытии книги
       // "с нуля" (не из снимка "Домика" — тот восстанавливает готовый
@@ -11949,12 +12827,14 @@
   }
 
   function jumpToChapterFromChaptersList(idx){
+    // Переписано 22.09: свой отдельный rAF со scrollTop конкурировал с rAF
+    // внутри renderBookReaderText (планировались в один кадр) — для больших
+    // книг (сотни ещё не свёрстанных сегментов до целевой главы) это ломало
+    // открытие. Теперь один путь, как у openIpkdReaderToToday:
+    // restorePosition + scrollBookReaderToPosition с её refine().
+    if(!bookReaderState) return;
+    bookReaderState.restorePosition = { ch: idx, blk: 0 };
     switchBookReaderMode("text");
-    requestAnimationFrame(function(){
-      var el = document.getElementById("bookChapter_" + idx);
-      var container = document.getElementById("settingsTabContent");
-      if(el && container) container.scrollTop = bookElTopInContainer(container, el);
-    });
   }
 
   // ===================== ВЫДЕЛЕНИЕ -> ЗАМЕТКА КНИГИ (READER_PLAN.md, Этап D,
@@ -12722,7 +13602,10 @@
   function updateIpkdTabIcon(){
     var btn = document.getElementById("settingsTabSet2GearBtn5");
     if(!btn) return;
-    btn.textContent = String(new Date().getDate());
+    // Пиктограмма — число в квадрате, как у календаря (ТЗ пользователя от
+    // 22.09): span.ipkd-tab-icon — рамка-квадрат (modals.css), число внутри
+    // чуть мельче font-size вкладки (32px у .settings-tab), чтобы помещалось.
+    btn.innerHTML = '<span class="ipkd-tab-icon">' + String(new Date().getDate()) + '</span>';
     btn.classList.toggle("ipkd-tab-unread", !isIpkdOpenedToday());
   }
 
@@ -16097,11 +16980,20 @@
   }
   function getAllTasks(){
     var list = [];
-    Object.keys(state).forEach(function(k){
-      if(k.indexOf("task:") === 0 && state[k] && state[k].c){
-        list.push({id: k.slice(5), c: state[k].c, t: state[k].t});
-      }
-    });
+    if(personalViewActive()){
+      // TASK_UNIFIED_SYNC.md, шаг 8 (cutover): чтение из вида на основе нового store — см.
+      // подраздел «Шаг 8» раздела «ЛИЧНЫЕ ЗАДАЧИ: ТЕНЕВАЯ ЗАПИСЬ В SYNC-ENGINE». Флаг выключен /
+      // вид не готов — читается state, как раньше.
+      personalView.map.forEach(function(rec, id){
+        if(rec && rec.c) list.push({id: id, c: rec.c, t: rec.t});
+      });
+    }else{
+      Object.keys(state).forEach(function(k){
+        if(k.indexOf("task:") === 0 && state[k] && state[k].c){
+          list.push({id: k.slice(5), c: state[k].c, t: state[k].t});
+        }
+      });
+    }
     list.sort(function(a,b){ return a.t - b.t; });
     return list;
   }
@@ -16112,7 +17004,7 @@
     // минимально инвазивная подмена источника данных для всего
     // остального рендера вкладок (см. пояснение там же).
     if(isGroupTaskId(id)) return getGroupTaskById(id);
-    var rec = state["task:" + id];
+    var rec = personalTaskRawRecord(id); // шаг 8: state или вид (флаг cutover)
     if(!rec || !rec.c) return null;
     return {id: id, c: rec.c, t: rec.t};
   }
@@ -16140,7 +17032,7 @@
     // задачи получают стабильную точку отсчёта уже при первом же после
     // этой правки изменении и дальше больше не двигаются.
     if(data.createdAt == null){
-      var existing = state["task:" + id];
+      var existing = personalTaskRawRecord(id); // шаг 8: то, что видит UI (state или вид)
       data.createdAt = existing ? existing.t : Date.now();
     }
     var savedAt = Date.now();
@@ -16149,6 +17041,7 @@
     // t. Только запись «в два места»: чтение по-прежнему из state, ошибки теневой части сюда
     // не долетают (см. personalShadowSave).
     personalShadowSave(id, data, savedAt);
+    personalViewSet(id, data, savedAt); // шаг 8: при включённом cutover UI читает вид — та же запись и метка сразу и туда
     // ⚠️ ДИАГНОСТИКА (16.09, продолжение TASK_FIX_TASK_IMAGE_LOSS.md) —
     // единая точка сохранения текста/данных задачи: фиксируем id, t и
     // длину текста ПРЯМО ПЕРЕД записью в localStorage — если после
@@ -16732,6 +17625,7 @@
     var deletedAt = Date.now();
     state["task:" + id] = {c: null, t: deletedAt};
     personalShadowRemove(id, deletedAt); // шаг 6: тумбстоун с той же меткой — в теневой store
+    personalViewSet(id, null, deletedAt); // шаг 8: и в вид (флаг cutover)
     saveLocalStateNow();
     scheduleCloudPush();
     // см. пояснение у setTaskText выше — удаление задачи тоже может

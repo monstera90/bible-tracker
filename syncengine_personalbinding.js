@@ -1,4 +1,11 @@
 // syncengine_personalbinding.js
+// Версия: 3.0 (21.09) — TASK_UNIFIED_SYNC.md, Шаг 8 (cutover личных задач): структурная правка —
+// добавлены `binding.snapshot({filter})` (снимок store для чтения: [{id, c, t, dead}] в общей очереди,
+// данные копируются) и чистые функции `buildCutoverPlan`/`formatCutoverPlan` (что изменится в списках
+// после переключения чтения на store: исчезнут/появятся/изменятся, рост дублей текста). Модуль по-прежнему
+// НЕ читает и не меняет `state` и ничего не показывает — «вид» для UI, зеркалирование в state и флаг
+// переключения живут в my.js (раздел «ЛИЧНЫЕ ЗАДАЧИ: ТЕНЕВАЯ ЗАПИСЬ…», подраздел «Шаг 8»).
+// `save/remove/reconcile/syncNow/diagnose/parity` не менялись.
 // Версия: 2.0 (21.09) — TASK_UNIFIED_SYNC.md, Шаг 7 (parity check): структурная правка —
 // добавлены `binding.parity(state, opts)` и чистые функции `buildParityReport`,
 // `formatParityReport`, `formatParityHeadline`, `summarizeCompletions` (см. раздел «Шаг 7»
@@ -567,6 +574,127 @@
     return lines.join('\n');
   }
 
+  // ==========================================================================================
+  // Шаг 8 (21.09): переключение ЧТЕНИЯ личных задач на store (cutover) — план переключения.
+  // Чистые функции (ничего не пишут, тестируются без движка). my.js зовёт их перед включением:
+  // «вид» для UI = last-write-wins по метке t между state и store (при равной метке остаётся
+  // state — так же, как в my.js, где уже лежащая в виде запись равной/более старой не заменяется).
+  // Отсюда честный ответ на вопрос «что изменится в списках задач после переключения»:
+  //   disappear — живы в state, а в store новее тумбстоун (задачу удалили/перенесли там, куда
+  //               старый путь ещё не дошёл, ИЛИ её «воскресил» старый doCloudSync после импорта);
+  //   appear    — живы в store, а в state нет / удалены (пришли новым путём или state их потерял);
+  //   changed   — живы и там и там, в store новее, содержимое отличается.
+  // Дубли: одинаковый непустой текст у РАЗНЫХ живых id — счётчик по state и по виду; рост
+  // после переключения — повод проверить вручную («не задвоилась ли задача»).
+  // ==========================================================================================
+  var DEFAULT_PLAN_ITEMS = 8;
+
+  function countTextDuplicates(map) {
+    var byText = new Map();
+    map.forEach(function (v) {
+      if (!v || !v.c) return;
+      var s = snippetOf(v.c, 1000000).toLowerCase();
+      if (!s) return;
+      byText.set(s, (byText.get(s) || 0) + 1);
+    });
+    var n = 0;
+    byText.forEach(function (cnt) { if (cnt > 1) n += cnt; });
+    return n;
+  }
+
+  /**
+   * buildCutoverPlan(input) -> plan
+   *   input.state      — объект state; читаются только ключи с префиксом input.prefix (по умолчанию 'task:')
+   *   input.records    — снимок store: [{id, c, t, dead}] (binding.snapshot() БЕЗ filter)
+   *   input.maxTextLen — длина фрагмента текста в отчёте (по умолчанию 30)
+   *   plan = {state:{live,tombstones,invalid}, view:{live,tombstones}, store:{live,tombstones},
+   *           disappear:[{id,text,stateT,storeT}], appear:[{id,text,storeT}], changed:[{id,text,fields}],
+   *           duplicateTexts:{state,view}, invalidIds, signature}
+   *   signature — короткий хэш id из disappear: одинаковый набор → одинаковая подпись (двойное подтверждение).
+   */
+  function buildCutoverPlan(input) {
+    input = input || {};
+    var prefix = input.prefix || DEFAULT_KEY_PREFIX;
+    var stateObj = input.state || {};
+    var records = input.records || [];
+    var textLen = input.maxTextLen || DEFAULT_TEXT_LEN;
+    var st = new Map();
+    var invalidIds = [];
+    Object.keys(stateObj).forEach(function (k) {
+      if (k.indexOf(prefix) !== 0) return;
+      var id = k.slice(prefix.length);
+      var rec = stateObj[k];
+      if (!rec || typeof rec !== 'object' || typeof rec.t !== 'number' || !isFinite(rec.t)) { invalidIds.push(id); return; }
+      st.set(id, { c: rec.c || null, t: rec.t });
+    });
+    var plan = {
+      state: { live: 0, tombstones: 0, invalid: invalidIds.length },
+      view: { live: 0, tombstones: 0 },
+      store: { live: 0, tombstones: 0 },
+      disappear: [], appear: [], changed: [],
+      duplicateTexts: { state: 0, view: 0 },
+      invalidIds: invalidIds,
+      signature: '',
+    };
+    var view = new Map();
+    st.forEach(function (s, id) {
+      view.set(id, s);
+      if (s.c) plan.state.live += 1; else plan.state.tombstones += 1;
+    });
+    records.forEach(function (r) {
+      if (!r || typeof r.id !== 'string' || typeof r.t !== 'number' || !isFinite(r.t)) return;
+      var rc = r.dead ? null : (r.c || null);
+      if (rc) plan.store.live += 1; else plan.store.tombstones += 1;
+      var s = st.get(r.id);
+      if (s && s.t >= r.t) return; // state не старее — в виде остаётся state
+      view.set(r.id, { c: rc, t: r.t });
+      if (s && s.c && !rc) {
+        plan.disappear.push({ id: r.id, text: snippetOf(s.c, textLen), stateT: s.t, storeT: r.t });
+      } else if (rc && (!s || !s.c)) {
+        plan.appear.push({ id: r.id, text: snippetOf(rc, textLen), storeT: r.t });
+      } else if (rc && s && s.c && stableStringify(s.c) !== stableStringify(rc)) {
+        plan.changed.push({ id: r.id, text: snippetOf(rc, textLen), fields: diffFields(s.c, rc) });
+      }
+    });
+    view.forEach(function (v) { if (v.c) plan.view.live += 1; else plan.view.tombstones += 1; });
+    plan.duplicateTexts = { state: countTextDuplicates(st), view: countTextDuplicates(view) };
+    function byId(a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; }
+    plan.disappear.sort(byId);
+    plan.appear.sort(byId);
+    plan.changed.sort(byId);
+    plan.signature = hashString(plan.disappear.map(function (x) { return x.id + '|' + x.storeT; }).join('\n'));
+    return plan;
+  }
+
+  /** formatCutoverPlan(plan, {maxItems}) -> строка отчёта (с фрагментами текста задач — только для копирования вручную). */
+  function formatCutoverPlan(plan, fopts) {
+    fopts = fopts || {};
+    var maxItems = fopts.maxItems || DEFAULT_PLAN_ITEMS;
+    var lines = [];
+    lines.push('State сейчас: живых ' + plan.state.live + ', удалённых ' + plan.state.tombstones +
+      (plan.state.invalid ? ', некорректных ' + plan.state.invalid : '') +
+      '. Store: живых ' + plan.store.live + ', удалённых ' + plan.store.tombstones + '.');
+    lines.push('После переключения в списках будет: живых ' + plan.view.live + ', удалённых ' + plan.view.tombstones + '.');
+    function list(title, arr, describe) {
+      lines.push(title + ': ' + arr.length + (arr.length ? '' : ' — нет'));
+      arr.slice(0, maxItems).forEach(function (x) { lines.push('  • ' + describe(x)); });
+      if (arr.length > maxItems) lines.push('  … и ещё ' + (arr.length - maxItems));
+    }
+    list('ИСЧЕЗНУТ из списков (живы в state, в store новее тумбстоун)', plan.disappear,
+      function (x) { return x.id + (x.text ? ' «' + x.text + '»' : '') + ' — state ' + fmtTime(x.stateT) + ', удалена в store ' + fmtTime(x.storeT); });
+    list('ПОЯВЯТСЯ в списках (живы в store, в state нет или удалены)', plan.appear,
+      function (x) { return x.id + (x.text ? ' «' + x.text + '»' : '') + ' — store ' + fmtTime(x.storeT); });
+    list('ИЗМЕНЯТСЯ (в store новее, содержимое другое)', plan.changed,
+      function (x) { return x.id + (x.text ? ' «' + x.text + '»' : '') + ' — поля: ' + (x.fields.join(', ') || '—'); });
+    lines.push('Одинаковый текст у разных живых задач: в state ' + plan.duplicateTexts.state + ', после переключения ' + plan.duplicateTexts.view +
+      (plan.duplicateTexts.view > plan.duplicateTexts.state ? ' — ВЫРОС, проверьте вручную, не задвоилось ли что-то' : ' — не вырос') + '.');
+    if (plan.invalidIds.length) {
+      lines.push('Некорректные записи state (в store не попадают; в списках остаются, пока читается state): ' + plan.invalidIds.slice(0, maxItems).join(', ') +
+        (plan.invalidIds.length > maxItems ? ', …' : ''));
+    }
+    return lines.join('\n');
+  }
+
   /**
    * createPersonalBinding(opts) -> binding
    *   opts.engine         — экземпляр SyncEngine v2.2+ (нужен opts.updatedAt у saveRecord/deleteRecord)
@@ -602,6 +730,9 @@
    *   parity(state, {readCloud, cloud, completions, freshMs, maxTextLen, now}) -> Promise<{ok, value:report}>
    *                                     шаг 7: подробная сверка state ↔ store ↔ облако по каждой задаче
    *                                     (см. buildParityReport); ничего не пишет
+   *   snapshot({filter})             -> Promise<{ok, value:{scope,total,live,tombstones,records:[{id,c,t,dead}]}}>
+   *                                     шаг 8: снимок store для чтения (в общей очереди, данные копируются);
+   *                                     filter(id, updatedAt, scope) === false — запись пропускается
    *   whenIdle()                     -> Promise                        очередь опустела (тесты)
    *   getStoreId()/getScope()/isCloudAttached()/getStorageMode()
    *   detach(dropStorage)/destroy()
@@ -1010,6 +1141,28 @@
       });
     }
 
+    // ---- шаг 8: снимок store для чтения ---------------------------------------------------
+    // Идёт в общей очереди — после уже поставленных save/remove/reconcile (согласованный срез).
+    // Данные КОПИРУЮТСЯ (JSON): «вид» и state в my.js правят объект задачи на месте, без копии это тихо
+    // меняло бы запись в кэше store (у memory-хранилища запись отдаётся по ссылке) — без dirty и без метки.
+    // filter(id, updatedAt, scope) === false — запись не копируется и в результат не попадает (счётчики
+    // live/tombstones считаются по всем записям): «вид» берёт только то, что новее уже известного ему.
+    function snapshot(sopts) {
+      sopts = sopts || {};
+      var filter = typeof sopts.filter === 'function' ? sopts.filter : null;
+      return safe('snapshot', async function () {
+        var att = ensure();
+        var list = await engine.listRecords(att.storeId, { includeDeleted: true });
+        var out = { scope: att.scope, total: list.length, live: 0, tombstones: 0, records: [] };
+        list.forEach(function (r) {
+          if (r.deleted) out.tombstones += 1; else out.live += 1;
+          if (filter && !filter(r.id, r.updatedAt, att.scope)) return;
+          out.records.push({ id: r.id, c: r.deleted ? null : cloneJson(r.data), t: r.updatedAt, dead: !!r.deleted });
+        });
+        return out;
+      });
+    }
+
     function whenIdle() {
       var q = queue;
       return q.then(function () { return queue === q ? undefined : whenIdle(); });
@@ -1035,6 +1188,7 @@
       pushNow: pushNow,
       diagnose: diagnose,
       parity: parity,
+      snapshot: snapshot,
       whenIdle: whenIdle,
       detach: detach,
       destroy: destroy,
@@ -1056,5 +1210,7 @@
     formatParityReport: formatParityReport,
     formatParityHeadline: formatParityHeadline,
     summarizeCompletions: summarizeCompletions,
+    buildCutoverPlan: buildCutoverPlan,
+    formatCutoverPlan: formatCutoverPlan,
   };
 });

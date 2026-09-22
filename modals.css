@@ -563,6 +563,21 @@
     background:var(--gold-light);
     --icon-halo:var(--gold-light);
   }
+  /* Квадрат-«календарик» вокруг числа (ТЗ пользователя от 22.09) — рамка
+     currentColor (тот же цвет, что и у остальных пиктограмм вкладки,
+     включая заливку .ipkd-tab-unread выше), число внутри чуть мельче
+     font-size вкладки (32px у .settings-tab), чтобы помещалось с полями. */
+  .ipkd-tab-icon{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:26px;
+    height:26px;
+    border:1.5px solid currentColor;
+    border-radius:4px;
+    font-size:16px;
+    line-height:1;
+  }
 
   /* ---------- горизонтальный ряд "лежачих" вкладок под окном ---------- */
   /* Приклеен снизу-СПРАВА окна настроек, вплотную к кнопке-язычку

@@ -1,5 +1,11 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 6.4 (21.09) — если все 4 попытки загрузить codemirror_bundle.js и запасной
+   esm.sh тоже не сработали, текст ошибки теперь называет реальную причину вместо
+   голого «не удалось загрузить»: ответ сервера (HTTP-код и content-type), лежит ли
+   файл в кэше приложения, управляет ли страницей service worker, есть ли сеть у
+   браузера (cmDiagnose). Ничего в самой загрузке (loadCMLocal, retry-цепочка) не
+   менялось — диагностика собирается только один раз, перед показом ошибки.
    Версия: 6.3 (21.09) — загрузка CodeMirror после обновления приложения больше не
    требует ручных действий: loadCM делает до 4 попыток загрузить локальный
    codemirror_bundle.js (обычный import(), затем чтение файла через fetch/Cache Storage
@@ -626,11 +632,39 @@ window.initMdEditorModule = function(deps){
     }
     return attempt(0);
   }
+  // Состояние на момент окончательного сбоя (все 4 попытки + esm.sh не сработали) —
+  // одной строкой в текст ошибки, чтобы было видно, что именно не так: реальный ответ
+  // сервера, лежит ли файл в кэше приложения, управляет ли страницей service worker.
+  // Каждая проверка независима и не бросает исключений — сама диагностика не должна
+  // ломать показ исходной ошибки.
+  function cmDiagnose(){
+    var parts = [];
+    function step(fn){ return Promise.resolve().then(fn).then(function(t){ if(t) parts.push(t); }, function(){}); }
+    return Promise.all([
+      // HEAD напрямую — если service worker перехватывает, это всё равно покажет,
+      // отвечает ли сеть/сервер как таковой.
+      step(function(){
+        return fetch(CM_LOCAL_URL, { method: "HEAD", cache: "no-store" }).then(function(r){
+          return "сервер: HTTP " + r.status + " " + (r.headers.get("content-type") || "без типа");
+        }, function(e){ return "сервер: нет ответа (" + (e && e.message ? e.message : e) + ")"; });
+      }),
+      step(function(){
+        if(!window.caches || !window.caches.match) return "";
+        return window.caches.match(CM_LOCAL_URL).then(function(r){ return "в кэше приложения: " + (r ? "да" : "нет"); });
+      })
+    ]).then(function(){
+      parts.push("service worker: " + (navigator.serviceWorker && navigator.serviceWorker.controller ? "управляет страницей" : "не управляет страницей"));
+      parts.push(navigator.onLine === false ? "браузер: офлайн" : "браузер: онлайн");
+      return parts.join("; ");
+    });
+  }
   function loadCM(){
     if(cmModulesPromise) return cmModulesPromise;
     cmModulesPromise = loadCMLocal().catch(function(localErr){
       return loadCMFromEsmSh().catch(function(netErr){
-        throw new Error("не удалось загрузить " + CM_LOCAL_URL + " (" + (localErr && localErr.message ? localErr.message : localErr) + ")");
+        return cmDiagnose().then(function(diag){
+          throw new Error("не удалось загрузить " + CM_LOCAL_URL + " (" + (localErr && localErr.message ? localErr.message : localErr) + "; " + diag + ")");
+        });
       });
     }).then(function(mods){
       cmModules = mods;
