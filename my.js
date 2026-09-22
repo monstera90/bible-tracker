@@ -2546,7 +2546,13 @@
   // "Обложки" списка книг, пока для книги ещё нет извлечённой реальной
   // обложки (см. getBookCoverUrl/saveBookCoverIfMissing ниже) — простой
   // силуэт закрытой книги, без претензии на конкретную обложку.
-  var BOOK_COVER_PLACEHOLDER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="1.5"></rect><path d="M4 7.5h16"></path><path d="M8 3v4.5"></path></svg>';
+  // Заглушка обложки (ТЗ пользователя от 22.09, второй вариант — с
+  // примером-картинкой): не иконка-книжка в центре, а макет самой
+  // обложки — широкая полоса-"заглавие" сверху и под ней полоса потоньше
+  // той же ширины (имитация мелкого текста/подзаголовка), на фоне самой
+  // карточки (.book-cover-thumb уже даёт фон и рамку). Растягивается на
+  // всю карточку через CSS (.book-cover-placeholder svg, components.css).
+  var BOOK_COVER_PLACEHOLDER_SVG = '<svg viewBox="0 0 100 150" preserveAspectRatio="xMidYMid meet"><rect x="14" y="20" width="72" height="15" rx="1.5" fill="currentColor"></rect><rect x="14" y="41" width="72" height="8" rx="1.5" fill="currentColor"></rect></svg>';
   // переключатель режима списка книг (ТЗ пользователя от 21.09) — кнопка
   // всегда изображает режим, В КОТОРЫЙ переключит клик (тот же язык, что и
   // у READER_TEXT_ICON_SVG/READER_CHAPTERS_ICON_SVG выше для книг/глав):
@@ -2572,6 +2578,19 @@
   // имеет доступа к внутренним константам модуля). Пока без функции — кнопка
   // "Скачать" вкладки "Извлечение субтитров" сейчас заглушка (см. ниже).
   var DOWNLOAD_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"></path><path d="M7.5 10.5L12 15l4.5-4.5"></path><path d="M4.5 18.5h15"></path></svg>';
+  // Кнопка "Загрузить книгу" в нижнем ряду вкладки "Книги" (ТЗ пользователя
+  // от 22.09) — та же пиктограмма DOWNLOAD_ICON_SVG выше, перевёрнутая по
+  // вертикали (зеркально отражена относительно центра квадрата 24×24), чтобы
+  // стрелка смотрела вверх, а не вниз.
+  var BOOKS_UPLOAD_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V10"></path><path d="M7.5 13.5L12 9l4.5 4.5"></path><path d="M4.5 5.5h15"></path></svg>';
+  // Кнопка "Сбросить обложку" в углу карточки сетки обложек (ТЗ пользователя
+  // от 22.09, book-cover-actions) — рамка-картинка с диагональной чертой
+  // ("нет изображения"), слева от кнопки "Поделиться".
+  var BOOK_COVER_RESET_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="1.5"></rect><circle cx="8.5" cy="9.5" r="1.4"></circle><path d="M4 16.5l5-5 4 4 3-3 4 4"></path><path d="M3 21L21 3"></path></svg>';
+  // Кнопка "Скрыть заглавия" в нижнем ряду вкладки "Книги", только в режиме
+  // "Обложки" (ТЗ пользователя от 22.09) — строчки текста с диагональной
+  // чертой, тот же приём "перечёркнутого" значка, что и у сброса обложки выше.
+  var BOOKS_HIDE_TITLES_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7.5" x2="20" y2="7.5"></line><line x1="4" y1="13" x2="14.5" y2="13"></line><line x1="3" y1="20" x2="21" y2="4"></line></svg>';
   // "глаз" открытый/перечёркнутый — два состояния кнопки #taskHideLinkedBtn
   // (см. updateHideLinkedBtnState в initTaskGlobalToolbar, ТЗ пользователя
   // от 15.09 #2): задачи ПОКАЗАНЫ -> открытый глаз (EYE_ICON_SVG), задачи
@@ -11424,6 +11443,40 @@
   // сессию (сбрасывается в "list" при перезапуске скрипта — отдельно не
   // сохраняем, не просили).
   var booksViewMode = "list";
+  // Скрытие заглавий под обложками в режиме "Обложки" (ТЗ пользователя от
+  // 22.09) — своя кнопка нижнего ряда, только в этом режиме; сохраняется
+  // между запусками (тот же приём try/catch, что и bibleReadingMode_v1 ниже
+  // по файлу).
+  var BOOKS_HIDE_TITLES_KEY = "bibleBooksHideTitles_v1";
+  function getBooksHideTitles(){
+    try{ return localStorage.getItem(BOOKS_HIDE_TITLES_KEY) === "1"; }catch(e){ return false; }
+  }
+  function setBooksHideTitles(val){
+    try{ localStorage.setItem(BOOKS_HIDE_TITLES_KEY, val ? "1" : "0"); }catch(e){}
+  }
+  // "Сброшенные" обложки — кнопка в углу карточки (слева от "Поделиться",
+  // ТЗ пользователя от 22.09): список хэшей книг, для которых обложку не
+  // нужно ни показывать, ни пытаться подгружать, пока пользователь не
+  // нажмёт кнопку ещё раз. Флаг per-книга, хранится по хэшу (не по имени —
+  // имя можно переименовать), переживает перезапуск.
+  var BOOKS_COVER_DISABLED_KEY = "bibleBookCoverDisabled_v1";
+  function isBookCoverDisabled(hash){
+    if(!hash) return false;
+    try{
+      var list = JSON.parse(localStorage.getItem(BOOKS_COVER_DISABLED_KEY) || "[]");
+      return list.indexOf(hash) !== -1;
+    }catch(e){ return false; }
+  }
+  function setBookCoverDisabled(hash, disabled){
+    if(!hash) return;
+    try{
+      var list = JSON.parse(localStorage.getItem(BOOKS_COVER_DISABLED_KEY) || "[]");
+      var i = list.indexOf(hash);
+      if(disabled){ if(i === -1) list.push(hash); }
+      else if(i !== -1){ list.splice(i, 1); }
+      localStorage.setItem(BOOKS_COVER_DISABLED_KEY, JSON.stringify(list));
+    }catch(e){}
+  }
 
   function confirmDeleteBook(item){
     openAppConfirmBar(
@@ -11593,10 +11646,21 @@
   // "домик" в самом углу — она НЕ функциональна на этом экране (мы и так
   // уже в списке книг), поэтому обработчик клика на неё не вешается, как
   // и на .task-project-fab-home там же по тому же принципу.
+  // Ряд кнопок расширен (ТЗ пользователя от 22.09), слева направо в
+  // разметке = справа налево на экране (см. .mdeditor-fab-row —
+  // position:absolute + inset-inline-end, последний в разметке стоит
+  // ближе всего к правому краю): скрыть заглавия (только режим "Обложки"),
+  // "i", загрузить книгу, переключатель список/обложки, домик-заглушка.
   function booksFabRowHtml(){
     var coverMode = booksViewMode === "cover";
+    var hideTitlesOn = getBooksHideTitles();
     return (
       '<div class="mdeditor-fab-row">' +
+        (coverMode ?
+          '<button type="button" class="mdeditor-fab-btn' + (hideTitlesOn ? " pressed" : "") + '" id="booksHideTitlesBtn" title="' + (hideTitlesOn ? "Показать заглавия" : "Скрыть заглавия") + '">' + BOOKS_HIDE_TITLES_ICON_SVG + '</button>'
+          : "") +
+        '<button type="button" class="mdeditor-fab-btn" id="booksInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="booksImportBtn" title="Загрузить fb2, epub или zip книгу">' + BOOKS_UPLOAD_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="booksViewModeBtn" title="' + (coverMode ? "Список" : "Обложки") + '">' +
           (coverMode ? BOOKS_VIEW_LIST_ICON_SVG : BOOKS_VIEW_COVER_ICON_SVG) +
         '</button>' +
@@ -11612,6 +11676,26 @@
         renderSettingsTabBooks();
       });
     }
+    var hideTitlesBtn = document.getElementById("booksHideTitlesBtn");
+    if(hideTitlesBtn){
+      hideTitlesBtn.addEventListener("click", function(){
+        var next = !getBooksHideTitles();
+        setBooksHideTitles(next);
+        hideTitlesBtn.classList.toggle("pressed", next);
+        hideTitlesBtn.title = next ? "Показать заглавия" : "Скрыть заглавия";
+        var grid = document.getElementById("booksList");
+        if(grid) grid.classList.toggle("hide-titles", next);
+      });
+    }
+    var infoBtn = document.getElementById("booksInfoBtn");
+    if(infoBtn){
+      infoBtn.addEventListener("click", function(){ renderBooksInfoScreen(); });
+    }
+    var input = document.getElementById("booksImportInput");
+    var importBtn = document.getElementById("booksImportBtn");
+    if(importBtn && input){
+      importBtn.addEventListener("click", function(){ input.click(); });
+    }
   }
 
   // Скрывает раскрытые долгим нажатием кнопки строки/карточки (Поделиться/
@@ -11620,19 +11704,20 @@
   function hideRevealedBookActionButtons(){
     if(!revealedBookDeleteRows.size) return;
     revealedBookDeleteRows.clear();
-    document.querySelectorAll("#booksList .mdeditor-share-btn.visible, #booksList .mdeditor-edit-btn.visible, #booksList .mdeditor-delete-btn.visible").forEach(function(btn){
+    document.querySelectorAll("#booksList .mdeditor-cover-reset-btn.visible, #booksList .mdeditor-share-btn.visible, #booksList .mdeditor-edit-btn.visible, #booksList .mdeditor-delete-btn.visible").forEach(function(btn){
       btn.classList.remove("visible");
     });
   }
 
-  // Долгое нажатие (раскрывает три кнопки действий) + клики — общие для
+  // Долгое нажатие (раскрывает кнопки действий) + клики — общие для
   // списка (.mdeditor-row) и сетки обложек (.book-cover-card): тот же
   // приём (таймер/порог сдвига пальца), что был раньше только у крестика
-  // удаления, просто теперь раскрывает сразу три кнопки одним классом
-  // "visible" и содержит два новых действия (Поделиться/Переименовать).
+  // удаления, просто теперь раскрывает несколько кнопок одним классом
+  // "visible" (Поделиться/Переименовать, плюс "Сбросить обложку" — только
+  // в сетке обложек, см. её разметку в renderBooksCoverItems).
   function bindBooksRowActions(containerEl, items, isCoverMode){
     var rowSelector = isCoverMode ? ".book-cover-card" : ".mdeditor-row";
-    var actionBtnSelector = ".mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn";
+    var actionBtnSelector = ".mdeditor-cover-reset-btn, .mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn";
     var LONG_PRESS_MS = 350, MOVE_CANCEL_PX = 10;
     var pressTimer = null, pressStartXY = null, longPressFired = false;
     function clearPressTimer(){ clearTimeout(pressTimer); pressTimer = null; }
@@ -11667,12 +11752,35 @@
     containerEl.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
     containerEl.addEventListener("mouseup", clearPressTimer);
     containerEl.addEventListener("mouseleave", clearPressTimer);
+    // Блокирует системное контекстное меню Chrome/Android по долгому
+    // нажатию на обложку (ТЗ пользователя от 22.09 — своё раскрытие
+    // кнопок долгим нажатием и так уже есть, системное меню поверх него
+    // не нужно). CSS (-webkit-touch-callout:none в components.css) не
+    // всегда достаточно сам по себе — событие "contextmenu" глушим и в JS,
+    // на весь контейнер, а не по одной картинке.
+    containerEl.addEventListener("contextmenu", function(e){ e.preventDefault(); });
 
     containerEl.addEventListener("click", function(e){
       var rowEl = e.target.closest(rowSelector);
       if(!rowEl) return;
       var it = items[Number(rowEl.dataset.index)];
       if(!it) return;
+      if(isCoverMode && e.target.closest(".mdeditor-cover-reset-btn")){
+        longPressFired = false;
+        var nowDisabled = !isBookCoverDisabled(it.hash);
+        setBookCoverDisabled(it.hash, nowDisabled);
+        var idx = Number(rowEl.dataset.index);
+        var thumb = document.getElementById("bookCoverThumb_" + idx);
+        if(thumb){
+          if(nowDisabled){
+            thumb.classList.add("book-cover-placeholder");
+            thumb.innerHTML = BOOK_COVER_PLACEHOLDER_SVG;
+          } else {
+            loadBookCoverIntoThumb(idx, it.hash);
+          }
+        }
+        return;
+      }
       if(e.target.closest(".mdeditor-delete-btn")){
         longPressFired = false;
         confirmDeleteBook(it);
@@ -11716,10 +11824,28 @@
     bindBooksRowActions(listEl, items, false);
   }
 
+  // Подгружает реальную обложку книги в уже нарисованную заглушку карточки
+  // (общая для первого рендера и для повторного включения кнопкой
+  // "Сбросить обложку" — mdeditor-cover-reset-btn). draggable="false" —
+  // вместе с CSS (-webkit-user-drag:none, components.css) убирает
+  // системное перетаскивание/контекстное меню картинки на долгом нажатии.
+  function loadBookCoverIntoThumb(idx, hash){
+    if(!hash) return;
+    getBookCoverUrl(hash).then(function(url){
+      if(!url) return;
+      var thumb = document.getElementById("bookCoverThumb_" + idx);
+      if(!thumb) return;
+      thumb.classList.remove("book-cover-placeholder");
+      thumb.innerHTML = '<img src="' + url + '" alt="" draggable="false">';
+    });
+  }
+
   // Разметка одной карточки сетки обложек (режим "Обложки") — заглушка
   // сразу, реальная обложка (если уже извлечена, см. getBookCoverUrl выше)
   // подставляется в неё асинхронно, по мере готовности каждой отдельно
-  // (не блокируя показ остальных карточек).
+  // (не блокируя показ остальных карточек) — кроме книг, у которых
+  // обложка "сброшена" кнопкой mdeditor-cover-reset-btn (isBookCoverDisabled),
+  // для них заглушка так и остаётся, подгрузка не запускается.
   function renderBooksCoverItems(gridEl, items){
     items.forEach(function(it, idx){
       var card = document.createElement("div");
@@ -11730,23 +11856,54 @@
         '<div class="book-cover-thumb book-cover-placeholder" id="bookCoverThumb_' + idx + '">' + BOOK_COVER_PLACEHOLDER_SVG + '</div>' +
         '<div class="book-cover-name"></div>' +
         '<div class="book-cover-actions">' +
+          '<button type="button" class="mdeditor-cover-reset-btn' + (revealed ? " visible" : "") + '" title="Сбросить обложку">' + BOOK_COVER_RESET_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-share-btn' + (revealed ? " visible" : "") + '" title="Поделиться">' + SHARE_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-edit-btn' + (revealed ? " visible" : "") + '" title="Переименовать">' + PENCIL_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-delete-btn' + (revealed ? " visible" : "") + '" title="Удалить">' + DELETE_ICON_SVG + '</button>' +
         '</div>';
       card.querySelector(".book-cover-name").textContent = it.name;
       gridEl.appendChild(card);
-      if(it.hash){
-        getBookCoverUrl(it.hash).then(function(url){
-          if(!url) return;
-          var thumb = document.getElementById("bookCoverThumb_" + idx);
-          if(!thumb) return;
-          thumb.classList.remove("book-cover-placeholder");
-          thumb.innerHTML = '<img src="' + url + '" alt="">';
-        });
-      }
+      if(it.hash && !isBookCoverDisabled(it.hash)) loadBookCoverIntoThumb(idx, it.hash);
     });
     bindBooksRowActions(gridEl, items, true);
+  }
+
+  // Полноэкранная инструкция вкладки "Книги" (ТЗ пользователя от 22.09) —
+  // открывается кнопкой "i" из нижнего ряда (booksInfoBtn, booksFabRowHtml),
+  // тем же приёмом, что и renderTaskInfoScreen выше по файлу: подменяет
+  // #settingsTabContent целиком, свой "домик" внизу вместо обычного ряда
+  // кнопок вкладки.
+  function renderBooksInfoScreen(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+
+    function iconRow(svg, html){
+      return '<div class="task-info-item"><div class="task-info-icon">' + svg + '</div><div class="task-info-text">' + html + '</div></div>';
+    }
+
+    var html = '';
+    html += iconRow(BOOKS_VIEW_COVER_ICON_SVG, "Переключает список книг между показом обложками и обычным списком с именами файлов.");
+    html += iconRow(BOOKS_UPLOAD_ICON_SVG, "Загружает книгу с устройства — файл .fb2, .epub или .zip (архив с книгой внутри).");
+    html += iconRow(BOOKS_HIDE_TITLES_ICON_SVG, "Только в режиме «Обложки»: скрывает подписи с названиями книг под обложками. Повторное нажатие возвращает подписи.");
+    html += iconRow(SHARE_ICON_SVG, "Долгое нажатие на книге (в списке или на обложке) раскрывает кнопки действий: «Поделиться» — системное меню Android с файлом книги; «Переименовать»; крестик «Удалить» — совсем, без возможности восстановить.");
+    html += iconRow(BOOK_COVER_RESET_ICON_SVG, "Только в режиме «Обложки», в тех же раскрывающихся кнопках: сбрасывает показ обложки конкретной книги — вместо неё останется заглушка, и приложение больше не будет пытаться подгрузить обложку заново. Повторное нажатие включает показ обложки обратно.");
+
+    container.innerHTML =
+      '<h3 class="common-tab-title">Книги — кнопки</h3>' +
+      '<div class="task-info-body">' + html + '</div>' +
+      '<div class="mdeditor-fab-row">' +
+        '<button type="button" class="mdeditor-fab-btn" id="booksInfoHomeBtn" title="Назад к книгам">' + READER_HOME_ICON_SVG + '</button>' +
+      '</div>';
+
+    var homeBtn = document.getElementById("booksInfoHomeBtn");
+    if(homeBtn){
+      homeBtn.addEventListener("click", function(){
+        // "Действие ВПЕРЁД": свой шаг "назад" — снимок этого же экрана
+        // инструкции, тот же приём, что и у renderTaskInfoScreen.
+        window.AppNav.push(function(){ renderBooksInfoScreen(); });
+        renderSettingsTabBooks();
+      });
+    }
   }
 
   function renderSettingsTabBooks(){
@@ -11757,13 +11914,16 @@
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     var coverMode = booksViewMode === "cover";
+    var hideTitlesOn = coverMode && getBooksHideTitles();
+    var listClass = coverMode ? "books-cover-grid" : "mdeditor-list";
+    if(hideTitlesOn) listClass += " hide-titles";
     var html = '<div class="mdeditor-tab books-list-tab">';
     html += '<h3 class="common-tab-title">Книги</h3>';
-    html += '<div class="' + (coverMode ? "books-cover-grid" : "mdeditor-list") + '" id="booksList"></div>';
+    html += '<div class="' + listClass + '" id="booksList"></div>';
     html += '<div class="mdeditor-status" id="booksStatus"></div>';
-    html += '<div class="mdeditor-list-actions">';
-    html += '<button type="button" class="workbooks-run-btn mdeditor-list-action-btn" id="booksImportBtn">Загрузить fb2, epub или zip книг</button>';
-    html += '</div>';
+    // Кнопка "Загрузить fb2, epub или zip книгу" переехала в нижний ряд
+    // (booksFabRowHtml, ТЗ пользователя от 22.09) — здесь остаётся только
+    // скрытый <input type="file">, который она открывает.
     html += '<input type="file" accept=".fb2,.epub,.zip,application/zip" id="booksImportInput" style="display:none;">';
     html += booksFabRowHtml();
     html += '</div>';
@@ -11807,10 +11967,11 @@
       restoreTabScroll("set2s_7");
     });
 
+    // Клик по кнопке загрузки теперь вешается в bindBooksFabRow (кнопка
+    // переехала в нижний ряд) — здесь остаётся только обработчик выбора
+    // файла на самом <input>.
     var input = document.getElementById("booksImportInput");
-    var btn = document.getElementById("booksImportBtn");
-    if(btn && input){
-      btn.addEventListener("click", function(){ input.click(); });
+    if(input){
       input.addEventListener("change", function(){
         var file = input.files && input.files[0];
         input.value = ""; // разрешаем выбрать тот же файл ещё раз

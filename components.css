@@ -2439,25 +2439,17 @@
     box-sizing:border-box;
     text-align:center;
   }
-  /* Вкладка "Книги" (renderSettingsTabBooks в my.js, ТЗ пользователя от
-     19.09): кнопка "Загрузить fb2, epub или zip книг" опущена к самому низу
-     окна, 7px от нижней границы. Вкладка (.mdeditor-tab, display:block)
-     растягивается на всю высоту #settingsTabContent (flex-column, см.
-     modals.css) и сама становится flex-column — тогда margin-top:auto у
-     блока кнопки прижимает его вниз, пока список короткий; когда список
-     длиннее окна, вкладка просто растёт, и кнопка идёт в конце списка,
-     как раньше (докрутить до конца). padding-top держит зазор 16px до
-     списка в этом случае. Только для этой вкладки — у "Моих заметок" тот же
-     .mdeditor-list-actions остаётся как был. */
+  /* Вкладка "Книги" (renderSettingsTabBooks в my.js). До 22.09 здесь была
+     ещё и кнопка "Загрузить fb2, epub или zip книг", прижатая к низу окна
+     через .mdeditor-list-actions/margin-top:auto — с 22.09 кнопка переехала
+     в общий нижний ряд (.mdeditor-fab-row, booksFabRowHtml), отдельное
+     правило для неё убрано; .mdeditor-tab.books-list-tab оставлен
+     flex-column на случай будущих элементов, прижатых к низу тем же
+     приёмом. */
   .mdeditor-tab.books-list-tab{
     display:flex;
     flex-direction:column;
     flex:1 0 auto;
-  }
-  .books-list-tab .mdeditor-list-actions{
-    margin-top:auto;
-    padding-top:16px;
-    margin-bottom:7px;
   }
   .mdeditor-row{
     position:relative;
@@ -3381,6 +3373,7 @@
      (--wood), а не красного — красный оставлен только за необратимым
      удалением. Используются и в строке списка (.mdeditor-row), и в сетке
      обложек (.book-cover-actions ниже). ---------- */
+  .mdeditor-cover-reset-btn,
   .mdeditor-share-btn,
   .mdeditor-edit-btn{
     visibility:hidden;
@@ -3397,11 +3390,14 @@
     cursor:pointer;
     -webkit-tap-highlight-color:transparent;
   }
+  .mdeditor-cover-reset-btn svg,
   .mdeditor-share-btn svg,
   .mdeditor-edit-btn svg{ width:16px; height:16px; }
+  .mdeditor-cover-reset-btn.visible,
   .mdeditor-share-btn.visible,
   .mdeditor-edit-btn.visible{ visibility:visible; }
   @media (hover:hover) and (pointer:fine){
+    .mdeditor-cover-reset-btn:hover,
     .mdeditor-share-btn:hover,
     .mdeditor-edit-btn:hover{ background:var(--parchment-dark); }
   }
@@ -3442,9 +3438,25 @@
     align-items:center;
     justify-content:center;
   }
-  .book-cover-thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
-  .book-cover-placeholder{ color:var(--wood); opacity:.55; }
-  .book-cover-placeholder svg{ width:38%; height:38%; }
+  /* -webkit-user-drag/-webkit-touch-callout/user-select:none — вместе с JS
+     (contextmenu preventDefault, draggable="false" у самого <img>, см.
+     bindBooksRowActions/loadBookCoverIntoThumb в my.js) убирают системное
+     меню Chrome/Android "Скопировать/Скачать/Поделиться изображением" по
+     долгому нажатию на обложку (ТЗ пользователя от 22.09) — своё раскрытие
+     кнопок долгим нажатием уже есть, системное меню поверх него лишнее. */
+  .book-cover-thumb img{
+    width:100%; height:100%; object-fit:cover; display:block;
+    -webkit-user-drag:none;
+    -webkit-touch-callout:none;
+    -webkit-user-select:none;
+    user-select:none;
+  }
+  /* Заглушка обложки (ТЗ пользователя от 22.09) — не маленькая иконка в
+     центре, а макет самой обложки (BOOK_COVER_PLACEHOLDER_SVG в my.js:
+     широкая полоса-заглавие сверху + под ней полоса той же ширины,
+     потоньше, "мелкий текст"), растянутый на всю карточку. */
+  .book-cover-placeholder{ color:var(--wood); opacity:.5; }
+  .book-cover-placeholder svg{ width:100%; height:100%; }
   .book-cover-name{
     margin-top:4px;
     font-family:"Palatino Linotype",Georgia,serif;
@@ -3475,6 +3487,7 @@
      кнопки своя тёмная полупрозрачная подложка и белая иконка (никакой
      новой CSS-переменной не заводим, plain rgba() — универсально
      поддерживается, в отличие от color-mix()). */
+  .book-cover-actions .mdeditor-cover-reset-btn,
   .book-cover-actions .mdeditor-share-btn,
   .book-cover-actions .mdeditor-edit-btn,
   .book-cover-actions .mdeditor-delete-btn{
@@ -3483,10 +3496,16 @@
   }
   .book-cover-actions .mdeditor-delete-btn{ color:#ff8a80; }
   @media (hover:hover) and (pointer:fine){
+    .book-cover-actions .mdeditor-cover-reset-btn:hover,
     .book-cover-actions .mdeditor-share-btn:hover,
     .book-cover-actions .mdeditor-edit-btn:hover,
     .book-cover-actions .mdeditor-delete-btn:hover{ background:rgba(0,0,0,.55); }
   }
+
+  /* Кнопка "Скрыть заглавия" нижнего ряда (booksHideTitlesBtn, только режим
+     "Обложки", ТЗ пользователя от 22.09) — прячет только подписи под
+     обложками, сама сетка/карточки не меняются. */
+  .books-cover-grid.hide-titles .book-cover-name{ display:none; }
 
   /* ---------- список закладок (#mdBookmarksList, renderBookmarksScreen в
      mdeditor.js) растёт СНИЗУ ВВЕРХ (settings-content-bottom прижимает
