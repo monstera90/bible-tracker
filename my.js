@@ -11331,7 +11331,18 @@
     }catch(e){ return null; }
   }
 
-  function openBookReader(name){
+  // resolveRestorePosition — необязательный колбэк(chapters) -> {ch, blk} |
+  // null (правка от 22.09, вкладка "ИПКД", ТЗ пользователя: "два действия
+  // выполняются и одно побеждает" — race с двумя независимыми scrollTop
+  // была неаккуратной заплаткой поверх этой функции). Вместо отдельного
+  // scrollTop-вызова СНАРУЖИ, конкурирующего с восстановлением обычной
+  // сохранённой позиции чтения ниже, вызывающий код (см.
+  // renderSettingsTabIpkd) может подставить сюда СВОЮ позицию — она просто
+  // подменяет обычную restorePosition ДО рендера, и дальше идёт ровно тем
+  // же единственным путём (renderBookReaderText -> requestAnimationFrame ->
+  // scrollBookReaderToPosition, с её собственной самокоррекцией через
+  // refine() — надёжнее и проще, чем городить свой rAF-скролл рядом).
+  function openBookReader(name, resolveRestorePosition){
     // Подчищаем картинки предыдущей открытой книги, если она осталась
     // "подвешенной" в памяти (например, после клика "Домик" — см.
     // bindBookReaderFabRow ниже — без возврата "назад" в ту книгу).
@@ -11422,11 +11433,12 @@
       // автооткрытие по этому имени подсунуло бы публикацию в чужую вкладку.
       if(name !== IPKD_BOOK_NAME) saveLastOpenedBookName(name);
       var savedBookState = getBookState(res.hash);
+      var forcedPosition = resolveRestorePosition ? resolveRestorePosition(res.parsed.chapters) : null;
       bookReaderState = {
         hash: res.hash, name: name,
         chapters: res.parsed.chapters, imageUrls: imageUrls, imageBase64: imageBase64,
         mode: "text", textScrollTop: 0, chaptersScrollTop: 0,
-        restorePosition: (savedBookState && savedBookState.position) || null
+        restorePosition: forcedPosition || (savedBookState && savedBookState.position) || null
       };
       // Ридер вкладки "ИПКД" — сам корневой экран вкладки (списка книг, куда
       // можно "вернуться", у неё нет): шаг "назад" для него НЕ кладётся —
@@ -12635,11 +12647,13 @@
   //   1) файл хранится под фиксированным служебным именем и спрятан из
   //      общего списка книг (IPKD_BOOK_NAME ниже);
   //   2) при каждом заходе на вкладку — принудительно сегодняшняя глава, а
-  //      не запомненное место чтения (openIpkdReaderToToday/
-  //      scrollIpkdReaderToToday);
-  //   3) кнопка "Домик" общего ряда тут не подходит (увела бы в чужой
-  //      список "Мои книги") — прячется, вместо неё отдельная кнопка "к
-  //      сегодня" (см. bindIpkdReaderExtras);
+  //      не запомненное место чтения (ipkdTodayPosition/
+  //      openIpkdReaderToToday, через тот же restorePosition, что и у
+  //      обычной сохранённой позиции чтения, см. openBookReader выше);
+  //   3) кнопки "Домик" и Flibusta (OPDS) общего ряда тут не нужны совсем
+  //      (см. bindIpkdReaderExtras) — переход на вкладку и так всегда сам
+  //      открывает сегодня, отдельной кнопки для этого не требуется, а
+  //      "Домик" увёл бы в чужой список "Мои книги";
   //   4) отдельная кнопка-скрепка в левом нижнем углу ридера — заменить файл
   //      публикации (например, в начале нового года), тот же общий диалог
   //      выбора файла, что и на пустом экране первой загрузки.
@@ -12743,28 +12757,32 @@
     }
     return 0;
   }
-  // Прокрутка к сегодняшней главе — тот же приём, что и
-  // jumpToChapterFromChaptersList выше (bookElTopInContainer/scrollTop
-  // контейнера #settingsTabContent), без записи отдельного шага "назад" —
-  // это не переход по клику из списка глав, а обычное открытие вкладки.
-  function scrollIpkdReaderToToday(){
-    if(!bookReaderState) return;
-    requestAnimationFrame(function(){
-      var idx = ipkdChapterIndexForToday(bookReaderState.chapters);
-      var el = document.getElementById("bookChapter_" + idx);
-      var container = document.getElementById("settingsTabContent");
-      if(el && container) container.scrollTop = bookElTopInContainer(container, el);
-    });
+  // {ch, blk} сегодняшней главы — blk:0, первый блок главы (её заголовок
+  // рисуется отдельным <h4>, не как блок с data-ch/data-blk, поэтому именно
+  // первый блок и есть "верх" главы). Чистая функция без побочных
+  // эффектов — единственное место, решающее, ГДЕ сегодня; ЕЙ пользуются все
+  // точки входа ниже (холодное открытие, возврат на уже открытую вкладку,
+  // замена публикации), а КАК скроллить — уже забота готового
+  // restorePosition/scrollBookReaderToPosition (см. правку в openBookReader
+  // выше и requestAnimationFrame в renderBookReaderText) — без отдельного
+  // scrollTop-вызова рядом, который конкурировал бы с ним же (правка от
+  // 22.09, ТЗ пользователя: "два действия... одно побеждает" — race была
+  // неаккуратной заплаткой, теперь путь один).
+  function ipkdTodayPosition(chapters){
+    return { ch: ipkdChapterIndexForToday(chapters), blk: 0 };
   }
   // Книга уже открыта этой сессией (bookReaderState жив, просто вернулись
   // на вкладку) — принудительно текстовый режим (не список глав) и заново
   // сегодняшний день, а не запомненная позиция чтения (в отличие от "Мои
   // книги" — ТЗ пользователя от 21.09: "при переходе на эту вкладку всегда
-  // открывается сегодняшний день").
+  // открывается сегодняшний день"). openBookReader тут не при чём — книга
+  // уже загружена и распарсена, файл заново читать незачем — поэтому
+  // restorePosition подставляется напрямую, тем же полем, что и там, и
+  // тем же единственным путём (renderBookReaderText) забирается в скролл.
   function openIpkdReaderToToday(){
     bookReaderState.mode = "text";
+    bookReaderState.restorePosition = ipkdTodayPosition(bookReaderState.chapters);
     renderBookReader();
-    scrollIpkdReaderToToday();
   }
 
   // Довесок поверх общей разметки ридера — вызывается из renderBookReader
@@ -12775,21 +12793,16 @@
   function bindIpkdReaderExtras(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
-    // "Домик" общего ряда увёл бы в чужой список "Мои книги" — прячем,
-    // вместо него своя кнопка чуть ниже (тот же слот в ряду, insertBefore).
+    // "Домик" общего ряда увёл бы в чужой список "Мои книги", а Flibusta
+    // (OPDS) для единственной фиксированной публикации не имеет смысла —
+    // обе кнопки на этой вкладке просто не нужны, без всякой замены (ТЗ
+    // пользователя от 22.09): любой заход на вкладку и так всегда
+    // открывает сегодняшний день сам (см. renderSettingsTabIpkd/
+    // openIpkdReaderToToday), отдельная кнопка для этого не нужна.
     var homeBtn = document.getElementById("bookReaderHomeBtn");
-    if(homeBtn) homeBtn.style.display = "none";
-    var fabRow = container.querySelector(".mdeditor-fab-row");
-    if(fabRow){
-      var todayBtn = document.createElement("button");
-      todayBtn.type = "button";
-      todayBtn.className = "mdeditor-fab-btn";
-      todayBtn.id = "ipkdTodayBtn";
-      todayBtn.title = "К сегодняшнему дню";
-      todayBtn.innerHTML = READER_HOME_ICON_SVG;
-      todayBtn.addEventListener("click", scrollIpkdReaderToToday);
-      fabRow.insertBefore(todayBtn, homeBtn || null);
-    }
+    if(homeBtn) homeBtn.remove();
+    var flibustaBtn = document.getElementById("bookReaderFlibustaBtn");
+    if(flibustaBtn) flibustaBtn.remove();
     // Скрепка "заменить публикацию" — левый нижний угол ридера, тот же
     // отступ (7px), что и у общего ряда справа (components.css,
     // .ipkd-swap-fab) — ТЗ пользователя от 21.09.
@@ -12845,9 +12858,8 @@
         return saveIpkdFile(new Uint8Array(buf));
       }).then(function(){
         bookReaderOwnerTab = "set2b_5";
-        return openBookReader(IPKD_BOOK_NAME);
+        return openBookReader(IPKD_BOOK_NAME, ipkdTodayPosition);
       }).then(function(){
-        scrollIpkdReaderToToday();
         markIpkdOpenedToday();
       }).catch(function(e){
         setStatus("Не удалось сохранить файл: " + (e && e.message ? e.message : e), true);
@@ -12894,9 +12906,7 @@
     ipkdFileExists().then(function(exists){
       if(currentSettingsTab !== "set2b_5" || !document.getElementById("settingsTabContent")) return; // вкладку успели покинуть (#settingsTabContent общий для всех вкладок и есть всегда — проверяем именно текущую вкладку)
       if(!exists){ renderIpkdEmptyScreen(); return; }
-      openBookReader(IPKD_BOOK_NAME).then(function(){
-        scrollIpkdReaderToToday();
-      });
+      openBookReader(IPKD_BOOK_NAME, ipkdTodayPosition);
     });
   }
 
