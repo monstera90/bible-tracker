@@ -332,7 +332,6 @@
   .settings-modal-box{
     position:relative;
     background:var(--parchment);
-    border:1px solid var(--groove-shadow);
     border-radius:0;
     border-start-start-radius:10px;
     border-start-end-radius:10px;
@@ -489,9 +488,7 @@
        такого цвета вокруг букв отделяет текст от линий под ним, в любом
        состоянии вкладки. */
     --icon-halo:var(--parchment);
-    border:1px solid var(--groove-shadow);
-    border-inline-start:none;
-    border-top:none;
+    border:none;
     border-radius:0;
     border-start-end-radius:14px;
     border-end-end-radius:14px;
@@ -529,7 +526,6 @@
      Правило нарочно ограничено этим стеком через #settingsTabs, чтобы не
      задеть отдельно стоящую "лежачую" вкладку-шестерёнку — у неё своя,
      другая по стороне, линия-срез (см. .settings-tab-gear). */
-  #settingsTabs .settings-tab:last-child, #settingsTabsSet2 .settings-tab:last-child{ border-top:1px solid var(--groove-shadow); }
   /* активный язычок — та же страница, что и открытое окно: линия сверху,
      отделяющая его, пропадает, и он выглядит продолжением окна.
      неактивный остаётся того же цвета страницы, но т.к. окно "лежит"
@@ -543,7 +539,6 @@
      еле-сиреневый оттенок фона (--parchment). Размер язычка при этом
      не меняется — только background/color. */
   .settings-tab.active{
-    border-top-color:transparent;
     background:var(--wood);
     color:var(--parchment);
     --icon-halo:var(--wood);
@@ -617,11 +612,9 @@
   .settings-tab-gear{
     width:68px;height:45px;
     flex:0 0 68px;
-    border-inline-start:1px solid var(--groove-shadow);
-    border-top:none;
     border-radius:0 0 14px 14px;
+    box-shadow:calc(2px * var(--hand-sign, 1)) 2px 5px rgba(0,0,0,.3);
   }
-  .settings-tab-gear:last-child{ border-top:none; }
 
   /* ---------- режим чтения (ТЗ пользователя от 18.09) ----------
      Глобальный переключатель (см. READING_MODE_KEY/applyReadingModeVisual
