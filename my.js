@@ -2591,6 +2591,14 @@
   // "Обложки" (ТЗ пользователя от 22.09) — строчки текста с диагональной
   // чертой, тот же приём "перечёркнутого" значка, что и у сброса обложки выше.
   var BOOKS_HIDE_TITLES_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7.5" x2="20" y2="7.5"></line><line x1="4" y1="13" x2="14.5" y2="13"></line><line x1="3" y1="20" x2="21" y2="4"></line></svg>';
+  // Кнопка "Заметка книги" в раскрывающихся долгим нажатием действиях
+  // строки/карточки книги (ТЗ пользователя от 22.09) — открывает заметку с
+  // подчёркиваниями этой книги (или предлагает завести её, если ещё нет,
+  // см. openBookNoteFromList/attachBookNote ниже). Физически дублирует
+  // FILE_ICON_SVG из mdeditor.js (тот не передаётся через deps наружу, а
+  // заводить деп ради одной иконки не стоит) — та же пиктограмма документа,
+  // что и у обычных заметок в общем списке "Закладки" (renderBookmarksList).
+  var BOOK_NOTE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M15 3v4h4"></path><line x1="7.5" y1="11" x2="14" y2="11"></line><line x1="7.5" y1="15" x2="14" y2="15"></line></svg>';
   // "глаз" открытый/перечёркнутый — два состояния кнопки #taskHideLinkedBtn
   // (см. updateHideLinkedBtnState в initTaskGlobalToolbar, ТЗ пользователя
   // от 15.09 #2): задачи ПОКАЗАНЫ -> открытый глаз (EYE_ICON_SVG), задачи
@@ -11439,10 +11447,17 @@
   //     "Переименовать" (openBookRenameDialog/renameBookFile) слева от
   //     уже существовавшего крестика удаления.
   var revealedBookDeleteRows = new Set();
-  // "list" | "cover" — текущий режим показа списка книг, общий на всю
-  // сессию (сбрасывается в "list" при перезапуске скрипта — отдельно не
-  // сохраняем, не просили).
-  var booksViewMode = "list";
+  // "list" | "cover" — текущий режим показа списка книг; переживает
+  // перезапуск приложения (ТЗ пользователя от 22.09, тот же приём
+  // try/catch, что и у BOOKS_HIDE_TITLES_KEY ниже).
+  var BOOKS_VIEW_MODE_KEY = "bibleBooksViewMode_v1";
+  function getBooksViewMode(){
+    try{ return localStorage.getItem(BOOKS_VIEW_MODE_KEY) === "cover" ? "cover" : "list"; }catch(e){ return "list"; }
+  }
+  function setBooksViewMode(mode){
+    try{ localStorage.setItem(BOOKS_VIEW_MODE_KEY, mode === "cover" ? "cover" : "list"); }catch(e){}
+  }
+  var booksViewMode = getBooksViewMode();
   // Скрытие заглавий под обложками в режиме "Обложки" (ТЗ пользователя от
   // 22.09) — своя кнопка нижнего ряда, только в этом режиме; сохраняется
   // между запусками (тот же приём try/catch, что и bibleReadingMode_v1 ниже
@@ -11673,6 +11688,7 @@
     if(modeBtn){
       modeBtn.addEventListener("click", function(){
         booksViewMode = (booksViewMode === "cover") ? "list" : "cover";
+        setBooksViewMode(booksViewMode);
         renderSettingsTabBooks();
       });
     }
@@ -11704,7 +11720,7 @@
   function hideRevealedBookActionButtons(){
     if(!revealedBookDeleteRows.size) return;
     revealedBookDeleteRows.clear();
-    document.querySelectorAll("#booksList .mdeditor-cover-reset-btn.visible, #booksList .mdeditor-share-btn.visible, #booksList .mdeditor-edit-btn.visible, #booksList .mdeditor-delete-btn.visible").forEach(function(btn){
+    document.querySelectorAll("#booksList .mdeditor-cover-reset-btn.visible, #booksList .mdeditor-note-btn.visible, #booksList .mdeditor-share-btn.visible, #booksList .mdeditor-edit-btn.visible, #booksList .mdeditor-delete-btn.visible").forEach(function(btn){
       btn.classList.remove("visible");
     });
   }
@@ -11717,7 +11733,7 @@
   // в сетке обложек, см. её разметку в renderBooksCoverItems).
   function bindBooksRowActions(containerEl, items, isCoverMode){
     var rowSelector = isCoverMode ? ".book-cover-card" : ".mdeditor-row";
-    var actionBtnSelector = ".mdeditor-cover-reset-btn, .mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn";
+    var actionBtnSelector = ".mdeditor-cover-reset-btn, .mdeditor-note-btn, .mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn";
     var LONG_PRESS_MS = 350, MOVE_CANCEL_PX = 10;
     var pressTimer = null, pressStartXY = null, longPressFired = false;
     function clearPressTimer(){ clearTimeout(pressTimer); pressTimer = null; }
@@ -11781,6 +11797,11 @@
         }
         return;
       }
+      if(e.target.closest(".mdeditor-note-btn")){
+        longPressFired = false;
+        openBookNoteFromList(it);
+        return;
+      }
       if(e.target.closest(".mdeditor-delete-btn")){
         longPressFired = false;
         confirmDeleteBook(it);
@@ -11811,12 +11832,13 @@
       row.className = "mdeditor-row";
       row.dataset.index = String(idx);
       row.innerHTML = TASK_MOVE_ICON_SVG("read") + '<span class="mdeditor-row-name"></span>' +
+        '<button type="button" class="mdeditor-note-btn" title="Заметка книги">' + BOOK_NOTE_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-share-btn" title="Поделиться">' + SHARE_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-edit-btn" title="Переименовать">' + PENCIL_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-delete-btn" title="Удалить">' + DELETE_ICON_SVG + '</button>';
       row.querySelector(".mdeditor-row-name").textContent = it.name;
       var revealed = revealedBookDeleteRows.has(it.name.toLowerCase());
-      row.querySelectorAll(".mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn").forEach(function(btn){
+      row.querySelectorAll(".mdeditor-note-btn, .mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn").forEach(function(btn){
         btn.classList.toggle("visible", revealed);
       });
       listEl.appendChild(row);
@@ -11857,6 +11879,7 @@
         '<div class="book-cover-name"></div>' +
         '<div class="book-cover-actions">' +
           '<button type="button" class="mdeditor-cover-reset-btn' + (revealed ? " visible" : "") + '" title="Сбросить обложку">' + BOOK_COVER_RESET_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-note-btn' + (revealed ? " visible" : "") + '" title="Заметка книги">' + BOOK_NOTE_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-share-btn' + (revealed ? " visible" : "") + '" title="Поделиться">' + SHARE_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-edit-btn' + (revealed ? " visible" : "") + '" title="Переименовать">' + PENCIL_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-delete-btn' + (revealed ? " visible" : "") + '" title="Удалить">' + DELETE_ICON_SVG + '</button>' +
@@ -11885,6 +11908,7 @@
     html += iconRow(BOOKS_VIEW_COVER_ICON_SVG, "Переключает список книг между показом обложками и обычным списком с именами файлов.");
     html += iconRow(BOOKS_UPLOAD_ICON_SVG, "Загружает книгу с устройства — файл .fb2, .epub или .zip (архив с книгой внутри).");
     html += iconRow(BOOKS_HIDE_TITLES_ICON_SVG, "Только в режиме «Обложки»: скрывает подписи с названиями книг под обложками. Повторное нажатие возвращает подписи.");
+    html += iconRow(BOOK_NOTE_ICON_SVG, "Долгое нажатие на книге (в списке или на обложке): открывает заметку с подчёркиваниями и иллюстрациями этой книги. Если заметка ещё не привязана — предлагает создать новую или выбрать уже существующую.");
     html += iconRow(SHARE_ICON_SVG, "Долгое нажатие на книге (в списке или на обложке) раскрывает кнопки действий: «Поделиться» — системное меню Android с файлом книги; «Переименовать»; крестик «Удалить» — совсем, без возможности восстановить.");
     html += iconRow(BOOK_COVER_RESET_ICON_SVG, "Только в режиме «Обложки», в тех же раскрывающихся кнопках: сбрасывает показ обложки конкретной книги — вместо неё останется заглушка, и приложение больше не будет пытаться подгрузить обложку заново. Повторное нажатие включает показ обложки обратно.");
 
@@ -13130,14 +13154,131 @@
     bindBookReaderUnderlineClicks(pEl);
   }
 
+  // Диалог выбора: создать новую заметку для подчёркиваний книги или
+  // выбрать одну из уже существующих (ТЗ пользователя от 22.09) — первый
+  // шаг привязки заметки к книге, см. attachBookNote ниже. hasExisting —
+  // скрывает пункт "Выбрать существующую", если заметок пока нет вообще.
+  function openBookNoteChoiceDialog(hasExisting, onCreateNew, onPickExisting){
+    if(!settingsModalBox) return;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title">Куда сохранять подчёркивания и иллюстрации из этой книги?</div>' +
+      '<div class="mdeditor-cleanup-actions-list">' +
+        '<button type="button" class="mdeditor-cleanup-list-btn" id="bookNoteChoiceNew">Новая заметка</button>' +
+        (hasExisting ? '<button type="button" class="mdeditor-cleanup-list-btn" id="bookNoteChoiceExisting">Выбрать существующую</button>' : "") +
+        '<button type="button" class="mdeditor-cleanup-list-btn" id="bookNoteChoiceCancel">Отмена</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    settingsModalBox.appendChild(overlay);
+
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+    document.getElementById("bookNoteChoiceCancel").addEventListener("click", close);
+    document.getElementById("bookNoteChoiceNew").addEventListener("click", function(){ close(); onCreateNew(); });
+    var existingBtn = document.getElementById("bookNoteChoiceExisting");
+    if(existingBtn) existingBtn.addEventListener("click", function(){ close(); onPickExisting(); });
+  }
+
+  // Список уже существующих заметок для выбора (второй шаг, если в
+  // openBookNoteChoiceDialog выше выбрано "Выбрать существующую") — та же
+  // карточка-список, по одному пункту на каждую заметку (имя как в общем
+  // списке "Мой блокнот", по алфавиту); список может быть длинным —
+  // прокручивается (.notepick-list в components.css). onPick(noteId)
+  // вызывается после выбора; новые подчёркивания дописываются в конец
+  // выбранной заметки независимо от её текущего содержимого.
+  function openBookNotePickerList(notes, onPick){
+    if(!settingsModalBox) return;
+    var sorted = notes.slice().sort(function(a, b){ return String(a.name).localeCompare(String(b.name), "ru"); });
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    var itemsHtml = sorted.map(function(n, i){
+      return '<button type="button" class="mdeditor-cleanup-list-btn" data-note-index="' + i + '">' + escapeHtml(n.name) + '</button>';
+    }).join("");
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title">Выберите заметку</div>' +
+      '<div class="mdeditor-cleanup-actions-list notepick-list">' + itemsHtml + '</div>' +
+      '<div class="mdeditor-cleanup-actions" style="margin-top:10px;">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="bookNotePickCancel">Отмена</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    settingsModalBox.appendChild(overlay);
+
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+    document.getElementById("bookNotePickCancel").addEventListener("click", close);
+    card.querySelectorAll("[data-note-index]").forEach(function(btn){
+      btn.addEventListener("click", function(){
+        var n = sorted[Number(btn.dataset.noteIndex)];
+        close();
+        if(n) onPick(n.id);
+      });
+    });
+  }
+
+  // Общая точка входа "привязать заметку к книге в первый раз" (пока нет
+  // data.noteId) — используется и document-кнопкой в списке книг
+  // (openBookNoteFromList ниже), и первым подчёркиванием в ридере
+  // (addUnderlineFromSelection дальше в этом разделе), ТЗ пользователя от
+  // 22.09. Выбор — создать новую (имя по умолчанию — имя книги, то же окно
+  // ввода имени, что было раньше) или выбрать уже существующую заметку;
+  // onDone(noteId) вызывается уже ПОСЛЕ того, как noteId определён и
+  // сохранён в модели книги (setBookNoteId) — сам не открывает заметку и
+  // ничего в неё не пишет.
+  function attachBookNote(hash, defaultName, onDone){
+    var existingNotes = (MdEditor && MdEditor.getSearchableNotes) ? MdEditor.getSearchableNotes() : [];
+    openBookNoteChoiceDialog(existingNotes.length > 0, function(){
+      openBookUnderlineNameDialog(function(name){
+        if(!MdEditor || !MdEditor.createNoteSilently) return false;
+        var noteId = MdEditor.createNoteSilently(name);
+        if(!noteId) return false; // имя занято
+        setBookNoteId(hash, noteId);
+        onDone(noteId);
+        return true;
+      }, defaultName);
+    }, function(){
+      openBookNotePickerList(existingNotes, function(noteId){
+        setBookNoteId(hash, noteId);
+        onDone(noteId);
+      });
+    });
+  }
+
+  // document-кнопка в раскрывающихся долгим нажатием действиях строки/
+  // карточки книги (ТЗ пользователя от 22.09, bindBooksRowActions выше) —
+  // открывает заметку с подчёркиваниями этой книги; если она ещё не
+  // привязана, сначала предлагает создать новую или выбрать существующую
+  // (attachBookNote выше), затем сразу открывает результат.
+  function openBookNoteFromList(item){
+    var hash = item.hash;
+    if(!hash) return;
+    var data = getBookState(hash);
+    var noteId = data && data.noteId;
+    if(noteId){
+      switchSettingsTab("set2s_1");
+      if(MdEditor && MdEditor.openNoteByIdExternally) MdEditor.openNoteByIdExternally(noteId);
+      return;
+    }
+    attachBookNote(hash, stripBookExt(item.name), function(newNoteId){
+      switchSettingsTab("set2s_1");
+      if(MdEditor && MdEditor.openNoteByIdExternally) MdEditor.openNoteByIdExternally(newNoteId);
+    });
+  }
+
   // Диалог ввода имени заметки книги — тот же общий вид карточки, что у
   // openSubtitleSaveNoteDialog выше (.mdeditor-cleanup-overlay/-card/
   // -input/-actions), но БЕЗ переключения вкладки/экрана: заметка создаётся
   // тихо, пользователь остаётся в ридере (см. MdEditor.createNoteSilently).
   // onSubmit(name) должен вернуть false, если имя занято (тогда поле
   // подсвечивается и диалог не закрывается, как и в openSubtitleSaveNoteDialog),
-  // и true/undefined при успехе.
-  function openBookUnderlineNameDialog(onSubmit){
+  // и true/undefined при успехе. defaultName (ТЗ 22.09) — необязательное имя
+  // по умолчанию для вызовов ВНЕ ридера (список книг, attachBookNote выше);
+  // если не передано — как и раньше, берётся имя текущей книги в ридере.
+  function openBookUnderlineNameDialog(onSubmit, defaultName){
     if(!settingsModalBox) return;
     var overlay = document.createElement("div");
     overlay.className = "mdeditor-cleanup-overlay";
@@ -13157,9 +13298,11 @@
     overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
 
     var input = document.getElementById("bookNoteNameInput");
-    // Имя книги (без расширения) как разумное имя заметки по умолчанию —
-    // пользователь может стереть и вписать своё, поле сразу выделено.
-    if(bookReaderState && bookReaderState.name) input.value = stripBookExt(bookReaderState.name);
+    // Имя по умолчанию — явно переданное (список книг) или, как и раньше,
+    // имя книги (без расширения), открытой в ридере — пользователь может
+    // стереть и вписать своё, поле сразу выделено.
+    var initialName = defaultName || (bookReaderState && bookReaderState.name ? stripBookExt(bookReaderState.name) : "");
+    if(initialName) input.value = initialName;
     input.focus();
     input.select();
 
@@ -13290,14 +13433,8 @@
     if(data.noteId){
       finishWithNoteId(data.noteId);
     } else {
-      openBookUnderlineNameDialog(function(name){
-        if(!MdEditor || !MdEditor.createNoteSilently) return false;
-        var noteId = MdEditor.createNoteSilently(name);
-        if(!noteId) return false; // имя занято
-        setBookNoteId(hash, noteId);
-        finishWithNoteId(noteId);
-        return true;
-      });
+      var defaultName = bookReaderState && bookReaderState.name ? stripBookExt(bookReaderState.name) : "";
+      attachBookNote(hash, defaultName, finishWithNoteId);
     }
   }
 
@@ -13551,14 +13688,7 @@
     if(data2.noteId){
       finishWithNoteId(data2.noteId);
     } else {
-      openBookUnderlineNameDialog(function(name){
-        if(!MdEditor.createNoteSilently) return false;
-        var noteId = MdEditor.createNoteSilently(name);
-        if(!noteId) return false; // имя занято
-        setBookNoteId(hash, noteId);
-        finishWithNoteId(noteId);
-        return true;
-      });
+      attachBookNote(hash, stripBookExt(bookReaderState.name || "book"), finishWithNoteId);
     }
   }
 

@@ -3301,6 +3301,16 @@
     border-color:var(--wood-dark);
     color:var(--parchment);
   }
+  /* Список заметок для выбора (openBookNotePickerList в my.js, ТЗ
+     пользователя от 22.09) — в отличие от .mdeditor-cleanup-actions-list
+     выше (обычно 2-3 пункта, помещаются целиком), заметок может быть
+     много — сама карточка ограничена высотой экрана (max-height:100% у
+     .mdeditor-cleanup-card), поэтому прокручивается список, а не карточка
+     целиком (заголовок и "Отмена" остаются на месте). */
+  .mdeditor-cleanup-actions-list.notepick-list{
+    max-height:min(50vh, 360px);
+    overflow-y:auto;
+  }
   /* поле ввода имени новой заметки (см. openNewNoteDialog в mdeditor.js) —
      тот же диалог-карточка .mdeditor-cleanup-card, что и у "Удалить
      неиспользуемые файлы" выше. */
@@ -3367,13 +3377,14 @@
   .mdeditor-list-grid .mdeditor-delete-btn{ right:30px; }
   .mdeditor-list-grid .mdeditor-delete-btn:last-child{ right:2px; }
 
-  /* ---------- "Поделиться"/"Переименовать" в списке книг (ТЗ пользователя
-     от 21.09) — те же размеры/поведение, что и у .mdeditor-delete-btn выше
-     (скрыты, пока не раскрыты долгим нажатием), но нейтрального цвета
-     (--wood), а не красного — красный оставлен только за необратимым
-     удалением. Используются и в строке списка (.mdeditor-row), и в сетке
-     обложек (.book-cover-actions ниже). ---------- */
+  /* ---------- "Поделиться"/"Переименовать"/"Заметка книги" в списке книг
+     (ТЗ пользователя от 21.09 и 22.09) — те же размеры/поведение, что и у
+     .mdeditor-delete-btn выше (скрыты, пока не раскрыты долгим нажатием),
+     но нейтрального цвета (--wood), а не красного — красный оставлен
+     только за необратимым удалением. Используются и в строке списка
+     (.mdeditor-row), и в сетке обложек (.book-cover-actions ниже). ---------- */
   .mdeditor-cover-reset-btn,
+  .mdeditor-note-btn,
   .mdeditor-share-btn,
   .mdeditor-edit-btn{
     visibility:hidden;
@@ -3391,13 +3402,16 @@
     -webkit-tap-highlight-color:transparent;
   }
   .mdeditor-cover-reset-btn svg,
+  .mdeditor-note-btn svg,
   .mdeditor-share-btn svg,
   .mdeditor-edit-btn svg{ width:16px; height:16px; }
   .mdeditor-cover-reset-btn.visible,
+  .mdeditor-note-btn.visible,
   .mdeditor-share-btn.visible,
   .mdeditor-edit-btn.visible{ visibility:visible; }
   @media (hover:hover) and (pointer:fine){
     .mdeditor-cover-reset-btn:hover,
+    .mdeditor-note-btn:hover,
     .mdeditor-share-btn:hover,
     .mdeditor-edit-btn:hover{ background:var(--parchment-dark); }
   }
@@ -3427,13 +3441,17 @@
     user-select:none;
     -webkit-touch-callout:none;
   }
+  // Фон карточки-обложки: фиксированный тёплый серый (не var(--parchment-dark)
+  // из темы, ТЗ пользователя от 22.09) — на тёмных темах старый фон сливался
+  // с фоном экрана, а заглушка должна читаться как обложка книги независимо
+  // от темы. Рамка — тоже фиксированный серый потемнее, той же причины.
   .book-cover-thumb{
     width:100%;
     aspect-ratio:2/3;
     border-radius:6px;
     overflow:hidden;
-    background:var(--parchment-dark);
-    border:1px solid var(--groove-shadow);
+    background:#dcd6cc;
+    border:1px solid #a89f8f;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -3454,8 +3472,12 @@
   /* Заглушка обложки (ТЗ пользователя от 22.09) — не маленькая иконка в
      центре, а макет самой обложки (BOOK_COVER_PLACEHOLDER_SVG в my.js:
      широкая полоса-заглавие сверху + под ней полоса той же ширины,
-     потоньше, "мелкий текст"), растянутый на всю карточку. */
-  .book-cover-placeholder{ color:var(--wood); opacity:.5; }
+     потоньше, "мелкий текст"), растянутый на всю карточку. Фиксированный
+     серый (не var(--wood) из темы, тем же приёмом и по той же причине, что
+     и фон .book-cover-thumb выше) — раньше на некоторых темах заглушка
+     сливалась с фоном; opacity:1 (было .5) — серый сам по себе достаточно
+     нейтрален, приглушать его дополнительной прозрачностью не нужно. */
+  .book-cover-placeholder{ color:#8f887a; opacity:1; }
   .book-cover-placeholder svg{ width:100%; height:100%; }
   .book-cover-name{
     margin-top:4px;
@@ -3475,19 +3497,28 @@
      каждой (раскрывает долгое нажатие, см. bindBooksRowActions в my.js),
      порядок слева направо через обычный flex, а не через right/right/right
      как в .mdeditor-list-grid выше — эти карточки шире, места достаточно. */
+  /* Теперь четыре кнопки действий поверх обложки (плюс "Заметка книги",
+     22.09) — в углу узкой карточки (110px базовая ширина) им уже тесно в
+     один ряд при исходном размере 26x26/2px, поэтому здесь (только в сетке
+     обложек, список книг это не трогает) кнопки чуть меньше и плотнее. */
   .book-cover-actions{
     position:absolute;
     top:2px;
     right:2px;
     display:flex;
-    gap:2px;
+    gap:1px;
   }
+  .book-cover-actions button{
+    width:22px;height:22px;
+  }
+  .book-cover-actions button svg{ width:14px; height:14px; }
   /* Обложки могут быть любого цвета — обычный var(--wood) на прозрачном
      фоне рисковал потеряться на светлой картинке, поэтому здесь у каждой
      кнопки своя тёмная полупрозрачная подложка и белая иконка (никакой
      новой CSS-переменной не заводим, plain rgba() — универсально
      поддерживается, в отличие от color-mix()). */
   .book-cover-actions .mdeditor-cover-reset-btn,
+  .book-cover-actions .mdeditor-note-btn,
   .book-cover-actions .mdeditor-share-btn,
   .book-cover-actions .mdeditor-edit-btn,
   .book-cover-actions .mdeditor-delete-btn{
@@ -3497,6 +3528,7 @@
   .book-cover-actions .mdeditor-delete-btn{ color:#ff8a80; }
   @media (hover:hover) and (pointer:fine){
     .book-cover-actions .mdeditor-cover-reset-btn:hover,
+    .book-cover-actions .mdeditor-note-btn:hover,
     .book-cover-actions .mdeditor-share-btn:hover,
     .book-cover-actions .mdeditor-edit-btn:hover,
     .book-cover-actions .mdeditor-delete-btn:hover{ background:rgba(0,0,0,.55); }
