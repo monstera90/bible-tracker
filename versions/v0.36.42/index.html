@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="ru">
+<!-- index.html
+     Версия: 2.6 (21.09) — пятая нижняя вкладка второго набора (settingsTabSet2GearBtn5) больше не
+     заглушка «5» — вкладка «ИПКД» (title, число месяца подставляет my.js, updateIpkdTabIcon).
+     Версия: 2.5 (21.09) — версия приложения переехала из подвала в левый верхний угол
+     шапки (#appVersionText, стили .app-version в footer.css, без «заглушки» в разметке —
+     текст подставляет my.js); убрана плашка «Доступна новая версия» (#updateWrap) —
+     ручного обновления больше нет, sw.js обновляется сам.
+     Версия: 2.4 (20.09) — подключены syncengine_personalcrypto.js и
+     syncengine_personalbinding.js (TASK_UNIFIED_SYNC.md, шаг 6: теневая запись
+     личных задач в sync-engine).
+     Версия: 2.3 (19.09) — подключён notifications.js (уведомления/напоминания
+     задач, ТЗ пользователя от 19.09).
+     Версия: 2.2 (19.09) -->
+<head>
+<meta charset="UTF-8">
+<script>
+/* Раскладка для левши (ТЗ 20.09): класс ставится ДО первой отрисовки, иначе
+   язычок и окно настроек на миг мелькнули бы в обычной раскладке. Тот же
+   ключ и то же значение, что в my.js (LEFT_HAND_KEY, applyLeftHanded). */
+try{ if(localStorage.getItem("leftHandedLayout") === "1") document.documentElement.classList.add("lefty"); }catch(e){}
+</script>
+<script>
+window.addEventListener("error", function(e){
+  // "ResizeObserver loop..." (обе формулировки: "limit exceeded" и
+  // "completed with undelivered notifications") — не настоящая ошибка, а
+  // безобидное предупреждение браузера о том, что колбэк ResizeObserver не
+  // успел отработать за один кадр; приложение при этом продолжает работать
+  // штатно. На части мобильных/планшетных браузеров это предупреждение
+  // почему-то долетает как полноценное событие "error" (на столе так не
+  // бывает) — отсюда красная плашка на планшете без видимой причины и без
+  // связи с последними правками. Глушим только это сообщение, остальные
+  // ошибки по-прежнему выводятся на экран как раньше.
+  if(e.message && e.message.indexOf("ResizeObserver loop") === 0) return;
+  var box = document.createElement("div");
+  box.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#c0392b;color:#fff;padding:12px;font:12px monospace;white-space:pre-wrap;max-height:60vh;overflow:auto;";
+  box.textContent = "JS ERROR: " + e.message + "\n" + (e.filename||"") + ":" + e.lineno + ":" + e.colno + "\n" + (e.error && e.error.stack ? e.error.stack : "");
+  document.body ? document.body.appendChild(box) : window.addEventListener("DOMContentLoaded", function(){ document.body.appendChild(box); });
+});
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>График чтения Библии</title>
+<link rel="icon" type="image/png" href="icon-192x192.png">
+<link rel="apple-touch-icon" href="icon-192x192.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#8f7fb8">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Библия">
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="footer.css">
+<link rel="stylesheet" href="modals.css">
+</head>
+<body>
+
+<header>
+  <div class="app-version" id="appVersionText"></div>
+  <div class="sync-status" id="syncStatusPill" data-state="off">
+    <span class="sync-dot"></span>
+    <span id="syncStatusText">Настроить<br>синхронизацию</span>
+  </div>
+
+  <h1>ГРАФИК ЧТЕНИЯ БИБЛИИ</h1>
+  <p class="quote" id="dailyQuote" style="display:none;"></p>
+  <div class="overall-progress-wrap">
+    <div class="xp-bar">
+      <div class="xp-fill" id="overallFill"></div>
+      <div class="xp-text" id="overallText">0 из 1189 глав (0%)</div>
+    </div>
+  </div>
+
+  <div class="hour-bar-wrap" id="hourMonthWrap">
+    <div class="hour-bar" id="hourMonthBar">
+      <div class="hour-bar-light-fill" id="hourMonthLightFill"></div>
+      <div class="hour-bar-dark-fill" id="hourMonthDarkFill"></div>
+      <div class="hour-bar-zone-text" id="hourMonthAchievedText"></div>
+      <div class="hour-bar-zone-text" id="hourMonthRemainingText"></div>
+    </div>
+    <div class="hour-input-overlay" id="hourMonthOverlay">
+      <div class="hour-input-row">
+        <input type="text" class="hour-input-mask" id="hourMonthInput" inputmode="numeric" placeholder="__.__" maxlength="6">
+        <button class="hour-input-confirm" id="hourMonthConfirm" title="Подтвердить">&#10003;</button>
+        <button class="hour-input-cancel" id="hourMonthCancel" title="Отмена">&times;</button>
+        <button class="hour-input-info" id="hourMonthInfo" title="Статистика за месяц">i</button>
+      </div>
+      <textarea class="hour-input-note" id="hourMonthNoteInput" placeholder="Комментарий за сегодня…" rows="2" style="display:none;"></textarea>
+    </div>
+    <button class="hour-reset-btn" id="hourMonthResetBtn" style="display:none;">Сбросить счётчик</button>
+  </div>
+
+  <div class="hour-bar-wrap" id="hourYearWrap">
+    <div class="hour-bar hour-year-bar" id="hourYearBar">
+      <div class="hour-year-collapsed" id="hourYearCollapsed">
+        <div class="hour-bar-light-fill" id="hourYearLightFill"></div>
+        <div class="hour-bar-dark-fill" id="hourYearDarkFill"></div>
+        <div class="hour-bar-zone-text" id="hourYearAchievedText"></div>
+        <div class="hour-bar-zone-text" id="hourYearRemainingText"></div>
+      </div>
+      <div class="hour-year-segments" id="hourYearSegments"></div>
+    </div>
+  </div>
+
+  <div class="goals-list-inline" id="goalsListInline"></div>
+
+  <div class="missed-wrap" id="missedWrap">
+    <div class="xp-bar">
+      <div class="warn-fill"></div>
+      <div class="warn-text" id="missedText"></div>
+    </div>
+  </div>
+
+  <div class="goals-band" id="goalsBand">
+    <div class="goals-list" id="goalsList"></div>
+  </div>
+  <div class="goals-toggle-wrap" id="goalsToggleWrap">
+    <button class="goals-toggle-btn" id="goalsToggleBtn" title="Свернуть/развернуть личные цели">&#9660;</button>
+  </div>
+</header>
+
+<main id="booksContainer"></main>
+
+<footer>
+  <div class="theme-picker">
+    <div class="theme-dots" id="themeDots"></div>
+  </div>
+
+  <div class="footer-line">
+    <div class="fab-toggle" id="fabToggleBtn">Включить плавающую кнопку</div>
+  </div>
+</footer>
+
+<!-- ===== плавающая кнопка настроек — угловой язычок ===== -->
+<!-- Раньше была отдельной круглой кнопкой с иконкой шестерёнки. Теперь —
+     чистый (без пиктограммы) язычок, визуально как бы образованный стыком
+     двух рядов язычков модалки настроек: бокового вертикального
+     (#settingsTabs, приклеен к правому краю) и нижнего горизонтального
+     (.settings-tabs-gear, приклеен к нижнему краю) — поэтому сам стоит
+     вплотную к правому И нижнему краю экрана (см. .settings-fab в
+     modals.css), а закруглён только один, "свободный" угол — верхний
+     левый, — как и у обычных язычков закруглён только не прилегающий к
+     окну край. Полупрозрачный, пока не наведён/не нажат. -->
+<button class="settings-fab" id="settingsGearBtn" title="Настройки"></button>
+
+<!-- ===== модальное окно настроек (шестерёнка) ===== -->
+<div class="settings-modal-overlay" id="settingsModalOverlay">
+  <div class="settings-modal-frame">
+    <div class="settings-modal-box" id="settingsModalBox">
+      <div class="settings-tab-content" id="settingsTabContent"></div>
+      <!-- Кнопка-меню "настройки вкладки" — самая левая в общем ряду
+           (TASK_SHARED_TASKS.md, Шаг 4, 15.09). Видна ТОЛЬКО на вкладке
+           "Общие задачи" (jointtasks), не на любой вкладке задач — тем же
+           приёмом, что и "глаз"/сортировка ниже (task-hide-linked-wrap/
+           task-red-sort-wrap): своя видимость по конкретной вкладке, не
+           общим условием showTaskFab (см. syncTaskFabRowForTab в my.js).
+           right:328 — тот же слот, что у "глаза" и сортировки (ТЗ
+           пользователя от 18.09: втроём делят одно место, все три вкладки
+           взаимно исключают друг друга). Попап (#taskJointMenuPopup) —
+           свой класс (.task-joint-menu-popup), НЕ переиспользует .mdeditor-
+           fontsize-popup: тот рассчитан на столбик квадратных 32×32 кнопок
+           ("+"/"-"), а здесь список текстовых пунктов переменной длины
+           ("Синхронизация"/"Отвязать пользователя"/…), состав которых
+           зависит от состояния группы и собирается в JS
+           (renderTaskJointMenu, см. раздел "ГРУППОВАЯ ПРИВЯЗКА «ОБЩИХ
+           ЗАДАЧ»" в my.js) — здесь попап изначально пустой. -->
+      <span class="task-joint-menu-wrap" id="taskJointMenuWrap">
+        <div class="task-joint-menu-popup" id="taskJointMenuPopup"></div>
+        <button type="button" class="mdeditor-fab-btn" id="taskJointMenuBtn" title="Настройки вкладки"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1.4"></circle><circle cx="12" cy="12" r="1.4"></circle><circle cx="12" cy="19" r="1.4"></circle></svg></button>
+      </span>
+      <!-- "глаз" — скрыть/показать на вкладке "Next" задачи, уже
+           привязанные к проекту (c.nextForProjectId), см.
+           getNextHideLinkedTasks/taskHideLinkedBtn в initTaskGlobalToolbar
+           (my.js), ТЗ пользователя от 15.09. Класс span'а — отдельный
+           "task-hide-linked-wrap" (modals.css): раньше здесь
+           переиспользовался "task-highlight-wrap" ради общих правил
+           показа/.visible, но вместе с ними заодно наследовался и его
+           right:168px — та же позиция, что у текстовыделителя
+           (.task-highlight-wrap ниже), из-за чего кнопка оказывалась
+           ровно под ним и была не видна и некликабельна. Теперь свой
+           класс со своим right — 328 (ТЗ пользователя от 18.09: переехала
+           сюда с прежнего 248, тот слот теперь занят кнопкой режима
+           чтения, .task-reading-wrap ниже; на 328 делит слот с
+           .task-red-sort-wrap/.task-joint-menu-wrap — все три взаимно
+           исключают друг друга по вкладке). В отличие от остальных кнопок
+           этого ряда видимость переключается не общим условием
+           showTaskFab, а отдельно — только когда открыта именно вкладка
+           "next" (см. syncTaskFabRowForTab в my.js). Без попапа; фон НЕ
+           закрашивается (в отличие от .pressed у остальных кнопок этого
+           ряда, ТЗ пользователя от 15.09 #2) — вместо этого сама
+           иконка/title переключаются между "открытый глаз" (задачи
+           показаны) и "перечёркнутый глаз" (задачи скрыты) прямо в JS
+           (updateHideLinkedBtnState/EYE_ICON_SVG/EYE_OFF_ICON_SVG в
+           my.js), поэтому здесь кнопка изначально пустая. -->
+      <!-- "i" — подсказка "Кнопки задач" (.task-info-wrap/taskInfoBtn,
+           renderTaskInfoScreen в my.js, ТЗ пользователя от 15.09).
+           Единственная в этом ряду видна на ВСЕХ вкладках задач сразу
+           (то же условие showTaskFab, что и у .task-add-fab, а не узкое
+           условие "только Next"/"только Red"/"только Общие задачи" — см.
+           syncTaskFabRowForTab в my.js), поэтому её место — фиксированный
+           right:288, не делит слот ни с чем. Иконка — тот же INFO_ICON_SVG,
+           что и у остальных info-кнопок проекта (см. my.js), своя копия
+           svg прямо тут по тому же принципу, что у "Ж"/"Аа"/
+           текстовыделителя выше. -->
+      <span class="task-info-wrap" id="taskInfoWrap">
+        <button type="button" class="mdeditor-fab-btn" id="taskInfoBtn" title="Что означают кнопки задач"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"></circle><path d="M12 11v6"></path><circle cx="12" cy="7.7" r="1" fill="currentColor" stroke="none"></circle></svg></button>
+      </span>
+      <!-- кнопка режима чтения (.task-reading-wrap/taskReadingBtn, ТЗ
+           пользователя от 18.09) — переключает глобальный режим чтения
+           (см. READING_MODE_KEY/applyReadingModeVisual в my.js): прячет
+           боковой/нижний ряды вкладок окна настроек, область содержимого
+           растягивается на освободившееся место — работает на ЛЮБОМ
+           экране приложения (заметки/книги/любая вкладка задач), не
+           только там, где есть эта кнопка. Стоит на right:248 — слот
+           между "i" (288) и "Ж" (208), тот же, что раньше делили "глаз"/
+           сортировка (переехали на 328, см. их комментарии выше). Видна
+           на любой вкладке задач (то же условие showTaskFab, что и у "i"
+           выше), КРОМЕ экрана "Все задачи проекта" — там этот слот занят
+           кнопкой-звеном этого экрана (.task-project-fab-link ниже по
+           файлу); явное скрытие — в openTaskNextPicker/my.js. Фон НЕ
+           закрашивается через общий .pressed — вместо этого переключается
+           сама иконка (открытая книга/перечёркнутая книга, тем же
+           приёмом, что и у "глаза" выше — innerHTML целиком, см.
+           applyReadingModeVisual/READING_BOOK_ICON_SVG/
+           READING_BOOK_OFF_ICON_SVG в my.js), поэтому здесь кнопка
+           изначально пустая. -->
+      <span class="task-reading-wrap" id="taskReadingWrap">
+        <button type="button" class="mdeditor-fab-btn" id="taskReadingBtn" title="Включить режим чтения"></button>
+      </span>
+      <!-- кнопка сортировки Red по отметке (.task-red-sort-wrap/
+           taskRedSortBtn, RED_SORT_BY_FLAG_KEY/getRedSortByFlag/
+           setRedSortByFlag в my.js, ТЗ пользователя от 15.09). Делит слот
+           right:328 с "глазом" выше и с кнопкой-меню "Общие задачи" ниже
+           (ТЗ пользователя от 18.09 — переехала сюда с прежнего 248
+           вместе с "глазом", тот слот занят кнопкой режима чтения выше) —
+           видна только на вкладке "Red" (там "глаз" не показывается, и
+           наоборот на "Next", и наоборот на "Общие задачи"), поэтому одно
+           и то же место в ряду не конфликтует, см. syncTaskFabRowForTab в
+           my.js. Фон НЕ закрашивается через общий .pressed — вместо этого
+           title переключается в JS (updateRedSortBtnState), сама иконка не
+           меняется. Иконка — два жетона: снизу жёлтый, сверху красный
+           (перекрывает жёлтый меньше чем наполовину, "жёлтый выглядывает
+           больше чем на половину", дословно из ТЗ) — фиксированные цвета,
+           совпадают с .task-flag-dot.flag-red/flag-yellow (modals.css), а
+           не currentColor/тема. -->
+      <span class="task-red-sort-wrap" id="taskRedSortWrap">
+        <button type="button" class="mdeditor-fab-btn" id="taskRedSortBtn" title="Сортировать по отметке (сначала красные)"><svg viewBox="0 0 24 24"><circle cx="9" cy="14" r="6.5" fill="#f2b705" stroke="#b8860b" stroke-width="1"></circle><circle cx="15.5" cy="10.5" r="6.5" fill="#e0392b" stroke="#a52a1e" stroke-width="1"></circle></svg></button>
+      </span>
+      <span class="task-hide-linked-wrap" id="taskHideLinkedWrap">
+        <button type="button" class="mdeditor-fab-btn" id="taskHideLinkedBtn" title="Скрыть задачи, привязанные к проектам"></button>
+      </span>
+      <!-- "Ж" (форматирование выделения) и "Аа" (размер шрифта, общий с
+           "Моим блокнотом") — слева от общей "+", в одном ряду с ней;
+           видимость включается тем же условием, что и у .task-add-fab
+           (см. switchSettingsTab в my.js), логика кнопок — в
+           initTaskGlobalToolbar (my.js), см. ТЗ пользователя от 31.08. -->
+      <span class="task-format-wrap" id="taskFormatWrap">
+        <div class="mdeditor-fontsize-popup" id="taskFormatPopup">
+          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="taskFmtBoldBtn" title="Жирный">Ж</button>
+          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-italic" id="taskFmtItalicBtn" title="Курсив">К</button>
+          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-underline" id="taskFmtUnderlineBtn" title="Подчёркнутый">П</button>
+          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-strike" id="taskFmtStrikeBtn" title="Зачёркнутый">Ч</button>
+        </div>
+        <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="taskFormatBtn" title="Форматирование выделенного текста">Ж</button>
+      </span>
+      <span class="task-fontsize-wrap" id="taskFontSizeWrap">
+        <div class="mdeditor-fontsize-popup" id="taskFontSizePopup">
+          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="taskFontPlusBtn" title="Крупнее">+</button>
+          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="taskFontMinusBtn" title="Мельче">&minus;</button>
+        </div>
+        <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="taskFontSizeBtn" title="Размер шрифта">Аа</button>
+      </span>
+      <!-- текстовыделитель — та же иконка и та же функция, что и в "Моём
+           блокноте" (см. HIGHLIGHT_ICON_SVG/mdEditorHighlightBtn в
+           mdeditor.js — своя копия svg тут же, заводить деп ради одной
+           иконки не стоит, тот же принцип, что и там): оборачивает
+           выделение в "==...==" (wrapEditableSelection, см.
+           initTaskGlobalToolbar в my.js), без попапа. Правее "Аа", левее
+           скрепки (.task-attach-wrap ниже). -->
+      <span class="task-highlight-wrap" id="taskHighlightWrap">
+        <button type="button" class="mdeditor-fab-btn" id="taskHighlightBtn" title="Выделить текст"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h6"></path><path d="M6.5 17.5L16 8l3 3-9.5 9.5H6.5v-3z"></path><path d="M14 6l4 4"></path></svg></button>
+      </span>
+      <!-- скрепка — вставка картинки в задачу/комментарий, тот же принцип
+           "![[имя]]"/OPFS images/, что и в "Моём блокноте"
+           (MdEditor.saveImageBytes/getImageBlobUrl), тот же порядок кнопок,
+           что и там (см. .mdeditor-fab-row в mdeditor.js: Ж → Аа →
+           текстовыделитель → скрепка): правее текстовыделителя, левее
+           общей "+". Своей попап-панели у неё нет — сразу открывает
+           системный диалог выбора файла (см. initTaskGlobalToolbar в
+           my.js). Видимость — тем же условием, что и у остальных кнопок
+           ряда (см. switchSettingsTab в my.js). -->
+      <span class="task-attach-wrap" id="taskAttachWrap">
+        <button type="button" class="mdeditor-fab-btn" id="taskAttachBtn" title="Вставить картинку"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></button>
+        <input type="file" accept="image/*" id="taskAttachInput" style="display:none;">
+      </span>
+      <button type="button" class="task-add-fab" id="taskAddFab" title="Добавить задачу">+</button>
+    </div>
+    <!-- Стек вкладок настроек. Благодаря flex-direction:column-reverse в CSS
+         (.settings-tabs) первый элемент в DOM оказывается самым НИЖНИМ, а
+         последний — самым ВЕРХНИМ. Порядок снизу вверх: worktasks, red,
+         inbox, next, projects, waiting, read, council, jointtasks, someday,
+         archive — видны только
+         если в настройках включена галочка "Показать все мои задачи"
+         (см. refreshSettingsTabsVisibility в my.js). Вкладка настроек
+         (шестерёнка) в этом стеке не участвует — она вынесена отдельным
+         "лежачим" язычком под левый нижний угол окна, туда же, рядом с
+         ней, теперь переехала и вкладка "Карта дней года" (см.
+         .settings-tabs-gear ниже). Вкладка "Версии" и вкладка "Настроение"
+         перенесены внутрь вкладки настроек как кнопки (см.
+         renderSettingsTabGear в my.js). -->
+    <div class="settings-tabs" id="settingsTabs">
+      <!-- Вкладка-заглушка "Задачи в работе" / "worktasks" (ТЗ пользователя
+           от 13.09) — устроена и работает точно как council/next (обычный
+           список задач через общий renderTaskTabList, см. TASK_TAB_IDS в
+           my.js), просто ещё без своего особого экрана. Пиктограмма —
+           портфель, та же svg, что и TASK_MOVE_ICONS.worktasks в my.js
+           (сетка "Перенести задачу"). Первая в списке — по порядку вкладок
+           из ТЗ. -->
+      <button class="settings-tab task-tab" id="settingsTabWorkTasksBtn" data-task="worktasks" title="worktasks" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path>
+          <rect x="3" y="7" width="18" height="12" rx="2"></rect>
+          <path d="M3 12h18"></path>
+        </svg>
+      </button>
+      <!-- Пиктограмма — сплошной красный кружок (не значок-флажок, как
+           раньше): цвет взят из цветной отметки приоритета задач,
+           см. .task-flag-dot.flag-red в modals.css (#e0392b/#a52a1e) —
+           тот же, достаточно яркий, а не тёмный оттенок красного. Красится
+           жёстко fill/stroke, а не через currentColor, поэтому не
+           перекрашивается вместе с фоном вкладки при .active. -->
+      <button class="settings-tab task-tab" id="settingsTabRedBtn" data-task="red" title="red" style="display:none;">
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="7" fill="#e0392b" stroke="#a52a1e" stroke-width="0.75"></circle>
+        </svg>
+      </button>
+      <button class="settings-tab task-tab" id="settingsTabInboxBtn" data-task="inbox" title="inbox" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 12h4l2 3h4l2-3h4"></path>
+          <path d="M4 12l1.5-7h13L20 12"></path>
+          <path d="M4 12v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6"></path>
+        </svg>
+      </button>
+      <!-- Пиктограмма — след стопы (ТЗ пользователя от 15.09, по
+           присланному образцу): только контур (stroke, без fill), как и
+           у остальных вкладок этого набора — пальцы четырьмя кружками
+           убывающего размера, свод/пятка одним наклонным эллипсом. -->
+      <button class="settings-tab task-tab" id="settingsTabNextBtn" data-task="next" title="next" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <ellipse cx="10.8" cy="15.5" rx="4.6" ry="6.2" transform="rotate(-12 10.8 15.5)"></ellipse>
+          <circle cx="7.7" cy="5.4" r="2.1"></circle>
+          <circle cx="11.4" cy="4.3" r="1.5"></circle>
+          <circle cx="14.3" cy="4.7" r="1.15"></circle>
+          <circle cx="16.5" cy="5.9" r="0.9"></circle>
+        </svg>
+      </button>
+      <button class="settings-tab task-tab" id="settingsTabProjectsBtn" data-task="projects" title="projects" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 6a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6z"></path>
+        </svg>
+      </button>
+      <button class="settings-tab task-tab" id="settingsTabWaitingBtn" data-task="waiting" title="waiting" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 3h12"></path>
+          <path d="M6 21h12"></path>
+          <path d="M7 3c0 4 3 5 5 6-2 1-5 2-5 6"></path>
+          <path d="M17 3c0 4-3 5-5 6 2 1 5 2 5 6"></path>
+        </svg>
+      </button>
+      <!-- Раскрытая книга: раньше корешок и створки были заметно вытянуты
+           по высоте (13.6 в высоту при развороте всего 12 в ширину, да
+           ещё и слабый изгиб делал страницы визуально узкими "лепестками",
+           а не разворотом книги). Здесь тот же принцип построения (одна
+           кривая на каждую половину + прямой корешок), но пропорции
+           перебалансированы: разворот шире (14 вместо 12), а высота
+           меньше (11.3 вместо 15.4) — книга выглядит раскрытой, а не
+           вытянутой в столбик. Толщина линии и итоговый размер
+           пиктограммы не завязаны на конкретные цифры пути — берутся
+           из общих правил #settingsTabs .task-tab svg (modals.css),
+           как и у остальных вкладок бокового стека. -->
+      <button class="settings-tab task-tab" id="settingsTabReadBtn" data-task="read" title="read" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 7c-1.8-1-4.5-1.3-7-1.3v10c2.5 0 4.7.3 7 1.3"></path>
+          <path d="M12 7c1.8-1 4.5-1.3 7-1.3v10c-2.5 0-4.7.3-7 1.3"></path>
+          <path d="M12 7v10"></path>
+        </svg>
+      </button>
+      <!-- Вкладка-список задач "council" — устроена и оформлена точно как
+           next (кнопка "+", добавление/редактирование задач, разделители,
+           отступы — вся отрисовка идёт через тот же общий
+           renderTaskTabList, см. TASK_TAB_IDS в my.js). 13.09 — переставлена
+           СЮДА, после read (была между waiting и read), и получила
+           видимое название "Council" — но только в сетке "Перенести
+           задачу" (TASK_TAB_TITLES.council в my.js), title у самой кнопки
+           намеренно пустой, как и раньше. -->
+      <button class="settings-tab task-tab" id="settingsTabCouncilBtn" data-task="council" title="" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="7.5" r="3"></circle>
+          <path d="M5 21c0-4 3-7 7-7s7 3 7 7"></path>
+        </svg>
+      </button>
+      <!-- Вкладка-заглушка "Совместные задачи" / "jointtasks" (ТЗ
+           пользователя от 13.09) — тем же принципом, что и worktasks выше:
+           обычный список задач через renderTaskTabList, пиктограмма — те
+           же два человечка, что и TASK_MOVE_ICONS.jointtasks в my.js.
+           С 15.09 переставлена сюда, перед someday (была после неё) —
+           ТЗ пользователя от 15.09. -->
+      <button class="settings-tab task-tab" id="settingsTabJointTasksBtn" data-task="jointtasks" title="jointtasks" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="8" r="2.3"></circle>
+          <path d="M3.5 19c0-3 2-5.3 4.5-5.3s4.5 2.3 4.5 5.3"></path>
+          <circle cx="16" cy="8" r="2.3"></circle>
+          <path d="M11.5 19c0-3 2-5.3 4.5-5.3s4.5 2.3 4.5 5.3"></path>
+        </svg>
+      </button>
+      <!-- Пиктограмма — календарь со знаком вопроса (ТЗ пользователя от
+           15.09, по присланному образцу): только контур (currentColor,
+           цвет берётся из темы, как и у всех соседних иконок), 3 кольца
+           крепления сверху, линия-разделитель шапки календаря, "?" с
+           отдельной закрашенной точкой внизу. С 15.09 (ТЗ пользователя) —
+           небольшой зазор сверху между линией-разделителем и "?" (линия
+           сдвинута выше, y=7.7 вместо 9, а не сам знак — чтобы не менять
+           его размер/положение) и зазор снизу между "?" и точкой (у
+           знака чуть укорочен самый кончик хвостика, петля не тронута).
+           До 15.09 здесь была повёрнутая стрелка (общий контур со старой
+           иконкой Next, см. #settingsTabNextBtn выше). Последняя перед
+           archive — archive должна оставаться самым последним элементом
+           в DOM (см. #settingsTabs .settings-tab:last-child в modals.css
+           — линия-срез верхнего края стека). -->
+      <button class="settings-tab task-tab" id="settingsTabSomedayBtn" data-task="someday" title="someday" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="8" y1="3" x2="8" y2="6.5"></line>
+          <line x1="12" y1="3" x2="12" y2="6.5"></line>
+          <line x1="16" y1="3" x2="16" y2="6.5"></line>
+          <rect x="4" y="5" width="16" height="15" rx="1.5"></rect>
+          <line x1="4" y1="7.7" x2="20" y2="7.7"></line>
+          <path d="M9.6 12.5c0-1.5 1.1-2.6 2.5-2.6s2.4 1 2.4 2.3c0 1.1-.6 1.7-1.5 2.3-.5.5-.8.85-1 .95"></path>
+          <circle cx="12" cy="17.6" r="0.95" fill="currentColor" stroke="none"></circle>
+        </svg>
+      </button>
+      <button class="settings-tab task-tab" id="settingsTabArchiveBtn" data-task="archive" title="archive" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="4" width="16" height="4" rx="1"></rect>
+          <path d="M5 8v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"></path>
+          <path d="M10 13h4"></path>
+        </svg>
+      </button>
+    </div>
+    <!-- Горизонтальный ряд "лежачих" вкладок под окном настроек, развёрнутых
+         на 90° относительно обычных: у них ширина и высота поменяны местами
+         (было 62×84 у вертикальной, стало 84×62 у лежачей), а закруглены не
+         правый, а нижние углы, т.к. они "смотрят вниз" и приклеены
+         снизу-слева к окну (см. .settings-tabs-gear в modals.css). Первая —
+         вкладка настроек (шестерёнка), она же первая с левого края, по
+         умолчанию активна и открывается при открытии окна настроек.
+         Пиктограмма на ней — та же форма шестерёнки, что и была раньше
+         (то же число зубьев — 7, та же их форма и размер: контур ниже —
+         это тот же путь, что и в прежней закрашенной версии, просто
+         пересчитан в масштаб 24×24 вместо 64×64), но теперь нарисована
+         КОНТУРОМ (stroke), как и все остальные пиктограммы вкладок —
+         fill="none", stroke="currentColor", та же толщина линии
+         (stroke-width, stroke-linecap, stroke-linejoin), что и у них, а
+         не сплошным силуэтом с вырезанной "дыркой" через fill-rule, как
+         было раньше. Маленький кружок в центре — тоже контуром, обычным
+         <circle>, а не вырезом. Красится через currentColor так же, как
+         и другие пиктограммы: обычный цвет — var(--wood), при .active
+         (см. .settings-tab.active в modals.css) — var(--parchment),
+         никакого отдельного правила для этого не нужно. Сразу за ней —
+         вкладка "Карта дней
+         года" (settingsTabYearBtn, переехала сюда из вертикального стека
+         #settingsTabs, чтобы быть рядом с шестерёнкой), сразу за ней —
+         вкладка диаграммы настроения (settingsTabMoodBtn, заняла место
+         бывшей вкладки-заглушки settingsTabExtra1Btn; раньше диаграмма
+         открывалась кнопкой "Показать диаграмму настроения" на вкладке
+         настроек — эта кнопка убрана, диаграмма доступна только отсюда,
+         см. renderSettingsTabMood в my.js), затем 2 вкладки-заглушки
+         (settingsTabExtra2..3) — контент под них ещё не определён (см.
+         renderSettingsTabExtra в my.js). Ширина каждой вкладки в этом
+         ряду зафиксирована в CSS — 68px (см. .settings-tab-gear в
+         modals.css), не зависит от ширины окна настроек и больше не
+         считается JS-ом. -->
+    <div class="settings-tabs-gear" id="settingsTabsGear">
+      <button class="settings-tab settings-tab-gear active" id="settingsTabGearBtn" title="Настройки">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12,21.56 C11.76,21.85 11.49,22.22 11.22,22.39 C10.95,22.57 10.67,22.58 10.4,22.59 C10.13,22.61 9.86,22.57 9.6,22.51 C9.34,22.45 9.08,22.37 8.84,22.24 C8.61,22.1 8.36,21.98 8.19,21.71 C8.02,21.43 7.94,20.98 7.85,20.61 C7.76,20.25 7.75,19.81 7.65,19.53 C7.55,19.26 7.4,19.12 7.26,18.95 C7.12,18.78 6.96,18.66 6.79,18.52 C6.63,18.39 6.47,18.27 6.28,18.16 C6.08,18.06 5.91,17.95 5.62,17.92 C5.33,17.88 4.9,17.97 4.52,17.96 C4.15,17.96 3.69,17.97 3.39,17.87 C3.09,17.77 2.91,17.55 2.72,17.36 C2.54,17.16 2.4,16.92 2.29,16.68 C2.17,16.44 2.07,16.18 2.03,15.91 C1.99,15.64 1.93,15.37 2.04,15.07 C2.15,14.77 2.45,14.42 2.68,14.13 C2.9,13.83 3.24,13.54 3.4,13.3 C3.55,13.05 3.57,12.84 3.61,12.63 C3.65,12.41 3.65,12.21 3.65,12 C3.65,11.79 3.65,11.59 3.61,11.37 C3.57,11.16 3.55,10.95 3.4,10.7 C3.24,10.46 2.9,10.17 2.68,9.87 C2.45,9.58 2.15,9.23 2.04,8.93 C1.93,8.63 1.99,8.36 2.03,8.08 C2.07,7.82 2.17,7.56 2.29,7.32 C2.4,7.08 2.54,6.84 2.72,6.64 C2.91,6.45 3.09,6.23 3.39,6.13 C3.69,6.03 4.15,6.04 4.52,6.04 C4.9,6.03 5.33,6.12 5.62,6.08 C5.91,6.05 6.08,5.94 6.28,5.83 C6.47,5.73 6.63,5.61 6.79,5.47 C6.96,5.34 7.12,5.22 7.26,5.05 C7.4,4.88 7.55,4.74 7.65,4.47 C7.75,4.19 7.76,3.75 7.85,3.39 C7.94,3.02 8.02,2.56 8.19,2.29 C8.36,2.03 8.61,1.9 8.84,1.76 C9.08,1.63 9.34,1.55 9.6,1.49 C9.86,1.43 10.13,1.39 10.4,1.41 C10.67,1.42 10.95,1.43 11.22,1.6 C11.49,1.78 11.76,2.15 12,2.44 C12.24,2.72 12.44,3.12 12.65,3.32 C12.86,3.53 13.05,3.59 13.25,3.68 C13.46,3.77 13.65,3.82 13.86,3.86 C14.06,3.91 14.26,3.96 14.48,3.96 C14.7,3.97 14.9,4 15.18,3.9 C15.46,3.81 15.81,3.54 16.15,3.39 C16.49,3.23 16.9,3.01 17.21,2.97 C17.53,2.93 17.78,3.05 18.03,3.15 C18.29,3.25 18.51,3.41 18.72,3.57 C18.93,3.74 19.13,3.93 19.29,4.15 C19.44,4.37 19.61,4.59 19.64,4.91 C19.67,5.22 19.55,5.67 19.48,6.04 C19.4,6.4 19.22,6.81 19.19,7.1 C19.16,7.39 19.23,7.58 19.29,7.79 C19.34,8.01 19.43,8.19 19.52,8.38 C19.61,8.57 19.7,8.75 19.83,8.93 C19.96,9.1 20.07,9.28 20.31,9.44 C20.56,9.59 20.99,9.71 21.32,9.87 C21.66,10.04 22.08,10.23 22.31,10.45 C22.53,10.67 22.61,10.94 22.68,11.2 C22.76,11.46 22.78,11.73 22.78,12 C22.78,12.27 22.76,12.54 22.68,12.8 C22.61,13.06 22.53,13.33 22.31,13.55 C22.08,13.77 21.66,13.96 21.32,14.13 C20.99,14.29 20.56,14.41 20.31,14.57 C20.07,14.72 19.96,14.9 19.83,15.08 C19.7,15.25 19.61,15.43 19.52,15.62 C19.43,15.81 19.34,15.99 19.29,16.21 C19.23,16.42 19.16,16.61 19.19,16.9 C19.22,17.19 19.4,17.6 19.48,17.96 C19.55,18.33 19.67,18.78 19.64,19.09 C19.61,19.41 19.44,19.63 19.29,19.85 C19.13,20.07 18.93,20.26 18.72,20.43 C18.51,20.59 18.29,20.75 18.03,20.85 C17.78,20.95 17.53,21.07 17.21,21.03 C16.9,20.99 16.49,20.77 16.15,20.61 C15.81,20.46 15.46,20.19 15.18,20.1 C14.9,20 14.7,20.03 14.48,20.04 C14.26,20.04 14.06,20.09 13.86,20.14 C13.65,20.18 13.46,20.23 13.25,20.32 C13.05,20.41 12.86,20.47 12.65,20.68 C12.44,20.88 12.24,21.28 12,21.56 Z"></path>
+          <circle cx="12" cy="12" r="2.25"></circle>
+        </svg>
+      </button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabYearBtn" title="Карта дней года">
+        <svg viewBox="0 0 24 24" fill="none">
+          <rect x="2" y="2" width="4" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
+          <rect x="8" y="2" width="4" height="4" rx="1" fill="currentColor" opacity="0.9"></rect>
+          <rect x="14" y="2" width="4" height="4" rx="1" fill="currentColor" opacity="0.5"></rect>
+          <rect x="20" y="2" width="2" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
+          <rect x="2" y="8" width="4" height="4" rx="1" fill="currentColor" opacity="0.5"></rect>
+          <rect x="8" y="8" width="4" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
+          <rect x="14" y="8" width="4" height="4" rx="1" fill="currentColor" opacity="0.9"></rect>
+          <rect x="20" y="8" width="2" height="4" rx="1" fill="currentColor" opacity="0.5"></rect>
+          <rect x="2" y="14" width="4" height="4" rx="1" fill="currentColor" opacity="0.9"></rect>
+          <rect x="8" y="14" width="4" height="4" rx="1" fill="currentColor" opacity="0.5"></rect>
+          <rect x="14" y="14" width="4" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
+          <rect x="20" y="14" width="2" height="4" rx="1" fill="currentColor" opacity="0.9"></rect>
+          <rect x="2" y="20" width="4" height="2" rx="1" fill="currentColor" opacity="0.25"></rect>
+          <rect x="8" y="20" width="4" height="2" rx="1" fill="currentColor" opacity="0.5"></rect>
+          <rect x="14" y="20" width="4" height="2" rx="1" fill="currentColor" opacity="0.9"></rect>
+          <rect x="20" y="20" width="2" height="2" rx="1" fill="currentColor" opacity="0.5"></rect>
+        </svg>
+      </button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabMoodBtn" title="Диаграмма настроения">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12,12 L12,1.5 A10.5,10.5 0 0,1 22.5,12 Z" fill="currentColor" opacity="0.7"></path>
+          <path d="M12,12 L22.5,12 A10.5,10.5 0 0,1 12,22.5 Z" fill="currentColor" opacity="0.25"></path>
+          <path d="M12,12 L12,22.5 A10.5,10.5 0 0,1 1.5,12 Z" fill="currentColor" opacity="0.15"></path>
+          <path d="M12,12 L1.5,12 A10.5,10.5 0 0,1 12,1.5 Z" fill="currentColor" opacity="0.5"></path>
+        </svg>
+      </button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabExtra2Btn" title=""></button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabExtra3Btn" title=""></button>
+    </div>
+    <!-- ===== ВТОРОЙ НАБОР ВКЛАДОК (заглушки) =====
+         Полный дубль первого набора по устройству: 9 боковых язычков
+         (.settings-tabs) + 5 нижних (.settings-tabs-gear) — те же CSS-
+         классы, поэтому размер язычков (фиксированные 68px и у боковых,
+         и у нижних, см. .settings-tab / .settings-tab-gear в modals.css)
+         общий для обоих наборов. Стоят в той
+         же точке (position:absolute от .settings-modal-frame), что и
+         первый набор — видно всегда только ОДИН набор, второй скрыт через
+         display:none (см. applySettingsTabSetVisibility в my.js).
+         Каждая кнопка пока просто заглушка: клик по ней показывает текст
+         "Вкладка пока не запрограммирована" (см. renderSettingsTabSet2Stub
+         в my.js) — сама функция появится позже. Первая нижняя вкладка
+         (settingsTabSet2GearBtn1) играет роль "домашней" для этого набора
+         — так же, как шестерёнка для первого — и открывается по
+         умолчанию при переключении на второй набор (см.
+         cycleSettingsTabSet в my.js). Третья нижняя вкладка
+         (settingsTabSet2GearBtn3) тоже уже не заглушка — это вкладка
+         "Объединение заметок" (слияние .jwlibrary файлов), см.
+         renderSettingsTabNotesMerge в jwlmerge.js и её отдельную ветку в
+         switchSettingsTab в my.js (стоит ДО общей проверки на
+         renderSettingsTabSet2Stub, иначе заглушка перехватила бы её тоже).
+         Вторая нижняя вкладка (settingsTabSet2GearBtn2) тоже уже не
+         заглушка — это вкладка "Заполнение бланков S-89": пользователь
+         прикрепляет подложку-бланк (картинку) и .docx с графиком, для
+         каждого подходящего задания рисуется отдельный заполненный бланк
+         (Canvas API вместо Pillow из исходного python-скрипта) и все они
+         скачиваются в Downloads — см. renderSettingsTabS89Fill в s89fill.js
+         (плюс s89tasks.js — разбор документа, s89draw.js — сама отрисовка)
+         и её отдельную ветку в switchSettingsTab (по той же причине, стоит
+         ДО общей проверки на renderSettingsTabSet2Stub).
+         Четвёртая нижняя вкладка (settingsTabSet2GearBtn4) тоже уже не
+         заглушка — это вкладка "Извлечение субтитров": пользователь даёт
+         видео (.mp4) со встроенной текстовой дорожкой субтитров (tx3g),
+         текст читается прямо в браузере обычным разбором контейнера mp4
+         (без сети, без ffmpeg/WebAssembly — см. extractSubtitleCuesFromMp4
+         в my.js), см. renderSettingsTabSubtitleExtract в my.js и её
+         отдельную ветку в switchSettingsTab (по той же причине, стоит ДО
+         общей проверки на renderSettingsTabSet2Stub). Пятая боковая
+         вкладка (settingsTabSet2Btn5) тоже уже не заглушка — это вкладка
+         "Разделение epub-файлов": книга .epub конвертируется в текст (в
+         правильном порядке чтения, по spine из content.opf) и делится на
+         несколько .txt-частей для источников NotebookLM, см.
+         renderSettingsTabEpubSplit в epubsplit.js и её отдельную ветку в
+         switchSettingsTab (по той же причине, стоит ДО общей проверки на
+         renderSettingsTabSet2Stub).
+         Шестая боковая вкладка (settingsTabSet2Btn6) — ЭТО БОЛЬШЕ НЕ
+         ЗАГЛУШКА: это вкладка "Изменение размера изображения". Пользователь
+         прикрепляет .jpg/.png, задаёт нужные ширину и высоту в пикселях —
+         картинка масштабируется на Canvas и скачивается уже нужного
+         размера (например, чтобы сделать из иконки 512×512 иконку меньшего
+         размера). Галочка "Сохранять пропорции" (по умолчанию включена)
+         решает, что делать, если соотношение сторон исходника не совпадает
+         с заданным: при включённой галочке картинка вписывается в рамку
+         целиком без искажений (лишнее место остаётся пустым), при
+         выключенной — надпись меняется на "Изображение будет обрезано" и
+         кадр обрезается по центру, но не растягивается. См.
+         renderSettingsTabImgResize в imgresize.js и её отдельную ветку в
+         switchSettingsTab (по той же причине, стоит ДО общей проверки на
+         renderSettingsTabSet2Stub). -->
+    <!-- Первая боковая вкладка второго набора (settingsTabSet2Btn1, "set2s_1")
+         — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: это вкладка "Мой блокнот" —
+         работа с .md заметками в стиле Obsidian (File System Access API,
+         CodeMirror 6 с decorations вместо переключения textarea/HTML,
+         ссылки [[Название]] между заметками). См. renderSettingsTabMdEditor
+         в mdeditor.js и её отдельную ветку в switchSettingsTab, по тому же
+         принципу вынесена ДО общей проверки на renderSettingsTabSet2Stub. -->
+    <div class="settings-tabs" id="settingsTabsSet2" style="display:none;">
+      <button class="settings-tab" id="settingsTabSet2Btn1" title="Мой блокнот">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="2.5" width="16" height="19" rx="1.5"></rect>
+          <circle cx="2.6" cy="6" r="1" fill="currentColor" stroke="none"></circle>
+          <circle cx="2.6" cy="10.5" r="1" fill="currentColor" stroke="none"></circle>
+          <circle cx="2.6" cy="15" r="1" fill="currentColor" stroke="none"></circle>
+          <circle cx="2.6" cy="19.5" r="1" fill="currentColor" stroke="none"></circle>
+          <line x1="8.5" y1="8" x2="17.5" y2="8"></line>
+          <line x1="8.5" y1="12" x2="17.5" y2="12"></line>
+          <line x1="8.5" y1="16" x2="14" y2="16"></line>
+        </svg>
+      </button>
+      <!-- Вторая боковая вкладка второго набора (settingsTabSet2Btn2, "set2s_2")
+           — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "Закладки" — список заметок из
+           "Моего блокнота" (settingsTabSet2Btn1), отмеченных закладкой. См.
+           renderSettingsTabMdBookmarks в mdeditor.js и её отдельную ветку в
+           switchSettingsTab, по тому же принципу вынесена ДО общей проверки
+           на renderSettingsTabSet2Stub. -->
+      <button class="settings-tab" id="settingsTabSet2Btn2" title="Закладки">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6.5 3.5h11a1 1 0 0 1 1 1V21l-6.5-4-6.5 4V4.5a1 1 0 0 1 1-1z"></path>
+        </svg>
+      </button>
+      <!-- Третья боковая вкладка второго набора (settingsTabSet2Btn3, "set2s_3")
+           — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "Поиск" (поиск по задачам/поиск
+           по заметкам, ТЗ пользователя от 08.09). См. renderSettingsTabSearch
+           в search.js и её отдельную ветку в switchSettingsTab, по тому же
+           принципу вынесена ДО общей проверки на renderSettingsTabSet2Stub. -->
+      <button class="settings-tab" id="settingsTabSet2Btn3" title="Поиск">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="10.5" cy="10.5" r="6.5"></circle>
+          <line x1="15.3" y1="15.3" x2="20.5" y2="20.5"></line>
+        </svg>
+      </button>
+      <button class="settings-tab" id="settingsTabSet2Btn4" title="Забытые заметки">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path>
+          <path d="M15 3v4h4"></path>
+          <line x1="7.5" y1="11" x2="12" y2="11"></line>
+          <line x1="7.5" y1="15" x2="10.5" y2="15"></line>
+          <circle cx="17" cy="17.5" r="4.3" fill="var(--icon-halo)" stroke="currentColor" stroke-width="1.5"></circle>
+          <path d="M17 15.3v2.2l1.5 1"></path>
+        </svg>
+      </button>
+      <button class="settings-tab" id="settingsTabSet2Btn5" title="Разделение epub-файлов">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3.4" y1="5" x2="20.6" y2="19"></line>
+          <line x1="20.6" y1="5" x2="3.4" y2="19"></line>
+          <circle cx="3.4" cy="5" r="2.3"></circle>
+          <circle cx="3.4" cy="19" r="2.3"></circle>
+          <text x="12" y="13.8" text-anchor="middle" font-size="6.4" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="none" stroke="var(--icon-halo)" stroke-width="3" paint-order="stroke fill">epub</text>
+          <text x="12" y="13.8" text-anchor="middle" font-size="6.4" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="currentColor" stroke="none">epub</text>
+        </svg>
+      </button>
+      <button class="settings-tab" id="settingsTabSet2Btn6" title="Изменение размера изображения">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.5" y="3" width="14" height="13" rx="1.5"></rect>
+          <circle cx="7" cy="7.5" r="1.3" fill="currentColor" stroke="none"></circle>
+          <path d="M4 14l3.2-3.8 2.3 2 3-3.7 3 4.3"></path>
+          <path d="M14.5 20.5l6-6"></path>
+          <path d="M21.5 18v2.5h-2.5"></path>
+        </svg>
+      </button>
+      <!-- Седьмая боковая вкладка второго набора (settingsTabSet2Btn7, "set2s_7")
+           — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "Мои книги" — хранилище книг
+           (OPFS, books/) и переход в экран чтения fb2/epub. См.
+           renderSettingsTabBooks в my.js (PROJECT_MAP_MYJS.md, строка 5885)
+           и её ветку в switchSettingsTab, по тому же принципу вынесена ДО
+           общей проверки на renderSettingsTabSet2Stub. -->
+      <button class="settings-tab" id="settingsTabSet2Btn7" title="Мои книги">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="13" height="19" rx="1.3"></rect>
+          <line x1="5.3" y1="2.5" x2="5.3" y2="21.5" stroke-width="1.2"></line>
+          <text x="10.5" y="10.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="none" stroke="var(--icon-halo)" stroke-width="3.2" paint-order="stroke fill">epub</text>
+          <text x="10.5" y="10.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="currentColor" stroke="none">epub</text>
+          <text x="10.5" y="18.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="none" stroke="var(--icon-halo)" stroke-width="3.2" paint-order="stroke fill">fb2</text>
+          <text x="10.5" y="18.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="currentColor" stroke="none">fb2</text>
+        </svg>
+      </button>
+      <button class="settings-tab" id="settingsTabSet2Btn8" title="">8</button>
+      <button class="settings-tab" id="settingsTabSet2Btn9" title="">9</button>
+    </div>
+    <div class="settings-tabs-gear" id="settingsTabsGearSet2" style="display:none;">
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn1" title="Извлечение информации из графиков">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="1.5"></rect>
+          <line x1="3" y1="9" x2="21" y2="9"></line>
+          <line x1="3" y1="14" x2="21" y2="14"></line>
+          <line x1="9" y1="4" x2="9" y2="20"></line>
+          <line x1="15" y1="4" x2="15" y2="20"></line>
+        </svg>
+      </button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn2" title="Заполнение бланков S-89">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path>
+          <path d="M15 3v4h4"></path>
+          <line x1="7.5" y1="11" x2="14" y2="11"></line>
+          <rect x="7.5" y="14.5" width="3" height="3"></rect>
+          <path d="M8.1 16l0.6 0.6L10 15.2"></path>
+        </svg>
+      </button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn3" title="Объединение заметок">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 4h7l4 4v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"></path>
+          <path d="M13 4v4h4"></path>
+          <path d="M8.5 12.5h7"></path>
+          <path d="M8.5 15.5h4.5"></path>
+          <circle cx="17" cy="16.5" r="1.4" fill="currentColor" stroke="none"></circle>
+          <circle cx="19.5" cy="19" r="1.4" fill="currentColor" stroke="none"></circle>
+          <path d="M17.7 17.5l1.1 1.1"></path>
+        </svg>
+      </button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn4" title="Извлечение субтитров">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.5" y="3.5" width="19" height="12.5" rx="1.5"></rect>
+          <path d="M10.3 7l4 2.5-4 2.5z" fill="currentColor" stroke="none"></path>
+          <line x1="6" y1="13.3" x2="18" y2="13.3"></line>
+          <path d="M12 18v2.5"></path>
+          <path d="M9.2 19.3l2.8 2.8 2.8-2.8"></path>
+        </svg>
+      </button>
+      <!-- Пятая "лежачая" вкладка второго набора (settingsTabSet2GearBtn5,
+           "set2b_5") — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "ИПКД" — ежедневное
+           чтение отдельного файла-публикации в формате epub (ТЗ пользователя
+           от 21.09, см. renderSettingsTabIpkd в my.js). Текстовое содержимое
+           (число месяца) проставляется в JS (updateIpkdTabIcon) — та же
+           цифровая пиктограмма, что у соседних заглушек
+           settingsTabSet2GearBtn8/9, только динамическая; заливка "вкладка
+           сегодня ещё не открывалась" — класс .ipkd-tab-unread (modals.css),
+           переключается там же. -->
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn5" title="ИПКД"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== модальное окно синхронизации ===== -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal-box" id="modalBox">
+    <!-- содержимое рисуется скриптом -->
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+
+<script src="mood.js"></script>
+<script src="minizip.js"></script>
+<script src="minixlsx.js"></script>
+<script src="docxparse.js"></script>
+<!-- fb2parse.js — READER_PLAN.md, Этап D, шаг 10: разбор fb2 в главы/абзацы/
+     картинки для будущего экрана-ридера (шаг 11, пока не реализован — сам
+     по себе этот файл ничего не рисует). Как и остальные "библиотеки без
+     UI" здесь, должен идти ПОСЛЕ minizip.js: переиспользует
+     MiniZip.decodeXmlEntities, своей копии не заводит. -->
+<script src="fb2parse.js"></script>
+<!-- epubparse.js — разбор .epub в ту же структуру глав/абзацев/картинок,
+     что и fb2parse.js выше (см. общий контракт в шапке файла) — тоже
+     должен идти ПОСЛЕ minizip.js: переиспользует MiniZip.extractAllFiles
+     (распаковка zip) и MiniZip.decodeXmlEntities, своих копий не заводит. -->
+<script src="epubparse.js"></script>
+<script src="workbookparse.js"></script>
+<script src="workbooks.js"></script>
+<script src="jwlmerge.js"></script>
+<script src="epubsplit.js"></script>
+<script src="s89tasks.js"></script>
+<script src="s89draw.js"></script>
+<script src="s89fill.js"></script>
+<script src="imgresize.js"></script>
+<script src="mdeditor.js"></script>
+<script src="search.js"></script>
+<!-- flibusta.js — READER_PLAN.md, Этап E, шаг 17: подключение к OPDS-
+     каталогу для скачивания книг; должен идти ПОСЛЕ minizip.js — при
+     скачивании fb2.zip переиспользует MiniZip.extractAllFiles, своей
+     копии не заводит. -->
+<script src="flibusta.js"></script>
+<script src="debug.js"></script>
+<!-- notifications.js — напоминания для задач (ТЗ пользователя от 19.09) и все
+     будущие уведомления приложения: диалог даты/времени, планировщик, показ.
+     Должен идти ДО my.js — my.js создаёт модуль при загрузке
+     (initNotificationsModule); сам файл на другие скрипты при загрузке не
+     ссылается. -->
+<script src="notifications.js"></script>
+<!-- syncengine*.js — TASK_UNIFIED_SYNC.md, Шаги 1-3 и 5: единый sync-engine.
+     syncengine.js (движок), syncengine_groupcrypto.js (шифрование групповым
+     ключом), syncengine_transport.js (Realtime Database),
+     syncengine_groupbinding.js (связка «облачный путь группы ↔ движок ↔
+     локальный кэш my.js», Шаг 3), syncengine_notescrypto.js (шифрование
+     заметок, Шаг 1), syncengine_notesbinding.js (связка того же движка с
+     notesMap mdeditor.js, Шаг 5.1). Все шесть должны идти ДО my.js — он
+     создаёт групповой движок при первом обращении к общим задачам; кроме
+     того, ДО my.js должны идти и mdeditor.js/syncengine_notescrypto.js/
+     syncengine_notesbinding.js вместе — my.js вызывает
+     window.initMdEditorModule(...) при своей загрузке, а тот уже внутри
+     себя создаёт notes-binding (см. "Sync-engine заметок" в mdeditor.js).
+     Само mdeditor.js может идти раньше (строка 739 выше) — он лишь
+     ОПРЕДЕЛЯЕТ initMdEditorModule, не вызывает; между собой syncengine*.js
+     порядок не важен (файлы друг на друга при загрузке не ссылаются,
+     объекты друг другу передаёт my.js/mdeditor.js). С 20.09 (шаг 6) добавлены
+     syncengine_personalcrypto.js (шифрование личным ключом SHA-256(syncId)) и
+     syncengine_personalbinding.js (теневой store личных задач, создаётся из
+     my.js при запуске) — тоже ДО my.js. -->
+<script src="syncengine.js"></script>
+<script src="syncengine_groupcrypto.js"></script>
+<script src="syncengine_transport.js"></script>
+<script src="syncengine_groupbinding.js"></script>
+<script src="syncengine_notescrypto.js"></script>
+<script src="syncengine_notesbinding.js"></script>
+<script src="syncengine_personalcrypto.js"></script>
+<script src="syncengine_personalbinding.js"></script>
+<script src="my.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,43 @@
+{
+  "name": "График чтения Библии",
+  "short_name": "График",
+  "id": "bible-tracker",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f4f0f8",
+  "theme_color": "#8f7fb8",
+  "icons": [
+    {
+      "src": "icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "share_target": {
+    "action": "https://monstera90.github.io/bible-tracker/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "sharedFile",
+          "accept": [
+            ".fb2",
+            ".epub",
+            ".mp4",
+            "video/mp4",
+            "application/epub+zip"
+          ]
+        }
+      ]
+    }
+  }
+}
