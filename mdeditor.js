@@ -1,5 +1,14 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 6.5 (23.09) — TASK_UNIFIED_SYNC.md, шаг 5, находка 3 (верификация,
+   23.09): новая resetLocalNotesForAccountSwitch() (экспорт MdEditor.*) —
+   закрывает открытую заметку, binding.destroy(), notesMap.clear(),
+   немедленный flushNotesCacheNow() (notesCache_v1 не остаётся с заметками
+   прошлого аккаунта даже при перезагрузке посреди процесса), сброс
+   nameIndex/дерева, binding пересоздаётся (createNotesBindingInstance),
+   сразу binding.pullNow(). Вызывается ЕДИНСТВЕННО из my.js joinWithCode —
+   см. my.js. Создание binding вынесено в createNotesBindingInstance(), чтобы
+   пересоздавать его с теми же опциями.
    Версия: 6.4 (21.09) — если все 4 попытки загрузить codemirror_bundle.js и запасной
    esm.sh тоже не сработали, текст ошибки теперь называет реальную причину вместо
    голого «не удалось загрузить»: ответ сервера (HTTP-код и content-type), лежит ли
@@ -2234,24 +2243,34 @@ window.initMdEditorModule = function(deps){
   // тестами модуля). nameIndex и markReferencedNamesDirty остаются здесь —
   // движок про них не знает.
   // ---------------------------------------------------------------------
-  var binding = window.SyncEngineNotesBinding.createNotesBinding({
-    io: { fetchCloudPath: fetchCloudPath, patchCloud: patchCloud, deleteCloudPath: deleteCloudPath },
-    makeHooks: window.SyncEngineNotesCrypto.makeNotesHooks,
-    getSyncId: getSyncId,
-    notesMap: notesMap,
-    isOnline: isOnline,
-    debounceMs: NOTES_PUSH_DEBOUNCE_MS,
-    retryDelays: NOTES_RETRY_DELAYS,
-    // Решение пользователя (шаг 5.2, п.1): оставить выключенным — ровно
-    // старое поведение (syncNow = pull, без досылки "локально новее
-    // облака"); включать отдельным заходом после проверки очистки
-    // notesCache_v1 при смене syncId в my.js.
-    reconcile: false,
-    schedulePersist: scheduleNotesCachePersist,
-    persistNow: flushNotesCacheNow,
-    onRemoteApplied: handleNotesRemoteApplied,
-    log: function(msg){ if(window.Debug) window.Debug.log(msg); }
-  });
+  // Вынесено в функцию (шаг 5, находка 3 — очистка notesCache_v1 при смене
+  // syncId): resetLocalNotesForAccountSwitch ниже пересоздаёт binding с теми
+  // же опциями, чтобы получить чистый внутренний движок (своё dirty-
+  // состояние с нуля) вместо ручной чистки — у engine всё равно нет API для
+  // сброса стора.
+  function createNotesBindingInstance(){
+    return window.SyncEngineNotesBinding.createNotesBinding({
+      io: { fetchCloudPath: fetchCloudPath, patchCloud: patchCloud, deleteCloudPath: deleteCloudPath },
+      makeHooks: window.SyncEngineNotesCrypto.makeNotesHooks,
+      getSyncId: getSyncId,
+      notesMap: notesMap,
+      isOnline: isOnline,
+      debounceMs: NOTES_PUSH_DEBOUNCE_MS,
+      retryDelays: NOTES_RETRY_DELAYS,
+      // Решение пользователя (шаг 5.2, п.1): оставить выключенным — ровно
+      // старое поведение (syncNow = pull, без досылки "локально новее
+      // облака"). Находка 3 (верификация шага 5, 23.09) подтвердила, что
+      // notesCache_v1/notesMap не были изолированы по syncId — теперь это
+      // закрыто resetLocalNotesForAccountSwitch (см. ниже), а не reconcile;
+      // включать reconcile — отдельный, самостоятельный вопрос.
+      reconcile: false,
+      schedulePersist: scheduleNotesCachePersist,
+      persistNow: flushNotesCacheNow,
+      onRemoteApplied: handleNotesRemoteApplied,
+      log: function(msg){ if(window.Debug) window.Debug.log(msg); }
+    });
+  }
+  var binding = createNotesBindingInstance();
 
   // Чужая правка, применённая pull'ом (см. onRemoteApplied в контракте
   // binding'а) — notesMap уже обновлён адаптером ДО этого вызова; здесь
@@ -2278,6 +2297,38 @@ window.initMdEditorModule = function(deps){
       cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: rec.text } });
       refreshDatesField();
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // Сброс локальных заметок при смене аккаунта синхронизации (TASK_UNIFIED_
+  // SYNC.md, шаг 5, находка 3 верификации 23.09) — вызывается ИЗ my.js,
+  // ЕДИНСТВЕННО из joinWithCode (подключение по чужому коду), симметрично
+  // personalShadowStateReplaced() для личных задач. У mdeditor.js свой
+  // ПОЛНОСТЬЮ ОТДЕЛЬНЫЙ офлайн-кэш (mdEditorDB/notesCache_v1) и свой канал
+  // синхронизации (notes/notesMeta вырезаны из fetchCloudBlob в joinWithCode
+  // через stripCloudReservedSubtrees) — на момент joinWithCode новых заметок
+  // под рукой ещё нет, сверяться не с чем (в отличие от личных задач, где
+  // новый state уже приехал в том же вызове), поэтому корректный вариант —
+  // обнулить локальное и подтянуть заметки нового аккаунта с нуля. НЕ
+  // вызывается из «Отключить синхронизацию»/создания кода первым устройством
+  // — там локальный прогресс должен сохраняться, это уже правильно работает.
+  // ---------------------------------------------------------------------
+  function resetLocalNotesForAccountSwitch(){
+    if(openFile){
+      openFile = null;
+      destroyEditor();
+    }
+    binding.destroy(); // снимает таймеры/подписку на dirty — ничего не долетит от старого аккаунта
+    notesMap.clear();
+    flushNotesCacheNow(); // синхронно, в обход debounce — даже перезагрузка посреди процесса не оставит чужие заметки на диске
+    nameIndex.clear();
+    screen = "list";
+    noteInfoOpen = false;
+    setStatus("", false);
+    rebuildTree(); // rootTree/currentDirNode пересобираются из уже пустого notesMap
+    render();
+    binding = createNotesBindingInstance(); // свежий движок — своё dirty-состояние с нуля, чистить engine отдельно не нужно
+    binding.pullNow(); // сразу забрать заметки нового аккаунта, не ждать следующего открытия вкладки
   }
 
   // ---- CRUD над notesMap — синхронные, локальные правки; в облако уходят
@@ -5866,6 +5917,9 @@ window.initMdEditorModule = function(deps){
     // завершился, чтобы чистка, отложенная из-за гонки, повторилась не
     // дожидаясь следующей правки заметки (referencedNamesDirty к этому
     // моменту всё ещё true — сама чистка ни разу не запускалась).
-    retryImageCleanup: maybeRunImageCleanup
+    retryImageCleanup: maybeRunImageCleanup,
+    // TASK_UNIFIED_SYNC.md, шаг 5, находка 3 (верификация 23.09) — вызывается
+    // ИЗ my.js, joinWithCode, см. resetLocalNotesForAccountSwitch выше.
+    resetLocalNotesForAccountSwitch: resetLocalNotesForAccountSwitch
   };
 };

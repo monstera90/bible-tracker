@@ -1,6 +1,11 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 42.1 (23.09) — TASK_UNIFIED_SYNC.md, шаг 5, находка 3 (верификация 23.09):
+   в joinWithCode, сразу после personalShadowStateReplaced(), добавлен вызов
+   MdEditor.resetLocalNotesForAccountSwitch() — заметки прошлого аккаунта (свой
+   отдельный канал/кэш, notesCache_v1) не были изолированы по syncId и оставались на
+   устройстве при подключении по чужому коду; см. mdeditor.js 6.5.
    Версия: 42.0 (23.09) — TASK_UNIFIED_SYNC.md, шаг 9 (продолжение): остальные скалярные
    настройки из раздела 0.4 заведены через settingsShadowSet (единая точка мутации у
    каждого поля) — setColorMarkEnabled (__colorMarkChapters), новая setFirstReadState
@@ -8835,6 +8840,16 @@
       localStorage.setItem(SYNC_ID_KEY, id);
       saveLocalStateNow();
       personalShadowStateReplaced(); // шаг 6: state заменён целиком — теневой store сверяется с погашением лишнего
+      // TASK_UNIFIED_SYNC.md, шаг 5, находка 3 (верификация 23.09): у заметок
+      // свой ОТДЕЛЬНЫЙ канал синхронизации (notes/notesMeta вырезаны выше,
+      // stripCloudReservedSubtrees) — personalShadowStateReplaced() их не
+      // касается, notesCache_v1/notesMap не были изолированы по syncId.
+      // Единственный корректный момент — здесь, сразу после смены syncId:
+      // обнулить локальные заметки прошлого аккаунта и подтянуть новые с
+      // нуля (см. resetLocalNotesForAccountSwitch в mdeditor.js). НЕ вызывать
+      // из "Отключить синхронизацию"/создания кода первым устройством — там
+      // локальный прогресс должен сохраняться.
+      if(MdEditor && MdEditor.resetLocalNotesForAccountSwitch) MdEditor.resetLocalNotesForAccountSwitch();
       setNoTransitions(true);
       rerenderAllFromState();
       setTimeout(function(){ setNoTransitions(false); }, 50);
