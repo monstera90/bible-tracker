@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.36.44";
+const APP_VERSION = "v0.36.46";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -254,6 +254,17 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (event.request.method !== "GET") return;
+
+  // ⚠️ ДОБАВЛЕНО (23.09, расход трафика): запросы к Firebase Realtime Database
+  // (синхронизация) service worker НЕ перехватывает — отдаёт браузеру напрямую.
+  // Раньше они попадали в стратегию ниже: при наличии копии в кэше страница
+  // получала её (устаревшую на один цикл), а свежий ответ всё равно качался
+  // целиком в фоне и клался в кэш — тяжёлый узел /syncs/<id> скачивался
+  // впритык дважды и оседал в Cache Storage. Остальные чужие адреса
+  // (esm.sh, cdn.jsdelivr.net) по-прежнему кэшируются для оффлайна.
+  // В режиме оффлайн эти запросы отсекает сама страница (fetchWithTimeout и
+  // installOfflineFetchGuard в my.js).
+  if (url.hostname.endsWith(".firebasedatabase.app") || url.hostname.endsWith(".firebaseio.com")) return;
 
   event.respondWith(
     isOfflineModeOn().then((offlineMode) =>
