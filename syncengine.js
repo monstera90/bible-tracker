@@ -1,4 +1,10 @@
 // syncengine.js
+// Версия: 2.3 (22.09) — TASK_UNIFIED_SYNC.md, Шаг 10: moveRecord принимает необязательный
+// 5-й аргумент opts.toRecordId — id записи в ЦЕЛЕВОМ store, если он должен отличаться от
+// recordId в исходном (личная задача "tk..." → общая "gt..." и обратно — разные пространства
+// id, простой moveRecord с одним id для обеих сторон для этой границы не подходит). Без
+// opts.toRecordId — как раньше (тот же id в обоих store), полная обратная совместимость.
+// Остальное (opts.updatedAt) не менялось.
 // Версия: 2.2 (20.09) — saveRecord/deleteRecord принимают необязательный 4-й/3-й аргумент
 // { updatedAt } — метку времени записи задаёт вызывающий код (TASK_UNIFIED_SYNC.md, шаг 6:
 // «теневая» запись личных задач должна нести ТУ ЖЕ метку, что и запись в старом state, иначе
@@ -265,21 +271,28 @@
      *     выполнен»). Пока dirty не поставлен, в облако ничего не уходит.
      * Сетевая отправка остаётся ДВУМЯ push (у store разные облачные пути) —
      * это забота транспорта, движок про сеть не знает.
+     *
+     * opts.toRecordId (v2.3) — id записи в toStoreId, если он должен отличаться от recordId
+     * (id в fromStoreId, он же id тумбстоуна). Нужно для границ между store с разными
+     * пространствами id (например, личная задача ↔ общая задача группы). Без этого поля —
+     * тот же id в обоих store, как раньше. opts.updatedAt — как у saveRecord/deleteRecord.
      */
-    async function moveRecord(fromStoreId, toStoreId, recordId, data) {
+    async function moveRecord(fromStoreId, toStoreId, recordId, data, opts) {
       validateRecordId(recordId);
       var from = getStoreOrThrow(fromStoreId);
       var to = getStoreOrThrow(toStoreId);
       if (fromStoreId === toStoreId) {
         throw new Error('[SyncEngine] moveRecord: исходный и целевой store совпадают (' + fromStoreId + ')');
       }
-      var ts = clock();
-      var target = { id: recordId, data: data, deleted: false, updatedAt: ts };
+      var toRecordId = (opts && typeof opts.toRecordId === 'string' && opts.toRecordId) ? opts.toRecordId : recordId;
+      validateRecordId(toRecordId);
+      var ts = resolveTimestamp(opts, clock);
+      var target = { id: toRecordId, data: data, deleted: false, updatedAt: ts };
       var tombstone = { id: recordId, data: null, deleted: true, updatedAt: ts };
 
       // Всё ниже до await выполняется синхронно. Сначала снимок «как было»
       // (для отката), потом обе записи.
-      var prevTo = settle(callNow(function () { return to.storage.get(recordId); }));
+      var prevTo = settle(callNow(function () { return to.storage.get(toRecordId); }));
       var prevFrom = settle(callNow(function () { return from.storage.get(recordId); }));
       var putTo = settle(callNow(function () { return to.storage.put(target); }));
       var putFrom = settle(callNow(function () { return from.storage.put(tombstone); }));
@@ -288,9 +301,9 @@
       var prevToR = r[0], prevFromR = r[1], putToR = r[2], putFromR = r[3];
 
       if (putToR.ok && putFromR.ok) {
-        to.dirty.set(recordId, true);
+        to.dirty.set(toRecordId, true);
         from.dirty.set(recordId, true);
-        emitter.emit('dirty', { storeId: toStoreId, recordId: recordId, record: target });
+        emitter.emit('dirty', { storeId: toStoreId, recordId: toRecordId, record: target });
         emitter.emit('dirty', { storeId: fromStoreId, recordId: recordId, record: tombstone });
         return { target: target, tombstone: tombstone };
       }
@@ -301,7 +314,7 @@
       // неудача такого отката не считается сбоем отката.
       var failure = !putToR.ok ? putToR.error : putFromR.error;
       var rb = await Promise.all([
-        rollbackSide(to, recordId, prevToR, ts, putToR.ok),
+        rollbackSide(to, toRecordId, prevToR, ts, putToR.ok),
         rollbackSide(from, recordId, prevFromR, ts, putFromR.ok),
       ]);
       var rollbackNote = '';
@@ -311,7 +324,8 @@
           : ' (⚠️ откат НЕ выполнен — состояние двух store может расходиться)';
       }
       throw new Error('[SyncEngine] moveRecord ' + fromStoreId + ' → ' + toStoreId + ', запись "' +
-        recordId + '": ' + (failure && failure.message ? failure.message : String(failure)) + rollbackNote);
+        recordId + (toRecordId !== recordId ? '" → "' + toRecordId + '"' : '"') + ': ' +
+        (failure && failure.message ? failure.message : String(failure)) + rollbackNote);
     }
 
     // Возвращает Promise<boolean> — «с этой стороной всё в порядке».

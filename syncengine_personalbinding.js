@@ -1,4 +1,12 @@
 // syncengine_personalbinding.js
+// Версия: 3.1 (22.09) — TASK_UNIFIED_SYNC.md, Шаг 10 (перенос между store одним вызовом
+// движка): добавлены `ensureStoreId()` (привязать store к текущей области и отдать storeId —
+// нужен вызывающей стороне moveTo) и `moveTo(targetBinding, id, data, {toRecordId, t})` —
+// перенос ОДНИМ вызовом engine.moveRecord (личный теневой store → любой другой binding на
+// том же движке, например общие задачи группы; toRecordId — если у целевого store своё
+// пространство id, как у общих задач, префикс "gt"). Через ОБЩУЮ очередь этого binding'а
+// (safe/queue), как save/remove/reconcile. save/remove/reconcile/syncNow/diagnose/parity/
+// snapshot не менялись.
 // Версия: 3.0 (21.09) — TASK_UNIFIED_SYNC.md, Шаг 8 (cutover личных задач): структурная правка —
 // добавлены `binding.snapshot({filter})` (снимок store для чтения: [{id, c, t, dead}] в общей очереди,
 // данные копируются) и чистые функции `buildCutoverPlan`/`formatCutoverPlan` (что изменится в списках
@@ -734,6 +742,14 @@
    *                                     шаг 8: снимок store для чтения (в общей очереди, данные копируются);
    *                                     filter(id, updatedAt, scope) === false — запись пропускается
    *   whenIdle()                     -> Promise                        очередь опустела (тесты)
+   *   ensureStoreId()                -> string   Шаг 10: привязать store к текущей области
+   *                                     (как ensure(), но публично) и отдать её storeId — нужен
+   *                                     moveTo() вызывающей стороны (другого binding'а)
+   *   moveTo(targetBinding, id, data, {toRecordId, t}) -> Promise<{ok, value|error}>
+   *                                     Шаг 10: перенос ОДНИМ вызовом engine.moveRecord — запись
+   *                                     в targetBinding (id = opts.toRecordId, иначе тот же id) +
+   *                                     тумбстоун в этом store. targetBinding — любой binding с
+   *                                     ensureStoreId() на ТОМ ЖЕ engine (personal или group).
    *   getStoreId()/getScope()/isCloudAttached()/getStorageMode()
    *   detach(dropStorage)/destroy()
    */
@@ -908,6 +924,35 @@
       return safe('remove ' + id, function () {
         var att = ensure();
         return engine.deleteRecord(att.storeId, id, { updatedAt: ts });
+      });
+    }
+
+    // Шаг 10: перенос записи ИЗ этого store В targetBinding (например, личная задача →
+    // общая задача группы) ОДНИМ вызовом движка (engine.moveRecord — запись в целевом store +
+    // тумбстоун в этом, атомарно относительно друг друга, с откатом при частичном сбое; те же
+    // гарантии, что у GroupBinding.moveTo, см. его комментарий). opts.toRecordId — id записи в
+    // targetBinding, если он должен отличаться от id в этом store (личное/общее — разные
+    // пространства id, "tk..." / "gt..."); без него — тот же id в обоих store. opts.t — метка
+    // времени (как у save/remove), по умолчанию now(). data копируется сразу (как у save).
+    function moveTo(targetBinding, id, data, mopts) {
+      if (!targetBinding || typeof targetBinding.ensureStoreId !== 'function') {
+        return failed('moveTo ' + id, new Error('targetBinding обязателен (нужен ensureStoreId())'));
+      }
+      var toId, ts, snap;
+      try {
+        if (!isValidRecordId(id)) throw new Error('недопустимый id "' + id + '"');
+        if (data === undefined) throw new Error('data не передан');
+        toId = (mopts && typeof mopts.toRecordId === 'string' && mopts.toRecordId) ? mopts.toRecordId : id;
+        if (!isValidRecordId(toId)) throw new Error('недопустимый целевой id "' + toId + '"');
+        ts = checkTimestamp(mopts && mopts.t);
+        snap = cloneJson(data);
+      } catch (err) {
+        return failed('moveTo ' + id, err);
+      }
+      return safe('moveTo ' + id + (toId !== id ? ' -> ' + toId : ''), function () {
+        var fromStoreId = ensure().storeId;
+        var toStoreId = targetBinding.ensureStoreId();
+        return engine.moveRecord(fromStoreId, toStoreId, id, snap, { toRecordId: toId, updatedAt: ts });
       });
     }
 
@@ -1182,6 +1227,8 @@
     return {
       save: save,
       remove: remove,
+      moveTo: moveTo,
+      ensureStoreId: function () { return ensure().storeId; },
       reconcile: reconcile,
       syncNow: syncNow,
       scheduleCloudSync: scheduleCloudSync,

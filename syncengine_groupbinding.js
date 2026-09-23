@@ -1,4 +1,9 @@
 // syncengine_groupbinding.js
+// Версия: 1.3 (22.09) — TASK_UNIFIED_SYNC.md, Шаг 10: moveTo(targetBinding, id, data, opts)
+// принимает необязательный 4-й аргумент opts.toRecordId (id в целевом store, если он должен
+// отличаться от id в этом — граница личное/общее, разные пространства id) и opts.updatedAt;
+// пробрасываются в engine.moveRecord как есть (engine v2.3+). Без opts — как раньше. Остальное
+// не менялось.
 // Версия: 1.2 (19.09) — Шаг 4.2: moveTo(targetBinding, id, data) — перенос записи
 // из этого binding в другой одним вызовом движка (engine.moveRecord), и
 // ensureStoreId(); put адаптера стал «всё или ничего» (если cache.save() бросил —
@@ -89,8 +94,9 @@
    * binding:
    *   save(id, data)     -> Promise<record>   создать/изменить запись
    *   remove(id)         -> Promise<record>   soft-delete (тумбстоун)
-   *   moveTo(target, id, data) -> Promise<{target, tombstone}>  перенос в другой
-   *                        binding одним вызовом движка (шаг 4.2)
+   *   moveTo(target, id, data, opts?) -> Promise<{target, tombstone}>  перенос в другой
+   *                        binding одним вызовом движка (шаг 4.2; opts.toRecordId/opts.updatedAt
+   *                        — шаг 10, см. engine.moveRecord)
    *   ensureStoreId()    -> string            привязать store к группе, отдать storeId
    *   syncNow()          -> Promise<{pull, push}>  pull → сверка → push
    *   pushNow(opts)      -> Promise<{pushed, failed, error}>
@@ -257,14 +263,15 @@
     // синхронно, одна метка updatedAt, dirty — только если обе легли, откат
     // при частичном сбое). Оба binding должны работать на одном engine и одной
     // группе; иначе — исключение до любых записей.
-    function moveTo(targetBinding, id, data) {
+    function moveTo(targetBinding, id, data, opts) {
       if (!targetBinding || typeof targetBinding.ensureStoreId !== 'function') {
         throw new Error('[GroupBinding:' + name + '] moveTo: targetBinding обязателен');
       }
       var fromId = ensure().storeId;
       var toId = targetBinding.ensureStoreId();
-      log('GroupBinding:' + name + ' moveTo ' + toId + ' ' + id);
-      return engine.moveRecord(fromId, toId, id, data);
+      var toRecordId = (opts && typeof opts.toRecordId === 'string' && opts.toRecordId) ? opts.toRecordId : id;
+      log('GroupBinding:' + name + ' moveTo ' + toId + ' ' + id + (toRecordId !== id ? ' -> ' + toRecordId : ''));
+      return engine.moveRecord(fromId, toId, id, data, opts);
     }
 
     function syncNow() {

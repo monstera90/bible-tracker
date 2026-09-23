@@ -1,6 +1,19 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 42.0 (23.09) — TASK_UNIFIED_SYNC.md, шаг 9 (продолжение): остальные скалярные
+   настройки из раздела 0.4 заведены через settingsShadowSet (единая точка мутации у
+   каждого поля) — setColorMarkEnabled (__colorMarkChapters), новая setFirstReadState
+   (__firstRead, вызывается из cycleChapterState и ensureFirstReadInitialized), новая
+   setQuoteState (__quote, вызывается из initQuote), общая setHourState (счётчик часов
+   HOUR_* и заодно оба скалярных ключа настроения из mood.js — MOOD_FIRST_LOG_KEY/
+   MOOD_DATA_RESET_AT_KEY, т.к. они тоже идут через setHourState). Цели чтения решено
+   НЕ класть в prefs (растущий список задач внутри цели) — новый раздел «ЦЕЛИ ЧТЕНИЯ:
+   ТЕНЕВАЯ ЗАПИСЬ В SYNC-ENGINE» (getGoalsBinding/goalsShadowSave/goalsShadowRemove,
+   store "goals", запись на goalId — по образцу личных задач шага 6), подключено в
+   saveGoal/deleteGoal; ветка "goals" добавлена в CLOUD_RESERVED_SUBTREES;
+   initGoalsShadow() в «ЗАПУСК». getBooksSyncEnabled и основная закладка книги —
+   решено НЕ трогать (закладка уже синхронизируется обычным блоком book:<hash>).
    Версия: 41.0 (21.09) — структурная правка (TASK_UNIFIED_SYNC.md, шаг 8, cutover личных
    задач): чтение личных задач можно переключить со state на новый store — за флагом
    устройства biblePersonalCutover_v1 (по умолчанию ВЫКЛЮЧЕН, поведение как на шагах 6–7).
@@ -1723,6 +1736,13 @@
   // весь слот целиком, для него ничего не "сгорает" и не накапливается:
   // при следующем визите цитата сдвигается ровно на один шаг вперёд, а не
   // "досчитывает" пропущенные слоты.
+  // Единая точка записи __quote (шаг 9, 23.09) — обе ветки ниже писали
+  // state[QUOTE_KEY] напрямую с одинаковой формой записи.
+  function setQuoteState(idx, slot){
+    var t = Date.now();
+    state[QUOTE_KEY] = {c: idx, t: t, slot: slot};
+    settingsShadowSet(QUOTE_KEY, {idx: idx, slot: slot}, t); // Шаг 9 (TASK_UNIFIED_SYNC.md, 23.09)
+  }
   function initQuote(){
     var pool = buildQuotePool();
     var rec = getQuoteRec();
@@ -1731,11 +1751,11 @@
 
     if(rec.slot < 0){
       // самый первый визит вообще — фиксируем слот, цитату не сдвигаем
-      state[QUOTE_KEY] = {c: idx, t: Date.now(), slot: currentSlot};
+      setQuoteState(idx, currentSlot);
       saveLocalState();
     } else if(currentSlot !== rec.slot){
       idx = pool.length ? (idx + 1) % pool.length : 0;
-      state[QUOTE_KEY] = {c: idx, t: Date.now(), slot: currentSlot};
+      setQuoteState(idx, currentSlot);
       saveLocalState();
     }
     showQuote(pool, idx);
@@ -2170,9 +2190,11 @@
     return !!(r && r.c);
   }
   function setColorMarkEnabled(value){
-    state["__colorMarkChapters"] = {c: value, t: Date.now()};
+    var t = Date.now();
+    state["__colorMarkChapters"] = {c: value, t: t};
     saveLocalStateNow();
     scheduleCloudPush();
+    settingsShadowSet("__colorMarkChapters", value, t); // Шаг 9 (TASK_UNIFIED_SYNC.md, 23.09)
   }
 
   // ===================== ЗАКЛАДКИ "МОЕГО БЛОКНОТА" (md-заметки) =====================
@@ -2298,7 +2320,13 @@
     var addFab = document.getElementById("taskAddFab");
     var isCommentsTab = (tab === "extra2" && getCustomCommentsEnabled());
     var showTaskFab = TASK_MOVABLE_TABS.indexOf(tab) !== -1 || isCommentsTab;
-    if(addFab) addFab.classList.toggle("visible", showTaskFab);
+    // Шаг 11 ТЗ синхронизации: viewer не должен видеть "+" на вкладке
+    // "Общие задачи" — сама вкладка при этом остаётся движимой
+    // (showTaskFab ниже управляет ещё и домиком-заглушкой/скрепкой/Аа и
+    // т.п., их этот шаг не трогает), поэтому гасим только саму кнопку "+",
+    // отдельным условием, не через showTaskFab.
+    var isJointReadOnlyTab = tab === "jointtasks" && isGroupTasksReadOnly();
+    if(addFab) addFab.classList.toggle("visible", showTaskFab && !isJointReadOnlyTab);
     // скрепка/Аа/текстовыделитель/Ж видны в тех же случаях, что и "+" (см.
     // ТЗ пользователя от 31.08 — все стоят в одном ряду с ней).
     var formatWrap = document.getElementById("taskFormatWrap");
@@ -2647,6 +2675,14 @@
       applyChapterColorClass(item, (enabled && input.checked && clr) ? clr : null);
     });
   }
+  // Единая точка записи __firstRead (шаг 9, 23.09) — вызывается и отсюда
+  // (первая отметка главы), и из ensureFirstReadInitialized (восстановление
+  // задним числом по самой ранней записи в state); раньше оба места писали
+  // state["__firstRead"] напрямую в обход одной точки.
+  function setFirstReadState(ts){
+    state["__firstRead"] = {c: ts, t: ts};
+    settingsShadowSet("__firstRead", ts, ts); // Шаг 9 (TASK_UNIFIED_SYNC.md, 23.09)
+  }
   function cycleChapterState(bookName, key, input, item){
     var prevRec = state[key];
     var wasChecked = !!(prevRec && prevRec.c);
@@ -2667,7 +2703,7 @@
 
     if(newChecked && !wasChecked){
       if(!state["__firstRead"] || state["__firstRead"].c == null){
-        state["__firstRead"] = {c: Date.now(), t: Date.now()};
+        setFirstReadState(Date.now());
       }
       checkedPerBook[bookName]++;
       totalChecked++;
@@ -2738,10 +2774,12 @@
   }
 
   function selectTheme(themeId){
-    state[THEME_KEY] = {c: themeId, t: Date.now()};
+    var ts = Date.now();
+    state[THEME_KEY] = {c: themeId, t: ts};
     saveLocalStateNow();
     applyThemeToPage(themeId);
     scheduleCloudPush();
+    settingsShadowSet("theme", themeId, ts); // Шаг 9 (TASK_UNIFIED_SYNC.md, 22.09) — теневая копия в новом сторе настроек
   }
 
   function renderThemeDots(){
@@ -2924,7 +2962,7 @@
         if(minT === null || state[k].t < minT) minT = state[k].t;
       }
     });
-    if(minT !== null){ state["__firstRead"] = {c: minT, t: minT}; saveLocalState(); }
+    if(minT !== null){ setFirstReadState(minT); saveLocalState(); }
   }
 
   // ===================== ПОЗДРАВЛЕНИЕ =====================
@@ -4348,10 +4386,17 @@
                                              // но этот список собирался по памяти о "текущих
                                              // putCloudBlob/patchNotesCloud веток", а не по grep.
     "s89Template": true,                    // S89Fill — подложка бланка S-89
-    "personalTasks": true                   // 20.09 (TASK_UNIFIED_SYNC.md, шаг 6): теневой store личных
+    "personalTasks": true,                  // 20.09 (TASK_UNIFIED_SYNC.md, шаг 6): теневой store личных
                                              // задач в sync-engine (syncengine_personalbinding.js,
                                              // /syncs/<syncId>/personalTasks/<id> = {c,t}) — у него свой
                                              // цикл (транспорт движка), в общий state НЕ подмешивается
+    "settings": true,                       // 22.09 (TASK_UNIFIED_SYNC.md, шаг 9): теневой store
+                                             // настроек (см. раздел «НАСТРОЙКИ: ТЕНЕВАЯ ЗАПИСЬ…» ниже),
+                                             // /syncs/<syncId>/settings/<id> = {c,t} — тот же приём, что
+                                             // и у personalTasks выше
+    "goals": true                           // 23.09 (TASK_UNIFIED_SYNC.md, шаг 9): теневой store целей
+                                             // чтения (см. раздел «ЦЕЛИ ЧТЕНИЯ: ТЕНЕВАЯ ЗАПИСЬ…» ниже),
+                                             // /syncs/<syncId>/goals/<goalId> = {c,t}
   };
   function stripCloudReservedSubtrees(cloudData, label){
     if(!cloudData) return cloudData;
@@ -4838,10 +4883,11 @@
     return "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   }
 
-  function createPairing(pairCode, groupId, adminDeviceId){
+  function createPairing(pairCode, groupId, adminDeviceId, role){
     var payload = {
       groupId: groupId,
       adminDeviceId: adminDeviceId,
+      role: role || "member", // Шаг 11 (22.09): "member" (полный доступ) или "viewer" (только чтение)
       createdAt: Date.now(),
       expiresAt: Date.now() + PAIRING_EXPIRY_MS
     };
@@ -4881,9 +4927,11 @@
     });
   }
 
-  // /groups/<groupId>/members/<deviceId> — {role, joinedAt}, см.
-  // TASK_SHARED_TASKS.md раздел 3.1. Список/объект, а не единственное
-  // поле — задел под будущее поднятие MAX_GROUP_MEMBERS (не часть этого шага).
+  // /groups/<groupId>/members/<deviceId> — {role, joinedAt}. Список/объект, а не
+  // единственное поле — под произвольное число участников (TASK_UNIFIED_SYNC.md,
+  // Шаг 11, 22.09: до этого шага UI не давал админу пригласить больше одного
+  // человека — не ограничение формата, см. handleCreateGroupPairCode/
+  // renderGroupCreateRoleChoice ниже). role: "admin" | "member" | "viewer".
   function writeGroupMember(groupId, memberDeviceId, role){
     var payload = { role: role, joinedAt: Date.now() };
     return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/members/" + encodeURIComponent(memberDeviceId) + ".json", {
@@ -4911,22 +4959,46 @@
       '<button class="modal-btn primary" id="mGroupCreate">Это первое устройство — создать код привязки</button>' +
       '<button class="modal-btn" id="mGroupJoin">У меня есть код привязки с другого устройства</button>';
     bindClose();
-    document.getElementById("mGroupCreate").addEventListener("click", renderGroupCreateWarning);
+    document.getElementById("mGroupCreate").addEventListener("click", function(){ renderGroupCreateWarning(); });
     document.getElementById("mGroupJoin").addEventListener("click", renderGroupJoinScreen);
   }
 
-  // п. 2.2.1 ТЗ — текст дословный, кнопки "Продолжить"/"Отмена".
-  function renderGroupCreateWarning(){
+  // п. 2.2.1 ТЗ — текст дословный, кнопки "Продолжить"/"Отмена". groupId —
+  // Шаг 11 (22.09): если задан (админ уже привязан и приглашает ЕЩЁ одного
+  // участника — см. пункт меню "Пригласить участника" в renderTaskJointMenu
+  // ниже), предупреждение про первую привязку не показывается — группа уже
+  // существует, дальше сразу выбор роли для НОВОГО кода.
+  function renderGroupCreateWarning(groupId){
+    if(groupId) return renderGroupCreateRoleChoice(groupId);
     modalBox.innerHTML = modalHeader("Внимание",
         "Задачи с этой вкладки станут видны всем, кто подключится к общим задачам.") +
       '<button class="modal-btn primary" id="mGroupCreateContinue">Продолжить</button>' +
       '<button class="modal-btn" id="mBack">Отмена</button>';
     bindClose();
     document.getElementById("mBack").addEventListener("click", renderGroupPairingHome);
-    document.getElementById("mGroupCreateContinue").addEventListener("click", handleCreateGroupPairCode);
+    document.getElementById("mGroupCreateContinue").addEventListener("click", function(){ renderGroupCreateRoleChoice(null); });
   }
 
-  function handleCreateGroupPairCode(){
+  // Шаг 11 (22.09): выбор роли для НОВОГО кода привязки — "участник" (видит и
+  // редактирует общие задачи наравне с админом) или "только чтение" (видит,
+  // но не может ни создать, ни отметить выполненной, ни удалить — см.
+  // isGroupTasksReadOnly() и её использование в блоке "ОБЩИЕ ЗАДАЧИ: ХРАНЕНИЕ
+  // И CRUD" выше). groupId — существующая группа (приглашение ещё одного
+  // участника) или null (первая привязка — handleCreateGroupPairCode сам
+  // создаст новую группу).
+  function renderGroupCreateRoleChoice(groupId){
+    modalBox.innerHTML = modalHeader("Доступ для нового устройства",
+        "Полный доступ — устройство видит общие задачи и может их менять. Только чтение — устройство видит общие задачи, но не может их менять.") +
+      '<button class="modal-btn primary" id="mGroupRoleMember">Полный доступ</button>' +
+      '<button class="modal-btn" id="mGroupRoleViewer">Только чтение</button>' +
+      '<button class="modal-btn" id="mBack">Отмена</button>';
+    bindClose();
+    document.getElementById("mBack").addEventListener("click", renderGroupPairingHome);
+    document.getElementById("mGroupRoleMember").addEventListener("click", function(){ handleCreateGroupPairCode(groupId, "member"); });
+    document.getElementById("mGroupRoleViewer").addEventListener("click", function(){ handleCreateGroupPairCode(groupId, "viewer"); });
+  }
+
+  function handleCreateGroupPairCode(existingGroupId, inviteRole){
     modalBox.innerHTML = modalHeader("Создаём код…", "Секунду, подключаемся к облачному хранилищу.");
     bindClose();
     if(!isNetworkAvailable()){
@@ -4935,12 +5007,15 @@
       document.getElementById("mBack").addEventListener("click", renderGroupPairingHome);
       return;
     }
-    var groupId = generateGroupId();
+    var groupId = existingGroupId || generateGroupId();
     var pairCode = generatePairCode();
-    createPairing(pairCode, groupId, getDeviceId()).then(function(){
-      return writeGroupMember(groupId, getDeviceId(), "admin");
+    // Шаг 11: если группа уже есть (existingGroupId) — админ уже
+    // зарегистрирован в /members, повторно писать не нужно, только новый код.
+    var adminStep = existingGroupId ? Promise.resolve() : writeGroupMember(groupId, getDeviceId(), "admin");
+    createPairing(pairCode, groupId, getDeviceId(), inviteRole).then(function(){
+      return adminStep;
     }).then(function(){
-      saveSharedGroup({groupId: groupId, role: "admin"});
+      if(!existingGroupId) saveSharedGroup({groupId: groupId, role: "admin"});
       // п. 3.5 ТЗ — до подключения первого участника isGroupTasksActive()
       // для role:"admin" остаётся false (см. пояснение в разделе «ОБЩИЕ
       // ЗАДАЧИ: ХРАНЕНИЕ И CRUD» ниже), так что этот вызов пока не переключит
@@ -5065,7 +5140,7 @@
       return;
     }
     fetchPairing(pairCode).then(function(pairing){
-      pendingGroupJoin = { pairCode: pairCode, groupId: pairing.groupId };
+      pendingGroupJoin = { pairCode: pairCode, groupId: pairing.groupId, role: pairing.role === "viewer" ? "viewer" : "member" };
       renderGroupJoinChecklist();
     }).catch(function(err){
       console.error(err);
@@ -5137,14 +5212,14 @@
     var groupId = pendingGroupJoin.groupId;
     modalBox.innerHTML = modalHeader("Подключаемся…", "Регистрируем устройство в группе.");
     bindClose();
-    writeGroupMember(groupId, getDeviceId(), "member").then(function(){
+    writeGroupMember(groupId, getDeviceId(), pendingGroupJoin.role).then(function(){
       // код одноразовый (см. PAIRING_EXPIRY_MS выше) — подчищаем сразу
       // после использования, не дожидаясь истечения срока
       deletePairing(pairCode).catch(function(){});
       getAllTasks().filter(function(t){ return t.c.tab === "jointtasks"; }).forEach(function(t){
         moveTaskToTab(t.id, "inbox");
       });
-      saveSharedGroup({groupId: groupId, role: "member"});
+      saveSharedGroup({groupId: groupId, role: pendingGroupJoin.role});
       refreshJointTasksData();
       pendingGroupJoin = null;
       modalBox.innerHTML = modalHeader("Подключено", "Устройство подключено к общим задачам.") +
@@ -5166,13 +5241,18 @@
   // см. index.html/modals.css, TASK_SHARED_TASKS.md, Шаг 4, п. 2.1 ТЗ).
   // Состав пунктов зависит от текущего состояния группы:
   //   - до привязки (sharedGroup === null) — только "Синхронизация";
-  //   - админ (sharedGroup.role === "admin") — "Отвязать пользователя" +
-  //     "Архив общих задач". Видна сразу после создания кода привязки, не
-  //     дожидаясь подключения первого участника (isGroupTasksActive() тут
-  //     намеренно НЕ используется — та завязана ещё и на миграцию данных,
-  //     п. 3.5 ТЗ, это другая, более узкая проверка).
+  //   - админ (sharedGroup.role === "admin") — "Пригласить участника" (Шаг 11,
+  //     22.09 — произвольное число участников, не только один) +
+  //     "Отвязать пользователя" + "Архив общих задач". Видна сразу после
+  //     создания кода привязки, не дожидаясь подключения первого участника
+  //     (isGroupTasksActive() тут намеренно НЕ используется — та завязана ещё
+  //     и на миграцию данных, п. 3.5 ТЗ, это другая, более узкая проверка).
   //   - участник (sharedGroup.role === "member") — "Отписаться от общих
   //     задач" + "Архив общих задач".
+  //   - только чтение (sharedGroup.role === "viewer", Шаг 11) — те же два
+  //     пункта, что у участника (виден и архив, отписаться тоже можно) — но
+  //     сами задачи в списке нередактируемы, см. isGroupTasksReadOnly() в
+  //     блоке "ОБЩИЕ ЗАДАЧИ: ХРАНЕНИЕ И CRUD" выше.
   // Вызывается заново перед КАЖДЫМ открытием попапа (см. initTaskGlobalToolbar
   // выше), не один раз — состояние группы могло измениться, пока попап был
   // закрыт.
@@ -5183,9 +5263,13 @@
     if(!sharedGroup){
       items.push({id:"mtjSync", label:"Синхронизация", action:openGroupPairingModal});
     } else if(sharedGroup.role === "admin"){
+      items.push({id:"mtjInvite", label:"Пригласить участника", action:function(){
+        modalOverlay.classList.add("open");
+        renderGroupCreateWarning(sharedGroup.groupId);
+      }});
       items.push({id:"mtjUnlink", label:"Отвязать пользователя", action:openGroupUnlinkModal});
       items.push({id:"mtjArchive", label:"Архив общих задач", action:openGroupJointArchiveTab});
-    } else if(sharedGroup.role === "member"){
+    } else if(sharedGroup.role === "member" || sharedGroup.role === "viewer"){
       items.push({id:"mtjUnsub", label:"Отписаться от общих задач", action:openGroupUnsubscribeModal});
       items.push({id:"mtjArchive", label:"Архив общих задач", action:openGroupJointArchiveTab});
     }
@@ -5259,8 +5343,20 @@
   // администрируется кем-то другим).
   function isGroupTasksActive(){
     if(!sharedGroup || !sharedGroup.groupId) return false;
-    if(sharedGroup.role === "member") return true;
+    if(sharedGroup.role === "member" || sharedGroup.role === "viewer") return true;
     return isAdminMigrationDone(sharedGroup.groupId);
+  }
+  // TASK_UNIFIED_SYNC.md, Шаг 11 (22.09): роль "viewer" — видит общие задачи и архив
+  // (isGroupTasksActive выше), но не редактирует. Точечная проверка в каждой точке
+  // мутации (createGroupTask/saveGroupTaskDataP/checkGroupTaskDone/
+  // deleteGroupTaskPermanently/moveGroupTaskToPersonal/restoreGroupTaskFromArchive/
+  // deleteGroupArchivedTaskPermanently) — не общий gate где-то в одном месте, потому
+  // что мутации приходят из разных обработчиков UI, а сами кнопки/чекбоксы UI
+  // отдельно не прячутся (шаг про модель доступа, не про полную переверстку вкладки) —
+  // проверка на уровне данных гарантирует, что даже случайно оставшаяся активной
+  // кнопка не даст ничего сломать.
+  function isGroupTasksReadOnly(){
+    return !!sharedGroup && sharedGroup.role === "viewer";
   }
 
   function isGroupTaskId(id){
@@ -5365,7 +5461,7 @@
   // чтобы дождаться постановки в очередь); saveGroupTaskData — обёртка для
   // всех остальных мест, тип возврата у неё прежний (undefined).
   function saveGroupTaskDataP(id, data){
-    if(!sharedGroup) return null;
+    if(!sharedGroup || isGroupTasksReadOnly()) return null;
     loadGroupTasksCache(sharedGroup.groupId);
     // та же причина, что у createdAt в личном saveTaskData ниже — стабильная
     // позиция в списке, не прыгает при каждой правке
@@ -5384,6 +5480,7 @@
       .sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
   }
   function createGroupTask(){
+    if(isGroupTasksReadOnly()) return null;
     var id = genGroupTaskId();
     saveGroupTaskData(id, {text:"", tab:"jointtasks", checked:false, checkedAt:null,
       completionKey:null, nextForProjectId:null, flag:null, inWork:false,
@@ -5391,7 +5488,7 @@
     return id;
   }
   function deleteGroupTaskPermanently(id){
-    if(!sharedGroup) return;
+    if(!sharedGroup || isGroupTasksReadOnly()) return;
     loadGroupTasksCache(sharedGroup.groupId);
     // тумбстоун {c:null,t} + постановка на отправку — один вызов (Шаг 3, 19.09)
     getGroupTasksBinding().remove(id).catch(logGroupTasksSyncError);
@@ -5407,7 +5504,7 @@
   // (архив — отдельный облачный путь). С Шага 4.2 (19.09) перенос — одна
   // атомарная операция движка (запись в архив + тумбстоун в /tasks, см. ниже).
   function checkGroupTaskDone(id){
-    if(!sharedGroup) return;
+    if(!sharedGroup || isGroupTasksReadOnly()) return;
     var task = getGroupTaskById(id);
     if(!task || task.c.checked) return;
     // Копия, а не правка task.c на месте: task.c — объект прямо из кэша /tasks,
@@ -5483,6 +5580,55 @@
     syncEngineRuntime = {engine: engine, transport: transport};
     return syncEngineRuntime;
   }
+
+  // ===================== ФАЙЛОВЫЙ РЕЕСТР: ЗЕРКАЛО В ДВИЖКЕ (TASK_UNIFIED_SYNC.md,
+  // Шаг 12, 22.09) =====================
+  // Манифест syncFileRegistry (books/images) по-прежнему живёт ГДЕ ЖИЛ — сырыми PATCH/GET
+  // через patchNotesCloud/fetchNotesCloudPath (/syncs/<syncId>/files/<kind>/<hash>), сама
+  // раздача байтов (fileBlobs, лимиты FILE_SYNC_SIZE_LIMIT_BYTES, пул скачивания
+  // FILE_SYNC_DOWNLOAD_CONCURRENCY) НЕ переписана и не переезжает на движок — риск того, что
+  // не входит в рамки этого шага. Задача шага — только ВИДИМОСТЬ: метаданные реестра (хэш,
+  // имя, размер, кто добавил) зеркалятся READ-ONLY-копией в отдельный store движка
+  // ("filesRegistry", id = "<kind>:<hash>"), чтобы диагностика (getDirty/listRecords и т.п.)
+  // видела файловый реестр наравне с остальными store, а не как единственное необъяснимое
+  // исключение. Store НЕ подключён к транспорту (нет cloudPath, transport.attachStore не
+  // вызывается) — dirty-флаги, которые проставляет saveRecord/deleteRecord, никуда не
+  // отправляются, это чисто локальная зеркальная копия; ошибки зеркалирования гасятся на
+  // месте (best-effort, не должны мешать настоящей синхронизации файлов).
+  var FILES_REGISTRY_STORE_ID = "filesRegistry";
+  var filesRegistryStoreReady = false;
+  function ensureFilesRegistryStore(){
+    var rt = getSyncEngineRuntime();
+    if(!filesRegistryStoreReady){
+      if(!rt.engine.isRegistered(FILES_REGISTRY_STORE_ID)) rt.engine.registerStore(FILES_REGISTRY_STORE_ID, {});
+      filesRegistryStoreReady = true;
+    }
+    return rt.engine;
+  }
+  // Снимок ОДНОГО пространства (kind) целиком — вызывается из syncFileRegistry после того,
+  // как облачный реестр этого kind уже получен (см. `registry` там), поэтому один вызов на
+  // цикл сверки покрывает и создание, и тумбстоуны, без отдельных зеркальных вызовов внутри
+  // registerFileInRegistry/registerFileDeletion.
+  function mirrorFileRegistrySnapshot(kind, registryObj){
+    try{
+      var engine = ensureFilesRegistryStore();
+      Object.keys(registryObj || {}).forEach(function(hash){
+        var entry = registryObj[hash] || {};
+        var id = kind + ":" + hash;
+        if(entry.deletedAt){
+          engine.deleteRecord(FILES_REGISTRY_STORE_ID, id, {updatedAt: entry.deletedAt}).catch(function(){});
+        }else{
+          var meta = {kind: kind, hash: hash, name: entry.name || null,
+            size: typeof entry.size === "number" ? entry.size : null, addedBy: entry.addedBy || null};
+          var mopts = typeof entry.addedAt === "number" ? {updatedAt: entry.addedAt} : undefined;
+          engine.saveRecord(FILES_REGISTRY_STORE_ID, id, meta, mopts).catch(function(){});
+        }
+      });
+    }catch(err){
+      syncEngineLog("filesRegistry mirror(" + kind + "): " + (err && err.message ? err.message : err));
+    }
+  }
+
   function getGroupTasksBinding(){
     if(groupTasksBinding) return groupTasksBinding;
     var rt = getSyncEngineRuntime();
@@ -5630,6 +5776,167 @@
       getPersonalTasksBinding().remove(id, t);
     }catch(err){
       syncEngineLog("PersonalShadow: remove " + id + " — " + personalShadowErrText(err));
+    }
+  }
+
+  // ===================== НАСТРОЙКИ: ТЕНЕВАЯ ЗАПИСЬ В SYNC-ENGINE
+  // (TASK_UNIFIED_SYNC.md, Шаг 9, 22.09) =====================
+  // Решение по разделу 0.4 ТЗ: ОДИН общий record «настройки пользователя» в
+  // новом движке (не отдельная запись на каждый параметр) — кандидатов
+  // немного, и, в отличие от заметок/задач, их набор не растёт без
+  // ограничения, гранулярный per-параметр store был бы просто лишними
+  // движущимися частями. Облако: /syncs/<syncId>/settings/prefs = {c,t},
+  // шифрование личным ключом — переиспользуется syncengine_personalbinding.js
+  // (createPersonalBinding), как у личных задач выше: готовый, уже
+  // протестированный механизм привязки к syncId/IndexedDB/транспорту, вместо
+  // того чтобы писать для одного record упрощённый вариант заново. Ветка
+  // "settings" внесена в CLOUD_RESERVED_SUBTREES (см. выше).
+  //
+  // Как и личные задачи на Шаге 6: `state` остаётся ЕДИНСТВЕННЫМ источником
+  // истины, который читает UI — это ТЕНЕВАЯ копия для будущего единого
+  // транспорта, не переключение источника (тут нет ни разбора конфликтов, ни
+  // cutover-флага — сами параметры настроек меняются редко и на других
+  // устройствах пока не применяются автоматически, приём "получить с
+  // облака, но ещё не показывать" уместен, см. Шаги 7-8 у личных задач как
+  // прецедент разделения на "записать" и "применить к UI"). settingsShadowSet
+  // читает текущий record из ЛОКАЛЬНОГО store движка (getRecord — не ждёт
+  // сеть), подменяет одно поле и пишет record целиком обратно — один вызов
+  // движка вместо блоб-merge всего state. Гонка при двух почти одновременных
+  // вызовах теоретически возможна (оба читают record до того, как первый
+  // допишет) — при столь редких изменениях (клики по настройкам) риск
+  // ничтожен и самоисправляется следующим изменением; жертвовать этим ради
+  // мьютекса здесь избыточно.
+  //
+  // Перенесено на этот шаг: тема оформления (selectTheme). Остальные
+  // кандидаты раздела 0.4 (цели чтения, счётчик часов, настроение, цветные
+  // отметки глав, цитата дня, закладка книги, тумблер синка книг) — решение
+  // принято (тот же механизм, тот же record), сам перенос — по одному полю,
+  // следующим шагом (инфраструктура уже готова, см. settingsShadowSet ниже).
+  // Явное решение по п. 0.4 "уточнить, локальный ли getBooksSyncEnabled" —
+  // ОСТАЁТСЯ локальным флагом устройства (тумблер для слабых устройств,
+  // рассинхронизация книг между устройствами тут — не баг, а сам смысл
+  // параметра, см. комментарий у BOOKS_SYNC_ENABLED_KEY); синим ходом не
+  // становится.
+  var SETTINGS_SHADOW_CLOUD_BRANCH = "settings";
+  var SETTINGS_RECORD_ID = "prefs";
+  var settingsBinding = null;
+  var settingsShadowReady = false;
+  function settingsShadowErrText(err){ return err && err.message ? err.message : String(err); }
+  function getSettingsBinding(){
+    if(settingsBinding) return settingsBinding;
+    if(!window.SyncEnginePersonalBinding || !window.SyncEnginePersonalCrypto){
+      throw new Error("syncengine_personalbinding.js / syncengine_personalcrypto.js не загружены (index.html)");
+    }
+    var rt = getSyncEngineRuntime();
+    settingsBinding = window.SyncEnginePersonalBinding.createPersonalBinding({
+      engine: rt.engine,
+      transport: rt.transport,
+      makeHooks: window.SyncEnginePersonalCrypto.makePersonalHooks,
+      getSyncId: function(){ return syncId; },
+      name: "settings",
+      keyPrefix: "settings:", // формально обязателен контрактом binding'а; save/remove здесь вызываются напрямую по фиксированному id "prefs" — не используется
+      syncsPath: FIREBASE_SYNCS_PATH,
+      cloudBranch: SETTINGS_SHADOW_CLOUD_BRANCH,
+      isCloudEnabled: function(){ return true; },
+      canSync: isNetworkAvailable,
+      log: syncEngineLog
+    });
+    return settingsBinding;
+  }
+  function initSettingsShadow(){
+    try{
+      getSettingsBinding();
+    }catch(err){
+      syncEngineLog("SettingsShadow: не запущена — " + settingsShadowErrText(err));
+      return;
+    }
+    settingsShadowReady = true;
+  }
+  // Правит ОДНО поле key внутри общего record "prefs" ({<key>: {c, t}, ...}) —
+  // читает текущий record из локального store движка, подменяет поле, пишет
+  // весь record обратно одним вызовом save().
+  function settingsShadowSet(key, value, t){
+    if(!settingsShadowReady) return;
+    var ts = t == null ? Date.now() : t;
+    try{
+      var binding = getSettingsBinding();
+      var rt = getSyncEngineRuntime();
+      var storeId = binding.ensureStoreId();
+      rt.engine.getRecord(storeId, SETTINGS_RECORD_ID).then(function(rec){
+        var data = (rec && rec.data) ? rec.data : {};
+        var merged = {};
+        Object.keys(data).forEach(function(k){ merged[k] = data[k]; });
+        merged[key] = {c: value, t: ts};
+        return binding.save(SETTINGS_RECORD_ID, merged, ts);
+      }).catch(function(err){
+        syncEngineLog("SettingsShadow: save " + key + " — " + settingsShadowErrText(err));
+      });
+    }catch(err){
+      syncEngineLog("SettingsShadow: save " + key + " — " + settingsShadowErrText(err));
+    }
+  }
+
+  // ===================== ЦЕЛИ ЧТЕНИЯ: ТЕНЕВАЯ ЗАПИСЬ В SYNC-ENGINE
+  // (TASK_UNIFIED_SYNC.md, Шаг 9, 23.09) =====================
+  // Решение по разделу 0.4 ТЗ (уточнено с пользователем 23.09): цели —
+  // НЕ скаляр (у каждой цели внутри свой список задач-шагов, до ~20 штук),
+  // поэтому не в общий record "prefs", а отдельный store, по тому же
+  // образцу, что личные задачи выше (Шаг 6): одна запись движка на одну
+  // цель (id = goalId), список задач внутри цели не разбивается на
+  // отдельные записи — переносится и меняется вместе с целью целиком, как
+  // и раньше в state. Облако: /syncs/<syncId>/goals/<goalId> = {c,t},
+  // шифрование личным ключом — тот же createPersonalBinding. Как и у
+  // settings/personalTasks: state остаётся ЕДИНСТВЕННЫМ источником истины
+  // для UI, это теневая копия; приём данных ИЗ облака сюда не входит (см.
+  // общее примечание у settingsShadowSet выше — пункт 3 шага 9).
+  var GOALS_SHADOW_CLOUD_BRANCH = "goals";
+  var goalsBinding = null;
+  var goalsShadowReady = false;
+  function goalsShadowErrText(err){ return err && err.message ? err.message : String(err); }
+  function getGoalsBinding(){
+    if(goalsBinding) return goalsBinding;
+    if(!window.SyncEnginePersonalBinding || !window.SyncEnginePersonalCrypto){
+      throw new Error("syncengine_personalbinding.js / syncengine_personalcrypto.js не загружены (index.html)");
+    }
+    var rt = getSyncEngineRuntime();
+    goalsBinding = window.SyncEnginePersonalBinding.createPersonalBinding({
+      engine: rt.engine,
+      transport: rt.transport,
+      makeHooks: window.SyncEnginePersonalCrypto.makePersonalHooks,
+      getSyncId: function(){ return syncId; },
+      name: "goals",
+      keyPrefix: "goal:",
+      syncsPath: FIREBASE_SYNCS_PATH,
+      cloudBranch: GOALS_SHADOW_CLOUD_BRANCH,
+      isCloudEnabled: function(){ return true; },
+      canSync: isNetworkAvailable,
+      log: syncEngineLog
+    });
+    return goalsBinding;
+  }
+  function initGoalsShadow(){
+    try{
+      getGoalsBinding();
+    }catch(err){
+      syncEngineLog("GoalsShadow: не запущена — " + goalsShadowErrText(err));
+      return;
+    }
+    goalsShadowReady = true;
+  }
+  function goalsShadowSave(id, data, t){
+    if(!goalsShadowReady) return;
+    try{
+      getGoalsBinding().save(id, data, t);
+    }catch(err){
+      syncEngineLog("GoalsShadow: save " + id + " — " + goalsShadowErrText(err));
+    }
+  }
+  function goalsShadowRemove(id, t){
+    if(!goalsShadowReady) return;
+    try{
+      getGoalsBinding().remove(id, t);
+    }catch(err){
+      syncEngineLog("GoalsShadow: remove " + id + " — " + goalsShadowErrText(err));
     }
   }
 
@@ -6344,7 +6651,7 @@
   // completedBy сбрасывается — как completionKey у личной задачи при
   // восстановлении (см. restoreTaskFromArchive).
   function restoreGroupTaskFromArchive(id){
-    if(!sharedGroup) return;
+    if(!sharedGroup || isGroupTasksReadOnly()) return;
     loadGroupArchiveCache(sharedGroup.groupId);
     loadGroupTasksCache(sharedGroup.groupId);
     var rec = groupArchiveState[id];
@@ -6365,7 +6672,7 @@
   // запись ИМЕННО в /groups/<groupId>/archive (не путать с
   // deleteGroupTaskPermanently выше — та про /tasks, активные задачи).
   function deleteGroupArchivedTaskPermanently(id){
-    if(!sharedGroup) return;
+    if(!sharedGroup || isGroupTasksReadOnly()) return;
     getGroupArchiveBinding().remove(id).catch(logGroupArchiveSyncError);
     if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
   }
@@ -6493,7 +6800,7 @@
     if(!sharedGroup) return;
     if(isOfflineMode()) return; // режим оффлайн: ни проверки членства, ни синка группы
     syncEngineLog("refreshJointTasksData: role=" + sharedGroup.role + ", активна=" + isGroupTasksActive() + ", online=" + isNetworkAvailable());
-    if(sharedGroup.role === "member"){
+    if(sharedGroup.role === "member" || sharedGroup.role === "viewer"){
       // Шаг 5: у отвязки нет push-уведомления участнику — единственный
       // способ узнать, что админ его отвязал (см. handleGroupUnlinkKeepData/
       // handleGroupUnlinkDeleteData), это переспросить сервер тем же
@@ -6601,9 +6908,8 @@
     });
   }
 
-  // Убирает из группы всех участников, кроме админа (сейчас
-  // MAX_GROUP_MEMBERS=1, так что это ровно один-единственный участник, но
-  // код не хардкодит это число — переберёт всех, кто найдётся).
+  // Убирает из группы всех участников, кроме админа — при отвязке "разрывает"
+  // разом всех: и member, и viewer, независимо от их числа (Шаг 11, 22.09).
   function removeAllNonAdminGroupMembers(groupId){
     return fetchGroupMembers(groupId).then(function(members){
       members = members || {};
@@ -6802,7 +7108,7 @@
   // считаем, что участник всё ещё в группе, и пробуем снова при следующей
   // возможности.
   function checkGroupMembershipStillValid(){
-    if(!sharedGroup || sharedGroup.role !== "member") return Promise.resolve(true);
+    if(!sharedGroup || (sharedGroup.role !== "member" && sharedGroup.role !== "viewer")) return Promise.resolve(true);
     var groupId = sharedGroup.groupId;
     return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/members/" + encodeURIComponent(getDeviceId()) + ".json", {method:"GET"}, 8000).then(function(res){
       if(!res.ok) throw new Error("group_membership_check_failed_" + res.status);
@@ -6875,7 +7181,7 @@
   }
 
   function handleGroupUnsubscribeConfirmed(){
-    if(!sharedGroup || sharedGroup.role !== "member") return closeModal();
+    if(!sharedGroup || (sharedGroup.role !== "member" && sharedGroup.role !== "viewer")) return closeModal();
     var groupId = sharedGroup.groupId;
     modalBox.innerHTML = modalHeader("Отписываемся…", "Секунду.");
     bindClose();
@@ -10337,6 +10643,7 @@
       adapters.getLocalManifest().catch(function(){ return {}; })
     ]).then(function(results){
       var registry = results[0] || {}, devices = results[1] || {}, requests = results[2] || {}, manifest = results[3] || {};
+      mirrorFileRegistrySnapshot(kind, registry); // Шаг 12: зеркало метаданных в движок (см. выше), best-effort
       var localHashes = {}; // hash -> true, что реально есть локально на этом устройстве
       Object.keys(manifest).forEach(function(h){ localHashes[h] = true; });
       var now = Date.now();
@@ -15732,7 +16039,19 @@
     return getHourGoal() === 50 && getClosedSegmentsCountThisYear() < getOverdueCatchUpCount();
   }
 
-  function setHourState(key, value){ state[key] = {c: value, t: Date.now()}; }
+  // Шаг 9 (TASK_UNIFIED_SYNC.md, 23.09): setHourState — единственная точка
+  // мутации не только для ключей счётчика часов (HOUR_*), но и для двух
+  // скалярных ключей настроения из mood.js (MOOD_FIRST_LOG_KEY,
+  // MOOD_DATA_RESET_AT_KEY, см. deps.setHourState там) — settingsShadowSet
+  // здесь закрывает разом оба пункта раздела 0.4 ТЗ («счётчик часов
+  // служения» и «настроение»). Записи настроения по отдельным сессиям
+  // (moodlog:*/moodsession:*) сюда не входят — это растущая коллекция,
+  // не скалярная настройка, её сюда переносить не нужно.
+  function setHourState(key, value){
+    var t = Date.now();
+    state[key] = {c: value, t: t};
+    settingsShadowSet(key, value, t);
+  }
 
   function activateHourCounter(goal, monthsToSeptember){
     var now = Date.now();
@@ -16969,14 +17288,18 @@
     return (rec && rec.c) ? rec.c : null;
   }
   function saveGoal(goalId, data){
-    state["goal:" + goalId] = {c: data, t: Date.now()};
+    var t = Date.now();
+    state["goal:" + goalId] = {c: data, t: t};
     saveLocalStateNow();
     scheduleCloudPush();
+    goalsShadowSave(goalId, data, t); // Шаг 9 (TASK_UNIFIED_SYNC.md, 23.09)
   }
   function deleteGoal(goalId){
-    state["goal:" + goalId] = {c: null, t: Date.now()};
+    var t = Date.now();
+    state["goal:" + goalId] = {c: null, t: t};
     saveLocalStateNow();
     scheduleCloudPush();
+    goalsShadowRemove(goalId, t); // Шаг 9 (TASK_UNIFIED_SYNC.md, 23.09)
   }
   function createNewGoal(){
     var id = "g" + Date.now() + Math.random().toString(36).slice(2,7);
@@ -17572,9 +17895,12 @@
     // хранилища (localStorage/облако личного стейта vs зашифрованный
     // /groups/<groupId>/tasks), простой сменой поля c.tab не обойтись —
     // вместо этого создаём новую запись в целевом хранилище с тем же
-    // содержимым и удаляем исходную (полностью, тумбстоуном, как обычное
-    // удаление задачи) — см. movePersonalTaskToGroup/moveGroupTaskToPersonal
-    // ниже.
+    // содержимым и удаляем исходную. С TASK_UNIFIED_SYNC.md, Шаг 10 (22.09) —
+    // создание+удаление на стороне движка (личный теневой store ↔ общий store
+    // группы) стало ОДНИМ атомарным вызовом (binding.moveTo → engine.moveRecord,
+    // с разными id по разные стороны границы — см. movePersonalTaskToGroup/
+    // moveGroupTaskToPersonal ниже); state/вид (Шаг 8) движок не знает, их
+    // мирроры — отдельно, синхронно, как и раньше.
     if(isGroupTaskId(id)){
       if(newTab === "jointtasks") return; // уже общая задача — переносить некуда
       moveGroupTaskToPersonal(id, newTab);
@@ -17591,38 +17917,79 @@
   // Перенос ОБЩЕЙ задачи в личное хранилище, на вкладку newTab (любая, кроме
   // "jointtasks" — та проверка уже сделана в moveTaskToTab выше). Создаёт
   // новую личную задачу с тем же текстом/отметками (та же логика
-  // homeTab/flag/inWork для вкладок "red"/"worktasks", что и в createTask)
-  // и permanently удаляет исходную общую запись (тумбстоуном в
-  // /groups/<groupId>/tasks — deleteGroupTaskPermanently). Поля, привязанные
-  // к своему хранилищу (createdBy/completedBy у общей задачи,
-  // completionKey/nextForProjectId — ссылаются на записи в конкретном
-  // state), в перенос не берутся — задача в новом хранилище живёт с нуля.
+  // homeTab/flag/inWork для вкладок "red"/"worktasks", что и в createTask).
+  // Поля, привязанные к своему хранилищу (createdBy/completedBy у общей
+  // задачи, completionKey/nextForProjectId — ссылаются на записи в
+  // конкретном state), в перенос не берутся — задача в новом хранилище
+  // живёт с нуля.
+  //
+  // TASK_UNIFIED_SYNC.md, Шаг 10 (22.09): раньше здесь были два независимых
+  // вызова ("создать в личном" + "удалить в общем") — между ними можно было
+  // остановиться и получить задачу сразу в обоих хранилищах или ни в одном.
+  // Пока личный теневой store включён (personalShadowReady) перенос на
+  // уровне движка теперь ОДИН атомарный вызов — GroupBinding.moveTo →
+  // engine.moveRecord (тумбстоун в /groups/<groupId>/tasks + запись в личном
+  // теневом store, с разными id: "gt..." → "tk...", opts.toRecordId; откат
+  // обеих сторон при частичном сбое). Личный ИСТОЧНИК ИСТИНЫ (state/вид,
+  // Шаг 8) движок не знает — его мирроры ниже, синхронно, как и раньше
+  // (ничего не ждут от промиса движка, ровно как personalShadowSave/Remove
+  // уже не ждёт state). Если теневой store выключен флагом устройства —
+  // деградация к прежним двум отдельным вызовам (тогда движок вообще не
+  // видит личную сторону границы).
   function moveGroupTaskToPersonal(id, newTab){
+    if(isGroupTasksReadOnly()) return;
     var task = getGroupTaskById(id);
     if(!task) return;
     var homeTab = (newTab === "red") ? "inbox" : (newTab === "worktasks" ? "next" : newTab);
     var flag = (newTab === "red") ? "red" : (task.c.flag || null);
     var inWork = (newTab === "worktasks") ? true : !!task.c.inWork;
     var newId = genTaskId();
-    saveTaskData(newId, {text: task.c.text || "", tab: homeTab, checked: false, checkedAt: null,
+    var content = {text: task.c.text || "", tab: homeTab, checked: false, checkedAt: null,
       completionKey: null, nextForProjectId: null, flag: flag, inWork: inWork,
-      remindAt: getTaskReminderAt(task)});
-    deleteGroupTaskPermanently(id);
+      remindAt: getTaskReminderAt(task)};
+    var ts = Date.now();
+    if(personalShadowReady && isPersonalShadowEnabled()){
+      getGroupTasksBinding().moveTo(getPersonalTasksBinding(), id, content, {toRecordId: newId, updatedAt: ts})
+        .catch(function(err){ logGroupMoveError("общее → личное (движок)", id, err); });
+    }else{
+      deleteGroupTaskPermanently(id);
+    }
+    state["task:" + newId] = {c: content, t: ts};
+    personalViewSet(newId, content, ts); // Шаг 8: и в вид (флаг cutover)
+    saveLocalStateNow();
+    scheduleCloudPush();
+    if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
     return newId;
   }
   // Перенос ЛИЧНОЙ задачи в общее хранилище группы (вкладка "Общие задачи") —
   // зеркально moveGroupTaskToPersonal выше: новая общая задача (createdBy —
-  // текущее устройство, completedBy пусто) + permanently удаляем исходную
-  // личную запись.
+  // текущее устройство, completedBy пусто). См. пояснение про Шаг 10 (22.09)
+  // выше — тот же атомарный engine.moveRecord через PersonalBinding.moveTo
+  // (личный теневой store → общий store группы, id "tk..." → "gt...",
+  // opts.toRecordId), state/вид — отдельный синхронный мирроr ниже.
   function movePersonalTaskToGroup(id){
     var task = getTaskById(id);
     if(!task) return;
     var newId = genGroupTaskId();
-    saveGroupTaskData(newId, {text: task.c.text || "", tab: "jointtasks", checked: false, checkedAt: null,
+    var content = {text: task.c.text || "", tab: "jointtasks", checked: false, checkedAt: null,
       completionKey: null, nextForProjectId: null, flag: task.c.flag || null, inWork: !!task.c.inWork,
       remindAt: getTaskReminderAt(task),
-      createdBy: getDeviceId(), completedBy: null});
-    deleteTaskPermanently(id);
+      createdBy: getDeviceId(), completedBy: null};
+    var ts = Date.now();
+    if(personalShadowReady && isPersonalShadowEnabled()){
+      getPersonalTasksBinding().moveTo(getGroupTasksBinding(), id, content, {toRecordId: newId, t: ts})
+        .then(function(res){
+          if(!res || !res.ok) logGroupMoveError("личное → общее (движок)", id, res && res.error);
+        });
+    }else{
+      saveGroupTaskData(newId, content);
+    }
+    if(task.c.completionKey) state[task.c.completionKey] = {c: null, t: ts};
+    state["task:" + id] = {c: null, t: ts};
+    personalViewSet(id, null, ts); // Шаг 8: тумбстоун и в вид (флаг cutover)
+    saveLocalStateNow();
+    scheduleCloudPush();
+    if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
     return newId;
   }
   // "В начало"/"В конец списка" (пиктограммы ARROW_TOP_ICON_SVG/
@@ -18653,7 +19020,16 @@
       tasks = tasks.filter(function(t){ return !t.c.nextForProjectId; });
     }
     var rowsHtml = tasks.map(function(t){ return buildTaskRowHtml(t); }).join("");
+    // Шаг 11 ТЗ синхронизации — подсказка "только чтение" в шапке вкладки
+    // для роли viewer (п. 3 задачи из шаг_11.txt: как подать viewer'у, что
+    // задачи нередактируемы). Рисуется только на самой "Общие задачи",
+    // только для isGroupTasksReadOnly() — простая текстовая плашка над
+    // списком, без нового CSS-класса в modals.css (инлайн-стиль).
+    var jointReadOnlyHintHtml = (tabKey === "jointtasks" && isGroupTasksReadOnly())
+      ? '<div class="task-joint-readonly-hint" style="padding:6px 12px;margin-bottom:4px;font-size:13px;color:#888;text-align:center;">Только чтение — вы не можете изменять эти задачи</div>'
+      : '';
     container.innerHTML =
+      jointReadOnlyHintHtml +
       '<div class="task-list task-grid-list" id="taskListWrap">' + rowsHtml + TASK_LIST_BOTTOM_SPACER_HTML + '</div>' +
       (tasks.length === 0 ? '<div class="task-empty">Здесь пока нет задач.</div>' : '');
     tasks.forEach(function(t){ bindTaskRow(t.id, tabKey); });
@@ -18671,6 +19047,14 @@
     }
 
     var fab = document.getElementById("taskAddFab");
+    // Шаг 11 ТЗ синхронизации — прячем "+" для viewer'а на вкладке "Общие
+    // задачи" (createGroupTask и так гейтится isGroupTasksReadOnly(), это
+    // только про UX: кликабельная кнопка, ничего не делающая по клику).
+    // Дублирует toggle в syncTaskFabRowForTab (тот срабатывает при
+    // переключении вкладки) — здесь то же самое ещё и при фоновой
+    // перерисовке уже открытой вкладки (rerenderJointTasksTabIfOpen), когда
+    // роль могла обновиться, а switchSettingsTab не вызывался.
+    if(fab && tabKey === "jointtasks" && isGroupTasksReadOnly()) fab.classList.remove("visible");
     if(fab){
       // при создании новой задачи НЕ перерисовываем список целиком (это
       // на некоторых мобильных браузерах сбивает фокус: клавиатура
@@ -18887,15 +19271,28 @@
     // нужна, когда задачу укоротили редактированием (см. updateTaskExpandBtn).
     var isExpanded = !!expandedTaskIds[id];
     var jointSignatureHtml = buildTaskJointSignatureHtml(task.c);
+    // TASK_UNIFIED_SYNC.md, Шаг 11 (переверстка под viewer): для роли
+    // "только чтение" в самой вкладке "Общие задачи" крестик удаления,
+    // галочка "в архив" (де-факто чекбокс выполнения), кнопка "перенести"
+    // (drag/меню переноса между вкладками) и карандаш-редактирование не
+    // рисуются вовсе — карандаш вёл в renderTaskRowEdit, единственный вход
+    // в contenteditable-режим строки (клик по самому тексту строки такого
+    // обработчика не имеет), а там done/move/delete не были защищены UI —
+    // печатать там можно было сколько угодно, но ничего не сохранится
+    // (гейт на уровне данных в saveGroupTaskDataP и остальных мутациях, см.
+    // isGroupTasksReadOnly() выше). Остальные кнопки строки (стрелки в
+    // начало-конец списка/копировать/приоритет/чемоданчик/напоминание)
+    // этот шаг сознательно не трогает — вне его границ (см. шаг_11.txt).
+    var isJointReadOnlyRow = tabKey === "jointtasks" && isGroupTasksReadOnly();
     body.innerHTML =
       jointSignatureHtml +
       '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
       '<span class="task-actions">' +
         '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
-        taskDeleteBtnHtml() +
-        '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
-        '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
-        '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
+        (isJointReadOnlyRow ? '' : taskDeleteBtnHtml()) +
+        (isJointReadOnlyRow ? '' : '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>') +
+        (isJointReadOnlyRow ? '' : '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>') +
+        (isJointReadOnlyRow ? '' : '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>') +
         '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
@@ -18904,7 +19301,8 @@
         '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + task.id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
         taskReminderBtnHtml(task) +
       '</span>';
-    body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderTaskRowEdit(id, tabKey, onAfterAction); });
+    var editBtn = body.querySelector(".task-edit-btn");
+    if(editBtn) editBtn.addEventListener("click", function(){ renderTaskRowEdit(id, tabKey, onAfterAction); });
     bindTaskRowActions(body, id, tabKey, onAfterAction);
     updateTaskExpandBtn(body, id);
     fitTaskActions(body);
@@ -20697,5 +21095,7 @@
   checkForSharedFile();
   Notifications.start();
   initPersonalTasksShadow();
+  initSettingsShadow(); // Шаг 9 (TASK_UNIFIED_SYNC.md, 22.09)
+  initGoalsShadow(); // Шаг 9 (TASK_UNIFIED_SYNC.md, 23.09)
 
 })();
