@@ -4186,16 +4186,146 @@
     return "s" + Date.now().toString(36) + Math.random().toString(36).slice(2,10);
   }
 
+  // ⚠️ ДОБАВЛЕНО (23.09, расход трафика — 2 ГБ на двух устройствах): раньше
+  // fetchCloudBlob читал узел /syncs/<syncId> ЦЕЛИКОМ, вместе с тяжёлыми ветками
+  // (notes, notesMeta, fileBlobs, files, devices, personalTasks, settings, goals…),
+  // и stripCloudReservedSubtrees выбрасывал их уже ПОСЛЕ загрузки — каждый цикл
+  // doCloudSync (правка, сворачивание, запуск, снятие оффлайна) качал десятки МБ
+  // впустую. Теперь: 1) shallow-запрос (только имена ключей, килобайты);
+  // 2) само содержимое — только тех ключей, что НЕ входят в CLOUD_RESERVED_SUBTREES,
+  // диапазонами orderBy="$key"&startAt&endAt (по границам из списка ключей).
+  // Результат — ровно то, что раньше оставалось после stripCloudReservedSubtrees.
+  // Страховки: (а) каждый ключ из shallow-списка обязан прийти — недостающие
+  // (гонка удаления/иной порядок ключей) добираются точечными GET, а если их
+  // слишком много — один раз откат на полный GET; (б) HTTP-ошибка запроса с
+  // фильтром → откат на полный GET до конца сессии; (в) флаг устройства
+  // bibleCloudFilteredGet_v1="0" отключает всё это и возвращает полный GET;
+  // (г) bibleCloudGetCompare_v1="1" — в фоне ещё раз читает полным GET и пишет
+  // в журнал отладки, совпал ли результат (разовая проверка, вдвое больше трафика).
+  // Устройства без этой версии по-прежнему читают узел целиком — ничего не ломается.
+  var CLOUD_FILTERED_GET_FLAG = "bibleCloudFilteredGet_v1";
+  var CLOUD_GET_COMPARE_FLAG = "bibleCloudGetCompare_v1";
+  var CLOUD_FILTERED_MAX_SINGLE_GETS = 20;
+  var CLOUD_PLAN_MAX_AGE_MS = 10 * 60 * 1000;
+  var cloudFilteredGetBroken = false;
+  var cloudBlobPlanCache = { id: null, runs: null, at: 0 };
+
+  function cloudFilteredGetEnabled(){
+    if(cloudFilteredGetBroken) return false;
+    try{ return localStorage.getItem(CLOUD_FILTERED_GET_FLAG) !== "0"; }catch(e){ return true; }
+  }
+  function cloudNodeUrl(id, tailPath){
+    return FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + (tailPath || "") + ".json";
+  }
+  function isReservedCloudKey(k){
+    return Object.prototype.hasOwnProperty.call(CLOUD_RESERVED_SUBTREES, k) && !!CLOUD_RESERVED_SUBTREES[k];
+  }
+  // Полный GET узла (как было раньше) — запасной путь и режим сверки.
+  function fetchCloudNodeFull(id, fetchOpts){
+    return fetchWithTimeout(cloudNodeUrl(id), fetchOpts, 8000).then(function(res){
+      if(!res.ok) throw new Error("fetch_failed_" + res.status);
+      return res.json();
+    });
+  }
+  // Непрерывные отрезки НЕзарезервированных ключей в отсортированном списке.
+  function planCloudBlobRuns(keys){
+    var sorted = keys.slice().sort();
+    var runs = [], cur = null;
+    sorted.forEach(function(k){
+      if(isReservedCloudKey(k)){ cur = null; return; }
+      if(!cur){ cur = { from: k, to: k }; runs.push(cur); } else { cur.to = k; }
+    });
+    return runs;
+  }
+  function fetchCloudRun(id, run, fetchOpts){
+    var url = cloudNodeUrl(id) + "?orderBy=" + encodeURIComponent('"$key"') +
+      "&startAt=" + encodeURIComponent(JSON.stringify(run.from)) +
+      "&endAt=" + encodeURIComponent(JSON.stringify(run.to));
+    return fetchWithTimeout(url, fetchOpts, 8000).then(function(res){
+      if(!res.ok){
+        var e = new Error(res.status === 400 ? "filtered_unsupported" : ("fetch_failed_" + res.status));
+        throw e;
+      }
+      return res.json();
+    });
+  }
+  function fetchCloudBlobFiltered(id, fetchOpts){
+    var cached = cloudBlobPlanCache;
+    var useCached = !!(fetchOpts.keepalive && cached.id === id && cached.runs && (Date.now() - cached.at) < CLOUD_PLAN_MAX_AGE_MS);
+    var planP;
+    if(useCached){
+      // срочный проход (страница уходит в фон): второй запрос подряд может не
+      // успеть — берём план прошлого цикла; новые ключи внутри его диапазонов
+      // всё равно придут, а вне диапазонов — подтянутся обычным циклом
+      planP = Promise.resolve({ runs: cached.runs, wanted: null, total: null });
+    } else {
+      planP = fetchWithTimeout(cloudNodeUrl(id) + "?shallow=true", fetchOpts, 8000).then(function(res){
+        if(!res.ok) throw new Error(res.status === 400 ? "filtered_unsupported" : ("fetch_failed_" + res.status));
+        return res.json();
+      }).then(function(shallow){
+        if(shallow === null || shallow === undefined) return null; // как раньше: по этому пути ничего нет
+        if(typeof shallow !== "object" || Array.isArray(shallow)) throw new Error("filtered_fallback");
+        var keys = Object.keys(shallow);
+        var runs = planCloudBlobRuns(keys);
+        cloudBlobPlanCache = { id: id, runs: runs, at: Date.now() };
+        return { runs: runs, total: keys.length, wanted: keys.filter(function(k){ return !isReservedCloudKey(k); }) };
+      });
+    }
+    return planP.then(function(plan){
+      if(plan === null) return null;
+      return Promise.all(plan.runs.map(function(run){ return fetchCloudRun(id, run, fetchOpts); })).then(function(parts){
+        var data = {};
+        parts.forEach(function(part){
+          if(part && typeof part === "object") Object.keys(part).forEach(function(k){ data[k] = part[k]; });
+        });
+        var missing = (plan.wanted || []).filter(function(k){ return data[k] === undefined; });
+        if(window.Debug) window.Debug.log("fetchCloudBlob: фильтрованный GET — ключей в узле=" + (plan.total === null ? "?(план прошлого цикла)" : plan.total) + ", диапазонов=" + plan.runs.length + ", получено ключей=" + Object.keys(data).length + ", не пришло=" + missing.length);
+        if(!missing.length) return data;
+        if(missing.length > CLOUD_FILTERED_MAX_SINGLE_GETS) throw new Error("filtered_fallback");
+        return Promise.all(missing.map(function(k){
+          return fetchWithTimeout(cloudNodeUrl(id, "/" + encodeURIComponent(k)), fetchOpts, 8000).then(function(res){
+            if(!res.ok) throw new Error("fetch_failed_" + res.status);
+            return res.json();
+          }).then(function(v){ if(v !== null && v !== undefined) data[k] = v; });
+        })).then(function(){ return data; });
+      });
+    });
+  }
+  // Единая точка: результат — то же, что давал полный GET до stripCloudReservedSubtrees
+  // (но без зарезервированных веток), либо null, если по пути ничего нет.
+  function fetchCloudBlobData(id, fetchOpts){
+    if(!cloudFilteredGetEnabled()) return fetchCloudNodeFull(id, fetchOpts);
+    return fetchCloudBlobFiltered(id, fetchOpts).then(function(data){
+      var compare = false;
+      try{ compare = localStorage.getItem(CLOUD_GET_COMPARE_FLAG) === "1"; }catch(e){}
+      if(compare && data){
+        fetchCloudNodeFull(id, { method: "GET" }).then(function(full){
+          var stripped = stripCloudReservedSubtrees(full, "сверка GET");
+          var same = statesEqual(stripped, data);
+          if(window.Debug) window.Debug.log("СВЕРКА GET: фильтрованный == полный (без зарезервированных веток): " + same + " (ключей " + Object.keys(data).length + " / " + Object.keys(stripped || {}).length + ")");
+        }).catch(function(err){
+          if(window.Debug) window.Debug.log("СВЕРКА GET: не удалась — " + (err && err.message ? err.message : err));
+        });
+      }
+      return data;
+    }).catch(function(err){
+      var msg = err && err.message ? err.message : "";
+      if(msg === "filtered_unsupported" || msg === "filtered_fallback"){
+        if(msg === "filtered_unsupported") cloudFilteredGetBroken = true; // до конца сессии не пробуем
+        if(window.Debug) window.Debug.log("fetchCloudBlob: откат на полный GET (" + msg + ")");
+        return fetchCloudNodeFull(id, fetchOpts);
+      }
+      throw err;
+    });
+  }
+
   function fetchCloudBlob(id, opts){
     var fetchOpts = { method:"GET" };
     // keepalive для GET безопасен всегда (тела нет, лимит в 64KB на
     // keepalive-запросы его не касается) — в отличие от putCloudBlob,
     // здесь проверка размера не нужна.
     if(opts && opts.keepalive) fetchOpts.keepalive = true;
-    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + ".json", fetchOpts, 8000).then(function(res){
-      if(!res.ok) throw new Error("fetch_failed_" + res.status);
-      return res.json();
-    }).then(function(data){
+    return fetchCloudBlobData(id, fetchOpts).then(function(data){
       // Firebase отдаёт null (не 404), если по пути ничего нет
       if(data === null || data === undefined) throw new Error("not_found");
       // Данные, которыми не пользовались (ни разу не подключались/не
