@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.36.55";
+const APP_VERSION = "v0.36.57";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -245,9 +245,25 @@ async function handleShareTarget(request){
   return Response.redirect("./index.html?shared=1", 303);
 }
 
-// Стратегия "кэш, обновляемый в фоне" (stale-while-revalidate):
-// сразу отдаём то, что уже сохранено (быстро и работает офлайн),
-// и параллельно тихо обновляем кэш из сети для следующего раза.
+// Стратегия "сначала кэш" (cache-first): если ответ уже есть в кэше текущей
+// версии — отдаём его и НИЧЕГО не качаем из сети. Раньше здесь было
+// "stale-while-revalidate" — при КАЖДОМ запросе (то есть при каждом
+// открытии/обновлении страницы, для каждого файла из ASSETS и вообще
+// любого GET) параллельно с отдачей из кэша всё равно шёл полный fetch()
+// по сети с {cache:"no-store"} (это в обход и кэша самого браузера тоже) —
+// то есть 20 обновлений страницы = 20 полных скачиваний ВСЕГО приложения
+// (my.js, mdeditor.js, codemirror_bundle.js, все css и т.д. — суммарно
+// несколько мегабайт), даже если ни один файл не изменился (расход
+// трафика, замечен пользователем 25.09). Свежесть кэша и так гарантирована
+// install-обработчиком выше: при каждом релизе меняется APP_VERSION →
+// новое имя кэша → все файлы из ASSETS перекачиваются заново одним разом.
+// Поэтому в рантайме сеть трогаем только для того, чего в кэше ещё нет
+// (новый файл, добавленный в ASSETS но не попавший в установленный кэш,
+// сторонний адрес вроде esm.sh/cdn.jsdelivr.net при первом обращении и т.п.).
+// ⚠️ Следствие: если правите файлы и тестируете БЕЗ смены APP_VERSION —
+// старая версия останется в кэше и по сети НЕ обновится, пока не
+// поднимете APP_VERSION (или не снесёте кэш вручную). Это ровно то, для
+// чего и задуман APP_VERSION (см. комментарий в начале файла).
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method === "POST" && url.pathname.endsWith("/share-target")) {
@@ -273,17 +289,16 @@ self.addEventListener("fetch", (event) => {
         // режим оффлайн (см. OFFLINE_MODE_CACHE выше): только кэш, без сети
         if (offlineMode) return cached || offlineModeFallback(event.request);
 
-        const networkFetch = fetch(event.request, { cache: "no-store" })
-          .then((response) => {
-            if (response && response.status === 200) {
-              const copy = response.clone();
-              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-            }
-            return response;
-          })
-          .catch(() => cached);
+        // Есть в кэше текущей версии — отдаём как есть, в сеть не идём.
+        if (cached) return cached;
 
-        return cached || networkFetch;
+        return fetch(event.request).then((response) => {
+          if (response && response.status === 200) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          }
+          return response;
+        });
       })
     )
   );
