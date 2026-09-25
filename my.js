@@ -1,6 +1,15 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 42.2 (24.09) — TASK_UNIFIED_SYNC.md, шаг 12 (правка по проверке): зеркало файлового
+   реестра (mirrorFileRegistrySnapshot) больше не пишет всё через saveRecord на каждой сверке
+   (это ставило вечный dirty и засоряло журнал строками транспорта «dirty для неподключённого
+   store»). Теперь — приём снимка через engine.mergeIncoming: только изменившиеся записи, без
+   dirty; метка новой версии строго больше прежней (возврат удалённого файла не проигрывает
+   своему тумбстоуну); записи, которых нет в облачном реестре (в т.ч. прежнего аккаунта),
+   гасятся тумбстоуном; при сбое чтения реестра (registryFetchOk) зеркало не трогается; вызовы
+   одного kind — по очереди (filesRegistryMirrorChain). Новые: filesRegistryMetaEqual,
+   filesRegistryNextTs. Групповой реестр (syncGroupImageRegistry) по-прежнему не зеркалится.
    Версия: 42.1 (23.09) — TASK_UNIFIED_SYNC.md, шаг 5, находка 3 (верификация 23.09):
    в joinWithCode, сразу после personalShadowStateReplaced(), добавлен вызов
    MdEditor.resetLocalNotesForAccountSwitch() — заметки прошлого аккаунта (свой
@@ -158,9 +167,14 @@
    пишет в архив через getGroupArchiveBinding().save(id, task.c) — но это
    ВСЁ ЕЩЁ два отдельных вызова (save в архив + deleteGroupTaskPermanently),
    не одна атомарная операция — это Шаг 4.2. fetchGroupArchiveRaw и
-   encryptGroupContent/decryptGroupContent оставлены — их использует
+   encryptGroupContent/decryptGroupContent оставлены — использовались
    migrateGroupTasksToLocalForAdmin (разовое чтение при отвязке «без
-   удаления», не часть цикла push/pull). returnJointTasksTabToLocalMode
+   удаления»); эта функция и сценарий «завершения группы» удалены Шагом 11
+   (правка, см. SYNC_VERIFICATION-1-1.md — «Отвязать» относится к одному
+   участнику, группа не завершается), но encryptGroupContent/
+   decryptGroupContent/fetchGroupArchiveRaw оставлены как есть — служат
+   эталоном формата для тестов (syncengine_groupcrypto_test.js и т.п.), даже
+   не будучи больше вызваны из остального кода. returnJointTasksTabToLocalMode
    отключает оба binding'а от группы. Облачный путь и формат {c,t} прежние.
    Версия: 29.2 (19.09) — строка «ДУБЛЬ» в fetchWithTimeout стала короткой
    (~80 символов вместо ~500: путь без хоста + только имена вызывающих функций,
@@ -2585,7 +2599,16 @@
   // той же ширины (имитация мелкого текста/подзаголовка), на фоне самой
   // карточки (.book-cover-thumb уже даёт фон и рамку). Растягивается на
   // всю карточку через CSS (.book-cover-placeholder svg, components.css).
-  var BOOK_COVER_PLACEHOLDER_SVG = '<svg viewBox="0 0 100 150" preserveAspectRatio="xMidYMid meet"><rect x="14" y="20" width="72" height="15" rx="1.5" fill="currentColor"></rect><rect x="14" y="41" width="72" height="8" rx="1.5" fill="currentColor"></rect></svg>';
+  // Заглушка обложки книги (ТЗ пользователя от 22.09, версия вечер) —
+  // раньше векторная иконка (currentColor, красилась темой и сливалась с
+  // фоном на части тем), теперь картинка-шаблон настоящей обложки
+  // (тканевый переплёт в фиксированных серых тонах), лежит в ASSETS sw.js
+  // рядом с index.html и подставляется как обычный <img> с object-fit:cover
+  // (.book-cover-thumb img в components.css) — тем же способом, что и
+  // реальные обложки (см. loadBookCoverIntoThumb ниже), поэтому кадрируется
+  // по той же рамке 1220×1737, что и они.
+  var BOOK_COVER_PLACEHOLDER_SRC = "book-cover-placeholder.jpg";
+  var BOOK_COVER_PLACEHOLDER_HTML = '<img src="' + BOOK_COVER_PLACEHOLDER_SRC + '" alt="" draggable="false">';
   // переключатель режима списка книг (ТЗ пользователя от 21.09) — кнопка
   // всегда изображает режим, В КОТОРЫЙ переключит клик (тот же язык, что и
   // у READER_TEXT_ICON_SVG/READER_CHAPTERS_ICON_SVG выше для книг/глав):
@@ -2624,6 +2647,16 @@
   // "Обложки" (ТЗ пользователя от 22.09) — строчки текста с диагональной
   // чертой, тот же приём "перечёркнутого" значка, что и у сброса обложки выше.
   var BOOKS_HIDE_TITLES_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7.5" x2="20" y2="7.5"></line><line x1="4" y1="13" x2="14.5" y2="13"></line><line x1="3" y1="20" x2="21" y2="4"></line></svg>';
+  // Та же пиктограмма для самой кнопки нижнего ряда (booksHideTitlesBtn),
+  // но диагональная линия-зачёркивание не встроена намертво, а рисуется
+  // только когда заглавия сейчас скрыты (ТЗ пользователя от 22.09: кнопка
+  // и базовая пиктограмма — те же самые, красится не кнопка, а появляется/
+  // исчезает именно эта линия в зависимости от текущего состояния).
+  function booksHideTitlesButtonIconSvg(hidden){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7.5" x2="20" y2="7.5"></line><line x1="4" y1="13" x2="14.5" y2="13"></line>' +
+      (hidden ? '<line x1="3" y1="20" x2="21" y2="4"></line>' : '') +
+      '</svg>';
+  }
   // Кнопка "Заметка книги" в раскрывающихся долгим нажатием действиях
   // строки/карточки книги (ТЗ пользователя от 22.09) — открывает заметку с
   // подчёркиваниями этой книги (или предлагает завести её, если ещё нет,
@@ -4143,6 +4176,21 @@
     return deviceId;
   }
 
+  // Отображаемое имя пользователя (Шаг 11, правка: список участников группы
+  // для отвязки по отдельности иначе показывал бы только deviceId, по
+  // которому человеку сложно ориентироваться, см. SYNC_VERIFICATION-1-1.md).
+  // Хранится локально; при наличии активной группы дублируется в
+  // /groups/<groupId>/members/<deviceId>/name, чтобы остальные участники
+  // видели его вместо ID устройства. Не путать с deviceId — это отдельное,
+  // не обязательное поле, пока пользователь сам его не введёт.
+  var USER_DISPLAY_NAME_KEY = "bibleUserDisplayName_v1";
+  function getUserDisplayName(){
+    try{ return localStorage.getItem(USER_DISPLAY_NAME_KEY) || null; }catch(e){ return null; }
+  }
+  function setUserDisplayName(name){
+    try{ localStorage.setItem(USER_DISPLAY_NAME_KEY, name); }catch(e){}
+  }
+
   // ⚠️ ДОБАВЛЕНО (диагностика 18.09): счётчик одновременных запросов к
   // ОДНОМУ и тому же URL — ловим шторм дублирующихся fetch (в логе
   // пользователя — ~30 почти одновременных запросов к syncs/<id>.json за
@@ -5069,6 +5117,12 @@
   // renderGroupCreateRoleChoice ниже). role: "admin" | "member" | "viewer".
   function writeGroupMember(groupId, memberDeviceId, role){
     var payload = { role: role, joinedAt: Date.now() };
+    // если к этому моменту у устройства уже есть сохранённое отображаемое
+    // имя (человек ввёл его раньше, на другой вкладке/группе) — сразу
+    // пишем его вместе с ролью, одним запросом; если ещё нет — поле name
+    // появится позже, когда пользователь его укажет (см. openUserNameDialog).
+    var nm = memberDeviceId === getDeviceId() ? getUserDisplayName() : null;
+    if(nm) payload.name = nm;
     return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/members/" + encodeURIComponent(memberDeviceId) + ".json", {
       method: "PUT",
       headers: {"Content-Type":"application/json"},
@@ -5077,6 +5131,77 @@
       if(!res.ok) throw new Error("group_member_write_failed_" + res.status);
       return true;
     });
+  }
+
+  // Обновляет ТОЛЬКО имя в уже существующей записи участника — используется
+  // и при первом вводе (если сам /members/<deviceId> уже создан раньше, чем
+  // человек назвал себя), и при смене имени через "Изменить отображаемое
+  // имя" (см. renderTaskJointMenu). Не трогает role/joinedAt.
+  function writeGroupMemberName(groupId, memberDeviceId, name){
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/members/" + encodeURIComponent(memberDeviceId) + "/name.json", {
+      method: "PUT",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(name)
+    }, 8000).then(function(res){
+      if(!res.ok) throw new Error("group_member_name_write_failed_" + res.status);
+      return true;
+    });
+  }
+
+  // Диалог ввода/смены отображаемого имени — та же карточка
+  // .mdeditor-cleanup-*, что и у openBookRenameDialog (см. ниже) — общий
+  // визуальный язык для "ввести текст в модалке".
+  // opts.required === true — версия без "Отмена" и без закрытия по клику
+  // вне карточки: вызывается при первом заходе на вкладку "Общие задачи",
+  // пока у устройства ещё нет сохранённого имени (см. renderTaskTabList) —
+  // без имени остальные участники видели бы в списке для отвязки только
+  // deviceId. opts.required не в строке — обычная смена имени из меню
+  // "настройки вкладки" (пункт "Изменить отображаемое имя").
+  function openUserNameDialog(opts){
+    opts = opts || {};
+    var required = !!opts.required;
+    if(!settingsModalBox) return;
+    if(document.getElementById("userNameDialogInput")) return; // уже открыт
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title">' + (required ? "Введите имя, чтобы продолжить" : "Отображаемое имя") + '</div>' +
+      (required ? '<div style="margin:4px 0 10px;font-size:14px;opacity:.8;">Остальные участники общих задач увидят это имя вместо ID устройства.</div>' : '') +
+      '<input type="text" class="mdeditor-cleanup-input" id="userNameDialogInput" maxlength="40">' +
+      '<div class="mdeditor-cleanup-actions">' +
+        (required ? '' : '<button type="button" class="mdeditor-cleanup-cancel" id="userNameDialogCancel">Отмена</button>') +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="userNameDialogSave">Сохранить</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    settingsModalBox.appendChild(overlay);
+
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    if(!required){
+      overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+      var cancelBtn = document.getElementById("userNameDialogCancel");
+      if(cancelBtn) cancelBtn.addEventListener("click", close);
+    }
+    var input = document.getElementById("userNameDialogInput");
+    input.value = getUserDisplayName() || "";
+    input.focus();
+    input.select();
+
+    function submit(){
+      var name = (input.value || "").trim();
+      if(!name) return;
+      close();
+      setUserDisplayName(name);
+      if(sharedGroup){
+        writeGroupMemberName(sharedGroup.groupId, getDeviceId(), name).catch(function(err){
+          console.error("Не удалось обновить отображаемое имя в облаке:", err);
+        });
+      }
+      if(opts.onSaved) opts.onSaved(name);
+    }
+    document.getElementById("userNameDialogSave").addEventListener("click", submit);
+    input.addEventListener("keydown", function(ev){ if(ev.key === "Enter") submit(); });
   }
 
   // Точка входа для кнопки "Синхронизация" в меню "настройки вкладки" на
@@ -5378,16 +5503,19 @@
   //   - до привязки (sharedGroup === null) — только "Синхронизация";
   //   - админ (sharedGroup.role === "admin") — "Пригласить участника" (Шаг 11,
   //     22.09 — произвольное число участников, не только один) +
-  //     "Отвязать пользователя" + "Архив общих задач". Видна сразу после
-  //     создания кода привязки, не дожидаясь подключения первого участника
-  //     (isGroupTasksActive() тут намеренно НЕ используется — та завязана ещё
-  //     и на миграцию данных, п. 3.5 ТЗ, это другая, более узкая проверка).
+  //     "Отвязать пользователя" (Шаг 11, правка — теперь отвязывает КОНКРЕТНОГО
+  //     выбранного участника, см. renderGroupUnlinkMemberList, а не всех разом
+  //     и не завершает группу) + "Изменить отображаемое имя" + "Архив общих
+  //     задач". Видна сразу после создания кода привязки, не дожидаясь
+  //     подключения первого участника (isGroupTasksActive() тут намеренно НЕ
+  //     используется — та завязана ещё и на миграцию данных, п. 3.5 ТЗ, это
+  //     другая, более узкая проверка).
   //   - участник (sharedGroup.role === "member") — "Отписаться от общих
-  //     задач" + "Архив общих задач".
-  //   - только чтение (sharedGroup.role === "viewer", Шаг 11) — те же два
-  //     пункта, что у участника (виден и архив, отписаться тоже можно) — но
-  //     сами задачи в списке нередактируемы, см. isGroupTasksReadOnly() в
-  //     блоке "ОБЩИЕ ЗАДАЧИ: ХРАНЕНИЕ И CRUD" выше.
+  //     задач" + "Изменить отображаемое имя" + "Архив общих задач".
+  //   - только чтение (sharedGroup.role === "viewer", Шаг 11) — те же пункты,
+  //     что у участника (виден и архив, отписаться и сменить имя тоже
+  //     можно) — но сами задачи в списке нередактируемы, см.
+  //     isGroupTasksReadOnly() в блоке "ОБЩИЕ ЗАДАЧИ: ХРАНЕНИЕ И CRUD" выше.
   // Вызывается заново перед КАЖДЫМ открытием попапа (см. initTaskGlobalToolbar
   // выше), не один раз — состояние группы могло измениться, пока попап был
   // закрыт.
@@ -5403,9 +5531,11 @@
         renderGroupCreateWarning(sharedGroup.groupId);
       }});
       items.push({id:"mtjUnlink", label:"Отвязать пользователя", action:openGroupUnlinkModal});
+      items.push({id:"mtjRename", label:"Изменить отображаемое имя", action:function(){ openUserNameDialog({required:false}); }});
       items.push({id:"mtjArchive", label:"Архив общих задач", action:openGroupJointArchiveTab});
     } else if(sharedGroup.role === "member" || sharedGroup.role === "viewer"){
       items.push({id:"mtjUnsub", label:"Отписаться от общих задач", action:openGroupUnsubscribeModal});
+      items.push({id:"mtjRename", label:"Изменить отображаемое имя", action:function(){ openUserNameDialog({required:false}); }});
       items.push({id:"mtjArchive", label:"Архив общих задач", action:openGroupJointArchiveTab});
     }
     popup.innerHTML = items.map(function(it){
@@ -5717,21 +5847,33 @@
   }
 
   // ===================== ФАЙЛОВЫЙ РЕЕСТР: ЗЕРКАЛО В ДВИЖКЕ (TASK_UNIFIED_SYNC.md,
-  // Шаг 12, 22.09) =====================
+  // Шаг 12, 22.09; переделано 24.09 по проверке) =====================
   // Манифест syncFileRegistry (books/images) по-прежнему живёт ГДЕ ЖИЛ — сырыми PATCH/GET
   // через patchNotesCloud/fetchNotesCloudPath (/syncs/<syncId>/files/<kind>/<hash>), сама
   // раздача байтов (fileBlobs, лимиты FILE_SYNC_SIZE_LIMIT_BYTES, пул скачивания
   // FILE_SYNC_DOWNLOAD_CONCURRENCY) НЕ переписана и не переезжает на движок — риск того, что
   // не входит в рамки этого шага. Задача шага — только ВИДИМОСТЬ: метаданные реестра (хэш,
   // имя, размер, кто добавил) зеркалятся READ-ONLY-копией в отдельный store движка
-  // ("filesRegistry", id = "<kind>:<hash>"), чтобы диагностика (getDirty/listRecords и т.п.)
-  // видела файловый реестр наравне с остальными store, а не как единственное необъяснимое
-  // исключение. Store НЕ подключён к транспорту (нет cloudPath, transport.attachStore не
-  // вызывается) — dirty-флаги, которые проставляет saveRecord/deleteRecord, никуда не
-  // отправляются, это чисто локальная зеркальная копия; ошибки зеркалирования гасятся на
-  // месте (best-effort, не должны мешать настоящей синхронизации файлов).
+  // ("filesRegistry", id = "<kind>:<hash>"), чтобы диагностика (listRecords и т.п.)
+  // видела файловый реестр наравне с остальными store. Store НЕ подключён к транспорту (нет
+  // cloudPath, transport.attachStore не вызывается).
+  //
+  // ⚠️ 24.09 (проверка шага 12): раньше каждая сверка заново писала ВСЕ записи через
+  // saveRecord — а он ставит dirty и шлёт событие 'dirty'. Флаг никто не снимал
+  // (getDirty возвращал весь реестр вечно), а слушатель транспорта на каждое событие пишет
+  // в журнал строку «dirty для неподключённого store» — сверка на 100 файлах забивала
+  // «⧉ последние 100». Теперь зеркало — это ПРИЁМ снимка, а не мутация: пишется через
+  // engine.mergeIncoming (без dirty и без события 'dirty'), и только то, что реально
+  // изменилось (неизменный реестр = ни одной записи и ни одной строки в журнале). Метка
+  // изменённой записи всегда строго больше прежней (mergeIncoming иначе оставит старую) —
+  // поэтому «удалили → добавили снова» не проигрывает собственному тумбстоуну. Записи этого
+  // kind, которых в облачном реестре больше нет (в т.ч. файлы прежнего аккаунта после смены
+  // syncId — со следующей успешной сверки), гасятся тумбстоуном. Если облачный реестр
+  // прочитать не удалось — зеркало не трогается вообще (иначе сбой сети выглядел бы как
+  // «реестр пуст» и погасил бы всё). Вызовы одного kind идут строго по очереди.
   var FILES_REGISTRY_STORE_ID = "filesRegistry";
   var filesRegistryStoreReady = false;
+  var filesRegistryMirrorChain = {}; // kind -> Promise: вызовы одного kind не пересекаются
   function ensureFilesRegistryStore(){
     var rt = getSyncEngineRuntime();
     if(!filesRegistryStoreReady){
@@ -5740,24 +5882,54 @@
     }
     return rt.engine;
   }
+  function filesRegistryMetaEqual(a, b){
+    return !!a && !!b && a.kind === b.kind && a.hash === b.hash && a.name === b.name &&
+      a.size === b.size && a.addedBy === b.addedBy;
+  }
+  // Метка новой версии записи: своя (addedAt/deletedAt из облака), но строго больше прежней.
+  function filesRegistryNextTs(base, prev){
+    var t = (typeof base === "number" && isFinite(base) && base >= 0) ? base : Date.now();
+    return prev ? Math.max(t, prev.updatedAt + 1) : t;
+  }
   // Снимок ОДНОГО пространства (kind) целиком — вызывается из syncFileRegistry после того,
-  // как облачный реестр этого kind уже получен (см. `registry` там), поэтому один вызов на
-  // цикл сверки покрывает и создание, и тумбстоуны, без отдельных зеркальных вызовов внутри
-  // registerFileInRegistry/registerFileDeletion.
+  // как облачный реестр этого kind успешно получен (см. `registry` там).
   function mirrorFileRegistrySnapshot(kind, registryObj){
     try{
       var engine = ensureFilesRegistryStore();
-      Object.keys(registryObj || {}).forEach(function(hash){
-        var entry = registryObj[hash] || {};
-        var id = kind + ":" + hash;
-        if(entry.deletedAt){
-          engine.deleteRecord(FILES_REGISTRY_STORE_ID, id, {updatedAt: entry.deletedAt}).catch(function(){});
-        }else{
-          var meta = {kind: kind, hash: hash, name: entry.name || null,
-            size: typeof entry.size === "number" ? entry.size : null, addedBy: entry.addedBy || null};
-          var mopts = typeof entry.addedAt === "number" ? {updatedAt: entry.addedAt} : undefined;
-          engine.saveRecord(FILES_REGISTRY_STORE_ID, id, meta, mopts).catch(function(){});
-        }
+      var prefix = kind + ":";
+      var snap = {};
+      Object.keys(registryObj || {}).forEach(function(hash){ snap[hash] = registryObj[hash]; });
+      var run = function(){
+        return engine.listRecords(FILES_REGISTRY_STORE_ID, {includeDeleted: true}).then(function(existing){
+          var prevById = {}, seen = {}, incoming = [];
+          existing.forEach(function(r){ if(r.id.indexOf(prefix) === 0) prevById[r.id] = r; });
+          Object.keys(snap).forEach(function(hash){
+            var entry = snap[hash];
+            if(!entry || typeof entry !== "object") entry = {};
+            var id = prefix + hash;
+            var prev = prevById[id] || null;
+            seen[id] = true;
+            if(entry.deletedAt){
+              if(prev && prev.deleted) return;
+              incoming.push({id: id, data: null, deleted: true, updatedAt: filesRegistryNextTs(entry.deletedAt, prev)});
+            }else{
+              var meta = {kind: kind, hash: hash, name: entry.name || null,
+                size: typeof entry.size === "number" ? entry.size : null, addedBy: entry.addedBy || null};
+              if(prev && !prev.deleted && filesRegistryMetaEqual(prev.data, meta)) return;
+              incoming.push({id: id, data: meta, deleted: false, updatedAt: filesRegistryNextTs(entry.addedAt, prev)});
+            }
+          });
+          Object.keys(prevById).forEach(function(id){
+            var prev = prevById[id];
+            if(seen[id] || prev.deleted) return;
+            incoming.push({id: id, data: null, deleted: true, updatedAt: filesRegistryNextTs(null, prev)});
+          });
+          if(!incoming.length) return null;
+          return engine.mergeIncoming(FILES_REGISTRY_STORE_ID, incoming);
+        });
+      };
+      filesRegistryMirrorChain[kind] = (filesRegistryMirrorChain[kind] || Promise.resolve()).then(run).catch(function(err){
+        syncEngineLog("filesRegistry mirror(" + kind + "): " + (err && err.message ? err.message : err));
       });
     }catch(err){
       syncEngineLog("filesRegistry mirror(" + kind + "): " + (err && err.message ? err.message : err));
@@ -6812,9 +6984,10 @@
     if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
   }
   // Разовое (не часть цикла push/pull) чтение сырых записей архива —
-  // нужно ТОЛЬКО migrateGroupTasksToLocalForAdmin (перенос при отвязке
-  // «без удаления», см. ниже); транспорт движка со своим pull её не
-  // заменяет, т.к. там нужны именно чужие/все записи группы целиком.
+  // использовалась только удалённой Шагом 11 migrateGroupTasksToLocalForAdmin
+  // (сценарий «завершения группы», больше не существует, см. комментарий в
+  // начале файла); оставлена как есть — эталон формата для тестов, ниоткуда
+  // в остальном коде больше не вызывается.
   function fetchGroupArchiveRaw(groupId){
     return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/archive.json", {method:"GET"}, 10000).then(function(res){
       if(!res.ok) throw new Error("group_archive_fetch_failed_" + res.status);
@@ -6937,9 +7110,9 @@
     syncEngineLog("refreshJointTasksData: role=" + sharedGroup.role + ", активна=" + isGroupTasksActive() + ", online=" + isNetworkAvailable());
     if(sharedGroup.role === "member" || sharedGroup.role === "viewer"){
       // Шаг 5: у отвязки нет push-уведомления участнику — единственный
-      // способ узнать, что админ его отвязал (см. handleGroupUnlinkKeepData/
-      // handleGroupUnlinkDeleteData), это переспросить сервер тем же
-      // циклом опроса, что и обычная подтяжка задач ниже.
+      // способ узнать, что админ его отвязал (см. handleGroupUnlinkMember,
+      // Шаг 11), это переспросить сервер тем же циклом опроса, что и
+      // обычная подтяжка задач ниже.
       checkGroupMembershipStillValid().then(function(stillMember){
         if(!stillMember){ returnJointTasksTabToLocalMode(); return; }
         return syncGroupTasksNow();
@@ -6983,17 +7156,87 @@
   // openGroupUnsubscribeModal ниже и renderTaskJointMenu выше,
   // TASK_SHARED_TASKS.md, Шаг 4).
 
-  // п. 2.5 ТЗ — видна только админу. Текст и три кнопки дословно из ТЗ.
-  function renderGroupUnlinkConfirm(){
-    modalBox.innerHTML = modalHeader("Отвязать пользователя?",
-        "Участник потеряет доступ к общим задачам. Что сделать с данными группы?") +
-      '<button class="modal-btn" id="mUnlinkKeep">Без удаления</button>' +
-      '<button class="modal-btn danger" id="mUnlinkDelete">С удалением</button>' +
+  // Шаг 11, правка (SYNC_VERIFICATION-1-1.md — "нужно, чтобы отвязывало
+  // конкретного участника, а не завершала группу"): прежняя версия убирала
+  // СРАЗУ ВСЕХ non-admin участников и предлагала выбор "что сделать с
+  // данными группы" — пользователь подтвердил, что это неверное поведение.
+  // "Отвязать пользователя" означает буквально это: убрать ИЗ группы одного
+  // конкретного человека, выбранного из списка. Никакого "завершения
+  // группы" не существует — если админ отвяжет всех по очереди, он просто
+  // останется единственным участником своей же группы и продолжит
+  // пользоваться вкладкой "Общие задачи" один (может переносить задачи себе
+  // на личные вкладки по одной через уже существующий moveGroupTaskToPersonal,
+  // отдельного механизма для этого заводить не нужно).
+  function renderGroupUnlinkMemberList(){
+    if(!sharedGroup || sharedGroup.role !== "admin") return closeModal();
+    var groupId = sharedGroup.groupId;
+    modalBox.innerHTML = modalHeader("Кого отвязать?", "Загрузка списка участников…");
+    bindClose();
+    if(!isNetworkAvailable()){
+      modalBox.innerHTML = modalHeader(noNetworkTitle(), noNetworkHint("списка участников")) + '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", closeModal);
+      return;
+    }
+    fetchGroupMembers(groupId).then(function(members){
+      members = members || {};
+      // сам админ и любые другие записи с ролью "admin" в список не
+      // попадают — отвязать можно только member/viewer.
+      var otherIds = Object.keys(members).filter(function(devId){
+        var m = members[devId];
+        return devId !== getDeviceId() && (!m || m.role !== "admin");
+      });
+      if(!otherIds.length){
+        modalBox.innerHTML = modalHeader("Кого отвязать?", "Кроме вас, в группе пока никого нет.") +
+          '<button class="modal-btn primary" id="mBack">Назад</button>';
+        bindClose();
+        document.getElementById("mBack").addEventListener("click", closeModal);
+        return;
+      }
+      // Имя участника — то, что он сам сохранил в своей записи
+      // (member.name, см. writeGroupMember/writeGroupMemberName выше); если
+      // человек ещё ни разу не заходил на вкладку "Общие задачи" на своём
+      // устройстве (и потому не вводил имя) — показываем deviceId, как и
+      // просил пользователь.
+      var rows = otherIds.map(function(devId){
+        var m = members[devId] || {};
+        var roleLabel = m.role === "viewer" ? "читатель" : "участник";
+        var label = m.name ? m.name : devId;
+        return '<button class="modal-btn" data-devid="' + escapeHtml(devId) + '">' + escapeHtml(label) + " (" + roleLabel + ")" + '</button>';
+      }).join("");
+      modalBox.innerHTML = modalHeader("Кого отвязать?", "Выбранный участник потеряет доступ к общим задачам.") +
+        rows +
+        '<button class="modal-btn" id="mBack">Отмена</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", closeModal);
+      Array.prototype.forEach.call(modalBox.querySelectorAll("[data-devid]"), function(btn){
+        var devId = btn.getAttribute("data-devid");
+        var m = members[devId] || {};
+        btn.addEventListener("click", function(){ renderGroupUnlinkConfirm(devId, m.name || null); });
+      });
+    }).catch(function(err){
+      console.error(err);
+      modalBox.innerHTML = modalHeader("Не удалось загрузить список участников", "Проверьте подключение к интернету и попробуйте ещё раз.") +
+        '<button class="modal-btn primary" id="mBack">Назад</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", renderGroupUnlinkMemberList);
+    });
+  }
+
+  // Подтверждение отвязки ОДНОГО выбранного участника (devId), memberName —
+  // его отображаемое имя, если было (иначе показываем deviceId, как и в
+  // списке выше).
+  function renderGroupUnlinkConfirm(devId, memberName){
+    var label = memberName || devId;
+    modalBox.innerHTML = modalHeader("Отвязать " + escapeHtml(label) + "?",
+        "Участник потеряет доступ к общим задачам. Общие задачи и архив группы при этом никуда не денутся — ими продолжат пользоваться остальные участники.") +
+      '<button class="modal-btn danger" id="mUnlinkConfirm">Отвязать</button>' +
       '<button class="modal-btn" id="mBack">Отмена</button>';
     bindClose();
-    document.getElementById("mBack").addEventListener("click", closeModal);
-    document.getElementById("mUnlinkKeep").addEventListener("click", handleGroupUnlinkKeepData);
-    document.getElementById("mUnlinkDelete").addEventListener("click", handleGroupUnlinkDeleteData);
+    document.getElementById("mBack").addEventListener("click", renderGroupUnlinkMemberList);
+    document.getElementById("mUnlinkConfirm").addEventListener("click", function(){
+      handleGroupUnlinkMember(devId, label);
+    });
   }
 
   // п. 2.6 ТЗ — видна только участнику. С 19.09 (ТЗ пользователя: перевод
@@ -7013,16 +7256,17 @@
     );
   }
 
-  // TASK_SHARED_TASKS, Шаг 4 (15.09): обёртки, вызываемые из меню
-  // "настройки вкладки" (renderTaskJointMenu выше). "Отвязать пользователя"
-  // — прежняя модалка (renderGroupUnlinkConfirm, не переведена на общий
-  // стиль по ТЗ пользователя от 19.09 — три равноправные кнопки и длинное
-  // описание в одну строку/плашку не укладываются). "Отписаться" — плашка
-  // (renderGroupUnsubscribeConfirm выше), модалку открывать здесь уже не
-  // нужно — она откроется сама после подтверждения.
+  // TASK_SHARED_TASKS, Шаг 4 (15.09), правка Шага 11: обёртки, вызываемые из
+  // меню "настройки вкладки" (renderTaskJointMenu выше). "Отвязать
+  // пользователя" открывает список конкретных участников
+  // (renderGroupUnlinkMemberList — не переведена на общий стиль плашки, как
+  // и раньше, по ТЗ пользователя от 19.09 — список кнопок в плашку не
+  // укладывается). "Отписаться" — плашка (renderGroupUnsubscribeConfirm
+  // выше), модалку открывать здесь уже не нужно — она откроется сама после
+  // подтверждения.
   function openGroupUnlinkModal(){
     modalOverlay.classList.add("open");
-    renderGroupUnlinkConfirm();
+    renderGroupUnlinkMemberList();
   }
   function openGroupUnsubscribeModal(){
     renderGroupUnsubscribeConfirm();
@@ -7043,163 +7287,15 @@
     });
   }
 
-  // Убирает из группы всех участников, кроме админа — при отвязке "разрывает"
-  // разом всех: и member, и viewer, независимо от их числа (Шаг 11, 22.09).
-  function removeAllNonAdminGroupMembers(groupId){
-    return fetchGroupMembers(groupId).then(function(members){
-      members = members || {};
-      var memberIds = Object.keys(members).filter(function(devId){
-        var m = members[devId];
-        return !m || m.role !== "admin";
-      });
-      return Promise.all(memberIds.map(function(devId){ return removeGroupMember(groupId, devId); }));
-    });
-  }
-
-  // "С удалением" (п. 2.5 ТЗ) — общие задачи и архив группы удаляются из
-  // облака полностью: /tasks и /archive (см. блок "ОБЩИЕ ЗАДАЧИ: АРХИВ",
-  // Шаг 6) — оба пути реальные с 16.09.
-  function deleteGroupTasksAndArchive(groupId){
-    var base = FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId);
-    return Promise.all([
-      fetchWithTimeout(base + "/tasks.json", {method:"DELETE"}, 10000),
-      fetchWithTimeout(base + "/archive.json", {method:"DELETE"}, 10000),
-      // ⚠️ ДОБАВЛЕНО 16.09 (TASK_FILE_SYNC_RTDB.md, раздел 4.5, Шаг 7):
-      // "данные группы" при варианте "С удалением" — это ещё и групповой
-      // канал картинок (files/fileBlobs/fileRequests под images) — сносим
-      // разом всю ветку, точечные тумбстоуны (registerFileDeletionFromGroup)
-      // здесь избыточны, группа целиком перестаёт существовать.
-      fetchWithTimeout(base + "/files.json", {method:"DELETE"}, 10000),
-      fetchWithTimeout(base + "/fileBlobs.json", {method:"DELETE"}, 10000),
-      fetchWithTimeout(base + "/fileRequests.json", {method:"DELETE"}, 10000)
-    ]).then(function(results){
-      results.forEach(function(res){ if(!res.ok) throw new Error("group_data_delete_failed_" + res.status); });
-      return true;
-    });
-  }
-
-  // "Без удаления" (п. 2.5 ТЗ): участник теряет доступ, но данные группы
-  // не стираются из облака — вместо этого, раз участников не осталось
-  // (MAX_GROUP_MEMBERS=1 — после отвязки их 0), они переносятся в личное
-  // локальное хранилище админа тем же путём, что и обычные личные задачи
-  // (state["task:<id>"], см. «ВКЛАДКИ ЗАДАЧ: ХРАНЕНИЕ» ниже), чтобы не
-  // остаться недоступными: групповая запись в Firebase при этом НЕ
-  // удаляется, но админ её больше не читает и не пишет (сразу после этой
-  // функции его sharedGroup обнуляется, см. returnJointTasksTabToLocalMode)
-  // — при следующей привязке создаётся новая группа с новым groupId,
-  // старая просто больше никем не используется.
-  // ⚠️ Правка 16.09 (вместе с Шагом 6): "данные группы" из п. 2.5 ТЗ — это
-  // не только /tasks, но и /archive (с Шага 6 отметка выполненной
-  // РЕАЛЬНО переносит запись в отдельный путь /groups/<groupId>/archive,
-  // см. checkGroupTaskDone/раздел «ОБЩИЕ ЗАДАЧИ: АРХИВ» — она больше не
-  // остаётся в /tasks с checked:true). Раньше эта функция читала только
-  // fetchGroupTasksRaw и потому архив группы при "без удаления" молча
-  // терялся бы в облаке (админ его больше не читает после сброса
-  // sharedGroup, а в личный архив ничего не попадало). Теперь тянутся оба
-  // пути параллельно, архивные записи переносятся в личный архив СРАЗУ как
-  // уже выполненные (checked:true) — с восстановлением личной записи
-  // "taskcompletion:…", тем же приёмом, что и у обычной checkTaskDone.
-  function migrateGroupTasksToLocalForAdmin(groupId){
-    return Promise.all([
-      fetchGroupTasksRaw(groupId),
-      fetchGroupArchiveRaw(groupId)
-    ]).then(function(raws){
-      var tasksRaw = raws[0] || {}, archiveRaw = raws[1] || {};
-      function decryptAll(raw, label){
-        return Promise.all(Object.keys(raw).map(function(id){
-          var rec = raw[id];
-          if(!rec || rec.c === null || rec.c === undefined) return null;
-          return decryptGroupContent(groupId, rec.c).catch(function(err){
-            console.error("Не удалось расшифровать " + label + " при переносе локально:", id, err);
-            return null;
-          });
-        }));
-      }
-      return Promise.all([
-        decryptAll(tasksRaw, "общую задачу"),
-        decryptAll(archiveRaw, "архивную общую задачу")
-      ]);
-    }).then(function(pair){
-      var contents = pair[0], archiveContents = pair[1];
-      var changed = false;
-      contents.forEach(function(content){
-        if(!content) return;
-        var newId = genTaskId();
-        var localContent = {
-          text: content.text, tab: "jointtasks", checked: !!content.checked,
-          checkedAt: content.checkedAt || null, completionKey: null,
-          nextForProjectId: null, flag: content.flag || null, inWork: !!content.inWork,
-          createdAt: content.createdAt != null ? content.createdAt : Date.now()
-        };
-        if(localContent.checked){
-          var ts = localContent.checkedAt || Date.now();
-          var completionKey = "taskcompletion:" + ts + "-" + Math.random().toString(36).slice(2,7);
-          state[completionKey] = {c: {text: localContent.text || "Без названия", tab: "jointtasks"}, t: ts};
-          localContent.completionKey = completionKey;
-        }
-        state["task:" + newId] = {c: localContent, t: Date.now()};
-        changed = true;
-      });
-      // Архивные записи группы — уже выполненные задачи, переносим сразу
-      // как checked:true (см. пояснение выше).
-      archiveContents.forEach(function(content){
-        if(!content) return;
-        var newId = genTaskId();
-        var ts = content.checkedAt || Date.now();
-        var completionKey = "taskcompletion:" + ts + "-" + Math.random().toString(36).slice(2,7);
-        state[completionKey] = {c: {text: content.text || "Без названия", tab: "jointtasks"}, t: ts};
-        state["task:" + newId] = {c: {
-          text: content.text, tab: "jointtasks", checked: true,
-          checkedAt: ts, completionKey: completionKey,
-          nextForProjectId: null, flag: content.flag || null, inWork: !!content.inWork,
-          createdAt: content.createdAt != null ? content.createdAt : ts
-        }, t: Date.now()};
-        changed = true;
-      });
-      if(changed){ saveLocalStateNow(); scheduleCloudPush(); }
-      // ⚠️ ДОБАВЛЕНО 16.09 (TASK_FILE_SYNC_RTDB.md, раздел 4.5, Шаг 7):
-      // картинки ("![[имя]]"), на которые остались ссылки в только что
-      // перенесённых задачах/архиве — переезжают из группового реестра
-      // канала в ЛИЧНЫЙ (/syncs/<id>/files/images), иначе после переноса
-      // задача останется видна, а картинка внутри недостижима ни по
-      // одному из каналов (групповой канал больше не читается — sharedGroup
-      // обнуляется сразу после этой функции, см. returnJointTasksTabToLocalMode).
-      // Переезжает только ЗАПИСЬ в реестре/канале синхронизации — сами
-      // байты на диске не трогаем: если админ когда-либо видел картинку
-      // (миниатюра открывалась), она уже лежит у него локально в OPFS
-      // благодаря syncGroupImageRegistry (см. выше) — если же локально
-      // её всё-таки нет (устройство ни разу не подтягивало байты), для
-      // такого хэша просто нечего регистрировать, это ожидаемое
-      // ограничение (см. пояснение в самом ТЗ, раздел 4.5).
-      var adapters = FILE_REGISTRY_ADAPTERS.images;
-      if(adapters){
-        var names = {}, re = /!\[\[([^\[\]\n]+)\]\]/g, m;
-        contents.concat(archiveContents).forEach(function(content){
-          if(!content || !content.text) return;
-          re.lastIndex = 0;
-          while((m = re.exec(content.text))){
-            names[m[1]] = true;
-            if(m[0].length === 0) re.lastIndex++;
-          }
-        });
-        var wantedNames = Object.keys(names);
-        if(wantedNames.length){
-          adapters.getLocalManifest().catch(function(){ return {}; }).then(function(manifest){
-            manifest = manifest || {};
-            var nameToHash = {};
-            Object.keys(manifest).forEach(function(h){ nameToHash[manifest[h]] = h; });
-            return Promise.all(wantedNames.map(function(name){
-              var hash = nameToHash[name];
-              if(!hash) return null; // локально этой картинки нет — переносить нечего (см. пояснение выше)
-              return adapters.readLocalBytes(hash, name).then(function(buf){
-                return registerFileInRegistry("images", hash, name, buf.byteLength);
-              }).catch(function(){});
-            }));
-          }).catch(function(){});
-        }
-      }
-    });
-  }
+  // Шаг 11, правка: раньше здесь были removeAllNonAdminGroupMembers/
+  // deleteGroupTasksAndArchive/migrateGroupTasksToLocalForAdmin — функции
+  // "завершения группы целиком" (убрать всех non-admin разом, спросить, что
+  // делать с общими задачами и архивом). Пользователь подтвердил, что такой
+  // сценарий вообще не запрашивался и не нужен — "Отвязать" относится к
+  // одному конкретному участнику (см. renderGroupUnlinkMemberList/
+  // handleGroupUnlinkMember выше/ниже), группа при этом не завершается и
+  // продолжает существовать, даже если в ней остался один админ. Функции
+  // удалены как мёртвый код.
 
   // Общая точка выхода из группового режима вкладки "Общие задачи" — и для
   // админа (после отвязки участника), и для участника (после отписки или
@@ -7259,7 +7355,13 @@
   // ---- Шаг 5: обработчики кнопок диалогов (вместо прежних заглушек
   // groupActionNotImplementedYet) ----
 
-  function handleGroupUnlinkKeepData(){
+  // Шаг 11, правка: убирает ИЗ ГРУППЫ только одного выбранного участника
+  // (devId/label — см. renderGroupUnlinkConfirm выше). Группа продолжает
+  // существовать как есть: sharedGroup у админа не трогаем, остальные
+  // участники (если есть) как пользовались общими задачами, так и
+  // пользуются — им ничего мигрировать/удалять не нужно, ведь данные им и
+  // принадлежат наравне с админом, а не только отвязываемому участнику.
+  function handleGroupUnlinkMember(devId, label){
     if(!sharedGroup || sharedGroup.role !== "admin") return closeModal();
     var groupId = sharedGroup.groupId;
     modalBox.innerHTML = modalHeader("Отвязываем…", "Секунду.");
@@ -7267,14 +7369,11 @@
     if(!isNetworkAvailable()){
       modalBox.innerHTML = modalHeader(noNetworkTitle(), noNetworkHint("отвязки участника")) + '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
-      document.getElementById("mBack").addEventListener("click", renderGroupUnlinkConfirm);
+      document.getElementById("mBack").addEventListener("click", function(){ renderGroupUnlinkConfirm(devId, label); });
       return;
     }
-    removeAllNonAdminGroupMembers(groupId).then(function(){
-      return migrateGroupTasksToLocalForAdmin(groupId);
-    }).then(function(){
-      returnJointTasksTabToLocalMode();
-      modalBox.innerHTML = modalHeader("Готово", "Участник отвязан. Общие задачи сохранены и перенесены в ваш личный список на вкладке «Общие задачи».") +
+    removeGroupMember(groupId, devId).then(function(){
+      modalBox.innerHTML = modalHeader("Готово", escapeHtml(label) + " отвязан(а) от общих задач.") +
         '<button class="modal-btn primary" id="mDone">Понятно</button>';
       bindClose();
       document.getElementById("mDone").addEventListener("click", closeModal);
@@ -7283,35 +7382,7 @@
       modalBox.innerHTML = modalHeader("Не удалось отвязать участника", "Проверьте подключение к интернету и попробуйте ещё раз.") +
         '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
-      document.getElementById("mBack").addEventListener("click", renderGroupUnlinkConfirm);
-    });
-  }
-
-  function handleGroupUnlinkDeleteData(){
-    if(!sharedGroup || sharedGroup.role !== "admin") return closeModal();
-    var groupId = sharedGroup.groupId;
-    modalBox.innerHTML = modalHeader("Удаляем…", "Секунду.");
-    bindClose();
-    if(!isNetworkAvailable()){
-      modalBox.innerHTML = modalHeader(noNetworkTitle(), noNetworkHint("отвязки участника")) + '<button class="modal-btn primary" id="mBack">Назад</button>';
-      bindClose();
-      document.getElementById("mBack").addEventListener("click", renderGroupUnlinkConfirm);
-      return;
-    }
-    removeAllNonAdminGroupMembers(groupId).then(function(){
-      return deleteGroupTasksAndArchive(groupId);
-    }).then(function(){
-      returnJointTasksTabToLocalMode();
-      modalBox.innerHTML = modalHeader("Готово", "Участник отвязан, общие задачи и архив группы удалены.") +
-        '<button class="modal-btn primary" id="mDone">Понятно</button>';
-      bindClose();
-      document.getElementById("mDone").addEventListener("click", closeModal);
-    }).catch(function(err){
-      console.error(err);
-      modalBox.innerHTML = modalHeader("Не удалось выполнить отвязку", "Проверьте подключение к интернету и попробуйте ещё раз.") +
-        '<button class="modal-btn primary" id="mBack">Назад</button>';
-      bindClose();
-      document.getElementById("mBack").addEventListener("click", renderGroupUnlinkConfirm);
+      document.getElementById("mBack").addEventListener("click", function(){ renderGroupUnlinkConfirm(devId, label); });
     });
   }
 
@@ -10781,14 +10852,15 @@
     // pendingRegistryPatch, а один-единственный patchNotesCloud с ним
     // уходит в самом конце цикла, после Promise.all(chores).
     var pendingRegistryPatch = {};
+    var registryFetchOk = false; // Шаг 12: отличить «реестр пуст» от «не удалось прочитать» (для зеркала)
     return Promise.all([
-      fetchNotesCloudPath("files/" + kind).catch(function(){ return null; }),
+      fetchNotesCloudPath("files/" + kind).then(function(v){ registryFetchOk = true; return v; }, function(){ return null; }),
       fetchNotesCloudPath("devices").catch(function(){ return null; }),
       fetchNotesCloudPath("fileRequests/" + kind).catch(function(){ return null; }),
       adapters.getLocalManifest().catch(function(){ return {}; })
     ]).then(function(results){
       var registry = results[0] || {}, devices = results[1] || {}, requests = results[2] || {}, manifest = results[3] || {};
-      mirrorFileRegistrySnapshot(kind, registry); // Шаг 12: зеркало метаданных в движок (см. выше), best-effort
+      if(registryFetchOk) mirrorFileRegistrySnapshot(kind, registry); // Шаг 12: зеркало метаданных в движок (см. выше), best-effort; при сбое чтения — не трогаем
       var localHashes = {}; // hash -> true, что реально есть локально на этом устройстве
       Object.keys(manifest).forEach(function(h){ localHashes[h] = true; });
       var now = Date.now();
@@ -11129,10 +11201,11 @@
   }
 
   // Тумбстоун в групповом реестре + немедленное удаление временной копии
-  // байт — зеркало registerFileDeletion выше. Используется точечно при
-  // отвязке/удалении группы (см. deleteGroupTasksAndArchive ниже, где
-  // проще снести всю ветку разом) — здесь пригодится, если понадобится
-  // точечное удаление одной картинки из группового канала в будущем.
+  // байт — зеркало registerFileDeletion выше. Точечное удаление одной
+  // картинки из группового канала — сценарий "снести всю ветку разом при
+  // удалении группы" (deleteGroupTasksAndArchive) убран Шагом 11 вместе со
+  // всем "завершением группы" (см. комментарий в начале файла), но сама
+  // функция пригодится для точечного удаления файла из группового канала.
   function registerFileDeletionFromGroup(groupId, hash){
     if(!groupId || !getFileSyncEnabled()) return Promise.resolve();
     var patch = {};
@@ -12124,7 +12197,11 @@
     return (
       '<div class="mdeditor-fab-row">' +
         (coverMode ?
-          '<button type="button" class="mdeditor-fab-btn' + (hideTitlesOn ? " pressed" : "") + '" id="booksHideTitlesBtn" title="' + (hideTitlesOn ? "Показать заглавия" : "Скрыть заглавия") + '">' + BOOKS_HIDE_TITLES_ICON_SVG + '</button>'
+          // ТЗ пользователя от 22.09: без класса "pressed" — эта кнопка не
+          // красится в активном состоянии, в отличие от остальных
+          // переключателей .mdeditor-fab-btn в проекте (состояние видно по
+          // самой пиктограмме, см. booksHideTitlesButtonIconSvg выше).
+          '<button type="button" class="mdeditor-fab-btn" id="booksHideTitlesBtn" title="' + (hideTitlesOn ? "Показать заглавия" : "Скрыть заглавия") + '">' + booksHideTitlesButtonIconSvg(hideTitlesOn) + '</button>'
           : "") +
         '<button type="button" class="mdeditor-fab-btn" id="booksInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="booksImportBtn" title="Загрузить fb2, epub или zip книгу">' + BOOKS_UPLOAD_ICON_SVG + '</button>' +
@@ -12149,7 +12226,7 @@
       hideTitlesBtn.addEventListener("click", function(){
         var next = !getBooksHideTitles();
         setBooksHideTitles(next);
-        hideTitlesBtn.classList.toggle("pressed", next);
+        hideTitlesBtn.innerHTML = booksHideTitlesButtonIconSvg(next);
         hideTitlesBtn.title = next ? "Показать заглавия" : "Скрыть заглавия";
         var grid = document.getElementById("booksList");
         if(grid) grid.classList.toggle("hide-titles", next);
@@ -12242,7 +12319,7 @@
         if(thumb){
           if(nowDisabled){
             thumb.classList.add("book-cover-placeholder");
-            thumb.innerHTML = BOOK_COVER_PLACEHOLDER_SVG;
+            thumb.innerHTML = BOOK_COVER_PLACEHOLDER_HTML;
           } else {
             loadBookCoverIntoThumb(idx, it.hash);
           }
@@ -12327,7 +12404,7 @@
       card.dataset.index = String(idx);
       var revealed = revealedBookDeleteRows.has(it.name.toLowerCase());
       card.innerHTML =
-        '<div class="book-cover-thumb book-cover-placeholder" id="bookCoverThumb_' + idx + '">' + BOOK_COVER_PLACEHOLDER_SVG + '</div>' +
+        '<div class="book-cover-thumb book-cover-placeholder" id="bookCoverThumb_' + idx + '">' + BOOK_COVER_PLACEHOLDER_HTML + '</div>' +
         '<div class="book-cover-name"></div>' +
         '<div class="book-cover-actions">' +
           '<button type="button" class="mdeditor-cover-reset-btn' + (revealed ? " visible" : "") + '" title="Сбросить обложку">' + BOOK_COVER_RESET_ICON_SVG + '</button>' +
@@ -18151,6 +18228,12 @@
   // якорь перерисовки (см. renderTaskTabList/anchorTaskId), поэтому видимая
   // позиция экрана не скачет ни в начало, ни в конец списка.
   function moveTaskToEdge(id, edge){
+    // Шаг 11, правка (см. SYNC_VERIFICATION-1-1.md): раньше проверка
+    // isGroupTasksReadOnly() срабатывала только внутри saveGroupTaskDataP,
+    // УЖЕ ПОСЛЕ того, как task.c (прямая ссылка на объект в groupTasksState,
+    // см. getGroupTaskById) мутировался ниже — viewer тем самым портил свой
+    // локальный кэш общей задачи, даже если сохранение в облако блокировалось.
+    if(isGroupTaskId(id) && isGroupTasksReadOnly()) return;
     var task = getTaskById(id);
     if(!task) return;
     // ⚠️ ИСПРАВЛЕНО (правка после ревью): раньше здесь всегда бралось
@@ -18179,6 +18262,8 @@
   // bindTapOrHold — общий тап/холд-хелпер). Возвращает новое значение
   // ("red"/"yellow").
   function cycleTaskFlag(id){
+    // см. пояснение у moveTaskToEdge выше — тот же баг и то же исправление.
+    if(isGroupTaskId(id) && isGroupTasksReadOnly()) return null;
     var task = getTaskById(id);
     if(!task) return null;
     var next = (task.c.flag === "red") ? "yellow" : "red";
@@ -18189,6 +18274,8 @@
   // Долгое нажатие на кружок-флажок — сброс отметки в null. Пара к
   // cycleTaskFlag выше.
   function clearTaskFlag(id){
+    // см. пояснение у moveTaskToEdge выше — тот же баг и то же исправление.
+    if(isGroupTaskId(id) && isGroupTasksReadOnly()) return null;
     var task = getTaskById(id);
     if(!task) return null;
     task.c.flag = null;
@@ -18212,6 +18299,8 @@
   // ниже, тот же bindTapOrHold, что и у cycleTaskFlag). Возвращает новое
   // значение ("work"/"check").
   function cycleTaskWorkState(id){
+    // см. пояснение у moveTaskToEdge выше — тот же баг и то же исправление.
+    if(isGroupTaskId(id) && isGroupTasksReadOnly()) return null;
     var task = getTaskById(id);
     if(!task) return null;
     var st = getTaskWorkState(task);
@@ -18222,6 +18311,8 @@
   }
   // Долгое нажатие на чемоданчик — сброс в off. Пара к cycleTaskWorkState.
   function clearTaskWorkState(id){
+    // см. пояснение у moveTaskToEdge выше — тот же баг и то же исправление.
+    if(isGroupTaskId(id) && isGroupTasksReadOnly()) return null;
     var task = getTaskById(id);
     if(!task) return null;
     task.c.inWork = false;
@@ -18252,6 +18343,8 @@
   }
   function hasTaskReminder(task){ return getTaskReminderAt(task) != null; }
   function setTaskReminder(id, ts){
+    // см. пояснение у moveTaskToEdge выше — тот же баг и то же исправление.
+    if(isGroupTaskId(id) && isGroupTasksReadOnly()) return false;
     var task = getTaskById(id);
     if(!task) return false;
     task.c.remindAt = ts;
@@ -18260,6 +18353,8 @@
   }
   // возвращает true, если напоминание действительно было и снято
   function clearTaskReminder(id){
+    // см. пояснение у moveTaskToEdge выше — тот же баг и то же исправление.
+    if(isGroupTaskId(id) && isGroupTasksReadOnly()) return false;
     var task = getTaskById(id);
     if(!task || !hasTaskReminder(task)) return false;
     task.c.remindAt = null;
@@ -19140,6 +19235,18 @@
     // подключения первого участника это ещё и единственный способ узнать,
     // что участник подключился (см. migrateAdminGroupTasksIfNeeded).
     if(tabKey === "jointtasks" && sharedGroup) refreshJointTasksData();
+    // Правка к Шагу 11 (SYNC_VERIFICATION-1-1.md, "можно ли поменять имя
+    // потом"): без отображаемого имени список для отвязки участника (см.
+    // renderGroupUnlinkMemberList) показывал бы только deviceId. Спрашиваем
+    // ИМЕННО здесь, при заходе на вкладку "Общие задачи" — не при запуске
+    // приложения (ТЗ пользователя: "предлагать ввести имя именно после
+    // перехода на эту вкладку, не вообще в приложении") — и только когда
+    // человек уже состоит в какой-то группе (sharedGroup), иначе имя
+    // никому не нужно. Диалог без "Отмена": пока имя не введено, он будет
+    // появляться заново при каждом заходе на вкладку.
+    if(tabKey === "jointtasks" && sharedGroup && !getUserDisplayName()){
+      openUserNameDialog({required:true});
+    }
     // Полная пересборка списка ниже (innerHTML) сама по себе всегда
     // приводит скролл контейнера к верху — нормально при настоящем
     // переключении вкладки (см. switchSettingsTab, там scrollTop и так

@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.36.47";
+const APP_VERSION = "v0.36.49";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -150,7 +150,8 @@ const ASSETS = [
   "./flibusta.js",
   "./DejaVuSans.ttf",
   "./icon-192x192.png",
-  "./icon-512x512.png"
+  "./icon-512x512.png",
+  "./book-cover-placeholder.jpg"
 ];
 
 self.addEventListener("install", (event) => {
