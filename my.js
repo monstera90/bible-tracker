@@ -13950,9 +13950,11 @@
       if(status0) status0.textContent = "Закладку можно сохранить только в режиме чтения текста.";
       return;
     }
-    pos = nextBookBlockPosition(pos);
+    // Правка 25.09: раньше здесь стоял nextBookBlockPosition(pos) — сдвиг
+    // на один блок вперёд (ТЗ 22.09, "закладка на абзац НИЖЕ видимого").
+    // Отменено: пользователь ожидает закладку ровно на первом видимом
+    // абзаце, без сдвига.
     var hash = bookReaderState.hash;
-    var oldMain = getMainBookBookmark(hash);
     if(oldMain){
       removeBookBookmark(hash, oldMain.id);
       removeBookReaderBookmarkMarkById(oldMain.id);
@@ -13985,7 +13987,9 @@
       if(status0) status0.textContent = "Закладку можно сохранить только в режиме чтения текста.";
       return;
     }
-    pos = nextBookBlockPosition(pos);
+    // Правка 25.09: см. тот же комментарий в saveBookReaderBookmark выше —
+    // сдвиг nextBookBlockPosition(pos) убран, закладка на первом видимом
+    // абзаце.
     var hash = bookReaderState.hash;
     var name = bookmarkNameFromPosition(pos);
     var newId = addBookBookmark(hash, pos, name, false);
