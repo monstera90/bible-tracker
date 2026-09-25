@@ -12679,6 +12679,22 @@
     if(isNaN(ch) || isNaN(blk)) return null;
     return {ch: ch, blk: blk};
   }
+  // Следующий блок книги после {ch, blk} — абзац или картинка сразу ПОСЛЕ
+  // текущего (следующий индекс в chapters[ch].blocks, а на границе главы —
+  // первый блок следующей главы). Нужна закладкам (ТЗ пользователя от
+  // 22.09: закладка ставится на абзац НИЖЕ текущего видимого, а не на сам
+  // текущий) — сдвигает позицию на один блок вперёд по тексту; на самом
+  // последнем блоке книги сдвигать некуда — возвращает исходную позицию.
+  function nextBookBlockPosition(pos){
+    var chapters = bookReaderState && bookReaderState.chapters;
+    if(!chapters) return pos;
+    var chapter = chapters[pos.ch];
+    if(chapter && pos.blk + 1 < chapter.blocks.length) return {ch: pos.ch, blk: pos.blk + 1};
+    for(var nextCh = pos.ch + 1; nextCh < chapters.length; nextCh++){
+      if(chapters[nextCh].blocks && chapters[nextCh].blocks.length) return {ch: nextCh, blk: 0};
+    }
+    return pos;
+  }
   // Обратная операция — прокручивает контейнер так, чтобы блок {ch, blk}
   // оказался наверху. Возвращает false, если блок не найден (например,
   // сохранённая позиция битая или файл книги успел измениться между
@@ -13894,6 +13910,7 @@
       if(status0) status0.textContent = "Закладку можно сохранить только в режиме чтения текста.";
       return;
     }
+    pos = nextBookBlockPosition(pos);
     var hash = bookReaderState.hash;
     var oldMain = getMainBookBookmark(hash);
     if(oldMain){
@@ -13928,6 +13945,7 @@
       if(status0) status0.textContent = "Закладку можно сохранить только в режиме чтения текста.";
       return;
     }
+    pos = nextBookBlockPosition(pos);
     var hash = bookReaderState.hash;
     var name = bookmarkNameFromPosition(pos);
     var newId = addBookBookmark(hash, pos, name, false);
@@ -14471,8 +14489,21 @@
   // scrollTop-вызова рядом, который конкурировал бы с ним же (правка от
   // 22.09, ТЗ пользователя: "два действия... одно побеждает" — race была
   // неаккуратной заплаткой, теперь путь один).
+  // ТЗ пользователя от 22.09: открывать не сам верх сегодняшней главы, а
+  // ровно на один абзац ВЫШЕ — последний блок ПРЕДЫДУЩЕЙ главы (вчерашней),
+  // тогда при открытии вкладки сегодняшний заголовок виден сразу под
+  // экраном, а не строго в первой строке. Если сегодняшняя глава — первая в
+  // книге (ch:0) или в предыдущей главе нет блоков — сдвигать некуда,
+  // остаёмся на прежнем поведении (верх сегодняшней главы).
   function ipkdTodayPosition(chapters){
-    return { ch: ipkdChapterIndexForToday(chapters), blk: 0 };
+    var ch = ipkdChapterIndexForToday(chapters);
+    if(ch > 0){
+      var prevChapter = chapters[ch - 1];
+      if(prevChapter && prevChapter.blocks && prevChapter.blocks.length){
+        return { ch: ch - 1, blk: prevChapter.blocks.length - 1 };
+      }
+    }
+    return { ch: ch, blk: 0 };
   }
   // Книга уже открыта этой сессией (bookReaderState жив, просто вернулись
   // на вкладку) — принудительно текстовый режим (не список глав) и заново
