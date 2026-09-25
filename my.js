@@ -13147,10 +13147,22 @@
     // bookReaderState.mode — он к этому моменту уже мог смениться на
     // целевой, см. switchBookReaderMode), поэтому здесь не путаемся с её
     // собственным сохранением prevMode.
-    if(container.querySelector(".book-reader-p, .book-reader-image-wrap")){
+    // Правка 25.09: если restorePosition уже выставлен ДО этого вызова
+    // (например, openIpkdReaderToToday принудительно ставит позицию
+    // "сегодня" при каждом заходе на вкладку ИПКД, или
+    // jumpToChapterFromChaptersList — позицию выбранной главы), эта
+    // авто-запоминалка не должна её перебивать значением из ещё старого,
+    // не сброшенного DOM — иначе принудительный переход "всегда сегодня"
+    // (ТЗ 21.09) срывался на возврате с другой вкладки/экрана приложения:
+    // заголовок дня оказывался выше видимой области. Для "Мои книги"
+    // поведение не меняется — там restorePosition к этому моменту уже
+    // выставлен тем же самым способом (см. switchSettingsTab, уход с
+    // вкладки "Книги"/ИПКД), так что раньше здесь просто вычислялось то
+    // же самое значение повторно.
+    if(!bookReaderState.restorePosition && container.querySelector(".book-reader-p, .book-reader-image-wrap")){
       var prevPos = currentBookReaderPosition(container);
       if(prevPos) bookReaderState.restorePosition = prevPos;
-    } else if(container.querySelector("#bookChaptersList")){
+    } else if(!bookReaderState.restorePosition && container.querySelector("#bookChaptersList")){
       bookReaderState.chaptersScrollTop = container.scrollTop;
     }
     // Флашим/снимаем слушатель ДО перерисовки — на момент вызова
