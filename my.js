@@ -13955,6 +13955,7 @@
     // Отменено: пользователь ожидает закладку ровно на первом видимом
     // абзаце, без сдвига.
     var hash = bookReaderState.hash;
+    var oldMain = getMainBookBookmark(hash);
     if(oldMain){
       removeBookBookmark(hash, oldMain.id);
       removeBookReaderBookmarkMarkById(oldMain.id);
