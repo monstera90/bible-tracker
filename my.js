@@ -4645,6 +4645,30 @@
   // Фикс — глубокое сравнение ПО ЗНАЧЕНИЮ, без учёта порядка ключей
   // объекта (порядок ЭЛЕМЕНТОВ МАССИВА при этом важен и сравнивается как
   // есть — там порядок содержательный, например bookmarks/underlines).
+  // ⚠️ ДОПОЛНЕНО 26.09 (третий проход того же разбора — после фиксов
+  // recordsEqual и pruneOldHourLogsForStats тот же лог пользователя
+  // ПОВТОРНО показал ~2.4 МБ, снова с одними и теми же id задач в
+  // deltaTaskKeys, стабильно, на каждой загрузке). Правдоподобная
+  // оставшаяся причина — то, как deepEqual выше сравнивает КЛЮЧИ объекта:
+  // если в локальном объекте задачи есть поле со значением ИМЕННО
+  // `undefined` (а не `null` — это разные вещи в JS), например
+  // `{someField: undefined}`, то `Object.keys` его ВСЁ РАВНО перечисляет —
+  // ключ формально есть. Но `JSON.stringify({someField: undefined})` даёт
+  // `"{}"` — такое поле молча ПРОПАДАЕТ при сериализации. Firebase Realtime
+  // Database получает тело putCloudBlob именно через JSON.stringify (см.
+  // выше) — значит на сервере этого поля нет вовсе, а при следующем GET
+  // `cloudData[key]` придёт БЕЗ него. Раньше (JSON.stringify-сравнение)
+  // это не было проблемой — обе стороны одинаково теряли такое поле при
+  // сериализации. Но deepEqual сравнивает ключи НАПРЯМУЮ, минуя
+  // JSON.stringify, и видит разное количество ключей (у локального объекта
+  // "лишний" ключ с undefined) — считает записи разными НАВСЕГДА, сколько
+  // бы раз их ни отправляли: код, создающий эту задачу, каждый раз заново
+  // кладёт то же undefined-поле, PATCH его каждый раз роняет при
+  // сериализации, а на следующей же загрузке deepEqual снова видит
+  // "расхождение" и отправляет ПОЛНУЮ запись заново — отсюда стабильно одни
+  // и те же id на каждом цикле. Фикс — приравнивать ключ со значением
+  // undefined к отсутствующему ключу (ровно так же, как это делает
+  // JSON.stringify/Firebase), а не считать его отличием.
   function deepEqual(a, b){
     if(a === b) return true;
     if(a === null || b === null || typeof a !== "object" || typeof b !== "object") return a === b;
@@ -4653,11 +4677,12 @@
       for(var i=0;i<a.length;i++){ if(!deepEqual(a[i], b[i])) return false; }
       return true;
     }
-    var ak = Object.keys(a), bk = Object.keys(b);
+    var ak = Object.keys(a).filter(function(k){ return a[k] !== undefined; });
+    var bk = Object.keys(b).filter(function(k){ return b[k] !== undefined; });
     if(ak.length !== bk.length) return false;
     for(var j=0;j<ak.length;j++){
       var k = ak[j];
-      if(!Object.prototype.hasOwnProperty.call(b, k)) return false;
+      if(!Object.prototype.hasOwnProperty.call(b, k) || b[k] === undefined) return false;
       if(!deepEqual(a[k], b[k])) return false;
     }
     return true;
@@ -4814,6 +4839,37 @@
         var deltaKeys = cloudDelta ? Object.keys(cloudDelta) : [];
         var deltaTaskKeys = deltaKeys.filter(function(k){ return k.indexOf("task:") === 0; });
         window.Debug.log("doCloudSync: слияние — локально изменилось=" + localChanged + ", в облако уйдёт ключей=" + deltaKeys.length + " (из них task:=" + deltaTaskKeys.length + (deltaTaskKeys.length ? ": " + deltaTaskKeys.slice(0, 5).join(", ") : "") + ")");
+        // ⚠️ ДИАГНОСТИКА (26.09, третий проход разбора трафика) — временно,
+        // пока не найдена причина стабильного повторного разбухания
+        // putCloudBlob у одних и тех же id (см. пояснение у deepEqual выше).
+        // Два среза: 1) крупнейшие по размеру ключи дельты — покажет,
+        // ДЕЙСТВИТЕЛЬНО ли раздувают именно task:-записи или что-то ещё
+        // (например book:<hash>), не попавшее в первые 5 из строки выше;
+        // 2) для первых нескольких task:-ключей — какие ИМЕННО поля
+        // содержимого отличаются от cloudData (по имени поля, без самих
+        // значений, чтобы не тащить в лог текст/картинки) — это прямо
+        // укажет, воспроизводится ли гипотеза про undefined-поле или дело
+        // в чём-то другом. Оставить только до следующего лога пользователя,
+        // затем убрать.
+        if(deltaKeys.length){
+          var sized = deltaKeys.map(function(k){
+            var n = 0;
+            try{ n = JSON.stringify(cloudDelta[k]).length; }catch(e){}
+            return {k:k, n:n};
+          });
+          sized.sort(function(a,b){ return b.n - a.n; });
+          window.Debug.log("doCloudSync: крупнейшие ключи дельты по размеру — " +
+            sized.slice(0, 5).map(function(x){ return x.k + "=" + x.n; }).join(", "));
+        }
+        deltaTaskKeys.slice(0, 3).forEach(function(k){
+          var lc = merged[k] && merged[k].c, cc = cloudData && cloudData[k] && cloudData[k].c;
+          var lk = lc && typeof lc === "object" ? Object.keys(lc) : [];
+          var ck = cc && typeof cc === "object" ? Object.keys(cc) : [];
+          var onlyLocal = lk.filter(function(f){ return ck.indexOf(f) === -1; });
+          var onlyCloud = ck.filter(function(f){ return lk.indexOf(f) === -1; });
+          var diffVals = lk.filter(function(f){ return ck.indexOf(f) !== -1 && !deepEqual(lc[f], cc[f]); });
+          window.Debug.log("doCloudSync: разбор полей " + k + " — только локально: [" + onlyLocal.join(",") + "], только в облаке: [" + onlyCloud.join(",") + "], отличаются по значению: [" + diffVals.join(",") + "]");
+        });
       }
       state = merged;
       personalViewAbsorbState(false); // шаг 8: задачи, приехавшие блобом (старые устройства), — в вид до перерисовки
