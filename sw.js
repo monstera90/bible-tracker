@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.36.64";
+const APP_VERSION = "v0.36.65";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -154,34 +154,62 @@ const ASSETS = [
   "./book-cover-placeholder.jpg"
 ];
 
+// Проверяет ЛОКАЛЬНО (без единого обращения к сети — только cache.match),
+// есть ли в кэше уже все файлы из ASSETS. Нужна install-обработчику ниже,
+// чтобы отличить настоящую новую версию (APP_VERSION поднят -> CACHE_NAME
+// новый -> кэш пустой -> нужна полная закачка) от "ложной" повторной
+// установки: браузер перепроверяет байты sw.js при каждой навигации и, если
+// они отличаются от прошлого раза ХОТЯ БЫ на один символ (например, правка
+// комментария в sw.js или даже перенос строки — БЕЗ изменения самого
+// APP_VERSION), запускает install заново. Раньше это означало полную
+// перекачку всех ~35 файлов приложения по сети — тот самый расход трафика
+// "на пустом месте", который заметил пользователь 26.09, хотя версия
+// приложения не менялась и все файлы уже лежали в этом же кэше (CACHE_NAME
+// ведь зависит только от APP_VERSION, а не от точного содержимого sw.js).
+function cacheHasAllAssets(cache) {
+  return Promise.all(ASSETS.map((url) => cache.match(url).then((r) => !!r)))
+    .then((flags) => flags.every(Boolean));
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     refuseInstallInOfflineMode()
       .then(() => caches.open(CACHE_NAME))
-      .then((cache) => {
-        // ВАЖНО: обычный cache.addAll() делает fetch() с учётом HTTP-кэша
-        // браузера — если сервер отдаёт файлы (например my.js) с
-        // Cache-Control, разрешающим кэширование, новый service worker
-        // может "закэшировать" ту же самую старую версию файла, даже
-        // если на сервере уже лежит новая. Поэтому качаем каждый файл
-        // явно в обход HTTP-кэша ({cache: "reload"}).
-        // Каждый файл качается независимо: сбой одного не отменяет остальные,
-        // результат — список не скачавшихся ("./файл (причина)").
-        return Promise.all(
-          ASSETS.map((url) =>
-            fetch(url, { cache: "reload" })
-              .then((response) => {
-                if (!response.ok) throw new Error("HTTP " + response.status);
-                return cache.put(url, response);
-              })
-              .then(
-                () => null,
-                (err) => ({ url: url, reason: String((err && err.message) || err) })
-              )
-          )
-        );
-      })
+      .then((cache) =>
+        cacheHasAllAssets(cache).then((alreadyComplete) => {
+          // Кэш этой же версии уже полон — см. cacheHasAllAssets выше:
+          // сеть не трогаем вовсе, сразу отдаём null дальше по цепочке
+          // (следующий .then() ниже читает null как "скачивать было
+          // нечего, отчёт и проверку критичных файлов пропускаем").
+          if (alreadyComplete) return null;
+
+          // ВАЖНО: обычный cache.addAll() делает fetch() с учётом HTTP-кэша
+          // браузера — если сервер отдаёт файлы (например my.js) с
+          // Cache-Control, разрешающим кэширование, новый service worker
+          // может "закэшировать" ту же самую старую версию файла, даже
+          // если на сервере уже лежит новая. Поэтому качаем каждый файл
+          // явно в обход HTTP-кэша ({cache: "reload"}).
+          // Каждый файл качается независимо: сбой одного не отменяет остальные,
+          // результат — список не скачавшихся ("./файл (причина)").
+          return Promise.all(
+            ASSETS.map((url) =>
+              fetch(url, { cache: "reload" })
+                .then((response) => {
+                  if (!response.ok) throw new Error("HTTP " + response.status);
+                  return cache.put(url, response);
+                })
+                .then(
+                  () => null,
+                  (err) => ({ url: url, reason: String((err && err.message) || err) })
+                )
+            )
+          );
+        })
+      )
       .then((results) => {
+        // null — из ветки alreadyComplete выше: качать было нечего, отчёт
+        // о неудавшихся файлах и проверку критичных писать не по чему.
+        if (!results) return;
         const failed = results.filter(Boolean);
         const criticalFailed = failed.filter((f) => CRITICAL_ASSETS.indexOf(f.url) !== -1);
         return writeInstallReport(failed.map((f) => f.url + " (" + f.reason + ")")).then(() => {
@@ -194,8 +222,8 @@ self.addEventListener("install", (event) => {
       // старые вкладки или нажмёт кнопку — сразу активируемся (в activate
       // ниже — clients.claim(), так что новая версия берёт под контроль и
       // уже открытые страницы). До этой строки дойдём только если скачались
-      // все обязательные файлы — иначе install падает и прежняя версия
-      // продолжает работать.
+      // все обязательные файлы (или скачивать было нечего — см. выше) —
+      // иначе install падает и прежняя версия продолжает работать.
       .then(() => self.skipWaiting())
   );
 });
