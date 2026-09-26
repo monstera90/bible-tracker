@@ -113,6 +113,18 @@
     appearance:none;
     -webkit-tap-highlight-color:transparent;
     transition:opacity .15s ease, background .15s ease;
+    /* Убирает системную вибрацию Android/Chrome при долгом тапе: это
+       haptic-отклик браузера на РАСПОЗНАВАНИЕ жеста долгого нажатия
+       (срабатывает до события "contextmenu", поэтому preventDefault на
+       нём в my.js эту вибрацию не отменяет — жест уже произошёл).
+       touch-action:manipulation говорит браузеру не разбирать этот тап
+       как жест долгого нажатия/выделения вовсе, -webkit-touch-callout и
+       user-select добивают тот же источник (системное меню/выделение) на
+       старых WebView, где manipulation одного недостаточно. */
+    touch-action:manipulation;
+    -webkit-touch-callout:none;
+    -webkit-user-select:none;
+    user-select:none;
   }
   @media (hover:hover) and (pointer:fine){
     .settings-fab:hover{
