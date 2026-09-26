@@ -4577,9 +4577,18 @@
                                              // настроек (см. раздел «НАСТРОЙКИ: ТЕНЕВАЯ ЗАПИСЬ…» ниже),
                                              // /syncs/<syncId>/settings/<id> = {c,t} — тот же приём, что
                                              // и у personalTasks выше
-    "goals": true                           // 23.09 (TASK_UNIFIED_SYNC.md, шаг 9): теневой store целей
+    "goals": true,                          // 23.09 (TASK_UNIFIED_SYNC.md, шаг 9): теневой store целей
                                              // чтения (см. раздел «ЦЕЛИ ЧТЕНИЯ: ТЕНЕВАЯ ЗАПИСЬ…» ниже),
                                              // /syncs/<syncId>/goals/<goalId> = {c,t}
+    "personalTasks_meta": true,             // 26.09 (syncengine_transport.js 1.3, «маячок» перед полным
+    "settings_meta": true,                  // pull): каждый личный store транспорта теперь пишет рядом
+    "goals_meta": true                      // <name>_meta = {t:<серверная метка>} — тот же верхний
+                                             // уровень /syncs/<syncId>/, что и сам store, поэтому три
+                                             // ветки-маячка нужно исключить из state точно так же, как
+                                             // сами personalTasks/settings/goals выше. Групповых
+                                             // аналогов (tasks_meta/archive_meta под /groups/<id>/) это
+                                             // НЕ касается — там нет кода, читающего узел группы целиком
+                                             // и подмешивающего все его ключи в какую-то общую структуру.
   };
   function stripCloudReservedSubtrees(cloudData, label){
     if(!cloudData) return cloudData;

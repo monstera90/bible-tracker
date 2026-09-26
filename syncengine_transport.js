@@ -1,4 +1,39 @@
 // syncengine_transport.js
+// Версия: 1.3 (26.09) — «маячок» перед полным pull (вариант «Б» из разбора
+// TASK_UNIFIED_SYNC.md, «лишний трафик pull»): pullInternal раньше делал
+// полный GET всего узла (<cloudPath>.json) КАЖДЫЙ раз, даже когда с прошлого
+// раза ничего не изменилось — в логе пользователя это personalTasks.json
+// (365 записей) целиком на каждый syncNow, включая возврат из фона. Теперь
+// перед полным GET транспорт сначала читает маленький маячок —
+// <cloudPath>_meta.json = { t: <серверная метка времени> } — и если он не
+// изменился с прошлого раза (маячок кэшируется в localStorage, ключ
+// syncEngineTransportMarker_<storeId>; сам storeId уже включает syncId/scope,
+// так что при смене области кэш естественным образом не путается), весь
+// узел не запрашивается вовсе. Маячок обновляется ПОСЛЕ каждого успешного
+// push, в котором реально что-то ушло (pushRes.pushed > 0) — серверной
+// меткой ({".sv":"timestamp"}), поэтому гонка "кто раньше записал" не имеет
+// значения: важен сам факт изменения, а не его порядок. Если сам push
+// только что обновил маячок, следующий пул в этом же цикле увидит "новый"
+// маячок и один раз сделает полный GET, даже если это были наши же
+// изменения — это осознанный компромисс в пользу простоты и надёжности
+// (см. пояснение у writeRemoteMarker ниже), а не единственная причина
+// полного пула тратить трафик.
+// ⚠️ ВАЖНО (см. my.js, CLOUD_RESERVED_SUBTREES): у ЛИЧНЫХ store (personalTasks,
+// settings, goals — /syncs/<syncId>/<name>/...) новый узел <name>_meta лежит
+// РЯДОМ, тем же соседним ключом верхнего уровня под /syncs/<syncId>/, куда
+// смотрит легаси doCloudSync/mergeStates. Если такой ключ не добавить в
+// CLOUD_RESERVED_SUBTREES, doCloudSync подмешает его в обычный `state`, как
+// обычную запись задачи — это НАДО дописать в my.js для каждого личного
+// store при подключении маячка (сделано 26.09 для personalTasks/settings/
+// goals). У ГРУППОВЫХ store (/groups/<groupId>/tasks_meta,
+// /groups/<groupId>/archive_meta) такой опасности нет — ничто в my.js не
+// читает узел /groups/<groupId>/ целиком и не итерирует все его дочерние
+// ключи как записи (в отличие от /syncs/<syncId>/), так что для групп
+// правка my.js не нужна.
+// Если localStorage недоступен (приватный режим, квота, старый браузер) —
+// маячок просто не кэшируется: pullInternal тогда ведёт себя как раньше,
+// всегда полным GET, без ошибки и без потери данных — маячок это только
+// оптимизация, а не часть модели корректности синка.
 // Версия: 1.2 (19.09) — новая опция opts.canSync (режим «оффлайн» в my.js): пока она
 // возвращает false, фоновые push (по событию dirty и повторы после ошибки) не
 // запускаются, записи остаются dirty. Остальная логика не менялась.
@@ -60,6 +95,8 @@
   'use strict';
 
   var TEST_ROOT = '/__syncengine_test__/';
+  var MARKER_SUFFIX = '_meta';
+  var MARKER_LS_PREFIX = 'syncEngineTransportMarker_';
   var DEFAULT_DEBOUNCE_MS = 400;
   var DEFAULT_PUSH_TIMEOUT_MS = 15000;
   var DEFAULT_PULL_TIMEOUT_MS = 10000;
@@ -115,6 +152,41 @@
 
   function errMessage(err) {
     return err && err.message ? err.message : String(err);
+  }
+
+  // ---- маячок (см. пояснение в шапке файла) --------------------------------
+  // Кэш последнего известного значения маячка — только чтобы пережить
+  // перезагрузку страницы (dirty-флаги движка и так живут только в памяти,
+  // но здесь речь про pull, а не push: без персистентного кэша маячок помог
+  // бы только внутри одной вкладки между вызовами syncNow, а самый частый
+  // случай — как раз холодная загрузка приложения, когда в облаке с
+  // прошлого визита ничего не изменилось). localStorage, а не IndexedDB:
+  // значение — одно короткое число на store, никакого риска квоты (в
+  // отличие от истории с копией самих задач, из-за которой personalbinding
+  // хранит СВОИ записи именно в IndexedDB, а не в localStorage).
+  function readLocalMarker(storeId) {
+    try {
+      if (typeof localStorage === 'undefined' || localStorage === null) return null;
+      var v = localStorage.getItem(MARKER_LS_PREFIX + storeId);
+      return v === null ? null : v;
+    } catch (err) {
+      return null; // приватный режим/квота/недоступен — маячок просто не сработает
+    }
+  }
+
+  function writeLocalMarker(storeId, val) {
+    try {
+      if (typeof localStorage === 'undefined' || localStorage === null) return;
+      localStorage.setItem(MARKER_LS_PREFIX + storeId, val);
+    } catch (err) {
+      // не страшно — в следующий раз просто снова сделаем полный pull
+    }
+  }
+
+  function markerUrlFor(dbUrl, segments) {
+    var last = segments[segments.length - 1] + MARKER_SUFFIX;
+    var markerSegments = segments.slice(0, -1).concat([last]);
+    return dbUrl + '/' + markerSegments.map(encodeURIComponent).join('/') + '.json';
   }
 
   /**
@@ -212,6 +284,7 @@
         storeId: storeId,
         cloudPath: cfg.cloudPath,
         url: dbUrl + '/' + segments.map(encodeURIComponent).join('/') + '.json',
+        markerUrl: markerUrlFor(dbUrl, segments),
         encryptHook: cfg.encryptHook,
         decryptHook: cfg.decryptHook,
         timer: null,        // debounce push
@@ -220,6 +293,12 @@
         pushing: null,      // Promise выполняющегося push (для склейки вызовов)
         rerun: false,
         extra: new Map(),   // записи, добавленные syncNow-сверкой (id -> record)
+        fullPulledOnce: false, // см. пояснение у маячка в pullInternal: первый pull после
+                                // attachStore ВСЕГДА полный, маячок разрешён только со второго
+                                // (иначе syncNow-сверка "локально новее облака" в этой же
+                                // функции ниже — которая лечит именно потерю dirty-флага при
+                                // перезагрузке — считала бы cloudTimes пустыми и на каждом
+                                // пропуске гоняла бы push всех живых записей заново)
       });
       if (autoPush && !offDirty) {
         offDirty = engine.on('dirty', function (e) {
@@ -329,6 +408,21 @@
       return result;
     }
 
+    // Обновляет маячок серверной меткой времени — ПОСЛЕ push, в котором
+    // реально что-то ушло. Ошибка записи маячка не должна ронять push (сами
+    // данные уже ушли) — она только означает, что следующий pull зря
+    // сделает полный GET, а не то, что что-то потерялось.
+    async function writeRemoteMarker(st) {
+      try {
+        var res = await request(st.markerUrl,
+          { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ t: { '.sv': 'timestamp' } }) },
+          pushTimeoutMs, false);
+        if (!res.ok) throw new Error('marker_write_failed_' + res.status);
+      } catch (err) {
+        log('SyncEngineTransport push "' + st.storeId + '": не удалось обновить маячок (' + errMessage(err) + ') — не критично, просто следующий pull сделает полный GET');
+      }
+    }
+
     async function pushOnce(st, pushOpts) {
       var dirty = await engine.getDirty(st.storeId);
       // Дополняем записями из сверки syncNow (локально новее облака, но dirty-флаг потерян).
@@ -347,6 +441,7 @@
       var pushRes = await pushRecords(st, toSend, pushOpts);
       log('SyncEngineTransport push "' + st.storeId + '": итог — отправлено ' + pushRes.pushed + ', не ушло ' + pushRes.failed.length +
         (pushRes.error ? ', ОШИБКА ' + errMessage(pushRes.error) : '') + ', ' + (Date.now() - pushT0) + ' мс');
+      if (pushRes.pushed > 0) await writeRemoteMarker(st);
       return pushRes;
     }
 
@@ -405,9 +500,39 @@
     }
 
     async function pullInternal(st) {
-      var out = { applied: 0, skipped: 0, undecryptable: [], invalid: [], cloudTimes: {}, error: null };
+      var out = { applied: 0, skipped: 0, undecryptable: [], invalid: [], cloudTimes: {}, error: null, skippedByMarker: false };
       var pullT0 = Date.now();
       log('SyncEngineTransport pull "' + st.storeId + '": старт');
+
+      // Маячок: дешёвая проверка "менялось ли что-то с прошлого раза" ПЕРЕД
+      // полным GET узла. localMarker === null значит "маячок ещё ни разу не
+      // кэшировался" (первый pull этого store в этом браузере, либо
+      // localStorage недоступен) — тогда НЕ пропускаем, всегда делаем полный
+      // pull для затравки. Если маячка в облаке вообще нет (никто ещё не
+      // пушил после появления этой версии транспорта, либо push шёл со
+      // старой версии без маячка) — remoteMarker будет null, и мы тоже не
+      // пропускаем: пропуск допустим ТОЛЬКО когда оба значения — реальные
+      // серверные метки и они совпали, иначе рискуем молча остановить pull
+      // навсегда, если что-то в цепочке маячок не пишет.
+      if (st.markerUrl && st.fullPulledOnce) {
+        try {
+          var mres = await request(st.markerUrl, { method: 'GET' }, pullTimeoutMs, true);
+          if (mres.ok) {
+            var remoteMarker = (mres.body && typeof mres.body === 'object' && typeof mres.body.t === 'number')
+              ? String(mres.body.t) : null;
+            var localMarker = readLocalMarker(st.storeId);
+            if (remoteMarker !== null && localMarker !== null && localMarker === remoteMarker) {
+              log('SyncEngineTransport pull "' + st.storeId + '": маячок не менялся (' + remoteMarker + ') — полный запрос узла пропущен');
+              out.skippedByMarker = true;
+              return out;
+            }
+            if (remoteMarker !== null) st.pendingMarker = remoteMarker;
+          }
+        } catch (err) {
+          // маячок недоступен/сеть — не страшно, просто продолжаем обычным полным pull
+        }
+      }
+
       var raw;
       try {
         var res = await request(st.url, { method: 'GET' }, pullTimeoutMs, true);
@@ -464,6 +589,14 @@
       if (out.applied) emitter.emit('pulled', { storeId: st.storeId, applied: out.applied });
       log('SyncEngineTransport pull "' + st.storeId + '": итог — в облаке ' + ids.length + ' зап., применено ' + out.applied +
         ', пропущено ' + out.skipped + ', нечитаемых ' + out.undecryptable.length + ', невалидных ' + out.invalid.length + ', ' + (Date.now() - pullT0) + ' мс');
+      // Полный pull применён успешно — теперь можно кэшировать маячок,
+      // который мы прочитали ДО него: только после того, как убедились,
+      // что данные, к которым он относится, реально дошли и слились.
+      if (st.pendingMarker !== undefined) {
+        writeLocalMarker(st.storeId, st.pendingMarker);
+        st.pendingMarker = undefined;
+      }
+      st.fullPulledOnce = true; // маячок теперь можно доверять syncNow-сверке ниже
       return out;
     }
 
@@ -490,7 +623,21 @@
     async function syncNow(storeId) {
       var st = getStoreOrThrow(storeId);
       var pull = await pullInternal(st);
-      if (!pull.error) {
+      // Сверка "локально новее облака, но dirty-флаг потерян" (лечит именно
+      // потерю флага при перезагрузке) годится ТОЛЬКО когда pull.cloudTimes
+      // реально пришли с сервера. Если pull был пропущен маячком —
+      // cloudTimes пустые НЕ потому что в облаке пусто, а потому что мы его
+      // не спрашивали; гонять эту сверку на пустых cloudTimes пометило бы
+      // «отличается от облака» вообще всё живое в store и свело бы экономию
+      // маячка на нет, просто перенеся тот же трафик с pull на push. Это
+      // безопасно пропустить: маячок сработал только когда есть хотя бы
+      // один настоящий полный pull с начала этого attachStore (см.
+      // st.fullPulledOnce в pullInternal) — а значит dirty-флаги внутри
+      // ЭТОЙ сессии отслеживались нормально и без потерь; единственный
+      // случай, который реально чинит эта сверка (потеря флага именно на
+      // перезагрузке страницы), уже покрыт тем самым обязательным первым
+      // полным pull'ом.
+      if (!pull.error && !pull.skippedByMarker) {
         var local = await engine.listRecords(st.storeId, { includeDeleted: true });
         local.forEach(function (r) {
           var ct = pull.cloudTimes[r.id];
