@@ -4200,6 +4200,22 @@
   // чтобы найти вызывающую функцию, не расставляя label на каждый из ~25
   // вызовов fetchWithTimeout по всему файлу.
   var fetchWithTimeoutInFlight = {};
+  // ⚠️ ДОБАВЛЕНО (26.09, поиск источника трафика 80-100 МБ/мин по замеру
+  // Android — размер тел PATCH-запросов логировался и раньше (putCloudBlob),
+  // но размер ОТВЕТОВ (GET) не логировался НИГДЕ, хотя самые тяжёлые
+  // передачи (полный узел при откате с фильтрованного GET, байты картинок,
+  // диапазоны ключей) — это именно ответы, а не запросы. Единая точка учёта
+  // трафика на всё приложение — bibleTrafficTotalBytes копится за сессию,
+  // logFetchTraffic пишет размер каждого отдельного вызова, чтобы в
+  // следующем логе искать не вслепую, а по конкретным цифрам.
+  var fetchTrafficTotalBytes = 0;
+  function logFetchTraffic(url, reqBytes, resBytes, ms){
+    fetchTrafficTotalBytes += (reqBytes || 0) + (resBytes || 0);
+    if(window.Debug){
+      var shortUrl = (typeof FIREBASE_DB_URL === "string" && url.indexOf(FIREBASE_DB_URL) === 0) ? url.slice(FIREBASE_DB_URL.length) : url;
+      window.Debug.log("ТРАФИК: " + shortUrl.slice(0, 90) + " — запрос=" + (reqBytes || 0) + "б, ответ=" + (resBytes === null ? "?" : resBytes) + "б, " + ms + "мс, ИТОГО за сессию=" + fetchTrafficTotalBytes + "б (" + (fetchTrafficTotalBytes / 1048576).toFixed(2) + " МБ)");
+    }
+  }
   function fetchWithTimeout(url, options, timeoutMs){
     // режим оффлайн (см. раздел «РЕЖИМ ОФФЛАЙН»): все ~25 сетевых вызовов
     // приложения идут через эту функцию — единая точка отсечки, до счётчика
@@ -4223,7 +4239,25 @@
     var timer = setTimeout(function(){ ctrl.abort(); }, timeoutMs || 8000);
     options = options || {};
     options.signal = ctrl.signal;
-    return fetch(url, options).finally(function(){
+    var trafficT0 = Date.now();
+    var reqBytes = 0;
+    try{ if(options.body) reqBytes = new Blob([options.body]).size; }catch(eReqSize){}
+    return fetch(url, options).then(function(res){
+      // Content-Length есть не у всех ответов Firebase (иногда chunked) —
+      // тогда меряем реальный размер через клон, не трогая основной res,
+      // которым дальше пользуется вызывающий код как обычно.
+      var cl = res.headers && res.headers.get ? res.headers.get("content-length") : null;
+      if(cl !== null && cl !== undefined && cl !== ""){
+        logFetchTraffic(url, reqBytes, parseInt(cl, 10) || 0, Date.now() - trafficT0);
+      } else {
+        try{
+          res.clone().blob().then(function(b){
+            logFetchTraffic(url, reqBytes, b.size, Date.now() - trafficT0);
+          }).catch(function(){ logFetchTraffic(url, reqBytes, null, Date.now() - trafficT0); });
+        }catch(eClone){ logFetchTraffic(url, reqBytes, null, Date.now() - trafficT0); }
+      }
+      return res;
+    }).finally(function(){
       clearTimeout(timer);
       fetchWithTimeoutInFlight[url] = (fetchWithTimeoutInFlight[url] || 1) - 1;
       if(fetchWithTimeoutInFlight[url] <= 0) delete fetchWithTimeoutInFlight[url];
@@ -4444,12 +4478,20 @@
       headers:{"Content-Type":"application/json"},
       body: body
     };
+    // .length у строки — это UTF-16 code units, не байты; для кириллицы
+    // (заметки, задачи) это занизит размер. Считаем реальный байтовый
+    // размер через Blob один раз — он нужен и для keepalive-лимита ниже,
+    // и (⚠️ ДОБАВЛЕНО 26.09, расход трафика — те же 4-5 хешей заливались
+    // заново каждые ~10 минут весь день, потому что фиксированный таймаут
+    // 15с почти никогда не давал уложиться байтам картинки в 5-7 МБ на
+    // нестабильной сети — запрос обрывался сам, ничего не долетало, и
+    // назавтра всё то же самое; см. computeCloudPatchTimeoutMs ниже) —
+    // для таймаута самого запроса: маленькие PATCH (задачи, заметки)
+    // получают прежние 15с, а крупные (байты файла) — пропорционально
+    // больше времени, чтобы иметь реальный шанс закончиться, а не просто
+    // сжигать трафик на заведомо обречённую попытку.
+    var byteSize = new Blob([body]).size;
     if(opts && opts.keepalive){
-      // .length у строки — это UTF-16 code units, не байты; для
-      // кириллицы (заметки, задачи) это занизит размер. Считаем реальный
-      // байтовый размер через Blob, иначе рискуем поставить keepalive на
-      // запрос, который браузер молча не отправит.
-      var byteSize = new Blob([body]).size;
       if(byteSize < KEEPALIVE_BODY_LIMIT){
         fetchOpts.keepalive = true;
       }
@@ -4457,10 +4499,22 @@
       // не делать, это не сделает: без keepalive шанс не долететь при
       // сворачивании/блокировке остаётся тем же, что и был.
     }
-    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + ".json", fetchOpts, 15000).then(function(res){
+    var timeoutMs = (opts && opts.timeoutMs) || computeCloudPatchTimeoutMs(byteSize);
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + ".json", fetchOpts, timeoutMs).then(function(res){
       if(!res.ok) throw new Error("put_failed_" + res.status);
       return true;
     });
+  }
+  // ⚠️ ДОБАВЛЕНО (26.09, расход трафика): единая формула таймаута для
+  // PATCH в облако — 15с хватает почти на всё (задачи, заметки, мелкие
+  // патчи реестра), но байты картинки (5-7+ МБ base64) на нестабильной
+  // сети физически не успевают. Даём +10с сверху на каждый МБ payload'а,
+  // с потолком в 90с — дальше смысла ждать нет, скорее всего сеть просто
+  // не тянет прямо сейчас, и лучше отступить и попробовать позже (см.
+  // backoff по хешу в syncFileRegistry), чем держать соединение минутами.
+  function computeCloudPatchTimeoutMs(byteSize){
+    var mb = (byteSize || 0) / (1024 * 1024);
+    return Math.min(90000, 15000 + Math.ceil(mb) * 10000);
   }
 
   // отдельного "создания" Firebase не требует — запись по случайному ID
@@ -11343,7 +11397,11 @@
       body: JSON.stringify(patchObj || {})
     };
     if(opts && opts.keepalive) fetchOpts.keepalive = true;
-    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + ".json", fetchOpts, 15000).then(function(res){
+    // ⚠️ ДОБАВЛЕНО (26.09, расход трафика) — тот же приём, что у putCloudBlob
+    // (личный канал, см. computeCloudPatchTimeoutMs там): крупный PATCH
+    // (байты общей картинки) получает таймаут по размеру, а не фиксированные 15с.
+    var groupTimeoutMs = (opts && opts.timeoutMs) || computeCloudPatchTimeoutMs(new Blob([fetchOpts.body]).size);
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + ".json", fetchOpts, groupTimeoutMs).then(function(res){
       if(!res.ok) throw new Error("group_patch_failed_" + res.status);
       return true;
     });
