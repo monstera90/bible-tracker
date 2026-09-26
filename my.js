@@ -4277,17 +4277,38 @@
   // 2) само содержимое — только тех ключей, что НЕ входят в CLOUD_RESERVED_SUBTREES,
   // диапазонами orderBy="$key"&startAt&endAt (по границам из списка ключей).
   // Результат — ровно то, что раньше оставалось после stripCloudReservedSubtrees.
+  //
+  // ⚠️ ИЗМЕНЕНО (26.09, ТЗ пользователя — "убрать полный GET для картинок и
+  // книг"): раньше все страховки ниже в итоге откатывались на буквальный
+  // полный GET узла целиком (fetchCloudNodeFull) — а значит, случись
+  // диапазонному запросу споткнуться (Firebase вернул 400, ключей "потерялось"
+  // больше горстки и т.п.), fileBlobs со всеми лежащими там картинками/книгами
+  // качались бы ЗАРАЗ, ровно то, от чего избавлялись 23.09. Автор явно
+  // потребовал: получить разом ВСЕ задачи — нормально (для них пока нет
+  // системы поштучной загрузки), а вот файлы (fileBlobs/файлы книг) не
+  // должны попадать в устройство пачкой ни при каких обстоятельствах — они
+  // и так всегда качаются поштучно через downloadFileFromCloud (по одному
+  // hash). Поэтому единственный оставшийся запасной путь —
+  // fetchCloudBlobSafeFallback (см. ниже): shallow-список ключей + точечный
+  // GET КАЖДОГО незарезервированного ключа по отдельности, без верхнего
+  // предела на их число. Зарезервированные ветки (в т.ч. fileBlobs) в этот
+  // список физически не попадают — не участвуют в запросе ни диапазоном, ни
+  // по отдельности, ни полным узлом. fetchCloudNodeFull (буквальный полный
+  // GET) с этого момента используется ТОЛЬКО в необязательной ручной сверке
+  // ниже (bibleCloudGetCompare_v1) — она явно включается самим пользователем
+  // для отладки и никогда не участвует в обычном цикле синхронизации.
+  //
   // Страховки: (а) каждый ключ из shallow-списка обязан прийти — недостающие
-  // (гонка удаления/иной порядок ключей) добираются точечными GET, а если их
-  // слишком много — один раз откат на полный GET; (б) HTTP-ошибка запроса с
-  // фильтром → откат на полный GET до конца сессии; (в) флаг устройства
-  // bibleCloudFilteredGet_v1="0" отключает всё это и возвращает полный GET;
-  // (г) bibleCloudGetCompare_v1="1" — в фоне ещё раз читает полным GET и пишет
-  // в журнал отладки, совпал ли результат (разовая проверка, вдвое больше трафика).
-  // Устройства без этой версии по-прежнему читают узел целиком — ничего не ломается.
+  // (гонка удаления/иной порядок ключей) добираются точечными GET, теперь
+  // без ограничения на количество; (б) HTTP-ошибка диапазонного запроса →
+  // безопасный запасной путь (шаг «в» выше) до конца сессии; (в) флаг
+  // устройства bibleCloudFilteredGet_v1="0" отключает диапазонные запросы и
+  // сразу использует безопасный запасной путь; (г) bibleCloudGetCompare_v1="1"
+  // — в фоне ещё раз читает НАСТОЯЩИМ полным GET и пишет в журнал отладки,
+  // совпал ли результат (разовая ручная проверка, вдвое больше трафика,
+  // включается только человеком, не кодом).
   var CLOUD_FILTERED_GET_FLAG = "bibleCloudFilteredGet_v1";
   var CLOUD_GET_COMPARE_FLAG = "bibleCloudGetCompare_v1";
-  var CLOUD_FILTERED_MAX_SINGLE_GETS = 20;
   var CLOUD_PLAN_MAX_AGE_MS = 10 * 60 * 1000;
   var cloudFilteredGetBroken = false;
   var cloudBlobPlanCache = { id: null, runs: null, at: 0 };
@@ -4302,11 +4323,40 @@
   function isReservedCloudKey(k){
     return Object.prototype.hasOwnProperty.call(CLOUD_RESERVED_SUBTREES, k) && !!CLOUD_RESERVED_SUBTREES[k];
   }
-  // Полный GET узла (как было раньше) — запасной путь и режим сверки.
+  // Полный GET узла (как было раньше). ⚠️ С 26.09 НЕ используется как
+  // запасной путь синхронизации (см. пояснение у CLOUD_FILTERED_GET_FLAG
+  // выше) — оставлен только для ручной сверки bibleCloudGetCompare_v1,
+  // которую включает сам пользователь. В обычном цикле не вызывается.
   function fetchCloudNodeFull(id, fetchOpts){
     return fetchWithTimeout(cloudNodeUrl(id), fetchOpts, 8000).then(function(res){
       if(!res.ok) throw new Error("fetch_failed_" + res.status);
       return res.json();
+    });
+  }
+  // ⚠️ ДОБАВЛЕНО (26.09, ТЗ пользователя): настоящий запасной путь вместо
+  // полного GET узла. Список ключей — тем же дешёвым shallow-запросом, что
+  // и у диапазонного плана, а дальше КАЖДЫЙ незарезервированный ключ
+  // качается отдельным точечным GET, сколько бы их ни было — никакого
+  // верхнего предела и никакого отката на буквальный полный узел. Ветки из
+  // CLOUD_RESERVED_SUBTREES (fileBlobs — байты картинок/книг — в первую
+  // очередь) в список запрашиваемых ключей никогда не попадают: они молча
+  // пропускаются на этапе фильтрации shallow-списка, а не после загрузки.
+  function fetchCloudBlobSafeFallback(id, fetchOpts){
+    return fetchWithTimeout(cloudNodeUrl(id) + "?shallow=true", fetchOpts, 8000).then(function(res){
+      if(!res.ok) throw new Error("fetch_failed_" + res.status);
+      return res.json();
+    }).then(function(shallow){
+      if(shallow === null || shallow === undefined) return null; // по пути ничего нет
+      if(typeof shallow !== "object" || Array.isArray(shallow)) return null; // неожиданная форма — пусть вызывающий код обработает как пустоту, лишь бы не тянуть узел целиком
+      var wanted = Object.keys(shallow).filter(function(k){ return !isReservedCloudKey(k); });
+      if(window.Debug) window.Debug.log("fetchCloudBlob: безопасный запасной путь — ключей в узле=" + Object.keys(shallow).length + ", запрашиваю по отдельности=" + wanted.length + " (fileBlobs и другие зарезервированные ветки не запрашиваются вообще)");
+      var data = {};
+      return Promise.all(wanted.map(function(k){
+        return fetchWithTimeout(cloudNodeUrl(id, "/" + encodeURIComponent(k)), fetchOpts, 8000).then(function(res){
+          if(!res.ok) throw new Error("fetch_failed_" + res.status);
+          return res.json();
+        }).then(function(v){ if(v !== null && v !== undefined) data[k] = v; });
+      })).then(function(){ return data; });
     });
   }
   // Непрерывные отрезки НЕзарезервированных ключей в отсортированном списке.
@@ -4363,7 +4413,13 @@
         var missing = (plan.wanted || []).filter(function(k){ return data[k] === undefined; });
         if(window.Debug) window.Debug.log("fetchCloudBlob: фильтрованный GET — ключей в узле=" + (plan.total === null ? "?(план прошлого цикла)" : plan.total) + ", диапазонов=" + plan.runs.length + ", получено ключей=" + Object.keys(data).length + ", не пришло=" + missing.length);
         if(!missing.length) return data;
-        if(missing.length > CLOUD_FILTERED_MAX_SINGLE_GETS) throw new Error("filtered_fallback");
+        // ⚠️ ИЗМЕНЕНО (26.09, ТЗ пользователя): раньше при большом числе
+        // "потерянных" ключей (> CLOUD_FILTERED_MAX_SINGLE_GETS) код нарочно
+        // откатывался на буквальный полный GET узла целиком, вместе с
+        // fileBlobs — единственная строчка во всей этой машинерии, где
+        // картинки/книги всё ещё могли уйти пачкой. Порог убран: сколько бы
+        // ключей ни "потерялось", догружаем их по отдельности — дороже по
+        // числу запросов, зато исключает полный узел даже теоретически.
         return Promise.all(missing.map(function(k){
           return fetchWithTimeout(cloudNodeUrl(id, "/" + encodeURIComponent(k)), fetchOpts, 8000).then(function(res){
             if(!res.ok) throw new Error("fetch_failed_" + res.status);
@@ -4376,7 +4432,7 @@
   // Единая точка: результат — то же, что давал полный GET до stripCloudReservedSubtrees
   // (но без зарезервированных веток), либо null, если по пути ничего нет.
   function fetchCloudBlobData(id, fetchOpts){
-    if(!cloudFilteredGetEnabled()) return fetchCloudNodeFull(id, fetchOpts);
+    if(!cloudFilteredGetEnabled()) return fetchCloudBlobSafeFallback(id, fetchOpts);
     return fetchCloudBlobFiltered(id, fetchOpts).then(function(data){
       var compare = false;
       try{ compare = localStorage.getItem(CLOUD_GET_COMPARE_FLAG) === "1"; }catch(e){}
@@ -4393,9 +4449,9 @@
     }).catch(function(err){
       var msg = err && err.message ? err.message : "";
       if(msg === "filtered_unsupported" || msg === "filtered_fallback"){
-        if(msg === "filtered_unsupported") cloudFilteredGetBroken = true; // до конца сессии не пробуем
-        if(window.Debug) window.Debug.log("fetchCloudBlob: откат на полный GET (" + msg + ")");
-        return fetchCloudNodeFull(id, fetchOpts);
+        if(msg === "filtered_unsupported") cloudFilteredGetBroken = true; // до конца сессии не пробуем диапазонные запросы
+        if(window.Debug) window.Debug.log("fetchCloudBlob: диапазонный запрос не сработал (" + msg + ") — безопасный запасной путь по ключам (без fileBlobs)");
+        return fetchCloudBlobSafeFallback(id, fetchOpts);
       }
       throw err;
     });
