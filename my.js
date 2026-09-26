@@ -4608,13 +4608,68 @@
     return merged;
   }
 
+  // ⚠️ НАЙДЕНО 26.09 (жалоба пользователя — трафик расходуется, даже если
+  // ничего не менялось): recordsEqual ниже сравнивала записи через
+  // JSON.stringify(a) === JSON.stringify(b) — а это сравнение ЧУВСТВИТЕЛЬНО
+  // К ПОРЯДКУ КЛЮЧЕЙ объекта. Локальный объект (data), собранный в JS-коде
+  // (saveTaskData/saveBookState и т.п.), сохраняет порядок ключей ТАКИМ,
+  // каким он был при первом создании литерала. А запись, только что
+  // прочитанная из Firebase Realtime Database (fetchCloudBlob/
+  // fetchCloudBlobFiltered), приходит в виде JSON, где Firebase отдаёт
+  // свойства объекта В СВОЁМ порядке (не обязательно в том, в котором их
+  // когда-то отправили) — как правило, это не совпадает с порядком в
+  // исходном JS-литерале. В итоге для записей с несколькими полями (задачи
+  // с текстом/приоритетом/датой, book:<hash> с position/bookmarks/
+  // underlines/noteId/images/bookName) JSON.stringify(merged) и
+  // JSON.stringify(cloudData) почти НИКОГДА не совпадали ПО СТРОКЕ, даже
+  // когда содержимое было идентично — buildStateDelta считал такие записи
+  // "отличающимися от облака" и включал их в PATCH СНОВА И СНОВА, на
+  // КАЖДОМ цикле doCloudSync, без единого реального изменения (это и есть
+  // ~209 ключей / ~2.4 МБ, уходящие в лог пользователя на каждой
+  // синхронизации подряд, включая полностью пустые открытия приложения).
+  // Та же чувствительность к порядку ключей (а точнее — к ССЫЛКЕ, что ещё
+  // грубее) была и в statesEqual: `a[k].c !== b[k].c` сравнивает вложенный
+  // объект `c` ПО ССЫЛКЕ, а не по значению — merged[k].c, взятый из
+  // cloudData (когда версия из облака "выигрывает" по t), это тот же
+  // объект, что и cloudData[k].c, поэтому в этом случае сравнение случайно
+  // "срабатывает", но когда выигрывает ЛОКАЛЬНАЯ версия (обычный случай —
+  // ничего не менялось нигде, кроме этого устройства), `merged[k].c` — это
+  // ссылка на локальный объект, а `cloudData[k].c` — свежепришедший из
+  // сети объект с теми же полями, но другой ссылкой: `!==` считает их
+  // разными ВСЕГДА, независимо от содержимого. Из-за этого localChanged/
+  // cloudChanged в логе почти всегда были true, даже когда реальных
+  // изменений не было — это не сама причина лишнего трафика (её создаёт
+  // buildStateDelta через recordsEqual выше), но лишний повод пробовать
+  // отправку и вводящая в заблуждение диагностика ("локально изменилось").
+  //
+  // Фикс — глубокое сравнение ПО ЗНАЧЕНИЮ, без учёта порядка ключей
+  // объекта (порядок ЭЛЕМЕНТОВ МАССИВА при этом важен и сравнивается как
+  // есть — там порядок содержательный, например bookmarks/underlines).
+  function deepEqual(a, b){
+    if(a === b) return true;
+    if(a === null || b === null || typeof a !== "object" || typeof b !== "object") return a === b;
+    if(Array.isArray(a) || Array.isArray(b)){
+      if(!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+      for(var i=0;i<a.length;i++){ if(!deepEqual(a[i], b[i])) return false; }
+      return true;
+    }
+    var ak = Object.keys(a), bk = Object.keys(b);
+    if(ak.length !== bk.length) return false;
+    for(var j=0;j<ak.length;j++){
+      var k = ak[j];
+      if(!Object.prototype.hasOwnProperty.call(b, k)) return false;
+      if(!deepEqual(a[k], b[k])) return false;
+    }
+    return true;
+  }
+
   function statesEqual(a, b){
     var ak = Object.keys(a||{}).sort(), bk = Object.keys(b||{}).sort();
     if(ak.length !== bk.length) return false;
     for(var i=0;i<ak.length;i++){
       var k = ak[i];
       if(!b[k]) return false;
-      if(a[k].c !== b[k].c || a[k].t !== b[k].t) return false;
+      if(!deepEqual(a[k].c, b[k].c) || a[k].t !== b[k].t) return false;
     }
     return true;
   }
@@ -4624,9 +4679,11 @@
   // объекты) — нужно, чтобы найти именно те ключи, которые реально
   // отличаются от того, что мы только что прочитали из облака, и
   // отправить в putCloudBlob (PATCH) только их. См. подробное пояснение
-  // про гонку двух устройств у putCloudBlob.
+  // про гонку двух устройств у putCloudBlob. С 26.09 — через deepEqual
+  // выше (без учёта порядка ключей), а не JSON.stringify (см. пояснение
+  // над deepEqual, почему это было источником лишнего трафика).
   function recordsEqual(a, b){
-    return JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+    return deepEqual(a === undefined ? null : a, b === undefined ? null : b);
   }
   function buildStateDelta(merged, cloudData){
     var delta = {};
