@@ -16156,6 +16156,13 @@
     ["pointerup", "pointerleave", "pointercancel"].forEach(function(evt){
       settingsGearBtn.addEventListener(evt, clearFabLongPressTimer);
     });
+    // Блокирует системное контекстное меню (и вибрацию, которой Android/
+    // Chrome сопровождает долгий тап) на язычке настроек — своя логика
+    // удержания (сворачивание блокнота) уже есть выше, системное меню и
+    // его вибрация поверх неё не нужны и не совпадают по времени с ней
+    // (тот же приём, что и у обложек книг, см. contextmenu-блок выше по
+    // файлу).
+    settingsGearBtn.addEventListener("contextmenu", function(e){ e.preventDefault(); });
 
     settingsGearBtn.addEventListener("click", function(){
       // Долгое удержание уже само закрыло блокнот в pointerdown-таймере
