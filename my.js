@@ -10891,6 +10891,60 @@
     });
   }
 
+  // ⚠️ ДОБАВЛЕНО (26.09, по свежему логу пользователя): в логе видно ровно
+  // то, из-за чего трафик расходуется впустую — 4 новые картинки (первая
+  // реальная заливка, uploadedOnce=false у всех) стартуют ПОЧТИ ОДНОВРЕМЕННО
+  // (FILE_SYNC_DOWNLOAD_CONCURRENCY=4 у runWithLimit), каждая по 5-7 МБ
+  // base64, и вкладка закрывается/обновляется ДО того, как хоть один из
+  // четырёх PATCH получил ответ (в логе для всех четырёх есть "fetch start",
+  // ни одного "fetch done" — сессия обрывается прямо на них). uploadedAt/
+  // uploadedOnce пишутся АТОМАРНО в том же PATCH, что и сами байты (фикс
+  // более раннего прохода) — значит при обрыве ни то ни другое на сервер не
+  // попадает, а на следующем открытии приложения entry.uploadedOnce всё ещё
+  // false, и syncFileRegistry честно начинает заливать ВСЕ ТЕ ЖЕ 4 файла с
+  // нуля. Если вкладка закрывается раньше, чем есть шанс докачать (плохая
+  // сеть, привычка сворачивать приложение), это повторяется КАЖДЫЙ раз —
+  // те самые "сотни мегабайт за 3 картинки".
+  // Бэкофф на хеш (именно то, что было в самом первом ТЗ этого разбора) —
+  // отдельно от uploadedOnce, переживает даже прерванную попытку: метка
+  // времени пишется СИНХРОННО в localStorage ДО сетевого запроса (см.
+  // uploadBackoffMarkAttempt), поэтому даже если сама заливка обрывается
+  // вместе с вкладкой и её catch не успевает отработать, при следующем
+  // запуске приложение всё равно видит "недавно уже пытались" и не долбит
+  // те же мегабайты немедленно again — задержка растёт 15м → 30м → 1ч → 2ч
+  // → 4ч → 8ч (дальше не растёт), сбрасывается только на подтверждённом
+  // успехе. Общий ключ на личный и групповой каналы (kind/groupId зашиты в
+  // сам key), чтобы не разводить два одинаковых хранилища.
+  var UPLOAD_BACKOFF_LS_KEY = "bibleFileUploadBackoff_v1";
+  var UPLOAD_BACKOFF_STEPS_MS = [15, 30, 60, 120, 240, 480].map(function(m){ return m * 60 * 1000; });
+  function readUploadBackoffMap(){
+    try{
+      var raw = localStorage.getItem(UPLOAD_BACKOFF_LS_KEY);
+      var parsed = raw ? JSON.parse(raw) : null;
+      return (parsed && typeof parsed === "object") ? parsed : {};
+    }catch(e){ return {}; }
+  }
+  function writeUploadBackoffMap(map){
+    try{ localStorage.setItem(UPLOAD_BACKOFF_LS_KEY, JSON.stringify(map)); }
+    catch(e){ /* квота/приватный режим — просто не будет бэкоффа со следующего запуска, не критично */ }
+  }
+  function uploadBackoffShouldSkip(key){
+    var rec = readUploadBackoffMap()[key];
+    return !!(rec && Date.now() < rec.nextAt);
+  }
+  // Вызывается ДО самого fetch — намеренно, см. пояснение выше.
+  function uploadBackoffMarkAttempt(key){
+    var map = readUploadBackoffMap();
+    var rec = map[key] || {attempts: 0};
+    var stepIdx = Math.min(rec.attempts, UPLOAD_BACKOFF_STEPS_MS.length - 1);
+    map[key] = {attempts: rec.attempts + 1, nextAt: Date.now() + UPLOAD_BACKOFF_STEPS_MS[stepIdx]};
+    writeUploadBackoffMap(map);
+  }
+  function uploadBackoffClear(key){
+    var map = readUploadBackoffMap();
+    if(map[key]){ delete map[key]; writeUploadBackoffMap(map); }
+  }
+
   // Заливает файл в RTDB как одноразовую точечную запись (PATCH одного
   // ключа через patchNotesCloud) — НЕ через подписку, см. предупреждение
   // в комментарии к разделу выше.
@@ -11304,6 +11358,11 @@
         // попросил пользователь ("дальше только по запросу").
         var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; }); // больше не влияет на решение, оставлено только для строки диагностики ниже
         if(!entry.uploadedAt && (!entry.uploadedOnce || pendingRequest)){
+          var backoffKey = kind + ":" + hash;
+          if(uploadBackoffShouldSkip(backoffKey)){
+            if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): заливка hash=" + hash + " (name=" + (entry.name || "?") + ") отложена бэкоффом — недавняя попытка не подтвердилась (сеть/закрытие вкладки), пропускаю до следующего окна");
+            return null;
+          }
           if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): РЕШЕНИЕ ЗАЛИТЬ hash=" + hash + " (name=" + (entry.name || "?") + ") — моё устройство=" + myId +
             ", confirmedBy=[" + Object.keys(confirmedBy).join(",") + "]" +
             ", известные устройства=[" + knownDeviceIds.join(",") + "]" +
@@ -11315,9 +11374,11 @@
           // байтами (см. пояснение там) — больше не копим его отдельно в
           // pendingRegistryPatch, чтобы не зависеть от финального патча
           // цикла, который эту заливку никак не подтверждает.
+          uploadBackoffMarkAttempt(backoffKey); // ДО сетевого запроса — см. пояснение у функции выше
           return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
             return uploadFileToCloud(kind, hash, buf);
           }).then(function(uploadedAt){
+            uploadBackoffClear(backoffKey);
             // ⚠️ ДОБАВЛЕНО (диагностика 26.09, по вопросу пользователя):
             // раньше об успешной заливке байтов вообще не логировалось —
             // по логу нельзя было отличить "PATCH реально прошёл,
@@ -11334,6 +11395,8 @@
             // на один и тот же hash выглядели необъяснимо: нельзя было
             // понять, не долетел ли запрос (сеть) или сломалось что-то
             // ещё. Теперь пишем, что именно не удалось и почему.
+            // Бэкофф НЕ снимаем — он уже выставлен выше, до попытки;
+            // именно он и не даст тут же попробовать снова.
             if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): ЗАЛИВКА НЕ УДАЛАСЬ, hash=" + hash + " (name=" + (entry.name || "?") + ") — " + (errUpload && errUpload.message ? errUpload.message : errUpload));
           });
         }
@@ -11722,11 +11785,18 @@
           // повод заливать заново, только uploadedOnce/явная заявка.
           var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; }); // не используется в условии — оставлено для будущей диагностики
           if(!entry.uploadedAt && (!entry.uploadedOnce || pendingRequest)){
+            var backoffKey = "group:" + groupId + ":" + hash;
+            if(uploadBackoffShouldSkip(backoffKey)){
+              if(window.Debug) window.Debug.log("syncGroupFileRegistry(\"" + groupId + "\"): заливка hash=" + hash + " (name=" + (entry.name || "?") + ") отложена бэкоффом — недавняя попытка не подтвердилась, пропускаю до следующего окна");
+              return null;
+            }
             // uploadedAt теперь пишет сама uploadFileToGroupCloud, в одном
             // PATCH с байтами — см. пояснение у uploadFileToCloud (личный канал).
+            uploadBackoffMarkAttempt(backoffKey); // ДО сетевого запроса — см. пояснение у функции выше (личный канал)
             return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
               return uploadFileToGroupCloud(groupId, hash, buf);
             }).then(function(uploadedAt){
+              uploadBackoffClear(backoffKey);
               // ⚠️ ДОБАВЛЕНО (диагностика 26.09) — то же самое, что и в
               // личном канале (runChore выше): без этого лога нельзя было
               // отличить "PATCH прошёл" от "тихо не удался, повтор с нуля".
