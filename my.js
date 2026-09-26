@@ -10784,15 +10784,36 @@
   // Заливает файл в RTDB как одноразовую точечную запись (PATCH одного
   // ключа через patchNotesCloud) — НЕ через подписку, см. предупреждение
   // в комментарии к разделу выше.
+  // ⚠️ 26.09 (по логу пользователя — повторные заливки уже залитых
+  // многомегабайтных картинок): раньше "залито" (files/<kind>/<hash>/
+  // uploadedAt) писалось ОТДЕЛЬНЫМ патчем в самом конце всего цикла
+  // syncFileRegistry (см. там pendingRegistryPatch) — общим на весь
+  // Promise.all(chores). Если этот финальный патч не долетал (обрыв
+  // сети, уход вкладки в фон ровно посередине цикла — именно это видно
+  // в логе: несколько putCloudBlob на разные хэши подряд, потом
+  // visibilitychange->hidden и AbortError, а на следующей сверке — те
+  // же самые по размеру заливки заново), сами байты УЖЕ лежали в
+  // fileBlobs, а uploadedAt так и не проставлялся — и на следующем
+  // цикле код (см. `if(!entry.uploadedAt && ...)` в runChore ниже)
+  // честно заливал те же несколько МБ ЗАНОВО, хотя нужды в этом не
+  // было. Теперь "залито" едет В ТОМ ЖЕ PATCH, что и сами байты —
+  // Firebase применяет multi-location PATCH одним запросом атомарно:
+  // либо долетает и то и другое разом, либо не долетает ничего (и
+  // тогда повторная заливка на следующей сверке — это честный повтор
+  // настоящего сбоя, а не потеря отдельно ушедшего маленького патча).
+  // Возвращает uploadedAt (мс) вместо true — вызывающему коду (runChore)
+  // больше не нужно самому копить эту метку в общий pendingRegistryPatch.
   function uploadFileToCloud(kind, hash, bytes){
+    var uploadedAt = Date.now();
     return encryptFileBytes(bytes).then(function(encBytes){
       return bytesToBase64Async(encBytes);
     }).then(function(b64){
       var patch = {};
       patch[fileBlobCloudPath(kind, hash)] = b64;
+      patch["files/" + kind + "/" + hash + "/uploadedAt"] = uploadedAt;
       return patchNotesCloud(patch);
     }).then(function(){
-      return true;
+      return uploadedAt;
     });
   }
   // Точечное разовое чтение (fetchNotesCloudPath = обычный GET, не
@@ -11129,10 +11150,12 @@
         // от того, что он мог уже когда-то его подтверждать).
         var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; });
         if(!entry.uploadedAt && (missingConfirmations || pendingRequest)){
+          // uploadedAt теперь пишет сама uploadFileToCloud, в одном PATCH с
+          // байтами (см. пояснение там) — больше не копим его отдельно в
+          // pendingRegistryPatch, чтобы не зависеть от финального патча
+          // цикла, который эту заливку никак не подтверждает.
           return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
             return uploadFileToCloud(kind, hash, buf);
-          }).then(function(){
-            pendingRegistryPatch["files/" + kind + "/" + hash + "/uploadedAt"] = now;
           }).catch(function(){});
         }
 
@@ -11282,14 +11305,19 @@
   // (bytesToBase64Async/base64ToBytesAsync — те же chunked-хелперы, что
   // и у личного канала, ничего группового им не нужно). ----
   function groupFileBlobCloudPath(hash){ return "fileBlobs/images/" + hash; }
+  // ⚠️ 26.09 — то же самое исправление, что у uploadFileToCloud (личный
+  // канал, см. пояснение там): uploadedAt едет в ОДНОМ PATCH с байтами,
+  // а не отдельным патчем в конце всего цикла sync'а группового реестра.
   function uploadFileToGroupCloud(groupId, hash, bytes){
+    var uploadedAt = Date.now();
     return encryptGroupFileBytes(groupId, bytes).then(function(encBytes){
       return bytesToBase64Async(encBytes);
     }).then(function(b64){
       var patch = {};
       patch[groupFileBlobCloudPath(hash)] = b64;
+      patch["files/images/" + hash + "/uploadedAt"] = uploadedAt;
       return patchGroupCloud(groupId, patch);
-    }).then(function(){ return true; });
+    }).then(function(){ return uploadedAt; });
   }
   function downloadFileFromGroupCloud(groupId, hash){
     return fetchGroupCloudPath(groupId, groupFileBlobCloudPath(hash)).then(function(b64){
@@ -11496,10 +11524,10 @@
           // чужая заявка).
           var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; });
           if(!entry.uploadedAt && (missingConfirmations || pendingRequest)){
+            // uploadedAt теперь пишет сама uploadFileToGroupCloud, в одном
+            // PATCH с байтами — см. пояснение у uploadFileToCloud (личный канал).
             return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
               return uploadFileToGroupCloud(groupId, hash, buf);
-            }).then(function(){
-              pendingGroupPatch["files/images/" + hash + "/uploadedAt"] = Date.now();
             }).catch(function(){});
           }
 
