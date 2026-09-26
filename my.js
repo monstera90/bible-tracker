@@ -9944,8 +9944,12 @@
     // открытии окна настроек — обновляем при КАЖДОМ переключении вкладок
     // (дёшево, обычная проверка двух DOM-свойств), а не только изнутри
     // renderSettingsTabIpkd (см. updateIpkdTabIcon ниже, ТЗ пользователя от
-    // 21.09).
+    // 21.09). То же для подсветки "mood"/"red" (ТЗ пользователя от 26.09,
+    // см. раздел "ПОДСВЕТКА ВКЛАДОК «MOOD»/«RED»" ниже) — обновляем на
+    // каждое переключение, а не только изнутри их собственного рендера.
     updateIpkdTabIcon();
+    updateMoodTabIcon();
+    updateRedTabIcon();
     var settingsWasOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay &&
       settingsModalOverlay.classList.contains("open");
     var prevTab = currentSettingsTab;
@@ -10059,7 +10063,12 @@
     // плодить лишний шаг истории), поэтому раньше "+" (спрятанная там же,
     // см. globalFab в openTaskNextPicker) при возврате не восстанавливалась.
     syncTaskFabRowForTab(tab);
-    if(tab === "mood"){ renderSettingsTabMood(); }
+    // Отметка "открыта сегодня"/"открыта только что" для подсветки язычков
+    // (ТЗ пользователя от 26.09) — red не имеет своего renderSettingsTabX,
+    // идёт через общий renderSettingsTabTask(tab) ниже, поэтому отмечается
+    // отдельной строкой, а не внутри какой-то ветки рендера.
+    if(tab === "red") markRedOpenedToday();
+    if(tab === "mood"){ markMoodOpenedToday(); renderSettingsTabMood(); }
     else if(tab === "year") renderSettingsTabYear();
     else if(tab === "versions") renderSettingsTabVersions();
     // "Архив общих задач" (меню "настройки вкладки" на jointtasks, см.
@@ -11972,6 +11981,27 @@
   //     "Переименовать" (openBookRenameDialog/renameBookFile) слева от
   //     уже существовавшего крестика удаления.
   var revealedBookDeleteRows = new Set();
+  // Раньше клик МИМО любой карточки/строки (но не по кнопкам нижнего ряда и
+  // не по пустому месту вкладки) не скрывал раскрытые долгим нажатием
+  // кнопки — обработчик в bindBooksRowActions ниже реагирует только на
+  // клики ВНУТРИ #booksList и только по самой карточке/строке. ТЗ
+  // пользователя от 26.09: "нажал мимо книги — кнопки должны скрываться".
+  // #settingsTabContent — общий постоянный контейнер вкладок (не
+  // пересоздаётся при рендере, только его innerHTML), поэтому слушатель на
+  // нём вешается один раз при первом заходе на список книг и ловит любой
+  // клик по вкладке, включая мимо сетки/списка книг.
+  var booksOutsideClickBound = false;
+  function bindBooksOutsideClickOnce(){
+    if(booksOutsideClickBound) return;
+    var tabContent = document.getElementById("settingsTabContent");
+    if(!tabContent) return;
+    booksOutsideClickBound = true;
+    tabContent.addEventListener("click", function(e){
+      if(!revealedBookDeleteRows.size) return;
+      if(e.target.closest(".book-cover-card, .mdeditor-row")) return; // сам клик по карточке/строке уже разобран в bindBooksRowActions
+      hideRevealedBookActionButtons();
+    });
+  }
   // "list" | "cover" — текущий режим показа списка книг; переживает
   // перезапуск приложения (ТЗ пользователя от 22.09, тот же приём
   // try/catch, что и у BOOKS_HIDE_TITLES_KEY ниже).
@@ -12261,6 +12291,7 @@
   // "visible" (Поделиться/Переименовать, плюс "Сбросить обложку" — только
   // в сетке обложек, см. её разметку в renderBooksCoverItems).
   function bindBooksRowActions(containerEl, items, isCoverMode){
+    bindBooksOutsideClickOnce();
     var rowSelector = isCoverMode ? ".book-cover-card" : ".mdeditor-row";
     var actionBtnSelector = ".mdeditor-cover-reset-btn, .mdeditor-note-btn, .mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn";
     var LONG_PRESS_MS = 350, MOVE_CANCEL_PX = 10;
@@ -14490,6 +14521,55 @@
     // чуть мельче font-size вкладки (32px у .settings-tab), чтобы помещалось.
     btn.innerHTML = '<span class="ipkd-tab-icon">' + String(new Date().getDate()) + '</span>';
     btn.classList.toggle("ipkd-tab-unread", !isIpkdOpenedToday());
+  }
+
+  // ===== ПОДСВЕТКА ВКЛАДОК "MOOD"/"RED" (ТЗ пользователя от 26.09) =====
+  // Тот же приём, что у ИПКД выше (дата последнего захода в localStorage +
+  // класс-заливка на язычке, см. .mood-tab-unread/.red-tab-unread в
+  // modals.css — цвет тот же var(--gold-light)), но с разным порогом:
+  // mood — "не открыта СЕГОДНЯ" (как ИПКД), red — "не открыта уже 3 суток"
+  // (сравнение календарных дат, границы суток 00:00-00:00, время внутри
+  // дня не участвует — переиспользуем ipkdTodayDateKey выше).
+  var MOOD_LAST_OPENED_KEY = "moodLastOpenedDate_v1";
+  var RED_LAST_OPENED_KEY = "redLastOpenedDate_v1";
+  var RED_UNOPENED_DAYS = 3;
+  function isMoodOpenedToday(){
+    var v;
+    try{ v = localStorage.getItem(MOOD_LAST_OPENED_KEY); }catch(e){ v = null; }
+    return v === ipkdTodayDateKey();
+  }
+  function markMoodOpenedToday(){
+    try{ localStorage.setItem(MOOD_LAST_OPENED_KEY, ipkdTodayDateKey()); }catch(e){}
+    updateMoodTabIcon();
+  }
+  function updateMoodTabIcon(){
+    var btn = document.getElementById("settingsTabMoodBtn");
+    if(!btn) return;
+    btn.classList.toggle("mood-tab-unread", !isMoodOpenedToday());
+  }
+  // Разница в календарных днях между двумя ключами вида "YYYY-MM-DD" (см.
+  // ipkdTodayDateKey) — обе даты уже локальные календарные, часовой пояс
+  // повторно не участвует.
+  function dateKeyDayDiff(fromKey, toKey){
+    var pf = fromKey.split("-"), pt = toKey.split("-");
+    var df = new Date(Number(pf[0]), Number(pf[1]) - 1, Number(pf[2]));
+    var dt = new Date(Number(pt[0]), Number(pt[1]) - 1, Number(pt[2]));
+    return Math.round((dt - df) / 86400000);
+  }
+  function isRedStale(){
+    var v;
+    try{ v = localStorage.getItem(RED_LAST_OPENED_KEY); }catch(e){ v = null; }
+    if(!v) return true; // ни разу не открывали — подсвечиваем
+    return dateKeyDayDiff(v, ipkdTodayDateKey()) >= RED_UNOPENED_DAYS;
+  }
+  function markRedOpenedToday(){
+    try{ localStorage.setItem(RED_LAST_OPENED_KEY, ipkdTodayDateKey()); }catch(e){}
+    updateRedTabIcon();
+  }
+  function updateRedTabIcon(){
+    var btn = document.getElementById("settingsTabRedBtn");
+    if(!btn) return;
+    btn.classList.toggle("red-tab-unread", isRedStale());
   }
 
   // Индекс главы, соответствующей сегодняшнему числу — по заголовку главы

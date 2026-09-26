@@ -558,17 +558,34 @@
     background:var(--gold-light);
     --icon-halo:var(--gold-light);
   }
+  /* Та же подсветка — для "Диаграммы настроения" (settingsTabMoodBtn, "не
+     открыта сегодня") и "Red" (settingsTabRedBtn, боковой стек, "не
+     открыта уже 3 суток подряд") — ТЗ пользователя от 26.09, my.js
+     updateMoodTabIcon/updateRedTabIcon. Тот же класс-приём и тот же цвет,
+     что и у ИПКД выше, просто свой класс-модификатор для каждой вкладки
+     (значения условий разные, см. my.js). */
+  .settings-tab.mood-tab-unread,
+  .settings-tab.red-tab-unread{
+    background:var(--gold-light);
+    --icon-halo:var(--gold-light);
+  }
   /* Квадрат-«календарик» вокруг числа (ТЗ пользователя от 22.09) — рамка
      currentColor (тот же цвет, что и у остальных пиктограмм вкладки,
      включая заливку .ipkd-tab-unread выше), число внутри чуть мельче
-     font-size вкладки (32px у .settings-tab), чтобы помещалось с полями. */
+     font-size вкладки (32px у .settings-tab), чтобы помещалось с полями.
+     Толщина рамки (ТЗ пользователя от 26.09) — подогнана под линию других
+     пиктограмм вкладок: у них viewBox 24×24 с stroke-width="1.6" при
+     физическом размере 32px (см. .settings-tab svg выше), то есть реальная
+     толщина линии на экране ≈ 1.6×32/24 ≈ 2.13px (образец — рамка-таблица
+     вкладки "Извлечение информации из графиков", settingsTabSet2GearBtn1,
+     index.html); раньше здесь была in border:1.5px, заметно тоньше их. */
   .ipkd-tab-icon{
     display:flex;
     align-items:center;
     justify-content:center;
     width:26px;
     height:26px;
-    border:1.5px solid currentColor;
+    border:2.1px solid currentColor;
     border-radius:4px;
     font-size:16px;
     line-height:1;
