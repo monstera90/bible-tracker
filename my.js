@@ -16199,6 +16199,18 @@
         closeSettingsModal(true);
       }, FAB_LONGPRESS_MS);
     });
+    // Дублируем preventDefault на touchstart: в части сборок Chromium
+    // (в т.ч. WebAPK, которым и является установленное PWA) встроенный
+    // распознаватель жеста долгого нажатия успевает "завестись" — и
+    // вызвать системную вибрацию — ещё до pointerdown, а touchstart в
+    // конвейере событий идёт раньше него. {passive:false} обязателен —
+    // иначе preventDefault в пассивном слушателе браузер молча
+    // игнорирует. Клик от этого не ломается: для тач-указателя он и так
+    // теперь вызывается вручную по pointerup (fabTouchDefaultPrevented
+    // выше), а не через нативный click.
+    settingsGearBtn.addEventListener("touchstart", function(e){
+      if(e.cancelable) e.preventDefault();
+    }, {passive:false});
     settingsGearBtn.addEventListener("pointerup", function(){
       clearFabLongPressTimer();
       // Долгое удержание уже само закрыло блокнот в pointerdown-таймере
