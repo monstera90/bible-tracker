@@ -11150,6 +11150,25 @@
         // от того, что он мог уже когда-то его подтверждать).
         var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; });
         if(!entry.uploadedAt && (missingConfirmations || pendingRequest)){
+          // ⚠️ ДОБАВЛЕНО (26.09, временная диагностика) — по жалобе
+          // пользователя: одни и те же ~5 хэшей заливаются заново КАЖДУЮ
+          // сессию уже давно, хотя новых картинок он не добавлял. Раз
+          // атомарная запись uploadedAt (см. uploadFileToCloud выше) не
+          // остановила именно ЭТИ повторы, дело не в потере финального
+          // патча — сама причина, по которой missingConfirmations/
+          // pendingRequest раз за разом остаются истинными для одних и тех
+          // же хэшей, пока неизвестна: не гадаю, логирую фактическое
+          // состояние записи реестра ПРЯМО в момент решения "заливать".
+          // Одна строка на хэш, только когда решение — заливать (не на
+          // каждый файл реестра), с конкретными значениями (кто уже
+          // подтвердил, кто "известен", какая заявка висит) — снять после
+          // подтверждения по логу.
+          if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): РЕШЕНИЕ ЗАЛИТЬ hash=" + hash + " (name=" + (entry.name || "?") + ") — моё устройство=" + myId +
+            ", confirmedBy=[" + Object.keys(confirmedBy).join(",") + "]" +
+            ", известные устройства=[" + knownDeviceIds.join(",") + "]" +
+            ", missingConfirmations=" + missingConfirmations +
+            ", pendingRequest=" + (pendingRequest ? JSON.stringify(pendingRequest) : "нет") +
+            ", entry.uploadedAt=" + entry.uploadedAt + ", entry.addedBy=" + entry.addedBy + ", entry.addedAt=" + entry.addedAt);
           // uploadedAt теперь пишет сама uploadFileToCloud, в одном PATCH с
           // байтами (см. пояснение там) — больше не копим его отдельно в
           // pendingRegistryPatch, чтобы не зависеть от финального патча
