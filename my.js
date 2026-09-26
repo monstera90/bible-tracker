@@ -10811,6 +10811,19 @@
       var patch = {};
       patch[fileBlobCloudPath(kind, hash)] = b64;
       patch["files/" + kind + "/" + hash + "/uploadedAt"] = uploadedAt;
+      // ⚠️ ДОБАВЛЕНО (26.09, ТЗ пользователя): в отличие от uploadedAt
+      // (сбрасывается в null, когда временную копию убирают из fileBlobs —
+      // см. пункт "3)" в syncFileRegistry), uploadedOnce НИКОГДА не
+      // сбрасывается. Раньше решение "нужно ли заливать" смотрело только
+      // на uploadedAt и на то, все ли известные устройства подтвердили
+      // получение — из-за этого файл, который уже был в облаке и которого
+      // никто не скачал (устройства могли быть давно неактивны), после
+      // каждой уборки по TTL заливался заново, снова и снова, без единого
+      // реального изменения. Теперь автозаливка происходит только один
+      // раз в жизни файла (по этому флагу); дальше — только по явной
+      // заявке (fileRequests), независимо от того, сколько устройств его
+      // видели.
+      patch["files/" + kind + "/" + hash + "/uploadedOnce"] = true;
       return patchNotesCloud(patch);
     }).then(function(){
       return uploadedAt;
@@ -11053,6 +11066,21 @@
         var haveLocally = !!localHashes[hash];
         var pendingRequest = requests[hash] || null; // {by, at} или нет заявки
 
+        // ⚠️ ДОБАВЛЕНО (26.09, по логу пользователя): у части зависших
+        // файлов заявка (fileRequests) оказалась от САМОГО СЕБЯ — устройство
+        // когда-то не нашло файл локально (например, между переустановкой и
+        // восстановлением), поставило себе заявку, а файл тем временем
+        // вернулся на место; снять заявку может только сам заявитель ПОСЛЕ
+        // реального скачивания (см. пункт "1)"), а раз файл и так уже есть
+        // локально, пункт "1)" для этого устройства больше не запускается —
+        // заявка виснет навсегда и (после следующей правки) вечно
+        // триггерила бы повторную заливку. Раз файл у нас уже есть — такая
+        // самозаявка бессмысленна, снимаем её сразу.
+        if(pendingRequest && pendingRequest.by === myId && haveLocally){
+          pendingRegistryPatch[fileRequestCloudPath(kind, hash)] = null;
+          pendingRequest = null;
+        }
+
         // 0) Тумбстоун: файл где-то удалили. Если он ещё есть у нас —
         // удаляем локально и на этом всё, ни скачивать, ни заливать
         // больше не нужно. Если его и так уже нет — тоже нечего делать.
@@ -11118,14 +11146,19 @@
             try{ if(window.__retryTaskImageHydration) window.__retryTaskImageHydration(entry.name || hash); }catch(eHydrate){
               if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): __retryTaskImageHydration бросил исключение — " + (eHydrate && eHydrate.message ? eHydrate.message : eHydrate));
             }
-            // Байты в fileBlobs больше НЕ удаляем здесь (см. пункт "1)"
-            // выше) — только отмечаем, что это устройство подтвердило
-            // получение; сами байты уберёт пункт "3)" ниже, когда придёт
-            // время (TTL или все известные устройства подтвердили).
-            return null;
+            // ⚠️ ИЗМЕНЕНО (26.09, ТЗ пользователя): раньше байты нарочно
+            // оставляли лежать в fileBlobs до TTL/подтверждения ВСЕХ
+            // известных устройств — расчёт был, что за это время файл
+            // успеет скачать не только первое подоспевшее устройство.
+            // Пользователь явно потребовал другое: одно устройство
+            // скачало — байты в облаке больше не нужны, удаляем сразу.
+            // Если файл понадобится ещё кому-то — сработает заявка
+            // (fileRequests, пункт "2)" ниже) — это и есть "по запросу".
+            return deleteFileFromCloud(kind, hash).catch(function(){});
           }).then(function(){
             var patch = {};
             patch["files/" + kind + "/" + hash + "/confirmedBy/" + myId] = true;
+            patch["files/" + kind + "/" + hash + "/uploadedAt"] = null;
             Object.keys(patch).forEach(function(k){ pendingRegistryPatch[k] = patch[k]; });
           }).then(function(){
             // Файл наконец забрали — если это была НАША заявка, снимаем её.
@@ -11148,25 +11181,24 @@
         // получение (обычная первая раздача), либо на файл есть чужая
         // заявка (раздел 4.3 — кому-то он снова понадобился, независимо
         // от того, что он мог уже когда-то его подтверждать).
-        var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; });
-        if(!entry.uploadedAt && (missingConfirmations || pendingRequest)){
-          // ⚠️ ДОБАВЛЕНО (26.09, временная диагностика) — по жалобе
-          // пользователя: одни и те же ~5 хэшей заливаются заново КАЖДУЮ
-          // сессию уже давно, хотя новых картинок он не добавлял. Раз
-          // атомарная запись uploadedAt (см. uploadFileToCloud выше) не
-          // остановила именно ЭТИ повторы, дело не в потере финального
-          // патча — сама причина, по которой missingConfirmations/
-          // pendingRequest раз за разом остаются истинными для одних и тех
-          // же хэшей, пока неизвестна: не гадаю, логирую фактическое
-          // состояние записи реестра ПРЯМО в момент решения "заливать".
-          // Одна строка на хэш, только когда решение — заливать (не на
-          // каждый файл реестра), с конкретными значениями (кто уже
-          // подтвердил, кто "известен", какая заявка висит) — снять после
-          // подтверждения по логу.
+        // ⚠️ ИЗМЕНЕНО (26.09, ТЗ пользователя): missingConfirmations
+        // (не все ИЗВЕСТНЫЕ устройства подтвердили) — БОЛЬШЕ НЕ повод
+        // заливать заново. Список "известных устройств" сам по себе не
+        // значит "устройства, которые реально придут скачивать" — среди
+        // них могут годами висеть переустановленные/заброшенные
+        // устройства, которые никогда не подтвердят получение. Раз файл
+        // уже был залит хотя бы один раз (uploadedOnce) — он лежит в
+        // облаке (или уже был кем-то скачан и убран, что нормально, не
+        // проблема) и автозаливка больше не триггерится; переливка теперь
+        // только по явной заявке (pendingRequest) — именно так, как
+        // попросил пользователь ("дальше только по запросу").
+        var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; }); // больше не влияет на решение, оставлено только для строки диагностики ниже
+        if(!entry.uploadedAt && (!entry.uploadedOnce || pendingRequest)){
           if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): РЕШЕНИЕ ЗАЛИТЬ hash=" + hash + " (name=" + (entry.name || "?") + ") — моё устройство=" + myId +
             ", confirmedBy=[" + Object.keys(confirmedBy).join(",") + "]" +
             ", известные устройства=[" + knownDeviceIds.join(",") + "]" +
             ", missingConfirmations=" + missingConfirmations +
+            ", uploadedOnce=" + !!entry.uploadedOnce +
             ", pendingRequest=" + (pendingRequest ? JSON.stringify(pendingRequest) : "нет") +
             ", entry.uploadedAt=" + entry.uploadedAt + ", entry.addedBy=" + entry.addedBy + ", entry.addedAt=" + entry.addedAt);
           // uploadedAt теперь пишет сама uploadFileToCloud, в одном PATCH с
@@ -11186,7 +11218,12 @@
         // никто не online прямо сейчас, чтобы скачать, заявка провисит
         // до следующего раза, когда одновременно окажутся online и
         // заявитель, и держатель — это ожидаемое ограничение (раздел 4.3).
-        if(entry.uploadedAt && !pendingRequest && (!missingConfirmations || (now - entry.uploadedAt) > FILE_RELAY_TTL_MS)){
+        // ⚠️ ИЗМЕНЕНО (26.09): основной путь удаления теперь в пункте "1)"
+        // (сразу после скачивания) — этот пункт остаётся чистой страховкой
+        // на случай, когда файл вообще никто не скачал (или удаление в
+        // пункте "1)" не долетело из-за сети): по истечении TTL просто
+        // убираем байты из облака, ничего больше не пересчитываем.
+        if(entry.uploadedAt && !pendingRequest && (now - entry.uploadedAt) > FILE_RELAY_TTL_MS){
           return deleteFileFromCloud(kind, hash).then(function(){
             pendingRegistryPatch["files/" + kind + "/" + hash + "/uploadedAt"] = null;
           }).catch(function(){});
@@ -11335,6 +11372,7 @@
       var patch = {};
       patch[groupFileBlobCloudPath(hash)] = b64;
       patch["files/images/" + hash + "/uploadedAt"] = uploadedAt;
+      patch["files/images/" + hash + "/uploadedOnce"] = true; // см. пояснение у uploadFileToCloud (личный канал)
       return patchGroupCloud(groupId, patch);
     }).then(function(){ return uploadedAt; });
   }
@@ -11509,6 +11547,12 @@
           var haveLocally = !!localHashes[hash];
           var pendingRequest = requests[hash] || null;
 
+          // см. пояснение у той же правки в личном канале (runChore) выше
+          if(pendingRequest && pendingRequest.by === myId && haveLocally){
+            pendingGroupPatch[groupFileRequestCloudPath(hash)] = null;
+            pendingRequest = null;
+          }
+
           // 0) тумбстоун
           if(entry.deletedAt){
             if(haveLocally){
@@ -11541,8 +11585,11 @@
           // 2) файл есть локально — заливаем, если байт сейчас нет в
           // fileBlobs и (не все известные участники подтвердили ИЛИ есть
           // чужая заявка).
-          var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; });
-          if(!entry.uploadedAt && (missingConfirmations || pendingRequest)){
+          // ⚠️ ИЗМЕНЕНО (26.09, ТЗ пользователя) — то же самое, что и в
+          // личном канале (runChore) выше: missingConfirmations больше не
+          // повод заливать заново, только uploadedOnce/явная заявка.
+          var missingConfirmations = knownDeviceIds.some(function(id){ return !confirmedBy[id]; }); // не используется в условии — оставлено для будущей диагностики
+          if(!entry.uploadedAt && (!entry.uploadedOnce || pendingRequest)){
             // uploadedAt теперь пишет сама uploadFileToGroupCloud, в одном
             // PATCH с байтами — см. пояснение у uploadFileToCloud (личный канал).
             return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
@@ -11553,7 +11600,9 @@
           // 3) байты залиты и (все известные подтвердили и нет чужой
           // заявки) ИЛИ истёк FILE_RELAY_TTL_MS после заливки — чистим
           // временную копию (тот же TTL, что у личного канала, раздел 4.4/4.5).
-          if(entry.uploadedAt && !pendingRequest && (!missingConfirmations || (Date.now() - entry.uploadedAt) > FILE_RELAY_TTL_MS)){
+          // страховка на случай, если файл вообще никто не скачал (в блоке
+          // "1)" выше удаление уже происходит сразу при первом скачивании)
+          if(entry.uploadedAt && !pendingRequest && (Date.now() - entry.uploadedAt) > FILE_RELAY_TTL_MS){
             return deleteFileFromGroupCloud(groupId, hash).then(function(){
               pendingGroupPatch["files/images/" + hash + "/uploadedAt"] = null;
             }).catch(function(){});
