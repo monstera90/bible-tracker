@@ -11267,6 +11267,28 @@
         // просто сеть подвела) — раздел 4.3: пишем заявку, если своей ещё
         // нет, чтобы держатель файла узнал, что байты снова нужны.
         if(!haveLocally){
+          // ⚠️ ДОБАВЛЕНО (26.09, по вопросу пользователя — расход трафика
+          // 1.2-18 ГБ/день): у ЗАЛИВКИ бэкофф уже есть (uploadBackoff*
+          // выше) — переживает даже разрыв сети/вкладки. У СКАЧИВАНИЯ его
+          // не было СОВСЕМ: если байты не удалось дотянуть (нестабильная
+          // сеть на середине 5-7+ МБ base64, таймаут, blob_not_found), на
+          // следующей же сверке файл качается заново с нуля — и так по
+          // кругу. FILE_REGISTRY_SYNC_MIN_GAP_MS (10 мин) тут не спасает:
+          // fileRegistryLastSyncAt живёт только в памяти вкладки и
+          // обнуляется на каждом новом открытии страницы, а PWA на
+          // телефоне именно так и открывается — заново, помногу раз в
+          // день. Именно эта асимметрия (бэкофф только на заливке) и даёт
+          // повторное скачивание одних и тех же мегабайт при каждом
+          // открытии приложения на нестабильной сети. Используем тот же
+          // бэкофф-хэлпер и то же хранилище, что и заливка — просто с
+          // другим префиксом ключа ("dl:"), чтобы не путать счётчики
+          // попыток скачивания и заливки одного и того же хэша.
+          var downloadBackoffKey = "dl:" + kind + ":" + hash;
+          if(uploadBackoffShouldSkip(downloadBackoffKey)){
+            if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): докачка hash=" + hash + " (name=" + (entry.name || "?") + ") отложена бэкоффом — недавняя попытка не завершилась (сеть/blob_not_found), пропускаю до следующего окна");
+            return null;
+          }
+          uploadBackoffMarkAttempt(downloadBackoffKey); // ДО сетевого запроса — см. пояснение у uploadBackoffMarkAttempt
           return downloadFileFromCloud(kind, hash).catch(function(err){
             // ⚠️ ИСПРАВЛЕНО (18.09, по логу пользователя лог2__1_.txt): раньше
             // здесь стоял requestFileFromCloud(kind, hash) — отдельный,
@@ -11288,6 +11310,7 @@
             }
             throw err; // дальше по цепочке скачивать/сохранять нечего
           }).then(function(buf){
+            uploadBackoffClear(downloadBackoffKey); // байты реально дошли — дальнейшие сбои (saveIncoming и т.п.) уже не про сеть
             return adapters.saveIncoming(hash, entry.name || hash, new Uint8Array(buf)).then(function(saveResult){
               // ⚠️ ДОБАВЛЕНО (диагностика 18.09): подтверждаем сам факт, что
               // байты дошли и adapters.saveIncoming успешно отработал на
@@ -11760,12 +11783,22 @@
           // удаляем временную копию из облака (раздел 3.4 ТЗ), при
           // отсутствии байт — заявка (раздел 4.3).
           if(!haveLocally){
+            // ⚠️ ДОБАВЛЕНО (26.09) — то же самое, что и в личном канале
+            // (runChore) выше: без бэкоффа неудачная докачка (сеть/
+            // blob_not_found) повторяется с нуля на КАЖДОЙ сверке.
+            var downloadBackoffKey = "dl:group:" + groupId + ":" + hash;
+            if(uploadBackoffShouldSkip(downloadBackoffKey)){
+              if(window.Debug) window.Debug.log("syncGroupFileRegistry(\"" + groupId + "\"): докачка hash=" + hash + " (name=" + (entry.name || "?") + ") отложена бэкоффом — недавняя попытка не завершилась, пропускаю до следующего окна");
+              return null;
+            }
+            uploadBackoffMarkAttempt(downloadBackoffKey);
             return downloadFileFromGroupCloud(groupId, hash).catch(function(err){
               if(err && err.message === "blob_not_found" && (!pendingRequest || pendingRequest.by !== myId)){
                 requestFileFromGroupCloud(groupId, hash);
               }
               throw err;
             }).then(function(buf){
+              uploadBackoffClear(downloadBackoffKey);
               return adapters.saveIncoming(hash, entry.name || hash, new Uint8Array(buf));
             }).then(function(){
               return deleteFileFromGroupCloud(groupId, hash).catch(function(){});
