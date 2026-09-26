@@ -11207,7 +11207,25 @@
           // цикла, который эту заливку никак не подтверждает.
           return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
             return uploadFileToCloud(kind, hash, buf);
-          }).catch(function(){});
+          }).then(function(uploadedAt){
+            // ⚠️ ДОБАВЛЕНО (диагностика 26.09, по вопросу пользователя):
+            // раньше об успешной заливке байтов вообще не логировалось —
+            // по логу нельзя было отличить "PATCH реально прошёл,
+            // uploadedOnce записался" от "заливка тихо не удалась и будет
+            // повторена с нуля на следующей сверке".
+            if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): ЗАЛИВКА успешна, hash=" + hash + " (name=" + (entry.name || "?") + "), uploadedAt=" + uploadedAt);
+          }).catch(function(errUpload){
+            // ⚠️ ДОБАВЛЕНО (диагностика 26.09, по вопросу пользователя):
+            // раньше эта ветка (readLocalBytes ИЛИ uploadFileToCloud —
+            // т.е. либо не смогли прочитать файл локально, либо не
+            // прошёл сетевой PATCH с байтами/uploadedOnce, см.
+            // uploadFileToCloud выше) гасилась молча — именно поэтому
+            // в логах повторные "РЕШЕНИЕ ЗАЛИТЬ" с uploadedOnce=false
+            // на один и тот же hash выглядели необъяснимо: нельзя было
+            // понять, не долетел ли запрос (сеть) или сломалось что-то
+            // ещё. Теперь пишем, что именно не удалось и почему.
+            if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): ЗАЛИВКА НЕ УДАЛАСЬ, hash=" + hash + " (name=" + (entry.name || "?") + ") — " + (errUpload && errUpload.message ? errUpload.message : errUpload));
+          });
         }
 
         // 3) Байты залиты и либо подтвердили все известные устройства
@@ -11594,7 +11612,14 @@
             // PATCH с байтами — см. пояснение у uploadFileToCloud (личный канал).
             return adapters.readLocalBytes(hash, manifest[hash]).then(function(buf){
               return uploadFileToGroupCloud(groupId, hash, buf);
-            }).catch(function(){});
+            }).then(function(uploadedAt){
+              // ⚠️ ДОБАВЛЕНО (диагностика 26.09) — то же самое, что и в
+              // личном канале (runChore выше): без этого лога нельзя было
+              // отличить "PATCH прошёл" от "тихо не удался, повтор с нуля".
+              if(window.Debug) window.Debug.log("syncGroupFileRegistry(\"" + groupId + "\"): ЗАЛИВКА успешна, hash=" + hash + " (name=" + (entry.name || "?") + "), uploadedAt=" + uploadedAt);
+            }).catch(function(errUpload){
+              if(window.Debug) window.Debug.log("syncGroupFileRegistry(\"" + groupId + "\"): ЗАЛИВКА НЕ УДАЛАСЬ, hash=" + hash + " (name=" + (entry.name || "?") + ") — " + (errUpload && errUpload.message ? errUpload.message : errUpload));
+            });
           }
 
           // 3) байты залиты и (все известные подтвердили и нет чужой
