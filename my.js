@@ -10730,7 +10730,7 @@
       patch["files/" + kind + "/" + hash] = entry;
       return patchNotesCloud(patch);
     }).then(function(){
-      return syncFileRegistry(kind); // сразу попробовать залить байты, если кто-то уже ждёт
+      return syncFileRegistry(kind, undefined, {force: true}); // сразу попробовать залить байты, если кто-то уже ждёт — троттлинг (см. выше) тут не нужен
     }).catch(function(){});
   }
 
@@ -10805,6 +10805,25 @@
   }
 
   var fileRegistrySyncInProgress = {}; // kind -> bool
+  // ⚠️ ДОБАВЛЕНО (26.09, по логу пользователя): раньше syncFileRegistry
+  // запускалась БЕЗ ограничения при каждом doCloudSync (то есть при
+  // каждом старте/обновлении страницы) и при каждом заходе на вкладку
+  // "Книги" (см. оба места вызова ниже по файлу). Если в реестре
+  // накопился бэклог файлов, ещё не подтверждённых ВСЕМИ известными
+  // устройствами (обычное дело — реле fileBlobs временное, см. комментарии
+  // у FILE_RELAY_TTL_MS выше), КАЖДЫЙ такой запуск заново честно
+  // перезаливал их байты (uploadFileToCloud) — и не потому, что что-то
+  // реально изменилось с прошлого раза, а просто потому что сверка снова
+  // запустилась. При десятке-другом картинок по несколько МБ это и давало
+  // те самые мегабайты трафика на КАЖДОЕ обновление страницы, которые
+  // заметил пользователь. Троттлинг ниже не трогает саму логику
+  // подтверждений/TTL (она осталась как есть) — просто не даёт сверке
+  // запускаться чаще, чем раз в FILE_REGISTRY_SYNC_MIN_GAP_MS, если её не
+  // попросили явно (force:true — см. registerFileInRegistry ниже, где
+  // сверку нужно попробовать немедленно: только что добавили файл или
+  // сняли тумбстоун, и кто-то может уже ждать байты).
+  var FILE_REGISTRY_SYNC_MIN_GAP_MS = 10 * 60 * 1000; // не чаще раза в 10 минут без явного force
+  var fileRegistryLastSyncAt = {}; // kind -> timestamp последнего фактически выполненного прохода
   // ⚠️ ДОБАВЛЕНО (18.09, по логу лог2__2_.txt): без ограничения concurrency
   // syncFileRegistry запускала downloadFileFromCloud/uploadFileToCloud
   // СРАЗУ на все хэши реестра разом (Object.keys(registry).map(...) — все
@@ -10841,12 +10860,18 @@
   }
   var FILE_SYNC_DOWNLOAD_CONCURRENCY = 4; // не слишком мало (не топтаться), не слишком много (не топить Firebase/себя же)
 
-  function syncFileRegistry(kind, adapters){
+  function syncFileRegistry(kind, adapters, opts){
     adapters = adapters || FILE_REGISTRY_ADAPTERS[kind];
     if(!adapters) return Promise.resolve();
     if(!syncId || !isNetworkAvailable() || !getFileSyncEnabled()) return Promise.resolve();
     if(kind === "books" && isBooksCloudSyncTemporarilyDisabled()) return Promise.resolve();
     if(fileRegistrySyncInProgress[kind]) return Promise.resolve();
+    var force = !!(opts && opts.force);
+    if(!force){
+      var lastAt = fileRegistryLastSyncAt[kind] || 0;
+      if((Date.now() - lastAt) < FILE_REGISTRY_SYNC_MIN_GAP_MS) return Promise.resolve();
+    }
+    fileRegistryLastSyncAt[kind] = Date.now();
     fileRegistrySyncInProgress[kind] = true;
     var myId = getDeviceId();
     // ⚠️ ДОБАВЛЕНО (18.09, по логу пользователя): раньше КАЖДЫЙ chore
