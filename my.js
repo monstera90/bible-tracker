@@ -16130,45 +16130,25 @@
     // мимо окна, раз короткий клик по язычку теперь только крутит набор
     // вкладок по кругу и сам никогда не закрывает (см. обработчик клика
     // ниже).
-    // Порог удержания — 250 мс (ТЗ пользователя от 19.09; раньше стояло 100 мс —
-    // слишком мало: медленный обычный тап срабатывал как удержание).
     var FAB_LONGPRESS_MS = 250;
     var fabLongPressTimer = null;
     var fabLongPressFired = false;
+    // Выставляется в pointerdown, когда жест — тач/перо и мы сами погасили
+    // его preventDefault'ом (см. ниже): значит, браузер НЕ пришлёт следом
+    // свой click, и по pointerup нужно вызвать ту же логику вручную. Для
+    // мыши/клавиатуры остаётся false — там штатный click никуда не делся
+    // (важно для доступности: активация с клавиатуры идёт через click, а
+    // не через pointerdown/up, поэтому этот путь трогать нельзя).
+    var fabTouchDefaultPrevented = false;
 
     function clearFabLongPressTimer(){
       if(fabLongPressTimer){ clearTimeout(fabLongPressTimer); fabLongPressTimer = null; }
     }
 
-    settingsGearBtn.addEventListener("pointerdown", function(){
-      fabLongPressFired = false;
-      clearFabLongPressTimer();
-      // Удержание значимо, только пока блокнот уже открыт — если он
-      // закрыт, обычный короткий клик и так его откроет, таймер заводить
-      // незачем (и не нужно мешать обычному открытию).
-      if(!(settingsModalOverlay && settingsModalOverlay.classList.contains("open"))) return;
-      fabLongPressTimer = setTimeout(function(){
-        fabLongPressTimer = null;
-        fabLongPressFired = true;
-        closeSettingsModal(true);
-      }, FAB_LONGPRESS_MS);
-    });
-    ["pointerup", "pointerleave", "pointercancel"].forEach(function(evt){
-      settingsGearBtn.addEventListener(evt, clearFabLongPressTimer);
-    });
-    // Блокирует системное контекстное меню (и вибрацию, которой Android/
-    // Chrome сопровождает долгий тап) на язычке настроек — своя логика
-    // удержания (сворачивание блокнота) уже есть выше, системное меню и
-    // его вибрация поверх неё не нужны и не совпадают по времени с ней
-    // (тот же приём, что и у обложек книг, см. contextmenu-блок выше по
-    // файлу).
-    settingsGearBtn.addEventListener("contextmenu", function(e){ e.preventDefault(); });
-
-    settingsGearBtn.addEventListener("click", function(){
-      // Долгое удержание уже само закрыло блокнот в pointerdown-таймере
-      // выше — браузер всё равно посылает следом обычный click при
-      // отпускании, его нужно проглотить, а не открывать блокнот заново.
-      if(fabLongPressFired){ fabLongPressFired = false; return; }
+    // Общая логика короткого тапа/клика по язычку — раньше жила прямо в
+    // обработчике "click", теперь вызывается и оттуда (мышь/клавиатура), и
+    // вручную по pointerup для тач/пера (см. ниже, почему).
+    function handleFabTap(){
       if(settingsModalOverlay && settingsModalOverlay.classList.contains("open")){
         // блокнот уже открыт: короткий клик всегда переключает набор
         // вкладок по кругу (набор 1 <-> набор 2 <-> ...), пока второй
@@ -16189,6 +16169,68 @@
         // getResumeSettingsState выше) — переживает и закрытие приложения.
         openSettingsModal();
       }
+    }
+
+    settingsGearBtn.addEventListener("pointerdown", function(e){
+      fabLongPressFired = false;
+      clearFabLongPressTimer();
+      // Тач/перо — гасим нативный жест долгого нажатия preventDefault'ом
+      // прямо на pointerdown (ТЗ пользователя от 26.09): системную
+      // вибрацию Android/Chrome на долгом тапе вызывает сам браузерный
+      // распознаватель жеста (готовится показать контекстное меню/
+      // выделение) ещё ДО события "contextmenu" — поэтому preventDefault
+      // на contextmenu (ниже) и CSS touch-action/-webkit-touch-callout её
+      // не убирают: жест уже опознан и haptic уже отработал. Единственный
+      // рабочий момент — на pointerdown, до того как браузер вообще начал
+      // его распознавать. Побочный эффект: браузер после этого не шлёт
+      // свой click для тач-указателя (спецификация Pointer Events — см.
+      // fabTouchDefaultPrevented и pointerup-обработчик ниже), поэтому
+      // мышь и клавиатуру (доступность) сюда не пускаем — там нативный
+      // click работал и продолжает работать без изменений.
+      fabTouchDefaultPrevented = (e.pointerType === "touch" || e.pointerType === "pen");
+      if(fabTouchDefaultPrevented && e.cancelable) e.preventDefault();
+      // Удержание значимо, только пока блокнот уже открыт — если он
+      // закрыт, обычный короткий клик и так его откроет, таймер заводить
+      // незачем (и не нужно мешать обычному открытию).
+      if(!(settingsModalOverlay && settingsModalOverlay.classList.contains("open"))) return;
+      fabLongPressTimer = setTimeout(function(){
+        fabLongPressTimer = null;
+        fabLongPressFired = true;
+        closeSettingsModal(true);
+      }, FAB_LONGPRESS_MS);
+    });
+    settingsGearBtn.addEventListener("pointerup", function(){
+      clearFabLongPressTimer();
+      // Долгое удержание уже само закрыло блокнот в pointerdown-таймере
+      // выше — короткий тап после него нужно проглотить, а не открывать/
+      // переключать заново.
+      if(fabLongPressFired){ fabLongPressFired = false; return; }
+      // Тач/перо: мы сами погасили нативный жест на pointerdown (см.
+      // выше), поэтому штатный click для этого указателя не придёт —
+      // вызываем ту же логику вручную здесь.
+      if(fabTouchDefaultPrevented){
+        fabTouchDefaultPrevented = false;
+        handleFabTap();
+      }
+    });
+    ["pointerleave", "pointercancel"].forEach(function(evt){
+      settingsGearBtn.addEventListener(evt, function(){
+        clearFabLongPressTimer();
+        fabTouchDefaultPrevented = false;
+      });
+    });
+    // Подстраховка для WebView/движков, где даже preventDefault на
+    // pointerdown не всегда гасит системное контекстное меню (тот же
+    // приём, что и у обложек книг, см. contextmenu-блок выше по файлу).
+    settingsGearBtn.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+
+    settingsGearBtn.addEventListener("click", function(){
+      // Сюда для тач/пера теперь в норме доходить не должно (см.
+      // preventDefault в pointerdown выше) — эта ветка обслуживает мышь и
+      // активацию с клавиатуры (Enter/Space), которые идут через click, а
+      // не через pointerdown/pointerup.
+      if(fabLongPressFired){ fabLongPressFired = false; return; }
+      handleFabTap();
     });
   }
 
