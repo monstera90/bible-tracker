@@ -19657,7 +19657,19 @@
     if(getHideStatusBarEnabled()){
       setHideStatusBarEnabled(false);
       applyReadingModeVisual();
+      // ⚠️ ДОБАВЛЕНО (жалоба пользователя: после выхода из полноэкранного
+      // режима в обычный визуально оставался размер шрифта чтения/
+      // полноэкранного режима) — сама раздельность fontSizeStep/
+      // fontSizeStepReading в mdeditor.js уже была на месте (см.
+      // getActiveFontSizeStep), не хватало только пересчёта CSS-размера
+      // после снятия флага HIDE_STATUS_BAR выше: getActiveFontSizeStep()
+      // уже вернул бы обычный fontSizeStep, но без явного applyFontSize()
+      // размер на экране не менялся сам по себе. Та же пара вызовов, что и
+      // в enterFullscreenDisplayMode ниже и в toggleReadingMode выше.
+      if(MdEditor && MdEditor.applyFontSize) MdEditor.applyFontSize();
       layoutSettingsModal();
+      refitAllVisibleTaskBodies();
+      if(window.requestAnimationFrame) window.requestAnimationFrame(refitAllVisibleTaskBodies);
     }
   }
   function enterFullscreenDisplayMode(){
@@ -20026,6 +20038,21 @@
     if(!el) return;
     var HOLD_MS = 250, MOVE_CANCEL_PX = 10;
     var timer = null, holdFired = false, startXY = null;
+    // ⚠️ ДОБАВЛЕНО (27.09, жалоба пользователя: после долгого удержания
+    // "Аа"/режима чтения экран уходит в полноэкранный режим — это верно,
+    // но заодно ещё и выделяется текст рядом с кнопкой — это баг). Причина
+    // та же, что уже была разобрана и исправлена у settingsGearBtn (см.
+    // initSettingsFab выше): нативный распознаватель долгого нажатия
+    // Android/Chrome сам стартует жест "выделение/контекстное меню" ещё до
+    // того, как наш таймер HOLD_MS вообще успевает сработать — CSS
+    // (user-select/-webkit-touch-callout) тут не спасает, единственный
+    // рабочий момент — preventDefault на touchstart, ДО того как браузер
+    // начал распознавание. Побочный эффект: после preventDefault на
+    // touchstart браузер для этого касания уже не шлёт свой click — поэтому
+    // тап теперь вызывается вручную из touchend (флаг touchHandled ниже), а
+    // click-слушатель в самом низу остаётся рабочим путём только для мыши/
+    // клавиатуры (доступность), как и раньше.
+    var touchHandled = false;
     function clearTimer(){ clearTimeout(timer); timer = null; }
     function start(x, y){
       holdFired = false;
@@ -20038,16 +20065,27 @@
       var dx = x - startXY.x, dy = y - startXY.y;
       if(Math.sqrt(dx*dx + dy*dy) > MOVE_CANCEL_PX) clearTimer();
     }
-    el.addEventListener("touchstart", function(e){ var t = e.touches[0]; start(t.clientX, t.clientY); }, {passive:true});
+    el.addEventListener("touchstart", function(e){
+      touchHandled = !!e.cancelable;
+      if(e.cancelable) e.preventDefault(); // {passive:false} ниже обязателен, иначе браузер это молча проигнорирует
+      var t = e.touches[0]; start(t.clientX, t.clientY);
+    }, {passive:false});
     el.addEventListener("touchmove", function(e){ var t = e.touches[0]; move(t.clientX, t.clientY); }, {passive:true});
-    el.addEventListener("touchend", clearTimer);
-    el.addEventListener("touchcancel", clearTimer);
+    el.addEventListener("touchend", function(e){
+      clearTimer();
+      if(!touchHandled) return;
+      touchHandled = false;
+      if(e.cancelable) e.preventDefault(); // подстраховка от "призрачного" клика на части сборок
+      if(holdFired){ holdFired = false; return; }
+      onTap();
+    }, {passive:false});
+    el.addEventListener("touchcancel", function(){ clearTimer(); touchHandled = false; });
     el.addEventListener("mousedown", function(e){ start(e.clientX, e.clientY); });
     el.addEventListener("mousemove", function(e){ move(e.clientX, e.clientY); });
     el.addEventListener("mouseup", clearTimer);
-    // click приходит и после обычного тапа, и (на тач-устройствах) следом
-    // за уже сработавшим долгим нажатием — если оно уже сработало, этот
-    // click просто гасим, а не выполняем ещё и onTap поверх него.
+    // click остаётся рабочим путём только для мыши/клавиатуры — тач уже
+    // обработан выше вручную в touchend (native click для него не придёт,
+    // раз мы погасили touchstart preventDefault'ом).
     el.addEventListener("click", function(e){
       e.stopPropagation();
       if(holdFired){ holdFired = false; return; }

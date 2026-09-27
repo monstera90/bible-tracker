@@ -790,6 +790,14 @@
     visibility:hidden;
     pointer-events:none;
   }
+  /* Точка приоритета задачи (.task-flag-dot, ТЗ пользователя от 27.09): в
+     режиме чтения/полноэкранном режиме она физически оказывается прямо в
+     области текста задачи — прячем вместе с рядами вкладок выше. display, а
+     не visibility — она внутри строки задачи, невидимая-но-занимающая-место
+     точка сдвигала бы текст точно так же, как и видимая. */
+  .settings-modal-overlay.reading-mode-active .task-flag-dot{
+    display:none;
+  }
 
   .settings-row{
     display:flex;
