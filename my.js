@@ -4858,8 +4858,19 @@
     return deepEqual(a === undefined ? null : a, b === undefined ? null : b);
   }
   function buildStateDelta(merged, cloudData){
+    // ⚠️ ИСПРАВЛЕНО (26.09, по логу пользователя — "notes"/"notesMeta"
+    // стабильно уходят в дельту КАЖДЫЙ цикл, ~2.3 МБ): это зарезервированные
+    // ветки (CLOUD_RESERVED_SUBTREES выше) — у них СВОЙ канал синхронизации
+    // (mdeditor.js/patchNotesCloud), в общий putCloudBlob они попадать не
+    // должны вовсе. cloudData к этому моменту уже вырезан от них
+    // (stripCloudReservedSubtrees в doCloudSync), а вот merged[k] — нет
+    // (заметки нужны локально редактору) → recordsEqual(реальный_объект,
+    // undefined) была ВСЕГДА false, и вся ветка уходила в облако заново на
+    // каждом cvикле, что бы ни менялось. Пропускаем эти ключи здесь же —
+    // они в принципе не место в этой дельте.
     var delta = {};
     Object.keys(merged || {}).forEach(function(k){
+      if(CLOUD_RESERVED_SUBTREES[k]) return;
       if(!recordsEqual(merged[k], cloudData ? cloudData[k] : undefined)) delta[k] = merged[k];
     });
     return delta;
