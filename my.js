@@ -11360,7 +11360,15 @@
       patch["files/" + kind + "/" + hash] = entry;
       return patchNotesCloud(patch);
     }).then(function(){
-      return syncFileRegistry(kind, undefined, {force: true}); // сразу попробовать залить байты, если кто-то уже ждёт — троттлинг (см. выше) тут не нужен
+      // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя): knownLocalHashes:[hash] — эта
+      // функция по своему контракту ВСЕГДА вызывается для файла, который
+      // вызывающий код уже сохранил локально (см. комментарий к функции
+      // выше) — байты точно есть прямо сейчас, ждать подтверждения от
+      // adapters.getLocalManifest() не нужно (см. пояснение у
+      // knownLocalHashes в syncFileRegistry — раньше из-за этой гонки
+      // заливка на устройстве, которое САМО добавило картинку, не
+      // начиналась, пока не произойдёт следующая сверка/перезагрузка).
+      return syncFileRegistry(kind, undefined, {force: true, knownLocalHashes: [hash]}); // сразу попробовать залить байты, если кто-то уже ждёт — троттлинг (см. выше) тут не нужен
     }).catch(function(){});
   }
 
@@ -11519,6 +11527,20 @@
       var lastAt = fileRegistryLastSyncAt[kind] || 0;
       if((Date.now() - lastAt) < FILE_REGISTRY_SYNC_MIN_GAP_MS) return Promise.resolve();
     }
+    // ⚠️ ДОБАВЛЕНО (27.09, ТЗ пользователя): подсказка вызывающей стороны —
+    // хэши, которые точно есть у нас локально ПРЯМО СЕЙЧАС, независимо от
+    // того, что вернёт adapters.getLocalManifest() ниже. Нужна из-за гонки
+    // в registerFileInRegistry (см. там): он зовёт этот цикл с force:true
+    // СРАЗУ после того, как файл был сохранён локально вызывающим кодом
+    // (вставка картинки в задачу/заметку) — но getLocalManifest() читает
+    // манифест локального хранилища адаптера, который иногда ещё не успел
+    // отразить только что сохранённый файл (запись в OPFS/IndexedDB
+    // асинхронна). Без этой подсказки цикл ниже считал файл отсутствующим
+    // локально и уходил в ветку СКАЧИВАНИЯ (получал blob_not_found, ставил
+    // себе же заявку) вместо немедленной заливки — заливка происходила
+    // только на следующей сверке (следующее открытие вкладки/перезагрузка
+    // страницы, см. лог пользователя).
+    var knownLocalHashes = (opts && opts.knownLocalHashes) || null;
     fileRegistryLastSyncAt[kind] = Date.now();
     fileRegistrySyncInProgress[kind] = true;
     var myId = getDeviceId();
@@ -11545,6 +11567,7 @@
       if(registryFetchOk) mirrorFileRegistrySnapshot(kind, registry); // Шаг 12: зеркало метаданных в движок (см. выше), best-effort; при сбое чтения — не трогаем
       var localHashes = {}; // hash -> true, что реально есть локально на этом устройстве
       Object.keys(manifest).forEach(function(h){ localHashes[h] = true; });
+      if(knownLocalHashes) knownLocalHashes.forEach(function(h){ localHashes[h] = true; }); // см. пояснение у knownLocalHashes выше
       var now = Date.now();
       var knownDeviceIds = Object.keys(devices).filter(function(id){
         var t = devices[id] && typeof devices[id].t === "number" ? devices[id].t : 0;
