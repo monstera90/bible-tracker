@@ -5700,8 +5700,15 @@
       document.getElementById("mDone").addEventListener("click", closeModal);
     }).catch(function(err){
       console.error(err);
+      // ⚠️ ДОБАВЛЕНО: раньше текст был статичным для ЛЮБОЙ причины сбоя
+      // (сеть, ответ Firebase с ошибкой, исключение в коде после записи) —
+      // из попапа было невозможно понять, что реально сломалось, не открывая
+      // консоль. Теперь код/сообщение реальной ошибки показывается прямо
+      // здесь, отдельной строкой техническими символами.
+      var detail = (err && err.message) ? String(err.message) : String(err);
       modalBox.innerHTML = modalHeader("Не удалось создать код",
         "Возможно, временно недоступен облачный сервис синхронизации. Попробуйте ещё раз чуть позже.") +
+        '<p class="modal-note" style="opacity:.7;word-break:break-all;">Код ошибки: ' + escapeHtml(detail) + '</p>' +
         '<button class="modal-btn primary" id="mBack">Назад</button>';
       bindClose();
       document.getElementById("mBack").addEventListener("click", renderGroupPairingHome);
