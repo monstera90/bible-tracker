@@ -4788,6 +4788,25 @@
   // и те же id на каждом цикле. Фикс — приравнивать ключ со значением
   // undefined к отсутствующему ключу (ровно так же, как это делает
   // JSON.stringify/Firebase), а не считать его отличием.
+  // ⚠️ ИСПРАВЛЕНО (26.09, по свежему логу пользователя — та же самая запись
+  // task:tk1786937453431ef8us с тем же самым полем "только локально:
+  // [nextForProjectId]" повторяется НЕИЗМЕННО в ДВУХ разных сессиях подряд):
+  // фикс про undefined (см. пояснение выше) поймал только половину случая.
+  // completionKey/nextForProjectId/flag/checkedAt и другие поля-умолчания
+  // по всему коду (saveTaskData и т.п.) хранятся локально как ЯВНЫЙ `null`,
+  // а не `undefined`. Firebase Realtime Database трактует запись `null` в
+  // PATCH как УДАЛЕНИЕ ключа — на сервере такого поля нет вообще. Значит
+  // локальный объект с `{nextForProjectId: null}` и облачный без этого
+  // ключа — это ОДНО И ТО ЖЕ состояние с точки зрения того, что реально
+  // хранится в базе, просто deepEqual сравнивала количество ключей и видела
+  // "лишний" ключ у локального объекта (null !== undefined — старый фильтр
+  // его не убирал) → считала записи разными НАВСЕГДА, сколько раз их ни
+  // отправляй. Отсюда и стабильно одни и те же id в дельте на КАЖДОМ цикле
+  // (~176 задач/2.4 МБ трафика за цикл, при частых перезагрузках страницы
+  // на телефоне — и есть основной вклад в аномальный расход трафика).
+  // Фикс — считать null тоже "отсутствующим" полем при сравнении (ровно то,
+  // во что null всё равно превращается после реального PATCH в Firebase).
+  function isAbsentValue(v){ return v === undefined || v === null; }
   function deepEqual(a, b){
     if(a === b) return true;
     if(a === null || b === null || typeof a !== "object" || typeof b !== "object") return a === b;
@@ -4796,12 +4815,12 @@
       for(var i=0;i<a.length;i++){ if(!deepEqual(a[i], b[i])) return false; }
       return true;
     }
-    var ak = Object.keys(a).filter(function(k){ return a[k] !== undefined; });
-    var bk = Object.keys(b).filter(function(k){ return b[k] !== undefined; });
+    var ak = Object.keys(a).filter(function(k){ return !isAbsentValue(a[k]); });
+    var bk = Object.keys(b).filter(function(k){ return !isAbsentValue(b[k]); });
     if(ak.length !== bk.length) return false;
     for(var j=0;j<ak.length;j++){
       var k = ak[j];
-      if(!Object.prototype.hasOwnProperty.call(b, k) || b[k] === undefined) return false;
+      if(!Object.prototype.hasOwnProperty.call(b, k) || isAbsentValue(b[k])) return false;
       if(!deepEqual(a[k], b[k])) return false;
     }
     return true;
@@ -4958,37 +4977,11 @@
         var deltaKeys = cloudDelta ? Object.keys(cloudDelta) : [];
         var deltaTaskKeys = deltaKeys.filter(function(k){ return k.indexOf("task:") === 0; });
         window.Debug.log("doCloudSync: слияние — локально изменилось=" + localChanged + ", в облако уйдёт ключей=" + deltaKeys.length + " (из них task:=" + deltaTaskKeys.length + (deltaTaskKeys.length ? ": " + deltaTaskKeys.slice(0, 5).join(", ") : "") + ")");
-        // ⚠️ ДИАГНОСТИКА (26.09, третий проход разбора трафика) — временно,
-        // пока не найдена причина стабильного повторного разбухания
-        // putCloudBlob у одних и тех же id (см. пояснение у deepEqual выше).
-        // Два среза: 1) крупнейшие по размеру ключи дельты — покажет,
-        // ДЕЙСТВИТЕЛЬНО ли раздувают именно task:-записи или что-то ещё
-        // (например book:<hash>), не попавшее в первые 5 из строки выше;
-        // 2) для первых нескольких task:-ключей — какие ИМЕННО поля
-        // содержимого отличаются от cloudData (по имени поля, без самих
-        // значений, чтобы не тащить в лог текст/картинки) — это прямо
-        // укажет, воспроизводится ли гипотеза про undefined-поле или дело
-        // в чём-то другом. Оставить только до следующего лога пользователя,
-        // затем убрать.
-        if(deltaKeys.length){
-          var sized = deltaKeys.map(function(k){
-            var n = 0;
-            try{ n = JSON.stringify(cloudDelta[k]).length; }catch(e){}
-            return {k:k, n:n};
-          });
-          sized.sort(function(a,b){ return b.n - a.n; });
-          window.Debug.log("doCloudSync: крупнейшие ключи дельты по размеру — " +
-            sized.slice(0, 5).map(function(x){ return x.k + "=" + x.n; }).join(", "));
-        }
-        deltaTaskKeys.slice(0, 3).forEach(function(k){
-          var lc = merged[k] && merged[k].c, cc = cloudData && cloudData[k] && cloudData[k].c;
-          var lk = lc && typeof lc === "object" ? Object.keys(lc) : [];
-          var ck = cc && typeof cc === "object" ? Object.keys(cc) : [];
-          var onlyLocal = lk.filter(function(f){ return ck.indexOf(f) === -1; });
-          var onlyCloud = ck.filter(function(f){ return lk.indexOf(f) === -1; });
-          var diffVals = lk.filter(function(f){ return ck.indexOf(f) !== -1 && !deepEqual(lc[f], cc[f]); });
-          window.Debug.log("doCloudSync: разбор полей " + k + " — только локально: [" + onlyLocal.join(",") + "], только в облаке: [" + onlyCloud.join(",") + "], отличаются по значению: [" + diffVals.join(",") + "]");
-        });
+        // Временная диагностика (26.09, третий проход разбора трафика) —
+        // убрана: она своё дело сделала, лог пользователя подтвердил
+        // гипотезу (null-поля вроде nextForProjectId стабильно считались
+        // "только локально", см. пояснение у deepEqual/isAbsentValue выше).
+        // Сам фикс остаётся; лишний лог на каждый цикл синка больше не нужен.
       }
       state = merged;
       personalViewAbsorbState(false); // шаг 8: задачи, приехавшие блобом (старые устройства), — в вид до перерисовки
@@ -11178,7 +11171,25 @@
       pump();
     });
   }
-  var FILE_SYNC_DOWNLOAD_CONCURRENCY = 4; // не слишком мало (не топтаться), не слишком много (не топить Firebase/себя же)
+  // ⚠️ ИЗМЕНЕНО (26.09, по вопросу пользователя — "картинки грузятся уже
+  // 100 раз и никак не загрузятся", 18 ГБ/день): было =4. Бэкофф (выше)
+  // решает только "не долбить одно и то же СРАЗУ", но не решает саму
+  // причину провала. А причина — вот она: каждый chore из choreHashes
+  // может оказаться ЗАЛИВКОЙ или ДОКАЧКОЙ 5-7 МБ (после base64 — уже
+  // 7-10 МБ), и при concurrency=4 до четырёх таких передач летят В ОДИН
+  // МОМЕНТ — на нестабильном мобильном канале это не "быстрее в 4 раза",
+  // а "каждой достаётся ~1/4 и без того небольшой полосы". Одна и та же
+  // картинка на таком канале, деля полосу вчетвером, физически не
+  // укладывается в computeCloudPatchTimeoutMs (до 90с) — AbortController
+  // рвёт запрос, часть байт уже улетела/пришла (это и есть трафик), а
+  // сама передача так и не засчиталась. С backoff это просто повторяется
+  // РЕЖЕ, но так же безуспешно — тот же 4-стороний затор на каждой
+  // попытке. Serial (=1) отдаёт каждой передаче ВСЮ доступную полосу — у
+  // неё появляется реальный шанс уложиться в таймаут и наконец
+  // завершиться, а не только "начаться и оборваться" раз за разом.
+  // Цена — сверка большой библиотеки файлов идёт дольше (по одному, не
+  // пачками), это не страшно: он и так фоновый, не блокирует UI.
+  var FILE_SYNC_DOWNLOAD_CONCURRENCY = 1;
 
   function syncFileRegistry(kind, adapters, opts){
     adapters = adapters || FILE_REGISTRY_ADAPTERS[kind];
