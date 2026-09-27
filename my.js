@@ -9580,20 +9580,38 @@
   // никогда не просил navigator.storage.persist(), см. ниже) между заходами:
   // если это происходит, здесь при следующем запуске будет видно "install
   // скачал N файлов" именно тогда, когда пользователь ничего не менял.
-  var LAST_INSTALL_REPORT_LOGGED_AT = null;
+  // ⚠️ ИСПРАВЛЕНО (27.09, второй заход): метка "этот отчёт уже показывали"
+  // изначально жила в обычной JS-переменной — она обнуляется на каждой
+  // перезагрузке страницы, а sw.js отчёт из кэша НЕ удаляет (это разовый
+  // "последний известный" отчёт, а не одноразовое сообщение). В сумме это
+  // значило, что ОДНА реальная установка (см. "ranNetworkInstall") писалась
+  // в журнал отладки заново на КАЖДОМ следующем заходе — выглядело как
+  // повторные скачивания 41 файла (~1896 КБ) на каждой перезагрузке, хотя
+  // install-обработчик в sw.js в эти разы вообще не запускался (в логе не
+  // было ни одного нового "SW: найдена новая версия"). Метка переезжает в
+  // localStorage — переживает перезагрузку, сообщение появится только один
+  // раз, действительно при новой установке.
+  var SW_INSTALL_REPORT_SHOWN_KEY = "bibleSwInstallReportShownAt_v1";
+  function getLastShownInstallReportAt(){
+    try{ var v = localStorage.getItem(SW_INSTALL_REPORT_SHOWN_KEY); return v ? Number(v) : null; }catch(e){ return null; }
+  }
+  function setLastShownInstallReportAt(at){
+    try{ localStorage.setItem(SW_INSTALL_REPORT_SHOWN_KEY, String(at)); }catch(e){}
+  }
   function logInstallReport(){
     if(!window.caches || !window.Debug) return;
     caches.match(SW_INSTALL_REPORT_KEY, { cacheName: SW_INSTALL_REPORT_CACHE }).then(function(res){
       return res ? res.json() : null;
     }).then(function(rep){
       if(!rep) return;
-      // Отчёт в кэше не одноразовый (sw.js его не удаляет) — без метки "at"
-      // одно и то же сообщение об установке писалось бы в журнал заново при
-      // каждом requestVersionFromSW/logInstallReport (на каждом визите),
-      // маскируя реальную частоту переустановок под видимость "происходит
-      // каждый раз". Пишем в журнал только когда видим НОВУЮ запись отчёта.
-      if(rep.at && rep.at === LAST_INSTALL_REPORT_LOGGED_AT) return;
-      LAST_INSTALL_REPORT_LOGGED_AT = rep.at || null;
+      // Отчёт в кэше не одноразовый (sw.js его не удаляет) — без метки "at",
+      // пережившей перезагрузку, одно и то же сообщение об установке
+      // писалось бы в журнал заново при каждом заходе, маскируя реальную
+      // частоту переустановок под видимость "происходит каждый раз". Пишем
+      // в журнал только когда видим НОВУЮ запись отчёта (по сравнению с тем,
+      // что уже показывали, — см. localStorage-метку выше).
+      if(rep.at && rep.at === getLastShownInstallReportAt()) return;
+      if(rep.at) setLastShownInstallReportAt(rep.at);
       if(rep.ranNetworkInstall){
         var kb = (typeof rep.fetchedBytes === "number") ? (rep.fetchedBytes / 1024).toFixed(0) + " КБ" : "вес неизвестен (сервер не прислал Content-Length)";
         swDebug("SW " + rep.version + ": install СКАЧАЛ ПО СЕТИ " + (rep.fetchedCount || 0) + " файлов (~" + kb + ") — это и есть источник трафика на этом заходе, если пользователь ничего не менял");
