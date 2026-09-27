@@ -1,6 +1,15 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 42.4 (27.09) — приоритет интерфейса над фоновой сборкой книги
+   (ТЗ пользователя от 27.09, продолжение 42.3): renderBookReaderText — тайм-
+   бюджет тика (RENDER_CHUNK_BUDGET_MS) теперь проверяется на каждом БЛОКЕ
+   абзаца/картинки, а не только между главами целиком (buildBlockHtml вместо
+   buildChapterHtml) — иначе одна крупная глава (сотни блоков, как у ИПКД)
+   сама по себе превышала бюджет в разы и не отпускала поток. Там, где
+   поддерживается (Chrome/Edge), добавлена проверка
+   navigator.scheduling.isInputPending() — тик прерывается СРАЗУ при
+   назревшем тач/клике, не дожидаясь даже своих 8мс.
    Версия: 42.3 (27.09) — долгое удержание язычка настроек: порог FAB_LONGPRESS_MS
    250 -> 200 мс (ТЗ пользователя от 27.09, там же диагностика/фикс двойного
    ребилда вкладки при повторном тапе — см. switchSettingsTabOnClick).
@@ -14504,77 +14513,117 @@
     var chapterIdx = 0;
     var RENDER_CHUNK_BUDGET_MS = 8; // держим "тик" короче кадра — остаётся время и на сам кадр, и на успевший накопиться ввод
 
-    // Сборка HTML ОДНОЙ главы — то же самое, что раньше выполнялось для
-    // каждой главы внутри общего forEach, вынесено в отдельную функцию,
-    // чтобы вызывать по одной главе за раз из renderChunk ниже.
-    function buildChapterHtml(ch, idx){
-      var chHtml = '<div class="book-reader-chapter" id="bookChapter_' + idx + '">';
-      if(ch.title) chHtml += '<h4 class="book-reader-chapter-title">' + escapeHtml(ch.title) + '</h4>';
-      // Сегмент — группа из BOOK_READER_SEG_SIZE соседних блоков ОДНОЙ главы
-      // (см. currentBookReaderPosition). data-chars/--seg-chars — число
-      // символов (оценка высоты), data-imgs/--seg-imgs — число картинок.
-      var segHtml = "", segBlocks = 0, segChars = 0, segImgs = 0;
-      function flushSeg(){
-        if(!segHtml) return;
-        chHtml += '<div class="book-reader-seg" data-chars="' + segChars + '" data-imgs="' + segImgs +
-          '" style="--seg-chars:' + segChars + ';--seg-imgs:' + segImgs + '">' + segHtml + '</div>';
-        segHtml = ""; segBlocks = 0; segChars = 0; segImgs = 0;
-      }
-      ch.blocks.forEach(function(block, bi){
-        var key = idx + "_" + bi;
-        if(block.type === "image"){
-          var hasImg = !!(block.imageId && bookReaderState.imageBase64 && bookReaderState.imageBase64[block.imageId]);
-          if(hasImg){
-            // Шаг 14 (READER_PLAN.md, Этап D, 11.09): .book-reader-image-wrap
-            // даёт position:relative для кнопки-кнопки, центрированной по
-            // верхнему краю картинки (components.css). data-ch/data-blk/
-            // data-img — та же адресация, что у подчёркиваний (см.
-            // bindBookReaderImages/toggleBookReaderImagePin ниже).
-            var pinned = !!pinByBlock[key];
-            segHtml += '<div class="book-reader-image-wrap" data-ch="' + idx + '" data-blk="' + bi + '" data-img="' + escapeHtml(block.imageId) + '">' +
-              '<img class="cm-md-image book-reader-image" decoding="async" data-lazy-img="' + escapeHtml(block.imageId) + '">' +
-              '<button type="button" class="book-reader-pin-btn' + (pinned ? ' pinned' : '') +
-                '" title="' + (pinned ? "Убрать из заметки" : "Отправить в заметку") + '">' + READER_PIN_ICON_SVG + '</button>' +
-            '</div>';
-            segImgs++;
-            segBlocks++;
-          }
-        } else {
-          // id/data-ch/data-blk (шаг 13) — по ним resolveSelectionToBlockPosition
-          // ниже находит абзац выделения и его координаты (idx = глава, bi =
-          // индекс блока внутри ch.blocks — стабилен независимо от типа
-          // соседних блоков, т.к. это просто позиция в исходном массиве).
-          var ranges = ulByBlock[key] || null;
-          // Закладка (шаг 15; пиктограмма справа — 15.09) — поверх первой
-          // строки абзаца, у правого края; клик снимает закладку целиком
-          // (bindBookReaderBookmarkMarkClick).
-          var bm = bmByBlock[key];
-          for(var ri = 0; ri < block.runs.length; ri++) segChars += block.runs[ri].text.length;
-          segHtml += '<p class="book-reader-p' +
-            '" id="bookP_' + idx + '_' + bi + '" data-ch="' + idx + '" data-blk="' + bi + '">' +
-            renderRunsHtml(block.runs, ranges) +
-            (bm ? '<button type="button" class="book-reader-bookmark-mark" data-bookmark-id="' + escapeHtml(bm.id) + '" title="Убрать закладку">' + READER_BOOKMARK_ICON_SVG + '</button>' : '') +
-            '</p>';
+    // ⚠️ ИЗМЕНЕНО (27.09, продолжение той же правки выше — ТЗ пользователя:
+    // "приоритет потока отдавать кнопке и интерфейсу") — бюджет тика раньше
+    // проверялся только МЕЖДУ главами (см. renderChunk ниже, старая версия:
+    // одна while по chapters, buildChapterHtml всегда строила главу
+    // целиком). Для Библии с короткими главами это не бросалось в глаза, но
+    // у обычных книг/публикаций (ИПКД и т.п.) одна глава может содержать
+    // сотни блоков — сборка её HTML сама по себе легко превышала
+    // RENDER_CHUNK_BUDGET_MS в разы (в логе диагностики — LONGTASK по
+    // 70-180мс подряд именно на этом этапе), и до жеста было не
+    // достучаться, пока не закончится вся глава целиком. Теперь бюджет
+    // проверяется на каждом БЛОКЕ (buildBlockHtml вместо buildChapterHtml
+    // для всей главы разом) — тик может прерваться и продолжиться в
+    // середине главы, не теряя место (chapterOpen/blockIdx переживают
+    // паузу). Плюс, где браузер это поддерживает (Chrome/Edge —
+    // navigator.scheduling.isInputPending), тик прерывается СРАЗУ, как
+    // только появился необработанный тач/клик, не дожидаясь даже своих
+    // 8мс — это и есть "приоритет интерфейсу": фоновая сборка книги
+    // буквально уступает дорогу, едва почувствовав нажатие.
+    var chapterOpen = false; // текущая глава открыта (её "<div class=book-reader-chapter...>" уже написан), но ещё не закрыта
+    var blockIdx = 0; // позиция внутри chapters[chapterIdx].blocks, на которой прервался прошлый тик
+    var segHtml = "", segBlocks = 0, segChars = 0, segImgs = 0;
+    function flushSeg(){
+      if(!segHtml) return "";
+      var html = '<div class="book-reader-seg" data-chars="' + segChars + '" data-imgs="' + segImgs +
+        '" style="--seg-chars:' + segChars + ';--seg-imgs:' + segImgs + '">' + segHtml + '</div>';
+      segHtml = ""; segBlocks = 0; segChars = 0; segImgs = 0;
+      return html;
+    }
+    // Сборка HTML ОДНОГО блока (абзац/картинка) — раньше была телом
+    // ch.blocks.forEach внутри buildChapterHtml, теперь вызывается по
+    // одному блоку за раз из renderChunk, чтобы бюджет можно было
+    // проверить после каждого.
+    function buildBlockHtml(ch, idx, block, bi){
+      var key = idx + "_" + bi;
+      if(block.type === "image"){
+        var hasImg = !!(block.imageId && bookReaderState.imageBase64 && bookReaderState.imageBase64[block.imageId]);
+        if(hasImg){
+          // Шаг 14 (READER_PLAN.md, Этап D, 11.09): .book-reader-image-wrap
+          // даёт position:relative для кнопки-кнопки, центрированной по
+          // верхнему краю картинки (components.css). data-ch/data-blk/
+          // data-img — та же адресация, что у подчёркиваний (см.
+          // bindBookReaderImages/toggleBookReaderImagePin ниже).
+          var pinned = !!pinByBlock[key];
+          segHtml += '<div class="book-reader-image-wrap" data-ch="' + idx + '" data-blk="' + bi + '" data-img="' + escapeHtml(block.imageId) + '">' +
+            '<img class="cm-md-image book-reader-image" decoding="async" data-lazy-img="' + escapeHtml(block.imageId) + '">' +
+            '<button type="button" class="book-reader-pin-btn' + (pinned ? ' pinned' : '') +
+              '" title="' + (pinned ? "Убрать из заметки" : "Отправить в заметку") + '">' + READER_PIN_ICON_SVG + '</button>' +
+          '</div>';
+          segImgs++;
           segBlocks++;
         }
-        if(segBlocks >= BOOK_READER_SEG_SIZE) flushSeg();
-      });
-      flushSeg();
-      chHtml += '</div>';
-      return chHtml;
+      } else {
+        // id/data-ch/data-blk (шаг 13) — по ним resolveSelectionToBlockPosition
+        // ниже находит абзац выделения и его координаты (idx = глава, bi =
+        // индекс блока внутри ch.blocks — стабилен независимо от типа
+        // соседних блоков, т.к. это просто позиция в исходном массиве).
+        var ranges = ulByBlock[key] || null;
+        // Закладка (шаг 15; пиктограмма справа — 15.09) — поверх первой
+        // строки абзаца, у правого края; клик снимает закладку целиком
+        // (bindBookReaderBookmarkMarkClick).
+        var bm = bmByBlock[key];
+        for(var ri = 0; ri < block.runs.length; ri++) segChars += block.runs[ri].text.length;
+        segHtml += '<p class="book-reader-p' +
+          '" id="bookP_' + idx + '_' + bi + '" data-ch="' + idx + '" data-blk="' + bi + '">' +
+          renderRunsHtml(block.runs, ranges) +
+          (bm ? '<button type="button" class="book-reader-bookmark-mark" data-bookmark-id="' + escapeHtml(bm.id) + '" title="Убрать закладку">' + READER_BOOKMARK_ICON_SVG + '</button>' : '') +
+          '</p>';
+        segBlocks++;
+      }
+      return (segBlocks >= BOOK_READER_SEG_SIZE) ? flushSeg() : "";
     }
 
-    // Один "тик": добавляет главы, пока не выйдет за тайм-бюджет, затем
-    // либо просит следующий кадр (requestAnimationFrame — тот самый момент,
-    // когда браузер успевает обработать накопившийся ввод и таймеры), либо,
-    // если это была последняя глава, переходит к хвостовой логике.
+    // true, если стоит прерваться прямо сейчас: вышли за тайм-бюджет тика
+    // ИЛИ (где браузер это умеет) уже назрел необработанный тач/клик —
+    // тогда ждать даже оставшийся бюджет незачем, отдаём поток немедленно.
+    function shouldYieldNow(t0){
+      if(performance.now() - t0 >= RENDER_CHUNK_BUDGET_MS) return true;
+      return !!(navigator.scheduling && navigator.scheduling.isInputPending && navigator.scheduling.isInputPending());
+    }
+
+    // Один "тик": добавляет блоки (внутри главы, при необходимости
+    // переходя на следующую), пока не выйдет за тайм-бюджет/не появится
+    // ввод, затем либо просит следующий кадр (requestAnimationFrame — тот
+    // самый момент, когда браузер успевает обработать накопившийся ввод и
+    // таймеры), либо, если это была последняя глава, переходит к хвостовой
+    // логике.
     function renderChunk(){
       var t0 = performance.now();
-      while(chapterIdx < chapters.length){
-        rootEl.insertAdjacentHTML("beforeend", buildChapterHtml(chapters[chapterIdx], chapterIdx));
-        chapterIdx++;
-        if(performance.now() - t0 >= RENDER_CHUNK_BUDGET_MS) break;
+      var out = "";
+      var yielded = false;
+      while(chapterIdx < chapters.length && !yielded){
+        var ch = chapters[chapterIdx];
+        if(!chapterOpen){
+          out += '<div class="book-reader-chapter" id="bookChapter_' + chapterIdx + '">';
+          if(ch.title) out += '<h4 class="book-reader-chapter-title">' + escapeHtml(ch.title) + '</h4>';
+          chapterOpen = true;
+          blockIdx = 0;
+        }
+        while(blockIdx < ch.blocks.length){
+          out += buildBlockHtml(ch, chapterIdx, ch.blocks[blockIdx], blockIdx);
+          blockIdx++;
+          if(shouldYieldNow(t0)){ yielded = true; break; }
+        }
+        if(blockIdx >= ch.blocks.length){
+          out += flushSeg();
+          out += '</div>';
+          chapterOpen = false;
+          chapterIdx++;
+        }
       }
+      if(out) rootEl.insertAdjacentHTML("beforeend", out);
       if(chapterIdx < chapters.length){
         requestAnimationFrame(renderChunk);
       } else {
