@@ -151,6 +151,17 @@ window.initMdEditorModule = function(deps){
   // .reading-mode-btn) — одно место на все такие кнопки приложения.
   var toggleReadingMode = deps.toggleReadingMode || function(){};
   var applyReadingModeVisual = deps.applyReadingModeVisual || function(){};
+  // ⚠️ ДОБАВЛЕНО (27.09, ТЗ пользователя, my.js): долгое нажатие на ту же
+  // кнопку включает полноэкранный режим (my.js: enterFullscreenDisplayMode/
+  // exitToNormalDisplayMode/handleReadingBtnTap/handleReadingBtnHold), обычный
+  // клик по-прежнему toggleReadingMode. bindTapOrHold — общий хелпер тап/
+  // удержание оттуда же; getFullscreenModeActive нужен getActiveFontSizeStep
+  // ниже — у полноэкранного режима свой размер шрифта не заводится, берётся
+  // тот же fontSizeStepReading, что и у режима чтения.
+  var getFullscreenModeActive = deps.getFullscreenModeActive || function(){ return false; };
+  var bindTapOrHold = deps.bindTapOrHold || function(el, onTap){ if(el) el.addEventListener("click", onTap); };
+  var handleReadingBtnTap = deps.handleReadingBtnTap || toggleReadingMode;
+  var handleReadingBtnHold = deps.handleReadingBtnHold || function(){};
   // Кнопка «i» в нижнем ряду редактора заметки (ТЗ пользователя от 20.09) —
   // та же пиктограмма, что у «i» на вкладках задач (INFO_ICON_SVG в my.js).
   var INFO_ICON_SVG = deps.INFO_ICON_SVG || "i";
@@ -1742,7 +1753,19 @@ window.initMdEditorModule = function(deps){
     // my.js сам зовёт deps.retryImageCleanup (см. публичный API ниже) сразу
     // после того, как флаг становится true — чтобы отложенная в эту секунду
     // чистка не потерялась до следующего изменения заметки.
-    if(deps.isTaskStateReady && !deps.isTaskStateReady()) return Promise.resolve();
+    // ⚠️ ДОБАВЛЕНО (диагностика 27.09, ТЗ пользователя — картинка общей
+    // задачи пропала локально на устройстве, которое её добавило, "через
+    // время"; момент поймать логом не удалось, поэтому логируем состояние
+    // всех гейтов прямо здесь на каждый запуск — при следующем повторении
+    // лог покажет, был ли пропуск по isTaskStateReady/referencedNamesDirty,
+    // или чистка реально прошла и что именно удалила (см. walkAndClean
+    // ниже)).
+    var isTaskStateReadyNow = !deps.isTaskStateReady || deps.isTaskStateReady();
+    if(window.Debug) window.Debug.log("cleanupOrphanedImages: старт — isTaskStateReady=" + isTaskStateReadyNow + ", referencedNamesDirty=" + referencedNamesDirty);
+    if(deps.isTaskStateReady && !deps.isTaskStateReady()){
+      if(window.Debug) window.Debug.log("cleanupOrphanedImages: пропущена — isTaskStateReady=false (синхронизация личных задач ещё не завершила первый цикл)");
+      return Promise.resolve();
+    }
     // Оптимизация производительности (ТЗ пользователя от 14.09): полный
     // рекурсивный обход OPFS-папки images/ ниже (walkAndClean) может быть
     // дорогим при большой папке — фризы. Если с прошлого ПОЛНОСТЬЮ
@@ -1750,10 +1773,14 @@ window.initMdEditorModule = function(deps){
     // облака — см. markReferencedNamesDirty у markNoteDirty и в
     // syncNotesFromCloud), список используемых картинок точно тот же, что
     // и в прошлый раз — обходить диск заново незачем, пропускаем.
-    if(!referencedNamesDirty) return Promise.resolve();
+    if(!referencedNamesDirty){
+      if(window.Debug) window.Debug.log("cleanupOrphanedImages: пропущена — referencedNamesDirty=false (список используемых картинок не менялся с прошлого полного прохода)");
+      return Promise.resolve();
+    }
     imageCleanupInFlight = true;
     function runDeletion(){
       var referenced = collectReferencedMediaNames();
+      if(window.Debug) window.Debug.log("cleanupOrphanedImages: снимок используемых картинок — " + referenced.size + " имён (заметки notesMap=" + notesMap.size + ", внешние тексты задач/комментариев учтены через getExternalMediaTexts)");
       // Флаг сбрасываем СРАЗУ после снятия снимка referenced (а не после
       // асинхронного обхода ниже) — любая правка заметки, случившаяся уже
       // ПОСЛЕ этого снимка (пока идёт обход диска), взведёт флаг заново
@@ -1768,6 +1795,7 @@ window.initMdEditorModule = function(deps){
             await walkAndClean(handle);
           } else if(handle.kind === "file" && IMAGE_EXT_RE.test(name)){
             if(!referenced.has(name.toLowerCase())){
+              if(window.Debug) window.Debug.log("cleanupOrphanedImages: удаляю \"" + name + "\" — не найдено в снимке используемых картинок (" + referenced.size + " имён)");
               try{
                 await dirHandle.removeEntry(name);
                 deletedAny = true;
@@ -1920,8 +1948,11 @@ window.initMdEditorModule = function(deps){
     return Math.max(FONT_SIZE_MIN_STEP, Math.min(FONT_SIZE_MAX_STEP, v));
   }
   // шаг, действующий ПРЯМО СЕЙЧАС — по флагу режима чтения из my.js
+  // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя): полноэкранный режим (getFullscreenModeActive)
+  // своего отдельного размера не имеет — использует тот же fontSizeStepReading,
+  // что и режим чтения.
   function getActiveFontSizeStep(){
-    if(getReadingModeActive() && fontSizeStepReading !== null) return fontSizeStepReading;
+    if((getReadingModeActive() || getFullscreenModeActive()) && fontSizeStepReading !== null) return fontSizeStepReading;
     return fontSizeStep;
   }
   function applyFontSize(){
@@ -1930,7 +1961,7 @@ window.initMdEditorModule = function(deps){
     refitAllVisibleTaskBodies();
   }
   function changeFontSizeStep(delta){
-    var reading = getReadingModeActive();
+    var reading = getReadingModeActive() || getFullscreenModeActive(); // 27.09 — см. getActiveFontSizeStep выше
     var next = getActiveFontSizeStep() + delta;
     if(next < FONT_SIZE_MIN_STEP || next > FONT_SIZE_MAX_STEP) return;
     if(reading){
@@ -4164,7 +4195,11 @@ window.initMdEditorModule = function(deps){
     var readingBtn = document.getElementById("mdEditorReadingBtn");
     if(readingBtn){
       readingBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
-      readingBtn.addEventListener("click", function(){ toggleReadingMode(); });
+      // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя): тап/удержание вместо обычного
+      // click — короткий клик по-прежнему toggleReadingMode
+      // (handleReadingBtnTap), удержание включает полноэкранный режим
+      // (handleReadingBtnHold), см. пояснение у deps выше.
+      bindTapOrHold(readingBtn, handleReadingBtnTap, handleReadingBtnHold);
     }
     applyReadingModeVisual();
 

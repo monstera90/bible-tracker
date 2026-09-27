@@ -2698,6 +2698,12 @@
   // (innerHTML целиком, не CSS-класс).
   var READING_BOOK_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c3-1.5 6-1.5 8 0v14c-2-1.5-5-1.5-8 0V5z"></path><path d="M20 5c-3-1.5-6-1.5-8 0v14c2-1.5 5-1.5 8 0V5z"></path></svg>';
   var READING_BOOK_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5c3-1.5 6-1.5 8 0v14c-2-1.5-5-1.5-8 0V5z"></path><path d="M20 5c-3-1.5-6-1.5-8 0v14c2-1.5 5-1.5 8 0V5z"></path><line x1="3" y1="21" x2="21" y2="3"></line></svg>';
+  // ⚠️ ДОБАВЛЕНО (27.09, ТЗ пользователя) — третье состояние той же кнопки
+  // (#taskReadingBtn и все .reading-mode-btn, см. applyReadingModeVisual):
+  // полноэкранный режим (долгое удержание). Обычные "стрелки по углам",
+  // тем же приёмом переключения иконки целиком (innerHTML), что и у
+  // READING_BOOK_ICON_SVG/READING_BOOK_OFF_ICON_SVG выше.
+  var FULLSCREEN_MODE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"></path><path d="M16 3h3a2 2 0 0 1 2 2v3"></path><path d="M8 21H5a2 2 0 0 1-2-2v-3"></path><path d="M16 21h3a2 2 0 0 0 2-2v-3"></path></svg>';
   var TASK_ARCHIVE_MAX_SHOWN = 50;
 
   function getShowAllTasksEnabled(){
@@ -8155,6 +8161,18 @@
     // (function-декларация, поднимается в начало IIFE); INFO_ICON_SVG — значок
     // кнопки «i» (экран «Форматирование заметок»), объявлен выше по файлу.
     getReadingModeActive: getReadingModeActive,
+    // ⚠️ ДОБАВЛЕНО (27.09, ТЗ пользователя): полноэкранный режим по долгому
+    // нажатию на ту же кнопку (#mdEditorReadingBtn) — см. пояснение у
+    // enterFullscreenDisplayMode/exitToNormalDisplayMode/handleReadingBtnTap/
+    // handleReadingBtnHold/bindTapOrHold (все — function-декларации, поднимаются
+    // в начало IIFE). getFullscreenModeActive нужен applyFontSize/changeFontSizeStep
+    // в mdeditor.js — там же, где getReadingModeActive выше — чтобы шрифт
+    // полноэкранного режима брался из того же fontSizeStepReading, что и у
+    // режима чтения (ТЗ пользователя).
+    getFullscreenModeActive: getHideStatusBarEnabled,
+    bindTapOrHold: bindTapOrHold,
+    handleReadingBtnTap: handleReadingBtnTap,
+    handleReadingBtnHold: handleReadingBtnHold,
     INFO_ICON_SVG: INFO_ICON_SVG,
     // закладки "Моих заметок" — теперь синхронизируются в облаке через
     // тот же state/saveLocalState/scheduleCloudPush, что и остальные
@@ -8277,7 +8295,16 @@
     // редакторе заметок/ридере книг, см. toggleReadingMode ниже по файлу
     // (function-декларации, поднимаются в начало IIFE).
     toggleReadingMode: toggleReadingMode,
-    applyReadingModeVisual: applyReadingModeVisual
+    applyReadingModeVisual: applyReadingModeVisual,
+    // ⚠️ ДОБАВЛЕНО (27.09, ТЗ пользователя) — те же deps, что и у
+    // initMdEditorModule выше, на случай если search.js подключит тап/
+    // удержание к своей кнопке режима чтения тем же приёмом (см. пояснение
+    // там же). search.js у меня сейчас нет, поэтому саму кнопку здесь не
+    // трогаю — если понадобится, нужен этот файл.
+    getFullscreenModeActive: getHideStatusBarEnabled,
+    bindTapOrHold: bindTapOrHold,
+    handleReadingBtnTap: handleReadingBtnTap,
+    handleReadingBtnHold: handleReadingBtnHold
   });
   var renderSettingsTabSearch = Search.renderSettingsTabSearch;
 
@@ -8538,11 +8565,12 @@
     stopMousedown(readingBtn);
     applyReadingModeVisual();
     if(readingBtn){
-      readingBtn.addEventListener("click", function(){
-        // toggleReadingMode (ниже по файлу) заодно пересчитывает высоту окна
-        // — в режиме чтения оно занимает весь экран до нижнего края.
-        toggleReadingMode();
-      });
+      // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя): был обычный click →
+      // toggleReadingMode(); теперь тап/удержание (bindTapOrHold ниже по
+      // файлу) — короткий клик, как и раньше, переключает режим чтения
+      // (handleReadingBtnTap), долгое нажатие включает полноэкранный режим
+      // (handleReadingBtnHold), см. пояснение у этих функций.
+      bindTapOrHold(readingBtn, handleReadingBtnTap, handleReadingBtnHold);
     }
 
     // --- скрепка (вставка картинки, тот же принцип "![[имя]]"/OPFS
@@ -14268,7 +14296,9 @@
     var readingBtn = document.getElementById("bookReaderReadingBtn");
     if(readingBtn){
       readingBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
-      readingBtn.addEventListener("click", function(){ toggleReadingMode(); });
+      // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя) — см. пояснение у taskReadingBtn
+      // выше: тап/удержание вместо обычного click.
+      bindTapOrHold(readingBtn, handleReadingBtnTap, handleReadingBtnHold);
     }
     applyReadingModeVisual();
   }
@@ -17160,7 +17190,13 @@
     b.title = "Выключить режим чтения";
     b.style.display = "none";
     b.innerHTML = READING_BOOK_ICON_SVG;
-    b.addEventListener("click", function(){ toggleReadingMode(); });
+    // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя) — см. пояснение у taskReadingBtn:
+    // тап/удержание вместо обычного click. Эта кнопка видна только пока
+    // активен режим чтения (см. display-условие выше), поэтому короткий
+    // клик и удержание тут на практике совпадают — оба ведут в обычный
+    // режим (equivalence по ТЗ), просто через общий обработчик, как и у
+    // остальных кнопок режима чтения.
+    bindTapOrHold(b, handleReadingBtnTap, handleReadingBtnHold);
     document.body.appendChild(b);
     applyReadingModeVisual();
   })();
@@ -19191,25 +19227,37 @@
   // раза, сразу отражалось в разметке.
   function applyReadingModeVisual(){
     var active = getReadingModeActive();
+    // ⚠️ ДОБАВЛЕНО (27.09, ТЗ пользователя) — третье состояние той же кнопки,
+    // см. FULLSCREEN_MODE_ICON_SVG/enterFullscreenDisplayMode/
+    // exitToNormalDisplayMode ниже. Переиспользует существующий флаг
+    // "Включить полноэкранный режим" из окна настроек (HIDE_STATUS_BAR_KEY),
+    // поэтому отдельного getFullscreenModeActive не заводим.
+    var fullscreenActive = getHideStatusBarEnabled();
     var overlay = document.getElementById("settingsModalOverlay");
     if(overlay) overlay.classList.toggle("reading-mode-active", active);
     // Кнопка режима чтения слева от язычка (readingModeFabBtn, ТЗ от 19.09):
     // существует всегда, пока режим чтения включён (и язычок вообще показан);
     // пока окно открыто, её закрывает растянутое окно/прячет modals.css.
+    // Полноэкранный режим НЕ прячет ряды вкладок (в отличие от режима
+    // чтения, см. .reading-mode-active в modals.css), поэтому обычная
+    // кнопка остаётся на месте и отдельный "язычок" для выхода ей не нужен
+    // — условие показа этого fab-а завязано только на active, как и раньше.
     var readingFab = document.getElementById("readingModeFabBtn");
     if(readingFab) readingFab.style.display = (active && isSettingsFabVisible()) ? "" : "none";
+    var iconHtml = fullscreenActive ? FULLSCREEN_MODE_ICON_SVG : (active ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG);
+    var titleText = fullscreenActive ? "Выключить полноэкранный режим (долгое нажатие — обычный режим)" : (active ? "Выключить режим чтения (удержание — полноэкранный режим)" : "Режим чтения (удержание — полноэкранный режим)");
     var btn = document.getElementById("taskReadingBtn");
     if(btn){
-      btn.innerHTML = active ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG;
-      btn.title = active ? "Выключить режим чтения" : "Включить режим чтения";
+      btn.innerHTML = iconHtml;
+      btn.title = titleText;
     }
     // Те же кнопки в нижних рядах редактора заметки (mdeditor.js) и ридера
     // книг (bookReaderFabRowHtml) — ТЗ пользователя от 19.09; узнаются по
     // классу .reading-mode-btn, рендерятся пустыми, иконку/title ставит эта
     // функция (одно место на все кнопки режима чтения).
     Array.prototype.forEach.call(document.querySelectorAll(".reading-mode-btn"), function(b){
-      b.innerHTML = active ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG;
-      b.title = active ? "Выключить режим чтения" : "Включить режим чтения";
+      b.innerHTML = iconHtml;
+      b.title = titleText;
     });
   }
   // Единая точка переключения режима чтения — вкладки задач, редактор
@@ -19235,6 +19283,50 @@
     // раз в следующий кадр — на случай, если браузер довёл раскладку позже.
     refitAllVisibleTaskBodies();
     if(window.requestAnimationFrame) window.requestAnimationFrame(refitAllVisibleTaskBodies);
+  }
+  // ⚠️ ДОБАВЛЕНО (27.09, ТЗ пользователя): полноэкранный режим по долгому
+  // нажатию на кнопку режима чтения — три взаимоисключающих состояния одной
+  // кнопки (обычный / чтение / полноэкранный). Из ОБЫЧНОГО состояния жесты
+  // различаются: короткий клик → режим чтения (handleReadingBtnTap,
+  // toggleReadingMode как и раньше), удержание → полноэкранный
+  // (enterFullscreenDisplayMode). Из ЛЮБОГО из двух особых состояний оба
+  // жеста равнозначны и ведут в одно и то же место — обычный режим
+  // (exitToNormalDisplayMode) — ТЗ пользователя: "сделай их равнозначными,
+  // пусть ведут в одно место". Сам полноэкранный режим переиспользует
+  // существующий механизм "Включить полноэкранный режим" из окна настроек
+  // (setHideStatusBarEnabled/applyStatusBarFullscreen выше) — тот же
+  // localStorage-флаг, та же галочка отразит актуальное состояние при
+  // следующем открытии окна настроек.
+  function exitToNormalDisplayMode(){
+    if(getReadingModeActive()) toggleReadingMode(); // сама обновит иконку/шрифт/раскладку
+    if(getHideStatusBarEnabled()){
+      setHideStatusBarEnabled(false);
+      applyReadingModeVisual();
+      layoutSettingsModal();
+    }
+  }
+  function enterFullscreenDisplayMode(){
+    if(getReadingModeActive()) toggleReadingMode(); // взаимоисключающие состояния — сперва выходим из режима чтения
+    setHideStatusBarEnabled(true);
+    applyReadingModeVisual();
+    // ТЗ пользователя: у полноэкранного режима свой размер шрифта НЕ
+    // заводим — берётся тот же fontSizeStepReading, что и у режима чтения
+    // (см. getActiveFontSizeStep в mdeditor.js, deps.getFullscreenModeActive
+    // ниже).
+    if(MdEditor && MdEditor.applyFontSize) MdEditor.applyFontSize();
+    layoutSettingsModal();
+  }
+  function handleReadingBtnTap(){
+    // Короткий клик, когда уже в полноэкранном — тоже способ выйти в
+    // обычный режим (см. комментарий выше про равнозначность жестов);
+    // обычный toggleReadingMode() здесь включил бы режим чтения ПОВЕРХ
+    // полноэкранного, а состояния должны быть взаимоисключающими.
+    if(getHideStatusBarEnabled()){ exitToNormalDisplayMode(); return; }
+    toggleReadingMode();
+  }
+  function handleReadingBtnHold(){
+    if(getHideStatusBarEnabled() || getReadingModeActive()){ exitToNormalDisplayMode(); return; }
+    enterFullscreenDisplayMode();
   }
   function setTaskText(id, text){
     var task = getTaskById(id);
