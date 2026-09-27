@@ -10394,6 +10394,18 @@
   // аргумента (именно вызовом, не как обработчик события — иначе quick
   // получил бы объект события).
   function closeSettingsModal(quick){
+    // ВРЕМЕННО (диагностика задержки долгого нажатия язычка, ТЗ
+    // пользователя от 27.09) — важно понять, КАКАЯ из двух веток ниже
+    // реально используется у этого пользователя: если "доп. анимации"
+    // включены, идёт совсем другой путь (animateSettingsWave, ниже —
+    // отдельный лог на его завершение), и правка с getComputedStyle
+    // (см. quick-ветку ниже) там вообще не участвует.
+    var _closeT0 = performance.now();
+    var _closeExtraAnim = getExtraAnimationsEnabled();
+    if(window.Debug) window.Debug.log(
+      "closeSettingsModal(quick=" + quick + "): вход, доп.анимации=" + _closeExtraAnim +
+      ", вкладка=" + (typeof currentSettingsTab !== "undefined" ? currentSettingsTab : "?")
+    );
     closeAppConfirmBar();
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
@@ -10409,6 +10421,10 @@
           settingsModalFrame.style.clipPath = "";
           settingsModalFrame.style.webkitClipPath = "";
         }
+        if(window.Debug) window.Debug.log(
+          "closeSettingsModal: волна (animateSettingsWave) реально закрыла окно через " +
+          Math.round(performance.now() - _closeT0) + "мс от входа в closeSettingsModal"
+        );
       }, quick === true ? SETTINGS_WAVE_FAST_DURATION : undefined);
     } else if(quick === true){
       // Долгое удержание язычка при ВЫКЛЮЧЕННЫХ дополнительных анимациях —
@@ -10448,7 +10464,12 @@
       // отдать актуальное значение), но не требует пересчёта layout —
       // opacity не влияет на геометрию, поэтому transition:none применяется
       // так же гарантированно, но без цены полной раскладки документа.
+      var _flushT0 = performance.now();
       void getComputedStyle(ov).opacity;
+      if(window.Debug) window.Debug.log(
+        "closeSettingsModal: getComputedStyle(ov).opacity (форсированный flush стилей) занял " +
+        Math.round(performance.now() - _flushT0) + "мс"
+      );
       requestAnimationFrame(function(){
         ov.style.transition = "";
         if(settingsModalFrame) settingsModalFrame.style.transition = "";
@@ -17217,10 +17238,33 @@
       // закрыт, обычный короткий клик и так его откроет, таймер заводить
       // незачем (и не нужно мешать обычному открытию).
       if(!(settingsModalOverlay && settingsModalOverlay.classList.contains("open"))) return;
+      // ВРЕМЕННО (диагностика задержки долгого нажатия язычка, ТЗ
+      // пользователя от 27.09: "250 vs иногда 400мс на невиданной за сессию
+      // вкладке") — засекаем момент постановки таймера и ожидаемое время
+      // его срабатывания; сравнение с реальным performance.now() внутри
+      // самого callback'а (см. ниже) покажет, опаздывает ли ИМЕННО ТАЙМЕР
+      // (main thread был занят чем-то другим, когда должен был сработать
+      // setTimeout) или нет — тогда вся задержка внутри closeSettingsModal
+      // (там своя диагностика, см. её "quick"-ветку). Убрать вместе с
+      // остальным диагностическим кодом этой задачи, когда причина найдена.
+      var _fabPressT0 = performance.now();
+      var _fabPressTab = (typeof currentSettingsTab !== "undefined") ? currentSettingsTab : "?";
       fabLongPressTimer = setTimeout(function(){
         fabLongPressTimer = null;
         fabLongPressFired = true;
+        var _fabFireNow = performance.now();
+        var _fabElapsed = _fabFireNow - _fabPressT0;
+        if(window.Debug) window.Debug.log(
+          "FAB longpress: таймер сработал через " + Math.round(_fabElapsed) + "мс (ожидали " +
+          FAB_LONGPRESS_MS + "мс, опоздание " + Math.round(_fabElapsed - FAB_LONGPRESS_MS) +
+          "мс), вкладка=" + _fabPressTab
+        );
+        var _fabCloseT0 = performance.now();
         closeSettingsModal(true);
+        if(window.Debug) window.Debug.log(
+          "FAB longpress: closeSettingsModal(true) вернул управление через " +
+          Math.round(performance.now() - _fabCloseT0) + "мс"
+        );
       }, FAB_LONGPRESS_MS);
     });
     // Дублируем preventDefault на touchstart: в части сборок Chromium
