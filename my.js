@@ -2828,7 +2828,8 @@
   var THEMES = [
     {id:1, name:"Пергамент"},{id:2, name:"Шалфей и небо"},{id:3, name:"Розовый и мята"},
     {id:4, name:"Лаванда и слоновая кость"},{id:5, name:"Аметист и слоновая кость"},
-    {id:6, name:"Пыльная роза и графит"},{id:7, name:"Морская пена и песок"}
+    {id:6, name:"Пыльная роза и графит"},{id:7, name:"Морская пена и песок"},
+    {id:8, name:"Тёмная"}
   ];
 
   function getCurrentThemeId(){
@@ -2897,7 +2898,8 @@
   function themeSwatchGradient(themeId){
     var swatches = {
       1:["#5c3d24","#48F78E"],2:["#5b7c99","#5AD1A0"],3:["#c98a97","#7FE8C0"],
-      4:["#8f7fb8","#8FE3C7"],5:["#7a3fc0","#8FE3C7"],6:["#7d8a99","#8FD9B8"],7:["#6fada0","#6FE0C0"]
+      4:["#8f7fb8","#8FE3C7"],5:["#7a3fc0","#8FE3C7"],6:["#7d8a99","#8FD9B8"],7:["#6fada0","#6FE0C0"],
+      8:["#161320","#8a7ab8"]
     };
     var pair = swatches[themeId] || swatches[1];
     return "linear-gradient(135deg, " + pair[0] + " 50%, " + pair[1] + " 50%)";

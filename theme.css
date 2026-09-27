@@ -108,6 +108,19 @@
     --warn:#c9835a; --warn-dark:#9a6140;
     --danger:#c17b5a; --danger-dark:#8f5540;
   }
+  html[data-theme="8"]{
+    --parchment:#242030; --parchment-dark:#1a1722;
+    --ink:#e8e3f2; --ink-soft:#a89fc0;
+    --wood:#8a7ab8; --wood-dark:#6a5c94;
+    --gold:#4a3f66; --gold-light:#5c4f7d;
+    --groove-shadow:#141119;
+    --xp-green:#6fe0b0; --xp-green-dark:#3aa87e;
+    --bg-top:#1e1b28; --bg-mid:#161320; --bg-bottom:#0e0c15;
+    --danger:#d16b6b; --danger-dark:#a34e4e;
+    --warn:#d9a94f; --warn-dark:#a87e34;
+    --status-off:#6a6580; --status-offline:#6a6580;
+    --status-sync:#d9b84a; --status-ok:#4fbe7f; --status-err:#d16b5a;
+  }
 
   /* цвет надписи о пропущенном чтении (.warn-text) — теперь единый для
      всех тем, как и у остальных прогресс-баров (см. .xp-text в
