@@ -14405,17 +14405,52 @@
       Object.keys(ulByBlock).forEach(function(k){ ulByBlock[k].sort(function(a, b){ return a.s - b.s; }); });
       (stateData.images || []).forEach(function(it){ pinByBlock[it.ch + "_" + it.blk] = true; });
     }
-    var html = '<div class="book-reader-tab">' + bookReaderFabRowHtml() + '<div class="book-reader">';
-    bookReaderState.chapters.forEach(function(ch, idx){
-      html += '<div class="book-reader-chapter" id="bookChapter_' + idx + '">';
-      if(ch.title) html += '<h4 class="book-reader-chapter-title">' + escapeHtml(ch.title) + '</h4>';
+    // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя: "нажатия должны отрабатывать
+    // молниеносно независимо от того, что происходит в фоне") — раньше вся
+    // HTML-строка книги (ВСЕ главы разом, у Библии — десятки тысяч блоков)
+    // собиралась и вставлялась ОДНИМ синхронным куском. Пока JS занят этим
+    // (и пока браузер парсит и раскладывает получившуюся разметку), поток
+    // выполнения занят целиком — ни клик, ни УЖЕ ВЗВЕДЁННЫЙ setTimeout
+    // долгого нажатия язычка настроек (FAB_LONGPRESS_MS выше) не может
+    // сработать вовремя, поэтому именно при первом заходе на вкладку "Мои
+    // книги" за сессию (когда книга переоткрывается заново — см.
+    // switchSettingsTab/booksTabVisitedThisSession) интерфейс на это время
+    // "залипал", а на уже открытой вкладке (bookReaderState в памяти,
+    // рендера заново не требуется) всё было мгновенно.
+    // Теперь главы собираются и добавляются в DOM порциями по тайм-бюджету
+    // (RENDER_CHUNK_BUDGET_MS на кадр) — между порциями настоящий возврат в
+    // браузерный event loop через requestAnimationFrame, и любой
+    // накопившийся тап/долгое нажатие успевает отработать между кадрами
+    // вместо того, чтобы стоять в очереди за одной гигантской задачей. Сам
+    // читаемый текст собирается в скрытом узле (visibility:hidden) и
+    // становится видимым только когда уже прокручен на восстановленную
+    // позицию — чтобы вместо "подрастающего" по ходу сборки списка глав
+    // человек по-прежнему видел то же самое, что и раньше: пустой экран, а
+    // потом сразу готовую страницу в нужном месте. Хвостовая логика
+    // (калибровка сегментов, восстановление прокрутки, обработчики) не
+    // менялась — просто вызывается один раз, когда собрана последняя глава
+    // (finishRenderBookReaderText ниже), вместо сразу после одной большой
+    // сборки innerHTML.
+    container.innerHTML = '<div class="book-reader-tab">' + bookReaderFabRowHtml() +
+      '<div class="book-reader" id="bookReaderTextRoot" style="visibility:hidden"></div></div>';
+    var rootEl = container.querySelector("#bookReaderTextRoot");
+    var chapters = bookReaderState.chapters;
+    var chapterIdx = 0;
+    var RENDER_CHUNK_BUDGET_MS = 8; // держим "тик" короче кадра — остаётся время и на сам кадр, и на успевший накопиться ввод
+
+    // Сборка HTML ОДНОЙ главы — то же самое, что раньше выполнялось для
+    // каждой главы внутри общего forEach, вынесено в отдельную функцию,
+    // чтобы вызывать по одной главе за раз из renderChunk ниже.
+    function buildChapterHtml(ch, idx){
+      var chHtml = '<div class="book-reader-chapter" id="bookChapter_' + idx + '">';
+      if(ch.title) chHtml += '<h4 class="book-reader-chapter-title">' + escapeHtml(ch.title) + '</h4>';
       // Сегмент — группа из BOOK_READER_SEG_SIZE соседних блоков ОДНОЙ главы
       // (см. currentBookReaderPosition). data-chars/--seg-chars — число
       // символов (оценка высоты), data-imgs/--seg-imgs — число картинок.
       var segHtml = "", segBlocks = 0, segChars = 0, segImgs = 0;
       function flushSeg(){
         if(!segHtml) return;
-        html += '<div class="book-reader-seg" data-chars="' + segChars + '" data-imgs="' + segImgs +
+        chHtml += '<div class="book-reader-seg" data-chars="' + segChars + '" data-imgs="' + segImgs +
           '" style="--seg-chars:' + segChars + ';--seg-imgs:' + segImgs + '">' + segHtml + '</div>';
         segHtml = ""; segBlocks = 0; segChars = 0; segImgs = 0;
       }
@@ -14459,43 +14494,68 @@
         if(segBlocks >= BOOK_READER_SEG_SIZE) flushSeg();
       });
       flushSeg();
-      html += '</div>';
-    });
-    html += '</div></div>';
-    if(window.Debug) window.Debug.log("renderBookReaderText: сборка HTML-строки заняла " + Math.round(performance.now() - _tBuild) + "мс, длина строки=" + html.length);
-    var _tInner = performance.now();
-    container.innerHTML = html;
-    if(window.Debug) window.Debug.log("renderBookReaderText: container.innerHTML= (парсинг+layout браузером) занял " + Math.round(performance.now() - _tInner) + "мс");
-    var _tCal = performance.now();
-    calibrateBookReaderSegments(container);
-    if(window.Debug) window.Debug.log("renderBookReaderText: калибровка сегментов заняла " + Math.round(performance.now() - _tCal) + "мс, сегментов=" + container.querySelectorAll(".book-reader-seg").length);
-    requestAnimationFrame(function(){
-      // Шаг 16: сохранённая позиция чтения применяется РОВНО ОДИН РАЗ,
-      // сразу после открытия книги (restorePosition обнуляется тут же,
-      // независимо от успеха — повторные рендеры текстового режима в
-      // этой сессии дальше идут через обычный textScrollTop, как и
-      // раньше). scrollBookReaderToPosition возвращает false на битой/
-      // устаревшей позиции — тогда используется обычный откат к
-      // textScrollTop (0 при первом открытии, то есть начало книги).
-      var restored = false;
-      if(bookReaderState.restorePosition){
-        restored = scrollBookReaderToPosition(container, bookReaderState.restorePosition);
-        bookReaderState.restorePosition = null;
+      chHtml += '</div>';
+      return chHtml;
+    }
+
+    // Один "тик": добавляет главы, пока не выйдет за тайм-бюджет, затем
+    // либо просит следующий кадр (requestAnimationFrame — тот самый момент,
+    // когда браузер успевает обработать накопившийся ввод и таймеры), либо,
+    // если это была последняя глава, переходит к хвостовой логике.
+    function renderChunk(){
+      var t0 = performance.now();
+      while(chapterIdx < chapters.length){
+        rootEl.insertAdjacentHTML("beforeend", buildChapterHtml(chapters[chapterIdx], chapterIdx));
+        chapterIdx++;
+        if(performance.now() - t0 >= RENDER_CHUNK_BUDGET_MS) break;
       }
-      if(!restored) container.scrollTop = bookReaderState.textScrollTop || 0;
-      // Слежение за прокруткой — только в текстовом режиме (в "главах"
-      // читательская позиция не копится, см. currentBookReaderPosition
-      // выше). Снимается перед ЛЮБЫМ следующим рендером ридера, см.
-      // destroyBookReaderScrollListener/renderBookReader выше.
-      bookReaderScrollHandler = function(){ scheduleBookReaderPositionSave(); };
-      bookReaderScrollContainer = container;
-      container.addEventListener("scroll", bookReaderScrollHandler, { passive: true });
-    });
-    bindBookReaderFabRow();
-    bindBookReaderImages();
-    bindBookReaderLazyImages(container);
-    bindBookReaderUnderlineClicks();
-    bindBookReaderBookmarkMarks();
+      if(chapterIdx < chapters.length){
+        requestAnimationFrame(renderChunk);
+      } else {
+        finishRenderBookReaderText();
+      }
+    }
+
+    function finishRenderBookReaderText(){
+      if(window.Debug) window.Debug.log("renderBookReaderText: сборка HTML заняла " + Math.round(performance.now() - _tBuild) + "мс (порциями, не блокируя интерфейс)");
+      var _tCal = performance.now();
+      calibrateBookReaderSegments(container);
+      if(window.Debug) window.Debug.log("renderBookReaderText: калибровка сегментов заняла " + Math.round(performance.now() - _tCal) + "мс, сегментов=" + container.querySelectorAll(".book-reader-seg").length);
+      requestAnimationFrame(function(){
+        // Шаг 16: сохранённая позиция чтения применяется РОВНО ОДИН РАЗ,
+        // сразу после открытия книги (restorePosition обнуляется тут же,
+        // независимо от успеха — повторные рендеры текстового режима в
+        // этой сессии дальше идут через обычный textScrollTop, как и
+        // раньше). scrollBookReaderToPosition возвращает false на битой/
+        // устаревшей позиции — тогда используется обычный откат к
+        // textScrollTop (0 при первом открытии, то есть начало книги).
+        var restored = false;
+        if(bookReaderState.restorePosition){
+          restored = scrollBookReaderToPosition(container, bookReaderState.restorePosition);
+          bookReaderState.restorePosition = null;
+        }
+        if(!restored) container.scrollTop = bookReaderState.textScrollTop || 0;
+        // Открываем видимость только теперь, когда контейнер уже прокручен
+        // на нужное место — иначе за время порционной сборки (см. выше)
+        // человек увидел бы, как список глав "подрастает" с самого начала
+        // книги, вместо привычного мгновенного появления готовой страницы.
+        rootEl.style.visibility = "";
+        // Слежение за прокруткой — только в текстовом режиме (в "главах"
+        // читательская позиция не копится, см. currentBookReaderPosition
+        // выше). Снимается перед ЛЮБЫМ следующим рендером ридера, см.
+        // destroyBookReaderScrollListener/renderBookReader выше.
+        bookReaderScrollHandler = function(){ scheduleBookReaderPositionSave(); };
+        bookReaderScrollContainer = container;
+        container.addEventListener("scroll", bookReaderScrollHandler, { passive: true });
+      });
+      bindBookReaderFabRow();
+      bindBookReaderImages();
+      bindBookReaderLazyImages(container);
+      bindBookReaderUnderlineClicks();
+      bindBookReaderBookmarkMarks();
+    }
+
+    requestAnimationFrame(renderChunk);
   }
 
   // Шаг 14 (READER_PLAN.md, Этап D, 11.09): тап по самой картинке открывает
