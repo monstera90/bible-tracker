@@ -4556,7 +4556,16 @@
       // сворачивании/блокировке остаётся тем же, что и был.
     }
     var timeoutMs = (opts && opts.timeoutMs) || computeCloudPatchTimeoutMs(byteSize);
-    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + ".json", fetchOpts, timeoutMs).then(function(res){
+    // ⚠️ ДОБАВЛЕНО (26.09, по логу пользователя — "запрос=2391255б,
+    // ответ=2387872б", ответ почти равен запросу): Firebase REST API по
+    // умолчанию эхом возвращает в ответе ВЕСЬ только что записанный объект
+    // (см. https://firebase.google.com/docs/reference/rest/database,
+    // параметр print=silent). Мы это тело ниже никогда не читаем (только
+    // res.ok) — но браузер всё равно тратит трафик на его скачивание. Это
+    // ПОЛНОЕ ДУБЛИРОВАНИЕ трафика на каждой отправке задач/заметок,
+    // безусловно, даже без единого бага в логике синка выше. print=silent
+    // просит сервер не присылать тело вовсе (Firebase отвечает 204 пустым).
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_SYNCS_PATH + "/" + encodeURIComponent(id) + ".json?print=silent", fetchOpts, timeoutMs).then(function(res){
       if(!res.ok) throw new Error("put_failed_" + res.status);
       return true;
     });
@@ -5299,8 +5308,7 @@
       createdAt: Date.now(),
       expiresAt: Date.now() + PAIRING_EXPIRY_MS
     };
-    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_PAIRINGS_PATH + "/" + encodeURIComponent(pairCode) + ".json", {
-      method: "PUT",
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_PAIRINGS_PATH + "/" + encodeURIComponent(pairCode) + ".json?print=silent", {
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify(payload)
     }, 8000).then(function(res){
@@ -5348,7 +5356,7 @@
     // появится позже, когда пользователь его укажет (см. openUserNameDialog).
     var nm = memberDeviceId === getDeviceId() ? getUserDisplayName() : null;
     if(nm) payload.name = nm;
-    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/members/" + encodeURIComponent(memberDeviceId) + ".json", {
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/members/" + encodeURIComponent(memberDeviceId) + ".json?print=silent", {
       method: "PUT",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify(payload)
@@ -5363,7 +5371,7 @@
   // человек назвал себя), и при смене имени через "Изменить отображаемое
   // имя" (см. renderTaskJointMenu). Не трогает role/joinedAt.
   function writeGroupMemberName(groupId, memberDeviceId, name){
-    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/members/" + encodeURIComponent(memberDeviceId) + "/name.json", {
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + "/members/" + encodeURIComponent(memberDeviceId) + "/name.json?print=silent", {
       method: "PUT",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify(name)
@@ -11554,7 +11562,10 @@
     // (личный канал, см. computeCloudPatchTimeoutMs там): крупный PATCH
     // (байты общей картинки) получает таймаут по размеру, а не фиксированные 15с.
     var groupTimeoutMs = (opts && opts.timeoutMs) || computeCloudPatchTimeoutMs(new Blob([fetchOpts.body]).size);
-    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + ".json", fetchOpts, groupTimeoutMs).then(function(res){
+    // ⚠️ ДОБАВЛЕНО (26.09) — тот же приём, что у putCloudBlob (личный канал)
+    // выше: не просим Firebase присылать назад тело, которое мы и так не
+    // читаем — это касается в том числе байтов общих картинок группы.
+    return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_GROUPS_PATH + "/" + encodeURIComponent(groupId) + ".json?print=silent", fetchOpts, groupTimeoutMs).then(function(res){
       if(!res.ok) throw new Error("group_patch_failed_" + res.status);
       return true;
     });

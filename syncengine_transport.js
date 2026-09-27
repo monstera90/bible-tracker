@@ -235,6 +235,21 @@
     // держать push/pull вечно. Сочетаем AbortController (реально рвёт запрос)
     // и Promise.race (работает и там, где abort игнорируется).
     function request(url, options, timeoutMs, wantJson) {
+      // ⚠️ ДОБАВЛЕНО (26.09, по логу пользователя — "запрос=2391255б,
+      // ответ=2387872б", т.е. ответ ПОЧТИ РАВЕН запросу на каждой заливке):
+      // Firebase REST API по умолчанию эхом возвращает в ответе ВЕСЬ только
+      // что записанный объект (см. https://firebase.google.com/docs/reference/rest/database
+      // — параметр print=silent). Для PATCH/PUT мы это тело никогда не
+      // читаем (ниже — wantJson=false у всех вызовов request() с методом
+      // записи), но браузер всё равно скачивает его целиком по сети — это
+      // ПОЛНОЕ ДУБЛИРОВАНИЕ трафика на КАЖДОЙ записи, безусловно, даже без
+      // единого бага в логике синка. print=silent просит сервер не
+      // присылать тело вообще (Firebase отвечает пустым 204) — применяем
+      // только когда сами и так не читаем JSON (wantJson=false), чтобы не
+      // сломать вызовы, которым тело ответа реально нужно (GET, маячок).
+      if(!wantJson){
+        url += (url.indexOf("?") === -1 ? "?" : "&") + "print=silent";
+      }
       var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
       var timer;
       var timeout = new Promise(function (resolve, reject) {
