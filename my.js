@@ -2883,7 +2883,10 @@
     var fab = document.getElementById("settingsGearBtn");
     if(fab) fab.style.display = visible ? "" : "none";
     var readingFab = document.getElementById("readingModeFabBtn");
-    if(readingFab) readingFab.style.display = (visible && getReadingModeActive()) ? "" : "none";
+    // 27.09 — см. applyReadingModeVisual: полноэкранный тоже прячет ряды
+    // вкладок (та же .reading-mode-active), значит той же кнопке-выходу
+    // тоже нужно быть видимой.
+    if(readingFab) readingFab.style.display = (visible && (getReadingModeActive() || getHideStatusBarEnabled())) ? "" : "none";
     var toggleBtn = document.getElementById("fabToggleBtn");
     if(toggleBtn) toggleBtn.textContent = visible ? "Убрать плавающую кнопку" : "Включить плавающую кнопку";
   }
@@ -19233,17 +19236,22 @@
     // "Включить полноэкранный режим" из окна настроек (HIDE_STATUS_BAR_KEY),
     // поэтому отдельного getFullscreenModeActive не заводим.
     var fullscreenActive = getHideStatusBarEnabled();
+    // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя — "в полноэкранном режиме не
+    // должно быть видно никаких вкладок"): полноэкранный режим — это
+    // ГИБРИД, не просто галочка "скрыть статус-бар" сама по себе — визуально
+    // он прячет ряды вкладок ТОЙ ЖЕ CSS (.reading-mode-active), что и режим
+    // чтения, плюс скрывает системный статус-бар через Fullscreen API. Флаг
+    // при этом остаётся тем же HIDE_STATUS_BAR_KEY (см. комментарий у
+    // enterFullscreenDisplayMode) — просто активным условием класса теперь
+    // "чтение ИЛИ полноэкранный", а не только чтение.
     var overlay = document.getElementById("settingsModalOverlay");
-    if(overlay) overlay.classList.toggle("reading-mode-active", active);
+    if(overlay) overlay.classList.toggle("reading-mode-active", active || fullscreenActive);
     // Кнопка режима чтения слева от язычка (readingModeFabBtn, ТЗ от 19.09):
-    // существует всегда, пока режим чтения включён (и язычок вообще показан);
-    // пока окно открыто, её закрывает растянутое окно/прячет modals.css.
-    // Полноэкранный режим НЕ прячет ряды вкладок (в отличие от режима
-    // чтения, см. .reading-mode-active в modals.css), поэтому обычная
-    // кнопка остаётся на месте и отдельный "язычок" для выхода ей не нужен
-    // — условие показа этого fab-а завязано только на active, как и раньше.
+    // существует всегда, пока ряды вкладок скрыты (и язычок вообще показан)
+    // — теперь это и режим чтения, и полноэкранный, у обоих одна и та же
+    // CSS-причина прятать обычную кнопку в ряду вкладок.
     var readingFab = document.getElementById("readingModeFabBtn");
-    if(readingFab) readingFab.style.display = (active && isSettingsFabVisible()) ? "" : "none";
+    if(readingFab) readingFab.style.display = ((active || fullscreenActive) && isSettingsFabVisible()) ? "" : "none";
     var iconHtml = fullscreenActive ? FULLSCREEN_MODE_ICON_SVG : (active ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG);
     var titleText = fullscreenActive ? "Выключить полноэкранный режим (долгое нажатие — обычный режим)" : (active ? "Выключить режим чтения (удержание — полноэкранный режим)" : "Режим чтения (удержание — полноэкранный режим)");
     var btn = document.getElementById("taskReadingBtn");
