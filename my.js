@@ -4185,6 +4185,53 @@
   // синхронизации он не меняет (та же гарантия, что и у fetchCloudBlob до
   // этого фикса — никогда не тише полного чтения).
   var CLOUD_STATE_MARKER_KEY = "state_meta";
+  // ⚠️ ДОБАВЛЕНО (27.09, продолжение фикса выше — по свежему логу
+  // пользователя ПОСЛЕ включения маячка трафик за сессию всё равно
+  // остался ~0.7 МБ, два полных цикла по ~380 КБ). Причина: `stateMarkerCache`
+  // выше живёт только в памяти вкладки, а между двумя "холодными стартами"
+  // в этом логе прошло 6-19 секунд (см. FREEZE-разрывы такой длины перед
+  // каждым повторным "Старт приложения") — это не осознанная перезагрузка
+  // пользователем, а типичное для мобильных браузеров/PWA убийство
+  // фоновой вкладки системой при нехватке памяти и её полный респаун при
+  // возврате. Комментарий у stateMarkerCache ниже ("холодный старт всегда
+  // делает один настоящий полный запрос") предполагал редкие настоящие
+  // перезагрузки — на практике для мобильного использования "холодный
+  // старт" случается почти на КАЖДОМ сворачивании/разворачивании
+  // приложения, и старое допущение обнуляло выгоду от маячка почти
+  // полностью.
+  //
+  // Фикс: маячок, полученный при последнем удачном обмене с облаком
+  // (неважно, чтением или отправкой), сохраняется ещё и в localStorage
+  // (дёшево — один timestamp, не сам cloudData). При старте приложения,
+  // ДО первого doCloudSync (см. `if(syncId) doCloudSync()` ниже),
+  // `stateMarkerCache` засевается этим сохранённым маячком, а вместо
+  // cloudData используется уже загруженный из localStorage `state`
+  // (см. `stripCloudReservedSubtrees` — та же операция, что и над
+  // настоящим ответом сети, для единообразия формы). Это безопасно: `state`
+  // в момент последнего успешного doCloudSync ВСЕГДА совпадает с тем, что
+  // тогда было в облаке (см. `state = merged` и обновление кэша в одном и
+  // том же тике и там, и там) — а если после того момента что-то на
+  // сервере изменилось (другое устройство), маленький сетевой запрос
+  // самого маячка (`fetchStateMarker`, который выполняется ВСЕГДА, кэш
+  // это не отменяет) это обнаружит и полное чтение всё равно произойдёт —
+  // угадать неправильно тут нельзя, маячок каждый раз реально проверяется
+  // по сети, кэш только решает, нужно ли ПОСЛЕ этого тянуть остальное.
+  var STATE_MARKER_PERSIST_KEY = "bibleStateMarker_v1";
+  function loadPersistedStateMarker(id){
+    try{
+      var raw = localStorage.getItem(STATE_MARKER_PERSIST_KEY);
+      if(!raw) return null;
+      var rec = JSON.parse(raw);
+      if(!rec || rec.id !== id || typeof rec.marker !== "number") return null;
+      return rec.marker;
+    }catch(e){ return null; }
+  }
+  function savePersistedStateMarker(id, marker){
+    try{
+      if(marker === null || marker === undefined || !id){ localStorage.removeItem(STATE_MARKER_PERSIST_KEY); return; }
+      localStorage.setItem(STATE_MARKER_PERSIST_KEY, JSON.stringify({ id: id, marker: marker }));
+    }catch(e){ /* квота — не критично, просто следующий холодный старт не получит кэш-хит */ }
+  }
 
   // Случайный ID этого браузера/устройства, живёт в localStorage
   // (переустановка PWA/очистка данных сайта создаст новый — это ожидаемо,
@@ -4524,6 +4571,7 @@
           // маячком (см. doCloudSync), это ожидаемо и безопасно (просто не
           // оптимизируем этот случай, не ломаем)
           stateMarkerCache = { id: id, marker: remoteMarkerT, cloudData: data };
+          savePersistedStateMarker(id, remoteMarkerT); // 27.09: переживает холодный старт/убийство вкладки
           return data;
         });
       }
@@ -5102,6 +5150,7 @@
         deltaWithMarker[CLOUD_STATE_MARKER_KEY] = { t: stateMarkerT };
         return putCloudBlob(syncId, deltaWithMarker, {keepalive: urgent}).then(function(res){
           stateMarkerCache = { id: syncId, marker: stateMarkerT, cloudData: merged };
+          savePersistedStateMarker(syncId, stateMarkerT); // 27.09: переживает холодный старт/убийство вкладки
           return res;
         });
       }
@@ -5137,6 +5186,7 @@
       if(String(err.message||"").indexOf("expired") !== -1){
         syncId = null;
         localStorage.removeItem(SYNC_ID_KEY);
+        savePersistedStateMarker(null, null); // 27.09: маячок был привязан к старому syncId
         personalShadowTouch(); // шаг 6: область теневого store сменилась (syncId → local)
         setSyncState("off");
         settleInitialTaskSync();
@@ -5184,6 +5234,19 @@
   }
   window.addEventListener("online", handleNetworkRestored);
   window.addEventListener("offline", function(){ refreshStatusBase(); });
+  // ⚠️ ДОБАВЛЕНО (27.09, см. STATE_MARKER_PERSIST_KEY выше): засеваем
+  // stateMarkerCache ДО первого doCloudSync этой сессии — если сохранённый
+  // маячок совпадёт с тем, что реально лежит на сервере (это всё равно
+  // проверяется по сети в fetchStateMarker, см. там же), холодный старт
+  // (в т.ч. после убийства фоновой вкладки системой) обойдётся без
+  // тяжёлого shallow+диапазонного чтения, а не только повторные циклы
+  // внутри одной живой вкладки.
+  if(syncId){
+    var persistedMarker = loadPersistedStateMarker(syncId);
+    if(persistedMarker !== null){
+      stateMarkerCache = { id: syncId, marker: persistedMarker, cloudData: stripCloudReservedSubtrees(state, "seed-стартового кэша маячка") };
+    }
+  }
   if(syncId) doCloudSync();
 
   // И saveLocalState (localStorage), И scheduleCloudPush (облако) —
@@ -9165,6 +9228,7 @@
         openAppConfirmBar("Отключить это устройство от синхронизации? Локальный прогресс сохранится.", function(){
           syncId = null;
           localStorage.removeItem(SYNC_ID_KEY);
+          savePersistedStateMarker(null, null); // 27.09: маячок был привязан к старому syncId
           personalShadowTouch(); // шаг 6: область теневого store сменилась (syncId → local)
           refreshStatusBase();
           renderModalHome();
