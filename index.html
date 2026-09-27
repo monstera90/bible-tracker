@@ -152,6 +152,16 @@ window.addEventListener("error", function(e){
 
 <!-- ===== модальное окно настроек (шестерёнка) ===== -->
 <div class="settings-modal-overlay" id="settingsModalOverlay">
+  <!-- Заплатка цвета шапки/theme-color (правый верхний угол экрана, там же,
+       где раньше стоял непрозрачный статус-бар — теперь, после апдейта
+       Chrome с edge-to-edge для установленных PWA, там стал виден тёмный
+       фон .settings-modal-overlay). Первая в DOM — значит, стек вкладок
+       (#settingsTabs/#settingsTabsSet2, внутри .settings-modal-frame ниже)
+       рисуется поверх неё естественным порядком, без явного z-index; сама
+       заплатка видна только в узкой полосе НАД самой верхней вкладкой,
+       ровно там, где сейчас видна тёмная подложка. Стили — .settings-corner-patch
+       в modals.css. -->
+  <div class="settings-corner-patch" aria-hidden="true"></div>
   <div class="settings-modal-frame">
     <div class="settings-modal-box" id="settingsModalBox">
       <div class="settings-tab-content" id="settingsTabContent"></div>
