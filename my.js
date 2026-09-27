@@ -4158,6 +4158,33 @@
   // Не имеет отношения к пользовательским данным.
   var LAST_ACTIVE_STATE_KEY = "__syncLastActive";
   var SYNC_EXPIRY_MS = 365 * 24 * 60 * 60 * 1000; // 365 дней
+  // ⚠️ ДОБАВЛЕНО (27.09, ТЗ_трафик_и_картинки.md, Задача 1 — "baseline"
+  // ~380КБ на КАЖДЫЙ цикл doCloudSync): в отличие от __syncLastActive выше
+  // (который трогает КАЖДЫЙ putCloudBlob/patchNotesCloud — заметки,
+  // touchDeviceRegistry, файловый реестр — и потому обновляется почти на
+  // каждом цикле независимо от того, менялись ли реально задачи/книги/цели),
+  // этот ключ пишет ТОЛЬКО doCloudSync, и только когда в облако реально
+  // уходит дельта состояния (cloudChanged=true, см. doCloudSync ниже). Это
+  // тот же приём "маячка", что уже применяется в syncengine_transport.js
+  // (SyncEngineTransport pull: "маячок не менялся — полный запрос узла
+  // пропущен"), перенесённый на старый doCloudSync/fetchCloudBlob путь:
+  // дешёвый точечный GET этого одного ключа ПЕРЕД тяжёлым shallow+диапазонным
+  // чтением всего состояния — если серверная метка не изменилась с прошлого
+  // раза, когда мы её видели, повторное чтение самого состояния не нужно
+  // (используем закэшированные в памяти данные). Кэш (stateMarkerCache ниже)
+  // живёт только в памяти вкладки — сбрасывается при перезагрузке страницы,
+  // так что "холодный" запуск всегда делает один настоящий полный запрос
+  // (это НЕ пытаемся оптимизировать — риск отдать устаревшие данные после
+  // перезагрузки того не стоит), а вот несколько циклов подряд В ОДНОЙ
+  // сессии (серия правок одной задачи с дебаунсом 400мс — см. лог из ТЗ,
+  // "пять с лишним полных циклов на правку ОДНОЙ короткой задачи") — от
+  // второго цикла и далее обходятся точечным GET на десятки байт вместо
+  // ~380КБ. Если маячок недоступен (сеть моргнула на этом маленьком
+  // запросе) — трактуем как "неизвестно, могло измениться" и делаем полный
+  // запрос как раньше: маячок только оптимизация, часть модели корректности
+  // синхронизации он не меняет (та же гарантия, что и у fetchCloudBlob до
+  // этого фикса — никогда не тише полного чтения).
+  var CLOUD_STATE_MARKER_KEY = "state_meta";
 
   // Случайный ID этого браузера/устройства, живёт в localStorage
   // (переустановка PWA/очистка данных сайта создаст новый — это ожидаемо,
@@ -4457,29 +4484,67 @@
     });
   }
 
+  // Кэш маячка состояния — см. пояснение у CLOUD_STATE_MARKER_KEY выше.
+  // ТОЛЬКО в памяти вкладки, нарочно не в localStorage: переживать
+  // перезагрузку страницы не нужно (холодный старт всегда делает один
+  // настоящий полный запрос), а хранить сам cloudData (сотни КБ) в
+  // localStorage добавило бы риск квоты — именно то, из-за чего в этом
+  // файле заметки давно переехали в IndexedDB (см. NOTES_STORAGE_KEY).
+  var stateMarkerCache = { id: null, marker: undefined, cloudData: undefined };
+  function fetchStateMarker(id, fetchOpts){
+    return fetchWithTimeout(cloudNodeUrl(id, "/" + CLOUD_STATE_MARKER_KEY), fetchOpts, 8000).then(function(res){
+      if(!res.ok) throw new Error("fetch_failed_" + res.status);
+      return res.json(); // {t:<число>} или null, если маячка ещё не было (до этого фикса/до первого push)
+    });
+  }
   function fetchCloudBlob(id, opts){
     var fetchOpts = { method:"GET" };
     // keepalive для GET безопасен всегда (тела нет, лимит в 64KB на
     // keepalive-запросы его не касается) — в отличие от putCloudBlob,
     // здесь проверка размера не нужна.
     if(opts && opts.keepalive) fetchOpts.keepalive = true;
-    return fetchCloudBlobData(id, fetchOpts).then(function(data){
-      // Firebase отдаёт null (не 404), если по пути ничего нет
-      if(data === null || data === undefined) throw new Error("not_found");
-      // Данные, которыми не пользовались (ни разу не подключались/не
-      // синхронизировались) больше года — считаем истёкшими: удаляем с
-      // сервера и сообщаем вызывающему коду, что кода больше не существует.
-      // У записей, созданных до появления этой метки, __syncLastActive
-      // отсутствует — такие записи не удаляем (нет данных, чтобы посчитать
-      // срок), они получат метку при первой же следующей записи в облако.
-      var lastActiveRec = data[LAST_ACTIVE_STATE_KEY];
-      var lastActiveTs = lastActiveRec && typeof lastActiveRec.t === "number" ? lastActiveRec.t : null;
-      if(lastActiveTs !== null && (Date.now() - lastActiveTs) > SYNC_EXPIRY_MS){
-        return deleteCloudBlob(id).catch(function(){}).then(function(){
-          throw new Error("expired");
+    // Маячок читаем ВСЕГДА (дёшево — один короткий ключ), даже если кэша
+    // ещё нет: это заодно даёт значение, которым мы засеем кэш после
+    // полного запроса ниже. Сбой этого маленького запроса — не беда,
+    // трактуем как "неизвестно" и просто идём по старому пути полного чтения.
+    return fetchStateMarker(id, fetchOpts).catch(function(){ return null; }).then(function(remoteMarkerRec){
+      var remoteMarkerT = remoteMarkerRec && typeof remoteMarkerRec.t === "number" ? remoteMarkerRec.t : null;
+      var cacheHit = stateMarkerCache.id === id && stateMarkerCache.cloudData !== undefined &&
+        remoteMarkerT !== null && remoteMarkerT === stateMarkerCache.marker;
+      var dataP;
+      if(cacheHit){
+        if(window.Debug) window.Debug.log("fetchCloudBlob: маячок состояния (" + remoteMarkerT + ") не менялся — полный запрос задач/книг/целей пропущен, используются данные из кэша вкладки");
+        dataP = Promise.resolve(stateMarkerCache.cloudData);
+      } else {
+        dataP = fetchCloudBlobData(id, fetchOpts).then(function(data){
+          // засеваем/обновляем кэш маячка ТОЛЬКО реально полученными данными —
+          // если remoteMarkerT === null (маячка ещё нет на сервере, старые
+          // данные до этого фикса), кэш всё равно заводим — просто следующая
+          // сверка тоже не даст cacheHit, пока не случится первый push с
+          // маячком (см. doCloudSync), это ожидаемо и безопасно (просто не
+          // оптимизируем этот случай, не ломаем)
+          stateMarkerCache = { id: id, marker: remoteMarkerT, cloudData: data };
+          return data;
         });
       }
-      return data;
+      return dataP.then(function(data){
+        // Firebase отдаёт null (не 404), если по пути ничего нет
+        if(data === null || data === undefined) throw new Error("not_found");
+        // Данные, которыми не пользовались (ни разу не подключались/не
+        // синхронизировались) больше года — считаем истёкшими: удаляем с
+        // сервера и сообщаем вызывающему коду, что кода больше не существует.
+        // У записей, созданных до появления этой метки, __syncLastActive
+        // отсутствует — такие записи не удаляем (нет данных, чтобы посчитать
+        // срок), они получат метку при первой же следующей записи в облако.
+        var lastActiveRec = data[LAST_ACTIVE_STATE_KEY];
+        var lastActiveTs = lastActiveRec && typeof lastActiveRec.t === "number" ? lastActiveRec.t : null;
+        if(lastActiveTs !== null && (Date.now() - lastActiveTs) > SYNC_EXPIRY_MS){
+          return deleteCloudBlob(id).catch(function(){}).then(function(){
+            throw new Error("expired");
+          });
+        }
+        return data;
+      });
     });
   }
 
@@ -4701,13 +4766,17 @@
                                              // /syncs/<syncId>/goals/<goalId> = {c,t}
     "personalTasks_meta": true,             // 26.09 (syncengine_transport.js 1.3, «маячок» перед полным
     "settings_meta": true,                  // pull): каждый личный store транспорта теперь пишет рядом
-    "goals_meta": true                      // <name>_meta = {t:<серверная метка>} — тот же верхний
+    "goals_meta": true,                     // <name>_meta = {t:<серверная метка>} — тот же верхний
                                              // уровень /syncs/<syncId>/, что и сам store, поэтому три
                                              // ветки-маячка нужно исключить из state точно так же, как
                                              // сами personalTasks/settings/goals выше. Групповых
                                              // аналогов (tasks_meta/archive_meta под /groups/<id>/) это
                                              // НЕ касается — там нет кода, читающего узел группы целиком
                                              // и подмешивающего все его ключи в какую-то общую структуру.
+    "state_meta": true                      // 27.09 (см. CLOUD_STATE_MARKER_KEY выше) — маячок самого
+                                             // doCloudSync/fetchCloudBlob пути (task:*/book:*/goal:*/…),
+                                             // тот же приём и по той же причине, что и три ветки-маячка
+                                             // выше — сам не является записью состояния.
   };
   function stripCloudReservedSubtrees(cloudData, label){
     if(!cloudData) return cloudData;
@@ -5016,7 +5085,25 @@
         // см. подробное объяснение гонки у putCloudBlob. Теперь отправляем
         // только реально отличающиеся от только что прочитанного cloudData
         // ключи — putCloudBlob шлёт их через PATCH, не трогая остальное.
-        return putCloudBlob(syncId, cloudDelta, {keepalive: urgent});
+        //
+        // ⚠️ ДОБАВЛЕНО (27.09, маячок состояния — см. CLOUD_STATE_MARKER_KEY/
+        // stateMarkerCache выше): в ту же PATCH-посылку добавляем свежую
+        // метку маячка — раз мы и так меняем состояние в облаке, серверная
+        // метка должна сдвинуться ОДНОВременно с самими данными, одним
+        // запросом, без отдельного round-trip. После успешной отправки сразу
+        // обновляем кэш вкладки ЗНАЯ, что теперь в облаке (это ровно merged —
+        // cloudData из ответа плюс applied delta), чтобы следующий цикл
+        // doCloudSync в этой же сессии (даже если он случится сразу же, см.
+        // pendingPushAfterSync) не тратил лишний полный запрос ровно на
+        // собственное же изменение.
+        var stateMarkerT = Date.now();
+        var deltaWithMarker = {};
+        Object.keys(cloudDelta).forEach(function(k){ deltaWithMarker[k] = cloudDelta[k]; });
+        deltaWithMarker[CLOUD_STATE_MARKER_KEY] = { t: stateMarkerT };
+        return putCloudBlob(syncId, deltaWithMarker, {keepalive: urgent}).then(function(res){
+          stateMarkerCache = { id: syncId, marker: stateMarkerT, cloudData: merged };
+          return res;
+        });
       }
     }).then(function(){
       if(window.Debug) window.Debug.log("doCloudSync: завершён успешно за " + (Date.now() - syncT0) + " мс");
