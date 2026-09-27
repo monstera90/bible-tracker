@@ -4192,45 +4192,55 @@
   // в этом логе прошло 6-19 секунд (см. FREEZE-разрывы такой длины перед
   // каждым повторным "Старт приложения") — это не осознанная перезагрузка
   // пользователем, а типичное для мобильных браузеров/PWA убийство
-  // фоновой вкладки системой при нехватке памяти и её полный респаун при
-  // возврате. Комментарий у stateMarkerCache ниже ("холодный старт всегда
-  // делает один настоящий полный запрос") предполагал редкие настоящие
-  // перезагрузки — на практике для мобильного использования "холодный
-  // старт" случается почти на КАЖДОМ сворачивании/разворачивании
-  // приложения, и старое допущение обнуляло выгоду от маячка почти
-  // полностью.
+  // фоновой вкладки системой при нехватке памяти (то же самое верно и для
+  // обычного "потянуть вниз, чтобы обновить" — это настоящая навигационная
+  // перезагрузка, с точки зрения этого скрипта неотличимая от убийства
+  // вкладки: JS запускается с нуля в обоих случаях). Комментарий у
+  // stateMarkerCache выше ("холодный старт всегда делает один настоящий
+  // полный запрос") предполагал редкие настоящие перезагрузки — на практике
+  // "холодный старт" случается почти на КАЖДОМ сворачивании/разворачивании
+  // или свайпе обновления, и старое допущение обнуляло выгоду от маячка
+  // почти полностью.
   //
-  // Фикс: маячок, полученный при последнем удачном обмене с облаком
-  // (неважно, чтением или отправкой), сохраняется ещё и в localStorage
-  // (дёшево — один timestamp, не сам cloudData). При старте приложения,
-  // ДО первого doCloudSync (см. `if(syncId) doCloudSync()` ниже),
-  // `stateMarkerCache` засевается этим сохранённым маячком, а вместо
-  // cloudData используется уже загруженный из localStorage `state`
-  // (см. `stripCloudReservedSubtrees` — та же операция, что и над
-  // настоящим ответом сети, для единообразия формы). Это безопасно: `state`
-  // в момент последнего успешного doCloudSync ВСЕГДА совпадает с тем, что
-  // тогда было в облаке (см. `state = merged` и обновление кэша в одном и
-  // том же тике и там, и там) — а если после того момента что-то на
-  // сервере изменилось (другое устройство), маленький сетевой запрос
-  // самого маячка (`fetchStateMarker`, который выполняется ВСЕГДА, кэш
-  // это не отменяет) это обнаружит и полное чтение всё равно произойдёт —
-  // угадать неправильно тут нельзя, маячок каждый раз реально проверяется
-  // по сети, кэш только решает, нужно ли ПОСЛЕ этого тянуть остальное.
+  // Фикс: маячок И сам cloudData (уже без зарезервированных веток — то же,
+  // что лежит в stateMarkerCache.cloudData в памяти) сохраняются в
+  // localStorage при каждом успешном обмене с облаком. При старте
+  // приложения, ДО первого doCloudSync, `stateMarkerCache` засевается ИЗ
+  // ЭТОГО СОХРАНЁННОГО СНЕПШОТА — НЕ из текущего `state`.
+  //
+  // ВАЖНО, почему нельзя просто взять текущий `state`: он мог уже
+  // измениться ПОСЛЕ последнего подтверждённого обмена с облаком (правка
+  // задачи, которая сохранилась локально, но её `doCloudSync` не успел
+  // завершиться до перезагрузки/убийства вкладки) — маячок на сервере при
+  // этом не сдвинется (никто другой ничего не менял), проверка маячка даст
+  // "совпадает", и если бы cloudData был равен текущему (уже изменённому)
+  // state, `mergeStates(state, cloudData)` не нашёл бы разницы и правка
+  // НИКОГДА не ушла бы в облако — молча, без ошибки, хуже исходной
+  // проблемы (правка жива локально, но не долетает до других устройств).
+  // Поэтому cloudData должен быть именно тем, что реально подтверждено
+  // сервером в прошлый раз, а не текущим состоянием — тогда `state`
+  // (с возможной новой правкой) и сохранённый cloudData (без неё)
+  // корректно дадут разницу и правка уйдёт в облако при первом же цикле
+  // после перезагрузки, просто без лишнего тяжёлого чтения ПЕРЕД этим.
+  //
+  // Сам маячок в любом случае реально проверяется по сети (`fetchStateMarker`,
+  // кэш это не отменяет) — угадать неправильно и не заметить чужие
+  // изменения с другого устройства тут нельзя.
   var STATE_MARKER_PERSIST_KEY = "bibleStateMarker_v1";
-  function loadPersistedStateMarker(id){
+  function loadPersistedCloudSnapshot(id){
     try{
       var raw = localStorage.getItem(STATE_MARKER_PERSIST_KEY);
       if(!raw) return null;
       var rec = JSON.parse(raw);
-      if(!rec || rec.id !== id || typeof rec.marker !== "number") return null;
-      return rec.marker;
+      if(!rec || rec.id !== id || typeof rec.marker !== "number" || !rec.cloudData || typeof rec.cloudData !== "object") return null;
+      return { marker: rec.marker, cloudData: rec.cloudData };
     }catch(e){ return null; }
   }
-  function savePersistedStateMarker(id, marker){
+  function savePersistedCloudSnapshot(id, marker, cloudData){
     try{
-      if(marker === null || marker === undefined || !id){ localStorage.removeItem(STATE_MARKER_PERSIST_KEY); return; }
-      localStorage.setItem(STATE_MARKER_PERSIST_KEY, JSON.stringify({ id: id, marker: marker }));
-    }catch(e){ /* квота — не критично, просто следующий холодный старт не получит кэш-хит */ }
+      if(marker === null || marker === undefined || !id || !cloudData){ localStorage.removeItem(STATE_MARKER_PERSIST_KEY); return; }
+      localStorage.setItem(STATE_MARKER_PERSIST_KEY, JSON.stringify({ id: id, marker: marker, cloudData: cloudData }));
+    }catch(e){ /* квота — не критично, просто следующий холодный старт не получит кэш-хит, поведёт себя как раньше (полное чтение) */ }
   }
 
   // Случайный ID этого браузера/устройства, живёт в localStorage
@@ -4571,7 +4581,7 @@
           // маячком (см. doCloudSync), это ожидаемо и безопасно (просто не
           // оптимизируем этот случай, не ломаем)
           stateMarkerCache = { id: id, marker: remoteMarkerT, cloudData: data };
-          savePersistedStateMarker(id, remoteMarkerT); // 27.09: переживает холодный старт/убийство вкладки
+          savePersistedCloudSnapshot(id, remoteMarkerT, data); // 27.09: переживает холодный старт/убийство вкладки/потянуть-обновить
           return data;
         });
       }
@@ -5150,7 +5160,7 @@
         deltaWithMarker[CLOUD_STATE_MARKER_KEY] = { t: stateMarkerT };
         return putCloudBlob(syncId, deltaWithMarker, {keepalive: urgent}).then(function(res){
           stateMarkerCache = { id: syncId, marker: stateMarkerT, cloudData: merged };
-          savePersistedStateMarker(syncId, stateMarkerT); // 27.09: переживает холодный старт/убийство вкладки
+          savePersistedCloudSnapshot(syncId, stateMarkerT, merged); // 27.09: переживает холодный старт/убийство вкладки/потянуть-обновить
           return res;
         });
       }
@@ -5186,7 +5196,7 @@
       if(String(err.message||"").indexOf("expired") !== -1){
         syncId = null;
         localStorage.removeItem(SYNC_ID_KEY);
-        savePersistedStateMarker(null, null); // 27.09: маячок был привязан к старому syncId
+        savePersistedCloudSnapshot(null, null, null); // 27.09: маячок и снепшот были привязаны к старому syncId
         personalShadowTouch(); // шаг 6: область теневого store сменилась (syncId → local)
         setSyncState("off");
         settleInitialTaskSync();
@@ -5242,9 +5252,9 @@
   // тяжёлого shallow+диапазонного чтения, а не только повторные циклы
   // внутри одной живой вкладки.
   if(syncId){
-    var persistedMarker = loadPersistedStateMarker(syncId);
-    if(persistedMarker !== null){
-      stateMarkerCache = { id: syncId, marker: persistedMarker, cloudData: stripCloudReservedSubtrees(state, "seed-стартового кэша маячка") };
+    var persistedSnapshot = loadPersistedCloudSnapshot(syncId);
+    if(persistedSnapshot){
+      stateMarkerCache = { id: syncId, marker: persistedSnapshot.marker, cloudData: persistedSnapshot.cloudData };
     }
   }
   if(syncId) doCloudSync();
@@ -9228,7 +9238,7 @@
         openAppConfirmBar("Отключить это устройство от синхронизации? Локальный прогресс сохранится.", function(){
           syncId = null;
           localStorage.removeItem(SYNC_ID_KEY);
-          savePersistedStateMarker(null, null); // 27.09: маячок был привязан к старому syncId
+          savePersistedCloudSnapshot(null, null, null); // 27.09: маячок и снепшот были привязаны к старому syncId
           personalShadowTouch(); // шаг 6: область теневого store сменилась (syncId → local)
           refreshStatusBase();
           renderModalHome();
