@@ -580,7 +580,7 @@ window.initMdEditorModule = function(deps){
   // файлами, интернет не нужен). Он экспортирует ровно три пространства имён:
   // state, view, commands (esbuild-бандл). esm.sh — запасной путь на
   // случай, если файла codemirror_bundle.js в проекте ещё нет.
-  var CM_LOCAL_URL = "./codemirror_bundle.js";
+  var CM_LOCAL_URL = "./codemirror.bundle.js";
   function loadCMFromEsmSh(){
     return Promise.all([
       import("https://esm.sh/@codemirror/state@6"),

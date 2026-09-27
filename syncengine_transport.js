@@ -1,4 +1,17 @@
 // syncengine_transport.js
+// Версия: 1.4 (27.09) — маячок теперь реально работает на холодной загрузке
+// страницы, а не только со второго pull за сессию (лог пользователя 27.09:
+// personalTasks.json, 371 зап., целиком на КАЖДОМ открытии приложения, хотя
+// маячок в localStorage от прошлой сессии уже был). Причина была в условии
+// "&& st.fullPulledOnce" перед проверкой маячка в pullInternal — оно снято.
+// Вместе с маячком теперь персистится (localStorage, тот же ключ-паттерн) и
+// снимок cloudTimes на момент последнего полного pull; при совпадении
+// маячка pullInternal отдаёт syncNow-сверке этот снимок вместо пустого
+// объекта, поэтому пропуск по маячку больше не отключает восстановление
+// потерянных при перезагрузке dirty-флагов (раньше сверку поэтому нарочно
+// пропускали при skippedByMarker — теперь не нужно, см. syncNow). Новые
+// функции: readLocalSnapshot/writeLocalSnapshot. Поле st.fullPulledOnce
+// убрано за ненадобностью.
 // Версия: 1.3 (26.09) — «маячок» перед полным pull (вариант «Б» из разбора
 // TASK_UNIFIED_SYNC.md, «лишний трафик pull»): pullInternal раньше делал
 // полный GET всего узла (<cloudPath>.json) КАЖДЫЙ раз, даже когда с прошлого
@@ -97,6 +110,7 @@
   var TEST_ROOT = '/__syncengine_test__/';
   var MARKER_SUFFIX = '_meta';
   var MARKER_LS_PREFIX = 'syncEngineTransportMarker_';
+  var SNAPSHOT_LS_PREFIX = 'syncEngineTransportCloudTimes_';
   var DEFAULT_DEBOUNCE_MS = 400;
   var DEFAULT_PUSH_TIMEOUT_MS = 15000;
   var DEFAULT_PULL_TIMEOUT_MS = 10000;
@@ -180,6 +194,46 @@
       localStorage.setItem(MARKER_LS_PREFIX + storeId, val);
     } catch (err) {
       // не страшно — в следующий раз просто снова сделаем полный pull
+    }
+  }
+
+  // ---- снимок cloudTimes (v1.4, 27.09) --------------------------------------
+  // Раньше маячок помогал пропустить полный GET только СО ВТОРОГО pull за
+  // сессию (см. было: st.fullPulledOnce в pullInternal) — то есть НЕ помогал
+  // ровно в самом частом случае, ради которого его и делали: холодная
+  // загрузка страницы, когда в облаке с прошлого визита ничего не менялось
+  // (лог пользователя 27.09 — personalTasks.json целиком на КАЖДОМ открытии
+  // приложения, хотя маячок в localStorage уже был от прошлой сессии).
+  // Причина: syncNow-сверка "локально новее облака, но dirty-флаг потерян
+  // при перезагрузке" (см. её пояснение в syncNow ниже) нуждается в
+  // настоящих cloudTimes, а при пропуске по маячку cloudTimes оставались
+  // пустыми — поэтому пропуск нарочно разрешали только со второго pull.
+  // Решение: сохранять cloudTimes (карта id → серверная метка) вместе с
+  // маячком, тем же способом. Если при следующей загрузке маячок совпал —
+  // он совпал именно потому, что НИЧЕГО в узле не менялось с прошлого раза,
+  // а значит сохранённые cloudTimes всё ещё точны, и можно отдать их сверке
+  // вместо пустых — без единого байта по сети. Размер небольшой (десятки
+  // байт на запись, ~15 КБ на 371 запись personalTasks) — тот же уровень
+  // риска квоты, что и у самого маячка.
+  function readLocalSnapshot(storeId) {
+    try {
+      if (typeof localStorage === 'undefined' || localStorage === null) return null;
+      var v = localStorage.getItem(SNAPSHOT_LS_PREFIX + storeId);
+      if (v === null) return null;
+      var parsed = JSON.parse(v);
+      return (parsed && typeof parsed === 'object') ? parsed : null;
+    } catch (err) {
+      return null; // повреждённый JSON/квота/приватный режим — как будто снимка нет
+    }
+  }
+
+  function writeLocalSnapshot(storeId, cloudTimes) {
+    try {
+      if (typeof localStorage === 'undefined' || localStorage === null) return;
+      localStorage.setItem(SNAPSHOT_LS_PREFIX + storeId, JSON.stringify(cloudTimes));
+    } catch (err) {
+      // не страшно — в следующий раз при совпадении маячка снимка не найдётся,
+      // и мы просто сделаем ещё один полный pull, чтобы его заново накопить
     }
   }
 
@@ -308,12 +362,6 @@
         pushing: null,      // Promise выполняющегося push (для склейки вызовов)
         rerun: false,
         extra: new Map(),   // записи, добавленные syncNow-сверкой (id -> record)
-        fullPulledOnce: false, // см. пояснение у маячка в pullInternal: первый pull после
-                                // attachStore ВСЕГДА полный, маячок разрешён только со второго
-                                // (иначе syncNow-сверка "локально новее облака" в этой же
-                                // функции ниже — которая лечит именно потерю dirty-флага при
-                                // перезагрузке — считала бы cloudTimes пустыми и на каждом
-                                // пропуске гоняла бы push всех живых записей заново)
       });
       if (autoPush && !offDirty) {
         offDirty = engine.on('dirty', function (e) {
@@ -529,7 +577,17 @@
       // пропускаем: пропуск допустим ТОЛЬКО когда оба значения — реальные
       // серверные метки и они совпали, иначе рискуем молча остановить pull
       // навсегда, если что-то в цепочке маячок не пишет.
-      if (st.markerUrl && st.fullPulledOnce) {
+      //
+      // v1.4 (27.09): раньше здесь ещё стояло "&& st.fullPulledOnce" — то
+      // есть маячок разрешали проверять только со ВТОРОГО pull за сессию,
+      // из-за чего он ни разу не срабатывал на холодной загрузке страницы
+      // (ровно там, где экономия нужнее всего). Условие снято: маячок
+      // проверяем при КАЖДОМ pull, включая самый первый после attachStore.
+      // Раньше пропуск отдавал пустые cloudTimes, которых syncNow-сверке
+      // недостаточно (см. её пояснение ниже) — теперь при совпадении
+      // маячка подставляем сохранённый снимок cloudTimes (см. выше), и
+      // сверка получает те же данные, что и после настоящего полного pull.
+      if (st.markerUrl) {
         try {
           var mres = await request(st.markerUrl, { method: 'GET' }, pullTimeoutMs, true);
           if (mres.ok) {
@@ -537,9 +595,16 @@
               ? String(mres.body.t) : null;
             var localMarker = readLocalMarker(st.storeId);
             if (remoteMarker !== null && localMarker !== null && localMarker === remoteMarker) {
-              log('SyncEngineTransport pull "' + st.storeId + '": маячок не менялся (' + remoteMarker + ') — полный запрос узла пропущен');
-              out.skippedByMarker = true;
-              return out;
+              var snapshot = readLocalSnapshot(st.storeId);
+              if (snapshot !== null) {
+                log('SyncEngineTransport pull "' + st.storeId + '": маячок не менялся (' + remoteMarker + ') — полный запрос узла пропущен, использован сохранённый снимок (' + Object.keys(snapshot).length + ' зап.)');
+                out.skippedByMarker = true;
+                out.cloudTimes = snapshot;
+                return out;
+              }
+              // маячок совпал, но снимка нет (старая версия транспорта до
+              // v1.4, либо localStorage чистили выборочно) — подстраховка:
+              // один раз всё же делаем полный pull, чтобы снимок появился.
             }
             if (remoteMarker !== null) st.pendingMarker = remoteMarker;
           }
@@ -607,11 +672,14 @@
       // Полный pull применён успешно — теперь можно кэшировать маячок,
       // который мы прочитали ДО него: только после того, как убедились,
       // что данные, к которым он относится, реально дошли и слились.
+      // Снимок cloudTimes кэшируем тем же условием и в тот же момент —
+      // именно он даст маячку право пропустить полный GET на следующей
+      // холодной загрузке (см. v1.4 выше).
       if (st.pendingMarker !== undefined) {
         writeLocalMarker(st.storeId, st.pendingMarker);
+        writeLocalSnapshot(st.storeId, out.cloudTimes);
         st.pendingMarker = undefined;
       }
-      st.fullPulledOnce = true; // маячок теперь можно доверять syncNow-сверке ниже
       return out;
     }
 
@@ -639,20 +707,19 @@
       var st = getStoreOrThrow(storeId);
       var pull = await pullInternal(st);
       // Сверка "локально новее облака, но dirty-флаг потерян" (лечит именно
-      // потерю флага при перезагрузке) годится ТОЛЬКО когда pull.cloudTimes
-      // реально пришли с сервера. Если pull был пропущен маячком —
-      // cloudTimes пустые НЕ потому что в облаке пусто, а потому что мы его
-      // не спрашивали; гонять эту сверку на пустых cloudTimes пометило бы
-      // «отличается от облака» вообще всё живое в store и свело бы экономию
-      // маячка на нет, просто перенеся тот же трафик с pull на push. Это
-      // безопасно пропустить: маячок сработал только когда есть хотя бы
-      // один настоящий полный pull с начала этого attachStore (см.
-      // st.fullPulledOnce в pullInternal) — а значит dirty-флаги внутри
-      // ЭТОЙ сессии отслеживались нормально и без потерь; единственный
-      // случай, который реально чинит эта сверка (потеря флага именно на
-      // перезагрузке страницы), уже покрыт тем самым обязательным первым
-      // полным pull'ом.
-      if (!pull.error && !pull.skippedByMarker) {
+      // потерю флага при перезагрузке) годится только когда pull.cloudTimes
+      // достоверны. До v1.4 маячок при пропуске отдавал ПУСТЫЕ cloudTimes
+      // (мы ведь ничего не спрашивали) — гонять сверку на пустых cloudTimes
+      // пометило бы «отличается от облака» вообще всё живое в store и свело
+      // бы экономию маячка на нет, просто перенеся тот же трафик с pull на
+      // push; поэтому сверку раньше пропускали при skippedByMarker.
+      // С v1.4 пропуск по маячку отдаёт сохранённый С ПРОШЛОГО полного pull
+      // снимок cloudTimes (см. readLocalSnapshot/writeLocalSnapshot) — он
+      // ничем не хуже свежего, потому что маячок совпал ровно тогда, когда
+      // в узле с тех пор ничего не изменилось. Поэтому теперь достаточно
+      // проверить, что cloudTimes вообще есть (хоть из полного pull, хоть
+      // из снимка), а не то, каким путём pull их получил.
+      if (!pull.error && (!pull.skippedByMarker || Object.keys(pull.cloudTimes).length > 0)) {
         var local = await engine.listRecords(st.storeId, { includeDeleted: true });
         local.forEach(function (r) {
           var ct = pull.cloudTimes[r.id];
