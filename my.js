@@ -6114,6 +6114,66 @@
     try{ localStorage.setItem(groupTasksCacheKey(sharedGroup.groupId), JSON.stringify(groupTasksState)); }catch(e){}
   }
 
+  // ---- локальный кэш отображаемых имён участников группы (правка 27.09:
+  // подпись "Создал/Выполнил" у общих задач раньше ВСЕГДА показывала
+  // "Второй участник" для любого чужого deviceId — имя, которое человек
+  // вводит в openUserNameDialog, хранится в /groups/<id>/members/<devId>/name
+  // (см. writeGroupMember/writeGroupMemberName), но buildTaskJointSignatureHtml
+  // его не читала. Кэш нужен, т.к. подпись рисуется синхронно на каждой
+  // строке задачи — не дёргать сеть на каждый рендер; тот же приём, что и у
+  // groupTasksState выше: держим последний известный снимок в localStorage,
+  // освежаем в фоне через fetchGroupMembers и перерисовываем вкладку, если
+  // что-то реально изменилось (rerenderJointTasksTabIfOpen). ----
+  var GROUP_MEMBER_NAMES_CACHE_KEY_PREFIX = "bibleGroupMemberNames_v1_";
+  var groupMemberNamesState = {};       // deviceId -> имя
+  var groupMemberNamesLoadedFor = null; // groupId, под который сейчас загружен кэш выше
+
+  function groupMemberNamesCacheKey(groupId){ return GROUP_MEMBER_NAMES_CACHE_KEY_PREFIX + groupId; }
+  function loadGroupMemberNamesCache(groupId){
+    if(groupMemberNamesLoadedFor === groupId) return;
+    groupMemberNamesState = {};
+    try{
+      var raw = localStorage.getItem(groupMemberNamesCacheKey(groupId));
+      if(raw) groupMemberNamesState = JSON.parse(raw) || {};
+    }catch(e){ groupMemberNamesState = {}; }
+    groupMemberNamesLoadedFor = groupId;
+  }
+  function saveGroupMemberNamesCacheLocal(){
+    if(!sharedGroup) return;
+    try{ localStorage.setItem(groupMemberNamesCacheKey(sharedGroup.groupId), JSON.stringify(groupMemberNamesState)); }catch(e){}
+  }
+  // Возвращает сохранённое имя устройства devId (не своего — своё показываем
+  // как "Вы" отдельно, см. buildTaskJointSignatureHtml) или null, если имени
+  // ещё нет в кэше (участник ни разу его не задавал, либо кэш ещё не
+  // освежался после подключения этого участника).
+  function getCachedGroupMemberName(devId){
+    if(!sharedGroup) return null;
+    loadGroupMemberNamesCache(sharedGroup.groupId);
+    return groupMemberNamesState[devId] || null;
+  }
+  // Освежает кэш из /groups/<id>/members (то же самое поле member.name, что
+  // уже использует renderGroupUnlinkMemberList для админского списка) —
+  // вызывается пассивно из refreshJointTasksData (открытие вкладки,
+  // событие "online"), как и остальной обмен с группой. Если после
+  // обновления показанные имена изменились бы — перерисовывает вкладку.
+  function refreshGroupMemberNamesCache(){
+    if(!sharedGroup || isOfflineMode() || !isNetworkAvailable()) return Promise.resolve();
+    var groupId = sharedGroup.groupId;
+    return fetchGroupMembers(groupId).then(function(members){
+      members = members || {};
+      var next = {};
+      Object.keys(members).forEach(function(devId){
+        var m = members[devId];
+        if(m && m.name) next[devId] = m.name;
+      });
+      loadGroupMemberNamesCache(groupId);
+      var changed = JSON.stringify(next) !== JSON.stringify(groupMemberNamesState);
+      groupMemberNamesState = next;
+      saveGroupMemberNamesCacheLocal();
+      if(changed) rerenderJointTasksTabIfOpen();
+    }).catch(function(err){ console.error(err); });
+  }
+
   function getAllGroupTasks(){
     if(!sharedGroup) return [];
     loadGroupTasksCache(sharedGroup.groupId);
@@ -7520,6 +7580,10 @@
     if(!sharedGroup) return;
     if(isOfflineMode()) return; // режим оффлайн: ни проверки членства, ни синка группы
     syncEngineLog("refreshJointTasksData: role=" + sharedGroup.role + ", активна=" + isGroupTasksActive() + ", online=" + isNetworkAvailable());
+    // Правка 27.09: имена участников (подпись "Создал/Выполнил") освежаем
+    // тем же ленивым циклом опроса, что и остальные данные группы — см.
+    // refreshGroupMemberNamesCache выше.
+    refreshGroupMemberNamesCache();
     if(sharedGroup.role === "member" || sharedGroup.role === "viewer"){
       // Шаг 5: у отвязки нет push-уведомления участнику — единственный
       // способ узнать, что админ его отвязал (см. handleGroupUnlinkMember,
@@ -20496,9 +20560,19 @@
   function buildTaskJointSignatureHtml(content){
     if(!content.createdBy) return "";
     var meId = getDeviceId();
-    var createdByLabel = content.createdBy === meId ? "Вы" : "Второй участник";
+    // Правка 27.09: раньше тут всегда стояло "Второй участник" для любого
+    // чужого devId — теперь берём отображаемое имя из локального кэша
+    // (см. getCachedGroupMemberName/refreshGroupMemberNamesCache выше);
+    // "Второй участник" остаётся только запасным вариантом — пока участник
+    // ни разу не задал себе имя (openUserNameDialog) или кэш ещё не
+    // подтянулся после его подключения.
+    function labelFor(devId){
+      if(devId === meId) return "Вы";
+      return getCachedGroupMemberName(devId) || "Второй участник";
+    }
+    var createdByLabel = labelFor(content.createdBy);
     return '<div class="task-joint-signature">Создал: ' + escapeHtml(createdByLabel) +
-      (content.completedBy ? " · Выполнил: " + escapeHtml(content.completedBy === meId ? "Вы" : "Второй участник") : "") +
+      (content.completedBy ? " · Выполнил: " + escapeHtml(labelFor(content.completedBy)) : "") +
       '</div>';
   }
 
