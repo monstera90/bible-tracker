@@ -1,6 +1,17 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 42.5 (27.09) — реальная причина затянутых LONGTASK при открытии
+   книги (ТЗ пользователя от 27.09, "приоритет нужным процессам, а не
+   оптимизация по кругу"): дело было не в размере чанка, а в том, что
+   renderBookReaderText() запускает новый чанкованный цикл при КАЖДОМ
+   заходе на вкладку книги/ИПКД, а предыдущий, ещё не доигравший цикл
+   requestAnimationFrame никак не узнавал о более новом и продолжал
+   молотить параллельно — отсюда несколько одновременных потоков чанков и
+   почти непрерывная стена LONGTASK при повторных заходах. Добавлен
+   bookReaderTextRenderGen — токен поколения рендера: каждый тик сверяет
+   свой номер с текущим и останавливается сам, если стартовал более новый
+   рендер, вместо того чтобы соревноваться с ним за поток.
    Версия: 42.4 (27.09) — приоритет интерфейса над фоновой сборкой книги
    (ТЗ пользователя от 27.09, продолжение 42.3): renderBookReaderText — тайм-
    бюджет тика (RENDER_CHUNK_BUDGET_MS) теперь проверяется на каждом БЛОКЕ
@@ -5053,12 +5064,26 @@
 
   var syncStatusPill = document.getElementById("syncStatusPill");
   var syncStatusText = document.getElementById("syncStatusText");
+  // Дубликат пилюли внутри окна настроек (.sync-status-modal-dup, modals.css /
+  // index.html, ТЗ пользователя от 27.09) — остаётся видимым/кликабельным
+  // поверх заплатки .settings-corner-patch, пока оригинал в шапке перекрыт
+  // оверлеем окна настроек. Состояние синхронизируется здесь же, одной
+  // точкой входа, вместе с оригиналом — дальнейшую логику именно этой копии
+  // вешать тоже сюда (и на её собственный click ниже).
+  var syncStatusPillDup = document.getElementById("syncStatusPillModalDup");
+  var syncStatusTextDup = document.getElementById("syncStatusTextModalDup");
 
   function setSyncState(st, extraText){
     syncStatusPill.setAttribute("data-state", st);
     if(st !== "off") syncStatusPill.classList.remove("sync-collapsed");
     var labels = {off:"Настроить<br>синхронизацию",offline:"",syncing:"",synced:"",error:""};
-    syncStatusText.innerHTML = (extraText != null ? extraText : labels[st]) || "";
+    var html = (extraText != null ? extraText : labels[st]) || "";
+    syncStatusText.innerHTML = html;
+    if(syncStatusPillDup){
+      syncStatusPillDup.setAttribute("data-state", st);
+      if(st !== "off") syncStatusPillDup.classList.remove("sync-collapsed");
+    }
+    if(syncStatusTextDup) syncStatusTextDup.innerHTML = html;
   }
 
   function refreshStatusBase(){
@@ -5455,6 +5480,10 @@
   function openModal(){ modalOverlay.classList.add("open"); renderModalHome(); }
   modalOverlay.addEventListener("click", function(e){ if(e.target === modalOverlay) closeModal(); });
   syncStatusPill.addEventListener("click", openModal);
+  // тот же обработчик, то же модальное окно (#modalOverlay уже стоит выше
+  // окна настроек по z-index — 1001 против 1000, см. .modal-overlay в
+  // modals.css) — "полностью функциональна", как и просил пользователь.
+  if(syncStatusPillDup) syncStatusPillDup.addEventListener("click", openModal);
 
   // надпись "Настроить синхронизацию" видна только до первого
   // взаимодействия пользователя со страницей — дальше плашка сворачивается
@@ -5463,6 +5492,7 @@
     var collapseEvents = ["scroll","touchstart","pointerdown","mousedown","keydown","wheel"];
     function collapseSyncPill(){
       syncStatusPill.classList.add("sync-collapsed");
+      if(syncStatusPillDup) syncStatusPillDup.classList.add("sync-collapsed");
       collapseEvents.forEach(function(ev){
         window.removeEventListener(ev, collapseSyncPill, {capture:true});
       });
@@ -10062,6 +10092,37 @@
     settingsWaveGeom = { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
   }
 
+  // ---------- заплатка цвета шапки в углу окна настроек (.settings-corner-
+  // patch, modals.css) — высота по месту (27.09, ТЗ пользователя) ----------
+  // ⚠️ ИСПРАВЛЕНО: раньше высота заплатки была фиксированной CSS-догадкой
+  // (env(safe-area-inset-top)+14px) — не совпадала с реальным верхним краем
+  // стека вкладок (#settingsTabs/#settingsTabsSet2), который растёт СНИЗУ
+  // вверх и меняется (галочка "Показать все мои задачи", переключатель
+  // наборов "9"/"8", режим чтения прячет оба ряда). Меряем тем же приёмом,
+  // что и updateSettingsWaveGeometry выше — реальный getBoundingClientRect()
+  // видимого стека (у него width/height>0; работает и пока сам оверлей скрыт
+  // через opacity/visibility — координаты всё равно измеримы, см. комментарий
+  // у layoutSettingsModal про .settings-fab) — и ставим высоту заплатки
+  // ровно до его верхнего края + 14px нахлёста (тот же радиус, что у
+  // скруглённого угла самой верхней вкладки, .settings-tab border-start-end-
+  // radius), чтобы срезанный уголок прятался под заплаткой целиком. Если не
+  // виден ни один стек (режим чтения/полноэкранный, оба display:none) —
+  // прикрывать нечего, высота 0.
+  var settingsCornerPatch = document.querySelector(".settings-corner-patch");
+  var SETTINGS_TAB_CORNER_RADIUS = 14; // px, см. .settings-tab в modals.css
+  function updateSettingsCornerPatchHeight(){
+    if(!settingsCornerPatch) return;
+    var top = null;
+    [document.getElementById("settingsTabs"), document.getElementById("settingsTabsSet2")].forEach(function(el){
+      if(!el) return;
+      var r = el.getBoundingClientRect();
+      if(r.width <= 0 || r.height <= 0) return;
+      if(top === null || r.top < top) top = r.top;
+    });
+    var h = (top === null) ? 0 : Math.max(0, top) + SETTINGS_TAB_CORNER_RADIUS;
+    settingsCornerPatch.style.height = h + "px";
+  }
+
   // t: 0 (совсем свёрнуто, в точку у угла (maxX,maxY) — там же стоит
   // кнопка) .. 1 (открыто полностью — окно и оба ряда вкладок). Первая
   // половина (t<=0.5) — растущий треугольник от угла (maxX,maxY) до
@@ -10400,6 +10461,11 @@
         readingFabBtn.style.top = Math.round(fabTopPx) + "px";
       }
     }
+    // см. комментарий у updateSettingsCornerPatchHeight выше — пересчитываем
+    // здесь же, заодно со всей остальной геометрией окна (открытие, ресайз,
+    // вход/выход из режима чтения — layoutSettingsModal и так уже вызывается
+    // во всех этих случаях).
+    updateSettingsCornerPatchHeight();
   }
   // quick=true (только из долгого удержания язычка, см. FAB_LONGPRESS_MS) —
   // укороченная волна закрытия; во всех остальных местах вызывается без
@@ -10501,6 +10567,11 @@
       var btn = document.getElementById(TASK_TAB_IDS[key]);
       if(btn) btn.style.display = showTasks ? "flex" : "none";
     });
+    // меняет количество видимых язычков в #settingsTabs — пересчитываем
+    // заплатку (см. updateSettingsCornerPatchHeight выше); единственный
+    // вызывающий, после которого раньше НЕ следовал layoutSettingsModal —
+    // галочка "Показать все мои задачи" (my.js, обработчик settingsShowAllTasksCb).
+    updateSettingsCornerPatchHeight();
   }
   // Окно настроек всегда одного размера (см. .settings-modal-box в
   // modals.css) — высота фиксирована и не зависит от вкладки, поэтому
@@ -13621,6 +13692,20 @@
   // растущего .cm-scroller; здесь высота книги стабильна между рендерами
   // одного режима, поэтому пиксельного значения достаточно).
   var bookReaderState = null; // {hash, name, chapters, imageUrls, mode, textScrollTop, chaptersScrollTop, restorePosition}
+  // ФИКС (ТЗ пользователя от 27.09: "отдавать приоритет нужным процессам,
+  // а не звать оптимизацию по кругу") — токен поколения чанкованного
+  // рендера книги (см. renderBookReaderText ниже). Проблема была не в
+  // размере чанка: renderBookReader()/renderBookReaderText() вызываются
+  // заново при КАЖДОМ заходе на вкладку книги/ИПКД (openIpkdReaderToToday
+  // и т.п.), но предыдущий, ещё не доигравший цикл requestAnimationFrame
+  // никак не узнавал об этом и продолжал молотить в фоне НАРЯДУ с новым —
+  // в логе диагностики это видно как два/три одновременных потока чанков
+  // и сплошная стена LONGTASK при повторных заходах на вкладку. Теперь
+  // каждый вызов renderBookReaderText берёт следующий номер, а его тик
+  // сверяется с текущим значением перед КАЖДЫМ шагом — если номер уже не
+  // совпадает (стартовал более новый рендер), старый цикл просто
+  // останавливается, не тратя больше ни одного тика на устаревшую работу.
+  var bookReaderTextRenderGen = 0;
   // true после первого захода на вкладку "Мои книги" (set2s_7) в рамках
   // ТЕКУЩЕГО запуска скрипта — см. switchSettingsTab, ветка set2s_7 и
   // LAST_OPENED_BOOK_KEY выше. Пока false, отсутствие bookReaderState
@@ -14512,6 +14597,12 @@
     var chapters = bookReaderState.chapters;
     var chapterIdx = 0;
     var RENDER_CHUNK_BUDGET_MS = 8; // держим "тик" короче кадра — остаётся время и на сам кадр, и на успевший накопиться ввод
+    // Свой номер поколения — см. bookReaderTextRenderGen выше. Если к
+    // моменту очередного тика глобальный счётчик уйдёт вперёд (значит,
+    // где-то уже стартовал более новый renderBookReaderText — например,
+    // повторный заход на вкладку раньше, чем этот успел доиграть), этот
+    // цикл прекращает себя сам, не потратив больше ни одного тика.
+    var myRenderGen = ++bookReaderTextRenderGen;
 
     // ⚠️ ИЗМЕНЕНО (27.09, продолжение той же правки выше — ТЗ пользователя:
     // "приоритет потока отдавать кнопке и интерфейсу") — бюджет тика раньше
@@ -14600,6 +14691,12 @@
     // таймеры), либо, если это была последняя глава, переходит к хвостовой
     // логике.
     function renderChunk(){
+      // Устарели — новый заход на вкладку книги уже запустил свежий
+      // рендер (см. myRenderGen выше). Молча останавливаемся: ни
+      // insertAdjacentHTML в чужой/отсоединённый rootEl, ни следующий
+      // requestAnimationFrame — освобождаем поток тому, кто реально нужен
+      // сейчас.
+      if(myRenderGen !== bookReaderTextRenderGen) return;
       var t0 = performance.now();
       var out = "";
       var yielded = false;
@@ -16816,6 +16913,11 @@
     if(set2Side) set2Side.style.display = showSet1 ? "none" : "";
     if(set2Bottom) set2Bottom.style.display = showSet1 ? "none" : "";
     try{ localStorage.setItem(SETTINGS_LAST_SET_KEY, String(settingsActiveTabSet)); }catch(e){}
+    // переключает набор вкладок ("9"/"8") целиком — пересчитываем заплатку
+    // (см. updateSettingsCornerPatchHeight выше); единственный вызывающий,
+    // после которого раньше НЕ следовал layoutSettingsModal — сам язычок-
+    // переключатель набора (cycleSettingsTabSet).
+    updateSettingsCornerPatchHeight();
   }
   // вызывается кликом по язычку-кнопке, когда блокнот уже открыт —
   // переключает набор и открывает вкладку нового набора на той же позиции,

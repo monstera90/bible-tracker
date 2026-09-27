@@ -783,7 +783,7 @@
     box-shadow:0 0 0 2px rgba(255,255,255,.15);
     animation:none !important;
   }
-  .sync-status[data-state="off"] #syncStatusText{
+  .sync-status[data-state="off"] .sync-status-text{
     line-height:1.3;
   }
 
@@ -803,11 +803,17 @@
     border:none;
     box-shadow:none;
   }
-  .sync-status[data-state="offline"] #syncStatusText,
-  .sync-status[data-state="synced"] #syncStatusText,
-  .sync-status[data-state="syncing"] #syncStatusText,
-  .sync-status[data-state="error"] #syncStatusText,
-  .sync-status[data-state="off"].sync-collapsed #syncStatusText{
+  /* ⚠️ ИСПРАВЛЕНО (27.09): было #syncStatusText (id) — совпадало только с
+     оригинальной пилюлей в шапке. Дубликат для окна настроек (.sync-status-
+     modal-dup, modals.css/index.html, ТЗ пользователя от 27.09) использует
+     свой id текста (syncStatusTextModalDup — id обязан быть уникальным), но
+     тот же класс .sync-status-text — переключили селектор на класс, чтобы
+     правило заодно скрывало текст и у дубликата, а не только у оригинала. */
+  .sync-status[data-state="offline"] .sync-status-text,
+  .sync-status[data-state="synced"] .sync-status-text,
+  .sync-status[data-state="syncing"] .sync-status-text,
+  .sync-status[data-state="error"] .sync-status-text,
+  .sync-status[data-state="off"].sync-collapsed .sync-status-text{
     display:none;
   }
   /* в свёрнутом виде "off" превращается в обычную серую точку — статичную,

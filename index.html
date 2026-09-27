@@ -60,7 +60,7 @@ window.addEventListener("error", function(e){
   <div class="app-version" id="appVersionText"></div>
   <div class="sync-status" id="syncStatusPill" data-state="off">
     <span class="sync-dot"></span>
-    <span id="syncStatusText">Настроить<br>синхронизацию</span>
+    <span class="sync-status-text" id="syncStatusText">Настроить<br>синхронизацию</span>
   </div>
 
   <h1>ГРАФИК ЧТЕНИЯ БИБЛИИ</h1>
@@ -160,8 +160,19 @@ window.addEventListener("error", function(e){
        рисуется поверх неё естественным порядком, без явного z-index; сама
        заплатка видна только в узкой полосе НАД самой верхней вкладкой,
        ровно там, где сейчас видна тёмная подложка. Стили — .settings-corner-patch
-       в modals.css. -->
+       в modals.css (27.09 — цвет и высота исправлены на реальные, см. её
+       комментарий там же). -->
   <div class="settings-corner-patch" aria-hidden="true"></div>
+  <!-- Дубликат пилюли синхронизации (27.09, ТЗ пользователя) — оригинал
+       (#syncStatusPill в шапке) перекрыт этим же оверлеем и невидим/некликабелен,
+       пока окно настроек открыто. Точная копия разметки оригинала (тот же
+       .sync-status/.sync-dot, свой id/id текста — оригинальные id заняты);
+       позиция/z-index — .sync-status-modal-dup в modals.css, состояние
+       синхронизирует my.js (setSyncState/collapseSyncPill). -->
+  <div class="sync-status sync-status-modal-dup" id="syncStatusPillModalDup" data-state="off">
+    <span class="sync-dot"></span>
+    <span class="sync-status-text" id="syncStatusTextModalDup">Настроить<br>синхронизацию</span>
+  </div>
   <div class="settings-modal-frame">
     <div class="settings-modal-box" id="settingsModalBox">
       <div class="settings-tab-content" id="settingsTabContent"></div>
