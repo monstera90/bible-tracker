@@ -1562,9 +1562,22 @@
       var req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
       if(req && !document.fullscreenElement && !document.webkitFullscreenElement){
         try{
-          var p = req.call(el);
+          // navigationUI:"hide" — необязательная подсказка браузеру постараться
+          // не показывать свой собственный UI (в т.ч., в теории, подсказку
+          // "проведите, чтобы выйти из полноэкранного режима") при входе в
+          // fullscreen. Поддержка частичная и не гарантирована спецификацией —
+          // если браузер её не понимает, аргумент просто игнорируется и вызов
+          // работает как раньше.
+          var p = req.call(el, { navigationUI: "hide" });
           if(p && p.catch) p.catch(function(){});
-        }catch(e){}
+        }catch(e){
+          // На случай браузера, который бросает ошибку именно из-за незнакомого
+          // аргумента (а не просто игнорирует его) — пробуем ещё раз без него.
+          try{
+            var p2 = req.call(el);
+            if(p2 && p2.catch) p2.catch(function(){});
+          }catch(e2){}
+        }
       }
     } else {
       var exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
