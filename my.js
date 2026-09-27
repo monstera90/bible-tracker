@@ -1859,6 +1859,20 @@
   // "ГРУППОВАЯ ПРИВЯЗКА «ОБЩИХ ЗАДАЧ»" ниже (loadSharedGroup объявлена там,
   // но доступна здесь по подъёму объявлений функций в пределах замыкания).
   var sharedGroup = loadSharedGroup();
+  // ⚠️ ДОБАВЛЕНО (27.09, ТЗ пользователя — та же болезнь, что и у
+  // initialTaskSyncSettled выше, только для ОБЩИХ задач): картинка,
+  // вставленная ТОЛЬКО в общую задачу, могла быть удалена корзиной сирот
+  // (mdeditor.js), если на момент первой в сессии чистки локальный кэш
+  // групповых задач (groupTasksState, читается синхронно из localStorage,
+  // см. loadGroupTasksCache) ещё не догнал реальное состояние — например,
+  // самое последнее локальное сохранение перед закрытием вкладки не успело
+  // долететь до localStorage. Раньше isTaskStateReady в deps mdeditor.js
+  // проверял ТОЛЬКО личную синхронизацию (initialTaskSyncSettled) — про
+  // общие задачи не знал вовсе. Тот же принцип: true сразу, если группа не
+  // подключена (ждать нечего — как !syncId у личных); иначе становится true
+  // после ПЕРВОГО завершённого в этой сессии цикла groupTasksBinding.syncNow
+  // (успех/оффлайн/ошибка — см. settleInitialGroupTaskSync ниже).
+  var initialGroupTaskSyncSettled = !sharedGroup;
 
   // Инкрементальные счётчики
   var totalChecked = 0;
@@ -5081,6 +5095,19 @@
     personalShadowAfterFirstSync(); // шаг 6: первый цикл личной синхронизации закончен — можно сверять теневой store с облаком
     if(MdEditor && MdEditor.retryImageCleanup) MdEditor.retryImageCleanup();
   }
+  // ⚠️ ДОБАВЛЕНО (27.09, ТЗ пользователя): зеркало settleInitialTaskSync
+  // выше, только для ОБЩИХ задач — см. initialGroupTaskSyncSettled
+  // (объявлена рядом с sharedGroup). Вызывается из КАЖДОЙ завершающей ветки
+  // refreshJointTasksData (успех/оффлайн/ошибка/группа больше не актуальна)
+  // — тем же принципом, что и у личной: дальше ждать нечего, "первый цикл
+  // синхронизации общих задач в этой сессии" в любом случае закончился.
+  // Идемпотентна. retryImageCleanup дёргается только на первом реальном
+  // переключении флага — тот же смысл, что и у личной версии.
+  function settleInitialGroupTaskSync(){
+    if(initialGroupTaskSyncSettled) return;
+    initialGroupTaskSyncSettled = true;
+    if(MdEditor && MdEditor.retryImageCleanup) MdEditor.retryImageCleanup();
+  }
   function doCloudSync(urgent){
     if(!syncId) { setSyncState("off"); return; }
     if(!isNetworkAvailable()){ setSyncState("offline"); settleInitialTaskSync(); return; }
@@ -5258,6 +5285,15 @@
     }
   }
   if(syncId) doCloudSync();
+  // ⚠️ ДОБАВЛЕНО (27.09, ТЗ пользователя — тот же приём, что и у doCloudSync
+  // выше, для ОБЩИХ задач): без этого вызова refreshJointTasksData ждала
+  // открытия вкладки "Общие задачи" или события "online" — если ни то, ни
+  // другое не случится в сессии, initialGroupTaskSyncSettled (см. выше)
+  // никогда не станет true, и корзина сирот mdeditor.js будет ждать его
+  // весь сеанс впустую. Личным задачам эта же гарантия уже давно даёт
+  // "if(syncId) doCloudSync()" — group-каналу нужен точно такой же
+  // безусловный старт.
+  if(sharedGroup) refreshJointTasksData();
 
   // И saveLocalState (localStorage), И scheduleCloudPush (облако) —
   // отложенные через setTimeout (300мс и PUSH_DEBOUNCE_MS соответственно,
@@ -7578,7 +7614,11 @@
   // syncId (личная синхронизация может быть вообще не настроена).
   function refreshJointTasksData(){
     if(!sharedGroup) return;
-    if(isOfflineMode()) return; // режим оффлайн: ни проверки членства, ни синка группы
+    // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя): офлайн — тоже терминальная ветка
+    // для initialGroupTaskSyncSettled, зеркало "if(!isNetworkAvailable())"
+    // у личного doCloudSync — ждать по сети всё равно нечего, локальный кэш
+    // group-задач и так уже всё, что у нас есть прямо сейчас.
+    if(isOfflineMode()){ settleInitialGroupTaskSync(); return; } // режим оффлайн: ни проверки членства, ни синка группы
     syncEngineLog("refreshJointTasksData: role=" + sharedGroup.role + ", активна=" + isGroupTasksActive() + ", online=" + isNetworkAvailable());
     // Правка 27.09: имена участников (подпись "Создал/Выполнил") освежаем
     // тем же ленивым циклом опроса, что и остальные данные группы — см.
@@ -7592,13 +7632,13 @@
       checkGroupMembershipStillValid().then(function(stillMember){
         if(!stillMember){ returnJointTasksTabToLocalMode(); return; }
         return syncGroupTasksNow();
-      }).catch(function(err){ console.error(err); });
+      }).catch(function(err){ console.error(err); }).then(function(){ settleInitialGroupTaskSync(); }); // 27.09 — см. пояснение у функции
     } else {
       var chain = !isAdminMigrationDone(sharedGroup.groupId)
         ? migrateAdminGroupTasksIfNeeded() : Promise.resolve();
       chain.then(function(){
         if(isGroupTasksActive()) return syncGroupTasksNow();
-      }).catch(function(err){ console.error(err); });
+      }).catch(function(err){ console.error(err); }).then(function(){ settleInitialGroupTaskSync(); }); // 27.09 — см. пояснение у функции
     }
     // Шаг 3 (19.09): syncGroupTasksNow = pull → сверка → push — отправка
     // накопленных (в т.ч. потерянных при перезагрузке) правок общих задач
@@ -8038,10 +8078,20 @@
     // задачи" её тоже показывает), считалась неиспользуемой и могла быть
     // молча удалена из images/ (OPFS) при чистке "сирот" — хотя миниатюра
     // в самой задаче видна и открывается.
+    var groupTextsCount = 0;
     if(sharedGroup){
-      getAllGroupTasks().forEach(function(t){ if(t.c && t.c.text) texts.push(t.c.text); });
-      getAllGroupArchivedTasks().forEach(function(t){ if(t.c && t.c.text) texts.push(t.c.text); });
+      getAllGroupTasks().forEach(function(t){ if(t.c && t.c.text){ texts.push(t.c.text); groupTextsCount++; } });
+      getAllGroupArchivedTasks().forEach(function(t){ if(t.c && t.c.text){ texts.push(t.c.text); groupTextsCount++; } });
     }
+    // ⚠️ ДОБАВЛЕНО (диагностика 27.09, ТЗ пользователя — картинка общей
+    // задачи пропала локально "через время" на добавившем её устройстве;
+    // момент поймать вживую не удалось, логируем каждый прогон, чтобы при
+    // повторении в логе было видно: был ли sharedGroup вообще установлен в
+    // этот момент, и сколько текстов общих задач реально попало в скан
+    // (если 0 при непустой вкладке "Общие задачи" — значит проблема здесь,
+    // до mdeditor.js; если групповые тексты попали, но картинку всё равно
+    // удалили — искать дальше в cleanupOrphanedImages, см. её лог).
+    if(window.Debug) window.Debug.log("collectTaskAndCommentTextsForMediaScan: всего текстов для скана=" + texts.length + " (из них общих задач/архива=" + groupTextsCount + "), sharedGroup=" + (sharedGroup ? sharedGroup.groupId : "нет"));
     return texts;
   }
   var MdEditor = window.initMdEditorModule({
@@ -8055,7 +8105,16 @@
     // облачная синхронизация задач не завершила в этой сессии хотя бы один
     // цикл, collectTaskAndCommentTextsForMediaScan выше может недосчитаться
     // задачи с другого устройства — корзина сирот должна подождать.
-    isTaskStateReady: function(){ return initialTaskSyncSettled; },
+    // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя — та же гонка, но для ОБЩИХ
+    // задач): раньше здесь проверялась готовность ТОЛЬКО личной
+    // синхронизации — про initialGroupTaskSyncSettled (см. sharedGroup
+    // выше) mdeditor.js не знал вовсе, поэтому картинка, вставленная
+    // только в общую задачу, могла попасть под чистку раньше, чем
+    // groupTasksState догонит реальное состояние. Теперь готовность общая:
+    // либо синхронизация общих задач не настроена (initialGroupTaskSyncSettled
+    // истинна сразу — группа не подключена), либо её первый в этой сессии
+    // цикл уже завершился.
+    isTaskStateReady: function(){ return initialTaskSyncSettled && initialGroupTaskSyncSettled; },
     // режим оффлайн: mdeditor.js использует это вместо navigator.onLine
     // (isOnline в облачном цикле заметок — pushDirtyNotes/syncNotesFromCloud)
     isNetworkAvailable: isNetworkAvailable,
