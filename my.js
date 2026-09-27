@@ -17164,24 +17164,42 @@
   var settingsTabGearBtn = document.getElementById("settingsTabGearBtn");
   var settingsTabYearBtn = document.getElementById("settingsTabYearBtn");
   var settingsTabMoodBtn = document.getElementById("settingsTabMoodBtn");
-  if(settingsTabGearBtn) settingsTabGearBtn.addEventListener("click", function(){ switchSettingsTab("gear"); });
-  if(settingsTabYearBtn) settingsTabYearBtn.addEventListener("click", function(){ switchSettingsTab("year"); });
-  if(settingsTabMoodBtn) settingsTabMoodBtn.addEventListener("click", function(){ switchSettingsTab("mood"); });
+  // ФИКС (диагностика тормозов язычка, ТЗ пользователя от 27.09) — лог
+  // показал: клик по кнопке вкладки, которая УЖЕ активна, всё равно
+  // заново гоняет switchSettingsTab -> полный innerHTML-ребилд списка
+  // (renderTaskTabList и т.п.), хотя показывать по сути нечего нового —
+  // сам переход в историю (AppNav) при этом даже не попадает
+  // (isRealSwitch внутри switchSettingsTab требует prevTab !== tab). На
+  // практике это бьёт по эффективности ИМЕННО в момент лага: человек не
+  // видит отклика на первый тап (главный поток занят LONGTASK/анимацией
+  // закрытия FAB) и тапает по той же вкладке ещё раз — получает второй
+  // полновесный ребилд впустую (см. "renderTaskTabList" дважды подряд в
+  // логе с разницей ~700мс, второй раз с LONGTASK на хвосте). Простой
+  // guard — повторный клик по уже открытой вкладке просто ничего не
+  // делает, как и было бы логично для переключателя вкладок (не кнопки
+  // "обновить").
+  function switchSettingsTabOnClick(tab){
+    if(tab === currentSettingsTab) return;
+    switchSettingsTab(tab);
+  }
+  if(settingsTabGearBtn) settingsTabGearBtn.addEventListener("click", function(){ switchSettingsTabOnClick("gear"); });
+  if(settingsTabYearBtn) settingsTabYearBtn.addEventListener("click", function(){ switchSettingsTabOnClick("year"); });
+  if(settingsTabMoodBtn) settingsTabMoodBtn.addEventListener("click", function(){ switchSettingsTabOnClick("mood"); });
   Object.keys(TASK_TAB_IDS).forEach(function(key){
     var btn = document.getElementById(TASK_TAB_IDS[key]);
-    if(btn) btn.addEventListener("click", function(){ switchSettingsTab(key); });
+    if(btn) btn.addEventListener("click", function(){ switchSettingsTabOnClick(key); });
   });
   Object.keys(EXTRA_TAB_IDS).forEach(function(key){
     var btn = document.getElementById(EXTRA_TAB_IDS[key]);
-    if(btn) btn.addEventListener("click", function(){ switchSettingsTab(key); });
+    if(btn) btn.addEventListener("click", function(){ switchSettingsTabOnClick(key); });
   });
   Object.keys(SET2_TAB_IDS).forEach(function(key){
     var btn = document.getElementById(SET2_TAB_IDS[key]);
-    if(btn) btn.addEventListener("click", function(){ switchSettingsTab(key); });
+    if(btn) btn.addEventListener("click", function(){ switchSettingsTabOnClick(key); });
   });
   Object.keys(SET2_EXTRA_TAB_IDS).forEach(function(key){
     var btn = document.getElementById(SET2_EXTRA_TAB_IDS[key]);
-    if(btn) btn.addEventListener("click", function(){ switchSettingsTab(key); });
+    if(btn) btn.addEventListener("click", function(){ switchSettingsTabOnClick(key); });
   });
 
   if(settingsModalOverlay){
