@@ -5480,6 +5480,7 @@
       expiresAt: Date.now() + PAIRING_EXPIRY_MS
     };
     return fetchWithTimeout(FIREBASE_DB_URL + FIREBASE_PAIRINGS_PATH + "/" + encodeURIComponent(pairCode) + ".json?print=silent", {
+      method: "PUT",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify(payload)
     }, 8000).then(function(res){
