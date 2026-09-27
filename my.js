@@ -9569,17 +9569,64 @@
     setTimeout(fallback, SW_VERSION_ANSWER_TIMEOUT_MS);
   }
 
-  // отчёт последней установки из sw.js: какие файлы не скачались (пусто — всё в порядке)
+  // отчёт последней установки из sw.js: какие файлы не скачались (пусто — всё
+  // в порядке), и (⚠️ ДОБАВЛЕНО 27.09, расследование "холостой" траты
+  // 0.3-0.5 МБ трафика) — была ли вообще на этом старте настоящая сетевая
+  // закачка ASSETS, и если да — сколько файлов и приблизительно сколько КБ.
+  // Раньше эта функция молчала, если install прошёл успешно (и молчала же,
+  // если install вообще не запускался) — с точки зрения трафика это две
+  // совершенно разные ситуации, а лог их не различал. Один из кандидатов на
+  // причину "холостого" трафика — вытеснение Cache Storage системой (сайт
+  // никогда не просил navigator.storage.persist(), см. ниже) между заходами:
+  // если это происходит, здесь при следующем запуске будет видно "install
+  // скачал N файлов" именно тогда, когда пользователь ничего не менял.
+  var LAST_INSTALL_REPORT_LOGGED_AT = null;
   function logInstallReport(){
     if(!window.caches || !window.Debug) return;
     caches.match(SW_INSTALL_REPORT_KEY, { cacheName: SW_INSTALL_REPORT_CACHE }).then(function(res){
       return res ? res.json() : null;
     }).then(function(rep){
-      if(rep && rep.failed && rep.failed.length){
+      if(!rep) return;
+      // Отчёт в кэше не одноразовый (sw.js его не удаляет) — без метки "at"
+      // одно и то же сообщение об установке писалось бы в журнал заново при
+      // каждом requestVersionFromSW/logInstallReport (на каждом визите),
+      // маскируя реальную частоту переустановок под видимость "происходит
+      // каждый раз". Пишем в журнал только когда видим НОВУЮ запись отчёта.
+      if(rep.at && rep.at === LAST_INSTALL_REPORT_LOGGED_AT) return;
+      LAST_INSTALL_REPORT_LOGGED_AT = rep.at || null;
+      if(rep.ranNetworkInstall){
+        var kb = (typeof rep.fetchedBytes === "number") ? (rep.fetchedBytes / 1024).toFixed(0) + " КБ" : "вес неизвестен (сервер не прислал Content-Length)";
+        swDebug("SW " + rep.version + ": install СКАЧАЛ ПО СЕТИ " + (rep.fetchedCount || 0) + " файлов (~" + kb + ") — это и есть источник трафика на этом заходе, если пользователь ничего не менял");
+      } else {
+        swDebug("SW " + rep.version + ": install — кэш уже был полон, сеть НЕ трогали (0 байт)");
+      }
+      if(rep.failed && rep.failed.length){
         swDebug("SW " + rep.version + ": при установке не скачались файлы (" + rep.failed.length + "): " + rep.failed.join("; "));
       }
     }).catch(function(){});
   }
+
+  // ⚠️ ДОБАВЛЕНО (27.09, расследование трафика): без явного запроса
+  // navigator.storage.persist() Cache Storage сайта хранится системой как
+  // "best-effort" — при нехватке места Android/Chrome вправе тихо стереть
+  // весь кэш service worker'а (все ~35 файлов приложения, включая my.js),
+  // особенно у редко находящегося на переднем плане PWA. Если это
+  // произошло, следующий заход выглядит как "холостой", а по факту service
+  // worker молча перекачивает всё приложение заново (см. logInstallReport
+  // выше — он это теперь покажет). persist() не гарантирует защиту от
+  // вытеснения (это эвристика браузера/ОС), но для установленного PWA с
+  // реальным использованием обычно даёт её без явного запроса разрешения у
+  // пользователя. persisted (true/false) логируем один раз при старте —
+  // чтобы было видно, дала ли система гарантию, если проблема повторится.
+  (function requestPersistentStorage(){
+    if(!navigator.storage || typeof navigator.storage.persist !== "function") return;
+    navigator.storage.persisted().then(function(already){
+      if(already){ swDebug("Storage: постоянное хранилище уже гарантировано (persisted=true)"); return; }
+      navigator.storage.persist().then(function(granted){
+        swDebug("Storage: запрошено постоянное хранилище — " + (granted ? "предоставлено (persisted=true)" : "НЕ предоставлено (кэш service worker может быть вытеснен системой при нехватке места)"));
+      }).catch(function(){});
+    }).catch(function(){});
+  })();
 
   // перезагрузка после смены версии — только когда приложение свёрнуто (см. п.2 выше)
   var swReloadArmed = false, swReloadTimer = null;

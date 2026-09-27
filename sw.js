@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.36.88";
+const APP_VERSION = "v0.36.90";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -55,11 +55,28 @@ const INSTALL_REPORT_KEY = self.location.origin + "/__sw_install_report__";
 // версия ставится, а список не скачавшихся файлов попадает в отчёт выше.
 const CRITICAL_ASSETS = ["./", "./index.html", "./my.js"];
 
-function writeInstallReport(failed) {
+function writeInstallReport(info) {
+  // info: { failed: [...], ranNetworkInstall: bool, fetchedCount: number, fetchedBytes: number|null }
+  // ⚠️ ДОБАВЛЕНО (расход трафика "на холостом проходе", 27.09): раньше отчёт
+  // содержал только список НЕ скачавшихся файлов — если install проходил
+  // полностью успешно, отчёт был неотличим от случая "install вообще не
+  // запускался" (alreadyComplete), хотя во втором случае сеть не тронута
+  // вовсе, а в первом — скачано полностью всё приложение (сотни КБ).
+  // ranNetworkInstall/fetchedCount/fetchedBytes закрывают этот пробел —
+  // страница (см. logInstallReport в my.js) теперь может прямо написать в
+  // журнал отладки "install скачал N файлов, ~X КБ" при следующем заходе,
+  // вместо того чтобы гадать по стороннему замеру трафика.
   return caches.open(INSTALL_REPORT_CACHE)
     .then((cache) => cache.put(
       INSTALL_REPORT_KEY,
-      new Response(JSON.stringify({ version: APP_VERSION, at: Date.now(), failed: failed }), {
+      new Response(JSON.stringify({
+        version: APP_VERSION,
+        at: Date.now(),
+        failed: info.failed || [],
+        ranNetworkInstall: !!info.ranNetworkInstall,
+        fetchedCount: info.fetchedCount || 0,
+        fetchedBytes: (typeof info.fetchedBytes === "number") ? info.fetchedBytes : null
+      }), {
         headers: { "Content-Type": "application/json" }
       })
     ))
@@ -181,7 +198,13 @@ self.addEventListener("install", (event) => {
           // сеть не трогаем вовсе, сразу отдаём null дальше по цепочке
           // (следующий .then() ниже читает null как "скачивать было
           // нечего, отчёт и проверку критичных файлов пропускаем").
-          if (alreadyComplete) return null;
+          // "SKIPPED" (а не null) — чтобы следующий .then() мог отличить
+          // "качать было нечего" от "качали, но список пуст" и в обоих
+          // случаях написать честный отчёт (27.09, см. writeInstallReport
+          // выше — раньше при alreadyComplete отчёт не писался вовсе, и
+          // страница не могла отличить "install не запускался" от "install
+          // прошёл успешно" — с точки зрения трафика это две разные вещи).
+          if (alreadyComplete) return "SKIPPED";
 
           // ВАЖНО: обычный cache.addAll() делает fetch() с учётом HTTP-кэша
           // браузера — если сервер отдаёт файлы (например my.js) с
@@ -189,30 +212,43 @@ self.addEventListener("install", (event) => {
           // может "закэшировать" ту же самую старую версию файла, даже
           // если на сервере уже лежит новая. Поэтому качаем каждый файл
           // явно в обход HTTP-кэша ({cache: "reload"}).
-          // Каждый файл качается независимо: сбой одного не отменяет остальные,
-          // результат — список не скачавшихся ("./файл (причина)").
+          // Каждый файл качается независимо: сбой одного не отменяет остальные.
+          // Успех несёт вес файла (Content-Length из заголовков, читаем ДО
+          // того как cache.put заберёт тело), сбой — причину. Оба идут в
+          // отчёт (27.09, см. writeInstallReport выше).
           return Promise.all(
             ASSETS.map((url) =>
               fetch(url, { cache: "reload" })
                 .then((response) => {
                   if (!response.ok) throw new Error("HTTP " + response.status);
-                  return cache.put(url, response);
+                  var cl = response.headers && response.headers.get ? response.headers.get("content-length") : null;
+                  var bytes = (cl !== null && cl !== undefined && cl !== "") ? (parseInt(cl, 10) || null) : null;
+                  return cache.put(url, response).then(function(){ return { url: url, ok: true, bytes: bytes }; });
                 })
-                .then(
-                  () => null,
-                  (err) => ({ url: url, reason: String((err && err.message) || err) })
-                )
+                .catch(function(err){ return { url: url, ok: false, reason: String((err && err.message) || err) }; })
             )
           );
         })
       )
       .then((results) => {
-        // null — из ветки alreadyComplete выше: качать было нечего, отчёт
-        // о неудавшихся файлах и проверку критичных писать не по чему.
-        if (!results) return;
-        const failed = results.filter(Boolean);
+        // "SKIPPED" — из ветки alreadyComplete выше: сеть не трогали вовсе.
+        if (results === "SKIPPED") {
+          return writeInstallReport({ failed: [], ranNetworkInstall: false, fetchedCount: 0, fetchedBytes: 0 });
+        }
+        var ok = results.filter(function(r){ return r.ok; });
+        var failed = results.filter(function(r){ return !r.ok; });
         const criticalFailed = failed.filter((f) => CRITICAL_ASSETS.indexOf(f.url) !== -1);
-        return writeInstallReport(failed.map((f) => f.url + " (" + f.reason + ")")).then(() => {
+        var knownBytes = ok.filter(function(r){ return typeof r.bytes === "number"; });
+        // Если хоть у одного скачанного файла нет Content-Length — сумма
+        // недостоверна (часть веса не посчитана), честно передаём null,
+        // а не заниженное число.
+        var fetchedBytes = (knownBytes.length === ok.length) ? knownBytes.reduce(function(s, r){ return s + r.bytes; }, 0) : null;
+        return writeInstallReport({
+          failed: failed.map((f) => f.url + " (" + f.reason + ")"),
+          ranNetworkInstall: true,
+          fetchedCount: ok.length,
+          fetchedBytes: fetchedBytes
+        }).then(() => {
           if (criticalFailed.length) {
             throw new Error("Failed to fetch " + criticalFailed.map((f) => f.url).join(", "));
           }
