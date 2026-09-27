@@ -17,10 +17,19 @@
    =========================================================================== */
 
   /* ---------- sync status pill ---------- */
+  /* top/right — 27.09 (ТЗ пользователя): было 23/23, поменяно на 18/18, чтобы
+     в свёрнутых состояниях (просто точка .sync-dot, 9×9px без паддингов —
+     см. [data-state="offline"|"synced"|"syncing"|"error"|"off".sync-collapsed
+     ниже, там padding:0) диод получался ровно по центру правой колонки
+     вкладок окна настроек (45px — .settings-corner-patch/.settings-tabs
+     в modals.css): (45-9)/2=18px и слева от края колонки, и справа от края
+     экрана — те же 18px и сверху. У дубликата в окне настроек тот же отступ
+     18px, но с добавкой env(safe-area-inset-top) — см. .sync-status-modal-dup
+     в modals.css. */
   .sync-status{
     position:absolute;
-    top:23px;
-    right:23px;
+    top:18px;
+    right:18px;
     display:flex;
     align-items:center;
     gap:6px;
