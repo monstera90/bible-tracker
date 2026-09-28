@@ -1,5 +1,10 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 6.6 (28.09) — ПЕРЕНОСЫ СЛОВ (ТЗ пользователя от 28.09): в попап «Аа» заметки добавлена
+   кнопка `#mdEditorHyphensBtn` (класс `hyphens-btn` — клик и иконку ведёт my.js, см. раздел
+   «ПЕРЕНОСЫ СЛОВ» там); в экспорт MdEditor — `captureScrollAnchor()`: запоминает позицию
+   документа у верхнего края области (CodeMirror posAtCoords/coordsAtPos) и отдаёт
+   `{restore}` — my.js зовёт после переключения переносов, чтобы текст не «уезжал».
    Версия: 6.5 (23.09) — TASK_UNIFIED_SYNC.md, шаг 5, находка 3 (верификация,
    23.09): новая resetLocalNotesForAccountSwitch() (экспорт MdEditor.*) —
    закрывает открытую заметку, binding.destroy(), notesMap.clear(),
@@ -4036,6 +4041,7 @@ window.initMdEditorModule = function(deps){
             '<div class="mdeditor-fontsize-popup" id="mdEditorFontSizePopup">' +
               '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="mdEditorFontPlusBtn" title="Крупнее">+</button>' +
               '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="mdEditorFontMinusBtn" title="Мельче">&minus;</button>' +
+              '<button type="button" class="mdeditor-fab-btn hyphens-btn" id="mdEditorHyphensBtn" title="Переносы слов"></button>' +
             '</div>' +
             '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="mdEditorFontSizeBtn" title="Размер шрифта">Аа</button>' +
           '</span>' +
@@ -5653,6 +5659,48 @@ window.initMdEditorModule = function(deps){
     var host = document.getElementById("mdEditorHost");
     return !!(host && cmView && openFile && screen === "editor" && !noteInfoOpen && host.getClientRects().length);
   }
+  // ПЕРЕНОСЫ СЛОВ (ТЗ пользователя от 28.09): при включении/выключении переносов строки
+  // перетекают, высота текста меняется, и то место, что читал человек, уезжает. my.js перед
+  // переключением зовёт captureScrollAnchor(): запоминаем позицию ДОКУМЕНТА (не пиксели)
+  // у верхнего края видимой области и её отступ от верха #settingsTabContent; restore()
+  // после перекладки находит эту позицию заново (coordsAtPos — по живому DOM строки) и
+  // докручивает область на разницу. Редактор не скроллится сам (см. currentScrollPercent),
+  // поэтому крутим #settingsTabContent. Нет редактора на экране -> null (my.js возьмёт общий
+  // DOM-способ для задач/книг).
+  function captureScrollAnchor(){
+    if(!editorIsShown()) return null;
+    var sc = document.getElementById("settingsTabContent");
+    var host = document.getElementById("mdEditorHost");
+    if(!sc || !host) return null;
+    var view = cmView;
+    var scRect = sc.getBoundingClientRect();
+    var hostRect = host.getBoundingClientRect();
+    var y = Math.max(scRect.top, hostRect.top) + 6;
+    var x = hostRect.left + Math.min(hostRect.width * 0.4, 160);
+    var pos = null, coords = null;
+    try{
+      pos = view.posAtCoords({ x: x, y: y });
+      if(pos === null || pos === undefined) return null;
+      coords = view.coordsAtPos(pos);
+    }catch(e){ return null; }
+    if(!coords) return null;
+    var wantOffset = coords.top - scRect.top;
+    return {
+      restore: function(){
+        if(!cmView || cmView !== view) return;
+        var sc2 = document.getElementById("settingsTabContent");
+        if(!sc2) return;
+        try{
+          view.requestMeasure();
+          var p = Math.min(pos, view.state.doc.length);
+          var c2 = view.coordsAtPos(p);
+          if(!c2) return;
+          var delta = (c2.top - sc2.getBoundingClientRect().top) - wantOffset;
+          if(Math.abs(delta) > 0.5) sc2.scrollTop += delta;
+        }catch(e){}
+      }
+    };
+  }
   // true — редактор на экране, но ни одной видимой строки в области нет
   function editorLooksBlank(){
     var host = document.getElementById("mdEditorHost");
@@ -5933,6 +5981,8 @@ window.initMdEditorModule = function(deps){
     // ТЗ 20.09: my.js зовёт при входе/выходе из режима чтения (toggleReadingMode) —
     // подставляет размер шрифта того режима, в который перешли.
     applyFontSize: applyFontSize,
+    // 28.09 (переносы слов): см. captureScrollAnchor выше — my.js, toggleHyphens.
+    captureScrollAnchor: captureScrollAnchor,
     FONT_SIZE_MIN_STEP: FONT_SIZE_MIN_STEP,
     FONT_SIZE_MAX_STEP: FONT_SIZE_MAX_STEP,
     // Восстановление сети (раздел 3 ТЗ TASK_MDNOTES_CLOUD.md): push сам по

@@ -1,6 +1,13 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 43.0 (28.09) — ПЕРЕНОСЫ СЛОВ (ТЗ пользователя от 28.09): новый глобальный
+   переключатель (одно состояние на всё приложение, localStorage `bibleHyphens_v1`) —
+   кнопка `.hyphens-btn` внутри попапа «Аа» (задачи `#taskHyphensBtn`, ридер книг и
+   ИПКД `#bookReaderHyphensBtn`; в заметках — `#mdEditorHyphensBtn`, разметка в mdeditor.js).
+   Включено -> класс `hyphens-on` на <html> (CSS `hyphens:auto`, components.css 3.4),
+   иконка кнопки без перечёркивания; выключено -> с перечёркиванием (иконка — CSS-маской,
+   JS её не рисует). Раздел «ПЕРЕНОСЫ СЛОВ» рядом с режимом чтения.
    Версия: 42.6 (27.09) — долгое удержание язычка настроек убрано целиком (ТЗ
    пользователя: закрытие открытого блокнота — только кликом мимо окна).
    Из обработчика settingsGearBtn выкинуты FAB_LONGPRESS_MS/pointerdown-
@@ -8542,6 +8549,17 @@
     var fontPopup = document.getElementById("taskFontSizePopup");
     var fontPlusBtn = document.getElementById("taskFontPlusBtn");
     var fontMinusBtn = document.getElementById("taskFontMinusBtn");
+    // ПЕРЕНОСЫ СЛОВ (ТЗ пользователя от 28.09): кнопка-переключатель внизу попапа
+    // «Аа» (ниже «−», ближе к самой «Аа» — попап раскрывается вверх). Создаётся
+    // здесь, а не в index.html; клик/иконка — общая делегация bindHyphensButtonsOnce.
+    if(fontPopup && !document.getElementById("taskHyphensBtn")){
+      var taskHyphensBtn = document.createElement("button");
+      taskHyphensBtn.type = "button";
+      taskHyphensBtn.id = "taskHyphensBtn";
+      taskHyphensBtn.className = "mdeditor-fab-btn hyphens-btn";
+      taskHyphensBtn.title = "Переносы слов";
+      fontPopup.appendChild(taskHyphensBtn);
+    }
     stopMousedown(fontBtn); stopMousedown(fontPlusBtn); stopMousedown(fontMinusBtn);
     if(fontBtn){
       fontBtn.addEventListener("click", function(){
@@ -8710,6 +8728,10 @@
     var readingBtn = document.getElementById("taskReadingBtn");
     stopMousedown(readingBtn);
     applyReadingModeVisual();
+    // Переносы слов: применить сохранённое состояние на старте и один раз
+    // повесить делегированные обработчики на все .hyphens-btn (см. раздел ниже).
+    applyHyphensVisual();
+    bindHyphensButtonsOnce();
     if(readingBtn){
       // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя): был обычный click →
       // toggleReadingMode(); теперь тап/удержание (bindTapOrHold ниже по
@@ -14377,6 +14399,7 @@
           '<div class="mdeditor-fontsize-popup" id="bookReaderFontSizePopup">' +
             '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontPlusBtn" title="Крупнее">+</button>' +
             '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontMinusBtn" title="Мельче">&minus;</button>' +
+            '<button type="button" class="mdeditor-fab-btn hyphens-btn" id="bookReaderHyphensBtn" title="Переносы слов"></button>' +
           '</div>' +
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontSizeBtn" title="Размер шрифта">Аа</button>' +
         '</span>' +
@@ -19433,6 +19456,169 @@
   function setNextHideLinkedTasks(val){
     try{ localStorage.setItem(NEXT_HIDE_LINKED_KEY, val ? "1" : "0"); }catch(e){}
   }
+  // ===========================================================================
+  // ПЕРЕНОСЫ СЛОВ (ТЗ пользователя от 28.09) — глобальный флаг, одно состояние
+  // на всё приложение: задачи и комментарии, заметки, книги, ИПКД (ридер
+  // ИПКД — тот же ридер книг). Вариант 1: штатные переносы браузера,
+  // `hyphens:auto` (правило под `html.hyphens-on` в components.css) — текст в
+  // DOM/данных не меняется, поэтому выделения, закладки, поиск, синхронизация и
+  // редактирование не затронуты. Если на устройстве русский словарь не сработает —
+  // запасной вариант 2 (мягкие переносы библиотекой), см. обсуждение задачи.
+  // Кнопка `.hyphens-btn` — в попапе «Аа». Иконка рисуется ЧИСТО CSS (маска,
+  // components.css) по классу `hyphens-on` — поэтому перерисовка экранов
+  // (innerHTML) ничего не ломает, а mdeditor.js достаточно отдать пустую
+  // кнопку с этим классом. Ключ — литерал внутри функций (var не поднимается
+  // вместе со значением, см. пояснение у READING_MODE_KEY ниже).
+  // ===========================================================================
+  function getHyphensActive(){
+    try{ return localStorage.getItem("bibleHyphens_v1") === "1"; }catch(e){ return false; }
+  }
+  function setHyphensActive(val){
+    try{ localStorage.setItem("bibleHyphens_v1", val ? "1" : "0"); }catch(e){}
+  }
+  // Класс на <html> + язык. Браузер выбирает словарь по lang: пока переносы
+  // включены и язык страницы не русский, ставим lang="ru" (прежнее значение
+  // запоминаем в data-атрибуте и возвращаем при выключении).
+  function applyHyphensVisual(){
+    var on = getHyphensActive();
+    var root = document.documentElement;
+    root.classList.toggle("hyphens-on", on);
+    if(on){
+      var cur = (root.getAttribute("lang") || "").toLowerCase();
+      if(cur.indexOf("ru") !== 0){
+        if(!root.hasAttribute("data-lang-before-hyphens")){
+          root.setAttribute("data-lang-before-hyphens", root.getAttribute("lang") || "");
+        }
+        root.setAttribute("lang", "ru");
+      }
+    }else if(root.hasAttribute("data-lang-before-hyphens")){
+      var prev = root.getAttribute("data-lang-before-hyphens");
+      root.removeAttribute("data-lang-before-hyphens");
+      if(prev) root.setAttribute("lang", prev); else root.removeAttribute("lang");
+    }
+    var title = on ? "Переносы слов включены (нажмите, чтобы выключить)" : "Переносы слов выключены (нажмите, чтобы включить)";
+    Array.prototype.forEach.call(document.querySelectorAll(".hyphens-btn"), function(b){ b.title = title; });
+  }
+  // Якорь прокрутки (ТЗ пользователя от 28.09: «пользователя не должно перебросить в
+  // другую часть текста»). Переносы меняют, сколько строк занимает каждый абзац, а значит и
+  // высоту всего текста над экраном — без поправки прочитанное место уезжает. Перед
+  // переключением запоминаем, ЧТО стоит у верхнего края области (не пиксели, а место в
+  // тексте) и на каком расстоянии от верха; после перекладки находим это же место и
+  // докручиваем #settingsTabContent на разницу. Заметки (CodeMirror) — через
+  // MdEditor.captureScrollAnchor (позиция документа); задачи/книги/ИПКД — обычный DOM:
+  // текстовый узел под точкой у верхнего края (caretRangeFromPoint) и его смещение.
+  function captureHyphensAnchor(){
+    var sc = document.getElementById("settingsTabContent");
+    if(!sc || !sc.clientHeight) return null;
+    try{
+      if(MdEditor && MdEditor.captureScrollAnchor){
+        var a = MdEditor.captureScrollAnchor();
+        if(a) return a;
+      }
+    }catch(e){}
+    var r = sc.getBoundingClientRect();
+    var x = r.left + r.width * 0.4, y = r.top + 8;
+    var node = null, off = 0;
+    try{
+      if(document.caretRangeFromPoint){
+        var rg = document.caretRangeFromPoint(x, y);
+        if(rg){ node = rg.startContainer; off = rg.startOffset; }
+      }else if(document.caretPositionFromPoint){
+        var cp = document.caretPositionFromPoint(x, y);
+        if(cp){ node = cp.offsetNode; off = cp.offset; }
+      }
+    }catch(e){ node = null; }
+    if(!node || !sc.contains(node)) return null;
+    // верх «места в тексте»: для текста — прямоугольник символа в этой точке, для
+    // остальных узлов — верх самого элемента
+    function topNow(){
+      if(!node.isConnected) return null;
+      var rc = null;
+      try{
+        if(node.nodeType === 3 && node.nodeValue.length){
+          var len = node.nodeValue.length;
+          var o = Math.min(off, len - 1);
+          var range = document.createRange();
+          range.setStart(node, o);
+          range.setEnd(node, o + 1);
+          var rects = range.getClientRects();
+          rc = rects.length ? rects[0] : null;
+        }
+      }catch(e){ rc = null; }
+      if(!rc || (!rc.width && !rc.height)){
+        var el = node.nodeType === 1 ? node : node.parentElement;
+        if(!el) return null;
+        rc = el.getBoundingClientRect();
+      }
+      return rc.top;
+    }
+    var t0 = topNow();
+    if(t0 === null) return null;
+    var wantOffset = t0 - r.top;
+    return {
+      restore: function(){
+        var sc2 = document.getElementById("settingsTabContent");
+        if(!sc2) return;
+        var t = topNow();
+        if(t === null) return;
+        var delta = (t - sc2.getBoundingClientRect().top) - wantOffset;
+        if(Math.abs(delta) > 0.5) sc2.scrollTop += delta;
+      }
+    };
+  }
+  function toggleHyphens(){
+    var anchor = captureHyphensAnchor();
+    setHyphensActive(!getHyphensActive());
+    applyHyphensVisual();
+    // Строки перетекают — та же реакция, что на смену размера шрифта: пересчёт
+    // подгонки кнопок строк задач и оценки высоты ещё не сверстанных сегментов
+    // книги (calibrateBookReaderSegments).
+    refitAllVisibleTaskBodies();
+    var reader = bookReaderState && bookReaderState.mode === "text" && document.querySelector("#settingsTabContent .book-reader");
+    // Поправка нужна не один раз: сразу (браузер пересчитает раскладку при чтении
+    // прямоугольника), в следующий кадр (подгонка кнопок задач), и после калибровки
+    // высот сегментов книги / замера CodeMirror. Если человек сам начал крутить —
+    // дальше не вмешиваемся.
+    var userMoved = false;
+    var stopEvents = ["touchstart", "wheel", "keydown", "mousedown"];
+    function onUser(){ userMoved = true; }
+    stopEvents.forEach(function(n){ document.addEventListener(n, onUser, { capture: true, passive: true }); });
+    function pass(){ if(anchor && !userMoved) anchor.restore(); }
+    pass();
+    if(window.requestAnimationFrame) window.requestAnimationFrame(function(){ refitAllVisibleTaskBodies(); pass(); });
+    if(reader){
+      setTimeout(function(){
+        var c2 = document.getElementById("settingsTabContent");
+        if(c2 && bookReaderState && bookReaderState.mode === "text") calibrateBookReaderSegments(c2);
+      }, 60);
+    }
+    setTimeout(pass, 120);
+    setTimeout(function(){
+      pass();
+      stopEvents.forEach(function(n){ document.removeEventListener(n, onUser, true); });
+    }, 350);
+  }
+  // Делегация (захват на document): кнопки живут в перерисовываемых экранах и в
+  // разметке mdeditor.js. mousedown с preventDefault — как у остальных кнопок
+  // ряда: клик не должен сбрасывать выделение/фокус в тексте. Флаг — свойство
+  // узла, а не var (тот же довод про подъём var, что и выше).
+  function bindHyphensButtonsOnce(){
+    if(document.documentElement.__hyphensBound) return;
+    document.documentElement.__hyphensBound = true;
+    function hitBtn(e){
+      var t = e.target;
+      return (t && t.closest) ? t.closest(".hyphens-btn") : null;
+    }
+    document.addEventListener("mousedown", function(e){
+      if(hitBtn(e)) e.preventDefault();
+    }, true);
+    document.addEventListener("click", function(e){
+      if(!hitBtn(e)) return;
+      e.preventDefault();
+      toggleHyphens();
+    }, true);
+  }
+
   // Режим чтения (ТЗ пользователя от 18.09) — глобальный флаг, не привязан
   // ни к заметке/книге/задаче конкретно: скрывает боковой и нижний ряды
   // вкладок окна настроек (#settingsTabs/#settingsTabsSet2/

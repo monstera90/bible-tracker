@@ -1,5 +1,9 @@
 /* ===========================================================================
    components.css
+   Версия: 3.4 (28.09) — ПЕРЕНОСЫ СЛОВ (ТЗ пользователя от 28.09): в конце файла — правило
+   `html.hyphens-on :is(.task-body, .task-editable, .book-reader, .mdeditor-editor-host)
+   {hyphens:auto}` и кнопка `.hyphens-btn` (иконка — CSS-маской: включено — строки текста с
+   дефисом, выключено — то же, перечёркнутое; цвет — currentColor кнопки, фон не меняется).
    Версия: 3.3 (21.09) — новый класс `.ipkd-swap-fab`: кнопка-скрепка «заменить публикацию» вкладки
    «ИПКД» в левом нижнем углу ридера (my.js bindIpkdReaderExtras).
    Версия: 3.2 (20.09) — ТЗ пользователя от 20.09: новый класс .book-reader-seg
@@ -3854,4 +3858,35 @@
     border-radius:3px;
     padding:0 1px;
     color:inherit;
+  }
+
+  /* ---------- ПЕРЕНОСЫ СЛОВ (ТЗ пользователя от 28.09) ----------
+     Один глобальный флаг (my.js, раздел «ПЕРЕНОСЫ СЛОВ»): класс hyphens-on на <html>.
+     Вариант 1 — штатные переносы браузера: язык берётся из lang (my.js ставит "ru"
+     на время включения), текст в DOM не меняется. hyphenate-limit-chars — не
+     переносить короткие слова и не оставлять на строке меньше 3 букв (там, где браузер
+     это поддерживает; иначе свойство просто игнорируется). Охват: текст задач и
+     комментариев (.task-body, .task-editable), ридер книг и ИПКД (.book-reader),
+     редактор заметок (.mdeditor-editor-host). */
+  html.hyphens-on :is(.task-body, .task-editable, .book-reader, .mdeditor-editor-host){
+    -webkit-hyphens:auto;
+    hyphens:auto;
+    hyphenate-limit-chars:6 3 3;
+  }
+  /* Кнопка-переключатель (внутри попапа «Аа», база — .mdeditor-fab-btn). Фон при
+     нажатии не меняется — состояние видно по иконке: строки текста с дефисом на конце
+     строки; включено — как есть, выключено — с диагональной чертой (та же логика,
+     что у кнопки режима чтения). Иконка — маска, закрашенная currentColor, поэтому
+     цвет берётся у кнопки/темы сам и перерисовка экранов её не сбрасывает. */
+  .hyphens-btn::before{
+    content:"";
+    width:16px;
+    height:16px;
+    background:currentColor;
+    -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M3 12h13'/%3E%3Cpath d='M19 12h2'/%3E%3Cpath d='M3 18h9'/%3E%3Cpath d='M3 21L21 3'/%3E%3C/svg%3E") center/contain no-repeat;
+    mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M3 12h13'/%3E%3Cpath d='M19 12h2'/%3E%3Cpath d='M3 18h9'/%3E%3Cpath d='M3 21L21 3'/%3E%3C/svg%3E") center/contain no-repeat;
+  }
+  html.hyphens-on .hyphens-btn::before{
+    -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M3 12h13'/%3E%3Cpath d='M19 12h2'/%3E%3Cpath d='M3 18h9'/%3E%3C/svg%3E");
+    mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M3 12h13'/%3E%3Cpath d='M19 12h2'/%3E%3Cpath d='M3 18h9'/%3E%3C/svg%3E");
   }
