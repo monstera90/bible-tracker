@@ -10611,6 +10611,30 @@
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
     flushPendingCommentEdits();
+    // Закрытие окна настроек на вкладке «Книги» с открытым текстом книги
+    // (фикс 28.09: «возвращаюсь — оказываюсь в начале книги»). После
+    // закрытия оверлей получает display:none, и браузер сбрасывает
+    // scrollTop у #settingsTabContent в 0, при этом DOM книги остаётся.
+    // При следующем открытии renderBookReader читал позицию из этого уже
+    // сброшенного контейнера и получал первый блок книги. Поэтому позицию
+    // запоминаем ЗДЕСЬ, пока окно ещё видно (только если оно реально
+    // открыто — повторный вызов на уже скрытом окне увидел бы scrollTop=0).
+    // destroyBookReaderScrollListener сам сбрасывает отложенное
+    // сохранение по видимому scrollTop; слушатель заново вешает
+    // renderBookReaderText при возврате.
+    if(currentSettingsTab === "set2s_7" && bookReaderState && bookReaderState.mode !== "chapters" &&
+       settingsModalOverlay.classList.contains("open")){
+      var closingReaderContainer = document.getElementById("settingsTabContent");
+      if(closingReaderContainer && closingReaderContainer.querySelector(".book-reader-p, .book-reader-image-wrap")){
+        destroyBookReaderScrollListener();
+        var closingBookPos = currentBookReaderPosition(closingReaderContainer);
+        if(closingBookPos){
+          bookReaderState.restorePosition = closingBookPos;
+          bookReaderState.textScrollTop = closingReaderContainer.scrollTop;
+          setBookPosition(bookReaderState.hash, closingBookPos);
+        }
+      }
+    }
     var gearBtn = document.getElementById("settingsGearBtn");
     if(gearBtn) gearBtn.classList.remove("is-open");
     if(getExtraAnimationsEnabled()){
