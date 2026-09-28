@@ -2838,9 +2838,9 @@
     {id:1, name:"Пергамент"},{id:2, name:"Мята"},{id:3, name:"Лайм"},
     {id:4, name:"Лаванда и слоновая кость"},{id:5, name:"Аметист и слоновая кость"},
     {id:6, name:"Пыльная роза и графит"},{id:7, name:"Морская пена и песок"},
-    // тёмные (нижний ряд): 8 — янтарь, 9 — фиолетовый, 10 — лайм, 11 — мята,
+    // тёмные (нижний ряд): 8 — жёлтый, 9 — фиолетовый, 10 — лайм, 11 — мята,
     // 12 — оранжевый, 13 — красный; id 14 свободен под седьмую тёмную тему
-    {id:8, name:"Ночь и янтарь"},{id:9, name:"Ночь и фиолетовый"},{id:10, name:"Ночь и лайм"},
+    {id:8, name:"Ночь и жёлтый"},{id:9, name:"Ночь и фиолетовый"},{id:10, name:"Ночь и лайм"},
     {id:11, name:"Ночь и мята"},{id:12, name:"Ночь и оранжевый"},{id:13, name:"Ночь и красный"}
   ];
 
@@ -2902,8 +2902,16 @@
     holder.style.gridTemplateColumns = "repeat(7, max-content)";
     holder.style.alignItems = "center";
     var current = getCurrentThemeId();
+    // светлые темы — верхний ряд (столбец = id), тёмные — нижний; тёмная
+    // тема стоит под своей светлой парой: 2 мята → 11, 3 лайм → 10,
+    // 5 аметист → 9. Темы без пары (8 жёлтая, 12 оранжевая, 13 красная)
+    // занимают оставшиеся столбцы; столбец 7 нижнего ряда — под 7-ю тёмную
+    // тему (id 14).
+    var DARK_COL = {8:1, 11:2, 10:3, 12:4, 9:5, 13:6, 14:7};
     THEMES.forEach(function(theme){
       var dot = document.createElement("button");
+      dot.style.gridRow = theme.id <= 7 ? "1" : "2";
+      dot.style.gridColumn = String(theme.id <= 7 ? theme.id : (DARK_COL[theme.id] || 7));
       dot.type = "button";
       dot.className = "theme-dot" + (theme.id === current ? " selected" : "");
       dot.setAttribute("data-theme-id", theme.id);
@@ -2919,7 +2927,7 @@
     var swatches = {
       1:["#5c3d24","#48F78E"],2:["#28BCA3","#89FFDD"],3:["#68B723","#D1FF82"],
       4:["#8f7fb8","#8FE3C7"],5:["#7a3fc0","#8FE3C7"],6:["#7d8a99","#8FD9B8"],7:["#6fada0","#6FE0C0"],
-      8:["#1f2b36","#d9b26a"],9:["#1f2b36","#c9a8f0"],10:["#1f2b36","#9BDB4D"],
+      8:["#1f2b36","#FFFF00"],9:["#1f2b36","#7F00FF"],10:["#1f2b36","#9BDB4D"],
       11:["#1f2b36","#43D6B5"],12:["#1f2b36","#F57C00"],13:["#1f2b36","#FF0000"]
     };
     var pair = swatches[themeId] || swatches[1];

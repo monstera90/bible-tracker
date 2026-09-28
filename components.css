@@ -1755,7 +1755,9 @@
     max-height:0;
     overflow:hidden;
     transition:max-height .3s ease;
-    background:#fbf4e2;
+    /* фон раскрытой книги = фон её шапки (.book-header, --parchment-dark);
+       раньше был захардкожен кремовый #fbf4e2, чужой для всех тем (ТЗ 28.09) */
+    background:var(--parchment-dark);
   }
 
   .chapters-container.open{
@@ -1800,7 +1802,7 @@
   .chapter-item input:checked + label{
     background:var(--xp-green);
     border-color:var(--xp-green-dark);
-    color:#12351f;
+    color:var(--on-fill, #12351f); /* --on-fill задан только у тёмных тем (theme.css), у остальных — прежний тёмно-зелёный */
     font-weight:bold;
     box-shadow:inset 0 -3px 5px rgba(0,60,0,.35), inset 0 2px 2px rgba(255,255,255,.5);
   }
@@ -1813,7 +1815,7 @@
   .chapter-item.clr-green input:checked + label{
     background:var(--xp-green);
     border-color:var(--xp-green-dark);
-    color:#12351f;
+    color:var(--on-fill, #12351f); /* --on-fill задан только у тёмных тем (theme.css), у остальных — прежний тёмно-зелёный */
     font-weight:bold;
     box-shadow:inset 0 -3px 5px rgba(0,60,0,.35), inset 0 2px 2px rgba(255,255,255,.5);
   }

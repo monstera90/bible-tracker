@@ -148,7 +148,6 @@
     --ink:#ebe6da; --ink-soft:#a9b5c0;
     --gold-light:#3b566a;
     --groove-shadow:#4d6175;
-    --xp-green:#6fe0b0; --xp-green-dark:#3aa87e;
     --bg-top:#141d26; --bg-mid:#0e151c; --bg-bottom:#090e13;
     --danger:#d9786a; --danger-dark:#a5544a;
     --warn:#e0b04f; --warn-dark:#a8802f;
@@ -163,16 +162,19 @@
     --edge:rgba(255,255,255,.18);
     --tab-bg:var(--surface-raised);
   }
-  /* акценты: --wood — заголовки, пиктограммы, активная вкладка, верх
-     градиента шапки не используется (там --theme-color); --wood-dark —
-     тёмный оттенок акцента; --gold — приглушённый акцент для линий
-     (полоса под шапкой, подчёркивание заголовков разделов) */
-  html[data-theme="8"]{ --wood:#d9b26a; --wood-dark:#a98b53; --gold:#77623a; } /* янтарь */
-  html[data-theme="9"]{ --wood:#c9a8f0; --wood-dark:#9d83bb; --gold:#6f5c84; } /* фиолетовый */
-  html[data-theme="10"]{ --wood:#9BDB4D; --wood-dark:#79ab3c; --gold:#55782a; } /* лайм */
-  html[data-theme="11"]{ --wood:#43D6B5; --wood-dark:#34a78d; --gold:#257664; } /* мята */
-  html[data-theme="12"]{ --wood:#F57C00; --wood-dark:#bf6100; --gold:#874400; } /* оранжевый */
-  html[data-theme="13"]{ --wood:#FF0000; --wood-dark:#c70000; --gold:#8c0000; } /* красный */
+  /* акценты: --wood — заголовки, пиктограммы, активная вкладка; --wood-dark —
+     тёмный оттенок акцента; --gold — приглушённый акцент для линий (полоса
+     под шапкой, подчёркивание заголовков разделов). Заливки прочитанного
+     (главы, полосы прогресса, карта дней) в тёмных темах — тоже акцентные,
+     а не зелёные: --xp-green = акцент, --xp-green-dark = его тёмный оттенок.
+     --on-fill — цвет текста/цифр на акцентной заливке (тёмный на светлых
+     акцентах, белый на фиолетовом и красном). */
+  html[data-theme="8"]{ --wood:#FFFF00; --wood-dark:#c7c700; --gold:#8c8c00; --xp-green:#FFFF00; --xp-green-dark:#c7c700; --on-fill:#101820; } /* жёлтый */
+  html[data-theme="9"]{ --wood:#7F00FF; --wood-dark:#6300c7; --gold:#46008c; --xp-green:#7F00FF; --xp-green-dark:#6300c7; --on-fill:#ffffff; } /* фиолетовый */
+  html[data-theme="10"]{ --wood:#9BDB4D; --wood-dark:#79ab3c; --gold:#55782a; --xp-green:#9BDB4D; --xp-green-dark:#79ab3c; --on-fill:#101820; } /* лайм */
+  html[data-theme="11"]{ --wood:#43D6B5; --wood-dark:#34a78d; --gold:#257664; --xp-green:#43D6B5; --xp-green-dark:#34a78d; --on-fill:#101820; } /* мята */
+  html[data-theme="12"]{ --wood:#F57C00; --wood-dark:#bf6100; --gold:#874400; --xp-green:#F57C00; --xp-green-dark:#bf6100; --on-fill:#101820; } /* оранжевый */
+  html[data-theme="13"]{ --wood:#FF0000; --wood-dark:#c70000; --gold:#8c0000; --xp-green:#FF0000; --xp-green-dark:#c70000; --on-fill:#ffffff; } /* красный */
 
   /* (1) Шапка — тёмная, в тон странице; заголовок акцентного цвета. Верх
      шапки = --theme-color, поэтому шва со строкой состояния нет. */
@@ -217,6 +219,51 @@
   html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) .settings-fab:hover,
   html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) .settings-fab:focus-visible,
   html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) .settings-fab:active{ opacity:1; }
+
+  /* заливки прочитанного: блик сверху и затемнение снизу — нейтральные
+     (в светлых темах они с зелёным оттенком под зелёную заливку) */
+  html:is(...) .xp-fill,
+  html:is(...) .book-fill{
+    background-image:linear-gradient(180deg, rgba(255,255,255,.35) 0%, rgba(255,255,255,0) 40%, rgba(0,0,0,0) 60%, rgba(0,0,0,.25) 100%);
+  }
+  html:is(...) .chapter-item input:checked + label,
+  html:is(...) .chapter-item.clr-green input:checked + label{
+    box-shadow:inset 0 -3px 5px rgba(0,0,0,.3), inset 0 2px 2px rgba(255,255,255,.35);
+  }
+  /* активная вкладка: акцентный фон — текст/пиктограмма цветом --on-fill */
+  html:is(...) .settings-tab.active{ color:var(--on-fill); }
+  /* фиолетовая (9) и красная (13): на акцентной заливке светлый текст.
+     Список — все правила со «заливкой --wood и цветом --parchment» из
+     components.css/modals.css (для остальных тёмных тем тёмный
+     --parchment читается на светлых акцентах и так). */
+  html:is([data-theme="9"],[data-theme="13"]) .workbooks-run-btn,
+  html:is([data-theme="9"],[data-theme="13"]) .workbooks-result-btn:active,
+  html:is([data-theme="9"],[data-theme="13"]) .workbooks-download-btn.ready,
+  html:is([data-theme="9"],[data-theme="13"]) .subtitle-copy-btn.ready,
+  html:is([data-theme="9"],[data-theme="13"]) .subtitle-download-btn.ready,
+  html:is([data-theme="9"],[data-theme="13"]) .subtitle-save-note-btn.ready,
+  html:is([data-theme="9"],[data-theme="13"]) .mdeditor-title-confirm,
+  html:is([data-theme="9"],[data-theme="13"]) .mdeditor-fab-btn:hover,
+  html:is([data-theme="9"],[data-theme="13"]) .mdeditor-fab-btn.pressed,
+  html:is([data-theme="9"],[data-theme="13"]) .book-reader-pin-btn:hover,
+  html:is([data-theme="9"],[data-theme="13"]) .mdeditor-cleanup-primary,
+  html:is([data-theme="9"],[data-theme="13"]) .mdeditor-cleanup-list-btn:active,
+  html:is([data-theme="9"],[data-theme="13"]) #settingsTabContent .review-pill.active,
+  html:is([data-theme="9"],[data-theme="13"]) .version-history-item.selected,
+  html:is([data-theme="9"],[data-theme="13"]) .version-history-update-item,
+  html:is([data-theme="9"],[data-theme="13"]) .settings-tab.active,
+  html:is([data-theme="9"],[data-theme="13"]) .modal-btn-grid button:hover,
+  html:is([data-theme="9"],[data-theme="13"]) .review-pill.active,
+  html:is([data-theme="9"],[data-theme="13"]) .task-icon-btn.task-worktasks-btn.active,
+  html:is([data-theme="9"],[data-theme="13"]) .task-icon-btn.task-reminder-btn.active,
+  html:is([data-theme="9"],[data-theme="13"]) .reminder-bubble.is-set,
+  html:is([data-theme="9"],[data-theme="13"]) .app-reminder-banner,
+  html:is([data-theme="9"],[data-theme="13"]) .task-add-fab:hover,
+  html:is([data-theme="9"],[data-theme="13"]) .task-picker-grid button:hover,
+  html:is([data-theme="9"],[data-theme="13"]) .task-picker-grid button.current,
+  html:is([data-theme="9"],[data-theme="13"]) .task-import-attach-btn:hover{
+    color:#fff;
+  }
 
   /* цвет надписи о пропущенном чтении (.warn-text) — теперь единый для
      всех тем, как и у остальных прогресс-баров (см. .xp-text в
