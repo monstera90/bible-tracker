@@ -52,6 +52,22 @@
     --danger:#c2574a; --danger-dark:#86382f;
     --warn:#dd9a3a; --warn-dark:#a86f1c;
   }
+  /* Тема 2 (мята): шапка светлее, полоса под ней (border-bottom) тёмная —
+     цвета шапки и полосы поменяны местами (ТЗ 28.09). Верх шапки остаётся
+     var(--wood) — того же цвета, что строка состояния (theme-color, см.
+     syncThemeColorMeta в my.js), поэтому шва между ними нет; книзу шапка
+     светлеет до var(--gold). Текст шапки на светлом фоне — тёмный (--ink),
+     как у остальных заголовков темы. Специфичность выше базовых правил
+     header{} из base.css, порядок подключения не важен. */
+  html[data-theme="2"] header{
+    background:linear-gradient(180deg, var(--wood) 0%, var(--gold) 100%);
+    border-bottom-color:var(--wood-dark);
+  }
+  html[data-theme="2"] header h1{
+    color:var(--ink);
+    text-shadow:0 1px 2px rgba(255,255,255,.45);
+  }
+  html[data-theme="2"] header .quote{ color:var(--ink); }
   html[data-theme="3"]{
     --parchment:#f7fceb; --parchment-dark:#e8f4cc;
     --ink:#26350f; --ink-soft:#4f6a2a;

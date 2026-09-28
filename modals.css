@@ -534,6 +534,26 @@
       background:var(--wood);
     }
     .settings-modal-overlay.reading-mode-active .settings-corner-patch::after{ display:none; }
+    /* ТЗ 28.09 (все темы): плавный переход статус-бар → правая полоса.
+       Тень рамки (.settings-modal-box, box-shadow) ложится на полосу справа
+       от окна и начинается резко — ровно там, где кончается статус-бар
+       (его цвет = var(--wood) через theme-color, как и у заплатки), из-за
+       чего виден шов. Тень при этом НЕ убрана: сверху поверх неё лежит
+       градиент от var(--wood) (непрозрачный) к прозрачному, и тень
+       проявляется постепенно. Слой рисуется после рамки (позже в DOM,
+       выше неё), покрывает только колонку полосы (45px, как заплатка) и
+       рамку окна не задевает. В режиме чтения полосы нет — слой скрыт. */
+    .settings-modal-overlay::after{
+      content:"";
+      position:fixed;
+      top:0;
+      inset-inline-end:0;
+      width:45px;
+      height:44px;
+      background:linear-gradient(to bottom, var(--wood) 0%, transparent 100%);
+      pointer-events:none;
+    }
+    .settings-modal-overlay.reading-mode-active::after{ display:none; }
   }
   #settingsTabContent{
     display:flex;
