@@ -1,6 +1,15 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 42.6 (27.09) — долгое удержание язычка настроек убрано целиком (ТЗ
+   пользователя: закрытие открытого блокнота — только кликом мимо окна).
+   Из обработчика settingsGearBtn выкинуты FAB_LONGPRESS_MS/pointerdown-
+   pointerup-таймер и вся диагностика вокруг него (задача из версий 42.3/27.1/
+   27.2 закрыта); остался только обычный click: закрыто -> открыто, открыто ->
+   cycleSettingsTabSet (или closeSettingsModal(), если второй набор вкладок не
+   разблокирован — как и было). closeSettingsModal(true) (мгновенное закрытие
+   без анимации) теперь нигде не вызывается — сама функция и её ветка `quick`
+   не трогались, просто больше не используются.
    Версия: 42.5 (27.09) — реальная причина затянутых LONGTASK при открытии
    книги (ТЗ пользователя от 27.09, "приоритет нужным процессам, а не
    оптимизация по кругу"): дело было не в размере чанка, а в том, что
@@ -2826,7 +2835,7 @@
   var THEME_KEY = "__theme";
   var DEFAULT_THEME_ID = 4;
   var THEMES = [
-    {id:1, name:"Пергамент"},{id:2, name:"Шалфей и небо"},{id:3, name:"Розовый и мята"},
+    {id:1, name:"Пергамент"},{id:2, name:"Мята"},{id:3, name:"Лайм"},
     {id:4, name:"Лаванда и слоновая кость"},{id:5, name:"Аметист и слоновая кость"},
     {id:6, name:"Пыльная роза и графит"},{id:7, name:"Морская пена и песок"},
     {id:8, name:"Тёмная"}
@@ -2897,7 +2906,7 @@
 
   function themeSwatchGradient(themeId){
     var swatches = {
-      1:["#5c3d24","#48F78E"],2:["#5b7c99","#5AD1A0"],3:["#c98a97","#7FE8C0"],
+      1:["#5c3d24","#48F78E"],2:["#28BCA3","#89FFDD"],3:["#68B723","#D1FF82"],
       4:["#8f7fb8","#8FE3C7"],5:["#7a3fc0","#8FE3C7"],6:["#7d8a99","#8FD9B8"],7:["#6fada0","#6FE0C0"],
       8:["#161320","#8a7ab8"]
     };
@@ -10055,10 +10064,6 @@
   // к этому углу, визуально неотличимо.
   var settingsWaveRAF = null;
   var SETTINGS_WAVE_DURATION = 400; // мс, см. обсуждение с пользователем
-  // Схлопывание окна по долгому удержанию язычка (см. FAB_LONGPRESS_MS): 400 мс
-  // обычной волны ПОВЕРХ самого удержания давали ощущение «отрабатывает очень
-  // долго», поэтому в этом пути волна укорочена (эффект тот же, только быстрее).
-  var SETTINGS_WAVE_FAST_DURATION = 120; // мс
   // Геометрия волны в px, в координатах рамки (0,0 — её левый верхний
   // угол); пересчитывается в updateSettingsWaveGeometry перед каждым
   // запуском волны. minX/minY/maxX/maxY — прямоугольник, который нужно
@@ -10469,23 +10474,7 @@
     // во всех этих случаях).
     updateSettingsCornerPatchHeight();
   }
-  // quick=true (только из долгого удержания язычка, см. FAB_LONGPRESS_MS) —
-  // укороченная волна закрытия; во всех остальных местах вызывается без
-  // аргумента (именно вызовом, не как обработчик события — иначе quick
-  // получил бы объект события).
-  function closeSettingsModal(quick){
-    // ВРЕМЕННО (диагностика задержки долгого нажатия язычка, ТЗ
-    // пользователя от 27.09) — важно понять, КАКАЯ из двух веток ниже
-    // реально используется у этого пользователя: если "доп. анимации"
-    // включены, идёт совсем другой путь (animateSettingsWave, ниже —
-    // отдельный лог на его завершение), и правка с getComputedStyle
-    // (см. quick-ветку ниже) там вообще не участвует.
-    var _closeT0 = performance.now();
-    var _closeExtraAnim = getExtraAnimationsEnabled();
-    if(window.Debug) window.Debug.log(
-      "closeSettingsModal(quick=" + quick + "): вход, доп.анимации=" + _closeExtraAnim +
-      ", вкладка=" + (typeof currentSettingsTab !== "undefined" ? currentSettingsTab : "?")
-    );
+  function closeSettingsModal(){
     closeAppConfirmBar();
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
@@ -10501,58 +10490,6 @@
           settingsModalFrame.style.clipPath = "";
           settingsModalFrame.style.webkitClipPath = "";
         }
-        if(window.Debug) window.Debug.log(
-          "closeSettingsModal: волна (animateSettingsWave) реально закрыла окно через " +
-          Math.round(performance.now() - _closeT0) + "мс от входа в closeSettingsModal"
-        );
-      }, quick === true ? SETTINGS_WAVE_FAST_DURATION : undefined);
-    } else if(quick === true){
-      // Долгое удержание язычка при ВЫКЛЮЧЕННЫХ дополнительных анимациях —
-      // закрываем мгновенно. Сам JS тут ничего не ждёт, но оверлей скрыт
-      // через opacity/visibility (см. .settings-modal-overlay в modals.css),
-      // и CSS-transition на них растягивал закрытие даже без волны. Поэтому
-      // на время снятия класса "open" гасим переходы инлайном, принудительно
-      // применяем стили (offsetHeight) и в следующем кадре возвращаем
-      // переходы обратно стилям из CSS — обычное закрытие/открытие не
-      // затрагивается.
-      var ov = settingsModalOverlay;
-      ov.style.transition = "none";
-      if(settingsModalFrame) settingsModalFrame.style.transition = "none";
-      ov.classList.remove("open");
-      ov.style.opacity = "";
-      if(settingsModalFrame){
-        settingsModalFrame.style.clipPath = "";
-        settingsModalFrame.style.webkitClipPath = "";
-      }
-      // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя: "нажатия должны отрабатывать
-      // молниеносно независимо от вкладки") — раньше здесь стояло
-      // "void ov.offsetHeight" (тот же приём, тот же смысл: заставить
-      // браузер применить transition:none ПРЯМО СЕЙЧАС, а не откладывать
-      // до следующего кадра). Проблема в том, что offsetHeight — это
-      // layout-свойство: чтобы его вернуть, браузер обязан пересчитать
-      // геометрию ВСЕГО документа, а не только ov. На вкладке, которую уже
-      // открывали в этой сессии, эта раскладка давно посчитана и не
-      // менялась — reflow почти бесплатный. А вот на вкладке, открытой
-      // впервые за сессию (её разметка только что появилась в DOM и ещё ни
-      // разу не укладывалась браузером — обычно это происходит лениво,
-      // перед следующей отрисовкой кадра), именно этот reflow СЧИТАЕТ ЕЁ
-      // РАСКЛАДКУ ВПЕРВЫЕ, синхронно, прямо здесь — то есть уже ПОСЛЕ того,
-      // как таймер долгого нажатия честно сработал вовремя (250мс), но ДО
-      // того, как окно реально закрылось. Это и ощущалось как "иногда 400мс
-      // вместо 250" — одинаково на любой вкладке, а не только на книгах.
-      // getComputedStyle(...).opacity требует пересчёта СТИЛЕЙ (чтобы
-      // отдать актуальное значение), но не требует пересчёта layout —
-      // opacity не влияет на геометрию, поэтому transition:none применяется
-      // так же гарантированно, но без цены полной раскладки документа.
-      var _flushT0 = performance.now();
-      void getComputedStyle(ov).opacity;
-      if(window.Debug) window.Debug.log(
-        "closeSettingsModal: getComputedStyle(ov).opacity (форсированный flush стилей) занял " +
-        Math.round(performance.now() - _flushT0) + "мс"
-      );
-      requestAnimationFrame(function(){
-        ov.style.transition = "";
-        if(settingsModalFrame) settingsModalFrame.style.transition = "";
       });
     } else {
       settingsModalOverlay.classList.remove("open");
@@ -14572,9 +14509,8 @@
     // HTML-строка книги (ВСЕ главы разом, у Библии — десятки тысяч блоков)
     // собиралась и вставлялась ОДНИМ синхронным куском. Пока JS занят этим
     // (и пока браузер парсит и раскладывает получившуюся разметку), поток
-    // выполнения занят целиком — ни клик, ни УЖЕ ВЗВЕДЁННЫЙ setTimeout
-    // долгого нажатия язычка настроек (FAB_LONGPRESS_MS выше) не может
-    // сработать вовремя, поэтому именно при первом заходе на вкладку "Мои
+    // выполнения занят целиком — ни клик, ни что-либо другое на главном
+    // потоке не может сработать вовремя, поэтому именно при первом заходе на вкладку "Мои
     // книги" за сессию (когда книга переоткрывается заново — см.
     // switchSettingsTab/booksTabVisitedThisSession) интерфейс на это время
     // "залипал", а на уже открытой вкладке (bookReaderState в памяти,
@@ -16772,8 +16708,9 @@
   // блокнот не закрыт (см. cycleSettingsTabSet и обработчик клика по
   // settingsGearBtn ниже; ТЗ пользователя от 12.09). Закрыть блокнот
   // короткий клик по язычку больше не может, пока разблокирован второй
-  // набор — для этого клик МИМО окна (см. settingsModalOverlay ниже) или
-  // долгое удержание самого язычка (200 мс, см. FAB_LONGPRESS_MS ниже).
+  // набор — для этого клик МИМО окна (см. settingsModalOverlay ниже).
+  // Долгое удержание язычка тоже закрывало блокнот, но убрано по ТЗ
+  // пользователя от 27.09 (переход исключительно кликом мимо окна).
   var settingsActiveTabSet = 1;
   // Запоминает набор вкладок (1 или 2) и саму последнюю реальную вкладку
   // (см. settingsLastStackTab ниже) в localStorage, а не только в памяти —
@@ -17366,46 +17303,18 @@
 
   var settingsGearBtn = document.getElementById("settingsGearBtn");
   if(settingsGearBtn){
-    // Долгое удержание язычка сворачивает уже открытый блокнот (ТЗ
-    // пользователя от 12.09) — второй способ закрыть его, помимо клика
-    // мимо окна, раз короткий клик по язычку теперь только крутит набор
-    // вкладок по кругу и сам никогда не закрывает (см. обработчик клика
-    // ниже).
-    var FAB_LONGPRESS_MS = 200;
-    var fabLongPressTimer = null;
-    var fabLongPressFired = false;
-    // Выставляется в pointerdown, когда жест — тач/перо и мы сами погасили
-    // его preventDefault'ом (см. ниже): значит, браузер НЕ пришлёт следом
-    // свой click, и по pointerup нужно вызвать ту же логику вручную. Для
-    // мыши/клавиатуры остаётся false — там штатный click никуда не делся
-    // (важно для доступности: активация с клавиатуры идёт через click, а
-    // не через pointerdown/up, поэтому этот путь трогать нельзя).
-    var fabTouchDefaultPrevented = false;
-
-    function clearFabLongPressTimer(){
-      if(fabLongPressTimer){ clearTimeout(fabLongPressTimer); fabLongPressTimer = null; }
-    }
-
-    // Общая логика короткого тапа/клика по язычку — раньше жила прямо в
-    // обработчике "click", теперь вызывается и оттуда (мышь/клавиатура), и
-    // вручную по pointerup для тач/пера (см. ниже, почему).
+    // Короткий клик по язычку: закрыто -> открыто, открыто -> переключение
+    // набора вкладок по кругу (если разблокирован второй набор) либо
+    // закрытие (если второго набора нет). Долгое удержание раньше тоже
+    // закрывало блокнот — убрано по ТЗ пользователя (закрытие теперь
+    // только кликом мимо окна, см. settingsModalOverlay выше).
     function handleFabTap(){
-      // ВРЕМЕННО (та же диагностика, ТЗ пользователя от 27.09) — общее
-      // время обработки короткого тапа по язычку целиком (переключение
-      // вкладки внутри cycleSettingsTabSet/switchSettingsTab выполняется
-      // синхронно ниже по стеку вызовов, поэтому этого одного замера
-      // достаточно, отдельный такой же есть внутри самого
-      // switchSettingsTab — сравнение двух чисел покажет, есть ли
-      // заметные накладные расходы ДО/ПОСЛЕ самого рендера вкладки).
-      // Убрать вместе с остальным диагностическим кодом этой задачи.
-      var _fabTapT0 = performance.now();
-      try{
       if(settingsModalOverlay && settingsModalOverlay.classList.contains("open")){
         // блокнот уже открыт: короткий клик всегда переключает набор
         // вкладок по кругу (набор 1 <-> набор 2 <-> ...), пока второй
         // набор разблокирован кодом — без ограничения числа переключений
         // (см. cycleSettingsTabSet выше). Закрытие теперь только через
-        // клик мимо окна или долгое удержание язычка (см. выше).
+        // клик мимо окна (см. выше).
         if(isSet2Unlocked()){
           cycleSettingsTabSet();
         } else {
@@ -17420,108 +17329,9 @@
         // getResumeSettingsState выше) — переживает и закрытие приложения.
         openSettingsModal();
       }
-      } finally {
-        if(window.Debug) window.Debug.log(
-          "handleFabTap: обработка целиком заняла " +
-          Math.round(performance.now() - _fabTapT0) + "мс"
-        );
-      }
     }
 
-    settingsGearBtn.addEventListener("pointerdown", function(e){
-      fabLongPressFired = false;
-      clearFabLongPressTimer();
-      // Тач/перо — гасим нативный жест долгого нажатия preventDefault'ом
-      // прямо на pointerdown (ТЗ пользователя от 26.09): системную
-      // вибрацию Android/Chrome на долгом тапе вызывает сам браузерный
-      // распознаватель жеста (готовится показать контекстное меню/
-      // выделение) ещё ДО события "contextmenu" — поэтому preventDefault
-      // на contextmenu (ниже) и CSS touch-action/-webkit-touch-callout её
-      // не убирают: жест уже опознан и haptic уже отработал. Единственный
-      // рабочий момент — на pointerdown, до того как браузер вообще начал
-      // его распознавать. Побочный эффект: браузер после этого не шлёт
-      // свой click для тач-указателя (спецификация Pointer Events — см.
-      // fabTouchDefaultPrevented и pointerup-обработчик ниже), поэтому
-      // мышь и клавиатуру (доступность) сюда не пускаем — там нативный
-      // click работал и продолжает работать без изменений.
-      fabTouchDefaultPrevented = (e.pointerType === "touch" || e.pointerType === "pen");
-      if(fabTouchDefaultPrevented && e.cancelable) e.preventDefault();
-      // Удержание значимо, только пока блокнот уже открыт — если он
-      // закрыт, обычный короткий клик и так его откроет, таймер заводить
-      // незачем (и не нужно мешать обычному открытию).
-      if(!(settingsModalOverlay && settingsModalOverlay.classList.contains("open"))) return;
-      // ВРЕМЕННО (диагностика задержки долгого нажатия язычка, ТЗ
-      // пользователя от 27.09: "250 vs иногда 400мс на невиданной за сессию
-      // вкладке") — засекаем момент постановки таймера и ожидаемое время
-      // его срабатывания; сравнение с реальным performance.now() внутри
-      // самого callback'а (см. ниже) покажет, опаздывает ли ИМЕННО ТАЙМЕР
-      // (main thread был занят чем-то другим, когда должен был сработать
-      // setTimeout) или нет — тогда вся задержка внутри closeSettingsModal
-      // (там своя диагностика, см. её "quick"-ветку). Убрать вместе с
-      // остальным диагностическим кодом этой задачи, когда причина найдена.
-      var _fabPressT0 = performance.now();
-      var _fabPressTab = (typeof currentSettingsTab !== "undefined") ? currentSettingsTab : "?";
-      fabLongPressTimer = setTimeout(function(){
-        fabLongPressTimer = null;
-        fabLongPressFired = true;
-        var _fabFireNow = performance.now();
-        var _fabElapsed = _fabFireNow - _fabPressT0;
-        if(window.Debug) window.Debug.log(
-          "FAB longpress: таймер сработал через " + Math.round(_fabElapsed) + "мс (ожидали " +
-          FAB_LONGPRESS_MS + "мс, опоздание " + Math.round(_fabElapsed - FAB_LONGPRESS_MS) +
-          "мс), вкладка=" + _fabPressTab
-        );
-        var _fabCloseT0 = performance.now();
-        closeSettingsModal(true);
-        if(window.Debug) window.Debug.log(
-          "FAB longpress: closeSettingsModal(true) вернул управление через " +
-          Math.round(performance.now() - _fabCloseT0) + "мс"
-        );
-      }, FAB_LONGPRESS_MS);
-    });
-    // Дублируем preventDefault на touchstart: в части сборок Chromium
-    // (в т.ч. WebAPK, которым и является установленное PWA) встроенный
-    // распознаватель жеста долгого нажатия успевает "завестись" — и
-    // вызвать системную вибрацию — ещё до pointerdown, а touchstart в
-    // конвейере событий идёт раньше него. {passive:false} обязателен —
-    // иначе preventDefault в пассивном слушателе браузер молча
-    // игнорирует. Клик от этого не ломается: для тач-указателя он и так
-    // теперь вызывается вручную по pointerup (fabTouchDefaultPrevented
-    // выше), а не через нативный click.
-    settingsGearBtn.addEventListener("touchstart", function(e){
-      if(e.cancelable) e.preventDefault();
-    }, {passive:false});
-    settingsGearBtn.addEventListener("pointerup", function(){
-      clearFabLongPressTimer();
-      // Долгое удержание уже само закрыло блокнот в pointerdown-таймере
-      // выше — короткий тап после него нужно проглотить, а не открывать/
-      // переключать заново.
-      if(fabLongPressFired){ fabLongPressFired = false; return; }
-      // Тач/перо: мы сами погасили нативный жест на pointerdown (см.
-      // выше), поэтому штатный click для этого указателя не придёт —
-      // вызываем ту же логику вручную здесь.
-      if(fabTouchDefaultPrevented){
-        fabTouchDefaultPrevented = false;
-        handleFabTap();
-      }
-    });
-    ["pointerleave", "pointercancel"].forEach(function(evt){
-      settingsGearBtn.addEventListener(evt, function(){
-        clearFabLongPressTimer();
-        fabTouchDefaultPrevented = false;
-      });
-    });
-    // Подстраховка для WebView/движков, где даже preventDefault на
-    // pointerdown не всегда гасит системное контекстное меню (тот же
-    // приём, что и у обложек книг, см. contextmenu-блок выше по файлу).
-    settingsGearBtn.addEventListener("contextmenu", function(e){ e.preventDefault(); });
-
     settingsGearBtn.addEventListener("click", function(){
-      // Сюда для тач/пера теперь в норме доходить не должно (см.
-      // preventDefault в pointerdown выше) — эта ветка обслуживает мышь и
-      // активацию с клавиатуры (Enter/Space), которые идут через click, а
-      // не через pointerdown/pointerup.
-      if(fabLongPressFired){ fabLongPressFired = false; return; }
       handleFabTap();
     });
   }

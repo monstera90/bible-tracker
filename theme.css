@@ -42,26 +42,26 @@
     --warn:#e2a640; --warn-dark:#b17a29;
   }
   html[data-theme="2"]{
-    --parchment:#e9f0e6; --parchment-dark:#dbe6d6;
-    --ink:#2f3b2c; --ink-soft:#57624f;
-    --wood:#5b7c99; --wood-dark:#3f5a70;
-    --gold:#a9c4a0; --gold-light:#cfe0c8;
-    --groove-shadow:#8fae87;
-    --xp-green:#5AD1A0; --xp-green-dark:#2E9E76;
-    --bg-top:#eef3ea; --bg-mid:#dbe6d9; --bg-bottom:#c7d8c2;
-    --danger:#b3654f; --danger-dark:#7a4436;
-    --warn:#c97a52; --warn-dark:#9a5936;
+    --parchment:#f0fcf8; --parchment-dark:#d9f5ec;
+    --ink:#0f3a33; --ink-soft:#3f6f65;
+    --wood:#28BCA3; --wood-dark:#0E9A83;
+    --gold:#43D6B5; --gold-light:#89FFDD;
+    --groove-shadow:#8fd6c6;
+    --xp-green:#43D6B5; --xp-green-dark:#28BCA3;
+    --bg-top:#f0fcf8; --bg-mid:#d5f5ea; --bg-bottom:#b5ebdc;
+    --danger:#c2574a; --danger-dark:#86382f;
+    --warn:#dd9a3a; --warn-dark:#a86f1c;
   }
   html[data-theme="3"]{
-    --parchment:#fbeef1; --parchment-dark:#f6dee3;
-    --ink:#4a2c33; --ink-soft:#7a5560;
-    --wood:#c98a97; --wood-dark:#9c6270;
-    --gold:#f3c6cf; --gold-light:#fbdfe4;
-    --groove-shadow:#d9a7b0;
-    --xp-green:#7FE8C0; --xp-green-dark:#3FB98E;
-    --bg-top:#fdf1f2; --bg-mid:#f8dfe4; --bg-bottom:#f1c9d2;
-    --danger:#c2607a; --danger-dark:#8a3f56;
-    --warn:#d97a6a; --warn-dark:#a85647;
+    --parchment:#f7fceb; --parchment-dark:#e8f4cc;
+    --ink:#26350f; --ink-soft:#4f6a2a;
+    --wood:#68B723; --wood-dark:#3A9104;
+    --gold:#9BDB4D; --gold-light:#D1FF82;
+    --groove-shadow:#a6cf75;
+    --xp-green:#9BDB4D; --xp-green-dark:#68B723;
+    --bg-top:#f7fceb; --bg-mid:#e6f5c4; --bg-bottom:#cdeb9c;
+    --danger:#b3542f; --danger-dark:#7d3820;
+    --warn:#d99a2b; --warn-dark:#a87418;
   }
   html[data-theme="4"]{
     --parchment:#f4f0f8; --parchment-dark:#e9e0f1;

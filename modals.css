@@ -513,7 +513,27 @@
      основного правила .settings-modal-box (та же специфичность —
      решает порядок в файле). */
   @media (max-width:600px){
-    .settings-modal-box{ border-radius:0; border-end-start-radius:10px; }
+    .settings-modal-box{ border-radius:0; border-end-start-radius:10px; border-start-end-radius:14px; }
+    /* ТЗ 28.09: правый верхний угол области чтения на телефоне скруглён
+       (14px — как у правого верхнего угла язычков стека, .settings-tab).
+       Вырез угла закрашен цветом правой полосы
+       (та же var(--wood), что у .settings-corner-patch): квадрат 10×10
+       14×14 на стыке заплатки и рамки — псевдоэлемент заплатки, лежит ПОД
+       рамкой, поэтому виден только в вырезе. Верх квадрата = верхний
+       отступ рамки (--corner-top, сейчас 0). Слева
+       от заплатки (inset-inline-end:100%) — работает и в раскладке
+       левши. В режиме чтения угол прямой — квадрат прячется. */
+    .settings-modal-overlay{ --corner-top:0px; }
+    .settings-corner-patch::after{
+      content:"";
+      position:absolute;
+      top:var(--corner-top);
+      inset-inline-end:100%;
+      width:14px;
+      height:14px;
+      background:var(--wood);
+    }
+    .settings-modal-overlay.reading-mode-active .settings-corner-patch::after{ display:none; }
   }
   #settingsTabContent{
     display:flex;
@@ -778,6 +798,9 @@
      светился бы кусочек затемнённой подложки. */
   .settings-modal-overlay.reading-mode-active .settings-modal-box{
     border-end-start-radius:0;
+    /* ТЗ 28.09: и правый верхний — прямой: стек вкладок скрыт, заплатка
+       цвета шапки обнулена (my.js), в вырезе засветилась бы подложка. */
+    border-start-end-radius:0;
   }
   /* Кнопка-язычок (.settings-fab) не в оверлее — она position:fixed сама по
      себе, поэтому прячем её через :has() от body: только когда окно открыто
