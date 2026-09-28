@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.38.8";
+const APP_VERSION = "v0.38.9";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -380,6 +380,9 @@ const REMINDER_CLICK_KEY = "click";
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const taskId = event.notification.data && event.notification.data.taskId;
+  // kind — тип уведомления (28.09: "group-task-new" — новая общая задача от другого
+  // участника); для напоминаний не задан. Страница по нему решает, что показать.
+  const kind = (event.notification.data && event.notification.data.kind) || "";
   // кнопка уведомления: "done" («✓ Готово») / "snooze" («Отложить»); "" — клик по
   // самому уведомлению. Страница разбирает действие в notifications.js
   // (consumePendingClick → handleNotificationAction). Приложение выводим на
@@ -392,7 +395,7 @@ self.addEventListener("notificationclick", (event) => {
         const cache = await caches.open(REMINDER_CLICK_CACHE);
         await cache.put(
           REMINDER_CLICK_KEY,
-          new Response(JSON.stringify({ taskId: taskId, action: action, at: Date.now() }), {
+          new Response(JSON.stringify({ taskId: taskId, action: action, kind: kind, at: Date.now() }), {
             headers: { "Content-Type": "application/json" }
           })
         );

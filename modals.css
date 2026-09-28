@@ -863,6 +863,15 @@
   .settings-modal-overlay.reading-mode-active .task-flag-dot{
     display:none;
   }
+  /* ТЗ 28.09: дубликат индикатора синхронизации (.sync-status-modal-dup,
+     см. выше) в режиме чтения и в полноэкранном режиме (оба вешают
+     .reading-mode-active, см. applyReadingModeVisual в my.js) не нужен —
+     точка лежит поверх текста в правом верхнем углу. Прячем только копию
+     внутри окна настроек; оригинал в шапке остаётся, его состояние и
+     обновление (syncStatusPillDup в my.js) не затрагиваются. */
+  .settings-modal-overlay.reading-mode-active .sync-status-modal-dup{
+    display:none;
+  }
 
   .settings-row{
     display:flex;
@@ -1351,7 +1360,12 @@
   .task-row{
     display:flex;
     align-items:flex-start;
-    padding:6px 2px;
+    /* верхний отступ 6px -> 1px (28.09, ТЗ пользователя): видимое расстояние
+       от разделителя до текста и до кнопок (6px + ~3.5px запас внутри строки
+       текста/кнопки 22px) уменьшено примерно вдвое, ~9.5px -> ~4.5px.
+       Нижний отступ прежний (6px). Одно правило на все вкладки задач,
+       архив и сеточный режим (.task-grid-list) — везде тот же .task-row. */
+    padding:1px 2px 6px;
     border-top:1px solid var(--groove-shadow);
   }
   .task-row:first-child{ border-top:none; }

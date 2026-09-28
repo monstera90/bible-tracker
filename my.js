@@ -6634,6 +6634,142 @@
     }
   }
 
+  // ===================== УВЕДОМЛЕНИЕ О НОВОЙ ОБЩЕЙ ЗАДАЧЕ ОТ ДРУГОГО УЧАСТНИКА (ТЗ 28.09) =====================
+  // БЕЗ НОВЫХ СЕТЕВЫХ ЗАПРОСОВ: отдельного опроса нет. Проверка идёт только тогда, когда
+  // обычный pull общих задач (открытие приложения, вкладки, событие «online» — см.
+  // refreshJointTasksData) уже сам принёс чужие правки и binding вызвал onRemoteChange.
+  // Значит, уведомление приходит с той частотой, с какой приложение и так обновляет
+  // задачи, и не чаще.
+  // «Новая» = id, которого ещё нет в списке уже виденных (localStorage, на группу),
+  // createdBy — не это устройство, задача не выполнена и текст не пустой (createGroupTask
+  // сначала создаёт пустую запись, текст приходит следующей правкой — до его появления
+  // ждём, id при этом «виденным» не помечается). Самый первый запуск (списка ещё нет) —
+  // молча запоминаем всё, что уже лежит в кэше: иначе при подключении к группе или
+  // после переустановки пришла бы лавина уведомлений про старые задачи.
+  var GROUP_TASKS_SEEN_KEY_PREFIX = "bibleGroupTasksSeen_v1_";
+  var groupTaskToastEl = null;
+  var groupTaskToastTimer = null;
+  function handleGroupTasksRemoteChange(){
+    try{ notifyAboutNewGroupTasks(); }catch(e){ console.error(e); }
+    rerenderJointTasksTabIfOpen();
+  }
+  function notifyAboutNewGroupTasks(){
+    if(!sharedGroup) return;
+    var key = GROUP_TASKS_SEEN_KEY_PREFIX + sharedGroup.groupId;
+    var seen = null;
+    try{ seen = JSON.parse(localStorage.getItem(key) || "null"); }catch(e){ seen = null; }
+    var firstRun = !seen || !seen.ids;
+    var knownIds = firstRun ? {} : seen.ids;
+    var me = getDeviceId();
+    var nextIds = {};
+    var fresh = [];
+    getAllGroupTasks().forEach(function(t){
+      if(knownIds[t.id] || firstRun || !t.c.createdBy || t.c.createdBy === me || t.c.checked){
+        nextIds[t.id] = 1;
+        return;
+      }
+      if(!t.c.text || !t.c.text.trim()) return; // ждём текста, не помечаем виденной
+      nextIds[t.id] = 1;
+      fresh.push(t);
+    });
+    try{ localStorage.setItem(key, JSON.stringify({ids: nextIds})); }catch(e){}
+    if(!fresh.length) return;
+    // Вкладка «Общие задачи» уже открыта на экране — новая задача и так появится в списке.
+    var viewingJoint = currentSettingsTab === "jointtasks" && settingsModalOverlay &&
+      settingsModalOverlay.classList.contains("open");
+    if(viewingJoint) return;
+    // Системное уведомление Android — тем же способом, что и напоминания о задачах
+    // (registration.showNotification через service worker); нет разрешения на
+    // уведомления или не вышло — запасная плашка внутри приложения.
+    showGroupTaskSystemNotification(fresh).then(function(shown){
+      if(!shown) showGroupTaskToast(fresh);
+    });
+  }
+  function groupTaskNotificationTexts(fresh){
+    var title, body;
+    function who(t){ return getCachedGroupMemberName(t.c.createdBy) || "Участник"; }
+    function snip(t, n){
+      var x = t.c.text.trim().replace(/\s+/g, " ");
+      return x.length > n ? x.slice(0, n) + "…" : x;
+    }
+    if(fresh.length === 1){
+      title = "Новая общая задача";
+      body = who(fresh[0]) + ": " + snip(fresh[0], 120);
+    } else {
+      title = "Новых общих задач: " + fresh.length;
+      body = fresh.slice(0, 3).map(function(t){ return "• " + snip(t, 50); }).join("\n") +
+        (fresh.length > 3 ? "\n…" : "");
+    }
+    return {title: title, body: body};
+  }
+  // Показ идёт ТОЛЬКО если разрешение на уведомления уже выдано (его запрашивает
+  // модуль напоминаний, здесь разрешение не запрашивается). data.taskId — для
+  // одной задачи: клик по уведомлению обрабатывает тот же путь, что и у напоминаний
+  // (sw.js notificationclick → notifications.js → openReminderTask: окно задач на
+  // вкладке «Общие задачи», строка подводится в центр).
+  function showGroupTaskSystemNotification(fresh){
+    try{
+      if(!("Notification" in window) || Notification.permission !== "granted" ||
+         !("serviceWorker" in navigator)) return Promise.resolve(false);
+      var txt = groupTaskNotificationTexts(fresh);
+      var single = fresh.length === 1;
+      return navigator.serviceWorker.ready.then(function(reg){
+        if(!reg || !reg.showNotification) return false;
+        return reg.showNotification(txt.title, {
+          body: txt.body,
+          icon: "./icon-192x192.png",
+          badge: "./icon-192x192.png",
+          tag: single ? ("group-task-" + fresh[0].id) : "group-task-many",
+          renotify: true,
+          vibrate: [200, 100, 200],
+          data: {taskId: fresh[0].id, kind: "group-task-new"} // при нескольких — открывается первая из них
+        }).then(function(){ return true; });
+      }).catch(function(err){ console.error(err); return false; });
+    }catch(e){ console.error(e); return Promise.resolve(false); }
+  }
+  function openJointTasksFromToast(){
+    try{
+      var alreadyOpen = settingsModalOverlay && settingsModalOverlay.classList.contains("open");
+      if(!alreadyOpen) openSettingsModal();
+      settingsActiveTabSet = 1;
+      applySettingsTabSetVisibility();
+      switchSettingsTab("jointtasks");
+    }catch(e){ console.error(e); }
+  }
+  function hideGroupTaskToast(){
+    if(groupTaskToastTimer){ clearTimeout(groupTaskToastTimer); groupTaskToastTimer = null; }
+    if(groupTaskToastEl) groupTaskToastEl.style.display = "none";
+  }
+  function showGroupTaskToast(fresh){
+    var text;
+    if(fresh.length === 1){
+      var who = getCachedGroupMemberName(fresh[0].c.createdBy) || "участник";
+      var snippet = fresh[0].c.text.trim().replace(/\s+/g, " ");
+      if(snippet.length > 70) snippet = snippet.slice(0, 70) + "…";
+      text = "Новая общая задача (" + who + "): " + snippet;
+    } else {
+      text = "Новых общих задач: " + fresh.length;
+    }
+    if(!groupTaskToastEl){
+      groupTaskToastEl = document.createElement("div");
+      groupTaskToastEl.setAttribute("role", "status");
+      groupTaskToastEl.style.cssText =
+        "position:fixed;left:50%;transform:translateX(-50%);max-width:90vw;box-sizing:border-box;" +
+        "top:calc(env(safe-area-inset-top, 0px) + 10px);z-index:1500;padding:10px 14px;" +
+        "border-radius:14px;background:var(--wood);color:var(--parchment);font-size:14px;line-height:1.35;" +
+        "box-shadow:0 2px 10px rgba(0,0,0,.35);cursor:pointer;-webkit-tap-highlight-color:transparent;";
+      groupTaskToastEl.addEventListener("click", function(){
+        hideGroupTaskToast();
+        openJointTasksFromToast();
+      });
+      document.body.appendChild(groupTaskToastEl);
+    }
+    groupTaskToastEl.textContent = text;
+    groupTaskToastEl.style.display = "block";
+    if(groupTaskToastTimer) clearTimeout(groupTaskToastTimer);
+    groupTaskToastTimer = setTimeout(hideGroupTaskToast, 7000);
+  }
+
   function getGroupTasksBinding(){
     if(groupTasksBinding) return groupTasksBinding;
     var rt = getSyncEngineRuntime();
@@ -6653,7 +6789,7 @@
       },
       // pull применил чужие правки — перерисовать вкладку (с защитой от
       // прерывания редактирования, см. rerenderJointTasksTabIfOpen)
-      onRemoteChange: rerenderJointTasksTabIfOpen,
+      onRemoteChange: handleGroupTasksRemoteChange,
       log: syncEngineLog
     });
     return groupTasksBinding;
@@ -17539,6 +17675,44 @@
       handleFabTap();
     });
   }
+
+  // Автозакрытие раскрытых попапов «Аа»/«Ж» (и «Скачать» в субтитрах) кликом
+  // мимо (ТЗ 28.09). Один слушатель на документ (capture — срабатывает даже
+  // если что-то гасит всплытие). Попап закрывается НЕ снятием класса «open»,
+  // а программным кликом по его же кнопке-переключателю: в каждом месте
+  // (задачи, «Мой блокнот» в mdeditor.js, ридер книг, субтитры) состояние
+  // «открыт/закрыт» дублируется в своей локальной переменной, и снятие
+  // класса извне рассинхронизировало бы её (следующий клик по кнопке «Аа»
+  // ничего бы не открыл). Клик внутри самого попапа или по его обёртке
+  // (кнопки «+»/«−», сама «Аа»/«Ж») попап не закрывает.
+  (function initFontFormatPopupsAutoClose(){
+    var OPEN_POPUPS_SELECTOR = ".mdeditor-fontsize-popup.open, #taskFormatPopup.open, #taskFontSizePopup.open";
+    function findToggleBtn(popup){
+      if(popup.id){
+        var byId = document.getElementById(popup.id.replace(/Popup$/, "Btn"));
+        if(byId && byId !== popup) return byId;
+      }
+      var wrap = popup.parentElement;
+      if(!wrap) return null;
+      for(var i = 0; i < wrap.children.length; i++){
+        var ch = wrap.children[i];
+        if(ch !== popup && ch.tagName === "BUTTON") return ch;
+      }
+      return null;
+    }
+    document.addEventListener("click", function(e){
+      var popups = document.querySelectorAll(OPEN_POPUPS_SELECTOR);
+      if(!popups.length) return;
+      var target = e.target;
+      for(var i = 0; i < popups.length; i++){
+        var popup = popups[i];
+        var wrap = popup.parentElement || popup;
+        if(target && wrap.contains(target)) continue;
+        var btn = findToggleBtn(popup);
+        if(btn) btn.click();
+      }
+    }, true);
+  })();
 
   // Кнопка режима чтения слева от язычка (ТЗ пользователя от 19.09): клик по
   // самому язычку с режимом чтения больше не связан. Стиль — тот же класс

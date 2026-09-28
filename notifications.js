@@ -389,7 +389,10 @@ window.initNotificationsModule = function(deps){
   }
 
   // что делать после клика по уведомлению или его кнопке
-  function handleNotificationAction(id, action){
+  function handleNotificationAction(id, action, kind){
+    // уведомление о новой общей задаче (my.js, 28.09): только открыть вкладку и
+    // подсветить строку — без карточки-напоминания (отложить/готово там не нужны)
+    if(kind === "group-task-new"){ openTaskAndFlash(id); return; }
     if(action === "done"){
       var t = findTask(id);
       var text = t ? cleanText(t.c && t.c.text) : "";
@@ -515,7 +518,7 @@ window.initNotificationsModule = function(deps){
         if(!resp) return;
         return resp.json().then(function(data){
           cache.delete(CLICK_KEY);
-          if(data && data.taskId) handleNotificationAction(data.taskId, data.action || "");
+          if(data && data.taskId) handleNotificationAction(data.taskId, data.action || "", data.kind || "");
         });
       });
     }).catch(function(e){ log("consumePendingClick: " + (e && e.message ? e.message : e)); });
