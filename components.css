@@ -3880,11 +3880,36 @@
      строки; включено — как есть, выключено — с диагональной чертой (та же логика,
      что у кнопки режима чтения). Иконка — маска, закрашенная currentColor, поэтому
      цвет берётся у кнопки/темы сам и перерисовка экранов её не сбрасывает. */
+  /* Цвет — тот же токен темы, что у соседних «Аа»/«+»/«−» (.mdeditor-fab-btn: var(--wood));
+     задан явно и с запасом по специфичности, иначе на тёмных темах иконка оставалась белой
+     (28.09: жалоба «кнопка не наследует цвет от темы»). Иконка — маска с currentColor. */
+  html .mdeditor-fab-btn.hyphens-btn,
+  html .hyphens-btn{
+    color:var(--wood) !important;
+  }
+  /* ⚠️ 28.09: иконка «≡» после нажатия становилась белой (красными оставались «+»/«−»).
+     Цвет иконки и кнопки теперь задан явно, во всех состояниях (:hover/:active/:focus/
+     :focus-visible), а не через currentColor — нажатие ничего не перекрашивает. */
+  html .hyphens-btn:hover,
+  html .hyphens-btn:active,
+  html .hyphens-btn:focus,
+  html .hyphens-btn:focus-visible{
+    color:var(--wood) !important;
+    outline:none;
+  }
+  html .hyphens-btn::before,
+  html .hyphens-btn:hover::before,
+  html .hyphens-btn:active::before,
+  html .hyphens-btn:focus::before,
+  html.hyphens-on .hyphens-btn::before{
+    background-color:var(--wood) !important;
+  }
   .hyphens-btn::before{
     content:"";
+    flex:0 0 16px;
+    background-color:currentColor;
     width:16px;
     height:16px;
-    background:currentColor;
     -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M3 12h13'/%3E%3Cpath d='M19 12h2'/%3E%3Cpath d='M3 18h9'/%3E%3Cpath d='M3 21L21 3'/%3E%3C/svg%3E") center/contain no-repeat;
     mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M3 12h13'/%3E%3Cpath d='M19 12h2'/%3E%3Cpath d='M3 18h9'/%3E%3Cpath d='M3 21L21 3'/%3E%3C/svg%3E") center/contain no-repeat;
   }
