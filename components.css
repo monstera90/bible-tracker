@@ -2658,7 +2658,7 @@
   .cm-md-underline{ text-decoration:underline; }
   /* ссылки — цветом, БЕЗ подчёркивания (важное требование из ТЗ) */
   .cm-md-link{
-    color:var(--link);
+    color:var(--wood);
     -webkit-tap-highlight-color:transparent; /* без вспышки при нажатии */
     text-decoration:none;
     cursor:pointer;
@@ -2675,7 +2675,7 @@
      ссылкой браузера; в блокноте же был отдельный (зелёный) стиль — то и
      другое сведено к этому одному правилу. */
   .auto-link.scripture-link{
-    color:var(--link);
+    color:var(--wood);
     -webkit-tap-highlight-color:transparent; /* без вспышки при нажатии */
     text-decoration:none;
     cursor:pointer;
@@ -2686,7 +2686,7 @@
      (.cm-md-link выше); клик обрабатывается делегированно на
      #settingsTabContent (см. initAutoFormatting в my.js). */
   .auto-link.note-link{
-    color:var(--link);
+    color:var(--wood);
     -webkit-tap-highlight-color:transparent; /* без вспышки при нажатии */
     text-decoration:none;
     cursor:pointer;
@@ -2696,7 +2696,7 @@
      выше: специально не заводим новый оттенок, чтобы визуально ссылки
      воспринимались одним семейством. */
   .auto-link.resource-link{
-    color:var(--link);
+    color:var(--wood);
     -webkit-tap-highlight-color:transparent; /* без вспышки при нажатии */
     text-decoration:none;
     cursor:pointer;
