@@ -14419,6 +14419,14 @@
       if(prevPos) bookReaderState.restorePosition = prevPos;
     } else if(!bookReaderState.restorePosition && container.querySelector("#bookChaptersList")){
       bookReaderState.chaptersScrollTop = container.scrollTop;
+    } else if(!bookReaderState.restorePosition && bookReaderState.mode !== "chapters"){
+      // Страховка (28.09): в контейнере сейчас НЕ текст книги (пока окно
+      // было закрыто, вкладку успел перерисовать другой код), а позиция в
+      // памяти уже израсходована — раньше здесь оставался textScrollTop=0,
+      // то есть начало книги. Берём последнюю сохранённую позицию из
+      // постоянного хранилища (её пишет прокрутка с debounce и закрытие окна).
+      var savedForRestore = getBookState(bookReaderState.hash);
+      if(savedForRestore && savedForRestore.position) bookReaderState.restorePosition = savedForRestore.position;
     }
     // Флашим/снимаем слушатель ДО перерисовки — на момент вызова
     // innerHTML контейнера ещё старый (см. currentBookReaderPosition
@@ -17497,7 +17505,37 @@
       }
     }
 
+    // Свайп вверх от язычка (ТЗ 28.09): пока окно настроек открыто, жест
+    // «палец на язычке -> вверх» закрывает его (то же closeSettingsModal,
+    // что и клик мимо окна) — возврат на главный экран со списком книг
+    // Библии. Обычный тап работает как раньше; после свайпа следующий
+    // click гасится (settingsGearSwipedAt), чтобы окно не переключило набор
+    // вкладок. touch-action:none нужен, чтобы браузер не забрал жест под
+    // прокрутку (иначе придёт pointercancel, не pointerup).
+    var settingsGearSwipedAt = 0;
+    var gearSwipe = null;
+    var GEAR_SWIPE_MIN_PX = 40;
+    settingsGearBtn.style.touchAction = "none";
+    settingsGearBtn.addEventListener("pointerdown", function(e){
+      if(e.pointerType === "mouse" && e.button !== 0) return;
+      gearSwipe = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      try{ settingsGearBtn.setPointerCapture(e.pointerId); }catch(err){}
+    });
+    settingsGearBtn.addEventListener("pointerup", function(e){
+      var g = gearSwipe;
+      gearSwipe = null;
+      if(!g || g.id !== e.pointerId) return;
+      var dy = e.clientY - g.y, dx = e.clientX - g.x;
+      if(dy <= -GEAR_SWIPE_MIN_PX && Math.abs(dx) < Math.abs(dy) &&
+         settingsModalOverlay && settingsModalOverlay.classList.contains("open")){
+        settingsGearSwipedAt = Date.now();
+        closeSettingsModal();
+      }
+    });
+    settingsGearBtn.addEventListener("pointercancel", function(){ gearSwipe = null; });
+
     settingsGearBtn.addEventListener("click", function(){
+      if(Date.now() - settingsGearSwipedAt < 500) return;
       handleFabTap();
     });
   }
