@@ -2917,21 +2917,39 @@
       dot.setAttribute("data-theme-id", theme.id);
       dot.title = theme.name;
       dot.setAttribute("aria-label", "Тема: " + theme.name);
-      dot.style.background = themeSwatchGradient(theme.id);
+      applyThemeSwatch(dot, theme.id);
       dot.addEventListener("click", function(){ selectTheme(theme.id); });
       holder.appendChild(dot);
     });
   }
 
-  function themeSwatchGradient(themeId){
+  // Цвета кружка темы: [главный, второстепенный]. Главный — правая нижняя
+  // половина круга и цвет окантовки; второстепенный — левая верхняя половина
+  // (у светлых тем — их второй цвет, у тёмных — почти чёрный). ТЗ 28.09.
+  function themeSwatchColors(themeId){
+    var DARK_TOP = "#0b0e13";
     var swatches = {
       1:["#5c3d24","#48F78E"],2:["#28BCA3","#89FFDD"],3:["#68B723","#D1FF82"],
       4:["#8f7fb8","#8FE3C7"],5:["#7a3fc0","#8FE3C7"],6:["#7d8a99","#8FD9B8"],7:["#6fada0","#6FE0C0"],
-      8:["#1f2b36","#FFFF00"],9:["#1f2b36","#7F00FF"],10:["#1f2b36","#9BDB4D"],
-      11:["#1f2b36","#43D6B5"],12:["#1f2b36","#F57C00"],13:["#1f2b36","#FF0000"]
+      8:["#FFFF00",DARK_TOP],9:["#7F00FF",DARK_TOP],10:["#9BDB4D",DARK_TOP],
+      11:["#43D6B5",DARK_TOP],12:["#F57C00",DARK_TOP],13:["#FF0000",DARK_TOP]
     };
-    var pair = swatches[themeId] || swatches[1];
-    return "linear-gradient(135deg, " + pair[0] + " 50%, " + pair[1] + " 50%)";
+    return swatches[themeId] || swatches[1];
+  }
+
+  // Заливка кружка: строго по границе border-box и без повторения — иначе
+  // градиент «размножается» под прозрачной окантовкой и по краям кружка
+  // видны обрезки оттенков. Цвет окантовки (--dot-ring, см. #themeDots
+  // .theme-dot в theme.css) = главный цвет темы.
+  function applyThemeSwatch(dot, themeId){
+    var c = themeSwatchColors(themeId);
+    dot.style.backgroundColor = c[0];
+    dot.style.backgroundImage = "linear-gradient(135deg, " + c[1] + " 50%, " + c[0] + " 50%)";
+    dot.style.backgroundRepeat = "no-repeat";
+    dot.style.backgroundOrigin = "border-box";
+    dot.style.backgroundClip = "border-box";
+    dot.style.backgroundSize = "100% 100%";
+    dot.style.setProperty("--dot-ring", c[0]);
   }
 
   // ---------- переключатель видимости плавающей кнопки настроек ----------

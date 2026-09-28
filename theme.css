@@ -265,6 +265,24 @@
     color:#fff;
   }
 
+  /* ---------- кружки выбора темы (renderThemeDots/applyThemeSwatch в my.js) ----------
+     ТЗ 28.09: круг из двух половин без обрезков оттенков по краям —
+     заливка держится строго по границе окантовки и не повторяется (это же
+     выставлено инлайн у каждого кружка); окантовка ровная, цветом темы
+     (--dot-ring), а не тёмная/белая. У выбранного кружка (.selected) свою
+     окантовку-«галочку» не трогаем — она остаётся как в основном CSS.
+     Селектор через #themeDots — выше по специфичности, чем .theme-dot из
+     основных стилей, порядок подключения не важен. */
+  #themeDots .theme-dot{
+    background-repeat:no-repeat;
+    background-origin:border-box;
+    background-clip:border-box;
+  }
+  #themeDots .theme-dot:not(.selected){
+    border-style:solid;
+    border-color:var(--dot-ring, transparent);
+  }
+
   /* цвет надписи о пропущенном чтении (.warn-text) — теперь единый для
      всех тем, как и у остальных прогресс-баров (см. .xp-text в
      components.css), без переопределений по темам */
