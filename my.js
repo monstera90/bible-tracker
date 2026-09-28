@@ -2838,7 +2838,10 @@
     {id:1, name:"Пергамент"},{id:2, name:"Мята"},{id:3, name:"Лайм"},
     {id:4, name:"Лаванда и слоновая кость"},{id:5, name:"Аметист и слоновая кость"},
     {id:6, name:"Пыльная роза и графит"},{id:7, name:"Морская пена и песок"},
-    {id:8, name:"Тёмная"}
+    // тёмные (нижний ряд): 8 — янтарь, 9 — фиолетовый, 10 — лайм, 11 — мята,
+    // 12 — оранжевый, 13 — красный; id 14 свободен под седьмую тёмную тему
+    {id:8, name:"Ночь и янтарь"},{id:9, name:"Ночь и фиолетовый"},{id:10, name:"Ночь и лайм"},
+    {id:11, name:"Ночь и мята"},{id:12, name:"Ночь и оранжевый"},{id:13, name:"Ночь и красный"}
   ];
 
   function getCurrentThemeId(){
@@ -2871,7 +2874,9 @@
     // пользователя от 15.09: шапка перекрашивалась, а статус-бар оставался
     // цветом темы по умолчанию). Читаем сразу, синхронно: reflow здесь
     // стоит мизерную паузу раз в смену темы, а не каждый кадр.
-    var wood = getComputedStyle(document.documentElement).getPropertyValue("--wood").trim();
+    var cs = getComputedStyle(document.documentElement);
+    // --theme-color — необязательная своя переменная темы (тема 8: тёмная шапка при янтарном --wood)
+    var wood = (cs.getPropertyValue("--theme-color") || cs.getPropertyValue("--wood")).trim();
     if(!wood) return;
     var meta = document.querySelector('meta[name="theme-color"]');
     if(meta) meta.setAttribute("content", wood);
@@ -2890,6 +2895,12 @@
     var holder = document.getElementById("themeDots");
     if(!holder) return;
     holder.innerHTML = "";
+    // раскладка сеткой в 7 столбцов: 7 светлых тем — верхний ряд, тёмные —
+    // нижний (сейчас 6, седьмое место справа свободно под будущую тему).
+    // gap/justify-content остаются из CSS контейнера, если они там заданы.
+    holder.style.display = "grid";
+    holder.style.gridTemplateColumns = "repeat(7, max-content)";
+    holder.style.alignItems = "center";
     var current = getCurrentThemeId();
     THEMES.forEach(function(theme){
       var dot = document.createElement("button");
@@ -2908,7 +2919,8 @@
     var swatches = {
       1:["#5c3d24","#48F78E"],2:["#28BCA3","#89FFDD"],3:["#68B723","#D1FF82"],
       4:["#8f7fb8","#8FE3C7"],5:["#7a3fc0","#8FE3C7"],6:["#7d8a99","#8FD9B8"],7:["#6fada0","#6FE0C0"],
-      8:["#161320","#8a7ab8"]
+      8:["#1f2b36","#d9b26a"],9:["#1f2b36","#c9a8f0"],10:["#1f2b36","#9BDB4D"],
+      11:["#1f2b36","#43D6B5"],12:["#1f2b36","#F57C00"],13:["#1f2b36","#FF0000"]
     };
     var pair = swatches[themeId] || swatches[1];
     return "linear-gradient(135deg, " + pair[0] + " 50%, " + pair[1] + " 50%)";

@@ -124,19 +124,99 @@
     --warn:#c9835a; --warn-dark:#9a6140;
     --danger:#c17b5a; --danger-dark:#8f5540;
   }
-  html[data-theme="8"]{
-    --parchment:#242030; --parchment-dark:#1a1722;
-    --ink:#e8e3f2; --ink-soft:#a89fc0;
-    --wood:#8a7ab8; --wood-dark:#6a5c94;
-    --gold:#4a3f66; --gold-light:#5c4f7d;
-    --groove-shadow:#141119;
+  /* ---------- тёмные темы 8–13: «Ночная библиотека» (ТЗ 28.09) ----------
+     Общая основа у всех шести — глубокий сине-серый (slate); отличается
+     только акцентный цвет (то, что в первой тёмной теме было янтарным):
+     8 — янтарь, 9 — фиолетовый (из темы 5), 10 — лайм (из темы 3),
+     11 — мята (из темы 2), 12 — оранжевый #F57C00, 13 — красный #FF0000.
+     Слот 14 оставлен под седьмую тёмную тему (см. THEMES в my.js).
+     Приёмы, которые в вебе применяют в тёмных темах (Material Design,
+     Atlassian, Linear и др.):
+     1) не чистый чёрный, а тонированный тёмно-серый; поверхности «выше»
+        (карточки, окно, вкладки) — светлее фона, ступенями светлоты;
+     2) тени в тёмной теме почти не видны, поэтому границы — тонкие
+        светлые линии (rgba белого ~12–20%) и/или цвет рамки с контрастом
+        около 3:1 к соседней поверхности (WCAG 1.4.11);
+     3) один акцент, остальное — нейтрали;
+     4) текст — не чисто белый, а тёплый off-white (контраст 12:1 и выше);
+        второстепенный — светло-серый (7:1).
+     Чтобы добавить ещё одну тёмную тему: допишите её id в селектор
+     html:is(...) в этом и следующих правилах (ищите [data-theme="13"]) и
+     добавьте строку акцента (--wood/--wood-dark/--gold), как у тем 9–13. */
+  html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]){
+    --parchment:#212c37; --parchment-dark:#151d25;
+    --ink:#ebe6da; --ink-soft:#a9b5c0;
+    --gold-light:#3b566a;
+    --groove-shadow:#4d6175;
     --xp-green:#6fe0b0; --xp-green-dark:#3aa87e;
-    --bg-top:#1e1b28; --bg-mid:#161320; --bg-bottom:#0e0c15;
-    --danger:#d16b6b; --danger-dark:#a34e4e;
-    --warn:#d9a94f; --warn-dark:#a87e34;
-    --status-off:#6a6580; --status-offline:#6a6580;
-    --status-sync:#d9b84a; --status-ok:#4fbe7f; --status-err:#d16b5a;
+    --bg-top:#141d26; --bg-mid:#0e151c; --bg-bottom:#090e13;
+    --danger:#d9786a; --danger-dark:#a5544a;
+    --warn:#e0b04f; --warn-dark:#a8802f;
+    --status-off:#6a7686; --status-offline:#6a7686;
+    --status-sync:#d9b84a; --status-ok:#4fbe7f; --status-err:#d9786a;
+    /* свои переменные тёмных тем: строка состояния (см. syncThemeColorMeta
+       в my.js — берёт --theme-color, а если её нет — --wood; у всех
+       тёмных тем она общая, не акцентная), поднятая поверхность
+       (неактивные вкладки, кнопка настроек) и светлая граница-волосок */
+    --theme-color:#1f2b36;
+    --surface-raised:#2e3c4a;
+    --edge:rgba(255,255,255,.18);
+    --tab-bg:var(--surface-raised);
   }
+  /* акценты: --wood — заголовки, пиктограммы, активная вкладка, верх
+     градиента шапки не используется (там --theme-color); --wood-dark —
+     тёмный оттенок акцента; --gold — приглушённый акцент для линий
+     (полоса под шапкой, подчёркивание заголовков разделов) */
+  html[data-theme="8"]{ --wood:#d9b26a; --wood-dark:#a98b53; --gold:#77623a; } /* янтарь */
+  html[data-theme="9"]{ --wood:#c9a8f0; --wood-dark:#9d83bb; --gold:#6f5c84; } /* фиолетовый */
+  html[data-theme="10"]{ --wood:#9BDB4D; --wood-dark:#79ab3c; --gold:#55782a; } /* лайм */
+  html[data-theme="11"]{ --wood:#43D6B5; --wood-dark:#34a78d; --gold:#257664; } /* мята */
+  html[data-theme="12"]{ --wood:#F57C00; --wood-dark:#bf6100; --gold:#874400; } /* оранжевый */
+  html[data-theme="13"]{ --wood:#FF0000; --wood-dark:#c70000; --gold:#8c0000; } /* красный */
+
+  /* (1) Шапка — тёмная, в тон странице; заголовок акцентного цвета. Верх
+     шапки = --theme-color, поэтому шва со строкой состояния нет. */
+  html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) header{
+    background:linear-gradient(180deg, var(--theme-color) 0%, var(--parchment-dark) 100%);
+    border-bottom:4px solid var(--gold);
+  }
+  html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) header h1{ color:var(--wood); }
+  /* (3) Карточки книг: светлая рамка ~3:1 к фону + тень с тонким светлым
+     кольцом вместо коричневой тени светлых тем. Шапка-полоска книги
+     отделена от тела линией. */
+  html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) .book-card{
+    border-color:var(--groove-shadow);
+    box-shadow:0 0 0 1px rgba(255,255,255,.05), 0 4px 12px rgba(0,0,0,.6);
+  }
+  html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) .book-header{ border-bottom-color:var(--edge); }
+  html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) .book-count{
+    background:rgba(255,255,255,.1);
+    color:var(--ink);
+  }
+  /* (2) Вкладки и область чтения: окно — «низкая» поверхность,
+     неактивные вкладки — «поднятая» (--tab-bg, см. .settings-tab в
+     modals.css) + светлая линия по стыку с окном; окно обведено
+     волоском, чтобы край был виден на затемнённом фоне. */
+  html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) .settings-modal-box{
+    box-shadow:0 10px 30px rgba(0,0,0,.6), 0 0 0 1px var(--edge);
+  }
+  html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) .settings-tab{
+    box-shadow:inset 1px 0 0 var(--edge), calc(2px * var(--hand-sign, 1)) 2px 5px rgba(0,0,0,.5);
+  }
+  html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) .settings-tab-gear{
+    box-shadow:inset 0 1px 0 var(--edge), calc(2px * var(--hand-sign, 1)) 2px 5px rgba(0,0,0,.5);
+  }
+  /* (4) Кнопка настроек: поднятая поверхность, акцентная пиктограмма,
+     светлое кольцо; в покое почти непрозрачная (было .55). */
+  html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) .settings-fab{
+    background:var(--surface-raised);
+    color:var(--wood);
+    opacity:.92;
+    box-shadow:0 0 0 1px var(--edge), calc(2px * var(--hand-sign, 1)) 2px 6px rgba(0,0,0,.55);
+  }
+  html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) .settings-fab:hover,
+  html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) .settings-fab:focus-visible,
+  html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[data-theme="12"],[data-theme="13"]) .settings-fab:active{ opacity:1; }
 
   /* цвет надписи о пропущенном чтении (.warn-text) — теперь единый для
      всех тем, как и у остальных прогресс-баров (см. .xp-text в

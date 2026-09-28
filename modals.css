@@ -312,7 +312,10 @@
     inset-inline-end:0;
     width:45px;
     height:calc(env(safe-area-inset-top, 0px) + 14px); /* запасное значение, см. комментарий выше — точную высоту выставляет my.js */
-    background:var(--wood);
+    /* --theme-color есть только у тем с собственным цветом статус-бара
+       (тема 8, см. theme.css); у остальных тем переменной нет — берётся
+       var(--wood), поведение прежнее */
+    background:var(--theme-color, var(--wood));
     pointer-events:none;
   }
   /* ---------- дубликат пилюли синхронизации для окна настроек (27.09) ----------
@@ -531,7 +534,7 @@
       inset-inline-end:100%;
       width:14px;
       height:14px;
-      background:var(--wood);
+      background:var(--theme-color, var(--wood));
     }
     .settings-modal-overlay.reading-mode-active .settings-corner-patch::after{ display:none; }
     /* ТЗ 28.09 (все темы): плавный переход статус-бар → правая полоса.
@@ -541,17 +544,36 @@
        чего виден шов. Тень при этом НЕ убрана: сверху поверх неё лежит
        градиент от var(--wood) (непрозрачный) к прозрачному, и тень
        проявляется постепенно. Слой рисуется после рамки (позже в DOM,
-       выше неё), покрывает только колонку полосы (45px, как заплатка) и
-       рамку окна не задевает. В режиме чтения полосы нет — слой скрыт. */
+       выше неё), покрывает колонку полосы (45px, как заплатка) и вырез угла окна
+       (маска, см. ниже); само окно не задевает. В режиме чтения полосы нет — слой скрыт. */
     .settings-modal-overlay::after{
       content:"";
       position:fixed;
       top:0;
       inset-inline-end:0;
-      width:45px;
+      width:59px; /* 45px полосы + 14px — вырез скруглённого угла окна */
       height:44px;
-      background:linear-gradient(to bottom, var(--wood) 0%, transparent 100%);
+      background:linear-gradient(to bottom, var(--theme-color, var(--wood)) 0%, transparent 100%);
       pointer-events:none;
+      /* Маска: полоса справа (45px) — целиком; слева 14px — ТОЛЬКО вырез
+         угла (квадрат 14×14 вне дуги радиуса 14 с центром в его левом
+         нижнем углу), чтобы слой не закрасил само окно. Тень в вырезе
+         так же плавно проявляется, как и вдоль полосы. */
+      -webkit-mask-image:radial-gradient(circle at 0 14px, transparent 13.5px, #000 14px), linear-gradient(#000, #000);
+      mask-image:radial-gradient(circle at 0 14px, transparent 13.5px, #000 14px), linear-gradient(#000, #000);
+      -webkit-mask-size:14px 14px, 45px 100%;
+      mask-size:14px 14px, 45px 100%;
+      -webkit-mask-position:0 0, 14px 0;
+      mask-position:0 0, 14px 0;
+      -webkit-mask-repeat:no-repeat;
+      mask-repeat:no-repeat;
+    }
+    /* Раскладка левши: полоса слева, вырез угла — справа от неё. */
+    html.lefty .settings-modal-overlay::after{
+      -webkit-mask-image:radial-gradient(circle at 100% 14px, transparent 13.5px, #000 14px), linear-gradient(#000, #000);
+      mask-image:radial-gradient(circle at 100% 14px, transparent 13.5px, #000 14px), linear-gradient(#000, #000);
+      -webkit-mask-position:100% 0, 0 0;
+      mask-position:100% 0, 0 0;
     }
     .settings-modal-overlay.reading-mode-active::after{ display:none; }
   }
@@ -618,7 +640,7 @@
     align-items:center;
     justify-content:center;
     box-sizing:border-box;
-    background:var(--parchment);
+    background:var(--tab-bg, var(--parchment));
     color:var(--wood);
     /* --icon-halo всегда равен фону этой вкладки (и переключается вместе
        с ним в .settings-tab.active ниже) — нужен пиктограмме вкладки
@@ -626,7 +648,7 @@
        слово "epub" там лежит поверх линий ножниц, и тонкая подложка
        такого цвета вокруг букв отделяет текст от линий под ним, в любом
        состоянии вкладки. */
-    --icon-halo:var(--parchment);
+    --icon-halo:var(--tab-bg, var(--parchment));
     border:none;
     border-radius:0;
     border-start-end-radius:14px;
