@@ -1,6 +1,11 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 43.1 (28.09) — переносы слов, две правки: (1) слова из 4 букв («ва-ши») теперь
+   переносятся — в components.css hyphenate-limit-chars 5 2 2 -> 4 2 2 (браузер сам не переносит
+   слова короче заданного порога, дело было не в словаре); (2) выбор «переносы вкл/выкл» дублируется
+   в IndexedDB (`bibleHyphensDB_v1`) и восстанавливается оттуда, если localStorage опустел
+   (см. hyphensIdbPut/restoreHyphensFromIdb); на старте в журнал отладки пишется, что нашлось.
    Версия: 43.0 (28.09) — ПЕРЕНОСЫ СЛОВ (ТЗ пользователя от 28.09): новый глобальный
    переключатель (одно состояние на всё приложение, localStorage `bibleHyphens_v1`) —
    кнопка `.hyphens-btn` внутри попапа «Аа» (задачи `#taskHyphensBtn`, ридер книг и
@@ -8732,6 +8737,7 @@
     // повесить делегированные обработчики на все .hyphens-btn (см. раздел ниже).
     applyHyphensVisual();
     bindHyphensButtonsOnce();
+    restoreHyphensFromIdb();
     if(readingBtn){
       // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя): был обычный click →
       // toggleReadingMode(); теперь тап/удержание (bindTapOrHold ниже по
@@ -19475,6 +19481,54 @@
   }
   function setHyphensActive(val){
     try{ localStorage.setItem("bibleHyphens_v1", val ? "1" : "0"); }catch(e){}
+    hyphensIdbPut(val);
+  }
+  // Резервная копия флага в IndexedDB (ТЗ 28.09: выбор должен переживать закрытие и
+  // обновление приложения). Размер шрифта в этом приложении хранится именно в IndexedDB —
+  // там он выживает, даже если система почистила localStorage. Имена — литералы внутри
+  // функций (var выше по файлу не поднимается вместе со значением).
+  function hyphensIdbOpen(){
+    return new Promise(function(resolve, reject){
+      if(!window.indexedDB){ reject(new Error("IndexedDB недоступна")); return; }
+      var req = indexedDB.open("bibleHyphensDB_v1", 1);
+      req.onupgradeneeded = function(){ req.result.createObjectStore("kv"); };
+      req.onsuccess = function(){ resolve(req.result); };
+      req.onerror = function(){ reject(req.error); };
+    });
+  }
+  function hyphensIdbPut(val){
+    hyphensIdbOpen().then(function(db){
+      var tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").put(val ? "1" : "0", "hyphens");
+      tx.oncomplete = function(){ db.close(); };
+      tx.onerror = tx.onabort = function(){ try{ db.close(); }catch(e){} };
+    }).catch(function(){});
+  }
+  function hyphensIdbGet(){
+    return hyphensIdbOpen().then(function(db){
+      return new Promise(function(resolve){
+        var r = db.transaction("kv", "readonly").objectStore("kv").get("hyphens");
+        r.onsuccess = function(){ var v = r.result; db.close(); resolve(v === "1" || v === "0" ? v : null); };
+        r.onerror = function(){ try{ db.close(); }catch(e){} resolve(null); };
+      });
+    }).catch(function(){ return null; });
+  }
+  // Вызывается один раз на старте (после applyHyphensVisual). localStorage главный (читается
+  // синхронно, до первой отрисовки); IndexedDB — страховка: если в localStorage значения нет
+  // (его очистили), берём из IndexedDB и применяем; если значения расходятся — правим копию.
+  function restoreHyphensFromIdb(){
+    hyphensIdbGet().then(function(idbVal){
+      var ls = null;
+      try{ ls = localStorage.getItem("bibleHyphens_v1"); }catch(e){}
+      try{ if(window.Debug) window.Debug.log("Переносы слов: на старте localStorage=" + ls + ", IndexedDB=" + idbVal); }catch(e){}
+      if(ls === null && idbVal !== null){
+        try{ localStorage.setItem("bibleHyphens_v1", idbVal); }catch(e){}
+        applyHyphensVisual();
+        refitAllVisibleTaskBodies();
+      }else if(ls !== null && ls !== idbVal){
+        hyphensIdbPut(ls === "1");
+      }
+    });
   }
   // Класс на <html> + язык. Браузер выбирает словарь по lang: пока переносы
   // включены и язык страницы не русский, ставим lang="ru" (прежнее значение
