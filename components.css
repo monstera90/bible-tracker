@@ -3021,6 +3021,25 @@
     padding:0 1px;
     cursor:pointer;
   }
+  /* ТЗ 28.09: в ТЁМНЫХ темах (data-theme 8..13, см. THEMES в my.js)
+     var(--gold-light) давал странный, полупрозрачный по виду оттенок.
+     Здесь подчёркивание — ТОТ ЖЕ оттенок, что акцент темы (--wood: у
+     «Ночь и красный» красный, у «Ночь и лайм» лаймовый и т.д.), но
+     менее яркий, приглушённый и СПЛОШНОЙ (не прозрачный): акцент
+     смешивается с фоном темы (--parchment) в равных долях через
+     color-mix, поэтому подходит любой тёмной теме без отдельных цветов.
+     Текст остаётся светлым (color:inherit выше). Светлые темы (1..7)
+     не затронуты. Долю акцента (сейчас 48%) можно менять: больше —
+     ярче, меньше — темнее. */
+  html[data-theme="8"] .book-reader-underline,
+  html[data-theme="9"] .book-reader-underline,
+  html[data-theme="10"] .book-reader-underline,
+  html[data-theme="11"] .book-reader-underline,
+  html[data-theme="12"] .book-reader-underline,
+  html[data-theme="13"] .book-reader-underline,
+  html[data-theme="14"] .book-reader-underline{
+    background:color-mix(in srgb, var(--wood) 48%, var(--parchment));
+  }
   /* ---------- Иллюстрация -> заметка книги (READER_PLAN.md, Этап D, шаг 14,
      11.09). .book-reader-image-wrap — только для position:relative, без
      своих отступов (margin по-прежнему на .cm-md-image внутри, см. выше).
@@ -3108,6 +3127,28 @@
   .book-reader-underline-trash-btn svg{ width:17px; height:17px; }
   @media (hover:hover) and (pointer:fine){
     .book-reader-underline-trash-btn:hover{ background:var(--danger, #c0392b); color:#fffef8; }
+  }
+  /* ТЗ 28.09: в ТЁМНЫХ темах (data-theme 8..14, см. THEMES в my.js) белые
+     кнопки (#fffef8) режут глаз — здесь они красятся как невыбранные
+     вкладки (.settings-tab: фон var(--tab-bg, var(--parchment)), значок
+     var(--wood)) + окантовка 1px того же цвета, что у выделенной вкладки
+     (.settings-tab.active: var(--wood)). Затронуты: кнопки нижнего ряда
+     (.mdeditor-fab-btn — скрепка, Аа, карандаш, закладки, меню, домик и
+     т.д. на всех вкладках), булавка иллюстрации ридера и урна снятия
+     подчёркивания (её значок остаётся var(--danger)). :where() даёт
+     нулевую специфичность самому селектору темы — поэтому :hover,
+     .pressed и disabled выше/ниже по-прежнему работают как раньше.
+     Светлые темы (1..7) не затронуты. */
+  :where(html[data-theme="8"],html[data-theme="9"],html[data-theme="10"],html[data-theme="11"],html[data-theme="12"],html[data-theme="13"],html[data-theme="14"]) :is(.mdeditor-fab-btn, .book-reader-pin-btn, .book-reader-underline-trash-btn){
+    background:var(--tab-bg, var(--parchment));
+    border:1px solid var(--wood);
+  }
+  :where(html[data-theme="8"],html[data-theme="9"],html[data-theme="10"],html[data-theme="11"],html[data-theme="12"],html[data-theme="13"],html[data-theme="14"]) .mdeditor-fab-btn:disabled:hover{
+    background:var(--tab-bg, var(--parchment));
+    color:var(--wood);
+  }
+  :where(html[data-theme="8"],html[data-theme="9"],html[data-theme="10"],html[data-theme="11"],html[data-theme="12"],html[data-theme="13"],html[data-theme="14"]) .book-reader-pin-btn.pinned:hover{
+    background:var(--tab-bg, var(--parchment));
   }
   /* ---------- картинка, вставленная в текст задачи/комментария кнопкой-
      скрепкой ("![[имя]]", см. formatInline/hydrateTaskImages в my.js) —
