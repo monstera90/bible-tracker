@@ -1,5 +1,6 @@
 /* ===========================================================================
    notifications.js
+   Версия: 4.0 (29.09) — структурная правка (ТЗ пользователя от 29.09): (1) плашка даты/времени без галочки: нажатие на часы задачи само ставит напоминание на «сегодня + 30 минут» (`defaultTimestamp`), плашка открывается уже с этими датой и временем; любое изменение даты/времени в плашке сохраняется сразу (`commit`), клик мимо плашки просто закрывает её; снять — долгое нажатие на часы; (2) плашка закрывается свайпом по любому месту мимо неё (touchstart/touchmove на документе, порог `SWIPE_CLOSE_PX`); (3) потеря разрешения на уведомления — сразу запрос заново (`ensurePermission`: при старте, возврате в приложение и первом касании); (4) плашка следует за кнопкой через `opts.getAnchorEl` (строка перерисовывается после каждого сохранения). Экспорт: + requestPermissionIfNeeded, defaultTimestamp.
    Версия: 3.4 (21.09) — галочка плашки даты/времени стала таким же круглым пузырём, как пузырь даты (класс `.reminder-bubble .reminder-bubble-date`, вместо `.mdeditor-fab-btn`); размер `--rb` замеряется временной пробной кнопкой `.mdeditor-fab-btn` внутри плашки.
    Версия: 3.3 (19.09) — из плашки выбора даты/времени убран крестик: остались
    пузыри даты и времени и галочка; отмена — клик мимо плашки (или «Назад»).
@@ -147,11 +148,12 @@ window.initNotificationsModule = function(deps){
     try{ datePart = d.toLocaleDateString("ru-RU", opts); }catch(e){ datePart = toDateValue(ts); }
     return datePart + ", " + toTimeValue(ts);
   }
-  // ближайший «круглый» час — стартовое значение для нового напоминания
+  // стартовое значение для нового напоминания: сейчас + 30 минут (секунды обнуляются,
+  // чтобы показанное время совпадало со временем срабатывания)
+  var DEFAULT_OFFSET_MIN = 30;
   function defaultTimestamp(){
-    var d = new Date();
-    d.setMinutes(0, 0, 0);
-    d.setHours(d.getHours() + 1);
+    var d = new Date(Date.now() + DEFAULT_OFFSET_MIN * 60000);
+    d.setSeconds(0, 0);
     return d.getTime();
   }
 
@@ -159,20 +161,37 @@ window.initNotificationsModule = function(deps){
 
   function isSupported(){ return typeof Notification !== "undefined"; }
 
+  var permRequestPending = false;
+  var deniedBannerShown = false;
   function requestPermissionIfNeeded(){
     if(!isSupported()) return;
     if(Notification.permission === "default"){
-      // вызывается из клика «Сохранить» — это жест пользователя
+      if(permRequestPending) return;
+      permRequestPending = true;
       try{
         var p = Notification.requestPermission();
         if(p && p.then){
           p.then(function(result){
+            permRequestPending = false;
             if(result !== "granted") showBanner("Уведомления не разрешены — напоминание покажется только внутри приложения.");
-          });
+          }, function(){ permRequestPending = false; });
+        }else{
+          permRequestPending = false; // старый колбэчный вариант API
         }
-      }catch(e){ log("requestPermission: " + (e && e.message ? e.message : e)); }
+      }catch(e){ permRequestPending = false; log("requestPermission: " + (e && e.message ? e.message : e)); }
     }else if(Notification.permission === "denied"){
       showBanner("Уведомления запрещены в настройках браузера — напоминание покажется только внутри приложения.");
+    }
+  }
+  // ТЗ 29.09: если приложение потеряло разрешение (статус снова «default») — сразу просим заново.
+  // «denied» повторным запросом не исправить (браузер его не покажет) — только один раз за сеанс
+  // напоминаем плашкой. Если запрос без касания браузер проигнорировал — повторяем на первом касании.
+  function ensurePermission(){
+    if(!isSupported()) return;
+    if(Notification.permission === "default") requestPermissionIfNeeded();
+    else if(Notification.permission === "denied" && !deniedBannerShown){
+      deniedBannerShown = true;
+      showBanner("Уведомления запрещены в настройках браузера — включите их для приложения, иначе напоминания покажутся только внутри него.");
     }
   }
 
@@ -528,15 +547,18 @@ window.initNotificationsModule = function(deps){
   function start(){
     if(started) return;
     started = true;
-    document.addEventListener("visibilitychange", function(){ if(!document.hidden) tick(); });
-    window.addEventListener("focus", tick);
-    window.addEventListener("pageshow", tick);
+    document.addEventListener("visibilitychange", function(){ if(!document.hidden){ ensurePermission(); tick(); } });
+    window.addEventListener("focus", function(){ ensurePermission(); tick(); });
+    window.addEventListener("pageshow", function(){ ensurePermission(); tick(); });
+    // первое касание: запрос без жеста Chrome может молча отклонить — тогда повторяем уже с жестом
+    document.addEventListener("pointerdown", function(){ ensurePermission(); }, {capture: true, once: true});
     if("serviceWorker" in navigator){
       navigator.serviceWorker.addEventListener("message", function(event){
         if(event.data && event.data.type === "REMINDER_CLICK") consumePendingClick();
       });
     }
     consumePendingClick();
+    ensurePermission();
     tick();
   }
 
@@ -598,29 +620,34 @@ window.initNotificationsModule = function(deps){
     try{ input.focus(); input.click(); }catch(e){}
   }
 
-  // opts: {anchorEl (кнопка-часы|null), currentTs (число|null), onSave(ts), onClear()} — onClear сейчас не
-  // вызывается (кнопки «Удалить» в плашке нет), оставлен в контракте
+  // opts: {anchorEl (кнопка-часы|null), getAnchorEl() (актуальная кнопка — строка перерисовывается
+  // после каждого сохранения, старая кнопка пропадает из DOM), currentTs (число|null), onSave(ts), onClear()}
+  // onClear сейчас не вызывается (напоминание снимается долгим нажатием на часы), оставлен в контракте.
+  // ТЗ 29.09: нет текущего напоминания — оно сразу ставится на «сейчас + 30 минут» (нажатие на часы и есть
+  // подтверждение), а изменения даты/времени сохраняются сразу; галочки нет.
+  var SWIPE_CLOSE_PX = 10;
   function openReminderDialog(opts){
     closeBar();
     var hasCurrent = typeof opts.currentTs === "number" && opts.currentTs > 0;
-    // пока ничего не выбрано — в пузырях иконки; у стоящего напоминания — его значения
-    var selDate = hasCurrent ? toDateValue(opts.currentTs) : "";
-    var selTime = hasCurrent ? toTimeValue(opts.currentTs) : "";
+    var startTs = hasCurrent ? opts.currentTs : defaultTimestamp();
+    var selDate = toDateValue(startTs);
+    var selTime = toTimeValue(startTs);
 
     var bar = document.createElement("div");
     bar.className = "app-confirm-bar app-reminder-bar";
-    var anchor = opts.anchorEl || null;
+    function curAnchor(){
+      var a = opts.getAnchorEl ? opts.getAnchorEl() : (opts.anchorEl || null);
+      return a || null;
+    }
     bar.setAttribute("role", "dialog");
     bar.innerHTML =
       '<button type="button" class="reminder-bubble reminder-bubble-date" id="mRemDateBtn" title="Дата"></button>' +
       '<button type="button" class="reminder-bubble reminder-bubble-time" id="mRemTimeBtn" title="Время"></button>' +
-      '<button type="button" class="reminder-bubble reminder-bubble-date" id="mRemSave" title="Сохранить">' + ICON_CHECK + '</button>' +
       '<input type="date" class="reminder-hidden-input" id="mRemDateInput" tabindex="-1" aria-hidden="true">' +
       '<input type="time" class="reminder-hidden-input" id="mRemTimeInput" tabindex="-1" aria-hidden="true">';
     document.body.appendChild(bar);
     barEl = bar;
-    // высота пузырей = высота кнопок крестик/галочка (их размер задаёт
-    // .mdeditor-fab-btn в components.css) — замеряем и отдаём в CSS
+    // высота пузырей = высота кнопок .mdeditor-fab-btn (components.css) — замеряем и отдаём в CSS
     var probe = document.createElement("button");
     probe.type = "button";
     probe.className = "mdeditor-fab-btn";
@@ -635,92 +662,97 @@ window.initNotificationsModule = function(deps){
     var dateInput = bar.querySelector("#mRemDateInput");
     var timeInput = bar.querySelector("#mRemTimeInput");
     dateInput.min = toDateValue(Date.now());
+    var savedDate = selDate, savedTime = selTime; // последнее СОХРАНЁННОЕ значение (откат при неверном)
 
     function refresh(){
-      // значение в input — только если оно выбрано: пустой input открывает
-      // нативное окно на «сегодня/сейчас», а change сработает при любом выборе
       dateInput.value = selDate;
       timeInput.value = selTime;
-      if(selDate){
-        dateBtn.textContent = String(parseInt(selDate.slice(8, 10), 10));
-        dateBtn.title = formatDateLong(parseLocal(selDate, "00:00"));
-        dateBtn.classList.add("is-set");
-      }else{
-        dateBtn.innerHTML = ICON_CALENDAR;
-        dateBtn.title = "Дата";
-        dateBtn.classList.remove("is-set");
-      }
-      if(selTime){
-        timeBtn.textContent = parseInt(selTime.slice(0, 2), 10) + ":" + selTime.slice(3, 5);
-        timeBtn.title = "Время " + selTime;
-        timeBtn.classList.add("is-set");
-      }else{
-        timeBtn.innerHTML = ICON_CLOCK;
-        timeBtn.title = "Время";
-        timeBtn.classList.remove("is-set");
-      }
+      dateBtn.textContent = String(parseInt(selDate.slice(8, 10), 10));
+      dateBtn.title = formatDateLong(parseLocal(selDate, "00:00"));
+      dateBtn.classList.add("is-set");
+      timeBtn.textContent = parseInt(selTime.slice(0, 2), 10) + ":" + selTime.slice(3, 5);
+      timeBtn.title = "Время " + selTime;
+      timeBtn.classList.add("is-set");
       dateBtn.classList.remove("is-invalid");
       timeBtn.classList.remove("is-invalid");
-      if(barEl === bar) placeBar(bar, anchor); // ширина плашки могла измениться
+      if(barEl === bar) placeBar(bar, curAnchor()); // ширина плашки могла измениться
     }
     refresh();
 
-    placeBar(bar, anchor);
+    placeBar(bar, curAnchor());
     var vk = navigator.virtualKeyboard;
-    var onPlace = function(){ placeBar(bar, anchor); };
+    var onPlace = function(){ placeBar(bar, curAnchor()); };
     if(vk) vk.addEventListener("geometrychange", onPlace);
     window.addEventListener("resize", onPlace);
     window.addEventListener("scroll", onPlace, true); // список задач прокручивается — плашка следует за часами
     window.addEventListener("popstate", closeBar);
-    // клик мимо плашки = отмена (как крестик); сам клик гасим, чтобы он не
-    // сработал на том, что под пальцем. Подключаем на следующем такте: клик,
-    // открывший плашку, ещё не закончил распространяться
+    // клик мимо плашки = закрыть (значения уже сохранены); сам клик гасим, чтобы он не сработал на том,
+    // что под пальцем. Подключаем на следующем такте: клик, открывший плашку, ещё не закончил распространяться
     var onOutside = function(e){
       if(bar.contains(e.target)) return;
       e.preventDefault();
       e.stopPropagation();
       closeBar();
     };
-    var outsideTimer = setTimeout(function(){ document.addEventListener("click", onOutside, true); }, 0);
+    // свайп по любому месту мимо плашки — тоже закрыть (сам свайп не гасим: список продолжает прокручиваться)
+    var swipeXY = null;
+    var onTouchStart = function(e){
+      if(bar.contains(e.target) || !e.touches || e.touches.length !== 1){ swipeXY = null; return; }
+      swipeXY = {x: e.touches[0].clientX, y: e.touches[0].clientY};
+    };
+    var onTouchMove = function(e){
+      if(!swipeXY || !e.touches || !e.touches.length) return;
+      var dx = e.touches[0].clientX - swipeXY.x, dy = e.touches[0].clientY - swipeXY.y;
+      if(Math.sqrt(dx * dx + dy * dy) > SWIPE_CLOSE_PX){ swipeXY = null; closeBar(); }
+    };
+    var outsideTimer = setTimeout(function(){
+      document.addEventListener("click", onOutside, true);
+      document.addEventListener("touchstart", onTouchStart, {capture: true, passive: true});
+      document.addEventListener("touchmove", onTouchMove, {capture: true, passive: true});
+    }, 0);
     barCleanup = function(){
       clearTimeout(outsideTimer);
       document.removeEventListener("click", onOutside, true);
+      document.removeEventListener("touchstart", onTouchStart, true);
+      document.removeEventListener("touchmove", onTouchMove, true);
       if(vk) vk.removeEventListener("geometrychange", onPlace);
       window.removeEventListener("resize", onPlace);
       window.removeEventListener("scroll", onPlace, true);
       window.removeEventListener("popstate", closeBar);
     };
 
-    // нажатие на плашку не отнимает фокус у поля задачи (иначе клавиатура
-    // закроется и всё «поедет»)
+    // нажатие на плашку не отнимает фокус у поля задачи (иначе клавиатура закроется и всё «поедет»)
     bar.addEventListener("mousedown", function(e){ e.preventDefault(); });
 
-    dateBtn.addEventListener("click", function(){ openNativePicker(dateInput); });
-    timeBtn.addEventListener("click", function(){ openNativePicker(timeInput); });
-    function onDate(){ if(dateInput.value){ selDate = dateInput.value; refresh(); } }
-    function onTime(){ if(timeInput.value){ selTime = timeInput.value; refresh(); } }
-    dateInput.addEventListener("change", onDate);
-    dateInput.addEventListener("input", onDate);
-    timeInput.addEventListener("change", onTime);
-    timeInput.addEventListener("input", onTime);
-
-    function markInvalid(dateBad, timeBad){
-      dateBtn.classList.toggle("is-invalid", !!dateBad);
-      timeBtn.classList.toggle("is-invalid", !!timeBad);
-    }
-    bar.querySelector("#mRemSave").addEventListener("click", function(){
-      if(!selDate || !selTime){ markInvalid(!selDate, !selTime); return; }
+    // сохранение: вызывается при открытии (нет напоминания) и после каждого изменения даты/времени
+    function commit(){
       var ts = parseLocal(selDate, selTime);
       if(isNaN(ts) || ts <= Date.now()){
-        // время уже прошло: если дата — сегодня, виновато время, иначе подсвечиваем оба
-        markInvalid(selDate !== toDateValue(Date.now()), true);
-        return;
+        // время в прошлом — не сохраняем, возвращаем прежнее значение и коротко подсвечиваем виновника
+        var dateBad = selDate !== toDateValue(Date.now());
+        selDate = savedDate; selTime = savedTime;
+        refresh();
+        dateBtn.classList.toggle("is-invalid", dateBad);
+        timeBtn.classList.toggle("is-invalid", !dateBad);
+        setTimeout(function(){ dateBtn.classList.remove("is-invalid"); timeBtn.classList.remove("is-invalid"); }, 700);
+        return false;
       }
+      savedDate = selDate; savedTime = selTime;
       requestPermissionIfNeeded(); // здесь ещё жест пользователя
-      closeBar();
       if(opts.onSave) opts.onSave(ts);
       schedule();
-    });
+      if(barEl === bar) placeBar(bar, curAnchor());
+      return true;
+    }
+    dateBtn.addEventListener("click", function(){ openNativePicker(dateInput); });
+    timeBtn.addEventListener("click", function(){ openNativePicker(timeInput); });
+    function onDate(){ if(dateInput.value && dateInput.value !== selDate){ selDate = dateInput.value; refresh(); commit(); } }
+    function onTime(){ if(timeInput.value && timeInput.value !== selTime){ selTime = timeInput.value; refresh(); commit(); } }
+    dateInput.addEventListener("change", onDate);
+    timeInput.addEventListener("change", onTime);
+    // (событие input не слушаем: пока крутится выбор времени, он стреляет на каждом шаге — сохраняем только по change)
+
+    if(!hasCurrent) commit(); // нажатие на часы = подтверждение: сегодня + 30 минут уже стоит
   }
 
   return {
@@ -729,6 +761,8 @@ window.initNotificationsModule = function(deps){
     openReminderDialog: openReminderDialog,
     formatReminder: formatReminder,
     isSupported: isSupported,
+    requestPermissionIfNeeded: requestPermissionIfNeeded,
+    defaultTimestamp: defaultTimestamp,
     showBanner: showBanner
   };
 };

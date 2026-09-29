@@ -1,6 +1,9 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 44.0 (29.09) — структурная правка (ТЗ пользователя от 29.09): часы-напоминание на кнопке задачи — кружок с числом (`reminderShowsDate`) слева от времени, если напоминание стоит на другой день не дальше чем «то же число следующего месяца» (29.09 → показывается до 28.10 включительно; дальше — просто залитые часы); разметка `.rb-circle/.rb-date/.rb-time` (modals.css 8.0); `openTaskReminderDialog` передаёт `getAnchorEl` (строка перерисовывается при каждом сохранении); напоминание ставится нажатием на часы (сегодня + 30 мин, notifications.js 4.0).
+   Версия: 43.6 (29.09) — `applyThemeToPage` вызывает `window.syncMoodJoyColor` (mood.js 1.1): --mood-joy на <html> для жёлтой отметки.
+   Версия: 43.5 (29.09) — ТЗ пользователя: `SORT_FLAG_ICON_SVG` без фиксированных цветов (классы `flag-icon-yellow/red`, цвета — modals.css 7.2).
    Версия: 43.4 (29.09) — скругление верхнего язычка убирается только при реальном прилипании (порог 0.5px,
    `SETTINGS_TAB_GLUED_TOLERANCE`); угол окна/градиент — по прежнему порогу 4px. Дубликат индикатора синхронизации скрыт (modals.css 7.1).
    Версия: 43.3 (29.09) — ТЗ пользователя: `updateSettingsCornerPatchHeight` ещё и ставит классы `tabs-flush-top`
@@ -2768,7 +2771,7 @@
   // те же два жетона, что и у #taskRedSortBtn в index.html (ТЗ
   // пользователя от 15.09) — держим одну копию тут для инструкции
   // (renderTaskInfoScreen), чтобы не разъехались при правках.
-  var SORT_FLAG_ICON_SVG = '<svg viewBox="0 0 24 24"><circle cx="9" cy="14" r="6.5" fill="#f2b705" stroke="#b8860b" stroke-width="1"></circle><circle cx="15.5" cy="10.5" r="6.5" fill="#e0392b" stroke="#a52a1e" stroke-width="1"></circle></svg>';
+  var SORT_FLAG_ICON_SVG = '<svg viewBox="0 0 24 24"><circle class="flag-icon-yellow" cx="9" cy="14" r="6.5" stroke-width="1"></circle><circle class="flag-icon-red" cx="15.5" cy="10.5" r="6.5" stroke-width="1"></circle></svg>';
   // стрелка вниз в лоток — "скачать" (та же пиктограмма, что и DOWNLOAD_-
   // ICON_SVG в mdeditor.js/«Мои заметки», скопирована сюда, т.к. my.js не
   // имеет доступа к внутренним константам модуля). Пока без функции — кнопка
@@ -2932,6 +2935,8 @@
 
   function applyThemeToPage(themeId){
     document.documentElement.setAttribute("data-theme", String(themeId));
+    // ТЗ 29.09: --mood-joy (жёлтая отметка задач) зависит от темы — пересчитываем (mood.js)
+    if(typeof window.syncMoodJoyColor === "function") window.syncMoodJoyColor();
     var dots = document.querySelectorAll(".theme-dot");
     dots.forEach(function(dot){
       dot.classList.toggle("selected", Number(dot.getAttribute("data-theme-id")) === themeId);
@@ -20421,12 +20426,31 @@
     var d = new Date(ts), m = d.getMinutes();
     return d.getHours() + ":" + (m < 10 ? "0" : "") + m;
   }
+  // ТЗ 29.09: число рядом со временем показывается, если напоминание НЕ на сегодня, но раньше чем через
+  // месяц: границей служит то же число следующего месяца (сегодня 29-е → 28-е следующего месяца ещё
+  // показывается, 29-е — уже нет: число стало бы неоднозначным). 31 янв → граница 28/29 фев (поджатие).
+  // Более ранние (просроченные) дни — тоже без числа.
+  function reminderShowsDate(ts){
+    var now = new Date();
+    var startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if(ts < startToday) return false;
+    var y = now.getFullYear(), m = now.getMonth() + 1;
+    var daysNext = new Date(y, m + 1, 0).getDate();
+    var limit = new Date(y, m, Math.min(now.getDate(), daysNext)).getTime();
+    return ts < limit;
+  }
+  // содержимое и модификаторы кнопки-часов (общая логика для кнопки в строке и примеров в справке)
+  function reminderBtnParts(at){
+    if(!at) return {cls: "", inner: CLOCK_ICON_SVG};
+    if(isReminderToday(at)) return {cls: " has-time", inner: '<span class="rb-time">' + formatReminderTimeShort(at) + '</span>'};
+    if(reminderShowsDate(at)) return {cls: " has-time has-date", inner: '<span class="rb-date">' + new Date(at).getDate() + '</span><span class="rb-time">' + formatReminderTimeShort(at) + '</span>'};
+    return {cls: "", inner: '<span class="rb-circle">' + CLOCK_ICON_SVG + '</span>'};
+  }
   function taskReminderBtnHtml(task){
     var at = getTaskReminderAt(task);
-    // напоминание на сегодня — на кнопке время вместо часов (см. .has-time в modals.css)
-    var todayTime = (at && isReminderToday(at)) ? formatReminderTimeShort(at) : "";
-    return '<button type="button" class="task-icon-btn task-reminder-btn' + (at ? ' active' : '') + (todayTime ? ' has-time' : '') + '" data-id="' + task.id + '" title="' +
-      (at ? escapeHtml('Напоминание: ' + Notifications.formatReminder(at)) : 'Напоминание') + '">' + (todayTime || CLOCK_ICON_SVG) + '</button>';
+    var p = reminderBtnParts(at);
+    return '<button type="button" class="task-icon-btn task-reminder-btn' + (at ? ' active' : '') + p.cls + '" data-id="' + task.id + '" title="' +
+      (at ? escapeHtml('Напоминание: ' + Notifications.formatReminder(at)) : 'Напоминание') + '">' + p.inner + '</button>';
   }
   // открывает диалог даты/времени; onDone — перерисовка строки/списка
   function openTaskReminderDialog(id, onDone){
@@ -20441,6 +20465,12 @@
     }
     Notifications.openReminderDialog({
       anchorEl: anchorEl,
+      // после каждого сохранения строка перерисовывается — плашка находит новую кнопку заново
+      getAnchorEl: function(){
+        var c2 = document.querySelectorAll('.task-reminder-btn[data-id="' + id + '"]');
+        for(var k = 0; k < c2.length; k++){ if(c2[k].offsetParent !== null) return c2[k]; }
+        return null;
+      },
       currentTs: getTaskReminderAt(task),
       onSave: function(ts){ setTaskReminder(id, ts); if(onDone) onDone(); },
       onClear: function(){ clearTaskReminder(id); if(onDone) onDone(); }
@@ -21721,10 +21751,11 @@
     );
     html += iconRow(
       CLOCK_ICON_SVG, false,
-      "Напоминание на конкретные дату и время. Нажатие открывает выбор даты и времени, повторное нажатие на уже стоящем напоминании — изменить их (там же есть «Удалить напоминание»). Долгое нажатие снимает напоминание сразу. Два состояния: " +
+      "Напоминание на конкретные дату и время. Нажатие на часы сразу ставит напоминание на «сегодня + 30 минут» и открывает плашку с датой и временем: подтверждать ничего не нужно, а если нужно другое — просто поменяйте дату и/или время (сохраняются сразу; клик или свайп мимо плашки закрывает её). Повторное нажатие на уже стоящем напоминании открывает плашку для изменения. Долгое нажатие снимает напоминание. Состояния: " +
       '<span class="task-icon-btn task-reminder-btn">' + CLOCK_ICON_SVG + '</span> напоминания нет, ' +
-      '<span class="task-icon-btn task-reminder-btn active">' + CLOCK_ICON_SVG + '</span> напоминание стоит на другой день, ' +
-      '<span class="task-icon-btn task-reminder-btn active has-time">8:00</span> напоминание стоит на сегодня — вместо часов время. ' +
+      '<span class="task-icon-btn task-reminder-btn active has-time"><span class="rb-time">8:00</span></span> стоит на сегодня — только время, ' +
+      '<span class="task-icon-btn task-reminder-btn active has-time has-date"><span class="rb-date">30</span><span class="rb-time">8:00</span></span> стоит на другой день ближайшего месяца — число и время, ' +
+      '<span class="task-icon-btn task-reminder-btn active"><span class="rb-circle">' + CLOCK_ICON_SVG + '</span></span> стоит позже (то же число следующего месяца и дальше) — просто залитые часы. ' +
       "Все задачи с напоминанием дополнительно показываются на вкладке с чемоданчиком."
     );
     html += iconRow(SORT_FLAG_ICON_SVG, false, "Кнопка в нижнем ряду только на вкладке «Red»: включает сортировку списка — сначала красные отметки, потом жёлтые. Повторное нажатие возвращает обычный порядок по дате добавления.");

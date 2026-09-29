@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 2.7 (29.09) — убран дубликат пилюли синхронизации (#syncStatusPillModalDup); кружки вкладки Red и кнопки
+     сортировки Red без жёстких цветов (красит modals.css 7.2).
      Версия: 2.6 (21.09) — пятая нижняя вкладка второго набора (settingsTabSet2GearBtn5) больше не
      заглушка «5» — вкладка «ИПКД» (title, число месяца подставляет my.js, updateIpkdTabIcon).
      Версия: 2.5 (21.09) — версия приложения переехала из подвала в левый верхний угол
@@ -163,16 +165,6 @@ window.addEventListener("error", function(e){
        в modals.css (27.09 — цвет и высота исправлены на реальные, см. её
        комментарий там же). -->
   <div class="settings-corner-patch" aria-hidden="true"></div>
-  <!-- Дубликат пилюли синхронизации (27.09, ТЗ пользователя) — оригинал
-       (#syncStatusPill в шапке) перекрыт этим же оверлеем и невидим/некликабелен,
-       пока окно настроек открыто. Точная копия разметки оригинала (тот же
-       .sync-status/.sync-dot, свой id/id текста — оригинальные id заняты);
-       позиция/z-index — .sync-status-modal-dup в modals.css, состояние
-       синхронизирует my.js (setSyncState/collapseSyncPill). -->
-  <div class="sync-status sync-status-modal-dup" id="syncStatusPillModalDup" data-state="off">
-    <span class="sync-dot"></span>
-    <span class="sync-status-text" id="syncStatusTextModalDup">Настроить<br>синхронизацию</span>
-  </div>
   <div class="settings-modal-frame">
     <div class="settings-modal-box" id="settingsModalBox">
       <div class="settings-tab-content" id="settingsTabContent"></div>
@@ -272,7 +264,7 @@ window.addEventListener("error", function(e){
            совпадают с .task-flag-dot.flag-red/flag-yellow (modals.css), а
            не currentColor/тема. -->
       <span class="task-red-sort-wrap" id="taskRedSortWrap">
-        <button type="button" class="mdeditor-fab-btn" id="taskRedSortBtn" title="Сортировать по отметке (сначала красные)"><svg viewBox="0 0 24 24"><circle cx="9" cy="14" r="6.5" fill="#f2b705" stroke="#b8860b" stroke-width="1"></circle><circle cx="15.5" cy="10.5" r="6.5" fill="#e0392b" stroke="#a52a1e" stroke-width="1"></circle></svg></button>
+        <button type="button" class="mdeditor-fab-btn" id="taskRedSortBtn" title="Сортировать по отметке (сначала красные)"><svg viewBox="0 0 24 24"><circle class="flag-icon-yellow" cx="9" cy="14" r="6.5" stroke-width="1"></circle><circle class="flag-icon-red" cx="15.5" cy="10.5" r="6.5" stroke-width="1"></circle></svg></button>
       </span>
       <span class="task-hide-linked-wrap" id="taskHideLinkedWrap">
         <button type="button" class="mdeditor-fab-btn" id="taskHideLinkedBtn" title="Скрыть задачи, привязанные к проектам"></button>
@@ -351,15 +343,11 @@ window.addEventListener("error", function(e){
           <path d="M3 12h18"></path>
         </svg>
       </button>
-      <!-- Пиктограмма — сплошной красный кружок (не значок-флажок, как
-           раньше): цвет взят из цветной отметки приоритета задач,
-           см. .task-flag-dot.flag-red в modals.css (#e0392b/#a52a1e) —
-           тот же, достаточно яркий, а не тёмный оттенок красного. Красится
-           жёстко fill/stroke, а не через currentColor, поэтому не
-           перекрашивается вместе с фоном вкладки при .active. -->
+      <!-- Пиктограмма — сплошной кружок цвета темы (29.09, ТЗ пользователя): цвет активной вкладки (var(--wood)); когда
+           вкладка сама активна — цвет неактивной вкладки. Цвета задаёт modals.css (#settingsTabRedBtn svg circle), не fill/stroke. -->
       <button class="settings-tab task-tab" id="settingsTabRedBtn" data-task="red" title="red" style="display:none;">
         <svg viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="7" fill="#e0392b" stroke="#a52a1e" stroke-width="0.75"></circle>
+          <circle cx="12" cy="12" r="7" fill="currentColor" stroke="currentColor" stroke-width="0.75"></circle>
         </svg>
       </button>
       <button class="settings-tab task-tab" id="settingsTabInboxBtn" data-task="inbox" title="inbox" style="display:none;">

@@ -1,5 +1,6 @@
 /* ===========================================================================
    mood.js
+   Версия: 1.1 (29.09) — `--mood-joy` на <html> (цвет «Радости» для отметок задач), `window.syncMoodJoyColor`.
    Функционал отслеживания настроения: счётчик, чек-ин, диаграмма настроения.
    Выделено из my.js. Модуль создаётся вызовом window.initMoodModule(deps)
    из my.js и получает через deps доступ к общему состоянию приложения
@@ -101,9 +102,16 @@
       sleepy:  pastel(0.68, 12),
       sad:     pastel(0.84, 16)
     };
+    // ТЗ 29.09: цвет «Радости» отдаётся в CSS (--mood-joy на <html>) — им красится жёлтая отметка задач и
+    // жёлтый кружок кнопки сортировки Red (modals.css, --flag-yellow). Обновляется здесь при каждом пересчёте
+    // палитры и из my.js при смене темы (window.syncMoodJoyColor).
+    try{ document.documentElement.style.setProperty("--mood-joy", moodPalette.joy); }catch(e){}
     return moodPalette;
   }
   function moodColor(key){ return moodPalette[key] || "#cccccc"; }
+  // пересчёт палитры без отрисовки вкладки — нужен, чтобы --mood-joy был верным в любой момент (смена темы, старт)
+  global.syncMoodJoyColor = function(){ try{ computeMoodPalette(); }catch(e){} };
+  global.syncMoodJoyColor();
 
   function moodCategoriesResolved(){
     return [

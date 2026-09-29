@@ -1,5 +1,8 @@
 /* ===========================================================================
    modals.css
+   Версия: 8.0 (29.09) — структурная правка (ТЗ пользователя от 29.09): залитые кружки строки задачи (красная/жёлтая отметка, чемоданчик «в работе»/«проверить», часы-напоминание) уменьшены 22px → `--task-circle` (19px), пиктограммы внутри прежние 15px; область нажатия прежняя 22px (центры сдвинуты компенсирующими отступами `--task-circle-pad`). Часы-напоминание теперь рисуются вложенными элементами `.rb-circle` (обычный залитый круг), `.rb-time` (время, напоминание на сегодня), `.rb-date` (кружок с числом слева от времени, напоминание на другой день ближайшего месяца); сама кнопка прозрачная. Галочки в плашке напоминания больше нет.
+   Версия: 7.2 (29.09) — ТЗ пользователя от 29.09: крестики удаления и красные отметки — цвета темы (`--flag-red`=var(--wood),
+   `--flag-yellow`=var(--mood-joy)), выделенная отметка 22px как чемоданчик, кружок вкладки Red и иконка сортировки Red — от темы.
    Версия: 7.1 (29.09) — индикатор-дубликат `.sync-status-modal-dup` скрыт всегда (display:none !important); скругление
    язычка (`.tab-flush-top`) теперь только когда он реально прилип (порог отдельный, см. my.js 43.4).
    Версия: 7.0 (29.09) — структурная правка (ТЗ пользователя от 29.09): (1) новые классы-модификаторы
@@ -701,6 +704,32 @@
      прежний размер (за счёт более высокой специфичности id-селектора). */
   #settingsTabs .task-tab svg{ width:38px; height:38px; stroke-width:1.35; }
   #settingsTabRedBtn svg{ width:32px; height:32px; }
+  /* ТЗ 29.09: кружок вкладки Red — не фиксированный красный, а цвет активной вкладки (var(--wood));
+     когда сама вкладка активна (её фон = var(--wood)) — цвет неактивной вкладки. !important — кружок
+     в index.html имеет собственные fill/stroke (атрибуты или inline). */
+  #settingsTabRedBtn svg circle{
+    fill:var(--wood) !important;
+    stroke:var(--wood) !important;
+  }
+  #settingsTabRedBtn.active svg circle{
+    fill:var(--tab-bg, var(--parchment)) !important;
+    stroke:var(--tab-bg, var(--parchment)) !important;
+  }
+  /* ТЗ 29.09: пиктограмма кнопки сортировки Red (два кружка, один выглядывает из-за другого): красный =
+     цвет активной вкладки, жёлтый = цвет настроения «Радость» (см. --flag-red/--flag-yellow выше). Селекторы
+     покрывают и кнопку в index.html (id #taskRedSortBtn — там первый кружок жёлтый, второй красный), и копию
+     в экране-инструкции (SORT_FLAG_ICON_SVG в my.js, классы flag-icon-*). Обводка — цвет фона кнопки,
+     чтобы кружки визуально разделялись. */
+  #taskRedSortBtn svg circle:nth-of-type(1),
+  svg circle.flag-icon-yellow{
+    fill:var(--flag-yellow) !important;
+    stroke:var(--tab-bg, var(--parchment)) !important;
+  }
+  #taskRedSortBtn svg circle:nth-of-type(2),
+  svg circle.flag-icon-red{
+    fill:var(--flag-red) !important;
+    stroke:var(--tab-bg, var(--parchment)) !important;
+  }
   /* тонкая лиловая линия-срез сверху (плавный переход в страницу, а не
      жёсткая тёмная граница) нужна только у самого верхнего язычка
      ВЕРТИКАЛЬНОГО стека (#settingsTabs) — он же последний в DOM из-за
@@ -1425,8 +1454,24 @@
     border:1px solid var(--groove-shadow);
     background:transparent;
   }
-  .task-flag-dot.flag-red .task-flag-dot-inner{ background:#e0392b; border-color:#a52a1e; }
-  .task-flag-dot.flag-yellow .task-flag-dot-inner{ background:#f2b705; border-color:#b8860b; }
+  /* ТЗ 29.09: цвета отметок — от темы. Красная = цвет активной вкладки (var(--wood)); жёлтая = цвет настроения
+     «Радость» (--mood-joy — выставляет mood.js по теме; пока переменной нет, запасной цвет — var(--gold-light)).
+     Выделенная отметка увеличена до размера залитого чемоданчика (.task-worktasks-btn.active — круг 22px, вся
+     кнопка), независимо от оттенка; невыделенная — прежний кружок 12px. */
+  :root{
+    --flag-red:var(--wood);
+    --flag-yellow:var(--mood-joy, var(--gold-light));
+    --task-circle:19px; /* ТЗ 29.09: диаметр залитых кружков строки задачи (был 22px) */
+    --task-circle-pad:calc((22px - var(--task-circle)) / 2);
+  }
+  .task-flag-dot.flag-red .task-flag-dot-inner,
+  .task-flag-dot.flag-yellow .task-flag-dot-inner{
+    box-sizing:border-box;
+    width:var(--task-circle);height:var(--task-circle);
+    border-color:transparent;
+  }
+  .task-flag-dot.flag-red .task-flag-dot-inner{ background:var(--flag-red); }
+  .task-flag-dot.flag-yellow .task-flag-dot-inner{ background:var(--flag-yellow); }
   /* .task-body — раньше кнопки "подверстывались" к последней строке
      текста через float:right (см. историю правок), но это оказалось
      ненадёжно: браузер решает, влезает ли float на текущую строку, ДО
@@ -1535,35 +1580,51 @@
     background:var(--wood);
     color:var(--parchment);
     border-radius:50%;
+    width:var(--task-circle);height:var(--task-circle);
+    margin-left:calc(6px + var(--task-circle-pad));
+    margin-right:var(--task-circle-pad);
   }
   .task-icon-btn.task-worktasks-btn.needs-check{
     border:1.5px solid var(--wood);
     border-radius:50%;
     box-sizing:border-box;
+    width:var(--task-circle);height:var(--task-circle);
+    margin-left:calc(6px + var(--task-circle-pad));
+    margin-right:var(--task-circle-pad);
   }
   /* пиктограмма-часы "напоминание" (.task-reminder-btn, notifications.js) —
      два состояния, третьего нет: обычное (нет напоминания) — как остальные
      кнопки строки; стоит напоминание (.active) — часы в закрашенном круге,
      тот же приём и те же цвета темы, что у .task-worktasks-btn.active. */
-  .task-icon-btn.task-reminder-btn.active{
+  /* ТЗ 29.09: сама кнопка прозрачная (область нажатия 22px), заливку рисуют вложенные элементы высотой
+     --task-circle (19px): .rb-circle — круг с часами (напоминание на другой день дальше месяца),
+     .rb-time — овал с временем «8:00» (напоминание на сегодня), .rb-date — круг с числом слева от
+     времени (число 1..31: другое число ближайшего месяца, см. taskReminderBtnHtml в my.js). Пиктограмма
+     внутри .rb-circle прежнего размера 15px (.task-icon-btn svg). Ширина овала ФИКСИРОВАННАЯ: 5ch =
+     пять цифр «0» (с запасом под «00:00»), tabular-nums — все цифры одной ширины. Кнопка с временем
+     шире 22px (width:auto); соседей сдвигает inline-flex .task-actions, fitTaskActions мерит offsetWidth. */
+  .task-icon-btn.task-reminder-btn.active{ background:transparent; }
+  .task-icon-btn.task-reminder-btn.has-time,
+  .task-icon-btn.task-reminder-btn.has-date{ width:auto; min-width:22px; }
+  .task-reminder-btn .rb-circle,
+  .task-reminder-btn .rb-date,
+  .task-reminder-btn .rb-time{
+    box-sizing:border-box;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    height:var(--task-circle);
     background:var(--wood);
     color:var(--parchment);
-    border-radius:50%;
   }
-  /* напоминание на СЕГОДНЯ (ТЗ пользователя от 21.09; класс ставит taskReminderBtnHtml в my.js
-     вместе с .active): вместо часов на кнопке — время («8:00», «23:05»), уменьшенная копия
-     овального пузыря времени плашки (.reminder-bubble-time.is-set): та же заливка
-     var(--wood)/var(--parchment), тот же шрифт и жирность. Пропорции — от высоты кнопки 22px
-     (у пузыря 32px шрифт .45 и боковой отступ .35 высоты, здесь 10px шрифта). Высота прежняя
-     (22px), кнопка становится шире (~35px). Ширина ФИКСИРОВАННАЯ: 5ch = ширина пяти цифр «0» —
-     с запасом под «00:00» (двоеточие уже цифры); так «0:00» и «23:59» выглядят одинаково.
-     tabular-nums — у всех цифр одна ширина (без этого у Georgia «старые» цифры разной ширины).
-     Соседние кнопки сдвигаются сами (.task-actions — inline-flex), подгонка под последнюю
-     строку текста (fitTaskActions в my.js) измеряет группу по offsetWidth. Другая дата — часы
-     в круге (правило выше), этот класс не ставится. */
-  .task-icon-btn.task-reminder-btn.has-time{
+  .task-reminder-btn .rb-circle,
+  .task-reminder-btn .rb-date{ width:var(--task-circle); border-radius:50%; }
+  .task-reminder-btn .rb-time{
     width:calc(5ch + 8px);
-    border-radius:11px;
+    border-radius:calc(var(--task-circle) / 2);
+  }
+  .task-reminder-btn .rb-date,
+  .task-reminder-btn .rb-time{
     font-family:"Palatino Linotype",Georgia,serif;
     font-size:10px;
     font-weight:bold;
@@ -1571,6 +1632,7 @@
     line-height:1;
     white-space:nowrap;
   }
+  .task-reminder-btn .rb-date + .rb-time{ margin-left:4px; }
   /* плашка выбора даты и времени (openReminderDialog в notifications.js).
      Класс .app-reminder-bar добавляется к .app-confirm-bar (правый край, над
      клавиатурой — базовые стили оттуда; с 3.1 затемнения нет, left/top ставит JS над кнопкой-часами). Ряд:
@@ -2324,7 +2386,8 @@
     color:var(--ink-soft);
     text-decoration:line-through;
   }
-  .task-delete-btn{ color:#c0392b; }
+  /* ТЗ 29.09: крестик удаления — не красный, а как остальные кнопки строки (.task-icon-btn: currentColor = var(--wood), тема) */
+  .task-delete-btn{ color:var(--wood); }
 
     /* отключение анимаций при массовых операциях */
   .no-transitions *{

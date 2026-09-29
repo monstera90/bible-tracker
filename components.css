@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 3.4.2 (29.09) — `.mood-checkin-item`: фон `var(--tab-bg, var(--parchment))` (как у неактивных вкладок) вместо #fffef8.
    Версия: 3.4.1 (28.09) — `hyphenate-limit-chars` ослаблен с 6 3 3 до 5 2 2 (слишком много пропущенных переносов).
    Версия: 3.4 (28.09) — ПЕРЕНОСЫ СЛОВ (ТЗ пользователя от 28.09): в конце файла — правило
    `html.hyphens-on :is(.task-body, .task-editable, .book-reader, .mdeditor-editor-host)
@@ -63,7 +64,8 @@
     align-items:center;
     gap:4px;
     padding:12px 4px;
-    background:#fffef8;
+    /* ТЗ 29.09: фон = фон неактивных вкладок (.settings-tab), в светлых и тёмных темах */
+    background:var(--tab-bg, var(--parchment));
     border:2px solid var(--groove-shadow);
     border-radius:8px;
     cursor:pointer;
