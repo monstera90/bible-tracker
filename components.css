@@ -3788,6 +3788,8 @@
   #settingsTabContent .review-list-item{ color:var(--ink); padding:2px 0; }
   #settingsTabContent .review-list-title{ font-weight:bold; }
   #settingsTabContent .review-sub-list .task-list{ margin:0; }
+  /* ТЗ 29.09: закрытые задачи на подэкране статистики — без зачёркивания (в архиве оно остаётся) */
+  #settingsTabContent .review-sub-list .task-archive-text{ text-decoration:none; }
 
   /* ===========================================================================
      Вкладка "Поиск" (третья боковая вкладка второго набора,

@@ -17620,6 +17620,12 @@
   // делает, как и было бы логично для переключателя вкладок (не кнопки
   // "обновить").
   function switchSettingsTabOnClick(tab){
+    // ТЗ 29.09: повторный клик по «Обзору» на подэкране статистики — выход
+    // на главный экран (так же, как жест «назад»)
+    if(tab === "extra3" && tab === currentSettingsTab && reviewSubScreen){
+      closeReviewSubScreen();
+      return;
+    }
     if(tab === currentSettingsTab) return;
     switchSettingsTab(tab);
   }
@@ -21249,8 +21255,8 @@
   // период: главы по датам / закрытые задачи / закрытые важные задачи /
   // достигнутые цели. reviewSubScreen: null (главный экран) | "chapters" |
   // "tasks" | "important" | "goals". Период (reviewSelectedPeriod) при входе
-  // в подэкран и возврате из него не сбрасывается. «Назад» — системная кнопка
-  // (AppNav.push) или пилюля «Назад» внизу (она зовёт history.back()).
+  // в подэкран и возврате из него не сбрасывается. Выход — жест/кнопка «назад»
+  // (AppNav.push) или повторный клик по вкладке «Обзор» (switchSettingsTabOnClick).
   var reviewSubScreen = null;
   var REVIEW_SUB_TITLES = {
     chapters: "Прочитанные главы",
@@ -21539,12 +21545,9 @@
       if(!bodyHtml) bodyHtml = '<div class="task-empty">За этот период ничего нет.</div>';
       container.innerHTML =
         '<h3 class="common-tab-title">' + escapeHtml(REVIEW_SUB_TITLES[reviewSubScreen] || "") + '</h3>' +
-        '<div class="review-stats-list review-sub-list">' + bodyHtml + '</div>' +
-        '<div class="review-pills"><button type="button" class="review-pill review-back-pill">Назад</button></div>';
+        '<div class="review-stats-list review-sub-list">' + bodyHtml + '</div>';
       container.scrollTop = preservedScrollTop;
       if(reviewSubScreen === "tasks" || reviewSubScreen === "important") bindReviewTaskRows(container);
-      var backBtn = container.querySelector(".review-back-pill");
-      if(backBtn) backBtn.addEventListener("click", closeReviewSubScreen);
       return;
     }
 
