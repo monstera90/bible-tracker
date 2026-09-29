@@ -11009,6 +11009,7 @@
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
     flushPendingCommentEdits();
+    flushReviewEdit(); // правка текста выполненной задачи на вкладке «Обзор»
     flushPendingMdEditorEdit();
     destroySubtitleScrollListener();
     // Уход из экрана чтения книги (set2s_7, bookReaderState) на ЛЮБУЮ
@@ -20640,7 +20641,11 @@
       if(k.indexOf("taskcompletion:") !== 0) return;
       var rec = state[k];
       if(!rec || !rec.c) return;
-      var day = startOfDay(rec.t);
+      // день выполнения — из ключа "taskcompletion:<ts>-<rand>": t записи
+      // обновляется при правке текста выполненной задачи (вкладка «Обзор»,
+      // setDoneTaskText), а дата выполнения от этого меняться не должна
+      var keyTs = Number((k.slice("taskcompletion:".length).split("-")[0]));
+      var day = startOfDay(keyTs > 0 ? keyTs : rec.t);
       (byDay[day] = byDay[day] || []).push(rec.c);
     });
     return byDay;
@@ -21238,43 +21243,340 @@
     return Math.ceil(remaining / ratePerDay);
   }
 
+  // ---- подэкраны вкладки «Обзор» (ТЗ пользователя от 29.09) ----------------
+  // Нажатие на строку статистики открывает подэкран в той же области чтения
+  // (#settingsTabContent) со списком того, из чего сложена цифра за выбранный
+  // период: главы по датам / закрытые задачи / закрытые важные задачи /
+  // достигнутые цели. reviewSubScreen: null (главный экран) | "chapters" |
+  // "tasks" | "important" | "goals". Период (reviewSelectedPeriod) при входе
+  // в подэкран и возврате из него не сбрасывается. «Назад» — системная кнопка
+  // (AppNav.push) или пилюля «Назад» внизу (она зовёт history.back()).
+  var reviewSubScreen = null;
+  var REVIEW_SUB_TITLES = {
+    chapters: "Прочитанные главы",
+    tasks: "Закрытые задачи",
+    important: "Закрытые важные задачи",
+    goals: "Достигнутые цели"
+  };
+  // редактируемая сейчас строка подэкрана задач: функция «сохранить и выйти
+  // из режима правки» либо null (см. bindReviewTaskRows)
+  var reviewPendingEdit = null;
+  function flushReviewEdit(){
+    if(reviewPendingEdit){
+      var fn = reviewPendingEdit;
+      reviewPendingEdit = null;
+      fn();
+    }
+  }
+
+  function openReviewSubScreen(name){
+    flushReviewEdit();
+    reviewSubScreen = name;
+    if(window.AppNav){
+      window.AppNav.push(function(){
+        flushReviewEdit();
+        reviewSubScreen = null;
+        if(currentSettingsTab === "extra3") renderReviewTabContent();
+      });
+    }
+    var container = document.getElementById("settingsTabContent");
+    if(container) container.scrollTop = 0;
+    renderReviewTabContent();
+  }
+  function closeReviewSubScreen(){
+    if(window.AppNav){ history.back(); return; }
+    flushReviewEdit();
+    reviewSubScreen = null;
+    renderReviewTabContent();
+  }
+
+  // «29 сентября» (для прошлых лет — с годом)
+  function formatReviewDay(ts){
+    var d = new Date(ts);
+    var s = d.getDate() + " " + MONTH_NAMES_FULL[d.getMonth()];
+    if(d.getFullYear() !== new Date().getFullYear()) s += " " + d.getFullYear();
+    return s;
+  }
+
+  // главы, отмеченные прочитанными с startTs: [{day, items:[{name}]}], дни от
+  // новых к старым, главы внутри дня — в порядке Библии
+  function getChaptersReadByDaySince(startTs){
+    var order = {}, idx = 0;
+    sections.forEach(function(s){ s.books.forEach(function(b){ order[b[0]] = idx++; }); });
+    var byDay = {};
+    Object.keys(state).forEach(function(k){
+      var p = k.indexOf("|");
+      if(p === -1) return;
+      var rec = state[k];
+      if(!(rec && rec.c === true && typeof rec.t === "number" && rec.t >= startTs)) return;
+      var book = k.slice(0, p), chStr = k.slice(p + 1);
+      var day = startOfDay(rec.t);
+      (byDay[day] = byDay[day] || []).push({
+        book: book, ch: Number(chStr), chStr: chStr,
+        o: order.hasOwnProperty(book) ? order[book] : 9999
+      });
+    });
+    return Object.keys(byDay).map(Number).sort(function(a, b){ return b - a; }).map(function(day){
+      var items = byDay[day].sort(function(a, b){
+        return (a.o - b.o) || (a.book < b.book ? -1 : a.book > b.book ? 1 : 0) || ((a.ch || 0) - (b.ch || 0));
+      });
+      return {day: day, items: items};
+    });
+  }
+
+  // выполненные задачи личных целей с startTs, дни от новых к старым
+  function getGoalCompletionsByDaySince(startTs){
+    var byDay = {};
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("goalcompletion:") !== 0) return;
+      var rec = state[k];
+      if(!(rec && rec.c && typeof rec.t === "number" && rec.t >= startTs)) return;
+      var day = startOfDay(rec.t);
+      (byDay[day] = byDay[day] || []).push({t: rec.t, goalTitle: rec.c.goalTitle || "Без названия", taskText: rec.c.taskText || ""});
+    });
+    return Object.keys(byDay).map(Number).sort(function(a, b){ return b - a; }).map(function(day){
+      return {day: day, items: byDay[day].sort(function(a, b){ return a.t - b.t; })};
+    });
+  }
+
+  // «Извлечь из архива» на этом экране — задача возвращается во «Входящие»
+  // (а не на прежнюю вкладку, как в самом архиве), запись о выполнении
+  // («taskcompletion:…») гасится — как и при обычном извлечении
+  function restoreTaskToInboxFromReview(id){
+    if(isGroupTaskId(id)) return;
+    var task = getTaskById(id);
+    if(!task || !task.c.checked) return;
+    if(task.c.completionKey){
+      state[task.c.completionKey] = {c: null, t: Date.now()};
+    }
+    task.c.checked = false;
+    task.c.checkedAt = null;
+    task.c.completionKey = null;
+    task.c.tab = "inbox";
+    task.c.nextForProjectId = null;
+    saveTaskData(id, task.c);
+  }
+  // правка текста выполненной задачи: обновляется и сама задача, и запись о
+  // выполнении («taskcompletion:…»), которая уходит в экспорт. t записи
+  // обновляется — иначе слияние с облаком (last-write-wins) не подтянет
+  // правку; дата выполнения от этого не съезжает, она берётся из ключа
+  // (см. getTaskCompletionsByDay)
+  function setDoneTaskText(id, text){
+    var task = getTaskById(id);
+    if(!task) return;
+    var key = task.c.completionKey;
+    if(key && state[key] && state[key].c){
+      var c2 = {};
+      Object.keys(state[key].c).forEach(function(f){ c2[f] = state[key].c[f]; });
+      c2.text = text || "Без названия";
+      state[key] = {c: c2, t: Date.now()};
+    }
+    setTaskText(id, text); // внутри — saveTaskData: сохранит и запись о выполнении
+  }
+
+  function reviewTaskRowsHtml(list){
+    var days = [], byDay = {};
+    list.forEach(function(t){
+      var day = startOfDay(t.c.checkedAt || 0);
+      if(!byDay[day]){ byDay[day] = []; days.push(day); }
+      byDay[day].push(t);
+    });
+    return days.map(function(day){
+      var rows = byDay[day].map(function(t){
+        var label = t.c.text ? escapeHtml(t.c.text) : "Без названия";
+        var isExpanded = !!expandedTaskIds[t.id];
+        return '<div class="task-row" data-id="' + t.id + '">' +
+          '<div class="task-body task-archive-body" data-id="' + t.id + '">' +
+            '<span class="task-text-view task-archive-text' + (isExpanded ? '' : ' task-text-clamped') + '">' + label + '</span>' +
+            '<span class="task-actions">' +
+              '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
+              '<button type="button" class="task-icon-btn review-task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
+              '<button type="button" class="task-icon-btn review-task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
+              '<button type="button" class="task-icon-btn review-task-restore-btn" title="Вернуть во Входящие">' + RESTORE_ICON_SVG + '</button>' +
+            '</span>' +
+          '</div>' +
+        '</div>';
+      }).join("");
+      return '<div class="review-day-head">' + escapeHtml(formatReviewDay(day)) + '</div>' +
+        '<div class="task-list">' + rows + '</div>';
+    }).join("");
+  }
+
+  function bindReviewTaskRows(container){
+    Array.prototype.forEach.call(container.querySelectorAll(".task-archive-body"), function(body){
+      var id = body.getAttribute("data-id");
+      var textEl = body.querySelector(".task-archive-text");
+      var expandBtn = body.querySelector(".task-expand-btn");
+      var editBtn = body.querySelector(".review-task-edit-btn");
+      var copyBtn = body.querySelector(".review-task-copy-btn");
+      var restoreBtn = body.querySelector(".review-task-restore-btn");
+      var editing = false;
+
+      // кнопки не отнимают фокус у редактируемого текста (как в строках задач)
+      [expandBtn, editBtn, copyBtn, restoreBtn].forEach(function(b){
+        if(b) b.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      });
+
+      if(expandBtn){
+        expandBtn.addEventListener("click", function(e){
+          e.stopPropagation();
+          if(expandedTaskIds[id]) delete expandedTaskIds[id];
+          else expandedTaskIds[id] = true;
+          if(textEl) textEl.classList.toggle("task-text-clamped", !expandedTaskIds[id]);
+          updateTaskExpandBtn(body, id);
+          fitTaskActions(body);
+        });
+      }
+
+      function commit(){
+        if(!editing) return;
+        editing = false;
+        var newText = getEditableNoteText(textEl).replace(/\n+$/, "").trim();
+        var cur = getTaskById(id);
+        if(cur && (cur.c.text || "") !== newText) setDoneTaskText(id, newText);
+        renderReviewTabContent();
+      }
+      if(editBtn){
+        editBtn.addEventListener("click", function(){
+          if(editing){ reviewPendingEdit = null; commit(); return; }
+          flushReviewEdit();
+          var cur = getTaskById(id);
+          if(!cur) return;
+          editing = true;
+          reviewPendingEdit = commit;
+          textEl.textContent = cur.c.text || "";
+          textEl.classList.remove("task-text-clamped");
+          textEl.classList.add("task-editable");
+          textEl.style.display = "block";
+          textEl.setAttribute("contenteditable", "true");
+          editBtn.innerHTML = CHECK_ICON_SVG;
+          editBtn.title = "Сохранить";
+          if(expandBtn) expandBtn.style.display = "none";
+          textEl.focus();
+          try{
+            var range = document.createRange();
+            range.selectNodeContents(textEl);
+            range.collapse(false);
+            var sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }catch(e){}
+          fitTaskActions(body);
+        });
+      }
+      if(textEl){
+        textEl.addEventListener("input", function(){ fitTaskActions(body); });
+        textEl.addEventListener("blur", function(){
+          // правка сохраняется и при уходе фокуса (тап в пустое место)
+          setTimeout(function(){
+            if(editing && document.activeElement !== textEl){ reviewPendingEdit = null; commit(); }
+          }, 0);
+        });
+      }
+      if(copyBtn){
+        copyBtn.addEventListener("click", function(){
+          var current = getTaskById(id);
+          var txt = editing ? getEditableNoteText(textEl) : (current && current.c.text ? current.c.text : "");
+          copyTaskTextToClipboard(txt);
+          copyBtn.innerHTML = CHECK_ICON_SVG;
+          setTimeout(function(){
+            if(document.body.contains(copyBtn)) copyBtn.innerHTML = COPY_ICON_SVG;
+          }, 1200);
+        });
+      }
+      if(restoreBtn){
+        restoreBtn.addEventListener("click", function(){
+          editing = false;
+          reviewPendingEdit = null;
+          restoreTaskToInboxFromReview(id);
+          renderReviewTabContent();
+        });
+      }
+      if(!editing){
+        updateTaskExpandBtn(body, id);
+        fitTaskActions(body);
+      }
+    });
+  }
+
   function renderReviewTab(){
     reviewSelectedPeriod = "week";
+    reviewSubScreen = null;
+    reviewPendingEdit = null;
     renderReviewTabContent();
   }
   function renderReviewTabContent(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     var startTs = getReviewPeriodStart(reviewSelectedPeriod);
+    var preservedScrollTop = container.scrollTop;
 
-    var rows = [];
+    // ----- подэкраны -----
+    if(reviewSubScreen){
+      var bodyHtml = "";
+      if(reviewSubScreen === "chapters"){
+        var chapterDays = getChaptersReadByDaySince(startTs);
+        bodyHtml = chapterDays.map(function(g){
+          return '<div class="review-day-head">' + escapeHtml(formatReviewDay(g.day)) + '</div>' +
+            g.items.map(function(it){
+              return '<div class="review-list-item">' + escapeHtml(it.book + " " + it.chStr) + '</div>';
+            }).join("");
+        }).join("");
+      } else if(reviewSubScreen === "tasks" || reviewSubScreen === "important"){
+        var doneList = getArchivedTasksSince(startTs);
+        if(reviewSubScreen === "important") doneList = doneList.filter(function(t){ return t.c.flag === "red"; });
+        bodyHtml = reviewTaskRowsHtml(doneList);
+      } else if(reviewSubScreen === "goals"){
+        var goalDays = getGoalCompletionsByDaySince(startTs);
+        bodyHtml = goalDays.map(function(g){
+          return '<div class="review-day-head">' + escapeHtml(formatReviewDay(g.day)) + '</div>' +
+            g.items.map(function(it){
+              return '<div class="review-list-item"><span class="review-list-title">' + escapeHtml(it.goalTitle) + '</span>' +
+                (it.taskText ? '<div>' + escapeHtml(it.taskText) + '</div>' : '') + '</div>';
+            }).join("");
+        }).join("");
+      }
+      if(!bodyHtml) bodyHtml = '<div class="task-empty">За этот период ничего нет.</div>';
+      container.innerHTML =
+        '<h3 class="common-tab-title">' + escapeHtml(REVIEW_SUB_TITLES[reviewSubScreen] || "") + '</h3>' +
+        '<div class="review-stats-list review-sub-list">' + bodyHtml + '</div>' +
+        '<div class="review-pills"><button type="button" class="review-pill review-back-pill">Назад</button></div>';
+      container.scrollTop = preservedScrollTop;
+      if(reviewSubScreen === "tasks" || reviewSubScreen === "important") bindReviewTaskRows(container);
+      var backBtn = container.querySelector(".review-back-pill");
+      if(backBtn) backBtn.addEventListener("click", closeReviewSubScreen);
+      return;
+    }
+
+    // ----- главный экран -----
+    var rows = []; // [подпись, значение, ключ подэкрана (необязательно)]
     var chaptersCount = getChaptersReadCountSince(startTs);
-    if(chaptersCount > 0) rows.push(["Прочитанные главы", chaptersCount]);
+    if(chaptersCount > 0) rows.push(["Прочитанные главы", chaptersCount, "chapters"]);
 
     var forecastDays = getBibleForecastDays(reviewSelectedPeriod);
     if(forecastDays !== null) rows.push(["До завершения чтения Библии предположительно", forecastDays + " " + pluralRu(forecastDays, DAY_FORMS)]);
 
     var goalsCount = getGoalCompletionsCountSince(startTs);
-    if(goalsCount > 0) rows.push(["Количество личных целей, которые были достигнуты", goalsCount]);
+    if(goalsCount > 0) rows.push(["Количество личных целей, которые были достигнуты", goalsCount, "goals"]);
 
     var hourMinutes = getHourMinutesSince(startTs);
     if(hourMinutes > 0) rows.push(["Количество часов", formatHHMM(hourMinutes)]);
 
     var archived = getArchivedTasksSince(startTs);
-    if(archived.length > 0) rows.push(["Количество закрытых задач", archived.length]);
+    if(archived.length > 0) rows.push(["Количество закрытых задач", archived.length, "tasks"]);
 
     var moodEmoji = getMoodTopEmojiSince(startTs);
     if(moodEmoji) rows.push(["Преобладающее настроение", moodEmoji]);
 
     var importantClosed = archived.filter(function(t){ return t.c.flag === "red"; }).length;
-    if(importantClosed > 0) rows.push(["Количество закрытых важных задач", importantClosed]);
+    if(importantClosed > 0) rows.push(["Количество закрытых важных задач", importantClosed, "important"]);
 
     var projectsDone = archived.filter(function(t){ return t.c.tab === "projects"; }).length;
     if(projectsDone > 0) rows.push(["Количество выполненных проектов", projectsDone]);
 
     var rowsHtml = rows.length
       ? rows.map(function(r){
-          return '<div class="review-stat-row"><span>' + escapeHtml(r[0]) + ':</span><span class="review-stat-value">' + escapeHtml(String(r[1])) + '</span></div>';
+          return '<div class="review-stat-row' + (r[2] ? ' review-stat-row-link' : '') + '"' + (r[2] ? ' data-sub="' + r[2] + '"' : '') + '><span>' + escapeHtml(r[0]) + ':</span><span class="review-stat-value">' + escapeHtml(String(r[1])) + '</span></div>';
         }).join("")
       : '<div class="task-empty">За этот период данных пока нет.</div>';
 
@@ -21282,12 +21584,20 @@
       return '<button type="button" class="review-pill' + (p.key === reviewSelectedPeriod ? " active" : "") + '" data-period="' + p.key + '">' + escapeHtml(p.label) + '</button>';
     }).join("") + '</div>';
 
-    container.innerHTML = '<div class="review-stats-list">' + rowsHtml + '</div>' + pillsHtml;
+    container.innerHTML =
+      '<h3 class="common-tab-title">Статистика</h3>' +
+      '<div class="review-stats-list">' + rowsHtml + '</div>' + pillsHtml;
+    container.scrollTop = preservedScrollTop;
 
     Array.prototype.forEach.call(container.querySelectorAll(".review-pill"), function(btn){
       btn.addEventListener("click", function(){
         reviewSelectedPeriod = btn.getAttribute("data-period");
         renderReviewTabContent();
+      });
+    });
+    Array.prototype.forEach.call(container.querySelectorAll(".review-stat-row-link"), function(row){
+      row.addEventListener("click", function(){
+        openReviewSubScreen(row.getAttribute("data-sub"));
       });
     });
   }

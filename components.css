@@ -3763,6 +3763,32 @@
   }
   #settingsTabContent .review-pill:active{ filter:brightness(.96); }
 
+  /* ---------- Вкладка «Обзор» (ТЗ 29.09): типографика как у задач/заметок/книг
+     (.task-body, .book-reader: Palatino Linotype/Georgia, размер --mdeditor-font-size,
+     интерлиньяж 1.5, цвет --ink). Значения заданы явно и с запасом по приоритету —
+     раньше строки статистики оставались на «своём» шрифте/интерлиньяже. ---------- */
+  html #settingsTabContent :is(.review-stat-row, .review-stat-value, .review-day-head, .review-list-item){
+    font-family:"Palatino Linotype",Georgia,serif !important;
+    font-size:var(--mdeditor-font-size, 14px) !important;
+    line-height:1.5 !important;
+  }
+  #settingsTabContent .review-stat-row{ color:var(--ink); align-items:baseline; }
+  #settingsTabContent .review-stat-value{ flex-shrink:0; white-space:nowrap; }
+  /* строки, открывающие подэкран (главы / закрытые задачи / важные / цели) */
+  #settingsTabContent .review-stat-row-link{ cursor:pointer; }
+  #settingsTabContent .review-stat-row-link .review-stat-value::after{ content:" \203A"; }
+  #settingsTabContent .review-stat-row-link:active{ background:var(--parchment-dark); }
+  /* подэкраны: заголовок-дата и строки под ней */
+  #settingsTabContent .review-day-head{
+    font-weight:bold;
+    color:var(--wood);
+    padding:10px 0 2px;
+    border-bottom:1px solid var(--groove-shadow);
+  }
+  #settingsTabContent .review-list-item{ color:var(--ink); padding:2px 0; }
+  #settingsTabContent .review-list-title{ font-weight:bold; }
+  #settingsTabContent .review-sub-list .task-list{ margin:0; }
+
   /* ===========================================================================
      Вкладка "Поиск" (третья боковая вкладка второго набора,
      settingsTabSet2Btn3, "set2s_3" — см. search.js, ТЗ пользователя от
