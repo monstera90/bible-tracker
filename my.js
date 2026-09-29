@@ -1,6 +1,10 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 43.4 (29.09) — скругление верхнего язычка убирается только при реальном прилипании (порог 0.5px,
+   `SETTINGS_TAB_GLUED_TOLERANCE`); угол окна/градиент — по прежнему порогу 4px. Дубликат индикатора синхронизации скрыт (modals.css 7.1).
+   Версия: 43.3 (29.09) — ТЗ пользователя: `updateSettingsCornerPatchHeight` ещё и ставит классы `tabs-flush-top`
+   (оверлей) / `tab-flush-top` (верхний язычок), когда стек вкладок вплотную к верху экрана (modals.css 7.0).
    Версия: 43.2 (28.09) — БАГФИКС (ТЗ пользователя): клик по книжной закладке открывал
    книгу и тут же "прыгал" на начало (последнюю сохранённую позицию чтения) вместо
    позиции закладки — гонка между внешней прокруткой (openBookAtMarginBookmark) и
@@ -10384,17 +10388,37 @@
   // прикрывать нечего, высота 0.
   var settingsCornerPatch = document.querySelector(".settings-corner-patch");
   var SETTINGS_TAB_CORNER_RADIUS = 14; // px, см. .settings-tab в modals.css
+  // ТЗ 29.09: верхний язычок "вплотную" к верху экрана, если его верх не ниже этого порога (px, запас на
+  // дробные координаты/скругление) — тогда скругление и градиент убираются (классы tabs-flush-top /
+  // tab-flush-top, modals.css). Дальше от верха — всё как раньше.
+  var SETTINGS_TAB_FLUSH_TOLERANCE = 4;     // окно: угол области чтения/градиент
+  var SETTINGS_TAB_GLUED_TOLERANCE = 0.5;   // сам язычок: скругление убирается, только если он реально прилип
   function updateSettingsCornerPatchHeight(){
     if(!settingsCornerPatch) return;
     var top = null;
+    var topTab = null, topTabY = null;
     [document.getElementById("settingsTabs"), document.getElementById("settingsTabsSet2")].forEach(function(el){
       if(!el) return;
       var r = el.getBoundingClientRect();
       if(r.width <= 0 || r.height <= 0) return;
       if(top === null || r.top < top) top = r.top;
+      // самый верхний ВИДИМЫЙ язычок этого стека (скрытые — display:none — пропускаем)
+      Array.prototype.forEach.call(el.querySelectorAll(".settings-tab"), function(tab){
+        var tr = tab.getBoundingClientRect();
+        if(tr.width <= 0 || tr.height <= 0) return;
+        if(topTabY === null || tr.top < topTabY){ topTabY = tr.top; topTab = tab; }
+      });
     });
     var h = (top === null) ? 0 : Math.max(0, top) + SETTINGS_TAB_CORNER_RADIUS;
     settingsCornerPatch.style.height = h + "px";
+    // вплотную к верху экрана? (вкладка может и вылезать выше — тогда тоже вплотную)
+    var flush = (topTab !== null && topTabY <= SETTINGS_TAB_FLUSH_TOLERANCE);
+    var glued = (topTab !== null && topTabY <= SETTINGS_TAB_GLUED_TOLERANCE);
+    if(settingsModalOverlay) settingsModalOverlay.classList.toggle("tabs-flush-top", flush);
+    Array.prototype.forEach.call(document.querySelectorAll(".settings-tab.tab-flush-top"), function(tab){
+      if(tab !== topTab || !glued) tab.classList.remove("tab-flush-top");
+    });
+    if(glued && topTab) topTab.classList.add("tab-flush-top");
   }
 
   // t: 0 (совсем свёрнуто, в точку у угла (maxX,maxY) — там же стоит
@@ -17238,6 +17262,7 @@
     var debugModeOn = window.Debug ? window.Debug.isEnabled() : false;
     var bookCols = getBookColumns();
     container.innerHTML =
+      '<div class="settings-gear-tab">' + // обёртка для размера шрифта от «Аа» (components.css, ТЗ 28.09)
       '<div class="settings-row"><span>Добавить дополнительный счётчик</span><input type="checkbox" id="settingsHourCb"' + (hourOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" id="settingsHourNotesRow" style="' + (hourOn ? "" : "display:none;") + '"><span>Добавить комментарий в дополнительный счётчик</span><input type="checkbox" id="settingsHourNotesCb"' + (hourNotesOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
@@ -17269,13 +17294,15 @@
       '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:' + (showAllTasksOn ? "10px" : "16px") + ';">Добавить для себя цель</button>' +
       '<button class="modal-btn" id="settingsVersionsBtn" style="margin-top:10px;">Версии</button>' +
       '<button class="modal-btn danger" id="settingsResetBtn" style="margin-top:10px;">Начать чтение сначала и сбросить прогресс</button>' +
+      '<button class="modal-btn danger" id="settingsMoodResetBtn" style="margin-top:10px;">Сбросить данные настроения</button>' +
       (isSet2Unlocked() ? '' :
         '<div class="settings-row" style="border-bottom:none; flex-direction:column; align-items:stretch; gap:8px; margin-top:16px;">' +
           '<span>Введите секретный код</span>' +
           '<input type="text" class="settings-verse-input" id="settingsSecretCodeInput" placeholder="Код" autocomplete="off" autocapitalize="off" spellcheck="false">' +
           '<div class="modal-note" id="settingsSecretCodeNote" style="display:none;"></div>' +
         '</div>'
-      );
+      ) +
+      '</div>';
 
     var customVerseTextEl = document.getElementById("settingsCustomVerseText");
     var customVerseRefEl = document.getElementById("settingsCustomVerseRef");
@@ -17442,6 +17469,11 @@
 
     document.getElementById("settingsResetBtn").addEventListener("click", function(){
       switchSettingsTab("resetConfirm");
+    });
+
+    // перенесена с вкладки диаграммы настроения (ТЗ 28.09); подтверждение — прежнее
+    document.getElementById("settingsMoodResetBtn").addEventListener("click", function(){
+      switchSettingsTab("moodResetConfirm");
     });
 
     var secretCodeInput = document.getElementById("settingsSecretCodeInput");
@@ -17700,10 +17732,8 @@
       }
       return null;
     }
-    document.addEventListener("click", function(e){
+    function closeOpenPopupsOutside(target){
       var popups = document.querySelectorAll(OPEN_POPUPS_SELECTOR);
-      if(!popups.length) return;
-      var target = e.target;
       for(var i = 0; i < popups.length; i++){
         var popup = popups[i];
         var wrap = popup.parentElement || popup;
@@ -17711,7 +17741,23 @@
         var btn = findToggleBtn(popup);
         if(btn) btn.click();
       }
+    }
+    var lastPopupClickAt = 0;
+    document.addEventListener("click", function(e){
+      lastPopupClickAt = Date.now();
+      closeOpenPopupsOutside(e.target);
     }, true);
+    // Прокрутка чего-либо вне попапа (список задач, заметка, текст книги) тоже
+    // сворачивает открытый попап. scroll не всплывает — слушаем в capture-фазе на
+    // документе; цель scroll-события — сам прокручиваемый элемент (или document).
+    // Прокрутки в первые 600мс после любого клика игнорируем: открытие попапа,
+    // «+»/«−» (перестройка текста) и фокус в поле сами могут сдвинуть прокрутку, это
+    // не жест пользователя.
+    document.addEventListener("scroll", function(e){
+      if(Date.now() - lastPopupClickAt < 600) return;
+      if(!document.querySelector(OPEN_POPUPS_SELECTOR)) return;
+      closeOpenPopupsOutside(e.target);
+    }, {capture: true, passive: true});
   })();
 
   // Кнопка режима чтения слева от язычка (ТЗ пользователя от 19.09): клик по

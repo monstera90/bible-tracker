@@ -1,5 +1,13 @@
 /* ===========================================================================
    modals.css
+   Версия: 7.1 (29.09) — индикатор-дубликат `.sync-status-modal-dup` скрыт всегда (display:none !important); скругление
+   язычка (`.tab-flush-top`) теперь только когда он реально прилип (порог отдельный, см. my.js 43.4).
+   Версия: 7.0 (29.09) — структурная правка (ТЗ пользователя от 29.09): (1) новые классы-модификаторы
+   `.settings-modal-overlay.tabs-flush-top` и `.settings-tab.tab-flush-top` (ставит my.js в
+   updateSettingsCornerPatchHeight, когда верхний язычок стека вплотную к верху экрана): убирают градиент
+   `.settings-modal-overlay::after`, вырез `.settings-corner-patch::after`, скругление правого верхнего угла
+   окна и самого язычка; (2) `accent-color:var(--wood)` у чекбоксов `.settings-row`/`.settings-book-cols-opt`
+   — цвет отмеченной галочки = цвет выбранной вкладки (.settings-tab.active), меняется вместе с темой.
    Версия: 6.1 (21.09) — новый класс `.settings-tab.ipkd-tab-unread`: заливка вкладки «ИПКД»
    (settingsTabSet2GearBtn5), пока сегодня её не открывали (var(--gold-light), my.js updateIpkdTabIcon).
    Версия: 6.0 (21.09) — структурная правка (ТЗ пользователя от 21.09): новый модификатор
@@ -349,7 +357,11 @@
      с оригиналом my.js при каждом изменении — см. setSyncState/
      collapseSyncPill; туда же вешать любую дальнейшую логику именно этой
      копии. */
+  /* ТЗ 29.09: дубликат в окне настроек больше НЕ нужен (баг — точка торчала поверх верхней вкладки, а в режиме
+     чтения/полноэкранном — поверх текста): скрыт целиком, всегда. Разметка (index.html) и синхронизация состояния
+     в my.js (syncStatusPillDup) оставлены как есть и безвредны; оригинал в шапке не тронут. */
   .sync-status-modal-dup{
+    display:none !important;
     position:fixed;
     top:calc(env(safe-area-inset-top, 0px) + 18px);
     inset-inline-end:18px;
@@ -576,6 +588,15 @@
       mask-position:100% 0, 0 0;
     }
     .settings-modal-overlay.reading-mode-active::after{ display:none; }
+    /* ТЗ 29.09: верхний язычок стека подошёл ВПРИТЫК к верху экрана (my.js,
+       updateSettingsCornerPatchHeight ставит .tabs-flush-top на оверлей и .tab-flush-top на сам язычок) —
+       скругление и градиент здесь больше не нужны: убираем градиент статус-бар→полоса, вырез угла окна,
+       скругление правого верхнего угла окна и язычка. Если язычок далеко от верха — класса нет,
+       всё выглядит как раньше. Логические свойства (start-end) — работает и в раскладке левши. */
+    .settings-modal-overlay.tabs-flush-top::after{ display:none; }
+    .settings-modal-overlay.tabs-flush-top .settings-corner-patch::after{ display:none; }
+    .settings-modal-overlay.tabs-flush-top .settings-modal-box{ border-start-end-radius:0; }
+    .settings-tab.tab-flush-top{ border-start-end-radius:0; }
   }
   #settingsTabContent{
     display:flex;
@@ -884,7 +905,8 @@
     font-size:14.5px;
     color:var(--ink);
   }
-  .settings-row input[type=checkbox]{ width:22px;height:22px;flex-shrink:0; }
+  /* ТЗ 29.09: цвет отмеченной галочки = цвет выбранной вкладки (.settings-tab.active — var(--wood)) */
+  .settings-row input[type=checkbox]{ width:22px;height:22px;flex-shrink:0; accent-color:var(--wood); }
 
   /* "Количество колонок для книг" (см. renderSettingsTabGear в my.js) —
      подпись сверху, три чекбокса 1/2/3 в ряд снизу; логика "ровно один
@@ -909,7 +931,7 @@
     font-size:14px;
     color:var(--ink);
   }
-  .settings-book-cols-opt input[type=checkbox]{ width:20px;height:20px;flex-shrink:0; }
+  .settings-book-cols-opt input[type=checkbox]{ width:20px;height:20px;flex-shrink:0; accent-color:var(--wood); }
 
   /* блок ввода своего ключевого стиха — появляется под галочкой "Включить
      библейские стихи…" (см. renderSettingsTabGear в my.js), тот же отступ

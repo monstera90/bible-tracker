@@ -89,11 +89,11 @@
      тот же шрифт/размер, что и у заголовков вкладок (.subtitle-extract-
      title и др., единый шрифт проекта), по центру, отступ до кнопок
      настроения — 8px (было 4px). */
+  /* 28.09: вопрос теперь с классом .common-tab-title (шрифт, размер, жирность,
+     цвет, линия под ним — как у заголовка вкладки, см. mood.js); здесь остаётся
+     только свой отступ: сверху 0 (зазор задаёт .mood-bars-wrap), снизу 8px до кнопок. */
   .mood-tab-checkin p{
     margin:0 0 8px 0;
-    text-align:center;
-    font-family:"Palatino Linotype",Georgia,serif;
-    font-size:var(--mdeditor-font-size, 15.5px);
   }
   /* Окно настроек (.settings-modal-box) уже само по себе уже, чем
      отдельная модалка (.modal-box, max-width:420px), поэтому сетка из 6
@@ -744,8 +744,36 @@
 
     display:flex;
     justify-content:center;
-    margin-top:-16px;
-    margin-bottom:8px;
+    /* ТЗ 28.09: диаграмма увеличена (K=1.2 в mood.js, svg 312x312) и зазор
+       под заголовком уменьшен — у svg сверху и снизу есть пустое поле под
+       смайликами, его выбираем отрицательными отступами */
+    margin-top:-46px;
+    /* 0: расстояние до столбиковой диаграммы теперь считает JS (layoutMoodBars
+       в mood.js) через margin-top у .mood-bars-wrap — минимальное, при котором
+       диаграммы не пересекаются */
+    margin-bottom:0;
+    /* svg (364px) шире области окна (~350px) — само содержимое (эллипс со
+       смайликами, ~338px) в неё помещается, а пустые поля svg заходят в
+       padding окна; без отрицательных боковых отступов контейнер получил бы
+       горизонтальную прокрутку */
+    margin-left:-8px;
+    margin-right:-8px;
+  }
+  /* столбиковая диаграмма и вопрос под ней (ТЗ 28.09): отступ до вопроса
+     увеличен (6px -> 14px) */
+  /* margin целиком здесь, а не в inline-style разметки (mood.js): inline перебивал
+     margin-bottom из CSS, и отступа до вопроса не было */
+  /* цифры над столбцами (ТЗ 28.09) — шрифт и размер от «Аа»; svg масштабируется
+     по ширине окна, --mood-bar-scale (ставит layoutMoodBars в mood.js) — этот
+     коэффициент, деление на него даёт реальный размер в px */
+  .mood-bars-wrap text.mood-bar-count{
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:calc(var(--mdeditor-font-size, 15.5px) / var(--mood-bar-scale, 1.17));
+  }
+  .mood-bars-wrap{
+    margin:-60px auto 16px; /* -60px — запасное значение; реальный margin-top ставит JS */
+    width:100%;
+    transition:margin-top .35s ease; /* едет вместе с раздвижением долек */
   }
   .mood-diagram-svg{
     cursor:pointer;
@@ -1295,9 +1323,18 @@
   }
   .year-grid-v-cell.empty{ visibility:hidden; cursor:default; }
   .year-grid-v-cell.future{ opacity:.4; cursor:default; }
-  .year-grid-v-cell.light{ background:var(--xp-green); border-color:rgba(0,0,0,.12); }
-  .year-grid-v-cell.dark{ background:var(--xp-green-dark); border-color:rgba(0,0,0,.18); }
-  .year-grid-v-cell.darkest{ background:var(--xp-green-dark); border-color:rgba(0,0,0,.25); filter:brightness(.72) saturate(1.15); }
+  /* ТЗ 28.09: цвета отметок считаются от цвета выбранной вкладки (var(--wood),
+     он свой в каждой теме, см. .settings-tab.active в modals.css), а не зелёные:
+     3 и более отметок — сам этот цвет, 2 — чуть пастельнее, 1 — ещё бледнее
+     (примесь белого через color-mix). Для браузеров без color-mix — запасной
+     вариант через прозрачность того же цвета. */
+  .year-grid-v-cell.light{ background:var(--wood); opacity:.4; border-color:rgba(0,0,0,.12); }
+  .year-grid-v-cell.dark{ background:var(--wood); opacity:.68; border-color:rgba(0,0,0,.18); }
+  .year-grid-v-cell.darkest{ background:var(--wood); border-color:rgba(0,0,0,.25); }
+  @supports (background:color-mix(in srgb, red 50%, white)){
+    .year-grid-v-cell.light{ background:color-mix(in srgb, var(--wood) 40%, white); opacity:1; }
+    .year-grid-v-cell.dark{ background:color-mix(in srgb, var(--wood) 68%, white); opacity:1; }
+  }
   .year-grid-v-cell.today{ box-shadow:0 0 0 2px var(--wood); border-color:var(--wood); }
 
   /* "летопись" — краткое пояснение цветов, лежит первым элементом внутри
@@ -3917,3 +3954,30 @@
     -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M3 12h13'/%3E%3Cpath d='M19 12h2'/%3E%3Cpath d='M3 18h9'/%3E%3C/svg%3E");
     mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h18'/%3E%3Cpath d='M3 12h13'/%3E%3Cpath d='M19 12h2'/%3E%3Cpath d='M3 18h9'/%3E%3C/svg%3E");
   }
+
+
+/* ---------- вкладка настроек (renderSettingsTabGear, обёртка .settings-gear-tab) ----------
+   ТЗ 28.09: размер текста берётся из общей переменной --mdeditor-font-size,
+   которую меняет кнопка «Аа» (mdeditor.js, applyFontSize) — как у заметок и
+   задач. Правила ограничены обёрткой, чтобы .settings-row/.modal-btn на других
+   вкладках остались с прежним фиксированным размером. Размеры флажков не
+   меняются. */
+.settings-gear-tab .settings-row,
+.settings-gear-tab .settings-book-cols-opt,
+.settings-gear-tab .settings-verse-input,
+.settings-gear-tab .modal-btn,
+.settings-gear-tab .modal-note{
+  font-family:"Palatino Linotype",Georgia,serif; /* тот же шрифт, что у задач, заметок и книг (.task-body) */
+  font-size:var(--mdeditor-font-size, 15.5px);
+  line-height:1.5;
+}
+.settings-gear-tab .settings-verse-label{
+  font-family:"Palatino Linotype",Georgia,serif;
+  font-size:calc(var(--mdeditor-font-size, 15.5px) * 0.9);
+}
+.settings-gear-tab input,
+.settings-gear-tab select,
+.settings-gear-tab textarea,
+.settings-gear-tab button{
+  font-family:"Palatino Linotype",Georgia,serif;
+}

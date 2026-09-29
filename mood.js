@@ -43,7 +43,67 @@
   var MOOD_FIRST_LOG_KEY = "__moodFirstLog";
   var MOOD_DATA_RESET_AT_KEY = "__moodDataResetAt";
 
-  var MOOD_COLORS = {joy:"#F7C948", sad:"#6FA8DC", calm:"#8FD9B8", anger:"#E06666", down:"#8E7CC3", sleepy:"#B4A7D6"};
+  // Палитра настроений (ТЗ 28.09) — не фиксированные цвета, а оттенки цвета
+  // ВЫБРАННОЙ ВКЛАДКИ настроек (var(--wood), см. .settings-tab.active в modals.css;
+  // в каждой теме он свой). «Внутренний мир» — сам этот цвет; «Раздражительность»
+  // и «Тревожность» — темнее него (тревожность темнее всех); «Радость»,
+  // «Спокойствие», «Сонливость», «Грусть» (именно в таком порядке) — каждая
+  // следующая пастельнее предыдущей. Оттенок при этом слегка сдвигается, чтобы
+  // цвета не были просто «серией серых». Считается при каждой отрисовке вкладки
+  // (тема могла смениться), результат лежит в moodPalette и общий для обеих
+  // диаграмм (круговой и столбиковой).
+  var moodPalette = {};
+  function readWoodRgb(){
+    var host = document.getElementById("settingsTabContent") || document.body;
+    var probe = document.createElement("span");
+    probe.style.cssText = "position:absolute;visibility:hidden;color:var(--wood);";
+    host.appendChild(probe);
+    var col = getComputedStyle(probe).color;
+    host.removeChild(probe);
+    var m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(col || "");
+    return m ? [+m[1], +m[2], +m[3]] : [75, 58, 110];
+  }
+  function rgbToHsl(r, g, b){
+    r /= 255; g /= 255; b /= 255;
+    var max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, h = 0, s = 0;
+    if(max !== min){
+      var d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if(max === r) h = (g - b) / d + (g < b ? 6 : 0);
+      else if(max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60;
+    }
+    return [h, s, l];
+  }
+  function hslToHex(h, s, l){
+    h = ((h % 360) + 360) % 360; s = Math.max(0, Math.min(1, s)); l = Math.max(0, Math.min(1, l));
+    var c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = l - c / 2;
+    var r = 0, g = 0, b = 0;
+    if(h < 60){ r = c; g = x; } else if(h < 120){ r = x; g = c; }
+    else if(h < 180){ g = c; b = x; } else if(h < 240){ g = x; b = c; }
+    else if(h < 300){ r = x; b = c; } else { r = c; b = x; }
+    function hx(v){ var n = Math.round((v + m) * 255); return (n < 16 ? "0" : "") + n.toString(16); }
+    return "#" + hx(r) + hx(g) + hx(b);
+  }
+  function computeMoodPalette(){
+    var rgb = readWoodRgb();
+    var hsl = rgbToHsl(rgb[0], rgb[1], rgb[2]);
+    var h = hsl[0], s = hsl[1], l = hsl[2];
+    // s у совсем серых цветов (тема с почти нейтральным --wood) не растягиваем
+    function pastel(t, dh){ return hslToHex(h + dh, s * (1 - 0.12 * t * 3), l + (0.95 - l) * t); }
+    moodPalette = {
+      down:    hslToHex(h, s, l),
+      anger:   hslToHex(h - 6, s, Math.max(0.12, l * 0.86)), // 28.09: светлее (было l*0.72)
+      anxiety: hslToHex(h + 6, s, Math.max(0.10, l * 0.72)), // 28.09: светлее (было l*0.5)
+      joy:     pastel(0.30, 4),
+      calm:    pastel(0.50, 8),
+      sleepy:  pastel(0.68, 12),
+      sad:     pastel(0.84, 16)
+    };
+    return moodPalette;
+  }
+  function moodColor(key){ return moodPalette[key] || "#cccccc"; }
 
   function moodCategoriesResolved(){
     return [
@@ -52,7 +112,8 @@
       {key:"calm", emoji:"🙄", label:"Спокойствие"},
       {key:"anger", emoji:"😡", label:"Раздражительность"},
       {key:"down", emoji:"😌", label:"Внутренний мир"},
-      {key:"sleepy", emoji:"🥱", label:"Сонливость"}
+      {key:"sleepy", emoji:"🥱", label:"Сонливость"},
+      {key:"anxiety", emoji:"😰", label:"Тревожность"}
     ];
   }
 
@@ -172,13 +233,20 @@
     var cats = moodCategoriesResolved().filter(function(c){ return counts[c.key] > 0; });
     // сплюснутый эллипс вместо круга + "стенка" толщины диска снизу —
     // вместе это даёт вид как бы под углом ~45° сбоку, а не сверху
-    var rx = 95, ry = 52, depth = 20;
-    var size = 260, cx = size/2, cy = size/2 - depth/2;
+    // K — общий масштаб диаграммы (ТЗ 28.09: сделать первую диаграмму больше);
+    // все размеры умножаются на него, поэтому пропорции остаются прежними
+    var K = 1.4; // 1.2 -> 1.32 -> 1.4 (28.09): svg 364px, шире окна (~350px) — см. отрицательные боковые margin у .mood-diagram-wrap в components.css; сами подписи-смайлики остаются в пределах окна
+    var rx = 95*K, ry = 52*K, depth = 20*K;
+    var size = 260*K, cx = size/2, cy = size/2 - depth/2;
     var gapDeg = 3;
-    var collapsedOffset = 3, expandedOffset = 22;
+    var collapsedOffset = 3*K, expandedOffset = 22*K;
     var ryRatio = ry/rx;
 
     var cum = 0;
+    // точки нижней границы круговой диаграммы (обод + стенка по 3° и низ
+    // смайликов), в координатах бокса svg: x — от центра, y — от верха; dx/dy —
+    // направление, в котором долька (и её смайлик) уезжает при раздвижении
+    var pieLower = [];
     var defsParts = [], emojiParts = [];
     var records = [];
 
@@ -192,11 +260,18 @@
       if(end < start) end = start;
       var mid = (start + end) / 2;
       var path = describeArcPathEllipse(0, 0, rx, ry, start, end);
-      var color = MOOD_COLORS[cat.key] || "#ccc";
+      var color = moodColor(cat.key);
       var wallColor = darkenColor(color, 55);
 
       var dirRad = (mid - 90) * Math.PI/180;
       var dx = Math.cos(dirRad), dy = Math.sin(dirRad) * ryRatio;
+
+      var arcSteps = Math.max(1, Math.ceil((end - start) / 3));
+      for(var ai = 0; ai <= arcSteps; ai++){
+        var aDeg = start + (end - start) * ai / arcSteps;
+        var rimPt = polarPointEllipse(0, 0, rx, ry, aDeg);
+        pieLower.push({x: rimPt.x, y: cy + rimPt.y + moodWallThickness(depth, aDeg), dx: dx, dy: dy});
+      }
 
       var gradId = "moodGrad" + idx;
       defsParts.push(
@@ -262,6 +337,9 @@
       var labelMargin = 24;
       var lx = cx + farX + Math.cos(dirRad)*labelMargin;
       var ly = cy + farY + Math.sin(dirRad)*labelMargin;
+      [-12, 0, 12].forEach(function(ex){
+        pieLower.push({x: lx - cx + ex, y: ly + 13, dx: dx, dy: dy});
+      });
       emojiParts.push(
         '<div class="mood-diagram-emoji" data-dx="' + dx.toFixed(3) + '" data-dy="' + dy.toFixed(3) + '" style="' +
         'position:absolute;left:' + lx.toFixed(1) + 'px;top:' + ly.toFixed(1) + 'px;' +
@@ -290,10 +368,63 @@
         emojiParts.join("") +
       '</div>';
 
+    // Столбиковая диаграмма ставится так, чтобы её самый высокий (вместе с
+    // подписью-числом) столбец в каждом месте ЛИШЬ на MOOD_CHART_GAP не доходил
+    // до круговой диаграммы над ним, — зазор между диаграммами получается
+    // минимальным, а если под круговой диаграммой оказываются большие столбцы
+    // (или она раздвинута кликом), блок сам опускается ниже.
+    var MOOD_CHART_GAP = 5;
+    function layoutMoodBars(off, instant){
+      var barsWrap = document.getElementById("moodBarsWrap");
+      if(!barsWrap || !moodBarsGeom) return;
+      var bw = barsWrap.clientWidth;
+      if(!bw) return;
+      var sc = bw / moodBarsGeom.W;
+      // цифры над столбцами берут размер и шрифт от «Аа» (--mdeditor-font-size,
+      // ТЗ 28.09): svg масштабируется (sc), поэтому в CSS размер делится на sc
+      // (--mood-bar-scale), а верх подписи считаем по реальному размеру в px
+      var barsSvg = barsWrap.querySelector("svg");
+      if(barsSvg) barsSvg.style.setProperty("--mood-bar-scale", sc.toFixed(4));
+      var fontPx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--mdeditor-font-size"));
+      if(!isFinite(fontPx) || fontPx <= 0) fontPx = 15.5;
+      var need = -Infinity;
+      moodBarsGeom.items.forEach(function(it){
+        var bx = (it.cx - moodBarsGeom.W / 2) * sc;
+        var hw = (it.half + 6) * sc;
+        var maxY = -Infinity;
+        pieLower.forEach(function(p){
+          var px = p.x + p.dx * off;
+          if(px >= bx - hw && px <= bx + hw){
+            var py = p.y + p.dy * off;
+            if(py > maxY) maxY = py;
+          }
+        });
+        if(maxY === -Infinity) return;
+        var labelTopPx = it.labelBase * sc - fontPx * 0.8; // верх цифр ≈ 0.8 размера шрифта над базовой линией
+        var m = maxY + MOOD_CHART_GAP - size - labelTopPx;
+        if(m > need) need = m;
+      });
+      if(need === -Infinity) need = -60;
+      need = Math.max(need, -size * 0.9);
+      // при первой расстановке — без анимации (иначе блок «доезжает» из запасного отступа)
+      if(instant) barsWrap.style.transition = "none";
+      barsWrap.style.marginTop = Math.round(need) + "px";
+      if(instant){ void barsWrap.offsetHeight; barsWrap.style.transition = ""; }
+    }
+    var layoutOffset = collapsedOffset;
+    moodLayoutFn = function(){ layoutMoodBars(layoutOffset); };
+    layoutMoodBars(layoutOffset, true);
+    if(!moodLayoutBound){
+      moodLayoutBound = true;
+      window.addEventListener("resize", function(){ if(moodLayoutFn) moodLayoutFn(); });
+    }
+
     var svgEl = document.getElementById("moodDiagramSvg");
     svgEl.addEventListener("click", function(){
       moodDiagramExpanded = !moodDiagramExpanded;
       var offset = moodDiagramExpanded ? expandedOffset : collapsedOffset;
+      layoutOffset = offset;
+      layoutMoodBars(offset);
       var groups = svgEl.querySelectorAll(".mood-diagram-slice, .mood-diagram-wall");
       groups.forEach(function(g){
         var dx = parseFloat(g.getAttribute("data-dx"));
@@ -314,6 +445,51 @@
     });
   }
 
+  // Столбиковая диаграмма (ТЗ 28.09) — под круговой. Показывает ВСЕ настроения
+  // (в том числе с нулём, чтобы места столбцов не прыгали), цвета — из той же
+  // moodPalette, что и у круговой; над столбцом число отметок, под ним эмодзи.
+  // Геометрия столбцов (в единицах viewBox) — нужна buildMoodDiagramSVG, чтобы
+  // подвинуть столбиковую диаграмму вплотную к круговой, не заходя на неё
+  // (см. layoutMoodBars ниже, ТЗ 28.09).
+  var moodBarsGeom = null;
+  var moodLayoutFn = null;
+  var moodLayoutBound = false;
+  function buildMoodBarsHtml(counts){
+    // столбцы слева направо от самого большого к самому маленькому (ТЗ 28.09);
+    // при равных значениях сохраняется обычный порядок категорий
+    var cats = moodCategoriesResolved().map(function(c, i){ return {c: c, i: i}; })
+      .sort(function(a, b){
+        var d = (counts[b.c.key] || 0) - (counts[a.c.key] || 0);
+        return d !== 0 ? d : a.i - b.i;
+      }).map(function(x){ return x.c; });
+    var W = 300, H = 180, baseY = 150, topPad = 14, maxH = baseY - topPad;
+    var slot = W / cats.length, barW = 30;
+    var max = 0;
+    cats.forEach(function(c){ if(counts[c.key] > max) max = counts[c.key]; });
+    moodBarsGeom = {W: W, items: []};
+    var parts = ['<line x1="2" y1="' + baseY + '" x2="' + (W - 2) + '" y2="' + baseY + '" stroke="currentColor" stroke-opacity=".25" stroke-width="1"></line>'];
+    cats.forEach(function(c, i){
+      var n = counts[c.key] || 0;
+      var cx = slot * i + slot / 2;
+      var h = max > 0 ? Math.round(maxH * n / max) : 0;
+      if(n > 0 && h < 3) h = 3;
+      // labelBase — базовая линия подписи-числа над столбцом (в единицах viewBox);
+      // верх подписи считает layoutMoodBars по реальному размеру шрифта «Аа»;
+      // half — половина ширины столбца
+      moodBarsGeom.items.push({cx: cx, half: barW / 2, labelBase: baseY - h - 5});
+      if(n > 0){
+        parts.push('<rect x="' + (cx - barW / 2).toFixed(1) + '" y="' + (baseY - h) + '" width="' + barW + '" height="' + h +
+          '" rx="4" ry="4" fill="' + moodColor(c.key) + '"></rect>');
+      }
+      parts.push('<text x="' + cx.toFixed(1) + '" y="' + (baseY - h - 5) + '" text-anchor="middle" class="mood-bar-count" fill="currentColor"' +
+        (n > 0 ? '' : ' fill-opacity=".45"') + '>' + n + '</text>');
+      parts.push('<text x="' + cx.toFixed(1) + '" y="' + (baseY + 24) + '" text-anchor="middle" font-size="20">' + c.emoji + '</text>');
+    });
+    return '<div class="mood-bars-wrap" id="moodBarsWrap">' +
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;overflow:visible;" role="img" aria-label="Столбиковая диаграмма настроения">' +
+      parts.join("") + '</svg></div>';
+  }
+
   // --- отметка настроения, встроенная во вкладку диаграммы (плавающая
   //     кнопка настроек) — по нажатию на один вариант запись сразу
   //     сохраняется и обновляет диаграмму выше, без отдельной кнопки
@@ -321,7 +497,15 @@
 
   function buildMoodCheckinBlockHtml(){
     var cats = moodCategoriesResolved();
-    var items = cats.map(function(c){
+    // Порядок кнопок задан явно (ТЗ 28.09), слева направо по 3 в ряд:
+    // 1) Внутренний мир, Радость, Спокойствие; 2) Грусть, Тревожность,
+    // Раздражительность; 3) Сонливость. Порядок здесь — только для сетки кнопок,
+    // порядок цветов/категорий (moodCategoriesResolved) не затрагивается.
+    var CHECKIN_ORDER = ["down", "joy", "calm", "sad", "anxiety", "anger", "sleepy"];
+    var byKey = {};
+    cats.forEach(function(c){ byKey[c.key] = c; });
+    var ordered = CHECKIN_ORDER.map(function(k){ return byKey[k]; }).filter(Boolean);
+    var items = ordered.map(function(c){
       return '<div class="mood-checkin-item" data-mood="' + c.key + '">' +
         '<span class="emoji">' + c.emoji + '</span><span class="label">' + c.label + '</span></div>';
     }).join("");
@@ -336,8 +520,10 @@
     // Расстояние до кнопок под ним стягивается стилями .mood-tab-checkin в
     // components.css (там же и уменьшенная сетка для этого узкого окна).
     return (
-      '<div class="settings-content-bottom mood-tab-checkin">' +
-      '<p>Что ты сейчас чувствуешь?</p>' +
+      // без .settings-content-bottom (ТЗ 28.09): блок больше не прижимается к низу
+      // окна принудительно — на вкладке теперь хватает содержимого, и он и так внизу
+      '<div class="mood-tab-checkin">' +
+      '<p class="common-tab-title">Что ты сейчас чувствуешь?</p>' + // тот же стиль, что у заголовка вкладки (ТЗ 28.09)
       '<div class="mood-checkin-grid" id="settingsMoodCheckinGrid">' + items + '</div>' +
       '</div>'
     );
@@ -375,6 +561,7 @@
     var total = 0;
     Object.keys(counts).forEach(function(k){ total += counts[k]; });
 
+    computeMoodPalette(); // до сборки html: цвета нужны и круговой, и столбиковой диаграмме
     var diagramHtml;
     if(total === 0){
       diagramHtml = '<div class="mood-diagram-empty">Данных о настроении нет. Добавьте настроение — тогда здесь появится диаграмма.</div>';
@@ -390,16 +577,15 @@
       diagramHtml =
         '<div class="common-tab-title">' + escapeHtml(title) + '</div>' +
         '<div class="mood-diagram-wrap" id="moodDiagramWrap"></div>' +
-        '<div class="mood-diagram-reset-row"><button class="mood-diagram-reset-btn" id="mMoodResetBtn2">Сбросить данные настроения</button></div>';
+        buildMoodBarsHtml(counts);
     }
 
+    // кнопка «Сбросить данные настроения» перенесена на вкладку настроек
+    // (renderSettingsTabGear в my.js, ТЗ 28.09)
     container.innerHTML = diagramHtml + buildMoodCheckinBlockHtml();
 
     if(total > 0){
       buildMoodDiagramSVG(counts, total);
-      document.getElementById("mMoodResetBtn2").addEventListener("click", function(){
-        switchSettingsTab("moodResetConfirm");
-      });
     }
     bindMoodCheckinBlock();
   }
@@ -417,10 +603,10 @@
       '</div>';
     document.getElementById("mMoodResetConfirmYesBtn").addEventListener("click", function(){
       resetMoodData();
-      switchSettingsTab("mood");
+      switchSettingsTab("gear"); // кнопка сброса теперь на вкладке настроек (ТЗ 28.09)
     });
     document.getElementById("mMoodResetConfirmNoBtn").addEventListener("click", function(){
-      switchSettingsTab("mood");
+      switchSettingsTab("gear");
     });
   }
 
