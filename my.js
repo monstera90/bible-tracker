@@ -1,6 +1,18 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 45.4 (29.09) — колесико нижнего ряда подсвечено как выбранное, пока показан подменённый набор вкладок (`applyBottomAltMode`, `switchSettingsTab`), и как невыбранное при стандартных.
+   Версия: 45.3 (29.09) — кнопка-колесико нижнего ряда только переключает набор вкладок (`toggleBottomAltMode`), вкладку «gear» больше не открывает: пользователь остаётся на текущей вкладке.
+   Версия: 45.2 (29.09) — код синхронизации в поле на вкладке «Синхронизация» выровнен по центру (`ensureSyncTabStyle`, `.sync-tab #codeText`).
+   Версия: 45.1 (29.09) — ТЗ пользователя: на вкладке «Синхронизация» галочка «Включить облачную синхронизацию изображений и книг…» (вместе с зависимой строкой «Включить синхронизацию книг (тестируется)») перенесена под «Заблокировать доступ в интернет»; логика не менялась.
+   Версия: 45.0 (29.09) — структурная правка (ТЗ пользователя): все настройки, остававшиеся на вкладке-шестерёнке, перенесены на вкладку «Дополнительные возможности» (alt4) — новая функция `renderSettingsTabMore` (прежнее тело `renderSettingsTabGear`); `renderSettingsTabGear` теперь только подсказка; после ввода секретного кода перерисовывается `renderSettingsTabMore`.
+   Версия: 44.7 (29.09) — ТЗ пользователя: «Включить дополнительные анимации» перенесено на вкладку «Внешний вид» (alt1); при втором наборе нижних вкладок появляется пятая — «Версии» (alt5, в вертикальном стеке на месте «В работе»), в неё перенесено содержимое бывшей кнопки «Версии» (кнопка с вкладки-шестерёнки убрана); `applyBottomAltMode`/`refreshSettingsTabsVisibility` учитывают «В работе».
+   Версия: 44.6 (29.09) — ТЗ пользователя: «Сбросить данные настроения» и «Экспортировать/Импортировать личные данные» возвращены на вкладку «Восстановление и сброс» (alt3); экспорт/импорт — под подзаголовком «Импорт и экспорт». С вкладки «Синхронизация» убраны.
+   Версия: 44.5 (29.09) — ТЗ пользователя: чекбокс «Использовать приложение в оффлайн режиме» переименован в «Заблокировать доступ в интернет» и стоит между заголовком «Синхронизация» и блоком «Устройство подключено» (логика `settingsOfflineModeCb` не менялась).
+   Версия: 44.4 (29.09) — багфикс: на вкладке «Синхронизация» строка кода и «Копировать» (`.code-row`) складывается в колонку, кнопка больше не уезжает за край при крупном «Аа».
+   Версия: 44.3 (29.09) — ТЗ пользователя: на вкладку «Синхронизация» перенесены «Экспортировать/Импортировать личные данные» и «Сбросить данные настроения» (с вкладки «Восстановление и сброс»); шрифт вкладки — общий, размер от «Аа» (`ensureSyncTabStyle`, `--mdeditor-font-size`); заголовок «Устройство подключено» — `h3.common-tab-title`, как «Синхронизация»; QR на всю ширину области (`showCodeAndQR(..., fillWidth)`).
+   Версия: 44.2 (29.09) — ТЗ пользователя: содержимое окна синхронизации (заголовок, QR, код + «Копировать», предупреждение, «Синхронизировать сейчас», «Отключить синхронизацию…» с пояснением) перенесено прямо во вкладку «Синхронизация» (`renderSettingsTabSync`); без кода вкладка показывает «создать код»/«ввести код» (открывают окно только для этих шагов). `closeModal` перерисовывает вкладку.
+   Версия: 44.1 (29.09) — ТЗ пользователя: вкладка «Восстановление и сброс» (alt3) больше не заглушка — на неё перенесены «Восстановить задачи из .txt», «Начать чтение сначала…», «Сбросить данные настроения» (были на вкладке настроек-шестерёнке) и «Экспортировать/Импортировать личные данные» (были в окне синхронизации — `renderSettingsTabRecovery`). Индикатор синхронизации (`#syncStatusPill`) скрыт, пока синхронизация не настроена (`setSyncState('off')`); клик по нему открывает вкладку «Синхронизация» (`openSyncSettingsTab`), а само окно с кодом/QR открывается кнопкой на этой вкладке.
    Версия: 44.0 (29.09) — структурная правка (ТЗ пользователя от 29.09): часы-напоминание на кнопке задачи — кружок с числом (`reminderShowsDate`) слева от времени, если напоминание стоит на другой день не дальше чем «то же число следующего месяца» (29.09 → показывается до 28.10 включительно; дальше — просто залитые часы); разметка `.rb-circle/.rb-date/.rb-time` (modals.css 8.0); `openTaskReminderDialog` передаёт `getAnchorEl` (строка перерисовывается при каждом сохранении); напоминание ставится нажатием на часы (сегодня + 30 мин, notifications.js 4.0).
    Версия: 43.6 (29.09) — `applyThemeToPage` вызывает `window.syncMoodJoyColor` (mood.js 1.1): --mood-joy на <html> для жёлтой отметки.
    Версия: 43.5 (29.09) — ТЗ пользователя: `SORT_FLAG_ICON_SVG` без фиксированных цветов (классы `flag-icon-yellow/red`, цвета — modals.css 7.2).
@@ -2977,8 +2989,8 @@
     settingsShadowSet("theme", themeId, ts); // Шаг 9 (TASK_UNIFIED_SYNC.md, 22.09) — теневая копия в новом сторе настроек
   }
 
-  function renderThemeDots(){
-    var holder = document.getElementById("themeDots");
+  function renderThemeDots(holder){
+    // holder — контейнер кружков (вкладка «Внешний вид», #settingsThemeDots)
     if(!holder) return;
     holder.innerHTML = "";
     // раскладка сеткой в 7 столбцов: 7 светлых тем — верхний ряд, тёмные —
@@ -3216,7 +3228,7 @@
       document.getElementById("mDone").addEventListener("click", closeThis);
     });
     document.getElementById("mCelebrateKeep").addEventListener("click", function(){
-      box.innerHTML = modalHeader("Хорошо", "Помните, вы всегда можете начать читать Библию заново. Для этого просто нужно открыть настройки (значок шестерёнки внизу страницы) и нажать на кнопку «Начать чтение сначала и сбросить прогресс».") + '<button class="modal-btn primary" id="mOk">ОК</button>';
+      box.innerHTML = modalHeader("Хорошо", "Помните, вы всегда можете начать читать Библию заново. Для этого просто нужно открыть настройки (значок шестерёнки внизу страницы) и перейти на вкладку «Восстановление и сброс» (нажимайте на значок шестерёнки, пока не появится нужный набор вкладок) и нажать на кнопку «Начать чтение сначала и сбросить прогресс».") + '<button class="modal-btn primary" id="mOk">ОК</button>';
       var closeBtn2 = document.getElementById("mClose");
       if(closeBtn2) closeBtn2.addEventListener("click", closeThis);
       document.getElementById("mOk").addEventListener("click", closeThis);
@@ -4238,7 +4250,7 @@
     updateHideProgressBadge();
     updateOverallProgress();
     applyThemeToPage(getCurrentThemeId());
-    if(!document.getElementById("themeDots").children.length) renderThemeDots();
+    // кружки тем теперь на вкладке «Внешний вид» — они сами подхватывают выбор в applyThemeToPage
     updateMissedBanner();
     renderHourBars();
     renderHourCounterMenu();
@@ -5214,6 +5226,10 @@
     var labels = {off:"Настроить<br>синхронизацию",offline:"",syncing:"",synced:"",error:""};
     var html = (extraText != null ? extraText : labels[st]) || "";
     syncStatusText.innerHTML = html;
+    // ТЗ 29.09: пока синхронизация не настроена (нет кода), индикатора нет вообще —
+    // он появляется после настройки на вкладке «Синхронизация» (setSyncState вызывается
+    // при каждом изменении syncId через refreshStatusBase)
+    syncStatusPill.style.display = (st === "off") ? "none" : "";
     if(syncStatusPillDup){
       syncStatusPillDup.setAttribute("data-state", st);
       if(st !== "off") syncStatusPillDup.classList.remove("sync-collapsed");
@@ -5611,14 +5627,20 @@
     if(scanRAF){ cancelAnimationFrame(scanRAF); scanRAF = null; }
     if(activeStream){ activeStream.getTracks().forEach(function(t){ t.stop(); }); activeStream = null; }
   }
-  function closeModal(){ stopCamera(); flushPendingTaskEdits(); modalOverlay.classList.remove("open"); modalBox.classList.remove("year-day-modal"); modalBox.innerHTML = ""; }
+  function closeModal(){ stopCamera(); flushPendingTaskEdits(); modalOverlay.classList.remove("open"); modalBox.classList.remove("year-day-modal"); modalBox.innerHTML = "";
+    // ТЗ 29.09: код/статус теперь показывает вкладка «Синхронизация» — после создания кода или
+    // подключения через окно её нужно перерисовать
+    try{ if(document.getElementById("settingsSyncBlock")) renderSettingsTabSync(); }catch(e){}
+  }
   function openModal(){ modalOverlay.classList.add("open"); renderModalHome(); }
   modalOverlay.addEventListener("click", function(e){ if(e.target === modalOverlay) closeModal(); });
-  syncStatusPill.addEventListener("click", openModal);
+  // ТЗ 29.09: клик по индикатору открывает вкладку настроек «Синхронизация» (alt2);
+  // само окно с кодом/QR открывается кнопкой на этой вкладке (openModal)
+  syncStatusPill.addEventListener("click", openSyncSettingsTab);
   // тот же обработчик, то же модальное окно (#modalOverlay уже стоит выше
   // окна настроек по z-index — 1001 против 1000, см. .modal-overlay в
   // modals.css) — "полностью функциональна", как и просил пользователь.
-  if(syncStatusPillDup) syncStatusPillDup.addEventListener("click", openModal);
+  if(syncStatusPillDup) syncStatusPillDup.addEventListener("click", openSyncSettingsTab);
 
   // надпись "Настроить синхронизацию" видна только до первого
   // взаимодействия пользователя со страницей — дальше плашка сворачивается
@@ -9546,15 +9568,17 @@
       input.value = "";
       if(!file) return;
       readImportArchive(file).then(function(payload){
+        modalOverlay.classList.add("open"); // кнопка теперь на вкладке настроек — окно поверх неё открываем сами
         renderImportCategoriesScreen(payload);
       }).catch(function(err){
         console.error("Ошибка импорта:", err);
         var msg = "Не удалось прочитать файл. Убедитесь, что выбран ZIP-архив или data.json, полученные экспортом из этого приложения.";
         if(err && err.message === "no_raw_state") msg = "В этом файле нет данных для восстановления (возможно, он экспортирован старой версией приложения). Экспортируйте данные заново с другого устройства.";
         if(err && err.message === "no_zip_module") msg = "Не удалось прочитать .zip: модуль ZIP не загружен.";
-        modalBox.innerHTML = modalHeader("Не получилось импортировать", msg) + '<button class="modal-btn primary" id="mBack">Назад</button>';
+        modalOverlay.classList.add("open");
+        modalBox.innerHTML = modalHeader("Не получилось импортировать", msg) + '<button class="modal-btn primary" id="mBack">Закрыть</button>';
         bindClose();
-        document.getElementById("mBack").addEventListener("click", renderModalHome);
+        document.getElementById("mBack").addEventListener("click", closeModal);
       });
     });
   }
@@ -9604,7 +9628,7 @@
       '<button class="modal-btn danger" id="mImportConfirm">Импортировать отмеченное</button>' +
       '<button class="modal-btn" id="mBack">Отмена</button>';
     bindClose();
-    document.getElementById("mBack").addEventListener("click", renderModalHome);
+    document.getElementById("mBack").addEventListener("click", closeModal);
     document.getElementById("mImportConfirm").addEventListener("click", function(){
       var checked = Array.prototype.slice.call(modalBox.querySelectorAll(".mImportCat:checked"))
         .map(function(cb){ return cb.dataset.cat; });
@@ -9705,14 +9729,10 @@
       modalBox.innerHTML = modalHeader("Синхронизация между устройствами",
         "Читаете с нескольких устройств? Подключите их между собой, и прогресс будет совпадать на всех.") +
         '<button class="modal-btn primary" id="mCreate">Это первое устройство — создать код</button>' +
-        '<button class="modal-btn" id="mJoin">У меня уже есть код с другого устройства</button>' +
-        exportSectionHtml() +
-        importSectionHtml();
+        '<button class="modal-btn" id="mJoin">У меня уже есть код с другого устройства</button>';
       bindClose();
       document.getElementById("mCreate").addEventListener("click", handleCreateCode);
       document.getElementById("mJoin").addEventListener("click", renderJoinScreen);
-      bindExportButton();
-      bindImportButton();
     } else {
       modalBox.innerHTML = modalHeader("Устройство подключено",
         "Прогресс синхронизируется с другими вашими устройствами.") +
@@ -9722,9 +9742,7 @@
         '<div class="modal-section">' +
           '<button class="modal-btn danger" id="mDisconnect">Отключить синхронизацию на этом устройстве</button>' +
           '<p class="modal-note">Это не удалит облачную копию — просто это устройство перестанет с ней сверяться.</p>' +
-        '</div>' +
-        exportSectionHtml() +
-        importSectionHtml();
+        '</div>';
       bindClose();
       loadQrLib().then(function(){
         showCodeAndQR("mOwnQrHolder", syncId, "Код для подключения ещё одного устройства:");
@@ -9748,12 +9766,10 @@
           renderModalHome();
         }, { yesTitle:"Отключить" });
       });
-      bindExportButton();
-      bindImportButton();
     }
   }
 
-  function showCodeAndQR(holderId, code, label, warningText){
+  function showCodeAndQR(holderId, code, label, warningText, fillWidth){
     var holder = document.getElementById(holderId);
     if(!holder) return;
     // Шаг 7 READER_PLAN.md (11.09): код синхронизации — это ещё и ключ
@@ -9769,7 +9785,19 @@
       '<div class="code-row"><input type="text" id="codeText" readonly value="' + code + '"><button id="codeCopy">Копировать</button></div>' +
       '<p class="modal-note">' + warning + '</p>';
     try{
-      new QRCode(document.getElementById("qrHolder"), {text: code, width: 200, height: 200, colorDark: "#2e2418", colorLight: "#fbf4e2"});
+      // ТЗ 29.09: на вкладке «Синхронизация» QR тянется на всю ширину области чтения (fillWidth)
+      var qrEl = document.getElementById("qrHolder");
+      var qrSize = 200;
+      if(fillWidth){
+        qrSize = Math.max(200, Math.min(holder.clientWidth || 200, 640));
+        qrEl.style.padding = "0";
+      }
+      new QRCode(qrEl, {text: code, width: qrSize, height: qrSize, colorDark: "#2e2418", colorLight: "#fbf4e2"});
+      if(fillWidth){
+        Array.prototype.forEach.call(qrEl.querySelectorAll("img,canvas"), function(el){
+          el.style.width = "100%"; el.style.height = "auto"; el.style.display = "block";
+        });
+      }
     }catch(e){
       document.getElementById("qrHolder").textContent = "Не удалось построить QR-код.";
     }
@@ -10272,8 +10300,8 @@
 
   var selectedVersionUrl = null;
 
-  // содержимое "Версий" открывается кнопкой из вкладки настроек (шестерёнка,
-  // см. renderSettingsTabGear), а не отдельным язычком — рисуется прямо в
+  // содержимое "Версий" (с ТЗ 29.09 — вкладка alt5 в вертикальном стеке, на месте
+  // «В работе», см. renderSettingsTabBottomAlt) рисуется прямо в
   // #settingsTabContent, как и у остальных вкладок
   function renderSettingsTabVersions(){
     var container = document.getElementById("settingsTabContent");
@@ -10824,7 +10852,9 @@
     var showTasks = getShowAllTasksEnabled();
     Object.keys(TASK_TAB_IDS).forEach(function(key){
       var btn = document.getElementById(TASK_TAB_IDS[key]);
-      if(btn) btn.style.display = showTasks ? "flex" : "none";
+      // «В работе» на время второго набора нижних вкладок заменена на «Версии»
+      var hiddenByAlt = (key === "worktasks" && bottomAltMode);
+      if(btn) btn.style.display = (showTasks && !hiddenByAlt) ? "flex" : "none";
     });
     // меняет количество видимых язычков в #settingsTabs — пересчитываем
     // заплатку (см. updateSettingsCornerPatchHeight выше); единственный
@@ -11066,9 +11096,19 @@
     var gearBtn = document.getElementById("settingsTabGearBtn");
     var yearBtn = document.getElementById("settingsTabYearBtn");
     var moodTabBtn = document.getElementById("settingsTabMoodBtn");
-    if(gearBtn) gearBtn.classList.toggle("active", tab === "gear");
+    // ТЗ 29.09: колесико выглядит выбранным, пока ряд показывает подменённый набор
+    // вкладок (bottomAltMode), и невыбранным при стандартных — не зависит от открытой вкладки
+    if(gearBtn) gearBtn.classList.toggle("active", !!bottomAltMode);
     if(yearBtn) yearBtn.classList.toggle("active", tab === "year");
     if(moodTabBtn) moodTabBtn.classList.toggle("active", tab === "mood");
+    // набор вкладок по клику на колесико (ТЗ 29.09)
+    if(BOTTOM_ALT_TAB_IDS){
+      syncBottomAltModeForTab(tab);
+      Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
+        var altBtn = document.getElementById(BOTTOM_ALT_TAB_IDS[key]);
+        if(altBtn) altBtn.classList.toggle("active", tab === key);
+      });
+    }
     Object.keys(TASK_TAB_IDS).forEach(function(key){
       var btn = document.getElementById(TASK_TAB_IDS[key]);
       if(btn) btn.classList.toggle("active", tab === key);
@@ -11130,6 +11170,7 @@
     // bookReaderState у книг.
     else if(tab === "projects" && activeProjectPickerId) openTaskNextPicker(activeProjectPickerId, "projects");
     else if(TASK_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabTask(tab);
+    else if(BOTTOM_ALT_TAB_IDS && BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabBottomAlt(tab);
     else if(EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabExtra(tab);
     else if(tab === "set2b_1") renderSettingsTabWorkbooks();
     else if(tab === "set2b_2") renderSettingsTabS89Fill();
@@ -17249,38 +17290,39 @@
     return { set: savedSet, tab: savedTab };
   }
 
+  // ТЗ 29.09: сама вкладка-шестерёнка («gear») больше не содержит настроек — все они
+  // переехали на вкладку «Дополнительные возможности» (alt4, renderSettingsTabMore ниже).
+  // Здесь остаётся только подсказка (функция по-прежнему нужна как экран по умолчанию
+  // в switchSettingsTab и layoutSettingsModal).
   function renderSettingsTabGear(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    container.innerHTML =
+      '<div class="settings-gear-tab">' +
+      '<div class="mood-diagram-empty">Настройки находятся на вкладке «Дополнительные возможности» — нажмите на колесико ещё раз, чтобы увидеть её.</div>' +
+      '</div>';
+  }
+
+  // ТЗ 29.09: вкладка «Дополнительные возможности» (alt4) — сюда перенесено всё, что
+  // раньше было на вкладке-шестерёнке (логика и id элементов не менялись).
+  function renderSettingsTabMore(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     var hourOn = !!getHourGoal();
     var hourNotesOn = isHourNotesEnabled();
     var reducedOn = getGoalsReducedView();
-    var colorMarkOn = getColorMarkEnabled();
     var showAllTasksOn = getShowAllTasksEnabled();
-    var extraAnimOn = getExtraAnimationsEnabled();
     var hideStatusBarOn = getHideStatusBarEnabled();
-    var offlineModeOn = isOfflineMode(); // ТЗ пользователя от 19.09 — см. раздел «РЕЖИМ ОФФЛАЙН»
-    var fileSyncOn = getFileSyncEnabled(); // TASK_FILE_SYNC_RTDB.md, раздел 5, шаг 6
-    var booksSyncOn = getBooksSyncEnabled(); // ТЗ пользователя от 18.09 — временный тестовый тумблер
     var bibleQuotesOn = getBibleQuotesEnabled();
     var customCommentsOn = getCustomCommentsEnabled();
     var customVerse = getCustomVerse();
     var debugModeOn = window.Debug ? window.Debug.isEnabled() : false;
-    var bookCols = getBookColumns();
     container.innerHTML =
       '<div class="settings-gear-tab">' + // обёртка для размера шрифта от «Аа» (components.css, ТЗ 28.09)
+      '<h3 class="common-tab-title">Дополнительные возможности</h3>' +
       '<div class="settings-row"><span>Добавить дополнительный счётчик</span><input type="checkbox" id="settingsHourCb"' + (hourOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" id="settingsHourNotesRow" style="' + (hourOn ? "" : "display:none;") + '"><span>Добавить комментарий в дополнительный счётчик</span><input type="checkbox" id="settingsHourNotesCb"' + (hourNotesOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row settings-row-book-cols">' +
-        '<span>Количество колонок для книг</span>' +
-        '<div class="settings-book-cols-options">' +
-          '<label class="settings-book-cols-opt"><input type="checkbox" id="settingsBookCols1" data-cols="1"' + (bookCols === 1 ? " checked" : "") + '><span>1</span></label>' +
-          '<label class="settings-book-cols-opt"><input type="checkbox" id="settingsBookCols2" data-cols="2"' + (bookCols === 2 ? " checked" : "") + '><span>2</span></label>' +
-          '<label class="settings-book-cols-opt"><input type="checkbox" id="settingsBookCols3" data-cols="3"' + (bookCols === 3 ? " checked" : "") + '><span>3</span></label>' +
-        '</div>' +
-      '</div>' +
-      '<div class="settings-row"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить библейские стихи в шапке приложения</span><input type="checkbox" id="settingsBibleQuotesCb"' + (bibleQuotesOn ? " checked" : "") + '></div>' +
       '<div class="settings-verse-block" id="settingsCustomVerseRow" style="' + (bibleQuotesOn ? "" : "display:none;") + '">' +
         '<span class="settings-verse-label">Свой ключевой стих для шапки (по желанию)</span>' +
@@ -17289,18 +17331,9 @@
       '</div>' +
       '<div class="settings-row"><span>Включить личные комментарии в шапке сайта</span><input type="checkbox" id="settingsCustomCommentsCb"' + (customCommentsOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row"><span>Включить дополнительные анимации</span><input type="checkbox" id="settingsExtraAnimCb"' + (extraAnimOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row"><span>Зеркальное отображение интерфейса для левши</span><input type="checkbox" id="settingsLeftHandedCb"' + (isLeftHanded() ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Включить полноэкранный режим</span><input type="checkbox" id="settingsHideStatusBarCb"' + (hideStatusBarOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row"><span>Использовать приложение в оффлайн режиме</span><input type="checkbox" id="settingsOfflineModeCb"' + (offlineModeOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row"><span>Включить облачную синхронизацию изображений и книг (может медленно работать на слабых устройствах)</span><input type="checkbox" id="settingsFileSyncCb"' + (fileSyncOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row" id="settingsBooksSyncRow" style="' + (fileSyncOn ? "" : "display:none;") + '"><span>Включить синхронизацию книг (тестируется)</span><input type="checkbox" id="settingsBooksSyncCb"' + (booksSyncOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" style="border-bottom:none;"><span>Включить режим отладки</span><input type="checkbox" id="settingsDebugModeCb"' + (debugModeOn ? " checked" : "") + '></div>' +
-      (showAllTasksOn ? '<button class="modal-btn" id="settingsImportTasksBtn" style="margin-top:16px;">Восстановить задачи из .txt</button>' : '') +
-      '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:' + (showAllTasksOn ? "10px" : "16px") + ';">Добавить для себя цель</button>' +
-      '<button class="modal-btn" id="settingsVersionsBtn" style="margin-top:10px;">Версии</button>' +
-      '<button class="modal-btn danger" id="settingsResetBtn" style="margin-top:10px;">Начать чтение сначала и сбросить прогресс</button>' +
-      '<button class="modal-btn danger" id="settingsMoodResetBtn" style="margin-top:10px;">Сбросить данные настроения</button>' +
+      '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:16px;">Добавить для себя цель</button>' +
       (isSet2Unlocked() ? '' :
         '<div class="settings-row" style="border-bottom:none; flex-direction:column; align-items:stretch; gap:8px; margin-top:16px;">' +
           '<span>Введите секретный код</span>' +
@@ -17371,6 +17404,85 @@
       renderGoalsSection();
     });
 
+    document.getElementById("settingsShowAllTasksCb").addEventListener("change", function(){
+      setShowAllTasksEnabled(this.checked);
+      refreshSettingsTabsVisibility();
+    });
+
+    document.getElementById("settingsHideStatusBarCb").addEventListener("change", function(){
+      // Сам клик по галочке — жест пользователя, поэтому вход в fullscreen
+      // сработает сразу же, без необходимости в armHideStatusBarAutoRetry.
+      setHideStatusBarEnabled(this.checked);
+    });
+
+    document.getElementById("settingsDebugModeCb").addEventListener("change", function(){
+      // Логика режима отладки (localStorage-флаг + панель логов) живёт в
+      // debug.js, здесь только передаём галочку туда.
+      if(window.Debug) window.Debug.setEnabled(this.checked);
+    });
+
+    document.getElementById("settingsAddGoalBtn").addEventListener("click", function(){
+      var id = createNewGoal();
+      renderGoalsSection();
+      closeSettingsModal();
+      openGoalSettingsModal(id);
+    });
+
+    var secretCodeInput = document.getElementById("settingsSecretCodeInput");
+    if(secretCodeInput){
+      var secretCodeNote = document.getElementById("settingsSecretCodeNote");
+      var submitSecretCode = function(){
+        var val = secretCodeInput.value;
+        if(!val) return;
+        if(trySet2UnlockCode(val)){
+          renderSettingsTabMore();
+        } else {
+          secretCodeInput.value = "";
+          if(secretCodeNote){
+            secretCodeNote.className = "modal-note error";
+            secretCodeNote.textContent = "Неверный код.";
+            secretCodeNote.style.display = "";
+          }
+        }
+      };
+      secretCodeInput.addEventListener("keydown", function(e){
+        if(e.key === "Enter"){ e.preventDefault(); submitSecretCode(); }
+      });
+      secretCodeInput.addEventListener("blur", submitSecretCode);
+    }
+  }
+
+  // ===== Вкладки «Внешний вид» (alt1) и «Синхронизация» (alt2) =====
+  // Настройки, вынесенные из renderSettingsTabGear: внешний вид — темы (раньше
+  // в подвале сайта), количество колонок для книг, цвет прочитанных глав,
+  // зеркальный интерфейс; синхронизация — оффлайн-режим, облачная синхронизация
+  // изображений и книг. Обёртка .settings-gear-tab — тот же размер шрифта («Аа»).
+  function renderSettingsTabAppearance(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var colorMarkOn = getColorMarkEnabled();
+    var bookCols = getBookColumns();
+    var extraAnimOn = getExtraAnimationsEnabled(); // ТЗ 29.09: перенесено с вкладки-шестерёнки
+    container.innerHTML =
+      '<div class="settings-gear-tab">' +
+      '<h3 class="common-tab-title">Внешний вид</h3>' +
+      '<div class="settings-row" style="border-bottom:none;"><span>Тема</span></div>' +
+      '<div class="theme-picker"><div class="theme-dots" id="settingsThemeDots"></div></div>' +
+      '<div class="settings-row settings-row-book-cols" style="margin-top:14px;">' +
+        '<span>Количество колонок для книг</span>' +
+        '<div class="settings-book-cols-options">' +
+          '<label class="settings-book-cols-opt"><input type="checkbox" id="settingsBookCols1" data-cols="1"' + (bookCols === 1 ? " checked" : "") + '><span>1</span></label>' +
+          '<label class="settings-book-cols-opt"><input type="checkbox" id="settingsBookCols2" data-cols="2"' + (bookCols === 2 ? " checked" : "") + '><span>2</span></label>' +
+          '<label class="settings-book-cols-opt"><input type="checkbox" id="settingsBookCols3" data-cols="3"' + (bookCols === 3 ? " checked" : "") + '><span>3</span></label>' +
+        '</div>' +
+      '</div>' +
+      '<div class="settings-row"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row"><span>Включить дополнительные анимации</span><input type="checkbox" id="settingsExtraAnimCb"' + (extraAnimOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row" style="border-bottom:none;"><span>Зеркальное отображение интерфейса</span><input type="checkbox" id="settingsLeftHandedCb"' + (isLeftHanded() ? " checked" : "") + '></div>' +
+      '</div>';
+
+    renderThemeDots(document.getElementById("settingsThemeDots"));
+
     var bookColsInputs = [
       document.getElementById("settingsBookCols1"),
       document.getElementById("settingsBookCols2"),
@@ -17397,11 +17509,6 @@
       refreshAllChapterColorVisuals();
     });
 
-    document.getElementById("settingsShowAllTasksCb").addEventListener("change", function(){
-      setShowAllTasksEnabled(this.checked);
-      refreshSettingsTabsVisibility();
-    });
-
     document.getElementById("settingsExtraAnimCb").addEventListener("change", function(){
       setExtraAnimationsEnabled(this.checked);
     });
@@ -17409,12 +17516,126 @@
     document.getElementById("settingsLeftHandedCb").addEventListener("change", function(){
       setLeftHanded(this.checked);
     });
+  }
 
-    document.getElementById("settingsHideStatusBarCb").addEventListener("change", function(){
-      // Сам клик по галочке — жест пользователя, поэтому вход в fullscreen
-      // сработает сразу же, без необходимости в armHideStatusBarAutoRetry.
-      setHideStatusBarEnabled(this.checked);
+  // ТЗ 29.09: вкладка «Восстановление и сброс» (alt3). Сюда перенесены кнопки, которые
+  // раньше жили на вкладке-шестерёнке (задачи из .txt, сброс прогресса, сброс настроения)
+  // и в окне синхронизации (экспорт/импорт личных данных). Логика самих действий не менялась.
+  function renderSettingsTabRecovery(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var showAllTasksOn = getShowAllTasksEnabled();
+    container.innerHTML =
+      '<div class="settings-gear-tab">' +
+      '<h3 class="common-tab-title">Восстановление и сброс</h3>' +
+      (showAllTasksOn ? '<button class="modal-btn" id="settingsImportTasksBtn">Восстановить задачи из .txt</button>' : '') +
+      '<h3 class="common-tab-title" style="margin-top:14px;">Импорт и экспорт</h3>' +
+      exportSectionHtml() +
+      importSectionHtml() +
+      '<button class="modal-btn danger" id="settingsResetBtn" style="margin-top:10px;">Начать чтение сначала и сбросить прогресс</button>' +
+      '<button class="modal-btn danger" id="settingsMoodResetBtn" style="margin-top:10px;">Сбросить данные настроения</button>' +
+      '</div>';
+
+    var importTasksBtn = document.getElementById("settingsImportTasksBtn");
+    if(importTasksBtn){
+      importTasksBtn.addEventListener("click", function(){
+        switchSettingsTab("import");
+      });
+    }
+    bindExportButton();
+    bindImportButton();
+    document.getElementById("settingsResetBtn").addEventListener("click", function(){
+      switchSettingsTab("resetConfirm");
     });
+    document.getElementById("settingsMoodResetBtn").addEventListener("click", function(){
+      switchSettingsTab("moodResetConfirm");
+    });
+  }
+
+  // ТЗ 29.09: размер шрифта вкладки «Синхронизация» берётся от «Аа» (--mdeditor-font-size,
+  // ставится MdEditor.applyFontSize), гарнитура — общая для приложения (inherit)
+  function ensureSyncTabStyle(){
+    if(document.getElementById("syncTabStyle")) return;
+    var st = document.createElement("style");
+    st.id = "syncTabStyle";
+    st.textContent =
+      ".sync-tab p, .sync-tab .modal-note, .sync-tab .modal-btn, .sync-tab button, .sync-tab input, .sync-tab span, .sync-tab label{" +
+      "font-family:inherit !important;font-size:var(--mdeditor-font-size, inherit) !important;}" +
+      ".sync-tab input[type=checkbox]{font-size:inherit !important;}" +
+      // при крупном шрифте «Аа» строка «код + Копировать» не помещалась в ширину — кнопка уезжала за край:
+      // теперь поле и кнопка идут друг под другом на всю ширину
+      ".sync-tab .code-row{display:flex !important;flex-direction:column !important;align-items:stretch !important;gap:8px;}" +
+      ".sync-tab .code-row input, .sync-tab .code-row button{width:100% !important;max-width:100% !important;min-width:0 !important;box-sizing:border-box !important;margin:0 !important;}" +
+      // код синхронизации в своём поле — по центру, а не по левому краю
+      ".sync-tab #codeText{text-align:center !important;}";
+    document.head.appendChild(st);
+  }
+
+  function renderSettingsTabSync(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    var offlineModeOn = isOfflineMode(); // ТЗ пользователя от 19.09 — см. раздел «РЕЖИМ ОФФЛАЙН»
+    var fileSyncOn = getFileSyncEnabled(); // TASK_FILE_SYNC_RTDB.md, раздел 5, шаг 6
+    var booksSyncOn = getBooksSyncEnabled(); // ТЗ пользователя от 18.09 — временный тестовый тумблер
+    container.innerHTML =
+      '<div class="settings-gear-tab sync-tab">' +
+      '<h3 class="common-tab-title">Синхронизация</h3>' +
+      '<div class="settings-row"><span>Заблокировать доступ в интернет</span><input type="checkbox" id="settingsOfflineModeCb"' + (offlineModeOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row"><span>Включить облачную синхронизацию изображений и книг (может медленно работать на слабых устройствах)</span><input type="checkbox" id="settingsFileSyncCb"' + (fileSyncOn ? " checked" : "") + '></div>' +
+      '<div class="settings-row" id="settingsBooksSyncRow" style="' + (fileSyncOn ? "" : "display:none;") + '"><span>Включить синхронизацию книг (тестируется)</span><input type="checkbox" id="settingsBooksSyncCb"' + (booksSyncOn ? " checked" : "") + '></div>' +
+      (syncId ?
+        '<div id="settingsSyncBlock">' +
+          '<h3 class="common-tab-title">Устройство подключено</h3>' +
+          '<p>Прогресс синхронизируется с другими вашими устройствами.</p>' +
+          '<div id="settingsOwnQrHolder"></div>' +
+          '<div class="modal-note" id="settingsSyncNote" style="margin-bottom:12px;"></div>' +
+          '<button class="modal-btn" id="settingsSyncNowBtn">Синхронизировать сейчас</button>' +
+          '<div class="modal-section">' +
+            '<button class="modal-btn danger" id="settingsDisconnectBtn">Отключить синхронизацию на этом устройстве</button>' +
+            '<p class="modal-note">Это не удалит облачную копию — просто это устройство перестанет с ней сверяться.</p>' +
+          '</div>' +
+        '</div>'
+      :
+        '<div id="settingsSyncBlock">' +
+          '<h3 class="common-tab-title">Синхронизация между устройствами</h3>' +
+          '<p>Читаете с нескольких устройств? Подключите их между собой, и прогресс будет совпадать на всех.</p>' +
+          '<button class="modal-btn primary" id="settingsSyncCreateBtn">Это первое устройство — создать код</button>' +
+          '<button class="modal-btn" id="settingsSyncJoinBtn" style="margin-bottom:12px;">У меня уже есть код с другого устройства</button>' +
+        '</div>') +
+      '</div>';
+
+    // ТЗ 29.09: единственная точка входа в окно с кодом/QR — индикатор в шапке
+    // теперь открывает эту вкладку, а не окно
+    ensureSyncTabStyle();
+    // окно (openModal) остаётся только для шагов «создать код» / «ввести код / сканировать QR»
+    if(syncId){
+      loadQrLib().then(function(){
+        showCodeAndQR("settingsOwnQrHolder", syncId, "Код для подключения ещё одного устройства:", null, true);
+      }).catch(function(){
+        var h = document.getElementById("settingsOwnQrHolder");
+        if(h) h.innerHTML = '<p class="modal-note error">Не удалось загрузить QR-код (нет интернета?).</p>';
+      });
+      document.getElementById("settingsSyncNowBtn").addEventListener("click", function(){
+        syncRetryCount = 0;
+        clearTimeout(syncRetryTimer);
+        doCloudSync();
+        var note = document.getElementById("settingsSyncNote");
+        if(note) note.textContent = "Синхронизация запущена…";
+      });
+      document.getElementById("settingsDisconnectBtn").addEventListener("click", function(){
+        openAppConfirmBar("Отключить это устройство от синхронизации? Локальный прогресс сохранится.", function(){
+          syncId = null;
+          localStorage.removeItem(SYNC_ID_KEY);
+          savePersistedCloudSnapshot(null, null, null);
+          personalShadowTouch();
+          refreshStatusBase();
+          renderSettingsTabSync();
+        }, { yesTitle:"Отключить" });
+      });
+    } else {
+      document.getElementById("settingsSyncCreateBtn").addEventListener("click", function(){ openModal(); handleCreateCode(); });
+      document.getElementById("settingsSyncJoinBtn").addEventListener("click", function(){ openModal(); renderJoinScreen(); });
+    }
 
     document.getElementById("settingsOfflineModeCb").addEventListener("change", function(){
       // ТЗ пользователя от 19.09 — полное отсечение интернета (см. раздел
@@ -17428,82 +17649,19 @@
     document.getElementById("settingsFileSyncCb").addEventListener("change", function(){
       // TASK_FILE_SYNC_RTDB.md, раздел 5, шаг 6 — сам гейт живёт внутри
       // touchDeviceRegistry/registerFileInRegistry/registerFileDeletion/
-      // syncFileRegistry (см. выше), здесь только сохраняем флаг. Включение
-      // не запускает синк немедленно — он подхватится обычным циклом при
-      // следующей успешной синхронизации (doCloudSync) или следующем заходе
-      // на вкладку "Мои книги"/"Мои заметки", как и раньше.
+      // syncFileRegistry, здесь только сохраняем флаг. Включение не запускает
+      // синк немедленно — он подхватится обычным циклом.
       setFileSyncEnabled(this.checked);
-      // ТЗ пользователя от 18.09 — строка с тестовым тумблером книг видна
-      // только когда включён общий тумблер (без него книги synced не будут
-      // в любом случае — оба флага проверяются независимо в одних и тех
-      // же точках гейта).
+      // ТЗ от 18.09 — тестовый тумблер книг виден только при включённом общем.
       var row = document.getElementById("settingsBooksSyncRow");
       if(row) row.style.display = this.checked ? "" : "none";
     });
 
     document.getElementById("settingsBooksSyncCb").addEventListener("change", function(){
-      // ТЗ пользователя от 18.09 — временный тестовый тумблер, замена
-      // хардкода true в isBooksCloudSyncTemporarilyDisabled(). Сам гейт —
-      // в тех же трёх точках, что и общий getFileSyncEnabled
-      // (registerFileInRegistry/registerFileDeletion/syncFileRegistry).
+      // ТЗ от 18.09 — временный тестовый тумблер, замена хардкода true в
+      // isBooksCloudSyncTemporarilyDisabled().
       setBooksSyncEnabled(this.checked);
     });
-
-    document.getElementById("settingsDebugModeCb").addEventListener("change", function(){
-      // Логика режима отладки (localStorage-флаг + панель логов) живёт в
-      // debug.js, здесь только передаём галочку туда.
-      if(window.Debug) window.Debug.setEnabled(this.checked);
-    });
-
-    document.getElementById("settingsAddGoalBtn").addEventListener("click", function(){
-      var id = createNewGoal();
-      renderGoalsSection();
-      closeSettingsModal();
-      openGoalSettingsModal(id);
-    });
-
-    var importTasksBtn = document.getElementById("settingsImportTasksBtn");
-    if(importTasksBtn){
-      importTasksBtn.addEventListener("click", function(){
-        switchSettingsTab("import");
-      });
-    }
-
-    document.getElementById("settingsVersionsBtn").addEventListener("click", function(){
-      switchSettingsTab("versions");
-    });
-
-    document.getElementById("settingsResetBtn").addEventListener("click", function(){
-      switchSettingsTab("resetConfirm");
-    });
-
-    // перенесена с вкладки диаграммы настроения (ТЗ 28.09); подтверждение — прежнее
-    document.getElementById("settingsMoodResetBtn").addEventListener("click", function(){
-      switchSettingsTab("moodResetConfirm");
-    });
-
-    var secretCodeInput = document.getElementById("settingsSecretCodeInput");
-    if(secretCodeInput){
-      var secretCodeNote = document.getElementById("settingsSecretCodeNote");
-      var submitSecretCode = function(){
-        var val = secretCodeInput.value;
-        if(!val) return;
-        if(trySet2UnlockCode(val)){
-          renderSettingsTabGear();
-        } else {
-          secretCodeInput.value = "";
-          if(secretCodeNote){
-            secretCodeNote.className = "modal-note error";
-            secretCodeNote.textContent = "Неверный код.";
-            secretCodeNote.style.display = "";
-          }
-        }
-      };
-      secretCodeInput.addEventListener("keydown", function(e){
-        if(e.key === "Enter"){ e.preventDefault(); submitSecretCode(); }
-      });
-      secretCodeInput.addEventListener("blur", submitSecretCode);
-    }
   }
 
   // ===== Восстановление задач из .txt (внутри настроек, вкладка "import") =====
@@ -17574,7 +17732,7 @@
           createTaskWithText(tabKey, text);
           count++;
         });
-        switchSettingsTab(count > 0 ? tabKey : "gear");
+        switchSettingsTab(count > 0 ? tabKey : "alt3");
       };
       reader.onerror = function(){
         submitBtn.disabled = false;
@@ -17598,7 +17756,7 @@
       closeSettingsModal();
     });
     document.getElementById("mResetConfirmNoBtn").addEventListener("click", function(){
-      switchSettingsTab("gear");
+      switchSettingsTab("alt3");
     });
   }
 
@@ -17629,7 +17787,13 @@
     if(tab === currentSettingsTab) return;
     switchSettingsTab(tab);
   }
-  if(settingsTabGearBtn) settingsTabGearBtn.addEventListener("click", function(){ switchSettingsTabOnClick("gear"); });
+  // ТЗ 29.09: каждый клик по колесику только переключает набор соседних
+  // вкладок нижнего ряда (см. «ВТОРОЙ НАБОР НИЖНИХ ВКЛАДОК» ниже). Сама вкладка
+  // «gear» больше не открывается (раньше открывала пустой экран-подсказку):
+  // человек остаётся на той вкладке, где был до нажатия.
+  if(settingsTabGearBtn) settingsTabGearBtn.addEventListener("click", function(){
+    toggleBottomAltMode();
+  });
   if(settingsTabYearBtn) settingsTabYearBtn.addEventListener("click", function(){ switchSettingsTabOnClick("year"); });
   if(settingsTabMoodBtn) settingsTabMoodBtn.addEventListener("click", function(){ switchSettingsTabOnClick("mood"); });
   Object.keys(TASK_TAB_IDS).forEach(function(key){
@@ -17648,6 +17812,129 @@
     var btn = document.getElementById(SET2_EXTRA_TAB_IDS[key]);
     if(btn) btn.addEventListener("click", function(){ switchSettingsTabOnClick(key); });
   });
+
+  // ===== ВТОРОЙ НАБОР НИЖНИХ ВКЛАДОК ПО КЛИКУ НА КОЛЕСИКО (ТЗ 29.09) =====
+  // (с ТЗ 29.09 — пятая: «Версии» встаёт в вертикальном стеке на место «В работе»)
+  // Клик по вкладке-колесику (settingsTabGearBtn) переключает четыре соседние
+  // вкладки нижнего ряда: «Карта дней года» (year), «mood», «Комментарии»
+  // (extra2), «Статистика» (extra3) заменяются на заглушки «Внешний вид»,
+  // «Синхронизация», «Восстановление и сброс», «Дополнительные возможности»;
+  // следующий клик по колесику возвращает прежние вкладки, и так по кругу.
+  // Сами вкладки-заглушки создаются здесь из JS (index.html не менялся) и
+  // встают в DOM сразу после «своей» оригинальной вкладки, поэтому занимают
+  // то же место в ряду. Режим хранится только в памяти (после перезапуска
+  // приложения ряд снова показывает обычные вкладки).
+  var BOTTOM_ALT_TAB_IDS = {
+    alt1: "settingsTabAlt1Btn", alt2: "settingsTabAlt2Btn",
+    alt3: "settingsTabAlt3Btn", alt4: "settingsTabAlt4Btn",
+    alt5: "settingsTabAlt5Btn" // ТЗ 29.09: «Версии» — в вертикальном стеке, на месте «В работе»
+  };
+  var BOTTOM_ALT_REPLACES = {
+    alt1: "settingsTabYearBtn", alt2: "settingsTabMoodBtn",
+    alt3: "settingsTabExtra2Btn", alt4: "settingsTabExtra3Btn",
+    alt5: "settingsTabWorkTasksBtn"
+  };
+  var BOTTOM_ALT_TAB_TITLES = {
+    alt1: "Внешний вид", alt2: "Синхронизация",
+    alt3: "Восстановление и сброс", alt4: "Дополнительные возможности",
+    alt5: "Версии"
+  };
+  var BOTTOM_ALT_ORIGINAL_TABS = ["year", "mood", "extra2", "extra3", "worktasks"];
+  var BOTTOM_ALT_SVG_OPEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">';
+  var BOTTOM_ALT_ICONS = {
+    // палитра с красками + кисточка
+    alt1: BOTTOM_ALT_SVG_OPEN +
+      '<path d="M11 3.5a8.5 8.5 0 1 0 0 17c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.3-.3-.4-.5-.8-.5-1.3 0-1 .8-1.7 1.8-1.7H16a4.5 4.5 0 0 0 4.5-4.5C20.5 6.6 16.3 3.5 11 3.5z"></path>' +
+      '<circle cx="6.8" cy="11" r="1"></circle><circle cx="9" cy="7.2" r="1"></circle><circle cx="13.2" cy="7" r="1"></circle>' +
+      '<path d="M21 2.5l-6.3 6.3"></path><path d="M14.7 8.8c-1.2-.4-2.3.3-2.3 1.5 0 .8-.5 1.2-1.1 1.4 1.1.7 2.7.6 3.4-.4.5-.7.4-1.9 0-2.5z"></path>' +
+      '</svg>',
+    // две круговые стрелки — синхронизация
+    alt2: BOTTOM_ALT_SVG_OPEN +
+      '<path d="M20.5 11.5A8.5 8.5 0 0 0 5.6 6.2L3.5 8.5"></path><path d="M3.5 3.5v5h5"></path>' +
+      '<path d="M3.5 12.5a8.5 8.5 0 0 0 14.9 5.3l2.1-2.3"></path><path d="M20.5 20.5v-5h-5"></path>' +
+      '</svg>',
+    // круговая стрелка назад — восстановление и сброс
+    alt3: BOTTOM_ALT_SVG_OPEN +
+      '<path d="M4 12a8 8 0 1 0 2.6-5.9L4 8.5"></path><path d="M4 3.8v4.7h4.7"></path><path d="M12 8v4.2l2.8 1.8"></path>' +
+      '</svg>',
+    // три горизонтальные линии с ползунками — дополнительные возможности
+    alt4: BOTTOM_ALT_SVG_OPEN +
+      '<path d="M4 7h9"></path><path d="M17 7h3"></path><circle cx="15" cy="7" r="2"></circle>' +
+      '<path d="M4 12h3"></path><path d="M11 12h9"></path><circle cx="9" cy="12" r="2"></circle>' +
+      '<path d="M4 17h11"></path><path d="M19 17h1"></path><circle cx="17" cy="17" r="2"></circle>' +
+      '</svg>',
+    // стопка слоёв — версии
+    alt5: BOTTOM_ALT_SVG_OPEN +
+      '<path d="M12 3.5l9 4.8-9 4.8-9-4.8 9-4.8z"></path><path d="M3 12.6l9 4.8 9-4.8"></path><path d="M3 16.9l9 4.8 9-4.8"></path>' +
+      '</svg>'
+  };
+  var bottomAltMode = false;
+
+  function initBottomAltTabs(){
+    Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
+      if(document.getElementById(BOTTOM_ALT_TAB_IDS[key])) return;
+      var orig = document.getElementById(BOTTOM_ALT_REPLACES[key]);
+      if(!orig || !orig.parentNode) return;
+      var btn = document.createElement(orig.tagName.toLowerCase());
+      if(btn.tagName === "BUTTON") btn.type = "button";
+      btn.id = BOTTOM_ALT_TAB_IDS[key];
+      btn.className = orig.className.replace(/\b(active|mood-tab-unread|red-tab-unread)\b/g, "").replace(/\s+/g, " ").trim();
+      btn.title = BOTTOM_ALT_TAB_TITLES[key];
+      btn.setAttribute("aria-label", BOTTOM_ALT_TAB_TITLES[key]);
+      btn.innerHTML = BOTTOM_ALT_ICONS[key];
+      btn.style.display = "none";
+      btn.addEventListener("click", function(){ switchSettingsTabOnClick(key); });
+      orig.parentNode.insertBefore(btn, orig.nextSibling);
+    });
+    applyBottomAltMode();
+  }
+  function applyBottomAltMode(){
+    Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
+      var alt = document.getElementById(BOTTOM_ALT_TAB_IDS[key]);
+      var orig = document.getElementById(BOTTOM_ALT_REPLACES[key]);
+      if(BOTTOM_ALT_REPLACES[key] === TASK_TAB_IDS.worktasks){
+        // вертикальный стек: оригинал («В работе») подчиняется ещё и галочке
+        // «Показать все мои задачи» (см. refreshSettingsTabsVisibility), а
+        // «Версии» видны всегда, когда включён второй набор
+        if(alt) alt.style.display = bottomAltMode ? "flex" : "none";
+        if(orig) orig.style.display = (!bottomAltMode && getShowAllTasksEnabled()) ? "flex" : "none";
+        return;
+      }
+      if(alt) alt.style.display = bottomAltMode ? "" : "none";
+      if(orig) orig.style.display = bottomAltMode ? "none" : "";
+    });
+    // колесико подсвечено как выбранное, пока показан подменённый набор вкладок
+    var gearTabBtn = document.getElementById("settingsTabGearBtn");
+    if(gearTabBtn) gearTabBtn.classList.toggle("active", bottomAltMode);
+    updateSettingsCornerPatchHeight(); // меняется число видимых язычков вертикального стека
+  }
+  function setBottomAltMode(on){
+    on = !!on;
+    if(on === bottomAltMode) return;
+    bottomAltMode = on;
+    applyBottomAltMode();
+  }
+  function toggleBottomAltMode(){ setBottomAltMode(!bottomAltMode); }
+  // вызывается из switchSettingsTab: если открывают вкладку из «другого»
+  // набора (например, программным переходом или жестом «назад»), ряд сам
+  // переключается на нужный набор, чтобы активная вкладка не оказалась скрытой
+  function syncBottomAltModeForTab(tab){
+    if(BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab)) setBottomAltMode(true);
+    else if(BOTTOM_ALT_ORIGINAL_TABS.indexOf(tab) !== -1) setBottomAltMode(false);
+  }
+  // вкладки-заглушки нового набора: только заголовок и пустое содержимое
+  function renderSettingsTabBottomAlt(tab){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    if(tab === "alt1"){ renderSettingsTabAppearance(); return; }
+    if(tab === "alt2"){ renderSettingsTabSync(); return; }
+    if(tab === "alt3"){ renderSettingsTabRecovery(); return; }
+    if(tab === "alt4"){ renderSettingsTabMore(); return; }
+    if(tab === "alt5"){ renderSettingsTabVersions(); return; }
+    container.innerHTML = '<h3 class="common-tab-title">' + BOTTOM_ALT_TAB_TITLES[tab] + '</h3>' +
+      '<div class="mood-diagram-empty">Контент появится позже</div>';
+  }
+  initBottomAltTabs();
 
   if(settingsModalOverlay){
     settingsModalOverlay.addEventListener("click", function(e){
@@ -23605,6 +23892,16 @@
   // switchSettingsTab не откроет сам оверлей окна и не переключит
   // settingsActiveTabSet на второй набор, где живут все три нужные вкладки
   // (Книги/Разделение epub/Извлечение субтитров).
+  // ТЗ 29.09: открыть окно настроек сразу на вкладке «Синхронизация» (alt2, набор 1,
+  // нижний ряд) — вызывается кликом по индикатору синхронизации в шапке.
+  function openSyncSettingsTab(){
+    var alreadyOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay &&
+      settingsModalOverlay.classList.contains("open");
+    if(!alreadyOpen) openSettingsModal();
+    settingsActiveTabSet = 1;
+    applySettingsTabSetVisibility();
+    switchSettingsTab("alt2");
+  }
   function openSettingsTabDirect(tab){
     var alreadyOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay &&
       settingsModalOverlay.classList.contains("open");
@@ -23756,7 +24053,6 @@
   ensureFirstReadInitialized();
   updateOverallProgress();
   applyThemeToPage(getCurrentThemeId());
-  renderThemeDots();
   initSettingsFabToggle();
   refreshExtra2TabAppearance();
   refreshExtra3TabAppearance();

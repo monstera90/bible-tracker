@@ -86,7 +86,7 @@
   html[data-theme="4"]{
     --parchment:#f4f0f8; --parchment-dark:#e9e0f1;
     --ink:#3b3350; --ink-soft:#6a6080;
-    --wood:#8f7fb8; --wood-dark:#6a5a91;
+    --wood:#7a3fc0; --wood-dark:#6a5a91;
     --gold:#d8cdec; --gold-light:#ece3f7;
     --groove-shadow:#b6a8d1;
     --xp-green:#8FE3C7; --xp-green-dark:#4FBE9B;
@@ -278,12 +278,14 @@ html:is([data-theme="8"],[data-theme="9"],[data-theme="10"],[data-theme="11"],[d
      окантовку-«галочку» не трогаем — она остаётся как в основном CSS.
      Селектор через #themeDots — выше по специфичности, чем .theme-dot из
      основных стилей, порядок подключения не важен. */
-  #themeDots .theme-dot{
+  #themeDots .theme-dot,
+  #settingsThemeDots .theme-dot{
     background-repeat:no-repeat;
     background-origin:border-box;
     background-clip:border-box;
   }
-  #themeDots .theme-dot:not(.selected){
+  #themeDots .theme-dot:not(.selected),
+  #settingsThemeDots .theme-dot:not(.selected){
     border-style:solid;
     border-color:var(--dot-ring, transparent);
   }
