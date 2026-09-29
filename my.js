@@ -1,6 +1,9 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 45.7 (29.09) — ТЗ пользователя: (1) у колеса ОДИН набор вкладок (убраны дубликаты для второго набора — размер иконки «Версии» больше не зависит от того, из какого набора вошли в колесо; режим колеса всегда рисуется в разметке набора 1, `applySettingsTabSetVisibility` учитывает `bottomAltMode`); (2) пока колесо активно, язычок переключения наборов ничего не меняет на экране: `cycleSettingsTabSet` только меняет `settingsActiveTabSet`, а вкладка нового набора открывается, когда пользователь убирает колесо (`toggleBottomAltMode`, `openTabOfActiveSettingsSet`, `bottomAltEntrySet`).
+   Версия: 45.6 (29.09) — ТЗ пользователя: колесо — не вкладка, а кнопка режима. В режиме колеса кликабельны только его вкладки (4 в нижнем ряду справа от колеса + «Версии» нижним язычком вертикального стека); вертикальный стек всегда из 11 язычков, остальные — пустые некликабельные (класс `settings-tab-decor`, `setTabDecor`, `ensureTabDecorStyle`, защита в `switchSettingsTabOnClick`). Работает в обоих наборах: для второго добавлены `BOTTOM_ALT_TAB_IDS_S2`, `refreshSet2SideStack`, два пустых язычка сверху стека (`SET2_SIDE_FILLER_IDS`).
+   Версия: 45.5 (29.09) — ТЗ пользователя: вкладка «ИПКД» переехала из нижнего ряда второго набора (set2b_5) в вертикальный стек, на место заглушки 8 (set2s_8, settingsTabSet2Btn8); первое место нижнего ряда второго набора занимает колесико (`settingsTabGearBtnSet2`, `initSet2GearTab`, поведение как у колесика первого набора — `toggleBottomAltMode`), остальные четыре вкладки сдвинуты на одну вправо («Извлечение субтитров» — на прежнем месте ИПКД); `SETTINGS_BOTTOM_ORDER_2` начинается с "gear".
    Версия: 45.4 (29.09) — колесико нижнего ряда подсвечено как выбранное, пока показан подменённый набор вкладок (`applyBottomAltMode`, `switchSettingsTab`), и как невыбранное при стандартных.
    Версия: 45.3 (29.09) — кнопка-колесико нижнего ряда только переключает набор вкладок (`toggleBottomAltMode`), вкладку «gear» больше не открывает: пользователь остаётся на текущей вкладке.
    Версия: 45.2 (29.09) — код синхронизации в поле на вкладке «Синхронизация» выровнен по центру (`ensureSyncTabStyle`, `.sync-tab #codeText`).
@@ -108,7 +111,7 @@
    state остаётся запасным путём (пишется и зеркалится, doCloudSync не менялся, кроме
    personalViewAbsorbState после слияния).
    Версия: 40.0 (21.09) — структурная правка (ТЗ пользователя от 21.09): пятая нижняя вкладка второго
-   набора (set2b_5, settingsTabSet2GearBtn5) больше не заглушка — вкладка «ИПКД»: ежедневное чтение
+   набора (тогда set2b_5, settingsTabSet2GearBtn5; с 45.5 — set2s_8) больше не заглушка — вкладка «ИПКД»: ежедневное чтение
    epub-публикации тем же экраном чтения, что и «Мои книги» (всегда открывается на сегодняшней главе,
    кнопка «к сегодня» вместо «Домика», скрепка «заменить публикацию», пиктограмма вкладки — число месяца с
    заливкой «сегодня не открывалась»). Новый раздел «ВКЛАДКА «ИПКД»» (IPKD_BOOK_NAME, bookReaderOwnerTab,
@@ -2650,7 +2653,10 @@
   };
   var SET2_EXTRA_TAB_IDS = {
     set2b_1: "settingsTabSet2GearBtn1", set2b_2: "settingsTabSet2GearBtn2", set2b_3: "settingsTabSet2GearBtn3",
-    set2b_4: "settingsTabSet2GearBtn4", set2b_5: "settingsTabSet2GearBtn5"
+    set2b_4: "settingsTabSet2GearBtn4"
+    // ТЗ 29.09: бывшая пятая нижняя вкладка «ИПКД» (set2b_5) переехала в вертикальный стек на место
+    // заглушки 8 (set2s_8, settingsTabSet2Btn8). Первое место нижнего ряда занимает вкладка-колесико
+    // (settingsTabGearBtnSet2, см. initSet2GearTab), четыре остальные сдвинуты на одну вправо
   };
   // а вот КУДА реально можно перенести задачу стрелочкой (пикер
   // "Перенести задачу") — без red, т.к. принадлежность к Red определяется
@@ -10852,9 +10858,16 @@
     var showTasks = getShowAllTasksEnabled();
     Object.keys(TASK_TAB_IDS).forEach(function(key){
       var btn = document.getElementById(TASK_TAB_IDS[key]);
-      // «В работе» на время второго набора нижних вкладок заменена на «Версии»
-      var hiddenByAlt = (key === "worktasks" && bottomAltMode);
-      if(btn) btn.style.display = (showTasks && !hiddenByAlt) ? "flex" : "none";
+      if(!btn) return;
+      if(bottomAltMode){
+        // ТЗ 29.09: в режиме колеса вертикальный стек всегда из 11 язычков; настоящий среди них один —
+        // «Версии» (на месте «В работе», нижний), остальные — пустые некликабельные (декор)
+        btn.style.display = (key === "worktasks") ? "none" : "flex";
+        setTabDecor(btn, key !== "worktasks");
+      } else {
+        setTabDecor(btn, false);
+        btn.style.display = showTasks ? "flex" : "none";
+      }
     });
     // меняет количество видимых язычков в #settingsTabs — пересчитываем
     // заплатку (см. updateSettingsCornerPatchHeight выше); единственный
@@ -11006,7 +11019,7 @@
     // (settingsModalOverlay ещё без класса "open", см. openSettingsModal)
     // в стек не попадает — иначе закрытие окна требовало бы лишнего
     // "назад".
-    // Пиктограмма вкладки "ИПКД" (settingsTabSet2GearBtn5, "set2b_5") —
+    // Пиктограмма вкладки "ИПКД" (settingsTabSet2Btn8, "set2s_8") —
     // число месяца и заливка "не открыта сегодня" должны быть актуальны,
     // даже если пользователь ещё ни разу не заходил на саму вкладку в этом
     // открытии окна настроек — обновляем при КАЖДОМ переключении вкладок
@@ -11060,10 +11073,10 @@
     // renderBookReaderChapters), и в textScrollTop/chaptersScrollTop (запасной
     // путь), и сразу в постоянное хранилище (setBookPosition) — на случай
     // перезапуска приложения раньше следующего дебаунса.
-    // (то же и для ридера вкладки "ИПКД", set2b_5 — только когда в памяти
+    // (то же и для ридера вкладки "ИПКД", set2s_8 — только когда в памяти
     // именно её файл: если там "чужая" книга из "Мои книги", экран ИПКД —
     // просто пустой экран/загрузка, сохранять с него нечего)
-    if(((prevTab === "set2s_7") || (prevTab === "set2b_5" && bookReaderState && bookReaderState.name === IPKD_BOOK_NAME)) &&
+    if(((prevTab === "set2s_7") || (prevTab === "set2s_8" && bookReaderState && bookReaderState.name === IPKD_BOOK_NAME)) &&
        tab !== prevTab && bookReaderState){
       var leavingReaderContainer = document.getElementById("settingsTabContent");
       if(leavingReaderContainer){
@@ -11098,7 +11111,7 @@
     var moodTabBtn = document.getElementById("settingsTabMoodBtn");
     // ТЗ 29.09: колесико выглядит выбранным, пока ряд показывает подменённый набор
     // вкладок (bottomAltMode), и невыбранным при стандартных — не зависит от открытой вкладки
-    if(gearBtn) gearBtn.classList.toggle("active", !!bottomAltMode);
+    if(gearBtn) updateBottomGearButtons();
     if(yearBtn) yearBtn.classList.toggle("active", tab === "year");
     if(moodTabBtn) moodTabBtn.classList.toggle("active", tab === "mood");
     // набор вкладок по клику на колесико (ТЗ 29.09)
@@ -11125,6 +11138,7 @@
       var btn = document.getElementById(SET2_EXTRA_TAB_IDS[key]);
       if(btn) btn.classList.toggle("active", tab === key);
     });
+    stripDecorClasses(); // декоративные язычки режима колеса никогда не выглядят выбранными
     var container = document.getElementById("settingsTabContent");
     // Вкладки из TAB_SCROLL_AUTO_TABS (задачи + список книг) сами
     // восстанавливают свою позицию скролла ниже, после рендера (см.
@@ -11176,11 +11190,11 @@
     else if(tab === "set2b_2") renderSettingsTabS89Fill();
     else if(tab === "set2b_3") renderSettingsTabNotesMerge();
     else if(tab === "set2b_4") renderSettingsTabSubtitleExtract();
-    // пятая нижняя вкладка второго набора (set2b_5) — ЭТО БОЛЬШЕ НЕ
+    // восьмая боковая вкладка второго набора (set2s_8) — ЭТО БОЛЬШЕ НЕ
     // ЗАГЛУШКА: вкладка "ИПКД" (ежедневное чтение epub-публикации, ТЗ
     // пользователя от 21.09) — см. renderSettingsTabIpkd ниже, в разделе
     // "ВКЛАДКА «ИПКД»" сразу после книжных закладок.
-    else if(tab === "set2b_5") renderSettingsTabIpkd();
+    else if(tab === "set2s_8") renderSettingsTabIpkd();
     else if(tab === "set2s_1") renderSettingsTabMdEditor();
     // вторая боковая вкладка второго набора (set2s_2) — ЭТО БОЛЬШЕ НЕ
     // ЗАГЛУШКА: вкладка "Закладки" — плоский список заметок из "Моего
@@ -11216,7 +11230,7 @@
     // null только при реальном выходе из книги (см. "Домик"/AppNav-колбэк в
     // openBookReader выше), переключение вкладок его не трогает.
     else if(tab === "set2s_7"){
-      // Вкладка "ИПКД" (set2b_5) делит с "Мои книги" одну переменную
+      // Вкладка "ИПКД" (set2s_8) делит с "Мои книги" одну переменную
       // bookReaderState — если в памяти осталась её публикация, здесь она
       // показываться не должна (и владелец ридера снова "Мои книги").
       bookReaderOwnerTab = "set2s_7";
@@ -14515,14 +14529,14 @@
       // иначе колбэк ниже через renderBookReaderOwnerTab заново открывал бы
       // ту же книгу и системное "назад" крутилось бы по кругу, не доходя до
       // возврата на прошлую вкладку/закрытия окна настроек.
-      var ipkdRootScreen = (name === IPKD_BOOK_NAME && bookReaderOwnerTab === "set2b_5");
+      var ipkdRootScreen = (name === IPKD_BOOK_NAME && bookReaderOwnerTab === "set2s_8");
       if(!ipkdRootScreen) window.AppNav.push(function(){
         destroyBookReaderScrollListener();
         revokeBookReaderImages();
         bookReaderState = null;
         // renderSettingsTabBooks() всегда — заменено на диспетчер по
         // bookReaderOwnerTab (ТЗ пользователя от 21.09, вкладка "ИПКД",
-        // set2b_5): для обычных книг (set2s_7, значение по умолчанию)
+        // set2s_8): для обычных книг (set2s_7, значение по умолчанию)
         // поведение не изменилось, renderBookReaderOwnerTab ниже так же
         // зовёт renderSettingsTabBooks(). См. раздел "ВКЛАДКА «ИПКД»".
         renderBookReaderOwnerTab();
@@ -14643,13 +14657,13 @@
     destroyBookReaderScrollListener();
     if(bookReaderState.mode === "chapters") renderBookReaderChapters(container);
     else renderBookReaderText(container);
-    // Довесок поверх общей разметки для вкладки "ИПКД" (set2b_5, ТЗ
+    // Довесок поверх общей разметки для вкладки "ИПКД" (set2s_8, ТЗ
     // пользователя от 21.09) — прячет неподходящую здесь кнопку "Домик" и
     // добавляет свои (см. bindIpkdReaderExtras в разделе "ВКЛАДКА «ИПКД»"
     // ниже). Условие на bookReaderOwnerTab, а не на bookReaderState.name,
     // потому что renderBookReader вызывается и до, и после переключения
     // текст/главы — владелец не меняется между ними в рамках одной книги.
-    if(bookReaderOwnerTab === "set2b_5") bindIpkdReaderExtras();
+    if(bookReaderOwnerTab === "set2s_8") bindIpkdReaderExtras();
   }
 
   // Общий нижний ряд кнопок (шаг 12) — одна и та же разметка в обоих режимах
@@ -15964,7 +15978,7 @@
   }
 
   // ===== ВКЛАДКА "ИПКД" (пятая нижняя вкладка второго набора,
-  // settingsTabSet2GearBtn5 / "set2b_5", ТЗ пользователя от 21.09) =====
+  // settingsTabSet2Btn8 / "set2s_8", ТЗ пользователя от 21.09) =====
   // Один и тот же файл-публикация в формате .epub с ежедневным чтением —
   // день там уже размечен как отдельная глава (спайн-файл), заголовок главы
   // — дата вида "1 апреля" (см. epubparse.js/parseBookBuffer). Читается ТЕМ
@@ -16002,13 +16016,13 @@
   // bookReaderOwnerTab — куда должен вернуться общий экран чтения
   // (openBookReader выше, снимок AppNav при реальном "назад" — см. правку
   // там же) при выходе из книги: "set2s_7" (общая библиотека "Мои книги",
-  // поведение по умолчанию, как было всегда) или "set2b_5" (эта вкладка).
+  // поведение по умолчанию, как было всегда) или "set2s_8" (эта вкладка).
   // Кнопка "Домик" общего нижнего ряда (bindBookReaderFabRow) на этот флаг
-  // не завязана и на set2b_5 просто прячется (bindIpkdReaderExtras ниже) —
+  // не завязана и на set2s_8 просто прячется (bindIpkdReaderExtras ниже) —
   // трогать её сохранённый обработчик клика не пришлось.
   var bookReaderOwnerTab = "set2s_7";
   function renderBookReaderOwnerTab(){
-    if(bookReaderOwnerTab === "set2b_5") renderSettingsTabIpkd();
+    if(bookReaderOwnerTab === "set2s_8") renderSettingsTabIpkd();
     else renderSettingsTabBooks();
   }
 
@@ -16041,21 +16055,23 @@
     try{ localStorage.setItem(IPKD_LAST_OPENED_KEY, ipkdTodayDateKey()); }catch(e){}
     updateIpkdTabIcon();
   }
-  // Пиктограмма вкладки — просто число (тем же приёмом, что у соседних
-  // заглушек settingsTabSet2GearBtn8/9 в index.html — обычный текстовый
+  // Пиктограмма вкладки — просто число (с ТЗ 29.09 вкладка стоит в вертикальном стеке
+  // второго набора на месте заглушки 8, кнопка settingsTabSet2Btn8 из index.html;
+  // содержимое кнопки целиком заменяется здесь, обычный текстовый
   // узел в язычке, font-size:32px из .settings-tab, modals.css); заливка
   // "не открыта сегодня" (.ipkd-tab-unread, modals.css) — var(--gold-light),
   // тот же пастельный акцент темы, что и у подчёркиваний книги
   // (.book-reader-underline, components.css), а не свой отдельный цвет —
   // ТЗ пользователя от 21.09 ("цвет такой же... он наследуется из темы").
   function updateIpkdTabIcon(){
-    var btn = document.getElementById("settingsTabSet2GearBtn5");
+    var btn = document.getElementById("settingsTabSet2Btn8");
     if(!btn) return;
     // Пиктограмма — число в квадрате, как у календаря (ТЗ пользователя от
     // 22.09): span.ipkd-tab-icon — рамка-квадрат (modals.css), число внутри
     // чуть мельче font-size вкладки (32px у .settings-tab), чтобы помещалось.
     btn.innerHTML = '<span class="ipkd-tab-icon">' + String(new Date().getDate()) + '</span>';
     btn.classList.toggle("ipkd-tab-unread", !isIpkdOpenedToday());
+    stripDecorClasses();
   }
 
   // ===== ПОДСВЕТКА ВКЛАДОК "MOOD"/"RED" (ТЗ пользователя от 26.09) =====
@@ -16081,6 +16097,7 @@
     var btn = document.getElementById("settingsTabMoodBtn");
     if(!btn) return;
     btn.classList.toggle("mood-tab-unread", !isMoodOpenedToday());
+    stripDecorClasses();
   }
   // Разница в календарных днях между двумя ключами вида "YYYY-MM-DD" (см.
   // ipkdTodayDateKey) — обе даты уже локальные календарные, часовой пояс
@@ -16105,6 +16122,7 @@
     var btn = document.getElementById("settingsTabRedBtn");
     if(!btn) return;
     btn.classList.toggle("red-tab-unread", isRedStale());
+    stripDecorClasses();
   }
 
   // Индекс главы, соответствующей сегодняшнему числу — по заголовку главы
@@ -16175,7 +16193,7 @@
   }
 
   // Довесок поверх общей разметки ридера — вызывается из renderBookReader
-  // выше (см. правку там же) при bookReaderOwnerTab === "set2b_5", то есть
+  // выше (см. правку там же) при bookReaderOwnerTab === "set2s_8", то есть
   // после КАЖДОГО её рендера (переключение текст/главы, возврат на
   // вкладку) — .innerHTML пересоздаёт узлы заново, поэтому и кнопки здесь
   // создаются заново каждый раз, без проверок на дубли.
@@ -16246,7 +16264,7 @@
         }
         return saveIpkdFile(new Uint8Array(buf));
       }).then(function(){
-        bookReaderOwnerTab = "set2b_5";
+        bookReaderOwnerTab = "set2s_8";
         return openBookReader(IPKD_BOOK_NAME, ipkdTodayPosition);
       }).then(function(){
         markIpkdOpenedToday();
@@ -16278,12 +16296,12 @@
     if(input) bindIpkdFileInput(input, false);
   }
 
-  // Пятая нижняя вкладка второго набора (set2b_5) — точка входа из
+  // Вкладка «ИПКД» (восьмая в вертикальном стеке второго набора, set2s_8) — точка входа из
   // switchSettingsTab (см. правку там же). markIpkdOpenedToday сразу при
   // заходе, не только после успешной загрузки книги — заливка вкладки
   // отмечает сам факт захода на неё сегодня, а не факт наличия файла.
   function renderSettingsTabIpkd(){
-    bookReaderOwnerTab = "set2b_5";
+    bookReaderOwnerTab = "set2s_8";
     markIpkdOpenedToday();
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -16293,7 +16311,7 @@
     }
     container.innerHTML = '<div class="mdeditor-empty">Загрузка…</div>';
     ipkdFileExists().then(function(exists){
-      if(currentSettingsTab !== "set2b_5" || !document.getElementById("settingsTabContent")) return; // вкладку успели покинуть (#settingsTabContent общий для всех вкладок и есть всегда — проверяем именно текущую вкладку)
+      if(currentSettingsTab !== "set2s_8" || !document.getElementById("settingsTabContent")) return; // вкладку успели покинуть (#settingsTabContent общий для всех вкладок и есть всегда — проверяем именно текущую вкладку)
       if(!exists){ renderIpkdEmptyScreen(); return; }
       openBookReader(IPKD_BOOK_NAME, ipkdTodayPosition);
     });
@@ -17120,7 +17138,8 @@
   var SETTINGS_SIDE_ORDER_1 = Object.keys(TASK_TAB_IDS);              // red..archive
   var SETTINGS_BOTTOM_ORDER_1 = ["gear","year","mood"].concat(Object.keys(EXTRA_TAB_IDS)); // gear,year,mood,extra2,extra3
   var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_9
-  var SETTINGS_BOTTOM_ORDER_2 = Object.keys(SET2_EXTRA_TAB_IDS);      // set2b_1..set2b_5
+  // ТЗ 29.09: первое место — колесико (как в наборе 1), дальше set2b_1..set2b_4
+  var SETTINGS_BOTTOM_ORDER_2 = ["gear"].concat(Object.keys(SET2_EXTRA_TAB_IDS));
   // последняя реально выбранная вкладка одного из двух стеков (см.
   // switchSettingsTab выше) — используется, чтобы при переключении набора
   // (cycleSettingsTabSet) открывалась не первая попавшаяся вкладка нового
@@ -17227,11 +17246,14 @@
     var set1Bottom = document.getElementById("settingsTabsGear");
     var set2Side = document.getElementById("settingsTabsSet2");
     var set2Bottom = document.getElementById("settingsTabsGearSet2");
-    var showSet1 = settingsActiveTabSet === 1;
+    // ТЗ 29.09: под режимом колеса (bottomAltMode) пользователь видит только вкладки колеса (разметка
+    // набора 1); переключение наборов язычком идёт незаметно, а показ нового набора — когда колесо уберут
+    var showSet1 = settingsActiveTabSet === 1 || bottomAltMode;
     if(set1Side) set1Side.style.display = showSet1 ? "" : "none";
     if(set1Bottom) set1Bottom.style.display = showSet1 ? "" : "none";
     if(set2Side) set2Side.style.display = showSet1 ? "none" : "";
     if(set2Bottom) set2Bottom.style.display = showSet1 ? "none" : "";
+    // запоминается настоящий набор (а не показанный под колесом)
     try{ localStorage.setItem(SETTINGS_LAST_SET_KEY, String(settingsActiveTabSet)); }catch(e){}
     // переключает набор вкладок ("9"/"8") целиком — пересчитываем заплатку
     // (см. updateSettingsCornerPatchHeight выше); единственный вызывающий,
@@ -17245,10 +17267,18 @@
   function cycleSettingsTabSet(){
     settingsActiveTabSet = (settingsActiveTabSet === 1) ? 2 : 1;
     applySettingsTabSetVisibility();
+    // ТЗ 29.09: пока активно колесо, язычок набора ничего не меняет на экране — набор переключается «под
+    // ним», а вкладка нового набора откроется, когда пользователь сам уберёт колесо (toggleBottomAltMode)
+    if(bottomAltMode) return;
+    openTabOfActiveSettingsSet();
+  }
+  function openTabOfActiveSettingsSet(){
     var target = getCorrespondingTabInOtherSet(settingsLastStackTab);
     if(!target){
       target = (settingsActiveTabSet === 1) ? (getShowAllTasksEnabled() ? "red" : "gear") : "set2b_1";
     }
+    // колесико второго набора — не вкладка с содержимым (только переключатель), открываем «домашнюю»
+    if(settingsActiveTabSet === 2 && target === "gear") target = "set2b_1";
     // боковые вкладки набора 1 (red..archive) скрыты, пока не включена
     // галочка "Показать все мои задачи" — переходить на скрытую вкладку
     // не нужно, вместо неё открываем вкладку настроек (тот же принцип,
@@ -17276,6 +17306,7 @@
     try{ savedTab = localStorage.getItem(SETTINGS_LAST_TAB_KEY); }catch(e){}
     try{ savedSet = (localStorage.getItem(SETTINGS_LAST_SET_KEY) === "2") ? 2 : 1; }catch(e){}
     if(savedSet === 2 && !isSet2Unlocked()){ savedSet = 1; savedTab = null; }
+    if(savedSet === 2 && savedTab === "gear") savedTab = null; // колесико набора 2 не открывается как вкладка
     if(savedTab && TASK_TAB_IDS.hasOwnProperty(savedTab) && !getShowAllTasksEnabled()){
       savedTab = null;
     }
@@ -17784,6 +17815,8 @@
       closeReviewSubScreen();
       return;
     }
+    // ТЗ 29.09: в режиме колеса кликабельны только его вкладки (alt1..alt5), остальные — декор
+    if(bottomAltMode && !BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab)) return;
     if(tab === currentSettingsTab) return;
     switchSettingsTab(tab);
   }
@@ -17870,42 +17903,72 @@
   };
   var bottomAltMode = false;
 
+  function createAltButton(key, id, origId){
+    if(document.getElementById(id)) return;
+    var orig = document.getElementById(origId);
+    if(!orig || !orig.parentNode) return;
+    var btn = document.createElement(orig.tagName.toLowerCase());
+    if(btn.tagName === "BUTTON") btn.type = "button";
+    btn.id = id;
+    btn.className = orig.className.replace(/\b(active|mood-tab-unread|red-tab-unread|ipkd-tab-unread)\b/g, "").replace(/\s+/g, " ").trim();
+    btn.title = BOTTOM_ALT_TAB_TITLES[key];
+    btn.setAttribute("aria-label", BOTTOM_ALT_TAB_TITLES[key]);
+    btn.innerHTML = BOTTOM_ALT_ICONS[key];
+    btn.style.display = "none";
+    btn.addEventListener("click", function(){ switchSettingsTabOnClick(key); });
+    orig.parentNode.insertBefore(btn, orig.nextSibling);
+  }
+  // декоративные язычки режима колеса: пустые и некликабельные (стиль — ensureTabDecorStyle)
+  var TAB_DECOR_STRIP = ["active", "mood-tab-unread", "red-tab-unread", "ipkd-tab-unread"];
+  function ensureTabDecorStyle(){
+    if(document.getElementById("tabDecorStyle")) return;
+    var st = document.createElement("style");
+    st.id = "tabDecorStyle";
+    st.textContent =
+      ".settings-tab-decor{pointer-events:none !important;cursor:default !important;color:transparent !important;}" +
+      ".settings-tab-decor > *{visibility:hidden !important;}";
+    document.head.appendChild(st);
+  }
+  function stripDecorClasses(){
+    Array.prototype.forEach.call(document.querySelectorAll(".settings-tab-decor"), function(b){
+      TAB_DECOR_STRIP.forEach(function(c){ b.classList.remove(c); });
+    });
+  }
+  function setTabDecor(btn, on){
+    if(!btn) return;
+    btn.classList.toggle("settings-tab-decor", !!on);
+    if(on){
+      btn.setAttribute("aria-hidden", "true");
+      btn.tabIndex = -1;
+      TAB_DECOR_STRIP.forEach(function(c){ btn.classList.remove(c); });
+    } else {
+      btn.removeAttribute("aria-hidden");
+      btn.removeAttribute("tabindex");
+    }
+  }
   function initBottomAltTabs(){
+    ensureTabDecorStyle();
     Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
-      if(document.getElementById(BOTTOM_ALT_TAB_IDS[key])) return;
-      var orig = document.getElementById(BOTTOM_ALT_REPLACES[key]);
-      if(!orig || !orig.parentNode) return;
-      var btn = document.createElement(orig.tagName.toLowerCase());
-      if(btn.tagName === "BUTTON") btn.type = "button";
-      btn.id = BOTTOM_ALT_TAB_IDS[key];
-      btn.className = orig.className.replace(/\b(active|mood-tab-unread|red-tab-unread)\b/g, "").replace(/\s+/g, " ").trim();
-      btn.title = BOTTOM_ALT_TAB_TITLES[key];
-      btn.setAttribute("aria-label", BOTTOM_ALT_TAB_TITLES[key]);
-      btn.innerHTML = BOTTOM_ALT_ICONS[key];
-      btn.style.display = "none";
-      btn.addEventListener("click", function(){ switchSettingsTabOnClick(key); });
-      orig.parentNode.insertBefore(btn, orig.nextSibling);
+      createAltButton(key, BOTTOM_ALT_TAB_IDS[key], BOTTOM_ALT_REPLACES[key]);
     });
     applyBottomAltMode();
   }
   function applyBottomAltMode(){
+    // ТЗ 29.09: режим колеса — ОДИН набор вкладок (alt1..alt5) в разметке набора 1, независимо от того, из
+    // какого набора нажато колесо: четыре вкладки в нижнем ряду вместо year/mood/extra2/extra3 и «Версии»
+    // нижним язычком вертикального стека (вместо «В работе»), остальные 10 язычков стека — пустой декор
     Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
       var alt = document.getElementById(BOTTOM_ALT_TAB_IDS[key]);
       var orig = document.getElementById(BOTTOM_ALT_REPLACES[key]);
-      if(BOTTOM_ALT_REPLACES[key] === TASK_TAB_IDS.worktasks){
-        // вертикальный стек: оригинал («В работе») подчиняется ещё и галочке
-        // «Показать все мои задачи» (см. refreshSettingsTabsVisibility), а
-        // «Версии» видны всегда, когда включён второй набор
+      if(key === "alt5"){
         if(alt) alt.style.display = bottomAltMode ? "flex" : "none";
-        if(orig) orig.style.display = (!bottomAltMode && getShowAllTasksEnabled()) ? "flex" : "none";
         return;
       }
       if(alt) alt.style.display = bottomAltMode ? "" : "none";
       if(orig) orig.style.display = bottomAltMode ? "none" : "";
     });
-    // колесико подсвечено как выбранное, пока показан подменённый набор вкладок
-    var gearTabBtn = document.getElementById("settingsTabGearBtn");
-    if(gearTabBtn) gearTabBtn.classList.toggle("active", bottomAltMode);
+    refreshSettingsTabsVisibility();   // вертикальный стек набора 1 (11 язычков, декор)
+    updateBottomGearButtons();         // колесо подсвечено, пока показан набор вкладок колеса
     updateSettingsCornerPatchHeight(); // меняется число видимых язычков вертикального стека
   }
   function setBottomAltMode(on){
@@ -17913,8 +17976,19 @@
     if(on === bottomAltMode) return;
     bottomAltMode = on;
     applyBottomAltMode();
+    applySettingsTabSetVisibility(); // в режиме колеса всегда виден ряд набора 1, после — ряд активного набора
   }
-  function toggleBottomAltMode(){ setBottomAltMode(!bottomAltMode); }
+  var bottomAltEntrySet = 1; // набор, который был активен, когда включили колесо
+  function toggleBottomAltMode(){
+    if(!bottomAltMode){
+      bottomAltEntrySet = settingsActiveTabSet;
+      setBottomAltMode(true);
+      return;
+    }
+    setBottomAltMode(false);
+    // язычок набора нажимали под колесом — теперь, когда колесо убрано, показываем вкладку нового набора
+    if(settingsActiveTabSet !== bottomAltEntrySet) openTabOfActiveSettingsSet();
+  }
   // вызывается из switchSettingsTab: если открывают вкладку из «другого»
   // набора (например, программным переходом или жестом «назад»), ряд сам
   // переключается на нужный набор, чтобы активная вкладка не оказалась скрытой
@@ -17935,6 +18009,30 @@
       '<div class="mood-diagram-empty">Контент появится позже</div>';
   }
   initBottomAltTabs();
+
+  // ТЗ 29.09: колесико — первая вкладка нижнего ряда и первого, и второго набора; поведение одно и то же
+  // (toggleBottomAltMode). Во втором наборе кнопку создаём из JS копией настоящего колесика (index.html не
+  // менялся); прежняя пятая кнопка «ИПКД» (settingsTabSet2GearBtn5) из ряда убирается.
+  function updateBottomGearButtons(){
+    ["settingsTabGearBtn", "settingsTabGearBtnSet2"].forEach(function(id){
+      var b = document.getElementById(id);
+      if(b) b.classList.toggle("active", !!bottomAltMode);
+    });
+  }
+  function initSet2GearTab(){
+    var oldIpkdBtn = document.getElementById("settingsTabSet2GearBtn5");
+    if(oldIpkdBtn && oldIpkdBtn.parentNode) oldIpkdBtn.parentNode.removeChild(oldIpkdBtn);
+    var row = document.getElementById("settingsTabsGearSet2");
+    var src = document.getElementById("settingsTabGearBtn");
+    if(!row || !src || document.getElementById("settingsTabGearBtnSet2")) return;
+    var btn = src.cloneNode(true);
+    btn.id = "settingsTabGearBtnSet2";
+    btn.className = src.className.replace(/\bactive\b/g, "").replace(/\s+/g, " ").trim();
+    btn.addEventListener("click", function(){ toggleBottomAltMode(); });
+    row.insertBefore(btn, document.getElementById("settingsTabSet2GearBtn1") || row.firstChild);
+    updateBottomGearButtons();
+  }
+  initSet2GearTab();
 
   if(settingsModalOverlay){
     settingsModalOverlay.addEventListener("click", function(e){
