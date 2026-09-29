@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 6.7 (29.09) — вкладка «Закладки» (`renderBookmarksList`): два отдельных списка с подписями «Закладки в заметках» и «Закладки в книгах» (пустой список скрыт), вместо одного смешанного.
    Версия: 6.6 (28.09) — ПЕРЕНОСЫ СЛОВ (ТЗ пользователя от 28.09): в попап «Аа» заметки добавлена
    кнопка `#mdEditorHyphensBtn` (класс `hyphens-btn` — клик и иконку ведёт my.js, см. раздел
    «ПЕРЕНОСЫ СЛОВ» там); в экспорт MdEditor — `captureScrollAnchor()`: запоминает позицию
@@ -3481,9 +3482,11 @@ window.initMdEditorModule = function(deps){
     return items;
   }
 
-  // Строит и монтирует сам список закладок (обе категории вперемешку,
-  // отсортированные вместе — см. sortBookmarkItems выше) внутрь уже
-  // существующего контейнера #mdBookmarksList/#mdBookmarksEmpty ИЛИ
+  // Строит и монтирует списки закладок (с 29.09 — два отдельных списка:
+  // «Закладки в заметках» #mdBookmarksNotesList и «Закладки в книгах»
+  // #mdBookmarksBooksList, внутри каждого сортировка по-прежнему общая —
+  // см. sortBookmarkItems выше) внутрь уже
+  // существующего контейнера #mdBookmarksNotesSection/#mdBookmarksBooksSection/#mdBookmarksEmpty ИЛИ
   // (isFirstPaint=true) отрисовывает всю разметку экрана заново — см.
   // renderBookmarksScreen ниже: первый проход рисует разметку целиком
   // (пока книжные закладки ещё не подъехали асинхронно из OPFS), второй
@@ -3510,21 +3513,33 @@ window.initMdEditorModule = function(deps){
       html += '</div>';
       html += '<div class="mdeditor-tab settings-content-bottom" id="mdBookmarksBottom">';
       html += '<div class="mdeditor-empty" id="mdBookmarksEmpty" style="display:none;">Пока нет ни одной закладки.<br>Чтобы добавить: удержите заметку в общем списке или нажмите на значок закладки в открытой заметке — либо на кнопку закладки в нижнем ряду при чтении книги.</div>';
-      html += '<div class="mdeditor-list" id="mdBookmarksList" style="display:none;"></div>';
+      // ТЗ 29.09: два отдельных списка с подписями — «Закладки в заметках» и
+      // «Закладки в книгах» (раньше обе категории шли одним списком вперемешку).
+      // Пустая секция целиком скрывается; если пусты обе — виден #mdBookmarksEmpty.
+      var subStyle = 'font-weight:600;font-size:0.95em;color:var(--ink-soft);margin:10px 4px 6px;';
+      html += '<div id="mdBookmarksNotesSection" style="display:none;">' +
+        '<div class="mdeditor-bookmarks-subtitle" style="' + subStyle + '">Закладки в заметках</div>' +
+        '<div class="mdeditor-list" id="mdBookmarksNotesList"></div></div>';
+      html += '<div id="mdBookmarksBooksSection" style="display:none;">' +
+        '<div class="mdeditor-bookmarks-subtitle" style="' + subStyle + '">Закладки в книгах</div>' +
+        '<div class="mdeditor-list" id="mdBookmarksBooksList"></div></div>';
       html += '</div>';
       container.innerHTML = html;
     }
     var emptyEl = document.getElementById("mdBookmarksEmpty");
-    var listEl = document.getElementById("mdBookmarksList");
-    if(!listEl || !emptyEl) return; // экран успели покинуть между проходами
-    listEl.innerHTML = "";
-    if(!items.length){
-      emptyEl.style.display = "";
-      listEl.style.display = "none";
-      return;
-    }
-    emptyEl.style.display = "none";
-    listEl.style.display = "";
+    var notesSectionEl = document.getElementById("mdBookmarksNotesSection");
+    var booksSectionEl = document.getElementById("mdBookmarksBooksSection");
+    var notesListEl = document.getElementById("mdBookmarksNotesList");
+    var booksListEl = document.getElementById("mdBookmarksBooksList");
+    if(!emptyEl || !notesSectionEl || !booksSectionEl || !notesListEl || !booksListEl) return; // экран успели покинуть между проходами
+    notesListEl.innerHTML = "";
+    booksListEl.innerHTML = "";
+    var hasBooks = items.some(function(x){ return x.type === "book"; });
+    var hasNotes = items.some(function(x){ return x.type !== "book"; });
+    emptyEl.style.display = (hasNotes || hasBooks) ? "none" : "";
+    notesSectionEl.style.display = hasNotes ? "" : "none";
+    booksSectionEl.style.display = hasBooks ? "" : "none";
+    if(!hasNotes && !hasBooks) return;
     items.forEach(function(it){
       var row = document.createElement("div");
       row.className = "mdeditor-row";
@@ -3614,7 +3629,7 @@ window.initMdEditorModule = function(deps){
         }
         toggleBookmarkNote(it.name);
       });
-      listEl.appendChild(row);
+      (it.type === "book" ? booksListEl : notesListEl).appendChild(row);
     });
   }
 
