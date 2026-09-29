@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 45.8 (29.09) — ТЗ пользователя: вкладка «Версии» (alt5, `renderSettingsTabVersions`) — обычный заголовок `h3.common-tab-title`, обёртка `.settings-gear-tab.versions-tab` (внутри `.settings-content-bottom` — блок прижат вниз, как раньше), гарнитура общая, размер шрифта от «Аа» (`--mdeditor-font-size`, `ensureVersionsTabStyle`); кнопки «Аа» на вкладке нет; `.year-grid-tab-title` убран.
    Версия: 45.7 (29.09) — ТЗ пользователя: (1) у колеса ОДИН набор вкладок (убраны дубликаты для второго набора — размер иконки «Версии» больше не зависит от того, из какого набора вошли в колесо; режим колеса всегда рисуется в разметке набора 1, `applySettingsTabSetVisibility` учитывает `bottomAltMode`); (2) пока колесо активно, язычок переключения наборов ничего не меняет на экране: `cycleSettingsTabSet` только меняет `settingsActiveTabSet`, а вкладка нового набора открывается, когда пользователь убирает колесо (`toggleBottomAltMode`, `openTabOfActiveSettingsSet`, `bottomAltEntrySet`).
    Версия: 45.6 (29.09) — ТЗ пользователя: колесо — не вкладка, а кнопка режима. В режиме колеса кликабельны только его вкладки (4 в нижнем ряду справа от колеса + «Версии» нижним язычком вертикального стека); вертикальный стек всегда из 11 язычков, остальные — пустые некликабельные (класс `settings-tab-decor`, `setTabDecor`, `ensureTabDecorStyle`, защита в `switchSettingsTabOnClick`). Работает в обоих наборах: для второго добавлены `BOTTOM_ALT_TAB_IDS_S2`, `refreshSet2SideStack`, два пустых язычка сверху стека (`SET2_SIDE_FILLER_IDS`).
    Версия: 45.5 (29.09) — ТЗ пользователя: вкладка «ИПКД» переехала из нижнего ряда второго набора (set2b_5) в вертикальный стек, на место заглушки 8 (set2s_8, settingsTabSet2Btn8); первое место нижнего ряда второго набора занимает колесико (`settingsTabGearBtnSet2`, `initSet2GearTab`, поведение как у колесика первого набора — `toggleBottomAltMode`), остальные четыре вкладки сдвинуты на одну вправо («Извлечение субтитров» — на прежнем месте ИПКД); `SETTINGS_BOTTOM_ORDER_2` начинается с "gear".
@@ -9375,8 +9376,8 @@
 
   function exportSectionHtml(){
     return '<div class="modal-section">' +
-      '<button class="modal-btn" id="mExportData">Экспортировать личные данные</button>' +
       '<p class="modal-note">Скачает ZIP-архив со всеми вашими данными: прогресс чтения, настроение, достижение целей, задачи, заметки (с картинками) и книги.</p>' +
+      '<button class="modal-btn" id="mExportData">Экспортировать личные данные</button>' +
       '</div>';
   }
   // READER_PLAN.md, Этап B, шаг 5 (11.09): раньше архив содержал только
@@ -9558,9 +9559,9 @@
 
   function importSectionHtml(){
     return '<div class="modal-section">' +
+      '<p class="modal-note">Восстановит данные из файла, полученного кнопкой «Экспортировать личные данные» (ZIP-архив или, для старых копий, файл data.json). После выбора файла можно будет отметить, что именно восстановить — каждая отмеченная категория полностью заменит то, что уже есть на этом устройстве.</p>' +
       '<button class="modal-btn" id="mImportData">Импортировать личные данные</button>' +
       '<input type="file" id="mImportFileInput" accept=".zip,.json,application/json,application/zip" style="display:none">' +
-      '<p class="modal-note">Восстановит данные из файла, полученного кнопкой «Экспортировать личные данные» (ZIP-архив или, для старых копий, файл data.json). После выбора файла можно будет отметить, что именно восстановить — каждая отмеченная категория полностью заменит то, что уже есть на этом устройстве.</p>' +
       '</div>';
   }
 
@@ -10306,6 +10307,16 @@
 
   var selectedVersionUrl = null;
 
+  function ensureVersionsTabStyle(){
+    if(document.getElementById("versionsTabStyle")) return;
+    var st = document.createElement("style");
+    st.id = "versionsTabStyle";
+    st.textContent =
+      ".versions-tab .version-history-item, .versions-tab .version-history-empty, .versions-tab .modal-btn{" +
+      "font-family:inherit !important;font-size:var(--mdeditor-font-size, inherit) !important;}";
+    document.head.appendChild(st);
+  }
+
   // содержимое "Версий" (с ТЗ 29.09 — вкладка alt5 в вертикальном стеке, на месте
   // «В работе», см. renderSettingsTabBottomAlt) рисуется прямо в
   // #settingsTabContent, как и у остальных вкладок
@@ -10313,11 +10324,17 @@
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     selectedVersionUrl = null;
+    ensureVersionsTabStyle();
+    // ТЗ 29.09: как у остальных вкладок настроек — обычный заголовок h3.common-tab-title, общая гарнитура,
+    // размер шрифта от «Аа» (--mdeditor-font-size); самой кнопки «Аа» здесь нет
+    // блок по-прежнему прижат вниз (.settings-content-bottom, как было)
     container.innerHTML =
       '<div class="settings-content-bottom">' +
-      '<div class="year-grid-tab-title" style="margin-bottom:12px;">Версии</div>' +
+      '<div class="settings-gear-tab versions-tab">' +
+      '<h3 class="common-tab-title">Версии</h3>' +
       '<div id="versionHistoryItems"></div>' +
       '<button class="modal-btn primary" id="mVersionReturnBtn" style="display:none;margin-top:12px;">Вернуться на выбранную версию</button>' +
+      '</div>' +
       '</div>';
     renderVersionHistory();
     var returnBtn = document.getElementById("mVersionReturnBtn");
@@ -17558,13 +17575,19 @@
     var showAllTasksOn = getShowAllTasksEnabled();
     container.innerHTML =
       '<div class="settings-gear-tab">' +
-      '<h3 class="common-tab-title">Восстановление и сброс</h3>' +
+      '<h3 class="common-tab-title" style="border:none;">Восстановление и сброс</h3>' +
       (showAllTasksOn ? '<button class="modal-btn" id="settingsImportTasksBtn">Восстановить задачи из .txt</button>' : '') +
-      '<h3 class="common-tab-title" style="margin-top:14px;">Импорт и экспорт</h3>' +
-      exportSectionHtml() +
-      importSectionHtml() +
       '<button class="modal-btn danger" id="settingsResetBtn" style="margin-top:10px;">Начать чтение сначала и сбросить прогресс</button>' +
       '<button class="modal-btn danger" id="settingsMoodResetBtn" style="margin-top:10px;">Сбросить данные настроения</button>' +
+      '<h3 class="common-tab-title" style="margin-top:14px;">Импорт и экспорт</h3>' +
+      // ТЗ 29.09: под заголовком остаётся один разделитель — у блоков убраны верхняя граница и отступы
+      // (между кнопкой экспорта и текстом импорта разделителя нет, остаётся только зазор 10px)
+      exportSectionHtml()
+        .replace('<div class="modal-section">', '<div class="modal-section" style="border-top:none;margin-top:0;padding-top:0;">')
+        .replace('<p class="modal-note">', '<p class="modal-note" style="margin-top:10px;">') +
+      importSectionHtml()
+        .replace('<div class="modal-section">', '<div class="modal-section" style="border-top:none;margin-top:0;padding-top:0;">')
+        .replace('<p class="modal-note">', '<p class="modal-note" style="margin-top:10px;">') +
       '</div>';
 
     var importTasksBtn = document.getElementById("settingsImportTasksBtn");
