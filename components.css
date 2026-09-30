@@ -1,5 +1,7 @@
 /* ===========================================================================
    components.css
+   Версия: 3.4.5 (30.09) — тема 5: отметка прочитанной главы (`.chapter-item input:checked + label`, в т.ч. `.clr-green`) — цвета шапки; дополнительные отметки `.clr-blue`/`.clr-red` не затронуты.
+   Версия: 3.4.4 (30.09) — тема 5 (аметист): заливка прогресса книг `.book-fill` — цвета шапки (тот же градиент `var(--wood)` → `var(--wood-dark)`, что у `header` в base.css), плюс светлый контур у `.book-name` для читаемости поверх тёмной заливки; общий прогресс `.xp-fill` не менялся.
    Версия: 3.4.3 (29.09) — ЭКСПЕРИМЕНТ: красная строка в книгах (`.book-reader-p`) через `::before` вместо `text-indent` (см. комментарий у правила; проверка «язычков» выделения на первом слове абзаца).
    Версия: 3.4.2 (29.09) — `.mood-checkin-item`: фон `var(--tab-bg, var(--parchment))` (как у неактивных вкладок) вместо #fffef8.
    Версия: 3.4.1 (28.09) — `hyphenate-limit-chars` ослаблен с 6 3 3 до 5 2 2 (слишком много пропущенных переносов).
@@ -1680,6 +1682,21 @@
     z-index:1;
   }
 
+  /* Тема 5 (аметист и слоновая кость): заливка прогресса книги — цвета шапки. Формула та же, что у
+     header{background:linear-gradient(180deg, var(--wood) 0%, var(--wood-dark) 100%)} (base.css).
+     Общий прогресс чтения (.xp-fill) намеренно НЕ тронут — остаётся var(--xp-green). Заливка тёмная,
+     поэтому название книги получает светлый контур цвета карточки (иначе var(--ink) сливается с ней);
+     счётчик .book-count и так лежит на своей светлой пилюле. Специфичность (html[data-theme] + класс)
+     выше базового .book-fill, порядок правил в файле не важен. */
+  html[data-theme="5"] .book-fill{
+    background-color:var(--wood);
+    background-image:linear-gradient(180deg, var(--wood) 0%, var(--wood-dark) 100%);
+    border-right-color:var(--wood-dark);
+  }
+  html[data-theme="5"] .book-name{
+    text-shadow:0 0 2px var(--parchment), 0 0 4px var(--parchment), 0 0 6px var(--parchment);
+  }
+
   .book-header-content{
     position:relative;
     z-index:2;
@@ -1879,6 +1896,18 @@
     color:#3d0b0e;
     font-weight:bold;
     box-shadow:inset 0 -3px 5px rgba(60,0,0,.35), inset 0 2px 2px rgba(255,255,255,.5);
+  }
+
+  /* Тема 5 (аметист): отметка прочитанной главы — цвета шапки, как заливка прогресса книги
+     (.book-fill выше). Это обычная отметка — без класса цвета или .clr-green; дополнительные
+     отметки .clr-blue/.clr-red исключены через :not(), иначе правило (специфичнее их собственных)
+     перекрасило бы и их. Цвет цифры — светлый (--parchment) вместо тёмно-зелёного --on-fill;
+     внутренние тени нейтральные тёмные вместо зелёных. */
+  html[data-theme="5"] .chapter-item:not(.clr-blue):not(.clr-red) input:checked + label{
+    background:var(--wood);
+    border-color:var(--wood-dark);
+    color:var(--parchment);
+    box-shadow:inset 0 -3px 5px rgba(0,0,0,.3), inset 0 2px 2px rgba(255,255,255,.25);
   }
 
   /* =============================================================
