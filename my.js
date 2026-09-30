@@ -1,6 +1,14 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 48.4 (30.09) — `applyReadingModeVisual`: в полноэкранном режиме та же пиктограмма, что и в режиме чтения, — открытая незачёркнутая книга (`READING_BOOK_ICON_SVG`); `FULLSCREEN_MODE_ICON_SVG` не используется. Названия (title) кнопки остаются разными.
+   Версия: 48.3 (30.09) — `bindTapOrHold`: свайп, начатый на кнопке (сдвиг > MOVE_CANCEL_PX), больше не считается тапом — раньше на отпускании срабатывал `onTap` (так режим чтения включался свайпом ползунка ряда, начатым с кнопки режима чтения). Удержание работало и раньше.
+   Версия: 48.2 (30.09) — `initFabRowSlider`: высота полосы жеста считается от размера кнопок (`stripH()` = 15 + `--fab-size`, кнопки нижней полосы теперь 40×40, modals.css 10.0), а не фиксированные 47px.
+   Версия: 48.1 (30.09) — `initFabRowSlider`: «резиновый край» — за крайние положения ряд тянется с нарастающим сопротивлением (`withRubber`, `rubberBand`, `RUBBER_DIM`/`RUBBER_C`) и по отпусканию пружинит обратно (`RUBBER_MIN_SPEED` — возврат из оттяжки не дольше ~300 мс); раньше палец упирался в стену (зажим по `lo`/`hi`).
+   Версия: 48.0 (30.09) — `initFabRowSlider`: доезд ряда «пружиной» (длительность от скорости броска, небольшой перелёт за край и возврат; `startSettle`, `y1ForOvershoot`, CSS-переменные `--fab-settle-dur/-ease`), вибрация 8 мс при защёлкивании (`haptic`), скорость отпускания по последним 100 мс (`releaseVelocity`), захват ряда посреди доезда (`currentSlide`); исправлено: возврат «домой» из крайнего положения медленным свайпом (раньше срабатывал только быстрый бросок — путь считался от `base`, а не от края).
+   Версия: 47.2 (30.09) — кнопка режима чтения в нижнем ряду ридера книг (`#bookReaderReadingBtn`) переставлена сразу слева от «домика»; на вкладках задач — сдвиг слотов в modals.css 9.2.
+   Версия: 47.1 (30.09) — `initFabRowSlider`: ряд кнопок тянется за пальцем (`fab-dragging`, `--fab-slide` напрямую), по отпусканию доезжает до ближайшего края (порог 25% пути или быстрый бросок); вместо мгновенного переключения по порогу свайпа.
+   Версия: 47.0 (30.09) — структурная правка (ТЗ пользователя от 30.09): «Ж» разобрана на четыре кнопки Ж/К/П/Ч в общем ряду вкладок задач (`.task-format-wrap` ×4, попап и `formatPanelOpen` убраны), новая функция `initFabRowSlider` — ползунок нижнего ряда кнопок (свайп слева направо — крайняя левая кнопка, справа налево — «домик»), `syncTaskFabRowForTab` сбрасывает его (`fabRowSliderReset`).
    Версия: 46.4 (30.09) — откат всех правок 46.0–46.3 к 45.8 (приём файла через «Поделиться» снова как был); добавлена только диагностика в журнал отладки: `checkForSharedFile` пишет «Поделиться: …» по каждой точке выхода и читает статус service worker (`shared-status`), `handleSharedFile` пишет строку, если тип файла не распознан. Поведение не менялось.
    Версия: 45.8 (29.09) — ТЗ пользователя: вкладка «Версии» (alt5, `renderSettingsTabVersions`) — обычный заголовок `h3.common-tab-title`, обёртка `.settings-gear-tab.versions-tab` (внутри `.settings-content-bottom` — блок прижат вниз, как раньше), гарнитура общая, размер шрифта от «Аа» (`--mdeditor-font-size`, `ensureVersionsTabStyle`); кнопки «Аа» на вкладке нет; `.year-grid-tab-title` убран.
    Версия: 45.7 (29.09) — ТЗ пользователя: (1) у колеса ОДИН набор вкладок (убраны дубликаты для второго набора — размер иконки «Версии» больше не зависит от того, из какого набора вошли в колесо; режим колеса всегда рисуется в разметке набора 1, `applySettingsTabSetVisibility` учитывает `bottomAltMode`); (2) пока колесо активно, язычок переключения наборов ничего не меняет на экране: `cycleSettingsTabSet` только меняет `settingsActiveTabSet`, а вкладка нового набора открывается, когда пользователь убирает колесо (`toggleBottomAltMode`, `openTabOfActiveSettingsSet`, `bottomAltEntrySet`).
@@ -2495,7 +2503,11 @@
   // через renderTaskTabList("projects") напрямую, минуя switchSettingsTab
   // (сознательно, чтобы не плодить лишний шаг истории), и раньше это
   // оставляло "+" спрятанной (её прячет globalFab в openTaskNextPicker).
+  // Возврат ползунка нижнего ряда в положение «дом виден» (см. initFabRowSlider) —
+  // присваивается там; здесь пустышка, чтобы вызов до инициализации был безвреден.
+  var fabRowSliderReset = function(){};
   function syncTaskFabRowForTab(tab){
+    fabRowSliderReset(); // смена вкладки/экрана — ряд всегда стартует с видимым «домиком»
     var addFab = document.getElementById("taskAddFab");
     var isCommentsTab = (tab === "extra2" && getCustomCommentsEnabled());
     var showTaskFab = TASK_MOVABLE_TABS.indexOf(tab) !== -1 || isCommentsTab;
@@ -2508,11 +2520,12 @@
     if(addFab) addFab.classList.toggle("visible", showTaskFab && !isJointReadOnlyTab);
     // скрепка/Аа/текстовыделитель/Ж видны в тех же случаях, что и "+" (см.
     // ТЗ пользователя от 31.08 — все стоят в одном ряду с ней).
-    var formatWrap = document.getElementById("taskFormatWrap");
+    // «Ж»/«К»/«П»/«Ч» — четыре отдельные обёртки (index.html), включаются вместе
+    var formatWraps = document.querySelectorAll(".task-format-wrap");
     var fontSizeWrap = document.getElementById("taskFontSizeWrap");
     var highlightWrap = document.getElementById("taskHighlightWrap");
     var attachWrap = document.getElementById("taskAttachWrap");
-    if(formatWrap) formatWrap.classList.toggle("visible", showTaskFab);
+    for(var fwi = 0; fwi < formatWraps.length; fwi++) formatWraps[fwi].classList.toggle("visible", showTaskFab);
     if(fontSizeWrap) fontSizeWrap.classList.toggle("visible", showTaskFab);
     if(highlightWrap) highlightWrap.classList.toggle("visible", showTaskFab);
     if(attachWrap) attachWrap.classList.toggle("visible", showTaskFab);
@@ -8704,6 +8717,7 @@
   });
 
   initTaskGlobalToolbar();
+  initFabRowSlider();
 
   // ---------------------------------------------------------------------
   // Глобальные "Ж" (форматирование выделения), "Аа" (размер шрифта),
@@ -8738,6 +8752,328 @@
   // пока не разрешится промис вставки — тогда и заново фокусируемый (см.
   // insertTextIntoTaskEditable) editable остаётся в DOM живым.
   var taskAttachDialogOpen = false;
+
+  // ===================== ПОЛЗУНОК РЯДА КНОПОК =====================
+  // ТЗ пользователя от 30.09: «Ж» разобрана на четыре кнопки Ж/К/П/Ч прямо в общем
+  // нижнем ряду, и ряд перестал помещаться в окно. Весь ряд (вкладки задач — набор
+  // абсолютных обёрток из index.html + кнопки экрана «Все задачи проекта»; «Мой
+  // блокнот» и все экраны с .mdeditor-fab-row — сам ряд) двигается целиком двумя
+  // положениями: «дом виден» (старт всегда такой) и «видна самая левая кнопка».
+  // Ряд тянется за пальцем, по отпусканию доезжает до ближайшего края (протянули
+  // дальше четверти пути или быстрый бросок — до другого края, иначе назад).
+  // Слева направо — к крайней левой кнопке, справа налево — назад «домой»
+  // (в раскладке левши жесты зеркальны). Сдвиг — CSS-переменная --fab-slide на
+  // #settingsModalBox (modals.css, «ПОЛЗУНОК РЯДА КНОПОК»); кнопки, не
+  // помещающиеся целиком в окно при нынешнем положении, получают .fab-slide-off.
+  // Если всё помещается (мало кнопок) — сдвиг 0 и свайп ничего не делает.
+  // Возврат «домой»: при смене набора видимых кнопок/перерисовке ряда
+  // (MutationObserver) и явным вызовом из syncTaskFabRowForTab (смена вкладки).
+  function initFabRowSlider(){
+    var box = document.getElementById("settingsModalBox");
+    if(!box) return;
+    var TASK_TARGETS_SEL = ".task-add-fab, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap, " +
+      ".task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, " +
+      ".task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home";
+    var EDGE = 6;           // отступ кнопок от края окна (как у самого ряда, --fab-gap в modals.css)
+    var STRIP_PAD = 14;     // отступ полосы жеста над кнопками: bottom:6 + запас 8; высота полосы = STRIP_PAD + --fab-size
+    function stripH(){      // высота полосы ряда от низа окна (размер кнопок — --fab-size в modals.css, по умолчанию 40)
+      var sz = parseFloat(getComputedStyle(box).getPropertyValue("--fab-size"));
+      return STRIP_PAD + (sz > 0 ? sz : 36);
+    }
+    var SWIPE_MIN = 36;     // минимальный горизонтальный путь жеста, px
+    var slid = false;       // false — «дом виден», true — «крайняя левая кнопка видна»
+    var uid = 0;
+    var lastSig = "";
+    var rafId = 0;
+    var touch = null;
+    var dragging = false;   // палец тянет ряд прямо сейчас — наблюдатель/пересчёт не вмешиваются
+
+    function isLefty(){ return document.documentElement.classList.contains("lefty"); }
+    function shown(el){ return el.offsetWidth > 0 && el.offsetHeight > 0; }
+    // позиция элемента в окне БЕЗ учёта transform (offsetLeft его не включает) —
+    // иначе во время анимации замер «плыл» бы
+    function leftInBox(el){
+      var x = 0, n = el;
+      while(n && n !== box){ x += n.offsetLeft; n = n.offsetParent; }
+      return n === box ? x : null;
+    }
+    // элементы ряда, которые сейчас на экране: обёртки задач + дети .mdeditor-fab-row
+    function getItems(){
+      var items = [];
+      var i, list = box.querySelectorAll(TASK_TARGETS_SEL);
+      for(i = 0; i < list.length; i++){
+        if(shown(list[i]) && !list[i].closest(".mdeditor-fab-row")) items.push(list[i]);
+      }
+      var rows = box.querySelectorAll(".mdeditor-fab-row");
+      for(i = 0; i < rows.length; i++){
+        if(!shown(rows[i])) continue;
+        for(var k = 0; k < rows[i].children.length; k++){
+          if(shown(rows[i].children[k])) items.push(rows[i].children[k]);
+        }
+      }
+      return items;
+    }
+    function signature(items){
+      return items.map(function(el){ return el.__fabSlideId || (el.__fabSlideId = ++uid); }).join("|");
+    }
+    // на сколько надо сдвинуть ряд, чтобы самая дальняя кнопка встала у края окна
+    // (вправо — положительное; в раскладке левши — отрицательное)
+    function farShift(items){
+      var boxW = box.clientWidth, best = 0;
+      for(var i = 0; i < items.length; i++){
+        var l = leftInBox(items[i]);
+        if(l === null) continue;
+        if(isLefty()){
+          var over = (l + items[i].offsetWidth) - (boxW - EDGE);
+          if(over > 0) best = Math.min(best, -over);
+        } else {
+          var need = EDGE - l;
+          if(need > 0) best = Math.max(best, need);
+        }
+      }
+      return Math.round(best);
+    }
+    var obs = null;
+    function observe(){
+      if(obs) obs.observe(box, {childList: true, subtree: true, attributes: true, attributeFilter: ["class"]});
+    }
+    function apply(){
+      if(obs) obs.disconnect(); // свои правки классов/переменной не должны будить наблюдателя
+      var items = getItems();
+      lastSig = signature(items);
+      var target = slid ? farShift(items) : 0;
+      box.style.setProperty("--fab-slide", target + "px");
+      var boxW = box.clientWidth;
+      for(var i = 0; i < items.length; i++){
+        var l = leftInBox(items[i]);
+        var off = false;
+        if(l !== null){
+          var a = l + target, b = a + items[i].offsetWidth;
+          // ТЗ 30.09: кнопки, не влезающие в окно, НЕ прячем — показываем как есть (обрезает край экрана)
+          off = false;
+        }
+        items[i].classList.toggle("fab-slide-off", off);
+      }
+      // прежде спрятанные, а теперь не попавшие в список (экран сменился) — вернуть
+      var stale = box.querySelectorAll(".fab-slide-off");
+      for(var j = 0; j < stale.length; j++){
+        if(items.indexOf(stale[j]) === -1) stale[j].classList.remove("fab-slide-off");
+      }
+      observe();
+    }
+    function setSlid(v){
+      if(slid === v) return;
+      slid = v;
+      apply();
+    }
+    function schedule(){
+      if(rafId) return;
+      rafId = requestAnimationFrame(function(){
+        rafId = 0;
+        if(dragging) return;
+        var sig = signature(getItems());
+        if(sig !== lastSig) slid = false; // набор кнопок сменился — старт с «домиком»
+        apply();
+      });
+    }
+    fabRowSliderReset = function(){ slid = false; apply(); };
+
+    if(typeof MutationObserver === "function"){
+      obs = new MutationObserver(schedule);
+      observe();
+    }
+    window.addEventListener("resize", schedule);
+    window.addEventListener("orientationchange", schedule);
+
+    // --- жест: ряд тянется за пальцем, по отпусканию доезжает сам ---
+    // Тянуть можно за полосу ряда (по горизонтали — в пределах видимых кнопок).
+    // Пока палец на экране, --fab-slide ведёт палец напрямую (класс fab-dragging
+    // гасит transition); между «домик» (0) и крайним положением — 1:1, за ними — резинка (withRubber).
+    // По отпусканию выбирается одно из двух положений: протянули дальше
+    // DRAG_COMMIT доли пути или быстрый бросок — ряд доезжает до другого края,
+    // иначе возвращается; доезд — обычный transition, см. apply().
+    var DRAG_START = 8;      // px до начала перетаскивания (отличить от тапа по кнопке)
+    var DRAG_COMMIT = 0.25;  // доля пути, после которой отпускание завершает движение
+    var FLING_V = 0.5;       // px/мс — быстрый бросок завершает движение при любой длине
+    // --- «пружина» доезда (ТЗ пользователя от 30.09) ---
+    // После отпускания ряд доезжает до края не за фиксированные 0.22с, а с длительностью от
+    // скорости броска и небольшим перелётом за край с возвратом. Кривая — cubic-bezier с y1>1
+    // (перелёт зависит только от y1, y2=1), значения кладутся в CSS-переменные
+    // --fab-settle-dur/--fab-settle-ease на окне (читает transition в конце modals.css) и
+    // снимаются сами, когда доезд закончился — прочие сдвиги (смена вкладки) идут по-старому.
+    var SETTLE_X1 = 0.25;    // x1 кривой: чем меньше, тем резче старт
+    var SETTLE_MIN = 200;    // мс: короткий/быстрый доезд не короче
+    var SETTLE_MAX = 360;    // мс: длинный/медленный доезд не длиннее
+    var OVERSHOOT_PX = 6;    // px: перелёт не больше (край кнопки у окна — EDGE=7, не вылезаем за него)
+    var HAPTIC_MS = 8;       // длительность вибрации при защёлкивании
+    var VELOCITY_WINDOW = 100; // мс: скорость в момент отпускания считается по последним движениям пальца
+    var settleTimer = 0;
+    // --- «резиновый край» (ТЗ пользователя от 30.09) ---
+    // За крайние положения ряд можно тянуть чуть дальше, но с нарастающим сопротивлением
+    // (формула iOS: d = (1 − 1/(x·c/dim + 1))·dim — растёт всё медленнее и не превышает dim);
+    // по отпусканию он возвращается к краю тем же пружинным доездом (startSettle).
+    var RUBBER_DIM = 44;     // px: предел оттяжки за край (кривая к нему только приближается)
+    var RUBBER_C = 0.55;     // жёсткость: чем меньше, тем «туже» тянется
+    var RUBBER_MIN_SPEED = 0.6; // px/мс: возврат из оттяжки не медленнее (иначе длился бы весь SETTLE_MAX)
+    function rubberBand(over){ // over > 0 — на сколько палец вышел за край, px → на сколько уехал ряд
+      return (1 - 1 / (over * RUBBER_C / RUBBER_DIM + 1)) * RUBBER_DIM;
+    }
+    function withRubber(raw, lo, hi){ // положение ряда с учётом резинки за краями [lo, hi]
+      if(raw > hi) return hi + rubberBand(raw - hi);
+      if(raw < lo) return lo - rubberBand(lo - raw);
+      return raw;
+    }
+    function bezierOvershoot(y1){ // максимальный перелёт кривой (доля пути) при данном y1
+      var m = 0;
+      for(var i = 1; i <= 40; i++){
+        var u = i / 40, w = 1 - u;
+        var y = 3 * w * w * u * y1 + 3 * w * u * u + u * u * u;
+        if(y > m) m = y;
+      }
+      return m - 1;
+    }
+    function y1ForOvershoot(os){ // подбор y1, дающего нужный перелёт (бинарный поиск)
+      if(os < 0.004) return 1;
+      var lo = 1, hi = 2.4;
+      for(var i = 0; i < 14; i++){
+        var mid = (lo + hi) / 2;
+        if(bezierOvershoot(mid) > os) hi = mid; else lo = mid;
+      }
+      return (lo + hi) / 2;
+    }
+    function bezierArrival(y1){ // доля времени, когда кривая впервые дошла до цели (для вибрации)
+      for(var i = 1; i <= 100; i++){
+        var u = i / 100, w = 1 - u;
+        var y = 3 * w * w * u * y1 + 3 * w * u * u + u * u * u;
+        if(y >= 0.99) return 3 * w * w * u * SETTLE_X1 + 3 * w * u * u * 0.4 + u * u * u;
+      }
+      return 1;
+    }
+    // speed — скорость пальца в сторону цели, px/мс (0 — палец стоял/шёл назад)
+    function startSettle(dist, speed){
+      var os = Math.min(0.07, 0.02 + speed * 0.02, OVERSHOOT_PX / Math.max(dist, 1));
+      var y1 = y1ForOvershoot(os);
+      // начальная скорость кривой = dist * (y1 / x1) / dur — подгоняем её под скорость пальца
+      var dur = Math.round(Math.max(SETTLE_MIN, Math.min(SETTLE_MAX,
+        dist * (y1 / SETTLE_X1) / Math.max(speed, 0.35))));
+      box.style.setProperty("--fab-settle-dur", dur + "ms");
+      box.style.setProperty("--fab-settle-ease", "cubic-bezier(" + SETTLE_X1 + "," + y1.toFixed(3) + ",0.4,1)");
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(clearSettle, dur + 80);
+      return Math.round(dur * bezierArrival(y1));
+    }
+    function clearSettle(){
+      clearTimeout(settleTimer);
+      box.style.removeProperty("--fab-settle-dur");
+      box.style.removeProperty("--fab-settle-ease");
+    }
+    function haptic(){
+      try{ if(navigator.vibrate) navigator.vibrate(HAPTIC_MS); }catch(e){}
+    }
+    // скорость пальца в момент отпускания (px/мс, со знаком): по движениям за последние
+    // VELOCITY_WINDOW мс, а не средняя за весь жест — палец остановился перед отпусканием = 0
+    function releaseVelocity(t){
+      var now = Date.now(), pts = [];
+      for(var i = 0; i < t.samples.length; i++){
+        if(now - t.samples[i].t <= VELOCITY_WINDOW) pts.push(t.samples[i]);
+      }
+      if(pts.length < 2) return 0;
+      var a = pts[0], b = pts[pts.length - 1];
+      var dt = b.t - a.t;
+      return dt >= 8 ? (b.x - a.x) / dt : 0;
+    }
+    // где ряд стоит на самом деле (важно, если палец подхватил его посреди доезда)
+    function currentSlide(fallback){
+      try{
+        var items = getItems();
+        if(!items.length) return fallback;
+        var m = new DOMMatrixReadOnly(getComputedStyle(items[0]).transform);
+        return isFinite(m.m41) ? m.m41 : fallback;
+      }catch(e){ return fallback; }
+    }
+    function endDrag(commit){
+      if(!touch) return;
+      var t = touch; touch = null;
+      if(!t.dragging) return;
+      dragging = false;
+      box.classList.remove("fab-dragging");
+      t.v = releaseVelocity(t);
+      var wasSlid = t.fromSlid;
+      slid = commit(t);
+      var target = slid ? t.range : 0;
+      var dir = target >= t.cur ? 1 : -1;
+      var speed = t.v * dir > 0 ? Math.abs(t.v) : 0;
+      if(t.cur < Math.min(0, t.range) || t.cur > Math.max(0, t.range)) speed = Math.max(speed, RUBBER_MIN_SPEED); // отпустили из оттяжки
+      var arrive = startSettle(Math.abs(target - t.cur), speed);
+      apply(); // transition доводит ряд от текущего положения до выбранного края
+      if(slid !== wasSlid) setTimeout(haptic, arrive); // «щелчок» — когда ряд дошёл до края
+    }
+    box.addEventListener("touchstart", function(e){
+      touch = null;
+      if(e.touches.length !== 1) return;
+      var t = e.touches[0];
+      var br = box.getBoundingClientRect();
+      if(t.clientY < br.bottom - stripH() || t.clientY > br.bottom) return;
+      var items = getItems(), minL = Infinity, maxR = -Infinity;
+      for(var i = 0; i < items.length; i++){
+        if(items[i].classList.contains("fab-slide-off")) continue;
+        var r = items[i].getBoundingClientRect();
+        if(r.left < minL) minL = r.left;
+        if(r.right > maxR) maxR = r.right;
+      }
+      if(minL === Infinity || t.clientX < minL - 8 || t.clientX > maxR + 8) return;
+      touch = {x: t.clientX, y: t.clientY, at: Date.now(), dragging: false, range: 0, base: 0, cur: 0,
+        rest: 0, fromSlid: false, samples: [], v: 0};
+    }, {passive: true});
+    box.addEventListener("touchmove", function(e){
+      if(!touch) return;
+      var t = e.touches[0];
+      var dx = t.clientX - touch.x, dy = t.clientY - touch.y;
+      if(!touch.dragging){
+        if(Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)){ touch = null; return; }
+        if(Math.abs(dx) < DRAG_START || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+        var range = farShift(getItems());
+        if(!range){ touch = null; return; } // всё помещается — двигать нечего
+        touch.dragging = true;
+        touch.range = range;
+        touch.fromSlid = slid;                       // к какому краю ряд ехал/стоял до жеста
+        touch.rest = slid ? range : 0;               // положение этого края
+        touch.base = currentSlide(touch.rest);       // где ряд на самом деле (может быть посреди доезда)
+        clearSettle();
+        touch.x = t.clientX; touch.at = Date.now(); // отсчёт пути — с начала перетаскивания
+        dragging = true;
+        box.classList.add("fab-dragging");
+        // во время перетаскивания показываем все кнопки (края окна обрезают сами)
+        var all = box.querySelectorAll(".fab-slide-off");
+        for(var i = 0; i < all.length; i++) all[i].classList.remove("fab-slide-off");
+        dx = 0;
+      }
+      if(e.cancelable) e.preventDefault();
+      var lo = Math.min(0, touch.range), hi = Math.max(0, touch.range);
+      touch.cur = withRubber(touch.base + dx, lo, hi);
+      touch.lastDx = dx;
+      var nowT = Date.now();
+      touch.samples.push({x: t.clientX, t: nowT});
+      while(touch.samples.length > 2 && nowT - touch.samples[0].t > VELOCITY_WINDOW * 2) touch.samples.shift();
+      box.style.setProperty("--fab-slide", Math.round(touch.cur) + "px");
+    }, {passive: false});
+    box.addEventListener("touchend", function(){
+      endDrag(function(t){
+        var other = t.fromSlid ? 0 : t.range;       // противоположный край
+        var toward = other - t.rest;                // путь от своего края до противоположного
+        var moved = t.cur - t.rest;                 // сколько протянули от своего края
+        var frac = toward ? moved / toward : 0;     // доля пути к другому краю (<0 — в обратную сторону)
+        var v = t.v;                                // px/мс со знаком жеста, на момент отпускания
+        var flingToOther = Math.abs(v) >= FLING_V && Math.abs(t.lastDx || 0) > 12 &&
+          (v > 0) === (toward > 0);
+        var goOther = frac >= DRAG_COMMIT || flingToOther;
+        return t.fromSlid ? !goOther : goOther;     // slid: true — крайняя левая кнопка видна
+      });
+    }, {passive: true});
+    box.addEventListener("touchcancel", function(){
+      endDrag(function(t){ return t.fromSlid; }); // отмена жеста — возвращаемся к своему краю
+    }, {passive: true});
+  }
 
   function initTaskGlobalToolbar(){
     // preventDefault на mousedown — чтобы контент-эдитабл не терял фокус/
@@ -8812,25 +9148,14 @@
       });
     }
 
-    // --- "Ж" (форматирование выделения) ---
-    var formatPanelOpen = false;
-    var formatBtn = document.getElementById("taskFormatBtn");
-    var formatPopup = document.getElementById("taskFormatPopup");
-    stopMousedown(formatBtn);
-    if(formatBtn){
-      formatBtn.addEventListener("click", function(){
-        formatPanelOpen = !formatPanelOpen;
-        if(formatPopup) formatPopup.classList.toggle("open", formatPanelOpen);
-      });
-    }
+    // --- «Ж»/«К»/«П»/«Ч» (форматирование выделения) — четыре отдельные кнопки в
+    // общем ряду (ТЗ 30.09), без попапа: один клик сразу оборачивает выделение ---
     function bindTaskFmtBtn(id, prefix, suffix){
       var btn = document.getElementById(id);
       if(!btn) return;
       stopMousedown(btn);
       btn.addEventListener("click", function(){
         wrapEditableSelection(prefix, suffix);
-        formatPanelOpen = false;
-        if(formatPopup) formatPopup.classList.remove("open");
       });
     }
     bindTaskFmtBtn("taskFmtBoldBtn", "**", "**");
@@ -14697,7 +15022,6 @@
       '<div class="mdeditor-status" id="bookReaderStatus"></div>' +
       '<div class="mdeditor-fab-row">' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderFlibustaBtn" title="Flibusta">' + READER_FLIBUSTA_ICON_SVG + '</button>' +
-        '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="bookReaderReadingBtn" title="Режим чтения"></button>' +
         '<span class="mdeditor-fontsize-wrap" id="bookReaderFontSizeWrap">' +
           '<div class="mdeditor-fontsize-popup" id="bookReaderFontSizePopup">' +
             '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontPlusBtn" title="Крупнее">+</button>' +
@@ -14712,6 +15036,8 @@
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderChaptersBtn" title="' + (chaptersMode ? "К тексту" : "Главы") + '">' +
           (chaptersMode ? READER_TEXT_ICON_SVG : READER_CHAPTERS_ICON_SVG) +
         '</button>' +
+        // режим чтения — сразу слева от «домика» (ТЗ пользователя от 30.09: одно и то же место на всех экранах)
+        '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="bookReaderReadingBtn" title="Режим чтения"></button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderHomeBtn" title="К списку книг">' + READER_HOME_ICON_SVG + '</button>' +
       '</div>'
     );
@@ -18139,7 +18465,7 @@
   // ничего бы не открыл). Клик внутри самого попапа или по его обёртке
   // (кнопки «+»/«−», сама «Аа»/«Ж») попап не закрывает.
   (function initFontFormatPopupsAutoClose(){
-    var OPEN_POPUPS_SELECTOR = ".mdeditor-fontsize-popup.open, #taskFormatPopup.open, #taskFontSizePopup.open";
+    var OPEN_POPUPS_SELECTOR = ".mdeditor-fontsize-popup.open, #taskFontSizePopup.open";
     function findToggleBtn(popup){
       if(popup.id){
         var byId = document.getElementById(popup.id.replace(/Popup$/, "Btn"));
@@ -20467,7 +20793,9 @@
     // CSS-причина прятать обычную кнопку в ряду вкладок.
     var readingFab = document.getElementById("readingModeFabBtn");
     if(readingFab) readingFab.style.display = ((active || fullscreenActive) && isSettingsFabVisible()) ? "" : "none";
-    var iconHtml = fullscreenActive ? FULLSCREEN_MODE_ICON_SVG : (active ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG);
+    // ТЗ 30.09: и в режиме чтения, и в полноэкранном режиме — одна пиктограмма: открытая незачёркнутая книга
+    // (FULLSCREEN_MODE_ICON_SVG больше не используется); зачёркнутая — когда оба режима выключены
+    var iconHtml = (fullscreenActive || active) ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG;
     var titleText = fullscreenActive ? "Выключить полноэкранный режим (долгое нажатие — обычный режим)" : (active ? "Выключить режим чтения (удержание — полноэкранный режим)" : "Режим чтения (удержание — полноэкранный режим)");
     var btn = document.getElementById("taskReadingBtn");
     if(btn){
@@ -20931,6 +21259,9 @@
     if(!el) return;
     var HOLD_MS = 250, MOVE_CANCEL_PX = 10;
     var timer = null, holdFired = false, startXY = null;
+    // ТЗ 30.09: палец ушёл дальше MOVE_CANCEL_PX (свайп, например ползунок ряда кнопок) — это не нажатие:
+    // ни удержание, ни короткий тап не срабатывают
+    var moved = false;
     // ⚠️ ДОБАВЛЕНО (27.09, жалоба пользователя: после долгого удержания
     // "Аа"/режима чтения экран уходит в полноэкранный режим — это верно,
     // но заодно ещё и выделяется текст рядом с кнопкой — это баг). Причина
@@ -20949,6 +21280,7 @@
     function clearTimer(){ clearTimeout(timer); timer = null; }
     function start(x, y){
       holdFired = false;
+      moved = false;
       startXY = {x:x, y:y};
       clearTimer();
       timer = setTimeout(function(){ holdFired = true; onHold(); }, HOLD_MS);
@@ -20956,7 +21288,7 @@
     function move(x, y){
       if(!startXY) return;
       var dx = x - startXY.x, dy = y - startXY.y;
-      if(Math.sqrt(dx*dx + dy*dy) > MOVE_CANCEL_PX) clearTimer();
+      if(Math.sqrt(dx*dx + dy*dy) > MOVE_CANCEL_PX){ moved = true; clearTimer(); }
     }
     el.addEventListener("touchstart", function(e){
       touchHandled = !!e.cancelable;
@@ -20970,6 +21302,7 @@
       touchHandled = false;
       if(e.cancelable) e.preventDefault(); // подстраховка от "призрачного" клика на части сборок
       if(holdFired){ holdFired = false; return; }
+      if(moved){ moved = false; return; } // свайп от кнопки — не тап
       onTap();
     }, {passive:false});
     el.addEventListener("touchcancel", function(){ clearTimer(); touchHandled = false; });
@@ -20982,6 +21315,7 @@
     el.addEventListener("click", function(e){
       e.stopPropagation();
       if(holdFired){ holdFired = false; return; }
+      if(moved){ moved = false; return; }
       onTap();
     });
   }

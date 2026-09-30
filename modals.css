@@ -1,5 +1,17 @@
 /* ===========================================================================
    modals.css
+   Версия: 10.1 (30.09) — нижний ряд кнопок: размер 36×36 (`--fab-size`), отступ от низа/левого/правого края и промежуток между кнопками 6px (`--fab-gap`); слоты вкладок задач считаются `calc(var(--fab-gap) + N·(размер + var(--fab-gap)))`.
+   Версия: 10.0 (30.09) — структурная правка (ТЗ пользователя от 30.09): кнопки нижней полосы 40×40 (были 32×32), промежуток 7px прежний. Новая переменная `--fab-size` (в конце файла, раздел «РАЗМЕР КНОПОК ПОЛОСЫ»), слоты вкладок задач теперь `calc(7px + N·(var(--fab-size) + 7px))` вместо чисел (шаг 47px: домик 7, режим чтения 54, «+» 101, скрепка 148, «Аа» 195, выделитель 242, Ч 289, П 336, К 383, Ж 430, кнопка-контекст 477, «i» 477/524); `.task-add-fab` берёт размер из переменной.
+   Версия: 9.3 (30.09) — `transition` ряда кнопок читает `--fab-settle-dur`/`--fab-settle-ease` (пружинный доезд после свайпа, ставит initFabRowSlider в my.js 48.0; без переменных — прежние .22s ease).
+   Версия: 9.2 (30.09) — ТЗ пользователя от 30.09: кнопка режима чтения стоит СРАЗУ СЛЕВА ОТ «ДОМИКА» (`.task-reading-wrap` 358→46), на всех вкладках
+   задач и на «Все задачи проекта»; всё, что было между («+», скрепка, «Аа», текстовыделитель, Ч/П/К/Ж), сдвинуто на один слот влево (+39px):
+   «+» 85 (`.task-add-fab-shifted`, `#taskProjectCreateFab`), скрепка 124, «Аа» 163, текстовыделитель 202, Ч 241, П 280, К 319, Ж 358.
+   «глаз»/сортировка/меню/звенья 397 и «i» 397/436 не менялись, ширина ряда прежняя. Номера слотов в старых комментариях ниже (248/288/328 и т.п.) — исторические.
+   Версия: 9.1 (30.09) — правило `.fab-dragging` в конце файла (без transition, пока палец тянет ряд кнопок).
+   Версия: 9.0 (30.09) — структурная правка (ТЗ пользователя от 30.09): «Ж» разобрана на четыре кнопки Ж/К/П/Ч в общем ряду задач
+   (`.task-format-wrap-bold/-italic/-underline/-strike`, слоты 319/280/241/202), всё левее сдвинуто на +117px (режим чтения 358, «глаз»/
+   сортировка/меню/звенья 397, «i» 397/436); в конце файла — «ПОЛЗУНОК РЯДА КНОПОК» (`--fab-slide`, `.fab-slide-off`, `width:max-content`
+   у `.mdeditor-fab-row`); `.task-add-fab:active` учитывает сдвиг.
    Версия: 8.0 (29.09) — структурная правка (ТЗ пользователя от 29.09): залитые кружки строки задачи (красная/жёлтая отметка, чемоданчик «в работе»/«проверить», часы-напоминание) уменьшены 22px → `--task-circle` (19px), пиктограммы внутри прежние 15px; область нажатия прежняя 22px (центры сдвинуты компенсирующими отступами `--task-circle-pad`). Часы-напоминание теперь рисуются вложенными элементами `.rb-circle` (обычный залитый круг), `.rb-time` (время, напоминание на сегодня), `.rb-date` (кружок с числом слева от времени, напоминание на другой день ближайшего месяца); сама кнопка прозрачная. Галочки в плашке напоминания больше нет.
    Версия: 7.2 (29.09) — ТЗ пользователя от 29.09: крестики удаления и красные отметки — цвета темы (`--flag-red`=var(--wood),
    `--flag-yellow`=var(--mood-joy)), выделенная отметка 22px как чемоданчик, кружок вкладки Red и иконка сортировки Red — от темы.
@@ -1380,11 +1392,11 @@
      перекрыта (частичное перекрытие/просвечивание — ожидаемо). */
   .mdeditor-forgotten-pills{
     position:absolute;
-    left:8px;
-    right:8px;
-    bottom:7px;
+    left:var(--fab-gap, 6px);
+    right:var(--fab-gap, 6px);
+    bottom:var(--fab-gap, 6px);
     display:flex;
-    gap:7px;
+    gap:var(--fab-gap, 6px);
     z-index:5;
   }
   .mdeditor-forgotten-pills .review-pill{
@@ -1803,9 +1815,9 @@
   .task-add-fab{
     display:none;
     position:absolute;
-    inset-inline-end:7px;
-    bottom:7px;
-    width:32px;height:32px;
+    inset-inline-end:var(--fab-gap, 6px);
+    bottom:var(--fab-gap, 6px);
+    width:var(--fab-size, 36px);height:var(--fab-size, 36px);
     border-radius:8px;
     border:1px solid var(--groove-shadow);
     background:#fffef8;
@@ -1858,19 +1870,28 @@
   .task-fontsize-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:124px;
-    bottom:7px;
+    inset-inline-end:calc(var(--fab-gap, 6px) + 4 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    bottom:var(--fab-gap, 6px);
     z-index:5;
   }
   .task-fontsize-wrap.visible{ display:flex; }
+  /* «Ж»/«К»/«П»/«Ч» — четыре отдельные кнопки вместо одной «Ж» с попапом (ТЗ
+     пользователя от 30.09), по слоту на каждую, шаг 39px; в notebook-ряду
+     (mdeditor.js) порядок тот же: слева направо Ж К П Ч, то есть Ч — ближе всех
+     к текстовыделителю (202), Ж — левее всех (319). Всё, что раньше стояло
+     левее «Ж» (режим чтения, «глаз»/сортировка/меню/звенья, «i»), сдвинуто
+     на +117px (три лишних слота) — значения ниже. */
   .task-format-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:202px;
-    bottom:7px;
+    bottom:var(--fab-gap, 6px);
     z-index:5;
   }
   .task-format-wrap.visible{ display:flex; }
+  .task-format-wrap-strike{ inset-inline-end:calc(var(--fab-gap, 6px) + 6 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-underline{ inset-inline-end:calc(var(--fab-gap, 6px) + 7 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-italic{ inset-inline-end:calc(var(--fab-gap, 6px) + 8 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-bold{ inset-inline-end:calc(var(--fab-gap, 6px) + 9 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
   /* текстовыделитель — та же функция и та же иконка, что и в "Моём
      блокноте" (см. HIGHLIGHT_ICON_SVG в mdeditor.js, тут своя копия svg
      прямо в index.html — иконка используется один раз, заводить деп ради
@@ -1880,8 +1901,8 @@
   .task-highlight-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:163px;
-    bottom:7px;
+    inset-inline-end:calc(var(--fab-gap, 6px) + 5 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    bottom:var(--fab-gap, 6px);
     z-index:5;
   }
   .task-highlight-wrap.visible{ display:flex; }
@@ -1920,8 +1941,8 @@
   .task-reading-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:241px;
-    bottom:7px;
+    inset-inline-end:calc(var(--fab-gap, 6px) + 1 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    bottom:var(--fab-gap, 6px);
     z-index:5;
   }
   .task-reading-wrap.visible{ display:flex; }
@@ -1937,8 +1958,8 @@
   .task-hide-linked-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:280px;
-    bottom:7px;
+    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    bottom:var(--fab-gap, 6px);
     z-index:5;
   }
   .task-hide-linked-wrap.visible{ display:flex; }
@@ -1956,8 +1977,8 @@
   .task-joint-menu-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:280px;
-    bottom:7px;
+    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    bottom:var(--fab-gap, 6px);
     z-index:5;
   }
   .task-joint-menu-wrap.visible{ display:flex; }
@@ -2028,8 +2049,8 @@
   .task-red-sort-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:280px;
-    bottom:7px;
+    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    bottom:var(--fab-gap, 6px);
     z-index:5;
   }
   .task-red-sort-wrap.visible{ display:flex; }
@@ -2046,8 +2067,8 @@
   .task-info-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:280px;
-    bottom:7px;
+    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    bottom:var(--fab-gap, 6px);
     z-index:5;
   }
   .task-info-wrap.visible{ display:flex; }
@@ -2056,15 +2077,15 @@
      стоит ближе к "Ж" (right:280), а "i" — левее неё (right:319). Класс
      вешает JS: syncTaskFabRowForTab и openTaskNextPicker (my.js). На остальных
      вкладках задач класса нет — "i" остаётся на right:280 без дырки в ряду. */
-  .task-info-wrap.task-info-wrap-far{ inset-inline-end:319px; }
+  .task-info-wrap.task-info-wrap-far{ inset-inline-end:calc(var(--fab-gap, 6px) + 11 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
   /* скрепка — между "Аа" и "+" (см. index.html и ТЗ пользователя, та же
      логика попапа не нужна: сразу открывает системный диалог выбора
      файла, см. initTaskGlobalToolbar в my.js) */
   .task-attach-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:85px;
-    bottom:7px;
+    inset-inline-end:calc(var(--fab-gap, 6px) + 3 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    bottom:var(--fab-gap, 6px);
     z-index:5;
   }
   .task-attach-wrap.visible{ display:flex; }
@@ -2075,7 +2096,7 @@
   @media (hover:hover) and (pointer:fine){
     .task-add-fab:hover{ background:var(--wood); color:var(--parchment); }
   }
-  .task-add-fab:active{ transform:scale(.95); }
+  .task-add-fab:active{ transform:translateX(var(--fab-slide, 0px)) scale(.95); }
 
   /* Экран-инструкция "Кнопки задач" (renderTaskInfoScreen в my.js, ТЗ
      пользователя от 15.09) — тем же приёмом, что и "Все задачи проекта"/
@@ -2268,8 +2289,8 @@
      render() (my.js), тем же приёмом, что у globalFab/homeStubHide там же. */
   .task-project-fab-link{
     position:absolute;
-    inset-inline-end:280px;
-    bottom:7px;
+    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    bottom:var(--fab-gap, 6px);
     z-index:5;
   }
   /* "+" этого экрана (см. #taskProjectCreateFab в my.js) — тот же класс
@@ -2281,7 +2302,7 @@
      на остальных вкладках задач (.task-add-fab-shifted ниже) — угол там
      тоже занят домиком, теперь уже общим для всех вкладок. */
   #taskProjectCreateFab{
-    right:46px;
+    right:calc(var(--fab-gap, 6px) + 2 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
   }
   /* "Домик" (#taskProjectHomeBtn) — правый угол ряда (доработка 13.09:
      раньше стояла самой левой, но в "Моём блокноте" — mdeditor.js —
@@ -2294,8 +2315,8 @@
      над кнопкой без текста ("подбородок"). */
   .task-project-fab-home{
     position:absolute;
-    inset-inline-end:7px;
-    bottom:7px;
+    inset-inline-end:var(--fab-gap, 6px);
+    bottom:var(--fab-gap, 6px);
     z-index:5;
   }
 
@@ -2315,8 +2336,8 @@
   #taskFabHomeStub{
     display:none;
     position:absolute;
-    right:7px;
-    bottom:7px;
+    right:var(--fab-gap, 6px);
+    bottom:var(--fab-gap, 6px);
     z-index:5;
     cursor:default;
     pointer-events:none;
@@ -2327,7 +2348,7 @@
      выше) на то же место, что и на экране "Все задачи проекта" (right:48,
      см. #taskProjectCreateFab выше) — угол теперь всегда занят домиком,
      а не только на списке "Мои проекты" (доработка 13.09). */
-  .task-add-fab.task-add-fab-shifted{ inset-inline-end:46px; }
+  .task-add-fab.task-add-fab-shifted{ inset-inline-end:calc(var(--fab-gap, 6px) + 2 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
 
   /* сетка выбора вкладки-назначения (перенос задачи) — переиспользует
      общее модальное окно (modalOverlay/modalBox), тот же приём, что и у
@@ -2439,3 +2460,78 @@ html.lefty div.mdeditor-fontsize-popup.mdeditor-fontsize-popup,
 html.lefty div.task-joint-menu-popup.task-joint-menu-popup{ direction:rtl; }
 html.lefty .mdeditor-fontsize-popup > *,
 html.lefty .task-joint-menu-popup > *{ direction:ltr; }
+
+/* ===========================================================================
+   ПОЛЗУНОК РЯДА КНОПОК (ТЗ пользователя от 30.09) — ряд нижних кнопок стал шире
+   экрана (Ж/К/П/Ч вместо одной «Ж»), поэтому весь ряд сдвигается целиком двумя
+   положениями: «дом виден» (старт, сдвиг 0) и «крайняя левая кнопка видна» (свайп
+   по ряду слева направо; справа налево — обратно). Сдвиг — одна переменная
+   --fab-slide на .settings-modal-box (ставит initFabRowSlider в my.js), её же
+   читают ВСЕ кнопки ряда: у вкладок задач — каждая абсолютная обёртка отдельно, у
+   «Моего блокнота» и прочих экранов с .mdeditor-fab-row — сам ряд. Кнопки, не
+   помещающиеся целиком в окно в текущем положении, получают .fab-slide-off
+   (прозрачные и некликабельные) — половинки кнопок на краю не показываются.
+   Раскладка левши зеркалится сама (inset-inline-*, знак сдвига считает JS).
+   ========================================================================= */
+.task-add-fab,
+.task-fontsize-wrap,
+.task-format-wrap,
+.task-highlight-wrap,
+.task-reading-wrap,
+.task-hide-linked-wrap,
+.task-joint-menu-wrap,
+.task-red-sort-wrap,
+.task-info-wrap,
+.task-attach-wrap,
+.task-project-fab-link,
+.task-project-fab-home,
+.mdeditor-fab-row{
+  transform:translateX(var(--fab-slide, 0px));
+  /* доезд после свайпа — «пружина»: длительность и кривую ставит initFabRowSlider (my.js) на время
+     доезда, в остальное время — прежние .22s ease */
+  transition:transform var(--fab-settle-dur, .22s) var(--fab-settle-ease, ease), opacity .18s ease;
+}
+/* ряд с заметок/книг и т.п. — flex-строка: без max-content она ужималась бы до
+   ширины окна, а кнопки вываливались бы за её правый край (flex-shrink:0) */
+.mdeditor-fab-row{ width:max-content; }
+.mdeditor-fab-row > *{ transition:opacity .18s ease; }
+/* ТЗ 30.09: не помещающиеся кнопки больше не прячутся — показываются целиком/обрезанными краем экрана
+   и остаются кликабельными (класс .fab-slide-off JS теперь не ставит, правило оставлено безвредным) */
+.fab-slide-off{ opacity:1; }
+/* перетаскивание ряда пальцем (initFabRowSlider, my.js): сдвиг ведёт палец без сглаживания,
+   сглаживание включается снова по отпусканию — так ряд «доезжает» до края */
+.fab-dragging :is(.task-add-fab, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap,
+  .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap,
+  .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home, .mdeditor-fab-row){
+  transition:none !important;
+}
+
+/* ===========================================================================
+   РАЗМЕР КНОПОК ПОЛОСЫ (ТЗ пользователя от 30.09) — все кнопки нижней полосы на всех
+   экранах 40×40 (было 32×32), промежуток между ними прежний 7px. Размер — одна переменная
+   --fab-size; от неё же считаются слоты вкладок задач (calc(7px + N·(размер + 7px)), N — номер
+   слота от «домика»: домик 0, режим чтения 1, «+» 2, скрепка 3, «Аа» 4, выделитель 5, Ч 6,
+   П 7, К 8, Ж 9, кнопка-контекст 10, «i» 10/11), а в my.js её читает initFabRowSlider
+   (высота полосы жеста). В полосу входят: дети .mdeditor-fab-row (заметки, книги, ридер,
+   поиск, экраны-инструкции, ИПКД), обёртки ряда вкладок задач и «Все задачи проекта»,
+   кнопки попапов внутри них. НЕ входят: .subtitle-action-row («Извлечение субтитров»), кнопки
+   плашки подтверждения (.app-confirm-bar) — у них свой размер. Размер иконок и шрифта внутри
+   кнопок не менялся. Базовые width/height у .mdeditor-fab-btn остались 32px в components.css —
+   здесь они перекрываются (modals.css грузится позже; специфичность выше у составных селекторов).
+   ========================================================================= */
+.settings-modal-box{ --fab-size:36px; --fab-gap:6px; }
+.mdeditor-fab-row .mdeditor-fab-btn,
+.task-fontsize-wrap .mdeditor-fab-btn,
+.task-format-wrap .mdeditor-fab-btn,
+.task-highlight-wrap .mdeditor-fab-btn,
+.task-reading-wrap .mdeditor-fab-btn,
+.task-hide-linked-wrap .mdeditor-fab-btn,
+.task-joint-menu-wrap .mdeditor-fab-btn,
+.task-red-sort-wrap .mdeditor-fab-btn,
+.task-info-wrap .mdeditor-fab-btn,
+.task-attach-wrap .mdeditor-fab-btn,
+.task-project-fab-link,
+.task-project-fab-home{
+  width:var(--fab-size, 36px);
+  height:var(--fab-size, 36px);
+}

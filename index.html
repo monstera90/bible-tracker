@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 3.0 (30.09) — структурная правка (ТЗ пользователя от 30.09): «Ж» больше не кнопка с попапом — вместо
+     `#taskFormatWrap` четыре отдельные обёртки `.task-format-wrap` (`#taskFmtBoldWrap`/`…ItalicWrap`/`…UnderlineWrap`/
+     `…StrikeWrap`) с кнопками Ж/К/П/Ч в общем ряду; `#taskFormatPopup`/`#taskFormatBtn` удалены.
      Версия: 2.8 (29.09) — страница скрыта (`html.app-loading body{visibility:hidden}`), пока не отработали все
      скрипты, и открывается по `DOMContentLoaded` (страховка — через 8 с): раньше при обновлении на миг были видны
      заглушки разметки («0 из 1189 глав», «Включить плавающую кнопку», язычок), пока грузился/разбирался my.js.
@@ -293,14 +296,22 @@ window.addEventListener("error", function(e){
            видимость включается тем же условием, что и у .task-add-fab
            (см. switchSettingsTab в my.js), логика кнопок — в
            initTaskGlobalToolbar (my.js), см. ТЗ пользователя от 31.08. -->
-      <span class="task-format-wrap" id="taskFormatWrap">
-        <div class="mdeditor-fontsize-popup" id="taskFormatPopup">
-          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="taskFmtBoldBtn" title="Жирный">Ж</button>
-          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-italic" id="taskFmtItalicBtn" title="Курсив">К</button>
-          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-underline" id="taskFmtUnderlineBtn" title="Подчёркнутый">П</button>
-          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-strike" id="taskFmtStrikeBtn" title="Зачёркнутый">Ч</button>
-        </div>
-        <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="taskFormatBtn" title="Форматирование выделенного текста">Ж</button>
+      <!-- «Ж»/«К»/«П»/«Ч» — четыре отдельные кнопки в общем ряду (ТЗ пользователя от
+           30.09: раньше одна «Ж» раскрывала попап с этими четырьмя). Каждая — своя
+           обёртка .task-format-wrap с собственным слотом (modals.css), видимость всех
+           четырёх включает syncTaskFabRowForTab одним querySelectorAll; клики —
+           bindTaskFmtBtn в initTaskGlobalToolbar (my.js). Слева направо: Ж К П Ч. -->
+      <span class="task-format-wrap task-format-wrap-bold" id="taskFmtBoldWrap">
+        <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="taskFmtBoldBtn" title="Жирный">Ж</button>
+      </span>
+      <span class="task-format-wrap task-format-wrap-italic" id="taskFmtItalicWrap">
+        <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-italic" id="taskFmtItalicBtn" title="Курсив">К</button>
+      </span>
+      <span class="task-format-wrap task-format-wrap-underline" id="taskFmtUnderlineWrap">
+        <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-underline" id="taskFmtUnderlineBtn" title="Подчёркнутый">П</button>
+      </span>
+      <span class="task-format-wrap task-format-wrap-strike" id="taskFmtStrikeWrap">
+        <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-strike" id="taskFmtStrikeBtn" title="Зачёркнутый">Ч</button>
       </span>
       <span class="task-fontsize-wrap" id="taskFontSizeWrap">
         <div class="mdeditor-fontsize-popup" id="taskFontSizePopup">

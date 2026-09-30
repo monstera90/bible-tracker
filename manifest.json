@@ -29,11 +29,17 @@
         {
           "name": "sharedFile",
           "accept": [
-            ".fb2",
-            ".epub",
+            "video/*",
+            "application/epub+zip",
+            "application/x-fictionbook+xml",
+            "application/octet-stream",
+            "text/xml",
+            "application/xml",
             ".mp4",
-            "video/mp4",
-            "application/epub+zip"
+            ".m4v",
+            ".mov",
+            ".epub",
+            ".fb2"
           ]
         }
       ]

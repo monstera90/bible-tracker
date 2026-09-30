@@ -1,5 +1,7 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 7.1 (30.09) — кнопка режима чтения (`#mdEditorReadingBtn`) в ряду редактора переставлена: теперь сразу слева от «домика» (была после «Скачать .md»).
+   Версия: 7.0 (30.09) — структурная правка (ТЗ пользователя от 30.09): попап «Ж» убран — в ряду кнопок редактора четыре отдельные кнопки Ж/К/П/Ч (`#mdEditorFmtBoldBtn`/`…ItalicBtn`/`…UnderlineBtn`/`…StrikeBtn`), `formatPanelOpen`, `#mdEditorFormatWrap/-Popup/-Btn` удалены; в инструкции «Форматирование заметок» — про четыре кнопки и свайп по ряду (сам ползунок ряда — `initFabRowSlider` в my.js).
    Версия: 6.7 (29.09) — вкладка «Закладки» (`renderBookmarksList`): два отдельных списка с подписями «Закладки в заметках» и «Закладки в книгах» (пустой список скрыт), вместо одного смешанного.
    Версия: 6.6 (28.09) — ПЕРЕНОСЫ СЛОВ (ТЗ пользователя от 28.09): в попап «Аа» заметки добавлена
    кнопка `#mdEditorHyphensBtn` (класс `hyphens-btn` — клик и иконку ведёт my.js, см. раздел
@@ -1934,7 +1936,6 @@ window.initMdEditorModule = function(deps){
   var fontSizeStepReading = null;
   var getReadingModeActive = deps.getReadingModeActive || function(){ return false; };
   var fontSizePanelOpen = false; // временные кнопки "+"/"-" сейчас показаны?
-  var formatPanelOpen = false; // попап "Ж"/"К"/"П"/"Ч" сейчас показан?
 
   // Пересчитывает подгонку кнопок ВСЕХ уже отрисованных строк задач при
   // каждом изменении размера шрифта — не только по клику "Аа"/"+"/"-"
@@ -3990,8 +3991,9 @@ window.initMdEditorModule = function(deps){
 
     // --- выделенный текст: кнопки Ж / К / П / Ч и маркер ---
     html += row(btnIcon("Ж", "fmt-btn-bold"),
-      "Оформление выделенного текста: сначала выделите текст, затем нажмите «Ж» — над ней раскроются четыре кнопки. " +
-      "То же самое можно набрать вручную:" +
+      "Оформление выделенного текста: сначала выделите текст, затем нажмите нужную из четырёх кнопок — Ж, К, П или Ч. " +
+      "Ряд кнопок длиннее экрана: проведите по нему пальцем слева направо — покажутся самые левые кнопки, справа налево — ряд вернётся к «домику». " +
+      "То же оформление можно набрать вручную:" +
       subRow(btnIcon("Ж", "fmt-btn-bold"), code("**жирный**")) +
       subRow(btnIcon("К", "fmt-btn-italic"), code("*курсив*") + " или " + code("_курсив_")) +
       subRow(btnIcon("П", "fmt-btn-underline"), code("++подчёркнутый++")) +
@@ -4025,7 +4027,6 @@ window.initMdEditorModule = function(deps){
 
   function renderEditorScreen(container){
     fontSizePanelOpen = false; // экран перерисован заново — попап "+"/"-" каждый раз стартует закрытым
-    formatPanelOpen = false; // и попап "Ж"/"К"/"П"/"Ч" тоже
     container.innerHTML =
       '<div class="mdeditor-tab mdeditor-editor-tab">' +
         '<div class="mdeditor-title-row" id="mdEditorTitleRow">' +
@@ -4041,16 +4042,10 @@ window.initMdEditorModule = function(deps){
         '<div class="mdeditor-fab-row">' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorInfoBtn" title="Как работает форматирование">' + INFO_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorDownloadBtn" title="Скачать .md">' + DOWNLOAD_ICON_SVG + '</button>' +
-          '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="mdEditorReadingBtn" title="Режим чтения"></button>' +
-          '<span class="mdeditor-fontsize-wrap" id="mdEditorFormatWrap">' +
-            '<div class="mdeditor-fontsize-popup" id="mdEditorFormatPopup">' +
-              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="mdEditorFmtBoldBtn" title="Жирный">Ж</button>' +
-              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-italic" id="mdEditorFmtItalicBtn" title="Курсив">К</button>' +
-              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-underline" id="mdEditorFmtUnderlineBtn" title="Подчёркнутый">П</button>' +
-              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-strike" id="mdEditorFmtStrikeBtn" title="Зачёркнутый">Ч</button>' +
-            '</div>' +
-            '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="mdEditorFormatBtn" title="Форматирование выделенного текста">Ж</button>' +
-          '</span>' +
+          '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="mdEditorFmtBoldBtn" title="Жирный">Ж</button>' +
+          '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-italic" id="mdEditorFmtItalicBtn" title="Курсив">К</button>' +
+          '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-underline" id="mdEditorFmtUnderlineBtn" title="Подчёркнутый">П</button>' +
+          '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-strike" id="mdEditorFmtStrikeBtn" title="Зачёркнутый">Ч</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorHighlightBtn" title="Выделить текст">' + HIGHLIGHT_ICON_SVG + '</button>' +
           '<span class="mdeditor-fontsize-wrap" id="mdEditorFontSizeWrap">' +
             '<div class="mdeditor-fontsize-popup" id="mdEditorFontSizePopup">' +
@@ -4062,6 +4057,8 @@ window.initMdEditorModule = function(deps){
           '</span>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorImageBtn" title="Вставить картинку">' + PAPERCLIP_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorModeBtn" title="Переключить режим кода">' + (codeMode ? EYE_ICON_SVG : CODE_ICON_SVG) + '</button>' +
+          // режим чтения — сразу слева от «домика» (ТЗ пользователя от 30.09: одно и то же место на всех экранах)
+          '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="mdEditorReadingBtn" title="Режим чтения"></button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn2" title="К списку заметок">' + HOME_ICON_SVG + '</button>' +
         '</div>' +
       '</div>';
@@ -4125,29 +4122,17 @@ window.initMdEditorModule = function(deps){
     document.getElementById("mdEditorFontPlusBtn").addEventListener("click", function(){ changeFontSizeStep(1); });
     document.getElementById("mdEditorFontMinusBtn").addEventListener("click", function(){ changeFontSizeStep(-1); });
 
-    // "Ж" — форматирование выделенного текста, левее "Аа" (см. ТЗ
-    // пользователя от 31.08): та же механика попапа, что и у "Аа" (клик
-    // раскрывает столбик из четырёх кнопок над ней, повторный клик
-    // прячет), но при выборе конкретного стиля (Ж/К/П/Ч) попап
-    // ЗАКРЫВАЕТСЯ САМ — см. bindFormatBtn ниже. mousedown с
-    // preventDefault на самой "Ж" не обязателен (CodeMirror не теряет
-    // выделение при уходе фокуса), но не мешает и на всякий случай
-    // держит курсор/скролл редактора на месте.
-    document.getElementById("mdEditorFormatBtn").addEventListener("mousedown", function(e){ e.preventDefault(); });
-    document.getElementById("mdEditorFormatBtn").addEventListener("click", function(){
-      formatPanelOpen = !formatPanelOpen;
-      var popup = document.getElementById("mdEditorFormatPopup");
-      if(popup) popup.classList.toggle("open", formatPanelOpen);
-    });
+    // «Ж»/«К»/«П»/«Ч» — форматирование выделенного текста, четыре отдельные
+    // кнопки в ряду левее текстовыделителя (ТЗ пользователя от 30.09; раньше —
+    // одна «Ж» с попапом): один клик сразу оборачивает выделение. mousedown с
+    // preventDefault не обязателен (CodeMirror не теряет выделение при уходе
+    // фокуса), но держит курсор/скролл редактора на месте.
     function bindFormatBtn(id, prefix, suffix){
       var btn = document.getElementById(id);
       if(!btn) return;
       btn.addEventListener("mousedown", function(e){ e.preventDefault(); });
       btn.addEventListener("click", function(){
         wrapCmSelection(prefix, suffix);
-        formatPanelOpen = false;
-        var popup = document.getElementById("mdEditorFormatPopup");
-        if(popup) popup.classList.remove("open");
       });
     }
     bindFormatBtn("mdEditorFmtBoldBtn", "**", "**");
@@ -4155,7 +4140,7 @@ window.initMdEditorModule = function(deps){
     bindFormatBtn("mdEditorFmtUnderlineBtn", "++", "++");
     bindFormatBtn("mdEditorFmtStrikeBtn", "~~", "~~");
 
-    // "Маркер" — отдельная кнопка на самой панели (не в попапе "Ж"), тот же
+    // "Маркер" — отдельная кнопка на самой панели (рядом с Ж/К/П/Ч), тот же
     // внешний вид, что у кнопки "Выделить текст" в книжном ридере (см.
     // HIGHLIGHT_ICON_SVG выше). В отличие от ридера книг кнопка не
     // "взводится" — сначала выделяешь текст в редакторе, потом жмёшь кнопку,

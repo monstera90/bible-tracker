@@ -2345,15 +2345,15 @@
      на вкладках задач и в ридере книг (см. modals.css). ---------- */
   .mdeditor-fab-row{
     position:absolute;
-    inset-inline-end:7px;
-    bottom:7px;
+    inset-inline-end:var(--fab-gap, 6px);
+    bottom:var(--fab-gap, 6px);
     display:flex;
-    gap:7px;
+    gap:var(--fab-gap, 6px);
     pointer-events:none;
     z-index:5;
   }
   .mdeditor-fab-btn{
-    width:32px;height:32px;
+    width:var(--fab-size, 36px);height:var(--fab-size, 36px);
     flex-shrink:0;
     display:flex;
     align-items:center;
