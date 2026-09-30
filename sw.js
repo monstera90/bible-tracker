@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.38.23";
+const APP_VERSION = "v0.38.26";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -291,10 +291,23 @@ async function handleShareTarget(request){
   // status — краткий итог для журнала отладки страницы (my.js, checkForSharedFile читает запись
   // "shared-status" из того же временного кэша); на приём файла не влияет
   let status = "";
+  // Заголовки самого запроса — чтобы отличить «Chrome прислал пустое тело» от «тело есть, но не разобралось»
+  const meta = " [запрос: тип=\"" + (request.headers.get("content-type") || "") + "\", длина=" + (request.headers.get("content-length") || "не указана") + "]";
   try{
     const formData = await request.formData();
-    const file = formData.get("sharedFile");
-    if(file){
+    // Файл берём по имени поля sharedFile, а если поле названо иначе — первый попавшийся файл формы
+    // (у File есть name/size/type; у обычных текстовых полей значение — строка).
+    let file = formData.get("sharedFile");
+    const parts = [];
+    for(const [key, val] of formData.entries()){
+      if(typeof val === "string"){
+        parts.push(key + "=строка(" + val.length + ")" + (val ? ":\"" + val.slice(0, 80) + "\"" : ""));
+      }else{
+        parts.push(key + "=файл(имя=\"" + (val.name || "") + "\", размер=" + val.size + ", тип=\"" + (val.type || "") + "\")");
+        if(!(file && typeof file !== "string")) file = val;
+      }
+    }
+    if(file && typeof file !== "string"){
       const headers = new Headers();
       headers.set("Content-Type", file.type || "application/octet-stream");
       // Response не хранит оригинальное имя файла — переносим его отдельным
@@ -302,13 +315,13 @@ async function handleShareTarget(request){
       headers.set("X-Shared-File-Name", encodeURIComponent(file.name || ""));
       const cache = await caches.open(SHARE_TARGET_CACHE);
       await cache.put(SHARE_TARGET_KEY, new Response(file, { headers }));
-      status = "файл сохранён: имя=\"" + (file.name || "") + "\", размер=" + file.size + ", тип=\"" + (file.type || "") + "\"";
+      status = "файл сохранён: имя=\"" + (file.name || "") + "\", размер=" + file.size + ", тип=\"" + (file.type || "") + "\"; поля формы: " + parts.join("; ") + meta;
     } else {
-      status = "в форме нет поля sharedFile; поля: " + Array.from(formData.keys()).join(",");
+      status = "в форме нет файла (Chrome не передал его — обычно тип файла не подошёл под accept в manifest.json); поля формы: " + (parts.join("; ") || "пусто") + meta;
     }
   }catch(e){
     // Страница просто не найдёт файл во временном кэше и ничего не откроет — причина уйдёт в статус.
-    status = "ошибка приёма: " + String((e && e.message) || e);
+    status = "ошибка приёма: " + String((e && e.message) || e) + meta;
   }
   try{
     const cache2 = await caches.open(SHARE_TARGET_CACHE);
