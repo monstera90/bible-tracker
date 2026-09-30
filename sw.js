@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.38.22";
+const APP_VERSION = "v0.38.23";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -270,8 +270,7 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((key) => key !== CACHE_NAME && key !== OFFLINE_MODE_CACHE && key !== INSTALL_REPORT_CACHE &&
-                  key !== SHARE_TARGET_CACHE && key !== "reminder-click-temp")
+            .filter((key) => key !== CACHE_NAME && key !== OFFLINE_MODE_CACHE && key !== INSTALL_REPORT_CACHE)
             .map((key) => caches.delete(key))
         )
       )
@@ -289,6 +288,9 @@ self.addEventListener("activate", (event) => {
 // проще передать Blob со страницы в SW и обратно, чем городить IndexedDB
 // или postMessage до того, как страница вообще успела загрузиться.
 async function handleShareTarget(request){
+  // status — краткий итог для журнала отладки страницы (my.js, checkForSharedFile читает запись
+  // "shared-status" из того же временного кэша); на приём файла не влияет
+  let status = "";
   try{
     const formData = await request.formData();
     const file = formData.get("sharedFile");
@@ -300,11 +302,18 @@ async function handleShareTarget(request){
       headers.set("X-Shared-File-Name", encodeURIComponent(file.name || ""));
       const cache = await caches.open(SHARE_TARGET_CACHE);
       await cache.put(SHARE_TARGET_KEY, new Response(file, { headers }));
+      status = "файл сохранён: имя=\"" + (file.name || "") + "\", размер=" + file.size + ", тип=\"" + (file.type || "") + "\"";
+    } else {
+      status = "в форме нет поля sharedFile; поля: " + Array.from(formData.keys()).join(",");
     }
   }catch(e){
-    // Молча игнорируем — страница просто не найдёт файл во временном кэше
-    // и ничего не откроет, без дальнейшего вреда.
+    // Страница просто не найдёт файл во временном кэше и ничего не откроет — причина уйдёт в статус.
+    status = "ошибка приёма: " + String((e && e.message) || e);
   }
+  try{
+    const cache2 = await caches.open(SHARE_TARGET_CACHE);
+    await cache2.put("shared-status", new Response(status));
+  }catch(e2){}
   // 303 (не 302) — прямое указание браузеру заменить исходный POST на
   // обычный GET при переходе по редиректу, ровно то, что нужно здесь.
   return Response.redirect("./index.html?shared=1", 303);

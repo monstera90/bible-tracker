@@ -1,10 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 46.3 (30.09) — «Поделиться»: диалог вставляется в окно настроек только после того, как окно реально показано (`whenSettingsWindowShown` — ждёт конец анимации-волны, через 2.5 с доводит принудительно); если диалог всё равно невидим — показывается в <body>.
-   Версия: 46.2 (30.09) — «Поделиться»: диалог выбора действия снова рисуется в области просмотра окна настроек (settingsModalBox), окно настроек открывается перед ним; положение/видимость диалога заданы инлайном (не зависят от CSS), диалог сам возвращается на место, если окно перестроило содержимое; ошибки — красной плашкой (`showSharedFileError`).
-   Версия: 46.1 (30.09) — «Поделиться»: диалог выбора действия (`openSharedFileActionList`) рисуется в <body> (position:fixed), а не внутри окна настроек, и показывается ДО открытия окна настроек; `handleSharedFile` разделена на обёртку с try/catch и `handleSharedFileInner`; ошибка выводится плашкой на экран (`showSharedFileError`).
-   Версия: 46.0 (30.09) — «Поделиться» видеофайлом: `handleSharedFile` больше не молчит. Новая `isSharedVideoFile(file)` — видео определяется по расширению (mp4/m4v/mov/3gp) ИЛИ по MIME (`video/*`), раньше только по `.mp4` в имени (у файла без имени/с другим расширением меню не появлялось вообще); неопознанный файл показывает диалог с именем и типом; ошибка в `handleSharedFile`/`checkForSharedFile` выводится на экран через глобальный `window.onerror` (раньше тихо уходила в журнал отладки).
+   Версия: 46.4 (30.09) — откат всех правок 46.0–46.3 к 45.8 (приём файла через «Поделиться» снова как был); добавлена только диагностика в журнал отладки: `checkForSharedFile` пишет «Поделиться: …» по каждой точке выхода и читает статус service worker (`shared-status`), `handleSharedFile` пишет строку, если тип файла не распознан. Поведение не менялось.
    Версия: 45.8 (29.09) — ТЗ пользователя: вкладка «Версии» (alt5, `renderSettingsTabVersions`) — обычный заголовок `h3.common-tab-title`, обёртка `.settings-gear-tab.versions-tab` (внутри `.settings-content-bottom` — блок прижат вниз, как раньше), гарнитура общая, размер шрифта от «Аа» (`--mdeditor-font-size`, `ensureVersionsTabStyle`); кнопки «Аа» на вкладке нет; `.year-grid-tab-title` убран.
    Версия: 45.7 (29.09) — ТЗ пользователя: (1) у колеса ОДИН набор вкладок (убраны дубликаты для второго набора — размер иконки «Версии» больше не зависит от того, из какого набора вошли в колесо; режим колеса всегда рисуется в разметке набора 1, `applySettingsTabSetVisibility` учитывает `bottomAltMode`); (2) пока колесо активно, язычок переключения наборов ничего не меняет на экране: `cycleSettingsTabSet` только меняет `settingsActiveTabSet`, а вкладка нового набора открывается, когда пользователь убирает колесо (`toggleBottomAltMode`, `openTabOfActiveSettingsSet`, `bottomAltEntrySet`).
    Версия: 45.6 (29.09) — ТЗ пользователя: колесо — не вкладка, а кнопка режима. В режиме колеса кликабельны только его вкладки (4 в нижнем ряду справа от колеса + «Версии» нижним язычком вертикального стека); вертикальный стек всегда из 11 язычков, остальные — пустые некликабельные (класс `settings-tab-decor`, `setTabDecor`, `ensureTabDecorStyle`, защита в `switchSettingsTabOnClick`). Работает в обоих наборах: для второго добавлены `BOTTOM_ALT_TAB_IDS_S2`, `refreshSet2SideStack`, два пустых язычка сверху стека (`SET2_SIDE_FILLER_IDS`).
@@ -24085,33 +24082,10 @@
   // (.mdeditor-cleanup-overlay/-card/-title), что и у остальных диалогов
   // этого файла — добавляется прямо в settingsModalBox, поэтому окно
   // настроек должно быть уже открыто к моменту вызова (см. handleSharedFile).
-  function whenSettingsWindowShown(cb){
-    var t0 = Date.now();
-    (function tick(){
-      var ov = settingsModalOverlay;
-      var shown = !!(ov && ov.classList.contains("open") && !settingsWaveRAF && (ov.style.opacity === "" || ov.style.opacity === "1"));
-      if(shown){ cb(); return; }
-      if(Date.now() - t0 > 2500){
-        try{
-          if(settingsWaveRAF){ cancelAnimationFrame(settingsWaveRAF); settingsWaveRAF = null; }
-          if(ov){ setSettingsWaveClip(1); ov.style.opacity = ""; }
-        }catch(e){}
-        cb();
-        return;
-      }
-      setTimeout(tick, 50);
-    })();
-  }
   function openSharedFileActionList(title, items){
-    // 46.2: диалог рисуется в области просмотра окна настроек (settingsModalBox), как и задумано. Чтобы он не
-    // зависел от CSS-правил окна, положение и видимость заданы инлайном: перекрывает всю область окна.
     if(!settingsModalBox) return;
     var overlay = document.createElement("div");
     overlay.className = "mdeditor-cleanup-overlay";
-    try{
-      if(window.getComputedStyle(settingsModalBox).position === "static") settingsModalBox.style.position = "relative";
-    }catch(e0){}
-    overlay.style.cssText = "position:absolute;left:0;top:0;right:0;bottom:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;opacity:1;visibility:visible;pointer-events:auto;";
     var card = document.createElement("div");
     card.className = "mdeditor-cleanup-card";
     var itemsHtml = items.map(function(it, i){
@@ -24124,38 +24098,16 @@
         '<button type="button" class="mdeditor-cleanup-cancel" id="sharedFileActionCancel">Отмена</button>' +
       '</div>';
     overlay.appendChild(card);
-    // 46.3: окно настроек при открытии идёт через анимацию «волны» (opacity 0 -> 1 на rAF); при холодном
-    // старте из «Поделиться» она может не успеть/не дойти до конца, и всё внутри окна (включая диалог)
-    // остаётся невидимым. Поэтому вставляем диалог только когда окно реально показано; если за 2.5 с
-    // не показалось — дорисовываем окно принудительно (волна в конец, opacity сброшен).
-    whenSettingsWindowShown(function(){
-      if(overlay.getAttribute("data-closed") === "1") return;
-      settingsModalBox.appendChild(overlay);
-      // последняя страховка: если диалог всё равно невидим (нулевой размер / opacity 0) — показать в <body>
-      setTimeout(function(){
-        if(overlay.getAttribute("data-closed") === "1") return;
-        var bad = false;
-        try{
-          var r = overlay.getBoundingClientRect();
-          var cs = window.getComputedStyle(settingsModalOverlay);
-          bad = !overlay.parentNode || r.width < 20 || r.height < 20 || cs.opacity === "0" || cs.visibility === "hidden" || cs.display === "none";
-        }catch(e1){}
-        if(bad){
-          if(window.Debug) window.Debug.log("sharedFile: диалог в окне настроек невидим — показываю в <body>");
-          overlay.style.position = "fixed";
-          document.body.appendChild(overlay);
-        }
-      }, 400);
-    });
+    settingsModalBox.appendChild(overlay);
 
-    function close(){ overlay.setAttribute("data-closed", "1"); if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
     overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
     document.getElementById("sharedFileActionCancel").addEventListener("click", close);
     Array.prototype.forEach.call(card.querySelectorAll("[data-idx]"), function(btn){
       btn.addEventListener("click", function(){
         var idx = parseInt(btn.getAttribute("data-idx"), 10);
         close();
-        try{ items[idx].onClick(); }catch(err){ showSharedFileError(err); }
+        items[idx].onClick();
       });
     });
   }
@@ -24165,21 +24117,7 @@
   // позже, когда для .mp4 появятся другие функции, ничего не пришлось
   // переделывать (ТЗ пользователя от 13.09, третий заход) — по факту
   // сейчас .fb2 вообще не спрашивает выбор (пункт один и заранее известен).
-  // Ошибку показываем на экране (плашка в <body>), чтобы не гадать по тишине
-  function showSharedFileError(err){
-    try{
-      if(window.Debug) window.Debug.log("sharedFile: " + (err && err.stack ? err.stack : err));
-      var b = document.createElement("div");
-      b.style.cssText = "position:fixed;left:8px;right:8px;top:8px;z-index:2147483001;background:#fee;color:#900;border:1px solid #900;border-radius:8px;padding:10px;font:13px/1.35 sans-serif;white-space:pre-wrap;word-break:break-word;";
-      b.textContent = "Ошибка «Поделиться»: " + (err && err.stack ? err.stack : String(err)).slice(0, 700);
-      b.addEventListener("click", function(){ if(b.parentNode) b.parentNode.removeChild(b); });
-      document.body.appendChild(b);
-    }catch(e2){}
-  }
   function handleSharedFile(file){
-    try{ handleSharedFileInner(file); }catch(err){ showSharedFileError(err); }
-  }
-  function handleSharedFileInner(file){
     var lower = (file.name || "").toLowerCase();
     if(/\.fb2$/.test(lower)){
       importSharedBook(file);
@@ -24193,24 +24131,17 @@
       ]);
       return;
     }
-    if(isSharedVideoFile(file)){
+    if(/\.mp4$/.test(lower)){
       openSettingsModal();
       openSharedFileActionList("Видео \u00AB" + file.name + "\u00BB — что сделать?", [
         { label: "Извлечение субтитров", onClick: function(){ openSharedSubtitleExtract(file); } }
       ]);
       return;
     }
-    // Файл пришёл, но тип не опознан (нет имени/расширения и MIME не video/*) —
-    // раньше здесь была тишина. Показываем имя и тип, чтобы было видно, что именно прислал Android.
-    openSettingsModal();
-    openSharedFileActionList("Не удалось определить тип файла \u00AB" + (file.name || "без имени") +
-      "\u00BB (тип: " + (file.type || "не указан") + ")", []);
-  }
-  // Видео определяем по расширению ИЛИ по MIME: при «Поделиться» из галереи/мессенджеров имя файла
-  // бывает без .mp4 (или пустым), а тип — video/mp4.
-  function isSharedVideoFile(file){
-    var lower = (file.name || "").toLowerCase();
-    return /\.(mp4|m4v|mov|3gp)$/.test(lower) || /^video\//i.test(file.type || "");
+    // Другие расширения сюда дойти не должны — accept в manifest.json
+    // ограничивает выбор файла в системном диалоге "Поделиться" именно
+    // этими тремя форматами.
+    if(window.Debug) window.Debug.log("Поделиться: тип файла не распознан по имени — имя=\"" + (file.name || "") + "\", тип=\"" + (file.type || "") + "\"");
   }
 
   // Вызывается один раз при каждом запуске страницы (см. "ЗАПУСК" ниже).
@@ -24218,24 +24149,50 @@
   // чтения кэша — чтобы обновление страницы или случайный повторный заход
   // не пытались забрать уже забранный (и стёртый) файл заново.
   function checkForSharedFile(){
-    if(!/[?&]shared=1(?:&|$)/.test(location.search)) return;
+    // Диагностика в журнале отладки (Debug.log — ничего не делает при выключенной галочке): по каждой точке
+    // выхода видно, дошёл ли файл до страницы. Сама логика приёма файла не менялась.
+    function dbg(msg){ if(window.Debug) window.Debug.log("Поделиться: " + msg); }
+    // sw.js кладёт в тот же временный кэш запись "shared-status" — что он сделал с присланным файлом
+    function readShareStatus(cache){
+      return cache.match("shared-status").then(function(r){
+        if(!r) return;
+        return r.text().then(function(t){ dbg("статус service worker: " + t); cache.delete("shared-status"); });
+      });
+    }
+    var hasFlag = /[?&]shared=1(?:&|$)/.test(location.search);
+    if(!hasFlag){
+      // обычный запуск; лог только если SW принял файл, а страница открылась без ?shared=1
+      if("caches" in window){
+        caches.has("share-target-temp").then(function(has){
+          if(!has) return;
+          return caches.open("share-target-temp").then(function(cache){
+            return cache.match("shared-status").then(function(r){
+              if(!r) return;
+              dbg("адрес без ?shared=1 (search=\"" + location.search + "\"), но SW оставил статус");
+              return readShareStatus(cache);
+            });
+          });
+        }).catch(function(){});
+      }
+      return;
+    }
+    dbg("адрес содержит shared=1");
     try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
-    if(!("caches" in window)) return;
+    if(!("caches" in window)){ dbg("нет Cache API"); return; }
     caches.open("share-target-temp").then(function(cache){
-      return cache.match("shared-file").then(function(response){
-        if(!response) return;
+      return readShareStatus(cache).then(function(){
+        return cache.match("shared-file");
+      }).then(function(response){
+        if(!response){ dbg("файла во временном кэше нет"); return; }
         return response.blob().then(function(blob){
           var name = "";
           try{ name = decodeURIComponent(response.headers.get("X-Shared-File-Name") || ""); }catch(e){}
           cache.delete("shared-file");
+          dbg("файл получен: имя=\"" + name + "\", размер=" + blob.size + ", тип=\"" + (blob.type || "") + "\"");
           handleSharedFile(new File([blob], name || "shared-file", { type: blob.type }));
         });
       });
-    }).catch(function(e){
-      if(window.Debug) window.Debug.log("checkForSharedFile: " + (e && e.message ? e.message : e));
-      // не глотаем молча: пробрасываем в глобальный window.onerror (index.html), он рисует ошибку на экране
-      setTimeout(function(){ throw e; }, 0);
-    });
+    }).catch(function(e){ dbg("ошибка: " + (e && e.message ? e.message : e)); });
   }
 
   // ===================== ЗАПУСК =====================
