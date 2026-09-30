@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 46.3 (30.09) — «Поделиться»: диалог вставляется в окно настроек только после того, как окно реально показано (`whenSettingsWindowShown` — ждёт конец анимации-волны, через 2.5 с доводит принудительно); если диалог всё равно невидим — показывается в <body>.
    Версия: 46.2 (30.09) — «Поделиться»: диалог выбора действия снова рисуется в области просмотра окна настроек (settingsModalBox), окно настроек открывается перед ним; положение/видимость диалога заданы инлайном (не зависят от CSS), диалог сам возвращается на место, если окно перестроило содержимое; ошибки — красной плашкой (`showSharedFileError`).
    Версия: 46.1 (30.09) — «Поделиться»: диалог выбора действия (`openSharedFileActionList`) рисуется в <body> (position:fixed), а не внутри окна настроек, и показывается ДО открытия окна настроек; `handleSharedFile` разделена на обёртку с try/catch и `handleSharedFileInner`; ошибка выводится плашкой на экран (`showSharedFileError`).
    Версия: 46.0 (30.09) — «Поделиться» видеофайлом: `handleSharedFile` больше не молчит. Новая `isSharedVideoFile(file)` — видео определяется по расширению (mp4/m4v/mov/3gp) ИЛИ по MIME (`video/*`), раньше только по `.mp4` в имени (у файла без имени/с другим расширением меню не появлялось вообще); неопознанный файл показывает диалог с именем и типом; ошибка в `handleSharedFile`/`checkForSharedFile` выводится на экран через глобальный `window.onerror` (раньше тихо уходила в журнал отладки).
@@ -24084,6 +24085,23 @@
   // (.mdeditor-cleanup-overlay/-card/-title), что и у остальных диалогов
   // этого файла — добавляется прямо в settingsModalBox, поэтому окно
   // настроек должно быть уже открыто к моменту вызова (см. handleSharedFile).
+  function whenSettingsWindowShown(cb){
+    var t0 = Date.now();
+    (function tick(){
+      var ov = settingsModalOverlay;
+      var shown = !!(ov && ov.classList.contains("open") && !settingsWaveRAF && (ov.style.opacity === "" || ov.style.opacity === "1"));
+      if(shown){ cb(); return; }
+      if(Date.now() - t0 > 2500){
+        try{
+          if(settingsWaveRAF){ cancelAnimationFrame(settingsWaveRAF); settingsWaveRAF = null; }
+          if(ov){ setSettingsWaveClip(1); ov.style.opacity = ""; }
+        }catch(e){}
+        cb();
+        return;
+      }
+      setTimeout(tick, 50);
+    })();
+  }
   function openSharedFileActionList(title, items){
     // 46.2: диалог рисуется в области просмотра окна настроек (settingsModalBox), как и задумано. Чтобы он не
     // зависел от CSS-правил окна, положение и видимость заданы инлайном: перекрывает всю область окна.
@@ -24106,17 +24124,29 @@
         '<button type="button" class="mdeditor-cleanup-cancel" id="sharedFileActionCancel">Отмена</button>' +
       '</div>';
     overlay.appendChild(card);
-    settingsModalBox.appendChild(overlay);
-    // страховка: если окно настроек при открытии перестроило содержимое и диалог пропал — вернуть на место
-    var reattachLeft = 3;
-    (function reattach(){
-      if(reattachLeft-- <= 0 || overlay.getAttribute("data-closed") === "1") return;
+    // 46.3: окно настроек при открытии идёт через анимацию «волны» (opacity 0 -> 1 на rAF); при холодном
+    // старте из «Поделиться» она может не успеть/не дойти до конца, и всё внутри окна (включая диалог)
+    // остаётся невидимым. Поэтому вставляем диалог только когда окно реально показано; если за 2.5 с
+    // не показалось — дорисовываем окно принудительно (волна в конец, opacity сброшен).
+    whenSettingsWindowShown(function(){
+      if(overlay.getAttribute("data-closed") === "1") return;
+      settingsModalBox.appendChild(overlay);
+      // последняя страховка: если диалог всё равно невидим (нулевой размер / opacity 0) — показать в <body>
       setTimeout(function(){
         if(overlay.getAttribute("data-closed") === "1") return;
-        if(!overlay.parentNode && settingsModalBox) settingsModalBox.appendChild(overlay);
-        reattach();
-      }, 250);
-    })();
+        var bad = false;
+        try{
+          var r = overlay.getBoundingClientRect();
+          var cs = window.getComputedStyle(settingsModalOverlay);
+          bad = !overlay.parentNode || r.width < 20 || r.height < 20 || cs.opacity === "0" || cs.visibility === "hidden" || cs.display === "none";
+        }catch(e1){}
+        if(bad){
+          if(window.Debug) window.Debug.log("sharedFile: диалог в окне настроек невидим — показываю в <body>");
+          overlay.style.position = "fixed";
+          document.body.appendChild(overlay);
+        }
+      }, 400);
+    });
 
     function close(){ overlay.setAttribute("data-closed", "1"); if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
     overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
