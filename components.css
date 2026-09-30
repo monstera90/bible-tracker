@@ -4022,3 +4022,16 @@
 .settings-gear-tab button{
   font-family:"Palatino Linotype",Georgia,serif;
 }
+
+/* ТЗ 30.09 (эксперимент): тёмная подложка под системной полоской жестовой навигации, чтобы Android
+   рисовал её светлой (цвет полоски выбирает система по яркости того, что под ней). Высота = нижний
+   safe-area inset: если страница не заходит под панель навигации, inset = 0 и правило ничего не делает. */
+body::after{
+  content:"";
+  position:fixed;
+  left:0; right:0; bottom:0;
+  height:env(safe-area-inset-bottom, 0px);
+  background:#1b0b3a;
+  pointer-events:none;
+  z-index:2147483000;
+}
