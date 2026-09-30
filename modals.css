@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 11.0 (30.09) — структурная правка (ТЗ пользователя от 30.09): новая кнопка полноэкранного режима `.task-fullscreen-wrap` (слот 1, сразу слева от «домика»), режим чтения — слот 2; все слоты левее сдвинуты на +1 («+» 3, скрепка 4, «Аа» 5, текстовыделитель 6, Ч/П/К/Ж 7–10, кнопка-контекст и звенья 11, «i» 11/12). `.task-fullscreen-wrap` добавлена в списки transform/lefty/размера кнопок.
    Версия: 10.2 (30.09) — телефон в горизонтальном режиме (min-width:601px и max-height:520px): окно прижато к левому и верхнему краю без полосы 16px и без скругления слева; окантовка остаётся только на больших экранах.
    Версия: 10.1 (30.09) — нижний ряд кнопок: размер 36×36 (`--fab-size`), отступ от низа/левого/правого края и промежуток между кнопками 6px (`--fab-gap`); слоты вкладок задач считаются `calc(var(--fab-gap) + N·(размер + var(--fab-gap)))`.
    Версия: 10.0 (30.09) — структурная правка (ТЗ пользователя от 30.09): кнопки нижней полосы 40×40 (были 32×32), промежуток 7px прежний. Новая переменная `--fab-size` (в конце файла, раздел «РАЗМЕР КНОПОК ПОЛОСЫ»), слоты вкладок задач теперь `calc(7px + N·(var(--fab-size) + 7px))` вместо чисел (шаг 47px: домик 7, режим чтения 54, «+» 101, скрепка 148, «Аа» 195, выделитель 242, Ч 289, П 336, К 383, Ж 430, кнопка-контекст 477, «i» 477/524); `.task-add-fab` берёт размер из переменной.
@@ -1853,7 +1854,7 @@
      (.task-add-fab.task-add-fab-shifted, 48) → скрепка (.task-attach-
      wrap, 88) → "Аа" (.task-fontsize-wrap, 128) → текстовыделитель
      (.task-highlight-wrap, 168) → "Ж" (.task-format-wrap, 208) → кнопка
-     режима чтения (.task-reading-wrap, 248, ТЗ пользователя от 18.09 —
+     режима чтения (.task-fullscreen-wrap, .task-reading-wrap, 248, ТЗ пользователя от 18.09 —
      видна на ЛЮБОЙ вкладке задач, тем же условием showTaskFab, что и
      "Ж"/"Аа"/текстовыделитель/скрепка выше, КРОМЕ экрана "Все задачи
      проекта" — там на этом же месте стоит кнопка-звено этого экрана,
@@ -1885,7 +1886,7 @@
   .task-fontsize-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 4 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 5 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -1903,10 +1904,10 @@
     z-index:5;
   }
   .task-format-wrap.visible{ display:flex; }
-  .task-format-wrap-strike{ inset-inline-end:calc(var(--fab-gap, 6px) + 6 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
-  .task-format-wrap-underline{ inset-inline-end:calc(var(--fab-gap, 6px) + 7 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
-  .task-format-wrap-italic{ inset-inline-end:calc(var(--fab-gap, 6px) + 8 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
-  .task-format-wrap-bold{ inset-inline-end:calc(var(--fab-gap, 6px) + 9 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-strike{ inset-inline-end:calc(var(--fab-gap, 6px) + 7 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-underline{ inset-inline-end:calc(var(--fab-gap, 6px) + 8 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-italic{ inset-inline-end:calc(var(--fab-gap, 6px) + 9 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-bold{ inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
   /* текстовыделитель — та же функция и та же иконка, что и в "Моём
      блокноте" (см. HIGHLIGHT_ICON_SVG в mdeditor.js, тут своя копия svg
      прямо в index.html — иконка используется один раз, заводить деп ради
@@ -1916,7 +1917,7 @@
   .task-highlight-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 5 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 6 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -1956,11 +1957,22 @@
   .task-reading-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 1 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 2 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
   .task-reading-wrap.visible{ display:flex; }
+  /* Кнопка полноэкранного режима (ТЗ пользователя от 30.09) — слот 1, СРАЗУ СЛЕВА ОТ «ДОМИКА»;
+     режим чтения — слот 2 (выше). Обёртку `#taskFullscreenWrap` создаёт initTaskGlobalToolbar
+     (my.js), видимость — вместе с `#taskReadingWrap` (syncTaskFabRowForTab/openTaskNextPicker). */
+  .task-fullscreen-wrap{
+    display:none;
+    position:absolute;
+    inset-inline-end:calc(var(--fab-gap, 6px) + 1 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    bottom:var(--fab-gap, 6px);
+    z-index:5;
+  }
+  .task-fullscreen-wrap.visible{ display:flex; }
   /* "глаз" — переехал сюда (ТЗ пользователя от 18.09) с прежнего right:248,
      который теперь занят кнопкой режима чтения выше (.task-reading-wrap) —
      та должна быть видна на ЛЮБОЙ вкладке задач, а "глаз" только на
@@ -1973,7 +1985,7 @@
   .task-hide-linked-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 11 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -1992,7 +2004,7 @@
   .task-joint-menu-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 11 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2064,7 +2076,7 @@
   .task-red-sort-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 11 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2082,7 +2094,7 @@
   .task-info-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 11 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2092,14 +2104,14 @@
      стоит ближе к "Ж" (right:280), а "i" — левее неё (right:319). Класс
      вешает JS: syncTaskFabRowForTab и openTaskNextPicker (my.js). На остальных
      вкладках задач класса нет — "i" остаётся на right:280 без дырки в ряду. */
-  .task-info-wrap.task-info-wrap-far{ inset-inline-end:calc(var(--fab-gap, 6px) + 11 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-info-wrap.task-info-wrap-far{ inset-inline-end:calc(var(--fab-gap, 6px) + 12 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
   /* скрепка — между "Аа" и "+" (см. index.html и ТЗ пользователя, та же
      логика попапа не нужна: сразу открывает системный диалог выбора
      файла, см. initTaskGlobalToolbar в my.js) */
   .task-attach-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 3 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 4 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2304,7 +2316,7 @@
      render() (my.js), тем же приёмом, что у globalFab/homeStubHide там же. */
   .task-project-fab-link{
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 11 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2317,7 +2329,7 @@
      на остальных вкладках задач (.task-add-fab-shifted ниже) — угол там
      тоже занят домиком, теперь уже общим для всех вкладок. */
   #taskProjectCreateFab{
-    right:calc(var(--fab-gap, 6px) + 2 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    right:calc(var(--fab-gap, 6px) + 3 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
   }
   /* "Домик" (#taskProjectHomeBtn) — правый угол ряда (доработка 13.09:
      раньше стояла самой левой, но в "Моём блокноте" — mdeditor.js —
@@ -2363,7 +2375,7 @@
      выше) на то же место, что и на экране "Все задачи проекта" (right:48,
      см. #taskProjectCreateFab выше) — угол теперь всегда занят домиком,
      а не только на списке "Мои проекты" (доработка 13.09). */
-  .task-add-fab.task-add-fab-shifted{ inset-inline-end:calc(var(--fab-gap, 6px) + 2 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-add-fab.task-add-fab-shifted{ inset-inline-end:calc(var(--fab-gap, 6px) + 3 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
 
   /* сетка выбора вкладки-назначения (перенос задачи) — переиспользует
      общее модальное окно (modalOverlay/modalBox), тот же приём, что и у
@@ -2466,8 +2478,8 @@ html.lefty .settings-modal-box > *{ direction:ltr; }
 /* ряды fab-кнопок и одиночные кнопки, позиционируемые inset-inline-end
    (селекторы по классу, а не по «ребёнок окна»: часть из них живёт внутри
    #settingsTabContent) */
-html.lefty :is(.mdeditor-fab-row, .task-add-fab, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home){ direction:rtl; }
-html.lefty :is(.mdeditor-fab-row, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap) > *{ direction:ltr; }
+html.lefty :is(.mdeditor-fab-row, .task-add-fab, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap, .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home){ direction:rtl; }
+html.lefty :is(.mdeditor-fab-row, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap, .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap) > *{ direction:ltr; }
 /* всплывающие столбики (inset-inline-start:0 — под rtl это правый край
    обёртки, то есть зеркально обычной раскладке); удвоенный класс + тег —
    чтобы перебить сброс «> *» выше, где попап — прямой ребёнок обёртки */
@@ -2492,7 +2504,7 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .task-fontsize-wrap,
 .task-format-wrap,
 .task-highlight-wrap,
-.task-reading-wrap,
+.task-fullscreen-wrap, .task-reading-wrap,
 .task-hide-linked-wrap,
 .task-joint-menu-wrap,
 .task-red-sort-wrap,
@@ -2516,7 +2528,7 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 /* перетаскивание ряда пальцем (initFabRowSlider, my.js): сдвиг ведёт палец без сглаживания,
    сглаживание включается снова по отпусканию — так ряд «доезжает» до края */
 .fab-dragging :is(.task-add-fab, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap,
-  .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap,
+  .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap,
   .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home, .mdeditor-fab-row){
   transition:none !important;
 }
@@ -2539,6 +2551,7 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .task-fontsize-wrap .mdeditor-fab-btn,
 .task-format-wrap .mdeditor-fab-btn,
 .task-highlight-wrap .mdeditor-fab-btn,
+.task-fullscreen-wrap .mdeditor-fab-btn,
 .task-reading-wrap .mdeditor-fab-btn,
 .task-hide-linked-wrap .mdeditor-fab-btn,
 .task-joint-menu-wrap .mdeditor-fab-btn,

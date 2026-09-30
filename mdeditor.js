@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 7.2 (30.09) — в нижнем ряду редактора добавлена кнопка полноэкранного режима (`#mdEditorFullscreenBtn`, `.fullscreen-mode-btn`, миниатюра смартфона) сразу слева от «домика»; режим чтения — следующая, только тап (удержания больше нет); строка про полноэкранный режим в инструкции заметок; dep `handleFullscreenBtnTap`.
    Версия: 7.1 (30.09) — кнопка режима чтения (`#mdEditorReadingBtn`) в ряду редактора переставлена: теперь сразу слева от «домика» (была после «Скачать .md»).
    Версия: 7.0 (30.09) — структурная правка (ТЗ пользователя от 30.09): попап «Ж» убран — в ряду кнопок редактора четыре отдельные кнопки Ж/К/П/Ч (`#mdEditorFmtBoldBtn`/`…ItalicBtn`/`…UnderlineBtn`/`…StrikeBtn`), `formatPanelOpen`, `#mdEditorFormatWrap/-Popup/-Btn` удалены; в инструкции «Форматирование заметок» — про четыре кнопки и свайп по ряду (сам ползунок ряда — `initFabRowSlider` в my.js).
    Версия: 6.7 (29.09) — вкладка «Закладки» (`renderBookmarksList`): два отдельных списка с подписями «Закладки в заметках» и «Закладки в книгах» (пустой список скрыт), вместо одного смешанного.
@@ -170,6 +171,7 @@ window.initMdEditorModule = function(deps){
   var bindTapOrHold = deps.bindTapOrHold || function(el, onTap){ if(el) el.addEventListener("click", onTap); };
   var handleReadingBtnTap = deps.handleReadingBtnTap || toggleReadingMode;
   var handleReadingBtnHold = deps.handleReadingBtnHold || function(){};
+  var handleFullscreenBtnTap = deps.handleFullscreenBtnTap || function(){};
   // Кнопка «i» в нижнем ряду редактора заметки (ТЗ пользователя от 20.09) —
   // та же пиктограмма, что у «i» на вкладках задач (INFO_ICON_SVG в my.js).
   var INFO_ICON_SVG = deps.INFO_ICON_SVG || "i";
@@ -4008,6 +4010,8 @@ window.initMdEditorModule = function(deps){
       "(" + '<span class="note-info-inline">' + EYE_ICON_SVG + '</span>' + "), пока показан код.");
     html += row(btnIcon("Аа"),
       "Размер шрифта: «+» крупнее, «−» мельче, один и тот же на всех вкладках приложения. В режиме чтения (кнопка ниже) размер запоминается отдельно от обычного.");
+    html += row(btnIcon("", "fullscreen-mode-btn"),
+      "Полноэкранный режим: прячет строку состояния и ряды вкладок; повторное нажатие возвращает всё обратно.");
     html += row(btnIcon("", "reading-mode-btn"),
       "Режим чтения: прячет ряды вкладок и растягивает окно на весь экран; повторное нажатие возвращает всё обратно.");
     html += row(btnIcon(DOWNLOAD_ICON_SVG), "Скачивает эту заметку файлом .md.");
@@ -4059,6 +4063,8 @@ window.initMdEditorModule = function(deps){
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorModeBtn" title="Переключить режим кода">' + (codeMode ? EYE_ICON_SVG : CODE_ICON_SVG) + '</button>' +
           // режим чтения — сразу слева от «домика» (ТЗ пользователя от 30.09: одно и то же место на всех экранах)
           '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="mdEditorReadingBtn" title="Режим чтения"></button>' +
+          // полноэкранный режим — сразу слева от «домика» (режим чтения — следующая кнопка)
+          '<button type="button" class="mdeditor-fab-btn fullscreen-mode-btn" id="mdEditorFullscreenBtn" title="Полноэкранный режим"></button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn2" title="К списку заметок">' + HOME_ICON_SVG + '</button>' +
         '</div>' +
       '</div>';
@@ -4206,6 +4212,11 @@ window.initMdEditorModule = function(deps){
       // (handleReadingBtnTap), удержание включает полноэкранный режим
       // (handleReadingBtnHold), см. пояснение у deps выше.
       bindTapOrHold(readingBtn, handleReadingBtnTap, handleReadingBtnHold);
+    }
+    var fullscreenBtnE = document.getElementById("mdEditorFullscreenBtn");
+    if(fullscreenBtnE){
+      fullscreenBtnE.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      bindTapOrHold(fullscreenBtnE, handleFullscreenBtnTap, function(){});
     }
     applyReadingModeVisual();
 
