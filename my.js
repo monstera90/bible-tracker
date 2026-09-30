@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 46.0 (30.09) — «Поделиться» видеофайлом: `handleSharedFile` больше не молчит. Новая `isSharedVideoFile(file)` — видео определяется по расширению (mp4/m4v/mov/3gp) ИЛИ по MIME (`video/*`), раньше только по `.mp4` в имени (у файла без имени/с другим расширением меню не появлялось вообще); неопознанный файл показывает диалог с именем и типом; ошибка в `handleSharedFile`/`checkForSharedFile` выводится на экран через глобальный `window.onerror` (раньше тихо уходила в журнал отладки).
    Версия: 45.8 (29.09) — ТЗ пользователя: вкладка «Версии» (alt5, `renderSettingsTabVersions`) — обычный заголовок `h3.common-tab-title`, обёртка `.settings-gear-tab.versions-tab` (внутри `.settings-content-bottom` — блок прижат вниз, как раньше), гарнитура общая, размер шрифта от «Аа» (`--mdeditor-font-size`, `ensureVersionsTabStyle`); кнопки «Аа» на вкладке нет; `.year-grid-tab-title` убран.
    Версия: 45.7 (29.09) — ТЗ пользователя: (1) у колеса ОДИН набор вкладок (убраны дубликаты для второго набора — размер иконки «Версии» больше не зависит от того, из какого набора вошли в колесо; режим колеса всегда рисуется в разметке набора 1, `applySettingsTabSetVisibility` учитывает `bottomAltMode`); (2) пока колесо активно, язычок переключения наборов ничего не меняет на экране: `cycleSettingsTabSet` только меняет `settingsActiveTabSet`, а вкладка нового набора открывается, когда пользователь убирает колесо (`toggleBottomAltMode`, `openTabOfActiveSettingsSet`, `bottomAltEntrySet`).
    Версия: 45.6 (29.09) — ТЗ пользователя: колесо — не вкладка, а кнопка режима. В режиме колеса кликабельны только его вкладки (4 в нижнем ряду справа от колеса + «Версии» нижним язычком вертикального стека); вертикальный стек всегда из 11 язычков, остальные — пустые некликабельные (класс `settings-tab-decor`, `setTabDecor`, `ensureTabDecorStyle`, защита в `switchSettingsTabOnClick`). Работает в обоих наборах: для второго добавлены `BOTTOM_ALT_TAB_IDS_S2`, `refreshSet2SideStack`, два пустых язычка сверху стека (`SET2_SIDE_FILLER_IDS`).
@@ -24130,16 +24131,24 @@
       ]);
       return;
     }
-    if(/\.mp4$/.test(lower)){
+    if(isSharedVideoFile(file)){
       openSettingsModal();
       openSharedFileActionList("Видео \u00AB" + file.name + "\u00BB — что сделать?", [
         { label: "Извлечение субтитров", onClick: function(){ openSharedSubtitleExtract(file); } }
       ]);
       return;
     }
-    // Другие расширения сюда дойти не должны — accept в manifest.json
-    // ограничивает выбор файла в системном диалоге "Поделиться" именно
-    // этими тремя форматами.
+    // Файл пришёл, но тип не опознан (нет имени/расширения и MIME не video/*) —
+    // раньше здесь была тишина. Показываем имя и тип, чтобы было видно, что именно прислал Android.
+    openSettingsModal();
+    openSharedFileActionList("Не удалось определить тип файла \u00AB" + (file.name || "без имени") +
+      "\u00BB (тип: " + (file.type || "не указан") + ")", []);
+  }
+  // Видео определяем по расширению ИЛИ по MIME: при «Поделиться» из галереи/мессенджеров имя файла
+  // бывает без .mp4 (или пустым), а тип — video/mp4.
+  function isSharedVideoFile(file){
+    var lower = (file.name || "").toLowerCase();
+    return /\.(mp4|m4v|mov|3gp)$/.test(lower) || /^video\//i.test(file.type || "");
   }
 
   // Вызывается один раз при каждом запуске страницы (см. "ЗАПУСК" ниже).
@@ -24160,7 +24169,11 @@
           handleSharedFile(new File([blob], name || "shared-file", { type: blob.type }));
         });
       });
-    }).catch(function(e){ if(window.Debug) window.Debug.log("checkForSharedFile: " + (e && e.message ? e.message : e)); });
+    }).catch(function(e){
+      if(window.Debug) window.Debug.log("checkForSharedFile: " + (e && e.message ? e.message : e));
+      // не глотаем молча: пробрасываем в глобальный window.onerror (index.html), он рисует ошибку на экране
+      setTimeout(function(){ throw e; }, 0);
+    });
   }
 
   // ===================== ЗАПУСК =====================
