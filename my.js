@@ -1,6 +1,8 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 46.2 (30.09) — «Поделиться»: диалог выбора действия снова рисуется в области просмотра окна настроек (settingsModalBox), окно настроек открывается перед ним; положение/видимость диалога заданы инлайном (не зависят от CSS), диалог сам возвращается на место, если окно перестроило содержимое; ошибки — красной плашкой (`showSharedFileError`).
+   Версия: 46.1 (30.09) — «Поделиться»: диалог выбора действия (`openSharedFileActionList`) рисуется в <body> (position:fixed), а не внутри окна настроек, и показывается ДО открытия окна настроек; `handleSharedFile` разделена на обёртку с try/catch и `handleSharedFileInner`; ошибка выводится плашкой на экран (`showSharedFileError`).
    Версия: 46.0 (30.09) — «Поделиться» видеофайлом: `handleSharedFile` больше не молчит. Новая `isSharedVideoFile(file)` — видео определяется по расширению (mp4/m4v/mov/3gp) ИЛИ по MIME (`video/*`), раньше только по `.mp4` в имени (у файла без имени/с другим расширением меню не появлялось вообще); неопознанный файл показывает диалог с именем и типом; ошибка в `handleSharedFile`/`checkForSharedFile` выводится на экран через глобальный `window.onerror` (раньше тихо уходила в журнал отладки).
    Версия: 45.8 (29.09) — ТЗ пользователя: вкладка «Версии» (alt5, `renderSettingsTabVersions`) — обычный заголовок `h3.common-tab-title`, обёртка `.settings-gear-tab.versions-tab` (внутри `.settings-content-bottom` — блок прижат вниз, как раньше), гарнитура общая, размер шрифта от «Аа» (`--mdeditor-font-size`, `ensureVersionsTabStyle`); кнопки «Аа» на вкладке нет; `.year-grid-tab-title` убран.
    Версия: 45.7 (29.09) — ТЗ пользователя: (1) у колеса ОДИН набор вкладок (убраны дубликаты для второго набора — размер иконки «Версии» больше не зависит от того, из какого набора вошли в колесо; режим колеса всегда рисуется в разметке набора 1, `applySettingsTabSetVisibility` учитывает `bottomAltMode`); (2) пока колесо активно, язычок переключения наборов ничего не меняет на экране: `cycleSettingsTabSet` только меняет `settingsActiveTabSet`, а вкладка нового набора открывается, когда пользователь убирает колесо (`toggleBottomAltMode`, `openTabOfActiveSettingsSet`, `bottomAltEntrySet`).
@@ -24083,9 +24085,15 @@
   // этого файла — добавляется прямо в settingsModalBox, поэтому окно
   // настроек должно быть уже открыто к моменту вызова (см. handleSharedFile).
   function openSharedFileActionList(title, items){
+    // 46.2: диалог рисуется в области просмотра окна настроек (settingsModalBox), как и задумано. Чтобы он не
+    // зависел от CSS-правил окна, положение и видимость заданы инлайном: перекрывает всю область окна.
     if(!settingsModalBox) return;
     var overlay = document.createElement("div");
     overlay.className = "mdeditor-cleanup-overlay";
+    try{
+      if(window.getComputedStyle(settingsModalBox).position === "static") settingsModalBox.style.position = "relative";
+    }catch(e0){}
+    overlay.style.cssText = "position:absolute;left:0;top:0;right:0;bottom:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;opacity:1;visibility:visible;pointer-events:auto;";
     var card = document.createElement("div");
     card.className = "mdeditor-cleanup-card";
     var itemsHtml = items.map(function(it, i){
@@ -24099,15 +24107,25 @@
       '</div>';
     overlay.appendChild(card);
     settingsModalBox.appendChild(overlay);
+    // страховка: если окно настроек при открытии перестроило содержимое и диалог пропал — вернуть на место
+    var reattachLeft = 3;
+    (function reattach(){
+      if(reattachLeft-- <= 0 || overlay.getAttribute("data-closed") === "1") return;
+      setTimeout(function(){
+        if(overlay.getAttribute("data-closed") === "1") return;
+        if(!overlay.parentNode && settingsModalBox) settingsModalBox.appendChild(overlay);
+        reattach();
+      }, 250);
+    })();
 
-    function close(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
+    function close(){ overlay.setAttribute("data-closed", "1"); if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }
     overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
     document.getElementById("sharedFileActionCancel").addEventListener("click", close);
     Array.prototype.forEach.call(card.querySelectorAll("[data-idx]"), function(btn){
       btn.addEventListener("click", function(){
         var idx = parseInt(btn.getAttribute("data-idx"), 10);
         close();
-        items[idx].onClick();
+        try{ items[idx].onClick(); }catch(err){ showSharedFileError(err); }
       });
     });
   }
@@ -24117,7 +24135,21 @@
   // позже, когда для .mp4 появятся другие функции, ничего не пришлось
   // переделывать (ТЗ пользователя от 13.09, третий заход) — по факту
   // сейчас .fb2 вообще не спрашивает выбор (пункт один и заранее известен).
+  // Ошибку показываем на экране (плашка в <body>), чтобы не гадать по тишине
+  function showSharedFileError(err){
+    try{
+      if(window.Debug) window.Debug.log("sharedFile: " + (err && err.stack ? err.stack : err));
+      var b = document.createElement("div");
+      b.style.cssText = "position:fixed;left:8px;right:8px;top:8px;z-index:2147483001;background:#fee;color:#900;border:1px solid #900;border-radius:8px;padding:10px;font:13px/1.35 sans-serif;white-space:pre-wrap;word-break:break-word;";
+      b.textContent = "Ошибка «Поделиться»: " + (err && err.stack ? err.stack : String(err)).slice(0, 700);
+      b.addEventListener("click", function(){ if(b.parentNode) b.parentNode.removeChild(b); });
+      document.body.appendChild(b);
+    }catch(e2){}
+  }
   function handleSharedFile(file){
+    try{ handleSharedFileInner(file); }catch(err){ showSharedFileError(err); }
+  }
+  function handleSharedFileInner(file){
     var lower = (file.name || "").toLowerCase();
     if(/\.fb2$/.test(lower)){
       importSharedBook(file);
