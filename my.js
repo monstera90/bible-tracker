@@ -1,6 +1,8 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 50.1 (02.10) — фикс ошибки при нажатии на кнопку основной закладки (в т.ч. в авторежиме «А»): `getOrCreateBookState` теперь достраивает у существующей записи книги недостающие массивы `bookmarks`/`underlines`/`images` (раньше запись без `bookmarks` роняла `addBookBookmark` — «Cannot read properties of undefined (reading 'push')», и закладка не ставилась). Тап по кнопке «А» ставит/переносит основную закладку так же, как обычный.
+   Версия: 50.0 (30.09) — вкладки при входе/выходе из полноэкранного режима больше не подтягиваются вразнобой: после смены полноэкранного состояния ~1.2 с раскладка окна пересчитывается в тот же кадр, когда изменился размер вьюпорта (любой resize + опрос в rAF: `startFullscreenSettle`/`fsSettleTick`/`fsViewportKey`), без дебаунса 120 мс; прежний пересчёт «только по первому resize» терял промежуточные шаги Android (боковой стек уже на месте, а нижний ряд вкладок за краем экрана).
    Версия: 49.1 (30.09) — полноэкранный режим и режим чтения разделены на две кнопки: новая кнопка-миниатюра смартфона (`FULLSCREEN_MODE_ICON_SVG`/`FULLSCREEN_MODE_ON_ICON_SVG`, класс `.fullscreen-mode-btn`) стоит сразу слева от «домика», обычное нажатие включает/выключает полноэкранный режим (`handleFullscreenBtnTap`); режим чтения — следующая кнопка, только тап (долгое нажатие убрано: `handleReadingBtnHold` — пустышка). На вкладках задач обёртка `#taskFullscreenWrap` создаётся в `initTaskGlobalToolbar` (`ensureTaskFullscreenBtn`), в ридере книг — `#bookReaderFullscreenBtn`; `applyReadingModeVisual` ставит иконку/title обеим.
    Версия: 49.0 (30.09) — основная закладка книги: удержание кнопки закладки в нижнем ряду ридера включает/выключает АВТОРЕЖИМ (пиктограмма меняется на закладку с буквой «А»): при выходе из книги (домик, «назад», смена вкладки, закрытие окна настроек) основная закладка сама переносится на текущее место. Второе удержание — авторежим выключен, закладка снова только ручная. Флаг `mainAuto` хранится в записи книги `book:<hash>` (синхронизируется между устройствами). Новые: `READER_BOOKMARK_AUTO_ICON_SVG`, `isMainBookmarkAuto`, `applyMainBookmarkBtnVisual`, `toggleMainBookmarkAuto`, `moveMainBookmarkTo`, `autoUpdateMainBookmarkOnExit`; `saveBookReaderBookmark` теперь зовёт `moveMainBookmarkTo`.
    Версия: 48.5 (30.09) — вкладки больше не «опаздывают» при выходе из полноэкранного режима: раскладка окна пересчитывается сразу по fullscreenchange и первому resize без дебаунса (раньше — только через ~120 мс после resize, до этого нижний ряд вкладок был за краем из-за старой innerHeight).
@@ -11124,7 +11126,14 @@
   // Всегда возвращает объект (с дефолтами) — коду ридера (Этап D) не нужно самому подставлять
   // пустые значения при первом открытии книги.
   function getOrCreateBookState(hash){
-    return getBookState(hash) || {position: null, bookmarks: [], underlines: [], noteId: null, images: [], bookName: null};
+    var data = getBookState(hash);
+    if(!data) return {position: null, bookmarks: [], underlines: [], noteId: null, images: [], bookName: null};
+    // Запись могла прийти из облака/старой версии без части полей (или с null вместо массива) —
+    // без этого addBookBookmark и др. падали на data.bookmarks.push (TypeError: reading 'push').
+    if(!Array.isArray(data.bookmarks)) data.bookmarks = [];
+    if(!Array.isArray(data.underlines)) data.underlines = [];
+    if(!Array.isArray(data.images)) data.images = [];
+    return data;
   }
   // Устройство, где файла ещё нет, читает это поле из уже пришедшего state и может показать
   // закладку в общем списке "Закладки", даже если открыть саму книгу пока нечем (см.
@@ -15790,22 +15799,53 @@
   // Правильная раскладка приходила только после resize + 120 мс дебаунса. Теперь раскладка
   // пересчитывается сразу по fullscreenchange, а первый resize после смены полноэкранного состояния
   // обрабатывается без дебаунса (плюс повтор в следующем кадре).
-  var fsResizePending = false;
+  // Выход из полноэкранного режима на Android меняет размер вьюпорта НЕ за один раз: fullscreenchange
+  // приходит при ещё старой window.innerHeight, потом идут несколько resize с промежуточными
+  // высотами. Высота окна (style.height) и нижний ряд вкладок (bottom:-45px от рамки) считаются от
+  // innerHeight, поэтому шаг, не пересчитанный сразу, оставлял окно со старой высотой: боковой стек
+  // уже на месте, а нижний ряд вкладок — за краем экрана, пока не сработает дебаунс 120 мс (на видео
+  // пользователя от 30.09 — ~4 кадра «опоздания»). Прежняя правка ловила только ПЕРВЫЙ resize.
+  // Теперь после входа/выхода из полноэкранного режима (fullscreenchange и сами кнопки —
+  // enterFullscreenDisplayMode/exitToNormalDisplayMode) в течение FS_SETTLE_MS раскладка
+  // пересчитывается в тот же кадр, в котором изменился размер вьюпорта: на каждый resize и опросом в
+  // requestAnimationFrame (часть Android-браузеров обновляет innerHeight без resize).
+  var FS_SETTLE_MS = 1200;
+  var fsSettleUntil = 0;
+  var fsSettleRaf = 0;
+  var fsSettleLast = "";
   function relayoutNowAfterFullscreenChange(){
     if(document.activeElement && document.activeElement.isContentEditable) return;
     layoutSettingsModal();
     if(typeof refitAllVisibleTaskBodies === "function") refitAllVisibleTaskBodies();
   }
+  function fsViewportKey(){
+    return window.innerWidth + "x" + window.innerHeight + "/" + document.documentElement.clientHeight;
+  }
+  function fsSettleTick(){
+    fsSettleRaf = 0;
+    var key = fsViewportKey();
+    if(key !== fsSettleLast){
+      fsSettleLast = key;
+      relayoutNowAfterFullscreenChange();
+    }
+    if(Date.now() < fsSettleUntil && window.requestAnimationFrame){
+      fsSettleRaf = window.requestAnimationFrame(fsSettleTick);
+    }
+  }
+  function startFullscreenSettle(){
+    fsSettleUntil = Date.now() + FS_SETTLE_MS;
+    fsSettleLast = ""; // первый же кадр пересчитывает раскладку в любом случае
+    if(!fsSettleRaf && window.requestAnimationFrame) fsSettleRaf = window.requestAnimationFrame(fsSettleTick);
+  }
   function onFullscreenStateChange(){
-    fsResizePending = true;
+    startFullscreenSettle();
     relayoutNowAfterFullscreenChange();
-    if(window.requestAnimationFrame) window.requestAnimationFrame(relayoutNowAfterFullscreenChange);
   }
   document.addEventListener("fullscreenchange", onFullscreenStateChange);
   document.addEventListener("webkitfullscreenchange", onFullscreenStateChange);
   window.addEventListener("resize", function(){
-    if(fsResizePending){
-      fsResizePending = false;
+    if(Date.now() < fsSettleUntil){
+      fsSettleLast = fsViewportKey();
       relayoutNowAfterFullscreenChange();
     }
   });
@@ -17937,6 +17977,7 @@
     if(getReadingModeActive()) toggleReadingMode(); // сама обновит иконку/шрифт/раскладку
     if(getHideStatusBarEnabled()){
       setHideStatusBarEnabled(false);
+      startFullscreenSettle(); // вьюпорт будет меняться в несколько шагов — см. FS_SETTLE_MS
       applyReadingModeVisual();
       // ⚠️ (жалоба пользователя: после выхода из полноэкранного режима в обычный визуально
       // оставался размер шрифта чтения/полноэкранного режима) — сама раздельность
@@ -17954,6 +17995,7 @@
   function enterFullscreenDisplayMode(){
     if(getReadingModeActive()) toggleReadingMode(); // взаимоисключающие состояния — сперва выходим из режима чтения
     setHideStatusBarEnabled(true);
+    startFullscreenSettle(); // см. FS_SETTLE_MS
     applyReadingModeVisual();
     if(MdEditor && MdEditor.applyFontSize) MdEditor.applyFontSize();
     layoutSettingsModal();
