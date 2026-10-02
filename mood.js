@@ -1,5 +1,6 @@
 /* ===========================================================================
    mood.js
+   Версия: 1.2 (02.10) — новое чувство «Подавленность» (ключ `dejected`, эмодзи 😔): запись в `moodCategoriesResolved`, цвет в `computeMoodPalette` (средний тон, не тёмный), кнопка в сетке отметок после «Сонливости» (`CHECKIN_ORDER`). Диаграммы и список по дням берут категории из `moodCategoriesResolved`, отдельных правок не потребовали.
    Версия: 1.1 (29.09) — `--mood-joy` на <html> (цвет «Радости» для отметок задач), `window.syncMoodJoyColor`.
    Функционал отслеживания настроения: счётчик, чек-ин, диаграмма настроения.
    Выделено из my.js. Модуль создаётся вызовом window.initMoodModule(deps)
@@ -100,7 +101,8 @@
       joy:     pastel(0.30, 4),
       calm:    pastel(0.50, 8),
       sleepy:  pastel(0.68, 12),
-      sad:     pastel(0.84, 16)
+      sad:     pastel(0.84, 16),
+      dejected: pastel(0.18, -14) // 02.10: «Подавленность» — средний тон, не тёмный: чуть светлее «Внутреннего мира», со сдвигом оттенка
     };
     // ТЗ 29.09: цвет «Радости» отдаётся в CSS (--mood-joy на <html>) — им красится жёлтая отметка задач и
     // жёлтый кружок кнопки сортировки Red (modals.css, --flag-yellow). Обновляется здесь при каждом пересчёте
@@ -121,7 +123,8 @@
       {key:"anger", emoji:"😡", label:"Раздражительность"},
       {key:"down", emoji:"😌", label:"Внутренний мир"},
       {key:"sleepy", emoji:"🥱", label:"Сонливость"},
-      {key:"anxiety", emoji:"😰", label:"Тревожность"}
+      {key:"anxiety", emoji:"😰", label:"Тревожность"},
+      {key:"dejected", emoji:"😔", label:"Подавленность"}
     ];
   }
 
@@ -507,9 +510,9 @@
     var cats = moodCategoriesResolved();
     // Порядок кнопок задан явно (ТЗ 28.09), слева направо по 3 в ряд:
     // 1) Внутренний мир, Радость, Спокойствие; 2) Грусть, Тревожность,
-    // Раздражительность; 3) Сонливость. Порядок здесь — только для сетки кнопок,
+    // Раздражительность; 3) Сонливость, Подавленность. Порядок здесь — только для сетки кнопок,
     // порядок цветов/категорий (moodCategoriesResolved) не затрагивается.
-    var CHECKIN_ORDER = ["down", "joy", "calm", "sad", "anxiety", "anger", "sleepy"];
+    var CHECKIN_ORDER = ["down", "joy", "calm", "sad", "anxiety", "anger", "sleepy", "dejected"];
     var byKey = {};
     cats.forEach(function(c){ byKey[c.key] = c; });
     var ordered = CHECKIN_ORDER.map(function(k){ return byKey[k]; }).filter(Boolean);
