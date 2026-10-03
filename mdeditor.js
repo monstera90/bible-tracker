@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 7.3 (03.10) — экран закладок: под основной закладкой книги кнопка «Восстановить предыдущее место, где была закладка» (появляется, если закладка перескочила на 2+ главы; `it.canRestorePrev` из my.js, dep `restoreBookPrevMain`); кнопка стоит внутри строки перед разделителем, зазор до него 2px. Функции не менялись.
    Версия: 7.2 (30.09) — в нижнем ряду редактора добавлена кнопка полноэкранного режима (`#mdEditorFullscreenBtn`, `.fullscreen-mode-btn`, миниатюра смартфона) сразу слева от «домика»; режим чтения — следующая, только тап (удержания больше нет); строка про полноэкранный режим в инструкции заметок; dep `handleFullscreenBtnTap`.
    Версия: 7.1 (30.09) — кнопка режима чтения (`#mdEditorReadingBtn`) в ряду редактора переставлена: теперь сразу слева от «домика» (была после «Скачать .md»).
    Версия: 7.0 (30.09) — структурная правка (ТЗ пользователя от 30.09): попап «Ж» убран — в ряду кнопок редактора четыре отдельные кнопки Ж/К/П/Ч (`#mdEditorFmtBoldBtn`/`…ItalicBtn`/`…UnderlineBtn`/`…StrikeBtn`), `formatPanelOpen`, `#mdEditorFormatWrap/-Popup/-Btn` удалены; в инструкции «Форматирование заметок» — про четыре кнопки и свайп по ряду (сам ползунок ряда — `initFabRowSlider` в my.js).
@@ -208,6 +209,9 @@ window.initMdEditorModule = function(deps){
   // переименование книжной закладки (ТЗ 20.09, кнопка-карандаш в строке
   // на вкладке «Закладки»); ручное имя имеет приоритет над автоматическим.
   var renameBookMarginBookmark = deps.renameBookMarginBookmark || function(){ return false; };
+  // restoreBookPrevMain(hash) -> true/false — вернуть основную закладку книги на прежнее место
+  // (кнопка под основной закладкой на вкладке «Закладки»; бэкап и логика — в my.js).
+  var restoreBookPrevMain = deps.restoreBookPrevMain || function(){ return false; };
   // ---------------------------------------------------------------------
   // ОБЛАЧНОЕ ХРАНЕНИЕ ЗАМЕТОК С ШИФРОВАНИЕМ (см. TASK_MDNOTES_CLOUD.md,
   // шаг 1 "Ядро", 05.09). Firebase-специфика (URL, /syncs/<id>) осознанно
@@ -3586,6 +3590,31 @@ window.initMdEditorModule = function(deps){
         subSpan.textContent = it.bookName + (it.availableLocally === false ? " — нет на этом устройстве" : "");
         nameEl.appendChild(mainSpan);
         nameEl.appendChild(subSpan);
+        // Кнопка возврата на прежнее место — под текстом основной закладки, внутри её строки, то есть
+        // перед разделителем строки. Нижний отступ строки обнулён, зазор до разделителя — ровно 2px.
+        if(it.isMain && it.canRestorePrev){
+          row.style.paddingBottom = "0";
+          var restoreBtn = document.createElement("button");
+          restoreBtn.type = "button";
+          restoreBtn.className = "mdeditor-bookmark-restore-btn";
+          restoreBtn.textContent = "Восстановить предыдущее место, где была закладка";
+          if(it.prevName) restoreBtn.title = "Прежнее место: " + it.prevName;
+          restoreBtn.style.cssText = "align-self:flex-start;text-align:left;margin:6px 0 2px;padding:3px 10px;" +
+            "font:inherit;font-size:0.8em;line-height:1.25;color:var(--ink-soft);background:transparent;" +
+            "border:1px solid var(--wood);border-radius:12px;cursor:pointer;";
+          restoreBtn.addEventListener("click", function(ev){
+            ev.stopPropagation();
+            if(!restoreBookPrevMain(it.hash)) return;
+            // Список книжных закладок читаем заново — основная закладка и её «прежнее место» поменялись.
+            getBookMarginBookmarks(function(bookItems){
+              if(activeMdTab !== "bookmarks") return;
+              if(document.getElementById("settingsTabContent") !== container) return;
+              var rest = items.filter(function(x){ return x.type !== "book"; });
+              renderBookmarksList(container, rest.concat(bookItems), false);
+            });
+          });
+          nameEl.appendChild(restoreBtn);
+        }
       } else {
         nameEl.textContent = it.name;
       }

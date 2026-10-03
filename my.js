@@ -1,6 +1,10 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 53.0 (03.10) — кнопка «i» в нижнем ряду ридера книг (`bookReaderInfoBtn`, самая левая кнопка ряда): полноэкранная инструкция «Книга — кнопки» (`renderBookReaderInfoScreen`, тем же приёмом, что `renderBooksInfoScreen`/`renderTaskInfoScreen`); перед показом запоминается место чтения, «домик» на экране инструкции возвращает в ту же книгу на то же место.
+   Версия: 52.0 (03.10) — бэкап прежнего места основной закладки: при переносе основной закладки на 2+ главы (`BOOKMARK_JUMP_CHAPTERS`) старое место сохраняется в `book:<hash>.prevMain` (одна копия, едет в облако); новая `restoreBookPrevMain(hash)` возвращает его (текущая основная при этом сама становится «прежней»); `getBookMarginBookmarksForList` помечает основную закладку флагом `canRestorePrev` (+ `prevName`), если прежнее место отстоит на 2+ главы; в deps для mdeditor.js — `restoreBookPrevMain`.
+   Версия: 51.1 (03.10) — периодическая автозакладка: пока книга открыта в авторежиме «А», раз в 45 с (`AUTO_BOOKMARK_PERIOD_MS`) основная закладка подтягивается на первый видимый абзац (если место сменилось). Новая `isBookReaderTextOnScreen` — общая проверка «текст книги на экране», её же использует `autoBookmarkOnPageHide`.
+   Версия: 51.0 (03.10) — автозакладка книги срабатывает и при простом сворачивании приложения (и при блокировке экрана): новая функция `autoBookmarkOnPageHide` (рядом с `autoUpdateMainBookmarkOnExit`) вызывается первой строкой `flushPendingSyncNow` — то есть из `visibilitychange`→hidden, `pagehide` и `beforeunload`, ДО сброса сохранения и облачной отправки, поэтому закладка уходит в облако в том же проходе. Если ридер открыт и виден: в авторежиме «А» основная закладка встаёт на первый видимый абзац, а ещё не сохранённая (debounce 500 мс) позиция чтения сохраняется сразу.
    Версия: 50.1 (02.10) — фикс ошибки при нажатии на кнопку основной закладки (в т.ч. в авторежиме «А»): `getOrCreateBookState` теперь достраивает у существующей записи книги недостающие массивы `bookmarks`/`underlines`/`images` (раньше запись без `bookmarks` роняла `addBookBookmark` — «Cannot read properties of undefined (reading 'push')», и закладка не ставилась). Тап по кнопке «А» ставит/переносит основную закладку так же, как обычный.
    Версия: 50.0 (30.09) — вкладки при входе/выходе из полноэкранного режима больше не подтягиваются вразнобой: после смены полноэкранного состояния ~1.2 с раскладка окна пересчитывается в тот же кадр, когда изменился размер вьюпорта (любой resize + опрос в rAF: `startFullscreenSettle`/`fsSettleTick`/`fsViewportKey`), без дебаунса 120 мс; прежний пересчёт «только по первому resize» терял промежуточные шаги Android (боковой стек уже на месте, а нижний ряд вкладок за краем экрана).
    Версия: 49.1 (30.09) — полноэкранный режим и режим чтения разделены на две кнопки: новая кнопка-миниатюра смартфона (`FULLSCREEN_MODE_ICON_SVG`/`FULLSCREEN_MODE_ON_ICON_SVG`, класс `.fullscreen-mode-btn`) стоит сразу слева от «домика», обычное нажатие включает/выключает полноэкранный режим (`handleFullscreenBtnTap`); режим чтения — следующая кнопка, только тап (долгое нажатие убрано: `handleReadingBtnHold` — пустышка). На вкладках задач обёртка `#taskFullscreenWrap` создаётся в `initTaskGlobalToolbar` (`ensureTaskFullscreenBtn`), в ридере книг — `#bookReaderFullscreenBtn`; `applyReadingModeVisual` ставит иконку/title обеим.
@@ -4346,6 +4350,9 @@
   // зрения) считала картинку неиспользуемой и удаляла — выглядело как "корзина съедает картинки".
   function flushPendingSyncNow(){
     if(window.Debug) window.Debug.log("flushPendingSyncNow: старт, saveTimer=" + !!saveTimer + " pushTimer=" + !!pushTimer);
+    // Свернули/заблокировали экран/закрыли вкладку в ридере книги — автозакладка и позиция чтения
+    // фиксируются ДО сброса сохранения и облачной отправки ниже (см. autoBookmarkOnPageHide).
+    autoBookmarkOnPageHide();
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
@@ -7071,6 +7078,8 @@
     openBookMarginBookmark: openBookAtMarginBookmark,
     removeBookMarginBookmark: removeBookBookmark,
     renameBookMarginBookmark: renameBookBookmark,
+    // вернуть основную закладку книги на прежнее место (кнопка под основной закладкой, см. restoreBookPrevMain)
+    restoreBookPrevMain: restoreBookPrevMain,
     // ---------------------------------------------------------------------
     // Облачное хранение заметок с шифрованием.
     // ---------------------------------------------------------------------
@@ -12608,6 +12617,8 @@
     return (
       '<div class="mdeditor-status" id="bookReaderStatus"></div>' +
       '<div class="mdeditor-fab-row">' +
+        // «i» — самая левая кнопка ряда: полноэкранная инструкция по кнопкам ридера (renderBookReaderInfoScreen)
+        '<button type="button" class="mdeditor-fab-btn" id="bookReaderInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderFlibustaBtn" title="Flibusta">' + READER_FLIBUSTA_ICON_SVG + '</button>' +
         '<span class="mdeditor-fontsize-wrap" id="bookReaderFontSizeWrap">' +
           '<div class="mdeditor-fontsize-popup" id="bookReaderFontSizePopup">' +
@@ -12630,6 +12641,92 @@
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderHomeBtn" title="К списку книг">' + READER_HOME_ICON_SVG + '</button>' +
       '</div>'
     );
+  }
+
+  // Полноэкранная инструкция ридера — открывается кнопкой «i» из нижнего ряда (bookReaderInfoBtn,
+  // bookReaderFabRowHtml), тем же приёмом, что renderBooksInfoScreen (список книг) и
+  // renderTaskInfoScreen (задачи): подменяет #settingsTabContent целиком, внизу — свой «домик»,
+  // остальные пиктограммы только нарисованы (без обработчиков). currentSettingsTab не меняется.
+  // В отличие от списка книг, здесь под экраном остаётся открытая книга, поэтому ПЕРЕД подменой
+  // содержимого запоминаем место чтения (restorePosition/textScrollTop/chaptersScrollTop +
+  // постоянное хранилище) — «домик» через renderBookReader вернёт ровно туда, где читали. Пока
+  // показан этот экран, в контейнере нет абзацев книги: автозакладка (isBookReaderTextOnScreen),
+  // уход с вкладки и закрытие окна позицию не трогают — она уже сохранена. Повторный вызов с самого
+  // экрана инструкции (снимок AppNav) безопасен: currentBookReaderPosition там вернёт null, и
+  // ранее запомненное место остаётся.
+  function renderBookReaderInfoScreen(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container || !bookReaderState) return;
+    // Недостроенная порциями сборка текста (renderBookReaderText) не должна дописывать абзацы в
+    // уже подменённый контейнер — гасим её, как это делает следующий рендер.
+    bookReaderTextRenderGen++;
+    removeBookReaderUnderlineTrashBtn();
+    if(bookReaderState.mode === "chapters"){
+      if(container.querySelector("#bookChaptersList")) bookReaderState.chaptersScrollTop = container.scrollTop;
+      destroyBookReaderScrollListener();
+    } else {
+      destroyBookReaderScrollListener(); // заодно сбрасывает отложенное сохранение позиции
+      var infoPos = currentBookReaderPosition(container);
+      if(infoPos){
+        bookReaderState.restorePosition = infoPos;
+        bookReaderState.textScrollTop = container.scrollTop;
+        setBookPosition(bookReaderState.hash, infoPos);
+      }
+    }
+
+    function iconRow(svg, big, html){
+      return '<div class="task-info-item"><div class="task-info-icon' + (big ? " task-info-icon-lg" : "") + '">' + svg + '</div><div class="task-info-text">' + html + '</div></div>';
+    }
+    var isIpkd = (bookReaderOwnerTab === "set2s_8");
+
+    var html = '';
+    if(!isIpkd){
+      html += iconRow(READER_FLIBUSTA_ICON_SVG, false, "Открывает каталог Flibusta: найденную книгу можно скачать прямо в приложение. Читаемая книга остаётся под каталогом — после закрытия каталога вы на том же месте.");
+    }
+    html += iconRow('<span style="font-weight:600;font-size:15px;line-height:1;">Аа</span>', false,
+      "Размер шрифта и переносы слов. Нажатие раскрывает кнопки «+» (крупнее), «−» (мельче) и кнопку переносов слов (включает и выключает автоматические переносы). Размер шрифта общий с задачами и «Моим блокнотом», у режима чтения он свой.");
+    html += iconRow(READER_SELECT_ICON_SVG, false,
+      "Сначала выделите фрагмент текста обычным способом, затем нажмите эту кнопку — фрагмент подчёркивается и дописывается в заметку книги. Когда заметка ещё не привязана, приложение предложит создать новую или выбрать существующую. Подчёркивать можно только в пределах одного абзаца. Нажатие на подчёркнутое место показывает кнопку-урну " +
+      '<span class="task-icon-btn" style="display:inline-flex;vertical-align:middle;width:1.3em;height:1.3em;">' + READER_TRASH_ICON_SVG + '</span> — она снимает подчёркивание.');
+    html += iconRow(READER_BOOKMARK_ADD_ICON_SVG, false,
+      "Добавляет отдельную закладку на первый видимый на экране абзац. Каждое нажатие — новая самостоятельная закладка (имя даётся автоматически), основную она не трогает. Все закладки собраны на вкладке «Закладки»; нажатие на значок закладки у правого края абзаца снимает её.");
+    html += iconRow(READER_BOOKMARK_ICON_SVG, false,
+      "Основная закладка книги (она одна на книгу). Нажатие переносит её на текущее место, старая снимается. Если новое место дальше прежнего на две главы и больше, прежнее место сохраняется — вернуть его можно кнопкой на вкладке «Закладки». Удержание кнопки включает авторежим — пиктограмма меняется на закладку с буквой «А» " +
+      '<span class="task-icon-btn" style="display:inline-flex;vertical-align:middle;width:1.3em;height:1.3em;">' + READER_BOOKMARK_AUTO_ICON_SVG + '</span>' +
+      ": основная закладка сама встаёт на текущее место при выходе из книги, при сворачивании приложения и раз в 45 секунд, пока книга открыта. Повторное удержание выключает авторежим.");
+    html += iconRow(READER_CHAPTERS_ICON_SVG, false,
+      "Показывает список глав: нажатие на главу открывает книгу с её начала. В списке глав та же кнопка меняется на раскрытую книгу " +
+      '<span class="task-icon-btn" style="display:inline-flex;vertical-align:middle;width:1.3em;height:1.3em;">' + READER_TEXT_ICON_SVG + '</span> и возвращает к тексту на прежнем месте.');
+    html += iconRow(READING_BOOK_OFF_ICON_SVG, false,
+      "Режим чтения: прячет ряды вкладок, окно растягивается до нижнего края экрана. Повторное нажатие (пиктограмма без зачёркивания) выключает режим. Режим общий для всего приложения.");
+    html += iconRow(FULLSCREEN_MODE_ICON_SVG, false,
+      "Полноэкранный режим: скрывает системные панели Android вместе с вкладками. Повторное нажатие (пиктограмма с закрашенным экраном) возвращает обычный вид.");
+    if(!isIpkd){
+      html += iconRow(READER_HOME_ICON_SVG, false,
+        "Выход из книги к списку книг. Если у основной закладки включён авторежим «А» — она встаёт на текущее место. Системное «назад» после выхода возвращает в эту же книгу на то же место.");
+    }
+    html += iconRow(READER_PIN_ICON_SVG, false,
+      "Кнопка над иллюстрацией в тексте книги: отправляет картинку в заметку книги, и кнопка краснеет " +
+      '<span class="task-icon-btn" style="display:inline-flex;vertical-align:middle;width:1.3em;height:1.3em;color:var(--danger);">' + READER_PIN_ICON_SVG + '</span>' +
+      ". Повторное нажатие убирает картинку из заметки.");
+
+    container.innerHTML =
+      '<h3 class="common-tab-title">Книга — кнопки</h3>' +
+      '<div class="task-info-body">' + html + '</div>' +
+      '<div class="mdeditor-fab-row">' +
+        '<button type="button" class="mdeditor-fab-btn" id="bookReaderInfoHomeBtn" title="Назад к книге">' + READER_HOME_ICON_SVG + '</button>' +
+      '</div>';
+    container.scrollTop = 0;
+
+    var homeBtnI = document.getElementById("bookReaderInfoHomeBtn");
+    if(homeBtnI){
+      homeBtnI.addEventListener("click", function(){
+        // «Действие ВПЕРЁД»: свой шаг «назад» — снимок этого же экрана инструкции (как у
+        // renderBooksInfoScreen); книга возвращается на запомненное место через renderBookReader.
+        window.AppNav.push(function(){ renderBookReaderInfoScreen(); });
+        renderBookReader();
+      });
+    }
   }
 
   // Обработчики нижнего ряда — навешиваются заново после каждого рендера (innerHTML пересоздаёт
@@ -12708,6 +12805,17 @@
         });
         bookReaderState = null;
         renderSettingsTabBooks();
+      });
+    }
+
+    // «i» — инструкция по кнопкам ридера. «Действие ВПЕРЁД» наоборот: сначала кладём в стек навигации
+    // шаг «назад» (вернуться в этот же ридер), потом показываем экран инструкции — системное «назад»
+    // с него вернёт в книгу на то же место (позицию запоминает сама renderBookReaderInfoScreen).
+    var infoBtnR = document.getElementById("bookReaderInfoBtn");
+    if(infoBtnR){
+      infoBtnR.addEventListener("click", function(){
+        window.AppNav.push(function(){ renderBookReader(); });
+        renderBookReaderInfoScreen();
       });
     }
 
@@ -13376,9 +13484,22 @@
   // Переносит основную закладку книги на pos (старая снимается и в данных, и на полях текста; ручное
   // имя переезжает в новую запись). Возвращает имя новой закладки или null, если закладка уже стоит
   // ровно здесь и менять нечего.
+  // «Резкий» перенос основной закладки — на столько глав и больше. Прежнее место при таком переносе
+  // уходит в бэкап book:<hash>.prevMain (одна копия), см. restoreBookPrevMain ниже. Обычное чтение
+  // (шаг на соседний абзац/главу, в том числе периодической автозакладкой) бэкап не трогает.
+  var BOOKMARK_JUMP_CHAPTERS = 2;
+  function isBookmarkJump(a, b){
+    return !!(a && b && typeof a.ch === "number" && typeof b.ch === "number" && Math.abs(a.ch - b.ch) >= BOOKMARK_JUMP_CHAPTERS);
+  }
   function moveMainBookmarkTo(hash, pos){
     var oldMain = getMainBookBookmark(hash);
     if(oldMain && oldMain.position && oldMain.position.ch === pos.ch && oldMain.position.blk === pos.blk) return null;
+    if(oldMain && isBookmarkJump(oldMain.position, pos)){
+      // Объект тот же, что лежит в state (запись уже есть, раз есть основная закладка), — сохранится
+      // вместе с removeBookBookmark/addBookBookmark ниже.
+      var backupData = getOrCreateBookState(hash);
+      backupData.prevMain = {position: Object.assign({}, oldMain.position), name: oldMain.name || "", nameManual: !!oldMain.nameManual, at: Date.now()};
+    }
     if(oldMain){
       removeBookBookmark(hash, oldMain.id);
       removeBookReaderBookmarkMarkById(oldMain.id);
@@ -13404,6 +13525,75 @@
     if(!container.querySelector(".book-reader-p, .book-reader-image-wrap")) return;
     var pos = firstVisibleBookBlockPosition(container);
     if(pos) moveMainBookmarkTo(hash, pos);
+  }
+  // Приложение уходит из переднего плана (свернули, погасили экран, закрыли вкладку — зовётся из
+  // flushPendingSyncNow по visibilitychange→hidden/pagehide/beforeunload), а ридер книги открыт и
+  // текст виден на экране: (1) в авторежиме «А» основная закладка встаёт на первый видимый абзац —
+  // как при выходе из книги; (2) позиция чтения, ещё висящая в debounce 500 мс, сохраняется сразу.
+  // Условия «окно настроек открыто и на экране текст» обязательны: у скрытого окна scrollTop
+  // сбрасывается в 0 (см. комментарий в closeSettingsModal про closingBookPos) и позиция/закладка
+  // уехали бы в начало книги. Повторные вызовы безопасны — moveMainBookmarkTo ничего не пишет, если
+  // закладка уже стоит на этом абзаце. Ошибка здесь не должна ломать остальной flushPendingSyncNow.
+  // Текст книги сейчас реально на экране (ридер открыт, не режим глав, окно настроек открыто на
+  // «Книгах»/«ИПКД», контейнер виден и содержит абзацы/картинки). Общая проверка для автозакладки
+  // при сворачивании и периодической.
+  function isBookReaderTextOnScreen(){
+    if(!bookReaderState || bookReaderState.mode === "chapters") return false;
+    if(currentSettingsTab !== "set2s_7" && currentSettingsTab !== "set2s_8") return false;
+    if(typeof settingsModalOverlay === "undefined" || !settingsModalOverlay || !settingsModalOverlay.classList.contains("open")) return false;
+    var container = document.getElementById("settingsTabContent");
+    if(!container || !container.offsetHeight) return false;
+    return !!container.querySelector(".book-reader-p, .book-reader-image-wrap");
+  }
+  function autoBookmarkOnPageHide(){
+    try{
+      if(!isBookReaderTextOnScreen()) return;
+      if(bookReaderPositionSaveTimer) flushBookReaderPositionNow();
+      if(isMainBookmarkAuto(bookReaderState.hash)){
+        autoUpdateMainBookmarkOnExit();
+        if(window.Debug) window.Debug.log("автозакладка при сворачивании: проверено");
+      }
+    }catch(e){
+      if(window.Debug) window.Debug.log("autoBookmarkOnPageHide: ошибка " + (e && e.message));
+    }
+  }
+  // Периодическая автозакладка: пока книга открыта в авторежиме «А» и приложение на экране, раз в
+  // AUTO_BOOKMARK_PERIOD_MS основная закладка подтягивается на первый видимый абзац. Страховка на
+  // случай, когда ни выход из книги, ни сворачивание не сработали (приложение убито системой,
+  // села батарея, книгу сменили, не выходя). Если место не сменилось — moveMainBookmarkTo ничего
+  // не пишет, так что в покое таймер ничего не стоит.
+  var AUTO_BOOKMARK_PERIOD_MS = 45000;
+  setInterval(function(){
+    try{
+      if(document.visibilityState !== "visible") return;
+      if(!isBookReaderTextOnScreen()) return;
+      if(!isMainBookmarkAuto(bookReaderState.hash)) return;
+      autoUpdateMainBookmarkOnExit();
+    }catch(e){
+      if(window.Debug) window.Debug.log("периодическая автозакладка: ошибка " + (e && e.message));
+    }
+  }, AUTO_BOOKMARK_PERIOD_MS);
+  // Возвращает основную закладку на прежнее место (book:<hash>.prevMain). Текущая основная при этом
+  // сама становится «прежней» — повторное нажатие возвращает всё обратно. Вызывается кнопкой на
+  // вкладке «Закладки» (mdeditor.js). true — сделано, false — бэкапа нет.
+  function restoreBookPrevMain(hash){
+    var data0 = getBookState(hash);
+    if(!data0 || !data0.prevMain || !data0.prevMain.position) return false;
+    var data = getOrCreateBookState(hash);
+    var prev = data.prevMain;
+    var cur = getMainBookBookmark(hash);
+    if(cur && cur.position){
+      data.prevMain = {position: Object.assign({}, cur.position), name: cur.name || "", nameManual: !!cur.nameManual, at: Date.now()};
+      data.bookmarks = data.bookmarks.filter(function(b){ return b.id !== cur.id; });
+    } else {
+      delete data.prevMain;
+    }
+    var rec = {id: genBookRecordId(), position: Object.assign({}, prev.position), addedAt: Date.now(), name: prev.name || "", isMain: true};
+    if(prev.nameManual) rec.nameManual = true;
+    data.bookmarks.push(rec);
+    saveBookState(hash, data);
+    if(navigator.vibrate){ try{ navigator.vibrate(15); }catch(e){} }
+    return true;
   }
   function saveBookReaderBookmark(){
     if(!bookReaderState) return;
@@ -13769,7 +13959,14 @@
         var name = (data && data.bookName) || manifest[hash];
         if(!name) return; // имя книги неизвестно ни из state, ни из локального манифеста
         data.bookmarks.forEach(function(b){
-          items.push({type: "book", hash: hash, bookmarkId: b.id, position: b.position, addedAt: b.addedAt, bookName: name, name: b.name, isMain: !!b.isMain, nameManual: !!b.nameManual, availableLocally: !!manifest[hash]});
+          var it = {type: "book", hash: hash, bookmarkId: b.id, position: b.position, addedAt: b.addedAt, bookName: name, name: b.name, isMain: !!b.isMain, nameManual: !!b.nameManual, availableLocally: !!manifest[hash]};
+          // Кнопка «Восстановить предыдущее место» — только у основной закладки и только если
+          // прежнее место (book:<hash>.prevMain) отстоит от неё на BOOKMARK_JUMP_CHAPTERS+ глав.
+          if(b.isMain && data.prevMain && isBookmarkJump(data.prevMain.position, b.position)){
+            it.canRestorePrev = true;
+            it.prevName = data.prevMain.name || "";
+          }
+          items.push(it);
         });
       });
       callback(items);
