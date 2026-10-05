@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 54.0 (05.10) — (1) ридер книг: смена размера шрифта «Аа» («+»/«−») больше не сдвигает читаемое место — `changeBookReaderFontSize` запоминает место в тексте (`captureHyphensAnchor`) и возвращает его после смены и после калибровки сегментов (`keepScrollAnchorPasses`, новая общая функция рядом с `captureHyphensAnchor`); (2) картинки задач («![[имя]]») в режиме просмотра — слева от текста квадратом в две строки, текст обтекает: новые `splitTaskImages`/`taskImagesHtml`/`taskTextInner` (раздел «КАРТИНКИ ЗАДАЧ В РЕЖИМЕ ПРОСМОТРА»), применены в `renderTaskRowView`, `renderRowView` («Все задачи проекта»), строках архива и ревью, поправка `fitTaskActions`; режим редактирования и комментарии не менялись.
    Версия: 53.0 (03.10) — кнопка «i» в нижнем ряду ридера книг (`bookReaderInfoBtn`, самая левая кнопка ряда): полноэкранная инструкция «Книга — кнопки» (`renderBookReaderInfoScreen`, тем же приёмом, что `renderBooksInfoScreen`/`renderTaskInfoScreen`); перед показом запоминается место чтения, «домик» на экране инструкции возвращает в ту же книгу на то же место.
    Версия: 52.0 (03.10) — бэкап прежнего места основной закладки: при переносе основной закладки на 2+ главы (`BOOKMARK_JUMP_CHAPTERS`) старое место сохраняется в `book:<hash>.prevMain` (одна копия, едет в облако); новая `restoreBookPrevMain(hash)` возвращает его (текущая основная при этом сама становится «прежней»); `getBookMarginBookmarksForList` помечает основную закладку флагом `canRestorePrev` (+ `prevName`), если прежнее место отстоит на 2+ главы; в deps для mdeditor.js — `restoreBookPrevMain`.
    Версия: 51.1 (03.10) — периодическая автозакладка: пока книга открыта в авторежиме «А», раз в 45 с (`AUTO_BOOKMARK_PERIOD_MS`) основная закладка подтягивается на первый видимый абзац (если место сменилось). Новая `isBookReaderTextOnScreen` — общая проверка «текст книги на экране», её же использует `autoBookmarkOnPageHide`.
@@ -691,6 +692,49 @@
       html += '<span class="fmt-line' + (isParaStart ? ' fmt-para' : '') + '">' + formatInline(line) + '</span>';
     }
     return html;
+  }
+
+  // ===================== КАРТИНКИ ЗАДАЧ В РЕЖИМЕ ПРОСМОТРА (ТЗ 05.10) =====================
+  // Только строки задач (все вкладки задач, включая «Общие задачи», архив и «Все задачи проекта»;
+  // комментарии, заметки и остальные места по-прежнему показывают «![[имя]]» миниатюрой посреди
+  // текста — см. formatInline). В режиме просмотра картинки задачи выносятся ВЛЕВО от текста:
+  // квадрат в две строки текста (3em), текст обтекает (float, см. .task-img-side-item и
+  // .task-has-img в components.css). Из текста для показа «![[имя]]» убирается, строка, где были
+  // одни картинки, пропадает. Сам текст задачи (task.c.text) не меняется — в режиме
+  // редактирования (.task-editable, renderTaskRowEdit) по-прежнему лежит сырой текст с
+  // «![[имя]]» там, где его написали; копирование тоже берёт сырой текст.
+  var TASK_IMG_TOKEN_RE = /!\[\[([^\[\]\n]+)\]\]/g;
+  function splitTaskImages(rawText){
+    var names = [];
+    if(rawText == null || rawText === "") return { names: names, text: rawText };
+    var out = [];
+    String(rawText).split("\n").forEach(function(line){
+      var had = false;
+      var stripped = line.replace(TASK_IMG_TOKEN_RE, function(m, name){
+        had = true;
+        names.push(name.trim());
+        return "";
+      });
+      if(!had){ out.push(line); return; }
+      stripped = stripped.replace(/ {2,}/g, " ").trim();
+      if(stripped === "") return; // строка состояла только из картинок
+      out.push(stripped);
+    });
+    return { names: names, text: out.join("\n") };
+  }
+  // временные плейсхолдеры слева от текста; настоящую картинку подставляет hydrateTaskImages
+  // (ищет .task-img-wrap[data-img-name], класс task-img-side-item только задаёт вид)
+  function taskImagesHtml(names){
+    return names.map(function(n){
+      return '<span class="task-img-wrap task-img-side-item" data-img-name="' + escapeHtml(n) + '">' + PAPERCLIP_ICON_SVG + '</span>';
+    }).join("");
+  }
+  // formatter — linkifyHtml (обычные строки задач) или escapeHtml (архив/ревью).
+  // Возвращает {html, hasImg}; hasImg — повод добавить .task-has-img на .task-text-view.
+  function taskTextInner(rawText, formatter){
+    var sp = splitTaskImages(rawText);
+    if(!sp.names.length) return { html: formatter(rawText), hasImg: false };
+    return { html: taskImagesHtml(sp.names) + formatter(sp.text), hasImg: true };
   }
 
   // ===================== АВТОМАТИЧЕСКОЕ ФОРМАТИРОВАНИЕ И ССЫЛКИ НА ЛЮБОЙ
@@ -12762,14 +12806,22 @@
     // Тот же fontSizeStep, что у "Моего блокнота"/задач (см. initTaskGlobalToolbar выше) — единица
     // размера общая на всё приложение. После смены шрифта пересчитываем оценку высоты ещё не
     // сверстанных сегментов.
-    function recalibrateBookReaderSoon(){
-      setTimeout(function(){
+    // ТЗ 05.10: при смене размера шрифта читаемое место не должно «прыгать». Раньше после смены
+    // размера через 80 мс пересчитывалась оценка высоты ещё не сверстанных сегментов
+    // (calibrateBookReaderSegments → --book-px-per-char), и всё, что выше экрана, меняло высоту
+    // без поправки прокрутки. Теперь тем же приёмом, что у переносов слов (toggleHyphens):
+    // запоминаем место в тексте у верхнего края (captureHyphensAnchor) и после смены шрифта и
+    // после калибровки возвращаем его на прежнее расстояние от верха (keepScrollAnchorPasses).
+    function changeBookReaderFontSize(delta){
+      var anchor = captureHyphensAnchor();
+      MdEditor.changeFontSizeStep(delta);
+      keepScrollAnchorPasses(anchor, function(){
         var c = document.getElementById("settingsTabContent");
         if(c && bookReaderState && bookReaderState.mode === "text") calibrateBookReaderSegments(c);
-      }, 80);
+      });
     }
-    if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ MdEditor.changeFontSizeStep(1); recalibrateBookReaderSoon(); });
-    if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ MdEditor.changeFontSizeStep(-1); recalibrateBookReaderSoon(); });
+    if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ changeBookReaderFontSize(1); });
+    if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ changeBookReaderFontSize(-1); });
 
     // Кнопка "Выделение" (шаг 13; доработка 13.09 — тот же порядок действий, что у кнопки "Маркер"
     // в "Моём блокноте", mdeditor.js): пользователь сначала выделяет текст обычным браузерным
@@ -18056,6 +18108,29 @@
       }
     };
   }
+  // Общая «докрутка к якорю» после смены раскладки (ТЗ 05.10, размер шрифта в книгах): поправка
+  // сразу, в следующий кадр, после необязательного midStep (например, калибровка высот сегментов
+  // книги — он меняет высоту всего, что выше экрана) и ещё дважды с запасом, пока Chrome дорисует
+  // content-visibility-сегменты. Если человек сам начал крутить/нажимать — дальше не вмешиваемся.
+  // anchor — результат captureHyphensAnchor (null — ничего не делаем, только midStep).
+  function keepScrollAnchorPasses(anchor, midStep){
+    var userMoved = false;
+    var stopEvents = ["touchstart", "wheel", "keydown", "mousedown"];
+    function onUser(){ userMoved = true; }
+    stopEvents.forEach(function(n){ document.addEventListener(n, onUser, { capture: true, passive: true }); });
+    function pass(){ if(anchor && !userMoved) anchor.restore(); }
+    pass();
+    if(window.requestAnimationFrame) window.requestAnimationFrame(pass);
+    setTimeout(function(){
+      if(midStep){ try{ midStep(); }catch(e){} } // калибровка нужна в любом случае, даже если человек уже крутит
+      pass();
+    }, 80);
+    setTimeout(pass, 200);
+    setTimeout(function(){
+      pass();
+      stopEvents.forEach(function(n){ document.removeEventListener(n, onUser, true); });
+    }, 450);
+  }
   function toggleHyphens(){
     var anchor = captureHyphensAnchor();
     setHyphensActive(!getHyphensActive());
@@ -19417,11 +19492,12 @@
     });
     return days.map(function(day){
       var rows = byDay[day].map(function(t){
-        var label = t.c.text ? escapeHtml(t.c.text) : "Без названия";
+        var labelInner = t.c.text ? taskTextInner(t.c.text, escapeHtml) : null; // картинки — слева от текста (ТЗ 05.10)
+        var label = labelInner ? labelInner.html : "Без названия";
         var isExpanded = !!expandedTaskIds[t.id];
         return '<div class="task-row" data-id="' + t.id + '">' +
           '<div class="task-body task-archive-body" data-id="' + t.id + '">' +
-            '<span class="task-text-view task-archive-text' + (isExpanded ? '' : ' task-text-clamped') + '">' + label + '</span>' +
+            '<span class="task-text-view task-archive-text' + (labelInner && labelInner.hasImg ? ' task-has-img' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + label + '</span>' +
             '<span class="task-actions">' +
               '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
               '<button type="button" class="task-icon-btn review-task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
@@ -19825,7 +19901,13 @@
       body.style.paddingBottom = "";
     } else {
       actions.style.top = (lastRect.bottom - bodyRect.top + 4) + "px";
-      body.style.paddingBottom = (actionsHeight + 4) + "px";
+      var padNeeded = actionsHeight + 4;
+      if(textEl.classList.contains("task-has-img")){
+        // ТЗ 05.10: блок текста с картинкой слева может быть ниже последней строки (картинка в две
+        // строки выше самого текста) — этот запас под кнопки уже есть, лишний отступ не добавляем
+        padNeeded = Math.max(0, padNeeded - (textEl.getBoundingClientRect().bottom - lastRect.bottom));
+      }
+      body.style.paddingBottom = padNeeded + "px";
     }
   }
   // пересчитывает подгонку кнопок у ВСЕХ строк задач, видимых прямо сейчас, — нужно при изменении
@@ -19907,7 +19989,8 @@
     var isProjectsTab = task.c.tab === "projects";
     var showRed = isProjectsTab && !projectHasActiveNext(id);
     var placeholder = isProjectsTab ? "Новый проект" : "Новая задача";
-    var textHtml = task.c.text ? linkifyHtml(task.c.text) : '<span class="task-text-placeholder">' + placeholder + '</span>';
+    var taskInner = task.c.text ? taskTextInner(task.c.text, linkifyHtml) : null; // картинки — слева от текста (ТЗ 05.10)
+    var textHtml = taskInner ? taskInner.html : '<span class="task-text-placeholder">' + placeholder + '</span>';
     var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
     // Развёрнутые задачи (expandedTaskIds) рисуются без обрезки — иначе нельзя ни прочитать текст
     // целиком, ни (что важнее) корректно определить через scrollHeight/clientHeight, что обрезка
@@ -19918,7 +20001,7 @@
     var isJointReadOnlyRow = (tabKey === "jointtasks" || isGroupTaskId(id)) && isGroupTasksReadOnly();
     body.innerHTML =
       jointSignatureHtml +
-      '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
+      '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + (taskInner && taskInner.hasImg ? ' task-has-img' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
       '<span class="task-actions">' +
         '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
         (isJointReadOnlyRow ? '' : taskDeleteBtnHtml()) +
@@ -20584,14 +20667,15 @@
       var body = document.querySelector('.task-body[data-id="' + id + '"]');
       var task = getTaskById(id);
       if(!body || !task) return;
-      var textHtml = task.c.text ? linkifyHtml(task.c.text) : '<span class="task-text-placeholder">Новая задача</span>';
+      var taskInner = task.c.text ? taskTextInner(task.c.text, linkifyHtml) : null; // картинки — слева от текста (ТЗ 05.10)
+      var textHtml = taskInner ? taskInner.html : '<span class="task-text-placeholder">Новая задача</span>';
       var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
       // Обрезка по строкам + шеврон "показать полностью" — та же карта expandedTaskIds, что и в
       // обычных вкладках задач (см. renderTaskRowView): это те же самые задачи, тот же id, так что
       // развёрнутость здесь и там — одно и то же состояние.
       var isExpanded = !!expandedTaskIds[id];
       body.innerHTML =
-        '<span class="task-text-view' + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
+        '<span class="task-text-view' + (taskInner && taskInner.hasImg ? ' task-has-img' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
         '<span class="task-actions">' +
           '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
           taskDeleteBtnHtml() +
@@ -20847,7 +20931,8 @@
     // архивная запись — та же самая задача, тот же id, так что развёрнутость логично не
     // сбрасывается при архивации/извлечении.
     var rowsHtml = shown.map(function(t){
-      var label = t.c.text ? escapeHtml(t.c.text) : "Без названия";
+      var labelInner = t.c.text ? taskTextInner(t.c.text, escapeHtml) : null; // картинки — слева от текста (ТЗ 05.10)
+      var label = labelInner ? labelInner.html : "Без названия";
       var isExpanded = !!expandedTaskIds[t.id];
       // isGroup: та же подпись "Создал: … · Выполнил: …", что и на активной вкладке; у личного
       // архива createdBy нет вовсе, buildTaskJointSignatureHtml сама вернёт "" — отдельно проверять
@@ -20856,7 +20941,7 @@
       return '<div class="task-row" data-id="' + t.id + '">' +
         '<div class="task-body task-archive-body" data-id="' + t.id + '">' +
           archiveJointSignatureHtml +
-          '<span class="task-text-view task-archive-text' + (isExpanded ? '' : ' task-text-clamped') + '">' + label + '</span>' +
+          '<span class="task-text-view task-archive-text' + (labelInner && labelInner.hasImg ? ' task-has-img' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + label + '</span>' +
           '<span class="task-actions">' +
             '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
             '<button type="button" class="task-icon-btn task-restore-btn" data-id="' + t.id + '" title="Извлечь из архива">' + RESTORE_ICON_SVG + '</button>' +

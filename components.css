@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 4.0 (05.10) — структурная правка (ТЗ пользователя от 05.10): картинки ЗАДАЧ в режиме просмотра — слева от текста квадратом в две строки (3em), текст обтекает: новые `.task-has-img` (на `.task-text-view`), `.task-img-wrap.task-img-side-item` (float:left), правило обрезки `.task-text-view.task-has-img.task-text-clamped` (max-height на 7 строк вместо line-clamp). Миниатюра `.task-img-wrap` в комментариях и прочих местах не менялась.
    Версия: 3.4.5 (30.09) — тема 5: отметка прочитанной главы (`.chapter-item input:checked + label`, в т.ч. `.clr-green`) — цвета шапки; дополнительные отметки `.clr-blue`/`.clr-red` не затронуты.
    Версия: 3.4.4 (30.09) — тема 5 (аметист): заливка прогресса книг `.book-fill` — цвета шапки (тот же градиент `var(--wood)` → `var(--wood-dark)`, что у `header` в base.css), плюс светлый контур у `.book-name` для читаемости поверх тёмной заливки; общий прогресс `.xp-fill` не менялся.
    Версия: 3.4.3 (29.09) — ЭКСПЕРИМЕНТ: красная строка в книгах (`.book-reader-p`) через `::before` вместо `text-indent` (см. комментарий у правила; проверка «язычков» выделения на первом слове абзаца).
@@ -3262,6 +3263,35 @@
   .task-img-wrap.task-img-loaded{ cursor:pointer; border-color:transparent; }
   .task-img-wrap img{ width:100%; height:100%; object-fit:cover; display:block; }
   .task-img-wrap.task-img-missing{ opacity:.4; }
+  /* ---------- ТЗ 05.10: картинки ЗАДАЧ в режиме просмотра — слева от текста,
+     квадрат в две строки (line-height .task-body = 1.5, значит 2 строки = 3em и
+     размер растёт/падает вместе с шрифтом «Аа»), текст обтекает (float).
+     Разметку делает taskTextInner в my.js (только строки задач: вкладки задач
+     включая «Общие», архив, ревью, «Все задачи проекта»; комментарии и прочие
+     места остаются с миниатюрой .task-img-wrap посреди строки, выше).
+     .task-has-img — на .task-text-view строки, где есть картинки: display:
+     flow-root, чтобы блок вмещал float (одна короткая строка + картинка).
+     Обрезка длинной задачи у такой строки — не -webkit-line-clamp (в нём
+     дети становятся flex-элементами, float не работает), а max-height на 7
+     строк (= TASK_CLAMP_LINES/modals.css) + overflow:hidden; многоточия нет, но
+     шеврон «показать полностью» работает как раньше (scrollHeight > clientHeight).
+     margin-bottom 0 — иначе третья строка тоже сдвинулась бы от картинки. ---------- */
+  .task-text-view.task-has-img{
+    display:flow-root;
+    min-height:3em;
+  }
+  .task-text-view.task-has-img.task-text-clamped{
+    overflow:hidden;
+    max-height:calc(7 * 1.5em);
+  }
+  .task-img-wrap.task-img-side-item{
+    float:left;
+    display:flex;
+    width:3em;height:3em;
+    margin:0 .5em 0 0;
+    vertical-align:baseline;
+  }
+  .task-img-wrap.task-img-side-item svg{ width:1.1em; height:1.1em; }
   /* ---------- полноэкранный просмотр вставленной в заметку картинки
      (клик по .cm-md-image выше, см. openImageViewer/setWrapToImage в
      mdeditor.js) — отдельный оверлей прямо в document.body (не внутри
