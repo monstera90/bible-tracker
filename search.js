@@ -56,6 +56,9 @@ window.initSearchModule = function(deps){
   var getSearchableTasks = deps.getSearchableTasks;
   var renderTaskRowEdit = deps.renderTaskRowEdit;
   var bindTaskRowActions = deps.bindTaskRowActions;
+  // общая задача при роли «только чтение» (my.js, isTaskReadOnly): в её строке нет кнопок
+  // удаления/правки/архива/переноса — как на вкладке «Общие задачи»
+  var isTaskReadOnly = deps.isTaskReadOnly;
   var fitTaskActions = deps.fitTaskActions;
   // иконки-пиктограммы приходят геттерами (не голыми строками) — PENCIL_
   // ICON_SVG в my.js объявлен ПОСЛЕ создания модулей типа MdEditor/Search
@@ -479,19 +482,21 @@ window.initSearchModule = function(deps){
     html += escapeHtml(text.slice(last));
     var isProjectsTab = found.c.tab === "projects";
     var flagClass = found.c.flag === "red" ? " flag-red" : (found.c.flag === "yellow" ? " flag-yellow" : "");
+    var ro = !!(isTaskReadOnly && isTaskReadOnly(id));
     body.innerHTML =
       '<span class="task-text-view">' + (text ? html : '<span class="task-text-placeholder">Новая задача</span>') + '</span>' +
       '<span class="task-actions">' +
-        '<button type="button" class="task-icon-btn task-delete-btn" title="Удалить">' + getCrossIcon() + '</button>' +
-        '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + getPencilIcon() + '</button>' +
-        '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + getCheckIcon() + '</button>' +
-        '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + getMoveIcon() + '</button>' +
+        (ro ? '' : '<button type="button" class="task-icon-btn task-delete-btn" title="Удалить">' + getCrossIcon() + '</button>') +
+        (ro ? '' : '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + getPencilIcon() + '</button>') +
+        (ro ? '' : '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + getCheckIcon() + '</button>') +
+        (ro ? '' : '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + getMoveIcon() + '</button>') +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + getNextIcon() + '</button>' : '') +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
         getReminderBtnHtml(found) +
       '</span>';
     var onAfterAction = function(){ removeSearchTaskRow(id); };
-    body.querySelector(".task-edit-btn").addEventListener("click", function(){
+    var editBtn = body.querySelector(".task-edit-btn");
+    if(editBtn) editBtn.addEventListener("click", function(){
       renderTaskRowEdit(id, found.c.tab, onAfterAction);
     });
     bindTaskRowActions(body, id, found.c.tab, onAfterAction);

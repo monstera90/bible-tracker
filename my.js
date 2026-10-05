@@ -6581,13 +6581,15 @@
   // редактирования, что и в rerenderAllFromState (не разрушаем открытое поле ввода фоновым
   // обновлением).
   function rerenderJointTasksTabIfOpen(){
-    if(currentSettingsTab !== "jointtasks"){ syncEngineLog("Общие задачи: перерисовка пропущена — открыта другая вкладка (" + currentSettingsTab + ")"); return; }
+    // Red и «В работе» — витрины, в которых лежат и общие задачи (см. getTasksForTab), поэтому
+    // чужие правки общих задач должны обновлять и их.
+    if(currentSettingsTab !== "jointtasks" && currentSettingsTab !== "red" && currentSettingsTab !== "worktasks"){ syncEngineLog("Общие задачи: перерисовка пропущена — открыта другая вкладка (" + currentSettingsTab + ")"); return; }
     if(!settingsModalOverlay || !settingsModalOverlay.classList.contains("open")){ syncEngineLog("Общие задачи: перерисовка пропущена — окно настроек закрыто"); return; }
     var activeEl = document.activeElement;
     var isEditingNow = !!(activeEl && activeEl.classList && activeEl.classList.contains("task-editable"));
     if(isEditingNow){ syncEngineLog("Общие задачи: перерисовка пропущена — сейчас идёт редактирование строки"); return; }
     syncEngineLog("Общие задачи: перерисовка вкладки после приёма чужих правок");
-    renderTaskTabList("jointtasks");
+    renderTaskTabList(currentSettingsTab);
   }
 
   // Единая точка входа для "освежить общие задачи" — вызывается при открытии вкладки (см.
@@ -7128,7 +7130,11 @@
     getSearchableNotes: MdEditor.getSearchableNotes,
     // архив (выполненные задачи) в поиске не участвует — по ТЗ
     getSearchableTasks: function(){
-      return getAllTasks().filter(function(t){ return t.c.checked !== true; });
+      var list = getAllTasks();
+      if(isGroupTasksActive()){
+        try{ list = list.concat(getAllGroupTasks()); }catch(e){}
+      }
+      return list.filter(function(t){ return t.c.checked !== true; });
     },
     renderTaskRowEdit: renderTaskRowEdit,
     bindTaskRowActions: bindTaskRowActions,
@@ -7139,6 +7145,7 @@
     getNextIcon: function(){ return LINK_NEXT_ICON_SVG; },
     getCrossIcon: function(){ return CROSS_SMALL_ICON_SVG; },
     getReminderBtnHtml: taskReminderBtnHtml,
+    isTaskReadOnly: function(id){ return isGroupTaskId(id) && isGroupTasksReadOnly(); },
     // кнопка режима чтения на вкладке "Поиск" — тот же переключатель и та же иконка
     // (.reading-mode-btn), что в редакторе заметок/ридере книг, см. toggleReadingMode ниже по файлу
     // (function-декларации, поднимаются в начало IIFE).
@@ -9656,7 +9663,14 @@
     // Отметка "открыта сегодня"/"открыта только что" для подсветки язычков — red не имеет своего
     // renderSettingsTabX, идёт через общий renderSettingsTabTask(tab) ниже, поэтому отмечается
     // отдельной строкой, а не внутри какой-то ветки рендера.
-    if(tab === "red") markRedOpenedToday();
+    if(tab === "worktasks" && sharedGroup && isGroupTasksActive()) refreshJointTasksData();
+    if(tab === "red"){
+      markRedOpenedToday();
+      // общие задачи с отметкой показываются и здесь — освежаем их из облака при заходе, как и на
+      // самой «Общие задачи» (там это делает renderTaskTabList; здесь — только при настоящем
+      // переключении вкладки, не при каждой перерисовке после тапа по кружку)
+      if(sharedGroup && isGroupTasksActive()) refreshJointTasksData();
+    }
     if(tab === "mood"){ markMoodOpenedToday(); renderSettingsTabMood(); }
     else if(tab === "year") renderSettingsTabYear();
     else if(tab === "versions") renderSettingsTabVersions();
@@ -17831,15 +17845,26 @@
       // проверить), из какой бы вкладки она ни была, плюс на всякий случай задачи с «настоящим»
       // tab==="worktasks" (могли остаться из более старой версии данных, когда worktasks ещё была
       // обычным местом хранения, до ТЗ от 13.09 про пиктограмму-чемоданчик)
-      return getAllTasks().filter(function(t){
+      // общие задачи (чемоданчик/напоминание лежат в их же записи) — тоже, как и на Red
+      var workSource = getAllTasks();
+      if(isGroupTasksActive()){
+        try{ workSource = workSource.concat(getAllGroupTasks()); }catch(e){}
+      }
+      return workSource.filter(function(t){
         if(t.c.checked === true) return false;
         return t.c.tab === "worktasks" || getTaskWorkState(t) !== "off" || hasTaskReminder(t);
       }).sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
     }
     if(tab === "red"){
       // витрина: любая незакрытая задача с красной/жёлтой отметкой, из какой бы вкладки она ни
-      // была.
-      var redList = getAllTasks().filter(function(t){
+      // была. Общие задачи (хранилище группы, id "gt…") — тоже: отметка ставится на них тем же
+      // кружком и лежит в их же записи (c.flag), поэтому берём оба источника. createdAt у личных и
+      // общих задач — один и тот же Date.now(), сортировка по нему корректна для смешанного списка.
+      var redSource = getAllTasks();
+      if(isGroupTasksActive()){
+        try{ redSource = redSource.concat(getAllGroupTasks()); }catch(e){}
+      }
+      var redList = redSource.filter(function(t){
         if(t.c.checked === true) return false;
         return t.c.tab === "red" || t.c.flag === "red" || t.c.flag === "yellow";
       });
@@ -18328,7 +18353,12 @@
     // Остальные функции этого раздела
     // (saveTaskData/getTasksForTab/checkTaskDone/deleteTaskPermanently и т.д.) эту развилку уже
     // делают — здесь её не было.
-    var all = isGroupTaskId(id) ? getAllGroupTasks() : getAllTasks();
+    // Края считаем по ОБЪЕДИНЁННОМУ списку (личные + общие): на вкладке Red они лежат в одном
+    // списке, и «в начало» общей задачи должно поставить её над личными, а не только над общими.
+    var all = getAllTasks();
+    if(isGroupTasksActive()){
+      try{ all = all.concat(getAllGroupTasks()); }catch(e){}
+    }
     function keyOf(t){ return t.c.createdAt != null ? t.c.createdAt : t.t; }
     var edgeKey = all.reduce(function(acc, t){
       if(t.id === id) return acc;
@@ -18648,6 +18678,13 @@
       var keyTs = Number((k.slice("taskcompletion:".length).split("-")[0]));
       var day = startOfDay(keyTs > 0 ? keyTs : rec.t);
       (byDay[day] = byDay[day] || []).push(rec.c);
+    });
+    // закрытые мной общие задачи — отдельной записи о выполнении у них нет, берём из архива группы
+    // (только чтение, ничего не пишем)
+    getGroupArchivedTasksClosedByMe().forEach(function(t){
+      if(!t.c.checkedAt) return;
+      var gday = startOfDay(t.c.checkedAt);
+      (byDay[gday] = byDay[gday] || []).push({text: t.c.text || "Без названия", tab: "jointtasks"});
     });
     return byDay;
   }
@@ -19156,8 +19193,25 @@
     });
     return total;
   }
+  // Закрытые ОБЩИЕ задачи, которые закрыло это устройство (completedBy), — для статистики. Закрытые
+  // другим участником сюда не входят: «Обзор» — личная статистика. Чтобы считать все — убрать
+  // проверку completedBy. Источник — кэш архива группы (освежается в refreshJointTasksData).
+  function getGroupArchivedTasksClosedByMe(){
+    if(!sharedGroup || !isGroupTasksActive()) return [];
+    var me = getDeviceId();
+    try{
+      return getGroupArchivedTasksAll().filter(function(t){ return t.c.completedBy === me; });
+    }catch(e){ return []; }
+  }
   function getArchivedTasksSince(startTs){
-    return getArchivedTasksAll().filter(function(t){ return (t.c.checkedAt || 0) >= startTs; });
+    return getArchivedTasksAll().concat(getGroupArchivedTasksClosedByMe())
+      .filter(function(t){ return (t.c.checkedAt || 0) >= startTs; })
+      .sort(function(a,b){ return (b.c.checkedAt||0) - (a.c.checkedAt||0); });
+  }
+  // задача по id для экрана «Обзор»: закрытая общая задача лежит в архиве группы, а не в /tasks
+  function getAnyTaskById(id){
+    if(isGroupTaskId(id)) return getGroupArchivedTaskById(id) || getGroupTaskById(id);
+    return getTaskById(id);
   }
   // самая частая отметка настроения за период (одно эмодзи, без подписи)
   function getMoodTopEmojiSince(startTs){
@@ -19310,7 +19364,8 @@
 
   // «Извлечь из архива» на этом экране — задача возвращается во «Входящие».
   function restoreTaskToInboxFromReview(id){
-    if(isGroupTaskId(id)) return;
+    // общая задача возвращается в «Общие задачи» (в личные «Входящие» она не переезжает)
+    if(isGroupTaskId(id)){ restoreGroupTaskFromArchive(id); return; }
     var task = getTaskById(id);
     if(!task || !task.c.checked) return;
     if(task.c.completionKey){
@@ -19328,6 +19383,19 @@
   // (last-write-wins) не подтянет правку; дата выполнения от этого не съезжает, она берётся из
   // ключа (см. getTaskCompletionsByDay)
   function setDoneTaskText(id, text){
+    if(isGroupTaskId(id)){
+      if(!sharedGroup || isGroupTasksReadOnly()) return;
+      var arch = getGroupArchivedTaskById(id);
+      if(arch){
+        var c3 = Object.assign({}, arch.c);
+        c3.text = text;
+        getGroupArchiveBinding().save(id, c3).catch(logGroupArchiveSyncError);
+        if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
+      }else{
+        setTaskText(id, text);
+      }
+      return;
+    }
     var task = getTaskById(id);
     if(!task) return;
     var key = task.c.completionKey;
@@ -19358,7 +19426,7 @@
               '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
               '<button type="button" class="task-icon-btn review-task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
               '<button type="button" class="task-icon-btn review-task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
-              '<button type="button" class="task-icon-btn review-task-restore-btn" title="Вернуть во Входящие">' + RESTORE_ICON_SVG + '</button>' +
+              '<button type="button" class="task-icon-btn review-task-restore-btn" title="' + (isGroupTaskId(t.id) ? 'Вернуть в общие задачи' : 'Вернуть во Входящие') + '">' + RESTORE_ICON_SVG + '</button>' +
             '</span>' +
           '</div>' +
         '</div>';
@@ -19398,7 +19466,7 @@
         if(!editing) return;
         editing = false;
         var newText = getEditableNoteText(textEl).replace(/\n+$/, "").trim();
-        var cur = getTaskById(id);
+        var cur = getAnyTaskById(id);
         if(cur && (cur.c.text || "") !== newText) setDoneTaskText(id, newText);
         renderReviewTabContent();
       }
@@ -19406,7 +19474,7 @@
         editBtn.addEventListener("click", function(){
           if(editing){ reviewPendingEdit = null; commit(); return; }
           flushReviewEdit();
-          var cur = getTaskById(id);
+          var cur = getAnyTaskById(id);
           if(!cur) return;
           editing = true;
           reviewPendingEdit = commit;
@@ -19441,7 +19509,7 @@
       }
       if(copyBtn){
         copyBtn.addEventListener("click", function(){
-          var current = getTaskById(id);
+          var current = getAnyTaskById(id);
           var txt = editing ? getEditableNoteText(textEl) : (current && current.c.text ? current.c.text : "");
           copyTaskTextToClipboard(txt);
           copyBtn.innerHTML = CHECK_ICON_SVG;
@@ -19846,7 +19914,8 @@
     // больше не нужна, когда задачу укоротили редактированием (см. updateTaskExpandBtn).
     var isExpanded = !!expandedTaskIds[id];
     var jointSignatureHtml = buildTaskJointSignatureHtml(task.c);
-    var isJointReadOnlyRow = tabKey === "jointtasks" && isGroupTasksReadOnly();
+    // не только вкладка «Общие задачи»: общая задача может лежать и на Red
+    var isJointReadOnlyRow = (tabKey === "jointtasks" || isGroupTaskId(id)) && isGroupTasksReadOnly();
     body.innerHTML =
       jointSignatureHtml +
       '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
