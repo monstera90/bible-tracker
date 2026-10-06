@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Долгое нажатие на иконку приложения → «Диагностика»: проверка хранилища, OPFS, камеры и сетевых сервисов. -->
+    <shortcut
+        android:enabled="true"
+        android:shortcutId="diag"
+        android:shortcutShortLabel="@string/shortcut_diag">
+        <intent
+            android:action="com.app.lifetracker.DIAG"
+            android:targetClass="com.app.lifetracker.MainActivity"
+            android:targetPackage="com.app.lifetracker" />
+    </shortcut>
+</shortcuts>
