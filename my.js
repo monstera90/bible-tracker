@@ -7900,7 +7900,7 @@
     if(qrLibLoaded) return Promise.resolve();
     return new Promise(function(resolve, reject){
       var s = document.createElement("script");
-      s.src = "https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js";
+      s.src = "vendor/qrcode.min.js"; // локальная копия (davidshimjs-qrcodejs@0.0.2), без CDN: нужна работа без сети в APK
       s.onload = function(){ qrLibLoaded = true; resolve(); };
       s.onerror = reject;
       document.head.appendChild(s);
@@ -7910,7 +7910,7 @@
     if(jsqrLibLoaded) return Promise.resolve();
     return new Promise(function(resolve, reject){
       var s = document.createElement("script");
-      s.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
+      s.src = "vendor/jsQR.js"; // локальная копия (jsqr@1.4.0), без CDN
       s.onload = function(){ jsqrLibLoaded = true; resolve(); };
       s.onerror = reject;
       document.head.appendChild(s);
@@ -9283,7 +9283,18 @@
     try{ SW_REGISTRATION.update().catch(function(){}); }catch(e){}
   }
 
-  if("serviceWorker" in navigator && (location.protocol === "http:" || location.protocol === "https:")){
+  if(window.LifeTrackerNative){
+    // Нативная оболочка (APK, ПЕРЕЕЗД_В_APK.md, шаг 2): service worker НЕ регистрируем — файлы отдаёт
+    // WebAssetServer оболочки, а обновление веб-части делает сама оболочка. Версию берём из version.json
+    // бандла (его кладёт tools/android_prepare.py из APP_VERSION в sw.js). В браузере этой ветки нет.
+    fetch("./version.json", {cache: "no-store"}).then(function(res){
+      return res.json();
+    }).then(function(info){
+      applyVersionToHeader(info && info.version);
+    }).catch(function(){
+      applyVersionToHeader(null);
+    });
+  } else if("serviceWorker" in navigator && (location.protocol === "http:" || location.protocol === "https:")){
     var swHadController = !!navigator.serviceWorker.controller;
     requestVersionFromSW();
     logInstallReport();

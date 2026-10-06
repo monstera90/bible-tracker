@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.38.39";
+const APP_VERSION = "v0.38.40";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -168,7 +168,11 @@ const ASSETS = [
   "./DejaVuSans.ttf",
   "./icon-192x192.png",
   "./icon-512x512.png",
-  "./book-cover-placeholder.jpg"
+  "./book-cover-placeholder.jpg",
+  "./vendor/qrcode.min.js",
+  "./vendor/jsQR.js",
+  "./vendor/sql-wasm.js",
+  "./vendor/sql-wasm.wasm"
 ];
 
 // Проверяет ЛОКАЛЬНО (без единого обращения к сети — только cache.match),
