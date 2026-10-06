@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ic_launcher_src.png копируется из icon-512x512.png скриптом tools/android_prepare.py.
+     inset 16.67% = картинка целиком помещается в безопасную зону адаптивной иконки (круг 66 из 108 dp). -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_launcher_src"
+    android:inset="16.67%" />
