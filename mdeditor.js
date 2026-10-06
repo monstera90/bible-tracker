@@ -2197,6 +2197,92 @@ window.initMdEditorModule = function(deps){
     }).catch(function(){});
   }
 
+
+  // ---------------------------------------------------------------------
+  // ТЗ ПЕРЕЕЗД_В_APK, шаг 2а (06.10.2026), 12.5.3, 12.5.7, 12.5.11.
+  // Экспорт/импорт настроек устройства из IndexedDB mdEditorDB (белый список) и индекс id заметок.
+  // Все функции читают/пишут через те же openDb/idbSet — второго независимого открытия базы нет.
+  // Экспорт ТОЛЬКО читает.
+  // ---------------------------------------------------------------------
+  var DEVICE_SETTINGS_IDB_KEYS = ["fontSizeStep", "fontSizeStepReading", "lastNote", "openedIndex"];
+  // idbGet превращает любое «ложное» значение (например, шаг шрифта 0) в null; для выгрузки
+  // нужно отличать «ключа нет» от 0, поэтому здесь свой чтец без такого приведения.
+  function idbGetRaw(key){
+    return openDb().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(STORE_NAME, "readonly");
+        var r = tx.objectStore(STORE_NAME).get(key);
+        r.onsuccess = function(){ resolve(r.result); };
+        r.onerror = function(){ reject(r.error); };
+      });
+    }).catch(function(){ return undefined; });
+  }
+  // true/false; null — локальный кэш заметок ещё не загружен (ответ неизвестен, вызывающий код не должен
+  // считать заметку отсутствующей).
+  function noteExistsById(id){
+    if(!id) return false;
+    if(!notesReady) return null;
+    var rec = notesMap.get(id);
+    return !!(rec && !rec.deleted && rec.name);
+  }
+  // [{path, name, id}] по всем живым заметкам — раздел notesIndex в data.json.
+  function getNotesIndexForExport(){
+    var out = [];
+    notesMap.forEach(function(rec, id){
+      if(!rec || rec.deleted || !rec.name) return;
+      out.push({ path: rec.path || "", name: rec.name, id: id });
+    });
+    return out;
+  }
+  // Promise<{ключ: значение}> — только ключи, реально лежащие в базе; значения копируются через JSON,
+  // чтобы в архив не попало ничего, кроме простых данных.
+  function getDeviceSettingsForExport(){
+    return Promise.all(DEVICE_SETTINGS_IDB_KEYS.map(function(k){ return idbGetRaw(k); })).then(function(vals){
+      var out = {};
+      DEVICE_SETTINGS_IDB_KEYS.forEach(function(k, i){
+        var v = vals[i];
+        if(v === undefined || v === null) return;
+        try{ out[k] = JSON.parse(JSON.stringify(v)); }catch(e){}
+      });
+      return out;
+    });
+  }
+  // Применяет только ключи из белого списка и только значения ожидаемого типа; остальное
+  // игнорируется. Promise<число применённых ключей>.
+  function applyDeviceSettingsFromImport(obj){
+    if(!obj || typeof obj !== "object") return Promise.resolve(0);
+    var jobs = [];
+    DEVICE_SETTINGS_IDB_KEYS.forEach(function(k){
+      if(!Object.prototype.hasOwnProperty.call(obj, k)) return;
+      var v = obj[k];
+      var ok = (k === "fontSizeStep" || k === "fontSizeStepReading")
+        ? (typeof v === "number" && isFinite(v))
+        : (v && typeof v === "object" && !Array.isArray(v));
+      if(!ok) return;
+      jobs.push(idbSet(k, v));
+    });
+    return Promise.all(jobs).then(function(){ return jobs.length; });
+  }
+  // Все ключи хранилища handles — для самопроверки полноты экспорта (12.5.11, п.2).
+  function listDeviceSettingsKeys(){
+    return openDb().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(STORE_NAME, "readonly");
+        var r = tx.objectStore(STORE_NAME).getAllKeys();
+        r.onsuccess = function(){ resolve(r.result || []); };
+        r.onerror = function(){ reject(r.error); };
+      });
+    }).catch(function(){ return []; });
+  }
+  // Как persistNotesCache, но возвращает Promise: импорт ждёт запись кэша заметок ПЕРЕД
+  // перезагрузкой страницы (иначе заметки, которые ещё не ушли в облако, можно потерять).
+  function persistNotesNow(){
+    if(notesCacheSaveTimer){ clearTimeout(notesCacheSaveTimer); notesCacheSaveTimer = null; }
+    var plain = {};
+    notesMap.forEach(function(rec, id){ plain[id] = rec; });
+    return idbSet(NOTES_CACHE_KEY, plain);
+  }
+
   // Единая точка предзагрузки: вызывается один раз при старте модуля (см.
   // низ файла), а также из initNotesModule на случай, если синхронизация
   // была настроена уже ПОСЛЕ старта модуля (тогда getSyncId() при первом
@@ -2514,8 +2600,18 @@ window.initMdEditorModule = function(deps){
   // есть; своя строка метаданных допишется при первом реальном
   // автосохранении, как и у любой "старой" заметки без неё (см.
   // parseNoteMeta/virtualLegacyDatePairRu выше). ----
-  function createImportedNoteRecord(name, path, text){
-    var id = generateId();
+  // 06.10 (ТЗ ПЕРЕЕЗД_В_APK, шаг 2а, 12.5.3): необязательный preferredId — id заметки из архива
+  // (раздел notesIndex в data.json). Используется, только если он безопасен для пути в облаке и не
+  // занят ЖИВОЙ заметкой (запись-тумбстоун с тем же id оживает: адаптер движка при put снимает
+  // deleted, а saveRecord ставит новую метку времени). Иначе, как раньше, выдаётся новый id.
+  var IMPORTED_NOTE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+  function createImportedNoteRecord(name, path, text, preferredId){
+    var id = null;
+    if(typeof preferredId === "string" && IMPORTED_NOTE_ID_RE.test(preferredId)){
+      var occupied = notesMap.get(preferredId);
+      if(!occupied || occupied.deleted) id = preferredId;
+    }
+    if(!id) id = generateId();
     binding.save(id, { name: name, path: path || "", text: text || "" });
     var rec = notesMap.get(id);
     nameIndex.set(name.toLowerCase(), id);
@@ -2638,7 +2734,7 @@ window.initMdEditorModule = function(deps){
       deleteNoteRecord(id);
     });
     entries.forEach(function(entry){
-      createImportedNoteRecord(entry.name, entry.path, entry.text);
+      createImportedNoteRecord(entry.name, entry.path, entry.text, entry.id);
     });
     rebuildTree();
     var container = document.getElementById("settingsTabContent");
@@ -4558,7 +4654,7 @@ window.initMdEditorModule = function(deps){
   // propagateRenameInMemory выше. Возвращает false, если заметка не найдена.
   function appendTextToNoteId(id, extra){
     var rec = notesMap.get(id);
-    if(!rec) return false;
+    if(!rec || rec.deleted) return false; // 06.10: тумбстоун — заметки фактически нет (12.5.3, п.2)
     var m = META_LINE_RE.exec(rec.text || "");
     var metaLen = m ? m[0].length : 0;
     var head = rec.text.slice(0, metaLen);
@@ -5958,6 +6054,13 @@ window.initMdEditorModule = function(deps){
     // appendTextToNoteId выше.
     createNoteSilently: createNoteSilently,
     appendTextToNoteId: appendTextToNoteId,
+    // ТЗ ПЕРЕЕЗД_В_APK, шаг 2а (06.10.2026): экспорт/импорт как постоянная функция (12.5.7, 12.5.11)
+    noteExistsById: noteExistsById,
+    getNotesIndexForExport: getNotesIndexForExport,
+    getDeviceSettingsForExport: getDeviceSettingsForExport,
+    applyDeviceSettingsFromImport: applyDeviceSettingsFromImport,
+    listDeviceSettingsKeys: listDeviceSettingsKeys,
+    persistNotesNow: persistNotesNow,
     // READER_PLAN.md, Этап D, шаг 14 (11.09) — иллюстрации книги в той же
     // заметке: openImageViewer — тот же полноэкранный просмотр с зумом,
     // что и у картинок в "Моём блокноте" (ридер своего не заводит);

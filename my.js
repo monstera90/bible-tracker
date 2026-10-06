@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 54.0 (05.10) — (1) ридер книг: смена размера шрифта «Аа» («+»/«−») больше не сдвигает читаемое место — `changeBookReaderFontSize` запоминает место в тексте (`captureHyphensAnchor`) и возвращает его после смены и после калибровки сегментов (`keepScrollAnchorPasses`, новая общая функция рядом с `captureHyphensAnchor`); (2) картинки задач («![[имя]]») в режиме просмотра — слева от текста квадратом в две строки, текст обтекает: новые `splitTaskImages`/`taskImagesHtml`/`taskTextInner` (раздел «КАРТИНКИ ЗАДАЧ В РЕЖИМЕ ПРОСМОТРА»), применены в `renderTaskRowView`, `renderRowView` («Все задачи проекта»), строках архива и ревью, поправка `fitTaskActions`; режим редактирования и комментарии не менялись.
+   Версия: 54.1 (05.10) — картинки задач: если первая строка задачи начинается с картинки, у первой строки текста снимается красная строка (`taskTextInner`). Версия 54.0: (1) ридер книг: смена размера шрифта «Аа» («+»/«−») больше не сдвигает читаемое место — `changeBookReaderFontSize` запоминает место в тексте (`captureHyphensAnchor`) и возвращает его после смены и после калибровки сегментов (`keepScrollAnchorPasses`, новая общая функция рядом с `captureHyphensAnchor`); (2) картинки задач («![[имя]]») в режиме просмотра — слева от текста квадратом в две строки, текст обтекает: новые `splitTaskImages`/`taskImagesHtml`/`taskTextInner` (раздел «КАРТИНКИ ЗАДАЧ В РЕЖИМЕ ПРОСМОТРА»), применены в `renderTaskRowView`, `renderRowView` («Все задачи проекта»), строках архива и ревью, поправка `fitTaskActions`; режим редактирования и комментарии не менялись.
    Версия: 53.0 (03.10) — кнопка «i» в нижнем ряду ридера книг (`bookReaderInfoBtn`, самая левая кнопка ряда): полноэкранная инструкция «Книга — кнопки» (`renderBookReaderInfoScreen`, тем же приёмом, что `renderBooksInfoScreen`/`renderTaskInfoScreen`); перед показом запоминается место чтения, «домик» на экране инструкции возвращает в ту же книгу на то же место.
    Версия: 52.0 (03.10) — бэкап прежнего места основной закладки: при переносе основной закладки на 2+ главы (`BOOKMARK_JUMP_CHAPTERS`) старое место сохраняется в `book:<hash>.prevMain` (одна копия, едет в облако); новая `restoreBookPrevMain(hash)` возвращает его (текущая основная при этом сама становится «прежней»); `getBookMarginBookmarksForList` помечает основную закладку флагом `canRestorePrev` (+ `prevName`), если прежнее место отстоит на 2+ главы; в deps для mdeditor.js — `restoreBookPrevMain`.
    Версия: 51.1 (03.10) — периодическая автозакладка: пока книга открыта в авторежиме «А», раз в 45 с (`AUTO_BOOKMARK_PERIOD_MS`) основная закладка подтягивается на первый видимый абзац (если место сменилось). Новая `isBookReaderTextOnScreen` — общая проверка «текст книги на экране», её же использует `autoBookmarkOnPageHide`.
@@ -734,7 +734,14 @@
   function taskTextInner(rawText, formatter){
     var sp = splitTaskImages(rawText);
     if(!sp.names.length) return { html: formatter(rawText), hasImg: false };
-    return { html: taskImagesHtml(sp.names) + formatter(sp.text), hasImg: true };
+    var textHtml = formatter(sp.text);
+    // Если ПЕРВАЯ строка задачи начиналась с картинки — картинка стоит на месте красной строки,
+    // поэтому абзацный отступ у первой строки текста снимается (убираем .fmt-para у первого
+    // <span class="fmt-line"> — formatObsidianHtml ставит его как начало абзаца).
+    if(/^\s*!\[\[/.test(String(rawText))){
+      textHtml = textHtml.replace(/^<span class="fmt-line fmt-para">/, '<span class="fmt-line">');
+    }
+    return { html: taskImagesHtml(sp.names) + textHtml, hasImg: true };
   }
 
   // ===================== АВТОМАТИЧЕСКОЕ ФОРМАТИРОВАНИЕ И ССЫЛКИ НА ЛЮБОЙ
@@ -7915,7 +7922,260 @@
   // этот день"), и упаковывает в настоящий ZIP-архив без сторонних библиотек (формат STORED — без
   // сжатия, это самый простой валидный вариант ZIP, полностью совместимый с любым распаковщиком).
   function isoDate(ts){ return new Date(ts).toISOString().slice(0,10); }
-  var EXPORT_FORMAT_VERSION = 2;
+  var EXPORT_FORMAT_VERSION = 3; // 06.10: 3 = добавлены notesIndex и deviceSettings (ТЗ ПЕРЕЕЗД_В_APK, шаг 2а); изменения формата ТОЛЬКО аддитивные
+  var DEVICE_SETTINGS_FORMAT_VERSION = 1;
+
+  // ТЗ ПЕРЕЕЗД_В_APK, 12.5.11 (06.10.2026): ЕДИНЫЙ реестр данных для экспорта. Экспорт (collectDeviceSettingsForExport),
+  // импорт (applyDeviceSettingsFromArchive) и самопроверка полноты (exportSelfCheck) берут список отсюда.
+  // ПРАВИЛО: любой новый ключ localStorage / ключ mdEditorDB / база IndexedDB / папка OPFS / кэш с данными
+  // пользователя добавляется сюда В ТОМ ЖЕ изменении кода, которое его создаёт — либо в include (переносится),
+  // либо в exclude с причиной. После правок выполнить в консоли: exportSelfCheck() — список «unknown» должен быть пуст.
+  // state целиком (прогресс, задачи, цели, закладки заметок __mdBookmark:*, состояние книг book:*) переносится через
+  // rawState.data, отдельно здесь не перечисляется.
+  var EXPORT_REGISTRY = {
+    localStorage: {
+      include: {
+        "bibleReadingSyncId_v1": "код синхронизации (ключ шифрования облака; архив хранить как пароль)",
+        "bibleSharedGroup_v1": "привязка к группе общих задач",
+        "bibleUserDisplayName_v1": "отображаемое имя в группе",
+        "bibleFileSyncEnabled_v1": "переключатель облачной синхронизации картинок",
+        "bibleBooksSyncEnabled_v1": "переключатель облачной синхронизации книг",
+        "biblePersonalShadow_v1": "флаг теневого store личных задач",
+        "biblePersonalShadowCloud_v1": "флаг облака теневого store",
+        "biblePersonalCutover_v1": "флаг чтения личных задач из store",
+        "s89DocumentLink": "ссылка на документ S-89",
+        "s89DocumentName": "имя документа S-89",
+        "s89StartYear": "год начала S-89",
+        "workbooksLinks": "ссылки workbooks (только локально, в облако не идут)",
+        "workbooksLinkNames": "имена ссылок workbooks",
+        "flibustaOpdsUrl_v1": "настройка flibusta (OPDS)",
+        "flibustaProxyTemplate_v1": "настройка flibusta (прокси)",
+        "bibleSettingsFabVisible_v1": "переключатель интерфейса",
+        "bibleHideStatusBar_v1": "полноэкранный режим",
+        "leftHandedLayout": "левша",
+        "bibleBookColumns_v1": "колонки списка книг",
+        "bibleBooksViewMode_v1": "вид списка книг",
+        "bibleBooksHideTitles_v1": "скрытие заголовков книг",
+        "bibleBookCoverDisabled_v1": "отключение обложек",
+        "bibleReadingMode_v1": "режим чтения",
+        "bibleRedSortByFlag_v1": "сортировка красных задач",
+        "bibleNextHideLinkedTasks_v1": "переключатель «Дальше»",
+        "bibleGoalsBandExpanded_v1": "развёрнутость полосы целей",
+        "bibleSet2Unlocked_v1": "разблокировка набора 2",
+        "bibleHyphens_v1": "переносы слов (копия в IndexedDB bibleHyphensDB_v1 восстанавливается кодом)",
+        "bibleLastOpenedBook_v1": "последняя открытая книга",
+        "bibleCelebrationShown_v1": "поздравление уже показано",
+        "tabScrollPercents_v1": "позиции прокрутки вкладок",
+        "bibleSettingsLastTab_v1": "последняя вкладка настроек",
+        "bibleSettingsLastTabSet_v1": "последний набор вкладок настроек",
+        "jwlMergeState_v1": "состояние слияния JW Library (по нему определяются удаления); проверять размер",
+        "taskRemindersFired_v1": "уже показанные напоминания задач"
+      },
+      exclude: {
+        "bibleReadingProgress_v2": "это сам state, идёт через rawState",
+        "bibleReadingProgress_v2_notes": "старый запасной путь заметок state, идёт через rawState",
+        "bibleReadingProgress_v1": "старый формат state, не используется",
+        "__migrated_v2": "флаг одноразовой миграции",
+        "bibleStateMarker_v1": "технический маркер синхронизации",
+        "bibleFileUploadBackoff_v1": "технический таймер повторов",
+        "bibleCloudFilteredGet_v1": "технический флаг",
+        "bibleCloudGetCompare_v1": "технический флаг",
+        "taskListOrderAsc_v1": "одноразовая миграция",
+        "commentsOrderAsc_v1": "одноразовая миграция",
+        "bibleSwInstallReportShownAt_v1": "технический отчёт об установке",
+        "bibleProjectPickerResume_v1": "решение заказчика (Q16 C): временная отметка экрана",
+        "bibleProjectPickerScrollMap_v1": "решение заказчика (Q16 C): мала польза",
+        "ipkdLastOpenedDate_v1": "решение заказчика (Q16 C)",
+        "moodLastOpenedDate_v1": "решение заказчика (Q16 C)",
+        "redLastOpenedDate_v1": "решение заказчика (Q16 C)",
+        "bibleSubtitleExtractedText_v1": "решение заказчика (Q16 C): извлекается заново",
+        "bibleSubtitleExtractScroll_v1": "решение заказчика (Q16 C)",
+        "s89TemplateFile": "решение заказчика: подложка приходит через облако",
+        "bibleOfflineMode_v1": "решение заказчика: не переносить",
+        "bibleDeviceId_v1": "id устройства, у каждого устройства свой",
+        "bibleDebugMode_v1": "технический режим отладки",
+        "bibleDebugPersistLog_v1": "журнал отладки"
+      },
+      excludePrefixes: {
+        "bibleGroupTasksSeen_v1_": "решение заказчика (Q16 C): пересоздаётся",
+        "bibleGroupTasksCache_v1_": "кэш из облака",
+        "bibleGroupMemberNames_v1_": "кэш из облака",
+        "bibleGroupArchiveCache_v1_": "кэш из облака",
+        "bibleGroupAdminMigrated_v1_": "повторная проверка безопасна (12.5.2, C)",
+        "syncEngineTransportMarker_": "ПЕРЕНОСИТЬ НЕЛЬЗЯ: описывает локальную копию этого устройства (12.5.12)",
+        "syncEngineTransportCloudTimes_": "ПЕРЕНОСИТЬ НЕЛЬЗЯ: снимок времён облака (12.5.12)"
+      }
+    },
+    mdEditorDB: {
+      include: {
+        "fontSizeStep": "размер шрифта заметок",
+        "fontSizeStepReading": "размер шрифта режима чтения",
+        "lastNote": "последняя открытая заметка и позиция (содержит id заметки)",
+        "openedIndex": "даты открытия заметок («Забытые заметки»)"
+      },
+      exclude: {
+        "notesCache_v1": "кэш заметок; сами заметки идут через notes/ и notesIndex",
+        "imagesCleanupWarned": "технический флаг предупреждения",
+        "bookmarks": "устаревший ключ, пустой массив для миграции"
+      }
+    },
+    indexedDB: {
+      excludeNames: {
+        "bibleNotesDB_v1": "хранит ключи notes:<id> из state; уходят в экспорт внутри rawState",
+        "biblePersonalCutoverBackup_v1": "резервная копия технического переключателя",
+        "bibleHyphensDB_v1": "копия bibleHyphens_v1, восстанавливается кодом"
+      },
+      excludePrefixes: {
+        "biblePersonalShadow_v1_": "копия state и облака, пересоздаётся (12.5.12, Q21)"
+      }
+    },
+    opfs: {
+      include: { "images": "картинки заметок (папка images/ в архиве)", "books": "книги (папка books/ в архиве)" },
+      exclude: { "book_covers": "обложки создаются при первом открытии книги (решение заказчика)" }
+    },
+    cacheApi: {
+      excludeNames: {
+        "share-target-temp": "временный кэш share target",
+        "reminder-click-temp": "временная отметка клика по уведомлению",
+        "offline-mode-flag": "флаг офлайн-режима (решение заказчика)",
+        "sw-install-report": "технический отчёт service worker"
+      },
+      excludePrefixes: { "bible-tracker-": "кэш файлов приложения" }
+    }
+  };
+
+  function registryPrefixMatch(map, key){
+    var found = null;
+    Object.keys(map).forEach(function(pfx){ if(key.indexOf(pfx) === 0) found = pfx; });
+    return found;
+  }
+  function registryLocalStorageStatus(key){
+    var ls = EXPORT_REGISTRY.localStorage;
+    if(Object.prototype.hasOwnProperty.call(ls.include, key)) return "include";
+    if(Object.prototype.hasOwnProperty.call(ls.exclude, key)) return "exclude";
+    if(registryPrefixMatch(ls.excludePrefixes, key)) return "exclude";
+    return null;
+  }
+
+  // Только читает localStorage (экспорт ничего не меняет, 12.5.11 п.5).
+  function collectLocalStorageForExport(){
+    var out = {};
+    Object.keys(EXPORT_REGISTRY.localStorage.include).forEach(function(k){
+      try{
+        var v = localStorage.getItem(k);
+        if(v !== null && v !== undefined) out[k] = String(v);
+      }catch(e){}
+    });
+    return out;
+  }
+  // Promise<{formatVersion, localStorage, indexedDB:{mdEditorDB}}>
+  function collectDeviceSettingsForExport(){
+    var idbPart = (MdEditor && MdEditor.getDeviceSettingsForExport) ? MdEditor.getDeviceSettingsForExport() : Promise.resolve({});
+    return Promise.resolve(idbPart).catch(function(){ return {}; }).then(function(idbValues){
+      return {
+        formatVersion: DEVICE_SETTINGS_FORMAT_VERSION,
+        localStorage: collectLocalStorageForExport(),
+        indexedDB: { mdEditorDB: idbValues || {} }
+      };
+    });
+  }
+  // Импорт deviceSettings: только ключи из include реестра, только строки; неизвестные ключи и разделы
+  // игнорируются. Архив более новой версии: известные ключи применяются (изменения формата аддитивные).
+  // Promise<{applied, ignored}>
+  function applyDeviceSettingsFromArchive(ds){
+    var res = { applied: 0, ignored: 0 };
+    if(!ds || typeof ds !== "object") return Promise.resolve(res);
+    var ls = ds.localStorage && typeof ds.localStorage === "object" ? ds.localStorage : {};
+    Object.keys(ls).forEach(function(k){
+      if(!Object.prototype.hasOwnProperty.call(EXPORT_REGISTRY.localStorage.include, k) || typeof ls[k] !== "string"){
+        res.ignored++;
+        return;
+      }
+      try{ localStorage.setItem(k, ls[k]); res.applied++; }catch(e){ res.ignored++; }
+    });
+    var idbVals = ds.indexedDB && ds.indexedDB.mdEditorDB;
+    if(idbVals && MdEditor && MdEditor.applyDeviceSettingsFromImport){
+      return MdEditor.applyDeviceSettingsFromImport(idbVals).then(function(n){ res.applied += n; return res; }).catch(function(){ return res; });
+    }
+    return Promise.resolve(res);
+  }
+
+  // Самопроверка полноты экспорта (12.5.11 п.2). НЕ в интерфейсе: вызывать из консоли/отладки.
+  // Перебирает ключи localStorage и mdEditorDB, базы IndexedDB (если доступен indexedDB.databases()),
+  // корень OPFS и Cache API; всё, чего нет в EXPORT_REGISTRY, попадает в unknown*. Побочных записей нет.
+  // Promise<{ok, unknownLocalStorage, unknownMdEditorDB, unknownIndexedDB, unknownOpfs, unknownCaches, sizes, notes}>
+  function exportSelfCheck(){
+    var report = { ok: true, unknownLocalStorage: [], unknownMdEditorDB: [], unknownIndexedDB: [], unknownOpfs: [], unknownCaches: [], sizes: {}, notes: [] };
+    try{
+      for(var i = 0; i < localStorage.length; i++){
+        var k = localStorage.key(i);
+        if(k === null) continue;
+        if(!registryLocalStorageStatus(k)) report.unknownLocalStorage.push(k);
+      }
+      Object.keys(EXPORT_REGISTRY.localStorage.include).forEach(function(k){
+        var v = localStorage.getItem(k);
+        if(v !== null) report.sizes[k] = v.length;
+      });
+    }catch(e){ report.notes.push("localStorage: " + (e && e.message ? e.message : e)); }
+
+    var steps = [];
+    steps.push(((MdEditor && MdEditor.listDeviceSettingsKeys) ? MdEditor.listDeviceSettingsKeys() : Promise.resolve([])).then(function(keys){
+      (keys || []).forEach(function(k){
+        var md = EXPORT_REGISTRY.mdEditorDB;
+        if(!Object.prototype.hasOwnProperty.call(md.include, k) && !Object.prototype.hasOwnProperty.call(md.exclude, k)) report.unknownMdEditorDB.push(String(k));
+      });
+    }).catch(function(e){ report.notes.push("mdEditorDB: " + (e && e.message ? e.message : e)); }));
+
+    if(window.indexedDB && indexedDB.databases){
+      steps.push(indexedDB.databases().then(function(list){
+        (list || []).forEach(function(d){
+          var n = d && d.name;
+          if(!n || n === "mdEditorDB") return;
+          var cfg = EXPORT_REGISTRY.indexedDB;
+          if(Object.prototype.hasOwnProperty.call(cfg.excludeNames, n)) return;
+          if(registryPrefixMatch(cfg.excludePrefixes, n)) return;
+          report.unknownIndexedDB.push(n);
+        });
+      }).catch(function(e){ report.notes.push("indexedDB.databases: " + (e && e.message ? e.message : e)); }));
+    } else {
+      report.notes.push("indexedDB.databases() недоступна: перечень баз сверяется только по реестру (EXPORT_REGISTRY.indexedDB)");
+    }
+
+    if(navigator.storage && navigator.storage.getDirectory){
+      steps.push(navigator.storage.getDirectory().then(function(root){
+        var it = root.entries();
+        function next(){
+          return it.next().then(function(r){
+            if(r.done) return;
+            var name = r.value[0];
+            var o = EXPORT_REGISTRY.opfs;
+            if(!Object.prototype.hasOwnProperty.call(o.include, name) && !Object.prototype.hasOwnProperty.call(o.exclude, name)) report.unknownOpfs.push(name);
+            return next();
+          });
+        }
+        return next();
+      }).catch(function(e){ report.notes.push("OPFS: " + (e && e.message ? e.message : e)); }));
+    }
+
+    if(window.caches && caches.keys){
+      steps.push(caches.keys().then(function(names){
+        names.forEach(function(n){
+          var c = EXPORT_REGISTRY.cacheApi;
+          if(Object.prototype.hasOwnProperty.call(c.excludeNames, n)) return;
+          if(registryPrefixMatch(c.excludePrefixes, n)) return;
+          report.unknownCaches.push(n);
+        });
+      }).catch(function(e){ report.notes.push("Cache API: " + (e && e.message ? e.message : e)); }));
+    }
+
+    return Promise.all(steps).then(function(){
+      report.ok = !(report.unknownLocalStorage.length || report.unknownMdEditorDB.length || report.unknownIndexedDB.length || report.unknownOpfs.length || report.unknownCaches.length);
+      try{ console.log("exportSelfCheck", report); }catch(e){}
+      if(window.Debug) window.Debug.log("exportSelfCheck: ok=" + report.ok + ", unknown LS=" + report.unknownLocalStorage.join(",") + "; mdDB=" + report.unknownMdEditorDB.join(",") + "; idb=" + report.unknownIndexedDB.join(",") + "; opfs=" + report.unknownOpfs.join(",") + "; caches=" + report.unknownCaches.join(","));
+      return report;
+    });
+  }
+  window.exportSelfCheck = exportSelfCheck;
 
   function buildExportData(){
     var data = {
@@ -8158,7 +8418,8 @@
 
   function exportSectionHtml(){
     return '<div class="modal-section">' +
-      '<p class="modal-note">Скачает ZIP-архив со всеми вашими данными: прогресс чтения, настроение, достижение целей, задачи, заметки (с картинками) и книги.</p>' +
+      '<p class="modal-note">Скачает ZIP-архив со всеми вашими данными: прогресс чтения, настроение, достижение целей, задачи, заметки (с картинками), книги и настройки устройства.</p>' +
+      '<p class="modal-note">⚠️ Файл содержит код синхронизации — это ключ шифрования облачных данных. Храните файл как пароль и никому не отправляйте.</p>' +
       '<button class="modal-btn" id="mExportData">Экспортировать личные данные</button>' +
       '</div>';
   }
@@ -8173,6 +8434,18 @@
   // картинок/книг асинхронный (чтение OPFS), поэтому вся функция теперь ждёт Promise.all и на время
   // сборки блокирует кнопку — на устройстве с большой библиотекой книг/картинок это может занять
   // заметное время, и повторный клик собрал бы архив дважды параллельно.
+  // Предупреждение про код синхронизации при экспорте (решение заказчика по Q15, 06.10.2026).
+  function showExportSavedNotice(){
+    if(!syncId) return;
+    try{
+      modalOverlay.classList.add("open");
+      modalBox.innerHTML = modalHeader("Архив сохранён",
+          "Файл содержит код синхронизации — это ключ шифрования облачных данных. Храните его как пароль и никому не отправляйте.") +
+        '<button class="modal-btn primary" id="mBack">Понятно</button>';
+      bindClose();
+      document.getElementById("mBack").addEventListener("click", closeModal);
+    }catch(e){}
+  }
   function bindExportButton(){
     var btn = document.getElementById("mExportData");
     if(!btn) return;
@@ -8183,18 +8456,26 @@
       btn.textContent = "Собираю архив…";
       Promise.all([
         MdEditor && MdEditor.getImageFilesForExport ? MdEditor.getImageFilesForExport() : Promise.resolve([]),
-        getBookFilesForExport()
+        getBookFilesForExport(),
+        collectDeviceSettingsForExport()
       ]).then(function(results){
         var imageFiles = results[0] || [];
         var bookFiles = results[1] || [];
+        var deviceSettings = results[2] || null;
         var noteFiles = (MdEditor && MdEditor.getNotesFilesForExport) ? MdEditor.getNotesFilesForExport() : [];
         var taskFiles = [{name: "tasks.json", data: new TextEncoder().encode(JSON.stringify(getAllTasks(), null, 2))}];
 
         var data = buildExportData();
+        // 06.10 (ТЗ ПЕРЕЕЗД_В_APK, 12.5.3 и 12.1.6): id заметок и настройки устройства. Разделы лежат рядом
+        // с rawState; старые версии приложения их просто игнорируют.
+        data.notesIndex = (MdEditor && MdEditor.getNotesIndexForExport) ? MdEditor.getNotesIndexForExport() : [];
+        if(deviceSettings) data.deviceSettings = deviceSettings;
         var encoder = new TextEncoder();
         var jsonBytes = encoder.encode(JSON.stringify(data, null, 2));
         var readmeBytes = encoder.encode(
-          "Экспорт личных данных из «Графика чтения Библии»\n" +
+          "Экспорт личных данных из «Графика чтения Библии» / «Life tracker»\n" +
+          "⚠️ ВНИМАНИЕ: этот архив содержит КОД СИНХРОНИЗАЦИИ (deviceSettings в data.json) — ключ шифрования ваших облачных данных (заметки, файлы). Храните архив как пароль и никому не отправляйте.\n" +
+          "Восстанавливайте архив только на ПУСТОЕ приложение (импорт полностью заменяет отмеченные категории). Для заметок используйте один путь: либо облако, либо файл.\n" +
           "Файл data.json содержит все данные в структурированном виде:\n" +
           "- dailyReadingLog: по дням, какие главы Библии были прочитаны\n" +
           "- hourCounter.dailyHoursLog: по дням, сколько времени внесено (текущий период)\n" +
@@ -8207,7 +8488,10 @@
           "Папка notes/ — заметки «Моего блокнота» (.md, со структурой папок).\n" +
           "Папка tasks/ — задачи (tasks.json), читаемая копия того же, что уже есть в rawState.data.\n" +
           "Папка images/ — картинки, вставленные в заметки.\n" +
-          "Папка books/ — загруженные книги (fb2 и др.).\n"
+          "Папка books/ — загруженные книги (fb2 и др.).\n" +
+          "- notesIndex: id заметок (чтобы после импорта заметки книг и «последняя открытая заметка» остались привязаны)\n" +
+          "- deviceSettings: настройки устройства (переключатели интерфейса, ссылки S-89/workbooks, настройки flibusta, код синхронизации, размеры шрифта, даты открытия заметок). formatVersion раздела: " + DEVICE_SETTINGS_FORMAT_VERSION + ", формат архива: " + EXPORT_FORMAT_VERSION + ".\n" +
+          "Не переносятся: подложка бланка S-89 (приходит через облако после ввода кода и первого открытия вкладки), обложки книг (создаются при первом открытии книги), кэши и технические ключи.\n"
         );
 
         var zipFiles = [
@@ -8228,6 +8512,7 @@
         a.click();
         document.body.removeChild(a);
         setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+        showExportSavedNotice();
       }).catch(function(e){
         console.error("Ошибка экспорта:", e);
         alert("Не удалось собрать архив с данными. Попробуйте ещё раз.");
@@ -8252,6 +8537,32 @@
   // mdeditor.js и handleImportBooksFile выше, поэтому отдельный самописный разбор центрального
   // каталога здесь больше не нужен и убран: extractAllFiles уже умеет и STORED, и DEFLATE).
   // Возвращает Promise<{rawStateData, noteEntries, imageEntries, bookEntries}>.
+  // 06.10 (шаг 2а): метаданные архива — версия формата, deviceSettings, notesIndex. Любые сбои и
+  // неожиданные типы молча превращаются в «нет раздела» (старые архивы без них импортируются как раньше).
+  function extractArchiveMeta(parsed){
+    var fv = Number(parsed && parsed.exportFormatVersion);
+    var idx = (parsed && Array.isArray(parsed.notesIndex)) ? parsed.notesIndex.filter(function(r){
+      return r && typeof r.name === "string" && typeof r.id === "string";
+    }) : null;
+    return {
+      formatVersion: isFinite(fv) && fv > 0 ? fv : 1,
+      deviceSettings: (parsed && parsed.deviceSettings && typeof parsed.deviceSettings === "object") ? parsed.deviceSettings : null,
+      notesIndex: idx
+    };
+  }
+  // id заметки из notesIndex по пути и имени (сначала точное совпадение пути+имени, затем только имя:
+  // имена заметок уникальны по всему дереву).
+  function lookupArchiveNoteId(notesIndex, dir, name){
+    if(!notesIndex) return null;
+    var exact = null, byName = null;
+    var wantName = String(name).toLowerCase(), wantDir = String(dir || "").toLowerCase();
+    notesIndex.forEach(function(r){
+      if(String(r.name).toLowerCase() !== wantName) return;
+      if(String(r.path || "").toLowerCase() === wantDir) exact = r.id;
+      else if(byName === null) byName = r.id;
+    });
+    return exact !== null ? exact : byName;
+  }
   function readImportArchive(file){
     var lowerName = (file.name || "").toLowerCase();
     var isJson = lowerName.endsWith(".json") || file.type === "application/json";
@@ -8262,7 +8573,9 @@
         if(!parsed || !parsed.rawState || typeof parsed.rawState.data !== "object"){
           throw new Error("no_raw_state");
         }
-        return { rawStateData: parsed.rawState.data, noteEntries: [], imageEntries: [], bookEntries: [] };
+        var jmeta = extractArchiveMeta(parsed);
+        return { rawStateData: parsed.rawState.data, noteEntries: [], imageEntries: [], bookEntries: [],
+          formatVersion: jmeta.formatVersion, deviceSettings: jmeta.deviceSettings, notesIndex: jmeta.notesIndex };
       });
     }
     if(!window.MiniZip || !window.MiniZip.extractAllFiles){
@@ -8281,6 +8594,7 @@
         throw new Error("no_raw_state");
       }
 
+      var meta = extractArchiveMeta(parsed);
       var noteEntries = [];
       entries.forEach(function(e){
         if(e.path.indexOf("notes/") !== 0 || !/\.md$/i.test(e.path)) return;
@@ -8289,7 +8603,7 @@
         var dir = slash >= 0 ? rel.slice(0, slash) : "";
         var base = slash >= 0 ? rel.slice(slash + 1) : rel;
         var noteName = base.replace(/\.md$/i, "").trim() || "Без названия";
-        noteEntries.push({ name: noteName, path: dir, text: decoder.decode(e.data) });
+        noteEntries.push({ name: noteName, path: dir, text: decoder.decode(e.data), id: lookupArchiveNoteId(meta.notesIndex, dir, noteName) });
       });
 
       var imageEntries = [];
@@ -8308,7 +8622,8 @@
         bookEntries.push({ name: rel.slice(rel.lastIndexOf("/") + 1), data: e.data });
       });
 
-      return { rawStateData: parsed.rawState.data, noteEntries: noteEntries, imageEntries: imageEntries, bookEntries: bookEntries };
+      return { rawStateData: parsed.rawState.data, noteEntries: noteEntries, imageEntries: imageEntries, bookEntries: bookEntries,
+        formatVersion: meta.formatVersion, deviceSettings: meta.deviceSettings, notesIndex: meta.notesIndex };
     });
   }
 
@@ -8353,7 +8668,8 @@
     { key: "tasks", label: "Задачи", countFrom: null },
     { key: "images", label: "Картинки заметок", countFrom: "imageEntries" },
     { key: "books", label: "Книги", countFrom: "bookEntries" },
-    { key: "all", label: "Всё остальное (прогресс чтения, счётчик часов, настроение, цели, комментарии)", countFrom: null }
+    { key: "all", label: "Всё остальное (прогресс чтения, счётчик часов, настроение, цели, комментарии)", countFrom: null },
+    { key: "device", label: "Настройки устройства и код синхронизации (после импорта приложение перезагрузится)", countFrom: null }
   ];
 
   // Какие категории реально нашлись в разобранном архиве (payload — из readImportArchive выше) — по
@@ -8371,8 +8687,27 @@
       if(def.key === "images") return payload.imageEntries.length > 0;
       if(def.key === "books") return payload.bookEntries.length > 0 || bookKeysFound;
       if(def.key === "tasks") return taskKeysFound;
+      if(def.key === "device") return !!(payload.deviceSettings && typeof payload.deviceSettings === "object");
       return true; // "all" — data.json (и в нём rawState.data) есть у любого валидного файла
     });
+  }
+
+  // Предупреждения экрана выбора категорий (ТЗ ПЕРЕЕЗД_В_APK, 12.5.3, 12.5.5, 12.5.11).
+  function importWarningsHtml(payload){
+    var w = ["Импортируйте только на ПУСТОЕ приложение: отмеченные категории заменяют данные полностью."];
+    if(payload.formatVersion > EXPORT_FORMAT_VERSION){
+      w.push("Архив сделан более новой версией приложения: часть данных не будет восстановлена.");
+    }
+    if(payload.noteEntries.length && !payload.notesIndex){
+      w.push("Архив сделан старой версией: привязка заметок к книгам и «последняя открытая заметка» не восстановятся. Сделайте новый экспорт.");
+    }
+    if(payload.noteEntries.length){
+      w.push("Для заметок используйте один путь: либо облако, либо файл.");
+    }
+    if(payload.deviceSettings){
+      w.push("Раздел «Настройки устройства» содержит код синхронизации: не отмечайте его, если не хотите подключать это устройство к облаку из файла.");
+    }
+    return '<div class="modal-section">' + w.map(function(t){ return '<p class="modal-note">⚠️ ' + escapeHtml(t) + '</p>'; }).join("") + '</div>';
   }
 
   function renderImportCategoriesScreen(payload){
@@ -8384,6 +8719,7 @@
     }).join("");
     modalBox.innerHTML = modalHeader("Что восстановить",
         "Отметьте, что восстановить из файла. Каждая отмеченная категория полностью заменит то, что есть на этом устройстве — объединения с текущими данными нет, отменить действие после импорта будет нельзя.") +
+      importWarningsHtml(payload) +
       '<div class="modal-section">' + rows + '</div>' +
       '<button class="modal-btn danger" id="mImportConfirm">Импортировать отмеченное</button>' +
       '<button class="modal-btn" id="mBack">Отмена</button>';
@@ -8411,6 +8747,29 @@
   // устройстве, даже если остальные две отмечены. Заметки/картинки/файлы книг — через отдельные
   // функции replaceAll*FromEntries (mdeditor.js/выше), каждая полностью заменяет соответствующее
   // хранилище.
+  // Дожидается реальной записи state (localStorage + IndexedDB bibleNotesDB_v1) и кэша заметок на диск:
+  // после импорта страница может перезагружаться, а часть записей асинхронна и без ожидания пропала бы.
+  function importPersistAll(){
+    var jobs = [];
+    try{ saveLocalStateNow(); }catch(e){}
+    try{ jobs.push(notesIdbWriteAll(splitStateForLocalStorage(state).notes)); }catch(e){}
+    if(MdEditor && MdEditor.persistNotesNow){
+      try{ jobs.push(MdEditor.persistNotesNow()); }catch(e){}
+    }
+    return Promise.all(jobs.map(function(j){ return Promise.resolve(j).catch(function(){}); }));
+  }
+  // deviceSettings применяются ПОСЛЕДНИМИ, затем страница перезагружается (12.1.6). Promise<true>, если идёт перезагрузка.
+  function importApplyDeviceAndReload(payload){
+    modalBox.innerHTML = modalHeader("Применяю настройки устройства…", "Приложение сейчас перезагрузится.");
+    return applyDeviceSettingsFromArchive(payload.deviceSettings).then(function(){
+      setTimeout(function(){ window.location.reload(); }, 600);
+      return true;
+    }).catch(function(e){
+      console.error("Ошибка применения настроек устройства:", e);
+      return false;
+    });
+  }
+
   function applyImportSelection(payload, selection){
     if(selection.all || selection.tasks || selection.books){
       var newState = {};
@@ -8448,6 +8807,12 @@
 
     modalBox.innerHTML = modalHeader("Восстанавливаю…", "Это может занять некоторое время, если в архиве много картинок или книг.");
     Promise.all(jobs).then(function(){
+      return importPersistAll();
+    }).then(function(){
+      if(selection.device) return importApplyDeviceAndReload(payload);
+      return false;
+    }).then(function(reloading){
+      if(reloading) return;
       setNoTransitions(true);
       rerenderAllFromState();
       setTimeout(function(){ setNoTransitions(false); }, 50);
@@ -13405,6 +13770,13 @@
   // Общая точка входа "привязать заметку к книге в первый раз" (пока нет data.noteId) —
   // используется и document-кнопкой в списке книг (openBookNoteFromList ниже), и первым
   // подчёркиванием в ридере (addUnderlineFromSelection дальше в этом разделе).
+  // 06.10 (шаг 2а, 12.5.3 п.2): true только если заметка с таким id ТОЧНО отсутствует (false), пока кэш
+  // заметок не загружен (null) — считаем «возможно есть», чтобы не просить привязывать заново зря.
+  function bookNoteIdIsMissing(noteId){
+    if(!noteId) return true;
+    if(!MdEditor || !MdEditor.noteExistsById) return false;
+    return MdEditor.noteExistsById(noteId) === false;
+  }
   function attachBookNote(hash, defaultName, onDone){
     var existingNotes = (MdEditor && MdEditor.getSearchableNotes) ? MdEditor.getSearchableNotes() : [];
     openBookNoteChoiceDialog(existingNotes.length > 0, function(){
@@ -13432,6 +13804,7 @@
     if(!hash) return;
     var data = getBookState(hash);
     var noteId = data && data.noteId;
+    if(noteId && bookNoteIdIsMissing(noteId)) noteId = null; // заметки с таким id нет — привязываем заново
     if(noteId){
       switchSettingsTab("set2s_1");
       if(MdEditor && MdEditor.openNoteByIdExternally) MdEditor.openNoteByIdExternally(noteId);
@@ -13720,12 +14093,18 @@
     }
     function finishWithNoteId(noteId){
       var underlineId = addBookUnderline(hash, {ch: ch, blk: blk, s: s, e: e});
-      MdEditor.appendTextToNoteId(noteId, text.trim());
-      markBookUnderlineMovedToNote(hash, underlineId);
+      var appended = MdEditor.appendTextToNoteId(noteId, text.trim());
+      if(appended !== false){
+        markBookUnderlineMovedToNote(hash, underlineId);
+      } else {
+        // заметки нет: подчёркивание остаётся, но НЕ помечается перенесённым (не теряется молча)
+        var st = document.getElementById("bookReaderStatus");
+        if(st) st.textContent = "Заметка книги не найдена: подчёркивание сохранено, но не перенесено. Привяжите заметку заново.";
+      }
       refreshBookReaderParagraphHighlight(ch, blk);
       if(window.getSelection) window.getSelection().removeAllRanges();
     }
-    if(data.noteId){
+    if(data.noteId && !bookNoteIdIsMissing(data.noteId)){
       finishWithNoteId(data.noteId);
     } else {
       var defaultName = bookReaderState && bookReaderState.name ? stripBookExt(bookReaderState.name) : "";
@@ -13948,7 +14327,13 @@
       var baseName = stripBookExt(bookReaderState.name || "book") +
         " " + (ch + 1) + "-" + (blk + 1) + extFromImageContentType(imgData.contentType);
       MdEditor.saveImageBytes(baseName, imgData.bytes, imgData.contentType).then(function(finalName){
-        MdEditor.appendTextToNoteId(noteId, "![[" + finalName + "]]");
+        if(MdEditor.appendTextToNoteId(noteId, "![[" + finalName + "]]") === false){
+          // заметки нет: файл картинки не оставляем «висеть», иллюстрацию не помечаем сохранённой
+          if(MdEditor.deleteImageFile) MdEditor.deleteImageFile(finalName);
+          var st2 = document.getElementById("bookReaderStatus");
+          if(st2) st2.textContent = "Заметка книги не найдена: иллюстрация не отправлена. Привяжите заметку заново.";
+          return;
+        }
         addBookImageEntry(hash, ch, blk, imageId, finalName);
         if(btnEl){
           btnEl.classList.add("pinned");
@@ -13960,7 +14345,7 @@
       });
     }
     var data2 = getOrCreateBookState(hash);
-    if(data2.noteId){
+    if(data2.noteId && !bookNoteIdIsMissing(data2.noteId)){
       finishWithNoteId(data2.noteId);
     } else {
       attachBookNote(hash, stripBookExt(bookReaderState.name || "book"), finishWithNoteId);
