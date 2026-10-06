@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Диагностика Life tracker</title>
+<style>
+  body{font:14px/1.4 system-ui,sans-serif;margin:0;padding:12px;background:#f4f0f8;color:#222}
+  h1{font-size:18px;margin:0 0 8px}
+  button,a.btn{display:inline-block;font:inherit;padding:10px 14px;margin:4px 6px 4px 0;border:0;border-radius:8px;background:#8f7fb8;color:#fff;text-decoration:none}
+  pre{white-space:pre-wrap;word-break:break-word;background:#fff;border-radius:8px;padding:10px;margin:8px 0;font:12px/1.45 monospace;user-select:text}
+  .hint{color:#555;font-size:12px}
+</style>
+</head>
+<body>
+<h1>Диагностика Life tracker</h1>
+<div class="hint">Служебная страница оболочки. Данные приложения не меняет: пробные записи удаляются сразу.</div>
+<div>
+  <button id="run">Запустить проверки</button>
+  <button id="cam">Проверить камеру</button>
+  <button id="copy">Копировать результат</button>
+  <a class="btn" href="/index.html">В приложение</a>
+</div>
+<pre id="out">Нажмите «Запустить проверки».</pre>
+<script>
+(function(){
+  var FIREBASE = "https://my-nekogram-default-rtdb.europe-west1.firebasedatabase.app";
+  var lines = [];
+  var out = document.getElementById("out");
+  function show(){ out.textContent = lines.join("\n"); }
+  function add(ok, name, detail){
+    lines.push((ok === null ? "ℹ️" : ok ? "✅" : "❌") + " " + name + (detail ? " — " + detail : ""));
+    show();
+  }
+  function fmtErr(e){ return (e && e.name ? e.name + ": " : "") + (e && e.message ? e.message : String(e)); }
+
+  function idbTest(){
+    return new Promise(function(resolve, reject){
+      var req = indexedDB.open("__lt_diag", 1);
+      req.onupgradeneeded = function(){ req.result.createObjectStore("s"); };
+      req.onerror = function(){ reject(req.error); };
+      req.onsuccess = function(){
+        var db = req.result;
+        var tx = db.transaction("s", "readwrite");
+        tx.objectStore("s").put({n: 42, t: "привет"}, "k");
+        tx.oncomplete = function(){
+          var r = db.transaction("s").objectStore("s").get("k");
+          r.onsuccess = function(){
+            var v = r.result;
+            db.close();
+            var del = indexedDB.deleteDatabase("__lt_diag");
+            del.onsuccess = function(){ resolve(v && v.n === 42 && v.t === "привет"); };
+            del.onerror = function(){ resolve(false); };
+            del.onblocked = function(){ resolve(false); };
+          };
+          r.onerror = function(){ db.close(); reject(r.error); };
+        };
+        tx.onerror = function(){ db.close(); reject(tx.error); };
+      };
+    });
+  }
+
+  async function opfsTest(){
+    var root = await navigator.storage.getDirectory();
+    var fh = await root.getFileHandle("__lt_diag.txt", {create: true});
+    var features = "createWritable=" + (typeof fh.createWritable) + ", createSyncAccessHandle=" + (typeof fh.createSyncAccessHandle);
+    if(typeof fh.createWritable !== "function") throw new Error("нет createWritable (" + features + ")");
+    var w = await fh.createWritable();
+    await w.write("привет");
+    await w.close();
+    var text = await (await fh.getFile()).text();
+    await root.removeEntry("__lt_diag.txt");
+    if(text !== "привет") throw new Error("прочитано «" + text + "»");
+    return features;
+  }
+
+  async function probe(label, url, opts, note){
+    var ctl = new AbortController();
+    var timer = setTimeout(function(){ ctl.abort(); }, 12000);
+    try{
+      var o = opts || {};
+      o.signal = ctl.signal;
+      var res = await fetch(url, o);
+      add(true, label, "HTTP " + res.status + " (ответ получен, CORS пропускает)" + (note ? ". " + note : ""));
+    }catch(e){
+      add(false, label, "ошибка: " + fmtErr(e) + " (CORS или нет сети)" + (note ? ". " + note : ""));
+    }finally{
+      clearTimeout(timer);
+    }
+  }
+
+  async function runAll(){
+    lines = [];
+    add(null, "Адрес страницы", location.origin + " (secure context: " + window.isSecureContext + ")");
+    add(null, "WebView", navigator.userAgent);
+    try{
+      if(window.LifeTrackerNative){ add(true, "Мост LifeTrackerNative", LifeTrackerNative.getAppInfo()); }
+      else add(false, "Мост LifeTrackerNative", "объекта нет");
+    }catch(e){ add(false, "Мост LifeTrackerNative", fmtErr(e)); }
+
+    add(null, "Экран", "innerWidth=" + innerWidth + ", innerHeight=" + innerHeight + ", dpr=" + devicePixelRatio +
+      (window.visualViewport ? ", visualViewport=" + Math.round(visualViewport.width) + "x" + Math.round(visualViewport.height) : ""));
+    try{
+      var probeEl = document.createElement("div");
+      probeEl.style.cssText = "position:fixed;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)";
+      document.body.appendChild(probeEl);
+      var cs = getComputedStyle(probeEl);
+      add(null, "env(safe-area-inset) top/right/bottom/left", [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].join(" / "));
+      probeEl.remove();
+    }catch(e){}
+
+    add(!!(window.crypto && crypto.subtle), "crypto.subtle (шифрование заметок и файлов)");
+    try{ localStorage.setItem("__lt_diag", "1"); var v = localStorage.getItem("__lt_diag"); localStorage.removeItem("__lt_diag"); add(v === "1", "localStorage"); }
+    catch(e){ add(false, "localStorage", fmtErr(e)); }
+    try{ add(await idbTest(), "IndexedDB (запись, чтение, удаление)"); }
+    catch(e){ add(false, "IndexedDB", fmtErr(e)); }
+    try{ add(true, "OPFS (navigator.storage.getDirectory)", await opfsTest()); }
+    catch(e){ add(false, "OPFS (navigator.storage.getDirectory)", fmtErr(e)); }
+    try{
+      var c = await caches.open("__lt_diag");
+      await c.put("/__lt_diag", new Response("ok"));
+      var m = await c.match("/__lt_diag");
+      var ok = !!m && (await m.text()) === "ok";
+      await caches.delete("__lt_diag");
+      add(ok, "Cache API");
+    }catch(e){ add(false, "Cache API", fmtErr(e)); }
+    try{
+      var est = await navigator.storage.estimate();
+      var pers = navigator.storage.persisted ? await navigator.storage.persisted() : "нет API";
+      add(null, "Хранилище", "квота ≈ " + Math.round(est.quota / 1048576) + " МБ, занято ≈ " + Math.round(est.usage / 1048576) + " МБ, persisted=" + pers);
+    }catch(e){ add(null, "Хранилище", fmtErr(e)); }
+    add(null, "Service worker в WebView", ("serviceWorker" in navigator) ? "API есть (приложение его в оболочке не регистрирует)" : "API нет");
+
+    try{
+      var res = await fetch("/vendor/sql-wasm.wasm");
+      var ct = res.headers.get("content-type");
+      var buf = await res.arrayBuffer();
+      var mod = await WebAssembly.compile(buf);
+      add(res.ok && ct === "application/wasm", "sql-wasm.wasm из бандла", "HTTP " + res.status + ", " + ct + ", " + Math.round(buf.byteLength / 1024) + " КБ, компиляция ок, instantiateStreaming=" + (typeof WebAssembly.instantiateStreaming));
+    }catch(e){ add(false, "sql-wasm.wasm из бандла", fmtErr(e)); }
+    try{
+      var v2 = await (await fetch("/version.json", {cache: "no-store"})).json();
+      add(!!v2.version, "version.json бандла", JSON.stringify(v2));
+    }catch(e){ add(false, "version.json бандла", fmtErr(e)); }
+
+    await probe("Firebase: GET (облачная синхронизация)", FIREBASE + "/syncs/__lt_diag_probe.json?shallow=true", {},
+      "200 или 401/403 — нормально: главное, что ответ дошёл");
+    await probe("Firebase: PATCH с JSON (проверка preflight)", FIREBASE + "/syncs/__lt_diag_probe.json", {
+      method: "PATCH", headers: {"Content-Type": "application/json"}, body: "{}"
+    }, "тело {} ничего не создаёт");
+    await probe("YouTube oEmbed (заголовки видео)", "https://www.youtube.com/oembed?format=json&url=" + encodeURIComponent("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
+    await probe("corsproxy.io (прокси для flibusta)", "https://corsproxy.io/?url=" + encodeURIComponent("https://example.com/"),
+      {}, "если здесь ошибка, а flibusta в приложении работает, это нормально");
+    await probe("docs.google.com (s89 и workbooks)", "https://docs.google.com/document/d/1/export?format=txt", {},
+      "только справка: реальные ссылки проверяются в самой функции");
+    add(null, "Готово", new Date().toLocaleString());
+  }
+
+  async function camTest(){
+    try{
+      var stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: "environment"}});
+      var tracks = stream.getVideoTracks();
+      var label = tracks.length ? tracks[0].label : "?";
+      tracks.forEach(function(t){ t.stop(); });
+      add(true, "Камера (getUserMedia)", label);
+    }catch(e){ add(false, "Камера (getUserMedia)", fmtErr(e)); }
+  }
+
+  document.getElementById("run").onclick = function(){ runAll(); };
+  document.getElementById("cam").onclick = function(){ camTest(); };
+  document.getElementById("copy").onclick = function(){
+    var text = lines.join("\n");
+    try{ navigator.clipboard.writeText(text).then(function(){ add(null, "Скопировано в буфер"); }, function(e){ add(false, "Копирование", fmtErr(e)); }); }
+    catch(e){ add(false, "Копирование", fmtErr(e)); }
+  };
+})();
+</script>
+</body>
+</html>
