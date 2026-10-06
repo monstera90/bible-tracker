@@ -1,0 +1,53 @@
+# Белый список файлов веб-части, которые попадают в APK (assets/www/) и в веб-бандл.
+# Пути от корня репозитория. Строки с # и пустые игнорируются.
+# Новый файл веб-части (подключённый в index.html или попавший в ASSETS в sw.js) добавляется сюда же:
+# tools/android_prepare.py остановит сборку с понятным сообщением, если файл забыли.
+# В список НЕ входят: versions/, *_test.js, sw.js (в оболочке service worker не используется), .github/, android/, tools/.
+index.html
+manifest.json
+
+theme.css
+base.css
+components.css
+footer.css
+modals.css
+
+debug.js
+syncengine.js
+syncengine_groupcrypto.js
+syncengine_transport.js
+syncengine_groupbinding.js
+syncengine_notescrypto.js
+syncengine_notesbinding.js
+syncengine_personalcrypto.js
+syncengine_personalbinding.js
+my.js
+mood.js
+minizip.js
+minixlsx.js
+docxparse.js
+fb2parse.js
+epubparse.js
+workbookparse.js
+workbooks.js
+jwlmerge.js
+epubsplit.js
+s89tasks.js
+s89draw.js
+s89fill.js
+imgresize.js
+mdeditor.js
+codemirror.bundle.js
+search.js
+notifications.js
+flibusta.js
+
+DejaVuSans.ttf
+icon-192x192.png
+icon-512x512.png
+book-cover-placeholder.jpg
+
+vendor/qrcode.min.js
+vendor/jsQR.js
+vendor/sql-wasm.js
+vendor/sql-wasm.wasm
