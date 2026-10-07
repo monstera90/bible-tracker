@@ -188,6 +188,8 @@ class MainActivity : ComponentActivity() {
         } else {
             controller.show(WindowInsetsCompat.Type.systemBars())
         }
+        // Высота полосы зависит от флага fullscreen: пересчитываем сразу, не дожидаясь смены панелей.
+        ViewCompat.requestApplyInsets(root)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -278,7 +280,9 @@ class MainActivity : ComponentActivity() {
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
             root.setPadding(bars.left, 0, bars.right, 0)
-            setStripHeight(statusStrip, bars.top)
+            // В полноэкранном режиме верхняя полоса не нужна совсем: иначе под вырезом камеры остаётся
+            // цветная полоса высотой с вырез (режим выреза shortEdges позволяет странице занять и его).
+            setStripHeight(statusStrip, if (fullscreen) 0 else bars.top)
             setStripHeight(navStrip, max(bars.bottom, ime.bottom))
             WindowInsetsCompat.CONSUMED
         }
