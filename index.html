@@ -775,8 +775,8 @@ window.addEventListener("error", function(e){
 <!-- async: внешние скрипты с CDN не должны задерживать запуск остальных (иначе на медленной
      сети my.js стартовал бы только после ответа jsdelivr). my.js сам подгружает обе библиотеки
      перед использованием (loadQrLib/loadJsqrLib), эти теги нужны лишь чтобы файлы попали в кэш. -->
-<script async src="https://cdn.jsdelivr.net/npm/davidshimjs-qrcodejs@0.0.2/qrcode.min.js"></script>
-<script async src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<script async src="vendor/qrcode.min.js"></script>
+<script async src="vendor/jsQR.js"></script>
 
 <script src="mood.js"></script>
 <script src="minizip.js"></script>
