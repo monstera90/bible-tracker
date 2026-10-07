@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Шаг 2: только то, что уже работает. Остальное добавляется на своих шагах (требует нового APK):
-         POST_NOTIFICATIONS, SCHEDULE_EXACT_ALARM/USE_EXACT_ALARM, RECEIVE_BOOT_COMPLETED и
-         foreground service (шаг 5), intent-filter для share target (шаг 4). -->
+    <!-- Шаг 4 (этот APK): приём файлов из «Поделиться» (intent-filter ниже) и FileProvider для отправки файлов.
+         Остаётся на своих шагах (требует нового APK): POST_NOTIFICATIONS, SCHEDULE_EXACT_ALARM/USE_EXACT_ALARM,
+         RECEIVE_BOOT_COMPLETED и foreground service (шаг 5). Для сохранения в «Загрузки» разрешений не нужно (MediaStore). -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -31,9 +31,46 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Шаг 4: «Поделиться → Life tracker» (замена Web Share Target из manifest.json).
+                 Типы те же, что принимала PWA: видео, epub, fb2 (часть файловых менеджеров отдаёт fb2 как
+                 octet-stream или xml). Что делать с файлом, решает страница по расширению (handleSharedFile в my.js).
+                 Текст и ссылки пока не принимаются: в PWA такой функции не было (вопрос заказчику, 12.9). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/x-fictionbook" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="text/xml" />
+                <data android:mimeType="application/xml" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/x-fictionbook" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="text/xml" />
+                <data android:mimeType="application/xml" />
+            </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- Шаг 4: временные файлы для «Поделиться» (cache/share/, см. res/xml/file_paths.xml). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.app.lifetracker.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

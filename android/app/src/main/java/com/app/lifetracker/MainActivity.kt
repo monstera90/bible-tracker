@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Toast
 import android.webkit.PermissionRequest
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.ValueCallback
@@ -29,6 +30,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.WindowInsetsCompat
 import org.json.JSONObject
 import java.io.File
@@ -52,21 +54,6 @@ class MainActivity : ComponentActivity() {
         // Сторож live-update: если пробная версия веб-части не подтвердила запуск (appReady) за это время после
         // загрузки страницы, откатываемся сразу, а не при следующем запуске.
         private const val TRIAL_TIMEOUT_MS = 30_000L
-
-        // Временное решение до шага 4: следим за <meta name="theme-color"> (его обновляет syncThemeColorMeta()
-        // в my.js) и передаём цвет в мост. На шаге 4 заменяется прямым вызовом из my.js.
-        private const val THEME_HOOK_JS = """
-            (function(){
-              if (window.__ltThemeHook) return;
-              window.__ltThemeHook = true;
-              function push(){
-                var m = document.querySelector('meta[name="theme-color"]');
-                if (m && m.content && window.LifeTrackerNative) { LifeTrackerNative.setStatusBarColor(m.content); }
-              }
-              push();
-              new MutationObserver(push).observe(document.head, {childList:true, subtree:true, attributes:true, attributeFilter:['content']});
-            })();
-        """
     }
 
     private lateinit var server: WebAssetServer
@@ -74,6 +61,14 @@ class MainActivity : ComponentActivity() {
     /** Live-update веб-части (скачивание, применение при запуске, откат). Мост обращается к нему из appReady. */
     lateinit var webUpdater: WebUpdater
         private set
+
+    /** Сохранение файлов в «Загрузки» и подготовка файлов для «Поделиться» (шаг 4). Мост обращается к нему. */
+    lateinit var fileSaver: FileSaver
+        private set
+
+    /** Полноэкранный режим включён страницей (шаг 4); восстанавливается при возврате фокуса окну. */
+    @Volatile
+    private var fullscreen = false
 
     private val handler = Handler(Looper.getMainLooper())
     private var trialWatchdogStarted = false
@@ -113,6 +108,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
+        fileSaver = FileSaver(applicationContext)
+        fileSaver.cleanStale()
+        SharedInbox.cleanStale(applicationContext)
+
         // Live-update: до загрузки страницы выбираем бандл (скачанный или встроенный) и применяем ожидающую версию.
         webUpdater = WebUpdater(File(filesDir, "web"), { readBuiltinVersion() })
         val bundle = try {
@@ -135,6 +134,7 @@ class MainActivity : ComponentActivity() {
             }
         })
 
+        handleShareIntent(intent)
         webView.loadUrl(if (intent?.action == ACTION_DIAG) WebAssetServer.DIAG_URL else WebAssetServer.START_URL)
         webUpdater.checkInBackground()
     }
@@ -142,7 +142,8 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // Шаг 4: здесь же будет приём share target (ACTION_SEND / ACTION_SEND_MULTIPLE).
+        // Шаг 4: «Поделиться» (ACTION_SEND / ACTION_SEND_MULTIPLE) при уже запущенном приложении.
+        handleShareIntent(intent)
         if (intent.action == ACTION_DIAG) webView.loadUrl(WebAssetServer.DIAG_URL)
     }
 
@@ -160,6 +161,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(trialWatchdog)
+        fileSaver.cancelAll()
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.destroy()
         super.onDestroy()
@@ -170,6 +172,85 @@ class MainActivity : ComponentActivity() {
         statusStrip.setBackgroundColor(color)
         WindowCompat.getInsetsController(window, root).isAppearanceLightStatusBars =
             ColorUtils.calculateLuminance(color) > 0.5
+    }
+
+    /**
+     * Полноэкранный режим (шаг 4, замена requestFullscreen из PWA): скрыты строка состояния и системная навигация,
+     * по свайпу с края панели показываются на время. Страница вызывает через LifeTrackerNative.setFullscreen.
+     * Вырез экрана учтён в WindowInsets (полоса statusStrip остаётся высотой выреза и красится цветом шапки).
+     */
+    fun applyFullscreen(enabled: Boolean) {
+        fullscreen = enabled
+        val controller = WindowCompat.getInsetsController(window, root)
+        if (enabled) {
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // После диалогов, шторки и возврата из других приложений система может вернуть панели: прячем снова.
+        if (hasFocus && fullscreen) applyFullscreen(true)
+    }
+
+    /** Короткое сообщение внизу экрана (из любого потока). */
+    fun toast(text: String) {
+        runOnUiThread { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
+    }
+
+    /** Запуск системного меню (выбор приложения для «Поделиться») из любого потока. */
+    fun startChooser(intent: Intent): Boolean {
+        runOnUiThread {
+            try {
+                startActivity(intent)
+            } catch (e: Exception) {
+                toast("Не удалось открыть меню «Поделиться»")
+            }
+        }
+        return true
+    }
+
+    /** Принимает файлы из системного «Поделиться» и сообщает странице, когда копия готова. */
+    private fun handleShareIntent(source: Intent?) {
+        SharedInbox.accept(
+            this,
+            source,
+            onAdded = { notifyPageAboutShare() },
+            onFailed = { toast("Не удалось принять файл") }
+        )
+    }
+
+    private fun notifyPageAboutShare() {
+        runOnUiThread {
+            if (!isDestroyed && pageTrusted) {
+                webView.evaluateJavascript("window.__ltOnNativeShare && window.__ltOnNativeShare()", null)
+            }
+        }
+    }
+
+    /**
+     * Intent выбора файла для <input type="file">. Если accept содержит расширения (.zip, .fb2, .jwlibrary:
+     * системный список типов по ним не строится) или пуст, показываем все файлы; один MIME-тип передаём как есть.
+     */
+    private fun buildFileChooserIntent(params: WebChromeClient.FileChooserParams): Intent {
+        val tokens = params.acceptTypes.map { it.trim() }.filter { it.isNotEmpty() }
+        val mimes = tokens.filter { it.contains('/') && !it.startsWith(".") }
+        val intent = Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE)
+        if (tokens.isEmpty() || tokens.any { it.startsWith(".") }) {
+            intent.type = "*/*"
+        } else if (mimes.size == 1) {
+            intent.type = mimes[0]
+        } else {
+            intent.type = "*/*"
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, mimes.toTypedArray())
+        }
+        if (params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) {
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        return intent
     }
 
     /** Версия встроенного бандла (assets/www/version.json, его пишет tools/android_prepare.py). */
@@ -248,7 +329,6 @@ class MainActivity : ComponentActivity() {
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
-                if (pageTrusted) view?.evaluateJavascript(THEME_HOOK_JS, null)
                 if (pageTrusted && !trialWatchdogStarted && url != null && url.startsWith(WebAssetServer.START_URL)) {
                     trialWatchdogStarted = true
                     if (webUpdater.hasTrial()) handler.postDelayed(trialWatchdog, TRIAL_TIMEOUT_MS)
@@ -272,7 +352,7 @@ class MainActivity : ComponentActivity() {
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
                 return try {
-                    fileChooserLauncher.launch(params.createIntent())
+                    fileChooserLauncher.launch(buildFileChooserIntent(params))
                     true
                 } catch (e: ActivityNotFoundException) {
                     fileCallback = null

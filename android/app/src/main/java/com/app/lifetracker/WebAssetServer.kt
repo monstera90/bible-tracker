@@ -58,6 +58,9 @@ class WebAssetServer(private val context: Context, private val bundleDir: File?)
 
             if (rel == "__diag.html") return openAsset("diag/diag.html", rel)
 
+            // Файл, принятый из системного «Поделиться» (SharedInbox): ./__shared/<id>.
+            if (rel.startsWith("__shared/")) return sharedFile(rel.removePrefix("__shared/"))
+
             if (bundleDir != null && bundleCanon != null) {
                 val file = File(bundleDir, rel)
                 val inside = try {
@@ -74,6 +77,20 @@ class WebAssetServer(private val context: Context, private val bundleDir: File?)
                 }
             }
             return openAsset("www/$rel", rel)
+        }
+    }
+
+    /** Отдаёт временную копию принятого файла страницы приложения (тот же origin). Чужие id и пути дают 404. */
+    private fun sharedFile(id: String): WebResourceResponse {
+        val item = SharedInbox.find(id) ?: return notFound()
+        return try {
+            val headers = mapOf(
+                "Content-Length" to item.file.length().toString(),
+                "Cache-Control" to "no-store"
+            )
+            WebResourceResponse(item.type, null, 200, "OK", headers, FileInputStream(item.file))
+        } catch (e: IOException) {
+            notFound()
         }
     }
 

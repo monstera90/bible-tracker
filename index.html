@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 3.1 (07.10) — подключён `native-shell.js` (шаг 4 переезда в APK: нативное скачивание файлов и `navigator.share` в оболочке Android) первым из скриптов, сразу после обработчика ошибок; в браузере файл ничего не делает.
      Версия: 3.0 (30.09) — структурная правка (ТЗ пользователя от 30.09): «Ж» больше не кнопка с попапом — вместо
      `#taskFormatWrap` четыре отдельные обёртки `.task-format-wrap` (`#taskFmtBoldWrap`/`…ItalicWrap`/`…UnderlineWrap`/
      `…StrikeWrap`) с кнопками Ж/К/П/Ч в общем ряду; `#taskFormatPopup`/`#taskFormatBtn` удалены.
@@ -69,6 +70,7 @@ window.addEventListener("error", function(e){
 </script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>График чтения Библии</title>
+<script src="native-shell.js"></script>
 <link rel="icon" type="image/png" href="icon-192x192.png">
 <link rel="apple-touch-icon" href="icon-192x192.png">
 <link rel="manifest" href="manifest.json">

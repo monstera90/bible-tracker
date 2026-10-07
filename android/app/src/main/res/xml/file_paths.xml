@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Файлы, подготовленные для системного меню «Поделиться» (FileSaver.beginStage). Только эта папка. -->
+    <cache-path name="share" path="share/" />
+</paths>

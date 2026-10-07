@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 55.0 (07.10) — шаг 4 переезда в APK (ПЕРЕЕЗД_В_APK.md): в нативной оболочке (есть `window.LifeTrackerNative`) полноэкранный режим идёт через мост (`applyStatusBarFullscreen` → `setFullscreen`), цвет строки состояния — прямым вызовом из `syncThemeColorMeta`, приём файла из «Поделиться» — через `pullNativeSharedFiles` (вызывается из `checkForSharedFile`, оболочка дёргает `window.__ltOnNativeShare`). В браузере поведение прежнее. Скачивание файлов и `navigator.share` для оболочки подменяет новый `native-shell.js`, остальной код не менялся.
    Версия: 54.1 (05.10) — картинки задач: если первая строка задачи начинается с картинки, у первой строки текста снимается красная строка (`taskTextInner`). Версия 54.0: (1) ридер книг: смена размера шрифта «Аа» («+»/«−») больше не сдвигает читаемое место — `changeBookReaderFontSize` запоминает место в тексте (`captureHyphensAnchor`) и возвращает его после смены и после калибровки сегментов (`keepScrollAnchorPasses`, новая общая функция рядом с `captureHyphensAnchor`); (2) картинки задач («![[имя]]») в режиме просмотра — слева от текста квадратом в две строки, текст обтекает: новые `splitTaskImages`/`taskImagesHtml`/`taskTextInner` (раздел «КАРТИНКИ ЗАДАЧ В РЕЖИМЕ ПРОСМОТРА»), применены в `renderTaskRowView`, `renderRowView` («Все задачи проекта»), строках архива и ревью, поправка `fitTaskActions`; режим редактирования и комментарии не менялись.
    Версия: 53.0 (03.10) — кнопка «i» в нижнем ряду ридера книг (`bookReaderInfoBtn`, самая левая кнопка ряда): полноэкранная инструкция «Книга — кнопки» (`renderBookReaderInfoScreen`, тем же приёмом, что `renderBooksInfoScreen`/`renderTaskInfoScreen`); перед показом запоминается место чтения, «домик» на экране инструкции возвращает в ту же книгу на то же место.
    Версия: 52.0 (03.10) — бэкап прежнего места основной закладки: при переносе основной закладки на 2+ главы (`BOOKMARK_JUMP_CHAPTERS`) старое место сохраняется в `book:<hash>.prevMain` (одна копия, едет в облако); новая `restoreBookPrevMain(hash)` возвращает его (текущая основная при этом сама становится «прежней»); `getBookMarginBookmarksForList` помечает основную закладку флагом `canRestorePrev` (+ `prevName`), если прежнее место отстоит на 2+ главы; в deps для mdeditor.js — `restoreBookPrevMain`.
@@ -1175,6 +1176,14 @@
   // браузер заблокировал как жест-независимый вызов). При enable=false выходит из полноэкранного
   // режима, если он был включён.
   function applyStatusBarFullscreen(enable){
+    // APK (ПЕРЕЕЗД_В_APK.md, шаг 4): в WebView requestFullscreen скрывает панели ненадёжно, поэтому
+    // нативная оболочка скрывает/показывает строку состояния и системную навигацию сама. Работает и без
+    // жеста пользователя (автозапуск при старте страницы). Если мост устаревший (старый APK) — прежний путь.
+    var nativeBridge = window.LifeTrackerNative;
+    if(nativeBridge && typeof nativeBridge.setFullscreen !== "undefined"){
+      try{ nativeBridge.setFullscreen(!!enable); }catch(e){}
+      return;
+    }
     var el = document.documentElement;
     if(enable){
       var req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
@@ -2248,6 +2257,13 @@
     if(!wood) return;
     var meta = document.querySelector('meta[name="theme-color"]');
     if(meta) meta.setAttribute("content", wood);
+    // APK (шаг 4): цвет строки состояния задаёт нативная оболочка, прямой вызов моста вместо наблюдателя
+    // за <meta> (его временно ставила оболочка шага 2; старый APK продолжает им пользоваться, повтор безвреден).
+    try{
+      if(window.LifeTrackerNative && typeof window.LifeTrackerNative.setStatusBarColor !== "undefined"){
+        window.LifeTrackerNative.setStatusBarColor(wood);
+      }
+    }catch(e){}
   }
 
   function selectTheme(themeId){
@@ -22019,7 +22035,44 @@
   // Вызывается один раз при каждом запуске страницы (см. "ЗАПУСК" ниже). Чистит "?shared=1" из
   // адресной строки СРАЗУ, независимо от исхода чтения кэша — чтобы обновление страницы или
   // случайный повторный заход не пытались забрать уже забранный (и стёртый) файл заново.
+  // APK (шаг 4): приём файла из системного «Поделиться». Оболочка копирует файл во временную папку и отдаёт
+  // список через LifeTrackerNative.takeSharedFiles(); содержимое страница берёт по адресу ./__shared/<id>
+  // (его раздаёт оболочка), после чего просит удалить временную копию. Дальше всё как у Web Share Target:
+  // handleSharedFile(File). Оболочка сама вызывает window.__ltOnNativeShare, когда файл дошёл уже после
+  // запуска страницы (приложение было открыто или копирование большого файла ещё шло).
+  function pullNativeSharedFiles(){
+    var bridge = window.LifeTrackerNative;
+    function dbg(msg){ if(window.Debug) window.Debug.log("Поделиться: " + msg); }
+    var list = [];
+    try{ list = JSON.parse(bridge.takeSharedFiles() || "[]"); }catch(e){ list = []; }
+    if(!list.length) return;
+    function next(i){
+      if(i >= list.length) return;
+      var item = list[i];
+      fetch("./__shared/" + encodeURIComponent(item.id), {cache: "no-store"}).then(function(res){
+        if(!res.ok) throw new Error("HTTP " + res.status);
+        return res.blob();
+      }).then(function(blob){
+        try{ bridge.releaseSharedFile(item.id); }catch(e){}
+        dbg("файл получен от оболочки: имя=\"" + (item.name || "") + "\", размер=" + blob.size + ", тип=\"" + (item.type || "") + "\"");
+        handleSharedFile(new File([blob], item.name || "shared-file", { type: item.type || blob.type || "" }));
+      }).catch(function(e){
+        try{ bridge.releaseSharedFile(item.id); }catch(e2){}
+        dbg("ошибка приёма от оболочки: " + (e && e.message ? e.message : e));
+      }).then(function(){
+        setTimeout(function(){ next(i + 1); }, 300);
+      });
+    }
+    next(0);
+  }
+
   function checkForSharedFile(){
+    if(window.LifeTrackerNative && typeof window.LifeTrackerNative.takeSharedFiles !== "undefined"){
+      // В оболочке service worker и Cache API share-target не используются (sw.js не регистрируется).
+      window.__ltOnNativeShare = pullNativeSharedFiles;
+      pullNativeSharedFiles();
+      return;
+    }
     // Сама логика приёма файла не менялась.
     function dbg(msg){ if(window.Debug) window.Debug.log("Поделиться: " + msg); }
     // sw.js кладёт в тот же временный кэш запись "shared-status" — что он сделал с присланным

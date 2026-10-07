@@ -12,6 +12,7 @@ components.css
 footer.css
 modals.css
 
+native-shell.js
 debug.js
 syncengine.js
 syncengine_groupcrypto.js

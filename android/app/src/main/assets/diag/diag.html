@@ -21,10 +21,16 @@
   <button id="upd">Состояние обновления</button>
   <button id="updcheck">Проверить обновление</button>
   <button id="updtest">Самотест обновления</button>
+  <button id="s4bridge">Шаг 4: мост</button>
+  <button id="s4save">Шаг 4: сохранить файл</button>
+  <button id="s4share">Шаг 4: поделиться</button>
+  <button id="s4full">Шаг 4: полный экран</button>
   <button id="copy">Копировать результат</button>
   <a class="btn" href="/index.html">В приложение</a>
 </div>
 <pre id="out">Нажмите «Запустить проверки».</pre>
+<!-- Тот же файл, что в приложении: проверяем настоящий код подмены скачивания и navigator.share. -->
+<script src="/native-shell.js"></script>
 <script>
 (function(){
   var FIREBASE = "https://my-nekogram-default-rtdb.europe-west1.firebasedatabase.app";
@@ -208,6 +214,71 @@
       show();
     }catch(e){ add(false, "Самотест обновления", fmtErr(e)); }
   }
+
+  // ===== Шаг 4: нативные замены =====
+  var S4_METHODS = ["beginSave", "appendSave", "finishSave", "cancelSave", "showToast", "beginStage", "finishStage",
+    "shareStaged", "shareText", "clearStaged", "setFullscreen", "takeSharedFiles", "releaseSharedFile", "setStatusBarColor"];
+
+  function s4Bridge(){
+    var N = window.LifeTrackerNative;
+    if(!N){ add(false, "Мост шага 4", "нет LifeTrackerNative"); return; }
+    var info = {};
+    try{ info = JSON.parse(N.getAppInfo()); }catch(e){}
+    add(info.bridgeVersion >= 2, "Версия моста", String(info.bridgeVersion || "нет (APK старше шага 4)") + ", APK " + (info.versionName || "?"));
+    var missing = S4_METHODS.filter(function(m){ return typeof N[m] === "undefined"; });
+    add(missing.length === 0, "Методы моста шага 4", missing.length ? "нет: " + missing.join(", ") : "все " + S4_METHODS.length + " на месте");
+    add(!!window.LifeTrackerShell, "native-shell.js загружен", window.LifeTrackerShell ? "да, сохранение: " + window.LifeTrackerShell.canSave() + ", поделиться: " + window.LifeTrackerShell.canShare() : "нет");
+    add(typeof navigator.share === "function", "navigator.share определён", String(typeof navigator.share));
+  }
+
+  // Файл 5 МБ (два куска по 3 МБ): байты i % 251, чтобы размер и содержимое можно было сверить глазами по размеру файла.
+  function s4Save(){
+    s4Bridge();
+    var size = 5 * 1024 * 1024;
+    var bytes = new Uint8Array(size);
+    for(var i = 0; i < size; i++) bytes[i] = i % 251;
+    var blob = new Blob([bytes], { type: "application/octet-stream" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "lt-diag-test.bin";
+    document.body.appendChild(a);
+    var t0 = Date.now();
+    document.addEventListener("lt-native-saved", function onSaved(ev){
+      document.removeEventListener("lt-native-saved", onSaved);
+      var d = ev.detail || {};
+      add(d.bytes === size, "Сохранение через a.click()", "имя «" + d.name + "», " + d.bytes + " из " + size + " байт, " + (Date.now() - t0) + " мс. Проверьте файл в «Загрузках»: размер 5 242 880 байт");
+    });
+    a.click(); // подменённый click: файл уходит в оболочку, на экране появится сообщение «Сохранено в «Загрузки»»
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 0);
+    add(null, "Сохранение запущено", "жду ответ оболочки");
+  }
+
+  function s4Share(){
+    var file;
+    try{ file = new File(["Проверка «Поделиться» из Life tracker\n"], "lt-diag-share.txt", { type: "text/plain" }); }
+    catch(e){ add(false, "Создание файла", fmtErr(e)); return; }
+    var can = typeof navigator.canShare === "function" ? navigator.canShare({ files: [file] }) : "нет canShare";
+    add(can === true, "canShare с файлом", String(can));
+    if(typeof navigator.share !== "function"){ add(false, "Поделиться", "navigator.share нет"); return; }
+    navigator.share({ files: [file], title: "Проверка" }).then(function(){
+      add(true, "Поделиться", "системное меню открыто (выберите приложение и проверьте, что файл дошёл)");
+    }, function(e){ add(false, "Поделиться", fmtErr(e)); });
+  }
+
+  function s4Full(){
+    var N = window.LifeTrackerNative;
+    if(!N || typeof N.setFullscreen === "undefined"){ add(false, "Полный экран", "нет setFullscreen (APK старше шага 4)"); return; }
+    N.setFullscreen(true);
+    add(null, "Полный экран", "включён на 5 секунд: строка состояния и системные кнопки должны исчезнуть, провести от края экрана — показать на время");
+    setTimeout(function(){ N.setFullscreen(false); add(null, "Полный экран", "выключен: панели должны вернуться"); }, 5000);
+  }
+
+  document.getElementById("s4bridge").onclick = function(){ s4Bridge(); };
+  document.getElementById("s4save").onclick = function(){ s4Save(); };
+  document.getElementById("s4share").onclick = function(){ s4Share(); };
+  document.getElementById("s4full").onclick = function(){ s4Full(); };
 
   document.getElementById("run").onclick = function(){ runAll(); };
   document.getElementById("upd").onclick = function(){ updState(); };
