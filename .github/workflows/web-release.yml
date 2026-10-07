@@ -1,0 +1,116 @@
+name: Web release
+
+# Выпуск веб-части для live-update (ПЕРЕЕЗД_В_APK.md, 6.5).
+# Как выпускать: поменять APP_VERSION в sw.js (например "v0.38.42") и закоммитить в main, как и раньше.
+# Что делает: собирает zip веб-части (тот же белый список tools/www-files.txt, что и для APK), и если версия НОВЕЕ
+# всех уже опубликованных (теги web-v*), создаёт GitHub Release web-v<версия> с двумя файлами:
+#   web-v<версия>.zip и version.json ({"version", "url", "sha256"}). Приложение читает version.json из
+#   последнего релиза: https://github.com/<репозиторий>/releases/latest/download/version.json
+# Если версия не менялась (или не новее), релиз не создаётся, workflow заканчивается успешно.
+# APK этот workflow НЕ собирает (APK собирает android.yml по тегу apk-v* или вручную), а APK-релизы там помечены
+# --latest=false, поэтому «последним релизом» всегда остаётся веб-часть.
+# Ничего не коммитит в main, поэтому цикла «коммит запускает сборку» нет.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sw.js"
+      - "index.html"
+      - "manifest.json"
+      - "*.js"
+      - "*.css"
+      - "*.png"
+      - "*.jpg"
+      - "*.ttf"
+      - "vendor/**"
+      - "tools/www-files.txt"
+      - "tools/android_prepare.py"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: web-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Собрать веб-бандл
+        id: prep
+        run: python3 tools/android_prepare.py --zip-dir dist
+
+      - name: Проверить, что версия новее опубликованной
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW: ${{ steps.prep.outputs.version }}
+        run: |
+          set -euo pipefail
+          PUBLISHED=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 500 --json tagName --jq '.[].tagName' | grep '^web-v' | sed 's/^web-//' || true)
+          LATEST=$(printf '%s\n' $PUBLISHED | sort -V | tail -n 1 || true)
+          echo "Версия в sw.js: $NEW; последняя опубликованная: ${LATEST:-нет}"
+          PUBLISH=true
+          if [ -n "$LATEST" ]; then
+            TOP=$(printf '%s\n%s\n' "$LATEST" "$NEW" | sort -V | tail -n 1)
+            if [ "$LATEST" = "$NEW" ] || [ "$TOP" != "$NEW" ]; then
+              PUBLISH=false
+            fi
+          fi
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+          if [ "$PUBLISH" = "false" ]; then
+            echo "::notice::Версия $NEW не новее опубликованной (${LATEST}). Релиз веб-части не создаётся. Чтобы выпустить, поднимите APP_VERSION в sw.js."
+          fi
+
+      - name: Подготовить version.json
+        if: steps.check.outputs.publish == 'true'
+        env:
+          VER: ${{ steps.prep.outputs.version }}
+          NAME: ${{ steps.prep.outputs.zip_name }}
+          SHA: ${{ steps.prep.outputs.zip_sha256 }}
+        run: |
+          set -euo pipefail
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/web-${VER}/${NAME}"
+          jq -n --arg v "$VER" --arg u "$URL" --arg s "$SHA" '{version: $v, url: $u, sha256: $s}' > dist/version.json
+          cat dist/version.json
+
+      - name: Опубликовать Release
+        if: steps.check.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ steps.prep.outputs.version }}
+          NAME: ${{ steps.prep.outputs.zip_name }}
+          SHA: ${{ steps.prep.outputs.zip_sha256 }}
+        run: |
+          set -euo pipefail
+          NOTES="Веб-часть ${VER} для live-update приложения (без пересборки APK). SHA-256 архива: ${SHA}. Не удаляйте и не редактируйте файлы релиза вручную."
+          gh release create "web-${VER}" "dist/${NAME}" dist/version.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Веб-часть ${VER}" \
+            --notes "$NOTES" \
+            --latest
+
+      - name: Проверить, что приложение увидит новую версию
+        if: steps.check.outputs.publish == 'true'
+        env:
+          VER: ${{ steps.prep.outputs.version }}
+        run: |
+          set -u
+          for i in 1 2 3 4 5; do
+            GOT=$(curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/version.json" | jq -r '.version' || true)
+            if [ "$GOT" = "$VER" ]; then
+              echo "OK: releases/latest отдаёт $GOT"
+              exit 0
+            fi
+            echo "Попытка $i: releases/latest пока отдаёт '${GOT}', жду"
+            sleep 6
+          done
+          echo "::warning::releases/latest/download/version.json пока не показывает $VER (возможна задержка GitHub). Проверьте позже, нет ли более нового релиза без флага latest=false."
