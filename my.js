@@ -9283,6 +9283,14 @@
     try{ SW_REGISTRATION.update().catch(function(){}); }catch(e){}
   }
 
+  function confirmShellReady(version){
+    function fire(){
+      try{ window.LifeTrackerNative.appReady(version); }catch(e){}
+    }
+    if(document.readyState === "complete") fire();
+    else window.addEventListener("load", fire);
+  }
+
   if(window.LifeTrackerNative){
     // Нативная оболочка (APK, ПЕРЕЕЗД_В_APK.md, шаг 2): service worker НЕ регистрируем — файлы отдаёт
     // WebAssetServer оболочки, а обновление веб-части делает сама оболочка. Версию берём из version.json
@@ -9291,6 +9299,9 @@
       return res.json();
     }).then(function(info){
       applyVersionToHeader(info && info.version);
+      // Live-update (шаг 3): сообщаем оболочке, что эта версия веб-части запустилась. Без этого вызова
+      // скачанная версия при следующем запуске откатится на предыдущую рабочую (WebUpdater).
+      confirmShellReady(info && info.version ? String(info.version) : "");
     }).catch(function(){
       applyVersionToHeader(null);
     });

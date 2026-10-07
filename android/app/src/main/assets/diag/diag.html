@@ -18,6 +18,9 @@
 <div>
   <button id="run">Запустить проверки</button>
   <button id="cam">Проверить камеру</button>
+  <button id="upd">Состояние обновления</button>
+  <button id="updcheck">Проверить обновление</button>
+  <button id="updtest">Самотест обновления</button>
   <button id="copy">Копировать результат</button>
   <a class="btn" href="/index.html">В приложение</a>
 </div>
@@ -143,6 +146,8 @@
       add(!!v2.version, "version.json бандла", JSON.stringify(v2));
     }catch(e){ add(false, "version.json бандла", fmtErr(e)); }
 
+    updState();
+
     await probe("Firebase: GET (облачная синхронизация)", FIREBASE + "/syncs/__lt_diag_probe.json?shallow=true", {},
       "200 или 401/403 — нормально: главное, что ответ дошёл");
     await probe("Firebase: PATCH с JSON (проверка preflight)", FIREBASE + "/syncs/__lt_diag_probe.json", {
@@ -166,7 +171,48 @@
     }catch(e){ add(false, "Камера (getUserMedia)", fmtErr(e)); }
   }
 
+  function updState(){
+    try{
+      if(!window.LifeTrackerNative || !LifeTrackerNative.getWebUpdateState){
+        add(false, "Обновление веба", "в этой оболочке нет моста обновления (нужен APK шага 3)");
+        return null;
+      }
+      var s = JSON.parse(LifeTrackerNative.getWebUpdateState());
+      add(null, "Обновление веба", "встроенная " + s.builtin + ", раздаётся " + s.served + ", активная " + (s.active || "—") +
+        ", запасная " + (s.lastGood || "—") + ", ждёт запуска " + (s.pending || "—") + ", пробная " + (s.trial || "—") +
+        ", неудачные [" + (s.bad || []).join(", ") + "]. Последняя проверка: " + s.lastResult);
+      return s;
+    }catch(e){ add(false, "Обновление веба", fmtErr(e)); return null; }
+  }
+
+  function updCheck(){
+    if(!window.LifeTrackerNative || !LifeTrackerNative.checkWebUpdateNow){ updState(); return; }
+    LifeTrackerNative.checkWebUpdateNow();
+    add(null, "Проверка обновления", "запущена, жду ответ GitHub");
+    var tries = 0;
+    var timer = setInterval(function(){
+      tries++;
+      var s = null;
+      try{ s = JSON.parse(LifeTrackerNative.getWebUpdateState()); }catch(e){}
+      if((s && !s.busy && tries > 1) || tries > 90){
+        clearInterval(timer);
+        updState();
+      }
+    }, 1000);
+  }
+
+  function updSelfTest(){
+    try{
+      var text = LifeTrackerNative.runWebUpdateSelfTest();
+      text.split("\n").forEach(function(l){ if(l) lines.push(l); });
+      show();
+    }catch(e){ add(false, "Самотест обновления", fmtErr(e)); }
+  }
+
   document.getElementById("run").onclick = function(){ runAll(); };
+  document.getElementById("upd").onclick = function(){ updState(); };
+  document.getElementById("updcheck").onclick = function(){ updCheck(); };
+  document.getElementById("updtest").onclick = function(){ updSelfTest(); };
   document.getElementById("cam").onclick = function(){ camTest(); };
   document.getElementById("copy").onclick = function(){
     var text = lines.join("\n");

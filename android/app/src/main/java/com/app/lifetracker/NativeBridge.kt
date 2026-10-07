@@ -29,10 +29,48 @@ class NativeBridge(private val activity: MainActivity) {
         }
     }
 
-    /** Страница сообщает, что успешно запустилась (на шаге 3 по этому вызову подтверждается новая версия веб-бандла). */
+    /**
+     * Страница сообщает, что успешно запустилась (my.js, после загрузки страницы и чтения version.json бандла).
+     * Подтверждает пробный запуск скачанной версии веб-части (live-update, WebUpdater); иначе при следующем
+     * запуске версия откатится на предыдущую рабочую.
+     */
     @JavascriptInterface
     fun appReady(version: String?) {
-        // Шаг 3 (live-update): подтверждение запуска и откат. Пока ничего не делает.
+        if (!activity.pageTrusted) return
+        try {
+            activity.webUpdater.confirm(version)
+        } catch (e: Exception) {
+            // Подтверждение не записалось: версия откатится при следующем запуске, приложение продолжает работать.
+        }
+    }
+
+    /** JSON с состоянием live-update (для страницы диагностики). */
+    @JavascriptInterface
+    fun getWebUpdateState(): String {
+        if (!activity.pageTrusted) return "{}"
+        return try {
+            activity.webUpdater.describe()
+        } catch (e: Exception) {
+            "{}"
+        }
+    }
+
+    /** Запускает проверку обновления веб-части прямо сейчас (в фоне); результат виден в getWebUpdateState(). */
+    @JavascriptInterface
+    fun checkWebUpdateNow() {
+        if (!activity.pageTrusted) return
+        activity.webUpdater.checkInBackground(true)
+    }
+
+    /** Самотест live-update на устройстве (без сети, в отдельной папке): текст с ✅/❌. */
+    @JavascriptInterface
+    fun runWebUpdateSelfTest(): String {
+        if (!activity.pageTrusted) return "страница не доверенная"
+        return try {
+            activity.webUpdater.selfTest()
+        } catch (e: Exception) {
+            "самотест не запустился: $e"
+        }
     }
 
     /** Цвет статус-бара: "#rrggbb", "#rgb" или "rgb(r, g, b)". Значок светлый/тёмный выбирается по яркости цвета. */

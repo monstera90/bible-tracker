@@ -9,6 +9,8 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.PermissionRequest
@@ -28,6 +30,8 @@ import androidx.core.graphics.ColorUtils
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import org.json.JSONObject
+import java.io.File
 import kotlin.math.max
 
 /**
@@ -44,6 +48,10 @@ class MainActivity : ComponentActivity() {
         // До первого сообщения от страницы: theme_color и background_color из manifest.json.
         private const val DEFAULT_STATUS_COLOR = 0xFF8F7FB8.toInt()
         private const val PAGE_BG_COLOR = 0xFFF4F0F8.toInt()
+
+        // Сторож live-update: если пробная версия веб-части не подтвердила запуск (appReady) за это время после
+        // загрузки страницы, откатываемся сразу, а не при следующем запуске.
+        private const val TRIAL_TIMEOUT_MS = 30_000L
 
         // Временное решение до шага 4: следим за <meta name="theme-color"> (его обновляет syncThemeColorMeta()
         // в my.js) и передаём цвет в мост. На шаге 4 заменяется прямым вызовом из my.js.
@@ -62,6 +70,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private lateinit var server: WebAssetServer
+
+    /** Live-update веб-части (скачивание, применение при запуске, откат). Мост обращается к нему из appReady. */
+    lateinit var webUpdater: WebUpdater
+        private set
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var trialWatchdogStarted = false
+    private val trialWatchdog = Runnable {
+        if (webUpdater.failTrial()) recreate()
+    }
     private lateinit var root: LinearLayout
     private lateinit var statusStrip: View
     private lateinit var navStrip: View
@@ -95,7 +113,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        server = WebAssetServer(applicationContext)
+        // Live-update: до загрузки страницы выбираем бандл (скачанный или встроенный) и применяем ожидающую версию.
+        webUpdater = WebUpdater(File(filesDir, "web"), { readBuiltinVersion() })
+        val bundle = try {
+            webUpdater.startLaunch()
+        } catch (e: Exception) {
+            null
+        }
+        server = WebAssetServer(applicationContext, bundle)
         buildLayout()
         setContentView(root)
         setupWebView()
@@ -111,6 +136,7 @@ class MainActivity : ComponentActivity() {
         })
 
         webView.loadUrl(if (intent?.action == ACTION_DIAG) WebAssetServer.DIAG_URL else WebAssetServer.START_URL)
+        webUpdater.checkInBackground()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -123,6 +149,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         webView.onResume()
+        // Возврат на передний план: проверка обновления веб-части (не чаще раза в 15 минут, внутри WebUpdater).
+        webUpdater.checkInBackground()
     }
 
     override fun onPause() {
@@ -131,6 +159,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(trialWatchdog)
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.destroy()
         super.onDestroy()
@@ -141,6 +170,14 @@ class MainActivity : ComponentActivity() {
         statusStrip.setBackgroundColor(color)
         WindowCompat.getInsetsController(window, root).isAppearanceLightStatusBars =
             ColorUtils.calculateLuminance(color) > 0.5
+    }
+
+    /** Версия встроенного бандла (assets/www/version.json, его пишет tools/android_prepare.py). */
+    private fun readBuiltinVersion(): String? = try {
+        val text = assets.open("www/version.json").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        WebUpdater.normalizeVersion(JSONObject(text).optString("version", ""))
+    } catch (e: Exception) {
+        null
     }
 
     private fun buildLayout() {
@@ -212,6 +249,10 @@ class MainActivity : ComponentActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 if (pageTrusted) view?.evaluateJavascript(THEME_HOOK_JS, null)
+                if (pageTrusted && !trialWatchdogStarted && url != null && url.startsWith(WebAssetServer.START_URL)) {
+                    trialWatchdogStarted = true
+                    if (webUpdater.hasTrial()) handler.postDelayed(trialWatchdog, TRIAL_TIMEOUT_MS)
+                }
             }
 
             override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {

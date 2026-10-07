@@ -12,10 +12,11 @@ import java.io.InputStream
 
 /**
  * Раздаёт веб-часть приложения под адресом https://localhost без сети.
- * Порядок: активный скачанный бандл (files/web/<версия>, указатель files/web/active.txt; пишется на шаге 3),
- * затем встроенный из assets/www/.
+ * Порядок: активный скачанный бандл (files/web/<версия>; папку выбирает WebUpdater.startLaunch() один раз при
+ * создании Activity и передаёт сюда), затем встроенный из assets/www/. Бандл фиксируется на всё время работы
+ * экрана: новая версия, скачанная в фоне, подхватывается только при следующем запуске (Q9).
  */
-class WebAssetServer(private val context: Context) {
+class WebAssetServer(private val context: Context, private val bundleDir: File?) {
 
     companion object {
         // ⚠️ НЕ МЕНЯТЬ ПОСЛЕ ПЕРВОГО РЕЛИЗА. От схемы и хоста зависит origin, а значит весь
@@ -26,6 +27,12 @@ class WebAssetServer(private val context: Context) {
 
         // Служебная страница диагностики (из assets/diag/), не часть веб-бандла.
         const val DIAG_URL = "$ORIGIN/__diag.html"
+    }
+
+    private val bundleCanon: String? = try {
+        bundleDir?.canonicalPath
+    } catch (e: IOException) {
+        null
     }
 
     private val loader: WebViewAssetLoader = WebViewAssetLoader.Builder()
@@ -51,11 +58,10 @@ class WebAssetServer(private val context: Context) {
 
             if (rel == "__diag.html") return openAsset("diag/diag.html", rel)
 
-            val bundle = activeBundleDir()
-            if (bundle != null) {
-                val file = File(bundle, rel)
+            if (bundleDir != null && bundleCanon != null) {
+                val file = File(bundleDir, rel)
                 val inside = try {
-                    file.canonicalPath.startsWith(bundle.canonicalPath + File.separator)
+                    file.canonicalPath.startsWith(bundleCanon + File.separator)
                 } catch (e: IOException) {
                     false
                 }
@@ -68,19 +74,6 @@ class WebAssetServer(private val context: Context) {
                 }
             }
             return openAsset("www/$rel", rel)
-        }
-    }
-
-    private fun activeBundleDir(): File? {
-        try {
-            val pointer = File(context.filesDir, "web/active.txt")
-            if (!pointer.isFile) return null
-            val name = pointer.readText().trim()
-            if (name.isEmpty() || name.contains('/') || name.contains("..")) return null
-            val dir = File(context.filesDir, "web/$name")
-            return if (File(dir, "index.html").isFile) dir else null
-        } catch (e: Exception) {
-            return null
         }
     }
 
