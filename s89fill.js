@@ -153,6 +153,18 @@ window.initS89FillModule = function(deps){
     return docId ? "https://docs.google.com/document/d/" + docId + "/export?format=docx" : null;
   }
 
+  // Всегда тянем свежую версию документа с Диска: к URL добавляется
+  // уникальный параметр (обходит кеш браузера и промежуточных кешей
+  // Google), а сам запрос идёт с cache: "no-store". Без этого повторный
+  // запуск мог отдавать старую копию .docx.
+  function freshUrl(url){
+    return url + (url.indexOf("?") === -1 ? "?" : "&") + "_=" + Date.now();
+  }
+
+  function fetchFresh(url){
+    return fetch(freshUrl(url), { cache: "no-store" });
+  }
+
   // Имя файла через заголовок Content-Disposition не достать: Google не
   // открывает его для кросс-доменных запросов через
   // Access-Control-Expose-Headers. dc:title внутри docProps/core.xml
@@ -168,7 +180,7 @@ window.initS89FillModule = function(deps){
   }
 
   function fetchNameFromMobilebasic(docId){
-    return fetch(mobilebasicUrl(docId))
+    return fetchFresh(mobilebasicUrl(docId))
       .then(function(r){
         if(!r.ok) throw new Error("HTTP " + r.status);
         return r.text();
@@ -192,7 +204,7 @@ window.initS89FillModule = function(deps){
 
     return mobilebasicAttempt.then(function(name){
       if(name) return name;
-      return fetch(exportUrl)
+      return fetchFresh(exportUrl)
         .then(function(r){
           if(!r.ok) return null;
           return r.arrayBuffer().then(function(buf){
@@ -399,7 +411,7 @@ window.initS89FillModule = function(deps){
         : Promise.resolve(null);
 
       Promise.all([
-        fetch(exportUrl).then(function(r){
+        fetchFresh(exportUrl).then(function(r){
           if(!r.ok) throw new Error("HTTP " + r.status);
           return r.arrayBuffer();
         }).then(function(buf){
