@@ -396,7 +396,9 @@ window.initS89FillModule = function(deps){
       downloadBtn.disabled = true;
       downloadBtn.classList.remove("ready");
       generatedFiles = null;
-      log("Загружаю документ…");
+      log("[s89fill v4: no-store] Загружаю документ…");
+      var fetchDiag = "";
+      var fetchStartedAt = performance.now();
 
       if(!fontLoadPromise){
         fontLoadPromise = S89Draw.loadFont(FONT_URL);
@@ -413,8 +415,13 @@ window.initS89FillModule = function(deps){
       Promise.all([
         fetchFresh(exportUrl).then(function(r){
           if(!r.ok) throw new Error("HTTP " + r.status);
+          var host = "";
+          try{ host = new URL(r.url).hostname; }catch(e){}
+          fetchDiag = (r.redirected ? "с редиректом" : "БЕЗ редиректа") + ", " + host;
           return r.arrayBuffer();
         }).then(function(buf){
+          fetchDiag = Math.round(buf.byteLength / 1024) + " КБ, " +
+            Math.round(performance.now() - fetchStartedAt) + " мс, " + fetchDiag;
           return namePromise.then(function(mobileName){
             return (mobileName ? Promise.resolve(mobileName) : MiniZip.extractDocxTitle(buf));
           }).then(function(realName){
@@ -432,9 +439,18 @@ window.initS89FillModule = function(deps){
         var docBuf = results[0];
         var templateImage = results[1];
 
-        return MiniZip.extractDocxDocumentXml(docBuf).then(function(xml){
+        return Promise.all([
+          MiniZip.extractDocxDocumentXml(docBuf),
+          MiniZip.extractDocxModified ? MiniZip.extractDocxModified(docBuf) : Promise.resolve(null),
+        ]).then(function(parts){
+          var xml = parts[0];
+          if(parts[1]) fetchDiag += ", изменён " + parts[1];
           log("Разбираю задания…");
           var tasks = S89Tasks.buildTasks([xml], startYear);
+          var datesInfo = tasks.length
+            ? "; даты заданий: " + tasks[0].date + " – " + tasks[tasks.length - 1].date
+            : "";
+          console.log("s89fill: документ скачан (" + fetchDiag + ")" + datesInfo);
 
           if(!tasks.length){
             log("В документе не нашлось подходящих заданий.");
@@ -455,6 +471,7 @@ window.initS89FillModule = function(deps){
               var totalMs = performance.now() - batchStart;
               var perImage = tasks.length ? totalMs / tasks.length : 0;
               log(
+                "[v4] Документ: " + fetchDiag + datesInfo + ". " +
                 "Готово: заполнено бланков - " + results2.length + " за " +
                 (totalMs / 1000).toFixed(1) + " с (в среднем " + perImage.toFixed(0) +
                 " мс/бланк; рисование " + (drawTotalMs / tasks.length).toFixed(0) +

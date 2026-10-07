@@ -189,6 +189,24 @@
     return null;
   }
 
+  // Время последнего изменения документа (dcterms:modified из
+  // docProps/core.xml) как строка ISO или null, если тега нет. Нужно
+  // только для диагностики: видно, какую версию документа реально отдал
+  // сервер.
+  async function extractDocxModified(docxData) {
+    const bytes = docxData instanceof Uint8Array ? docxData : new Uint8Array(docxData);
+    let entries;
+    try {
+      entries = readCentralDirectory(bytes);
+    } catch (e) {
+      return null;
+    }
+    const coreXml = await extractEntryText(bytes, entries, "docProps/core.xml");
+    if (!coreXml) return null;
+    const m = /<dcterms:modified[^>]*>([\s\S]*?)<\/dcterms:modified>/i.exec(coreXml);
+    return m ? m[1].trim() : null;
+  }
+
   // Достаёт из ПРОИЗВОЛЬНОГО .zip все записи с расширением .md как текст
   // (UTF-8), сохраняя путь записи внутри архива (папки — как есть, без
   // ведущего "/"). В отличие от extractDocxDocumentXml, не привязана к
@@ -373,6 +391,7 @@
   global.MiniZip = {
     extractDocxDocumentXml: extractDocxDocumentXml,
     extractDocxTitle: extractDocxTitle,
+    extractDocxModified: extractDocxModified,
     decodeXmlEntities: decodeXmlEntities,
     createZip: createZip,
     extractMarkdownFiles: extractMarkdownFiles,
