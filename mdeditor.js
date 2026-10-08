@@ -2605,7 +2605,12 @@ window.initMdEditorModule = function(deps){
   // занят ЖИВОЙ заметкой (запись-тумбстоун с тем же id оживает: адаптер движка при put снимает
   // deleted, а saveRecord ставит новую метку времени). Иначе, как раньше, выдаётся новый id.
   var IMPORTED_NOTE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-  function createImportedNoteRecord(name, path, text, preferredId){
+  // 08.10 (ТЗ ПЕРЕЕЗД_В_APK, шаг 6, 12.12): skipCreatedRecord — не писать в state запись «новая заметка»
+  // (recordNoteCreated). При восстановлении из архива настоящие записи notecreated:<день>-<суффикс> с
+  // исходными датами приходят вместе с state, а новая запись с сегодняшним днём искажала бы «Карту дней
+  // года» (все заметки «создавались» в день импорта) и уходила бы в облако. Для обычного импорта .md/.zip
+  // (applyEntries) параметр не передаётся: такие заметки действительно новые.
+  function createImportedNoteRecord(name, path, text, preferredId, skipCreatedRecord){
     var id = null;
     if(typeof preferredId === "string" && IMPORTED_NOTE_ID_RE.test(preferredId)){
       var occupied = notesMap.get(preferredId);
@@ -2616,7 +2621,7 @@ window.initMdEditorModule = function(deps){
     var rec = notesMap.get(id);
     nameIndex.set(name.toLowerCase(), id);
     markReferencedNamesDirty();
-    recordNoteCreated(name);
+    if(!skipCreatedRecord) recordNoteCreated(name);
     return rec;
   }
 
@@ -2734,7 +2739,7 @@ window.initMdEditorModule = function(deps){
       deleteNoteRecord(id);
     });
     entries.forEach(function(entry){
-      createImportedNoteRecord(entry.name, entry.path, entry.text, entry.id);
+      createImportedNoteRecord(entry.name, entry.path, entry.text, entry.id, true);
     });
     rebuildTree();
     var container = document.getElementById("settingsTabContent");
