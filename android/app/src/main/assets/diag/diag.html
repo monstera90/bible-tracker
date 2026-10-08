@@ -30,12 +30,22 @@
   <button id="s5test">Шаг 5: тест через 1 мин</button>
   <button id="s5poll">Шаг 5: проверить группу</button>
   <button id="s5bg">Шаг 5: работа в фоне</button>
+  <button id="s6idb">Шаг 6: IndexedDB</button>
+  <button id="s6check">Шаг 6: самопроверка экспорта</button>
+  <button id="s6snap">Шаг 6: снимок данных</button>
+  <button id="s6cmp">Шаг 6: сравнить снимки (2 файла)</button>
+  <button id="s6arc">Шаг 6: проверить архив (1–2 файла)</button>
+  <button id="s6pick">Шаг 6: выбор файла</button>
+  <button id="s6b100">Шаг 6: объём 100 МБ</button>
+  <button id="s6b300">Шаг 6: объём 300 МБ</button>
+  <button id="s6b600">Шаг 6: объём 600 МБ</button>
   <button id="copy">Копировать результат</button>
   <a class="btn" href="/index.html">В приложение</a>
 </div>
 <pre id="out">Нажмите «Запустить проверки».</pre>
 <!-- Тот же файл, что в приложении: проверяем настоящий код подмены скачивания и navigator.share. -->
 <script src="/native-shell.js"></script>
+<script src="/minizip.js"></script>
 <script>
 (function(){
   var FIREBASE = "https://my-nekogram-default-rtdb.europe-west1.firebasedatabase.app";
@@ -126,7 +136,7 @@
     add(!!(window.crypto && crypto.subtle), "crypto.subtle (шифрование заметок и файлов)");
     try{ localStorage.setItem("__lt_diag", "1"); var v = localStorage.getItem("__lt_diag"); localStorage.removeItem("__lt_diag"); add(v === "1", "localStorage"); }
     catch(e){ add(false, "localStorage", fmtErr(e)); }
-    try{ add(await idbTest(), "IndexedDB (запись, чтение, удаление)"); }
+    try{ var ir = await idbRounds(1); add(ir.ok, "IndexedDB (запись, чтение, удаление)", ir.ok ? "" : "\n   " + ir.detail); }
     catch(e){ add(false, "IndexedDB", fmtErr(e)); }
     try{ add(true, "OPFS (navigator.storage.getDirectory)", await opfsTest()); }
     catch(e){ add(false, "OPFS (navigator.storage.getDirectory)", fmtErr(e)); }
@@ -339,6 +349,311 @@
   document.getElementById("s5test").onclick = function(){ s5Test(); };
   document.getElementById("s5poll").onclick = function(){ s5Poll(); };
   document.getElementById("s5bg").onclick = function(){ s5Bg(); };
+
+  // ---------------------------------------------------------------- Шаг 6: проверки переноса данных
+  // Читают данные приложения (тот же origin), ничего в них не пишут. Значения не показываются: только имена, размеры, хеши.
+  function fmtMB(n){ return n >= 1048576 ? (n/1048576).toFixed(1) + " МБ" : n >= 1024 ? (n/1024).toFixed(1) + " КБ" : n + " Б"; }
+  async function sha(bytes){ var d = await crypto.subtle.digest("SHA-256", bytes); return Array.from(new Uint8Array(d)).map(function(b){ return b.toString(16).padStart(2, "0"); }).join(""); }
+  async function shaStr(s){ return (await sha(new TextEncoder().encode(s))).slice(0, 12); }
+  function pickFiles(accept, multiple){
+    return new Promise(function(resolve){
+      var inp = document.createElement("input"); inp.type = "file"; if(accept) inp.accept = accept; inp.multiple = !!multiple;
+      inp.style.display = "none"; document.body.appendChild(inp);
+      var done = false;
+      function fin(l){ if(done) return; done = true; inp.remove(); resolve(l); }
+      inp.addEventListener("change", function(){ fin(Array.from(inp.files || [])); });
+      inp.addEventListener("cancel", function(){ fin([]); });
+      inp.click();
+    });
+  }
+  function saveBlob(name, blob, timeoutMs){
+    return new Promise(function(resolve){
+      var url = URL.createObjectURL(blob), a = document.createElement("a"), t0 = Date.now(), done = false, to;
+      a.href = url; a.download = name; document.body.appendChild(a);
+      function fin(r){ if(done) return; done = true; document.removeEventListener("lt-native-saved", onS); clearTimeout(to); resolve(r); }
+      function onS(ev){ fin({ ok: true, detail: ev.detail || {}, ms: Date.now() - t0 }); }
+      document.addEventListener("lt-native-saved", onS);
+      to = setTimeout(function(){ fin({ ok: false, ms: Date.now() - t0 }); }, timeoutMs || 120000);
+      a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 0);
+    });
+  }
+  function stamp(){ var d = new Date(), p = function(n){ return String(n).padStart(2, "0"); }; return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()); }
+
+  // --- IndexedDB по шагам (старый тест мог ложно падать на «blocked» при удалении)
+  function idbOpenP(name, ver, upg){
+    return new Promise(function(res, rej){ var r = ver ? indexedDB.open(name, ver) : indexedDB.open(name);
+      r.onupgradeneeded = function(){ upg(r); }; r.onsuccess = function(){ res(r.result); }; r.onerror = function(){ rej(r.error || new Error("open")); }; r.onblocked = function(){ rej(new Error("blocked")); }; });
+  }
+  async function idbRounds(n){
+    var all = [], ok = true;
+    for(var k = 1; k <= n; k++){
+      var st = [], name = "__lt_diag6_" + k + "_" + Date.now(), db = null, t = Date.now();
+      function S(g, label, x){ st.push((g ? "✅ " : "❌ ") + label + (x ? " (" + x + ")" : "")); if(!g) ok = false; }
+      try{ db = await idbOpenP(name, 1, function(r){ r.result.createObjectStore("s"); }); S(true, "открытие", (Date.now() - t) + " мс"); }
+      catch(e){ S(false, "открытие", fmtErr(e)); all.push("круг " + k + ": " + st.join("; ")); continue; }
+      try{ await new Promise(function(res, rej){ var tx = db.transaction("s", "readwrite"); tx.objectStore("s").put({ n: 42, t: "привет", b: new Uint8Array([1, 2, 3]) }, "k"); tx.oncomplete = res; tx.onerror = tx.onabort = function(){ rej(tx.error || new Error("abort")); }; }); S(true, "запись"); }
+      catch(e){ S(false, "запись", fmtErr(e)); }
+      try{ var v = await new Promise(function(res, rej){ var tx = db.transaction("s"), r = tx.objectStore("s").get("k"); tx.oncomplete = function(){ res(r.result); }; tx.onerror = function(){ rej(tx.error); }; }); S(!!(v && v.n === 42 && v.t === "привет" && v.b && v.b.length === 3), "чтение"); }
+      catch(e){ S(false, "чтение", fmtErr(e)); }
+      db.close();
+      var blocked = false;
+      var dr = await new Promise(function(res){ var d = indexedDB.deleteDatabase(name), to = setTimeout(function(){ res("таймаут 5 с"); }, 5000);
+        d.onsuccess = function(){ clearTimeout(to); res(blocked ? "ok, было blocked" : "ok"); }; d.onerror = function(){ clearTimeout(to); res("ошибка: " + fmtErr(d.error)); }; d.onblocked = function(){ blocked = true; }; });
+      S(dr.indexOf("ok") === 0, "удаление", dr);
+      all.push("круг " + k + ": " + st.join("; "));
+    }
+    return { ok: ok, detail: all.join("\n   ") };
+  }
+  async function listDbs(withHash){
+    var out = [];
+    if(!indexedDB.databases) return null;
+    var list = await indexedDB.databases();
+    for(var i = 0; i < list.length; i++){
+      var d = list[i];
+      if(/^__lt_diag/.test(d.name)) continue;
+      var info = { name: d.name, version: d.version, stores: {}, keys: {} };
+      try{
+        var db = await idbOpenP(d.name, 0, function(r){ try{ r.transaction.abort(); }catch(e){} });
+        var names = Array.from(db.objectStoreNames);
+        for(var j = 0; j < names.length; j++){
+          var sn = names[j];
+          info.stores[sn] = await new Promise(function(res, rej){ var rq = db.transaction(sn).objectStore(sn).count(); rq.onsuccess = function(){ res(rq.result); }; rq.onerror = function(){ rej(rq.error); }; });
+          var skip = /^biblePersonalShadow_v1_/.test(d.name) || info.stores[sn] > 5000;
+          if(withHash && !skip){
+            var rows = await new Promise(function(res, rej){ var o = [], rq = db.transaction(sn).objectStore(sn).openCursor();
+              rq.onsuccess = function(){ var c = rq.result; if(!c) return res(o); o.push([String(c.key), c.value]); c.continue(); }; rq.onerror = function(){ rej(rq.error); }; });
+            var m = {};
+            for(var q = 0; q < rows.length; q++){ var s = ""; try{ s = JSON.stringify(rows[q][1]); }catch(e){} m[rows[q][0]] = await shaStr(s || ""); }
+            info.keys[sn] = m;
+          }
+        }
+        db.close();
+      }catch(e){ info.error = fmtErr(e); }
+      out.push(info);
+    }
+    return out;
+  }
+
+  // --- реестр экспорта берём из my.js бандла (тот же, что в приложении)
+  var registryCache = null;
+  async function loadRegistry(){
+    if(registryCache) return registryCache;
+    var text = await (await fetch("/my.js", { cache: "no-store" })).text();
+    var s = text.indexOf("var EXPORT_REGISTRY = {");
+    if(s < 0) throw new Error("в my.js нет EXPORT_REGISTRY");
+    var i = text.indexOf("{", s), depth = 0, inStr = false, q = "", j;
+    for(j = i; j < text.length; j++){
+      var ch = text[j];
+      if(inStr){ if(ch === "\\") j++; else if(ch === q) inStr = false; continue; }
+      if(ch === '"' || ch === "'"){ inStr = true; q = ch; continue; }
+      if(ch === "/" && text[j + 1] === "/"){ while(j < text.length && text[j] !== "\n") j++; continue; }
+      if(ch === "{") depth++; else if(ch === "}"){ depth--; if(depth === 0) break; }
+    }
+    registryCache = (new Function("return (" + text.slice(i, j + 1) + ");"))();
+    return registryCache;
+  }
+  function hasK(o, k){ return Object.prototype.hasOwnProperty.call(o, k); }
+  function pfx(map, key){ return Object.keys(map).some(function(p){ return key.indexOf(p) === 0; }); }
+  function lsStatus(R, k){ var l = R.localStorage; if(hasK(l.include, k)) return "include"; if(hasK(l.exclude, k) || pfx(l.excludePrefixes, k)) return "exclude"; return null; }
+  async function dirStats(dir){
+    var files = 0, bytes = 0, names = [];
+    for await (var e of dir.entries()){
+      if(e[1].kind === "file"){ files++; var sz = (await e[1].getFile()).size; bytes += sz; names.push(e[0] + ":" + sz); }
+      else { var s = await dirStats(e[1]); files += s.files; bytes += s.bytes; s.names.forEach(function(n){ names.push(e[0] + "/" + n); }); }
+    }
+    return { files: files, bytes: bytes, names: names };
+  }
+  async function inventory(R){
+    var inv = { kind: "lt-snapshot", v: 1, at: Date.now(), ls: {}, state: {}, md: {}, dbs: [], opfs: {}, caches: {} };
+    for(var i = 0; i < localStorage.length; i++){
+      var k = localStorage.key(i), v = localStorage.getItem(k) || "";
+      inv.ls[k] = { len: v.length, h: await shaStr(v) };
+      if(k === "bibleReadingProgress_v2"){
+        try{ var st = JSON.parse(v); inv.state.count = Object.keys(st).length; inv.state.rec = {};
+          for(var sk in st){ if(sk.indexOf("__") === 0) continue; var r = st[sk]; inv.state.rec[sk] = [await shaStr(JSON.stringify(r && r.c)), r && r.t]; } }catch(e){ inv.state.error = fmtErr(e); }
+      }
+    }
+    inv.dbs = (await listDbs(true)) || [];
+    var md = inv.dbs.filter(function(d){ return d.name === "mdEditorDB"; })[0];
+    if(md){ try{ var db = await idbOpenP("mdEditorDB", 0, function(r){ try{ r.transaction.abort(); }catch(e){} });
+      var rows = await new Promise(function(res, rej){ var o = [], rq = db.transaction("handles").objectStore("handles").openCursor(); rq.onsuccess = function(){ var c = rq.result; if(!c) return res(o); o.push([String(c.key), c.value]); c.continue(); }; rq.onerror = function(){ rej(rq.error); }; });
+      for(var a = 0; a < rows.length; a++){ var s = ""; try{ s = JSON.stringify(rows[a][1]); }catch(e){} inv.md[rows[a][0]] = await shaStr(s || ""); }
+      db.close(); }catch(e){ inv.md.__error = fmtErr(e); } }
+    try{ var root = await navigator.storage.getDirectory();
+      for await (var en of root.entries()){ if(en[1].kind === "directory"){ var ds = await dirStats(en[1]); inv.opfs[en[0]] = { files: ds.files, bytes: ds.bytes, h: await shaStr(ds.names.sort().join("|")) }; } else inv.opfs[en[0]] = { file: true }; } }catch(e){ inv.opfsError = fmtErr(e); }
+    try{ var cn = await caches.keys(); for(var c = 0; c < cn.length; c++) inv.caches[cn[c]] = (await (await caches.open(cn[c])).keys()).length; }catch(e){}
+    return inv;
+  }
+
+  async function s6Idb(){
+    add(null, "Шаг 6: IndexedDB", "3 круга, подождите…");
+    var r = await idbRounds(3);
+    add(r.ok, "IndexedDB по шагам", "\n   " + r.detail);
+    try{
+      var dbs = await listDbs(false);
+      if(!dbs) add(null, "Базы приложения", "indexedDB.databases() недоступна");
+      else add(null, "Базы приложения (" + dbs.length + ")", dbs.length ? "\n   " + dbs.map(function(d){ return d.name + " v" + d.version + ": " + (d.error ? "ошибка " + d.error : Object.keys(d.stores).map(function(s){ return s + "=" + d.stores[s]; }).join(", ")); }).join("\n   ") : "пока нет (приложение не запускалось)");
+    }catch(e){ add(false, "Базы приложения", fmtErr(e)); }
+  }
+
+  async function s6SelfCheck(){
+    add(null, "Шаг 6: самопроверка экспорта", "реестр берётся из my.js бандла…");
+    try{
+      var R = await loadRegistry(), inv = await inventory(R), unk = [], tot = 0, big = [];
+      Object.keys(inv.ls).forEach(function(k){ tot += k.length + inv.ls[k].len; big.push([k, inv.ls[k].len]); if(!lsStatus(R, k)) unk.push(k); });
+      big.sort(function(a, b){ return b[1] - a[1]; });
+      add(unk.length === 0, "localStorage: ключи вне реестра", unk.length ? unk.join(", ") : "нет (всего " + big.length + " ключей, ≈" + fmtMB(tot * 2) + ")");
+      add(null, "Самые большие ключи", big.slice(0, 4).map(function(b){ return b[0] + " " + b[1]; }).join(", "));
+      var jw = inv.ls["jwlMergeState_v1"]; add(null, "jwlMergeState_v1", jw ? jw.len + " символов" : "нет");
+      var mdU = Object.keys(inv.md).filter(function(k){ return k !== "__error" && !hasK(R.mdEditorDB.include, k) && !hasK(R.mdEditorDB.exclude, k); });
+      add(mdU.length === 0 && !inv.md.__error, "mdEditorDB: ключи вне реестра", mdU.length ? mdU.join(", ") : inv.md.__error || "нет (ключей " + Object.keys(inv.md).length + ")");
+      var dbU = inv.dbs.filter(function(d){ return d.name !== "mdEditorDB" && !hasK(R.indexedDB.excludeNames, d.name) && !pfx(R.indexedDB.excludePrefixes, d.name); }).map(function(d){ return d.name; });
+      add(dbU.length === 0, "IndexedDB: базы вне реестра", dbU.length ? dbU.join(", ") : "нет");
+      add(null, "Базы и записи", inv.dbs.map(function(d){ return d.name + " (" + Object.keys(d.stores).map(function(s){ return s + "=" + d.stores[s]; }).join(",") + ")"; }).join("; "));
+      var opU = Object.keys(inv.opfs).filter(function(n){ return !hasK(R.opfs.include, n) && !hasK(R.opfs.exclude, n); });
+      add(opU.length === 0, "OPFS: папки вне реестра", opU.length ? opU.join(", ") : "нет");
+      add(null, "OPFS", Object.keys(inv.opfs).map(function(n){ var o = inv.opfs[n]; return n + ": " + (o.files === undefined ? "файл" : o.files + " файлов, " + fmtMB(o.bytes)); }).join("; ") || "пусто");
+      var cU = Object.keys(inv.caches).filter(function(n){ return !hasK(R.cacheApi.excludeNames, n) && !pfx(R.cacheApi.excludePrefixes, n); });
+      add(cU.length === 0, "Cache API: кэши вне реестра", cU.length ? cU.join(", ") : "нет");
+      add(null, "Состояние state", inv.state.count !== undefined ? inv.state.count + " записей" : (inv.state.error || "нет"));
+    }catch(e){ add(false, "Самопроверка экспорта", fmtErr(e)); }
+  }
+
+  async function s6Snapshot(){
+    add(null, "Шаг 6: снимок данных", "собираю…");
+    try{
+      var R = await loadRegistry(), inv = await inventory(R), name = "lt-snapshot-" + stamp() + ".json";
+      var r = await saveBlob(name, new Blob([JSON.stringify(inv)], { type: "application/json" }), 30000);
+      add(r.ok, "Снимок сохранён", name + " (в «Загрузках»). Записей state: " + (inv.state.count || 0) + ", ключей localStorage: " + Object.keys(inv.ls).length + ". Значений в снимке нет, только имена и хеши.");
+    }catch(e){ add(false, "Снимок данных", fmtErr(e)); }
+  }
+
+  var VOLATILE = { "tabScrollPercents_v1": 1, "bibleSettingsLastTab_v1": 1, "bibleSettingsLastTabSet_v1": 1, "bibleLastOpenedBook_v1": 1, "taskRemindersFired_v1": 1 };
+  async function s6Compare(){
+    var files = await pickFiles(".json", true);
+    if(files.length !== 2){ add(false, "Сравнение снимков", "выберите ровно 2 файла lt-snapshot-*.json за один раз (выбрано " + files.length + ")"); return; }
+    try{
+      var R = await loadRegistry(), A = JSON.parse(await files[0].text()), B = JSON.parse(await files[1].text());
+      if(A.kind !== "lt-snapshot" || B.kind !== "lt-snapshot"){ add(false, "Сравнение снимков", "это не снимки"); return; }
+      if(A.at > B.at){ var t = A; A = B; B = t; }
+      add(null, "Сравнение снимков", "до: " + new Date(A.at).toLocaleString("ru-RU") + ", после: " + new Date(B.at).toLocaleString("ru-RU") + ". Снимок «после» делайте сразу после импорта.");
+      var inc = [], vol = [], unk = [], exc = 0, keys = {};
+      Object.keys(A.ls).concat(Object.keys(B.ls)).forEach(function(k){ keys[k] = 1; });
+      Object.keys(keys).forEach(function(k){
+        var a = A.ls[k], b = B.ls[k], d = !a ? "нет до" : !b ? "нет после" : a.h !== b.h ? "изменён" : null; if(!d) return;
+        var s = lsStatus(R, k);
+        if(s === "include") (VOLATILE[k] ? vol : inc).push(k + " (" + d + ")"); else if(s === "exclude") exc++; else unk.push(k + " (" + d + ")");
+      });
+      add(inc.length === 0, "Переносимые ключи localStorage совпадают", inc.length ? inc.join(", ") : "да");
+      if(vol.length) add(null, "Могут меняться сами при работе", vol.join(", "));
+      if(unk.length) add(null, "Ключи вне реестра", unk.join(", "));
+      add(null, "Исключённые ключи", exc + " отличаются или есть только с одной стороны (ожидаемо)");
+      var ra = A.state.rec || {}, rb = B.state.rec || {}, miss = [], extra = [], cdiff = [], tdiff = 0;
+      Object.keys(ra).forEach(function(k){ if(!rb[k]) miss.push(k); else { if(ra[k][0] !== rb[k][0]) cdiff.push(k); if(ra[k][1] !== rb[k][1]) tdiff++; } });
+      Object.keys(rb).forEach(function(k){ if(!ra[k]) extra.push(k); });
+      add(!miss.length && !cdiff.length, "state: записи и их значения", "до " + Object.keys(ra).length + ", после " + Object.keys(rb).length + (miss.length ? "; пропали: " + miss.slice(0, 12).join(", ") : "") + (cdiff.length ? "; значение изменилось: " + cdiff.slice(0, 12).join(", ") : "") + (tdiff ? "; отличаются только метки времени: " + tdiff : ""));
+      if(extra.length) add(null, "state: новые записи после", extra.length + ": " + extra.slice(0, 8).join(", "));
+      A.dbs.forEach(function(da){
+        var db = B.dbs.filter(function(x){ return x.name === da.name; })[0], shadow = /^biblePersonalShadow_v1_/.test(da.name);
+        if(!db){ add(shadow ? null : false, "База " + da.name, "после: нет"); return; }
+        Object.keys(da.stores).forEach(function(s){
+          var ka = (da.keys || {})[s], kb = (db.keys || {})[s], line = "записей до " + da.stores[s] + ", после " + (db.stores[s] === undefined ? "нет хранилища" : db.stores[s]);
+          if(ka && kb){ var ms = Object.keys(ka).filter(function(k){ return !(k in kb); }), cd = Object.keys(ka).filter(function(k){ return k in kb && ka[k] !== kb[k]; });
+            add(ms.length === 0 && da.stores[s] === db.stores[s], da.name + "/" + s, line + (ms.length ? "; пропали ключи: " + ms.slice(0, 10).join(", ") : "") + (cd.length ? "; значения отличаются у " + cd.length + " (метки времени возможны)" : "")); }
+          else add(shadow ? null : da.stores[s] === db.stores[s], da.name + "/" + s, line);
+        });
+      });
+      Object.keys(A.opfs).forEach(function(n){ var a = A.opfs[n], b = B.opfs[n]; if(a.files === undefined) return;
+        var inc2 = R.opfs && hasK(R.opfs.include, n); var same = b && a.h === b.h;
+        add(inc2 ? !!same : null, "OPFS " + n, "до " + a.files + " (" + fmtMB(a.bytes) + "), после " + (b ? b.files + " (" + fmtMB(b.bytes) + ")" : "нет") + (inc2 ? "" : " — не переносится")); });
+      var mk = Object.keys(R.mdEditorDB.include).filter(function(k){ return (A.md || {})[k] !== (B.md || {})[k]; });
+      add(mk.length === 0, "mdEditorDB: переносимые ключи", mk.length ? "отличаются: " + mk.join(", ") + " (lastNote и openedIndex могут меняться при открытии)" : "совпадают");
+    }catch(e){ add(false, "Сравнение снимков", fmtErr(e)); }
+  }
+
+  function canon(v){ if(Array.isArray(v)) return "[" + v.map(canon).join(",") + "]"; if(v && typeof v === "object") return "{" + Object.keys(v).sort().map(function(k){ return JSON.stringify(k) + ":" + canon(v[k]); }).join(",") + "}"; return JSON.stringify(v); }
+  async function readArchive(file){
+    var t0 = Date.now(), buf = new Uint8Array(await file.arrayBuffer()), t1 = Date.now();
+    var ents = await MiniZip.extractAllFiles(buf), by = {}, out = { name: file.name, size: file.size, ents: ents, readMs: t1 - t0, zipMs: Date.now() - t1, groups: {} };
+    ents.forEach(function(e){ var g = e.path.indexOf("/") > 0 ? e.path.split("/")[0] + "/" : e.path; var o = out.groups[g] || (out.groups[g] = { n: 0, b: 0 }); o.n++; o.b += e.data.length; by[e.path] = e; });
+    out.by = by; out.dataEnt = by["data.json"];
+    if(out.dataEnt){ try{ out.data = JSON.parse(new TextDecoder().decode(out.dataEnt.data)); }catch(e){ out.dataErr = fmtErr(e); } }
+    return out;
+  }
+  async function s6Archive(){
+    var files = await pickFiles(".zip,.json", true);
+    if(!files.length){ add(null, "Шаг 6: архив", "файл не выбран"); return; }
+    try{
+      var R = await loadRegistry(), arcs = [];
+      for(var f = 0; f < files.length; f++){
+        var a = await readArchive(files[f]); arcs.push(a);
+        add(true, "Файл выбран и прочитан: " + a.name, fmtMB(a.size) + ", чтение " + a.readMs + " мс, распаковка " + a.zipMs + " мс, записей " + a.ents.length);
+        add(null, "Состав", Object.keys(a.groups).map(function(g){ return g + " " + a.groups[g].n + " (" + fmtMB(a.groups[g].b) + ")"; }).join("; "));
+        if(!a.data){ add(false, "data.json", a.dataErr || "нет в архиве"); continue; }
+        var d = a.data, ds = d.deviceSettings, ni = d.notesIndex;
+        add(d.exportFormatVersion <= 3, "data.json", "версия формата " + d.exportFormatVersion + ", создан " + d.exportedAt + ", разделов " + Object.keys(d).length);
+        var rs = d.rawState && d.rawState.data ? Object.keys(d.rawState.data).length : 0; add(rs > 0, "rawState.data", rs + " записей");
+        var mdN = (a.groups["notes/"] || {}).n || 0;
+        if(!ni) add(mdN ? false : null, "notesIndex", "нет (старый архив)" + (mdN ? ", заметок в архиве " + mdN + ": после импорта потеряется привязка заметок книг" : ""));
+        else { var ids = ni.map(function(r){ return r.id; }), bad = ids.filter(function(i){ return !/^[A-Za-z0-9_-]{1,64}$/.test(String(i)); }).length, uniq = new Set(ids).size === ids.length;
+          add(bad === 0 && uniq && ni.length === mdN, "notesIndex", ni.length + " записей, заметок-файлов " + mdN + ", небезопасных id " + bad + ", повторов " + (uniq ? "нет" : "есть")); }
+        if(!ds) add(false, "deviceSettings", "нет (код синхронизации и настройки не перенесутся)");
+        else { var lsK = Object.keys(ds.localStorage || {}), notInc = lsK.filter(function(k){ return !hasK(R.localStorage.include, k); });
+          add(notInc.length === 0, "deviceSettings.localStorage", lsK.length + " ключей, импорт проигнорирует: " + (notInc.length ? notInc.join(", ") : "ничего") + "; formatVersion " + ds.formatVersion);
+          add(!!(ds.localStorage && ds.localStorage.bibleReadingSyncId_v1), "Код синхронизации в архиве", "значение не показывается");
+          add(null, "jwlMergeState_v1 / taskRemindersFired_v1", ((ds.localStorage || {}).jwlMergeState_v1 || "").length + " / " + ((ds.localStorage || {}).taskRemindersFired_v1 || "").length + " символов");
+          add(null, "mdEditorDB в архиве", Object.keys((ds.indexedDB || {}).mdEditorDB || {}).join(", ") || "пусто"); }
+      }
+      if(arcs.length === 2 && arcs[0].data && arcs[1].data){
+        var A = arcs[0], B = arcs[1], paths = {}, onlyA = [], onlyB = [], diff = [];
+        A.ents.concat(B.ents).forEach(function(e){ paths[e.path] = 1; });
+        for(var p in paths){ var ea = A.by[p], eb = B.by[p];
+          if(!ea) onlyB.push(p); else if(!eb) onlyA.push(p);
+          else if(p !== "data.json" && p !== "README.txt" && (ea.data.length !== eb.data.length || (await sha(ea.data)) !== (await sha(eb.data)))) diff.push(p); }
+        add(!onlyA.length && !onlyB.length && !diff.length, "Круг «экспорт → импорт → экспорт»: файлы", (onlyA.length ? "только в первом: " + onlyA.slice(0, 8).join(", ") + "; " : "") + (onlyB.length ? "только во втором: " + onlyB.slice(0, 8).join(", ") + "; " : "") + (diff.length ? "отличаются: " + diff.slice(0, 8).join(", ") : (!onlyA.length && !onlyB.length ? "все файлы одинаковы" : "")));
+        var da = Object.assign({}, A.data), db2 = Object.assign({}, B.data); delete da.exportedAt; delete db2.exportedAt;
+        var tk = {}; Object.keys(da).concat(Object.keys(db2)).forEach(function(k){ tk[k] = 1; });
+        var dk = Object.keys(tk).filter(function(k){ return canon(da[k]) !== canon(db2[k]); });
+        add(dk.length === 0, "data.json: разделы", dk.length ? "отличаются: " + dk.join(", ") : "одинаковы (кроме времени экспорта)");
+        if(dk.indexOf("rawState") >= 0){ var xa = A.data.rawState.data, xb = B.data.rawState.data, ch = Object.keys(xa).filter(function(k){ return k in xb && canon(xa[k]) !== canon(xb[k]); }), ms = Object.keys(xa).filter(function(k){ return !(k in xb); }), ex = Object.keys(xb).filter(function(k){ return !(k in xa); });
+          add(null, "rawState.data", "изменились " + ch.length + ", пропали " + ms.length + ", добавились " + ex.length + "; примеры: " + ch.concat(ms, ex).slice(0, 10).join(", ")); }
+      }else if(arcs.length === 2) add(false, "Сравнение", "один из архивов без data.json");
+    }catch(e){ add(false, "Проверка архива", fmtErr(e)); }
+  }
+
+  async function s6Pick(){
+    var files = await pickFiles(".zip,.json,.md", false);
+    if(!files.length){ add(null, "Шаг 6: выбор файла", "ничего не выбрано"); return; }
+    var f = files[0];
+    try{
+      var head = new Uint8Array(await f.slice(0, 8).arrayBuffer()), hex = Array.from(head).map(function(b){ return b.toString(16).padStart(2, "0"); }).join(" ");
+      add(true, "Файл выбран: " + f.name, fmtMB(f.size) + ", тип «" + (f.type || "—") + "», первые байты " + hex);
+      if(f.size === 5242880){ var u = new Uint8Array(await f.arrayBuffer()), good = true; for(var i = 0; i < u.length; i++){ if(u[i] !== i % 251){ good = false; break; } }
+        add(good, "Круг «сохранить → выбрать»", good ? "5 МБ из «Шаг 4: сохранить файл» вернулись без изменений" : "содержимое не совпало на байте " + i); }
+    }catch(e){ add(false, "Выбор файла", fmtErr(e)); }
+  }
+
+  async function s6Big(mb){
+    add(null, "Шаг 6: объём " + mb + " МБ", "выделяю память. Если страница перезагрузится или приложение закроется, это и есть результат: запишите, на каком размере.");
+    var CH = 16, chunks = [], t0 = Date.now();
+    try{ for(var done = 0; done < mb; done += CH){ var u = new Uint8Array(Math.min(CH, mb - done) * 1048576); u.fill((done + 7) & 255); u[0] = done & 255; chunks.push(u); } }
+    catch(e){ add(false, "Память " + mb + " МБ", fmtErr(e) + ", выделено " + chunks.length * CH + " МБ"); return; }
+    var blob = new Blob(chunks, { type: "application/octet-stream" }); chunks = null;
+    add(null, "Данные в памяти", (Date.now() - t0) + " мс, Blob " + fmtMB(blob.size));
+    var r = await saveBlob("lt-diag-big-" + mb + "mb.bin", blob, 600000);
+    add(r.ok && r.detail.bytes === blob.size, "Сохранение " + mb + " МБ в «Загрузки»", r.ok ? r.detail.bytes + " байт за " + r.ms + " мс. Удалите файл lt-diag-big-" + mb + "mb.bin из «Загрузок»" : "ответа нет за " + Math.round(r.ms / 1000) + " с");
+  }
+
+  document.getElementById("s6idb").onclick = function(){ s6Idb(); };
+  document.getElementById("s6check").onclick = function(){ s6SelfCheck(); };
+  document.getElementById("s6snap").onclick = function(){ s6Snapshot(); };
+  document.getElementById("s6cmp").onclick = function(){ s6Compare(); };
+  document.getElementById("s6arc").onclick = function(){ s6Archive(); };
+  document.getElementById("s6pick").onclick = function(){ s6Pick(); };
+  document.getElementById("s6b100").onclick = function(){ s6Big(100); };
+  document.getElementById("s6b300").onclick = function(){ s6Big(300); };
+  document.getElementById("s6b600").onclick = function(){ s6Big(600); };
 
   document.getElementById("run").onclick = function(){ runAll(); };
   document.getElementById("upd").onclick = function(){ updState(); };
