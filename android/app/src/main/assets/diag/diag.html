@@ -25,6 +25,11 @@
   <button id="s4save">Шаг 4: сохранить файл</button>
   <button id="s4share">Шаг 4: поделиться</button>
   <button id="s4full">Шаг 4: полный экран</button>
+  <button id="s5state">Шаг 5: состояние</button>
+  <button id="s5perm">Шаг 5: разрешение</button>
+  <button id="s5test">Шаг 5: тест через 1 мин</button>
+  <button id="s5poll">Шаг 5: проверить группу</button>
+  <button id="s5bg">Шаг 5: работа в фоне</button>
   <button id="copy">Копировать результат</button>
   <a class="btn" href="/index.html">В приложение</a>
 </div>
@@ -279,6 +284,61 @@
   document.getElementById("s4save").onclick = function(){ s4Save(); };
   document.getElementById("s4share").onclick = function(){ s4Share(); };
   document.getElementById("s4full").onclick = function(){ s4Full(); };
+
+  // ---------------------------------------------------------------- Шаг 5: уведомления при закрытом приложении
+  function s5Bridge(){
+    var L = window.LTNotify;
+    if(!L || !L.available){ add(false, "Шаг 5: мост", "нет методов уведомлений (APK старше шага 5)"); return null; }
+    return L;
+  }
+  function fmtTs(ms){ return ms ? new Date(ms).toLocaleString("ru-RU") : "—"; }
+
+  function s5State(){
+    var L = s5Bridge(); if(!L) return;
+    var st = L.state();
+    if(!st){ add(false, "Шаг 5: состояние", "оболочка не ответила"); return; }
+    add(st.permission, "Уведомления разрешены", st.permission ? "да" : (st.canRequest ? "нет — нажмите «Шаг 5: разрешение»" : "нет — включите в настройках уведомлений приложения"));
+    add(st.exactAlarm, "Точные будильники", st.exactAlarm ? "разрешены" : "запрещены (напоминания придут неточно)");
+    add(st.batteryIgnored ? true : null, "Оптимизация батареи", st.batteryIgnored ? "приложение исключено" : "ограничение включено — см. «Шаг 5: работа в фоне»");
+    add(null, "Напоминаний в оболочке", st.reminders + ", ближайшее: " + fmtTs(st.nextAt));
+    add(null, "Слежение за общими задачами", st.watching ? "включено (настройки группы получены от приложения)" : "выключено (нет группы или приложение ещё не прислало настройки)");
+    add(null, "Журнал проверок группы", (st.pollLog && st.pollLog.length) ? "\n   " + st.pollLog.join("\n   ") : "пока пуст");
+    add(null, "Устройство", st.manufacturer + ", Android SDK " + st.sdk);
+  }
+  function s5Perm(){
+    var L = s5Bridge(); if(!L) return;
+    L.onPermission(function(granted){ add(granted, "Разрешение на уведомления", granted ? "выдано" : "не выдано"); });
+    var st = L.state();
+    if(st && st.permission){ add(true, "Разрешение на уведомления", "уже выдано"); return; }
+    if(st && !st.canRequest){ add(null, "Разрешение на уведомления", "системный запрос недоступен — открываю настройки уведомлений"); L.openNotifySettings(); return; }
+    L.requestPermission();
+  }
+  function s5Test(){
+    var L = s5Bridge(); if(!L) return;
+    var st = L.state();
+    if(st && !st.permission){ add(false, "Тест напоминания", "сначала выдайте разрешение («Шаг 5: разрешение»)"); return; }
+    if(!L.scheduleTestReminder(60)){ add(false, "Тест напоминания", "не удалось поставить"); return; }
+    add(null, "Тест напоминания", "поставлено на 1 минуту. ВАЖНО: сразу закройте приложение (кнопка «Домой» или смахните из списка) или заблокируйте экран. Пока приложение на экране, уведомление не показывается — напоминание остаётся за самим приложением. Через минуту должно прийти уведомление «Пробное напоминание» с кнопками «✓ Готово» и «Завтра».");
+  }
+  function s5Poll(){
+    var L = s5Bridge(); if(!L) return;
+    if(!L.runGroupPollNow()){ add(false, "Проверка группы", "не удалось запустить"); return; }
+    add(null, "Проверка группы", "запущена, результат через 5 секунд…");
+    setTimeout(function(){
+      var st = L.state();
+      add(null, "Журнал проверок группы", (st && st.pollLog && st.pollLog.length) ? "\n   " + st.pollLog.join("\n   ") : "пока пуст");
+    }, 5000);
+  }
+  function s5Bg(){
+    var L = s5Bridge(); if(!L) return;
+    add(null, "Работа в фоне", "открываю настройки. Xiaomi/HyperOS: включите «Автозапуск» для Life tracker, затем в «Приложения → Life tracker → Контроль активности» выберите «Нет ограничений». Остальные телефоны: разрешите работу без ограничений батареи.");
+    L.openBackgroundSettings();
+  }
+  document.getElementById("s5state").onclick = function(){ s5State(); };
+  document.getElementById("s5perm").onclick = function(){ s5Perm(); };
+  document.getElementById("s5test").onclick = function(){ s5Test(); };
+  document.getElementById("s5poll").onclick = function(){ s5Poll(); };
+  document.getElementById("s5bg").onclick = function(){ s5Bg(); };
 
   document.getElementById("run").onclick = function(){ runAll(); };
   document.getElementById("upd").onclick = function(){ updState(); };

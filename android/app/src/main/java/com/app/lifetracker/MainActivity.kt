@@ -3,11 +3,14 @@ package com.app.lifetracker
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
+import android.provider.Settings
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -46,6 +49,15 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_DIAG = "com.app.lifetracker.DIAG"
+
+        // Шаг 5: клик по уведомлению (NotifyHelper.openIntent) открывает приложение с этими данными.
+        const val ACTION_OPEN_TASK = "com.app.lifetracker.OPEN_TASK"
+        const val EXTRA_TASK_ID = "taskId"
+        const val EXTRA_KIND = "kind"
+
+        /** Запущенная Activity (или null): получатель кнопок уведомления сообщает через неё странице о новом действии. */
+        @Volatile
+        var instance: MainActivity? = null
 
         // До первого сообщения от страницы: theme_color и background_color из manifest.json.
         private const val DEFAULT_STATUS_COLOR = 0xFF8F7FB8.toInt()
@@ -104,8 +116,19 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+    // Шаг 5: системный запрос разрешения на уведомления (Android 13+); ответ уходит странице.
+    private val notifyPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            runOnUiThread {
+                if (!isDestroyed && pageTrusted) {
+                    webView.evaluateJavascript("window.__ltOnNotifyPermission && window.__ltOnNotifyPermission($granted)", null)
+                }
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        instance = this
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         fileSaver = FileSaver(applicationContext)
@@ -134,6 +157,7 @@ class MainActivity : ComponentActivity() {
             }
         })
 
+        handleNotifyIntent(intent)
         handleShareIntent(intent)
         webView.loadUrl(if (intent?.action == ACTION_DIAG) WebAssetServer.DIAG_URL else WebAssetServer.START_URL)
         webUpdater.checkInBackground()
@@ -142,6 +166,8 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // Шаг 5: клик по уведомлению при уже запущенном приложении.
+        handleNotifyIntent(intent)
         // Шаг 4: «Поделиться» (ACTION_SEND / ACTION_SEND_MULTIPLE) при уже запущенном приложении.
         handleShareIntent(intent)
         if (intent.action == ACTION_DIAG) webView.loadUrl(WebAssetServer.DIAG_URL)
@@ -150,16 +176,28 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         webView.onResume()
+        // Шаг 5: пока приложение на экране, напоминания и общие задачи показывает страница, а не оболочка.
+        NotifyStore.appForeground = true
+        // Подстраховка: будильники пропадают после «Остановить» в настройках, ставим заново из сохранённых данных.
+        try {
+            ReminderScheduler.scheduleNext(applicationContext)
+            GroupWatcher.scheduleNextPoll(applicationContext)
+        } catch (e: Exception) {
+            // уведомления остаются на странице; приложение работает
+        }
         // Возврат на передний план: проверка обновления веб-части (не чаще раза в 15 минут, внутри WebUpdater).
         webUpdater.checkInBackground()
     }
 
     override fun onPause() {
+        NotifyStore.appForeground = false
         webView.onPause()
         super.onPause()
     }
 
     override fun onDestroy() {
+        if (instance === this) instance = null
+        NotifyStore.appForeground = false
         handler.removeCallbacks(trialWatchdog)
         fileSaver.cancelAll()
         (webView.parent as? ViewGroup)?.removeView(webView)
@@ -213,6 +251,92 @@ class MainActivity : ComponentActivity() {
             }
         }
         return true
+    }
+
+    // ===== Шаг 5: уведомления =====
+
+    /** Системный запрос разрешения на уведомления (Android 13+); на старых версиях и при выданном разрешении отвечает сразу. */
+    fun requestNotifyPermission() {
+        val needed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        if (needed) {
+            try {
+                notifyPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                return
+            } catch (e: Exception) {
+                // запрос не открылся: сообщаем страницей текущее состояние ниже
+            }
+        }
+        val granted = NotifyHelper.enabled(applicationContext)
+        webView.evaluateJavascript("window.__ltOnNotifyPermission && window.__ltOnNotifyPermission($granted)", null)
+    }
+
+    /** Настройки уведомлений приложения (если разрешение выключено и системный запрос уже не показывается). */
+    fun openNotifySettings() {
+        try {
+            startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            )
+        } catch (e: Exception) {
+            openAppDetails()
+        }
+    }
+
+    /**
+     * Настройки работы в фоне. Xiaomi/HyperOS: экран «Автозапуск»; иначе список оптимизации батареи; запасной вариант —
+     * сведения о приложении. Что включить, написано в странице диагностики (автозапуск, «Нет ограничений»).
+     */
+    fun openBackgroundSettings() {
+        val candidates = ArrayList<Intent>()
+        if (Build.MANUFACTURER.equals("xiaomi", true) || Build.MANUFACTURER.equals("redmi", true) ||
+            Build.MANUFACTURER.equals("poco", true)
+        ) {
+            candidates.add(
+                Intent().setComponent(
+                    ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")
+                )
+            )
+        }
+        candidates.add(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        for (candidate in candidates) {
+            try {
+                startActivity(candidate)
+                return
+            } catch (e: Exception) {
+                // этого экрана на устройстве нет — пробуем следующий
+            }
+        }
+        openAppDetails()
+    }
+
+    private fun openAppDetails() {
+        try {
+            startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+            )
+        } catch (e: Exception) {
+            toast("Не удалось открыть настройки")
+        }
+    }
+
+    /** Клик по уведомлению: id задачи ставится в очередь действий страницы (она откроет задачу и подсветит строку). */
+    private fun handleNotifyIntent(source: Intent?) {
+        if (source == null || source.action != ACTION_OPEN_TASK) return
+        val id = source.getStringExtra(EXTRA_TASK_ID) ?: return
+        val kind = source.getStringExtra(EXTRA_KIND) ?: ""
+        source.action = null // повторная обработка того же Intent (пересоздание Activity) не нужна
+        NotifyStore.addAction(applicationContext, id, "", kind, 0L)
+        notifyPageAboutAction()
+    }
+
+    /** Сообщает странице, что в очереди появились действия из уведомлений (она заберёт их takeNotifyActions). */
+    fun notifyPageAboutAction() {
+        runOnUiThread {
+            if (!isDestroyed && pageTrusted) {
+                webView.evaluateJavascript("window.__ltOnNativeAction && window.__ltOnNativeAction()", null)
+            }
+        }
     }
 
     /** Принимает файлы из системного «Поделиться» и сообщает странице, когда копия готова. */

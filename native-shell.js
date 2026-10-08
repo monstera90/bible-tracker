@@ -1,5 +1,9 @@
 /* ===========================================================================
    native-shell.js
+   Версия: 1.1 (07.10) — шаг 5 переезда в APK: добавлен window.LTNotify — обёртка над нативными уведомлениями
+   (напоминания о задачах и уведомление о новой общей задаче работают и при закрытом приложении, их показывает
+   оболочка: будильник + фоновая проверка группы). Пользуются notifications.js и my.js; на старом APK (без мостовых
+   методов) LTNotify.available = false, и всё работает по-прежнему.
    Версия: 1.0 (07.10) — новый файл (ПЕРЕЕЗД_В_APK.md, шаг 4): веб-слой нативной оболочки Android.
    Работает ТОЛЬКО в APK (есть window.LifeTrackerNative); в браузере файл ничего не делает, прежнее поведение
    сохраняется. Подключается в index.html ПЕРЕД остальными скриптами: должен успеть заменить navigator.share до
@@ -228,6 +232,70 @@
       logDebug("не удалось определить navigator.share: " + (e && e.message ? e.message : e));
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // 3. Уведомления (шаг 5): window.LTNotify
+  // ---------------------------------------------------------------------------
+  // Все методы безопасны: на ошибку мост возвращают «пусто» (null / [] / {} / false), страница тогда работает по-старому.
+  // available — оболочка умеет всё, что нужно (мост версии 3).
+
+  function notifyAvailable() {
+    return has("setReminders") && has("getNotifyState") && has("takeNotifyActions") && has("takeFiredReminders") &&
+      has("setGroupWatch") && has("takeGroupSeen") && has("postGroupTaskNotification") && has("requestNotifyPermission");
+  }
+
+  function callJson(name, fallback) {
+    try {
+      var text = N[name]();
+      var value = JSON.parse(text);
+      return value == null ? fallback : value;
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  var permissionListeners = [];
+  window.__ltOnNotifyPermission = function (granted) {
+    permissionListeners.slice().forEach(function (cb) {
+      try { cb(!!granted); } catch (e) {}
+    });
+  };
+
+  var actionListeners = [];
+  window.__ltOnNativeAction = function () {
+    actionListeners.slice().forEach(function (cb) {
+      try { cb(); } catch (e) {}
+    });
+  };
+
+  window.LTNotify = {
+    available: notifyAvailable(),
+    // {permission, canRequest, exactAlarm, batteryIgnored, reminders, nextAt, watching, pollLog, manufacturer, sdk} или null
+    state: function () { return callJson("getNotifyState", null); },
+    requestPermission: function () { try { N.requestNotifyPermission(); } catch (e) {} },
+    openNotifySettings: function () { try { N.openNotifySettings(); } catch (e) {} },
+    openBackgroundSettings: function () { try { N.openBackgroundSettings(); } catch (e) {} },
+    onPermission: function (cb) { permissionListeners.push(cb); },
+    onAction: function (cb) { actionListeners.push(cb); },
+    // list: [{id, at, text}] — напоминания, которые оболочка должна показать (заменяет прежний список)
+    setReminders: function (list) {
+      try { return !!N.setReminders(JSON.stringify(list || [])); } catch (e) { return false; }
+    },
+    takeFired: function () { return callJson("takeFiredReminders", {}); },
+    takeActions: function () { return callJson("takeNotifyActions", []); },
+    cancelReminderNotification: function (id) { try { N.cancelReminderNotification(String(id)); } catch (e) {} },
+    postGroupTask: function (title, body, taskId, many) {
+      try { return !!N.postGroupTaskNotification(String(title), String(body), String(taskId), !!many); } catch (e) { return false; }
+    },
+    // cfg: {groupId, db, deviceId, seenIds, names} или null (группы нет)
+    setGroupWatch: function (cfg) {
+      try { return !!N.setGroupWatch(cfg ? JSON.stringify(cfg) : ""); } catch (e) { return false; }
+    },
+    takeGroupSeen: function () { return callJson("takeGroupSeen", []); },
+    // для страницы диагностики
+    scheduleTestReminder: function (seconds) { try { return !!N.scheduleTestReminder(seconds | 0); } catch (e) { return false; } },
+    runGroupPollNow: function () { try { return !!N.runGroupPollNow(); } catch (e) { return false; } }
+  };
 
   // Для страницы диагностики и будущих шагов.
   window.LifeTrackerShell = {

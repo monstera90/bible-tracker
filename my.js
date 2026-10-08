@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 56.0 (07.10) — шаг 5 переезда в APK (ПЕРЕЕЗД_В_APK.md): нативные уведомления при закрытом приложении. В модуль уведомлений (`notifications.js` 4.1) теперь передаются `snoozeTask`/`completeTask` (раньше не передавались — кнопки «Готово»/«Завтра» и пузыри отсрочки в карточке ничего не делали) и `getGroupWatch` (`getGroupWatchConfig`: группа, адрес базы, id этого устройства, уже увиденные общие задачи, имена участников — оболочка по ним проверяет новые общие задачи при закрытом приложении). `notifyAboutNewGroupTasks` сначала подмешивает id, о которых оболочка уже уведомила (`LTNotify.takeGroupSeen`), `showGroupTaskSystemNotification` в оболочке показывает уведомление через мост. Приём чужих правок (общих и личных) пересчитывает снимок напоминаний (`Notifications.schedule`). В браузере (PWA) поведение прежнее.
    Версия: 55.0 (07.10) — шаг 4 переезда в APK (ПЕРЕЕЗД_В_APK.md): в нативной оболочке (есть `window.LifeTrackerNative`) полноэкранный режим идёт через мост (`applyStatusBarFullscreen` → `setFullscreen`), цвет строки состояния — прямым вызовом из `syncThemeColorMeta`, приём файла из «Поделиться» — через `pullNativeSharedFiles` (вызывается из `checkForSharedFile`, оболочка дёргает `window.__ltOnNativeShare`). В браузере поведение прежнее. Скачивание файлов и `navigator.share` для оболочки подменяет новый `native-shell.js`, остальной код не менялся.
    Версия: 54.1 (05.10) — картинки задач: если первая строка задачи начинается с картинки, у первой строки текста снимается красная строка (`taskTextInner`). Версия 54.0: (1) ридер книг: смена размера шрифта «Аа» («+»/«−») больше не сдвигает читаемое место — `changeBookReaderFontSize` запоминает место в тексте (`captureHyphensAnchor`) и возвращает его после смены и после калибровки сегментов (`keepScrollAnchorPasses`, новая общая функция рядом с `captureHyphensAnchor`); (2) картинки задач («![[имя]]») в режиме просмотра — слева от текста квадратом в две строки, текст обтекает: новые `splitTaskImages`/`taskImagesHtml`/`taskTextInner` (раздел «КАРТИНКИ ЗАДАЧ В РЕЖИМЕ ПРОСМОТРА»), применены в `renderTaskRowView`, `renderRowView` («Все задачи проекта»), строках архива и ревью, поправка `fitTaskActions`; режим редактирования и комментарии не менялись.
    Версия: 53.0 (03.10) — кнопка «i» в нижнем ряду ридера книг (`bookReaderInfoBtn`, самая левая кнопка ряда): полноэкранная инструкция «Книга — кнопки» (`renderBookReaderInfoScreen`, тем же приёмом, что `renderBooksInfoScreen`/`renderTaskInfoScreen`); перед показом запоминается место чтения, «домик» на экране инструкции возвращает в ту же книгу на то же место.
@@ -5416,6 +5417,8 @@
   var groupTaskToastTimer = null;
   function handleGroupTasksRemoteChange(){
     try{ notifyAboutNewGroupTasks(); }catch(e){ console.error(e); }
+    // чужие правки могли добавить/убрать/выполнить задачи со сроками — снимок напоминаний для оболочки обновляем
+    try{ if(typeof Notifications !== "undefined" && Notifications) Notifications.schedule(); }catch(e){}
     rerenderJointTasksTabIfOpen();
   }
   function notifyAboutNewGroupTasks(){
@@ -5424,6 +5427,15 @@
     var seen = null;
     try{ seen = JSON.parse(localStorage.getItem(key) || "null"); }catch(e){ seen = null; }
     var firstRun = !seen || !seen.ids;
+    // Оболочка APK могла уже уведомить о новых общих задачах при закрытом приложении — их считаем увиденными,
+    // иначе то же уведомление пришло бы второй раз.
+    if(window.LTNotify && window.LTNotify.available){
+      var nativeSeenIds = [];
+      try{ nativeSeenIds = window.LTNotify.takeGroupSeen() || []; }catch(e){ nativeSeenIds = []; }
+      if(nativeSeenIds.length && !firstRun){
+        nativeSeenIds.forEach(function(id){ seen.ids[id] = 1; });
+      }
+    }
     var knownIds = firstRun ? {} : seen.ids;
     var me = getDeviceId();
     var nextIds = {};
@@ -5473,6 +5485,15 @@
   // notifications.js → openReminderTask: окно задач на вкладке «Общие задачи», строка подводится в
   // центр).
   function showGroupTaskSystemNotification(fresh){
+    // оболочка APK: уведомление показывает она (то же, что делает при закрытом приложении); нет разрешения — запасная плашка
+    if(window.LTNotify && window.LTNotify.available){
+      try{
+        var st = window.LTNotify.state();
+        if(!st || !st.permission) return Promise.resolve(false);
+        var nt = groupTaskNotificationTexts(fresh);
+        return Promise.resolve(!!window.LTNotify.postGroupTask(nt.title, nt.body, fresh[0].id, fresh.length > 1));
+      }catch(e){ console.error(e); return Promise.resolve(false); }
+    }
     try{
       if(!("Notification" in window) || Notification.permission !== "granted" ||
          !("serviceWorker" in navigator)) return Promise.resolve(false);
@@ -5533,6 +5554,27 @@
     groupTaskToastEl.style.display = "block";
     if(groupTaskToastTimer) clearTimeout(groupTaskToastTimer);
     groupTaskToastTimer = setTimeout(hideGroupTaskToast, 7000);
+  }
+
+  // Настройки слежения за общими задачами для оболочки APK (notifications.js → getGroupWatch → LTNotify.setGroupWatch):
+  // оболочка при закрытом приложении раз в ~10 минут проверяет новые задачи группы и показывает уведомление.
+  // null — слежение выключено: нет активной группы / режим «оффлайн» / список «уже виденных» ещё не создан
+  // (самый первый запуск: notifyAboutNewGroupTasks сначала молча запоминает всё, что уже лежит в кэше).
+  function getGroupWatchConfig(){
+    try{
+      if(!sharedGroup || !sharedGroup.groupId || !isGroupTasksActive() || isOfflineMode()) return null;
+      var seen = null;
+      try{ seen = JSON.parse(localStorage.getItem(GROUP_TASKS_SEEN_KEY_PREFIX + sharedGroup.groupId) || "null"); }catch(e){ seen = null; }
+      if(!seen || !seen.ids) return null;
+      loadGroupMemberNamesCache(sharedGroup.groupId);
+      return {
+        groupId: sharedGroup.groupId,
+        db: FIREBASE_DB_URL,
+        deviceId: getDeviceId(),
+        seenIds: Object.keys(seen.ids),
+        names: groupMemberNamesState || {}
+      };
+    }catch(e){ return null; }
   }
 
   function getGroupTasksBinding(){
@@ -6189,6 +6231,7 @@
   // Транспорт применил чужие записи с облака.
   function personalViewOnRemoteChange(e){
     personalViewRefresh("облако: принято " + (e && e.applied ? e.applied : "?"));
+    try{ if(typeof Notifications !== "undefined" && Notifications) Notifications.schedule(); }catch(err){}
   }
   // Возврат в приложение — повод подтянуть чужие правки нового пути (не чаще раза в минуту).
   function bindPersonalForegroundSync(){
@@ -7237,7 +7280,20 @@
     bindClose: bindClose,
     closeModal: closeModal,
     getRemindableTasks: getRemindableTasks,
-    openTaskFromReminder: openReminderTask
+    openTaskFromReminder: openReminderTask,
+    // «Завтра» и пузыри отсрочки: новый срок напоминания (общая задача — тем же путём, setTaskReminder сам знает про права)
+    snoozeTask: function(id, ts){
+      if(setTaskReminder(id, ts)){ try{ rerenderJointTasksTabIfOpen(); }catch(e){} }
+    },
+    // «✓ Готово» в уведомлении/карточке: та же отметка, что галочка в строке задачи (личная — с «Картой дней года»,
+    // общая — перенос в архив группы)
+    completeTask: function(id){
+      try{ flushPendingTaskEdits(); }catch(e){}
+      checkTaskDone(id);
+      try{ rerenderJointTasksTabIfOpen(); }catch(e){}
+    },
+    // слежение за общими задачами при закрытом приложении (только оболочка APK)
+    getGroupWatch: getGroupWatchConfig
   });
 
   // ===================== FLIBUSTA (flibusta.js) =====================

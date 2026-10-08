@@ -1,5 +1,12 @@
 /* ===========================================================================
    notifications.js
+   Версия: 4.1 (07.10) — шаг 5 переезда в APK (ПЕРЕЕЗД_В_APK.md): в нативной оболочке (есть window.LTNotify, см.
+   native-shell.js) напоминания показывает ОБОЛОЧКА — точным будильником, при закрытом приложении тоже. Страница лишь
+   присылает ей снимок напоминаний (pushNative: невыполненные задачи со сроком, которые ещё не показаны) и настройки
+   слежения за общими задачами (dep getGroupWatch), а забирает обратно: что уже показано (чтобы не дублировать карточкой),
+   нажатия «✓ Готово»/«Завтра» и клики по уведомлениям (syncFromNative → handleNotificationAction). Пока приложение на
+   экране, срабатывание остаётся за страницей (карточка внутри приложения, как раньше). В браузере (PWA) ничего не
+   изменилось. Новые deps: getGroupWatch. Исправлено: snoozeTask/completeTask теперь реально передаются из my.js.
    Версия: 4.0 (29.09) — структурная правка (ТЗ пользователя от 29.09): (1) плашка даты/времени без галочки: нажатие на часы задачи само ставит напоминание на «сегодня + 30 минут» (`defaultTimestamp`), плашка открывается уже с этими датой и временем; любое изменение даты/времени в плашке сохраняется сразу (`commit`), клик мимо плашки просто закрывает её; снять — долгое нажатие на часы; (2) плашка закрывается свайпом по любому месту мимо неё (touchstart/touchmove на документе, порог `SWIPE_CLOSE_PX`); (3) потеря разрешения на уведомления — сразу запрос заново (`ensurePermission`: при старте, возврате в приложение и первом касании); (4) плашка следует за кнопкой через `opts.getAnchorEl` (строка перерисовывается после каждого сохранения). Экспорт: + requestPermissionIfNeeded, defaultTimestamp.
    Версия: 3.4 (21.09) — галочка плашки даты/времени стала таким же круглым пузырём, как пузырь даты (класс `.reminder-bubble .reminder-bubble-date`, вместо `.mdeditor-fab-btn`); размер `--rb` замеряется временной пробной кнопкой `.mdeditor-fab-btn` внутри плашки.
    Версия: 3.3 (19.09) — из плашки выбора даты/времени убран крестик: остались
@@ -101,6 +108,10 @@ window.initNotificationsModule = function(deps){
   var openTaskFromReminder = deps.openTaskFromReminder || function(){};
   var snoozeTask = deps.snoozeTask || function(){};
   var completeTask = deps.completeTask || function(){};
+  var getGroupWatch = deps.getGroupWatch || function(){ return null; };
+
+  // Нативная оболочка (APK): уведомления показывает она. null — обычный браузер/PWA.
+  var NT = (window.LTNotify && window.LTNotify.available) ? window.LTNotify : null;
 
   var FIRED_KEY = "taskRemindersFired_v1";
   var FIRED_KEEP_MS = 60 * 24 * 60 * 60 * 1000; // забываем записи старше ~двух месяцев
@@ -159,12 +170,26 @@ window.initNotificationsModule = function(deps){
 
   // ------------------------------------------------------- разрешение/показ
 
-  function isSupported(){ return typeof Notification !== "undefined"; }
+  function isSupported(){ return !!NT || typeof Notification !== "undefined"; }
+
+  // Разрешение в оболочке: системный запрос — один раз за запуск; если выключено насовсем — плашка, по нажатию
+  // открываются настройки уведомлений приложения.
+  var nativePermAsked = false, nativeDeniedShown = false;
+  function nativeEnsurePermission(){
+    var st = NT.state();
+    if(!st || st.permission) return;
+    if(st.canRequest && !nativePermAsked){ nativePermAsked = true; NT.requestPermission(); return; }
+    if(nativeDeniedShown) return;
+    nativeDeniedShown = true;
+    showBanner("Уведомления выключены для приложения — напоминания придут только внутри него. Нажмите, чтобы открыть настройки.",
+      function(){ NT.openNotifySettings(); }, true);
+  }
 
   var permRequestPending = false;
   var deniedBannerShown = false;
   function requestPermissionIfNeeded(){
     if(!isSupported()) return;
+    if(NT){ nativeEnsurePermission(); return; }
     if(Notification.permission === "default"){
       if(permRequestPending) return;
       permRequestPending = true;
@@ -188,6 +213,7 @@ window.initNotificationsModule = function(deps){
   // напоминаем плашкой. Если запрос без касания браузер проигнорировал — повторяем на первом касании.
   function ensurePermission(){
     if(!isSupported()) return;
+    if(NT){ nativeEnsurePermission(); return; }
     if(Notification.permission === "default") requestPermissionIfNeeded();
     else if(Notification.permission === "denied" && !deniedBannerShown){
       deniedBannerShown = true;
@@ -352,8 +378,9 @@ window.initNotificationsModule = function(deps){
   // чем через 350 мс, когда прокрутка уже встала на место
   var FLASH_START_MIN_MS = 350;
   var FLASH_GIVE_UP_MS = 2500;
-  function flashTask(id){
+  function flashTask(id, giveUpMs){
     var startedAt = Date.now();
+    var giveUp = giveUpMs || FLASH_GIVE_UP_MS;
     (function attempt(){
       var el = null;
       var rows = document.querySelectorAll('.task-body[data-id="' + id + '"]');
@@ -372,12 +399,14 @@ window.initNotificationsModule = function(deps){
         });
         return;
       }
-      if(waited < FLASH_GIVE_UP_MS) setTimeout(attempt, 100);
+      if(waited < giveUp) setTimeout(attempt, 100);
     })();
   }
-  function openTaskAndFlash(id){
+  // giveUpMs: общая задача из уведомления, пришедшего при закрытом приложении, подтягивается из сети после открытия
+  // вкладки — строку ждём дольше
+  function openTaskAndFlash(id, giveUpMs){
     openTaskFromReminder(id);
-    flashTask(id);
+    flashTask(id, giveUpMs);
   }
 
   function findTask(id){
@@ -408,10 +437,10 @@ window.initNotificationsModule = function(deps){
   }
 
   // что делать после клика по уведомлению или его кнопке
-  function handleNotificationAction(id, action, kind){
+  function handleNotificationAction(id, action, kind, at){
     // уведомление о новой общей задаче (my.js, 28.09): только открыть вкладку и
     // подсветить строку — без карточки-напоминания (отложить/готово там не нужны)
-    if(kind === "group-task-new"){ openTaskAndFlash(id); return; }
+    if(kind === "group-task-new"){ openTaskAndFlash(id, NT ? 10000 : 0); return; }
     if(action === "done"){
       var t = findTask(id);
       var text = t ? cleanText(t.c && t.c.text) : "";
@@ -423,7 +452,8 @@ window.initNotificationsModule = function(deps){
     if(action === "tomorrow"){
       var task = findTask(id);
       if(!task || (task.c && task.c.checked === true)) return;
-      var ts = tomorrowSameTime(getRemindAt(task));
+      // в оболочке срок «завтра» уже посчитан и записан там (at) — берём его, чтобы данные и будильник совпали
+      var ts = (typeof at === "number" && at > 0) ? at : tomorrowSameTime(getRemindAt(task));
       snoozeTask(id, ts);
       schedule();
       showBanner("Напоминание перенесено на " + formatReminder(ts) + ": " + cleanText(task.c && task.c.text));
@@ -442,6 +472,8 @@ window.initNotificationsModule = function(deps){
   function notifyTask(task, at){
     var id = task.id;
     var text = cleanText(task.c && task.c.text);
+    // оболочка (APK): системное уведомление показывает она; страница отвечает только за карточку на экране
+    if(NT){ showTaskCard(id, text, at); return; }
     // приложение открыто и на виду — системное уведомление не нужно (оно
     // только продублировало бы карточку): показываем карточку с кнопками
     if(document.visibilityState === "visible"){ showTaskCard(id, text, at); return; }
@@ -500,9 +532,70 @@ window.initNotificationsModule = function(deps){
     var delay = TICK_MAX_MS;
     if(nextDue != null) delay = Math.min(Math.max(nextDue - now, 500), TICK_MAX_MS);
     timer = setTimeout(tick, delay);
+    pushNative();
+  }
+
+  // ------------------------------------------------------- оболочка (APK)
+
+  // Снимок для оболочки: невыполненные задачи со сроком, по которым страница ещё НЕ показывала напоминание
+  // (иначе оболочка повторила бы уже показанное). Шлётся только при изменении. До первого syncFromNative не шлём —
+  // нельзя затереть срок «Завтра», выбранный в уведомлении, пока приложение было закрыто.
+  var nativeReady = false;
+  var moduleStartedAt = Date.now();
+  var NATIVE_EMPTY_GRACE_MS = 8000; // пока задачи могли ещё не загрузиться, пустой список оболочке не шлём
+  var lastPushedReminders = null, lastPushedWatch = null;
+  function pushNative(){
+    if(!NT || !nativeReady) return;
+    try{
+      var fired = loadFired();
+      var list = [];
+      var tasks = [];
+      try{ tasks = getRemindableTasks() || []; }catch(e){}
+      // Пустой список сразу после запуска — скорее всего, данные ещё не прочитаны: не затираем напоминания оболочки.
+      if(!tasks.length && Date.now() - moduleStartedAt < NATIVE_EMPTY_GRACE_MS) return;
+      tasks.forEach(function(t){
+        var at = getRemindAt(t);
+        if(at == null || (t.c && t.c.checked === true) || fired[t.id] === at) return;
+        list.push({id: t.id, at: at, text: cleanText(t.c && t.c.text)});
+      });
+      list.sort(function(a, b){ return a.at - b.at || (a.id < b.id ? -1 : 1); });
+      var json = JSON.stringify(list);
+      if(json !== lastPushedReminders && NT.setReminders(list)) lastPushedReminders = json;
+
+      var watch = null;
+      try{ watch = getGroupWatch(); }catch(e){}
+      var watchJson = watch ? JSON.stringify(watch) : "";
+      if(watchJson !== lastPushedWatch && NT.setGroupWatch(watch)) lastPushedWatch = watchJson;
+    }catch(e){ log("pushNative: " + (e && e.message ? e.message : e)); }
+  }
+
+  // Что произошло без страницы: показанные оболочкой напоминания (в «уже показано», чтобы не дублировать карточкой),
+  // затем нажатия кнопок и клики по уведомлениям. Порядок важен: срок «Завтра» применяется до отправки нового снимка.
+  function syncFromNative(){
+    if(!NT) return;
+    try{
+      var firedNative = NT.takeFired();
+      var keys = Object.keys(firedNative || {});
+      if(keys.length){
+        var fired = loadFired();
+        keys.forEach(function(k){ if(typeof firedNative[k] === "number") fired[k] = firedNative[k]; });
+        saveFired(fired);
+      }
+      var actions = NT.takeActions() || [];
+      actions.forEach(function(a){
+        if(!a || !a.taskId) return;
+        try{ handleNotificationAction(a.taskId, a.action || "", a.kind || "", a.at); }
+        catch(e){ log("action: " + (e && e.message ? e.message : e)); }
+      });
+    }catch(e){ log("syncFromNative: " + (e && e.message ? e.message : e)); }
   }
 
   function tick(){
+    if(NT){
+      syncFromNative();
+      // приложение не на экране: напоминания показывает оболочка, карточка покажется при возврате
+      if(document.hidden){ schedule(); return; }
+    }
     var now = Date.now();
     var fired = loadFired();
     var changed = false;
@@ -556,6 +649,16 @@ window.initNotificationsModule = function(deps){
       navigator.serviceWorker.addEventListener("message", function(event){
         if(event.data && event.data.type === "REMINDER_CLICK") consumePendingClick();
       });
+    }
+    if(NT){
+      NT.onPermission(function(granted){
+        if(granted){ nativeDeniedShown = false; pushNative(); }
+        else{ nativePermAsked = true; nativeEnsurePermission(); }
+      });
+      // клик по уведомлению / кнопка, пока приложение запущено: применить сразу
+      NT.onAction(function(){ syncFromNative(); schedule(); });
+      syncFromNative();
+      nativeReady = true;
     }
     consumePendingClick();
     ensurePermission();

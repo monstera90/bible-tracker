@@ -1,12 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Шаг 4 (этот APK): приём файлов из «Поделиться» (intent-filter ниже) и FileProvider для отправки файлов.
-         Остаётся на своих шагах (требует нового APK): POST_NOTIFICATIONS, SCHEDULE_EXACT_ALARM/USE_EXACT_ALARM,
-         RECEIVE_BOOT_COMPLETED и foreground service (шаг 5). Для сохранения в «Загрузки» разрешений не нужно (MediaStore). -->
+    <!-- Шаг 4: приём файлов из «Поделиться» (intent-filter ниже) и FileProvider для отправки файлов.
+         Шаг 5 (этот APK): уведомления при закрытом приложении — POST_NOTIFICATIONS (запрос на Android 13+),
+         точные будильники напоминаний (USE_EXACT_ALARM на Android 13+ выдаётся автоматически, SCHEDULE_EXACT_ALARM
+         только для Android 12 и ниже), RECEIVE_BOOT_COMPLETED (будильники и опрос ставятся заново после перезагрузки).
+         Для сохранения в «Загрузки» разрешений не нужно (MediaStore). -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Заготовка под будущее (ТЗ, раздел 5; без реализации): foreground service для секундомера/таймера/записи с уведомлением
+         в шторке. Начиная с Android 14 у такого сервиса обязателен тип; для таймера и секундомера подходит "specialUse".
+         Когда понадобится: объявить <service android:name=".TimerService" android:foregroundServiceType="specialUse" ...>
+         со свойством PROPERTY_SPECIAL_USE_FGS_SUBTYPE и запускать его из страницы через мост. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
@@ -72,5 +84,18 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Шаг 5: будильник напоминаний, опрос общих задач, кнопки уведомлений, перезагрузка и смена времени.
+             exported="false": принимает только свои PendingIntent и системные рассылки. -->
+        <receiver
+            android:name=".NotifyReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
