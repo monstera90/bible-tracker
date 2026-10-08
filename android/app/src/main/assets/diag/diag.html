@@ -33,8 +33,9 @@
   <button id="s6idb">Шаг 6: IndexedDB</button>
   <button id="s6check">Шаг 6: самопроверка экспорта</button>
   <button id="s6snap">Шаг 6: снимок данных</button>
-  <button id="s6cmp">Шаг 6: сравнить снимки (2 файла)</button>
+  <button id="s6cmp">Шаг 6: сравнить снимки (2 файла, можно по одному)</button>
   <button id="s6arc">Шаг 6: проверить архив (1–2 файла)</button>
+  <button id="s6arc2">Шаг 6: сверить два архива (по одному)</button>
   <button id="s6pick">Шаг 6: выбор файла</button>
   <button id="s6b100">Шаг 6: объём 100 МБ</button>
   <button id="s6b300">Шаг 6: объём 300 МБ</button>
@@ -366,6 +367,22 @@
       inp.click();
     });
   }
+  // Выбор двух файлов: если системный выбор не даёт отметить два сразу, файлы можно выбрать по одному,
+  // нажав ту же кнопку второй раз (первый файл запоминается до второго нажатия).
+  var stagedPick = {};
+  async function pickTwo(key, accept){
+    var files = await pickFiles(accept, true);
+    if(files.length >= 2) { stagedPick[key] = null; return files.slice(0, 2); }
+    if(files.length === 1){
+      var first = stagedPick[key];
+      if(first && first.name !== files[0].name){ stagedPick[key] = null; return [first, files[0]]; }
+      stagedPick[key] = files[0];
+      add(null, "Выбран 1 файл: " + files[0].name, "нажмите эту же кнопку ещё раз и выберите второй файл");
+      return null;
+    }
+    add(null, "Файл не выбран", stagedPick[key] ? "первый файл (" + stagedPick[key].name + ") пока запомнен" : "");
+    return null;
+  }
   function saveBlob(name, blob, timeoutMs, match){
     return new Promise(function(resolve){
       var url = URL.createObjectURL(blob), a = document.createElement("a"), t0 = Date.now(), done = false, to;
@@ -531,8 +548,8 @@
 
   var VOLATILE = { "tabScrollPercents_v1": 1, "bibleSettingsLastTab_v1": 1, "bibleSettingsLastTabSet_v1": 1, "bibleLastOpenedBook_v1": 1, "taskRemindersFired_v1": 1 };
   async function s6Compare(){
-    var files = await pickFiles(".json", true);
-    if(files.length !== 2){ add(false, "Сравнение снимков", "выберите ровно 2 файла lt-snapshot-*.json за один раз (выбрано " + files.length + ")"); return; }
+    var files = await pickTwo("cmp", ".json");
+    if(!files) return;
     try{
       var R = await loadRegistry(), A = JSON.parse(await files[0].text()), B = JSON.parse(await files[1].text());
       if(A.kind !== "lt-snapshot" || B.kind !== "lt-snapshot"){ add(false, "Сравнение снимков", "это не снимки"); return; }
@@ -581,8 +598,9 @@
     if(out.dataEnt){ try{ out.data = JSON.parse(new TextDecoder().decode(out.dataEnt.data)); }catch(e){ out.dataErr = fmtErr(e); } }
     return out;
   }
-  async function s6Archive(){
-    var files = await pickFiles(".zip,.json", true);
+  async function s6Archive(two){
+    var files = two ? await pickTwo("arc", ".zip,.json") : await pickFiles(".zip,.json", true);
+    if(!files) return;
     if(!files.length){ add(null, "Шаг 6: архив", "файл не выбран"); return; }
     try{
       var R = await loadRegistry(), arcs = [];
@@ -657,7 +675,8 @@
   document.getElementById("s6check").onclick = function(){ s6SelfCheck(); };
   document.getElementById("s6snap").onclick = function(){ s6Snapshot(); };
   document.getElementById("s6cmp").onclick = function(){ s6Compare(); };
-  document.getElementById("s6arc").onclick = function(){ s6Archive(); };
+  document.getElementById("s6arc").onclick = function(){ s6Archive(false); };
+  document.getElementById("s6arc2").onclick = function(){ s6Archive(true); };
   document.getElementById("s6pick").onclick = function(){ s6Pick(); };
   document.getElementById("s6b100").onclick = function(){ s6Big(100); };
   document.getElementById("s6b300").onclick = function(){ s6Big(300); };
