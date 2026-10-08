@@ -109,6 +109,6 @@ jobs:
           NOTES="Веб-часть ${{ steps.prep.outputs.version }}, versionCode ${{ github.run_number }}. SHA-256 сертификата подписи: ${{ steps.apk.outputs.fingerprint }} (у всех сборок должен совпадать)."
           gh release create "$TAG" "${{ steps.apk.outputs.name }}" \
             --target "$GITHUB_SHA" \
-            --title "Life tracker APK ${{ steps.prep.outputs.version_name }} (сборка ${{ github.run_number }})" \
+            --title "LifeTracker APK ${{ steps.prep.outputs.version_name }} (сборка ${{ github.run_number }})" \
             --notes "$NOTES" \
             --latest=false

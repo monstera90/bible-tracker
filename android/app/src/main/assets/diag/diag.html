@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Диагностика Life tracker</title>
+<title>Диагностика LifeTracker</title>
 <style>
   body{font:14px/1.4 system-ui,sans-serif;margin:0;padding:12px;background:#f4f0f8;color:#222}
   h1{font-size:18px;margin:0 0 8px}
@@ -13,7 +13,7 @@
 </style>
 </head>
 <body>
-<h1>Диагностика Life tracker</h1>
+<h1>Диагностика LifeTracker</h1>
 <div class="hint">Служебная страница оболочки. Данные приложения не меняет: пробные записи удаляются сразу.</div>
 <div>
   <button id="run">Запустить проверки</button>
@@ -273,7 +273,7 @@
 
   function s4Share(){
     var file;
-    try{ file = new File(["Проверка «Поделиться» из Life tracker\n"], "lt-diag-share.txt", { type: "text/plain" }); }
+    try{ file = new File(["Проверка «Поделиться» из LifeTracker\n"], "lt-diag-share.txt", { type: "text/plain" }); }
     catch(e){ add(false, "Создание файла", fmtErr(e)); return; }
     var can = typeof navigator.canShare === "function" ? navigator.canShare({ files: [file] }) : "нет canShare";
     add(can === true, "canShare с файлом", String(can));
@@ -342,7 +342,7 @@
   }
   function s5Bg(){
     var L = s5Bridge(); if(!L) return;
-    add(null, "Работа в фоне", "открываю настройки. Xiaomi/HyperOS: включите «Автозапуск» для Life tracker, затем в «Приложения → Life tracker → Контроль активности» выберите «Нет ограничений». Остальные телефоны: разрешите работу без ограничений батареи.");
+    add(null, "Работа в фоне", "открываю настройки. Xiaomi/HyperOS: включите «Автозапуск» для LifeTracker, затем в «Приложения → LifeTracker → Контроль активности» выберите «Нет ограничений». Остальные телефоны: разрешите работу без ограничений батареи.");
     L.openBackgroundSettings();
   }
   document.getElementById("s5state").onclick = function(){ s5State(); };

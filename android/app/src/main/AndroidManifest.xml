@@ -43,7 +43,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Шаг 4: «Поделиться → Life tracker» (замена Web Share Target из manifest.json).
+            <!-- Шаг 4: «Поделиться → LifeTracker» (замена Web Share Target из manifest.json).
                  Типы те же, что принимала PWA: видео, epub, fb2 (часть файловых менеджеров отдаёт fb2 как
                  octet-stream или xml). Что делать с файлом, решает страница по расширению (handleSharedFile в my.js).
                  Текст и ссылки пока не принимаются: в PWA такой функции не было (вопрос заказчику, 12.9). -->

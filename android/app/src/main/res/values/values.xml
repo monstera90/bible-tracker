@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Life tracker</string>
+    <string name="app_name">LifeTracker</string>
     <string name="shortcut_diag">Диагностика</string>
 
     <!-- Фон окна и полос системных панелей до того, как страница сообщит свои цвета (background_color из manifest.json). -->
