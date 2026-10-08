@@ -5670,6 +5670,7 @@ window.initMdEditorModule = function(deps){
       // вкладку могли закрыть/переключить заметку, пока грузился CodeMirror
       var host = document.getElementById("mdEditorHost");
       if(!host || openFile !== fileAtMountTime) return;
+      if(cmView && host.contains(cmView.dom)) return; // уже собран (параллельный mountEditor)
       try{
         var EditorState = cm.state.EditorState;
         var EditorView = cm.view.EditorView;
@@ -5950,33 +5951,53 @@ window.initMdEditorModule = function(deps){
     render();
     restoreScrollAfterMount(file, top);
   }
+  // экран заметки на месте (разметка есть), независимо от того, собран ли в ней CodeMirror
+  function editorScreenUp(){
+    return !!(document.getElementById("mdEditorHost") && openFile && screen === "editor" && !noteInfoOpen);
+  }
+  // CodeMirror не собран: view нет или он остался в уже выброшенном куске DOM
+  function editorNotMounted(){
+    var host = document.getElementById("mdEditorHost");
+    return !!(host && (!cmView || !host.contains(cmView.dom)));
+  }
   function scheduleEditorRepairAfterResume(){
     resumeRepairTimers.forEach(function(t){ clearTimeout(t); });
     resumeRepairTimers = [];
-    if(!editorIsShown()) return;
+    if(!editorScreenUp()) return;
     var sc = document.getElementById("settingsTabContent");
     var target = (scrollBeforeHide !== null) ? scrollBeforeHide : (sc ? sc.scrollTop : null);
     userTouchedSinceResume = false;
     if(window.Debug){
       var host0 = document.getElementById("mdEditorHost");
       window.Debug.log("mdeditor: возврат в приложение — прокрутка до сворачивания=" + scrollBeforeHide + ", сейчас=" + (sc ? sc.scrollTop : "?") +
-        ", высота=" + (sc ? sc.scrollHeight + "/" + sc.clientHeight : "?") + ", строк CodeMirror=" + (host0 ? host0.querySelectorAll(".cm-line").length : "?"));
+        ", высота=" + (sc ? sc.scrollHeight + "/" + sc.clientHeight : "?") + ", строк CodeMirror=" + (host0 ? host0.querySelectorAll(".cm-line").length : "?") +
+        ", cmView=" + (cmView ? "есть" : "НЕТ") + ", не собран=" + editorNotMounted() + ", видим=" + editorIsShown());
     }
-    nudgeEditorRepaint();
-    applyScrollTop(target);
-    [150, 600].forEach(function(ms){
+    if(editorIsShown()){
+      nudgeEditorRepaint();
+      applyScrollTop(target);
+    }
+    [150, 600, 1500].forEach(function(ms){
       resumeRepairTimers.push(setTimeout(function(){
-        if(!editorIsShown()) return;
+        // решение принимаем В МОМЕНТ проверки, а не один раз на возврате: сразу после
+        // возврата состояние ещё может не устояться
+        if(!editorScreenUp()) return;
         var sc2 = document.getElementById("settingsTabContent");
-        var blank = editorLooksBlank();
-        if(window.Debug) window.Debug.log("mdeditor: проверка через " + ms + " мс — " + (blank ? "область пуста, перемонтирую редактор" : "строки на месте") + ", прокрутка=" + (sc2 ? sc2.scrollTop : "?") + ", ждали=" + target);
-        if(blank){ remountEditorInPlace(target); return; }
+        var notMounted = editorNotMounted();
+        var blank = !notMounted && editorIsShown() && editorLooksBlank();
+        if(window.Debug) window.Debug.log("mdeditor: проверка через " + ms + " мс — " + (notMounted ? "редактор не собран, перемонтирую" : (blank ? "область пуста, перемонтирую редактор" : "строки на месте")) + ", прокрутка=" + (sc2 ? sc2.scrollTop : "?") + ", ждали=" + target);
+        if(notMounted || blank){
+          resumeRepairTimers.forEach(function(t){ clearTimeout(t); });
+          resumeRepairTimers = [];
+          remountEditorInPlace(target);
+          return;
+        }
         // строки на месте — если браузер при этом сбросил прокрутку, возвращаем её
         if(!userTouchedSinceResume && sc2 && target !== null && Math.abs(sc2.scrollTop - target) > 2){
           applyScrollTop(target);
           if(window.Debug) window.Debug.log("mdeditor: прокрутка сбилась — вернула на " + target + " → " + sc2.scrollTop);
         }
-        if(ms === 150) nudgeEditorRepaint();
+        if(ms === 150 && editorIsShown()) nudgeEditorRepaint();
       }, ms));
     });
   }
