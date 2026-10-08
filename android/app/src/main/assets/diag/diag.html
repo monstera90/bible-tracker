@@ -366,12 +366,12 @@
       inp.click();
     });
   }
-  function saveBlob(name, blob, timeoutMs){
+  function saveBlob(name, blob, timeoutMs, match){
     return new Promise(function(resolve){
       var url = URL.createObjectURL(blob), a = document.createElement("a"), t0 = Date.now(), done = false, to;
       a.href = url; a.download = name; document.body.appendChild(a);
       function fin(r){ if(done) return; done = true; document.removeEventListener("lt-native-saved", onS); clearTimeout(to); resolve(r); }
-      function onS(ev){ fin({ ok: true, detail: ev.detail || {}, ms: Date.now() - t0 }); }
+      function onS(ev){ var d = ev.detail || {}; if(match && !match(d)) return; fin({ ok: true, detail: d, ms: Date.now() - t0 }); }
       document.addEventListener("lt-native-saved", onS);
       to = setTimeout(function(){ fin({ ok: false, ms: Date.now() - t0 }); }, timeoutMs || 120000);
       a.click(); document.body.removeChild(a);
@@ -601,7 +601,8 @@
         if(!ds) add(false, "deviceSettings", "нет (код синхронизации и настройки не перенесутся)");
         else { var lsK = Object.keys(ds.localStorage || {}), notInc = lsK.filter(function(k){ return !hasK(R.localStorage.include, k); });
           add(notInc.length === 0, "deviceSettings.localStorage", lsK.length + " ключей, импорт проигнорирует: " + (notInc.length ? notInc.join(", ") : "ничего") + "; formatVersion " + ds.formatVersion);
-          add(!!(ds.localStorage && ds.localStorage.bibleReadingSyncId_v1), "Код синхронизации в архиве", "значение не показывается");
+          { var hasCode = !!(ds.localStorage && ds.localStorage.bibleReadingSyncId_v1);
+            add(hasCode ? true : null, "Код синхронизации в архиве", hasCode ? "есть (значение не показывается)" : "нет: в приложении код не вводился или он не попал в архив; значение не показывается"); }
           add(null, "jwlMergeState_v1 / taskRemindersFired_v1", ((ds.localStorage || {}).jwlMergeState_v1 || "").length + " / " + ((ds.localStorage || {}).taskRemindersFired_v1 || "").length + " символов");
           add(null, "mdEditorDB в архиве", Object.keys((ds.indexedDB || {}).mdEditorDB || {}).join(", ") || "пусто"); }
       }
@@ -634,14 +635,21 @@
     }catch(e){ add(false, "Выбор файла", fmtErr(e)); }
   }
 
+  var s6BigBusy = false;
   async function s6Big(mb){
+    if(s6BigBusy){ add(null, "Шаг 6: объём " + mb + " МБ", "пропущено: предыдущая проверка объёма ещё идёт, дождитесь её результата"); return; }
+    s6BigBusy = true;
+    try{ await s6BigRun(mb); } finally { s6BigBusy = false; }
+  }
+  async function s6BigRun(mb){
     add(null, "Шаг 6: объём " + mb + " МБ", "выделяю память. Если страница перезагрузится или приложение закроется, это и есть результат: запишите, на каком размере.");
     var CH = 16, chunks = [], t0 = Date.now();
     try{ for(var done = 0; done < mb; done += CH){ var u = new Uint8Array(Math.min(CH, mb - done) * 1048576); u.fill((done + 7) & 255); u[0] = done & 255; chunks.push(u); } }
     catch(e){ add(false, "Память " + mb + " МБ", fmtErr(e) + ", выделено " + chunks.length * CH + " МБ"); return; }
     var blob = new Blob(chunks, { type: "application/octet-stream" }); chunks = null;
     add(null, "Данные в памяти", (Date.now() - t0) + " мс, Blob " + fmtMB(blob.size));
-    var r = await saveBlob("lt-diag-big-" + mb + "mb.bin", blob, 600000);
+    var stem = "lt-diag-big-" + mb + "mb";
+    var r = await saveBlob(stem + ".bin", blob, 600000, function(d){ return d.bytes === blob.size && (!d.name || String(d.name).indexOf(stem) === 0); });
     add(r.ok && r.detail.bytes === blob.size, "Сохранение " + mb + " МБ в «Загрузки»", r.ok ? r.detail.bytes + " байт за " + r.ms + " мс. Удалите файл lt-diag-big-" + mb + "mb.bin из «Загрузок»" : "ответа нет за " + Math.round(r.ms / 1000) + " с");
   }
 
