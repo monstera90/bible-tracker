@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 56.1 (08.10) — картинки удаляются вместе с задачей/комментарием: `deleteTaskPermanently`, `deleteCommentPermanently`, `deleteGroupTaskPermanently`, `deleteGroupArchivedTaskPermanently` зовут `MdEditor.deleteImagesOfText(текст)` (mdeditor.js 7.4, автоматическая «корзина сирот» отключена).
    Версия: 56.0 (07.10) — шаг 5 переезда в APK (ПЕРЕЕЗД_В_APK.md): нативные уведомления при закрытом приложении. В модуль уведомлений (`notifications.js` 4.1) теперь передаются `snoozeTask`/`completeTask` (раньше не передавались — кнопки «Готово»/«Завтра» и пузыри отсрочки в карточке ничего не делали) и `getGroupWatch` (`getGroupWatchConfig`: группа, адрес базы, id этого устройства, уже увиденные общие задачи, имена участников — оболочка по ним проверяет новые общие задачи при закрытом приложении). `notifyAboutNewGroupTasks` сначала подмешивает id, о которых оболочка уже уведомила (`LTNotify.takeGroupSeen`), `showGroupTaskSystemNotification` в оболочке показывает уведомление через мост. Приём чужих правок (общих и личных) пересчитывает снимок напоминаний (`Notifications.schedule`). В браузере (PWA) поведение прежнее.
    Версия: 55.0 (07.10) — шаг 4 переезда в APK (ПЕРЕЕЗД_В_APK.md): в нативной оболочке (есть `window.LifeTrackerNative`) полноэкранный режим идёт через мост (`applyStatusBarFullscreen` → `setFullscreen`), цвет строки состояния — прямым вызовом из `syncThemeColorMeta`, приём файла из «Поделиться» — через `pullNativeSharedFiles` (вызывается из `checkForSharedFile`, оболочка дёргает `window.__ltOnNativeShare`). В браузере поведение прежнее. Скачивание файлов и `navigator.share` для оболочки подменяет новый `native-shell.js`, остальной код не менялся.
    Версия: 54.1 (05.10) — картинки задач: если первая строка задачи начинается с картинки, у первой строки текста снимается красная строка (`taskTextInner`). Версия 54.0: (1) ридер книг: смена размера шрифта «Аа» («+»/«−») больше не сдвигает читаемое место — `changeBookReaderFontSize` запоминает место в тексте (`captureHyphensAnchor`) и возвращает его после смены и после калибровки сегментов (`keepScrollAnchorPasses`, новая общая функция рядом с `captureHyphensAnchor`); (2) картинки задач («![[имя]]») в режиме просмотра — слева от текста квадратом в две строки, текст обтекает: новые `splitTaskImages`/`taskImagesHtml`/`taskTextInner` (раздел «КАРТИНКИ ЗАДАЧ В РЕЖИМЕ ПРОСМОТРА»), применены в `renderTaskRowView`, `renderRowView` («Все задачи проекта»), строках архива и ревью, поправка `fitTaskActions`; режим редактирования и комментарии не менялись.
@@ -5247,7 +5248,11 @@
     if(!sharedGroup || isGroupTasksReadOnly()) return;
     loadGroupTasksCache(sharedGroup.groupId);
     // тумбстоун {c:null,t} + постановка на отправку — один вызов
-    getGroupTasksBinding().remove(id).catch(logGroupTasksSyncError);
+    var gt = getGroupTaskById(id), ownText = gt && gt.c ? gt.c.text : "";
+    getGroupTasksBinding().remove(id).then(function(){
+      // картинки уходят после снятия записи из кэша общих задач (иначе её текст ещё считался бы ссылкой)
+      if(MdEditor && MdEditor.deleteImagesOfText) MdEditor.deleteImagesOfText(ownText);
+    }).catch(logGroupTasksSyncError);
     if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
   }
   // Отметка общей задачи выполненной — п. 2.4 ТЗ. completedBy проставляется здесь же (второе
@@ -6588,7 +6593,10 @@
   // активные задачи).
   function deleteGroupArchivedTaskPermanently(id){
     if(!sharedGroup || isGroupTasksReadOnly()) return;
-    getGroupArchiveBinding().remove(id).catch(logGroupArchiveSyncError);
+    var ga = getGroupArchivedTaskById(id), ownText = ga && ga.c ? ga.c.text : "";
+    getGroupArchiveBinding().remove(id).then(function(){
+      if(MdEditor && MdEditor.deleteImagesOfText) MdEditor.deleteImagesOfText(ownText);
+    }).catch(logGroupArchiveSyncError);
     if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
   }
   // Разовое (не часть цикла push/pull) чтение сырых записей архива — использовалась только
@@ -19205,6 +19213,7 @@
     if(isGroupTaskId(id)) return deleteGroupTaskPermanently(id);
     var task = getTaskById(id);
     if(!task) return;
+    var ownText = task.c.text; // картинки из текста уйдут вместе с задачей (после снятия записи, ниже)
     if(task.c.completionKey){
       state[task.c.completionKey] = {c: null, t: Date.now()};
     }
@@ -19217,6 +19226,7 @@
     // см. пояснение у setTaskText выше — удаление задачи тоже может освободить картинку,
     // вставленную только в неё
     if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
+    if(MdEditor && MdEditor.deleteImagesOfText) MdEditor.deleteImagesOfText(ownText);
   }
   // выполненные задачи по дням (ключи "taskcompletion:", не удаляются — используются и в
   // детализации дня "Карты дней года", и в экспорте)
@@ -19329,12 +19339,14 @@
   // безвозвратное удаление — не трогает уже сделанную копию в "Карте дней года" (см. пояснение
   // выше)
   function deleteCommentPermanently(id){
+    var cur = getCommentById(id), ownText = cur && cur.c ? cur.c.text : "";
     state["comment:" + id] = {c: null, t: Date.now()};
     saveLocalStateNow();
     scheduleCloudPush();
     refreshHeaderQuote();
     // см. пояснение у setTaskText выше
     if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
+    if(MdEditor && MdEditor.deleteImagesOfText) MdEditor.deleteImagesOfText(ownText);
   }
 
   // Перенос задачи в "Комментарии" через сетку "Перенести задачу": задачи и комментарии — два

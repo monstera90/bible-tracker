@@ -499,6 +499,8 @@
       db.close(); }catch(e){ inv.md.__error = fmtErr(e); } }
     try{ var root = await navigator.storage.getDirectory();
       for await (var en of root.entries()){ if(en[1].kind === "directory"){ var ds = await dirStats(en[1]); inv.opfs[en[0]] = { files: ds.files, bytes: ds.bytes, h: await shaStr(ds.names.sort().join("|")) }; } else inv.opfs[en[0]] = { file: true }; } }catch(e){ inv.opfsError = fmtErr(e); }
+    try{ inv.imgs = []; var rootI = await navigator.storage.getDirectory(), dirI = await rootI.getDirectoryHandle("images");
+      var stI = await dirStats(dirI); stI.names.forEach(function(n){ inv.imgs.push(n.split(":")[0].toLowerCase()); }); inv.imgs.sort(); }catch(e){ inv.imgsError = fmtErr(e); }
     try{ var cn = await caches.keys(); for(var c = 0; c < cn.length; c++) inv.caches[cn[c]] = (await (await caches.open(cn[c])).keys()).length; }catch(e){}
     return inv;
   }
@@ -584,6 +586,11 @@
       Object.keys(A.opfs).forEach(function(n){ var a = A.opfs[n], b = B.opfs[n]; if(a.files === undefined) return;
         var inc2 = R.opfs && hasK(R.opfs.include, n); var same = b && a.h === b.h;
         add(inc2 ? !!same : null, "OPFS " + n, "до " + a.files + " (" + fmtMB(a.bytes) + "), после " + (b ? b.files + " (" + fmtMB(b.bytes) + ")" : "нет") + (inc2 ? "" : " — не переносится")); });
+      if(A.imgs && B.imgs){
+        var sa = {}, sb = {}; A.imgs.forEach(function(n){ sa[n] = 1; }); B.imgs.forEach(function(n){ sb[n] = 1; });
+        var lostI = A.imgs.filter(function(n){ return !sb[n]; }), newI = B.imgs.filter(function(n){ return !sa[n]; });
+        add(!lostI.length, "Картинки на устройстве: до " + A.imgs.length + ", после " + B.imgs.length, (lostI.length ? "\n   пропали (" + lostI.length + "): " + lostI.slice(0, 15).join(", ") + (lostI.length > 15 ? " …" : "") : "ничего не пропало") + (newI.length ? "\n   появились (" + newI.length + "): " + newI.slice(0, 15).join(", ") + (newI.length > 15 ? " …" : "") : ""));
+      }else add(null, "Картинки на устройстве", "в одном из снимков нет списка имён (снимок сделан старой версией диагностики): сделайте новые снимки");
       var mk = Object.keys(R.mdEditorDB.include).filter(function(k){ return (A.md || {})[k] !== (B.md || {})[k]; });
       add(mk.length === 0, "mdEditorDB: переносимые ключи", mk.length ? "отличаются: " + mk.join(", ") + " (lastNote и openedIndex могут меняться при открытии)" : "совпадают");
     }catch(e){ add(false, "Сравнение снимков", fmtErr(e)); }
@@ -597,6 +604,22 @@
     out.by = by; out.dataEnt = by["data.json"];
     if(out.dataEnt){ try{ out.data = JSON.parse(new TextDecoder().decode(out.dataEnt.data)); }catch(e){ out.dataErr = fmtErr(e); } }
     return out;
+  }
+  // Картинки архива: какие файлы лежат в images/ и на какие из них есть ссылки ![[имя]] в заметках
+  // (notes/) и в текстах личных задач и комментариев (rawState). Правило то же, что у «корзины сирот»
+  // в приложении: картинка без ссылок после старта удаляется. Общие задачи группы в архив не входят,
+  // поэтому картинка, нужная только им, здесь может выглядеть сиротой.
+  var IMG_REF_RE = /!\[\[([^\[\]\n]+)\]\]/g;
+  function imgReport(a){
+    var imgs = {}, refs = {}, dec = new TextDecoder();
+    a.ents.forEach(function(e){ if(e.path.indexOf("images/") === 0 && e.path.length > 7){ var n = e.path.slice(7); imgs[n.toLowerCase()] = { name: n, size: e.data.length }; } });
+    function scan(t){ if(!t) return; IMG_REF_RE.lastIndex = 0; var m; while((m = IMG_REF_RE.exec(t))){ refs[m[1].trim().toLowerCase()] = 1; } }
+    a.ents.forEach(function(e){ if(e.path.indexOf("notes/") === 0){ try{ scan(dec.decode(e.data)); }catch(x){} } });
+    var rd = a.data && a.data.rawState && a.data.rawState.data || {};
+    Object.keys(rd).forEach(function(k){ if((k.indexOf("task:") === 0 || k.indexOf("comment:") === 0) && rd[k] && rd[k].c && rd[k].c.text) scan(rd[k].c.text); });
+    var keys = Object.keys(imgs), orphans = keys.filter(function(k){ return !refs[k]; }), missing = Object.keys(refs).filter(function(k){ return !imgs[k]; });
+    var bytes = 0; keys.forEach(function(k){ bytes += imgs[k].size; });
+    return { imgs: imgs, refs: refs, keys: keys, orphans: orphans, missing: missing, bytes: bytes };
   }
   async function s6Archive(two){
     var files = two ? await pickTwo("arc", ".zip,.json") : await pickFiles(".zip,.json", true);
@@ -612,6 +635,9 @@
         var d = a.data, ds = d.deviceSettings, ni = d.notesIndex;
         add(d.exportFormatVersion <= 3, "data.json", "версия формата " + d.exportFormatVersion + ", создан " + d.exportedAt + ", разделов " + Object.keys(d).length);
         var rs = d.rawState && d.rawState.data ? Object.keys(d.rawState.data).length : 0; add(rs > 0, "rawState.data", rs + " записей");
+        a.img = imgReport(a);
+        add(null, "Картинки в архиве", a.img.keys.length + " файлов (" + fmtMB(a.img.bytes) + "); с ссылками из заметок/задач: " + (a.img.keys.length - a.img.orphans.length) + "; без ссылок («сироты», приложение удалит их при запуске): " + a.img.orphans.length + (a.img.orphans.length ? "\n   сироты: " + a.img.orphans.slice(0, 12).map(function(k){ return a.img.imgs[k].name; }).join(", ") + (a.img.orphans.length > 12 ? " …" : "") : ""));
+        if(a.img.missing.length) add(null, "Ссылки на картинки, которых нет в архиве", a.img.missing.length + ": " + a.img.missing.slice(0, 12).join(", "));
         var mdN = (a.groups["notes/"] || {}).n || 0;
         if(!ni) add(mdN ? false : null, "notesIndex", "нет (старый архив)" + (mdN ? ", заметок в архиве " + mdN + ": после импорта потеряется привязка заметок книг" : ""));
         else { var ids = ni.map(function(r){ return r.id; }), bad = ids.filter(function(i){ return !/^[A-Za-z0-9_-]{1,64}$/.test(String(i)); }).length, uniq = new Set(ids).size === ids.length;
@@ -634,6 +660,18 @@
         var da = Object.assign({}, A.data), db2 = Object.assign({}, B.data); delete da.exportedAt; delete db2.exportedAt;
         var tk = {}; Object.keys(da).concat(Object.keys(db2)).forEach(function(k){ tk[k] = 1; });
         var dk = Object.keys(tk).filter(function(k){ return canon(da[k]) !== canon(db2[k]); });
+        if(A.img && B.img){
+          var iA = A.img.keys.filter(function(k){ return !B.img.imgs[k]; }), iB = B.img.keys.filter(function(k){ return !A.img.imgs[k]; });
+          var iD = A.img.keys.filter(function(k){ return B.img.imgs[k] && A.img.imgs[k].size !== B.img.imgs[k].size; });
+          var lst = function(arr, X){ return arr.slice(0, 15).map(function(k){ return X.img.imgs[k].name + (X.img.refs[k] ? " [есть ссылка]" : " [сирота]"); }).join(", ") + (arr.length > 15 ? " …" : ""); };
+          add(!iA.length && !iB.length && !iD.length, "Картинки: первый архив " + A.img.keys.length + ", второй " + B.img.keys.length,
+            (iA.length ? "\n   есть только в первом (" + iA.length + ", из них сирот " + iA.filter(function(k){ return !A.img.refs[k]; }).length + "): " + lst(iA, A) : "") +
+            (iB.length ? "\n   есть только во втором (" + iB.length + "): " + lst(iB, B) : "") +
+            (iD.length ? "\n   разный размер у " + iD.length + ": " + iD.slice(0, 10).map(function(k){ return A.img.imgs[k].name; }).join(", ") : "") +
+            (!iA.length && !iB.length && !iD.length ? "наборы совпадают" : ""));
+          if(iA.length){ var allOrph = iA.every(function(k){ return !A.img.refs[k]; });
+            add(allOrph ? null : false, "Картинки: чего не хватает во втором архиве", allOrph ? "все пропавшие были сиротами: это чистка при запуске, а не потеря при переносе" : "среди пропавших есть картинки со ссылками: это настоящая потеря, пришлите этот результат"); }
+        }
         add(dk.length === 0, "data.json: разделы", dk.length ? "отличаются: " + dk.join(", ") : "одинаковы (кроме времени экспорта)");
         if(dk.indexOf("rawState") >= 0){ var xa = A.data.rawState.data, xb = B.data.rawState.data, ch = Object.keys(xa).filter(function(k){ return k in xb && canon(xa[k]) !== canon(xb[k]); }), ms = Object.keys(xa).filter(function(k){ return !(k in xb); }), ex = Object.keys(xb).filter(function(k){ return !(k in xa); });
           add(null, "rawState.data", "изменились " + ch.length + ", пропали " + ms.length + ", добавились " + ex.length + "; примеры: " + ch.concat(ms, ex).slice(0, 10).join(", ")); }

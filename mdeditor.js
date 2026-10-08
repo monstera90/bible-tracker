@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 7.4 (08.10) — картинки удаляются вместе с владельцем, автоматической «корзины сирот» больше нет: `maybeRunImageCleanup` ничего не делает (её раньше дёргали старт, сверка заметок и `retryImageCleanup`), новая `deleteImagesOfText(text, excludeNoteId)` стирает картинки `![[имя]]` из текста удалённой задачи/комментария/заметки (если на них нет других ссылок), `deleteNoteRecord(id, withImages)` зовёт её при удалении заметки из списка и папки. Причина: чистка судила по неполному снимку данных и ставила в облаке метку удаления, которая стирала картинку на всех устройствах.
    Версия: 7.3 (03.10) — экран закладок: под основной закладкой книги кнопка «Восстановить предыдущее место, где была закладка» (появляется, если закладка перескочила на 2+ главы; `it.canRestorePrev` из my.js, dep `restoreBookPrevMain`); кнопка стоит внутри строки перед разделителем, зазор до него 2px. Функции не менялись.
    Версия: 7.2 (30.09) — в нижнем ряду редактора добавлена кнопка полноэкранного режима (`#mdEditorFullscreenBtn`, `.fullscreen-mode-btn`, миниатюра смартфона) сразу слева от «домика»; режим чтения — следующая, только тап (удержания больше нет); строка про полноэкранный режим в инструкции заметок; dep `handleFullscreenBtnTap`.
    Версия: 7.1 (30.09) — кнопка режима чтения (`#mdEditorReadingBtn`) в ряду редактора переставлена: теперь сразу слева от «домика» (была после «Скачать .md»).
@@ -1718,7 +1719,7 @@ window.initMdEditorModule = function(deps){
   // будет учтена оптимизацией до следующего перезапуска приложения.
   var referencedNamesDirty = true;
   function markReferencedNamesDirty(){ referencedNamesDirty = true; }
-  function collectReferencedMediaNames(){
+  function collectReferencedMediaNames(excludeNoteId){
     var names = new Set();
     function scanText(text){
       if(!text) return;
@@ -1729,8 +1730,9 @@ window.initMdEditorModule = function(deps){
         if(m[0].length === 0) MEDIA_REF_RE.lastIndex++;
       }
     }
-    notesMap.forEach(function(rec){
+    notesMap.forEach(function(rec, nid){
       if(!rec || rec.deleted || !rec.text) return;
+      if(excludeNoteId != null && nid === excludeNoteId) return; // удаляемая заметка уже не владелец картинок
       scanText(rec.text);
     });
     getExternalMediaTexts().forEach(scanText);
@@ -1873,11 +1875,44 @@ window.initMdEditorModule = function(deps){
   // корзину — чтение и удаление в одной папке больше никогда не идут
   // одновременно.
   function maybeRunImageCleanup(){
-    if(imagesDirHandle && notesReady && imageIndexBuilt){
-      Promise.all(Array.from(imageLoadPromises.values())).then(function(){
-        cleanupOrphanedImages();
-      });
+    // 08.10: автоматическая «корзина сирот» ОТКЛЮЧЕНА. Она решала «картинка не используется» по
+    // тому, что устройство успело загрузить к этому моменту (общие задачи группы, недогруженные
+    // заметки, правки с другого устройства), и после ошибки ставила в облаке метку удаления
+    // (recordImageRemoved → registerFileDeletion), которая стирала картинку на ВСЕХ устройствах.
+    // Теперь картинку удаляет само действие, удалившее владельца (deleteImagesOfText ниже).
+    // Имя и вызовы сохранены, чтобы не трогать места, откуда её дёргали; cleanupOrphanedImages
+    // оставлена в файле для возможной ручной кнопки «Убрать неиспользуемые» (с предпросмотром).
+  }
+
+  // Удаляет картинки ![[имя]] из текста только что удалённого владельца (задача, комментарий,
+  // заметка). Вызывать ПОСЛЕ того, как владелец убран из state/notesMap: картинка, на которую
+  // осталась ссылка где-либо ещё (excludeNoteId — id удаляемой заметки, если она ещё в notesMap),
+  // не трогается. Пока заметки не загружены (notesReady=false) или нет папки images/ — ничего не
+  // делает (лучше оставить файл, чем стереть нужный). Удаление идёт после завершения всех чтений
+  // в папке (чтение и удаление в одной директории одновременно подвисают), по одному файлу, через deleteImageFile (она же ставит метку удаления в облаке,
+  // чтобы остальные устройства стёрли файл у себя).
+  function deleteImagesOfText(text, excludeNoteId){
+    if(!text || !notesReady || !imagesDirHandle) return Promise.resolve();
+    var names = [], seen = {}, m;
+    MEDIA_REF_RE.lastIndex = 0;
+    while((m = MEDIA_REF_RE.exec(String(text)))){
+      var k = m[1].trim().toLowerCase();
+      if(k && !seen[k]){ seen[k] = 1; names.push(k); }
+      if(m[0].length === 0) MEDIA_REF_RE.lastIndex++;
     }
+    if(!names.length) return Promise.resolve();
+    return Promise.all(Array.from(imageLoadPromises.values())).catch(function(){}).then(function(){
+      var still = collectReferencedMediaNames(excludeNoteId);
+      return names.reduce(function(p, key){
+        return p.then(function(){
+          if(still.has(key)) return;
+          var item = imageIndex.get(key);
+          if(!item) return;
+          if(window.Debug) window.Debug.log("deleteImagesOfText: удаляю \"" + item.name + "\" вместе с владельцем");
+          return deleteImageFile(item.name).catch(function(){});
+        });
+      }, Promise.resolve());
+    }).then(function(){ referencedNamesDirty = true; }).catch(function(){});
   }
 
   var livePreviewCompartment = null;
@@ -2488,12 +2523,17 @@ window.initMdEditorModule = function(deps){
     binding.save(id, { name: rec.name, path: rec.path, text: newText });
     markReferencedNamesDirty();
   }
-  function deleteNoteRecord(id){
+  // withImages=true — удаление заметки пользователем (список, папка): картинки из её текста
+  // удаляются вместе с ней. Замена заметок при импорте архива зовёт без флага — картинки там
+  // приходят из того же архива.
+  function deleteNoteRecord(id, withImages){
     var rec = notesMap.get(id);
     if(!rec) return;
+    var ownText = rec.text;
     nameIndex.delete(rec.name.toLowerCase());
     binding.remove(id);
     markReferencedNamesDirty();
+    if(withImages) deleteImagesOfText(ownText, id);
   }
   // Правки в тексте ДРУГИХ заметок при переименовании (замена [[старое]] на
   // [[новое]] — существовавшая и раньше фича, см. историю правок) — теперь
@@ -3508,7 +3548,7 @@ window.initMdEditorModule = function(deps){
       openFile = null;
       screen = "list";
     }
-    deleteNoteRecord(it.id);
+    deleteNoteRecord(it.id, true);
     if(bookmarkedNames.has(key)){
       bookmarkedNames.delete(key);
       setSyncedBookmark(key, false);
@@ -3558,7 +3598,7 @@ window.initMdEditorModule = function(deps){
         }
         revealedBookmarkRows.delete(key);
       }
-      deleteNoteRecord(id);
+      deleteNoteRecord(id, true);
     });
     revealedFolderDeleteRows.delete(it.node.path);
     rebuildTree();
@@ -6111,6 +6151,9 @@ window.initMdEditorModule = function(deps){
     // корзина сирот может не заметить её появление/исчезновение до
     // следующего перезапуска приложения.
     markMediaReferencesDirty: markReferencedNamesDirty,
+    // 08.10: картинки из текста удалённой задачи/комментария — удаляются вместе с ней, см.
+    // deleteImagesOfText (корзина сирот отключена).
+    deleteImagesOfText: deleteImagesOfText,
     // READER_PLAN.md, Этап B, шаг 6 (11.09) — для категорий "Заметки"/
     // "Картинки заметок" выборочного импорта общего ZIP-бэкапа, см.
     // applyImportSelection в my.js.
