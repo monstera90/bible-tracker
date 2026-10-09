@@ -1596,6 +1596,14 @@
     vertical-align:middle;
     -webkit-tap-highlight-color:transparent;
   }
+  /* my.js 56.2: bindTapOrHold больше не гасит touchstart — системное меню/выделение при долгом
+     нажатии на этих кнопках отключено здесь, а скролл списка с них работает. */
+  .task-icon-btn, .task-flag-dot{
+    touch-action:manipulation;
+    -webkit-touch-callout:none;
+    -webkit-user-select:none;
+    user-select:none;
+  }
   .task-icon-btn svg{ width:15px; height:15px; }
   /* пиктограмма-чемоданчик "В работе" (.task-worktasks-btn,
      cycleTaskWorkState в my.js) — обычное (не залитое, "off") состояние

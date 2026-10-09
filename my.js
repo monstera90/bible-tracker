@@ -19137,11 +19137,15 @@
       var dx = x - startXY.x, dy = y - startXY.y;
       if(Math.sqrt(dx*dx + dy*dy) > MOVE_CANCEL_PX){ moved = true; clearTimer(); }
     }
+    // my.js 56.2: на touchstart больше НЕ вызываем preventDefault — он блокировал начало скролла списка,
+    // если палец стартовал на кнопке. При начале скролла браузер шлёт touchcancel (таймер сбрасывается,
+    // тап не засчитывается), а «призрачный» click гасится preventDefault в touchend ниже. Системное
+    // меню/выделение при долгом нажатии гасят CSS (touch-action/-webkit-touch-callout/user-select) и contextmenu.
     el.addEventListener("touchstart", function(e){
-      touchHandled = !!e.cancelable;
-      if(e.cancelable) e.preventDefault(); // {passive:false} ниже обязателен, иначе браузер это молча проигнорирует
+      touchHandled = true;
       var t = e.touches[0]; start(t.clientX, t.clientY);
-    }, {passive:false});
+    }, {passive:true});
+    el.addEventListener("contextmenu", function(e){ e.preventDefault(); });
     el.addEventListener("touchmove", function(e){ var t = e.touches[0]; move(t.clientX, t.clientY); }, {passive:true});
     el.addEventListener("touchend", function(e){
       clearTimer();
