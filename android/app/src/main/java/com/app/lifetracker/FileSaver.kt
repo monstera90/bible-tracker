@@ -5,21 +5,28 @@ import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
+import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Base64
 import android.webkit.MimeTypeMap
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Приём файла от страницы по частям (base64) и два назначения:
- *  - SAVE: запись в папку «Загрузки» через MediaStore (Android 10+, без разрешений на хранилище);
+ *  - SAVE: запись в папку «Загрузки»: через MediaStore на Android 10+ (без разрешений), напрямую в папку на Android 5-9
+ *    (разрешение WRITE_EXTERNAL_STORAGE; на Android 6-9 запрашивается при первом сохранении);
  *  - STAGE: временный файл в cache/share/ для системного меню «Поделиться» (через FileProvider).
  * Страница режет Blob на куски по ~3 МБ (native-shell.js), поэтому архив любого размера не лежит в памяти целиком.
  * Все методы вызываются из потока моста WebView (не из главного), блокирующая запись допустима.
@@ -79,24 +86,60 @@ class FileSaver(private val context: Context) {
         return try {
             val name = sanitizeName(rawName)
             val mime = mimeForName(name)
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, name)
-                put(MediaStore.Downloads.MIME_TYPE, mime)
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                put(MediaStore.Downloads.IS_PENDING, 1)
-            }
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return ""
-            val out = resolver.openOutputStream(uri)
-            if (out == null) {
-                resolver.delete(uri, null, null)
-                return ""
-            }
-            val id = "s" + counter.incrementAndGet()
-            sessions[id] = Session(Mode.SAVE, name, mime, out.buffered(1 shl 16), uri, null)
-            id
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) beginSaveMediaStore(name, mime) else beginSaveLegacy(name, mime)
         } catch (e: Exception) {
             ""
         }
+    }
+
+    /** Android 10+: запись через MediaStore, разрешений не нужно. */
+    private fun beginSaveMediaStore(name: String, mime: String): String {
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, name)
+            put(MediaStore.Downloads.MIME_TYPE, mime)
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return ""
+        val out = resolver.openOutputStream(uri)
+        if (out == null) {
+            resolver.delete(uri, null, null)
+            return ""
+        }
+        val id = "s" + counter.incrementAndGet()
+        sessions[id] = Session(Mode.SAVE, name, mime, out.buffered(1 shl 16), uri, null)
+        return id
+    }
+
+    /**
+     * Android 5-9: файл создаётся прямо в общей папке «Загрузки». На 6-9 сначала нужно разрешение на запись
+     * (на 5.x выдаётся при установке). Вызывается из потока моста: ожидание ответа пользователя блокирует только его.
+     */
+    private fun beginSaveLegacy(name: String, mime: String): String {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted && MainActivity.instance?.requestStoragePermissionBlocking() != true) return ""
+        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        if (!dir.isDirectory && !dir.mkdirs()) return ""
+        val file = createUniqueFile(dir, name) ?: return ""
+        val out = FileOutputStream(file).buffered(1 shl 16)
+        val id = "s" + counter.incrementAndGet()
+        sessions[id] = Session(Mode.SAVE, file.name, mime, out, null, file)
+        return id
+    }
+
+    /** Свободное имя в папке: «имя.ext», затем «имя (1).ext», «имя (2).ext» (как делает MediaStore). */
+    private fun createUniqueFile(dir: File, name: String): File? {
+        val ext = name.substringAfterLast('.', "")
+        val base = if (ext.isEmpty()) name else name.substringBeforeLast('.')
+        var n = 0
+        while (n < 1000) {
+            val candidate = if (n == 0) name else if (ext.isEmpty()) "$base ($n)" else "$base ($n).$ext"
+            val file = File(dir, candidate)
+            if (file.createNewFile()) return file
+            n++
+        }
+        return null
     }
 
     /** Начало подготовки файла для «Поделиться». Возвращает идентификатор сессии или "" при ошибке. */
@@ -137,10 +180,21 @@ class FileSaver(private val context: Context) {
             session.out.close()
             when (session.mode) {
                 Mode.SAVE -> {
-                    val uri = session.uri!!
-                    val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
-                    resolver.update(uri, done, null, null)
-                    JSONObject().put("ok", true).put("name", savedName(uri) ?: session.name).put("bytes", session.bytes).toString()
+                    val uri = session.uri
+                    if (uri != null) {
+                        val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
+                        resolver.update(uri, done, null, null)
+                        JSONObject().put("ok", true).put("name", savedName(uri) ?: session.name).put("bytes", session.bytes).toString()
+                    } else {
+                        // Android 5-9: файл лежит в «Загрузках»; сообщаем медиасканеру, чтобы он появился в файловых менеджерах.
+                        val saved = session.file!!
+                        try {
+                            MediaScannerConnection.scanFile(context, arrayOf(saved.absolutePath), arrayOf(session.mime), null)
+                        } catch (e: Exception) {
+                            // файл уже записан; появится в списках позже
+                        }
+                        JSONObject().put("ok", true).put("name", saved.name).put("bytes", session.bytes).toString()
+                    }
                 }
                 Mode.STAGE -> {
                     synchronized(staged) { staged.add(Pair(session.file!!, session.mime)) }
@@ -232,7 +286,10 @@ class FileSaver(private val context: Context) {
     private fun discard(session: Session) {
         try {
             if (session.uri != null) resolver.delete(session.uri, null, null)
-            if (session.file != null) deleteQuietly(session.file)
+            if (session.file != null) {
+                // В «Загрузках» (Android 5-9) удаляем только сам файл: папку «Загрузки» трогать нельзя.
+                if (session.mode == Mode.STAGE) deleteQuietly(session.file) else session.file.delete()
+            }
         } catch (e: Exception) {
             // не критично
         }

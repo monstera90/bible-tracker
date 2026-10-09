@@ -3,6 +3,7 @@ package com.app.lifetracker
 import android.graphics.Color
 import android.os.Build
 import android.webkit.JavascriptInterface
+import androidx.core.content.pm.PackageInfoCompat
 import org.json.JSONObject
 
 /**
@@ -30,7 +31,7 @@ class NativeBridge(private val activity: MainActivity) {
             JSONObject()
                 .put("shell", "kotlin")
                 .put("versionName", info.versionName ?: "")
-                .put("versionCode", info.longVersionCode)
+                .put("versionCode", PackageInfoCompat.getLongVersionCode(info))
                 .put("sdk", Build.VERSION.SDK_INT)
                 .put("bridgeVersion", BRIDGE_VERSION)
                 .toString()
@@ -235,7 +236,7 @@ class NativeBridge(private val activity: MainActivity) {
                 .put("permission", granted)
                 .put("canRequest", Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !runtimeGranted)
                 .put("exactAlarm", ReminderScheduler.canScheduleExact(ctx))
-                .put("batteryIgnored", power.isIgnoringBatteryOptimizations(ctx.packageName))
+                .put("batteryIgnored", Build.VERSION.SDK_INT < Build.VERSION_CODES.M || power.isIgnoringBatteryOptimizations(ctx.packageName))
                 .put("reminders", reminders.size)
                 .put("nextAt", next)
                 .put("watching", NotifyStore.getWatch(ctx) != null)

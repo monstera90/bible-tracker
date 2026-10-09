@@ -36,7 +36,7 @@ object GroupWatcher {
     private fun pollIntent(ctx: Context): PendingIntent {
         val intent = Intent(ctx, NotifyReceiver::class.java).setAction(NotifyReceiver.ACTION_POLL)
         return PendingIntent.getBroadcast(
-            ctx, REQUEST_POLL, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            ctx, REQUEST_POLL, intent, Compat.pendingFlags()
         )
     }
 

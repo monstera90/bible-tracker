@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.net.Uri
 import android.provider.Settings
 import android.os.Build
@@ -16,6 +17,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.Toast
 import android.webkit.PermissionRequest
 import android.webkit.RenderProcessGoneDetail
@@ -35,8 +37,11 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.webkit.WebViewCompat
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -67,6 +72,10 @@ class MainActivity : ComponentActivity() {
         // Сторож live-update: если пробная версия веб-части не подтвердила запуск (appReady) за это время после
         // загрузки страницы, откатываемся сразу, а не при следующем запуске.
         private const val TRIAL_TIMEOUT_MS = 30_000L
+
+        // Веб-часть использует OPFS (navigator.storage.getDirectory, Chrome 86+): на более старом WebView хранилище не заработает.
+        // На Android 5.0-7.x WebView обновляется через Google Play («Android System WebView» / Chrome).
+        private const val MIN_WEBVIEW_MAJOR = 86
     }
 
     private lateinit var server: WebAssetServer
@@ -131,6 +140,19 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+    // Android 6-9: разрешение на запись в «Загрузки» (FileSaver ждёт ответ в потоке моста, см. requestStoragePermissionBlocking).
+    @Volatile
+    private var storageLatch: CountDownLatch? = null
+
+    @Volatile
+    private var storageGranted = false
+
+    private val storagePermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            storageGranted = granted
+            storageLatch?.countDown()
+        }
+
     // Шаг 5: системный запрос разрешения на уведомления (Android 13+); ответ уходит странице.
     private val notifyPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -145,6 +167,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         instance = this
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        setupLegacySystemBars()
 
         fileSaver = FileSaver(applicationContext)
         fileSaver.cleanStale()
@@ -176,6 +199,7 @@ class MainActivity : ComponentActivity() {
         handleShareIntent(intent)
         webView.loadUrl(if (intent?.action == ACTION_DIAG) WebAssetServer.DIAG_URL else WebAssetServer.START_URL)
         webUpdater.checkInBackground()
+        warnIfWebViewTooOld()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -228,9 +252,48 @@ class MainActivity : ComponentActivity() {
 
     /** Вызывается мостом (в главном потоке): цвет полосы статус-бара и светлые/тёмные значки по яркости цвета. */
     fun applyStatusBarColor(color: Int) {
-        statusStrip.setBackgroundColor(color)
+        var shown = color
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            // Android 5.x: тёмных значков строки состояния нет, они всегда белые. На светлой шапке их не видно,
+            // поэтому полосу чуть затемняем, пока значки не станут читаемыми.
+            var guard = 0
+            while (ColorUtils.calculateLuminance(shown) > 0.5 && guard++ < 10) {
+                shown = ColorUtils.blendARGB(shown, Color.BLACK, 0.25f)
+            }
+        }
+        statusStrip.setBackgroundColor(shown)
         WindowCompat.getInsetsController(window, root).isAppearanceLightStatusBars =
-            ColorUtils.calculateLuminance(color) > 0.5
+            ColorUtils.calculateLuminance(shown) > 0.5
+    }
+
+    /**
+     * Android 5.0-9: системные панели по умолчанию закрашены (тема DeviceDefault), и наши полосы под ними не видны.
+     * Делаем строку состояния прозрачной, чтобы был виден цвет шапки страницы. Панель навигации: на Android 8-9 тоже
+     * прозрачная (значки темнеют через isAppearanceLightNavigationBars), на 5.0-7.1 тёмных значков нет — остаётся чёрной.
+     * На Android 10+ ничего не меняем: там поведение прежнее (тема values-v29).
+     */
+    private fun setupLegacySystemBars() {
+        val sdk = Build.VERSION.SDK_INT
+        if (sdk >= Build.VERSION_CODES.Q) return
+        window.clearFlags(
+            WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS or WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION
+        )
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = if (sdk >= Build.VERSION_CODES.O) Color.TRANSPARENT else Color.BLACK
+    }
+
+    /** Предупреждение, если установленный WebView старее нужного (на Android 5-7 его обновляют через Google Play). */
+    private fun warnIfWebViewTooOld() {
+        try {
+            val name = WebViewCompat.getCurrentWebViewPackage(this)?.versionName ?: return
+            val major = name.substringBefore('.').toIntOrNull() ?: return
+            if (major < MIN_WEBVIEW_MAJOR) {
+                toast("Системный WebView устарел (версия $major, нужна $MIN_WEBVIEW_MAJOR+). Обновите «Android System WebView» в Google Play, иначе часть функций не заработает.")
+            }
+        } catch (e: Exception) {
+            // версию не определить: молчим
+        }
     }
 
     /**
@@ -280,6 +343,35 @@ class MainActivity : ComponentActivity() {
         runOnUiThread { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
     }
 
+    /**
+     * Android 6-9: запрос разрешения на запись в «Загрузки» из потока моста WebView (не из главного: он ждёт ответа).
+     * Возвращает true, если разрешение есть. Синхронизирован: параллельные сохранения ждут один и тот же запрос.
+     */
+    @Synchronized
+    fun requestStoragePermissionBlocking(): Boolean {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+            return true
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) return false
+        val latch = CountDownLatch(1)
+        storageLatch = latch
+        storageGranted = false
+        runOnUiThread {
+            try {
+                storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            } catch (e: Exception) {
+                latch.countDown()
+            }
+        }
+        try {
+            latch.await(120, TimeUnit.SECONDS)
+        } catch (e: InterruptedException) {
+            // ответа нет
+        }
+        storageLatch = null
+        return storageGranted
+    }
+
     /** Запуск системного меню (выбор приложения для «Поделиться») из любого потока. */
     fun startChooser(intent: Intent): Boolean {
         runOnUiThread {
@@ -312,6 +404,11 @@ class MainActivity : ComponentActivity() {
 
     /** Настройки уведомлений приложения (если разрешение выключено и системный запрос уже не показывается). */
     fun openNotifySettings() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            // Отдельного экрана уведомлений приложения до Android 8.0 нет: открываем сведения о приложении.
+            openAppDetails()
+            return
+        }
         try {
             startActivity(
                 Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
@@ -337,7 +434,10 @@ class MainActivity : ComponentActivity() {
                 )
             )
         }
-        candidates.add(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        // Список оптимизации батареи появился в Android 6.0; на 5.x остаются автозапуск (Xiaomi) и сведения о приложении.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            candidates.add(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
         for (candidate in candidates) {
             try {
                 startActivity(candidate)
@@ -495,12 +595,13 @@ class MainActivity : ComponentActivity() {
                 return if (request == null) null else server.intercept(request.url)
             }
 
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val uri = request?.url ?: return true
-                if (server.isAppUrl(uri)) return false
-                openExternal(uri)
-                return true
-            }
+            // Android 7.0+ вызывает вариант с WebResourceRequest, Android 5.0-6.0 — только вариант со строкой.
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean =
+                handleUrlLoading(request?.url)
+
+            @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
+            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean =
+                handleUrlLoading(if (url == null) null else Uri.parse(url))
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 pageTrusted = url != null && server.isAppUrl(Uri.parse(url))
@@ -570,6 +671,14 @@ class MainActivity : ComponentActivity() {
                 if (request != null && request == pendingPermission) pendingPermission = null
             }
         }
+    }
+
+    /** true: переход перехвачен (внешняя ссылка ушла в другое приложение); false: страницу приложения грузит сам WebView. */
+    private fun handleUrlLoading(uri: Uri?): Boolean {
+        if (uri == null) return true
+        if (server.isAppUrl(uri)) return false
+        openExternal(uri)
+        return true
     }
 
     /** Внешние ссылки и диплинки (JW Library, YouTube, почта и т.п.) открываются во внешнем приложении. */

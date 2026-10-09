@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import java.text.SimpleDateFormat
@@ -39,6 +40,8 @@ object NotifyHelper {
     fun enabled(ctx: Context): Boolean = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
 
     private fun ensureChannels(ctx: Context) {
+        // Каналы уведомлений появились в Android 8.0; на 5.0-7.1 звук, вибрацию и важность задаёт сам Builder.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (nm.getNotificationChannel(CHANNEL_REMINDERS) == null) {
             val ch = NotificationChannel(CHANNEL_REMINDERS, "Напоминания о задачах", NotificationManager.IMPORTANCE_HIGH)
@@ -75,7 +78,7 @@ object NotifyHelper {
         }
         return PendingIntent.getActivity(
             ctx, ("open$kind$taskId").hashCode(), intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            Compat.pendingFlags()
         )
     }
 
@@ -88,7 +91,7 @@ object NotifyHelper {
         }
         return PendingIntent.getBroadcast(
             ctx, (action + taskId).hashCode(), intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            Compat.pendingFlags()
         )
     }
 

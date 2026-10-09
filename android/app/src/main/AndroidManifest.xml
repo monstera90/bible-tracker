@@ -13,6 +13,10 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Android 5-9 (minSdk 21): сохранение в «Загрузки» без MediaStore; на Android 10+ разрешение не нужно и не запрашивается. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
     <!-- Заготовка под будущее (ТЗ, раздел 5; без реализации): foreground service для секундомера/таймера/записи с уведомлением
          в шторке. Начиная с Android 14 у такого сервиса обязателен тип; для таймера и секундомера подходит "specialUse".
          Когда понадобится: объявить <service android:name=".TimerService" android:foregroundServiceType="specialUse" ...>

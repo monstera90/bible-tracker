@@ -18,8 +18,9 @@ android {
     defaultConfig {
         // appId после первой установки не менять.
         applicationId = "com.app.lifetracker"
-        // 29 = Android 10: хранилище через MediaStore без устаревших разрешений. Оба телефона на Android 16.
-        minSdk = 29
+        // 21 = Android 5.0. На Android 10+ файлы в «Загрузки» пишутся через MediaStore без разрешений, на Android 5-9 —
+        // напрямую в папку «Загрузки» (разрешение WRITE_EXTERNAL_STORAGE, см. FileSaver). Версии ниже 26/23/21 учтены в коде.
+        minSdk = 21
         targetSdk = 36
         versionCode = ltVersionCode
         versionName = ltVersionName

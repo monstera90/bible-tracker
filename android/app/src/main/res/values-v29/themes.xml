@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 10+: полный набор (как было до перехода на minSdk 21). -->
+    <style name="Theme.LifeTracker" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_bg</item>
+        <!-- Не затемнять страницу принудительно: у приложения свои темы. -->
+        <item name="android:forceDarkAllowed">false</item>
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

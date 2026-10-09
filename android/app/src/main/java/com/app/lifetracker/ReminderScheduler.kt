@@ -19,7 +19,7 @@ object ReminderScheduler {
     private fun alarmIntent(ctx: Context): PendingIntent {
         val intent = Intent(ctx, NotifyReceiver::class.java).setAction(NotifyReceiver.ACTION_ALARM)
         return PendingIntent.getBroadcast(
-            ctx, REQUEST_ALARM, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            ctx, REQUEST_ALARM, intent, Compat.pendingFlags()
         )
     }
 
@@ -32,6 +32,11 @@ object ReminderScheduler {
     /** Ставит будильник на момент at (точный, если разрешено; иначе неточный, но тоже в режиме Doze). */
     fun setAlarm(ctx: Context, pending: PendingIntent, at: Long) {
         val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            // Android 5.x: режима Doze и методов *AllowWhileIdle ещё нет; set() с API 19 неточный, поэтому setExact().
+            am.setExact(AlarmManager.RTC_WAKEUP, at, pending)
+            return
+        }
         try {
             if (canScheduleExact(ctx)) {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
