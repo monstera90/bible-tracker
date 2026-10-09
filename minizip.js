@@ -11,9 +11,9 @@
    только ЧИТАТЬ один конкретный файл из архива, не писать zip) значительно
    надёжнее сделать самим.
 
-   Используется нативный браузерный DecompressionStream('deflate-raw') -
-   поддерживается в Chrome/Android из коробки, распаковка без сторонних
-   библиотек.
+   Используется нативный браузерный DecompressionStream('deflate-raw'), а
+   если его нет (Chrome/WebView до 103) - самописный inflate из
+   minideflate.js (подключается в index.html раньше этого файла).
    =========================================================================== */
 
 (function (global) {
@@ -102,7 +102,11 @@
       return compressedData;
     }
     if (entry.compressionMethod === 8) {
-      // DEFLATE - распаковываем через нативный DecompressionStream
+      // DEFLATE - нативный DecompressionStream("deflate-raw") (Chrome 103+),
+      // а в старых WebView (например 95) - самописный inflate из minideflate.js
+      if (global.MiniDeflate) {
+        return global.MiniDeflate.inflateRaw(compressedData, entry.uncompressedSize);
+      }
       const ds = new DecompressionStream("deflate-raw");
       const writer = ds.writable.getWriter();
       writer.write(compressedData);

@@ -10,7 +10,8 @@
      подгружается лениво, только при первом открытии вкладки, по тому же
      принципу, что loadQrLib/loadJsqrLib в my.js.
    - ZIP: свой читатель (STORED и DEFLATE) и писатель (со сжатием DEFLATE
-     через CompressionStream, с откатом на STORED, если API недоступно) —
+     через CompressionStream, а если формата deflate-raw нет (WebView до
+     103) - через самописный сжиматель из minideflate.js) —
      отдельно от buildZipBlob в my.js, чтобы не трогать существующий код.
    - "Снимок по устройствам" для защиты от повторного появления удалённых
      заметок хранится в localStorage (браузерный аналог отдельного
@@ -122,9 +123,9 @@ window.initJwlMergeModule = function(deps){
     if(entry.method === 0){
       return Promise.resolve(compBytes);
     }
-    if(entry.method === 8 && typeof DecompressionStream !== "undefined"){
-      var stream = new Response(compBytes).body.pipeThrough(new DecompressionStream("deflate-raw"));
-      return new Response(stream).arrayBuffer().then(function(buf){ return new Uint8Array(buf); });
+    if(entry.method === 8){
+      // нативный поток или (в WebView до 103) самописный inflate из minideflate.js
+      return window.MiniDeflate.inflateRaw(compBytes, entry.uncompSize);
     }
     return Promise.reject(new Error("unsupported_zip_method_" + entry.method));
   }
@@ -152,11 +153,9 @@ window.initJwlMergeModule = function(deps){
   // крупнее, но по структуре всё равно корректный ZIP).
 
   function deflateRawIfPossible(bytes){
-    if(typeof CompressionStream === "undefined") return Promise.resolve({method:0, data:bytes});
-    var stream = new Response(bytes).body.pipeThrough(new CompressionStream("deflate-raw"));
-    return new Response(stream).arrayBuffer().then(function(buf){
-      return {method:8, data:new Uint8Array(buf)};
-    });
+    // нативный CompressionStream или (в WebView до 103) самописный deflate из
+    // minideflate.js; метод 0 вернётся только если сжатие не дало выигрыша
+    return window.MiniDeflate.deflateRaw(bytes);
   }
 
   function buildZipLocalAndCentral(name, uncompBytes, compResult, offset){

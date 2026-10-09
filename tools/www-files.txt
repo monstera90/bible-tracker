@@ -24,6 +24,7 @@ syncengine_personalcrypto.js
 syncengine_personalbinding.js
 my.js
 mood.js
+minideflate.js
 minizip.js
 minixlsx.js
 docxparse.js

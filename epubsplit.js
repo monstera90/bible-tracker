@@ -72,9 +72,9 @@ window.initEpubSplitModule = function(deps){
     var dataStart = entry.localOffset + 30 + lNameLen + lExtraLen;
     var compBytes = bytes.subarray(dataStart, dataStart + entry.compSize);
     if(entry.method === 0) return Promise.resolve(compBytes);
-    if(entry.method === 8 && typeof DecompressionStream !== "undefined"){
-      var stream = new Response(compBytes).body.pipeThrough(new DecompressionStream("deflate-raw"));
-      return new Response(stream).arrayBuffer().then(function(buf){ return new Uint8Array(buf); });
+    if(entry.method === 8){
+      // нативный поток или (в WebView до 103) самописный inflate из minideflate.js
+      return window.MiniDeflate.inflateRaw(compBytes, entry.uncompSize);
     }
     return Promise.reject(new Error("Неподдерживаемый метод сжатия внутри .epub (" + entry.method + ")"));
   }

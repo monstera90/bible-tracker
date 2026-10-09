@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 3.2 (09.10) — подключён новый `minideflate.js` (самописные inflate/deflate) ПЕРЕД `minizip.js`: в Android WebView 95 нет `DecompressionStream("deflate-raw")` (он с Chrome 103), и без запасного варианта не открывались zip-файлы (.docx/.epub/.jwlibrary/бэкапы). `minizip.js`, `jwlmerge.js`, `epubsplit.js` переведены на `MiniDeflate`.
      Версия: 3.1 (07.10) — подключён `native-shell.js` (шаг 4 переезда в APK: нативное скачивание файлов и `navigator.share` в оболочке Android) первым из скриптов, сразу после обработчика ошибок; в браузере файл ничего не делает.
      Версия: 3.0 (30.09) — структурная правка (ТЗ пользователя от 30.09): «Ж» больше не кнопка с попапом — вместо
      `#taskFormatWrap` четыре отдельные обёртки `.task-format-wrap` (`#taskFmtBoldWrap`/`…ItalicWrap`/`…UnderlineWrap`/
@@ -781,6 +782,10 @@ window.addEventListener("error", function(e){
 <script async src="vendor/jsQR.js"></script>
 
 <script src="mood.js"></script>
+<!-- minideflate.js — самописные inflate/deflate на случай, когда в WebView нет
+     DecompressionStream("deflate-raw") (Chrome < 103); должен идти ДО
+     minizip.js, jwlmerge.js и epubsplit.js. -->
+<script src="minideflate.js"></script>
 <script src="minizip.js"></script>
 <script src="minixlsx.js"></script>
 <script src="docxparse.js"></script>
