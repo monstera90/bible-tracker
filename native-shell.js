@@ -1,5 +1,8 @@
 /* ===========================================================================
    native-shell.js
+   Версия: 1.2 (09.10) — добавлена эмуляция navigator.virtualKeyboard (раздел 4): в WebView этого API нет, поэтому подъём
+   текста задачи/заметки над клавиатурой (initTaskKeyboardLift в my.js) в APK не включался. Нужен APK с мостом версии 4
+   (setKeyboardOverlay); на старом APK ничего не меняется.
    Версия: 1.1 (07.10) — шаг 5 переезда в APK: добавлен window.LTNotify — обёртка над нативными уведомлениями
    (напоминания о задачах и уведомление о новой общей задаче работают и при закрытом приложении, их показывает
    оболочка: будильник + фоновая проверка группы). Пользуются notifications.js и my.js; на старом APK (без мостовых
@@ -296,6 +299,73 @@
     scheduleTestReminder: function (seconds) { try { return !!N.scheduleTestReminder(seconds | 0); } catch (e) { return false; } },
     runGroupPollNow: function () { try { return !!N.runGroupPollNow(); } catch (e) { return false; } }
   };
+
+  // ---------------------------------------------------------------------------
+  // 4. Клавиатура поверх страницы: эмуляция navigator.virtualKeyboard
+  // ---------------------------------------------------------------------------
+  // В Chrome my.js, notifications.js и плашки подтверждения берут высоту клавиатуры из navigator.virtualKeyboard
+  // (boundingRect, событие geometrychange, флаг overlaysContent). В WebView этого API нет (или он не работает), поэтому
+  // подставляем свой объект с теми же свойствами: overlaysContent уходит в оболочку (WebView перестаёт сжиматься
+  // клавиатурой), а высоту клавиатуры оболочка присылает в window.__ltOnKeyboard(cssPx). Остальной код менять не нужно.
+  // Ставим только если мост умеет setKeyboardOverlay (APK с мостом версии 4); иначе всё как было.
+
+  if (has("setKeyboardOverlay")) {
+    (function () {
+      var kbHeight = 0;
+      var overlays = false;
+      var listeners = [];
+
+      function rect() {
+        var h = Math.max(0, kbHeight);
+        var top = window.innerHeight - h;
+        var w = window.innerWidth;
+        // как у Chrome: пока клавиатуры нет или режим «поверх» выключен, высота 0
+        if (!overlays || h <= 0) return { x: 0, y: 0, top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0 };
+        return { x: 0, y: top, top: top, left: 0, bottom: top + h, right: w, width: w, height: h };
+      }
+      function fire() {
+        var ev;
+        try { ev = new Event("geometrychange"); } catch (e) { ev = null; }
+        listeners.slice().forEach(function (cb) {
+          try { cb.call(shim, ev); } catch (e2) {}
+        });
+      }
+
+      var shim = {
+        get boundingRect() { return rect(); },
+        get overlaysContent() { return overlays; },
+        set overlaysContent(v) {
+          v = !!v;
+          if (v === overlays) return;
+          overlays = v;
+          try { N.setKeyboardOverlay(v); } catch (e) {}
+          if (!v) { kbHeight = 0; fire(); }
+        },
+        show: function () {},
+        hide: function () {},
+        addEventListener: function (type, cb) {
+          if (type === "geometrychange" && typeof cb === "function" && listeners.indexOf(cb) < 0) listeners.push(cb);
+        },
+        removeEventListener: function (type, cb) {
+          var i = listeners.indexOf(cb);
+          if (type === "geometrychange" && i >= 0) listeners.splice(i, 1);
+        }
+      };
+
+      window.__ltOnKeyboard = function (cssPx) {
+        var h = Math.max(0, Number(cssPx) || 0);
+        if (h === kbHeight) return;
+        kbHeight = h;
+        fire();
+      };
+
+      try {
+        Object.defineProperty(navigator, "virtualKeyboard", { value: shim, configurable: true });
+      } catch (e) {
+        logDebug("не удалось подставить navigator.virtualKeyboard: " + (e && e.message ? e.message : e));
+      }
+    })();
+  }
 
   // Для страницы диагностики и будущих шагов.
   window.LifeTrackerShell = {

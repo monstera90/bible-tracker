@@ -38,6 +38,7 @@ import androidx.core.view.WindowInsetsCompat
 import org.json.JSONObject
 import java.io.File
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * Единственный экран: WebView с веб-частью приложения (https://localhost).
@@ -81,6 +82,20 @@ class MainActivity : ComponentActivity() {
     /** Полноэкранный режим включён страницей (шаг 4); восстанавливается при возврате фокуса окну. */
     @Volatile
     private var fullscreen = false
+
+    /**
+     * Клавиатура «поверх страницы» (аналог navigator.virtualKeyboard.overlaysContent из Chrome). Включает страница на время
+     * ввода в задачу/комментарий/заметку (native-shell.js, setKeyboardOverlay): WebView при этом НЕ сжимается клавиатурой,
+     * вкладки остаются на местах, а страница сама поднимает текст над клавиатурой (initTaskKeyboardLift в my.js) по высоте,
+     * которую сообщает оболочка (window.__ltOnKeyboard). Выключено — как раньше: WebView сжимается до верха клавиатуры.
+     */
+    @Volatile
+    private var keyboardOverlay = false
+
+    /** Последняя высота клавиатуры, отправленная странице (CSS-пиксели), и отложенная отправка (склейка кадров анимации). */
+    private var sentKeyboardCssPx = 0
+    private var pendingKeyboardCssPx = 0
+    private val keyboardPush = Runnable { pushKeyboardHeight(pendingKeyboardCssPx) }
 
     private val handler = Handler(Looper.getMainLooper())
     private var trialWatchdogStarted = false
@@ -199,6 +214,7 @@ class MainActivity : ComponentActivity() {
         if (instance === this) instance = null
         NotifyStore.appForeground = false
         handler.removeCallbacks(trialWatchdog)
+        handler.removeCallbacks(keyboardPush)
         fileSaver.cancelAll()
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.destroy()
@@ -228,6 +244,24 @@ class MainActivity : ComponentActivity() {
         }
         // Высота полосы зависит от флага fullscreen: пересчитываем сразу, не дожидаясь смены панелей.
         ViewCompat.requestApplyInsets(root)
+    }
+
+    /**
+     * Вызывается мостом (в главном потоке): страница включает/выключает режим «клавиатура поверх страницы».
+     * Нижняя полоса пересчитывается сразу: при включении она перестаёт расти вместе с клавиатурой.
+     */
+    fun applyKeyboardOverlay(enabled: Boolean) {
+        if (keyboardOverlay == enabled) return
+        keyboardOverlay = enabled
+        ViewCompat.requestApplyInsets(root)
+    }
+
+    /** Отправляет странице высоту клавиатуры над нижним краем WebView (CSS-пиксели; 0 — клавиатуры нет или она сжимает WebView). */
+    private fun pushKeyboardHeight(cssPx: Int) {
+        if (cssPx == sentKeyboardCssPx) return
+        sentKeyboardCssPx = cssPx
+        if (isDestroyed || !pageTrusted) return
+        webView.evaluateJavascript("window.__ltOnKeyboard && window.__ltOnKeyboard($cssPx)", null)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -407,7 +441,18 @@ class MainActivity : ComponentActivity() {
             // В полноэкранном режиме верхняя полоса не нужна совсем: иначе под вырезом камеры остаётся
             // цветная полоса высотой с вырез (режим выреза shortEdges позволяет странице занять и его).
             setStripHeight(statusStrip, if (fullscreen) 0 else bars.top)
-            setStripHeight(navStrip, max(bars.bottom, ime.bottom))
+            // Обычный режим: WebView сжимается до верха клавиатуры. Режим «поверх страницы» (вводит текст задачи/заметки):
+            // WebView не сжимается, клавиатура перекрывает его низ, а страница получает её высоту и поднимает текст сама.
+            val overlay = keyboardOverlay
+            setStripHeight(navStrip, if (overlay) bars.bottom else max(bars.bottom, ime.bottom))
+            val kbPx = if (overlay) max(0, ime.bottom - bars.bottom) else 0
+            val kbCss = (kbPx / resources.displayMetrics.density).roundToInt()
+            if (kbCss != pendingKeyboardCssPx) {
+                pendingKeyboardCssPx = kbCss
+                // Анимация клавиатуры даёт значение на каждый кадр: отправляем итоговое, когда оно перестало меняться.
+                handler.removeCallbacks(keyboardPush)
+                handler.postDelayed(keyboardPush, if (kbCss == 0) 0L else 40L)
+            }
             WindowInsetsCompat.CONSUMED
         }
 
@@ -454,6 +499,14 @@ class MainActivity : ComponentActivity() {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 pageTrusted = url != null && server.isAppUrl(Uri.parse(url))
+                // Страница загружается заново: её состояние клавиатуры сброшено (высота 0, режим «поверх» выключен).
+                handler.removeCallbacks(keyboardPush)
+                pendingKeyboardCssPx = 0
+                sentKeyboardCssPx = 0
+                if (keyboardOverlay) {
+                    keyboardOverlay = false
+                    ViewCompat.requestApplyInsets(root)
+                }
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {

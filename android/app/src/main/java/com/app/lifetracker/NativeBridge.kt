@@ -15,9 +15,10 @@ class NativeBridge(private val activity: MainActivity) {
     companion object {
         /**
          * 1: шаги 2-3 (статус-бар, live-update); 2: шаг 4 (сохранение, «Поделиться», полный экран, приём файлов);
-         * 3: шаг 5 (нативные уведомления: напоминания, общие задачи, будильник, опрос при закрытом приложении).
+         * 3: шаг 5 (нативные уведомления: напоминания, общие задачи, будильник, опрос при закрытом приложении);
+         * 4: клавиатура поверх страницы (setKeyboardOverlay + window.__ltOnKeyboard): текст задачи поднимается над клавиатурой.
          */
-        const val BRIDGE_VERSION = 3
+        const val BRIDGE_VERSION = 4
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -177,6 +178,16 @@ class NativeBridge(private val activity: MainActivity) {
     fun setFullscreen(enabled: Boolean) {
         if (!activity.pageTrusted) return
         activity.runOnUiThread { activity.applyFullscreen(enabled) }
+    }
+
+    /**
+     * Режим «клавиатура поверх страницы» (аналог navigator.virtualKeyboard.overlaysContent): true — WebView не сжимается
+     * клавиатурой, высота клавиатуры приходит странице через window.__ltOnKeyboard(cssPx); false — WebView сжимается, как раньше.
+     */
+    @JavascriptInterface
+    fun setKeyboardOverlay(enabled: Boolean) {
+        if (!activity.pageTrusted) return
+        activity.runOnUiThread { activity.applyKeyboardOverlay(enabled) }
     }
 
     // ===== Шаг 4: приём файлов из «Поделиться» (замена Web Share Target) =====
