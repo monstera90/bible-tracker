@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 57.0 (09.10) — автозакладка книги: периодический таймер раз в 45 с (`AUTO_BOOKMARK_PERIOD_MS`) убран по просьбе пользователя; при выходе (смена вкладки, закрытие окна) закладка ставится ровно на то место, которое сохраняется как позиция чтения (`autoUpdateMainBookmarkOnExit(posOverride)`); `window.__ltOnAppPause` — вызов `flushPendingSyncNow` из оболочки APK при сворачивании (в WebView `visibilitychange` не успевает).
    Версия: 56.1 (08.10) — картинки удаляются вместе с задачей/комментарием: `deleteTaskPermanently`, `deleteCommentPermanently`, `deleteGroupTaskPermanently`, `deleteGroupArchivedTaskPermanently` зовут `MdEditor.deleteImagesOfText(текст)` (mdeditor.js 7.4, автоматическая «корзина сирот» отключена).
    Версия: 56.0 (07.10) — шаг 5 переезда в APK (ПЕРЕЕЗД_В_APK.md): нативные уведомления при закрытом приложении. В модуль уведомлений (`notifications.js` 4.1) теперь передаются `snoozeTask`/`completeTask` (раньше не передавались — кнопки «Готово»/«Завтра» и пузыри отсрочки в карточке ничего не делали) и `getGroupWatch` (`getGroupWatchConfig`: группа, адрес базы, id этого устройства, уже увиденные общие задачи, имена участников — оболочка по ним проверяет новые общие задачи при закрытом приложении). `notifyAboutNewGroupTasks` сначала подмешивает id, о которых оболочка уже уведомила (`LTNotify.takeGroupSeen`), `showGroupTaskSystemNotification` в оболочке показывает уведомление через мост. Приём чужих правок (общих и личных) пересчитывает снимок напоминаний (`Notifications.schedule`). В браузере (PWA) поведение прежнее.
    Версия: 55.0 (07.10) — шаг 4 переезда в APK (ПЕРЕЕЗД_В_APK.md): в нативной оболочке (есть `window.LifeTrackerNative`) полноэкранный режим идёт через мост (`applyStatusBarFullscreen` → `setFullscreen`), цвет строки состояния — прямым вызовом из `syncThemeColorMeta`, приём файла из «Поделиться» — через `pullNativeSharedFiles` (вызывается из `checkForSharedFile`, оболочка дёргает `window.__ltOnNativeShare`). В браузере поведение прежнее. Скачивание файлов и `navigator.share` для оболочки подменяет новый `native-shell.js`, остальной код не менялся.
@@ -4454,6 +4455,12 @@
     if(window.Debug) window.Debug.log("beforeunload");
     flushPendingSyncNow();
   });
+  // APK: оболочка зовёт это из Activity.onPause, до паузы WebView (visibilitychange/pagehide в WebView при
+  // сворачивании могут не успеть сработать, и автозакладка при сворачивании не ставилась).
+  window.__ltOnAppPause = function(){
+    if(window.Debug) window.Debug.log("__ltOnAppPause");
+    flushPendingSyncNow();
+  };
 
   // ⚠️ подстраховка, не зависящая ни от одного unload-события выше — периодический таймер, который
   // досохраняет накопившееся, если по каким-то причинам ни немедленное сохранение, ни один из трёх
@@ -9895,9 +9902,9 @@
        settingsModalOverlay.classList.contains("open")){
       var closingReaderContainer = document.getElementById("settingsTabContent");
       if(closingReaderContainer && closingReaderContainer.querySelector(".book-reader-p, .book-reader-image-wrap")){
-        autoUpdateMainBookmarkOnExit();
-        destroyBookReaderScrollListener();
         var closingBookPos = currentBookReaderPosition(closingReaderContainer);
+        autoUpdateMainBookmarkOnExit(closingBookPos);
+        destroyBookReaderScrollListener();
         if(closingBookPos){
           bookReaderState.restorePosition = closingBookPos;
           bookReaderState.textScrollTop = closingReaderContainer.scrollTop;
@@ -10108,7 +10115,7 @@
           bookReaderState.chaptersScrollTop = leavingReaderContainer.scrollTop;
         } else {
           var leavingBookPos = currentBookReaderPosition(leavingReaderContainer);
-          autoUpdateMainBookmarkOnExit();
+          autoUpdateMainBookmarkOnExit(leavingBookPos);
           if(leavingBookPos){
             bookReaderState.restorePosition = leavingBookPos;
             bookReaderState.textScrollTop = leavingReaderContainer.scrollTop;
@@ -14057,14 +14064,16 @@
   // окна настроек): если у книги включён авторежим — основная закладка (создаётся, если её ещё не было)
   // переезжает на абзац, первый на экране. Вызывается ДО destroyBookReaderScrollListener, пока контейнер
   // ещё показывает текст книги. Молча выходит, если текста на экране нет (режим глав, окно скрыто).
-  function autoUpdateMainBookmarkOnExit(){
+  // posOverride — место, уже вычисленное вызывающим кодом для сохранения позиции чтения
+  // (currentBookReaderPosition): тогда закладка встаёт ровно туда же, где книга откроется в следующий раз.
+  function autoUpdateMainBookmarkOnExit(posOverride){
     if(!bookReaderState || bookReaderState.mode === "chapters") return;
     var hash = bookReaderState.hash;
     if(!isMainBookmarkAuto(hash)) return;
     var container = document.getElementById("settingsTabContent");
     if(!container || !container.offsetHeight) return;
     if(!container.querySelector(".book-reader-p, .book-reader-image-wrap")) return;
-    var pos = firstVisibleBookBlockPosition(container);
+    var pos = posOverride || firstVisibleBookBlockPosition(container);
     if(pos) moveMainBookmarkTo(hash, pos);
   }
   // Приложение уходит из переднего плана (свернули, погасили экран, закрыли вкладку — зовётся из
@@ -14098,22 +14107,8 @@
       if(window.Debug) window.Debug.log("autoBookmarkOnPageHide: ошибка " + (e && e.message));
     }
   }
-  // Периодическая автозакладка: пока книга открыта в авторежиме «А» и приложение на экране, раз в
-  // AUTO_BOOKMARK_PERIOD_MS основная закладка подтягивается на первый видимый абзац. Страховка на
-  // случай, когда ни выход из книги, ни сворачивание не сработали (приложение убито системой,
-  // села батарея, книгу сменили, не выходя). Если место не сменилось — moveMainBookmarkTo ничего
-  // не пишет, так что в покое таймер ничего не стоит.
-  var AUTO_BOOKMARK_PERIOD_MS = 45000;
-  setInterval(function(){
-    try{
-      if(document.visibilityState !== "visible") return;
-      if(!isBookReaderTextOnScreen()) return;
-      if(!isMainBookmarkAuto(bookReaderState.hash)) return;
-      autoUpdateMainBookmarkOnExit();
-    }catch(e){
-      if(window.Debug) window.Debug.log("периодическая автозакладка: ошибка " + (e && e.message));
-    }
-  }, AUTO_BOOKMARK_PERIOD_MS);
+  // Периодической автозакладки (таймер раз в 45 с) больше нет — убрана 09.10 по просьбе пользователя.
+  // Автозакладка срабатывает только при выходе из книги и при сворачивании приложения.
   // Возвращает основную закладку на прежнее место (book:<hash>.prevMain). Текущая основная при этом
   // сама становится «прежней» — повторное нажатие возвращает всё обратно. Вызывается кнопкой на
   // вкладке «Закладки» (mdeditor.js). true — сделано, false — бэкапа нет.

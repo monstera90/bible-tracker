@@ -206,6 +206,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         NotifyStore.appForeground = false
+        // Сворачивание: страница успевает сохранить автозакладку и позицию чтения, пока WebView ещё не на паузе
+        // (visibilitychange в WebView в этот момент может не прийти).
+        if (pageTrusted) {
+            webView.evaluateJavascript("window.__ltOnAppPause && window.__ltOnAppPause()", null)
+        }
         webView.onPause()
         super.onPause()
     }
