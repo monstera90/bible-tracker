@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 57.1 (09.10) — вкладка «ИПКД»: кнопка-скрепка «Заменить публикацию» стоит в общем нижнем ряду ридера сразу справа от «i» (на месте убранной Flibusta), а не отдельно в левом нижнем углу (`bindIpkdReaderExtras`).
    Версия: 57.0 (09.10) — автозакладка книги: периодический таймер раз в 45 с (`AUTO_BOOKMARK_PERIOD_MS`) убран по просьбе пользователя; при выходе (смена вкладки, закрытие окна) закладка ставится ровно на то место, которое сохраняется как позиция чтения (`autoUpdateMainBookmarkOnExit(posOverride)`); `window.__ltOnAppPause` — вызов `flushPendingSyncNow` из оболочки APK при сворачивании (в WebView `visibilitychange` не успевает).
    Версия: 56.1 (08.10) — картинки удаляются вместе с задачей/комментарием: `deleteTaskPermanently`, `deleteCommentPermanently`, `deleteGroupTaskPermanently`, `deleteGroupArchivedTaskPermanently` зовут `MdEditor.deleteImagesOfText(текст)` (mdeditor.js 7.4, автоматическая «корзина сирот» отключена).
    Версия: 56.0 (07.10) — шаг 5 переезда в APK (ПЕРЕЕЗД_В_APK.md): нативные уведомления при закрытом приложении. В модуль уведомлений (`notifications.js` 4.1) теперь передаются `snoozeTask`/`completeTask` (раньше не передавались — кнопки «Готово»/«Завтра» и пузыри отсрочки в карточке ничего не делали) и `getGroupWatch` (`getGroupWatchConfig`: группа, адрес базы, id этого устройства, уже увиденные общие задачи, имена участников — оболочка по ним проверяет новые общие задачи при закрытом приложении). `notifyAboutNewGroupTasks` сначала подмешивает id, о которых оболочка уже уведомила (`LTNotify.takeGroupSeen`), `showGroupTaskSystemNotification` в оболочке показывает уведомление через мост. Приём чужих правок (общих и личных) пересчитывает снимок напоминаний (`Notifications.schedule`). В браузере (PWA) поведение прежнее.
@@ -14763,17 +14764,21 @@
     if(homeBtn) homeBtn.remove();
     var flibustaBtn = document.getElementById("bookReaderFlibustaBtn");
     if(flibustaBtn) flibustaBtn.remove();
-    // Скрепка "заменить публикацию" — левый нижний угол ридера, тот же отступ (7px), что и у общего
-    // ряда справа (components.css, .ipkd-swap-fab).
+    // Скрепка "заменить публикацию" — в общем нижнем ряду, сразу справа от «i» (с 09.10; раньше стояла
+    // отдельно в левом нижнем углу, класс .ipkd-swap-fab в components.css больше не используется).
     var readerTab = container.querySelector(".book-reader-tab");
     if(readerTab){
       var swapBtn = document.createElement("button");
       swapBtn.type = "button";
-      swapBtn.className = "mdeditor-fab-btn ipkd-swap-fab";
+      swapBtn.className = "mdeditor-fab-btn";
       swapBtn.id = "ipkdSwapBtn";
       swapBtn.title = "Заменить публикацию";
       swapBtn.innerHTML = PAPERCLIP_ICON_SVG;
-      readerTab.appendChild(swapBtn);
+      var infoBtn = document.getElementById("bookReaderInfoBtn");
+      var fabRow = infoBtn ? infoBtn.parentNode : container.querySelector(".mdeditor-fab-row");
+      if(infoBtn && fabRow) fabRow.insertBefore(swapBtn, infoBtn.nextSibling);
+      else if(fabRow) fabRow.insertBefore(swapBtn, fabRow.firstChild);
+      else readerTab.appendChild(swapBtn);
       var input = document.createElement("input");
       input.type = "file";
       input.accept = ".epub";
