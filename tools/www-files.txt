@@ -13,6 +13,7 @@ footer.css
 modals.css
 
 native-shell.js
+opfs-shim.js
 debug.js
 syncengine.js
 syncengine_groupcrypto.js

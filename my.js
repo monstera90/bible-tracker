@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 57.2 (09.10) — реестр экспорта: база IndexedDB `lt_opfs_shim_v1` (запасной OPFS из `opfs-shim.js` 1.0 для WebView без OPFS) внесена в `EXPORT_REGISTRY.indexedDB.excludeNames`, чтобы самопроверка экспорта не считала её «неизвестной». Остальной код не менялся: файлы по-прежнему читаются и пишутся через `navigator.storage.getDirectory()`.
    Версия: 57.1 (09.10) — вкладка «ИПКД»: кнопка-скрепка «Заменить публикацию» стоит в общем нижнем ряду ридера сразу справа от «i» (на месте убранной Flibusta), а не отдельно в левом нижнем углу (`bindIpkdReaderExtras`).
    Версия: 57.0 (09.10) — автозакладка книги: периодический таймер раз в 45 с (`AUTO_BOOKMARK_PERIOD_MS`) убран по просьбе пользователя; при выходе (смена вкладки, закрытие окна) закладка ставится ровно на то место, которое сохраняется как позиция чтения (`autoUpdateMainBookmarkOnExit(posOverride)`); `window.__ltOnAppPause` — вызов `flushPendingSyncNow` из оболочки APK при сворачивании (в WebView `visibilitychange` не успевает).
    Версия: 56.1 (08.10) — картинки удаляются вместе с задачей/комментарием: `deleteTaskPermanently`, `deleteCommentPermanently`, `deleteGroupTaskPermanently`, `deleteGroupArchivedTaskPermanently` зовут `MdEditor.deleteImagesOfText(текст)` (mdeditor.js 7.4, автоматическая «корзина сирот» отключена).
@@ -8111,7 +8112,8 @@
       excludeNames: {
         "bibleNotesDB_v1": "хранит ключи notes:<id> из state; уходят в экспорт внутри rawState",
         "biblePersonalCutoverBackup_v1": "резервная копия технического переключателя",
-        "bibleHyphensDB_v1": "копия bibleHyphens_v1, восстанавливается кодом"
+        "bibleHyphensDB_v1": "копия bibleHyphens_v1, восстанавливается кодом",
+        "lt_opfs_shim_v1": "запасная замена OPFS на старых WebView (opfs-shim.js); файлы уходят в экспорт через обход OPFS (images/, books/)"
       },
       excludePrefixes: {
         "biblePersonalShadow_v1_": "копия state и облака, пересоздаётся (12.5.12, Q21)"

@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.38.54";
+const APP_VERSION = "v0.38.55";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -137,6 +137,7 @@ const ASSETS = [
   "./footer.css",
   "./modals.css",
   "./native-shell.js",
+  "./opfs-shim.js",
   "./debug.js",
   "./syncengine.js",
   "./syncengine_groupcrypto.js",
