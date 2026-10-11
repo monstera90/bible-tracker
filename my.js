@@ -1,6 +1,8 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 57.9 (11.10) — Android 5, место в книге открывалось на главу не там: `scrollBookReaderToPosition` на WebView без `contain-intrinsic-size: auto` (Chrome < 107) перед переходом измеряет реальную высоту шести сегментов выше и трёх ниже цели и закрепляет её инлайн-стилем (раньше соседи «плыли» между настоящей и оценочной высотой); подгонка до 8 кадров с остановкой, когда геометрия устоялась; в журнале «закреплено высот=N».
+
    Версия: 57.8 (11.10) — Android 5, «всегда открывается в одном и том же месте» (вкладка книг и закладки): `scrollBookReaderToPosition` на время перехода отключает якорение прокрутки (`overflow-anchor`), в конце проверяет, что нужный блок на экране, и при промахе зовёт `scrollIntoView`; подробный журнал «восстановление места: …» (цель, scrollTop, scrollHeight, версия Chrome, поддержка `contain-intrinsic-size: auto`, итог).
 
    Версия: 57.7 (11.10) — закладка книги, Android 5 («закладка откатывается на старое место»): (1) `moveMainBookmarkTo`/`restoreBookPrevMain` больше не зовут `Object.assign` (`copyPlainObj`) — на старом WebView перенос основной закладки на 2+ главы падал до записи; (2) `saveBookReaderBookmark` ловит ошибку переноса, пишет её в журнал и показывает в строке состояния ридера («Закладка НЕ сохранена: …»); (3) временная диагностика: журнал переноса закладки (позиции, t записи, Date.now()) и строка «ИЗМЕНЕНИЕ книги … при слиянии» в `doCloudSync`, если облако изменило основную закладку или позицию (видны метки t обеих сторон — для проверки расхождения часов).
@@ -12874,10 +12876,30 @@
     // На время перехода якорение выключаем и в конце проверяем, что нужный блок реально на экране.
     var prevAnchor = container.style.overflowAnchor;
     container.style.overflowAnchor = "none";
+    // 57.9: без ключевого слова `auto` в contain-intrinsic-size (Chrome < 107) браузер не помнит реальную высоту
+    // пропущенного сегмента: отрисованные соседи имеют настоящую высоту, остальные — оценку, и при каждом сдвиге
+    // прокрутки геометрия «плывёт» (место открывалось на главу раньше/позже). Поэтому у сегментов вокруг цели
+    // (шесть выше и три ниже) один раз измеряем реальную высоту и закрепляем её как contain-intrinsic-size — дальше
+    // эти сегменты одной и той же высоты и в отрисованном, и в пропущенном виде.
+    var frozen = 0;
+    if(seg && !(window.CSS && CSS.supports && CSS.supports("contain-intrinsic-size", "auto 0px"))){
+      try{
+        var allSegs = container.querySelectorAll(".book-reader-seg");
+        var sIdx = Array.prototype.indexOf.call(allSegs, seg);
+        for(var fi = Math.max(0, sIdx - 6); sIdx >= 0 && fi <= Math.min(allSegs.length - 1, sIdx + 3); fi++){
+          var fs = allSegs[fi];
+          if(fs.getAttribute("data-imgs") !== "0") continue; // с картинками высота зависит от ленивой загрузки — оставляем оценку
+          fs.style.contentVisibility = "visible";
+          var fh = fs.getBoundingClientRect().height;
+          fs.style.contentVisibility = "";
+          if(fh > 0){ fs.style.containIntrinsicSize = "0px " + (Math.round(fh * 100) / 100) + "px"; frozen++; }
+        }
+      }catch(eFreeze){ if(dbg) dbg.log("восстановление места: ошибка закрепления высот: " + (eFreeze && eFreeze.message)); }
+    }
     var firstTarget = bookElTopInContainer(container, seg || el);
     container.scrollTop = firstTarget;
-    if(dbg) dbg.log("восстановление места: " + posText(position) + ", цель=" + Math.round(firstTarget) + ", scrollTop=" + Math.round(container.scrollTop) + ", scrollHeight=" + container.scrollHeight + ", clientHeight=" + container.clientHeight + ", сегмент " + (seg ? "есть" : "нет") + ", contain-intrinsic auto: " + (window.CSS && CSS.supports && CSS.supports("contain-intrinsic-size", "auto 0px")) + ", " + (navigator.userAgent.match(/Chrome\/[\d.]+/) || ["Chrome ?"])[0]);
-    var tries = 0;
+    if(dbg) dbg.log("восстановление места: " + posText(position) + ", цель=" + Math.round(firstTarget) + ", scrollTop=" + Math.round(container.scrollTop) + ", scrollHeight=" + container.scrollHeight + ", clientHeight=" + container.clientHeight + ", сегмент " + (seg ? "есть" : "нет") + ", закреплено высот=" + frozen + ", contain-intrinsic auto: " + (window.CSS && CSS.supports && CSS.supports("contain-intrinsic-size", "auto 0px")) + ", " + (navigator.userAgent.match(/Chrome\/[\d.]+/) || ["Chrome ?"])[0]);
+    var tries = 0, stableFrames = 0;
     function release(){ container.style.overflowAnchor = prevAnchor; }
     function finalize(){
       if(!el.isConnected){ release(); return; }
@@ -12899,10 +12921,13 @@
       var top = bookElTopInContainer(container, el);
       var segTop = seg ? bookElTopInContainer(container, seg) : top;
       var segH = seg ? seg.getBoundingClientRect().height : 0;
+      var moved = false;
       if(!seg || (top >= segTop - 2 && top <= segTop + segH + 2)){
-        if(Math.abs(top - container.scrollTop) > 1) container.scrollTop = top;
+        if(Math.abs(top - container.scrollTop) > 1){ container.scrollTop = top; moved = true; }
       }
-      if(++tries < 3) requestAnimationFrame(refine);
+      stableFrames = moved ? 0 : stableFrames + 1;
+      // до 8 кадров, но раньше — если два кадра подряд поправок не потребовалось (геометрия устоялась)
+      if(++tries < 8 && stableFrames < 2) requestAnimationFrame(refine);
       else requestAnimationFrame(finalize);
     }
     requestAnimationFrame(refine);
