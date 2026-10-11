@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 57.4 (11.10) — плавающая кнопка и кнопка слева от неё прячутся в режиме чтения/полноэкранном инлайн-стилем (`syncFabsHiddenForReading`); `__ltOnAppResume`/`MdEditor.onAppPause`; поле имени заметки включает режим «клавиатура поверх» (`initTaskKeyboardLift`).
    Версия: 57.3 (11.10) — (1) слияние записей книг `book:<hash>` ПО ПОЛЯМ (`mergeBookRecords` в `mergeStates`): закладки объединяются по id с «надгробиями» `removedBookmarks`, подчёркивания по id, основная закладка одна; раньше запись целиком решала метка t, а t растёт при чтении — закладка с другого устройства затиралась старой копией. (2) Импорт: закладки заметок `__mdBookmark:*` относятся к категориям «Заметки»/«Всё остальное» и получают свежую метку (`importGroupSelected`). (3) `CLOUD_GET_TIMEOUT_MS` = 30 с для чтения облака (было 8 с).
    Версия: 57.2 (09.10) — реестр экспорта: база IndexedDB `lt_opfs_shim_v1` (запасной OPFS из `opfs-shim.js` 1.0 для WebView без OPFS) внесена в `EXPORT_REGISTRY.indexedDB.excludeNames`, чтобы самопроверка экспорта не считала её «неизвестной». Остальной код не менялся: файлы по-прежнему читаются и пишутся через `navigator.storage.getDirectory()`.
    Версия: 57.1 (09.10) — вкладка «ИПКД»: кнопка-скрепка «Заменить публикацию» стоит в общем нижнем ряду ридера сразу справа от «i» (на месте убранной Flibusta), а не отдельно в левом нижнем углу (`bindIpkdReaderExtras`).
@@ -4537,6 +4538,13 @@
   window.__ltOnAppPause = function(){
     if(window.Debug) window.Debug.log("__ltOnAppPause");
     flushPendingSyncNow();
+    // заметка: запомнить прокрутку и сохранить курсор ДО паузы WebView (visibilitychange на Android 16 может не прийти)
+    try{ if(window.MdEditor && MdEditor.onAppPause) MdEditor.onAppPause(); }catch(e){}
+  };
+  // APK: оболочка зовёт это из Activity.onResume — заметка возвращает прокрутку/перерисовку так же, как на visibilitychange.
+  window.__ltOnAppResume = function(){
+    if(window.Debug) window.Debug.log("__ltOnAppResume");
+    try{ if(window.MdEditor && MdEditor.onAppResume) MdEditor.onAppResume(); }catch(e){}
   };
 
   // ⚠️ подстраховка, не зависящая ни от одного unload-события выше — периодический таймер, который
@@ -16633,6 +16641,7 @@
     bindTapOrHold(b, handleReadingBtnTap, handleReadingBtnHold);
     document.body.appendChild(b);
     applyReadingModeVisual();
+    syncFabsHiddenForReading();
   })();
 
   // Ставим язычок-кнопку в угол окна настроек сразу при загрузке страницы (а не только при первом
@@ -18784,6 +18793,27 @@
   // ниже, экран "Все задачи проекта"). Вызывается и при клике по кнопке, и один раз при открытии
   // окна настроек (openSettingsModal ниже) — чтобы состояние, оставшееся с прошлого раза, сразу
   // отражалось в разметке.
+  // Плавающая кнопка (#settingsGearBtn) и кнопка слева от неё (#readingModeFabBtn) прячутся, пока окно настроек
+  // открыто в режиме чтения или полноэкранном (оверлей с классами open + reading-mode-active). Раньше это делали
+  // только CSS-правила `body:has(...)` и `body.lt-reading-open` (класс ставил legacy-webview.js) — на Android 5.0
+  // кнопки оставались поверх всего, в т.ч. поверх нижнего ряда кнопок. Теперь то же делаем прямо инлайн-стилем:
+  // от селекторов и MutationObserver в другом файле это не зависит. visibility, а не display — геометрия кнопок
+  // остаётся измеримой для layoutSettingsModal.
+  function syncFabsHiddenForReading(){
+    var ov = document.getElementById("settingsModalOverlay");
+    var hide = !!(ov && ov.classList.contains("open") && ov.classList.contains("reading-mode-active"));
+    ["settingsGearBtn", "readingModeFabBtn"].forEach(function(id){
+      var b = document.getElementById(id);
+      if(!b) return;
+      b.style.visibility = hide ? "hidden" : "";
+      b.style.pointerEvents = hide ? "none" : "";
+    });
+  }
+  (function watchOverlayForFabs(){
+    var ov = document.getElementById("settingsModalOverlay");
+    if(!ov || typeof MutationObserver !== "function") return;
+    try{ new MutationObserver(syncFabsHiddenForReading).observe(ov, { attributes: true, attributeFilter: ["class"] }); }catch(e){}
+  })();
   function applyReadingModeVisual(){
     var active = getReadingModeActive();
     // ⚠️ третье состояние той же кнопки, см.
@@ -18804,6 +18834,7 @@
     // CSS-причина прятать обычную кнопку в ряду вкладок.
     var readingFab = document.getElementById("readingModeFabBtn");
     if(readingFab) readingFab.style.display = ((active || fullscreenActive) && isSettingsFabVisible()) ? "" : "none";
+    syncFabsHiddenForReading();
     var iconHtml = (fullscreenActive || active) ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG;
     var titleText = fullscreenActive ? "Выйти из полноэкранного режима" : (active ? "Выключить режим чтения" : "Режим чтения");
     // кнопка полноэкранного режима — миниатюра смартфона (залитый экран, пока режим включён)
@@ -21875,6 +21906,10 @@
       return !!(el && el.classList && el.classList.contains("cm-content") && el.closest && el.closest(".mdeditor-editor-host"));
     }
     function isLiftEditable(el){ return isTaskEditable(el) || isNoteEditable(el); }
+    // Поле имени заметки (переименование, mdeditor.js): подъёма текста не нужно (поле вверху), но клавиатура
+    // должна перекрывать страницу, а не сжимать WebView — иначе нижний ряд вкладок подпрыгивает над клавиатурой.
+    function isTitleInput(el){ return !!(el && el.classList && el.classList.contains("mdeditor-title-input")); }
+    var activeTitleInput = null;
     // низ каретки в заметке (px от верха вьюпорта) или 0, если определить нельзя
     function noteCaretBottom(el){
       var sel = window.getSelection();
@@ -21959,6 +21994,12 @@
     }
 
     document.addEventListener("focusin", function(e){
+      if(isTitleInput(e.target)){
+        clearTimeout(releaseTimer);
+        activeTitleInput = e.target;
+        try{ vk.overlaysContent = true; }catch(err){}
+        return;
+      }
       if(!isLiftEditable(e.target)) return;
       clearTimeout(releaseTimer);
       activeEditable = e.target;
@@ -21967,15 +22008,18 @@
       requestAnimationFrame(applyLift);
     });
     document.addEventListener("focusout", function(e){
-      if(!isLiftEditable(e.target)) return;
+      if(!isLiftEditable(e.target) && !isTitleInput(e.target)) return;
       clearTimeout(releaseTimer);
       releaseTimer = setTimeout(function(){
-        if(isLiftEditable(document.activeElement)) return;
+        if(isLiftEditable(document.activeElement) || isTitleInput(document.activeElement)) return;
+        activeTitleInput = null;
         release();
       }, RELEASE_DELAY_MS);
     });
     // клавиатура появилась/исчезла/сменила высоту (в т.ч. переключение раскладки)
     vk.addEventListener("geometrychange", function(){
+      // поле имени убрано из DOM (нажали ✓/×) — blur при удалении элемента приходит не везде
+      if(activeTitleInput && !document.body.contains(activeTitleInput)){ activeTitleInput = null; release(); return; }
       if(activeEditable && !document.body.contains(activeEditable)){ release(); return; }
       if(activeEditable) applyLift();
       else removeSpacer();

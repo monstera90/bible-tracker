@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 7.6 (11.10) — в возвращаемом объекте `onAppPause`/`onAppResume` (сворачивание/возврат из APK без visibilitychange); при возврате без запомненной прокрутки область возвращается к строке с кареткой, а не в начало.
    Версия: 7.5 (11.10) — `replaceAllNotesFromEntries` (импорт категории «Заметки») больше не снимает закладки заметок: раньше каждая закладка заменялась записью {c:false} с текущим временем — она затирала закладки из импортируемого архива и уходила в облако (закладки исчезали на всех устройствах); теперь после замены набор перечитывается из state.
    Версия: 7.4 (08.10) — картинки удаляются вместе с владельцем, автоматической «корзины сирот» больше нет: `maybeRunImageCleanup` ничего не делает (её раньше дёргали старт, сверка заметок и `retryImageCleanup`), новая `deleteImagesOfText(text, excludeNoteId)` стирает картинки `![[имя]]` из текста удалённой задачи/комментария/заметки (если на них нет других ссылок), `deleteNoteRecord(id, withImages)` зовёт её при удалении заметки из списка и папки. Причина: чистка судила по неполному снимку данных и ставила в облаке метку удаления, которая стирала картинку на всех устройствах.
    Версия: 7.3 (03.10) — экран закладок: под основной закладкой книги кнопка «Восстановить предыдущее место, где была закладка» (появляется, если закладка перескочила на 2+ главы; `it.canRestorePrev` из my.js, dep `restoreBookPrevMain`); кнопка стоит внутри строки перед разделителем, зазор до него 2px. Функции не менялись.
@@ -5964,6 +5965,18 @@ window.initMdEditorModule = function(deps){
     if(!editorScreenUp()) return;
     var sc = document.getElementById("settingsTabContent");
     var target = (scrollBeforeHide !== null) ? scrollBeforeHide : (sc ? sc.scrollTop : null);
+    // Прокрутку до сворачивания запомнить не успели (на Android 16 visibilitychange может не прийти), а сейчас
+    // область уже в начале — вместо начала показываем строку с кареткой (до сворачивания пользователь печатал там).
+    if(scrollBeforeHide === null && (target === null || target < 2) && editorIsShown()){
+      try{
+        var head = cmView.state.selection.main.head;
+        var cc = head > 0 ? cmView.coordsAtPos(head) : null;
+        if(cc && sc){
+          var want = sc.scrollTop + (cc.top - sc.getBoundingClientRect().top) - Math.round(sc.clientHeight / 2);
+          if(want > 2) target = want;
+        }
+      }catch(e){}
+    }
     userTouchedSinceResume = false;
     if(window.Debug){
       var host0 = document.getElementById("mdEditorHost");
@@ -6105,6 +6118,13 @@ window.initMdEditorModule = function(deps){
   if(getSyncId()) preloadNotesCache();
 
   return {
+    // APK (MainActivity.onPause/onResume через my.js __ltOnAppPause/__ltOnAppResume): сворачивание/возврат,
+    // не дожидаясь visibilitychange, который в WebView на новых Android приходит не всегда.
+    onAppPause: function(){
+      try{ flushAutosaveNow(); }catch(e){}
+      try{ rememberScrollBeforeHide(); }catch(e){}
+    },
+    onAppResume: function(){ scheduleEditorRepairAfterResume(); },
     renderSettingsTabMdEditor: renderSettingsTabMdEditor,
     renderSettingsTabMdBookmarks: renderSettingsTabMdBookmarks,
     // Кнопка "Сохранить в Мои заметки" вкладки "Извлечение субтитров" (см.

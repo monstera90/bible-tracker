@@ -226,6 +226,10 @@ class MainActivity : ComponentActivity() {
         }
         // Возврат на передний план: проверка обновления веб-части (не чаще раза в 15 минут, внутри WebUpdater).
         webUpdater.checkInBackground()
+        // Страница возвращает прокрутку открытой заметки (visibilitychange на возврате приходит не всегда).
+        if (pageTrusted) {
+            webView.evaluateJavascript("window.__ltOnAppResume && window.__ltOnAppResume()", null)
+        }
     }
 
     override fun onPause() {
