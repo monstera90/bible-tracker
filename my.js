@@ -1,6 +1,8 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 57.11 (11.10) — Android 5, диагностика места в книге: на старом WebView (без `contain-intrinsic-size: auto`) после перехода `scrollBookReaderToPosition` показывает крупный отчёт поверх экрана (`#ltRestoreReport`, тап — закрыть): источник цели, цель и первые слова абзаца, что реально сверху, сохранённая позиция, основная закладка, число глав/сегментов, версия Chrome; через 1.5 с повторная проверка (шрифт/картинки могли сдвинуть блок) и, если человек не листал, возврат блока на место. В `bookReaderState` добавлено поле `restoreSource`.
+
    Версия: 57.10 (11.10) — Android 5, место в книге открывалось не там (по логу оценка высот сегментов врала в 3-4 раза: цель 27420 против ~7307): `scrollBookReaderToPosition` на WebView без `contain-intrinsic-size: auto` перед переходом реально сверстывает все сегменты от начала книги до цели (+3), закрепляет их высоты как `contain-intrinsic-size` и только потом прокручивает (константа `BOOK_EXACT_LAYOUT_MAX_SEGS`=150; глубже — только соседи цели); в журнале «сегмент №… сверстано с … по … за … мс».\n\n   Версия: 57.9 (11.10) — Android 5, место в книге открывалось на главу не там: `scrollBookReaderToPosition` на WebView без `contain-intrinsic-size: auto` (Chrome < 107) перед переходом измеряет реальную высоту шести сегментов выше и трёх ниже цели и закрепляет её инлайн-стилем (раньше соседи «плыли» между настоящей и оценочной высотой); подгонка до 8 кадров с остановкой, когда геометрия устоялась; в журнале «закреплено высот=N».
 
    Версия: 57.8 (11.10) — Android 5, «всегда открывается в одном и том же месте» (вкладка книг и закладки): `scrollBookReaderToPosition` на время перехода отключает якорение прокрутки (`overflow-anchor`), в конце проверяет, что нужный блок на экране, и при промахе зовёт `scrollIntoView`; подробный журнал «восстановление места: …» (цель, scrollTop, scrollHeight, версия Chrome, поддержка `contain-intrinsic-size: auto`, итог).
@@ -12884,7 +12886,12 @@
     // contain-intrinsic-size: пропущенные и отрисованные они теперь одной высоты, геометрия над целью точная. Для
     // очень глубокой позиции (дальше BOOK_EXACT_LAYOUT_MAX_SEGS сегментов) сверстываются только соседи цели (6 выше, 3 ниже).
     var frozen = 0, freezeInfo = "";
-    if(seg && !(window.CSS && CSS.supports && CSS.supports("contain-intrinsic-size", "auto 0px"))){
+    var legacyIntrinsic = !(window.CSS && CSS.supports && CSS.supports("contain-intrinsic-size", "auto 0px"));
+    var userTouched = false;
+    function onUserTouch(){ userTouched = true; }
+    container.addEventListener("touchstart", onUserTouch, {passive: true});
+    container.addEventListener("wheel", onUserTouch, {passive: true});
+    if(seg && legacyIntrinsic){
       try{
         var tF = performance.now();
         var allSegs = container.querySelectorAll(".book-reader-seg");
@@ -12910,6 +12917,38 @@
     if(dbg) dbg.log("восстановление места: " + posText(position) + ", цель=" + Math.round(firstTarget) + ", scrollTop=" + Math.round(container.scrollTop) + ", scrollHeight=" + container.scrollHeight + ", clientHeight=" + container.clientHeight + ", сегмент " + (seg ? "есть" : "нет") + ", закреплено высот=" + frozen + freezeInfo + ", contain-intrinsic auto: " + (window.CSS && CSS.supports && CSS.supports("contain-intrinsic-size", "auto 0px")) + ", " + (navigator.userAgent.match(/Chrome\/[\d.]+/) || ["Chrome ?"])[0]);
     var tries = 0, stableFrames = 0;
     function release(){ container.style.overflowAnchor = prevAnchor; }
+    function restoreReportLines(note){
+      var st = bookReaderState || {};
+      var data = getBookState(st.hash) || {};
+      var main = getMainBookBookmark(st.hash);
+      var topPos = firstVisibleBookBlockPosition(container);
+      var ua = (navigator.userAgent.match(/Chrome\/[\d.]+/) || ["Chrome ?"])[0];
+      return [
+        "МЕСТО В КНИГЕ (диагностика)",
+        "Источник цели: " + (st.restoreSource || "?"),
+        "Цель: " + posText(position) + " «" + bookmarkNameFromPosition(position) + "»",
+        "Сверху сейчас: " + posText(topPos) + " «" + (topPos ? bookmarkNameFromPosition(topPos) : "—") + "»" + (topPos && topPos.ch === position.ch && topPos.blk === position.blk ? "  ✓ совпало" : "  ✗ НЕ совпало"),
+        "Сохранённая позиция чтения: " + posText(data.position),
+        "Основная закладка: " + (main ? posText(main.position) + " «" + (main.name || "") + "»" : "нет"),
+        "Глав в книге: " + (st.chapters ? st.chapters.length : "?") + ", сегментов: " + container.querySelectorAll(".book-reader-seg").length,
+        "scrollTop=" + Math.round(container.scrollTop) + ", scrollHeight=" + container.scrollHeight,
+        ua + ", auto=" + (!legacyIntrinsic) + ", закреплено=" + frozen,
+        note || ""
+      ];
+    }
+    function showRestoreReport(lines){
+      if(!legacyIntrinsic) return; // временная диагностика — только на старом WebView
+      var d = document.getElementById("ltRestoreReport");
+      if(!d){
+        d = document.createElement("div");
+        d.id = "ltRestoreReport";
+        d.style.cssText = "position:fixed;left:6px;right:6px;top:calc(env(safe-area-inset-top, 0px) + 6px);z-index:2147483000;background:rgba(0,0,0,.9);color:#fff;font:15px/1.35 monospace;padding:10px;border-radius:8px;white-space:pre-wrap;word-break:break-word;";
+        d.addEventListener("click", function(){ d.style.display = "none"; });
+        document.body.appendChild(d);
+      }
+      d.textContent = lines.join("\n") + "\n(тап — закрыть)";
+      d.style.display = "block";
+    }
     function finalize(){
       if(!el.isConnected){ release(); return; }
       var r = el.getBoundingClientRect(), cr = container.getBoundingClientRect();
@@ -12919,7 +12958,23 @@
         try{ el.scrollIntoView(true); }catch(e){}
         if(dbg) dbg.log("восстановление места: scrollIntoView → scrollTop=" + Math.round(container.scrollTop));
       }
-      setTimeout(release, 400);
+      showRestoreReport(restoreReportLines("первая проверка"));
+      // Повторная проверка после дозагрузки (шрифт из IndexedDB, ленивые картинки меняют высоты выше цели): если человек
+      // ничего не трогал, а блок уехал от верха — возвращаем его на место.
+      setTimeout(function(){
+        if(!el.isConnected){ release(); return; }
+        var rel = el.getBoundingClientRect().top - container.getBoundingClientRect().top;
+        var fixed = false;
+        if(!userTouched && Math.abs(rel) > 30){
+          container.scrollTop = bookElTopInContainer(container, el);
+          fixed = true;
+        }
+        container.removeEventListener("touchstart", onUserTouch);
+        container.removeEventListener("wheel", onUserTouch);
+        if(dbg) dbg.log("восстановление места: проверка через 1.5 с — сдвиг блока от верха=" + Math.round(rel) + (fixed ? ", поправлено" : (userTouched ? ", пользователь листал — не трогаем" : ", в порядке")));
+        showRestoreReport(restoreReportLines("через 1.5 с: сдвиг=" + Math.round(rel) + (fixed ? " (поправлено)" : userTouched ? " (листали сами)" : " (в порядке)")));
+        release();
+      }, 1500);
     }
     function refine(){
       if(!el.isConnected || !(seg ? seg.isConnected : true)){ release(); return; }
@@ -13214,7 +13269,8 @@
         hash: res.hash, name: name,
         chapters: res.parsed.chapters, imageUrls: imageUrls, imageBase64: imageBase64,
         mode: "text", textScrollTop: 0, chaptersScrollTop: 0,
-        restorePosition: forcedPosition || (savedBookState && savedBookState.position) || null
+        restorePosition: forcedPosition || (savedBookState && savedBookState.position) || null,
+        restoreSource: forcedPosition ? "переход (закладка/глава)" : "сохранённая позиция чтения"
       };
       // Ридер вкладки "ИПКД" — сам корневой экран вкладки (списка книг, куда можно "вернуться", у
       // неё нет): шаг "назад" для него НЕ кладётся — иначе колбэк ниже через
