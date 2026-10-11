@@ -1,6 +1,8 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 57.8 (11.10) — Android 5, «всегда открывается в одном и том же месте» (вкладка книг и закладки): `scrollBookReaderToPosition` на время перехода отключает якорение прокрутки (`overflow-anchor`), в конце проверяет, что нужный блок на экране, и при промахе зовёт `scrollIntoView`; подробный журнал «восстановление места: …» (цель, scrollTop, scrollHeight, версия Chrome, поддержка `contain-intrinsic-size: auto`, итог).
+
    Версия: 57.7 (11.10) — закладка книги, Android 5 («закладка откатывается на старое место»): (1) `moveMainBookmarkTo`/`restoreBookPrevMain` больше не зовут `Object.assign` (`copyPlainObj`) — на старом WebView перенос основной закладки на 2+ главы падал до записи; (2) `saveBookReaderBookmark` ловит ошибку переноса, пишет её в журнал и показывает в строке состояния ридера («Закладка НЕ сохранена: …»); (3) временная диагностика: журнал переноса закладки (позиции, t записи, Date.now()) и строка «ИЗМЕНЕНИЕ книги … при слиянии» в `doCloudSync`, если облако изменило основную закладку или позицию (видны метки t обеих сторон — для проверки расхождения часов).
 
    Версия: 57.6 (11.10) — гонка вкладок «ИПКД» и «Мои книги» через общий `bookReaderState` (ошибка «Cannot read properties of null (reading 'restorePosition')» на Android 5, последняя книга открывалась не на своём месте): (1) `renderBookReaderText` — отложенные шаги (`renderChunk`, `finishRenderBookReaderText`, кадр восстановления позиции) проверяют `renderIsStale()` (тот же ли ридер и то же ли поколение) и молча выходят; раньше кадр восстановления мог упасть на null или забрать `restorePosition` другой книги; (2) `openBookReader` отбрасывает результат загрузки, если за время загрузки пользователь ушёл на другую вкладку (`startTab`/`startOwner`); (3) уход с «ИПКД» на «Мои книги» увеличивает `bookReaderTextRenderGen`.
@@ -12860,25 +12862,48 @@
   function scrollBookReaderToPosition(container, position){
     if(!position) return false;
     if(position.blk === -1) return scrollBookReaderToChapterTitleTop(container, position.ch);
+    var dbg = window.Debug;
     var el = container.querySelector('[data-ch="' + position.ch + '"][data-blk="' + position.blk + '"]');
-    if(!el) return false;
+    if(!el){
+      if(dbg) dbg.log("восстановление места: блок " + posText(position) + " НЕ найден в DOM (сегментов=" + container.querySelectorAll(".book-reader-seg").length + ") — откат на textScrollTop");
+      return false;
+    }
     var seg = el.closest(".book-reader-seg");
-    container.scrollTop = bookElTopInContainer(container, seg || el);
-    if(!seg) return true;
+    // 57.8: на WebView ~Chrome 95 (Android 5) у пропущенных сегментов (content-visibility:auto) высота — только оценка, и
+    // «якорение прокрутки» браузера двигало scrollTop сразу после нашего перехода — место открывалось одно и то же.
+    // На время перехода якорение выключаем и в конце проверяем, что нужный блок реально на экране.
+    var prevAnchor = container.style.overflowAnchor;
+    container.style.overflowAnchor = "none";
+    var firstTarget = bookElTopInContainer(container, seg || el);
+    container.scrollTop = firstTarget;
+    if(dbg) dbg.log("восстановление места: " + posText(position) + ", цель=" + Math.round(firstTarget) + ", scrollTop=" + Math.round(container.scrollTop) + ", scrollHeight=" + container.scrollHeight + ", clientHeight=" + container.clientHeight + ", сегмент " + (seg ? "есть" : "нет") + ", contain-intrinsic auto: " + (window.CSS && CSS.supports && CSS.supports("contain-intrinsic-size", "auto 0px")) + ", " + (navigator.userAgent.match(/Chrome\/[\d.]+/) || ["Chrome ?"])[0]);
     var tries = 0;
+    function release(){ container.style.overflowAnchor = prevAnchor; }
+    function finalize(){
+      if(!el.isConnected){ release(); return; }
+      var r = el.getBoundingClientRect(), cr = container.getBoundingClientRect();
+      var inView = r.bottom > cr.top && r.top < cr.bottom;
+      if(dbg) dbg.log("восстановление места: итог " + posText(position) + " на экране=" + inView + ", scrollTop=" + Math.round(container.scrollTop) + ", верх блока относительно контейнера=" + Math.round(r.top - cr.top));
+      if(!inView){
+        try{ el.scrollIntoView(true); }catch(e){}
+        if(dbg) dbg.log("восстановление места: scrollIntoView → scrollTop=" + Math.round(container.scrollTop));
+      }
+      setTimeout(release, 400);
+    }
     function refine(){
-      if(!el.isConnected || !seg.isConnected) return;
+      if(!el.isConnected || !(seg ? seg.isConnected : true)){ release(); return; }
       // ВАЖНО: сначала top — чтение геометрии потомка форсирует реальную вёрстку пропущенного
       // сегмента (content-visibility:auto); segTop/segH читаем ПОСЛЕ, иначе это устаревшая оценка
       // (contain-intrinsic-size), сравниваемая со свежим top — проверка границ её отбраковывала, и
       // прокрутка замирала на верху сегмента (баг «соседняя строка»/закладка выше экрана).
       var top = bookElTopInContainer(container, el);
-      var segTop = bookElTopInContainer(container, seg);
-      var segH = seg.getBoundingClientRect().height;
-      if(top >= segTop - 2 && top <= segTop + segH + 2 && Math.abs(top - container.scrollTop) > 1){
-        container.scrollTop = top;
+      var segTop = seg ? bookElTopInContainer(container, seg) : top;
+      var segH = seg ? seg.getBoundingClientRect().height : 0;
+      if(!seg || (top >= segTop - 2 && top <= segTop + segH + 2)){
+        if(Math.abs(top - container.scrollTop) > 1) container.scrollTop = top;
       }
       if(++tries < 3) requestAnimationFrame(refine);
+      else requestAnimationFrame(finalize);
     }
     requestAnimationFrame(refine);
     return true;
