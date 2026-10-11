@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 57.6 (11.10) — гонка вкладок «ИПКД» и «Мои книги» через общий `bookReaderState` (ошибка «Cannot read properties of null (reading 'restorePosition')» на Android 5, последняя книга открывалась не на своём месте): (1) `renderBookReaderText` — отложенные шаги (`renderChunk`, `finishRenderBookReaderText`, кадр восстановления позиции) проверяют `renderIsStale()` (тот же ли ридер и то же ли поколение) и молча выходят; раньше кадр восстановления мог упасть на null или забрать `restorePosition` другой книги; (2) `openBookReader` отбрасывает результат загрузки, если за время загрузки пользователь ушёл на другую вкладку (`startTab`/`startOwner`); (3) уход с «ИПКД» на «Мои книги» увеличивает `bookReaderTextRenderGen`.
    Версия: 57.5 (11.10) — `applyReadingModeVisual` ставит на окне настроек класс `fullscreen-mode-active` только в полноэкранном режиме (для modals.css 11.2).
    Версия: 57.4 (11.10) — плавающая кнопка и кнопка слева от неё прячутся в режиме чтения/полноэкранном инлайн-стилем (`syncFabsHiddenForReading`); `__ltOnAppResume`/`MdEditor.onAppPause`; поле имени заметки включает режим «клавиатура поверх» (`initTaskKeyboardLift`).
    Версия: 57.3 (11.10) — (1) слияние записей книг `book:<hash>` ПО ПОЛЯМ (`mergeBookRecords` в `mergeStates`): закладки объединяются по id с «надгробиями» `removedBookmarks`, подчёркивания по id, основная закладка одна; раньше запись целиком решала метка t, а t растёт при чтении — закладка с другого устройства затиралась старой копией. (2) Импорт: закладки заметок `__mdBookmark:*` относятся к категориям «Заметки»/«Всё остальное» и получают свежую метку (`importGroupSelected`). (3) `CLOUD_GET_TIMEOUT_MS` = 30 с для чтения облака (было 8 с).
@@ -10338,6 +10339,7 @@
       if(bookReaderState && bookReaderState.name === IPKD_BOOK_NAME){
         destroyBookReaderScrollListener();
         revokeBookReaderImages();
+        bookReaderTextRenderGen++; // гасим недособранный порциями рендер публикации ИПКД
         bookReaderState = null;
       }
       var isFirstBooksVisitThisSession = !booksTabVisitedThisSession;
@@ -13058,6 +13060,10 @@
     if(bookReaderState){ destroyBookReaderScrollListener(); revokeBookReaderImages(); }
     var container = document.getElementById("settingsTabContent");
     var prevScrollTop = container ? container.scrollTop : 0;
+    // Вкладка и «владелец» ридера на момент вызова: загрузка книги асинхронная (чтение файла, хэш, разбор — на старом
+    // телефоне это секунды), и за это время человек может уйти на другую вкладку. Тогда результат уже не нужен
+    // (см. проверку в начале then(res) ниже), иначе он подменил бы bookReaderState чужой книги.
+    var startTab = currentSettingsTab, startOwner = bookReaderOwnerTab;
     // ВРЕМЕННО — таймеры через window.Debug.log, убрать после того, как найдём узкое место.
     var _dbgT0 = performance.now();
     function _dbg(label){
@@ -13080,6 +13086,10 @@
         });
       });
     }).then(function(res){
+      if(currentSettingsTab !== startTab || bookReaderOwnerTab !== startOwner){
+        if(window.Debug) window.Debug.log("openBookReader[" + name + "]: результат отброшен — пользователь ушёл с вкладки " + startTab + " на " + currentSettingsTab);
+        return;
+      }
       var _tImg = performance.now();
       // Поэтому вместо imageBytes{bytes,contentType} на все картинки сразу теперь
       // bookReaderState.imageBase64{base64,contentType} (дёшево — просто ссылки на уже распарсенные
@@ -13590,6 +13600,12 @@
     // Свой номер поколения — см. bookReaderTextRenderGen выше. Если к моменту очередного тика
     // глобальный счётчик уйдёт вперёд.
     var myRenderGen = ++bookReaderTextRenderGen;
+    // «Свой» ридер: bookReaderState — общая переменная вкладок «Мои книги» и «ИПКД». Пока книга собирается порциями
+    // (requestAnimationFrame), её могут обнулить (уход на другую вкладку) или подменить другой книгой. Любой
+    // отложенный шаг ниже обязан убедиться, что это всё ещё ТОТ ЖЕ ридер, иначе он либо падает на null
+    // («Cannot read properties of null (reading 'restorePosition')»), либо забирает restorePosition чужой книги.
+    var myReaderState = bookReaderState;
+    function renderIsStale(){ return myRenderGen !== bookReaderTextRenderGen || !bookReaderState || bookReaderState !== myReaderState; }
 
     // Теперь бюджет проверяется на каждом БЛОКЕ (buildBlockHtml вместо buildChapterHtml для всей
     // главы разом) — тик может прерваться и продолжиться в середине главы, не теряя место
@@ -13661,7 +13677,7 @@
       // Устарели — новый заход на вкладку книги уже запустил свежий рендер (см. myRenderGen выше).
       // Молча останавливаемся: ни insertAdjacentHTML в чужой/отсоединённый rootEl, ни следующий
       // requestAnimationFrame — освобождаем поток тому, кто реально нужен сейчас.
-      if(myRenderGen !== bookReaderTextRenderGen) return;
+      if(renderIsStale()) return;
       var t0 = performance.now();
       var out = "";
       var yielded = false;
@@ -13694,11 +13710,13 @@
     }
 
     function finishRenderBookReaderText(){
+      if(renderIsStale()) return;
       if(window.Debug) window.Debug.log("renderBookReaderText: сборка HTML заняла " + Math.round(performance.now() - _tBuild) + "мс (порциями, не блокируя интерфейс)");
       var _tCal = performance.now();
       calibrateBookReaderSegments(container);
       if(window.Debug) window.Debug.log("renderBookReaderText: калибровка сегментов заняла " + Math.round(performance.now() - _tCal) + "мс, сегментов=" + container.querySelectorAll(".book-reader-seg").length);
       requestAnimationFrame(function(){
+        if(renderIsStale()) return; // за кадр ридер успели закрыть или подменить — чужой restorePosition не трогаем
         // Шаг 16: сохранённая позиция чтения применяется РОВНО ОДИН РАЗ, сразу после открытия
         // книги.
         var restored = false;
