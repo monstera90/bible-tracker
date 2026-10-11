@@ -1,6 +1,8 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 57.7 (11.10) — закладка книги, Android 5 («закладка откатывается на старое место»): (1) `moveMainBookmarkTo`/`restoreBookPrevMain` больше не зовут `Object.assign` (`copyPlainObj`) — на старом WebView перенос основной закладки на 2+ главы падал до записи; (2) `saveBookReaderBookmark` ловит ошибку переноса, пишет её в журнал и показывает в строке состояния ридера («Закладка НЕ сохранена: …»); (3) временная диагностика: журнал переноса закладки (позиции, t записи, Date.now()) и строка «ИЗМЕНЕНИЕ книги … при слиянии» в `doCloudSync`, если облако изменило основную закладку или позицию (видны метки t обеих сторон — для проверки расхождения часов).
+
    Версия: 57.6 (11.10) — гонка вкладок «ИПКД» и «Мои книги» через общий `bookReaderState` (ошибка «Cannot read properties of null (reading 'restorePosition')» на Android 5, последняя книга открывалась не на своём месте): (1) `renderBookReaderText` — отложенные шаги (`renderChunk`, `finishRenderBookReaderText`, кадр восстановления позиции) проверяют `renderIsStale()` (тот же ли ридер и то же ли поколение) и молча выходят; раньше кадр восстановления мог упасть на null или забрать `restorePosition` другой книги; (2) `openBookReader` отбрасывает результат загрузки, если за время загрузки пользователь ушёл на другую вкладку (`startTab`/`startOwner`); (3) уход с «ИПКД» на «Мои книги» увеличивает `bookReaderTextRenderGen`.
    Версия: 57.5 (11.10) — `applyReadingModeVisual` ставит на окне настроек класс `fullscreen-mode-active` только в полноэкранном режиме (для modals.css 11.2).
    Версия: 57.4 (11.10) — плавающая кнопка и кнопка слева от неё прячутся в режиме чтения/полноэкранном инлайн-стилем (`syncFabsHiddenForReading`); `__ltOnAppResume`/`MdEditor.onAppPause`; поле имени заметки включает режим «клавиатура поверх» (`initTaskKeyboardLift`).
@@ -4362,6 +4364,21 @@
           if(window.Debug) window.Debug.log("doCloudSync: РЕГРЕССИЯ ТЕКСТА у " + k + " — было (t=" + before.t + "): \"" + beforeText + "\", стало (t=" + (after && after.t) + "): \"" + afterText + "\"");
         }
       });
+      // 57.7: диагностика «отката закладки» — если после слияния с облаком основная закладка книги или позиция чтения
+      // отличаются от локальных, пишем в журнал, чьи метки t победили (часы устройств могут расходиться).
+      try{
+        if(window.Debug) Object.keys(state || {}).forEach(function(k){
+          if(!isBookStateKey(k)) return;
+          var lb = state[k], mb = merged[k], cb = cloudData && cloudData[k];
+          if(!lb || !lb.c || !mb || !mb.c) return;
+          var lm = (bookListAsArray(lb.c.bookmarks).filter(function(b){ return b && b.isMain; })[0]) || null;
+          var mm = (bookListAsArray(mb.c.bookmarks).filter(function(b){ return b && b.isMain; })[0]) || null;
+          var lp = lb.c.position, mp = mb.c.position;
+          if((lm && lm.id) !== (mm && mm.id) || posText(lp) !== posText(mp)){
+            window.Debug.log("doCloudSync: ИЗМЕНЕНИЕ книги " + k + " при слиянии — основная закладка " + (lm ? lm.id + "@" + posText(lm.position) : "нет") + " → " + (mm ? mm.id + "@" + posText(mm.position) : "нет") + "; позиция " + posText(lp) + " → " + posText(mp) + "; t локально=" + lb.t + ", t облака=" + (cb && cb.t) + ", Date.now()=" + Date.now());
+          }
+        });
+      }catch(eDiag){}
       var localChanged = !statesEqual(merged, state);
       var cloudChanged = !statesEqual(merged, cloudData);
       // дельта считается один раз: и для журнала, и для отправки ниже
@@ -14156,6 +14173,10 @@
   // уходит в бэкап book:<hash>.prevMain (одна копия), см. restoreBookPrevMain ниже. Обычное чтение
   // (шаг на соседний абзац/главу, в том числе периодической автозакладкой) бэкап не трогает.
   var BOOKMARK_JUMP_CHAPTERS = 2;
+  // Копия простого объекта БЕЗ Object.assign (57.7): на старом WebView (Android 5) его может не быть — тогда перенос
+  // основной закладки на 2+ главы (isBookmarkJump) падал TypeError ДО записи, и закладка молча оставалась на старом месте.
+  function copyPlainObj(o){ var r = {}; if(o) Object.keys(o).forEach(function(k){ r[k] = o[k]; }); return r; }
+  function posText(p){ return p ? (p.ch + ":" + p.blk) : "нет"; }
   function isBookmarkJump(a, b){
     return !!(a && b && typeof a.ch === "number" && typeof b.ch === "number" && Math.abs(a.ch - b.ch) >= BOOKMARK_JUMP_CHAPTERS);
   }
@@ -14166,7 +14187,7 @@
       // Объект тот же, что лежит в state (запись уже есть, раз есть основная закладка), — сохранится
       // вместе с removeBookBookmark/addBookBookmark ниже.
       var backupData = getOrCreateBookState(hash);
-      backupData.prevMain = {position: Object.assign({}, oldMain.position), name: oldMain.name || "", nameManual: !!oldMain.nameManual, at: Date.now()};
+      backupData.prevMain = {position: copyPlainObj(oldMain.position), name: oldMain.name || "", nameManual: !!oldMain.nameManual, at: Date.now()};
     }
     if(oldMain){
       removeBookBookmark(hash, oldMain.id);
@@ -14178,6 +14199,7 @@
     var name = keepManual ? oldMain.name : bookmarkNameFromPosition(pos);
     var newId = addBookBookmark(hash, pos, name, true, keepManual);
     setBookReaderBookmarkMarkInDom(pos.ch, pos.blk, newId);
+    if(window.Debug) window.Debug.log("закладка: основная перенесена " + posText(oldMain && oldMain.position) + " → " + posText(pos) + ", новый id=" + newId + ", t записи=" + (state[bookStateKey(hash)] && state[bookStateKey(hash)].t) + ", Date.now()=" + Date.now());
     return name;
   }
   // Автообновление при выходе из книги (домик, системное «назад», уход на другую вкладку, закрытие
@@ -14239,13 +14261,13 @@
     var prev = data.prevMain;
     var cur = getMainBookBookmark(hash);
     if(cur && cur.position){
-      data.prevMain = {position: Object.assign({}, cur.position), name: cur.name || "", nameManual: !!cur.nameManual, at: Date.now()};
+      data.prevMain = {position: copyPlainObj(cur.position), name: cur.name || "", nameManual: !!cur.nameManual, at: Date.now()};
       noteBookBookmarkRemoved(data, cur.id);
       data.bookmarks = data.bookmarks.filter(function(b){ return b.id !== cur.id; });
     } else {
       delete data.prevMain;
     }
-    var rec = {id: genBookRecordId(), position: Object.assign({}, prev.position), addedAt: Date.now(), name: prev.name || "", isMain: true};
+    var rec = {id: genBookRecordId(), position: copyPlainObj(prev.position), addedAt: Date.now(), name: prev.name || "", isMain: true};
     if(prev.nameManual) rec.nameManual = true;
     data.bookmarks.push(rec);
     saveBookState(hash, data);
@@ -14262,7 +14284,16 @@
       return;
     }
     var hash = bookReaderState.hash;
-    var name = moveMainBookmarkTo(hash, pos);
+    var name;
+    try{
+      name = moveMainBookmarkTo(hash, pos);
+    }catch(e){
+      // 57.7: раньше ошибка внутри переноса молча глотала нажатие — закладка оставалась старой, а статус не менялся.
+      if(window.Debug) window.Debug.log("закладка: ОШИБКА переноса основной на " + posText(pos) + ": " + (e && e.name ? e.name + ": " : "") + (e && e.message ? e.message : e));
+      var statusErr = document.getElementById("bookReaderStatus");
+      if(statusErr) statusErr.textContent = "Закладка НЕ сохранена: " + (e && e.message ? e.message : e);
+      return;
+    }
     if(name === null){
       var oldMain = getMainBookBookmark(hash);
       name = oldMain ? oldMain.name : "";
