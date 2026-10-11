@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 57.9 (11.10) — Android 5, место в книге открывалось на главу не там: `scrollBookReaderToPosition` на WebView без `contain-intrinsic-size: auto` (Chrome < 107) перед переходом измеряет реальную высоту шести сегментов выше и трёх ниже цели и закрепляет её инлайн-стилем (раньше соседи «плыли» между настоящей и оценочной высотой); подгонка до 8 кадров с остановкой, когда геометрия устоялась; в журнале «закреплено высот=N».
+   Версия: 57.10 (11.10) — Android 5, место в книге открывалось не там (по логу оценка высот сегментов врала в 3-4 раза: цель 27420 против ~7307): `scrollBookReaderToPosition` на WebView без `contain-intrinsic-size: auto` перед переходом реально сверстывает все сегменты от начала книги до цели (+3), закрепляет их высоты как `contain-intrinsic-size` и только потом прокручивает (константа `BOOK_EXACT_LAYOUT_MAX_SEGS`=150; глубже — только соседи цели); в журнале «сегмент №… сверстано с … по … за … мс».\n\n   Версия: 57.9 (11.10) — Android 5, место в книге открывалось на главу не там: `scrollBookReaderToPosition` на WebView без `contain-intrinsic-size: auto` (Chrome < 107) перед переходом измеряет реальную высоту шести сегментов выше и трёх ниже цели и закрепляет её инлайн-стилем (раньше соседи «плыли» между настоящей и оценочной высотой); подгонка до 8 кадров с остановкой, когда геометрия устоялась; в журнале «закреплено высот=N».
 
    Версия: 57.8 (11.10) — Android 5, «всегда открывается в одном и том же месте» (вкладка книг и закладки): `scrollBookReaderToPosition` на время перехода отключает якорение прокрутки (`overflow-anchor`), в конце проверяет, что нужный блок на экране, и при промахе зовёт `scrollIntoView`; подробный журнал «восстановление места: …» (цель, scrollTop, scrollHeight, версия Chrome, поддержка `contain-intrinsic-size: auto`, итог).
 
@@ -12861,6 +12861,7 @@
     requestAnimationFrame(refine);
     return true;
   }
+  var BOOK_EXACT_LAYOUT_MAX_SEGS = 150; // до этого номера сегмента место восстанавливается по точной вёрстке всех сегментов выше
   function scrollBookReaderToPosition(container, position){
     if(!position) return false;
     if(position.blk === -1) return scrollBookReaderToChapterTitleTop(container, position.ch);
@@ -12876,29 +12877,37 @@
     // На время перехода якорение выключаем и в конце проверяем, что нужный блок реально на экране.
     var prevAnchor = container.style.overflowAnchor;
     container.style.overflowAnchor = "none";
-    // 57.9: без ключевого слова `auto` в contain-intrinsic-size (Chrome < 107) браузер не помнит реальную высоту
-    // пропущенного сегмента: отрисованные соседи имеют настоящую высоту, остальные — оценку, и при каждом сдвиге
-    // прокрутки геометрия «плывёт» (место открывалось на главу раньше/позже). Поэтому у сегментов вокруг цели
-    // (шесть выше и три ниже) один раз измеряем реальную высоту и закрепляем её как contain-intrinsic-size — дальше
-    // эти сегменты одной и той же высоты и в отрисованном, и в пропущенном виде.
-    var frozen = 0;
+    // 57.10: без ключевого слова `auto` в contain-intrinsic-size (Chrome < 107) браузер не помнит реальную высоту
+    // пропущенного сегмента, а оценка по числу символов на этом WebView врёт в разы (лог: цель по оценке 27420, на
+    // деле блок около 7307) — прокрутка «спускалась» ступеньками и останавливалась не там. Поэтому перед переходом
+    // ОДИН РАЗ реально сверстываем все сегменты от начала книги до цели (+3 ниже), читаем их высоты и закрепляем как
+    // contain-intrinsic-size: пропущенные и отрисованные они теперь одной высоты, геометрия над целью точная. Для
+    // очень глубокой позиции (дальше BOOK_EXACT_LAYOUT_MAX_SEGS сегментов) сверстываются только соседи цели (6 выше, 3 ниже).
+    var frozen = 0, freezeInfo = "";
     if(seg && !(window.CSS && CSS.supports && CSS.supports("contain-intrinsic-size", "auto 0px"))){
       try{
+        var tF = performance.now();
         var allSegs = container.querySelectorAll(".book-reader-seg");
         var sIdx = Array.prototype.indexOf.call(allSegs, seg);
-        for(var fi = Math.max(0, sIdx - 6); sIdx >= 0 && fi <= Math.min(allSegs.length - 1, sIdx + 3); fi++){
-          var fs = allSegs[fi];
-          if(fs.getAttribute("data-imgs") !== "0") continue; // с картинками высота зависит от ленивой загрузки — оставляем оценку
-          fs.style.contentVisibility = "visible";
-          var fh = fs.getBoundingClientRect().height;
-          fs.style.contentVisibility = "";
-          if(fh > 0){ fs.style.containIntrinsicSize = "0px " + (Math.round(fh * 100) / 100) + "px"; frozen++; }
+        if(sIdx >= 0){
+          var fromI = sIdx <= BOOK_EXACT_LAYOUT_MAX_SEGS ? 0 : Math.max(0, sIdx - 6);
+          var toI = Math.min(allSegs.length - 1, sIdx + 3);
+          var hs = [], i2;
+          for(i2 = fromI; i2 <= toI; i2++) allSegs[i2].style.contentVisibility = "visible";
+          for(i2 = fromI; i2 <= toI; i2++) hs.push(allSegs[i2].getBoundingClientRect().height); // первое чтение форсирует вёрстку всех сразу
+          for(i2 = fromI; i2 <= toI; i2++){
+            var sg = allSegs[i2];
+            sg.style.contentVisibility = "";
+            var hh = hs[i2 - fromI];
+            if(hh > 0){ sg.style.containIntrinsicSize = "0px " + (Math.round(hh * 100) / 100) + "px"; frozen++; }
+          }
+          freezeInfo = ", сегмент №" + sIdx + " из " + allSegs.length + ", сверстано с " + fromI + " по " + toI + " за " + Math.round(performance.now() - tF) + " мс";
         }
       }catch(eFreeze){ if(dbg) dbg.log("восстановление места: ошибка закрепления высот: " + (eFreeze && eFreeze.message)); }
     }
     var firstTarget = bookElTopInContainer(container, seg || el);
     container.scrollTop = firstTarget;
-    if(dbg) dbg.log("восстановление места: " + posText(position) + ", цель=" + Math.round(firstTarget) + ", scrollTop=" + Math.round(container.scrollTop) + ", scrollHeight=" + container.scrollHeight + ", clientHeight=" + container.clientHeight + ", сегмент " + (seg ? "есть" : "нет") + ", закреплено высот=" + frozen + ", contain-intrinsic auto: " + (window.CSS && CSS.supports && CSS.supports("contain-intrinsic-size", "auto 0px")) + ", " + (navigator.userAgent.match(/Chrome\/[\d.]+/) || ["Chrome ?"])[0]);
+    if(dbg) dbg.log("восстановление места: " + posText(position) + ", цель=" + Math.round(firstTarget) + ", scrollTop=" + Math.round(container.scrollTop) + ", scrollHeight=" + container.scrollHeight + ", clientHeight=" + container.clientHeight + ", сегмент " + (seg ? "есть" : "нет") + ", закреплено высот=" + frozen + freezeInfo + ", contain-intrinsic auto: " + (window.CSS && CSS.supports && CSS.supports("contain-intrinsic-size", "auto 0px")) + ", " + (navigator.userAgent.match(/Chrome\/[\d.]+/) || ["Chrome ?"])[0]);
     var tries = 0, stableFrames = 0;
     function release(){ container.style.overflowAnchor = prevAnchor; }
     function finalize(){
