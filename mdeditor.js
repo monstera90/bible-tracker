@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 7.5 (11.10) — `replaceAllNotesFromEntries` (импорт категории «Заметки») больше не снимает закладки заметок: раньше каждая закладка заменялась записью {c:false} с текущим временем — она затирала закладки из импортируемого архива и уходила в облако (закладки исчезали на всех устройствах); теперь после замены набор перечитывается из state.
    Версия: 7.4 (08.10) — картинки удаляются вместе с владельцем, автоматической «корзины сирот» больше нет: `maybeRunImageCleanup` ничего не делает (её раньше дёргали старт, сверка заметок и `retryImageCleanup`), новая `deleteImagesOfText(text, excludeNoteId)` стирает картинки `![[имя]]` из текста удалённой задачи/комментария/заметки (если на них нет других ссылок), `deleteNoteRecord(id, withImages)` зовёт её при удалении заметки из списка и папки. Причина: чистка судила по неполному снимку данных и ставила в облаке метку удаления, которая стирала картинку на всех устройствах.
    Версия: 7.3 (03.10) — экран закладок: под основной закладкой книги кнопка «Восстановить предыдущее место, где была закладка» (появляется, если закладка перескочила на 2+ главы; `it.canRestorePrev` из my.js, dep `restoreBookPrevMain`); кнопка стоит внутри строки перед разделителем, зазор до него 2px. Функции не менялись.
    Версия: 7.2 (30.09) — в нижнем ряду редактора добавлена кнопка полноэкранного режима (`#mdEditorFullscreenBtn`, `.fullscreen-mode-btn`, миниатюра смартфона) сразу слева от «домика»; режим чтения — следующая, только тап (удержания больше нет); строка про полноэкранный режим в инструкции заметок; dep `handleFullscreenBtnTap`.
@@ -2768,19 +2769,16 @@ window.initMdEditorModule = function(deps){
     });
     existingIds.forEach(function(id){
       var rec = notesMap.get(id);
-      if(rec){
-        var key = rec.name.toLowerCase();
-        if(bookmarkedNames.has(key)){
-          bookmarkedNames.delete(key);
-          setSyncedBookmark(key, false);
-        }
-        revealedBookmarkRows.delete(key);
-      }
+      if(rec) revealedBookmarkRows.delete(rec.name.toLowerCase());
+      // Закладки здесь НЕ снимаются (до 7.5 для каждой заметки писалось {c:false} с текущим временем: это затирало
+      // закладки из только что импортированного архива и уходило в облако — закладки исчезали на всех устройствах).
+      // Закладки привязаны к имени и остаются в state; после замены заметок набор перечитывается из него.
       deleteNoteRecord(id);
     });
     entries.forEach(function(entry){
       createImportedNoteRecord(entry.name, entry.path, entry.text, entry.id, true);
     });
+    bookmarkedNames = new Set(getSyncedBookmarkNames());
     rebuildTree();
     var container = document.getElementById("settingsTabContent");
     if(container) render();

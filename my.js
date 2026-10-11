@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 57.3 (11.10) — (1) слияние записей книг `book:<hash>` ПО ПОЛЯМ (`mergeBookRecords` в `mergeStates`): закладки объединяются по id с «надгробиями» `removedBookmarks`, подчёркивания по id, основная закладка одна; раньше запись целиком решала метка t, а t растёт при чтении — закладка с другого устройства затиралась старой копией. (2) Импорт: закладки заметок `__mdBookmark:*` относятся к категориям «Заметки»/«Всё остальное» и получают свежую метку (`importGroupSelected`). (3) `CLOUD_GET_TIMEOUT_MS` = 30 с для чтения облака (было 8 с).
    Версия: 57.2 (09.10) — реестр экспорта: база IndexedDB `lt_opfs_shim_v1` (запасной OPFS из `opfs-shim.js` 1.0 для WebView без OPFS) внесена в `EXPORT_REGISTRY.indexedDB.excludeNames`, чтобы самопроверка экспорта не считала её «неизвестной». Остальной код не менялся: файлы по-прежнему читаются и пишутся через `navigator.storage.getDirectory()`.
    Версия: 57.1 (09.10) — вкладка «ИПКД»: кнопка-скрепка «Заменить публикацию» стоит в общем нижнем ряду ридера сразу справа от «i» (на месте убранной Flibusta), а не отдельно в левом нижнем углу (`bindIpkdReaderExtras`).
    Версия: 57.0 (09.10) — автозакладка книги: периодический таймер раз в 45 с (`AUTO_BOOKMARK_PERIOD_MS`) убран по просьбе пользователя; при выходе (смена вкладки, закрытие окна) закладка ставится ровно на то место, которое сохраняется как позиция чтения (`autoUpdateMainBookmarkOnExit(posOverride)`); `window.__ltOnAppPause` — вызов `flushPendingSyncNow` из оболочки APK при сворачивании (в WebView `visibilitychange` не успевает).
@@ -3575,6 +3576,10 @@
       window.Debug.log("ТРАФИК: " + shortUrl.slice(0, 90) + " — запрос=" + (reqBytes || 0) + "б, ответ=" + (resBytes === null ? "?" : resBytes) + "б, " + ms + "мс, ИТОГО за сессию=" + fetchTrafficTotalBytes + "б (" + (fetchTrafficTotalBytes / 1048576).toFixed(2) + " МБ)");
     }
   }
+  // Чтение данных из облака (GET блоба/диапазонов) — объёмы большие (мегабайты); на слабых и старых устройствах
+  // 8 с не хватало, запрос обрывался, цикл синхронизации уходил в ошибку (красный/жёлтый светодиод) и не
+  // заканчивался никогда. Маячок (fetchStateMarker) и записи по-прежнему с 8 с.
+  var CLOUD_GET_TIMEOUT_MS = 30000;
   function fetchWithTimeout(url, options, timeoutMs){
     // режим оффлайн (см. раздел «РЕЖИМ ОФФЛАЙН»): все ~25 сетевых вызовов приложения идут через эту
     // функцию — единая точка отсечки, до счётчика дублей и таймеров; вызывающие получают обычный
@@ -3666,7 +3671,7 @@
   }
   // В обычном цикле не вызывается.
   function fetchCloudNodeFull(id, fetchOpts){
-    return fetchWithTimeout(cloudNodeUrl(id), fetchOpts, 8000).then(function(res){
+    return fetchWithTimeout(cloudNodeUrl(id), fetchOpts, CLOUD_GET_TIMEOUT_MS).then(function(res){
       if(!res.ok) throw new Error("fetch_failed_" + res.status);
       return res.json();
     });
@@ -3678,7 +3683,7 @@
   // первую очередь) в список запрашиваемых ключей никогда не попадают: они молча пропускаются на
   // этапе фильтрации shallow-списка, а не после загрузки.
   function fetchCloudBlobSafeFallback(id, fetchOpts){
-    return fetchWithTimeout(cloudNodeUrl(id) + "?shallow=true", fetchOpts, 8000).then(function(res){
+    return fetchWithTimeout(cloudNodeUrl(id) + "?shallow=true", fetchOpts, CLOUD_GET_TIMEOUT_MS).then(function(res){
       if(!res.ok) throw new Error("fetch_failed_" + res.status);
       return res.json();
     }).then(function(shallow){
@@ -3688,7 +3693,7 @@
       if(window.Debug) window.Debug.log("fetchCloudBlob: безопасный запасной путь — ключей в узле=" + Object.keys(shallow).length + ", запрашиваю по отдельности=" + wanted.length + " (fileBlobs и другие зарезервированные ветки не запрашиваются вообще)");
       var data = {};
       return Promise.all(wanted.map(function(k){
-        return fetchWithTimeout(cloudNodeUrl(id, "/" + encodeURIComponent(k)), fetchOpts, 8000).then(function(res){
+        return fetchWithTimeout(cloudNodeUrl(id, "/" + encodeURIComponent(k)), fetchOpts, CLOUD_GET_TIMEOUT_MS).then(function(res){
           if(!res.ok) throw new Error("fetch_failed_" + res.status);
           return res.json();
         }).then(function(v){ if(v !== null && v !== undefined) data[k] = v; });
@@ -3709,7 +3714,7 @@
     var url = cloudNodeUrl(id) + "?orderBy=" + encodeURIComponent('"$key"') +
       "&startAt=" + encodeURIComponent(JSON.stringify(run.from)) +
       "&endAt=" + encodeURIComponent(JSON.stringify(run.to));
-    return fetchWithTimeout(url, fetchOpts, 8000).then(function(res){
+    return fetchWithTimeout(url, fetchOpts, CLOUD_GET_TIMEOUT_MS).then(function(res){
       if(!res.ok){
         var e = new Error(res.status === 400 ? "filtered_unsupported" : ("fetch_failed_" + res.status));
         throw e;
@@ -3727,7 +3732,7 @@
       // подтянутся обычным циклом
       planP = Promise.resolve({ runs: cached.runs, wanted: null, total: null });
     } else {
-      planP = fetchWithTimeout(cloudNodeUrl(id) + "?shallow=true", fetchOpts, 8000).then(function(res){
+      planP = fetchWithTimeout(cloudNodeUrl(id) + "?shallow=true", fetchOpts, CLOUD_GET_TIMEOUT_MS).then(function(res){
         if(!res.ok) throw new Error(res.status === 400 ? "filtered_unsupported" : ("fetch_failed_" + res.status));
         return res.json();
       }).then(function(shallow){
@@ -3752,7 +3757,7 @@
         // Порог убран: сколько бы ключей ни "потерялось", догружаем их по отдельности — дороже по
         // числу запросов, зато исключает полный узел даже теоретически.
         return Promise.all(missing.map(function(k){
-          return fetchWithTimeout(cloudNodeUrl(id, "/" + encodeURIComponent(k)), fetchOpts, 8000).then(function(res){
+          return fetchWithTimeout(cloudNodeUrl(id, "/" + encodeURIComponent(k)), fetchOpts, CLOUD_GET_TIMEOUT_MS).then(function(res){
             if(!res.ok) throw new Error("fetch_failed_" + res.status);
             return res.json();
           }).then(function(v){ if(v !== null && v !== undefined) data[k] = v; });
@@ -4054,12 +4059,82 @@
     return out || cloudData;
   }
 
+  // Слияние двух версий записи книги book:<hash> ПО ПОЛЯМ (my.js 57.3). Раньше запись целиком решала метка t
+  // («последний записал — победил»), а t этой записи растёт каждые полсекунды чтения (setBookPosition) — поэтому
+  // устройство, где книгу просто читали, затирало закладку, добавленную на другом, своей старой копией массива
+  // bookmarks (закладка «не доезжала», а основная могла откатиться назад). Теперь: скалярные поля (position,
+  // bookName, noteId, mainAuto, prevMain, images) берёт запись с большим t, а списки сливаются: bookmarks — по id с
+  // «надгробиями» removedBookmarks (иначе удалённая закладка воскресала бы), underlines — по id (их не удаляют).
+  // Основная закладка остаётся одна (остальные, если разъехались, — снимаются: побеждает более поздняя addedAt).
+  var BOOK_REMOVED_KEEP_MS = 120 * 24 * 3600 * 1000;
+  function bookListAsArray(x){
+    if(Array.isArray(x)) return x;
+    if(x && typeof x === "object") return Object.keys(x).map(function(k){ return x[k]; }); // Firebase иногда отдаёт массив объектом
+    return [];
+  }
+  function mergeBookRecords(l, c){
+    var newer = (l.t >= c.t) ? l : c;
+    var older = (newer === l) ? c : l;
+    var nd = newer.c || {}, od = older.c || {};
+    var out = {};
+    Object.keys(nd).forEach(function(k){ out[k] = nd[k]; });
+    var now = Date.now();
+    var removed = {};
+    [od.removedBookmarks, nd.removedBookmarks].forEach(function(m){
+      if(!m || typeof m !== "object") return;
+      Object.keys(m).forEach(function(id){
+        var ts = Number(m[id]) || 0;
+        if(now - ts > BOOK_REMOVED_KEEP_MS) return; // старые надгробия отбрасываем
+        removed[id] = Math.max(removed[id] || 0, ts);
+      });
+    });
+    var bm = [], seen = {};
+    [nd, od].forEach(function(d){
+      bookListAsArray(d.bookmarks).forEach(function(b){
+        if(!b || !b.id || seen[b.id] || removed[b.id]) return;
+        seen[b.id] = true;
+        bm.push(b);
+      });
+    });
+    var mains = bm.filter(function(b){ return b.isMain; });
+    if(mains.length > 1){
+      var keep = mains[0];
+      mains.forEach(function(b){ if((b.addedAt || 0) > (keep.addedAt || 0)) keep = b; });
+      bm = bm.filter(function(b){
+        if(!b.isMain || b === keep) return true;
+        removed[b.id] = now;
+        return false;
+      });
+    }
+    // форму сохраняем: пустой массив Firebase не хранит, не плодим различий «[] против отсутствия» (лишние отправки)
+    if(bm.length || nd.bookmarks !== undefined) out.bookmarks = bm; else delete out.bookmarks;
+    var ul = [], useen = {}, uIdx = {};
+    [nd, od].forEach(function(d){
+      bookListAsArray(d.underlines).forEach(function(u){
+        if(!u || !u.id) return;
+        if(useen[u.id]){
+          if(u.movedToNote) ul[uIdx[u.id]].movedToNote = true; // «перенесено в заметку» не откатывается
+          return;
+        }
+        useen[u.id] = true;
+        uIdx[u.id] = ul.length;
+        ul.push(u);
+      });
+    });
+    if(ul.length || nd.underlines !== undefined) out.underlines = ul; else delete out.underlines;
+    if(Object.keys(removed).length) out.removedBookmarks = removed; else delete out.removedBookmarks;
+    return { c: out, t: newer.t };
+  }
   function mergeStates(local, cloud){
     var merged = {}, keys = {};
     Object.keys(local||{}).forEach(function(k){ keys[k]=true; });
     Object.keys(cloud||{}).forEach(function(k){ keys[k]=true; });
     Object.keys(keys).forEach(function(k){
       var l = local ? local[k] : null, c = cloud ? cloud[k] : null;
+      if(l && c && isBookStateKey(k) && l.c && c.c && typeof l.c === "object" && typeof c.c === "object"){
+        merged[k] = mergeBookRecords(l, c);
+        return;
+      }
       merged[k] = (l && c) ? ((l.t >= c.t) ? l : c) : (l || c);
     });
     return merged;
@@ -8860,22 +8935,30 @@
     });
   }
 
+  // К какой категории импорта относится ключ state. Закладки «Моего блокнота» (__mdBookmark:*) — часть заметок:
+  // применяются при «Заметках» или «Всё остальное».
+  function isMdBookmarkKey(k){ return k.indexOf(MD_BOOKMARK_PREFIX) === 0; }
+  function importGroupSelected(k, selection){
+    if(isTaskStateKey(k)) return !!selection.tasks;
+    if(isBookStateKey(k)) return !!selection.books;
+    if(isMdBookmarkKey(k)) return !!(selection.all || selection.notes);
+    return !!selection.all;
+  }
+
   function applyImportSelection(payload, selection){
-    if(selection.all || selection.tasks || selection.books){
+    if(selection.all || selection.tasks || selection.books || selection.notes){
+      var importNow = Date.now();
       var newState = {};
       Object.keys(state).forEach(function(k){
-        var isTask = isTaskStateKey(k);
-        var isBook = isBookStateKey(k);
-        if(isTask && !selection.tasks) newState[k] = state[k];
-        else if(isBook && !selection.books) newState[k] = state[k];
-        else if(!isTask && !isBook && !selection.all) newState[k] = state[k];
+        if(!importGroupSelected(k, selection)) newState[k] = state[k];
       });
       Object.keys(payload.rawStateData).forEach(function(k){
-        var isTask = isTaskStateKey(k);
-        var isBook = isBookStateKey(k);
-        if(isTask && selection.tasks) newState[k] = payload.rawStateData[k];
-        else if(isBook && selection.books) newState[k] = payload.rawStateData[k];
-        else if(!isTask && !isBook && selection.all) newState[k] = payload.rawStateData[k];
+        if(!importGroupSelected(k, selection)) return;
+        var rec = payload.rawStateData[k];
+        // Закладки из архива получают свежую метку времени: иначе их перебьют «надгробия» (c:false) — например,
+        // оставшиеся от прежнего импорта, который снимал закладки, и они снова исчезли бы после синхронизации.
+        if(isMdBookmarkKey(k) && rec && typeof rec === "object") rec = {c: !!rec.c, t: importNow};
+        newState[k] = rec;
       });
       state = newState;
       removeStrayPersonalTasksBranchFromState(); // экспорт со старого устройства мог унести лишний ключ personalTasks
@@ -11737,8 +11820,15 @@
   // Снятие закладки — в отличие от подчёркиваний (никогда не удаляются, см. комментарий у c выше)
   // закладки можно свободно убирать: клик по активной пиктограмме закладки в общей вкладке
   // "Закладки" (см. deps.removeBookMarginBookmark, передаётся в mdeditor.js).
+  // «Надгробие» удалённой закладки (id → время): без него слияние записей книги по полям (mergeBookRecords)
+  // вернуло бы закладку с устройства, где её ещё не удалили.
+  function noteBookBookmarkRemoved(data, bookmarkId){
+    if(!data.removedBookmarks || typeof data.removedBookmarks !== "object") data.removedBookmarks = {};
+    data.removedBookmarks[bookmarkId] = Date.now();
+  }
   function removeBookBookmark(hash, bookmarkId){
     var data = getOrCreateBookState(hash);
+    noteBookBookmarkRemoved(data, bookmarkId);
     data.bookmarks = data.bookmarks.filter(function(b){ return b.id !== bookmarkId; });
     saveBookState(hash, data);
   }
@@ -14123,6 +14213,7 @@
     var cur = getMainBookBookmark(hash);
     if(cur && cur.position){
       data.prevMain = {position: Object.assign({}, cur.position), name: cur.name || "", nameManual: !!cur.nameManual, at: Date.now()};
+      noteBookBookmarkRemoved(data, cur.id);
       data.bookmarks = data.bookmarks.filter(function(b){ return b.id !== cur.id; });
     } else {
       delete data.prevMain;

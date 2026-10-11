@@ -3034,6 +3034,10 @@
      .book-reader-tab. ---------- */
   .book-reader-seg{
     content-visibility:auto;
+    /* Запасной вариант БЕЗ ключевого слова auto: до Chrome 107 (WebView на Android 5-7 застревает на ~95) строка
+       с auto целиком отбрасывается — высота невидимых сегментов схлопывалась в 0, геометрия книги ехала, и позиция
+       чтения/закладка считались неверно (закладка «далеко назад»). Строка ниже перекрывает эту в новых браузерах. */
+    contain-intrinsic-size:0px calc(var(--seg-chars, 0) * var(--book-px-per-char, 0.5px) + var(--seg-imgs, 0) * 260px + 24px);
     contain-intrinsic-size:auto 0px auto calc(var(--seg-chars, 0) * var(--book-px-per-char, 0.5px) + var(--seg-imgs, 0) * 260px + 24px);
     margin:0 -8px;
     padding:0 8px;
@@ -3123,6 +3127,7 @@
   html[data-theme="12"] .book-reader-underline,
   html[data-theme="13"] .book-reader-underline,
   html[data-theme="14"] .book-reader-underline{
+    background:rgba(128,128,128,.38); /* запасной цвет: color-mix есть с Chrome 111; на старом WebView без него подчёркивание было бы невидимым */
     background:color-mix(in srgb, var(--wood) 48%, var(--parchment));
   }
   /* ---------- Иллюстрация -> заметка книги (READER_PLAN.md, Этап D, шаг 14,
