@@ -1,6 +1,8 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 58.0 (12.10) — переход по главе/закладке на Android 5 «не туда»: у ленивых картинок книги не было размеров (высота <img> = 0 до декодирования), и каждая подгрузка картинки выше цели сдвигала книгу на её высоту (в журнале scrollTop сам прыгает на +1150…1200 px и обратно, итоговая проверка при этом считает, что всё в порядке), а закрепление высот сегментов (57.14) мерило их без картинок. Теперь `bookImageSizeAttrs` читает ширину/высоту из заголовка PNG/JPEG/GIF/WebP и пишет в `width`/`height` <img> — место резервируется сразу, вёрстка книги не меняется при подгрузке картинок.
+
    Версия: 57.14 (12.10) — ПЕРВОПРИЧИНА всех «не туда» в книгах на Android 5 (Chrome 95): запись `contain-intrinsic-size: auto 0px auto Y` в components.css в Chrome < 107 невалидна и отбрасывается — браузер не запоминает реальную высоту пропущенных сегментов (`content-visibility:auto`), геометрия книги схлопывается при прокрутке (в журнале scrollTop 22452 → 8017), а позиции по пикселям (место чтения, глава из содержания, закладка) уезжают. Прежняя проверка `CSS.supports(..., "auto 0px")` проверяла короткую форму, которую Chrome 95 понимает, и закрепление высот (57.9–57.10) там НЕ запускалось («закреплено высот=0»). Теперь `bookCvLegacy` проверяет ту форму, что в CSS; на таком движке `freezeBookSegHeights` сразу после сборки книги измеряет реальные высоты всех сегментов (до `BOOK_FREEZE_ALL_MAX_CHARS`=1.5 млн знаков, дальше — до цели) и закрепляет их как `contain-intrinsic-size` (атрибут `data-frozen`). Экранная плашка диагностики (57.11) удалена.
 
    Версия: 57.13 (12.10) — выбор главы в содержании книги («Главы») открывал НАЧАЛО книги: `jumpToChapterFromChaptersList` целится в блок {ch, 0}, а если он не отрисован (блок-картинка без данных картинки на этом устройстве), `scrollBookReaderToPosition` возвращала false и ридер откатывался на `textScrollTop` (0). Теперь запасные цели: ближайший следующий отрисованный блок главы → заголовок главы → сама глава (`#bookChapter_N`); `scrollBookReaderToChapterTitleTop` при отсутствии заголовка целится в саму главу; в журнале «блок … не отрисован — запасная цель: …».
@@ -13658,6 +13660,69 @@
   // currentBookReaderPosition и .book-reader-seg в components.css.
   var BOOK_READER_SEG_SIZE = 40;
 
+  // 57.15: размеры картинок книги, известные ДО их загрузки. Картинки грузятся лениво (в HTML у <img> нет src), а без
+  // width/height высота такого <img> = 0, пока браузер не декодирует data:-URL. Каждая подгрузка картинки выше места, куда мы
+  // только что прокрутили (переход по главе/закладке), раздувала книгу на высоту картинки (в журнале Android 5: scrollTop
+  // сам прыгает на +1150…1200 px и обратно), а freezeBookSegHeights закреплял высоты сегментов БЕЗ картинок. Читаем
+  // ширину/высоту из заголовка файла (PNG/JPEG/GIF/WebP) и отдаём их в атрибуты <img> — браузер резервирует место сразу
+  // (при CSS width:100%; height:auto). Это не зависит от версии WebView.
+  function readImageDimsFromBinary(bin){
+    function c(i){ return bin.charCodeAt(i); }
+    var n = bin.length, w = 0, h = 0, i, m, len;
+    if(n < 30) return null;
+    if(c(0) === 0x89 && bin.substr(1, 3) === "PNG"){
+      w = ((c(16) << 24) >>> 0) + (c(17) << 16) + (c(18) << 8) + c(19);
+      h = ((c(20) << 24) >>> 0) + (c(21) << 16) + (c(22) << 8) + c(23);
+    } else if(bin.substr(0, 3) === "GIF"){
+      w = c(6) | (c(7) << 8); h = c(8) | (c(9) << 8);
+    } else if(c(0) === 0xFF && c(1) === 0xD8){
+      i = 2;
+      while(i + 9 < n){
+        if(c(i) !== 0xFF){ i++; continue; }
+        m = c(i + 1);
+        if(m === 0xFF){ i++; continue; }
+        if(m === 0xD8 || m === 0x01 || (m >= 0xD0 && m <= 0xD7)){ i += 2; continue; }
+        len = (c(i + 2) << 8) | c(i + 3);
+        if(m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC){
+          h = (c(i + 5) << 8) | c(i + 6); w = (c(i + 7) << 8) | c(i + 8);
+          break;
+        }
+        i += 2 + len;
+      }
+    } else if(bin.substr(0, 4) === "RIFF" && bin.substr(8, 4) === "WEBP"){
+      m = bin.substr(12, 4);
+      if(m === "VP8X"){ w = 1 + (c(24) | (c(25) << 8) | (c(26) << 16)); h = 1 + (c(27) | (c(28) << 8) | (c(29) << 16)); }
+      else if(m === "VP8 "){ w = (c(26) | (c(27) << 8)) & 0x3fff; h = (c(28) | (c(29) << 8)) & 0x3fff; }
+      else if(m === "VP8L"){
+        var bits = c(21) | (c(22) << 8) | (c(23) << 16) | (c(24) << 24);
+        w = (bits & 0x3fff) + 1; h = ((bits >>> 14) & 0x3fff) + 1;
+      }
+    }
+    return (w > 0 && h > 0 && w < 20000 && h < 20000) ? {w: w, h: h} : null;
+  }
+  function readImageDimsFromBase64(b64){
+    var limits = [24000, 160000, 800000]; // у JPEG заголовок с размерами может лежать после EXIF-миниатюры
+    for(var li = 0; li < limits.length; li++){
+      var nChars = Math.min(b64.length, limits[li]);
+      nChars -= nChars % 4;
+      var d = readImageDimsFromBinary(atob(b64.substr(0, nChars)));
+      if(d) return d;
+      if(nChars >= b64.length - (b64.length % 4)) break;
+    }
+    return null;
+  }
+  function bookImageSizeAttrs(imageId){
+    if(!bookReaderState || !bookReaderState.imageBase64) return "";
+    var cache = bookReaderState.imageDims || (bookReaderState.imageDims = {});
+    if(!Object.prototype.hasOwnProperty.call(cache, imageId)){
+      var entry = bookReaderState.imageBase64[imageId], d = null;
+      try{ if(entry && entry.base64) d = readImageDimsFromBase64(entry.base64); }catch(e){ d = null; }
+      cache[imageId] = d;
+    }
+    var dims = cache[imageId];
+    return dims ? ' width="' + dims.w + '" height="' + dims.h + '"' : "";
+  }
+
   // Калибровка оценки высоты пропускаемых сегментов: пока сегмент не сверстан, его высота берётся
   // из contain-intrinsic-size, а она считается как число символов * --book-px-per-char (+
   // картинки). Здесь мерим реальное значение px/символ на 3 «обычных» сегментах (без картинок): на
@@ -13793,7 +13858,7 @@
           // ниже).
           var pinned = !!pinByBlock[key];
           segHtml += '<div class="book-reader-image-wrap" data-ch="' + idx + '" data-blk="' + bi + '" data-img="' + escapeHtml(block.imageId) + '">' +
-            '<img class="cm-md-image book-reader-image" decoding="async" data-lazy-img="' + escapeHtml(block.imageId) + '">' +
+            '<img class="cm-md-image book-reader-image" decoding="async"' + bookImageSizeAttrs(block.imageId) + ' data-lazy-img="' + escapeHtml(block.imageId) + '">' +
             '<button type="button" class="book-reader-pin-btn' + (pinned ? ' pinned' : '') +
               '" title="' + (pinned ? "Убрать из заметки" : "Отправить в заметку") + '">' + READER_PIN_ICON_SVG + '</button>' +
           '</div>';
