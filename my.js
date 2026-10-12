@@ -1,6 +1,8 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 59.0 (12.10) — ПРИЧИНА «переход по главе из содержания и по закладке встаёт не туда» (воспроизведено в Chromium 141 на копии вёрстки ридера и настоящих функциях `scrollBookReaderToPosition`/`calibrateBookReaderSegments`: блок оказывался на 12…450 px ниже верха сразу после перехода): пока сегменты выше цели не отрисованы, их высота — оценка `contain-intrinsic-size`, реальной она становится только в кадре отрисовки ПОСЛЕ присваивания `scrollTop`. Прежний `refine` читал геометрию внутри `requestAnimationFrame` (до этого шага), два кадра подряд видел «всё ровно» и завершался; единственная запоздалая поправка (через 1.5 с) не делалась, если человек коснулся экрана, и пропускала сдвиг ≤ 30 px. Теперь `scrollBookReaderToPosition` доводит место циклом `settle`: каждый кадр сдвигает `scrollTop` на разницу между верхом блока и верхом контейнера, заканчивает когда поправок не было ≥ 700 мс (не раньше 1 с), по потолку 4 с или когда человек реально листает (`touchmove`/`wheel`; простое касание не прерывает). Прежние `refine`/`finalize`/проверка через 1.5 с и флаг `userTouched` удалены. Журнал: «ПЕРЕХОД · доводка №…» и «восстановление места: итог … — причина, поправок=N».
+
    Версия: 58.3 (12.10) — диагностика: в замерах после перехода добавлено, что реально нарисовано под верхней границей (`bookTopPainted`, elementFromPoint) и устройство первых сегментов/названия глав у цели (`bookTraceLayoutInfo`) — пользователь видит наверху ДРУГУЮ главу, чем та, что по геометрии DOM стоит наверху.
 
    Версия: 58.2 (12.10) — `currentBookReaderPosition`: допуск 1 px при определении блока наверху. По журналу Android 5 (Chrome 95) браузер округляет `scrollTop` до физического пикселя (885.35 → 884.88), и блок, стоящий ровно наверху (1:0), считался «ещё не дошли» — сверху определялся предыдущий (0:0), и через него писались позиция чтения и автозакладка. Остальное — диагностика 58.1.
@@ -13040,10 +13042,6 @@
     // книга больше BOOK_FREEZE_ALL_MAX_CHARS и цель далеко, закрепляем здесь сегменты от начала до цели (+3).
     var frozen = 0, freezeInfo = "";
     var legacyIntrinsic = bookCvLegacy;
-    var userTouched = false;
-    function onUserTouch(){ userTouched = true; }
-    container.addEventListener("touchstart", onUserTouch, {passive: true});
-    container.addEventListener("wheel", onUserTouch, {passive: true});
     if(seg && legacyIntrinsic){
       try{
         var allSegs = container.querySelectorAll(".book-reader-seg");
@@ -13059,58 +13057,53 @@
     if(bookTraceOn()) bookTrace("первое присваивание scrollTop=" + Math.round(firstTarget) + " → сразу прочитано " + Math.round(container.scrollTop) + (Math.abs(container.scrollTop - firstTarget) > 2 ? " ⚠ НЕ ПРИМЕНИЛОСЬ (контейнер не прокручивается до цели: scrollHeight=" + container.scrollHeight + ", clientHeight=" + container.clientHeight + ")" : " (применилось)"));
     if(dbg) dbg.log("восстановление места: " + posText(position) + ", цель=" + Math.round(firstTarget) + ", scrollTop=" + Math.round(container.scrollTop) + ", scrollHeight=" + container.scrollHeight + ", clientHeight=" + container.clientHeight + ", сегмент " + (seg ? "есть" : "нет") + ", закреплено высот=" + frozen + freezeInfo + ", движок без запоминания высот: " + bookCvLegacy + ", " + (navigator.userAgent.match(/Chrome\/[\d.]+/) || ["Chrome ?"])[0]);
     bookTraceAfterJump(container, el, position);
-    var tries = 0, stableFrames = 0;
+    // 59.0: ДОВОДКА места, пока геометрия книги не устоялась. Причина «переход по главе/закладке встаёт не туда» (проверено
+    // в Chromium 141 на копии вёрстки ридера и функций из этого файла, смещение 12…450 px): пока сегменты выше цели не
+    // отрисованы, их высота — оценка (contain-intrinsic-size), реальной она становится только в КАДРЕ ОТРИСОВКИ ПОСЛЕ нашего
+    // присваивания scrollTop. Прежний refine читал геометрию внутри rAF (до этого шага), видел «всё ровно» два кадра подряд и
+    // завершался; блок уезжал позже, а поправка через 1.5 с срабатывала только если человек не коснулся экрана и только при
+    // сдвиге > 30 px. Теперь: каждый кадр сравниваем верх блока с верхом контейнера и сдвигаем scrollTop ровно на разницу;
+    // заканчиваем, когда поправок не было ≥ 700 мс (но не раньше 1 с), либо по потолку 4 с, либо когда человек сам листает
+    // (touchmove/wheel — одно касание без движения доводку не прерывает).
+    var settleStart = performance.now(), lastFixAt = settleStart, fixes = 0, userMoved = false, settled = false;
+    function onUserMove(){ userMoved = true; }
+    container.addEventListener("touchmove", onUserMove, {passive: true});
+    container.addEventListener("wheel", onUserMove, {passive: true});
     function release(){
+      container.removeEventListener("touchmove", onUserMove);
+      container.removeEventListener("wheel", onUserMove);
       container.style.overflowAnchor = prevAnchor;
       bookReaderRestoreActive = false;
       if(bookReaderRestoreFailsafe){ clearTimeout(bookReaderRestoreFailsafe); bookReaderRestoreFailsafe = null; }
     }
-    function finalize(){
-      if(!el.isConnected){ release(); return; }
-      var r = el.getBoundingClientRect(), cr = container.getBoundingClientRect();
-      var inView = r.bottom > cr.top && r.top < cr.bottom;
-      if(dbg) dbg.log("восстановление места: итог " + posText(position) + " на экране=" + inView + ", scrollTop=" + Math.round(container.scrollTop) + ", верх блока относительно контейнера=" + Math.round(r.top - cr.top));
-      if(!inView){
-        try{ el.scrollIntoView(true); }catch(e){}
-        if(dbg) dbg.log("восстановление места: scrollIntoView → scrollTop=" + Math.round(container.scrollTop));
+    function finish(why){
+      if(settled) return;
+      settled = true;
+      if(el.isConnected){
+        var r = el.getBoundingClientRect(), cr = container.getBoundingClientRect();
+        if(dbg) dbg.log("восстановление места: итог " + posText(position) + " — " + why + ", поправок=" + fixes + ", за " + Math.round(performance.now() - settleStart) + " мс, scrollTop=" + Math.round(container.scrollTop) + ", верх блока относительно контейнера=" + Math.round(r.top - cr.top));
       }
-      // Повторная проверка после дозагрузки (шрифт из IndexedDB, ленивые картинки меняют высоты выше цели): если человек
-      // ничего не трогал, а блок уехал от верха — возвращаем его на место.
-      setTimeout(function(){
-        if(!el.isConnected){ release(); return; }
-        var rel = el.getBoundingClientRect().top - container.getBoundingClientRect().top;
-        var fixed = false;
-        if(!userTouched && Math.abs(rel) > 30){
-          container.scrollTop = bookElTopInContainer(container, el);
-          fixed = true;
-        }
-        container.removeEventListener("touchstart", onUserTouch);
-        container.removeEventListener("wheel", onUserTouch);
-        if(dbg) dbg.log("восстановление места: проверка через 1.5 с — сдвиг блока от верха=" + Math.round(rel) + (fixed ? ", поправлено" : (userTouched ? ", пользователь листал — не трогаем" : ", в порядке")));
-        release();
-      }, 1500);
+      release();
     }
-    function refine(){
-      if(!el.isConnected || !(seg ? seg.isConnected : true)){ if(bookTraceOn()) bookTrace("refine: блок/сегмент отсоединён от DOM — восстановление прервано (книгу перерисовали?)"); release(); return; }
-      // ВАЖНО: сначала top — чтение геометрии потомка форсирует реальную вёрстку пропущенного
-      // сегмента (content-visibility:auto); segTop/segH читаем ПОСЛЕ, иначе это устаревшая оценка
-      // (contain-intrinsic-size), сравниваемая со свежим top — проверка границ её отбраковывала, и
-      // прокрутка замирала на верху сегмента (баг «соседняя строка»/закладка выше экрана).
-      var top = bookElTopInContainer(container, el);
-      var segTop = seg ? bookElTopInContainer(container, seg) : top;
-      var segH = seg ? seg.getBoundingClientRect().height : 0;
-      var moved = false;
-      var _inSeg = (!seg || (top >= segTop - 2 && top <= segTop + segH + 2)), _stBefore = container.scrollTop;
-      if(_inSeg){
-        if(Math.abs(top - container.scrollTop) > 1){ container.scrollTop = top; moved = true; }
+    function settle(){
+      if(settled) return;
+      if(!el.isConnected || (seg && !seg.isConnected)){ if(bookTraceOn()) bookTrace("доводка: блок/сегмент отсоединён от DOM — прервана (книгу перерисовали?)"); finish("блок отсоединён"); return; }
+      if(userMoved){ finish("человек листает сам"); return; }
+      var now = performance.now();
+      var rel = el.getBoundingClientRect().top - container.getBoundingClientRect().top - container.clientTop;
+      if(Math.abs(rel) > 1){
+        var before = container.scrollTop;
+        container.scrollTop = before + rel;
+        // упёрлись в край прокрутки (последняя глава короче экрана) — это не поправка, ждать стабильности нечего
+        if(Math.abs(container.scrollTop - before) >= 0.5){ fixes++; lastFixAt = now; }
+        if(bookTraceOn()) bookTrace("доводка №" + fixes + " +" + Math.round(now - settleStart) + " мс: блок был на " + Math.round(rel) + " px от верха, scrollTop " + Math.round(before) + " → " + Math.round(container.scrollTop) + ", scrollHeight=" + container.scrollHeight);
       }
-      if(bookTraceOn()) bookTrace("refine №" + (tries + 1) + ": верх блока=" + Math.round(top) + ", верх сегмента=" + Math.round(segTop) + ", высота сегмента=" + Math.round(segH) + ", блок в границах сегмента=" + _inSeg + ", scrollTop " + Math.round(_stBefore) + " → " + Math.round(container.scrollTop) + (moved ? " (поправлен)" : " (без поправки)") + ", scrollHeight=" + container.scrollHeight);
-      stableFrames = moved ? 0 : stableFrames + 1;
-      // до 8 кадров, но раньше — если два кадра подряд поправок не потребовалось (геометрия устоялась)
-      if(++tries < 8 && stableFrames < 2) requestAnimationFrame(refine);
-      else requestAnimationFrame(finalize);
+      var elapsed = now - settleStart;
+      if(elapsed >= 4000){ finish("потолок 4 с"); return; }
+      if(elapsed >= 1000 && now - lastFixAt >= 700){ finish("геометрия устоялась"); return; }
+      requestAnimationFrame(settle);
     }
-    requestAnimationFrame(refine);
+    requestAnimationFrame(settle);
     return true;
   }
   function flushBookReaderPositionNow(){
