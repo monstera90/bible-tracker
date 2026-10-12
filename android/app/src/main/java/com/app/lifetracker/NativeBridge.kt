@@ -18,8 +18,9 @@ class NativeBridge(private val activity: MainActivity) {
          * 1: шаги 2-3 (статус-бар, live-update); 2: шаг 4 (сохранение, «Поделиться», полный экран, приём файлов);
          * 3: шаг 5 (нативные уведомления: напоминания, общие задачи, будильник, опрос при закрытом приложении);
          * 4: клавиатура поверх страницы (setKeyboardOverlay + window.__ltOnKeyboard): текст задачи поднимается над клавиатурой.
+         * 5: copyText — копирование выделенного текста в буфер обмена (своя кнопка «Копировать» вместо системного меню).
          */
-        const val BRIDGE_VERSION = 4
+        const val BRIDGE_VERSION = 5
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -357,6 +358,26 @@ class NativeBridge(private val activity: MainActivity) {
             }
         }.start()
         return true
+    }
+
+    /** Кладёт текст в буфер обмена (кнопка «Копировать» в ридере, задачах и заметках). */
+    @JavascriptInterface
+    fun copyText(text: String?): Boolean {
+        if (!activity.pageTrusted || text.isNullOrEmpty()) return false
+        var ok = false
+        val latch = java.util.concurrent.CountDownLatch(1)
+        activity.runOnUiThread {
+            try {
+                val cm = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("text", text))
+                ok = true
+            } catch (e: Exception) {
+                ok = false
+            }
+            latch.countDown()
+        }
+        latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+        return ok
     }
 
     /** Цвет статус-бара: "#rrggbb", "#rgb" или "rgb(r, g, b)". Значок светлый/тёмный выбирается по яркости цвета. */

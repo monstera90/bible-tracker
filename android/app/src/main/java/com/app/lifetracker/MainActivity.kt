@@ -533,7 +533,7 @@ class MainActivity : ComponentActivity() {
     private fun buildLayout() {
         statusStrip = View(this).apply { setBackgroundColor(DEFAULT_STATUS_COLOR) }
         navStrip = View(this).apply { setBackgroundColor(PAGE_BG_COLOR) }
-        webView = WebView(this)
+        webView = SelectionMenuWebView(this) // без системного меню выделения (копирование — своя кнопка страницы)
 
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

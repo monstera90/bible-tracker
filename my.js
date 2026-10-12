@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 60.0 (12.10) — кнопка «Копировать» (структурная правка: `window.LTCopyText`, `READER_COPY_ICON_SVG`, `#bookReaderCopyBtn` слева от «Выделить текст» в ридере, `#taskCopyBtn` в нижнем ряду задач слева от текстовыделителя, `.task-copy-wrap` в списках видимости/ползунка); системное меню выделения в APK скрыто (SelectionMenuWebView.kt, мост версии 5).
    Версия: 59.1 (12.10) — `openBookAtMarginBookmark`: при тапе по закладке книга собиралась ДВАЖДЫ (switchSettingsTab("set2s_7") перерисовывал уже открытую книгу, затем openBookReader заново читал файл, парсил и собирал её ещё раз — `renderBookReader` обнулял `scrollTop` и стирал результат первой доводки, на Android 5 около 10 с). Теперь: эта же книга уже открыта — `openBookReader` не зовётся, выставляются текстовый режим и `restorePosition`, вкладка собирает книгу один раз; открыта другая книга — перед `switchSettingsTab` место старой сохраняется и `bookReaderState` сбрасывается (вкладка рисует лёгкий список), `booksTabVisitedThisSession` ставится заранее (чтобы вкладка не открыла «последнюю книгу» параллельно), затем нужная книга открывается один раз.
 
    Версия: 59.0 (12.10) — ПРИЧИНА «переход по главе из содержания и по закладке встаёт не туда» (воспроизведено в Chromium 141 на копии вёрстки ридера и настоящих функциях `scrollBookReaderToPosition`/`calibrateBookReaderSegments`: блок оказывался на 12…450 px ниже верха сразу после перехода): пока сегменты выше цели не отрисованы, их высота — оценка `contain-intrinsic-size`, реальной она становится только в кадре отрисовки ПОСЛЕ присваивания `scrollTop`. Прежний `refine` читал геометрию внутри `requestAnimationFrame` (до этого шага), два кадра подряд видел «всё ровно» и завершался; единственная запоздалая поправка (через 1.5 с) не делалась, если человек коснулся экрана, и пропускала сдвиг ≤ 30 px. Теперь `scrollBookReaderToPosition` доводит место циклом `settle`: каждый кадр сдвигает `scrollTop` на разницу между верхом блока и верхом контейнера, заканчивает когда поправок не было ≥ 700 мс (не раньше 1 с), по потолку 4 с или когда человек реально листает (`touchmove`/`wheel`; простое касание не прерывает). Прежние `refine`/`finalize`/проверка через 1.5 с и флаг `userTouched` удалены. Журнал: «ПЕРЕХОД · доводка №…» и «восстановление места: итог … — причина, поправок=N».
@@ -1904,6 +1905,8 @@
     var fontSizeWrap = document.getElementById("taskFontSizeWrap");
     var highlightWrap = document.getElementById("taskHighlightWrap");
     var attachWrap = document.getElementById("taskAttachWrap");
+    var copyWrap = document.getElementById("taskCopyWrap");
+    if(copyWrap) copyWrap.classList.toggle("visible", showTaskFab);
     for(var fwi = 0; fwi < formatWraps.length; fwi++) formatWraps[fwi].classList.toggle("visible", showTaskFab);
     if(fontSizeWrap) fontSizeWrap.classList.toggle("visible", showTaskFab);
     if(highlightWrap) highlightWrap.classList.toggle("visible", showTaskFab);
@@ -7492,7 +7495,7 @@
   function initFabRowSlider(){
     var box = document.getElementById("settingsModalBox");
     if(!box) return;
-    var TASK_TARGETS_SEL = ".task-add-fab, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap, " +
+    var TASK_TARGETS_SEL = ".task-add-fab, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap, .task-copy-wrap, " +
       ".task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, " +
       ".task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home";
     var EDGE = 6;           // отступ кнопок от края окна (как у самого ряда, --fab-gap в modals.css)
@@ -7886,6 +7889,19 @@
       });
     }
 
+    // --- «Копировать» (слева от текстовыделителя): выделенный текст — в буфер обмена. Выделение лежит
+    // в .task-editable (редактируемая строка) либо в обычном тексте вкладки; берём window.getSelection().
+    // stopMousedown — чтобы строка не потеряла фокус/выделение раньше click (см. выше). ---
+    var copyBtn = document.getElementById("taskCopyBtn");
+    stopMousedown(copyBtn);
+    if(copyBtn){
+      copyBtn.addEventListener("click", function(){
+        var sel = window.getSelection();
+        var text = sel ? sel.toString() : "";
+        if(text) window.LTCopyText(text);
+      });
+    }
+
     // --- "глаз" — скрыть/показать на вкладке "Next" задачи, которые уже
     // привязаны к какому-то проекту (nextForProjectId, см. фильтр в renderTaskTabList и
     // NEXT_HIDE_LINKED_KEY выше). Сама задача при этом никуда не удаляется — просто не выводится в
@@ -8079,6 +8095,41 @@
       setTaskText(taskIdForImmediateSave, immediateText);
     }
   }
+
+  // Копирование текста в буфер обмена (кнопки «Копировать» в ридере книг, задачах и «Моём блокноте»; в APK
+  // системное меню выделения скрыто — SelectionMenuWebView.kt). Порядок: нативный мост copyText (APK, мост ≥ 5) →
+  // navigator.clipboard → execCommand("copy") через временное поле. Возвращает Promise<boolean>; при успехе в APK
+  // показывает короткое сообщение «Скопировано».
+  window.LTCopyText = function(text){
+    text = String(text == null ? "" : text);
+    if(!text) return Promise.resolve(false);
+    function done(ok){
+      try {
+        var N = window.LifeTrackerNative;
+        if(ok && N && typeof N.showToast !== "undefined") N.showToast("Скопировано");
+      } catch(e){}
+      return ok;
+    }
+    try {
+      var N = window.LifeTrackerNative;
+      if(N && typeof N.copyText !== "undefined" && N.copyText(text)) return Promise.resolve(done(true));
+    } catch(e){}
+    function legacy(){
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0;";
+      document.body.appendChild(ta);
+      var ok = false;
+      try { ta.select(); ok = document.execCommand("copy"); } catch(e){ ok = false; }
+      document.body.removeChild(ta);
+      return ok;
+    }
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      return navigator.clipboard.writeText(text).then(function(){ return done(true); }, function(){ return done(legacy()); });
+    }
+    return Promise.resolve(done(legacy()));
+  };
 
   // оборачивает ВЫДЕЛЕННЫЙ прямо сейчас текст (внутри того .task-editable, что сейчас редактируется
   // — см. initTaskGlobalToolbar выше) markdown-маркерами форматирования. Если выделения нет —
@@ -13214,6 +13265,8 @@
       '<circle cx="12" cy="7.2" r="4.2"></circle>' +
       '<line x1="12" y1="11.4" x2="12" y2="20.5"></line>' +
     '</svg>';
+  var READER_COPY_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V6a2 2 0 0 1 2-2h9"></path></svg>';
   var READER_SELECT_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M4 20h6"></path>' +
@@ -13530,6 +13583,7 @@
           '</div>' +
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontSizeBtn" title="Размер шрифта">Аа</button>' +
         '</span>' +
+        '<button type="button" class="mdeditor-fab-btn" id="bookReaderCopyBtn" title="Копировать">' + READER_COPY_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderSelectBtn" title="Выделить текст">' + READER_SELECT_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderBookmarkAddBtn" title="Добавить отдельную закладку">' + READER_BOOKMARK_ADD_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderBookmarkBtn" title="' + (isMainBookmarkAuto(bookReaderState.hash) ? MAIN_BOOKMARK_AUTO_TITLE : MAIN_BOOKMARK_MANUAL_TITLE) + '">' + (isMainBookmarkAuto(bookReaderState.hash) ? READER_BOOKMARK_AUTO_ICON_SVG : READER_BOOKMARK_ICON_SVG) + '</button>' +
@@ -13587,6 +13641,8 @@
     }
     html += iconRow('<span style="font-weight:600;font-size:15px;line-height:1;">Аа</span>', false,
       "Размер шрифта и переносы слов. Нажатие раскрывает кнопки «+» (крупнее), «−» (мельче) и кнопку переносов слов (включает и выключает автоматические переносы). Размер шрифта общий с задачами и «Моим блокнотом», у режима чтения он свой.");
+    html += iconRow(READER_COPY_ICON_SVG, false,
+      "Копирует выделенный в книге текст в буфер обмена. Системное меню выделения («Копировать», «Поделиться» и др.) в приложении не показывается — копируйте этой кнопкой.");
     html += iconRow(READER_SELECT_ICON_SVG, false,
       "Сначала выделите фрагмент текста обычным способом, затем нажмите эту кнопку — фрагмент подчёркивается и дописывается в заметку книги. Когда заметка ещё не привязана, приложение предложит создать новую или выбрать существующую. Подчёркивать можно только в пределах одного абзаца. Нажатие на подчёркнутое место показывает кнопку-урну " +
       '<span class="task-icon-btn" style="display:inline-flex;vertical-align:middle;width:1.3em;height:1.3em;">' + READER_TRASH_ICON_SVG + '</span> — она снимает подчёркивание.');
@@ -13673,6 +13729,16 @@
     // сразу подчёркивает его. mousedown с preventDefault — то же самое, зачем это нужно кнопкам
     // форматирования в mdeditor.js: клик по кнопке иначе сбросил бы выделение текста до
     // срабатывания click.
+    // «Копировать» — слева от «Выделить текст»: выделенный в книге текст уходит в буфер обмена.
+    var copyBtn = document.getElementById("bookReaderCopyBtn");
+    if(copyBtn){
+      copyBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+      copyBtn.addEventListener("click", function(){
+        var sel = window.getSelection();
+        var text = sel ? sel.toString() : "";
+        if(text) window.LTCopyText(text);
+      });
+    }
     var selectBtn = document.getElementById("bookReaderSelectBtn");
     if(selectBtn){
       selectBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });

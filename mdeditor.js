@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 8.0 (12.10) — кнопка «Копировать» `#mdEditorCopyBtn` (`COPY_ICON_SVG`) в нижнем ряду заметки слева от маркера, копирует выделение CodeMirror через `window.LTCopyText` (my.js).
    Версия: 7.6 (11.10) — в возвращаемом объекте `onAppPause`/`onAppResume` (сворачивание/возврат из APK без visibilitychange); при возврате без запомненной прокрутки область возвращается к строке с кареткой, а не в начало.
    Версия: 7.5 (11.10) — `replaceAllNotesFromEntries` (импорт категории «Заметки») больше не снимает закладки заметок: раньше каждая закладка заменялась записью {c:false} с текущим временем — она затирала закладки из импортируемого архива и уходила в облако (закладки исчезали на всех устройствах); теперь после замены набор перечитывается из state.
    Версия: 7.4 (08.10) — картинки удаляются вместе с владельцем, автоматической «корзины сирот» больше нет: `maybeRunImageCleanup` ничего не делает (её раньше дёргали старт, сверка заметок и `retryImageCleanup`), новая `deleteImagesOfText(text, excludeNoteId)` стирает картинки `![[имя]]` из текста удалённой задачи/комментария/заметки (если на них нет других ссылок), `deleteNoteRecord(id, withImages)` зовёт её при удалении заметки из списка и папки. Причина: чистка судила по неполному снимку данных и ставила в облаке метку удаления, которая стирала картинку на всех устройствах.
@@ -505,6 +506,9 @@ window.initMdEditorModule = function(deps){
     '</svg>';
   // Кнопка "Поделиться" в полноэкранном просмотре картинки (openImageViewer
   // ниже) — стандартная андроид-пиктограмма "коробка со стрелкой вверх".
+  // «Копировать» — слева от маркера в нижнем ряду заметки (та же пиктограмма, что в my.js/index.html).
+  var COPY_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V6a2 2 0 0 1 2-2h9"></path></svg>';
   var SHARE_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M12 15V4"></path>' +
@@ -4172,6 +4176,9 @@ window.initMdEditorModule = function(deps){
     html += row(btnIcon(HIGHLIGHT_ICON_SVG),
       "Текстовыделитель: выделите текст и нажмите кнопку — он будет выделен цветом. В тексте это " + code("==выделенный==") + ".");
 
+    html += row(btnIcon(COPY_ICON_SVG),
+      "Копирует выделенный текст в буфер обмена. Системное меню выделения в приложении не показывается — копируйте этой кнопкой.");
+
     // --- остальные кнопки нижнего ряда ---
     html += row(btnIcon(CODE_ICON_SVG),
       "Переключает режим показа: без символов разметки (красиво оформленный текст) и «с кодом» — видны все " +
@@ -4219,6 +4226,7 @@ window.initMdEditorModule = function(deps){
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-italic" id="mdEditorFmtItalicBtn" title="Курсив">К</button>' +
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-underline" id="mdEditorFmtUnderlineBtn" title="Подчёркнутый">П</button>' +
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-strike" id="mdEditorFmtStrikeBtn" title="Зачёркнутый">Ч</button>' +
+          '<button type="button" class="mdeditor-fab-btn" id="mdEditorCopyBtn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorHighlightBtn" title="Выделить текст">' + HIGHLIGHT_ICON_SVG + '</button>' +
           '<span class="mdeditor-fontsize-wrap" id="mdEditorFontSizeWrap">' +
             '<div class="mdeditor-fontsize-popup" id="mdEditorFontSizePopup">' +
@@ -4323,6 +4331,17 @@ window.initMdEditorModule = function(deps){
     // выделения, что и у Ж/К/П/Ч, см. wrapCmSelection/bindFormatBtn выше).
     // mousedown с preventDefault — чтобы клик по кнопке не сбрасывал
     // выделение в CodeMirror до срабатывания click.
+    // «Копировать» — слева от маркера: выделение CodeMirror (sliceDoc) уходит в буфер обмена через window.LTCopyText (my.js).
+    var copyBtn = document.getElementById("mdEditorCopyBtn");
+    if(copyBtn){
+      copyBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      copyBtn.addEventListener("click", function(){
+        if(!cmView) return;
+        var sel = cmView.state.selection.main;
+        if(sel.from === sel.to) return;
+        if(window.LTCopyText) window.LTCopyText(cmView.state.sliceDoc(sel.from, sel.to));
+      });
+    }
     var highlightBtn = document.getElementById("mdEditorHighlightBtn");
     if(highlightBtn){
       highlightBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
