@@ -1,6 +1,8 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 58.1 (12.10) — ТОЛЬКО ДИАГНОСТИКА (поведение не менялось): сквозная трассировка перехода по главе из содержания и по закладке в журнале отладки (строки «ПЕРЕХОД · …»): клик → `jumpToChapterFromChaptersList`/`openBookAtMarginBookmark` → `openBookReader` (с ошибками, раньше они глотались в строку статуса) → `renderBookReader` → сборка текста → кадр восстановления → `scrollBookReaderToPosition` (снимок контейнера: прокручиваемые предки, overflow, высоты; присвоенный и прочитанный `scrollTop`; каждый `refine`) → замеры через 0/60/200/500/1000/2000/3500 мс и события `scroll` в течение этого времени. Новые функции: `bookTrace`, `bookTraceOn`, `bookScrollEnv`, `bookTraceAfterJump`.
+
    Версия: 58.0 (12.10) — переход по главе/закладке на Android 5 «не туда»: у ленивых картинок книги не было размеров (высота <img> = 0 до декодирования), и каждая подгрузка картинки выше цели сдвигала книгу на её высоту (в журнале scrollTop сам прыгает на +1150…1200 px и обратно, итоговая проверка при этом считает, что всё в порядке), а закрепление высот сегментов (57.14) мерило их без картинок. Теперь `bookImageSizeAttrs` читает ширину/высоту из заголовка PNG/JPEG/GIF/WebP и пишет в `width`/`height` <img> — место резервируется сразу, вёрстка книги не меняется при подгрузке картинок.
 
    Версия: 57.14 (12.10) — ПЕРВОПРИЧИНА всех «не туда» в книгах на Android 5 (Chrome 95): запись `contain-intrinsic-size: auto 0px auto Y` в components.css в Chrome < 107 невалидна и отбрасывается — браузер не запоминает реальную высоту пропущенных сегментов (`content-visibility:auto`), геометрия книги схлопывается при прокрутке (в журнале scrollTop 22452 → 8017), а позиции по пикселям (место чтения, глава из содержания, закладка) уезжают. Прежняя проверка `CSS.supports(..., "auto 0px")` проверяла короткую форму, которую Chrome 95 понимает, и закрепление высот (57.9–57.10) там НЕ запускалось («закреплено высот=0»). Теперь `bookCvLegacy` проверяет ту форму, что в CSS; на таком движке `freezeBookSegHeights` сразу после сборки книги измеряет реальные высоты всех сегментов (до `BOOK_FREEZE_ALL_MAX_CHARS`=1.5 млн знаков, дальше — до цели) и закрепляет их как `contain-intrinsic-size` (атрибут `data-frozen`). Экранная плашка диагностики (57.11) удалена.
@@ -12909,11 +12911,66 @@
     if(window.Debug) window.Debug.log("высоты сегментов закреплены: " + n + " из " + segs.length + " за " + Math.round(performance.now() - t0) + " мс (движок без `contain-intrinsic-size: auto` по осям)");
     return n;
   }
+  // 58.1: ТРАССИРОВКА перехода по главе/закладке (только журнал отладки Debug.log, поведение не меняет; всё не включено, пока
+  // не включена галочка «режим отладки»). Нужна, чтобы определить НАСТОЯЩУЮ причину «переход не переносит страницу» на Android 5.
+  function bookTraceOn(){ return !!(window.Debug && window.Debug.isEnabled && window.Debug.isEnabled()); }
+  function bookTrace(msg){ if(window.Debug) window.Debug.log("ПЕРЕХОД · " + msg); }
+  function bookTraceErr(where, e){
+    bookTrace("ОШИБКА в " + where + ": " + (e && e.name ? e.name + ": " : "") + (e && e.message ? e.message : e) +
+      (e && e.stack ? " | " + String(e.stack).split("\n").slice(0, 4).join(" <- ").slice(0, 400) : ""));
+  }
+  // Снимок «кто на самом деле прокручивается»: сам контейнер, его стили и все прокручиваемые предки.
+  function bookScrollEnv(container){
+    try{
+      var cs = window.getComputedStyle(container);
+      var s = "контейнер #" + (container.id || "?") + " scrollTop=" + Math.round(container.scrollTop) + " scrollHeight=" + container.scrollHeight +
+        " clientHeight=" + container.clientHeight + " overflowY=" + cs.overflowY + " display=" + cs.display + " position=" + cs.position +
+        " height=" + cs.height + " подключён=" + container.isConnected;
+      var anc = [], par = container.parentElement, guard = 0;
+      while(par && guard++ < 12){
+        var pcs = window.getComputedStyle(par);
+        if(par.scrollHeight > par.clientHeight + 1 && /(auto|scroll)/.test(pcs.overflowY)){
+          anc.push((par.id ? "#" + par.id : par.tagName.toLowerCase() + "." + String(par.className).split(" ")[0]) + "(scrollTop=" + Math.round(par.scrollTop) + ")");
+        }
+        par = par.parentElement;
+      }
+      var se = document.scrollingElement;
+      s += "; прокручиваемые предки: " + (anc.length ? anc.join(", ") : "нет") + "; страница scrollTop=" + (se ? Math.round(se.scrollTop) : "?") +
+        "; innerHeight=" + window.innerHeight + (window.visualViewport ? ", visualViewport.height=" + Math.round(window.visualViewport.height) : "") +
+        "; сегментов=" + container.querySelectorAll(".book-reader-seg").length + ", закреплённых=" + container.querySelectorAll(".book-reader-seg[data-frozen]").length +
+        "; body.class=" + String(document.body.className).slice(0, 80);
+      return s;
+    }catch(e){ return "ошибка снимка: " + (e && e.message); }
+  }
+  // После перехода: замеры через 0/60/200/500/1000/2000/3500 мс (где сейчас цель и что сверху) + каждое событие scroll (со сдвигом).
+  // Вместе с уже существующими строками Debug «scrollTop СВОИМ JS» (со стеком) и «БЕЗ JS-set» видно, КТО и когда сдвинул прокрутку.
+  function bookTraceAfterJump(container, el, position){
+    if(!bookTraceOn()) return;
+    var t0 = performance.now(), lastSt = container.scrollTop, lines = 0, delays = [0, 60, 200, 500, 1000, 2000, 3500];
+    function onScroll(){
+      var st = container.scrollTop;
+      if(Math.abs(st - lastSt) >= 1 && lines < 40){ lines++; bookTrace("событие scroll +" + Math.round(performance.now() - t0) + " мс: " + Math.round(lastSt) + " → " + Math.round(st) + " (Δ" + Math.round(st - lastSt) + ")"); }
+      lastSt = st;
+    }
+    container.addEventListener("scroll", onScroll, {passive: true});
+    delays.forEach(function(d, i){
+      setTimeout(function(){
+        try{
+          var rel = el.isConnected ? Math.round(el.getBoundingClientRect().top - container.getBoundingClientRect().top) : "блок отсоединён";
+          bookTrace("замер +" + Math.round(performance.now() - t0) + " мс: цель " + posText(position) + ", верх цели от верха контейнера=" + rel +
+            ", сверху сейчас блок " + posText(currentBookReaderPosition(container)) + ", scrollTop=" + Math.round(container.scrollTop) + "/" + container.scrollHeight +
+            ", идёт восстановление=" + bookReaderRestoreActive);
+        }catch(e){ bookTraceErr("замере", e); }
+        if(i === delays.length - 1) container.removeEventListener("scroll", onScroll);
+      }, d);
+    });
+  }
   var BOOK_EXACT_LAYOUT_MAX_SEGS = 150; // до этого номера сегмента место восстанавливается по точной вёрстке всех сегментов выше
   function scrollBookReaderToPosition(container, position){
     if(!position) return false;
     if(position.blk === -1) return scrollBookReaderToChapterTitleTop(container, position.ch);
     var dbg = window.Debug;
+    if(bookTraceOn()) bookTrace("scrollBookReaderToPosition(" + posText(position) + ") вызвана, источник цели: " + (bookReaderState && bookReaderState.restoreSource) + "; " + bookScrollEnv(container) + "; " + (navigator.userAgent.match(/Chrome\/[\d.]+/) || ["Chrome ?"])[0]);
     var el = container.querySelector('[data-ch="' + position.ch + '"][data-blk="' + position.blk + '"]');
     if(!el){
       // 57.13: целевой блок может быть не отрисован (например, блок-картинка без данных картинки на этом устройстве, из-за
@@ -12961,7 +13018,9 @@
     }
     var firstTarget = bookElTopInContainer(container, seg || el);
     container.scrollTop = firstTarget;
+    if(bookTraceOn()) bookTrace("первое присваивание scrollTop=" + Math.round(firstTarget) + " → сразу прочитано " + Math.round(container.scrollTop) + (Math.abs(container.scrollTop - firstTarget) > 2 ? " ⚠ НЕ ПРИМЕНИЛОСЬ (контейнер не прокручивается до цели: scrollHeight=" + container.scrollHeight + ", clientHeight=" + container.clientHeight + ")" : " (применилось)"));
     if(dbg) dbg.log("восстановление места: " + posText(position) + ", цель=" + Math.round(firstTarget) + ", scrollTop=" + Math.round(container.scrollTop) + ", scrollHeight=" + container.scrollHeight + ", clientHeight=" + container.clientHeight + ", сегмент " + (seg ? "есть" : "нет") + ", закреплено высот=" + frozen + freezeInfo + ", движок без запоминания высот: " + bookCvLegacy + ", " + (navigator.userAgent.match(/Chrome\/[\d.]+/) || ["Chrome ?"])[0]);
+    bookTraceAfterJump(container, el, position);
     var tries = 0, stableFrames = 0;
     function release(){
       container.style.overflowAnchor = prevAnchor;
@@ -12994,7 +13053,7 @@
       }, 1500);
     }
     function refine(){
-      if(!el.isConnected || !(seg ? seg.isConnected : true)){ release(); return; }
+      if(!el.isConnected || !(seg ? seg.isConnected : true)){ if(bookTraceOn()) bookTrace("refine: блок/сегмент отсоединён от DOM — восстановление прервано (книгу перерисовали?)"); release(); return; }
       // ВАЖНО: сначала top — чтение геометрии потомка форсирует реальную вёрстку пропущенного
       // сегмента (content-visibility:auto); segTop/segH читаем ПОСЛЕ, иначе это устаревшая оценка
       // (contain-intrinsic-size), сравниваемая со свежим top — проверка границ её отбраковывала, и
@@ -13003,9 +13062,11 @@
       var segTop = seg ? bookElTopInContainer(container, seg) : top;
       var segH = seg ? seg.getBoundingClientRect().height : 0;
       var moved = false;
-      if(!seg || (top >= segTop - 2 && top <= segTop + segH + 2)){
+      var _inSeg = (!seg || (top >= segTop - 2 && top <= segTop + segH + 2)), _stBefore = container.scrollTop;
+      if(_inSeg){
         if(Math.abs(top - container.scrollTop) > 1){ container.scrollTop = top; moved = true; }
       }
+      if(bookTraceOn()) bookTrace("refine №" + (tries + 1) + ": верх блока=" + Math.round(top) + ", верх сегмента=" + Math.round(segTop) + ", высота сегмента=" + Math.round(segH) + ", блок в границах сегмента=" + _inSeg + ", scrollTop " + Math.round(_stBefore) + " → " + Math.round(container.scrollTop) + (moved ? " (поправлен)" : " (без поправки)") + ", scrollHeight=" + container.scrollHeight);
       stableFrames = moved ? 0 : stableFrames + 1;
       // до 8 кадров, но раньше — если два кадра подряд поправок не потребовалось (геометрия устоялась)
       if(++tries < 8 && stableFrames < 2) requestAnimationFrame(refine);
@@ -13223,6 +13284,7 @@
     // телефоне это секунды), и за это время человек может уйти на другую вкладку. Тогда результат уже не нужен
     // (см. проверку в начале then(res) ниже), иначе он подменил бы bookReaderState чужой книги.
     var startTab = currentSettingsTab, startOwner = bookReaderOwnerTab;
+    if(bookTraceOn()) bookTrace("openBookReader(" + name + ") вызван, позиция от вызывающего: " + (resolveRestorePosition ? "передана колбэком" : "нет (будет сохранённая)") + ", вкладка=" + startTab + ", книга уже открыта=" + !!bookReaderState + " | " + String(new Error().stack || "").split("\n").slice(2, 5).join(" <- ").slice(0, 300));
     // ВРЕМЕННО — таймеры через window.Debug.log, убрать после того, как найдём узкое место.
     var _dbgT0 = performance.now();
     function _dbg(label){
@@ -13246,7 +13308,7 @@
       });
     }).then(function(res){
       if(currentSettingsTab !== startTab || bookReaderOwnerTab !== startOwner){
-        if(window.Debug) window.Debug.log("openBookReader[" + name + "]: результат отброшен — пользователь ушёл с вкладки " + startTab + " на " + currentSettingsTab);
+        if(window.Debug) window.Debug.log("ПЕРЕХОД · openBookReader[" + name + "]: результат отброшен — пользователь ушёл с вкладки " + startTab + " на " + currentSettingsTab);
         return;
       }
       var _tImg = performance.now();
@@ -13304,6 +13366,7 @@
       // неё нет): шаг "назад" для него НЕ кладётся — иначе колбэк ниже через
       // renderBookReaderOwnerTab заново открывал бы ту же книгу и системное "назад" крутилось бы по
       // кругу, не доходя до возврата на прошлую вкладку/закрытия окна настроек.
+      if(bookTraceOn()) bookTrace("openBookReader[" + name + "]: bookReaderState создан, restorePosition=" + posText(bookReaderState.restorePosition) + " (" + bookReaderState.restoreSource + "), сохранённая позиция=" + posText(savedBookState && savedBookState.position));
       var ipkdRootScreen = (name === IPKD_BOOK_NAME && bookReaderOwnerTab === "set2s_8");
       if(!ipkdRootScreen) window.AppNav.push(function(){
         autoUpdateMainBookmarkOnExit();
@@ -13321,6 +13384,7 @@
       renderBookReader();
       _dbg("renderBookReader() вернул управление (innerHTML уже выставлен синхронно)");
     }).catch(function(e){
+      bookTraceErr("openBookReader[" + name + "] (цепочка открытия книги, включая renderBookReader)", e);
       var statusEl = document.getElementById("booksStatus");
       if(statusEl){
         statusEl.textContent = "Не удалось открыть книгу: " + (e && e.message ? e.message : e);
@@ -13371,6 +13435,7 @@
 
   function renderBookReader(){
     var container = document.getElementById("settingsTabContent");
+    if(bookTraceOn()) bookTrace("renderBookReader: " + (!container ? "нет #settingsTabContent — выход" : (!bookReaderState ? "нет bookReaderState — выход" : "режим=" + bookReaderState.mode + ", restorePosition=" + posText(bookReaderState.restorePosition) + ", в контейнере сейчас: " + (container.querySelector("#bookChaptersList") ? "список глав" : (container.querySelector(".book-reader-p, .book-reader-image-wrap") ? "текст книги" : "другое")))));
     if(!container || !bookReaderState) return;
     // Запоминаем позицию ТОГО, что сейчас реально показано в контейнере, ПЕРЕД любой перерисовкой —
     // не только при смене режима текст<->главы (см. switchBookReaderMode ниже, она это уже делала
@@ -13783,6 +13848,7 @@
   function renderBookReaderText(container){
     // ВРЕМЕННО.
     var _tBuild = performance.now();
+    if(bookTraceOn()) bookTrace("renderBookReaderText: начало сборки, restorePosition=" + posText(bookReaderState.restorePosition) + ", глав=" + bookReaderState.chapters.length);
     var hash = bookReaderState.hash;
     var stateData = getBookState(hash);
     var bmByBlock = {}, ulByBlock = {}, pinByBlock = {};
@@ -13933,7 +13999,8 @@
     }
 
     function finishRenderBookReaderText(){
-      if(renderIsStale()) return;
+      if(renderIsStale()){ if(bookTraceOn()) bookTrace("finishRenderBookReaderText: рендер УСТАРЕЛ — сборка отброшена, восстановление места не будет (поколение " + myRenderGen + " против " + bookReaderTextRenderGen + ", состояние " + (bookReaderState ? (bookReaderState === myReaderState ? "то же" : "ДРУГОЕ") : "нет") + ")"); return; }
+      if(bookTraceOn()) bookTrace("finishRenderBookReaderText: сборка завершена, restorePosition=" + posText(bookReaderState.restorePosition));
       if(window.Debug) window.Debug.log("renderBookReaderText: сборка HTML заняла " + Math.round(performance.now() - _tBuild) + "мс (порциями, не блокируя интерфейс)");
       var _tCal = performance.now();
       calibrateBookReaderSegments(container);
@@ -13945,15 +14012,18 @@
       }
       if(window.Debug) window.Debug.log("renderBookReaderText: калибровка сегментов заняла " + Math.round(performance.now() - _tCal) + "мс, сегментов=" + container.querySelectorAll(".book-reader-seg").length);
       requestAnimationFrame(function(){
-        if(renderIsStale()) return; // за кадр ридер успели закрыть или подменить — чужой restorePosition не трогаем
+        if(renderIsStale()){ if(bookTraceOn()) bookTrace("кадр восстановления: рендер УСТАРЕЛ за один кадр — место НЕ восстановлено"); return; } // за кадр ридер успели закрыть или подменить — чужой restorePosition не трогаем
         // Шаг 16: сохранённая позиция чтения применяется РОВНО ОДИН РАЗ, сразу после открытия
         // книги.
         var restored = false;
+        var _rpTrace = bookReaderState.restorePosition;
         if(bookReaderState.restorePosition){
-          restored = scrollBookReaderToPosition(container, bookReaderState.restorePosition);
+          try{ restored = scrollBookReaderToPosition(container, bookReaderState.restorePosition); }
+          catch(eRestore){ bookTraceErr("scrollBookReaderToPosition", eRestore); restored = false; }
           bookReaderState.restorePosition = null;
         }
         if(!restored) container.scrollTop = bookReaderState.textScrollTop || 0;
+        if(bookTraceOn()) bookTrace("кадр восстановления: restorePosition=" + posText(_rpTrace) + " → scrollBookReaderToPosition вернула " + restored + (restored ? "" : "; откат на textScrollTop=" + Math.round(bookReaderState.textScrollTop || 0) + ", scrollTop теперь " + Math.round(container.scrollTop)));
         // Открываем видимость только теперь, когда контейнер уже прокручен на нужное место — иначе
         // за время порционной сборки (см. выше) человек увидел бы, как список глав "подрастает" с
         // самого начала книги, вместо привычного мгновенного появления готовой страницы.
@@ -14022,6 +14092,7 @@
     if(listEl){
       listEl.querySelectorAll(".mdeditor-row").forEach(function(row){
         row.addEventListener("click", function(){
+          if(bookTraceOn()) bookTrace("КЛИК по строке содержания, data-idx=" + row.getAttribute("data-idx"));
           jumpToChapterFromChaptersList(parseInt(row.getAttribute("data-idx"), 10));
         });
       });
@@ -14033,6 +14104,7 @@
   // Каждый переход — свой шаг "назад" со своим восстановлением сохранённой прокрутки режима, тем же
   // приёмом, что prevScrollTop в openNoteById (mdeditor.js).
   function switchBookReaderMode(mode){
+    if(bookTraceOn()) bookTrace("switchBookReaderMode(" + mode + "): " + (!bookReaderState ? "bookReaderState НЕТ — выход" : (bookReaderState.mode === mode ? "режим уже " + mode + " — выход БЕЗ перерисовки" : "режим " + bookReaderState.mode + " → " + mode)));
     if(!bookReaderState || bookReaderState.mode === mode) return;
     var container = document.getElementById("settingsTabContent");
     var prevMode = bookReaderState.mode;
@@ -14048,9 +14120,13 @@
   function jumpToChapterFromChaptersList(idx){
     // Теперь один путь, как у openIpkdReaderToToday: restorePosition + scrollBookReaderToPosition с
     // её refine().
+    if(bookTraceOn()) bookTrace("jumpToChapterFromChaptersList(" + idx + "): " + (bookReaderState ? "состояние есть, режим " + bookReaderState.mode + ", глав " + (bookReaderState.chapters ? bookReaderState.chapters.length : "?") + ", restorePosition до=" + posText(bookReaderState.restorePosition) : "bookReaderState НЕТ — выход без действия"));
     if(!bookReaderState) return;
     bookReaderState.restorePosition = { ch: idx, blk: 0 };
-    switchBookReaderMode("text");
+    bookReaderState.restoreSource = "переход по главе из содержания";
+    try{ switchBookReaderMode("text"); }
+    catch(eJump){ bookTraceErr("switchBookReaderMode после выбора главы", eJump); throw eJump; }
+    if(bookTraceOn()) bookTrace("jumpToChapterFromChaptersList: switchBookReaderMode вернул управление, restorePosition=" + posText(bookReaderState && bookReaderState.restorePosition) + " (текст собирается порциями, дальше — кадр восстановления)");
   }
 
   // ===================== ВЫДЕЛЕНИЕ -> ЗАМЕТКА КНИГИ (READER_PLAN.md, Этап D,
@@ -14890,10 +14966,12 @@
   // mdeditor.js). Переключает вкладку настроек на "Книги" (set2s_7) тем же способом, что и клик по
   // [[ссылке]]/заметке-закладке переключает на "Мой блокнот" (set2s_1).
   function openBookAtMarginBookmark(hash, position){
+    if(bookTraceOn()) bookTrace("КЛИК по закладке во вкладке «Закладки»: книга " + String(hash).slice(0, 8) + ", позиция " + posText(position));
     getBooksDirHandle().then(function(dir){
       return loadBooksManifest(dir);
     }).catch(function(){ return {}; }).then(function(manifest){
       var name = manifest[hash];
+      if(bookTraceOn()) bookTrace("openBookAtMarginBookmark: имя файла по манифесту=" + name + ", перед switchSettingsTab: книга открыта=" + !!bookReaderState);
       switchSettingsTab("set2s_7"); // рендерит renderSettingsTabBooks — #booksStatus уже в DOM
       if(!name){
         // Закладка синхронизирована и видна в общем списке (см. getBookMarginBookmarksForList выше

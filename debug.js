@@ -1,4 +1,11 @@
 // debug.js — общее место для отладочного кода "Графика чтения Библии".
+// Версия: 3.0 (12.10) — структурная правка: (1) копирование в буфер переписано (`copyViaExecCommand`,
+// `showManualCopyOverlay`): на Android 5 (WebView) `navigator.clipboard.writeText` отказывает, а запасного пути
+// при отказе не было — обе кнопки («копировать лог», «последние 100») писали «не удалось скопировать». Теперь сначала
+// `execCommand("copy")` прямо в обработчике нажатия (с проверкой результата), затем Clipboard API, и если оба
+// отказали — полноэкранное окно с выделенным текстом для ручного копирования (долгое нажатие → «Копировать»);
+// причина отказа каждого способа пишется в журнал; (2) в журнал попадают ошибки JS (`error`, `unhandledrejection`) —
+// раньше исключение внутри кадра/промиса было видно только красной плашкой и не попадало в копируемый лог.
 // Версия: 2.0 (21.09) — структурная правка (TASK_UNIFIED_SYNC.md, шаг 7): в `window.Debug`
 // добавлен `registerAction(label, run)` — кнопки-действия в липкой полосе панели лога
 // (рядом с «копировать лог»). Нужны для диагностики, которую надо запускать по нажатию,
@@ -211,27 +218,101 @@
       " строк лога, не больше " + COPY_LAST_MAX_CHARS + " символов)\n" + chosen.join("\n");
   }
 
-  // Копирование текста в буфер обмена: navigator.clipboard, а если его нет —
-  // запасной путь через скрытый textarea + execCommand. done(true/false).
-  function copyTextToClipboard(text, done) {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
-      return;
-    }
+  // Копирование текста в буфер обмена. done(ok, how): ok === true — скопировано; ok === false и how === "manual" — автокопирование
+  // не сработало, открыто окно с выделенным текстом для ручного копирования; how === "fail" — не вышло совсем.
+  // Порядок (v3.0): 1) execCommand("copy") СИНХРОННО в обработчике нажатия — самый надёжный путь в старых WebView (Android 5),
+  // жест пользователя ещё «свежий»; 2) navigator.clipboard.writeText (в старом WebView часто отказывает: NotAllowedError/нет
+  // фокуса/нет разрешения — раньше при отказе запасного пути не было); 3) окно ручного копирования.
+  function copyViaExecCommand(text) {
+    var prevActive = document.activeElement;
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", ""); // без клавиатуры; copy работает и с readonly
+    ta.setAttribute("aria-hidden", "true");
+    ta.style.cssText =
+      "position:fixed;left:0;top:0;width:2em;height:2em;padding:0;margin:0;border:0;outline:0;" +
+      "box-shadow:none;background:transparent;color:transparent;opacity:0.01;font-size:16px;" +
+      "-webkit-user-select:text;user-select:text;pointer-events:none;z-index:1000000;";
+    var ok = false, err = "";
     try {
-      var ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
+      (document.body || document.documentElement).appendChild(ta);
       ta.focus();
       ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-      done(true);
-    } catch (err) {
-      done(false);
+      try { ta.setSelectionRange(0, text.length); } catch (e1) {}
+      ok = !!document.execCommand("copy");
+      if (!ok) err = "execCommand вернул false";
+    } catch (e) {
+      ok = false;
+      err = (e && e.name ? e.name + ": " : "") + (e && e.message ? e.message : String(e));
     }
+    try { if (ta.parentNode) ta.parentNode.removeChild(ta); } catch (e2) {}
+    try { if (prevActive && prevActive.focus) prevActive.focus(); } catch (e3) {}
+    return { ok: ok, err: err };
+  }
+
+  function showManualCopyOverlay(text) {
+    var old = document.getElementById("debugManualCopy");
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    var wrap = document.createElement("div");
+    wrap.id = "debugManualCopy";
+    wrap.style.cssText =
+      "position:fixed;left:0;top:0;right:0;bottom:0;z-index:1000001;background:#000;color:#0f0;" +
+      "display:flex;flex-direction:column;padding:6px;box-sizing:border-box;font:12px monospace;";
+    var hint = document.createElement("div");
+    hint.style.cssText = "padding:4px 2px 6px;";
+    hint.textContent = "Автокопирование не сработало. Нажмите «Выделить всё», затем удерживайте выделенный текст → «Копировать». Символов: " + text.length;
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText =
+      "flex:1;width:100%;box-sizing:border-box;background:#111;color:#0f0;border:1px solid #0f0;" +
+      "font:10px monospace;-webkit-user-select:text;user-select:text;white-space:pre;";
+    var bar = document.createElement("div");
+    bar.style.cssText = "display:flex;gap:6px;padding-top:6px;";
+    function mk(label, fn) {
+      var b = makeBarButton(label);
+      b.style.pointerEvents = "auto";
+      b.style.fontSize = "14px";
+      b.style.padding = "8px 14px";
+      b.addEventListener("click", function (e) { e.stopPropagation(); fn(); });
+      bar.appendChild(b);
+    }
+    function selectAll() {
+      try { ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length); } catch (e) {}
+    }
+    mk("Выделить всё", selectAll);
+    mk("Закрыть", function () { if (wrap.parentNode) wrap.parentNode.removeChild(wrap); });
+    wrap.appendChild(hint);
+    wrap.appendChild(ta);
+    wrap.appendChild(bar);
+    document.body.appendChild(wrap);
+    selectAll();
+  }
+
+  function copyTextToClipboard(text, done) {
+    var reasons = [];
+    var r = copyViaExecCommand(text);
+    if (r.ok) { done(true, "execCommand"); return; }
+    reasons.push("execCommand: " + r.err);
+    function manual() {
+      log("копирование: автоматически не удалось (" + reasons.join("; ") + ") — открыто окно ручного копирования, символов: " + text.length);
+      try { showManualCopyOverlay(text); } catch (eM) { log("копирование: окно ручного копирования не открылось: " + (eM && eM.message)); done(false, "fail"); return; }
+      done(false, "manual");
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        navigator.clipboard.writeText(text).then(function () { done(true, "clipboard"); }, function (e) {
+          reasons.push("clipboard.writeText: " + (e && e.name ? e.name + ": " : "") + (e && e.message ? e.message : String(e)));
+          manual();
+        });
+        return;
+      } catch (eC) {
+        reasons.push("clipboard.writeText бросил: " + (eC && eC.message ? eC.message : String(eC)));
+      }
+    } else {
+      reasons.push("navigator.clipboard нет (контекст не защищённый или старый WebView)");
+    }
+    manual();
   }
 
   // ⚠️ ДОБАВЛЕНО (21.09, TASK_UNIFIED_SYNC.md, шаг 7): кнопки-действия в панели лога. Устроено
@@ -289,8 +370,8 @@
     copyBtn.addEventListener("click", function (e) {
       e.stopPropagation();
       var text = action.lastText || "";
-      copyTextToClipboard(text, function (ok) {
-        copyBtn.textContent = ok ? "✓ скопировано" : "не удалось скопировать";
+      copyTextToClipboard(text, function (ok, how) {
+        copyBtn.textContent = ok ? "✓ скопировано" : (how === "manual" ? "окно для ручного копирования" : "не удалось скопировать");
         setTimeout(function () { copyBtn.textContent = "⧉ отчёт (" + text.length + " симв.)"; }, 2000);
       });
     });
@@ -353,8 +434,8 @@
       btn.addEventListener("click", function (e) {
         e.stopPropagation();
         var text = getText();
-        copyTextToClipboard(text, function (ok) {
-          btn.textContent = ok ? "✓ скопировано, " + text.length + " симв." : "не удалось скопировать";
+        copyTextToClipboard(text, function (ok, how) {
+          btn.textContent = ok ? "✓ скопировано, " + text.length + " симв." : (how === "manual" ? "окно для ручного копирования" : "не удалось скопировать");
           setTimeout(function () { btn.textContent = label; }, 2000);
         });
       });
@@ -507,6 +588,23 @@
     guardTaskListScroll: guardTaskListScroll,
     registerAction: registerAction
   };
+
+  // v3.0: ошибки JS — в журнал (и в копируемый лог). Исключение внутри requestAnimationFrame/промиса иначе видно только красной
+  // плашкой index.html и в «копировать лог» не попадало. log() — no-op, пока режим отладки выключен.
+  window.addEventListener("error", function (e) {
+    try {
+      if (e && e.message && String(e.message).indexOf("ResizeObserver loop") === 0) return;
+      log("JS-ОШИБКА: " + (e && e.message) + " @" + String((e && e.filename) || "").split("/").pop() + ":" + (e && e.lineno) + ":" + (e && e.colno) +
+        (e && e.error && e.error.stack ? " | " + String(e.error.stack).split("\n").slice(0, 4).join(" <- ").slice(0, 400) : ""));
+    } catch (e2) {}
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    try {
+      var r = e && e.reason;
+      log("НЕОБРАБОТАННЫЙ PROMISE: " + (r && r.name ? r.name + ": " : "") + (r && r.message ? r.message : String(r)) +
+        (r && r.stack ? " | " + String(r.stack).split("\n").slice(0, 4).join(" <- ").slice(0, 400) : ""));
+    } catch (e2) {}
+  });
 
   // ---------------------------------------------------------------------
   // ВРЕМЕННО (ТЗ пользователя от 06.09): непонятно, откуда берётся
