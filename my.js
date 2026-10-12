@@ -1,6 +1,8 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 57.12 (11.10) — ПРИЧИНА «открывает всегда в одном и том же месте / всё дальше назад» (Android 5, Chrome 95): слушатель прокрутки вешается сразу после первого `scrollTop` восстановления, и промежуточные положения (прыжки `refine`, «самопрокрутка» браузера при пересчёте высот сегментов — в журнале 22452 → 8017) через 500 мс записывались в книгу как позиция чтения; следующее открытие стартовало уже оттуда. Теперь флаг `bookReaderRestoreActive` (ставит `scrollBookReaderToPosition`, снимает `release`, страховка 6 с) блокирует `scheduleBookReaderPositionSave`/`flushBookReaderPositionNow` и сохранение позиции/автозакладки при уходе с вкладки и закрытии окна; в журнал пишется «позиция чтения: сохранена a:b (была c:d)» и «сохранение пропущено — идёт восстановление места».
+
    Версия: 57.11 (11.10) — Android 5, диагностика места в книге: на старом WebView (без `contain-intrinsic-size: auto`) после перехода `scrollBookReaderToPosition` показывает крупный отчёт поверх экрана (`#ltRestoreReport`, тап — закрыть): источник цели, цель и первые слова абзаца, что реально сверху, сохранённая позиция, основная закладка, число глав/сегментов, версия Chrome; через 1.5 с повторная проверка (шрифт/картинки могли сдвинуть блок) и, если человек не листал, возврат блока на место. В `bookReaderState` добавлено поле `restoreSource`.
 
    Версия: 57.10 (11.10) — Android 5, место в книге открывалось не там (по логу оценка высот сегментов врала в 3-4 раза: цель 27420 против ~7307): `scrollBookReaderToPosition` на WebView без `contain-intrinsic-size: auto` перед переходом реально сверстывает все сегменты от начала книги до цели (+3), закрепляет их высоты как `contain-intrinsic-size` и только потом прокручивает (константа `BOOK_EXACT_LAYOUT_MAX_SEGS`=150; глубже — только соседи цели); в журнале «сегмент №… сверстано с … по … за … мс».\n\n   Версия: 57.9 (11.10) — Android 5, место в книге открывалось на главу не там: `scrollBookReaderToPosition` на WebView без `contain-intrinsic-size: auto` (Chrome < 107) перед переходом измеряет реальную высоту шести сегментов выше и трёх ниже цели и закрепляет её инлайн-стилем (раньше соседи «плыли» между настоящей и оценочной высотой); подгонка до 8 кадров с остановкой, когда геометрия устоялась; в журнале «закреплено высот=N».
@@ -10021,7 +10023,7 @@
        settingsModalOverlay.classList.contains("open")){
       var closingReaderContainer = document.getElementById("settingsTabContent");
       if(closingReaderContainer && closingReaderContainer.querySelector(".book-reader-p, .book-reader-image-wrap")){
-        var closingBookPos = currentBookReaderPosition(closingReaderContainer);
+        var closingBookPos = bookReaderRestoreActive ? null : currentBookReaderPosition(closingReaderContainer);
         autoUpdateMainBookmarkOnExit(closingBookPos);
         destroyBookReaderScrollListener();
         if(closingBookPos){
@@ -10233,7 +10235,7 @@
         if(bookReaderState.mode === "chapters"){
           bookReaderState.chaptersScrollTop = leavingReaderContainer.scrollTop;
         } else {
-          var leavingBookPos = currentBookReaderPosition(leavingReaderContainer);
+          var leavingBookPos = bookReaderRestoreActive ? null : currentBookReaderPosition(leavingReaderContainer);
           autoUpdateMainBookmarkOnExit(leavingBookPos);
           if(leavingBookPos){
             bookReaderState.restorePosition = leavingBookPos;
@@ -12748,6 +12750,12 @@
   var bookReaderScrollContainer = null;
   var bookReaderScrollHandler = null;
   var bookReaderPositionSaveTimer = null;
+  // 57.12: пока идёт программное восстановление места (scrollBookReaderToPosition: прыжки refine + «самопрокрутка»
+  // браузера при пересчёте высот сегментов), позицию чтения сохранять НЕЛЬЗЯ: слушатель прокрутки вешается сразу после
+  // первого scrollTop, и промежуточное положение (например, зажатое до максимума при схлопнувшейся оценке высот)
+  // записывалось как «место чтения» — следующее открытие стартовало оттуда, и место уезжало назад/застревало.
+  var bookReaderRestoreActive = false;
+  var bookReaderRestoreFailsafe = null;
   // Абзац/картинка {ch, blk}, чьё начало (offsetTop) последним не превышает текущий scrollTop
   // контейнера — тот же приём, что jumpToChapterFromChaptersList ниже использует для перехода к
   // главе, только гранулярность — абзац, а не глава. По умолчанию (пока scrollTop не дошёл ни до
@@ -12874,6 +12882,9 @@
       return false;
     }
     var seg = el.closest(".book-reader-seg");
+    bookReaderRestoreActive = true;
+    if(bookReaderRestoreFailsafe) clearTimeout(bookReaderRestoreFailsafe);
+    bookReaderRestoreFailsafe = setTimeout(function(){ bookReaderRestoreActive = false; }, 6000); // страховка: флаг не должен залипнуть
     // 57.8: на WebView ~Chrome 95 (Android 5) у пропущенных сегментов (content-visibility:auto) высота — только оценка, и
     // «якорение прокрутки» браузера двигало scrollTop сразу после нашего перехода — место открывалось одно и то же.
     // На время перехода якорение выключаем и в конце проверяем, что нужный блок реально на экране.
@@ -12916,7 +12927,11 @@
     container.scrollTop = firstTarget;
     if(dbg) dbg.log("восстановление места: " + posText(position) + ", цель=" + Math.round(firstTarget) + ", scrollTop=" + Math.round(container.scrollTop) + ", scrollHeight=" + container.scrollHeight + ", clientHeight=" + container.clientHeight + ", сегмент " + (seg ? "есть" : "нет") + ", закреплено высот=" + frozen + freezeInfo + ", contain-intrinsic auto: " + (window.CSS && CSS.supports && CSS.supports("contain-intrinsic-size", "auto 0px")) + ", " + (navigator.userAgent.match(/Chrome\/[\d.]+/) || ["Chrome ?"])[0]);
     var tries = 0, stableFrames = 0;
-    function release(){ container.style.overflowAnchor = prevAnchor; }
+    function release(){
+      container.style.overflowAnchor = prevAnchor;
+      bookReaderRestoreActive = false;
+      if(bookReaderRestoreFailsafe){ clearTimeout(bookReaderRestoreFailsafe); bookReaderRestoreFailsafe = null; }
+    }
     function restoreReportLines(note){
       var st = bookReaderState || {};
       var data = getBookState(st.hash) || {};
@@ -13000,11 +13015,22 @@
   function flushBookReaderPositionNow(){
     if(bookReaderPositionSaveTimer){ clearTimeout(bookReaderPositionSaveTimer); bookReaderPositionSaveTimer = null; }
     if(!bookReaderState) return;
+    if(bookReaderRestoreActive){
+      if(window.Debug) window.Debug.log("позиция чтения: сохранение пропущено — идёт восстановление места");
+      return;
+    }
     var container = document.getElementById("settingsTabContent");
     var pos = container ? currentBookReaderPosition(container) : null;
-    if(pos) setBookPosition(bookReaderState.hash, pos);
+    if(pos){
+      if(window.Debug){
+        var prevSaved = getBookState(bookReaderState.hash);
+        window.Debug.log("позиция чтения: сохранена " + posText(pos) + " (была " + posText(prevSaved && prevSaved.position) + "), scrollTop=" + Math.round(container.scrollTop));
+      }
+      setBookPosition(bookReaderState.hash, pos);
+    }
   }
   function scheduleBookReaderPositionSave(){
+    if(bookReaderRestoreActive) return;
     if(bookReaderPositionSaveTimer) clearTimeout(bookReaderPositionSaveTimer);
     bookReaderPositionSaveTimer = setTimeout(flushBookReaderPositionNow, 500);
   }
