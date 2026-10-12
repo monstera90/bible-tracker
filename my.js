@@ -1,6 +1,8 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 59.1 (12.10) — `openBookAtMarginBookmark`: при тапе по закладке книга собиралась ДВАЖДЫ (switchSettingsTab("set2s_7") перерисовывал уже открытую книгу, затем openBookReader заново читал файл, парсил и собирал её ещё раз — `renderBookReader` обнулял `scrollTop` и стирал результат первой доводки, на Android 5 около 10 с). Теперь: эта же книга уже открыта — `openBookReader` не зовётся, выставляются текстовый режим и `restorePosition`, вкладка собирает книгу один раз; открыта другая книга — перед `switchSettingsTab` место старой сохраняется и `bookReaderState` сбрасывается (вкладка рисует лёгкий список), `booksTabVisitedThisSession` ставится заранее (чтобы вкладка не открыла «последнюю книгу» параллельно), затем нужная книга открывается один раз.
+
    Версия: 59.0 (12.10) — ПРИЧИНА «переход по главе из содержания и по закладке встаёт не туда» (воспроизведено в Chromium 141 на копии вёрстки ридера и настоящих функциях `scrollBookReaderToPosition`/`calibrateBookReaderSegments`: блок оказывался на 12…450 px ниже верха сразу после перехода): пока сегменты выше цели не отрисованы, их высота — оценка `contain-intrinsic-size`, реальной она становится только в кадре отрисовки ПОСЛЕ присваивания `scrollTop`. Прежний `refine` читал геометрию внутри `requestAnimationFrame` (до этого шага), два кадра подряд видел «всё ровно» и завершался; единственная запоздалая поправка (через 1.5 с) не делалась, если человек коснулся экрана, и пропускала сдвиг ≤ 30 px. Теперь `scrollBookReaderToPosition` доводит место циклом `settle`: каждый кадр сдвигает `scrollTop` на разницу между верхом блока и верхом контейнера, заканчивает когда поправок не было ≥ 700 мс (не раньше 1 с), по потолку 4 с или когда человек реально листает (`touchmove`/`wheel`; простое касание не прерывает). Прежние `refine`/`finalize`/проверка через 1.5 с и флаг `userTouched` удалены. Журнал: «ПЕРЕХОД · доводка №…» и «восстановление места: итог … — причина, поправок=N».
 
    Версия: 58.3 (12.10) — диагностика: в замерах после перехода добавлено, что реально нарисовано под верхней границей (`bookTopPainted`, elementFromPoint) и устройство первых сегментов/названия глав у цели (`bookTraceLayoutInfo`) — пользователь видит наверху ДРУГУЮ главу, чем та, что по геометрии DOM стоит наверху.
@@ -15003,6 +15005,42 @@
     }).catch(function(){ return {}; }).then(function(manifest){
       var name = manifest[hash];
       if(bookTraceOn()) bookTrace("openBookAtMarginBookmark: имя файла по манифесту=" + name + ", перед switchSettingsTab: книга открыта=" + !!bookReaderState);
+      // 59.1: раньше здесь ВСЕГДА шло switchSettingsTab("set2s_7") + openBookReader(...). Если книга уже была открыта,
+      // вкладка сначала собирала её целиком (первая сборка, 1,5–3 с на Android 5), а потом openBookReader заново читал
+      // файл, парсил и собирал вторую раз — renderBookReader обнулял scrollTop и стирал уже правильный результат первой
+      // сборки (доводка прерывалась «блок отсоединён»). Теперь сборка всегда ровно одна.
+      // (1) Эта же книга уже в памяти ридера: файл заново не читаем — выставляем текстовый режим и позицию закладки
+      //     (тот же единственный путь restorePosition → renderBookReaderText → scrollBookReaderToPosition, что у
+      //     openIpkdReaderToToday) и даём вкладке собрать книгу один раз.
+      if(bookReaderState && bookReaderState.hash === hash && bookReaderState.name !== IPKD_BOOK_NAME){
+        if(bookTraceOn()) bookTrace("openBookAtMarginBookmark: эта книга уже открыта — без повторного openBookReader, restorePosition=" + posText(position) + ", одна сборка");
+        bookReaderState.mode = "text";
+        bookReaderState.restorePosition = position;
+        bookReaderState.restoreSource = "переход (закладка/глава)";
+        switchSettingsTab("set2s_7"); // renderBookReader() с этой позицией — единственная сборка
+        return;
+      }
+      // (2) В памяти ДРУГАЯ книга (или публикация «ИПКД»): сначала сохраняем её место (так же, как это сделал бы
+      //     уход с вкладки в switchSettingsTab) и сбрасываем состояние, чтобы вкладка нарисовала дешёвый список
+      //     книг, а не собирала ненужную старую книгу; нужная книга потом открывается один раз ниже.
+      if(bookReaderState){
+        if(currentSettingsTab === "set2s_7" || (currentSettingsTab === "set2s_8" && bookReaderState.name === IPKD_BOOK_NAME)){
+          if(bookReaderState.mode !== "chapters" && !bookReaderRestoreActive){
+            var leavingC = document.getElementById("settingsTabContent");
+            var leavingP = leavingC ? currentBookReaderPosition(leavingC) : null;
+            autoUpdateMainBookmarkOnExit(leavingP);
+            if(leavingP) setBookPosition(bookReaderState.hash, leavingP);
+          }
+        }
+        if(bookTraceOn()) bookTrace("openBookAtMarginBookmark: в памяти другая книга — сброс bookReaderState до switchSettingsTab (вместо её сборки)");
+        destroyBookReaderScrollListener();
+        revokeBookReaderImages();
+        bookReaderTextRenderGen++; // гасим недособранный порциями рендер старой книги
+        bookReaderState = null;
+      }
+      // Без этого флага switchSettingsTab (ветка set2s_7, первый заход за сеанс) сама запустила бы openBookReader
+      // последней открытой книги — ещё одна лишняя сборка параллельно с нашей.
+      booksTabVisitedThisSession = true;
       switchSettingsTab("set2s_7"); // рендерит renderSettingsTabBooks — #booksStatus уже в DOM
       if(!name){
         // Закладка синхронизирована и видна в общем списке (см. getBookMarginBookmarksForList выше
