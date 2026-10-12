@@ -1,6 +1,10 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 58.3 (12.10) — диагностика: в замерах после перехода добавлено, что реально нарисовано под верхней границей (`bookTopPainted`, elementFromPoint) и устройство первых сегментов/названия глав у цели (`bookTraceLayoutInfo`) — пользователь видит наверху ДРУГУЮ главу, чем та, что по геометрии DOM стоит наверху.
+
+   Версия: 58.2 (12.10) — `currentBookReaderPosition`: допуск 1 px при определении блока наверху. По журналу Android 5 (Chrome 95) браузер округляет `scrollTop` до физического пикселя (885.35 → 884.88), и блок, стоящий ровно наверху (1:0), считался «ещё не дошли» — сверху определялся предыдущий (0:0), и через него писались позиция чтения и автозакладка. Остальное — диагностика 58.1.
+
    Версия: 58.1 (12.10) — ТОЛЬКО ДИАГНОСТИКА (поведение не менялось): сквозная трассировка перехода по главе из содержания и по закладке в журнале отладки (строки «ПЕРЕХОД · …»): клик → `jumpToChapterFromChaptersList`/`openBookAtMarginBookmark` → `openBookReader` (с ошибками, раньше они глотались в строку статуса) → `renderBookReader` → сборка текста → кадр восстановления → `scrollBookReaderToPosition` (снимок контейнера: прокручиваемые предки, overflow, высоты; присвоенный и прочитанный `scrollTop`; каждый `refine`) → замеры через 0/60/200/500/1000/2000/3500 мс и события `scroll` в течение этого времени. Новые функции: `bookTrace`, `bookTraceOn`, `bookScrollEnv`, `bookTraceAfterJump`.
 
    Версия: 58.0 (12.10) — переход по главе/закладке на Android 5 «не туда»: у ленивых картинок книги не было размеров (высота <img> = 0 до декодирования), и каждая подгрузка картинки выше цели сдвигала книгу на её высоту (в журнале scrollTop сам прыгает на +1150…1200 px и обратно, итоговая проверка при этом считает, что всё в порядке), а закрепление высот сегментов (57.14) мерило их без картинок. Теперь `bookImageSizeAttrs` читает ширину/высоту из заголовка PNG/JPEG/GIF/WebP и пишет в `width`/`height` <img> — место резервируется сразу, вёрстка книги не меняется при подгрузке картинок.
@@ -12789,7 +12793,7 @@
     var lo = 0, hi = segs.length - 1, found = 0;
     while(lo <= hi){
       var mid = (lo + hi) >> 1;
-      if(bookElTopInContainer(container, segs[mid]) <= st){ found = mid; lo = mid + 1; }
+      if(bookElTopInContainer(container, segs[mid]) <= st + 1){ found = mid; lo = mid + 1; }
       else hi = mid - 1;
     }
     var seg = segs[found];
@@ -12803,7 +12807,7 @@
       best = blocks[blocks.length - 1];
     } else {
       for(var i = 0; i < blocks.length; i++){
-        if(bookElTopInContainer(container, blocks[i]) <= st) best = blocks[i];
+        if(bookElTopInContainer(container, blocks[i]) <= st + 1) best = blocks[i];
         else break;
       }
     }
@@ -12944,8 +12948,42 @@
   }
   // После перехода: замеры через 0/60/200/500/1000/2000/3500 мс (где сейчас цель и что сверху) + каждое событие scroll (со сдвигом).
   // Вместе с уже существующими строками Debug «scrollTop СВОИМ JS» (со стеком) и «БЕЗ JS-set» видно, КТО и когда сдвинул прокрутку.
+  // 58.3: что РЕАЛЬНО нарисовано под верхней границей контейнера (elementFromPoint) — сравнить с тем, что считает геометрия DOM.
+  function bookTopPainted(container){
+    try{
+      var cr = container.getBoundingClientRect();
+      var x = cr.left + Math.min(cr.width / 2, 200);
+      var out = [];
+      [4, 40, 120].forEach(function(dy){
+        var e = document.elementFromPoint(x, cr.top + dy);
+        var b = e && e.closest ? e.closest("[data-ch][data-blk], .book-reader-chapter-title, .book-reader-seg") : null;
+        var ch = e && e.closest ? e.closest(".book-reader-chapter") : null;
+        out.push("y+" + dy + ": " + (e ? e.tagName.toLowerCase() + "." + String(e.className).split(" ")[0] : "нет") +
+          (b ? " [блок " + (b.getAttribute("data-ch") || "-") + ":" + (b.getAttribute("data-blk") || "-") + "]" : "") +
+          (ch ? " глава=" + ch.id : "") + " «" + String((e && e.textContent) || "").replace(/\s+/g, " ").slice(0, 40) + "»");
+      });
+      return out.join(" | ");
+    }catch(e){ return "ошибка: " + (e && e.message); }
+  }
+  // Устройство первых сегментов и названия глав вокруг цели.
+  function bookTraceLayoutInfo(container, position){
+    try{
+      var segs = container.querySelectorAll(".book-reader-seg"), parts = [];
+      for(var i = 0; i < Math.min(segs.length, 6); i++){
+        var fb = segs[i].querySelector("[data-ch][data-blk]");
+        var imgs = segs[i].querySelectorAll("img").length;
+        parts.push("сег" + i + ": блок " + (fb ? fb.getAttribute("data-ch") + ":" + fb.getAttribute("data-blk") : "-") + ", верх=" + Math.round(bookElTopInContainer(container, segs[i])) + ", высота=" + Math.round(segs[i].getBoundingClientRect().height) + ", картинок=" + imgs + ", символов=" + segs[i].getAttribute("data-chars"));
+      }
+      var chs = bookReaderState && bookReaderState.chapters || [], tt = [];
+      for(var c = Math.max(0, position.ch - 1); c <= Math.min(chs.length - 1, position.ch + 1); c++){
+        tt.push("гл." + c + " «" + String(chs[c].title || "").slice(0, 30) + "» блоков=" + (chs[c].blocks ? chs[c].blocks.length : "?") + (chs[c].blocks && chs[c].blocks[0] ? " первый=" + chs[c].blocks[0].type : ""));
+      }
+      bookTrace("устройство книги: " + parts.join("; ") + " || главы: " + tt.join("; "));
+    }catch(e){ bookTraceErr("устройстве книги", e); }
+  }
   function bookTraceAfterJump(container, el, position){
     if(!bookTraceOn()) return;
+    bookTraceLayoutInfo(container, position);
     var t0 = performance.now(), lastSt = container.scrollTop, lines = 0, delays = [0, 60, 200, 500, 1000, 2000, 3500];
     function onScroll(){
       var st = container.scrollTop;
@@ -12959,7 +12997,7 @@
           var rel = el.isConnected ? Math.round(el.getBoundingClientRect().top - container.getBoundingClientRect().top) : "блок отсоединён";
           bookTrace("замер +" + Math.round(performance.now() - t0) + " мс: цель " + posText(position) + ", верх цели от верха контейнера=" + rel +
             ", сверху сейчас блок " + posText(currentBookReaderPosition(container)) + ", scrollTop=" + Math.round(container.scrollTop) + "/" + container.scrollHeight +
-            ", идёт восстановление=" + bookReaderRestoreActive);
+            ", идёт восстановление=" + bookReaderRestoreActive + " || НАРИСОВАНО сверху: " + bookTopPainted(container));
         }catch(e){ bookTraceErr("замере", e); }
         if(i === delays.length - 1) container.removeEventListener("scroll", onScroll);
       }, d);
