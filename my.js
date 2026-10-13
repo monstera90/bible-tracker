@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 61.1 (13.10) — ручки выделения: слой ручек над окном настроек (z-index 1050 в components.css) и отмена системного `selectstart` в тексте книги (Android 5.0: родные «язычки» Google проскакивали); откат — my.js 61.0.
    Версия: 61.0 (12.10) — свои ручки выделения в ридере книг: `bindBookReaderCustomSelection` (удержание 250 мс выделяет слово), `ltSel*` (две ручки поверх страницы, автопрокрутка), вызов из `finishRenderBookReaderText`; откат — файл my.js версии 60.0.
    Версия: 60.0 (12.10) — кнопка «Копировать» (структурная правка: `window.LTCopyText`, `READER_COPY_ICON_SVG`, `#bookReaderCopyBtn` слева от «Выделить текст» в ридере, `#taskCopyBtn` в нижнем ряду задач слева от текстовыделителя, `.task-copy-wrap` в списках видимости/ползунка); системное меню выделения в APK скрыто (SelectionMenuWebView.kt, мост версии 5).
    Версия: 59.1 (12.10) — `openBookAtMarginBookmark`: при тапе по закладке книга собиралась ДВАЖДЫ (switchSettingsTab("set2s_7") перерисовывал уже открытую книгу, затем openBookReader заново читал файл, парсил и собирал её ещё раз — `renderBookReader` обнулял `scrollTop` и стирал результат первой доводки, на Android 5 около 10 с). Теперь: эта же книга уже открыта — `openBookReader` не зовётся, выставляются текстовый режим и `restorePosition`, вкладка собирает книгу один раз; открыта другая книга — перед `switchSettingsTab` место старой сохраняется и `bookReaderState` сбрасывается (вкладка рисует лёгкий список), `booksTabVisitedThisSession` ставится заранее (чтобы вкладка не открыла «последнюю книгу» параллельно), затем нужная книга открывается один раз.
@@ -14163,6 +14164,7 @@
   try { ltSelWordRe = new RegExp("[\\p{L}\\p{N}\\p{M}'\u2019\u00AD]", "u"); }
   catch(eRe){ ltSelWordRe = /[A-Za-z\u0400-\u04FF0-9'\u2019\u00AD]/; }
   var ltSel = null; // активная сессия выделения (одна на приложение)
+  var ltSelApplying = false; // true только пока мы сами ставим Selection (см. selectstart в bindBookReaderCustomSelection)
 
   function ltSelCaretFromPoint(x, y){
     var n = null, o = 0;
@@ -14232,8 +14234,8 @@
     var r = document.createRange();
     try { r.setStart(sn, so); r.setEnd(en, eo); } catch(e){ return false; }
     var sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(r);
+    ltSelApplying = true;
+    try { sel.removeAllRanges(); sel.addRange(r); } finally { ltSelApplying = false; }
     sess.range = r;
     ltSelPlace(sess);
     return true;
@@ -14406,6 +14408,12 @@
       if(Date.now() < swallowUntil){ e.preventDefault(); e.stopPropagation(); }
     }, true);
     rootEl.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+    // Системное выделение (долгое нажатие, двойной тап) в тексте книги отменяем целиком: оно показало бы родные
+    // «язычки» Google (на Android 5.0 user-select:none их не останавливает). Наше выделение ставится из JS
+    // (ltSelApply, флаг ltSelApplying) и это событие не требует.
+    rootEl.addEventListener("selectstart", function(e){
+      if(!ltSelApplying) e.preventDefault();
+    });
   }
 
   // Шаг 14: тап по самой картинке открывает тот же полноэкранный просмотрщик с зумом, что и у
