@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 63.0 (13.10) — маркер по удержанию с протяжкой: удержание 250 мс подчёркивает слово, ведя палец (вниз/вверх, в пределах абзаца) подчёркивание растягивается по словам, у краёв окна — автопрокрутка, запись при отпускании; подсветка в процессе — `.lt-hl-layer`; откат — my.js 62.0.
    Версия: 62.0 (13.10) — маркер по удержанию 250 мс вместо своих ручек: `bindBookReaderHoldMarker` (слово под пальцем подчёркивается сразу, системное выделение в тексте книги выключено), кнопка «Копировать» рядом с урной после тапа по подчёркиванию (`.book-reader-underline-actions` в `showBookReaderUnderlineTrashBtn`); откат — my.js 61.1 (ручки) или 60.0.
    Версия: 61.1 (13.10) — ручки выделения: слой ручек над окном настроек (z-index 1050 в components.css) и отмена системного `selectstart` в тексте книги (Android 5.0: родные «язычки» Google проскакивали); откат — my.js 61.0.
    Версия: 61.0 (12.10) — свои ручки выделения в ридере книг: `bindBookReaderCustomSelection` (удержание 250 мс выделяет слово), `ltSel*` (две ручки поверх страницы, автопрокрутка), вызов из `finishRenderBookReaderText`; откат — файл my.js версии 60.0.
@@ -14189,39 +14190,150 @@
     return { s: s, e: e };
   }
 
+  // Подсветка «в процессе» при протяжке — полупрозрачные прямоугольники поверх страницы (position:fixed,
+  // pointer-events:none), а не системное выделение: оно в тексте книги выключено (см. выше).
+  var ltHlLayer = null;
+  function ltHlRender(range){
+    if(!ltHlLayer){
+      ltHlLayer = document.createElement("div");
+      ltHlLayer.className = "lt-hl-layer";
+      document.body.appendChild(ltHlLayer);
+    }
+    var html = "", rects = range ? range.getClientRects() : [];
+    for(var i = 0; i < rects.length; i++){
+      var r = rects[i];
+      if(r.width < 1 || r.height < 1) continue;
+      html += '<div class="lt-hl-rect" style="left:' + r.left + 'px;top:' + r.top + 'px;width:' + r.width + 'px;height:' + r.height + 'px"></div>';
+    }
+    ltHlLayer.innerHTML = html;
+  }
+  function ltHlClear(){
+    if(ltHlLayer && ltHlLayer.parentNode) ltHlLayer.parentNode.removeChild(ltHlLayer);
+    ltHlLayer = null;
+  }
+
+  // Текстовая позиция под точкой. user-select:none у .book-reader на части движков мешает hit-test —
+  // тогда на время запроса включаем .lt-sel-probe и запоминаем, что в этом WebView нужно сразу с ним.
+  var ltProbeFirst = false;
+  function ltCaretText(rootEl, x, y){
+    function good(c){ return (c && c.node.nodeType === 3 && rootEl.contains(c.node)) ? c : null; }
+    var c;
+    if(!ltProbeFirst){
+      c = good(ltCaretFromPoint(x, y));
+      if(c) return c;
+    }
+    rootEl.classList.add("lt-sel-probe");
+    try { c = good(ltCaretFromPoint(x, y)); } finally { rootEl.classList.remove("lt-sel-probe"); }
+    if(c) ltProbeFirst = true;
+    return c;
+  }
+
+  // Начало/конец абзаца (первый/последний непустой текстовый узел) → {node, off} или null.
+  function ltParaEdge(pEl, atEnd){
+    var w = document.createTreeWalker(pEl, NodeFilter.SHOW_TEXT, null), n, pick = null;
+    while((n = w.nextNode())){
+      if(!n.data.length) continue;
+      if(!atEnd) return { node: n, off: 0 };
+      pick = n;
+    }
+    return pick ? { node: pick, off: pick.data.length } : null;
+  }
+
+  // Удержание 250 мс подчёркивает слово под пальцем; если не отпускать, а вести палец — подчёркивание
+  // растягивается до слова под пальцем (вниз или вверх от первого слова), у верхнего/нижнего края окна
+  // текст сам прокручивается. Подчёркивание записывается при отпускании. Растяжка ограничена одним
+  // абзацем (подчёркивание привязано к одному блоку, см. resolveSelectionToBlockPosition): протяжка в
+  // другой абзац доводит подчёркивание до конца (начала) исходного абзаца.
   function bindBookReaderHoldMarker(rootEl){
     if(!rootEl) return;
-    var timer = null, start = null, fired = false, swallowUntil = 0;
+    var container = document.getElementById("settingsTabContent");
+    var timer = null, start = null, active = null, swallowUntil = 0, lastX = 0, lastY = 0, autoOn = false;
     function cancel(){ if(timer){ clearTimeout(timer); timer = null; } }
+
+    function update(){
+      if(!active) return;
+      var caret = ltCaretText(rootEl, lastX, lastY);
+      if(!caret) return;
+      var a = active;
+      var tmp = document.createRange();
+      var cmp, cmp2;
+      try {
+        tmp.setStart(a.node, a.s); tmp.collapse(true);
+        cmp = tmp.comparePoint(caret.node, caret.off);
+        tmp.setStart(a.node, a.e); tmp.collapse(true);
+        cmp2 = tmp.comparePoint(caret.node, caret.off);
+      } catch(eC){ return; }
+      var sN = a.node, sO = a.s, eN = a.node, eO = a.e;
+      var pc = closestBookP(caret.node);
+      if(cmp < 0){
+        if(pc !== a.p){ var ed = ltParaEdge(a.p, false); if(ed){ sN = ed.node; sO = ed.off; } }
+        else { var w = ltWordAt(caret.node, caret.off); sN = caret.node; sO = w ? w.s : caret.off; }
+      } else if(cmp2 > 0){
+        if(pc !== a.p){ var ed2 = ltParaEdge(a.p, true); if(ed2){ eN = ed2.node; eO = ed2.off; } }
+        else { var w2 = ltWordAt(caret.node, caret.off); eN = caret.node; eO = w2 ? w2.e : caret.off; }
+      }
+      var r = document.createRange();
+      try { r.setStart(sN, sO); r.setEnd(eN, eO); } catch(eR){ return; }
+      a.range = r;
+      ltHlRender(r);
+    }
+
+    function autoScroll(){
+      if(autoOn) return;
+      autoOn = true;
+      function tick(){
+        if(!active || !container){ autoOn = false; return; }
+        var cr = container.getBoundingClientRect();
+        var top = Math.max(cr.top, 0) + 70;
+        var bottom = Math.min(cr.bottom, window.innerHeight) - 110;
+        var dy = 0;
+        if(lastY < top) dy = -Math.min(14, 2 + (top - lastY) / 6);
+        else if(lastY > bottom) dy = Math.min(14, 2 + (lastY - bottom) / 6);
+        if(dy){ container.scrollTop += dy; update(); }
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+
     function fire(){
       timer = null;
       if(!start || !bookReaderState || bookReaderState.mode !== "text" || !document.body.contains(rootEl)) return;
-      // user-select:none у .book-reader — на время запроса позиции разрешаем выделение (на всякий случай:
-      // позиция под пальцем не должна зависеть от того, выбираем ли мы текст вообще).
-      var caret;
-      rootEl.classList.add("lt-sel-probe");
-      try { caret = ltCaretFromPoint(start.x, start.y); } finally { rootEl.classList.remove("lt-sel-probe"); }
-      if(!caret || caret.node.nodeType !== 3 || !rootEl.contains(caret.node)) return;
+      var caret = ltCaretText(rootEl, start.x, start.y);
+      if(!caret) return;
       var par = caret.node.parentNode;
       if(par && par.closest && par.closest(".book-reader-underline")) return; // слово уже подчёркнуто
       var w = ltWordAt(caret.node, caret.off);
       if(!w) return;
-      var range = document.createRange();
-      try { range.setStart(caret.node, w.s); range.setEnd(caret.node, w.e); } catch(eR){ return; }
-      var pos = resolveSelectionToBlockPosition(range);
+      var p = closestBookP(caret.node);
+      if(!p) return;
+      var r = document.createRange();
+      try { r.setStart(caret.node, w.s); r.setEnd(caret.node, w.e); } catch(eR){ return; }
+      active = { node: caret.node, s: w.s, e: w.e, p: p, range: r };
+      lastX = start.x; lastY = start.y;
+      ltHlRender(r);
+      try { if(navigator.vibrate) navigator.vibrate(12); } catch(eV){}
+      autoScroll();
+    }
+
+    function commit(){
+      var a = active;
+      active = null;
+      ltHlClear();
+      if(!a || !a.range) return;
+      var text = a.range.toString();
+      if(!text || !text.trim()) return;
+      var pos = resolveSelectionToBlockPosition(a.range);
       if(!pos){
         var statusEl = document.getElementById("bookReaderStatus");
         if(statusEl) statusEl.textContent = "Это место подчеркнуть нельзя.";
         return;
       }
-      var text = (caret.node.data || "").slice(w.s, w.e);
-      if(!text.trim()) return;
-      fired = true;
-      try { if(navigator.vibrate) navigator.vibrate(12); } catch(eV){}
       addUnderlineFromSelection(pos.ch, pos.blk, pos.s, pos.e, text);
     }
+
     rootEl.addEventListener("touchstart", function(e){
-      cancel(); fired = false;
+      cancel();
+      if(active){ active = null; ltHlClear(); }
       if(e.touches.length !== 1) return;
       var tg = e.target;
       if(tg && tg.closest && tg.closest("a, button, .book-reader-image-wrap")) return;
@@ -14229,19 +14341,31 @@
       start = { x: t.clientX, y: t.clientY };
       timer = setTimeout(fire, LT_HOLD_MARK_MS);
     }, { passive: true });
+    // Не passive: после срабатывания удержания перетаскивание не должно прокручивать страницу (до этого
+    // preventDefault не вызывается — обычная прокрутка не страдает).
     rootEl.addEventListener("touchmove", function(e){
-      if(!timer || !start) return;
       var t = e.touches[0];
+      if(active){
+        if(e.cancelable) e.preventDefault();
+        lastX = t.clientX; lastY = t.clientY;
+        update();
+        return;
+      }
+      if(!timer || !start) return;
       if(Math.abs(t.clientX - start.x) > LT_HOLD_MOVE_PX || Math.abs(t.clientY - start.y) > LT_HOLD_MOVE_PX) cancel();
-    }, { passive: true });
-    function finish(){
+    }, { passive: false });
+    rootEl.addEventListener("touchend", function(){
       cancel();
-      // отпускание после удержания не должно считаться кликом по тому, что оказалось под пальцем
-      if(fired) swallowUntil = Date.now() + 500;
-      fired = false;
-    }
-    rootEl.addEventListener("touchend", finish, { passive: true });
-    rootEl.addEventListener("touchcancel", finish, { passive: true });
+      if(active){
+        // отпускание после удержания не должно считаться кликом по тому, что оказалось под пальцем
+        swallowUntil = Date.now() + 500;
+        commit();
+      }
+    }, { passive: true });
+    rootEl.addEventListener("touchcancel", function(){
+      cancel();
+      if(active){ active = null; ltHlClear(); }
+    }, { passive: true });
     rootEl.addEventListener("click", function(e){
       if(Date.now() < swallowUntil){ e.preventDefault(); e.stopPropagation(); }
     }, true);
