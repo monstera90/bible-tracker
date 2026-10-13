@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 62.0 (13.10) — маркер по удержанию 250 мс вместо своих ручек: `bindBookReaderHoldMarker` (слово под пальцем подчёркивается сразу, системное выделение в тексте книги выключено), кнопка «Копировать» рядом с урной после тапа по подчёркиванию (`.book-reader-underline-actions` в `showBookReaderUnderlineTrashBtn`); откат — my.js 61.1 (ручки) или 60.0.
    Версия: 61.1 (13.10) — ручки выделения: слой ручек над окном настроек (z-index 1050 в components.css) и отмена системного `selectstart` в тексте книги (Android 5.0: родные «язычки» Google проскакивали); откат — my.js 61.0.
    Версия: 61.0 (12.10) — свои ручки выделения в ридере книг: `bindBookReaderCustomSelection` (удержание 250 мс выделяет слово), `ltSel*` (две ручки поверх страницы, автопрокрутка), вызов из `finishRenderBookReaderText`; откат — файл my.js версии 60.0.
    Версия: 60.0 (12.10) — кнопка «Копировать» (структурная правка: `window.LTCopyText`, `READER_COPY_ICON_SVG`, `#bookReaderCopyBtn` слева от «Выделить текст» в ридере, `#taskCopyBtn` в нижнем ряду задач слева от текстовыделителя, `.task-copy-wrap` в списках видимости/ползунка); системное меню выделения в APK скрыто (SelectionMenuWebView.kt, мост версии 5).
@@ -14141,32 +14142,27 @@
       bindBookReaderLazyImages(container);
       bindBookReaderUnderlineClicks();
       bindBookReaderBookmarkMarks();
-      bindBookReaderCustomSelection(rootEl, container);
+      bindBookReaderHoldMarker(rootEl);
     }
 
     requestAnimationFrame(renderChunk);
   }
 
-  // ===================== СВОИ РУЧКИ ВЫДЕЛЕНИЯ В РИДЕРЕ КНИГ (12.10) =====================
-  // Системное долгое нажатие (~500 мс, настройка Android, из приложения не меняется) заменено своим:
-  // удержание пальца LT_SEL_HOLD_MS (250 мс) на тексте книги программно выделяет слово под пальцем
-  // (обычный Selection/Range — поэтому кнопки «Копировать» и «Выделить текст» работают без изменений),
-  // а границы выделения двигаются двумя своими ручками (кружки на position:fixed поверх страницы).
-  // Только текстовый режим ридера (#bookReaderTextRoot); задачи, заметки и поля ввода не затронуты.
-  // Откат: вернуть my.js/components.css до версий 60.0 / 4.0 (вызов bindBookReaderCustomSelection в
-  // finishRenderBookReaderText и этот блок — единственные изменения).
-  // Чтобы системное долгое нажатие (500 мс) не выделило слово заново и не показало свои системные
-  // ручки, на время удержания у корня ставится класс lt-sel-hold (user-select:none); снимается на
-  // отпускании пальца.
-  var LT_SEL_HOLD_MS = 250;
-  var LT_SEL_MOVE_PX = 10;
-  var ltSelWordRe;
-  try { ltSelWordRe = new RegExp("[\\p{L}\\p{N}\\p{M}'\u2019\u00AD]", "u"); }
-  catch(eRe){ ltSelWordRe = /[A-Za-z\u0400-\u04FF0-9'\u2019\u00AD]/; }
-  var ltSel = null; // активная сессия выделения (одна на приложение)
-  var ltSelApplying = false; // true только пока мы сами ставим Selection (см. selectstart в bindBookReaderCustomSelection)
+  // ===================== МАРКЕР ПО УДЕРЖАНИЮ В РИДЕРЕ КНИГ (13.10) =====================
+  // Вместо системного выделения (долгое нажатие ~500 мс, на Android 5.0 оно показывало родные «язычки»
+  // Google и не отключалось) — свой жест: удержание пальца LT_HOLD_MARK_MS (250 мс) на слове сразу
+  // подчёркивает это слово маркером (тот же addUnderlineFromSelection, что у кнопки «Выделить текст»):
+  // без ручек и без промежуточного выделения. Системное выделение в тексте книги выключено целиком
+  // (.book-reader{user-select:none} в components.css + отмена selectstart). Копирование — кнопка рядом с
+  // урной после тапа по подчёркиванию (showBookReaderUnderlineTrashBtn). Только текстовый режим ридера.
+  // Откат: my.js 61.1 / components.css 4.2 (свои ручки) или 60.0 / 4.0 (до ручек).
+  var LT_HOLD_MARK_MS = 250;
+  var LT_HOLD_MOVE_PX = 10;
+  var ltWordRe;
+  try { ltWordRe = new RegExp("[\\p{L}\\p{N}\\p{M}'\u2019\u00AD]", "u"); }
+  catch(eRe){ ltWordRe = /[A-Za-z\u0400-\u04FF0-9'\u2019\u00AD]/; }
 
-  function ltSelCaretFromPoint(x, y){
+  function ltCaretFromPoint(x, y){
     var n = null, o = 0;
     try {
       if(document.caretRangeFromPoint){
@@ -14181,9 +14177,9 @@
   }
 
   // Слово вокруг позиции в текстовом узле → {s, e} (смещения в node.data) или null.
-  function ltSelWordAt(node, off){
+  function ltWordAt(node, off){
     var d = node.data || "", len = d.length, i = off;
-    function isW(ch){ return ch && ltSelWordRe.test(ch); }
+    function isW(ch){ return ch && ltWordRe.test(ch); }
     if(i < len && isW(d.charAt(i))){ /* на слове */ }
     else if(i > 0 && isW(d.charAt(i - 1))) i--;
     else return null;
@@ -14193,193 +14189,36 @@
     return { s: s, e: e };
   }
 
-  function ltSelTeardown(){
-    var sess = ltSel;
-    if(!sess) return;
-    ltSel = null;
-    sess.stopAuto = true;
-    if(sess.layer && sess.layer.parentNode) sess.layer.parentNode.removeChild(sess.layer);
-    document.removeEventListener("selectionchange", sess.onSelChange);
-    document.removeEventListener("touchstart", sess.onDocTouchStart, true);
-    document.removeEventListener("touchend", sess.onDocTouchEnd, true);
-    if(sess.container) sess.container.removeEventListener("scroll", sess.onScroll);
-    window.removeEventListener("resize", sess.onScroll);
-  }
-
-  function ltSelClear(){
-    var sel = window.getSelection();
-    if(sel) sel.removeAllRanges();
-    ltSelTeardown();
-  }
-
-  // Ручки ставятся по первому/последнему прямоугольнику выделения (низ строки: начало — слева, конец — справа).
-  function ltSelPlace(sess){
-    if(!sess || !sess.range) return;
-    if(!document.body.contains(sess.root)){ ltSelTeardown(); return; }
-    var rects = [], all = sess.range.getClientRects();
-    for(var i = 0; i < all.length; i++) if(all[i].width > 0 && all[i].height > 0) rects.push(all[i]);
-    if(!rects.length){ sess.hStart.classList.add("hidden"); sess.hEnd.classList.add("hidden"); return; }
-    var a = rects[0], b = rects[rects.length - 1];
-    var cr = sess.container ? sess.container.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
-    function put(h, x, y){
-      var vis = y >= cr.top && y <= Math.min(cr.bottom, window.innerHeight);
-      h.classList.toggle("hidden", !vis);
-      h.style.transform = "translate(" + Math.round(x) + "px," + Math.round(y) + "px)";
-    }
-    put(sess.hStart, a.left, a.bottom);
-    put(sess.hEnd, b.right, b.bottom);
-  }
-
-  function ltSelApply(sess, sn, so, en, eo){
-    var r = document.createRange();
-    try { r.setStart(sn, so); r.setEnd(en, eo); } catch(e){ return false; }
-    var sel = window.getSelection();
-    ltSelApplying = true;
-    try { sel.removeAllRanges(); sel.addRange(r); } finally { ltSelApplying = false; }
-    sess.range = r;
-    ltSelPlace(sess);
-    return true;
-  }
-
-  function ltSelEnsureSession(root, container){
-    if(ltSel && ltSel.root === root) return ltSel;
-    ltSelTeardown();
-    var layer = document.createElement("div");
-    layer.className = "lt-sel-layer";
-    var hStart = document.createElement("div");
-    hStart.className = "lt-sel-handle";
-    var hEnd = document.createElement("div");
-    hEnd.className = "lt-sel-handle";
-    layer.appendChild(hStart);
-    layer.appendChild(hEnd);
-    document.body.appendChild(layer);
-    var sess = { root: root, container: container, layer: layer, hStart: hStart, hEnd: hEnd,
-      range: null, drag: null, lastY: 0, lastX: 0, stopAuto: false };
-
-    sess.onScroll = function(){
-      if(sess.rafPending) return;
-      sess.rafPending = true;
-      requestAnimationFrame(function(){ sess.rafPending = false; if(ltSel === sess) ltSelPlace(sess); });
-    };
-    sess.onSelChange = function(){
-      if(ltSel !== sess || sess.drag) return;
-      var sel = window.getSelection();
-      if(!sel || sel.rangeCount === 0 || sel.isCollapsed || !root.contains(sel.getRangeAt(0).commonAncestorContainer)){
-        ltSelTeardown();
-        return;
-      }
-      sess.range = sel.getRangeAt(0);
-      ltSelPlace(sess);
-    };
-    // Тап (короткое касание без сдвига) вне ручек и вне нижнего ряда кнопок — снимает выделение.
-    sess.onDocTouchStart = function(e){
-      var t = e.touches && e.touches[0];
-      sess.tapStart = t ? { x: t.clientX, y: t.clientY, at: Date.now(), target: e.target } : null;
-    };
-    sess.onDocTouchEnd = function(e){
-      var ts = sess.tapStart; sess.tapStart = null;
-      if(!ts || ltSel !== sess) return;
-      var tg = ts.target;
-      if(tg && tg.closest && tg.closest(".lt-sel-layer, .mdeditor-fab-row, .mdeditor-fab-btn")) return;
-      var c = e.changedTouches && e.changedTouches[0];
-      if(!c) return;
-      var moved = Math.abs(c.clientX - ts.x) > LT_SEL_MOVE_PX || Math.abs(c.clientY - ts.y) > LT_SEL_MOVE_PX;
-      if(!moved && (Date.now() - ts.at) < LT_SEL_HOLD_MS) ltSelClear();
-    };
-    document.addEventListener("selectionchange", sess.onSelChange);
-    document.addEventListener("touchstart", sess.onDocTouchStart, { capture: true, passive: true });
-    document.addEventListener("touchend", sess.onDocTouchEnd, { capture: true, passive: true });
-    if(container) container.addEventListener("scroll", sess.onScroll, { passive: true });
-    window.addEventListener("resize", sess.onScroll);
-
-    function bindHandle(h, which){
-      h.addEventListener("touchstart", function(e){
-        if(!sess.range) return;
-        e.preventDefault(); e.stopPropagation();
-        var r = sess.range;
-        // «Своя» ручка тащит один край; противоположный остаётся на месте. Какая из двух ручек сейчас
-        // начало, а какая конец, определяет порядок в документе — он может поменяться при перетаскивании
-        // через противоположный край.
-        sess.drag = { el: h, fixed: which === "start"
-          ? { node: r.endContainer, off: r.endOffset }
-          : { node: r.startContainer, off: r.startOffset } };
-        sess.lastX = e.touches[0].clientX; sess.lastY = e.touches[0].clientY;
-        ltSelAutoScroll(sess);
-      }, { passive: false });
-      h.addEventListener("touchmove", function(e){
-        if(!sess.drag) return;
-        e.preventDefault(); e.stopPropagation();
-        sess.lastX = e.touches[0].clientX; sess.lastY = e.touches[0].clientY;
-        ltSelDragTo(sess);
-      }, { passive: false });
-      function end(e){
-        if(!sess.drag) return;
-        e.stopPropagation();
-        sess.drag = null;
-        // роли ручек после перетаскивания: первая — начало, вторая — конец (по порядку в документе)
-        if(ltSel === sess) ltSelPlace(sess);
-      }
-      h.addEventListener("touchend", end, { passive: true });
-      h.addEventListener("touchcancel", end, { passive: true });
-    }
-    bindHandle(hStart, "start");
-    bindHandle(hEnd, "end");
-    ltSel = sess;
-    return sess;
-  }
-
-  // Палец ведёт ручку: точку под пальцем берём чуть выше (палец закрывает строку), ручка
-  // рисуется ниже строки.
-  function ltSelDragTo(sess){
-    if(!sess.drag || ltSel !== sess) return;
-    var caret = ltSelCaretFromPoint(sess.lastX, sess.lastY - 24);
-    if(!caret || caret.node.nodeType !== 3 || !sess.root.contains(caret.node)) return;
-    var f = sess.drag.fixed;
-    var tmp = document.createRange();
-    try { tmp.setStart(f.node, f.off); tmp.collapse(true); } catch(e){ return; }
-    var c;
-    try { c = tmp.comparePoint(caret.node, caret.off); } catch(e2){ return; }
-    if(c === 0) return;
-    if(c < 0) ltSelApply(sess, caret.node, caret.off, f.node, f.off);
-    else ltSelApply(sess, f.node, f.off, caret.node, caret.off);
-  }
-
-  // Автопрокрутка, пока ручку держат у верхнего/нижнего края видимой области.
-  function ltSelAutoScroll(sess){
-    function tick(){
-      if(!sess.drag || sess.stopAuto || ltSel !== sess || !sess.container) return;
-      var cr = sess.container.getBoundingClientRect();
-      var top = Math.max(cr.top, 0) + 70;
-      var bottom = Math.min(cr.bottom, window.innerHeight) - 110;
-      var dy = 0;
-      if(sess.lastY < top) dy = -Math.min(14, 2 + (top - sess.lastY) / 6);
-      else if(sess.lastY > bottom) dy = Math.min(14, 2 + (sess.lastY - bottom) / 6);
-      if(dy){
-        sess.container.scrollTop += dy;
-        ltSelDragTo(sess);
-      }
-      requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
-  }
-
-  function bindBookReaderCustomSelection(rootEl, container){
+  function bindBookReaderHoldMarker(rootEl){
     if(!rootEl) return;
-    ltSelTeardown();
     var timer = null, start = null, fired = false, swallowUntil = 0;
     function cancel(){ if(timer){ clearTimeout(timer); timer = null; } }
     function fire(){
       timer = null;
-      if(!start || !document.body.contains(rootEl)) return;
-      var caret = ltSelCaretFromPoint(start.x, start.y);
+      if(!start || !bookReaderState || bookReaderState.mode !== "text" || !document.body.contains(rootEl)) return;
+      // user-select:none у .book-reader — на время запроса позиции разрешаем выделение (на всякий случай:
+      // позиция под пальцем не должна зависеть от того, выбираем ли мы текст вообще).
+      var caret;
+      rootEl.classList.add("lt-sel-probe");
+      try { caret = ltCaretFromPoint(start.x, start.y); } finally { rootEl.classList.remove("lt-sel-probe"); }
       if(!caret || caret.node.nodeType !== 3 || !rootEl.contains(caret.node)) return;
-      var w = ltSelWordAt(caret.node, caret.off);
+      var par = caret.node.parentNode;
+      if(par && par.closest && par.closest(".book-reader-underline")) return; // слово уже подчёркнуто
+      var w = ltWordAt(caret.node, caret.off);
       if(!w) return;
-      var sess = ltSelEnsureSession(rootEl, container);
-      if(!ltSelApply(sess, caret.node, w.s, caret.node, w.e)) return;
+      var range = document.createRange();
+      try { range.setStart(caret.node, w.s); range.setEnd(caret.node, w.e); } catch(eR){ return; }
+      var pos = resolveSelectionToBlockPosition(range);
+      if(!pos){
+        var statusEl = document.getElementById("bookReaderStatus");
+        if(statusEl) statusEl.textContent = "Это место подчеркнуть нельзя.";
+        return;
+      }
+      var text = (caret.node.data || "").slice(w.s, w.e);
+      if(!text.trim()) return;
       fired = true;
-      rootEl.classList.add("lt-sel-hold");
       try { if(navigator.vibrate) navigator.vibrate(12); } catch(eV){}
+      addUnderlineFromSelection(pos.ch, pos.blk, pos.s, pos.e, text);
     }
     rootEl.addEventListener("touchstart", function(e){
       cancel(); fired = false;
@@ -14388,17 +14227,16 @@
       if(tg && tg.closest && tg.closest("a, button, .book-reader-image-wrap")) return;
       var t = e.touches[0];
       start = { x: t.clientX, y: t.clientY };
-      timer = setTimeout(fire, LT_SEL_HOLD_MS);
+      timer = setTimeout(fire, LT_HOLD_MARK_MS);
     }, { passive: true });
     rootEl.addEventListener("touchmove", function(e){
       if(!timer || !start) return;
       var t = e.touches[0];
-      if(Math.abs(t.clientX - start.x) > LT_SEL_MOVE_PX || Math.abs(t.clientY - start.y) > LT_SEL_MOVE_PX) cancel();
+      if(Math.abs(t.clientX - start.x) > LT_HOLD_MOVE_PX || Math.abs(t.clientY - start.y) > LT_HOLD_MOVE_PX) cancel();
     }, { passive: true });
     function finish(){
       cancel();
-      rootEl.classList.remove("lt-sel-hold");
-      // отпускание после долгого удержания не должно считаться кликом по тому, что под пальцем
+      // отпускание после удержания не должно считаться кликом по тому, что оказалось под пальцем
       if(fired) swallowUntil = Date.now() + 500;
       fired = false;
     }
@@ -14408,12 +14246,8 @@
       if(Date.now() < swallowUntil){ e.preventDefault(); e.stopPropagation(); }
     }, true);
     rootEl.addEventListener("contextmenu", function(e){ e.preventDefault(); });
-    // Системное выделение (долгое нажатие, двойной тап) в тексте книги отменяем целиком: оно показало бы родные
-    // «язычки» Google (на Android 5.0 user-select:none их не останавливает). Наше выделение ставится из JS
-    // (ltSelApply, флаг ltSelApplying) и это событие не требует.
-    rootEl.addEventListener("selectstart", function(e){
-      if(!ltSelApplying) e.preventDefault();
-    });
+    // Системное выделение (долгое нажатие, двойной тап) в тексте книги отменяем целиком.
+    rootEl.addEventListener("selectstart", function(e){ e.preventDefault(); });
   }
 
   // Шаг 14: тап по самой картинке открывает тот же полноэкранный просмотрщик с зумом, что и у
@@ -15060,15 +14894,38 @@
     if(!settingsModalBox) return;
     var rect = markEl.getBoundingClientRect();
     var boxRect = settingsModalBox.getBoundingClientRect();
+    // Две кнопки рядом над подчёркиванием (13.10): «Копировать» и урна. Обёртка — один элемент
+    // (bookReaderUnderlineTrashBtn), её и ищет скрытие по тапу вне (bindBookReaderUnderlineDismissOnce).
+    var wrap = document.createElement("div");
+    wrap.className = "book-reader-underline-actions";
+    wrap.style.left = (rect.left - boxRect.left + rect.width / 2) + "px";
+    wrap.style.top = (rect.top - boxRect.top) + "px";
+    var copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "book-reader-underline-trash-btn book-reader-underline-copy-btn";
+    copyBtn.title = "Копировать";
+    copyBtn.innerHTML = READER_COPY_ICON_SVG;
     var btn = document.createElement("button");
     btn.type = "button";
     btn.className = "book-reader-underline-trash-btn";
     btn.title = "Убрать подчёркивание";
     btn.innerHTML = READER_TRASH_ICON_SVG;
-    btn.style.left = (rect.left - boxRect.left + rect.width / 2) + "px";
-    btn.style.top = (rect.top - boxRect.top) + "px";
-    settingsModalBox.appendChild(btn);
-    bookReaderUnderlineTrashBtn = btn;
+    wrap.appendChild(copyBtn);
+    wrap.appendChild(btn);
+    settingsModalBox.appendChild(wrap);
+    bookReaderUnderlineTrashBtn = wrap;
+    copyBtn.addEventListener("click", function(ev){
+      ev.stopPropagation();
+      var data = getBookState(hash);
+      var u = data && data.underlines ? data.underlines.filter(function(x){ return x.id === underlineId; })[0] : null;
+      var chapter = bookReaderState && bookReaderState.chapters[ch];
+      var block = chapter && chapter.blocks[blk];
+      if(u && u.position && block){
+        var text = flatBlockText(block).slice(u.position.s, u.position.e).trim();
+        if(text) window.LTCopyText(text);
+      }
+      removeBookReaderUnderlineTrashBtn();
+    });
     btn.addEventListener("click", function(ev){
       ev.stopPropagation();
       deleteBookUnderline(hash, underlineId, ch, blk);
@@ -15133,7 +14990,7 @@
     bookReaderUnderlineDismissBound = true;
     document.addEventListener("click", function(ev){
       if(!bookReaderUnderlineTrashBtn) return;
-      if(ev.target === bookReaderUnderlineTrashBtn) return;
+      if(bookReaderUnderlineTrashBtn.contains(ev.target)) return;
       if(ev.target.closest && ev.target.closest(".book-reader-underline")) return;
       removeBookReaderUnderlineTrashBtn();
     });

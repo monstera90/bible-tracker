@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 4.3 (13.10) — маркер по удержанию: `.book-reader{user-select:none}` + `.lt-sel-probe`, свои ручки убраны; `.book-reader-underline-actions` (обёртка двух кнопок над подчёркиванием: «Копировать» `.book-reader-underline-copy-btn` + урна).
    Версия: 4.2 (13.10) — `.lt-sel-layer` z-index 60 → 1050 (ручки были под окном настроек, z-index 1000).
    Версия: 4.1 (12.10) — новые `.book-reader.lt-sel-hold`, `.lt-sel-layer`, `.lt-sel-handle` (свои ручки выделения в ридере книг, см. my.js 61.0).
    Версия: 4.0 (05.10) — структурная правка (ТЗ пользователя от 05.10): картинки ЗАДАЧ в режиме просмотра — слева от текста квадратом в две строки (3em), текст обтекает: новые `.task-has-img` (на `.task-text-view`), `.task-img-wrap.task-img-side-item` (float:left), правило обрезки `.task-text-view.task-has-img.task-text-clamped` (max-height на 7 строк вместо line-clamp). Миниатюра `.task-img-wrap` в комментариях и прочих местах не менялась.
@@ -3020,20 +3021,11 @@
      первых словах абзацев в книгах теперь появляются всегда — тот же приём стоит
      перенести на заметки (.cm-md-para-start) и задачи (.fmt-para); если нет — вернуть
      `text-indent:1ch` и удалить правило ::before ниже. */
-  /* Свои ручки выделения в ридере книг (my.js, bindBookReaderCustomSelection, 12.10).
-     .lt-sel-hold — на время удержания пальца отключает системное выделение, чтобы системное долгое
-     нажатие (500 мс) не выделило слово второй раз. Ручки — кружки со «стебельком» на position:fixed,
-     координаты задаются transform из JS; зона касания шире кружка (::before). */
-  .book-reader.lt-sel-hold{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
-  .lt-sel-layer{ position:fixed; left:0; top:0; width:0; height:0; z-index:1050; pointer-events:none; }
-  .lt-sel-handle{
-    position:fixed; left:0; top:0; width:22px; height:22px; margin:11px 0 0 -11px;
-    border-radius:50%; background:var(--wood-dark, #6a5a91);
-    pointer-events:auto; touch-action:none; will-change:transform;
-  }
-  .lt-sel-handle::after{ content:""; position:absolute; left:50%; top:-11px; width:2px; height:11px; margin-left:-1px; background:inherit; }
-  .lt-sel-handle::before{ content:""; position:absolute; left:-14px; top:-14px; right:-14px; bottom:-8px; }
-  .lt-sel-handle.hidden{ visibility:hidden; }
+  /* Маркер по удержанию в ридере книг (my.js, bindBookReaderHoldMarker, 13.10): системное выделение
+     текста книги выключено — слово подчёркивается своим жестом, копирование — кнопка у урны.
+     .lt-sel-probe — на долю секунды при удержании, чтобы узнать позицию под пальцем. */
+  .book-reader{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  .book-reader.lt-sel-probe{ -webkit-user-select:text; user-select:text; }
   .book-reader-p{ margin:0 0 10px 0; position:relative; }
   .book-reader-p::before{ content:""; display:inline-block; width:1ch; height:0; }
   /* ---------- Сегмент текста книги (ТЗ 20.09, ускорение открытия длинных
@@ -3214,9 +3206,14 @@
      сам считает left/top через getBoundingClientRect — см. my.js), поэтому
      здесь только сам вид и центрирование над точкой (переданной как
      left/top угла подчёркивания) через transform. ---------- */
-  .book-reader-underline-trash-btn{
+  .book-reader-underline-actions{
     position:absolute;
     transform:translate(-50%,-100%) translateY(-6px);
+    display:flex; gap:8px;
+    z-index:5;
+  }
+  .book-reader-underline-trash-btn{
+    position:relative;
     width:32px; height:32px;
     border-radius:50%;
     display:flex;
@@ -3228,11 +3225,15 @@
     cursor:pointer;
     box-shadow:0 2px 6px rgba(0,0,0,.28);
     -webkit-tap-highlight-color:transparent;
-    z-index:5;
   }
   .book-reader-underline-trash-btn svg{ width:17px; height:17px; }
   @media (hover:hover) and (pointer:fine){
     .book-reader-underline-trash-btn:hover{ background:var(--danger, #c0392b); color:#fffef8; }
+  }
+  /* «Копировать» рядом с урной: тот же вид, но значок не красный (после правила урны — иначе оно перебьёт цвет) */
+  .book-reader-underline-trash-btn.book-reader-underline-copy-btn{ color:var(--wood-dark, #6a5a91); }
+  @media (hover:hover) and (pointer:fine){
+    .book-reader-underline-trash-btn.book-reader-underline-copy-btn:hover{ background:var(--wood-dark, #6a5a91); color:#fffef8; }
   }
   /* ТЗ 28.09: в ТЁМНЫХ темах (data-theme 8..14, см. THEMES в my.js) белые
      кнопки (#fffef8) режут глаз — здесь они красятся как невыбранные
