@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 4.5 (13.10) — подсветка протяжки в ридере: `.lt-hl-layer`/`.lt-hl-rect` внутри `.book-reader` (position:relative; isolation:isolate), под текстом, цвет как у `.book-reader-underline`.
    Версия: 4.4 (13.10) — `.lt-hl-layer`/`.lt-hl-rect`: подсветка подчёркивания при протяжке в ридере книг.
    Версия: 4.3 (13.10) — маркер по удержанию: `.book-reader{user-select:none}` + `.lt-sel-probe`, свои ручки убраны; `.book-reader-underline-actions` (обёртка двух кнопок над подчёркиванием: «Копировать» `.book-reader-underline-copy-btn` + урна).
    Версия: 4.2 (13.10) — `.lt-sel-layer` z-index 60 → 1050 (ручки были под окном настроек, z-index 1000).
@@ -3025,11 +3026,17 @@
   /* Маркер по удержанию в ридере книг (my.js, bindBookReaderHoldMarker, 13.10): системное выделение
      текста книги выключено — слово подчёркивается своим жестом, копирование — кнопка у урны.
      .lt-sel-probe — на долю секунды при удержании, чтобы узнать позицию под пальцем. */
-  .book-reader{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  .book-reader{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; position:relative; isolation:isolate; }
   .book-reader.lt-sel-probe{ -webkit-user-select:text; user-select:text; }
-  /* Подсветка подчёркивания «в процессе» при протяжке (my.js, bindBookReaderHoldMarker): прямоугольники на position:fixed поверх окна настроек (z-index 1000). */
-  .lt-hl-layer{ position:fixed; left:0; top:0; width:0; height:0; z-index:1050; pointer-events:none; }
-  .lt-hl-rect{ position:fixed; background:var(--wood-dark, #6a5a91); opacity:.32; border-radius:3px; }
+  /* Подсветка подчёркивания «в процессе» при протяжке (my.js, bindBookReaderHoldMarker): слой внутри
+     .book-reader (position:relative; isolation:isolate — чтобы z-index:-1 оставался внутри ридера), прямоугольники
+     ПОД текстом и того же цвета, что .book-reader-underline (в т.ч. тема 14) — цвет не меняется при отпускании. */
+  .lt-hl-layer{ position:absolute; left:0; top:0; width:0; height:0; z-index:-1; pointer-events:none; }
+  .lt-hl-rect{ position:absolute; background:var(--gold-light); border-radius:2px; }
+  html[data-theme="14"] .lt-hl-rect{
+    background:rgba(128,128,128,.38);
+    background:color-mix(in srgb, var(--wood) 48%, var(--parchment));
+  }
   .book-reader-p{ margin:0 0 10px 0; position:relative; }
   .book-reader-p::before{ content:""; display:inline-block; width:1ch; height:0; }
   /* ---------- Сегмент текста книги (ТЗ 20.09, ускорение открытия длинных

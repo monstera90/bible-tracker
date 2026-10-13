@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 63.1 (13.10) — подсветка при протяжке теперь ПОД текстом и того же цвета, что готовое подчёркивание (раньше была тёмной полупрозрачной поверх текста): `ltHlRender(range, rootEl)` кладёт слой внутрь `.book-reader`; откат — my.js 63.0.
    Версия: 63.0 (13.10) — маркер по удержанию с протяжкой: удержание 250 мс подчёркивает слово, ведя палец (вниз/вверх, в пределах абзаца) подчёркивание растягивается по словам, у краёв окна — автопрокрутка, запись при отпускании; подсветка в процессе — `.lt-hl-layer`; откат — my.js 62.0.
    Версия: 62.0 (13.10) — маркер по удержанию 250 мс вместо своих ручек: `bindBookReaderHoldMarker` (слово под пальцем подчёркивается сразу, системное выделение в тексте книги выключено), кнопка «Копировать» рядом с урной после тапа по подчёркиванию (`.book-reader-underline-actions` в `showBookReaderUnderlineTrashBtn`); откат — my.js 61.1 (ручки) или 60.0.
    Версия: 61.1 (13.10) — ручки выделения: слой ручек над окном настроек (z-index 1050 в components.css) и отмена системного `selectstart` в тексте книги (Android 5.0: родные «язычки» Google проскакивали); откат — my.js 61.0.
@@ -14190,20 +14191,24 @@
     return { s: s, e: e };
   }
 
-  // Подсветка «в процессе» при протяжке — полупрозрачные прямоугольники поверх страницы (position:fixed,
-  // pointer-events:none), а не системное выделение: оно в тексте книги выключено (см. выше).
+  // Подсветка «в процессе» при протяжке — прямоугольники ПОД текстом (слой внутри .book-reader с z-index:-1,
+  // сам .book-reader — isolation:isolate/position:relative, см. components.css) того же цвета, что у готового
+  // подчёркивания (.book-reader-underline): цвет во время протяжки и после отпускания совпадает. Системное
+  // выделение в тексте книги выключено (см. выше).
   var ltHlLayer = null;
-  function ltHlRender(range){
-    if(!ltHlLayer){
+  function ltHlRender(range, rootEl){
+    if(!ltHlLayer || ltHlLayer.parentNode !== rootEl){
+      ltHlClear();
       ltHlLayer = document.createElement("div");
       ltHlLayer.className = "lt-hl-layer";
-      document.body.appendChild(ltHlLayer);
+      rootEl.appendChild(ltHlLayer);
     }
+    var rr = rootEl.getBoundingClientRect();
     var html = "", rects = range ? range.getClientRects() : [];
     for(var i = 0; i < rects.length; i++){
       var r = rects[i];
       if(r.width < 1 || r.height < 1) continue;
-      html += '<div class="lt-hl-rect" style="left:' + r.left + 'px;top:' + r.top + 'px;width:' + r.width + 'px;height:' + r.height + 'px"></div>';
+      html += '<div class="lt-hl-rect" style="left:' + (r.left - rr.left) + 'px;top:' + (r.top - rr.top) + 'px;width:' + r.width + 'px;height:' + r.height + 'px"></div>';
     }
     ltHlLayer.innerHTML = html;
   }
@@ -14275,7 +14280,7 @@
       var r = document.createRange();
       try { r.setStart(sN, sO); r.setEnd(eN, eO); } catch(eR){ return; }
       a.range = r;
-      ltHlRender(r);
+      ltHlRender(r, rootEl);
     }
 
     function autoScroll(){
@@ -14310,7 +14315,7 @@
       try { r.setStart(caret.node, w.s); r.setEnd(caret.node, w.e); } catch(eR){ return; }
       active = { node: caret.node, s: w.s, e: w.e, p: p, range: r };
       lastX = start.x; lastY = start.y;
-      ltHlRender(r);
+      ltHlRender(r, rootEl);
       try { if(navigator.vibrate) navigator.vibrate(12); } catch(eV){}
       autoScroll();
     }
