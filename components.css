@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 4.8 (14.10) — кнопки «Копировать» и маркер нижнего ряда заметки скрыты в режиме чтения (`.reading-mode-active #mdEditorCopyBtn/#mdEditorHighlightBtn`).
    Версия: 4.7 (14.10) — `.lt-hl-host`, `.lt-hl-fmt`: подсветка протяжки маркера в задачах и заметках (режим чтения).
    Версия: 4.6 (13.10) — кнопка «Копировать» у подчёркивания: цвет и hover как у урны (отдельный цвет убран).
    Версия: 4.5 (13.10) — подсветка протяжки в ридере: `.lt-hl-layer`/`.lt-hl-rect` внутри `.book-reader` (position:relative; isolation:isolate), под текстом, цвет как у `.book-reader-underline`.
@@ -3037,6 +3038,10 @@
   .lt-hl-rect{ position:absolute; background:var(--gold-light); border-radius:2px; }
   /* Хосты слоя подсветки без собственного позиционирования (строка задачи, прокрутка CodeMirror): слой z-index:-1 остаётся внутри. */
   .lt-hl-host{ position:relative; isolation:isolate; }
+  /* «Копировать» и маркер в нижнем ряду заметки — только в режиме редактирования; в режиме чтения (и полноэкранном) их заменяет
+     жест удержания (mdeditor.js, bindNoteHoldMarker). */
+  .settings-modal-overlay.reading-mode-active #mdEditorCopyBtn,
+  .settings-modal-overlay.reading-mode-active #mdEditorHighlightBtn{ display:none; }
   /* Подсветка протяжки ==выделения== в задачах и заметках — цвет готового .fmt-mark / .cm-md-mark */
   .lt-hl-layer.lt-hl-fmt .lt-hl-rect{ background:#f3e08a; }
   html[data-theme="14"] .lt-hl-rect{

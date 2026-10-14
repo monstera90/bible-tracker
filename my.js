@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 65.0 (14.10) — из нижнего ряда задач убраны кнопки «Копировать» и «Выделить текст» (разметка, видимость, обработчики); ИПКД на Android 5 (WebView ~Chrome 95): `scrollBookReaderToPosition` для цели «заголовок главы» (blk === -1) на старом движке идёт общим путём с закреплением высот сегментов и доводкой (раньше — простая однократная прокрутка и «промах»), ошибка открытия ИПКД теперь видна вместо вечной «Загрузки…»; откат — my.js 64.0.
    Версия: 64.0 (14.10) — из ридера книг убраны кнопки «Копировать» и «Выделить текст» (нижний ряд, справка, обработчики, `handleBookReaderSelectionSettled`); маркер по удержанию с протяжкой в режиме чтения для задач (`bindTaskHoldMarker`, `commitTaskHoldMark`: слово оборачивается в «==») и общий движок `ltRunHold`/`ltDomSession`/`window.LTHold` для заметок (mdeditor.js 9.0); `ltHlRender(range, host, variant)`; откат — my.js 63.1.
    Версия: 63.1 (13.10) — подсветка при протяжке теперь ПОД текстом и того же цвета, что готовое подчёркивание (раньше была тёмной полупрозрачной поверх текста): `ltHlRender(range, rootEl)` кладёт слой внутрь `.book-reader`; откат — my.js 63.0.
    Версия: 63.0 (13.10) — маркер по удержанию с протяжкой: удержание 250 мс подчёркивает слово, ведя палец (вниз/вверх, в пределах абзаца) подчёркивание растягивается по словам, у краёв окна — автопрокрутка, запись при отпускании; подсветка в процессе — `.lt-hl-layer`; откат — my.js 62.0.
@@ -1909,13 +1910,9 @@
     // скрепка/Аа/текстовыделитель/Ж видны в тех же случаях, что и "+".
     var formatWraps = document.querySelectorAll(".task-format-wrap");
     var fontSizeWrap = document.getElementById("taskFontSizeWrap");
-    var highlightWrap = document.getElementById("taskHighlightWrap");
     var attachWrap = document.getElementById("taskAttachWrap");
-    var copyWrap = document.getElementById("taskCopyWrap");
-    if(copyWrap) copyWrap.classList.toggle("visible", showTaskFab);
     for(var fwi = 0; fwi < formatWraps.length; fwi++) formatWraps[fwi].classList.toggle("visible", showTaskFab);
     if(fontSizeWrap) fontSizeWrap.classList.toggle("visible", showTaskFab);
-    if(highlightWrap) highlightWrap.classList.toggle("visible", showTaskFab);
     if(attachWrap) attachWrap.classList.toggle("visible", showTaskFab);
     // "i" — в отличие от "глаза"/сортировки ниже видна на ЛЮБОЙ вкладке задач, тем же условием, что
     // и вся остальная скрепка/Аа/Ж/текстовыделитель выше.
@@ -7501,7 +7498,7 @@
   function initFabRowSlider(){
     var box = document.getElementById("settingsModalBox");
     if(!box) return;
-    var TASK_TARGETS_SEL = ".task-add-fab, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap, .task-copy-wrap, " +
+    var TASK_TARGETS_SEL = ".task-add-fab, .task-fontsize-wrap, .task-format-wrap, " +
       ".task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, " +
       ".task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home";
     var EDGE = 6;           // отступ кнопок от края окна (как у самого ряда, --fab-gap в modals.css)
@@ -7883,30 +7880,6 @@
     bindTaskFmtBtn("taskFmtItalicBtn", "*", "*");
     bindTaskFmtBtn("taskFmtUnderlineBtn", "++", "++");
     bindTaskFmtBtn("taskFmtStrikeBtn", "~~", "~~");
-
-    // --- текстовыделитель (та же функция, что и "Ж"/"К"/"П"/"Ч" выше, но
-    // без попапа — один клик сразу оборачивает выделение, тот же приём, что и у
-    // HIGHLIGHT_ICON_SVG-кнопки в "Моём блокноте", см. mdeditor.js) ---
-    var highlightBtn = document.getElementById("taskHighlightBtn");
-    stopMousedown(highlightBtn);
-    if(highlightBtn){
-      highlightBtn.addEventListener("click", function(){
-        wrapEditableSelection("==", "==");
-      });
-    }
-
-    // --- «Копировать» (слева от текстовыделителя): выделенный текст — в буфер обмена. Выделение лежит
-    // в .task-editable (редактируемая строка) либо в обычном тексте вкладки; берём window.getSelection().
-    // stopMousedown — чтобы строка не потеряла фокус/выделение раньше click (см. выше). ---
-    var copyBtn = document.getElementById("taskCopyBtn");
-    stopMousedown(copyBtn);
-    if(copyBtn){
-      copyBtn.addEventListener("click", function(){
-        var sel = window.getSelection();
-        var text = sel ? sel.toString() : "";
-        if(text) window.LTCopyText(text);
-      });
-    }
 
     // --- "глаз" — скрыть/показать на вкладке "Next" задачи, которые уже
     // привязаны к какому-то проекту (nextForProjectId, см. фильтр в renderTaskTabList и
@@ -13067,7 +13040,11 @@
   var BOOK_EXACT_LAYOUT_MAX_SEGS = 150; // до этого номера сегмента место восстанавливается по точной вёрстке всех сегментов выше
   function scrollBookReaderToPosition(container, position){
     if(!position) return false;
-    if(position.blk === -1) return scrollBookReaderToChapterTitleTop(container, position.ch);
+    // blk === -1 — «заголовок главы первой строкой» (ИПКД: сегодняшний день). На современном движке хватает простой прокрутки
+    // scrollBookReaderToChapterTitleTop; на старом WebView (Android 5, bookCvLegacy: высоты пропущенных сегментов — оценка)
+    // она читала геометрию один раз и промахивалась, поэтому там идём общим путём ниже (закрепление высот сегментов,
+    // отключение якорения, доводка до устойчивого положения) с целью — заголовком главы (см. ветку blk === -1 ниже).
+    if(position.blk === -1 && !bookCvLegacy) return scrollBookReaderToChapterTitleTop(container, position.ch);
     var dbg = window.Debug;
     if(bookTraceOn()) bookTrace("scrollBookReaderToPosition(" + posText(position) + ") вызвана, источник цели: " + (bookReaderState && bookReaderState.restoreSource) + "; " + bookScrollEnv(container) + "; " + (navigator.userAgent.match(/Chrome\/[\d.]+/) || ["Chrome ?"])[0]);
     var el = container.querySelector('[data-ch="' + position.ch + '"][data-blk="' + position.blk + '"]');
@@ -13083,7 +13060,7 @@
         if(!isNaN(cb) && cb >= position.blk){ nextEl = sameCh[ci]; break; }
       }
       // для перехода на начало главы (blk 0) сама глава с заголовком — лучшая цель, чем первый попавшийся абзац дальше
-      if(position.blk === 0 && chDiv) el = chDiv.querySelector(".book-reader-chapter-title") || chDiv;
+      if((position.blk === 0 || position.blk === -1) && chDiv) el = chDiv.querySelector(".book-reader-chapter-title") || chDiv;
       else el = nextEl || (chDiv && (chDiv.querySelector(".book-reader-chapter-title") || chDiv)) || null;
       if(dbg) dbg.log("восстановление места: блок " + posText(position) + " не отрисован — запасная цель: " + (el ? (el === chDiv ? "глава" : (el.classList && el.classList.contains("book-reader-chapter-title") ? "заголовок главы" : "блок " + el.getAttribute("data-ch") + ":" + el.getAttribute("data-blk"))) : "НЕТ (откат на textScrollTop)") + ", сегментов=" + container.querySelectorAll(".book-reader-seg").length);
       if(!el) return false;
@@ -15908,7 +15885,13 @@
     ipkdFileExists().then(function(exists){
       if(currentSettingsTab !== "set2s_8" || !document.getElementById("settingsTabContent")) return; // вкладку успели покинуть (#settingsTabContent общий для всех вкладок и есть всегда — проверяем именно текущую вкладку)
       if(!exists){ renderIpkdEmptyScreen(); return; }
-      openBookReader(IPKD_BOOK_NAME, ipkdTodayPosition);
+      openBookReader(IPKD_BOOK_NAME, ipkdTodayPosition).catch(function(e){
+        // раньше при ошибке разбора/чтения файла оставалась вечная «Загрузка…» без объяснения (особенно заметно на старых телефонах)
+        var c2 = document.getElementById("settingsTabContent");
+        if(currentSettingsTab !== "set2s_8" || !c2) return;
+        c2.innerHTML = '<div class="mdeditor-empty">Не удалось открыть ИПКД: ' + escapeHtml(String(e && e.message ? e.message : e)) + '</div>';
+        if(window.Debug) window.Debug.log("ИПКД: openBookReader не удался: " + (e && e.message ? e.message : e));
+      });
     });
   }
 

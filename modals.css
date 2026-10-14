@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 12.1 (14.10) — из нижнего ряда задач убраны `.task-highlight-wrap` и `.task-copy-wrap`; слоты левее сдвинуты на 2: Ч 6, П 7, К 8, Ж 9, «глаз»/сортировка/меню/звенья/«i» 10, «i» дальняя 11.
    Версия: 12.0 (12.10) — структурная правка: кнопка «Копировать» `.task-copy-wrap` (слот 7, слева от текстовыделителя); Ч/П/К/Ж и всё левее сдвинуто на +1 слот (Ч 8, П 9, К 10, Ж 11, «глаз»/сортировка/меню/звенья/«i» 12, «i» дальняя 13).
    Версия: 11.5 (11.10) — на больших экранах (планшет, обычный режим) слева и сверху отступ тоже 2px (базовое правило оверлея: `padding-block:2px 72px; padding-inline:2px 47px`; было 16px слева/сверху), так что со всех четырёх сторон окна по 2px. Полноэкранный режим и телефон не менялись.
    Версия: 11.4 (11.10) — на больших экранах (планшет) справа от колонки вкладок отступ 2px, как снизу от нижнего ряда: базовое `padding-inline` оверлея `16px 47px` вместо `16px 57px` (в 11.3 было 45px, то есть вплотную к краю — это было неверно, нужен тот же отступ, что снизу).
@@ -1899,7 +1900,7 @@
      нижнего угла ВЛЕВО, шаг 40px: "Домик" (пустышка, right:8) → "+"
      (.task-add-fab.task-add-fab-shifted, 48) → скрепка (.task-attach-
      wrap, 88) → "Аа" (.task-fontsize-wrap, 128) → текстовыделитель
-     (.task-highlight-wrap, 168) → "Ж" (.task-format-wrap, 208) → кнопка
+     (168) → "Ж" (.task-format-wrap, 208) → кнопка
      режима чтения (.task-fullscreen-wrap, .task-reading-wrap, 248, ТЗ пользователя от 18.09 —
      видна на ЛЮБОЙ вкладке задач, тем же условием showTaskFab, что и
      "Ж"/"Аа"/текстовыделитель/скрепка выше, КРОМЕ экрана "Все задачи
@@ -1950,35 +1951,12 @@
     z-index:5;
   }
   .task-format-wrap.visible{ display:flex; }
-  .task-format-wrap-strike{ inset-inline-end:calc(var(--fab-gap, 6px) + 8 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
-  .task-format-wrap-underline{ inset-inline-end:calc(var(--fab-gap, 6px) + 9 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
-  .task-format-wrap-italic{ inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
-  .task-format-wrap-bold{ inset-inline-end:calc(var(--fab-gap, 6px) + 11 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
-  /* текстовыделитель — та же функция и та же иконка, что и в "Моём
-     блокноте" (см. HIGHLIGHT_ICON_SVG в mdeditor.js, тут своя копия svg
-     прямо в index.html — иконка используется один раз, заводить деп ради
-     неё не стоит, тот же принцип, что и у mdeditor.js), оборачивает
-     выделение в "==...==" через wrapEditableSelection (см.
-     initTaskGlobalToolbar в my.js), попапа не открывает. */
-  .task-highlight-wrap{
-    display:none;
-    position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 6 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
-    bottom:var(--fab-gap, 6px);
-    z-index:5;
-  }
-  .task-highlight-wrap.visible{ display:flex; }
-  /* «Копировать» (12.10) — слот 7, СРАЗУ СЛЕВА ОТ текстовыделителя (6); Ч/П/К/Ж и всё левее сдвинуты на +1
-     (Ч 8, П 9, К 10, Ж 11, «глаз»/сортировка/меню/звенья/«i» 12, «i» дальняя 13). Кнопка #taskCopyBtn (index.html),
-     логика — initTaskGlobalToolbar (my.js), видимость — вместе с остальным рядом (syncTaskFabRowForTab). */
-  .task-copy-wrap{
-    display:none;
-    position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 7 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
-    bottom:var(--fab-gap, 6px);
-    z-index:5;
-  }
-  .task-copy-wrap.visible{ display:flex; }
+  .task-format-wrap-strike{ inset-inline-end:calc(var(--fab-gap, 6px) + 6 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-underline{ inset-inline-end:calc(var(--fab-gap, 6px) + 7 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-italic{ inset-inline-end:calc(var(--fab-gap, 6px) + 8 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-bold{ inset-inline-end:calc(var(--fab-gap, 6px) + 9 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  /* (14.10) Кнопки «Выделить текст» и «Копировать» из нижнего ряда задач убраны (маркер — жестом удержания в режиме чтения,
+     копирование — системным способом); слоты левее них сдвинуты на 2 назад: Ч 6, П 7, К 8, Ж 9, «глаз»/сортировка/меню/звенья/«i» 10, «i» дальняя 11. */
   /* "глаз" — скрыть/показать на вкладке "Next" задачи, уже привязанные к
      проекту (см. taskHideLinkedWrap/taskHideLinkedBtn в index.html,
      initTaskGlobalToolbar/NEXT_HIDE_LINKED_KEY в my.js, ТЗ пользователя
@@ -2042,7 +2020,7 @@
   .task-hide-linked-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 12 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2061,7 +2039,7 @@
   .task-joint-menu-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 12 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2133,7 +2111,7 @@
   .task-red-sort-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 12 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2151,7 +2129,7 @@
   .task-info-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 12 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2161,7 +2139,7 @@
      стоит ближе к "Ж" (right:280), а "i" — левее неё (right:319). Класс
      вешает JS: syncTaskFabRowForTab и openTaskNextPicker (my.js). На остальных
      вкладках задач класса нет — "i" остаётся на right:280 без дырки в ряду. */
-  .task-info-wrap.task-info-wrap-far{ inset-inline-end:calc(var(--fab-gap, 6px) + 13 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-info-wrap.task-info-wrap-far{ inset-inline-end:calc(var(--fab-gap, 6px) + 11 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
   /* скрепка — между "Аа" и "+" (см. index.html и ТЗ пользователя, та же
      логика попапа не нужна: сразу открывает системный диалог выбора
      файла, см. initTaskGlobalToolbar в my.js) */
@@ -2373,7 +2351,7 @@
      render() (my.js), тем же приёмом, что у globalFab/homeStubHide там же. */
   .task-project-fab-link{
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 12 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2535,8 +2513,8 @@ html.lefty .settings-modal-box > *{ direction:ltr; }
 /* ряды fab-кнопок и одиночные кнопки, позиционируемые inset-inline-end
    (селекторы по классу, а не по «ребёнок окна»: часть из них живёт внутри
    #settingsTabContent) */
-html.lefty :is(.mdeditor-fab-row, .task-add-fab, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap, .task-copy-wrap, .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home){ direction:rtl; }
-html.lefty :is(.mdeditor-fab-row, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap, .task-copy-wrap, .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap) > *{ direction:ltr; }
+html.lefty :is(.mdeditor-fab-row, .task-add-fab, .task-fontsize-wrap, .task-format-wrap, .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home){ direction:rtl; }
+html.lefty :is(.mdeditor-fab-row, .task-fontsize-wrap, .task-format-wrap, .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap) > *{ direction:ltr; }
 /* всплывающие столбики (inset-inline-start:0 — под rtl это правый край
    обёртки, то есть зеркально обычной раскладке); удвоенный класс + тег —
    чтобы перебить сброс «> *» выше, где попап — прямой ребёнок обёртки */
@@ -2560,8 +2538,6 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .task-add-fab,
 .task-fontsize-wrap,
 .task-format-wrap,
-.task-highlight-wrap,
-.task-copy-wrap,
 .task-fullscreen-wrap, .task-reading-wrap,
 .task-hide-linked-wrap,
 .task-joint-menu-wrap,
@@ -2585,8 +2561,7 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .fab-slide-off{ opacity:1; }
 /* перетаскивание ряда пальцем (initFabRowSlider, my.js): сдвиг ведёт палец без сглаживания,
    сглаживание включается снова по отпусканию — так ряд «доезжает» до края */
-.fab-dragging :is(.task-add-fab, .task-fontsize-wrap, .task-format-wrap, .task-highlight-wrap, .task-copy-wrap,
-  .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap,
+.fab-dragging :is(.task-add-fab, .task-fontsize-wrap, .task-format-wrap,   .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap,
   .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home, .mdeditor-fab-row){
   transition:none !important;
 }
@@ -2608,8 +2583,6 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .mdeditor-fab-row .mdeditor-fab-btn,
 .task-fontsize-wrap .mdeditor-fab-btn,
 .task-format-wrap .mdeditor-fab-btn,
-.task-highlight-wrap .mdeditor-fab-btn,
-.task-copy-wrap .mdeditor-fab-btn,
 .task-fullscreen-wrap .mdeditor-fab-btn,
 .task-reading-wrap .mdeditor-fab-btn,
 .task-hide-linked-wrap .mdeditor-fab-btn,

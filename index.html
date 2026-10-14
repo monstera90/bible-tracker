@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 3.6 (14.10) — из нижнего ряда задач убраны кнопки «Копировать» (`#taskCopyWrap`) и «Выделить текст» (`#taskHighlightWrap`).
      Версия: 3.5 (12.10) — кнопка «Копировать» `#taskCopyWrap`/`#taskCopyBtn` в нижнем ряду задач (слева от текстовыделителя).
      Версия: 3.4 (11.10) — подключён `legacy-webview.js` после `opfs-shim.js` (замена `:has()` и блокировка прокрутки страницы под окном для старого WebView).
      Версия: 3.3 (09.10) — подключён `opfs-shim.js` сразу после `native-shell.js` (запасное хранилище файлов на IndexedDB для WebView без OPFS; при наличии родного OPFS ничего не делает).
@@ -327,22 +328,6 @@ window.addEventListener("error", function(e){
           <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="taskFontMinusBtn" title="Мельче">&minus;</button>
         </div>
         <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="taskFontSizeBtn" title="Размер шрифта">Аа</button>
-      </span>
-      <!-- текстовыделитель — та же иконка и та же функция, что и в "Моём
-           блокноте" (см. HIGHLIGHT_ICON_SVG/mdEditorHighlightBtn в
-           mdeditor.js — своя копия svg тут же, заводить деп ради одной
-           иконки не стоит, тот же принцип, что и там): оборачивает
-           выделение в "==...==" (wrapEditableSelection, см.
-           initTaskGlobalToolbar в my.js), без попапа. Правее "Аа", левее
-           скрепки (.task-attach-wrap ниже). -->
-      <span class="task-highlight-wrap" id="taskHighlightWrap">
-        <button type="button" class="mdeditor-fab-btn" id="taskHighlightBtn" title="Выделить текст"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h6"></path><path d="M6.5 17.5L16 8l3 3-9.5 9.5H6.5v-3z"></path><path d="M14 6l4 4"></path></svg></button>
-      </span>
-      <!-- «Копировать» — слот слева от текстовыделителя (12.10): копирует выделенный текст в буфер обмена
-           (вместо системного меню выделения, которое в APK скрыто, см. SelectionMenuWebView.kt); логика —
-           initTaskGlobalToolbar (my.js, window.LTCopyText). -->
-      <span class="task-copy-wrap" id="taskCopyWrap">
-        <button type="button" class="mdeditor-fab-btn" id="taskCopyBtn" title="Копировать"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V6a2 2 0 0 1 2-2h9"></path></svg></button>
       </span>
       <!-- скрепка — вставка картинки в задачу/комментарий, тот же принцип
            "![[имя]]"/OPFS images/, что и в "Моём блокноте"
