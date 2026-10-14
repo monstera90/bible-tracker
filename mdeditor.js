@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 10.0 (14.10) — «Аа»: вместо кнопок «+»/«−» ползунок размера шрифта (стиль ползунка размера значков задач): новые `setFontSizeStep(step)` (абсолютный шаг, сохраняется как раньше) и `bindFontSizeBar(popup, bar, applyStep)` (общая привязка ползунка `.fontsize-bar` для заметки, задач и ридера книг; в `MdEditor` отдаются `setFontSizeStep`/`bindFontSizeBar`); в попапе «Аа» заметки осталась кнопка переносов слов, ползунок — `#mdEditorFontSizeBar` после ряда кнопок. Откат: mdeditor.js 9.0.
    Версия: 9.0 (14.10) — маркер по удержанию в режиме чтения: `bindNoteHoldMarker(view)` (слово подсвечивается, протяжка растягивает, при отпускании оборачивается в «==»), движок жеста — `window.LTHold` из my.js; откат — mdeditor.js 8.0.
    Версия: 8.0 (12.10) — кнопка «Копировать» `#mdEditorCopyBtn` (`COPY_ICON_SVG`) в нижнем ряду заметки слева от маркера, копирует выделение CodeMirror через `window.LTCopyText` (my.js).
    Версия: 7.6 (11.10) — в возвращаемом объекте `onAppPause`/`onAppResume` (сворачивание/возврат из APK без visibilitychange); при возврате без запомненной прокрутки область возвращается к строке с кареткой, а не в начало.
@@ -2095,6 +2096,57 @@ window.initMdEditorModule = function(deps){
       idbSet("fontSizeStep", fontSizeStep).catch(function(){});
     }
     applyFontSize();
+  }
+  // Абсолютный шаг (ползунок «Аа»): то же, что changeFontSizeStep, но не «на столько-то», а «ровно такой».
+  // Режим чтения/обычный — как в changeFontSizeStep. Возвращает шаг, который действует после вызова.
+  function setFontSizeStep(step){
+    step = Math.round(Number(step));
+    if(!isFinite(step)) return getActiveFontSizeStep();
+    step = clampFontSizeStep(step);
+    if(step === getActiveFontSizeStep()) return step;
+    changeFontSizeStep(step - getActiveFontSizeStep());
+    return getActiveFontSizeStep();
+  }
+  function fontSizeStepLabel(step){
+    var px = Math.round((FONT_SIZE_BASE_PX + step * FONT_SIZE_STEP_PX) * 10) / 10;
+    return String(px).replace(".", ",") + " px";
+  }
+  // Привязка ползунка размера шрифта `.fontsize-bar` к попапу «Аа» (попап — `.mdeditor-fontsize-popup`, в нём кнопка
+  // переносов слов; ползунок — отдельный элемент окна, см. index.html/#taskFontSizeBar и modals.css). Ползунок виден,
+  // пока открыт попап: вызывающий код зовёт возвращённую функцию после каждого открытия/закрытия попапа.
+  // applyStep(step) — как применить новый шаг (по умолчанию setFontSizeStep; ридер книг передаёт свой — с якорем места
+  // чтения). Возвращает sync() — выставить видимость и значение по состоянию попапа.
+  function bindFontSizeBar(popup, bar, applyStep){
+    if(!bar) return function(){};
+    var range = bar.querySelector(".fontsize-bar-range");
+    var val = bar.querySelector(".fontsize-bar-val");
+    function show(){
+      var st = getActiveFontSizeStep();
+      if(range){
+        range.min = String(FONT_SIZE_MIN_STEP);
+        range.max = String(FONT_SIZE_MAX_STEP);
+        range.value = String(st);
+      }
+      if(val) val.textContent = fontSizeStepLabel(st);
+    }
+    function sync(){
+      var open = !!(popup && popup.classList.contains("open"));
+      bar.classList.toggle("open", open);
+      if(open) show();
+    }
+    if(range && !range.__ltFontBound){
+      range.__ltFontBound = true;
+      // ползунок не должен отнимать фокус у редактируемого поля (иначе строка задачи пересохранится и перерисуется)
+      range.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      range.addEventListener("input", function(){
+        var st = parseInt(range.value, 10);
+        if(!isFinite(st)) return;
+        (applyStep || setFontSizeStep)(st);
+        if(val) val.textContent = fontSizeStepLabel(getActiveFontSizeStep());
+      });
+    }
+    sync();
+    return sync;
   }
   // применяется сразу, не дожидаясь открытия вкладки "Мои заметки" (см.
   // пояснение выше) — idbGet/idbSet объявлены ниже как function-декларации
@@ -4254,7 +4306,7 @@ window.initMdEditorModule = function(deps){
       code("**") + ", " + code(">") + ", " + code("[[ ]]") + ". Удобно, когда нужно поправить сами символы. Иконка меняется на глаз " +
       "(" + '<span class="note-info-inline">' + EYE_ICON_SVG + '</span>' + "), пока показан код.");
     html += row(btnIcon("Аа"),
-      "Размер шрифта: «+» крупнее, «−» мельче, один и тот же на всех вкладках приложения. В режиме чтения (кнопка ниже) размер запоминается отдельно от обычного.");
+      "Размер шрифта: ползунок (влево — мельче, вправо — крупнее) и кнопка переносов слов, размер один и тот же на всех вкладках приложения. В режиме чтения (кнопка ниже) размер запоминается отдельно от обычного.");
     html += row(btnIcon("", "fullscreen-mode-btn"),
       "Полноэкранный режим: прячет строку состояния и ряды вкладок; повторное нажатие возвращает всё обратно.");
     html += row(btnIcon("", "reading-mode-btn"),
@@ -4299,8 +4351,6 @@ window.initMdEditorModule = function(deps){
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorHighlightBtn" title="Выделить текст">' + HIGHLIGHT_ICON_SVG + '</button>' +
           '<span class="mdeditor-fontsize-wrap" id="mdEditorFontSizeWrap">' +
             '<div class="mdeditor-fontsize-popup" id="mdEditorFontSizePopup">' +
-              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="mdEditorFontPlusBtn" title="Крупнее">+</button>' +
-              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="mdEditorFontMinusBtn" title="Мельче">&minus;</button>' +
               '<button type="button" class="mdeditor-fab-btn hyphens-btn" id="mdEditorHyphensBtn" title="Переносы слов"></button>' +
             '</div>' +
             '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="mdEditorFontSizeBtn" title="Размер шрифта">Аа</button>' +
@@ -4312,6 +4362,13 @@ window.initMdEditorModule = function(deps){
           // полноэкранный режим — сразу слева от «домика» (режим чтения — следующая кнопка)
           '<button type="button" class="mdeditor-fab-btn fullscreen-mode-btn" id="mdEditorFullscreenBtn" title="Полноэкранный режим"></button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn2" title="К списку заметок">' + HOME_ICON_SVG + '</button>' +
+        '</div>' +
+        // ползунок размера шрифта («Аа») — отдельный элемент рядом с рядом кнопок (ряд двигается свайпом, ползунок нет)
+        '<div class="fontsize-bar" id="mdEditorFontSizeBar">' +
+          '<span class="task-iconsize-dot task-iconsize-dot-s"></span>' +
+          '<input type="range" class="fontsize-bar-range" id="mdEditorFontSizeRange" min="-6" max="12" step="1" value="0" aria-label="Размер шрифта">' +
+          '<span class="task-iconsize-dot task-iconsize-dot-l"></span>' +
+          '<span class="fontsize-bar-val" id="mdEditorFontSizeVal"></span>' +
         '</div>' +
       '</div>';
     document.getElementById("mdEditorTitle").textContent = openFile.name;
@@ -4366,13 +4423,14 @@ window.initMdEditorModule = function(deps){
     // единицу (см. changeFontSizeStep выше) и сохраняются в IndexedDB, за
     // исходный размер (шаг 0) принят текущий стандартный (см.
     // FONT_SIZE_BASE_PX выше).
+    // 14.10: вместо «+»/«−» — ползунок #mdEditorFontSizeBar (bindFontSizeBar выше), виден вместе с попапом.
+    var mdFontPopupEl = document.getElementById("mdEditorFontSizePopup");
+    var syncMdFontBar = bindFontSizeBar(mdFontPopupEl, document.getElementById("mdEditorFontSizeBar"), setFontSizeStep);
     document.getElementById("mdEditorFontSizeBtn").addEventListener("click", function(){
       fontSizePanelOpen = !fontSizePanelOpen;
-      var popup = document.getElementById("mdEditorFontSizePopup");
-      if(popup) popup.classList.toggle("open", fontSizePanelOpen);
+      if(mdFontPopupEl) mdFontPopupEl.classList.toggle("open", fontSizePanelOpen);
+      syncMdFontBar();
     });
-    document.getElementById("mdEditorFontPlusBtn").addEventListener("click", function(){ changeFontSizeStep(1); });
-    document.getElementById("mdEditorFontMinusBtn").addEventListener("click", function(){ changeFontSizeStep(-1); });
 
     // «Ж»/«К»/«П»/«Ч» — форматирование выделенного текста, четыре отдельные
     // кнопки в ряду левее текстовыделителя (ТЗ пользователя от 30.09; раньше —
@@ -6297,6 +6355,9 @@ window.initMdEditorModule = function(deps){
     // "Моих заметках".
     getFontSizeStep: function(){ return getActiveFontSizeStep(); },
     changeFontSizeStep: changeFontSizeStep,
+    // 14.10: ползунок «Аа» (см. bindFontSizeBar) — задачи и ридер книг зовут из my.js.
+    setFontSizeStep: setFontSizeStep,
+    bindFontSizeBar: bindFontSizeBar,
     // ТЗ 20.09: my.js зовёт при входе/выходе из режима чтения (toggleReadingMode) —
     // подставляет размер шрифта того режима, в который перешли.
     applyFontSize: applyFontSize,

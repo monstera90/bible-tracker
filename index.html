@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 5.0 (14.10) — «Аа» вкладок задач: вместо кнопок «+»/«−» ползунок `#taskFontSizeBar` (`#taskFontSizeRange`, `#taskFontSizeVal`) в стиле ползунка размера значков; в попапе `#taskFontSizePopup` осталась кнопка переносов слов. Откат: index.html 4.0.
      Версия: 4.0 (14.10) — новая кнопка нижнего ряда задач «Размер значков» (`#taskIconSizeWrap`/`#taskIconSizeBtn`, слот 6, слева от «Аа») и её всплывающий ползунок `#taskIconSizePopup` (`#taskIconSizeRange`, `#taskIconSizeVal`).
      Версия: 3.6 (14.10) — из нижнего ряда задач убраны кнопки «Копировать» (`#taskCopyWrap`) и «Выделить текст» (`#taskHighlightWrap`).
      Версия: 3.5 (12.10) — кнопка «Копировать» `#taskCopyWrap`/`#taskCopyBtn` в нижнем ряду задач (слева от текстовыделителя).
@@ -325,8 +326,6 @@ window.addEventListener("error", function(e){
       </span>
       <span class="task-fontsize-wrap" id="taskFontSizeWrap">
         <div class="mdeditor-fontsize-popup" id="taskFontSizePopup">
-          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="taskFontPlusBtn" title="Крупнее">+</button>
-          <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="taskFontMinusBtn" title="Мельче">&minus;</button>
         </div>
         <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="taskFontSizeBtn" title="Размер шрифта">Аа</button>
       </span>
@@ -342,6 +341,15 @@ window.addEventListener("error", function(e){
         <input type="range" class="task-iconsize-range" id="taskIconSizeRange" min="70" max="160" step="5" value="100" aria-label="Размер значков задач">
         <span class="task-iconsize-dot task-iconsize-dot-l"></span>
         <span class="task-iconsize-val" id="taskIconSizeVal">100%</span>
+      </div>
+      <!-- Ползунок размера шрифта («Аа», 14.10) — вместо кнопок «+»/«−». Отдельный элемент окна (как #taskIconSizePopup):
+           ряд двигается свайпом, ползунок стоит на месте; открывается/закрывается вместе с #taskFontSizePopup
+           (MdEditor.bindFontSizeBar, initTaskGlobalToolbar в my.js). -->
+      <div class="fontsize-bar" id="taskFontSizeBar">
+        <span class="task-iconsize-dot task-iconsize-dot-s"></span>
+        <input type="range" class="fontsize-bar-range" id="taskFontSizeRange" min="-6" max="12" step="1" value="0" aria-label="Размер шрифта">
+        <span class="task-iconsize-dot task-iconsize-dot-l"></span>
+        <span class="fontsize-bar-val" id="taskFontSizeVal"></span>
       </div>
       <!-- скрепка — вставка картинки в задачу/комментарий, тот же принцип
            "![[имя]]"/OPFS images/, что и в "Моём блокноте"

@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 14.0 (14.10) — структурная правка: ползунок размера шрифта `.fontsize-bar` (+ `.fontsize-bar-range`, `.fontsize-bar-val`) для попапов «Аа» (задачи, «Мой блокнот», ридер книг): тот же вид, что у `.task-iconsize-popup`, но на второй «ступеньке» над рядом (первую занимает кнопка переносов слов). Откат: modals.css 13.0.
    Версия: 13.0 (14.10) — структурная правка: (1) размер значков управления задачей задаётся одним множителем `--task-ico-scale` (кнопка 22px → `--task-btn`, пиктограмма 15px → `--task-ico`, кружок 19px → `--task-circle`, внутренний кружок приоритета 12px → `--task-flag-inner`, шрифт времени/числа напоминания); множитель ставит my.js (`applyTaskIconScale`), по умолчанию 1 — вид прежний. (2) новая кнопка нижнего ряда задач `.task-iconsize-wrap` (слот 6, сразу слева от «Аа») и её всплывающий ползунок `.task-iconsize-popup` (высота кнопки, над рядом на расстоянии `--fab-gap`, ширина по окну, но не больше 9 кнопок с промежутками); слоты левее сдвинуты на +1: Ч 7, П 8, К 9, Ж 10, «глаз»/сортировка/меню/звенья/«i» 11, «i» дальняя 12.
    Версия: 12.1 (14.10) — из нижнего ряда задач убраны `.task-highlight-wrap` и `.task-copy-wrap`; слоты левее сдвинуты на 2: Ч 6, П 7, К 8, Ж 9, «глаз»/сортировка/меню/звенья/«i» 10, «i» дальняя 11.
    Версия: 12.0 (12.10) — структурная правка: кнопка «Копировать» `.task-copy-wrap` (слот 7, слева от текстовыделителя); Ч/П/К/Ж и всё левее сдвинуто на +1 слот (Ч 8, П 9, К 10, Ж 11, «глаз»/сортировка/меню/звенья/«i» 12, «i» дальняя 13).
@@ -1959,7 +1960,8 @@
   /* Ползунок — отдельный элемент окна (не внутри обёртки кнопки: ряд двигается свайпом, ползунок должен стоять на месте).
      Высота = высота кнопки ряда; над рядом на расстоянии --fab-gap (как между кнопками); правый край — как у «домика»;
      ширина — вся область окна минус отступы по краям, но не больше 9 кнопок с промежутками между ними. */
-  .task-iconsize-popup{
+  .task-iconsize-popup,
+  .fontsize-bar{
     display:none;
     position:absolute;
     z-index:6;
@@ -1979,11 +1981,13 @@
     color:var(--wood);
     -webkit-tap-highlight-color:transparent;
   }
-  .task-iconsize-popup.open{ display:flex; }
+  .task-iconsize-popup.open,
+  .fontsize-bar.open{ display:flex; }
   .task-iconsize-dot{ flex:0 0 auto; border-radius:50%; background:currentColor; }
   .task-iconsize-dot-s{ width:7px; height:7px; }
   .task-iconsize-dot-l{ width:17px; height:17px; }
-  .task-iconsize-val{
+  .task-iconsize-val,
+  .fontsize-bar-val{
     flex:0 0 auto;
     min-width:3.2em;
     text-align:end;
@@ -1991,7 +1995,8 @@
     font-variant-numeric:tabular-nums;
     color:var(--ink-soft);
   }
-  .task-iconsize-range{
+  .task-iconsize-range,
+  .fontsize-bar-range{
     -webkit-appearance:none;
     appearance:none;
     flex:1 1 auto;
@@ -2002,9 +2007,12 @@
     cursor:pointer;
     touch-action:none;
   }
-  .task-iconsize-range:focus{ outline:none; }
-  .task-iconsize-range::-webkit-slider-runnable-track{ height:4px; border-radius:2px; background:var(--groove-shadow); }
-  .task-iconsize-range::-webkit-slider-thumb{
+  .task-iconsize-range:focus,
+  .fontsize-bar-range:focus{ outline:none; }
+  .task-iconsize-range::-webkit-slider-runnable-track,
+  .fontsize-bar-range::-webkit-slider-runnable-track{ height:4px; border-radius:2px; background:var(--groove-shadow); }
+  .task-iconsize-range::-webkit-slider-thumb,
+  .fontsize-bar-range::-webkit-slider-thumb{
     -webkit-appearance:none;
     width:20px; height:20px;
     margin-top:-8px;
@@ -2012,8 +2020,14 @@
     background:var(--wood);
     box-shadow:0 1px 3px rgba(0,0,0,.35);
   }
-  .task-iconsize-range::-moz-range-track{ height:4px; border-radius:2px; background:var(--groove-shadow); }
-  .task-iconsize-range::-moz-range-thumb{ width:20px; height:20px; border:none; border-radius:50%; background:var(--wood); }
+  .task-iconsize-range::-moz-range-track,
+  .fontsize-bar-range::-moz-range-track{ height:4px; border-radius:2px; background:var(--groove-shadow); }
+  .task-iconsize-range::-moz-range-thumb,
+  .fontsize-bar-range::-moz-range-thumb{ width:20px; height:20px; border:none; border-radius:50%; background:var(--wood); }
+  /* Ползунок шрифта стоит на второй «ступеньке» над рядом кнопок: на первой — кнопка переносов слов из попапа «Аа»
+     (она на 7px выше ряда). Подпись — размер в px, чуть шире подписи процентов. */
+  .fontsize-bar{ bottom:calc(var(--fab-gap, 6px) + 2 * var(--fab-size, 36px) + 14px); }
+  .fontsize-bar-val{ min-width:4.4em; }
   /* «Ж»/«К»/«П»/«Ч» — четыре отдельные кнопки вместо одной «Ж» с попапом (ТЗ
      пользователя от 30.09), по слоту на каждую, шаг 39px; в notebook-ряду
      (mdeditor.js) порядок тот же: слева направо Ж К П Ч, то есть Ч — ближе всех

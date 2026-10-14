@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 68.0 (14.10) — «Аа»: кнопки «+»/«−» заменены ползунком размера шрифта в стиле ползунка размера значков (на вкладках задач `#taskFontSizeBar`, в «Моём блокноте» — mdeditor.js 10.0, в ридере книг `#bookReaderFontSizeBar`); общая привязка — `MdEditor.bindFontSizeBar`/`MdEditor.setFontSizeStep`; в ридере книг `changeBookReaderFontSize(delta)` заменена на `setBookReaderFontSize(step)` (то же сохранение места чтения); автозакрытие попапов «Аа» (`initFontFormatPopupsAutoClose`) не срабатывает от касаний самого ползунка. Откат: my.js 67.0 / mdeditor.js 9.0 / modals.css 13.0 / index.html 4.0.
    Версия: 67.0 (14.10) — размер значков управления задачей: новая кнопка нижнего ряда задач («Размер значков», слот слева от «Аа») открывает всплывающий ползунок 70–160 %; `getTaskIconScalePct`/`applyTaskIconScale` (localStorage `taskIconScale_v1`, CSS-переменная `--task-ico-scale`, подгонка `refitAllVisibleTaskBodies`), `pushQuickTaskTheme` присылает оболочке ещё и `iconScale` — окно «Создать новую задачу» рисует кнопки того же размера; кнопка в `syncTaskFabRowForTab` (там же закрывается ползунок), `TASK_TARGETS_SEL`, обработчики в `initTaskGlobalToolbar`; при старте множитель применяется до первой отрисовки. Откат: my.js 66.0.
    Версия: 66.0 (14.10) — ярлык «Создать новую задачу» (APK, мост версии 6): `pullNativeQuickTasks` забирает у оболочки задачи, созданные окном над клавиатурой без открытия приложения (`LifeTrackerNative.takeQuickTasks`/`ackQuickTasks`), и кладёт их в Inbox (приоритет `flag`, чемоданчик `inWork`, напоминание `remindAt`); вызывается при запуске страницы и из `__ltOnAppResume`. `pushQuickTaskTheme` присылает оболочке цвета темы (`setQuickTaskTheme`), чтобы окно выглядело как задача в приложении; вызывается из `syncThemeColorMeta`, при запуске и из `__ltOnAppPause`.
    Версия: 65.0 (14.10) — из нижнего ряда задач убраны кнопки «Копировать» и «Выделить текст» (разметка, видимость, обработчики); ИПКД на Android 5 (WebView ~Chrome 95): `scrollBookReaderToPosition` для цели «заголовок главы» (blk === -1) на старом движке идёт общим путём с закреплением высот сегментов и доводкой (раньше — простая однократная прокрутка и «промах»), ошибка открытия ИПКД теперь видна вместо вечной «Загрузки…»; откат — my.js 64.0.
@@ -7875,8 +7876,6 @@
     var fontSizePanelOpen = false;
     var fontBtn = document.getElementById("taskFontSizeBtn");
     var fontPopup = document.getElementById("taskFontSizePopup");
-    var fontPlusBtn = document.getElementById("taskFontPlusBtn");
-    var fontMinusBtn = document.getElementById("taskFontMinusBtn");
     // ПЕРЕНОСЫ СЛОВ: кнопка-переключатель внизу попапа «Аа» (ниже «−», ближе к самой «Аа» — попап
     // раскрывается вверх). Создаётся здесь, а не в index.html; клик/иконка — общая делегация
     // bindHyphensButtonsOnce.
@@ -7888,22 +7887,17 @@
       taskHyphensBtn.title = "Переносы слов";
       fontPopup.appendChild(taskHyphensBtn);
     }
-    stopMousedown(fontBtn); stopMousedown(fontPlusBtn); stopMousedown(fontMinusBtn);
+    stopMousedown(fontBtn);
+    // Ползунок размера шрифта #taskFontSizeBar (14.10, вместо «+»/«−») — виден, пока открыт попап «Аа»; размер тот же
+    // общий шаг, что у «Моего блокнота» (MdEditor.setFontSizeStep → applyFontSize → refitAllVisibleTaskBodies).
+    var syncFontBar = MdEditor.bindFontSizeBar(fontPopup, document.getElementById("taskFontSizeBar"), MdEditor.setFontSizeStep);
     if(fontBtn){
       fontBtn.addEventListener("click", function(){
         fontSizePanelOpen = !fontSizePanelOpen;
         if(fontPopup) fontPopup.classList.toggle("open", fontSizePanelOpen);
+        syncFontBar();
       });
     }
-    function changeTaskFontSizeStep(delta){
-      // пересчёт подгонки кнопок (см. fitTaskActions выше) теперь встроен прямо в applyFontSize
-      // (mdeditor.js) — единая точка на ЛЮБОЕ изменение размера шрифта, а не только на клик "+"/"-"
-      // здесь, см. передачу refitAllVisibleTaskBodies в deps при вызове initMdEditorModule выше.
-      MdEditor.changeFontSizeStep(delta);
-    }
-    if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ changeTaskFontSizeStep(1); });
-    if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ changeTaskFontSizeStep(-1); });
-
     // --- «Размер значков» (слева от «Аа») ---
     // Открывает ползунок #taskIconSizePopup (отдельный элемент окна над рядом кнопок): тянешь — множитель
     // --task-ico-scale меняется сразу у всех значков управления задачей (applyTaskIconScale), та же величина уходит
@@ -13659,8 +13653,6 @@
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderFlibustaBtn" title="Flibusta">' + READER_FLIBUSTA_ICON_SVG + '</button>' +
         '<span class="mdeditor-fontsize-wrap" id="bookReaderFontSizeWrap">' +
           '<div class="mdeditor-fontsize-popup" id="bookReaderFontSizePopup">' +
-            '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontPlusBtn" title="Крупнее">+</button>' +
-            '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontMinusBtn" title="Мельче">&minus;</button>' +
             '<button type="button" class="mdeditor-fab-btn hyphens-btn" id="bookReaderHyphensBtn" title="Переносы слов"></button>' +
           '</div>' +
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontSizeBtn" title="Размер шрифта">Аа</button>' +
@@ -13675,6 +13667,13 @@
         // полноэкранный режим — сразу слева от «домика», режим чтения — следующая кнопка
         '<button type="button" class="mdeditor-fab-btn fullscreen-mode-btn" id="bookReaderFullscreenBtn" title="Полноэкранный режим"></button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderHomeBtn" title="К списку книг">' + READER_HOME_ICON_SVG + '</button>' +
+      '</div>' +
+      // ползунок размера шрифта («Аа», 14.10) — отдельный элемент рядом с рядом кнопок (ряд двигается свайпом, ползунок нет)
+      '<div class="fontsize-bar" id="bookReaderFontSizeBar">' +
+        '<span class="task-iconsize-dot task-iconsize-dot-s"></span>' +
+        '<input type="range" class="fontsize-bar-range" id="bookReaderFontSizeRange" min="-6" max="12" step="1" value="0" aria-label="Размер шрифта">' +
+        '<span class="task-iconsize-dot task-iconsize-dot-l"></span>' +
+        '<span class="fontsize-bar-val" id="bookReaderFontSizeVal"></span>' +
       '</div>'
     );
   }
@@ -13720,7 +13719,7 @@
       html += iconRow(READER_FLIBUSTA_ICON_SVG, false, "Открывает каталог Flibusta: найденную книгу можно скачать прямо в приложение. Читаемая книга остаётся под каталогом — после закрытия каталога вы на том же месте.");
     }
     html += iconRow('<span style="font-weight:600;font-size:15px;line-height:1;">Аа</span>', false,
-      "Размер шрифта и переносы слов. Нажатие раскрывает кнопки «+» (крупнее), «−» (мельче) и кнопку переносов слов (включает и выключает автоматические переносы). Размер шрифта общий с задачами и «Моим блокнотом», у режима чтения он свой.");
+      "Размер шрифта и переносы слов. Нажатие раскрывает ползунок размера (влево — мельче, вправо — крупнее) и кнопку переносов слов (включает и выключает автоматические переносы). Размер шрифта общий с задачами и «Моим блокнотом», у режима чтения он свой.");
     html += iconRow(READER_SELECT_ICON_SVG, false,
       "Подчёркивание текста (без кнопки): задержите палец на слове — оно сразу подчёркивается и дописывается в заметку книги; не отпуская, ведите палец вниз или вверх — подчёркивание растянется по словам (в пределах абзаца). Когда заметка ещё не привязана, приложение предложит создать новую или выбрать существующую. Нажатие на подчёркнутый текст показывает кнопки: копировать текст и " +
       '<span class="task-icon-btn" style="display:inline-flex;vertical-align:middle;width:1.3em;height:1.3em;">' + READER_TRASH_ICON_SVG + '</span> — снять подчёркивание.');
@@ -13773,33 +13772,31 @@
     removeBookReaderUnderlineTrashBtn(); // кнопка-урна тоже не переживает полный рендер — та же причина
     var fontBtn = document.getElementById("bookReaderFontSizeBtn");
     var fontPopup = document.getElementById("bookReaderFontSizePopup");
-    var fontPlusBtn = document.getElementById("bookReaderFontPlusBtn");
-    var fontMinusBtn = document.getElementById("bookReaderFontMinusBtn");
-    if(fontBtn){
-      fontBtn.addEventListener("click", function(){
-        bookReaderFontSizePanelOpen = !bookReaderFontSizePanelOpen;
-        if(fontPopup) fontPopup.classList.toggle("open", bookReaderFontSizePanelOpen);
-      });
-    }
-    // Тот же fontSizeStep, что у "Моего блокнота"/задач (см. initTaskGlobalToolbar выше) — единица
-    // размера общая на всё приложение. После смены шрифта пересчитываем оценку высоты ещё не
-    // сверстанных сегментов.
     // ТЗ 05.10: при смене размера шрифта читаемое место не должно «прыгать». Раньше после смены
     // размера через 80 мс пересчитывалась оценка высоты ещё не сверстанных сегментов
     // (calibrateBookReaderSegments → --book-px-per-char), и всё, что выше экрана, меняло высоту
     // без поправки прокрутки. Теперь тем же приёмом, что у переносов слов (toggleHyphens):
     // запоминаем место в тексте у верхнего края (captureHyphensAnchor) и после смены шрифта и
     // после калибровки возвращаем его на прежнее расстояние от верха (keepScrollAnchorPasses).
-    function changeBookReaderFontSize(delta){
+    // 14.10: вместо «+»/«−» — ползунок #bookReaderFontSizeBar (MdEditor.bindFontSizeBar), виден, пока открыт попап «Аа»;
+    // тот же fontSizeStep, что у «Моего блокнота»/задач (единица размера общая на всё приложение).
+    function setBookReaderFontSize(step){
       var anchor = captureHyphensAnchor();
-      MdEditor.changeFontSizeStep(delta);
+      var applied = MdEditor.setFontSizeStep(step);
       keepScrollAnchorPasses(anchor, function(){
         var c = document.getElementById("settingsTabContent");
         if(c && bookReaderState && bookReaderState.mode === "text") calibrateBookReaderSegments(c);
       });
+      return applied;
     }
-    if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ changeBookReaderFontSize(1); });
-    if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ changeBookReaderFontSize(-1); });
+    var syncBookFontBar = MdEditor.bindFontSizeBar(fontPopup, document.getElementById("bookReaderFontSizeBar"), setBookReaderFontSize);
+    if(fontBtn){
+      fontBtn.addEventListener("click", function(){
+        bookReaderFontSizePanelOpen = !bookReaderFontSizePanelOpen;
+        if(fontPopup) fontPopup.classList.toggle("open", bookReaderFontSizePanelOpen);
+        syncBookFontBar();
+      });
+    }
 
     var bookmarkBtn = document.getElementById("bookReaderBookmarkBtn");
     // Тап — переставить основную закладку на текущее место; удержание — включить/выключить авторежим
@@ -17623,6 +17620,8 @@
         var popup = popups[i];
         var wrap = popup.parentElement || popup;
         if(target && wrap.contains(target)) continue;
+        // ползунок размера шрифта (.fontsize-bar, 14.10) — отдельный элемент рядом с рядом кнопок: касания по нему попап не закрывают
+        if(target && target.closest && target.closest(".fontsize-bar")) continue;
         var btn = findToggleBtn(popup);
         if(btn) btn.click();
       }
@@ -17631,6 +17630,11 @@
     document.addEventListener("click", function(e){
       lastPopupClickAt = Date.now();
       closeOpenPopupsOutside(e.target);
+    }, true);
+    // Тянешь ползунок шрифта — текст перестраивается и может сам сдвинуть прокрутку (поправка места чтения, подгонка):
+    // это не жест пользователя, попап из-за такой прокрутки закрываться не должен (то же окно в 600 мс, что после клика).
+    document.addEventListener("input", function(e){
+      if(e.target && e.target.closest && e.target.closest(".fontsize-bar")) lastPopupClickAt = Date.now();
     }, true);
     // Прокрутка чего-либо вне попапа (список задач, заметка, текст книги) тоже сворачивает открытый
     // попап. scroll не всплывает — слушаем в capture-фазе на документе; цель scroll-события — сам
