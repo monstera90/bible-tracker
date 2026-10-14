@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 69.0 (14.10) — (1) ЗАКЛАДКА/МЕСТО ПРИ УХОДЕ С КНИГИ: на Android 5 книга собирается и «доводится» до места секундами; если за это время уйти на другую вкладку, `currentBookReaderPosition` читал ещё недостроенный/непрокрученный текст и возвращал начало книги — в авторежиме «А» основная закладка и сохранённая позиция чтения затирались на 0:0, книга открывалась с начала (значок на полях при этом не рисовался: у блока-картинки/обложки в начале книги нет места под значок). Новая `bookReaderLeavePosition(container)`: пока текст не готов (`bookReaderState.textReady === false`) или идёт восстановление места — берётся ЗАПЛАНИРОВАННОЕ место (`restoreTarget` / `restorePosition` / сохранённая позиция), а не геометрия DOM; её используют уход с вкладки, закрытие окна, `autoUpdateMainBookmarkOnExit`, `renderBookReader`, `openBookAtMarginBookmark`. (2) ИПКД/книги на Android 5 открываются быстрее: кэш закреплённых высот сегментов (`applyCachedSegHeights`/`saveCachedSegHeights`, localStorage `bookSegH_v1:<hash>`, с проверкой двух сегментов) вместо повторной полной вёрстки всей книги; порции сборки на старом WebView по 30 мс вместо 8; разобранная публикация ИПКД держится в памяти (`ipkdParsedCache`) — повторный заход не разбирает epub заново. Откат: my.js 68.0.
    Версия: 68.0 (14.10) — «Аа»: кнопки «+»/«−» заменены ползунком размера шрифта в стиле ползунка размера значков (на вкладках задач `#taskFontSizeBar`, в «Моём блокноте» — mdeditor.js 10.0, в ридере книг `#bookReaderFontSizeBar`); общая привязка — `MdEditor.bindFontSizeBar`/`MdEditor.setFontSizeStep`; в ридере книг `changeBookReaderFontSize(delta)` заменена на `setBookReaderFontSize(step)` (то же сохранение места чтения); автозакрытие попапов «Аа» (`initFontFormatPopupsAutoClose`) не срабатывает от касаний самого ползунка. Откат: my.js 67.0 / mdeditor.js 9.0 / modals.css 13.0 / index.html 4.0.
    Версия: 67.0 (14.10) — размер значков управления задачей: новая кнопка нижнего ряда задач («Размер значков», слот слева от «Аа») открывает всплывающий ползунок 70–160 %; `getTaskIconScalePct`/`applyTaskIconScale` (localStorage `taskIconScale_v1`, CSS-переменная `--task-ico-scale`, подгонка `refitAllVisibleTaskBodies`), `pushQuickTaskTheme` присылает оболочке ещё и `iconScale` — окно «Создать новую задачу» рисует кнопки того же размера; кнопка в `syncTaskFabRowForTab` (там же закрывается ползунок), `TASK_TARGETS_SEL`, обработчики в `initTaskGlobalToolbar`; при старте множитель применяется до первой отрисовки. Откат: my.js 66.0.
    Версия: 66.0 (14.10) — ярлык «Создать новую задачу» (APK, мост версии 6): `pullNativeQuickTasks` забирает у оболочки задачи, созданные окном над клавиатурой без открытия приложения (`LifeTrackerNative.takeQuickTasks`/`ackQuickTasks`), и кладёт их в Inbox (приоритет `flag`, чемоданчик `inWork`, напоминание `remindAt`); вызывается при запуске страницы и из `__ltOnAppResume`. `pushQuickTaskTheme` присылает оболочке цвета темы (`setQuickTaskTheme`), чтобы окно выглядело как задача в приложении; вызывается из `syncThemeColorMeta`, при запуске и из `__ltOnAppPause`.
@@ -10162,13 +10163,14 @@
        settingsModalOverlay.classList.contains("open")){
       var closingReaderContainer = document.getElementById("settingsTabContent");
       if(closingReaderContainer && closingReaderContainer.querySelector(".book-reader-p, .book-reader-image-wrap")){
-        var closingBookPos = bookReaderRestoreActive ? null : currentBookReaderPosition(closingReaderContainer);
+        var closingTrusted = bookReaderPosTrusted();
+        var closingBookPos = bookReaderLeavePosition(closingReaderContainer);
         autoUpdateMainBookmarkOnExit(closingBookPos);
         destroyBookReaderScrollListener();
         if(closingBookPos){
           bookReaderState.restorePosition = closingBookPos;
-          bookReaderState.textScrollTop = closingReaderContainer.scrollTop;
-          setBookPosition(bookReaderState.hash, closingBookPos);
+          if(closingTrusted) bookReaderState.textScrollTop = closingReaderContainer.scrollTop;
+          if(closingTrusted) setBookPosition(bookReaderState.hash, closingBookPos);
         }
       }
     }
@@ -10374,12 +10376,15 @@
         if(bookReaderState.mode === "chapters"){
           bookReaderState.chaptersScrollTop = leavingReaderContainer.scrollTop;
         } else {
-          var leavingBookPos = bookReaderRestoreActive ? null : currentBookReaderPosition(leavingReaderContainer);
+          var leavingTrusted = bookReaderPosTrusted();
+          var leavingBookPos = bookReaderLeavePosition(leavingReaderContainer);
           autoUpdateMainBookmarkOnExit(leavingBookPos);
           if(leavingBookPos){
             bookReaderState.restorePosition = leavingBookPos;
-            bookReaderState.textScrollTop = leavingReaderContainer.scrollTop;
-            setBookPosition(bookReaderState.hash, leavingBookPos);
+            if(leavingTrusted){
+              bookReaderState.textScrollTop = leavingReaderContainer.scrollTop;
+              setBookPosition(bookReaderState.hash, leavingBookPos);
+            }
           }
         }
       }
@@ -12895,6 +12900,25 @@
   // записывалось как «место чтения» — следующее открытие стартовало оттуда, и место уезжало назад/застревало.
   var bookReaderRestoreActive = false;
   var bookReaderRestoreFailsafe = null;
+  // 69.0: место, к которому сейчас идёт восстановление (пока bookReaderRestoreActive) — при уходе с вкладки в этот момент
+  // DOM ещё «едет» к цели, и читать позицию из него нельзя.
+  var bookReaderRestoreTarget = null;
+  // 69.0: позиция, на которой читатель РЕАЛЬНО остановился, для сохранения при уходе с книги (вкладка, закрытие окна,
+  // автозакладка). Пока текст не готов (сборка порциями, до кадра восстановления: bookReaderState.textReady === false) или
+  // идёт восстановление места, геометрия DOM ничего не значит (scrollTop 0, часть абзацев не построена) — тогда возвращаем
+  // ЗАПЛАНИРОВАННОЕ место: цель восстановления → ещё не применённый restorePosition → сохранённая позиция чтения.
+  // Раньше здесь возвращалось начало книги, и оно записывалось и в основную закладку (авторежим), и в позицию чтения.
+  function bookReaderLeavePosition(container){
+    if(!bookReaderState) return null;
+    if(bookReaderState.textReady === false || bookReaderRestoreActive){
+      var p = (bookReaderRestoreActive && bookReaderRestoreTarget) || bookReaderState.restorePosition ||
+        ((getBookState(bookReaderState.hash) || {}).position) || null;
+      if(!p || typeof p.ch !== "number") return null;
+      return {ch: p.ch, blk: Math.max(0, p.blk || 0)};
+    }
+    return container ? currentBookReaderPosition(container) : null;
+  }
+  function bookReaderPosTrusted(){ return !!bookReaderState && bookReaderState.textReady !== false && !bookReaderRestoreActive; }
   // Абзац/картинка {ch, blk}, чьё начало (offsetTop) последним не превышает текущий scrollTop
   // контейнера — тот же приём, что jumpToChapterFromChaptersList ниже использует для перехода к
   // главе, только гранулярность — абзац, а не глава. По умолчанию (пока scrollTop не дошёл ни до
@@ -13037,10 +13061,92 @@
     for(i = 0; i < idxs.length; i++){
       var sg = segs[idxs[i]];
       sg.style.contentVisibility = "";
-      if(hs[i] > 0){ sg.style.containIntrinsicSize = "0px " + (Math.round(hs[i] * 100) / 100) + "px"; sg.setAttribute("data-frozen", "1"); n++; }
+      if(hs[i] > 0){ sg.style.containIntrinsicSize = "0px " + (Math.round(hs[i] * 100) / 100) + "px"; sg.setAttribute("data-frozen", "1"); sg._frozenH = Math.round(hs[i] * 100) / 100; n++; }
     }
     if(window.Debug) window.Debug.log("высоты сегментов закреплены: " + n + " из " + segs.length + " за " + Math.round(performance.now() - t0) + " мс (движок без `contain-intrinsic-size: auto` по осям)");
     return n;
+  }
+  // 69.0: КЭШ закреплённых высот сегментов. Полная вёрстка всей книги в freezeBookSegHeights — самая дорогая часть открытия
+  // длинной книги (ИПКД — год текста) на Android 5; высоты же зависят только от текста книги и от вёрстки (ширина колонки,
+  // шрифт). Поэтому после первого измерения высоты кладутся в localStorage (по хэшу книги и «подписи» вёрстки), а следующее
+  // открытие подставляет их без вёрстки. Перед применением проверяются два сегмента (если расходятся больше чем на 2 px или
+  // 1 % — кэш отбрасывается и идёт обычное измерение), так что устаревший кэш (другой шрифт/CSS) не может сломать место.
+  var BOOK_SEGH_PREFIX = "bookSegH_v1:";
+  var BOOK_SEGH_IDX = "bookSegH_idx_v1";
+  var BOOK_SEGH_KEEP_BOOKS = 6, BOOK_SEGH_KEEP_SIGS = 3, BOOK_SEGH_MAX_SEGS = 6000;
+  function bookSegHeightsSig(container, nSegs){
+    try{
+      var reader = container.querySelector(".book-reader");
+      if(!reader) return null;
+      var cs = window.getComputedStyle(reader);
+      return [nSegs, Math.round(reader.clientWidth * 10) / 10, cs.fontSize, cs.lineHeight, cs.fontFamily, cs.letterSpacing,
+        cs.paddingLeft, cs.paddingRight, cs.textAlign, cs.hyphens || "", cs.wordBreak || "", window.devicePixelRatio || 1].join("|");
+    }catch(e){ return null; }
+  }
+  function applyCachedSegHeights(container, hash){
+    try{
+      if(!bookCvLegacy || !hash) return false;
+      var segs = container.querySelectorAll(".book-reader-seg");
+      if(!segs.length || segs.length > BOOK_SEGH_MAX_SEGS) return false;
+      var sig = bookSegHeightsSig(container, segs.length);
+      if(!sig) return false;
+      var raw = localStorage.getItem(BOOK_SEGH_PREFIX + hash);
+      if(!raw) return false;
+      var rec = JSON.parse(raw), item = null, i;
+      for(i = 0; rec && rec.l && i < rec.l.length; i++) if(rec.l[i].s === sig){ item = rec.l[i]; break; }
+      if(!item || !item.h || item.h.length !== segs.length) return false;
+      var probes = [Math.floor(segs.length * 0.25), Math.floor(segs.length * 0.75)];
+      if(probes[1] === probes[0]) probes.pop();
+      for(i = 0; i < probes.length; i++){
+        var sg = segs[probes[i]], want = item.h[probes[i]];
+        sg.style.contentVisibility = "visible";
+        var got = sg.getBoundingClientRect().height;
+        sg.style.contentVisibility = "";
+        if(!(want > 0) || Math.abs(got - want) > Math.max(2, want * 0.01)){
+          if(window.Debug) window.Debug.log("кэш высот сегментов: не прошёл проверку (сегмент " + probes[i] + ": кэш " + want + " px, сейчас " + Math.round(got) + " px) — измеряем заново");
+          return false;
+        }
+      }
+      var t0 = performance.now(), n = 0;
+      for(i = 0; i < segs.length; i++){
+        var h = item.h[i];
+        if(h > 0){ segs[i].style.containIntrinsicSize = "0px " + h + "px"; segs[i].setAttribute("data-frozen", "1"); segs[i]._frozenH = h; n++; }
+      }
+      if(window.Debug) window.Debug.log("кэш высот сегментов: применено " + n + " из " + segs.length + " за " + Math.round(performance.now() - t0) + " мс (без полной вёрстки книги)");
+      return n === segs.length;
+    }catch(e){
+      if(window.Debug) window.Debug.log("кэш высот сегментов: ошибка применения: " + (e && e.message));
+      return false;
+    }
+  }
+  function saveCachedSegHeights(container, hash){
+    try{
+      if(!bookCvLegacy || !hash) return;
+      var segs = container.querySelectorAll(".book-reader-seg");
+      if(!segs.length || segs.length > BOOK_SEGH_MAX_SEGS) return;
+      var h = [], i;
+      for(i = 0; i < segs.length; i++){
+        if(!(segs[i]._frozenH > 0)) return; // кэшируем только полностью измеренную книгу
+        h.push(segs[i]._frozenH);
+      }
+      var sig = bookSegHeightsSig(container, segs.length);
+      if(!sig) return;
+      var rec = null;
+      try{ rec = JSON.parse(localStorage.getItem(BOOK_SEGH_PREFIX + hash) || "null"); }catch(e){ rec = null; }
+      var list = (rec && rec.l) ? rec.l.filter(function(x){ return x.s !== sig; }) : [];
+      list.unshift({s: sig, h: h});
+      if(list.length > BOOK_SEGH_KEEP_SIGS) list.length = BOOK_SEGH_KEEP_SIGS;
+      localStorage.setItem(BOOK_SEGH_PREFIX + hash, JSON.stringify({l: list}));
+      var idx = [];
+      try{ idx = JSON.parse(localStorage.getItem(BOOK_SEGH_IDX) || "[]") || []; }catch(e){ idx = []; }
+      idx = idx.filter(function(x){ return x !== hash; });
+      idx.unshift(hash);
+      while(idx.length > BOOK_SEGH_KEEP_BOOKS){ try{ localStorage.removeItem(BOOK_SEGH_PREFIX + idx.pop()); }catch(e2){} }
+      localStorage.setItem(BOOK_SEGH_IDX, JSON.stringify(idx));
+      if(window.Debug) window.Debug.log("кэш высот сегментов: сохранён для следующего открытия (" + segs.length + " сегментов)");
+    }catch(e){
+      if(window.Debug) window.Debug.log("кэш высот сегментов: не сохранён: " + (e && e.message));
+    }
   }
   // 58.1: ТРАССИРОВКА перехода по главе/закладке (только журнал отладки Debug.log, поведение не меняет; всё не включено, пока
   // не включена галочка «режим отладки»). Нужна, чтобы определить НАСТОЯЩУЮ причину «переход не переносит страницу» на Android 5.
@@ -13160,8 +13266,9 @@
     }
     var seg = el.closest(".book-reader-seg");
     bookReaderRestoreActive = true;
+    bookReaderRestoreTarget = {ch: position.ch, blk: position.blk};
     if(bookReaderRestoreFailsafe) clearTimeout(bookReaderRestoreFailsafe);
-    bookReaderRestoreFailsafe = setTimeout(function(){ bookReaderRestoreActive = false; }, 6000); // страховка: флаг не должен залипнуть
+    bookReaderRestoreFailsafe = setTimeout(function(){ bookReaderRestoreActive = false; bookReaderRestoreTarget = null; }, 6000); // страховка: флаг не должен залипнуть
     // 57.8: на WebView ~Chrome 95 (Android 5) у пропущенных сегментов (content-visibility:auto) высота — только оценка, и
     // «якорение прокрутки» браузера двигало scrollTop сразу после нашего перехода — место открывалось одно и то же.
     // На время перехода якорение выключаем и в конце проверяем, что нужный блок реально на экране.
@@ -13203,6 +13310,7 @@
       container.removeEventListener("wheel", onUserMove);
       container.style.overflowAnchor = prevAnchor;
       bookReaderRestoreActive = false;
+      bookReaderRestoreTarget = null;
       if(bookReaderRestoreFailsafe){ clearTimeout(bookReaderRestoreFailsafe); bookReaderRestoreFailsafe = null; }
     }
     function finish(why){
@@ -13238,8 +13346,8 @@
   function flushBookReaderPositionNow(){
     if(bookReaderPositionSaveTimer){ clearTimeout(bookReaderPositionSaveTimer); bookReaderPositionSaveTimer = null; }
     if(!bookReaderState) return;
-    if(bookReaderRestoreActive){
-      if(window.Debug) window.Debug.log("позиция чтения: сохранение пропущено — идёт восстановление места");
+    if(bookReaderRestoreActive || bookReaderState.textReady === false){
+      if(window.Debug) window.Debug.log("позиция чтения: сохранение пропущено — " + (bookReaderRestoreActive ? "идёт восстановление места" : "текст ещё собирается"));
       return;
     }
     var container = document.getElementById("settingsTabContent");
@@ -13253,7 +13361,7 @@
     }
   }
   function scheduleBookReaderPositionSave(){
-    if(bookReaderRestoreActive) return;
+    if(bookReaderRestoreActive || (bookReaderState && bookReaderState.textReady === false)) return;
     if(bookReaderPositionSaveTimer) clearTimeout(bookReaderPositionSaveTimer);
     bookReaderPositionSaveTimer = setTimeout(flushBookReaderPositionNow, 500);
   }
@@ -13463,8 +13571,13 @@
       return sha256Hex(buf).then(function(hash){
         _dbg("хэш посчитан");
         var _tParse = performance.now();
+        if(name === IPKD_BOOK_NAME && ipkdParsedCache && ipkdParsedCache.hash === hash){
+          if(window.Debug) window.Debug.log("openBookReader[" + name + "]: разбор не нужен — публикация уже разобрана в этой сессии");
+          return {hash: hash, parsed: ipkdParsedCache.parsed};
+        }
         return parseBookBuffer(name, buf).then(function(parsed){
           if(window.Debug) window.Debug.log("openBookReader[" + name + "]: parseBookBuffer занял " + Math.round(performance.now() - _tParse) + "мс, глав=" + parsed.chapters.length + ", блоков=" + parsed.chapters.reduce(function(s,c){return s+c.blocks.length;},0) + ", картинок=" + Object.keys(parsed.images).length);
+          if(name === IPKD_BOOK_NAME) ipkdParsedCache = {hash: hash, parsed: parsed};
           return {hash: hash, parsed: parsed};
         });
       });
@@ -13613,7 +13726,7 @@
     // поведение не меняется — там restorePosition к этому моменту уже выставлен тем же самым
     // способом (см. switchSettingsTab, уход с вкладки "Книги"/ИПКД).
     if(!bookReaderState.restorePosition && container.querySelector(".book-reader-p, .book-reader-image-wrap")){
-      var prevPos = currentBookReaderPosition(container);
+      var prevPos = bookReaderLeavePosition(container);
       if(prevPos) bookReaderState.restorePosition = prevPos;
     } else if(!bookReaderState.restorePosition && container.querySelector("#bookChaptersList")){
       bookReaderState.chaptersScrollTop = container.scrollTop;
@@ -13701,11 +13814,14 @@
       destroyBookReaderScrollListener();
     } else {
       destroyBookReaderScrollListener(); // заодно сбрасывает отложенное сохранение позиции
-      var infoPos = currentBookReaderPosition(container);
+      var infoTrusted = bookReaderPosTrusted();
+      var infoPos = bookReaderLeavePosition(container);
       if(infoPos){
         bookReaderState.restorePosition = infoPos;
-        bookReaderState.textScrollTop = container.scrollTop;
-        setBookPosition(bookReaderState.hash, infoPos);
+        if(infoTrusted){
+          bookReaderState.textScrollTop = container.scrollTop;
+          setBookPosition(bookReaderState.hash, infoPos);
+        }
       }
     }
 
@@ -13876,6 +13992,9 @@
   // Размер сегмента (блоков) — единица content-visibility:auto, см. комментарий у
   // currentBookReaderPosition и .book-reader-seg в components.css.
   var BOOK_READER_SEG_SIZE = 40;
+  // 69.0: разобранная публикация ИПКД остаётся в памяти — повторный заход на вкладку после другой книги не разбирает epub
+  // заново (на Android 5 разбор — секунды). Ключ — хэш файла, при замене публикации хэш другой.
+  var ipkdParsedCache = null;
 
   // 57.15: размеры картинок книги, известные ДО их загрузки. Картинки грузятся лениво (в HTML у <img> нет src), а без
   // width/height высота такого <img> = 0, пока браузер не декодирует data:-URL. Каждая подгрузка картинки выше места, куда мы
@@ -14002,6 +14121,7 @@
     var _tBuild = performance.now();
     if(bookTraceOn()) bookTrace("renderBookReaderText: начало сборки, restorePosition=" + posText(bookReaderState.restorePosition) + ", глав=" + bookReaderState.chapters.length);
     var hash = bookReaderState.hash;
+    bookReaderState.textReady = false; // 69.0: до кадра восстановления места (см. finishRenderBookReaderText) позицию из DOM брать нельзя
     var stateData = getBookState(hash);
     var bmByBlock = {}, ulByBlock = {}, pinByBlock = {};
     if(stateData){
@@ -14037,7 +14157,7 @@
     var rootEl = container.querySelector("#bookReaderTextRoot");
     var chapters = bookReaderState.chapters;
     var chapterIdx = 0;
-    var RENDER_CHUNK_BUDGET_MS = 8; // держим "тик" короче кадра — остаётся время и на сам кадр, и на успевший накопиться ввод
+    var RENDER_CHUNK_BUDGET_MS = bookCvLegacy ? 30 : 8; // 69.0: на старом WebView между порциями ждать кадр (≥16 мс) дороже самой сборки — порции крупнее. Держим "тик" короче кадра — остаётся время и на сам кадр, и на успевший накопиться ввод
     // Свой номер поколения — см. bookReaderTextRenderGen выше. Если к моменту очередного тика
     // глобальный счётчик уйдёт вперёд.
     var myRenderGen = ++bookReaderTextRenderGen;
@@ -14160,7 +14280,15 @@
       if(bookCvLegacy){
         var _allCh = 0, _segsAll = container.querySelectorAll(".book-reader-seg");
         for(var _si = 0; _si < _segsAll.length; _si++) _allCh += parseInt(_segsAll[_si].getAttribute("data-chars"), 10) || 0;
-        freezeBookSegHeights(container, 0, _allCh <= BOOK_FREEZE_ALL_MAX_CHARS ? _segsAll.length - 1 : BOOK_EXACT_LAYOUT_MAX_SEGS);
+        if(_allCh <= BOOK_FREEZE_ALL_MAX_CHARS){
+          // 69.0: сначала кэш высот (без полной вёрстки книги), иначе измеряем всё и запоминаем
+          if(!applyCachedSegHeights(container, bookReaderState.hash)){
+            freezeBookSegHeights(container, 0, _segsAll.length - 1);
+            saveCachedSegHeights(container, bookReaderState.hash);
+          }
+        } else {
+          freezeBookSegHeights(container, 0, BOOK_EXACT_LAYOUT_MAX_SEGS);
+        }
       }
       if(window.Debug) window.Debug.log("renderBookReaderText: калибровка сегментов заняла " + Math.round(performance.now() - _tCal) + "мс, сегментов=" + container.querySelectorAll(".book-reader-seg").length);
       requestAnimationFrame(function(){
@@ -14175,6 +14303,7 @@
           bookReaderState.restorePosition = null;
         }
         if(!restored) container.scrollTop = bookReaderState.textScrollTop || 0;
+        bookReaderState.textReady = true;
         if(bookTraceOn()) bookTrace("кадр восстановления: restorePosition=" + posText(_rpTrace) + " → scrollBookReaderToPosition вернула " + restored + (restored ? "" : "; откат на textScrollTop=" + Math.round(bookReaderState.textScrollTop || 0) + ", scrollTop теперь " + Math.round(container.scrollTop)));
         // Открываем видимость только теперь, когда контейнер уже прокручен на нужное место — иначе
         // за время порционной сборки (см. выше) человек увидел бы, как список глав "подрастает" с
@@ -15140,7 +15269,8 @@
     var container = document.getElementById("settingsTabContent");
     if(!container || !container.offsetHeight) return;
     if(!container.querySelector(".book-reader-p, .book-reader-image-wrap")) return;
-    var pos = posOverride || firstVisibleBookBlockPosition(container);
+    // 69.0: без готового текста/во время восстановления места геометрия DOM недостоверна (начало книги) — берём заплан. место
+    var pos = posOverride || (bookReaderPosTrusted() ? firstVisibleBookBlockPosition(container) : bookReaderLeavePosition(container));
     if(pos) moveMainBookmarkTo(hash, pos);
   }
   // Приложение уходит из переднего плана (свернули, погасили экран, закрыли вкладку — зовётся из
@@ -15631,11 +15761,12 @@
       //     книг, а не собирала ненужную старую книгу; нужная книга потом открывается один раз ниже.
       if(bookReaderState){
         if(currentSettingsTab === "set2s_7" || (currentSettingsTab === "set2s_8" && bookReaderState.name === IPKD_BOOK_NAME)){
-          if(bookReaderState.mode !== "chapters" && !bookReaderRestoreActive){
+          if(bookReaderState.mode !== "chapters"){
             var leavingC = document.getElementById("settingsTabContent");
-            var leavingP = leavingC ? currentBookReaderPosition(leavingC) : null;
+            var leavingTrusted = bookReaderPosTrusted();
+            var leavingP = leavingC ? bookReaderLeavePosition(leavingC) : null;
             autoUpdateMainBookmarkOnExit(leavingP);
-            if(leavingP) setBookPosition(bookReaderState.hash, leavingP);
+            if(leavingP && leavingTrusted) setBookPosition(bookReaderState.hash, leavingP);
           }
         }
         if(bookTraceOn()) bookTrace("openBookAtMarginBookmark: в памяти другая книга — сброс bookReaderState до switchSettingsTab (вместо её сборки)");
