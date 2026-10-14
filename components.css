@@ -1,5 +1,7 @@
 /* ===========================================================================
    components.css
+   Версия: 4.7 (14.10) — `.lt-hl-host`, `.lt-hl-fmt`: подсветка протяжки маркера в задачах и заметках (режим чтения).
+   Версия: 4.6 (13.10) — кнопка «Копировать» у подчёркивания: цвет и hover как у урны (отдельный цвет убран).
    Версия: 4.5 (13.10) — подсветка протяжки в ридере: `.lt-hl-layer`/`.lt-hl-rect` внутри `.book-reader` (position:relative; isolation:isolate), под текстом, цвет как у `.book-reader-underline`.
    Версия: 4.4 (13.10) — `.lt-hl-layer`/`.lt-hl-rect`: подсветка подчёркивания при протяжке в ридере книг.
    Версия: 4.3 (13.10) — маркер по удержанию: `.book-reader{user-select:none}` + `.lt-sel-probe`, свои ручки убраны; `.book-reader-underline-actions` (обёртка двух кнопок над подчёркиванием: «Копировать» `.book-reader-underline-copy-btn` + урна).
@@ -3033,6 +3035,10 @@
      ПОД текстом и того же цвета, что .book-reader-underline (в т.ч. тема 14) — цвет не меняется при отпускании. */
   .lt-hl-layer{ position:absolute; left:0; top:0; width:0; height:0; z-index:-1; pointer-events:none; }
   .lt-hl-rect{ position:absolute; background:var(--gold-light); border-radius:2px; }
+  /* Хосты слоя подсветки без собственного позиционирования (строка задачи, прокрутка CodeMirror): слой z-index:-1 остаётся внутри. */
+  .lt-hl-host{ position:relative; isolation:isolate; }
+  /* Подсветка протяжки ==выделения== в задачах и заметках — цвет готового .fmt-mark / .cm-md-mark */
+  .lt-hl-layer.lt-hl-fmt .lt-hl-rect{ background:#f3e08a; }
   html[data-theme="14"] .lt-hl-rect{
     background:rgba(128,128,128,.38);
     background:color-mix(in srgb, var(--wood) 48%, var(--parchment));
@@ -3129,6 +3135,119 @@
     padding:0 1px;
     cursor:pointer;
   }
+  /* ТЗ 28.09: в ТЁМНЫХ темах (data-theme 8..13, см. THEMES в my.js)
+     var(--gold-light) давал странный, полупрозрачный по виду оттенок.
+     Здесь подчёркивание — ТОТ ЖЕ оттенок, что акцент темы (--wood: у
+     «Ночь и красный» красный, у «Ночь и лайм» лаймовый и т.д.), но
+     менее яркий, приглушённый и СПЛОШНОЙ (не прозрачный): акцент
+     смешивается с фоном темы (--parchment) в равных долях через
+     color-mix, поэтому подходит любой тёмной теме без отдельных цветов.
+     Текст остаётся светлым (color:inherit выше). Светлые темы (1..7)
+     не затронуты. Долю акцента (сейчас 48%) можно менять: больше —
+     ярче, меньше — темнее. */
+  html[data-theme="8"] .book-reader-underline,
+  html[data-theme="9"] .book-reader-underline,
+  html[data-theme="10"] .book-reader-underline,
+  html[data-theme="11"] .book-reader-underline,
+  html[data-theme="12"] .book-reader-underline,
+  html[data-theme="13"] .book-reader-underline,
+  html[data-theme="14"] .book-reader-underline{
+    background:rgba(128,128,128,.38); /* запасной цвет: color-mix есть с Chrome 111; на старом WebView без него подчёркивание было бы невидимым */
+    background:color-mix(in srgb, var(--wood) 48%, var(--parchment));
+  }
+  /* ---------- Иллюстрация -> заметка книги (READER_PLAN.md, Этап D, шаг 14,
+     11.09). .book-reader-image-wrap — только для position:relative, без
+     своих отступов (margin по-прежнему на .cm-md-image внутри, см. выше).
+     Кнопка-кнопка (READER_PIN_ICON_SVG, my.js) сидит по центру ВЕРХНЕГО
+     края картинки — наполовину на картинке, наполовину над ней (transform
+     -50% по обеим осям от угла top:0/left:50%), тем же круглым базовым
+     видом, что .mdeditor-fab-btn (фон #fffef8, тонкая рамка/тень), но
+     round, не квадрат — 8px radius кнопок-квадратов здесь неуместен.
+     Обычное состояние — бесцветная (var(--wood), тот же язык кнопок
+     блокнота); .pinned — var(--danger), головка иконки (circle) заливается
+     сплошным цветом через currentColor — "воткнутая" кнопка. ---------- */
+  .book-reader-image-wrap{
+    position:relative;
+    display:block;
+    /* Тот же full-bleed приём, что у .cm-md-image-wrap выше (15.09) —
+       источник горизонтального отступа, из-под которого вылезает
+       картинка, — padding:0 8px у .book-reader-tab (modals.css), НЕ у
+       .settings-modal-box: тот на этой вкладке обнулён целиком (см.
+       комментарий у .cm-md-image-wrap выше про overflow-x у
+       #settingsTabContent — по той же причине margin здесь не пытается
+       дотянуться до .settings-modal-box напрямую). .book-reader сам
+       горизонтальных отступов не задаёт (см. комментарий у .book-reader-p
+       выше). Кнопка-пин (.book-reader-pin-btn) позиционируется от ЭТОГО
+       элемента (position:relative тут же) и центрируется через left:50% —
+       симметричное расширение на 8px в обе стороны не сдвигает её центр,
+       менять её CSS не нужно. */
+    width:calc(100% + 16px);
+    margin:0 -8px;
+  }
+  .book-reader-pin-btn{
+    position:absolute;
+    top:0; left:50%;
+    transform:translate(-50%,-50%);
+    width:30px; height:30px;
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    color:var(--wood);
+    cursor:pointer;
+    box-shadow:0 2px 6px rgba(0,0,0,.28);
+    -webkit-tap-highlight-color:transparent;
+    z-index:1;
+  }
+  .book-reader-pin-btn svg{ width:16px; height:16px; }
+  @media (hover:hover) and (pointer:fine){
+    .book-reader-pin-btn:hover{ background:var(--wood); color:var(--parchment); }
+  }
+  .book-reader-pin-btn.pinned{
+    color:var(--danger, #c0392b);
+    border-color:var(--danger, #c0392b);
+  }
+  .book-reader-pin-btn.pinned svg circle{ fill:currentColor; }
+  @media (hover:hover) and (pointer:fine){
+    .book-reader-pin-btn.pinned:hover{ background:#fffef8; color:var(--danger, #c0392b); }
+  }
+  /* ---------- Кнопка-урна снятия подчёркивания (READER_PLAN.md, Этап D,
+     шаг 13, доработка 11.09). Появляется рядом с тапнутым <mark
+     class="book-reader-underline"> (см. showBookReaderUnderlineTrashBtn в
+     my.js) — тот же круглый базовый вид, что .book-reader-pin-btn, но
+     сразу окрашена в var(--danger) (действие необратимо удаляет
+     подчёркивание, в отличие от pin-кнопки с двумя равноценными
+     состояниями). Позиционируется абсолютно от .settings-modal-box (JS
+     сам считает left/top через getBoundingClientRect — см. my.js), поэтому
+     здесь только сам вид и центрирование над точкой (переданной как
+     left/top угла подчёркивания) через transform. ---------- */
+  .book-reader-underline-actions{
+    position:absolute;
+    transform:translate(-50%,-100%) translateY(-6px);
+    display:flex; gap:8px;
+    z-index:5;
+  }
+  .book-reader-underline-trash-btn{
+    position:relative;
+    width:32px; height:32px;
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    color:var(--danger, #c0392b);
+    cursor:pointer;
+    box-shadow:0 2px 6px rgba(0,0,0,.28);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .book-reader-underline-trash-btn svg{ width:17px; height:17px; }
+  @media (hover:hover) and (pointer:fine){
+    .book-reader-underline-trash-btn:hover{ background:var(--danger, #c0392b); color:#fffef8; }
+  }
+  /* «Копировать» рядом с урной (13.10) — тот же вид и цвет, что у урны: отдельных правил нет (класс .book-reader-underline-copy-btn — только метка для JS/карты). */
   /* ТЗ 28.09: в ТЁМНЫХ темах (data-theme 8..13, см. THEMES в my.js)
      var(--gold-light) давал странный, полупрозрачный по виду оттенок.
      Здесь подчёркивание — ТОТ ЖЕ оттенок, что акцент темы (--wood: у

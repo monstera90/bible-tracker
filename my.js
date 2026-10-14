@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 64.0 (14.10) — из ридера книг убраны кнопки «Копировать» и «Выделить текст» (нижний ряд, справка, обработчики, `handleBookReaderSelectionSettled`); маркер по удержанию с протяжкой в режиме чтения для задач (`bindTaskHoldMarker`, `commitTaskHoldMark`: слово оборачивается в «==») и общий движок `ltRunHold`/`ltDomSession`/`window.LTHold` для заметок (mdeditor.js 9.0); `ltHlRender(range, host, variant)`; откат — my.js 63.1.
    Версия: 63.1 (13.10) — подсветка при протяжке теперь ПОД текстом и того же цвета, что готовое подчёркивание (раньше была тёмной полупрозрачной поверх текста): `ltHlRender(range, rootEl)` кладёт слой внутрь `.book-reader`; откат — my.js 63.0.
    Версия: 63.0 (13.10) — маркер по удержанию с протяжкой: удержание 250 мс подчёркивает слово, ведя палец (вниз/вверх, в пределах абзаца) подчёркивание растягивается по словам, у краёв окна — автопрокрутка, запись при отпускании; подсветка в процессе — `.lt-hl-layer`; откат — my.js 62.0.
    Версия: 62.0 (13.10) — маркер по удержанию 250 мс вместо своих ручек: `bindBookReaderHoldMarker` (слово под пальцем подчёркивается сразу, системное выделение в тексте книги выключено), кнопка «Копировать» рядом с урной после тапа по подчёркиванию (`.book-reader-underline-actions` в `showBookReaderUnderlineTrashBtn`); откат — my.js 61.1 (ручки) или 60.0.
@@ -13588,8 +13589,6 @@
           '</div>' +
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="bookReaderFontSizeBtn" title="Размер шрифта">Аа</button>' +
         '</span>' +
-        '<button type="button" class="mdeditor-fab-btn" id="bookReaderCopyBtn" title="Копировать">' + READER_COPY_ICON_SVG + '</button>' +
-        '<button type="button" class="mdeditor-fab-btn" id="bookReaderSelectBtn" title="Выделить текст">' + READER_SELECT_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderBookmarkAddBtn" title="Добавить отдельную закладку">' + READER_BOOKMARK_ADD_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderBookmarkBtn" title="' + (isMainBookmarkAuto(bookReaderState.hash) ? MAIN_BOOKMARK_AUTO_TITLE : MAIN_BOOKMARK_MANUAL_TITLE) + '">' + (isMainBookmarkAuto(bookReaderState.hash) ? READER_BOOKMARK_AUTO_ICON_SVG : READER_BOOKMARK_ICON_SVG) + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderChaptersBtn" title="' + (chaptersMode ? "К тексту" : "Главы") + '">' +
@@ -13646,11 +13645,9 @@
     }
     html += iconRow('<span style="font-weight:600;font-size:15px;line-height:1;">Аа</span>', false,
       "Размер шрифта и переносы слов. Нажатие раскрывает кнопки «+» (крупнее), «−» (мельче) и кнопку переносов слов (включает и выключает автоматические переносы). Размер шрифта общий с задачами и «Моим блокнотом», у режима чтения он свой.");
-    html += iconRow(READER_COPY_ICON_SVG, false,
-      "Копирует выделенный в книге текст в буфер обмена. Системное меню выделения («Копировать», «Поделиться» и др.) в приложении не показывается — копируйте этой кнопкой.");
     html += iconRow(READER_SELECT_ICON_SVG, false,
-      "Сначала выделите фрагмент текста обычным способом, затем нажмите эту кнопку — фрагмент подчёркивается и дописывается в заметку книги. Когда заметка ещё не привязана, приложение предложит создать новую или выбрать существующую. Подчёркивать можно только в пределах одного абзаца. Нажатие на подчёркнутое место показывает кнопку-урну " +
-      '<span class="task-icon-btn" style="display:inline-flex;vertical-align:middle;width:1.3em;height:1.3em;">' + READER_TRASH_ICON_SVG + '</span> — она снимает подчёркивание.');
+      "Подчёркивание текста (без кнопки): задержите палец на слове — оно сразу подчёркивается и дописывается в заметку книги; не отпуская, ведите палец вниз или вверх — подчёркивание растянется по словам (в пределах абзаца). Когда заметка ещё не привязана, приложение предложит создать новую или выбрать существующую. Нажатие на подчёркнутый текст показывает кнопки: копировать текст и " +
+      '<span class="task-icon-btn" style="display:inline-flex;vertical-align:middle;width:1.3em;height:1.3em;">' + READER_TRASH_ICON_SVG + '</span> — снять подчёркивание.');
     html += iconRow(READER_BOOKMARK_ADD_ICON_SVG, false,
       "Добавляет отдельную закладку на первый видимый на экране абзац. Каждое нажатие — новая самостоятельная закладка (имя даётся автоматически), основную она не трогает. Все закладки собраны на вкладке «Закладки»; нажатие на значок закладки у правого края абзаца снимает её.");
     html += iconRow(READER_BOOKMARK_ICON_SVG, false,
@@ -13727,28 +13724,6 @@
     }
     if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ changeBookReaderFontSize(1); });
     if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ changeBookReaderFontSize(-1); });
-
-    // Кнопка "Выделение" (шаг 13; доработка 13.09 — тот же порядок действий, что у кнопки "Маркер"
-    // в "Моём блокноте", mdeditor.js): пользователь сначала выделяет текст обычным браузерным
-    // выделением, затем жмёт кнопку — handleBookReaderSelectionSettled читает текущее выделение и
-    // сразу подчёркивает его. mousedown с preventDefault — то же самое, зачем это нужно кнопкам
-    // форматирования в mdeditor.js: клик по кнопке иначе сбросил бы выделение текста до
-    // срабатывания click.
-    // «Копировать» — слева от «Выделить текст»: выделенный в книге текст уходит в буфер обмена.
-    var copyBtn = document.getElementById("bookReaderCopyBtn");
-    if(copyBtn){
-      copyBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
-      copyBtn.addEventListener("click", function(){
-        var sel = window.getSelection();
-        var text = sel ? sel.toString() : "";
-        if(text) window.LTCopyText(text);
-      });
-    }
-    var selectBtn = document.getElementById("bookReaderSelectBtn");
-    if(selectBtn){
-      selectBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
-      selectBtn.addEventListener("click", handleBookReaderSelectionSettled);
-    }
 
     var bookmarkBtn = document.getElementById("bookReaderBookmarkBtn");
     // Тап — переставить основную закладку на текущее место; удержание — включить/выключить авторежим
@@ -14196,24 +14171,34 @@
   // подчёркивания (.book-reader-underline): цвет во время протяжки и после отпускания совпадает. Системное
   // выделение в тексте книги выключено (см. выше).
   var ltHlLayer = null;
-  function ltHlRender(range, rootEl){
+  // variant — доп. модификатор цвета слоя (.lt-hl-fmt — цвет ==выделения== задач и заметок, #f3e08a).
+  function ltHlRender(range, rootEl, variant){
     if(!ltHlLayer || ltHlLayer.parentNode !== rootEl){
       ltHlClear();
       ltHlLayer = document.createElement("div");
-      ltHlLayer.className = "lt-hl-layer";
+      ltHlLayer.className = "lt-hl-layer" + (variant ? " lt-hl-" + variant : "");
+      rootEl.classList.add("lt-hl-host");
       rootEl.appendChild(ltHlLayer);
     }
     var rr = rootEl.getBoundingClientRect();
+    var ox = rr.left + (rootEl.clientLeft || 0) - (rootEl.scrollLeft || 0);
+    var oy = rr.top + (rootEl.clientTop || 0) - (rootEl.scrollTop || 0);
     var html = "", rects = range ? range.getClientRects() : [];
     for(var i = 0; i < rects.length; i++){
       var r = rects[i];
       if(r.width < 1 || r.height < 1) continue;
-      html += '<div class="lt-hl-rect" style="left:' + (r.left - rr.left) + 'px;top:' + (r.top - rr.top) + 'px;width:' + r.width + 'px;height:' + r.height + 'px"></div>';
+      html += '<div class="lt-hl-rect" style="left:' + (r.left - ox) + 'px;top:' + (r.top - oy) + 'px;width:' + r.width + 'px;height:' + r.height + 'px"></div>';
     }
     ltHlLayer.innerHTML = html;
   }
   function ltHlClear(){
-    if(ltHlLayer && ltHlLayer.parentNode) ltHlLayer.parentNode.removeChild(ltHlLayer);
+    if(ltHlLayer){
+      var host = ltHlLayer.parentNode;
+      if(host){
+        host.removeChild(ltHlLayer);
+        if(host.classList) host.classList.remove("lt-hl-host");
+      }
+    }
     ltHlLayer = null;
   }
 
@@ -14378,6 +14363,251 @@
     // Системное выделение (долгое нажатие, двойной тап) в тексте книги отменяем целиком.
     rootEl.addEventListener("selectstart", function(e){ e.preventDefault(); });
   }
+
+  // ===================== МАРКЕР ПО УДЕРЖАНИЮ В ЗАДАЧАХ И ЗАМЕТКАХ (13.10) =====================
+  // Тот же жест, что в ридере книг (удержание 250 мс подчёркивает слово, протяжка растягивает), но ТОЛЬКО в режиме
+  // чтения (оверлей настроек с классом reading-mode-active — режим чтения и полноэкранный). «Подчёркивание» здесь —
+  // ==выделение== (то же, что кнопка-маркер в нижнем ряду): при отпускании слово(а) оборачиваются в «==».
+  // Задачи — этот файл (bindTaskHoldMarker, вид .task-text-view); заметки — mdeditor.js (bindNoteHoldMarker, CodeMirror),
+  // общий движок жеста отдаётся туда как window.LTHold. Откат: my.js 63.1 / mdeditor.js 8.0 / components.css 4.6.
+
+  // Сессия протяжки по DOM-тексту: слово под пальцем → растяжка по словам в пределах «абзаца» (paraOf(node)).
+  function ltDomSession(hostEl, paraOf, hlHost, variant, skipSel){
+    var a = null, lx = 0, ly = 0;
+    function update(){
+      if(!a) return;
+      var caret = ltCaretText(hostEl, lx, ly);
+      if(!caret) return;
+      var tmp = document.createRange(), cmp, cmp2;
+      try {
+        tmp.setStart(a.node, a.s); tmp.collapse(true);
+        cmp = tmp.comparePoint(caret.node, caret.off);
+        tmp.setStart(a.node, a.e); tmp.collapse(true);
+        cmp2 = tmp.comparePoint(caret.node, caret.off);
+      } catch(eC){ return; }
+      var sN = a.node, sO = a.s, eN = a.node, eO = a.e;
+      var pc = paraOf(caret.node);
+      if(cmp < 0){
+        if(pc !== a.p){ var ed = ltParaEdge(a.p, false); if(ed){ sN = ed.node; sO = ed.off; } }
+        else { var w = ltWordAt(caret.node, caret.off); sN = caret.node; sO = w ? w.s : caret.off; }
+      } else if(cmp2 > 0){
+        if(pc !== a.p){ var ed2 = ltParaEdge(a.p, true); if(ed2){ eN = ed2.node; eO = ed2.off; } }
+        else { var w2 = ltWordAt(caret.node, caret.off); eN = caret.node; eO = w2 ? w2.e : caret.off; }
+      }
+      var r = document.createRange();
+      try { r.setStart(sN, sO); r.setEnd(eN, eO); } catch(eR){ return; }
+      a.range = r;
+      ltHlRender(r, hlHost, variant);
+    }
+    return {
+      begin: function(x, y){
+        var caret = ltCaretText(hostEl, x, y);
+        if(!caret) return false;
+        var par = caret.node.parentNode;
+        if(skipSel && par && par.closest && par.closest(skipSel)) return false;
+        var w = ltWordAt(caret.node, caret.off);
+        if(!w) return false;
+        var p = paraOf(caret.node);
+        if(!p) return false;
+        var r = document.createRange();
+        try { r.setStart(caret.node, w.s); r.setEnd(caret.node, w.e); } catch(eR){ return false; }
+        a = { node: caret.node, s: w.s, e: w.e, p: p, range: r };
+        lx = x; ly = y;
+        ltHlRender(r, hlHost, variant);
+        return true;
+      },
+      move: function(x, y){ lx = x; ly = y; update(); },
+      update: update,
+      end: function(){ var r = a && a.range; a = null; ltHlClear(); return r; },
+      cancel: function(){ a = null; ltHlClear(); }
+    };
+  }
+
+  // Общий жест: e — touchstart на hostEl; session — begin/move/update/end/cancel (ltDomSession или CodeMirror-сессия из
+  // mdeditor.js); onCommit(результат end()) вызывается при отпускании; container — прокручиваемая область для автопрокрутки
+  // (если она не прокручивается — #settingsTabContent). Слушатели touchmove/touchend не passive и висят только на время
+  // жеста: после срабатывания удержания прокрутка и «клик» (старт редактирования) отключаются через preventDefault.
+  function ltRunHold(e, hostEl, session, onCommit, container){
+    var t0 = e.touches && e.touches[0];
+    if(!t0) return;
+    var sx = t0.clientX, sy = t0.clientY, lastY = sy;
+    var timer = null, on = false, auto = false, done = false;
+    function pickContainer(){
+      var c = container;
+      if(!c || c.scrollHeight <= c.clientHeight + 1) c = document.getElementById("settingsTabContent");
+      return c;
+    }
+    function cleanup(){
+      if(done) return;
+      done = true;
+      if(timer){ clearTimeout(timer); timer = null; }
+      hostEl.removeEventListener("touchmove", onMove);
+      hostEl.removeEventListener("touchend", onEnd);
+      hostEl.removeEventListener("touchcancel", onCancel);
+      hostEl.removeEventListener("selectstart", onSel);
+      hostEl.removeEventListener("contextmenu", onSel);
+    }
+    function autoScroll(){
+      if(auto) return;
+      auto = true;
+      (function tick(){
+        if(!on || done){ auto = false; return; }
+        var c = pickContainer();
+        if(c){
+          var cr = c.getBoundingClientRect();
+          var top = Math.max(cr.top, 0) + 70;
+          var bottom = Math.min(cr.bottom, window.innerHeight) - 110;
+          var dy = 0;
+          if(lastY < top) dy = -Math.min(14, 2 + (top - lastY) / 6);
+          else if(lastY > bottom) dy = Math.min(14, 2 + (lastY - bottom) / 6);
+          if(dy){ c.scrollTop += dy; session.update(); }
+        }
+        requestAnimationFrame(tick);
+      })();
+    }
+    function fire(){
+      timer = null;
+      if(done) return;
+      if(!session.begin(sx, sy)){ cleanup(); return; }
+      on = true;
+      try { if(navigator.vibrate) navigator.vibrate(12); } catch(eV){}
+      autoScroll();
+    }
+    function onMove(ev){
+      var tt = ev.touches && ev.touches[0];
+      if(!tt) return;
+      if(on){
+        if(ev.cancelable) ev.preventDefault();
+        lastY = tt.clientY;
+        session.move(tt.clientX, tt.clientY);
+        return;
+      }
+      if(Math.abs(tt.clientX - sx) > LT_HOLD_MOVE_PX || Math.abs(tt.clientY - sy) > LT_HOLD_MOVE_PX) cleanup();
+    }
+    function onEnd(ev){
+      if(on){
+        if(ev.cancelable) ev.preventDefault(); // без «клика» и эмулированных mouse-событий после жеста
+        on = false;
+        var r = session.end();
+        try { onCommit(r); } catch(eC){ if(window.Debug) window.Debug.log("ltRunHold commit: " + (eC && eC.message)); }
+      }
+      cleanup();
+    }
+    function onCancel(){
+      if(on){ on = false; session.cancel(); }
+      cleanup();
+    }
+    function onSel(ev){ if(on) ev.preventDefault(); }
+    hostEl.addEventListener("touchmove", onMove, { passive: false });
+    hostEl.addEventListener("touchend", onEnd, { passive: false });
+    hostEl.addEventListener("touchcancel", onCancel, { passive: true });
+    hostEl.addEventListener("selectstart", onSel);
+    hostEl.addEventListener("contextmenu", onSel);
+    timer = setTimeout(fire, LT_HOLD_MARK_MS);
+  }
+  window.LTHold = { run: ltRunHold, hlRender: ltHlRender, hlClear: ltHlClear };
+
+  // --- задачи ---
+  // Длина блочного префикса строки задачи («# », «> », «- », «1. ») — те же регэкспы, что в formatObsidianHtml.
+  function ltTaskBlockPrefixLen(line){
+    var m = /^(#{1,3})(\s+)/.exec(line) || /^(\s*>+ ?)/.exec(line) || /^(\s*)([-*])(\s+)/.exec(line) || /^(\s*)(\d{1,4}[.)])(\s+)/.exec(line);
+    return m ? m[0].length : 0;
+  }
+  // Соответствие «символ показанного текста строки → символ исходного текста строки» (разметка ** == ~~ ++ _ [[ ]]
+  // в показанном тексте отсутствует). null — выровнять не удалось (например, YouTube-ссылка заменена заголовком).
+  function ltTaskMapRendered(content, rendered){
+    var map = [], j = 0, n = content.length, skip = /[*_=~+\[\]!]/;
+    for(var i = 0; i < rendered.length; i++){
+      var c = rendered.charAt(i);
+      while(j < n && content.charAt(j) !== c){
+        if(skip.test(content.charAt(j))) j++;
+        else return null;
+      }
+      if(j >= n) return null;
+      map.push(j);
+      j++;
+    }
+    return map;
+  }
+  function ltTaskLineTextNodes(lineEl){
+    var out = [], w = document.createTreeWalker(lineEl, NodeFilter.SHOW_TEXT, null), n;
+    while((n = w.nextNode())){
+      var p = n.parentNode;
+      if(p && p.closest && p.closest(".fmt-bullet")) continue;
+      out.push(n);
+    }
+    return out;
+  }
+  function commitTaskHoldMark(view, id, range){
+    if(!range) return;
+    var task = getTaskById(id);
+    if(!task || !task.c || !task.c.text) return;
+    var src = String(task.c.text);
+    var lines = src.split("\n");
+    function lineElOf(node){
+      var el = node.nodeType === 3 ? node.parentElement : node;
+      return el && el.closest ? el.closest(".fmt-line") : null;
+    }
+    var lineEl = lineElOf(range.startContainer);
+    if(!lineEl || lineEl !== lineElOf(range.endContainer)) return;
+    var lineEls = view.querySelectorAll(".fmt-line");
+    var idx = Array.prototype.indexOf.call(lineEls, lineEl);
+    if(idx < 0 || idx >= lines.length) return;
+    var line = lines[idx];
+    var prefixLen = ltTaskBlockPrefixLen(line);
+    var content = line.slice(prefixLen);
+    var nodes = ltTaskLineTextNodes(lineEl);
+    var rendered = "";
+    nodes.forEach(function(n){ rendered += n.data; });
+    // в строках списка между значком и текстом стоит один пробел — он не из исходного текста
+    var lead = (lineEl.classList.contains("fmt-list") && rendered.charAt(0) === " ") ? 1 : 0;
+    function idxOf(node, off){
+      var sum = 0;
+      for(var k = 0; k < nodes.length; k++){
+        if(nodes[k] === node) return sum + off - lead;
+        sum += nodes[k].data.length;
+      }
+      return -1;
+    }
+    var si = idxOf(range.startContainer, range.startOffset);
+    var ei = idxOf(range.endContainer, range.endOffset);
+    if(si < 0) si = 0;
+    if(ei <= si) return;
+    var map = ltTaskMapRendered(content, rendered.slice(lead));
+    if(!map || ei > map.length) return;
+    var cs = map[si], ce = map[ei - 1] + 1;
+    var lineStart = 0;
+    for(var q = 0; q < idx; q++) lineStart += lines[q].length + 1;
+    var s0 = lineStart + prefixLen + cs, e0 = lineStart + prefixLen + ce;
+    var sub = src.slice(s0, e0);
+    if(!sub.trim() || sub.indexOf("==") !== -1 || sub.indexOf("\n") !== -1) return;
+    var newText = src.slice(0, s0) + "==" + sub + "==" + src.slice(e0);
+    setTaskText(id, newText);
+    view.innerHTML = taskTextInner(newText, linkifyHtml).html;
+  }
+  function bindTaskHoldMarker(){
+    document.addEventListener("touchstart", function(e){
+      if(!e.touches || e.touches.length !== 1) return;
+      var ov = document.getElementById("settingsModalOverlay");
+      if(!ov || !ov.classList.contains("reading-mode-active")) return;
+      var tg = e.target;
+      if(!tg || !tg.closest) return;
+      if(tg.closest("a, button, .task-actions, .task-img-wrap, .task-flag-dot, .task-editable")) return;
+      var view = tg.closest(".task-text-view");
+      if(!view || view.classList.contains("task-archive-text") || view.classList.contains("task-has-img")) return;
+      var body = view.closest(".task-body");
+      if(!body || !body.querySelector(".task-edit-btn")) return; // чужая/общая только для чтения или не задача
+      var id = body.getAttribute("data-id");
+      var task = id ? getTaskById(id) : null;
+      if(!task || !task.c || !task.c.text) return;
+      var session = ltDomSession(view, function(n){
+        var el = n.nodeType === 3 ? n.parentElement : n;
+        return el && el.closest ? el.closest(".fmt-line") : null;
+      }, body, "fmt", ".fmt-mark, .fmt-bullet");
+      ltRunHold(e, view, session, function(range){ commitTaskHoldMark(view, id, range); }, document.getElementById("settingsTabContent"));
+    }, { passive: true });
+  }
+  bindTaskHoldMarker();
 
   // Шаг 14: тап по самой картинке открывает тот же полноэкранный просмотрщик с зумом, что и у
   // картинок в "Моём блокноте" (MdEditor.openImageViewer, экспортирована специально для этого) —
@@ -15244,27 +15474,6 @@
     } else {
       attachBookNote(hash, stripBookExt(bookReaderState.name || "book"), finishWithNoteId);
     }
-  }
-
-  // Обработчик клика по кнопке "Выделение" (доработка 13.09, см. bindBookReaderFabRow выше) —
-  // реагирует только пока открыт ридер в текстовом режиме и текущее браузерное выделение реально
-  // лежит внутри .book-reader.
-  function handleBookReaderSelectionSettled(){
-    if(!bookReaderState || bookReaderState.mode !== "text") return;
-    var sel = window.getSelection();
-    if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
-    var range = sel.getRangeAt(0);
-    var text = range.toString();
-    if(!text || !text.trim()) return;
-    var readerEl = document.querySelector(".book-reader");
-    if(!readerEl || !readerEl.contains(range.commonAncestorContainer)) return;
-    var pos = resolveSelectionToBlockPosition(range);
-    if(!pos){
-      var statusEl = document.getElementById("bookReaderStatus");
-      if(statusEl) statusEl.textContent = "Пока можно подчёркивать текст только в пределах одного абзаца.";
-      return;
-    }
-    addUnderlineFromSelection(pos.ch, pos.blk, pos.s, pos.e, text);
   }
 
   // ===================== ЗАКЛАДКИ КНИГИ (READER_PLAN.md, Этап D, шаг 15,

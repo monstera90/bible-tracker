@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 9.0 (14.10) — маркер по удержанию в режиме чтения: `bindNoteHoldMarker(view)` (слово подсвечивается, протяжка растягивает, при отпускании оборачивается в «==»), движок жеста — `window.LTHold` из my.js; откат — mdeditor.js 8.0.
    Версия: 8.0 (12.10) — кнопка «Копировать» `#mdEditorCopyBtn` (`COPY_ICON_SVG`) в нижнем ряду заметки слева от маркера, копирует выделение CodeMirror через `window.LTCopyText` (my.js).
    Версия: 7.6 (11.10) — в возвращаемом объекте `onAppPause`/`onAppResume` (сворачивание/возврат из APK без visibilitychange); при возврате без запомненной прокрутки область возвращается к строке с кареткой, а не в начало.
    Версия: 7.5 (11.10) — `replaceAllNotesFromEntries` (импорт категории «Заметки») больше не снимает закладки заметок: раньше каждая закладка заменялась записью {c:false} с текущим временем — она затирала закладки из импортируемого архива и уходила в облако (закладки исчезали на всех устройствах); теперь после замены набор перечитывается из state.
@@ -1077,6 +1078,74 @@ window.initMdEditorModule = function(deps){
       changes: { from: sel.from, to: sel.to, insert: prefix + text + suffix },
       selection: { anchor: sel.from, head: sel.from + prefix.length + text.length + suffix.length }
     });
+  }
+
+  // Маркер по удержанию в режиме чтения (14.10): удержание 250 мс на слове подсвечивает его, протяжка пальца вниз/вверх
+  // растягивает подсветку по словам в пределах абзаца (строки CodeMirror), при отпускании слова оборачиваются в «==»
+  // (то же, что кнопка-маркер). Движок жеста — window.LTHold из my.js (run/hlRender/hlClear); здесь только сессия на
+  // координатах CodeMirror. Работает ТОЛЬКО пока включён режим чтения/полноэкранный (см. getReadingModeActive,
+  // getFullscreenModeActive); в обычном редактировании долгое нажатие остаётся системным (каретка, выделение).
+  function bindNoteHoldMarker(view){
+    view.dom.addEventListener("touchstart", function(e){
+      if(!window.LTHold || !e.touches || e.touches.length !== 1) return;
+      if(!(getReadingModeActive() || getFullscreenModeActive())) return;
+      var tg = e.target;
+      if(tg && tg.closest && tg.closest("a, button, input, select, textarea")) return;
+      var a = null, lx = 0, ly = 0;
+      function wordAt(pos){ return view.state.wordAt(pos); }
+      function render(from, to){
+        var d1 = view.domAtPos(from), d2 = view.domAtPos(to), r = document.createRange();
+        try { r.setStart(d1.node, d1.offset); r.setEnd(d2.node, d2.offset); } catch(eR){ return; }
+        window.LTHold.hlRender(r, view.scrollDOM, "fmt");
+      }
+      function update(){
+        if(!a) return;
+        var pos = view.posAtCoords({ x: lx, y: ly });
+        if(pos == null) return;
+        var from = a.from, to = a.to;
+        if(pos < a.from){
+          if(pos < a.line.from) from = a.line.from;
+          else { var w = wordAt(pos); from = (w && w.from >= a.line.from) ? w.from : pos; }
+        } else if(pos > a.to){
+          if(pos > a.line.to) to = a.line.to;
+          else { var w2 = wordAt(pos); to = (w2 && w2.to <= a.line.to) ? w2.to : pos; }
+        }
+        a.cur = { from: from, to: to };
+        render(from, to);
+      }
+      var session = {
+        begin: function(x, y){
+          var pos = view.posAtCoords({ x: x, y: y });
+          if(pos == null) return false;
+          var line = view.state.doc.lineAt(pos);
+          var w = wordAt(pos);
+          if(!w || w.empty || w.from < line.from || w.to > line.to) return false;
+          var re = /==([^=\n]+?)==/g, m;
+          while((m = re.exec(line.text))){
+            var ms = line.from + m.index, me = ms + m[0].length;
+            if(pos >= ms && pos <= me) return false; // слово уже выделено маркером
+          }
+          a = { from: w.from, to: w.to, line: line, cur: { from: w.from, to: w.to } };
+          lx = x; ly = y;
+          render(w.from, w.to);
+          return true;
+        },
+        move: function(x, y){ lx = x; ly = y; update(); },
+        update: update,
+        end: function(){ var c = a && a.cur; a = null; window.LTHold.hlClear(); return c; },
+        cancel: function(){ a = null; window.LTHold.hlClear(); }
+      };
+      window.LTHold.run(e, view.contentDOM, session, function(c){
+        if(!c) return;
+        var from = c.from, to = c.to, txt = view.state.sliceDoc(from, to);
+        var lead = txt.length - txt.replace(/^\s+/, "").length;
+        var trail = txt.length - txt.replace(/\s+$/, "").length;
+        from += lead; to -= trail;
+        if(from >= to) return;
+        if(view.state.sliceDoc(from, to).indexOf("==") !== -1) return;
+        view.dispatch({ changes: [{ from: from, insert: "==" }, { from: to, insert: "==" }] });
+      }, view.scrollDOM);
+    }, { passive: true });
   }
 
   // ---------------------------------------------------------------------
@@ -5745,6 +5814,7 @@ window.initMdEditorModule = function(deps){
         var initialPos = Math.max(minCursorPos, Math.min(openFile.cursorPos || 0, openFile.text.length));
         var state = EditorState.create({ doc: openFile.text, selection: { anchor: initialPos }, extensions: extensions });
         cmView = new EditorView({ state: state, parent: host });
+        bindNoteHoldMarker(cmView); // маркер по удержанию в режиме чтения (14.10)
         // Ширина редактора может измениться не только от ввода текста
         // (что и так пересчитывает decorations) — поворот планшета,
         // изменение ширины окна настроек (layoutSettingsModal в my.js) и
