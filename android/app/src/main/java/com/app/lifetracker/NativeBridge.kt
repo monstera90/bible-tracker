@@ -19,8 +19,10 @@ class NativeBridge(private val activity: MainActivity) {
          * 3: шаг 5 (нативные уведомления: напоминания, общие задачи, будильник, опрос при закрытом приложении);
          * 4: клавиатура поверх страницы (setKeyboardOverlay + window.__ltOnKeyboard): текст задачи поднимается над клавиатурой.
          * 5: copyText — копирование выделенного текста в буфер обмена (своя кнопка «Копировать» вместо системного меню).
+         * 6: быстрая задача из ярлыка (takeQuickTasks / ackQuickTasks / setQuickTaskTheme): окно «Создать новую задачу»
+         *    складывает задачи в очередь, страница забирает их в Inbox.
          */
-        const val BRIDGE_VERSION = 5
+        const val BRIDGE_VERSION = 6
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -378,6 +380,32 @@ class NativeBridge(private val activity: MainActivity) {
         }
         latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
         return ok
+    }
+
+    // ===== Ярлык «Создать новую задачу» (QuickTaskActivity) =====
+
+    /**
+     * Очередь задач, созданных окном быстрой задачи, JSON-массив [{id, text, createdAt, flag?, work?, remindAt?}].
+     * Очередь НЕ очищается: страница создаёт задачи и затем зовёт ackQuickTasks с id сохранённых.
+     */
+    @JavascriptInterface
+    fun takeQuickTasks(): String {
+        if (!activity.pageTrusted) return "[]"
+        return QuickTaskStore.peekJson(activity.applicationContext)
+    }
+
+    /** Страница сохранила задачи из очереди: JSON-массив их id, они удаляются из очереди. */
+    @JavascriptInterface
+    fun ackQuickTasks(idsJson: String?) {
+        if (!activity.pageTrusted) return
+        QuickTaskStore.ack(activity.applicationContext, idsJson)
+    }
+
+    /** Цвета темы оформления для окна быстрой задачи: JSON {parchment, ink, inkSoft, wood, groove, joy} (CSS-цвета). */
+    @JavascriptInterface
+    fun setQuickTaskTheme(json: String?) {
+        if (!activity.pageTrusted) return
+        QuickTaskStore.setThemeJson(activity.applicationContext, json)
     }
 
     /** Цвет статус-бара: "#rrggbb", "#rgb" или "rgb(r, g, b)". Значок светлый/тёмный выбирается по яркости цвета. */

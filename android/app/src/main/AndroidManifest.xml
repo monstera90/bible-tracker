@@ -29,7 +29,7 @@
 
     <application
         android:allowBackup="false"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/ic_launcher_app"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.LifeTracker"
@@ -77,6 +77,21 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- Ярлык «Создать новую задачу» (долгое нажатие на иконку, res/xml/shortcuts.xml): маленькое окно над клавиатурой
+             БЕЗ запуска основного приложения. Свой task (taskAffinity пустой) и прозрачная тема — основное окно приложения
+             не поднимается, под окном остаётся рабочий стол. Задача складывается в очередь QuickTaskStore, страница
+             забирает её при следующем открытии приложения и кладёт в Inbox. -->
+        <activity
+            android:name=".QuickTaskActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout|uiMode|density|fontScale|layoutDirection|locale|navigation|colorMode"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="@string/shortcut_new_task"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/QuickTaskTheme"
+            android:windowSoftInputMode="stateVisible|adjustResize" />
 
         <!-- Шаг 4: временные файлы для «Поделиться» (cache/share/, см. res/xml/file_paths.xml). -->
         <provider

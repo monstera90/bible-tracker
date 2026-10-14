@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 66.0 (14.10) — ярлык «Создать новую задачу» (APK, мост версии 6): `pullNativeQuickTasks` забирает у оболочки задачи, созданные окном над клавиатурой без открытия приложения (`LifeTrackerNative.takeQuickTasks`/`ackQuickTasks`), и кладёт их в Inbox (приоритет `flag`, чемоданчик `inWork`, напоминание `remindAt`); вызывается при запуске страницы и из `__ltOnAppResume`. `pushQuickTaskTheme` присылает оболочке цвета темы (`setQuickTaskTheme`), чтобы окно выглядело как задача в приложении; вызывается из `syncThemeColorMeta`, при запуске и из `__ltOnAppPause`.
    Версия: 65.0 (14.10) — из нижнего ряда задач убраны кнопки «Копировать» и «Выделить текст» (разметка, видимость, обработчики); ИПКД на Android 5 (WebView ~Chrome 95): `scrollBookReaderToPosition` для цели «заголовок главы» (blk === -1) на старом движке идёт общим путём с закреплением высот сегментов и доводкой (раньше — простая однократная прокрутка и «промах»), ошибка открытия ИПКД теперь видна вместо вечной «Загрузки…»; откат — my.js 64.0.
    Версия: 64.0 (14.10) — из ридера книг убраны кнопки «Копировать» и «Выделить текст» (нижний ряд, справка, обработчики, `handleBookReaderSelectionSettled`); маркер по удержанию с протяжкой в режиме чтения для задач (`bindTaskHoldMarker`, `commitTaskHoldMark`: слово оборачивается в «==») и общий движок `ltRunHold`/`ltDomSession`/`window.LTHold` для заметок (mdeditor.js 9.0); `ltHlRender(range, host, variant)`; откат — my.js 63.1.
    Версия: 63.1 (13.10) — подсветка при протяжке теперь ПОД текстом и того же цвета, что готовое подчёркивание (раньше была тёмной полупрозрачной поверх текста): `ltHlRender(range, rootEl)` кладёт слой внутрь `.book-reader`; откат — my.js 63.0.
@@ -2305,6 +2306,24 @@
         window.LifeTrackerNative.setStatusBarColor(wood);
       }
     }catch(e){}
+    try{ pushQuickTaskTheme(); }catch(e){}
+  }
+  // APK: цвета темы для окна «Создать новую задачу» (ярлык на иконке). Окно рисует оболочка, у неё нет CSS, поэтому
+  // страница присылает те же цвета, что у строки задачи (--parchment — фон, --wood — кнопки и красный приоритет,
+  // --mood-joy — жёлтый приоритет). Шлётся только при изменении.
+  var lastQuickTaskThemeJson = "";
+  function pushQuickTaskTheme(){
+    var nb = window.LifeTrackerNative;
+    if(!nb || typeof nb.setQuickTaskTheme === "undefined") return;
+    var cs = getComputedStyle(document.documentElement);
+    function g(name){ return String(cs.getPropertyValue(name) || "").trim(); }
+    var json = JSON.stringify({
+      parchment: g("--parchment"), ink: g("--ink"), inkSoft: g("--ink-soft"), wood: g("--wood"),
+      groove: g("--groove-shadow"), joy: g("--mood-joy") || g("--gold-light")
+    });
+    if(json === lastQuickTaskThemeJson) return;
+    lastQuickTaskThemeJson = json;
+    nb.setQuickTaskTheme(json);
   }
 
   function selectTheme(themeId){
@@ -4589,11 +4608,15 @@
     flushPendingSyncNow();
     // заметка: запомнить прокрутку и сохранить курсор ДО паузы WebView (visibilitychange на Android 16 может не прийти)
     try{ if(window.MdEditor && MdEditor.onAppPause) MdEditor.onAppPause(); }catch(e){}
+    // цвета темы для окна «Создать новую задачу» (ярлык): к моменту сворачивания они свежие
+    try{ pushQuickTaskTheme(); }catch(e){}
   };
   // APK: оболочка зовёт это из Activity.onResume — заметка возвращает прокрутку/перерисовку так же, как на visibilitychange.
   window.__ltOnAppResume = function(){
     if(window.Debug) window.Debug.log("__ltOnAppResume");
     try{ if(window.MdEditor && MdEditor.onAppResume) MdEditor.onAppResume(); }catch(e){}
+    // задачи из окна «Создать новую задачу» (ярлык), созданные пока приложение было закрыто/свёрнуто
+    try{ pullNativeQuickTasks(); }catch(e){ if(window.Debug) window.Debug.log("Быстрая задача: " + (e && e.message ? e.message : e)); }
   };
 
   // ⚠️ подстраховка, не зависящая ни от одного unload-события выше — периодический таймер, который
@@ -23202,6 +23225,50 @@
     next(0);
   }
 
+  // APK: ярлык «Создать новую задачу» (долгое нажатие на иконку). Окно над клавиатурой (QuickTaskActivity) работает без
+  // основного приложения и складывает задачу в очередь оболочки. Здесь страница забирает очередь (takeQuickTasks), создаёт
+  // задачи в Inbox (приоритет — c.flag, чемоданчик — c.inWork, напоминание — c.remindAt, всё как у обычной задачи) и только
+  // потом просит оболочку удалить их из очереди (ackQuickTasks) — при сбое между этими шагами задача не теряется, а
+  // повторно не создаётся: id задачи придумывает оболочка, уже существующий id пропускается.
+  function pullNativeQuickTasks(){
+    var bridge = window.LifeTrackerNative;
+    if(!bridge || typeof bridge.takeQuickTasks === "undefined") return;
+    var list = [];
+    try{ list = JSON.parse(bridge.takeQuickTasks() || "[]"); }catch(e){ list = []; }
+    if(!list.length) return;
+    var doneIds = [], created = 0, withReminder = false;
+    list.forEach(function(q){
+      if(!q || typeof q.id !== "string" || !/^tk[0-9a-z]+$/.test(q.id)) return;
+      var text = String(q.text == null ? "" : q.text).trim();
+      if(!text){ doneIds.push(q.id); return; }
+      if(!getTaskById(q.id)){
+        var data = {
+          text: text, tab: "inbox", checked: false, checkedAt: null, completionKey: null, nextForProjectId: null,
+          flag: (q.flag === "red" || q.flag === "yellow") ? q.flag : null,
+          inWork: (q.work === "work" || q.work === "check") ? q.work : false
+        };
+        if(typeof q.remindAt === "number" && isFinite(q.remindAt) && q.remindAt > 0){ data.remindAt = q.remindAt; withReminder = true; }
+        if(typeof q.createdAt === "number" && isFinite(q.createdAt) && q.createdAt > 0) data.createdAt = q.createdAt;
+        saveTaskData(q.id, data);
+        created++;
+      }
+      doneIds.push(q.id);
+    });
+    if(doneIds.length){ try{ bridge.ackQuickTasks(JSON.stringify(doneIds)); }catch(e){} }
+    if(window.Debug) window.Debug.log("Быстрая задача: из оболочки получено " + list.length + ", создано в Inbox " + created);
+    if(!created) return;
+    if(withReminder){ try{ Notifications.schedule(); }catch(e){} }
+    // открыт Inbox (или витрина, где задача видна) — обновить список, если строка сейчас не редактируется
+    try{
+      if(settingsModalOverlay && settingsModalOverlay.classList.contains("open") &&
+         (currentSettingsTab === "inbox" || currentSettingsTab === "red" || currentSettingsTab === "worktasks")){
+        var ae = document.activeElement;
+        var editing = !!(ae && ae.classList && ae.classList.contains("task-editable"));
+        if(!editing) renderTaskTabList(currentSettingsTab);
+      }
+    }catch(e){}
+  }
+
   function checkForSharedFile(){
     if(window.LifeTrackerNative && typeof window.LifeTrackerNative.takeSharedFiles !== "undefined"){
       // В оболочке service worker и Cache API share-target не используются (sw.js не регистрируется).
@@ -23280,6 +23347,8 @@
   initTabScrollTracking();
   setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkHourBoundaries(); refreshYearGridIfOpen(); }, 30 * 60 * 1000);
   checkForSharedFile();
+  try{ pullNativeQuickTasks(); }catch(e){ if(window.Debug) window.Debug.log("Быстрая задача: " + (e && e.message ? e.message : e)); }
+  try{ pushQuickTaskTheme(); }catch(e){}
   Notifications.start();
   initPersonalTasksShadow();
   initSettingsShadow(); // Шаг 9

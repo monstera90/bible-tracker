@@ -10,4 +10,16 @@
             android:targetClass="com.app.lifetracker.MainActivity"
             android:targetPackage="com.app.lifetracker" />
     </shortcut>
+    <!-- Там же, сразу под «Диагностикой»: «Создать новую задачу» — окно над клавиатурой, основное приложение не открывается
+         (QuickTaskActivity). Порядок в меню задаёт лаунчер: пункты идут в порядке объявления в этом файле. -->
+    <shortcut
+        android:enabled="true"
+        android:shortcutId="new_task"
+        android:shortcutShortLabel="@string/shortcut_new_task"
+        android:shortcutLongLabel="@string/shortcut_new_task">
+        <intent
+            android:action="com.app.lifetracker.NEW_TASK"
+            android:targetClass="com.app.lifetracker.QuickTaskActivity"
+            android:targetPackage="com.app.lifetracker" />
+    </shortcut>
 </shortcuts>
