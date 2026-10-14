@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 4.0 (14.10) — новая кнопка нижнего ряда задач «Размер значков» (`#taskIconSizeWrap`/`#taskIconSizeBtn`, слот 6, слева от «Аа») и её всплывающий ползунок `#taskIconSizePopup` (`#taskIconSizeRange`, `#taskIconSizeVal`).
      Версия: 3.6 (14.10) — из нижнего ряда задач убраны кнопки «Копировать» (`#taskCopyWrap`) и «Выделить текст» (`#taskHighlightWrap`).
      Версия: 3.5 (12.10) — кнопка «Копировать» `#taskCopyWrap`/`#taskCopyBtn` в нижнем ряду задач (слева от текстовыделителя).
      Версия: 3.4 (11.10) — подключён `legacy-webview.js` после `opfs-shim.js` (замена `:has()` и блокировка прокрутки страницы под окном для старого WebView).
@@ -329,6 +330,19 @@ window.addEventListener("error", function(e){
         </div>
         <button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="taskFontSizeBtn" title="Размер шрифта">Аа</button>
       </span>
+      <!-- «Размер значков» — слот 6, слева от «Аа» (14.10). Нажатие открывает ползунок #taskIconSizePopup (ниже): множитель
+           --task-ico-scale для всех значков управления задачей, тот же размер берёт окно «Создать новую задачу» в APK.
+           Ползунок — отдельный элемент окна (не внутри обёртки кнопки, ряд двигается свайпом); логика — initTaskGlobalToolbar
+           и applyTaskIconScale (my.js). Видимость кнопки — вместе с «Аа» (syncTaskFabRowForTab). -->
+      <span class="task-iconsize-wrap" id="taskIconSizeWrap">
+        <button type="button" class="mdeditor-fab-btn" id="taskIconSizeBtn" title="Размер значков задач"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="12" width="9" height="9" rx="2"></rect><rect x="9" y="3" width="12" height="12" rx="2.5" fill="none"></rect><path d="M12.5 11.5 L17 7"></path><path d="M13.8 7 H17 V10.2"></path></svg></button>
+      </span>
+      <div class="task-iconsize-popup" id="taskIconSizePopup">
+        <span class="task-iconsize-dot task-iconsize-dot-s"></span>
+        <input type="range" class="task-iconsize-range" id="taskIconSizeRange" min="70" max="160" step="5" value="100" aria-label="Размер значков задач">
+        <span class="task-iconsize-dot task-iconsize-dot-l"></span>
+        <span class="task-iconsize-val" id="taskIconSizeVal">100%</span>
+      </div>
       <!-- скрепка — вставка картинки в задачу/комментарий, тот же принцип
            "![[имя]]"/OPFS images/, что и в "Моём блокноте"
            (MdEditor.saveImageBytes/getImageBlobUrl), тот же порядок кнопок,

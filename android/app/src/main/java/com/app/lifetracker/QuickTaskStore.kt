@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (14.10) — `iconScale`: множитель размера значков задачи из ключа iconScale присланного страницей JSON.
 
 import android.content.Context
 import android.graphics.Color
@@ -104,6 +105,21 @@ object QuickTaskStore {
             groove = c("groove", 0xFFB6A8D1.toInt()),
             yellow = c("joy", 0xFFE3B341.toInt())
         )
+    }
+
+    /**
+     * Множитель размера значков управления задачей (ползунок в нижнем ряду задач веб-части, 0.7..1.6; 1.0 — размеры
+     * строки задачи по умолчанию: кнопка 22, пиктограмма 15, кружки 19). Страница присылает его в том же JSON, что и цвета
+     * темы (ключ iconScale); пока не прислала — 1.0.
+     */
+    fun iconScale(ctx: Context): Float {
+        val o = try {
+            JSONObject(prefs(ctx).getString(K_THEME, "{}") ?: "{}")
+        } catch (e: Exception) {
+            JSONObject()
+        }
+        val v = o.optDouble("iconScale", 1.0)
+        return if (v.isNaN()) 1f else v.toFloat().coerceIn(0.7f, 1.6f)
     }
 
     /** "#rrggbb", "#rgb" или "rgb(r, g, b)"; иначе null. */

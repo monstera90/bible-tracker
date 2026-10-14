@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 67.0 (14.10) — размер значков управления задачей: новая кнопка нижнего ряда задач («Размер значков», слот слева от «Аа») открывает всплывающий ползунок 70–160 %; `getTaskIconScalePct`/`applyTaskIconScale` (localStorage `taskIconScale_v1`, CSS-переменная `--task-ico-scale`, подгонка `refitAllVisibleTaskBodies`), `pushQuickTaskTheme` присылает оболочке ещё и `iconScale` — окно «Создать новую задачу» рисует кнопки того же размера; кнопка в `syncTaskFabRowForTab` (там же закрывается ползунок), `TASK_TARGETS_SEL`, обработчики в `initTaskGlobalToolbar`; при старте множитель применяется до первой отрисовки. Откат: my.js 66.0.
    Версия: 66.0 (14.10) — ярлык «Создать новую задачу» (APK, мост версии 6): `pullNativeQuickTasks` забирает у оболочки задачи, созданные окном над клавиатурой без открытия приложения (`LifeTrackerNative.takeQuickTasks`/`ackQuickTasks`), и кладёт их в Inbox (приоритет `flag`, чемоданчик `inWork`, напоминание `remindAt`); вызывается при запуске страницы и из `__ltOnAppResume`. `pushQuickTaskTheme` присылает оболочке цвета темы (`setQuickTaskTheme`), чтобы окно выглядело как задача в приложении; вызывается из `syncThemeColorMeta`, при запуске и из `__ltOnAppPause`.
    Версия: 65.0 (14.10) — из нижнего ряда задач убраны кнопки «Копировать» и «Выделить текст» (разметка, видимость, обработчики); ИПКД на Android 5 (WebView ~Chrome 95): `scrollBookReaderToPosition` для цели «заголовок главы» (blk === -1) на старом движке идёт общим путём с закреплением высот сегментов и доводкой (раньше — простая однократная прокрутка и «промах»), ошибка открытия ИПКД теперь видна вместо вечной «Загрузки…»; откат — my.js 64.0.
    Версия: 64.0 (14.10) — из ридера книг убраны кнопки «Копировать» и «Выделить текст» (нижний ряд, справка, обработчики, `handleBookReaderSelectionSettled`); маркер по удержанию с протяжкой в режиме чтения для задач (`bindTaskHoldMarker`, `commitTaskHoldMark`: слово оборачивается в «==») и общий движок `ltRunHold`/`ltDomSession`/`window.LTHold` для заметок (mdeditor.js 9.0); `ltHlRender(range, host, variant)`; откат — my.js 63.1.
@@ -1915,6 +1916,15 @@
     for(var fwi = 0; fwi < formatWraps.length; fwi++) formatWraps[fwi].classList.toggle("visible", showTaskFab);
     if(fontSizeWrap) fontSizeWrap.classList.toggle("visible", showTaskFab);
     if(attachWrap) attachWrap.classList.toggle("visible", showTaskFab);
+    // «Размер значков» (слева от «Аа») — на тех же экранах; ползунок при смене вкладки/экрана закрывается.
+    var iconSizeWrap = document.getElementById("taskIconSizeWrap");
+    if(iconSizeWrap) iconSizeWrap.classList.toggle("visible", showTaskFab);
+    var iconSizePopupEl = document.getElementById("taskIconSizePopup");
+    if(iconSizePopupEl && iconSizePopupEl.classList.contains("open")){
+      iconSizePopupEl.classList.remove("open");
+      var iconSizeBtnEl = document.getElementById("taskIconSizeBtn");
+      if(iconSizeBtnEl) iconSizeBtnEl.classList.remove("pressed");
+    }
     // "i" — в отличие от "глаза"/сортировки ниже видна на ЛЮБОЙ вкладке задач, тем же условием, что
     // и вся остальная скрепка/Аа/Ж/текстовыделитель выше.
     var infoWrap = document.getElementById("taskInfoWrap");
@@ -2319,11 +2329,40 @@
     function g(name){ return String(cs.getPropertyValue(name) || "").trim(); }
     var json = JSON.stringify({
       parchment: g("--parchment"), ink: g("--ink"), inkSoft: g("--ink-soft"), wood: g("--wood"),
-      groove: g("--groove-shadow"), joy: g("--mood-joy") || g("--gold-light")
+      groove: g("--groove-shadow"), joy: g("--mood-joy") || g("--gold-light"),
+      iconScale: getTaskIconScalePct() / 100   // множитель размера значков задачи (ползунок в нижнем ряду задач)
     });
     if(json === lastQuickTaskThemeJson) return;
     lastQuickTaskThemeJson = json;
     nb.setQuickTaskTheme(json);
+  }
+
+  // ===================== РАЗМЕР ЗНАЧКОВ УПРАВЛЕНИЯ ЗАДАЧЕЙ =====================
+  // Один множитель на всю систему: CSS-переменная --task-ico-scale на <html> (modals.css: кнопка 22px, пиктограмма 15px,
+  // кружки 19px/12px и шрифт времени напоминания считаются от неё; 1 = прежний вид) и то же число в окне «Создать новую
+  // задачу» APK (pushQuickTaskTheme → iconScale). Меняется ползунком из нижнего ряда задач (initTaskGlobalToolbar).
+  // Значение — проценты 70..160 с шагом 5, хранится на устройстве (localStorage `taskIconScale_v1`), не синхронизируется.
+  // Ключ записан литералом: функции зовутся из syncThemeColorMeta ещё до того, как выполнятся var-объявления ниже.
+  function getTaskIconScalePct(){
+    var v = 100;
+    try{ v = parseInt(localStorage.getItem("taskIconScale_v1"), 10); }catch(e){}
+    if(!(v >= 70 && v <= 160)) v = 100;
+    return v;
+  }
+  var taskIconScaleRefitRaf = 0;
+  function applyTaskIconScale(pct, persist){
+    pct = Math.max(70, Math.min(160, Math.round(pct / 5) * 5));
+    document.documentElement.style.setProperty("--task-ico-scale", String(pct / 100));
+    if(persist){ try{ localStorage.setItem("taskIconScale_v1", String(pct)); }catch(e){} }
+    // ширина кнопок изменилась — заново подогнать их к последней строке текста каждой задачи
+    if(!taskIconScaleRefitRaf){
+      taskIconScaleRefitRaf = requestAnimationFrame(function(){
+        taskIconScaleRefitRaf = 0;
+        try{ refitAllVisibleTaskBodies(); }catch(e){}
+      });
+    }
+    try{ pushQuickTaskTheme(); }catch(e){}
+    return pct;
   }
 
   function selectTheme(themeId){
@@ -7521,7 +7560,7 @@
   function initFabRowSlider(){
     var box = document.getElementById("settingsModalBox");
     if(!box) return;
-    var TASK_TARGETS_SEL = ".task-add-fab, .task-fontsize-wrap, .task-format-wrap, " +
+    var TASK_TARGETS_SEL = ".task-add-fab, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap, " +
       ".task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, " +
       ".task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home";
     var EDGE = 6;           // отступ кнопок от края окна (как у самого ряда, --fab-gap в modals.css)
@@ -7864,6 +7903,43 @@
     }
     if(fontPlusBtn) fontPlusBtn.addEventListener("click", function(){ changeTaskFontSizeStep(1); });
     if(fontMinusBtn) fontMinusBtn.addEventListener("click", function(){ changeTaskFontSizeStep(-1); });
+
+    // --- «Размер значков» (слева от «Аа») ---
+    // Открывает ползунок #taskIconSizePopup (отдельный элемент окна над рядом кнопок): тянешь — множитель
+    // --task-ico-scale меняется сразу у всех значков управления задачей (applyTaskIconScale), та же величина уходит
+    // окну «Создать новую задачу» в APK. Повторный тап по кнопке или тап мимо закрывает ползунок.
+    var iconSizeBtn = document.getElementById("taskIconSizeBtn");
+    var iconSizePopup = document.getElementById("taskIconSizePopup");
+    var iconSizeRange = document.getElementById("taskIconSizeRange");
+    var iconSizeVal = document.getElementById("taskIconSizeVal");
+    stopMousedown(iconSizeBtn);
+    function showIconSizeValue(pct){
+      if(iconSizeRange) iconSizeRange.value = String(pct);
+      if(iconSizeVal) iconSizeVal.textContent = pct + "%";
+    }
+    function setIconSizePopupOpen(open){
+      if(!iconSizePopup) return;
+      iconSizePopup.classList.toggle("open", open);
+      if(iconSizeBtn) iconSizeBtn.classList.toggle("pressed", open);
+      if(open) showIconSizeValue(getTaskIconScalePct());
+    }
+    showIconSizeValue(getTaskIconScalePct());
+    if(iconSizeBtn){
+      iconSizeBtn.addEventListener("click", function(){
+        setIconSizePopupOpen(!(iconSizePopup && iconSizePopup.classList.contains("open")));
+      });
+    }
+    if(iconSizeRange){
+      iconSizeRange.addEventListener("input", function(){
+        var pct = applyTaskIconScale(parseInt(iconSizeRange.value, 10) || 100, true);
+        if(iconSizeVal) iconSizeVal.textContent = pct + "%";
+      });
+    }
+    document.addEventListener("click", function(e){
+      if(!iconSizePopup || !iconSizePopup.classList.contains("open")) return;
+      if(iconSizePopup.contains(e.target) || (iconSizeBtn && iconSizeBtn.contains(e.target))) return;
+      setIconSizePopupOpen(false);
+    }, true);
 
     // --- "⋮" — меню "настройки вкладки" ---
     // Самая левая кнопка ряда, видна только на вкладке "Общие задачи" (см. .task-joint-menu-wrap в
@@ -23343,6 +23419,7 @@
   checkHourBoundaries();
   renderGoalsSection();
   renderAddGoalMenu();
+  try{ applyTaskIconScale(getTaskIconScalePct(), false); }catch(e){} // сохранённый размер значков задач — до первой отрисовки списков
   refreshSettingsTabsVisibility();
   initTabScrollTracking();
   setInterval(function(){ updateOverallProgress(); updateMissedBanner(); checkHourBoundaries(); refreshYearGridIfOpen(); }, 30 * 60 * 1000);

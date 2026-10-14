@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Версия: 1.1 (14.10) — у обоих пунктов свой значок (`android:icon`): ic_shortcut_diag, ic_shortcut_new_task. -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Долгое нажатие на иконку приложения → «Диагностика»: проверка хранилища, OPFS, камеры и сетевых сервисов. -->
     <shortcut
         android:enabled="true"
         android:shortcutId="diag"
+        android:icon="@drawable/ic_shortcut_diag"
         android:shortcutShortLabel="@string/shortcut_diag">
         <intent
             android:action="com.app.lifetracker.DIAG"
@@ -15,6 +17,7 @@
     <shortcut
         android:enabled="true"
         android:shortcutId="new_task"
+        android:icon="@drawable/ic_shortcut_new_task"
         android:shortcutShortLabel="@string/shortcut_new_task"
         android:shortcutLongLabel="@string/shortcut_new_task">
         <intent

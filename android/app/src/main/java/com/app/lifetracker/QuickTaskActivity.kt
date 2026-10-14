@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (14.10) — размеры кнопок как в строке задачи приложения (кнопка 22, пиктограмма 15, кружки 19, промежуток 6 dp) × множитель `sc` из QuickTaskStore.iconScale.
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
@@ -55,6 +56,9 @@ class QuickTaskActivity : ComponentActivity() {
     private lateinit var workIcon: ImageView
     private lateinit var clockHolder: LinearLayout
 
+    /** Множитель размера значков (QuickTaskStore.iconScale): ползунок в нижнем ряду задач веб-части. */
+    private var sc = 1f
+
     private var flag: String? = null
     private var work: String? = null
     private var remindAt: Long = 0L
@@ -65,6 +69,7 @@ class QuickTaskActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         pal = QuickTaskStore.palette(applicationContext)
+        sc = QuickTaskStore.iconScale(applicationContext)
 
         // Android 11+: окно рисуется под системными панелями, высоту клавиатуры учитываем сами (см. listener ниже).
         // До Android 11 клавиатуру обрабатывает системный adjustResize.
@@ -127,6 +132,13 @@ class QuickTaskActivity : ComponentActivity() {
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
 
+    /** dp с учётом множителя значков: при 1.0 — те же размеры, что у кнопок строки задачи в приложении (CSS px = dp). */
+    private fun sdp(v: Float): Int = maxOf(1, (v * sc * resources.displayMetrics.density + 0.5f).toInt())
+
+    /** Промежуток между кнопками строки задачи (margin-left 6px в modals.css) — от множителя не зависит. */
+    private fun gapParams(w: Int, h: Int): LinearLayout.LayoutParams =
+        LinearLayout.LayoutParams(w, h).apply { leftMargin = dp(6) }
+
     private fun cardParams(): FrameLayout.LayoutParams {
         val width = minOf(resources.displayMetrics.widthPixels, dp(560))
         return FrameLayout.LayoutParams(width, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
@@ -184,16 +196,15 @@ class QuickTaskActivity : ComponentActivity() {
         card.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         // ✕ — отмена (слева), дальше — кнопки задачи в том же порядке, что в строке: копировать, приоритет, чемоданчик, часы.
-        row.addView(iconButton(R.drawable.ic_qt_close, "Отмена") { cancel() })
+        row.addView(iconButton(R.drawable.ic_qt_close, "Отмена", false) { cancel() })
         row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-        row.addView(iconButton(R.drawable.ic_qt_copy, "Копировать") { copyText() })
+        row.addView(iconButton(R.drawable.ic_qt_copy, "Копировать", true) { copyText() })
         row.addView(buildFlagButton())
         row.addView(buildWorkButton())
         clockHolder = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            minimumWidth = dp(44)
-            setPadding(dp(4), 0, dp(4), 0)
+            minimumWidth = sdp(22f)
             background = selectable()
             contentDescription = "Напоминание"
             setOnClickListener { onClockTap() }
@@ -203,8 +214,8 @@ class QuickTaskActivity : ComponentActivity() {
                 true
             }
         }
-        row.addView(clockHolder, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
-        row.addView(iconButton(R.drawable.ic_qt_check, "Сохранить") { save() })
+        row.addView(clockHolder, gapParams(ViewGroup.LayoutParams.WRAP_CONTENT, sdp(22f)))
+        row.addView(iconButton(R.drawable.ic_qt_check, "Сохранить", true) { save() })
     }
 
     private fun selectable(): android.graphics.drawable.Drawable? {
@@ -216,15 +227,18 @@ class QuickTaskActivity : ComponentActivity() {
         }
     }
 
-    private fun iconButton(res: Int, desc: String, onClick: () -> Unit): ImageView {
+    /** Кнопка 22 (область нажатия) с пиктограммой 15 внутри — как `.task-icon-btn` в приложении; gap — отступ слева 6. */
+    private fun iconButton(res: Int, desc: String, gap: Boolean, onClick: () -> Unit): ImageView {
+        val box = sdp(22f)
+        val pad = maxOf(0, (box - sdp(15f)) / 2)
         return ImageView(this).apply {
             setImageResource(res)
             setColorFilter(pal.accent)
             scaleType = ImageView.ScaleType.FIT_CENTER
-            setPadding(dp(11), dp(11), dp(11), dp(11))
+            setPadding(pad, pad, pad, pad)
             contentDescription = desc
             background = selectable()
-            layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
+            layoutParams = if (gap) gapParams(box, box) else LinearLayout.LayoutParams(box, box)
             setOnClickListener { onClick() }
         }
     }
@@ -234,8 +248,8 @@ class QuickTaskActivity : ComponentActivity() {
         holder.background = selectable()
         holder.contentDescription = "Приоритет"
         flagDot = View(this)
-        holder.addView(flagDot, FrameLayout.LayoutParams(dp(12), dp(12), Gravity.CENTER))
-        holder.layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
+        holder.addView(flagDot, FrameLayout.LayoutParams(sdp(12f), sdp(12f), Gravity.CENTER))
+        holder.layoutParams = gapParams(sdp(22f), sdp(22f))
         holder.setOnClickListener {
             flag = if (flag == "red") "yellow" else "red"
             updateFlag()
@@ -253,13 +267,13 @@ class QuickTaskActivity : ComponentActivity() {
         holder.background = selectable()
         holder.contentDescription = "В работе"
         workCircle = View(this)
-        holder.addView(workCircle, FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER))
+        holder.addView(workCircle, FrameLayout.LayoutParams(sdp(19f), sdp(19f), Gravity.CENTER))
         workIcon = ImageView(this).apply {
             setImageResource(R.drawable.ic_qt_work)
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
-        holder.addView(workIcon, FrameLayout.LayoutParams(dp(15), dp(15), Gravity.CENTER))
-        holder.layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
+        holder.addView(workIcon, FrameLayout.LayoutParams(sdp(15f), sdp(15f), Gravity.CENTER))
+        holder.layoutParams = gapParams(sdp(22f), sdp(22f))
         holder.setOnClickListener {
             work = if (work == null) "work" else if (work == "work") "check" else "work"
             updateWork()
@@ -281,10 +295,10 @@ class QuickTaskActivity : ComponentActivity() {
         if (flag == null) {
             d.setColor(Color.TRANSPARENT)
             d.setStroke(dp(1), pal.groove)
-            size = dp(12)
+            size = sdp(12f)
         } else {
             d.setColor(if (flag == "red") pal.accent else pal.yellow)
-            size = dp(19)
+            size = sdp(19f)
         }
         flagDot.background = d
         flagDot.layoutParams = FrameLayout.LayoutParams(size, size, Gravity.CENTER)
@@ -311,23 +325,33 @@ class QuickTaskActivity : ComponentActivity() {
         workCircle.background = d
     }
 
+    /** Шрифт и размер надписи на кружке с числом/овале со временем: 10 px жирным, как `.rb-date`/`.rb-time` в приложении. */
+    private val pillTypeface: Typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+    private fun pillTextPx(): Float = 10f * sc * resources.displayMetrics.density
+
+    /** Ширина пилюли: круг с числом — 19, овал со временем — «5ch + 8px» (пять нулей этого шрифта плюс 8), как в приложении. */
+    private fun pillWidth(round: Boolean): Int {
+        if (round) return sdp(19f)
+        val paint = android.graphics.Paint().apply {
+            typeface = pillTypeface
+            textSize = pillTextPx()
+        }
+        return (5f * paint.measureText("0")).toInt() + dp(8)
+    }
+
     private fun pill(text: String, round: Boolean): TextView {
+        val h = sdp(19f)
         return TextView(this).apply {
             this.text = text
             setTextColor(pal.card)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
-            typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, pillTextPx())
+            typeface = pillTypeface
             gravity = Gravity.CENTER
             includeFontPadding = false
             maxLines = 1
             background = GradientDrawable().apply {
                 setColor(pal.accent)
-                cornerRadius = dp(10).toFloat()
-            }
-            if (round) {
-                minWidth = dp(19)
-            } else {
-                setPadding(dp(7), 0, dp(7), 0)
+                cornerRadius = h / 2f
             }
         }
     }
@@ -340,7 +364,7 @@ class QuickTaskActivity : ComponentActivity() {
                 setColorFilter(pal.accent)
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }
-            clockHolder.addView(icon, LinearLayout.LayoutParams(dp(22), dp(22)))
+            clockHolder.addView(icon, LinearLayout.LayoutParams(sdp(15f), sdp(15f)))
             return
         }
         val at = Calendar.getInstance().apply { timeInMillis = remindAt }
@@ -349,10 +373,10 @@ class QuickTaskActivity : ComponentActivity() {
         if (!sameDay) {
             // Другой день: кружок с числом слева от времени (как в строке задачи).
             val date = pill(at.get(Calendar.DAY_OF_MONTH).toString(), true)
-            clockHolder.addView(date, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(19)).apply { rightMargin = dp(4) })
+            clockHolder.addView(date, LinearLayout.LayoutParams(pillWidth(true), sdp(19f)).apply { rightMargin = dp(4) })
         }
         val time = pill(String.format("%d:%02d", at.get(Calendar.HOUR_OF_DAY), at.get(Calendar.MINUTE)), false)
-        clockHolder.addView(time, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(19)))
+        clockHolder.addView(time, LinearLayout.LayoutParams(pillWidth(false), sdp(19f)))
     }
 
     // ------------------------------------------------------------------ действия
