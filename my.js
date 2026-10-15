@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 70.0 (15.10) — клавиатура при вводе имени в диалогах-карточках (`.mdeditor-cleanup-input`: «Имя новой заметки», переименование закладки/книги, имя пользователя и др.): `initTaskKeyboardLift` теперь включает `overlaysContent` и для этих полей (раньше только для `.mdeditor-title-input`), поэтому WebView не сжимается и нижние вкладки не подпрыгивают над клавиатурой, а прячутся под ней; новая `liftDialog`/`clearDialog` добавляют карточке `padding-bottom` на высоту перекрытия — карточка стоит по центру видимой над клавиатурой части. Откат: my.js 69.0.
    Версия: 69.0 (14.10) — (1) ЗАКЛАДКА/МЕСТО ПРИ УХОДЕ С КНИГИ: на Android 5 книга собирается и «доводится» до места секундами; если за это время уйти на другую вкладку, `currentBookReaderPosition` читал ещё недостроенный/непрокрученный текст и возвращал начало книги — в авторежиме «А» основная закладка и сохранённая позиция чтения затирались на 0:0, книга открывалась с начала (значок на полях при этом не рисовался: у блока-картинки/обложки в начале книги нет места под значок). Новая `bookReaderLeavePosition(container)`: пока текст не готов (`bookReaderState.textReady === false`) или идёт восстановление места — берётся ЗАПЛАНИРОВАННОЕ место (`restoreTarget` / `restorePosition` / сохранённая позиция), а не геометрия DOM; её используют уход с вкладки, закрытие окна, `autoUpdateMainBookmarkOnExit`, `renderBookReader`, `openBookAtMarginBookmark`. (2) ИПКД/книги на Android 5 открываются быстрее: кэш закреплённых высот сегментов (`applyCachedSegHeights`/`saveCachedSegHeights`, localStorage `bookSegH_v1:<hash>`, с проверкой двух сегментов) вместо повторной полной вёрстки всей книги; порции сборки на старом WebView по 30 мс вместо 8; разобранная публикация ИПКД держится в памяти (`ipkdParsedCache`) — повторный заход не разбирает epub заново. Откат: my.js 68.0.
    Версия: 68.0 (14.10) — «Аа»: кнопки «+»/«−» заменены ползунком размера шрифта в стиле ползунка размера значков (на вкладках задач `#taskFontSizeBar`, в «Моём блокноте» — mdeditor.js 10.0, в ридере книг `#bookReaderFontSizeBar`); общая привязка — `MdEditor.bindFontSizeBar`/`MdEditor.setFontSizeStep`; в ридере книг `changeBookReaderFontSize(delta)` заменена на `setBookReaderFontSize(step)` (то же сохранение места чтения); автозакрытие попапов «Аа» (`initFontFormatPopupsAutoClose`) не срабатывает от касаний самого ползунка. Откат: my.js 67.0 / mdeditor.js 9.0 / modals.css 13.0 / index.html 4.0.
    Версия: 67.0 (14.10) — размер значков управления задачей: новая кнопка нижнего ряда задач («Размер значков», слот слева от «Аа») открывает всплывающий ползунок 70–160 %; `getTaskIconScalePct`/`applyTaskIconScale` (localStorage `taskIconScale_v1`, CSS-переменная `--task-ico-scale`, подгонка `refitAllVisibleTaskBodies`), `pushQuickTaskTheme` присылает оболочке ещё и `iconScale` — окно «Создать новую задачу» рисует кнопки того же размера; кнопка в `syncTaskFabRowForTab` (там же закрывается ползунок), `TASK_TARGETS_SEL`, обработчики в `initTaskGlobalToolbar`; при старте множитель применяется до первой отрисовки. Откат: my.js 66.0.
@@ -23069,8 +23070,25 @@
     function isLiftEditable(el){ return isTaskEditable(el) || isNoteEditable(el); }
     // Поле имени заметки (переименование, mdeditor.js): подъёма текста не нужно (поле вверху), но клавиатура
     // должна перекрывать страницу, а не сжимать WebView — иначе нижний ряд вкладок подпрыгивает над клавиатурой.
-    function isTitleInput(el){ return !!(el && el.classList && el.classList.contains("mdeditor-title-input")); }
+    // 70.0: сюда же поля имени в диалогах-карточках (.mdeditor-cleanup-input — «Имя новой заметки» и др.)
+    function isTitleInput(el){ return !!(el && el.classList && (el.classList.contains("mdeditor-title-input") || el.classList.contains("mdeditor-cleanup-input"))); }
     var activeTitleInput = null;
+    // 70.0: карточка-диалог (.mdeditor-cleanup-overlay) центрируется по всему окну, а клавиатура перекрывает его низ — добавляем
+    // карточке нижний отступ на высоту перекрытия, чтобы она (и кнопки «Создать/Отмена») стояла над клавиатурой.
+    var dialogOverlayEl = null;
+    function clearDialogLift(){
+      if(dialogOverlayEl){ dialogOverlayEl.style.paddingBottom = ""; dialogOverlayEl = null; }
+    }
+    function liftDialog(){
+      var el = activeTitleInput;
+      if(!el || !el.closest) return;
+      var ov = el.closest(".mdeditor-cleanup-overlay");
+      var r = vk.boundingRect;
+      if(!ov || !r || !(r.height > 0)){ clearDialogLift(); return; }
+      var overlap = Math.max(0, ov.getBoundingClientRect().bottom - r.top);
+      dialogOverlayEl = ov;
+      ov.style.paddingBottom = (24 + Math.round(overlap)) + "px";
+    }
     // низ каретки в заметке (px от верха вьюпорта) или 0, если определить нельзя
     function noteCaretBottom(el){
       var sel = window.getSelection();
@@ -23110,6 +23128,7 @@
     }
     function release(){
       removeSpacer();
+      clearDialogLift();
       activeEditable = null;
       try{ vk.overlaysContent = false; }catch(e){}
     }
@@ -23159,6 +23178,7 @@
         clearTimeout(releaseTimer);
         activeTitleInput = e.target;
         try{ vk.overlaysContent = true; }catch(err){}
+        requestAnimationFrame(liftDialog);
         return;
       }
       if(!isLiftEditable(e.target)) return;
@@ -23181,6 +23201,7 @@
     vk.addEventListener("geometrychange", function(){
       // поле имени убрано из DOM (нажали ✓/×) — blur при удалении элемента приходит не везде
       if(activeTitleInput && !document.body.contains(activeTitleInput)){ activeTitleInput = null; release(); return; }
+      if(activeTitleInput) liftDialog();
       if(activeEditable && !document.body.contains(activeEditable)){ release(); return; }
       if(activeEditable) applyLift();
       else removeSpacer();
