@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 10.1 (16.10) — возврат в заметку после сворачивания: `currentScrollPercent` возвращает null, пока область не имеет геометрии (приложение свёрнуто — `visibilitychange`/`pagehide` приходят уже после скрытия WebView), `flushDocStateNow` в этом случае не затирает сохранённый процент прокрутки нулём (раньше запоминалось «начало заметки»); `rememberScrollBeforeHide` не затирает ранее запомненную прокрутку, если измерить её сейчас нельзя; касание экрана сбрасывает запомненную прокрутку.
    Версия: 10.0 (14.10) — «Аа»: вместо кнопок «+»/«−» ползунок размера шрифта (стиль ползунка размера значков задач): новые `setFontSizeStep(step)` (абсолютный шаг, сохраняется как раньше) и `bindFontSizeBar(popup, bar, applyStep)` (общая привязка ползунка `.fontsize-bar` для заметки, задач и ридера книг; в `MdEditor` отдаются `setFontSizeStep`/`bindFontSizeBar`); в попапе «Аа» заметки осталась кнопка переносов слов, ползунок — `#mdEditorFontSizeBar` после ряда кнопок. Откат: mdeditor.js 9.0.
    Версия: 9.0 (14.10) — маркер по удержанию в режиме чтения: `bindNoteHoldMarker(view)` (слово подсвечивается, протяжка растягивает, при отпускании оборачивается в «==»), движок жеста — `window.LTHold` из my.js; откат — mdeditor.js 8.0.
    Версия: 8.0 (12.10) — кнопка «Копировать» `#mdEditorCopyBtn` (`COPY_ICON_SVG`) в нижнем ряду заметки слева от маркера, копирует выделение CodeMirror через `window.LTCopyText` (my.js).
@@ -5072,6 +5073,10 @@ window.initMdEditorModule = function(deps){
   function currentScrollPercent(){
     var sc = document.getElementById("settingsTabContent");
     if(!sc) return null;
+    // Приложение свёрнуто/WebView скрыт — у области нет геометрии (clientHeight 0, редактор без размеров): процент
+    // недостоверен (раньше здесь получался 0 и запоминалось «начало заметки», на возврате заметка открывалась с начала).
+    var hostEl = document.getElementById("mdEditorHost");
+    if(!(sc.clientHeight > 0) || !hostEl || !hostEl.getClientRects().length) return null;
     var max = sc.scrollHeight - sc.clientHeight;
     if(max <= 0) return 0;
     return Math.max(0, Math.min(1, sc.scrollTop / max));
@@ -5081,6 +5086,11 @@ window.initMdEditorModule = function(deps){
     if(!openFile || !cmView) return;
     var pos = cmView.state.selection.main.head;
     var pct = currentScrollPercent();
+    if(pct === null){
+      // измерить нельзя — оставляем прежнее запомненное значение, а не затираем его
+      pct = (docState.id === openFile.id && typeof docState.scrollPercent === "number") ? docState.scrollPercent
+        : (typeof openFile.scrollPercent === "number" ? openFile.scrollPercent : null);
+    }
     openFile.cursorPos = pos;
     openFile.scrollPercent = pct;
     persistDocStateNow({ screen: "editor", id: openFile.id, name: openFile.name, cursorPos: pos, scrollPercent: pct });
@@ -5981,7 +5991,7 @@ window.initMdEditorModule = function(deps){
   var scrollBeforeHide = null;
   var userTouchedSinceResume = false;
   ["touchstart", "wheel", "keydown"].forEach(function(evName){
-    document.addEventListener(evName, function(){ userTouchedSinceResume = true; }, true);
+    document.addEventListener(evName, function(){ userTouchedSinceResume = true; scrollBeforeHide = null; }, true);
   });
   function editorIsShown(){
     var host = document.getElementById("mdEditorHost");
@@ -6045,7 +6055,9 @@ window.initMdEditorModule = function(deps){
   }
   function rememberScrollBeforeHide(){
     var sc = document.getElementById("settingsTabContent");
-    scrollBeforeHide = (sc && editorIsShown()) ? sc.scrollTop : null;
+    // visibilitychange/pagehide приходят уже после скрытия WebView — тогда измерить нельзя, и верное значение,
+    // запомненное раньше (onAppPause, пока приложение ещё на экране), не затираем
+    if(sc && editorIsShown() && sc.clientHeight > 0) scrollBeforeHide = sc.scrollTop;
   }
   // scrollTop назначается только после принудительного пересчёта раскладки —
   // иначе браузер зажимает его по старым (ещё не пересчитанным) размерам
