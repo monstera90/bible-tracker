@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 4.9 (16.10) — затемнение окон редактора заметок мягче: `.mdeditor-image-overlay` и `.mdeditor-cleanup-overlay` (диалоги имени/переименования/подтверждения и просмотр картинки поверх заметки) .86 → .45 (то же значение берёт показ карточки при сканировании). Полноэкранный просмотр картинки `.mdeditor-imgview-overlay` (.92) не менялся.
    Версия: 4.8 (14.10) — кнопки «Копировать» и маркер нижнего ряда заметки скрыты в режиме чтения (`.reading-mode-active #mdEditorCopyBtn/#mdEditorHighlightBtn`).
    Версия: 4.7 (14.10) — `.lt-hl-host`, `.lt-hl-fmt`: подсветка протяжки маркера в задачах и заметках (режим чтения).
    Версия: 4.6 (13.10) — кнопка «Копировать» у подчёркивания: цвет и hover как у урны (отдельный цвет убран).
@@ -3523,7 +3524,7 @@
     align-items:center;
     justify-content:center;
     padding:24px;
-    background:rgba(20,14,8,.86);
+    background:rgba(20,14,8,.45);
     z-index:20;
     cursor:zoom-out;
     text-align:center;
@@ -3557,7 +3558,7 @@
     align-items:center;
     justify-content:center;
     padding:24px;
-    background:rgba(20,14,8,.86);
+    background:rgba(20,14,8,.45);
     z-index:20;
   }
   .mdeditor-cleanup-card{
