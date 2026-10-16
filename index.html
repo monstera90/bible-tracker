@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 5.1 (16.10) — вкладка set2s_9 «Карточки предметов»: значок-миниатюра QR, подключён `itemcards.js` (после `imgresize.js`).
      Версия: 5.0 (14.10) — «Аа» вкладок задач: вместо кнопок «+»/«−» ползунок `#taskFontSizeBar` (`#taskFontSizeRange`, `#taskFontSizeVal`) в стиле ползунка размера значков; в попапе `#taskFontSizePopup` осталась кнопка переносов слов. Откат: index.html 4.0.
      Версия: 4.0 (14.10) — новая кнопка нижнего ряда задач «Размер значков» (`#taskIconSizeWrap`/`#taskIconSizeBtn`, слот 6, слева от «Аа») и её всплывающий ползунок `#taskIconSizePopup` (`#taskIconSizeRange`, `#taskIconSizeVal`).
      Версия: 3.6 (14.10) — из нижнего ряда задач убраны кнопки «Копировать» (`#taskCopyWrap`) и «Выделить текст» (`#taskHighlightWrap`).
@@ -731,7 +732,15 @@ window.addEventListener("error", function(e){
         </svg>
       </button>
       <button class="settings-tab" id="settingsTabSet2Btn8" title="">8</button>
-      <button class="settings-tab" id="settingsTabSet2Btn9" title="">9</button>
+      <button class="settings-tab" id="settingsTabSet2Btn9" title="Карточки предметов">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3.5" y="3.5" width="6" height="6" rx="1"></rect>
+          <rect x="14.5" y="3.5" width="6" height="6" rx="1"></rect>
+          <rect x="3.5" y="14.5" width="6" height="6" rx="1"></rect>
+          <path d="M6.5 6.5h.01M17.5 6.5h.01M6.5 17.5h.01"></path>
+          <path d="M14.5 14.5h2.5M20.5 14.5h.01M14.5 17.5v3M17.5 17.5h3M18 20.5h2.5"></path>
+        </svg>
+      </button>
     </div>
     <div class="settings-tabs-gear" id="settingsTabsGearSet2" style="display:none;">
       <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn1" title="Извлечение информации из графиков">
@@ -826,6 +835,7 @@ window.addEventListener("error", function(e){
 <script src="s89draw.js"></script>
 <script src="s89fill.js"></script>
 <script src="imgresize.js"></script>
+<script src="itemcards.js"></script>
 <script src="mdeditor.js"></script>
 <script src="search.js"></script>
 <!-- flibusta.js — READER_PLAN.md, Этап E, шаг 17: подключение к OPDS-

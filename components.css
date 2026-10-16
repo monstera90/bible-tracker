@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 5.0 (16.10) — структурная правка: «Карточки предметов» (вкладка 9, itemcards.js): `.item-cards-grid`, `.item-card*`, `.item-type-menu`, `.item-card-form`, `.item-wheel*`. Откат: components.css 4.9.
    Версия: 4.9 (16.10) — затемнение окон редактора заметок мягче: `.mdeditor-image-overlay` и `.mdeditor-cleanup-overlay` (диалоги имени/переименования/подтверждения и просмотр картинки поверх заметки) .86 → .45 (то же значение берёт показ карточки при сканировании). Полноэкранный просмотр картинки `.mdeditor-imgview-overlay` (.92) не менялся.
    Версия: 4.8 (14.10) — кнопки «Копировать» и маркер нижнего ряда заметки скрыты в режиме чтения (`.reading-mode-active #mdEditorCopyBtn/#mdEditorHighlightBtn`).
    Версия: 4.7 (14.10) — `.lt-hl-host`, `.lt-hl-fmt`: подсветка протяжки маркера в задачах и заметках (режим чтения).
@@ -4252,3 +4253,153 @@ body::after{
   pointer-events:none;
   z-index:2147483000;
 }
+
+
+/* ===========================================================================
+   «Карточки предметов» (вкладка set2s_9, itemcards.js). Размер карточки задаёт одна
+   переменная --item-card-w (ставит JS: две нижние вкладки × ползунок 0,7–2); всё внутри
+   считается от неё. Пропорция 2:3. Цвета — только из темы (--ink, --bg-mid).
+   =========================================================================== */
+.item-cards-tab{ position:relative; }
+.item-cards-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, var(--item-card-w, 112px));
+  gap:10px;
+  justify-content:center;
+  padding:10px 6px 90px;
+}
+.item-cards-empty{ min-height:40vh; }
+.item-card{
+  position:relative;
+  box-sizing:border-box;
+  width:var(--item-card-w, 112px);
+  height:calc(var(--item-card-w, 112px) * 1.5);
+  border:2px solid var(--ink, #000);
+  border-radius:14px;
+  background:var(--bg-mid, #fbf4e2);
+  color:var(--ink, #000);
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-touch-callout:none;
+  overflow:hidden;
+}
+.item-card-front,
+.item-card-back{
+  position:absolute;
+  inset:0;
+  box-sizing:border-box;
+  padding:calc(var(--item-card-w, 112px) * 0.08);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+}
+.item-card-back{ background:var(--bg-mid, #fbf4e2); padding:0; }
+.item-card-qr{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:calc(var(--item-card-w, 112px) * 0.06);
+  background:#fff; /* подложка светлая независимо от темы, иначе на тёмных темах код не читается */
+  border-radius:6px;
+}
+.item-card-qr img,
+.item-card-qr canvas{ display:block; }
+.item-card-icon{
+  width:calc(var(--item-card-w, 112px) * 0.45);
+  height:calc(var(--item-card-w, 112px) * 0.45);
+  margin-bottom:calc(var(--item-card-w, 112px) * 0.05);
+}
+.item-card-icon svg{ width:100%; height:100%; }
+.item-card-title{
+  max-width:100%;
+  font-size:calc(var(--item-card-w, 112px) * 0.12);
+  line-height:1.15;
+  font-weight:700;
+  overflow:hidden;
+  display:-webkit-box;
+  -webkit-line-clamp:3;
+  -webkit-box-orient:vertical;
+  word-break:break-word;
+}
+.item-card-date{
+  margin-top:calc(var(--item-card-w, 112px) * 0.04);
+  font-size:calc(var(--item-card-w, 112px) * 0.1);
+  color:var(--ink-soft, inherit);
+  font-variant-numeric:tabular-nums;
+}
+.item-card-timer{
+  margin-top:calc(var(--item-card-w, 112px) * 0.08);
+  font-size:calc(var(--item-card-w, 112px) * 0.22);
+  font-weight:700;
+  font-variant-numeric:tabular-nums;
+}
+.item-card-page-btn{
+  position:absolute;
+  left:calc(var(--item-card-w, 112px) * 0.06);
+  bottom:calc(var(--item-card-w, 112px) * 0.06);
+  width:calc(var(--item-card-w, 112px) * 0.2);
+  height:calc(var(--item-card-w, 112px) * 0.2);
+  padding:0;
+  border:0;
+  background:transparent;
+  color:inherit;
+}
+.item-card-page-btn svg{ width:100%; height:100%; }
+.item-card .book-cover-actions{ grid-template-columns:repeat(2, 36px); z-index:2; }
+
+.item-type-menu{
+  position:absolute;
+  z-index:6;
+  inset-inline-end:var(--fab-gap, 6px);
+  bottom:calc(var(--fab-gap, 6px) * 2 + var(--fab-size, 36px));
+  flex-direction:column;
+  gap:6px;
+  padding:8px;
+  background:#fffef8;
+  border:1px solid var(--groove-shadow);
+  border-radius:8px;
+  box-shadow:0 2px 6px rgba(0,0,0,.28);
+}
+
+/* форма создания/правки */
+.item-card-form{ display:flex; flex-direction:column; gap:14px; padding:10px 12px 90px; }
+.item-form-title{ width:100%; box-sizing:border-box; }
+.item-form-row{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.item-form-icons{ display:grid; grid-template-columns:repeat(3, 44px); gap:6px; }
+.item-form-icon{
+  width:44px; height:44px; padding:5px; box-sizing:border-box;
+  border:1px solid var(--groove-shadow);
+  border-radius:8px;
+  background:transparent;
+  color:var(--ink, inherit);
+}
+.item-form-icon svg{ width:100%; height:100%; }
+.item-form-icon.selected{ border:3px solid var(--ink, #000); padding:3px; }
+.item-form-date{ flex:0 0 auto; }
+.item-form-error{ min-height:1.2em; color:#b3261e; font-size:13px; }
+.item-form-buttons{ display:flex; gap:10px; }
+.item-form-buttons .workbooks-run-btn{ flex:1 1 0; }
+
+/* колесо времени «как в часах» */
+.item-form-timer{ display:flex; justify-content:center; gap:14px; }
+.item-wheel-col{ display:flex; flex-direction:column; align-items:center; position:relative; }
+.item-wheel{
+  position:relative;
+  width:64px;
+  height:120px;
+  overflow-y:auto;
+  scroll-snap-type:y mandatory;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+  border-top:1px solid var(--groove-shadow);
+  border-bottom:1px solid var(--groove-shadow);
+}
+.item-wheel::-webkit-scrollbar{ display:none; }
+.item-wheel-row,
+.item-wheel-pad{ height:40px; line-height:40px; text-align:center; font-size:22px; font-variant-numeric:tabular-nums; }
+.item-wheel-row{ scroll-snap-align:start; }
+.item-wheel-label{ margin-top:4px; font-size:12px; color:var(--ink-soft, inherit); }

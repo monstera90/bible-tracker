@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 71.0 (16.10) — структурная правка: вкладка set2s_9 «Карточки предметов» (модуль itemcards.js, ленивая инициализация `renderSettingsTabItemCards`, ветка в switchSettingsTab до заглушки); ключи `itemCards_v1`/`itemCardsSize_v1` в EXPORT_REGISTRY. Откат: my.js 70.0.
    Версия: 70.0 (15.10) — клавиатура при вводе имени в диалогах-карточках (`.mdeditor-cleanup-input`: «Имя новой заметки», переименование закладки/книги, имя пользователя и др.): `initTaskKeyboardLift` теперь включает `overlaysContent` и для этих полей (раньше только для `.mdeditor-title-input`), поэтому WebView не сжимается и нижние вкладки не подпрыгивают над клавиатурой, а прячутся под ней; новая `liftDialog`/`clearDialog` добавляют карточке `padding-bottom` на высоту перекрытия — карточка стоит по центру видимой над клавиатурой части. Откат: my.js 69.0.
    Версия: 69.0 (14.10) — (1) ЗАКЛАДКА/МЕСТО ПРИ УХОДЕ С КНИГИ: на Android 5 книга собирается и «доводится» до места секундами; если за это время уйти на другую вкладку, `currentBookReaderPosition` читал ещё недостроенный/непрокрученный текст и возвращал начало книги — в авторежиме «А» основная закладка и сохранённая позиция чтения затирались на 0:0, книга открывалась с начала (значок на полях при этом не рисовался: у блока-картинки/обложки в начале книги нет места под значок). Новая `bookReaderLeavePosition(container)`: пока текст не готов (`bookReaderState.textReady === false`) или идёт восстановление места — берётся ЗАПЛАНИРОВАННОЕ место (`restoreTarget` / `restorePosition` / сохранённая позиция), а не геометрия DOM; её используют уход с вкладки, закрытие окна, `autoUpdateMainBookmarkOnExit`, `renderBookReader`, `openBookAtMarginBookmark`. (2) ИПКД/книги на Android 5 открываются быстрее: кэш закреплённых высот сегментов (`applyCachedSegHeights`/`saveCachedSegHeights`, localStorage `bookSegH_v1:<hash>`, с проверкой двух сегментов) вместо повторной полной вёрстки всей книги; порции сборки на старом WebView по 30 мс вместо 8; разобранная публикация ИПКД держится в памяти (`ipkdParsedCache`) — повторный заход не разбирает epub заново. Откат: my.js 68.0.
    Версия: 68.0 (14.10) — «Аа»: кнопки «+»/«−» заменены ползунком размера шрифта в стиле ползунка размера значков (на вкладках задач `#taskFontSizeBar`, в «Моём блокноте» — mdeditor.js 10.0, в ридере книг `#bookReaderFontSizeBar`); общая привязка — `MdEditor.bindFontSizeBar`/`MdEditor.setFontSizeStep`; в ридере книг `changeBookReaderFontSize(delta)` заменена на `setBookReaderFontSize(step)` (то же сохранение места чтения); автозакрытие попапов «Аа» (`initFontFormatPopupsAutoClose`) не срабатывает от касаний самого ползунка. Откат: my.js 67.0 / mdeditor.js 9.0 / modals.css 13.0 / index.html 4.0.
@@ -8309,7 +8310,9 @@
         "bibleSettingsLastTab_v1": "последняя вкладка настроек",
         "bibleSettingsLastTabSet_v1": "последний набор вкладок настроек",
         "jwlMergeState_v1": "состояние слияния JW Library (по нему определяются удаления); проверять размер",
-        "taskRemindersFired_v1": "уже показанные напоминания задач"
+        "taskRemindersFired_v1": "уже показанные напоминания задач",
+        "itemCards_v1": "записи карточек предметов (вкладка 9)",
+        "itemCardsSize_v1": "размер карточек предметов на этом устройстве"
       },
       exclude: {
         "bibleReadingProgress_v2": "это сам state, идёт через rawState",
@@ -10521,6 +10524,9 @@
       }
       else renderSettingsTabBooks();
     }
+    // девятая боковая вкладка второго набора (set2s_9) — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: «Карточки предметов»
+    // (itemcards.js, ТЗ TASK_ITEM_CARDS_QR.md); вынесена ДО общей проверки на заглушку.
+    else if(tab === "set2s_9") renderSettingsTabItemCards();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
 
@@ -10574,6 +10580,23 @@
   // Оставшиеся вкладки второго набора пока показывают один и тот же текст — функции под них
   // появятся позже. set2s_7 («Книги») выведена из их числа и вынесена ДО этой проверки (см.
   // switchSettingsTab выше).
+  // «Карточки предметов» (set2s_9): модуль создаётся при первом заходе (иконки домика и пр. объявлены
+  // в my.js ниже по файлу, поэтому не при загрузке скрипта).
+  var ItemCardsMod = null;
+  function renderSettingsTabItemCards(){
+    if(!ItemCardsMod){
+      ItemCardsMod = window.initItemCardsModule({
+        escapeHtml: escapeHtml,
+        READER_HOME_ICON_SVG: READER_HOME_ICON_SVG,
+        PENCIL_ICON_SVG: PENCIL_ICON_SVG,
+        DELETE_ICON_SVG: DELETE_ICON_SVG,
+        openAppConfirmBar: openAppConfirmBar,
+        loadQrLib: loadQrLib,
+        getMdEditor: function(){ return MdEditor; }
+      });
+    }
+    ItemCardsMod.renderSettingsTabItemCards();
+  }
   function renderSettingsTabSet2Stub(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;

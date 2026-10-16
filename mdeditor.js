@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 11.0 (16.10) — структурная правка: заметки-карточки вкладки 9 («Карточки предметов», itemcards.js): скрытый путь `CARD_NOTES_PATH` (не показываются в списке, поиске, «забытых»), `createCardNote`/`renameCardNote`/`deleteCardNote`/`openCardNote`/`closeCardNote`, домик редактора такой заметки возвращает к сетке карточек (`cardNoteHomeHook`). Откат: mdeditor.js 10.1.
    Версия: 10.1 (16.10) — возврат в заметку после сворачивания: `currentScrollPercent` возвращает null, пока область не имеет геометрии (приложение свёрнуто — `visibilitychange`/`pagehide` приходят уже после скрытия WebView), `flushDocStateNow` в этом случае не затирает сохранённый процент прокрутки нулём (раньше запоминалось «начало заметки»); `rememberScrollBeforeHide` не затирает ранее запомненную прокрутку, если измерить её сейчас нельзя; касание экрана сбрасывает запомненную прокрутку.
    Версия: 10.0 (14.10) — «Аа»: вместо кнопок «+»/«−» ползунок размера шрифта (стиль ползунка размера значков задач): новые `setFontSizeStep(step)` (абсолютный шаг, сохраняется как раньше) и `bindFontSizeBar(popup, bar, applyStep)` (общая привязка ползунка `.fontsize-bar` для заметки, задач и ридера книг; в `MdEditor` отдаются `setFontSizeStep`/`bindFontSizeBar`); в попапе «Аа» заметки осталась кнопка переносов слов, ползунок — `#mdEditorFontSizeBar` после ряда кнопок. Откат: mdeditor.js 9.0.
    Версия: 9.0 (14.10) — маркер по удержанию в режиме чтения: `bindNoteHoldMarker(view)` (слово подсвечивается, протяжка растягивает, при отпускании оборачивается в «==»), движок жеста — `window.LTHold` из my.js; откат — mdeditor.js 8.0.
@@ -2466,6 +2467,11 @@ window.initMdEditorModule = function(deps){
   // ---- дерево папок из notesMap.path (раздел 2 ТЗ: "папка" — это просто
   // общий префикс path у нескольких заметок, реальной файловой системы
   // больше нет) ----
+  // Заметки-карточки вкладки 9 (itemcards.js) — обычные записи notesMap (синхронизируются вместе с
+  // заметками), но с особым путём: в списке, поиске и «забытых» не показываются.
+  var CARD_NOTES_PATH = "\u0001cards";
+  function isCardNoteRec(rec){ return !!rec && rec.path === CARD_NOTES_PATH; }
+  var cardNoteHomeHook = null; // функция возврата к сетке карточек, пока открыта заметка-карточка
   function buildTreeFromNotes(){
     var root = { name: "", path: "", folders: [], files: [] };
     var folderCache = { "": root };
@@ -2485,7 +2491,7 @@ window.initMdEditorModule = function(deps){
       return cur;
     }
     notesMap.forEach(function(rec, id){
-      if(!rec || rec.deleted || !rec.name) return;
+      if(!rec || rec.deleted || !rec.name || isCardNoteRec(rec)) return;
       var folder = getFolderNode(rec.path);
       folder.files.push({ name: rec.name, id: id });
     });
@@ -3211,7 +3217,7 @@ window.initMdEditorModule = function(deps){
     var out = [];
     if(!notesReady) return out;
     notesMap.forEach(function(rec){
-      if(rec && !rec.deleted && rec.name) out.push({ id: rec.id, name: rec.name, text: rec.text || "" });
+      if(rec && !rec.deleted && rec.name && !isCardNoteRec(rec)) out.push({ id: rec.id, name: rec.name, text: rec.text || "" });
     });
     return out;
   }
@@ -4047,7 +4053,7 @@ window.initMdEditorModule = function(deps){
   async function loadForgottenNotesData(){
     var entries = [];
     notesMap.forEach(function(rec, id){
-      if(!rec || rec.deleted || !rec.name) return;
+      if(!rec || rec.deleted || !rec.name || isCardNoteRec(rec)) return;
       entries.push({ name: rec.name, id: id });
     });
     var openedIndex = await loadOpenedIndex();
@@ -4538,6 +4544,12 @@ window.initMdEditorModule = function(deps){
 
 
     document.getElementById("mdEditorHomeBtn2").addEventListener("click", function(){
+      if(cardNoteHomeHook){ // заметка-карточка: домик ведёт назад к сетке карточек
+        var hook = cardNoteHomeHook;
+        closeCardNote();
+        hook();
+        return;
+      }
       var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
       pushMdNav(function(){
         flushAutosaveNow();
@@ -4577,6 +4589,55 @@ window.initMdEditorModule = function(deps){
     if(!row || !openFile) return;
     var dates = getNoteDatesRu(openFile.text);
     row.textContent = dates.created + " · " + dates.updated;
+  }
+
+  // ---- заметки-карточки (вкладка 9, itemcards.js) ----
+  function createCardNote(title){
+    if(!notesReady) return null;
+    var base = (title || "Карточка").replace(/^\s+|\s+$/g, "") || "Карточка";
+    var name = base, n = 2;
+    while(isNoteNameTaken(name)){ name = base + " (" + n + ")"; n++; }
+    var rec = createNoteRecord(name, CARD_NOTES_PATH);
+    recordNoteCreated(name);
+    rebuildTree();
+    return { id: rec.id, name: name };
+  }
+  function renameCardNote(id, title){
+    var rec = notesMap.get(id);
+    if(!rec || rec.deleted) return false;
+    var base = (title || "").replace(/^\s+|\s+$/g, "");
+    if(!base || base === rec.name) return false;
+    var name = base, n = 2;
+    while(isNoteNameTaken(name, id)){ name = base + " (" + n + ")"; n++; }
+    return renameNoteRecord(id, name);
+  }
+  function deleteCardNote(id){
+    var rec = notesMap.get(id);
+    if(!rec) return;
+    if(openFile && openFile.id === id){ destroyEditor(); openFile = null; screen = "list"; cardNoteHomeHook = null; }
+    deleteNoteRecord(id, true);
+    rebuildTree();
+  }
+  // onHome — вызывается домиком редактора; переход «назад» системным жестом регистрирует вызывающий.
+  function openCardNote(id, onHome){
+    if(!notesReady) return false;
+    var rec = notesMap.get(id);
+    if(!rec || rec.deleted) return false;
+    activeMdTab = "editor";
+    cardNoteHomeHook = onHome || null;
+    openNoteByIdExternally(id);
+    return true;
+  }
+  function closeCardNote(){
+    cardNoteHomeHook = null;
+    if(!openFile && screen !== "editor") return;
+    flushAutosaveNow();
+    binding.pushNow({keepalive:true});
+    destroyEditor();
+    openFile = null;
+    currentDirNode = rootTree;
+    screen = "list";
+    persistDocStateNow({ screen: "list", id: null, name: null, cursorPos: 0, scrollPercent: null });
   }
 
   function goHome(){
@@ -6331,6 +6392,11 @@ window.initMdEditorModule = function(deps){
     // для декоративной подсветки, см. searchHighlightWords выше);
     // getSearchableNotes — плоский список заметок для самого поиска.
     openNoteByIdExternally: openNoteByIdExternally,
+    createCardNote: createCardNote,
+    renameCardNote: renameCardNote,
+    deleteCardNote: deleteCardNote,
+    openCardNote: openCardNote,
+    closeCardNote: closeCardNote,
     getSearchableNotes: getSearchableNotes,
     // READER_PLAN.md, Этап B, шаг 5 (11.09) — для общего ZIP-бэкапа
     // (кнопка "Скачать" в модалке синхронизации, см. bindExportButton в
