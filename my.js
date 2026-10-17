@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 72.2 (17.10) — ключ `itemCardTimers_v1` внесён в EXPORT_REGISTRY.exclude. Откат: my.js 72.1.
    Версия: 72.1 (17.10) — ключ `itemCardsSync_v1` внесён в EXPORT_REGISTRY.exclude (служебный, у каждого устройства свой). Откат: my.js 72.0.
    Версия: 72.0 (16.10) — структурная правка: сканирование карточек — деп `loadJsqrLib` в `initItemCardsModule`, вход из оболочки `window.__ltOpenCard(id, mode)` / параметры `?card=<id>&cardmode=note|create` при старте (`openCardFromNative`, `handleCardLaunchParam`). Откат: my.js 71.0.
    Версия: 71.0 (16.10) — структурная правка: вкладка set2s_9 «Карточки предметов» (модуль itemcards.js, ленивая инициализация `renderSettingsTabItemCards`, ветка в switchSettingsTab до заглушки); ключи `itemCards_v1`/`itemCardsSize_v1` в EXPORT_REGISTRY. Откат: my.js 70.0.
@@ -8329,6 +8330,7 @@
         "commentsOrderAsc_v1": "одноразовая миграция",
         "bibleSwInstallReportShownAt_v1": "технический отчёт об установке",
         "bibleProjectPickerResume_v1": "решение заказчика (Q16 C): временная отметка экрана",
+        "itemCardTimers_v1": "запасной таймер карточек в браузере (в приложении таймеры ведёт оболочка): момент окончания, у каждого устройства свой",
         "itemCardsSync_v1": "служебное: какие карточки уже ушли в облако и какие удалены здесь (синхронизация карточек, itemcards.js)",
         "bibleProjectPickerScrollMap_v1": "решение заказчика (Q16 C): мала польза",
         "ipkdLastOpenedDate_v1": "решение заказчика (Q16 C)",

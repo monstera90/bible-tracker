@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 5.2 (17.10) — таймеры карточек: `.item-card-start-btn` («Пуск» внизу по центру), `.item-card-time.running/.paused`; цифры времени на карточке переименованы `.item-card-timer` → `.item-card-time` (старое имя совпадало с классом самой карточки типа «таймер», и правило с отступом и размером шрифта действовало на всю карточку). Откат: components.css 5.1.
    Версия: 5.1 (16.10) — структурная правка: сканирование карточек (cardscan.js, itemcards.js): `.card-scan-screen*` (полноэкранный сканер), `.scan-card-overlay`, `.scan-card`, `.scan-card-today-btn`, `.scan-notice*`. Откат: components.css 5.0.
    Версия: 5.0 (16.10) — структурная правка: «Карточки предметов» (вкладка 9, itemcards.js): `.item-cards-grid`, `.item-card*`, `.item-type-menu`, `.item-card-form`, `.item-wheel*`. Откат: components.css 4.9.
    Версия: 4.9 (16.10) — затемнение окон редактора заметок мягче: `.mdeditor-image-overlay` и `.mdeditor-cleanup-overlay` (диалоги имени/переименования/подтверждения и просмотр картинки поверх заметки) .86 → .45 (то же значение берёт показ карточки при сканировании). Полноэкранный просмотр картинки `.mdeditor-imgview-overlay` (.92) не менялся.
@@ -4332,7 +4333,7 @@ body::after{
   color:var(--ink-soft, inherit);
   font-variant-numeric:tabular-nums;
 }
-.item-card-timer{
+.item-card-time{
   margin-top:calc(var(--item-card-w, 112px) * 0.08);
   font-size:calc(var(--item-card-w, 112px) * 0.22);
   font-weight:700;
@@ -4504,3 +4505,23 @@ body::after{
 @media (prefers-reduced-motion: reduce){
   .scan-card-overlay, .scan-card{ animation:none; }
 }
+
+/* таймеры карточек (шаг 5а): «Пуск» внизу по центру карточки; цифры идущего таймера выделены, приостановленного — приглушены */
+.item-card-start-btn{
+  position:absolute;
+  left:50%;
+  bottom:calc(var(--item-card-w, 112px) * 0.06);
+  transform:translateX(-50%);
+  padding:calc(var(--item-card-w, 112px) * 0.02) calc(var(--item-card-w, 112px) * 0.1);
+  border:1px solid currentColor;
+  border-radius:calc(var(--item-card-w, 112px) * 0.08);
+  background:transparent;
+  color:inherit;
+  font:inherit;
+  font-size:calc(var(--item-card-w, 112px) * 0.1);
+  font-weight:700;
+  line-height:1.3;
+  cursor:pointer;
+}
+.item-card-time.running{ text-decoration:underline; text-underline-offset:.15em; }
+.item-card-time.paused{ opacity:.6; }

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <!-- scan.html
+     Версия: 1.1 (17.10) — `deps.timers`: скан карточки-таймера запускает таймер через мост (`startTimer`/`getTimers`).
      Версия: 1.0 (16.10)
      Страница окна «Сканировать QR-код» (ScanActivity.kt, ярлык на иконке приложения). Открывается в отдельной
      прозрачной Activity: сначала сканер на весь экран, затем карточка на прозрачном фоне поверх рабочего стола.
@@ -45,6 +46,10 @@
       standalone: true,
       escapeHtml: esc,
       loadJsqrLib: function(){ return Promise.resolve(); },
+      timers: bridge ? {
+        start: function(id, title, sec){ return bridge.startTimer(String(id), String(title || ""), sec | 0); },
+        list: function(){ try{ return JSON.parse(bridge.getTimers() || "[]"); }catch(e){ return []; } }
+      } : null,
       native: bridge ? {
         openInApp: function(id, mode){ bridge.openInApp(String(id), String(mode)); },
         openUrl: function(url){ bridge.openUrl(String(url)); },

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.0 (17.10) — мост версии 7: методы таймеров карточек (startCardTimer и др.).
 
 import android.graphics.Color
 import android.os.Build
@@ -21,8 +22,9 @@ class NativeBridge(private val activity: MainActivity) {
          * 5: copyText — копирование выделенного текста в буфер обмена (своя кнопка «Копировать» вместо системного меню).
          * 6: быстрая задача из ярлыка (takeQuickTasks / ackQuickTasks / setQuickTaskTheme): окно «Создать новую задачу»
          *    складывает задачи в очередь, страница забирает их в Inbox.
+         * 7: таймеры карточек вкладки 9 (startCardTimer / pauseCardTimer / resumeCardTimer / cancelCardTimer / getCardTimers).
          */
-        const val BRIDGE_VERSION = 6
+        const val BRIDGE_VERSION = 7
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -406,6 +408,40 @@ class NativeBridge(private val activity: MainActivity) {
     fun setQuickTaskTheme(json: String?) {
         if (!activity.pageTrusted) return
         QuickTaskStore.setThemeJson(activity.applicationContext, json)
+    }
+
+    // ---------- таймеры карточек вкладки 9 (CardTimers; ТЗ карточек, шаг 5а) ----------
+
+    /** Запускает (или перезапускает) таймер карточки на seconds секунд: отсчёт в шторке/острове, будильник, вибрация в конце. */
+    @JavascriptInterface
+    fun startCardTimer(id: String?, title: String?, seconds: Int): Boolean {
+        if (!activity.pageTrusted || id == null) return false
+        return CardTimers.start(activity.applicationContext, id, title ?: "", seconds.toLong())
+    }
+
+    @JavascriptInterface
+    fun pauseCardTimer(id: String?) {
+        if (!activity.pageTrusted || id == null) return
+        CardTimers.pause(activity.applicationContext, id)
+    }
+
+    @JavascriptInterface
+    fun resumeCardTimer(id: String?) {
+        if (!activity.pageTrusted || id == null) return
+        CardTimers.resume(activity.applicationContext, id)
+    }
+
+    @JavascriptInterface
+    fun cancelCardTimer(id: String?) {
+        if (!activity.pageTrusted || id == null) return
+        CardTimers.cancel(activity.applicationContext, id)
+    }
+
+    /** Идущие и приостановленные таймеры: [{id, title, durationMs, running, endAt, remainingMs, now}] (now — часы устройства). */
+    @JavascriptInterface
+    fun getCardTimers(): String {
+        if (!activity.pageTrusted) return "[]"
+        return CardTimers.listJson(activity.applicationContext)
     }
 
     /** Цвет статус-бара: "#rrggbb", "#rgb" или "rgb(r, g, b)". Значок светлый/тёмный выбирается по яркости цвета. */

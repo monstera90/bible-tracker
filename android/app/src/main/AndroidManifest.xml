@@ -10,6 +10,8 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Android 16: «живые обновления» (продвигаемые постоянные уведомления; у Xiaomi HyperOS 3 — динамический остров) для таймеров карточек. -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -129,5 +131,10 @@
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
             </intent-filter>
         </receiver>
+
+        <!-- Таймеры карточек (CardTimers): будильник окончания и кнопки уведомления «Пауза / Продолжить / Отмена». -->
+        <receiver
+            android:name=".CardTimerReceiver"
+            android:exported="false" />
     </application>
 </manifest>

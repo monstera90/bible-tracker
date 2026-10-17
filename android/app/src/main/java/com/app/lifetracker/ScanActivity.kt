@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (17.10) — мост ScanBridge: startTimer / getTimers (скан карточки-таймера запускает таймер CardTimers без открытия приложения).
 // Версия: 1.0 (16.10)
 
 import android.Manifest
@@ -274,6 +275,17 @@ class ScanActivity : ComponentActivity() {
                 finishAndRemoveTask()
             }
         }
+
+        /** Скан карточки-таймера: запуск (или перезапуск) таймера прямо отсюда, приложение не открывается. */
+        @JavascriptInterface
+        fun startTimer(id: String?, title: String?, seconds: Int): Boolean {
+            if (id == null || !CARD_ID_RE.matches(id)) return false
+            return CardTimers.start(applicationContext, id, title ?: "", seconds.toLong())
+        }
+
+        /** Снимок таймеров (тот же JSON, что у NativeBridge.getCardTimers) — показать оставшееся время на карточке. */
+        @JavascriptInterface
+        fun getTimers(): String = CardTimers.listJson(applicationContext)
 
         @JavascriptInterface
         fun close() {

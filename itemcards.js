@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 4.0 (17.10) — структурная правка: таймеры карточек (шаг 5а ТЗ): кнопка «Пуск» (внизу по центру) на карточке-таймере, оставшееся время в сетке и на показе по скану, запуск таймера по скану (`startTimerForCard`, `getTimerApi`: оболочка — CardTimers через мост, scan.html — `deps.timers`, браузер — запасной таймер в localStorage `itemCardTimers_v1`). Откат: itemcards.js 3.0.
    Версия: 3.0 (17.10) — структурная правка: синхронизация записей карточек (вариант А ТЗ, 12.4): зеркало каждой карточки в скрытой записи заметок через mdeditor.js (`cardMetaSave/Remove/All/Pull/Status`), сверка `reconcileCloud` (last-write-wins по updatedAt; «уже синхронизирована» и «удалить в облаке» хранятся в `itemCardsSync_v1`), запуск при входе во вкладку, после каждого сохранения (debounce) и по приходу правок с другого устройства. Откат: itemcards.js 2.0.
    Версия: 2.0 (16.10) — структурная правка: сканирование (шаги 3 и 5 ТЗ): кнопка сканера, слой «карточка при сканировании», кнопка «сегодняшняя дата», «карточка не найдена» → создание с тем же id, чужие коды; режим standalone для scan.html (ScanActivity); `openCardFromNative`.
    Вкладка «Карточки предметов» (девятая боковая вкладка второго набора,
@@ -261,7 +262,8 @@ window.initItemCardsModule = function(deps){
     var icon = iconSvg(c.icon);
     if(c.type === "timer"){
       return '<div class="item-card-title"></div>' +
-        '<div class="item-card-timer">' + escapeHtml(formatTimer(c.seconds)) + '</div>';
+        '<div class="item-card-time" data-id="' + escapeHtml(c.id) + '">' + escapeHtml(timerTextFor(c)) + '</div>' +
+        '<button type="button" class="item-card-start-btn" title="Запустить таймер">Пуск</button>';
     }
     return '<div class="item-card-icon">' + icon + '</div>' +
       '<div class="item-card-title"></div>' +
@@ -317,6 +319,7 @@ window.initItemCardsModule = function(deps){
       grid.appendChild(card);
     });
     bindGrid(grid);
+    syncTimersView();
     bindFab(tab);
     if(flippedId && findCard(flippedId)) flipCard(flippedId, true, true); else flippedId = null;
   }
@@ -421,6 +424,7 @@ window.initItemCardsModule = function(deps){
       }
       if(flippedId === id){ flipCard(id, false); return; } // тап по QR/обороту — назад
       if(flippedId) unflipAny();
+      if(e.target.closest(".item-card-start-btn")){ startTimerForCard(c); return; } // «Пуск»: запуск, а если уже идёт — заново
       if(e.target.closest(".item-card-page-btn")){ openForm("note", c); return; }
       if(revealedIds[id]){ hideRevealed(); return; }
       var now = Date.now();
@@ -669,6 +673,106 @@ window.initItemCardsModule = function(deps){
   }
 
 
+
+  // ---------- таймеры карточек (шаг 5а ТЗ) ----------
+  // Отсчёт ведёт не страница: в оболочке — Kotlin (CardTimers: будильник, уведомление/остров, вибрация в конце), он идёт при
+  // закрытом приложении; на странице scan.html — тот же CardTimers через мост окна (deps.timers); в браузере (без оболочки) —
+  // запасной вариант: момент окончания в localStorage, вибрацию в конце даёт только открытая страница.
+  var TIMERS_KEY = "itemCardTimers_v1";
+  var timerApi = null;
+  var timerList = [];
+  var tickTimer = null;
+  function makeWebTimers(){
+    function read(){ try{ return JSON.parse(localStorage.getItem(TIMERS_KEY) || "{}") || {}; }catch(e){ return {}; } }
+    function write(o){ try{ localStorage.setItem(TIMERS_KEY, JSON.stringify(o)); }catch(e){} }
+    function sweep(){
+      var o = read(), now = Date.now(), fired = false;
+      Object.keys(o).forEach(function(id){ if(o[id].running && o[id].endAt <= now){ delete o[id]; fired = true; } });
+      if(fired){
+        write(o);
+        try{ if(navigator.vibrate) navigator.vibrate([400, 200, 400, 200, 800]); }catch(e){}
+      }
+    }
+    return {
+      start: function(id, title, sec){
+        var o = read();
+        o[id] = { id: id, title: title, durationMs: sec * 1000, running: true, endAt: Date.now() + sec * 1000, remainingMs: 0 };
+        write(o);
+        return true;
+      },
+      list: function(){ sweep(); var o = read(); return Object.keys(o).map(function(k){ return o[k]; }); }
+    };
+  }
+  function getTimerApi(){
+    if(timerApi) return timerApi;
+    if(deps.timers){ timerApi = deps.timers; return timerApi; }
+    var N = window.LifeTrackerNative;
+    if(N && typeof N.getCardTimers === "function"){
+      timerApi = {
+        start: function(id, title, sec){ return N.startCardTimer(id, title, sec | 0); },
+        list: function(){ try{ return JSON.parse(N.getCardTimers() || "[]"); }catch(e){ return []; } }
+      };
+    } else {
+      timerApi = makeWebTimers();
+    }
+    return timerApi;
+  }
+  function refreshTimers(){
+    try{ timerList = getTimerApi().list() || []; }catch(e){ timerList = []; }
+  }
+  // {running, leftMs} для идущего или приостановленного таймера этой карточки, иначе null
+  function timerInfo(id){
+    for(var i = 0; i < timerList.length; i++){
+      var t = timerList[i];
+      if(t.id !== id) continue;
+      if(t.running){
+        var left = t.endAt - Date.now();
+        return left > 0 ? { running: true, leftMs: left } : null;
+      }
+      return { running: false, leftMs: t.remainingMs || 0 };
+    }
+    return null;
+  }
+  function timerTextFor(c){
+    var info = timerInfo(c.id);
+    return formatTimer(info ? Math.ceil(info.leftMs / 1000) : c.seconds);
+  }
+  // обновляет цифры на всех видимых карточках-таймерах; true — есть идущий или приостановленный таймер
+  function updateTimerTexts(){
+    var any = false;
+    var nodes = document.querySelectorAll(".item-card-time[data-id]");
+    for(var i = 0; i < nodes.length; i++){
+      var id = nodes[i].getAttribute("data-id");
+      var c = findCard(id);
+      if(!c) continue;
+      var info = timerInfo(id);
+      nodes[i].textContent = formatTimer(info ? Math.ceil(info.leftMs / 1000) : c.seconds);
+      nodes[i].classList.toggle("running", !!(info && info.running));
+      nodes[i].classList.toggle("paused", !!(info && !info.running));
+      if(info) any = true;
+    }
+    return any;
+  }
+  function ensureTick(){
+    if(tickTimer) return;
+    tickTimer = setInterval(function(){
+      refreshTimers();
+      var active = updateTimerTexts();
+      var visible = !!document.querySelector(".item-card-time[data-id]");
+      if(!active || !visible){ clearInterval(tickTimer); tickTimer = null; }
+    }, 1000);
+  }
+  // после отрисовки сетки или показа карточки: подтянуть состояние и, если что-то идёт, запустить обновление цифр
+  function syncTimersView(){
+    refreshTimers();
+    if(updateTimerTexts()) ensureTick();
+  }
+  function startTimerForCard(c){
+    if(!c || c.type !== "timer" || !(c.seconds > 0)) return;
+    try{ getTimerApi().start(c.id, c.title || "", c.seconds); }catch(e){}
+    syncTimersView();
+  }
+
   // ---------- сканирование (шаги 3 и 5 ТЗ) ----------
   var scanHandle = null;   // активный сканер (CardScan.open) или null
   var overlayEl = null;    // слой «карточка при сканировании» или null
@@ -739,7 +843,11 @@ window.initItemCardsModule = function(deps){
       reloadCards();
       var c = findCard(p.id);
       if(!c && !standalone && reconcileCloud()) c = findCard(p.id);
-      if(c){ showCardOverlay(c); return; }
+      if(c){
+        if(c.type === "timer") startTimerForCard(c); // скан таймера: отсчёт стартует сразу (если уже шёл — заново)
+        showCardOverlay(c);
+        return;
+      }
       // карточки нет на этом устройстве: если настроена синхронизация — ищем в облаке (не дольше 2,5 с)
       var md = getMdEditor();
       var st = (!standalone && md && md.cardMetaStatus && md.cardMetaPull) ? md.cardMetaStatus() : null;
@@ -753,7 +861,10 @@ window.initItemCardsModule = function(deps){
           if(overlayEl !== waitEl) return; // пользователь уже закрыл окно
           reconcileCloud();
           var c2 = findCard(p.id);
-          if(c2) showCardOverlay(c2); else showNoticeOverlay({ kind: "missing", id: p.id });
+          if(c2){
+            if(c2.type === "timer") startTimerForCard(c2);
+            showCardOverlay(c2);
+          } else showNoticeOverlay({ kind: "missing", id: p.id });
         };
         setTimeout(finish, 2500);
         md.cardMetaPull().then(finish, finish);
@@ -790,8 +901,10 @@ window.initItemCardsModule = function(deps){
     card.addEventListener("click", function(e){
       e.stopPropagation();
       if(c.type === "note") openNoteFromScan(c);
+      else if(c.type === "timer" && e.target.closest(".item-card-start-btn")) startTimerForCard(c); // «Пуск» на показе: заново
     });
     o.appendChild(card);
+    if(c.type === "timer") syncTimersView();
     if(isLegacyAnim()){ o.style.animation = "none"; card.style.animation = "none"; } // Android 5: без анимации
     if(c.type === "item"){
       var b = document.createElement("button");
