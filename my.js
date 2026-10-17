@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 72.1 (17.10) — ключ `itemCardsSync_v1` внесён в EXPORT_REGISTRY.exclude (служебный, у каждого устройства свой). Откат: my.js 72.0.
    Версия: 72.0 (16.10) — структурная правка: сканирование карточек — деп `loadJsqrLib` в `initItemCardsModule`, вход из оболочки `window.__ltOpenCard(id, mode)` / параметры `?card=<id>&cardmode=note|create` при старте (`openCardFromNative`, `handleCardLaunchParam`). Откат: my.js 71.0.
    Версия: 71.0 (16.10) — структурная правка: вкладка set2s_9 «Карточки предметов» (модуль itemcards.js, ленивая инициализация `renderSettingsTabItemCards`, ветка в switchSettingsTab до заглушки); ключи `itemCards_v1`/`itemCardsSize_v1` в EXPORT_REGISTRY. Откат: my.js 70.0.
    Версия: 70.0 (15.10) — клавиатура при вводе имени в диалогах-карточках (`.mdeditor-cleanup-input`: «Имя новой заметки», переименование закладки/книги, имя пользователя и др.): `initTaskKeyboardLift` теперь включает `overlaysContent` и для этих полей (раньше только для `.mdeditor-title-input`), поэтому WebView не сжимается и нижние вкладки не подпрыгивают над клавиатурой, а прячутся под ней; новая `liftDialog`/`clearDialog` добавляют карточке `padding-bottom` на высоту перекрытия — карточка стоит по центру видимой над клавиатурой части. Откат: my.js 69.0.
@@ -8328,6 +8329,7 @@
         "commentsOrderAsc_v1": "одноразовая миграция",
         "bibleSwInstallReportShownAt_v1": "технический отчёт об установке",
         "bibleProjectPickerResume_v1": "решение заказчика (Q16 C): временная отметка экрана",
+        "itemCardsSync_v1": "служебное: какие карточки уже ушли в облако и какие удалены здесь (синхронизация карточек, itemcards.js)",
         "bibleProjectPickerScrollMap_v1": "решение заказчика (Q16 C): мала польза",
         "ipkdLastOpenedDate_v1": "решение заказчика (Q16 C)",
         "moodLastOpenedDate_v1": "решение заказчика (Q16 C)",

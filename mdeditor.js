@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 12.0 (17.10) — структурная правка: синхронизация записей карточек вкладки 9 (вариант А ТЗ, 12.4): каждая карточка — ещё одна скрытая запись `notesMap` (`CARD_META_PATH`, id `cm<id карточки>`, имя `card:<id>`, текст — JSON карточки); API `cardMetaStatus`/`cardMetaPull`/`cardMetaAll`/`cardMetaSave`/`cardMetaRemove`/`setCardMetaListener`; такие записи скрыты везде, где скрыты заметки-карточки, не попадают в индекс имён, экспорт .zip/notesIndex и в «замену всех заметок» при импорте (туда же теперь не попадают и тела заметок-карточек). Откат: mdeditor.js 11.0.
    Версия: 11.0 (16.10) — структурная правка: заметки-карточки вкладки 9 («Карточки предметов», itemcards.js): скрытый путь `CARD_NOTES_PATH` (не показываются в списке, поиске, «забытых»), `createCardNote`/`renameCardNote`/`deleteCardNote`/`openCardNote`/`closeCardNote`, домик редактора такой заметки возвращает к сетке карточек (`cardNoteHomeHook`). Откат: mdeditor.js 10.1.
    Версия: 10.1 (16.10) — возврат в заметку после сворачивания: `currentScrollPercent` возвращает null, пока область не имеет геометрии (приложение свёрнуто — `visibilitychange`/`pagehide` приходят уже после скрытия WebView), `flushDocStateNow` в этом случае не затирает сохранённый процент прокрутки нулём (раньше запоминалось «начало заметки»); `rememberScrollBeforeHide` не затирает ранее запомненную прокрутку, если измерить её сейчас нельзя; касание экрана сбрасывает запомненную прокрутку.
    Версия: 10.0 (14.10) — «Аа»: вместо кнопок «+»/«−» ползунок размера шрифта (стиль ползунка размера значков задач): новые `setFontSizeStep(step)` (абсолютный шаг, сохраняется как раньше) и `bindFontSizeBar(popup, bar, applyStep)` (общая привязка ползунка `.fontsize-bar` для заметки, задач и ридера книг; в `MdEditor` отдаются `setFontSizeStep`/`bindFontSizeBar`); в попапе «Аа» заметки осталась кнопка переносов слов, ползунок — `#mdEditorFontSizeBar` после ряда кнопок. Откат: mdeditor.js 9.0.
@@ -2356,7 +2357,7 @@ window.initMdEditorModule = function(deps){
         var rec = plain[id];
         if(!rec) return;
         notesMap.set(id, rec);
-        if(!rec.deleted && rec.name) nameIndex.set(rec.name.toLowerCase(), id);
+        if(!rec.deleted && rec.name && !isCardMetaRec(rec)) nameIndex.set(rec.name.toLowerCase(), id);
       });
     }).catch(function(){});
   }
@@ -2393,7 +2394,7 @@ window.initMdEditorModule = function(deps){
   function getNotesIndexForExport(){
     var out = [];
     notesMap.forEach(function(rec, id){
-      if(!rec || rec.deleted || !rec.name) return;
+      if(!rec || rec.deleted || !rec.name || isCardMetaRec(rec)) return;
       out.push({ path: rec.path || "", name: rec.name, id: id });
     });
     return out;
@@ -2470,7 +2471,12 @@ window.initMdEditorModule = function(deps){
   // Заметки-карточки вкладки 9 (itemcards.js) — обычные записи notesMap (синхронизируются вместе с
   // заметками), но с особым путём: в списке, поиске и «забытых» не показываются.
   var CARD_NOTES_PATH = "\u0001cards";
-  function isCardNoteRec(rec){ return !!rec && rec.path === CARD_NOTES_PATH; }
+  // Записи самих карточек для синхронизации (ТЗ карточек, 12.4, вариант А): JSON карточки в text, id записи
+  // «cm» + id карточки (одинаковый на всех устройствах — две копии одной карточки не плодятся).
+  var CARD_META_PATH = "\u0001cardmeta";
+  function isCardMetaRec(rec){ return !!rec && rec.path === CARD_META_PATH; }
+  // «Скрытая» запись вкладки 9: тело заметки-карточки или запись самой карточки.
+  function isCardNoteRec(rec){ return !!rec && (rec.path === CARD_NOTES_PATH || rec.path === CARD_META_PATH); }
   var cardNoteHomeHook = null; // функция возврата к сетке карточек, пока открыта заметка-карточка
   function buildTreeFromNotes(){
     var root = { name: "", path: "", folders: [], files: [] };
@@ -2582,8 +2588,9 @@ window.initMdEditorModule = function(deps){
   function handleNotesRemoteApplied(evt){
     var id = evt.id, rec = evt.rec, prev = evt.prev, deleted = evt.deleted;
     if(prev && prev.name) nameIndex.delete(prev.name.toLowerCase());
-    if(!deleted && rec && rec.name) nameIndex.set(rec.name.toLowerCase(), id);
+    if(!deleted && rec && rec.name && !isCardMetaRec(rec)) nameIndex.set(rec.name.toLowerCase(), id);
     markReferencedNamesDirty();
+    if(isCardMetaRec(rec) || isCardMetaRec(prev)) scheduleCardMetaNotify();
     if(!(openFile && openFile.id === id && !openFile.dirty)) return;
     if(deleted){
       openFile = null;
@@ -2618,6 +2625,7 @@ window.initMdEditorModule = function(deps){
       destroyEditor();
     }
     binding.destroy(); // снимает таймеры/подписку на dirty — ничего не долетит от старого аккаунта
+    cardMetaPulledOk = false; // записи карточек нового аккаунта ещё не подтянуты — «исчезла в облаке» судить рано
     notesMap.clear();
     flushNotesCacheNow(); // синхронно, в обход debounce — даже перезагрузка посреди процесса не оставит чужие заметки на диске
     nameIndex.clear();
@@ -2739,7 +2747,7 @@ window.initMdEditorModule = function(deps){
   function buildNotesFileList(){
     var files = [];
     notesMap.forEach(function(rec){
-      if(!rec || rec.deleted || !rec.name) return;
+      if(!rec || rec.deleted || !rec.name || isCardMetaRec(rec)) return;
       files.push({ name: noteZipEntryName(rec), data: new TextEncoder().encode(rec.text || "") });
     });
     return files;
@@ -2898,7 +2906,7 @@ window.initMdEditorModule = function(deps){
   function replaceAllNotesFromEntries(entries){
     var existingIds = [];
     notesMap.forEach(function(rec, id){
-      if(rec && !rec.deleted) existingIds.push(id);
+      if(rec && !rec.deleted && !isCardNoteRec(rec)) existingIds.push(id); // записи и тела карточек вкладки 9 импорт заметок не трогает
     });
     existingIds.forEach(function(id){
       var rec = notesMap.get(id);
@@ -3151,6 +3159,7 @@ window.initMdEditorModule = function(deps){
       // картинок из непришедшего текста. Лучше пропустить корзину сирот в
       // этом цикле и попробовать на следующей сверке, чем удалить
       // реально используемую картинку (баг от 14.09).
+      if(result && result.pull && !result.pull.hadFetchError) cardMetaPulledOk = true;
       if(!result || !result.pull || !result.pull.hadFetchError){
         maybeRunImageCleanup(); // свежие заметки с облака могли изменить список используемых картинок
       }
@@ -3325,7 +3334,7 @@ window.initMdEditorModule = function(deps){
     // Кнопка "Загрузить" показывается всегда, включая самый первый пустой
     // экран (раздел 7 ТЗ).
     var hasAnyNotes = false;
-    notesMap.forEach(function(rec){ if(rec && !rec.deleted && rec.name) hasAnyNotes = true; });
+    notesMap.forEach(function(rec){ if(rec && !rec.deleted && rec.name && !isCardNoteRec(rec)) hasAnyNotes = true; });
     var html = '<div class="mdeditor-tab">';
     html += '<h3 class="common-tab-title">' + (isRoot ? "Мои заметки" : escName(node.name)) + '</h3>';
     if(!items.length){
@@ -4589,6 +4598,64 @@ window.initMdEditorModule = function(deps){
     if(!row || !openFile) return;
     var dates = getNoteDatesRu(openFile.text);
     row.textContent = dates.created + " · " + dates.updated;
+  }
+
+
+  // ---- синхронизация записей карточек (вкладка 9, itemcards.js; ТЗ карточек 12.4, вариант А) ----
+  // Хранилище для itemcards.js остаётся localStorage (быстрое синхронное чтение); здесь — зеркало в notesMap,
+  // которое движок заметок шифрует, отправляет и принимает так же, как заметки (last-write-wins, тумбстоуны).
+  var cardMetaPulledOk = false;   // с момента запуска (или смены аккаунта) облако заметок успешно прочитано целиком
+  var cardMetaListener = null;
+  var cardMetaNotifyTimer = null;
+  function cardMetaRecId(cardId){ return "cm" + cardId; }
+  function scheduleCardMetaNotify(){
+    if(!cardMetaListener) return;
+    if(cardMetaNotifyTimer) clearTimeout(cardMetaNotifyTimer);
+    cardMetaNotifyTimer = setTimeout(function(){
+      cardMetaNotifyTimer = null;
+      if(cardMetaListener){ try{ cardMetaListener(); }catch(e){} }
+    }, 300);
+  }
+  function setCardMetaListener(fn){ cardMetaListener = typeof fn === "function" ? fn : null; }
+  // ready — заметки загружены и настроена синхронизация (без неё зеркало не ведём: dirty-флаги движка живут только
+  // в памяти, запись «в никуда» потом не догнать); pulled — облако уже прочитано целиком (можно считать «удалена на другом устройстве»).
+  function cardMetaStatus(){
+    return { ready: !!(notesReady && getSyncId()), pulled: cardMetaPulledOk };
+  }
+  function cardMetaPull(){
+    if(!notesReady || !getSyncId()) return Promise.resolve(false);
+    return binding.syncNow().then(function(result){
+      var ok = !!(result && result.pull && !result.pull.hadFetchError);
+      if(ok) cardMetaPulledOk = true;
+      return ok;
+    }, function(){ return false; });
+  }
+  // [{...запись карточки}] по всем живым записям карточек; битый JSON пропускается
+  function cardMetaAll(){
+    var out = [];
+    notesMap.forEach(function(rec){
+      if(!rec || rec.deleted || !isCardMetaRec(rec) || !rec.text) return;
+      try{
+        var c = JSON.parse(rec.text);
+        if(c && typeof c === "object" && typeof c.id === "string") out.push(c);
+      }catch(e){}
+    });
+    return out;
+  }
+  function cardMetaSave(card){
+    if(!card || typeof card.id !== "string" || !notesReady) return false;
+    var text = JSON.stringify(card);
+    var id = cardMetaRecId(card.id);
+    var cur = notesMap.get(id);
+    if(cur && !cur.deleted && cur.text === text) return true; // без изменений — лишний push не нужен
+    binding.save(id, { name: "card:" + card.id, path: CARD_META_PATH, text: text });
+    return true;
+  }
+  function cardMetaRemove(cardId){
+    var id = cardMetaRecId(cardId);
+    var cur = notesMap.get(id);
+    if(!cur || cur.deleted) return;
+    binding.remove(id);
   }
 
   // ---- заметки-карточки (вкладка 9, itemcards.js) ----
@@ -6397,6 +6464,12 @@ window.initMdEditorModule = function(deps){
     deleteCardNote: deleteCardNote,
     openCardNote: openCardNote,
     closeCardNote: closeCardNote,
+    cardMetaStatus: cardMetaStatus,
+    cardMetaPull: cardMetaPull,
+    cardMetaAll: cardMetaAll,
+    cardMetaSave: cardMetaSave,
+    cardMetaRemove: cardMetaRemove,
+    setCardMetaListener: setCardMetaListener,
     getSearchableNotes: getSearchableNotes,
     // READER_PLAN.md, Этап B, шаг 5 (11.09) — для общего ZIP-бэкапа
     // (кнопка "Скачать" в модалке синхронизации, см. bindExportButton в

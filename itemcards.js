@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 3.0 (17.10) — структурная правка: синхронизация записей карточек (вариант А ТЗ, 12.4): зеркало каждой карточки в скрытой записи заметок через mdeditor.js (`cardMetaSave/Remove/All/Pull/Status`), сверка `reconcileCloud` (last-write-wins по updatedAt; «уже синхронизирована» и «удалить в облаке» хранятся в `itemCardsSync_v1`), запуск при входе во вкладку, после каждого сохранения (debounce) и по приходу правок с другого устройства. Откат: itemcards.js 2.0.
    Версия: 2.0 (16.10) — структурная правка: сканирование (шаги 3 и 5 ТЗ): кнопка сканера, слой «карточка при сканировании», кнопка «сегодняшняя дата», «карточка не найдена» → создание с тем же id, чужие коды; режим standalone для scan.html (ScanActivity); `openCardFromNative`.
    Вкладка «Карточки предметов» (девятая боковая вкладка второго набора,
    settingsTabSet2Btn9 / "set2s_9"), ТЗ TASK_ITEM_CARDS_QR.md.
@@ -76,8 +77,122 @@ window.initItemCardsModule = function(deps){
     cardsCache = arr.filter(function(c){ return c && c.id && c.type; });
     return cardsCache;
   }
-  function saveCards(){
+  function persistCards(){
     try{ localStorage.setItem(CARDS_KEY, JSON.stringify(cardsCache || [])); }catch(e){}
+  }
+  // сохранить и поставить сверку с облаком в очередь (в scan.html облака нет — сверка при следующем входе во вкладку)
+  function saveCards(){
+    persistCards();
+    scheduleCloudSync();
+  }
+
+  // ---------- синхронизация записей карточек (вариант А ТЗ 12.4) ----------
+  // Источник для экрана — localStorage (как раньше). Зеркало — скрытая запись заметок на каждую карточку
+  // (mdeditor.js: cardMeta*), её шифрует, отправляет и принимает движок заметок. Конфликт — по updatedAt (новее побеждает).
+  // «Синхронизирована» (itemCardsSync_v1.synced) — запись уже была в облаке: если потом её там нет, а облако прочитано целиком,
+  // значит удалена на другом устройстве. «Удалить в облаке» (pending) — карточки, удалённые здесь.
+  var SYNC_KEY = "itemCardsSync_v1";
+  function loadSyncInfo(){
+    var o = null;
+    try{ o = JSON.parse(localStorage.getItem(SYNC_KEY) || "null"); }catch(e){ o = null; }
+    if(!o || typeof o !== "object") o = {};
+    if(!o.synced || typeof o.synced !== "object") o.synced = {};
+    if(!Array.isArray(o.pending)) o.pending = [];
+    return o;
+  }
+  function saveSyncInfo(o){
+    try{ localStorage.setItem(SYNC_KEY, JSON.stringify(o)); }catch(e){}
+  }
+  // запись карточки в том виде, как она ходит между устройствами (и проверка пришедшей из облака)
+  function cloudShape(r){
+    if(!r || typeof r.id !== "string" || !/^[A-Za-z0-9]{4,32}$/.test(r.id)) return null;
+    if(r.type !== "timer" && r.type !== "item" && r.type !== "note") return null;
+    var o = {
+      id: r.id,
+      type: r.type,
+      title: String(r.title == null ? "" : r.title).slice(0, 200),
+      icon: String(r.icon == null ? "" : r.icon).slice(0, 40),
+      date: /^\d{4}-\d{2}-\d{2}$/.test(String(r.date || "")) ? r.date : "",
+      seconds: Math.max(0, Math.floor(Number(r.seconds) || 0)),
+      createdAt: Number(r.createdAt) || 0,
+      updatedAt: Number(r.updatedAt) || 0
+    };
+    if(r.type === "note") o.noteId = String(r.noteId == null ? "" : r.noteId).slice(0, 64);
+    return o;
+  }
+  // true — локальный список изменился (пришло из облака / удалено на другом устройстве)
+  function reconcileCloud(){
+    var md = getMdEditor();
+    if(standalone || !md || !md.cardMetaStatus || !md.cardMetaAll) return false;
+    var st = md.cardMetaStatus();
+    if(!st || !st.ready) return false; // синхронизация не настроена или заметки не загружены: карточки живут только здесь
+    var info = loadSyncInfo();
+    var changed = false;
+    // 1) удалённые здесь — убрать из облака (если id уже занят новой карточкой, не трогаем)
+    info.pending.forEach(function(id){ if(!findCard(id)) md.cardMetaRemove(id); });
+    info.pending = [];
+    // 2) облако → словарь
+    var remote = {};
+    md.cardMetaAll().forEach(function(r){
+      var n = cloudShape(r);
+      if(n) remote[n.id] = n;
+    });
+    // 3) локальные карточки против облака
+    var out = [];
+    loadCards().forEach(function(c){
+      var r = remote[c.id];
+      if(!r){
+        if(info.synced[c.id]){
+          // была в облаке, теперь нет: удалена на другом устройстве — но только если облако прочитано целиком
+          if(st.pulled){ delete info.synced[c.id]; changed = true; return; }
+          out.push(c);
+          return;
+        }
+        var mine = cloudShape(c);
+        if(mine){ md.cardMetaSave(mine); info.synced[c.id] = 1; }
+        out.push(c);
+        return;
+      }
+      delete remote[c.id];
+      info.synced[c.id] = 1;
+      var ru = r.updatedAt || 0, lu = c.updatedAt || 0;
+      if(ru > lu){ out.push(r); changed = true; return; }
+      if(lu > ru){ var m2 = cloudShape(c); if(m2) md.cardMetaSave(m2); }
+      out.push(c);
+    });
+    // 4) новые из облака
+    Object.keys(remote).forEach(function(id){
+      out.push(remote[id]);
+      info.synced[id] = 1;
+      changed = true;
+    });
+    saveSyncInfo(info);
+    if(changed){ cardsCache = out; persistCards(); }
+    return changed;
+  }
+  function gridVisible(){ return screenMode === "grid" && !!document.getElementById("itemCardsGrid"); }
+  var cloudSyncTimer = null;
+  function scheduleCloudSync(){
+    if(standalone) return;
+    if(cloudSyncTimer) clearTimeout(cloudSyncTimer);
+    cloudSyncTimer = setTimeout(function(){
+      cloudSyncTimer = null;
+      if(reconcileCloud() && gridVisible()) renderGrid();
+    }, 800);
+  }
+  var cloudListenerSet = false;
+  function cloudSyncOnEnter(){
+    var md = getMdEditor();
+    if(standalone || !md || !md.cardMetaPull) return;
+    if(!cloudListenerSet && md.setCardMetaListener){
+      cloudListenerSet = true;
+      // приход записей карточек с другого устройства, пока вкладка открыта
+      md.setCardMetaListener(function(){ if(reconcileCloud() && gridVisible()) renderGrid(); });
+    }
+    if(reconcileCloud()) renderGrid();
+    md.cardMetaPull().then(function(){
+      if(reconcileCloud() && gridVisible()) renderGrid();
+    });
   }
   function findCard(id){
     var list = loadCards();
@@ -404,6 +519,11 @@ window.initItemCardsModule = function(deps){
     cardsCache = list.filter(function(x){ return x.id !== id; });
     delete revealedIds[id];
     if(flippedId === id) flippedId = null;
+    var syncInfo = loadSyncInfo();
+    delete syncInfo.synced[id];
+    if(syncInfo.pending.indexOf(id) < 0) syncInfo.pending.push(id);
+    if(syncInfo.pending.length > 300) syncInfo.pending = syncInfo.pending.slice(-300);
+    saveSyncInfo(syncInfo); // удалить и запись в облаке (reconcileCloud)
     saveCards();
     renderGrid();
   }
@@ -618,7 +738,28 @@ window.initItemCardsModule = function(deps){
     if(p.kind === "card"){
       reloadCards();
       var c = findCard(p.id);
-      if(c) showCardOverlay(c); else showNoticeOverlay({ kind: "missing", id: p.id });
+      if(!c && !standalone && reconcileCloud()) c = findCard(p.id);
+      if(c){ showCardOverlay(c); return; }
+      // карточки нет на этом устройстве: если настроена синхронизация — ищем в облаке (не дольше 2,5 с)
+      var md = getMdEditor();
+      var st = (!standalone && md && md.cardMetaStatus && md.cardMetaPull) ? md.cardMetaStatus() : null;
+      if(st && st.ready){
+        showNoticeOverlay({ kind: "text", text: "Ищу карточку в облаке…" });
+        var waitEl = overlayEl;
+        var done = false;
+        var finish = function(){
+          if(done) return;
+          done = true;
+          if(overlayEl !== waitEl) return; // пользователь уже закрыл окно
+          reconcileCloud();
+          var c2 = findCard(p.id);
+          if(c2) showCardOverlay(c2); else showNoticeOverlay({ kind: "missing", id: p.id });
+        };
+        setTimeout(finish, 2500);
+        md.cardMetaPull().then(finish, finish);
+        return;
+      }
+      showNoticeOverlay({ kind: "missing", id: p.id });
       return;
     }
     showNoticeOverlay({ kind: p.kind, url: p.url, text: p.text });
@@ -802,6 +943,7 @@ window.initItemCardsModule = function(deps){
     typeMenuOpen = false;
     cardsCache = null; // записи могла изменить страница scan.html (кнопка «сегодняшняя дата»)
     renderGrid();
+    cloudSyncOnEnter();
   }
 
   return {
