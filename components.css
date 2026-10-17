@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 5.3 (17.10) — PDF: `.item-pdf-status` (строка «Готовлю PDF…» в меню размеров). Откат: components.css 5.2.
    Версия: 5.2 (17.10) — таймеры карточек: `.item-card-start-btn` («Пуск» внизу по центру), `.item-card-time.running/.paused`; цифры времени на карточке переименованы `.item-card-timer` → `.item-card-time` (старое имя совпадало с классом самой карточки типа «таймер», и правило с отступом и размером шрифта действовало на всю карточку). Откат: components.css 5.1.
    Версия: 5.1 (16.10) — структурная правка: сканирование карточек (cardscan.js, itemcards.js): `.card-scan-screen*` (полноэкранный сканер), `.scan-card-overlay`, `.scan-card`, `.scan-card-today-btn`, `.scan-notice*`. Откат: components.css 5.0.
    Версия: 5.0 (16.10) — структурная правка: «Карточки предметов» (вкладка 9, itemcards.js): `.item-cards-grid`, `.item-card*`, `.item-type-menu`, `.item-card-form`, `.item-wheel*`. Откат: components.css 4.9.
@@ -4525,3 +4526,10 @@ body::after{
 }
 .item-card-time.running{ text-decoration:underline; text-underline-offset:.15em; }
 .item-card-time.paused{ opacity:.6; }
+
+/* меню размеров PDF (itemcards.js, кнопка PDF): строка состояния под кнопками */
+.item-pdf-status{
+  font-size:13px;
+  text-align:center;
+  color:var(--ink-soft, inherit);
+}

@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 5.0 (17.10) — структурная правка: кнопка «PDF» в нижнем ряду (после сканера; на Android 5 её нет) и меню «4 / 12 / 24 на лист» — `openPdfMenu`/`exportPdf`, сборка листов в cardpdf.js, сохранение в «Загрузки» через <a download>. Откат: itemcards.js 4.0.
    Версия: 4.0 (17.10) — структурная правка: таймеры карточек (шаг 5а ТЗ): кнопка «Пуск» (внизу по центру) на карточке-таймере, оставшееся время в сетке и на показе по скану, запуск таймера по скану (`startTimerForCard`, `getTimerApi`: оболочка — CardTimers через мост, scan.html — `deps.timers`, браузер — запасной таймер в localStorage `itemCardTimers_v1`). Откат: itemcards.js 3.0.
    Версия: 3.0 (17.10) — структурная правка: синхронизация записей карточек (вариант А ТЗ, 12.4): зеркало каждой карточки в скрытой записи заметок через mdeditor.js (`cardMetaSave/Remove/All/Pull/Status`), сверка `reconcileCloud` (last-write-wins по updatedAt; «уже синхронизирована» и «удалить в облаке» хранятся в `itemCardsSync_v1`), запуск при входе во вкладку, после каждого сохранения (debounce) и по приходу правок с другого устройства. Откат: itemcards.js 2.0.
    Версия: 2.0 (16.10) — структурная правка: сканирование (шаги 3 и 5 ТЗ): кнопка сканера, слой «карточка при сканировании», кнопка «сегодняшняя дата», «карточка не найдена» → создание с тем же id, чужие коды; режим standalone для scan.html (ScanActivity); `openCardFromNative`.
@@ -66,6 +67,7 @@ window.initItemCardsModule = function(deps){
   var SCAN_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8"></path><path d="M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8"></path><path d="M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16"></path><path d="M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"></path><rect x="8" y="8" width="3" height="3"></rect><rect x="13" y="8" width="3" height="3"></rect><rect x="8" y="13" width="3" height="3"></rect><path d="M13 13h3v3"></path></svg>';
   // часы со стрелкой вокруг («история»), слегка изменённые: стрелка по часовой, на кнопке «сегодняшняя дата»
   var TODAY_ICON_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9"></path><path d="M20 4v4.5h-4.5"></path><path d="M12 7.5V12l3 2"></path></svg>';
+  var PDF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7.5A1.5 1.5 0 0 0 6 4.5v15A1.5 1.5 0 0 0 7.5 21h9a1.5 1.5 0 0 0 1.5-1.5V7z"></path><path d="M14 3v4h4"></path><path d="M9 12.5h6"></path><path d="M9 15.5h6"></path><path d="M9 18h3"></path></svg>';
   var PAGE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path></svg>';
 
   // ---------- хранилище ----------
@@ -250,6 +252,8 @@ window.initItemCardsModule = function(deps){
   var typeMenuOpen = false;
 
   function container(){ return document.getElementById("settingsTabContent"); }
+  // Android 5: PDF не реализуется (решение заказчика, ТЗ 16.10.2026) — кнопки нет
+  function isAndroid5(){ return /Android [1-5]\./.test(navigator.userAgent || ""); }
   function isLegacyAnim(){
     try{
       if(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return true;
@@ -282,9 +286,19 @@ window.initItemCardsModule = function(deps){
       '<button type="button" class="workbooks-run-btn" data-type="item">Предмет</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="note">Заметка</button>' +
     '</div>';
+    var showPdf = !isAndroid5();
+    if(showPdf){
+      html += '<div class="item-type-menu" id="itemPdfMenu" style="display:none;">' +
+        '<button type="button" class="workbooks-run-btn" data-per="4">Большие (4 на лист)</button>' +
+        '<button type="button" class="workbooks-run-btn" data-per="12">Средние (12 на лист)</button>' +
+        '<button type="button" class="workbooks-run-btn" data-per="24">Маленькие (24 на лист)</button>' +
+        '<div class="item-pdf-status" id="itemPdfStatus" style="display:none;"></div>' +
+      '</div>';
+    }
     html += '<div class="mdeditor-fab-row">' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsAddBtn" title="Новая карточка">' + PLUS_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsScanBtn" title="Сканировать QR-код">' + SCAN_ICON_SVG + '</button>' +
+      (showPdf ? '<button type="button" class="mdeditor-fab-btn" id="itemCardsPdfBtn" title="PDF с QR-кодами для печати">' + PDF_ICON_SVG + '</button>' : '') +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsSizeBtn" title="Размер карточек">' + SIZE_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsHomeStub" tabindex="-1" aria-disabled="true">' + READER_HOME_ICON_SVG + '</button>' +
     '</div>';
@@ -453,10 +467,50 @@ window.initItemCardsModule = function(deps){
   }
 
   // ---------- нижний ряд ----------
+  var pdfBusy = false;
   function closeTypeMenu(){
     typeMenuOpen = false;
     var m = document.getElementById("itemTypeMenu");
     if(m) m.style.display = "none";
+    var pm = document.getElementById("itemPdfMenu");
+    if(pm && !pdfBusy) pm.style.display = "none"; // во время сборки PDF меню остаётся — на нём строка «Готовлю…»
+  }
+
+  // ---------- PDF с кодами (шаг 6 ТЗ) ----------
+  function exportPdf(perPage){
+    if(pdfBusy) return;
+    var cards = loadCards();
+    if(!cards.length){ alert("Карточек пока нет — PDF собирать не из чего."); return; }
+    if(!window.CardPdf){ alert("Модуль PDF не загружен."); return; }
+    var menu = document.getElementById("itemPdfMenu");
+    var status = document.getElementById("itemPdfStatus");
+    function setStatus(t){ if(status){ status.style.display = t ? "block" : "none"; status.textContent = t || ""; } }
+    function setButtons(disabled){
+      if(!menu) return;
+      var bs = menu.querySelectorAll("button");
+      for(var i = 0; i < bs.length; i++) bs[i].disabled = disabled;
+    }
+    pdfBusy = true; setButtons(true); setStatus("Готовлю PDF…");
+    var forPdf = cards.map(function(c){ return { id: c.id, title: c.title }; });
+    deps.loadQrLib().then(function(){
+      return window.CardPdf.build(forPdf, perPage, { onProgress: function(done, total){ setStatus("Готовлю PDF… " + done + " из " + total); } });
+    }).then(function(blob){
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "cards-qr-" + todayIso() + ".pdf";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+    }).catch(function(err){
+      console.error(err);
+      alert("Не удалось собрать PDF.");
+    }).then(function(){
+      pdfBusy = false; setButtons(false); setStatus("");
+      var m = document.getElementById("itemPdfMenu");
+      if(m) m.style.display = "none";
+    });
   }
   function bindFab(tab){
     var addBtn = document.getElementById("itemCardsAddBtn");
@@ -464,6 +518,8 @@ window.initItemCardsModule = function(deps){
     addBtn.addEventListener("click", function(){
       var bar = document.getElementById("itemCardsSizeBar");
       if(bar) bar.classList.remove("open");
+      var pm = document.getElementById("itemPdfMenu");
+      if(pm && !pdfBusy) pm.style.display = "none";
       typeMenuOpen = !typeMenuOpen;
       menu.style.display = typeMenuOpen ? "flex" : "none";
     });
@@ -473,6 +529,22 @@ window.initItemCardsModule = function(deps){
       closeTypeMenu();
       openForm(b.dataset.type, null);
     });
+    var pdfBtn = document.getElementById("itemCardsPdfBtn");
+    var pdfMenu = document.getElementById("itemPdfMenu");
+    if(pdfBtn && pdfMenu){
+      pdfBtn.addEventListener("click", function(){
+        var sb2 = document.getElementById("itemCardsSizeBar");
+        if(sb2) sb2.classList.remove("open");
+        var open = pdfMenu.style.display !== "flex";
+        closeTypeMenu();
+        if(open) pdfMenu.style.display = "flex";
+      });
+      pdfMenu.addEventListener("click", function(e){
+        var b = e.target.closest("button[data-per]");
+        if(!b) return;
+        exportPdf(parseInt(b.dataset.per, 10));
+      });
+    }
     document.getElementById("itemCardsScanBtn").addEventListener("click", function(){
       closeTypeMenu();
       var sb = document.getElementById("itemCardsSizeBar");

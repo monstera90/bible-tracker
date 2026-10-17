@@ -41,6 +41,7 @@ s89draw.js
 s89fill.js
 imgresize.js
 cardscan.js
+cardpdf.js
 itemcards.js
 scan.html
 mdeditor.js
