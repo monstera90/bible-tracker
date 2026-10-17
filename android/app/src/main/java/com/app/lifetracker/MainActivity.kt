@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.0 (16.10) — вход ACTION_OPEN_CARD (ScanActivity → страница: window.__ltOpenCard / ?card=<id>).
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -55,6 +56,13 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val ACTION_DIAG = "com.app.lifetracker.DIAG"
+
+        // ScanActivity (ярлык «Сканировать QR-код») просит открыть приложение внутри карточки: заметка по id либо
+        // создание карточки под уже напечатанный код. Страница получает это как window.__ltOpenCard(id, mode).
+        const val ACTION_OPEN_CARD = "com.app.lifetracker.OPEN_CARD"
+        const val EXTRA_CARD_ID = "cardId"
+        const val EXTRA_CARD_MODE = "cardMode"
+        private val CARD_ID_RE = Regex("^[A-Za-z0-9]{4,32}$")
 
         // Шаг 5: клик по уведомлению (NotifyHelper.openIntent) открывает приложение с этими данными.
         const val ACTION_OPEN_TASK = "com.app.lifetracker.OPEN_TASK"
@@ -197,7 +205,14 @@ class MainActivity : ComponentActivity() {
 
         handleNotifyIntent(intent)
         handleShareIntent(intent)
-        webView.loadUrl(if (intent?.action == ACTION_DIAG) WebAssetServer.DIAG_URL else WebAssetServer.START_URL)
+        val cardLaunch = cardLaunchOf(intent)
+        webView.loadUrl(
+            when {
+                intent?.action == ACTION_DIAG -> WebAssetServer.DIAG_URL
+                cardLaunch != null -> WebAssetServer.START_URL + "?card=" + cardLaunch.first + "&cardmode=" + cardLaunch.second
+                else -> WebAssetServer.START_URL
+            }
+        )
         webUpdater.checkInBackground()
         warnIfWebViewTooOld()
     }
@@ -210,6 +225,26 @@ class MainActivity : ComponentActivity() {
         // Шаг 4: «Поделиться» (ACTION_SEND / ACTION_SEND_MULTIPLE) при уже запущенном приложении.
         handleShareIntent(intent)
         if (intent.action == ACTION_DIAG) webView.loadUrl(WebAssetServer.DIAG_URL)
+        val cardLaunch = cardLaunchOf(intent)
+        if (cardLaunch != null) {
+            if (pageTrusted) {
+                // id и режим прошли проверку (только буквы и цифры / фиксированные слова): в строку скрипта попадать нечему
+                webView.evaluateJavascript(
+                    "window.__ltOpenCard && window.__ltOpenCard('${cardLaunch.first}','${cardLaunch.second}')", null
+                )
+            } else {
+                webView.loadUrl(WebAssetServer.START_URL + "?card=" + cardLaunch.first + "&cardmode=" + cardLaunch.second)
+            }
+        }
+    }
+
+    /** (id, режим) из intent ACTION_OPEN_CARD или null; id проверяется, режим — только "note" или "create". */
+    private fun cardLaunchOf(intent: Intent?): Pair<String, String>? {
+        if (intent?.action != ACTION_OPEN_CARD) return null
+        val id = intent.getStringExtra(EXTRA_CARD_ID) ?: return null
+        if (!CARD_ID_RE.matches(id)) return null
+        val mode = if (intent.getStringExtra(EXTRA_CARD_MODE) == "create") "create" else "note"
+        return Pair(id, mode)
     }
 
     override fun onResume() {

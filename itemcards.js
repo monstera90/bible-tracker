@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 1.0 (16.10)
+   Версия: 2.0 (16.10) — структурная правка: сканирование (шаги 3 и 5 ТЗ): кнопка сканера, слой «карточка при сканировании», кнопка «сегодняшняя дата», «карточка не найдена» → создание с тем же id, чужие коды; режим standalone для scan.html (ScanActivity); `openCardFromNative`.
    Вкладка «Карточки предметов» (девятая боковая вкладка второго набора,
    settingsTabSet2Btn9 / "set2s_9"), ТЗ TASK_ITEM_CARDS_QR.md.
 
@@ -15,8 +15,11 @@
      CARD_NOTES_PATH, см. mdeditor.js: createCardNote/openCardNote) и открывается
      тем же редактором.
 
-   Чего здесь ещё нет (следующие шаги ТЗ): сканер, показ по скану, таймер по скану,
-   PDF, напоминания, облачная синхронизация записей карточек (тело карточки-заметки
+   Сканирование: камера и разбор кода — cardscan.js (CardScan); показ результата — здесь
+   (openScan → handleScanned → showCardOverlay / showNoticeOverlay). Тот же код работает на
+   странице scan.html (deps.standalone + deps.native, мост ScanBridge из ScanActivity.kt).
+
+   Чего здесь ещё нет (следующие шаги ТЗ): таймер по скану (Пуск), PDF, напоминания, облачная синхронизация записей карточек (тело карточки-заметки
    синхронизируется вместе с заметками, сами записи карточек пока только на устройстве).
 
    Хранилище записей — только функции loadCards/saveCards (localStorage), чтобы потом
@@ -30,7 +33,9 @@ window.initItemCardsModule = function(deps){
   var PENCIL_ICON_SVG = deps.PENCIL_ICON_SVG;
   var DELETE_ICON_SVG = deps.DELETE_ICON_SVG;
   var openAppConfirmBar = deps.openAppConfirmBar;
-  var getMdEditor = deps.getMdEditor;
+  var getMdEditor = deps.getMdEditor || function(){ return null; };
+  var standalone = !!deps.standalone;   // true на странице scan.html (окно ScanActivity, без приложения)
+  var nativeScan = deps.native || null; // мост оболочки: openInApp(id, mode), openUrl(url), close()
 
   var CARDS_KEY = "itemCards_v1";
   var SIZE_KEY = "itemCardsSize_v1";
@@ -56,6 +61,9 @@ window.initItemCardsModule = function(deps){
   }
   var PLUS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
   var SIZE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="12" rx="1.5"></rect><rect x="13" y="9" width="8" height="12" rx="1.5"></rect></svg>';
+  var SCAN_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8"></path><path d="M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8"></path><path d="M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16"></path><path d="M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"></path><rect x="8" y="8" width="3" height="3"></rect><rect x="13" y="8" width="3" height="3"></rect><rect x="8" y="13" width="3" height="3"></rect><path d="M13 13h3v3"></path></svg>';
+  // часы со стрелкой вокруг («история»), слегка изменённые: стрелка по часовой, на кнопке «сегодняшняя дата»
+  var TODAY_ICON_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9"></path><path d="M20 4v4.5h-4.5"></path><path d="M12 7.5V12l3 2"></path></svg>';
   var PAGE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path></svg>';
 
   // ---------- хранилище ----------
@@ -159,6 +167,7 @@ window.initItemCardsModule = function(deps){
     '</div>';
     html += '<div class="mdeditor-fab-row">' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsAddBtn" title="Новая карточка">' + PLUS_ICON_SVG + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="itemCardsScanBtn" title="Сканировать QR-код">' + SCAN_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsSizeBtn" title="Размер карточек">' + SIZE_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsHomeStub" tabindex="-1" aria-disabled="true">' + READER_HOME_ICON_SVG + '</button>' +
     '</div>';
@@ -345,6 +354,12 @@ window.initItemCardsModule = function(deps){
       closeTypeMenu();
       openForm(b.dataset.type, null);
     });
+    document.getElementById("itemCardsScanBtn").addEventListener("click", function(){
+      closeTypeMenu();
+      var sb = document.getElementById("itemCardsSizeBar");
+      if(sb) sb.classList.remove("open");
+      openScan();
+    });
     var bar = document.getElementById("itemCardsSizeBar");
     var range = document.getElementById("itemCardsSizeRange");
     var val = document.getElementById("itemCardsSizeVal");
@@ -395,7 +410,7 @@ window.initItemCardsModule = function(deps){
 
   // ---------- форма создания / правки ----------
   var TYPE_LABEL = { timer: "Таймер", item: "Предмет", note: "Заметка" };
-  function openForm(type, card){
+  function openForm(type, card, forcedId){
     screenMode = "form";
     var el = container();
     if(!el) return;
@@ -497,7 +512,7 @@ window.initItemCardsModule = function(deps){
       }
       var now = Date.now();
       if(isNew){
-        data.id = newId();
+        data.id = (forcedId && !findCard(forcedId)) ? forcedId : newId(); // forcedId: карточка создаётся под уже напечатанный код
         data.createdAt = now;
         data.updatedAt = now;
         loadCards().push(data);
@@ -533,6 +548,251 @@ window.initItemCardsModule = function(deps){
     return w ? Math.max(0, Math.round(w.scrollTop / WHEEL_ROW)) : 0;
   }
 
+
+  // ---------- сканирование (шаги 3 и 5 ТЗ) ----------
+  var scanHandle = null;   // активный сканер (CardScan.open) или null
+  var overlayEl = null;    // слой «карточка при сканировании» или null
+  var scanNav = null;      // шаг «назад» на время сканирования: {active}
+  var scanDirty = false;   // дата карточки менялась кнопкой в углу — сетке нужна перерисовка
+
+  function reloadCards(){ cardsCache = null; return loadCards(); }
+  function scanNavStart(){
+    if(!window.AppNav){ scanNav = null; return; } // scan.html: своей истории нет, закрытие — через мост оболочки
+    var token = { active: true };
+    scanNav = token;
+    window.AppNav.push(function(){
+      if(!token.active) return;
+      token.active = false; scanNav = null;
+      closeScanSession();
+    });
+  }
+  // goBack=true — просто закрываем сканирование (убираем свой шаг «назад»); false — дальше сразу идёт
+  // другая навигация (заметка, форма): шаг оставляем, как у остальных экранов вкладки.
+  function scanNavEnd(goBack){
+    var t = scanNav;
+    scanNav = null;
+    if(!t || !t.active) return;
+    t.active = false;
+    if(goBack){ try{ history.back(); }catch(e){} }
+  }
+  function closeOverlayEl(){
+    if(overlayEl && overlayEl.parentNode) overlayEl.parentNode.removeChild(overlayEl);
+    overlayEl = null;
+  }
+  function closeScanSession(){
+    closeOverlayEl();
+    if(scanHandle){ scanHandle.close(); scanHandle = null; }
+    finishScanSession();
+  }
+  function finishScanSession(){
+    if(standalone){ leaveStandalone(); return; }
+    if(scanDirty && screenMode === "grid" && document.getElementById("itemCardsGrid")){ renderGrid(); }
+    scanDirty = false;
+  }
+  function endScanSession(goBack){
+    closeOverlayEl();
+    if(scanHandle){ scanHandle.close(); scanHandle = null; }
+    scanNavEnd(goBack);
+    finishScanSession();
+  }
+  function leaveStandalone(){
+    if(nativeScan && nativeScan.close){ try{ nativeScan.close(); return; }catch(e){} }
+    try{ history.back(); }catch(e){}
+  }
+
+  function openScan(){
+    if(!window.CardScan) return;
+    closeOverlayEl();
+    if(scanHandle){ scanHandle.close(); scanHandle = null; }
+    scanNavEnd(false);
+    scanNavStart();
+    scanHandle = window.CardScan.open({
+      loadJsqr: deps.loadJsqrLib,
+      onCode: function(text){ scanHandle = null; handleScanned(text); },
+      onBack: function(){ scanHandle = null; endScanSession(true); }
+    });
+  }
+
+  function handleScanned(text){
+    var p = window.CardScan.parseCode(text);
+    if(p.kind === "card"){
+      reloadCards();
+      var c = findCard(p.id);
+      if(c) showCardOverlay(c); else showNoticeOverlay({ kind: "missing", id: p.id });
+      return;
+    }
+    showNoticeOverlay({ kind: p.kind, url: p.url, text: p.text });
+  }
+
+  function newOverlay(){
+    closeOverlayEl();
+    var o = document.createElement("div");
+    o.className = "scan-card-overlay";
+    // тап мимо карточки закрывает показ (из приложения — назад на вкладку 9, из ярлыка — на рабочий стол)
+    o.addEventListener("click", function(){ endScanSession(true); });
+    document.body.appendChild(o);
+    overlayEl = o;
+    return o;
+  }
+  // ширина карточки при сканировании: почти вся ширина экрана с полями, на низком экране ограничена высотой
+  function overlayCardWidth(){
+    var vw = window.innerWidth || 360, vh = window.innerHeight || 640;
+    return Math.max(120, Math.floor(Math.min(vw - 32, (vh - 120) / 1.5, 480)));
+  }
+  function showCardOverlay(c){
+    var o = newOverlay();
+    var card = document.createElement("div");
+    card.className = "item-card item-card-" + c.type + " scan-card";
+    card.style.setProperty("--item-card-w", overlayCardWidth() + "px");
+    card.innerHTML = '<div class="item-card-front">' + cardFrontHtml(c) + '</div>';
+    card.querySelector(".item-card-title").textContent = c.title || "";
+    card.addEventListener("click", function(e){
+      e.stopPropagation();
+      if(c.type === "note") openNoteFromScan(c);
+    });
+    o.appendChild(card);
+    if(isLegacyAnim()){ o.style.animation = "none"; card.style.animation = "none"; } // Android 5: без анимации
+    if(c.type === "item"){
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "scan-card-today-btn";
+      b.title = "Поставить сегодняшнюю дату";
+      b.innerHTML = TODAY_ICON_SVG;
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        reloadCards();
+        var cur = findCard(c.id);
+        if(!cur) return;
+        cur.date = todayIso();
+        cur.updatedAt = Date.now();
+        saveCards();
+        scanDirty = true;
+        var d = card.querySelector(".item-card-date");
+        if(d) d.textContent = isoToRu(cur.date);
+      });
+      o.appendChild(b);
+    }
+  }
+  function openNoteFromScan(c){
+    if(standalone){
+      if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(c.id, "note"); }catch(e){} }
+      leaveStandalone();
+      return;
+    }
+    endScanSession(false);
+    openNoteWhenReady(c, 0);
+  }
+
+  function showNoticeOverlay(info){
+    var o = newOverlay();
+    var box = document.createElement("div");
+    box.className = "scan-notice";
+    box.addEventListener("click", function(e){ e.stopPropagation(); });
+    var msg = document.createElement("div");
+    msg.className = "scan-notice-text";
+    var btns = document.createElement("div");
+    btns.className = "scan-notice-buttons";
+    function addBtn(label, fn){
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "workbooks-run-btn";
+      b.textContent = label;
+      b.addEventListener("click", fn);
+      btns.appendChild(b);
+    }
+    if(info.kind === "missing"){
+      msg.textContent = "Карточка не найдена. Возможно, ещё не синхронизирована.";
+      addBtn("Создать карточку с этим кодом", function(){
+        if(standalone){
+          if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(info.id, "create"); }catch(e){} }
+          leaveStandalone();
+          return;
+        }
+        endScanSession(false);
+        openTypeChooser(info.id);
+      });
+    } else if(info.kind === "url"){
+      msg.textContent = info.url;
+      msg.classList.add("scan-notice-url");
+      addBtn("Открыть", function(){
+        if(standalone && nativeScan && nativeScan.openUrl){ try{ nativeScan.openUrl(info.url); }catch(e){} leaveStandalone(); return; }
+        openExternalUrl(info.url);
+        endScanSession(true);
+      });
+    } else {
+      msg.textContent = info.kind === "unknown"
+        ? "Код не поддерживается этой версией приложения: " + (info.text || "")
+        : (info.text || "Код пустой.");
+      msg.classList.add("scan-notice-url");
+    }
+    addBtn("Закрыть", function(){ endScanSession(true); });
+    box.appendChild(msg);
+    box.appendChild(btns);
+    o.appendChild(box);
+  }
+  function openExternalUrl(url){
+    var a = document.createElement("a");
+    a.href = url; a.target = "_blank"; a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  // выбор типа для карточки под уже напечатанный код (id не найден на устройстве)
+  function openTypeChooser(forcedId){
+    screenMode = "form";
+    var el = container();
+    if(!el) return;
+    el.innerHTML = '<div class="mdeditor-tab item-card-form" id="itemCardForm">' +
+      '<h3 class="common-tab-title">Новая карточка</h3>' +
+      '<div class="item-form-buttons item-form-types">' +
+        '<button type="button" class="workbooks-run-btn" data-type="timer">Таймер</button>' +
+        '<button type="button" class="workbooks-run-btn" data-type="item">Предмет</button>' +
+        '<button type="button" class="workbooks-run-btn" data-type="note">Заметка</button>' +
+      '</div>' +
+      '<div class="item-form-buttons"><button type="button" class="workbooks-run-btn" id="icfTypeCancel">Отмена</button></div>' +
+    '</div>';
+    el.addEventListener("click", function onClick(e){
+      var b = e.target.closest("button[data-type]");
+      if(!b) return;
+      el.removeEventListener("click", onClick);
+      openForm(b.dataset.type, null, forcedId);
+    });
+    document.getElementById("icfTypeCancel").addEventListener("click", function(){ renderGrid(); });
+    if(window.AppNav) window.AppNav.push(function(){ renderGrid(); });
+  }
+
+  // карточка-заметка из сканирования: заметки на холодном старте приложения могут быть ещё не загружены — ждём
+  function openNoteWhenReady(c, n){
+    var md = getMdEditor();
+    if(md && md.openCardNote && c.noteId){
+      var ok = md.openCardNote(c.noteId, backToGrid);
+      if(ok !== false){
+        screenMode = "note";
+        if(window.AppNav) window.AppNav.push(function(){ backToGrid(); });
+        return;
+      }
+    }
+    if(n < 25){ setTimeout(function(){ openNoteWhenReady(c, n + 1); }, 300); return; }
+    alert("Заметка этой карточки не найдена на устройстве.");
+  }
+
+  // вход из оболочки (ScanActivity → MainActivity): mode "note" — открыть заметку карточки,
+  // "create" — создать карточку с этим id (код уже напечатан)
+  function openCardFromNative(id, mode){
+    reloadCards();
+    var c = findCard(id);
+    if(mode === "create" && !c){ openTypeChooser(id); return; }
+    renderGrid();
+    if(mode === "note" && c && c.type === "note") openNoteWhenReady(c, 0);
+  }
+
+  // страница scan.html: сразу сканер, результат — на прозрачном фоне поверх рабочего стола
+  function startStandaloneScan(){
+    reloadCards();
+    openScan();
+  }
+
   // ---------- вход вкладки ----------
   function renderSettingsTabItemCards(){
     var md = getMdEditor();
@@ -540,11 +800,15 @@ window.initItemCardsModule = function(deps){
     if(screenMode === "note" && md && md.closeCardNote) md.closeCardNote();
     flippedId = null;
     typeMenuOpen = false;
+    cardsCache = null; // записи могла изменить страница scan.html (кнопка «сегодняшняя дата»)
     renderGrid();
   }
 
   return {
     renderSettingsTabItemCards: renderSettingsTabItemCards,
+    openScan: openScan,
+    openCardFromNative: openCardFromNative,
+    startStandaloneScan: startStandaloneScan,
     getCards: function(){ return loadCards().slice(); },
     qrTextForId: function(id){ return QR_PREFIX + id; }
   };

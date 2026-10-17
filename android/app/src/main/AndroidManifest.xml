@@ -93,6 +93,19 @@
             android:theme="@style/QuickTaskTheme"
             android:windowSoftInputMode="stateVisible|adjustResize" />
 
+        <!-- Ярлык «Сканировать QR-код» (карточки предметов): окно сканера на весь экран и показ карточки на фоне рабочего
+             стола, БЕЗ запуска основного приложения (свой task, прозрачная тема ScanTheme, как у QuickTaskActivity).
+             Карточка-заметка по нажатию открывает MainActivity (ACTION_OPEN_CARD). -->
+        <activity
+            android:name=".ScanActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout|uiMode|density|fontScale|layoutDirection|locale|navigation|colorMode"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="@string/shortcut_scan_qr"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/ScanTheme" />
+
         <!-- Шаг 4: временные файлы для «Поделиться» (cache/share/, см. res/xml/file_paths.xml). -->
         <provider
             android:name="androidx.core.content.FileProvider"

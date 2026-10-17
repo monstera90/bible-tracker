@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 5.1 (16.10) — структурная правка: сканирование карточек (cardscan.js, itemcards.js): `.card-scan-screen*` (полноэкранный сканер), `.scan-card-overlay`, `.scan-card`, `.scan-card-today-btn`, `.scan-notice*`. Откат: components.css 5.0.
    Версия: 5.0 (16.10) — структурная правка: «Карточки предметов» (вкладка 9, itemcards.js): `.item-cards-grid`, `.item-card*`, `.item-type-menu`, `.item-card-form`, `.item-wheel*`. Откат: components.css 4.9.
    Версия: 4.9 (16.10) — затемнение окон редактора заметок мягче: `.mdeditor-image-overlay` и `.mdeditor-cleanup-overlay` (диалоги имени/переименования/подтверждения и просмотр картинки поверх заметки) .86 → .45 (то же значение берёт показ карточки при сканировании). Полноэкранный просмотр картинки `.mdeditor-imgview-overlay` (.92) не менялся.
    Версия: 4.8 (14.10) — кнопки «Копировать» и маркер нижнего ряда заметки скрыты в режиме чтения (`.reading-mode-active #mdEditorCopyBtn/#mdEditorHighlightBtn`).
@@ -4403,3 +4404,103 @@ body::after{
 .item-wheel-pad{ height:40px; line-height:40px; text-align:center; font-size:22px; font-variant-numeric:tabular-nums; }
 .item-wheel-row{ scroll-snap-align:start; }
 .item-wheel-label{ margin-top:4px; font-size:12px; color:var(--ink-soft, inherit); }
+
+
+/* ===========================================================================
+   Сканирование карточек (cardscan.js — сканер; itemcards.js — показ результата).
+   Те же стили работают на странице scan.html (окно ScanActivity поверх рабочего стола).
+   =========================================================================== */
+.card-scan-screen{
+  position:fixed;
+  inset:0;
+  z-index:10050;
+  background:#000;
+  color:#fff;
+}
+.card-scan-screen .scan-video-wrap{
+  position:absolute;
+  inset:0;
+  margin:0;
+  border-radius:0;
+}
+.card-scan-screen .scan-video-wrap video{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+.card-scan-screen .scan-frame{
+  width:min(70vw, 70vh);
+  height:min(70vw, 70vh);
+}
+.card-scan-note{
+  position:absolute;
+  left:16px;
+  right:16px;
+  bottom:calc(84px + var(--safe-bottom, 0px));
+  text-align:center;
+  color:#fff;
+}
+.card-scan-note.error{ color:#ffb4a8; }
+.card-scan-back{
+  position:absolute;
+  left:50%;
+  bottom:calc(20px + var(--safe-bottom, 0px));
+  transform:translateX(-50%);
+  min-width:140px;
+}
+/* затемнение — то же, что у окон редактора заметок; за ним виден экран приложения или рабочий стол */
+.scan-card-overlay{
+  position:fixed;
+  inset:0;
+  z-index:10060;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:rgba(20,14,8,.45);
+  animation:scanCardFade .18s ease-out;
+}
+.scan-card{
+  flex:0 0 auto;
+  cursor:default;
+  animation:scanCardPop .2s ease-out;
+}
+.scan-card .item-card-page-btn{ display:none; }
+/* положение и вид — как у кнопки «Поделиться» в просмотре картинки (mdeditor.js, openImageViewer) */
+.scan-card-today-btn{
+  position:fixed;
+  bottom:calc(16px + var(--safe-bottom, 0px)); /* --safe-bottom ставит только ScanActivity (окно под жестовой панелью); в приложении 0 */
+  right:16px;
+  width:44px;
+  height:44px;
+  border-radius:50%;
+  background:rgba(0,0,0,.55);
+  border:none;
+  color:#fff;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:10061;
+  padding:0;
+}
+.scan-notice{
+  box-sizing:border-box;
+  width:min(92vw, 420px);
+  padding:16px;
+  background:var(--bg-mid, #fbf4e2);
+  color:var(--ink, #000);
+  border:2px solid var(--ink, #000);
+  border-radius:14px;
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+.scan-notice-text{ font-size:15px; line-height:1.4; }
+.scan-notice-url{ word-break:break-all; }
+.scan-notice-buttons{ display:flex; flex-direction:column; gap:8px; }
+.item-form-types{ flex-direction:column; }
+@keyframes scanCardFade{ from{ opacity:0; } to{ opacity:1; } }
+@keyframes scanCardPop{ from{ transform:scale(.92); opacity:0; } to{ transform:scale(1); opacity:1; } }
+/* Android 5 и «уменьшить анимацию»: без анимации появления */
+@media (prefers-reduced-motion: reduce){
+  .scan-card-overlay, .scan-card{ animation:none; }
+}

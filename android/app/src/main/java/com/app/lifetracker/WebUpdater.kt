@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.0 (16.10) — activeBundleReadOnly(): чтение активного бандла без изменения состояния (для ScanActivity).
 
 import android.os.SystemClock
 import android.util.Log
@@ -217,6 +218,20 @@ class WebUpdater(
         }
         served = s.active
         s.active?.let { dir(it) }
+    }
+
+    /**
+     * Только чтение (состояние не меняется): папка бандла, который сейчас раздаёт приложение, либо null — встроенный из assets.
+     * Для ScanActivity (отдельное окно ярлыка): startLaunch() там вызывать нельзя, он применяет ожидающую версию и
+     * запускает пробный режим, а подтверждать его некому.
+     */
+    fun activeBundleReadOnly(): File? = synchronized(LOCK) {
+        val s = load()
+        val builtin = builtinVersionProvider()
+        val a = s.active ?: return null
+        if (builtin != null && compareVersions(a, builtin) <= 0) return null
+        val d = dir(a)
+        if (isValidBundle(d)) d else null
     }
 
     /** Страница сообщает, что запустилась. Подтверждает пробный запуск, если версия совпадает с раздаваемой. */

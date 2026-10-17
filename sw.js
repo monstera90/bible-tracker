@@ -164,6 +164,7 @@ const ASSETS = [
   "./s89draw.js",
   "./s89fill.js",
   "./imgresize.js",
+  "./cardscan.js",
   "./itemcards.js",
   "./mdeditor.js",
   "./codemirror.bundle.js",

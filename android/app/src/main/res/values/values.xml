@@ -3,6 +3,7 @@
     <string name="app_name">LifeTracker</string>
     <string name="shortcut_diag">Диагностика</string>
     <string name="shortcut_new_task">Создать новую задачу</string>
+    <string name="shortcut_scan_qr">Сканировать QR-код</string>
 
     <!-- Фон окна и полос системных панелей до того, как страница сообщит свои цвета (background_color из manifest.json). -->
     <color name="window_bg">#F4F0F8</color>
@@ -17,6 +18,15 @@
 
     <!-- Окно «Создать новую задачу» (QuickTaskActivity): прозрачная тема, затемнение рисует само окно. -->
     <style name="QuickTaskTheme" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <!-- Окно «Сканировать QR-код» (ScanActivity): прозрачная тема; фон рисует страница scan.html (чёрный сканер, затем
+         затемнение за карточкой), под ней виден рабочий стол. -->
+    <style name="ScanTheme" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:backgroundDimEnabled">false</item>

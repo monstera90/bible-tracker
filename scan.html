@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<!-- scan.html
+     Версия: 1.0 (16.10)
+     Страница окна «Сканировать QR-код» (ScanActivity.kt, ярлык на иконке приложения). Открывается в отдельной
+     прозрачной Activity: сначала сканер на весь экран, затем карточка на прозрачном фоне поверх рабочего стола.
+     Тот же origin (https://localhost), что и приложение: карточки читаются из того же localStorage (itemCards_v1).
+     Работает только в оболочке (нужен мост ScanBridge); в index.html и sw.js не подключается. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Сканировать QR-код</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="modals.css">
+<style>
+  html, body{ background:transparent !important; margin:0; padding:0; height:100%; overflow:hidden; }
+</style>
+<script>
+  // та же тема, что в приложении (state["__theme"].c в localStorage; по умолчанию 4)
+  (function(){
+    var id = 4;
+    try{
+      var st = JSON.parse(localStorage.getItem("bibleReadingProgress_v2") || "{}");
+      if(st && st["__theme"] && st["__theme"].c) id = st["__theme"].c;
+    }catch(e){}
+    document.documentElement.setAttribute("data-theme", String(id));
+  })();
+</script>
+</head>
+<body>
+<script src="vendor/jsQR.js"></script>
+<script src="cardscan.js"></script>
+<script src="itemcards.js"></script>
+<script>
+  (function(){
+    function esc(s){
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function(ch){
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+      });
+    }
+    var bridge = window.LifeTrackerScan || null; // мост ScanActivity.kt
+    var mod = window.initItemCardsModule({
+      standalone: true,
+      escapeHtml: esc,
+      loadJsqrLib: function(){ return Promise.resolve(); },
+      native: bridge ? {
+        openInApp: function(id, mode){ bridge.openInApp(String(id), String(mode)); },
+        openUrl: function(url){ bridge.openUrl(String(url)); },
+        close: function(){ bridge.close(); }
+      } : null
+    });
+    mod.startStandaloneScan();
+  })();
+</script>
+</body>
+</html>

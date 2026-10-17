@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 72.0 (16.10) — структурная правка: сканирование карточек — деп `loadJsqrLib` в `initItemCardsModule`, вход из оболочки `window.__ltOpenCard(id, mode)` / параметры `?card=<id>&cardmode=note|create` при старте (`openCardFromNative`, `handleCardLaunchParam`). Откат: my.js 71.0.
    Версия: 71.0 (16.10) — структурная правка: вкладка set2s_9 «Карточки предметов» (модуль itemcards.js, ленивая инициализация `renderSettingsTabItemCards`, ветка в switchSettingsTab до заглушки); ключи `itemCards_v1`/`itemCardsSize_v1` в EXPORT_REGISTRY. Откат: my.js 70.0.
    Версия: 70.0 (15.10) — клавиатура при вводе имени в диалогах-карточках (`.mdeditor-cleanup-input`: «Имя новой заметки», переименование закладки/книги, имя пользователя и др.): `initTaskKeyboardLift` теперь включает `overlaysContent` и для этих полей (раньше только для `.mdeditor-title-input`), поэтому WebView не сжимается и нижние вкладки не подпрыгивают над клавиатурой, а прячутся под ней; новая `liftDialog`/`clearDialog` добавляют карточке `padding-bottom` на высоту перекрытия — карточка стоит по центру видимой над клавиатурой части. Откат: my.js 69.0.
    Версия: 69.0 (14.10) — (1) ЗАКЛАДКА/МЕСТО ПРИ УХОДЕ С КНИГИ: на Android 5 книга собирается и «доводится» до места секундами; если за это время уйти на другую вкладку, `currentBookReaderPosition` читал ещё недостроенный/непрокрученный текст и возвращал начало книги — в авторежиме «А» основная закладка и сохранённая позиция чтения затирались на 0:0, книга открывалась с начала (значок на полях при этом не рисовался: у блока-картинки/обложки в начале книги нет места под значок). Новая `bookReaderLeavePosition(container)`: пока текст не готов (`bookReaderState.textReady === false`) или идёт восстановление места — берётся ЗАПЛАНИРОВАННОЕ место (`restoreTarget` / `restorePosition` / сохранённая позиция), а не геометрия DOM; её используют уход с вкладки, закрытие окна, `autoUpdateMainBookmarkOnExit`, `renderBookReader`, `openBookAtMarginBookmark`. (2) ИПКД/книги на Android 5 открываются быстрее: кэш закреплённых высот сегментов (`applyCachedSegHeights`/`saveCachedSegHeights`, localStorage `bookSegH_v1:<hash>`, с проверкой двух сегментов) вместо повторной полной вёрстки всей книги; порции сборки на старом WebView по 30 мс вместо 8; разобранная публикация ИПКД держится в памяти (`ipkdParsedCache`) — повторный заход не разбирает epub заново. Откат: my.js 68.0.
@@ -10592,10 +10593,27 @@
         DELETE_ICON_SVG: DELETE_ICON_SVG,
         openAppConfirmBar: openAppConfirmBar,
         loadQrLib: loadQrLib,
+        loadJsqrLib: loadJsqrLib,
         getMdEditor: function(){ return MdEditor; }
       });
     }
     ItemCardsMod.renderSettingsTabItemCards();
+  }
+  // Вход из оболочки (ScanActivity → MainActivity): открыть вкладку 9 и заметку карточки (mode "note")
+  // либо создание карточки под уже напечатанный код (mode "create"). Приложение уже запущено —
+  // оболочка зовёт window.__ltOpenCard; холодный старт — параметры адреса ?card=<id>&cardmode=…
+  function openCardFromNative(id, mode){
+    if(!/^[A-Za-z0-9]{4,32}$/.test(String(id || ""))) return;
+    openSettingsTabDirect("set2s_9");
+    if(ItemCardsMod) ItemCardsMod.openCardFromNative(String(id), mode === "create" ? "create" : "note");
+  }
+  window.__ltOpenCard = openCardFromNative;
+  function handleCardLaunchParam(){
+    var m = /[?&]card=([A-Za-z0-9]{4,32})(?:&|$)/.exec(location.search || "");
+    if(!m) return;
+    var mode = /[?&]cardmode=create(?:&|$)/.test(location.search) ? "create" : "note";
+    try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
+    setTimeout(function(){ openCardFromNative(m[1], mode); }, 0);
   }
   function renderSettingsTabSet2Stub(){
     var container = document.getElementById("settingsTabContent");
@@ -23605,6 +23623,7 @@
   checkForSharedFile();
   try{ pullNativeQuickTasks(); }catch(e){ if(window.Debug) window.Debug.log("Быстрая задача: " + (e && e.message ? e.message : e)); }
   try{ pushQuickTaskTheme(); }catch(e){}
+  try{ handleCardLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Карточка из оболочки: " + (e && e.message ? e.message : e)); }
   Notifications.start();
   initPersonalTasksShadow();
   initSettingsShadow(); // Шаг 9

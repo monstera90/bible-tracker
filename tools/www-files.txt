@@ -40,7 +40,9 @@ s89tasks.js
 s89draw.js
 s89fill.js
 imgresize.js
+cardscan.js
 itemcards.js
+scan.html
 mdeditor.js
 codemirror.bundle.js
 search.js
