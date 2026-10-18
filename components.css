@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 5.5 (17.10) — исправление внешнего вида вкладки 9 по сверке с ТЗ: убран `position:relative` у `.item-cards-tab` (нижний ряд и меню прилипали к концу содержимого, а не к низу окна, как у остальных вкладок), фон карточки в сетке — как у страницы (прозрачный; сплошная заливка только при показе по скану), колесо времени (выбранное значение по центру, полоса выбора, привязка по центру), дата в форме — таблетка, а не круг. Откат: components.css 5.4.
    Версия: 5.4 (17.10) — напоминания карточек: `.item-card-remind-btn` (часы в правом нижнем углу), `.item-card-attn` (жирная обводка после перехода из уведомления). Откат: components.css 5.3.
    Версия: 5.3 (17.10) — PDF: `.item-pdf-status` (строка «Готовлю PDF…» в меню размеров). Откат: components.css 5.2.
    Версия: 5.2 (17.10) — таймеры карточек: `.item-card-start-btn` («Пуск» внизу по центру), `.item-card-time.running/.paused`; цифры времени на карточке переименованы `.item-card-timer` → `.item-card-time` (старое имя совпадало с классом самой карточки типа «таймер», и правило с отступом и размером шрифта действовало на всю карточку). Откат: components.css 5.1.
@@ -4264,7 +4265,7 @@ body::after{
    переменная --item-card-w (ставит JS: две нижние вкладки × ползунок 0,7–2); всё внутри
    считается от неё. Пропорция 2:3. Цвета — только из темы (--ink, --bg-mid).
    =========================================================================== */
-.item-cards-tab{ position:relative; }
+/* position:relative здесь НЕЛЬЗЯ: нижний ряд (.mdeditor-fab-row), меню и ползунок позиционируются от .settings-modal-box, как у остальных вкладок */
 .item-cards-grid{
   display:grid;
   grid-template-columns:repeat(auto-fill, var(--item-card-w, 112px));
@@ -4280,7 +4281,7 @@ body::after{
   height:calc(var(--item-card-w, 112px) * 1.5);
   border:2px solid var(--ink, #000);
   border-radius:14px;
-  background:var(--bg-mid, #fbf4e2);
+  background:transparent; /* фон как у страницы приложения (ТЗ, часть 10, вопрос 25); сплошной — только .scan-card */
   color:var(--ink, #000);
   cursor:pointer;
   -webkit-tap-highlight-color:transparent;
@@ -4301,7 +4302,7 @@ body::after{
   justify-content:center;
   text-align:center;
 }
-.item-card-back{ background:var(--bg-mid, #fbf4e2); padding:0; }
+.item-card-back{ background:transparent; padding:0; } /* оборот — тот же фон, что у лица (фон страницы); QR лежит на своей светлой подложке */
 .item-card-qr{
   display:flex;
   align-items:center;
@@ -4355,18 +4356,43 @@ body::after{
 .item-card-page-btn svg{ width:100%; height:100%; }
 .item-card .book-cover-actions{ grid-template-columns:repeat(2, 36px); z-index:2; }
 
+/* меню «+» и меню размеров PDF: тот же вид, что у попап-меню «Общие задачи» (панель с текстовыми пунктами), но цвета —
+   от темы (--tab-bg, как у соседних кнопок ряда), иначе в тёмных темах панель оставалась белой */
 .item-type-menu{
   position:absolute;
   z-index:6;
   inset-inline-end:var(--fab-gap, 6px);
   bottom:calc(var(--fab-gap, 6px) * 2 + var(--fab-size, 36px));
   flex-direction:column;
-  gap:6px;
-  padding:8px;
-  background:#fffef8;
+  gap:4px;
+  min-width:200px;
+  padding:6px;
+  background:var(--tab-bg, #fffef8);
   border:1px solid var(--groove-shadow);
   border-radius:8px;
   box-shadow:0 2px 6px rgba(0,0,0,.28);
+}
+.item-type-menu .workbooks-run-btn{
+  display:block;
+  width:100%;
+  min-height:0;
+  margin:0;
+  padding:9px 10px;
+  text-align:left;
+  background:transparent;
+  border:none;
+  border-radius:6px;
+  box-shadow:none;
+  font-family:"Palatino Linotype",Georgia,serif;
+  font-size:14px;
+  color:var(--ink, inherit);
+  white-space:nowrap;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
+.item-type-menu .workbooks-run-btn:disabled{ opacity:.5; }
+@media (hover:hover) and (pointer:fine){
+  .item-type-menu .workbooks-run-btn:hover:not(:disabled){ background:rgba(127,127,127,.18); }
 }
 
 /* форма создания/правки */
@@ -4383,7 +4409,9 @@ body::after{
 }
 .item-form-icon svg{ width:100%; height:100%; }
 .item-form-icon.selected{ border:3px solid var(--ink, #000); padding:3px; }
-.item-form-date{ flex:0 0 auto; }
+.item-form-date{ flex:0 0 auto; --rb:40px; }
+/* дата в форме — таблетка с полной датой (круг на 32px из окна напоминания вмещает только число) */
+.item-form-date .reminder-bubble{ width:auto; min-width:var(--rb, 40px); padding:0 16px; border-radius:calc(var(--rb, 40px) / 2); font-size:16px; white-space:nowrap; }
 .item-form-error{ min-height:1.2em; color:#b3261e; font-size:13px; }
 .item-form-buttons{ display:flex; gap:10px; }
 .item-form-buttons .workbooks-run-btn{ flex:1 1 0; }
@@ -4394,18 +4422,29 @@ body::after{
 .item-wheel{
   position:relative;
   width:64px;
-  height:120px;
+  height:120px; /* три строки по 40px: выбранная — средняя, сверху и снизу соседние */
   overflow-y:auto;
   scroll-snap-type:y mandatory;
   -webkit-overflow-scrolling:touch;
   scrollbar-width:none;
-  border-top:1px solid var(--groove-shadow);
-  border-bottom:1px solid var(--groove-shadow);
+  -webkit-mask-image:linear-gradient(to bottom, transparent 0, #000 32%, #000 68%, transparent 100%);
+  mask-image:linear-gradient(to bottom, transparent 0, #000 32%, #000 68%, transparent 100%);
+}
+/* полоса выбранного значения: две линии вокруг средней строки */
+.item-wheel-col::before{
+  content:"";
+  position:absolute;
+  left:0; right:0; top:40px; height:40px;
+  box-sizing:border-box;
+  border-top:1px solid var(--ink-soft, var(--groove-shadow));
+  border-bottom:1px solid var(--ink-soft, var(--groove-shadow));
+  pointer-events:none;
+  z-index:1;
 }
 .item-wheel::-webkit-scrollbar{ display:none; }
 .item-wheel-row,
 .item-wheel-pad{ height:40px; line-height:40px; text-align:center; font-size:22px; font-variant-numeric:tabular-nums; }
-.item-wheel-row{ scroll-snap-align:start; }
+.item-wheel-row{ scroll-snap-align:center; }
 .item-wheel-label{ margin-top:4px; font-size:12px; color:var(--ink-soft, inherit); }
 
 
@@ -4463,6 +4502,7 @@ body::after{
   animation:scanCardFade .18s ease-out;
 }
 .scan-card{
+  background:var(--bg-mid, #fbf4e2); /* при показе по скану — сплошная заливка цветом темы, чтобы карточка не просвечивала */
   flex:0 0 auto;
   cursor:default;
   animation:scanCardPop .2s ease-out;
@@ -4525,7 +4565,7 @@ body::after{
   line-height:1.3;
   cursor:pointer;
 }
-.item-card-time.running{ text-decoration:underline; text-underline-offset:.15em; }
+.item-card-time.running{ font-weight:800; }
 .item-card-time.paused{ opacity:.6; }
 
 /* меню размеров PDF (itemcards.js, кнопка PDF): строка состояния под кнопками */
