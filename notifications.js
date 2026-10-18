@@ -1,5 +1,6 @@
 /* ===========================================================================
    notifications.js
+   Версия: 4.2 (17.10) — структурная правка: напоминания карточек вкладки 9 (id вида `card:<id>`, их отдаёт getRemindableTasks из my.js): клик по уведомлению ведёт к карточке (`openCardFromReminder`), у карточек нет «Готово/Завтра» (в окне, в браузерном уведомлении) и показывается плашка вместо карточки задачи; в снимок для оболочки добавлено `repeatDays`; в окне даты/времени слева появляется кнопка «повтор» (`opts.onRepeat`, периоды 1,2,3,5,10,14,21,30,60,90,180 дней, после 180 и долгое удержание — выключение). Откат: notifications.js 4.1.
    Версия: 4.1 (07.10) — шаг 5 переезда в APK (ПЕРЕЕЗД_В_APK.md): в нативной оболочке (есть window.LTNotify, см.
    native-shell.js) напоминания показывает ОБОЛОЧКА — точным будильником, при закрытом приложении тоже. Страница лишь
    присылает ей снимок напоминаний (pushNative: невыполненные задачи со сроком, которые ещё не показаны) и настройки
@@ -106,6 +107,8 @@ window.initNotificationsModule = function(deps){
   var closeModal = deps.closeModal;
   var getRemindableTasks = deps.getRemindableTasks;
   var openTaskFromReminder = deps.openTaskFromReminder || function(){};
+  var openCardFromReminder = deps.openCardFromReminder || function(){}; // напоминания карточек (id «card:<id>»)
+  function isCardId(id){ return String(id || "").indexOf("card:") === 0; }
   var snoozeTask = deps.snoozeTask || function(){};
   var completeTask = deps.completeTask || function(){};
   var getGroupWatch = deps.getGroupWatch || function(){ return null; };
@@ -438,6 +441,8 @@ window.initNotificationsModule = function(deps){
 
   // что делать после клика по уведомлению или его кнопке
   function handleNotificationAction(id, action, kind, at){
+    // карточка вкладки 9: у неё нет «Готово/Завтра», клик по уведомлению ведёт к карточке в сетке (с жирной обводкой)
+    if(isCardId(id)){ if(!action) openCardFromReminder(String(id).slice(5)); return; }
     // уведомление о новой общей задаче (my.js, 28.09): только открыть вкладку и
     // подсветить строку — без карточки-напоминания (отложить/готово там не нужны)
     if(kind === "group-task-new"){ openTaskAndFlash(id, NT ? 10000 : 0); return; }
@@ -472,6 +477,11 @@ window.initNotificationsModule = function(deps){
   function notifyTask(task, at){
     var id = task.id;
     var text = cleanText(task.c && task.c.text);
+    // карточка вкладки 9 (приложение открыто и на виду): плашка с названием, тап — к карточке; кнопок «Готово/Завтра» нет
+    if(isCardId(id) && (NT || document.visibilityState === "visible")){
+      showBanner("Напоминание: " + text, function(){ openCardFromReminder(String(id).slice(5)); }, true);
+      return;
+    }
     // оболочка (APK): системное уведомление показывает она; страница отвечает только за карточку на экране
     if(NT){ showTaskCard(id, text, at); return; }
     // приложение открыто и на виду — системное уведомление не нужно (оно
@@ -491,7 +501,7 @@ window.initNotificationsModule = function(deps){
       requireInteraction: true,
       vibrate: NOTIFY_VIBRATE,
       renotify: true, // тот же tag (повторное срабатывание после отсрочки) снова подаст сигнал
-      actions: getNotificationActions()
+      actions: isCardId(id) ? [] : getNotificationActions()
     }).catch(function(e){
       log("showNotification: " + (e && e.message ? e.message : e));
       fallback();
@@ -556,7 +566,10 @@ window.initNotificationsModule = function(deps){
       tasks.forEach(function(t){
         var at = getRemindAt(t);
         if(at == null || (t.c && t.c.checked === true) || fired[t.id] === at) return;
-        list.push({id: t.id, at: at, text: cleanText(t.c && t.c.text)});
+        var item = {id: t.id, at: at, text: cleanText(t.c && t.c.text)};
+        var rd = t.c && t.c.repeatDays;
+        if(typeof rd === "number" && rd > 0) item.repeatDays = rd; // повторяющееся напоминание карточки: оболочка сама сдвигает срок
+        list.push(item);
       });
       list.sort(function(a, b){ return a.at - b.at || (a.id < b.id ? -1 : 1); });
       var json = JSON.stringify(list);
@@ -724,11 +737,14 @@ window.initNotificationsModule = function(deps){
   }
 
   // opts: {anchorEl (кнопка-часы|null), getAnchorEl() (актуальная кнопка — строка перерисовывается
-  // после каждого сохранения, старая кнопка пропадает из DOM), currentTs (число|null), onSave(ts), onClear()}
+  // после каждого сохранения, старая кнопка пропадает из DOM), currentTs (число|null), onSave(ts), onClear(),
+  //        repeatDays (число, только для карточек), onRepeat(days) — если задан, слева в плашке кнопка «повтор»}
   // onClear сейчас не вызывается (напоминание снимается долгим нажатием на часы), оставлен в контракте.
   // ТЗ 29.09: нет текущего напоминания — оно сразу ставится на «сейчас + 30 минут» (нажатие на часы и есть
   // подтверждение), а изменения даты/времени сохраняются сразу; галочки нет.
   var SWIPE_CLOSE_PX = 10;
+  var REPEAT_STEPS = [1, 2, 3, 5, 10, 14, 21, 30, 60, 90, 180]; // период повтора в днях (ТЗ карточек, часть 11)
+  var REPEAT_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9"></path><path d="M20 4v4.5h-4.5"></path></svg>';
   function openReminderDialog(opts){
     closeBar();
     var hasCurrent = typeof opts.currentTs === "number" && opts.currentTs > 0;
@@ -743,7 +759,10 @@ window.initNotificationsModule = function(deps){
       return a || null;
     }
     bar.setAttribute("role", "dialog");
+    var hasRepeat = typeof opts.onRepeat === "function";
+    var repeatDays = hasRepeat ? (opts.repeatDays | 0) : 0;
     bar.innerHTML =
+      (hasRepeat ? '<button type="button" class="reminder-bubble reminder-bubble-repeat" id="mRemRepeatBtn" title="Повтор"></button>' : '') +
       '<button type="button" class="reminder-bubble reminder-bubble-date" id="mRemDateBtn" title="Дата"></button>' +
       '<button type="button" class="reminder-bubble reminder-bubble-time" id="mRemTimeBtn" title="Время"></button>' +
       '<input type="date" class="reminder-hidden-input" id="mRemDateInput" tabindex="-1" aria-hidden="true">' +
@@ -764,6 +783,7 @@ window.initNotificationsModule = function(deps){
     var timeBtn = bar.querySelector("#mRemTimeBtn");
     var dateInput = bar.querySelector("#mRemDateInput");
     var timeInput = bar.querySelector("#mRemTimeInput");
+    var repeatBtn = bar.querySelector("#mRemRepeatBtn");
     dateInput.min = toDateValue(Date.now());
     var savedDate = selDate, savedTime = selTime; // последнее СОХРАНЁННОЕ значение (откат при неверном)
 
@@ -778,6 +798,12 @@ window.initNotificationsModule = function(deps){
       timeBtn.classList.add("is-set");
       dateBtn.classList.remove("is-invalid");
       timeBtn.classList.remove("is-invalid");
+      if(repeatBtn){
+        repeatBtn.innerHTML = REPEAT_ICON_SVG + (repeatDays > 0 ? '<span class="rb-repeat-days">' + repeatDays + '</span>' : '');
+        repeatBtn.classList.toggle("is-set", repeatDays > 0);
+        repeatBtn.classList.toggle("has-days", repeatDays > 0);
+        repeatBtn.title = repeatDays > 0 ? "Повтор каждые " + repeatDays + " дн. (удерживайте — выключить)" : "Повтор выключен";
+      }
       if(barEl === bar) placeBar(bar, curAnchor()); // ширина плашки могла измениться
     }
     refresh();
@@ -846,6 +872,25 @@ window.initNotificationsModule = function(deps){
       schedule();
       if(barEl === bar) placeBar(bar, curAnchor());
       return true;
+    }
+    if(repeatBtn){
+      // нажатие — следующий период по кругу (1,2,3,5,10,14,21,30,60,90,180, затем выключено); удержание — выключить
+      var holdTimer = null, holdFired = false;
+      var setRepeat = function(d){ repeatDays = d; refresh(); try{ opts.onRepeat(d); }catch(e){} schedule(); };
+      var startHold = function(){ holdFired = false; clearTimeout(holdTimer); holdTimer = setTimeout(function(){ holdFired = true; if(repeatDays > 0) setRepeat(0); }, 450); };
+      var endHold = function(){ clearTimeout(holdTimer); holdTimer = null; };
+      repeatBtn.addEventListener("touchstart", startHold, {passive: true});
+      repeatBtn.addEventListener("mousedown", startHold);
+      repeatBtn.addEventListener("touchend", endHold);
+      repeatBtn.addEventListener("touchmove", endHold, {passive: true});
+      repeatBtn.addEventListener("mouseup", endHold);
+      repeatBtn.addEventListener("mouseleave", endHold);
+      repeatBtn.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+      repeatBtn.addEventListener("click", function(){
+        if(holdFired){ holdFired = false; return; }
+        var i = REPEAT_STEPS.indexOf(repeatDays);
+        setRepeat(i < 0 ? REPEAT_STEPS[0] : (i + 1 < REPEAT_STEPS.length ? REPEAT_STEPS[i + 1] : 0));
+      });
     }
     dateBtn.addEventListener("click", function(){ openNativePicker(dateInput); });
     timeBtn.addEventListener("click", function(){ openNativePicker(timeInput); });

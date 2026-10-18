@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 5.4 (17.10) — напоминания карточек: `.item-card-remind-btn` (часы в правом нижнем углу), `.item-card-attn` (жирная обводка после перехода из уведомления). Откат: components.css 5.3.
    Версия: 5.3 (17.10) — PDF: `.item-pdf-status` (строка «Готовлю PDF…» в меню размеров). Откат: components.css 5.2.
    Версия: 5.2 (17.10) — таймеры карточек: `.item-card-start-btn` («Пуск» внизу по центру), `.item-card-time.running/.paused`; цифры времени на карточке переименованы `.item-card-timer` → `.item-card-time` (старое имя совпадало с классом самой карточки типа «таймер», и правило с отступом и размером шрифта действовало на всю карточку). Откат: components.css 5.1.
    Версия: 5.1 (16.10) — структурная правка: сканирование карточек (cardscan.js, itemcards.js): `.card-scan-screen*` (полноэкранный сканер), `.scan-card-overlay`, `.scan-card`, `.scan-card-today-btn`, `.scan-notice*`. Откат: components.css 5.0.
@@ -4532,4 +4533,19 @@ body::after{
   font-size:13px;
   text-align:center;
   color:var(--ink-soft, inherit);
+}
+
+/* напоминания карточек (шаг 6а): часы в правом нижнем углу карточки-предмета и заметки — тот же вид и состояния, что у задач
+   (.task-icon-btn.task-reminder-btn, modals.css); размер задаёт ширина карточки */
+.item-card-remind-btn{
+  position:absolute;
+  right:calc(var(--item-card-w, 112px) * 0.04);
+  bottom:calc(var(--item-card-w, 112px) * 0.04);
+  --task-btn:calc(var(--item-card-w, 112px) * 0.2);
+  font-size:calc(var(--item-card-w, 112px) * 0.1);
+}
+.scan-card .item-card-remind-btn{ display:none; }
+/* переход из уведомления: более жирная обводка (внутрь, чтобы не сдвигать сетку); снимается при первом взаимодействии */
+.item-card.item-card-attn{
+  box-shadow:inset 0 0 0 calc(var(--item-card-w, 112px) * 0.035) var(--ink, #000);
 }

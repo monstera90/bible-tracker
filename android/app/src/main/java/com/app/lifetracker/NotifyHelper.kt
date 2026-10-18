@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.0 (17.10) — напоминания карточек (id «card:<id>») без кнопок «Готово/Завтра».
 
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
@@ -100,7 +101,7 @@ object NotifyHelper {
     fun postReminder(ctx: Context, r: NotifyStore.Reminder, now: Long): Boolean {
         return try {
             ensureChannels(ctx)
-            val text = if (r.text.isBlank()) "Задача без названия" else r.text
+            val text = if (r.text.isBlank()) (if (r.id.startsWith("card:")) "Карточка без названия" else "Задача без названия") else r.text
             val body = if (now - r.at > LATE_MS) text + "\n(" + formatWhen(r.at) + ")" else text
             val n = NotificationCompat.Builder(ctx, CHANNEL_REMINDERS)
                 .setSmallIcon(R.drawable.ic_stat_notify)
@@ -114,10 +115,13 @@ object NotifyHelper {
                 .setDefaults(NotificationCompat.DEFAULT_SOUND)
                 .setAutoCancel(true)
                 .setContentIntent(openIntent(ctx, r.id, ""))
-                .addAction(0, "✓ Готово", actionIntent(ctx, NotifyReceiver.ACTION_DONE, r.id, r.at))
-                .addAction(0, "Завтра", actionIntent(ctx, NotifyReceiver.ACTION_TOMORROW, r.id, r.at))
-                .build()
-            NotificationManagerCompat.from(ctx).notify(TAG_REMINDER_PREFIX + r.id, NOTIFICATION_ID, n)
+            // «✓ Готово» и «Завтра» — только у задач; у карточек (id «card:<id>») их нет: клик ведёт к карточке в сетке
+            if (!r.id.startsWith("card:")) {
+                n.addAction(0, "✓ Готово", actionIntent(ctx, NotifyReceiver.ACTION_DONE, r.id, r.at))
+                    .addAction(0, "Завтра", actionIntent(ctx, NotifyReceiver.ACTION_TOMORROW, r.id, r.at))
+            }
+            val built = n.build()
+            NotificationManagerCompat.from(ctx).notify(TAG_REMINDER_PREFIX + r.id, NOTIFICATION_ID, built)
             true
         } catch (e: Exception) {
             false

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.0 (17.10) — у напоминания поле repeatDays (повтор напоминаний карточек).
 
 import android.content.Context
 import org.json.JSONArray
@@ -35,7 +36,8 @@ object NotifyStore {
     @Volatile
     var appForeground: Boolean = false
 
-    class Reminder(val id: String, val at: Long, val text: String)
+    /** repeatDays > 0 — повторяющееся напоминание карточки (id вида «card:<id>»): после показа срок сдвигается на период. */
+    class Reminder(val id: String, val at: Long, val text: String, val repeatDays: Int = 0)
 
     private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -61,7 +63,7 @@ object NotifyStore {
             val id = o.optString("id", "")
             val at = o.optLong("at", 0L)
             if (id.isEmpty() || at <= 0L) continue
-            out.add(Reminder(id, at, o.optString("text", "")))
+            out.add(Reminder(id, at, o.optString("text", ""), o.optInt("repeatDays", 0).coerceIn(0, 365)))
         }
         out
     }

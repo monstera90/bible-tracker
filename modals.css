@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 14.2 (17.10) — кнопка «повтор» в плашке напоминания (`.reminder-bubble-repeat`, `.rb-repeat-days`) — для напоминаний карточек.
    Версия: 14.1 (16.10) — значки под задачей (`.task-body > .task-actions`) переносятся на следующую строку, если не помещаются в ширину строки (крупный размер значков, узкий экран).
    Версия: 14.0 (14.10) — структурная правка: ползунок размера шрифта `.fontsize-bar` (+ `.fontsize-bar-range`, `.fontsize-bar-val`) для попапов «Аа» (задачи, «Мой блокнот», ридер книг): тот же вид, что у `.task-iconsize-popup`, но на второй «ступеньке» над рядом (первую занимает кнопка переносов слов). Откат: modals.css 13.0.
    Версия: 13.0 (14.10) — структурная правка: (1) размер значков управления задачей задаётся одним множителем `--task-ico-scale` (кнопка 22px → `--task-btn`, пиктограмма 15px → `--task-ico`, кружок 19px → `--task-circle`, внутренний кружок приоритета 12px → `--task-flag-inner`, шрифт времени/числа напоминания); множитель ставит my.js (`applyTaskIconScale`), по умолчанию 1 — вид прежний. (2) новая кнопка нижнего ряда задач `.task-iconsize-wrap` (слот 6, сразу слева от «Аа») и её всплывающий ползунок `.task-iconsize-popup` (высота кнопки, над рядом на расстоянии `--fab-gap`, ширина по окну, но не больше 9 кнопок с промежутками); слоты левее сдвинуты на +1: Ч 7, П 8, К 9, Ж 10, «глаз»/сортировка/меню/звенья/«i» 11, «i» дальняя 12.
@@ -1778,6 +1779,10 @@
     gap:8px;
     justify-content:center;
   }
+  .reminder-bubble-repeat{ width:var(--rb, 32px); border-radius:50%; }
+  .reminder-bubble-repeat.has-days{ width:auto; min-width:var(--rb, 32px); padding:0 calc(var(--rb, 32px) * .3); border-radius:calc(var(--rb, 32px) / 2); gap:2px; }
+  .reminder-bubble-repeat .rb-repeat-days{ font-size:calc(var(--rb, 32px) * .42); }
+  .reminder-bubble-repeat svg{ width:calc(var(--rb, 32px) * .5); height:calc(var(--rb, 32px) * .5); }
   .reminder-bubble-date{ width:var(--rb, 32px); border-radius:50%; }
   .reminder-bubble-time{ min-width:calc(var(--rb, 32px) * 1.9); padding:0 calc(var(--rb, 32px) * .35); border-radius:calc(var(--rb, 32px) / 2); }
   .reminder-bubble.is-set{

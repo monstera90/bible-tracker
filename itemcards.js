@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 6.0 (17.10) — структурная правка: напоминания карточек (шаг 6а ТЗ): кнопка-часы в правом нижнем углу карточки-предмета и заметки (у таймера нет), окно даты/времени и повтор (1…180 дней) из notifications.js, поля remindAt/repeatDays (синхронизируются) и remindDone (только на устройстве), `getRemindableCards` для планировщика (my.js getRemindableTasks), `focusCard` — переход к карточке из уведомления с жирной обводкой до первого взаимодействия. Откат: itemcards.js 5.0.
    Версия: 5.0 (17.10) — структурная правка: кнопка «PDF» в нижнем ряду (после сканера; на Android 5 её нет) и меню «4 / 12 / 24 на лист» — `openPdfMenu`/`exportPdf`, сборка листов в cardpdf.js, сохранение в «Загрузки» через <a download>. Откат: itemcards.js 4.0.
    Версия: 4.0 (17.10) — структурная правка: таймеры карточек (шаг 5а ТЗ): кнопка «Пуск» (внизу по центру) на карточке-таймере, оставшееся время в сетке и на показе по скану, запуск таймера по скану (`startTimerForCard`, `getTimerApi`: оболочка — CardTimers через мост, scan.html — `deps.timers`, браузер — запасной таймер в localStorage `itemCardTimers_v1`). Откат: itemcards.js 3.0.
    Версия: 3.0 (17.10) — структурная правка: синхронизация записей карточек (вариант А ТЗ, 12.4): зеркало каждой карточки в скрытой записи заметок через mdeditor.js (`cardMetaSave/Remove/All/Pull/Status`), сверка `reconcileCloud` (last-write-wins по updatedAt; «уже синхронизирована» и «удалить в облаке» хранятся в `itemCardsSync_v1`), запуск при входе во вкладку, после каждого сохранения (debounce) и по приходу правок с другого устройства. Откат: itemcards.js 2.0.
@@ -87,6 +88,7 @@ window.initItemCardsModule = function(deps){
   function saveCards(){
     persistCards();
     scheduleCloudSync();
+    rescheduleReminders(); // название, дата-время или повтор могли поменяться — планировщик пересчитывает сроки
   }
 
   // ---------- синхронизация записей карточек (вариант А ТЗ 12.4) ----------
@@ -121,6 +123,11 @@ window.initItemCardsModule = function(deps){
       updatedAt: Number(r.updatedAt) || 0
     };
     if(r.type === "note") o.noteId = String(r.noteId == null ? "" : r.noteId).slice(0, 64);
+    if(r.type !== "timer"){
+      // напоминание карточки: выбранная дата-время и период повтора (remindDone — только на этом устройстве, наружу не идёт)
+      o.remindAt = Math.max(0, Math.floor(Number(r.remindAt) || 0));
+      o.repeatDays = REPEAT_STEPS.indexOf(r.repeatDays | 0) >= 0 ? (r.repeatDays | 0) : 0;
+    }
     return o;
   }
   // true — локальный список изменился (пришло из облака / удалено на другом устройстве)
@@ -159,18 +166,25 @@ window.initItemCardsModule = function(deps){
       delete remote[c.id];
       info.synced[c.id] = 1;
       var ru = r.updatedAt || 0, lu = c.updatedAt || 0;
-      if(ru > lu){ out.push(r); changed = true; return; }
+      if(ru > lu){
+        // пришла более новая версия: журнал срабатываний (remindDone) остаётся своим, если напоминание то же; иначе отсчёт заново
+        var same = (Number(c.remindAt) || 0) === (Number(r.remindAt) || 0) && repeatOf(c) === repeatOf(r);
+        r.remindDone = same ? (Number(c.remindDone) || 0) : 0;
+        if(!same) markPastDone(r);
+        out.push(r); changed = true; return;
+      }
       if(lu > ru){ var m2 = cloudShape(c); if(m2) md.cardMetaSave(m2); }
       out.push(c);
     });
     // 4) новые из облака
     Object.keys(remote).forEach(function(id){
+      markPastDone(remote[id]); // повтор уже шёл на другом устройстве: прошлые сроки здесь не показываем
       out.push(remote[id]);
       info.synced[id] = 1;
       changed = true;
     });
     saveSyncInfo(info);
-    if(changed){ cardsCache = out; persistCards(); }
+    if(changed){ cardsCache = out; persistCards(); rescheduleReminders(); }
     return changed;
   }
   function gridVisible(){ return screenMode === "grid" && !!document.getElementById("itemCardsGrid"); }
@@ -262,6 +276,105 @@ window.initItemCardsModule = function(deps){
   }
 
   // ---------- сетка ----------
+  // ---------- напоминания карточек (шаг 6а ТЗ) ----------
+  var REPEAT_STEPS = [1, 2, 3, 5, 10, 14, 21, 30, 60, 90, 180];
+  var DAY_MS = 86400000;
+  var FIRED_KEY = "taskRemindersFired_v1"; // «уже показанные» напоминания (notifications.js) — id карточек там вида «card:<id>»
+  function repeatOf(c){ var d = (c && c.repeatDays) | 0; return REPEAT_STEPS.indexOf(d) >= 0 ? d : 0; }
+  // ближайший срок: без повтора — выбранный; с повтором — первый срок «выбранная дата + k периодов» после уже отработанного
+  function nextOccurrence(c){
+    var base = Number(c && c.remindAt) || 0;
+    if(!(base > 0)) return 0;
+    var p = repeatOf(c) * DAY_MS;
+    if(!p) return base;
+    var done = Number(c.remindDone) || 0;
+    if(done < base) return base;
+    return base + (Math.floor((done - base) / p) + 1) * p;
+  }
+  // последний наступивший срок повтора (новые с другого устройства карточки не должны «догонять» прошлое)
+  function markPastDone(c){
+    var p = repeatOf(c) * DAY_MS, base = Number(c.remindAt) || 0, now = Date.now();
+    if(p && base > 0 && base <= now) c.remindDone = base + Math.floor((now - base) / p) * p;
+  }
+  function remindBtnHtml(c){
+    if(c.type === "timer" || !deps.reminderBtnParts) return "";
+    var at = nextOccurrence(c);
+    var p = deps.reminderBtnParts(at || 0);
+    return '<button type="button" class="task-icon-btn task-reminder-btn item-card-remind-btn' + (at ? ' active' : '') + p.cls + '" data-card-id="' + escapeHtml(c.id) + '" title="' +
+      (at && deps.formatReminder ? escapeHtml("Напоминание: " + deps.formatReminder(at) + (repeatOf(c) ? ", повтор каждые " + repeatOf(c) + " дн." : "")) : "Напоминание") + '">' + p.inner + '</button>';
+  }
+  function refreshRemindBtn(c){
+    var b = document.querySelector('.item-card-remind-btn[data-card-id="' + c.id + '"]');
+    if(!b || !deps.reminderBtnParts) return;
+    var at = nextOccurrence(c);
+    var p = deps.reminderBtnParts(at || 0);
+    b.className = 'task-icon-btn task-reminder-btn item-card-remind-btn' + (at ? ' active' : '') + p.cls;
+    b.innerHTML = p.inner;
+    b.title = at && deps.formatReminder ? "Напоминание: " + deps.formatReminder(at) + (repeatOf(c) ? ", повтор каждые " + repeatOf(c) + " дн." : "") : "Напоминание";
+  }
+  // снимок для планировщика уведомлений (my.js getRemindableTasks → notifications.js): [{id: "card:<id>", c: {text, remindAt, repeatDays, checked}}]
+  function getRemindableCards(){
+    var fired = {};
+    try{ fired = JSON.parse(localStorage.getItem(FIRED_KEY) || "{}") || {}; }catch(e){ fired = {}; }
+    var changed = false, out = [];
+    loadCards().forEach(function(c){
+      if(c.type === "timer" || !(Number(c.remindAt) > 0)) return;
+      var key = "card:" + c.id, f = fired[key];
+      // срабатывание повтора (здесь или в оболочке) запоминаем в самой карточке: журнал показанных чистится через ~2 месяца
+      if(repeatOf(c) && typeof f === "number" && f > (Number(c.remindDone) || 0)){ c.remindDone = f; changed = true; }
+      var at = nextOccurrence(c);
+      if(at > 0) out.push({ id: key, c: { text: c.title || "", remindAt: at, repeatDays: repeatOf(c), checked: false } });
+    });
+    if(changed) persistCards();
+    return out;
+  }
+  function rescheduleReminders(){ if(deps.rescheduleReminders) deps.rescheduleReminders(); }
+  function openCardReminder(c){
+    if(!deps.openReminderDialog) return;
+    var sel = '.item-card-remind-btn[data-card-id="' + c.id + '"]';
+    var btn = function(){ return document.querySelector(sel); };
+    deps.openReminderDialog({
+      anchorEl: btn(),
+      getAnchorEl: btn,
+      currentTs: nextOccurrence(c) || null,
+      repeatDays: repeatOf(c),
+      onSave: function(ts){
+        var cur = findCard(c.id);
+        if(!cur) return;
+        cur.remindAt = ts; cur.remindDone = 0; cur.updatedAt = Date.now(); // новая выбранная дата — отсчёт повтора заново
+        saveCards(); refreshRemindBtn(cur);
+      },
+      onRepeat: function(d){
+        var cur = findCard(c.id);
+        if(!cur) return;
+        if(d === 0 && repeatOf(cur)){ cur.remindAt = nextOccurrence(cur) || cur.remindAt; cur.remindDone = 0; } // выключили повтор: остаётся ближайший срок
+        cur.repeatDays = d;
+        cur.updatedAt = Date.now();
+        saveCards(); refreshRemindBtn(cur);
+      }
+    });
+  }
+  function clearCardReminder(id){
+    var cur = findCard(id);
+    if(!cur) return;
+    cur.remindAt = 0; cur.repeatDays = 0; cur.remindDone = 0; cur.updatedAt = Date.now();
+    saveCards(); refreshRemindBtn(cur);
+  }
+  // выделение карточки жирной обводкой (переход из уведомления); пропадает после первого взаимодействия
+  var attentionId = null;
+  function clearAttention(id){
+    if(attentionId !== id) return;
+    attentionId = null;
+    var el = cardEl(id);
+    if(el) el.classList.remove("item-card-attn");
+  }
+  function focusCard(id){
+    attentionId = findCard(id) ? id : null;
+    renderGrid();
+    var el = attentionId ? cardEl(attentionId) : null;
+    if(el && el.scrollIntoView) el.scrollIntoView({ block: "center" });
+  }
+
   function cardFrontHtml(c){
     var icon = iconSvg(c.icon);
     if(c.type === "timer"){
@@ -272,7 +385,8 @@ window.initItemCardsModule = function(deps){
     return '<div class="item-card-icon">' + icon + '</div>' +
       '<div class="item-card-title"></div>' +
       '<div class="item-card-date">' + escapeHtml(isoToRu(c.date)) + '</div>' +
-      (c.type === "note" ? '<button type="button" class="item-card-page-btn" title="Поля карточки">' + PAGE_ICON_SVG + '</button>' : '');
+      (c.type === "note" ? '<button type="button" class="item-card-page-btn" title="Поля карточки">' + PAGE_ICON_SVG + '</button>' : '') +
+      remindBtnHtml(c);
   }
   function renderGrid(){
     screenMode = "grid";
@@ -319,7 +433,7 @@ window.initItemCardsModule = function(deps){
     }
     cards.forEach(function(c){
       var card = document.createElement("div");
-      card.className = "item-card item-card-" + c.type;
+      card.className = "item-card item-card-" + c.type + (attentionId === c.id ? " item-card-attn" : "");
       card.dataset.id = c.id;
       var revealed = !!revealedIds[c.id];
       card.innerHTML =
@@ -395,12 +509,18 @@ window.initItemCardsModule = function(deps){
     var pressTimer = null, startXY = null, longFired = false;
     var lastTapId = null, lastTapAt = 0, singleTimer = null;
     function clearPress(){ clearTimeout(pressTimer); pressTimer = null; }
-    function startPress(cardNode, x, y){
+    function startPress(cardNode, x, y, target){
       if(!cardNode) return;
       longFired = false; startXY = { x: x, y: y };
       clearPress();
+      // удержание часов напоминания — снять напоминание (как у задач); кнопки правки/удаления при этом не раскрываются
+      if(target && target.closest && target.closest(".item-card-remind-btn")){
+        pressTimer = setTimeout(function(){ longFired = true; clearCardReminder(cardNode.dataset.id); }, LONG_MS);
+        return;
+      }
       pressTimer = setTimeout(function(){
         longFired = true;
+        clearAttention(cardNode.dataset.id);
         revealedIds[cardNode.dataset.id] = true;
         var btns = cardNode.querySelectorAll(".mdeditor-edit-btn, .mdeditor-delete-btn");
         for(var i = 0; i < btns.length; i++) btns[i].classList.add("visible");
@@ -411,11 +531,11 @@ window.initItemCardsModule = function(deps){
       var dx = x - startXY.x, dy = y - startXY.y;
       if(Math.sqrt(dx * dx + dy * dy) > MOVE_PX) clearPress();
     }
-    grid.addEventListener("touchstart", function(e){ var t = e.touches[0]; startPress(e.target.closest(".item-card"), t.clientX, t.clientY); }, { passive: true });
+    grid.addEventListener("touchstart", function(e){ var t = e.touches[0]; startPress(e.target.closest(".item-card"), t.clientX, t.clientY, e.target); }, { passive: true });
     grid.addEventListener("touchmove", function(e){ var t = e.touches[0]; movePress(t.clientX, t.clientY); }, { passive: true });
     grid.addEventListener("touchend", clearPress);
     grid.addEventListener("touchcancel", clearPress);
-    grid.addEventListener("mousedown", function(e){ startPress(e.target.closest(".item-card"), e.clientX, e.clientY); });
+    grid.addEventListener("mousedown", function(e){ startPress(e.target.closest(".item-card"), e.clientX, e.clientY, e.target); });
     grid.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
     grid.addEventListener("mouseup", clearPress);
     grid.addEventListener("mouseleave", clearPress);
@@ -429,6 +549,8 @@ window.initItemCardsModule = function(deps){
       if(!c) return;
       if(longFired){ longFired = false; return; }
       e.stopPropagation();
+      clearAttention(id); // любое взаимодействие с карточкой снимает жирную обводку
+      if(e.target.closest(".item-card-remind-btn")){ hideRevealed(); openCardReminder(c); return; }
       if(e.target.closest(".mdeditor-edit-btn")){ hideRevealed(); openForm(c.type, c); return; }
       if(e.target.closest(".mdeditor-delete-btn")){
         openAppConfirmBar("Удалить карточку «" + (c.title || "без названия") + "»? QR-код перестанет работать.", function(){
@@ -1134,6 +1256,8 @@ window.initItemCardsModule = function(deps){
   return {
     renderSettingsTabItemCards: renderSettingsTabItemCards,
     openScan: openScan,
+    getRemindableCards: getRemindableCards,
+    focusCard: focusCard,
     openCardFromNative: openCardFromNative,
     startStandaloneScan: startStandaloneScan,
     getCards: function(){ return loadCards().slice(); },

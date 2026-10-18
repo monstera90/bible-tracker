@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.0 (17.10) — fireDue: повторяющиеся напоминания (repeatDays) сдвигают срок на период, а не выбывают.
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -79,7 +80,16 @@ object ReminderScheduler {
         val canShow = !NotifyStore.appForeground && NotifyHelper.enabled(ctx)
         for (r in due) {
             val shown = canShow && NotifyHelper.postReminder(ctx, r, now)
-            NotifyStore.markFired(ctx, r.id, r.at, shown)
+            if (r.repeatDays > 0) {
+                // Повторяющееся (карточка): одно уведомление за все пропущенные сроки. «Отработанным» считаем последний
+                // наступивший срок (база + k периодов), следующий — через период; страница считает так же (itemcards.js).
+                val period = r.repeatDays * 86_400_000L
+                val last = r.at + ((now - r.at) / period) * period
+                NotifyStore.markFired(ctx, r.id, last, shown)
+                NotifyStore.updateReminderAt(ctx, r.id, last + period)
+            } else {
+                NotifyStore.markFired(ctx, r.id, r.at, shown)
+            }
         }
     }
 }

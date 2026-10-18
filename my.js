@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 73.0 (17.10) — структурная правка: напоминания карточек вкладки 9 — `ensureItemCards` (модуль создаётся и до захода на вкладку), `getRemindableTasks` добавляет `ItemCardsMod.getRemindableCards()`, `openCardFromReminder` (деп notifications.js), деп `reminderBtnParts/openReminderDialog/rescheduleReminders/formatReminder` у `initItemCardsModule`. Откат: my.js 72.2.
    Версия: 72.2 (17.10) — ключ `itemCardTimers_v1` внесён в EXPORT_REGISTRY.exclude. Откат: my.js 72.1.
    Версия: 72.1 (17.10) — ключ `itemCardsSync_v1` внесён в EXPORT_REGISTRY.exclude (служебный, у каждого устройства свой). Откат: my.js 72.0.
    Версия: 72.0 (16.10) — структурная правка: сканирование карточек — деп `loadJsqrLib` в `initItemCardsModule`, вход из оболочки `window.__ltOpenCard(id, mode)` / параметры `?card=<id>&cardmode=note|create` при старте (`openCardFromNative`, `handleCardLaunchParam`). Откат: my.js 71.0.
@@ -7499,6 +7500,7 @@
     closeModal: closeModal,
     getRemindableTasks: getRemindableTasks,
     openTaskFromReminder: openReminderTask,
+    openCardFromReminder: openCardFromReminder,
     // «Завтра» и пузыри отсрочки: новый срок напоминания (общая задача — тем же путём, setTaskReminder сам знает про права)
     snoozeTask: function(id, ts){
       if(setTaskReminder(id, ts)){ try{ rerenderJointTasksTabIfOpen(); }catch(e){} }
@@ -10588,7 +10590,8 @@
   // «Карточки предметов» (set2s_9): модуль создаётся при первом заходе (иконки домика и пр. объявлены
   // в my.js ниже по файлу, поэтому не при загрузке скрипта).
   var ItemCardsMod = null;
-  function renderSettingsTabItemCards(){
+  // модуль нужен и без захода на вкладку: планировщик напоминаний берёт у него сроки карточек
+  function ensureItemCards(){
     if(!ItemCardsMod){
       ItemCardsMod = window.initItemCardsModule({
         escapeHtml: escapeHtml,
@@ -10598,10 +10601,24 @@
         openAppConfirmBar: openAppConfirmBar,
         loadQrLib: loadQrLib,
         loadJsqrLib: loadJsqrLib,
-        getMdEditor: function(){ return MdEditor; }
+        getMdEditor: function(){ return MdEditor; },
+        // напоминания карточек: кнопка-часы, окно даты/времени с повтором и пересчёт сроков — те же, что у задач
+        reminderBtnParts: reminderBtnParts,
+        formatReminder: function(ts){ return Notifications.formatReminder(ts); },
+        openReminderDialog: function(o){ Notifications.openReminderDialog(o); },
+        rescheduleReminders: function(){ try{ Notifications.schedule(); }catch(e){} }
       });
     }
-    ItemCardsMod.renderSettingsTabItemCards();
+    return ItemCardsMod;
+  }
+  function renderSettingsTabItemCards(){
+    ensureItemCards().renderSettingsTabItemCards();
+  }
+  // клик по уведомлению о карточке (notifications.js): вкладка 9, прокрутка к карточке, жирная обводка до первого взаимодействия
+  function openCardFromReminder(cardId){
+    if(!/^[A-Za-z0-9]{4,32}$/.test(String(cardId || ""))) return;
+    openSettingsTabDirect("set2s_9");
+    ensureItemCards().focusCard(String(cardId));
   }
   // Вход из оболочки (ScanActivity → MainActivity): открыть вкладку 9 и заметку карточки (mode "note")
   // либо создание карточки под уже напечатанный код (mode "create"). Приложение уже запущено —
@@ -10609,7 +10626,7 @@
   function openCardFromNative(id, mode){
     if(!/^[A-Za-z0-9]{4,32}$/.test(String(id || ""))) return;
     openSettingsTabDirect("set2s_9");
-    if(ItemCardsMod) ItemCardsMod.openCardFromNative(String(id), mode === "create" ? "create" : "note");
+    ensureItemCards().openCardFromNative(String(id), mode === "create" ? "create" : "note");
   }
   window.__ltOpenCard = openCardFromNative;
   function handleCardLaunchParam(){
@@ -20421,6 +20438,8 @@
     if(isGroupTasksActive()){
       try{ list = list.concat(getAllGroupTasks()); }catch(e){}
     }
+    // карточки вкладки 9 с напоминанием (id «card:<id>»); сбой модуля карточек не должен ломать напоминания задач
+    try{ list = list.concat(ensureItemCards().getRemindableCards()); }catch(e){}
     return list;
   }
   // клик по уведомлению (notifications.js): открыть окно задач на вкладке с напоминаниями
