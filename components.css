@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 5.6 (18.10) — карточки менее вытянутые: пропорция 3:4 вместо 2:3 (высота = ширина × 1,3333); под это в `.item-card-front` оставлена нижняя полоса (padding-bottom 0,26 ширины) и пиктограмма уменьшена с 0,45 до 0,36 ширины, чтобы содержимое не наезжало на часы, значок листа и «Пуск». Откат: components.css 5.5.
    Версия: 5.5 (17.10) — исправление внешнего вида вкладки 9 по сверке с ТЗ: убран `position:relative` у `.item-cards-tab` (нижний ряд и меню прилипали к концу содержимого, а не к низу окна, как у остальных вкладок), фон карточки в сетке — как у страницы (прозрачный; сплошная заливка только при показе по скану), колесо времени (выбранное значение по центру, полоса выбора, привязка по центру), дата в форме — таблетка, а не круг. Откат: components.css 5.4.
    Версия: 5.4 (17.10) — напоминания карточек: `.item-card-remind-btn` (часы в правом нижнем углу), `.item-card-attn` (жирная обводка после перехода из уведомления). Откат: components.css 5.3.
    Версия: 5.3 (17.10) — PDF: `.item-pdf-status` (строка «Готовлю PDF…» в меню размеров). Откат: components.css 5.2.
@@ -4278,7 +4279,7 @@ body::after{
   position:relative;
   box-sizing:border-box;
   width:var(--item-card-w, 112px);
-  height:calc(var(--item-card-w, 112px) * 1.5);
+  height:calc(var(--item-card-w, 112px) * 1.3333); /* пропорция 3:4 (заказчик, 18.10: менее вытянутые, чем 2:3) */
   border:2px solid var(--ink, #000);
   border-radius:14px;
   background:transparent; /* фон как у страницы приложения (ТЗ, часть 10, вопрос 25); сплошной — только .scan-card */
@@ -4302,6 +4303,7 @@ body::after{
   justify-content:center;
   text-align:center;
 }
+.item-card-front{ padding-bottom:calc(var(--item-card-w, 112px) * 0.26); } /* нижняя полоса под часы, значок листа и «Пуск» — при пропорции 3:4 содержимое не должно на них наезжать */
 .item-card-back{ background:transparent; padding:0; } /* оборот — тот же фон, что у лица (фон страницы); QR лежит на своей светлой подложке */
 .item-card-qr{
   display:flex;
@@ -4314,9 +4316,9 @@ body::after{
 .item-card-qr img,
 .item-card-qr canvas{ display:block; }
 .item-card-icon{
-  width:calc(var(--item-card-w, 112px) * 0.45);
-  height:calc(var(--item-card-w, 112px) * 0.45);
-  margin-bottom:calc(var(--item-card-w, 112px) * 0.05);
+  width:calc(var(--item-card-w, 112px) * 0.36);
+  height:calc(var(--item-card-w, 112px) * 0.36);
+  margin-bottom:calc(var(--item-card-w, 112px) * 0.04);
 }
 .item-card-icon svg{ width:100%; height:100%; }
 .item-card-title{

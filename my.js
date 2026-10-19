@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 73.1 (18.10) — вкладка «Дополнительные возможности»: кнопка «Создать ярлык сканера QR-кодов» (+ подсказка и «Открыть разрешения приложения»), `hasScanShortcutBridge`. Откат: my.js 73.0.
    Версия: 73.0 (17.10) — структурная правка: напоминания карточек вкладки 9 — `ensureItemCards` (модуль создаётся и до захода на вкладку), `getRemindableTasks` добавляет `ItemCardsMod.getRemindableCards()`, `openCardFromReminder` (деп notifications.js), деп `reminderBtnParts/openReminderDialog/rescheduleReminders/formatReminder` у `initItemCardsModule`. Откат: my.js 72.2.
    Версия: 72.2 (17.10) — ключ `itemCardTimers_v1` внесён в EXPORT_REGISTRY.exclude. Откат: my.js 72.1.
    Версия: 72.1 (17.10) — ключ `itemCardsSync_v1` внесён в EXPORT_REGISTRY.exclude (служебный, у каждого устройства свой). Откат: my.js 72.0.
@@ -10611,6 +10612,10 @@
     }
     return ItemCardsMod;
   }
+  // ярлык сканера QR на рабочий стол умеет создавать только оболочка (NativeBridge версии 8)
+  function hasScanShortcutBridge(){
+    return !!(window.LifeTrackerNative && typeof window.LifeTrackerNative.createScanShortcut === "function");
+  }
   function renderSettingsTabItemCards(){
     ensureItemCards().renderSettingsTabItemCards();
   }
@@ -17096,6 +17101,12 @@
       '<div class="settings-row"><span>Включить полноэкранный режим</span><input type="checkbox" id="settingsHideStatusBarCb"' + (hideStatusBarOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" style="border-bottom:none;"><span>Включить режим отладки</span><input type="checkbox" id="settingsDebugModeCb"' + (debugModeOn ? " checked" : "") + '></div>' +
       '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:16px;">Добавить для себя цель</button>' +
+      // ярлык сканера QR-кодов карточек на рабочий стол: только в приложении (оболочка), в браузере создать ярлык нельзя
+      (hasScanShortcutBridge() ?
+        '<button class="modal-btn" id="settingsScanShortcutBtn" style="margin-top:10px;">Создать ярлык сканера QR-кодов</button>' +
+        '<div class="modal-note" id="settingsScanShortcutNote" style="display:none;"></div>' +
+        '<button class="modal-btn" id="settingsShortcutPermBtn" style="margin-top:8px; display:none;">Открыть разрешения приложения</button>'
+        : '') +
       (isSet2Unlocked() ? '' :
         '<div class="settings-row" style="border-bottom:none; flex-direction:column; align-items:stretch; gap:8px; margin-top:16px;">' +
           '<span>Введите секретный код</span>' +
@@ -17182,6 +17193,31 @@
       // передаём галочку туда.
       if(window.Debug) window.Debug.setEnabled(this.checked);
     });
+
+    var scanShortcutBtn = document.getElementById("settingsScanShortcutBtn");
+    if(scanShortcutBtn){
+      var scanShortcutNote = document.getElementById("settingsScanShortcutNote");
+      var shortcutPermBtn = document.getElementById("settingsShortcutPermBtn");
+      scanShortcutBtn.addEventListener("click", function(){
+        var res = "";
+        try{ res = String(window.LifeTrackerNative.createScanShortcut() || ""); }catch(e){ res = "error"; }
+        var text;
+        if(res === "requested"){
+          text = "Запрос на создание ярлыка отправлен. Подтвердите его в окне телефона. Если ярлык не появился на рабочем столе, на некоторых телефонах (Xiaomi и др.) нужно разрешить приложению «Ярлыки на рабочем столе» — кнопка ниже откроет разрешения. Если такой ярлык уже есть, ничего не изменится.";
+        } else if(res === "unsupported"){
+          text = "Этот рабочий стол не поддерживает создание ярлыков из приложения. Ярлык сканера всё равно есть в меню долгого нажатия на иконку приложения.";
+        } else {
+          text = "Не удалось создать ярлык. Проверьте разрешение приложения на создание ярлыков (кнопка ниже).";
+        }
+        scanShortcutNote.className = "modal-note" + (res === "requested" ? "" : " error");
+        scanShortcutNote.textContent = text;
+        scanShortcutNote.style.display = "";
+        if(shortcutPermBtn) shortcutPermBtn.style.display = "";
+      });
+      if(shortcutPermBtn) shortcutPermBtn.addEventListener("click", function(){
+        try{ window.LifeTrackerNative.openShortcutPermissionSettings(); }catch(e){}
+      });
+    }
 
     document.getElementById("settingsAddGoalBtn").addEventListener("click", function(){
       var id = createNewGoal();

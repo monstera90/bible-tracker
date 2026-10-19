@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (18.10) — мост версии 8: createScanShortcut / openShortcutPermissionSettings.
 // Версия: 1.0 (17.10) — мост версии 7: методы таймеров карточек (startCardTimer и др.).
 
 import android.graphics.Color
@@ -23,8 +24,9 @@ class NativeBridge(private val activity: MainActivity) {
          * 6: быстрая задача из ярлыка (takeQuickTasks / ackQuickTasks / setQuickTaskTheme): окно «Создать новую задачу»
          *    складывает задачи в очередь, страница забирает их в Inbox.
          * 7: таймеры карточек вкладки 9 (startCardTimer / pauseCardTimer / resumeCardTimer / cancelCardTimer / getCardTimers).
+         * 8: ярлык сканера QR на рабочий стол (createScanShortcut / openShortcutPermissionSettings).
          */
-        const val BRIDGE_VERSION = 7
+        const val BRIDGE_VERSION = 8
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -442,6 +444,22 @@ class NativeBridge(private val activity: MainActivity) {
     fun getCardTimers(): String {
         if (!activity.pageTrusted) return "[]"
         return CardTimers.listJson(activity.applicationContext)
+    }
+
+    // ---------- ярлык сканера QR-кодов на рабочий стол (ScanShortcut; кнопка в «Дополнительных возможностях») ----------
+
+    /** Просит рабочий стол закрепить ярлык «Сканер QR»: "requested" | "unsupported" | "failed" | "denied". */
+    @JavascriptInterface
+    fun createScanShortcut(): String {
+        if (!activity.pageTrusted) return "denied"
+        return ScanShortcut.requestPin(activity)
+    }
+
+    /** Открывает разрешения приложения (у Xiaomi — «Ярлыки на рабочем столе» в редакторе разрешений MIUI/HyperOS). */
+    @JavascriptInterface
+    fun openShortcutPermissionSettings(): Boolean {
+        if (!activity.pageTrusted) return false
+        return ScanShortcut.openPermissionSettings(activity)
     }
 
     /** Цвет статус-бара: "#rrggbb", "#rgb" или "rgb(r, g, b)". Значок светлый/тёмный выбирается по яркости цвета. */

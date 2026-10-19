@@ -9,6 +9,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Создание ярлыков на рабочем столе (кнопка «Создать ярлык сканера QR-кодов» в настройках; до Android 8 — этим разрешением,
+         на новых версиях запрос подтверждает пользователь в окне рабочего стола). У Xiaomi есть ещё своё разрешение «Ярлыки на
+         рабочем столе» в настройках приложения — его выдаёт пользователь (кнопка «Открыть разрешения приложения»). -->
+    <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Android 16: «живые обновления» (продвигаемые постоянные уведомления; у Xiaomi HyperOS 3 — динамический остров) для таймеров карточек. -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
