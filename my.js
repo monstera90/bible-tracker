@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 73.2 (20.10) — деп `openNotesTab` у `initItemCardsModule` (переключает на «Мои заметки»: скан карточки «Заметка с датой» создаёт обычную заметку блокнота).
    Версия: 73.1 (18.10) — вкладка «Дополнительные возможности»: кнопка «Создать ярлык сканера QR-кодов» (+ подсказка и «Открыть разрешения приложения»), `hasScanShortcutBridge`. Откат: my.js 73.0.
    Версия: 73.0 (17.10) — структурная правка: напоминания карточек вкладки 9 — `ensureItemCards` (модуль создаётся и до захода на вкладку), `getRemindableTasks` добавляет `ItemCardsMod.getRemindableCards()`, `openCardFromReminder` (деп notifications.js), деп `reminderBtnParts/openReminderDialog/rescheduleReminders/formatReminder` у `initItemCardsModule`. Откат: my.js 72.2.
    Версия: 72.2 (17.10) — ключ `itemCardTimers_v1` внесён в EXPORT_REGISTRY.exclude. Откат: my.js 72.1.
@@ -10603,6 +10604,7 @@
         loadQrLib: loadQrLib,
         loadJsqrLib: loadJsqrLib,
         getMdEditor: function(){ return MdEditor; },
+        openNotesTab: function(){ switchSettingsTab("set2s_1"); },
         // напоминания карточек: кнопка-часы, окно даты/времени с повтором и пересчёт сроков — те же, что у задач
         reminderBtnParts: reminderBtnParts,
         formatReminder: function(ts){ return Notifications.formatReminder(ts); },

@@ -1,5 +1,7 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 13.1 (20.10) — `createDatedNote`: если заметка с сегодняшней датой в имени уже есть, она открывается на редактирование, новая не создаётся.
+   Версия: 13.0 (20.10) — структурная правка: `createDatedNote` (+ `datedNoteFolderName`) — обычная заметка блокнота с сегодняшней датой в имени (`дд.мм.гггг`, при совпадении — « (2)»…) в папке `notes` в корне (регистр существующей папки сохраняется; нет папки — создаётся самим путём заметки), сразу открывается на редактирование; зовёт itemcards.js при скане карточки «Заметка с датой». В публичном API. Откат: mdeditor.js 12.0.
    Версия: 12.0 (17.10) — структурная правка: синхронизация записей карточек вкладки 9 (вариант А ТЗ, 12.4): каждая карточка — ещё одна скрытая запись `notesMap` (`CARD_META_PATH`, id `cm<id карточки>`, имя `card:<id>`, текст — JSON карточки); API `cardMetaStatus`/`cardMetaPull`/`cardMetaAll`/`cardMetaSave`/`cardMetaRemove`/`setCardMetaListener`; такие записи скрыты везде, где скрыты заметки-карточки, не попадают в индекс имён, экспорт .zip/notesIndex и в «замену всех заметок» при импорте (туда же теперь не попадают и тела заметок-карточек). Откат: mdeditor.js 11.0.
    Версия: 11.0 (16.10) — структурная правка: заметки-карточки вкладки 9 («Карточки предметов», itemcards.js): скрытый путь `CARD_NOTES_PATH` (не показываются в списке, поиске, «забытых»), `createCardNote`/`renameCardNote`/`deleteCardNote`/`openCardNote`/`closeCardNote`, домик редактора такой заметки возвращает к сетке карточек (`cardNoteHomeHook`). Откат: mdeditor.js 10.1.
    Версия: 10.1 (16.10) — возврат в заметку после сворачивания: `currentScrollPercent` возвращает null, пока область не имеет геометрии (приложение свёрнуто — `visibilitychange`/`pagehide` приходят уже после скрытия WebView), `flushDocStateNow` в этом случае не затирает сохранённый процент прокрутки нулём (раньше запоминалось «начало заметки»); `rememberScrollBeforeHide` не затирает ранее запомненную прокрутку, если измерить её сейчас нельзя; касание экрана сбрасывает запомненную прокрутку.
@@ -4669,6 +4671,70 @@ window.initMdEditorModule = function(deps){
     rebuildTree();
     return { id: rec.id, name: name };
   }
+  // ---- заметка с датой (карточка «Заметка с датой», itemcards.js) ----
+  // Обычная заметка блокнота (не скрытая заметка карточки): имя — сегодняшняя дата, путь — папка `notes` в корне. Папки как
+  // отдельной сущности нет (дерево строится из путей заметок), поэтому «создать папку» = положить заметку по этому пути.
+  // Если в корне уже есть папка notes (в любом регистре) — берём её написание, чтобы не плодить «Notes» и «notes».
+  var DATED_NOTE_FOLDER = "notes";
+  function datedNoteFolderName(){
+    var found = null;
+    notesMap.forEach(function(rec){
+      if(found || !rec || rec.deleted || !rec.name || isCardNoteRec(rec)) return;
+      var first = String(rec.path || "").split("/")[0];
+      if(first && first.toLowerCase() === DATED_NOTE_FOLDER) found = first;
+    });
+    return found || DATED_NOTE_FOLDER;
+  }
+  // true — заметка создана и открыта; false — заметки ещё не загружены (вызывающий повторит позже)
+  function createDatedNote(){
+    if(!notesReady) return false;
+    var base = todayRu();
+    // заметка на сегодня уже есть (имена уникальны по всему блокноту) — открываем её, новую не создаём
+    var existingId = nameIndex.get(base.toLowerCase());
+    var existing = existingId ? notesMap.get(existingId) : null;
+    if(existing && !existing.deleted && !isCardNoteRec(existing)){
+      activeMdTab = "editor";
+      openNoteByIdExternally(existingId);
+      return true;
+    }
+    var name = base, n = 2;
+    while(isNoteNameTaken(name)){ name = base + " (" + n + ")"; n++; }
+    var folder = datedNoteFolderName();
+    var rec = createNoteRecord(name, folder);
+    recordNoteCreated(name);
+    recordNoteOpened(name);
+    rebuildTree();
+    activeMdTab = "editor";
+    // «назад» из заметки ведёт в список этой папки (там заметка и лежит)
+    var folderNode = findNodeByPath(rootTree, [folder]);
+    if(folderNode) currentDirNode = folderNode;
+    var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
+    var prevScrollTop = null;
+    if(prevScreen === "list"){
+      var scrollHost = document.getElementById("settingsTabContent");
+      if(scrollHost) prevScrollTop = scrollHost.scrollTop;
+    }
+    pushMdNav(function(){
+      flushAutosaveNow();
+      binding.pushNow({keepalive:true});
+      destroyEditor();
+      openFile = prevOpenFile;
+      currentDirNode = prevDirNode;
+      screen = prevScreen;
+      render();
+      if(prevScrollTop !== null){
+        var restoredScrollHost = document.getElementById("settingsTabContent");
+        if(restoredScrollHost) restoredScrollHost.scrollTop = prevScrollTop;
+      }
+    });
+    flushAutosaveNow();
+    binding.pushNow({keepalive:true});
+    destroyEditor();
+    openFile = { id: rec.id, name: rec.name, path: rec.path, text: rec.text, dirty: false };
+    screen = "editor";
+    render();
+    return true;
+  }
   function renameCardNote(id, title){
     var rec = notesMap.get(id);
     if(!rec || rec.deleted) return false;
@@ -6460,6 +6526,7 @@ window.initMdEditorModule = function(deps){
     // getSearchableNotes — плоский список заметок для самого поиска.
     openNoteByIdExternally: openNoteByIdExternally,
     createCardNote: createCardNote,
+    createDatedNote: createDatedNote,
     renameCardNote: renameCardNote,
     deleteCardNote: deleteCardNote,
     openCardNote: openCardNote,
