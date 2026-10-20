@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 1.2 (20.10) — в окне ярлыка (`windowed`) кнопки «Назад» нет: выход — нажатие мимо окна камеры (`onBack`).
    Версия: 1.1 (20.10) — `open({windowed:true})` (окно ярлыка): видоискатель только в центральном окне с зелёной рамкой, вокруг прозрачно (виден рабочий стол); до первого кадра вместо растянутой заглушки WebView — серая заглушка внутри окна.
    Версия: 1.0 (16.10)
    Сканер QR-кодов карточек предметов (ТЗ TASK_ITEM_CARDS_QR.md, шаг 3): отдельный
@@ -49,7 +50,7 @@ window.CardScan = (function(){
       '<video id="cardScanVideo" playsinline autoplay muted></video><div class="scan-frame"></div></div>' +
       '<canvas id="cardScanCanvas" style="display:none;"></canvas>' +
       '<div class="modal-note card-scan-note" id="cardScanNote"></div>' +
-      '<button type="button" class="modal-btn card-scan-back" id="cardScanBack">Назад</button>';
+      (opts.windowed ? '' : '<button type="button" class="modal-btn card-scan-back" id="cardScanBack">Назад</button>');
     document.body.appendChild(layer);
 
     var video = layer.querySelector("#cardScanVideo");
@@ -78,10 +79,20 @@ window.CardScan = (function(){
       note.textContent = msg;
     }
 
-    layer.querySelector("#cardScanBack").addEventListener("click", function(){
+    function goBack(){
       close();
       if(opts.onBack) opts.onBack();
-    });
+    }
+    var backBtn = layer.querySelector("#cardScanBack");
+    if(backBtn) backBtn.addEventListener("click", goBack);
+    if(opts.windowed){
+      // окно ярлыка: нажатие мимо окна камеры (и мимо строки ошибки) закрывает сканер
+      layer.addEventListener("click", function(e){
+        var t = e.target;
+        if(t && t.closest && (t.closest(".scan-video-wrap") || t.closest(".card-scan-note"))) return;
+        goBack();
+      });
+    }
 
     Promise.resolve(opts.loadJsqr ? opts.loadJsqr() : null).then(function(){
       if(closed) return;

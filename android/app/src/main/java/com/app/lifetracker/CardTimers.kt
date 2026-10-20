@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (20.10) — остров Xiaomi (XiaomiIsland): extras `miui.focus.param` в уведомлении таймера.
 // Версия: 1.0 (17.10)
 
 import android.annotation.SuppressLint
@@ -177,7 +178,7 @@ object CardTimers {
         val items = synchronized(LOCK) { load(ctx).values.toList() }
         for (t in items) {
             if (t.running) {
-                if (t.endAt <= now) fire(ctx, t.id) else synchronized(LOCK) { scheduleAlarm(ctx, t); postRunning(ctx, t) }
+                if (t.endAt <= now) fire(ctx, t.id) else synchronized(LOCK) { scheduleAlarm(ctx, t); postRunning(ctx, t, false) }
             } else {
                 synchronized(LOCK) { postPaused(ctx, t) }
             }
@@ -249,7 +250,7 @@ object CardTimers {
     private fun titleOf(t: Timer) = if (t.title.isBlank()) "Таймер" else t.title
 
     @SuppressLint("MissingPermission")
-    private fun postRunning(ctx: Context, t: Timer) {
+    private fun postRunning(ctx: Context, t: Timer, float: Boolean = true) {
         try {
             ensureChannels(ctx)
             val b = NotificationCompat.Builder(ctx, CHANNEL_RUN)
@@ -272,7 +273,10 @@ object CardTimers {
                 b.setUsesChronometer(false).setContentText("Закончится в " + clock(t.endAt))
             }
             // «Живые обновления» Android 16 / остров HyperOS: просим показать как продвигаемое постоянное уведомление
-            b.addExtras(Bundle().apply { putBoolean("android.requestPromotedOngoing", true) })
+            // На Xiaomi с HyperOS вместо этого — остров по протоколу Xiaomi (XiaomiIsland); на остальных — флаг Android 16.
+            val island = XiaomiIsland.runningExtras(ctx, titleOf(t), t.endAt, float)
+            if (island != null) b.addExtras(island)
+            else b.addExtras(Bundle().apply { putBoolean("android.requestPromotedOngoing", true) })
             NotificationManagerCompat.from(ctx).notify(TAG_RUN + t.id, NOTIFICATION_ID, b.build())
         } catch (e: Exception) {
             // уведомления выключены: таймер всё равно идёт и завершится вибрацией
@@ -296,6 +300,7 @@ object CardTimers {
                 .setContentIntent(openApp(ctx))
                 .addAction(0, "Продолжить", actionIntent(ctx, CardTimerReceiver.ACTION_RESUME, t.id))
                 .addAction(0, "✕ Отмена", actionIntent(ctx, CardTimerReceiver.ACTION_CANCEL, t.id))
+            XiaomiIsland.pausedExtras(ctx, titleOf(t), left(t.remainingMs))?.let { b.addExtras(it) }
             NotificationManagerCompat.from(ctx).notify(TAG_RUN + t.id, NOTIFICATION_ID, b.build())
         } catch (e: Exception) {
             // уведомления выключены
