@@ -1,5 +1,7 @@
 /* ===========================================================================
    components.css
+   Версия: 5.8 (19.10) — сетка карточек как сетка обложек книг: `grid-template-columns:repeat(var(--item-card-cols), minmax(0,1fr))`, gap 2px, карточка width:100% (ширину и число колонок ставит itemcards.js); `.scan-card` сам держит ширину. Откат: components.css 5.7.
+   Версия: 5.7 (19.10) — отступы сетки карточек: между карточками 5px (было 10), края окна как в ридере книг (сверху 2px, снизу 44px, по бокам только 8px вкладки). Откат: components.css 5.6.
    Версия: 5.6 (18.10) — карточки менее вытянутые: пропорция 3:4 вместо 2:3 (высота = ширина × 1,3333); под это в `.item-card-front` оставлена нижняя полоса (padding-bottom 0,26 ширины) и пиктограмма уменьшена с 0,45 до 0,36 ширины, чтобы содержимое не наезжало на часы, значок листа и «Пуск». Откат: components.css 5.5.
    Версия: 5.5 (17.10) — исправление внешнего вида вкладки 9 по сверке с ТЗ: убран `position:relative` у `.item-cards-tab` (нижний ряд и меню прилипали к концу содержимого, а не к низу окна, как у остальных вкладок), фон карточки в сетке — как у страницы (прозрачный; сплошная заливка только при показе по скану), колесо времени (выбранное значение по центру, полоса выбора, привязка по центру), дата в форме — таблетка, а не круг. Откат: components.css 5.4.
    Версия: 5.4 (17.10) — напоминания карточек: `.item-card-remind-btn` (часы в правом нижнем углу), `.item-card-attn` (жирная обводка после перехода из уведомления). Откат: components.css 5.3.
@@ -4269,16 +4271,20 @@ body::after{
 /* position:relative здесь НЕЛЬЗЯ: нижний ряд (.mdeditor-fab-row), меню и ползунок позиционируются от .settings-modal-box, как у остальных вкладок */
 .item-cards-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fill, var(--item-card-w, 112px));
-  gap:10px;
-  justify-content:center;
-  padding:10px 6px 90px;
+  /* как .books-cover-grid в книгах (repeat(auto-fill, minmax(110px, 1fr)), gap 2px): число колонок и ширину карточки считает
+     itemcards.js (applySize → --item-card-cols, --item-card-w), карточки занимают всю ширину без пустых полей по бокам */
+  grid-template-columns:repeat(var(--item-card-cols, 2), minmax(0, 1fr));
+  gap:2px;
+  /* края окна — как в ридере книг: по бокам только 8px самой вкладки (.mdeditor-tab), сверху 2px (как .book-reader), снизу 44px
+     (у ридера 40; нижний ряд кнопок перекрывает последние ~42px, а у карточек с их рамкой 4px запаса нужны, чтобы нижняя
+     строка карточек не касалась кнопок). Лишних 6px по бокам и 10px сверху, 90px снизу больше нет. */
+  padding:2px 0 44px; /* сверху 2px — как у книг (.books-cover-grid padding-top) */
 }
 .item-cards-empty{ min-height:40vh; }
 .item-card{
   position:relative;
   box-sizing:border-box;
-  width:var(--item-card-w, 112px);
+  width:100%; /* ширина колонки сетки; = --item-card-w (её считает JS) */
   height:calc(var(--item-card-w, 112px) * 1.3333); /* пропорция 3:4 (заказчик, 18.10: менее вытянутые, чем 2:3) */
   border:2px solid var(--ink, #000);
   border-radius:14px;
@@ -4504,6 +4510,7 @@ body::after{
   animation:scanCardFade .18s ease-out;
 }
 .scan-card{
+  width:var(--item-card-w, 112px); /* при показе по скану карточка вне сетки — ширину задаёт JS */
   background:var(--bg-mid, #fbf4e2); /* при показе по скану — сплошная заливка цветом темы, чтобы карточка не просвечивала */
   flex:0 0 auto;
   cursor:default;

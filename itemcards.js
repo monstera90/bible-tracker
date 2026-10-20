@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 7.0 (19.10) — структурная правка: размер и способ раскладки карточек — как у сетки обложек в книгах (`.books-cover-grid`: колонки repeat(auto-fill, minmax(110px, 1fr)), зазор 2px): база 110px × ползунок, карточки растягиваются на всю ширину, число колонок и точную ширину считает `applySize` (`--item-card-cols`, `--item-card-w`), пропорция 3:4 и ползунок (0,7–2) без изменений. Откат: itemcards.js 6.1.
    Версия: 6.1 (18.10) — пропорция карточки 3:4 вместо 2:3 (показ по скану: ширина с учётом высоты ×4/3). Откат: itemcards.js 6.0.
    Версия: 6.0 (17.10) — структурная правка: напоминания карточек (шаг 6а ТЗ): кнопка-часы в правом нижнем углу карточки-предмета и заметки (у таймера нет), окно даты/времени и повтор (1…180 дней) из notifications.js, поля remindAt/repeatDays (синхронизируются) и remindDone (только на устройстве), `getRemindableCards` для планировщика (my.js getRemindableTasks), `focusCard` — переход к карточке из уведомления с жирной обводкой до первого взаимодействия. Откат: itemcards.js 5.0.
    Версия: 5.0 (17.10) — структурная правка: кнопка «PDF» в нижнем ряду (после сканера; на Android 5 её нет) и меню «4 / 12 / 24 на лист» — `openPdfMenu`/`exportPdf`, сборка листов в cardpdf.js, сохранение в «Загрузки» через <a download>. Откат: itemcards.js 4.0.
@@ -249,16 +250,33 @@ window.initItemCardsModule = function(deps){
   function setScale(v){
     try{ localStorage.setItem(SIZE_KEY, String(v)); }catch(e){}
   }
-  // базовая ширина = две нижние вкладки приложения (замер реальной кнопки), запасное значение 112px
-  function baseWidthPx(){
-    var tab = document.getElementById("settingsTabYearBtn") || document.getElementById("settingsTabMoodBtn");
-    var w = tab ? tab.getBoundingClientRect().width : 0;
-    return w > 20 ? Math.round(w * 2) : 112;
-  }
+  // Раскладка — та же, что у сетки обложек в книгах (components.css .books-cover-grid): колонки
+  // repeat(auto-fill, minmax(110px, 1fr)) с зазором 2px. База 110px × ползунок — это минимальная ширина карточки,
+  // колонок помещается столько, сколько влезает, и карточки растягиваются на всю ширину области вкладки (без пустых
+  // полей по бокам; поля — только 8px самой вкладки, как у книг). Саму ширину считаем здесь, а не в CSS, потому что
+  // от неё считается всё внутри карточки (шрифты, пиктограмма, кнопки: переменная --item-card-w).
+  var BOOKS_BASE_PX = 110;
+  var GRID_GAP_PX = 2;
   function applySize(rootEl){
     if(!rootEl) return;
-    rootEl.style.setProperty("--item-card-w", Math.round(baseWidthPx() * getScale()) + "px");
+    var cs = window.getComputedStyle(rootEl);
+    var inner = rootEl.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+    if(!(inner > 40)) inner = 329; // область вкладки ещё не измерима: запасное значение (экран ~390px)
+    var base = BOOKS_BASE_PX * getScale();
+    var cols = Math.max(1, Math.floor((inner + GRID_GAP_PX) / (base + GRID_GAP_PX)));
+    var w = (inner - GRID_GAP_PX * (cols - 1)) / cols;
+    rootEl.style.setProperty("--item-card-cols", String(cols));
+    rootEl.style.setProperty("--item-card-w", (Math.floor(w * 100) / 100) + "px");
   }
+  // поворот экрана и смена ширины окна: колонки пересчитываются
+  var resizeTimer = null;
+  window.addEventListener("resize", function(){
+    if(resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function(){
+      var tab = document.querySelector(".item-cards-tab");
+      if(tab && document.getElementById("itemCardsGrid")) applySize(tab);
+    }, 120);
+  });
 
   // ---------- состояние экрана ----------
   var screenMode = "grid"; // grid | form
