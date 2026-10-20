@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Версия: 1.0 (20.10) — рисунок для закреплённого ярлыка сканера на рабочем столе (ScanShortcut.iconBitmap): белая миниатюра QR
+     (угловые рамки и три квадрата) на прозрачном фоне, крупнее, чем в ic_shortcut_scan_qr. Холст 108×108 как у адаптивной иконки,
+     рисунок по центру (34…74) — целиком внутри безопасной зоны 66×66, любая маска рабочего стола его не обрежет. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- угловые рамки -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M34,44.9 L34,38.5 A4.5,4.5 0 0 1 38.5,34 L44.9,34 M63.1,34 L69.5,34 A4.5,4.5 0 0 1 74,38.5 L74,44.9 M74,63.1 L74,69.5 A4.5,4.5 0 0 1 69.5,74 L63.1,74 M44.9,74 L38.5,74 A4.5,4.5 0 0 1 34,69.5 L34,63.1" />
+    <!-- модули кода -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M44.9,44.9 h7.3 v7.3 h-7.3 Z M55.8,44.9 h7.3 v7.3 h-7.3 Z M44.9,55.8 h7.3 v7.3 h-7.3 Z M57.6,57.6 h5.5 v5.5 h-5.5 Z" />
+</vector>

@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (18.10)
+// Версия: 1.1 (20.10)
 
 import android.content.Context
 import android.content.Intent
@@ -24,7 +24,8 @@ import androidx.core.graphics.drawable.IconCompat
 object ScanShortcut {
 
     private const val SHORTCUT_ID = "scan_qr_pinned"
-    private const val ICON_SIZE_PX = 192
+    private const val ICON_COLOR = 0xFF7F00FF.toInt()
+    private const val ICON_SIZE_PX = 432 // 108dp адаптивной иконки × 4
 
     /** "requested" — запрос отправлен (на Android 8+ рабочий стол спросит пользователя), "unsupported", "failed". */
     fun requestPin(ctx: Context): String {
@@ -37,7 +38,7 @@ object ScanShortcut {
             val info = ShortcutInfoCompat.Builder(ctx, SHORTCUT_ID)
                 .setShortLabel("Сканер QR")
                 .setLongLabel("Сканировать QR-код")
-                .setIcon(IconCompat.createWithBitmap(iconBitmap(ctx)))
+                .setIcon(IconCompat.createWithAdaptiveBitmap(iconBitmap(ctx)))
                 .setIntent(intent)
                 .build()
             if (ShortcutManagerCompat.requestPinShortcut(ctx, info, null)) "requested" else "failed"
@@ -46,13 +47,18 @@ object ScanShortcut {
         }
     }
 
-    /** Значок ярлыка — тот же фиолетовый круг с QR (ic_shortcut_scan_qr), нарисованный в картинку: так его читает любой рабочий стол. */
+    /**
+     * Значок ярлыка — адаптивная иконка: весь холст залит насыщенным фиолетовым, поверх — белый рисунок QR (ic_scan_pin_glyph).
+     * Фон без прозрачных краёв, поэтому рабочий стол (в т.ч. Xiaomi) не подкладывает белый квадрат и сам обрезает форму по маске.
+     */
     private fun iconBitmap(ctx: Context): Bitmap {
         val bmp = Bitmap.createBitmap(ICON_SIZE_PX, ICON_SIZE_PX, Bitmap.Config.ARGB_8888)
-        val d = ContextCompat.getDrawable(ctx, R.drawable.ic_shortcut_scan_qr)
+        val canvas = Canvas(bmp)
+        canvas.drawColor(ICON_COLOR)
+        val d = ContextCompat.getDrawable(ctx, R.drawable.ic_scan_pin_glyph)
         if (d != null) {
             d.setBounds(0, 0, ICON_SIZE_PX, ICON_SIZE_PX)
-            d.draw(Canvas(bmp))
+            d.draw(canvas)
         }
         return bmp
     }

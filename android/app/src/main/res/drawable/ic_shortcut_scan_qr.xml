@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Версия: 1.0 (16.10) — значок пункта «Сканировать QR-код» в меню долгого нажатия на иконку приложения (res/xml/shortcuts.xml).
-     Фиолетовый круг цвета иконки приложения, белая миниатюра QR: угловые рамки и три квадрата. Рисунок целиком внутри круга. -->
+<!-- Версия: 1.1 (20.10) — значок пункта «Сканировать QR-код» в меню долгого нажатия на иконку приложения (res/xml/shortcuts.xml).
+     Насыщенно фиолетовый (#7F00FF) круг, белая миниатюра QR: угловые рамки и три квадрата. Рисунок целиком внутри круга. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp"
     android:height="48dp"
     android:viewportWidth="48"
     android:viewportHeight="48">
     <path
-        android:fillColor="#8F7FB8"
+        android:fillColor="#7F00FF"
         android:pathData="M0,24 a24,24 0 1,0 48,0 a24,24 0 1,0 -48,0 Z" />
     <!-- угловые рамки -->
     <path
