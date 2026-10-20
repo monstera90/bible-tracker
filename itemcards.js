@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 7.1 (20.10) — окно ярлыка: сканеру передаётся `windowed: standalone` (видоискатель в центральной рамке, вокруг прозрачно).
    Версия: 7.0 (19.10) — структурная правка: размер и способ раскладки карточек — как у сетки обложек в книгах (`.books-cover-grid`: колонки repeat(auto-fill, minmax(110px, 1fr)), зазор 2px): база 110px × ползунок, карточки растягиваются на всю ширину, число колонок и точную ширину считает `applySize` (`--item-card-cols`, `--item-card-w`), пропорция 3:4 и ползунок (0,7–2) без изменений. Откат: itemcards.js 6.1.
    Версия: 6.1 (18.10) — пропорция карточки 3:4 вместо 2:3 (показ по скану: ширина с учётом высоты ×4/3). Откат: itemcards.js 6.0.
    Версия: 6.0 (17.10) — структурная правка: напоминания карточек (шаг 6а ТЗ): кнопка-часы в правом нижнем углу карточки-предмета и заметки (у таймера нет), окно даты/времени и повтор (1…180 дней) из notifications.js, поля remindAt/repeatDays (синхронизируются) и remindDone (только на устройстве), `getRemindableCards` для планировщика (my.js getRemindableTasks), `focusCard` — переход к карточке из уведомления с жирной обводкой до первого взаимодействия. Откат: itemcards.js 5.0.
@@ -1045,6 +1046,7 @@ window.initItemCardsModule = function(deps){
     scanNavStart();
     scanHandle = window.CardScan.open({
       loadJsqr: deps.loadJsqrLib,
+      windowed: standalone,
       onCode: function(text){ scanHandle = null; handleScanned(text); },
       onBack: function(){ scanHandle = null; endScanSession(true); }
     });

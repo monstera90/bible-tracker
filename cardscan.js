@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 1.1 (20.10) — `open({windowed:true})` (окно ярлыка): видоискатель только в центральном окне с зелёной рамкой, вокруг прозрачно (виден рабочий стол); до первого кадра вместо растянутой заглушки WebView — серая заглушка внутри окна.
    Версия: 1.0 (16.10)
    Сканер QR-кодов карточек предметов (ТЗ TASK_ITEM_CARDS_QR.md, шаг 3): отдельный
    полноэкранный слой — видео с задней камеры, рамка-прицел, кнопка «Назад» и строка
@@ -35,15 +36,17 @@ window.CardScan = (function(){
     return { kind: "text", text: t };
   }
 
-  // open({ loadJsqr: () => Promise, onCode(text), onBack() }) → { close() }
+  // open({ loadJsqr: () => Promise, onCode(text), onBack(), windowed?: bool }) → { close() }
+  // windowed — окно ярлыка (scan.html): камера только в центральной рамке, остальное прозрачно.
   // onCode вызывается один раз, камера к этому моменту уже остановлена и слой убран.
   function open(opts){
     var stream = null, raf = null, closed = false;
 
     var layer = document.createElement("div");
-    layer.className = "card-scan-screen";
+    layer.className = "card-scan-screen" + (opts.windowed ? " scan-windowed" : "");
     layer.innerHTML =
-      '<div class="scan-video-wrap"><video id="cardScanVideo" playsinline autoplay muted></video><div class="scan-frame"></div></div>' +
+      '<div class="scan-video-wrap"><div class="scan-wait"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="34" fill="none" stroke="#000" stroke-width="10"/><polygon points="43,33 43,67 69,50" fill="#000"/></svg></div>' +
+      '<video id="cardScanVideo" playsinline autoplay muted></video><div class="scan-frame"></div></div>' +
       '<canvas id="cardScanCanvas" style="display:none;"></canvas>' +
       '<div class="modal-note card-scan-note" id="cardScanNote"></div>' +
       '<button type="button" class="modal-btn card-scan-back" id="cardScanBack">Назад</button>';
@@ -52,6 +55,10 @@ window.CardScan = (function(){
     var video = layer.querySelector("#cardScanVideo");
     var canvas = layer.querySelector("#cardScanCanvas");
     var note = layer.querySelector("#cardScanNote");
+
+    // до первого кадра видео скрыто (иначе WebView рисует растянутую заглушку), после — показываем камеру
+    function setLive(){ if(!closed) layer.className += (layer.className.indexOf(" scan-live") < 0 ? " scan-live" : ""); }
+    video.addEventListener("playing", setLive);
 
     function stopCamera(){
       if(raf){ cancelAnimationFrame(raf); raf = null; }
@@ -103,6 +110,7 @@ window.CardScan = (function(){
     function tick(){
       if(closed) return;
       if(video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth){
+        setLive();
         // уменьшаем кадр для скорости, пропорции сохраняем
         var w = Math.min(480, video.videoWidth);
         var h = Math.max(1, Math.round(w * video.videoHeight / video.videoWidth));

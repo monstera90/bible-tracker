@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 5.9 (20.10) — окно ярлыка сканера: `.card-scan-screen.scan-windowed` (прозрачный слой, видоискатель в центральной рамке), `.scan-wait` (серая заглушка до первого кадра), `.scan-live`; до первого кадра `<video>` скрыт.
    Версия: 5.8 (19.10) — сетка карточек как сетка обложек книг: `grid-template-columns:repeat(var(--item-card-cols), minmax(0,1fr))`, gap 2px, карточка width:100% (ширину и число колонок ставит itemcards.js); `.scan-card` сам держит ширину. Откат: components.css 5.7.
    Версия: 5.7 (19.10) — отступы сетки карточек: между карточками 5px (было 10), края окна как в ридере книг (сверху 2px, снизу 44px, по бокам только 8px вкладки). Откат: components.css 5.6.
    Версия: 5.6 (18.10) — карточки менее вытянутые: пропорция 3:4 вместо 2:3 (высота = ширина × 1,3333); под это в `.item-card-front` оставлена нижняя полоса (padding-bottom 0,26 ширины) и пиктограмма уменьшена с 0,45 до 0,36 ширины, чтобы содержимое не наезжало на часы, значок листа и «Пуск». Откат: components.css 5.5.
@@ -4481,6 +4482,39 @@ body::after{
 .card-scan-screen .scan-frame{
   width:min(70vw, 70vh);
   height:min(70vw, 70vh);
+}
+/* до первого кадра видео скрыто (WebView рисует у пустого <video> растянутую заглушку); после «playing» слой получает .scan-live */
+.card-scan-screen .scan-video-wrap video{ opacity:0; }
+.card-scan-screen.scan-live .scan-video-wrap video{ opacity:1; }
+.card-scan-screen .scan-wait{ display:none; }
+/* окно ярлыка (scan.html): камера только в центральной рамке, вокруг прозрачно — виден рабочий стол */
+.card-scan-screen.scan-windowed{ background:transparent; }
+.card-scan-screen.scan-windowed .scan-video-wrap{
+  inset:auto;
+  top:50%;
+  left:50%;
+  width:min(70vw, 70vh);
+  height:min(70vw, 70vh);
+  transform:translate(-50%,-50%);
+  box-sizing:border-box;
+  border:3px solid var(--xp-green);
+  border-radius:8px;
+  background:#8a8a8a;
+}
+.card-scan-screen.scan-windowed .scan-frame{ display:none; }
+.card-scan-screen.scan-windowed .scan-wait{
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.card-scan-screen.scan-windowed .scan-wait svg{ width:45%; height:45%; }
+.card-scan-screen.scan-windowed.scan-live .scan-wait{ display:none; }
+.card-scan-screen.scan-windowed .card-scan-note:not(:empty){
+  background:rgba(0,0,0,.6);
+  border-radius:8px;
+  padding:8px 10px;
 }
 .card-scan-note{
   position:absolute;
