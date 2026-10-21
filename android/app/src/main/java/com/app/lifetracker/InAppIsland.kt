@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 8.2 (22.10) — время в раскрытой карточке жирнее, как у настоящего острова Xiaomi: `cardTime` — `StrokeText` (обводка `strokePx = screenW × 0.0026`); размер прежний 0.0508 × ширина экрана (шрифт настоящего острова задаёт система, увеличить его из приложения нельзя). Откат: InAppIsland.kt 8.0.
 // Версия: 8.0 (22.10) — карточка и плашка больше не полупрозрачные. Причина: с Android 12 окно поверх всех (TYPE_APPLICATION_OVERLAY) с FLAG_NOT_TOUCHABLE система само принудительно делает непрозрачным не больше чем на 80 % (alpha ≤ 0.8). Теперь окно с картинкой ПРИНИМАЕТ нажатия (без FLAG_NOT_TOUCHABLE, alpha 1): в покое свёрнутой плашки оно ровно по плашке, на время анимации и пока карточка раскрыта — рамка всего движения (меняет размер только когда раскладка внутри неё не меняется: p=0 ↔ плашка в углу окна). Отдельные окна нажатий (touchView) убраны, кнопки «пауза»/«стоп» — обычные View-клики, нажатие мимо карточки внутри окна и ACTION_OUTSIDE сворачивают. Откат: InAppIsland.kt 7.1.
 // Версия: 7.1 (22.10) — (1) убрано проявление окна (alpha 0→1 за 140 мс): карточка на раскрытии выглядела полупрозрачной; (2) плашка больше не раскрывается сама при запуске таймера — остаётся свёрнутой, раскрывается только нажатием. Откат: InAppIsland.kt 7.0.
 // Версия: 7.0 (22.10) — дрожание на смене размера: по записи экрана на последнем кадре сворачивания плашка на один кадр прыгала к левому краю (размер/положение окна и раскладка внутри него применялись не одновременно). Теперь окно с картинкой (`layer`) одно большое и НИКОГДА не меняет размер и положение, а нажатия принимают отдельные прозрачные окна (`touchView`: под плашкой — тап раскрывает; под карточкой — кнопки «пауза»/«стоп» по координатам `pauseRect`/`stopRect`, нажатие мимо сворачивает); окно с картинкой — FLAG_NOT_TOUCHABLE. Плашка рисуется поверх карточки, поэтому её значок и текст плавно проявляются при сворачивании, а не появляются рывком. Откат: InAppIsland.kt 6.0.
@@ -60,7 +61,7 @@ class InAppIsland(private val activity: Activity) {
     private val card = FrameLayout(activity)
     private val cardContent = FrameLayout(activity)
     private val cardIcon = ImageView(activity)
-    private val cardTime = TextView(activity)
+    private val cardTime = StrokeText(activity)
     private val cardName = TextView(activity)
     private val pauseBtn = ImageView(activity)
     private val stopBtn = ImageView(activity)
@@ -527,7 +528,8 @@ class InAppIsland(private val activity: Activity) {
         winH = (cardTop + cardH * 1.12f).roundToInt() - pillTop
         for (v in listOf<View>(cardIcon, cardTime, cardName, pauseBtn, stopBtn)) (v.parent as? ViewGroup)?.removeView(v)
         cardContent.removeAllViews()
-        cardTime.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0508f)
+        cardTime.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0508f) // размер как у настоящего острова (его шрифт задаёт система)
+        cardTime.strokePx = screenW * 0.0026f // жирнее, как время настоящего острова
         cardName.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0328f)
         val texts = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
