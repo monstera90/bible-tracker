@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.2 (21.10) — `Info.totalMs` (заданное время, для кольца паузы в плашке). Откат: CardTimers.kt 5.1.
 // Версия: 5.1 (21.10) — в раскрытый остров передаётся круглая кнопка паузы (`XiaomiIsland.pauseAction`). Откат: CardTimers.kt 5.0.
 // Версия: 5.0 (21.10) — `primaryInfo` (данные главного таймера для плашки InAppIsland). Откат: CardTimers.kt 4.0.
 // Версия: 4.0 (21.10) — одно уведомление вместо двух: при работающей службе тика уведомление главного (самого раннего) таймера и есть уведомление службы (`FG_NOTIFICATION_ID`, `primaryId`, `foregroundNotification`, `buildRunning`); в раскрытый остров передаётся кнопка «Стоп» и крупное время. Откат: CardTimers.kt 3.0.
@@ -328,16 +329,16 @@ object CardTimers {
         load(ctx).values.filter { it.running && it.endAt > now }.minByOrNull { it.endAt }?.id
     }
 
-    class Info(val id: String, val title: String, val running: Boolean, val leftMs: Long)
+    class Info(val id: String, val title: String, val running: Boolean, val leftMs: Long, val totalMs: Long = 0L)
 
     /** Главный таймер для плашки в приложении: самый ранний из идущих, иначе первый приостановленный; null — таймеров нет. */
     fun primaryInfo(ctx: Context): Info? = synchronized(LOCK) {
         val now = System.currentTimeMillis()
         val all = load(ctx).values
         val run = all.filter { it.running && it.endAt > now }.minByOrNull { it.endAt }
-        if (run != null) return@synchronized Info(run.id, titleOf(run), true, run.endAt - now)
+        if (run != null) return@synchronized Info(run.id, titleOf(run), true, run.endAt - now, run.durationMs)
         val p = all.firstOrNull { !it.running } ?: return@synchronized null
-        Info(p.id, titleOf(p), false, p.remainingMs)
+        Info(p.id, titleOf(p), false, p.remainingMs, p.durationMs)
     }
 
     /** Для службы тика: готовое уведомление главного таймера (или null, если идущих нет). */

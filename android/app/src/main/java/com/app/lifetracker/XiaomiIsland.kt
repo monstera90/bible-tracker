@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.1 (21.10) — `pauseBitmap(fraction, stage, paused)`: при paused вместо полосок рисуется треугольник «продолжить» (нужен плашке в приложении). Откат: XiaomiIsland.kt 5.0.
 // Версия: 5.0 (21.10) — круглая кнопка паузы в раскрытом острове (`pauseAction`, `pauseBitmap`): кольцо оставшегося времени цвета этапа и две полоски «пауза», слева от «Стоп»; рисуется кодом, кольцо обновляется тиком раз в секунду. Откат: XiaomiIsland.kt 4.0.
 // Версия: 4.0 (21.10) — `iconBitmap` и `crossBitmap` вынесены (значок и крестик нужны плашке InAppIsland); `icon`/`crossIcon` — обёртки. Откат: XiaomiIsland.kt 3.2.
 // Версия: 3.2 (21.10) — эмблема раскрытого острова та же, что в свёрнутом: цветной круг (фиолетовый/жёлтый/красный) и белые песочные часы, только крупнее (`icon(stage, 192)`); отдельный рисунок `bigIcon` удалён. Откат: XiaomiIsland.kt 3.1.
@@ -204,7 +205,7 @@ object XiaomiIsland {
     }
 
     /** Круглая кнопка паузы: тёмный круг, кольцо цвета этапа (доля [fraction] — сколько времени осталось, от верха по часовой), две полоски. */
-    fun pauseBitmap(fraction: Float, stage: Int): Bitmap {
+    fun pauseBitmap(fraction: Float, stage: Int, paused: Boolean = false): Bitmap {
         val size = 96
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
@@ -223,8 +224,12 @@ object XiaomiIsland {
         if (fraction >= 0.999f) c.drawArc(ring, 0f, 360f, false, paint)
         else if (fraction > 0f) c.drawArc(ring, -90f, 360f * fraction, false, paint)
         paint.style = Paint.Style.FILL
-        c.drawRoundRect(RectF(35f, 31f, 44f, 65f), 3f, 3f, paint)
-        c.drawRoundRect(RectF(52f, 31f, 61f, 65f), 3f, 3f, paint)
+        if (paused) {
+            c.drawPath(Path().apply { moveTo(40f, 30f); lineTo(40f, 66f); lineTo(68f, 48f); close() }, paint)
+        } else {
+            c.drawRoundRect(RectF(35f, 31f, 44f, 65f), 3f, 3f, paint)
+            c.drawRoundRect(RectF(52f, 31f, 61f, 65f), 3f, 3f, paint)
+        }
         return bmp
     }
 

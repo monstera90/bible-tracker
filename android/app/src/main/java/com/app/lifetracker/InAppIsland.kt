@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 3.0 (21.10) — раскрытие как у острова Xiaomi (по записи экрана): плашка плавно растёт в широкую карточку на месте (ширина 0.926 экрана, высота 0.213, радиус 0.082, отскок на раскрытии), содержимое проявляется после 30% пути, плашка гаснет; внутри значок, время, название, круглая кнопка паузы/«продолжить» с кольцом остатка, «Стоп», полоска внизу; нажатие мимо кнопок или 6 с — сворачивание обратно в плашку. Откат: InAppIsland.kt 2.0.
 // Версия: 2.0 (21.10) — жирное время рисуется обводкой (`StrokeText`): HyperOS игнорирует жирное начертание у системного шрифта, цифры выходили тонкими. Время 12sp + обводка 0.0021 ширины экрана + разрядка 0.08 (шире, как у острова), правое поле 0.0272, текст на ~1,5 px выше (плашка 0.0077 сверху, высота 0.0878, без верхнего отступа). Откат: InAppIsland.kt 1.4.
 // Версия: 1.4 (21.10) — вторая сверка со скриншотом: время сдвинуто влево на 11 px (правое поле 0.0335 ширины), начертание не через вес (HyperOS его игнорировал): время — sans-serif BOLD, название — sans-serif-medium; значок 0.57 высоты и на пиксель ниже, плашка на пиксель ниже. Откат: InAppIsland.kt 1.3.
 // Версия: 1.3 (21.10) — сверка со скриншотом острова: время 13sp жирное (высота цифр 32 px вместо 37), название обычным начертанием (вес 400), правая часть по размеру времени, название получает всё остальное место и не обрезается; плашка выше на 3 px, шире на 2 px. Откат: InAppIsland.kt 1.2.
@@ -6,6 +7,7 @@ package com.app.lifetracker
 // Версия: 1.1 (21.10) — размеры плашки считаются от ширины экрана (по замеру настоящего острова Poco X6 Pro: ширина 0.43, высота 0.086, отступ сверху 0.011 ширины экрана), а не от рамки выреза: система отдаёт рамку размером со всю строку состояния, плашка выходила огромной. Откат: InAppIsland.kt 1.0.
 // Версия: 1.0 (21.10) — плашка таймера внутри приложения, пока оно на экране: чёрная «таблетка» вокруг выреза камеры (как свёрнутый остров Xiaomi) со значком, названием слева и временем справа; нажатие раскрывает карточку с большим значком, временем и кнопкой «Стоп». Без выреза сверху (поворот, телефон без выреза) плашки нет.
 
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.graphics.Color
 import android.graphics.Rect
@@ -18,6 +20,8 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -35,11 +39,27 @@ class InAppIsland(private val activity: Activity) {
     private val pillIcon = ImageView(activity)
     private val pillName = TextView(activity)
     private val pillTime = StrokeText(activity)
-    private val card = LinearLayout(activity)
+    private val card = FrameLayout(activity)
+    private val cardContent = FrameLayout(activity)
     private val cardIcon = ImageView(activity)
     private val cardTime = TextView(activity)
     private val cardName = TextView(activity)
+    private val pauseBtn = ImageView(activity)
     private val stopBtn = ImageView(activity)
+    private val cardBg = GradientDrawable().apply { setColor(Color.BLACK) }
+
+    // геометрия плашки и карточки (px), считается в layoutFor
+    private var pillLeft = 0
+    private var pillTop = 0
+    private var pillW = 0
+    private var pillH = 0
+    private var cardTop = 0
+    private var cardW = 0
+    private var cardH = 0
+    private var cardR = 0f
+    private var centerX = 0
+    private var progress = 0f
+    private var anim: ValueAnimator? = null
 
     private var cutout: Rect? = null
     private var attached = false
@@ -49,6 +69,7 @@ class InAppIsland(private val activity: Activity) {
     private var currentId: String? = null
     private var shownStage = -1
     private var builtFor: Rect? = null
+    private var paused = false
 
     private fun dp(v: Float) = (v * density).roundToInt()
 
@@ -77,32 +98,30 @@ class InAppIsland(private val activity: Activity) {
             maxLines = 1
         }
 
-        card.orientation = LinearLayout.HORIZONTAL
-        card.gravity = Gravity.CENTER_VERTICAL
         card.visibility = View.GONE
-        card.isClickable = true // не пропускает нажатия на страницу под карточкой
-        card.background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = dp(34f).toFloat() }
-        card.setPadding(dp(18f), dp(16f), dp(14f), dp(16f))
+        card.background = cardBg
+        card.isClickable = true // не пропускает нажатия на страницу под карточкой; нажатие мимо кнопок сворачивает
+        card.setOnClickListener { collapse() }
         cardTime.apply {
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 30f)
             maxLines = 1
         }
         cardName.apply {
             setTextColor(0xFF8A8A8A.toInt())
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
-        val texts = LinearLayout(activity).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(cardTime)
-            addView(cardName)
+        pauseBtn.setOnClickListener {
+            val id = currentId
+            if (id != null) {
+                val ctx = activity.applicationContext
+                if (paused) CardTimers.resume(ctx, id) else CardTimers.pause(ctx, id)
+            }
+            expandedAt = System.currentTimeMillis()
+            refresh()
         }
         stopBtn.apply {
             setImageBitmap(XiaomiIsland.crossBitmap())
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF2A2A2A.toInt()) }
-            setPadding(dp(8f), dp(8f), dp(8f), dp(8f))
             setOnClickListener {
                 val id = currentId
                 if (id != null) CardTimers.cancel(activity.applicationContext, id)
@@ -110,9 +129,7 @@ class InAppIsland(private val activity: Activity) {
                 refresh()
             }
         }
-        card.addView(cardIcon, LinearLayout.LayoutParams(dp(56f), dp(56f)))
-        card.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(14f) })
-        card.addView(stopBtn, LinearLayout.LayoutParams(dp(52f), dp(52f)))
+        card.addView(cardContent)
         layer.addView(pill)
         layer.addView(card)
     }
@@ -161,21 +178,72 @@ class InAppIsland(private val activity: Activity) {
     }
 
     private fun hide() {
+        anim?.cancel()
+        anim = null
         layer.visibility = View.GONE
         expanded = false
+        progress = 0f
         card.visibility = View.GONE
+        pill.alpha = 1f
     }
 
     private fun toggle() {
-        expanded = !expanded
+        if (expanded) collapse() else expand()
+    }
+
+    private fun expand() {
+        if (expanded) return
+        expanded = true
         expandedAt = System.currentTimeMillis()
-        card.visibility = if (expanded) View.VISIBLE else View.GONE
+        card.visibility = View.VISIBLE
         refresh()
+        animateTo(1f, 420L, OvershootInterpolator(1.1f))
     }
 
     private fun collapse() {
+        if (!expanded) return
         expanded = false
-        card.visibility = View.GONE
+        animateTo(0f, 280L, AccelerateDecelerateInterpolator())
+    }
+
+    private fun animateTo(target: Float, duration: Long, interpolator: android.view.animation.Interpolator) {
+        anim?.cancel()
+        val a = ValueAnimator.ofFloat(progress, target)
+        a.duration = duration
+        a.interpolator = interpolator
+        a.addUpdateListener { applyProgress(it.animatedValue as Float) }
+        a.addListener(object : android.animation.AnimatorListenerAdapter() {
+            private var cancelled = false
+            override fun onAnimationCancel(animation: android.animation.Animator) { cancelled = true }
+            override fun onAnimationEnd(animation: android.animation.Animator) {
+                if (cancelled) return
+                applyProgress(target)
+                if (target == 0f) card.visibility = View.GONE
+            }
+        })
+        anim = a
+        a.start()
+    }
+
+    private fun lerp(a: Float, b: Float, p: Float) = a + (b - a) * p
+
+    /** p = 0 — карточка точно по плашке, p = 1 — раскрыта (на отскоке p чуть больше 1). */
+    private fun applyProgress(p: Float) {
+        progress = p
+        if (cardW == 0) return
+        val w = lerp(pillW.toFloat(), cardW.toFloat(), p).roundToInt().coerceAtLeast(pillW)
+        val h = lerp(pillH.toFloat(), cardH.toFloat(), p).roundToInt().coerceAtLeast(pillH)
+        val top = lerp(pillTop.toFloat(), cardTop.toFloat(), p).roundToInt()
+        val lp = card.layoutParams as FrameLayout.LayoutParams
+        lp.width = w
+        lp.height = h
+        lp.gravity = Gravity.TOP or Gravity.START
+        lp.leftMargin = centerX - w / 2
+        lp.topMargin = top
+        card.layoutParams = lp
+        cardBg.cornerRadius = lerp(pillH / 2f, cardR, p.coerceIn(0f, 1f))
+        cardContent.alpha = ((p - 0.3f) / 0.7f).coerceIn(0f, 1f)
+        pill.alpha = (1f - p / 0.25f).coerceIn(0f, 1f)
     }
 
     private fun refresh() {
@@ -186,6 +254,7 @@ class InAppIsland(private val activity: Activity) {
             return
         }
         currentId = info.id
+        paused = !info.running
         if (expanded && System.currentTimeMillis() - expandedAt > 6000L) collapse()
         layoutFor(r)
         val stage = XiaomiIsland.stageFor(info.leftMs)
@@ -199,6 +268,10 @@ class InAppIsland(private val activity: Activity) {
         pillTime.text = clock
         cardTime.text = clock
         cardName.text = if (info.running) info.title else info.title + " · пауза"
+        if (card.visibility == View.VISIBLE) {
+            val fraction = if (info.totalMs > 0) info.leftMs.toFloat() / info.totalMs else 1f
+            pauseBtn.setImageBitmap(XiaomiIsland.pauseBitmap(fraction.coerceIn(0f, 1f), stage, paused))
+        }
         layer.visibility = View.VISIBLE
     }
 
@@ -237,11 +310,47 @@ class InAppIsland(private val activity: Activity) {
         pill.addView(rightBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
         pill.layoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.START; leftMargin = left; topMargin = top }
 
-        card.layoutParams = FrameLayout.LayoutParams(screenW - 2 * dp(12f), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            gravity = Gravity.TOP or Gravity.START
-            leftMargin = dp(12f)
-            topMargin = top + h + dp(8f)
+        pillLeft = left
+        pillTop = top
+        pillW = w
+        pillH = h
+        centerX = r.centerX()
+
+        // раскрытая карточка — размеры по записи экрана острова Xiaomi (ширина экрана 1220 px: 1130 × 260, отступ сверху 18)
+        cardW = (screenW * 0.926f).roundToInt()
+        cardH = (screenW * 0.213f).roundToInt()
+        cardTop = (screenW * 0.0148f).roundToInt()
+        cardR = screenW * 0.082f
+        val btn = (screenW * 0.131f).roundToInt()
+        val edge = (screenW * 0.041f).roundToInt()
+        val gap = (screenW * 0.029f).roundToInt()
+        val ic = (screenW * 0.123f).roundToInt()
+
+        for (v in listOf<View>(cardIcon, cardTime, cardName, pauseBtn, stopBtn)) (v.parent as? ViewGroup)?.removeView(v)
+        cardContent.removeAllViews()
+        cardTime.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0508f)
+        cardName.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0328f)
+        val texts = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(cardTime)
+            addView(cardName)
         }
+        cardContent.addView(cardIcon, FrameLayout.LayoutParams(ic, ic).apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL; marginStart = (screenW * 0.045f).roundToInt() })
+        cardContent.addView(texts, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            marginStart = (screenW * 0.2f).roundToInt()
+        })
+        cardContent.addView(pauseBtn, FrameLayout.LayoutParams(btn, btn).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; marginEnd = edge + btn + gap })
+        cardContent.addView(stopBtn, FrameLayout.LayoutParams(btn, btn).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; marginEnd = edge })
+        val bar = View(activity).apply { background = GradientDrawable().apply { setColor(0xFF3A3A3A.toInt()); cornerRadius = screenW * 0.004f } }
+        cardContent.addView(bar, FrameLayout.LayoutParams((screenW * 0.152f).roundToInt(), (screenW * 0.008f).roundToInt()).apply {
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            bottomMargin = (screenW * 0.008f).roundToInt()
+        })
+        card.removeView(cardContent)
+        card.addView(cardContent, FrameLayout.LayoutParams(cardW, cardH).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL })
+        card.layoutParams = FrameLayout.LayoutParams(w, h)
+        applyProgress(progress)
     }
 }
 
