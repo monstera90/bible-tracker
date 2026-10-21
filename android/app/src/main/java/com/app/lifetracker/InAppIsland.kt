@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.4 (21.10) — вторая сверка со скриншотом: время сдвинуто влево на 11 px (правое поле 0.0335 ширины), начертание не через вес (HyperOS его игнорировал): время — sans-serif BOLD, название — sans-serif-medium; значок 0.57 высоты и на пиксель ниже, плашка на пиксель ниже. Откат: InAppIsland.kt 1.3.
 // Версия: 1.3 (21.10) — сверка со скриншотом острова: время 13sp жирное (высота цифр 32 px вместо 37), название обычным начертанием (вес 400), правая часть по размеру времени, название получает всё остальное место и не обрезается; плашка выше на 3 px, шире на 2 px. Откат: InAppIsland.kt 1.2.
 // Версия: 1.2 (21.10) — подгонка по скриншотам настоящего острова и плашки: ширина 0.41, отступ сверху 0.007, боковые поля 0.024, значок 0.58 высоты, зазор до названия 0.0104 ширины экрана, время — обычное начертание (у острова не жирное). Откат: InAppIsland.kt 1.1.
 // Версия: 1.1 (21.10) — размеры плашки считаются от ширины экрана (по замеру настоящего острова Poco X6 Pro: ширина 0.43, высота 0.086, отступ сверху 0.011 ширины экрана), а не от рамки выреза: система отдаёт рамку размером со всю строку состояния, плашка выходила огромной. Откат: InAppIsland.kt 1.0.
@@ -63,14 +64,14 @@ class InAppIsland(private val activity: Activity) {
         pillName.apply {
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = weighted(400)
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
         pillTime.apply {
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = weighted(700)
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
             maxLines = 1
         }
 
@@ -208,7 +209,7 @@ class InAppIsland(private val activity: Activity) {
         // от ширины экрана, как у настоящего острова (замер на Poco X6 Pro: 500 × 105 px при ширине 1220, отступ сверху 13 px).
         val h = (screenW * 0.0886f).roundToInt()
         val w = (screenW * 0.4117f).roundToInt()
-                val top = max(dp(2f), (screenW * 0.0061f).roundToInt())
+                val top = max(dp(2f), (screenW * 0.0069f).roundToInt())
         val left = r.centerX() - w / 2
 
         // дети переезжают в новые контейнеры: сначала отцепляем от старых (иначе addView бросает исключение)
@@ -216,13 +217,13 @@ class InAppIsland(private val activity: Activity) {
         pill.removeAllViews()
         pill.background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = h / 2f }
         val side = (screenW * 0.024f).roundToInt()
-        pill.setPadding(side, 0, side, 0)
-        val iconSize = (h * 0.58f).roundToInt()
+        pill.setPadding(side, (screenW * 0.0013f).roundToInt(), (screenW * 0.0335f).roundToInt(), 0)
+        val iconSize = (h * 0.57f).roundToInt()
         val leftBox = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             addView(pillIcon, LinearLayout.LayoutParams(iconSize, iconSize))
-            addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = (screenW * 0.0104f).roundToInt() })
+            addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = (screenW * 0.0087f).roundToInt() })
         }
         pillTime.setPadding((screenW * 0.02f).roundToInt(), 0, 0, 0)
         val rightBox = LinearLayout(activity).apply {
