@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 6.0 (22.10) — против мерцания копии острова: (1) вырез на миг пропадает при пересчёте WindowInsets (открытие приложения, прятание панелей) — раньше это сразу убирало окно и плашка пропадала и появлялась заново, теперь `setCutout(null)` ждёт 400 мс (`hideAfterCutoutLoss`); (2) тексты и кольцо паузы перерисовываются только когда изменились (раньше каждые 500 мс — лишние раскладки окна); (3) первое появление окна — короткое проявление 140 мс, а не резкое «вспыхивание». Откат: InAppIsland.kt 5.0.
 // Версия: 5.0 (21.10) — как у оригинала: (1) анимация раскрытия/сворачивания идёт по кадрам Choreographer (не зависит от выключенных анимаций системы), а окно на время анимации равно рамке всего движения — раньше оно ресайзилось покадрово с задержкой, карточка обрезалась и «прыгала»; (2) карточка не гаснет по таймеру, а сворачивается нажатием в любое место мимо неё (FLAG_WATCH_OUTSIDE_TOUCH → ACTION_OUTSIDE; касание при этом работает как обычно); таймер 6 с остался только в запасном режиме без разрешения; (3) окно раскрытой карточки начинается с её верха, а не с верха экрана — строка состояния по бокам и над карточкой снова тянет шторку. Откат: InAppIsland.kt 4.1.
 // Версия: 4.1 (21.10) — раскрытая карточка стоит ниже, как у настоящего острова под строкой состояния: отступ сверху 0.108 ширины экрана (было 0.0148), высота 0.2147, ширина 0.9286 (замер по скриншоту: верх 126, высота 247, ширина 1074 при ширине 1159). Откат: InAppIsland.kt 4.0.
 // Версия: 4.0 (21.10) — плашка живёт в собственном окне поверх всех (TYPE_APPLICATION_OVERLAY, разрешение «Поверх других приложений»), размером ровно с плашку/карточку, поэтому нажатие по ней доходит (окно строки состояния перехватывало касания к окну приложения). Без разрешения — запасной вариант в decorView (виден, но не нажимается; автораскрытие при запуске таймера остаётся); при первом показе один раз предлагается выдать разрешение. Окно убирается в onPause. Откат: InAppIsland.kt 3.1.
@@ -95,6 +96,10 @@ class InAppIsland(private val activity: Activity) {
     private var builtFor: Rect? = null
     private var paused = false
     private var autoShownFor: String? = null
+    private var shownClock: String? = null
+    private var shownTitle: String? = null
+    private var shownCardName: String? = null
+    private var shownPauseKey: String? = null
 
     private fun dp(v: Float) = (v * density).roundToInt()
 
@@ -165,8 +170,22 @@ class InAppIsland(private val activity: Activity) {
 
     /** Рамка выреза камеры (координаты окна) из WindowInsets; null — выреза сверху нет. */
     fun setCutout(rect: Rect?) {
-        cutout = rect
-        if (rect == null) hide()
+        if (rect != null) {
+            handler.removeCallbacks(hideAfterCutoutLoss)
+            cutout = rect
+            return
+        }
+        // При открытии приложения и смене режима панелей WindowInsets приходят заново и вырез на миг может пропасть:
+        // убирать окно сразу нельзя — плашка мигает. Реально пропавший вырез (поворот) убираем через паузу.
+        if (cutout != null) {
+            handler.removeCallbacks(hideAfterCutoutLoss)
+            handler.postDelayed(hideAfterCutoutLoss, 400L)
+        }
+    }
+
+    private val hideAfterCutoutLoss = Runnable {
+        cutout = null
+        hide()
     }
 
     fun start() {
@@ -178,6 +197,7 @@ class InAppIsland(private val activity: Activity) {
     fun stop() {
         started = false
         handler.removeCallbacks(tick)
+        handler.removeCallbacks(hideAfterCutoutLoss)
         hide()
     }
 
@@ -279,6 +299,8 @@ class InAppIsland(private val activity: Activity) {
 
     private fun hide() {
         stopAnim()
+        layer.animate().cancel()
+        layer.alpha = 1f
         layer.visibility = View.GONE
         expanded = false
         progress = 0f
@@ -407,16 +429,35 @@ class InAppIsland(private val activity: Activity) {
             pillIcon.setImageBitmap(XiaomiIsland.iconBitmap(stage, 96))
             cardIcon.setImageBitmap(XiaomiIsland.iconBitmap(stage, 192))
         }
+        // менять View только когда значение изменилось: каждый setText/setImageBitmap — лишняя раскладка и перерисовка окна
         val clock = XiaomiIsland.clockText(info.leftMs)
-        pillName.text = info.title
-        pillTime.text = clock
-        cardTime.text = clock
-        cardName.text = if (info.running) info.title else info.title + " · пауза"
-        if (card.visibility == View.VISIBLE) {
-            val fraction = if (info.totalMs > 0) info.leftMs.toFloat() / info.totalMs else 1f
-            pauseBtn.setImageBitmap(XiaomiIsland.pauseBitmap(fraction.coerceIn(0f, 1f), stage, paused))
+        if (clock != shownClock) {
+            shownClock = clock
+            pillTime.text = clock
+            cardTime.text = clock
         }
-        layer.visibility = View.VISIBLE
+        if (info.title != shownTitle) {
+            shownTitle = info.title
+            pillName.text = info.title
+        }
+        val cardNameText = if (info.running) info.title else info.title + " · пауза"
+        if (cardNameText != shownCardName) {
+            shownCardName = cardNameText
+            cardName.text = cardNameText
+        }
+        if (card.visibility == View.VISIBLE) {
+            val fraction = (if (info.totalMs > 0) info.leftMs.toFloat() / info.totalMs else 1f).coerceIn(0f, 1f)
+            val pauseKey = "" + (fraction * 200f).roundToInt() + "/" + stage + "/" + paused
+            if (pauseKey != shownPauseKey) {
+                shownPauseKey = pauseKey
+                pauseBtn.setImageBitmap(XiaomiIsland.pauseBitmap(fraction, stage, paused))
+            }
+        }
+        if (layer.visibility != View.VISIBLE) {
+            layer.visibility = View.VISIBLE
+            layer.alpha = 0f
+            layer.animate().alpha(1f).setDuration(140L).start()
+        }
         // только что запущенный таймер: плашка сама раскрывается (нажать на неё нельзя — см. шапку файла)
         if (info.running && info.totalMs > 0 && info.totalMs - info.leftMs < 3000L && autoShownFor != info.id && !expanded) {
             autoShownFor = info.id

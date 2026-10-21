@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 3.1 (22.10) — onPause сразу перепоставляет уведомления идущих таймеров (`CardTimers.tickIsland`): пока приложение на экране, тик их не трогает, и остров в шторке получает свежее время без ожидания следующего тика. Откат: MainActivity.kt 3.0.
 // Версия: 3.0 (21.10) — плашка таймера в приложении: `inAppIsland` (InAppIsland.kt), вырез камеры берётся из WindowInsets, старт/стоп в onResume/onPause. Откат: MainActivity.kt 2.1.
 // Версия: 2.1 (21.10) — onResume гасит вибрацию конца таймера карточки (CardTimers.stopVibration).
 // Версия: 2.0 (21.10) — вкладка Claude: `webHost` (FrameLayout вокруг главного WebView) и `claudeTab` (ClaudeTab.kt), `handleFileChooser`/`openExternalLink` вынесены для второго WebView.
@@ -288,6 +289,12 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         NotifyStore.appForeground = false
         inAppIsland.stop()
+        // Пока приложение было на экране, тик службы не перепоставлял уведомления таймеров — остров в шторке освежаем сразу.
+        try {
+            CardTimers.tickIsland(applicationContext)
+        } catch (e: Exception) {
+            // остров обновится следующим тиком службы
+        }
         // Сворачивание: страница успевает сохранить автозакладку и позицию чтения, пока WebView ещё не на паузе
         // (visibilitychange в WebView в этот момент может не прийти).
         if (pageTrusted) {

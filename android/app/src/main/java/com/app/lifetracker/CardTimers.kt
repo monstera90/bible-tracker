@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.3 (22.10) — `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
 // Версия: 5.2 (21.10) — `Info.totalMs` (заданное время, для кольца паузы в плашке). Откат: CardTimers.kt 5.1.
 // Версия: 5.1 (21.10) — в раскрытый остров передаётся круглая кнопка паузы (`XiaomiIsland.pauseAction`). Откат: CardTimers.kt 5.0.
 // Версия: 5.0 (21.10) — `primaryInfo` (данные главного таймера для плашки InAppIsland). Откат: CardTimers.kt 4.0.
@@ -225,7 +226,7 @@ object CardTimers {
         var next = -1L
         for (t in load(ctx).values) {
             if (!t.running || t.endAt <= now) continue
-            postRunning(ctx, t, false)
+            if (!NotifyStore.appForeground) postRunning(ctx, t, false)
             if (next < 0) next = (t.endAt - now) % 1000L + 20L
         }
         next
