@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 1.5 (21.10) — `parseCode` явно срезает BOM (\uFEFF), который библиотека QR ставит перед текстом с кириллицей (название таймера). Откат: cardscan.js 1.4.
    Версия: 1.4 (21.10) — `parseCode` узнаёт QR таймера `lt://v1/timer/<секунды>[/<название>]` → `{kind:"timer", seconds, title}` (код сам несёт таймер, карточка на устройстве не нужна). Откат: cardscan.js 1.3.
    Версия: 1.3 (21.10) — `parseCode` узнаёт QR заметки `lt://v1/note/<id>` → `{kind:"note", id}` (QR строит кнопка в редакторе заметок, mdeditor.js).
    Версия: 1.2 (20.10) — в окне ярлыка (`windowed`) кнопки «Назад» нет: выход — нажатие мимо окна камеры (`onBack`).
@@ -32,7 +33,7 @@ window.CardScan = (function(){
   //   {kind:"url", url}   — обычная ссылка http(s)
   //   {kind:"text", text} — всё остальное
   function parseCode(text){
-    var t = String(text == null ? "" : text).replace(/^\s+|\s+$/g, "");
+    var t = String(text == null ? "" : text).replace(/^[\s\uFEFF]+|[\s\uFEFF]+$/g, ""); // \uFEFF: библиотека QR ставит BOM перед текстом с кириллицей
     if(t.indexOf(QR_PREFIX) === 0){
       var id = t.slice(QR_PREFIX.length);
       if(/^[A-Za-z0-9]{4,32}$/.test(id)) return { kind: "card", id: id };

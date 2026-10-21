@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 10.2 (21.10) — `qrTextFor`: обрезка названия таймера не оставляет половину эмодзи (иначе библиотека QR падала и код не рисовался). Откат: itemcards.js 10.1.
    Версия: 10.1 (21.10) — QR таймера несёт время и название в самом коде (`lt://v1/timer/<секунды>[/<название до 40 знаков>]`): `qrTextFor`, `timerFromCode`/`timerCodeId`/`virtualCards`; скан такого кода запускает таймер на любом устройстве без карточки; `buildQr` и PDF берут текст через `qrTextFor`. Откат: itemcards.js 10.0.
    Версия: 10.0 (21.10) — структурная правка: тип карточки `reminder` («Напоминалка», одна на приложение, как «Сегодня»): `createSingletonCard` (вместо `createDateNoteCard`), `isSingletonCard`/`cardTitle`, `reminderPool`/`pickReminder` (бочонки в `reminderBag_v1`)/`showReminderOverlay`, уведомление `noreminders`; «Заметка с датой» переименована в «Сегодня» (название всегда берётся из кода, у старых карточек в записях может лежать прежнее). Откат: itemcards.js 9.0.
    Версия: 9.0 (21.10) — структурная правка: тип карточки «заметка» и её скрытая заметка УБРАНЫ (`openNoteCard`/`backToGrid`/`openNoteFromScan`/`openNoteWhenReady`, `data-type="note"`, кнопка «Поля карточки»); прежние карточки-заметки при загрузке отбрасываются (их заметки mdeditor.js 14.0 переносит в папку `cards-notes`), записи таких карточек в облаке удаляются. Вместо этого сканер понимает QR заметки `lt://v1/note/<id>` (кнопка QR в редакторе заметок): `handleScanned` → `openNoteByQrWhenReady`, из окна ярлыка — `openInApp(id,"note")` и `openCardFromNative`. Откат: itemcards.js 8.0.
@@ -57,6 +58,7 @@ window.initItemCardsModule = function(deps){
   function qrTextFor(c){
     if(c && c.type === "timer" && c.seconds > 0){
       var t = String(c.title || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, TIMER_QR_TITLE_MAX);
+      if(/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1); // обрезка не должна оставлять половину эмодзи (парный знак)
       return TIMER_PREFIX + (c.seconds | 0) + (t ? "/" + t : "");
     }
     return QR_PREFIX + (c ? c.id : "");
