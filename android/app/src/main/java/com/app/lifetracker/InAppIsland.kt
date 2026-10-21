@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 8.6 (22.10) — свёрнутая плашка возвращена к виду 8.0–8.2 (13sp название, 12sp время, letterSpacing 0.08, отступы 0.0087/0.0272): она точно совпадала с настоящим островом, правки 8.3 и 8.5 её испортили. Раскрытая карточка (8.3–8.5) не тронута. Откат: InAppIsland.kt 8.5.
 // Версия: 8.5 (22.10) — по замеру четырёх скриншотов (ширина 1159): название на плашке было мельче настоящего на ~14 % → 0.0350 × ширина экрана; время на плашке ниже на ~10 % и уже на ~19 % → 13.2sp, letterSpacing 0.13, tnum; время в карточке было выше на 7 % и уже на 12 % (вытянутые цифры) → размер 0.0450, letterSpacing 0.06, tnum. Откат: InAppIsland.kt 8.4.
 // Версия: 8.4 (22.10) — время в раскрытой карточке: по скриншотам оно вышло жирнее и крупнее настоящего — обводка 0.0026 → 0.0012 × ширина экрана, размер 0.0508 → 0.0483. Откат: InAppIsland.kt 8.3.
 // Версия: 8.3 (22.10) — название таймера как у настоящего острова (по записи экрана): на плашке крупнее на ~5 % (0.0307 × ширина экрана вместо 13sp), на 2,5 px правее и на ~3 px выше, время на ~6 px левее; в карточке название крупнее на ~8 % и выше на ~4 px, время выше на ~2 px. Откат: InAppIsland.kt 8.2.
@@ -124,17 +125,16 @@ class InAppIsland(private val activity: Activity) {
         layer.setOnTouchListener { _, e -> onLayerTouch(e) }
         pillName.apply {
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, activity.resources.displayMetrics.widthPixels * 0.0350f) // по замеру скриншотов: настоящее название крупнее на ~14 % (0.0307 вышло мельче)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
         pillTime.apply {
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.2f) // по замеру настоящее время выше на ~10 % (было 12sp)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             typeface = Typeface.DEFAULT
-            letterSpacing = 0.13f // и шире на ~19 %: цифры настоящего острова разрежены
-            fontFeatureSettings = "tnum" // цифры одной ширины, как у острова
+            letterSpacing = 0.08f
             maxLines = 1
         }
 
@@ -492,15 +492,14 @@ class InAppIsland(private val activity: Activity) {
         pill.removeAllViews()
         pill.background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = h / 2f }
         val side = (screenW * 0.024f).roundToInt()
-        pill.setPadding(side, 0, (screenW * 0.0322f).roundToInt(), 0) // время чуть левее, как у настоящего острова
-        pillName.translationY = -screenW * 0.0025f // название чуть выше, как у настоящего острова
+        pill.setPadding(side, 0, (screenW * 0.0272f).roundToInt(), 0)
         pillTime.strokePx = screenW * 0.0021f
         val iconSize = (h * 0.57f).roundToInt()
         val leftBox = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             addView(pillIcon, LinearLayout.LayoutParams(iconSize, iconSize))
-            addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = (screenW * 0.0107f).roundToInt() })
+            addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = (screenW * 0.0087f).roundToInt() })
         }
         pillTime.setPadding((screenW * 0.02f).roundToInt(), 0, 0, 0)
         val rightBox = LinearLayout(activity).apply {
