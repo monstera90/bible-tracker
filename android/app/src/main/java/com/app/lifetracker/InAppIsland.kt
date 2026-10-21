@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.3 (21.10) — сверка со скриншотом острова: время 13sp жирное (высота цифр 32 px вместо 37), название обычным начертанием (вес 400), правая часть по размеру времени, название получает всё остальное место и не обрезается; плашка выше на 3 px, шире на 2 px. Откат: InAppIsland.kt 1.2.
 // Версия: 1.2 (21.10) — подгонка по скриншотам настоящего острова и плашки: ширина 0.41, отступ сверху 0.007, боковые поля 0.024, значок 0.58 высоты, зазор до названия 0.0104 ширины экрана, время — обычное начертание (у острова не жирное). Откат: InAppIsland.kt 1.1.
 // Версия: 1.1 (21.10) — размеры плашки считаются от ширины экрана (по замеру настоящего острова Poco X6 Pro: ширина 0.43, высота 0.086, отступ сверху 0.011 ширины экрана), а не от рамки выреза: система отдаёт рамку размером со всю строку состояния, плашка выходила огромной. Откат: InAppIsland.kt 1.0.
 // Версия: 1.0 (21.10) — плашка таймера внутри приложения, пока оно на экране: чёрная «таблетка» вокруг выреза камеры (как свёрнутый остров Xiaomi) со значком, названием слева и временем справа; нажатие раскрывает карточку с большим значком, временем и кнопкой «Стоп». Без выреза сверху (поворот, телефон без выреза) плашки нет.
@@ -49,6 +50,11 @@ class InAppIsland(private val activity: Activity) {
 
     private fun dp(v: Float) = (v * density).roundToInt()
 
+    /** Начертание нужного веса (как у системного острова: название 400, время 700); на старых Android — обычное/жирное. */
+    private fun weighted(weight: Int): Typeface =
+        if (android.os.Build.VERSION.SDK_INT >= 28) Typeface.create(Typeface.DEFAULT, weight, false)
+        else Typeface.create(Typeface.DEFAULT, if (weight >= 600) Typeface.BOLD else Typeface.NORMAL)
+
     init {
         layer.visibility = View.GONE
         pill.orientation = LinearLayout.HORIZONTAL
@@ -57,13 +63,14 @@ class InAppIsland(private val activity: Activity) {
         pillName.apply {
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = weighted(400)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
         pillTime.apply {
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            typeface = Typeface.DEFAULT
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = weighted(700)
             maxLines = 1
         }
 
@@ -199,10 +206,9 @@ class InAppIsland(private val activity: Activity) {
         val screenW = activity.resources.displayMetrics.widthPixels
         // Рамка выреза у Xiaomi — размером со всю строку состояния, по ней плашка выходит огромной. Размеры берём
         // от ширины экрана, как у настоящего острова (замер на Poco X6 Pro: 500 × 105 px при ширине 1220, отступ сверху 13 px).
-        val h = (screenW * 0.086f).roundToInt()
-        val w = (screenW * 0.41f).roundToInt()
-        val gapW = (screenW * 0.075f).roundToInt()
-        val top = max(dp(2f), (screenW * 0.007f).roundToInt())
+        val h = (screenW * 0.0886f).roundToInt()
+        val w = (screenW * 0.4117f).roundToInt()
+                val top = max(dp(2f), (screenW * 0.0061f).roundToInt())
         val left = r.centerX() - w / 2
 
         // дети переезжают в новые контейнеры: сначала отцепляем от старых (иначе addView бросает исключение)
@@ -218,13 +224,13 @@ class InAppIsland(private val activity: Activity) {
             addView(pillIcon, LinearLayout.LayoutParams(iconSize, iconSize))
             addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = (screenW * 0.0104f).roundToInt() })
         }
+        pillTime.setPadding((screenW * 0.02f).roundToInt(), 0, 0, 0)
         val rightBox = LinearLayout(activity).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
             addView(pillTime)
         }
         pill.addView(leftBox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        pill.addView(View(activity), LinearLayout.LayoutParams(gapW, 1))
-        pill.addView(rightBox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        pill.addView(rightBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
         pill.layoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.START; leftMargin = left; topMargin = top }
 
         card.layoutParams = FrameLayout.LayoutParams(screenW - 2 * dp(12f), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
