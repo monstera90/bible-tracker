@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 7.0 (21.10) — структурная правка: `.scan-reminder-card` / `.scan-reminder-text` — слой «Напоминалки» (itemcards.js 10.0). Откат: components.css 6.0.
    Версия: 6.0 (21.10) — убраны стили кнопки «Поля карточки» (`.item-card-page-btn`): карточек-заметок больше нет.
    Версия: 5.10 (20.10) — рамка окна ярлыка сканера фиолетовая (#7F00FF, как значок ярлыка).
    Версия: 5.9 (20.10) — окно ярлыка сканера: `.card-scan-screen.scan-windowed` (прозрачный слой, видоискатель в центральной рамке), `.scan-wait` (серая заглушка до первого кадра), `.scan-live`; до первого кадра `<video>` скрыт.
@@ -4572,12 +4573,29 @@ body::after{
 .scan-notice-text{ font-size:15px; line-height:1.4; }
 .scan-notice-url{ word-break:break-all; }
 .scan-notice-buttons{ display:flex; flex-direction:column; gap:8px; }
+/* «Напоминалка»: слой со случайным напоминанием из «Комментариев» — карточка с текстом по центру, вид как у .scan-notice */
+.scan-reminder-card{
+  box-sizing:border-box;
+  width:min(92vw, 420px);
+  max-height:80vh;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  padding:22px 20px;
+  background:var(--bg-mid, #fbf4e2);
+  color:var(--ink, #000);
+  border:2px solid var(--ink, #000);
+  border-radius:14px;
+  font-size:18px;
+  line-height:1.5;
+  animation:scanCardPop .2s ease-out;
+}
+.scan-reminder-text{ white-space:pre-wrap; overflow-wrap:anywhere; text-align:center; }
 .item-form-types{ flex-direction:column; }
 @keyframes scanCardFade{ from{ opacity:0; } to{ opacity:1; } }
 @keyframes scanCardPop{ from{ transform:scale(.92); opacity:0; } to{ transform:scale(1); opacity:1; } }
 /* Android 5 и «уменьшить анимацию»: без анимации появления */
 @media (prefers-reduced-motion: reduce){
-  .scan-card-overlay, .scan-card{ animation:none; }
+  .scan-card-overlay, .scan-card, .scan-reminder-card{ animation:none; }
 }
 
 /* таймеры карточек (шаг 5а): «Пуск» внизу по центру карточки; цифры идущего таймера выделены, приостановленного — приглушены */

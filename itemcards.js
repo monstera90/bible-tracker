@@ -1,5 +1,7 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 10.1 (21.10) — QR таймера несёт время и название в самом коде (`lt://v1/timer/<секунды>[/<название до 40 знаков>]`): `qrTextFor`, `timerFromCode`/`timerCodeId`/`virtualCards`; скан такого кода запускает таймер на любом устройстве без карточки; `buildQr` и PDF берут текст через `qrTextFor`. Откат: itemcards.js 10.0.
+   Версия: 10.0 (21.10) — структурная правка: тип карточки `reminder` («Напоминалка», одна на приложение, как «Сегодня»): `createSingletonCard` (вместо `createDateNoteCard`), `isSingletonCard`/`cardTitle`, `reminderPool`/`pickReminder` (бочонки в `reminderBag_v1`)/`showReminderOverlay`, уведомление `noreminders`; «Заметка с датой» переименована в «Сегодня» (название всегда берётся из кода, у старых карточек в записях может лежать прежнее). Откат: itemcards.js 9.0.
    Версия: 9.0 (21.10) — структурная правка: тип карточки «заметка» и её скрытая заметка УБРАНЫ (`openNoteCard`/`backToGrid`/`openNoteFromScan`/`openNoteWhenReady`, `data-type="note"`, кнопка «Поля карточки»); прежние карточки-заметки при загрузке отбрасываются (их заметки mdeditor.js 14.0 переносит в папку `cards-notes`), записи таких карточек в облаке удаляются. Вместо этого сканер понимает QR заметки `lt://v1/note/<id>` (кнопка QR в редакторе заметок): `handleScanned` → `openNoteByQrWhenReady`, из окна ярлыка — `openInApp(id,"note")` и `openCardFromNative`. Откат: itemcards.js 8.0.
    Версия: 8.0 (20.10) — структурная правка: тип карточки `datenote` («Заметка с датой»): пункт «Создать новую заметку с датой» в меню «+» (пока такая карточка есть, пункта нет), только QR на обороте; скан (и из окна ярлыка через `openInApp(id,"note")`) сразу создаёт ОБЫЧНУЮ заметку блокнота с сегодняшней датой в имени в папке `notes` в корне — `createDatedNote` (mdeditor.js), `showScanned`/`openDatedNoteFromScan`/`createDatedNoteWhenReady`, деп `openNotesTab`. Откат: itemcards.js 7.1.
    Версия: 7.1 (20.10) — окно ярлыка: сканеру передаётся `windowed: standalone` (видоискатель в центральной рамке, вокруг прозрачно).
@@ -15,7 +17,7 @@
 
    Что здесь сделано (шаги 1, 2, 4, 5б, 7 плана ТЗ):
    - сетка карточек 3:4 (было 2:3), число колонок считается от ширины карточки;
-   - типы: «таймер», «предмет» и «заметка с датой»; формы создания/правки (таймер, предмет);
+   - типы: «таймер», «предмет», «Сегодня» (бывшая «заметка с датой») и «Напоминалка»; формы создания/правки (таймер, предмет);
    - у каждой карточки личный id (8 знаков) и QR `lt://v1/card/<id>` на обороте
      (двойной тап; QR строится лениво, библиотека vendor/qrcode.min.js);
    - долгий тап раскрывает кнопки «правка»/«удаление» (те же классы, что у обложек книг);
@@ -47,6 +49,36 @@ window.initItemCardsModule = function(deps){
   var CARDS_KEY = "itemCards_v1";
   var SIZE_KEY = "itemCardsSize_v1";
   var QR_PREFIX = "lt://v1/card/";
+  var TIMER_PREFIX = "lt://v1/timer/";
+  var TIMER_QR_TITLE_MAX = 40; // название в коде таймера: длиннее — код плотнее и хуже читается на малой наклейке
+  // Текст QR карточки. Таймер несёт время и название в самом коде (lt://v1/timer/<секунды>/<название>): любое устройство
+  // с приложением запускает такой таймер по скану, карточка там не нужна (код можно напечатать и карточку удалить).
+  // Остальные карточки — как раньше, по id (lt://v1/card/<id>). Ранее напечатанные коды таймеров по id работают, пока карточка есть.
+  function qrTextFor(c){
+    if(c && c.type === "timer" && c.seconds > 0){
+      var t = String(c.title || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, TIMER_QR_TITLE_MAX);
+      return TIMER_PREFIX + (c.seconds | 0) + (t ? "/" + t : "");
+    }
+    return QR_PREFIX + (c ? c.id : "");
+  }
+  // таймер из отсканированного кода: «виртуальная» карточка (в список не попадает); id считается от времени и названия,
+  // поэтому повторный скан того же кода перезапускает тот же таймер, а разные коды не мешают друг другу
+  var virtualCards = {};
+  function timerCodeId(seconds, title){
+    var str = seconds + "|" + title, h1 = 5381, h2 = 52711;
+    for(var i = 0; i < str.length; i++){
+      var ch = str.charCodeAt(i);
+      h1 = ((h1 * 33) ^ ch) >>> 0;
+      h2 = ((h2 * 31) + ch) >>> 0;
+    }
+    return "q" + h1.toString(36) + h2.toString(36);
+  }
+  function timerFromCode(p){
+    var title = String(p.title || "").slice(0, 80);
+    var vc = { id: timerCodeId(p.seconds, title), type: "timer", title: title, icon: "", date: "", seconds: p.seconds, virtual: true };
+    virtualCards[vc.id] = vc;
+    return vc;
+  }
   var SIZE_MIN = 0.7, SIZE_MAX = 2;
   var ID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"; // без похожих знаков (i, l, o, 0, 1)
 
@@ -59,11 +91,21 @@ window.initItemCardsModule = function(deps){
     car: '<path d="M4 12l2-4.5a2 2 0 0 1 1.8-1.2h8.4a2 2 0 0 1 1.8 1.2L20 12"></path><path d="M3.5 12h17v5a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"></path><path d="M6.5 15h.01M17.5 15h.01"></path><path d="M6 18v2M18 18v2"></path>',
     vegetable: '<path d="M12 7.5c-4.5 0-7.5 2.6-7.5 6.2 0 3.6 3 6.3 7.5 6.3s7.5-2.7 7.5-6.3c0-3.6-3-6.2-7.5-6.2z"></path><path d="M12 7.5V4"></path><path d="M12 7.5c-2-.5-3.5-1.5-4-3 2 0 3.5.5 4 1.5M12 7.5c2-.5 3.5-1.5 4-3-2 0-3.5.5-4 1.5"></path>',
     paper: '<path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path><path d="M9 12h6M9 15.5h6"></path>',
+    reminder: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"></path><path d="M10 20.5a2 2 0 0 0 4 0"></path>',
     datepaper: '<path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path><rect x="8.5" y="11.5" width="7" height="6" rx="1"></rect><path d="M8.5 14h7"></path><path d="M10.5 10.2v2.2M13.5 10.2v2.2"></path>'
   };
   var ICON_ORDER = ["bottle", "container", "jar", "bicycle", "car", "vegetable", "paper"];
-  var DEFAULT_ICON = { item: "", timer: "", datenote: "datepaper" };
-  var DATENOTE_TITLE = "Заметка с датой";
+  var DEFAULT_ICON = { item: "", timer: "", datenote: "datepaper", reminder: "reminder" };
+  var DATENOTE_TITLE = "Сегодня";
+  var REMINDER_TITLE = "Напоминалка";
+  // «Сегодня» (бывшая «Заметка с датой») и «Напоминалка» — по одной на приложение, без формы: название всегда своё
+  // (в записях и в облаке у старых карточек «Сегодня» может лежать прежнее название — оно не показывается)
+  function isSingletonCard(c){ return !!c && (c.type === "datenote" || c.type === "reminder"); }
+  function cardTitle(c){
+    if(c.type === "datenote") return DATENOTE_TITLE;
+    if(c.type === "reminder") return REMINDER_TITLE;
+    return c.title || "";
+  }
   function iconSvg(name){
     if(!name || !ICONS[name]) return "";
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + ICONS[name] + '</svg>';
@@ -116,7 +158,7 @@ window.initItemCardsModule = function(deps){
   // запись карточки в том виде, как она ходит между устройствами (и проверка пришедшей из облака)
   function cloudShape(r){
     if(!r || typeof r.id !== "string" || !/^[A-Za-z0-9]{4,32}$/.test(r.id)) return null;
-    if(r.type !== "timer" && r.type !== "item" && r.type !== "datenote") return null;
+    if(r.type !== "timer" && r.type !== "item" && r.type !== "datenote" && r.type !== "reminder") return null;
     var o = {
       id: r.id,
       type: r.type,
@@ -219,7 +261,7 @@ window.initItemCardsModule = function(deps){
   function findCard(id){
     var list = loadCards();
     for(var i = 0; i < list.length; i++) if(list[i].id === id) return list[i];
-    return null;
+    return virtualCards[id] || null;
   }
   function newId(){
     var out = "";
@@ -319,7 +361,7 @@ window.initItemCardsModule = function(deps){
     if(p && base > 0 && base <= now) c.remindDone = base + Math.floor((now - base) / p) * p;
   }
   function remindBtnHtml(c){
-    if(c.type === "timer" || c.type === "datenote" || !deps.reminderBtnParts) return "";
+    if(c.type === "timer" || isSingletonCard(c) || !deps.reminderBtnParts) return "";
     var at = nextOccurrence(c);
     var p = deps.reminderBtnParts(at || 0);
     return '<button type="button" class="task-icon-btn task-reminder-btn item-card-remind-btn' + (at ? ' active' : '') + p.cls + '" data-card-id="' + escapeHtml(c.id) + '" title="' +
@@ -340,7 +382,7 @@ window.initItemCardsModule = function(deps){
     try{ fired = JSON.parse(localStorage.getItem(FIRED_KEY) || "{}") || {}; }catch(e){ fired = {}; }
     var changed = false, out = [];
     loadCards().forEach(function(c){
-      if(c.type === "timer" || c.type === "datenote" || !(Number(c.remindAt) > 0)) return;
+      if(c.type === "timer" || isSingletonCard(c) || !(Number(c.remindAt) > 0)) return;
       var key = "card:" + c.id, f = fired[key];
       // срабатывание повтора (здесь или в оболочке) запоминаем в самой карточке: журнал показанных чистится через ~2 месяца
       if(repeatOf(c) && typeof f === "number" && f > (Number(c.remindDone) || 0)){ c.remindDone = f; changed = true; }
@@ -416,12 +458,15 @@ window.initItemCardsModule = function(deps){
     var cards = loadCards();
     var html = '<div class="mdeditor-tab item-cards-tab" id="itemCardsTab">';
     html += '<div class="item-cards-grid" id="itemCardsGrid"></div>';
-    // «Заметка с датой» — одна на всё приложение: пока карточка есть, пункта в меню нет (вернётся после удаления карточки)
+    // «Сегодня» — одна на всё приложение: пока карточка есть, пункта в меню нет (вернётся после удаления карточки)
     var hasDateNote = cards.some(function(c){ return c.type === "datenote"; });
+    // «Напоминалка» — тоже одна на приложение, по тому же правилу
+    var hasReminder = cards.some(function(c){ return c.type === "reminder"; });
     html += '<div class="item-type-menu" id="itemTypeMenu" style="display:none;">' +
       '<button type="button" class="workbooks-run-btn" data-type="timer">Таймер</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="item">Предмет</button>' +
-      (hasDateNote ? '' : '<button type="button" class="workbooks-run-btn" data-type="datenote">Создать новую заметку с датой</button>') +
+      (hasDateNote ? '' : '<button type="button" class="workbooks-run-btn" data-type="datenote">' + DATENOTE_TITLE + '</button>') +
+      (hasReminder ? '' : '<button type="button" class="workbooks-run-btn" data-type="reminder">' + REMINDER_TITLE + '</button>') +
     '</div>';
     var showPdf = !isAndroid5();
     if(showPdf){
@@ -463,10 +508,10 @@ window.initItemCardsModule = function(deps){
         '<div class="item-card-front">' + cardFrontHtml(c) + '</div>' +
         '<div class="item-card-back" style="display:none;"><div class="item-card-qr"></div></div>' +
         '<div class="book-cover-actions">' +
-          (c.type === "datenote" ? '' : '<button type="button" class="mdeditor-edit-btn' + (revealed ? " visible" : "") + '" title="Изменить">' + PENCIL_ICON_SVG + '</button>') +
+          (isSingletonCard(c) ? '' : '<button type="button" class="mdeditor-edit-btn' + (revealed ? " visible" : "") + '" title="Изменить">' + PENCIL_ICON_SVG + '</button>') +
           '<button type="button" class="mdeditor-delete-btn' + (revealed ? " visible" : "") + '" title="Удалить">' + DELETE_ICON_SVG + '</button>' +
         '</div>';
-      card.querySelector(".item-card-title").textContent = c.title || "";
+      card.querySelector(".item-card-title").textContent = cardTitle(c);
       grid.appendChild(card);
     });
     bindGrid(grid);
@@ -482,13 +527,16 @@ window.initItemCardsModule = function(deps){
   // ---------- оборот карточки: QR ----------
   function buildQr(card, id){
     var host = card.querySelector(".item-card-qr");
-    if(!host || host.dataset.built === id) return;
-    host.dataset.built = id;
+    if(!host) return;
+    var cc = findCard(id);
+    var text = cc ? qrTextFor(cc) : QR_PREFIX + id; // у таймера в коде время и название, поэтому «построено» помечается самим текстом
+    if(host.dataset.built === text) return;
+    host.dataset.built = text;
     host.innerHTML = "";
     deps.loadQrLib().then(function(){
-      if(host.dataset.built !== id) return;
+      if(host.dataset.built !== text) return;
       var size = Math.max(60, Math.round(card.clientWidth * 0.72));
-      try{ new window.QRCode(host, { text: QR_PREFIX + id, width: size, height: size, colorDark: "#000000", colorLight: "#ffffff" }); }catch(e){}
+      try{ new window.QRCode(host, { text: text, width: size, height: size, colorDark: "#000000", colorLight: "#ffffff" }); }catch(e){}
     }).catch(function(){ host.textContent = "QR недоступен"; });
   }
   function setFace(card, back){
@@ -606,7 +654,7 @@ window.initItemCardsModule = function(deps){
   }
 
   function onCardTap(c){
-    if(c.type === "datenote") return; // «Заметка с датой» работает только по QR-коду (двойной тап — оборот с кодом)
+    if(isSingletonCard(c)) return; // «Сегодня» и «Напоминалка» работают только по QR-коду (двойной тап — оборот с кодом)
     openForm(c.type, c); // таймер и предмет: форма с заполненными полями
   }
 
@@ -635,7 +683,7 @@ window.initItemCardsModule = function(deps){
       for(var i = 0; i < bs.length; i++) bs[i].disabled = disabled;
     }
     pdfBusy = true; setButtons(true); setStatus("Готовлю PDF…");
-    var forPdf = cards.map(function(c){ return { id: c.id, title: c.title }; });
+    var forPdf = cards.map(function(c){ return { id: c.id, title: cardTitle(c), qr: qrTextFor(c) }; });
     deps.loadQrLib().then(function(){
       return window.CardPdf.build(forPdf, perPage, { onProgress: function(done, total){ setStatus("Готовлю PDF… " + done + " из " + total); } });
     }).then(function(blob){
@@ -671,7 +719,8 @@ window.initItemCardsModule = function(deps){
       var b = e.target.closest("button[data-type]");
       if(!b) return;
       closeTypeMenu();
-      if(b.dataset.type === "datenote"){ createDateNoteCard(); return; }
+      if(b.dataset.type === "datenote"){ createSingletonCard("datenote"); return; }
+      if(b.dataset.type === "reminder"){ createSingletonCard("reminder"); return; }
       openForm(b.dataset.type, null);
     });
     var pdfBtn = document.getElementById("itemCardsPdfBtn");
@@ -730,12 +779,13 @@ window.initItemCardsModule = function(deps){
     renderGrid();
   }
 
-  // «Заметка с датой»: карточка без формы — создаётся сразу, нужна только ради QR-кода (одна на приложение)
-  function createDateNoteCard(){
+  // «Сегодня» и «Напоминалка»: карточка без формы — создаётся сразу, нужна только ради QR-кода (по одной на приложение;
+  // пока карточка есть, пункта в меню «+» нет, после удаления он возвращается)
+  function createSingletonCard(type){
     var list = loadCards();
-    for(var i = 0; i < list.length; i++) if(list[i].type === "datenote"){ renderGrid(); return; }
+    for(var i = 0; i < list.length; i++) if(list[i].type === type){ renderGrid(); return; }
     var now = Date.now();
-    list.push({ id: newId(), type: "datenote", title: DATENOTE_TITLE, icon: DEFAULT_ICON.datenote, date: "", seconds: 0, createdAt: now, updatedAt: now });
+    list.push({ id: newId(), type: type, title: type === "reminder" ? REMINDER_TITLE : DATENOTE_TITLE, icon: DEFAULT_ICON[type], date: "", seconds: 0, createdAt: now, updatedAt: now });
     saveCards();
     renderGrid();
   }
@@ -1070,12 +1120,14 @@ window.initItemCardsModule = function(deps){
       return;
     }
     if(p.kind === "note"){ openScannedNote(p.id); return; }
+    if(p.kind === "timer"){ showScanned(timerFromCode(p)); return; } // таймер из самого кода: отсчёт стартует сразу, карточка не нужна
     showNoticeOverlay({ kind: p.kind, url: p.url, text: p.text });
   }
 
-  // найденная по скану карточка: таймер стартует сразу и показывается слоем; «Заметка с датой» слоя не имеет — сразу создаёт заметку
+  // найденная по скану карточка: таймер стартует сразу и показывается слоем; «Сегодня» слоя не имеет — сразу создаёт заметку
   function showScanned(c){
     if(c.type === "datenote"){ openDatedNoteFromScan(c); return; }
+    if(c.type === "reminder"){ showReminderOverlay(); return; } // «Напоминалка»: случайное напоминание из «Комментариев» слоем
     if(c.type === "timer") startTimerForCard(c); // скан таймера: отсчёт стартует сразу (если уже шёл — заново)
     showCardOverlay(c);
   }
@@ -1099,6 +1151,71 @@ window.initItemCardsModule = function(deps){
     alert("Заметки ещё не готовы: нужна настроенная синхронизация.");
   }
 
+  // ---------- «Напоминалка»: случайное напоминание из вкладки «Комментарии» ----------
+  // Комментарии лежат в общем состоянии приложения (localStorage `bibleReadingProgress_v2`, записи `comment:<id>` = {c:{text}, t}),
+  // его читает и окно ярлыка scan.html (там my.js нет). Выбор — «лотерейные бочонки»: в `reminderBag_v1` помнится, какие уже
+  // показаны в этом круге ({shown:[id…], last}); каждый раз вынимается случайный из ещё не показанных; когда показаны все,
+  // круг начинается заново (первое — снова случайное, но не то же самое, что показано последним, если комментариев больше одного).
+  // Новые комментарии сами попадают в «не показанные», удалённые из учёта выпадают.
+  var STATE_STORAGE_KEY = "bibleReadingProgress_v2";
+  var REMINDER_BAG_KEY = "reminderBag_v1";
+  function cleanReminderText(t){
+    return String(t || "")
+      .replace(/!\[\[[^\]\n]*\]\]/g, "")        // картинки ![[имя]] в слой не берём
+      .replace(/\*\*([^*\n]+)\*\*/g, "$1")
+      .replace(/==([^=\n]+)==/g, "$1")
+      .replace(/~~([^~\n]+)~~/g, "$1")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+  function reminderPool(){
+    var st = {};
+    try{ st = JSON.parse(localStorage.getItem(STATE_STORAGE_KEY) || "{}") || {}; }catch(e){ st = {}; }
+    var list = [];
+    Object.keys(st).forEach(function(k){
+      if(k.indexOf("comment:") !== 0) return;
+      var rec = st[k];
+      var text = rec && rec.c && typeof rec.c.text === "string" ? cleanReminderText(rec.c.text) : "";
+      if(text) list.push({ id: k.slice(8), text: text });
+    });
+    return list;
+  }
+  function pickReminder(){
+    var pool = reminderPool();
+    if(!pool.length) return null;
+    var bag = {};
+    try{ bag = JSON.parse(localStorage.getItem(REMINDER_BAG_KEY) || "{}") || {}; }catch(e){ bag = {}; }
+    if(!bag || typeof bag !== "object") bag = {};
+    var inPool = {};
+    pool.forEach(function(r){ inPool[r.id] = true; });
+    var shown = (Array.isArray(bag.shown) ? bag.shown : []).filter(function(id){ return inPool[id]; });
+    var left = pool.filter(function(r){ return shown.indexOf(r.id) < 0; });
+    if(!left.length){ // вынуты все — бочонки снова в мешок, новый круг
+      shown = [];
+      left = pool.filter(function(r){ return pool.length < 2 || r.id !== bag.last; });
+    }
+    var pick = left[Math.floor(Math.random() * left.length)];
+    shown.push(pick.id);
+    try{ localStorage.setItem(REMINDER_BAG_KEY, JSON.stringify({ shown: shown, last: pick.id })); }catch(e){}
+    return pick;
+  }
+  // слой с карточкой-текстом поверх приложения или рабочего стола; тап мимо карточки закрывает (как у остальных слоёв скана)
+  function showReminderOverlay(){
+    var pick = pickReminder();
+    if(!pick){ showNoticeOverlay({ kind: "noreminders" }); return; }
+    var o = newOverlay();
+    var card = document.createElement("div");
+    card.className = "scan-reminder-card";
+    card.addEventListener("click", function(e){ e.stopPropagation(); });
+    var txt = document.createElement("div");
+    txt.className = "scan-reminder-text";
+    txt.textContent = pick.text;
+    card.appendChild(txt);
+    o.appendChild(card);
+    if(isLegacyAnim()){ o.style.animation = "none"; card.style.animation = "none"; } // Android 5: без анимации
+  }
+
+
   function newOverlay(){
     closeOverlayEl();
     var o = document.createElement("div");
@@ -1120,7 +1237,7 @@ window.initItemCardsModule = function(deps){
     card.className = "item-card item-card-" + c.type + " scan-card";
     card.style.setProperty("--item-card-w", overlayCardWidth() + "px");
     card.innerHTML = '<div class="item-card-front">' + cardFrontHtml(c) + '</div>';
-    card.querySelector(".item-card-title").textContent = c.title || "";
+    card.querySelector(".item-card-title").textContent = cardTitle(c);
     card.addEventListener("click", function(e){
       e.stopPropagation();
       if(c.type === "timer" && e.target.closest(".item-card-start-btn")) startTimerForCard(c); // «Пуск» на показе: заново
@@ -1185,6 +1302,8 @@ window.initItemCardsModule = function(deps){
         openExternalUrl(info.url);
         endScanSession(true);
       });
+    } else if(info.kind === "noreminders"){
+      msg.textContent = "Напоминаний пока нет. Добавьте комментарии на вкладке «Комментарии».";
     } else {
       msg.textContent = info.kind === "unknown"
         ? "Код не поддерживается этой версией приложения: " + (info.text || "")
@@ -1235,7 +1354,7 @@ window.initItemCardsModule = function(deps){
     if(n < 25){ setTimeout(function(){ openNoteByQrWhenReady(id, n + 1); }, 300); return; }
     alert("Заметка не найдена на этом устройстве. Возможно, ещё не синхронизирована.");
   }
-  // скан QR заметки: из окна ярлыка открываем приложение тем же входом, что у «Заметки с датой» (mode "note"), иначе открываем сразу
+  // скан QR заметки: из окна ярлыка открываем приложение тем же входом, что у «Сегодня» (mode "note"), иначе открываем сразу
   function openScannedNote(id){
     if(standalone){
       if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(id, "note"); }catch(e){} }
@@ -1246,13 +1365,13 @@ window.initItemCardsModule = function(deps){
     openNoteByQrWhenReady(id, 0);
   }
 
-  // вход из оболочки (ScanActivity → MainActivity): mode "note" — «Заметка с датой» (id карточки) либо заметка по QR (id заметки),
+  // вход из оболочки (ScanActivity → MainActivity): mode "note" — «Сегодня» (id карточки) либо заметка по QR (id заметки),
   // "create" — создать карточку с этим id (код уже напечатан)
   function openCardFromNative(id, mode){
     reloadCards();
     var c = findCard(id);
     if(mode === "create" && !c){ openTypeChooser(id); return; }
-    if(mode === "note" && c && c.type === "datenote"){ createDatedNoteWhenReady(0); return; } // скан «Заметки с датой» из окна ярлыка
+    if(mode === "note" && c && c.type === "datenote"){ createDatedNoteWhenReady(0); return; } // скан «Сегодня» из окна ярлыка
     if(mode === "note" && !c){ openNoteByQrWhenReady(id, 0); return; } // id не карточки — id заметки из QR (скан в окне ярлыка)
     renderGrid();
   }

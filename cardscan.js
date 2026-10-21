@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 1.4 (21.10) — `parseCode` узнаёт QR таймера `lt://v1/timer/<секунды>[/<название>]` → `{kind:"timer", seconds, title}` (код сам несёт таймер, карточка на устройстве не нужна). Откат: cardscan.js 1.3.
    Версия: 1.3 (21.10) — `parseCode` узнаёт QR заметки `lt://v1/note/<id>` → `{kind:"note", id}` (QR строит кнопка в редакторе заметок, mdeditor.js).
    Версия: 1.2 (20.10) — в окне ярлыка (`windowed`) кнопки «Назад» нет: выход — нажатие мимо окна камеры (`onBack`).
    Версия: 1.1 (20.10) — `open({windowed:true})` (окно ярлыка): видоискатель только в центральном окне с зелёной рамкой, вокруг прозрачно (виден рабочий стол); до первого кадра вместо растянутой заглушки WebView — серая заглушка внутри окна.
@@ -21,9 +22,11 @@ window.CardScan = (function(){
 
   var QR_PREFIX = "lt://v1/card/";
   var NOTE_PREFIX = "lt://v1/note/";
+  var TIMER_PREFIX = "lt://v1/timer/";
 
   // Разбор текста из QR:
   //   {kind:"card", id}   — код карточки приложения (lt://v1/card/<id>)
+  //   {kind:"timer", seconds, title} — таймер, зашитый в код (lt://v1/timer/<секунды>[/<название>])
   //   {kind:"note", id}   — код заметки «Моего блокнота» (lt://v1/note/<id>)
   //   {kind:"unknown", text} — наша схема lt://, но другая версия/вид (не выполняется)
   //   {kind:"url", url}   — обычная ссылка http(s)
@@ -33,6 +36,13 @@ window.CardScan = (function(){
     if(t.indexOf(QR_PREFIX) === 0){
       var id = t.slice(QR_PREFIX.length);
       if(/^[A-Za-z0-9]{4,32}$/.test(id)) return { kind: "card", id: id };
+      return { kind: "unknown", text: t };
+    }
+    if(t.indexOf(TIMER_PREFIX) === 0){
+      // таймер, зашитый в сам код: lt://v1/timer/<секунды>[/<название>] — карточка на устройстве не нужна
+      var tm = /^(\d{1,6})(?:\/([\s\S]*))?$/.exec(t.slice(TIMER_PREFIX.length));
+      var tsec = tm ? parseInt(tm[1], 10) : 0;
+      if(tm && tsec >= 1 && tsec <= 359999) return { kind: "timer", seconds: tsec, title: (tm[2] || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, 80) };
       return { kind: "unknown", text: t };
     }
     if(t.indexOf(NOTE_PREFIX) === 0){
