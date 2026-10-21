@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 11.0 (21.10) — структурная правка: на карточке-таймере две равные кнопки — «Стоп» слева и «Пуск» справа (`.item-card-timer-btns`); `stopTimerForCard` отменяет таймер (в оболочке `cancelCardTimer`, в окне ярлыка `deps.timers.cancel`, в браузере — запасной localStorage); цифры возвращаются к заданному времени. Откат: itemcards.js 10.2.
    Версия: 10.2 (21.10) — `qrTextFor`: обрезка названия таймера не оставляет половину эмодзи (иначе библиотека QR падала и код не рисовался). Откат: itemcards.js 10.1.
    Версия: 10.1 (21.10) — QR таймера несёт время и название в самом коде (`lt://v1/timer/<секунды>[/<название до 40 знаков>]`): `qrTextFor`, `timerFromCode`/`timerCodeId`/`virtualCards`; скан такого кода запускает таймер на любом устройстве без карточки; `buildQr` и PDF берут текст через `qrTextFor`. Откат: itemcards.js 10.0.
    Версия: 10.0 (21.10) — структурная правка: тип карточки `reminder` («Напоминалка», одна на приложение, как «Сегодня»): `createSingletonCard` (вместо `createDateNoteCard`), `isSingletonCard`/`cardTitle`, `reminderPool`/`pickReminder` (бочонки в `reminderBag_v1`)/`showReminderOverlay`, уведомление `noreminders`; «Заметка с датой» переименована в «Сегодня» (название всегда берётся из кода, у старых карточек в записях может лежать прежнее). Откат: itemcards.js 9.0.
@@ -446,7 +447,10 @@ window.initItemCardsModule = function(deps){
     if(c.type === "timer"){
       return '<div class="item-card-title"></div>' +
         '<div class="item-card-time" data-id="' + escapeHtml(c.id) + '">' + escapeHtml(timerTextFor(c)) + '</div>' +
-        '<button type="button" class="item-card-start-btn" title="Запустить таймер">Пуск</button>';
+        '<div class="item-card-timer-btns">' +
+          '<button type="button" class="item-card-stop-btn" title="Остановить таймер">Стоп</button>' +
+          '<button type="button" class="item-card-start-btn" title="Запустить таймер">Пуск</button>' +
+        '</div>';
     }
     return '<div class="item-card-icon">' + icon + '</div>' +
       '<div class="item-card-title"></div>' +
@@ -634,6 +638,7 @@ window.initItemCardsModule = function(deps){
       if(flippedId === id){ flipCard(id, false); return; } // тап по QR/обороту — назад
       if(flippedId) unflipAny();
       if(e.target.closest(".item-card-start-btn")){ startTimerForCard(c); return; } // «Пуск»: запуск, а если уже идёт — заново
+      if(e.target.closest(".item-card-stop-btn")){ stopTimerForCard(c); return; } // «Стоп»: отмена таймера
       if(revealedIds[id]){ hideRevealed(); return; }
       var now = Date.now();
       if(lastTapId === id && now - lastTapAt < DOUBLE_MS){
@@ -950,6 +955,7 @@ window.initItemCardsModule = function(deps){
         write(o);
         return true;
       },
+      cancel: function(id){ var o = read(); if(o[id]){ delete o[id]; write(o); } },
       list: function(){ sweep(); var o = read(); return Object.keys(o).map(function(k){ return o[k]; }); }
     };
   }
@@ -960,6 +966,8 @@ window.initItemCardsModule = function(deps){
     if(N && typeof N.getCardTimers === "function"){
       timerApi = {
         start: function(id, title, sec){ return N.startCardTimer(id, title, sec | 0); },
+        // cancelCardTimer есть в мосте с версии 7; проверка — на случай старой оболочки
+        cancel: function(id){ if(typeof N.cancelCardTimer === "function") N.cancelCardTimer(id); },
         list: function(){ try{ return JSON.parse(N.getCardTimers() || "[]"); }catch(e){ return []; } }
       };
     } else {
@@ -1020,6 +1028,12 @@ window.initItemCardsModule = function(deps){
   function startTimerForCard(c){
     if(!c || c.type !== "timer" || !(c.seconds > 0)) return;
     try{ getTimerApi().start(c.id, c.title || "", c.seconds); }catch(e){}
+    syncTimersView();
+  }
+  // «Стоп»: таймер отменяется целиком (пауза не нужна), цифры возвращаются к заданному времени; закончившийся таймер — гасит вибрацию
+  function stopTimerForCard(c){
+    if(!c || c.type !== "timer") return;
+    try{ var api = getTimerApi(); if(api && typeof api.cancel === "function") api.cancel(c.id); }catch(e){}
     syncTimersView();
   }
 
@@ -1243,6 +1257,7 @@ window.initItemCardsModule = function(deps){
     card.addEventListener("click", function(e){
       e.stopPropagation();
       if(c.type === "timer" && e.target.closest(".item-card-start-btn")) startTimerForCard(c); // «Пуск» на показе: заново
+      if(c.type === "timer" && e.target.closest(".item-card-stop-btn")) stopTimerForCard(c); // «Стоп» на показе
     });
     o.appendChild(card);
     if(c.type === "timer") syncTimersView();

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.1 (21.10) — onResume гасит вибрацию конца таймера карточки (CardTimers.stopVibration).
 // Версия: 2.0 (21.10) — вкладка Claude: `webHost` (FrameLayout вокруг главного WebView) и `claudeTab` (ClaudeTab.kt), `handleFileChooser`/`openExternalLink` вынесены для второго WebView.
 // Версия: 1.0 (16.10) — вход ACTION_OPEN_CARD (ScanActivity → страница: window.__ltOpenCard / ?card=<id>).
 
@@ -262,6 +263,8 @@ class MainActivity : ComponentActivity() {
         webView.onResume()
         // Шаг 5: пока приложение на экране, напоминания и общие задачи показывает страница, а не оболочка.
         NotifyStore.appForeground = true
+        // Открыл приложение (в том числе по уведомлению «Таймер закончился») — вибрация конца таймера карточки больше не нужна.
+        CardTimers.stopVibration(applicationContext)
         // Подстраховка: будильники пропадают после «Остановить» в настройках, ставим заново из сохранённых данных.
         try {
             ReminderScheduler.scheduleNext(applicationContext)

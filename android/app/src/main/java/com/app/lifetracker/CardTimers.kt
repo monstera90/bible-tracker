@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.0 (21.10) — этапы цвета значка острова (жёлтый за 2 минуты, красный за минуту: `scheduleStages`/`stage`, будильники этапов перепостят уведомление); вибрация в конце — 60 секунд (`donePattern`), гасится кнопкой «Стоп» в уведомлении, смахиванием, «Стоп» на карточке и открытием приложения (`silence`/`stopVibration`); в extras острова передаётся полная длительность. Откат: CardTimers.kt 1.1.
 // Версия: 1.1 (20.10) — остров Xiaomi (XiaomiIsland): extras `miui.focus.param` в уведомлении таймера.
 // Версия: 1.0 (17.10)
 
@@ -8,6 +9,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -47,7 +49,8 @@ object CardTimers {
     private const val ACCENT = 0xFF8F7FB8.toInt()
     private const val MAX_SECONDS = 359_999L // 99:59:59
     private val ID_RE = Regex("^[A-Za-z0-9]{4,32}$")
-    private val VIBRATE_DONE = longArrayOf(0, 400, 200, 400, 200, 800)
+    private const val VIBRATE_TOTAL_MS = 60_000L // вибрация после срабатывания — 60 секунд (или до «Стоп»)
+    private val VIBRATE_CYCLE = longArrayOf(400, 200, 400, 200, 800, 1000) // прежний рисунок «три удара» + пауза, 3 с
 
     private val LOCK = Any()
 
@@ -119,7 +122,7 @@ object CardTimers {
         map[id] = t // тот же id — заново
         save(ctx, map)
         scheduleAlarm(ctx, t)
-        cancelDone(ctx, id)
+        silence(ctx, id) // новый запуск гасит вибрацию и уведомление «Таймер закончился»
         postRunning(ctx, t)
         true
     }
@@ -153,6 +156,20 @@ object CardTimers {
         save(ctx, map)
         cancelAlarm(ctx, id)
         cancelRunning(ctx, id)
+        silence(ctx, id) // «Стоп» гасит и вибрацию закончившегося таймера, и уведомление «Таймер закончился»
+    }
+
+    /** Погасить вибрацию конца и убрать уведомление «Таймер закончился» (кнопка «Стоп» в нём, смахивание, открытие приложения). */
+    fun silence(ctx: Context, id: String) {
+        stopVibration(ctx)
+        cancelDone(ctx, id)
+    }
+
+    /** Сработал будильник этапа (за 2 минуты / за минуту до конца): уведомление перепоставляется — значок меняет цвет. */
+    fun stage(ctx: Context, id: String) = synchronized(LOCK) {
+        val t = load(ctx)[id] ?: return@synchronized
+        if (!t.running || t.endAt <= System.currentTimeMillis()) return@synchronized
+        postRunning(ctx, t, false)
     }
 
     /** Сработал будильник (или телефон включили после срока): убрать «идёт», вибрация, «Таймер закончился». */
@@ -195,11 +212,36 @@ object CardTimers {
         return PendingIntent.getBroadcast(ctx, ("fire$id").hashCode(), intent, Compat.pendingFlags())
     }
 
+    private fun stageIntent(ctx: Context, id: String, stage: Int): PendingIntent {
+        val intent = Intent(ctx, CardTimerReceiver::class.java).apply {
+            action = CardTimerReceiver.ACTION_STAGE
+            data = Uri.parse("ltcardtimer://stage/$id/$stage")
+            putExtra(CardTimerReceiver.EXTRA_ID, id)
+        }
+        return PendingIntent.getBroadcast(ctx, ("stage$stage$id").hashCode(), intent, Compat.pendingFlags())
+    }
+
     private fun scheduleAlarm(ctx: Context, t: Timer) {
         try {
             ReminderScheduler.setAlarm(ctx, fireIntent(ctx, t.id), t.endAt)
         } catch (e: Exception) {
             // будильник не поставился: отсчёт в шторке идёт, конец увидит страница при открытии
+        }
+        scheduleStages(ctx, t)
+    }
+
+    /** Будильники смены цвета значка: за 2 минуты и за минуту до конца (те, что ещё впереди). */
+    private fun scheduleStages(ctx: Context, t: Timer) {
+        val now = System.currentTimeMillis()
+        val stages = listOf(XiaomiIsland.STAGE_YELLOW to XiaomiIsland.YELLOW_MS, XiaomiIsland.STAGE_RED to XiaomiIsland.RED_MS)
+        for ((stage, lead) in stages) {
+            val at = t.endAt - lead
+            if (at <= now + 500) continue
+            try {
+                ReminderScheduler.setAlarm(ctx, stageIntent(ctx, t.id, stage), at)
+            } catch (e: Exception) {
+                // этап не поставился: значок просто не сменит цвет, отсчёт и конец работают
+            }
         }
     }
 
@@ -207,8 +249,10 @@ object CardTimers {
         try {
             val am = ctx.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
             am.cancel(fireIntent(ctx, id))
+            am.cancel(stageIntent(ctx, id, XiaomiIsland.STAGE_YELLOW))
+            am.cancel(stageIntent(ctx, id, XiaomiIsland.STAGE_RED))
         } catch (e: Exception) {
-            // будильника уже нет
+            // будильников уже нет
         }
     }
 
@@ -274,7 +318,7 @@ object CardTimers {
             }
             // «Живые обновления» Android 16 / остров HyperOS: просим показать как продвигаемое постоянное уведомление
             // На Xiaomi с HyperOS вместо этого — остров по протоколу Xiaomi (XiaomiIsland); на остальных — флаг Android 16.
-            val island = XiaomiIsland.runningExtras(ctx, titleOf(t), t.endAt, float)
+            val island = XiaomiIsland.runningExtras(ctx, titleOf(t), t.endAt, t.durationMs, float)
             if (island != null) b.addExtras(island)
             else b.addExtras(Bundle().apply { putBoolean("android.requestPromotedOngoing", true) })
             NotificationManagerCompat.from(ctx).notify(TAG_RUN + t.id, NOTIFICATION_ID, b.build())
@@ -300,7 +344,7 @@ object CardTimers {
                 .setContentIntent(openApp(ctx))
                 .addAction(0, "Продолжить", actionIntent(ctx, CardTimerReceiver.ACTION_RESUME, t.id))
                 .addAction(0, "✕ Отмена", actionIntent(ctx, CardTimerReceiver.ACTION_CANCEL, t.id))
-            XiaomiIsland.pausedExtras(ctx, titleOf(t), left(t.remainingMs))?.let { b.addExtras(it) }
+            XiaomiIsland.pausedExtras(ctx, titleOf(t), left(t.remainingMs), t.remainingMs)?.let { b.addExtras(it) }
             NotificationManagerCompat.from(ctx).notify(TAG_RUN + t.id, NOTIFICATION_ID, b.build())
         } catch (e: Exception) {
             // уведомления выключены
@@ -320,6 +364,8 @@ object CardTimers {
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
                 .setContentIntent(openApp(ctx))
+                .setDeleteIntent(actionIntent(ctx, CardTimerReceiver.ACTION_STOP_VIBRATE, t.id))
+                .addAction(0, "Стоп", actionIntent(ctx, CardTimerReceiver.ACTION_STOP_VIBRATE, t.id))
                 .build()
             NotificationManagerCompat.from(ctx).notify(TAG_DONE + t.id, NOTIFICATION_ID, n)
         } catch (e: Exception) {
@@ -343,18 +389,46 @@ object CardTimers {
         }
     }
 
+    /** Рисунок вибрации на VIBRATE_TOTAL_MS: пауза 0 и повторы VIBRATE_CYCLE, пока не наберётся 60 секунд. */
+    private fun donePattern(): LongArray {
+        val reps = (VIBRATE_TOTAL_MS / VIBRATE_CYCLE.sum()).toInt().coerceAtLeast(1)
+        val out = LongArray(1 + VIBRATE_CYCLE.size * reps)
+        for (r in 0 until reps) for (i in VIBRATE_CYCLE.indices) out[1 + r * VIBRATE_CYCLE.size + i] = VIBRATE_CYCLE[i]
+        return out
+    }
+
     @Suppress("DEPRECATION")
     private fun vibrate(ctx: Context) {
         try {
             val v = ctx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
             if (!v.hasVibrator()) return
+            val pattern = donePattern()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                v.vibrate(VibrationEffect.createWaveform(VIBRATE_DONE, -1))
+                val effect = VibrationEffect.createWaveform(pattern, -1)
+                try {
+                    // как у будильника: вибрирует и в беззвучном режиме
+                    val attrs = AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                    v.vibrate(effect, attrs)
+                } catch (e: Exception) {
+                    v.vibrate(effect)
+                }
             } else {
-                v.vibrate(VIBRATE_DONE, -1)
+                v.vibrate(pattern, -1)
             }
         } catch (e: Exception) {
             // вибрации нет или нет разрешения
+        }
+    }
+
+    /** Оборвать идущую вибрацию конца (кнопка «Стоп», смахивание уведомления, открытие приложения). */
+    fun stopVibration(ctx: Context) {
+        try {
+            (ctx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)?.cancel()
+        } catch (e: Exception) {
+            // нечего останавливать
         }
     }
 
