@@ -1,4 +1,6 @@
 package com.app.lifetracker
+// Версия: 8.4 (22.10) — время в раскрытой карточке: по скриншотам оно вышло жирнее и крупнее настоящего — обводка 0.0026 → 0.0012 × ширина экрана, размер 0.0508 → 0.0483. Откат: InAppIsland.kt 8.3.
+// Версия: 8.3 (22.10) — название таймера как у настоящего острова (по записи экрана): на плашке крупнее на ~5 % (0.0307 × ширина экрана вместо 13sp), на 2,5 px правее и на ~3 px выше, время на ~6 px левее; в карточке название крупнее на ~8 % и выше на ~4 px, время выше на ~2 px. Откат: InAppIsland.kt 8.2.
 // Версия: 8.2 (22.10) — время в раскрытой карточке жирнее, как у настоящего острова Xiaomi: `cardTime` — `StrokeText` (обводка `strokePx = screenW × 0.0026`); размер прежний 0.0508 × ширина экрана (шрифт настоящего острова задаёт система, увеличить его из приложения нельзя). Откат: InAppIsland.kt 8.0.
 // Версия: 8.0 (22.10) — карточка и плашка больше не полупрозрачные. Причина: с Android 12 окно поверх всех (TYPE_APPLICATION_OVERLAY) с FLAG_NOT_TOUCHABLE система само принудительно делает непрозрачным не больше чем на 80 % (alpha ≤ 0.8). Теперь окно с картинкой ПРИНИМАЕТ нажатия (без FLAG_NOT_TOUCHABLE, alpha 1): в покое свёрнутой плашки оно ровно по плашке, на время анимации и пока карточка раскрыта — рамка всего движения (меняет размер только когда раскладка внутри неё не меняется: p=0 ↔ плашка в углу окна). Отдельные окна нажатий (touchView) убраны, кнопки «пауза»/«стоп» — обычные View-клики, нажатие мимо карточки внутри окна и ACTION_OUTSIDE сворачивают. Откат: InAppIsland.kt 7.1.
 // Версия: 7.1 (22.10) — (1) убрано проявление окна (alpha 0→1 за 140 мс): карточка на раскрытии выглядела полупрозрачной; (2) плашка больше не раскрывается сама при запуске таймера — остаётся свёрнутой, раскрывается только нажатием. Откат: InAppIsland.kt 7.0.
@@ -121,7 +123,7 @@ class InAppIsland(private val activity: Activity) {
         layer.setOnTouchListener { _, e -> onLayerTouch(e) }
         pillName.apply {
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, activity.resources.displayMetrics.widthPixels * 0.0307f) // как у настоящего острова (было 13sp)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
@@ -488,14 +490,15 @@ class InAppIsland(private val activity: Activity) {
         pill.removeAllViews()
         pill.background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = h / 2f }
         val side = (screenW * 0.024f).roundToInt()
-        pill.setPadding(side, 0, (screenW * 0.0272f).roundToInt(), 0)
+        pill.setPadding(side, 0, (screenW * 0.0322f).roundToInt(), 0) // время чуть левее, как у настоящего острова
+        pillName.translationY = -screenW * 0.0025f // название чуть выше, как у настоящего острова
         pillTime.strokePx = screenW * 0.0021f
         val iconSize = (h * 0.57f).roundToInt()
         val leftBox = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             addView(pillIcon, LinearLayout.LayoutParams(iconSize, iconSize))
-            addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = (screenW * 0.0087f).roundToInt() })
+            addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = (screenW * 0.0107f).roundToInt() })
         }
         pillTime.setPadding((screenW * 0.02f).roundToInt(), 0, 0, 0)
         val rightBox = LinearLayout(activity).apply {
@@ -528,9 +531,11 @@ class InAppIsland(private val activity: Activity) {
         winH = (cardTop + cardH * 1.12f).roundToInt() - pillTop
         for (v in listOf<View>(cardIcon, cardTime, cardName, pauseBtn, stopBtn)) (v.parent as? ViewGroup)?.removeView(v)
         cardContent.removeAllViews()
-        cardTime.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0508f) // размер как у настоящего острова (его шрифт задаёт система)
-        cardTime.strokePx = screenW * 0.0026f // жирнее, как время настоящего острова
-        cardName.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0328f)
+        cardTime.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0483f) // размер по скриншотам настоящего острова (был 0.0508 — крупнее)
+        cardTime.strokePx = screenW * 0.0012f // чуть плотнее обычного, как время настоящего острова (0.0026 вышло слишком жирно)
+        cardName.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0354f) // как у настоящего острова (было 0.0328)
+        cardTime.translationY = -screenW * 0.0017f
+        cardName.translationY = -screenW * 0.0034f
         val texts = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             addView(cardTime)

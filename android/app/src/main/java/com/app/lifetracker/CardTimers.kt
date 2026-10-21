@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 5.4 (22.10) — ЭКСПЕРИМЕНТ: чёрный фон уведомления таймера (`.setColor(NOTIF_BG).setColorized(true)` в `buildRunning` и `postPaused`); не помогло — вернуть `.setColor(ACCENT)` и убрать `.setColorized`. 5.3: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
+// Версия: 5.5 (22.10) — эксперимент с чёрным фоном уведомления (`setColorized`) откачен: HyperOS не меняет цвет карточки. Прежнее: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
 // Версия: 5.2 (21.10) — `Info.totalMs` (заданное время, для кольца паузы в плашке). Откат: CardTimers.kt 5.1.
 // Версия: 5.1 (21.10) — в раскрытый остров передаётся круглая кнопка паузы (`XiaomiIsland.pauseAction`). Откат: CardTimers.kt 5.0.
 // Версия: 5.0 (21.10) — `primaryInfo` (данные главного таймера для плашки InAppIsland). Откат: CardTimers.kt 4.0.
@@ -55,7 +55,6 @@ object CardTimers {
     private const val PREFS = "card_timers"
     private const val KEY = "timers"
     private const val ACCENT = 0xFF8F7FB8.toInt()
-    private const val NOTIF_BG = 0xFF000000.toInt() // эксперимент: чёрный фон уведомления (setColorized)
     private const val MAX_SECONDS = 359_999L // 99:59:59
     private val ID_RE = Regex("^[A-Za-z0-9]{4,32}$")
     private const val VIBRATE_TOTAL_MS = 60_000L // вибрация после срабатывания — 60 секунд (или до «Стоп»)
@@ -355,8 +354,7 @@ object CardTimers {
             ensureChannels(ctx)
             val b = NotificationCompat.Builder(ctx, CHANNEL_RUN)
                 .setSmallIcon(R.drawable.ic_stat_notify)
-                .setColor(NOTIF_BG)
-                .setColorized(true)
+                .setColor(ACCENT)
                 .setContentTitle(titleOf(t))
                 .setCategory(NotificationCompat.CATEGORY_PROGRESS)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -412,8 +410,7 @@ object CardTimers {
             ensureChannels(ctx)
             val b = NotificationCompat.Builder(ctx, CHANNEL_RUN)
                 .setSmallIcon(R.drawable.ic_stat_notify)
-                .setColor(NOTIF_BG)
-                .setColorized(true)
+                .setColor(ACCENT)
                 .setContentTitle(titleOf(t))
                 .setContentText("Пауза · осталось " + left(t.remainingMs))
                 .setCategory(NotificationCompat.CATEGORY_PROGRESS)
