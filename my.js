@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 74.2 (21.10) — скрепка задач: картинка перед сохранением идёт через `MdEditor.prepareImageFile` (пережатие без видимой потери). Откат: my.js 74.1.
    Версия: 74.1 (21.10) — деп `loadQrLib` у `initMdEditorModule` (QR-код заметки). Откат: my.js 74.0.
    Версия: 74.0 (21.10) — структурная правка: вкладка set2s_10 «Claude» (модуль claudetab.js, ветка в switchSettingsTab до заглушки; `ClaudeTabMod.onSwitch` при смене вкладки и `ClaudeTabMod.hide` при закрытии окна настроек, чтобы убрать нативный WebView).
    Версия: 73.2 (20.10) — деп `openNotesTab` у `initItemCardsModule` (переключает на «Мои заметки»: скан карточки «Заметка с датой» создаёт обычную заметку блокнота).
@@ -8117,21 +8118,19 @@
           taskAttachDialogOpen = false;
           return;
         }
-        var reader = new FileReader();
-        reader.onload = function(){
-          var bytes = new Uint8Array(reader.result);
-          MdEditor.saveImageBytes(file.name, bytes, file.type).then(function(finalName){
-            insertTextIntoTaskEditable(target.editable, target.range, "![[" + finalName + "]]");
-          }).catch(function(){
-            // не удалось сохранить картинку — хотя бы возвращаем фокус в editable, чтобы
-            // редактирование не осталось "подвешенным"
-            if(target.editable && document.body.contains(target.editable)) target.editable.focus();
-          }).then(function(){
-            taskAttachDialogOpen = false;
-          });
-        };
-        reader.onerror = function(){ taskAttachDialogOpen = false; };
-        reader.readAsArrayBuffer(file);
+        // перед сохранением картинка пережимается (MdEditor.prepareImageFile: без видимой потери качества,
+        // оригинал сохраняется, если выигрыша нет); сбой пережатия не мешает — берётся оригинал
+        MdEditor.prepareImageFile(file).then(function(prep){
+          return MdEditor.saveImageBytes(prep.name, prep.bytes, prep.type);
+        }).then(function(finalName){
+          insertTextIntoTaskEditable(target.editable, target.range, "![[" + finalName + "]]");
+        }).catch(function(){
+          // не удалось сохранить картинку — хотя бы возвращаем фокус в editable, чтобы
+          // редактирование не осталось "подвешенным"
+          if(target.editable && document.body.contains(target.editable)) target.editable.focus();
+        }).then(function(){
+          taskAttachDialogOpen = false;
+        });
       });
     }
   }

@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 15.0 (21.10) — структурная правка: `prepareImageFile` (+ `loadImageForRecompress`/`canvasToBlob`/`readFileBytes`, константы `IMG_RECOMPRESS_*`) — пережатие картинок задач без видимой потери (длинная сторона до 2560px, JPEG 0,92, PNG с прозрачностью остаётся PNG, малые файлы не трогаются); экспорт `MdEditor.prepareImageFile`. Откат: mdeditor.js 14.0.
    Версия: 14.0 (21.10) — структурная правка: кнопка QR в нижнем ряду редактора (`mdEditorQrBtn`, плашка `#mdEditorQrPlaque` над рядом): первое нажатие переносит заметку в папку `cards-notes` (папку создаёт сама) и показывает QR `lt://v1/note/<id заметки>`, повторное — показывает/прячет код; новые `noteQrText`/`noteHasQr`/`qrFolderName`/`moveNoteToQrFolder`/`toggleNoteQr`/`openNoteByQr` (публично). Скрытые заметки-карточки УБРАНЫ: `CARD_NOTES_PATH`, `isCardNoteRec` (осталась `isCardMetaRec` — только записи самих карточек), `cardNoteHomeHook`, `createCardNote`/`renameCardNote`/`deleteCardNote`/`openCardNote`/`closeCardNote`; прежние скрытые заметки один раз переносятся в `cards-notes` (`migrateLegacyCardNotes`). `renderListScreen` берёт свежий узел папки после перестройки дерева. Откат: mdeditor.js 13.1.
    Версия: 13.1 (20.10) — `createDatedNote`: если заметка с сегодняшней датой в имени уже есть, она открывается на редактирование, новая не создаётся.
    Версия: 13.0 (20.10) — структурная правка: `createDatedNote` (+ `datedNoteFolderName`) — обычная заметка блокнота с сегодняшней датой в имени (`дд.мм.гггг`, при совпадении — « (2)»…) в папке `notes` в корне (регистр существующей папки сохраняется; нет папки — создаётся самим путём заметки), сразу открывается на редактирование; зовёт itemcards.js при скане карточки «Заметка с датой». В публичном API. Откат: mdeditor.js 12.0.
@@ -1745,6 +1746,112 @@ window.initMdEditorModule = function(deps){
         recordImageAdded(finalName, buf);
         return finalName;
       });
+    });
+  }
+
+  // Пережатие картинки перед сохранением в images/ (картинки ЗАДАЧ, кнопка-скрепка в my.js). Цель — меньше
+  // места в OPFS и в облаке (лимит синка файла ~7 МБ), но БЕЗ видимой потери качества: длинная сторона
+  // не меньше 2560px, JPEG качеством 0,92, уменьшение ступенями вдвое (на старом WebView одноразовое
+  // сжатие в разы даёт «лесенку»), у картинок с прозрачностью остаётся PNG. Файл, который и так небольшой
+  // (до 1,5 МБ) и не крупнее 2560px, не трогается вовсе. Если результат не меньше оригинала хотя бы на 10%
+  // или что-то пошло не так — возвращается оригинал. gif/svg/webp не трогаются (анимация, вектор).
+  // Promise<{bytes:Uint8Array, name:string, type:string}> — никогда не реджектится.
+  var IMG_RECOMPRESS_MAX_SIDE = 2560;
+  var IMG_RECOMPRESS_SKIP_BYTES = 1536 * 1024;
+  var IMG_RECOMPRESS_JPEG_Q = 0.92;
+  function readFileBytes(file){
+    return new Promise(function(resolve, reject){
+      var r = new FileReader();
+      r.onload = function(){ resolve(new Uint8Array(r.result)); };
+      r.onerror = function(){ reject(r.error || new Error("read")); };
+      r.readAsArrayBuffer(file);
+    });
+  }
+  function loadImageForRecompress(file){
+    if(window.createImageBitmap){
+      return window.createImageBitmap(file, { imageOrientation: "from-image" }).catch(function(){
+        return window.createImageBitmap(file);
+      }).then(function(bmp){
+        return { src: bmp, w: bmp.width, h: bmp.height, close: function(){ try{ bmp.close(); }catch(e){} } };
+      });
+    }
+    return new Promise(function(resolve, reject){
+      var url = URL.createObjectURL(file);
+      var im = new Image();
+      im.onload = function(){ resolve({ src: im, w: im.naturalWidth, h: im.naturalHeight, close: function(){ URL.revokeObjectURL(url); } }); };
+      im.onerror = function(){ URL.revokeObjectURL(url); reject(new Error("decode")); };
+      im.src = url;
+    });
+  }
+  function canvasToBlob(canvas, type, q){
+    return new Promise(function(resolve){
+      if(canvas.toBlob){ canvas.toBlob(function(b){ resolve(b); }, type, q); return; }
+      try{
+        var d = canvas.toDataURL(type, q), parts = d.split(","), bin = atob(parts[1]), arr = new Uint8Array(bin.length);
+        for(var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        resolve(new Blob([arr], { type: type }));
+      }catch(e){ resolve(null); }
+    });
+  }
+  function prepareImageFile(file){
+    var original = function(){
+      return readFileBytes(file).then(function(bytes){ return { bytes: bytes, name: file.name, type: file.type }; });
+    };
+    var type = (file.type || "").toLowerCase();
+    if(type !== "image/jpeg" && type !== "image/png") return original();
+    var loaded = null;
+    return loadImageForRecompress(file).then(function(li){
+      loaded = li;
+      var w = li.w, h = li.h;
+      if(!w || !h) return original();
+      var scale = Math.min(1, IMG_RECOMPRESS_MAX_SIDE / Math.max(w, h));
+      if(scale === 1 && file.size <= IMG_RECOMPRESS_SKIP_BYTES) return original();
+      var tw = Math.max(1, Math.round(w * scale)), th = Math.max(1, Math.round(h * scale));
+      // ступенчатое уменьшение: каждый шаг не более чем вдвое
+      var cur = li.src, cw = w, ch = h;
+      while(cw / 2 > tw || ch / 2 > th){
+        var nw = Math.max(tw, Math.round(cw / 2)), nh = Math.max(th, Math.round(ch / 2));
+        var c2 = document.createElement("canvas"); c2.width = nw; c2.height = nh;
+        var x2 = c2.getContext("2d"); x2.imageSmoothingEnabled = true;
+        if("imageSmoothingQuality" in x2) x2.imageSmoothingQuality = "high";
+        x2.drawImage(cur, 0, 0, cw, ch, 0, 0, nw, nh);
+        cur = c2; cw = nw; ch = nh;
+      }
+      var canvas = document.createElement("canvas"); canvas.width = tw; canvas.height = th;
+      var ctx = canvas.getContext("2d"); ctx.imageSmoothingEnabled = true;
+      if("imageSmoothingQuality" in ctx) ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(cur, 0, 0, cw, ch, 0, 0, tw, th);
+      // есть ли прозрачность (только для PNG): по уменьшенной копии, чтобы не гонять все пиксели
+      var hasAlpha = false;
+      if(type === "image/png"){
+        try{
+          var sw2 = Math.min(tw, 64), sh2 = Math.min(th, 64);
+          var probe = document.createElement("canvas"); probe.width = sw2; probe.height = sh2;
+          var pc = probe.getContext("2d"); pc.drawImage(canvas, 0, 0, tw, th, 0, 0, sw2, sh2);
+          var px = pc.getImageData(0, 0, sw2, sh2).data;
+          for(var i = 3; i < px.length; i += 4){ if(px[i] < 250){ hasAlpha = true; break; } }
+        }catch(eA){ hasAlpha = true; } // не смогли проверить — безопаснее считать прозрачной (останется PNG)
+      }
+      var outType = hasAlpha ? "image/png" : "image/jpeg";
+      if(outType === "image/jpeg"){
+        // JPEG без альфы: белая подложка на случай полупрозрачных краёв
+        var flat = document.createElement("canvas"); flat.width = tw; flat.height = th;
+        var fc = flat.getContext("2d"); fc.fillStyle = "#fff"; fc.fillRect(0, 0, tw, th); fc.drawImage(canvas, 0, 0);
+        canvas = flat;
+      }
+      return canvasToBlob(canvas, outType, IMG_RECOMPRESS_JPEG_Q).then(function(blob){
+        if(!blob || blob.size > file.size * 0.9) return original();
+        return readFileBytes(blob).then(function(bytes){
+          var name = file.name;
+          if(outType !== type){ name = name.replace(/\.[^.\/\\]*$/, "") + ".jpg"; }
+          return { bytes: bytes, name: name, type: outType };
+        });
+      });
+    }).catch(function(){
+      return original();
+    }).then(function(res){
+      if(loaded) loaded.close();
+      return res;
     });
   }
 
@@ -6562,6 +6669,8 @@ window.initMdEditorModule = function(deps){
     // removeTextFromNoteId — обратная операция к appendTextToNoteId.
     openImageViewer: openImageViewer,
     saveImageBytes: saveImageBytes,
+    // пережатие картинки перед saveImageBytes (картинки задач, my.js): Promise<{bytes,name,type}>
+    prepareImageFile: prepareImageFile,
     deleteImageFile: deleteImageFile,
     removeTextFromNoteId: removeTextFromNoteId,
     // используется задачами/комментариями (my.js, hydrateTaskImages) —
