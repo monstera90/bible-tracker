@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 7.0 (22.10) — дрожание на смене размера: по записи экрана на последнем кадре сворачивания плашка на один кадр прыгала к левому краю (размер/положение окна и раскладка внутри него применялись не одновременно). Теперь окно с картинкой (`layer`) одно большое и НИКОГДА не меняет размер и положение, а нажатия принимают отдельные прозрачные окна (`touchView`: под плашкой — тап раскрывает; под карточкой — кнопки «пауза»/«стоп» по координатам `pauseRect`/`stopRect`, нажатие мимо сворачивает); окно с картинкой — FLAG_NOT_TOUCHABLE. Плашка рисуется поверх карточки, поэтому её значок и текст плавно проявляются при сворачивании, а не появляются рывком. Откат: InAppIsland.kt 6.0.
 // Версия: 6.0 (22.10) — против мерцания копии острова: (1) вырез на миг пропадает при пересчёте WindowInsets (открытие приложения, прятание панелей) — раньше это сразу убирало окно и плашка пропадала и появлялась заново, теперь `setCutout(null)` ждёт 400 мс (`hideAfterCutoutLoss`); (2) тексты и кольцо паузы перерисовываются только когда изменились (раньше каждые 500 мс — лишние раскладки окна); (3) первое появление окна — короткое проявление 140 мс, а не резкое «вспыхивание». Откат: InAppIsland.kt 5.0.
 // Версия: 5.0 (21.10) — как у оригинала: (1) анимация раскрытия/сворачивания идёт по кадрам Choreographer (не зависит от выключенных анимаций системы), а окно на время анимации равно рамке всего движения — раньше оно ресайзилось покадрово с задержкой, карточка обрезалась и «прыгала»; (2) карточка не гаснет по таймеру, а сворачивается нажатием в любое место мимо неё (FLAG_WATCH_OUTSIDE_TOUCH → ACTION_OUTSIDE; касание при этом работает как обычно); таймер 6 с остался только в запасном режиме без разрешения; (3) окно раскрытой карточки начинается с её верха, а не с верха экрана — строка состояния по бокам и над карточкой снова тянет шторку. Откат: InAppIsland.kt 4.1.
 // Версия: 4.1 (21.10) — раскрытая карточка стоит ниже, как у настоящего острова под строкой состояния: отступ сверху 0.108 ширины экрана (было 0.0148), высота 0.2147, ширина 0.9286 (замер по скриншоту: верх 126, высота 247, ширина 1074 при ширине 1159). Откат: InAppIsland.kt 4.0.
@@ -100,6 +101,13 @@ class InAppIsland(private val activity: Activity) {
     private var shownTitle: String? = null
     private var shownCardName: String? = null
     private var shownPauseKey: String? = null
+    private var touchView: View? = null
+    private var touchKind = 0 // 0 — нет окна нажатий, 1 — под плашкой, 2 — под карточкой
+    private var scrW = 0
+    private val pauseRect = Rect()
+    private val stopRect = Rect()
+    private var downX = 0f
+    private var downY = 0f
 
     private fun dp(v: Float) = (v * density).roundToInt()
 
@@ -132,10 +140,6 @@ class InAppIsland(private val activity: Activity) {
         card.background = cardBg
         card.isClickable = true // не пропускает нажатия на страницу под карточкой; нажатие мимо кнопок сворачивает
         card.setOnClickListener { } // касание карточки (мимо кнопок) ничего не делает; сворачивает нажатие мимо неё
-        layer.setOnTouchListener { _, e ->
-            if (e.actionMasked == MotionEvent.ACTION_OUTSIDE && expanded) collapse()
-            false
-        }
         cardTime.apply {
             setTextColor(Color.WHITE)
             maxLines = 1
@@ -145,27 +149,14 @@ class InAppIsland(private val activity: Activity) {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
-        pauseBtn.setOnClickListener {
-            val id = currentId
-            if (id != null) {
-                val ctx = activity.applicationContext
-                if (paused) CardTimers.resume(ctx, id) else CardTimers.pause(ctx, id)
-            }
-            expandedAt = System.currentTimeMillis()
-            refresh()
-        }
+        pauseBtn.setOnClickListener { onPauseClick() }
         stopBtn.apply {
             setImageBitmap(XiaomiIsland.crossBitmap())
-            setOnClickListener {
-                val id = currentId
-                if (id != null) CardTimers.cancel(activity.applicationContext, id)
-                collapse()
-                refresh()
-            }
+            setOnClickListener { onStopClick() }
         }
         card.addView(cardContent)
-        layer.addView(pill)
         layer.addView(card)
+        layer.addView(pill) // плашка выше карточки: её значок и текст проявляются/гаснут поверх, а не появляются рывком
     }
 
     /** Рамка выреза камеры (координаты окна) из WindowInsets; null — выреза сверху нет. */
@@ -231,10 +222,10 @@ class InAppIsland(private val activity: Activity) {
         applyProgress(progress)
         try {
             if (want == 2) {
-                val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
-                val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
-                val wl = WindowManager.LayoutParams(max(winW, 1), max(winH, 1), type, flags, PixelFormat.TRANSLUCENT)
+                // окно с картинкой не принимает нажатия вовсе (их ловят отдельные прозрачные окна) и больше не меняет размер
+                val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                val wl = WindowManager.LayoutParams(max(winW, 1), max(winH, 1), windowType(), flags, PixelFormat.TRANSLUCENT)
                 wl.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 wl.y = winY
                 if (Build.VERSION.SDK_INT >= 28) wl.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -252,6 +243,7 @@ class InAppIsland(private val activity: Activity) {
     }
 
     private fun detach() {
+        removeTouch()
         if (!attached) return
         try {
             if (mode == 2) wm().removeViewImmediate(layer) else (layer.parent as? ViewGroup)?.removeView(layer)
@@ -261,18 +253,102 @@ class InAppIsland(private val activity: Activity) {
         mode = 0
     }
 
-    /** Размер окна повторяет плашку/карточку, чтобы вокруг них касания шли в строку состояния и приложение. */
-    private fun updateWindow() {
-        val wl = winLp ?: return
-        if (mode != 2 || !attached) return
-        if (wl.width == winW && wl.height == winH && wl.y == winY) return
-        wl.width = winW
-        wl.height = winH
-        wl.y = winY
-        try {
-            wm().updateViewLayout(layer, wl)
-        } catch (e: Exception) {
+    private fun windowType(): Int =
+        if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
+
+    /** Параметры прозрачного окна нажатий: ровно по плашке/карточке, живёт только в покое (не во время анимации). */
+    private fun touchParams(w: Int, h: Int, y: Int, outside: Boolean): WindowManager.LayoutParams {
+        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        if (outside) flags = flags or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+        val wl = WindowManager.LayoutParams(max(w, 1), max(h, 1), windowType(), flags, PixelFormat.TRANSLUCENT)
+        wl.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        wl.y = y
+        if (Build.VERSION.SDK_INT >= 28) wl.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        return wl
+    }
+
+    /** Какое окно нажатий нужно сейчас: под плашкой (покой), под карточкой (раскрыта) или никакого (анимация, нет окна). */
+    private fun syncTouch() {
+        val want = when {
+            mode != 2 || !attached || animating || layer.visibility != View.VISIBLE -> 0
+            expanded -> 2
+            else -> 1
         }
+        setTouch(want)
+    }
+
+    private fun setTouch(kind: Int) {
+        if (touchKind == kind) return
+        removeTouch()
+        if (kind == 0) return
+        try {
+            val v = View(activity)
+            val wl: WindowManager.LayoutParams
+            if (kind == 1) {
+                v.setOnClickListener { toggle() }
+                wl = touchParams(pillW, pillH, pillTop, false)
+            } else {
+                v.setOnTouchListener { _, e ->
+                    onCardTouch(e)
+                    true
+                }
+                wl = touchParams(cardW, cardH, cardTop, true)
+            }
+            wm().addView(v, wl)
+            touchView = v
+            touchKind = kind
+        } catch (e: Exception) {
+            // окно не добавилось: плашка остаётся видимой, нажатия попробуем ещё раз при следующем обновлении
+        }
+    }
+
+    private fun removeTouch() {
+        val v = touchView
+        touchView = null
+        touchKind = 0
+        if (v != null) {
+            try {
+                wm().removeViewImmediate(v)
+            } catch (e: Exception) {
+            }
+        }
+    }
+
+    /** Окно под раскрытой карточкой: кнопки по координатам, нажатие мимо карточки (ACTION_OUTSIDE) сворачивает. */
+    private fun onCardTouch(e: MotionEvent) {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_OUTSIDE -> if (expanded) collapse()
+            MotionEvent.ACTION_DOWN -> {
+                downX = e.rawX
+                downY = e.rawY
+            }
+            MotionEvent.ACTION_UP -> {
+                val dx = downX.toInt()
+                val dy = downY.toInt()
+                val ux = e.rawX.toInt()
+                val uy = e.rawY.toInt()
+                if (stopRect.contains(dx, dy) && stopRect.contains(ux, uy)) onStopClick()
+                else if (pauseRect.contains(dx, dy) && pauseRect.contains(ux, uy)) onPauseClick()
+            }
+        }
+    }
+
+    private fun onPauseClick() {
+        val id = currentId
+        if (id != null) {
+            val ctx = activity.applicationContext
+            if (paused) CardTimers.resume(ctx, id) else CardTimers.pause(ctx, id)
+        }
+        expandedAt = System.currentTimeMillis()
+        refresh()
+    }
+
+    private fun onStopClick() {
+        val id = currentId
+        if (id != null) CardTimers.cancel(activity.applicationContext, id)
+        collapse()
+        refresh()
     }
 
     /** Один раз предлагает выдать разрешение «Поверх других приложений» — без него плашку нельзя нажать. */
@@ -306,6 +382,7 @@ class InAppIsland(private val activity: Activity) {
         progress = 0f
         card.visibility = View.GONE
         pill.alpha = 1f
+        pill.visibility = View.VISIBLE
         if (mode == 2) detach() // окно поверх всех не должно оставаться и перехватывать касания
     }
 
@@ -337,8 +414,9 @@ class InAppIsland(private val activity: Activity) {
                 Choreographer.getInstance().postFrameCallback(this)
             } else {
                 animating = false
-                applyProgress(animTo) // окно становится точно по карточке/плашке
+                applyProgress(animTo)
                 if (animTo == 0f) card.visibility = View.GONE
+                syncTouch() // анимация кончилась: ставим окно нажатий под плашку или карточку
             }
         }
     }
@@ -357,7 +435,7 @@ class InAppIsland(private val activity: Activity) {
         animInterp = interpolator
         animStart = SystemClock.uptimeMillis()
         animating = true
-        applyProgress(progress) // окно сразу на всю рамку движения
+        syncTouch() // на время движения окна нажатий нет
         Choreographer.getInstance().postFrameCallback(frame)
     }
 
@@ -369,7 +447,7 @@ class InAppIsland(private val activity: Activity) {
 
     private fun lerp(a: Float, b: Float, p: Float) = a + (b - a) * p
 
-    /** p = 0 — карточка точно по плашке, p = 1 — раскрыта (на отскоке p чуть больше 1). */
+    /** p = 0 — карточка точно по плашке, p = 1 — раскрыта (на отскоке p чуть больше 1). Окно не трогаем — двигаются только View внутри него. */
     private fun applyProgress(p: Float) {
         progress = p
         if (cardW == 0) return
@@ -381,28 +459,13 @@ class InAppIsland(private val activity: Activity) {
         lp.height = h
         lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
         lp.leftMargin = 0
-        if (mode == 2) {
-            if (animating) {
-                // на время движения окно — рамка всей анимации (с запасом на отскок), карточка двигается внутри
-                val bottom = (cardTop + cardH * 1.12f).roundToInt()
-                winW = (cardW * 1.12f).roundToInt()
-                winY = pillTop
-                winH = bottom - pillTop
-                lp.topMargin = top - pillTop
-            } else {
-                winW = w
-                winY = top
-                winH = h
-                lp.topMargin = 0
-            }
-        } else {
-            lp.topMargin = top
-        }
+        lp.topMargin = top - (if (mode == 2) pillTop else 0) // в своём окне отсчёт от верха окна (он на уровне плашки)
         card.layoutParams = lp
-        updateWindow()
         cardBg.cornerRadius = lerp(pillH / 2f, cardR, p.coerceIn(0f, 1f))
         cardContent.alpha = ((p - 0.3f) / 0.7f).coerceIn(0f, 1f)
-        pill.alpha = (1f - p / 0.25f).coerceIn(0f, 1f)
+        val pillAlpha = (1f - p / 0.25f).coerceIn(0f, 1f)
+        pill.alpha = pillAlpha
+        pill.visibility = if (pillAlpha <= 0f) View.INVISIBLE else View.VISIBLE
     }
 
     private fun refresh() {
@@ -463,13 +526,16 @@ class InAppIsland(private val activity: Activity) {
             autoShownFor = info.id
             expand()
         }
+        syncTouch()
     }
 
     /** Размеры и места плашки и карточки считаются от выреза; пересчёт — только когда вырез поменялся. */
     private fun layoutFor(r: Rect) {
         if (builtFor == r) return
         builtFor = Rect(r)
+        if (attached) detach() // геометрия поменялась: окно с картинкой создаётся заново уже нужного размера
         val screenW = activity.resources.displayMetrics.widthPixels
+        scrW = screenW
         // Рамка выреза у Xiaomi — размером со всю строку состояния, по ней плашка выходит огромной. Размеры берём
         // от ширины экрана, как у настоящего острова (замер на Poco X6 Pro: 500 × 105 px при ширине 1220, отступ сверху 13 px).
         val h = (screenW * 0.0878f).roundToInt()
@@ -515,6 +581,18 @@ class InAppIsland(private val activity: Activity) {
         val edge = (screenW * 0.041f).roundToInt()
         val gap = (screenW * 0.029f).roundToInt()
         val ic = (screenW * 0.123f).roundToInt()
+
+        // окно с картинкой одно на всё время показа: рамка всего движения карточки (с запасом на отскок), размер больше не меняется
+        winW = (cardW * 1.12f).roundToInt()
+        winY = pillTop
+        winH = (cardTop + cardH * 1.12f).roundToInt() - pillTop
+        // области кнопок карточки в координатах экрана (для окна нажатий), с запасом под палец
+        val slop = dp(6f)
+        val cardRight = (screenW - cardW) / 2 + cardW
+        val cy = cardTop + cardH / 2
+        stopRect.set(cardRight - edge - btn - slop, cy - btn / 2 - slop, cardRight - edge + slop, cy + btn / 2 + slop)
+        val pauseRight = cardRight - edge - btn - gap
+        pauseRect.set(pauseRight - btn - slop, cy - btn / 2 - slop, pauseRight + slop, cy + btn / 2 + slop)
 
         for (v in listOf<View>(cardIcon, cardTime, cardName, pauseBtn, stopBtn)) (v.parent as? ViewGroup)?.removeView(v)
         cardContent.removeAllViews()
