@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 14.0 (21.10) — структурная правка: кнопка QR в нижнем ряду редактора (`mdEditorQrBtn`, плашка `#mdEditorQrPlaque` над рядом): первое нажатие переносит заметку в папку `cards-notes` (папку создаёт сама) и показывает QR `lt://v1/note/<id заметки>`, повторное — показывает/прячет код; новые `noteQrText`/`noteHasQr`/`qrFolderName`/`moveNoteToQrFolder`/`toggleNoteQr`/`openNoteByQr` (публично). Скрытые заметки-карточки УБРАНЫ: `CARD_NOTES_PATH`, `isCardNoteRec` (осталась `isCardMetaRec` — только записи самих карточек), `cardNoteHomeHook`, `createCardNote`/`renameCardNote`/`deleteCardNote`/`openCardNote`/`closeCardNote`; прежние скрытые заметки один раз переносятся в `cards-notes` (`migrateLegacyCardNotes`). `renderListScreen` берёт свежий узел папки после перестройки дерева. Откат: mdeditor.js 13.1.
    Версия: 13.1 (20.10) — `createDatedNote`: если заметка с сегодняшней датой в имени уже есть, она открывается на редактирование, новая не создаётся.
    Версия: 13.0 (20.10) — структурная правка: `createDatedNote` (+ `datedNoteFolderName`) — обычная заметка блокнота с сегодняшней датой в имени (`дд.мм.гггг`, при совпадении — « (2)»…) в папке `notes` в корне (регистр существующей папки сохраняется; нет папки — создаётся самим путём заметки), сразу открывается на редактирование; зовёт itemcards.js при скане карточки «Заметка с датой». В публичном API. Откат: mdeditor.js 12.0.
    Версия: 12.0 (17.10) — структурная правка: синхронизация записей карточек вкладки 9 (вариант А ТЗ, 12.4): каждая карточка — ещё одна скрытая запись `notesMap` (`CARD_META_PATH`, id `cm<id карточки>`, имя `card:<id>`, текст — JSON карточки); API `cardMetaStatus`/`cardMetaPull`/`cardMetaAll`/`cardMetaSave`/`cardMetaRemove`/`setCardMetaListener`; такие записи скрыты везде, где скрыты заметки-карточки, не попадают в индекс имён, экспорт .zip/notesIndex и в «замену всех заметок» при импорте (туда же теперь не попадают и тела заметок-карточек). Откат: mdeditor.js 11.0.
@@ -235,6 +236,7 @@ window.initMdEditorModule = function(deps){
   var fetchCloudPath = deps.fetchCloudPath || function(){ return Promise.reject(new Error("no_sync")); };
   var patchCloud = deps.patchCloud || function(){ return Promise.reject(new Error("no_sync")); };
   var deleteCloudPath = deps.deleteCloudPath || function(){ return Promise.reject(new Error("no_sync")); };
+  var loadQrLib = deps.loadQrLib || function(){ return window.QRCode ? Promise.resolve() : Promise.reject(new Error("no_qr")); };
   var generateId = deps.generateId || function(){ return "n" + Date.now().toString(36) + Math.random().toString(36).slice(2,10); };
   var NOTES_PUSH_DEBOUNCE_MS = deps.notesPushDebounceMs || 400;
   var NOTES_RETRY_DELAYS = deps.notesRetryDelays || [5000, 15000, 40000, 90000];
@@ -516,6 +518,8 @@ window.initMdEditorModule = function(deps){
   // «Копировать» — слева от маркера в нижнем ряду заметки (та же пиктограмма, что в my.js/index.html).
   var COPY_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V6a2 2 0 0 1 2-2h9"></path></svg>';
+  var QR_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="6" height="6" rx="1"></rect><rect x="14.5" y="3.5" width="6" height="6" rx="1"></rect><rect x="3.5" y="14.5" width="6" height="6" rx="1"></rect><path d="M14.5 14.5h2.5v2.5"></path><path d="M20.5 14.5v.01"></path><path d="M14.5 20.5h.01"></path><path d="M17 20.5h3.5V17"></path></svg>';
   var SHARE_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M12 15V4"></path>' +
@@ -2462,6 +2466,7 @@ window.initMdEditorModule = function(deps){
     notesCachePreloadPromise = loadNotesCache().then(function(){
       rebuildTree();
       notesReady = true;
+      migrateLegacyCardNotes();
       maybeRunImageCleanup(); // папка картинок могла быть готова раньше notesMap
     });
     return notesCachePreloadPromise;
@@ -2470,16 +2475,13 @@ window.initMdEditorModule = function(deps){
   // ---- дерево папок из notesMap.path (раздел 2 ТЗ: "папка" — это просто
   // общий префикс path у нескольких заметок, реальной файловой системы
   // больше нет) ----
-  // Заметки-карточки вкладки 9 (itemcards.js) — обычные записи notesMap (синхронизируются вместе с
-  // заметками), но с особым путём: в списке, поиске и «забытых» не показываются.
-  var CARD_NOTES_PATH = "\u0001cards";
-  // Записи самих карточек для синхронизации (ТЗ карточек, 12.4, вариант А): JSON карточки в text, id записи
-  // «cm» + id карточки (одинаковый на всех устройствах — две копии одной карточки не плодятся).
+  // Записи самих карточек вкладки 9 (itemcards.js) для синхронизации (ТЗ карточек, 12.4, вариант А): JSON карточки в text, id записи
+  // «cm» + id карточки (одинаковый на всех устройствах — две копии одной карточки не плодятся). Обычные записи notesMap
+  // (синхронизируются вместе с заметками), но с особым путём: в списке, поиске и «забытых» не показываются.
   var CARD_META_PATH = "\u0001cardmeta";
   function isCardMetaRec(rec){ return !!rec && rec.path === CARD_META_PATH; }
-  // «Скрытая» запись вкладки 9: тело заметки-карточки или запись самой карточки.
-  function isCardNoteRec(rec){ return !!rec && (rec.path === CARD_NOTES_PATH || rec.path === CARD_META_PATH); }
-  var cardNoteHomeHook = null; // функция возврата к сетке карточек, пока открыта заметка-карточка
+  // Прежний скрытый путь тел заметок-карточек (функцию убрали): записи с ним один раз переносятся в папку QR-заметок.
+  var LEGACY_CARD_NOTES_PATH = "\u0001cards";
   function buildTreeFromNotes(){
     var root = { name: "", path: "", folders: [], files: [] };
     var folderCache = { "": root };
@@ -2499,7 +2501,7 @@ window.initMdEditorModule = function(deps){
       return cur;
     }
     notesMap.forEach(function(rec, id){
-      if(!rec || rec.deleted || !rec.name || isCardNoteRec(rec)) return;
+      if(!rec || rec.deleted || !rec.name || isCardMetaRec(rec)) return;
       var folder = getFolderNode(rec.path);
       folder.files.push({ name: rec.name, id: id });
     });
@@ -2593,6 +2595,7 @@ window.initMdEditorModule = function(deps){
     if(!deleted && rec && rec.name && !isCardMetaRec(rec)) nameIndex.set(rec.name.toLowerCase(), id);
     markReferencedNamesDirty();
     if(isCardMetaRec(rec) || isCardMetaRec(prev)) scheduleCardMetaNotify();
+    if(!deleted && rec && rec.path === LEGACY_CARD_NOTES_PATH) setTimeout(migrateLegacyCardNotes, 0); // старая версия на другом устройстве прислала скрытую заметку-карточку
     if(!(openFile && openFile.id === id && !openFile.dirty)) return;
     if(deleted){
       openFile = null;
@@ -2908,7 +2911,7 @@ window.initMdEditorModule = function(deps){
   function replaceAllNotesFromEntries(entries){
     var existingIds = [];
     notesMap.forEach(function(rec, id){
-      if(rec && !rec.deleted && !isCardNoteRec(rec)) existingIds.push(id); // записи и тела карточек вкладки 9 импорт заметок не трогает
+      if(rec && !rec.deleted && !isCardMetaRec(rec)) existingIds.push(id); // записи и тела карточек вкладки 9 импорт заметок не трогает
     });
     existingIds.forEach(function(id){
       var rec = notesMap.get(id);
@@ -3228,7 +3231,7 @@ window.initMdEditorModule = function(deps){
     var out = [];
     if(!notesReady) return out;
     notesMap.forEach(function(rec){
-      if(rec && !rec.deleted && rec.name && !isCardNoteRec(rec)) out.push({ id: rec.id, name: rec.name, text: rec.text || "" });
+      if(rec && !rec.deleted && rec.name && !isCardMetaRec(rec)) out.push({ id: rec.id, name: rec.name, text: rec.text || "" });
     });
     return out;
   }
@@ -3314,6 +3317,8 @@ window.initMdEditorModule = function(deps){
   // сама папка; "домик" всегда ведёт в корень.
   // ---------------------------------------------------------------------
   function renderListScreen(container){
+    // дерево могли перестроить (перенос заметки в папку QR-заметок, приход правок): узел папки берём заново по пути
+    currentDirNode = findNodeByPath(rootTree, folderPath(currentDirNode)) || rootTree;
     var node = currentDirNode;
     var visibleFolders = node.folders.filter(function(fo){
       return fo.name.charAt(0) !== ".";
@@ -3336,7 +3341,7 @@ window.initMdEditorModule = function(deps){
     // Кнопка "Загрузить" показывается всегда, включая самый первый пустой
     // экран (раздел 7 ТЗ).
     var hasAnyNotes = false;
-    notesMap.forEach(function(rec){ if(rec && !rec.deleted && rec.name && !isCardNoteRec(rec)) hasAnyNotes = true; });
+    notesMap.forEach(function(rec){ if(rec && !rec.deleted && rec.name && !isCardMetaRec(rec)) hasAnyNotes = true; });
     var html = '<div class="mdeditor-tab">';
     html += '<h3 class="common-tab-title">' + (isRoot ? "Мои заметки" : escName(node.name)) + '</h3>';
     if(!items.length){
@@ -4064,7 +4069,7 @@ window.initMdEditorModule = function(deps){
   async function loadForgottenNotesData(){
     var entries = [];
     notesMap.forEach(function(rec, id){
-      if(!rec || rec.deleted || !rec.name || isCardNoteRec(rec)) return;
+      if(!rec || rec.deleted || !rec.name || isCardMetaRec(rec)) return;
       entries.push({ name: rec.name, id: id });
     });
     var openedIndex = await loadOpenedIndex();
@@ -4317,6 +4322,9 @@ window.initMdEditorModule = function(deps){
 
     html += row(btnIcon(COPY_ICON_SVG),
       "Копирует выделенный текст в буфер обмена. Системное меню выделения в приложении не показывается — копируйте этой кнопкой.");
+    html += row(btnIcon(QR_ICON_SVG),
+      "QR-код заметки: при первом нажатии заметка получает код и переходит в папку «cards-notes» (папка создаётся сама), код показывается над рядом кнопок. " +
+      "Повторное нажатие показывает его снова, тап по коду прячет. Распечатайте код — сканер в «Карточках предметов» откроет эту заметку.");
 
     // --- остальные кнопки нижнего ряда ---
     html += row(btnIcon(CODE_ICON_SVG),
@@ -4374,6 +4382,7 @@ window.initMdEditorModule = function(deps){
             '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="mdEditorFontSizeBtn" title="Размер шрифта">Аа</button>' +
           '</span>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorImageBtn" title="Вставить картинку">' + PAPERCLIP_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-fab-btn" id="mdEditorQrBtn" title="QR-код заметки">' + QR_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorModeBtn" title="Переключить режим кода">' + (codeMode ? EYE_ICON_SVG : CODE_ICON_SVG) + '</button>' +
           // режим чтения — сразу слева от «домика» (ТЗ пользователя от 30.09: одно и то же место на всех экранах)
           '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="mdEditorReadingBtn" title="Режим чтения"></button>' +
@@ -4388,6 +4397,8 @@ window.initMdEditorModule = function(deps){
           '<span class="task-iconsize-dot task-iconsize-dot-l"></span>' +
           '<span class="fontsize-bar-val" id="mdEditorFontSizeVal"></span>' +
         '</div>' +
+        // плашка с QR-кодом заметки — отдельный элемент над рядом (ряд двигается свайпом, плашка стоит на месте)
+        '<div class="mdeditor-qr-plaque" id="mdEditorQrPlaque"></div>' +
       '</div>';
     document.getElementById("mdEditorTitle").textContent = openFile.name;
     applyFontSize();
@@ -4520,6 +4531,8 @@ window.initMdEditorModule = function(deps){
     });
 
     document.getElementById("mdEditorDownloadBtn").addEventListener("click", downloadSingleNote);
+    document.getElementById("mdEditorQrBtn").addEventListener("click", toggleNoteQr);
+    document.getElementById("mdEditorQrPlaque").addEventListener("click", hideNoteQr); // тап по плашке — спрятать
 
     // Кнопка «i» — экран-инструкция по форматированию (ТЗ пользователя от
     // 20.09), тем же приёмом, что «i» на вкладках задач (renderTaskInfoScreen
@@ -4555,12 +4568,6 @@ window.initMdEditorModule = function(deps){
 
 
     document.getElementById("mdEditorHomeBtn2").addEventListener("click", function(){
-      if(cardNoteHomeHook){ // заметка-карточка: домик ведёт назад к сетке карточек
-        var hook = cardNoteHomeHook;
-        closeCardNote();
-        hook();
-        return;
-      }
       var prevScreen = screen, prevDirNode = currentDirNode, prevOpenFile = openFile;
       pushMdNav(function(){
         flushAutosaveNow();
@@ -4660,17 +4667,6 @@ window.initMdEditorModule = function(deps){
     binding.remove(id);
   }
 
-  // ---- заметки-карточки (вкладка 9, itemcards.js) ----
-  function createCardNote(title){
-    if(!notesReady) return null;
-    var base = (title || "Карточка").replace(/^\s+|\s+$/g, "") || "Карточка";
-    var name = base, n = 2;
-    while(isNoteNameTaken(name)){ name = base + " (" + n + ")"; n++; }
-    var rec = createNoteRecord(name, CARD_NOTES_PATH);
-    recordNoteCreated(name);
-    rebuildTree();
-    return { id: rec.id, name: name };
-  }
   // ---- заметка с датой (карточка «Заметка с датой», itemcards.js) ----
   // Обычная заметка блокнота (не скрытая заметка карточки): имя — сегодняшняя дата, путь — папка `notes` в корне. Папки как
   // отдельной сущности нет (дерево строится из путей заметок), поэтому «создать папку» = положить заметку по этому пути.
@@ -4679,7 +4675,7 @@ window.initMdEditorModule = function(deps){
   function datedNoteFolderName(){
     var found = null;
     notesMap.forEach(function(rec){
-      if(found || !rec || rec.deleted || !rec.name || isCardNoteRec(rec)) return;
+      if(found || !rec || rec.deleted || !rec.name || isCardMetaRec(rec)) return;
       var first = String(rec.path || "").split("/")[0];
       if(first && first.toLowerCase() === DATED_NOTE_FOLDER) found = first;
     });
@@ -4692,7 +4688,7 @@ window.initMdEditorModule = function(deps){
     // заметка на сегодня уже есть (имена уникальны по всему блокноту) — открываем её, новую не создаём
     var existingId = nameIndex.get(base.toLowerCase());
     var existing = existingId ? notesMap.get(existingId) : null;
-    if(existing && !existing.deleted && !isCardNoteRec(existing)){
+    if(existing && !existing.deleted && !isCardMetaRec(existing)){
       activeMdTab = "editor";
       openNoteByIdExternally(existingId);
       return true;
@@ -4735,42 +4731,102 @@ window.initMdEditorModule = function(deps){
     render();
     return true;
   }
-  function renameCardNote(id, title){
+  // ---- QR-код заметки (кнопка `mdEditorQrBtn` в нижнем ряду редактора) ----
+  // QR любой заметки — `lt://v1/note/<id заметки>` (разбор — cardscan.js, открытие — itemcards.js через `openNoteByQr`).
+  // Отдельной записи «у заметки есть QR» нет: заметка «имеет код», когда лежит в папке QR_NOTES_FOLDER (в корне или глубже).
+  // Первое нажатие кнопки переносит её туда; папку создавать отдельно не нужно (папок как сущностей нет — это префикс пути заметок),
+  // а признак ездит между устройствами вместе с путём заметки.
+  var QR_NOTES_FOLDER = "cards-notes";
+  var NOTE_QR_PREFIX = "lt://v1/note/";
+  function noteQrText(id){ return NOTE_QR_PREFIX + id; }
+  // если в корне уже есть такая папка (в любом регистре) — берём её написание, чтобы не плодить «Cards-notes» и «cards-notes»
+  function qrFolderName(){
+    var found = null;
+    notesMap.forEach(function(rec){
+      if(found || !rec || rec.deleted || !rec.name || isCardMetaRec(rec)) return;
+      var first = String(rec.path || "").split("/")[0];
+      if(first && first.toLowerCase() === QR_NOTES_FOLDER) found = first;
+    });
+    return found || QR_NOTES_FOLDER;
+  }
+  function noteHasQr(rec){
+    return !!rec && String(rec.path || "").split("/")[0].toLowerCase() === QR_NOTES_FOLDER;
+  }
+  // перенос записи в папку QR-заметок (текст берётся из notesMap — вызывающий сначала сбрасывает автосохранение)
+  function moveNoteToQrFolder(id){
     var rec = notesMap.get(id);
     if(!rec || rec.deleted) return false;
-    var base = (title || "").replace(/^\s+|\s+$/g, "");
-    if(!base || base === rec.name) return false;
-    var name = base, n = 2;
-    while(isNoteNameTaken(name, id)){ name = base + " (" + n + ")"; n++; }
-    return renameNoteRecord(id, name);
+    if(noteHasQr(rec)) return true;
+    binding.save(id, { name: rec.name, path: qrFolderName(), text: rec.text });
+    return true;
   }
-  function deleteCardNote(id){
-    var rec = notesMap.get(id);
-    if(!rec) return;
-    if(openFile && openFile.id === id){ destroyEditor(); openFile = null; screen = "list"; cardNoteHomeHook = null; }
-    deleteNoteRecord(id, true);
+  // Заметки прежних скрытых карточек (путь LEGACY_CARD_NOTES_PATH) становятся обычными заметками в папке QR-заметок.
+  function migrateLegacyCardNotes(){
+    if(!notesReady) return;
+    var ids = [];
+    notesMap.forEach(function(rec, id){
+      if(rec && !rec.deleted && rec.path === LEGACY_CARD_NOTES_PATH) ids.push(id);
+    });
+    if(!ids.length) return;
+    var folder = qrFolderName();
+    ids.forEach(function(id){
+      var rec = notesMap.get(id);
+      if(rec) binding.save(id, { name: rec.name, path: folder, text: rec.text });
+    });
     rebuildTree();
+    if(openFile && notesMap.get(openFile.id)) openFile.path = notesMap.get(openFile.id).path;
   }
-  // onHome — вызывается домиком редактора; переход «назад» системным жестом регистрирует вызывающий.
-  function openCardNote(id, onHome){
+  // Открыть заметку по скану её QR (itemcards.js). true — открыта; false — заметки ещё не загружены или такой нет на устройстве.
+  function openNoteByQr(id){
     if(!notesReady) return false;
     var rec = notesMap.get(id);
-    if(!rec || rec.deleted) return false;
+    if(!rec || rec.deleted || isCardMetaRec(rec)) return false;
     activeMdTab = "editor";
-    cardNoteHomeHook = onHome || null;
     openNoteByIdExternally(id);
     return true;
   }
-  function closeCardNote(){
-    cardNoteHomeHook = null;
-    if(!openFile && screen !== "editor") return;
-    flushAutosaveNow();
-    binding.pushNow({keepalive:true});
-    destroyEditor();
-    openFile = null;
-    currentDirNode = rootTree;
-    screen = "list";
-    persistDocStateNow({ screen: "list", id: null, name: null, cursorPos: 0, scrollPercent: null });
+  function hideNoteQr(){
+    var plaque = document.getElementById("mdEditorQrPlaque");
+    if(!plaque) return;
+    plaque.classList.remove("open");
+    plaque.innerHTML = "";
+    plaque.style.width = "";
+    plaque.style.height = "";
+  }
+  // Плашка: квадрат шириной с окно заметки (минус отступы по краям), стоит над рядом кнопок на расстоянии --fab-gap; на низком
+  // экране ограничена высотой окна. Фон светлый независимо от темы — иначе код не читается.
+  function showNoteQr(plaque, id){
+    plaque.innerHTML = "";
+    plaque.classList.add("open");
+    plaque.style.width = "";
+    plaque.style.height = "";
+    var parent = plaque.offsetParent || plaque.parentNode;
+    var side = plaque.clientWidth;
+    var bottom = parseFloat(window.getComputedStyle(plaque).bottom) || 0;
+    var room = (parent && parent.clientHeight ? parent.clientHeight : 0) - bottom - 7;
+    if(room > 60 && room < side) side = Math.floor(room);
+    side = Math.max(120, side);
+    plaque.style.width = side + "px";
+    plaque.style.height = side + "px";
+    var inner = Math.max(80, side - 24); // 12px подложки с каждой стороны
+    loadQrLib().then(function(){
+      if(!plaque.classList.contains("open")) return;
+      try{ new window.QRCode(plaque, { text: noteQrText(id), width: inner, height: inner, colorDark: "#000000", colorLight: "#ffffff" }); }
+      catch(e){ plaque.textContent = "QR недоступен"; }
+    }).catch(function(){ plaque.textContent = "QR недоступен"; });
+  }
+  function toggleNoteQr(){
+    var plaque = document.getElementById("mdEditorQrPlaque");
+    if(!plaque || !openFile) return;
+    if(plaque.classList.contains("open")){ hideNoteQr(); return; }
+    if(!/^[A-Za-z0-9]{4,32}$/.test(String(openFile.id))){ setStatus("Для этой заметки QR-код недоступен.", true); return; } // сканер и оболочка принимают только такие id
+    flushAutosaveNow(); // перенос пишет текст из notesMap — правки из редактора должны попасть туда раньше
+    if(!noteHasQr(notesMap.get(openFile.id)) && moveNoteToQrFolder(openFile.id)){
+      var moved = notesMap.get(openFile.id);
+      if(moved) openFile.path = moved.path;
+      rebuildTree();
+    }
+    showNoteQr(plaque, openFile.id);
   }
 
   function goHome(){
@@ -6525,12 +6581,8 @@ window.initMdEditorModule = function(deps){
     // для декоративной подсветки, см. searchHighlightWords выше);
     // getSearchableNotes — плоский список заметок для самого поиска.
     openNoteByIdExternally: openNoteByIdExternally,
-    createCardNote: createCardNote,
     createDatedNote: createDatedNote,
-    renameCardNote: renameCardNote,
-    deleteCardNote: deleteCardNote,
-    openCardNote: openCardNote,
-    closeCardNote: closeCardNote,
+    openNoteByQr: openNoteByQr,
     cardMetaStatus: cardMetaStatus,
     cardMetaPull: cardMetaPull,
     cardMetaAll: cardMetaAll,

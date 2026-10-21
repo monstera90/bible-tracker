@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 1.3 (21.10) — `parseCode` узнаёт QR заметки `lt://v1/note/<id>` → `{kind:"note", id}` (QR строит кнопка в редакторе заметок, mdeditor.js).
    Версия: 1.2 (20.10) — в окне ярлыка (`windowed`) кнопки «Назад» нет: выход — нажатие мимо окна камеры (`onBack`).
    Версия: 1.1 (20.10) — `open({windowed:true})` (окно ярлыка): видоискатель только в центральном окне с зелёной рамкой, вокруг прозрачно (виден рабочий стол); до первого кадра вместо растянутой заглушки WebView — серая заглушка внутри окна.
    Версия: 1.0 (16.10)
@@ -19,9 +20,11 @@ window.CardScan = (function(){
   "use strict";
 
   var QR_PREFIX = "lt://v1/card/";
+  var NOTE_PREFIX = "lt://v1/note/";
 
   // Разбор текста из QR:
   //   {kind:"card", id}   — код карточки приложения (lt://v1/card/<id>)
+  //   {kind:"note", id}   — код заметки «Моего блокнота» (lt://v1/note/<id>)
   //   {kind:"unknown", text} — наша схема lt://, но другая версия/вид (не выполняется)
   //   {kind:"url", url}   — обычная ссылка http(s)
   //   {kind:"text", text} — всё остальное
@@ -30,6 +33,11 @@ window.CardScan = (function(){
     if(t.indexOf(QR_PREFIX) === 0){
       var id = t.slice(QR_PREFIX.length);
       if(/^[A-Za-z0-9]{4,32}$/.test(id)) return { kind: "card", id: id };
+      return { kind: "unknown", text: t };
+    }
+    if(t.indexOf(NOTE_PREFIX) === 0){
+      var nid = t.slice(NOTE_PREFIX.length);
+      if(/^[A-Za-z0-9]{4,32}$/.test(nid)) return { kind: "note", id: nid };
       return { kind: "unknown", text: t };
     }
     if(/^lt:\/\//i.test(t)) return { kind: "unknown", text: t };
@@ -142,5 +150,5 @@ window.CardScan = (function(){
     return { close: close };
   }
 
-  return { parseCode: parseCode, open: open, QR_PREFIX: QR_PREFIX };
+  return { parseCode: parseCode, open: open, QR_PREFIX: QR_PREFIX, NOTE_PREFIX: NOTE_PREFIX };
 })();

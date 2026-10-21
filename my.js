@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 74.1 (21.10) — деп `loadQrLib` у `initMdEditorModule` (QR-код заметки). Откат: my.js 74.0.
    Версия: 74.0 (21.10) — структурная правка: вкладка set2s_10 «Claude» (модуль claudetab.js, ветка в switchSettingsTab до заглушки; `ClaudeTabMod.onSwitch` при смене вкладки и `ClaudeTabMod.hide` при закрытии окна настроек, чтобы убрать нативный WebView).
    Версия: 73.2 (20.10) — деп `openNotesTab` у `initItemCardsModule` (переключает на «Мои заметки»: скан карточки «Заметка с датой» создаёт обычную заметку блокнота).
    Версия: 73.1 (18.10) — вкладка «Дополнительные возможности»: кнопка «Создать ярлык сканера QR-кодов» (+ подсказка и «Открыть разрешения приложения»), `hasScanShortcutBridge`. Откат: my.js 73.0.
@@ -7347,6 +7348,7 @@
     // режим оффлайн: mdeditor.js использует это вместо navigator.onLine (isOnline в облачном цикле
     // заметок — pushDirtyNotes/syncNotesFromCloud)
     isNetworkAvailable: isNetworkAvailable,
+    loadQrLib: loadQrLib, // QR-код заметки (кнопка QR в редакторе)
     PAPERCLIP_ICON_SVG: PAPERCLIP_ICON_SVG,
     // то же распознавание ссылок на Библию, что и в "Карте дней года" (см.
     // SCRIPTURE_RE/BOOK_ALIASES/scriptureRefLink выше) — regexSource передаётся строкой (а не самим

@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 9.0 (21.10) — структурная правка: тип карточки «заметка» и её скрытая заметка УБРАНЫ (`openNoteCard`/`backToGrid`/`openNoteFromScan`/`openNoteWhenReady`, `data-type="note"`, кнопка «Поля карточки»); прежние карточки-заметки при загрузке отбрасываются (их заметки mdeditor.js 14.0 переносит в папку `cards-notes`), записи таких карточек в облаке удаляются. Вместо этого сканер понимает QR заметки `lt://v1/note/<id>` (кнопка QR в редакторе заметок): `handleScanned` → `openNoteByQrWhenReady`, из окна ярлыка — `openInApp(id,"note")` и `openCardFromNative`. Откат: itemcards.js 8.0.
    Версия: 8.0 (20.10) — структурная правка: тип карточки `datenote` («Заметка с датой»): пункт «Создать новую заметку с датой» в меню «+» (пока такая карточка есть, пункта нет), только QR на обороте; скан (и из окна ярлыка через `openInApp(id,"note")`) сразу создаёт ОБЫЧНУЮ заметку блокнота с сегодняшней датой в имени в папке `notes` в корне — `createDatedNote` (mdeditor.js), `showScanned`/`openDatedNoteFromScan`/`createDatedNoteWhenReady`, деп `openNotesTab`. Откат: itemcards.js 7.1.
    Версия: 7.1 (20.10) — окно ярлыка: сканеру передаётся `windowed: standalone` (видоискатель в центральной рамке, вокруг прозрачно).
    Версия: 7.0 (19.10) — структурная правка: размер и способ раскладки карточек — как у сетки обложек в книгах (`.books-cover-grid`: колонки repeat(auto-fill, minmax(110px, 1fr)), зазор 2px): база 110px × ползунок, карточки растягиваются на всю ширину, число колонок и точную ширину считает `applySize` (`--item-card-cols`, `--item-card-w`), пропорция 3:4 и ползунок (0,7–2) без изменений. Откат: itemcards.js 6.1.
@@ -14,21 +15,19 @@
 
    Что здесь сделано (шаги 1, 2, 4, 5б, 7 плана ТЗ):
    - сетка карточек 3:4 (было 2:3), число колонок считается от ширины карточки;
-   - три типа: «таймер», «предмет», «заметка»; формы создания/правки;
+   - типы: «таймер», «предмет» и «заметка с датой»; формы создания/правки (таймер, предмет);
    - у каждой карточки личный id (8 знаков) и QR `lt://v1/card/<id>` на обороте
      (двойной тап; QR строится лениво, библиотека vendor/qrcode.min.js);
    - долгий тап раскрывает кнопки «правка»/«удаление» (те же классы, что у обложек книг);
    - ползунок размера (0,7–2), нижний ряд кнопок;
-   - карточка-заметка: тело хранится в скрытой заметке «Моего блокнота» (путь
-     CARD_NOTES_PATH, см. mdeditor.js: createCardNote/openCardNote) и открывается
-     тем же редактором.
+   - QR заметок «Моего блокнота» (`lt://v1/note/<id>`) строит кнопка в редакторе заметок (mdeditor.js);
+     здесь сканер открывает такую заметку (`openNoteByQrWhenReady`).
 
    Сканирование: камера и разбор кода — cardscan.js (CardScan); показ результата — здесь
    (openScan → handleScanned → showCardOverlay / showNoticeOverlay). Тот же код работает на
    странице scan.html (deps.standalone + deps.native, мост ScanBridge из ScanActivity.kt).
 
-   Чего здесь ещё нет (следующие шаги ТЗ): таймер по скану (Пуск), PDF, напоминания, облачная синхронизация записей карточек (тело карточки-заметки
-   синхронизируется вместе с заметками, сами записи карточек пока только на устройстве).
+   Чего здесь ещё нет (следующие шаги ТЗ): таймер по скану (Пуск), PDF, напоминания, облачная синхронизация записей карточек (записи карточек синхронизируются зеркалом в заметках, см. ниже).
 
    Хранилище записей — только функции loadCards/saveCards (localStorage), чтобы потом
    подменить их на sync-engine, не трогая остальной код.
@@ -63,7 +62,7 @@ window.initItemCardsModule = function(deps){
     datepaper: '<path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path><rect x="8.5" y="11.5" width="7" height="6" rx="1"></rect><path d="M8.5 14h7"></path><path d="M10.5 10.2v2.2M13.5 10.2v2.2"></path>'
   };
   var ICON_ORDER = ["bottle", "container", "jar", "bicycle", "car", "vegetable", "paper"];
-  var DEFAULT_ICON = { note: "paper", item: "", timer: "", datenote: "datepaper" };
+  var DEFAULT_ICON = { item: "", timer: "", datenote: "datepaper" };
   var DATENOTE_TITLE = "Заметка с датой";
   function iconSvg(name){
     if(!name || !ICONS[name]) return "";
@@ -75,7 +74,6 @@ window.initItemCardsModule = function(deps){
   // часы со стрелкой вокруг («история»), слегка изменённые: стрелка по часовой, на кнопке «сегодняшняя дата»
   var TODAY_ICON_SVG = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9"></path><path d="M20 4v4.5h-4.5"></path><path d="M12 7.5V12l3 2"></path></svg>';
   var PDF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7.5A1.5 1.5 0 0 0 6 4.5v15A1.5 1.5 0 0 0 7.5 21h9a1.5 1.5 0 0 0 1.5-1.5V7z"></path><path d="M14 3v4h4"></path><path d="M9 12.5h6"></path><path d="M9 15.5h6"></path><path d="M9 18h3"></path></svg>';
-  var PAGE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path></svg>';
 
   // ---------- хранилище ----------
   var cardsCache = null;
@@ -84,7 +82,8 @@ window.initItemCardsModule = function(deps){
     var arr = [];
     try{ arr = JSON.parse(localStorage.getItem(CARDS_KEY) || "[]"); }catch(e){ arr = []; }
     if(!Array.isArray(arr)) arr = [];
-    cardsCache = arr.filter(function(c){ return c && c.id && c.type; });
+    // тип «note» (скрытые заметки-карточки) убран: такие записи отбрасываются, их тела стали обычными заметками в папке cards-notes (mdeditor.js)
+    cardsCache = arr.filter(function(c){ return c && c.id && c.type && c.type !== "note"; });
     return cardsCache;
   }
   function persistCards(){
@@ -117,7 +116,7 @@ window.initItemCardsModule = function(deps){
   // запись карточки в том виде, как она ходит между устройствами (и проверка пришедшей из облака)
   function cloudShape(r){
     if(!r || typeof r.id !== "string" || !/^[A-Za-z0-9]{4,32}$/.test(r.id)) return null;
-    if(r.type !== "timer" && r.type !== "item" && r.type !== "note" && r.type !== "datenote") return null;
+    if(r.type !== "timer" && r.type !== "item" && r.type !== "datenote") return null;
     var o = {
       id: r.id,
       type: r.type,
@@ -128,8 +127,7 @@ window.initItemCardsModule = function(deps){
       createdAt: Number(r.createdAt) || 0,
       updatedAt: Number(r.updatedAt) || 0
     };
-    if(r.type === "note") o.noteId = String(r.noteId == null ? "" : r.noteId).slice(0, 64);
-    if(r.type === "item" || r.type === "note"){
+    if(r.type === "item"){
       // напоминание карточки: выбранная дата-время и период повтора (remindDone — только на этом устройстве, наружу не идёт)
       o.remindAt = Math.max(0, Math.floor(Number(r.remindAt) || 0));
       o.repeatDays = REPEAT_STEPS.indexOf(r.repeatDays | 0) >= 0 ? (r.repeatDays | 0) : 0;
@@ -150,6 +148,7 @@ window.initItemCardsModule = function(deps){
     // 2) облако → словарь
     var remote = {};
     md.cardMetaAll().forEach(function(r){
+      if(r && r.type === "note" && typeof r.id === "string"){ md.cardMetaRemove(r.id); return; } // прежние карточки-заметки: записи из облака убираем
       var n = cloudShape(r);
       if(n) remote[n.id] = n;
     });
@@ -408,7 +407,6 @@ window.initItemCardsModule = function(deps){
     return '<div class="item-card-icon">' + icon + '</div>' +
       '<div class="item-card-title"></div>' +
       '<div class="item-card-date">' + escapeHtml(isoToRu(c.date)) + '</div>' +
-      (c.type === "note" ? '<button type="button" class="item-card-page-btn" title="Поля карточки">' + PAGE_ICON_SVG + '</button>' : '') +
       remindBtnHtml(c);
   }
   function renderGrid(){
@@ -423,7 +421,6 @@ window.initItemCardsModule = function(deps){
     html += '<div class="item-type-menu" id="itemTypeMenu" style="display:none;">' +
       '<button type="button" class="workbooks-run-btn" data-type="timer">Таймер</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="item">Предмет</button>' +
-      '<button type="button" class="workbooks-run-btn" data-type="note">Заметка</button>' +
       (hasDateNote ? '' : '<button type="button" class="workbooks-run-btn" data-type="datenote">Создать новую заметку с датой</button>') +
     '</div>';
     var showPdf = !isAndroid5();
@@ -587,7 +584,6 @@ window.initItemCardsModule = function(deps){
       if(flippedId === id){ flipCard(id, false); return; } // тап по QR/обороту — назад
       if(flippedId) unflipAny();
       if(e.target.closest(".item-card-start-btn")){ startTimerForCard(c); return; } // «Пуск»: запуск, а если уже идёт — заново
-      if(e.target.closest(".item-card-page-btn")){ openForm("note", c); return; }
       if(revealedIds[id]){ hideRevealed(); return; }
       var now = Date.now();
       if(lastTapId === id && now - lastTapAt < DOUBLE_MS){
@@ -611,7 +607,6 @@ window.initItemCardsModule = function(deps){
 
   function onCardTap(c){
     if(c.type === "datenote") return; // «Заметка с датой» работает только по QR-коду (двойной тап — оборот с кодом)
-    if(c.type === "note"){ openNoteCard(c); return; }
     openForm(c.type, c); // таймер и предмет: форма с заполненными полями
   }
 
@@ -719,29 +714,10 @@ window.initItemCardsModule = function(deps){
     });
   }
 
-  // ---------- карточка-заметка ----------
-  function backToGrid(){
-    var md = getMdEditor();
-    if(md && md.closeCardNote) md.closeCardNote();
-    renderGrid();
-  }
-  function openNoteCard(c){
-    var md = getMdEditor();
-    if(!md || !md.openCardNote || !c.noteId){ return; }
-    var ok = md.openCardNote(c.noteId, backToGrid);
-    if(ok === false){ alert("Заметка этой карточки не найдена на устройстве."); return; }
-    screenMode = "note";
-    if(window.AppNav) window.AppNav.push(function(){ backToGrid(); });
-  }
-
   function deleteCard(id){
     var list = loadCards();
     var c = findCard(id);
     if(!c) return;
-    if(c.type === "note" && c.noteId){
-      var md = getMdEditor();
-      if(md && md.deleteCardNote) md.deleteCardNote(c.noteId);
-    }
     cardsCache = list.filter(function(x){ return x.id !== id; });
     delete revealedIds[id];
     if(flippedId === id) flippedId = null;
@@ -765,7 +741,7 @@ window.initItemCardsModule = function(deps){
   }
 
   // ---------- форма создания / правки ----------
-  var TYPE_LABEL = { timer: "Таймер", item: "Предмет", note: "Заметка" };
+  var TYPE_LABEL = { timer: "Таймер", item: "Предмет" };
   function openForm(type, card, forcedId){
     screenMode = "form";
     var el = container();
@@ -856,16 +832,6 @@ window.initItemCardsModule = function(deps){
         data.seconds = sec;
       }
       data.title = title;
-      var md = getMdEditor();
-      if(type === "note"){
-        if(isNew){
-          var made = md && md.createCardNote ? md.createCardNote(title) : null;
-          if(!made){ errEl.textContent = "Заметки ещё не готовы: нужна настроенная синхронизация."; return; }
-          data.noteId = made.id;
-        } else if(card.noteId && md && md.renameCardNote){
-          md.renameCardNote(card.noteId, title);
-        }
-      }
       var now = Date.now();
       if(isNew){
         data.id = (forcedId && !findCard(forcedId)) ? forcedId : newId(); // forcedId: карточка создаётся под уже напечатанный код
@@ -1103,6 +1069,7 @@ window.initItemCardsModule = function(deps){
       showNoticeOverlay({ kind: "missing", id: p.id });
       return;
     }
+    if(p.kind === "note"){ openScannedNote(p.id); return; }
     showNoticeOverlay({ kind: p.kind, url: p.url, text: p.text });
   }
 
@@ -1114,7 +1081,7 @@ window.initItemCardsModule = function(deps){
   }
   function openDatedNoteFromScan(c){
     if(standalone){
-      // окно ярлыка: открываем приложение тем же входом, что у карточки-заметки (mode "note"), заметку создаст страница приложения
+      // окно ярлыка: открываем приложение тем же входом (mode "note"), заметку создаст страница приложения
       if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(c.id, "note"); }catch(e){} }
       leaveStandalone();
       return;
@@ -1123,7 +1090,7 @@ window.initItemCardsModule = function(deps){
     createDatedNoteWhenReady(0);
   }
   // Новая ОБЫЧНАЯ заметка блокнота (вкладка «Мои заметки», не скрытая заметка карточки) с сегодняшней датой в имени, в папке notes
-  // в корне; сразу открывается на редактирование. На холодном старте заметки могут быть ещё не загружены — ждём (как у карточки-заметки).
+  // в корне; сразу открывается на редактирование. На холодном старте заметки могут быть ещё не загружены — ждём.
   function createDatedNoteWhenReady(n){
     var md = getMdEditor();
     if(n === 0 && deps.openNotesTab){ try{ deps.openNotesTab(); }catch(e){} }
@@ -1156,8 +1123,7 @@ window.initItemCardsModule = function(deps){
     card.querySelector(".item-card-title").textContent = c.title || "";
     card.addEventListener("click", function(e){
       e.stopPropagation();
-      if(c.type === "note") openNoteFromScan(c);
-      else if(c.type === "timer" && e.target.closest(".item-card-start-btn")) startTimerForCard(c); // «Пуск» на показе: заново
+      if(c.type === "timer" && e.target.closest(".item-card-start-btn")) startTimerForCard(c); // «Пуск» на показе: заново
     });
     o.appendChild(card);
     if(c.type === "timer") syncTimersView();
@@ -1183,16 +1149,6 @@ window.initItemCardsModule = function(deps){
       o.appendChild(b);
     }
   }
-  function openNoteFromScan(c){
-    if(standalone){
-      if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(c.id, "note"); }catch(e){} }
-      leaveStandalone();
-      return;
-    }
-    endScanSession(false);
-    openNoteWhenReady(c, 0);
-  }
-
   function showNoticeOverlay(info){
     var o = newOverlay();
     var box = document.createElement("div");
@@ -1258,7 +1214,6 @@ window.initItemCardsModule = function(deps){
       '<div class="item-form-buttons item-form-types">' +
         '<button type="button" class="workbooks-run-btn" data-type="timer">Таймер</button>' +
         '<button type="button" class="workbooks-run-btn" data-type="item">Предмет</button>' +
-        '<button type="button" class="workbooks-run-btn" data-type="note">Заметка</button>' +
       '</div>' +
       '<div class="item-form-buttons"><button type="button" class="workbooks-run-btn" id="icfTypeCancel">Отмена</button></div>' +
     '</div>';
@@ -1272,30 +1227,34 @@ window.initItemCardsModule = function(deps){
     if(window.AppNav) window.AppNav.push(function(){ renderGrid(); });
   }
 
-  // карточка-заметка из сканирования: заметки на холодном старте приложения могут быть ещё не загружены — ждём
-  function openNoteWhenReady(c, n){
+  // заметка по скану её QR (`lt://v1/note/<id>`): на холодном старте приложения заметки могут быть ещё не загружены — ждём
+  function openNoteByQrWhenReady(id, n){
     var md = getMdEditor();
-    if(md && md.openCardNote && c.noteId){
-      var ok = md.openCardNote(c.noteId, backToGrid);
-      if(ok !== false){
-        screenMode = "note";
-        if(window.AppNav) window.AppNav.push(function(){ backToGrid(); });
-        return;
-      }
+    if(n === 0 && deps.openNotesTab){ try{ deps.openNotesTab(); }catch(e){} }
+    if(md && md.openNoteByQr && md.openNoteByQr(id)) return;
+    if(n < 25){ setTimeout(function(){ openNoteByQrWhenReady(id, n + 1); }, 300); return; }
+    alert("Заметка не найдена на этом устройстве. Возможно, ещё не синхронизирована.");
+  }
+  // скан QR заметки: из окна ярлыка открываем приложение тем же входом, что у «Заметки с датой» (mode "note"), иначе открываем сразу
+  function openScannedNote(id){
+    if(standalone){
+      if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(id, "note"); }catch(e){} }
+      leaveStandalone();
+      return;
     }
-    if(n < 25){ setTimeout(function(){ openNoteWhenReady(c, n + 1); }, 300); return; }
-    alert("Заметка этой карточки не найдена на устройстве.");
+    endScanSession(false);
+    openNoteByQrWhenReady(id, 0);
   }
 
-  // вход из оболочки (ScanActivity → MainActivity): mode "note" — открыть заметку карточки,
+  // вход из оболочки (ScanActivity → MainActivity): mode "note" — «Заметка с датой» (id карточки) либо заметка по QR (id заметки),
   // "create" — создать карточку с этим id (код уже напечатан)
   function openCardFromNative(id, mode){
     reloadCards();
     var c = findCard(id);
     if(mode === "create" && !c){ openTypeChooser(id); return; }
     if(mode === "note" && c && c.type === "datenote"){ createDatedNoteWhenReady(0); return; } // скан «Заметки с датой» из окна ярлыка
+    if(mode === "note" && !c){ openNoteByQrWhenReady(id, 0); return; } // id не карточки — id заметки из QR (скан в окне ярлыка)
     renderGrid();
-    if(mode === "note" && c && c.type === "note") openNoteWhenReady(c, 0);
   }
 
   // страница scan.html: сразу сканер, результат — на прозрачном фоне поверх рабочего стола
@@ -1306,9 +1265,6 @@ window.initItemCardsModule = function(deps){
 
   // ---------- вход вкладки ----------
   function renderSettingsTabItemCards(){
-    var md = getMdEditor();
-    // если из этой вкладки была открыта заметка-карточка и пользователь ушёл — закрываем её редактор
-    if(screenMode === "note" && md && md.closeCardNote) md.closeCardNote();
     flippedId = null;
     typeMenuOpen = false;
     cardsCache = null; // записи могла изменить страница scan.html (кнопка «сегодняшняя дата»)

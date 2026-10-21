@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 15.0 (21.10) — структурная правка: плашка QR-кода заметки `.mdeditor-qr-plaque` (+ `.open`) над рядом кнопок редактора заметок (mdeditor.js 14.0).
    Версия: 14.2 (17.10) — кнопка «повтор» в плашке напоминания (`.reminder-bubble-repeat`, `.rb-repeat-days`) — для напоминаний карточек.
    Версия: 14.1 (16.10) — значки под задачей (`.task-body > .task-actions`) переносятся на следующую строку, если не помещаются в ширину строки (крупный размер значков, узкий экран).
    Версия: 14.0 (14.10) — структурная правка: ползунок размера шрифта `.fontsize-bar` (+ `.fontsize-bar-range`, `.fontsize-bar-val`) для попапов «Аа» (задачи, «Мой блокнот», ридер книг): тот же вид, что у `.task-iconsize-popup`, но на второй «ступеньке» над рядом (первую занимает кнопка переносов слов). Откат: modals.css 13.0.
@@ -2045,6 +2046,32 @@
      (она на 7px выше ряда). Подпись — размер в px, чуть шире подписи процентов. */
   .fontsize-bar{ bottom:calc(var(--fab-gap, 6px) + 2 * var(--fab-size, 36px) + 14px); }
   .fontsize-bar-val{ min-width:4.4em; }
+  /* Плашка QR-кода заметки (кнопка QR в ряду редактора, mdeditor.js): квадрат на всю ширину окна (минус отступы по краям, как у
+     ползунка), над рядом на расстоянии --fab-gap. Сторону (и ограничение по высоте на низком экране) выставляет mdeditor.js —
+     aspect-ratio на Android 5 не работает. Фон светлый независимо от темы, иначе код не прочитать. */
+  .mdeditor-qr-plaque{
+    display:none;
+    position:absolute;
+    z-index:7;
+    box-sizing:border-box;
+    left:var(--fab-gap, 6px);
+    right:var(--fab-gap, 6px);
+    margin:0 auto;
+    bottom:calc(var(--fab-gap, 6px) * 2 + var(--fab-size, 36px));
+    width:calc(100% - var(--fab-gap, 6px) * 2);
+    padding:12px;
+    align-items:center;
+    justify-content:center;
+    background:#fff;
+    color:#000;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    box-shadow:0 2px 6px rgba(0,0,0,.28);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .mdeditor-qr-plaque.open{ display:flex; }
+  .mdeditor-qr-plaque img,
+  .mdeditor-qr-plaque canvas{ display:block; }
   /* «Ж»/«К»/«П»/«Ч» — четыре отдельные кнопки вместо одной «Ж» с попапом (ТЗ
      пользователя от 30.09), по слоту на каждую, шаг 39px; в notebook-ряду
      (mdeditor.js) порядок тот же: слева направо Ж К П Ч, то есть Ч — ближе всех
