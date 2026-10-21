@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 3.1 (21.10) — раскрытый вид через `iconTextInfo` с `animIconInfo` (значок слева, `baseInfo` и корневой `picInfo` убраны: значок в них не показывался); песочные часы на жёлтом круге — белые; кнопка «Стоп» — тёмный круг с белым крестиком. Откат: XiaomiIsland.kt 3.0 (без значка, но с временем и «Стоп»).
 // Версия: 3.0 (21.10) — раскрытый остров как у часов: крупное время в заголовке (`clockText`, обновляется тиком), большой значок песочных часов без круга (`bigIcon`, цвет по этапу), кнопка «Стоп» (`miui.focus.actions`); `hintInfo` убран. Откат: XiaomiIsland.kt 2.1.
 // Версия: 2.1 (21.10) — в `param_island` добавлены `islandOrder=true` и `dismissIsland=false` (остров должен возвращаться, если система его убрала, пока приложение на экране; эффект проверяется на телефоне). Откат: XiaomiIsland.kt 2.0.
 // Версия: 2.0 (21.10) — значок острова рисуется кодом: песочные часы на цветном круге, цвет по этапу (`stageFor`: фиолетовый / жёлтый за 2 минуты / красный за минуту); в `timerInfo` добавлено `timerTotal` (в примерах Xiaomi поле есть у каждого таймера; отсчёт на острове замирал после первой секунды — связь с отсутствием поля предположительная, проверяется на телефоне). Откат: XiaomiIsland.kt 1.0.
@@ -136,10 +137,11 @@ object XiaomiIsland {
             island.put("islandTimeout", sec)
         }
         // раскрытый остров и карточка в шторке: большая эмблема слева, крупное время (бегущее — заголовок), название под ним
+        val anim = JSONObject().put("type", 0).put("src", bigKey)
         val base = if (timer != null) {
-            JSONObject().put("type", 2).put("title", clockText(endAt - now)).put("content", title)
+            JSONObject().put("type", 1).put("title", clockText(endAt - now)).put("content", title).put("animIconInfo", anim)
         } else {
-            JSONObject().put("type", 2).put("title", title).put("content", status)
+            JSONObject().put("type", 1).put("title", title).put("content", status).put("animIconInfo", anim)
         }
         val v2 = JSONObject()
             .put("protocol", 1)
@@ -151,8 +153,7 @@ object XiaomiIsland {
             .put("tickerPic", picKey)
             .put("aodTitle", title)
             .put("param_island", island)
-            .put("picInfo", JSONObject().put("type", 1).put("pic", bigKey))
-            .put("baseInfo", base)
+            .put("iconTextInfo", base)
         if (timer != null) {
             val minutes = ((endAt - now) / 60000).coerceAtLeast(1) + 1
             v2.put("timeout", minutes)
@@ -208,17 +209,20 @@ object XiaomiIsland {
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = 0xFF2A2A2A.toInt()
+        paint.style = Paint.Style.FILL
+        c.drawCircle(size / 2f, size / 2f, size / 2f, paint)
         paint.color = Color.WHITE
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 9f
+        paint.strokeWidth = 8f
         paint.strokeCap = Paint.Cap.ROUND
-        c.drawLine(28f, 28f, 68f, 68f, paint)
-        c.drawLine(68f, 28f, 28f, 68f, paint)
+        c.drawLine(32f, 32f, 64f, 64f, paint)
+        c.drawLine(64f, 32f, 32f, 64f, paint)
         return Icon.createWithBitmap(bmp)
     }
 
     /**
-     * Значок таймера для острова: цветной круг и белые песочные часы (на жёлтом — тёмные, иначе не видно).
+     * Значок таймера для острова: цветной круг и белые песочные часы (на жёлтом тоже белые).
      * Цвет по этапу: фиолетовый #7F00FF (как значок сканера), жёлтый, красный.
      */
     private fun icon(stage: Int): Icon {
@@ -228,7 +232,7 @@ object XiaomiIsland {
             STAGE_YELLOW -> 0xFFFFC400.toInt()
             else -> 0xFF7F00FF.toInt()
         }
-        val fg = if (stage == STAGE_YELLOW) 0xFF2B2200.toInt() else Color.WHITE
+        val fg = Color.WHITE
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
