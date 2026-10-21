@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.0 (21.10) — как у оригинала: (1) анимация раскрытия/сворачивания идёт по кадрам Choreographer (не зависит от выключенных анимаций системы), а окно на время анимации равно рамке всего движения — раньше оно ресайзилось покадрово с задержкой, карточка обрезалась и «прыгала»; (2) карточка не гаснет по таймеру, а сворачивается нажатием в любое место мимо неё (FLAG_WATCH_OUTSIDE_TOUCH → ACTION_OUTSIDE; касание при этом работает как обычно); таймер 6 с остался только в запасном режиме без разрешения; (3) окно раскрытой карточки начинается с её верха, а не с верха экрана — строка состояния по бокам и над карточкой снова тянет шторку. Откат: InAppIsland.kt 4.1.
 // Версия: 4.1 (21.10) — раскрытая карточка стоит ниже, как у настоящего острова под строкой состояния: отступ сверху 0.108 ширины экрана (было 0.0148), высота 0.2147, ширина 0.9286 (замер по скриншоту: верх 126, высота 247, ширина 1074 при ширине 1159). Откат: InAppIsland.kt 4.0.
 // Версия: 4.0 (21.10) — плашка живёт в собственном окне поверх всех (TYPE_APPLICATION_OVERLAY, разрешение «Поверх других приложений»), размером ровно с плашку/карточку, поэтому нажатие по ней доходит (окно строки состояния перехватывало касания к окну приложения). Без разрешения — запасной вариант в decorView (виден, но не нажимается; автораскрытие при запуске таймера остаётся); при первом показе один раз предлагается выдать разрешение. Окно убирается в onPause. Откат: InAppIsland.kt 3.1.
 // Версия: 3.1 (21.10) — плашка раскрывается сама, когда таймер только что запущен (первые 3 с), как «всплытие» настоящего острова: нажатие на саму плашку до приложения не доходит, пока видна системная строка состояния (окно SystemUI сверху перехватывает касания). Раскрытая карточка ниже строки состояния — кнопки нажимаются. Откат: InAppIsland.kt 3.0.
@@ -10,7 +11,6 @@ package com.app.lifetracker
 // Версия: 1.1 (21.10) — размеры плашки считаются от ширины экрана (по замеру настоящего острова Poco X6 Pro: ширина 0.43, высота 0.086, отступ сверху 0.011 ширины экрана), а не от рамки выреза: система отдаёт рамку размером со всю строку состояния, плашка выходила огромной. Откат: InAppIsland.kt 1.0.
 // Версия: 1.0 (21.10) — плашка таймера внутри приложения, пока оно на экране: чёрная «таблетка» вокруг выреза камеры (как свёрнутый остров Xiaomi) со значком, названием слева и временем справа; нажатие раскрывает карточку с большим значком, временем и кнопкой «Стоп». Без выреза сверху (поворот, телефон без выреза) плашки нет.
 
-import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
@@ -31,6 +31,9 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.MotionEvent
+import android.view.Choreographer
+import android.os.SystemClock
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
@@ -70,7 +73,13 @@ class InAppIsland(private val activity: Activity) {
     private var cardR = 0f
     private var centerX = 0
     private var progress = 0f
-    private var anim: ValueAnimator? = null
+    private var animating = false
+    private var animStart = 0L
+    private var animFrom = 0f
+    private var animTo = 0f
+    private var animDur = 1L
+    private var animInterp: android.view.animation.Interpolator = AccelerateDecelerateInterpolator()
+    private var winY = 0
 
     private var cutout: Rect? = null
     private var attached = false
@@ -117,7 +126,11 @@ class InAppIsland(private val activity: Activity) {
         card.visibility = View.GONE
         card.background = cardBg
         card.isClickable = true // не пропускает нажатия на страницу под карточкой; нажатие мимо кнопок сворачивает
-        card.setOnClickListener { collapse() }
+        card.setOnClickListener { } // касание карточки (мимо кнопок) ничего не делает; сворачивает нажатие мимо неё
+        layer.setOnTouchListener { _, e ->
+            if (e.actionMasked == MotionEvent.ACTION_OUTSIDE && expanded) collapse()
+            false
+        }
         cardTime.apply {
             setTextColor(Color.WHITE)
             maxLines = 1
@@ -193,13 +206,17 @@ class InAppIsland(private val activity: Activity) {
         val want = if (canOverlay()) 2 else 1
         if (attached && mode == want) return
         detach()
+        mode = want // сначала режим: от него зависят отступы и размер окна
+        fixPillMargin()
+        applyProgress(progress)
         try {
             if (want == 2) {
                 val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
                 val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
                 val wl = WindowManager.LayoutParams(max(winW, 1), max(winH, 1), type, flags, PixelFormat.TRANSLUCENT)
                 wl.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                wl.y = winY
                 if (Build.VERSION.SDK_INT >= 28) wl.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                 winLp = wl
                 wm().addView(layer, wl)
@@ -208,10 +225,9 @@ class InAppIsland(private val activity: Activity) {
                     layer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 )
             }
-            mode = want
             attached = true
         } catch (e: Exception) {
-            // окно не готово или разрешение отозвано: попробуем при следующем обновлении
+            mode = 0 // окно не готово или разрешение отозвано: попробуем при следующем обновлении
         }
     }
 
@@ -229,9 +245,10 @@ class InAppIsland(private val activity: Activity) {
     private fun updateWindow() {
         val wl = winLp ?: return
         if (mode != 2 || !attached) return
-        if (wl.width == winW && wl.height == winH) return
+        if (wl.width == winW && wl.height == winH && wl.y == winY) return
         wl.width = winW
         wl.height = winH
+        wl.y = winY
         try {
             wm().updateViewLayout(layer, wl)
         } catch (e: Exception) {
@@ -261,8 +278,7 @@ class InAppIsland(private val activity: Activity) {
     }
 
     private fun hide() {
-        anim?.cancel()
-        anim = null
+        stopAnim()
         layer.visibility = View.GONE
         expanded = false
         progress = 0f
@@ -290,23 +306,43 @@ class InAppIsland(private val activity: Activity) {
         animateTo(0f, 280L, AccelerateDecelerateInterpolator())
     }
 
-    private fun animateTo(target: Float, duration: Long, interpolator: android.view.animation.Interpolator) {
-        anim?.cancel()
-        val a = ValueAnimator.ofFloat(progress, target)
-        a.duration = duration
-        a.interpolator = interpolator
-        a.addUpdateListener { applyProgress(it.animatedValue as Float) }
-        a.addListener(object : android.animation.AnimatorListenerAdapter() {
-            private var cancelled = false
-            override fun onAnimationCancel(animation: android.animation.Animator) { cancelled = true }
-            override fun onAnimationEnd(animation: android.animation.Animator) {
-                if (cancelled) return
-                applyProgress(target)
-                if (target == 0f) card.visibility = View.GONE
+    private val frame = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!animating) return
+            val t = ((SystemClock.uptimeMillis() - animStart) / animDur.toFloat()).coerceIn(0f, 1f)
+            applyProgress(animFrom + (animTo - animFrom) * animInterp.getInterpolation(t))
+            if (t < 1f) {
+                Choreographer.getInstance().postFrameCallback(this)
+            } else {
+                animating = false
+                applyProgress(animTo) // окно становится точно по карточке/плашке
+                if (animTo == 0f) card.visibility = View.GONE
             }
-        })
-        anim = a
-        a.start()
+        }
+    }
+
+    private fun stopAnim() {
+        animating = false
+        Choreographer.getInstance().removeFrameCallback(frame)
+    }
+
+    /** Анимация по кадрам экрана: не зависит от настройки «Убрать анимацию» в системе. */
+    private fun animateTo(target: Float, duration: Long, interpolator: android.view.animation.Interpolator) {
+        stopAnim()
+        animFrom = progress
+        animTo = target
+        animDur = duration
+        animInterp = interpolator
+        animStart = SystemClock.uptimeMillis()
+        animating = true
+        applyProgress(progress) // окно сразу на всю рамку движения
+        Choreographer.getInstance().postFrameCallback(frame)
+    }
+
+    private fun fixPillMargin() {
+        val lp = pill.layoutParams as? FrameLayout.LayoutParams ?: return
+        lp.topMargin = if (mode == 2) 0 else pillTop // в своём окне плашка стоит у верха окна
+        pill.layoutParams = lp
     }
 
     private fun lerp(a: Float, b: Float, p: Float) = a + (b - a) * p
@@ -323,10 +359,24 @@ class InAppIsland(private val activity: Activity) {
         lp.height = h
         lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
         lp.leftMargin = 0
-        lp.topMargin = top
+        if (mode == 2) {
+            if (animating) {
+                // на время движения окно — рамка всей анимации (с запасом на отскок), карточка двигается внутри
+                val bottom = (cardTop + cardH * 1.12f).roundToInt()
+                winW = (cardW * 1.12f).roundToInt()
+                winY = pillTop
+                winH = bottom - pillTop
+                lp.topMargin = top - pillTop
+            } else {
+                winW = w
+                winY = top
+                winH = h
+                lp.topMargin = 0
+            }
+        } else {
+            lp.topMargin = top
+        }
         card.layoutParams = lp
-        winW = w
-        winH = top + h
         updateWindow()
         cardBg.cornerRadius = lerp(pillH / 2f, cardR, p.coerceIn(0f, 1f))
         cardContent.alpha = ((p - 0.3f) / 0.7f).coerceIn(0f, 1f)
@@ -350,7 +400,7 @@ class InAppIsland(private val activity: Activity) {
         askOverlayOnce()
         currentId = info.id
         paused = !info.running
-        if (expanded && System.currentTimeMillis() - expandedAt > 6000L) collapse()
+        if (expanded && mode == 1 && System.currentTimeMillis() - expandedAt > 6000L) collapse() // без окна поверх всех «мимо» не поймать — по таймеру
         val stage = XiaomiIsland.stageFor(info.leftMs)
         if (stage != shownStage) {
             shownStage = stage
@@ -449,6 +499,7 @@ class InAppIsland(private val activity: Activity) {
         card.removeView(cardContent)
         card.addView(cardContent, FrameLayout.LayoutParams(cardW, cardH).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL })
         card.layoutParams = FrameLayout.LayoutParams(w, h)
+        fixPillMargin()
         applyProgress(progress)
     }
 }
