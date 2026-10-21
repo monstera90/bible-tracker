@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 3.0 (21.10) — плашка таймера в приложении: `inAppIsland` (InAppIsland.kt), вырез камеры берётся из WindowInsets, старт/стоп в onResume/onPause. Откат: MainActivity.kt 2.1.
 // Версия: 2.1 (21.10) — onResume гасит вибрацию конца таймера карточки (CardTimers.stopVibration).
 // Версия: 2.0 (21.10) — вкладка Claude: `webHost` (FrameLayout вокруг главного WebView) и `claudeTab` (ClaudeTab.kt), `handleFileChooser`/`openExternalLink` вынесены для второго WebView.
 // Версия: 1.0 (16.10) — вход ACTION_OPEN_CARD (ScanActivity → страница: window.__ltOpenCard / ?card=<id>).
@@ -127,6 +128,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var navStrip: View
     private lateinit var webView: WebView
     private lateinit var webHost: FrameLayout
+
+    /** Плашка таймера вокруг выреза камеры, пока приложение на экране (как остров Xiaomi, которого в приложении нет). */
+    private lateinit var inAppIsland: InAppIsland
 
     /** Вкладка Claude (set2s_10): второй WebView поверх области содержимого; управляется мостом (claude*). */
     lateinit var claudeTab: ClaudeTab
@@ -265,6 +269,7 @@ class MainActivity : ComponentActivity() {
         NotifyStore.appForeground = true
         // Открыл приложение (в том числе по уведомлению «Таймер закончился») — вибрация конца таймера карточки больше не нужна.
         CardTimers.stopVibration(applicationContext)
+        inAppIsland.start()
         // Подстраховка: будильники пропадают после «Остановить» в настройках, ставим заново из сохранённых данных.
         try {
             ReminderScheduler.scheduleNext(applicationContext)
@@ -282,6 +287,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         NotifyStore.appForeground = false
+        inAppIsland.stop()
         // Сворачивание: страница успевает сохранить автозакладку и позицию чтения, пока WebView ещё не на паузе
         // (visibilitychange в WebView в этот момент может не прийти).
         if (pageTrusted) {
@@ -586,6 +592,7 @@ class MainActivity : ComponentActivity() {
         webView = SelectionMenuWebView(this) // без системного меню выделения (копирование — своя кнопка страницы)
         webHost = FrameLayout(this).apply { addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
         claudeTab = ClaudeTab(this, webHost)
+        inAppIsland = InAppIsland(this)
 
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -599,6 +606,13 @@ class MainActivity : ComponentActivity() {
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
             root.setPadding(bars.left, 0, bars.right, 0)
+            // Вырез камеры сверху (если есть) — плашке таймера: она рисуется вокруг него
+            val cut = try {
+                insets.displayCutout?.boundingRects?.firstOrNull { it.top <= 0 && it.width() > 0 && it.height() > 0 }
+            } catch (e: Exception) {
+                null
+            }
+            inAppIsland.setCutout(cut?.let { android.graphics.Rect(it) })
             // В полноэкранном режиме верхняя полоса не нужна совсем: иначе под вырезом камеры остаётся
             // цветная полоса высотой с вырез (режим выреза shortEdges позволяет странице занять и его).
             setStripHeight(statusStrip, if (fullscreen) 0 else bars.top)

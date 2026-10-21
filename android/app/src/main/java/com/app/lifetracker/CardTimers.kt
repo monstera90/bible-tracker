@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.0 (21.10) — `primaryInfo` (данные главного таймера для плашки InAppIsland). Откат: CardTimers.kt 4.0.
 // Версия: 4.0 (21.10) — одно уведомление вместо двух: при работающей службе тика уведомление главного (самого раннего) таймера и есть уведомление службы (`FG_NOTIFICATION_ID`, `primaryId`, `foregroundNotification`, `buildRunning`); в раскрытый остров передаётся кнопка «Стоп» и крупное время. Откат: CardTimers.kt 3.0.
 // Версия: 3.0 (21.10) — тик острова: `tickIsland` (раз в секунду перепоставляет уведомления идущих таймеров) и `startTicker` (служба TimerTickService на Xiaomi): свёрнутый остров не тикал сам и показывал одну секунду. Откат: CardTimers.kt 2.0 (вместе с удалением TimerTickService.kt и записи <service>).
 // Версия: 2.0 (21.10) — этапы цвета значка острова (жёлтый за 2 минуты, красный за минуту: `scheduleStages`/`stage`, будильники этапов перепостят уведомление); вибрация в конце — 60 секунд (`donePattern`), гасится кнопкой «Стоп» в уведомлении, смахиванием, «Стоп» на карточке и открытием приложения (`silence`/`stopVibration`); в extras острова передаётся полная длительность. Откат: CardTimers.kt 1.1.
@@ -324,6 +325,18 @@ object CardTimers {
     private fun primaryId(ctx: Context): String? = synchronized(LOCK) {
         val now = System.currentTimeMillis()
         load(ctx).values.filter { it.running && it.endAt > now }.minByOrNull { it.endAt }?.id
+    }
+
+    class Info(val id: String, val title: String, val running: Boolean, val leftMs: Long)
+
+    /** Главный таймер для плашки в приложении: самый ранний из идущих, иначе первый приостановленный; null — таймеров нет. */
+    fun primaryInfo(ctx: Context): Info? = synchronized(LOCK) {
+        val now = System.currentTimeMillis()
+        val all = load(ctx).values
+        val run = all.filter { it.running && it.endAt > now }.minByOrNull { it.endAt }
+        if (run != null) return@synchronized Info(run.id, titleOf(run), true, run.endAt - now)
+        val p = all.firstOrNull { !it.running } ?: return@synchronized null
+        Info(p.id, titleOf(p), false, p.remainingMs)
     }
 
     /** Для службы тика: готовое уведомление главного таймера (или null, если идущих нет). */

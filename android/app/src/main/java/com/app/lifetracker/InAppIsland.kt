@@ -1,0 +1,231 @@
+package com.app.lifetracker
+// Версия: 1.0 (21.10) — плашка таймера внутри приложения, пока оно на экране: чёрная «таблетка» вокруг выреза камеры (как свёрнутый остров Xiaomi) со значком, названием слева и временем справа; нажатие раскрывает карточку с большим значком, временем и кнопкой «Стоп». Без выреза сверху (поворот, телефон без выреза) плашки нет.
+
+import android.app.Activity
+import android.graphics.Color
+import android.graphics.Rect
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.os.Handler
+import android.os.Looper
+import android.text.TextUtils
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.TextView
+import kotlin.math.max
+import kotlin.math.roundToInt
+
+class InAppIsland(private val activity: Activity) {
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val density = activity.resources.displayMetrics.density
+
+    private val layer = FrameLayout(activity)
+    private val pill = LinearLayout(activity)
+    private val pillIcon = ImageView(activity)
+    private val pillName = TextView(activity)
+    private val pillTime = TextView(activity)
+    private val card = LinearLayout(activity)
+    private val cardIcon = ImageView(activity)
+    private val cardTime = TextView(activity)
+    private val cardName = TextView(activity)
+    private val stopBtn = ImageView(activity)
+
+    private var cutout: Rect? = null
+    private var attached = false
+    private var started = false
+    private var expanded = false
+    private var expandedAt = 0L
+    private var currentId: String? = null
+    private var shownStage = -1
+    private var builtFor: Rect? = null
+
+    private fun dp(v: Float) = (v * density).roundToInt()
+
+    init {
+        layer.visibility = View.GONE
+        pill.orientation = LinearLayout.HORIZONTAL
+        pill.gravity = Gravity.CENTER_VERTICAL
+        pill.setOnClickListener { toggle() }
+        pillName.apply {
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        pillTime.apply {
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            typeface = Typeface.DEFAULT_BOLD
+            maxLines = 1
+        }
+
+        card.orientation = LinearLayout.HORIZONTAL
+        card.gravity = Gravity.CENTER_VERTICAL
+        card.visibility = View.GONE
+        card.isClickable = true // не пропускает нажатия на страницу под карточкой
+        card.background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = dp(34f).toFloat() }
+        card.setPadding(dp(18f), dp(16f), dp(14f), dp(16f))
+        cardTime.apply {
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 30f)
+            maxLines = 1
+        }
+        cardName.apply {
+            setTextColor(0xFF8A8A8A.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        val texts = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(cardTime)
+            addView(cardName)
+        }
+        stopBtn.apply {
+            setImageBitmap(XiaomiIsland.crossBitmap())
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xFF2A2A2A.toInt()) }
+            setPadding(dp(8f), dp(8f), dp(8f), dp(8f))
+            setOnClickListener {
+                val id = currentId
+                if (id != null) CardTimers.cancel(activity.applicationContext, id)
+                collapse()
+                refresh()
+            }
+        }
+        card.addView(cardIcon, LinearLayout.LayoutParams(dp(56f), dp(56f)))
+        card.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(14f) })
+        card.addView(stopBtn, LinearLayout.LayoutParams(dp(52f), dp(52f)))
+        layer.addView(pill)
+        layer.addView(card)
+    }
+
+    /** Рамка выреза камеры (координаты окна) из WindowInsets; null — выреза сверху нет. */
+    fun setCutout(rect: Rect?) {
+        cutout = rect
+        if (rect == null) hide()
+    }
+
+    fun start() {
+        if (started) return
+        started = true
+        attach()
+        handler.post(tick)
+    }
+
+    fun stop() {
+        started = false
+        handler.removeCallbacks(tick)
+        hide()
+    }
+
+    private val tick = object : Runnable {
+        override fun run() {
+            if (!started) return
+            try {
+                refresh()
+            } catch (e: Exception) {
+                hide() // плашка — украшение: любая ошибка не должна мешать приложению
+            }
+            handler.postDelayed(this, 500L)
+        }
+    }
+
+    private fun attach() {
+        if (attached) return
+        try {
+            (activity.window.decorView as ViewGroup).addView(
+                layer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            )
+            attached = true
+        } catch (e: Exception) {
+            // окно не готово: попробуем при следующем запуске
+        }
+    }
+
+    private fun hide() {
+        layer.visibility = View.GONE
+        expanded = false
+        card.visibility = View.GONE
+    }
+
+    private fun toggle() {
+        expanded = !expanded
+        expandedAt = System.currentTimeMillis()
+        card.visibility = if (expanded) View.VISIBLE else View.GONE
+        refresh()
+    }
+
+    private fun collapse() {
+        expanded = false
+        card.visibility = View.GONE
+    }
+
+    private fun refresh() {
+        val r = cutout
+        val info = CardTimers.primaryInfo(activity.applicationContext)
+        if (r == null || info == null || !attached) {
+            hide()
+            return
+        }
+        currentId = info.id
+        if (expanded && System.currentTimeMillis() - expandedAt > 6000L) collapse()
+        layoutFor(r)
+        val stage = XiaomiIsland.stageFor(info.leftMs)
+        if (stage != shownStage) {
+            shownStage = stage
+            pillIcon.setImageBitmap(XiaomiIsland.iconBitmap(stage, 96))
+            cardIcon.setImageBitmap(XiaomiIsland.iconBitmap(stage, 192))
+        }
+        val clock = XiaomiIsland.clockText(info.leftMs)
+        pillName.text = info.title
+        pillTime.text = clock
+        cardTime.text = clock
+        cardName.text = if (info.running) info.title else info.title + " · пауза"
+        layer.visibility = View.VISIBLE
+    }
+
+    /** Размеры и места плашки и карточки считаются от выреза; пересчёт — только когда вырез поменялся. */
+    private fun layoutFor(r: Rect) {
+        if (builtFor == r) return
+        builtFor = Rect(r)
+        val screenW = activity.resources.displayMetrics.widthPixels
+        val h = max((r.height() * 1.9f).roundToInt(), dp(34f))
+        val gapW = r.width() + dp(10f)
+        val w = max(gapW + 2 * dp(104f), (screenW * 0.42f).roundToInt())
+        val top = max(dp(2f), r.centerY() - h / 2)
+        val left = r.centerX() - w / 2
+
+        // дети переезжают в новые контейнеры: сначала отцепляем от старых (иначе addView бросает исключение)
+        for (v in listOf<View>(pillIcon, pillName, pillTime)) (v.parent as? ViewGroup)?.removeView(v)
+        pill.removeAllViews()
+        pill.background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = h / 2f }
+        pill.setPadding(h / 4, 0, h / 4, 0)
+        val iconSize = (h * 0.62f).roundToInt()
+        val leftBox = LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            addView(pillIcon, LinearLayout.LayoutParams(iconSize, iconSize))
+            addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(6f) })
+        }
+        val rightBox = LinearLayout(activity).apply {
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            addView(pillTime)
+        }
+        pill.addView(leftBox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        pill.addView(View(activity), LinearLayout.LayoutParams(gapW, 1))
+        pill.addView(rightBox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        pill.layoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.START; leftMargin = left; topMargin = top }
+
+        card.layoutParams = FrameLayout.LayoutParams(screenW - 2 * dp(12f), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.TOP or Gravity.START
+            leftMargin = dp(12f)
+            topMargin = top + h + dp(8f)
+        }
+    }
+}

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.0 (21.10) — `iconBitmap` и `crossBitmap` вынесены (значок и крестик нужны плашке InAppIsland); `icon`/`crossIcon` — обёртки. Откат: XiaomiIsland.kt 3.2.
 // Версия: 3.2 (21.10) — эмблема раскрытого острова та же, что в свёрнутом: цветной круг (фиолетовый/жёлтый/красный) и белые песочные часы, только крупнее (`icon(stage, 192)`); отдельный рисунок `bigIcon` удалён. Откат: XiaomiIsland.kt 3.1.
 // Версия: 3.1 (21.10) — раскрытый вид через `iconTextInfo` с `animIconInfo` (значок слева, `baseInfo` и корневой `picInfo` убраны: значок в них не показывался); песочные часы на жёлтом круге — белые; кнопка «Стоп» — тёмный круг с белым крестиком. Откат: XiaomiIsland.kt 3.0 (без значка, но с временем и «Стоп»).
 // Версия: 3.0 (21.10) — раскрытый остров как у часов: крупное время в заголовке (`clockText`, обновляется тиком), большой значок песочных часов без круга (`bigIcon`, цвет по этапу), кнопка «Стоп» (`miui.focus.actions`); `hintInfo` убран. Откат: XiaomiIsland.kt 2.1.
@@ -178,7 +179,9 @@ object XiaomiIsland {
     private fun bigIcon(stage: Int): Icon = icon(stage, 192)
 
     /** Значок кнопки «Стоп»: белый крестик. */
-    private fun crossIcon(): Icon {
+    private fun crossIcon(): Icon = Icon.createWithBitmap(crossBitmap())
+
+    fun crossBitmap(): Bitmap {
         val size = 96
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
@@ -192,14 +195,14 @@ object XiaomiIsland {
         paint.strokeCap = Paint.Cap.ROUND
         c.drawLine(32f, 32f, 64f, 64f, paint)
         c.drawLine(64f, 32f, 32f, 64f, paint)
-        return Icon.createWithBitmap(bmp)
+        return bmp
     }
 
     /**
      * Значок таймера для острова: цветной круг и белые песочные часы (на жёлтом тоже белые).
      * Цвет по этапу: фиолетовый #7F00FF (как значок сканера), жёлтый, красный.
      */
-    private fun icon(stage: Int, size: Int = 96): Icon {
+    fun iconBitmap(stage: Int, size: Int = 96): Bitmap {
         val bg = when (stage) {
             STAGE_RED -> 0xFFE53935.toInt()
             STAGE_YELLOW -> 0xFFFFC400.toInt()
@@ -235,6 +238,8 @@ object XiaomiIsland {
         c.drawLine(48f, 44f, 48f, 58f, paint)
         paint.style = Paint.Style.FILL
         c.drawPath(Path().apply { moveTo(38f, 66f); lineTo(58f, 66f); lineTo(48f, 55f); close() }, paint)
-        return Icon.createWithBitmap(bmp)
+        return bmp
     }
+
+    private fun icon(stage: Int, size: Int = 96): Icon = Icon.createWithBitmap(iconBitmap(stage, size))
 }
