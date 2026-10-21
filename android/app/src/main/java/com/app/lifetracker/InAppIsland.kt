@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (21.10) — размеры плашки считаются от ширины экрана (по замеру настоящего острова Poco X6 Pro: ширина 0.43, высота 0.086, отступ сверху 0.011 ширины экрана), а не от рамки выреза: система отдаёт рамку размером со всю строку состояния, плашка выходила огромной. Откат: InAppIsland.kt 1.0.
 // Версия: 1.0 (21.10) — плашка таймера внутри приложения, пока оно на экране: чёрная «таблетка» вокруг выреза камеры (как свёрнутый остров Xiaomi) со значком, названием слева и временем справа; нажатие раскрывает карточку с большим значком, временем и кнопкой «Стоп». Без выреза сверху (поворот, телефон без выреза) плашки нет.
 
 import android.app.Activity
@@ -54,7 +55,7 @@ class InAppIsland(private val activity: Activity) {
         pill.setOnClickListener { toggle() }
         pillName.apply {
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
@@ -195,23 +196,25 @@ class InAppIsland(private val activity: Activity) {
         if (builtFor == r) return
         builtFor = Rect(r)
         val screenW = activity.resources.displayMetrics.widthPixels
-        val h = max((r.height() * 1.9f).roundToInt(), dp(34f))
-        val gapW = r.width() + dp(10f)
-        val w = max(gapW + 2 * dp(104f), (screenW * 0.42f).roundToInt())
-        val top = max(dp(2f), r.centerY() - h / 2)
+        // Рамка выреза у Xiaomi — размером со всю строку состояния, по ней плашка выходит огромной. Размеры берём
+        // от ширины экрана, как у настоящего острова (замер на Poco X6 Pro: 500 × 105 px при ширине 1220, отступ сверху 13 px).
+        val h = (screenW * 0.086f).roundToInt()
+        val w = (screenW * 0.43f).roundToInt()
+        val gapW = (screenW * 0.075f).roundToInt()
+        val top = max(dp(2f), (screenW * 0.0107f).roundToInt())
         val left = r.centerX() - w / 2
 
         // дети переезжают в новые контейнеры: сначала отцепляем от старых (иначе addView бросает исключение)
         for (v in listOf<View>(pillIcon, pillName, pillTime)) (v.parent as? ViewGroup)?.removeView(v)
         pill.removeAllViews()
         pill.background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = h / 2f }
-        pill.setPadding(h / 4, 0, h / 4, 0)
+        pill.setPadding(h / 5, 0, h / 5, 0)
         val iconSize = (h * 0.62f).roundToInt()
         val leftBox = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             addView(pillIcon, LinearLayout.LayoutParams(iconSize, iconSize))
-            addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(6f) })
+            addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(5f) })
         }
         val rightBox = LinearLayout(activity).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
