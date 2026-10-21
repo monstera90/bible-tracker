@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.0 (21.10) — вкладка Claude: `webHost` (FrameLayout вокруг главного WebView) и `claudeTab` (ClaudeTab.kt), `handleFileChooser`/`openExternalLink` вынесены для второго WebView.
 // Версия: 1.0 (16.10) — вход ACTION_OPEN_CARD (ScanActivity → страница: window.__ltOpenCard / ?card=<id>).
 
 import android.Manifest
@@ -28,6 +29,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -123,6 +125,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var statusStrip: View
     private lateinit var navStrip: View
     private lateinit var webView: WebView
+    private lateinit var webHost: FrameLayout
+
+    /** Вкладка Claude (set2s_10): второй WebView поверх области содержимого; управляется мостом (claude*). */
+    lateinit var claudeTab: ClaudeTab
+        private set
 
     /** true, пока загружена страница приложения (https://localhost); мост отвечает только в этом случае. */
     @Volatile
@@ -195,7 +202,9 @@ class MainActivity : ComponentActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (webView.canGoBack()) {
+                if (claudeTab.isVisible && claudeTab.canGoBack()) {
+                    claudeTab.goBack()
+                } else if (webView.canGoBack()) {
                     webView.goBack()
                 } else {
                     moveTaskToBack(true)
@@ -215,6 +224,7 @@ class MainActivity : ComponentActivity() {
         )
         webUpdater.checkInBackground()
         warnIfWebViewTooOld()
+        claudeTab.startIfEnabled()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -275,6 +285,7 @@ class MainActivity : ComponentActivity() {
             webView.evaluateJavascript("window.__ltOnAppPause && window.__ltOnAppPause()", null)
         }
         webView.onPause()
+        claudeTab.pause()
         super.onPause()
     }
 
@@ -284,6 +295,7 @@ class MainActivity : ComponentActivity() {
         handler.removeCallbacks(trialWatchdog)
         handler.removeCallbacks(keyboardPush)
         fileSaver.cancelAll()
+        claudeTab.destroy()
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.destroy()
         super.onDestroy()
@@ -569,12 +581,14 @@ class MainActivity : ComponentActivity() {
         statusStrip = View(this).apply { setBackgroundColor(DEFAULT_STATUS_COLOR) }
         navStrip = View(this).apply { setBackgroundColor(PAGE_BG_COLOR) }
         webView = SelectionMenuWebView(this) // без системного меню выделения (копирование — своя кнопка страницы)
+        webHost = FrameLayout(this).apply { addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
+        claudeTab = ClaudeTab(this, webHost)
 
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(PAGE_BG_COLOR)
             addView(statusStrip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0))
-            addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(webHost, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             addView(navStrip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0))
         }
 
@@ -673,19 +687,7 @@ class MainActivity : ComponentActivity() {
                 view: WebView?,
                 callback: ValueCallback<Array<Uri>>?,
                 params: FileChooserParams?
-            ): Boolean {
-                if (callback == null || params == null) return false
-                fileCallback?.onReceiveValue(null)
-                fileCallback = callback
-                return try {
-                    fileChooserLauncher.launch(buildFileChooserIntent(params))
-                    true
-                } catch (e: ActivityNotFoundException) {
-                    fileCallback = null
-                    callback.onReceiveValue(null)
-                    false
-                }
-            }
+            ): Boolean = handleFileChooser(callback, params)
 
             override fun onPermissionRequest(request: PermissionRequest?) {
                 if (request == null) return
@@ -711,6 +713,24 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    /** Выбор файла для <input type="file"> — общий для главного WebView и вкладки Claude. */
+    fun handleFileChooser(callback: ValueCallback<Array<Uri>>?, params: WebChromeClient.FileChooserParams?): Boolean {
+        if (callback == null || params == null) return false
+        fileCallback?.onReceiveValue(null)
+        fileCallback = callback
+        return try {
+            fileChooserLauncher.launch(buildFileChooserIntent(params))
+            true
+        } catch (e: ActivityNotFoundException) {
+            fileCallback = null
+            callback.onReceiveValue(null)
+            false
+        }
+    }
+
+    /** Открыть ссылку во внешнем приложении (для вкладки Claude: чужие адреса не грузятся в её WebView). */
+    fun openExternalLink(uri: Uri) = openExternal(uri)
 
     /** true: переход перехвачен (внешняя ссылка ушла в другое приложение); false: страницу приложения грузит сам WebView. */
     private fun handleUrlLoading(uri: Uri?): Boolean {

@@ -167,6 +167,7 @@ const ASSETS = [
   "./cardscan.js",
   "./cardpdf.js",
   "./itemcards.js",
+  "./claudetab.js",
   "./mdeditor.js",
   "./codemirror.bundle.js",
   "./search.js",

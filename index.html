@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 6.0 (21.10) — структурная правка: кнопка вкладки set2s_10 «Claude» (`settingsTabSet2Btn10`, над «Карточками предметов») и подключён `claudetab.js`.
      Версия: 5.3 (17.10) — подключён `cardpdf.js` (PDF с QR-кодами карточек).
      Версия: 5.2 (16.10) — структурная правка: подключён `cardscan.js` (сканер карточек, перед `itemcards.js`).
      Версия: 5.1 (16.10) — вкладка set2s_9 «Карточки предметов»: значок-миниатюра QR, подключён `itemcards.js` (после `imgresize.js`).
@@ -743,6 +744,15 @@ window.addEventListener("error", function(e){
           <path d="M14.5 14.5h2.5M20.5 14.5h.01M14.5 17.5v3M17.5 17.5h3M18 20.5h2.5"></path>
         </svg>
       </button>
+      <!-- Десятая боковая вкладка второго набора (settingsTabSet2Btn10, "set2s_10"; в стеке самая верхняя, над
+           «Карточками предметов») — «Claude»: нативный WebView с claude.ai и автоотправка «Дальше» после
+           снятия лимита. См. claudetab.js и ClaudeTab.kt. -->
+      <button class="settings-tab" id="settingsTabSet2Btn10" title="Claude">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 5.5h16a1 1 0 0 1 1 1V16a1 1 0 0 1-1 1h-8l-4.5 3.5V17H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1z"></path>
+          <path d="M12 8v5M9.5 9.5l5 2M14.5 9.5l-5 2"></path>
+        </svg>
+      </button>
     </div>
     <div class="settings-tabs-gear" id="settingsTabsGearSet2" style="display:none;">
       <button class="settings-tab settings-tab-gear" id="settingsTabSet2GearBtn1" title="Извлечение информации из графиков">
@@ -840,6 +850,7 @@ window.addEventListener("error", function(e){
 <script src="cardscan.js"></script>
 <script src="cardpdf.js"></script>
 <script src="itemcards.js"></script>
+<script src="claudetab.js"></script>
 <script src="mdeditor.js"></script>
 <script src="search.js"></script>
 <!-- flibusta.js — READER_PLAN.md, Этап E, шаг 17: подключение к OPDS-

@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 74.0 (21.10) — структурная правка: вкладка set2s_10 «Claude» (модуль claudetab.js, ветка в switchSettingsTab до заглушки; `ClaudeTabMod.onSwitch` при смене вкладки и `ClaudeTabMod.hide` при закрытии окна настроек, чтобы убрать нативный WebView).
    Версия: 73.2 (20.10) — деп `openNotesTab` у `initItemCardsModule` (переключает на «Мои заметки»: скан карточки «Заметка с датой» создаёт обычную заметку блокнота).
    Версия: 73.1 (18.10) — вкладка «Дополнительные возможности»: кнопка «Создать ярлык сканера QR-кодов» (+ подсказка и «Открыть разрешения приложения»), `hasScanShortcutBridge`. Откат: my.js 73.0.
    Версия: 73.0 (17.10) — структурная правка: напоминания карточек вкладки 9 — `ensureItemCards` (модуль создаётся и до захода на вкладку), `getRemindableTasks` добавляет `ItemCardsMod.getRemindableCards()`, `openCardFromReminder` (деп notifications.js), деп `reminderBtnParts/openReminderDialog/rescheduleReminders/formatReminder` у `initItemCardsModule`. Откат: my.js 72.2.
@@ -2039,7 +2040,8 @@
   var SET2_TAB_IDS = {
     set2s_1: "settingsTabSet2Btn1", set2s_2: "settingsTabSet2Btn2", set2s_3: "settingsTabSet2Btn3",
     set2s_4: "settingsTabSet2Btn4", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
-    set2s_7: "settingsTabSet2Btn7", set2s_8: "settingsTabSet2Btn8", set2s_9: "settingsTabSet2Btn9"
+    set2s_7: "settingsTabSet2Btn7", set2s_8: "settingsTabSet2Btn8", set2s_9: "settingsTabSet2Btn9",
+    set2s_10: "settingsTabSet2Btn10"
   };
   var SET2_EXTRA_TAB_IDS = {
     set2b_1: "settingsTabSet2GearBtn1", set2b_2: "settingsTabSet2GearBtn2", set2b_3: "settingsTabSet2GearBtn3",
@@ -10160,6 +10162,7 @@
     updateSettingsCornerPatchHeight();
   }
   function closeSettingsModal(){
+    try{ if(window.ClaudeTabMod) window.ClaudeTabMod.hide(); }catch(e){}
     closeAppConfirmBar();
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
@@ -10346,6 +10349,7 @@
     // пользователя от 21.09). То же для подсветки "mood"/"red" (ТЗ пользователя от 26.09, см.
     // раздел "ПОДСВЕТКА ВКЛАДОК «MOOD»/«RED»" ниже) — обновляем на каждое переключение, а не только
     // изнутри их собственного рендера.
+    try{ if(window.ClaudeTabMod) window.ClaudeTabMod.onSwitch(tab); }catch(e){} // уход с «Claude»: нативный WebView убирается
     updateIpkdTabIcon();
     updateMoodTabIcon();
     updateRedTabIcon();
@@ -10536,6 +10540,8 @@
     // девятая боковая вкладка второго набора (set2s_9) — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: «Карточки предметов»
     // (itemcards.js, ТЗ TASK_ITEM_CARDS_QR.md); вынесена ДО общей проверки на заглушку.
     else if(tab === "set2s_9") renderSettingsTabItemCards();
+    // десятая боковая вкладка второго набора (set2s_10) — «Claude» (claudetab.js): нативный WebView с claude.ai
+    else if(tab === "set2s_10") renderSettingsTabClaude();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
 
@@ -10642,6 +10648,10 @@
     var mode = /[?&]cardmode=create(?:&|$)/.test(location.search) ? "create" : "note";
     try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
     setTimeout(function(){ openCardFromNative(m[1], mode); }, 0);
+  }
+  function renderSettingsTabClaude(){
+    if(window.ClaudeTabMod) window.ClaudeTabMod.render();
+    else renderSettingsTabSet2Stub();
   }
   function renderSettingsTabSet2Stub(){
     var container = document.getElementById("settingsTabContent");
@@ -16904,7 +16914,7 @@
   //   вручную, а не через Object.keys(EXTRA_TAB_IDS), в котором только 2 из 5) идёт слева направо.
   var SETTINGS_SIDE_ORDER_1 = Object.keys(TASK_TAB_IDS);              // red..archive
   var SETTINGS_BOTTOM_ORDER_1 = ["gear","year","mood"].concat(Object.keys(EXTRA_TAB_IDS)); // gear,year,mood,extra2,extra3
-  var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_9
+  var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_10
   var SETTINGS_BOTTOM_ORDER_2 = ["gear"].concat(Object.keys(SET2_EXTRA_TAB_IDS));
   // последняя реально выбранная вкладка одного из двух стеков (см. switchSettingsTab выше) —
   // используется, чтобы при переключении набора (cycleSettingsTabSet) открывалась не первая

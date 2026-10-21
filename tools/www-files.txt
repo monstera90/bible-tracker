@@ -43,6 +43,7 @@ imgresize.js
 cardscan.js
 cardpdf.js
 itemcards.js
+claudetab.js
 scan.html
 mdeditor.js
 codemirror.bundle.js

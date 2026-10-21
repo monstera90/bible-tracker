@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.0 (21.10) — мост версии 9: вкладка Claude (claudeShow/claudeHide/claudeReload/claudeSetAuto/claudeGetState/claudeArm/claudeDisarm/claudeSendNow).
 // Версия: 1.1 (18.10) — мост версии 8: createScanShortcut / openShortcutPermissionSettings.
 // Версия: 1.0 (17.10) — мост версии 7: методы таймеров карточек (startCardTimer и др.).
 
@@ -25,8 +26,9 @@ class NativeBridge(private val activity: MainActivity) {
          *    складывает задачи в очередь, страница забирает их в Inbox.
          * 7: таймеры карточек вкладки 9 (startCardTimer / pauseCardTimer / resumeCardTimer / cancelCardTimer / getCardTimers).
          * 8: ярлык сканера QR на рабочий стол (createScanShortcut / openShortcutPermissionSettings).
+         * 9: вкладка Claude (claudeShow / claudeHide / claudeReload / claudeSetAuto / claudeGetState / claudeArm / claudeDisarm / claudeSendNow).
          */
-        const val BRIDGE_VERSION = 8
+        const val BRIDGE_VERSION = 9
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -460,6 +462,63 @@ class NativeBridge(private val activity: MainActivity) {
     fun openShortcutPermissionSettings(): Boolean {
         if (!activity.pageTrusted) return false
         return ScanShortcut.openPermissionSettings(activity)
+    }
+
+    // ---------- вкладка Claude (ClaudeTab; set2s_10) ----------
+
+    /** Показывает WebView claude.ai в прямоугольнике (CSS-пиксели страницы приложения). */
+    @JavascriptInterface
+    fun claudeShow(x: Double, y: Double, w: Double, h: Double): Boolean {
+        if (!activity.pageTrusted) return false
+        activity.runOnUiThread { activity.claudeTab.show(x, y, w, h) }
+        return true
+    }
+
+    /** Прячет WebView claude.ai (страница в нём продолжает жить — автоотправка работает). */
+    @JavascriptInterface
+    fun claudeHide() {
+        if (!activity.pageTrusted) return
+        activity.runOnUiThread { activity.claudeTab.hide() }
+    }
+
+    @JavascriptInterface
+    fun claudeReload() {
+        if (!activity.pageTrusted) return
+        activity.runOnUiThread { activity.claudeTab.reload() }
+    }
+
+    /** Автоотправка: включена ли и какой текст слать после снятия лимита. */
+    @JavascriptInterface
+    fun claudeSetAuto(enabled: Boolean, text: String?) {
+        if (!activity.pageTrusted) return
+        activity.runOnUiThread { activity.claudeTab.setAuto(enabled, text) }
+    }
+
+    /** JSON: {"created":bool,"auto":bool,"text":"...","status":{...}} — статус читается из страницы раз в несколько секунд. */
+    @JavascriptInterface
+    fun claudeGetState(): String {
+        if (!activity.pageTrusted) return "{}"
+        return try { activity.claudeTab.stateJson() } catch (e: Exception) { "{}" }
+    }
+
+    /** Ручной таймер: отправить через N минут (запасной путь, если плашку лимита не удалось распознать). */
+    @JavascriptInterface
+    fun claudeArm(minutes: Int) {
+        if (!activity.pageTrusted) return
+        activity.runOnUiThread { activity.claudeTab.armTimer(minutes) }
+    }
+
+    @JavascriptInterface
+    fun claudeDisarm() {
+        if (!activity.pageTrusted) return
+        activity.runOnUiThread { activity.claudeTab.disarm() }
+    }
+
+    /** Проверка: отправить текст в чат прямо сейчас. */
+    @JavascriptInterface
+    fun claudeSendNow() {
+        if (!activity.pageTrusted) return
+        activity.runOnUiThread { activity.claudeTab.sendNow() }
     }
 
     /** Цвет статус-бара: "#rrggbb", "#rgb" или "rgb(r, g, b)". Значок светлый/тёмный выбирается по яркости цвета. */
