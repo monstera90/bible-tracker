@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 8.5 (22.10) — по замеру четырёх скриншотов (ширина 1159): название на плашке было мельче настоящего на ~14 % → 0.0350 × ширина экрана; время на плашке ниже на ~10 % и уже на ~19 % → 13.2sp, letterSpacing 0.13, tnum; время в карточке было выше на 7 % и уже на 12 % (вытянутые цифры) → размер 0.0450, letterSpacing 0.06, tnum. Откат: InAppIsland.kt 8.4.
 // Версия: 8.4 (22.10) — время в раскрытой карточке: по скриншотам оно вышло жирнее и крупнее настоящего — обводка 0.0026 → 0.0012 × ширина экрана, размер 0.0508 → 0.0483. Откат: InAppIsland.kt 8.3.
 // Версия: 8.3 (22.10) — название таймера как у настоящего острова (по записи экрана): на плашке крупнее на ~5 % (0.0307 × ширина экрана вместо 13sp), на 2,5 px правее и на ~3 px выше, время на ~6 px левее; в карточке название крупнее на ~8 % и выше на ~4 px, время выше на ~2 px. Откат: InAppIsland.kt 8.2.
 // Версия: 8.2 (22.10) — время в раскрытой карточке жирнее, как у настоящего острова Xiaomi: `cardTime` — `StrokeText` (обводка `strokePx = screenW × 0.0026`); размер прежний 0.0508 × ширина экрана (шрифт настоящего острова задаёт система, увеличить его из приложения нельзя). Откат: InAppIsland.kt 8.0.
@@ -123,16 +124,17 @@ class InAppIsland(private val activity: Activity) {
         layer.setOnTouchListener { _, e -> onLayerTouch(e) }
         pillName.apply {
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, activity.resources.displayMetrics.widthPixels * 0.0307f) // как у настоящего острова (было 13sp)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, activity.resources.displayMetrics.widthPixels * 0.0350f) // по замеру скриншотов: настоящее название крупнее на ~14 % (0.0307 вышло мельче)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
         pillTime.apply {
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.2f) // по замеру настоящее время выше на ~10 % (было 12sp)
             typeface = Typeface.DEFAULT
-            letterSpacing = 0.08f
+            letterSpacing = 0.13f // и шире на ~19 %: цифры настоящего острова разрежены
+            fontFeatureSettings = "tnum" // цифры одной ширины, как у острова
             maxLines = 1
         }
 
@@ -531,7 +533,9 @@ class InAppIsland(private val activity: Activity) {
         winH = (cardTop + cardH * 1.12f).roundToInt() - pillTop
         for (v in listOf<View>(cardIcon, cardTime, cardName, pauseBtn, stopBtn)) (v.parent as? ViewGroup)?.removeView(v)
         cardContent.removeAllViews()
-        cardTime.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0483f) // размер по скриншотам настоящего острова (был 0.0508 — крупнее)
+        cardTime.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0450f) // высота цифр как у настоящего (замер: 40 px при 1159; было 0.0483 — выше на 7 %)
+        cardTime.letterSpacing = 0.06f // цифры у настоящего шире (125 px против 112 у копии)
+        cardTime.fontFeatureSettings = "tnum"
         cardTime.strokePx = screenW * 0.0012f // чуть плотнее обычного, как время настоящего острова (0.0026 вышло слишком жирно)
         cardName.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0354f) // как у настоящего острова (было 0.0328)
         cardTime.translationY = -screenW * 0.0017f
