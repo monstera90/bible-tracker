@@ -1,8 +1,7 @@
 package com.app.lifetracker
-// Версия: 1.0 (21.10) — служба переднего плана «тик» острова: пока идёт хотя бы один таймер карточки на Xiaomi, раз в секунду перепоставляет его уведомление со свежим временем (система сама не тикает отсчёт в свёрнутом острове). Останавливается сама, когда идущих таймеров нет. Откат: удалить файл, запись <service> в манифесте и вызовы CardTimers.startTicker.
+// Версия: 2.0 (21.10) — своего уведомления у службы больше нет: переднего плана она держится на уведомлении главного таймера (`CardTimers.foregroundNotification`), поэтому в шторке одно уведомление со значком приложения. Флаг `active`. Откат: TimerTickService.kt 1.0.
+// Версия: 1.0 (21.10) — служба переднего плана «тик» острова: пока идёт хотя бы один таймер карточки на Xiaomi, раз в секунду перепоставляет его уведомление со свежим временем (система сама не тикает отсчёт в свёрнутом острове). Останавливается сама, когда идущих таймеров нет.
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -17,8 +16,11 @@ import androidx.core.app.ServiceCompat
 class TimerTickService : Service() {
 
     companion object {
-        private const val CHANNEL = "card_timer_tick"
-        private const val FG_ID = 3
+        private const val FG_ID = CardTimers.FG_NOTIFICATION_ID
+
+        /** Служба уже держит уведомление главного таймера (CardTimers пишет его в FG_NOTIFICATION_ID). */
+        @Volatile
+        var active = false
 
         /** Запустить (или не мешать уже запущенной) службе тика. Любая ошибка не мешает таймеру. */
         fun ensure(ctx: Context) {
@@ -47,7 +49,8 @@ class TimerTickService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!enterForeground()) {
+        val hasTimer = enterForeground()
+        if (!hasTimer) {
             stopSelf()
             return START_NOT_STICKY
         }
@@ -57,35 +60,34 @@ class TimerTickService : Service() {
     }
 
     override fun onDestroy() {
+        active = false
         handler.removeCallbacks(tick)
         super.onDestroy()
     }
 
-    private fun enterForeground(): Boolean = try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (nm.getNotificationChannel(CHANNEL) == null) {
-                val ch = NotificationChannel(CHANNEL, "Обновление острова таймера", NotificationManager.IMPORTANCE_MIN)
-                ch.setShowBadge(false)
-                nm.createNotificationChannel(ch)
+    /** true — служба встала на уведомление идущего таймера; false — таймеров нет (служба тут же остановится). */
+    private fun enterForeground(): Boolean {
+        return try {
+            val real = CardTimers.foregroundNotification(applicationContext)
+            val has = real != null
+            val n = real ?: run {
+                // startForeground обязателен после startForegroundService, даже если таймер уже закончился
+                CardTimers.ensureChannels(applicationContext)
+                NotificationCompat.Builder(this, CardTimers.CHANNEL_RUN)
+                    .setSmallIcon(R.drawable.ic_stat_notify)
+                    .setContentTitle("Таймер")
+                    .setPriority(NotificationCompat.PRIORITY_MIN)
+                    .build()
             }
+            if (Build.VERSION.SDK_INT >= 34) {
+                ServiceCompat.startForeground(this, FG_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(FG_ID, n)
+            }
+            active = has
+            has
+        } catch (e: Exception) {
+            false
         }
-        val n = NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_notify)
-            .setContentTitle("Таймер идёт")
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setShowWhen(false)
-            .build()
-        if (Build.VERSION.SDK_INT >= 34) {
-            ServiceCompat.startForeground(this, FG_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(FG_ID, n)
-        }
-        true
-    } catch (e: Exception) {
-        false
     }
 }

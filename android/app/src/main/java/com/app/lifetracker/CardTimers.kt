@@ -1,10 +1,12 @@
 package com.app.lifetracker
+// Версия: 4.0 (21.10) — одно уведомление вместо двух: при работающей службе тика уведомление главного (самого раннего) таймера и есть уведомление службы (`FG_NOTIFICATION_ID`, `primaryId`, `foregroundNotification`, `buildRunning`); в раскрытый остров передаётся кнопка «Стоп» и крупное время. Откат: CardTimers.kt 3.0.
 // Версия: 3.0 (21.10) — тик острова: `tickIsland` (раз в секунду перепоставляет уведомления идущих таймеров) и `startTicker` (служба TimerTickService на Xiaomi): свёрнутый остров не тикал сам и показывал одну секунду. Откат: CardTimers.kt 2.0 (вместе с удалением TimerTickService.kt и записи <service>).
 // Версия: 2.0 (21.10) — этапы цвета значка острова (жёлтый за 2 минуты, красный за минуту: `scheduleStages`/`stage`, будильники этапов перепостят уведомление); вибрация в конце — 60 секунд (`donePattern`), гасится кнопкой «Стоп» в уведомлении, смахиванием, «Стоп» на карточке и открытием приложения (`silence`/`stopVibration`); в extras острова передаётся полная длительность. Откат: CardTimers.kt 1.1.
 // Версия: 1.1 (20.10) — остров Xiaomi (XiaomiIsland): extras `miui.focus.param` в уведомлении таймера.
 // Версия: 1.0 (17.10)
 
 import android.annotation.SuppressLint
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -45,6 +47,7 @@ object CardTimers {
     private const val TAG_RUN = "card-timer-"
     private const val TAG_DONE = "card-timer-done-"
     private const val NOTIFICATION_ID = 2
+    const val FG_NOTIFICATION_ID = 3 // уведомление главного таймера, пока работает служба тика (оно же её уведомление переднего плана)
     private const val PREFS = "card_timers"
     private const val KEY = "timers"
     private const val ACCENT = 0xFF8F7FB8.toInt()
@@ -280,7 +283,7 @@ object CardTimers {
     }
 
     // ---------- уведомления ----------
-    private fun ensureChannels(ctx: Context) {
+    fun ensureChannels(ctx: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (nm.getNotificationChannel(CHANNEL_RUN) == null) {
@@ -301,6 +304,7 @@ object CardTimers {
     private fun actionIntent(ctx: Context, action: String, id: String): PendingIntent {
         val intent = Intent(ctx, CardTimerReceiver::class.java).apply {
             this.action = action
+            addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             data = Uri.parse("ltcardtimer://action/${Uri.encode(action)}/$id")
             putExtra(CardTimerReceiver.EXTRA_ID, id)
         }
@@ -316,9 +320,21 @@ object CardTimers {
 
     private fun titleOf(t: Timer) = if (t.title.isBlank()) "Таймер" else t.title
 
-    @SuppressLint("MissingPermission")
-    private fun postRunning(ctx: Context, t: Timer, float: Boolean = true) {
-        try {
+    /** Идущий таймер, чьё уведомление служит уведомлением службы тика: тот, что закончится раньше всех. */
+    private fun primaryId(ctx: Context): String? = synchronized(LOCK) {
+        val now = System.currentTimeMillis()
+        load(ctx).values.filter { it.running && it.endAt > now }.minByOrNull { it.endAt }?.id
+    }
+
+    /** Для службы тика: готовое уведомление главного таймера (или null, если идущих нет). */
+    fun foregroundNotification(ctx: Context): Notification? = synchronized(LOCK) {
+        val id = primaryId(ctx) ?: return@synchronized null
+        val t = load(ctx)[id] ?: return@synchronized null
+        buildRunning(ctx, t, false)
+    }
+
+    private fun buildRunning(ctx: Context, t: Timer, float: Boolean): Notification? {
+        return try {
             ensureChannels(ctx)
             val b = NotificationCompat.Builder(ctx, CHANNEL_RUN)
                 .setSmallIcon(R.drawable.ic_stat_notify)
@@ -341,10 +357,28 @@ object CardTimers {
             }
             // «Живые обновления» Android 16 / остров HyperOS: просим показать как продвигаемое постоянное уведомление
             // На Xiaomi с HyperOS вместо этого — остров по протоколу Xiaomi (XiaomiIsland); на остальных — флаг Android 16.
-            val island = XiaomiIsland.runningExtras(ctx, titleOf(t), t.endAt, t.durationMs, float)
+            val stop = if (XiaomiIsland.available(ctx)) XiaomiIsland.stopAction(actionIntent(ctx, CardTimerReceiver.ACTION_CANCEL, t.id)) else null
+            val island = XiaomiIsland.runningExtras(ctx, titleOf(t), t.endAt, t.durationMs, float, stop)
             if (island != null) b.addExtras(island)
             else b.addExtras(Bundle().apply { putBoolean("android.requestPromotedOngoing", true) })
-            NotificationManagerCompat.from(ctx).notify(TAG_RUN + t.id, NOTIFICATION_ID, b.build())
+            b.build()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun postRunning(ctx: Context, t: Timer, float: Boolean = true) {
+        try {
+            val n = buildRunning(ctx, t, float) ?: return
+            val nm = NotificationManagerCompat.from(ctx)
+            if (TimerTickService.active && t.id == primaryId(ctx)) {
+                // главный таймер живёт в уведомлении службы тика — второго уведомления не будет
+                nm.notify(FG_NOTIFICATION_ID, n)
+                nm.cancel(TAG_RUN + t.id, NOTIFICATION_ID)
+            } else {
+                nm.notify(TAG_RUN + t.id, NOTIFICATION_ID, n)
+            }
         } catch (e: Exception) {
             // уведомления выключены: таймер всё равно идёт и завершится вибрацией
         }

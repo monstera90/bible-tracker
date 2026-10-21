@@ -1,8 +1,10 @@
 package com.app.lifetracker
+// Версия: 3.0 (21.10) — раскрытый остров как у часов: крупное время в заголовке (`clockText`, обновляется тиком), большой значок песочных часов без круга (`bigIcon`, цвет по этапу), кнопка «Стоп» (`miui.focus.actions`); `hintInfo` убран. Откат: XiaomiIsland.kt 2.1.
 // Версия: 2.1 (21.10) — в `param_island` добавлены `islandOrder=true` и `dismissIsland=false` (остров должен возвращаться, если система его убрала, пока приложение на экране; эффект проверяется на телефоне). Откат: XiaomiIsland.kt 2.0.
 // Версия: 2.0 (21.10) — значок острова рисуется кодом: песочные часы на цветном круге, цвет по этапу (`stageFor`: фиолетовый / жёлтый за 2 минуты / красный за минуту); в `timerInfo` добавлено `timerTotal` (в примерах Xiaomi поле есть у каждого таймера; отсчёт на острове замирал после первой секунды — связь с отсутствием поля предположительная, проверяется на телефоне). Откат: XiaomiIsland.kt 1.0.
 // Версия: 1.0 (20.10)
 
+import android.app.Notification
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -28,6 +30,8 @@ import org.json.JSONObject
 object XiaomiIsland {
 
     private const val PIC_KEY = "miui.focus.pic_timer"
+    private const val PIC_BIG_KEY = "miui.focus.pic_timer_big"
+    private const val ACTION_KEY = "miui.focus.action_stop"
 
     /** Этапы цвета значка: до «жёлтого» — фиолетовый, за 2 минуты до конца — жёлтый, за минуту — красный. */
     const val STAGE_NORMAL = 0
@@ -74,31 +78,48 @@ object XiaomiIsland {
      * Extras для уведомления идущего таймера (обратный отсчёт до [endAt]) или null, если остров не поддерживается.
      * [float] — раскрыть остров при появлении (запуск/продолжение), false — тихое обновление (восстановление после перезагрузки).
      */
-    fun runningExtras(ctx: Context, title: String, endAt: Long, totalMs: Long, float: Boolean): Bundle? {
+    fun runningExtras(ctx: Context, title: String, endAt: Long, totalMs: Long, float: Boolean, stopAction: Notification.Action?): Bundle? {
         if (!available(ctx)) return null
         return try {
             val now = System.currentTimeMillis()
             val timer = JSONObject().put("timerType", -1).put("timerWhen", endAt)
                 .put("timerTotal", totalMs.coerceAtLeast(1L)).put("timerSystemCurrent", now)
-            build(ctx, title, "Таймер идёт", timer, endAt, now, float, stageFor(endAt - now))
+            build(ctx, title, "Таймер идёт", timer, endAt, now, float, stageFor(endAt - now), stopAction)
         } catch (e: Exception) {
             null
         }
+    }
+
+    /** Время для заголовка раскрытого острова: М:СС или Ч:ММ:СС (округление вверх, как на карточке). */
+    fun clockText(leftMs: Long): String {
+        val s = ((leftMs + 999) / 1000).coerceAtLeast(0)
+        val h = s / 3600
+        val m = (s % 3600) / 60
+        val sec = s % 60
+        return if (h > 0) String.format(java.util.Locale.US, "%d:%02d:%02d", h, m, sec) else String.format(java.util.Locale.US, "%d:%02d", m, sec)
+    }
+
+    /** Кнопка «Стоп» для раскрытого острова: белый крестик в круге-иконке, действие — PendingIntent вызывающего. */
+    fun stopAction(pending: android.app.PendingIntent): Notification.Action? = try {
+        Notification.Action.Builder(crossIcon(), "Стоп", pending).build()
+    } catch (e: Exception) {
+        null
     }
 
     /** Extras для приостановленного таймера: остаток показывается текстом (счётчик не тикает). */
     fun pausedExtras(ctx: Context, title: String, leftText: String, leftMs: Long): Bundle? {
         if (!available(ctx)) return null
         return try {
-            build(ctx, title, "Пауза · осталось $leftText", null, 0L, System.currentTimeMillis(), false, stageFor(leftMs))
+            build(ctx, title, "Пауза · осталось $leftText", null, 0L, System.currentTimeMillis(), false, stageFor(leftMs), null)
         } catch (e: Exception) {
             null
         }
     }
 
-    private fun build(ctx: Context, title: String, status: String, timer: JSONObject?, endAt: Long, now: Long, float: Boolean, stage: Int): Bundle {
+    private fun build(ctx: Context, title: String, status: String, timer: JSONObject?, endAt: Long, now: Long, float: Boolean, stage: Int, stopAction: Notification.Action?): Bundle {
         // у каждого этапа свой ключ картинки: система не подставит старую (фиолетовую) из кэша
         val picKey = PIC_KEY + stage
+        val bigKey = PIC_BIG_KEY + stage
         val pic = JSONObject().put("type", 1).put("pic", picKey)
         val left = JSONObject().put("type", 1).put("picInfo", pic)
             .put("textInfo", JSONObject().put("title", title).put("content", if (timer == null) status else ""))
@@ -114,6 +135,12 @@ object XiaomiIsland {
             val sec = ((endAt - now) / 1000).coerceAtLeast(1) + 5
             island.put("islandTimeout", sec)
         }
+        // раскрытый остров и карточка в шторке: большая эмблема слева, крупное время (бегущее — заголовок), название под ним
+        val base = if (timer != null) {
+            JSONObject().put("type", 2).put("title", clockText(endAt - now)).put("content", title)
+        } else {
+            JSONObject().put("type", 2).put("title", title).put("content", status)
+        }
         val v2 = JSONObject()
             .put("protocol", 1)
             .put("business", "card_timer")
@@ -124,17 +151,70 @@ object XiaomiIsland {
             .put("tickerPic", picKey)
             .put("aodTitle", title)
             .put("param_island", island)
-            .put("baseInfo", JSONObject().put("type", 2).put("title", title).put("content", status))
+            .put("picInfo", JSONObject().put("type", 1).put("pic", bigKey))
+            .put("baseInfo", base)
         if (timer != null) {
-            v2.put("hintInfo", JSONObject().put("type", 1).put("timerInfo", timer))
             val minutes = ((endAt - now) / 60000).coerceAtLeast(1) + 1
             v2.put("timeout", minutes)
         }
-        val pics = Bundle().apply { putParcelable(picKey, icon(stage)) }
-        return Bundle().apply {
-            putString("miui.focus.param", JSONObject().put("param_v2", v2).toString())
+        val pics = Bundle().apply {
+            putParcelable(picKey, icon(stage))
+            putParcelable(bigKey, bigIcon(stage))
+        }
+        val out = Bundle().apply {
             putBundle("miui.focus.pics", pics)
         }
+        if (stopAction != null) {
+            v2.put("actions", org.json.JSONArray().put(JSONObject().put("action", ACTION_KEY)))
+            out.putBundle("miui.focus.actions", Bundle().apply { putParcelable(ACTION_KEY, stopAction) })
+        }
+        out.putString("miui.focus.param", JSONObject().put("param_v2", v2).toString())
+        return out
+    }
+
+    /** Крупная эмблема для раскрытого острова: песочные часы цвета этапа на прозрачном фоне (как синие у часов). */
+    private fun bigIcon(stage: Int): Icon {
+        val size = 192
+        val color = when (stage) {
+            STAGE_RED -> 0xFFE53935.toInt()
+            STAGE_YELLOW -> 0xFFFFC400.toInt()
+            else -> 0xFF8A2BFF.toInt()
+        }
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = color
+        paint.style = Paint.Style.FILL
+        val k = size / 96f
+        c.drawRoundRect(RectF(21f * k, 12f * k, 75f * k, 20f * k), 4f * k, 4f * k, paint)
+        c.drawRoundRect(RectF(21f * k, 76f * k, 75f * k, 84f * k), 4f * k, 4f * k, paint)
+        val glass = Path().apply {
+            moveTo(27f * k, 22f * k); lineTo(69f * k, 22f * k); lineTo(52f * k, 48f * k)
+            lineTo(69f * k, 74f * k); lineTo(27f * k, 74f * k); lineTo(44f * k, 48f * k); close()
+        }
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 5f * k
+        paint.strokeJoin = Paint.Join.ROUND
+        c.drawPath(glass, paint)
+        paint.style = Paint.Style.FILL
+        c.drawPath(Path().apply { moveTo(34f * k, 28f * k); lineTo(62f * k, 28f * k); lineTo(48f * k, 46f * k); close() }, paint)
+        c.drawPath(Path().apply { moveTo(32f * k, 70f * k); lineTo(64f * k, 70f * k); lineTo(48f * k, 54f * k); close() }, paint)
+        return Icon.createWithBitmap(bmp)
+    }
+
+    /** Значок кнопки «Стоп»: белый крестик. */
+    private fun crossIcon(): Icon {
+        val size = 96
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = Color.WHITE
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 9f
+        paint.strokeCap = Paint.Cap.ROUND
+        c.drawLine(28f, 28f, 68f, 68f, paint)
+        c.drawLine(68f, 28f, 28f, 68f, paint)
+        return Icon.createWithBitmap(bmp)
     }
 
     /**
