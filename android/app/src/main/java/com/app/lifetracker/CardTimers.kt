@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.1 (21.10) — в раскрытый остров передаётся круглая кнопка паузы (`XiaomiIsland.pauseAction`). Откат: CardTimers.kt 5.0.
 // Версия: 5.0 (21.10) — `primaryInfo` (данные главного таймера для плашки InAppIsland). Откат: CardTimers.kt 4.0.
 // Версия: 4.0 (21.10) — одно уведомление вместо двух: при работающей службе тика уведомление главного (самого раннего) таймера и есть уведомление службы (`FG_NOTIFICATION_ID`, `primaryId`, `foregroundNotification`, `buildRunning`); в раскрытый остров передаётся кнопка «Стоп» и крупное время. Откат: CardTimers.kt 3.0.
 // Версия: 3.0 (21.10) — тик острова: `tickIsland` (раз в секунду перепоставляет уведомления идущих таймеров) и `startTicker` (служба TimerTickService на Xiaomi): свёрнутый остров не тикал сам и показывал одну секунду. Откат: CardTimers.kt 2.0 (вместе с удалением TimerTickService.kt и записи <service>).
@@ -371,7 +372,11 @@ object CardTimers {
             // «Живые обновления» Android 16 / остров HyperOS: просим показать как продвигаемое постоянное уведомление
             // На Xiaomi с HyperOS вместо этого — остров по протоколу Xiaomi (XiaomiIsland); на остальных — флаг Android 16.
             val stop = if (XiaomiIsland.available(ctx)) XiaomiIsland.stopAction(actionIntent(ctx, CardTimerReceiver.ACTION_CANCEL, t.id)) else null
-            val island = XiaomiIsland.runningExtras(ctx, titleOf(t), t.endAt, t.durationMs, float, stop)
+            val now = System.currentTimeMillis()
+            val pause = if (stop != null) XiaomiIsland.pauseAction(
+                actionIntent(ctx, CardTimerReceiver.ACTION_PAUSE, t.id), t.endAt - now, t.durationMs, XiaomiIsland.stageFor(t.endAt - now)
+            ) else null
+            val island = XiaomiIsland.runningExtras(ctx, titleOf(t), t.endAt, t.durationMs, float, stop, pause)
             if (island != null) b.addExtras(island)
             else b.addExtras(Bundle().apply { putBoolean("android.requestPromotedOngoing", true) })
             b.build()

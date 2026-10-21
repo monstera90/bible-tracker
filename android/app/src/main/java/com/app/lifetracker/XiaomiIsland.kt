@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.0 (21.10) — круглая кнопка паузы в раскрытом острове (`pauseAction`, `pauseBitmap`): кольцо оставшегося времени цвета этапа и две полоски «пауза», слева от «Стоп»; рисуется кодом, кольцо обновляется тиком раз в секунду. Откат: XiaomiIsland.kt 4.0.
 // Версия: 4.0 (21.10) — `iconBitmap` и `crossBitmap` вынесены (значок и крестик нужны плашке InAppIsland); `icon`/`crossIcon` — обёртки. Откат: XiaomiIsland.kt 3.2.
 // Версия: 3.2 (21.10) — эмблема раскрытого острова та же, что в свёрнутом: цветной круг (фиолетовый/жёлтый/красный) и белые песочные часы, только крупнее (`icon(stage, 192)`); отдельный рисунок `bigIcon` удалён. Откат: XiaomiIsland.kt 3.1.
 // Версия: 3.1 (21.10) — раскрытый вид через `iconTextInfo` с `animIconInfo` (значок слева, `baseInfo` и корневой `picInfo` убраны: значок в них не показывался); песочные часы на жёлтом круге — белые; кнопка «Стоп» — тёмный круг с белым крестиком. Откат: XiaomiIsland.kt 3.0 (без значка, но с временем и «Стоп»).
@@ -35,6 +36,7 @@ object XiaomiIsland {
     private const val PIC_KEY = "miui.focus.pic_timer"
     private const val PIC_BIG_KEY = "miui.focus.pic_timer_big"
     private const val ACTION_KEY = "miui.focus.action_stop"
+    private const val ACTION_PAUSE_KEY = "miui.focus.action_pause"
 
     /** Этапы цвета значка: до «жёлтого» — фиолетовый, за 2 минуты до конца — жёлтый, за минуту — красный. */
     const val STAGE_NORMAL = 0
@@ -81,13 +83,13 @@ object XiaomiIsland {
      * Extras для уведомления идущего таймера (обратный отсчёт до [endAt]) или null, если остров не поддерживается.
      * [float] — раскрыть остров при появлении (запуск/продолжение), false — тихое обновление (восстановление после перезагрузки).
      */
-    fun runningExtras(ctx: Context, title: String, endAt: Long, totalMs: Long, float: Boolean, stopAction: Notification.Action?): Bundle? {
+    fun runningExtras(ctx: Context, title: String, endAt: Long, totalMs: Long, float: Boolean, stopAction: Notification.Action?, pauseAction: Notification.Action? = null): Bundle? {
         if (!available(ctx)) return null
         return try {
             val now = System.currentTimeMillis()
             val timer = JSONObject().put("timerType", -1).put("timerWhen", endAt)
                 .put("timerTotal", totalMs.coerceAtLeast(1L)).put("timerSystemCurrent", now)
-            build(ctx, title, "Таймер идёт", timer, endAt, now, float, stageFor(endAt - now), stopAction)
+            build(ctx, title, "Таймер идёт", timer, endAt, now, float, stageFor(endAt - now), stopAction, pauseAction)
         } catch (e: Exception) {
             null
         }
@@ -113,13 +115,13 @@ object XiaomiIsland {
     fun pausedExtras(ctx: Context, title: String, leftText: String, leftMs: Long): Bundle? {
         if (!available(ctx)) return null
         return try {
-            build(ctx, title, "Пауза · осталось $leftText", null, 0L, System.currentTimeMillis(), false, stageFor(leftMs), null)
+            build(ctx, title, "Пауза · осталось $leftText", null, 0L, System.currentTimeMillis(), false, stageFor(leftMs), null, null)
         } catch (e: Exception) {
             null
         }
     }
 
-    private fun build(ctx: Context, title: String, status: String, timer: JSONObject?, endAt: Long, now: Long, float: Boolean, stage: Int, stopAction: Notification.Action?): Bundle {
+    private fun build(ctx: Context, title: String, status: String, timer: JSONObject?, endAt: Long, now: Long, float: Boolean, stage: Int, stopAction: Notification.Action?, pauseAction: Notification.Action?): Bundle {
         // у каждого этапа свой ключ картинки: система не подставит старую (фиолетовую) из кэша
         val picKey = PIC_KEY + stage
         val bigKey = PIC_BIG_KEY + stage
@@ -168,8 +170,17 @@ object XiaomiIsland {
             putBundle("miui.focus.pics", pics)
         }
         if (stopAction != null) {
-            v2.put("actions", org.json.JSONArray().put(JSONObject().put("action", ACTION_KEY)))
-            out.putBundle("miui.focus.actions", Bundle().apply { putParcelable(ACTION_KEY, stopAction) })
+            // слева направо: пауза (круг с кольцом), затем «Стоп»
+            val list = org.json.JSONArray()
+            val acts = Bundle()
+            if (pauseAction != null) {
+                list.put(JSONObject().put("action", ACTION_PAUSE_KEY))
+                acts.putParcelable(ACTION_PAUSE_KEY, pauseAction)
+            }
+            list.put(JSONObject().put("action", ACTION_KEY))
+            acts.putParcelable(ACTION_KEY, stopAction)
+            v2.put("actions", list)
+            out.putBundle("miui.focus.actions", acts)
         }
         out.putString("miui.focus.param", JSONObject().put("param_v2", v2).toString())
         return out
@@ -177,6 +188,45 @@ object XiaomiIsland {
 
     /** Крупная эмблема для раскрытого острова: тот же значок, что в свёрнутом, вдвое крупнее. */
     private fun bigIcon(stage: Int): Icon = icon(stage, 192)
+
+    /** Кнопка «Пауза» для раскрытого острова: кольцо оставшегося времени и две полоски. */
+    fun pauseAction(pending: android.app.PendingIntent, leftMs: Long, totalMs: Long, stage: Int): Notification.Action? = try {
+        val fraction = (leftMs.toFloat() / totalMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
+        Notification.Action.Builder(Icon.createWithBitmap(pauseBitmap(fraction, stage)), "Пауза", pending).build()
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun stageColor(stage: Int): Int = when (stage) {
+        STAGE_RED -> 0xFFE53935.toInt()
+        STAGE_YELLOW -> 0xFFFFC400.toInt()
+        else -> 0xFF7F00FF.toInt()
+    }
+
+    /** Круглая кнопка паузы: тёмный круг, кольцо цвета этапа (доля [fraction] — сколько времени осталось, от верха по часовой), две полоски. */
+    fun pauseBitmap(fraction: Float, stage: Int): Bitmap {
+        val size = 96
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = 0xFF2A2A2A.toInt()
+        paint.style = Paint.Style.FILL
+        c.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+        val color = stageColor(stage)
+        val ring = RectF(8f, 8f, 88f, 88f)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 6f
+        paint.color = 0xFF444444.toInt()
+        c.drawArc(ring, 0f, 360f, false, paint)
+        paint.color = color
+        paint.strokeCap = Paint.Cap.ROUND
+        if (fraction >= 0.999f) c.drawArc(ring, 0f, 360f, false, paint)
+        else if (fraction > 0f) c.drawArc(ring, -90f, 360f * fraction, false, paint)
+        paint.style = Paint.Style.FILL
+        c.drawRoundRect(RectF(35f, 31f, 44f, 65f), 3f, 3f, paint)
+        c.drawRoundRect(RectF(52f, 31f, 61f, 65f), 3f, 3f, paint)
+        return bmp
+    }
 
     /** Значок кнопки «Стоп»: белый крестик. */
     private fun crossIcon(): Icon = Icon.createWithBitmap(crossBitmap())

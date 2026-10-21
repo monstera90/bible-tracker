@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.0 (21.10) — жирное время рисуется обводкой (`StrokeText`): HyperOS игнорирует жирное начертание у системного шрифта, цифры выходили тонкими. Время 12sp + обводка 0.0021 ширины экрана + разрядка 0.08 (шире, как у острова), правое поле 0.0272, текст на ~1,5 px выше (плашка 0.0077 сверху, высота 0.0878, без верхнего отступа). Откат: InAppIsland.kt 1.4.
 // Версия: 1.4 (21.10) — вторая сверка со скриншотом: время сдвинуто влево на 11 px (правое поле 0.0335 ширины), начертание не через вес (HyperOS его игнорировал): время — sans-serif BOLD, название — sans-serif-medium; значок 0.57 высоты и на пиксель ниже, плашка на пиксель ниже. Откат: InAppIsland.kt 1.3.
 // Версия: 1.3 (21.10) — сверка со скриншотом острова: время 13sp жирное (высота цифр 32 px вместо 37), название обычным начертанием (вес 400), правая часть по размеру времени, название получает всё остальное место и не обрезается; плашка выше на 3 px, шире на 2 px. Откат: InAppIsland.kt 1.2.
 // Версия: 1.2 (21.10) — подгонка по скриншотам настоящего острова и плашки: ширина 0.41, отступ сверху 0.007, боковые поля 0.024, значок 0.58 высоты, зазор до названия 0.0104 ширины экрана, время — обычное начертание (у острова не жирное). Откат: InAppIsland.kt 1.1.
@@ -33,7 +34,7 @@ class InAppIsland(private val activity: Activity) {
     private val pill = LinearLayout(activity)
     private val pillIcon = ImageView(activity)
     private val pillName = TextView(activity)
-    private val pillTime = TextView(activity)
+    private val pillTime = StrokeText(activity)
     private val card = LinearLayout(activity)
     private val cardIcon = ImageView(activity)
     private val cardTime = TextView(activity)
@@ -70,8 +71,9 @@ class InAppIsland(private val activity: Activity) {
         }
         pillTime.apply {
             setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            typeface = Typeface.DEFAULT
+            letterSpacing = 0.08f
             maxLines = 1
         }
 
@@ -207,9 +209,9 @@ class InAppIsland(private val activity: Activity) {
         val screenW = activity.resources.displayMetrics.widthPixels
         // Рамка выреза у Xiaomi — размером со всю строку состояния, по ней плашка выходит огромной. Размеры берём
         // от ширины экрана, как у настоящего острова (замер на Poco X6 Pro: 500 × 105 px при ширине 1220, отступ сверху 13 px).
-        val h = (screenW * 0.0886f).roundToInt()
+        val h = (screenW * 0.0878f).roundToInt()
         val w = (screenW * 0.4117f).roundToInt()
-                val top = max(dp(2f), (screenW * 0.0069f).roundToInt())
+                val top = max(dp(2f), (screenW * 0.0077f).roundToInt())
         val left = r.centerX() - w / 2
 
         // дети переезжают в новые контейнеры: сначала отцепляем от старых (иначе addView бросает исключение)
@@ -217,7 +219,8 @@ class InAppIsland(private val activity: Activity) {
         pill.removeAllViews()
         pill.background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = h / 2f }
         val side = (screenW * 0.024f).roundToInt()
-        pill.setPadding(side, (screenW * 0.0013f).roundToInt(), (screenW * 0.0335f).roundToInt(), 0)
+        pill.setPadding(side, 0, (screenW * 0.0272f).roundToInt(), 0)
+        pillTime.strokePx = screenW * 0.0021f
         val iconSize = (h * 0.57f).roundToInt()
         val leftBox = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -239,5 +242,17 @@ class InAppIsland(private val activity: Activity) {
             leftMargin = dp(12f)
             topMargin = top + h + dp(8f)
         }
+    }
+}
+
+/** Текст с обводкой того же цвета: утолщает штрихи, когда системный шрифт не даёт жирного начертания. */
+class StrokeText(context: android.content.Context) : TextView(context) {
+    var strokePx = 0f
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        val p = paint
+        p.style = android.graphics.Paint.Style.FILL_AND_STROKE
+        p.strokeWidth = strokePx
+        p.strokeJoin = android.graphics.Paint.Join.ROUND
+        super.onDraw(canvas)
     }
 }
