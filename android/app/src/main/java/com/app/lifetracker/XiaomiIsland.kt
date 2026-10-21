@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 3.2 (21.10) — эмблема раскрытого острова та же, что в свёрнутом: цветной круг (фиолетовый/жёлтый/красный) и белые песочные часы, только крупнее (`icon(stage, 192)`); отдельный рисунок `bigIcon` удалён. Откат: XiaomiIsland.kt 3.1.
 // Версия: 3.1 (21.10) — раскрытый вид через `iconTextInfo` с `animIconInfo` (значок слева, `baseInfo` и корневой `picInfo` убраны: значок в них не показывался); песочные часы на жёлтом круге — белые; кнопка «Стоп» — тёмный круг с белым крестиком. Откат: XiaomiIsland.kt 3.0 (без значка, но с временем и «Стоп»).
 // Версия: 3.0 (21.10) — раскрытый остров как у часов: крупное время в заголовке (`clockText`, обновляется тиком), большой значок песочных часов без круга (`bigIcon`, цвет по этапу), кнопка «Стоп» (`miui.focus.actions`); `hintInfo` убран. Откат: XiaomiIsland.kt 2.1.
 // Версия: 2.1 (21.10) — в `param_island` добавлены `islandOrder=true` и `dismissIsland=false` (остров должен возвращаться, если система его убрала, пока приложение на экране; эффект проверяется на телефоне). Откат: XiaomiIsland.kt 2.0.
@@ -173,35 +174,8 @@ object XiaomiIsland {
         return out
     }
 
-    /** Крупная эмблема для раскрытого острова: песочные часы цвета этапа на прозрачном фоне (как синие у часов). */
-    private fun bigIcon(stage: Int): Icon {
-        val size = 192
-        val color = when (stage) {
-            STAGE_RED -> 0xFFE53935.toInt()
-            STAGE_YELLOW -> 0xFFFFC400.toInt()
-            else -> 0xFF8A2BFF.toInt()
-        }
-        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val c = Canvas(bmp)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        paint.color = color
-        paint.style = Paint.Style.FILL
-        val k = size / 96f
-        c.drawRoundRect(RectF(21f * k, 12f * k, 75f * k, 20f * k), 4f * k, 4f * k, paint)
-        c.drawRoundRect(RectF(21f * k, 76f * k, 75f * k, 84f * k), 4f * k, 4f * k, paint)
-        val glass = Path().apply {
-            moveTo(27f * k, 22f * k); lineTo(69f * k, 22f * k); lineTo(52f * k, 48f * k)
-            lineTo(69f * k, 74f * k); lineTo(27f * k, 74f * k); lineTo(44f * k, 48f * k); close()
-        }
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 5f * k
-        paint.strokeJoin = Paint.Join.ROUND
-        c.drawPath(glass, paint)
-        paint.style = Paint.Style.FILL
-        c.drawPath(Path().apply { moveTo(34f * k, 28f * k); lineTo(62f * k, 28f * k); lineTo(48f * k, 46f * k); close() }, paint)
-        c.drawPath(Path().apply { moveTo(32f * k, 70f * k); lineTo(64f * k, 70f * k); lineTo(48f * k, 54f * k); close() }, paint)
-        return Icon.createWithBitmap(bmp)
-    }
+    /** Крупная эмблема для раскрытого острова: тот же значок, что в свёрнутом, вдвое крупнее. */
+    private fun bigIcon(stage: Int): Icon = icon(stage, 192)
 
     /** Значок кнопки «Стоп»: белый крестик. */
     private fun crossIcon(): Icon {
@@ -225,8 +199,7 @@ object XiaomiIsland {
      * Значок таймера для острова: цветной круг и белые песочные часы (на жёлтом тоже белые).
      * Цвет по этапу: фиолетовый #7F00FF (как значок сканера), жёлтый, красный.
      */
-    private fun icon(stage: Int): Icon {
-        val size = 96
+    private fun icon(stage: Int, size: Int = 96): Icon {
         val bg = when (stage) {
             STAGE_RED -> 0xFFE53935.toInt()
             STAGE_YELLOW -> 0xFFFFC400.toInt()
@@ -235,10 +208,11 @@ object XiaomiIsland {
         val fg = Color.WHITE
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
+        c.scale(size / 96f, size / 96f) // рисунок рассчитан на 96 px, при другом размере масштабируется
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         paint.style = Paint.Style.FILL
         paint.color = bg
-        c.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+        c.drawCircle(48f, 48f, 48f, paint)
 
         paint.color = fg
         // крышка и дно
