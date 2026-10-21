@@ -140,5 +140,15 @@
         <receiver
             android:name=".CardTimerReceiver"
             android:exported="false" />
+
+        <!-- Тик острова Xiaomi для таймеров карточек (раз в секунду обновляет время); работает, только пока идёт таймер. -->
+        <service
+            android:name=".TimerTickService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="card_timer_island_countdown" />
+        </service>
     </application>
 </manifest>

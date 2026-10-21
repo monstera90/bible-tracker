@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 3.0 (21.10) — тик острова: `tickIsland` (раз в секунду перепоставляет уведомления идущих таймеров) и `startTicker` (служба TimerTickService на Xiaomi): свёрнутый остров не тикал сам и показывал одну секунду. Откат: CardTimers.kt 2.0 (вместе с удалением TimerTickService.kt и записи <service>).
 // Версия: 2.0 (21.10) — этапы цвета значка острова (жёлтый за 2 минуты, красный за минуту: `scheduleStages`/`stage`, будильники этапов перепостят уведомление); вибрация в конце — 60 секунд (`donePattern`), гасится кнопкой «Стоп» в уведомлении, смахиванием, «Стоп» на карточке и открытием приложения (`silence`/`stopVibration`); в extras острова передаётся полная длительность. Откат: CardTimers.kt 1.1.
 // Версия: 1.1 (20.10) — остров Xiaomi (XiaomiIsland): extras `miui.focus.param` в уведомлении таймера.
 // Версия: 1.0 (17.10)
@@ -124,6 +125,7 @@ object CardTimers {
         scheduleAlarm(ctx, t)
         silence(ctx, id) // новый запуск гасит вибрацию и уведомление «Таймер закончился»
         postRunning(ctx, t)
+        startTicker(ctx)
         true
     }
 
@@ -148,6 +150,7 @@ object CardTimers {
         save(ctx, map)
         scheduleAlarm(ctx, r)
         postRunning(ctx, r)
+        startTicker(ctx)
     }
 
     fun cancel(ctx: Context, id: String) = synchronized(LOCK) {
@@ -195,11 +198,31 @@ object CardTimers {
         val items = synchronized(LOCK) { load(ctx).values.toList() }
         for (t in items) {
             if (t.running) {
-                if (t.endAt <= now) fire(ctx, t.id) else synchronized(LOCK) { scheduleAlarm(ctx, t); postRunning(ctx, t, false) }
+                if (t.endAt <= now) fire(ctx, t.id) else synchronized(LOCK) { scheduleAlarm(ctx, t); postRunning(ctx, t, false) }.also { startTicker(ctx) }
             } else {
                 synchronized(LOCK) { postPaused(ctx, t) }
             }
         }
+    }
+
+    /** Служба тика нужна только острову Xiaomi; на других телефонах отсчёт в шторке идёт сам. */
+    private fun startTicker(ctx: Context) {
+        if (XiaomiIsland.available(ctx)) TimerTickService.ensure(ctx)
+    }
+
+    /**
+     * Тик из TimerTickService: перепоставляет уведомления идущих таймеров (остров получает свежее время).
+     * Возвращает задержку до следующего тика в мс или -1, если идущих таймеров нет (служба остановится).
+     */
+    fun tickIsland(ctx: Context): Long = synchronized(LOCK) {
+        val now = System.currentTimeMillis()
+        var next = -1L
+        for (t in load(ctx).values) {
+            if (!t.running || t.endAt <= now) continue
+            postRunning(ctx, t, false)
+            if (next < 0) next = (t.endAt - now) % 1000L + 20L
+        }
+        next
     }
 
     // ---------- будильник ----------

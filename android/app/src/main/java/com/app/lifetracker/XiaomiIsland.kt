@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.1 (21.10) — в `param_island` добавлены `islandOrder=true` и `dismissIsland=false` (остров должен возвращаться, если система его убрала, пока приложение на экране; эффект проверяется на телефоне). Откат: XiaomiIsland.kt 2.0.
 // Версия: 2.0 (21.10) — значок острова рисуется кодом: песочные часы на цветном круге, цвет по этапу (`stageFor`: фиолетовый / жёлтый за 2 минуты / красный за минуту); в `timerInfo` добавлено `timerTotal` (в примерах Xiaomi поле есть у каждого таймера; отсчёт на острове замирал после первой секунды — связь с отсутствием поля предположительная, проверяется на телефоне). Откат: XiaomiIsland.kt 1.0.
 // Версия: 1.0 (20.10)
 
@@ -105,6 +106,8 @@ object XiaomiIsland {
         if (timer != null) big.put("sameWidthDigitInfo", JSONObject().put("timerInfo", timer)) else big.put("picInfo", pic)
         val island = JSONObject()
             .put("islandProperty", 1)
+            .put("islandOrder", true)
+            .put("dismissIsland", false)
             .put("bigIslandArea", big)
             .put("smallIslandArea", JSONObject().put("picInfo", pic))
         if (timer != null) {
