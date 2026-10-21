@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Создание ярлыков на рабочем столе (кнопка «Создать ярлык сканера QR-кодов» в настройках; до Android 8 — этим разрешением,
          на новых версиях запрос подтверждает пользователь в окне рабочего стола). У Xiaomi есть ещё своё разрешение «Ярлыки на
          рабочем столе» в настройках приложения — его выдаёт пользователь (кнопка «Открыть разрешения приложения»). -->

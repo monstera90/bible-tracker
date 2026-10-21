@@ -1,4 +1,6 @@
 package com.app.lifetracker
+// Версия: 4.0 (21.10) — плашка живёт в собственном окне поверх всех (TYPE_APPLICATION_OVERLAY, разрешение «Поверх других приложений»), размером ровно с плашку/карточку, поэтому нажатие по ней доходит (окно строки состояния перехватывало касания к окну приложения). Без разрешения — запасной вариант в decorView (виден, но не нажимается; автораскрытие при запуске таймера остаётся); при первом показе один раз предлагается выдать разрешение. Окно убирается в onPause. Откат: InAppIsland.kt 3.1.
+// Версия: 3.1 (21.10) — плашка раскрывается сама, когда таймер только что запущен (первые 3 с), как «всплытие» настоящего острова: нажатие на саму плашку до приложения не доходит, пока видна системная строка состояния (окно SystemUI сверху перехватывает касания). Раскрытая карточка ниже строки состояния — кнопки нажимаются. Откат: InAppIsland.kt 3.0.
 // Версия: 3.0 (21.10) — раскрытие как у острова Xiaomi (по записи экрана): плашка плавно растёт в широкую карточку на месте (ширина 0.926 экрана, высота 0.213, радиус 0.082, отскок на раскрытии), содержимое проявляется после 30% пути, плашка гаснет; внутри значок, время, название, круглая кнопка паузы/«продолжить» с кольцом остатка, «Стоп», полоска внизу; нажатие мимо кнопок или 6 с — сворачивание обратно в плашку. Откат: InAppIsland.kt 2.0.
 // Версия: 2.0 (21.10) — жирное время рисуется обводкой (`StrokeText`): HyperOS игнорирует жирное начертание у системного шрифта, цифры выходили тонкими. Время 12sp + обводка 0.0021 ширины экрана + разрядка 0.08 (шире, как у острова), правое поле 0.0272, текст на ~1,5 px выше (плашка 0.0077 сверху, высота 0.0878, без верхнего отступа). Откат: InAppIsland.kt 1.4.
 // Версия: 1.4 (21.10) — вторая сверка со скриншотом: время сдвинуто влево на 11 px (правое поле 0.0335 ширины), начертание не через вес (HyperOS его игнорировал): время — sans-serif BOLD, название — sans-serif-medium; значок 0.57 высоты и на пиксель ниже, плашка на пиксель ниже. Откат: InAppIsland.kt 1.3.
@@ -9,6 +11,14 @@ package com.app.lifetracker
 
 import android.animation.ValueAnimator
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.Context
+import android.content.Intent
+import android.graphics.PixelFormat
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import android.view.WindowManager
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.Typeface
@@ -63,6 +73,10 @@ class InAppIsland(private val activity: Activity) {
 
     private var cutout: Rect? = null
     private var attached = false
+    private var mode = 0 // 0 — нигде, 1 — в decorView (не нажимается), 2 — своё окно поверх всех
+    private var winLp: WindowManager.LayoutParams? = null
+    private var winW = 0
+    private var winH = 0
     private var started = false
     private var expanded = false
     private var expandedAt = 0L
@@ -70,6 +84,7 @@ class InAppIsland(private val activity: Activity) {
     private var shownStage = -1
     private var builtFor: Rect? = null
     private var paused = false
+    private var autoShownFor: String? = null
 
     private fun dp(v: Float) = (v * density).roundToInt()
 
@@ -143,7 +158,6 @@ class InAppIsland(private val activity: Activity) {
     fun start() {
         if (started) return
         started = true
-        attach()
         handler.post(tick)
     }
 
@@ -165,15 +179,83 @@ class InAppIsland(private val activity: Activity) {
         }
     }
 
+    private fun wm() = activity.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+    private fun canOverlay(): Boolean = try {
+        Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(activity)
+    } catch (e: Exception) {
+        false
+    }
+
+    /** Ставит слой в нужное место: своё окно поверх всех (нажимается) или, без разрешения, decorView. */
     private fun attach() {
-        if (attached) return
+        val want = if (canOverlay()) 2 else 1
+        if (attached && mode == want) return
+        detach()
         try {
-            (activity.window.decorView as ViewGroup).addView(
-                layer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            )
+            if (want == 2) {
+                val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE
+                val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                val wl = WindowManager.LayoutParams(max(winW, 1), max(winH, 1), type, flags, PixelFormat.TRANSLUCENT)
+                wl.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                if (Build.VERSION.SDK_INT >= 28) wl.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                winLp = wl
+                wm().addView(layer, wl)
+            } else {
+                (activity.window.decorView as ViewGroup).addView(
+                    layer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                )
+            }
+            mode = want
             attached = true
         } catch (e: Exception) {
-            // окно не готово: попробуем при следующем запуске
+            // окно не готово или разрешение отозвано: попробуем при следующем обновлении
+        }
+    }
+
+    private fun detach() {
+        if (!attached) return
+        try {
+            if (mode == 2) wm().removeViewImmediate(layer) else (layer.parent as? ViewGroup)?.removeView(layer)
+        } catch (e: Exception) {
+        }
+        attached = false
+        mode = 0
+    }
+
+    /** Размер окна повторяет плашку/карточку, чтобы вокруг них касания шли в строку состояния и приложение. */
+    private fun updateWindow() {
+        val wl = winLp ?: return
+        if (mode != 2 || !attached) return
+        if (wl.width == winW && wl.height == winH) return
+        wl.width = winW
+        wl.height = winH
+        try {
+            wm().updateViewLayout(layer, wl)
+        } catch (e: Exception) {
+        }
+    }
+
+    /** Один раз предлагает выдать разрешение «Поверх других приложений» — без него плашку нельзя нажать. */
+    private fun askOverlayOnce() {
+        if (Build.VERSION.SDK_INT < 23 || canOverlay() || activity.isFinishing) return
+        val prefs = activity.getSharedPreferences("island", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("asked", false)) return
+        prefs.edit().putBoolean("asked", true).apply()
+        try {
+            AlertDialog.Builder(activity)
+                .setTitle("Плашка таймера")
+                .setMessage("Чтобы плашку сверху можно было нажимать и раскрывать, разрешите приложению «Поверх других приложений».")
+                .setPositiveButton("Открыть настройки") { _, _ ->
+                    try {
+                        activity.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + activity.packageName)))
+                    } catch (e: Exception) {
+                    }
+                }
+                .setNegativeButton("Позже", null)
+                .show()
+        } catch (e: Exception) {
         }
     }
 
@@ -185,6 +267,7 @@ class InAppIsland(private val activity: Activity) {
         progress = 0f
         card.visibility = View.GONE
         pill.alpha = 1f
+        if (mode == 2) detach() // окно поверх всех не должно оставаться и перехватывать касания
     }
 
     private fun toggle() {
@@ -237,10 +320,13 @@ class InAppIsland(private val activity: Activity) {
         val lp = card.layoutParams as FrameLayout.LayoutParams
         lp.width = w
         lp.height = h
-        lp.gravity = Gravity.TOP or Gravity.START
-        lp.leftMargin = centerX - w / 2
+        lp.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        lp.leftMargin = 0
         lp.topMargin = top
         card.layoutParams = lp
+        winW = w
+        winH = top + h
+        updateWindow()
         cardBg.cornerRadius = lerp(pillH / 2f, cardR, p.coerceIn(0f, 1f))
         cardContent.alpha = ((p - 0.3f) / 0.7f).coerceIn(0f, 1f)
         pill.alpha = (1f - p / 0.25f).coerceIn(0f, 1f)
@@ -249,14 +335,21 @@ class InAppIsland(private val activity: Activity) {
     private fun refresh() {
         val r = cutout
         val info = CardTimers.primaryInfo(activity.applicationContext)
-        if (r == null || info == null || !attached) {
+        if (info == null) autoShownFor = null
+        if (r == null || info == null) {
             hide()
             return
         }
+        layoutFor(r)
+        attach()
+        if (!attached) {
+            hide()
+            return
+        }
+        askOverlayOnce()
         currentId = info.id
         paused = !info.running
         if (expanded && System.currentTimeMillis() - expandedAt > 6000L) collapse()
-        layoutFor(r)
         val stage = XiaomiIsland.stageFor(info.leftMs)
         if (stage != shownStage) {
             shownStage = stage
@@ -273,6 +366,11 @@ class InAppIsland(private val activity: Activity) {
             pauseBtn.setImageBitmap(XiaomiIsland.pauseBitmap(fraction.coerceIn(0f, 1f), stage, paused))
         }
         layer.visibility = View.VISIBLE
+        // только что запущенный таймер: плашка сама раскрывается (нажать на неё нельзя — см. шапку файла)
+        if (info.running && info.totalMs > 0 && info.totalMs - info.leftMs < 3000L && autoShownFor != info.id && !expanded) {
+            autoShownFor = info.id
+            expand()
+        }
     }
 
     /** Размеры и места плашки и карточки считаются от выреза; пересчёт — только когда вырез поменялся. */
@@ -308,7 +406,7 @@ class InAppIsland(private val activity: Activity) {
         }
         pill.addView(leftBox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         pill.addView(rightBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        pill.layoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.START; leftMargin = left; topMargin = top }
+        pill.layoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; topMargin = top }
 
         pillLeft = left
         pillTop = top
