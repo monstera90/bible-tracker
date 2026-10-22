@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 8.0 (22.10) — структурная правка: «Создавать задачу» (itemcards.js 12.0): `.item-form-hint`, `.item-form-tabs`/`.item-form-tab` (выбор вкладки в форме), `.scan-task-card*` (слой «задача добавлена»). Откат: components.css 7.1.
    Версия: 7.1 (21.10) — таймеры карточек: `.item-card-timer-btns` (ряд кнопок внизу карточки), `.item-card-stop-btn` слева и `.item-card-start-btn` справа одинаковой ширины (`flex:1 1 0`). Откат: components.css 7.0.
    Версия: 7.0 (21.10) — структурная правка: `.scan-reminder-card` / `.scan-reminder-text` — слой «Напоминалки» (itemcards.js 10.0). Откат: components.css 6.0.
    Версия: 6.0 (21.10) — убраны стили кнопки «Поля карточки» (`.item-card-page-btn`): карточек-заметок больше нет.
@@ -4413,6 +4414,19 @@ body::after{
 .item-form-date{ flex:0 0 auto; --rb:40px; }
 /* дата в форме — таблетка с полной датой (круг на 32px из окна напоминания вмещает только число) */
 .item-form-date .reminder-bubble{ width:auto; min-width:var(--rb, 40px); padding:0 16px; border-radius:calc(var(--rb, 40px) / 2); font-size:16px; white-space:nowrap; }
+.item-form-hint{ font-size:13px; line-height:1.35; color:var(--ink-soft, inherit); }
+.item-form-tabs{ display:grid; grid-template-columns:repeat(auto-fill, minmax(72px, 1fr)); gap:6px; }
+.item-form-tab{
+  display:flex; flex-direction:column; align-items:center; gap:3px;
+  padding:6px 2px; box-sizing:border-box;
+  border:1px solid var(--groove-shadow);
+  border-radius:8px;
+  background:transparent;
+  color:var(--ink, inherit);
+  font-size:11px; line-height:1.1;
+}
+.item-form-tab svg{ width:28px; height:28px; }
+.item-form-tab.selected{ border:3px solid var(--ink, #000); padding:4px 0; }
 .item-form-error{ min-height:1.2em; color:#b3261e; font-size:13px; }
 .item-form-buttons{ display:flex; gap:10px; }
 .item-form-buttons .workbooks-run-btn{ flex:1 1 0; }
@@ -4592,11 +4606,35 @@ body::after{
 }
 .scan-reminder-text{ white-space:pre-wrap; overflow-wrap:anywhere; text-align:center; }
 .item-form-types{ flex-direction:column; }
+/* «Создавать задачу»: слой после скана — что добавлено и на какую вкладку (вид как у .scan-reminder-card) */
+.scan-task-card{
+  box-sizing:border-box;
+  width:min(92vw, 420px);
+  max-height:80vh;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  padding:20px;
+  background:var(--bg-mid, #fbf4e2);
+  color:var(--ink, #000);
+  border:2px solid var(--ink, #000);
+  border-radius:14px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:12px;
+  text-align:center;
+  animation:scanCardPop .2s ease-out;
+}
+.scan-task-head{ font-size:14px; color:var(--ink-soft, inherit); }
+.scan-task-text{ font-size:18px; line-height:1.4; font-weight:700; white-space:pre-wrap; overflow-wrap:anywhere; }
+.scan-task-tab{ display:flex; flex-direction:column; align-items:center; gap:4px; font-size:15px; }
+.scan-task-ico{ width:44px; height:44px; }
+.scan-task-ico svg{ width:100%; height:100%; }
 @keyframes scanCardFade{ from{ opacity:0; } to{ opacity:1; } }
 @keyframes scanCardPop{ from{ transform:scale(.92); opacity:0; } to{ transform:scale(1); opacity:1; } }
 /* Android 5 и «уменьшить анимацию»: без анимации появления */
 @media (prefers-reduced-motion: reduce){
-  .scan-card-overlay, .scan-card, .scan-reminder-card{ animation:none; }
+  .scan-card-overlay, .scan-card, .scan-reminder-card, .scan-task-card{ animation:none; }
 }
 
 /* таймеры карточек (шаг 5а): внизу карточки две равные кнопки — «Стоп» слева, «Пуск» справа; цифры идущего таймера выделены, приостановленного — приглушены.

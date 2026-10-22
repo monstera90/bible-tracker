@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 12.0 (22.10) — структурная правка: тип карточки «Создавать задачу» (`type:"task"`: `title` — текст задачи до 80 знаков, `icon` — ключ вкладки задач). QR `lt://v1/task/<ключ вкладки>/<текст>` несёт задачу в самом коде (`qrTextFor`, `taskText`); форма с выбором вкладки по пиктограммам (`openForm`, `deps.getTaskTabs`); скан → `handleScannedTask`/`applyScannedTask` (`deps.addTaskFromQr`: добавляет задачу либо, если такая же невыполненная уже есть, переносит её в конец вкладки) → слой `showTaskResultOverlay` (текст, пиктограмма и название вкладки); из окна ярлыка задача кладётся в очередь `pendingScanTasks_v1` и приложение открывается входом `newtask` (`drainPendingTasks`, без правок Kotlin). Откат: itemcards.js 11.0.
    Версия: 11.0 (21.10) — структурная правка: на карточке-таймере две равные кнопки — «Стоп» слева и «Пуск» справа (`.item-card-timer-btns`); `stopTimerForCard` отменяет таймер (в оболочке `cancelCardTimer`, в окне ярлыка `deps.timers.cancel`, в браузере — запасной localStorage); цифры возвращаются к заданному времени. Откат: itemcards.js 10.2.
    Версия: 10.3 (22.10) — QR «Сегодня» и «Напоминалки» одинаковые у всех (`lt://v1/today`, `lt://v1/reminder`): `qrTextFor` для этих типов возвращает общий код, `handleScanned` разбирает `today`/`reminder` без поиска карточки (напоминание — из «Комментариев» сканирующего, «Сегодня» — новая заметка сканирующего; из окна ярлыка — вход в приложение с id `today`, режим `note`). Прежние коды по id карточки работают как раньше. Откат: itemcards.js 10.2.
    Версия: 10.2 (21.10) — `qrTextFor`: обрезка названия таймера не оставляет половину эмодзи (иначе библиотека QR падала и код не рисовался). Откат: itemcards.js 10.1.
@@ -53,6 +54,10 @@ window.initItemCardsModule = function(deps){
   var SIZE_KEY = "itemCardsSize_v1";
   var QR_PREFIX = "lt://v1/card/";
   var TIMER_PREFIX = "lt://v1/timer/";
+  var TASK_PREFIX = "lt://v1/task/";
+  var TASK_TEXT_MAX = 80; // текст задачи в коде: длиннее — код плотнее и хуже читается на малой наклейке (на карточке и в PDF показывается только начало)
+  var PENDING_TASKS_KEY = "pendingScanTasks_v1"; // очередь «окно ярлыка → приложение» (тот же localStorage)
+  var TASK_NATIVE_ID = "newtask"; // служебный id входа из оболочки для задач (проходит проверку оболочки: 4–32 букв и цифр)
   var TODAY_CODE = "lt://v1/today";
   var REMINDER_CODE = "lt://v1/reminder";
   var TODAY_NATIVE_ID = "today"; // служебный id для входа из оболочки (не совпадает с id карточек: в них нет буквы «o»)
@@ -60,7 +65,14 @@ window.initItemCardsModule = function(deps){
   // Текст QR карточки. Таймер несёт время и название в самом коде (lt://v1/timer/<секунды>/<название>): любое устройство
   // с приложением запускает такой таймер по скану, карточка там не нужна (код можно напечатать и карточку удалить).
   // Остальные карточки — как раньше, по id (lt://v1/card/<id>). Ранее напечатанные коды таймеров по id работают, пока карточка есть.
+  // текст задачи: пробелы схлопнуты, длина не больше max, парный знак (эмодзи) не режется пополам
+  function taskText(s, max){
+    var t = String(s == null ? "" : s).replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, max || TASK_TEXT_MAX);
+    if(/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1);
+    return t.replace(/ $/, "");
+  }
   function qrTextFor(c){
+    if(c && c.type === "task" && c.icon && taskText(c.title)) return TASK_PREFIX + c.icon + "/" + taskText(c.title); // задача в самом коде
     if(c && c.type === "timer" && c.seconds > 0){
       var t = String(c.title || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, TIMER_QR_TITLE_MAX);
       if(/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1); // обрезка не должна оставлять половину эмодзи (парный знак)
@@ -105,7 +117,7 @@ window.initItemCardsModule = function(deps){
     datepaper: '<path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path><rect x="8.5" y="11.5" width="7" height="6" rx="1"></rect><path d="M8.5 14h7"></path><path d="M10.5 10.2v2.2M13.5 10.2v2.2"></path>'
   };
   var ICON_ORDER = ["bottle", "container", "jar", "bicycle", "car", "vegetable", "paper"];
-  var DEFAULT_ICON = { item: "", timer: "", datenote: "datepaper", reminder: "reminder" };
+  var DEFAULT_ICON = { item: "", timer: "", task: "", datenote: "datepaper", reminder: "reminder" };
   var DATENOTE_TITLE = "Сегодня";
   var REMINDER_TITLE = "Напоминалка";
   // «Сегодня» (бывшая «Заметка с датой») и «Напоминалка» — по одной на приложение, без формы: название всегда своё
@@ -115,6 +127,15 @@ window.initItemCardsModule = function(deps){
     if(c.type === "datenote") return DATENOTE_TITLE;
     if(c.type === "reminder") return REMINDER_TITLE;
     return c.title || "";
+  }
+  // вкладки задач, куда можно положить задачу: [{key,title,svg}] — список и пиктограммы отдаёт my.js (в scan.html их нет)
+  function taskTabs(){
+    try{ return (deps.getTaskTabs && deps.getTaskTabs()) || []; }catch(e){ return []; }
+  }
+  function taskTabSvg(key){
+    var tabs = taskTabs();
+    for(var i = 0; i < tabs.length; i++) if(tabs[i].key === key) return tabs[i].svg || "";
+    return "";
   }
   function iconSvg(name){
     if(!name || !ICONS[name]) return "";
@@ -168,7 +189,7 @@ window.initItemCardsModule = function(deps){
   // запись карточки в том виде, как она ходит между устройствами (и проверка пришедшей из облака)
   function cloudShape(r){
     if(!r || typeof r.id !== "string" || !/^[A-Za-z0-9]{4,32}$/.test(r.id)) return null;
-    if(r.type !== "timer" && r.type !== "item" && r.type !== "datenote" && r.type !== "reminder") return null;
+    if(r.type !== "timer" && r.type !== "item" && r.type !== "task" && r.type !== "datenote" && r.type !== "reminder") return null;
     var o = {
       id: r.id,
       type: r.type,
@@ -459,6 +480,10 @@ window.initItemCardsModule = function(deps){
           '<button type="button" class="item-card-start-btn" title="Запустить таймер">Пуск</button>' +
         '</div>';
     }
+    if(c.type === "task"){ // пиктограмма вкладки, куда код кладёт задачу, и начало текста задачи (название обрезается стилем)
+      return '<div class="item-card-icon">' + taskTabSvg(c.icon) + '</div>' +
+        '<div class="item-card-title"></div>';
+    }
     return '<div class="item-card-icon">' + icon + '</div>' +
       '<div class="item-card-title"></div>' +
       '<div class="item-card-date">' + escapeHtml(isoToRu(c.date)) + '</div>' +
@@ -478,6 +503,7 @@ window.initItemCardsModule = function(deps){
     html += '<div class="item-type-menu" id="itemTypeMenu" style="display:none;">' +
       '<button type="button" class="workbooks-run-btn" data-type="timer">Таймер</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="item">Предмет</button>' +
+      '<button type="button" class="workbooks-run-btn" data-type="task">Создавать задачу</button>' +
       (hasDateNote ? '' : '<button type="button" class="workbooks-run-btn" data-type="datenote">' + DATENOTE_TITLE + '</button>') +
       (hasReminder ? '' : '<button type="button" class="workbooks-run-btn" data-type="reminder">' + REMINDER_TITLE + '</button>') +
     '</div>';
@@ -549,7 +575,9 @@ window.initItemCardsModule = function(deps){
     deps.loadQrLib().then(function(){
       if(host.dataset.built !== text) return;
       var size = Math.max(60, Math.round(card.clientWidth * 0.72));
-      try{ new window.QRCode(host, { text: text, width: size, height: size, colorDark: "#000000", colorLight: "#ffffff" }); }catch(e){}
+      var qo = { text: text, width: size, height: size, colorDark: "#000000", colorLight: "#ffffff" };
+      if(cc && cc.type === "task") qo.correctLevel = window.QRCode.CorrectLevel.M; // текст внутри кода: уровень M — меньше модулей, код крупнее
+      try{ new window.QRCode(host, qo); }catch(e){}
     }).catch(function(){ host.textContent = "QR недоступен"; });
   }
   function setFace(card, back){
@@ -697,7 +725,12 @@ window.initItemCardsModule = function(deps){
       for(var i = 0; i < bs.length; i++) bs[i].disabled = disabled;
     }
     pdfBusy = true; setButtons(true); setStatus("Готовлю PDF…");
-    var forPdf = cards.map(function(c){ return { id: c.id, title: cardTitle(c), qr: qrTextFor(c) }; });
+    // у «Создавать задачу» рядом с кодом печатается только начало текста (полный текст лежит в самом коде)
+    var forPdf = cards.map(function(c){
+      var ttl = cardTitle(c);
+      if(c.type === "task" && ttl.length > 40) ttl = taskText(ttl, 40) + "…";
+      return { id: c.id, title: ttl, qr: qrTextFor(c) };
+    });
     deps.loadQrLib().then(function(){
       return window.CardPdf.build(forPdf, perPage, { onProgress: function(done, total){ setStatus("Готовлю PDF… " + done + " из " + total); } });
     }).then(function(blob){
@@ -805,7 +838,7 @@ window.initItemCardsModule = function(deps){
   }
 
   // ---------- форма создания / правки ----------
-  var TYPE_LABEL = { timer: "Таймер", item: "Предмет" };
+  var TYPE_LABEL = { timer: "Таймер", item: "Предмет", task: "Создавать задачу" };
   function openForm(type, card, forcedId){
     screenMode = "form";
     var el = container();
@@ -816,8 +849,17 @@ window.initItemCardsModule = function(deps){
     };
     var html = '<div class="mdeditor-tab item-card-form" id="itemCardForm">';
     html += '<h3 class="common-tab-title">' + escapeHtml(TYPE_LABEL[type]) + '</h3>';
-    html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="Название" maxlength="80" autocomplete="off">';
-    if(type === "timer"){
+    if(type === "task"){
+      html += '<div class="item-form-hint">Код с текстом задачи: кто его отсканирует в приложении, получит эту задачу на выбранной вкладке. Такая же невыполненная задача второй раз не создаётся — её переносят в конец списка вкладки.</div>';
+    }
+    html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="' + (type === "task" ? "Текст задачи (до " + TASK_TEXT_MAX + " знаков)" : "Название") + '" maxlength="' + (type === "task" ? TASK_TEXT_MAX : 80) + '" autocomplete="off">';
+    if(type === "task"){
+      html += '<div class="item-form-tabs" id="icfTabs">';
+      taskTabs().forEach(function(t){
+        html += '<button type="button" class="item-form-tab" data-tab="' + escapeHtml(t.key) + '" title="' + escapeHtml(t.title) + '">' + (t.svg || "") + '<span>' + escapeHtml(t.title) + '</span></button>';
+      });
+      html += '</div>';
+    } else if(type === "timer"){
       html += '<div class="item-form-timer" id="icfTimer">' +
         wheelHtml("h", 24, "ч") + wheelHtml("m", 60, "мин") + wheelHtml("s", 60, "с") +
       '</div>';
@@ -851,6 +893,19 @@ window.initItemCardsModule = function(deps){
       setWheel("h", Math.floor(total / 3600));
       setWheel("m", Math.floor((total % 3600) / 60));
       setWheel("s", total % 60);
+    } else if(type === "task"){
+      var tabsEl = document.getElementById("icfTabs");
+      function markTabs(){
+        var bs = tabsEl.querySelectorAll(".item-form-tab");
+        for(var i = 0; i < bs.length; i++) bs[i].classList.toggle("selected", bs[i].dataset.tab === data.icon);
+      }
+      markTabs();
+      tabsEl.addEventListener("click", function(e){
+        var b = e.target.closest(".item-form-tab");
+        if(!b) return;
+        data.icon = b.dataset.tab;
+        markTabs();
+      });
     } else {
       var iconsEl = document.getElementById("icfIcons");
       function markIcons(){
@@ -889,6 +944,11 @@ window.initItemCardsModule = function(deps){
     document.getElementById("icfSave").addEventListener("click", function(){
       var title = titleEl.value.replace(/^\s+|\s+$/g, "");
       errEl.textContent = "";
+      if(type === "task"){
+        title = taskText(title);
+        if(!title){ errEl.textContent = "Введите текст задачи."; return; }
+        if(!data.icon){ errEl.textContent = "Выберите вкладку, куда добавлять задачу."; return; }
+      }
       if(!title){ errEl.textContent = "Введите название."; return; }
       if(type === "timer"){
         var sec = getWheel("h") * 3600 + getWheel("m") * 60 + getWheel("s");
@@ -1145,12 +1205,84 @@ window.initItemCardsModule = function(deps){
     if(p.kind === "reminder"){ showReminderOverlay(); return; } // общий код «Напоминалки»: карточка не нужна
     if(p.kind === "today"){ openTodayFromScan(); return; }       // общий код «Сегодня»: карточка не нужна
     if(p.kind === "note"){ openScannedNote(p.id); return; }
+    if(p.kind === "task"){ handleScannedTask(p); return; }  // задача в самом коде: карточка не нужна
     if(p.kind === "timer"){ showScanned(timerFromCode(p)); return; } // таймер из самого кода: отсчёт стартует сразу, карточка не нужна
     showNoticeOverlay({ kind: p.kind, url: p.url, text: p.text });
   }
 
+  // ---------- «Создавать задачу»: скан кода lt://v1/task/<вкладка>/<текст> ----------
+  // В приложении задачу добавляет my.js (deps.addTaskFromQr): новую создаёт на вкладке, а если такая же невыполненная уже есть —
+  // не плодит дубликат, а переносит её в конец списка этой вкладки. Окно ярлыка (scan.html) приложения не содержит: задача
+  // кладётся в очередь (тот же localStorage) и приложение открывается входом TASK_NATIVE_ID — оболочка ничего нового не знает.
+  function handleScannedTask(p){
+    if(standalone){
+      try{
+        var q = JSON.parse(localStorage.getItem(PENDING_TASKS_KEY) || "[]");
+        if(!Array.isArray(q)) q = [];
+        q.push({ tab: p.tab, text: p.text, at: Date.now() });
+        localStorage.setItem(PENDING_TASKS_KEY, JSON.stringify(q.slice(-20)));
+      }catch(e){}
+      if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(TASK_NATIVE_ID, "note"); }catch(e){} }
+      leaveStandalone();
+      return;
+    }
+    applyScannedTask(p);
+  }
+  function applyScannedTask(p, silent){
+    var res;
+    try{ res = deps.addTaskFromQr ? deps.addTaskFromQr(p.tab, p.text) : { status: "error", reason: "unsupported" }; }
+    catch(e){ console.error(e); res = { status: "error", reason: "fail" }; }
+    if(!silent) showTaskResultOverlay(p, res);
+    return res;
+  }
+  // очередь из окна ярлыка: свежие записи (не старше 30 минут) выполняются, слой показывает результат последней
+  function drainPendingTasks(){
+    var q = [];
+    try{ q = JSON.parse(localStorage.getItem(PENDING_TASKS_KEY) || "[]"); }catch(e){ q = []; }
+    try{ localStorage.removeItem(PENDING_TASKS_KEY); }catch(e){}
+    if(!Array.isArray(q)) return;
+    var now = Date.now();
+    q = q.filter(function(x){ return x && typeof x.tab === "string" && typeof x.text === "string" && now - (Number(x.at) || 0) < 30 * 60 * 1000; });
+    for(var i = 0; i < q.length; i++) applyScannedTask(q[i], i < q.length - 1);
+  }
+  // слой: задача «…» добавлена (или перенесена в конец) на вкладку (пиктограмма и название)
+  function showTaskResultOverlay(p, res){
+    var o = newOverlay();
+    var card = document.createElement("div");
+    card.className = "scan-task-card";
+    card.addEventListener("click", function(e){ e.stopPropagation(); });
+    var head = document.createElement("div");
+    head.className = "scan-task-head";
+    var txt = document.createElement("div");
+    txt.className = "scan-task-text";
+    txt.textContent = "«" + (res && res.text ? res.text : p.text) + "»";
+    if(res && (res.status === "added" || res.status === "moved")){
+      head.textContent = res.status === "added" ? "Задача добавлена на вкладку" : "Такая задача уже была — перенесена в конец вкладки";
+      card.appendChild(txt);
+      card.appendChild(head);
+      var tab = document.createElement("div");
+      tab.className = "scan-task-tab";
+      tab.innerHTML = '<div class="scan-task-ico">' + (res.tabSvg || "") + '</div>';
+      var nm = document.createElement("span");
+      nm.textContent = res.tabTitle || "";
+      tab.appendChild(nm);
+      card.appendChild(tab);
+    } else {
+      var why = res && res.reason;
+      head.textContent = why === "badtab" ? "Код ссылается на вкладку, которой нет в этой версии приложения."
+        : why === "readonly" ? "Задачу не добавить: на вкладке «Общие задачи» у вас только просмотр."
+        : why === "unsupported" ? "Эта версия приложения не умеет добавлять задачи по коду."
+        : "Не удалось добавить задачу.";
+      card.appendChild(head);
+      card.appendChild(txt);
+    }
+    o.appendChild(card);
+    if(isLegacyAnim()){ o.style.animation = "none"; card.style.animation = "none"; } // Android 5: без анимации
+  }
+
   // найденная по скану карточка: таймер стартует сразу и показывается слоем; «Сегодня» слоя не имеет — сразу создаёт заметку
   function showScanned(c){
+    if(c.type === "task"){ handleScannedTask({ tab: c.icon, text: c.title }); return; } // на случай кода по id карточки
     if(c.type === "datenote"){ openDatedNoteFromScan(c); return; }
     if(c.type === "reminder"){ showReminderOverlay(); return; } // «Напоминалка»: случайное напоминание из «Комментариев» слоем
     if(c.type === "timer") startTimerForCard(c); // скан таймера: отсчёт стартует сразу (если уже шёл — заново)
@@ -1395,6 +1527,7 @@ window.initItemCardsModule = function(deps){
   // вход из оболочки (ScanActivity → MainActivity): mode "note" — «Сегодня» (id карточки) либо заметка по QR (id заметки),
   // "create" — создать карточку с этим id (код уже напечатан)
   function openCardFromNative(id, mode){
+    if(mode === "note" && id === TASK_NATIVE_ID){ drainPendingTasks(); return; } // «Создавать задачу», отсканированный в окне ярлыка
     if(mode === "note" && id === TODAY_NATIVE_ID){ createDatedNoteWhenReady(0); return; } // общий код «Сегодня» из окна ярлыка
     reloadCards();
     var c = findCard(id);

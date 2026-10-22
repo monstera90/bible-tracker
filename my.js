@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 75.0 (22.10) — структурная правка: `addTaskFromQr` (QR «Создавать задачу», itemcards.js 12.0): добавляет задачу на вкладку или, если такая же невыполненная уже есть, переносит её в конец списка вкладки; `moveTaskToTab` теперь возвращает id задачи (у переноса между личным и общим хранилищем он новый); деп `getTaskTabs`/`addTaskFromQr` у `initItemCardsModule`; вход оболочки с id `newtask` не переключает вкладку. Откат: my.js 74.2.
    Версия: 74.2 (21.10) — скрепка задач: картинка перед сохранением идёт через `MdEditor.prepareImageFile` (пережатие без видимой потери). Откат: my.js 74.1.
    Версия: 74.1 (21.10) — деп `loadQrLib` у `initMdEditorModule` (QR-код заметки). Откат: my.js 74.0.
    Версия: 74.0 (21.10) — структурная правка: вкладка set2s_10 «Claude» (модуль claudetab.js, ветка в switchSettingsTab до заглушки; `ClaudeTabMod.onSwitch` при смене вкладки и `ClaudeTabMod.hide` при закрытии окна настроек, чтобы убрать нативный WebView).
@@ -10612,6 +10613,11 @@
         loadJsqrLib: loadJsqrLib,
         getMdEditor: function(){ return MdEditor; },
         openNotesTab: function(){ switchSettingsTab("set2s_1"); },
+        // QR «Создавать задачу»: вкладки для выбора (ключ, название, пиктограмма с настоящей вкладки) и добавление задачи по коду
+        getTaskTabs: function(){
+          return TASK_MOVABLE_TABS.map(function(k){ return {key: k, title: taskQrTabTitle(k), svg: TASK_MOVE_ICON_SVG(k)}; });
+        },
+        addTaskFromQr: addTaskFromQr,
         // напоминания карточек: кнопка-часы, окно даты/времени с повтором и пересчёт сроков — те же, что у задач
         reminderBtnParts: reminderBtnParts,
         formatReminder: function(ts){ return Notifications.formatReminder(ts); },
@@ -10639,6 +10645,8 @@
   // оболочка зовёт window.__ltOpenCard; холодный старт — параметры адреса ?card=<id>&cardmode=…
   function openCardFromNative(id, mode){
     if(!/^[A-Za-z0-9]{4,32}$/.test(String(id || ""))) return;
+    // «Создавать задачу» из окна ярлыка: вкладку не переключаем — задача добавляется, слой с результатом поверх текущего экрана
+    if(String(id) === "newtask"){ ensureItemCards().openCardFromNative("newtask", "note"); return; }
     openSettingsTabDirect("set2s_9");
     ensureItemCards().openCardFromNative(String(id), mode === "create" ? "create" : "note");
   }
@@ -20211,23 +20219,82 @@
   }
   function moveTaskToTab(id, newTab){
     var task = getTaskById(id);
-    if(!task || task.c.tab === newTab) return;
+    if(!task || task.c.tab === newTab) return id;
     // TASK_SHARED_TASKS — перенос задачи МЕЖДУ личным state и облачным хранилищем группы: т.к. это
     // два разных хранилища (localStorage/облако личного стейта vs зашифрованный
     // /groups/<groupId>/tasks), простой сменой поля c.tab не обойтись — вместо этого создаём новую
     // запись в целевом хранилище с тем же содержимым и удаляем исходную.
     if(isGroupTaskId(id)){
-      if(newTab === "jointtasks") return; // уже общая задача — переносить некуда
-      moveGroupTaskToPersonal(id, newTab);
-      return;
+      if(newTab === "jointtasks") return id; // уже общая задача — переносить некуда
+      return moveGroupTaskToPersonal(id, newTab) || id; // возвращает id: при переносе между хранилищами он новый
     }
     if(newTab === "jointtasks" && isGroupTasksActive()){
-      movePersonalTaskToGroup(id);
-      return;
+      return movePersonalTaskToGroup(id) || id;
     }
     task.c.tab = newTab;
     if(newTab !== "next") task.c.nextForProjectId = null;
     saveTaskData(id, task.c);
+    return id;
+  }
+  // QR «Создавать задачу» (itemcards.js → deps.addTaskFromQr): код несёт ключ вкладки и текст задачи. Если невыполненная задача с
+  // таким текстом уже есть (на любой вкладке, личная или общая) — дубликат не создаётся: её переносят на нужную вкладку и ставят
+  // в конец списка. Иначе создаётся новая. Возвращает {status:"added"|"moved"|"error", reason, text, tabTitle, tabSvg}.
+  // Вкладки Red и «Задачи в работе» — витрины (см. createTask): «лежать» на них значит иметь красную отметку / чемоданчик.
+  function addTaskFromQr(tabKey, rawText){
+    var text = String(rawText == null ? "" : rawText).replace(/\s+/g, " ").trim();
+    var info = {text: text, tabTitle: TASK_TAB_TITLES[tabKey] || tabKey, tabSvg: ""};
+    if(TASK_MOVABLE_TABS.indexOf(tabKey) === -1){ info.status = "error"; info.reason = "badtab"; return info; }
+    info.tabTitle = taskQrTabTitle(tabKey);
+    info.tabSvg = TASK_MOVE_ICON_SVG(tabKey);
+    if(!text){ info.status = "error"; info.reason = "empty"; return info; }
+    var groupOn = isGroupTasksActive(), groupRO = groupOn && isGroupTasksReadOnly();
+    if(tabKey === "jointtasks" && groupRO){ info.status = "error"; info.reason = "readonly"; return info; }
+    function keyOf(t){ return String(t || "").replace(/\s+/g, " ").trim().toLowerCase(); }
+    var want = keyOf(text);
+    var all = getAllTasks();
+    if(groupOn && !groupRO){ try{ all = all.concat(getAllGroupTasks()); }catch(e){} }
+    var same = all.filter(function(t){ return t.c.checked !== true && keyOf(t.c.text) === want; });
+    function onTab(t){
+      if(tabKey === "red") return t.c.tab === "red" || t.c.flag === "red" || t.c.flag === "yellow";
+      if(tabKey === "worktasks") return t.c.tab === "worktasks" || getTaskWorkState(t) !== "off";
+      return t.c.tab === tabKey;
+    }
+    var found = null;
+    for(var i = 0; i < same.length && !found; i++) if(onTab(same[i])) found = same[i];
+    if(!found && same.length) found = same[0];
+    var id;
+    if(found){
+      id = found.id;
+      if(!onTab(found)){
+        if(tabKey === "red"){ found.c.flag = "red"; saveTaskData(id, found.c); }
+        else if(tabKey === "worktasks"){ found.c.inWork = true; saveTaskData(id, found.c); }
+        else id = moveTaskToTab(id, tabKey);
+      }
+      moveTaskToEdge(id, "bottom");
+      info.status = "moved";
+    } else {
+      if(tabKey === "jointtasks" && groupOn){
+        id = genGroupTaskId();
+        saveGroupTaskData(id, {text: text, tab: "jointtasks", checked: false, checkedAt: null,
+          completionKey: null, nextForProjectId: null, flag: null, inWork: false,
+          createdBy: getDeviceId(), completedBy: null});
+        if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
+      } else {
+        id = createTaskWithText(tabKey, text);
+      }
+      info.status = "added";
+    }
+    // открытая вкладка задач сразу показывает новый список/порядок (кроме момента, когда в ней идёт редактирование строки)
+    try{
+      var ae = document.activeElement;
+      var editing = !!(ae && ae.classList && ae.classList.contains("task-editable"));
+      if(!editing && !activeProjectPickerRerender && settingsModalOverlay && settingsModalOverlay.classList.contains("open") && TASK_TAB_IDS.hasOwnProperty(currentSettingsTab)) renderSettingsTabTask(currentSettingsTab);
+    }catch(e){}
+    return info;
+  }
+  // названия вкладок для QR «Создавать задачу»: как в сетке «Перенести задачу», «Общие задачи» — так, как их называет пользователь
+  function taskQrTabTitle(key){
+    return key === "jointtasks" ? "Общие задачи" : (TASK_TAB_TITLES[key] || key);
   }
   // Перенос ОБЩЕЙ задачи в личное хранилище, на вкладку newTab (любая, кроме "jointtasks" — та
   // проверка уже сделана в moveTaskToTab выше). Создаёт новую личную задачу с тем же
