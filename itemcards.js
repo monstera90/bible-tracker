@@ -1,6 +1,7 @@
 /* ===========================================================================
    itemcards.js
    Версия: 11.0 (21.10) — структурная правка: на карточке-таймере две равные кнопки — «Стоп» слева и «Пуск» справа (`.item-card-timer-btns`); `stopTimerForCard` отменяет таймер (в оболочке `cancelCardTimer`, в окне ярлыка `deps.timers.cancel`, в браузере — запасной localStorage); цифры возвращаются к заданному времени. Откат: itemcards.js 10.2.
+   Версия: 10.3 (22.10) — QR «Сегодня» и «Напоминалки» одинаковые у всех (`lt://v1/today`, `lt://v1/reminder`): `qrTextFor` для этих типов возвращает общий код, `handleScanned` разбирает `today`/`reminder` без поиска карточки (напоминание — из «Комментариев» сканирующего, «Сегодня» — новая заметка сканирующего; из окна ярлыка — вход в приложение с id `today`, режим `note`). Прежние коды по id карточки работают как раньше. Откат: itemcards.js 10.2.
    Версия: 10.2 (21.10) — `qrTextFor`: обрезка названия таймера не оставляет половину эмодзи (иначе библиотека QR падала и код не рисовался). Откат: itemcards.js 10.1.
    Версия: 10.1 (21.10) — QR таймера несёт время и название в самом коде (`lt://v1/timer/<секунды>[/<название до 40 знаков>]`): `qrTextFor`, `timerFromCode`/`timerCodeId`/`virtualCards`; скан такого кода запускает таймер на любом устройстве без карточки; `buildQr` и PDF берут текст через `qrTextFor`. Откат: itemcards.js 10.0.
    Версия: 10.0 (21.10) — структурная правка: тип карточки `reminder` («Напоминалка», одна на приложение, как «Сегодня»): `createSingletonCard` (вместо `createDateNoteCard`), `isSingletonCard`/`cardTitle`, `reminderPool`/`pickReminder` (бочонки в `reminderBag_v1`)/`showReminderOverlay`, уведомление `noreminders`; «Заметка с датой» переименована в «Сегодня» (название всегда берётся из кода, у старых карточек в записях может лежать прежнее). Откат: itemcards.js 9.0.
@@ -52,6 +53,9 @@ window.initItemCardsModule = function(deps){
   var SIZE_KEY = "itemCardsSize_v1";
   var QR_PREFIX = "lt://v1/card/";
   var TIMER_PREFIX = "lt://v1/timer/";
+  var TODAY_CODE = "lt://v1/today";
+  var REMINDER_CODE = "lt://v1/reminder";
+  var TODAY_NATIVE_ID = "today"; // служебный id для входа из оболочки (не совпадает с id карточек: в них нет буквы «o»)
   var TIMER_QR_TITLE_MAX = 40; // название в коде таймера: длиннее — код плотнее и хуже читается на малой наклейке
   // Текст QR карточки. Таймер несёт время и название в самом коде (lt://v1/timer/<секунды>/<название>): любое устройство
   // с приложением запускает такой таймер по скану, карточка там не нужна (код можно напечатать и карточку удалить).
@@ -62,6 +66,9 @@ window.initItemCardsModule = function(deps){
       if(/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1); // обрезка не должна оставлять половину эмодзи (парный знак)
       return TIMER_PREFIX + (c.seconds | 0) + (t ? "/" + t : "");
     }
+    // «Сегодня» и «Напоминалка»: код один на всех, не зависит от карточки и аккаунта — что откроется, решает тот, кто сканирует
+    if(c && c.type === "datenote") return TODAY_CODE;
+    if(c && c.type === "reminder") return REMINDER_CODE;
     return QR_PREFIX + (c ? c.id : "");
   }
   // таймер из отсканированного кода: «виртуальная» карточка (в список не попадает); id считается от времени и названия,
@@ -1135,6 +1142,8 @@ window.initItemCardsModule = function(deps){
       showNoticeOverlay({ kind: "missing", id: p.id });
       return;
     }
+    if(p.kind === "reminder"){ showReminderOverlay(); return; } // общий код «Напоминалки»: карточка не нужна
+    if(p.kind === "today"){ openTodayFromScan(); return; }       // общий код «Сегодня»: карточка не нужна
     if(p.kind === "note"){ openScannedNote(p.id); return; }
     if(p.kind === "timer"){ showScanned(timerFromCode(p)); return; } // таймер из самого кода: отсчёт стартует сразу, карточка не нужна
     showNoticeOverlay({ kind: p.kind, url: p.url, text: p.text });
@@ -1147,10 +1156,11 @@ window.initItemCardsModule = function(deps){
     if(c.type === "timer") startTimerForCard(c); // скан таймера: отсчёт стартует сразу (если уже шёл — заново)
     showCardOverlay(c);
   }
-  function openDatedNoteFromScan(c){
+  function openDatedNoteFromScan(c){ openTodayFromScan(c.id); }
+  function openTodayFromScan(id){
     if(standalone){
       // окно ярлыка: открываем приложение тем же входом (mode "note"), заметку создаст страница приложения
-      if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(c.id, "note"); }catch(e){} }
+      if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(id || TODAY_NATIVE_ID, "note"); }catch(e){} }
       leaveStandalone();
       return;
     }
@@ -1385,6 +1395,7 @@ window.initItemCardsModule = function(deps){
   // вход из оболочки (ScanActivity → MainActivity): mode "note" — «Сегодня» (id карточки) либо заметка по QR (id заметки),
   // "create" — создать карточку с этим id (код уже напечатан)
   function openCardFromNative(id, mode){
+    if(mode === "note" && id === TODAY_NATIVE_ID){ createDatedNoteWhenReady(0); return; } // общий код «Сегодня» из окна ярлыка
     reloadCards();
     var c = findCard(id);
     if(mode === "create" && !c){ openTypeChooser(id); return; }

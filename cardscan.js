@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 1.6 (22.10) — `parseCode` узнаёт одинаковые у всех коды «Сегодня» `lt://v1/today` → `{kind:"today"}` и «Напоминалки» `lt://v1/reminder` → `{kind:"reminder"}` (карточка на устройстве не нужна: открывается то, что есть у того, кто сканирует). Откат: cardscan.js 1.5.
    Версия: 1.5 (21.10) — `parseCode` явно срезает BOM (\uFEFF), который библиотека QR ставит перед текстом с кириллицей (название таймера). Откат: cardscan.js 1.4.
    Версия: 1.4 (21.10) — `parseCode` узнаёт QR таймера `lt://v1/timer/<секунды>[/<название>]` → `{kind:"timer", seconds, title}` (код сам несёт таймер, карточка на устройстве не нужна). Откат: cardscan.js 1.3.
    Версия: 1.3 (21.10) — `parseCode` узнаёт QR заметки `lt://v1/note/<id>` → `{kind:"note", id}` (QR строит кнопка в редакторе заметок, mdeditor.js).
@@ -24,16 +25,21 @@ window.CardScan = (function(){
   var QR_PREFIX = "lt://v1/card/";
   var NOTE_PREFIX = "lt://v1/note/";
   var TIMER_PREFIX = "lt://v1/timer/";
+  var TODAY_CODE = "lt://v1/today";       // «Сегодня»: один и тот же код у всех, заметку создаёт тот, кто сканирует
+  var REMINDER_CODE = "lt://v1/reminder"; // «Напоминалка»: один и тот же код у всех, напоминание берётся у того, кто сканирует
 
   // Разбор текста из QR:
   //   {kind:"card", id}   — код карточки приложения (lt://v1/card/<id>)
   //   {kind:"timer", seconds, title} — таймер, зашитый в код (lt://v1/timer/<секунды>[/<название>])
+  //   {kind:"today"} / {kind:"reminder"} — общие коды «Сегодня» и «Напоминалки» (lt://v1/today, lt://v1/reminder)
   //   {kind:"note", id}   — код заметки «Моего блокнота» (lt://v1/note/<id>)
   //   {kind:"unknown", text} — наша схема lt://, но другая версия/вид (не выполняется)
   //   {kind:"url", url}   — обычная ссылка http(s)
   //   {kind:"text", text} — всё остальное
   function parseCode(text){
     var t = String(text == null ? "" : text).replace(/^[\s\uFEFF]+|[\s\uFEFF]+$/g, ""); // \uFEFF: библиотека QR ставит BOM перед текстом с кириллицей
+    if(t === TODAY_CODE) return { kind: "today" };
+    if(t === REMINDER_CODE) return { kind: "reminder" };
     if(t.indexOf(QR_PREFIX) === 0){
       var id = t.slice(QR_PREFIX.length);
       if(/^[A-Za-z0-9]{4,32}$/.test(id)) return { kind: "card", id: id };
