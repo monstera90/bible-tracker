@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 17.0 (22.10) — структурная правка: при долгом нажатии у карточки две кнопки — глаз и удаление (кнопки «Изменить» нет: карточка открывается на правку тапом); глаз получил класс `mdeditor-share-btn` (общая скрытость до `.visible`, как у кнопки удаления) и стоит левее удаления. Откат: itemcards.js 16.1.
    Версия: 16.1 (22.10) — кнопка `#itemCardsHiddenBtn` больше не заливается цветом: состояние показывает только значок (глаз / перечёркнутый глаз). Откат: itemcards.js 16.0.
    Версия: 16.0 (22.10) — структурная правка: признак карточки `hidden` («скрыть», общий для всех типов, ходит через облако в `cloudShape`): третья кнопка-глаз `.item-card-eye-btn` при долгом нажатии (глаз — показана, перечёркнутый глаз — скрыта); кнопка `#itemCardsHiddenBtn` в нижнем ряду (глаз — показаны все, перечёркнутый — скрытые не показываются; выбор в `itemCardsShowHidden_v1`, `getShowHidden`/`setShowHidden`); скрытая карточка при показе всех бледнее (`.item-card-hidden`); скрытые не попадают в PDF (`exportPdf`); по QR скрытые карточки работают как обычно. Откат: itemcards.js 15.0.
    Версия: 15.0 (22.10) — структурная правка: фильтр карточек по типу — кнопка-воронка `#itemCardsFilterBtn` слева от «+» с выпадающим списком «Все / Таймеры / Предметы / Задачи / Особые» (`FILTERS`, `getFilter`/`setFilter`/`cardMatchesFilter`, выбор помнится в `itemCardsFilter_v1`); «Особые» — «Сегодня» и «Напоминалка». При фильтре кнопка залита (`.pressed`); создание карточки скрытого типа сбрасывает фильтр на «Все». PDF по-прежнему печатает все карточки. Откат: itemcards.js 14.0.
@@ -637,9 +638,8 @@ window.initItemCardsModule = function(deps){
         '<div class="item-card-front">' + cardFrontHtml(c) + '</div>' +
         '<div class="item-card-back" style="display:none;"><div class="item-card-qr"></div></div>' +
         '<div class="book-cover-actions">' +
-          (isSingletonCard(c) ? '' : '<button type="button" class="mdeditor-edit-btn' + (revealed ? " visible" : "") + '" title="Изменить">' + PENCIL_ICON_SVG + '</button>') +
+          '<button type="button" class="mdeditor-share-btn item-card-eye-btn' + (revealed ? " visible" : "") + '" title="' + (c.hidden ? "Скрыта (нажмите, чтобы показывать всегда)" : "Показана (нажмите, чтобы скрыть)") + '">' + (c.hidden ? EYE_OFF_ICON_SVG : EYE_ICON_SVG) + '</button>' +
           '<button type="button" class="mdeditor-delete-btn' + (revealed ? " visible" : "") + '" title="Удалить">' + DELETE_ICON_SVG + '</button>' +
-          '<button type="button" class="item-card-eye-btn' + (revealed ? " visible" : "") + '" title="' + (c.hidden ? "Скрыта (нажмите, чтобы показывать всегда)" : "Показана (нажмите, чтобы скрыть)") + '">' + (c.hidden ? EYE_OFF_ICON_SVG : EYE_ICON_SVG) + '</button>' +
         '</div>';
       card.querySelector(".item-card-title").textContent = cardTitle(c);
       grid.appendChild(card);
@@ -703,7 +703,7 @@ window.initItemCardsModule = function(deps){
     for(var k in revealedIds){ if(revealedIds.hasOwnProperty(k)){ any = true; break; } }
     if(!any) return;
     revealedIds = {};
-    var btns = document.querySelectorAll("#itemCardsGrid .mdeditor-edit-btn.visible, #itemCardsGrid .mdeditor-delete-btn.visible, #itemCardsGrid .item-card-eye-btn.visible");
+    var btns = document.querySelectorAll("#itemCardsGrid .mdeditor-delete-btn.visible, #itemCardsGrid .item-card-eye-btn.visible");
     for(var i = 0; i < btns.length; i++) btns[i].classList.remove("visible");
   }
 
@@ -725,7 +725,7 @@ window.initItemCardsModule = function(deps){
         longFired = true;
         clearAttention(cardNode.dataset.id);
         revealedIds[cardNode.dataset.id] = true;
-        var btns = cardNode.querySelectorAll(".mdeditor-edit-btn, .mdeditor-delete-btn, .item-card-eye-btn");
+        var btns = cardNode.querySelectorAll(".mdeditor-delete-btn, .item-card-eye-btn");
         for(var i = 0; i < btns.length; i++) btns[i].classList.add("visible");
       }, LONG_MS);
     }
@@ -754,7 +754,6 @@ window.initItemCardsModule = function(deps){
       e.stopPropagation();
       clearAttention(id); // любое взаимодействие с карточкой снимает жирную обводку
       if(e.target.closest(".item-card-remind-btn")){ hideRevealed(); openCardReminder(c); return; }
-      if(e.target.closest(".mdeditor-edit-btn")){ hideRevealed(); openForm(c.type, c); return; }
       if(e.target.closest(".item-card-eye-btn")){ // глаз: показывать всегда ↔ скрыть (скрытая видна и в PDF не попадает)
         if(c.hidden) delete c.hidden; else c.hidden = 1;
         c.updatedAt = Date.now();
