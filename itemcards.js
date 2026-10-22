@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 14.0 (22.10) — структурная правка: список категорий в форме «Создавать задачу» берётся из карточек, а не из задач (`cardTaskTags`: категории карточек типа task, без повторов, по алфавиту); последняя карточка с категорией удалена — категория из списка пропадает. `deps.getTaskTags` больше не используется. Откат: itemcards.js 13.0.
    Версия: 13.0 (22.10) — структурная правка: у «Создавать задачу» необязательный тег-категория (`tag`, до 16 знаков, `taskTag`): в QR `lt://v1/task/<вкладка>#<тег>/<текст>`, в форме выпадающий список категорий, уже стоящих на задачах (`deps.getTaskTags`), пункт «Новая категория…» и «Без категории»; тег уходит в `deps.addTaskFromQr(tab, text, tag)`, на карточке показывается «#тег», в PDF — перед текстом; карточки без тега и коды без `#` работают как раньше. Откат: itemcards.js 12.0.
    Версия: 12.0 (22.10) — структурная правка: тип карточки «Создавать задачу» (`type:"task"`: `title` — текст задачи до 80 знаков, `icon` — ключ вкладки задач). QR `lt://v1/task/<ключ вкладки>/<текст>` несёт задачу в самом коде (`qrTextFor`, `taskText`); форма с выбором вкладки по пиктограммам (`openForm`, `deps.getTaskTabs`); скан → `handleScannedTask`/`applyScannedTask` (`deps.addTaskFromQr`: добавляет задачу либо, если такая же невыполненная уже есть, переносит её в конец вкладки) → слой `showTaskResultOverlay` (текст, пиктограмма и название вкладки); из окна ярлыка задача кладётся в очередь `pendingScanTasks_v1` и приложение открывается входом `newtask` (`drainPendingTasks`, без правок Kotlin). Откат: itemcards.js 11.0.
    Версия: 11.0 (21.10) — структурная правка: на карточке-таймере две равные кнопки — «Стоп» слева и «Пуск» справа (`.item-card-timer-btns`); `stopTimerForCard` отменяет таймер (в оболочке `cancelCardTimer`, в окне ярлыка `deps.timers.cancel`, в браузере — запасной localStorage); цифры возвращаются к заданному времени. Откат: itemcards.js 10.2.
@@ -78,6 +79,20 @@ window.initItemCardsModule = function(deps){
     var t = String(s == null ? "" : s).replace(/[\s\/]+/g, " ").replace(/^ | $/g, "").slice(0, TASK_TAG_MAX);
     if(/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1);
     return t.replace(/ $/, "");
+  }
+  // категории карточек «Создавать задачу»: без повторов (без учёта регистра), по алфавиту; пропадают вместе с последней карточкой
+  function cardTaskTags(){
+    var seen = {}, out = [];
+    loadCards().forEach(function(c){
+      if(!c || c.type !== "task") return;
+      var t = taskTag(c.tag);
+      if(!t) return;
+      var k = t.toLowerCase();
+      if(seen[k]) return;
+      seen[k] = 1; out.push(t);
+    });
+    out.sort(function(a, b){ return a.localeCompare(b, "ru"); });
+    return out;
   }
   function qrTextFor(c){
     if(c && c.type === "task" && c.icon && taskText(c.title)){ // задача в самом коде (тег — необязательно, после ключа вкладки через «#»)
@@ -875,9 +890,8 @@ window.initItemCardsModule = function(deps){
         html += '<button type="button" class="item-form-tab" data-tab="' + escapeHtml(t.key) + '" title="' + escapeHtml(t.title) + '">' + (t.svg || "") + '<span>' + escapeHtml(t.title) + '</span></button>';
       });
       html += '</div>';
-      // категория (тег): выпадающий список тегов, уже стоящих на задачах, «Без категории» и «Новая категория…» с полем ввода
-      var catList = [];
-      try{ catList = (deps.getTaskTags && deps.getTaskTags()) || []; }catch(e){ catList = []; }
+      // категория (тег): выпадающий список категорий, которые уже есть у карточек «Создавать задачу», «Без категории» и «Новая категория…» с полем ввода
+      var catList = cardTaskTags();
       var curTag = taskTag(data.tag);
       if(curTag && catList.map(function(x){ return String(x).toLowerCase(); }).indexOf(curTag.toLowerCase()) < 0) catList = catList.concat([curTag]);
       html += '<div class="item-form-cat" id="icfCat"><select class="mdeditor-cleanup-input" id="icfCatSel"><option value="">Без категории</option>';
