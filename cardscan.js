@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 2.0 (22.10) — структурная правка: код принимается не мгновенно, а после удержания. Нужен один и тот же код, почти неподвижный в зоне прицела (в окне ярлыка — всё окно, на весь экран — центральные 70%); код вне зоны и совсем мелкий игнорируются. Время удержания 0,25 с в центре зоны, до 0,6 с у края, для таймера и «Создавать задачу» не меньше 0,5 с; сдвиг кода или другой код — отсчёт не идёт, а откатывается. Вокруг кода рисуется фиолетовый (#7F00FF) скруглённый контур (SVG `.scan-lock`): бледный — «вижу, жду», яркий бежит по часовой стрелке с левого верхнего угла и замыкается; внутри заливка 15%. Приём — лёгкая вибрация, без вспышки. Откат: cardscan.js 1.8.
    Версия: 1.8 (22.10) — QR «Создавать задачу» может нести тег-категорию: `lt://v1/task/<ключ вкладки>#<тег>/<текст>` → `{kind:"task", tab, tag, text}` (без `#<тег>` — как раньше, `tag:""`). Откат: cardscan.js 1.7.
    Версия: 1.7 (22.10) — `parseCode` узнаёт QR «Создавать задачу» `lt://v1/task/<ключ вкладки>/<текст задачи>` → `{kind:"task", tab, text}` (код сам несёт задачу, карточка на устройстве не нужна). Откат: cardscan.js 1.6.
    Версия: 1.6 (22.10) — `parseCode` узнаёт одинаковые у всех коды «Сегодня» `lt://v1/today` → `{kind:"today"}` и «Напоминалки» `lt://v1/reminder` → `{kind:"reminder"}` (карточка на устройстве не нужна: открывается то, что есть у того, кто сканирует). Откат: cardscan.js 1.5.
@@ -96,6 +97,105 @@ window.CardScan = (function(){
     var canvas = layer.querySelector("#cardScanCanvas");
     var note = layer.querySelector("#cardScanNote");
 
+    // ---------- удержание и индикатор ----------
+    // Цвет — как у значка ярлыка сканера (ScanShortcut.kt, 0xFF7F00FF). Стили заданы атрибутами, а не классами: индикатор не зависит от CSS.
+    var PURPLE = "#7F00FF";
+    var HOLD_MIN_MS = 250;      // код в центре зоны
+    var HOLD_EDGE_MS = 600;     // код у края зоны
+    var HOLD_SIDE_EFFECT_MS = 500; // таймер и «Создавать задачу»: запуск/создание не откатить сканом по ошибке, поэтому не быстрее
+    var MOVE_TOL = 0.06;        // сдвиг центра кода от якоря, после которого удержание не копится (доля стороны зоны)
+    var GRACE_MS = 200;         // кадры без кода короче этого срока не сбрасывают удержание
+    var MIN_CODE_SIDE = 0.15;   // совсем мелкие коды (далеко/на фоне) не считаются; доля стороны зоны
+    var wrap = layer.querySelector(".scan-video-wrap");
+    var SVGNS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("class", "scan-lock");
+    svg.setAttribute("aria-hidden", "true");
+    svg.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:3;";
+    function mkPath(attrs){
+      var el = document.createElementNS(SVGNS, "path");
+      for(var k in attrs){ if(attrs.hasOwnProperty(k)) el.setAttribute(k, attrs[k]); }
+      el.style.display = "none";
+      svg.appendChild(el);
+      return el;
+    }
+    var fillEl = mkPath({ fill: PURPLE, "fill-opacity": "0", stroke: "none" });
+    var faintEl = mkPath({ fill: "none", stroke: PURPLE, "stroke-opacity": "0.4", "stroke-width": "2", "stroke-linejoin": "round" });
+    var progEl = mkPath({ fill: "none", stroke: PURPLE, "stroke-width": "4", "stroke-linecap": "round", "stroke-linejoin": "round" });
+    if(wrap) wrap.appendChild(svg);
+
+    var hold = { text: null, ax: 0, ay: 0 }; // что сейчас держим и «якорь» — где центр кода был, когда он последний раз стоял
+    var held = 0, disp = 0, lastT = 0, lastSeen = 0, sp = null, lastViewBox = "";
+
+    function towardPt(p, q, r){
+      var dx = q.x - p.x, dy = q.y - p.y, len = Math.sqrt(dx * dx + dy * dy) || 1;
+      var k = Math.min(r, len / 2) / len;
+      return { x: p.x + dx * k, y: p.y + dy * k };
+    }
+    // скруглённый четырёхугольник по часовой стрелке; начало — угол, ближайший к левому верхнему углу экрана
+    function roundedPath(pts, r){
+      var best = 0, i;
+      for(i = 1; i < 4; i++){ if(pts[i].x + pts[i].y < pts[best].x + pts[best].y) best = i; }
+      var d = "";
+      for(var n = 0; n < 4; n++){
+        var i1 = (best + n) % 4, p0 = pts[(i1 + 3) % 4], p1 = pts[i1], p2 = pts[(i1 + 1) % 4];
+        var a = towardPt(p1, p0, r), b = towardPt(p1, p2, r);
+        d += (n === 0 ? "M" : "L") + a.x.toFixed(1) + "," + a.y.toFixed(1) + " Q" + p1.x.toFixed(1) + "," + p1.y.toFixed(1) + " " + b.x.toFixed(1) + "," + b.y.toFixed(1) + " ";
+      }
+      return d + "Z";
+    }
+    // контур кода из jsQR (координаты уменьшенного кадра) → координаты слоя видео (object-fit: cover), с отступом
+    function describeCode(loc, cw, ch, Wd, Hd){
+      var vw = video.videoWidth, vh = video.videoHeight;
+      var sc = Math.max(Wd / vw, Hd / vh), ox = (Wd - vw * sc) / 2, oy = (Hd - vh * sc) / 2;
+      var raw = [loc.topLeftCorner, loc.topRightCorner, loc.bottomRightCorner, loc.bottomLeftCorner];
+      var pts = [], cx = 0, cy = 0, i;
+      for(i = 0; i < 4; i++){
+        var q = { x: raw[i].x * (vw / cw) * sc + ox, y: raw[i].y * (vh / ch) * sc + oy };
+        pts.push(q); cx += q.x / 4; cy += q.y / 4;
+      }
+      var side = 0;
+      for(i = 0; i < 4; i++){
+        var nx = pts[(i + 1) % 4];
+        side += Math.sqrt((nx.x - pts[i].x) * (nx.x - pts[i].x) + (nx.y - pts[i].y) * (nx.y - pts[i].y)) / 4;
+      }
+      for(i = 0; i < 4; i++){ pts[i] = { x: cx + (pts[i].x - cx) * 1.12, y: cy + (pts[i].y - cy) * 1.12 }; } // небольшой отступ от кода
+      return { pts: pts, cx: cx, cy: cy, side: side };
+    }
+    function hideLock(){
+      fillEl.style.display = "none"; faintEl.style.display = "none"; progEl.style.display = "none";
+    }
+    function drawLock(){
+      if(!sp){ hideLock(); return; }
+      var side = Math.sqrt((sp[1].x - sp[0].x) * (sp[1].x - sp[0].x) + (sp[1].y - sp[0].y) * (sp[1].y - sp[0].y));
+      var d = roundedPath(sp, Math.max(6, side * 0.12));
+      faintEl.setAttribute("d", d); faintEl.style.display = "";
+      if(disp > 0.005){
+        var len = 0;
+        progEl.setAttribute("d", d);
+        progEl.style.display = ""; // длину считаем у показанного элемента: у скрытого старые WebView могут отдать 0
+        try{ len = progEl.getTotalLength(); }catch(e){ len = 0; }
+        if(!(len > 0)) len = side * 4.5;
+        progEl.setAttribute("stroke-dasharray", len + " " + len);
+        progEl.setAttribute("stroke-dashoffset", String(len * (1 - Math.min(1, disp))));
+        progEl.style.display = "";
+        fillEl.setAttribute("d", d);
+        fillEl.setAttribute("fill-opacity", String(0.15 * Math.min(1, disp * 5)));
+        fillEl.style.display = "";
+      }else{
+        progEl.style.display = "none"; fillEl.style.display = "none";
+      }
+    }
+    function holdNeeded(info, zone, text){
+      var dn = Math.max(Math.abs(info.cx - zone.cx), Math.abs(info.cy - zone.cy)) / (zone.side / 2);
+      dn = Math.max(0, Math.min(1, dn));
+      var need = HOLD_MIN_MS + (HOLD_EDGE_MS - HOLD_MIN_MS) * dn;
+      var kind = parseCode(text).kind;
+      if(kind === "task" || kind === "timer") need = Math.max(need, HOLD_SIDE_EFFECT_MS);
+      return need;
+    }
+    function buzz(){ try{ if(navigator.vibrate) navigator.vibrate(30); }catch(e){} }
+
     // до первого кадра видео скрыто (иначе WebView рисует растянутую заглушку), после — показываем камеру
     function setLive(){ if(!closed) layer.className += (layer.className.indexOf(" scan-live") < 0 ? " scan-live" : ""); }
     video.addEventListener("playing", setLive);
@@ -159,6 +259,10 @@ window.CardScan = (function(){
 
     function tick(){
       if(closed) return;
+      var now = Date.now();
+      var dt = lastT ? Math.min(100, now - lastT) : 16;
+      lastT = now;
+      var found = null, zone = null;
       if(video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth){
         setLive();
         // уменьшаем кадр для скорости, пропорции сохраняем
@@ -169,12 +273,54 @@ window.CardScan = (function(){
         ctx.drawImage(video, 0, 0, w, h);
         var data = ctx.getImageData(0, 0, w, h);
         var result = window.jsQR(data.data, data.width, data.height, { inversionAttempts: "dontInvert" });
-        if(result && result.data){
+        var Wd = wrap ? wrap.clientWidth : 0, Hd = wrap ? wrap.clientHeight : 0;
+        if(Wd > 0 && Hd > 0){
+          var vb = "0 0 " + Wd + " " + Hd;
+          if(vb !== lastViewBox){ svg.setAttribute("viewBox", vb); lastViewBox = vb; }
+          // зона прицела: в окне ярлыка — всё окно камеры, на весь экран — центральный квадрат (рамка .scan-frame, 70%)
+          zone = { cx: Wd / 2, cy: Hd / 2, side: opts.windowed ? Math.min(Wd, Hd) : 0.7 * Math.min(Wd, Hd) };
+          if(result && result.data && result.location){
+            var info = describeCode(result.location, w, h, Wd, Hd);
+            var inside = Math.abs(info.cx - zone.cx) <= zone.side / 2 && Math.abs(info.cy - zone.cy) <= zone.side / 2;
+            if(inside && info.side >= MIN_CODE_SIDE * zone.side) found = { text: result.data, info: info };
+          }
+        }else if(result && result.data){
+          // слой без размеров (нетипично): без индикатора, как раньше — первый удачный кадр
           close();
           if(opts.onCode) opts.onCode(result.data);
           return;
         }
       }
+      if(found){
+        lastSeen = now;
+        var c = found.info;
+        if(hold.text !== found.text){ hold.text = found.text; hold.ax = c.cx; hold.ay = c.cy; held = 0; }
+        else{
+          var ddx = c.cx - hold.ax, ddy = c.cy - hold.ay;
+          if(Math.sqrt(ddx * ddx + ddy * ddy) > MOVE_TOL * zone.side){ hold.ax = c.cx; hold.ay = c.cy; held = Math.max(0, held - dt * 3); } // двигается — не копим, откатываем
+          else held += dt;
+        }
+        var need = holdNeeded(c, zone, found.text);
+        if(held >= need){
+          disp = 1;
+          buzz();
+          var text = found.text;
+          close();
+          if(opts.onCode) opts.onCode(text);
+          return;
+        }
+        // сглаживание контура: он плавно догоняет код, а не дёргается вместе с рукой
+        if(!sp){ sp = c.pts; }
+        else{ for(var k = 0; k < 4; k++){ sp[k] = { x: sp[k].x + (c.pts[k].x - sp[k].x) * 0.5, y: sp[k].y + (c.pts[k].y - sp[k].y) * 0.5 }; } }
+        var target = held / need;
+        if(target >= disp) disp = target; else disp = Math.max(target, disp - dt / 400);
+      }else if(now - lastSeen > GRACE_MS){
+        // кода нет дольше допуска: отсчёт откатывается, индикатор плавно сворачивается
+        held = Math.max(0, held - dt * 2);
+        disp = Math.max(0, disp - dt / 400);
+        if(held === 0 && disp <= 0.005){ hold.text = null; sp = null; }
+      }
+      drawLock();
       raf = requestAnimationFrame(tick);
     }
 
