@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 2.1 (22.10) — удержание стало терпимым к дрожи руки: допуск ухода кода от якоря 20% зоны (было 6%), якорь плавно следует за кодом, уход кода от якоря не обнуляет счёт, а даёт штраф 150 мс (дрожь в допуске штрафа не даёт, а код, который проносят через зону, штрафуется чаще, чем копит); пропадание кода до 0,4 с (смаз) счёт не трогает, дольше — откат с обычной скоростью; другой текст кода переключает счёт, только если держится 3 кадра подряд. Откат: cardscan.js 2.0.
    Версия: 2.0 (22.10) — структурная правка: код принимается не мгновенно, а после удержания. Нужен один и тот же код, почти неподвижный в зоне прицела (в окне ярлыка — всё окно, на весь экран — центральные 70%); код вне зоны и совсем мелкий игнорируются. Время удержания 0,25 с в центре зоны, до 0,6 с у края, для таймера и «Создавать задачу» не меньше 0,5 с; сдвиг кода или другой код — отсчёт не идёт, а откатывается. Вокруг кода рисуется фиолетовый (#7F00FF) скруглённый контур (SVG `.scan-lock`): бледный — «вижу, жду», яркий бежит по часовой стрелке с левого верхнего угла и замыкается; внутри заливка 15%. Приём — лёгкая вибрация, без вспышки. Откат: cardscan.js 1.8.
    Версия: 1.8 (22.10) — QR «Создавать задачу» может нести тег-категорию: `lt://v1/task/<ключ вкладки>#<тег>/<текст>` → `{kind:"task", tab, tag, text}` (без `#<тег>` — как раньше, `tag:""`). Откат: cardscan.js 1.7.
    Версия: 1.7 (22.10) — `parseCode` узнаёт QR «Создавать задачу» `lt://v1/task/<ключ вкладки>/<текст задачи>` → `{kind:"task", tab, text}` (код сам несёт задачу, карточка на устройстве не нужна). Откат: cardscan.js 1.6.
@@ -103,8 +104,10 @@ window.CardScan = (function(){
     var HOLD_MIN_MS = 250;      // код в центре зоны
     var HOLD_EDGE_MS = 600;     // код у края зоны
     var HOLD_SIDE_EFFECT_MS = 500; // таймер и «Создавать задачу»: запуск/создание не откатить сканом по ошибке, поэтому не быстрее
-    var MOVE_TOL = 0.06;        // сдвиг центра кода от якоря, после которого удержание не копится (доля стороны зоны)
-    var GRACE_MS = 200;         // кадры без кода короче этого срока не сбрасывают удержание
+    var MOVE_TOL = 0.2;         // уход центра кода от якоря, после которого удержание на время не копится (доля стороны зоны); дрожь руки укладывается в допуск
+    var EXCEED_PENALTY_MS = 150; // штраф счёту за каждый уход кода от якоря
+    var GRACE_MS = 400;         // кадры без кода (смаз при дрожании руки) короче этого срока удержание не трогают
+    var SWITCH_FRAMES = 3;      // другой текст кода должен продержаться столько кадров подряд, чтобы счёт пошёл заново (разовый сбой чтения не в счёт)
     var MIN_CODE_SIDE = 0.15;   // совсем мелкие коды (далеко/на фоне) не считаются; доля стороны зоны
     var wrap = layer.querySelector(".scan-video-wrap");
     var SVGNS = "http://www.w3.org/2000/svg";
@@ -125,7 +128,7 @@ window.CardScan = (function(){
     if(wrap) wrap.appendChild(svg);
 
     var hold = { text: null, ax: 0, ay: 0 }; // что сейчас держим и «якорь» — где центр кода был, когда он последний раз стоял
-    var held = 0, disp = 0, lastT = 0, lastSeen = 0, sp = null, lastViewBox = "";
+    var held = 0, disp = 0, lastT = 0, lastSeen = 0, sp = null, lastViewBox = "", pendText = null, pendCount = 0;
 
     function towardPt(p, q, r){
       var dx = q.x - p.x, dy = q.y - p.y, len = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -294,31 +297,51 @@ window.CardScan = (function(){
       if(found){
         lastSeen = now;
         var c = found.info;
-        if(hold.text !== found.text){ hold.text = found.text; hold.ax = c.cx; hold.ay = c.cy; held = 0; }
-        else{
+        var accum = true;
+        if(hold.text === null){ hold.text = found.text; hold.ax = c.cx; hold.ay = c.cy; held = 0; pendText = null; pendCount = 0; }
+        else if(hold.text !== found.text){
+          // другой код: счёт заново только если он держится несколько кадров подряд; пока — прежний счёт стоит
+          accum = false;
+          if(pendText === found.text) pendCount++; else { pendText = found.text; pendCount = 1; }
+          if(pendCount >= SWITCH_FRAMES){ hold.text = found.text; hold.ax = c.cx; hold.ay = c.cy; held = 0; pendText = null; pendCount = 0; }
+        }else{
+          pendText = null; pendCount = 0;
           var ddx = c.cx - hold.ax, ddy = c.cy - hold.ay;
-          if(Math.sqrt(ddx * ddx + ddy * ddy) > MOVE_TOL * zone.side){ hold.ax = c.cx; hold.ay = c.cy; held = Math.max(0, held - dt * 3); } // двигается — не копим, откатываем
-          else held += dt;
+          if(Math.sqrt(ddx * ddx + ddy * ddy) > MOVE_TOL * zone.side){
+            // код ушёл далеко от якоря (резкий рывок или проводят мимо): штраф EXCEED_PENALTY_MS, якорь переезжает за кодом.
+            // Дрожь руки в допуск укладывается и штрафа не даёт; код, который проносят через зону, штрафуется чаще, чем копит счёт
+            accum = false;
+            hold.ax = c.cx; hold.ay = c.cy;
+            held = Math.max(0, held - EXCEED_PENALTY_MS);
+          }else{
+            // якорь медленно следует за кодом: плавный дрейф руки не считается уходом
+            hold.ax += ddx * 0.05; hold.ay += ddy * 0.05;
+          }
         }
-        var need = holdNeeded(c, zone, found.text);
-        if(held >= need){
-          disp = 1;
-          buzz();
-          var text = found.text;
-          close();
-          if(opts.onCode) opts.onCode(text);
-          return;
+        if(hold.text === found.text){ // счёт идёт только у держимого кода: чужой код, мелькнувший рядом, принят быть не может
+          if(accum) held += dt;
+          var need = holdNeeded(c, zone, found.text);
+          if(held >= need){
+            disp = 1;
+            buzz();
+            var text = found.text;
+            close();
+            if(opts.onCode) opts.onCode(text);
+            return;
+          }
+          // сглаживание контура: он плавно догоняет код, а не дёргается вместе с рукой
+          if(!sp){ sp = c.pts; }
+          else{ for(var k = 0; k < 4; k++){ sp[k] = { x: sp[k].x + (c.pts[k].x - sp[k].x) * 0.5, y: sp[k].y + (c.pts[k].y - sp[k].y) * 0.5 }; } }
+          var target = held / need;
+          if(target >= disp) disp = target; else disp = Math.max(target, disp - dt / 400);
+        }else{
+          disp = Math.max(0, disp - dt / 400); // в кадре другой код: индикатор держимого сворачивается
         }
-        // сглаживание контура: он плавно догоняет код, а не дёргается вместе с рукой
-        if(!sp){ sp = c.pts; }
-        else{ for(var k = 0; k < 4; k++){ sp[k] = { x: sp[k].x + (c.pts[k].x - sp[k].x) * 0.5, y: sp[k].y + (c.pts[k].y - sp[k].y) * 0.5 }; } }
-        var target = held / need;
-        if(target >= disp) disp = target; else disp = Math.max(target, disp - dt / 400);
       }else if(now - lastSeen > GRACE_MS){
         // кода нет дольше допуска: отсчёт откатывается, индикатор плавно сворачивается
-        held = Math.max(0, held - dt * 2);
+        held = Math.max(0, held - dt);
         disp = Math.max(0, disp - dt / 400);
-        if(held === 0 && disp <= 0.005){ hold.text = null; sp = null; }
+        if(held === 0 && disp <= 0.005){ hold.text = null; sp = null; pendText = null; pendCount = 0; }
       }
       drawLock();
       raf = requestAnimationFrame(tick);
