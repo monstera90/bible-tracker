@@ -1,5 +1,8 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 16.1 (22.10) — кнопка `#itemCardsHiddenBtn` больше не заливается цветом: состояние показывает только значок (глаз / перечёркнутый глаз). Откат: itemcards.js 16.0.
+   Версия: 16.0 (22.10) — структурная правка: признак карточки `hidden` («скрыть», общий для всех типов, ходит через облако в `cloudShape`): третья кнопка-глаз `.item-card-eye-btn` при долгом нажатии (глаз — показана, перечёркнутый глаз — скрыта); кнопка `#itemCardsHiddenBtn` в нижнем ряду (глаз — показаны все, перечёркнутый — скрытые не показываются; выбор в `itemCardsShowHidden_v1`, `getShowHidden`/`setShowHidden`); скрытая карточка при показе всех бледнее (`.item-card-hidden`); скрытые не попадают в PDF (`exportPdf`); по QR скрытые карточки работают как обычно. Откат: itemcards.js 15.0.
+   Версия: 15.0 (22.10) — структурная правка: фильтр карточек по типу — кнопка-воронка `#itemCardsFilterBtn` слева от «+» с выпадающим списком «Все / Таймеры / Предметы / Задачи / Особые» (`FILTERS`, `getFilter`/`setFilter`/`cardMatchesFilter`, выбор помнится в `itemCardsFilter_v1`); «Особые» — «Сегодня» и «Напоминалка». При фильтре кнопка залита (`.pressed`); создание карточки скрытого типа сбрасывает фильтр на «Все». PDF по-прежнему печатает все карточки. Откат: itemcards.js 14.0.
    Версия: 14.0 (22.10) — структурная правка: список категорий в форме «Создавать задачу» берётся из карточек, а не из задач (`cardTaskTags`: категории карточек типа task, без повторов, по алфавиту); последняя карточка с категорией удалена — категория из списка пропадает. `deps.getTaskTags` больше не используется. Откат: itemcards.js 13.0.
    Версия: 13.0 (22.10) — структурная правка: у «Создавать задачу» необязательный тег-категория (`tag`, до 16 знаков, `taskTag`): в QR `lt://v1/task/<вкладка>#<тег>/<текст>`, в форме выпадающий список категорий, уже стоящих на задачах (`deps.getTaskTags`), пункт «Новая категория…» и «Без категории»; тег уходит в `deps.addTaskFromQr(tab, text, tag)`, на карточке показывается «#тег», в PDF — перед текстом; карточки без тега и коды без `#` работают как раньше. Откат: itemcards.js 12.0.
    Версия: 12.0 (22.10) — структурная правка: тип карточки «Создавать задачу» (`type:"task"`: `title` — текст задачи до 80 знаков, `icon` — ключ вкладки задач). QR `lt://v1/task/<ключ вкладки>/<текст>` несёт задачу в самом коде (`qrTextFor`, `taskText`); форма с выбором вкладки по пиктограммам (`openForm`, `deps.getTaskTabs`); скан → `handleScannedTask`/`applyScannedTask` (`deps.addTaskFromQr`: добавляет задачу либо, если такая же невыполненная уже есть, переносит её в конец вкладки) → слой `showTaskResultOverlay` (текст, пиктограмма и название вкладки); из окна ярлыка задача кладётся в очередь `pendingScanTasks_v1` и приложение открывается входом `newtask` (`drainPendingTasks`, без правок Kotlin). Откат: itemcards.js 11.0.
@@ -227,6 +230,7 @@ window.initItemCardsModule = function(deps){
       updatedAt: Number(r.updatedAt) || 0
     };
     if(r.type === "task") o.tag = taskTag(r.tag);
+    if(r.hidden) o.hidden = 1; // «скрыть» — общий признак карточки любого типа
     if(r.type === "item"){
       // напоминание карточки: выбранная дата-время и период повтора (remindDone — только на этом устройстве, наружу не идёт)
       o.remindAt = Math.max(0, Math.floor(Number(r.remindAt) || 0));
@@ -386,6 +390,52 @@ window.initItemCardsModule = function(deps){
   var revealedIds = {};
   var flippedId = null;
   var typeMenuOpen = false;
+  // фильтр по типу карточек (кнопка-воронка слева от «+»): all | timer | item | task | special («Особые» — «Сегодня» и «Напоминалка»)
+  var FILTER_KEY = "itemCardsFilter_v1";
+  var FILTERS = [
+    { key: "all", label: "Все" },
+    { key: "timer", label: "Таймеры" },
+    { key: "item", label: "Предметы" },
+    { key: "task", label: "Задачи" },
+    { key: "special", label: "Особые" }
+  ];
+  var cardFilter = null;
+  function getFilter(){
+    if(cardFilter === null){
+      var v = "all";
+      try{ v = localStorage.getItem(FILTER_KEY) || "all"; }catch(e){}
+      cardFilter = FILTERS.some(function(f){ return f.key === v; }) ? v : "all";
+    }
+    return cardFilter;
+  }
+  function setFilter(v){
+    cardFilter = v;
+    try{ if(v === "all") localStorage.removeItem(FILTER_KEY); else localStorage.setItem(FILTER_KEY, v); }catch(e){}
+  }
+  function cardMatchesFilter(c, f){
+    f = f || getFilter();
+    if(f === "all") return true;
+    if(f === "special") return c.type === "datenote" || c.type === "reminder";
+    return c.type === f;
+  }
+  // «Показать/скрыть скрытые»: глаз — показаны все карточки, перечёркнутый глаз — карточки с признаком `hidden` не показываются
+  var SHOWHID_KEY = "itemCardsShowHidden_v1";
+  var showHidden = null;
+  function getShowHidden(){
+    if(showHidden === null){
+      var v = "1";
+      try{ v = localStorage.getItem(SHOWHID_KEY) || "1"; }catch(e){}
+      showHidden = v !== "0";
+    }
+    return showHidden;
+  }
+  function setShowHidden(v){
+    showHidden = !!v;
+    try{ localStorage.setItem(SHOWHID_KEY, showHidden ? "1" : "0"); }catch(e){}
+  }
+  var EYE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+  var EYE_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path></svg>';
+  var FILTER_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8.5V20l-4-2v-4.5L3 5z"></path></svg>';
 
   function container(){ return document.getElementById("settingsTabContent"); }
   // Android 5: PDF не реализуется (решение заказчика, ТЗ 16.10.2026) — кнопки нет
@@ -544,7 +594,18 @@ window.initItemCardsModule = function(deps){
         '<div class="item-pdf-status" id="itemPdfStatus" style="display:none;"></div>' +
       '</div>';
     }
+    var curFilter = getFilter();
+    var showAll = getShowHidden();
     html += '<div class="mdeditor-fab-row">' +
+      '<button type="button" class="mdeditor-fab-btn" id="itemCardsHiddenBtn" title="' + (showAll ? 'Показаны все карточки (нажмите, чтобы скрыть скрытые)' : 'Скрытые карточки не показаны (нажмите, чтобы показать все)') + '">' + (showAll ? EYE_ICON_SVG : EYE_OFF_ICON_SVG) + '</button>' +
+      '<span class="item-filter-wrap">' +
+        '<div class="item-type-menu item-filter-menu" id="itemFilterMenu" style="display:none;">' +
+          FILTERS.map(function(f){
+            return '<button type="button" class="workbooks-run-btn' + (f.key === curFilter ? ' selected' : '') + '" data-filter="' + f.key + '">' + f.label + '</button>';
+          }).join('') +
+        '</div>' +
+        '<button type="button" class="mdeditor-fab-btn' + (curFilter !== "all" ? ' pressed' : '') + '" id="itemCardsFilterBtn" title="Показать карточки: ' + FILTERS.filter(function(f){ return f.key === curFilter; })[0].label + '">' + FILTER_ICON_SVG + '</button>' +
+      '</span>' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsAddBtn" title="Новая карточка">' + PLUS_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsScanBtn" title="Сканировать QR-код">' + SCAN_ICON_SVG + '</button>' +
       (showPdf ? '<button type="button" class="mdeditor-fab-btn" id="itemCardsPdfBtn" title="PDF с QR-кодами для печати">' + PDF_ICON_SVG + '</button>' : '') +
@@ -563,12 +624,13 @@ window.initItemCardsModule = function(deps){
     applySize(tab);
 
     var grid = document.getElementById("itemCardsGrid");
-    if(!cards.length){
+    var shown = cards.filter(function(c){ return cardMatchesFilter(c, curFilter) && (showAll || !c.hidden); });
+    if(!shown.length){
       grid.className = "item-cards-grid item-cards-empty";
     }
-    cards.forEach(function(c){
+    shown.forEach(function(c){
       var card = document.createElement("div");
-      card.className = "item-card item-card-" + c.type + (attentionId === c.id ? " item-card-attn" : "");
+      card.className = "item-card item-card-" + c.type + (attentionId === c.id ? " item-card-attn" : "") + (c.hidden ? " item-card-hidden" : "");
       card.dataset.id = c.id;
       var revealed = !!revealedIds[c.id];
       card.innerHTML =
@@ -577,6 +639,7 @@ window.initItemCardsModule = function(deps){
         '<div class="book-cover-actions">' +
           (isSingletonCard(c) ? '' : '<button type="button" class="mdeditor-edit-btn' + (revealed ? " visible" : "") + '" title="Изменить">' + PENCIL_ICON_SVG + '</button>') +
           '<button type="button" class="mdeditor-delete-btn' + (revealed ? " visible" : "") + '" title="Удалить">' + DELETE_ICON_SVG + '</button>' +
+          '<button type="button" class="item-card-eye-btn' + (revealed ? " visible" : "") + '" title="' + (c.hidden ? "Скрыта (нажмите, чтобы показывать всегда)" : "Показана (нажмите, чтобы скрыть)") + '">' + (c.hidden ? EYE_OFF_ICON_SVG : EYE_ICON_SVG) + '</button>' +
         '</div>';
       card.querySelector(".item-card-title").textContent = cardTitle(c);
       grid.appendChild(card);
@@ -640,7 +703,7 @@ window.initItemCardsModule = function(deps){
     for(var k in revealedIds){ if(revealedIds.hasOwnProperty(k)){ any = true; break; } }
     if(!any) return;
     revealedIds = {};
-    var btns = document.querySelectorAll("#itemCardsGrid .mdeditor-edit-btn.visible, #itemCardsGrid .mdeditor-delete-btn.visible");
+    var btns = document.querySelectorAll("#itemCardsGrid .mdeditor-edit-btn.visible, #itemCardsGrid .mdeditor-delete-btn.visible, #itemCardsGrid .item-card-eye-btn.visible");
     for(var i = 0; i < btns.length; i++) btns[i].classList.remove("visible");
   }
 
@@ -662,7 +725,7 @@ window.initItemCardsModule = function(deps){
         longFired = true;
         clearAttention(cardNode.dataset.id);
         revealedIds[cardNode.dataset.id] = true;
-        var btns = cardNode.querySelectorAll(".mdeditor-edit-btn, .mdeditor-delete-btn");
+        var btns = cardNode.querySelectorAll(".mdeditor-edit-btn, .mdeditor-delete-btn, .item-card-eye-btn");
         for(var i = 0; i < btns.length; i++) btns[i].classList.add("visible");
       }, LONG_MS);
     }
@@ -692,6 +755,13 @@ window.initItemCardsModule = function(deps){
       clearAttention(id); // любое взаимодействие с карточкой снимает жирную обводку
       if(e.target.closest(".item-card-remind-btn")){ hideRevealed(); openCardReminder(c); return; }
       if(e.target.closest(".mdeditor-edit-btn")){ hideRevealed(); openForm(c.type, c); return; }
+      if(e.target.closest(".item-card-eye-btn")){ // глаз: показывать всегда ↔ скрыть (скрытая видна и в PDF не попадает)
+        if(c.hidden) delete c.hidden; else c.hidden = 1;
+        c.updatedAt = Date.now();
+        saveCards();
+        renderGrid(); // кнопки остаются раскрытыми (revealedIds), значок меняется
+        return;
+      }
       if(e.target.closest(".mdeditor-delete-btn")){
         openAppConfirmBar("Удалить карточку «" + (c.title || "без названия") + "»? QR-код перестанет работать.", function(){
           deleteCard(c.id);
@@ -734,6 +804,8 @@ window.initItemCardsModule = function(deps){
     typeMenuOpen = false;
     var m = document.getElementById("itemTypeMenu");
     if(m) m.style.display = "none";
+    var fm = document.getElementById("itemFilterMenu");
+    if(fm) fm.style.display = "none";
     var pm = document.getElementById("itemPdfMenu");
     if(pm && !pdfBusy) pm.style.display = "none"; // во время сборки PDF меню остаётся — на нём строка «Готовлю…»
   }
@@ -741,8 +813,9 @@ window.initItemCardsModule = function(deps){
   // ---------- PDF с кодами (шаг 6 ТЗ) ----------
   function exportPdf(perPage){
     if(pdfBusy) return;
-    var cards = loadCards();
-    if(!cards.length){ alert("Карточек пока нет — PDF собирать не из чего."); return; }
+    var allCards = loadCards();
+    var cards = allCards.filter(function(c){ return !c.hidden; }); // скрытые карточки в PDF не попадают
+    if(!cards.length){ alert(allCards.length ? "Все карточки скрыты — PDF собирать не из чего." : "Карточек пока нет — PDF собирать не из чего."); return; }
     if(!window.CardPdf){ alert("Модуль PDF не загружен."); return; }
     var menu = document.getElementById("itemPdfMenu");
     var status = document.getElementById("itemPdfStatus");
@@ -785,9 +858,36 @@ window.initItemCardsModule = function(deps){
   function bindFab(tab){
     var addBtn = document.getElementById("itemCardsAddBtn");
     var menu = document.getElementById("itemTypeMenu");
+    var hiddenBtn = document.getElementById("itemCardsHiddenBtn");
+    hiddenBtn.addEventListener("click", function(){
+      closeTypeMenu();
+      var sb1 = document.getElementById("itemCardsSizeBar");
+      if(sb1) sb1.classList.remove("open");
+      setShowHidden(!getShowHidden());
+      unflipAny();
+      renderGrid();
+    });
+    var filterBtn = document.getElementById("itemCardsFilterBtn");
+    var filterMenu = document.getElementById("itemFilterMenu");
+    filterBtn.addEventListener("click", function(){
+      var open = filterMenu.style.display !== "flex";
+      closeTypeMenu();
+      var sb0 = document.getElementById("itemCardsSizeBar");
+      if(sb0) sb0.classList.remove("open");
+      if(open) filterMenu.style.display = "flex";
+    });
+    filterMenu.addEventListener("click", function(e){
+      var b = e.target.closest("button[data-filter]");
+      if(!b) return;
+      setFilter(b.dataset.filter);
+      unflipAny();
+      renderGrid();
+    });
     addBtn.addEventListener("click", function(){
       var bar = document.getElementById("itemCardsSizeBar");
       if(bar) bar.classList.remove("open");
+      var fm0 = document.getElementById("itemFilterMenu");
+      if(fm0) fm0.style.display = "none";
       var pm = document.getElementById("itemPdfMenu");
       if(pm && !pdfBusy) pm.style.display = "none";
       typeMenuOpen = !typeMenuOpen;
@@ -797,6 +897,7 @@ window.initItemCardsModule = function(deps){
       var b = e.target.closest("button[data-type]");
       if(!b) return;
       closeTypeMenu();
+      if(!cardMatchesFilter({ type: b.dataset.type })) setFilter("all"); // новая карточка не должна пропасть под фильтром
       if(b.dataset.type === "datenote"){ createSingletonCard("datenote"); return; }
       if(b.dataset.type === "reminder"){ createSingletonCard("reminder"); return; }
       openForm(b.dataset.type, null);
