@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 13.0 (22.10) — структурная правка: у «Создавать задачу» необязательный тег-категория (`tag`, до 16 знаков, `taskTag`): в QR `lt://v1/task/<вкладка>#<тег>/<текст>`, в форме выпадающий список категорий, уже стоящих на задачах (`deps.getTaskTags`), пункт «Новая категория…» и «Без категории»; тег уходит в `deps.addTaskFromQr(tab, text, tag)`, на карточке показывается «#тег», в PDF — перед текстом; карточки без тега и коды без `#` работают как раньше. Откат: itemcards.js 12.0.
    Версия: 12.0 (22.10) — структурная правка: тип карточки «Создавать задачу» (`type:"task"`: `title` — текст задачи до 80 знаков, `icon` — ключ вкладки задач). QR `lt://v1/task/<ключ вкладки>/<текст>` несёт задачу в самом коде (`qrTextFor`, `taskText`); форма с выбором вкладки по пиктограммам (`openForm`, `deps.getTaskTabs`); скан → `handleScannedTask`/`applyScannedTask` (`deps.addTaskFromQr`: добавляет задачу либо, если такая же невыполненная уже есть, переносит её в конец вкладки) → слой `showTaskResultOverlay` (текст, пиктограмма и название вкладки); из окна ярлыка задача кладётся в очередь `pendingScanTasks_v1` и приложение открывается входом `newtask` (`drainPendingTasks`, без правок Kotlin). Откат: itemcards.js 11.0.
    Версия: 11.0 (21.10) — структурная правка: на карточке-таймере две равные кнопки — «Стоп» слева и «Пуск» справа (`.item-card-timer-btns`); `stopTimerForCard` отменяет таймер (в оболочке `cancelCardTimer`, в окне ярлыка `deps.timers.cancel`, в браузере — запасной localStorage); цифры возвращаются к заданному времени. Откат: itemcards.js 10.2.
    Версия: 10.3 (22.10) — QR «Сегодня» и «Напоминалки» одинаковые у всех (`lt://v1/today`, `lt://v1/reminder`): `qrTextFor` для этих типов возвращает общий код, `handleScanned` разбирает `today`/`reminder` без поиска карточки (напоминание — из «Комментариев» сканирующего, «Сегодня» — новая заметка сканирующего; из окна ярлыка — вход в приложение с id `today`, режим `note`). Прежние коды по id карточки работают как раньше. Откат: itemcards.js 10.2.
@@ -71,8 +72,18 @@ window.initItemCardsModule = function(deps){
     if(/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1);
     return t.replace(/ $/, "");
   }
+  // тег-категория задачи: пробелы и «/» схлопнуты в один пробел, до 16 знаков (в коде «/» закончил бы тег)
+  var TASK_TAG_MAX = 16;
+  function taskTag(s){
+    var t = String(s == null ? "" : s).replace(/[\s\/]+/g, " ").replace(/^ | $/g, "").slice(0, TASK_TAG_MAX);
+    if(/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1);
+    return t.replace(/ $/, "");
+  }
   function qrTextFor(c){
-    if(c && c.type === "task" && c.icon && taskText(c.title)) return TASK_PREFIX + c.icon + "/" + taskText(c.title); // задача в самом коде
+    if(c && c.type === "task" && c.icon && taskText(c.title)){ // задача в самом коде (тег — необязательно, после ключа вкладки через «#»)
+      var tg = taskTag(c.tag);
+      return TASK_PREFIX + c.icon + (tg ? "#" + tg : "") + "/" + taskText(c.title);
+    }
     if(c && c.type === "timer" && c.seconds > 0){
       var t = String(c.title || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, TIMER_QR_TITLE_MAX);
       if(/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1); // обрезка не должна оставлять половину эмодзи (парный знак)
@@ -200,6 +211,7 @@ window.initItemCardsModule = function(deps){
       createdAt: Number(r.createdAt) || 0,
       updatedAt: Number(r.updatedAt) || 0
     };
+    if(r.type === "task") o.tag = taskTag(r.tag);
     if(r.type === "item"){
       // напоминание карточки: выбранная дата-время и период повтора (remindDone — только на этом устройстве, наружу не идёт)
       o.remindAt = Math.max(0, Math.floor(Number(r.remindAt) || 0));
@@ -482,7 +494,8 @@ window.initItemCardsModule = function(deps){
     }
     if(c.type === "task"){ // пиктограмма вкладки, куда код кладёт задачу, и начало текста задачи (название обрезается стилем)
       return '<div class="item-card-icon">' + taskTabSvg(c.icon) + '</div>' +
-        '<div class="item-card-title"></div>';
+        '<div class="item-card-title"></div>' +
+        (taskTag(c.tag) ? '<div class="item-card-date">#' + escapeHtml(taskTag(c.tag)) + '</div>' : '');
     }
     return '<div class="item-card-icon">' + icon + '</div>' +
       '<div class="item-card-title"></div>' +
@@ -728,7 +741,10 @@ window.initItemCardsModule = function(deps){
     // у «Создавать задачу» рядом с кодом печатается только начало текста (полный текст лежит в самом коде)
     var forPdf = cards.map(function(c){
       var ttl = cardTitle(c);
-      if(c.type === "task" && ttl.length > 40) ttl = taskText(ttl, 40) + "…";
+      if(c.type === "task"){
+        if(ttl.length > 40) ttl = taskText(ttl, 40) + "…";
+        if(taskTag(c.tag)) ttl = taskTag(c.tag) + ": " + ttl; // категория — перед текстом, чтобы наклейки легко разложить по группам
+      }
       return { id: c.id, title: ttl, qr: qrTextFor(c) };
     });
     deps.loadQrLib().then(function(){
@@ -850,7 +866,7 @@ window.initItemCardsModule = function(deps){
     var html = '<div class="mdeditor-tab item-card-form" id="itemCardForm">';
     html += '<h3 class="common-tab-title">' + escapeHtml(TYPE_LABEL[type]) + '</h3>';
     if(type === "task"){
-      html += '<div class="item-form-hint">Код с текстом задачи: кто его отсканирует в приложении, получит эту задачу на выбранной вкладке. Такая же невыполненная задача второй раз не создаётся — её переносят в конец списка вкладки.</div>';
+      html += '<div class="item-form-hint">Код с текстом задачи: кто его отсканирует в приложении, получит эту задачу на выбранной вкладке. Такая же невыполненная задача второй раз не создаётся — её переносят в конец списка вкладки. Категория (тег) необязательна: задача получит её сразу, по тегу задачи можно отбирать на вкладке.</div>';
     }
     html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="' + (type === "task" ? "Текст задачи (до " + TASK_TEXT_MAX + " знаков)" : "Название") + '" maxlength="' + (type === "task" ? TASK_TEXT_MAX : 80) + '" autocomplete="off">';
     if(type === "task"){
@@ -859,6 +875,15 @@ window.initItemCardsModule = function(deps){
         html += '<button type="button" class="item-form-tab" data-tab="' + escapeHtml(t.key) + '" title="' + escapeHtml(t.title) + '">' + (t.svg || "") + '<span>' + escapeHtml(t.title) + '</span></button>';
       });
       html += '</div>';
+      // категория (тег): выпадающий список тегов, уже стоящих на задачах, «Без категории» и «Новая категория…» с полем ввода
+      var catList = [];
+      try{ catList = (deps.getTaskTags && deps.getTaskTags()) || []; }catch(e){ catList = []; }
+      var curTag = taskTag(data.tag);
+      if(curTag && catList.map(function(x){ return String(x).toLowerCase(); }).indexOf(curTag.toLowerCase()) < 0) catList = catList.concat([curTag]);
+      html += '<div class="item-form-cat" id="icfCat"><select class="mdeditor-cleanup-input" id="icfCatSel"><option value="">Без категории</option>';
+      catList.forEach(function(x){ html += '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>'; });
+      html += '<option value="__new__">Новая категория…</option></select>' +
+        '<input type="text" class="mdeditor-cleanup-input" id="icfCatNew" placeholder="Новая категория (до ' + TASK_TAG_MAX + ' знаков)" maxlength="' + TASK_TAG_MAX + '" autocomplete="off" style="display:none;"></div>';
     } else if(type === "timer"){
       html += '<div class="item-form-timer" id="icfTimer">' +
         wheelHtml("h", 24, "ч") + wheelHtml("m", 60, "мин") + wheelHtml("s", 60, "с") +
@@ -906,6 +931,13 @@ window.initItemCardsModule = function(deps){
         data.icon = b.dataset.tab;
         markTabs();
       });
+      var catSel = document.getElementById("icfCatSel"), catNew = document.getElementById("icfCatNew");
+      function showCatNew(){ catNew.style.display = catSel.value === "__new__" ? "" : "none"; if(catSel.value === "__new__") catNew.focus(); }
+      var tg0 = taskTag(data.tag);
+      if(tg0){
+        for(var oi = 0; oi < catSel.options.length; oi++) if(catSel.options[oi].value.toLowerCase() === tg0.toLowerCase()) catSel.selectedIndex = oi;
+      }
+      catSel.addEventListener("change", showCatNew);
     } else {
       var iconsEl = document.getElementById("icfIcons");
       function markIcons(){
@@ -948,6 +980,9 @@ window.initItemCardsModule = function(deps){
         title = taskText(title);
         if(!title){ errEl.textContent = "Введите текст задачи."; return; }
         if(!data.icon){ errEl.textContent = "Выберите вкладку, куда добавлять задачу."; return; }
+        var csel = document.getElementById("icfCatSel"), cnew = document.getElementById("icfCatNew");
+        data.tag = taskTag(csel.value === "__new__" ? cnew.value : csel.value);
+        if(csel.value === "__new__" && !data.tag){ errEl.textContent = "Введите название категории или выберите «Без категории»."; return; }
       }
       if(!title){ errEl.textContent = "Введите название."; return; }
       if(type === "timer"){
@@ -967,6 +1002,7 @@ window.initItemCardsModule = function(deps){
         if(cur){
           cur.title = data.title;
           cur.icon = data.icon;
+          if(type === "task") cur.tag = data.tag;
           cur.date = data.date;
           cur.seconds = data.seconds;
           cur.updatedAt = now;
@@ -1219,7 +1255,7 @@ window.initItemCardsModule = function(deps){
       try{
         var q = JSON.parse(localStorage.getItem(PENDING_TASKS_KEY) || "[]");
         if(!Array.isArray(q)) q = [];
-        q.push({ tab: p.tab, text: p.text, at: Date.now() });
+        q.push({ tab: p.tab, tag: p.tag || "", text: p.text, at: Date.now() });
         localStorage.setItem(PENDING_TASKS_KEY, JSON.stringify(q.slice(-20)));
       }catch(e){}
       if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(TASK_NATIVE_ID, "note"); }catch(e){} }
@@ -1230,7 +1266,7 @@ window.initItemCardsModule = function(deps){
   }
   function applyScannedTask(p, silent){
     var res;
-    try{ res = deps.addTaskFromQr ? deps.addTaskFromQr(p.tab, p.text) : { status: "error", reason: "unsupported" }; }
+    try{ res = deps.addTaskFromQr ? deps.addTaskFromQr(p.tab, p.text, p.tag || "") : { status: "error", reason: "unsupported" }; }
     catch(e){ console.error(e); res = { status: "error", reason: "fail" }; }
     if(!silent) showTaskResultOverlay(p, res);
     return res;
@@ -1267,6 +1303,12 @@ window.initItemCardsModule = function(deps){
       nm.textContent = res.tabTitle || "";
       tab.appendChild(nm);
       card.appendChild(tab);
+      if(res.tag){
+        var tgEl = document.createElement("div");
+        tgEl.className = "scan-task-tag";
+        tgEl.textContent = "Тег: " + res.tag;
+        card.appendChild(tgEl);
+      }
     } else {
       var why = res && res.reason;
       head.textContent = why === "badtab" ? "Код ссылается на вкладку, которой нет в этой версии приложения."
@@ -1282,7 +1324,7 @@ window.initItemCardsModule = function(deps){
 
   // найденная по скану карточка: таймер стартует сразу и показывается слоем; «Сегодня» слоя не имеет — сразу создаёт заметку
   function showScanned(c){
-    if(c.type === "task"){ handleScannedTask({ tab: c.icon, text: c.title }); return; } // на случай кода по id карточки
+    if(c.type === "task"){ handleScannedTask({ tab: c.icon, tag: taskTag(c.tag), text: c.title }); return; } // на случай кода по id карточки
     if(c.type === "datenote"){ openDatedNoteFromScan(c); return; }
     if(c.type === "reminder"){ showReminderOverlay(); return; } // «Напоминалка»: случайное напоминание из «Комментариев» слоем
     if(c.type === "timer") startTimerForCard(c); // скан таймера: отсчёт стартует сразу (если уже шёл — заново)

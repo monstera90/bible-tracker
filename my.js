@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 76.0 (22.10) — структурная правка: теги-категории задач (`c.tag`): кнопка тегов `#taskTagBtn` с выпадающим списком в ряду кнопок вкладок задач (`updateTaskTagBtn`/`renderTaskTagPopup`, фильтр вкладки хранится в `bibleTaskTagFilter_v1`, `getTaskTagFilter`/`setTaskTagFilter`/`collectTaskTags`), фильтр в `renderTaskTabList`; `addTaskFromQr(tab, text, tag)` ставит тег (`getAllTaskTags`), тег сохраняется при переносе между личным и общим хранилищем; деп `getTaskTags` у `initItemCardsModule`. Откат: my.js 75.0.
    Версия: 75.0 (22.10) — структурная правка: `addTaskFromQr` (QR «Создавать задачу», itemcards.js 12.0): добавляет задачу на вкладку или, если такая же невыполненная уже есть, переносит её в конец списка вкладки; `moveTaskToTab` теперь возвращает id задачи (у переноса между личным и общим хранилищем он новый); деп `getTaskTabs`/`addTaskFromQr` у `initItemCardsModule`; вход оболочки с id `newtask` не переключает вкладку. Откат: my.js 74.2.
    Версия: 74.2 (21.10) — скрепка задач: картинка перед сохранением идёт через `MdEditor.prepareImageFile` (пережатие без видимой потери). Откат: my.js 74.1.
    Версия: 74.1 (21.10) — деп `loadQrLib` у `initMdEditorModule` (QR-код заметки). Откат: my.js 74.0.
@@ -1966,6 +1967,15 @@
     // в modals.css у .task-red-sort-wrap), видна только на самой вкладке "Red".
     var redSortWrap = document.getElementById("taskRedSortWrap");
     if(redSortWrap) redSortWrap.classList.toggle("visible", tab === "red");
+    // кнопка тегов — на вкладках-списках задач (не на «Комментариях»); пока видна, окно получает .fab-tag-shift — кнопки левее «+»
+    // сдвигаются на одну позицию (modals.css, --tag-s). Попап при смене вкладки закрывается.
+    var tagWrapEl = document.getElementById("taskTagWrap");
+    var tagOn = TASK_MOVABLE_TABS.indexOf(tab) !== -1;
+    if(tagWrapEl) tagWrapEl.classList.toggle("visible", tagOn);
+    var tagBoxEl = document.getElementById("settingsModalBox");
+    if(tagBoxEl) tagBoxEl.classList.toggle("fab-tag-shift", tagOn);
+    var tagPopupEl = document.getElementById("taskTagPopup");
+    if(tagPopupEl) tagPopupEl.classList.remove("open");
     if(infoWrap){
       infoWrap.classList.toggle("task-info-wrap-far",
         tab === "next" || tab === "red" || tab === "jointtasks");
@@ -7579,7 +7589,7 @@
     if(!box) return;
     var TASK_TARGETS_SEL = ".task-add-fab, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap, " +
       ".task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, " +
-      ".task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home";
+      ".task-info-wrap, .task-attach-wrap, .task-tag-wrap, .task-project-fab-link, .task-project-fab-home";
     var EDGE = 6;           // отступ кнопок от края окна (как у самого ряда, --fab-gap в modals.css)
     var STRIP_PAD = 14;     // отступ полосы жеста над кнопками: bottom:6 + запас 8; высота полосы = STRIP_PAD + --fab-size
     function stripH(){      // высота полосы ряда от низа окна (размер кнопок — --fab-size в modals.css, по умолчанию 40)
@@ -7972,6 +7982,21 @@
         var willOpen = !jointMenuPopup || !jointMenuPopup.classList.contains("open");
         if(willOpen) renderTaskJointMenu();
         if(jointMenuPopup) jointMenuPopup.classList.toggle("open", willOpen);
+      });
+    }
+
+    // --- кнопка тегов (22.10): выпадающий список «Все» + теги вкладки; закрывается нажатием мимо
+    var tagBtnEl = document.getElementById("taskTagBtn");
+    var tagPopupBind = document.getElementById("taskTagPopup");
+    stopMousedown(tagBtnEl);
+    if(tagBtnEl){
+      tagBtnEl.addEventListener("click", function(){
+        var willOpen = !tagPopupBind || !tagPopupBind.classList.contains("open");
+        if(willOpen) renderTaskTagPopup();
+        if(tagPopupBind) tagPopupBind.classList.toggle("open", willOpen);
+      });
+      document.addEventListener("click", function(e){
+        if(tagPopupBind && tagPopupBind.classList.contains("open") && !(e.target.closest && e.target.closest("#taskTagWrap"))) tagPopupBind.classList.remove("open");
       });
     }
 
@@ -10618,6 +10643,7 @@
           return TASK_MOVABLE_TABS.map(function(k){ return {key: k, title: taskQrTabTitle(k), svg: TASK_MOVE_ICON_SVG(k)}; });
         },
         addTaskFromQr: addTaskFromQr,
+        getTaskTags: getAllTaskTags,
         // напоминания карточек: кнопка-часы, окно даты/времени с повтором и пересчёт сроков — те же, что у задач
         reminderBtnParts: reminderBtnParts,
         formatReminder: function(ts){ return Notifications.formatReminder(ts); },
@@ -19825,6 +19851,83 @@
     try{ localStorage.setItem(NEXT_HIDE_LINKED_KEY, val ? "1" : "0"); }catch(e){}
   }
   // ===========================================================================
+  // ТЕГИ-КАТЕГОРИИ ЗАДАЧ (22.10). У задачи необязательное поле c.tag (строка до 16 знаков), его ставит QR «Создавать задачу»
+  // (itemcards.js → addTaskFromQr). Кнопка с выпадающим списком в ряду кнопок вкладок задач (#taskTagBtn, между скрепкой и «+»):
+  // в списке «Все» (всегда) и теги невыполненных задач ЭТОЙ вкладки, пока на вкладке есть хоть одна такая задача. Выбор тега
+  // показывает только задачи с ним; «Все» — все задачи. Выбор помнится отдельно для каждой вкладки (localStorage, переживает
+  // перезапуск): bibleTaskTagFilter_v1 = {<ключ вкладки>: <тег>}; если тега на вкладке больше нет, фильтр сам сбрасывается на «Все».
+  // Кнопка: «Все» — белая; любой тег — залита цветом темы (.pressed, инверсия). Теги сравниваются без учёта регистра.
+  // ===========================================================================
+  var TASK_TAG_FILTER_KEY = "bibleTaskTagFilter_v1";
+  var TASK_TAG_MAX = 16;
+  function normTaskTag(v){
+    var t = String(v == null ? "" : v).replace(/[\s\/]+/g, " ").replace(/^ | $/g, "").slice(0, TASK_TAG_MAX);
+    if(/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1);
+    return t.replace(/ $/, "");
+  }
+  function taskTagKey(v){ return normTaskTag(v).toLowerCase(); }
+  function readTaskTagFilters(){
+    try{
+      var o = JSON.parse(localStorage.getItem(TASK_TAG_FILTER_KEY) || "{}");
+      return (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
+    }catch(e){ return {}; }
+  }
+  function getTaskTagFilter(tab){
+    var v = readTaskTagFilters()[tab];
+    return typeof v === "string" ? v : "";
+  }
+  function setTaskTagFilter(tab, tag){
+    var o = readTaskTagFilters();
+    if(tag) o[tab] = tag; else delete o[tab];
+    try{ localStorage.setItem(TASK_TAG_FILTER_KEY, JSON.stringify(o)); }catch(e){}
+  }
+  // теги списка задач: [{key, label, count}] по алфавиту (подпись — как у первой задачи с таким тегом)
+  function collectTaskTags(tasks){
+    var map = {}, out = [];
+    tasks.forEach(function(t){
+      var lab = normTaskTag(t && t.c && t.c.tag);
+      if(!lab) return;
+      var k = lab.toLowerCase();
+      if(!map[k]){ map[k] = {key: k, label: lab, count: 0}; out.push(map[k]); }
+      map[k].count++;
+    });
+    out.sort(function(a, b){ return a.label.localeCompare(b.label, "ru"); });
+    return out;
+  }
+  // все теги невыполненных задач (личные + общие, любая вкладка) — список категорий в форме QR «Создавать задачу»
+  function getAllTaskTags(){
+    var all = getAllTasks();
+    if(isGroupTasksActive()){ try{ all = all.concat(getAllGroupTasks()); }catch(e){} }
+    return collectTaskTags(all.filter(function(t){ return t.c.checked !== true; })).map(function(x){ return x.label; });
+  }
+  var taskTagState = {tab: null, list: [], sel: ""}; // что показано на кнопке сейчас (его же показывает попап)
+  function updateTaskTagBtn(tabKey, list, selKey){
+    taskTagState = {tab: tabKey, list: list, sel: selKey};
+    var btn = document.getElementById("taskTagBtn");
+    if(!btn) return;
+    btn.classList.toggle("pressed", !!selKey);
+    var lab = "";
+    list.forEach(function(x){ if(x.key === selKey) lab = x.label; });
+    btn.title = selKey ? ("Тег: " + lab + " (нажмите, чтобы сменить)") : "Теги: показать задачи с выбранным тегом";
+  }
+  function renderTaskTagPopup(){
+    var popup = document.getElementById("taskTagPopup");
+    if(!popup) return;
+    var items = [{key: "", label: "Все"}].concat(taskTagState.list);
+    popup.innerHTML = items.map(function(it){
+      return '<button type="button" data-key="' + escapeHtml(it.key) + '"' + (it.key === taskTagState.sel ? ' class="selected"' : '') + '>' + escapeHtml(it.label) + '</button>';
+    }).join("");
+    Array.prototype.forEach.call(popup.querySelectorAll("button"), function(b, i){
+      b.addEventListener("click", function(){
+        popup.classList.remove("open");
+        var tab = taskTagState.tab;
+        if(!tab) return;
+        setTaskTagFilter(tab, i === 0 ? "" : items[i].label);
+        renderTaskTabList(tab);
+      });
+    });
+  }
+  // ===========================================================================
   // ПЕРЕНОСЫ СЛОВ — глобальный флаг, одно состояние на всё приложение: задачи и комментарии,
   // заметки, книги, ИПКД (ридер ИПКД — тот же ридер книг). Вариант 1: штатные переносы браузера,
   // `hyphens:auto` (правило под `html.hyphens-on` в components.css) — текст в DOM/данных не
@@ -20240,9 +20343,16 @@
   // таким текстом уже есть (на любой вкладке, личная или общая) — дубликат не создаётся: её переносят на нужную вкладку и ставят
   // в конец списка. Иначе создаётся новая. Возвращает {status:"added"|"moved"|"error", reason, text, tabTitle, tabSvg}.
   // Вкладки Red и «Задачи в работе» — витрины (см. createTask): «лежать» на них значит иметь красную отметку / чемоданчик.
-  function addTaskFromQr(tabKey, rawText){
+  function addTaskFromQr(tabKey, rawText, rawTag){
     var text = String(rawText == null ? "" : rawText).replace(/\s+/g, " ").trim();
     var info = {text: text, tabTitle: TASK_TAB_TITLES[tabKey] || tabKey, tabSvg: ""};
+    // тег: подпись берётся у уже существующего тега с тем же написанием (без учёта регистра), чтобы «Аптека» и «аптека» не разошлись
+    var tag = normTaskTag(rawTag);
+    if(tag){
+      var knownTags = getAllTaskTags();
+      for(var ti = 0; ti < knownTags.length; ti++) if(knownTags[ti].toLowerCase() === tag.toLowerCase()){ tag = knownTags[ti]; break; }
+    }
+    info.tag = tag;
     if(TASK_MOVABLE_TABS.indexOf(tabKey) === -1){ info.status = "error"; info.reason = "badtab"; return info; }
     info.tabTitle = taskQrTabTitle(tabKey);
     info.tabSvg = TASK_MOVE_ICON_SVG(tabKey);
@@ -20265,6 +20375,7 @@
     var id;
     if(found){
       id = found.id;
+      if(tag && normTaskTag(found.c.tag) !== tag){ found.c.tag = tag; saveTaskData(id, found.c); } // код с тегом ставит его и уже существующей задаче
       if(!onTab(found)){
         if(tabKey === "red"){ found.c.flag = "red"; saveTaskData(id, found.c); }
         else if(tabKey === "worktasks"){ found.c.inWork = true; saveTaskData(id, found.c); }
@@ -20277,10 +20388,11 @@
         id = genGroupTaskId();
         saveGroupTaskData(id, {text: text, tab: "jointtasks", checked: false, checkedAt: null,
           completionKey: null, nextForProjectId: null, flag: null, inWork: false,
-          createdBy: getDeviceId(), completedBy: null});
+          createdBy: getDeviceId(), completedBy: null, tag: tag || null});
         if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
       } else {
         id = createTaskWithText(tabKey, text);
+        if(tag){ var nt2 = getTaskById(id); if(nt2){ nt2.c.tag = tag; saveTaskData(id, nt2.c); } }
       }
       info.status = "added";
     }
@@ -20318,6 +20430,7 @@
     var content = {text: task.c.text || "", tab: homeTab, checked: false, checkedAt: null,
       completionKey: null, nextForProjectId: null, flag: flag, inWork: inWork,
       remindAt: getTaskReminderAt(task)};
+    if(task.c.tag) content.tag = task.c.tag;
     var ts = Date.now();
     if(personalShadowReady && isPersonalShadowEnabled()){
       getGroupTasksBinding().moveTo(getPersonalTasksBinding(), id, content, {toRecordId: newId, updatedAt: ts})
@@ -20345,6 +20458,7 @@
       completionKey: null, nextForProjectId: null, flag: task.c.flag || null, inWork: !!task.c.inWork,
       remindAt: getTaskReminderAt(task),
       createdBy: getDeviceId(), completedBy: null};
+    if(task.c.tag) content.tag = task.c.tag;
     var ts = Date.now();
     if(personalShadowReady && isPersonalShadowEnabled()){
       getPersonalTasksBinding().moveTo(getGroupTasksBinding(), id, content, {toRecordId: newId, t: ts})
@@ -21724,6 +21838,12 @@
     if(tabKey === "next" && getNextHideLinkedTasks()){
       tasks = tasks.filter(function(t){ return !t.c.nextForProjectId; });
     }
+    // теги (22.10): список кнопки — теги задач этой вкладки; выбранный тег оставляет только задачи с ним (нет такого — сброс на «Все»)
+    var tagList = collectTaskTags(tasks);
+    var tagSelKey = taskTagKey(getTaskTagFilter(tabKey));
+    if(tagSelKey && !tagList.some(function(x){ return x.key === tagSelKey; })){ setTaskTagFilter(tabKey, ""); tagSelKey = ""; }
+    if(tagSelKey) tasks = tasks.filter(function(t){ return taskTagKey(t.c && t.c.tag) === tagSelKey; });
+    updateTaskTagBtn(tabKey, tagList, tagSelKey);
     var rowsHtml = tasks.map(function(t){ return buildTaskRowHtml(t); }).join("");
     // Шаг 11 ТЗ синхронизации — подсказка "только чтение" в шапке вкладки для роли viewer (п. 3
     // задачи из шаг_11.txt: как подать viewer'у, что задачи нередактируемы). Рисуется только на
@@ -21765,6 +21885,9 @@
       fab.onclick = function(){
         flushPendingTaskEdits(); // не потерять то, что уже набрано в другой строке
         var id = createTask(tabKey);
+        // при выбранном теге новая задача получает его — иначе при следующей перерисовке она пропала бы из отфильтрованного списка
+        var curTagLabel = getTaskTagFilter(tabKey);
+        if(curTagLabel){ var nt = getTaskById(id); if(nt){ nt.c.tag = curTagLabel; saveTaskData(id, nt.c); } }
         var wrap = document.getElementById("taskListWrap");
         if(wrap){
           var emptyMsg = document.querySelector(".task-empty");
@@ -22507,6 +22630,11 @@
       // лишней/перекрывала бы его.
       var homeStubHide = document.getElementById("taskFabHomeStub");
       if(homeStubHide) homeStubHide.classList.remove("visible");
+      // кнопка тегов (22.10) на экране «Все задачи проекта» не нужна; возвращает её syncTaskFabRowForTab при выходе
+      var tagWrapHide = document.getElementById("taskTagWrap");
+      if(tagWrapHide) tagWrapHide.classList.remove("visible");
+      var tagBoxHide = document.getElementById("settingsModalBox");
+      if(tagBoxHide) tagBoxHide.classList.remove("fab-tag-shift");
       // Кнопка режима чтения ("полноэкранный режим", right:241).
       // (241) → звенья (280) → "i" (319). syncTaskFabRowForTab здесь не вызывается (см. комментарий
       //   у globalFab выше), поэтому обе кнопки включаем явно — не полагаясь на то, что они

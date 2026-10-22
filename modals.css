@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 16.0 (22.10) — структурная правка: кнопка тегов задач `.task-tag-wrap` (слот 4 между «+» и скрепкой) + попап `.task-tag-popup`; слоты 4–12 теперь считаются как `N + var(--tag-s, 0)` (класс `.fab-tag-shift` на окне ставит `--tag-s:1`: все кнопки левее «+» уезжают на одну позицию, пока видна кнопка тегов). Откат: modals.css 15.0.
    Версия: 15.0 (21.10) — структурная правка: плашка QR-кода заметки `.mdeditor-qr-plaque` (+ `.open`) над рядом кнопок редактора заметок (mdeditor.js 14.0).
    Версия: 14.2 (17.10) — кнопка «повтор» в плашке напоминания (`.reminder-bubble-repeat`, `.rb-repeat-days`) — для напоминаний карточек.
    Версия: 14.1 (16.10) — значки под задачей (`.task-body > .task-actions`) переносятся на следующую строку, если не помещаются в ширину строки (крупный размер значков, узкий экран).
@@ -1959,7 +1960,7 @@
   .task-fontsize-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 5 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + (5 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -1970,7 +1971,7 @@
   .task-iconsize-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 6 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + (6 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2085,10 +2086,10 @@
     z-index:5;
   }
   .task-format-wrap.visible{ display:flex; }
-  .task-format-wrap-strike{ inset-inline-end:calc(var(--fab-gap, 6px) + 7 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
-  .task-format-wrap-underline{ inset-inline-end:calc(var(--fab-gap, 6px) + 8 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
-  .task-format-wrap-italic{ inset-inline-end:calc(var(--fab-gap, 6px) + 9 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
-  .task-format-wrap-bold{ inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-strike{ inset-inline-end:calc(var(--fab-gap, 6px) + (7 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-underline{ inset-inline-end:calc(var(--fab-gap, 6px) + (8 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-italic{ inset-inline-end:calc(var(--fab-gap, 6px) + (9 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-bold{ inset-inline-end:calc(var(--fab-gap, 6px) + (10 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
   /* (14.10) Кнопки «Выделить текст» и «Копировать» из нижнего ряда задач убраны (маркер — жестом удержания в режиме чтения,
      копирование — системным способом); слоты левее них сдвинуты на 2 назад: Ч 6, П 7, К 8, Ж 9, «глаз»/сортировка/меню/звенья/«i» 10, «i» дальняя 11. */
   /* "глаз" — скрыть/показать на вкладке "Next" задачи, уже привязанные к
@@ -2154,7 +2155,7 @@
   .task-hide-linked-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 11 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + (11 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2173,7 +2174,7 @@
   .task-joint-menu-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 11 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + (11 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2245,7 +2246,7 @@
   .task-red-sort-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 11 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + (11 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2263,7 +2264,7 @@
   .task-info-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 11 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    inset-inline-end:calc(var(--fab-gap, 6px) + (11 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2273,14 +2274,67 @@
      стоит ближе к "Ж" (right:280), а "i" — левее неё (right:319). Класс
      вешает JS: syncTaskFabRowForTab и openTaskNextPicker (my.js). На остальных
      вкладках задач класса нет — "i" остаётся на right:280 без дырки в ряду. */
-  .task-info-wrap.task-info-wrap-far{ inset-inline-end:calc(var(--fab-gap, 6px) + 12 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-info-wrap.task-info-wrap-far{ inset-inline-end:calc(var(--fab-gap, 6px) + (12 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
   /* скрепка — между "Аа" и "+" (см. index.html и ТЗ пользователя, та же
      логика попапа не нужна: сразу открывает системный диалог выбора
      файла, см. initTaskGlobalToolbar в my.js) */
-  .task-attach-wrap{
+  /* Теги задач (22.10): кнопка с выпадающим списком — слот 4, между «+» (3) и скрепкой. Видна на вкладках-списках задач;
+     пока она видна, окно получает класс .fab-tag-shift (--tag-s:1) и все кнопки левее «+» сдвинуты на одну позицию
+     (slot N → N + var(--tag-s, 0)). Попап — как у меню «Общие задачи», но с прокруткой при длинном списке. */
+  .settings-modal-box.fab-tag-shift{ --tag-s:1; }
+  .task-tag-wrap{
     display:none;
     position:absolute;
     inset-inline-end:calc(var(--fab-gap, 6px) + 4 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    bottom:var(--fab-gap, 6px);
+    z-index:5;
+  }
+  .task-tag-wrap.visible{ display:flex; }
+  .task-tag-popup{
+    display:none;
+    position:absolute;
+    inset-inline-start:0;
+    bottom:calc(100% + 8px);
+    flex-direction:column;
+    gap:4px;
+    min-width:160px;
+    max-width:70vw;
+    max-height:50vh;
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+    padding:6px;
+    background:#fffef8;
+    border:1px solid var(--groove-shadow);
+    border-radius:8px;
+    box-shadow:0 2px 6px rgba(0,0,0,.28);
+    z-index:6;
+  }
+  .task-tag-popup.open{ display:flex; }
+  .task-tag-popup button{
+    display:block;
+    width:100%;
+    text-align:left;
+    padding:8px 10px;
+    background:transparent;
+    border:none;
+    border-radius:6px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:14px;
+    color:var(--ink);
+    cursor:pointer;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .task-tag-popup button.selected{ background:#f4ead0; font-weight:700; }
+  @media (hover:hover) and (pointer:fine){
+    .task-tag-popup button:hover{ background:#f4ead0; }
+  }
+  .task-attach-wrap{
+    display:none;
+    position:absolute;
+    inset-inline-end:calc(var(--fab-gap, 6px) + (4 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
     bottom:var(--fab-gap, 6px);
     z-index:5;
   }
@@ -2647,8 +2701,8 @@ html.lefty .settings-modal-box > *{ direction:ltr; }
 /* ряды fab-кнопок и одиночные кнопки, позиционируемые inset-inline-end
    (селекторы по классу, а не по «ребёнок окна»: часть из них живёт внутри
    #settingsTabContent) */
-html.lefty :is(.mdeditor-fab-row, .task-add-fab, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap, .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home){ direction:rtl; }
-html.lefty :is(.mdeditor-fab-row, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap, .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap) > *{ direction:ltr; }
+html.lefty :is(.mdeditor-fab-row, .task-tag-wrap, .task-add-fab, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap, .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home){ direction:rtl; }
+html.lefty :is(.mdeditor-fab-row, .task-tag-wrap, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap, .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap) > *{ direction:ltr; }
 /* всплывающие столбики (inset-inline-start:0 — под rtl это правый край
    обёртки, то есть зеркально обычной раскладке); удвоенный класс + тег —
    чтобы перебить сброс «> *» выше, где попап — прямой ребёнок обёртки */
@@ -2679,6 +2733,7 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .task-red-sort-wrap,
 .task-info-wrap,
 .task-attach-wrap,
+.task-tag-wrap,
 .task-project-fab-link,
 .task-project-fab-home,
 .mdeditor-fab-row{
@@ -2696,7 +2751,7 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .fab-slide-off{ opacity:1; }
 /* перетаскивание ряда пальцем (initFabRowSlider, my.js): сдвиг ведёт палец без сглаживания,
    сглаживание включается снова по отпусканию — так ряд «доезжает» до края */
-.fab-dragging :is(.task-add-fab, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap,   .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap,
+.fab-dragging :is(.task-tag-wrap, .task-add-fab, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap,   .task-fullscreen-wrap, .task-reading-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap,
   .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home, .mdeditor-fab-row){
   transition:none !important;
 }
@@ -2726,6 +2781,7 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .task-red-sort-wrap .mdeditor-fab-btn,
 .task-info-wrap .mdeditor-fab-btn,
 .task-attach-wrap .mdeditor-fab-btn,
+.task-tag-wrap .mdeditor-fab-btn,
 .task-project-fab-link,
 .task-project-fab-home{
   width:var(--fab-size, 36px);
