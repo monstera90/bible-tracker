@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 76.1 (22.10) — в подписи общей задачи «Создал: …» добавлены дата и время создания («Создал: Вы, 22.10.2026 8:05 · Выполнил: …», тот же шрифт `.task-joint-signature`): `groupTaskCreatedTs` берёт время из id задачи (genGroupTaskId), для задач со старым id — из c.createdAt; `formatTaskCreatedAt`; `buildTaskJointSignatureHtml(content, id)` получил второй параметр (активные задачи и архив). Откат: my.js 76.0.
    Версия: 76.0 (22.10) — структурная правка: теги-категории задач (`c.tag`): кнопка тегов `#taskTagBtn` с выпадающим списком в ряду кнопок вкладок задач (`updateTaskTagBtn`/`renderTaskTagPopup`, фильтр вкладки хранится в `bibleTaskTagFilter_v1`, `getTaskTagFilter`/`setTaskTagFilter`/`collectTaskTags`), фильтр в `renderTaskTabList`; `addTaskFromQr(tab, text, tag)` ставит тег (`getAllTaskTags`), тег сохраняется при переносе между личным и общим хранилищем; деп `getTaskTags` у `initItemCardsModule`. Откат: my.js 75.0.
    Версия: 75.0 (22.10) — структурная правка: `addTaskFromQr` (QR «Создавать задачу», itemcards.js 12.0): добавляет задачу на вкладку или, если такая же невыполненная уже есть, переносит её в конец списка вкладки; `moveTaskToTab` теперь возвращает id задачи (у переноса между личным и общим хранилищем он новый); деп `getTaskTabs`/`addTaskFromQr` у `initItemCardsModule`; вход оболочки с id `newtask` не переключает вкладку. Откат: my.js 74.2.
    Версия: 74.2 (21.10) — скрепка задач: картинка перед сохранением идёт через `MdEditor.prepareImageFile` (пережатие без видимой потери). Откат: my.js 74.1.
@@ -22053,7 +22054,25 @@
   // (renderTaskArchiveTab(true)), где completedBy уже не null практически всегда (задача
   // архивируется как раз в момент выполнения, см. checkGroupTaskDone) — вынесено сюда, чтобы не
   // дублировать формирование метки "Вы"/"Второй участник".
-  function buildTaskJointSignatureHtml(content){
+  // Время создания общей задачи: оно зашито в её id (genGroupTaskId: "gt" + Date.now() в base36 из 8 знаков + случайный
+  // хвост) — настоящий момент создания, в отличие от c.createdAt, который служит ключом сортировки и сдвигается при
+  // «в начало/в конец». У задач со старым id (например "gt_…" из миграции) id времени не несёт — берём c.createdAt,
+  // если он похож на время (для них это лучшее, что есть). Нет ни того ни другого — null, время не показывается.
+  function groupTaskCreatedTs(id, content){
+    function plausible(ts){ return typeof ts === "number" && isFinite(ts) && ts > 1577836800000 && ts < 4102444800000; }
+    var m = typeof id === "string" ? /^gt([0-9a-z]{8})[0-9a-z]+$/.exec(id) : null;
+    if(m){
+      var ts = parseInt(m[1], 36);
+      if(plausible(ts)) return ts;
+    }
+    return plausible(content && content.createdAt) ? content.createdAt : null;
+  }
+  // «22.10.2026 8:05» — дата и время создания рядом с именем создателя; время в том же формате, что у напоминаний
+  function formatTaskCreatedAt(ts){
+    var d = new Date(ts), dd = d.getDate(), mm = d.getMonth() + 1;
+    return (dd < 10 ? "0" : "") + dd + "." + (mm < 10 ? "0" : "") + mm + "." + d.getFullYear() + " " + formatReminderTimeShort(ts);
+  }
+  function buildTaskJointSignatureHtml(content, id){
     if(!content.createdBy) return "";
     var meId = getDeviceId();
     function labelFor(devId){
@@ -22061,7 +22080,9 @@
       return getCachedGroupMemberName(devId) || "Второй участник";
     }
     var createdByLabel = labelFor(content.createdBy);
+    var createdTs = groupTaskCreatedTs(id, content);
     return '<div class="task-joint-signature">Создал: ' + escapeHtml(createdByLabel) +
+      (createdTs ? ", " + formatTaskCreatedAt(createdTs) : "") +
       (content.completedBy ? " · Выполнил: " + escapeHtml(labelFor(content.completedBy)) : "") +
       '</div>';
   }
@@ -22080,7 +22101,7 @@
     // целиком, ни (что важнее) корректно определить через scrollHeight/clientHeight, что обрезка
     // больше не нужна, когда задачу укоротили редактированием (см. updateTaskExpandBtn).
     var isExpanded = !!expandedTaskIds[id];
-    var jointSignatureHtml = buildTaskJointSignatureHtml(task.c);
+    var jointSignatureHtml = buildTaskJointSignatureHtml(task.c, id);
     // не только вкладка «Общие задачи»: общая задача может лежать и на Red
     var isJointReadOnlyRow = (tabKey === "jointtasks" || isGroupTaskId(id)) && isGroupTasksReadOnly();
     body.innerHTML =
@@ -23026,7 +23047,7 @@
       // isGroup: та же подпись "Создал: … · Выполнил: …", что и на активной вкладке; у личного
       // архива createdBy нет вовсе, buildTaskJointSignatureHtml сама вернёт "" — отдельно проверять
       // isGroup здесь не нужно.
-      var archiveJointSignatureHtml = buildTaskJointSignatureHtml(t.c);
+      var archiveJointSignatureHtml = buildTaskJointSignatureHtml(t.c, t.id);
       return '<div class="task-row" data-id="' + t.id + '">' +
         '<div class="task-body task-archive-body" data-id="' + t.id + '">' +
           archiveJointSignatureHtml +
