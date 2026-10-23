@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 77.0 (23.10) — структурная правка: вкладка «Скрытие вкладок» (`alt6`, режим колеса, вторая снизу в вертикальном стеке — на месте Red, `BOTTOM_ALT_REPLACES.alt6`; Red теперь тоже в `BOTTOM_ALT_ORIGINAL_TABS` и скрывается под колесом, как worktasks): список всех вкладок с пиктограммой (innerHTML настоящей кнопки), названием и галочкой «показана» (`renderSettingsTabHiddenTabs`, `hideableTabsInScreenOrder`); скрытие — класс `.settings-tab-user-hidden` (display:none !important, стиль вставляется из JS), хранение `bibleHiddenSettingsTabs_v1` (id кнопок, внесён в `EXPORT_REGISTRY.include`); шестерёнка и вкладки режима колеса не скрываются; `getResumeSettingsState`/`openTabOfActiveSettingsSet` не открывают скрытую вкладку (`isSettingsTabUserHidden`, `firstVisibleTabOfSet`). Откат: my.js 76.1.
    Версия: 76.1 (22.10) — в подписи общей задачи «Создал: …» добавлены дата и время создания («Создал: Вы, 22.10.2026 8:05 · Выполнил: …», тот же шрифт `.task-joint-signature`): `groupTaskCreatedTs` берёт время из id задачи (genGroupTaskId), для задач со старым id — из c.createdAt; `formatTaskCreatedAt`; `buildTaskJointSignatureHtml(content, id)` получил второй параметр (активные задачи и архив). Откат: my.js 76.0.
    Версия: 76.0 (22.10) — структурная правка: теги-категории задач (`c.tag`): кнопка тегов `#taskTagBtn` с выпадающим списком в ряду кнопок вкладок задач (`updateTaskTagBtn`/`renderTaskTagPopup`, фильтр вкладки хранится в `bibleTaskTagFilter_v1`, `getTaskTagFilter`/`setTaskTagFilter`/`collectTaskTags`), фильтр в `renderTaskTabList`; `addTaskFromQr(tab, text, tag)` ставит тег (`getAllTaskTags`), тег сохраняется при переносе между личным и общим хранилищем; деп `getTaskTags` у `initItemCardsModule`. Откат: my.js 75.0.
    Версия: 75.0 (22.10) — структурная правка: `addTaskFromQr` (QR «Создавать задачу», itemcards.js 12.0): добавляет задачу на вкладку или, если такая же невыполненная уже есть, переносит её в конец списка вкладки; `moveTaskToTab` теперь возвращает id задачи (у переноса между личным и общим хранилищем он новый); деп `getTaskTabs`/`addTaskFromQr` у `initItemCardsModule`; вход оболочки с id `newtask` не переключает вкладку. Откат: my.js 74.2.
@@ -8349,7 +8350,8 @@
         "jwlMergeState_v1": "состояние слияния JW Library (по нему определяются удаления); проверять размер",
         "taskRemindersFired_v1": "уже показанные напоминания задач",
         "itemCards_v1": "записи карточек предметов (вкладка 9)",
-        "itemCardsSize_v1": "размер карточек предметов на этом устройстве"
+        "itemCardsSize_v1": "размер карточек предметов на этом устройстве",
+        "bibleHiddenSettingsTabs_v1": "скрытые вкладки окна настроек (id кнопок вкладок)"
       },
       exclude: {
         "bibleReadingProgress_v2": "это сам state, идёт через rawState",
@@ -10244,8 +10246,9 @@
       var btn = document.getElementById(TASK_TAB_IDS[key]);
       if(!btn) return;
       if(bottomAltMode){
-        btn.style.display = (key === "worktasks") ? "none" : "flex";
-        setTabDecor(btn, key !== "worktasks");
+        var replacedByAlt = (key === "worktasks" || key === "red"); // на их местах стоят «Версии» и «Скрытие вкладок»
+        btn.style.display = replacedByAlt ? "none" : "flex";
+        setTabDecor(btn, !replacedByAlt);
       } else {
         setTabDecor(btn, false);
         btn.style.display = showTasks ? "flex" : "none";
@@ -17079,6 +17082,16 @@
     if(settingsActiveTabSet === 1 && TASK_TAB_IDS.hasOwnProperty(target) && !getShowAllTasksEnabled()){
       target = "gear";
     }
+    // скрытую пользователем вкладку не открываем: берём первую не скрытую того же набора; у набора 2 не осталось ни одной —
+    // возвращаемся на набор 1 (вкладка настроек)
+    if(target !== "gear" && isSettingsTabUserHidden(target)){
+      target = firstVisibleTabOfSet(settingsActiveTabSet);
+      if(!target){
+        settingsActiveTabSet = 1;
+        applySettingsTabSetVisibility();
+        target = "gear";
+      }
+    }
     switchSettingsTab(target);
   }
 
@@ -17107,6 +17120,11 @@
     }
     if(!savedTab){
       savedTab = (savedSet === 1) ? (getShowAllTasksEnabled() ? "red" : "gear") : "set2b_1";
+    }
+    // скрытая пользователем вкладка: первая не скрытая того же набора, а если таких нет — вкладка настроек набора 1
+    if(savedTab !== "gear" && isSettingsTabUserHidden(savedTab)){
+      var alt = firstVisibleTabOfSet(savedSet);
+      if(alt) savedTab = alt; else { savedSet = 1; savedTab = "gear"; }
     }
     return { set: savedSet, tab: savedTab };
   }
@@ -17639,19 +17657,19 @@
   var BOTTOM_ALT_TAB_IDS = {
     alt1: "settingsTabAlt1Btn", alt2: "settingsTabAlt2Btn",
     alt3: "settingsTabAlt3Btn", alt4: "settingsTabAlt4Btn",
-    alt5: "settingsTabAlt5Btn"
+    alt5: "settingsTabAlt5Btn", alt6: "settingsTabAlt6Btn"
   };
   var BOTTOM_ALT_REPLACES = {
     alt1: "settingsTabYearBtn", alt2: "settingsTabMoodBtn",
     alt3: "settingsTabExtra2Btn", alt4: "settingsTabExtra3Btn",
-    alt5: "settingsTabWorkTasksBtn"
+    alt5: "settingsTabWorkTasksBtn", alt6: "settingsTabRedBtn"
   };
   var BOTTOM_ALT_TAB_TITLES = {
     alt1: "Внешний вид", alt2: "Синхронизация",
     alt3: "Восстановление и сброс", alt4: "Дополнительные возможности",
-    alt5: "Версии"
+    alt5: "Версии", alt6: "Скрытие вкладок"
   };
-  var BOTTOM_ALT_ORIGINAL_TABS = ["year", "mood", "extra2", "extra3", "worktasks"];
+  var BOTTOM_ALT_ORIGINAL_TABS = ["year", "mood", "extra2", "extra3", "worktasks", "red"];
   var BOTTOM_ALT_SVG_OPEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">';
   var BOTTOM_ALT_ICONS = {
     // палитра с красками + кисточка
@@ -17678,6 +17696,10 @@
     // стопка слоёв — версии
     alt5: BOTTOM_ALT_SVG_OPEN +
       '<path d="M12 3.5l9 4.8-9 4.8-9-4.8 9-4.8z"></path><path d="M3 12.6l9 4.8 9-4.8"></path><path d="M3 16.9l9 4.8 9-4.8"></path>' +
+      '</svg>',
+    // перечёркнутый глаз — скрытие вкладок
+    alt6: BOTTOM_ALT_SVG_OPEN +
+      '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path>' +
       '</svg>'
   };
   var bottomAltMode = false;
@@ -17736,7 +17758,7 @@
     Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
       var alt = document.getElementById(BOTTOM_ALT_TAB_IDS[key]);
       var orig = document.getElementById(BOTTOM_ALT_REPLACES[key]);
-      if(key === "alt5"){
+      if(key === "alt5" || key === "alt6"){ // эти две стоят в вертикальном стеке на месте worktasks и red (обычные вкладки там — flex)
         if(alt) alt.style.display = bottomAltMode ? "flex" : "none";
         return;
       }
@@ -17782,9 +17804,142 @@
     if(tab === "alt3"){ renderSettingsTabRecovery(); return; }
     if(tab === "alt4"){ renderSettingsTabMore(); return; }
     if(tab === "alt5"){ renderSettingsTabVersions(); return; }
+    if(tab === "alt6"){ renderSettingsTabHiddenTabs(); return; }
     container.innerHTML = '<h3 class="common-tab-title">' + BOTTOM_ALT_TAB_TITLES[tab] + '</h3>' +
       '<div class="mood-diagram-empty">Контент появится позже</div>';
   }
+
+  // ===================== СКРЫТИЕ ВКЛАДОК ОКНА НАСТРОЕК =====================
+  // Вкладка «Скрытие вкладок» (alt6, режим колеса, вторая снизу в вертикальном стеке): список всех вкладок —
+  // пиктограмма, название, галочка «показана». Список строится из настоящих кнопок вкладок (их innerHTML), поэтому
+  // пиктограммы здесь всегда такие же, как на самих вкладках: поменяешь иконку вкладки — изменится и тут.
+  // Не скрываются: шестерёнка (колесо) и вкладки самого режима колеса (alt1..alt6) — иначе до настроек не добраться.
+  // Скрытие — класс .settings-tab-user-hidden (display:none !important) на кнопке, поверх любой другой логики показа
+  // (галочка «Показать все мои задачи», режим колеса и т.п.). В хранилище — id кнопок: bibleHiddenSettingsTabs_v1.
+  var HIDDEN_TABS_KEY = "bibleHiddenSettingsTabs_v1";
+  var hiddenSettingsTabIds = null; // {id кнопки: true}
+  function loadHiddenSettingsTabs(){
+    if(hiddenSettingsTabIds) return hiddenSettingsTabIds;
+    hiddenSettingsTabIds = {};
+    try{
+      var arr = JSON.parse(localStorage.getItem(HIDDEN_TABS_KEY) || "[]");
+      if(Array.isArray(arr)) arr.forEach(function(id){ if(typeof id === "string") hiddenSettingsTabIds[id] = true; });
+    }catch(e){}
+    return hiddenSettingsTabIds;
+  }
+  function saveHiddenSettingsTabs(){
+    try{
+      var ids = Object.keys(hiddenSettingsTabIds || {});
+      if(ids.length) localStorage.setItem(HIDDEN_TABS_KEY, JSON.stringify(ids)); else localStorage.removeItem(HIDDEN_TABS_KEY);
+    }catch(e){}
+  }
+  function ensureHiddenTabsStyle(){
+    if(document.getElementById("hiddenTabsStyle")) return;
+    var st = document.createElement("style");
+    st.id = "hiddenTabsStyle";
+    st.textContent =
+      ".settings-tab.settings-tab-user-hidden{display:none !important;}" +
+      ".hidetabs-row{cursor:pointer;}" +
+      ".hidetabs-left{display:flex;align-items:center;gap:12px;min-width:0;}" +
+      ".hidetabs-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 34px;width:34px;height:34px;color:var(--wood);--icon-halo:var(--parchment);}" +
+      ".hidetabs-icon svg{width:28px;height:28px;}" +
+      ".hidetabs-name{overflow:hidden;text-overflow:ellipsis;}";
+    document.head.appendChild(st);
+  }
+  // шестерёнки (колесо обоих наборов) и вкладки режима колеса скрывать нельзя
+  function isProtectedTabButton(btn){
+    return !btn || btn.id === "settingsTabGearBtn" || btn.id === "settingsTabGearBtnSet2" || /^settingsTabAlt\d+Btn$/.test(btn.id);
+  }
+  // в список попадает язычок с пиктограммой (пустые заглушки без значка не считаем)
+  function isHideableTabButton(btn){
+    return !isProtectedTabButton(btn) && !!btn.querySelector("svg, .ipkd-tab-icon");
+  }
+  // порядок — как на экране: боковые стеки сверху вниз (в DOM они идут снизу вверх), нижние ряды слева направо;
+  // вкладки набора 2 — только когда он разблокирован
+  function hideableTabsInScreenOrder(){
+    var res = [];
+    function pushFrom(containerId, reverse){
+      var c = document.getElementById(containerId);
+      if(!c) return;
+      var btns = Array.prototype.filter.call(c.querySelectorAll(".settings-tab"), isHideableTabButton);
+      if(reverse) btns.reverse();
+      btns.forEach(function(b){ res.push(b); });
+    }
+    pushFrom("settingsTabs", true);
+    pushFrom("settingsTabsGear", false);
+    if(isSet2Unlocked()){
+      pushFrom("settingsTabsSet2", true);
+      pushFrom("settingsTabsGearSet2", false);
+    }
+    return res;
+  }
+  var HIDEABLE_TAB_NAMES = { settingsTabSet2Btn8: "ИПКД" };
+  function hideableTabName(btn){
+    if(HIDEABLE_TAB_NAMES[btn.id]) return HIDEABLE_TAB_NAMES[btn.id];
+    var taskKey = btn.getAttribute("data-task");
+    if(taskKey) return taskQrTabTitle(taskKey);
+    if(btn.id === EXTRA_TAB_IDS.extra2) return TASK_TAB_TITLES.extra2 || "Comments";
+    return btn.getAttribute("title") || btn.getAttribute("aria-label") || btn.id;
+  }
+  function applyHiddenSettingsTabs(){
+    ensureHiddenTabsStyle();
+    var hidden = loadHiddenSettingsTabs();
+    Array.prototype.forEach.call(document.querySelectorAll("#settingsTabs .settings-tab, #settingsTabsGear .settings-tab, #settingsTabsSet2 .settings-tab, #settingsTabsGearSet2 .settings-tab"), function(btn){
+      // значок у части вкладок (Comments, ИПКД) ставится кодом позже старта, поэтому здесь значок не проверяем
+      btn.classList.toggle("settings-tab-user-hidden", !!hidden[btn.id] && !isProtectedTabButton(btn));
+    });
+    updateSettingsCornerPatchHeight(); // число видимых язычков в стеке изменилось
+  }
+  // скрыта ли вкладка с ключом tab (ключи как в switchSettingsTab: "inbox", "year", "set2s_3", "set2b_1" …)
+  function isSettingsTabUserHidden(tab){
+    var id = TASK_TAB_IDS[tab] || EXTRA_TAB_IDS[tab] || SET2_TAB_IDS[tab] || SET2_EXTRA_TAB_IDS[tab] ||
+      (tab === "year" ? "settingsTabYearBtn" : (tab === "mood" ? "settingsTabMoodBtn" : null));
+    var btn = id ? document.getElementById(id) : null;
+    return !!(btn && btn.classList.contains("settings-tab-user-hidden"));
+  }
+  // первая не скрытая вкладка набора (нижний ряд, затем боковой стек) или null — на неё переходим, если нужная скрыта
+  function firstVisibleTabOfSet(set){
+    var orders = set === 1 ? [SETTINGS_BOTTOM_ORDER_1, SETTINGS_SIDE_ORDER_1] : [SETTINGS_BOTTOM_ORDER_2, SETTINGS_SIDE_ORDER_2];
+    for(var o = 0; o < orders.length; o++){
+      for(var i = 0; i < orders[o].length; i++){
+        var key = orders[o][i];
+        if(key === "gear") continue;
+        if(set === 1 && TASK_TAB_IDS.hasOwnProperty(key) && !getShowAllTasksEnabled()) continue;
+        if(!isSettingsTabUserHidden(key)) return key;
+      }
+    }
+    return null;
+  }
+  function renderSettingsTabHiddenTabs(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    ensureHiddenTabsStyle();
+    var hidden = loadHiddenSettingsTabs();
+    var rowsHtml = hideableTabsInScreenOrder().map(function(btn){
+      return '<label class="settings-row hidetabs-row">' +
+        '<span class="hidetabs-left"><span class="hidetabs-icon">' + btn.innerHTML + '</span>' +
+        '<span class="hidetabs-name">' + escapeHtml(hideableTabName(btn)) + '</span></span>' +
+        '<input type="checkbox" data-tab-btn="' + btn.id + '"' + (hidden[btn.id] ? "" : " checked") + '>' +
+        '</label>';
+    }).join("");
+    container.innerHTML =
+      '<div class="settings-gear-tab">' +
+      '<h3 class="common-tab-title">Скрытие вкладок</h3>' +
+      '<div class="modal-note" style="margin-bottom:6px;">Галочка — вкладка показана. Снимите галочку, чтобы скрыть вкладку. Вкладки настроек скрыть нельзя.</div>' +
+      (getShowAllTasksEnabled() ? '' : '<div class="modal-note" style="margin-bottom:6px;">Вкладки задач показываются только при включённой галочке «Показать все мои задачи» (вкладка «Дополнительные возможности»).</div>') +
+      rowsHtml +
+      '</div>';
+    Array.prototype.forEach.call(container.querySelectorAll("input[data-tab-btn]"), function(cb){
+      cb.addEventListener("change", function(){
+        var id = this.getAttribute("data-tab-btn");
+        var h = loadHiddenSettingsTabs();
+        if(this.checked) delete h[id]; else h[id] = true;
+        saveHiddenSettingsTabs();
+        applyHiddenSettingsTabs();
+      });
+    });
+  }
+  applyHiddenSettingsTabs();
   initBottomAltTabs();
 
   function updateBottomGearButtons(){
