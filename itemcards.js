@@ -1384,7 +1384,7 @@ window.initItemCardsModule = function(deps){
       html += '<option value="__new__">Новая категория…</option></select>' +
         '<input type="text" class="mdeditor-cleanup-input" id="icfCatNew" placeholder="Новая категория (до ' + TASK_TAG_MAX + ' знаков)" maxlength="' + TASK_TAG_MAX + '" autocomplete="off" style="display:none;"></div>';
     } else if(type === "weather"){
-      html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfCity" placeholder="Город (например, Москва)" maxlength="60" autocomplete="off">';
+      html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfCity" placeholder="Город (например, Париж)" maxlength="60" autocomplete="off">';
       html += '<div class="item-form-hint" id="icfCityPicked"></div>';
       html += '<div id="icfCityList" style="display:flex;flex-direction:column;margin:6px 0;"></div>';
     } else if(type === "habit"){
