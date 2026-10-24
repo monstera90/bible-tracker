@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 26.2 (25.10) — кнопки карточки, раскрытые долгим нажатием (глаз/удалить/звезда/изменить), прячутся тапом мимо этой карточки (тап по другой карточке только прячет кнопки) и прокруткой списка (`bindMenuDismiss`; прокрутка сразу после перерисовки сетки игнорируется — `lastRenderAt`). Kotlin не менялся. Откат: itemcards.js 26.1.
    Версия: 26.1 (25.10) — при фильтре «Избранное» кнопка-глаз в нижнем ряду скрыта (там и так показаны все, скрытые тоже); меню воронки, «+» и PDF закрываются тапом мимо (`bindMenuDismiss`: тап по карточке только закрывает меню, не открывая форму) и прокруткой списка. Kotlin не менялся. Откат: itemcards.js 26.0.
    Версия: 26.0 (25.10) — структурная правка: фильтр «Особые» переименован в «Избранное» (ключ `fav`): в него попадают только карточки с признаком `fav`, а не «Сегодня»/«Напоминалка»; кнопка-звезда `.item-card-fav-btn` среди кнопок при удержании карточки (`toggleFav`) ставит и снимает признак (синхронизируется через `cloudShape`); при фильтре «Избранное» показываются все избранные карточки, в том числе скрытые, независимо от кнопки-глаза внизу. Откат: itemcards.js 25.1.
    Версия: 25.1 (25.10) — на карточке «Погода» внизу кнопка «Показать» (`.item-card-wx-btn`): показывает слой погоды (`showWeatherOverlay`) без сканирования QR. Kotlin не менялся. Откат: itemcards.js 25.0.
@@ -578,6 +579,7 @@ window.initItemCardsModule = function(deps){
   var revealedIds = {};
   var flippedId = null;
   var typeMenuOpen = false;
+  var lastRenderAt = 0; // время последней перерисовки сетки: прокрутка сразу после неё (сдвиг содержимого) кнопки карточки не прячет
   // фильтр по типу карточек (кнопка-воронка слева от «+»): all | timer | item | task | fav («Избранное» — только карточки с признаком `fav`)
   var FILTER_KEY = "itemCardsFilter_v1";
   var FILTERS = [
@@ -856,6 +858,7 @@ window.initItemCardsModule = function(deps){
   }
   function renderGrid(){
     screenMode = "grid";
+    lastRenderAt = Date.now();
     ensureHabitStyles();
     var el = container();
     if(!el) return;
@@ -1239,12 +1242,22 @@ window.initItemCardsModule = function(deps){
   function bindMenuDismiss(){
     if(menuDismissBound) return;
     menuDismissBound = true;
+    function anyRevealed(){ for(var k in revealedIds){ if(revealedIds.hasOwnProperty(k)) return true; } return false; }
     function onDown(e){
-      if(!anyMenuOpen()) return;
+      var menu = anyMenuOpen(), rev = anyRevealed();
+      if(!menu && !rev) return;
       var t = e.target;
-      if(!t || !t.closest || t.closest(".item-type-menu, #itemCardsFilterBtn, #itemCardsAddBtn, #itemCardsPdfBtn")) return; // свои кнопки сами открывают и закрывают меню
-      closeTypeMenu();
-      if(t.closest("#itemCardsGrid")) menuTapAt = Date.now(); // тап по карточке только закрывает меню (см. onClick); долгое нажатие работает как обычно
+      if(!t || !t.closest) return;
+      var inMenu = !!t.closest(".item-type-menu");
+      var closed = false;
+      // меню воронки/«+»/PDF: свои кнопки сами открывают и закрывают меню
+      if(menu && !inMenu && !t.closest("#itemCardsFilterBtn, #itemCardsAddBtn, #itemCardsPdfBtn")){ closeTypeMenu(); closed = true; }
+      // кнопки карточки (долгое нажатие): прячутся при нажатии вне этой карточки
+      if(rev && !inMenu){
+        var cn = t.closest("#itemCardsGrid .item-card");
+        if(!(cn && cn.dataset && revealedIds[cn.dataset.id])){ hideRevealed(); closed = true; }
+      }
+      if(closed && t.closest("#itemCardsGrid")) menuTapAt = Date.now(); // тап по карточке только прячет меню/кнопки (см. onClick); долгое нажатие работает как обычно
     }
     function onClick(e){
       if(!menuTapAt) return;
@@ -1253,10 +1266,10 @@ window.initItemCardsModule = function(deps){
       if(recent && e.target && e.target.closest && e.target.closest("#itemCardsGrid")){ e.stopPropagation(); e.preventDefault(); }
     }
     function onScroll(e){
-      if(!anyMenuOpen()) return;
       var t = e.target;
       if(t && t.closest && t.closest(".item-type-menu")) return; // прокрутка самого меню
-      closeTypeMenu();
+      if(anyMenuOpen()) closeTypeMenu();
+      if(anyRevealed() && Date.now() - lastRenderAt > 400) hideRevealed();
     }
     document.addEventListener("touchstart", onDown, { capture: true, passive: true });
     document.addEventListener("mousedown", onDown, true);
