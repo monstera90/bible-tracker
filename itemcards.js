@@ -1,6 +1,7 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 25.1 (24.10) — на карточке «Погода» внизу кнопка «Показать» (`.item-card-wx-btn`): показывает слой погоды (`showWeatherOverlay`) без сканирования QR. Kotlin не менялся. Откат: itemcards.js 25.0.
+   Версия: 26.0 (25.10) — структурная правка: фильтр «Особые» переименован в «Избранное» (ключ `fav`): в него попадают только карточки с признаком `fav`, а не «Сегодня»/«Напоминалка»; кнопка-звезда `.item-card-fav-btn` среди кнопок при удержании карточки (`toggleFav`) ставит и снимает признак (синхронизируется через `cloudShape`); при фильтре «Избранное» показываются все избранные карточки, в том числе скрытые, независимо от кнопки-глаза внизу. Откат: itemcards.js 25.1.
+   Версия: 25.1 (25.10) — на карточке «Погода» внизу кнопка «Показать» (`.item-card-wx-btn`): показывает слой погоды (`showWeatherOverlay`) без сканирования QR. Kotlin не менялся. Откат: itemcards.js 25.0.
    Версия: 25.0 (24.10) — структурная правка: новый тип карточки «Погода» (`weather`, пункт «+» после «Будильника», «Погода» в воронке): QR несёт город в самом коде — `lt://v1/weather/<широта>,<долгота>[/<название>]` (`WEATHER_PREFIX`, `qrTextFor`); форма — поиск города по названию (геокодер Open-Meteo, `wxSearchCity`) и цвет как у остальных; скан показывает слой `showWeatherOverlay`: город, температура, ветер (м/с), влажность, УФ-индекс, качество воздуха, осадки (если есть) и три мини-карточки следующих дней; данные — Open-Meteo без ключа (`loadWeather`, запрос XHR, последний ответ кладётся в `itemCardsWeather_v1` на случай «нет сети»). Откат: itemcards.js 24.1.
    Версия: 24.1 (24.10) — повторный скан кода заведённого будильника выключает его (`showScanned`: `alarmInfo(runId(c))` → `stopAlarmForCard`, слой «Выключен»); раньше заводил заново. Kotlin не менялся. Откат: itemcards.js 24.0.
    Версия: 24.0 (24.10) — структурная правка: новый тип карточки «Будильник» (`alarm`, пункт «+» после «Скрытого таймера», «Будильники» в воронке): QR несёт время, повтор и название — `lt://v1/alarm/<ЧЧММ>[,<5|15|30>,<1..4>][/<название>]` (`ALARM_PREFIX`, `qrTextFor`, `alarmFromCode`; id будильника в оболочке — хеш кода, `alarmCodeId`/`runId`, поэтому скан и карточка в сетке — один будильник); поля карточки `alarmTime` («ЧЧ:ММ»), `alarmEvery` (0/5/15/30 минут), `alarmTimes` (0..4 повторов) ходят через облако (`cloudShape`); форма — колёса часов и минут, список «Повтор через…» и (только при выбранном повторе) «Количество повторов»; скан заводит будильник на ближайшее такое время (сегодня, если не прошло, иначе завтра) через мост (`getAlarmApi`: оболочка / `deps.alarms` в `scan.html`; в браузере без оболочки — сообщение), кнопки «Выкл.» и «Завести» на карточке (`startAlarmForCard`/`stopAlarmForCard`, `syncAlarmsView`). Откат: itemcards.js 23.0.
@@ -392,6 +393,7 @@ window.initItemCardsModule = function(deps){
     };
     if(r.type === "task") o.tag = taskTag(r.tag);
     if(r.hidden) o.hidden = 1; // «скрыть» — общий признак карточки любого типа
+    if(r.fav) o.fav = 1; // «избранное» — тоже общий признак
     if(r.type === "timer" && r.noIsland) o.noIsland = 1; // скрытый таймер: без острова и уведомления «идёт»
     var col = cardColor(r); if(col) o.color = col; // цвет карточки — у любого типа (пусто — без цвета)
     if(r.type === "habit") o.days = habitDays(r);
@@ -575,7 +577,7 @@ window.initItemCardsModule = function(deps){
   var revealedIds = {};
   var flippedId = null;
   var typeMenuOpen = false;
-  // фильтр по типу карточек (кнопка-воронка слева от «+»): all | timer | item | task | special («Особые» — «Сегодня» и «Напоминалка»)
+  // фильтр по типу карточек (кнопка-воронка слева от «+»): all | timer | item | task | fav («Избранное» — только карточки с признаком `fav`)
   var FILTER_KEY = "itemCardsFilter_v1";
   var FILTERS = [
     { key: "all", label: "Все" },
@@ -586,7 +588,7 @@ window.initItemCardsModule = function(deps){
     { key: "task", label: "Задачи" },
     { key: "habit", label: "Привычки" },
     { key: "remind", label: "Напоминания" },
-    { key: "special", label: "Особые" }
+    { key: "fav", label: "Избранное" }
   ];
   var cardFilter = null;
   function getFilter(){
@@ -604,7 +606,7 @@ window.initItemCardsModule = function(deps){
   function cardMatchesFilter(c, f){
     f = f || getFilter();
     if(f === "all") return true;
-    if(f === "special") return c.type === "datenote" || c.type === "reminder";
+    if(f === "fav") return !!c.fav;
     return c.type === f;
   }
   // «Показать/скрыть скрытые»: глаз — показаны все карточки, перечёркнутый глаз — карточки с признаком `hidden` не показываются
@@ -623,6 +625,8 @@ window.initItemCardsModule = function(deps){
     try{ localStorage.setItem(SHOWHID_KEY, showHidden ? "1" : "0"); }catch(e){}
   }
   var EYE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+  var STAR_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9 6.8 19.7l1-5.9-4.3-4.1 5.9-.8z"></path></svg>';
+  var STAR_FILLED_ICON_SVG = STAR_ICON_SVG.replace('fill="none"', 'fill="currentColor"');
   var EYE_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path></svg>';
   var FILTER_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8.5V20l-4-2v-4.5L3 5z"></path></svg>';
 
@@ -912,7 +916,7 @@ window.initItemCardsModule = function(deps){
     applySize(tab);
 
     var grid = document.getElementById("itemCardsGrid");
-    var shown = cards.filter(function(c){ return cardMatchesFilter(c, curFilter) && (showAll || !c.hidden); });
+    var shown = cards.filter(function(c){ return cardMatchesFilter(c, curFilter) && (showAll || curFilter === "fav" || !c.hidden); }); // «Избранное» показывает все избранные, скрытые тоже
     if(!shown.length){
       grid.className = "item-cards-grid item-cards-empty";
     }
@@ -927,6 +931,7 @@ window.initItemCardsModule = function(deps){
         '<div class="book-cover-actions">' +
           '<button type="button" class="mdeditor-share-btn item-card-eye-btn' + (revealed ? " visible" : "") + '" title="' + (c.hidden ? "Скрыта (нажмите, чтобы показывать всегда)" : "Показана (нажмите, чтобы скрыть)") + '">' + (c.hidden ? EYE_OFF_ICON_SVG : EYE_ICON_SVG) + '</button>' +
           '<button type="button" class="mdeditor-delete-btn' + (revealed ? " visible" : "") + '" title="Удалить">' + DELETE_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-share-btn item-card-fav-btn' + (revealed ? " visible" : "") + '" title="' + (c.fav ? "В избранном (нажмите, чтобы убрать)" : "Добавить в избранное") + '">' + (c.fav ? STAR_FILLED_ICON_SVG : STAR_ICON_SVG) + '</button>' +
           // у привычки тап открывает карту, а не форму — правка отдельной кнопкой (тот же тёмный полупрозрачный стиль, что у глаза)
           ((c.type === "habit" || isSingletonCard(c)) ? '<button type="button" class="mdeditor-share-btn item-card-edit-btn' + (revealed ? " visible" : "") + '" title="Изменить">' + PENCIL_ICON_SVG + '</button>' : '') +
         '</div>';
@@ -1053,12 +1058,18 @@ window.initItemCardsModule = function(deps){
     if(flippedId) flipCard(flippedId, false);
   }
 
+  function toggleFav(c){
+    if(c.fav) delete c.fav; else c.fav = 1;
+    c.updatedAt = Date.now();
+    saveCards();
+    renderGrid(); // при фильтре «Избранное» снятая со звезды карточка пропадает
+  }
   function hideRevealed(){
     var any = false;
     for(var k in revealedIds){ if(revealedIds.hasOwnProperty(k)){ any = true; break; } }
     if(!any) return;
     revealedIds = {};
-    var btns = document.querySelectorAll("#itemCardsGrid .mdeditor-delete-btn.visible, #itemCardsGrid .item-card-eye-btn.visible, #itemCardsGrid .item-card-edit-btn.visible");
+    var btns = document.querySelectorAll("#itemCardsGrid .mdeditor-delete-btn.visible, #itemCardsGrid .item-card-eye-btn.visible, #itemCardsGrid .item-card-fav-btn.visible, #itemCardsGrid .item-card-edit-btn.visible");
     for(var i = 0; i < btns.length; i++) btns[i].classList.remove("visible");
   }
 
@@ -1080,7 +1091,7 @@ window.initItemCardsModule = function(deps){
         longFired = true;
         clearAttention(cardNode.dataset.id);
         revealedIds[cardNode.dataset.id] = true;
-        var btns = cardNode.querySelectorAll(".mdeditor-delete-btn, .item-card-eye-btn, .item-card-edit-btn");
+        var btns = cardNode.querySelectorAll(".mdeditor-delete-btn, .item-card-eye-btn, .item-card-fav-btn, .item-card-edit-btn");
         for(var i = 0; i < btns.length; i++) btns[i].classList.add("visible");
       }, LONG_MS);
     }
@@ -1116,6 +1127,7 @@ window.initItemCardsModule = function(deps){
         renderGrid(); // кнопки остаются раскрытыми (revealedIds), значок меняется
         return;
       }
+      if(e.target.closest(".item-card-fav-btn")){ toggleFav(c); return; } // звезда: в избранное ↔ из избранного (кнопки остаются раскрытыми)
       if(e.target.closest(".item-card-edit-btn")){ hideRevealed(); openForm(c.type, c); return; }
       if(e.target.closest(".mdeditor-delete-btn")){
         openAppConfirmBar("Удалить карточку «" + (c.title || "без названия") + "»?" + (c.type === "remind" ? " Напоминание будет отменено." : " QR-код перестанет работать."), function(){
