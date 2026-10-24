@@ -1,5 +1,6 @@
 /* ===========================================================================
    notifications.js
+   Версия: 4.3 (24.10) — события для центра событий (`eventlog.js`): `logReminderShown`, провайдер предстоящих напоминаний (`EventLog.setUpcomingProvider`), запись напоминаний, показанных оболочкой.
    Версия: 4.2 (17.10) — структурная правка: напоминания карточек вкладки 9 (id вида `card:<id>`, их отдаёт getRemindableTasks из my.js): клик по уведомлению ведёт к карточке (`openCardFromReminder`), у карточек нет «Готово/Завтра» (в окне, в браузерном уведомлении) и показывается плашка вместо карточки задачи; в снимок для оболочки добавлено `repeatDays`; в окне даты/времени слева появляется кнопка «повтор» (`opts.onRepeat`, периоды 1,2,3,5,10,14,21,30,60,90,180 дней, после 180 и долгое удержание — выключение). Откат: notifications.js 4.1.
    Версия: 4.1 (07.10) — шаг 5 переезда в APK (ПЕРЕЕЗД_В_APK.md): в нативной оболочке (есть window.LTNotify, см.
    native-shell.js) напоминания показывает ОБОЛОЧКА — точным будильником, при закрытом приложении тоже. Страница лишь
@@ -474,9 +475,30 @@ window.initNotificationsModule = function(deps){
     if(t && !(t.c && t.c.checked === true)) showTaskCard(id, cleanText(t.c && t.c.text), null);
   }
 
+  function reminderWhat(id){ return isCardId(id) ? "карточке" : "задаче"; }
+  function logReminderShown(id, text, at){
+    try{
+      if(window.EventLog) window.EventLog.add("Было показано напоминание по " + reminderWhat(id) + " «" + text + "»", {at: at, key: "reminder:" + id + ":" + at});
+    }catch(e){}
+  }
+  // предстоящие напоминания для центра событий
+  try{
+    if(window.EventLog) window.EventLog.setUpcomingProvider(function(){
+      var out = [], now = Date.now(), fired = loadFired(), tasks = [];
+      try{ tasks = getRemindableTasks() || []; }catch(e){}
+      tasks.forEach(function(t){
+        var at = getRemindAt(t);
+        if(at == null || at <= now || (t.c && t.c.checked === true) || fired[t.id] === at) return;
+        out.push({at: at, text: "Будет показано напоминание по " + reminderWhat(t.id) + " «" + cleanText(t.c && t.c.text) + "»"});
+      });
+      return out;
+    });
+  }catch(e){}
+
   function notifyTask(task, at){
     var id = task.id;
     var text = cleanText(task.c && task.c.text);
+    logReminderShown(id, text, at);
     // карточка вкладки 9 (приложение открыто и на виду): плашка с названием, тап — к карточке; кнопок «Готово/Завтра» нет
     if(isCardId(id) && (NT || document.visibilityState === "visible")){
       showBanner("Напоминание: " + text, function(){ openCardFromReminder(String(id).slice(5)); }, true);
@@ -591,7 +613,13 @@ window.initNotificationsModule = function(deps){
       var keys = Object.keys(firedNative || {});
       if(keys.length){
         var fired = loadFired();
-        keys.forEach(function(k){ if(typeof firedNative[k] === "number") fired[k] = firedNative[k]; });
+        var known = {};
+        try{ (getRemindableTasks() || []).forEach(function(t){ known[t.id] = t; }); }catch(e){}
+        keys.forEach(function(k){
+          if(typeof firedNative[k] !== "number") return;
+          fired[k] = firedNative[k];
+          if(known[k]) logReminderShown(k, cleanText(known[k].c && known[k].c.text), firedNative[k]); // показала оболочка при закрытом приложении
+        });
         saveFired(fired);
       }
       var actions = NT.takeActions() || [];

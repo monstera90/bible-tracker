@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 8.0 (24.10) — структурная правка: кнопка вкладки «События» `settingsTabEventsBtn` (над «Архивом») и подключён `eventlog.js`.
      Версия: 7.0 (22.10) — структурная правка: кнопка тегов задач `#taskTagWrap`/`#taskTagBtn` с выпадающим списком `#taskTagPopup` (между скрепкой и «+»).
      Версия: 6.0 (21.10) — структурная правка: кнопка вкладки set2s_10 «Claude» (`settingsTabSet2Btn10`, над «Карточками предметов») и подключён `claudetab.js`.
      Версия: 5.3 (17.10) — подключён `cardpdf.js` (PDF с QR-кодами карточек).
@@ -525,6 +526,14 @@ window.addEventListener("error", function(e){
           <path d="M10 13h4"></path>
         </svg>
       </button>
+      <!-- Центр событий (история): над «Архивом», последний в DOM = самый верхний язычок стека (линия-срез сверху теперь у него).
+           Не вкладка задач: свой ключ "events", показывается по тем же условиям, что и вкладки задач. Колокольчик. -->
+      <button class="settings-tab" id="settingsTabEventsBtn" title="События" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"></path>
+          <path d="M10 20.5a2 2 0 0 0 4 0"></path>
+        </svg>
+      </button>
     </div>
     <!-- Горизонтальный ряд "лежачих" вкладок под окном настроек, развёрнутых
          на 90° относительно обычных: у них ширина и высота поменяны местами
@@ -829,6 +838,7 @@ window.addEventListener("error", function(e){
 <script async src="vendor/qrcode.min.js"></script>
 <script async src="vendor/jsQR.js"></script>
 
+<script src="eventlog.js"></script>
 <script src="mood.js"></script>
 <!-- minideflate.js — самописные inflate/deflate на случай, когда в WebView нет
      DecompressionStream("deflate-raw") (Chrome < 103); должен идти ДО

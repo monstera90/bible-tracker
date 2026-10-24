@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 79.0 (24.10) — структурная правка: вкладка `events` «События» (центр событий, `eventlog.js`) над «Архивом»: `EVENTS_TAB_KEY`/`EVENTS_TAB_BTN_ID`, `renderSettingsTabEvents`, ветки в `refreshSettingsTabsVisibility`/`switchSettingsTab`/`SETTINGS_SIDE_ORDER_1`; запись обновления версии (`applyVersionToHeader`), уведомления об общих задачах в журнал.
    Версия: 78.0 (24.10) — структурная правка: вкладка `alt5` «Версии» заменена на «Проверка обновлений» (`renderSettingsTabUpdates`: кнопка внизу, «Проверить обновления» → «Перезагрузить приложение для установки обновлений»; в APK — через мост версии 10: `checkWebUpdateNow`/`getWebUpdateState`/`restartForWebUpdate`, в браузере — через `SW_REGISTRATION.update()`); архив версий убран (`renderVersionHistory`, `renderVersionItems`, `ensureVersionsTabStyle`, `renderSettingsTabVersions`). Классы `.version-history-*` остались — их используют другие места.
    Версия: 77.0 (23.10) — структурная правка: вкладка «Скрытие вкладок» (`alt6`, режим колеса, вторая снизу в вертикальном стеке — на месте Red, `BOTTOM_ALT_REPLACES.alt6`; Red теперь тоже в `BOTTOM_ALT_ORIGINAL_TABS` и скрывается под колесом, как worktasks): список всех вкладок с пиктограммой (innerHTML настоящей кнопки), названием и галочкой «показана» (`renderSettingsTabHiddenTabs`, `hideableTabsInScreenOrder`); скрытие — класс `.settings-tab-user-hidden` (display:none !important, стиль вставляется из JS), хранение `bibleHiddenSettingsTabs_v1` (id кнопок, внесён в `EXPORT_REGISTRY.include`); шестерёнка и вкладки режима колеса не скрываются; `getResumeSettingsState`/`openTabOfActiveSettingsSet` не открывают скрытую вкладку (`isSettingsTabUserHidden`, `firstVisibleTabOfSet`). Откат: my.js 76.1.
    Версия: 76.1 (22.10) — в подписи общей задачи «Создал: …» добавлены дата и время создания («Создал: Вы, 22.10.2026 8:05 · Выполнил: …», тот же шрифт `.task-joint-signature`): `groupTaskCreatedTs` берёт время из id задачи (genGroupTaskId), для задач со старым id — из c.createdAt; `formatTaskCreatedAt`; `buildTaskJointSignatureHtml(content, id)` получил второй параметр (активные задачи и архив). Откат: my.js 76.0.
@@ -1870,6 +1871,10 @@
     jointtasks: "settingsTabJointTasksBtn",
     archive: "settingsTabArchiveBtn"
   };
+  // Центр событий (eventlog.js): язычок над «Архивом» в том же стеке. НЕ вкладка задач (в TASK_TAB_IDS не входит), но
+  // показывается по тем же условиям (галочка «Показать все мои задачи» / режим колеса).
+  var EVENTS_TAB_KEY = "events";
+  var EVENTS_TAB_BTN_ID = "settingsTabEventsBtn";
   var TASK_TAB_TITLES = {
     worktasks: "Work tasks", red: "Red", inbox: "Inbox", next: "Next", projects: "Projects",
     waiting: "Waiting", read: "Read", council: "Council", someday: "Someday",
@@ -5669,7 +5674,12 @@
       var nativeSeenIds = [];
       try{ nativeSeenIds = window.LTNotify.takeGroupSeen() || []; }catch(e){ nativeSeenIds = []; }
       if(nativeSeenIds.length && !firstRun){
-        nativeSeenIds.forEach(function(id){ seen.ids[id] = 1; });
+        nativeSeenIds.forEach(function(id){
+          seen.ids[id] = 1;
+          // уведомление показала оболочка при закрытом приложении — пишем его в журнал событий
+          var gt = getGroupTaskById(id);
+          if(gt) logGroupTaskEvent(gt, (typeof gt.t === "number" && gt.t > 0 && gt.t <= Date.now()) ? gt.t : Date.now());
+        });
       }
     }
     var knownIds = firstRun ? {} : seen.ids;
@@ -5694,9 +5704,21 @@
     // Системное уведомление Android — тем же способом, что и напоминания о задачах
     // (registration.showNotification через service worker); нет разрешения на уведомления или не
     // вышло — запасная плашка внутри приложения.
+    fresh.forEach(function(t){ logGroupTaskEvent(t, Date.now()); });
     showGroupTaskSystemNotification(fresh).then(function(shown){
       if(!shown) showGroupTaskToast(fresh);
     });
+  }
+  // журнал событий: «Пользователь Аленка добавил новую задачу «…» в список общих задач»
+  function logGroupTaskEvent(t, at){
+    try{
+      if(!window.EventLog || !t || !t.c) return;
+      var who = getCachedGroupMemberName(t.c.createdBy) || "Участник";
+      var txt = String(t.c.text || "").replace(/\s+/g, " ").trim();
+      if(!txt) return;
+      if(txt.length > 140) txt = txt.slice(0, 140) + "…";
+      window.EventLog.add("Пользователь " + who + " добавил новую задачу «" + txt + "» в список общих задач", {at: at, key: "group-task:" + t.id});
+    }catch(e){}
   }
   function groupTaskNotificationTexts(fresh){
     var title, body;
@@ -7536,6 +7558,7 @@
     // слежение за общими задачами при закрытом приложении (только оболочка APK)
     getGroupWatch: getGroupWatchConfig
   });
+  try{ if(window.EventLog) window.EventLog.start(); }catch(e){}
 
   // ===================== FLIBUSTA (flibusta.js) =====================
   var Flibusta = window.initFlibustaModule({
@@ -9542,6 +9565,7 @@
     var el = document.getElementById("appVersionText");
     if(!el) return;
     if(version){
+      try{ if(window.EventLog) window.EventLog.noteVersion(version); }catch(e){}
       swVersionKnown = true;
       el.textContent = "v" + String(version).replace(/^v/i, "");
     } else if(!swVersionKnown){
@@ -10313,6 +10337,11 @@
         btn.style.display = showTasks ? "flex" : "none";
       }
     });
+    var evBtn = document.getElementById(EVENTS_TAB_BTN_ID);
+    if(evBtn){
+      if(bottomAltMode){ evBtn.style.display = "flex"; setTabDecor(evBtn, true); }
+      else { setTabDecor(evBtn, false); evBtn.style.display = showTasks ? "flex" : "none"; }
+    }
     // меняет количество видимых язычков в #settingsTabs — пересчитываем заплатку (см.
     // updateSettingsCornerPatchHeight выше); единственный вызывающий.
     updateSettingsCornerPatchHeight();
@@ -10321,6 +10350,14 @@
   // и не зависит от вкладки, поэтому верхний край окна не "прыгает" при переключении вкладок. Если
   // содержимое вкладки не помещается, прокручивается #settingsTabContent (без видимого индикатора
   // прокрутки, см. CSS).
+
+  // Вкладка «События» (центр событий): весь экран рисует eventlog.js, открывается в самом низу списка.
+  function renderSettingsTabEvents(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    if(window.EventLog) window.EventLog.renderInto(container);
+    else container.innerHTML = '<div class="mood-diagram-empty">Журнал событий недоступен</div>';
+  }
 
   // ===================== ЗАПОМИНАНИЕ СКРОЛЛА ВКЛАДОК =====================
   // Общая функция для ЛЮБОЙ вкладки #settingsTabContent — тем же приёмом, что
@@ -10526,6 +10563,8 @@
       var btn = document.getElementById(TASK_TAB_IDS[key]);
       if(btn) btn.classList.toggle("active", tab === key);
     });
+    var evTabBtn = document.getElementById(EVENTS_TAB_BTN_ID);
+    if(evTabBtn) evTabBtn.classList.toggle("active", tab === EVENTS_TAB_KEY);
     Object.keys(EXTRA_TAB_IDS).forEach(function(key){
       var btn = document.getElementById(EXTRA_TAB_IDS[key]);
       if(btn) btn.classList.toggle("active", tab === key);
@@ -10572,6 +10611,7 @@
     // кнопкой-домиком — повторный заход на вкладку возвращает именно её, а не список всех проектов
     // заново.
     else if(tab === "projects" && activeProjectPickerId) openTaskNextPicker(activeProjectPickerId, "projects");
+    else if(tab === EVENTS_TAB_KEY) renderSettingsTabEvents();
     else if(TASK_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabTask(tab);
     else if(BOTTOM_ALT_TAB_IDS && BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabBottomAlt(tab);
     else if(EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabExtra(tab);
@@ -17009,7 +17049,7 @@
   //   переключаются отдельными переменными gearBtn/yearBtn/moodTabBtn, а не через EXTRA_TAB_IDS —
   //   поэтому единственный полный список из всех 5 нижних вкладок первого набора собран здесь
   //   вручную, а не через Object.keys(EXTRA_TAB_IDS), в котором только 2 из 5) идёт слева направо.
-  var SETTINGS_SIDE_ORDER_1 = Object.keys(TASK_TAB_IDS);              // red..archive
+  var SETTINGS_SIDE_ORDER_1 = Object.keys(TASK_TAB_IDS).concat([EVENTS_TAB_KEY]);              // red..archive
   var SETTINGS_BOTTOM_ORDER_1 = ["gear","year","mood"].concat(Object.keys(EXTRA_TAB_IDS)); // gear,year,mood,extra2,extra3
   var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_10
   var SETTINGS_BOTTOM_ORDER_2 = ["gear"].concat(Object.keys(SET2_EXTRA_TAB_IDS));
@@ -17137,7 +17177,7 @@
     // боковые вкладки набора 1 (red..archive) скрыты, пока не включена галочка "Показать все мои
     // задачи" — переходить на скрытую вкладку не нужно, вместо неё открываем вкладку настроек (тот
     // же принцип, что и при обычном открытии блокнота, см. openSettingsModal).
-    if(settingsActiveTabSet === 1 && TASK_TAB_IDS.hasOwnProperty(target) && !getShowAllTasksEnabled()){
+    if(settingsActiveTabSet === 1 && (TASK_TAB_IDS.hasOwnProperty(target) || target === EVENTS_TAB_KEY) && !getShowAllTasksEnabled()){
       target = "gear";
     }
     // скрытую пользователем вкладку не открываем: берём первую не скрытую того же набора; у набора 2 не осталось ни одной —
@@ -17168,7 +17208,7 @@
     try{ savedSet = (localStorage.getItem(SETTINGS_LAST_SET_KEY) === "2") ? 2 : 1; }catch(e){}
     if(savedSet === 2 && !isSet2Unlocked()){ savedSet = 1; savedTab = null; }
     if(savedSet === 2 && savedTab === "gear") savedTab = null; // колесико набора 2 не открывается как вкладка
-    if(savedTab && TASK_TAB_IDS.hasOwnProperty(savedTab) && !getShowAllTasksEnabled()){
+    if(savedTab && (TASK_TAB_IDS.hasOwnProperty(savedTab) || savedTab === EVENTS_TAB_KEY) && !getShowAllTasksEnabled()){
       savedTab = null;
     }
     if(savedTab){
@@ -17695,6 +17735,10 @@
     var btn = document.getElementById(TASK_TAB_IDS[key]);
     if(btn) btn.addEventListener("click", function(){ switchSettingsTabOnClick(key); });
   });
+  (function(){
+    var evBtn = document.getElementById(EVENTS_TAB_BTN_ID);
+    if(evBtn) evBtn.addEventListener("click", function(){ switchSettingsTabOnClick(EVENTS_TAB_KEY); });
+  })();
   Object.keys(EXTRA_TAB_IDS).forEach(function(key){
     var btn = document.getElementById(EXTRA_TAB_IDS[key]);
     if(btn) btn.addEventListener("click", function(){ switchSettingsTabOnClick(key); });
@@ -17950,7 +17994,7 @@
   }
   // скрыта ли вкладка с ключом tab (ключи как в switchSettingsTab: "inbox", "year", "set2s_3", "set2b_1" …)
   function isSettingsTabUserHidden(tab){
-    var id = TASK_TAB_IDS[tab] || EXTRA_TAB_IDS[tab] || SET2_TAB_IDS[tab] || SET2_EXTRA_TAB_IDS[tab] ||
+    var id = TASK_TAB_IDS[tab] || (tab === EVENTS_TAB_KEY ? EVENTS_TAB_BTN_ID : null) || EXTRA_TAB_IDS[tab] || SET2_TAB_IDS[tab] || SET2_EXTRA_TAB_IDS[tab] ||
       (tab === "year" ? "settingsTabYearBtn" : (tab === "mood" ? "settingsTabMoodBtn" : null));
     var btn = id ? document.getElementById(id) : null;
     return !!(btn && btn.classList.contains("settings-tab-user-hidden"));
@@ -17962,7 +18006,7 @@
       for(var i = 0; i < orders[o].length; i++){
         var key = orders[o][i];
         if(key === "gear") continue;
-        if(set === 1 && TASK_TAB_IDS.hasOwnProperty(key) && !getShowAllTasksEnabled()) continue;
+        if(set === 1 && (TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY) && !getShowAllTasksEnabled()) continue;
         if(!isSettingsTabUserHidden(key)) return key;
       }
     }

@@ -49,6 +49,7 @@ mdeditor.js
 codemirror.bundle.js
 search.js
 notifications.js
+eventlog.js
 flibusta.js
 
 DejaVuSans.ttf

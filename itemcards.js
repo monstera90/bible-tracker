@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 21.0 (24.10) — структурная правка: запись в журнал событий (`eventlog.js`, `evLog`): сканирования QR (карточки, привычки, «Сегодня», «Напоминалка», заметки, задачи, чужие коды), установка/остановка таймера.
    Версия: 20.0 (24.10) — структурная правка: QR привычки несёт название (`lt://v1/habit/<id>/<название до 40 знаков>`, `qrTextFor`; цвета в коде нет — его каждый выбирает себе сам): скан на устройстве без такой карточки создаёт её по коду (`habitFromCode`: тот же id, название из кода, пустые `days`, без цвета) и отмечает сегодняшний день; сначала карточка ищется у себя и в облаке (если синхронизация настроена). Название привычки в форме — до 40 знаков (иначе не поместится в код). Прежние коды `lt://v1/card/<id>` привычек работают как раньше, но только там, где карточка есть. Откат: itemcards.js 19.0.
    Версия: 19.0 (24.10) — структурная правка: цвет карточки у ВСЕХ типов (таймер, предмет, «Создавать задачу», привычка, «Сегодня», «Напоминалка»): необязательное поле `color` ("#rrggbb"; пусто — без цвета, карточка как раньше), ходит через облако (`cloudShape`) и красит карточку в сетке (`applyCardLook`, вместо `applyHabitLook`). Палитра формы — общая (`colorPaletteHtml`): первый пастельный квадрат стал ПУСТЫМ цветом (был пастельный красный). Цвет по умолчанию — пустой; выбранный цвет запоминается по типу карточки (`itemCardsColorDefaults_v1`, `defaultColorFor`/`rememberColorFor`, только на этом устройстве) и подставляется в новые карточки этого типа. «Сегодня» и «Напоминалка»: создаются и правятся маленькой формой с одним цветом (`createSingletonCard` убран; у них при удержании появилась кнопка «Изменить»). У привычки без цвета отметки на карте и точка в заголовке берут цвет темы (`var(--wood)`), `HABIT_DEFAULT_COLOR` убран. Показ карточки по скану ВСЕГДА цвета холста (`.scan-card`), цвет карточки там не применяется. Откат: itemcards.js 18.1.
    Версия: 18.1 (24.10) — цвета привычек: красный #ff0000, жёлтый #ffff00, фиолетовый #7f00ff в верхнем ряду; зелёный #9cdb4e и бирюзовый #40d5b5 вместо пастельных в нижнем. Прежняя 18.0 (23.10) — структурная правка: новый тип карточки «Привычка» (`habit`, поля `color`, `days`): пункт «Привычка» в меню «+» и в выборе типа при создании под напечатанный код; форма — название и цвет квадратиками (8 ярких + 8 пастельных, `HABIT_COLORS_*`); пункт «Привычки» в меню воронки; при удержании три кнопки в одном стиле — глаз, удаление, правка (`.item-card-edit-btn`); тап — карта дней (`openHabitMap`, `habitMapMarkup`: вид и классы «Карты дней года», отмеченные дни — цветом привычки), двойной тап — оборот с QR как обычно; скан кода карточки отмечает сегодняшний день (`markHabitToday`: один день — одна отметка, повторный скан в тот же день ничего не делает) и показывает карточку с подписью «Сегодня отмечено» / «Сегодня уже отмечено»; `days` ходят через облако и объединяются при сверке (`mergeHabitDays` в `reconcileCloud`); стили формы — из JS (`ensureHabitStyles`). Откат: itemcards.js 17.1. Скан кода привычки сканер принимает после удержания не меньше 0,5 с (`longHold` в `openScan`, cardscan.js 2.2).
@@ -1455,15 +1456,18 @@ window.initItemCardsModule = function(deps){
     refreshTimers();
     if(updateTimerTexts()) ensureTick();
   }
+  function evLog(text, opts){ try{ if(window.EventLog) window.EventLog.add(text, opts); }catch(e){} }
   function startTimerForCard(c){
     if(!c || c.type !== "timer" || !(c.seconds > 0)) return;
     try{ getTimerApi().start(c.id, c.title || "", c.seconds); }catch(e){}
+    try{ if(window.EventLog) window.EventLog.timerStarted(c.id, c.title || "", c.seconds); }catch(e){}
     syncTimersView();
   }
   // «Стоп»: таймер отменяется целиком (пауза не нужна), цифры возвращаются к заданному времени; закончившийся таймер — гасит вибрацию
   function stopTimerForCard(c){
     if(!c || c.type !== "timer") return;
     try{ var api = getTimerApi(); if(api && typeof api.cancel === "function") api.cancel(c.id); }catch(e){}
+    try{ if(window.EventLog) window.EventLog.timerCancelled(c.id); }catch(e){}
     syncTimersView();
   }
 
@@ -1558,12 +1562,13 @@ window.initItemCardsModule = function(deps){
           reconcileCloud();
           var c2 = findCard(p.id);
           if(c2) showScanned(c2);
-          else showNoticeOverlay({ kind: "missing", id: p.id });
+          else { evLog("Просканирована карточка, которой нет на этом устройстве"); showNoticeOverlay({ kind: "missing", id: p.id }); }
         };
         setTimeout(finish, 2500);
         md.cardMetaPull().then(finish, finish);
         return;
       }
+      evLog("Просканирована карточка, которой нет на этом устройстве");
       showNoticeOverlay({ kind: "missing", id: p.id });
       return;
     }
@@ -1573,6 +1578,7 @@ window.initItemCardsModule = function(deps){
     if(p.kind === "note"){ openScannedNote(p.id); return; }
     if(p.kind === "task"){ handleScannedTask(p); return; }  // задача в самом коде: карточка не нужна
     if(p.kind === "timer"){ showScanned(timerFromCode(p)); return; } // таймер из самого кода: отсчёт стартует сразу, карточка не нужна
+    evLog("Просканирован QR-код: " + String(p.url || p.text || "").slice(0, 80));
     showNoticeOverlay({ kind: p.kind, url: p.url, text: p.text });
   }
 
@@ -1637,6 +1643,8 @@ window.initItemCardsModule = function(deps){
     var res;
     try{ res = deps.addTaskFromQr ? deps.addTaskFromQr(p.tab, p.text, p.tag || "") : { status: "error", reason: "unsupported" }; }
     catch(e){ console.error(e); res = { status: "error", reason: "fail" }; }
+    if(res && res.status === "added") evLog("Была добавлена новая задача «" + (res.text || p.text) + "»");
+    else if(res && res.status === "moved") evLog("Задача «" + (res.text || p.text) + "» перенесена в конец вкладки" + (res.tabTitle ? " " + res.tabTitle : ""));
     if(!silent) showTaskResultOverlay(p, res);
     return res;
   }
@@ -1708,6 +1716,7 @@ window.initItemCardsModule = function(deps){
   function showScanned(c){
     if(c.type === "habit"){ // скан привычки: один день — одна отметка, повторный скан в тот же день ничего не делает
       var added = markHabitToday(c.id);
+      evLog(cardTitle(c));
       scanDirty = true;
       showCardOverlay(findCard(c.id) || c, added ? "Сегодня отмечено" : "Сегодня уже отмечено");
       return;
@@ -1716,10 +1725,12 @@ window.initItemCardsModule = function(deps){
     if(c.type === "datenote"){ openDatedNoteFromScan(c); return; }
     if(c.type === "reminder"){ showReminderOverlay(); return; } // «Напоминалка»: случайное напоминание из «Комментариев» слоем
     if(c.type === "timer") startTimerForCard(c); // скан таймера: отсчёт стартует сразу (если уже шёл — заново)
+    else evLog(cardTitle(c)); // предмет и прочие карточки: в журнал — название
     showCardOverlay(c);
   }
   function openDatedNoteFromScan(c){ openTodayFromScan(c.id); }
   function openTodayFromScan(id){
+    evLog("Сегодня");
     if(standalone){
       // окно ярлыка: открываем приложение тем же входом (mode "note"), заметку создаст страница приложения
       if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(id || TODAY_NATIVE_ID, "note"); }catch(e){} }
@@ -1789,6 +1800,7 @@ window.initItemCardsModule = function(deps){
   }
   // слой с карточкой-текстом поверх приложения или рабочего стола; тап мимо карточки закрывает (как у остальных слоёв скана)
   function showReminderOverlay(){
+    evLog("Напоминалка");
     var pick = pickReminder();
     if(!pick){ showNoticeOverlay({ kind: "noreminders" }); return; }
     var o = newOverlay();
@@ -1948,7 +1960,12 @@ window.initItemCardsModule = function(deps){
   function openNoteByQrWhenReady(id, n){
     var md = getMdEditor();
     if(n === 0 && deps.openNotesTab){ try{ deps.openNotesTab(); }catch(e){} }
-    if(md && md.openNoteByQr && md.openNoteByQr(id)) return;
+    if(md && md.openNoteByQr && md.openNoteByQr(id)){
+      var nm = "";
+      try{ (md.getSearchableNotes() || []).forEach(function(x){ if(x.id === id) nm = x.name; }); }catch(e){}
+      evLog(nm ? ("Открыта заметка «" + nm + "»") : "Открыта заметка по QR-коду");
+      return;
+    }
     if(n < 25){ setTimeout(function(){ openNoteByQrWhenReady(id, n + 1); }, 300); return; }
     alert("Заметка не найдена на этом устройстве. Возможно, ещё не синхронизирована.");
   }
