@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.6 (24.10) — этапы цвета значка: остался один, красный за 2 минуты до конца (`scheduleStages`); жёлтый убран, но его будильник от прежней версии снимается (`LEGACY_STAGE_YELLOW`). Откат: CardTimers.kt 5.5.
 // Версия: 5.5 (22.10) — эксперимент с чёрным фоном уведомления (`setColorized`) откачен: HyperOS не меняет цвет карточки. Прежнее: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
 // Версия: 5.2 (21.10) — `Info.totalMs` (заданное время, для кольца паузы в плашке). Откат: CardTimers.kt 5.1.
 // Версия: 5.1 (21.10) — в раскрытый остров передаётся круглая кнопка паузы (`XiaomiIsland.pauseAction`). Откат: CardTimers.kt 5.0.
@@ -260,10 +261,10 @@ object CardTimers {
         scheduleStages(ctx, t)
     }
 
-    /** Будильники смены цвета значка: за 2 минуты и за минуту до конца (те, что ещё впереди). */
+    /** Будильник смены цвета значка на красный: за 2 минуты до конца (если он ещё впереди). */
     private fun scheduleStages(ctx: Context, t: Timer) {
         val now = System.currentTimeMillis()
-        val stages = listOf(XiaomiIsland.STAGE_YELLOW to XiaomiIsland.YELLOW_MS, XiaomiIsland.STAGE_RED to XiaomiIsland.RED_MS)
+        val stages = listOf(XiaomiIsland.STAGE_RED to XiaomiIsland.RED_MS)
         for ((stage, lead) in stages) {
             val at = t.endAt - lead
             if (at <= now + 500) continue
@@ -275,11 +276,13 @@ object CardTimers {
         }
     }
 
+    private const val LEGACY_STAGE_YELLOW = 1
+
     private fun cancelAlarm(ctx: Context, id: String) {
         try {
             val am = ctx.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
             am.cancel(fireIntent(ctx, id))
-            am.cancel(stageIntent(ctx, id, XiaomiIsland.STAGE_YELLOW))
+            am.cancel(stageIntent(ctx, id, LEGACY_STAGE_YELLOW)) // жёлтого этапа больше нет; снимаем будильник, поставленный прежней версией
             am.cancel(stageIntent(ctx, id, XiaomiIsland.STAGE_RED))
         } catch (e: Exception) {
             // будильников уже нет

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.2 (24.10) — жёлтый этап значка убран: красный начинается за 2 минуты до конца (`RED_MS` = 120 с; `STAGE_YELLOW` и `YELLOW_MS` удалены). Откат: XiaomiIsland.kt 5.1.
 // Версия: 5.1 (21.10) — `pauseBitmap(fraction, stage, paused)`: при paused вместо полосок рисуется треугольник «продолжить» (нужен плашке в приложении). Откат: XiaomiIsland.kt 5.0.
 // Версия: 5.0 (21.10) — круглая кнопка паузы в раскрытом острове (`pauseAction`, `pauseBitmap`): кольцо оставшегося времени цвета этапа и две полоски «пауза», слева от «Стоп»; рисуется кодом, кольцо обновляется тиком раз в секунду. Откат: XiaomiIsland.kt 4.0.
 // Версия: 4.0 (21.10) — `iconBitmap` и `crossBitmap` вынесены (значок и крестик нужны плашке InAppIsland); `icon`/`crossIcon` — обёртки. Откат: XiaomiIsland.kt 3.2.
@@ -39,17 +40,14 @@ object XiaomiIsland {
     private const val ACTION_KEY = "miui.focus.action_stop"
     private const val ACTION_PAUSE_KEY = "miui.focus.action_pause"
 
-    /** Этапы цвета значка: до «жёлтого» — фиолетовый, за 2 минуты до конца — жёлтый, за минуту — красный. */
+    /** Этапы цвета значка: до последних двух минут — фиолетовый, за 2 минуты до конца и дальше — красный (жёлтого этапа нет). */
     const val STAGE_NORMAL = 0
-    const val STAGE_YELLOW = 1
     const val STAGE_RED = 2
-    const val YELLOW_MS = 120_000L
-    const val RED_MS = 60_000L
+    const val RED_MS = 120_000L
 
     // допуск 1 с: будильник этапа может сработать на несколько мс раньше срока — цвет всё равно должен смениться
     fun stageFor(leftMs: Long): Int = when {
         leftMs <= RED_MS + 1000 -> STAGE_RED
-        leftMs <= YELLOW_MS + 1000 -> STAGE_YELLOW
         else -> STAGE_NORMAL
     }
 
@@ -200,7 +198,6 @@ object XiaomiIsland {
 
     private fun stageColor(stage: Int): Int = when (stage) {
         STAGE_RED -> 0xFFE53935.toInt()
-        STAGE_YELLOW -> 0xFFFFC400.toInt()
         else -> 0xFF7F00FF.toInt()
     }
 
@@ -254,13 +251,12 @@ object XiaomiIsland {
     }
 
     /**
-     * Значок таймера для острова: цветной круг и белые песочные часы (на жёлтом тоже белые).
-     * Цвет по этапу: фиолетовый #7F00FF (как значок сканера), жёлтый, красный.
+     * Значок таймера для острова: цветной круг и белые песочные часы.
+     * Цвет по этапу: фиолетовый #7F00FF (как значок сканера), красный в последние две минуты.
      */
     fun iconBitmap(stage: Int, size: Int = 96): Bitmap {
         val bg = when (stage) {
             STAGE_RED -> 0xFFE53935.toInt()
-            STAGE_YELLOW -> 0xFFFFC400.toInt()
             else -> 0xFF7F00FF.toInt()
         }
         val fg = Color.WHITE
