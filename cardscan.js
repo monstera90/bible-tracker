@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 2.5 (24.10) — `parseCode` узнаёт QR будильника `lt://v1/alarm/<ЧЧММ>[,<5|15|30>,<1..4>][/<название>]` → `{kind:"alarm", hour, minute, every, times, title}` (`every`/`times` — 0, если повтора нет); для будильника, как для таймера, нужно удержание от 0,5 с. Откат: cardscan.js 2.4.
    Версия: 2.4 (24.10) — `parseCode` узнаёт QR скрытого таймера `lt://v1/htimer/<секунды>[/<название>]` → `{kind:"timer", seconds, title, hidden:true}` (остальное — как у обычного таймера, в том числе удержание 0,5 с). Откат: cardscan.js 2.3.
    Версия: 2.3 (24.10) — `parseCode` узнаёт QR привычки `lt://v1/habit/<id>/<название>` → `{kind:"habit", id, title}` (код сам несёт название: на устройстве без такой карточки приложение создаёт её по коду); такой код, как и таймер/задача, принимается после удержания ≥ HOLD_SIDE_EFFECT_MS. Откат: cardscan.js 2.2.
    Версия: 2.2 (23.10) — `open({longHold})`: приложение может пометить код как «с побочным эффектом» (скан карточки-привычки отмечает день без отмены) — для него удержание не меньше 0,5 с, как у таймера и задачи. Откат: cardscan.js 2.1.
@@ -33,6 +34,7 @@ window.CardScan = (function(){
   var NOTE_PREFIX = "lt://v1/note/";
   var TIMER_PREFIX = "lt://v1/timer/";
   var HTIMER_PREFIX = "lt://v1/htimer/"; // скрытый таймер: тот же код, но без острова
+  var ALARM_PREFIX = "lt://v1/alarm/";   // будильник: время, повтор и название в коде
   var HABIT_PREFIX = "lt://v1/habit/";
   var TASK_PREFIX = "lt://v1/task/";
   var TODAY_CODE = "lt://v1/today";       // «Сегодня»: один и тот же код у всех, заметку создаёт тот, кто сканирует
@@ -41,6 +43,7 @@ window.CardScan = (function(){
   // Разбор текста из QR:
   //   {kind:"card", id}   — код карточки приложения (lt://v1/card/<id>)
   //   {kind:"timer", seconds, title[, hidden:true]} — таймер, зашитый в код (lt://v1/timer/<секунды>[/<название>]; скрытый — lt://v1/htimer/…)
+  //   {kind:"alarm", hour, minute, every, times, title} — будильник, зашитый в код (lt://v1/alarm/<ЧЧММ>[,<5|15|30>,<1..4>][/<название>])
   //   {kind:"habit", id, title} — привычка с названием в коде (lt://v1/habit/<id>/<название>)
   //   {kind:"task", tab, tag, text} — задача, зашитая в код (lt://v1/task/<ключ вкладки>[#<тег>]/<текст>)
   //   {kind:"today"} / {kind:"reminder"} — общие коды «Сегодня» и «Напоминалки» (lt://v1/today, lt://v1/reminder)
@@ -66,6 +69,16 @@ window.CardScan = (function(){
         var tres = { kind: "timer", seconds: tsec, title: (tm[2] || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, 80) };
         if(thid) tres.hidden = true;
         return tres;
+      }
+      return { kind: "unknown", text: t };
+    }
+    if(t.indexOf(ALARM_PREFIX) === 0){
+      // будильник, зашитый в сам код: время ЧЧММ, необязательный повтор «,<минут>,<раз>» и название — карточка на устройстве не нужна
+      var am = /^(\d{2})(\d{2})(?:,(5|15|30),([1-4]))?(?:\/([\s\S]*))?$/.exec(t.slice(ALARM_PREFIX.length));
+      var ah = am ? parseInt(am[1], 10) : -1, amin = am ? parseInt(am[2], 10) : -1;
+      if(am && ah >= 0 && ah < 24 && amin >= 0 && amin < 60){
+        return { kind: "alarm", hour: ah, minute: amin, every: am[3] ? parseInt(am[3], 10) : 0, times: am[4] ? parseInt(am[4], 10) : 0,
+          title: (am[5] || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, 80) };
       }
       return { kind: "unknown", text: t };
     }
@@ -212,7 +225,7 @@ window.CardScan = (function(){
       dn = Math.max(0, Math.min(1, dn));
       var need = HOLD_MIN_MS + (HOLD_EDGE_MS - HOLD_MIN_MS) * dn;
       var parsed = parseCode(text), kind = parsed.kind;
-      var sideEffect = kind === "task" || kind === "timer" || kind === "habit";
+      var sideEffect = kind === "task" || kind === "timer" || kind === "habit" || kind === "alarm";
       // opts.longHold(разобранный код): приложение знает карточки — скан «Привычки» тоже отмечает день без отмены, как и таймер/задача
       if(!sideEffect && typeof opts.longHold === "function"){ try{ sideEffect = !!opts.longHold(parsed); }catch(e){} }
       if(sideEffect) need = Math.max(need, HOLD_SIDE_EFFECT_MS);

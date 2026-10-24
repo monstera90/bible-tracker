@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.0 (24.10) — мост версии 12: setCardAlarm / cancelCardAlarm / getCardAlarms (будильники карточек, CardAlarms).
 // Версия: 4.0 (24.10) — мост версии 11: startHiddenCardTimer (скрытый таймер карточки: без острова, плашки и уведомления «идёт»).
 // Версия: 3.0 (24.10) — мост версии 10: restartForWebUpdate (перезапуск Activity, чтобы применилась скачанная веб-часть).
 // Версия: 2.0 (21.10) — мост версии 9: вкладка Claude (claudeShow/claudeHide/claudeReload/claudeSetAuto/claudeGetState/claudeArm/claudeDisarm/claudeSendNow).
@@ -30,8 +31,10 @@ class NativeBridge(private val activity: MainActivity) {
          * 8: ярлык сканера QR на рабочий стол (createScanShortcut / openShortcutPermissionSettings).
          * 9: вкладка Claude (claudeShow / claudeHide / claudeReload / claudeSetAuto / claudeGetState / claudeArm / claudeDisarm / claudeSendNow).
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
+         * 11: скрытый таймер карточки (startHiddenCardTimer).
+         * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          */
-        const val BRIDGE_VERSION = 11
+        const val BRIDGE_VERSION = 12
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -466,6 +469,31 @@ class NativeBridge(private val activity: MainActivity) {
     fun getCardTimers(): String {
         if (!activity.pageTrusted) return "[]"
         return CardTimers.listJson(activity.applicationContext)
+    }
+
+    // ---------- будильники карточек вкладки 9 (CardAlarms) ----------
+
+    /**
+     * Заводит (или заводит заново) будильник карточки на ближайшее ЧЧ:ММ; everyMin — 0/5/15/30, times — повторов 0..4.
+     * Возвращает момент первого звонка (мс) или 0, если параметры неверны.
+     */
+    @JavascriptInterface
+    fun setCardAlarm(id: String?, title: String?, hour: Int, minute: Int, everyMin: Int, times: Int): Long {
+        if (!activity.pageTrusted || id == null) return 0L
+        return CardAlarms.set(activity.applicationContext, id, title ?: "", hour, minute, everyMin, times)
+    }
+
+    @JavascriptInterface
+    fun cancelCardAlarm(id: String?) {
+        if (!activity.pageTrusted || id == null) return
+        CardAlarms.cancel(activity.applicationContext, id)
+    }
+
+    /** Заведённые будильники: [{id, title, hour, minute, every, times, k, firstAt, nextAt, now}]. */
+    @JavascriptInterface
+    fun getCardAlarms(): String {
+        if (!activity.pageTrusted) return "[]"
+        return CardAlarms.listJson(activity.applicationContext)
     }
 
     // ---------- ярлык сканера QR-кодов на рабочий стол (ScanShortcut; кнопка в «Дополнительных возможностях») ----------

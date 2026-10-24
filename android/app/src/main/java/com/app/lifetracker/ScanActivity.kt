@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.0 (24.10) — мост ScanBridge: setAlarm / cancelAlarm / getAlarms (скан кода будильника в окне ярлыка заводит будильник CardAlarms).
 // Версия: 3.0 (24.10) — мост ScanBridge: startHiddenTimer (скан кода скрытого таймера из окна ярлыка: без острова и уведомления «идёт»).
 // Версия: 2.0 (21.10) — мост ScanBridge: cancelTimer («Стоп» на карточке в окне ярлыка).
 // Версия: 1.1 (17.10) — мост ScanBridge: startTimer / getTimers (скан карточки-таймера запускает таймер CardTimers без открытия приложения).
@@ -291,6 +292,24 @@ class ScanActivity : ComponentActivity() {
             if (id == null || !CARD_ID_RE.matches(id)) return false
             return CardTimers.start(applicationContext, id, title ?: "", seconds.toLong(), true)
         }
+
+        /** Скан кода будильника: заводит будильник на ближайшее ЧЧ:ММ (приложение не открывается). Возвращает момент первого звонка или 0. */
+        @JavascriptInterface
+        fun setAlarm(id: String?, title: String?, hour: Int, minute: Int, everyMin: Int, times: Int): Long {
+            if (id == null || !CARD_ID_RE.matches(id)) return 0L
+            return CardAlarms.set(applicationContext, id, title ?: "", hour, minute, everyMin, times)
+        }
+
+        /** «Выкл.» на карточке-будильнике. */
+        @JavascriptInterface
+        fun cancelAlarm(id: String?) {
+            if (id == null || !CARD_ID_RE.matches(id)) return
+            CardAlarms.cancel(applicationContext, id)
+        }
+
+        /** Заведённые будильники (тот же JSON, что у NativeBridge.getCardAlarms). */
+        @JavascriptInterface
+        fun getAlarms(): String = CardAlarms.listJson(applicationContext)
 
         /** «Стоп» на карточке-таймере: отмена таймера (и вибрации конца), как cancelCardTimer в основном мосте. */
         @JavascriptInterface

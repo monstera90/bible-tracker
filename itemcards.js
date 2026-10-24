@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 24.0 (24.10) — структурная правка: новый тип карточки «Будильник» (`alarm`, пункт «+» после «Скрытого таймера», «Будильники» в воронке): QR несёт время, повтор и название — `lt://v1/alarm/<ЧЧММ>[,<5|15|30>,<1..4>][/<название>]` (`ALARM_PREFIX`, `qrTextFor`, `alarmFromCode`; id будильника в оболочке — хеш кода, `alarmCodeId`/`runId`, поэтому скан и карточка в сетке — один будильник); поля карточки `alarmTime` («ЧЧ:ММ»), `alarmEvery` (0/5/15/30 минут), `alarmTimes` (0..4 повторов) ходят через облако (`cloudShape`); форма — колёса часов и минут, список «Повтор через…» и (только при выбранном повторе) «Количество повторов»; скан заводит будильник на ближайшее такое время (сегодня, если не прошло, иначе завтра) через мост (`getAlarmApi`: оболочка / `deps.alarms` в `scan.html`; в браузере без оболочки — сообщение), кнопки «Выкл.» и «Завести» на карточке (`startAlarmForCard`/`stopAlarmForCard`, `syncAlarmsView`). Откат: itemcards.js 23.0.
    Версия: 23.0 (24.10) — структурная правка: «Скрытый таймер» (пункт «+»): обычная карточка-таймер с признаком `noIsland` (ходит через облако в `cloudShape`), форма как у таймера (`openForm("htimer")` → `type:"timer"` + `noIsland`); в оболочке такой таймер не показывается ни в острове, ни в плашке, ни в шторке (мост `startHiddenCardTimer` / `startHiddenTimer` в окне ярлыка) — виден только на вкладке карточек и на показе по скану, в конце срабатывает как обычный. QR — `lt://v1/htimer/<секунды>[/<название>]` (`HTIMER_PREFIX`, `qrTextFor`); таймер по скану и таймер карточки в сетке делят один id (`runId`, `timerCodeId(..., hidden)`, `timerQrTitle`), поэтому после скана таймер виден работающим на самой карточке. Откат: itemcards.js 22.0.
    Версия: 22.0 (24.10) — структурная правка: новый тип карточки «Напоминание» (`remind`, без QR-кода): название, комментарий (`comment`), цвет, дата и время (`remindAt`), повтор `repeatKind` (час / 8 часов / день / неделя / месяц / год; `REPEAT_KINDS`, `addKind`, `kthIdx`, `lastOcc`, `nextOccurrence`); пункт «Напоминание» в «+» и в воронке; уходит в планировщик через `getRemindableCards` (с `repeatKind` — его повторяет и оболочка); в PDF не попадает, оборота с QR нет; форма — `openForm("remind")`.
    Версия: 21.0 (24.10) — структурная правка: запись в журнал событий (`eventlog.js`, `evLog`): сканирования QR (карточки, привычки, «Сегодня», «Напоминалка», заметки, задачи, чужие коды), установка/остановка таймера.
@@ -68,6 +69,9 @@ window.initItemCardsModule = function(deps){
   var QR_PREFIX = "lt://v1/card/";
   var TIMER_PREFIX = "lt://v1/timer/";
   var HTIMER_PREFIX = "lt://v1/htimer/"; // «скрытый таймер»: тот же код таймера, но без острова и уведомления «идёт»
+  var ALARM_PREFIX = "lt://v1/alarm/";   // «будильник»: время, повтор и название в самом коде
+  var ALARM_EVERY = [5, 15, 30];         // варианты повтора, минут
+  var ALARM_TIMES_MAX = 4;               // повторов не больше четырёх (всего звонков до пяти)
   var HABIT_PREFIX = "lt://v1/habit/";
   var TASK_PREFIX = "lt://v1/task/";
   var TASK_TEXT_MAX = 80; // текст задачи в коде: длиннее — код плотнее и хуже читается на малой наклейке (на карточке и в PDF показывается только начало)
@@ -124,6 +128,10 @@ window.initItemCardsModule = function(deps){
       var t = timerQrTitle(c.title);
       return (c.noIsland ? HTIMER_PREFIX : TIMER_PREFIX) + (c.seconds | 0) + (t ? "/" + t : "");
     }
+    if(c && c.type === "alarm" && alarmHM(c)){ // будильник: время, повтор и название в самом коде (lt://v1/alarm/0730,15,3/Подъём)
+      var ah = alarmHM(c), aev = alarmEvery(c), at0 = timerQrTitle(c.title);
+      return ALARM_PREFIX + pad2(ah.h) + pad2(ah.m) + (aev ? "," + aev + "," + alarmTimes(c) : "") + (at0 ? "/" + at0 : "");
+    }
     if(c && c.type === "habit" && c.id){ // привычка: id и название в самом коде (цвет не передаётся — у каждого свой)
       var ht = String(c.title || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, HABIT_TITLE_MAX);
       if(/[\uD800-\uDBFF]$/.test(ht)) ht = ht.slice(0, -1);
@@ -153,10 +161,46 @@ window.initItemCardsModule = function(deps){
     virtualCards[vc.id] = vc;
     return vc;
   }
+  // ---------- будильник ----------
+  // Карточка: {type:"alarm", title, alarmTime:"ЧЧ:ММ", alarmEvery:0|5|15|30 (минут между повторами), alarmTimes:0..4 (повторов)}.
+  // Всего звонков 1 + alarmTimes. Скан кода заводит будильник в оболочке (CardAlarms.kt) на ближайшее такое время.
+  function alarmEvery(c){ var e = c ? (c.alarmEvery | 0) : 0; return ALARM_EVERY.indexOf(e) >= 0 ? e : 0; }
+  function alarmTimes(c){
+    if(!alarmEvery(c)) return 0;
+    var n = c.alarmTimes | 0;
+    return n >= 1 && n <= ALARM_TIMES_MAX ? n : 1;
+  }
+  function alarmHM(c){
+    var m = /^(\d{2}):(\d{2})$/.exec(String(c && c.alarmTime || ""));
+    if(!m) return null;
+    var h = parseInt(m[1], 10), mi = parseInt(m[2], 10);
+    return (h < 24 && mi < 60) ? { h: h, m: mi } : null;
+  }
+  function alarmClock(c){ var t = alarmHM(c); return t ? pad2(t.h) + ":" + pad2(t.m) : ""; }
+  // id будильника в оболочке — хеш от времени, повтора и названия (как у таймера из кода): повторный скан того же кода заводит тот же будильник заново
+  function alarmCodeId(c){
+    var hm = alarmHM(c) || { h: 0, m: 0 };
+    var str = "a|" + pad2(hm.h) + pad2(hm.m) + "|" + alarmEvery(c) + "|" + alarmTimes(c) + "|" + timerQrTitle(c && c.title), h1 = 5381, h2 = 52711;
+    for(var i = 0; i < str.length; i++){
+      var ch = str.charCodeAt(i);
+      h1 = ((h1 * 33) ^ ch) >>> 0;
+      h2 = ((h2 * 31) + ch) >>> 0;
+    }
+    return "a" + h1.toString(36) + h2.toString(36);
+  }
+  // будильник из отсканированного кода: «виртуальная» карточка (в список не попадает)
+  function alarmFromCode(p){
+    var vc = { type: "alarm", title: String(p.title || "").slice(0, 80), icon: "", date: "", seconds: 0,
+      alarmTime: pad2(p.hour) + ":" + pad2(p.minute), alarmEvery: p.every | 0, alarmTimes: p.times | 0, virtual: true };
+    vc.id = alarmCodeId(vc);
+    virtualCards[vc.id] = vc;
+    return vc;
+  }
   // id, под которым таймер карточки живёт в оболочке. Обычный — id карточки. Скрытый — id, посчитанный от времени и названия, как у таймера
   // из кода: скан кода и сама карточка в сетке работают с одним таймером, и после скана он виден работающим на карточке.
   function runId(c){
     if(!c) return "";
+    if(c.type === "alarm") return alarmCodeId(c); // у будильника id считается от кода
     if(c.noIsland && !c.virtual) return timerCodeId(c.seconds | 0, timerQrTitle(c.title), true);
     return c.id;
   }
@@ -326,7 +370,7 @@ window.initItemCardsModule = function(deps){
   // запись карточки в том виде, как она ходит между устройствами (и проверка пришедшей из облака)
   function cloudShape(r){
     if(!r || typeof r.id !== "string" || !/^[A-Za-z0-9]{4,32}$/.test(r.id)) return null;
-    if(r.type !== "timer" && r.type !== "item" && r.type !== "task" && r.type !== "datenote" && r.type !== "reminder" && r.type !== "habit" && r.type !== "remind") return null;
+    if(r.type !== "timer" && r.type !== "alarm" && r.type !== "item" && r.type !== "task" && r.type !== "datenote" && r.type !== "reminder" && r.type !== "habit" && r.type !== "remind") return null;
     var o = {
       id: r.id,
       type: r.type,
@@ -342,6 +386,7 @@ window.initItemCardsModule = function(deps){
     if(r.type === "timer" && r.noIsland) o.noIsland = 1; // скрытый таймер: без острова и уведомления «идёт»
     var col = cardColor(r); if(col) o.color = col; // цвет карточки — у любого типа (пусто — без цвета)
     if(r.type === "habit") o.days = habitDays(r);
+    if(r.type === "alarm"){ var ahm = alarmHM(r); o.alarmTime = ahm ? pad2(ahm.h) + ":" + pad2(ahm.m) : ""; o.alarmEvery = alarmEvery(r); o.alarmTimes = alarmTimes(r); }
     if(r.type === "item"){
       // напоминание карточки: выбранная дата-время и период повтора (remindDone — только на этом устройстве, наружу не идёт)
       o.remindAt = Math.max(0, Math.floor(Number(r.remindAt) || 0));
@@ -521,6 +566,7 @@ window.initItemCardsModule = function(deps){
   var FILTERS = [
     { key: "all", label: "Все" },
     { key: "timer", label: "Таймеры" },
+    { key: "alarm", label: "Будильники" },
     { key: "item", label: "Предметы" },
     { key: "task", label: "Задачи" },
     { key: "habit", label: "Привычки" },
@@ -752,6 +798,15 @@ window.initItemCardsModule = function(deps){
           '<button type="button" class="item-card-start-btn" title="Запустить таймер">Пуск</button>' +
         '</div>';
     }
+    if(c.type === "alarm"){ // время будильника, ниже — «заведён…» или повтор; кнопки как у таймера
+      return '<div class="item-card-title"></div>' +
+        '<div class="item-card-time">' + escapeHtml(alarmClock(c)) + '</div>' +
+        '<div class="item-card-date item-card-alarm-state" data-alarm-id="' + escapeHtml(runId(c)) + '"></div>' +
+        '<div class="item-card-timer-btns">' +
+          '<button type="button" class="item-card-stop-btn" title="Выключить будильник">Выкл.</button>' +
+          '<button type="button" class="item-card-start-btn" title="Завести будильник">Завести</button>' +
+        '</div>';
+    }
     if(c.type === "habit"){ // цвет привычки — фон всей карточки (applyCardLook), здесь значок календаря с галочкой и название
       return '<div class="item-card-icon">' + iconSvg("habit") + '</div>' +
         '<div class="item-card-title"></div>';
@@ -787,6 +842,7 @@ window.initItemCardsModule = function(deps){
     html += '<div class="item-type-menu" id="itemTypeMenu" style="display:none;">' +
       '<button type="button" class="workbooks-run-btn" data-type="timer">Таймер</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="htimer">Скрытый таймер</button>' +
+      '<button type="button" class="workbooks-run-btn" data-type="alarm">Будильник</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="item">Предмет</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="task">Создавать задачу</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="habit">Привычка</button>' +
@@ -857,6 +913,7 @@ window.initItemCardsModule = function(deps){
     });
     bindGrid(grid);
     syncTimersView();
+    syncAlarmsView();
     bindFab(tab);
     if(flippedId && findCard(flippedId)) flipCard(flippedId, true, true); else flippedId = null;
   }
@@ -1221,6 +1278,7 @@ window.initItemCardsModule = function(deps){
     var c = findCard(id);
     if(!c) return;
     if(c.type === "timer" && c.noIsland){ try{ var apiD = getTimerApi(); if(apiD && apiD.cancel) apiD.cancel(runId(c)); }catch(e){} } // идущий скрытый таймер без карточки остановить было бы нечем
+    if(c.type === "alarm"){ try{ var apiDA = getAlarmApi(); if(apiDA && apiDA.cancel) apiDA.cancel(runId(c)); }catch(e){} } // заведённый будильник без карточки выключить было бы нечем
     cardsCache = list.filter(function(x){ return x.id !== id; });
     delete revealedIds[id];
     if(flippedId === id) flippedId = null;
@@ -1234,7 +1292,7 @@ window.initItemCardsModule = function(deps){
   }
 
   // ---------- форма создания / правки ----------
-  var TYPE_LABEL = { timer: "Таймер", htimer: "Скрытый таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE, remind: "Напоминание" };
+  var TYPE_LABEL = { timer: "Таймер", alarm: "Будильник", htimer: "Скрытый таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE, remind: "Напоминание" };
   // выбор цвета карточки (необязательный, у любого типа): разметка и привязка; первый пастельный квадрат — пустой цвет
   function colorPaletteHtml(type){
     var h = '<div class="item-form-hint">' + (type === "habit"
@@ -1273,6 +1331,9 @@ window.initItemCardsModule = function(deps){
     html += '<h3 class="common-tab-title">' + escapeHtml(TYPE_LABEL[hideIsland ? "htimer" : type]) + '</h3>';
     if(hideIsland){
       html += '<div class="item-form-hint">Работает как обычный таймер, но не показывается ни в динамическом острове, ни в шторке: виден только на этой вкладке и на карточке при сканировании кода. В конце срабатывает как обычный — вибрация и уведомление.</div>';
+    }
+    if(type === "alarm"){
+      html += '<div class="item-form-hint">Время, повтор и название зашиты в код. Кто его отсканирует, у того будильник заведётся на ближайшее такое время (сегодня, если оно ещё не прошло, иначе завтра) и сработает карточкой на экране, в том числе заблокированном; выключить — смахнуть карточку. Повторы необязательны: если выбраны, будильник прозвонит ещё несколько раз через равные промежутки — каждый звонок гасится смахиванием.</div>';
     }
     if(type === "habit"){
       html += '<div class="item-form-hint">Каждое сканирование кода отмечает сегодняшний день на карте привычки. В один день засчитывается одно сканирование — повторные в тот же день ничего не меняют. Название (до 40 знаков) зашито в код: если кто-то отсканирует его на другом устройстве, там появится такая же привычка (цвет каждый выбирает себе сам) и отметки пойдут уже у него.</div>';
@@ -1314,6 +1375,14 @@ window.initItemCardsModule = function(deps){
       html += '<select class="mdeditor-cleanup-input" id="icfRepeat"><option value="">Без повтора</option>';
       REPEAT_KINDS.forEach(function(k){ html += '<option value="' + k.key + '">' + k.label + '</option>'; });
       html += '</select>';
+    } else if(type === "alarm"){
+      html += '<div class="item-form-timer" id="icfTimer">' + wheelHtml("h", 24, "ч") + wheelHtml("m", 60, "мин") + '</div>';
+      html += '<select class="mdeditor-cleanup-input" id="icfAlarmEvery"><option value="">Без повторов</option>';
+      ALARM_EVERY.forEach(function(m){ html += '<option value="' + m + '">Повтор через ' + m + ' минут</option>'; });
+      html += '</select>';
+      html += '<select class="mdeditor-cleanup-input" id="icfAlarmTimes" style="display:none;">';
+      [["1", "1 повтор"], ["2", "2 повтора"], ["3", "3 повтора"], ["4", "4 повтора"]].forEach(function(o){ html += '<option value="' + o[0] + '">' + o[1] + '</option>'; });
+      html += '</select>';
     } else if(type === "timer"){
       html += '<div class="item-form-timer" id="icfTimer">' +
         wheelHtml("h", 24, "ч") + wheelHtml("m", 60, "мин") + wheelHtml("s", 60, "с") +
@@ -1344,7 +1413,17 @@ window.initItemCardsModule = function(deps){
     if(titleEl) titleEl.value = data.title || "";
     var errEl = document.getElementById("icfError");
 
-    if(type === "timer"){
+    if(type === "alarm"){
+      var ahm0 = alarmHM(data) || { h: 7, m: 0 }; // новый будильник — 07:00
+      setWheel("h", ahm0.h);
+      setWheel("m", ahm0.m);
+      var evSel = document.getElementById("icfAlarmEvery"), tmSel = document.getElementById("icfAlarmTimes");
+      evSel.value = alarmEvery(data) ? String(alarmEvery(data)) : "";
+      tmSel.value = String(alarmTimes(data) || 1);
+      var showTimes = function(){ tmSel.style.display = evSel.value ? "" : "none"; }; // «Количество повторов» появляется, только когда выбран повтор
+      showTimes();
+      evSel.addEventListener("change", showTimes);
+    } else if(type === "timer"){
       var total = data.seconds | 0;
       setWheel("h", Math.floor(total / 3600));
       setWheel("m", Math.floor((total % 3600) / 60));
@@ -1462,6 +1541,12 @@ window.initItemCardsModule = function(deps){
         data.remindDone = 0;
         delete data.rDate; delete data.rTime;
       }
+      if(type === "alarm"){
+        data.alarmTime = pad2(Math.min(23, getWheel("h"))) + ":" + pad2(Math.min(59, getWheel("m")));
+        var evv = parseInt(document.getElementById("icfAlarmEvery").value, 10) || 0;
+        data.alarmEvery = ALARM_EVERY.indexOf(evv) >= 0 ? evv : 0;
+        data.alarmTimes = data.alarmEvery ? Math.max(1, Math.min(ALARM_TIMES_MAX, parseInt(document.getElementById("icfAlarmTimes").value, 10) || 1)) : 0;
+      }
       if(type === "timer"){
         var sec = getWheel("h") * 3600 + getWheel("m") * 60 + getWheel("s");
         if(sec <= 0){ errEl.textContent = "Задайте время."; return; }
@@ -1481,16 +1566,20 @@ window.initItemCardsModule = function(deps){
         var cur = findCard(card.id);
         if(cur){
           var oldRun = (cur.type === "timer" && cur.noIsland) ? runId(cur) : "";
+          var oldAlarm = cur.type === "alarm" ? runId(cur) : "";
           cur.title = data.title;
           cur.icon = data.icon;
           if(type === "task") cur.tag = data.tag;
           if(data.color) cur.color = data.color; else delete cur.color; // отметки дней (days) правка не трогает
           cur.date = data.date;
           cur.seconds = data.seconds;
+          if(type === "alarm"){ cur.alarmTime = data.alarmTime; cur.alarmEvery = data.alarmEvery; cur.alarmTimes = data.alarmTimes; }
           if(type === "remind"){ cur.comment = data.comment; cur.remindAt = data.remindAt; cur.repeatKind = data.repeatKind; cur.remindDone = 0; }
           cur.updatedAt = now;
           // скрытый таймер: id считается от времени и названия — после правки старый (если шёл) снимаем, иначе его никто не увидит
           if(oldRun && oldRun !== runId(cur)){ try{ var api0 = getTimerApi(); if(api0 && api0.cancel) api0.cancel(oldRun); }catch(e){} }
+          // будильник: id считается от кода — после правки старый (если был заведён) снимаем, иначе он прозвонит по прежним данным
+          if(oldAlarm && oldAlarm !== runId(cur)){ try{ var apiA = getAlarmApi(); if(apiA && apiA.cancel) apiA.cancel(oldAlarm); }catch(e){} }
         }
       }
       saveCards();
@@ -1619,6 +1708,7 @@ window.initItemCardsModule = function(deps){
   }
   function evLog(text, opts){ try{ if(window.EventLog) window.EventLog.add(text, opts); }catch(e){} }
   function startTimerForCard(c){
+    if(c && c.type === "alarm"){ startAlarmForCard(c); return; } // кнопки «Завести» и «Выкл.» у будильника те же, что у таймера
     if(!c || c.type !== "timer" || !(c.seconds > 0)) return;
     try{ getTimerApi().start(runId(c), c.title || "", c.seconds, !!c.noIsland); }catch(e){}
     try{ if(window.EventLog) window.EventLog.timerStarted(runId(c), c.title || "", c.seconds); }catch(e){}
@@ -1626,10 +1716,87 @@ window.initItemCardsModule = function(deps){
   }
   // «Стоп»: таймер отменяется целиком (пауза не нужна), цифры возвращаются к заданному времени; закончившийся таймер — гасит вибрацию
   function stopTimerForCard(c){
+    if(c && c.type === "alarm"){ stopAlarmForCard(c); return; }
     if(!c || c.type !== "timer") return;
     try{ var api = getTimerApi(); if(api && typeof api.cancel === "function") api.cancel(runId(c)); }catch(e){}
     try{ if(window.EventLog) window.EventLog.timerCancelled(runId(c)); }catch(e){}
     syncTimersView();
+  }
+
+  // ---------- будильники карточек ----------
+  // Звонит оболочка (CardAlarms.kt): точный будильник, карточка-уведомление (видна на заблокированном экране, гасится смахиванием),
+  // повторы. Страница только заводит и снимает: в оболочке — через мост LifeTrackerNative, в окне ярлыка — через deps.alarms (scan.html).
+  // В браузере без оболочки будильника нет (страница при закрытии не звонит).
+  var alarmApi = null;
+  var alarmList = [];
+  function getAlarmApi(){
+    if(alarmApi) return alarmApi;
+    if(deps.alarms){ alarmApi = deps.alarms; return alarmApi; }
+    var N = window.LifeTrackerNative;
+    if(N && typeof N.setCardAlarm === "function"){ // мост версии 12
+      alarmApi = {
+        set: function(id, title, h, m, every, times){ return Number(N.setCardAlarm(id, title, h | 0, m | 0, every | 0, times | 0)) || 0; },
+        cancel: function(id){ if(typeof N.cancelCardAlarm === "function") N.cancelCardAlarm(id); },
+        list: function(){ try{ return JSON.parse(N.getCardAlarms() || "[]"); }catch(e){ return []; } }
+      };
+    } else {
+      alarmApi = {}; // нет оболочки (или она старше моста 12): будильник завести нечем
+    }
+    return alarmApi;
+  }
+  function alarmSupported(){ var a = getAlarmApi(); return !!(a && typeof a.set === "function"); }
+  function dayWord(at){
+    var now = new Date(), d = new Date(at);
+    var a0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    var b0 = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    var diff = Math.round((b0 - a0) / 86400000);
+    return diff === 0 ? "сегодня" : (diff === 1 ? "завтра" : pad2(d.getDate()) + "." + pad2(d.getMonth() + 1));
+  }
+  function clockOf(at){ var d = new Date(at); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); }
+  function refreshAlarms(){
+    try{ var a = getAlarmApi(); alarmList = (a && a.list ? a.list() : []) || []; }catch(e){ alarmList = []; }
+  }
+  function alarmInfo(id){
+    for(var i = 0; i < alarmList.length; i++) if(alarmList[i].id === id) return alarmList[i];
+    return null;
+  }
+  // строка под временем на карточке: заведён — когда ближайший звонок; не заведён — сводка повтора (если он есть)
+  function alarmStateText(c){
+    var info = alarmInfo(runId(c));
+    if(info && info.nextAt > Date.now()){
+      return (info.k | 0) > 0 ? "повтор в " + clockOf(info.nextAt) : "заведён, " + dayWord(info.nextAt);
+    }
+    var ev = alarmEvery(c);
+    return ev ? "повтор " + ev + " мин × " + alarmTimes(c) : "";
+  }
+  function syncAlarmsView(){
+    var nodes = document.querySelectorAll(".item-card-alarm-state[data-alarm-id]");
+    if(!nodes.length) return;
+    refreshAlarms();
+    var byId = {}, k;
+    loadCards().forEach(function(c){ if(c.type === "alarm") byId[runId(c)] = c; });
+    for(k in virtualCards){ if(virtualCards.hasOwnProperty(k) && virtualCards[k].type === "alarm") byId[k] = virtualCards[k]; }
+    for(var i = 0; i < nodes.length; i++){
+      var c = byId[nodes[i].getAttribute("data-alarm-id")];
+      if(c) nodes[i].textContent = alarmStateText(c);
+    }
+  }
+  // заводит будильник карточки; возвращает момент первого звонка (мс) или 0 (нечем завести / ошибка)
+  function startAlarmForCard(c){
+    if(!c || c.type !== "alarm") return 0;
+    var hm = alarmHM(c), api = getAlarmApi(), at = 0;
+    if(!hm) return 0;
+    if(!api.set){ if(!standalone){ try{ alert("Будильник работает только в приложении на телефоне."); }catch(e){} } return 0; }
+    try{ at = api.set(runId(c), c.title || "", hm.h, hm.m, alarmEvery(c), alarmTimes(c)) || 0; }catch(e){ at = 0; }
+    if(at) evLog("Будильник " + alarmClock(c) + (c.title ? " «" + c.title + "»" : "") + " заведён: " + dayWord(at));
+    syncAlarmsView();
+    return at;
+  }
+  function stopAlarmForCard(c){
+    if(!c || c.type !== "alarm") return;
+    try{ var api = getAlarmApi(); if(api && api.cancel) api.cancel(runId(c)); }catch(e){}
+    evLog("Будильник " + alarmClock(c) + (c.title ? " «" + c.title + "»" : "") + " выключен");
+    syncAlarmsView();
   }
 
   // ---------- сканирование (шаги 3 и 5 ТЗ) ----------
@@ -1738,6 +1905,7 @@ window.initItemCardsModule = function(deps){
     if(p.kind === "today"){ openTodayFromScan(); return; }       // общий код «Сегодня»: карточка не нужна
     if(p.kind === "note"){ openScannedNote(p.id); return; }
     if(p.kind === "task"){ handleScannedTask(p); return; }  // задача в самом коде: карточка не нужна
+    if(p.kind === "alarm"){ showScanned(alarmFromCode(p)); return; } // будильник из самого кода: заводится сразу, карточка не нужна
     if(p.kind === "timer"){ showScanned(timerFromCode(p)); return; } // таймер из самого кода: отсчёт стартует сразу, карточка не нужна
     evLog("Просканирован QR-код: " + String(p.url || p.text || "").slice(0, 80));
     showNoticeOverlay({ kind: p.kind, url: p.url, text: p.text });
@@ -1875,6 +2043,13 @@ window.initItemCardsModule = function(deps){
     return true;
   }
   function showScanned(c){
+    if(c.type === "alarm"){ // скан будильника: заводится на ближайшее время сразу (если уже был заведён — заново)
+      if(!alarmSupported()){ showNoticeOverlay({ kind: "msg", text: "Будильник работает только в приложении на телефоне." }); return; }
+      var alAt = startAlarmForCard(c);
+      if(!alAt){ showNoticeOverlay({ kind: "msg", text: "Не удалось завести будильник." }); return; }
+      showCardOverlay(c, "Заведён: " + dayWord(alAt) + " в " + clockOf(alAt));
+      return;
+    }
     if(c.type === "habit"){ // скан привычки: один день — одна отметка, повторный скан в тот же день ничего не делает
       var added = markHabitToday(c.id);
       evLog(cardTitle(c));
@@ -2003,8 +2178,8 @@ window.initItemCardsModule = function(deps){
     card.querySelector(".item-card-title").textContent = cardTitle(c);
     card.addEventListener("click", function(e){
       e.stopPropagation();
-      if(c.type === "timer" && e.target.closest(".item-card-start-btn")) startTimerForCard(c); // «Пуск» на показе: заново
-      if(c.type === "timer" && e.target.closest(".item-card-stop-btn")) stopTimerForCard(c); // «Стоп» на показе
+      if((c.type === "timer" || c.type === "alarm") && e.target.closest(".item-card-start-btn")) startTimerForCard(c); // «Пуск» на показе: заново («Завести» у будильника)
+      if((c.type === "timer" || c.type === "alarm") && e.target.closest(".item-card-stop-btn")) stopTimerForCard(c); // «Стоп» на показе («Выкл.» у будильника)
     });
     o.appendChild(card);
     if(noteText){
@@ -2014,6 +2189,7 @@ window.initItemCardsModule = function(deps){
       o.appendChild(noteEl);
     }
     if(c.type === "timer") syncTimersView();
+    if(c.type === "alarm") syncAlarmsView();
     if(isLegacyAnim()){ o.style.animation = "none"; card.style.animation = "none"; } // Android 5: без анимации
     if(c.type === "item"){
       var b = document.createElement("button");
@@ -2072,6 +2248,8 @@ window.initItemCardsModule = function(deps){
         openExternalUrl(info.url);
         endScanSession(true);
       });
+    } else if(info.kind === "msg"){
+      msg.textContent = info.text || "";
     } else if(info.kind === "noreminders"){
       msg.textContent = "Напоминаний пока нет. Добавьте комментарии на вкладке «Комментарии».";
     } else {

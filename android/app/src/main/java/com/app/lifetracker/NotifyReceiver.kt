@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (24.10) — после перезагрузки/смены времени/обновления заново ставятся и будильники карточек (CardAlarms.restore).
 // Версия: 1.0 (17.10) — после перезагрузки/смены времени/обновления восстанавливаются таймеры карточек (CardTimers.restore).
 
 import android.content.BroadcastReceiver
@@ -58,6 +59,7 @@ class NotifyReceiver : BroadcastReceiver() {
                 ReminderScheduler.scheduleNext(ctx)
                 GroupWatcher.scheduleNextPoll(ctx)
                 CardTimers.restore(ctx) // таймеры карточек: будильники и уведомления заново, закончившиеся — сразу
+                CardAlarms.restore(ctx) // будильники карточек: заново, опоздавшие звонки пропускаются
             }
         }
     }
