@@ -1,5 +1,6 @@
 /* ===========================================================================
    notifications.js
+   Версия: 4.4 (24.10) — `pushNative` передаёт оболочке `repeatKind` (карточка «Напоминание»).
    Версия: 4.3 (24.10) — события для центра событий (`eventlog.js`): `logReminderShown`, провайдер предстоящих напоминаний (`EventLog.setUpcomingProvider`), запись напоминаний, показанных оболочкой.
    Версия: 4.2 (17.10) — структурная правка: напоминания карточек вкладки 9 (id вида `card:<id>`, их отдаёт getRemindableTasks из my.js): клик по уведомлению ведёт к карточке (`openCardFromReminder`), у карточек нет «Готово/Завтра» (в окне, в браузерном уведомлении) и показывается плашка вместо карточки задачи; в снимок для оболочки добавлено `repeatDays`; в окне даты/времени слева появляется кнопка «повтор» (`opts.onRepeat`, периоды 1,2,3,5,10,14,21,30,60,90,180 дней, после 180 и долгое удержание — выключение). Откат: notifications.js 4.1.
    Версия: 4.1 (07.10) — шаг 5 переезда в APK (ПЕРЕЕЗД_В_APK.md): в нативной оболочке (есть window.LTNotify, см.
@@ -591,6 +592,8 @@ window.initNotificationsModule = function(deps){
         var item = {id: t.id, at: at, text: cleanText(t.c && t.c.text)};
         var rd = t.c && t.c.repeatDays;
         if(typeof rd === "number" && rd > 0) item.repeatDays = rd; // повторяющееся напоминание карточки: оболочка сама сдвигает срок
+        var rk = t.c && t.c.repeatKind;
+        if(typeof rk === "string" && rk) item.repeatKind = rk;   // «Напоминание» (hour/8h/day/week/month/year): оболочка считает следующий срок сама
         list.push(item);
       });
       list.sort(function(a, b){ return a.at - b.at || (a.id < b.id ? -1 : 1); });

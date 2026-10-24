@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 22.0 (24.10) — структурная правка: новый тип карточки «Напоминание» (`remind`, без QR-кода): название, комментарий (`comment`), цвет, дата и время (`remindAt`), повтор `repeatKind` (час / 8 часов / день / неделя / месяц / год; `REPEAT_KINDS`, `addKind`, `kthIdx`, `lastOcc`, `nextOccurrence`); пункт «Напоминание» в «+» и в воронке; уходит в планировщик через `getRemindableCards` (с `repeatKind` — его повторяет и оболочка); в PDF не попадает, оборота с QR нет; форма — `openForm("remind")`.
    Версия: 21.0 (24.10) — структурная правка: запись в журнал событий (`eventlog.js`, `evLog`): сканирования QR (карточки, привычки, «Сегодня», «Напоминалка», заметки, задачи, чужие коды), установка/остановка таймера.
    Версия: 20.0 (24.10) — структурная правка: QR привычки несёт название (`lt://v1/habit/<id>/<название до 40 знаков>`, `qrTextFor`; цвета в коде нет — его каждый выбирает себе сам): скан на устройстве без такой карточки создаёт её по коду (`habitFromCode`: тот же id, название из кода, пустые `days`, без цвета) и отмечает сегодняшний день; сначала карточка ищется у себя и в облаке (если синхронизация настроена). Название привычки в форме — до 40 знаков (иначе не поместится в код). Прежние коды `lt://v1/card/<id>` привычек работают как раньше, но только там, где карточка есть. Откат: itemcards.js 19.0.
    Версия: 19.0 (24.10) — структурная правка: цвет карточки у ВСЕХ типов (таймер, предмет, «Создавать задачу», привычка, «Сегодня», «Напоминалка»): необязательное поле `color` ("#rrggbb"; пусто — без цвета, карточка как раньше), ходит через облако (`cloudShape`) и красит карточку в сетке (`applyCardLook`, вместо `applyHabitLook`). Палитра формы — общая (`colorPaletteHtml`): первый пастельный квадрат стал ПУСТЫМ цветом (был пастельный красный). Цвет по умолчанию — пустой; выбранный цвет запоминается по типу карточки (`itemCardsColorDefaults_v1`, `defaultColorFor`/`rememberColorFor`, только на этом устройстве) и подставляется в новые карточки этого типа. «Сегодня» и «Напоминалка»: создаются и правятся маленькой формой с одним цветом (`createSingletonCard` убран; у них при удержании появилась кнопка «Изменить»). У привычки без цвета отметки на карте и точка в заголовке берут цвет темы (`var(--wood)`), `HABIT_DEFAULT_COLOR` убран. Показ карточки по скану ВСЕГДА цвета холста (`.scan-card`), цвет карточки там не применяется. Откат: itemcards.js 18.1.
@@ -309,7 +310,7 @@ window.initItemCardsModule = function(deps){
   // запись карточки в том виде, как она ходит между устройствами (и проверка пришедшей из облака)
   function cloudShape(r){
     if(!r || typeof r.id !== "string" || !/^[A-Za-z0-9]{4,32}$/.test(r.id)) return null;
-    if(r.type !== "timer" && r.type !== "item" && r.type !== "task" && r.type !== "datenote" && r.type !== "reminder" && r.type !== "habit") return null;
+    if(r.type !== "timer" && r.type !== "item" && r.type !== "task" && r.type !== "datenote" && r.type !== "reminder" && r.type !== "habit" && r.type !== "remind") return null;
     var o = {
       id: r.id,
       type: r.type,
@@ -328,6 +329,11 @@ window.initItemCardsModule = function(deps){
       // напоминание карточки: выбранная дата-время и период повтора (remindDone — только на этом устройстве, наружу не идёт)
       o.remindAt = Math.max(0, Math.floor(Number(r.remindAt) || 0));
       o.repeatDays = REPEAT_STEPS.indexOf(r.repeatDays | 0) >= 0 ? (r.repeatDays | 0) : 0;
+    }
+    if(r.type === "remind"){
+      o.comment = String(r.comment == null ? "" : r.comment).slice(0, REMIND_COMMENT_MAX);
+      o.remindAt = Math.max(0, Math.floor(Number(r.remindAt) || 0));
+      o.repeatKind = kindOf(r);
     }
     return o;
   }
@@ -378,7 +384,7 @@ window.initItemCardsModule = function(deps){
       }
       if(ru > lu){
         // пришла более новая версия: журнал срабатываний (remindDone) остаётся своим, если напоминание то же; иначе отсчёт заново
-        var same = (Number(c.remindAt) || 0) === (Number(r.remindAt) || 0) && repeatOf(c) === repeatOf(r);
+        var same = (Number(c.remindAt) || 0) === (Number(r.remindAt) || 0) && repeatOf(c) === repeatOf(r) && kindOf(c) === kindOf(r);
         r.remindDone = same ? (Number(c.remindDone) || 0) : 0;
         if(!same) markPastDone(r);
         if(daysRemoteLacks){ var mr = cloudShape(r); if(mr) md.cardMetaSave(mr); }
@@ -501,6 +507,7 @@ window.initItemCardsModule = function(deps){
     { key: "item", label: "Предметы" },
     { key: "task", label: "Задачи" },
     { key: "habit", label: "Привычки" },
+    { key: "remind", label: "Напоминания" },
     { key: "special", label: "Особые" }
   ];
   var cardFilter = null;
@@ -557,8 +564,56 @@ window.initItemCardsModule = function(deps){
   var DAY_MS = 86400000;
   var FIRED_KEY = "taskRemindersFired_v1"; // «уже показанные» напоминания (notifications.js) — id карточек там вида «card:<id>»
   function repeatOf(c){ var d = (c && c.repeatDays) | 0; return REPEAT_STEPS.indexOf(d) >= 0 ? d : 0; }
-  // ближайший срок: без повтора — выбранный; с повтором — первый срок «выбранная дата + k периодов» после уже отработанного
+  // карточка «Напоминание» (type "remind"): повтор по видам, а не по дням — каждый час / 8 часов / день / неделя / месяц / год
+  var REMIND_COMMENT_MAX = 500;
+  var REPEAT_KINDS = [
+    { key: "hour", label: "Каждый час", ms: 3600000 },
+    { key: "8h", label: "Каждые 8 часов", ms: 28800000 },
+    { key: "day", label: "Каждый день", ms: 86400000 },
+    { key: "week", label: "Каждую неделю", ms: 604800000 },
+    { key: "month", label: "Каждый месяц", est: 28 * 86400000 },
+    { key: "year", label: "Каждый год", est: 365 * 86400000 }
+  ];
+  function kindInfo(k){ for(var i = 0; i < REPEAT_KINDS.length; i++) if(REPEAT_KINDS[i].key === k) return REPEAT_KINDS[i]; return null; }
+  function kindOf(c){ var k = c && c.repeatKind; return kindInfo(k) ? k : ""; }
+  // прибавить месяцы с «прижиманием» дня к концу короткого месяца (31 января + 1 месяц = 28/29 февраля; так же считает оболочка)
+  function addMonthsTs(ts, n){
+    var d = new Date(ts), day = d.getDate();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + n);
+    var last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(Math.min(day, last));
+    return d.getTime();
+  }
+  // срок номер k от базы (k = 0 — сама база)
+  function addKind(base, kind, k){
+    var info = kindInfo(kind);
+    if(info.ms) return base + k * info.ms;
+    return addMonthsTs(base, kind === "year" ? 12 * k : k);
+  }
+  // наибольший k ≥ 0, при котором срок не позже t (base ≤ t)
+  function kthIdx(base, kind, t){
+    var info = kindInfo(kind);
+    var k = Math.max(0, Math.floor((t - base) / (info.ms || info.est)));
+    while(addKind(base, kind, k + 1) <= t) k++;
+    while(k > 0 && addKind(base, kind, k) > t) k--;
+    return k;
+  }
+  // последний наступивший срок повтора (0 — повтора нет или ещё не начался)
+  function lastOcc(c, t){
+    var base = Number(c && c.remindAt) || 0, kind = kindOf(c);
+    if(!kind || !(base > 0) || base > t) return 0;
+    return addKind(base, kind, kthIdx(base, kind, t));
+  }
   function nextOccurrence(c){
+    var kind0 = kindOf(c);
+    if(kind0){
+      var b0 = Number(c.remindAt) || 0;
+      if(!(b0 > 0)) return 0;
+      var done0 = Number(c.remindDone) || 0;
+      if(done0 < b0) return b0;
+      return addKind(b0, kind0, kthIdx(b0, kind0, done0) + 1);
+    }
     var base = Number(c && c.remindAt) || 0;
     if(!(base > 0)) return 0;
     var p = repeatOf(c) * DAY_MS;
@@ -569,11 +624,12 @@ window.initItemCardsModule = function(deps){
   }
   // последний наступивший срок повтора (новые с другого устройства карточки не должны «догонять» прошлое)
   function markPastDone(c){
+    if(kindOf(c)){ var lo = lastOcc(c, Date.now()); if(lo) c.remindDone = lo; return; }
     var p = repeatOf(c) * DAY_MS, base = Number(c.remindAt) || 0, now = Date.now();
     if(p && base > 0 && base <= now) c.remindDone = base + Math.floor((now - base) / p) * p;
   }
   function remindBtnHtml(c){
-    if(c.type === "timer" || isSingletonCard(c) || !deps.reminderBtnParts) return "";
+    if(c.type === "timer" || c.type === "remind" || isSingletonCard(c) || !deps.reminderBtnParts) return "";
     var at = nextOccurrence(c);
     var p = deps.reminderBtnParts(at || 0);
     return '<button type="button" class="task-icon-btn task-reminder-btn item-card-remind-btn' + (at ? ' active' : '') + p.cls + '" data-card-id="' + escapeHtml(c.id) + '" title="' +
@@ -596,6 +652,22 @@ window.initItemCardsModule = function(deps){
     loadCards().forEach(function(c){
       if(c.type === "timer" || isSingletonCard(c) || !(Number(c.remindAt) > 0)) return;
       var key = "card:" + c.id, f = fired[key];
+      if(c.type === "remind"){
+        // «Напоминание»: сработавший срок (здесь или в оболочке) → отработанным считаем последний наступивший (пропущенные не повторяем)
+        var rk = kindOf(c), rd = Number(c.remindDone) || 0;
+        if(typeof f === "number" && f >= (Number(c.remindAt) || 0) && f > rd){
+          var lo = rk ? lastOcc(c, Date.now()) : 0;
+          c.remindDone = Math.max(f, lo); changed = true;
+        }
+        if(!rk && (Number(c.remindDone) || 0) >= Number(c.remindAt)) return; // разовое уже сработало — больше не планируем
+        var rat = nextOccurrence(c);
+        if(rat > 0){
+          var rt = String(c.title || "").trim() || "Напоминание";
+          var cm = String(c.comment || "").replace(/\s+/g, " ").trim();
+          out.push({ id: key, c: { text: cm ? (rt + ": " + cm) : rt, remindAt: rat, repeatDays: 0, repeatKind: rk, checked: false } });
+        }
+        return;
+      }
       // срабатывание повтора (здесь или в оболочке) запоминаем в самой карточке: журнал показанных чистится через ~2 месяца
       if(repeatOf(c) && typeof f === "number" && f > (Number(c.remindDone) || 0)){ c.remindDone = f; changed = true; }
       var at = nextOccurrence(c);
@@ -651,6 +723,8 @@ window.initItemCardsModule = function(deps){
     if(el && el.scrollIntoView) el.scrollIntoView({ block: "center" });
   }
 
+  var REMIND_BELL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"></path><path d="M10 20.5a2 2 0 0 0 4 0"></path></svg>';
+  function remindShort(ts){ var d = new Date(ts); return pad2(d.getDate()) + "." + pad2(d.getMonth() + 1) + " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes()); }
   function cardFrontHtml(c){
     var icon = iconSvg(c.icon);
     if(c.type === "timer"){
@@ -664,6 +738,12 @@ window.initItemCardsModule = function(deps){
     if(c.type === "habit"){ // цвет привычки — фон всей карточки (applyCardLook), здесь значок календаря с галочкой и название
       return '<div class="item-card-icon">' + iconSvg("habit") + '</div>' +
         '<div class="item-card-title"></div>';
+    }
+    if(c.type === "remind"){ // колокольчик, название и ближайший срок (QR-кода нет)
+      var nxt = nextOccurrence(c);
+      return '<div class="item-card-icon">' + REMIND_BELL_SVG + '</div>' +
+        '<div class="item-card-title"></div>' +
+        (nxt ? '<div class="item-card-date">' + escapeHtml(remindShort(nxt)) + '</div>' : '');
     }
     if(c.type === "task"){ // пиктограмма вкладки, куда код кладёт задачу, и начало текста задачи (название обрезается стилем)
       return '<div class="item-card-icon">' + taskTabSvg(c.icon) + '</div>' +
@@ -692,6 +772,7 @@ window.initItemCardsModule = function(deps){
       '<button type="button" class="workbooks-run-btn" data-type="item">Предмет</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="task">Создавать задачу</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="habit">Привычка</button>' +
+      '<button type="button" class="workbooks-run-btn" data-type="remind">Напоминание</button>' +
       (hasDateNote ? '' : '<button type="button" class="workbooks-run-btn" data-type="datenote">' + DATENOTE_TITLE + '</button>') +
       (hasReminder ? '' : '<button type="button" class="workbooks-run-btn" data-type="reminder">' + REMINDER_TITLE + '</button>') +
     '</div>';
@@ -939,7 +1020,7 @@ window.initItemCardsModule = function(deps){
       }
       if(e.target.closest(".item-card-edit-btn")){ hideRevealed(); openForm(c.type, c); return; }
       if(e.target.closest(".mdeditor-delete-btn")){
-        openAppConfirmBar("Удалить карточку «" + (c.title || "без названия") + "»? QR-код перестанет работать.", function(){
+        openAppConfirmBar("Удалить карточку «" + (c.title || "без названия") + "»?" + (c.type === "remind" ? " Напоминание будет отменено." : " QR-код перестанет работать."), function(){
           deleteCard(c.id);
         }, { anchorEl: e.target.closest(".mdeditor-delete-btn") });
         return;
@@ -949,6 +1030,7 @@ window.initItemCardsModule = function(deps){
       if(e.target.closest(".item-card-start-btn")){ startTimerForCard(c); return; } // «Пуск»: запуск, а если уже идёт — заново
       if(e.target.closest(".item-card-stop-btn")){ stopTimerForCard(c); return; } // «Стоп»: отмена таймера
       if(revealedIds[id]){ hideRevealed(); return; }
+      if(c.type === "remind"){ onCardTap(c); return; } // у «Напоминания» нет QR-кода: оборота нет, тап сразу открывает форму
       var now = Date.now();
       if(lastTapId === id && now - lastTapAt < DOUBLE_MS){
         clearTimeout(singleTimer); lastTapId = null;
@@ -991,7 +1073,7 @@ window.initItemCardsModule = function(deps){
   function exportPdf(perPage){
     if(pdfBusy) return;
     var allCards = loadCards();
-    var cards = allCards.filter(function(c){ return !c.hidden; }); // скрытые карточки в PDF не попадают
+    var cards = allCards.filter(function(c){ return !c.hidden && c.type !== "remind"; }); // скрытые и «Напоминания» (кода нет) в PDF не попадают
     if(!cards.length){ alert(allCards.length ? "Все карточки скрыты — PDF собирать не из чего." : "Карточек пока нет — PDF собирать не из чего."); return; }
     if(!window.CardPdf){ alert("Модуль PDF не загружен."); return; }
     var menu = document.getElementById("itemPdfMenu");
@@ -1133,7 +1215,7 @@ window.initItemCardsModule = function(deps){
   }
 
   // ---------- форма создания / правки ----------
-  var TYPE_LABEL = { timer: "Таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE };
+  var TYPE_LABEL = { timer: "Таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE, remind: "Напоминание" };
   // выбор цвета карточки (необязательный, у любого типа): разметка и привязка; первый пастельный квадрат — пустой цвет
   function colorPaletteHtml(type){
     var h = '<div class="item-form-hint">' + (type === "habit"
@@ -1172,6 +1254,9 @@ window.initItemCardsModule = function(deps){
     if(type === "task"){
       html += '<div class="item-form-hint">Код с текстом задачи: кто его отсканирует в приложении, получит эту задачу на выбранной вкладке. Такая же невыполненная задача второй раз не создаётся — её переносят в конец списка вкладки. Категория (тег) необязательна: задача получит её сразу, по тегу задачи можно отбирать на вкладке.</div>';
     }
+    if(type === "remind"){
+      html += '<div class="item-form-hint">Напоминание сработает в выбранный день и час. QR-кода у этой карточки нет.</div>';
+    }
     if(!isSingle) html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="' + (type === "task" ? "Текст задачи (до " + TASK_TEXT_MAX + " знаков)" : "Название") + '" maxlength="' + (type === "task" ? TASK_TEXT_MAX : (type === "habit" ? HABIT_TITLE_MAX : 80)) + '" autocomplete="off">';
     if(isSingle){
       // только цвет (ниже)
@@ -1191,6 +1276,18 @@ window.initItemCardsModule = function(deps){
         '<input type="text" class="mdeditor-cleanup-input" id="icfCatNew" placeholder="Новая категория (до ' + TASK_TAG_MAX + ' знаков)" maxlength="' + TASK_TAG_MAX + '" autocomplete="off" style="display:none;"></div>';
     } else if(type === "habit"){
       // у привычки только название и цвет (ниже)
+    } else if(type === "remind"){
+      html += '<textarea class="mdeditor-cleanup-input item-form-comment" id="icfComment" rows="3" maxlength="' + REMIND_COMMENT_MAX + '" placeholder="Комментарий" style="resize:vertical;font-family:inherit;"></textarea>';
+      html += '<div class="item-form-row"><div class="item-form-date">' +
+        '<button type="button" class="reminder-bubble reminder-bubble-time" id="icfTimeBtn" title="Время"></button>' +
+        '<input type="time" class="reminder-hidden-input" id="icfTimeInput" tabindex="-1" aria-hidden="true">' +
+      '</div><div class="item-form-date">' +
+        '<button type="button" class="reminder-bubble reminder-bubble-date" id="icfDateBtn" title="Дата"></button>' +
+        '<input type="date" class="reminder-hidden-input" id="icfDateInput" tabindex="-1" aria-hidden="true">' +
+      '</div></div>';
+      html += '<select class="mdeditor-cleanup-input" id="icfRepeat"><option value="">Без повтора</option>';
+      REPEAT_KINDS.forEach(function(k){ html += '<option value="' + k.key + '">' + k.label + '</option>'; });
+      html += '</select>';
     } else if(type === "timer"){
       html += '<div class="item-form-timer" id="icfTimer">' +
         wheelHtml("h", 24, "ч") + wheelHtml("m", 60, "мин") + wheelHtml("s", 60, "с") +
@@ -1228,6 +1325,24 @@ window.initItemCardsModule = function(deps){
       setWheel("s", total % 60);
     } else if(isSingle || type === "habit"){
       // ничего, кроме цвета
+    } else if(type === "remind"){
+      var cmEl = document.getElementById("icfComment"), repEl = document.getElementById("icfRepeat");
+      cmEl.value = data.comment || "";
+      repEl.value = kindOf(data);
+      var base0 = Number(data.remindAt) > 0 ? Number(data.remindAt) : (function(){ var d0 = new Date(Date.now() + 30 * 60000); d0.setSeconds(0, 0); return d0.getTime(); })();
+      var bd = new Date(base0);
+      data.rDate = bd.getFullYear() + "-" + pad2(bd.getMonth() + 1) + "-" + pad2(bd.getDate());
+      data.rTime = pad2(bd.getHours()) + ":" + pad2(bd.getMinutes());
+      var rDateBtn = document.getElementById("icfDateBtn"), rDateIn = document.getElementById("icfDateInput");
+      var rTimeBtn = document.getElementById("icfTimeBtn"), rTimeIn = document.getElementById("icfTimeInput");
+      function showRDate(){ rDateBtn.textContent = isoToRu(data.rDate) || "дата"; rDateIn.value = data.rDate || ""; }
+      function showRTime(){ rTimeBtn.textContent = data.rTime || "время"; rTimeIn.value = data.rTime || ""; }
+      showRDate(); showRTime();
+      function openPicker(inp){ try{ if(typeof inp.showPicker === "function"){ inp.showPicker(); return; } }catch(e){} try{ inp.focus(); inp.click(); }catch(e){} }
+      rDateBtn.addEventListener("click", function(){ openPicker(rDateIn); });
+      rTimeBtn.addEventListener("click", function(){ openPicker(rTimeIn); });
+      rDateIn.addEventListener("change", function(){ if(rDateIn.value) data.rDate = rDateIn.value; showRDate(); });
+      rTimeIn.addEventListener("change", function(){ if(rTimeIn.value) data.rTime = rTimeIn.value; showRTime(); });
     } else if(type === "task"){
       var tabsEl = document.getElementById("icfTabs");
       function markTabs(){
@@ -1309,6 +1424,18 @@ window.initItemCardsModule = function(deps){
         if(csel.value === "__new__" && !data.tag){ errEl.textContent = "Введите название категории или выберите «Без категории»."; return; }
       }
       if(!title && !isSingle){ errEl.textContent = "Введите название."; return; }
+      if(type === "remind"){
+        var dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(data.rDate || ""), tm = /^(\d{2}):(\d{2})$/.exec(data.rTime || "");
+        if(!dm || !tm){ errEl.textContent = "Выберите дату и время напоминания."; return; }
+        var at = new Date(+dm[1], +dm[2] - 1, +dm[3], +tm[1], +tm[2], 0, 0).getTime();
+        if(!(at > Date.now())){ errEl.textContent = "Время напоминания уже прошло — выберите время в будущем."; return; }
+        data.remindAt = at;
+        data.comment = document.getElementById("icfComment").value.replace(/^\s+|\s+$/g, "").slice(0, REMIND_COMMENT_MAX);
+        data.repeatKind = document.getElementById("icfRepeat").value;
+        if(!kindInfo(data.repeatKind)) data.repeatKind = "";
+        data.remindDone = 0;
+        delete data.rDate; delete data.rTime;
+      }
       if(type === "timer"){
         var sec = getWheel("h") * 3600 + getWheel("m") * 60 + getWheel("s");
         if(sec <= 0){ errEl.textContent = "Задайте время."; return; }
@@ -1333,6 +1460,7 @@ window.initItemCardsModule = function(deps){
           if(data.color) cur.color = data.color; else delete cur.color; // отметки дней (days) правка не трогает
           cur.date = data.date;
           cur.seconds = data.seconds;
+          if(type === "remind"){ cur.comment = data.comment; cur.remindAt = data.remindAt; cur.repeatKind = data.repeatKind; cur.remindDone = 0; }
           cur.updatedAt = now;
         }
       }

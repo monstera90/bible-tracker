@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (24.10) — повтор по видам (repeatKind: hour/8h/day/week/month/year), `kindAdd`/`kindLast`.
 // Версия: 1.0 (17.10) — fireDue: повторяющиеся напоминания (repeatDays) сдвигают срок на период, а не выбывают.
 
 import android.app.AlarmManager
@@ -71,6 +72,37 @@ object ReminderScheduler {
      * Показывает все наступившие напоминания. Приложение на экране или уведомления выключены — показ остаётся
      * странице (карточка внутри приложения), оболочка только запоминает, что сработала.
      */
+    /** Грубый шаг вида повтора (мс) для оценки номера срока; null — вид неизвестен. Совпадает с itemcards.js (REPEAT_KINDS). */
+    private fun kindStep(kind: String): Long? = when (kind) {
+        "hour" -> 3_600_000L
+        "8h" -> 28_800_000L
+        "day" -> 86_400_000L
+        "week" -> 604_800_000L
+        "month" -> 28 * 86_400_000L
+        "year" -> 365 * 86_400_000L
+        else -> null
+    }
+
+    /** Срок номер k от базы base. Месяц/год — по календарю: 31 января + 1 месяц = конец февраля (как в itemcards.js addMonthsTs). */
+    private fun kindAdd(base: Long, kind: String, k: Long): Long = when (kind) {
+        "month", "year" -> {
+            val cal = java.util.Calendar.getInstance()
+            cal.timeInMillis = base
+            cal.add(java.util.Calendar.MONTH, (if (kind == "year") 12 * k else k).toInt())
+            cal.timeInMillis
+        }
+        else -> base + k * (kindStep(kind) ?: 0L)
+    }
+
+    /** Наибольший k ≥ 0, при котором срок не позже t (base ≤ t); иначе 0. */
+    private fun kindLastIndex(base: Long, kind: String, t: Long): Long {
+        val step = kindStep(kind) ?: return 0L
+        var k = maxOf(0L, (t - base) / step)
+        while (kindAdd(base, kind, k + 1) <= t) k++
+        while (k > 0 && kindAdd(base, kind, k) > t) k--
+        return k
+    }
+
     fun fireDue(ctx: Context) {
         val now = System.currentTimeMillis()
         val due = NotifyStore.getReminders(ctx)
@@ -80,7 +112,12 @@ object ReminderScheduler {
         val canShow = !NotifyStore.appForeground && NotifyHelper.enabled(ctx)
         for (r in due) {
             val shown = canShow && NotifyHelper.postReminder(ctx, r, now)
-            if (r.repeatDays > 0) {
+            if (r.repeatKind.isNotEmpty() && kindStep(r.repeatKind) != null) {
+                // «Напоминание»: последний наступивший срок = база + k периодов (месяц/год — по календарю), следующий — за ним
+                val k = kindLastIndex(r.at, r.repeatKind, now)
+                NotifyStore.markFired(ctx, r.id, kindAdd(r.at, r.repeatKind, k), shown)
+                NotifyStore.updateReminderAt(ctx, r.id, kindAdd(r.at, r.repeatKind, k + 1))
+            } else if (r.repeatDays > 0) {
                 // Повторяющееся (карточка): одно уведомление за все пропущенные сроки. «Отработанным» считаем последний
                 // наступивший срок (база + k периодов), следующий — через период; страница считает так же (itemcards.js).
                 val period = r.repeatDays * 86_400_000L
