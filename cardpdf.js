@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardpdf.js
+   Версия: 2.0 (24.10) — название не шире QR (при длинном слове шрифт уменьшается: `fitFont`); линия реза проходит по содержимому: отступ от QR до реза слева/справа и от надписи до нижнего реза равен прежнему отступу от QR до верхнего реза (`drawCell`). Откат: cardpdf.js 1.1.
    Версия: 1.1 (21.10) — текст QR берётся из `card.qr`, если он передан (иначе `lt://v1/card/<id>`). Откат: cardpdf.js 1.0.
    Версия: 1.0 (17.10)
    PDF с QR-кодами карточек для печати наклеек (ТЗ TASK_ITEM_CARDS_QR.md, раздел 4б, шаг 6): лист A4, три размера —
@@ -41,8 +42,8 @@ window.CardPdf = (function(){
     return { n: m.getModuleCount(), dark: function(r, c){ return m.isDark(r, c); } };
   }
 
-  // до двух строк названия по ширине maxW; лишнее обрезается многоточием
-  function wrapTitle(ctx, text, maxW){
+  // до двух строк названия по ширине maxW; лишнее обрезается многоточием (raw = true — без обрезки, все строки)
+  function wrapTitle(ctx, text, maxW, raw){
     var words = String(text || "").replace(/\s+/g, " ").trim().split(" ");
     var lines = [], cur = "";
     for(var i = 0; i < words.length; i++){
@@ -60,7 +61,7 @@ window.CardPdf = (function(){
       else { lines.push(cur); cur = w; }
     }
     if(cur) lines.push(cur);
-    if(lines.length > 2){
+    if(!raw && lines.length > 2){
       var last = lines[1];
       while(last.length > 1 && ctx.measureText(last + "…").width > maxW) last = last.slice(0, -1);
       lines = [lines[0], last + "…"];
@@ -68,23 +69,57 @@ window.CardPdf = (function(){
     return lines;
   }
 
+  // подбирает размер шрифта так, чтобы слова не были шире maxW и название уместилось в две строки (но не мельче 60% исходного)
+  function fitFont(ctx, text, fs, maxW){
+    var words = String(text || "").replace(/\s+/g, " ").trim().split(" ");
+    var minFs = Math.max(12, Math.round(fs * 0.6));
+    for(var size = fs; size > minFs; size--){
+      ctx.font = "700 " + size + "px sans-serif";
+      var ok = true;
+      for(var i = 0; i < words.length; i++){
+        if(ctx.measureText(words[i]).width > maxW){ ok = false; break; }
+      }
+      if(ok && wrapTitle(ctx, text, maxW, true).length <= 2) return size;
+    }
+    return minFs;
+  }
+
+  // (x, y, w, h) — «слот» на листе; рамка реза рисуется плотно вокруг содержимого и центрируется в слоте
   function drawCell(ctx, x, y, w, h, card){
+    var pad = Math.round(Math.min(w, h) * 0.05);
+    var fs0 = Math.max(20, Math.min(60, Math.round(w * 0.085)));
+    var lineH0 = Math.round(fs0 * 1.2);
+    var titleH0 = lineH0 * 2;
+    var qr = Math.floor(Math.min(w * 0.86, h - titleH0 - pad * 3));
+    // эталонный отступ: расстояние от QR до верхнего реза в прежней раскладке (содержимое по центру слота),
+    // но не больше того, что помещается по ширине слота
+    var gap = Math.round((h - (qr + pad + titleH0)) / 2);
+    gap = Math.max(4, Math.min(gap, Math.floor((w - qr) / 2)));
+
+    // название: ширина не больше QR, до двух строк
+    var title = card.title || "Без названия";
+    var fs = fitFont(ctx, title, fs0, qr);
+    var lineH = Math.round(fs * 1.2);
+    ctx.font = "700 " + fs + "px sans-serif";
+    var lines = wrapTitle(ctx, title, qr);
+    var textH = (lines.length - 1) * lineH + fs;
+
+    // рамка реза: слева/справа/сверху — gap от QR, снизу — gap от надписи
+    var cw = qr + gap * 2;
+    var ch = gap + qr + pad + textH + gap;
+    var cx = x + Math.round((w - cw) / 2);
+    var cy = y + Math.round((h - ch) / 2);
+
     // тонкая пунктирная рамка — по ней режут наклейки
     ctx.save();
     ctx.strokeStyle = "#b8b8b8";
     ctx.lineWidth = 1;
     ctx.setLineDash([6, 6]);
-    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    ctx.strokeRect(cx + 0.5, cy + 0.5, cw - 1, ch - 1);
     ctx.restore();
 
-    var pad = Math.round(Math.min(w, h) * 0.05);
-    var fs = Math.max(20, Math.min(60, Math.round(w * 0.085)));
-    var lineH = Math.round(fs * 1.2);
-    var titleH = lineH * 2;
-    var qr = Math.floor(Math.min(w * 0.86, h - titleH - pad * 3));
-    var blockH = qr + pad + titleH;
-    var top = y + Math.round((h - blockH) / 2);
-    var left = x + Math.round((w - qr) / 2);
+    var top = cy + gap;
+    var left = cx + gap;
 
     // QR: белая подложка с полем в 2 модуля (тёмные темы приложения на печать не влияют), чёрные квадраты
     var m = qrMatrix(card.qr || (QR_PREFIX + card.id)); // card.qr — готовый текст кода (таймер несёт время в самом коде)
@@ -107,9 +142,8 @@ window.CardPdf = (function(){
     ctx.font = "700 " + fs + "px sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    var lines = wrapTitle(ctx, card.title || "Без названия", w - pad * 2);
     var ty = top + qr + pad;
-    for(var i = 0; i < lines.length; i++) ctx.fillText(lines[i], x + w / 2, ty + i * lineH);
+    for(var i = 0; i < lines.length; i++) ctx.fillText(lines[i], cx + cw / 2, ty + i * lineH);
   }
 
   function canvasToJpeg(canvas){
