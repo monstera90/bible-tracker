@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.0 (24.10) — мост версии 11: startHiddenCardTimer (скрытый таймер карточки: без острова, плашки и уведомления «идёт»).
 // Версия: 3.0 (24.10) — мост версии 10: restartForWebUpdate (перезапуск Activity, чтобы применилась скачанная веб-часть).
 // Версия: 2.0 (21.10) — мост версии 9: вкладка Claude (claudeShow/claudeHide/claudeReload/claudeSetAuto/claudeGetState/claudeArm/claudeDisarm/claudeSendNow).
 // Версия: 1.1 (18.10) — мост версии 8: createScanShortcut / openShortcutPermissionSettings.
@@ -30,7 +31,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 9: вкладка Claude (claudeShow / claudeHide / claudeReload / claudeSetAuto / claudeGetState / claudeArm / claudeDisarm / claudeSendNow).
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          */
-        const val BRIDGE_VERSION = 10
+        const val BRIDGE_VERSION = 11
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -433,6 +434,13 @@ class NativeBridge(private val activity: MainActivity) {
     fun startCardTimer(id: String?, title: String?, seconds: Int): Boolean {
         if (!activity.pageTrusted || id == null) return false
         return CardTimers.start(activity.applicationContext, id, title ?: "", seconds.toLong())
+    }
+
+    /** Скрытый таймер карточки: идёт и срабатывает как обычный, но не показывается в острове, плашке и шторке (только конец). */
+    @JavascriptInterface
+    fun startHiddenCardTimer(id: String?, title: String?, seconds: Int): Boolean {
+        if (!activity.pageTrusted || id == null) return false
+        return CardTimers.start(activity.applicationContext, id, title ?: "", seconds.toLong(), true)
     }
 
     @JavascriptInterface

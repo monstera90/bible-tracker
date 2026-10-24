@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 3.0 (24.10) — мост ScanBridge: startHiddenTimer (скан кода скрытого таймера из окна ярлыка: без острова и уведомления «идёт»).
 // Версия: 2.0 (21.10) — мост ScanBridge: cancelTimer («Стоп» на карточке в окне ярлыка).
 // Версия: 1.1 (17.10) — мост ScanBridge: startTimer / getTimers (скан карточки-таймера запускает таймер CardTimers без открытия приложения).
 // Версия: 1.0 (16.10)
@@ -282,6 +283,13 @@ class ScanActivity : ComponentActivity() {
         fun startTimer(id: String?, title: String?, seconds: Int): Boolean {
             if (id == null || !CARD_ID_RE.matches(id)) return false
             return CardTimers.start(applicationContext, id, title ?: "", seconds.toLong())
+        }
+
+        /** Скан скрытого таймера: как startTimer, но таймер не показывается в острове, плашке и шторке (только конец). */
+        @JavascriptInterface
+        fun startHiddenTimer(id: String?, title: String?, seconds: Int): Boolean {
+            if (id == null || !CARD_ID_RE.matches(id)) return false
+            return CardTimers.start(applicationContext, id, title ?: "", seconds.toLong(), true)
         }
 
         /** «Стоп» на карточке-таймере: отмена таймера (и вибрации конца), как cancelCardTimer в основном мосте. */

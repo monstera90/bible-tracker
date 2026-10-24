@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 2.4 (24.10) — `parseCode` узнаёт QR скрытого таймера `lt://v1/htimer/<секунды>[/<название>]` → `{kind:"timer", seconds, title, hidden:true}` (остальное — как у обычного таймера, в том числе удержание 0,5 с). Откат: cardscan.js 2.3.
    Версия: 2.3 (24.10) — `parseCode` узнаёт QR привычки `lt://v1/habit/<id>/<название>` → `{kind:"habit", id, title}` (код сам несёт название: на устройстве без такой карточки приложение создаёт её по коду); такой код, как и таймер/задача, принимается после удержания ≥ HOLD_SIDE_EFFECT_MS. Откат: cardscan.js 2.2.
    Версия: 2.2 (23.10) — `open({longHold})`: приложение может пометить код как «с побочным эффектом» (скан карточки-привычки отмечает день без отмены) — для него удержание не меньше 0,5 с, как у таймера и задачи. Откат: cardscan.js 2.1.
    Версия: 2.1 (22.10) — удержание стало терпимым к дрожи руки: допуск ухода кода от якоря 20% зоны (было 6%), якорь плавно следует за кодом, уход кода от якоря не обнуляет счёт, а даёт штраф 150 мс (дрожь в допуске штрафа не даёт, а код, который проносят через зону, штрафуется чаще, чем копит); пропадание кода до 0,4 с (смаз) счёт не трогает, дольше — откат с обычной скоростью; другой текст кода переключает счёт, только если держится 3 кадра подряд. Откат: cardscan.js 2.0.
@@ -31,6 +32,7 @@ window.CardScan = (function(){
   var QR_PREFIX = "lt://v1/card/";
   var NOTE_PREFIX = "lt://v1/note/";
   var TIMER_PREFIX = "lt://v1/timer/";
+  var HTIMER_PREFIX = "lt://v1/htimer/"; // скрытый таймер: тот же код, но без острова
   var HABIT_PREFIX = "lt://v1/habit/";
   var TASK_PREFIX = "lt://v1/task/";
   var TODAY_CODE = "lt://v1/today";       // «Сегодня»: один и тот же код у всех, заметку создаёт тот, кто сканирует
@@ -38,7 +40,7 @@ window.CardScan = (function(){
 
   // Разбор текста из QR:
   //   {kind:"card", id}   — код карточки приложения (lt://v1/card/<id>)
-  //   {kind:"timer", seconds, title} — таймер, зашитый в код (lt://v1/timer/<секунды>[/<название>])
+  //   {kind:"timer", seconds, title[, hidden:true]} — таймер, зашитый в код (lt://v1/timer/<секунды>[/<название>]; скрытый — lt://v1/htimer/…)
   //   {kind:"habit", id, title} — привычка с названием в коде (lt://v1/habit/<id>/<название>)
   //   {kind:"task", tab, tag, text} — задача, зашитая в код (lt://v1/task/<ключ вкладки>[#<тег>]/<текст>)
   //   {kind:"today"} / {kind:"reminder"} — общие коды «Сегодня» и «Напоминалки» (lt://v1/today, lt://v1/reminder)
@@ -55,11 +57,16 @@ window.CardScan = (function(){
       if(/^[A-Za-z0-9]{4,32}$/.test(id)) return { kind: "card", id: id };
       return { kind: "unknown", text: t };
     }
-    if(t.indexOf(TIMER_PREFIX) === 0){
-      // таймер, зашитый в сам код: lt://v1/timer/<секунды>[/<название>] — карточка на устройстве не нужна
-      var tm = /^(\d{1,6})(?:\/([\s\S]*))?$/.exec(t.slice(TIMER_PREFIX.length));
+    if(t.indexOf(TIMER_PREFIX) === 0 || t.indexOf(HTIMER_PREFIX) === 0){
+      // таймер, зашитый в сам код: lt://v1/timer/<секунды>[/<название>] (скрытый — lt://v1/htimer/…) — карточка на устройстве не нужна
+      var thid = t.indexOf(HTIMER_PREFIX) === 0;
+      var tm = /^(\d{1,6})(?:\/([\s\S]*))?$/.exec(t.slice((thid ? HTIMER_PREFIX : TIMER_PREFIX).length));
       var tsec = tm ? parseInt(tm[1], 10) : 0;
-      if(tm && tsec >= 1 && tsec <= 359999) return { kind: "timer", seconds: tsec, title: (tm[2] || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, 80) };
+      if(tm && tsec >= 1 && tsec <= 359999){
+        var tres = { kind: "timer", seconds: tsec, title: (tm[2] || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, 80) };
+        if(thid) tres.hidden = true;
+        return tres;
+      }
       return { kind: "unknown", text: t };
     }
     if(t.indexOf(HABIT_PREFIX) === 0){

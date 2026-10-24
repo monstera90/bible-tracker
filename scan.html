@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <!-- scan.html
+     Версия: 1.4 (24.10) — `deps.timers.start` умеет скрытый таймер (`bridge.startHiddenTimer`, без острова и уведомления «идёт»).
      Версия: 1.3 (24.10) — подключён `eventlog.js` (запись сканирований в журнал событий).
      Версия: 1.2 (21.10) — `deps.timers.cancel` («Стоп» на карточке-таймере в окне ярлыка → `bridge.cancelTimer`).
      Версия: 1.1 (17.10) — `deps.timers`: скан карточки-таймера запускает таймер через мост (`startTimer`/`getTimers`).
@@ -50,7 +51,10 @@
       escapeHtml: esc,
       loadJsqrLib: function(){ return Promise.resolve(); },
       timers: bridge ? {
-        start: function(id, title, sec){ return bridge.startTimer(String(id), String(title || ""), sec | 0); },
+        start: function(id, title, sec, hidden){
+          if(hidden && typeof bridge.startHiddenTimer === "function") return bridge.startHiddenTimer(String(id), String(title || ""), sec | 0);
+          return bridge.startTimer(String(id), String(title || ""), sec | 0);
+        },
         cancel: function(id){ if(typeof bridge.cancelTimer === "function") bridge.cancelTimer(String(id)); },
         list: function(){ try{ return JSON.parse(bridge.getTimers() || "[]"); }catch(e){ return []; } }
       } : null,

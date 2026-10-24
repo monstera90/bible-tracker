@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.7 (24.10) — скрытый таймер (`Timer.hidden`, `start(..., hidden)`): идёт и срабатывает как обычный, но без уведомления «идёт», острова, плашки в приложении, службы тика и этапов цвета; в конце — обычные вибрация и «Таймер закончился»; `listJson` отдаёт `hidden`. Откат: CardTimers.kt 5.6.
 // Версия: 5.6 (24.10) — этапы цвета значка: остался один, красный за 2 минуты до конца (`scheduleStages`); жёлтый убран, но его будильник от прежней версии снимается (`LEGACY_STAGE_YELLOW`). Откат: CardTimers.kt 5.5.
 // Версия: 5.5 (22.10) — эксперимент с чёрным фоном уведомления (`setColorized`) откачен: HyperOS не меняет цвет карточки. Прежнее: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
 // Версия: 5.2 (21.10) — `Info.totalMs` (заданное время, для кольца паузы в плашке). Откат: CardTimers.kt 5.1.
@@ -69,7 +70,8 @@ object CardTimers {
         val durationMs: Long,
         val running: Boolean,
         val endAt: Long,        // для идущего: момент окончания (мс, часы устройства)
-        val remainingMs: Long   // для приостановленного: сколько осталось
+        val remainingMs: Long,  // для приостановленного: сколько осталось
+        val hidden: Boolean = false // скрытый таймер: ни острова, ни плашки, ни уведомления «идёт» (только конец)
     )
 
     // ---------- хранилище ----------
@@ -85,7 +87,7 @@ object CardTimers {
                 val t = o.optJSONObject(id) ?: continue
                 out[id] = Timer(
                     id, t.optString("title", ""), t.optLong("durationMs", 0L), t.optBoolean("running", false),
-                    t.optLong("endAt", 0L), t.optLong("remainingMs", 0L)
+                    t.optLong("endAt", 0L), t.optLong("remainingMs", 0L), t.optBoolean("hidden", false)
                 )
             }
         } catch (e: Exception) {
@@ -100,7 +102,7 @@ object CardTimers {
             o.put(
                 id,
                 JSONObject().put("title", t.title).put("durationMs", t.durationMs).put("running", t.running)
-                    .put("endAt", t.endAt).put("remainingMs", t.remainingMs)
+                    .put("endAt", t.endAt).put("remainingMs", t.remainingMs).put("hidden", t.hidden)
             )
         }
         prefs(ctx).edit().putString(KEY, o.toString()).apply()
@@ -116,24 +118,25 @@ object CardTimers {
             arr.put(
                 JSONObject().put("id", t.id).put("title", t.title).put("durationMs", t.durationMs)
                     .put("running", t.running).put("endAt", t.endAt).put("remainingMs", t.remainingMs).put("now", now)
+                    .put("hidden", t.hidden)
             )
         }
         arr.toString()
     }
 
     // ---------- действия ----------
-    fun start(ctx: Context, id: String, title: String, seconds: Long): Boolean = synchronized(LOCK) {
+    fun start(ctx: Context, id: String, title: String, seconds: Long, hidden: Boolean = false): Boolean = synchronized(LOCK) {
         if (!ID_RE.matches(id) || seconds < 1) return false
         val sec = seconds.coerceAtMost(MAX_SECONDS)
         val now = System.currentTimeMillis()
-        val t = Timer(id, title.take(200), sec * 1000, true, now + sec * 1000, 0L)
+        val t = Timer(id, title.take(200), sec * 1000, true, now + sec * 1000, 0L, hidden)
         val map = load(ctx)
         map[id] = t // тот же id — заново
         save(ctx, map)
         scheduleAlarm(ctx, t)
         silence(ctx, id) // новый запуск гасит вибрацию и уведомление «Таймер закончился»
         postRunning(ctx, t)
-        startTicker(ctx)
+        if (!hidden) startTicker(ctx)
         true
     }
 
@@ -142,7 +145,7 @@ object CardTimers {
         val t = map[id] ?: return@synchronized
         if (!t.running) return@synchronized
         val left = (t.endAt - System.currentTimeMillis()).coerceAtLeast(1000L)
-        val p = Timer(id, t.title, t.durationMs, false, 0L, left)
+        val p = Timer(id, t.title, t.durationMs, false, 0L, left, t.hidden)
         map[id] = p
         save(ctx, map)
         cancelAlarm(ctx, id)
@@ -153,12 +156,12 @@ object CardTimers {
         val map = load(ctx)
         val t = map[id] ?: return@synchronized
         if (t.running) return@synchronized
-        val r = Timer(id, t.title, t.durationMs, true, System.currentTimeMillis() + t.remainingMs, 0L)
+        val r = Timer(id, t.title, t.durationMs, true, System.currentTimeMillis() + t.remainingMs, 0L, t.hidden)
         map[id] = r
         save(ctx, map)
         scheduleAlarm(ctx, r)
         postRunning(ctx, r)
-        startTicker(ctx)
+        if (!r.hidden) startTicker(ctx)
     }
 
     fun cancel(ctx: Context, id: String) = synchronized(LOCK) {
@@ -179,7 +182,7 @@ object CardTimers {
     /** Сработал будильник этапа (за 2 минуты / за минуту до конца): уведомление перепоставляется — значок меняет цвет. */
     fun stage(ctx: Context, id: String) = synchronized(LOCK) {
         val t = load(ctx)[id] ?: return@synchronized
-        if (!t.running || t.endAt <= System.currentTimeMillis()) return@synchronized
+        if (t.hidden || !t.running || t.endAt <= System.currentTimeMillis()) return@synchronized
         postRunning(ctx, t, false)
     }
 
@@ -206,7 +209,7 @@ object CardTimers {
         val items = synchronized(LOCK) { load(ctx).values.toList() }
         for (t in items) {
             if (t.running) {
-                if (t.endAt <= now) fire(ctx, t.id) else synchronized(LOCK) { scheduleAlarm(ctx, t); postRunning(ctx, t, false) }.also { startTicker(ctx) }
+                if (t.endAt <= now) fire(ctx, t.id) else synchronized(LOCK) { scheduleAlarm(ctx, t); postRunning(ctx, t, false) }.also { if (!t.hidden) startTicker(ctx) }
             } else {
                 synchronized(LOCK) { postPaused(ctx, t) }
             }
@@ -226,7 +229,7 @@ object CardTimers {
         val now = System.currentTimeMillis()
         var next = -1L
         for (t in load(ctx).values) {
-            if (!t.running || t.endAt <= now) continue
+            if (t.hidden || !t.running || t.endAt <= now) continue // скрытый таймер уведомления «идёт» не имеет
             if (!NotifyStore.appForeground) postRunning(ctx, t, false)
             if (next < 0) next = (t.endAt - now) % 1000L + 20L
         }
@@ -258,7 +261,7 @@ object CardTimers {
         } catch (e: Exception) {
             // будильник не поставился: отсчёт в шторке идёт, конец увидит страница при открытии
         }
-        scheduleStages(ctx, t)
+        if (!t.hidden) scheduleStages(ctx, t) // этапы нужны только значку острова, у скрытого таймера его нет
     }
 
     /** Будильник смены цвета значка на красный: за 2 минуты до конца (если он ещё впереди). */
@@ -330,7 +333,7 @@ object CardTimers {
     /** Идущий таймер, чьё уведомление служит уведомлением службы тика: тот, что закончится раньше всех. */
     private fun primaryId(ctx: Context): String? = synchronized(LOCK) {
         val now = System.currentTimeMillis()
-        load(ctx).values.filter { it.running && it.endAt > now }.minByOrNull { it.endAt }?.id
+        load(ctx).values.filter { !it.hidden && it.running && it.endAt > now }.minByOrNull { it.endAt }?.id
     }
 
     class Info(val id: String, val title: String, val running: Boolean, val leftMs: Long, val totalMs: Long = 0L)
@@ -338,7 +341,7 @@ object CardTimers {
     /** Главный таймер для плашки в приложении: самый ранний из идущих, иначе первый приостановленный; null — таймеров нет. */
     fun primaryInfo(ctx: Context): Info? = synchronized(LOCK) {
         val now = System.currentTimeMillis()
-        val all = load(ctx).values
+        val all = load(ctx).values.filter { !it.hidden } // скрытые таймеры в плашке приложения не показываются
         val run = all.filter { it.running && it.endAt > now }.minByOrNull { it.endAt }
         if (run != null) return@synchronized Info(run.id, titleOf(run), true, run.endAt - now, run.durationMs)
         val p = all.firstOrNull { !it.running } ?: return@synchronized null
@@ -392,6 +395,7 @@ object CardTimers {
 
     @SuppressLint("MissingPermission")
     private fun postRunning(ctx: Context, t: Timer, float: Boolean = true) {
+        if (t.hidden) return // скрытый таймер: уведомления «идёт» нет
         try {
             val n = buildRunning(ctx, t, float) ?: return
             val nm = NotificationManagerCompat.from(ctx)
@@ -409,6 +413,7 @@ object CardTimers {
 
     @SuppressLint("MissingPermission")
     private fun postPaused(ctx: Context, t: Timer) {
+        if (t.hidden) return
         try {
             ensureChannels(ctx)
             val b = NotificationCompat.Builder(ctx, CHANNEL_RUN)

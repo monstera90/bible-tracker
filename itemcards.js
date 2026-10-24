@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 23.0 (24.10) — структурная правка: «Скрытый таймер» (пункт «+»): обычная карточка-таймер с признаком `noIsland` (ходит через облако в `cloudShape`), форма как у таймера (`openForm("htimer")` → `type:"timer"` + `noIsland`); в оболочке такой таймер не показывается ни в острове, ни в плашке, ни в шторке (мост `startHiddenCardTimer` / `startHiddenTimer` в окне ярлыка) — виден только на вкладке карточек и на показе по скану, в конце срабатывает как обычный. QR — `lt://v1/htimer/<секунды>[/<название>]` (`HTIMER_PREFIX`, `qrTextFor`); таймер по скану и таймер карточки в сетке делят один id (`runId`, `timerCodeId(..., hidden)`, `timerQrTitle`), поэтому после скана таймер виден работающим на самой карточке. Откат: itemcards.js 22.0.
    Версия: 22.0 (24.10) — структурная правка: новый тип карточки «Напоминание» (`remind`, без QR-кода): название, комментарий (`comment`), цвет, дата и время (`remindAt`), повтор `repeatKind` (час / 8 часов / день / неделя / месяц / год; `REPEAT_KINDS`, `addKind`, `kthIdx`, `lastOcc`, `nextOccurrence`); пункт «Напоминание» в «+» и в воронке; уходит в планировщик через `getRemindableCards` (с `repeatKind` — его повторяет и оболочка); в PDF не попадает, оборота с QR нет; форма — `openForm("remind")`.
    Версия: 21.0 (24.10) — структурная правка: запись в журнал событий (`eventlog.js`, `evLog`): сканирования QR (карточки, привычки, «Сегодня», «Напоминалка», заметки, задачи, чужие коды), установка/остановка таймера.
    Версия: 20.0 (24.10) — структурная правка: QR привычки несёт название (`lt://v1/habit/<id>/<название до 40 знаков>`, `qrTextFor`; цвета в коде нет — его каждый выбирает себе сам): скан на устройстве без такой карточки создаёт её по коду (`habitFromCode`: тот же id, название из кода, пустые `days`, без цвета) и отмечает сегодняшний день; сначала карточка ищется у себя и в облаке (если синхронизация настроена). Название привычки в форме — до 40 знаков (иначе не поместится в код). Прежние коды `lt://v1/card/<id>` привычек работают как раньше, но только там, где карточка есть. Откат: itemcards.js 19.0.
@@ -66,6 +67,7 @@ window.initItemCardsModule = function(deps){
   var SIZE_KEY = "itemCardsSize_v1";
   var QR_PREFIX = "lt://v1/card/";
   var TIMER_PREFIX = "lt://v1/timer/";
+  var HTIMER_PREFIX = "lt://v1/htimer/"; // «скрытый таймер»: тот же код таймера, но без острова и уведомления «идёт»
   var HABIT_PREFIX = "lt://v1/habit/";
   var TASK_PREFIX = "lt://v1/task/";
   var TASK_TEXT_MAX = 80; // текст задачи в коде: длиннее — код плотнее и хуже читается на малой наклейке (на карточке и в PDF показывается только начало)
@@ -106,15 +108,21 @@ window.initItemCardsModule = function(deps){
     out.sort(function(a, b){ return a.localeCompare(b, "ru"); });
     return out;
   }
+  // название таймера в коде: пробелы схлопнуты, до TIMER_QR_TITLE_MAX знаков, парный знак (эмодзи) не режется пополам, пробел на конце снят
+  // (сканер срезает пробелы по краям текста, поэтому id таймера из кода и id карточки считаются от одной и той же строки)
+  function timerQrTitle(s){
+    var t = String(s == null ? "" : s).replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, TIMER_QR_TITLE_MAX);
+    if(/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1);
+    return t.replace(/ $/, "");
+  }
   function qrTextFor(c){
     if(c && c.type === "task" && c.icon && taskText(c.title)){ // задача в самом коде (тег — необязательно, после ключа вкладки через «#»)
       var tg = taskTag(c.tag);
       return TASK_PREFIX + c.icon + (tg ? "#" + tg : "") + "/" + taskText(c.title);
     }
     if(c && c.type === "timer" && c.seconds > 0){
-      var t = String(c.title || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, TIMER_QR_TITLE_MAX);
-      if(/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1); // обрезка не должна оставлять половину эмодзи (парный знак)
-      return TIMER_PREFIX + (c.seconds | 0) + (t ? "/" + t : "");
+      var t = timerQrTitle(c.title);
+      return (c.noIsland ? HTIMER_PREFIX : TIMER_PREFIX) + (c.seconds | 0) + (t ? "/" + t : "");
     }
     if(c && c.type === "habit" && c.id){ // привычка: id и название в самом коде (цвет не передаётся — у каждого свой)
       var ht = String(c.title || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, HABIT_TITLE_MAX);
@@ -129,8 +137,8 @@ window.initItemCardsModule = function(deps){
   // таймер из отсканированного кода: «виртуальная» карточка (в список не попадает); id считается от времени и названия,
   // поэтому повторный скан того же кода перезапускает тот же таймер, а разные коды не мешают друг другу
   var virtualCards = {};
-  function timerCodeId(seconds, title){
-    var str = seconds + "|" + title, h1 = 5381, h2 = 52711;
+  function timerCodeId(seconds, title, hidden){
+    var str = (hidden ? "h|" : "") + seconds + "|" + title, h1 = 5381, h2 = 52711; // у скрытого таймера свой id: не мешает обычному с тем же временем и названием
     for(var i = 0; i < str.length; i++){
       var ch = str.charCodeAt(i);
       h1 = ((h1 * 33) ^ ch) >>> 0;
@@ -140,9 +148,17 @@ window.initItemCardsModule = function(deps){
   }
   function timerFromCode(p){
     var title = String(p.title || "").slice(0, 80);
-    var vc = { id: timerCodeId(p.seconds, title), type: "timer", title: title, icon: "", date: "", seconds: p.seconds, virtual: true };
+    var vc = { id: timerCodeId(p.seconds, title, !!p.hidden), type: "timer", title: title, icon: "", date: "", seconds: p.seconds, virtual: true };
+    if(p.hidden) vc.noIsland = 1;
     virtualCards[vc.id] = vc;
     return vc;
+  }
+  // id, под которым таймер карточки живёт в оболочке. Обычный — id карточки. Скрытый — id, посчитанный от времени и названия, как у таймера
+  // из кода: скан кода и сама карточка в сетке работают с одним таймером, и после скана он виден работающим на карточке.
+  function runId(c){
+    if(!c) return "";
+    if(c.noIsland && !c.virtual) return timerCodeId(c.seconds | 0, timerQrTitle(c.title), true);
+    return c.id;
   }
   var SIZE_MIN = 0.7, SIZE_MAX = 2;
   var ID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"; // без похожих знаков (i, l, o, 0, 1)
@@ -323,6 +339,7 @@ window.initItemCardsModule = function(deps){
     };
     if(r.type === "task") o.tag = taskTag(r.tag);
     if(r.hidden) o.hidden = 1; // «скрыть» — общий признак карточки любого типа
+    if(r.type === "timer" && r.noIsland) o.noIsland = 1; // скрытый таймер: без острова и уведомления «идёт»
     var col = cardColor(r); if(col) o.color = col; // цвет карточки — у любого типа (пусто — без цвета)
     if(r.type === "habit") o.days = habitDays(r);
     if(r.type === "item"){
@@ -769,6 +786,7 @@ window.initItemCardsModule = function(deps){
     var hasReminder = cards.some(function(c){ return c.type === "reminder"; });
     html += '<div class="item-type-menu" id="itemTypeMenu" style="display:none;">' +
       '<button type="button" class="workbooks-run-btn" data-type="timer">Таймер</button>' +
+      '<button type="button" class="workbooks-run-btn" data-type="htimer">Скрытый таймер</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="item">Предмет</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="task">Создавать задачу</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="habit">Привычка</button>' +
@@ -1202,6 +1220,7 @@ window.initItemCardsModule = function(deps){
     var list = loadCards();
     var c = findCard(id);
     if(!c) return;
+    if(c.type === "timer" && c.noIsland){ try{ var apiD = getTimerApi(); if(apiD && apiD.cancel) apiD.cancel(runId(c)); }catch(e){} } // идущий скрытый таймер без карточки остановить было бы нечем
     cardsCache = list.filter(function(x){ return x.id !== id; });
     delete revealedIds[id];
     if(flippedId === id) flippedId = null;
@@ -1215,7 +1234,7 @@ window.initItemCardsModule = function(deps){
   }
 
   // ---------- форма создания / правки ----------
-  var TYPE_LABEL = { timer: "Таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE, remind: "Напоминание" };
+  var TYPE_LABEL = { timer: "Таймер", htimer: "Скрытый таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE, remind: "Напоминание" };
   // выбор цвета карточки (необязательный, у любого типа): разметка и привязка; первый пастельный квадрат — пустой цвет
   function colorPaletteHtml(type){
     var h = '<div class="item-form-hint">' + (type === "habit"
@@ -1239,15 +1258,22 @@ window.initItemCardsModule = function(deps){
     if(!el) return;
     var isNew = !card;
     ensureHabitStyles();
+    var hideIsland = (type === "htimer") || !!(card && card.noIsland && card.type === "timer"); // «Скрытый таймер»: форма как у таймера
+    if(type === "htimer") type = "timer";
+    var colorKey = hideIsland ? "htimer" : type; // цвет по умолчанию запоминается отдельно для скрытых таймеров
     var isSingle = (type === "datenote" || type === "reminder"); // «Сегодня» и «Напоминалка»: в форме только цвет
     var data = card ? JSON.parse(JSON.stringify(card)) : {
       type: type, title: isSingle ? TYPE_LABEL[type] : "", icon: DEFAULT_ICON[type] || "", date: isSingle ? "" : todayIso(), seconds: 0
     };
-    data.color = isNew ? defaultColorFor(type) : cardColor(card); // новая карточка — с запомненным цветом этого типа
+    if(isNew && hideIsland) data.noIsland = 1;
+    data.color = isNew ? defaultColorFor(colorKey) : cardColor(card); // новая карточка — с запомненным цветом этого типа
     var colorTouched = false;
     if(type === "habit" && isNew) data.days = [];
     var html = '<div class="mdeditor-tab item-card-form" id="itemCardForm">';
-    html += '<h3 class="common-tab-title">' + escapeHtml(TYPE_LABEL[type]) + '</h3>';
+    html += '<h3 class="common-tab-title">' + escapeHtml(TYPE_LABEL[hideIsland ? "htimer" : type]) + '</h3>';
+    if(hideIsland){
+      html += '<div class="item-form-hint">Работает как обычный таймер, но не показывается ни в динамическом острове, ни в шторке: виден только на этой вкладке и на карточке при сканировании кода. В конце срабатывает как обычный — вибрация и уведомление.</div>';
+    }
     if(type === "habit"){
       html += '<div class="item-form-hint">Каждое сканирование кода отмечает сегодняшний день на карте привычки. В один день засчитывается одно сканирование — повторные в тот же день ничего не меняют. Название (до 40 знаков) зашито в код: если кто-то отсканирует его на другом устройстве, там появится такая же привычка (цвет каждый выбирает себе сам) и отметки пойдут уже у него.</div>';
     }
@@ -1444,7 +1470,7 @@ window.initItemCardsModule = function(deps){
       data.title = title;
       var now = Date.now();
       if(!data.color) delete data.color; // пустой цвет в записи не хранится
-      if(colorTouched) rememberColorFor(type, data.color || "");
+      if(colorTouched) rememberColorFor(colorKey, data.color || "");
       if(isNew && isSingle && loadCards().some(function(x){ return x.type === type; })){ leave(); return; } // такая карточка уже есть
       if(isNew){
         data.id = (forcedId && !findCard(forcedId)) ? forcedId : newId(); // forcedId: карточка создаётся под уже напечатанный код
@@ -1454,6 +1480,7 @@ window.initItemCardsModule = function(deps){
       } else {
         var cur = findCard(card.id);
         if(cur){
+          var oldRun = (cur.type === "timer" && cur.noIsland) ? runId(cur) : "";
           cur.title = data.title;
           cur.icon = data.icon;
           if(type === "task") cur.tag = data.tag;
@@ -1462,6 +1489,8 @@ window.initItemCardsModule = function(deps){
           cur.seconds = data.seconds;
           if(type === "remind"){ cur.comment = data.comment; cur.remindAt = data.remindAt; cur.repeatKind = data.repeatKind; cur.remindDone = 0; }
           cur.updatedAt = now;
+          // скрытый таймер: id считается от времени и названия — после правки старый (если шёл) снимаем, иначе его никто не увидит
+          if(oldRun && oldRun !== runId(cur)){ try{ var api0 = getTimerApi(); if(api0 && api0.cancel) api0.cancel(oldRun); }catch(e){} }
         }
       }
       saveCards();
@@ -1524,7 +1553,11 @@ window.initItemCardsModule = function(deps){
     var N = window.LifeTrackerNative;
     if(N && typeof N.getCardTimers === "function"){
       timerApi = {
-        start: function(id, title, sec){ return N.startCardTimer(id, title, sec | 0); },
+        start: function(id, title, sec, hidden){
+          // скрытый таймер — отдельный метод моста (версия 11); в старой оболочке такого нет, тогда стартует обычный
+          if(hidden && typeof N.startHiddenCardTimer === "function") return N.startHiddenCardTimer(id, title, sec | 0);
+          return N.startCardTimer(id, title, sec | 0);
+        },
         // cancelCardTimer есть в мосте с версии 7; проверка — на случай старой оболочки
         cancel: function(id){ if(typeof N.cancelCardTimer === "function") N.cancelCardTimer(id); },
         list: function(){ try{ return JSON.parse(N.getCardTimers() || "[]"); }catch(e){ return []; } }
@@ -1551,7 +1584,7 @@ window.initItemCardsModule = function(deps){
     return null;
   }
   function timerTextFor(c){
-    var info = timerInfo(c.id);
+    var info = timerInfo(runId(c));
     return formatTimer(info ? Math.ceil(info.leftMs / 1000) : c.seconds);
   }
   // обновляет цифры на всех видимых карточках-таймерах; true — есть идущий или приостановленный таймер
@@ -1562,7 +1595,7 @@ window.initItemCardsModule = function(deps){
       var id = nodes[i].getAttribute("data-id");
       var c = findCard(id);
       if(!c) continue;
-      var info = timerInfo(id);
+      var info = timerInfo(runId(c));
       nodes[i].textContent = formatTimer(info ? Math.ceil(info.leftMs / 1000) : c.seconds);
       nodes[i].classList.toggle("running", !!(info && info.running));
       nodes[i].classList.toggle("paused", !!(info && !info.running));
@@ -1587,15 +1620,15 @@ window.initItemCardsModule = function(deps){
   function evLog(text, opts){ try{ if(window.EventLog) window.EventLog.add(text, opts); }catch(e){} }
   function startTimerForCard(c){
     if(!c || c.type !== "timer" || !(c.seconds > 0)) return;
-    try{ getTimerApi().start(c.id, c.title || "", c.seconds); }catch(e){}
-    try{ if(window.EventLog) window.EventLog.timerStarted(c.id, c.title || "", c.seconds); }catch(e){}
+    try{ getTimerApi().start(runId(c), c.title || "", c.seconds, !!c.noIsland); }catch(e){}
+    try{ if(window.EventLog) window.EventLog.timerStarted(runId(c), c.title || "", c.seconds); }catch(e){}
     syncTimersView();
   }
   // «Стоп»: таймер отменяется целиком (пауза не нужна), цифры возвращаются к заданному времени; закончившийся таймер — гасит вибрацию
   function stopTimerForCard(c){
     if(!c || c.type !== "timer") return;
-    try{ var api = getTimerApi(); if(api && typeof api.cancel === "function") api.cancel(c.id); }catch(e){}
-    try{ if(window.EventLog) window.EventLog.timerCancelled(c.id); }catch(e){}
+    try{ var api = getTimerApi(); if(api && typeof api.cancel === "function") api.cancel(runId(c)); }catch(e){}
+    try{ if(window.EventLog) window.EventLog.timerCancelled(runId(c)); }catch(e){}
     syncTimersView();
   }
 
