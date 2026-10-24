@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 19.0 (24.10) — структурная правка: цвет карточки у ВСЕХ типов (таймер, предмет, «Создавать задачу», привычка, «Сегодня», «Напоминалка»): необязательное поле `color` ("#rrggbb"; пусто — без цвета, карточка как раньше), ходит через облако (`cloudShape`) и красит карточку в сетке (`applyCardLook`, вместо `applyHabitLook`). Палитра формы — общая (`colorPaletteHtml`): первый пастельный квадрат стал ПУСТЫМ цветом (был пастельный красный). Цвет по умолчанию — пустой; выбранный цвет запоминается по типу карточки (`itemCardsColorDefaults_v1`, `defaultColorFor`/`rememberColorFor`, только на этом устройстве) и подставляется в новые карточки этого типа. «Сегодня» и «Напоминалка»: создаются и правятся маленькой формой с одним цветом (`createSingletonCard` убран; у них при удержании появилась кнопка «Изменить»). У привычки без цвета отметки на карте и точка в заголовке берут цвет темы (`var(--wood)`), `HABIT_DEFAULT_COLOR` убран. Показ карточки по скану ВСЕГДА цвета холста (`.scan-card`), цвет карточки там не применяется. Откат: itemcards.js 18.1.
    Версия: 18.1 (24.10) — цвета привычек: красный #ff0000, жёлтый #ffff00, фиолетовый #7f00ff в верхнем ряду; зелёный #9cdb4e и бирюзовый #40d5b5 вместо пастельных в нижнем. Прежняя 18.0 (23.10) — структурная правка: новый тип карточки «Привычка» (`habit`, поля `color`, `days`): пункт «Привычка» в меню «+» и в выборе типа при создании под напечатанный код; форма — название и цвет квадратиками (8 ярких + 8 пастельных, `HABIT_COLORS_*`); пункт «Привычки» в меню воронки; при удержании три кнопки в одном стиле — глаз, удаление, правка (`.item-card-edit-btn`); тап — карта дней (`openHabitMap`, `habitMapMarkup`: вид и классы «Карты дней года», отмеченные дни — цветом привычки), двойной тап — оборот с QR как обычно; скан кода карточки отмечает сегодняшний день (`markHabitToday`: один день — одна отметка, повторный скан в тот же день ничего не делает) и показывает карточку с подписью «Сегодня отмечено» / «Сегодня уже отмечено»; `days` ходят через облако и объединяются при сверке (`mergeHabitDays` в `reconcileCloud`); стили формы — из JS (`ensureHabitStyles`). Откат: itemcards.js 17.1. Скан кода привычки сканер принимает после удержания не меньше 0,5 с (`longHold` в `openScan`, cardscan.js 2.2).
    Версия: 17.1 (22.10) — в PDF у «Создавать задачу» печатается только текст задачи, без названия категории (категория остаётся в QR-коде и на карточке в приложении). Откат: itemcards.js 17.0.
    Версия: 17.0 (22.10) — структурная правка: при долгом нажатии у карточки две кнопки — глаз и удаление (кнопки «Изменить» нет: карточка открывается на правку тапом); глаз получил класс `mdeditor-share-btn` (общая скрытость до `.visible`, как у кнопки удаления) и стоит левее удаления. Откат: itemcards.js 16.1.
@@ -158,13 +159,27 @@ window.initItemCardsModule = function(deps){
   // ---------- привычка ----------
   // Карточка-привычка: {type:"habit", title, color:"#rrggbb", days:["2026-10-23", …]}. Её QR — обычный код карточки
   // (lt://v1/card/<id>); скан отмечает сегодняшний день (в один день засчитывается один раз), тап открывает карту дней.
-  // Палитра: 8 ярких и 8 пастельных цветов.
+  // Палитра цвета карточки (у ВСЕХ типов карточек): 8 ярких и 8 пастельных; первый пастельный квадрат — ПУСТОЙ цвет (""): карточка
+  // без заливки, как раньше. Пустой цвет — по умолчанию; у привычки отметки на карте тогда берут цвет темы (var(--wood)).
   var HABIT_COLORS_BRIGHT = ["#ff0000", "#fb8c00", "#ffff00", "#43a047", "#00acc1", "#1e88e5", "#7f00ff", "#d81b60"];
-  var HABIT_COLORS_PASTEL = ["#f4a6a6", "#ffcba4", "#fff3a3", "#9cdb4e", "#40d5b5", "#a9ccf4", "#d4b8f0", "#f8bbd9"];
-  var HABIT_DEFAULT_COLOR = "#43a047";
+  var HABIT_COLORS_PASTEL = ["", "#ffcba4", "#fff3a3", "#9cdb4e", "#40d5b5", "#a9ccf4", "#d4b8f0", "#f8bbd9"];
   var HABIT_MAX_DAYS = 1830; // пять лет отметок; больше в записи (и в облаке) не держим
-  function isHabitColor(v){ return /^#[0-9a-fA-F]{6}$/.test(String(v || "")); }
-  function habitColor(c){ return c && isHabitColor(c.color) ? String(c.color).toLowerCase() : HABIT_DEFAULT_COLOR; }
+  function isCardColor(v){ return /^#[0-9a-fA-F]{6}$/.test(String(v || "")); }
+  function cardColor(c){ return c && isCardColor(c.color) ? String(c.color).toLowerCase() : ""; } // "" — без цвета
+  // Запомненный цвет по умолчанию для новых карточек каждого типа (только на этом устройстве): выбрал цвет для таймера — все новые
+  // таймеры создаются с ним, пока не выберет другой (в том числе пустой). Запоминается, когда цвет выбран в форме и форма сохранена.
+  var COLOR_DEFAULTS_KEY = "itemCardsColorDefaults_v1";
+  function loadColorDefaults(){
+    var o = null;
+    try{ o = JSON.parse(localStorage.getItem(COLOR_DEFAULTS_KEY) || "null"); }catch(e){ o = null; }
+    return (o && typeof o === "object") ? o : {};
+  }
+  function defaultColorFor(type){ var v = loadColorDefaults()[type]; return isCardColor(v) ? String(v).toLowerCase() : ""; }
+  function rememberColorFor(type, color){
+    var o = loadColorDefaults();
+    o[type] = isCardColor(color) ? String(color).toLowerCase() : "";
+    try{ localStorage.setItem(COLOR_DEFAULTS_KEY, JSON.stringify(o)); }catch(e){}
+  }
   function normHabitDays(arr){
     var seen = {}, out = [];
     if(Array.isArray(arr)){
@@ -178,19 +193,28 @@ window.initItemCardsModule = function(deps){
   function habitDays(c){ return normHabitDays(c && c.days); }
   function mergeHabitDays(a, b){ return normHabitDays((a || []).concat(b || [])); } // объединение: отметки не пропадают при расхождении устройств
   // цвет текста на карточке цвета hex: тёмный на светлом, белый на тёмном
-  function habitInk(hex){
+  function cardInk(hex){
     var n = parseInt(hex.slice(1), 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
     return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "#1b1b1b" : "#ffffff";
   }
-  function habitCardBg(c){
-    var hex = habitColor(c);
+  function cardBg(c){
+    var hex = cardColor(c);
     if(!c.hidden) return hex;
     var n = parseInt(hex.slice(1), 16); // скрытая карточка (когда показаны все) — бледнее, как и остальные
     return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + ",.45)";
   }
-  function applyHabitLook(cardNode, c){
-    cardNode.style.background = habitCardBg(c);
-    cardNode.style.color = habitInk(habitColor(c));
+  // Заливка карточки в сетке своим цветом; без цвета — стили по умолчанию (фон страницы). Показ по скану (showCardOverlay) цвет НЕ применяет.
+  function applyCardLook(cardNode, c){
+    if(!cardColor(c)){
+      cardNode.style.background = "";
+      cardNode.style.color = "";
+      cardNode.style.removeProperty("--ink-soft");
+      return;
+    }
+    var ink = cardInk(cardColor(c));
+    cardNode.style.background = cardBg(c);
+    cardNode.style.color = ink;
+    cardNode.style.setProperty("--ink-soft", ink); // дата на карточке читается и на тёмной заливке
   }
   var habitStyleDone = false;
   function ensureHabitStyles(){
@@ -203,6 +227,7 @@ window.initItemCardsModule = function(deps){
       ".habit-color-row{display:flex;gap:6px;}" +
       // квадрат без aspect-ratio: проценты в padding считаются от ширины строки, поэтому высота = ширине
       ".habit-color{flex:0 0 calc((100% - 42px) / 8);height:0;padding:0 0 calc((100% - 42px) / 8) 0;border:1px solid rgba(0,0,0,.18);border-radius:8px;box-sizing:border-box;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
+      ".habit-color.none{background:transparent;background-image:linear-gradient(to top right, transparent calc(50% - 1px), rgba(0,0,0,.45) calc(50% - 1px), rgba(0,0,0,.45) calc(50% + 1px), transparent calc(50% + 1px));}" +
       ".habit-color.selected{box-shadow:0 0 0 2px var(--parchment,#fff),0 0 0 4px var(--ink,#000);}" +
       ".habit-map-dot{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:8px;vertical-align:-1px;border:1px solid rgba(0,0,0,.2);}" +
       ".habit-scan-note{position:absolute;left:0;right:0;bottom:9%;text-align:center;color:#fff;font-size:18px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,.7);pointer-events:none;padding:0 16px;}";
@@ -288,7 +313,8 @@ window.initItemCardsModule = function(deps){
     };
     if(r.type === "task") o.tag = taskTag(r.tag);
     if(r.hidden) o.hidden = 1; // «скрыть» — общий признак карточки любого типа
-    if(r.type === "habit"){ o.color = habitColor(r); o.days = habitDays(r); }
+    var col = cardColor(r); if(col) o.color = col; // цвет карточки — у любого типа (пусто — без цвета)
+    if(r.type === "habit") o.days = habitDays(r);
     if(r.type === "item"){
       // напоминание карточки: выбранная дата-время и период повтора (remindDone — только на этом устройстве, наружу не идёт)
       o.remindAt = Math.max(0, Math.floor(Number(r.remindAt) || 0));
@@ -626,7 +652,7 @@ window.initItemCardsModule = function(deps){
           '<button type="button" class="item-card-start-btn" title="Запустить таймер">Пуск</button>' +
         '</div>';
     }
-    if(c.type === "habit"){ // цвет привычки — фон всей карточки (applyHabitLook), здесь значок календаря с галочкой и название
+    if(c.type === "habit"){ // цвет привычки — фон всей карточки (applyCardLook), здесь значок календаря с галочкой и название
       return '<div class="item-card-icon">' + iconSvg("habit") + '</div>' +
         '<div class="item-card-title"></div>';
     }
@@ -715,10 +741,10 @@ window.initItemCardsModule = function(deps){
           '<button type="button" class="mdeditor-share-btn item-card-eye-btn' + (revealed ? " visible" : "") + '" title="' + (c.hidden ? "Скрыта (нажмите, чтобы показывать всегда)" : "Показана (нажмите, чтобы скрыть)") + '">' + (c.hidden ? EYE_OFF_ICON_SVG : EYE_ICON_SVG) + '</button>' +
           '<button type="button" class="mdeditor-delete-btn' + (revealed ? " visible" : "") + '" title="Удалить">' + DELETE_ICON_SVG + '</button>' +
           // у привычки тап открывает карту, а не форму — правка отдельной кнопкой (тот же тёмный полупрозрачный стиль, что у глаза)
-          (c.type === "habit" ? '<button type="button" class="mdeditor-share-btn item-card-edit-btn' + (revealed ? " visible" : "") + '" title="Изменить">' + PENCIL_ICON_SVG + '</button>' : '') +
+          ((c.type === "habit" || isSingletonCard(c)) ? '<button type="button" class="mdeditor-share-btn item-card-edit-btn' + (revealed ? " visible" : "") + '" title="Изменить">' + PENCIL_ICON_SVG + '</button>' : '') +
         '</div>';
       card.querySelector(".item-card-title").textContent = cardTitle(c);
-      if(c.type === "habit") applyHabitLook(card, c);
+      applyCardLook(card, c);
       grid.appendChild(card);
     });
     bindGrid(grid);
@@ -738,7 +764,7 @@ window.initItemCardsModule = function(deps){
   var HABIT_WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
   function isoOfDate(d){ return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
   function habitMapMarkup(c){
-    var color = habitColor(c);
+    var color = cardColor(c) || "var(--wood)"; // без цвета — цвет выбранной вкладки (темы)
     var marked = {};
     habitDays(c).forEach(function(d){ marked[d] = 1; });
     var now = new Date();
@@ -785,7 +811,7 @@ window.initItemCardsModule = function(deps){
     var built = habitMapMarkup(c);
     el.innerHTML =
       '<div class="year-grid-tab-header">' +
-        '<div class="common-tab-title"><span class="habit-map-dot" style="background:' + habitColor(c) + ';"></span><span id="habitMapTitle"></span></div>' +
+        '<div class="common-tab-title"><span class="habit-map-dot" style="background:' + (cardColor(c) || "var(--wood)") + ';"></span><span id="habitMapTitle"></span></div>' +
         '<button type="button" class="year-grid-active-days-btn" tabindex="-1" title="Дней с отметками за последние 365 дней">' + built.count + '</button>' +
       '</div>' +
       '<div class="year-grid-v-scroll" id="habitMapScroll">' + built.html + '</div>';
@@ -1039,8 +1065,6 @@ window.initItemCardsModule = function(deps){
       if(!b) return;
       closeTypeMenu();
       if(!cardMatchesFilter({ type: b.dataset.type })) setFilter("all"); // новая карточка не должна пропасть под фильтром
-      if(b.dataset.type === "datenote"){ createSingletonCard("datenote"); return; }
-      if(b.dataset.type === "reminder"){ createSingletonCard("reminder"); return; }
       openForm(b.dataset.type, null);
     });
     var pdfBtn = document.getElementById("itemCardsPdfBtn");
@@ -1099,29 +1123,38 @@ window.initItemCardsModule = function(deps){
     renderGrid();
   }
 
-  // «Сегодня» и «Напоминалка»: карточка без формы — создаётся сразу, нужна только ради QR-кода (по одной на приложение;
-  // пока карточка есть, пункта в меню «+» нет, после удаления он возвращается)
-  function createSingletonCard(type){
-    var list = loadCards();
-    for(var i = 0; i < list.length; i++) if(list[i].type === type){ renderGrid(); return; }
-    var now = Date.now();
-    list.push({ id: newId(), type: type, title: type === "reminder" ? REMINDER_TITLE : DATENOTE_TITLE, icon: DEFAULT_ICON[type], date: "", seconds: 0, createdAt: now, updatedAt: now });
-    saveCards();
-    renderGrid();
-  }
-
   // ---------- форма создания / правки ----------
-  var TYPE_LABEL = { timer: "Таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка" };
+  var TYPE_LABEL = { timer: "Таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE };
+  // выбор цвета карточки (необязательный, у любого типа): разметка и привязка; первый пастельный квадрат — пустой цвет
+  function colorPaletteHtml(type){
+    var h = '<div class="item-form-hint">' + (type === "habit"
+      ? 'Цвет карточки и отметок на карте. Пустой квадрат — карточка без заливки, отметки в цвете темы.'
+      : 'Цвет карточки — необязательно. Пустой квадрат — карточка без заливки.') + '</div>';
+    h += '<div class="habit-colors" id="icfColors">';
+    [HABIT_COLORS_BRIGHT, HABIT_COLORS_PASTEL].forEach(function(row){
+      h += '<div class="habit-color-row">';
+      row.forEach(function(hex){
+        h += hex
+          ? '<button type="button" class="habit-color" data-color="' + hex + '" style="background:' + hex + ';" title="' + hex + '"></button>'
+          : '<button type="button" class="habit-color none" data-color="" title="Без цвета"></button>';
+      });
+      h += '</div>';
+    });
+    return h + '</div>';
+  }
   function openForm(type, card, forcedId){
     screenMode = "form";
     var el = container();
     if(!el) return;
     var isNew = !card;
     ensureHabitStyles();
+    var isSingle = (type === "datenote" || type === "reminder"); // «Сегодня» и «Напоминалка»: в форме только цвет
     var data = card ? JSON.parse(JSON.stringify(card)) : {
-      type: type, title: "", icon: DEFAULT_ICON[type] || "", date: todayIso(), seconds: 0
+      type: type, title: isSingle ? TYPE_LABEL[type] : "", icon: DEFAULT_ICON[type] || "", date: isSingle ? "" : todayIso(), seconds: 0
     };
-    if(type === "habit"){ data.color = habitColor(data); if(isNew) data.days = []; }
+    data.color = isNew ? defaultColorFor(type) : cardColor(card); // новая карточка — с запомненным цветом этого типа
+    var colorTouched = false;
+    if(type === "habit" && isNew) data.days = [];
     var html = '<div class="mdeditor-tab item-card-form" id="itemCardForm">';
     html += '<h3 class="common-tab-title">' + escapeHtml(TYPE_LABEL[type]) + '</h3>';
     if(type === "habit"){
@@ -1130,8 +1163,10 @@ window.initItemCardsModule = function(deps){
     if(type === "task"){
       html += '<div class="item-form-hint">Код с текстом задачи: кто его отсканирует в приложении, получит эту задачу на выбранной вкладке. Такая же невыполненная задача второй раз не создаётся — её переносят в конец списка вкладки. Категория (тег) необязательна: задача получит её сразу, по тегу задачи можно отбирать на вкладке.</div>';
     }
-    html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="' + (type === "task" ? "Текст задачи (до " + TASK_TEXT_MAX + " знаков)" : "Название") + '" maxlength="' + (type === "task" ? TASK_TEXT_MAX : 80) + '" autocomplete="off">';
-    if(type === "task"){
+    if(!isSingle) html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="' + (type === "task" ? "Текст задачи (до " + TASK_TEXT_MAX + " знаков)" : "Название") + '" maxlength="' + (type === "task" ? TASK_TEXT_MAX : 80) + '" autocomplete="off">';
+    if(isSingle){
+      // только цвет (ниже)
+    } else if(type === "task"){
       html += '<div class="item-form-tabs" id="icfTabs">';
       taskTabs().forEach(function(t){
         html += '<button type="button" class="item-form-tab" data-tab="' + escapeHtml(t.key) + '" title="' + escapeHtml(t.title) + '">' + (t.svg || "") + '<span>' + escapeHtml(t.title) + '</span></button>';
@@ -1146,13 +1181,7 @@ window.initItemCardsModule = function(deps){
       html += '<option value="__new__">Новая категория…</option></select>' +
         '<input type="text" class="mdeditor-cleanup-input" id="icfCatNew" placeholder="Новая категория (до ' + TASK_TAG_MAX + ' знаков)" maxlength="' + TASK_TAG_MAX + '" autocomplete="off" style="display:none;"></div>';
     } else if(type === "habit"){
-      html += '<div class="habit-colors" id="icfColors">';
-      [HABIT_COLORS_BRIGHT, HABIT_COLORS_PASTEL].forEach(function(row){
-        html += '<div class="habit-color-row">';
-        row.forEach(function(hex){ html += '<button type="button" class="habit-color" data-color="' + hex + '" style="background:' + hex + ';" title="' + hex + '"></button>'; });
-        html += '</div>';
-      });
-      html += '</div>';
+      // у привычки только название и цвет (ниже)
     } else if(type === "timer"){
       html += '<div class="item-form-timer" id="icfTimer">' +
         wheelHtml("h", 24, "ч") + wheelHtml("m", 60, "мин") + wheelHtml("s", 60, "с") +
@@ -1170,6 +1199,7 @@ window.initItemCardsModule = function(deps){
       '</div>';
       html += '</div>';
     }
+    html += colorPaletteHtml(type);
     html += '<div class="item-form-error" id="icfError"></div>';
     html += '<div class="item-form-buttons">' +
       '<button type="button" class="workbooks-run-btn" id="icfSave">Сохранить</button>' +
@@ -1179,7 +1209,7 @@ window.initItemCardsModule = function(deps){
     el.innerHTML = html;
 
     var titleEl = document.getElementById("icfTitle");
-    titleEl.value = data.title || "";
+    if(titleEl) titleEl.value = data.title || "";
     var errEl = document.getElementById("icfError");
 
     if(type === "timer"){
@@ -1187,19 +1217,8 @@ window.initItemCardsModule = function(deps){
       setWheel("h", Math.floor(total / 3600));
       setWheel("m", Math.floor((total % 3600) / 60));
       setWheel("s", total % 60);
-    } else if(type === "habit"){
-      var colorsEl = document.getElementById("icfColors");
-      var markColors = function(){
-        var bs = colorsEl.querySelectorAll(".habit-color");
-        for(var i = 0; i < bs.length; i++) bs[i].classList.toggle("selected", bs[i].dataset.color === data.color);
-      };
-      markColors();
-      colorsEl.addEventListener("click", function(e){
-        var b = e.target.closest(".habit-color");
-        if(!b) return;
-        data.color = b.dataset.color;
-        markColors();
-      });
+    } else if(isSingle || type === "habit"){
+      // ничего, кроме цвета
     } else if(type === "task"){
       var tabsEl = document.getElementById("icfTabs");
       function markTabs(){
@@ -1251,12 +1270,26 @@ window.initItemCardsModule = function(deps){
       });
     }
 
+    var colorsEl = document.getElementById("icfColors");
+    var markColors = function(){
+      var bs = colorsEl.querySelectorAll(".habit-color");
+      for(var i = 0; i < bs.length; i++) bs[i].classList.toggle("selected", bs[i].dataset.color === (data.color || ""));
+    };
+    markColors();
+    colorsEl.addEventListener("click", function(e){
+      var b = e.target.closest(".habit-color");
+      if(!b) return;
+      data.color = b.dataset.color; // "" — пустой цвет
+      colorTouched = true;
+      markColors();
+    });
+
     function leave(){ renderGrid(); }
     document.getElementById("icfCancel").addEventListener("click", leave);
     if(window.AppNav) window.AppNav.push(function(){ renderGrid(); });
 
     document.getElementById("icfSave").addEventListener("click", function(){
-      var title = titleEl.value.replace(/^\s+|\s+$/g, "");
+      var title = titleEl ? titleEl.value.replace(/^\s+|\s+$/g, "") : data.title;
       errEl.textContent = "";
       if(type === "task"){
         title = taskText(title);
@@ -1266,7 +1299,7 @@ window.initItemCardsModule = function(deps){
         data.tag = taskTag(csel.value === "__new__" ? cnew.value : csel.value);
         if(csel.value === "__new__" && !data.tag){ errEl.textContent = "Введите название категории или выберите «Без категории»."; return; }
       }
-      if(!title){ errEl.textContent = "Введите название."; return; }
+      if(!title && !isSingle){ errEl.textContent = "Введите название."; return; }
       if(type === "timer"){
         var sec = getWheel("h") * 3600 + getWheel("m") * 60 + getWheel("s");
         if(sec <= 0){ errEl.textContent = "Задайте время."; return; }
@@ -1274,6 +1307,9 @@ window.initItemCardsModule = function(deps){
       }
       data.title = title;
       var now = Date.now();
+      if(!data.color) delete data.color; // пустой цвет в записи не хранится
+      if(colorTouched) rememberColorFor(type, data.color || "");
+      if(isNew && isSingle && loadCards().some(function(x){ return x.type === type; })){ leave(); return; } // такая карточка уже есть
       if(isNew){
         data.id = (forcedId && !findCard(forcedId)) ? forcedId : newId(); // forcedId: карточка создаётся под уже напечатанный код
         data.createdAt = now;
@@ -1285,7 +1321,7 @@ window.initItemCardsModule = function(deps){
           cur.title = data.title;
           cur.icon = data.icon;
           if(type === "task") cur.tag = data.tag;
-          if(type === "habit") cur.color = data.color; // отметки дней (days) правка не трогает
+          if(data.color) cur.color = data.color; else delete cur.color; // отметки дней (days) правка не трогает
           cur.date = data.date;
           cur.seconds = data.seconds;
           cur.updatedAt = now;
@@ -1741,7 +1777,7 @@ window.initItemCardsModule = function(deps){
     var card = document.createElement("div");
     card.className = "item-card item-card-" + c.type + " scan-card";
     card.style.setProperty("--item-card-w", overlayCardWidth() + "px");
-    if(c.type === "habit") applyHabitLook(card, { color: c.color }); // на показе скана карточка всегда яркая, даже если скрыта
+    // цвет карточки при сканировании НЕ применяется: показ всегда цвета холста (.scan-card), что бы ни было выбрано в сетке
     card.innerHTML = '<div class="item-card-front">' + cardFrontHtml(c) + '</div>';
     card.querySelector(".item-card-title").textContent = cardTitle(c);
     card.addEventListener("click", function(e){
