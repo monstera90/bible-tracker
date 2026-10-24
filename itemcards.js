@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 25.0 (24.10) — структурная правка: новый тип карточки «Погода» (`weather`, пункт «+» после «Будильника», «Погода» в воронке): QR несёт город в самом коде — `lt://v1/weather/<широта>,<долгота>[/<название>]` (`WEATHER_PREFIX`, `qrTextFor`); форма — поиск города по названию (геокодер Open-Meteo, `wxSearchCity`) и цвет как у остальных; скан показывает слой `showWeatherOverlay`: город, температура, ветер (м/с), влажность, УФ-индекс, качество воздуха, осадки (если есть) и три мини-карточки следующих дней; данные — Open-Meteo без ключа (`loadWeather`, запрос XHR, последний ответ кладётся в `itemCardsWeather_v1` на случай «нет сети»). Откат: itemcards.js 24.1.
    Версия: 24.1 (24.10) — повторный скан кода заведённого будильника выключает его (`showScanned`: `alarmInfo(runId(c))` → `stopAlarmForCard`, слой «Выключен»); раньше заводил заново. Kotlin не менялся. Откат: itemcards.js 24.0.
    Версия: 24.0 (24.10) — структурная правка: новый тип карточки «Будильник» (`alarm`, пункт «+» после «Скрытого таймера», «Будильники» в воронке): QR несёт время, повтор и название — `lt://v1/alarm/<ЧЧММ>[,<5|15|30>,<1..4>][/<название>]` (`ALARM_PREFIX`, `qrTextFor`, `alarmFromCode`; id будильника в оболочке — хеш кода, `alarmCodeId`/`runId`, поэтому скан и карточка в сетке — один будильник); поля карточки `alarmTime` («ЧЧ:ММ»), `alarmEvery` (0/5/15/30 минут), `alarmTimes` (0..4 повторов) ходят через облако (`cloudShape`); форма — колёса часов и минут, список «Повтор через…» и (только при выбранном повторе) «Количество повторов»; скан заводит будильник на ближайшее такое время (сегодня, если не прошло, иначе завтра) через мост (`getAlarmApi`: оболочка / `deps.alarms` в `scan.html`; в браузере без оболочки — сообщение), кнопки «Выкл.» и «Завести» на карточке (`startAlarmForCard`/`stopAlarmForCard`, `syncAlarmsView`). Откат: itemcards.js 23.0.
    Версия: 23.0 (24.10) — структурная правка: «Скрытый таймер» (пункт «+»): обычная карточка-таймер с признаком `noIsland` (ходит через облако в `cloudShape`), форма как у таймера (`openForm("htimer")` → `type:"timer"` + `noIsland`); в оболочке такой таймер не показывается ни в острове, ни в плашке, ни в шторке (мост `startHiddenCardTimer` / `startHiddenTimer` в окне ярлыка) — виден только на вкладке карточек и на показе по скану, в конце срабатывает как обычный. QR — `lt://v1/htimer/<секунды>[/<название>]` (`HTIMER_PREFIX`, `qrTextFor`); таймер по скану и таймер карточки в сетке делят один id (`runId`, `timerCodeId(..., hidden)`, `timerQrTitle`), поэтому после скана таймер виден работающим на самой карточке. Откат: itemcards.js 22.0.
@@ -73,6 +74,7 @@ window.initItemCardsModule = function(deps){
   var ALARM_PREFIX = "lt://v1/alarm/";   // «будильник»: время, повтор и название в самом коде
   var ALARM_EVERY = [5, 15, 30];         // варианты повтора, минут
   var ALARM_TIMES_MAX = 4;               // повторов не больше четырёх (всего звонков до пяти)
+  var WEATHER_PREFIX = "lt://v1/weather/"; // «погода»: координаты и название города в самом коде
   var HABIT_PREFIX = "lt://v1/habit/";
   var TASK_PREFIX = "lt://v1/task/";
   var TASK_TEXT_MAX = 80; // текст задачи в коде: длиннее — код плотнее и хуже читается на малой наклейке (на карточке и в PDF показывается только начало)
@@ -132,6 +134,10 @@ window.initItemCardsModule = function(deps){
     if(c && c.type === "alarm" && alarmHM(c)){ // будильник: время, повтор и название в самом коде (lt://v1/alarm/0730,15,3/Подъём)
       var ah = alarmHM(c), aev = alarmEvery(c), at0 = timerQrTitle(c.title);
       return ALARM_PREFIX + pad2(ah.h) + pad2(ah.m) + (aev ? "," + aev + "," + alarmTimes(c) : "") + (at0 ? "/" + at0 : "");
+    }
+    if(c && c.type === "weather" && c.lat != null && c.lon != null && isFinite(Number(c.lat)) && isFinite(Number(c.lon))){ // погода: город в самом коде (lt://v1/weather/55.75,37.62/Москва)
+      var wtt = timerQrTitle(c.title);
+      return WEATHER_PREFIX + wxCoord(c.lat) + "," + wxCoord(c.lon) + (wtt ? "/" + wtt : "");
     }
     if(c && c.type === "habit" && c.id){ // привычка: id и название в самом коде (цвет не передаётся — у каждого свой)
       var ht = String(c.title || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, HABIT_TITLE_MAX);
@@ -221,7 +227,8 @@ window.initItemCardsModule = function(deps){
     datepaper: '<path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path><rect x="8.5" y="11.5" width="7" height="6" rx="1"></rect><path d="M8.5 14h7"></path><path d="M10.5 10.2v2.2M13.5 10.2v2.2"></path>'
   };
   var ICON_ORDER = ["bottle", "container", "jar", "bicycle", "car", "vegetable", "paper"];
-  var DEFAULT_ICON = { item: "", timer: "", task: "", datenote: "datepaper", reminder: "reminder" };
+  var DEFAULT_ICON = { item: "", timer: "", task: "", datenote: "datepaper", reminder: "reminder", weather: "weather" };
+  ICONS.weather = '<circle cx="8.5" cy="8.5" r="2.6"></circle><path d="M8.5 3v1.2M3 8.5h1.2M4.6 4.6l.9.9M12.4 4.6l-.9.9"></path><path d="M8 19.5h9.2a3.3 3.3 0 0 0 .5-6.55A4.6 4.6 0 0 0 9 12.6 3.4 3.4 0 0 0 8 19.5z"></path>';
   ICONS.habit = '<rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 10h16M8 3v4M16 3v4"></path><path d="M9 15l2 2 4-4"></path>';
   var DATENOTE_TITLE = "Сегодня";
   var REMINDER_TITLE = "Напоминалка";
@@ -371,7 +378,7 @@ window.initItemCardsModule = function(deps){
   // запись карточки в том виде, как она ходит между устройствами (и проверка пришедшей из облака)
   function cloudShape(r){
     if(!r || typeof r.id !== "string" || !/^[A-Za-z0-9]{4,32}$/.test(r.id)) return null;
-    if(r.type !== "timer" && r.type !== "alarm" && r.type !== "item" && r.type !== "task" && r.type !== "datenote" && r.type !== "reminder" && r.type !== "habit" && r.type !== "remind") return null;
+    if(r.type !== "timer" && r.type !== "alarm" && r.type !== "item" && r.type !== "task" && r.type !== "datenote" && r.type !== "reminder" && r.type !== "habit" && r.type !== "remind" && r.type !== "weather") return null;
     var o = {
       id: r.id,
       type: r.type,
@@ -388,6 +395,11 @@ window.initItemCardsModule = function(deps){
     var col = cardColor(r); if(col) o.color = col; // цвет карточки — у любого типа (пусто — без цвета)
     if(r.type === "habit") o.days = habitDays(r);
     if(r.type === "alarm"){ var ahm = alarmHM(r); o.alarmTime = ahm ? pad2(ahm.h) + ":" + pad2(ahm.m) : ""; o.alarmEvery = alarmEvery(r); o.alarmTimes = alarmTimes(r); }
+    if(r.type === "weather"){ // город: координаты (название — в title)
+      var wla = Number(r.lat), wlo = Number(r.lon);
+      o.lat = isFinite(wla) && wla >= -90 && wla <= 90 ? Math.round(wla * 100) / 100 : 0;
+      o.lon = isFinite(wlo) && wlo >= -180 && wlo <= 180 ? Math.round(wlo * 100) / 100 : 0;
+    }
     if(r.type === "item"){
       // напоминание карточки: выбранная дата-время и период повтора (remindDone — только на этом устройстве, наружу не идёт)
       o.remindAt = Math.max(0, Math.floor(Number(r.remindAt) || 0));
@@ -568,6 +580,7 @@ window.initItemCardsModule = function(deps){
     { key: "all", label: "Все" },
     { key: "timer", label: "Таймеры" },
     { key: "alarm", label: "Будильники" },
+    { key: "weather", label: "Погода" },
     { key: "item", label: "Предметы" },
     { key: "task", label: "Задачи" },
     { key: "habit", label: "Привычки" },
@@ -808,6 +821,10 @@ window.initItemCardsModule = function(deps){
           '<button type="button" class="item-card-start-btn" title="Завести будильник">Завести</button>' +
         '</div>';
     }
+    if(c.type === "weather"){ // значок погоды и название города
+      return '<div class="item-card-icon">' + iconSvg(c.icon || "weather") + '</div>' +
+        '<div class="item-card-title"></div>';
+    }
     if(c.type === "habit"){ // цвет привычки — фон всей карточки (applyCardLook), здесь значок календаря с галочкой и название
       return '<div class="item-card-icon">' + iconSvg("habit") + '</div>' +
         '<div class="item-card-title"></div>';
@@ -844,6 +861,7 @@ window.initItemCardsModule = function(deps){
       '<button type="button" class="workbooks-run-btn" data-type="timer">Таймер</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="htimer">Скрытый таймер</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="alarm">Будильник</button>' +
+      '<button type="button" class="workbooks-run-btn" data-type="weather">Погода</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="item">Предмет</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="task">Создавать задачу</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="habit">Привычка</button>' +
@@ -1000,7 +1018,7 @@ window.initItemCardsModule = function(deps){
       if(host.dataset.built !== text) return;
       var size = Math.max(60, Math.round(card.clientWidth * 0.72));
       var qo = { text: text, width: size, height: size, colorDark: "#000000", colorLight: "#ffffff" };
-      if(cc && cc.type === "task") qo.correctLevel = window.QRCode.CorrectLevel.M; // текст внутри кода: уровень M — меньше модулей, код крупнее
+      if(cc && (cc.type === "task" || cc.type === "weather")) qo.correctLevel = window.QRCode.CorrectLevel.M; // текст внутри кода: уровень M — меньше модулей, код крупнее
       try{ new window.QRCode(host, qo); }catch(e){}
     }).catch(function(){ host.textContent = "QR недоступен"; });
   }
@@ -1293,7 +1311,7 @@ window.initItemCardsModule = function(deps){
   }
 
   // ---------- форма создания / правки ----------
-  var TYPE_LABEL = { timer: "Таймер", alarm: "Будильник", htimer: "Скрытый таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE, remind: "Напоминание" };
+  var TYPE_LABEL = { timer: "Таймер", alarm: "Будильник", weather: "Погода", htimer: "Скрытый таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE, remind: "Напоминание" };
   // выбор цвета карточки (необязательный, у любого типа): разметка и привязка; первый пастельный квадрат — пустой цвет
   function colorPaletteHtml(type){
     var h = '<div class="item-form-hint">' + (type === "habit"
@@ -1336,6 +1354,9 @@ window.initItemCardsModule = function(deps){
     if(type === "alarm"){
       html += '<div class="item-form-hint">Время, повтор и название зашиты в код. Кто его отсканирует, у того будильник заведётся на ближайшее такое время (сегодня, если оно ещё не прошло, иначе завтра) и сработает карточкой на экране, в том числе заблокированном; выключить — смахнуть карточку. Повторы необязательны: если выбраны, будильник прозвонит ещё несколько раз через равные промежутки — каждый звонок гасится смахиванием.</div>';
     }
+    if(type === "weather"){
+      html += '<div class="item-form-hint">Город зашит в код. Кто его отсканирует, увидит погоду за окном: сейчас (температура, ветер, влажность, УФ-индекс, качество воздуха, осадки) и прогноз на три дня вперёд. Карточка на другом устройстве не нужна. Нужен интернет (данные Open-Meteo).</div>';
+    }
     if(type === "habit"){
       html += '<div class="item-form-hint">Каждое сканирование кода отмечает сегодняшний день на карте привычки. В один день засчитывается одно сканирование — повторные в тот же день ничего не меняют. Название (до 40 знаков) зашито в код: если кто-то отсканирует его на другом устройстве, там появится такая же привычка (цвет каждый выбирает себе сам) и отметки пойдут уже у него.</div>';
     }
@@ -1345,7 +1366,7 @@ window.initItemCardsModule = function(deps){
     if(type === "remind"){
       html += '<div class="item-form-hint">Напоминание сработает в выбранный день и час. QR-кода у этой карточки нет.</div>';
     }
-    if(!isSingle) html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="' + (type === "task" ? "Текст задачи (до " + TASK_TEXT_MAX + " знаков)" : "Название") + '" maxlength="' + (type === "task" ? TASK_TEXT_MAX : (type === "habit" ? HABIT_TITLE_MAX : 80)) + '" autocomplete="off">';
+    if(!isSingle && type !== "weather") html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="' + (type === "task" ? "Текст задачи (до " + TASK_TEXT_MAX + " знаков)" : "Название") + '" maxlength="' + (type === "task" ? TASK_TEXT_MAX : (type === "habit" ? HABIT_TITLE_MAX : 80)) + '" autocomplete="off">';
     if(isSingle){
       // только цвет (ниже)
     } else if(type === "task"){
@@ -1362,6 +1383,10 @@ window.initItemCardsModule = function(deps){
       catList.forEach(function(x){ html += '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>'; });
       html += '<option value="__new__">Новая категория…</option></select>' +
         '<input type="text" class="mdeditor-cleanup-input" id="icfCatNew" placeholder="Новая категория (до ' + TASK_TAG_MAX + ' знаков)" maxlength="' + TASK_TAG_MAX + '" autocomplete="off" style="display:none;"></div>';
+    } else if(type === "weather"){
+      html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfCity" placeholder="Город (например, Москва)" maxlength="60" autocomplete="off">';
+      html += '<div class="item-form-hint" id="icfCityPicked"></div>';
+      html += '<div id="icfCityList" style="display:flex;flex-direction:column;margin:6px 0;"></div>';
     } else if(type === "habit"){
       // у привычки только название и цвет (ниже)
     } else if(type === "remind"){
@@ -1429,6 +1454,49 @@ window.initItemCardsModule = function(deps){
       setWheel("h", Math.floor(total / 3600));
       setWheel("m", Math.floor((total % 3600) / 60));
       setWheel("s", total % 60);
+    } else if(type === "weather"){
+      var cityIn = document.getElementById("icfCity"), listEl = document.getElementById("icfCityList"), pickedEl = document.getElementById("icfCityPicked");
+      var searchSeq = 0, searchTimer = null;
+      cityIn.value = data.title || "";
+      function showPicked(){
+        pickedEl.textContent = (typeof data.lat === "number" && typeof data.lon === "number" && data.title) ? "Выбрано: " + (data.place || data.title) : "Город не выбран: введите название и выберите из списка.";
+      }
+      showPicked();
+      function runSearch(){
+        clearTimeout(searchTimer);
+        var q = cityIn.value.replace(/^\s+|\s+$/g, "");
+        if(q.length < 2){ searchSeq++; listEl.innerHTML = ""; return; }
+        var seq = ++searchSeq;
+        listEl.textContent = "Ищу…";
+        wxSearchCity(q, function(res){
+          if(seq !== searchSeq) return;
+          listEl.innerHTML = "";
+          if(res === null){ listEl.textContent = "Не удалось найти город: нет связи."; return; }
+          if(!res.length){ listEl.textContent = "Ничего не найдено."; return; }
+          res.forEach(function(r){
+            var place = wxPlaceName(r);
+            var b = document.createElement("button");
+            b.type = "button";
+            b.className = "workbooks-run-btn";
+            b.style.marginBottom = "6px";
+            b.textContent = place;
+            b.addEventListener("click", function(){
+              data.title = String(r.name || "").slice(0, 80);
+              data.lat = Math.round(Number(r.latitude) * 100) / 100;
+              data.lon = Math.round(Number(r.longitude) * 100) / 100;
+              data.place = place;
+              errEl.textContent = "";
+              searchSeq++;
+              listEl.innerHTML = "";
+              cityIn.value = data.title;
+              showPicked();
+            });
+            listEl.appendChild(b);
+          });
+        });
+      }
+      cityIn.addEventListener("input", function(){ clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 600); });
+      cityIn.addEventListener("keydown", function(e){ if(e.keyCode === 13){ e.preventDefault(); runSearch(); } });
     } else if(isSingle || type === "habit"){
       // ничего, кроме цвета
     } else if(type === "remind"){
@@ -1529,6 +1597,10 @@ window.initItemCardsModule = function(deps){
         data.tag = taskTag(csel.value === "__new__" ? cnew.value : csel.value);
         if(csel.value === "__new__" && !data.tag){ errEl.textContent = "Введите название категории или выберите «Без категории»."; return; }
       }
+      if(type === "weather"){
+        if(typeof data.lat !== "number" || typeof data.lon !== "number" || !data.title){ errEl.textContent = "Найдите город и выберите его из списка."; return; }
+        title = data.title;
+      }
       if(!title && !isSingle){ errEl.textContent = "Введите название."; return; }
       if(type === "remind"){
         var dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(data.rDate || ""), tm = /^(\d{2}):(\d{2})$/.exec(data.rTime || "");
@@ -1554,6 +1626,7 @@ window.initItemCardsModule = function(deps){
         data.seconds = sec;
       }
       data.title = title;
+      delete data.place; // подпись из списка поиска в записи не хранится
       var now = Date.now();
       if(!data.color) delete data.color; // пустой цвет в записи не хранится
       if(colorTouched) rememberColorFor(colorKey, data.color || "");
@@ -1574,6 +1647,7 @@ window.initItemCardsModule = function(deps){
           if(data.color) cur.color = data.color; else delete cur.color; // отметки дней (days) правка не трогает
           cur.date = data.date;
           cur.seconds = data.seconds;
+          if(type === "weather"){ cur.lat = data.lat; cur.lon = data.lon; }
           if(type === "alarm"){ cur.alarmTime = data.alarmTime; cur.alarmEvery = data.alarmEvery; cur.alarmTimes = data.alarmTimes; }
           if(type === "remind"){ cur.comment = data.comment; cur.remindAt = data.remindAt; cur.repeatKind = data.repeatKind; cur.remindDone = 0; }
           cur.updatedAt = now;
@@ -1800,6 +1874,215 @@ window.initItemCardsModule = function(deps){
     syncAlarmsView();
   }
 
+  // ---------- погода ----------
+  // Карточка: {type:"weather", title:<город>, lat, lon, icon:"weather"}. QR: lt://v1/weather/<широта>,<долгота>[/<название>] (координаты до сотых).
+  // Данные — Open-Meteo (без ключа, CORS открыт): прогноз `api.open-meteo.com`, воздух и УФ `air-quality-api.open-meteo.com`,
+  // поиск города `geocoding-api.open-meteo.com`. Запросы XHR (на Android 5 нет fetch). sw.js эти адреса НЕ кэширует (иначе погода застынет).
+  var WEATHER_CACHE_KEY = "itemCardsWeather_v1"; // последний удачный ответ по городу: показывается, если сети нет
+  var WX_DAYS = ["ВС", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
+  var WX_BASE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">';
+  var WX_CLOUD = '<path d="M7 14.5h10.2a3.4 3.4 0 0 0 .5-6.75A5 5 0 0 0 7.4 7 3.8 3.8 0 0 0 7 14.5z"></path>';
+  var WX_SHAPES = {
+    sun: '<circle cx="12" cy="12" r="4"></circle><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"></path>',
+    partly: ICONS.weather,
+    cloud: '<path d="M7 18h10.2a3.8 3.8 0 0 0 .6-7.55A5.5 5.5 0 0 0 7.2 9.6 4.2 4.2 0 0 0 7 18z"></path>',
+    rain: WX_CLOUD + '<path d="M8.5 17.5l-1 2.5M12.5 17.5l-1 2.5M16.5 17.5l-1 2.5"></path>',
+    snow: WX_CLOUD + '<path d="M8.5 18h.01M12 20h.01M15.5 18h.01"></path>',
+    storm: WX_CLOUD + '<path d="M13 14.5l-2.2 3h2.6l-1.6 3"></path>',
+    fog: '<path d="M4 8h16M6 12h12M4 16h16"></path>'
+  };
+  function wxIconSvg(kind){ return WX_BASE + (WX_SHAPES[kind] || WX_SHAPES.cloud) + '</svg>'; }
+  // код погоды WMO → вид значка
+  function wxKind(code){
+    code = Number(code);
+    if(code === 0 || code === 1) return "sun";
+    if(code === 2) return "partly";
+    if(code === 3) return "cloud";
+    if(code === 45 || code === 48) return "fog";
+    if((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return "rain";
+    if((code >= 71 && code <= 77) || code === 85 || code === 86) return "snow";
+    if(code >= 95 && code <= 99) return "storm";
+    return "cloud";
+  }
+  function wxDesc(code){
+    code = Number(code);
+    if(code === 0) return "ясно";
+    if(code === 1) return "преимущественно ясно";
+    if(code === 2) return "переменная облачность";
+    if(code === 3) return "пасмурно";
+    if(code === 45 || code === 48) return "туман";
+    if(code >= 51 && code <= 57) return "морось";
+    if(code >= 61 && code <= 67) return "дождь";
+    if(code >= 71 && code <= 77) return "снег";
+    if(code >= 80 && code <= 82) return "ливень";
+    if(code === 85 || code === 86) return "снегопад";
+    if(code >= 95 && code <= 99) return "гроза";
+    return "";
+  }
+  // слово про осадки по коду погоды ("" — осадков в коде нет)
+  function wxPrecipWord(code){
+    code = Number(code);
+    if(code >= 51 && code <= 57) return "морось";
+    if(code >= 61 && code <= 67) return "дождь";
+    if(code >= 71 && code <= 77) return "снег";
+    if(code >= 80 && code <= 82) return "ливень";
+    if(code === 85 || code === 86) return "снегопад";
+    if(code >= 95 && code <= 99) return "гроза";
+    return "";
+  }
+  function wxCoord(x){ return String(Math.round(Number(x) * 100) / 100); }
+  function wxTemp(v){
+    if(v == null || isNaN(Number(v))) return "—";
+    var n = Math.round(Number(v));
+    return n === 0 ? "0°" : (n > 0 ? "+" : "\u2212") + Math.abs(n) + "°";
+  }
+  function wxNum(v, d){ return String(Math.round(Number(v) * Math.pow(10, d)) / Math.pow(10, d)).replace(".", ","); }
+  function wxUv(v){
+    if(v == null || isNaN(Number(v))) return "—";
+    var n = Math.round(Number(v)), w = n < 3 ? "низкий" : (n < 6 ? "умеренный" : (n < 8 ? "высокий" : (n < 11 ? "очень высокий" : "экстремальный")));
+    return n + " · " + w;
+  }
+  // европейский индекс качества воздуха
+  function wxAqi(v){
+    if(v == null || isNaN(Number(v))) return "—";
+    var n = Number(v), w = n <= 20 ? "хорошее" : (n <= 40 ? "приемлемое" : (n <= 60 ? "умеренное" : (n <= 80 ? "плохое" : (n <= 100 ? "очень плохое" : "опасное"))));
+    return Math.round(n) + " · " + w;
+  }
+  function wxPlaceName(r){
+    var out = String(r.name || "");
+    if(r.admin1 && r.admin1 !== r.name) out += ", " + r.admin1;
+    if(r.country) out += ", " + r.country;
+    return out;
+  }
+  // GET → объект JSON или null (ошибка, нет сети, таймаут)
+  function wxHttp(url, cb){
+    var done = false, x;
+    function fin(v){ if(done) return; done = true; cb(v); }
+    try{
+      x = new XMLHttpRequest();
+      x.open("GET", url, true);
+      x.timeout = 12000;
+      x.onload = function(){
+        var j = null;
+        if(x.status >= 200 && x.status < 300){ try{ j = JSON.parse(x.responseText); }catch(e){ j = null; } }
+        fin(j);
+      };
+      x.onerror = function(){ fin(null); };
+      x.ontimeout = function(){ fin(null); };
+      x.send();
+    }catch(e){ fin(null); }
+  }
+  // поиск города по названию: массив результатов ([] — не найдено) или null (нет связи)
+  function wxSearchCity(q, cb){
+    wxHttp("https://geocoding-api.open-meteo.com/v1/search?name=" + encodeURIComponent(q) + "&count=8&language=ru&format=json", function(j){
+      cb(j ? (j.results || []) : null);
+    });
+  }
+  function wxCacheRead(){
+    try{ var o = JSON.parse(localStorage.getItem(WEATHER_CACHE_KEY) || "{}"); return (o && typeof o === "object") ? o : {}; }catch(e){ return {}; }
+  }
+  function wxCacheWrite(k, val){
+    var o = wxCacheRead();
+    o[k] = val;
+    var keys = Object.keys(o);
+    if(keys.length > 12){
+      keys.sort(function(a, b){ return ((o[a] && o[a].ts) || 0) - ((o[b] && o[b].ts) || 0); });
+      while(keys.length > 12) delete o[keys.shift()];
+    }
+    try{ localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify(o)); }catch(e){}
+  }
+  // cb({f, a, ts[, stale:true]}) или cb(null): f — прогноз (обязателен), a — воздух и УФ (может не быть); без сети — последний ответ из кэша
+  function loadWeather(lat, lon, cb){
+    lat = Number(lat); lon = Number(lon);
+    if(!isFinite(lat) || !isFinite(lon)){ cb(null); return; }
+    var key = lat.toFixed(2) + "," + lon.toFixed(2);
+    var fUrl = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon +
+      "&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m" +
+      "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max" +
+      "&wind_speed_unit=ms&timezone=auto&forecast_days=4";
+    var aUrl = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + lat + "&longitude=" + lon + "&current=european_aqi,uv_index&timezone=auto";
+    var f = null, a = null, left = 2;
+    function done(){
+      if(--left > 0) return;
+      if(f && f.current && f.daily && f.daily.time){
+        var res = { f: f, a: a, ts: Date.now() };
+        wxCacheWrite(key, res);
+        cb(res);
+        return;
+      }
+      var old = wxCacheRead()[key];
+      if(old && old.f){ old.stale = true; cb(old); } else cb(null);
+    }
+    wxHttp(fUrl, function(j){ f = j; done(); });
+    wxHttp(aUrl, function(j){ a = j; done(); });
+  }
+  function wxDayName(iso){
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
+    return m ? WX_DAYS[new Date(+m[1], +m[2] - 1, +m[3]).getDay()] : "";
+  }
+  function wxDayPrecip(d, i){
+    var pr = d.precipitation_probability_max ? d.precipitation_probability_max[i] : null;
+    var sum = d.precipitation_sum ? d.precipitation_sum[i] : null;
+    var has = (pr != null) ? pr >= 30 : (sum != null && sum >= 1);
+    if(!has) return "без осадков";
+    var w = wxPrecipWord(d.weather_code ? d.weather_code[i] : 0) || "осадки";
+    return w + (pr != null ? " " + Math.round(pr) + "%" : "");
+  }
+  function weatherHtml(title, res){
+    var cur = res.f.current || {}, d = res.f.daily || {}, air = (res.a && res.a.current) || {};
+    var html = '<div class="scan-weather-city">' + escapeHtml(title || "Погода") + '</div>' +
+      '<div class="scan-weather-now"><span class="scan-weather-ico">' + wxIconSvg(wxKind(cur.weather_code)) + '</span>' +
+        '<span class="scan-weather-temp">' + wxTemp(cur.temperature_2m) + '</span></div>' +
+      '<div class="scan-weather-desc">' + escapeHtml(wxDesc(cur.weather_code)) + '</div>';
+    function stat(k, v){ return '<div class="scan-weather-stat"><span class="scan-weather-k">' + k + '</span><span class="scan-weather-v">' + escapeHtml(v) + '</span></div>'; }
+    html += '<div class="scan-weather-stats">' +
+      stat("Ветер", cur.wind_speed_10m != null ? wxNum(cur.wind_speed_10m, 1) + " м/с" : "—") +
+      stat("Влажность", cur.relative_humidity_2m != null ? Math.round(cur.relative_humidity_2m) + "%" : "—") +
+      stat("УФ-индекс", wxUv(air.uv_index)) +
+      stat("Качество воздуха", wxAqi(air.european_aqi)) +
+    '</div>';
+    var pw = wxPrecipWord(cur.weather_code), mm = Number(cur.precipitation) || 0;
+    if(pw || mm > 0){ // осадки показываются, только если они есть
+      html += '<div class="scan-weather-precip">Осадки: ' + escapeHtml(pw || "есть") + (mm > 0 ? ", " + wxNum(mm, 1) + " мм" : "") + '</div>';
+    }
+    html += '<div class="scan-weather-days">';
+    for(var i = 1; i <= 3 && d.time && i < d.time.length; i++){
+      html += '<div class="scan-weather-day">' +
+        '<div class="scan-weather-day-name">' + wxDayName(d.time[i]) + '</div>' +
+        '<div class="scan-weather-day-ico">' + wxIconSvg(wxKind(d.weather_code ? d.weather_code[i] : 3)) + '</div>' +
+        '<div class="scan-weather-day-t">' + wxTemp(d.temperature_2m_max ? d.temperature_2m_max[i] : null) + '</div>' +
+        '<div class="scan-weather-day-min">' + wxTemp(d.temperature_2m_min ? d.temperature_2m_min[i] : null) + '</div>' +
+        '<div class="scan-weather-day-p">' + escapeHtml(wxDayPrecip(d, i)) + '</div>' +
+      '</div>';
+    }
+    html += '</div>';
+    if(res.stale){
+      var t = new Date(res.ts || 0);
+      html += '<div class="scan-weather-note">Нет связи — данные от ' + pad2(t.getDate()) + '.' + pad2(t.getMonth() + 1) + ' ' + pad2(t.getHours()) + ':' + pad2(t.getMinutes()) + '</div>';
+    }
+    return html;
+  }
+  // слой после скана: сразу название города и «Загружаю…», потом сама погода (если слой к тому времени не закрыли)
+  function showWeatherOverlay(c){
+    var title = String(c.title || "").slice(0, 80);
+    evLog("Погода" + (title ? " «" + title + "»" : ""));
+    var o = newOverlay();
+    var card = document.createElement("div");
+    card.className = "scan-weather-card";
+    card.addEventListener("click", function(e){ e.stopPropagation(); });
+    card.innerHTML = '<div class="scan-weather-city">' + escapeHtml(title || "Погода") + '</div><div class="scan-weather-status">Загружаю погоду…</div>';
+    o.appendChild(card);
+    if(isLegacyAnim()){ o.style.animation = "none"; card.style.animation = "none"; } // Android 5: без анимации
+    loadWeather(c.lat, c.lon, function(res){
+      if(overlayEl !== o) return; // слой уже закрыли
+      if(!res){
+        card.innerHTML = '<div class="scan-weather-city">' + escapeHtml(title || "Погода") + '</div><div class="scan-weather-status">Не удалось получить погоду. Проверьте интернет.</div>';
+        return;
+      }
+      card.innerHTML = weatherHtml(title, res);
+    });
+  }
+
   // ---------- сканирование (шаги 3 и 5 ТЗ) ----------
   var scanHandle = null;   // активный сканер (CardScan.open) или null
   var overlayEl = null;    // слой «карточка при сканировании» или null
@@ -1906,6 +2189,7 @@ window.initItemCardsModule = function(deps){
     if(p.kind === "today"){ openTodayFromScan(); return; }       // общий код «Сегодня»: карточка не нужна
     if(p.kind === "note"){ openScannedNote(p.id); return; }
     if(p.kind === "task"){ handleScannedTask(p); return; }  // задача в самом коде: карточка не нужна
+    if(p.kind === "weather"){ showWeatherOverlay({ title: p.title, lat: p.lat, lon: p.lon }); return; } // погода из самого кода: карточка не нужна
     if(p.kind === "alarm"){ showScanned(alarmFromCode(p)); return; } // будильник из самого кода: заводится сразу, карточка не нужна
     if(p.kind === "timer"){ showScanned(timerFromCode(p)); return; } // таймер из самого кода: отсчёт стартует сразу, карточка не нужна
     evLog("Просканирован QR-код: " + String(p.url || p.text || "").slice(0, 80));
@@ -2044,6 +2328,7 @@ window.initItemCardsModule = function(deps){
     return true;
   }
   function showScanned(c){
+    if(c.type === "weather"){ showWeatherOverlay(c); return; } // на случай кода по id карточки
     if(c.type === "alarm"){ // скан будильника: не заведён — заводится на ближайшее время; уже заведён (в том числе идут повторы) — выключается
       if(!alarmSupported()){ showNoticeOverlay({ kind: "msg", text: "Будильник работает только в приложении на телефоне." }); return; }
       refreshAlarms();

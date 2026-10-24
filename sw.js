@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.39.15";
+const APP_VERSION = "v0.39.16";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -382,6 +382,10 @@ self.addEventListener("fetch", (event) => {
   // В режиме оффлайн эти запросы отсекает сама страница (fetchWithTimeout и
   // installOfflineFetchGuard в my.js).
   if (url.hostname.endsWith(".firebasedatabase.app") || url.hostname.endsWith(".firebaseio.com")) return;
+
+  // Погода карточек (itemcards.js): запросы к Open-Meteo всегда идут напрямую в сеть — иначе стратегия ниже
+  // отдала бы первый закэшированный ответ и погода «застыла» бы.
+  if (url.hostname.endsWith(".open-meteo.com")) return;
 
   event.respondWith(
     isOfflineModeOn().then((offlineMode) =>

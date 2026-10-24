@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 12.1 (24.10) — структурная правка: `.scan-weather-*` — слой «Погода» после скана (itemcards.js 25.0, `showWeatherOverlay`). Откат: components.css 12.0.
    Версия: 12.0 (24.10) — структурная правка: стили центра событий `.event-center` и др.; название карточки `.item-card-title` — шрифт и интерлиньяж как у ридера/заметок/задач.
    Версия: 11.0 (22.10) — структурная правка: `.item-card-eye-btn` (кнопка-глаз на карточке при долгом нажатии), `.item-card-hidden` (скрытая карточка бледнее), itemcards.js 16.0. Откат: components.css 10.0.
    Версия: 10.0 (22.10) — структурная правка: `.item-filter-wrap`/`.item-filter-menu` (кнопка-воронка фильтра карточек слева от «+», itemcards.js 15.0). Откат: components.css 9.0.
@@ -4667,11 +4668,47 @@ body::after{
 .scan-task-tag{ font-size:14px; color:var(--ink-soft, inherit); }
 .scan-task-ico{ width:44px; height:44px; }
 .scan-task-ico svg{ width:100%; height:100%; }
+/* «Погода»: слой после скана — город, температура, ветер/влажность/УФ/воздух, осадки (если есть) и три мини-карточки дней.
+   Без flex-gap и grid (на Android 5 не работают): отступы — margin, колонки — проценты и flex:1 */
+.scan-weather-card{
+  box-sizing:border-box;
+  width:min(92vw, 420px);
+  max-height:88vh;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  padding:18px 16px 16px;
+  background:var(--bg-mid, #fbf4e2);
+  color:var(--ink, #000);
+  border:2px solid var(--ink, #000);
+  border-radius:14px;
+  text-align:center;
+  animation:scanCardPop .2s ease-out;
+}
+.scan-weather-city{ font-size:20px; font-weight:700; line-height:1.25; overflow-wrap:anywhere; }
+.scan-weather-status{ font-size:14px; padding:14px 0 6px; color:var(--ink-soft, inherit); }
+.scan-weather-now{ display:flex; align-items:center; justify-content:center; margin:8px 0 2px; }
+.scan-weather-ico{ display:block; width:46px; height:46px; margin-right:10px; flex:0 0 auto; }
+.scan-weather-ico svg, .scan-weather-day-ico svg{ display:block; width:100%; height:100%; }
+.scan-weather-temp{ font-size:52px; font-weight:300; line-height:1; }
+.scan-weather-desc{ font-size:14px; color:var(--ink-soft, inherit); margin-bottom:12px; }
+.scan-weather-stats{ display:flex; flex-wrap:wrap; text-align:left; }
+.scan-weather-stat{ box-sizing:border-box; width:50%; padding:5px 4px; }
+.scan-weather-k{ display:block; font-size:12px; color:var(--ink-soft, inherit); }
+.scan-weather-v{ display:block; font-size:15px; font-weight:600; }
+.scan-weather-precip{ margin-top:6px; font-size:14px; font-weight:600; }
+.scan-weather-days{ display:flex; margin:14px -3px 0; }
+.scan-weather-day{ box-sizing:border-box; flex:1 1 0; min-width:0; margin:0 3px; padding:8px 4px; border:1px solid rgba(0,0,0,.25); border-radius:10px; }
+.scan-weather-day-name{ font-size:13px; font-weight:700; letter-spacing:.04em; }
+.scan-weather-day-ico{ width:26px; height:26px; margin:4px auto; }
+.scan-weather-day-t{ font-size:17px; font-weight:600; line-height:1.2; }
+.scan-weather-day-min{ font-size:12px; color:var(--ink-soft, inherit); }
+.scan-weather-day-p{ font-size:11px; line-height:1.25; margin-top:4px; color:var(--ink-soft, inherit); }
+.scan-weather-note{ margin-top:10px; font-size:12px; color:var(--ink-soft, inherit); }
 @keyframes scanCardFade{ from{ opacity:0; } to{ opacity:1; } }
 @keyframes scanCardPop{ from{ transform:scale(.92); opacity:0; } to{ transform:scale(1); opacity:1; } }
 /* Android 5 и «уменьшить анимацию»: без анимации появления */
 @media (prefers-reduced-motion: reduce){
-  .scan-card-overlay, .scan-card, .scan-reminder-card, .scan-task-card{ animation:none; }
+  .scan-card-overlay, .scan-card, .scan-reminder-card, .scan-task-card, .scan-weather-card{ animation:none; }
 }
 
 /* таймеры карточек (шаг 5а): внизу карточки две равные кнопки — «Стоп» слева, «Пуск» справа; цифры идущего таймера выделены, приостановленного — приглушены.
