@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 26.1 (25.10) — при фильтре «Избранное» кнопка-глаз в нижнем ряду скрыта (там и так показаны все, скрытые тоже); меню воронки, «+» и PDF закрываются тапом мимо (`bindMenuDismiss`: тап по карточке только закрывает меню, не открывая форму) и прокруткой списка. Kotlin не менялся. Откат: itemcards.js 26.0.
    Версия: 26.0 (25.10) — структурная правка: фильтр «Особые» переименован в «Избранное» (ключ `fav`): в него попадают только карточки с признаком `fav`, а не «Сегодня»/«Напоминалка»; кнопка-звезда `.item-card-fav-btn` среди кнопок при удержании карточки (`toggleFav`) ставит и снимает признак (синхронизируется через `cloudShape`); при фильтре «Избранное» показываются все избранные карточки, в том числе скрытые, независимо от кнопки-глаза внизу. Откат: itemcards.js 25.1.
    Версия: 25.1 (25.10) — на карточке «Погода» внизу кнопка «Показать» (`.item-card-wx-btn`): показывает слой погоды (`showWeatherOverlay`) без сканирования QR. Kotlin не менялся. Откат: itemcards.js 25.0.
    Версия: 25.0 (24.10) — структурная правка: новый тип карточки «Погода» (`weather`, пункт «+» после «Будильника», «Погода» в воронке): QR несёт город в самом коде — `lt://v1/weather/<широта>,<долгота>[/<название>]` (`WEATHER_PREFIX`, `qrTextFor`); форма — поиск города по названию (геокодер Open-Meteo, `wxSearchCity`) и цвет как у остальных; скан показывает слой `showWeatherOverlay`: город, температура, ветер (м/с), влажность, УФ-индекс, качество воздуха, осадки (если есть) и три мини-карточки следующих дней; данные — Open-Meteo без ключа (`loadWeather`, запрос XHR, последний ответ кладётся в `itemCardsWeather_v1` на случай «нет сети»). Откат: itemcards.js 24.1.
@@ -889,7 +890,7 @@ window.initItemCardsModule = function(deps){
     var curFilter = getFilter();
     var showAll = getShowHidden();
     html += '<div class="mdeditor-fab-row">' +
-      '<button type="button" class="mdeditor-fab-btn" id="itemCardsHiddenBtn" title="' + (showAll ? 'Показаны все карточки (нажмите, чтобы скрыть скрытые)' : 'Скрытые карточки не показаны (нажмите, чтобы показать все)') + '">' + (showAll ? EYE_ICON_SVG : EYE_OFF_ICON_SVG) + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="itemCardsHiddenBtn"' + (curFilter === "fav" ? ' style="display:none;"' : '') + ' title="' + (showAll ? 'Показаны все карточки (нажмите, чтобы скрыть скрытые)' : 'Скрытые карточки не показаны (нажмите, чтобы показать все)') + '">' + (showAll ? EYE_ICON_SVG : EYE_OFF_ICON_SVG) + '</button>' +
       '<span class="item-filter-wrap">' +
         '<div class="item-type-menu item-filter-menu" id="itemFilterMenu" style="display:none;">' +
           FILTERS.map(function(f){
@@ -1224,7 +1225,46 @@ window.initItemCardsModule = function(deps){
       if(m) m.style.display = "none";
     });
   }
+  // меню воронки, «+» и PDF закрываются тапом мимо и прокруткой; слушатели вешаются один раз на document (вкладка перерисовывается часто)
+  var menuDismissBound = false, menuTapAt = 0;
+  function anyMenuOpen(){
+    if(typeMenuOpen) return true;
+    var ids = ["itemTypeMenu", "itemFilterMenu", "itemPdfMenu"];
+    for(var i = 0; i < ids.length; i++){
+      var m = document.getElementById(ids[i]);
+      if(m && m.style.display === "flex") return true;
+    }
+    return false;
+  }
+  function bindMenuDismiss(){
+    if(menuDismissBound) return;
+    menuDismissBound = true;
+    function onDown(e){
+      if(!anyMenuOpen()) return;
+      var t = e.target;
+      if(!t || !t.closest || t.closest(".item-type-menu, #itemCardsFilterBtn, #itemCardsAddBtn, #itemCardsPdfBtn")) return; // свои кнопки сами открывают и закрывают меню
+      closeTypeMenu();
+      if(t.closest("#itemCardsGrid")) menuTapAt = Date.now(); // тап по карточке только закрывает меню (см. onClick); долгое нажатие работает как обычно
+    }
+    function onClick(e){
+      if(!menuTapAt) return;
+      var recent = Date.now() - menuTapAt < 350;
+      menuTapAt = 0;
+      if(recent && e.target && e.target.closest && e.target.closest("#itemCardsGrid")){ e.stopPropagation(); e.preventDefault(); }
+    }
+    function onScroll(e){
+      if(!anyMenuOpen()) return;
+      var t = e.target;
+      if(t && t.closest && t.closest(".item-type-menu")) return; // прокрутка самого меню
+      closeTypeMenu();
+    }
+    document.addEventListener("touchstart", onDown, { capture: true, passive: true });
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("click", onClick, true);
+    document.addEventListener("scroll", onScroll, true);
+  }
   function bindFab(tab){
+    bindMenuDismiss();
     var addBtn = document.getElementById("itemCardsAddBtn");
     var menu = document.getElementById("itemTypeMenu");
     var hiddenBtn = document.getElementById("itemCardsHiddenBtn");
