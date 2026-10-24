@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (24.10) — счётчик завершённых проверок `checkSeq` (в describe() и для вкладки «Проверка обновлений»).
 // Версия: 1.0 (16.10) — activeBundleReadOnly(): чтение активного бандла без изменения состояния (для ScanActivity).
 
 import android.os.SystemClock
@@ -77,6 +78,11 @@ class WebUpdater(
 
         @Volatile
         var lastResult: String = "проверок ещё не было"
+            private set
+
+        /** Сколько проверок завершилось с запуска приложения (растёт после каждой): страница по нему узнаёт, что проверка кончилась. */
+        @Volatile
+        var checkSeq: Int = 0
             private set
 
         /** "0.38.41" и "V0.38.41" приводятся к "v0.38.41"; всё, что не похоже на версию, даёт null. */
@@ -312,6 +318,7 @@ class WebUpdater(
                 "ошибка: ${e.message ?: e.javaClass.simpleName}"
             }
             lastResult = result
+            checkSeq++
             Log.i(TAG, result)
             return result
         } finally {
@@ -500,6 +507,7 @@ class WebUpdater(
             .put("bad", JSONArray(s.bad))
             .put("busy", busy.get())
             .put("lastResult", lastResult)
+            .put("checkSeq", checkSeq)
             .toString()
     }
 

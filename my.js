@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 78.0 (24.10) — структурная правка: вкладка `alt5` «Версии» заменена на «Проверка обновлений» (`renderSettingsTabUpdates`: кнопка внизу, «Проверить обновления» → «Перезагрузить приложение для установки обновлений»; в APK — через мост версии 10: `checkWebUpdateNow`/`getWebUpdateState`/`restartForWebUpdate`, в браузере — через `SW_REGISTRATION.update()`); архив версий убран (`renderVersionHistory`, `renderVersionItems`, `ensureVersionsTabStyle`, `renderSettingsTabVersions`). Классы `.version-history-*` остались — их используют другие места.
    Версия: 77.0 (23.10) — структурная правка: вкладка «Скрытие вкладок» (`alt6`, режим колеса, вторая снизу в вертикальном стеке — на месте Red, `BOTTOM_ALT_REPLACES.alt6`; Red теперь тоже в `BOTTOM_ALT_ORIGINAL_TABS` и скрывается под колесом, как worktasks): список всех вкладок с пиктограммой (innerHTML настоящей кнопки), названием и галочкой «показана» (`renderSettingsTabHiddenTabs`, `hideableTabsInScreenOrder`); скрытие — класс `.settings-tab-user-hidden` (display:none !important, стиль вставляется из JS), хранение `bibleHiddenSettingsTabs_v1` (id кнопок, внесён в `EXPORT_REGISTRY.include`); шестерёнка и вкладки режима колеса не скрываются; `getResumeSettingsState`/`openTabOfActiveSettingsSet` не открывают скрытую вкладку (`isSettingsTabUserHidden`, `firstVisibleTabOfSet`). Откат: my.js 76.1.
    Версия: 76.1 (22.10) — в подписи общей задачи «Создал: …» добавлены дата и время создания («Создал: Вы, 22.10.2026 8:05 · Выполнил: …», тот же шрифт `.task-joint-signature`): `groupTaskCreatedTs` берёт время из id задачи (genGroupTaskId), для задач со старым id — из c.createdAt; `formatTaskCreatedAt`; `buildTaskJointSignatureHtml(content, id)` получил второй параметр (активные задачи и архив). Откат: my.js 76.0.
    Версия: 76.0 (22.10) — структурная правка: теги-категории задач (`c.tag`): кнопка тегов `#taskTagBtn` с выпадающим списком в ряду кнопок вкладок задач (`updateTaskTagBtn`/`renderTaskTagPopup`, фильтр вкладки хранится в `bibleTaskTagFilter_v1`, `getTaskTagFilter`/`setTaskTagFilter`/`collectTaskTags`), фильтр в `renderTaskTabList`; `addTaskFromQr(tab, text, tag)` ставит тег (`getAllTaskTags`), тег сохраняется при переносе между личным и общим хранилищем; деп `getTaskTags` у `initItemCardsModule`. Откат: my.js 75.0.
@@ -9734,88 +9735,146 @@
     });
   }
 
-  // ===================== АРХИВ ПРЕДЫДУЩИХ ВЕРСИЙ =====================
-  // Список берётся автоматически из ./versions/versions.json — этот файл ведёт GitHub Action при
-  // публикации релиза (тега) в репозитории, вручную ничего копировать и редактировать в коде больше
-  // не нужно.
-  function renderVersionHistory(){
-    var itemsHolder = document.getElementById("versionHistoryItems");
-    if(!itemsHolder) return;
-    fetch("./versions/versions.json")
-      .then(function(res){
-        if(!res.ok) throw new Error("no versions.json");
-        return res.json();
-      })
-      .then(function(data){
-        var items = (data && data.versions) ? data.versions.slice(0, 5) : [];
-        renderVersionItems(items);
-      })
-      .catch(function(){
-        renderVersionItems([]);
-      });
+  // ===================== ВКЛАДКА «ПРОВЕРКА ОБНОВЛЕНИЙ» =====================
+  // Вкладка alt5 (режим колеса, низ вертикального стека; раньше — «Версии»). Одна кнопка внизу области: «Проверить
+  // обновления» → когда новая веб-часть скачана, превращается в «Перезагрузить приложение для установки обновлений».
+  // В APK: проверку делает оболочка (WebUpdater: checkWebUpdateNow, итог — по счётчику checkSeq в getWebUpdateState),
+  // скачанная версия лежит как «ожидающая» (pending) и применяется только при создании Activity, поэтому перезагрузка —
+  // restartForWebUpdate (мост версии 10). В браузере (PWA): SW_REGISTRATION.update(), готовое обновление — перезагрузка страницы.
+  var UPDATES_LABEL_CHECK = "Проверить обновления";
+  var UPDATES_LABEL_RELOAD = "Перезагрузить приложение для установки обновлений";
+  var UPDATES_POLL_MS = 700;
+  var UPDATES_POLL_MAX_MS = 180000;
+
+  function updatesReadNativeState(){
+    try{ return JSON.parse(window.LifeTrackerNative.getWebUpdateState() || "{}") || {}; }catch(e){ return {}; }
   }
 
-  function renderVersionItems(items){
-    var itemsHolder = document.getElementById("versionHistoryItems");
-    if(!itemsHolder) return;
-    itemsHolder.innerHTML = "";
-    if(!items.length){
-      var empty = document.createElement("div");
-      empty.className = "version-history-empty";
-      empty.textContent = "Архив версий пока пуст";
-      itemsHolder.appendChild(empty);
-      return;
-    }
-    items.forEach(function(item){
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "version-history-item";
-      btn.textContent = "v" + item.version + (item.date ? " — " + item.date : "");
-      var url = "./versions/v" + item.version + "/index.html";
-      btn.addEventListener("click", function(){
-        selectedVersionUrl = url;
-        Array.prototype.forEach.call(itemsHolder.querySelectorAll(".version-history-item"), function(b){
-          b.classList.remove("selected");
-        });
-        btn.classList.add("selected");
-        var returnBtn = document.getElementById("mVersionReturnBtn");
-        if(returnBtn) returnBtn.style.display = "block";
-      });
-      itemsHolder.appendChild(btn);
-    });
+  function updatesCapFirst(t){
+    t = String(t || "");
+    return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
   }
 
-  var selectedVersionUrl = null;
-
-  function ensureVersionsTabStyle(){
-    if(document.getElementById("versionsTabStyle")) return;
-    var st = document.createElement("style");
-    st.id = "versionsTabStyle";
-    st.textContent =
-      ".versions-tab .version-history-item, .versions-tab .version-history-empty, .versions-tab .modal-btn{" +
-      "font-family:inherit !important;font-size:var(--mdeditor-font-size, inherit) !important;}";
-    document.head.appendChild(st);
-  }
-
-  function renderSettingsTabVersions(){
+  function renderSettingsTabUpdates(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
-    selectedVersionUrl = null;
-    ensureVersionsTabStyle();
     container.innerHTML =
       '<div class="settings-content-bottom">' +
-      '<div class="settings-gear-tab versions-tab">' +
-      '<h3 class="common-tab-title">Версии</h3>' +
-      '<div id="versionHistoryItems"></div>' +
-      '<button class="modal-btn primary" id="mVersionReturnBtn" style="display:none;margin-top:12px;">Вернуться на выбранную версию</button>' +
+      '<div class="settings-gear-tab updates-tab">' +
+      '<h3 class="common-tab-title">Проверка обновлений</h3>' +
+      '<div id="updatesStatus" style="margin:0 0 12px;min-height:1.3em;opacity:.85;"></div>' +
+      '<button class="modal-btn primary" id="updatesBtn" type="button">' + UPDATES_LABEL_CHECK + '</button>' +
       '</div>' +
       '</div>';
-    renderVersionHistory();
-    var returnBtn = document.getElementById("mVersionReturnBtn");
-    if(returnBtn){
-      returnBtn.addEventListener("click", function(){
-        if(selectedVersionUrl) window.location.href = selectedVersionUrl;
+    var btn = document.getElementById("updatesBtn");
+    var statusEl = document.getElementById("updatesStatus");
+    if(!btn || !statusEl) return;
+
+    var native = window.LifeTrackerNative || null;
+    var nativeOk = !!(native && typeof native.checkWebUpdateNow !== "undefined" && typeof native.getWebUpdateState !== "undefined");
+    var canRestart = !!(native && typeof native.restartForWebUpdate !== "undefined");
+    var readyToReload = false;
+    var busy = false;
+
+    function alive(){ return document.getElementById("updatesBtn") === btn; } // вкладку могли закрыть
+    function setStatus(t){ statusEl.textContent = t || ""; }
+    function showCheck(){
+      readyToReload = false; busy = false;
+      btn.disabled = false; btn.textContent = UPDATES_LABEL_CHECK;
+    }
+    function showReload(text){
+      readyToReload = true; busy = false;
+      btn.disabled = false; btn.textContent = UPDATES_LABEL_RELOAD;
+      if(text) setStatus(text);
+    }
+    function showBusy(text){
+      busy = true; btn.disabled = true; btn.textContent = "Проверяю…";
+      setStatus(text || "");
+    }
+
+    // ---- APK
+    function nativeFinish(st){
+      if(st.pending){
+        if(canRestart) showReload("Обновление " + st.pending + " скачано. Осталось перезагрузить приложение.");
+        else { showCheck(); setStatus("Обновление " + st.pending + " скачано, но эта сборка оболочки не умеет перезапускаться сама: пересоберите APK или закройте приложение и откройте заново."); }
+      } else {
+        showCheck();
+        setStatus(updatesCapFirst(st.lastResult));
+      }
+    }
+    function nativeCheck(){
+      var before = updatesReadNativeState().checkSeq || 0;
+      showBusy("Связываюсь с GitHub…");
+      try{ native.checkWebUpdateNow(); }catch(e){ showCheck(); setStatus("Не удалось запустить проверку: " + e); return; }
+      var started = Date.now();
+      (function poll(){
+        if(!alive()) return;
+        var st = updatesReadNativeState();
+        if((st.checkSeq || 0) > before){ nativeFinish(st); return; }
+        if(Date.now() - started > UPDATES_POLL_MAX_MS){
+          showCheck(); setStatus("Ответа нет дольше трёх минут (медленный интернет?). Нажмите ещё раз."); return;
+        }
+        if(st.busy) setStatus("Скачиваю обновление…");
+        setTimeout(poll, UPDATES_POLL_MS);
+      })();
+    }
+
+    // ---- браузер (PWA, service worker)
+    function swCheck(){
+      var reg = SW_REGISTRATION;
+      if(!reg){ showCheck(); setStatus("Service worker ещё не запущен — попробуйте через несколько секунд."); return; }
+      if(typeof isNetworkAvailable === "function" && !isNetworkAvailable()){ showCheck(); setStatus("Нет сети или включён режим «оффлайн»."); return; }
+      showBusy("Связываюсь с сервером…");
+      var done = false;
+      function finish(ready, text){
+        if(done) return; done = true;
+        if(!alive()) return;
+        if(ready) showReload(text); else { showCheck(); setStatus(text); }
+      }
+      var timeout = setTimeout(function(){ finish(false, "Ответа нет дольше минуты. Нажмите ещё раз."); }, 60000);
+      reg.update().then(function(){
+        var w = reg.installing || reg.waiting;
+        if(!w){
+          clearTimeout(timeout);
+          finish(!!reg.waiting, "Новой версии нет, у вас последняя.");
+          return;
+        }
+        setStatus("Скачиваю обновление…");
+        function judge(){
+          if(w.state === "installed" || w.state === "activating" || w.state === "activated"){
+            clearTimeout(timeout);
+            finish(true, "Обновление скачано. Осталось перезагрузить приложение.");
+          } else if(w.state === "redundant"){
+            clearTimeout(timeout);
+            finish(false, "Не удалось установить обновление (не скачался обязательный файл или включён режим «оффлайн»).");
+          }
+        }
+        w.addEventListener("statechange", judge);
+        judge();
+      }).catch(function(err){
+        clearTimeout(timeout);
+        finish(false, "Не удалось проверить: " + (err && err.message ? err.message : err));
       });
+    }
+
+    btn.addEventListener("click", function(){
+      if(busy) return;
+      if(readyToReload){
+        if(nativeOk){
+          if(canRestart){ btn.disabled = true; setStatus("Перезапускаю…"); try{ native.restartForWebUpdate(); }catch(e){ btn.disabled = false; setStatus("Не получилось: " + e); } }
+        } else {
+          window.location.reload();
+        }
+        return;
+      }
+      if(nativeOk) nativeCheck(); else swCheck();
+    });
+
+    // уже скачанное, но не применённое обновление — сразу предлагаем перезагрузку
+    if(nativeOk){
+      var st0 = updatesReadNativeState();
+      if(st0.pending && canRestart) showReload("Обновление " + st0.pending + " уже скачано. Осталось перезагрузить приложение.");
+      else if(st0.busy) setStatus("Сейчас идёт фоновая проверка. Нажмите «" + UPDATES_LABEL_CHECK + "», чтобы дождаться результата.");
     }
   }
 
@@ -10246,7 +10305,7 @@
       var btn = document.getElementById(TASK_TAB_IDS[key]);
       if(!btn) return;
       if(bottomAltMode){
-        var replacedByAlt = (key === "worktasks" || key === "red"); // на их местах стоят «Версии» и «Скрытие вкладок»
+        var replacedByAlt = (key === "worktasks" || key === "red"); // на их местах стоят «Проверка обновлений» и «Скрытие вкладок»
         btn.style.display = replacedByAlt ? "none" : "flex";
         setTabDecor(btn, !replacedByAlt);
       } else {
@@ -10439,7 +10498,7 @@
       destroyBookReaderScrollListener();
     }
     // запоминаем позицию только если это реальная вкладка одного из двух стеков (бокового или
-    // нижнего, набор 1 или 2) — служебные экраны вроде "versions"/"import"/"resetConfirm"
+    // нижнего, набор 1 или 2) — служебные экраны вроде "import"/"resetConfirm"
     // (открываются кнопками ВНУТРИ вкладки настроек) не считаются отдельной позицией и не сбивают
     // запомненное место — см. cycleSettingsTabSet ниже.
     if(SETTINGS_SIDE_ORDER_1.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(tab) !== -1 ||
@@ -10504,7 +10563,6 @@
     }
     if(tab === "mood"){ markMoodOpenedToday(); renderSettingsTabMood(); }
     else if(tab === "year") renderSettingsTabYear();
-    else if(tab === "versions") renderSettingsTabVersions();
     else if(tab === "jointArchive") renderTaskArchiveTab(true);
     else if(tab === "import") renderSettingsTabImportPicker();
     else if(tab === "resetConfirm") renderSettingsTabResetConfirm();
@@ -17667,7 +17725,7 @@
   var BOTTOM_ALT_TAB_TITLES = {
     alt1: "Внешний вид", alt2: "Синхронизация",
     alt3: "Восстановление и сброс", alt4: "Дополнительные возможности",
-    alt5: "Версии", alt6: "Скрытие вкладок"
+    alt5: "Проверка обновлений", alt6: "Скрытие вкладок"
   };
   var BOTTOM_ALT_ORIGINAL_TABS = ["year", "mood", "extra2", "extra3", "worktasks", "red"];
   var BOTTOM_ALT_SVG_OPEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">';
@@ -17693,9 +17751,9 @@
       '<path d="M4 12h3"></path><path d="M11 12h9"></path><circle cx="9" cy="12" r="2"></circle>' +
       '<path d="M4 17h11"></path><path d="M19 17h1"></path><circle cx="17" cy="17" r="2"></circle>' +
       '</svg>',
-    // стопка слоёв — версии
+    // стрелка вниз в лоток — проверка и загрузка обновлений
     alt5: BOTTOM_ALT_SVG_OPEN +
-      '<path d="M12 3.5l9 4.8-9 4.8-9-4.8 9-4.8z"></path><path d="M3 12.6l9 4.8 9-4.8"></path><path d="M3 16.9l9 4.8 9-4.8"></path>' +
+      '<path d="M12 3.5v11"></path><path d="M7.5 10.5l4.5 4.5 4.5-4.5"></path><path d="M4.5 19.5h15"></path>' +
       '</svg>',
     // перечёркнутый глаз — скрытие вкладок
     alt6: BOTTOM_ALT_SVG_OPEN +
@@ -17803,7 +17861,7 @@
     if(tab === "alt2"){ renderSettingsTabSync(); return; }
     if(tab === "alt3"){ renderSettingsTabRecovery(); return; }
     if(tab === "alt4"){ renderSettingsTabMore(); return; }
-    if(tab === "alt5"){ renderSettingsTabVersions(); return; }
+    if(tab === "alt5"){ renderSettingsTabUpdates(); return; }
     if(tab === "alt6"){ renderSettingsTabHiddenTabs(); return; }
     container.innerHTML = '<h3 class="common-tab-title">' + BOTTOM_ALT_TAB_TITLES[tab] + '</h3>' +
       '<div class="mood-diagram-empty">Контент появится позже</div>';
@@ -22693,7 +22751,7 @@
   // привязанных к другому проекту, плюс возможность сразу создать новую next-задачу, привязанную к
   // этому проекту "Все задачи проекта" (кнопка-цепочка на строке проекта) — не отдельное
   // всплывающее окно, а замена содержимого прямо в #settingsTabContent (тот же приём, что и у
-  // "Версий", см. renderSettingsTabVersions выше). Отдельной кнопки "назад" нет — возврат к списку
+  // вкладки «Проверка обновлений», см. renderSettingsTabUpdates выше). Отдельной кнопки "назад" нет — возврат к списку
   // проектов происходит так же, как и вход сюда: через повторный клик по язычку "Projects"
   // (switchSettingsTab("projects") безусловно перерисовывает список проектов поверх этого экрана).
   function openTaskNextPicker(projectId, tabKey, resumeScrollTop){
@@ -23217,7 +23275,7 @@
     }).join("");
     // Заголовок — только у группового экрана: у личного архива своя постоянная кнопка-язычок уже
     // говорит, что это архив (см. пояснение у renderTaskArchiveTab выше), а у "jointArchive" такого
-    // язычка нет — тот же приём заголовка, что у renderSettingsTabVersions.
+    // язычка нет — тот же приём заголовка, что у renderSettingsTabUpdates.
     var titleHtml = isGroup ? '<div class="year-grid-tab-title" style="margin-bottom:12px;">Архив общих задач</div>' : '';
     container.innerHTML =
       titleHtml +
@@ -24053,7 +24111,6 @@
   refreshExtra2TabAppearance();
   refreshExtra3TabAppearance();
   updateMissedBanner();
-  renderVersionHistory();
   renderHourBars();
   renderHourCounterMenu();
   checkHourBoundaries();

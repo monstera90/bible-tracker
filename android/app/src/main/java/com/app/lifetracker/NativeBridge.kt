@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 3.0 (24.10) — мост версии 10: restartForWebUpdate (перезапуск Activity, чтобы применилась скачанная веб-часть).
 // Версия: 2.0 (21.10) — мост версии 9: вкладка Claude (claudeShow/claudeHide/claudeReload/claudeSetAuto/claudeGetState/claudeArm/claudeDisarm/claudeSendNow).
 // Версия: 1.1 (18.10) — мост версии 8: createScanShortcut / openShortcutPermissionSettings.
 // Версия: 1.0 (17.10) — мост версии 7: методы таймеров карточек (startCardTimer и др.).
@@ -27,8 +28,9 @@ class NativeBridge(private val activity: MainActivity) {
          * 7: таймеры карточек вкладки 9 (startCardTimer / pauseCardTimer / resumeCardTimer / cancelCardTimer / getCardTimers).
          * 8: ярлык сканера QR на рабочий стол (createScanShortcut / openShortcutPermissionSettings).
          * 9: вкладка Claude (claudeShow / claudeHide / claudeReload / claudeSetAuto / claudeGetState / claudeArm / claudeDisarm / claudeSendNow).
+         * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          */
-        const val BRIDGE_VERSION = 9
+        const val BRIDGE_VERSION = 10
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -80,6 +82,16 @@ class NativeBridge(private val activity: MainActivity) {
     fun checkWebUpdateNow() {
         if (!activity.pageTrusted) return
         activity.webUpdater.checkInBackground(true)
+    }
+
+    /**
+     * Перезапускает Activity: onCreate снова зовёт WebUpdater.startLaunch(), и скачанная (ожидающая) версия веб-части
+     * становится активной без ожидания следующего холодного запуска. Процесс и данные приложения не затрагиваются.
+     */
+    @JavascriptInterface
+    fun restartForWebUpdate() {
+        if (!activity.pageTrusted) return
+        activity.runOnUiThread { activity.recreate() }
     }
 
     /** Самотест live-update на устройстве (без сети, в отдельной папке): текст с ✅/❌. */
