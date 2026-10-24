@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 12.2 (24.10) — `.item-card-wx-btn` («Показать» на карточке «Погода») оформлена как кнопки таймера. Откат: components.css 12.1.
    Версия: 12.1 (24.10) — структурная правка: `.scan-weather-*` — слой «Погода» после скана (itemcards.js 25.0, `showWeatherOverlay`). Откат: components.css 12.0.
    Версия: 12.0 (24.10) — структурная правка: стили центра событий `.event-center` и др.; название карточки `.item-card-title` — шрифт и интерлиньяж как у ридера/заметок/задач.
    Версия: 11.0 (22.10) — структурная правка: `.item-card-eye-btn` (кнопка-глаз на карточке при долгом нажатии), `.item-card-hidden` (скрытая карточка бледнее), itemcards.js 16.0. Откат: components.css 10.0.
@@ -4721,7 +4722,8 @@ body::after{
   display:flex;
 }
 .item-card-start-btn,
-.item-card-stop-btn{
+.item-card-stop-btn,
+.item-card-wx-btn{
   flex:1 1 0;
   min-width:0;
   padding:calc(var(--item-card-w, 112px) * 0.02) 0;

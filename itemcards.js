@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 25.1 (24.10) — на карточке «Погода» внизу кнопка «Показать» (`.item-card-wx-btn`): показывает слой погоды (`showWeatherOverlay`) без сканирования QR. Kotlin не менялся. Откат: itemcards.js 25.0.
    Версия: 25.0 (24.10) — структурная правка: новый тип карточки «Погода» (`weather`, пункт «+» после «Будильника», «Погода» в воронке): QR несёт город в самом коде — `lt://v1/weather/<широта>,<долгота>[/<название>]` (`WEATHER_PREFIX`, `qrTextFor`); форма — поиск города по названию (геокодер Open-Meteo, `wxSearchCity`) и цвет как у остальных; скан показывает слой `showWeatherOverlay`: город, температура, ветер (м/с), влажность, УФ-индекс, качество воздуха, осадки (если есть) и три мини-карточки следующих дней; данные — Open-Meteo без ключа (`loadWeather`, запрос XHR, последний ответ кладётся в `itemCardsWeather_v1` на случай «нет сети»). Откат: itemcards.js 24.1.
    Версия: 24.1 (24.10) — повторный скан кода заведённого будильника выключает его (`showScanned`: `alarmInfo(runId(c))` → `stopAlarmForCard`, слой «Выключен»); раньше заводил заново. Kotlin не менялся. Откат: itemcards.js 24.0.
    Версия: 24.0 (24.10) — структурная правка: новый тип карточки «Будильник» (`alarm`, пункт «+» после «Скрытого таймера», «Будильники» в воронке): QR несёт время, повтор и название — `lt://v1/alarm/<ЧЧММ>[,<5|15|30>,<1..4>][/<название>]` (`ALARM_PREFIX`, `qrTextFor`, `alarmFromCode`; id будильника в оболочке — хеш кода, `alarmCodeId`/`runId`, поэтому скан и карточка в сетке — один будильник); поля карточки `alarmTime` («ЧЧ:ММ»), `alarmEvery` (0/5/15/30 минут), `alarmTimes` (0..4 повторов) ходят через облако (`cloudShape`); форма — колёса часов и минут, список «Повтор через…» и (только при выбранном повторе) «Количество повторов»; скан заводит будильник на ближайшее такое время (сегодня, если не прошло, иначе завтра) через мост (`getAlarmApi`: оболочка / `deps.alarms` в `scan.html`; в браузере без оболочки — сообщение), кнопки «Выкл.» и «Завести» на карточке (`startAlarmForCard`/`stopAlarmForCard`, `syncAlarmsView`). Откат: itemcards.js 23.0.
@@ -823,7 +824,10 @@ window.initItemCardsModule = function(deps){
     }
     if(c.type === "weather"){ // значок погоды и название города
       return '<div class="item-card-icon">' + iconSvg(c.icon || "weather") + '</div>' +
-        '<div class="item-card-title"></div>';
+        '<div class="item-card-title"></div>' +
+        '<div class="item-card-timer-btns">' +
+          '<button type="button" class="item-card-wx-btn" title="Показать погоду">Показать</button>' +
+        '</div>';
     }
     if(c.type === "habit"){ // цвет привычки — фон всей карточки (applyCardLook), здесь значок календаря с галочкой и название
       return '<div class="item-card-icon">' + iconSvg("habit") + '</div>' +
@@ -1121,6 +1125,7 @@ window.initItemCardsModule = function(deps){
       }
       if(flippedId === id){ flipCard(id, false); return; } // тап по QR/обороту — назад
       if(flippedId) unflipAny();
+      if(c.type === "weather" && e.target.closest(".item-card-wx-btn")){ hideRevealed(); showWeatherOverlay(c); return; } // «Показать»: погода без скана QR
       if(e.target.closest(".item-card-start-btn")){ startTimerForCard(c); return; } // «Пуск»: запуск, а если уже идёт — заново
       if(e.target.closest(".item-card-stop-btn")){ stopTimerForCard(c); return; } // «Стоп»: отмена таймера
       if(revealedIds[id]){ hideRevealed(); return; }
