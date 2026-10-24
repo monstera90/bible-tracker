@@ -1,5 +1,6 @@
 /* ===========================================================================
    notifications.js
+   Версия: 4.5 (24.10) — в журнале событий у карточек «Было/Будет показано напоминание «…»» без «по карточке».
    Версия: 4.4 (24.10) — `pushNative` передаёт оболочке `repeatKind` (карточка «Напоминание»).
    Версия: 4.3 (24.10) — события для центра событий (`eventlog.js`): `logReminderShown`, провайдер предстоящих напоминаний (`EventLog.setUpcomingProvider`), запись напоминаний, показанных оболочкой.
    Версия: 4.2 (17.10) — структурная правка: напоминания карточек вкладки 9 (id вида `card:<id>`, их отдаёт getRemindableTasks из my.js): клик по уведомлению ведёт к карточке (`openCardFromReminder`), у карточек нет «Готово/Завтра» (в окне, в браузерном уведомлении) и показывается плашка вместо карточки задачи; в снимок для оболочки добавлено `repeatDays`; в окне даты/времени слева появляется кнопка «повтор» (`opts.onRepeat`, периоды 1,2,3,5,10,14,21,30,60,90,180 дней, после 180 и долгое удержание — выключение). Откат: notifications.js 4.1.
@@ -476,10 +477,11 @@ window.initNotificationsModule = function(deps){
     if(t && !(t.c && t.c.checked === true)) showTaskCard(id, cleanText(t.c && t.c.text), null);
   }
 
-  function reminderWhat(id){ return isCardId(id) ? "карточке" : "задаче"; }
+  // у задач — «по задаче «…»», у карточек — просто «напоминание «…»» (без «по карточке»)
+  function reminderPhrase(id, text){ return "напоминание " + (isCardId(id) ? "" : "по задаче ") + "«" + text + "»"; }
   function logReminderShown(id, text, at){
     try{
-      if(window.EventLog) window.EventLog.add("Было показано напоминание по " + reminderWhat(id) + " «" + text + "»", {at: at, key: "reminder:" + id + ":" + at});
+      if(window.EventLog) window.EventLog.add("Было показано " + reminderPhrase(id, text), {at: at, key: "reminder:" + id + ":" + at});
     }catch(e){}
   }
   // предстоящие напоминания для центра событий
@@ -490,7 +492,7 @@ window.initNotificationsModule = function(deps){
       tasks.forEach(function(t){
         var at = getRemindAt(t);
         if(at == null || at <= now || (t.c && t.c.checked === true) || fired[t.id] === at) return;
-        out.push({at: at, text: "Будет показано напоминание по " + reminderWhat(t.id) + " «" + cleanText(t.c && t.c.text) + "»"});
+        out.push({at: at, text: "Будет показано " + reminderPhrase(t.id, cleanText(t.c && t.c.text))});
       });
       return out;
     });
