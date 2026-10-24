@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 26.3 (25.10) — в историю (центр событий) попадает только скан QR погоды: «Был просканирован qr-код погоды города «Название»»; показ погоды кнопкой «Показать» на карточке в историю не пишется (`showWeatherOverlay(c, fromScan)`). Kotlin не менялся. Откат: itemcards.js 26.2.
    Версия: 26.2 (25.10) — кнопки карточки, раскрытые долгим нажатием (глаз/удалить/звезда/изменить), прячутся тапом мимо этой карточки (тап по другой карточке только прячет кнопки) и прокруткой списка (`bindMenuDismiss`; прокрутка сразу после перерисовки сетки игнорируется — `lastRenderAt`). Kotlin не менялся. Откат: itemcards.js 26.1.
    Версия: 26.1 (25.10) — при фильтре «Избранное» кнопка-глаз в нижнем ряду скрыта (там и так показаны все, скрытые тоже); меню воронки, «+» и PDF закрываются тапом мимо (`bindMenuDismiss`: тап по карточке только закрывает меню, не открывая форму) и прокруткой списка. Kotlin не менялся. Откат: itemcards.js 26.0.
    Версия: 26.0 (25.10) — структурная правка: фильтр «Особые» переименован в «Избранное» (ключ `fav`): в него попадают только карточки с признаком `fav`, а не «Сегодня»/«Напоминалка»; кнопка-звезда `.item-card-fav-btn` среди кнопок при удержании карточки (`toggleFav`) ставит и снимает признак (синхронизируется через `cloudShape`); при фильтре «Избранное» показываются все избранные карточки, в том числе скрытые, независимо от кнопки-глаза внизу. Откат: itemcards.js 25.1.
@@ -2133,9 +2134,9 @@ window.initItemCardsModule = function(deps){
     return html;
   }
   // слой после скана: сразу название города и «Загружаю…», потом сама погода (если слой к тому времени не закрыли)
-  function showWeatherOverlay(c){
+  function showWeatherOverlay(c, fromScan){
     var title = String(c.title || "").slice(0, 80);
-    evLog("Погода" + (title ? " «" + title + "»" : ""));
+    if(fromScan) evLog("Был просканирован qr-код погоды" + (title ? " города «" + title + "»" : "")); // кнопка «Показать» на карточке в историю не пишется
     var o = newOverlay();
     var card = document.createElement("div");
     card.className = "scan-weather-card";
@@ -2259,7 +2260,7 @@ window.initItemCardsModule = function(deps){
     if(p.kind === "today"){ openTodayFromScan(); return; }       // общий код «Сегодня»: карточка не нужна
     if(p.kind === "note"){ openScannedNote(p.id); return; }
     if(p.kind === "task"){ handleScannedTask(p); return; }  // задача в самом коде: карточка не нужна
-    if(p.kind === "weather"){ showWeatherOverlay({ title: p.title, lat: p.lat, lon: p.lon }); return; } // погода из самого кода: карточка не нужна
+    if(p.kind === "weather"){ showWeatherOverlay({ title: p.title, lat: p.lat, lon: p.lon }, true); return; } // погода из самого кода: карточка не нужна
     if(p.kind === "alarm"){ showScanned(alarmFromCode(p)); return; } // будильник из самого кода: заводится сразу, карточка не нужна
     if(p.kind === "timer"){ showScanned(timerFromCode(p)); return; } // таймер из самого кода: отсчёт стартует сразу, карточка не нужна
     evLog("Просканирован QR-код: " + String(p.url || p.text || "").slice(0, 80));
@@ -2398,7 +2399,7 @@ window.initItemCardsModule = function(deps){
     return true;
   }
   function showScanned(c){
-    if(c.type === "weather"){ showWeatherOverlay(c); return; } // на случай кода по id карточки
+    if(c.type === "weather"){ showWeatherOverlay(c, true); return; } // на случай кода по id карточки
     if(c.type === "alarm"){ // скан будильника: не заведён — заводится на ближайшее время; уже заведён (в том числе идут повторы) — выключается
       if(!alarmSupported()){ showNoticeOverlay({ kind: "msg", text: "Будильник работает только в приложении на телефоне." }); return; }
       refreshAlarms();
