@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 2.3 (24.10) — `parseCode` узнаёт QR привычки `lt://v1/habit/<id>/<название>` → `{kind:"habit", id, title}` (код сам несёт название: на устройстве без такой карточки приложение создаёт её по коду); такой код, как и таймер/задача, принимается после удержания ≥ HOLD_SIDE_EFFECT_MS. Откат: cardscan.js 2.2.
    Версия: 2.2 (23.10) — `open({longHold})`: приложение может пометить код как «с побочным эффектом» (скан карточки-привычки отмечает день без отмены) — для него удержание не меньше 0,5 с, как у таймера и задачи. Откат: cardscan.js 2.1.
    Версия: 2.1 (22.10) — удержание стало терпимым к дрожи руки: допуск ухода кода от якоря 20% зоны (было 6%), якорь плавно следует за кодом, уход кода от якоря не обнуляет счёт, а даёт штраф 150 мс (дрожь в допуске штрафа не даёт, а код, который проносят через зону, штрафуется чаще, чем копит); пропадание кода до 0,4 с (смаз) счёт не трогает, дольше — откат с обычной скоростью; другой текст кода переключает счёт, только если держится 3 кадра подряд. Откат: cardscan.js 2.0.
    Версия: 2.0 (22.10) — структурная правка: код принимается не мгновенно, а после удержания. Нужен один и тот же код, почти неподвижный в зоне прицела (в окне ярлыка — всё окно, на весь экран — центральные 70%); код вне зоны и совсем мелкий игнорируются. Время удержания 0,25 с в центре зоны, до 0,6 с у края, для таймера и «Создавать задачу» не меньше 0,5 с; сдвиг кода или другой код — отсчёт не идёт, а откатывается. Вокруг кода рисуется фиолетовый (#7F00FF) скруглённый контур (SVG `.scan-lock`): бледный — «вижу, жду», яркий бежит по часовой стрелке с левого верхнего угла и замыкается; внутри заливка 15%. Приём — лёгкая вибрация, без вспышки. Откат: cardscan.js 1.8.
@@ -30,6 +31,7 @@ window.CardScan = (function(){
   var QR_PREFIX = "lt://v1/card/";
   var NOTE_PREFIX = "lt://v1/note/";
   var TIMER_PREFIX = "lt://v1/timer/";
+  var HABIT_PREFIX = "lt://v1/habit/";
   var TASK_PREFIX = "lt://v1/task/";
   var TODAY_CODE = "lt://v1/today";       // «Сегодня»: один и тот же код у всех, заметку создаёт тот, кто сканирует
   var REMINDER_CODE = "lt://v1/reminder"; // «Напоминалка»: один и тот же код у всех, напоминание берётся у того, кто сканирует
@@ -37,6 +39,7 @@ window.CardScan = (function(){
   // Разбор текста из QR:
   //   {kind:"card", id}   — код карточки приложения (lt://v1/card/<id>)
   //   {kind:"timer", seconds, title} — таймер, зашитый в код (lt://v1/timer/<секунды>[/<название>])
+  //   {kind:"habit", id, title} — привычка с названием в коде (lt://v1/habit/<id>/<название>)
   //   {kind:"task", tab, tag, text} — задача, зашитая в код (lt://v1/task/<ключ вкладки>[#<тег>]/<текст>)
   //   {kind:"today"} / {kind:"reminder"} — общие коды «Сегодня» и «Напоминалки» (lt://v1/today, lt://v1/reminder)
   //   {kind:"note", id}   — код заметки «Моего блокнота» (lt://v1/note/<id>)
@@ -57,6 +60,13 @@ window.CardScan = (function(){
       var tm = /^(\d{1,6})(?:\/([\s\S]*))?$/.exec(t.slice(TIMER_PREFIX.length));
       var tsec = tm ? parseInt(tm[1], 10) : 0;
       if(tm && tsec >= 1 && tsec <= 359999) return { kind: "timer", seconds: tsec, title: (tm[2] || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, 80) };
+      return { kind: "unknown", text: t };
+    }
+    if(t.indexOf(HABIT_PREFIX) === 0){
+      // привычка: id и название в самом коде — на устройстве без такой карточки приложение создаёт её по коду (цвета в коде нет)
+      var hb = /^([A-Za-z0-9]{4,32})\/([\s\S]+)$/.exec(t.slice(HABIT_PREFIX.length));
+      var htitle = hb ? hb[2].replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, 80) : "";
+      if(htitle) return { kind: "habit", id: hb[1], title: htitle };
       return { kind: "unknown", text: t };
     }
     if(t.indexOf(TASK_PREFIX) === 0){
@@ -195,7 +205,7 @@ window.CardScan = (function(){
       dn = Math.max(0, Math.min(1, dn));
       var need = HOLD_MIN_MS + (HOLD_EDGE_MS - HOLD_MIN_MS) * dn;
       var parsed = parseCode(text), kind = parsed.kind;
-      var sideEffect = kind === "task" || kind === "timer";
+      var sideEffect = kind === "task" || kind === "timer" || kind === "habit";
       // opts.longHold(разобранный код): приложение знает карточки — скан «Привычки» тоже отмечает день без отмены, как и таймер/задача
       if(!sideEffect && typeof opts.longHold === "function"){ try{ sideEffect = !!opts.longHold(parsed); }catch(e){} }
       if(sideEffect) need = Math.max(need, HOLD_SIDE_EFFECT_MS);

@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 20.0 (24.10) — структурная правка: QR привычки несёт название (`lt://v1/habit/<id>/<название до 40 знаков>`, `qrTextFor`; цвета в коде нет — его каждый выбирает себе сам): скан на устройстве без такой карточки создаёт её по коду (`habitFromCode`: тот же id, название из кода, пустые `days`, без цвета) и отмечает сегодняшний день; сначала карточка ищется у себя и в облаке (если синхронизация настроена). Название привычки в форме — до 40 знаков (иначе не поместится в код). Прежние коды `lt://v1/card/<id>` привычек работают как раньше, но только там, где карточка есть. Откат: itemcards.js 19.0.
    Версия: 19.0 (24.10) — структурная правка: цвет карточки у ВСЕХ типов (таймер, предмет, «Создавать задачу», привычка, «Сегодня», «Напоминалка»): необязательное поле `color` ("#rrggbb"; пусто — без цвета, карточка как раньше), ходит через облако (`cloudShape`) и красит карточку в сетке (`applyCardLook`, вместо `applyHabitLook`). Палитра формы — общая (`colorPaletteHtml`): первый пастельный квадрат стал ПУСТЫМ цветом (был пастельный красный). Цвет по умолчанию — пустой; выбранный цвет запоминается по типу карточки (`itemCardsColorDefaults_v1`, `defaultColorFor`/`rememberColorFor`, только на этом устройстве) и подставляется в новые карточки этого типа. «Сегодня» и «Напоминалка»: создаются и правятся маленькой формой с одним цветом (`createSingletonCard` убран; у них при удержании появилась кнопка «Изменить»). У привычки без цвета отметки на карте и точка в заголовке берут цвет темы (`var(--wood)`), `HABIT_DEFAULT_COLOR` убран. Показ карточки по скану ВСЕГДА цвета холста (`.scan-card`), цвет карточки там не применяется. Откат: itemcards.js 18.1.
    Версия: 18.1 (24.10) — цвета привычек: красный #ff0000, жёлтый #ffff00, фиолетовый #7f00ff в верхнем ряду; зелёный #9cdb4e и бирюзовый #40d5b5 вместо пастельных в нижнем. Прежняя 18.0 (23.10) — структурная правка: новый тип карточки «Привычка» (`habit`, поля `color`, `days`): пункт «Привычка» в меню «+» и в выборе типа при создании под напечатанный код; форма — название и цвет квадратиками (8 ярких + 8 пастельных, `HABIT_COLORS_*`); пункт «Привычки» в меню воронки; при удержании три кнопки в одном стиле — глаз, удаление, правка (`.item-card-edit-btn`); тап — карта дней (`openHabitMap`, `habitMapMarkup`: вид и классы «Карты дней года», отмеченные дни — цветом привычки), двойной тап — оборот с QR как обычно; скан кода карточки отмечает сегодняшний день (`markHabitToday`: один день — одна отметка, повторный скан в тот же день ничего не делает) и показывает карточку с подписью «Сегодня отмечено» / «Сегодня уже отмечено»; `days` ходят через облако и объединяются при сверке (`mergeHabitDays` в `reconcileCloud`); стили формы — из JS (`ensureHabitStyles`). Откат: itemcards.js 17.1. Скан кода привычки сканер принимает после удержания не меньше 0,5 с (`longHold` в `openScan`, cardscan.js 2.2).
    Версия: 17.1 (22.10) — в PDF у «Создавать задачу» печатается только текст задачи, без названия категории (категория остаётся в QR-коде и на карточке в приложении). Откат: itemcards.js 17.0.
@@ -63,6 +64,7 @@ window.initItemCardsModule = function(deps){
   var SIZE_KEY = "itemCardsSize_v1";
   var QR_PREFIX = "lt://v1/card/";
   var TIMER_PREFIX = "lt://v1/timer/";
+  var HABIT_PREFIX = "lt://v1/habit/";
   var TASK_PREFIX = "lt://v1/task/";
   var TASK_TEXT_MAX = 80; // текст задачи в коде: длиннее — код плотнее и хуже читается на малой наклейке (на карточке и в PDF показывается только начало)
   var PENDING_TASKS_KEY = "pendingScanTasks_v1"; // очередь «окно ярлыка → приложение» (тот же localStorage)
@@ -70,6 +72,7 @@ window.initItemCardsModule = function(deps){
   var TODAY_CODE = "lt://v1/today";
   var REMINDER_CODE = "lt://v1/reminder";
   var TODAY_NATIVE_ID = "today"; // служебный id для входа из оболочки (не совпадает с id карточек: в них нет буквы «o»)
+  var HABIT_TITLE_MAX = 40; // название привычки: в форме и в коде
   var TIMER_QR_TITLE_MAX = 40; // название в коде таймера: длиннее — код плотнее и хуже читается на малой наклейке
   // Текст QR карточки. Таймер несёт время и название в самом коде (lt://v1/timer/<секунды>/<название>): любое устройство
   // с приложением запускает такой таймер по скану, карточка там не нужна (код можно напечатать и карточку удалить).
@@ -110,6 +113,11 @@ window.initItemCardsModule = function(deps){
       var t = String(c.title || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, TIMER_QR_TITLE_MAX);
       if(/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1); // обрезка не должна оставлять половину эмодзи (парный знак)
       return TIMER_PREFIX + (c.seconds | 0) + (t ? "/" + t : "");
+    }
+    if(c && c.type === "habit" && c.id){ // привычка: id и название в самом коде (цвет не передаётся — у каждого свой)
+      var ht = String(c.title || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, HABIT_TITLE_MAX);
+      if(/[\uD800-\uDBFF]$/.test(ht)) ht = ht.slice(0, -1);
+      if(ht) return HABIT_PREFIX + c.id + "/" + ht;
     }
     // «Сегодня» и «Напоминалка»: код один на всех, не зависит от карточки и аккаунта — что откроется, решает тот, кто сканирует
     if(c && c.type === "datenote") return TODAY_CODE;
@@ -1158,12 +1166,12 @@ window.initItemCardsModule = function(deps){
     var html = '<div class="mdeditor-tab item-card-form" id="itemCardForm">';
     html += '<h3 class="common-tab-title">' + escapeHtml(TYPE_LABEL[type]) + '</h3>';
     if(type === "habit"){
-      html += '<div class="item-form-hint">Каждое сканирование кода отмечает сегодняшний день на карте привычки. В один день засчитывается одно сканирование — повторные в тот же день ничего не меняют.</div>';
+      html += '<div class="item-form-hint">Каждое сканирование кода отмечает сегодняшний день на карте привычки. В один день засчитывается одно сканирование — повторные в тот же день ничего не меняют. Название (до 40 знаков) зашито в код: если кто-то отсканирует его на другом устройстве, там появится такая же привычка (цвет каждый выбирает себе сам) и отметки пойдут уже у него.</div>';
     }
     if(type === "task"){
       html += '<div class="item-form-hint">Код с текстом задачи: кто его отсканирует в приложении, получит эту задачу на выбранной вкладке. Такая же невыполненная задача второй раз не создаётся — её переносят в конец списка вкладки. Категория (тег) необязательна: задача получит её сразу, по тегу задачи можно отбирать на вкладке.</div>';
     }
-    if(!isSingle) html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="' + (type === "task" ? "Текст задачи (до " + TASK_TEXT_MAX + " знаков)" : "Название") + '" maxlength="' + (type === "task" ? TASK_TEXT_MAX : 80) + '" autocomplete="off">';
+    if(!isSingle) html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="' + (type === "task" ? "Текст задачи (до " + TASK_TEXT_MAX + " знаков)" : "Название") + '" maxlength="' + (type === "task" ? TASK_TEXT_MAX : (type === "habit" ? HABIT_TITLE_MAX : 80)) + '" autocomplete="off">';
     if(isSingle){
       // только цвет (ниже)
     } else if(type === "task"){
@@ -1520,7 +1528,7 @@ window.initItemCardsModule = function(deps){
       loadJsqr: deps.loadJsqrLib,
       windowed: standalone,
       // скан привычки отмечает день без отмены — для таких кодов сканер держит дольше (как для таймера и задачи)
-      longHold: function(p){ if(!p || p.kind !== "card") return false; var cc = findCard(p.id); return !!cc && cc.type === "habit"; },
+      longHold: function(p){ if(p && p.kind === "habit") return true; if(!p || p.kind !== "card") return false; var cc = findCard(p.id); return !!cc && cc.type === "habit"; },
       onCode: function(text){ scanHandle = null; handleScanned(text); },
       onBack: function(){ scanHandle = null; endScanSession(true); }
     });
@@ -1559,12 +1567,52 @@ window.initItemCardsModule = function(deps){
       showNoticeOverlay({ kind: "missing", id: p.id });
       return;
     }
+    if(p.kind === "habit"){ handleScannedHabit(p); return; } // привычка с названием в коде: нет карточки — создаём по коду
     if(p.kind === "reminder"){ showReminderOverlay(); return; } // общий код «Напоминалки»: карточка не нужна
     if(p.kind === "today"){ openTodayFromScan(); return; }       // общий код «Сегодня»: карточка не нужна
     if(p.kind === "note"){ openScannedNote(p.id); return; }
     if(p.kind === "task"){ handleScannedTask(p); return; }  // задача в самом коде: карточка не нужна
     if(p.kind === "timer"){ showScanned(timerFromCode(p)); return; } // таймер из самого кода: отсчёт стартует сразу, карточка не нужна
     showNoticeOverlay({ kind: p.kind, url: p.url, text: p.text });
+  }
+
+  // ---------- привычка из кода lt://v1/habit/<id>/<название> ----------
+  // Карточка на этом устройстве есть — обычный скан (отметка дня). Нет — сначала смотрим в облаке (если синхронизация настроена,
+  // не дольше 2,5 с: вдруг это своя карточка, ещё не дошедшая сюда), потом создаём её по коду: тот же id, название из кода,
+  // пустые `days`, без цвета. Одинаковый id — своя история отметок у каждого, при общей синхронизации дни объединяются.
+  function habitFromCode(p){
+    var c = findCard(p.id);
+    if(c) return c;
+    var now = Date.now();
+    c = { id: p.id, type: "habit", title: String(p.title || "").slice(0, 80), icon: DEFAULT_ICON.habit || "", date: "", seconds: 0, days: [], createdAt: now, updatedAt: now };
+    var col = defaultColorFor("habit"); if(col) c.color = col;
+    loadCards().push(c);
+    saveCards();
+    return c;
+  }
+  function handleScannedHabit(p){
+    reloadCards();
+    var c = findCard(p.id);
+    if(!c && !standalone && reconcileCloud()) c = findCard(p.id);
+    if(c){ showScanned(c); return; }
+    var md = getMdEditor();
+    var st = (!standalone && md && md.cardMetaStatus && md.cardMetaPull) ? md.cardMetaStatus() : null;
+    if(st && st.ready){
+      showNoticeOverlay({ kind: "text", text: "Ищу карточку в облаке…" });
+      var waitEl = overlayEl;
+      var done = false;
+      var finish = function(){
+        if(done) return;
+        done = true;
+        if(overlayEl !== waitEl) return; // пользователь уже закрыл окно
+        reconcileCloud();
+        showScanned(habitFromCode(p));
+      };
+      setTimeout(finish, 2500);
+      md.cardMetaPull().then(finish, finish);
+      return;
+    }
+    showScanned(habitFromCode(p));
   }
 
   // ---------- «Создавать задачу»: скан кода lt://v1/task/<вкладка>/<текст> ----------
