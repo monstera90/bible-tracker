@@ -1,7 +1,8 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 82.0 (25.10) — структурная правка: вкладка `calendar` «Календарь» (`calendar.js`) — самый нижний язычок стека набора 1: `CALENDAR_TAB_KEY`/`CALENDAR_TAB_BTN_ID`, `renderSettingsTabCalendar`, первый в `SETTINGS_SIDE_ORDER_1`.
+   Версия: 83.0 (25.10) — структурная правка: мероприятия календаря в синхронизации как задачи (раздел «КАЛЕНДАРЬ: СИНХРОНИЗАЦИЯ МЕРОПРИЯТИЙ»): личные — `state["ev:<id>"]` (едут с личными задачами), общие — группа `/groups/<id>/events` (binding `events`, едут с общими задачами, доступ тот же). Откат: my.js 82.0.
+   Версия 82.0 (25.10) — структурная правка: вкладка `calendar` «Календарь» (`calendar.js`) — самый нижний язычок стека набора 1: `CALENDAR_TAB_KEY`/`CALENDAR_TAB_BTN_ID`, `renderSettingsTabCalendar`, первый в `SETTINGS_SIDE_ORDER_1`.
    Версия: 81.1 (25.10) — `layoutSettingsModal`: запас под нижний ряд `ANDROID_NAV_BAR_H` 37px (было 47), положение кнопки режима чтения считается от ширины язычка.
    Версия: 81.0 (25.10) — структурная правка: общая задача остаётся общей при переносе на любую вкладку. Вкладка — личная сортировка: у каждого участника своя, хранится в личном state (`gtab:<id>`, `getGroupTaskPlacement`/`setGroupTaskPlacement`/`taskEffectiveTab`), в запись группы не попадает (там tab всегда «jointtasks»); списки вкладок (`getTasksForTab`, `getGroupTasksForTab`), пикер переноса, QR «Создавать задачу» и перерисовка (`rerenderJointTasksTabIfOpen`) учитывают её; перенос личной задачи на «Общие задачи» — с предупреждением (`moveTaskWithWarning`); подпись начинается с «Общая задача.». Откат: my.js 80.1.
    Версия: 80.1 (25.10) — переключение набора вкладок (язычок-кнопка, выход из режима колеса) больше НЕ открывает вкладку другого набора само: меняется только ряд язычков, открытая вкладка остаётся на экране, пока пользователь сам не нажмёт нужный язычок (`cycleSettingsTabSet`, `toggleBottomAltMode`; `getResumeSettingsState` при перезапуске открывает набор той вкладки, что реально была на экране). Откат: my.js 80.0.
@@ -7010,13 +7011,13 @@
       // опроса, что и обычная подтяжка задач ниже.
       checkGroupMembershipStillValid().then(function(stillMember){
         if(!stillMember){ returnJointTasksTabToLocalMode(); return; }
-        return syncGroupTasksNow();
+        return syncGroupTasksNow().then(refreshGroupEvents); // календарь: общие мероприятия — тем же циклом и по тому же доступу, что общие задачи
       }).catch(function(err){ console.error(err); }).then(function(){ settleInitialGroupTaskSync(); });
     } else {
       var chain = !isAdminMigrationDone(sharedGroup.groupId)
         ? migrateAdminGroupTasksIfNeeded() : Promise.resolve();
       chain.then(function(){
-        if(isGroupTasksActive()) return syncGroupTasksNow();
+        if(isGroupTasksActive()) return syncGroupTasksNow().then(refreshGroupEvents); // календарь: см. выше
       }).catch(function(err){ console.error(err); }).then(function(){ settleInitialGroupTaskSync(); });
     }
     // Шаг 3: syncGroupTasksNow = pull → сверка → push — отправка накопленных (в т.ч. потерянных при
@@ -7170,16 +7171,21 @@
     // отвязанной/удалённой) группы то, что осталось в очереди
     if(groupTasksBinding) groupTasksBinding.detach();
     if(groupArchiveBinding) groupArchiveBinding.detach();
+    if(groupEventsBinding) groupEventsBinding.detach(); // календарь: общие мероприятия — тот же доступ, уходят вместе с задачами
     saveSharedGroup(null);
     if(prevGroupId){
       try{ localStorage.removeItem(groupTasksCacheKey(prevGroupId)); }catch(e){}
       try{ localStorage.removeItem(GROUP_ADMIN_MIGRATED_KEY_PREFIX + prevGroupId); }catch(e){}
       try{ localStorage.removeItem(groupArchiveCacheKey(prevGroupId)); }catch(e){}
+      try{ localStorage.removeItem(groupEventsCacheKey(prevGroupId)); }catch(e){}
     }
     groupTasksState = {};
     groupTasksLoadedFor = null;
     groupArchiveState = {};
     groupArchiveLoadedFor = null;
+    groupEventsState = {};
+    groupEventsLoadedFor = null;
+    rerenderCalendarIfOpen();
     var popup = document.getElementById("taskJointMenuPopup");
     if(popup) popup.classList.remove("open");
     rerenderJointTasksTabIfOpen();
@@ -10398,8 +10404,231 @@
   function renderSettingsTabCalendar(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
-    if(window.CalendarTab) window.CalendarTab.render();
+    if(window.CalendarTab){
+      ensureCalendarStore();
+      window.CalendarTab.render();
+      // общие мероприятия — подтянуть из группы (тот же доступ, что у общих задач); пришло что-то новое — календарь сам перерисуется
+      if(sharedGroup && isGroupTasksActive()) refreshGroupEvents().then(rerenderCalendarIfOpen);
+    }
     else container.innerHTML = '<div class="mood-diagram-empty">Календарь недоступен</div>';
+  }
+
+  // ===================== КАЛЕНДАРЬ: СИНХРОНИЗАЦИЯ МЕРОПРИЯТИЙ =====================
+  // Мероприятие синхронизируется КАК ЗАДАЧА (calendar.js ничего не знает о сети — он получает хранилище через
+  // CalendarTab.setStore, см. calendarStore ниже):
+  // • ЛИЧНЫЙ календарь едет вместе с личными задачами: запись в личном `state` под ключом "ev:<id>" = {c: данные, t},
+  //   тумбстоун — {c:null, t}; уходит в облако тем же doCloudSync (mergeStates/buildStateDelta — last-write-wins по t),
+  //   отдельных веток и нового кода push/pull нет. Данные (c) — {title,start,end,repeat,cal,updatedAt[,until,skip]}.
+  // • ОБЩИЙ календарь едет вместе с общими задачами: третий binding группы (name:"events") на ТОМ ЖЕ движке/транспорте,
+  //   что и tasks/archive — /groups/<groupId>/events/<id> = {c,t}, шифрование тем же групповым ключом SHA-256(groupId)
+  //   (syncengine_groupcrypto.js), локальный кэш groupEventsState (bibleGroupEventsCache_v1_<groupId>). Доступ ОДИН на
+  //   задачи и мероприятия: активен, когда активны общие задачи (isGroupTasksActive), читатель группы (viewer) общие
+  //   мероприятия только смотрит (isGroupTasksReadOnly), отдельного подключения/кода для календаря нет.
+  // • Пока группы нет (или админ ещё ждёт первого участника — п. 3.5 ТЗ общих задач), «общие» мероприятия лежат в state
+  //   так же, как локальные задачи вкладки «Общие задачи» ("ev:<id>" с c.cal = "shared"); когда группа становится активной,
+  //   у АДМИНА они переносятся в группу (migrateLocalSharedEvents — как migrateAdminGroupTasksIfNeeded), у участника
+  //   остаются на устройстве и не показываются, пока он в группе (как его локальные «общие» задачи).
+  // • Цикл обмена с группой — внутри refreshJointTasksData (открытие приложения/вкладки, «online»): после общих задач
+  //   вызывается refreshGroupEvents; вкладка «Календарь» зовёт его же при открытии. Чужие правки → handleGroupEventsRemoteChange.
+  var CAL_EVENT_KEY_PREFIX = "ev:";
+  var GROUP_EVENTS_CACHE_KEY_PREFIX = "bibleGroupEventsCache_v1_";
+  var groupEventsState = {};       // id -> {c, t}, расшифровано
+  var groupEventsLoadedFor = null; // groupId, под который сейчас загружен кэш выше
+  var groupEventsBinding = null;
+  var calendarStoreReady = false;
+
+  function groupEventsCacheKey(groupId){ return GROUP_EVENTS_CACHE_KEY_PREFIX + groupId; }
+  function loadGroupEventsCache(groupId){
+    if(groupEventsLoadedFor === groupId) return;
+    groupEventsState = {};
+    try{
+      var raw = localStorage.getItem(groupEventsCacheKey(groupId));
+      if(raw) groupEventsState = JSON.parse(raw) || {};
+    }catch(e){ groupEventsState = {}; }
+    groupEventsLoadedFor = groupId;
+  }
+  function saveGroupEventsCacheLocal(){
+    if(!sharedGroup) return;
+    try{ localStorage.setItem(groupEventsCacheKey(sharedGroup.groupId), JSON.stringify(groupEventsState)); }catch(e){}
+  }
+  function getGroupEventsBinding(){
+    if(groupEventsBinding) return groupEventsBinding;
+    var rt = getSyncEngineRuntime();
+    groupEventsBinding = window.SyncEngineGroupBinding.createGroupBinding({
+      engine: rt.engine,
+      transport: rt.transport,
+      makeHooks: window.SyncEngineGroupCrypto.makeGroupHooks,
+      name: "events",
+      groupsPath: FIREBASE_GROUPS_PATH,
+      getGroupId: function(){ return sharedGroup && sharedGroup.groupId ? sharedGroup.groupId : null; },
+      // синхронный локальный кэш: читает календарь (calendarStore.list), пишет ТОЛЬКО адаптер движка через save/remove/приём чужих правок
+      cache: {
+        load: loadGroupEventsCache,
+        get: function(){ return groupEventsState; },
+        save: saveGroupEventsCacheLocal
+      },
+      onRemoteChange: rerenderCalendarIfOpen, // pull применил чужие правки — перерисовать календарь, если он на экране
+      log: syncEngineLog
+    });
+    return groupEventsBinding;
+  }
+  function logGroupEventsSyncError(err){
+    console.error("Календарь: ошибка синхронизации общих мероприятий:", err);
+    syncEngineLog("Календарь: ошибка синхронизации общих мероприятий — " + (err && err.message ? err.message : err));
+  }
+  // pull → сверка → push одним вызовом (см. syncGroupTasksNow); сетевые ошибки не бросает
+  function syncGroupEventsNow(){
+    if(!sharedGroup || isOfflineMode()) return Promise.resolve(null);
+    try{
+      return getGroupEventsBinding().syncNow().catch(function(err){
+        logGroupEventsSyncError(err);
+        return null;
+      });
+    }catch(err){
+      logGroupEventsSyncError(err);
+      return Promise.resolve(null);
+    }
+  }
+  // Перенос «общих» мероприятий, накопленных в state до появления активной группы, в группу — только у админа (см. выше).
+  // Запись в группу и отправка — до снятия локальной копии: если отправка сорвалась, локальные остаются и перенос повторится
+  // (id тот же, в кэше группы они не дублируются).
+  function migrateLocalSharedEvents(){
+    if(!sharedGroup || sharedGroup.role !== "admin" || !isGroupTasksActive() || isGroupTasksReadOnly()) return Promise.resolve();
+    var local = [];
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf(CAL_EVENT_KEY_PREFIX) !== 0) return;
+      var r = state[k];
+      if(r && r.c && r.c.cal === "shared") local.push(k.slice(CAL_EVENT_KEY_PREFIX.length));
+    });
+    if(!local.length) return Promise.resolve();
+    loadGroupEventsCache(sharedGroup.groupId);
+    var saves = [];
+    local.forEach(function(id){
+      if(groupEventsState[id] && groupEventsState[id].c) return;
+      var data = JSON.parse(JSON.stringify(state[CAL_EVENT_KEY_PREFIX + id].c));
+      saves.push(getGroupEventsBinding().save(id, data));
+    });
+    return Promise.all(saves).then(function(){
+      return syncGroupEventsNow();
+    }).then(function(res){
+      if(!res || res.pull.error || res.push.error || (res.push.failed && res.push.failed.length)) throw new Error("group_events_migrate_sync_failed");
+      var now = Date.now();
+      local.forEach(function(id){
+        var g = groupEventsState[id];
+        if(g && g.c){
+          var prev = state[CAL_EVENT_KEY_PREFIX + id];
+          state[CAL_EVENT_KEY_PREFIX + id] = {c: null, t: Math.max(now, prev && typeof prev.t === "number" ? prev.t + 1 : now)};
+        }
+      });
+      saveLocalStateNow(); scheduleCloudPush();
+    }).catch(function(err){
+      console.error("Не удалось перенести локальные общие мероприятия в группу:", err);
+    });
+  }
+  // Единая точка «освежить общие мероприятия»: из refreshJointTasksData (после общих задач) и при открытии вкладки «Календарь».
+  // Ничего не бросает.
+  function refreshGroupEvents(){
+    if(!sharedGroup || !isGroupTasksActive() || isOfflineMode()) return Promise.resolve(null);
+    return syncGroupEventsNow().then(function(res){
+      return migrateLocalSharedEvents().then(function(){ return res; });
+    }).catch(function(err){ logGroupEventsSyncError(err); return null; });
+  }
+  function rerenderCalendarIfOpen(){
+    if(currentSettingsTab !== CALENDAR_TAB_KEY) return;
+    if(!settingsModalOverlay || !settingsModalOverlay.classList.contains("open")) return;
+    if(window.CalendarTab && window.CalendarTab.refresh) window.CalendarTab.refresh();
+  }
+
+  function calEventClone(c){ return JSON.parse(JSON.stringify(c)); }
+  function calEventFromRecord(id, c, cal){
+    var e = calEventClone(c);
+    e.id = id;
+    e.cal = cal || (e.cal === "shared" ? "shared" : "personal");
+    return e;
+  }
+  // Хранилище для calendar.js. list() отдаёт КОПИИ (calendar.js правит их на месте и сравнивает с хранилищем в save()).
+  var calendarStore = {
+    // видимые мероприятия: личные + общие (из группы, если она активна, иначе локальные «общие» из state)
+    list: function(){
+      var out = [], groupOn = !!(sharedGroup && isGroupTasksActive());
+      Object.keys(state).forEach(function(k){
+        if(k.indexOf(CAL_EVENT_KEY_PREFIX) !== 0) return;
+        var r = state[k];
+        if(!r || !r.c) return;
+        var shared = r.c.cal === "shared", id = k.slice(CAL_EVENT_KEY_PREFIX.length);
+        if(shared && groupOn){
+          // у участника локальные «общие» скрыты, пока он в группе (как его локальные общие задачи); у админа они ждут переноса
+          // в группу и до тех пор видны (не пропадают офлайн), если такой записи в группе ещё нет
+          if(sharedGroup.role !== "admin") return;
+          loadGroupEventsCache(sharedGroup.groupId);
+          if(groupEventsState[id] && groupEventsState[id].c) return;
+        }
+        out.push(calEventFromRecord(id, r.c));
+      });
+      if(groupOn){
+        loadGroupEventsCache(sharedGroup.groupId);
+        Object.keys(groupEventsState).forEach(function(id){
+          var r = groupEventsState[id];
+          if(r && r.c) out.push(calEventFromRecord(id, r.c, "shared"));
+        });
+      }
+      return out;
+    },
+    // общие мероприятия правятся всеми, кроме читателя группы
+    canEditShared: function(){
+      return !(sharedGroup && isGroupTasksActive() && isGroupTasksReadOnly());
+    },
+    put: function(ev){
+      var data = calEventClone(ev);
+      delete data.id;
+      data.cal = data.cal === "shared" ? "shared" : "personal";
+      if(data.cal === "shared" && sharedGroup && isGroupTasksActive()){
+        if(isGroupTasksReadOnly()) return false;
+        loadGroupEventsCache(sharedGroup.groupId);
+        getGroupEventsBinding().save(ev.id, data).catch(logGroupEventsSyncError);
+        return true;
+      }
+      calStatePut(ev.id, data);
+      return true;
+    },
+    remove: function(ev){
+      if(ev.cal === "shared" && sharedGroup && isGroupTasksActive()){
+        if(isGroupTasksReadOnly()) return false;
+        loadGroupEventsCache(sharedGroup.groupId);
+        getGroupEventsBinding().remove(ev.id).catch(logGroupEventsSyncError);
+        // у админа та же запись могла ещё лежать локально (ждала переноса) — гасим и её, иначе она «воскреснет» в списке
+        var pend = state[CAL_EVENT_KEY_PREFIX + ev.id];
+        if(pend && pend.c){ state[CAL_EVENT_KEY_PREFIX + ev.id] = {c: null, t: calNextT(pend)}; saveLocalStateNow(); scheduleCloudPush(); }
+        return true;
+      }
+      var key = CAL_EVENT_KEY_PREFIX + ev.id, prev = state[key];
+      if(!prev || !prev.c) return false;
+      state[key] = {c: null, t: calNextT(prev)};
+      saveLocalStateNow(); scheduleCloudPush();
+      return true;
+    },
+    // перенос старых данных календаря (localStorage) — всегда в state, без оглядки на группу: если «общие» должны уйти в группу, это сделает migrateLocalSharedEvents
+    importLocal: function(ev){
+      var data = calEventClone(ev);
+      delete data.id;
+      data.cal = data.cal === "shared" ? "shared" : "personal";
+      calStatePut(ev.id, data);
+    }
+  };
+  // метка записи: строго больше прежней (часы устройств, правка в ту же миллисекунду)
+  function calNextT(prev){
+    var t = Date.now();
+    return (prev && typeof prev.t === "number" && t <= prev.t) ? prev.t + 1 : t;
+  }
+  function calStatePut(id, data){
+    var key = CAL_EVENT_KEY_PREFIX + id;
+    state[key] = {c: data, t: calNextT(state[key])};
+    saveLocalStateNow(); scheduleCloudPush();
+  }
+  function ensureCalendarStore(){
+    if(calendarStoreReady || !window.CalendarTab || !window.CalendarTab.setStore) return;
+    window.CalendarTab.setStore(calendarStore);
+    calendarStoreReady = true;
   }
 
   // ===================== ЗАПОМИНАНИЕ СКРОЛЛА ВКЛАДОК =====================

@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 5.0 (25.10)
+   Версия: 6.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
    под «В работе»). Точка входа — window.CalendarTab.render(); my.js зовёт её из switchSettingsTab (renderSettingsTabCalendar).
    Два режима, кнопка-переключатель — первая в нижнем ряду (`calendarModeBtn`), выбор хранится в `calendarMode_v1`
@@ -22,7 +22,13 @@
    Мероприятие: {id, title, start, end, repeat, cal, updatedAt[, until, skip]}; cal — календарь: "personal" (по умолчанию, и если поля нет) | "shared"
    (поле «Календарь» в форме; пока различие только в цвете: личный — как «Радость» в диаграмме настроений (--mood-joy), общий — цвет
    выделенной вкладки (--wood); переменные --cal-personal/--cal-shared и классы .cal-c-personal/.cal-c-shared в components.css); start/end — мс (локальное время), repeat — "" | day |
-   week | month | year. Хранится в localStorage `calendarEvents_v1` (только на этом устройстве, в облако пока не уходит).
+   week | month | year. Хранилище — провайдер от my.js (`setStore`, раздел «КАЛЕНДАРЬ: СИНХРОНИЗАЦИЯ МЕРОПРИЯТИЙ» в my.js): мероприятие — как задача.
+   Личное лежит в личном `state` (ключ `ev:<id>`) и едет вместе с личными задачами; общее — в группе (`/groups/<groupId>/events`)
+   и едет вместе с общими задачами, доступ тот же, что к общим задачам (читатель группы только смотрит). Модуль работает с полным списком
+   (`load()` — копии записей), а `save(list)` сам сравнивает его с хранилищем и отдаёт провайдеру только изменённые/удалённые записи
+   (`put`/`remove`), поэтому остальной код (форма, серии) списком по-прежнему оперирует целиком. Старые данные из localStorage
+   `calendarEvents_v1` один раз переносятся в провайдер при первом открытии вкладки (`importLegacy`, флаг `calendarImported_v1`).
+   Без провайдера (не должно случаться) работает прежний localStorage `calendarEvents_v1`.
    Серия (repeat != ""): `until` — мс, повторения с началом >= until не существуют (серию «разрезали»: дальше идёт другая
    серия); `skip` — массив дат "ГГГГ-ММ-ДД" повторений, которых в серии нет (их отвязали или удалили). Как в Google Календаре:
    правка/удаление повторения спрашивает «Только это» / «Это и все последующие» (`askScope`). «Только это» — повторение
@@ -116,18 +122,66 @@
   function newId(){ return "ev" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
   // ---------- хранение ----------
+  var STORE = null;            // провайдер хранилища от my.js: {list, put, remove, importLocal, canEditShared}
+  var IMPORTED_KEY = "calendarImported_v1";
+  var lastSig = null;          // подпись списка при последней отрисовке/обновлении (refresh не перерисовывает без перемен)
   function validEvent(e){
     return e && typeof e === "object" && typeof e.id === "string" && typeof e.title === "string" &&
       typeof e.start === "number" && isFinite(e.start) && typeof e.end === "number" && isFinite(e.end);
   }
-  function load(){
+  function legacyLoad(){
     try{
       var a = JSON.parse(localStorage.getItem(KEY) || "[]");
       return Array.isArray(a) ? a.filter(validEvent) : [];
     }catch(e){ return []; }
   }
-  function save(list){
+  function legacySave(list){
     try{ localStorage.setItem(KEY, JSON.stringify(list)); }catch(e){}
+  }
+  // полный список мероприятий (копии: правка элементов на месте хранилище не меняет)
+  function load(){
+    if(!STORE) return legacyLoad();
+    try{
+      var a = STORE.list();
+      return Array.isArray(a) ? a.filter(validEvent) : [];
+    }catch(e){ return []; }
+  }
+  // Принимает полный список (как раньше), но провайдеру отдаёт только отличия от текущего содержимого хранилища:
+  // новые и изменённые — put, пропавшие — remove; смена календаря (личный ↔ общий) — remove из старого и put в новый.
+  function save(list){
+    if(!STORE){ legacySave(list); return; }
+    var prev = {};
+    load().forEach(function(e){ prev[e.id] = e; });
+    var seen = {};
+    list.forEach(function(ev){
+      seen[ev.id] = true;
+      var p = prev[ev.id];
+      if(p && JSON.stringify(p) === JSON.stringify(ev)) return;
+      if(p && calOf(p) !== calOf(ev)) STORE.remove(p);
+      STORE.put(ev);
+    });
+    Object.keys(prev).forEach(function(id){ if(!seen[id]) STORE.remove(prev[id]); });
+  }
+  // Общее мероприятие читателя группы только смотрит (как общие задачи): правка и удаление закрыты
+  function canEdit(ev){
+    if(!STORE || !STORE.canEditShared) return true;
+    if(ev && calOf(ev) === "shared") return !!STORE.canEditShared();
+    return true;
+  }
+  // Старые мероприятия из localStorage — в провайдер, один раз (без перезаписи уже существующих id)
+  function importLegacy(){
+    if(!STORE) return;
+    try{ if(localStorage.getItem(IMPORTED_KEY)) return; }catch(e){ return; }
+    var old = legacyLoad();
+    if(old.length){
+      var have = {};
+      load().forEach(function(e){ have[e.id] = true; });
+      old.forEach(function(ev){
+        if(have[ev.id]) return;
+        if(STORE.importLocal) STORE.importLocal(ev); else STORE.put(ev);
+      });
+    }
+    try{ localStorage.setItem(IMPORTED_KEY, "1"); }catch(e){}
   }
   function findEvent(id){
     var list = load();
@@ -703,6 +757,20 @@
       ed.value = dateValue(preset + HOUR_MS); et.value = timeValue(preset + HOUR_MS);
     }
 
+    // Общий календарь у читателя группы — только просмотр (как общие задачи): новое общее не создать, существующее не правится
+    var readOnly = !!ev && !canEdit(ev);
+    if(!readOnly && !canEdit({ cal: "shared" }) && !(ev && calOf(ev) === "shared")){
+      for(var oi = calEl.options.length - 1; oi >= 0; oi--) if(calEl.options[oi].value === "shared") calEl.remove(oi);
+    }
+    if(readOnly){
+      [titleEl, sd, st, ed, et, repEl, calEl].forEach(function(el){ el.disabled = true; });
+      var svBtn = document.getElementById("calSave"), delRow = document.getElementById("calDelRow"), cnBtn = document.getElementById("calCancel");
+      if(svBtn) svBtn.style.display = "none";
+      if(delRow) delRow.style.display = "none";
+      if(cnBtn) cnBtn.textContent = "Назад";
+      errEl.textContent = "Общий календарь: у вас доступ только для чтения.";
+    }
+
     // окончание = начало + 1 час, пока пользователь сам не правил окончание (у существующего мероприятия — не трогаем)
     var endTouched = !isNew;
     function onStart(){
@@ -798,7 +866,21 @@
   }
 
   window.CalendarTab = {
-    render: function(){ loadMode(); weekStart = null; weekScrollKeep = null; renderMain(); },
+    // my.js отдаёт хранилище (см. шапку); зовётся до первого render
+    setStore: function(store){ STORE = store || null; },
+    render: function(){ importLegacy(); loadMode(); weekStart = null; weekScrollKeep = null; lastSig = JSON.stringify(load()); renderMain(); },
+    // данные могли измениться снаружи (пришли чужие правки группы): перерисовать текущий экран, если список изменился.
+    // Открытую форму не трогаем; прокрутка сохраняется. my.js зовёт только когда вкладка «Календарь» на экране.
+    refresh: function(){
+      if(screen === "form") return;
+      var sig = JSON.stringify(load());
+      if(sig === lastSig) return;
+      lastSig = sig;
+      var c = container(), top = c ? c.scrollTop : 0;
+      if(mode === "week") weekScrollKeep = top;
+      renderMain();
+      if(c && mode !== "week") c.scrollTop = top;
+    },
     // для проверки/других модулей: мероприятия на отрезке [from, to) — [{id,title,at,dur,repeat}]
     occurrences: function(from, to){
       var out = [];
