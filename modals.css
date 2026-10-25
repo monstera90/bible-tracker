@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 16.1 (25.10) — компактные язычки: боковые 35×55px (было 45×68), нижние 55×35px, кнопка-язычок `.settings-fab` 35×35px; отступы оверлея и заплатка угла под колонку 35px.
    Версия: 16.0 (22.10) — структурная правка: кнопка тегов задач `.task-tag-wrap` (слот 4 между «+» и скрепкой) + попап `.task-tag-popup`; слоты 4–12 теперь считаются как `N + var(--tag-s, 0)` (класс `.fab-tag-shift` на окне ставит `--tag-s:1`: все кнопки левее «+» уезжают на одну позицию, пока видна кнопка тегов). Откат: modals.css 15.0.
    Версия: 15.0 (21.10) — структурная правка: плашка QR-кода заметки `.mdeditor-qr-plaque` (+ `.open`) над рядом кнопок редактора заметок (mdeditor.js 14.0).
    Версия: 14.2 (17.10) — кнопка «повтор» в плашке напоминания (`.reminder-bubble-repeat`, `.rb-repeat-days`) — для напоминаний карточек.
@@ -126,7 +127,7 @@
        инлайн и переопределяют right/bottom), поднимаем и его на то же
        число, чтобы кнопка не мелькала под плашкой даже на долю секунды. */
     bottom:55px;
-    width:45px;height:45px;
+    width:35px;height:35px;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -297,13 +298,13 @@
     /* 11.10 (ТЗ пользователя): на большом экране (планшет, обычный режим) со всех четырёх сторон окна отступ 2px:
        сверху и слева 2px (было 16px), справа и снизу 2px (см. ниже). Полноэкранный режим (0 слева/сверху) и телефон
        (0) не менялись. */
-    padding-block:2px 72px;
+    padding-block:2px 62px;
     /* 11.10 (ТЗ пользователя): справа от колонки вкладок на большом экране (планшет) отступ ровно такой же, как
        снизу от нижнего ряда: 2px (в layoutSettingsModal запас под нижний ряд ANDROID_NAV_BAR_H = 47px, а сам ряд
        торчит на 45px ниже рамки). Поэтому справа 45px (толщина колонки, .settings-tabs торчит на 45px правее
        рамки) + те же 2px = 47px. Было 57px = 45px + 12px воздуха. На телефоне (ниже, @media max-width:600px)
        справа ровно 45px — это не менялось. */
-    padding-inline:2px 47px;
+    padding-inline:2px 37px;
     z-index:1000;
     opacity:0;
     visibility:hidden;
@@ -355,7 +356,7 @@
     position:fixed;
     top:0;
     inset-inline-end:0;
-    width:45px;
+    width:35px;
     height:calc(env(safe-area-inset-top, 0px) + 14px); /* запасное значение, см. комментарий выше — точную высоту выставляет my.js */
     /* --theme-color есть только у тем с собственным цветом статус-бара
        (тема 8, см. theme.css); у остальных тем переменной нет — берётся
@@ -431,7 +432,7 @@
      от отступов оверлея, поэтому её положение этим брейкпоинтом не
      затронуто. */
   @media (max-width:600px){
-    .settings-modal-overlay{ padding-block:0 72px; padding-inline:0 45px; }
+    .settings-modal-overlay{ padding-block:0 62px; padding-inline:0 35px; }
     /* На телефоне окно вплотную прижато к верхнему краю экрана (после
        снятия padding-top у оверлея выше) — верхнее скругление в этой
        точке больше не нужно, оно смотрелось бы как "оторванный" от
@@ -607,7 +608,7 @@
       position:fixed;
       top:0;
       inset-inline-end:0;
-      width:59px; /* 45px полосы + 14px — вырез скруглённого угла окна */
+      width:49px; /* 35px полосы + 14px — вырез скруглённого угла окна */
       height:44px;
       background:linear-gradient(to bottom, var(--theme-color, var(--wood)) 0%, transparent 100%);
       pointer-events:none;
@@ -617,8 +618,8 @@
          так же плавно проявляется, как и вдоль полосы. */
       -webkit-mask-image:radial-gradient(circle at 0 14px, transparent 13.5px, #000 14px), linear-gradient(#000, #000);
       mask-image:radial-gradient(circle at 0 14px, transparent 13.5px, #000 14px), linear-gradient(#000, #000);
-      -webkit-mask-size:14px 14px, 45px 100%;
-      mask-size:14px 14px, 45px 100%;
+      -webkit-mask-size:14px 14px, 35px 100%;
+      mask-size:14px 14px, 35px 100%;
       -webkit-mask-position:0 0, 14px 0;
       mask-position:0 0, 14px 0;
       -webkit-mask-repeat:no-repeat;
@@ -691,16 +692,16 @@
      свойствах нет специально. */
   .settings-tabs{
     position:absolute;
-    inset-inline-end:-45px;
+    inset-inline-end:-35px;
     bottom:0;
     display:flex;
     flex-direction:column-reverse;
     gap:1px;
   }
   .settings-tab{
-    width:45px;
-    height:68px;
-    flex:0 0 68px;
+    width:35px;
+    height:55px;
+    flex:0 0 55px;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -874,13 +875,13 @@
   .settings-tabs-gear{
     position:absolute;
     inset-inline-end:1px;
-    bottom:-45px;
+    bottom:-35px;
     display:flex;
     gap:1px;
   }
   .settings-tab-gear{
-    width:68px;height:45px;
-    flex:0 0 68px;
+    width:55px;height:35px;
+    flex:0 0 55px;
     border-radius:0 0 14px 14px;
     box-shadow:calc(2px * var(--hand-sign, 1)) 2px 5px rgba(0,0,0,.3);
   }

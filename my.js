@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 81.1 (25.10) — `layoutSettingsModal`: запас под нижний ряд `ANDROID_NAV_BAR_H` 37px (было 47), положение кнопки режима чтения считается от ширины язычка.
    Версия: 81.0 (25.10) — структурная правка: общая задача остаётся общей при переносе на любую вкладку. Вкладка — личная сортировка: у каждого участника своя, хранится в личном state (`gtab:<id>`, `getGroupTaskPlacement`/`setGroupTaskPlacement`/`taskEffectiveTab`), в запись группы не попадает (там tab всегда «jointtasks»); списки вкладок (`getTasksForTab`, `getGroupTasksForTab`), пикер переноса, QR «Создавать задачу» и перерисовка (`rerenderJointTasksTabIfOpen`) учитывают её; перенос личной задачи на «Общие задачи» — с предупреждением (`moveTaskWithWarning`); подпись начинается с «Общая задача.». Откат: my.js 80.1.
    Версия: 80.1 (25.10) — переключение набора вкладок (язычок-кнопка, выход из режима колеса) больше НЕ открывает вкладку другого набора само: меняется только ряд язычков, открытая вкладка остаётся на экране, пока пользователь сам не нажмёт нужный язычок (`cycleSettingsTabSet`, `toggleBottomAltMode`; `getResumeSettingsState` при перезапуске открывает набор той вкладки, что реально была на экране). Откат: my.js 80.0.
    Версия: 80.0 (25.10) — структурная правка: вкладка set2s_11 «Музыка» (модуль `music.js`, `renderSettingsTabMusic`, ветка в `switchSettingsTab` до `set2s_5`; в `SET2_TAB_IDS` стоит между `set2s_4` и `set2s_5`).
@@ -10209,7 +10210,7 @@
     // applyReadingModeVisual), а не из localStorage — так расчёт не зависит от порядка
     // инициализации переменных файла.
     var readingFull = !!(settingsModalOverlay && settingsModalOverlay.classList.contains("reading-mode-active"));
-    var ANDROID_NAV_BAR_H = 47; // px, замерено по скриншоту пользователя + 20px, чтобы поднять кнопку-язычок (.settings-fab) выше; уменьшено на 15px, затем поднято на 2px, затем опущено ещё на 8px (вместе с рядами вкладок и кнопкой — см. .settings-tabs/.settings-tabs-gear в modals.css), чтобы у окна не было "дыры" между его нижним краем и рядами
+    var ANDROID_NAV_BAR_H = 37; // px, замерено по скриншоту пользователя + 20px, чтобы поднять кнопку-язычок (.settings-fab) выше; уменьшено на 15px, затем поднято на 2px, затем опущено ещё на 8px (вместе с рядами вкладок и кнопкой — см. .settings-tabs/.settings-tabs-gear в modals.css), чтобы у окна не было "дыры" между его нижним краем и рядами
     var fabTop = window.innerHeight - (readingFull ? 0 : ANDROID_NAV_BAR_H);
     var minTop = naturalTop; // не даём окну вылезти выше верхнего края оверлея
     // Высота окна больше не фиксируется числом.
@@ -10274,15 +10275,15 @@
       // — по реальным координатам), язычок ставится зеркально — вплотную СЛЕВА от ряда (тот же
       // зазор 1px), а кнопка режима чтения — с другой стороны от язычка, вплотную к ряду: ровно
       // отражение обычной схемы «язычок справа от ряда, кнопка режима чтения слева от язычка».
-      var fabW = settingsGearBtn.offsetWidth || 45;
+      var fabW = settingsGearBtn.offsetWidth || 35;
       var fabLeft, readingLeft;
       if(isLeftHanded()){
         var gearRowLeft = hasGearRow ? gearRowRect.left : frameRect.right;
         fabLeft = gearRowLeft - 1 - fabW;
-        readingLeft = fabLeft + 46;
+        readingLeft = fabLeft + fabW + 1;
       } else {
         fabLeft = gearRowRight + 1;
-        readingLeft = gearRowRight + 1 - 46;
+        readingLeft = gearRowRight + 1 - (fabW + 1);
       }
       settingsGearBtn.style.left = Math.round(fabLeft) + "px";
       settingsGearBtn.style.top = Math.round(fabTopPx) + "px";
