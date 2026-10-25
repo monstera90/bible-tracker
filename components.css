@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 14.0 (25.10) — структурная правка: стили серий календаря (`.cal-more`, `.cal-row-exp`, `.cal-scope`).
    Версия: 13.0 (25.10) — структурная правка: стили вкладки «Календарь» (`.cal-center`, `.cal-row`, `.cal-row-past`, `.cal-rep`, `.cal-field`, `.cal-dt`, calendar.js); `.sync-status`: right 13px (точка по центру колонки вкладок шириной 35px).
    Версия: 12.3 (25.10) — `.item-card-fav-btn` (звезда «В избранное» среди кнопок карточки при удержании) оформлена как кнопка-глаз. Откат: components.css 12.2.
    Версия: 12.2 (25.10) — `.item-card-wx-btn` («Показать» на карточке «Погода») оформлена как кнопки таймера. Откат: components.css 12.1.
@@ -4795,6 +4796,10 @@ body::after{
 .cal-row{ cursor:pointer; -webkit-tap-highlight-color:transparent; }
 .cal-row-past{ opacity:.6; }
 .cal-rep{ color:var(--ink-soft, var(--ink)); font-size:.9em; }
+.cal-more{ color:var(--ink-soft, var(--ink)); font-size:.9em; white-space:nowrap; padding:2px 4px; }
+.cal-row-exp{ padding-left:10px; border-left:2px solid var(--ink-soft, var(--ink)); }
+.cal-scope{ flex-direction:column; gap:8px; }
+.cal-scope .workbooks-run-btn{ width:100%; }
 .cal-field{ display:flex; flex-direction:column; gap:4px; }
 .cal-dt{ display:flex; gap:8px; }
 .cal-dt .mdeditor-cleanup-input{ flex:1 1 0; min-width:0; margin-bottom:0; }

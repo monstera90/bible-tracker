@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 1.0 (25.10)
+   Версия: 2.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
    под «В работе»). Точка входа — window.CalendarTab.render(); my.js зовёт её из switchSettingsTab (renderSettingsTabCalendar).
    Сейчас есть только режим «Список» (в стиле центра событий — вкладки-колокольчика, eventlog.js: `.event-center`,
@@ -8,8 +8,21 @@
    Экран: список мероприятий (дни без мероприятий не показываются) и нижний ряд кнопок `.mdeditor-fab-row`: «+» (новое
    мероприятие) слева от «домика»; «домик» здесь — пустышка в углу, как на списках «Мои книги» и «Карточки предметов».
    Тап по мероприятию открывает ту же форму для правки (с кнопкой «Удалить»).
-   Мероприятие: {id, title, start, end, repeat, updatedAt}; start/end — мс (локальное время), repeat — "" | day | week |
-   month | year. Хранится в localStorage `calendarEvents_v1` (только на этом устройстве, в облако пока не уходит).
+   Мероприятие: {id, title, start, end, repeat, updatedAt[, until, skip]}; start/end — мс (локальное время), repeat — "" | day |
+   week | month | year. Хранится в localStorage `calendarEvents_v1` (только на этом устройстве, в облако пока не уходит).
+   Серия (repeat != ""): `until` — мс, повторения с началом >= until не существуют (серию «разрезали»: дальше идёт другая
+   серия); `skip` — массив дат "ГГГГ-ММ-ДД" повторений, которых в серии нет (их отвязали или удалили). Как в Google Календаре:
+   правка/удаление повторения спрашивает «Только это» / «Это и все последующие» (`askScope`). «Только это» — повторение
+   отвязывается: в серии на этот день пропуск (`skip`), а правка сохраняется отдельным обычным мероприятием. «Это и последующие»
+   (`applyFollowing`) — старой серии ставится `until = начало этого повторения`, с него стартует новая серия с правками; правка
+   самого первого повторения меняет серию на месте. Прошедшие повторения не трогаются. Если в форме изменено только поле
+   «Повторения», вопрос не задаётся — это всегда «последующие». Пропуски переносятся в новую серию, только если дата начала и
+   вид повтора не менялись.
+   Список: каждая серия — ОДНА строка, ближайшее ещё не закончившееся повторение (`upcoming`, смотрит до 400 дней вперёд); у
+   неё значок «↻ ещё N». Двойной тап по строке серии (тайминг как у переворота карточки в itemcards.js, DOUBLE_MS = 300) или тап
+   по значку раскрывает до EXPAND_COUNT ближайших повторений (`expanded`); повторный двойной тап / значок / тап мимо строк
+   сворачивает; выход из формы и повторный вход на вкладку тоже сворачивают. Одиночный тап по строке серии ждёт DOUBLE_MS, у
+   обычных мероприятий форма открывается сразу. Тап открывает форму ИМЕННО того повторения (`data-at`), а не первого.
    Повторы считаются от первого начала: k-е повторение = start + k периодов; для месяца/года день прижимается к концу
    месяца (31-е → 30-е/28-е), как у напоминаний карточек. Длительность повторения = end − start.
    Список показывает окно: LIST_BACK_DAYS дней назад … LIST_AHEAD_DAYS вперёд от сегодня; при открытии прокручен к
@@ -23,6 +36,8 @@
   var LIST_AHEAD_DAYS = 90;
   var HOUR_MS = 3600000;
   var DAY_MS = 86400000;
+  var DOUBLE_MS = 300;      // как в itemcards.js (двойной тап по карточке)
+  var EXPAND_COUNT = 12;    // сколько ближайших повторений показывает раскрытая серия
   var REPEATS = [
     { key: "day", label: "Каждый день" },
     { key: "week", label: "Каждую неделю" },
@@ -38,6 +53,8 @@
       '<path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
 
   var screen = "list"; // "list" | "form" — что сейчас нарисовано во вкладке
+  var expanded = {};   // id серий, раскрытых в списке
+  var tapTimer = null; // отложенный одиночный тап по строке серии
 
   // ---------- вспомогательное ----------
   function container(){ return document.getElementById("settingsTabContent"); }
@@ -105,12 +122,23 @@
       var per = ev.repeat === "day" ? DAY_MS : (ev.repeat === "week" ? 7 * DAY_MS : (ev.repeat === "month" ? 31 * DAY_MS : 366 * DAY_MS));
       k0 = Math.max(0, Math.floor(span / per) - 1);
     }
+    var skip = ev.skip && ev.skip.length ? ev.skip : null;
     for(var k = k0, guard = 0; guard < 4000; k++, guard++){
       var at = addPeriod(ev.start, ev.repeat, k);
       if(at >= to) break;
-      if(at >= from) out.push(at);
+      if(ev.until && at >= ev.until) break;
+      if(at >= from){
+        if(skip && skip.indexOf(dateValue(at)) >= 0) continue; // повторение отвязано или удалено
+        out.push(at);
+      }
     }
     return out;
+  }
+  // ближайшие n повторений серии, которые ещё не закончились (идущее сейчас — тоже)
+  function upcoming(ev, now, n){
+    var dur = Math.max(0, ev.end - ev.start);
+    var from = now - dur;
+    return occurrenceStarts(ev, from, from + 400 * DAY_MS).slice(0, n);
   }
   function repeatLabel(key){
     for(var i = 0; i < REPEATS.length; i++) if(REPEATS[i].key === key) return REPEATS[i].label.toLowerCase();
@@ -131,7 +159,15 @@
     var rows = [];
     load().forEach(function(ev){
       var dur = Math.max(0, ev.end - ev.start);
-      occurrenceStarts(ev, from, to).forEach(function(at){ rows.push({ at: at, dur: dur, ev: ev }); });
+      if(!ev.repeat){
+        if(ev.start >= from && ev.start < to) rows.push({ at: ev.start, dur: dur, ev: ev });
+        return;
+      }
+      var list = upcoming(ev, now, EXPAND_COUNT);
+      var open = !!expanded[ev.id];
+      (open ? list : list.slice(0, 1)).forEach(function(at, i){
+        rows.push({ at: at, dur: dur, ev: ev, series: true, first: i === 0, open: open, more: list.length - 1 });
+      });
     });
     if(!rows.length) return '<div class="event-empty">Мероприятий пока нет. Нажмите «+», чтобы добавить.</div>';
     rows.sort(function(a, b){ return a.at - b.at; });
@@ -142,9 +178,14 @@
         html += '<div class="event-day" data-day="' + day + '">' + dateLabel(r.at) + '</div>';
         lastDay = day;
       }
-      html += '<div class="event-row cal-row' + (r.at + r.dur < now ? ' cal-row-past' : '') + '" data-id="' + esc(r.ev.id) + '">' +
+      var badge = "";
+      if(r.series && r.more > 0){
+        badge = ' <span class="cal-more">' + (r.open ? '↻ свернуть' : '↻ ещё ' + r.more) + '</span>';
+      }
+      html += '<div class="event-row cal-row' + (r.at + r.dur < now ? ' cal-row-past' : '') + (r.series && !r.first ? ' cal-row-exp' : '') +
+        '" data-id="' + esc(r.ev.id) + '" data-at="' + r.at + '">' +
         '<span class="event-time">' + timeRange(r.at, r.dur) + '</span> ' + esc(r.ev.title) +
-        (r.ev.repeat ? '<span class="cal-rep"> · ' + repeatLabel(r.ev.repeat) + '</span>' : '') + '</div>';
+        (r.ev.repeat ? '<span class="cal-rep"> · ' + repeatLabel(r.ev.repeat) + '</span>' : '') + badge + '</div>';
     });
     return html;
   }
@@ -164,10 +205,28 @@
     setTimeout(go, 60);
     setTimeout(go, 250);
   }
+  // перерисовать только список (раскрытие/сворачивание серий), не трогая прокрутку
+  function refreshList(){
+    var c = container(), list = document.getElementById("calendarList");
+    if(!c || !list) return;
+    var top = c.scrollTop;
+    list.innerHTML = listHtml();
+    c.scrollTop = top;
+  }
+  function toggleExpand(id){
+    if(expanded[id]) delete expanded[id]; else expanded[id] = true;
+    refreshList();
+  }
+  function anyExpanded(){
+    for(var k in expanded){ if(expanded.hasOwnProperty(k)) return true; }
+    return false;
+  }
   function renderList(){
     var c = container();
     if(!c) return;
     screen = "list";
+    expanded = {};
+    clearTimeout(tapTimer); tapTimer = null;
     c.innerHTML =
       '<div class="event-center cal-center" id="calendarList">' + listHtml() + '</div>' +
       '<div class="mdeditor-fab-row">' +
@@ -175,21 +234,107 @@
         '<button type="button" class="mdeditor-fab-btn" id="calendarHomeStub" tabindex="-1" aria-disabled="true">' + HOME_ICON_SVG + '</button>' +
       '</div>';
     document.getElementById("calendarAddBtn").addEventListener("click", function(){ openForm(null); });
+    var lastKey = null, lastAt = 0;
     document.getElementById("calendarList").addEventListener("click", function(e){
       var row = e.target.closest ? e.target.closest(".cal-row") : null;
-      if(!row) return;
-      var ev = findEvent(row.getAttribute("data-id"));
-      if(ev) openForm(ev);
+      if(!row){
+        if(anyExpanded()){ expanded = {}; refreshList(); } // тап мимо строк сворачивает раскрытые серии
+        return;
+      }
+      var id = row.getAttribute("data-id"), at = +row.getAttribute("data-at");
+      var ev = findEvent(id);
+      if(!ev) return;
+      if(!ev.repeat){ openForm(ev, at); return; }
+      if(e.target.closest(".cal-more")){ lastKey = null; clearTimeout(tapTimer); toggleExpand(id); return; }
+      var key = id + ":" + at, now = Date.now();
+      if(lastKey === key && now - lastAt < DOUBLE_MS){ // двойной тап: раскрыть/свернуть серию
+        clearTimeout(tapTimer); lastKey = null;
+        toggleExpand(id);
+        return;
+      }
+      lastKey = key; lastAt = now;
+      clearTimeout(tapTimer);
+      tapTimer = setTimeout(function(){ lastKey = null; openForm(ev, at); }, DOUBLE_MS);
     });
     scrollToToday(c);
   }
 
+  // ---------- сохранение и удаление повторений ----------
+  function replaceInList(list, rec){
+    for(var i = 0; i < list.length; i++) if(list[i].id === rec.id){ list[i] = rec; return true; }
+    return false;
+  }
+  // «Только это»: повторение отвязывается — в серии на этот день пропуск, правка живёт отдельным обычным мероприятием
+  function skipOccurrence(list, ev, at){
+    var key = dateValue(at);
+    for(var i = 0; i < list.length; i++){
+      if(list[i].id !== ev.id) continue;
+      var sk = (list[i].skip || []).slice();
+      if(sk.indexOf(key) < 0) sk.push(key);
+      list[i].skip = sk;
+      list[i].updatedAt = Date.now();
+    }
+  }
+  function applyOnlyThis(ev, at, title, s, e){
+    var list = load();
+    skipOccurrence(list, ev, at);
+    list.push({ id: newId(), title: title, start: s, end: e, repeat: "", updatedAt: Date.now() });
+    save(list);
+  }
+  // «Это и последующие»: первое повторение — серия правится на месте; иначе старая серия обрывается (until), с этого повторения стартует новая
+  function applyFollowing(ev, at, title, s, e, r){
+    var list = load(), now = Date.now();
+    var atKey = dateValue(at);
+    var same = dateValue(s) === atKey && r === (ev.repeat || "");
+    var skip = same ? (ev.skip || []).filter(function(k){ return k >= atKey; }) : [];
+    function make(id){
+      var rec = { id: id, title: title, start: s, end: e, repeat: r, updatedAt: now };
+      if(r){
+        if(ev.until && ev.until > s) rec.until = ev.until;
+        if(skip.length) rec.skip = skip;
+      }
+      return rec;
+    }
+    if(at === ev.start){
+      replaceInList(list, make(ev.id));
+    } else {
+      for(var i = 0; i < list.length; i++){
+        if(list[i].id === ev.id){
+          list[i].until = list[i].until ? Math.min(list[i].until, at) : at;
+          list[i].updatedAt = now;
+        }
+      }
+      list.push(make(newId()));
+    }
+    save(list);
+  }
+  function deleteOccurrence(ev, at, following){
+    var list = load();
+    if(following && at === ev.start){
+      list = list.filter(function(x){ return x.id !== ev.id; });
+    } else if(following){
+      for(var i = 0; i < list.length; i++){
+        if(list[i].id === ev.id){
+          list[i].until = list[i].until ? Math.min(list[i].until, at) : at;
+          list[i].updatedAt = Date.now();
+        }
+      }
+    } else {
+      skipOccurrence(list, ev, at);
+    }
+    save(list);
+  }
+
   // ---------- форма ----------
-  function openForm(ev){
+  // ev — мероприятие (null — новое); at — начало того повторения, по которому нажали (у серии форма показывает его, а не первое начало)
+  function openForm(ev, at){
     var c = container();
     if(!c) return;
+    clearTimeout(tapTimer); tapTimer = null;
     screen = "form";
     var isNew = !ev;
+    var baseS = ev ? (ev.repeat && isFinite(at) ? at : ev.start) : 0;
+    var baseE = ev ? baseS + Math.max(0, ev.end - ev.start) : 0;
     var html = '<div class="mdeditor-tab item-card-form" id="calendarForm">' +
       '<h3 class="common-tab-title">' + (isNew ? "Новое мероприятие" : "Мероприятие") + '</h3>' +
       '<input type="text" class="mdeditor-cleanup-input item-form-title" id="calTitle" placeholder="Название мероприятия" maxlength="120" autocomplete="off">' +
@@ -206,11 +351,12 @@
         REPEATS.map(function(r){ return '<option value="' + r.key + '">' + r.label + '</option>'; }).join("") +
         '</select></div>' +
       '<div class="item-form-error" id="calError"></div>' +
-      '<div class="item-form-buttons">' +
+      '<div class="cal-scope" id="calScope" style="display:none"></div>' +
+      '<div class="item-form-buttons" id="calBtns">' +
         '<button type="button" class="workbooks-run-btn" id="calSave">Сохранить</button>' +
         '<button type="button" class="workbooks-run-btn" id="calCancel">Отмена</button>' +
       '</div>' +
-      (isNew ? '' : '<div class="item-form-buttons"><button type="button" class="workbooks-run-btn" id="calDelete">Удалить</button></div>') +
+      (isNew ? '' : '<div class="item-form-buttons" id="calDelRow"><button type="button" class="workbooks-run-btn" id="calDelete">Удалить</button></div>') +
     '</div>';
     c.innerHTML = html;
     c.scrollTop = 0;
@@ -221,8 +367,8 @@
     var repEl = document.getElementById("calRepeat"), errEl = document.getElementById("calError");
     if(ev){
       titleEl.value = ev.title;
-      sd.value = dateValue(ev.start); st.value = timeValue(ev.start);
-      ed.value = dateValue(ev.end); et.value = timeValue(ev.end);
+      sd.value = dateValue(baseS); st.value = timeValue(baseS);
+      ed.value = dateValue(baseE); et.value = timeValue(baseE);
       repEl.value = ev.repeat || "";
     }
 
@@ -247,6 +393,26 @@
     if(window.AppNav) window.AppNav.push(function(){ if(screen === "form") renderList(); });
 
     function fail(msg){ errEl.textContent = msg; }
+    var scopeEl = document.getElementById("calScope"), btnsEl = document.getElementById("calBtns"), delRowEl = document.getElementById("calDelRow");
+    // вопрос «только это / это и последующие» вместо кнопок формы
+    function askScope(text, onOnly, onFollowing){
+      errEl.textContent = "";
+      scopeEl.innerHTML = '<div class="item-form-hint">' + esc(text) + '</div>' +
+        '<button type="button" class="workbooks-run-btn" id="calScopeOnly">Только это</button>' +
+        '<button type="button" class="workbooks-run-btn" id="calScopeFollow">Это и все последующие</button>' +
+        '<button type="button" class="workbooks-run-btn" id="calScopeBack">Назад</button>';
+      scopeEl.style.display = "flex";
+      btnsEl.style.display = "none";
+      if(delRowEl) delRowEl.style.display = "none";
+      document.getElementById("calScopeOnly").addEventListener("click", onOnly);
+      document.getElementById("calScopeFollow").addEventListener("click", onFollowing);
+      document.getElementById("calScopeBack").addEventListener("click", function(){
+        scopeEl.style.display = "none"; scopeEl.innerHTML = "";
+        btnsEl.style.display = "";
+        if(delRowEl) delRowEl.style.display = "";
+      });
+    }
+
     document.getElementById("calSave").addEventListener("click", function(){
       var title = titleEl.value.replace(/^\s+|\s+$/g, "");
       if(!title) return fail("Введите название мероприятия");
@@ -259,13 +425,20 @@
         if(isNaN(e)) return fail("Укажите дату и время окончания");
       }
       if(e <= s) return fail("Окончание должно быть позже начала");
-      var list = load();
-      var rec = { id: ev ? ev.id : newId(), title: title, start: s, end: e, repeat: repEl.value || "", updatedAt: Date.now() };
-      var replaced = false;
-      for(var i = 0; i < list.length; i++){
-        if(list[i].id === rec.id){ list[i] = rec; replaced = true; break; }
+      var r = repEl.value || "";
+
+      if(ev && ev.repeat){ // правка повторения серии
+        if(title === ev.title && s === baseS && e === baseE && r === ev.repeat) return renderList(); // ничего не менялось
+        var following = function(){ applyFollowing(ev, baseS, title, s, e, r); renderList(); }; // не function-объявление в блоке: старый WebView (Android 5)
+        if(r !== ev.repeat) return following(); // менялся вид повтора — это всегда «последующие», вопрос не нужен
+        return askScope("Это повторяющееся мероприятие. Сохранить изменения:",
+          function(){ applyOnlyThis(ev, baseS, title, s, e); renderList(); },
+          following);
       }
-      if(!replaced) list.push(rec);
+
+      var list = load();
+      var rec = { id: ev ? ev.id : newId(), title: title, start: s, end: e, repeat: r, updatedAt: Date.now() };
+      if(!replaceInList(list, rec)) list.push(rec);
       save(list);
       renderList();
     });
@@ -274,6 +447,11 @@
     if(delBtn){
       var armed = false, armTimer = null;
       delBtn.addEventListener("click", function(){
+        if(ev.repeat){ // серия: вопрос вместо двойного нажатия
+          return askScope("Это повторяющееся мероприятие. Удалить:",
+            function(){ deleteOccurrence(ev, baseS, false); renderList(); },
+            function(){ deleteOccurrence(ev, baseS, true); renderList(); });
+        }
         if(!armed){
           armed = true;
           delBtn.textContent = "Точно удалить?";
