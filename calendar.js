@@ -1,10 +1,18 @@
 /* ===========================================================================
    calendar.js
-   Версия: 2.0 (25.10)
+   Версия: 3.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
    под «В работе»). Точка входа — window.CalendarTab.render(); my.js зовёт её из switchSettingsTab (renderSettingsTabCalendar).
-   Сейчас есть только режим «Список» (в стиле центра событий — вкладки-колокольчика, eventlog.js: `.event-center`,
-   `.event-day`, `.event-row`, `.event-time`); режим «Неделя» будет добавлен отдельно.
+   Два режима, кнопка-переключатель — первая в нижнем ряду (`calendarModeBtn`), выбор хранится в `calendarMode_v1`
+   ("list" | "week"), рисует нужный `renderMain` (из форм возвращаются тоже через него):
+   • «Список» (в стиле центра событий — вкладки-колокольчика, eventlog.js: `.event-center`, `.event-day`, `.event-row`,
+     `.event-time`) — `renderList`;
+   • «Неделя» (как в Google Календаре) — `renderWeek`: шапка с «‹ › Сегодня» и диапазоном дат, ряд дней Пн–Вс, сетка
+     24 часа × `HOUR_PX`, события блоками на своём месте (`weekSegments`: событие через полночь режется по дням, пересекающиеся
+     встают в колонки `packDay`). Показываются ВСЕ повторения серий этой недели (сворачивания серий в неделе нет). Тап по
+     блоку — форма этого повторения; смена недели — стрелки или свайп по сетке. Вход во вкладку открывает текущую неделю;
+     возвращение из формы — ту же неделю с той же прокруткой (`weekStart`, `weekScrollKeep`). Шапка липкая (`position:sticky`;
+     на старом WebView без sticky просто прокручивается вместе с сеткой).
    Экран: список мероприятий (дни без мероприятий не показываются) и нижний ряд кнопок `.mdeditor-fab-row`: «+» (новое
    мероприятие) слева от «домика»; «домик» здесь — пустышка в углу, как на списках «Мои книги» и «Карточки предметов».
    Тап по мероприятию открывает ту же форму для правки (с кнопкой «Удалить»).
@@ -32,10 +40,14 @@
   "use strict";
 
   var KEY = "calendarEvents_v1";
+  var MODE_KEY = "calendarMode_v1";
   var LIST_BACK_DAYS = 7;
   var LIST_AHEAD_DAYS = 90;
   var HOUR_MS = 3600000;
   var DAY_MS = 86400000;
+  var HOUR_PX = 44;         // высота часа в режиме «Неделя»
+  var MIN_BLOCK_PX = 14;    // минимальная высота блока события в неделе
+  var SWIPE_DX = 70, SWIPE_DY = 50;
   var DOUBLE_MS = 300;      // как в itemcards.js (двойной тап по карточке)
   var EXPAND_COUNT = 12;    // сколько ближайших повторений показывает раскрытая серия
   var REPEATS = [
@@ -44,6 +56,15 @@
     { key: "month", label: "Каждый месяц" },
     { key: "year", label: "Каждый год" }
   ];
+  var WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  var MONTHS_SHORT = ["янв.", "февр.", "марта", "апр.", "мая", "июня", "июля", "авг.", "сент.", "окт.", "нояб.", "дек."];
+  // значок кнопки режима: показывает, НА ЧТО переключит нажатие
+  var WEEK_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 10h16"></path><path d="M9.3 10v10"></path><path d="M14.7 10v10"></path></svg>';
+  var LIST_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M9 6h11"></path><path d="M9 12h11"></path><path d="M9 18h11"></path><path d="M4.5 6h.01"></path><path d="M4.5 12h.01"></path><path d="M4.5 18h.01"></path></svg>';
   var HOME_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M4 11.5L12 4l8 7.5"></path><path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"></path><path d="M10 20v-5h4v5"></path>' +
@@ -52,7 +73,10 @@
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
 
-  var screen = "list"; // "list" | "form" — что сейчас нарисовано во вкладке
+  var screen = "list"; // "list" | "week" | "form" — что сейчас нарисовано во вкладке
+  var mode = "list";    // выбранный режим: "list" | "week" (хранится в MODE_KEY)
+  var weekStart = null; // начало (понедельник 00:00) показанной недели; null — текущая
+  var weekScrollKeep = null; // прокрутка недели, которую вернуть после формы
   var expanded = {};   // id серий, раскрытых в списке
   var tapTimer = null; // отложенный одиночный тап по строке серии
 
@@ -205,6 +229,185 @@
     setTimeout(go, 60);
     setTimeout(go, 250);
   }
+  // ---------- нижний ряд и режимы ----------
+  function loadMode(){
+    try{ mode = localStorage.getItem(MODE_KEY) === "week" ? "week" : "list"; }catch(e){ mode = "list"; }
+  }
+  function saveMode(){ try{ localStorage.setItem(MODE_KEY, mode); }catch(e){} }
+  function fabRowHtml(){
+    return '<div class="mdeditor-fab-row">' +
+      '<button type="button" class="mdeditor-fab-btn" id="calendarModeBtn" title="' + (mode === "week" ? "Режим: список" : "Режим: неделя") + '">' +
+        (mode === "week" ? LIST_ICON_SVG : WEEK_ICON_SVG) + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="calendarAddBtn" title="Новое мероприятие">' + PLUS_ICON_SVG + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="calendarHomeStub" tabindex="-1" aria-disabled="true">' + HOME_ICON_SVG + '</button>' +
+    '</div>';
+  }
+  function bindFab(){
+    document.getElementById("calendarAddBtn").addEventListener("click", function(){ weekRememberScroll(); openForm(null); });
+    document.getElementById("calendarModeBtn").addEventListener("click", function(){
+      mode = mode === "week" ? "list" : "week";
+      saveMode();
+      weekStart = null; weekScrollKeep = null;
+      renderMain();
+    });
+  }
+  function renderMain(){ if(mode === "week") renderWeek(); else renderList(); }
+
+  // ---------- экран «Неделя» ----------
+  function mondayOf(ts){
+    var d = new Date(ts);
+    var back = (d.getDay() + 6) % 7; // пн = 0
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() - back, 0, 0, 0, 0).getTime();
+  }
+  function dayStartAt(base, i){ var d = new Date(base); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + i, 0, 0, 0, 0).getTime(); }
+  function minutesOfDay(ts){ var d = new Date(ts); return d.getHours() * 60 + d.getMinutes(); }
+  function weekTitle(ws){
+    var a = new Date(ws), b = new Date(dayStartAt(ws, 6));
+    if(a.getFullYear() !== b.getFullYear())
+      return a.getDate() + " " + MONTHS_SHORT[a.getMonth()] + " " + a.getFullYear() + " – " + b.getDate() + " " + MONTHS_SHORT[b.getMonth()] + " " + b.getFullYear();
+    if(a.getMonth() !== b.getMonth())
+      return a.getDate() + " " + MONTHS_SHORT[a.getMonth()] + " – " + b.getDate() + " " + MONTHS_SHORT[b.getMonth()] + " " + b.getFullYear();
+    return a.getDate() + "–" + b.getDate() + " " + MONTHS_SHORT[a.getMonth()] + " " + b.getFullYear();
+  }
+  // куски событий недели по дням: [день 0..6] → [{top,bottom (минуты), ev, at, dur}]
+  function weekSegments(ws){
+    var days = [[], [], [], [], [], [], []];
+    var weekEnd = dayStartAt(ws, 7);
+    load().forEach(function(ev){
+      var dur = Math.max(0, ev.end - ev.start);
+      occurrenceStarts(ev, ws - dur, weekEnd).forEach(function(at){
+        var end = at + dur;
+        for(var i = 0; i < 7; i++){
+          var ds = dayStartAt(ws, i), de = dayStartAt(ws, i + 1);
+          if(end <= ds && !(dur === 0 && at === ds)) continue;
+          if(at >= de) continue;
+          var top = at > ds ? minutesOfDay(at) : 0;
+          var bottom = end >= de ? 1440 : minutesOfDay(end);
+          days[i].push({ top: top, bottom: Math.max(bottom, top + 1), ev: ev, at: at, dur: dur });
+        }
+      });
+    });
+    return days;
+  }
+  // раскладка пересекающихся блоков дня по колонкам: проставляет seg.col и seg.cols
+  function packDay(segs){
+    var minH = MIN_BLOCK_PX * 60 / HOUR_PX; // минимальная высота блока в минутах — по ней считается пересечение
+    segs.sort(function(a, b){ return a.top - b.top || b.bottom - a.bottom; });
+    var cluster = [], colEnds = [], clusterEnd = -1;
+    function flush(){
+      for(var i = 0; i < cluster.length; i++) cluster[i].cols = colEnds.length;
+      cluster = []; colEnds = []; clusterEnd = -1;
+    }
+    segs.forEach(function(sg){
+      var bottom = Math.max(sg.bottom, sg.top + minH);
+      if(cluster.length && sg.top >= clusterEnd) flush();
+      var col = -1;
+      for(var c = 0; c < colEnds.length; c++){ if(colEnds[c] <= sg.top){ col = c; break; } }
+      if(col < 0){ col = colEnds.length; colEnds.push(0); }
+      colEnds[col] = bottom;
+      sg.col = col;
+      cluster.push(sg);
+      clusterEnd = Math.max(clusterEnd, bottom);
+    });
+    flush();
+  }
+  function weekHtml(ws){
+    var now = Date.now(), todayKey = dateValue(now);
+    var segsByDay = weekSegments(ws);
+    var head = '<div class="cal-wk-head"><div class="cal-wk-gutter"></div>';
+    var cols = '';
+    for(var i = 0; i < 7; i++){
+      var ds = dayStartAt(ws, i), isToday = dateValue(ds) === todayKey;
+      head += '<div class="cal-wk-dayh' + (isToday ? ' cal-wk-today' : '') + '"><span>' + WEEKDAYS[i] + '</span><b>' + new Date(ds).getDate() + '</b></div>';
+      var segs = segsByDay[i];
+      packDay(segs);
+      var blocks = '';
+      segs.forEach(function(sg){
+        var top = sg.top * HOUR_PX / 60;
+        var h = Math.max(MIN_BLOCK_PX, (sg.bottom - sg.top) * HOUR_PX / 60 - 1);
+        var w = 100 / sg.cols, left = sg.col * w;
+        var tall = h >= 30;
+        blocks += '<div class="cal-wk-ev' + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '"' +
+          ' style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;left:' + left.toFixed(2) + '%;width:calc(' + w.toFixed(2) + '% - 1px)">' +
+          (tall ? '<span class="cal-wk-et">' + timeValue(sg.at) + '</span>' : '') + esc(sg.ev.title) + '</div>';
+      });
+      var nowLine = isToday ? '<div class="cal-wk-now" style="top:' + (minutesOfDay(now) * HOUR_PX / 60).toFixed(1) + 'px"></div>' : '';
+      cols += '<div class="cal-wk-col' + (isToday ? ' cal-wk-today-col' : '') + '">' + blocks + nowLine + '</div>';
+    }
+    head += '</div>';
+    var labels = '';
+    for(var h2 = 1; h2 < 24; h2++) labels += '<span style="top:' + (h2 * HOUR_PX - 6) + 'px">' + pad2(h2) + ':00</span>';
+    return '<div class="cal-wk-top">' +
+        '<div class="cal-wk-nav">' +
+          '<button type="button" class="cal-wk-btn" id="calWkPrev" title="Предыдущая неделя">‹</button>' +
+          '<div class="cal-wk-title">' + weekTitle(ws) + '</div>' +
+          '<button type="button" class="cal-wk-btn" id="calWkNext" title="Следующая неделя">›</button>' +
+          '<button type="button" class="cal-wk-btn cal-wk-todaybtn" id="calWkToday">Сегодня</button>' +
+        '</div>' + head +
+      '</div>' +
+      '<div class="cal-wk-body" id="calWkBody" style="height:' + (24 * HOUR_PX) + 'px">' +
+        '<div class="cal-wk-gutter cal-wk-labels">' + labels + '</div>' +
+        '<div class="cal-wk-cols" style="background-size:100% ' + HOUR_PX + 'px">' + cols + '</div>' +
+      '</div>';
+  }
+  function weekRememberScroll(){
+    var c = container();
+    weekScrollKeep = (mode === "week" && c) ? c.scrollTop : null;
+  }
+  function renderWeek(){
+    var c = container();
+    if(!c) return;
+    screen = "week";
+    expanded = {};
+    clearTimeout(tapTimer); tapTimer = null;
+    var cur = mondayOf(Date.now());
+    if(weekStart === null) weekStart = cur;
+    var ws = weekStart;
+    c.innerHTML = '<div class="cal-week" id="calWeek">' + weekHtml(ws) + '</div>' + fabRowHtml();
+    bindFab();
+    function shift(n){ weekStart = dayStartAt(ws, 7 * n); weekScrollKeep = c.scrollTop; renderWeek(); }
+    document.getElementById("calWkPrev").addEventListener("click", function(){ shift(-1); });
+    document.getElementById("calWkNext").addEventListener("click", function(){ shift(1); });
+    document.getElementById("calWkToday").addEventListener("click", function(){ weekStart = null; weekScrollKeep = null; renderWeek(); });
+    var wk = document.getElementById("calWeek");
+    wk.addEventListener("click", function(e){
+      var blk = e.target.closest ? e.target.closest(".cal-wk-ev") : null;
+      if(!blk) return;
+      var ev = findEvent(blk.getAttribute("data-id"));
+      if(!ev) return;
+      weekRememberScroll();
+      openForm(ev, +blk.getAttribute("data-at"));
+    });
+    var sx = 0, sy = 0, tracking = false;
+    wk.addEventListener("touchstart", function(e){
+      if(!e.touches || e.touches.length !== 1){ tracking = false; return; }
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
+    }, { passive: true });
+    wk.addEventListener("touchend", function(e){
+      if(!tracking || !e.changedTouches || !e.changedTouches.length) return;
+      tracking = false;
+      var dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+      if(Math.abs(dx) > SWIPE_DX && Math.abs(dy) < SWIPE_DY) shift(dx < 0 ? 1 : -1);
+    }, { passive: true });
+    scrollWeek(c, ws === cur);
+  }
+  function scrollWeek(c, isCurrent){
+    var keep = weekScrollKeep;
+    weekScrollKeep = null;
+    function go(){
+      if(keep !== null){ c.scrollTop = keep; return; }
+      var body = document.getElementById("calWkBody"), top = c.querySelector(".cal-wk-top");
+      if(!body) return;
+      var hour = isCurrent ? Math.max(0, new Date().getHours() - 2) : 7;
+      var headH = top ? top.getBoundingClientRect().height : 0;
+      c.scrollTop += body.getBoundingClientRect().top - c.getBoundingClientRect().top - headH + hour * HOUR_PX;
+    }
+    go();
+    if(window.requestAnimationFrame) window.requestAnimationFrame(go);
+    setTimeout(go, 60);
+    setTimeout(go, 250);
+  }
+
   // перерисовать только список (раскрытие/сворачивание серий), не трогая прокрутку
   function refreshList(){
     var c = container(), list = document.getElementById("calendarList");
@@ -229,11 +432,8 @@
     clearTimeout(tapTimer); tapTimer = null;
     c.innerHTML =
       '<div class="event-center cal-center" id="calendarList">' + listHtml() + '</div>' +
-      '<div class="mdeditor-fab-row">' +
-        '<button type="button" class="mdeditor-fab-btn" id="calendarAddBtn" title="Новое мероприятие">' + PLUS_ICON_SVG + '</button>' +
-        '<button type="button" class="mdeditor-fab-btn" id="calendarHomeStub" tabindex="-1" aria-disabled="true">' + HOME_ICON_SVG + '</button>' +
-      '</div>';
-    document.getElementById("calendarAddBtn").addEventListener("click", function(){ openForm(null); });
+      fabRowHtml();
+    bindFab();
     var lastKey = null, lastAt = 0;
     document.getElementById("calendarList").addEventListener("click", function(e){
       var row = e.target.closest ? e.target.closest(".cal-row") : null;
@@ -388,9 +588,9 @@
       ed.addEventListener(t, onEnd); et.addEventListener(t, onEnd);
     });
 
-    function leave(){ renderList(); }
+    function leave(){ renderMain(); }
     document.getElementById("calCancel").addEventListener("click", leave);
-    if(window.AppNav) window.AppNav.push(function(){ if(screen === "form") renderList(); });
+    if(window.AppNav) window.AppNav.push(function(){ if(screen === "form") renderMain(); });
 
     function fail(msg){ errEl.textContent = msg; }
     var scopeEl = document.getElementById("calScope"), btnsEl = document.getElementById("calBtns"), delRowEl = document.getElementById("calDelRow");
@@ -428,11 +628,11 @@
       var r = repEl.value || "";
 
       if(ev && ev.repeat){ // правка повторения серии
-        if(title === ev.title && s === baseS && e === baseE && r === ev.repeat) return renderList(); // ничего не менялось
-        var following = function(){ applyFollowing(ev, baseS, title, s, e, r); renderList(); }; // не function-объявление в блоке: старый WebView (Android 5)
+        if(title === ev.title && s === baseS && e === baseE && r === ev.repeat) return renderMain(); // ничего не менялось
+        var following = function(){ applyFollowing(ev, baseS, title, s, e, r); renderMain(); }; // не function-объявление в блоке: старый WebView (Android 5)
         if(r !== ev.repeat) return following(); // менялся вид повтора — это всегда «последующие», вопрос не нужен
         return askScope("Это повторяющееся мероприятие. Сохранить изменения:",
-          function(){ applyOnlyThis(ev, baseS, title, s, e); renderList(); },
+          function(){ applyOnlyThis(ev, baseS, title, s, e); renderMain(); },
           following);
       }
 
@@ -440,7 +640,7 @@
       var rec = { id: ev ? ev.id : newId(), title: title, start: s, end: e, repeat: r, updatedAt: Date.now() };
       if(!replaceInList(list, rec)) list.push(rec);
       save(list);
-      renderList();
+      renderMain();
     });
 
     var delBtn = document.getElementById("calDelete");
@@ -449,8 +649,8 @@
       delBtn.addEventListener("click", function(){
         if(ev.repeat){ // серия: вопрос вместо двойного нажатия
           return askScope("Это повторяющееся мероприятие. Удалить:",
-            function(){ deleteOccurrence(ev, baseS, false); renderList(); },
-            function(){ deleteOccurrence(ev, baseS, true); renderList(); });
+            function(){ deleteOccurrence(ev, baseS, false); renderMain(); },
+            function(){ deleteOccurrence(ev, baseS, true); renderMain(); });
         }
         if(!armed){
           armed = true;
@@ -460,13 +660,13 @@
         }
         clearTimeout(armTimer);
         save(load().filter(function(x){ return x.id !== ev.id; }));
-        renderList();
+        renderMain();
       });
     }
   }
 
   window.CalendarTab = {
-    render: renderList,
+    render: function(){ loadMode(); weekStart = null; weekScrollKeep = null; renderMain(); },
     // для проверки/других модулей: мероприятия на отрезке [from, to) — [{id,title,at,dur,repeat}]
     occurrences: function(from, to){
       var out = [];

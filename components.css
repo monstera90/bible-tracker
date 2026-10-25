@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 15.0 (25.10) — структурная правка: стили режима «Неделя» календаря (`.cal-week`, `.cal-wk-*`).
    Версия: 14.0 (25.10) — структурная правка: стили серий календаря (`.cal-more`, `.cal-row-exp`, `.cal-scope`).
    Версия: 13.0 (25.10) — структурная правка: стили вкладки «Календарь» (`.cal-center`, `.cal-row`, `.cal-row-past`, `.cal-rep`, `.cal-field`, `.cal-dt`, calendar.js); `.sync-status`: right 13px (точка по центру колонки вкладок шириной 35px).
    Версия: 12.3 (25.10) — `.item-card-fav-btn` (звезда «В избранное» среди кнопок карточки при удержании) оформлена как кнопка-глаз. Откат: components.css 12.2.
@@ -4800,6 +4801,30 @@ body::after{
 .cal-row-exp{ padding-left:10px; border-left:2px solid var(--ink-soft, var(--ink)); }
 .cal-scope{ flex-direction:column; gap:8px; }
 .cal-scope .workbooks-run-btn{ width:100%; }
+
+/* Календарь, режим «Неделя» (calendar.js): шапка с навигацией и днями липкая, ниже сетка 24 часа; блоки событий — absolute внутри колонки дня */
+.cal-week{ font-family:"Palatino Linotype",Georgia,serif; color:var(--ink); padding:0 4px 64px 4px; }
+.cal-wk-top{ position:-webkit-sticky; position:sticky; top:0; z-index:3; background:var(--parchment); padding-top:4px; }
+.cal-wk-nav{ display:flex; align-items:center; gap:4px; padding:0 0 4px 0; }
+.cal-wk-title{ flex:1 1 auto; text-align:center; font-weight:bold; color:var(--wood); font-size:14px; min-width:0; }
+.cal-wk-btn{ flex:0 0 auto; min-width:30px; height:28px; padding:0 6px; background:#fffef8; color:var(--wood); border:1px solid var(--groove-shadow); border-radius:6px; font:inherit; font-size:15px; line-height:1; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.cal-wk-todaybtn{ font-size:12px; }
+.cal-wk-head{ display:flex; border-bottom:1px solid var(--groove-shadow); }
+.cal-wk-gutter{ flex:0 0 32px; width:32px; }
+.cal-wk-dayh{ flex:1 1 0; min-width:0; text-align:center; padding:2px 0 3px 0; font-size:11px; color:var(--ink-soft, var(--ink)); line-height:1.2; }
+.cal-wk-dayh b{ display:block; font-size:14px; color:var(--ink); }
+.cal-wk-dayh.cal-wk-today b{ display:inline-block; min-width:22px; border-radius:11px; background:var(--wood); color:var(--parchment); }
+.cal-wk-dayh.cal-wk-today{ color:var(--wood); }
+.cal-wk-body{ display:flex; position:relative; }
+.cal-wk-labels{ position:relative; }
+.cal-wk-labels span{ position:absolute; right:3px; font-size:9px; color:var(--ink-soft, var(--ink)); line-height:12px; font-variant-numeric:tabular-nums; }
+.cal-wk-cols{ flex:1 1 0; min-width:0; display:flex; position:relative; background-image:linear-gradient(to bottom, rgba(0,0,0,.14) 1px, transparent 1px); }
+.cal-wk-col{ flex:1 1 0; min-width:0; position:relative; border-left:1px solid rgba(0,0,0,.14); }
+.cal-wk-today-col{ background:rgba(127,127,127,.09); }
+.cal-wk-ev{ position:absolute; box-sizing:border-box; overflow:hidden; padding:1px 2px; background:var(--wood); color:var(--parchment); border-radius:3px; border:1px solid var(--parchment); font-size:10px; line-height:1.15; word-break:break-word; cursor:pointer; -webkit-tap-highlight-color:transparent; z-index:1; }
+.cal-wk-et{ display:block; font-size:9px; opacity:.85; font-variant-numeric:tabular-nums; }
+.cal-wk-past{ opacity:.6; }
+.cal-wk-now{ position:absolute; left:0; right:0; height:0; border-top:2px solid #d33; z-index:2; pointer-events:none; }
 .cal-field{ display:flex; flex-direction:column; gap:4px; }
 .cal-dt{ display:flex; gap:8px; }
 .cal-dt .mdeditor-cleanup-input{ flex:1 1 0; min-width:0; margin-bottom:0; }
