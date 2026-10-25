@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 6.0 (25.10) — мост версии 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
 // Версия: 5.0 (24.10) — мост версии 12: setCardAlarm / cancelCardAlarm / getCardAlarms (будильники карточек, CardAlarms).
 // Версия: 4.0 (24.10) — мост версии 11: startHiddenCardTimer (скрытый таймер карточки: без острова, плашки и уведомления «идёт»).
 // Версия: 3.0 (24.10) — мост версии 10: restartForWebUpdate (перезапуск Activity, чтобы применилась скачанная веб-часть).
@@ -33,8 +34,9 @@ class NativeBridge(private val activity: MainActivity) {
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
+         * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 12
+        const val BRIDGE_VERSION = 13
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -494,6 +496,69 @@ class NativeBridge(private val activity: MainActivity) {
     fun getCardAlarms(): String {
         if (!activity.pageTrusted) return "[]"
         return CardAlarms.listJson(activity.applicationContext)
+    }
+
+    // ---------- вкладка «Музыка» (MusicLibrary / MusicPlayer; set2s_11) ----------
+
+    /** JSON: {"set":true,"name":"..."} — папка с музыкой выбрана; {"set":false} — нет. */
+    @JavascriptInterface
+    fun musicGetFolder(): String {
+        if (!activity.pageTrusted) return "{}"
+        return MusicLibrary.folderJson(activity.applicationContext)
+    }
+
+    /** Открывает системное окно выбора папки; по результату страница получает window.__ltOnMusicFolder(true|false). */
+    @JavascriptInterface
+    fun musicPickFolder(): Boolean {
+        if (!activity.pageTrusted) return false
+        activity.runOnUiThread { activity.pickMusicFolder() }
+        return true
+    }
+
+    /** Содержимое папки: {"ok":true,"items":[{"id","name","dir"}]}. Пустой/null docId — корень выбранной папки. */
+    @JavascriptInterface
+    fun musicList(docId: String?): String {
+        if (!activity.pageTrusted) return "{\"ok\":false}"
+        return MusicLibrary.listJson(activity.applicationContext, docId)
+    }
+
+    /** Играть трек [trackId] из папки [folderId]; дальше пойдут остальные файлы этой папки. */
+    @JavascriptInterface
+    fun musicPlay(folderId: String?, trackId: String?, folderName: String?): Boolean {
+        if (!activity.pageTrusted || trackId == null) return false
+        return MusicPlayer.play(activity.applicationContext, folderId, trackId, folderName ?: "")
+    }
+
+    @JavascriptInterface
+    fun musicToggle() {
+        if (!activity.pageTrusted) return
+        MusicPlayer.toggle()
+    }
+
+    @JavascriptInterface
+    fun musicNext() {
+        if (!activity.pageTrusted) return
+        MusicPlayer.next()
+    }
+
+    @JavascriptInterface
+    fun musicPrev() {
+        if (!activity.pageTrusted) return
+        MusicPlayer.prev()
+    }
+
+    /** Закрыть воспроизведение (крестик на полосе плеера). */
+    @JavascriptInterface
+    fun musicClose() {
+        if (!activity.pageTrusted) return
+        MusicPlayer.close()
+    }
+
+    /** JSON: {"active","playing","title","folder","index","count","id","error"}. */
+    @JavascriptInterface
+    fun musicState(): String {
+        if (!activity.pageTrusted) return "{}"
+        return MusicPlayer.stateJson()
     }
 
     // ---------- ярлык сканера QR-кодов на рабочий стол (ScanShortcut; кнопка в «Дополнительных возможностях») ----------

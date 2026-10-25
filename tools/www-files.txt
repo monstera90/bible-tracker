@@ -1,4 +1,5 @@
 # Белый список файлов веб-части, которые попадают в APK (assets/www/) и в веб-бандл.
+# Версия: 1.0 (25.10)
 # Пути от корня репозитория. Строки с # и пустые игнорируются.
 # Новый файл веб-части (подключённый в index.html или попавший в ASSETS в sw.js) добавляется сюда же:
 # tools/android_prepare.py остановит сборку с понятным сообщением, если файл забыли.
@@ -44,6 +45,7 @@ cardscan.js
 cardpdf.js
 itemcards.js
 claudetab.js
+music.js
 scan.html
 mdeditor.js
 codemirror.bundle.js

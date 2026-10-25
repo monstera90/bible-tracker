@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Версия: 1.0 (25.10) -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Шаг 4: приём файлов из «Поделиться» (intent-filter ниже) и FileProvider для отправки файлов.
@@ -32,6 +33,8 @@
          со свойством PROPERTY_SPECIAL_USE_FGS_SUBTYPE и запускать его из страницы через мост. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Плеер вкладки «Музыка» (MusicService): служба переднего плана типа mediaPlayback. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
@@ -158,5 +161,11 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="card_timer_island_countdown" />
         </service>
+
+        <!-- Плеер вкладки «Музыка»: уведомление с кнопками и остров Xiaomi, пока играет музыка (в том числе при погашенном экране). -->
+        <service
+            android:name=".MusicService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
     </application>
 </manifest>

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 9.0 (25.10) — структурная правка: кнопка вкладки «Музыка» `settingsTabSet2Btn11` (set2s_11, между «Забытыми заметками» и «Разделением epub») и подключён `music.js`.
      Версия: 8.0 (24.10) — структурная правка: кнопка вкладки «События» `settingsTabEventsBtn` (над «Архивом») и подключён `eventlog.js`.
      Версия: 7.0 (22.10) — структурная правка: кнопка тегов задач `#taskTagWrap`/`#taskTagBtn` с выпадающим списком `#taskTagPopup` (между скрепкой и «+»).
      Версия: 6.0 (21.10) — структурная правка: кнопка вкладки set2s_10 «Claude» (`settingsTabSet2Btn10`, над «Карточками предметов») и подключён `claudetab.js`.
@@ -717,6 +718,14 @@ window.addEventListener("error", function(e){
           <path d="M17 15.3v2.2l1.5 1"></path>
         </svg>
       </button>
+      <button class="settings-tab" id="settingsTabSet2Btn11" title="Музыка">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 18V5.5l11-2.5v12.5"></path>
+          <circle cx="6" cy="18" r="3"></circle>
+          <circle cx="17" cy="15.5" r="3"></circle>
+          <path d="M9 9.5l11-2.5"></path>
+        </svg>
+      </button>
       <button class="settings-tab" id="settingsTabSet2Btn5" title="Разделение epub-файлов">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <line x1="3.4" y1="5" x2="20.6" y2="19"></line>
@@ -870,6 +879,7 @@ window.addEventListener("error", function(e){
 <script src="cardpdf.js"></script>
 <script src="itemcards.js"></script>
 <script src="claudetab.js"></script>
+<script src="music.js"></script>
 <script src="mdeditor.js"></script>
 <script src="search.js"></script>
 <!-- flibusta.js — READER_PLAN.md, Этап E, шаг 17: подключение к OPDS-

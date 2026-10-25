@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.0 (25.10) — выбор папки с музыкой (`musicFolderLauncher`, `pickMusicFolder`) для вкладки «Музыка».
 // Версия: 3.1 (22.10) — onPause сразу перепоставляет уведомления идущих таймеров (`CardTimers.tickIsland`): пока приложение на экране, тик их не трогает, и остров в шторке получает свежее время без ожидания следующего тика. Откат: MainActivity.kt 3.0.
 // Версия: 3.0 (21.10) — плашка таймера в приложении: `inAppIsland` (InAppIsland.kt), вырез камеры берётся из WindowInsets, старт/стоп в onResume/onPause. Откат: MainActivity.kt 2.1.
 // Версия: 2.1 (21.10) — onResume гасит вибрацию конца таймера карточки (CardTimers.stopVibration).
@@ -183,6 +184,27 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+    // Вкладка «Музыка»: системное окно выбора папки; страница узнаёт результат через window.__ltOnMusicFolder(true|false).
+    private val musicFolderLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            val ok = if (uri != null) MusicLibrary.setTree(applicationContext, uri) else false
+            if (ok) MusicPlayer.close() // папка сменилась — старая очередь больше не нужна
+            runOnUiThread {
+                if (!isDestroyed && pageTrusted) {
+                    webView.evaluateJavascript("window.__ltOnMusicFolder && window.__ltOnMusicFolder($ok)", null)
+                }
+            }
+        }
+
+    /** Вызывается мостом в главном потоке. */
+    fun pickMusicFolder() {
+        try {
+            musicFolderLauncher.launch(null)
+        } catch (e: Exception) {
+            toast("Не удалось открыть выбор папки")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

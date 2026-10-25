@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 80.0 (25.10) — структурная правка: вкладка set2s_11 «Музыка» (модуль `music.js`, `renderSettingsTabMusic`, ветка в `switchSettingsTab` до `set2s_5`; в `SET2_TAB_IDS` стоит между `set2s_4` и `set2s_5`).
    Версия: 79.0 (24.10) — структурная правка: вкладка `events` «События» (центр событий, `eventlog.js`) над «Архивом»: `EVENTS_TAB_KEY`/`EVENTS_TAB_BTN_ID`, `renderSettingsTabEvents`, ветки в `refreshSettingsTabsVisibility`/`switchSettingsTab`/`SETTINGS_SIDE_ORDER_1`; запись обновления версии (`applyVersionToHeader`), уведомления об общих задачах в журнал.
    Версия: 78.0 (24.10) — структурная правка: вкладка `alt5` «Версии» заменена на «Проверка обновлений» (`renderSettingsTabUpdates`: кнопка внизу, «Проверить обновления» → «Перезагрузить приложение для установки обновлений»; в APK — через мост версии 10: `checkWebUpdateNow`/`getWebUpdateState`/`restartForWebUpdate`, в браузере — через `SW_REGISTRATION.update()`); архив версий убран (`renderVersionHistory`, `renderVersionItems`, `ensureVersionsTabStyle`, `renderSettingsTabVersions`). Классы `.version-history-*` остались — их используют другие места.
    Версия: 77.0 (23.10) — структурная правка: вкладка «Скрытие вкладок» (`alt6`, режим колеса, вторая снизу в вертикальном стеке — на месте Red, `BOTTOM_ALT_REPLACES.alt6`; Red теперь тоже в `BOTTOM_ALT_ORIGINAL_TABS` и скрывается под колесом, как worktasks): список всех вкладок с пиктограммой (innerHTML настоящей кнопки), названием и галочкой «показана» (`renderSettingsTabHiddenTabs`, `hideableTabsInScreenOrder`); скрытие — класс `.settings-tab-user-hidden` (display:none !important, стиль вставляется из JS), хранение `bibleHiddenSettingsTabs_v1` (id кнопок, внесён в `EXPORT_REGISTRY.include`); шестерёнка и вкладки режима колеса не скрываются; `getResumeSettingsState`/`openTabOfActiveSettingsSet` не открывают скрытую вкладку (`isSettingsTabUserHidden`, `firstVisibleTabOfSet`). Откат: my.js 76.1.
@@ -2060,7 +2061,7 @@
   // вынесена ДО общей проверки на renderSettingsTabSet2Stub.
   var SET2_TAB_IDS = {
     set2s_1: "settingsTabSet2Btn1", set2s_2: "settingsTabSet2Btn2", set2s_3: "settingsTabSet2Btn3",
-    set2s_4: "settingsTabSet2Btn4", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
+    set2s_4: "settingsTabSet2Btn4", set2s_11: "settingsTabSet2Btn11", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
     set2s_7: "settingsTabSet2Btn7", set2s_8: "settingsTabSet2Btn8", set2s_9: "settingsTabSet2Btn9",
     set2s_10: "settingsTabSet2Btn10"
   };
@@ -10636,6 +10637,8 @@
     // mdeditor.js), тем же способом вынесена ДО общей проверки на renderSettingsTabSet2Stub, что и
     // остальные уже не-заглушки этого набора.
     else if(tab === "set2s_4") renderSettingsTabForgottenNotes();
+    // вкладка «Музыка» (set2s_11, между «Забытыми заметками» и «Разделением epub»): библиотека и плеер, см. music.js
+    else if(tab === "set2s_11") renderSettingsTabMusic();
     else if(tab === "set2s_5") renderSettingsTabEpubSplit();
     else if(tab === "set2s_6") renderSettingsTabImgResize();
     // седьмая боковая вкладка второго набора (set2s_7) — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: список книг
@@ -10785,6 +10788,9 @@
     var mode = /[?&]cardmode=create(?:&|$)/.test(location.search) ? "create" : "note";
     try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
     setTimeout(function(){ openCardFromNative(m[1], mode); }, 0);
+  }
+  function renderSettingsTabMusic(){
+    if(window.MusicTab) window.MusicTab.render();
   }
   function renderSettingsTabClaude(){
     if(window.ClaudeTabMod) window.ClaudeTabMod.render();
@@ -17051,7 +17057,7 @@
   //   вручную, а не через Object.keys(EXTRA_TAB_IDS), в котором только 2 из 5) идёт слева направо.
   var SETTINGS_SIDE_ORDER_1 = Object.keys(TASK_TAB_IDS).concat([EVENTS_TAB_KEY]);              // red..archive
   var SETTINGS_BOTTOM_ORDER_1 = ["gear","year","mood"].concat(Object.keys(EXTRA_TAB_IDS)); // gear,year,mood,extra2,extra3
-  var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_10
+  var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_4, set2s_11, set2s_5..set2s_10 (порядок = порядок вкладок снизу вверх)
   var SETTINGS_BOTTOM_ORDER_2 = ["gear"].concat(Object.keys(SET2_EXTRA_TAB_IDS));
   // последняя реально выбранная вкладка одного из двух стеков (см. switchSettingsTab выше) —
   // используется, чтобы при переключении набора (cycleSettingsTabSet) открывалась не первая

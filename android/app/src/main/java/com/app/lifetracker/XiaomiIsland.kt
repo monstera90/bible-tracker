@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 6.0 (25.10) — остров плеера «Музыка»: `musicExtras` (значок-нота, название трека и папка, кнопки «Назад / Пауза-Играть / Вперёд»), `musicIconBitmap`, `musicButtonBitmap`. Откат: XiaomiIsland.kt 5.2.
 // Версия: 5.2 (24.10) — жёлтый этап значка убран: красный начинается за 2 минуты до конца (`RED_MS` = 120 с; `STAGE_YELLOW` и `YELLOW_MS` удалены). Откат: XiaomiIsland.kt 5.1.
 // Версия: 5.1 (21.10) — `pauseBitmap(fraction, stage, paused)`: при paused вместо полосок рисуется треугольник «продолжить» (нужен плашке в приложении). Откат: XiaomiIsland.kt 5.0.
 // Версия: 5.0 (21.10) — круглая кнопка паузы в раскрытом острове (`pauseAction`, `pauseBitmap`): кольцо оставшегося времени цвета этапа и две полоски «пауза», слева от «Стоп»; рисуется кодом, кольцо обновляется тиком раз в секунду. Откат: XiaomiIsland.kt 4.0.
@@ -293,4 +294,118 @@ object XiaomiIsland {
     }
 
     private fun icon(stage: Int, size: Int = 96): Icon = Icon.createWithBitmap(iconBitmap(stage, size))
+
+    // ---------- остров плеера «Музыка» ----------
+
+    private const val PIC_MUSIC_KEY = "miui.focus.pic_music"
+    private const val PIC_MUSIC_BIG_KEY = "miui.focus.pic_music_big"
+    private const val ACTION_MUSIC_PREV = "miui.focus.action_music_prev"
+    private const val ACTION_MUSIC_TOGGLE = "miui.focus.action_music_toggle"
+    private const val ACTION_MUSIC_NEXT = "miui.focus.action_music_next"
+
+    /**
+     * Extras острова для уведомления плеера или null, если остров не поддерживается. Свёрнутый остров — значок-нота,
+     * раскрытый — название трека, папка и три круглые кнопки: назад, пауза/играть, вперёд. [float] — раскрыть остров при
+     * появлении (начало воспроизведения), false — тихое обновление (смена трека, пауза).
+     */
+    fun musicExtras(
+        ctx: Context, title: String, sub: String, playing: Boolean, float: Boolean,
+        prev: android.app.PendingIntent, toggle: android.app.PendingIntent, next: android.app.PendingIntent
+    ): Bundle? {
+        if (!available(ctx)) return null
+        return try {
+            val pic = JSONObject().put("type", 1).put("pic", PIC_MUSIC_KEY)
+            val left = JSONObject().put("type", 1).put("picInfo", pic)
+                .put("textInfo", JSONObject().put("title", title).put("content", sub))
+            val big = JSONObject().put("imageTextInfoLeft", left).put("picInfo", pic)
+            val island = JSONObject()
+                .put("islandProperty", 1)
+                .put("islandOrder", true)
+                .put("dismissIsland", false)
+                .put("bigIslandArea", big)
+                .put("smallIslandArea", JSONObject().put("picInfo", pic))
+            val anim = JSONObject().put("type", 0).put("src", PIC_MUSIC_BIG_KEY)
+            val base = JSONObject().put("type", 1).put("title", title).put("content", sub).put("animIconInfo", anim)
+            val list = org.json.JSONArray()
+                .put(JSONObject().put("action", ACTION_MUSIC_PREV))
+                .put(JSONObject().put("action", ACTION_MUSIC_TOGGLE))
+                .put(JSONObject().put("action", ACTION_MUSIC_NEXT))
+            val v2 = JSONObject()
+                .put("protocol", 1)
+                .put("business", "music_player")
+                .put("islandFirstFloat", float)
+                .put("enableFloat", false)
+                .put("updatable", true)
+                .put("ticker", title)
+                .put("tickerPic", PIC_MUSIC_KEY)
+                .put("aodTitle", title)
+                .put("param_island", island)
+                .put("iconTextInfo", base)
+                .put("actions", list)
+            val pics = Bundle().apply {
+                putParcelable(PIC_MUSIC_KEY, Icon.createWithBitmap(musicIconBitmap(96)))
+                putParcelable(PIC_MUSIC_BIG_KEY, Icon.createWithBitmap(musicIconBitmap(192)))
+            }
+            val acts = Bundle().apply {
+                putParcelable(ACTION_MUSIC_PREV, Notification.Action.Builder(Icon.createWithBitmap(musicButtonBitmap(0)), "Назад", prev).build())
+                putParcelable(
+                    ACTION_MUSIC_TOGGLE,
+                    Notification.Action.Builder(Icon.createWithBitmap(musicButtonBitmap(if (playing) 2 else 1)), if (playing) "Пауза" else "Играть", toggle).build()
+                )
+                putParcelable(ACTION_MUSIC_NEXT, Notification.Action.Builder(Icon.createWithBitmap(musicButtonBitmap(3)), "Вперёд", next).build())
+            }
+            Bundle().apply {
+                putBundle("miui.focus.pics", pics)
+                putBundle("miui.focus.actions", acts)
+                putString("miui.focus.param", JSONObject().put("param_v2", v2).toString())
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Значок плеера для острова: фиолетовый круг (#7F00FF, как у сканера и таймеров) и белая нота. */
+    fun musicIconBitmap(size: Int = 96): Bitmap {
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.scale(size / 96f, size / 96f)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFF7F00FF.toInt()
+        c.drawCircle(48f, 48f, 48f, paint)
+        paint.color = Color.WHITE
+        // головка ноты, штиль и флажок
+        c.drawOval(RectF(28f, 56f, 48f, 71f), paint)
+        c.drawRect(44f, 24f, 50f, 64f, paint)
+        c.drawPath(Path().apply { moveTo(50f, 24f); lineTo(70f, 32f); lineTo(70f, 44f); lineTo(50f, 37f); close() }, paint)
+        return bmp
+    }
+
+    /** Круглая кнопка острова плеера: 0 — назад, 1 — играть, 2 — пауза, 3 — вперёд (белый значок на тёмном круге). */
+    fun musicButtonBitmap(kind: Int): Bitmap {
+        val size = 96
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFF2A2A2A.toInt()
+        c.drawCircle(48f, 48f, 48f, paint)
+        paint.color = Color.WHITE
+        when (kind) {
+            0 -> {
+                c.drawRect(30f, 30f, 36f, 66f, paint)
+                c.drawPath(Path().apply { moveTo(68f, 30f); lineTo(68f, 66f); lineTo(40f, 48f); close() }, paint)
+            }
+            1 -> c.drawPath(Path().apply { moveTo(38f, 28f); lineTo(38f, 68f); lineTo(70f, 48f); close() }, paint)
+            2 -> {
+                c.drawRoundRect(RectF(33f, 29f, 44f, 67f), 3f, 3f, paint)
+                c.drawRoundRect(RectF(52f, 29f, 63f, 67f), 3f, 3f, paint)
+            }
+            else -> {
+                c.drawRect(60f, 30f, 66f, 66f, paint)
+                c.drawPath(Path().apply { moveTo(28f, 30f); lineTo(28f, 66f); lineTo(56f, 48f); close() }, paint)
+            }
+        }
+        return bmp
+    }
 }
