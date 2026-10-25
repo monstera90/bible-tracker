@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 6.0 (25.10)
+   Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
    под «В работе»). Точка входа — window.CalendarTab.render(); my.js зовёт её из switchSettingsTab (renderSettingsTabCalendar).
    Два режима, кнопка-переключатель — первая в нижнем ряду (`calendarModeBtn`), выбор хранится в `calendarMode_v1`
@@ -20,7 +20,7 @@
    мероприятие) слева от «домика»; «домик» здесь — пустышка в углу, как на списках «Мои книги» и «Карточки предметов».
    Тап по мероприятию открывает ту же форму для правки (с кнопкой «Удалить»).
    Мероприятие: {id, title, start, end, repeat, cal, updatedAt[, until, skip]}; cal — календарь: "personal" (по умолчанию, и если поля нет) | "shared"
-   (поле «Календарь» в форме; пока различие только в цвете: личный — как «Радость» в диаграмме настроений (--mood-joy), общий — цвет
+   (поле «Календарь» в форме; в НОВОМ мероприятии стоит календарь последнего сохранённого — `calendarLastCal_v1`, `lastCal`/`rememberCal`, на устройстве; пока различие только в цвете: личный — как «Радость» в диаграмме настроений (--mood-joy), общий — цвет
    выделенной вкладки (--wood); переменные --cal-personal/--cal-shared и классы .cal-c-personal/.cal-c-shared в components.css); start/end — мс (локальное время), repeat — "" | day |
    week | month | year. Хранилище — провайдер от my.js (`setStore`, раздел «КАЛЕНДАРЬ: СИНХРОНИЗАЦИЯ МЕРОПРИЯТИЙ» в my.js): мероприятие — как задача.
    Личное лежит в личном `state` (ключ `ev:<id>`) и едет вместе с личными задачами; общее — в группе (`/groups/<groupId>/events`)
@@ -52,6 +52,7 @@
 
   var KEY = "calendarEvents_v1";
   var MODE_KEY = "calendarMode_v1";
+  var LAST_CAL_KEY = "calendarLastCal_v1"; // календарь последнего сохранённого мероприятия ("personal" | "shared"), подставляется в новое
   var LIST_BACK_DAYS = 7;
   var LIST_AHEAD_DAYS = 90;
   var HOUR_MS = 3600000;
@@ -112,6 +113,11 @@
   // заголовок дня в списке: «ПН 26.10.2026»
   function dayLabel(ts){ return WEEKDAYS_UP[(new Date(ts).getDay() + 6) % 7] + " " + dateLabel(ts); }
   function calOf(ev){ return ev && ev.cal === "shared" ? "shared" : "personal"; }
+  // Календарь, в котором сохраняли мероприятие в прошлый раз, — по умолчанию в форме нового (хранится на устройстве)
+  function lastCal(){
+    try{ return localStorage.getItem(LAST_CAL_KEY) === "shared" ? "shared" : "personal"; }catch(e){ return "personal"; }
+  }
+  function rememberCal(v){ try{ localStorage.setItem(LAST_CAL_KEY, v === "shared" ? "shared" : "personal"); }catch(e){} }
   function parseLocal(dateStr, timeStr){
     var dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr || ""), tm = /^(\d{1,2}):(\d{2})$/.exec(timeStr || "");
     if(!dm || !tm) return NaN;
@@ -762,6 +768,10 @@
     if(!readOnly && !canEdit({ cal: "shared" }) && !(ev && calOf(ev) === "shared")){
       for(var oi = calEl.options.length - 1; oi >= 0; oi--) if(calEl.options[oi].value === "shared") calEl.remove(oi);
     }
+    if(isNew){ // новое мероприятие — в том календаре, в котором сохраняли прошлое (если он доступен; можно сменить)
+      var lc = lastCal();
+      for(var li = 0; li < calEl.options.length; li++) if(calEl.options[li].value === lc) calEl.value = lc;
+    }
     if(readOnly){
       [titleEl, sd, st, ed, et, repEl, calEl].forEach(function(el){ el.disabled = true; });
       var svBtn = document.getElementById("calSave"), delRow = document.getElementById("calDelRow"), cnBtn = document.getElementById("calCancel");
@@ -829,10 +839,10 @@
 
       if(ev && ev.repeat){ // правка повторения серии
         if(title === ev.title && s === baseS && e === baseE && r === ev.repeat && calv === calOf(ev)) return renderMain(); // ничего не менялось
-        var following = function(){ applyFollowing(ev, baseS, title, s, e, r, calv); renderMain(); }; // не function-объявление в блоке: старый WebView (Android 5)
+        var following = function(){ applyFollowing(ev, baseS, title, s, e, r, calv); rememberCal(calv); renderMain(); }; // не function-объявление в блоке: старый WebView (Android 5)
         if(r !== ev.repeat) return following(); // менялся вид повтора — это всегда «последующие», вопрос не нужен
         return askScope("Это повторяющееся мероприятие. Сохранить изменения:",
-          function(){ applyOnlyThis(ev, baseS, title, s, e, calv); renderMain(); },
+          function(){ applyOnlyThis(ev, baseS, title, s, e, calv); rememberCal(calv); renderMain(); },
           following);
       }
 
@@ -840,6 +850,7 @@
       var rec = { id: ev ? ev.id : newId(), title: title, start: s, end: e, repeat: r, cal: calv, updatedAt: Date.now() };
       if(!replaceInList(list, rec)) list.push(rec);
       save(list);
+      rememberCal(calv);
       renderMain();
     });
 
