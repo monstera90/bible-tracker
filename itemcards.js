@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 26.4 (25.10) — центр событий: погода — «Была показана погода для города Название» (без кавычек); будильник пишет в `EventLog.alarmStarted` / `alarmCancelled` (итог одной записью, см. `eventlog.js` 2.0), «выключен» без времени: «Будильник «Название» был отключён пользователем». Kotlin не менялся. Откат: itemcards.js 26.3.
    Версия: 26.3 (25.10) — в историю (центр событий) попадает только скан QR погоды: «Был просканирован qr-код погоды города «Название»»; показ погоды кнопкой «Показать» на карточке в историю не пишется (`showWeatherOverlay(c, fromScan)`). Kotlin не менялся. Откат: itemcards.js 26.2.
    Версия: 26.2 (25.10) — кнопки карточки, раскрытые долгим нажатием (глаз/удалить/звезда/изменить), прячутся тапом мимо этой карточки (тап по другой карточке только прячет кнопки) и прокруткой списка (`bindMenuDismiss`; прокрутка сразу после перерисовки сетки игнорируется — `lastRenderAt`). Kotlin не менялся. Откат: itemcards.js 26.1.
    Версия: 26.1 (25.10) — при фильтре «Избранное» кнопка-глаз в нижнем ряду скрыта (там и так показаны все, скрытые тоже); меню воронки, «+» и PDF закрываются тапом мимо (`bindMenuDismiss`: тап по карточке только закрывает меню, не открывая форму) и прокруткой списка. Kotlin не менялся. Откат: itemcards.js 26.0.
@@ -1934,14 +1935,21 @@ window.initItemCardsModule = function(deps){
     if(!hm) return 0;
     if(!api.set){ if(!standalone){ try{ alert("Будильник работает только в приложении на телефоне."); }catch(e){} } return 0; }
     try{ at = api.set(runId(c), c.title || "", hm.h, hm.m, alarmEvery(c), alarmTimes(c)) || 0; }catch(e){ at = 0; }
-    if(at) evLog("Будильник " + alarmClock(c) + (c.title ? " «" + c.title + "»" : "") + " заведён: " + dayWord(at));
+    if(at){
+      var setText = "Будильник " + alarmClock(c) + (c.title ? " «" + c.title + "»" : "") + " заведён: " + dayWord(at);
+      try{
+        if(window.EventLog && window.EventLog.alarmStarted) window.EventLog.alarmStarted(runId(c), c.title || "", at, alarmEvery(c), alarmTimes(c), setText);
+        else evLog(setText);
+      }catch(e){}
+    }
     syncAlarmsView();
     return at;
   }
   function stopAlarmForCard(c){
     if(!c || c.type !== "alarm") return;
+    // в журнал — до отмены в оболочке: после неё будильника уже нет в её списке
+    try{ if(window.EventLog && window.EventLog.alarmCancelled) window.EventLog.alarmCancelled(runId(c), c.title || ""); }catch(e){}
     try{ var api = getAlarmApi(); if(api && api.cancel) api.cancel(runId(c)); }catch(e){}
-    evLog("Будильник " + alarmClock(c) + (c.title ? " «" + c.title + "»" : "") + " выключен");
     syncAlarmsView();
   }
 
@@ -2136,7 +2144,7 @@ window.initItemCardsModule = function(deps){
   // слой после скана: сразу название города и «Загружаю…», потом сама погода (если слой к тому времени не закрыли)
   function showWeatherOverlay(c, fromScan){
     var title = String(c.title || "").slice(0, 80);
-    if(fromScan) evLog("Был просканирован qr-код погоды" + (title ? " города «" + title + "»" : "")); // кнопка «Показать» на карточке в историю не пишется
+    if(fromScan) evLog("Была показана погода" + (title ? " для города " + title : "")); // кнопка «Показать» на карточке в историю не пишется
     var o = newOverlay();
     var card = document.createElement("div");
     card.className = "scan-weather-card";
