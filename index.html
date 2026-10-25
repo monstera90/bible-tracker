@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
      Версия: 9.0 (25.10) — структурная правка: кнопка вкладки «Музыка» `settingsTabSet2Btn11` (set2s_11, между «Забытыми заметками» и «Разделением epub») и подключён `music.js`.
      Версия: 8.0 (24.10) — структурная правка: кнопка вкладки «События» `settingsTabEventsBtn` (над «Архивом») и подключён `eventlog.js`.
      Версия: 7.0 (22.10) — структурная правка: кнопка тегов задач `#taskTagWrap`/`#taskTagBtn` с выпадающим списком `#taskTagPopup` (между скрепкой и «+»).
@@ -395,6 +396,16 @@ window.addEventListener("error", function(e){
          перенесены внутрь вкладки настроек как кнопки (см.
          renderSettingsTabGear в my.js). -->
     <div class="settings-tabs" id="settingsTabs">
+      <!-- Календарь (calendar.js): САМЫЙ нижний язычок бокового стека набора 1 — первый в DOM, под «Задачи в работе» (worktasks).
+           Не вкладка задач: свой ключ "calendar", показывается по тем же условиям, что и вкладки задач / «События». -->
+      <button class="settings-tab" id="settingsTabCalendarBtn" title="Календарь" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3.5" y="5" width="17" height="15" rx="2"></rect>
+          <path d="M3.5 10h17"></path>
+          <path d="M8 3v4"></path>
+          <path d="M16 3v4"></path>
+        </svg>
+      </button>
       <!-- Вкладка-заглушка "Задачи в работе" / "worktasks" (ТЗ пользователя
            от 13.09) — устроена и работает точно как council/next (обычный
            список задач через общий renderTaskTabList, см. TASK_TAB_IDS в
@@ -880,6 +891,7 @@ window.addEventListener("error", function(e){
 <script src="itemcards.js"></script>
 <script src="claudetab.js"></script>
 <script src="music.js"></script>
+<script src="calendar.js"></script>
 <script src="mdeditor.js"></script>
 <script src="search.js"></script>
 <!-- flibusta.js — READER_PLAN.md, Этап E, шаг 17: подключение к OPDS-

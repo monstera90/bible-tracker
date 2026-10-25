@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 12.4 (25.10) — `.sync-status`: right 13px (точка по центру колонки вкладок шириной 35px).
+   Версия: 13.0 (25.10) — структурная правка: стили вкладки «Календарь» (`.cal-center`, `.cal-row`, `.cal-row-past`, `.cal-rep`, `.cal-field`, `.cal-dt`, calendar.js); `.sync-status`: right 13px (точка по центру колонки вкладок шириной 35px).
    Версия: 12.3 (25.10) — `.item-card-fav-btn` (звезда «В избранное» среди кнопок карточки при удержании) оформлена как кнопка-глаз. Откат: components.css 12.2.
    Версия: 12.2 (25.10) — `.item-card-wx-btn` («Показать» на карточке «Погода») оформлена как кнопки таймера. Откат: components.css 12.1.
    Версия: 12.1 (24.10) — структурная правка: `.scan-weather-*` — слой «Погода» после скана (itemcards.js 25.0, `showWeatherOverlay`). Откат: components.css 12.0.
@@ -4789,3 +4789,12 @@ body::after{
 .event-time{ font-weight:bold; font-variant-numeric:tabular-nums; }
 .event-row-upcoming{ color:var(--ink-soft, var(--ink)); opacity:.75; }
 .event-empty{ text-align:center; color:var(--ink-soft, var(--ink)); padding:24px 0; }
+
+/* Календарь (calendar.js): список — на классах центра событий (.event-center/.event-day/.event-row), здесь только отличия */
+.cal-center{ padding-bottom:64px; } /* место под нижний ряд кнопок */
+.cal-row{ cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.cal-row-past{ opacity:.6; }
+.cal-rep{ color:var(--ink-soft, var(--ink)); font-size:.9em; }
+.cal-field{ display:flex; flex-direction:column; gap:4px; }
+.cal-dt{ display:flex; gap:8px; }
+.cal-dt .mdeditor-cleanup-input{ flex:1 1 0; min-width:0; margin-bottom:0; }
