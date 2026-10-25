@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 4.0 (25.10)
+   Версия: 5.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
    под «В работе»). Точка входа — window.CalendarTab.render(); my.js зовёт её из switchSettingsTab (renderSettingsTabCalendar).
    Два режима, кнопка-переключатель — первая в нижнем ряду (`calendarModeBtn`), выбор хранится в `calendarMode_v1`
@@ -19,7 +19,9 @@
    Экран: список мероприятий (дни без мероприятий не показываются) и нижний ряд кнопок `.mdeditor-fab-row`: «+» (новое
    мероприятие) слева от «домика»; «домик» здесь — пустышка в углу, как на списках «Мои книги» и «Карточки предметов».
    Тап по мероприятию открывает ту же форму для правки (с кнопкой «Удалить»).
-   Мероприятие: {id, title, start, end, repeat, updatedAt[, until, skip]}; start/end — мс (локальное время), repeat — "" | day |
+   Мероприятие: {id, title, start, end, repeat, cal, updatedAt[, until, skip]}; cal — календарь: "personal" (по умолчанию, и если поля нет) | "shared"
+   (поле «Календарь» в форме; пока различие только в цвете: личный — как «Радость» в диаграмме настроений (--mood-joy), общий — цвет
+   выделенной вкладки (--wood); переменные --cal-personal/--cal-shared и классы .cal-c-personal/.cal-c-shared в components.css); start/end — мс (локальное время), repeat — "" | day |
    week | month | year. Хранится в localStorage `calendarEvents_v1` (только на этом устройстве, в облако пока не уходит).
    Серия (repeat != ""): `until` — мс, повторения с началом >= until не существуют (серию «разрезали»: дальше идёт другая
    серия); `skip` — массив дат "ГГГГ-ММ-ДД" повторений, которых в серии нет (их отвязали или удалили). Как в Google Календаре:
@@ -62,6 +64,8 @@
     { key: "month", label: "Каждый месяц" },
     { key: "year", label: "Каждый год" }
   ];
+  var CALS = [{ key: "personal", label: "Личный календарь" }, { key: "shared", label: "Общий календарь" }];
+  var WEEKDAYS_UP = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"];
   var WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
   var MONTHS_SHORT = ["янв.", "февр.", "марта", "апр.", "мая", "июня", "июля", "авг.", "сент.", "окт.", "нояб.", "дек."];
   // значок кнопки режима: показывает, НА ЧТО переключит нажатие
@@ -99,6 +103,9 @@
   function dateValue(ts){ var d = new Date(ts); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
   function timeValue(ts){ var d = new Date(ts); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); }
   function dateLabel(ts){ var d = new Date(ts); return pad2(d.getDate()) + "." + pad2(d.getMonth() + 1) + "." + d.getFullYear(); }
+  // заголовок дня в списке: «ПН 26.10.2026»
+  function dayLabel(ts){ return WEEKDAYS_UP[(new Date(ts).getDay() + 6) % 7] + " " + dateLabel(ts); }
+  function calOf(ev){ return ev && ev.cal === "shared" ? "shared" : "personal"; }
   function parseLocal(dateStr, timeStr){
     var dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr || ""), tm = /^(\d{1,2}):(\d{2})$/.exec(timeStr || "");
     if(!dm || !tm) return NaN;
@@ -207,14 +214,14 @@
     rows.forEach(function(r){
       var day = dateValue(r.at);
       if(day !== lastDay){
-        html += '<div class="event-day" data-day="' + day + '">' + dateLabel(r.at) + '</div>';
+        html += '<div class="event-day" data-day="' + day + '">' + dayLabel(r.at) + '</div>';
         lastDay = day;
       }
       var badge = "";
       if(r.series && r.more > 0){
         badge = ' <span class="cal-more">' + (r.open ? '↻ свернуть' : '↻ ещё ' + r.more) + '</span>';
       }
-      html += '<div class="event-row cal-row' + (r.at + r.dur < now ? ' cal-row-past' : '') + (r.series && !r.first ? ' cal-row-exp' : '') +
+      html += '<div class="event-row cal-row cal-c-' + calOf(r.ev) + (r.at + r.dur < now ? ' cal-row-past' : '') + (r.series && !r.first ? ' cal-row-exp' : '') +
         '" data-id="' + esc(r.ev.id) + '" data-at="' + r.at + '">' +
         '<span class="event-time">' + timeRange(r.at, r.dur) + '</span> ' + esc(r.ev.title) +
         (r.ev.repeat ? '<span class="cal-rep"> · ' + repeatLabel(r.ev.repeat) + '</span>' : '') + badge + '</div>';
@@ -237,6 +244,42 @@
     setTimeout(go, 60);
     setTimeout(go, 250);
   }
+  // ---------- цвета календарей и отступы окна ----------
+  // цвет текста на блоке недели: тёмный или светлый — по яркости цвета календаря (цвета зависят от темы)
+  function fgFor(cssVar){
+    var host = container() || document.body;
+    var probe = document.createElement("span");
+    probe.style.cssText = "position:absolute;visibility:hidden;color:var(" + cssVar + ");";
+    host.appendChild(probe);
+    var col = getComputedStyle(probe).color;
+    host.removeChild(probe);
+    var m = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(col || "");
+    if(!m) return "var(--ink)";
+    var lum = (0.299 * +m[1] + 0.587 * +m[2] + 0.114 * +m[3]) / 255;
+    return lum > 0.6 ? "var(--ink)" : "var(--parchment)";
+  }
+  function applyCalColors(el){
+    if(!el || !el.style || !el.style.setProperty) return;
+    el.style.setProperty("--cal-personal-fg", fgFor("--cal-personal"));
+    el.style.setProperty("--cal-shared-fg", fgFor("--cal-shared"));
+  }
+  // В режиме «Неделя» у окна убираются боковые поля (класс cal-week-flush на .settings-modal-box, modals.css), чтобы сетка
+  // влезала целиком. Класс снимается сам, как только во вкладке перестаёт быть .cal-week (другой экран или другая вкладка):
+  // за этим следит MutationObserver на #settingsTabContent (без :has — он есть не везде).
+  var flushObserver = null;
+  function syncFlush(){
+    var c = container();
+    if(!c) return;
+    var box = c.parentNode;
+    if(!box || !box.classList) return;
+    var has = !!(c.firstElementChild && c.firstElementChild.classList.contains("cal-week"));
+    if(has) box.classList.add("cal-week-flush"); else box.classList.remove("cal-week-flush");
+    if(!flushObserver && window.MutationObserver){
+      flushObserver = new MutationObserver(syncFlush);
+      flushObserver.observe(c, { childList: true });
+    }
+  }
+
   // ---------- нижний ряд и режимы ----------
   function clampHour(v){ return Math.max(HOUR_MIN, Math.min(HOUR_MAX, v)); }
   function loadMode(){
@@ -340,7 +383,7 @@
         var h = Math.max(MIN_BLOCK_PX, (sg.bottom - sg.top) * hourPx / 60 - 1);
         var w = 100 / sg.cols, left = sg.col * w;
         var tall = h >= 30;
-        blocks += '<div class="cal-wk-ev' + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '"' +
+        blocks += '<div class="cal-wk-ev cal-c-' + calOf(sg.ev) + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '"' +
           ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;left:' + left.toFixed(2) + '%;width:calc(' + w.toFixed(2) + '% - 1px)">' +
           (tall ? '<span class="cal-wk-et">' + timeValue(sg.at) + '</span>' : '') + esc(sg.ev.title) + '</div>';
       });
@@ -397,6 +440,8 @@
     var ws = weekStart;
     c.innerHTML = '<div class="cal-week" id="calWeek">' + weekHtml(ws) + '</div>' + fabRowHtml();
     bindFab();
+    syncFlush();
+    applyCalColors(document.getElementById("calWeek"));
     function shift(n){ weekStart = dayStartAt(ws, 7 * n); weekScrollKeep = c.scrollTop; renderWeek(); }
     document.getElementById("calWkPrev").addEventListener("click", function(){ shift(-1); });
     document.getElementById("calWkNext").addEventListener("click", function(){ shift(1); });
@@ -509,6 +554,7 @@
       '<div class="event-center cal-center" id="calendarList">' + listHtml() + '</div>' +
       fabRowHtml();
     bindFab();
+    syncFlush();
     var lastKey = null, lastAt = 0;
     document.getElementById("calendarList").addEventListener("click", function(e){
       var row = e.target.closest ? e.target.closest(".cal-row") : null;
@@ -550,20 +596,20 @@
       list[i].updatedAt = Date.now();
     }
   }
-  function applyOnlyThis(ev, at, title, s, e){
+  function applyOnlyThis(ev, at, title, s, e, cal){
     var list = load();
     skipOccurrence(list, ev, at);
-    list.push({ id: newId(), title: title, start: s, end: e, repeat: "", updatedAt: Date.now() });
+    list.push({ id: newId(), title: title, start: s, end: e, repeat: "", cal: cal, updatedAt: Date.now() });
     save(list);
   }
   // «Это и последующие»: первое повторение — серия правится на месте; иначе старая серия обрывается (until), с этого повторения стартует новая
-  function applyFollowing(ev, at, title, s, e, r){
+  function applyFollowing(ev, at, title, s, e, r, cal){
     var list = load(), now = Date.now();
     var atKey = dateValue(at);
     var same = dateValue(s) === atKey && r === (ev.repeat || "");
     var skip = same ? (ev.skip || []).filter(function(k){ return k >= atKey; }) : [];
     function make(id){
-      var rec = { id: id, title: title, start: s, end: e, repeat: r, updatedAt: now };
+      var rec = { id: id, title: title, start: s, end: e, repeat: r, cal: cal, updatedAt: now };
       if(r){
         if(ev.until && ev.until > s) rec.until = ev.until;
         if(skip.length) rec.skip = skip;
@@ -626,6 +672,10 @@
         '<select class="mdeditor-cleanup-input" id="calRepeat"><option value="">Не повторять</option>' +
         REPEATS.map(function(r){ return '<option value="' + r.key + '">' + r.label + '</option>'; }).join("") +
         '</select></div>' +
+      '<div class="cal-field"><div class="item-form-hint">Календарь</div>' +
+        '<select class="mdeditor-cleanup-input" id="calCal">' +
+        CALS.map(function(k){ return '<option value="' + k.key + '">' + k.label + '</option>'; }).join("") +
+        '</select></div>' +
       '<div class="item-form-error" id="calError"></div>' +
       '<div class="cal-scope" id="calScope" style="display:none"></div>' +
       '<div class="item-form-buttons" id="calBtns">' +
@@ -635,17 +685,19 @@
       (isNew ? '' : '<div class="item-form-buttons" id="calDelRow"><button type="button" class="workbooks-run-btn" id="calDelete">Удалить</button></div>') +
     '</div>';
     c.innerHTML = html;
+    syncFlush();
     c.scrollTop = 0;
 
     var titleEl = document.getElementById("calTitle");
     var sd = document.getElementById("calStartDate"), st = document.getElementById("calStartTime");
     var ed = document.getElementById("calEndDate"), et = document.getElementById("calEndTime");
-    var repEl = document.getElementById("calRepeat"), errEl = document.getElementById("calError");
+    var repEl = document.getElementById("calRepeat"), calEl = document.getElementById("calCal"), errEl = document.getElementById("calError");
     if(ev){
       titleEl.value = ev.title;
       sd.value = dateValue(baseS); st.value = timeValue(baseS);
       ed.value = dateValue(baseE); et.value = timeValue(baseE);
       repEl.value = ev.repeat || "";
+      calEl.value = calOf(ev);
     } else if(preset){
       sd.value = dateValue(preset); st.value = timeValue(preset);
       ed.value = dateValue(preset + HOUR_MS); et.value = timeValue(preset + HOUR_MS);
@@ -705,18 +757,19 @@
       }
       if(e <= s) return fail("Окончание должно быть позже начала");
       var r = repEl.value || "";
+      var calv = calEl.value === "shared" ? "shared" : "personal";
 
       if(ev && ev.repeat){ // правка повторения серии
-        if(title === ev.title && s === baseS && e === baseE && r === ev.repeat) return renderMain(); // ничего не менялось
-        var following = function(){ applyFollowing(ev, baseS, title, s, e, r); renderMain(); }; // не function-объявление в блоке: старый WebView (Android 5)
+        if(title === ev.title && s === baseS && e === baseE && r === ev.repeat && calv === calOf(ev)) return renderMain(); // ничего не менялось
+        var following = function(){ applyFollowing(ev, baseS, title, s, e, r, calv); renderMain(); }; // не function-объявление в блоке: старый WebView (Android 5)
         if(r !== ev.repeat) return following(); // менялся вид повтора — это всегда «последующие», вопрос не нужен
         return askScope("Это повторяющееся мероприятие. Сохранить изменения:",
-          function(){ applyOnlyThis(ev, baseS, title, s, e); renderMain(); },
+          function(){ applyOnlyThis(ev, baseS, title, s, e, calv); renderMain(); },
           following);
       }
 
       var list = load();
-      var rec = { id: ev ? ev.id : newId(), title: title, start: s, end: e, repeat: r, updatedAt: Date.now() };
+      var rec = { id: ev ? ev.id : newId(), title: title, start: s, end: e, repeat: r, cal: calv, updatedAt: Date.now() };
       if(!replaceInList(list, rec)) list.push(rec);
       save(list);
       renderMain();
