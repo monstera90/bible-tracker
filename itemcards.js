@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 27.0 (25.10) — структурная правка: «Создавать задачу» из окна ярлыка больше НЕ открывает приложение: окно показывает слой (`showTaskResultOverlay`, статус `queued`; пиктограмма и название вкладки — из кэша `itemCardsTaskTabs_v1`, который пишет приложение: `cacheTaskTabs`) и закрывается на рабочий стол, а задача лежит в очереди `pendingScanTasks_v1`; приложение выполняет очередь молча при запуске и при возврате (`drainPendingTasks(silent)`, зовёт my.js). Вход `newtask` из оболочки остался (старые сборки). Откат: itemcards.js 26.4.
    Версия: 26.4 (25.10) — центр событий: погода — «Была показана погода для города Название» (без кавычек); будильник пишет в `EventLog.alarmStarted` / `alarmCancelled` (итог одной записью, см. `eventlog.js` 2.0), «выключен» без времени: «Будильник «Название» был отключён пользователем». Kotlin не менялся. Откат: itemcards.js 26.3.
    Версия: 26.3 (25.10) — в историю (центр событий) попадает только скан QR погоды: «Был просканирован qr-код погоды города «Название»»; показ погоды кнопкой «Показать» на карточке в историю не пишется (`showWeatherOverlay(c, fromScan)`). Kotlin не менялся. Откат: itemcards.js 26.2.
    Версия: 26.2 (25.10) — кнопки карточки, раскрытые долгим нажатием (глаз/удалить/звезда/изменить), прячутся тапом мимо этой карточки (тап по другой карточке только прячет кнопки) и прокруткой списка (`bindMenuDismiss`; прокрутка сразу после перерисовки сетки игнорируется — `lastRenderAt`). Kotlin не менялся. Откат: itemcards.js 26.1.
@@ -85,6 +86,7 @@ window.initItemCardsModule = function(deps){
   var TASK_PREFIX = "lt://v1/task/";
   var TASK_TEXT_MAX = 80; // текст задачи в коде: длиннее — код плотнее и хуже читается на малой наклейке (на карточке и в PDF показывается только начало)
   var PENDING_TASKS_KEY = "pendingScanTasks_v1"; // очередь «окно ярлыка → приложение» (тот же localStorage)
+  var TASK_TABS_CACHE_KEY = "itemCardsTaskTabs_v1"; // {ключ вкладки: {title, svg}} — пишет приложение, читает окно ярлыка (подпись на слое)
   var TASK_NATIVE_ID = "newtask"; // служебный id входа из оболочки для задач (проходит проверку оболочки: 4–32 букв и цифр)
   var TODAY_CODE = "lt://v1/today";
   var REMINDER_CODE = "lt://v1/reminder";
@@ -2326,11 +2328,24 @@ window.initItemCardsModule = function(deps){
         q.push({ tab: p.tab, tag: p.tag || "", text: p.text, at: Date.now() });
         localStorage.setItem(PENDING_TASKS_KEY, JSON.stringify(q.slice(-20)));
       }catch(e){}
-      if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(TASK_NATIVE_ID, "note"); }catch(e){} }
-      leaveStandalone();
+      // приложение НЕ открываем: слой с задачей поверх рабочего стола, очередь выполнит приложение при ближайшем запуске/возврате
+      var info = readTaskTabsCache()[p.tab] || {};
+      showTaskResultOverlay(p, { status: "queued", tabTitle: info.title || "", tabSvg: info.svg || "", tag: p.tag || "" });
       return;
     }
     applyScannedTask(p);
+  }
+  // пиктограммы и названия вкладок задач для слоя в окне ярлыка (там нет my.js): приложение кладёт их в общий localStorage
+  function readTaskTabsCache(){
+    try{ var o = JSON.parse(localStorage.getItem(TASK_TABS_CACHE_KEY) || "{}"); return (o && typeof o === "object") ? o : {}; }catch(e){ return {}; }
+  }
+  function cacheTaskTabs(){
+    if(standalone || !deps.getTaskTabs) return;
+    try{
+      var o = {}, list = deps.getTaskTabs() || [];
+      for(var i = 0; i < list.length; i++) if(list[i] && list[i].key) o[list[i].key] = { title: list[i].title || "", svg: list[i].svg || "" };
+      localStorage.setItem(TASK_TABS_CACHE_KEY, JSON.stringify(o));
+    }catch(e){}
   }
   function applyScannedTask(p, silent){
     var res;
@@ -2342,14 +2357,16 @@ window.initItemCardsModule = function(deps){
     return res;
   }
   // очередь из окна ярлыка: свежие записи (не старше 30 минут) выполняются, слой показывает результат последней
-  function drainPendingTasks(){
+  // silent — без слоя (очередь из окна ярлыка выполняется в фоне: слой пользователь уже видел в самом окне)
+  function drainPendingTasks(silent){
+    cacheTaskTabs();
     var q = [];
     try{ q = JSON.parse(localStorage.getItem(PENDING_TASKS_KEY) || "[]"); }catch(e){ q = []; }
     try{ localStorage.removeItem(PENDING_TASKS_KEY); }catch(e){}
     if(!Array.isArray(q)) return;
     var now = Date.now();
     q = q.filter(function(x){ return x && typeof x.tab === "string" && typeof x.text === "string" && now - (Number(x.at) || 0) < 30 * 60 * 1000; });
-    for(var i = 0; i < q.length; i++) applyScannedTask(q[i], i < q.length - 1);
+    for(var i = 0; i < q.length; i++) applyScannedTask(q[i], silent === true || i < q.length - 1);
   }
   // слой: задача «…» добавлена (или перенесена в конец) на вкладку (пиктограмма и название)
   function showTaskResultOverlay(p, res){
@@ -2362,8 +2379,9 @@ window.initItemCardsModule = function(deps){
     var txt = document.createElement("div");
     txt.className = "scan-task-text";
     txt.textContent = "«" + (res && res.text ? res.text : p.text) + "»";
-    if(res && (res.status === "added" || res.status === "moved")){
-      head.textContent = res.status === "added" ? "Задача добавлена на вкладку" : "Такая задача уже была — перенесена в конец вкладки";
+    if(res && (res.status === "added" || res.status === "moved" || res.status === "queued")){
+      head.textContent = res.status === "queued" ? "Задача принята — появится на вкладке, когда вы откроете приложение"
+        : res.status === "added" ? "Задача добавлена на вкладку" : "Такая задача уже была — перенесена в конец вкладки";
       card.appendChild(txt);
       card.appendChild(head);
       var tab = document.createElement("div");
@@ -2724,6 +2742,7 @@ window.initItemCardsModule = function(deps){
     getRemindableCards: getRemindableCards,
     focusCard: focusCard,
     openCardFromNative: openCardFromNative,
+    drainPendingTasks: drainPendingTasks,
     startStandaloneScan: startStandaloneScan,
     getCards: function(){ return loadCards().slice(); },
     qrTextForId: function(id){ return QR_PREFIX + id; }

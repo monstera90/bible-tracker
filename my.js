@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 83.1 (25.10) — очередь «Создавать задачу» из окна ярлыка выполняется молча при запуске и в `__ltOnAppResume` (`ItemCards.drainPendingTasks(true)`; itemcards.js 27.0) — окно ярлыка приложение больше не открывает.
    Версия: 83.0 (25.10) — структурная правка: мероприятия календаря в синхронизации как задачи (раздел «КАЛЕНДАРЬ: СИНХРОНИЗАЦИЯ МЕРОПРИЯТИЙ»): личные — `state["ev:<id>"]` (едут с личными задачами), общие — группа `/groups/<id>/events` (binding `events`, едут с общими задачами, доступ тот же). Откат: my.js 82.0.
    Версия 82.0 (25.10) — структурная правка: вкладка `calendar` «Календарь» (`calendar.js`) — самый нижний язычок стека набора 1: `CALENDAR_TAB_KEY`/`CALENDAR_TAB_BTN_ID`, `renderSettingsTabCalendar`, первый в `SETTINGS_SIDE_ORDER_1`.
    Версия: 81.1 (25.10) — `layoutSettingsModal`: запас под нижний ряд `ANDROID_NAV_BAR_H` 37px (было 47), положение кнопки режима чтения считается от ширины язычка.
@@ -4699,6 +4700,8 @@
     try{ if(window.MdEditor && MdEditor.onAppResume) MdEditor.onAppResume(); }catch(e){}
     // задачи из окна «Создать новую задачу» (ярлык), созданные пока приложение было закрыто/свёрнуто
     try{ pullNativeQuickTasks(); }catch(e){ if(window.Debug) window.Debug.log("Быстрая задача: " + (e && e.message ? e.message : e)); }
+    // задачи «Создавать задачу», отсканированные в окне ярлыка без открытия приложения
+    try{ ensureItemCards().drainPendingTasks(true); }catch(e){ if(window.Debug) window.Debug.log("Очередь QR-задач: " + (e && e.message ? e.message : e)); }
   };
 
   // ⚠️ подстраховка, не зависящая ни от одного unload-события выше — периодический таймер, который
@@ -24471,6 +24474,7 @@
   checkForSharedFile();
   try{ pullNativeQuickTasks(); }catch(e){ if(window.Debug) window.Debug.log("Быстрая задача: " + (e && e.message ? e.message : e)); }
   try{ pushQuickTaskTheme(); }catch(e){}
+  try{ ensureItemCards().drainPendingTasks(true); }catch(e){ if(window.Debug) window.Debug.log("Очередь QR-задач: " + (e && e.message ? e.message : e)); }
   try{ handleCardLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Карточка из оболочки: " + (e && e.message ? e.message : e)); }
   Notifications.start();
   initPersonalTasksShadow();
