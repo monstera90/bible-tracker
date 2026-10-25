@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 80.1 (25.10) — переключение набора вкладок (язычок-кнопка, выход из режима колеса) больше НЕ открывает вкладку другого набора само: меняется только ряд язычков, открытая вкладка остаётся на экране, пока пользователь сам не нажмёт нужный язычок (`cycleSettingsTabSet`, `toggleBottomAltMode`; `getResumeSettingsState` при перезапуске открывает набор той вкладки, что реально была на экране). Откат: my.js 80.0.
    Версия: 80.0 (25.10) — структурная правка: вкладка set2s_11 «Музыка» (модуль `music.js`, `renderSettingsTabMusic`, ветка в `switchSettingsTab` до `set2s_5`; в `SET2_TAB_IDS` стоит между `set2s_4` и `set2s_5`).
    Версия: 79.0 (24.10) — структурная правка: вкладка `events` «События» (центр событий, `eventlog.js`) над «Архивом»: `EVENTS_TAB_KEY`/`EVENTS_TAB_BTN_ID`, `renderSettingsTabEvents`, ветки в `refreshSettingsTabsVisibility`/`switchSettingsTab`/`SETTINGS_SIDE_ORDER_1`; запись обновления версии (`applyVersionToHeader`), уведомления об общих задачах в журнал.
    Версия: 78.0 (24.10) — структурная правка: вкладка `alt5` «Версии» заменена на «Проверка обновлений» (`renderSettingsTabUpdates`: кнопка внизу, «Проверить обновления» → «Перезагрузить приложение для установки обновлений»; в APK — через мост версии 10: `checkWebUpdateNow`/`getWebUpdateState`/`restartForWebUpdate`, в браузере — через `SW_REGISTRATION.update()`); архив версий убран (`renderVersionHistory`, `renderVersionItems`, `ensureVersionsTabStyle`, `renderSettingsTabVersions`). Классы `.version-history-*` остались — их используют другие места.
@@ -17169,8 +17170,7 @@
   function cycleSettingsTabSet(){
     settingsActiveTabSet = (settingsActiveTabSet === 1) ? 2 : 1;
     applySettingsTabSetVisibility();
-    if(bottomAltMode) return;
-    openTabOfActiveSettingsSet();
+    // вкладку нового набора само не открываем: на экране остаётся прежняя, пока пользователь сам не нажмёт нужный язычок
   }
   function openTabOfActiveSettingsSet(){
     var target = getCorrespondingTabInOtherSet(settingsLastStackTab);
@@ -17220,6 +17220,9 @@
     if(savedTab){
       var belongsToSet1 = SETTINGS_SIDE_ORDER_1.indexOf(savedTab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(savedTab) !== -1;
       var belongsToSet2 = SETTINGS_SIDE_ORDER_2.indexOf(savedTab) !== -1 || SETTINGS_BOTTOM_ORDER_2.indexOf(savedTab) !== -1;
+      // набор переключили, но вкладку так и не выбрали: на экране была вкладка другого набора — открываем её набор
+      if(savedSet === 1 && !belongsToSet1 && belongsToSet2 && isSet2Unlocked()) savedSet = 2;
+      else if(savedSet === 2 && !belongsToSet2 && belongsToSet1) savedSet = 1;
       if((savedSet === 1 && !belongsToSet1) || (savedSet === 2 && !belongsToSet2)) savedTab = null;
     }
     if(!savedTab){
@@ -17894,7 +17897,7 @@
     setBottomAltMode(false);
     // язычок набора нажимали под колесом — теперь, когда колесо убрано, показываем вкладку нового
     // набора
-    if(settingsActiveTabSet !== bottomAltEntrySet) openTabOfActiveSettingsSet();
+    // (вкладку нового набора само не открываем: остаётся открытая, пока пользователь сам не нажмёт нужный язычок)
   }
   // вызывается из switchSettingsTab: если открывают вкладку из «другого» набора (например,
   // программным переходом или жестом «назад»), ряд сам переключается на нужный набор, чтобы
