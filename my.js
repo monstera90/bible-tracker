@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 81.0 (25.10) — структурная правка: общая задача остаётся общей при переносе на любую вкладку. Вкладка — личная сортировка: у каждого участника своя, хранится в личном state (`gtab:<id>`, `getGroupTaskPlacement`/`setGroupTaskPlacement`/`taskEffectiveTab`), в запись группы не попадает (там tab всегда «jointtasks»); списки вкладок (`getTasksForTab`, `getGroupTasksForTab`), пикер переноса, QR «Создавать задачу» и перерисовка (`rerenderJointTasksTabIfOpen`) учитывают её; перенос личной задачи на «Общие задачи» — с предупреждением (`moveTaskWithWarning`); подпись начинается с «Общая задача.». Откат: my.js 80.1.
    Версия: 80.1 (25.10) — переключение набора вкладок (язычок-кнопка, выход из режима колеса) больше НЕ открывает вкладку другого набора само: меняется только ряд язычков, открытая вкладка остаётся на экране, пока пользователь сам не нажмёт нужный язычок (`cycleSettingsTabSet`, `toggleBottomAltMode`; `getResumeSettingsState` при перезапуске открывает набор той вкладки, что реально была на экране). Откат: my.js 80.0.
    Версия: 80.0 (25.10) — структурная правка: вкладка set2s_11 «Музыка» (модуль `music.js`, `renderSettingsTabMusic`, ветка в `switchSettingsTab` до `set2s_5`; в `SET2_TAB_IDS` стоит между `set2s_4` и `set2s_5`).
    Версия: 79.0 (24.10) — структурная правка: вкладка `events` «События» (центр событий, `eventlog.js`) над «Архивом»: `EVENTS_TAB_KEY`/`EVENTS_TAB_BTN_ID`, `renderSettingsTabEvents`, ветки в `refreshSettingsTabsVisibility`/`switchSettingsTab`/`SETTINGS_SIDE_ORDER_1`; запись обновления версии (`applyVersionToHeader`), уведомления об общих задачах в журнал.
@@ -5470,8 +5471,27 @@
     var p = saveGroupTaskDataP(id, data);
     if(p) p.catch(logGroupTasksSyncError);
   }
+  // Личная раскладка общих задач по вкладкам. «Общая/личная» — тип задачи (права доступа), а вкладка — лишь способ
+  // сортировки, поэтому у каждого участника она СВОЯ: хранится в личном state (ходит между устройствами владельца
+  // обычной синхронизацией), в запись группы не попадает и на чужую сортировку не влияет. Нет записи — «jointtasks».
+  var GROUP_TAB_KEY_PREFIX = "gtab:";
+  function getGroupTaskPlacement(id){
+    var r = state[GROUP_TAB_KEY_PREFIX + id];
+    return (r && typeof r.c === "string" && r.c) ? r.c : "jointtasks";
+  }
+  function setGroupTaskPlacement(id, tab){
+    var key = GROUP_TAB_KEY_PREFIX + id;
+    if(tab === "jointtasks" && !state[key]) return;
+    state[key] = {c: tab === "jointtasks" ? null : tab, t: Date.now()};
+    saveLocalStateNow();
+    scheduleCloudPush();
+  }
+  // вкладка, на которой задача лежит ДЛЯ ЭТОГО пользователя (у личной — c.tab, у общей — личная раскладка)
+  function taskEffectiveTab(t){
+    return (t && isGroupTaskId(t.id)) ? getGroupTaskPlacement(t.id) : (t && t.c ? t.c.tab : null);
+  }
   function getGroupTasksForTab(){
-    return getAllGroupTasks().filter(function(t){ return t.c.checked !== true; })
+    return getAllGroupTasks().filter(function(t){ return t.c.checked !== true && getGroupTaskPlacement(t.id) === "jointtasks"; })
       .sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
   }
   function createGroupTask(){
@@ -5484,6 +5504,7 @@
   }
   function deleteGroupTaskPermanently(id){
     if(!sharedGroup || isGroupTasksReadOnly()) return;
+    if(state[GROUP_TAB_KEY_PREFIX + id]){ state[GROUP_TAB_KEY_PREFIX + id] = {c: null, t: Date.now()}; saveLocalStateNow(); scheduleCloudPush(); }
     loadGroupTasksCache(sharedGroup.groupId);
     // тумбстоун {c:null,t} + постановка на отправку — один вызов
     var gt = getGroupTaskById(id), ownText = gt && gt.c ? gt.c.text : "";
@@ -6956,7 +6977,8 @@
   function rerenderJointTasksTabIfOpen(){
     // Red и «В работе» — витрины, в которых лежат и общие задачи (см. getTasksForTab), поэтому
     // чужие правки общих задач должны обновлять и их.
-    if(currentSettingsTab !== "jointtasks" && currentSettingsTab !== "red" && currentSettingsTab !== "worktasks"){ syncEngineLog("Общие задачи: перерисовка пропущена — открыта другая вкладка (" + currentSettingsTab + ")"); return; }
+    // Теперь общая задача может лежать и на любой другой списочной вкладке (личная раскладка), кроме «Projects».
+    if(["jointtasks","red","worktasks","inbox","next","waiting","read","council","someday"].indexOf(currentSettingsTab) === -1){ syncEngineLog("Общие задачи: перерисовка пропущена — открыта другая вкладка (" + currentSettingsTab + ")"); return; }
     if(!settingsModalOverlay || !settingsModalOverlay.classList.contains("open")){ syncEngineLog("Общие задачи: перерисовка пропущена — окно настроек закрыто"); return; }
     var activeEl = document.activeElement;
     var isEditingNow = !!(activeEl && activeEl.classList && activeEl.classList.contains("task-editable"));
@@ -20065,7 +20087,7 @@
       }
       return workSource.filter(function(t){
         if(t.c.checked === true) return false;
-        return t.c.tab === "worktasks" || getTaskWorkState(t) !== "off" || hasTaskReminder(t);
+        return taskEffectiveTab(t) === "worktasks" || getTaskWorkState(t) !== "off" || hasTaskReminder(t);
       }).sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
     }
     if(tab === "red"){
@@ -20079,7 +20101,7 @@
       }
       var redList = redSource.filter(function(t){
         if(t.c.checked === true) return false;
-        return t.c.tab === "red" || t.c.flag === "red" || t.c.flag === "yellow";
+        return taskEffectiveTab(t) === "red" || t.c.flag === "red" || t.c.flag === "yellow";
       });
       if(getRedSortByFlag()){
         redList.sort(function(a,b){
@@ -20093,8 +20115,14 @@
       }
       return redList;
     }
-    return getAllTasks().filter(function(t){ return t.c.tab === tab && t.c.checked !== true; })
-      .sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
+    var plain = getAllTasks().filter(function(t){ return t.c.tab === tab && t.c.checked !== true; });
+    // общие задачи, которые пользователь сам разложил на эту вкладку (задача остаётся общей)
+    if(tab !== "jointtasks" && isGroupTasksActive()){
+      try{
+        plain = plain.concat(getAllGroupTasks().filter(function(t){ return t.c.checked !== true && getGroupTaskPlacement(t.id) === tab; }));
+      }catch(e){}
+    }
+    return plain.sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
   }
   function getArchivedTasksAll(){
     return getAllTasks().filter(function(t){ return t.c.checked === true; })
@@ -20589,15 +20617,17 @@
   }
   function moveTaskToTab(id, newTab){
     var task = getTaskById(id);
-    if(!task || task.c.tab === newTab) return id;
-    // TASK_SHARED_TASKS — перенос задачи МЕЖДУ личным state и облачным хранилищем группы: т.к. это
+    if(!task || taskEffectiveTab(task) === newTab) return id;
+    // Общая задача при переносе на любую вкладку остаётся общей (тот же id, те же надписи, то же облачное хранилище
+    // группы): меняется только личная раскладка этого пользователя — другим участникам это не видно.
+    if(isGroupTaskId(id)){
+      setGroupTaskPlacement(id, newTab);
+      return id;
+    }
+    // TASK_SHARED_TASKS — перенос ЛИЧНОЙ задачи на вкладку «Общие задачи» делает её общей (см. ниже); между личным state и облачным хранилищем группы: т.к. это
     // два разных хранилища (localStorage/облако личного стейта vs зашифрованный
     // /groups/<groupId>/tasks), простой сменой поля c.tab не обойтись — вместо этого создаём новую
     // запись в целевом хранилище с тем же содержимым и удаляем исходную.
-    if(isGroupTaskId(id)){
-      if(newTab === "jointtasks") return id; // уже общая задача — переносить некуда
-      return moveGroupTaskToPersonal(id, newTab) || id; // возвращает id: при переносе между хранилищами он новый
-    }
     if(newTab === "jointtasks" && isGroupTasksActive()){
       return movePersonalTaskToGroup(id) || id;
     }
@@ -20632,9 +20662,9 @@
     if(groupOn && !groupRO){ try{ all = all.concat(getAllGroupTasks()); }catch(e){} }
     var same = all.filter(function(t){ return t.c.checked !== true && keyOf(t.c.text) === want; });
     function onTab(t){
-      if(tabKey === "red") return t.c.tab === "red" || t.c.flag === "red" || t.c.flag === "yellow";
-      if(tabKey === "worktasks") return t.c.tab === "worktasks" || getTaskWorkState(t) !== "off";
-      return t.c.tab === tabKey;
+      if(tabKey === "red") return taskEffectiveTab(t) === "red" || t.c.flag === "red" || t.c.flag === "yellow";
+      if(tabKey === "worktasks") return taskEffectiveTab(t) === "worktasks" || getTaskWorkState(t) !== "off";
+      return taskEffectiveTab(t) === tabKey;
     }
     var found = null;
     for(var i = 0; i < same.length && !found; i++) if(onTab(same[i])) found = same[i];
@@ -22347,7 +22377,7 @@
     }
     var createdByLabel = labelFor(content.createdBy);
     var createdTs = groupTaskCreatedTs(id, content);
-    return '<div class="task-joint-signature">Создал: ' + escapeHtml(createdByLabel) +
+    return '<div class="task-joint-signature">Общая задача. Создал: ' + escapeHtml(createdByLabel) +
       (createdTs ? ", " + formatTaskCreatedAt(createdTs) : "") +
       (content.completedBy ? " · Выполнил: " + escapeHtml(labelFor(content.completedBy)) : "") +
       '</div>';
@@ -22753,7 +22783,7 @@
     var targetKeys = TASK_MOVE_TARGET_TABS.slice();
     if(getCustomCommentsEnabled()) targetKeys.push("extra2");
     return targetKeys.map(function(key){
-      return { key: key, svg: TASK_MOVE_ICON_SVG(key), title: TASK_TAB_TITLES[key], current: key === task.c.tab };
+      return { key: key, svg: TASK_MOVE_ICON_SVG(key), title: TASK_TAB_TITLES[key], current: key === taskEffectiveTab(task) };
     });
   }
 
@@ -22767,12 +22797,26 @@
       // строка могла быть в правке — плашка перед действием снимает фокус (blurBeforePick), текст
       // при этом сохраняется, поэтому задачу берём заново
       var cur = getTaskById(id) || task;
-      if(newTab === cur.c.tab) return;
+      if(newTab === taskEffectiveTab(cur)) return;
+      moveTaskWithWarning(id, newTab, function(){
+        if(onAfterAction) onAfterAction();
+        else renderTaskTabList(tabKey || taskEffectiveTab(cur));
+      });
+    }, { label: "Перенести задачу", blurBeforePick: true });
+  }
+  // Перенос из плашки. Личная задача, уходящая на «Общие задачи», становится общей — перед этим предупреждаем.
+  function moveTaskWithWarning(id, newTab, after){
+    function run(){
       if(newTab === "extra2") convertTaskToComment(id);
       else moveTaskToTab(id, newTab);
-      if(onAfterAction) onAfterAction();
-      else renderTaskTabList(tabKey || cur.c.tab);
-    }, { label: "Перенести задачу", blurBeforePick: true });
+      if(after) after();
+    }
+    if(newTab === "jointtasks" && !isGroupTaskId(id) && isGroupTasksActive() && !isGroupTasksReadOnly()){
+      openAppConfirmBar("Эта задача станет общей: её увидят и смогут менять все участники группы. Перенести?", run,
+        { yesTitle: "Перенести", blurBeforeYes: true });
+      return;
+    }
+    run();
   }
 
   // Тот же пикер выбора вкладки-назначения, что и openTaskMovePicker выше, но БЕЗ привязки к уже
@@ -23263,10 +23307,8 @@
       if(!task) return;
       openAppBubbleGrid(anchorEl, taskMoveBubbleItems(task), function(newTab){
         var cur = getTaskById(id) || task;
-        if(newTab === cur.c.tab) return;
-        if(newTab === "extra2") convertTaskToComment(id);
-        else moveTaskToTab(id, newTab);
-        render();
+        if(newTab === taskEffectiveTab(cur)) return;
+        moveTaskWithWarning(id, newTab, render);
       }, { label: "Перенести задачу", blurBeforePick: true });
     }
 
