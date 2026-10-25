@@ -1,5 +1,6 @@
 /* ===========================================================================
    music.js
+   Версия: 1.1 (25.10) — жест «назад» поднимает на уровень выше: вход в подпапку кладёт возврат в стек window.AppNav (как везде в приложении), кнопка ← в шапке делает history.back().
    Версия: 1.0 (25.10)
    Вкладка «Музыка» (set2s_11, между «Забытыми заметками» и «Разделением epub»): библиотека и плеер.
    Звук играет оболочка Android (MusicPlayer.kt, служба MusicService.kt; мост LifeTrackerNative версии 13: musicGetFolder /
@@ -181,10 +182,18 @@
     markCurrent();
   }
 
-  function goUp(){
+  // шаг наверх; вызывается жестом «назад» (через AppNav) и, без AppNav, кнопкой ←
+  function popFolder(){
     if(!stack || stack.length < 2) return;
     stack.pop();
-    openFolder();
+    if(rootEl()) openFolder();
+  }
+
+  // кнопка ←: идём через историю, чтобы стек AppNav не рассинхронизировался с глубиной
+  function goUp(){
+    if(!stack || stack.length < 2) return;
+    if(window.AppNav) history.back();
+    else popFolder();
   }
 
   function onListClick(ev){
@@ -195,6 +204,7 @@
     if(it.dir){
       stack.push({ id: it.id, name: it.name });
       openFolder();
+      if(window.AppNav) window.AppNav.push(popFolder);
       return;
     }
     var b = bridge(); if(!b) return;
