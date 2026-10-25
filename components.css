@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 15.1 (25.10) — `.cal-week`: `touch-action:pan-x pan-y` (щипок по сетке недели обрабатывает calendar.js, а не браузер).
    Версия: 15.0 (25.10) — структурная правка: стили режима «Неделя» календаря (`.cal-week`, `.cal-wk-*`).
    Версия: 14.0 (25.10) — структурная правка: стили серий календаря (`.cal-more`, `.cal-row-exp`, `.cal-scope`).
    Версия: 13.0 (25.10) — структурная правка: стили вкладки «Календарь» (`.cal-center`, `.cal-row`, `.cal-row-past`, `.cal-rep`, `.cal-field`, `.cal-dt`, calendar.js); `.sync-status`: right 13px (точка по центру колонки вкладок шириной 35px).
@@ -4803,7 +4804,7 @@ body::after{
 .cal-scope .workbooks-run-btn{ width:100%; }
 
 /* Календарь, режим «Неделя» (calendar.js): шапка с навигацией и днями липкая, ниже сетка 24 часа; блоки событий — absolute внутри колонки дня */
-.cal-week{ font-family:"Palatino Linotype",Georgia,serif; color:var(--ink); padding:0 4px 64px 4px; }
+.cal-week{ font-family:"Palatino Linotype",Georgia,serif; color:var(--ink); padding:0 4px 64px 4px; touch-action:pan-x pan-y; }
 .cal-wk-top{ position:-webkit-sticky; position:sticky; top:0; z-index:3; background:var(--parchment); padding-top:4px; }
 .cal-wk-nav{ display:flex; align-items:center; gap:4px; padding:0 0 4px 0; }
 .cal-wk-title{ flex:1 1 auto; text-align:center; font-weight:bold; color:var(--wood); font-size:14px; min-width:0; }

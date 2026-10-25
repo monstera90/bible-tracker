@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 3.0 (25.10)
+   Версия: 4.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
    под «В работе»). Точка входа — window.CalendarTab.render(); my.js зовёт её из switchSettingsTab (renderSettingsTabCalendar).
    Два режима, кнопка-переключатель — первая в нижнем ряду (`calendarModeBtn`), выбор хранится в `calendarMode_v1`
@@ -8,9 +8,12 @@
    • «Список» (в стиле центра событий — вкладки-колокольчика, eventlog.js: `.event-center`, `.event-day`, `.event-row`,
      `.event-time`) — `renderList`;
    • «Неделя» (как в Google Календаре) — `renderWeek`: шапка с «‹ › Сегодня» и диапазоном дат, ряд дней Пн–Вс, сетка
-     24 часа × `HOUR_PX`, события блоками на своём месте (`weekSegments`: событие через полночь режется по дням, пересекающиеся
+     24 часа × `hourPx` (щипок двумя пальцами по вертикали меняет высоту часа в пределах `HOUR_MIN`…`HOUR_MAX`, значение
+     хранится в `calendarHourPx_v1`; на время жеста блоки пересчитываются на месте `applyZoom`, по отпусканию неделя
+     перерисовывается — перераскладка пересечений), события блоками на своём месте (`weekSegments`: событие через полночь режется по дням, пересекающиеся
      встают в колонки `packDay`). Показываются ВСЕ повторения серий этой недели (сворачивания серий в неделе нет). Тап по
-     блоку — форма этого повторения; смена недели — стрелки или свайп по сетке. Вход во вкладку открывает текущую неделю;
+     блоку — форма этого повторения, тап по пустому месту сетки — форма нового мероприятия на этот день с началом в начале
+     нажатого часа (`openForm(null, null, начало)`); смена недели — стрелки или свайп по сетке. Вход во вкладку открывает текущую неделю;
      возвращение из формы — ту же неделю с той же прокруткой (`weekStart`, `weekScrollKeep`). Шапка липкая (`position:sticky`;
      на старом WebView без sticky просто прокручивается вместе с сеткой).
    Экран: список мероприятий (дни без мероприятий не показываются) и нижний ряд кнопок `.mdeditor-fab-row`: «+» (новое
@@ -45,7 +48,10 @@
   var LIST_AHEAD_DAYS = 90;
   var HOUR_MS = 3600000;
   var DAY_MS = 86400000;
-  var HOUR_PX = 44;         // высота часа в режиме «Неделя»
+  var HOUR_DEFAULT = 44;    // высота часа в режиме «Неделя» по умолчанию
+  var HOUR_MIN = 28, HOUR_MAX = 110; // пределы щипка
+  var ZOOM_KEY = "calendarHourPx_v1";
+  var PINCH_MIN_GAP = 30;   // щипок считается, только если пальцы разведены по вертикали хотя бы на столько px
   var MIN_BLOCK_PX = 14;    // минимальная высота блока события в неделе
   var SWIPE_DX = 70, SWIPE_DY = 50;
   var DOUBLE_MS = 300;      // как в itemcards.js (двойной тап по карточке)
@@ -77,6 +83,8 @@
   var mode = "list";    // выбранный режим: "list" | "week" (хранится в MODE_KEY)
   var weekStart = null; // начало (понедельник 00:00) показанной недели; null — текущая
   var weekScrollKeep = null; // прокрутка недели, которую вернуть после формы
+  var hourPx = HOUR_DEFAULT; // текущая высота часа в неделе
+  var pinchEndedAt = 0;      // когда закончился щипок (тап сразу после него игнорируется)
   var expanded = {};   // id серий, раскрытых в списке
   var tapTimer = null; // отложенный одиночный тап по строке серии
 
@@ -230,8 +238,13 @@
     setTimeout(go, 250);
   }
   // ---------- нижний ряд и режимы ----------
+  function clampHour(v){ return Math.max(HOUR_MIN, Math.min(HOUR_MAX, v)); }
   function loadMode(){
-    try{ mode = localStorage.getItem(MODE_KEY) === "week" ? "week" : "list"; }catch(e){ mode = "list"; }
+    try{
+      mode = localStorage.getItem(MODE_KEY) === "week" ? "week" : "list";
+      var z = parseFloat(localStorage.getItem(ZOOM_KEY));
+      hourPx = isFinite(z) ? clampHour(z) : HOUR_DEFAULT;
+    }catch(e){ mode = "list"; hourPx = HOUR_DEFAULT; }
   }
   function saveMode(){ try{ localStorage.setItem(MODE_KEY, mode); }catch(e){} }
   function fabRowHtml(){
@@ -291,7 +304,7 @@
   }
   // раскладка пересекающихся блоков дня по колонкам: проставляет seg.col и seg.cols
   function packDay(segs){
-    var minH = MIN_BLOCK_PX * 60 / HOUR_PX; // минимальная высота блока в минутах — по ней считается пересечение
+    var minH = MIN_BLOCK_PX * 60 / hourPx; // минимальная высота блока в минутах — по ней считается пересечение
     segs.sort(function(a, b){ return a.top - b.top || b.bottom - a.bottom; });
     var cluster = [], colEnds = [], clusterEnd = -1;
     function flush(){
@@ -323,20 +336,20 @@
       packDay(segs);
       var blocks = '';
       segs.forEach(function(sg){
-        var top = sg.top * HOUR_PX / 60;
-        var h = Math.max(MIN_BLOCK_PX, (sg.bottom - sg.top) * HOUR_PX / 60 - 1);
+        var top = sg.top * hourPx / 60;
+        var h = Math.max(MIN_BLOCK_PX, (sg.bottom - sg.top) * hourPx / 60 - 1);
         var w = 100 / sg.cols, left = sg.col * w;
         var tall = h >= 30;
         blocks += '<div class="cal-wk-ev' + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '"' +
-          ' style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;left:' + left.toFixed(2) + '%;width:calc(' + w.toFixed(2) + '% - 1px)">' +
+          ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;left:' + left.toFixed(2) + '%;width:calc(' + w.toFixed(2) + '% - 1px)">' +
           (tall ? '<span class="cal-wk-et">' + timeValue(sg.at) + '</span>' : '') + esc(sg.ev.title) + '</div>';
       });
-      var nowLine = isToday ? '<div class="cal-wk-now" style="top:' + (minutesOfDay(now) * HOUR_PX / 60).toFixed(1) + 'px"></div>' : '';
-      cols += '<div class="cal-wk-col' + (isToday ? ' cal-wk-today-col' : '') + '">' + blocks + nowLine + '</div>';
+      var nowLine = isToday ? '<div class="cal-wk-now" data-m="' + minutesOfDay(now) + '" style="top:' + (minutesOfDay(now) * hourPx / 60).toFixed(1) + 'px"></div>' : '';
+      cols += '<div class="cal-wk-col' + (isToday ? ' cal-wk-today-col' : '') + '" data-day="' + ds + '">' + blocks + nowLine + '</div>';
     }
     head += '</div>';
     var labels = '';
-    for(var h2 = 1; h2 < 24; h2++) labels += '<span style="top:' + (h2 * HOUR_PX - 6) + 'px">' + pad2(h2) + ':00</span>';
+    for(var h2 = 1; h2 < 24; h2++) labels += '<span data-h="' + h2 + '" style="top:' + (h2 * hourPx - 6) + 'px">' + pad2(h2) + ':00</span>';
     return '<div class="cal-wk-top">' +
         '<div class="cal-wk-nav">' +
           '<button type="button" class="cal-wk-btn" id="calWkPrev" title="Предыдущая неделя">‹</button>' +
@@ -345,10 +358,29 @@
           '<button type="button" class="cal-wk-btn cal-wk-todaybtn" id="calWkToday">Сегодня</button>' +
         '</div>' + head +
       '</div>' +
-      '<div class="cal-wk-body" id="calWkBody" style="height:' + (24 * HOUR_PX) + 'px">' +
+      '<div class="cal-wk-body" id="calWkBody" style="height:' + (24 * hourPx) + 'px">' +
         '<div class="cal-wk-gutter cal-wk-labels">' + labels + '</div>' +
-        '<div class="cal-wk-cols" style="background-size:100% ' + HOUR_PX + 'px">' + cols + '</div>' +
+        '<div class="cal-wk-cols" style="background-size:100% ' + hourPx + 'px">' + cols + '</div>' +
       '</div>';
+  }
+  // пересчитать геометрию недели под новую высоту часа без перерисовки (на время щипка)
+  function applyZoom(px){
+    hourPx = clampHour(px);
+    var wk = document.getElementById("calWeek");
+    if(!wk) return;
+    var body = document.getElementById("calWkBody"), cols = wk.querySelector(".cal-wk-cols");
+    if(body) body.style.height = (24 * hourPx) + "px";
+    if(cols) cols.style.backgroundSize = "100% " + hourPx + "px";
+    var i, list = wk.querySelectorAll(".cal-wk-labels span");
+    for(i = 0; i < list.length; i++) list[i].style.top = (+list[i].getAttribute("data-h") * hourPx - 6) + "px";
+    list = wk.querySelectorAll(".cal-wk-ev");
+    for(i = 0; i < list.length; i++){
+      var t = +list[i].getAttribute("data-t"), b = +list[i].getAttribute("data-b");
+      list[i].style.top = (t * hourPx / 60).toFixed(1) + "px";
+      list[i].style.height = Math.max(MIN_BLOCK_PX, (b - t) * hourPx / 60 - 1).toFixed(1) + "px";
+    }
+    list = wk.querySelectorAll(".cal-wk-now");
+    for(i = 0; i < list.length; i++) list[i].style.top = (+list[i].getAttribute("data-m") * hourPx / 60).toFixed(1) + "px";
   }
   function weekRememberScroll(){
     var c = container();
@@ -371,19 +403,62 @@
     document.getElementById("calWkToday").addEventListener("click", function(){ weekStart = null; weekScrollKeep = null; renderWeek(); });
     var wk = document.getElementById("calWeek");
     wk.addEventListener("click", function(e){
+      if(Date.now() - pinchEndedAt < 350) return; // тап, оставшийся от щипка
       var blk = e.target.closest ? e.target.closest(".cal-wk-ev") : null;
-      if(!blk) return;
-      var ev = findEvent(blk.getAttribute("data-id"));
-      if(!ev) return;
+      if(blk){
+        var ev = findEvent(blk.getAttribute("data-id"));
+        if(!ev) return;
+        weekRememberScroll();
+        openForm(ev, +blk.getAttribute("data-at"));
+        return;
+      }
+      var col = e.target.closest ? e.target.closest(".cal-wk-col") : null;
+      if(!col) return;
+      // пустое место сетки: новое мероприятие на этот день, начало — начало нажатого часа
+      var hour = Math.max(0, Math.min(23, Math.floor((e.clientY - col.getBoundingClientRect().top) / hourPx)));
+      var d = new Date(+col.getAttribute("data-day"));
       weekRememberScroll();
-      openForm(ev, +blk.getAttribute("data-at"));
+      openForm(null, null, new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, 0, 0, 0).getTime());
     });
+    // жесты: один палец — свайп недели; два пальца по вертикали — щипок (размер сетки)
     var sx = 0, sy = 0, tracking = false;
+    var pinch = null; // {gap0, px0, anchor (минуты под серединой пальцев)}
+    function gapOf(t){ return Math.abs(t[0].clientY - t[1].clientY); }
+    function midOf(t){ return (t[0].clientY + t[1].clientY) / 2; }
     wk.addEventListener("touchstart", function(e){
+      if(e.touches && e.touches.length === 2){
+        tracking = false;
+        var g = gapOf(e.touches);
+        var body = document.getElementById("calWkBody");
+        if(g >= PINCH_MIN_GAP && body){
+          pinch = { gap0: g, px0: hourPx, anchor: (midOf(e.touches) - body.getBoundingClientRect().top) / hourPx };
+        } else pinch = null;
+        return;
+      }
       if(!e.touches || e.touches.length !== 1){ tracking = false; return; }
       sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
     }, { passive: true });
+    wk.addEventListener("touchmove", function(e){
+      if(!pinch || !e.touches || e.touches.length !== 2) return;
+      if(e.cancelable) e.preventDefault(); // не даём странице прокручиваться/масштабироваться самой
+      var g = Math.max(gapOf(e.touches), 1);
+      applyZoom(pinch.px0 * g / pinch.gap0);
+      var body = document.getElementById("calWkBody");
+      if(body){ // точка под серединой пальцев остаётся на месте
+        c.scrollTop += body.getBoundingClientRect().top + pinch.anchor * hourPx - midOf(e.touches);
+      }
+    }, { passive: false });
     wk.addEventListener("touchend", function(e){
+      if(pinch){
+        if(!e.touches || e.touches.length < 2){
+          pinch = null; tracking = false;
+          pinchEndedAt = Date.now();
+          try{ localStorage.setItem(ZOOM_KEY, String(hourPx)); }catch(err){}
+          weekScrollKeep = c.scrollTop;
+          renderWeek(); // перерисовка: пересчёт раскладки пересекающихся блоков под новую высоту
+        }
+        return;
+      }
       if(!tracking || !e.changedTouches || !e.changedTouches.length) return;
       tracking = false;
       var dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
@@ -400,7 +475,7 @@
       if(!body) return;
       var hour = isCurrent ? Math.max(0, new Date().getHours() - 2) : 7;
       var headH = top ? top.getBoundingClientRect().height : 0;
-      c.scrollTop += body.getBoundingClientRect().top - c.getBoundingClientRect().top - headH + hour * HOUR_PX;
+      c.scrollTop += body.getBoundingClientRect().top - c.getBoundingClientRect().top - headH + hour * hourPx;
     }
     go();
     if(window.requestAnimationFrame) window.requestAnimationFrame(go);
@@ -526,8 +601,9 @@
   }
 
   // ---------- форма ----------
-  // ev — мероприятие (null — новое); at — начало того повторения, по которому нажали (у серии форма показывает его, а не первое начало)
-  function openForm(ev, at){
+  // ev — мероприятие (null — новое); at — начало того повторения, по которому нажали (у серии форма показывает его, а не первое начало);
+  // preset — для нового мероприятия: начало (мс), которое подставляется в форму (тап по пустому месту недели), окончание = начало + 1 час
+  function openForm(ev, at, preset){
     var c = container();
     if(!c) return;
     clearTimeout(tapTimer); tapTimer = null;
@@ -570,6 +646,9 @@
       sd.value = dateValue(baseS); st.value = timeValue(baseS);
       ed.value = dateValue(baseE); et.value = timeValue(baseE);
       repEl.value = ev.repeat || "";
+    } else if(preset){
+      sd.value = dateValue(preset); st.value = timeValue(preset);
+      ed.value = dateValue(preset + HOUR_MS); et.value = timeValue(preset + HOUR_MS);
     }
 
     // окончание = начало + 1 час, пока пользователь сам не правил окончание (у существующего мероприятия — не трогаем)
