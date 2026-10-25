@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
 // Версия: 4.0 (25.10) — выбор папки с музыкой (`musicFolderLauncher`, `pickMusicFolder`) для вкладки «Музыка».
 // Версия: 3.1 (22.10) — onPause сразу перепоставляет уведомления идущих таймеров (`CardTimers.tickIsland`): пока приложение на экране, тик их не трогает, и остров в шторке получает свежее время без ожидания следующего тика. Откат: MainActivity.kt 3.0.
 // Версия: 3.0 (21.10) — плашка таймера в приложении: `inAppIsland` (InAppIsland.kt), вырез камеры берётся из WindowInsets, старт/стоп в onResume/onPause. Откат: MainActivity.kt 2.1.
@@ -316,6 +317,12 @@ class MainActivity : ComponentActivity() {
             CardTimers.tickIsland(applicationContext)
         } catch (e: Exception) {
             // остров обновится следующим тиком службы
+        }
+        // Музыка играет: пока приложение было на экране, остров плеера не показывался — перепоставляем его сразу.
+        try {
+            MusicPlayer.onAppBackground(applicationContext)
+        } catch (e: Exception) {
+            // остров обновится при следующем изменении трека
         }
         // Сворачивание: страница успевает сохранить автозакладку и позицию чтения, пока WebView ещё не на паузе
         // (visibilitychange в WebView в этот момент может не прийти).

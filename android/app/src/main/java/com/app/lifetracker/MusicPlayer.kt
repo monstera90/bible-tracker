@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (25.10) — остров не появлялся, если трек запущен из самого приложения (система прячет остров, пока приложение на экране, а перепоста при сворачивании не было): `onAppBackground` (зовёт MainActivity.onPause) перепоставляет уведомление и раскрывает остров, если раскрытие пришлось на время, когда приложение было на экране (`floatDeferred`). Откат: MusicPlayer.kt 1.0.
 // Версия: 1.0 (25.10)
 
 import android.content.Context
@@ -56,6 +57,9 @@ object MusicPlayer {
     @Volatile
     private var floatPending = false
 
+    @Volatile
+    private var floatDeferred = false
+
     private var queue: List<Track> = emptyList()
     private var mp: MediaPlayer? = null
     private var mpPrepared = false
@@ -69,7 +73,24 @@ object MusicPlayer {
     fun consumeFloat(): Boolean {
         val f = floatPending
         floatPending = false
+        // приложение на экране: система остров не показывает, раскрытие пропало впустую — повторим при сворачивании
+        if (f && NotifyStore.appForeground) floatDeferred = true
         return f
+    }
+
+    /**
+     * Приложение ушло с экрана (MainActivity.onPause): пока оно было на экране, остров плеера не показывался, поэтому
+     * уведомление нужно перепоставить сразу — тогда остров появляется в шторке/у выреза, а если раскрытие прошло
+     * впустую, он ещё и раскрывается. Без активной музыки ничего не делает.
+     */
+    fun onAppBackground(ctx: Context) {
+        if (!active) return
+        init(ctx)
+        if (floatDeferred) {
+            floatDeferred = false
+            floatPending = true
+        }
+        MusicService.refresh(ctx.applicationContext)
     }
 
     private fun init(ctx: Context) {
@@ -303,6 +324,7 @@ object MusicPlayer {
         index = 0
         resumeAfterFocus = false
         floatPending = false
+        floatDeferred = false
         val ctx = app
         if (ctx != null) MusicService.stop(ctx)
     }
