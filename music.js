@@ -1,5 +1,7 @@
 /* ===========================================================================
    music.js
+   Версия: 1.3 (25.10) — при возврате на вкладку открывается та же папка, где ушли; для каждого сохранённого уровня заново кладутся записи AppNav (после записи переключения вкладки), поэтому «назад» поднимается по папкам, а не уходит на другую вкладку. Сброс в корень из 1.2 убран.
+   Версия: 1.2 (25.10) — «назад» уходило на другую вкладку: глубина папок сохранялась при уходе с вкладки, а записей AppNav для неё уже не было (поверх лежала запись переключения вкладки). Теперь при входе на вкладку список начинается с корня, а запись входа в папку проверяет, что она ещё актуальна, иначе передаёт «назад» дальше.
    Версия: 1.1 (25.10) — жест «назад» поднимает на уровень выше: вход в подпапку кладёт возврат в стек window.AppNav (как везде в приложении), кнопка ← в шапке делает history.back().
    Версия: 1.0 (25.10)
    Вкладка «Музыка» (set2s_11, между «Забытыми заметками» и «Разделением epub»): библиотека и плеер.
@@ -113,6 +115,7 @@
     if(!c) return;
     var b = bridge();
     if(!b){ renderNoBridge(c); return; }
+    var fresh = !rootEl(); // вход на вкладку заново (экрана в DOM ещё нет)
     var info = parse(b.musicGetFolder(), {});
     if(!info.set){
       stack = null;
@@ -148,6 +151,24 @@
     openFolder();
     poll();
     startTimer();
+    // сохранённая глубина папок: записи AppNav для неё заново; после синхронного переключения вкладки в my.js,
+    // чтобы они легли поверх записи этого переключения
+    if(fresh && stack.length > 1 && window.AppNav){
+      var levels = stack.length;
+      setTimeout(function(){
+        if(!rootEl() || !stack || stack.length !== levels) return;
+        for(var d = 2; d <= levels; d++) pushLevel(d);
+      }, 0);
+    }
+  }
+
+  // запись «назад» для папки глубины depth (в стеке path длина = depth)
+  function pushLevel(depth){
+    window.AppNav.push(function(){
+      // запись устарела (вкладку покидали или глубина другая) — не глотаем «назад», а передаём дальше
+      if(rootEl() && stack && stack.length === depth) popFolder();
+      else history.back();
+    });
   }
 
   function cur(){ return stack[stack.length - 1]; }
@@ -204,7 +225,7 @@
     if(it.dir){
       stack.push({ id: it.id, name: it.name });
       openFolder();
-      if(window.AppNav) window.AppNav.push(popFolder);
+      if(window.AppNav) pushLevel(stack.length);
       return;
     }
     var b = bridge(); if(!b) return;
