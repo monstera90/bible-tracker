@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 2.7 (25.10) — плотные коды (QR «Создавать задачу» с длинным текстом/тегом: кириллица — 2 байта на знак, модулей до 57×57 против 25×25 у таймера) читались хуже: кадр для разбора всегда сжимался до 480 px, и модуль кода становился ~2 px. Теперь камера просится в 1280×720 (`ideal`), а при ненайденном коде разбор чередует кадр 480 px (быстро) и 960 px (для мелких модулей); найденный масштаб держится, пока код виден (`useBig`, `BIG_W`). Удержание (0,25–0,6 с, у задачи/таймера не меньше 0,5 с) не менялось. Откат: cardscan.js 2.6.
    Версия: 2.6 (24.10) — `parseCode` узнаёт QR погоды `lt://v1/weather/<широта>,<долгота>[/<название>]` → `{kind:"weather", lat, lon, title}` (побочных действий нет — обычное удержание). Откат: cardscan.js 2.5.
    Версия: 2.5 (24.10) — `parseCode` узнаёт QR будильника `lt://v1/alarm/<ЧЧММ>[,<5|15|30>,<1..4>][/<название>]` → `{kind:"alarm", hour, minute, every, times, title}` (`every`/`times` — 0, если повтора нет); для будильника, как для таймера, нужно удержание от 0,5 с. Откат: cardscan.js 2.4.
    Версия: 2.4 (24.10) — `parseCode` узнаёт QR скрытого таймера `lt://v1/htimer/<секунды>[/<название>]` → `{kind:"timer", seconds, title, hidden:true}` (остальное — как у обычного таймера, в том числе удержание 0,5 с). Откат: cardscan.js 2.3.
@@ -151,6 +152,7 @@ window.CardScan = (function(){
     var EXCEED_PENALTY_MS = 150; // штраф счёту за каждый уход кода от якоря
     var GRACE_MS = 400;         // кадры без кода (смаз при дрожании руки) короче этого срока удержание не трогают
     var SWITCH_FRAMES = 3;      // другой текст кода должен продержаться столько кадров подряд, чтобы счёт пошёл заново (разовый сбой чтения не в счёт)
+    var BIG_W = 960;            // ширина крупного кадра для разбора плотных кодов (обычный кадр — 480)
     var MIN_CODE_SIDE = 0.15;   // совсем мелкие коды (далеко/на фоне) не считаются; доля стороны зоны
     var wrap = layer.querySelector(".scan-video-wrap");
     var SVGNS = "http://www.w3.org/2000/svg";
@@ -171,7 +173,7 @@ window.CardScan = (function(){
     if(wrap) wrap.appendChild(svg);
 
     var hold = { text: null, ax: 0, ay: 0 }; // что сейчас держим и «якорь» — где центр кода был, когда он последний раз стоял
-    var held = 0, disp = 0, lastT = 0, lastSeen = 0, sp = null, lastViewBox = "", pendText = null, pendCount = 0;
+    var useBig = false, held = 0, disp = 0, lastT = 0, lastSeen = 0, sp = null, lastViewBox = "", pendText = null, pendCount = 0;
 
     function towardPt(p, q, r){
       var dx = q.x - p.x, dy = q.y - p.y, len = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -292,7 +294,7 @@ window.CardScan = (function(){
         showError("Камера недоступна на этом устройстве.");
         return;
       }
-      navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function(s){
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } }).then(function(s){
         if(closed){ try{ s.getTracks().forEach(function(t){ t.stop(); }); }catch(e){} return; }
         stream = s;
         video.srcObject = s;
@@ -314,14 +316,16 @@ window.CardScan = (function(){
       var found = null, zone = null;
       if(video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth){
         setLive();
-        // уменьшаем кадр для скорости, пропорции сохраняем
-        var w = Math.min(480, video.videoWidth);
+        // уменьшаем кадр для скорости, пропорции сохраняем. Мелкие модули плотных кодов (длинная задача) на 480 px не читаются,
+        // поэтому пока кода нет, кадры чередуются: обычный 480 px и крупный 960 px; кто нашёл код — тот масштаб и держится
+        var w = Math.min(useBig ? BIG_W : 480, video.videoWidth);
         var h = Math.max(1, Math.round(w * video.videoHeight / video.videoWidth));
-        canvas.width = w; canvas.height = h;
+        if(canvas.width !== w || canvas.height !== h){ canvas.width = w; canvas.height = h; }
         var ctx = canvas.getContext("2d");
         ctx.drawImage(video, 0, 0, w, h);
         var data = ctx.getImageData(0, 0, w, h);
         var result = window.jsQR(data.data, data.width, data.height, { inversionAttempts: "dontInvert" });
+        if(!(result && result.data && result.location)) useBig = !useBig; // не нашли — в следующий раз другой масштаб
         var Wd = wrap ? wrap.clientWidth : 0, Hd = wrap ? wrap.clientHeight : 0;
         if(Wd > 0 && Hd > 0){
           var vb = "0 0 " + Wd + " " + Hd;
