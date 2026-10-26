@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <!-- scan.html
+     Версия: 1.7 (26.10) — `deps.music.headphones` (мост `bridge.musicHeadphones`: комбо с галочкой «Наушники обязательны» проверяет наушники в окне ярлыка).
      Версия: 1.6 (26.10) — `deps.music` (QR «Комбинированный» в окне ярлыка включает трек/папку через мост: `bridge.musicPlayTrack`/`musicPlayFolder`).
      Версия: 1.5 (24.10) — `deps.alarms` (скан кода будильника в окне ярлыка заводит будильник через мост: `bridge.setAlarm`/`cancelAlarm`/`getAlarms`).
      Версия: 1.4 (24.10) — `deps.timers.start` умеет скрытый таймер (`bridge.startHiddenTimer`, без острова и уведомления «идёт»).
@@ -67,7 +68,8 @@
       } : null,
       music: (bridge && typeof bridge.musicPlayTrack === "function") ? {
         track: function(id, loop, vol){ return !!bridge.musicPlayTrack(String(id), !!loop, vol | 0); },
-        folder: function(id, loop, vol){ return !!bridge.musicPlayFolder(String(id), !!loop, vol | 0); }
+        folder: function(id, loop, vol){ return !!bridge.musicPlayFolder(String(id), !!loop, vol | 0); },
+        headphones: function(){ return typeof bridge.musicHeadphones === "function" ? !!bridge.musicHeadphones() : false; }
       } : null,
       native: bridge ? {
         openInApp: function(id, mode){ bridge.openInApp(String(id), String(mode)); },

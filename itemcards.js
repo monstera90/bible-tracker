@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 29.0 (26.10) — структурная правка: «Избранное» больше не рисует скрытые карточки серыми (`.item-card-hidden` только вне фильтра «Избранное»); комбо: громкость — прямо громкость телефона (поток музыки, ставит оболочка), галочка «Наушники должны быть обязательно подключены» у трека/папки (поле `hp`, `comboHeadphonesOn`; без наушников не выполняется ни одно действие кода, слой «Вначале подключи наушники»). Нужен мост версии 15 (`musicHeadphones`). Откат: itemcards.js 28.0.
    Версия: 28.0 (26.10) — структурная правка: тип «Комбинированный» (`combo`): до 5 действий одним QR-кодом `lt://v1/combo/<JSON>` и кнопкой «Пуск» (таймер; музыкальный трек/папка с зацикливанием и громкостью; открыть вкладку/закладку/заметку; добавить задачу по id; событие в журнал). Новое: `runCombo`, `comboRun*`, `showComboResultOverlay`, `drainPendingCombos`, `openComboForm`, `comboPicker`, `comboMusicPicker`, `comboActs*`; деп `getComboTabs`/`openComboTab`/`getComboBookmarks`/`openComboBookmark`/`addComboTask`/`music`; вход оболочки `combo`; очередь `pendingScanCombos_v1`. Нужен мост версии 14 (музыка). Откат: itemcards.js 27.0.
    Версия: 27.0 (25.10) — структурная правка: «Создавать задачу» из окна ярлыка больше НЕ открывает приложение: окно показывает слой (`showTaskResultOverlay`, статус `queued`; пиктограмма и название вкладки — из кэша `itemCardsTaskTabs_v1`, который пишет приложение: `cacheTaskTabs`) и закрывается на рабочий стол, а задача лежит в очереди `pendingScanTasks_v1`; приложение выполняет очередь молча при запуске и при возврате (`drainPendingTasks(silent)`, зовёт my.js). Вход `newtask` из оболочки остался (старые сборки). Откат: itemcards.js 26.4.
    Версия: 26.4 (25.10) — центр событий: погода — «Была показана погода для города Название» (без кавычек); будильник пишет в `EventLog.alarmStarted` / `alarmCancelled` (итог одной записью, см. `eventlog.js` 2.0), «выключен» без времени: «Будильник «Название» был отключён пользователем». Kotlin не менялся. Откат: itemcards.js 26.3.
@@ -947,7 +948,7 @@ window.initItemCardsModule = function(deps){
     }
     shown.forEach(function(c){
       var card = document.createElement("div");
-      card.className = "item-card item-card-" + c.type + (attentionId === c.id ? " item-card-attn" : "") + (c.hidden ? " item-card-hidden" : "");
+      card.className = "item-card item-card-" + c.type + (attentionId === c.id ? " item-card-attn" : "") + ((c.hidden && curFilter !== "fav") ? " item-card-hidden" : "");
       card.dataset.id = c.id;
       var revealed = !!revealedIds[c.id];
       card.innerHTML =
@@ -2824,10 +2825,17 @@ window.initItemCardsModule = function(deps){
     if(N && typeof N.musicPlayTrack === "function" && typeof N.musicPlayFolder === "function"){
       return {
         track: function(id, loop, vol){ return !!N.musicPlayTrack(String(id), !!loop, vol | 0); },
-        folder: function(id, loop, vol){ return !!N.musicPlayFolder(String(id), !!loop, vol | 0); }
+        folder: function(id, loop, vol){ return !!N.musicPlayFolder(String(id), !!loop, vol | 0); },
+        headphones: function(){ return typeof N.musicHeadphones === "function" ? !!N.musicHeadphones() : false; }
       };
     }
     return null;
+  }
+  // наушники подключены? Нет моста версии 15 — проверить нельзя, считаем «не подключены» (код с галочкой не должен сработать вслепую)
+  function comboHeadphonesOn(){
+    var api = comboMusicApi();
+    if(!api || typeof api.headphones !== "function") return false;
+    try{ return !!api.headphones(); }catch(e){ return false; }
   }
   function comboRunTimer(a){
     var title = timerQrTitle(a.name);
@@ -2845,7 +2853,7 @@ window.initItemCardsModule = function(deps){
     try{ ok = isTrack ? api.track(a.id, a.loop, a.vol) : api.folder(a.id, a.loop, a.vol); }catch(e){ ok = false; }
     if(!ok) return { ok: false, text: (isTrack ? "Трек" : "Папка") + (nm ? " «" + nm + "»" : "") + " не найден на этом телефоне — проверьте папку с музыкой на вкладке «Музыка»" };
     return { ok: true, text: (isTrack ? "Играет трек" : "Играет папка") + (nm ? " «" + nm + "»" : (isTrack ? "" : " с музыкой")) +
-      (a.loop ? ", по кругу" : (isTrack ? ", затем остановится" : ", затем остановится")) + ", громкость " + a.vol + "%" };
+      (a.loop ? ", по кругу" : (isTrack ? ", затем остановится" : ", затем остановится")) + ", громкость телефона " + a.vol + "%" };
   }
   // задача: id действия (qid) хранится в самой задаче; пока такая невыполненная есть на любой вкладке — второй раз не создаётся,
   // выполненная (в архиве) — создаётся заново. В окне ярлыка приложения нет — задача встаёт в очередь (выполнит приложение)
@@ -2905,6 +2913,9 @@ window.initItemCardsModule = function(deps){
     var cs = comboScan();
     var acts = cs ? cs.normComboList(rawActs) : null;
     if(!acts || !acts.length){ showNoticeOverlay({ kind: "msg", text: "В комбинированном коде нет действий, которые эта версия приложения умеет выполнять." }); return; }
+    // «Наушники должны быть подключены»: без них не срабатывает ни одно действие кода (ни таймер, ни задача, ни запись в журнал)
+    var needHp = acts.some(function(a){ return (a.k === "track" || a.k === "folder") && a.hp; });
+    if(needHp && !comboHeadphonesOn()){ showNoticeOverlay({ kind: "msg", text: "Вначале подключи наушники" }); return; }
     var results = [], openAct = null, taskAct = null, eventText = "";
     acts.forEach(function(a){
       if(a.k === "timer") results.push(comboRunTimer(a));
@@ -3186,8 +3197,8 @@ window.initItemCardsModule = function(deps){
     }
     function defaultAct(kind){
       if(kind === "timer") return { k: "timer", sec: 0, name: "" };
-      if(kind === "track") return { k: "track", id: "", name: "", loop: 0, vol: 100 };
-      if(kind === "folder") return { k: "folder", id: "", name: "", picked: false, loop: 0, vol: 100 };
+      if(kind === "track") return { k: "track", id: "", name: "", loop: 0, vol: 50, hp: 0 };
+      if(kind === "folder") return { k: "folder", id: "", name: "", picked: false, loop: 0, vol: 50, hp: 0 };
       if(kind === "tab") return { k: "tab", key: "" };
       if(kind === "bm") return { k: "note", via: "bm", id: "", name: "" };
       if(kind === "note") return { k: "note", id: "", name: "" };
@@ -3207,7 +3218,7 @@ window.initItemCardsModule = function(deps){
           out = { k: "timer", sec: sec, name: timerQrTitle(body.querySelector(".combo-t-name").value) };
         } else if(r.kind === "track" || r.kind === "folder"){
           if((r.kind === "track" && !a.id) || (r.kind === "folder" && !a.picked)){ if(strict) err = "Действие " + n + " («" + kl + "»): выберите " + (r.kind === "track" ? "трек" : "папку") + "."; return; }
-          out = { k: r.kind, id: a.id || "", name: a.name || "", loop: body.querySelector(".combo-loop").value === "1" ? 1 : 0, vol: Math.max(0, Math.min(100, parseInt(body.querySelector(".combo-vol-r").value, 10) || 0)) };
+          out = { k: r.kind, id: a.id || "", name: a.name || "", loop: body.querySelector(".combo-loop").value === "1" ? 1 : 0, vol: Math.max(0, Math.min(100, parseInt(body.querySelector(".combo-vol-r").value, 10) || 0)), hp: body.querySelector(".combo-hp").checked ? 1 : 0 };
         } else if(r.kind === "tab"){
           if(!a.key){ if(strict) err = "Действие " + n + " («" + kl + "»): выберите вкладку."; return; }
           out = { k: "tab", key: a.key, name: tabTitleByKey(a.key) };
@@ -3256,12 +3267,15 @@ window.initItemCardsModule = function(deps){
         var isT = r.kind === "track";
         body.innerHTML = '<div class="combo-music-pick"></div>' +
           '<select class="mdeditor-cleanup-input combo-loop"><option value="0">' + (isT ? "Когда трек закончится — остановить воспроизведение" : "Когда треки закончатся — закончить воспроизведение") + '</option><option value="1">' + (isT ? "Зациклить трек" : "Зациклить папку") + '</option></select>' +
-          '<div class="combo-vol"><span class="combo-vol-l">Громкость</span><input type="range" class="combo-vol-r" min="0" max="100" step="5"><span class="combo-vol-v"></span></div>' +
-          '<div class="item-form-hint">Плеер показывается только на вкладке «Музыка» и в острове. Громкость — доля от громкости телефона на момент запуска.</div>';
+          '<div class="combo-vol"><span class="combo-vol-l">Громкость телефона</span><input type="range" class="combo-vol-r" min="0" max="100" step="5"><span class="combo-vol-v"></span></div>' +
+          '<label class="combo-hp-row" style="display:flex;align-items:center;gap:8px;margin:8px 0;"><input type="checkbox" class="combo-hp"><span>Наушники должны быть обязательно подключены</span></label>' +
+          '<div class="item-form-hint">Плеер показывается только на вкладке «Музыка» и в острове. Громкость — это сама громкость телефона: при запуске она выставляется на выбранный процент от максимума. Если галочка стоит, а наушников нет, код не выполнит ни одно действие.</div>';
         comboMusicPicker(body.querySelector(".combo-music-pick"), r.kind, a, updateSize);
         body.querySelector(".combo-loop").value = a.loop ? "1" : "0";
         var rng = body.querySelector(".combo-vol-r"), rv = body.querySelector(".combo-vol-v");
-        rng.value = String(a.vol == null ? 100 : a.vol);
+        rng.value = String(a.vol == null ? 50 : a.vol);
+        body.querySelector(".combo-hp").checked = !!a.hp;
+        body.querySelector(".combo-hp").addEventListener("change", updateSize);
         function showVol(){ rv.textContent = rng.value + "%"; }
         showVol();
         rng.addEventListener("input", function(){ showVol(); });

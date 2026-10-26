@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 8.0 (26.10) — мост версии 15: `musicHeadphones` (подключены ли наушники; для галочки «Наушники обязательны» в QR «Комбинированный»); `musicPlayTrack`/`musicPlayFolder` ставят громкость телефона.
 // Версия: 7.0 (26.10) — мост версии 14: `musicPlayTrack` / `musicPlayFolder` (QR «Комбинированный»: трек или папка по id с зацикливанием и начальной громкостью).
 // Версия: 6.0 (25.10) — мост версии 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
 // Версия: 5.0 (24.10) — мост версии 12: setCardAlarm / cancelCardAlarm / getCardAlarms (будильники карточек, CardAlarms).
@@ -35,10 +36,11 @@ class NativeBridge(private val activity: MainActivity) {
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
+         * 15: `musicHeadphones()` — подключены ли наушники; `volumePct` в `musicPlayTrack`/`musicPlayFolder` теперь громкость самого телефона.
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 14
+        const val BRIDGE_VERSION = 15
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -536,6 +538,13 @@ class NativeBridge(private val activity: MainActivity) {
     fun musicPlayTrack(trackId: String?, loop: Boolean, volumePct: Int): Boolean {
         if (!activity.pageTrusted || trackId.isNullOrEmpty()) return false
         return MusicPlayer.playSingle(activity.applicationContext, trackId, loop, volumePct)
+    }
+
+    /** Подключены ли наушники (проводные, USB, Bluetooth). */
+    @JavascriptInterface
+    fun musicHeadphones(): Boolean {
+        if (!activity.pageTrusted) return false
+        return MusicPlayer.headphonesConnected(activity.applicationContext)
     }
 
     /** Играть все треки папки по id (пустой — выбранная папка целиком); [loop] — по кругу. */

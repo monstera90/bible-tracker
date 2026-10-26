@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 3.1 (26.10) — удержание кода вдвое короче (`HOLD_MIN_MS` 125, `HOLD_EDGE_MS` 300, `HOLD_SIDE_EFFECT_MS` 250, `EXCEED_PENALTY_MS` 75); в действиях «музыка» комбо-кода появилось поле `hp` («наушники обязательны», пятый элемент `["m"|"f", id, цикл, громкость, 1]`, при 0 не пишется). Откат: cardscan.js 3.0.
    Версия: 3.0 (26.10) — структурная правка: QR «Комбинированный» `lt://v1/combo/<JSON>` → `{kind:"combo", acts:[…]}` (`parseCombo`, `comboCode`, `comboCategory`, `COMBO_MAX`): до 5 действий, по одному из категории (таймер / музыка / «открыть» / задача / событие в журнал), JSON из коротких массивов (`["t",сек,название]`, `["m",id,цикл,громкость]`, `["f",…]`, `["o",ключ вкладки]`, `["b",хеш книги,id закладки]`, `["n",id заметки]`, `["k",id задачи,вкладка,тег,текст]`, `["e",текст]`); такой код — с побочным эффектом, удержание не меньше 0,5 с. Откат: cardscan.js 2.7.
    Версия: 2.7 (25.10) — плотные коды (QR «Создавать задачу» с длинным текстом/тегом: кириллица — 2 байта на знак, модулей до 57×57 против 25×25 у таймера) читались хуже: кадр для разбора всегда сжимался до 480 px, и модуль кода становился ~2 px. Теперь камера просится в 1280×720 (`ideal`), а при ненайденном коде разбор чередует кадр 480 px (быстро) и 960 px (для мелких модулей); найденный масштаб держится, пока код виден (`useBig`, `BIG_W`). Удержание (0,25–0,6 с, у задачи/таймера не меньше 0,5 с) не менялось. Откат: cardscan.js 2.6.
    Версия: 2.6 (24.10) — `parseCode` узнаёт QR погоды `lt://v1/weather/<широта>,<долгота>[/<название>]` → `{kind:"weather", lat, lon, title}` (побочных действий нет — обычное удержание). Откат: cardscan.js 2.5.
@@ -92,7 +93,7 @@ window.CardScan = (function(){
       if(a.k === "track" && !id) return null;
       if(id.length > 400) return null;
       var vol = Math.floor(Number(a.vol)); if(!(vol >= 0 && vol <= 100)) vol = 100;
-      return { k: a.k, id: id, loop: a.loop ? 1 : 0, vol: vol };
+      return { k: a.k, id: id, loop: a.loop ? 1 : 0, vol: vol, hp: a.hp ? 1 : 0 };
     }
     if(a.k === "tab"){
       return /^[a-z0-9_]{2,20}$/.test(String(a.key || "")) ? { k: "tab", key: String(a.key) } : null;
@@ -136,8 +137,8 @@ window.CardScan = (function(){
       var a = normCombo(x);
       if(!a) return;
       if(a.k === "timer") arr.push(["t", a.sec, a.name]);
-      else if(a.k === "track") arr.push(["m", a.id, a.loop, a.vol]);
-      else if(a.k === "folder") arr.push(["f", a.id, a.loop, a.vol]);
+      else if(a.k === "track"){ var tm = ["m", a.id, a.loop, a.vol]; if(a.hp) tm.push(1); arr.push(tm); }
+      else if(a.k === "folder"){ var fm = ["f", a.id, a.loop, a.vol]; if(a.hp) fm.push(1); arr.push(fm); }
       else if(a.k === "tab") arr.push(["o", a.key]);
       else if(a.k === "bm") arr.push(["b", a.hash, a.bid]);
       else if(a.k === "note") arr.push(["n", a.id]);
@@ -156,8 +157,8 @@ window.CardScan = (function(){
       if(!Array.isArray(r)) return null;
       var a = null;
       if(r[0] === "t") a = { k: "timer", sec: r[1], name: r[2] };
-      else if(r[0] === "m") a = { k: "track", id: r[1], loop: r[2], vol: r[3] };
-      else if(r[0] === "f") a = { k: "folder", id: r[1], loop: r[2], vol: r[3] };
+      else if(r[0] === "m") a = { k: "track", id: r[1], loop: r[2], vol: r[3], hp: r[4] };
+      else if(r[0] === "f") a = { k: "folder", id: r[1], loop: r[2], vol: r[3], hp: r[4] };
       else if(r[0] === "o") a = { k: "tab", key: r[1] };
       else if(r[0] === "b") a = { k: "bm", hash: r[1], bid: r[2] };
       else if(r[0] === "n") a = { k: "note", id: r[1] };
@@ -265,11 +266,11 @@ window.CardScan = (function(){
     // ---------- удержание и индикатор ----------
     // Цвет — как у значка ярлыка сканера (ScanShortcut.kt, 0xFF7F00FF). Стили заданы атрибутами, а не классами: индикатор не зависит от CSS.
     var PURPLE = "#7F00FF";
-    var HOLD_MIN_MS = 250;      // код в центре зоны
-    var HOLD_EDGE_MS = 600;     // код у края зоны
-    var HOLD_SIDE_EFFECT_MS = 500; // таймер и «Создавать задачу»: запуск/создание не откатить сканом по ошибке, поэтому не быстрее
+    var HOLD_MIN_MS = 125;      // код в центре зоны
+    var HOLD_EDGE_MS = 300;     // код у края зоны
+    var HOLD_SIDE_EFFECT_MS = 250; // таймер и «Создавать задачу»: запуск/создание не откатить сканом по ошибке, поэтому не быстрее
     var MOVE_TOL = 0.2;         // уход центра кода от якоря, после которого удержание на время не копится (доля стороны зоны); дрожь руки укладывается в допуск
-    var EXCEED_PENALTY_MS = 150; // штраф счёту за каждый уход кода от якоря
+    var EXCEED_PENALTY_MS = 75;  // штраф счёту за каждый уход кода от якоря
     var GRACE_MS = 400;         // кадры без кода (смаз при дрожании руки) короче этого срока удержание не трогают
     var SWITCH_FRAMES = 3;      // другой текст кода должен продержаться столько кадров подряд, чтобы счёт пошёл заново (разовый сбой чтения не в счёт)
     var BIG_W = 960;            // ширина крупного кадра для разбора плотных кодов (обычный кадр — 480)

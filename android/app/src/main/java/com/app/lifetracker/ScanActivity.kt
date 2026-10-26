@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 6.0 (26.10) — мост ScanBridge: musicHeadphones (подключены ли наушники; комбо с галочкой «Наушники обязательны»).
 // Версия: 5.0 (26.10) — мост ScanBridge: musicPlayTrack / musicPlayFolder (QR «Комбинированный» из окна ярлыка включает трек или папку через MusicPlayer; приложение не открывается).
 // Версия: 4.0 (24.10) — мост ScanBridge: setAlarm / cancelAlarm / getAlarms (скан кода будильника в окне ярлыка заводит будильник CardAlarms).
 // Версия: 3.0 (24.10) — мост ScanBridge: startHiddenTimer (скан кода скрытого таймера из окна ярлыка: без острова и уведомления «идёт»).
@@ -325,6 +326,10 @@ class ScanActivity : ComponentActivity() {
             if (trackId.isNullOrEmpty()) return false
             return MusicPlayer.playSingle(applicationContext, trackId, loop, volumePct)
         }
+
+        /** Подключены ли наушники (проводные, USB, Bluetooth). */
+        @JavascriptInterface
+        fun musicHeadphones(): Boolean = MusicPlayer.headphonesConnected(applicationContext)
 
         /** QR «Комбинированный»: играть папку по id (пустой — вся выбранная папка). */
         @JavascriptInterface

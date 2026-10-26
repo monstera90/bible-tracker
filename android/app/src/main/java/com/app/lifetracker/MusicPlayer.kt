@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 3.0 (26.10) — структурная правка: `playSingle`/`playFolder` ставят громкость самого телефона (`setPhoneVolume`: поток STREAM_MUSIC, процент от максимума), громкость плеера остаётся 1.0; `headphonesConnected` — подключены ли наушники (проводные, USB, Bluetooth, слуховой аппарат).
 // Версия: 2.0 (26.10) — структурная правка (QR «Комбинированный»): `playSingle` (один трек по id, без очереди папки) и `playFolder` (все треки папки по id), оба с зацикливанием (`loopTrack`/`loopQueue`) и начальной громкостью (`baseVolume`); `trackEnded` повторяет трек или очередь, если включено; «следующий» на последнем треке зацикленной папки идёт в начало; громкость после ослабления при звонке/навигаторе возвращается к `baseVolume`, а не к 1. Обычный `play` (вкладка «Музыка») сбрасывает зацикливание и громкость. Откат: MusicPlayer.kt 1.1.
 // Версия: 1.1 (25.10) — остров не появлялся, если трек запущен из самого приложения (система прячет остров, пока приложение на экране, а перепоста при сворачивании не было): `onAppBackground` (зовёт MainActivity.onPause) перепоставляет уведомление и раскрывает остров, если раскрытие пришлось на время, когда приложение было на экране (`floatDeferred`). Откат: MusicPlayer.kt 1.0.
 // Версия: 1.0 (25.10)
@@ -142,14 +143,45 @@ object MusicPlayer {
         return true
     }
 
-    /** Из потока моста: играет ОДИН трек [trackIdWanted] (id документа), без остальных файлов папки; [loop] — повторять его, пока не закроют. [volumePct] 0..100 — громкость плеера (от громкости телефона). */
+    /** Громкость самого телефона (поток музыки), [pct] 0..100 от максимума; при pct > 0 не ниже первой ступени. */
+    private fun setPhoneVolume(ctx: Context, pct: Int) {
+        try {
+            val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val p = pct.coerceIn(0, 100)
+            var idx = Math.round(max * p / 100f)
+            if (p > 0 && idx < 1) idx = 1
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, idx, 0)
+        } catch (e: Exception) {
+        }
+    }
+
+    /** Подключены ли наушники: проводные, USB, Bluetooth (A2DP/SCO/LE), слуховой аппарат. Встроенный динамик не считается. */
+    @Suppress("DEPRECATION")
+    fun headphonesConnected(ctx: Context): Boolean {
+        return try {
+            val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (Build.VERSION.SDK_INT >= 23) {
+                // 3 проводная гарнитура, 4 проводные наушники, 7 Bluetooth SCO, 8 Bluetooth A2DP, 22 USB-гарнитура, 23 слуховой аппарат, 26 BLE-гарнитура, 27 BLE-динамик
+                val types = intArrayOf(3, 4, 7, 8, 22, 23, 26, 27)
+                am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { d -> types.contains(d.type) }
+            } else {
+                am.isWiredHeadsetOn || am.isBluetoothA2dpOn
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /** Из потока моста: играет ОДИН трек [trackIdWanted] (id документа), без остальных файлов папки; [loop] — повторять его, пока не закроют. [volumePct] 0..100 — громкость самого телефона (процент от максимума). */
     fun playSingle(ctx: Context, trackIdWanted: String, loop: Boolean, volumePct: Int): Boolean {
         init(ctx)
         val tree = MusicLibrary.treeUri(ctx) ?: return false
         val name = MusicLibrary.displayName(ctx, trackIdWanted) ?: return false
         if (!MusicLibrary.isAudio(name)) return false
         val one = listOf(Track(trackIdWanted, name, MusicLibrary.docUri(tree, trackIdWanted)))
-        val vol = volumePct.coerceIn(0, 100) / 100f
+        setPhoneVolume(ctx, volumePct)
+        val vol = 1f
         main.post {
             queue = one
             folderTitle = ""
@@ -176,7 +208,8 @@ object MusicPlayer {
         }
         if (tracks.isEmpty()) return false
         val folderName = MusicLibrary.displayName(ctx, folderId) ?: ""
-        val vol = volumePct.coerceIn(0, 100) / 100f
+        setPhoneVolume(ctx, volumePct)
+        val vol = 1f
         main.post {
             queue = tracks
             folderTitle = folderName
