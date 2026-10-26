@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 6.0 (26.10) — структурная правка: учёт времени таймеров для «Трекера экранов» (`elapsedMs`, `ScreenTimeStats.TIMERS` в `start`/`cancel`/`fire`).
 // Версия: 5.7 (24.10) — скрытый таймер (`Timer.hidden`, `start(..., hidden)`): идёт и срабатывает как обычный, но без уведомления «идёт», острова, плашки в приложении, службы тика и этапов цвета; в конце — обычные вибрация и «Таймер закончился»; `listJson` отдаёт `hidden`. Откат: CardTimers.kt 5.6.
 // Версия: 5.6 (24.10) — этапы цвета значка: остался один, красный за 2 минуты до конца (`scheduleStages`); жёлтый убран, но его будильник от прежней версии снимается (`LEGACY_STAGE_YELLOW`). Откат: CardTimers.kt 5.5.
 // Версия: 5.5 (22.10) — эксперимент с чёрным фоном уведомления (`setColorized`) откачен: HyperOS не меняет цвет карточки. Прежнее: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
@@ -124,6 +125,12 @@ object CardTimers {
         arr.toString()
     }
 
+    /** Сколько таймер уже насчитал (без времени на паузе); у дошедшего до конца — всё заданное время. */
+    private fun elapsedMs(t: Timer, now: Long): Long {
+        val left = if (t.running) (t.endAt - now) else t.remainingMs
+        return (t.durationMs - left.coerceAtLeast(0L)).coerceIn(0L, t.durationMs)
+    }
+
     // ---------- действия ----------
     fun start(ctx: Context, id: String, title: String, seconds: Long, hidden: Boolean = false): Boolean = synchronized(LOCK) {
         if (!ID_RE.matches(id) || seconds < 1) return false
@@ -131,6 +138,7 @@ object CardTimers {
         val now = System.currentTimeMillis()
         val t = Timer(id, title.take(200), sec * 1000, true, now + sec * 1000, 0L, hidden)
         val map = load(ctx)
+        map[id]?.let { ScreenTimeStats.add(ctx, ScreenTimeStats.TIMERS, elapsedMs(it, now)) } // перезапуск: прежний отсчёт тоже считается
         map[id] = t // тот же id — заново
         save(ctx, map)
         scheduleAlarm(ctx, t)
@@ -166,7 +174,7 @@ object CardTimers {
 
     fun cancel(ctx: Context, id: String) = synchronized(LOCK) {
         val map = load(ctx)
-        map.remove(id)
+        map.remove(id)?.let { ScreenTimeStats.add(ctx, ScreenTimeStats.TIMERS, elapsedMs(it, System.currentTimeMillis())) }
         save(ctx, map)
         cancelAlarm(ctx, id)
         cancelRunning(ctx, id)
@@ -197,6 +205,7 @@ object CardTimers {
             return@synchronized
         }
         map.remove(id)
+        ScreenTimeStats.add(ctx, ScreenTimeStats.TIMERS, t.durationMs) // сработал: насчитал всё заданное время
         save(ctx, map)
         cancelRunning(ctx, id)
         vibrate(ctx)

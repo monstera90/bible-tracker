@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 9.0 (26.10) — мост версии 16: `getScreenTimeTotals` (счётчики музыки и таймеров для «Трекера экранов», `ScreenTimeStats`).
 // Версия: 8.0 (26.10) — мост версии 15: `musicHeadphones` (подключены ли наушники; для галочки «Наушники обязательны» в QR «Комбинированный»); `musicPlayTrack`/`musicPlayFolder` ставят громкость телефона.
 // Версия: 7.0 (26.10) — мост версии 14: `musicPlayTrack` / `musicPlayFolder` (QR «Комбинированный»: трек или папка по id с зацикливанием и начальной громкостью).
 // Версия: 6.0 (25.10) — мост версии 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
@@ -36,11 +37,12 @@ class NativeBridge(private val activity: MainActivity) {
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
+         * 16: `getScreenTimeTotals()` — накопленные устройством миллисекунды музыки и таймеров для вкладки «Трекер экранов».
          * 15: `musicHeadphones()` — подключены ли наушники; `volumePct` в `musicPlayTrack`/`musicPlayFolder` теперь громкость самого телефона.
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 15
+        const val BRIDGE_VERSION = 16
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -577,6 +579,13 @@ class NativeBridge(private val activity: MainActivity) {
     fun musicClose() {
         if (!activity.pageTrusted) return
         MusicPlayer.close()
+    }
+
+    /** JSON {"music": мс, "timers": мс} — сколько этот телефон проиграл музыки и насчитали таймеры карточек (вкладка «Трекер экранов»). */
+    @JavascriptInterface
+    fun getScreenTimeTotals(): String {
+        if (!activity.pageTrusted) return "{}"
+        return ScreenTimeStats.totalsJson(activity.applicationContext)
     }
 
     /** JSON: {"active","playing","title","folder","index","count","id","error"}. */

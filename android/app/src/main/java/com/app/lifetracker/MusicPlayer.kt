@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.0 (26.10) — структурная правка: учёт времени воспроизведения для «Трекера экранов» (`playing` копит отрезки в `ScreenTimeStats.MUSIC`, `livePlayingMs`).
 // Версия: 3.0 (26.10) — структурная правка: `playSingle`/`playFolder` ставят громкость самого телефона (`setPhoneVolume`: поток STREAM_MUSIC, процент от максимума), громкость плеера остаётся 1.0; `headphonesConnected` — подключены ли наушники (проводные, USB, Bluetooth, слуховой аппарат).
 // Версия: 2.0 (26.10) — структурная правка (QR «Комбинированный»): `playSingle` (один трек по id, без очереди папки) и `playFolder` (все треки папки по id), оба с зацикливанием (`loopTrack`/`loopQueue`) и начальной громкостью (`baseVolume`); `trackEnded` повторяет трек или очередь, если включено; «следующий» на последнем треке зацикленной папки идёт в начало; громкость после ослабления при звонке/навигаторе возвращается к `baseVolume`, а не к 1. Обычный `play` (вкладка «Музыка») сбрасывает зацикливание и громкость. Откат: MusicPlayer.kt 1.1.
 // Версия: 1.1 (25.10) — остров не появлялся, если трек запущен из самого приложения (система прячет остров, пока приложение на экране, а перепоста при сворачивании не было): `onAppBackground` (зовёт MainActivity.onPause) перепоставляет уведомление и раскрывает остров, если раскрытие пришлось на время, когда приложение было на экране (`floatDeferred`). Откат: MusicPlayer.kt 1.0.
@@ -14,6 +15,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import org.json.JSONObject
 
 /**
@@ -32,9 +34,26 @@ object MusicPlayer {
     var active = false
         private set
 
+    // «Трекер экранов»: каждый отрезок, пока playing == true, копится в ScreenTimeStats.MUSIC (меняется только в главном потоке)
+    private var playSince = 0L
+
     @Volatile
     var playing = false
-        private set
+        private set(value) {
+            if (field != value) {
+                val now = SystemClock.elapsedRealtime()
+                if (value) {
+                    playSince = now
+                } else {
+                    val ctx = app
+                    if (ctx != null) ScreenTimeStats.add(ctx, ScreenTimeStats.MUSIC, now - playSince)
+                }
+            }
+            field = value
+        }
+
+    /** Сколько длится идущий сейчас отрезок воспроизведения (для итога трекера), мс; 0, если не играет. */
+    fun livePlayingMs(): Long = if (playing) (SystemClock.elapsedRealtime() - playSince).coerceAtLeast(0L) else 0L
 
     @Volatile
     var title = ""

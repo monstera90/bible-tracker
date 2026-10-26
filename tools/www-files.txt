@@ -53,6 +53,7 @@ codemirror.bundle.js
 search.js
 notifications.js
 eventlog.js
+screentime.js
 flibusta.js
 
 DejaVuSans.ttf

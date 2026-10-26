@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 85.0 (26.10) — структурная правка: вкладка `screentime` «Трекер экранов» (`screentime.js`) — самый верхний язычок стека набора 1, над «События»: `SCREENTIME_TAB_KEY`/`SCREENTIME_TAB_BTN_ID`, `renderSettingsTabScreenTime`, `ScreenTime.init` (счётчики в `state["__screenTime:<deviceId>"]`), вызовы `ScreenTime.setAppActive` в `__ltOnAppPause`/`__ltOnAppResume`.
    Версия: 84.0 (26.10) — структурная правка: «Комбинированный» (itemcards.js 28.0): `getComboTabList`, `openComboTab`, `getComboBookmarks`, `openComboBookmark`, `addComboTask` (задача по id `c.qid`: не создаётся, пока невыполненная с таким id есть на любой вкладке; выполненная — архив — создаётся снова); деп-ы у `initItemCardsModule`; вход оболочки `combo` не переключает вкладку. Откат: my.js 83.1.
    Версия: 83.1 (25.10) — очередь «Создавать задачу» из окна ярлыка выполняется молча при запуске и в `__ltOnAppResume` (`ItemCards.drainPendingTasks(true)`; itemcards.js 27.0) — окно ярлыка приложение больше не открывает.
    Версия: 83.0 (25.10) — структурная правка: мероприятия календаря в синхронизации как задачи (раздел «КАЛЕНДАРЬ: СИНХРОНИЗАЦИЯ МЕРОПРИЯТИЙ»): личные — `state["ev:<id>"]` (едут с личными задачами), общие — группа `/groups/<id>/events` (binding `events`, едут с общими задачами, доступ тот же). Откат: my.js 82.0.
@@ -1887,6 +1888,10 @@
   // показывается по тем же условиям, что и вкладки задач / «События».
   var CALENDAR_TAB_KEY = "calendar";
   var CALENDAR_TAB_BTN_ID = "settingsTabCalendarBtn";
+  // Трекер экранов (screentime.js): САМЫЙ верхний язычок стека набора 1, над «События» (колокольчиком). Не вкладка задач,
+  // показывается по тем же условиям, что и вкладки задач / «События» / «Календарь».
+  var SCREENTIME_TAB_KEY = "screentime";
+  var SCREENTIME_TAB_BTN_ID = "settingsTabScreenTimeBtn";
   var TASK_TAB_TITLES = {
     worktasks: "Work tasks", red: "Red", inbox: "Inbox", next: "Next", projects: "Projects",
     waiting: "Waiting", read: "Read", council: "Council", someday: "Someday",
@@ -4689,6 +4694,7 @@
   // сворачивании могут не успеть сработать, и автозакладка при сворачивании не ставилась).
   window.__ltOnAppPause = function(){
     if(window.Debug) window.Debug.log("__ltOnAppPause");
+    try{ if(window.ScreenTime) window.ScreenTime.setAppActive(false); }catch(e){}
     flushPendingSyncNow();
     // заметка: запомнить прокрутку и сохранить курсор ДО паузы WebView (visibilitychange на Android 16 может не прийти)
     try{ if(window.MdEditor && MdEditor.onAppPause) MdEditor.onAppPause(); }catch(e){}
@@ -4698,6 +4704,7 @@
   // APK: оболочка зовёт это из Activity.onResume — заметка возвращает прокрутку/перерисовку так же, как на visibilitychange.
   window.__ltOnAppResume = function(){
     if(window.Debug) window.Debug.log("__ltOnAppResume");
+    try{ if(window.ScreenTime) window.ScreenTime.setAppActive(true); }catch(e){}
     try{ if(window.MdEditor && MdEditor.onAppResume) MdEditor.onAppResume(); }catch(e){}
     // задачи из окна «Создать новую задачу» (ярлык), созданные пока приложение было закрыто/свёрнуто
     try{ pullNativeQuickTasks(); }catch(e){ if(window.Debug) window.Debug.log("Быстрая задача: " + (e && e.message ? e.message : e)); }
@@ -7599,6 +7606,26 @@
     getGroupWatch: getGroupWatchConfig
   });
   try{ if(window.EventLog) window.EventLog.start(); }catch(e){}
+  // Трекер экранов (screentime.js): счётчики по устройствам в state (`__screenTime:<deviceId>`), итог — сумма по всем
+  try{
+    if(window.ScreenTime) window.ScreenTime.init({
+      getState: function(){ return state; },
+      saveLocalState: saveLocalState,
+      scheduleCloudPush: scheduleCloudPush,
+      getDeviceId: getDeviceId,
+      getContext: function(){
+        var c = document.getElementById("settingsTabContent");
+        return {
+          open: !!(settingsModalOverlay && settingsModalOverlay.classList.contains("open")),
+          tab: currentSettingsTab,
+          taskTabs: Object.keys(TASK_TAB_IDS),
+          calendarKey: CALENDAR_TAB_KEY,
+          reader: !!(c && c.querySelector(".book-reader-tab")),
+          qrForm: !!(c && c.querySelector("#itemCardForm"))
+        };
+      }
+    });
+  }catch(e){ if(window.Debug) window.Debug.log("ScreenTime.init: " + (e && e.message ? e.message : e)); }
 
   // ===================== FLIBUSTA (flibusta.js) =====================
   var Flibusta = window.initFlibustaModule({
@@ -10387,6 +10414,11 @@
       if(bottomAltMode){ calBtnV.style.display = "flex"; setTabDecor(calBtnV, true); }
       else { setTabDecor(calBtnV, false); calBtnV.style.display = showTasks ? "flex" : "none"; }
     }
+    var stBtnV = document.getElementById(SCREENTIME_TAB_BTN_ID);
+    if(stBtnV){
+      if(bottomAltMode){ stBtnV.style.display = "flex"; setTabDecor(stBtnV, true); }
+      else { setTabDecor(stBtnV, false); stBtnV.style.display = showTasks ? "flex" : "none"; }
+    }
     // меняет количество видимых язычков в #settingsTabs — пересчитываем заплатку (см.
     // updateSettingsCornerPatchHeight выше); единственный вызывающий.
     updateSettingsCornerPatchHeight();
@@ -10402,6 +10434,14 @@
     if(!container) return;
     if(window.EventLog) window.EventLog.renderInto(container);
     else container.innerHTML = '<div class="mood-diagram-empty">Журнал событий недоступен</div>';
+  }
+
+  // Вкладка «Трекер экранов»: весь экран рисует screentime.js
+  function renderSettingsTabScreenTime(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    if(window.ScreenTime) window.ScreenTime.render();
+    else container.innerHTML = '<div class="mood-diagram-empty">Трекер экранов недоступен</div>';
   }
 
   // Вкладка «Календарь»: весь экран (список, форма, кнопки «+» и «домик») рисует calendar.js
@@ -10843,6 +10883,8 @@
     if(evTabBtn) evTabBtn.classList.toggle("active", tab === EVENTS_TAB_KEY);
     var calTabBtn = document.getElementById(CALENDAR_TAB_BTN_ID);
     if(calTabBtn) calTabBtn.classList.toggle("active", tab === CALENDAR_TAB_KEY);
+    var stTabBtn = document.getElementById(SCREENTIME_TAB_BTN_ID);
+    if(stTabBtn) stTabBtn.classList.toggle("active", tab === SCREENTIME_TAB_KEY);
     Object.keys(EXTRA_TAB_IDS).forEach(function(key){
       var btn = document.getElementById(EXTRA_TAB_IDS[key]);
       if(btn) btn.classList.toggle("active", tab === key);
@@ -10891,6 +10933,7 @@
     else if(tab === "projects" && activeProjectPickerId) openTaskNextPicker(activeProjectPickerId, "projects");
     else if(tab === EVENTS_TAB_KEY) renderSettingsTabEvents();
     else if(tab === CALENDAR_TAB_KEY) renderSettingsTabCalendar();
+    else if(tab === SCREENTIME_TAB_KEY) renderSettingsTabScreenTime();
     else if(TASK_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabTask(tab);
     else if(BOTTOM_ALT_TAB_IDS && BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabBottomAlt(tab);
     else if(EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabExtra(tab);
@@ -17341,7 +17384,7 @@
   //   переключаются отдельными переменными gearBtn/yearBtn/moodTabBtn, а не через EXTRA_TAB_IDS —
   //   поэтому единственный полный список из всех 5 нижних вкладок первого набора собран здесь
   //   вручную, а не через Object.keys(EXTRA_TAB_IDS), в котором только 2 из 5) идёт слева направо.
-  var SETTINGS_SIDE_ORDER_1 = [CALENDAR_TAB_KEY].concat(Object.keys(TASK_TAB_IDS)).concat([EVENTS_TAB_KEY]); // calendar, worktasks..archive, events (снизу вверх)
+  var SETTINGS_SIDE_ORDER_1 = [CALENDAR_TAB_KEY].concat(Object.keys(TASK_TAB_IDS)).concat([EVENTS_TAB_KEY, SCREENTIME_TAB_KEY]); // calendar, worktasks..archive, events, screentime (снизу вверх)
   var SETTINGS_BOTTOM_ORDER_1 = ["gear","year","mood"].concat(Object.keys(EXTRA_TAB_IDS)); // gear,year,mood,extra2,extra3
   var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_4, set2s_11, set2s_5..set2s_10 (порядок = порядок вкладок снизу вверх)
   var SETTINGS_BOTTOM_ORDER_2 = ["gear"].concat(Object.keys(SET2_EXTRA_TAB_IDS));
@@ -17468,7 +17511,7 @@
     // боковые вкладки набора 1 (red..archive) скрыты, пока не включена галочка "Показать все мои
     // задачи" — переходить на скрытую вкладку не нужно, вместо неё открываем вкладку настроек (тот
     // же принцип, что и при обычном открытии блокнота, см. openSettingsModal).
-    if(settingsActiveTabSet === 1 && (TASK_TAB_IDS.hasOwnProperty(target) || target === EVENTS_TAB_KEY || target === CALENDAR_TAB_KEY) && !getShowAllTasksEnabled()){
+    if(settingsActiveTabSet === 1 && (TASK_TAB_IDS.hasOwnProperty(target) || target === EVENTS_TAB_KEY || target === CALENDAR_TAB_KEY || target === SCREENTIME_TAB_KEY) && !getShowAllTasksEnabled()){
       target = "gear";
     }
     // скрытую пользователем вкладку не открываем: берём первую не скрытую того же набора; у набора 2 не осталось ни одной —
@@ -17499,7 +17542,7 @@
     try{ savedSet = (localStorage.getItem(SETTINGS_LAST_SET_KEY) === "2") ? 2 : 1; }catch(e){}
     if(savedSet === 2 && !isSet2Unlocked()){ savedSet = 1; savedTab = null; }
     if(savedSet === 2 && savedTab === "gear") savedTab = null; // колесико набора 2 не открывается как вкладка
-    if(savedTab && (TASK_TAB_IDS.hasOwnProperty(savedTab) || savedTab === EVENTS_TAB_KEY || savedTab === CALENDAR_TAB_KEY) && !getShowAllTasksEnabled()){
+    if(savedTab && (TASK_TAB_IDS.hasOwnProperty(savedTab) || savedTab === EVENTS_TAB_KEY || savedTab === CALENDAR_TAB_KEY || savedTab === SCREENTIME_TAB_KEY) && !getShowAllTasksEnabled()){
       savedTab = null;
     }
     if(savedTab){
@@ -18034,6 +18077,8 @@
     if(evBtn) evBtn.addEventListener("click", function(){ switchSettingsTabOnClick(EVENTS_TAB_KEY); });
     var calBtn = document.getElementById(CALENDAR_TAB_BTN_ID);
     if(calBtn) calBtn.addEventListener("click", function(){ switchSettingsTabOnClick(CALENDAR_TAB_KEY); });
+    var stBtn = document.getElementById(SCREENTIME_TAB_BTN_ID);
+    if(stBtn) stBtn.addEventListener("click", function(){ switchSettingsTabOnClick(SCREENTIME_TAB_KEY); });
   })();
   Object.keys(EXTRA_TAB_IDS).forEach(function(key){
     var btn = document.getElementById(EXTRA_TAB_IDS[key]);
@@ -18290,7 +18335,7 @@
   }
   // скрыта ли вкладка с ключом tab (ключи как в switchSettingsTab: "inbox", "year", "set2s_3", "set2b_1" …)
   function isSettingsTabUserHidden(tab){
-    var id = TASK_TAB_IDS[tab] || (tab === EVENTS_TAB_KEY ? EVENTS_TAB_BTN_ID : null) || (tab === CALENDAR_TAB_KEY ? CALENDAR_TAB_BTN_ID : null) || EXTRA_TAB_IDS[tab] || SET2_TAB_IDS[tab] || SET2_EXTRA_TAB_IDS[tab] ||
+    var id = TASK_TAB_IDS[tab] || (tab === EVENTS_TAB_KEY ? EVENTS_TAB_BTN_ID : null) || (tab === CALENDAR_TAB_KEY ? CALENDAR_TAB_BTN_ID : null) || (tab === SCREENTIME_TAB_KEY ? SCREENTIME_TAB_BTN_ID : null) || EXTRA_TAB_IDS[tab] || SET2_TAB_IDS[tab] || SET2_EXTRA_TAB_IDS[tab] ||
       (tab === "year" ? "settingsTabYearBtn" : (tab === "mood" ? "settingsTabMoodBtn" : null));
     var btn = id ? document.getElementById(id) : null;
     return !!(btn && btn.classList.contains("settings-tab-user-hidden"));
@@ -18302,7 +18347,7 @@
       for(var i = 0; i < orders[o].length; i++){
         var key = orders[o][i];
         if(key === "gear") continue;
-        if(set === 1 && (TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY || key === CALENDAR_TAB_KEY) && !getShowAllTasksEnabled()) continue;
+        if(set === 1 && (TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY || key === CALENDAR_TAB_KEY || key === SCREENTIME_TAB_KEY) && !getShowAllTasksEnabled()) continue;
         if(!isSettingsTabUserHidden(key)) return key;
       }
     }
@@ -20978,6 +21023,7 @@
     TASK_MOVABLE_TABS.forEach(function(k){ add(k, taskQrTabTitle(k), TASK_MOVE_ICON_SVG(k)); });
     add("archive", "Архив", btnSvg(TASK_TAB_IDS.archive));
     add(EVENTS_TAB_KEY, "События", btnSvg(EVENTS_TAB_BTN_ID));
+    add(SCREENTIME_TAB_KEY, "Трекер экранов", btnSvg(SCREENTIME_TAB_BTN_ID));
     add("year", "Карта дней года", btnSvg("settingsTabYearBtn"));
     add("mood", "Диаграмма настроения", btnSvg("settingsTabMoodBtn"));
     var fallback = {set2s_8: "ИПКД"};
@@ -20992,7 +21038,7 @@
   function openComboTab(key){
     key = String(key || "");
     if(SET2_TAB_IDS.hasOwnProperty(key)){ openSettingsTabDirect(key); return true; }
-    var set1 = TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY || key === CALENDAR_TAB_KEY || key === "year" || key === "mood";
+    var set1 = TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY || key === CALENDAR_TAB_KEY || key === SCREENTIME_TAB_KEY || key === "year" || key === "mood";
     if(!set1) return false;
     var alreadyOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay && settingsModalOverlay.classList.contains("open");
     if(!alreadyOpen) openSettingsModal();
