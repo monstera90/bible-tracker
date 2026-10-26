@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 4.0 (26.10) — структурная правка: `decodeCrop` — если на целом кадре код не найден (рядом на листе соседний код: его уголки-«глаза» сбивают jsQR, как на лист с несколькими наклейками), кадр разбирается по квадратным вырезкам (по центру, со сдвигом влево и вправо; `CROPS`), удачная вырезка запоминается (`cropSticky`) и пробуется первой. Откат: cardscan.js 3.1.
    Версия: 3.1 (26.10) — удержание кода вдвое короче (`HOLD_MIN_MS` 125, `HOLD_EDGE_MS` 300, `HOLD_SIDE_EFFECT_MS` 250, `EXCEED_PENALTY_MS` 75); в действиях «музыка» комбо-кода появилось поле `hp` («наушники обязательны», пятый элемент `["m"|"f", id, цикл, громкость, 1]`, при 0 не пишется). Откат: cardscan.js 3.0.
    Версия: 3.0 (26.10) — структурная правка: QR «Комбинированный» `lt://v1/combo/<JSON>` → `{kind:"combo", acts:[…]}` (`parseCombo`, `comboCode`, `comboCategory`, `COMBO_MAX`): до 5 действий, по одному из категории (таймер / музыка / «открыть» / задача / событие в журнал), JSON из коротких массивов (`["t",сек,название]`, `["m",id,цикл,громкость]`, `["f",…]`, `["o",ключ вкладки]`, `["b",хеш книги,id закладки]`, `["n",id заметки]`, `["k",id задачи,вкладка,тег,текст]`, `["e",текст]`); такой код — с побочным эффектом, удержание не меньше 0,5 с. Откат: cardscan.js 2.7.
    Версия: 2.7 (25.10) — плотные коды (QR «Создавать задачу» с длинным текстом/тегом: кириллица — 2 байта на знак, модулей до 57×57 против 25×25 у таймера) читались хуже: кадр для разбора всегда сжимался до 480 px, и модуль кода становился ~2 px. Теперь камера просится в 1280×720 (`ideal`), а при ненайденном коде разбор чередует кадр 480 px (быстро) и 960 px (для мелких модулей); найденный масштаб держится, пока код виден (`useBig`, `BIG_W`). Удержание (0,25–0,6 с, у задачи/таймера не меньше 0,5 с) не менялось. Откат: cardscan.js 2.6.
@@ -294,7 +295,7 @@ window.CardScan = (function(){
     if(wrap) wrap.appendChild(svg);
 
     var hold = { text: null, ax: 0, ay: 0 }; // что сейчас держим и «якорь» — где центр кода был, когда он последний раз стоял
-    var useBig = false, held = 0, disp = 0, lastT = 0, lastSeen = 0, sp = null, lastViewBox = "", pendText = null, pendCount = 0;
+    var useBig = false, cropSticky = 0, cropRot = 0, held = 0, disp = 0, lastT = 0, lastSeen = 0, sp = null, lastViewBox = "", pendText = null, pendCount = 0;
 
     function towardPt(p, q, r){
       var dx = q.x - p.x, dy = q.y - p.y, len = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -429,6 +430,21 @@ window.CardScan = (function(){
       showError("Не удалось загрузить модуль сканирования.");
     });
 
+    // вырезки кадра для случая, когда рядом с нужным кодом виден соседний: квадрат по центру и со сдвигом влево/вправо (доли меньшей стороны кадра)
+    var CROPS = [{ l: 0.7, dx: 0 }, { l: 0.75, dx: -0.17 }, { l: 0.75, dx: 0.17 }];
+    function decodeCrop(ctx, w, h, idx){
+      var S = Math.min(w, h), c = CROPS[idx - 1];
+      var L = Math.max(16, Math.round(c.l * S));
+      var x0 = Math.max(0, Math.min(w - L, Math.round(w / 2 + c.dx * S - L / 2)));
+      var y0 = Math.max(0, Math.min(h - L, Math.round(h / 2 - L / 2)));
+      var d = ctx.getImageData(x0, y0, L, L);
+      var r = window.jsQR(d.data, L, L, { inversionAttempts: "dontInvert" });
+      if(!(r && r.data && r.location)) return null;
+      var o = {}, names = ["topLeftCorner", "topRightCorner", "bottomRightCorner", "bottomLeftCorner"];
+      for(var i = 0; i < 4; i++) o[names[i]] = { x: r.location[names[i]].x + x0, y: r.location[names[i]].y + y0 };
+      return { data: r.data, location: o };
+    }
+
     function tick(){
       if(closed) return;
       var now = Date.now();
@@ -444,8 +460,18 @@ window.CardScan = (function(){
         if(canvas.width !== w || canvas.height !== h){ canvas.width = w; canvas.height = h; }
         var ctx = canvas.getContext("2d");
         ctx.drawImage(video, 0, 0, w, h);
-        var data = ctx.getImageData(0, 0, w, h);
-        var result = window.jsQR(data.data, data.width, data.height, { inversionAttempts: "dontInvert" });
+        var result = null;
+        if(cropSticky){ result = decodeCrop(ctx, w, h, cropSticky); if(!result) cropSticky = 0; } // вырезка, на которой код нашёлся в прошлый раз
+        if(!result){
+          var data = ctx.getImageData(0, 0, w, h);
+          result = window.jsQR(data.data, data.width, data.height, { inversionAttempts: "dontInvert" });
+          if(!(result && result.data && result.location)){
+            // целый кадр не дал кода: соседний код на листе сбивает поиск — пробуем по одной вырезке за кадр, по кругу
+            cropRot = cropRot % CROPS.length + 1;
+            result = decodeCrop(ctx, w, h, cropRot);
+            if(result) cropSticky = cropRot;
+          }
+        }
         if(!(result && result.data && result.location)) useBig = !useBig; // не нашли — в следующий раз другой масштаб
         var Wd = wrap ? wrap.clientWidth : 0, Hd = wrap ? wrap.clientHeight : 0;
         if(Wd > 0 && Hd > 0){
