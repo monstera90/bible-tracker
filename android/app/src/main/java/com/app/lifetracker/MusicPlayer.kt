@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.0 (26.10) — структурная правка (QR «Комбинированный»): `playSingle` (один трек по id, без очереди папки) и `playFolder` (все треки папки по id), оба с зацикливанием (`loopTrack`/`loopQueue`) и начальной громкостью (`baseVolume`); `trackEnded` повторяет трек или очередь, если включено; «следующий» на последнем треке зацикленной папки идёт в начало; громкость после ослабления при звонке/навигаторе возвращается к `baseVolume`, а не к 1. Обычный `play` (вкладка «Музыка») сбрасывает зацикливание и громкость. Откат: MusicPlayer.kt 1.1.
 // Версия: 1.1 (25.10) — остров не появлялся, если трек запущен из самого приложения (система прячет остров, пока приложение на экране, а перепоста при сворачивании не было): `onAppBackground` (зовёт MainActivity.onPause) перепоставляет уведомление и раскрывает остров, если раскрытие пришлось на время, когда приложение было на экране (`floatDeferred`). Откат: MusicPlayer.kt 1.0.
 // Версия: 1.0 (25.10)
 
@@ -61,6 +62,16 @@ object MusicPlayer {
     private var floatDeferred = false
 
     private var queue: List<Track> = emptyList()
+
+    // зацикливание и начальная громкость от QR «Комбинированный»; обычный play() со вкладки «Музыка» их сбрасывает
+    @Volatile
+    private var loopTrack = false
+
+    @Volatile
+    private var loopQueue = false
+
+    @Volatile
+    private var baseVolume = 1f
     private var mp: MediaPlayer? = null
     private var mpPrepared = false
     private var alac: AlacEngine? = null
@@ -120,10 +131,63 @@ object MusicPlayer {
             queue = tracks
             folderTitle = folderName
             count = tracks.size
+            loopTrack = false
+            loopQueue = false
+            baseVolume = 1f
             active = true
             failStreak = 0
             floatPending = true
             startTrack(idx)
+        }
+        return true
+    }
+
+    /** Из потока моста: играет ОДИН трек [trackIdWanted] (id документа), без остальных файлов папки; [loop] — повторять его, пока не закроют. [volumePct] 0..100 — громкость плеера (от громкости телефона). */
+    fun playSingle(ctx: Context, trackIdWanted: String, loop: Boolean, volumePct: Int): Boolean {
+        init(ctx)
+        val tree = MusicLibrary.treeUri(ctx) ?: return false
+        val name = MusicLibrary.displayName(ctx, trackIdWanted) ?: return false
+        if (!MusicLibrary.isAudio(name)) return false
+        val one = listOf(Track(trackIdWanted, name, MusicLibrary.docUri(tree, trackIdWanted)))
+        val vol = volumePct.coerceIn(0, 100) / 100f
+        main.post {
+            queue = one
+            folderTitle = ""
+            count = 1
+            loopTrack = loop
+            loopQueue = false
+            baseVolume = vol
+            active = true
+            failStreak = 0
+            floatPending = true
+            startTrack(0)
+        }
+        return true
+    }
+
+    /** Из потока моста: играет все звуковые файлы папки [folderId] (пустой — выбранная папка целиком) по порядку списка; [loop] — после последнего снова с первого. */
+    fun playFolder(ctx: Context, folderId: String?, loop: Boolean, volumePct: Int): Boolean {
+        init(ctx)
+        val tree = MusicLibrary.treeUri(ctx) ?: return false
+        val list = MusicLibrary.list(ctx, folderId) ?: return false
+        val tracks = ArrayList<Track>()
+        for (e in list) {
+            if (!e.dir) tracks.add(Track(e.id, e.name, MusicLibrary.docUri(tree, e.id)))
+        }
+        if (tracks.isEmpty()) return false
+        val folderName = MusicLibrary.displayName(ctx, folderId) ?: ""
+        val vol = volumePct.coerceIn(0, 100) / 100f
+        main.post {
+            queue = tracks
+            folderTitle = folderName
+            count = tracks.size
+            loopTrack = false
+            loopQueue = loop
+            baseVolume = vol
+            active = true
+            failStreak = 0
+            floatPending = true
+            startTrack(0)
         }
         return true
     }
@@ -138,7 +202,9 @@ object MusicPlayer {
 
     fun next() {
         main.post {
-            if (active && index + 1 < queue.size) startTrack(index + 1)
+            if (!active) return@post
+            if (index + 1 < queue.size) startTrack(index + 1)
+            else if (loopQueue && queue.isNotEmpty()) startTrack(0)
         }
     }
 
@@ -210,6 +276,7 @@ object MusicPlayer {
             }
         })
         alac = engine
+        engine.setVolume(baseVolume)
         engine.start(!playing)
     }
 
@@ -221,6 +288,7 @@ object MusicPlayer {
             mp = p
             mpPrepared = false
             p.setAudioAttributes(audioAttrs())
+            p.setVolume(baseVolume, baseVolume)
             p.setWakeMode(ctx, PowerManager.PARTIAL_WAKE_LOCK)
             p.setDataSource(ctx, t.uri)
             p.setOnPreparedListener { player ->
@@ -244,7 +312,12 @@ object MusicPlayer {
 
     private fun trackEnded() {
         failStreak = 0
-        if (index + 1 < queue.size) startTrack(index + 1) else closeNow()
+        when {
+            loopTrack -> startTrack(index)
+            index + 1 < queue.size -> startTrack(index + 1)
+            loopQueue && queue.isNotEmpty() -> startTrack(0)
+            else -> closeNow()
+        }
     }
 
     /** Трек не открылся: пробуем следующий; если дальше некуда или всё подряд не играет — остаёмся на треке с текстом ошибки. */
@@ -325,6 +398,9 @@ object MusicPlayer {
         resumeAfterFocus = false
         floatPending = false
         floatDeferred = false
+        loopTrack = false
+        loopQueue = false
+        baseVolume = 1f
         val ctx = app
         if (ctx != null) MusicService.stop(ctx)
     }
@@ -355,9 +431,9 @@ object MusicPlayer {
                     resumeAfterFocus = true
                 }
             }
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> setVolume(0.3f)
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> setVolume(baseVolume * 0.3f)
             AudioManager.AUDIOFOCUS_GAIN -> {
-                setVolume(1f)
+                setVolume(baseVolume)
                 if (resumeAfterFocus) {
                     resumeAfterFocus = false
                     resumeNow()

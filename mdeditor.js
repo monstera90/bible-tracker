@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 16.0 (26.10) — структурная правка: публичная `getBookmarkedNotes()` (заметки со вкладки «Закладки» — [{id, name}]; нужна выбору «Открыть закладку» в «Комбинированном», itemcards.js 28.0). Откат: mdeditor.js 15.0.
    Версия: 15.0 (21.10) — структурная правка: `prepareImageFile` (+ `loadImageForRecompress`/`canvasToBlob`/`readFileBytes`, константы `IMG_RECOMPRESS_*`) — пережатие картинок задач без видимой потери (длинная сторона до 2560px, JPEG 0,92, PNG с прозрачностью остаётся PNG, малые файлы не трогаются); экспорт `MdEditor.prepareImageFile`. Откат: mdeditor.js 14.0.
    Версия: 14.0 (21.10) — структурная правка: кнопка QR в нижнем ряду редактора (`mdEditorQrBtn`, плашка `#mdEditorQrPlaque` над рядом): первое нажатие переносит заметку в папку `cards-notes` (папку создаёт сама) и показывает QR `lt://v1/note/<id заметки>`, повторное — показывает/прячет код; новые `noteQrText`/`noteHasQr`/`qrFolderName`/`moveNoteToQrFolder`/`toggleNoteQr`/`openNoteByQr` (публично). Скрытые заметки-карточки УБРАНЫ: `CARD_NOTES_PATH`, `isCardNoteRec` (осталась `isCardMetaRec` — только записи самих карточек), `cardNoteHomeHook`, `createCardNote`/`renameCardNote`/`deleteCardNote`/`openCardNote`/`closeCardNote`; прежние скрытые заметки один раз переносятся в `cards-notes` (`migrateLegacyCardNotes`). `renderListScreen` берёт свежий узел папки после перестройки дерева. Откат: mdeditor.js 13.1.
    Версия: 13.1 (20.10) — `createDatedNote`: если заметка с сегодняшней датой в имени уже есть, она открывается на редактирование, новая не создаётся.
@@ -6699,6 +6700,7 @@ window.initMdEditorModule = function(deps){
     cardMetaRemove: cardMetaRemove,
     setCardMetaListener: setCardMetaListener,
     getSearchableNotes: getSearchableNotes,
+    getBookmarkedNotes: function(){ return notesReady ? collectNoteBookmarkItems().map(function(x){ return { id: x.id, name: x.name }; }) : []; },
     // READER_PLAN.md, Этап B, шаг 5 (11.09) — для общего ZIP-бэкапа
     // (кнопка "Скачать" в модалке синхронизации, см. bindExportButton в
     // my.js): getNotesFilesForExport — синхронный список файлов заметок

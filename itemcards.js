@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 28.0 (26.10) — структурная правка: тип «Комбинированный» (`combo`): до 5 действий одним QR-кодом `lt://v1/combo/<JSON>` и кнопкой «Пуск» (таймер; музыкальный трек/папка с зацикливанием и громкостью; открыть вкладку/закладку/заметку; добавить задачу по id; событие в журнал). Новое: `runCombo`, `comboRun*`, `showComboResultOverlay`, `drainPendingCombos`, `openComboForm`, `comboPicker`, `comboMusicPicker`, `comboActs*`; деп `getComboTabs`/`openComboTab`/`getComboBookmarks`/`openComboBookmark`/`addComboTask`/`music`; вход оболочки `combo`; очередь `pendingScanCombos_v1`. Нужен мост версии 14 (музыка). Откат: itemcards.js 27.0.
    Версия: 27.0 (25.10) — структурная правка: «Создавать задачу» из окна ярлыка больше НЕ открывает приложение: окно показывает слой (`showTaskResultOverlay`, статус `queued`; пиктограмма и название вкладки — из кэша `itemCardsTaskTabs_v1`, который пишет приложение: `cacheTaskTabs`) и закрывается на рабочий стол, а задача лежит в очереди `pendingScanTasks_v1`; приложение выполняет очередь молча при запуске и при возврате (`drainPendingTasks(silent)`, зовёт my.js). Вход `newtask` из оболочки остался (старые сборки). Откат: itemcards.js 26.4.
    Версия: 26.4 (25.10) — центр событий: погода — «Была показана погода для города Название» (без кавычек); будильник пишет в `EventLog.alarmStarted` / `alarmCancelled` (итог одной записью, см. `eventlog.js` 2.0), «выключен» без времени: «Будильник «Название» был отключён пользователем». Kotlin не менялся. Откат: itemcards.js 26.3.
    Версия: 26.3 (25.10) — в историю (центр событий) попадает только скан QR погоды: «Был просканирован qr-код погоды города «Название»»; показ погоды кнопкой «Показать» на карточке в историю не пишется (`showWeatherOverlay(c, fromScan)`). Kotlin не менялся. Откат: itemcards.js 26.2.
@@ -135,6 +136,10 @@ window.initItemCardsModule = function(deps){
       var tg = taskTag(c.tag);
       return TASK_PREFIX + c.icon + (tg ? "#" + tg : "") + "/" + taskText(c.title);
     }
+    if(c && c.type === "combo"){ // «Комбинированный»: все действия в самом коде
+      var cacts = comboActs(c);
+      if(cacts.length) return window.CardScan.comboCode(cacts);
+    }
     if(c && c.type === "timer" && c.seconds > 0){
       var t = timerQrTitle(c.title);
       return (c.noIsland ? HTIMER_PREFIX : TIMER_PREFIX) + (c.seconds | 0) + (t ? "/" + t : "");
@@ -235,8 +240,9 @@ window.initItemCardsModule = function(deps){
     datepaper: '<path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path><rect x="8.5" y="11.5" width="7" height="6" rx="1"></rect><path d="M8.5 14h7"></path><path d="M10.5 10.2v2.2M13.5 10.2v2.2"></path>'
   };
   var ICON_ORDER = ["bottle", "container", "jar", "bicycle", "car", "vegetable", "paper"];
-  var DEFAULT_ICON = { item: "", timer: "", task: "", datenote: "datepaper", reminder: "reminder", weather: "weather" };
+  var DEFAULT_ICON = { item: "", timer: "", task: "", datenote: "datepaper", reminder: "reminder", weather: "weather", combo: "combo" };
   ICONS.weather = '<circle cx="8.5" cy="8.5" r="2.6"></circle><path d="M8.5 3v1.2M3 8.5h1.2M4.6 4.6l.9.9M12.4 4.6l-.9.9"></path><path d="M8 19.5h9.2a3.3 3.3 0 0 0 .5-6.55A4.6 4.6 0 0 0 9 12.6 3.4 3.4 0 0 0 8 19.5z"></path>';
+  ICONS.combo = '<path d="M12 2.5l9 5-9 5-9-5z"></path><path d="M3 12.5l9 5 9-5"></path><path d="M3 17l9 5 9-5"></path>';
   ICONS.habit = '<rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 10h16M8 3v4M16 3v4"></path><path d="M9 15l2 2 4-4"></path>';
   var DATENOTE_TITLE = "Сегодня";
   var REMINDER_TITLE = "Напоминалка";
@@ -386,7 +392,7 @@ window.initItemCardsModule = function(deps){
   // запись карточки в том виде, как она ходит между устройствами (и проверка пришедшей из облака)
   function cloudShape(r){
     if(!r || typeof r.id !== "string" || !/^[A-Za-z0-9]{4,32}$/.test(r.id)) return null;
-    if(r.type !== "timer" && r.type !== "alarm" && r.type !== "item" && r.type !== "task" && r.type !== "datenote" && r.type !== "reminder" && r.type !== "habit" && r.type !== "remind" && r.type !== "weather") return null;
+    if(r.type !== "timer" && r.type !== "alarm" && r.type !== "item" && r.type !== "task" && r.type !== "datenote" && r.type !== "reminder" && r.type !== "habit" && r.type !== "remind" && r.type !== "weather" && r.type !== "combo") return null;
     var o = {
       id: r.id,
       type: r.type,
@@ -398,6 +404,7 @@ window.initItemCardsModule = function(deps){
       updatedAt: Number(r.updatedAt) || 0
     };
     if(r.type === "task") o.tag = taskTag(r.tag);
+    if(r.type === "combo") o.acts = comboActsForCloud(r.acts);
     if(r.hidden) o.hidden = 1; // «скрыть» — общий признак карточки любого типа
     if(r.fav) o.fav = 1; // «избранное» — тоже общий признак
     if(r.type === "timer" && r.noIsland) o.noIsland = 1; // скрытый таймер: без острова и уведомления «идёт»
@@ -595,6 +602,7 @@ window.initItemCardsModule = function(deps){
     { key: "task", label: "Задачи" },
     { key: "habit", label: "Привычки" },
     { key: "remind", label: "Напоминания" },
+    { key: "combo", label: "Комбинированные" },
     { key: "fav", label: "Избранное" }
   ];
   var cardFilter = null;
@@ -840,6 +848,14 @@ window.initItemCardsModule = function(deps){
           '<button type="button" class="item-card-wx-btn" title="Показать погоду">Показать</button>' +
         '</div>';
     }
+    if(c.type === "combo"){ // значок «слои», название, число действий и кнопка «Пуск»
+      return '<div class="item-card-icon">' + iconSvg("combo") + '</div>' +
+        '<div class="item-card-title"></div>' +
+        '<div class="item-card-date">' + escapeHtml(comboCountText(comboActs(c).length)) + '</div>' +
+        '<div class="item-card-timer-btns">' +
+          '<button type="button" class="item-card-start-btn" title="Запустить все действия">Пуск</button>' +
+        '</div>';
+    }
     if(c.type === "habit"){ // цвет привычки — фон всей карточки (applyCardLook), здесь значок календаря с галочкой и название
       return '<div class="item-card-icon">' + iconSvg("habit") + '</div>' +
         '<div class="item-card-title"></div>';
@@ -878,6 +894,7 @@ window.initItemCardsModule = function(deps){
       '<button type="button" class="workbooks-run-btn" data-type="htimer">Скрытый таймер</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="alarm">Будильник</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="weather">Погода</button>' +
+      '<button type="button" class="workbooks-run-btn" data-type="combo">Комбинированный</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="item">Предмет</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="task">Создавать задачу</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="habit">Привычка</button>' +
@@ -1035,7 +1052,7 @@ window.initItemCardsModule = function(deps){
       if(host.dataset.built !== text) return;
       var size = Math.max(60, Math.round(card.clientWidth * 0.72));
       var qo = { text: text, width: size, height: size, colorDark: "#000000", colorLight: "#ffffff" };
-      if(cc && (cc.type === "task" || cc.type === "weather")) qo.correctLevel = window.QRCode.CorrectLevel.M; // текст внутри кода: уровень M — меньше модулей, код крупнее
+      if(cc && (cc.type === "task" || cc.type === "weather" || cc.type === "combo")) qo.correctLevel = window.QRCode.CorrectLevel.M; // текст внутри кода: уровень M — меньше модулей, код крупнее
       try{ new window.QRCode(host, qo); }catch(e){}
     }).catch(function(){ host.textContent = "QR недоступен"; });
   }
@@ -1385,7 +1402,7 @@ window.initItemCardsModule = function(deps){
   }
 
   // ---------- форма создания / правки ----------
-  var TYPE_LABEL = { timer: "Таймер", alarm: "Будильник", weather: "Погода", htimer: "Скрытый таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE, remind: "Напоминание" };
+  var TYPE_LABEL = { timer: "Таймер", alarm: "Будильник", weather: "Погода", htimer: "Скрытый таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE, remind: "Напоминание", combo: "Комбинированный" };
   // выбор цвета карточки (необязательный, у любого типа): разметка и привязка; первый пастельный квадрат — пустой цвет
   function colorPaletteHtml(type){
     var h = '<div class="item-form-hint">' + (type === "habit"
@@ -1404,6 +1421,7 @@ window.initItemCardsModule = function(deps){
     return h + '</div>';
   }
   function openForm(type, card, forcedId){
+    if(type === "combo"){ openComboForm(card); return; }
     screenMode = "form";
     var el = container();
     if(!el) return;
@@ -1857,6 +1875,7 @@ window.initItemCardsModule = function(deps){
   }
   function evLog(text, opts){ try{ if(window.EventLog) window.EventLog.add(text, opts); }catch(e){} }
   function startTimerForCard(c){
+    if(c && c.type === "combo"){ runCombo(c.acts, { card: c }); return; } // «Пуск» комбинированного: все действия разом
     if(c && c.type === "alarm"){ startAlarmForCard(c); return; } // кнопки «Завести» и «Выкл.» у будильника те же, что у таймера
     if(!c || c.type !== "timer" || !(c.seconds > 0)) return;
     try{ getTimerApi().start(runId(c), c.title || "", c.seconds, !!c.noIsland); }catch(e){}
@@ -2269,6 +2288,7 @@ window.initItemCardsModule = function(deps){
     if(p.kind === "reminder"){ showReminderOverlay(); return; } // общий код «Напоминалки»: карточка не нужна
     if(p.kind === "today"){ openTodayFromScan(); return; }       // общий код «Сегодня»: карточка не нужна
     if(p.kind === "note"){ openScannedNote(p.id); return; }
+    if(p.kind === "combo"){ runCombo(p.acts, { scan: true }); return; } // «Комбинированный»: действия в самом коде, карточка не нужна
     if(p.kind === "task"){ handleScannedTask(p); return; }  // задача в самом коде: карточка не нужна
     if(p.kind === "weather"){ showWeatherOverlay({ title: p.title, lat: p.lat, lon: p.lon }, true); return; } // погода из самого кода: карточка не нужна
     if(p.kind === "alarm"){ showScanned(alarmFromCode(p)); return; } // будильник из самого кода: заводится сразу, карточка не нужна
@@ -2360,6 +2380,7 @@ window.initItemCardsModule = function(deps){
   // silent — без слоя (очередь из окна ярлыка выполняется в фоне: слой пользователь уже видел в самом окне)
   function drainPendingTasks(silent){
     cacheTaskTabs();
+    drainPendingCombos(false); // задачи из «Комбинированного», отсканированного в окне ярлыка («открыть» ждёт своего входа)
     var q = [];
     try{ q = JSON.parse(localStorage.getItem(PENDING_TASKS_KEY) || "[]"); }catch(e){ q = []; }
     try{ localStorage.removeItem(PENDING_TASKS_KEY); }catch(e){}
@@ -2685,16 +2706,16 @@ window.initItemCardsModule = function(deps){
   }
 
   // заметка по скану её QR (`lt://v1/note/<id>`): на холодном старте приложения заметки могут быть ещё не загружены — ждём
-  function openNoteByQrWhenReady(id, n){
+  function openNoteByQrWhenReady(id, n, quiet){
     var md = getMdEditor();
     if(n === 0 && deps.openNotesTab){ try{ deps.openNotesTab(); }catch(e){} }
     if(md && md.openNoteByQr && md.openNoteByQr(id)){
       var nm = "";
       try{ (md.getSearchableNotes() || []).forEach(function(x){ if(x.id === id) nm = x.name; }); }catch(e){}
-      evLog(nm ? ("Открыта заметка «" + nm + "»") : "Открыта заметка по QR-коду");
+      if(!quiet) evLog(nm ? ("Открыта заметка «" + nm + "»") : "Открыта заметка по QR-коду"); // из «Комбинированного» запись в журнал одна — своя
       return;
     }
-    if(n < 25){ setTimeout(function(){ openNoteByQrWhenReady(id, n + 1); }, 300); return; }
+    if(n < 25){ setTimeout(function(){ openNoteByQrWhenReady(id, n + 1, quiet); }, 300); return; }
     alert("Заметка не найдена на этом устройстве. Возможно, ещё не синхронизирована.");
   }
   // скан QR заметки: из окна ярлыка открываем приложение тем же входом, что у «Сегодня» (mode "note"), иначе открываем сразу
@@ -2711,6 +2732,7 @@ window.initItemCardsModule = function(deps){
   // вход из оболочки (ScanActivity → MainActivity): mode "note" — «Сегодня» (id карточки) либо заметка по QR (id заметки),
   // "create" — создать карточку с этим id (код уже напечатан)
   function openCardFromNative(id, mode){
+    if(mode === "note" && id === COMBO_NATIVE_ID){ drainPendingCombos(true); return; } // «Комбинированный» из окна ярлыка: задача и «открыть»
     if(mode === "note" && id === TASK_NATIVE_ID){ drainPendingTasks(); return; } // «Создавать задачу», отсканированный в окне ярлыка
     if(mode === "note" && id === TODAY_NATIVE_ID){ createDatedNoteWhenReady(0); return; } // общий код «Сегодня» из окна ярлыка
     reloadCards();
@@ -2725,6 +2747,668 @@ window.initItemCardsModule = function(deps){
   function startStandaloneScan(){
     reloadCards();
     openScan();
+  }
+
+  // =========================================================================
+  // «Комбинированный» (type:"combo") — несколько действий одним QR-кодом и одной кнопкой «Пуск»
+  // =========================================================================
+  // Карточка: {type:"combo", title, color, acts:[действие, …]}, действий не больше COMBO_MAX (5). Действие — объект с полем k
+  // (формат и проверка — cardscan.js: normCombo / normComboList / comboCode). Из каждой категории можно взять только одно:
+  //   таймер · музыка (трек или папка) · «открыть» (вкладка, закладка или заметка — экран один) · задача · событие в журнал.
+  // Код несёт всё сам (lt://v1/combo/<JSON>), карточка на другом устройстве не нужна. Скан кода и «Пуск» делают одно и то же
+  // (`runCombo`): все действия стартуют разом, «открыть» — последним. В журнал всегда идёт ОДНА запись: комментарий события «как
+  // написан» или заглушка COMBO_STUB; собственных записей таймера («был установлен…») действия не пишут.
+  var COMBO_NATIVE_ID = "combo";                  // служебный id входа из оболочки (окно ярлыка → приложение); у карточек буквы «o» в id нет
+  var PENDING_COMBO_KEY = "pendingScanCombos_v1"; // очередь «окно ярлыка → приложение»: задача и «открыть», которые окно выполнить не может
+  var COMBO_STUB = "Был выполнен ряд действий при сканировании qr-кода";
+  var COMBO_MAX = 5;
+  var COMBO_CODE_MAX = 900; // байт: плотнее камера телефона код уже не читает
+  var COMBO_KINDS = [
+    { k: "timer", label: "Таймер", cat: "timer" },
+    { k: "track", label: "Музыкальный трек", cat: "music" },
+    { k: "folder", label: "Папка с музыкой", cat: "music" },
+    { k: "tab", label: "Открыть вкладку", cat: "open" },
+    { k: "bm", label: "Открыть закладку", cat: "open" },
+    { k: "note", label: "Открыть заметку", cat: "open" },
+    { k: "task", label: "Добавить задачу", cat: "task" },
+    { k: "event", label: "Событие в журнал", cat: "event" }
+  ];
+  function comboKind(k){ for(var i = 0; i < COMBO_KINDS.length; i++) if(COMBO_KINDS[i].k === k) return COMBO_KINDS[i]; return null; }
+  function comboScan(){ return window.CardScan || null; }
+  // «закладка заметки» хранится как действие «открыть заметку» с пометкой via:"bm" — для формы это всё равно «Открыть закладку»
+  function comboKindOf(a){ return (a && a.k === "note" && a.via === "bm") ? "bm" : (a ? a.k : ""); }
+  // чистый список действий карточки (для кода и запуска); [] — если что-то не так
+  function comboActs(c){
+    var cs = comboScan();
+    if(!cs || !c || !Array.isArray(c.acts)) return [];
+    return cs.normComboList(c.acts) || [];
+  }
+  // действия для записи карточки и облака: проверенные поля + подписи (название трека/папки/вкладки/закладки/заметки — только для показа)
+  function comboActsForCloud(list){
+    var cs = comboScan(), out = [];
+    if(!cs || !Array.isArray(list)) return out;
+    list.forEach(function(a){
+      var n = cs.normCombo(a);
+      if(!n || out.length >= COMBO_MAX) return;
+      if(n.k !== "timer" && n.k !== "event" && n.k !== "task" && a && a.name != null) n.name = String(a.name).slice(0, 80);
+      if(n.k === "note" && a && a.via === "bm") n.via = "bm";
+      out.push(n);
+    });
+    return out;
+  }
+  function comboCountText(n){
+    var m = n % 10, h = n % 100;
+    return n + " " + (m === 1 && h !== 11 ? "действие" : ((m >= 2 && m <= 4 && (h < 12 || h > 14)) ? "действия" : "действий"));
+  }
+  function utf8Len(s){ try{ return unescape(encodeURIComponent(String(s))).length; }catch(e){ return String(s).length; } }
+  function comboBaseName(id){
+    var s = String(id == null ? "" : id), i = Math.max(s.lastIndexOf("/"), s.lastIndexOf(":"));
+    if(i >= 0) s = s.slice(i + 1);
+    return s.replace(/\.[A-Za-z0-9]{2,5}$/, "");
+  }
+  function jparse(text, fallback){ try{ return JSON.parse(text || ""); }catch(e){ return fallback; } }
+  function tabTitleByKey(key){
+    var tabs = comboTabs();
+    for(var i = 0; i < tabs.length; i++) if(tabs[i].key === key) return tabs[i].title;
+    return key;
+  }
+  function comboTabs(){
+    try{ return (deps.getComboTabs && deps.getComboTabs()) || []; }catch(e){ return []; }
+  }
+
+  // ---------- запуск ----------
+  // музыка: в приложении — мост оболочки (версия 14), в окне ярлыка — deps.music (scan.html)
+  function comboMusicApi(){
+    if(deps.music) return deps.music;
+    var N = window.LifeTrackerNative;
+    if(N && typeof N.musicPlayTrack === "function" && typeof N.musicPlayFolder === "function"){
+      return {
+        track: function(id, loop, vol){ return !!N.musicPlayTrack(String(id), !!loop, vol | 0); },
+        folder: function(id, loop, vol){ return !!N.musicPlayFolder(String(id), !!loop, vol | 0); }
+      };
+    }
+    return null;
+  }
+  function comboRunTimer(a){
+    var title = timerQrTitle(a.name);
+    try{ getTimerApi().start(timerCodeId(a.sec, title, false), title, a.sec, false); }
+    catch(e){ return { ok: false, text: "Таймер не запустился" }; }
+    syncTimersView();
+    return { ok: true, text: "Таймер" + (title ? " «" + title + "»" : "") + " запущен: " + formatTimer(a.sec) };
+  }
+  function comboRunMusic(a, shownName){
+    var isTrack = a.k === "track";
+    var nm = shownName || (isTrack ? comboBaseName(a.id) : "");
+    var api = comboMusicApi();
+    if(!api) return { ok: false, text: "Музыка включается только в приложении на телефоне" };
+    var ok = false;
+    try{ ok = isTrack ? api.track(a.id, a.loop, a.vol) : api.folder(a.id, a.loop, a.vol); }catch(e){ ok = false; }
+    if(!ok) return { ok: false, text: (isTrack ? "Трек" : "Папка") + (nm ? " «" + nm + "»" : "") + " не найден на этом телефоне — проверьте папку с музыкой на вкладке «Музыка»" };
+    return { ok: true, text: (isTrack ? "Играет трек" : "Играет папка") + (nm ? " «" + nm + "»" : (isTrack ? "" : " с музыкой")) +
+      (a.loop ? ", по кругу" : (isTrack ? ", затем остановится" : ", затем остановится")) + ", громкость " + a.vol + "%" };
+  }
+  // задача: id действия (qid) хранится в самой задаче; пока такая невыполненная есть на любой вкладке — второй раз не создаётся,
+  // выполненная (в архиве) — создаётся заново. В окне ярлыка приложения нет — задача встаёт в очередь (выполнит приложение)
+  function comboQueue(entry){
+    try{
+      var q = JSON.parse(localStorage.getItem(PENDING_COMBO_KEY) || "[]");
+      if(!Array.isArray(q)) q = [];
+      entry.at = Date.now();
+      q.push(entry);
+      localStorage.setItem(PENDING_COMBO_KEY, JSON.stringify(q.slice(-20)));
+    }catch(e){}
+  }
+  function comboTaskResult(a, res){
+    var t = "«" + a.text + "»";
+    if(res && res.status === "added") return { ok: true, text: "Задача " + t + " добавлена на вкладку " + (res.tabTitle || a.tab) };
+    if(res && res.status === "exists") return { ok: true, text: "Задача " + t + " уже есть на вкладке " + (res.tabTitle || a.tab) + " — второй раз не добавлена" };
+    var why = res && res.reason;
+    return { ok: false, text: "Задачу " + t + " не добавить: " + (why === "badtab" ? "такой вкладки нет в этой версии приложения" :
+      why === "readonly" ? "на вкладке «Общие задачи» у вас только просмотр" :
+      why === "unsupported" ? "эта версия приложения не умеет добавлять задачи по коду" : "ошибка") };
+  }
+  function comboRunTask(a){
+    var res;
+    try{ res = deps.addComboTask ? deps.addComboTask(a.qid, a.tab, a.text, a.tag || "") : { status: "error", reason: "unsupported" }; }
+    catch(e){ console.error(e); res = { status: "error", reason: "fail" }; }
+    return comboTaskResult(a, res);
+  }
+  // «открыть»: вкладка / закладка / заметка. Возвращает описание для слоя (слой при этом обычно не показывается — экран уходит)
+  function comboRunOpen(a){
+    if(a.k === "tab"){
+      var ok = false;
+      try{ ok = !!(deps.openComboTab && deps.openComboTab(a.key)); }catch(e){ ok = false; }
+      return { ok: ok, text: ok ? "Открыта вкладка «" + tabTitleByKey(a.key) + "»" : "Такой вкладки нет в этой версии приложения" };
+    }
+    if(a.k === "note"){
+      openNoteByQrWhenReady(a.id, 0, true);
+      return { ok: true, text: "Открывается заметка" };
+    }
+    if(a.k === "bm"){
+      try{ if(deps.openComboBookmark) deps.openComboBookmark(a.hash, a.bid, function(found){ if(!found) alert("Закладка не найдена на этом устройстве. Возможно, ещё не синхронизирована."); }); }catch(e){}
+      return { ok: true, text: "Открывается закладка" };
+    }
+    return { ok: false, text: "Неизвестное действие" };
+  }
+  // подпись действия для слоя «выполнено» (у карточки есть названия, у кода — нет, тогда берём из id)
+  function comboShownName(c, a){
+    if(!c || !Array.isArray(c.acts)) return "";
+    for(var i = 0; i < c.acts.length; i++){
+      var x = c.acts[i];
+      if(x && x.k === a.k && String(x.id || "") === String(a.id || "") && x.name) return String(x.name);
+    }
+    return "";
+  }
+  // главный запуск. rawActs — действия карточки или кода; o: {card} — запуск кнопкой «Пуск», {scan:true} — по скану
+  function runCombo(rawActs, o){
+    o = o || {};
+    var cs = comboScan();
+    var acts = cs ? cs.normComboList(rawActs) : null;
+    if(!acts || !acts.length){ showNoticeOverlay({ kind: "msg", text: "В комбинированном коде нет действий, которые эта версия приложения умеет выполнять." }); return; }
+    var results = [], openAct = null, taskAct = null, eventText = "";
+    acts.forEach(function(a){
+      if(a.k === "timer") results.push(comboRunTimer(a));
+      else if(a.k === "track" || a.k === "folder") results.push(comboRunMusic(a, comboShownName(o.card, a)));
+      else if(a.k === "task") taskAct = a;
+      else if(a.k === "event") eventText = a.text;
+      else openAct = a;
+    });
+    // журнал: ровно одна запись — комментарий события как написан, иначе заглушка
+    evLog(eventText || COMBO_STUB);
+    if(eventText) results.push({ ok: true, text: "В журнал записано: «" + eventText + "»" });
+    if(standalone){
+      // окно ярлыка (scan.html): приложения здесь нет — задачу и «открыть» выполнит приложение (очередь), остальное уже сделано
+      var pend = {};
+      if(taskAct){ pend.task = taskAct; results.push({ ok: "queued", text: "Задача «" + taskAct.text + "» появится на вкладке, когда вы откроете приложение" }); }
+      if(openAct) pend.open = openAct;
+      if(pend.task || pend.open) comboQueue(pend);
+      if(openAct){
+        if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(COMBO_NATIVE_ID, "note"); }catch(e){} }
+        leaveStandalone();
+        return;
+      }
+      showComboResultOverlay(results);
+      return;
+    }
+    if(taskAct) results.push(comboRunTask(taskAct));
+    if(openAct){
+      if(scanHandle || overlayEl || scanNav) endScanSession(false); // сканер закрыт, экран уходит на открываемое место
+      var r = comboRunOpen(openAct);
+      if(!r.ok) showComboResultOverlay(results.concat([r]));
+      return;
+    }
+    scanDirty = true;
+    showComboResultOverlay(results);
+  }
+  // слой с итогом: по строке на действие («✓» выполнено, «✕» не вышло, «…» ждёт приложения); тап мимо — закрыть
+  function showComboResultOverlay(results){
+    var o = newOverlay();
+    var box = document.createElement("div");
+    box.className = "scan-notice";
+    box.addEventListener("click", function(e){ e.stopPropagation(); });
+    var head = document.createElement("div");
+    head.className = "scan-notice-text";
+    var bad = results.some(function(r){ return r.ok === false; });
+    head.style.fontWeight = "700";
+    head.textContent = bad ? "Выполнено не всё" : "Выполнено";
+    box.appendChild(head);
+    results.forEach(function(r){
+      var line = document.createElement("div");
+      line.className = "scan-notice-text";
+      line.textContent = (r.ok === true ? "✓ " : (r.ok === "queued" ? "… " : "✕ ")) + r.text;
+      box.appendChild(line);
+    });
+    var btns = document.createElement("div");
+    btns.className = "scan-notice-buttons";
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "workbooks-run-btn"; b.textContent = "Закрыть";
+    b.addEventListener("click", function(){ endScanSession(true); });
+    btns.appendChild(b);
+    box.appendChild(btns);
+    o.appendChild(box);
+    if(isLegacyAnim()){ o.style.animation = "none"; }
+  }
+  // очередь из окна ярлыка: задачи выполняются сразу (и при запуске, и при возврате в приложение), «открыть» — только когда приложение
+  // открыли именно этим входом (allowOpen), иначе запись ждёт: возврат в приложение не должен съесть её раньше входа
+  function drainPendingCombos(allowOpen){
+    var q = [];
+    try{ q = JSON.parse(localStorage.getItem(PENDING_COMBO_KEY) || "[]"); }catch(e){ q = []; }
+    if(!Array.isArray(q)) q = [];
+    var now = Date.now(), keep = [], lastOpen = null;
+    q.forEach(function(x){
+      if(!x || now - (Number(x.at) || 0) > 30 * 60 * 1000) return;
+      var cs = comboScan();
+      if(x.task){
+        var t = cs ? cs.normCombo(x.task) : null;
+        if(t && t.k === "task"){ var tr = comboRunTask(t); if(!tr.ok) console.error(tr.text); }
+        delete x.task;
+      }
+      if(x.open){
+        if(allowOpen){ var op = cs ? cs.normCombo(x.open) : null; if(op) lastOpen = op; }
+        else keep.push(x);
+      }
+    });
+    try{ if(keep.length) localStorage.setItem(PENDING_COMBO_KEY, JSON.stringify(keep)); else localStorage.removeItem(PENDING_COMBO_KEY); }catch(e){}
+    if(lastOpen) comboRunOpen(lastOpen);
+  }
+
+  // ---------- форма ----------
+  var comboStyleDone = false;
+  function ensureComboStyles(){
+    if(comboStyleDone || document.getElementById("comboCardStyle")){ comboStyleDone = true; return; }
+    comboStyleDone = true;
+    var st = document.createElement("style");
+    st.id = "comboCardStyle";
+    st.textContent =
+      ".combo-row{margin:8px 0;padding:8px;border:1px solid rgba(127,127,127,.35);border-radius:10px;}" +
+      ".combo-row-head{display:flex;align-items:center;}" +
+      ".combo-num{flex:0 0 auto;width:24px;font-weight:700;opacity:.8;}" +
+      ".combo-sel{flex:1 1 auto;min-width:0;}" +
+      ".combo-body{margin-top:8px;}" +
+      ".combo-body:empty{display:none;}" +
+      ".combo-body .mdeditor-cleanup-input,.combo-body .workbooks-run-btn{margin-bottom:6px;}" +
+      ".combo-pick-btn{display:block;width:100%;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
+      ".combo-pick-btn.combo-unset{opacity:.75;}" +
+      ".combo-list{margin:4px 0 8px;max-height:240px;overflow-y:auto;border:1px solid rgba(127,127,127,.35);border-radius:8px;padding:4px;overscroll-behavior:contain;}" +
+      ".combo-list[hidden]{display:none;}" +
+      ".combo-item{display:flex;align-items:center;width:100%;box-sizing:border-box;padding:7px 6px;border:none;border-bottom:1px solid rgba(127,127,127,.22);background:transparent;color:inherit;font:inherit;font-size:14px;text-align:left;}" +
+      ".combo-item.dim{opacity:.55;}" +
+      ".combo-item svg{flex:0 0 20px;width:20px;height:20px;margin-right:8px;}" +
+      ".combo-item-t{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
+      ".combo-item-s{flex:0 0 auto;margin-left:8px;font-size:12px;opacity:.65;}" +
+      ".combo-browser-head{display:flex;align-items:center;padding:2px 2px 6px;font-size:13px;}" +
+      ".combo-back{flex:0 0 auto;margin-right:8px;padding:2px 10px;border:1px solid currentColor;border-radius:8px;background:transparent;color:inherit;font:inherit;}" +
+      ".combo-path{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.8;}" +
+      ".combo-vol{display:flex;align-items:center;margin:2px 0 4px;}" +
+      ".combo-vol-l{flex:0 0 auto;margin-right:8px;font-size:14px;}" +
+      ".combo-vol-r{flex:1 1 auto;min-width:0;}" +
+      ".combo-vol-v{flex:0 0 44px;text-align:right;font-size:14px;}" +
+      ".combo-tabs .item-form-tab{margin:2px;}" +
+      ".combo-msg{font-size:14px;opacity:.8;padding:6px 2px;}" +
+      ".combo-warn{color:#c62828;}";
+    document.head.appendChild(st);
+  }
+  // выпадающий список выбора внутри действия: кнопка с выбранным значением, под ней раскрывается список (с поиском, если filter)
+  // opts: {getItems(cb), filter, current:{title}|null, placeholder, empty, onPick(item)}; item: {key, title, sub, svg}
+  function comboPicker(host, opts){
+    host.innerHTML = '<button type="button" class="workbooks-run-btn combo-pick-btn"></button><div class="combo-list" hidden></div>';
+    var btn = host.querySelector(".combo-pick-btn"), box = host.querySelector(".combo-list");
+    var all = [], shown = [], itemsEl = null, filterEl = null;
+    function setBtn(item){
+      btn.textContent = item ? item.title : opts.placeholder;
+      btn.classList.toggle("combo-unset", !item);
+    }
+    setBtn(opts.current || null);
+    function draw(){
+      var q = filterEl ? filterEl.value.replace(/^\s+|\s+$/g, "").toLowerCase() : "";
+      shown = all.filter(function(it){ return !q || String(it.title).toLowerCase().indexOf(q) >= 0 || String(it.sub || "").toLowerCase().indexOf(q) >= 0; });
+      var h = "";
+      shown.slice(0, 80).forEach(function(it, i){
+        h += '<button type="button" class="combo-item" data-i="' + i + '">' + (it.svg ? it.svg : "") + '<span class="combo-item-t">' + escapeHtml(it.title) + '</span>' +
+          (it.sub ? '<span class="combo-item-s">' + escapeHtml(it.sub) + '</span>' : '') + '</button>';
+      });
+      if(shown.length > 80) h += '<div class="combo-msg">Показаны первые 80 из ' + shown.length + ' — уточните поиск.</div>';
+      if(!shown.length) h = '<div class="combo-msg">' + escapeHtml(all.length ? "Ничего не найдено." : (opts.empty || "Список пуст.")) + '</div>';
+      itemsEl.innerHTML = h;
+    }
+    btn.addEventListener("click", function(){
+      if(!box.hidden){ box.hidden = true; return; }
+      box.hidden = false;
+      box.innerHTML = (opts.filter ? '<input type="text" class="mdeditor-cleanup-input combo-filter" placeholder="Поиск…" autocomplete="off">' : '') + '<div class="combo-items"><div class="combo-msg">Загружаю…</div></div>';
+      itemsEl = box.querySelector(".combo-items");
+      filterEl = box.querySelector(".combo-filter");
+      if(filterEl) filterEl.addEventListener("input", draw);
+      opts.getItems(function(items){
+        if(box.hidden || !itemsEl) return;
+        all = items || [];
+        draw();
+      });
+    });
+    box.addEventListener("click", function(e){
+      var b = e.target.closest(".combo-item");
+      if(!b) return;
+      var it = shown[parseInt(b.getAttribute("data-i"), 10)];
+      if(!it) return;
+      setBtn(it);
+      box.hidden = true;
+      opts.onPick(it);
+    });
+  }
+  // выбор трека/папки: кнопка и под ней проводник по папке с музыкой (мост оболочки musicList)
+  function comboMusicPicker(host, mode, a, onChange){
+    host.innerHTML = '<button type="button" class="workbooks-run-btn combo-pick-btn"></button><div class="combo-list combo-browser" hidden></div>';
+    var btn = host.querySelector(".combo-pick-btn"), box = host.querySelector(".combo-browser");
+    var N = window.LifeTrackerNative;
+    var stack = [], items = [];
+    function has(){ return mode === "track" ? !!a.id : !!a.picked; }
+    function label(){
+      if(!has()) return mode === "track" ? "Выбрать трек…" : "Выбрать папку…";
+      return mode === "track" ? (a.name || comboBaseName(a.id)) : (a.name || "Вся папка с музыкой");
+    }
+    function showBtn(){ btn.textContent = label(); btn.classList.toggle("combo-unset", !has()); }
+    showBtn();
+    function draw(){
+      var cur = stack[stack.length - 1];
+      var res = jparse(N.musicList(cur.id), { ok: false });
+      if(!res.ok){ box.innerHTML = '<div class="combo-msg">Не удалось прочитать папку.</div>'; return; }
+      items = res.items || [];
+      var h = '<div class="combo-browser-head">' + (stack.length > 1 ? '<button type="button" class="combo-back">←</button>' : '') +
+        '<span class="combo-path">' + escapeHtml(stack.map(function(s){ return s.name; }).join(" / ")) + '</span></div>';
+      if(mode === "folder") h += '<button type="button" class="workbooks-run-btn combo-choose">Выбрать эту папку</button>';
+      items.forEach(function(it, i){
+        if(mode === "track" && !it.dir) h += '<button type="button" class="combo-item" data-i="' + i + '"><span class="combo-item-t">' + escapeHtml(it.name) + '</span></button>';
+        else if(it.dir) h += '<button type="button" class="combo-item" data-i="' + i + '"><span class="combo-item-t">' + escapeHtml(it.name) + '</span><span class="combo-item-s">папка</span></button>';
+        else h += '<div class="combo-item dim"><span class="combo-item-t">' + escapeHtml(it.name) + '</span></div>';
+      });
+      if(!items.length) h += '<div class="combo-msg">Здесь нет подпапок и звуковых файлов.</div>';
+      box.innerHTML = h;
+      box.scrollTop = 0;
+    }
+    btn.addEventListener("click", function(){
+      if(!box.hidden){ box.hidden = true; return; }
+      box.hidden = false;
+      if(!N || typeof N.musicList !== "function"){ box.innerHTML = '<div class="combo-msg">Выбор музыки работает только в приложении на телефоне (APK).</div>'; return; }
+      var info = jparse(N.musicGetFolder(), {});
+      if(!info.set){ box.innerHTML = '<div class="combo-msg">Сначала укажите папку с музыкой на вкладке «Музыка».</div>'; return; }
+      stack = [{ id: "", name: info.name || "Музыка" }];
+      draw();
+    });
+    box.addEventListener("click", function(e){
+      if(e.target.closest(".combo-back")){ stack.pop(); draw(); return; }
+      if(e.target.closest(".combo-choose")){
+        var cur = stack[stack.length - 1];
+        a.id = cur.id; a.name = stack.length > 1 ? cur.name : ""; a.picked = true;
+        box.hidden = true; showBtn(); onChange();
+        return;
+      }
+      var b = e.target.closest(".combo-item[data-i]");
+      if(!b) return;
+      var it = items[parseInt(b.getAttribute("data-i"), 10)];
+      if(!it) return;
+      if(it.dir){ stack.push({ id: it.id, name: it.name }); draw(); return; }
+      if(mode === "track"){ a.id = it.id; a.name = it.name; box.hidden = true; showBtn(); onChange(); }
+    });
+  }
+
+  function openComboForm(card){
+    screenMode = "form";
+    var el = container();
+    if(!el) return;
+    ensureHabitStyles();
+    ensureComboStyles();
+    var isNew = !card;
+    var data = card ? JSON.parse(JSON.stringify(card)) : { type: "combo", title: "", icon: DEFAULT_ICON.combo || "combo", date: "", seconds: 0, acts: [] };
+    data.color = isNew ? defaultColorFor("combo") : cardColor(card);
+    var colorTouched = false;
+    var rows = [];
+    for(var ri = 0; ri < COMBO_MAX; ri++){
+      var s0 = Array.isArray(data.acts) ? data.acts[ri] : null;
+      var kind0 = s0 ? comboKindOf(s0) : "";
+      rows.push(comboKind(kind0) ? { kind: kind0, a: JSON.parse(JSON.stringify(s0)) } : { kind: "", a: null });
+    }
+    rows.forEach(function(r){ if(r.a && r.kind === "folder") r.a.picked = true; });
+
+    var html = '<div class="mdeditor-tab item-card-form" id="itemCardForm">';
+    html += '<h3 class="common-tab-title">' + escapeHtml(TYPE_LABEL.combo) + '</h3>';
+    html += '<div class="item-form-hint">Один код и кнопка «Пуск» запускают все выбранные действия сразу (не больше ' + COMBO_MAX + '). Из каждой группы можно взять только одно действие: таймер; музыка (трек или папка); открыть (вкладку, закладку или заметку — экран один); задача; событие в журнал. Всё, что нужно, зашито в сам код: карточка на другом устройстве не нужна, но трек, папка, заметка и закладка найдутся только там, где они есть.</div>';
+    html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="Название" maxlength="40" autocomplete="off">';
+    html += '<div class="combo-rows" id="icfComboRows">';
+    for(var i = 0; i < COMBO_MAX; i++){
+      html += '<div class="combo-row" data-i="' + i + '"><div class="combo-row-head"><span class="combo-num">' + (i + 1) + '</span><select class="mdeditor-cleanup-input combo-sel"></select></div><div class="combo-body"></div></div>';
+    }
+    html += '</div>';
+    html += colorPaletteHtml("combo");
+    html += '<div class="item-form-hint" id="icfComboSize"></div>';
+    html += '<div class="item-form-error" id="icfError"></div>';
+    html += '<div class="item-form-buttons">' +
+      '<button type="button" class="workbooks-run-btn" id="icfSave">Сохранить</button>' +
+      '<button type="button" class="workbooks-run-btn" id="icfCancel">Отмена</button>' +
+    '</div>';
+    html += '</div>';
+    el.innerHTML = html;
+    var titleEl = document.getElementById("icfTitle");
+    titleEl.value = data.title || "";
+    var errEl = document.getElementById("icfError");
+    var rowEls = el.querySelectorAll(".combo-row");
+
+    function optionsFor(i){
+      var used = {};
+      rows.forEach(function(r, j){ if(j !== i && r.kind) used[comboKind(r.kind).cat] = true; });
+      var h = '<option value="">' + (rows[i].kind ? "— убрать действие —" : "Добавить действие…") + '</option>';
+      COMBO_KINDS.forEach(function(k){
+        if(used[k.cat]) return; // категория уже занята другим пунктом
+        h += '<option value="' + k.k + '"' + (rows[i].kind === k.k ? ' selected' : '') + '>' + escapeHtml(k.label) + '</option>';
+      });
+      return h;
+    }
+    function refreshSelects(){
+      for(var i = 0; i < COMBO_MAX; i++) rowEls[i].querySelector(".combo-sel").innerHTML = optionsFor(i);
+    }
+    function defaultAct(kind){
+      if(kind === "timer") return { k: "timer", sec: 0, name: "" };
+      if(kind === "track") return { k: "track", id: "", name: "", loop: 0, vol: 100 };
+      if(kind === "folder") return { k: "folder", id: "", name: "", picked: false, loop: 0, vol: 100 };
+      if(kind === "tab") return { k: "tab", key: "" };
+      if(kind === "bm") return { k: "note", via: "bm", id: "", name: "" };
+      if(kind === "note") return { k: "note", id: "", name: "" };
+      if(kind === "task") return { k: "task", qid: newId(), tab: "", tag: "", text: "" };
+      return { k: "event", text: "" };
+    }
+    // собрать действия из состояния и полей; strict — с проверкой (ошибка по строке), иначе пропускаются незаполненные
+    function collect(strict){
+      var acts = [], err = "";
+      rows.forEach(function(r, i){
+        if(!r.kind || err) return;
+        var a = r.a, body = rowEls[i].querySelector(".combo-body"), n = i + 1, kl = comboKind(r.kind).label;
+        var out = null;
+        if(r.kind === "timer"){
+          var sec = getWheel("ch") * 3600 + getWheel("cm") * 60 + getWheel("cs");
+          if(sec <= 0){ if(strict) err = "Действие " + n + " («" + kl + "»): задайте время."; return; }
+          out = { k: "timer", sec: sec, name: timerQrTitle(body.querySelector(".combo-t-name").value) };
+        } else if(r.kind === "track" || r.kind === "folder"){
+          if((r.kind === "track" && !a.id) || (r.kind === "folder" && !a.picked)){ if(strict) err = "Действие " + n + " («" + kl + "»): выберите " + (r.kind === "track" ? "трек" : "папку") + "."; return; }
+          out = { k: r.kind, id: a.id || "", name: a.name || "", loop: body.querySelector(".combo-loop").value === "1" ? 1 : 0, vol: Math.max(0, Math.min(100, parseInt(body.querySelector(".combo-vol-r").value, 10) || 0)) };
+        } else if(r.kind === "tab"){
+          if(!a.key){ if(strict) err = "Действие " + n + " («" + kl + "»): выберите вкладку."; return; }
+          out = { k: "tab", key: a.key, name: tabTitleByKey(a.key) };
+        } else if(r.kind === "bm" || r.kind === "note"){
+          var has = a.k === "bm" ? (a.hash && a.bid) : a.id;
+          if(!has){ if(strict) err = "Действие " + n + " («" + kl + "»): выберите " + (r.kind === "bm" ? "закладку" : "заметку") + "."; return; }
+          out = JSON.parse(JSON.stringify(a));
+        } else if(r.kind === "task"){
+          var tx = taskText(body.querySelector(".combo-k-text").value);
+          if(!tx || !a.tab){ if(strict) err = "Действие " + n + " («" + kl + "»): " + (!tx ? "введите текст задачи." : "выберите вкладку, куда добавлять задачу."); return; }
+          out = { k: "task", qid: a.qid, tab: a.tab, tag: taskTag(body.querySelector(".combo-k-tag").value), text: tx };
+        } else if(r.kind === "event"){
+          var ev = body.querySelector(".combo-e-text").value.replace(/^\s+|\s+$/g, "").slice(0, 200);
+          if(!ev){ if(strict) err = "Действие " + n + " («" + kl + "»): введите комментарий или уберите действие."; return; }
+          out = { k: "event", text: ev };
+        }
+        if(out) acts.push(out);
+      });
+      return { acts: comboActsForCloud(acts), err: err };
+    }
+    function updateSize(){
+      var sizeEl = document.getElementById("icfComboSize");
+      if(!sizeEl) return;
+      var cs = comboScan(), acts = collect(false).acts;
+      if(!acts.length || !cs){ sizeEl.textContent = ""; sizeEl.classList.remove("combo-warn"); return; }
+      var bytes = utf8Len(cs.comboCode(acts));
+      var big = bytes > COMBO_CODE_MAX;
+      sizeEl.classList.toggle("combo-warn", big);
+      sizeEl.textContent = "Размер кода: " + bytes + " байт" + (big ? " — слишком много, камера такой код не прочитает: сократите текст или уберите действие." :
+        (bytes > 350 ? " — код получится плотным: печатайте его крупно (например, «4 на лист»)." : "."));
+    }
+    function buildBody(i){
+      var r = rows[i], body = rowEls[i].querySelector(".combo-body"), a = r.a;
+      body.innerHTML = "";
+      if(!r.kind) return;
+      var host;
+      if(r.kind === "timer"){
+        body.innerHTML = '<input type="text" class="mdeditor-cleanup-input combo-t-name" placeholder="Название таймера (необязательно)" maxlength="40" autocomplete="off">' +
+          '<div class="item-form-timer" id="icfTimer">' + wheelHtml("ch", 24, "ч") + wheelHtml("cm", 60, "мин") + wheelHtml("cs", 60, "с") + '</div>';
+        body.querySelector(".combo-t-name").value = a.name || "";
+        var t0 = a.sec | 0;
+        setWheel("ch", Math.floor(t0 / 3600)); setWheel("cm", Math.floor((t0 % 3600) / 60)); setWheel("cs", t0 % 60);
+        ["ch", "cm", "cs"].forEach(function(w){ var we = document.getElementById("icfWheel_" + w); if(we) we.addEventListener("scroll", function(){ clearTimeout(we._t); we._t = setTimeout(updateSize, 150); }); });
+        body.querySelector(".combo-t-name").addEventListener("input", updateSize);
+      } else if(r.kind === "track" || r.kind === "folder"){
+        var isT = r.kind === "track";
+        body.innerHTML = '<div class="combo-music-pick"></div>' +
+          '<select class="mdeditor-cleanup-input combo-loop"><option value="0">' + (isT ? "Когда трек закончится — остановить воспроизведение" : "Когда треки закончатся — закончить воспроизведение") + '</option><option value="1">' + (isT ? "Зациклить трек" : "Зациклить папку") + '</option></select>' +
+          '<div class="combo-vol"><span class="combo-vol-l">Громкость</span><input type="range" class="combo-vol-r" min="0" max="100" step="5"><span class="combo-vol-v"></span></div>' +
+          '<div class="item-form-hint">Плеер показывается только на вкладке «Музыка» и в острове. Громкость — доля от громкости телефона на момент запуска.</div>';
+        comboMusicPicker(body.querySelector(".combo-music-pick"), r.kind, a, updateSize);
+        body.querySelector(".combo-loop").value = a.loop ? "1" : "0";
+        var rng = body.querySelector(".combo-vol-r"), rv = body.querySelector(".combo-vol-v");
+        rng.value = String(a.vol == null ? 100 : a.vol);
+        function showVol(){ rv.textContent = rng.value + "%"; }
+        showVol();
+        rng.addEventListener("input", function(){ showVol(); });
+        rng.addEventListener("change", updateSize);
+      } else if(r.kind === "tab"){
+        body.innerHTML = '<div class="combo-tabpick"></div>';
+        comboPicker(body.querySelector(".combo-tabpick"), {
+          placeholder: "Выбрать вкладку…", filter: false, empty: "Список вкладок недоступен.",
+          current: a.key ? { title: tabTitleByKey(a.key) } : null,
+          getItems: function(cb){ cb(comboTabs().map(function(t){ return { key: t.key, title: t.title, svg: t.svg }; })); },
+          onPick: function(it){ a.key = it.key; a.name = it.title; updateSize(); }
+        });
+      } else if(r.kind === "bm"){
+        body.innerHTML = '<div class="combo-bmpick"></div>';
+        var bmCur = (a.k === "bm" ? (a.hash && a.bid) : a.id) ? { title: a.name || "Закладка" } : null;
+        comboPicker(body.querySelector(".combo-bmpick"), {
+          placeholder: "Выбрать закладку…", filter: true, empty: "Закладок пока нет.",
+          current: bmCur,
+          getItems: function(cb){
+            if(!deps.getComboBookmarks){ cb([]); return; }
+            deps.getComboBookmarks(function(list){
+              cb((list || []).map(function(b){
+                return b.type === "book" ? { key: "b:" + b.hash + ":" + b.bookmarkId, title: b.name || b.bookName, sub: b.bookName, raw: b }
+                  : { key: "n:" + b.id, title: b.name, sub: "заметка", raw: b };
+              }));
+            });
+          },
+          onPick: function(it){
+            var b = it.raw;
+            r.a = b.type === "book" ? { k: "bm", hash: b.hash, bid: b.bookmarkId, name: it.title } : { k: "note", via: "bm", id: b.id, name: it.title };
+            a = r.a; updateSize();
+          }
+        });
+      } else if(r.kind === "note"){
+        body.innerHTML = '<div class="combo-notepick"></div>';
+        comboPicker(body.querySelector(".combo-notepick"), {
+          placeholder: "Выбрать заметку…", filter: true, empty: "Заметки ещё не загружены или их нет.",
+          current: a.id ? { title: a.name || "Заметка" } : null,
+          getItems: function(cb){
+            var md = getMdEditor(), list = [];
+            try{ list = (md && md.getSearchableNotes && md.getSearchableNotes()) || []; }catch(e){ list = []; }
+            list = list.map(function(n){ return { key: n.id, title: n.name }; });
+            list.sort(function(x, y){ return String(x.title).localeCompare(String(y.title), "ru"); });
+            cb(list);
+          },
+          onPick: function(it){ a.id = it.key; a.name = it.title; updateSize(); }
+        });
+      } else if(r.kind === "task"){
+        body.innerHTML = '<input type="text" class="mdeditor-cleanup-input combo-k-text" placeholder="Текст задачи (до ' + TASK_TEXT_MAX + ' знаков)" maxlength="' + TASK_TEXT_MAX + '" autocomplete="off">' +
+          '<div class="item-form-tabs combo-tabs"></div>' +
+          '<input type="text" class="mdeditor-cleanup-input combo-k-tag" placeholder="Категория (необязательно, до ' + TASK_TAG_MAX + ' знаков)" maxlength="' + TASK_TAG_MAX + '" autocomplete="off" list="icfComboTags' + i + '">' +
+          '<datalist id="icfComboTags' + i + '"></datalist>' +
+          '<div class="item-form-hint">Задача добавляется на выбранную вкладку, только если задачи с этим id нет ни на одной вкладке. Выполненная (в архиве) не мешает: код создаст её снова.</div>';
+        body.querySelector(".combo-k-text").value = a.text || "";
+        body.querySelector(".combo-k-tag").value = a.tag || "";
+        var tags = [];
+        try{ tags = (deps.getTaskTags && deps.getTaskTags()) || []; }catch(e){ tags = []; }
+        cardTaskTags().forEach(function(x){ if(tags.indexOf(x) < 0) tags.push(x); });
+        body.querySelector("datalist").innerHTML = tags.map(function(x){ return '<option value="' + escapeHtml(x) + '"></option>'; }).join("");
+        var tabsEl = body.querySelector(".combo-tabs");
+        var tabHtml = "";
+        taskTabs().forEach(function(t){
+          tabHtml += '<button type="button" class="item-form-tab' + (a.tab === t.key ? " selected" : "") + '" data-tab="' + escapeHtml(t.key) + '" title="' + escapeHtml(t.title) + '">' + (t.svg || "") + '<span>' + escapeHtml(t.title) + '</span></button>';
+        });
+        tabsEl.innerHTML = tabHtml;
+        tabsEl.addEventListener("click", function(e){
+          var b = e.target.closest(".item-form-tab");
+          if(!b) return;
+          a.tab = b.dataset.tab;
+          var bs = tabsEl.querySelectorAll(".item-form-tab");
+          for(var k = 0; k < bs.length; k++) bs[k].classList.toggle("selected", bs[k].dataset.tab === a.tab);
+          updateSize();
+        });
+        body.querySelector(".combo-k-text").addEventListener("input", updateSize);
+        body.querySelector(".combo-k-tag").addEventListener("input", updateSize);
+      } else if(r.kind === "event"){
+        body.innerHTML = '<textarea class="mdeditor-cleanup-input combo-e-text" rows="2" maxlength="200" placeholder="Комментарий для журнала" style="resize:vertical;font-family:inherit;"></textarea>' +
+          '<div class="item-form-hint">В журнале появится время запуска и этот комментарий — ровно так, как написан. Без этого действия в журнал попадает запись «' + escapeHtml(COMBO_STUB) + '».</div>';
+        var ta = body.querySelector(".combo-e-text");
+        ta.value = a.text || "";
+        ta.addEventListener("input", updateSize);
+      }
+    }
+    rowEls = Array.prototype.slice.call(rowEls);
+    rowEls.forEach(function(rowEl, i){
+      rowEl.querySelector(".combo-sel").addEventListener("change", function(){
+        var v = this.value;
+        rows[i] = v ? { kind: v, a: defaultAct(v) } : { kind: "", a: null };
+        refreshSelects();
+        buildBody(i);
+        updateSize();
+      });
+    });
+    refreshSelects();
+    for(var bi = 0; bi < COMBO_MAX; bi++) buildBody(bi);
+    updateSize();
+
+    var colorsEl = document.getElementById("icfColors");
+    var markColors = function(){
+      var bs = colorsEl.querySelectorAll(".habit-color");
+      for(var i = 0; i < bs.length; i++) bs[i].classList.toggle("selected", bs[i].dataset.color === (data.color || ""));
+    };
+    markColors();
+    colorsEl.addEventListener("click", function(e){
+      var b = e.target.closest(".habit-color");
+      if(!b) return;
+      data.color = b.dataset.color;
+      colorTouched = true;
+      markColors();
+    });
+
+    function leave(){ renderGrid(); }
+    document.getElementById("icfCancel").addEventListener("click", leave);
+    if(window.AppNav) window.AppNav.push(function(){ renderGrid(); });
+
+    document.getElementById("icfSave").addEventListener("click", function(){
+      errEl.textContent = "";
+      var title = titleEl.value.replace(/^\s+|\s+$/g, "");
+      if(!title){ errEl.textContent = "Введите название."; return; }
+      var res = collect(true);
+      if(res.err){ errEl.textContent = res.err; return; }
+      if(!res.acts.length){ errEl.textContent = "Добавьте хотя бы одно действие."; return; }
+      var cs = comboScan();
+      if(!cs || !cs.normComboList(res.acts)){ errEl.textContent = "Не удалось собрать код из этих действий."; return; }
+      if(utf8Len(cs.comboCode(res.acts)) > COMBO_CODE_MAX){ errEl.textContent = "Код получился слишком длинным — камера его не прочитает. Сократите текст или уберите действие."; return; }
+      var now = Date.now();
+      if(!data.color) delete data.color;
+      if(colorTouched) rememberColorFor("combo", data.color || "");
+      if(isNew){
+        data.id = newId();
+        data.title = title;
+        data.acts = res.acts;
+        data.createdAt = now;
+        data.updatedAt = now;
+        loadCards().push(data);
+      } else {
+        var cur = findCard(card.id);
+        if(cur){
+          cur.title = title;
+          cur.acts = res.acts;
+          if(data.color) cur.color = data.color; else delete cur.color;
+          cur.updatedAt = now;
+        }
+      }
+      saveCards();
+      leave();
+    });
   }
 
   // ---------- вход вкладки ----------
@@ -2743,6 +3427,7 @@ window.initItemCardsModule = function(deps){
     focusCard: focusCard,
     openCardFromNative: openCardFromNative,
     drainPendingTasks: drainPendingTasks,
+    drainPendingCombos: drainPendingCombos,
     startStandaloneScan: startStandaloneScan,
     getCards: function(){ return loadCards().slice(); },
     qrTextForId: function(id){ return QR_PREFIX + id; }

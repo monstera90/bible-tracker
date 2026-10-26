@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 7.0 (26.10) — мост версии 14: `musicPlayTrack` / `musicPlayFolder` (QR «Комбинированный»: трек или папка по id с зацикливанием и начальной громкостью).
 // Версия: 6.0 (25.10) — мост версии 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
 // Версия: 5.0 (24.10) — мост версии 12: setCardAlarm / cancelCardAlarm / getCardAlarms (будильники карточек, CardAlarms).
 // Версия: 4.0 (24.10) — мост версии 11: startHiddenCardTimer (скрытый таймер карточки: без острова, плашки и уведомления «идёт»).
@@ -34,9 +35,10 @@ class NativeBridge(private val activity: MainActivity) {
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
+         * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 13
+        const val BRIDGE_VERSION = 14
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -527,6 +529,20 @@ class NativeBridge(private val activity: MainActivity) {
     fun musicPlay(folderId: String?, trackId: String?, folderName: String?): Boolean {
         if (!activity.pageTrusted || trackId == null) return false
         return MusicPlayer.play(activity.applicationContext, folderId, trackId, folderName ?: "")
+    }
+
+    /** Играть ОДИН трек по id документа (QR «Комбинированный»); [loop] — повторять; [volumePct] 0..100 — громкость плеера. */
+    @JavascriptInterface
+    fun musicPlayTrack(trackId: String?, loop: Boolean, volumePct: Int): Boolean {
+        if (!activity.pageTrusted || trackId.isNullOrEmpty()) return false
+        return MusicPlayer.playSingle(activity.applicationContext, trackId, loop, volumePct)
+    }
+
+    /** Играть все треки папки по id (пустой — выбранная папка целиком); [loop] — по кругу. */
+    @JavascriptInterface
+    fun musicPlayFolder(folderId: String?, loop: Boolean, volumePct: Int): Boolean {
+        if (!activity.pageTrusted) return false
+        return MusicPlayer.playFolder(activity.applicationContext, folderId, loop, volumePct)
     }
 
     @JavascriptInterface

@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 84.0 (26.10) — структурная правка: «Комбинированный» (itemcards.js 28.0): `getComboTabList`, `openComboTab`, `getComboBookmarks`, `openComboBookmark`, `addComboTask` (задача по id `c.qid`: не создаётся, пока невыполненная с таким id есть на любой вкладке; выполненная — архив — создаётся снова); деп-ы у `initItemCardsModule`; вход оболочки `combo` не переключает вкладку. Откат: my.js 83.1.
    Версия: 83.1 (25.10) — очередь «Создавать задачу» из окна ярлыка выполняется молча при запуске и в `__ltOnAppResume` (`ItemCards.drainPendingTasks(true)`; itemcards.js 27.0) — окно ярлыка приложение больше не открывает.
    Версия: 83.0 (25.10) — структурная правка: мероприятия календаря в синхронизации как задачи (раздел «КАЛЕНДАРЬ: СИНХРОНИЗАЦИЯ МЕРОПРИЯТИЙ»): личные — `state["ev:<id>"]` (едут с личными задачами), общие — группа `/groups/<id>/events` (binding `events`, едут с общими задачами, доступ тот же). Откат: my.js 82.0.
    Версия 82.0 (25.10) — структурная правка: вкладка `calendar` «Календарь» (`calendar.js`) — самый нижний язычок стека набора 1: `CALENDAR_TAB_KEY`/`CALENDAR_TAB_BTN_ID`, `renderSettingsTabCalendar`, первый в `SETTINGS_SIDE_ORDER_1`.
@@ -11025,6 +11026,12 @@
           return TASK_MOVABLE_TABS.map(function(k){ return {key: k, title: taskQrTabTitle(k), svg: TASK_MOVE_ICON_SVG(k)}; });
         },
         addTaskFromQr: addTaskFromQr,
+        // «Комбинированный»: выбор вкладки/закладки, открытие и задача по id
+        getComboTabs: getComboTabList,
+        openComboTab: openComboTab,
+        getComboBookmarks: getComboBookmarks,
+        openComboBookmark: openComboBookmark,
+        addComboTask: addComboTask,
         getTaskTags: getAllTaskTags,
         // напоминания карточек: кнопка-часы, окно даты/времени с повтором и пересчёт сроков — те же, что у задач
         reminderBtnParts: reminderBtnParts,
@@ -11055,6 +11062,8 @@
     if(!/^[A-Za-z0-9]{4,32}$/.test(String(id || ""))) return;
     // «Создавать задачу» из окна ярлыка: вкладку не переключаем — задача добавляется, слой с результатом поверх текущего экрана
     if(String(id) === "newtask"){ ensureItemCards().openCardFromNative("newtask", "note"); return; }
+    // «Комбинированный» из окна ярлыка: вкладку не переключаем — сначала выполняется очередь (задача, «открыть»)
+    if(String(id) === "combo"){ ensureItemCards().openCardFromNative("combo", "note"); return; }
     openSettingsTabDirect("set2s_9");
     ensureItemCards().openCardFromNative(String(id), mode === "create" ? "create" : "note");
   }
@@ -20950,6 +20959,105 @@
       info.status = "added";
     }
     // открытая вкладка задач сразу показывает новый список/порядок (кроме момента, когда в ней идёт редактирование строки)
+    try{
+      var ae = document.activeElement;
+      var editing = !!(ae && ae.classList && ae.classList.contains("task-editable"));
+      if(!editing && !activeProjectPickerRerender && settingsModalOverlay && settingsModalOverlay.classList.contains("open") && TASK_TAB_IDS.hasOwnProperty(currentSettingsTab)) renderSettingsTabTask(currentSettingsTab);
+    }catch(e){}
+    return info;
+  }
+  // ===========================================================================
+  // «КОМБИНИРОВАННЫЙ» (itemcards.js 28.0): вкладки, закладки и задача по id для действий QR-кода
+  // ===========================================================================
+  // Список вкладок для выбора «Открыть вкладку»: [{key, title, svg}] — пиктограмма берётся с настоящей кнопки вкладки.
+  function getComboTabList(){
+    var out = [];
+    function btnSvg(id){ var b = document.getElementById(id); var sv = b && b.querySelector ? b.querySelector("svg") : null; return sv ? sv.outerHTML : ""; }
+    function add(key, title, svg){ out.push({key: key, title: title, svg: svg || ""}); }
+    add(CALENDAR_TAB_KEY, "Календарь", btnSvg(CALENDAR_TAB_BTN_ID));
+    TASK_MOVABLE_TABS.forEach(function(k){ add(k, taskQrTabTitle(k), TASK_MOVE_ICON_SVG(k)); });
+    add("archive", "Архив", btnSvg(TASK_TAB_IDS.archive));
+    add(EVENTS_TAB_KEY, "События", btnSvg(EVENTS_TAB_BTN_ID));
+    add("year", "Карта дней года", btnSvg("settingsTabYearBtn"));
+    add("mood", "Диаграмма настроения", btnSvg("settingsTabMoodBtn"));
+    var fallback = {set2s_8: "ИПКД"};
+    Object.keys(SET2_TAB_IDS).forEach(function(k){
+      var b = document.getElementById(SET2_TAB_IDS[k]);
+      var title = (b && b.title) || fallback[k] || k;
+      add(k, title, btnSvg(SET2_TAB_IDS[k]));
+    });
+    return out;
+  }
+  // Открыть вкладку по ключу: окно настроек (если закрыто) и нужный набор вкладок. false — такого ключа нет.
+  function openComboTab(key){
+    key = String(key || "");
+    if(SET2_TAB_IDS.hasOwnProperty(key)){ openSettingsTabDirect(key); return true; }
+    var set1 = TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY || key === CALENDAR_TAB_KEY || key === "year" || key === "mood";
+    if(!set1) return false;
+    var alreadyOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay && settingsModalOverlay.classList.contains("open");
+    if(!alreadyOpen) openSettingsModal();
+    settingsActiveTabSet = 1;
+    applySettingsTabSetVisibility();
+    switchSettingsTab(key);
+    return true;
+  }
+  // Закладки для выбора: закладки заметок + книжные закладки (как на вкладке «Закладки»)
+  function getComboBookmarks(cb){
+    var out = [];
+    try{
+      var notes = (MdEditor && MdEditor.getBookmarkedNotes && MdEditor.getBookmarkedNotes()) || [];
+      notes.forEach(function(n){ out.push({type: "note", id: n.id, name: n.name}); });
+    }catch(e){}
+    getBookMarginBookmarksForList(function(items){
+      (items || []).forEach(function(b){ out.push({type: "book", hash: b.hash, bookmarkId: b.bookmarkId, name: b.name || b.bookName, bookName: b.bookName}); });
+      cb(out);
+    });
+  }
+  // Открыть книжную закладку по (хеш книги, id закладки): текущее место закладки берётся на момент запуска (основная закладка двигается)
+  function openComboBookmark(hash, bookmarkId, cb){
+    getBookMarginBookmarksForList(function(items){
+      var found = null;
+      (items || []).forEach(function(b){ if(!found && b.hash === hash && b.bookmarkId === bookmarkId) found = b; });
+      if(found) openBookAtMarginBookmark(found.hash, found.position);
+      if(cb) cb(!!found);
+    });
+  }
+  // Добавить задачу по id (поле c.qid самой задачи). Пока невыполненная задача с этим id лежит на любой вкладке (личной или общей) —
+  // второй раз не создаётся ({status:"exists"}); выполненная (архив, checked) не мешает — создаётся заново. Возвращает
+  // {status:"added"|"exists"|"error", reason, text, tabTitle}.
+  function addComboTask(qid, tabKey, rawText, rawTag){
+    var text = String(rawText == null ? "" : rawText).replace(/\s+/g, " ").trim();
+    var info = {text: text, tabTitle: taskQrTabTitle(tabKey)};
+    var tag = normTaskTag(rawTag);
+    if(tag){
+      var known = getAllTaskTags();
+      for(var ti = 0; ti < known.length; ti++) if(known[ti].toLowerCase() === tag.toLowerCase()){ tag = known[ti]; break; }
+    }
+    if(TASK_MOVABLE_TABS.indexOf(tabKey) === -1){ info.status = "error"; info.reason = "badtab"; return info; }
+    if(!text || !qid){ info.status = "error"; info.reason = "empty"; return info; }
+    var groupOn = isGroupTasksActive(), groupRO = groupOn && isGroupTasksReadOnly();
+    var all = getAllTasks();
+    if(groupOn){ try{ all = all.concat(getAllGroupTasks()); }catch(e){} }
+    var same = all.filter(function(t){ return t.c.checked !== true && t.c.qid === qid; });
+    if(same.length){
+      info.status = "exists";
+      info.tabTitle = taskQrTabTitle(taskEffectiveTab(same[0]) || tabKey);
+      return info;
+    }
+    if(tabKey === "jointtasks" && groupRO){ info.status = "error"; info.reason = "readonly"; return info; }
+    var id;
+    if(tabKey === "jointtasks" && groupOn){
+      id = genGroupTaskId();
+      saveGroupTaskData(id, {text: text, tab: "jointtasks", checked: false, checkedAt: null,
+        completionKey: null, nextForProjectId: null, flag: null, inWork: false,
+        createdBy: getDeviceId(), completedBy: null, tag: tag || null, qid: qid});
+      if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
+    } else {
+      id = createTaskWithText(tabKey, text);
+      var nt = getTaskById(id);
+      if(nt){ nt.c.qid = qid; if(tag) nt.c.tag = tag; saveTaskData(id, nt.c); }
+    }
+    info.status = "added";
     try{
       var ae = document.activeElement;
       var editing = !!(ae && ae.classList && ae.classList.contains("task-editable"));

@@ -1,5 +1,6 @@
 /* ===========================================================================
    cardscan.js
+   Версия: 3.0 (26.10) — структурная правка: QR «Комбинированный» `lt://v1/combo/<JSON>` → `{kind:"combo", acts:[…]}` (`parseCombo`, `comboCode`, `comboCategory`, `COMBO_MAX`): до 5 действий, по одному из категории (таймер / музыка / «открыть» / задача / событие в журнал), JSON из коротких массивов (`["t",сек,название]`, `["m",id,цикл,громкость]`, `["f",…]`, `["o",ключ вкладки]`, `["b",хеш книги,id закладки]`, `["n",id заметки]`, `["k",id задачи,вкладка,тег,текст]`, `["e",текст]`); такой код — с побочным эффектом, удержание не меньше 0,5 с. Откат: cardscan.js 2.7.
    Версия: 2.7 (25.10) — плотные коды (QR «Создавать задачу» с длинным текстом/тегом: кириллица — 2 байта на знак, модулей до 57×57 против 25×25 у таймера) читались хуже: кадр для разбора всегда сжимался до 480 px, и модуль кода становился ~2 px. Теперь камера просится в 1280×720 (`ideal`), а при ненайденном коде разбор чередует кадр 480 px (быстро) и 960 px (для мелких модулей); найденный масштаб держится, пока код виден (`useBig`, `BIG_W`). Удержание (0,25–0,6 с, у задачи/таймера не меньше 0,5 с) не менялось. Откат: cardscan.js 2.6.
    Версия: 2.6 (24.10) — `parseCode` узнаёт QR погоды `lt://v1/weather/<широта>,<долгота>[/<название>]` → `{kind:"weather", lat, lon, title}` (побочных действий нет — обычное удержание). Откат: cardscan.js 2.5.
    Версия: 2.5 (24.10) — `parseCode` узнаёт QR будильника `lt://v1/alarm/<ЧЧММ>[,<5|15|30>,<1..4>][/<название>]` → `{kind:"alarm", hour, minute, every, times, title}` (`every`/`times` — 0, если повтора нет); для будильника, как для таймера, нужно удержание от 0,5 с. Откат: cardscan.js 2.4.
@@ -27,7 +28,7 @@
    - отдельная страница scan.html, которую открывает ScanActivity по ярлыку
      «Сканировать QR-код» (камера и разбор те же).
 
-   window.CardScan = { parseCode(text), open(opts) }
+   window.CardScan = { parseCode(text), open(opts), comboCode(acts), comboCategory(act), normCombo(act), normComboList(acts) }
    =========================================================================== */
 window.CardScan = (function(){
   "use strict";
@@ -39,6 +40,8 @@ window.CardScan = (function(){
   var ALARM_PREFIX = "lt://v1/alarm/";   // будильник: время, повтор и название в коде
   var WEATHER_PREFIX = "lt://v1/weather/"; // погода: координаты и название города в коде
   var HABIT_PREFIX = "lt://v1/habit/";
+  var COMBO_PREFIX = "lt://v1/combo/";   // «Комбинированный»: до 5 действий одним кодом (JSON из коротких массивов)
+  var COMBO_MAX = 5;
   var TASK_PREFIX = "lt://v1/task/";
   var TODAY_CODE = "lt://v1/today";       // «Сегодня»: один и тот же код у всех, заметку создаёт тот, кто сканирует
   var REMINDER_CODE = "lt://v1/reminder"; // «Напоминалка»: один и тот же код у всех, напоминание берётся у того, кто сканирует
@@ -49,12 +52,123 @@ window.CardScan = (function(){
   //   {kind:"alarm", hour, minute, every, times, title} — будильник, зашитый в код (lt://v1/alarm/<ЧЧММ>[,<5|15|30>,<1..4>][/<название>])
   //   {kind:"weather", lat, lon, title} — погода города, зашитая в код (lt://v1/weather/<широта>,<долгота>[/<название>])
   //   {kind:"habit", id, title} — привычка с названием в коде (lt://v1/habit/<id>/<название>)
+  //   {kind:"combo", acts} — «Комбинированный»: до 5 действий в самом коде (lt://v1/combo/<JSON>, см. comboCode/parseCombo)
   //   {kind:"task", tab, tag, text} — задача, зашитая в код (lt://v1/task/<ключ вкладки>[#<тег>]/<текст>)
   //   {kind:"today"} / {kind:"reminder"} — общие коды «Сегодня» и «Напоминалки» (lt://v1/today, lt://v1/reminder)
   //   {kind:"note", id}   — код заметки «Моего блокнота» (lt://v1/note/<id>)
   //   {kind:"unknown", text} — наша схема lt://, но другая версия/вид (не выполняется)
   //   {kind:"url", url}   — обычная ссылка http(s)
   //   {kind:"text", text} — всё остальное
+  // ---------- «Комбинированный» ----------
+  // Действие (одинаково на карточке и в коде; поля name — только подписи на карточке, в код не идут):
+  //   {k:"timer", sec, name}  {k:"track", id, loop, vol}  {k:"folder", id, loop, vol}  {k:"tab", key}
+  //   {k:"bm", hash, bid}  {k:"note", id}  {k:"task", qid, tab, tag, text}  {k:"event", text}
+  // Категории: «таймер», «музыка» (трек/папка), «открыть» (вкладка/закладка/заметка), «задача», «событие» — из каждой не больше одного действия.
+  function comboCategory(a){
+    if(!a) return "";
+    if(a.k === "timer") return "timer";
+    if(a.k === "track" || a.k === "folder") return "music";
+    if(a.k === "tab" || a.k === "bm" || a.k === "note") return "open";
+    if(a.k === "task") return "task";
+    if(a.k === "event") return "event";
+    return "";
+  }
+  function cleanStr(v, max){
+    var t = String(v == null ? "" : v).replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, max);
+    if(/[\uD800-\uDBFF]$/.test(t)) t = t.slice(0, -1);
+    return t.replace(/ $/, "");
+  }
+  // строгая проверка одного действия: возвращает чистый объект или null
+  function normCombo(a){
+    if(!a || typeof a !== "object") return null;
+    var ID = /^[A-Za-z0-9]{4,32}$/;
+    if(a.k === "timer"){
+      var sec = Math.floor(Number(a.sec));
+      if(!(sec >= 1 && sec <= 359999)) return null;
+      return { k: "timer", sec: sec, name: cleanStr(a.name, 40) };
+    }
+    if(a.k === "track" || a.k === "folder"){
+      var id = String(a.id == null ? "" : a.id);
+      if(a.k === "track" && !id) return null;
+      if(id.length > 400) return null;
+      var vol = Math.floor(Number(a.vol)); if(!(vol >= 0 && vol <= 100)) vol = 100;
+      return { k: a.k, id: id, loop: a.loop ? 1 : 0, vol: vol };
+    }
+    if(a.k === "tab"){
+      return /^[a-z0-9_]{2,20}$/.test(String(a.key || "")) ? { k: "tab", key: String(a.key) } : null;
+    }
+    if(a.k === "bm"){
+      var h = String(a.hash || ""), b = String(a.bid || "");
+      return (/^[A-Za-z0-9_\-]{4,80}$/.test(h) && /^[A-Za-z0-9_\-]{1,80}$/.test(b)) ? { k: "bm", hash: h, bid: b } : null;
+    }
+    if(a.k === "note"){
+      return ID.test(String(a.id || "")) ? { k: "note", id: String(a.id) } : null;
+    }
+    if(a.k === "task"){
+      var q = String(a.qid || ""), tb = String(a.tab || ""), tx = cleanStr(a.text, 80);
+      if(!ID.test(q) || !/^[a-z0-9]{2,20}$/.test(tb) || !tx) return null;
+      return { k: "task", qid: q, tab: tb, tag: cleanStr(String(a.tag == null ? "" : a.tag).replace(/\//g, " "), 16), text: tx };
+    }
+    if(a.k === "event"){
+      var ev = cleanStr(a.text, 200);
+      return ev ? { k: "event", text: ev } : null;
+    }
+    return null;
+  }
+  // список действий → список чистых действий (не больше COMBO_MAX, по одному из категории); null — что-то не так
+  function normComboList(list){
+    if(!Array.isArray(list) || !list.length || list.length > COMBO_MAX) return null;
+    var out = [], seen = {};
+    for(var i = 0; i < list.length; i++){
+      var n = normCombo(list[i]);
+      if(!n) return null;
+      var cat = comboCategory(n);
+      if(seen[cat]) return null;
+      seen[cat] = 1;
+      out.push(n);
+    }
+    return out;
+  }
+  // действия → текст кода: JSON из коротких массивов (названия — только у таймера и задачи/события, где они сами и есть содержание)
+  function comboCode(acts){
+    var arr = [];
+    (acts || []).forEach(function(x){
+      var a = normCombo(x);
+      if(!a) return;
+      if(a.k === "timer") arr.push(["t", a.sec, a.name]);
+      else if(a.k === "track") arr.push(["m", a.id, a.loop, a.vol]);
+      else if(a.k === "folder") arr.push(["f", a.id, a.loop, a.vol]);
+      else if(a.k === "tab") arr.push(["o", a.key]);
+      else if(a.k === "bm") arr.push(["b", a.hash, a.bid]);
+      else if(a.k === "note") arr.push(["n", a.id]);
+      else if(a.k === "task") arr.push(["k", a.qid, a.tab, a.tag, a.text]);
+      else if(a.k === "event") arr.push(["e", a.text]);
+    });
+    return COMBO_PREFIX + JSON.stringify(arr);
+  }
+  function parseCombo(body){
+    var arr;
+    try{ arr = JSON.parse(body); }catch(e){ return null; }
+    if(!Array.isArray(arr)) return null;
+    var list = [];
+    for(var i = 0; i < arr.length; i++){
+      var r = arr[i];
+      if(!Array.isArray(r)) return null;
+      var a = null;
+      if(r[0] === "t") a = { k: "timer", sec: r[1], name: r[2] };
+      else if(r[0] === "m") a = { k: "track", id: r[1], loop: r[2], vol: r[3] };
+      else if(r[0] === "f") a = { k: "folder", id: r[1], loop: r[2], vol: r[3] };
+      else if(r[0] === "o") a = { k: "tab", key: r[1] };
+      else if(r[0] === "b") a = { k: "bm", hash: r[1], bid: r[2] };
+      else if(r[0] === "n") a = { k: "note", id: r[1] };
+      else if(r[0] === "k") a = { k: "task", qid: r[1], tab: r[2], tag: r[3], text: r[4] };
+      else if(r[0] === "e") a = { k: "event", text: r[1] };
+      if(!a) return null;
+      list.push(a);
+    }
+    return normComboList(list);
+  }
+
   function parseCode(text){
     var t = String(text == null ? "" : text).replace(/^[\s\uFEFF]+|[\s\uFEFF]+$/g, ""); // \uFEFF: библиотека QR ставит BOM перед текстом с кириллицей
     if(t === TODAY_CODE) return { kind: "today" };
@@ -93,6 +207,12 @@ window.CardScan = (function(){
       if(wm && wla >= -90 && wla <= 90 && wlo >= -180 && wlo <= 180){
         return { kind: "weather", lat: wla, lon: wlo, title: (wm[3] || "").replace(/\s+/g, " ").replace(/^ | $/g, "").slice(0, 80) };
       }
+      return { kind: "unknown", text: t };
+    }
+    if(t.indexOf(COMBO_PREFIX) === 0){
+      // «Комбинированный»: несколько действий одним кодом — карточка на устройстве не нужна
+      var cacts = parseCombo(t.slice(COMBO_PREFIX.length));
+      if(cacts) return { kind: "combo", acts: cacts };
       return { kind: "unknown", text: t };
     }
     if(t.indexOf(HABIT_PREFIX) === 0){
@@ -239,7 +359,7 @@ window.CardScan = (function(){
       dn = Math.max(0, Math.min(1, dn));
       var need = HOLD_MIN_MS + (HOLD_EDGE_MS - HOLD_MIN_MS) * dn;
       var parsed = parseCode(text), kind = parsed.kind;
-      var sideEffect = kind === "task" || kind === "timer" || kind === "habit" || kind === "alarm";
+      var sideEffect = kind === "task" || kind === "timer" || kind === "habit" || kind === "alarm" || kind === "combo";
       // opts.longHold(разобранный код): приложение знает карточки — скан «Привычки» тоже отмечает день без отмены, как и таймер/задача
       if(!sideEffect && typeof opts.longHold === "function"){ try{ sideEffect = !!opts.longHold(parsed); }catch(e){} }
       if(sideEffect) need = Math.max(need, HOLD_SIDE_EFFECT_MS);
@@ -400,5 +520,5 @@ window.CardScan = (function(){
     return { close: close };
   }
 
-  return { parseCode: parseCode, open: open, QR_PREFIX: QR_PREFIX, NOTE_PREFIX: NOTE_PREFIX };
+  return { parseCode: parseCode, open: open, QR_PREFIX: QR_PREFIX, NOTE_PREFIX: NOTE_PREFIX, COMBO_PREFIX: COMBO_PREFIX, COMBO_MAX: COMBO_MAX, comboCode: comboCode, comboCategory: comboCategory, normCombo: normCombo, normComboList: normComboList };
 })();

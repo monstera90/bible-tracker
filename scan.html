@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <!-- scan.html
+     Версия: 1.6 (26.10) — `deps.music` (QR «Комбинированный» в окне ярлыка включает трек/папку через мост: `bridge.musicPlayTrack`/`musicPlayFolder`).
      Версия: 1.5 (24.10) — `deps.alarms` (скан кода будильника в окне ярлыка заводит будильник через мост: `bridge.setAlarm`/`cancelAlarm`/`getAlarms`).
      Версия: 1.4 (24.10) — `deps.timers.start` умеет скрытый таймер (`bridge.startHiddenTimer`, без острова и уведомления «идёт»).
      Версия: 1.3 (24.10) — подключён `eventlog.js` (запись сканирований в журнал событий).
@@ -63,6 +64,10 @@
         set: function(id, title, h, m, every, times){ return Number(bridge.setAlarm(String(id), String(title || ""), h | 0, m | 0, every | 0, times | 0)) || 0; },
         cancel: function(id){ if(typeof bridge.cancelAlarm === "function") bridge.cancelAlarm(String(id)); },
         list: function(){ try{ return JSON.parse(bridge.getAlarms() || "[]"); }catch(e){ return []; } }
+      } : null,
+      music: (bridge && typeof bridge.musicPlayTrack === "function") ? {
+        track: function(id, loop, vol){ return !!bridge.musicPlayTrack(String(id), !!loop, vol | 0); },
+        folder: function(id, loop, vol){ return !!bridge.musicPlayFolder(String(id), !!loop, vol | 0); }
       } : null,
       native: bridge ? {
         openInApp: function(id, mode){ bridge.openInApp(String(id), String(mode)); },

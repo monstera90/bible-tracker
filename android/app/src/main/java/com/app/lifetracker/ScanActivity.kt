@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.0 (26.10) — мост ScanBridge: musicPlayTrack / musicPlayFolder (QR «Комбинированный» из окна ярлыка включает трек или папку через MusicPlayer; приложение не открывается).
 // Версия: 4.0 (24.10) — мост ScanBridge: setAlarm / cancelAlarm / getAlarms (скан кода будильника в окне ярлыка заводит будильник CardAlarms).
 // Версия: 3.0 (24.10) — мост ScanBridge: startHiddenTimer (скан кода скрытого таймера из окна ярлыка: без острова и уведомления «идёт»).
 // Версия: 2.0 (21.10) — мост ScanBridge: cancelTimer («Стоп» на карточке в окне ярлыка).
@@ -317,6 +318,18 @@ class ScanActivity : ComponentActivity() {
             if (id == null || !CARD_ID_RE.matches(id)) return
             CardTimers.cancel(applicationContext, id)
         }
+
+        /** QR «Комбинированный»: играть один трек по id документа (папка с музыкой должна быть выбрана в приложении). */
+        @JavascriptInterface
+        fun musicPlayTrack(trackId: String?, loop: Boolean, volumePct: Int): Boolean {
+            if (trackId.isNullOrEmpty()) return false
+            return MusicPlayer.playSingle(applicationContext, trackId, loop, volumePct)
+        }
+
+        /** QR «Комбинированный»: играть папку по id (пустой — вся выбранная папка). */
+        @JavascriptInterface
+        fun musicPlayFolder(folderId: String?, loop: Boolean, volumePct: Int): Boolean =
+            MusicPlayer.playFolder(applicationContext, folderId, loop, volumePct)
 
         /** Снимок таймеров (тот же JSON, что у NativeBridge.getCardTimers) — показать оставшееся время на карточке. */
         @JavascriptInterface

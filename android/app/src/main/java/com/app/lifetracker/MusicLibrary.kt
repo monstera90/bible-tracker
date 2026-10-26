@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (26.10) — `displayName(ctx, docId)`: имя документа по id (нужно, чтобы играть трек/папку прямо по id из QR «Комбинированный», без списка папки).
 // Версия: 1.0 (25.10)
 
 import android.content.Context
@@ -63,6 +64,15 @@ object MusicLibrary {
     }
 
     fun docUri(tree: Uri, docId: String): Uri = DocumentsContract.buildDocumentUriUsingTree(tree, docId)
+
+    /** Имя документа (файла или папки) по его id; пустой id — выбранная папка целиком. null — такого документа нет или он вне выбранной папки. */
+    fun displayName(ctx: Context, docId: String?): String? {
+        val tree = treeUri(ctx) ?: return null
+        if (docId.isNullOrEmpty()) {
+            return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_NAME, null) ?: "Музыка"
+        }
+        return queryName(ctx, tree, docId)
+    }
 
     private fun queryName(ctx: Context, tree: Uri, docId: String): String? {
         return try {
