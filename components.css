@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
    Версия: 16.2 (27.10) — `.cal-week`: `touch-action:pan-y` (горизонтальный жест отдан странице: за пальцем едет неделя, см. calendar.js 8.0). Откат: components.css 16.1.
    Версия: 16.1 (26.10) — `.cal-wk-today b`: число сегодняшнего дня снова под подписью дня недели (был inline-block — вставал в строку с «Пн»), кружок по центру колонки. Откат: components.css 16.0.
    Версия: 16.0 (25.10) — структурная правка: цвета календарей (`--cal-personal` = цвет «Радости» `--mood-joy`, `--cal-shared` = `--wood`; классы `.cal-c-personal`/`.cal-c-shared`): полоса слева у строк списка, заливка блоков недели; у `.cal-week` убраны боковые поля.
@@ -3068,9 +3069,8 @@
   .lt-hl-rect{ position:absolute; background:var(--gold-light); border-radius:2px; }
   /* Хосты слоя подсветки без собственного позиционирования (строка задачи, прокрутка CodeMirror): слой z-index:-1 остаётся внутри. */
   .lt-hl-host{ position:relative; isolation:isolate; }
-  /* «Копировать» и маркер в нижнем ряду заметки — только в режиме редактирования; в режиме чтения (и полноэкранном) их заменяет
-     жест удержания (mdeditor.js, bindNoteHoldMarker). */
-  .settings-modal-overlay.reading-mode-active #mdEditorCopyBtn,
+  /* Маркер в нижнем ряду заметки — только в режиме редактирования; в режиме чтения (и полноэкранном) его заменяет жест удержания
+     (mdeditor.js, bindNoteHoldMarker). «Копировать» (#mdEditorCopyBtn) остаётся видна во всех режимах. */
   .settings-modal-overlay.reading-mode-active #mdEditorHighlightBtn{ display:none; }
   /* Подсветка протяжки ==выделения== в задачах и заметках — цвет готового .fmt-mark / .cm-md-mark */
   .lt-hl-layer.lt-hl-fmt .lt-hl-rect{ background:#f3e08a; }

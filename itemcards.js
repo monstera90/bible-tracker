@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 30.0 (27.10) — структурная правка: у карточек «Сегодня» и «Напоминалка» появилась кнопка «Пуск» (`runSingletonCard`: то же, что скан их QR — новая заметка с датой / случайное напоминание слоем); у будильника кнопка «Завести» переименована в «Пуск» (действие то же, `startAlarmForCard`). Откат: itemcards.js 29.1.
    Версия: 29.1 (26.10) — «Избранное»: скрытые карточки не бледнеют и заливкой (`cardBg` не делает цвет полупрозрачным в этом фильтре).
    Версия: 29.0 (26.10) — структурная правка: «Избранное» больше не рисует скрытые карточки серыми (`.item-card-hidden` только вне фильтра «Избранное»); комбо: громкость — прямо громкость телефона (поток музыки, ставит оболочка), галочка «Наушники должны быть обязательно подключены» у трека/папки (поле `hp`, `comboHeadphonesOn`; без наушников не выполняется ни одно действие кода, слой «Вначале подключи наушники»). Нужен мост версии 15 (`musicHeadphones`). Откат: itemcards.js 28.0.
    Версия: 28.0 (26.10) — структурная правка: тип «Комбинированный» (`combo`): до 5 действий одним QR-кодом `lt://v1/combo/<JSON>` и кнопкой «Пуск» (таймер; музыкальный трек/папка с зацикливанием и громкостью; открыть вкладку/закладку/заметку; добавить задачу по id; событие в журнал). Новое: `runCombo`, `comboRun*`, `showComboResultOverlay`, `drainPendingCombos`, `openComboForm`, `comboPicker`, `comboMusicPicker`, `comboActs*`; деп `getComboTabs`/`openComboTab`/`getComboBookmarks`/`openComboBookmark`/`addComboTask`/`music`; вход оболочки `combo`; очередь `pendingScanCombos_v1`. Нужен мост версии 14 (музыка). Откат: itemcards.js 27.0.
@@ -840,7 +841,7 @@ window.initItemCardsModule = function(deps){
         '<div class="item-card-date item-card-alarm-state" data-alarm-id="' + escapeHtml(runId(c)) + '"></div>' +
         '<div class="item-card-timer-btns">' +
           '<button type="button" class="item-card-stop-btn" title="Выключить будильник">Выкл.</button>' +
-          '<button type="button" class="item-card-start-btn" title="Завести будильник">Завести</button>' +
+          '<button type="button" class="item-card-start-btn" title="Запустить будильник">Пуск</button>' +
         '</div>';
     }
     if(c.type === "weather"){ // значок погоды и название города
@@ -876,7 +877,11 @@ window.initItemCardsModule = function(deps){
     return '<div class="item-card-icon">' + icon + '</div>' +
       '<div class="item-card-title"></div>' +
       '<div class="item-card-date">' + escapeHtml(isoToRu(c.date)) + '</div>' +
-      remindBtnHtml(c);
+      remindBtnHtml(c) +
+      (isSingletonCard(c) ? // «Сегодня» и «Напоминалка»: «Пуск» делает то же, что скан их QR-кода
+        '<div class="item-card-timer-btns">' +
+          '<button type="button" class="item-card-start-btn" title="' + (c.type === "reminder" ? 'Показать напоминание' : 'Создать заметку с сегодняшней датой') + '">Пуск</button>' +
+        '</div>' : '');
   }
   function renderGrid(){
     screenMode = "grid";
@@ -1165,6 +1170,7 @@ window.initItemCardsModule = function(deps){
       if(flippedId === id){ flipCard(id, false); return; } // тап по QR/обороту — назад
       if(flippedId) unflipAny();
       if(c.type === "weather" && e.target.closest(".item-card-wx-btn")){ hideRevealed(); showWeatherOverlay(c); return; } // «Показать»: погода без скана QR
+      if(isSingletonCard(c) && e.target.closest(".item-card-start-btn")){ hideRevealed(); runSingletonCard(c); return; } // «Пуск» у «Сегодня» и «Напоминалки»
       if(e.target.closest(".item-card-start-btn")){ startTimerForCard(c); return; } // «Пуск»: запуск, а если уже идёт — заново
       if(e.target.closest(".item-card-stop-btn")){ stopTimerForCard(c); return; } // «Стоп»: отмена таймера
       if(revealedIds[id]){ hideRevealed(); return; }
@@ -1878,7 +1884,7 @@ window.initItemCardsModule = function(deps){
   function evLog(text, opts){ try{ if(window.EventLog) window.EventLog.add(text, opts); }catch(e){} }
   function startTimerForCard(c){
     if(c && c.type === "combo"){ runCombo(c.acts, { card: c }); return; } // «Пуск» комбинированного: все действия разом
-    if(c && c.type === "alarm"){ startAlarmForCard(c); return; } // кнопки «Завести» и «Выкл.» у будильника те же, что у таймера
+    if(c && c.type === "alarm"){ startAlarmForCard(c); return; } // кнопки «Пуск» и «Выкл.» у будильника те же, что у таймера
     if(!c || c.type !== "timer" || !(c.seconds > 0)) return;
     try{ getTimerApi().start(runId(c), c.title || "", c.seconds, !!c.noIsland); }catch(e){}
     try{ if(window.EventLog) window.EventLog.timerStarted(runId(c), c.title || "", c.seconds); }catch(e){}
@@ -2477,6 +2483,11 @@ window.initItemCardsModule = function(deps){
     showCardOverlay(c);
   }
   function openDatedNoteFromScan(c){ openTodayFromScan(c.id); }
+  // «Пуск» на карточке «Сегодня» / «Напоминалка» — ровно то же, что скан их QR-кода
+  function runSingletonCard(c){
+    if(c.type === "datenote") openTodayFromScan(c.id);
+    else if(c.type === "reminder") showReminderOverlay();
+  }
   function openTodayFromScan(id){
     evLog("Сегодня");
     if(standalone){
@@ -2590,7 +2601,7 @@ window.initItemCardsModule = function(deps){
     card.querySelector(".item-card-title").textContent = cardTitle(c);
     card.addEventListener("click", function(e){
       e.stopPropagation();
-      if((c.type === "timer" || c.type === "alarm") && e.target.closest(".item-card-start-btn")) startTimerForCard(c); // «Пуск» на показе: заново («Завести» у будильника)
+      if((c.type === "timer" || c.type === "alarm") && e.target.closest(".item-card-start-btn")) startTimerForCard(c); // «Пуск» на показе: заново (у будильника — завести)
       if((c.type === "timer" || c.type === "alarm") && e.target.closest(".item-card-stop-btn")) stopTimerForCard(c); // «Стоп» на показе («Выкл.» у будильника)
     });
     o.appendChild(card);
