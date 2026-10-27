@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
    Версия: 88.0 (27.10) — структурная правка: комментарий дня «Карты дней года» и поле «Комментарий за сегодня» хранятся в заметке этого дня (имя `дд.мм.гггг`, папка `notes`; mdeditor.js 17.0): `getHourNoteForDay`/`setHourNoteForDay`/`getHourNotesByDay` читают и пишут заметки, старые `hournote:` один раз переносятся (`migrateHourNotesToNotes`) и обнуляются; короткий (≤300 знаков, ≤3 строк) правится на месте, длинный — превью и «Открыть в редакторе» (`isShortDayNote`, `openDayNoteInEditor`, `setupHourNoteLongUi`); экспорт `dailyNotesLog` отдаёт полный текст. Откат: my.js 87.0.
    Версия: 87.0 (27.10)
    Версия: 86.0 (27.10) — «Комбинированный»: `openComboBookmark` не нашёл закладку по id — берёт текущую основную закладку книги (её id меняется при каждом переносе). Откат: my.js 85.0.
@@ -3543,6 +3544,7 @@
     // список заметок/вкладка "Закладки", перерисовать (см. refreshBookmarksFromState в
     // mdeditor.js).
     if(MdEditor && MdEditor.refreshBookmarksFromState) MdEditor.refreshBookmarksFromState();
+    refreshHiddenTabsFromState(); // скрытые вкладки приходят из облака вместе с state
     // Если сейчас открыта одна из вкладок задач
     // (red/inbox/next/projects/waiting/read/someday/archive) — её тоже нужно перерисовать из
     // свежего state: rerenderAllFromState вызывается только после слияния с облаком (см.
@@ -8447,7 +8449,7 @@
         "taskRemindersFired_v1": "уже показанные напоминания задач",
         "itemCards_v1": "записи карточек предметов (вкладка 9)",
         "itemCardsSize_v1": "размер карточек предметов на этом устройстве",
-        "bibleHiddenSettingsTabs_v1": "скрытые вкладки окна настроек (id кнопок вкладок)"
+        "bibleHiddenSettingsTabs_v1": "скрытые вкладки окна настроек (id кнопок вкладок) — старое хранилище, читается только для переноса в state"
       },
       exclude: {
         "bibleReadingProgress_v2": "это сам state, идёт через rawState",
@@ -18269,22 +18271,46 @@
   // Не скрываются: шестерёнка (колесо) и вкладки самого режима колеса (alt1..alt6) — иначе до настроек не добраться.
   // Скрытие — класс .settings-tab-user-hidden (display:none !important) на кнопке, поверх любой другой логики показа
   // (галочка «Показать все мои задачи», режим колеса и т.п.). В хранилище — id кнопок: bibleHiddenSettingsTabs_v1.
-  var HIDDEN_TABS_KEY = "bibleHiddenSettingsTabs_v1";
+  var HIDDEN_TABS_KEY = "bibleHiddenSettingsTabs_v1"; // старое хранилище (localStorage этого устройства) — только для переноса
+  // С 27.10 список скрытых вкладок лежит в state (`__hiddenTabs` = {c: [id кнопок], t}) и ездит через облако: скрыли вкладки на
+  // одном устройстве — они скрываются на всех устройствах аккаунта (слияние по последнему t, как у остальных настроек).
+  var HIDDEN_TABS_STATE_KEY = "__hiddenTabs";
+  // значение — строка «v1:id1,id2» (а не массив): Firebase отбрасывает пустые массивы, и «показать все вкладки» не дошло бы до других устройств
+  var HIDDEN_TABS_PREFIX = "v1:";
   var hiddenSettingsTabIds = null; // {id кнопки: true}
   function loadHiddenSettingsTabs(){
     if(hiddenSettingsTabIds) return hiddenSettingsTabIds;
     hiddenSettingsTabIds = {};
+    var rec = state[HIDDEN_TABS_STATE_KEY];
+    if(rec && typeof rec.c === "string" && rec.c.indexOf(HIDDEN_TABS_PREFIX) === 0){
+      rec.c.slice(HIDDEN_TABS_PREFIX.length).split(",").forEach(function(id){ if(id) hiddenSettingsTabIds[id] = true; });
+      return hiddenSettingsTabIds;
+    }
+    // в state списка ещё нет: переносим список этого устройства (t=1 — любое настоящее изменение на другом устройстве новее)
     try{
       var arr = JSON.parse(localStorage.getItem(HIDDEN_TABS_KEY) || "[]");
-      if(Array.isArray(arr)) arr.forEach(function(id){ if(typeof id === "string") hiddenSettingsTabIds[id] = true; });
+      if(Array.isArray(arr)){
+        arr.forEach(function(id){ if(typeof id === "string") hiddenSettingsTabIds[id] = true; });
+        if(arr.length){
+          state[HIDDEN_TABS_STATE_KEY] = {c: HIDDEN_TABS_PREFIX + Object.keys(hiddenSettingsTabIds).join(","), t: 1};
+          saveLocalStateNow();
+          scheduleCloudPush();
+        }
+      }
     }catch(e){}
     return hiddenSettingsTabIds;
   }
   function saveHiddenSettingsTabs(){
-    try{
-      var ids = Object.keys(hiddenSettingsTabIds || {});
-      if(ids.length) localStorage.setItem(HIDDEN_TABS_KEY, JSON.stringify(ids)); else localStorage.removeItem(HIDDEN_TABS_KEY);
-    }catch(e){}
+    state[HIDDEN_TABS_STATE_KEY] = {c: HIDDEN_TABS_PREFIX + Object.keys(hiddenSettingsTabIds || {}).join(","), t: Date.now()};
+    saveLocalStateNow();
+    scheduleCloudPush();
+    try{ localStorage.removeItem(HIDDEN_TABS_KEY); }catch(e){}
+  }
+  // после слияния с облаком (rerenderAllFromState): перечитать список и обновить вкладки, а если открыт экран «Скрытие вкладок» — и его
+  function refreshHiddenTabsFromState(){
+    hiddenSettingsTabIds = null;
+    applyHiddenSettingsTabs();
+    if(document.querySelector("#settingsTabContent input[data-tab-btn]")) renderSettingsTabHiddenTabs();
   }
   function ensureHiddenTabsStyle(){
     if(document.getElementById("hiddenTabsStyle")) return;
