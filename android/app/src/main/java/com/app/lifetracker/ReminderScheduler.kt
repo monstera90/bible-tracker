@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.2 (27.10) — повторы «день»/«неделя» и repeatDays считаются по календарным суткам (`daysAdd`, `kindAdd`): после перевода часов срок не сдвигается на час, как и в itemcards.js 30.1.
 // Версия: 1.1 (24.10) — повтор по видам (repeatKind: hour/8h/day/week/month/year), `kindAdd`/`kindLast`.
 // Версия: 1.0 (17.10) — fireDue: повторяющиеся напоминания (repeatDays) сдвигают срок на период, а не выбывают.
 
@@ -85,6 +86,7 @@ object ReminderScheduler {
 
     /** Срок номер k от базы base. Месяц/год — по календарю: 31 января + 1 месяц = конец февраля (как в itemcards.js addMonthsTs). */
     private fun kindAdd(base: Long, kind: String, k: Long): Long = when (kind) {
+        "day", "week" -> daysAdd(base, if (kind == "week") 7 * k else k)
         "month", "year" -> {
             val cal = java.util.Calendar.getInstance()
             cal.timeInMillis = base
@@ -92,6 +94,14 @@ object ReminderScheduler {
             cal.timeInMillis
         }
         else -> base + k * (kindStep(kind) ?: 0L)
+    }
+
+    /** base + n календарных суток: время суток сохраняется при переводе часов (24 ч × n его сдвинули бы на час). */
+    private fun daysAdd(base: Long, n: Long): Long {
+        val cal = java.util.Calendar.getInstance()
+        cal.timeInMillis = base
+        cal.add(java.util.Calendar.DAY_OF_YEAR, n.toInt())
+        return cal.timeInMillis
     }
 
     /** Наибольший k ≥ 0, при котором срок не позже t (base ≤ t); иначе 0. */
@@ -120,10 +130,12 @@ object ReminderScheduler {
             } else if (r.repeatDays > 0) {
                 // Повторяющееся (карточка): одно уведомление за все пропущенные сроки. «Отработанным» считаем последний
                 // наступивший срок (база + k периодов), следующий — через период; страница считает так же (itemcards.js).
-                val period = r.repeatDays * 86_400_000L
-                val last = r.at + ((now - r.at) / period) * period
-                NotifyStore.markFired(ctx, r.id, last, shown)
-                NotifyStore.updateReminderAt(ctx, r.id, last + period)
+                val days = r.repeatDays.toLong()
+                var k = maxOf(0L, (now - r.at) / (days * 86_400_000L))
+                while (daysAdd(r.at, (k + 1) * days) <= now) k++
+                while (k > 0 && daysAdd(r.at, k * days) > now) k--
+                NotifyStore.markFired(ctx, r.id, daysAdd(r.at, k * days), shown)
+                NotifyStore.updateReminderAt(ctx, r.id, daysAdd(r.at, (k + 1) * days))
             } else {
                 NotifyStore.markFired(ctx, r.id, r.at, shown)
             }

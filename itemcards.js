@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 30.1 (27.10) — повтор напоминаний «каждый день»/«каждую неделю» и «каждые N дней» считается по календарным дням (`addDaysTs`, `dayIdx`): после перевода часов срок не уезжает на час (раньше прибавлялось ровно 24 ч × N). Откат: itemcards.js 30.0.
    Версия: 30.0 (27.10) — структурная правка: у карточек «Сегодня» и «Напоминалка» появилась кнопка «Пуск» (`runSingletonCard`: то же, что скан их QR — новая заметка с датой / случайное напоминание слоем); у будильника кнопка «Завести» переименована в «Пуск» (действие то же, `startAlarmForCard`). Откат: itemcards.js 29.1.
    Версия: 29.1 (26.10) — «Избранное»: скрытые карточки не бледнеют и заливкой (`cardBg` не делает цвет полупрозрачным в этом фильтре).
    Версия: 29.0 (26.10) — структурная правка: «Избранное» больше не рисует скрытые карточки серыми (`.item-card-hidden` только вне фильтра «Избранное»); комбо: громкость — прямо громкость телефона (поток музыки, ставит оболочка), галочка «Наушники должны быть обязательно подключены» у трека/папки (поле `hp`, `comboHeadphonesOn`; без наушников не выполняется ни одно действие кода, слой «Вначале подключи наушники»). Нужен мост версии 15 (`musicHeadphones`). Откат: itemcards.js 28.0.
@@ -685,9 +686,17 @@ window.initItemCardsModule = function(deps){
     d.setDate(Math.min(day, last));
     return d.getTime();
   }
-  // срок номер k от базы (k = 0 — сама база)
+  // прибавить n календарных суток: время суток («8:00») сохраняется и при переводе часов (24 ч × n его сдвинули бы на час)
+  function addDaysTs(ts, n){
+    var d = new Date(ts);
+    d.setDate(d.getDate() + n);
+    return d.getTime();
+  }
+  // срок номер k от базы (k = 0 — сама база); сутки и недели — по календарю, часы — ровно по времени
   function addKind(base, kind, k){
     var info = kindInfo(kind);
+    if(kind === "day") return addDaysTs(base, k);
+    if(kind === "week") return addDaysTs(base, 7 * k);
     if(info.ms) return base + k * info.ms;
     return addMonthsTs(base, kind === "year" ? 12 * k : k);
   }
@@ -716,17 +725,24 @@ window.initItemCardsModule = function(deps){
     }
     var base = Number(c && c.remindAt) || 0;
     if(!(base > 0)) return 0;
-    var p = repeatOf(c) * DAY_MS;
-    if(!p) return base;
+    var rd = repeatOf(c);
+    if(!rd) return base;
     var done = Number(c.remindDone) || 0;
     if(done < base) return base;
-    return base + (Math.floor((done - base) / p) + 1) * p;
+    return addDaysTs(base, (dayIdx(base, rd, done) + 1) * rd);
+  }
+  // наибольший k ≥ 0, при котором срок «база + k × days суток» (по календарю) не позже t
+  function dayIdx(base, days, t){
+    var k = Math.max(0, Math.floor((t - base) / (days * DAY_MS)));
+    while(addDaysTs(base, (k + 1) * days) <= t) k++;
+    while(k > 0 && addDaysTs(base, k * days) > t) k--;
+    return k;
   }
   // последний наступивший срок повтора (новые с другого устройства карточки не должны «догонять» прошлое)
   function markPastDone(c){
     if(kindOf(c)){ var lo = lastOcc(c, Date.now()); if(lo) c.remindDone = lo; return; }
-    var p = repeatOf(c) * DAY_MS, base = Number(c.remindAt) || 0, now = Date.now();
-    if(p && base > 0 && base <= now) c.remindDone = base + Math.floor((now - base) / p) * p;
+    var rd = repeatOf(c), base = Number(c.remindAt) || 0, now = Date.now();
+    if(rd && base > 0 && base <= now) c.remindDone = addDaysTs(base, dayIdx(base, rd, now) * rd);
   }
   function remindBtnHtml(c){
     if(c.type === "timer" || c.type === "remind" || isSingletonCard(c) || !deps.reminderBtnParts) return "";
