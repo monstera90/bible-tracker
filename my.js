@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 86.1 (27.10) — «Карта дней года»: пропадали все дни до перевода часов (DST, 25.10) — дни считались шагом 24 ч от полуночи и не совпадали с ключами `startOfDay`; теперь через календарную дату (`dayShift` в `buildYearGridMarkup`). Откат: my.js 86.0.
+   Версия: 87.0 (27.10)
    Версия: 86.0 (27.10) — «Комбинированный»: `openComboBookmark` не нашёл закладку по id — берёт текущую основную закладку книги (её id меняется при каждом переносе). Откат: my.js 85.0.
    Версия: 85.0 (26.10) — структурная правка: вкладка `screentime` «Трекер экранов» (`screentime.js`) — самый верхний язычок стека набора 1, над «События»: `SCREENTIME_TAB_KEY`/`SCREENTIME_TAB_BTN_ID`, `renderSettingsTabScreenTime`, `ScreenTime.init` (счётчики в `state["__screenTime:<deviceId>"]`), вызовы `ScreenTime.setAppActive` в `__ltOnAppPause`/`__ltOnAppResume`.
    Версия: 84.0 (26.10) — структурная правка: «Комбинированный» (itemcards.js 28.0): `getComboTabList`, `openComboTab`, `getComboBookmarks`, `openComboBookmark`, `addComboTask` (задача по id `c.qid`: не создаётся, пока невыполненная с таким id есть на любой вкладке; выполненная — архив — создаётся снова); деп-ы у `initItemCardsModule`; вход оболочки `combo` не переключает вкладку. Откат: my.js 83.1.
@@ -18061,6 +18061,11 @@
       closeReviewSubScreen();
       return;
     }
+    if(tab === "year" && tab === currentSettingsTab && yearDayDetailOpen){
+      if(window.AppNav) history.back();
+      else renderSettingsTabYear(yearGridScrollKeep);
+      return;
+    }
     if(bottomAltMode && !BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab)) return;
     if(tab === currentSettingsTab) return;
     switchSettingsTab(tab);
@@ -19554,9 +19559,34 @@
   }
 
   // --- детализация по тапу на день ---
-  // Отдельной кнопки закрытия ("крестик") здесь нет: чтобы вернуться к сетке, достаточно ещё раз
-  // нажать на язычок настроек "Карта дней года" — он всегда заново отрисовывает сетку (см.
-  // switchSettingsTab → renderSettingsTabYear).
+  // Отдельной кнопки закрытия ("крестик") здесь нет: вернуться к сетке можно жестом/кнопкой
+  // "назад" (запись в AppNav кладёт openYearDayDetail) или повторным нажатием на язычок настроек
+  // "Карта дней года" (switchSettingsTabOnClick → history.back()).
+  // День — отдельный "экран" с точки зрения "назад": без записи в стеке жест уходил на запись
+  // переключения вкладки и перебрасывал на прежнюю вкладку, минуя саму карту.
+  // yearDayDetailOpen — на экране сейчас день (сбрасывает renderSettingsTabYear); yearGridScrollKeep —
+  // прокрутка сетки на момент входа в день, чтобы вернуться на то же место.
+  var yearDayDetailOpen = false;
+  var yearGridScrollKeep = null;
+  function openYearDayDetail(dayTs){
+    var holder = document.getElementById("yearGridVScroll");
+    yearGridScrollKeep = holder ? holder.scrollTop : null;
+    yearDayDetailOpen = true;
+    if(window.AppNav){
+      window.AppNav.push(function(){
+        if(currentSettingsTab === "year" && yearDayDetailOpen){
+          flushPendingYearDayNoteEdit();
+          flushPendingYearCommentEdits();
+          renderSettingsTabYear(yearGridScrollKeep);
+        } else {
+          // запись устарела (день уже закрыт другим путём или вкладку покидали) — не глотаем
+          // "назад", а передаём дальше
+          history.back();
+        }
+      });
+    }
+    renderYearDayDetail(dayTs);
+  }
   function renderYearDayDetail(dayTs){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -19893,9 +19923,10 @@
   // внутренней прокруткой. Пояснение ("летопись") — не отдельный блок под сеткой, а первый элемент
   // внутри той же прокрутки, над самой старой неделей: по умолчанию окно открыто прокрученным вниз
   // (к сегодня), так что пояснение видно, только если докрутить ленту до самого верха. ---
-  function renderSettingsTabYear(){
+  function renderSettingsTabYear(keepScrollTop){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
+    yearDayDetailOpen = false; // на экране сетка, не день (см. openYearDayDetail)
 
     var built = buildYearGridMarkup();
 
@@ -19932,12 +19963,13 @@
         var cell = e.target.closest ? e.target.closest("[data-day-ts]") : null;
         if(!cell) return;
         var ts = Number(cell.getAttribute("data-day-ts"));
-        if(!isNaN(ts)) renderYearDayDetail(ts);
+        if(!isNaN(ts)) openYearDayDetail(ts);
       });
       // сразу прокручиваем к текущей неделе (в самый низ сетки) — пояснение наверху ленты остаётся
-      // скрыто, пока не прокрутить наверх вручную
+      // скрыто, пока не прокрутить наверх вручную; при возврате из дня («назад») — на то место
+      // сетки, где её оставили (keepScrollTop)
       requestAnimationFrame(function(){
-        scrollHolder.scrollTop = scrollHolder.scrollHeight;
+        scrollHolder.scrollTop = (typeof keepScrollTop === "number") ? keepScrollTop : scrollHolder.scrollHeight;
       });
     }
   }
