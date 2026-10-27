@@ -1,5 +1,6 @@
 /* ===========================================================================
    calendar.js
+   Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
    под «В работе»). Точка входа — window.CalendarTab.render(); my.js зовёт её из switchSettingsTab (renderSettingsTabCalendar).
@@ -94,6 +95,8 @@
   var mode = "list";    // выбранный режим: "list" | "week" (хранится в MODE_KEY)
   var weekStart = null; // начало (понедельник 00:00) показанной недели; null — текущая
   var weekScrollKeep = null; // прокрутка недели, которую вернуть после формы
+  var weekScrollToNow = false; // кнопка «Сегодня»: один раз прокрутить к красной линии (иначе неделя всегда открывается с 7:00)
+  var WEEK_SLIDE_MS = 260;   // длительность доезжания недели при перелистывании
   var hourPx = HOUR_DEFAULT; // текущая высота часа в неделе
   var pinchEndedAt = 0;      // когда закончился щипок (тап сразу после него игнорируется)
   var expanded = {};   // id серий, раскрытых в списке
@@ -502,10 +505,66 @@
     bindFab();
     syncFlush();
     applyCalColors(document.getElementById("calWeek"));
-    function shift(n){ weekStart = dayStartAt(ws, 7 * n); weekScrollKeep = c.scrollTop; renderWeek(); }
+    // Перелистывание недели как в Google Календаре: соседняя неделя (копия без id) ставится рядом, обе едут за пальцем
+    // (или сами по кнопкам ‹ ›), по окончании настоящая перерисовка renderWeek() подменяет копию — картинка не меняется.
+    var slide = null; // {dir, nw, nws, W, finishing}
+    var prevOverflowX = "";
+    function slideStart(dir){
+      var nws = dayStartAt(ws, 7 * dir);
+      // копия соседней недели кладётся ВНУТРИ текущей, сбоку (на ширину недели): едет вместе с ней как одна лента;
+      // сам элемент недели не переносится — палец, начавший жест на нём, не теряется
+      var W = wk.getBoundingClientRect().width || c.clientWidth || 360;
+      var nw = document.createElement("div");
+      nw.className = "cal-week cal-wk-clone";
+      nw.setAttribute("aria-hidden", "true");
+      nw.innerHTML = weekHtml(nws).replace(/\sid="[^"]*"/g, "");
+      nw.style.cssText = "position:absolute;top:0;left:0;width:100%;pointer-events:none;transform:translate3d(" + (dir * W) + "px,0,0);";
+      wk.style.position = "relative";
+      wk.appendChild(nw);
+      applyCalColors(nw);
+      prevOverflowX = c.style.overflowX;
+      c.style.overflowX = "hidden";
+      slide = { dir: dir, nw: nw, nws: nws, W: W, finishing: false };
+    }
+    function slideTo(dx, animate){
+      var s = slide;
+      if(!s) return;
+      dx = s.dir > 0 ? Math.min(0, Math.max(-s.W, dx)) : Math.max(0, Math.min(s.W, dx));
+      wk.style.transition = animate ? "transform " + WEEK_SLIDE_MS + "ms cubic-bezier(.2,.8,.2,1)" : "none";
+      wk.style.transform = "translate3d(" + dx + "px,0,0)";
+    }
+    function slideUnwrap(){
+      var s = slide;
+      if(!s) return;
+      slide = null;
+      wk.style.transform = ""; wk.style.transition = ""; wk.style.position = "";
+      if(s.nw.parentNode) s.nw.parentNode.removeChild(s.nw);
+      c.style.overflowX = prevOverflowX;
+    }
+    function slideFinish(commit, fromDx){
+      var s = slide;
+      if(!s || s.finishing) return;
+      s.finishing = true;
+      slideTo(commit ? -s.dir * s.W : 0, true);
+      setTimeout(function(){
+        if(slide !== s) return;
+        if(commit){
+          slide = null;
+          c.style.overflowX = prevOverflowX;
+          weekStart = s.nws; weekScrollKeep = c.scrollTop; renderWeek();
+        } else slideUnwrap();
+      }, WEEK_SLIDE_MS + 30);
+    }
+    function shift(n){
+      if(slide) return;
+      slideStart(n);
+      slideTo(0, false);
+      void wk.offsetWidth; // зафиксировать стартовое положение, чтобы переход анимировался
+      slideFinish(true);
+    }
     document.getElementById("calWkPrev").addEventListener("click", function(){ shift(-1); });
     document.getElementById("calWkNext").addEventListener("click", function(){ shift(1); });
-    document.getElementById("calWkToday").addEventListener("click", function(){ weekStart = null; weekScrollKeep = null; renderWeek(); });
+    document.getElementById("calWkToday").addEventListener("click", function(){ if(slide) return; weekStart = null; weekScrollKeep = null; weekScrollToNow = true; renderWeek(); });
     var wk = document.getElementById("calWeek");
     wk.addEventListener("click", function(e){
       if(Date.now() - pinchEndedAt < 350) return; // тап, оставшийся от щипка
@@ -526,13 +585,15 @@
       openForm(null, null, new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, 0, 0, 0).getTime());
     });
     // жесты: один палец — свайп недели; два пальца по вертикали — щипок (размер сетки)
-    var sx = 0, sy = 0, tracking = false;
+    var sx = 0, sy = 0, tracking = false, lock = null, t0 = 0, lastDx = 0; // lock: null | "h" (листаем неделю) | "v" (обычная прокрутка)
     var pinch = null; // {gap0, px0, anchor (минуты под серединой пальцев)}
     function gapOf(t){ return Math.abs(t[0].clientY - t[1].clientY); }
     function midOf(t){ return (t[0].clientY + t[1].clientY) / 2; }
     wk.addEventListener("touchstart", function(e){
+      if(slide && slide.finishing) return; // неделя ещё доезжает — новый жест не начинаем
       if(e.touches && e.touches.length === 2){
-        tracking = false;
+        tracking = false; lock = null;
+        if(slide) slideUnwrap(); // второй палец: перелистывание отменяется, дальше щипок
         var g = gapOf(e.touches);
         var body = document.getElementById("calWkBody");
         if(g >= PINCH_MIN_GAP && body){
@@ -541,9 +602,24 @@
         return;
       }
       if(!e.touches || e.touches.length !== 1){ tracking = false; return; }
-      sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true; lock = null; t0 = Date.now(); lastDx = 0;
     }, { passive: true });
     wk.addEventListener("touchmove", function(e){
+      if(!pinch && tracking && lock !== "v" && e.touches && e.touches.length === 1){
+        var mdx = e.touches[0].clientX - sx, mdy = e.touches[0].clientY - sy;
+        if(lock === null && (Math.abs(mdx) > 8 || Math.abs(mdy) > 8)){
+          lock = Math.abs(mdx) > Math.abs(mdy) * 1.4 ? "h" : "v";
+        }
+        if(lock === "h"){
+          if(e.cancelable) e.preventDefault();
+          var want = mdx < 0 ? 1 : -1;
+          if(slide && slide.dir !== want && mdx !== 0) slideUnwrap(); // палец перешёл на другую сторону — другая соседняя неделя
+          if(!slide && mdx !== 0) slideStart(want);
+          lastDx = mdx;
+          slideTo(mdx, false);
+        }
+        return;
+      }
       if(!pinch || !e.touches || e.touches.length !== 2) return;
       if(e.cancelable) e.preventDefault(); // не даём странице прокручиваться/масштабироваться самой
       var g = Math.max(gapOf(e.touches), 1);
@@ -564,21 +640,33 @@
         }
         return;
       }
-      if(!tracking || !e.changedTouches || !e.changedTouches.length) return;
+      if(!tracking) return;
       tracking = false;
-      var dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
-      if(Math.abs(dx) > SWIPE_DX && Math.abs(dy) < SWIPE_DY) shift(dx < 0 ? 1 : -1);
+      if(lock === "h" && slide){
+        var dx = lastDx, ms = Math.max(1, Date.now() - t0);
+        var far = Math.abs(dx) > Math.min(slide.W * 0.3, 140), fast = Math.abs(dx) / ms > 0.45 && Math.abs(dx) > 25;
+        var right = (slide.dir > 0) === (dx < 0); // ушли в сторону, где лежит соседняя неделя
+        pinchEndedAt = Date.now(); // тап, оставшийся от жеста, не открывает форму
+        slideFinish(right && (far || fast));
+      }
+      lock = null;
     }, { passive: true });
-    scrollWeek(c, ws === cur);
+    wk.addEventListener("touchcancel", function(){
+      tracking = false; lock = null;
+      if(slide && !slide.finishing) slideFinish(false);
+    }, { passive: true });
+    var goNow = weekScrollToNow; weekScrollToNow = false;
+    scrollWeek(c, goNow);
   }
-  function scrollWeek(c, isCurrent){
+  // isNow — только после кнопки «Сегодня»: прокрутить к красной линии; иначе (открытие вкладки, листание) день виден с 7:00
+  function scrollWeek(c, isNow){
     var keep = weekScrollKeep;
     weekScrollKeep = null;
     function go(){
       if(keep !== null){ c.scrollTop = keep; return; }
       var body = document.getElementById("calWkBody"), top = c.querySelector(".cal-wk-top");
       if(!body) return;
-      var hour = isCurrent ? Math.max(0, new Date().getHours() - 2) : 7;
+      var hour = isNow ? Math.max(0, new Date().getHours() - 2) : 7;
       var headH = top ? top.getBoundingClientRect().height : 0;
       c.scrollTop += body.getBoundingClientRect().top - c.getBoundingClientRect().top - headH + hour * hourPx;
     }

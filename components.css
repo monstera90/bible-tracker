@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 16.2 (27.10) — `.cal-week`: `touch-action:pan-y` (горизонтальный жест отдан странице: за пальцем едет неделя, см. calendar.js 8.0). Откат: components.css 16.1.
    Версия: 16.1 (26.10) — `.cal-wk-today b`: число сегодняшнего дня снова под подписью дня недели (был inline-block — вставал в строку с «Пн»), кружок по центру колонки. Откат: components.css 16.0.
    Версия: 16.0 (25.10) — структурная правка: цвета календарей (`--cal-personal` = цвет «Радости» `--mood-joy`, `--cal-shared` = `--wood`; классы `.cal-c-personal`/`.cal-c-shared`): полоса слева у строк списка, заливка блоков недели; у `.cal-week` убраны боковые поля.
    Версия: 15.1 (25.10) — `.cal-week`: `touch-action:pan-x pan-y` (щипок по сетке недели обрабатывает calendar.js, а не браузер).
@@ -4811,7 +4812,7 @@ body::after{
 .cal-scope .workbooks-run-btn{ width:100%; }
 
 /* Календарь, режим «Неделя» (calendar.js): шапка с навигацией и днями липкая, ниже сетка 24 часа; блоки событий — absolute внутри колонки дня */
-.cal-week{ font-family:"Palatino Linotype",Georgia,serif; color:var(--ink); padding:0 0 64px 0; touch-action:pan-x pan-y; }
+.cal-week{ font-family:"Palatino Linotype",Georgia,serif; color:var(--ink); padding:0 0 64px 0; touch-action:pan-y; }
 .cal-wk-top{ position:-webkit-sticky; position:sticky; top:0; z-index:3; background:var(--parchment); padding-top:4px; }
 .cal-wk-nav{ display:flex; align-items:center; gap:4px; padding:0 0 4px 0; }
 .cal-wk-title{ flex:1 1 auto; text-align:center; font-weight:bold; color:var(--wood); font-size:14px; min-width:0; }
