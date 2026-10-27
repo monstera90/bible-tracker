@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 86.1 (27.10) — «Карта дней года»: пропадали все дни до перевода часов (DST, 25.10) — дни считались шагом 24 ч от полуночи и не совпадали с ключами `startOfDay`; теперь через календарную дату (`dayShift` в `buildYearGridMarkup`). Откат: my.js 86.0.
    Версия: 86.0 (27.10) — «Комбинированный»: `openComboBookmark` не нашёл закладку по id — берёт текущую основную закладку книги (её id меняется при каждом переносе). Откат: my.js 85.0.
    Версия: 85.0 (26.10) — структурная правка: вкладка `screentime` «Трекер экранов» (`screentime.js`) — самый верхний язычок стека набора 1, над «События»: `SCREENTIME_TAB_KEY`/`SCREENTIME_TAB_BTN_ID`, `renderSettingsTabScreenTime`, `ScreenTime.init` (счётчики в `state["__screenTime:<deviceId>"]`), вызовы `ScreenTime.setAppActive` в `__ltOnAppPause`/`__ltOnAppResume`.
    Версия: 84.0 (26.10) — структурная правка: «Комбинированный» (itemcards.js 28.0): `getComboTabList`, `openComboTab`, `getComboBookmarks`, `openComboBookmark`, `addComboTask` (задача по id `c.qid`: не создаётся, пока невыполненная с таким id есть на любой вкладке; выполненная — архив — создаётся снова); деп-ы у `initItemCardsModule`; вход оболочки `combo` не переключает вкладку. Откат: my.js 83.1.
@@ -19474,13 +19475,22 @@
 
     var now = new Date();
     var todayStart = startOfDay(now.getTime());
-    var windowStart = todayStart - 364 * DAY_MS; // 365 дней включительно
+    // ⚠️ Дни считаются ТОЛЬКО через календарную дату (new Date(г, м, д + N) → полночь по местному
+    // времени), а не прибавлением N * DAY_MS: при переводе часов (DST) сутки длятся 23 или 25 часов,
+    // и «полночь + 24 ч» уже не полночь — ключ byDay[dayTs] (он строится через startOfDay) не
+    // находился, и все дни до перевода часов выглядели пустыми (на карте оставались только дни
+    // после перевода). Та же схема — в habitMapMarkup (itemcards.js).
+    function dayShift(baseTs, n){
+      var b = new Date(baseTs);
+      return new Date(b.getFullYear(), b.getMonth(), b.getDate() + n).getTime();
+    }
+    var windowStart = dayShift(todayStart, -364); // 365 дней включительно
     // понедельник = 0 ... воскресенье = 6
     var windowStartWeekday = (new Date(windowStart).getDay() + 6) % 7;
-    var gridStart = windowStart - windowStartWeekday * DAY_MS;
+    var gridStart = dayShift(windowStart, -windowStartWeekday);
     var todayWeekday = (new Date(todayStart).getDay() + 6) % 7;
-    var gridEnd = todayStart + (6 - todayWeekday) * DAY_MS;
-    var totalDays = Math.round((gridEnd - gridStart) / DAY_MS) + 1;
+    var gridEnd = dayShift(todayStart, 6 - todayWeekday);
+    var totalDays = Math.round((gridEnd - gridStart) / DAY_MS) + 1; // округление гасит часовой сдвиг DST
     var totalRows = Math.ceil(totalDays / 7);
 
     var headerHtml = '<div class="year-grid-v-row year-grid-v-header">' +
@@ -19494,7 +19504,7 @@
     var lastMonthShown = -1;
     var activeDays = 0;
     for(var row = 0; row < totalRows; row++){
-      var rowFirstDay = gridStart + row * 7 * DAY_MS;
+      var rowFirstDay = dayShift(gridStart, row * 7);
       var rowFirstMonth = new Date(rowFirstDay).getMonth();
       var monthLabel = "";
       if(rowFirstDay >= windowStart && rowFirstMonth !== lastMonthShown){
@@ -19503,7 +19513,7 @@
       }
       rowsHtml += '<div class="year-grid-v-row"><span class="year-grid-v-month-label">' + monthLabel + '</span>';
       for(var col = 0; col < 7; col++){
-        var dayTs = rowFirstDay + col * DAY_MS;
+        var dayTs = dayShift(rowFirstDay, col);
         var cls = "year-grid-v-cell";
         var attr = "";
         if(dayTs < windowStart){
