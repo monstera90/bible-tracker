@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 86.0 (27.10) — «Комбинированный»: `openComboBookmark` не нашёл закладку по id — берёт текущую основную закладку книги (её id меняется при каждом переносе). Откат: my.js 85.0.
    Версия: 85.0 (26.10) — структурная правка: вкладка `screentime` «Трекер экранов» (`screentime.js`) — самый верхний язычок стека набора 1, над «События»: `SCREENTIME_TAB_KEY`/`SCREENTIME_TAB_BTN_ID`, `renderSettingsTabScreenTime`, `ScreenTime.init` (счётчики в `state["__screenTime:<deviceId>"]`), вызовы `ScreenTime.setAppActive` в `__ltOnAppPause`/`__ltOnAppResume`.
    Версия: 84.0 (26.10) — структурная правка: «Комбинированный» (itemcards.js 28.0): `getComboTabList`, `openComboTab`, `getComboBookmarks`, `openComboBookmark`, `addComboTask` (задача по id `c.qid`: не создаётся, пока невыполненная с таким id есть на любой вкладке; выполненная — архив — создаётся снова); деп-ы у `initItemCardsModule`; вход оболочки `combo` не переключает вкладку. Откат: my.js 83.1.
    Версия: 83.1 (25.10) — очередь «Создавать задачу» из окна ярлыка выполняется молча при запуске и в `__ltOnAppResume` (`ItemCards.drainPendingTasks(true)`; itemcards.js 27.0) — окно ярлыка приложение больше не открывает.
@@ -21059,11 +21060,18 @@
       cb(out);
     });
   }
-  // Открыть книжную закладку по (хеш книги, id закладки): текущее место закладки берётся на момент запуска (основная закладка двигается)
+  // Открыть книжную закладку по (хеш книги, id закладки): текущее место закладки берётся на момент запуска.
+  // Основная («контактная») закладка при каждом переносе (moveMainBookmarkTo, restoreBookPrevMain) удаляется и создаётся
+  // заново с НОВЫМ id, поэтому id, сохранённый в карточке, устаревает. Не нашли по id — берём ТЕКУЩУЮ основную закладку этой книги.
   function openComboBookmark(hash, bookmarkId, cb){
     getBookMarginBookmarksForList(function(items){
-      var found = null;
-      (items || []).forEach(function(b){ if(!found && b.hash === hash && b.bookmarkId === bookmarkId) found = b; });
+      var found = null, main = null;
+      (items || []).forEach(function(b){
+        if(b.hash !== hash) return;
+        if(!found && b.bookmarkId === bookmarkId) found = b;
+        if(!main && b.isMain) main = b;
+      });
+      if(!found) found = main;
       if(found) openBookAtMarginBookmark(found.hash, found.position);
       if(cb) cb(!!found);
     });

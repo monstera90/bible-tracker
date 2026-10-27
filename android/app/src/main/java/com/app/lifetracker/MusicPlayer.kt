@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.1 (27.10) — `setPhoneVolume`: `FLAG_SHOW_UI` (панель громкости системы синхронизируется — кнопки громкости больше не «скачут» от прежнего положения) и проверка значения через 0,4 с с одним повтором.
 // Версия: 4.0 (26.10) — структурная правка: учёт времени воспроизведения для «Трекера экранов» (`playing` копит отрезки в `ScreenTimeStats.MUSIC`, `livePlayingMs`).
 // Версия: 3.0 (26.10) — структурная правка: `playSingle`/`playFolder` ставят громкость самого телефона (`setPhoneVolume`: поток STREAM_MUSIC, процент от максимума), громкость плеера остаётся 1.0; `headphonesConnected` — подключены ли наушники (проводные, USB, Bluetooth, слуховой аппарат).
 // Версия: 2.0 (26.10) — структурная правка (QR «Комбинированный»): `playSingle` (один трек по id, без очереди папки) и `playFolder` (все треки папки по id), оба с зацикливанием (`loopTrack`/`loopQueue`) и начальной громкостью (`baseVolume`); `trackEnded` повторяет трек или очередь, если включено; «следующий» на последнем треке зацикленной папки идёт в начало; громкость после ослабления при звонке/навигаторе возвращается к `baseVolume`, а не к 1. Обычный `play` (вкладка «Музыка») сбрасывает зацикливание и громкость. Откат: MusicPlayer.kt 1.1.
@@ -170,7 +171,20 @@ object MusicPlayer {
             val p = pct.coerceIn(0, 100)
             var idx = Math.round(max * p / 100f)
             if (p > 0 && idx < 1) idx = 1
-            am.setStreamVolume(AudioManager.STREAM_MUSIC, idx, 0)
+            // FLAG_SHOW_UI: без него часть прошивок меняет сам поток, но не обновляет свою панель громкости — и первое нажатие
+            // кнопок громкости отсчитывается от старого положения ползунка («было 70, поставили 50, нажали — скачет»).
+            // С флагом панель коротко показывается и синхронизируется.
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, idx, AudioManager.FLAG_SHOW_UI)
+            // система могла округлить/не принять значение (безопасная громкость, смена устройства вывода) — проверяем и повторяем один раз
+            val want = idx
+            main.postDelayed({
+                try {
+                    if (am.getStreamVolume(AudioManager.STREAM_MUSIC) != want) {
+                        am.setStreamVolume(AudioManager.STREAM_MUSIC, want, AudioManager.FLAG_SHOW_UI)
+                    }
+                } catch (e: Exception) {
+                }
+            }, 400)
         } catch (e: Exception) {
         }
     }
