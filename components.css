@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
    Версия: 16.2 (27.10) — `.cal-week`: `touch-action:pan-y` (горизонтальный жест отдан странице: за пальцем едет неделя, см. calendar.js 8.0). Откат: components.css 16.1.
    Версия: 16.1 (26.10) — `.cal-wk-today b`: число сегодняшнего дня снова под подписью дня недели (был inline-block — вставал в строку с «Пн»), кружок по центру колонки. Откат: components.css 16.0.
@@ -1443,6 +1444,54 @@
     -webkit-line-clamp:3;
     overflow:hidden;
     line-height:1.4;
+  }
+
+  /* комментарий дня = заметка дня (my.js, getHourNoteForDay): длинный текст показывается обрезанным превью, правка — в редакторе */
+  .year-day-note-preview{
+    display:-webkit-box;
+    -webkit-box-orient:vertical;
+    -webkit-line-clamp:5;
+    overflow:hidden;
+    white-space:pre-wrap;
+    overflow-wrap:anywhere;
+  }
+  .year-day-note-open-btn{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    margin-top:6px;
+    padding:5px 10px;
+    border:1px solid var(--groove-shadow);
+    border-radius:6px;
+    background:transparent;
+    color:var(--wood);
+    font-family:inherit;
+    font-size:13px;
+    cursor:pointer;
+  }
+  .year-day-note-open-btn svg{ width:14px; height:14px; }
+  .year-day-note-hint{
+    margin-top:6px;
+    font-size:13px;
+    line-height:1.4;
+    color:var(--ink-soft);
+  }
+  .hour-note-long{
+    width:100%;
+    max-width:400px;
+    margin:6px auto 0;
+    box-sizing:border-box;
+    font-size:13px;
+    line-height:1.4;
+    color:var(--ink);
+  }
+  .hour-note-long-preview{
+    display:-webkit-box;
+    -webkit-box-orient:vertical;
+    -webkit-line-clamp:4;
+    overflow:hidden;
+    white-space:pre-wrap;
+    overflow-wrap:anywhere;
   }
 
   .year-day-modal-title{

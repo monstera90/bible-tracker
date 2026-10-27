@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 88.0 (27.10) — структурная правка: комментарий дня «Карты дней года» и поле «Комментарий за сегодня» хранятся в заметке этого дня (имя `дд.мм.гггг`, папка `notes`; mdeditor.js 17.0): `getHourNoteForDay`/`setHourNoteForDay`/`getHourNotesByDay` читают и пишут заметки, старые `hournote:` один раз переносятся (`migrateHourNotesToNotes`) и обнуляются; короткий (≤300 знаков, ≤3 строк) правится на месте, длинный — превью и «Открыть в редакторе» (`isShortDayNote`, `openDayNoteInEditor`, `setupHourNoteLongUi`); экспорт `dailyNotesLog` отдаёт полный текст. Откат: my.js 87.0.
    Версия: 87.0 (27.10)
    Версия: 86.0 (27.10) — «Комбинированный»: `openComboBookmark` не нашёл закладку по id — берёт текущую основную закладку книги (её id меняется при каждом переносе). Откат: my.js 85.0.
    Версия: 85.0 (26.10) — структурная правка: вкладка `screentime` «Трекер экранов» (`screentime.js`) — самый верхний язычок стека набора 1, над «События»: `SCREENTIME_TAB_KEY`/`SCREENTIME_TAB_BTN_ID`, `renderSettingsTabScreenTime`, `ScreenTime.init` (счётчики в `state["__screenTime:<deviceId>"]`), вызовы `ScreenTime.setAppActive` в `__ltOnAppPause`/`__ltOnAppResume`.
@@ -7535,6 +7536,8 @@
   var renderSettingsTabMdBookmarks = MdEditor.renderSettingsTabMdBookmarks;
   var renderSettingsTabForgottenNotes = MdEditor.renderSettingsTabForgottenNotes;
   var flushPendingMdEditorEdit = MdEditor.flushPendingMdEditorEdit;
+  // перенос старых комментариев дней в заметки (см. migrateHourNotesToNotes — раздел о счётчике часов ниже)
+  setTimeout(function(){ migrateHourNotesWhenReady(0); }, 4000);
 
   // ===================== ПОИСК =====================
   // Логика вкладки "Поиск" (третья боковая вкладка второго набора, settingsTabSet2Btn3 / "set2s_3")
@@ -18657,13 +18660,33 @@
   // pruneOldHourLogsForStats: в отличие от "сырых" hourlog:, заметки должны храниться и
   // редактироваться сколь угодно давние ("Карта дней года").
   function hourNoteKeyForDay(dayTs){ return "hournote:" + dayTs; }
-  function getHourNoteForDay(dayTs){
+  // С 27.10 комментарий дня живёт в заметке этого дня (имя `дд.мм.гггг`, папка notes, см. mdeditor.js getDayNote/setDayNote):
+  // заметку удалили — комментария нет. Ключи `hournote:` остались только как старое хранилище: читаются, пока заметки не
+  // загружены или заметки дня ещё нет, и переносятся в заметки (migrateHourNotesToNotes), после чего обнуляются.
+  function getDayNoteApi(){
+    return (typeof MdEditor !== "undefined" && MdEditor && MdEditor.getDayNote) ? MdEditor : null;
+  }
+  function getLegacyHourNoteForDay(dayTs){
     var rec = state[hourNoteKeyForDay(dayTs)];
     return (rec && typeof rec.c === "string" && rec.c) ? rec.c : "";
   }
+  function getHourNoteForDay(dayTs){
+    var api = getDayNoteApi();
+    var fromNote = api ? api.getDayNote(dayTs) : null;
+    if(fromNote) return fromNote;
+    return getLegacyHourNoteForDay(dayTs);
+  }
   function setHourNoteForDay(dayTs, text, skipGridRefresh){
     var trimmed = (text || "").trim();
-    state[hourNoteKeyForDay(dayTs)] = {c: trimmed ? trimmed : null, t: Date.now()};
+    var api = getDayNoteApi();
+    var inNotes = !!(api && api.setDayNote(dayTs, trimmed));
+    if(inNotes){
+      // старая копия (если ещё не перенесена) больше не нужна — иначе удалённый комментарий вернулся бы из неё
+      if(getLegacyHourNoteForDay(dayTs)) state[hourNoteKeyForDay(dayTs)] = {c: null, t: Date.now()};
+    } else {
+      // заметки ещё не загружены — пишем по-старому, при переносе комментарий уйдёт в заметку
+      state[hourNoteKeyForDay(dayTs)] = {c: trimmed ? trimmed : null, t: Date.now()};
+    }
     saveLocalStateNow();
     scheduleCloudPush();
     // при сохранении прямо из карточки дня (см. renderYearDayNoteEdit) сброс к общей сетке не нужен
@@ -18671,16 +18694,81 @@
     // skipGridRefresh=true
     if(!skipGridRefresh) refreshYearGridIfOpen();
   }
+  // все комментарии дней для экспорта: полный текст заметок дней; старые (ещё не перенесённые) — только если заметки дня нет
   function getHourNotesByDay(){
     var byDay = {};
     Object.keys(state).forEach(function(k){
       if(k.indexOf("hournote:") !== 0) return;
       var rec = state[k];
       if(!rec || typeof rec.c !== "string" || !rec.c) return;
-      var day = Number(k.slice("hournote:".length));
-      byDay[day] = rec.c;
+      byDay[Number(k.slice("hournote:".length))] = rec.c;
     });
+    var api = getDayNoteApi();
+    if(api){
+      var fromNotes = api.getDayNotesByDay();
+      Object.keys(fromNotes).forEach(function(d){ byDay[d] = fromNotes[d]; });
+    }
     return byDay;
+  }
+
+  // ---- короткий / длинный комментарий дня ----
+  // Короткий (до 300 знаков и 3 строк) правится на месте — в поле над счётчиком часов и в карточке дня. Длинный там только
+  // показывается обрезанным превью, а правится в редакторе заметок. Знаки разметки в коротком тексте допустимы (в поле это
+  // просто символы), оформляется текст только в самой заметке.
+  var DAY_NOTE_SHORT_CHARS = 300;
+  var DAY_NOTE_SHORT_LINES = 3;
+  function isShortDayNote(text){
+    var t = String(text || "");
+    return t.length <= DAY_NOTE_SHORT_CHARS && t.split("\n").length <= DAY_NOTE_SHORT_LINES;
+  }
+  // сохранить введённое и открыть заметку этого дня в «Моих заметках»
+  function openDayNoteInEditor(dayTs, pendingText){
+    var api = getDayNoteApi();
+    if(!api) return;
+    if(typeof pendingText === "string") setHourNoteForDay(dayTs, pendingText, true);
+    var id = api.getDayNoteId(dayTs);
+    if(!id) return;
+    openSettingsTabDirect("set2s_1");
+    if(MdEditor.openNoteByQr) MdEditor.openNoteByQr(id);
+  }
+  // перенос старых комментариев (state «hournote:») в заметки дней; ждёт, пока заметки загрузятся и (при включённой
+  // синхронизации) облако будет прочитано — иначе на двух устройствах могли бы получиться две заметки одного дня
+  var hourNotesMigrationBusy = false;
+  function migrateHourNotesToNotes(){
+    var api = getDayNoteApi();
+    if(!api || hourNotesMigrationBusy) return;
+    var legacy = [];
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf("hournote:") !== 0) return;
+      var rec = state[k];
+      if(rec && typeof rec.c === "string" && rec.c.trim()) legacy.push(k);
+    });
+    if(!legacy.length) return;
+    if(api.getDayNote(0) === null) return; // заметки ещё не загружены — вызовут позже
+    function run(){
+      var moved = 0;
+      legacy.forEach(function(k){
+        var rec = state[k];
+        if(!rec || typeof rec.c !== "string" || !rec.c.trim()) return;
+        if(api.importDayNote(Number(k.slice("hournote:".length)), rec.c)){
+          state[k] = {c: null, t: Date.now()};
+          moved++;
+        }
+      });
+      if(moved){ saveLocalStateNow(); scheduleCloudPush(); }
+    }
+    var st = api.cardMetaStatus ? api.cardMetaStatus() : { ready: false, pulled: true };
+    if(st.ready && !st.pulled && api.cardMetaPull){
+      hourNotesMigrationBusy = true;
+      api.cardMetaPull().then(function(ok){ hourNotesMigrationBusy = false; if(ok) run(); },
+                              function(){ hourNotesMigrationBusy = false; });
+    } else {
+      run();
+    }
+  }
+  function migrateHourNotesWhenReady(n){
+    migrateHourNotesToNotes();
+    if(n < 20) setTimeout(function(){ migrateHourNotesWhenReady(n + 1); }, 3000);
   }
   function getMonthsToSeptember(){ var r = state[HOUR_MONTHS_KEY]; return (r && r.c) ? r.c : null; }
   function getRealMonthsAtActivation(){ var r = state[HOUR_REAL_MONTHS_KEY]; return (r && r.c) ? r.c : null; }
@@ -19017,6 +19105,58 @@
     }
   }
 
+  // Поле комментария за сегодня над счётчиком часов. Короткий текст правится здесь. Если сегодняшний комментарий уже длинный,
+  // поле скрыто, вместо него превью и кнопка «Открыть в редакторе»; если текст разрастается во время набора, под полем
+  // появляется подсказка с той же кнопкой (она сохраняет написанное в заметку и открывает её).
+  function setupHourNoteLongUi(noteInput, todayNote){
+    var holder = document.getElementById("hourMonthNoteLong");
+    if(!holder){
+      holder = document.createElement("div");
+      holder.id = "hourMonthNoteLong";
+      holder.className = "hour-note-long";
+      holder.style.display = "none";
+      holder.addEventListener("click", function(e){ e.stopPropagation(); });
+      noteInput.parentNode.appendChild(holder);
+      noteInput.addEventListener("input", function(){ syncHourNoteHint(noteInput); });
+    }
+    var today = startOfDay(Date.now());
+    if(noteInput.style.display !== "none" && todayNote && !isShortDayNote(todayNote)){
+      noteInput.setAttribute("data-long", "1");
+      noteInput.style.display = "none";
+      holder.innerHTML =
+        '<div class="hour-note-long-preview">' + escapeHtml(todayNote.slice(0, DAY_NOTE_SHORT_CHARS * 2)) + '</div>' +
+        '<button type="button" class="year-day-note-open-btn">' + PENCIL_ICON_SVG + ' Открыть в редакторе</button>';
+      holder.style.display = "";
+      holder.querySelector("button").addEventListener("click", function(){
+        closeHourInputOverlay("hourMonth");
+        openDayNoteInEditor(today);
+      });
+      return;
+    }
+    noteInput.removeAttribute("data-long");
+    holder.style.display = "none";
+    holder.innerHTML = "";
+    syncHourNoteHint(noteInput);
+  }
+  function syncHourNoteHint(noteInput){
+    var holder = document.getElementById("hourMonthNoteLong");
+    if(!holder || noteInput.getAttribute("data-long") === "1") return;
+    if(isShortDayNote(noteInput.value)){
+      holder.style.display = "none";
+      holder.innerHTML = "";
+      return;
+    }
+    if(holder.style.display === "none" || !holder.firstChild){
+      holder.innerHTML =
+        '<span>Длинный текст удобнее в редакторе.</span> <button type="button" class="year-day-note-open-btn">' + PENCIL_ICON_SVG + ' Открыть в редакторе</button>';
+      holder.style.display = "";
+      holder.querySelector("button").addEventListener("click", function(){
+        var text = noteInput.value;
+        closeHourInputOverlay("hourMonth");
+        openDayNoteInEditor(startOfDay(Date.now()), text);
+      });
+    }
+  }
   function closeHourInputOverlay(prefix){
     var overlay = document.getElementById(prefix + "Overlay");
     if(overlay) overlay.classList.remove("open");
@@ -19035,9 +19175,12 @@
         var noteInput = document.getElementById("hourMonthNoteInput");
         if(noteInput){
           var notesOn = isHourNotesEnabled();
+          migrateHourNotesToNotes();
+          var todayNote = notesOn ? getHourNoteForDay(startOfDay(Date.now())) : "";
           noteInput.style.display = notesOn ? "block" : "none";
           noteInput.style.borderColor = "";
-          noteInput.value = notesOn ? getHourNoteForDay(startOfDay(Date.now())) : "";
+          noteInput.value = todayNote;
+          setupHourNoteLongUi(noteInput, todayNote);
         }
       }
       if(input) input.focus();
@@ -19052,6 +19195,8 @@
 
     var notesOn = (prefix === "hourMonth") && isHourNotesEnabled();
     var noteInput = notesOn ? document.getElementById("hourMonthNoteInput") : null;
+    // у длинного комментария поле скрыто и заметку не меняет (она правится только в редакторе)
+    if(noteInput && noteInput.getAttribute("data-long") === "1"){ notesOn = false; noteInput = null; }
     var noteText = noteInput ? noteInput.value : "";
     var hasNoteText = notesOn && noteText.trim().length > 0;
 
@@ -19656,6 +19801,7 @@
     }
 
     // блок с комментарием этого дня: показываем, если функция сейчас включена в настройках.
+    migrateHourNotesToNotes(); // старые комментарии, если ещё не перенесены, — в заметки (ничего не делает, если переносить нечего)
     var existingNote = getHourNoteForDay(dayTs);
     var showNotes = isHourNotesEnabled() || existingNote;
 
@@ -19686,6 +19832,15 @@
   function renderYearDayNoteView(dayTs, noteText){
     var wrap = document.getElementById("yearDayNoteSection");
     if(!wrap) return;
+    if(noteText && !isShortDayNote(noteText)){
+      // длинный комментарий: превью (первые строки, остальное обрезано) и переход в заметку дня — править его здесь нельзя
+      wrap.innerHTML =
+        '<div class="year-day-note-view year-day-note-preview">' + linkifyHtml(noteText.slice(0, DAY_NOTE_SHORT_CHARS * 2)) + '</div>' +
+        '<button type="button" class="year-day-note-open-btn" id="yearDayNoteOpenBtn">' + PENCIL_ICON_SVG + ' Открыть в редакторе</button>';
+      var openBtn = document.getElementById("yearDayNoteOpenBtn");
+      if(openBtn) openBtn.addEventListener("click", function(){ openDayNoteInEditor(dayTs); });
+      return;
+    }
     var textHtml = noteText ? linkifyHtml(noteText) : '<span class="year-day-note-placeholder">Комментарий</span>';
     wrap.innerHTML =
       '<div class="year-day-note-view">' + textHtml +
@@ -19752,9 +19907,20 @@
     saveBtn.innerHTML = SAVE_ICON_SVG;
     editable.appendChild(saveBtn);
 
+    // подсказка «длинный текст удобнее в редакторе» — под полем, появляется, когда текст перестаёт быть коротким
+    var hint = document.createElement("div");
+    hint.className = "year-day-note-hint";
+    hint.style.display = "none";
+    hint.innerHTML = '<span>Длинный текст удобнее в редакторе.</span> <button type="button" class="year-day-note-open-btn">' + PENCIL_ICON_SVG + ' Открыть в редакторе</button>';
+    wrap.appendChild(hint);
+    hint.querySelector("button").addEventListener("click", function(e){
+      e.stopPropagation();
+      openDayNoteInEditor(dayTs, getEditableNoteText(editable, saveBtn));
+    });
     function updatePlaceholder(){
-      var empty = getEditableNoteText(editable, saveBtn).length === 0;
-      editable.classList.toggle("is-empty", empty);
+      var cur = getEditableNoteText(editable, saveBtn);
+      editable.classList.toggle("is-empty", cur.length === 0);
+      hint.style.display = isShortDayNote(cur) ? "none" : "";
     }
     updatePlaceholder();
 

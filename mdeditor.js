@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
    Версия: 16.0 (26.10) — структурная правка: публичная `getBookmarkedNotes()` (заметки со вкладки «Закладки» — [{id, name}]; нужна выбору «Открыть закладку» в «Комбинированном», itemcards.js 28.0). Откат: mdeditor.js 15.0.
    Версия: 15.0 (21.10) — структурная правка: `prepareImageFile` (+ `loadImageForRecompress`/`canvasToBlob`/`readFileBytes`, константы `IMG_RECOMPRESS_*`) — пережатие картинок задач без видимой потери (длинная сторона до 2560px, JPEG 0,92, PNG с прозрачностью остаётся PNG, малые файлы не трогаются); экспорт `MdEditor.prepareImageFile`. Откат: mdeditor.js 14.0.
@@ -4842,6 +4843,91 @@ window.initMdEditorModule = function(deps){
     render();
     return true;
   }
+  // ---- комментарий дня «Карты дней года» = заметка этого дня ----
+  // Комментарий к дню хранится в обычной заметке блокнота: имя — дата дня `дд.мм.гггг` (как у «Заметки с датой»), путь — папка
+  // `notes` в корне. Заметка есть — комментарий есть, заметку удалили — комментария нет. Текст комментария = тело заметки без
+  // служебной строки %%meta…%%. Свои «Новые заметки» в активность дня такая заметка не пишет (recordNoteCreated не зовётся):
+  // иначе она дублировала бы сам комментарий в карточке дня.
+  function dayNoteName(dayTs){ return formatDateRu(new Date(Number(dayTs))); }
+  function noteBodyOnly(text){
+    var m = META_LINE_RE.exec(text || "");
+    return m ? String(text).slice(m[0].length) : String(text || "");
+  }
+  function dayNoteRec(dayTs){
+    if(!notesReady) return null;
+    var id = nameIndex.get(dayNoteName(dayTs).toLowerCase());
+    var rec = id ? notesMap.get(id) : null;
+    return (rec && !rec.deleted && rec.name && !isCardMetaRec(rec)) ? rec : null;
+  }
+  // текст комментария дня; "" — заметки нет или она пустая; null — заметки ещё не загружены (судить рано)
+  function getDayNote(dayTs){
+    if(!notesReady) return null;
+    var rec = dayNoteRec(dayTs);
+    return rec ? noteBodyOnly(rec.text).trim() : "";
+  }
+  function getDayNoteId(dayTs){
+    var rec = dayNoteRec(dayTs);
+    return rec ? rec.id : null;
+  }
+  // заменить тело заметки, оставив строку метаданных (дата правки — сегодня); открытую сейчас заметку обновляет и в редакторе
+  function replaceNoteBody(rec, body){
+    var m = META_LINE_RE.exec(rec.text || "");
+    var head = "";
+    if(m) head = (m[2] === todayRu()) ? m[0] : buildMetaLine(m[1], todayRu(), m[3] || null);
+    var newText = head + body;
+    editNoteRecordText(rec.id, newText);
+    if(openFile && openFile.id === rec.id){
+      openFile.text = newText;
+      if(cmView) cmView.dispatch({ changes: { from: 0, to: cmView.state.doc.length, insert: newText } });
+    }
+  }
+  // записать комментарий дня; пустой текст удаляет заметку дня. false — заметки ещё не загружены (вызывающий пишет по-старому).
+  function setDayNote(dayTs, text){
+    if(!notesReady) return false;
+    var body = String(text || "").trim();
+    var rec = dayNoteRec(dayTs);
+    if(!body){
+      // заметка открыта в редакторе — не вырываем её из-под курсора, только очищаем тело
+      if(rec){
+        if(openFile && openFile.id === rec.id) replaceNoteBody(rec, "");
+        else { deleteNoteRecord(rec.id, true); rebuildTree(); }
+      }
+      return true;
+    }
+    if(rec){
+      if(noteBodyOnly(rec.text).trim() !== body) replaceNoteBody(rec, body);
+      return true;
+    }
+    createNoteRecord(dayNoteName(dayTs), datedNoteFolderName(), body);
+    rebuildTree();
+    return true;
+  }
+  // перенос старого комментария (state «hournote:») в заметку дня: заметки нет — создаётся; есть и в ней уже этот текст — ничего;
+  // есть с другим текстом — старый комментарий дописывается в конец, ничего не теряется. false — заметки ещё не загружены.
+  function importDayNote(dayTs, text){
+    if(!notesReady) return false;
+    var body = String(text || "").trim();
+    if(!body) return true;
+    var rec = dayNoteRec(dayTs);
+    if(!rec) return setDayNote(dayTs, body);
+    if(noteBodyOnly(rec.text).indexOf(body) !== -1) return true;
+    return appendTextToNoteId(rec.id, body);
+  }
+  // { начало дня (мс): полный текст } по всем заметкам с именем-датой — для экспорта
+  function getDayNotesByDay(){
+    var out = {};
+    if(!notesReady) return out;
+    notesMap.forEach(function(rec){
+      if(!rec || rec.deleted || !rec.name || isCardMetaRec(rec)) return;
+      var m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(rec.name);
+      if(!m) return;
+      var d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+      if(d.getDate() !== Number(m[1])) return; // 31.02.… и подобное — не дата
+      var body = noteBodyOnly(rec.text).trim();
+      if(body) out[d.getTime()] = body;
+    });
+    return out;
+  }
   // ---- QR-код заметки (кнопка `mdEditorQrBtn` в нижнем ряду редактора) ----
   // QR любой заметки — `lt://v1/note/<id заметки>` (разбор — cardscan.js, открытие — itemcards.js через `openNoteByQr`).
   // Отдельной записи «у заметки есть QR» нет: заметка «имеет код», когда лежит в папке QR_NOTES_FOLDER (в корне или глубже).
@@ -6695,6 +6781,12 @@ window.initMdEditorModule = function(deps){
     // getSearchableNotes — плоский список заметок для самого поиска.
     openNoteByIdExternally: openNoteByIdExternally,
     createDatedNote: createDatedNote,
+    // комментарий дня «Карты дней года» = заметка `дд.мм.гггг` в папке notes (my.js: getHourNoteForDay/setHourNoteForDay)
+    getDayNote: getDayNote,
+    getDayNoteId: getDayNoteId,
+    setDayNote: setDayNote,
+    importDayNote: importDayNote,
+    getDayNotesByDay: getDayNotesByDay,
     openNoteByQr: openNoteByQr,
     cardMetaStatus: cardMetaStatus,
     cardMetaPull: cardMetaPull,
