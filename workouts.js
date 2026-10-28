@@ -1,5 +1,6 @@
 /* ===========================================================================
    workouts.js
+   Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
    Версия: 1.1 (27.10) — кнопки периода («1 мес. / 3 мес. / 6 мес. / Год») перенесены в нижний ряд слева от «Записи»; свайп влево/вправо работает по всей области вкладки (слушатели на контейнере).
@@ -23,7 +24,18 @@
    OpenStreetMap (если сервис недоступен — остаётся расстояние по GPS) и кладёт готовую запись в очередь; страница забирает её
    `drain()` (при открытии вкладки, при возврате в приложение, после остановки) и сохраняет через хранилище.
 
-   Запись тренировки: {id, start, end, m (метры, итог), rawM (метры по GPS), totalMs, lostMs, gaps:[[с,по]], how:"map"|"raw"}.
+   Запись тренировки: {id, start, end, m (метры, итог), rawM (метры по GPS), totalMs, lostMs, gaps:[[с,по]], how:"map"|"raw"[, rpe (1…10)]}.
+
+   «Нагрузка» (sRPE, session RPE): сразу после остановки (кнопкой в панели, в уведомлении или в острове — не важно, запись попадает в `drain`)
+   запись помечается как ожидающая оценки (`workoutsPendingRpe_v1`, список id, только на этом устройстве) и в области панели записи (`#wkLive`,
+   там же, где идёт таймер) вместо итога появляется окно «Насколько тяжёлой была тренировка?» с кнопками 1…10 и «Сохранить». Окно не закрывается
+   и ждёт ответа сколько угодно (хранится в localStorage; если запись удалить, ожидание снимается). Пока оценки нет, новая запись не стартует
+   (`startNative` отвечает "rpe"; кнопка «Запись» приглушена; `start()` для QR «Комбинированный» тоже отвечает "rpe"). Баллы тренировки =
+   минуты × оценка; минуты — `Math.round(totalMs / 60000)` (общее время существующего таймера, с учётом и без учёта километров),
+   баллы не хранятся, а считаются из `totalMs` и `rpe` (`loadOf`). Баллы показаны в строке записи списка и на итоговой карточке.
+   Кнопка-индикатор `#wkLoadBtn` (размер обычной кнопки ряда, самая левая в ряду, слева от «1 мес.») показывает сумму баллов за 7 дней: сегодня и 6 предыдущих
+   календарных дней по дню начала тренировки (`loadWindowStart`: календарная дата, не 7×24 ч — безопасно при переводе часов; дни выпадают сами в полночь).
+   Записи без оценки в сумму не входят (в том числе все записи, сделанные до появления «Нагрузки»). Нажатие на кнопку открывает/закрывает справку.
    Хранилище — провайдер от my.js (`setStore`, раздел «ТРЕНИРОВКИ» в my.js): запись лежит в личном `state` под ключом
    `wk:<id>` = {c, t} и едет в облако вместе с остальными данными и в экспорт; удаление — тумбстоун {c:null, t}.
    =========================================================================== */
@@ -32,6 +44,10 @@
 
   var PERIOD_KEY = "workoutsPeriod_v1";
   var LAST_RESULT_KEY = "workoutsLastResult_v1";
+  var PENDING_KEY = "workoutsPendingRpe_v1";   // id записей, ждущих оценки (только это устройство)
+  var LOAD_DAYS = 7;                           // окно суммы баллов: сегодня и 6 предыдущих дней
+  var LOAD_CHECK_MS = 60000;                   // как часто пересчитывать кнопку-индикатор (дни выпадают сами)
+  var RPE_LABELS = ["Очень легко", "Легко", "Умеренно", "Немного тяжело", "Тяжело", "Тяжело", "Очень тяжело", "Очень тяжело", "Почти предел", "Максимум усилий"];
   var POLL_MS = 500;
   var SWIPE_DX = 70, SWIPE_DY = 50;
   var MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
@@ -66,6 +82,9 @@
   var messageAction = "";  // "gps" — у подсказки кнопка «Открыть настройки»
   var openedId = null;     // запись, у которой раскрыта кнопка «Удалить»
   var delArm = null;       // {id, timer}: первое нажатие «Удалить» сделано
+  var rpeSel = 0;          // выбранная, но ещё не сохранённая оценка в окне «Насколько тяжёлой была тренировка?»
+  var infoOpen = false;    // открыта справка про sRPE (кнопка-индикатор)
+  var lastLoadCheck = 0;   // когда в последний раз пересчитывали кнопку-индикатор
 
   // ---------- вспомогательное ----------
   function container(){ return document.getElementById("settingsTabContent"); }
@@ -145,6 +164,79 @@
   function sumM(list){ var s = 0; list.forEach(function(r){ s += num(r.m); }); return s; }
   function sumMs(list){ var s = 0; list.forEach(function(r){ s += num(r.totalMs); }); return s; }
 
+  // ---------- «Нагрузка» (sRPE) ----------
+  function rpeOk(v){ v = Number(v); return v >= 1 && v <= 10 && Math.floor(v) === v; }
+  function minutesOf(r){ return Math.round(Math.max(0, num(r.totalMs)) / 60000); }
+  function loadOf(r){ return rpeOk(r.rpe) ? minutesOf(r) * Number(r.rpe) : 0; }
+  function pointsWord(n){ return plural(n, "балл", "балла", "баллов"); }
+  // на кнопке места мало: до 9999 — как есть, дальше «12,3к»
+  function fmtPoints(n){
+    n = Math.round(num(n));
+    return n >= 10000 ? (Math.round(n / 100) / 10).toFixed(1).replace(".", ",") + "к" : String(n);
+  }
+  // начало окна: полночь дня «сегодня − 6» по календарной дате (не «минус 7 × 24 ч» — сутки при переводе часов бывают 23/25 ч)
+  function loadWindowStart(){
+    var n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), n.getDate() - (LOAD_DAYS - 1), 0, 0, 0, 0).getTime();
+  }
+  function weekLoad(){
+    var from = loadWindowStart(), s = 0;
+    allRecords().forEach(function(r){ if(r.start >= from) s += loadOf(r); });
+    return s;
+  }
+  function updateLoadBtn(){
+    var b = document.getElementById("wkLoadBtn");
+    if(!b) return;
+    var t = fmtPoints(weekLoad());
+    if(b.textContent !== t) b.textContent = t;
+    b.classList.toggle("long", t.length >= 5);
+    lastLoadCheck = Date.now();
+  }
+
+  // записи, ждущие оценки: список id в localStorage, самый старый первым
+  function readPending(){
+    try{
+      var a = JSON.parse(localStorage.getItem(PENDING_KEY) || "[]");
+      return Array.isArray(a) ? a.filter(function(x){ return typeof x === "string"; }) : [];
+    }catch(e){ return []; }
+  }
+  function writePending(a){
+    try{ if(a.length) localStorage.setItem(PENDING_KEY, JSON.stringify(a)); else localStorage.removeItem(PENDING_KEY); }catch(e){}
+  }
+  function addPending(id){
+    var a = readPending();
+    if(a.indexOf(id) < 0){ a.push(id); writePending(a); }
+  }
+  // первая запись, которой ещё нужна оценка (удалённые и уже оценённые из списка выбрасываются); null — ждать нечего
+  function pendingRecord(){
+    var ids = readPending();
+    if(!ids.length || !STORE) return null;
+    var byId = {};
+    allRecords().forEach(function(r){ byId[r.id] = r; });
+    var keep = [], found = null;
+    ids.forEach(function(id){
+      var r = byId[id];
+      if(!r || rpeOk(r.rpe)) return;
+      keep.push(id);
+      if(!found) found = r;
+    });
+    if(keep.length !== ids.length) writePending(keep);
+    return found;
+  }
+  function saveRpe(){
+    var rec = pendingRecord();
+    if(!rec || !rpeOk(rpeSel) || !STORE) return;
+    var c = {};
+    Object.keys(rec).forEach(function(k){ if(k !== "id") c[k] = rec[k]; });
+    c.rpe = rpeSel;
+    try{ STORE.put(rec.id, c); }
+    catch(e){ setMessage("Не удалось сохранить оценку. Попробуйте ещё раз.", ""); return; }
+    writePending(readPending().filter(function(x){ return x !== rec.id; }));
+    saveLastResult({ id: rec.id, start: rec.start, m: rec.m, totalMs: rec.totalMs, gaps: rec.gaps || [], how: rec.how, rpe: rpeSel });
+    rpeSel = 0; message = ""; messageAction = "";
+    render(); // обновит список, кнопку-индикатор и панель
+  }
+
   // ---------- стили ----------
   function ensureStyle(){
     if(document.getElementById("workoutsStyle")) return;
@@ -156,7 +248,7 @@
       ".wk-scroll::-webkit-scrollbar{display:none;width:0;height:0;}" +
       "#wkLive{flex:none;max-height:60%;overflow-y:auto;margin-bottom:calc(var(--fab-size,36px) + 2 * var(--fab-gap,6px));}" +
       "#wkLive .wk-card,#wkLive .wk-msg{margin-bottom:0;}" +
-      "#wkLive .wk-msg + .wk-card{margin-top:var(--fab-gap,6px);}" +
+      "#wkLive > * + *{margin-top:var(--fab-gap,6px);}" +
       ".wk-per{width:auto;min-width:40px;padding:0 6px;font:inherit;font-size:11px;white-space:nowrap;}" +
       ".wk-per.on{background:var(--wood);color:var(--parchment);border-color:var(--wood);}" +
       ".wk-nav{display:flex;align-items:center;justify-content:space-between;margin:4px 0 6px;}" +
@@ -192,18 +284,32 @@
       ".wk-msg button{margin-top:8px;padding:6px 12px;border-radius:10px;border:1px solid var(--wood);background:transparent;color:var(--wood-dark);font:inherit;cursor:pointer;}" +
       ".wk-gaps{margin-top:8px;color:var(--ink);}" +
       ".wk-gaps div{margin-top:3px;}" +
-      "#wkRecBtn.wk-active{color:#e53935;}";
+      "#wkRecBtn.wk-active{color:#e53935;}" +
+      "#wkRecBtn.wk-blocked{opacity:.45;}" +
+      ".wk-load{padding:0;font:inherit;font-size:12px;font-weight:bold;line-height:1;font-variant-numeric:tabular-nums;color:var(--wood-dark);overflow:hidden;}" +
+      ".wk-load.long{font-size:10px;}" +
+      ".wk-load.on{background:var(--wood);color:var(--parchment);border-color:var(--wood);}" +
+      ".wk-info .wk-note{color:var(--ink);}" +
+      ".wk-rpe-q{font-weight:bold;font-size:1.1em;}" +
+      ".wk-rpe-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:10px;}" +
+      ".wk-rpe-btn{height:44px;border-radius:10px;border:1px solid var(--groove-shadow);background:transparent;color:var(--ink);font:inherit;font-size:1.15em;font-weight:bold;font-variant-numeric:tabular-nums;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
+      ".wk-rpe-btn.on{background:var(--wood);border-color:var(--wood);color:var(--parchment);}" +
+      ".wk-rpe-hint{margin-top:8px;color:var(--ink-soft);min-height:2.4em;}" +
+      ".wk-btns button.wk-save:not(:disabled){background:var(--wood);border-color:var(--wood);color:var(--parchment);}" +
+      ".wk-btns button:disabled{opacity:.4;cursor:default;}";
     document.head.appendChild(st);
   }
 
   // ---------- главный экран ----------
   function fabRowHtml(){
     var active = lastState && lastState.status && lastState.status !== "idle";
+    var lt = fmtPoints(weekLoad());
     return '<div class="mdeditor-fab-row">' +
+      '<button type="button" class="mdeditor-fab-btn wk-load' + (lt.length >= 5 ? " long" : "") + (infoOpen ? " on" : "") + '" id="wkLoadBtn" title="Нагрузка за 7 дней" aria-label="Нагрузка за 7 дней">' + esc(lt) + '</button>' +
       PERIODS.map(function(p){
         return '<button type="button" class="mdeditor-fab-btn wk-per' + (p.months === months ? " on" : "") + '" data-months="' + p.months + '">' + p.label + '</button>';
       }).join("") +
-      '<button type="button" class="mdeditor-fab-btn' + (active ? ' wk-active' : '') + '" id="wkRecBtn" title="' + (active ? "Идёт запись" : "Записать тренировку") + '">' + REC_ICON_SVG + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn' + (active ? ' wk-active' : '') + (pendingRecord() && !active ? ' wk-blocked' : '') + '" id="wkRecBtn" title="' + (active ? "Идёт запись" : "Записать тренировку") + '">' + REC_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="wkHomeStub" tabindex="-1" aria-disabled="true">' + HOME_ICON_SVG + '</button>' +
       '</div>';
   }
@@ -229,6 +335,7 @@
       '<div id="wkLive"></div>' +
       '</div>' + fabRowHtml();
     c.innerHTML = html;
+    lastLoadCheck = Date.now();
     bind(c);
     lastShape = "";
     pollOnce(true);
@@ -261,8 +368,11 @@
   function listHtml(recs){
     if(!recs.length) return '<div class="wk-empty">В этом периоде тренировок нет.<br>Нажмите кнопку записи внизу, чтобы начать.</div>';
     if(months !== 1) return "";
+    var pend = pendingRecord(), pid = pend ? pend.id : "";
     return recs.map(function(r){
       var sub = [];
+      if(rpeOk(r.rpe)) sub.push(minutesOf(r) + " мин × " + r.rpe + " = " + loadOf(r) + " " + pointsWord(loadOf(r)));
+      else if(r.id === pid) sub.push("ждёт оценки");
       if(r.how === "raw") sub.push("по GPS");
       if(num(r.lostMs) >= 1000) sub.push("без учёта км: " + fmtDur(r.lostMs));
       var open = openedId === r.id;
@@ -308,6 +418,12 @@
     });
     var rec = document.getElementById("wkRecBtn");
     if(rec) rec.addEventListener("click", onRecordTap);
+    var lb = document.getElementById("wkLoadBtn");
+    if(lb) lb.addEventListener("click", function(){
+      infoOpen = !infoOpen;
+      lb.classList.toggle("on", infoOpen);
+      paintLive(true);
+    });
     bindSwipe(c);
   }
 
@@ -377,6 +493,7 @@
   function startNative(){
     var n = nat();
     if(!n) return "nonative";
+    if(pendingRecord()) return "rpe"; // предыдущая тренировка ещё без оценки — новую не начинаем
     try{ return String(n.workoutStart()); }catch(e){ return "error"; }
   }
   function onRecordTap(){
@@ -393,6 +510,7 @@
     else if(res === "permission") setMessage("Разрешите доступ к геолокации в окне системы — запись начнётся сама.", "");
     else if(res === "gps_off") setMessage("GPS выключен. Включите геолокацию и нажмите «Запись» снова.", "gps");
     else if(res === "busy") message = "";
+    else if(res === "rpe") setMessage("Сначала оцените предыдущую тренировку — окно с вопросом выше.", "");
     else setMessage("Не удалось начать запись.", "");
     pollOnce(true);
   }
@@ -430,6 +548,7 @@
       var active = !!(st && st.status && st.status !== "idle");
       recBtn.classList.toggle("wk-active", active);
     }
+    if(Date.now() - lastLoadCheck >= LOAD_CHECK_MS) updateLoadBtn();
     paintLive(force);
   }
 
@@ -457,7 +576,12 @@
     var st = lastState;
     var active = st && st.status && st.status !== "idle";
     var res = readLastResult();
-    var shape = (active ? st.status + ":" + (st.fix ? 1 : 0) + ":" + ((st.gaps || []).length) : "idle") + "|" + (res ? res.id : "") + "|" + message + messageAction;
+    var pendAny = pendingRecord();
+    var pend = active ? null : pendAny;
+    var recBtn = document.getElementById("wkRecBtn");
+    if(recBtn) recBtn.classList.toggle("wk-blocked", !!pendAny && !active);
+    var shape = (active ? st.status + ":" + (st.fix ? 1 : 0) + ":" + ((st.gaps || []).length) : "idle") + "|" + (res ? res.id : "") + "|" + message + messageAction +
+      "|" + (pend ? pend.id + ":" + rpeSel : "") + "|" + (infoOpen ? "i" : "");
     if(!force && shape === lastShape && active){
       updateLiveNumbers(box, st);
       return;
@@ -465,11 +589,13 @@
     if(!force && shape === lastShape) return;
     lastShape = shape;
     var html = "";
+    if(infoOpen) html += infoCardHtml();
     if(message){
       html += '<div class="wk-msg">' + esc(message) +
         (messageAction === "gps" ? '<br><button type="button" id="wkGpsBtn">Открыть настройки геолокации</button>' : "") + '</div>';
     }
     if(active) html += liveCardHtml(st);
+    else if(pend) html += rpeCardHtml(pend);
     else if(res) html += resultCardHtml(res);
     box.innerHTML = html;
     var gb = document.getElementById("wkGpsBtn");
@@ -478,6 +604,18 @@
     if(pb) pb.addEventListener("click", function(){ var n = nat(); if(n) try{ n.workoutPause(); }catch(e){} pollOnce(true); });
     var sb = document.getElementById("wkStopBtn");
     if(sb) sb.addEventListener("click", onStopTap);
+    var ic = document.getElementById("wkInfoCard");
+    if(ic) ic.addEventListener("click", function(){
+      infoOpen = false;
+      var lb = document.getElementById("wkLoadBtn");
+      if(lb) lb.classList.remove("on");
+      paintLive(true);
+    });
+    Array.prototype.forEach.call(box.querySelectorAll(".wk-rpe-btn"), function(b){
+      b.addEventListener("click", function(){ rpeSel = parseInt(b.getAttribute("data-rpe"), 10) || 0; paintLive(true); });
+    });
+    var rs = document.getElementById("wkRpeSave");
+    if(rs) rs.addEventListener("click", saveRpe);
     var cb = document.getElementById("wkResultOk");
     if(cb) cb.addEventListener("click", function(){ saveLastResult(null); lastShape = ""; paintLive(true); });
     if(active) updateLiveNumbers(box, st);
@@ -546,12 +684,39 @@
     }
   }
 
+  // окно оценки: стоит там, где во время тренировки идёт таймер; ждёт ответа, пока человек не выберет оценку и не нажмёт «Сохранить»
+  function rpeCardHtml(rec){
+    var btns = "";
+    for(var i = 1; i <= 10; i++){
+      btns += '<button type="button" class="wk-rpe-btn' + (i === rpeSel ? " on" : "") + '" data-rpe="' + i + '">' + i + '</button>';
+    }
+    var mins = minutesOf(rec);
+    var hint = rpeOk(rpeSel)
+      ? '<b>' + rpeSel + '</b> — ' + esc(RPE_LABELS[rpeSel - 1]) + '. ' + mins + ' мин × ' + rpeSel + ' = ' + (mins * rpeSel) + ' ' + pointsWord(mins * rpeSel)
+      : 'Выберите оценку: 1 — очень легко, 10 — максимум усилий.';
+    return '<div class="wk-card"><div class="wk-live-head"><span class="wk-dot ok"></span><span class="wk-rpe-q">Насколько тяжёлой была тренировка?</span></div>' +
+      '<div class="wk-note">' + esc(dayLabel(rec.start)) + ' · ' + esc(fmtHM(rec.start)) + ' · ' + esc(fmtClock(rec.totalMs)) + ' · ' + esc(fmtKm(rec.m)) + '</div>' +
+      '<div class="wk-rpe-grid">' + btns + '</div>' +
+      '<div class="wk-rpe-hint">' + hint + '</div>' +
+      '<div class="wk-btns"><button type="button" class="wk-save" id="wkRpeSave"' + (rpeOk(rpeSel) ? "" : " disabled") + '>Сохранить</button></div></div>';
+  }
+
+  // краткая справка по кнопке-индикатору
+  function infoCardHtml(){
+    return '<div class="wk-card wk-info" id="wkInfoCard"><div class="wk-live-head"><span>Нагрузка (метод sRPE)</span></div>' +
+      '<div class="wk-note">sRPE (session RPE) — простой способ оценить, сколько нагрузки дала тренировка. После неё вы оцениваете, насколько она была тяжёлой, по шкале от 1 (очень легко) до 10 (максимум усилий).</div>' +
+      '<div class="wk-note">Баллы тренировки = минуты × оценка. Например, 40 минут с оценкой 6 дают 240 баллов.</div>' +
+      '<div class="wk-note">Число на кнопке — сумма баллов за последние 7 дней: сегодня и шесть предыдущих дней, старые дни выпадают сами. Тренировки без оценки в сумму не входят. Сравнивайте недели между собой: резкий скачок вверх — повод дать телу время на восстановление.</div>' +
+      '<div class="wk-note">Нажмите на карточку, чтобы закрыть.</div></div>';
+  }
+
   function resultCardHtml(r){
     var how = r.how === "map" ? "маршрут сверен с картой OpenStreetMap" : "расстояние по GPS (сверить с картой не удалось)";
     return '<div class="wk-card"><div class="wk-live-head"><span class="wk-dot ok"></span><span>Тренировка сохранена</span></div>' +
       '<div class="wk-live-time">' + esc(fmtKm(r.m)) + '</div>' +
       '<div class="wk-live-dist">' + esc(fmtClock(r.totalMs)) + '</div>' +
       '<div class="wk-note">' + esc(how) + '</div>' +
+      (rpeOk(r.rpe) ? '<div class="wk-note">Нагрузка: ' + minutesOf(r) + ' мин × ' + r.rpe + ' = ' + loadOf(r) + ' ' + pointsWord(loadOf(r)) + '</div>' : "") +
       gapsHtml(r.gaps) +
       '<div class="wk-btns"><button type="button" id="wkResultOk">Понятно</button></div></div>';
   }
@@ -563,7 +728,7 @@
     var arr;
     try{ arr = JSON.parse(String(n.workoutTakeFinished())); }catch(e){ return; }
     if(!Array.isArray(arr) || !arr.length) return;
-    var ids = [], newest = null;
+    var ids = [];
     var have = {};
     allRecords().forEach(function(r){ have[r.id] = true; });
     arr.forEach(function(r){
@@ -576,12 +741,11 @@
           how: r.how === "map" ? "map" : "raw"
         };
         try{ STORE.put(r.id, c); }catch(e){ return; }
-        if(!newest || r.start > newest.start) newest = { id: r.id, start: c.start, m: c.m, totalMs: c.totalMs, gaps: c.gaps, how: c.how };
+        addPending(r.id); // сначала оценка тяжести (sRPE), итоговая карточка появится после неё
       }
       ids.push(r.id);
     });
     if(ids.length){ try{ n.workoutAckFinished(JSON.stringify(ids)); }catch(e){} }
-    if(newest) saveLastResult(newest);
     refreshIfOpen();
   }
 
@@ -596,9 +760,9 @@
 
   window.WorkoutsTab = {
     setStore: function(s){ STORE = s; },
-    render: render,
+    render: function(){ infoOpen = false; render(); },
     drain: drain,
     refreshIfOpen: refreshIfOpen,
-    start: function(){ var r = startNative(); if(r === "gps_off") setMessage("GPS выключен. Включите геолокацию и нажмите «Запись» снова.", "gps"); else if(r === "permission") setMessage("Разрешите доступ к геолокации в окне системы — запись начнётся сама.", ""); return r; }
+    start: function(){ var r = startNative(); if(r === "rpe") setMessage("Сначала оцените предыдущую тренировку — окно с вопросом выше.", ""); else if(r === "gps_off") setMessage("GPS выключен. Включите геолокацию и нажмите «Запись» снова.", "gps"); else if(r === "permission") setMessage("Разрешите доступ к геолокации в окне системы — запись начнётся сама.", ""); return r; }
   };
 })();
