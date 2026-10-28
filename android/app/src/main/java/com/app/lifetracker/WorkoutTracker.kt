@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (27.10)
+// Версия: 2.0 (28.10)
 
 import android.content.Context
 import org.json.JSONArray
@@ -23,6 +23,11 @@ import kotlin.math.sqrt
  *    потерянной, если годной точки нет дольше [LOSS_MS]; разрыв начинается с последней годной точки и заканчивается,
  *    когда годная точка появилась снова. Участок маршрута между потерей и возвратом в километраж не входит (после
  *    возврата начинается новый сегмент, расстояние от старой точки до новой не добавляется — ничего не выдумываем).
+ *  • Выбросы GPS. Точка, до которой от последней принятой нужно было бы бежать быстрее [MAX_SPEED], в маршрут не попадает,
+ *    сколько бы времени ни прошло: она становится «кандидатом». Если следующие точки возвращаются на маршрут — кандидат был
+ *    выбросом и просто выброшен. Если же [JUMP_CONFIRM] точек подряд согласованы между собой, а на маршрут не стыкуются
+ *    (GPS «уехал» в сторону и держится там), начинается новый сегмент: расстояние от старой точки до новой не добавляется,
+ *    а путь внутри сдвинутого участка считается как обычно. Число таких случаев — `jumps` в записи.
  *  • PAUSE — время и километраж стоят; GPS продолжает работать, чтобы связь не терялась на паузе.
  *  • Общее время = okMs + lostMs.
  *  • При остановке (FINISH) маршрут по сегментам сопоставляется с картой OpenStreetMap (map matching, публичный сервер
@@ -39,7 +44,7 @@ object WorkoutTracker {
     const val ST_FINISH = 4
 
     /** Точка годна, если её точность не хуже этого значения (метры). */
-    private const val ACC_MAX = 30f
+    private const val ACC_MAX = 20f
 
     /** Нет годной точки дольше этого времени — связь потеряна (мс). */
     private const val LOSS_MS = 10_000L
@@ -47,8 +52,17 @@ object WorkoutTracker {
     /** Шаг короче этого значения не считается (дрожание GPS на месте), метры. */
     private const val MIN_STEP_M = 3.0
 
-    /** Скорость выше этого значения — выброс GPS, точка пропускается (м/с). */
-    private const val MAX_SPEED = 12.0
+    /** Скорость выше этого значения — не бег, а ошибка GPS: точка в маршрут не попадает (м/с, 9 м/с = 32 км/ч). */
+    private const val MAX_SPEED = 9.0
+
+    /** Сколько подряд согласованных между собой точек, не стыкующихся с маршрутом, считать устойчивым сдвигом: новый сегмент. */
+    private const val JUMP_CONFIRM = 5
+
+    /** При проверке скорости время между точками берётся не меньше DT_MIN (дрожание при частых точках), секунды. */
+    private const val DT_MIN = 1.5
+
+    /** Для точек-кандидатов время между ними ограничено этим значением (с), чтобы «подождать — и пройдёт» не работало. */
+    private const val DT_CAND = 10.0
 
     /** После паузы связь считается сохранённой, если годная точка была не раньше этого времени назад (мс). */
     private const val FRESH_MS = 5_000L
@@ -102,6 +116,9 @@ object WorkoutTracker {
     private val segments = ArrayList<ArrayList<DoubleArray>>()
     private var curSeg: ArrayList<DoubleArray>? = null
     private var lastPt: DoubleArray? = null
+    private var lastPtT = 0L                        // время последней точки, стыкующейся с маршрутом (в том числе не прибавившей метры)
+    private val cand = ArrayList<DoubleArray>()      // точки, не стыкующиеся с маршрутом (возможный выброс или сдвиг)
+    private var jumps = 0                            // сколько раз GPS «уезжал» (выброс или сдвиг), за тренировку
 
     // раскрыть остров при ближайшем обновлении уведомления (старт и «Связь установлена»)
     private var floatPending = false
@@ -155,6 +172,9 @@ object WorkoutTracker {
             segments.clear()
             curSeg = null
             lastPt = null
+            lastPtT = 0L
+            cand.clear()
+            jumps = 0
             floatPending = true
             floatDeferred = false
             return true
@@ -171,6 +191,7 @@ object WorkoutTracker {
                 status = ST_PAUSE
                 curSeg = null
                 lastPt = null
+                cand.clear()
             } else if (status == ST_PAUSE) {
                 status = ST_RUN
                 lastTickAt = now
@@ -178,6 +199,7 @@ object WorkoutTracker {
                 if (!fix) gapStart = now
                 curSeg = null
                 lastPt = null
+                cand.clear()
             }
         }
     }
@@ -203,7 +225,7 @@ object WorkoutTracker {
                 status = ST_FINISH
                 val copy = ArrayList<List<DoubleArray>>()
                 segments.forEach { copy.add(ArrayList(it)) }
-                Rec(startedAt, now, okMs + lostMs, lostMs, ArrayList(gaps), distM, copy)
+                Rec(startedAt, now, okMs + lostMs, lostMs, ArrayList(gaps), distM, copy, jumps)
             }
         }
         if (rec == null) return false
@@ -285,6 +307,7 @@ object WorkoutTracker {
                 gapStart = lastGoodAt
                 curSeg = null
                 lastPt = null
+                cand.clear()
                 floatPending = true
             }
         }
@@ -350,6 +373,14 @@ object WorkoutTracker {
         segments.add(seg)
         curSeg = seg
         lastPt = p
+        lastPtT = t
+        cand.clear()
+    }
+
+    /** Можно ли добраться от точки a (время at, мс) до (lat, lon, t) не быстрее [MAX_SPEED]; время между точками зажато в [DT_MIN]..maxDt. */
+    private fun stepOk(a: DoubleArray, at: Long, lat: Double, lon: Double, t: Long, maxDt: Double): Boolean {
+        val dt = ((t - at) / 1000.0).coerceIn(DT_MIN, maxDt)
+        return haversine(a[0], a[1], lat, lon) <= MAX_SPEED * dt
     }
 
     private fun addPoint(lat: Double, lon: Double, t: Long) {
@@ -360,13 +391,52 @@ object WorkoutTracker {
             return
         }
         val p = doubleArrayOf(lat, lon, t.toDouble())
-        val d = haversine(prev[0], prev[1], lat, lon)
-        if (d < MIN_STEP_M) return
-        val dt = (t - prev[2].toLong()) / 1000.0
-        if (dt > 0 && d / dt > MAX_SPEED) return
-        distM += d
-        seg.add(p)
-        lastPt = p
+        // 1) Уже есть кандидат (точка, не стыковавшаяся с маршрутом). Если новая точка согласована с ним, она принадлежит
+        //    тому же «уехавшему» участку и к маршруту присоединиться не может — сколько бы времени ни прошло.
+        if (cand.isNotEmpty()) {
+            val c = cand[cand.size - 1]
+            if (stepOk(c, c[2].toLong(), lat, lon, t, DT_CAND)) {
+                cand.add(p)
+                if (cand.size >= JUMP_CONFIRM) acceptJump()
+                return
+            }
+        }
+        // 2) Стыкуется с маршрутом: бег от последней точки маршрута возможен. Кандидат (если был) оказался выбросом.
+        if (stepOk(prev, lastPtT, lat, lon, t, 3600.0)) {
+            if (cand.isNotEmpty()) {
+                jumps++
+                cand.clear()
+            }
+            lastPtT = t
+            val d = haversine(prev[0], prev[1], lat, lon)
+            if (d < MIN_STEP_M) return
+            distM += d
+            seg.add(p)
+            lastPt = p
+            return
+        }
+        // 3) Не стыкуется ни с маршрутом, ни с кандидатом: новый кандидат (прежний был одиночным выбросом).
+        if (cand.isNotEmpty()) jumps++
+        cand.clear()
+        cand.add(p)
+    }
+
+    /** Устойчивый сдвиг: новый сегмент с первой точки кандидата; путь внутри сдвинутого участка считается как обычно, переход к нему — нет. */
+    private fun acceptJump() {
+        jumps++
+        val pts = ArrayList(cand)
+        startSegment(pts[0][0], pts[0][1], pts[0][2].toLong()) // очищает cand
+        val seg = curSeg ?: return
+        for (i in 1 until pts.size) {
+            val q = pts[i]
+            val prev = lastPt ?: return
+            val d = haversine(prev[0], prev[1], q[0], q[1])
+            if (d < MIN_STEP_M) continue
+            distM += d
+            seg.add(q)
+            lastPt = q
+        }
+        lastPtT = pts[pts.size - 1][2].toLong()
     }
 
     private fun haversine(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -387,7 +457,8 @@ object WorkoutTracker {
         val lostMs: Long,
         val gaps: List<LongArray>,
         val rawM: Double,
-        val segments: List<List<DoubleArray>>
+        val segments: List<List<DoubleArray>>,
+        val jumps: Int
     ) {
         fun toJson(distM: Double, how: String): JSONObject {
             val g = JSONArray()
@@ -402,6 +473,7 @@ object WorkoutTracker {
                 .put("rawM", Math.round(rawM))
                 .put("m", Math.round(distM))
                 .put("how", how)
+                .put("jumps", jumps)
         }
     }
 

@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 3.0 (28.10)
+   Версия: 3.1 (28.10)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -25,7 +25,7 @@
    OpenStreetMap (если сервис недоступен — остаётся расстояние по GPS) и кладёт готовую запись в очередь; страница забирает её
    `drain()` (при открытии вкладки, при возврате в приложение, после остановки) и сохраняет через хранилище.
 
-   Запись тренировки: {id, start, end, m (метры, итог), rawM (метры по GPS), totalMs, lostMs, gaps:[[с,по]], how:"map"|"raw"[, rpe (1…10)]}.
+   Запись тренировки: {id, start, end, m (метры, итог), rawM (метры по GPS), totalMs, lostMs, gaps:[[с,по]], how:"map"|"raw"[, jumps (сколько раз GPS «уезжал» в сторону и это отброшено, только если было), rpe (1…10)]}.
 
    «Нагрузка» (sRPE, session RPE): сразу после остановки (кнопкой в панели, в уведомлении или в острове — не важно, запись попадает в `drain`)
    запись помечается как ожидающая оценки (поле `needRpe:1` в самой записи, поэтому метка уезжает в облако и окно оценки появляется и на другом устройстве; `needRpe` снимается при сохранении оценки; старый локальный список `workoutsPendingRpe_v1` один раз переносится в записи — `migrateLocalPending`) и в области панели записи (`#wkLive`,
@@ -259,7 +259,7 @@
     try{ STORE.put(rec.id, c); }
     catch(e){ setMessage("Не удалось сохранить оценку. Попробуйте ещё раз.", ""); return; }
     pendCache = null;
-    saveLastResult({ id: rec.id, start: rec.start, m: rec.m, totalMs: rec.totalMs, gaps: rec.gaps || [], how: rec.how, rpe: rpeSel });
+    saveLastResult({ id: rec.id, start: rec.start, m: rec.m, totalMs: rec.totalMs, gaps: rec.gaps || [], how: rec.how, jumps: rec.jumps, rpe: rpeSel });
     rpeSel = 0; message = ""; messageAction = "";
     render(); // обновит список, кнопку-индикатор и панель
     refreshTabMark();
@@ -404,6 +404,7 @@
       if(rpeOk(r.rpe)) sub.push(minutesOf(r) + " мин × " + r.rpe + " = " + loadOf(r) + " " + pointsWord(loadOf(r)));
       else if(r.id === pid) sub.push("ждёт оценки");
       if(r.how === "raw") sub.push("по GPS");
+      if(num(r.jumps) > 0) sub.push("выбросов GPS: " + Math.round(num(r.jumps)));
       if(num(r.lostMs) >= 1000) sub.push("без учёта км: " + fmtDur(r.lostMs));
       var open = openedId === r.id;
       return '<div class="wk-row" data-id="' + esc(r.id) + '">' +
@@ -747,6 +748,7 @@
       '<div class="wk-live-time">' + esc(fmtKm(r.m)) + '</div>' +
       '<div class="wk-live-dist">' + esc(fmtClock(r.totalMs)) + '</div>' +
       '<div class="wk-note">' + esc(how) + '</div>' +
+      (num(r.jumps) > 0 ? '<div class="wk-note">Отброшено выбросов GPS: ' + Math.round(num(r.jumps)) + '</div>' : "") +
       (rpeOk(r.rpe) ? '<div class="wk-note">Нагрузка: ' + minutesOf(r) + ' мин × ' + r.rpe + ' = ' + loadOf(r) + ' ' + pointsWord(loadOf(r)) + '</div>' : "") +
       gapsHtml(r.gaps) + '</div>';
   }
@@ -770,6 +772,7 @@
           gaps: Array.isArray(r.gaps) ? r.gaps.filter(function(g){ return Array.isArray(g) && g.length === 2; }) : [],
           how: r.how === "map" ? "map" : "raw"
         };
+        if(num(r.jumps) > 0) c.jumps = Math.round(num(r.jumps));
         c.needRpe = 1; // сначала оценка тяжести (sRPE), итоговая карточка появится после неё; метка едет в облако вместе с записью
         try{ STORE.put(r.id, c); }catch(e){ return; }
         pendCache = null;
