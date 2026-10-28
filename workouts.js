@@ -1,10 +1,11 @@
 /* ===========================================================================
    workouts.js
+   Версия: 1.1 (27.10) — кнопки периода («1 мес. / 3 мес. / 6 мес. / Год») перенесены в нижний ряд слева от «Записи»; свайп влево/вправо работает по всей области вкладки (слушатели на контейнере).
    Версия: 1.0 (27.10) — новый файл. Вкладка «Тренировки» (`workouts`, кнопка `settingsTabWorkoutsBtn` в нижнем ряду набора 1,
    между шестерёнкой и «Картой дней года»). `window.WorkoutsTab.{setStore, render, drain, refreshIfOpen}`.
 
    Что на экране:
-   • сверху — период: «Месяц / 3 мес. / 6 мес. / Год», стрелки «‹ ›» листают период назад и вперёд (свайп влево/вправо по
+   • период: «1 мес. / 3 мес. / 6 мес. / Год» (кнопки в нижнем ряду), стрелки «‹ ›» листают период назад и вперёд (свайп влево/вправо по
      экрану — то же); выбор периода хранится в `workoutsPeriod_v1`. Период всегда заканчивается выбранным месяцем и не уходит
      в будущее дальше текущего месяца;
    • итог за период: километры (одна десятая, «10,7 км»; сотые в записях остаются и участвуют в суммах), число тренировок,
@@ -35,7 +36,7 @@
   var MONTHS_SHORT = ["янв.", "февр.", "март", "апр.", "май", "июнь", "июль", "авг.", "сент.", "окт.", "нояб.", "дек."];
   var WEEKDAYS = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
   var PERIODS = [
-    { months: 1, label: "Месяц" },
+    { months: 1, label: "1 мес." },
     { months: 3, label: "3 мес." },
     { months: 6, label: "6 мес." },
     { months: 12, label: "Год" }
@@ -148,10 +149,9 @@
     var st = document.createElement("style");
     st.id = "workoutsStyle";
     st.textContent =
-      ".wk-root{padding-bottom:84px;touch-action:pan-y;}" +
-      ".wk-seg{display:flex;gap:6px;margin:6px 0 10px;}" +
-      ".wk-seg button{flex:1;padding:7px 4px;border-radius:10px;border:1px solid var(--groove-shadow);background:transparent;color:var(--ink);font:inherit;font-size:.9em;cursor:pointer;}" +
-      ".wk-seg button.on{background:var(--wood);border-color:var(--wood);color:var(--parchment);}" +
+      ".wk-root{padding-bottom:84px;min-height:100%;}" +
+      ".wk-per{width:auto;min-width:40px;padding:0 6px;font:inherit;font-size:11px;white-space:nowrap;}" +
+      ".wk-per.on{background:var(--wood);color:var(--parchment);border-color:var(--wood);}" +
       ".wk-nav{display:flex;align-items:center;justify-content:space-between;margin:4px 0 6px;}" +
       ".wk-nav button{width:40px;height:36px;border-radius:10px;border:1px solid var(--groove-shadow);background:transparent;color:var(--ink);font-size:1.3em;line-height:1;cursor:pointer;}" +
       ".wk-nav button:disabled{opacity:.3;cursor:default;}" +
@@ -193,6 +193,9 @@
   function fabRowHtml(){
     var active = lastState && lastState.status && lastState.status !== "idle";
     return '<div class="mdeditor-fab-row">' +
+      PERIODS.map(function(p){
+        return '<button type="button" class="mdeditor-fab-btn wk-per' + (p.months === months ? " on" : "") + '" data-months="' + p.months + '">' + p.label + '</button>';
+      }).join("") +
       '<button type="button" class="mdeditor-fab-btn' + (active ? ' wk-active' : '') + '" id="wkRecBtn" title="' + (active ? "Идёт запись" : "Записать тренировку") + '">' + REC_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="wkHomeStub" tabindex="-1" aria-disabled="true">' + HOME_ICON_SVG + '</button>' +
       '</div>';
@@ -208,9 +211,6 @@
     var html = '<div class="wk-root" id="' + rootId + '">' +
       '<h3 class="common-tab-title">Тренировки</h3>' +
       '<div id="wkLive"></div>' +
-      '<div class="wk-seg">' + PERIODS.map(function(p){
-        return '<button type="button" data-months="' + p.months + '" class="' + (p.months === months ? "on" : "") + '">' + p.label + '</button>';
-      }).join("") + '</div>' +
       '<div class="wk-nav"><button type="button" id="wkPrev" aria-label="Назад">‹</button><div class="wk-title">' + esc(periodTitle()) +
       '</div><button type="button" id="wkNext" aria-label="Вперёд"' + (endMonth.getTime() >= curMonth().getTime() ? " disabled" : "") + '>›</button></div>' +
       '<div class="wk-total"><div class="wk-km">' + esc(fmtKm(sumM(recs))) + '</div><div class="wk-sub">' +
@@ -266,7 +266,7 @@
   }
 
   function bind(c){
-    var seg = c.querySelectorAll(".wk-seg button");
+    var seg = c.querySelectorAll(".wk-per");
     Array.prototype.forEach.call(seg, function(b){
       b.addEventListener("click", function(){
         months = parseInt(b.getAttribute("data-months"), 10) || 1;
@@ -299,7 +299,7 @@
     });
     var rec = document.getElementById("wkRecBtn");
     if(rec) rec.addEventListener("click", onRecordTap);
-    bindSwipe(document.getElementById(rootId));
+    bindSwipe(c);
   }
 
   function shift(dir){
@@ -311,21 +311,30 @@
     render();
   }
 
+  var swipeEl = null, swipeStart = null, swipeEnd = null;
+  // свайп по всей области вкладки (в том числе по пустому месту под списком); слушатели снимаются при каждой перерисовке
   function bindSwipe(el){
-    if(!el) return;
+    if(swipeEl){
+      swipeEl.removeEventListener("touchstart", swipeStart, true);
+      swipeEl.removeEventListener("touchend", swipeEnd, true);
+    }
     var sx = 0, sy = 0, on = false;
-    el.addEventListener("touchstart", function(e){
-      if(!e.touches || e.touches.length !== 1){ on = false; return; }
+    swipeStart = function(e){
+      if(!document.getElementById(rootId) || !e.touches || e.touches.length !== 1){ on = false; return; }
       sx = e.touches[0].clientX; sy = e.touches[0].clientY; on = true;
-    }, { passive: true });
-    el.addEventListener("touchend", function(e){
+    };
+    swipeEnd = function(e){
       if(!on) return;
       on = false;
+      if(!document.getElementById(rootId)) return;
       var t = e.changedTouches && e.changedTouches[0];
       if(!t) return;
       var dx = t.clientX - sx, dy = t.clientY - sy;
       if(Math.abs(dx) >= SWIPE_DX && Math.abs(dy) <= SWIPE_DY) shift(dx > 0 ? -1 : 1);
-    }, { passive: true });
+    };
+    swipeEl = el;
+    el.addEventListener("touchstart", swipeStart, { passive: true, capture: true });
+    el.addEventListener("touchend", swipeEnd, { passive: true, capture: true });
   }
 
   function clearArm(){ if(delArm){ clearTimeout(delArm.timer); delArm = null; } }
