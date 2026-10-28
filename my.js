@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 91.1 (28.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -22119,6 +22120,7 @@
     if(fab){
       fab.onclick = function(){
         flushPendingCommentEdits();
+        if(window.AppKeyboard && window.AppKeyboard.cancelScrollGuards) window.AppKeyboard.cancelScrollGuards();
         var id = createComment();
         var wrap = document.getElementById("commentListWrap");
         if(wrap){
@@ -22130,12 +22132,14 @@
           var commentScroller = document.getElementById("settingsTabContent");
           if(commentScroller) commentScroller.scrollTop = commentScroller.scrollHeight;
           renderCommentRowEdit(id);
+          if(window.AppKeyboard && window.AppKeyboard.settleNewRow) window.AppKeyboard.settleNewRow();
         } else {
           renderCommentsTab();
           requestAnimationFrame(function(){
             var sc = document.getElementById("settingsTabContent");
             if(sc) sc.scrollTop = sc.scrollHeight;
             renderCommentRowEdit(id);
+            if(window.AppKeyboard && window.AppKeyboard.settleNewRow) window.AppKeyboard.settleNewRow();
           });
         }
       };
@@ -22899,6 +22903,7 @@
       // в режим редактирования
       fab.onclick = function(){
         flushPendingTaskEdits(); // не потерять то, что уже набрано в другой строке
+        if(window.AppKeyboard && window.AppKeyboard.cancelScrollGuards) window.AppKeyboard.cancelScrollGuards(); // сторож соседней строки не должен откатывать прокрутку к новой
         var id = createTask(tabKey);
         // при выбранном теге новая задача получает его — иначе при следующей перерисовке она пропала бы из отфильтрованного списка
         var curTagLabel = getTaskTagFilter(tabKey);
@@ -22914,12 +22919,14 @@
           var listScroller = document.getElementById("settingsTabContent");
           if(listScroller) listScroller.scrollTop = listScroller.scrollHeight;
           renderTaskRowEdit(id, tabKey);
+          if(window.AppKeyboard && window.AppKeyboard.settleNewRow) window.AppKeyboard.settleNewRow(); // поле ввода — вплотную над клавиатурой
         } else {
           renderTaskTabList(tabKey);
           requestAnimationFrame(function(){
             var sc = document.getElementById("settingsTabContent");
             if(sc) sc.scrollTop = sc.scrollHeight;
             renderTaskRowEdit(id, tabKey);
+            if(window.AppKeyboard && window.AppKeyboard.settleNewRow) window.AppKeyboard.settleNewRow();
           });
         }
       };
@@ -23758,6 +23765,7 @@
 
       document.getElementById("taskProjectCreateFab").addEventListener("click", function(){
         flushPendingTaskEdits();
+        if(window.AppKeyboard && window.AppKeyboard.cancelScrollGuards) window.AppKeyboard.cancelScrollGuards();
         var nid = createTask("next");
         var t = getTaskById(nid);
         t.c.nextForProjectId = projectId;
@@ -23768,6 +23776,7 @@
         var projArea = document.getElementById("taskProjectArea");
         if(projArea) projArea.scrollTop = projArea.scrollHeight;
         renderRowEdit(nid);
+        if(window.AppKeyboard && window.AppKeyboard.settleNewRow) window.AppKeyboard.settleNewRow();
       });
 
       // сохранение позиции скролла (см. PROJECT_PICKER_RESUME_KEY выше) — область, у которой
@@ -24405,10 +24414,29 @@
   // вьюпорта) или null; нужен окну подтверждения удаления задачи (openTaskDeleteConfirm).
   (function initTaskKeyboardLift(){
     var vk = navigator.virtualKeyboard;
+    var liftNow = null;     // перерасчёт подъёма (назначается ниже, когда applyLift определена)
+    var snapUntil = 0;      // до этого момента строку нужно не только поднять, но и опустить вплотную к клавиатуре
+    function cancelScrollGuards(){
+      if(window.Debug && window.Debug.cancelTaskListScrollGuards) window.Debug.cancelTaskListScrollGuards();
+    }
     window.AppKeyboard = {
       getTop: function(){
         var r = vk && vk.boundingRect;
         return (r && r.height > 0) ? r.top : null;
+      },
+      // Новая строка (задача/комментарий) создаётся кнопкой «+»: сторожа прокрутки (Debug.guardTaskListScroll) от потерявшей
+      // фокус соседней строки откатывали бы подъём над клавиатурой, поэтому их снимают — до прокрутки списка и сразу после
+      // перехода в редактирование (blur соседней строки создаёт сторожа при focus() новой).
+      cancelScrollGuards: cancelScrollGuards,
+      // Вызывается сразу после renderTaskRowEdit/renderCommentRowEdit/renderRowEdit новой строки: снимает сторожей и несколько раз
+      // перерасчитывает подъём — клавиатура приходит с задержкой, а соседняя строка перерисовывается обратно в просмотр через 500 мс
+      // (высота списка меняется), так что одного расчёта сразу после focus() мало.
+      settleNewRow: function(){
+        cancelScrollGuards();
+        snapUntil = Date.now() + 1500;
+        [0, 150, 350, 650, 900, 1300].forEach(function(ms){
+          setTimeout(function(){ if(liftNow) liftNow(); }, ms);
+        });
       }
     };
     if(!vk) return;
@@ -24526,7 +24554,9 @@
         need = caretBottom ? (caretBottom - limit) : maxUp;
       }
       if(need > 1) box.scrollTop += need;
+      else if(need < -1 && Date.now() < snapUntil) box.scrollTop += need; // новая строка: после перерисовки соседей вплотную к клавиатуре, без зазора
     }
+    liftNow = function(){ if(activeEditable) applyLift(); };
 
     document.addEventListener("focusin", function(e){
       if(isTitleInput(e.target)){

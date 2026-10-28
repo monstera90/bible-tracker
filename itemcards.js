@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 33.0 (28.10)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -984,8 +985,8 @@ window.initItemCardsModule = function(deps){
           '<button type="button" class="mdeditor-share-btn item-card-eye-btn' + (revealed ? " visible" : "") + '" title="' + (c.hidden ? "Скрыта (нажмите, чтобы показывать всегда)" : "Показана (нажмите, чтобы скрыть)") + '">' + (c.hidden ? EYE_OFF_ICON_SVG : EYE_ICON_SVG) + '</button>' +
           '<button type="button" class="mdeditor-delete-btn' + (revealed ? " visible" : "") + '" title="Удалить">' + DELETE_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-share-btn item-card-fav-btn' + (revealed ? " visible" : "") + '" title="' + (c.fav ? "В избранном (нажмите, чтобы убрать)" : "Добавить в избранное") + '">' + (c.fav ? STAR_FILLED_ICON_SVG : STAR_ICON_SVG) + '</button>' +
-          // у привычки тап открывает карту, а не форму — правка отдельной кнопкой (тот же тёмный полупрозрачный стиль, что у глаза)
-          ((c.type === "habit" || isSingletonCard(c)) ? '<button type="button" class="mdeditor-share-btn item-card-edit-btn' + (revealed ? " visible" : "") + '" title="Изменить">' + PENCIL_ICON_SVG + '</button>' : '') +
+          // тап по карточке = «Пуск» (скан кода), поэтому правка формы — только этой кнопкой (появляется по долгому нажатию, тот же стиль, что у глаза)
+          '<button type="button" class="mdeditor-share-btn item-card-edit-btn' + (revealed ? " visible" : "") + '" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
         '</div>';
       card.querySelector(".item-card-title").textContent = cardTitle(c);
       applyCardLook(card, c);
@@ -1215,10 +1216,14 @@ window.initItemCardsModule = function(deps){
     });
   }
 
+  // Тап по карточке = «Пуск» = скан её QR-кода; форма правки открывается только долгим нажатием → «Редактировать».
+  // Там, где у карточки есть своя кнопка «Пуск» (таймер, будильник, комбинированный, «Сегодня», «Напоминалка»), тап делает то же,
+  // что она; у остальных (предмет, привычка, задача, погода) — ровно то, что делал бы скан (`showScanned`).
   function onCardTap(c){
-    if(isSingletonCard(c)) return; // «Сегодня» и «Напоминалка» работают только по QR-коду (двойной тап — оборот с кодом)
-    if(c.type === "habit"){ openHabitMap(c.id); return; } // привычка: карта дней (правка — кнопкой при удержании)
-    openForm(c.type, c); // таймер и предмет: форма с заполненными полями
+    if(isSingletonCard(c)){ runSingletonCard(c); return; }
+    if(c.type === "timer" || c.type === "alarm" || c.type === "combo"){ startTimerForCard(c); return; }
+    if(c.type === "remind"){ showCardOverlay(c); return; } // «Напоминание» без QR-кода: просто крупный показ карточки, в журнал не пишется
+    showScanned(c);
   }
 
   // ---------- нижний ряд ----------
@@ -2633,6 +2638,19 @@ window.initItemCardsModule = function(deps){
     if(c.type === "timer") syncTimersView();
     if(c.type === "alarm") syncAlarmsView();
     if(isLegacyAnim()){ o.style.animation = "none"; card.style.animation = "none"; } // Android 5: без анимации
+    if(c.type === "habit" && !standalone){ // карта дней привычки: тап по карточке теперь отмечает день, поэтому карта открывается отсюда
+      var mb = document.createElement("button");
+      mb.type = "button";
+      mb.className = "scan-card-today-btn";
+      mb.title = "Карта дней";
+      mb.innerHTML = iconSvg("habit");
+      mb.addEventListener("click", function(e){
+        e.stopPropagation();
+        endScanSession(false);
+        openHabitMap(c.id);
+      });
+      o.appendChild(mb);
+    }
     if(c.type === "item"){
       var b = document.createElement("button");
       b.type = "button";

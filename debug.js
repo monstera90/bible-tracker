@@ -1,4 +1,5 @@
 // debug.js — общее место для отладочного кода "Графика чтения Библии".
+// Версия: 3.1 (28.10)
 // Версия: 3.0 (12.10) — структурная правка: (1) копирование в буфер переписано (`copyViaExecCommand`,
 // `showManualCopyOverlay`): на Android 5 (WebView) `navigator.clipboard.writeText` отказывает, а запасного пути
 // при отказе не было — обе кнопки («копировать лог», «последние 100») писали «не удалось скопировать». Теперь сначала
@@ -531,9 +532,19 @@
   // и scrollTop всегда 0 — сторожить его бессмысленно, поэтому my.js
   // передаёт туда #taskProjectArea явно (см. 12.09, пятый заход — до этого
   // защита молча не работала именно на этом экране).
+  var activeScrollGuards = []; // сторожа, ещё не снятые и не отменённые (см. cancelTaskListScrollGuards)
+  // Отмена всех действующих сторожей: после неё они не откатывают scrollTop и restore() ничего не делает. Нужна, когда прокрутку
+  // списка осознанно меняет само приложение (новая задача: строка поднимается над клавиатурой) — иначе сторож, оставшийся от
+  // потерявшей фокус соседней строки, возвращал бы список на прежнее место.
+  function cancelTaskListScrollGuards() {
+    for (var i = 0; i < activeScrollGuards.length; i++) activeScrollGuards[i].cancelled = true;
+    activeScrollGuards = [];
+  }
   function guardTaskListScroll(container) {
     container = container || document.getElementById("settingsTabContent");
     if (!container) return function () {};
+    var guardState = { cancelled: false };
+    activeScrollGuards.push(guardState);
     var savedScroll = container.scrollTop;
     function snapshot() {
       // ДОБАВЛЕНО (третий заход): в двух прогонах подряд scrollTop был 0
@@ -555,6 +566,7 @@
       log("container scroll", snapshot());
       // Подстраховка: если гипотеза (не удалять узел сразу) не убрала сброс
       // целиком, хотя бы откатываем его сразу же, а не оставляем как есть.
+      if (guardState.cancelled) return;
       if (container.scrollTop !== savedScroll) container.scrollTop = savedScroll;
     };
     var onWinScroll = function () {
@@ -568,6 +580,8 @@
     window.addEventListener("resize", onResize);
     if (window.visualViewport) window.visualViewport.addEventListener("resize", onResize);
     setTimeout(function () {
+      var gi = activeScrollGuards.indexOf(guardState);
+      if (gi >= 0) activeScrollGuards.splice(gi, 1);
       log("guard:end", snapshot());
       container.removeEventListener("scroll", onScroll);
       window.removeEventListener("scroll", onWinScroll);
@@ -576,6 +590,7 @@
     }, 2000);
     return function () {
       log("restore-called", snapshot());
+      if (guardState.cancelled) return;
       if (document.body.contains(container) && container.scrollTop !== savedScroll) container.scrollTop = savedScroll;
     };
   }
@@ -586,6 +601,7 @@
     log: log,
     clear: clear,
     guardTaskListScroll: guardTaskListScroll,
+    cancelTaskListScrollGuards: cancelTaskListScrollGuards,
     registerAction: registerAction
   };
 
