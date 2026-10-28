@@ -1,5 +1,6 @@
 /* ===========================================================================
    eventlog.js
+   Версия: 3.0 (28.10) — структурная правка: удаление записи журнала долгим нажатием (≈0,5 с) на строке с событием: плашка «Подтвердить удаление?» с кнопками «Удалить» / «Отмена» (`bindLongPress`, `askDelete`, `closeDeleteBar`, `removeEntry`; `window.EventLog.remove`). Серые «предстоящие» строки не удаляются (считаются на лету). Удалённый ключ запоминается (`bibleEventDeletedKeys_v1`, до 200), чтобы таймер/будильник, дописывающий итог в уже удалённую запись, не создал её заново. Откат: eventlog.js 2.2.
    Версия: 2.2 (25.10) — заголовки дней: «ПН 26.10.2026» (день недели + дата). Откат: eventlog.js 2.1
    Версия: 2.1 (25.10) — предстоящее у будильника: серой строкой показывается только ближайший звонок (первый; сработал — появляется второй повтор, и так далее), а не все сразу. Откат: eventlog.js 2.0.
    Версия: 2.0 (25.10) — структурная правка: у таймера и будильника ОДНА запись на запуск, которая меняется по ходу дела: «8:00 Был установлен таймер «Кофе»» → после срока «… и сработал через 23 минуты в **8:23**» / «… и был остановлен пользователем через 15 минут 23 секунды в **8:15**»;
@@ -22,6 +23,10 @@
   var PENDING_KEY = "bibleEventTimersPending_v1";
   var VERSION_KEY = "bibleEventLastVersion_v1";
   var ALARMS_PENDING_KEY = "bibleEventAlarmsPending_v1"; // заведённые будильники, чей итог ещё не записан
+  var DELETED_KEYS_KEY = "bibleEventDeletedKeys_v1";     // ключи записей, удалённых пользователем (итог таймера/будильника их не воскрешает)
+  var MAX_DELETED_KEYS = 200;
+  var LONG_PRESS_MS = 500;
+  var PRESS_MOVE_TOL = 10;    // сдвиг пальца (px), после которого нажатие считается прокруткой
   var TIMERS_WEB_KEY = "itemCardTimers_v1"; // запасное хранилище таймеров в браузере (itemcards.js, makeWebTimers)
   var MAX_ENTRIES = 1000;
   var DEDUPE_MS = 15000;      // одинаковый текст чаще, чем раз в 15 секунд, не пишется (скан в окне ярлыка и повторный вход в приложение)
@@ -58,6 +63,7 @@
     opts = opts || {};
     var at = (typeof opts.at === "number" && isFinite(opts.at) && opts.at > 0) ? opts.at : Date.now();
     var key = opts.key ? String(opts.key) : "";
+    if(key && readDeletedKeys().indexOf(key) >= 0) return false; // пользователь удалил эту запись — не воскрешаем
     var log = readLog();
     var i;
     if(key){
@@ -83,6 +89,35 @@
     return true;
   }
   function list(){ return readLog(); }
+  function readDeletedKeys(){
+    try{
+      var a = JSON.parse(localStorage.getItem(DELETED_KEYS_KEY) || "[]");
+      return Array.isArray(a) ? a : [];
+    }catch(e){ return []; }
+  }
+  function rememberDeletedKey(k){
+    if(!k) return;
+    var a = readDeletedKeys();
+    if(a.indexOf(k) < 0) a.push(k);
+    if(a.length > MAX_DELETED_KEYS) a.splice(0, a.length - MAX_DELETED_KEYS);
+    try{ localStorage.setItem(DELETED_KEYS_KEY, JSON.stringify(a)); }catch(e){}
+  }
+  // удаляет запись журнала (по времени, тексту и ключу, как она была показана); true — запись найдена и удалена
+  function removeEntry(ref){
+    if(!ref) return false;
+    var log = readLog();
+    for(var i = log.length - 1; i >= 0; i--){
+      var e = log[i];
+      if(e && (e.t || 0) === (ref.t || 0) && e.s === ref.s && (e.k || "") === (ref.k || "")){
+        log.splice(i, 1);
+        writeLog(log);
+        rememberDeletedKey(e.k);
+        fire();
+        return true;
+      }
+    }
+    return false;
+  }
   // меняет текст уже записанного события по ключу (время записи остаётся); false — такой записи нет
   function update(key, text, opts){
     text = cleanText(text);
@@ -401,19 +436,22 @@
     return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
   }
   function boldMarks(html){ return html.replace(/\u27E6([^\u27E7]*)\u27E7/g, "<b>$1</b>"); }
+  var shownRows = []; // что показано на экране: по data-n строки находится запись журнала (null — предстоящее, не удаляется)
   function listHtml(){
-    var rows = readLog().map(function(e){ return { at: e.t || 0, text: e.s || "", up: false }; });
+    shownRows = [];
+    var rows = readLog().map(function(e){ return { at: e.t || 0, text: e.s || "", up: false, ref: { t: e.t || 0, s: e.s, k: e.k || "" } }; });
     upcoming().forEach(function(u){ rows.push({ at: u.at, text: u.text, up: true }); });
     if(!rows.length) return '<div class="event-empty">Событий пока нет</div>';
     rows.sort(function(a, b){ return a.at - b.at; }); // сортировка устойчивая не везде — порядок внутри минуты неважен
     var html = "", lastDay = "";
-    rows.forEach(function(r){
+    rows.forEach(function(r, n){
+      shownRows[n] = r.up ? null : r.ref;
       var day = dateLabel(r.at);
       if(day !== lastDay){
         html += '<div class="event-day">' + day + '</div>';
         lastDay = day;
       }
-      html += '<div class="event-row' + (r.up ? ' event-row-upcoming' : '') + '"><span class="event-time">' + timeLabel(r.at) +
+      html += '<div class="event-row' + (r.up ? ' event-row-upcoming' : '') + '" data-n="' + n + '"><span class="event-time">' + timeLabel(r.at) +
         '</span> ' + boldMarks(esc(r.text)) + '</div>';
     });
     return html;
@@ -434,16 +472,98 @@
     box.innerHTML = listHtml();
     if(nearBottom) scrollHost.scrollTop = scrollHost.scrollHeight; else scrollHost.scrollTop = keep;
   }
+  // ---------------------------------------------------------------- удаление записи долгим нажатием
+
+  function closeDeleteBar(){
+    var b = document.getElementById("eventDelBar");
+    if(b && b.parentNode) b.parentNode.removeChild(b);
+    var hl = document.querySelectorAll(".event-row-del");
+    for(var i = 0; i < hl.length; i++) hl[i].className = hl[i].className.replace(/\s*event-row-del\b/g, "");
+    document.removeEventListener("touchstart", onOutsideDown, true);
+    document.removeEventListener("mousedown", onOutsideDown, true);
+  }
+  function onOutsideDown(e){
+    var b = document.getElementById("eventDelBar");
+    var n = e.target;
+    while(n && n !== document){ if(n === b) return; n = n.parentNode; }
+    closeDeleteBar(); // тап мимо плашки — отмена
+  }
+  // ref — запись журнала, как она была показана ({t, s, k}); row — нажатая строка (подсвечивается, пока открыта плашка)
+  function askDelete(ref, row){
+    closeDeleteBar();
+    if(row) row.className += " event-row-del";
+    var bar = document.createElement("div");
+    bar.id = "eventDelBar";
+    bar.className = "event-del-bar";
+    bar.innerHTML = '<span class="event-del-text">Подтвердить удаление?</span>' +
+      '<button type="button" class="event-del-btn event-del-no" aria-label="Отмена">\u2715</button>' +
+      '<button type="button" class="event-del-btn event-del-yes" aria-label="Удалить">\u2713</button>';
+    bar.querySelector(".event-del-no").addEventListener("click", function(e){ e.stopPropagation(); closeDeleteBar(); });
+    bar.querySelector(".event-del-yes").addEventListener("click", function(e){
+      e.stopPropagation();
+      closeDeleteBar();
+      removeEntry(ref); // fire() перерисует открытый экран
+    });
+    document.body.appendChild(bar);
+    document.addEventListener("touchstart", onOutsideDown, true);
+    document.addEventListener("mousedown", onOutsideDown, true);
+  }
+  // долгое нажатие на строке события (кроме серых «предстоящих»): без сдвига пальца — прокрутка не считается
+  function bindLongPress(box){
+    var timer = null, sx = 0, sy = 0, lastTouchAt = 0;
+    function cancel(){ if(timer){ clearTimeout(timer); timer = null; } }
+    function rowOf(el){
+      while(el && el !== box){
+        if(el.className && typeof el.className === "string" && /(^|\s)event-row(\s|$)/.test(el.className)) return el;
+        el = el.parentNode;
+      }
+      return null;
+    }
+    function down(e, isTouch){
+      if(isTouch) lastTouchAt = Date.now();
+      else if(Date.now() - lastTouchAt < 800) return; // эмулированные мышиные события после касания
+      var row = rowOf(e.target);
+      if(!row) return;
+      var ref = shownRows[parseInt(row.getAttribute("data-n"), 10)];
+      if(!ref) return; // предстоящее: в журнале его нет
+      var pt = (e.touches && e.touches[0]) || e;
+      sx = pt.clientX; sy = pt.clientY;
+      cancel();
+      timer = setTimeout(function(){
+        timer = null;
+        try{ if(navigator.vibrate) navigator.vibrate(20); }catch(err){}
+        askDelete(ref, row);
+      }, LONG_PRESS_MS);
+    }
+    function move(e){
+      if(!timer) return;
+      var pt = (e.touches && e.touches[0]) || e;
+      if(Math.abs(pt.clientX - sx) > PRESS_MOVE_TOL || Math.abs(pt.clientY - sy) > PRESS_MOVE_TOL) cancel();
+    }
+    box.addEventListener("touchstart", function(e){ down(e, true); });
+    box.addEventListener("touchmove", move);
+    box.addEventListener("touchend", cancel);
+    box.addEventListener("touchcancel", cancel);
+    box.addEventListener("mousedown", function(e){ down(e, false); });
+    box.addEventListener("mousemove", move);
+    box.addEventListener("mouseup", cancel);
+    box.addEventListener("mouseleave", cancel);
+    box.addEventListener("contextmenu", function(e){ e.preventDefault(); }); // системное меню при долгом нажатии не нужно
+  }
+
   var refreshTimer = null;
   function renderInto(container){
     if(!container) return;
     scrollHost = container;
     try{ reconcileTimers(); }catch(e){}
+    closeDeleteBar();
     container.innerHTML = '<div class="event-center"><div id="eventCenterList">' + listHtml() + '</div></div>';
+    var listBox = document.getElementById("eventCenterList");
+    if(listBox) bindLongPress(listBox);
     scrollToBottom(container); // вкладка всегда открывается в самом низу событий
     if(!refreshTimer){
       refreshTimer = setInterval(function(){
-        if(!document.getElementById("eventCenterList")) return;
+        if(!document.getElementById("eventCenterList")){ closeDeleteBar(); return; } // со вкладки ушли — плашку убираем
         refreshOpenScreen();
       }, REFRESH_MS);
     }
@@ -463,6 +583,7 @@
   window.EventLog = {
     add: add,
     update: update,
+    remove: removeEntry,
     list: list,
     upcoming: upcoming,
     noteVersion: noteVersion,

@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
    Версия: 31.0 (28.10) — структурная правка: «Комбинированный»: действие «Запустить тренировку» (`workout`: `COMBO_KINDS`, `comboRunWorkout`, очередь `pend.workout`, `deps.startWorkout`).
@@ -1474,7 +1475,7 @@ window.initItemCardsModule = function(deps){
       html += '<div class="item-form-hint">Время, повтор и название зашиты в код. Кто его отсканирует, у того будильник заведётся на ближайшее такое время (сегодня, если оно ещё не прошло, иначе завтра) и сработает карточкой на экране, в том числе заблокированном; выключить — смахнуть карточку. Повторы необязательны: если выбраны, будильник прозвонит ещё несколько раз через равные промежутки — каждый звонок гасится смахиванием.</div>';
     }
     if(type === "weather"){
-      html += '<div class="item-form-hint">Город зашит в код. Кто его отсканирует, увидит погоду за окном: сейчас (температура, ветер, влажность, УФ-индекс, качество воздуха, осадки) и прогноз на три дня вперёд. Карточка на другом устройстве не нужна. Нужен интернет (данные Open-Meteo).</div>';
+      html += '<div class="item-form-hint">Город зашит в код. Кто его отсканирует, увидит погоду за окном: сейчас (температура, ветер, влажность, УФ-индекс, время рассвета и заката, осадки) и прогноз на три дня вперёд. Карточка на другом устройстве не нужна. Нужен интернет (данные Open-Meteo).</div>';
     }
     if(type === "habit"){
       html += '<div class="item-form-hint">Каждое сканирование кода отмечает сегодняшний день на карте привычки. В один день засчитывается одно сканирование — повторные в тот же день ничего не меняют. Название (до 40 знаков) зашито в код: если кто-то отсканирует его на другом устройстве, там появится такая же привычка (цвет каждый выбирает себе сам) и отметки пойдут уже у него.</div>';
@@ -2003,7 +2004,7 @@ window.initItemCardsModule = function(deps){
 
   // ---------- погода ----------
   // Карточка: {type:"weather", title:<город>, lat, lon, icon:"weather"}. QR: lt://v1/weather/<широта>,<долгота>[/<название>] (координаты до сотых).
-  // Данные — Open-Meteo (без ключа, CORS открыт): прогноз `api.open-meteo.com`, воздух и УФ `air-quality-api.open-meteo.com`,
+  // Данные — Open-Meteo (без ключа, CORS открыт): прогноз `api.open-meteo.com`, УФ-индекс `air-quality-api.open-meteo.com`,
   // поиск города `geocoding-api.open-meteo.com`. Запросы XHR (на Android 5 нет fetch). sw.js эти адреса НЕ кэширует (иначе погода застынет).
   var WEATHER_CACHE_KEY = "itemCardsWeather_v1"; // последний удачный ответ по городу: показывается, если сети нет
   var WX_DAYS = ["ВС", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
@@ -2069,11 +2070,10 @@ window.initItemCardsModule = function(deps){
     var n = Math.round(Number(v)), w = n < 3 ? "низкий" : (n < 6 ? "умеренный" : (n < 8 ? "высокий" : (n < 11 ? "очень высокий" : "экстремальный")));
     return n + " · " + w;
   }
-  // европейский индекс качества воздуха
-  function wxAqi(v){
-    if(v == null || isNaN(Number(v))) return "—";
-    var n = Number(v), w = n <= 20 ? "хорошее" : (n <= 40 ? "приемлемое" : (n <= 60 ? "умеренное" : (n <= 80 ? "плохое" : (n <= 100 ? "очень плохое" : "опасное"))));
-    return Math.round(n) + " · " + w;
+  // время из ISO-строки местного времени города («2026-10-28T07:12» → «07:12»); «—», если данных нет (полярный день/ночь, старый кэш)
+  function wxTime(iso){
+    var m = /T(\d{2}:\d{2})/.exec(String(iso || ""));
+    return m ? m[1] : "—";
   }
   function wxPlaceName(r){
     var out = String(r.name || "");
@@ -2118,16 +2118,16 @@ window.initItemCardsModule = function(deps){
     }
     try{ localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify(o)); }catch(e){}
   }
-  // cb({f, a, ts[, stale:true]}) или cb(null): f — прогноз (обязателен), a — воздух и УФ (может не быть); без сети — последний ответ из кэша
+  // cb({f, a, ts[, stale:true]}) или cb(null): f — прогноз (обязателен), a — УФ-индекс (может не быть); без сети — последний ответ из кэша
   function loadWeather(lat, lon, cb){
     lat = Number(lat); lon = Number(lon);
     if(!isFinite(lat) || !isFinite(lon)){ cb(null); return; }
     var key = lat.toFixed(2) + "," + lon.toFixed(2);
     var fUrl = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon +
       "&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m" +
-      "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max" +
+      "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,sunrise,sunset" +
       "&wind_speed_unit=ms&timezone=auto&forecast_days=4";
-    var aUrl = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + lat + "&longitude=" + lon + "&current=european_aqi,uv_index&timezone=auto";
+    var aUrl = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + lat + "&longitude=" + lon + "&current=uv_index&timezone=auto";
     var f = null, a = null, left = 2;
     function done(){
       if(--left > 0) return;
@@ -2166,7 +2166,7 @@ window.initItemCardsModule = function(deps){
       stat("Ветер", cur.wind_speed_10m != null ? wxNum(cur.wind_speed_10m, 1) + " м/с" : "—") +
       stat("Влажность", cur.relative_humidity_2m != null ? Math.round(cur.relative_humidity_2m) + "%" : "—") +
       stat("УФ-индекс", wxUv(air.uv_index)) +
-      stat("Качество воздуха", wxAqi(air.european_aqi)) +
+      stat("Рассвет / закат", (d.sunrise || d.sunset) ? wxTime(d.sunrise && d.sunrise[0]) + " \u00B7 " + wxTime(d.sunset && d.sunset[0]) : "—") +
     '</div>';
     var pw = wxPrecipWord(cur.weather_code), mm = Number(cur.precipitation) || 0;
     if(pw || mm > 0){ // осадки показываются, только если они есть
