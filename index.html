@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
      Версия: 9.0 (25.10) — структурная правка: кнопка вкладки «Музыка» `settingsTabSet2Btn11` (set2s_11, между «Забытыми заметками» и «Разделением epub») и подключён `music.js`.
@@ -597,6 +598,15 @@ window.addEventListener("error", function(e){
           <circle cx="12" cy="12" r="2.25"></circle>
         </svg>
       </button>
+      <button class="settings-tab settings-tab-gear" id="settingsTabWorkoutsBtn" title="Тренировки">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="15" cy="4.8" r="1.7"></circle>
+          <path d="M13.2 8.6l-2.7 3.6 3.2 2.1-1.1 5.2"></path>
+          <path d="M10.5 12.2L7 11.4"></path>
+          <path d="M13.2 8.6l3.2 2.4 2.6-.6"></path>
+          <path d="M13.7 14.3l3.1 1.6.6 3.6"></path>
+        </svg>
+      </button>
       <button class="settings-tab settings-tab-gear" id="settingsTabYearBtn" title="Карта дней года">
         <svg viewBox="0 0 24 24" fill="none">
           <rect x="2" y="2" width="4" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
@@ -903,6 +913,7 @@ window.addEventListener("error", function(e){
 <script src="claudetab.js"></script>
 <script src="music.js"></script>
 <script src="calendar.js"></script>
+<script src="workouts.js"></script>
 <script src="mdeditor.js"></script>
 <script src="search.js"></script>
 <!-- flibusta.js — READER_PLAN.md, Этап E, шаг 17: подключение к OPDS-

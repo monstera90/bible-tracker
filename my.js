@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
    Версия: 88.0 (27.10) — структурная правка: комментарий дня «Карты дней года» и поле «Комментарий за сегодня» хранятся в заметке этого дня (имя `дд.мм.гггг`, папка `notes`; mdeditor.js 17.0): `getHourNoteForDay`/`setHourNoteForDay`/`getHourNotesByDay` читают и пишут заметки, старые `hournote:` один раз переносятся (`migrateHourNotesToNotes`) и обнуляются; короткий (≤300 знаков, ≤3 строк) правится на месте, длинный — превью и «Открыть в редакторе» (`isShortDayNote`, `openDayNoteInEditor`, `setupHourNoteLongUi`); экспорт `dailyNotesLog` отдаёт полный текст. Откат: my.js 87.0.
    Версия: 87.0 (27.10)
@@ -1896,6 +1897,10 @@
   // показывается по тем же условиям, что и вкладки задач / «События» / «Календарь».
   var SCREENTIME_TAB_KEY = "screentime";
   var SCREENTIME_TAB_BTN_ID = "settingsTabScreenTimeBtn";
+  // Вкладка «Тренировки» (workouts.js): нижний ряд набора 1, между шестерёнкой и «Картой дней года». В SETTINGS_BOTTOM_ORDER_1 НЕ входит
+  // (иначе сдвинется соответствие позиций с нижним рядом набора 2) — запоминание последней вкладки и «набор» учитывают её отдельно.
+  var WORKOUTS_TAB_KEY = "workouts";
+  var WORKOUTS_TAB_BTN_ID = "settingsTabWorkoutsBtn";
   var TASK_TAB_TITLES = {
     worktasks: "Work tasks", red: "Red", inbox: "Inbox", next: "Next", projects: "Projects",
     waiting: "Waiting", read: "Read", council: "Council", someday: "Someday",
@@ -3538,6 +3543,7 @@
     renderGoalsSection();
     renderAddGoalMenu();
     refreshYearGridIfOpen();
+    try{ if(window.WorkoutsTab) window.WorkoutsTab.refreshIfOpen(); }catch(e){}
     // "Закладки" md-редактора тоже часть этого же state (см.
     // getSyncedBookmarkNames/setSyncedBookmark выше) — после слияния с облаком (единственный
     // случай, когда rerenderAllFromState вообще вызывается) нужно перечитать их и, если открыт
@@ -4710,6 +4716,7 @@
   window.__ltOnAppResume = function(){
     if(window.Debug) window.Debug.log("__ltOnAppResume");
     try{ if(window.ScreenTime) window.ScreenTime.setAppActive(true); }catch(e){}
+    try{ ensureWorkoutsStore(); if(window.WorkoutsTab) window.WorkoutsTab.drain(); }catch(e){} // тренировки, законченные при закрытом приложении
     try{ if(window.MdEditor && MdEditor.onAppResume) MdEditor.onAppResume(); }catch(e){}
     // задачи из окна «Создать новую задачу» (ярлык), созданные пока приложение было закрыто/свёрнуто
     try{ pullNativeQuickTasks(); }catch(e){ if(window.Debug) window.Debug.log("Быстрая задача: " + (e && e.message ? e.message : e)); }
@@ -10676,6 +10683,53 @@
     state[key] = {c: data, t: calNextT(state[key])};
     saveLocalStateNow(); scheduleCloudPush();
   }
+  // ===================== ТРЕНИРОВКИ (workouts.js) =====================
+  // Запись тренировки лежит в личном `state` под ключом "wk:<id>" = {c: данные, t}; тумбстоун — {c:null, t}. Едет в облако тем же
+  // doCloudSync (mergeStates — last-write-wins по t) и попадает в экспорт вместе с остальным state, отдельных веток нет.
+  var WORKOUT_KEY_PREFIX = "wk:";
+  var workoutsStoreReady = false;
+  var workoutsStore = {
+    list: function(){
+      var out = [];
+      Object.keys(state).forEach(function(k){
+        if(k.indexOf(WORKOUT_KEY_PREFIX) !== 0) return;
+        var r = state[k];
+        if(!r || !r.c || typeof r.c !== "object") return;
+        var o = JSON.parse(JSON.stringify(r.c));
+        o.id = k.slice(WORKOUT_KEY_PREFIX.length);
+        out.push(o);
+      });
+      return out;
+    },
+    put: function(id, data){
+      var key = WORKOUT_KEY_PREFIX + id;
+      state[key] = {c: data, t: calNextT(state[key])};
+      saveLocalStateNow(); scheduleCloudPush();
+    },
+    remove: function(id){
+      var key = WORKOUT_KEY_PREFIX + id, prev = state[key];
+      if(!prev || !prev.c) return;
+      state[key] = {c: null, t: calNextT(prev)};
+      saveLocalStateNow(); scheduleCloudPush();
+    }
+  };
+  function ensureWorkoutsStore(){
+    if(workoutsStoreReady || !window.WorkoutsTab) return;
+    window.WorkoutsTab.setStore(workoutsStore);
+    workoutsStoreReady = true;
+  }
+  function renderSettingsTabWorkouts(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    if(window.WorkoutsTab){
+      ensureWorkoutsStore();
+      window.WorkoutsTab.drain();
+      window.WorkoutsTab.render();
+    } else container.innerHTML = '<div class="mood-diagram-empty">Тренировки недоступны</div>';
+  }
+  // при запуске: забрать тренировки, законченные, пока приложение было закрыто
+  setTimeout(function(){ try{ ensureWorkoutsStore(); if(window.WorkoutsTab) window.WorkoutsTab.drain(); }catch(e){} }, 3000);
+
   function ensureCalendarStore(){
     if(calendarStoreReady || !window.CalendarTab || !window.CalendarTab.setStore) return;
     window.CalendarTab.setStore(calendarStore);
@@ -10861,7 +10915,7 @@
     // нижнего, набор 1 или 2) — служебные экраны вроде "import"/"resetConfirm"
     // (открываются кнопками ВНУТРИ вкладки настроек) не считаются отдельной позицией и не сбивают
     // запомненное место — см. cycleSettingsTabSet ниже.
-    if(SETTINGS_SIDE_ORDER_1.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(tab) !== -1 ||
+    if(SETTINGS_SIDE_ORDER_1.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(tab) !== -1 || tab === WORKOUTS_TAB_KEY ||
        SETTINGS_SIDE_ORDER_2.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_2.indexOf(tab) !== -1){
       settingsLastStackTab = tab;
       // тоже в localStorage — settingsLastStackTab сам живёт только в памяти вкладки и не
@@ -10874,6 +10928,8 @@
     if(gearBtn) updateBottomGearButtons();
     if(yearBtn) yearBtn.classList.toggle("active", tab === "year");
     if(moodTabBtn) moodTabBtn.classList.toggle("active", tab === "mood");
+    var wkTabBtn = document.getElementById(WORKOUTS_TAB_BTN_ID);
+    if(wkTabBtn) wkTabBtn.classList.toggle("active", tab === WORKOUTS_TAB_KEY);
     // набор вкладок по клику на колесико
     if(BOTTOM_ALT_TAB_IDS){
       syncBottomAltModeForTab(tab);
@@ -10929,6 +10985,7 @@
     }
     if(tab === "mood"){ markMoodOpenedToday(); renderSettingsTabMood(); }
     else if(tab === "year") renderSettingsTabYear();
+    else if(tab === WORKOUTS_TAB_KEY) renderSettingsTabWorkouts();
     else if(tab === "jointArchive") renderTaskArchiveTab(true);
     else if(tab === "import") renderSettingsTabImportPicker();
     else if(tab === "resetConfirm") renderSettingsTabResetConfirm();
@@ -17553,7 +17610,7 @@
       savedTab = null;
     }
     if(savedTab){
-      var belongsToSet1 = SETTINGS_SIDE_ORDER_1.indexOf(savedTab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(savedTab) !== -1;
+      var belongsToSet1 = SETTINGS_SIDE_ORDER_1.indexOf(savedTab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(savedTab) !== -1 || savedTab === WORKOUTS_TAB_KEY;
       var belongsToSet2 = SETTINGS_SIDE_ORDER_2.indexOf(savedTab) !== -1 || SETTINGS_BOTTOM_ORDER_2.indexOf(savedTab) !== -1;
       // набор переключили, но вкладку так и не выбрали: на экране была вкладка другого набора — открываем её набор
       if(savedSet === 1 && !belongsToSet1 && belongsToSet2 && isSet2Unlocked()) savedSet = 2;
@@ -18078,6 +18135,10 @@
   if(settingsTabGearBtn) settingsTabGearBtn.addEventListener("click", function(){
     toggleBottomAltMode();
   });
+  (function(){
+    var wkBtn = document.getElementById(WORKOUTS_TAB_BTN_ID);
+    if(wkBtn) wkBtn.addEventListener("click", function(){ switchSettingsTabOnClick(WORKOUTS_TAB_KEY); });
+  })();
   if(settingsTabYearBtn) settingsTabYearBtn.addEventListener("click", function(){ switchSettingsTabOnClick("year"); });
   if(settingsTabMoodBtn) settingsTabMoodBtn.addEventListener("click", function(){ switchSettingsTabOnClick("mood"); });
   Object.keys(TASK_TAB_IDS).forEach(function(key){
@@ -18124,7 +18185,7 @@
     alt3: "Восстановление и сброс", alt4: "Дополнительные возможности",
     alt5: "Проверка обновлений", alt6: "Скрытие вкладок"
   };
-  var BOTTOM_ALT_ORIGINAL_TABS = ["year", "mood", "extra2", "extra3", "worktasks", "red"];
+  var BOTTOM_ALT_ORIGINAL_TABS = ["year", "mood", "extra2", "extra3", "worktasks", "red", "workouts"];
   var BOTTOM_ALT_SVG_OPEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">';
   var BOTTOM_ALT_ICONS = {
     // палитра с красками + кисточка
@@ -18220,6 +18281,8 @@
       if(alt) alt.style.display = bottomAltMode ? "" : "none";
       if(orig) orig.style.display = bottomAltMode ? "none" : "";
     });
+    var wkAltOrig = document.getElementById(WORKOUTS_TAB_BTN_ID);
+    if(wkAltOrig) wkAltOrig.style.display = bottomAltMode ? "none" : ""; // в режиме колеса ряд — шестерёнка + 4 вкладки колеса
     refreshSettingsTabsVisibility();   // вертикальный стек набора 1 (11 язычков, декор)
     updateBottomGearButtons();         // колесо подсвечено, пока показан набор вкладок колеса
     updateSettingsCornerPatchHeight(); // меняется число видимых язычков вертикального стека
@@ -18372,7 +18435,7 @@
   // скрыта ли вкладка с ключом tab (ключи как в switchSettingsTab: "inbox", "year", "set2s_3", "set2b_1" …)
   function isSettingsTabUserHidden(tab){
     var id = TASK_TAB_IDS[tab] || (tab === EVENTS_TAB_KEY ? EVENTS_TAB_BTN_ID : null) || (tab === CALENDAR_TAB_KEY ? CALENDAR_TAB_BTN_ID : null) || (tab === SCREENTIME_TAB_KEY ? SCREENTIME_TAB_BTN_ID : null) || EXTRA_TAB_IDS[tab] || SET2_TAB_IDS[tab] || SET2_EXTRA_TAB_IDS[tab] ||
-      (tab === "year" ? "settingsTabYearBtn" : (tab === "mood" ? "settingsTabMoodBtn" : null));
+      (tab === "year" ? "settingsTabYearBtn" : (tab === "mood" ? "settingsTabMoodBtn" : (tab === WORKOUTS_TAB_KEY ? WORKOUTS_TAB_BTN_ID : null)));
     var btn = id ? document.getElementById(id) : null;
     return !!(btn && btn.classList.contains("settings-tab-user-hidden"));
   }
@@ -21259,6 +21322,7 @@
     add("archive", "Архив", btnSvg(TASK_TAB_IDS.archive));
     add(EVENTS_TAB_KEY, "События", btnSvg(EVENTS_TAB_BTN_ID));
     add(SCREENTIME_TAB_KEY, "Трекер экранов", btnSvg(SCREENTIME_TAB_BTN_ID));
+    add(WORKOUTS_TAB_KEY, "Тренировки", btnSvg(WORKOUTS_TAB_BTN_ID));
     add("year", "Карта дней года", btnSvg("settingsTabYearBtn"));
     add("mood", "Диаграмма настроения", btnSvg("settingsTabMoodBtn"));
     var fallback = {set2s_8: "ИПКД"};
@@ -21273,7 +21337,7 @@
   function openComboTab(key){
     key = String(key || "");
     if(SET2_TAB_IDS.hasOwnProperty(key)){ openSettingsTabDirect(key); return true; }
-    var set1 = TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY || key === CALENDAR_TAB_KEY || key === SCREENTIME_TAB_KEY || key === "year" || key === "mood";
+    var set1 = TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY || key === CALENDAR_TAB_KEY || key === SCREENTIME_TAB_KEY || key === WORKOUTS_TAB_KEY || key === "year" || key === "mood";
     if(!set1) return false;
     var alreadyOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay && settingsModalOverlay.classList.contains("open");
     if(!alreadyOpen) openSettingsModal();

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 7.0 (27.10) — остров записи тренировки: `workoutExtras` (метка-диод красная/жёлтая/зелёная, время и дистанция, кнопки «Пауза» и «Стоп»), `workoutDotBitmap`, `elapsedText`. Откат: XiaomiIsland.kt 6.0.
 // Версия: 6.0 (25.10) — остров плеера «Музыка»: `musicExtras` (значок-нота, название трека и папка, кнопки «Назад / Пауза-Играть / Вперёд»), `musicIconBitmap`, `musicButtonBitmap`. Откат: XiaomiIsland.kt 5.2.
 // Версия: 5.2 (24.10) — жёлтый этап значка убран: красный начинается за 2 минуты до конца (`RED_MS` = 120 с; `STAGE_YELLOW` и `YELLOW_MS` удалены). Откат: XiaomiIsland.kt 5.1.
 // Версия: 5.1 (21.10) — `pauseBitmap(fraction, stage, paused)`: при paused вместо полосок рисуется треугольник «продолжить» (нужен плашке в приложении). Откат: XiaomiIsland.kt 5.0.
@@ -406,6 +407,139 @@ object XiaomiIsland {
                 c.drawPath(Path().apply { moveTo(28f, 30f); lineTo(28f, 66f); lineTo(56f, 48f); close() }, paint)
             }
         }
+        return bmp
+    }
+
+    // ---------- остров вкладки «Тренировки» ----------
+
+    private const val PIC_WK_KEY = "miui.focus.pic_wk"
+    private const val PIC_WK_BIG_KEY = "miui.focus.pic_wk_big"
+    private const val ACTION_WK_PAUSE = "miui.focus.action_wk_pause"
+    private const val ACTION_WK_STOP = "miui.focus.action_wk_stop"
+
+    /** Время тренировки: М:СС или Ч:ММ:СС (секунды отбрасываются, а не округляются вверх, как у таймера). */
+    fun elapsedText(ms: Long): String = clockText((ms / 1000) * 1000)
+
+    /**
+     * Extras острова для записи тренировки или null, если остров не поддерживается. Свёрнутый остров: метка-диод слева
+     * (красная — нет связи/поиск, зелёная — связь есть, жёлтая — пауза), дистанция рядом с меткой и общее время справа.
+     * Раскрытый: крупное общее время, ниже дистанция, а при потере связи — «без учёта М:СС»; кнопки «Пауза/Продолжить»
+     * и «Стоп». Цвет строки «без учёта» в самом острове протокол Xiaomi не задаёт — бледно-красной она бывает в шторке.
+     * [float] — раскрыть остров (старт записи, «Связь установлена», потеря связи).
+     */
+    fun workoutExtras(
+        ctx: Context, s: WorkoutTracker.Snapshot, float: Boolean,
+        pause: android.app.PendingIntent, stop: android.app.PendingIntent
+    ): Bundle? {
+        if (!available(ctx)) return null
+        return try {
+            val searching = s.status == WorkoutTracker.ST_SEARCH
+            val finishing = s.status == WorkoutTracker.ST_FINISH
+            val paused = s.status == WorkoutTracker.ST_PAUSE
+            val dot = when {
+                paused -> 1
+                s.status == WorkoutTracker.ST_RUN && s.fix -> 2
+                else -> 0 // 0 — красная, 1 — жёлтая, 2 — зелёная
+            }
+            val picKey = PIC_WK_KEY + dot
+            val bigKey = PIC_WK_BIG_KEY + dot
+            val km = WorkoutService.kmText(s.distM)
+            val total = elapsedText(s.totalMs)
+            val pic = JSONObject().put("type", 1).put("pic", picKey)
+            val left = JSONObject().put("type", 1).put("picInfo", pic)
+                .put("textInfo", JSONObject().put("title", if (searching) "Поиск…" else if (finishing) "Карта…" else km))
+            val big = JSONObject().put("imageTextInfoLeft", left)
+            if (!searching && !finishing) {
+                big.put("imageTextInfoRight", JSONObject().put("type", 2).put("textInfo", JSONObject().put("title", total)))
+            }
+            val island = JSONObject()
+                .put("islandProperty", 1)
+                .put("islandOrder", true)
+                .put("dismissIsland", false)
+                .put("bigIslandArea", big)
+                .put("smallIslandArea", JSONObject().put("picInfo", pic))
+            val title: String
+            val content: String
+            when {
+                searching -> {
+                    title = "Поиск спутников"
+                    content = if (s.sat >= 0) "Найдено: ${s.sat}" else "Ждём сигнал GPS"
+                }
+                finishing -> {
+                    title = "Тренировка завершена"
+                    content = "Сопоставляю маршрут с картой…"
+                }
+                else -> {
+                    title = total
+                    content = when {
+                        s.status == WorkoutTracker.ST_RUN && !s.fix -> "Связи нет · $km · без учёта " + elapsedText(s.lostMs)
+                        s.connectedBanner -> "Связь установлена · $km"
+                        paused -> "Пауза · $km"
+                        s.lostMs >= 1000 -> "$km · без учёта " + elapsedText(s.lostMs)
+                        else -> km
+                    }
+                }
+            }
+            val anim = JSONObject().put("type", 0).put("src", bigKey)
+            val base = JSONObject().put("type", 1).put("title", title).put("content", content).put("animIconInfo", anim)
+            val v2 = JSONObject()
+                .put("protocol", 1)
+                .put("business", "workout_gps")
+                .put("islandFirstFloat", float)
+                .put("enableFloat", false)
+                .put("updatable", true)
+                .put("ticker", title)
+                .put("tickerPic", picKey)
+                .put("aodTitle", title)
+                .put("param_island", island)
+                .put("iconTextInfo", base)
+            val pics = Bundle().apply {
+                putParcelable(picKey, Icon.createWithBitmap(workoutDotBitmap(dot, 96)))
+                putParcelable(bigKey, Icon.createWithBitmap(workoutDotBitmap(dot, 192)))
+            }
+            val out = Bundle().apply { putBundle("miui.focus.pics", pics) }
+            if (s.status == WorkoutTracker.ST_RUN || s.status == WorkoutTracker.ST_PAUSE) {
+                val acts = Bundle()
+                val list = org.json.JSONArray()
+                acts.putParcelable(
+                    ACTION_WK_PAUSE,
+                    Notification.Action.Builder(
+                        Icon.createWithBitmap(pauseBitmap(1f, STAGE_NORMAL, paused)), if (paused) "Продолжить" else "Пауза", pause
+                    ).build()
+                )
+                acts.putParcelable(ACTION_WK_STOP, Notification.Action.Builder(crossIcon(), "Стоп", stop).build())
+                list.put(JSONObject().put("action", ACTION_WK_PAUSE))
+                list.put(JSONObject().put("action", ACTION_WK_STOP))
+                v2.put("actions", list)
+                out.putBundle("miui.focus.actions", acts)
+            }
+            out.putString("miui.focus.param", JSONObject().put("param_v2", v2).toString())
+            out
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Метка-диод тренировки: цветной круг (0 — красный, 1 — жёлтый, 2 — зелёный) с белым ободком. */
+    fun workoutDotBitmap(kind: Int, size: Int = 96): Bitmap {
+        val color = when (kind) {
+            2 -> 0xFF2FA15F.toInt()
+            1 -> 0xFFFFB300.toInt()
+            else -> 0xFFE53935.toInt()
+        }
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.scale(size / 96f, size / 96f)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.style = Paint.Style.FILL
+        paint.color = color
+        c.drawCircle(48f, 48f, 48f, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 6f
+        paint.color = Color.WHITE
+        c.drawCircle(48f, 48f, 26f, paint)
+        paint.style = Paint.Style.FILL
+        c.drawCircle(48f, 48f, 13f, paint)
         return bmp
     }
 }

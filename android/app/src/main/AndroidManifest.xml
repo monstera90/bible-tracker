@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Версия: 1.0 (25.10) -->
+<!-- Версия: 2.0 (27.10) — геолокация и служба WorkoutService (вкладка «Тренировки») -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Шаг 4: приём файлов из «Поделиться» (intent-filter ниже) и FileProvider для отправки файлов.
@@ -35,7 +35,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Плеер вкладки «Музыка» (MusicService): служба переднего плана типа mediaPlayback. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Вкладка «Тренировки» (WorkoutService): запись маршрута по GPS при погашенном экране. ACCESS_FINE_LOCATION запрашивается
+         по нажатию «Запись»; фоновое разрешение (ACCESS_BACKGROUND_LOCATION) не нужно — служба стартует из открытого приложения. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
@@ -167,5 +173,11 @@
             android:name=".MusicService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- Вкладка «Тренировки»: запись тренировки по GPS, уведомление с кнопками и остров Xiaomi, пока идёт запись. -->
+        <service
+            android:name=".WorkoutService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
     </application>
 </manifest>

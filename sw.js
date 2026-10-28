@@ -172,6 +172,7 @@ const ASSETS = [
   "./claudetab.js",
   "./music.js",
   "./calendar.js",
+  "./workouts.js",
   "./mdeditor.js",
   "./codemirror.bundle.js",
   "./search.js",

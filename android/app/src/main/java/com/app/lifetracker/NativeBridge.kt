@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
 // Версия: 9.0 (26.10) — мост версии 16: `getScreenTimeTotals` (счётчики музыки и таймеров для «Трекера экранов», `ScreenTimeStats`).
 // Версия: 8.0 (26.10) — мост версии 15: `musicHeadphones` (подключены ли наушники; для галочки «Наушники обязательны» в QR «Комбинированный»); `musicPlayTrack`/`musicPlayFolder` ставят громкость телефона.
 // Версия: 7.0 (26.10) — мост версии 14: `musicPlayTrack` / `musicPlayFolder` (QR «Комбинированный»: трек или папка по id с зацикливанием и начальной громкостью).
@@ -37,12 +38,13 @@ class NativeBridge(private val activity: MainActivity) {
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
+         * 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
          * 16: `getScreenTimeTotals()` — накопленные устройством миллисекунды музыки и таймеров для вкладки «Трекер экранов».
          * 15: `musicHeadphones()` — подключены ли наушники; `volumePct` в `musicPlayTrack`/`musicPlayFolder` теперь громкость самого телефона.
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 16
+        const val BRIDGE_VERSION = 17
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -593,6 +595,80 @@ class NativeBridge(private val activity: MainActivity) {
     fun musicState(): String {
         if (!activity.pageTrusted) return "{}"
         return MusicPlayer.stateJson()
+    }
+
+    // ---------- вкладка «Тренировки» (WorkoutTracker / WorkoutService) ----------
+
+    /**
+     * Начать запись тренировки («Поиск спутников»). Ответ: "ok" — запись началась; "permission" — запрошено разрешение на
+     * геолокацию (после ответа запись начнётся сама, страница узнаёт это из workoutState); "gps_off" — GPS выключен;
+     * "busy" — запись уже идёт; "denied" — страница не доверенная.
+     */
+    @JavascriptInterface
+    fun workoutStart(): String {
+        if (!activity.pageTrusted) return "denied"
+        if (WorkoutTracker.status != WorkoutTracker.ST_IDLE) return "busy"
+        val ctx = activity.applicationContext
+        if (!WorkoutService.hasLocationPermission(ctx)) {
+            activity.runOnUiThread { activity.requestLocationForWorkout() }
+            return "permission"
+        }
+        if (!WorkoutService.gpsEnabled(ctx)) return "gps_off"
+        if (!WorkoutTracker.begin()) return "busy"
+        WorkoutService.refresh(ctx)
+        return "ok"
+    }
+
+    /** Пауза / продолжить. */
+    @JavascriptInterface
+    fun workoutPause() {
+        if (!activity.pageTrusted) return
+        WorkoutTracker.togglePause()
+        WorkoutService.refresh(activity.applicationContext)
+    }
+
+    /** Остановить запись: true — тренировка сохранится (после сопоставления с картой), false — записывать было нечего. */
+    @JavascriptInterface
+    fun workoutStop(): Boolean {
+        if (!activity.pageTrusted) return false
+        val saved = WorkoutTracker.stop(activity.applicationContext)
+        WorkoutService.refresh(activity.applicationContext)
+        return saved
+    }
+
+    /** JSON: {"status":"idle|searching|running|paused|finishing","fix","sat","satTotal","totalMs","lostMs","distM","startedAt","gaps":[[с,по]],"pending"}. */
+    @JavascriptInterface
+    fun workoutState(): String {
+        if (!activity.pageTrusted) return "{}"
+        return WorkoutTracker.stateJson(activity.applicationContext)
+    }
+
+    /** JSON-массив готовых записей тренировок, которые страница ещё не сохранила. */
+    @JavascriptInterface
+    fun workoutTakeFinished(): String {
+        if (!activity.pageTrusted) return "[]"
+        return WorkoutTracker.takeFinishedJson(activity.applicationContext)
+    }
+
+    /** Страница сохранила записи с этими id (JSON-массив строк) — убрать их из очереди оболочки. */
+    @JavascriptInterface
+    fun workoutAckFinished(idsJson: String?) {
+        if (!activity.pageTrusted || idsJson == null) return
+        WorkoutTracker.ackFinished(activity.applicationContext, idsJson)
+    }
+
+    /** Открывает системные настройки геолокации (включить GPS). */
+    @JavascriptInterface
+    fun openLocationSettings(): Boolean {
+        if (!activity.pageTrusted) return false
+        return try {
+            val i = android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            activity.startActivity(i)
+            true
+        } catch (e: Exception) {
+            false
+        }
     }
 
     // ---------- ярлык сканера QR-кодов на рабочий стол (ScanShortcut; кнопка в «Дополнительных возможностях») ----------

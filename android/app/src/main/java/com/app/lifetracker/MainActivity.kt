@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
 // Версия: 4.0 (25.10) — выбор папки с музыкой (`musicFolderLauncher`, `pickMusicFolder`) для вкладки «Музыка».
 // Версия: 3.1 (22.10) — onPause сразу перепоставляет уведомления идущих таймеров (`CardTimers.tickIsland`): пока приложение на экране, тик их не трогает, и остров в шторке получает свежее время без ожидания следующего тика. Откат: MainActivity.kt 3.0.
@@ -186,6 +187,31 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+    // Вкладка «Тренировки»: запрос геолокации. После «Разрешить» запись начинается сама, страница узнаёт об этом из workoutState.
+    private val locationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            val granted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true
+            if (granted && WorkoutService.gpsEnabled(applicationContext) && WorkoutTracker.begin()) {
+                WorkoutService.refresh(applicationContext)
+            }
+            runOnUiThread {
+                if (!isDestroyed && pageTrusted) {
+                    webView.evaluateJavascript("window.__ltOnLocationPermission && window.__ltOnLocationPermission($granted)", null)
+                }
+            }
+        }
+
+    /** Вызывается мостом в главном потоке: системный запрос разрешения на точную геолокацию. */
+    fun requestLocationForWorkout() {
+        try {
+            locationPermissionLauncher.launch(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            )
+        } catch (e: Exception) {
+            toast("Не удалось запросить разрешение на геолокацию")
+        }
+    }
+
     // Вкладка «Музыка»: системное окно выбора папки; страница узнаёт результат через window.__ltOnMusicFolder(true|false).
     private val musicFolderLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -323,6 +349,12 @@ class MainActivity : ComponentActivity() {
             MusicPlayer.onAppBackground(applicationContext)
         } catch (e: Exception) {
             // остров обновится при следующем изменении трека
+        }
+        // Идёт запись тренировки: пока приложение было на экране, остров не показывался — перепоставляем уведомление сразу.
+        try {
+            WorkoutTracker.onAppBackground(applicationContext)
+        } catch (e: Exception) {
+            // остров обновится следующим тиком службы
         }
         // Сворачивание: страница успевает сохранить автозакладку и позицию чтения, пока WebView ещё не на паузе
         // (visibilitychange в WebView в этот момент может не прийти).
