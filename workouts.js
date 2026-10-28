@@ -1,5 +1,6 @@
 /* ===========================================================================
    workouts.js
+   Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
    Версия: 1.1 (27.10) — кнопки периода («1 мес. / 3 мес. / 6 мес. / Год») перенесены в нижний ряд слева от «Записи»; свайп влево/вправо работает по всей области вкладки (слушатели на контейнере).
    Версия: 1.0 (27.10) — новый файл. Вкладка «Тренировки» (`workouts`, кнопка `settingsTabWorkoutsBtn` в нижнем ряду набора 1,
    между шестерёнкой и «Картой дней года»). `window.WorkoutsTab.{setStore, render, drain, refreshIfOpen}`.
@@ -149,7 +150,12 @@
     var st = document.createElement("style");
     st.id = "workoutsStyle";
     st.textContent =
-      ".wk-root{padding-bottom:84px;min-height:100%;}" +
+      ".wk-root{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;}" +
+      ".wk-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:none;padding-bottom:12px;}" +
+      ".wk-scroll::-webkit-scrollbar{display:none;width:0;height:0;}" +
+      "#wkLive{flex:none;max-height:60%;overflow-y:auto;margin-bottom:calc(var(--fab-size,36px) + 2 * var(--fab-gap,6px));}" +
+      "#wkLive .wk-card,#wkLive .wk-msg{margin-bottom:0;}" +
+      "#wkLive .wk-msg + .wk-card{margin-top:var(--fab-gap,6px);}" +
       ".wk-per{width:auto;min-width:40px;padding:0 6px;font:inherit;font-size:11px;white-space:nowrap;}" +
       ".wk-per.on{background:var(--wood);color:var(--parchment);border-color:var(--wood);}" +
       ".wk-nav{display:flex;align-items:center;justify-content:space-between;margin:4px 0 6px;}" +
@@ -209,8 +215,8 @@
     clampEnd();
     var recs = inRange(allRecords());
     var html = '<div class="wk-root" id="' + rootId + '">' +
+      '<div class="wk-scroll">' +
       '<h3 class="common-tab-title">Тренировки</h3>' +
-      '<div id="wkLive"></div>' +
       '<div class="wk-nav"><button type="button" id="wkPrev" aria-label="Назад">‹</button><div class="wk-title">' + esc(periodTitle()) +
       '</div><button type="button" id="wkNext" aria-label="Вперёд"' + (endMonth.getTime() >= curMonth().getTime() ? " disabled" : "") + '>›</button></div>' +
       '<div class="wk-total"><div class="wk-km">' + esc(fmtKm(sumM(recs))) + '</div><div class="wk-sub">' +
@@ -218,6 +224,8 @@
       '</div></div>' +
       byMonthHtml(recs) +
       listHtml(recs) +
+      '</div>' +
+      '<div id="wkLive"></div>' +
       '</div>' + fabRowHtml();
     c.innerHTML = html;
     bind(c);
