@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
    Версия: 16.0 (26.10) — структурная правка: публичная `getBookmarkedNotes()` (заметки со вкладки «Закладки» — [{id, name}]; нужна выбору «Открыть закладку» в «Комбинированном», itemcards.js 28.0). Откат: mdeditor.js 15.0.
@@ -4841,6 +4842,8 @@ window.initMdEditorModule = function(deps){
     openFile = { id: rec.id, name: rec.name, path: rec.path, text: rec.text, dirty: false };
     screen = "editor";
     render();
+    // как в openNoteById: иначе «последней открытой» остаётся вчерашняя заметка и при запуске модуля она открывается поверх новой
+    persistDocStateNow({ screen: "editor", id: rec.id, name: rec.name, cursorPos: 0, scrollPercent: null });
     return true;
   }
   // ---- комментарий дня «Карты дней года» = заметка этого дня ----
@@ -5549,7 +5552,10 @@ window.initMdEditorModule = function(deps){
   // Только это устройство (см. решение пользователя от 05.09) — просто
   // читаем IndexedDB, файла на диске больше нет вовсе.
   function resumeLastNoteOrShowList(){
+    var openAtStart = openFile;
     return idbGet("lastNote").then(function(v){
+      // за время чтения успели открыть другую заметку (например, «Сегодня» на холодном старте) — вчерашнюю поверх неё не возвращаем
+      if(openFile !== openAtStart) return;
       if(v && typeof v === "object"){
         for(var k in v){ if(v.hasOwnProperty(k)) docState[k] = v[k]; }
       }
@@ -5560,6 +5566,7 @@ window.initMdEditorModule = function(deps){
         render();
       }
     }).catch(function(){
+      if(openFile !== openAtStart) return;
       screen = "list";
       render();
     });

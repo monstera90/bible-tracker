@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
    Версия: 31.0 (28.10) — структурная правка: «Комбинированный»: действие «Запустить тренировку» (`workout`: `COMBO_KINDS`, `comboRunWorkout`, очередь `pend.workout`, `deps.startWorkout`).
    Версия: 30.1 (27.10) — повтор напоминаний «каждый день»/«каждую неделю» и «каждые N дней» считается по календарным дням (`addDaysTs`, `dayIdx`): после перевода часов срок не уезжает на час (раньше прибавлялось ровно 24 ч × N). Откат: itemcards.js 30.0.
@@ -2803,7 +2804,7 @@ window.initItemCardsModule = function(deps){
     { k: "note", label: "Открыть заметку", cat: "open" },
     { k: "task", label: "Добавить задачу", cat: "task" },
     { k: "event", label: "Событие в журнал", cat: "event" },
-    { k: "workout", label: "Запустить тренировку", cat: "workout" }
+    { k: "workout", label: "Запустить тренировку - бег", cat: "workout" }
   ];
   function comboKind(k){ for(var i = 0; i < COMBO_KINDS.length; i++) if(COMBO_KINDS[i].k === k) return COMBO_KINDS[i]; return null; }
   function comboScan(){ return window.CardScan || null; }
