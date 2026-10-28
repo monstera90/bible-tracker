@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 16.6 (28.10)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4773,7 +4774,7 @@ body::after{
   .scan-card-overlay, .scan-card, .scan-reminder-card, .scan-task-card, .scan-weather-card{ animation:none; }
 }
 
-/* таймеры карточек (шаг 5а): внизу карточки две равные кнопки — «Стоп» слева, «Пуск» справа; цифры идущего таймера выделены, приостановленного — приглушены.
+/* таймеры карточек (шаг 5а): внизу карточки две равные кнопки — «Стоп» на всю ширину; цифры идущего таймера выделены, приостановленного — приглушены.
    Зазор между кнопками — margin, а не gap во flex: на Android 5 (WebView < Chrome 84) gap у flex не работает */
 .item-card-timer-btns{
   position:absolute;
@@ -4782,7 +4783,6 @@ body::after{
   bottom:calc(var(--item-card-w, 112px) * 0.06);
   display:flex;
 }
-.item-card-start-btn,
 .item-card-stop-btn,
 .item-card-wx-btn{
   flex:1 1 0;
@@ -4799,7 +4799,6 @@ body::after{
   text-align:center;
   cursor:pointer;
 }
-.item-card-stop-btn{ margin-right:calc(var(--item-card-w, 112px) * 0.04); }
 .item-card-time.running{ font-weight:800; }
 .item-card-time.paused{ opacity:.6; }
 

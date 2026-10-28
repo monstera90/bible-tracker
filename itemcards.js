@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 33.0 (28.10)
+   Версия: 33.1 (28.10)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -853,7 +853,6 @@ window.initItemCardsModule = function(deps){
         '<div class="item-card-time" data-id="' + escapeHtml(c.id) + '">' + escapeHtml(timerTextFor(c)) + '</div>' +
         '<div class="item-card-timer-btns">' +
           '<button type="button" class="item-card-stop-btn" title="Остановить таймер">Стоп</button>' +
-          '<button type="button" class="item-card-start-btn" title="Запустить таймер">Пуск</button>' +
         '</div>';
     }
     if(c.type === "alarm"){ // время будильника, ниже — «заведён…» или повтор; кнопки как у таймера
@@ -862,7 +861,6 @@ window.initItemCardsModule = function(deps){
         '<div class="item-card-date item-card-alarm-state" data-alarm-id="' + escapeHtml(runId(c)) + '"></div>' +
         '<div class="item-card-timer-btns">' +
           '<button type="button" class="item-card-stop-btn" title="Выключить будильник">Выкл.</button>' +
-          '<button type="button" class="item-card-start-btn" title="Запустить будильник">Пуск</button>' +
         '</div>';
     }
     if(c.type === "weather"){ // значок погоды и название города
@@ -872,13 +870,10 @@ window.initItemCardsModule = function(deps){
           '<button type="button" class="item-card-wx-btn" title="Показать погоду">Показать</button>' +
         '</div>';
     }
-    if(c.type === "combo"){ // значок «слои», название, число действий и кнопка «Пуск»
+    if(c.type === "combo"){ // значок «слои», название и число действий (запуск — нажатием на карточку)
       return '<div class="item-card-icon">' + iconSvg("combo") + '</div>' +
         '<div class="item-card-title"></div>' +
-        '<div class="item-card-date">' + escapeHtml(comboCountText(comboActs(c).length)) + '</div>' +
-        '<div class="item-card-timer-btns">' +
-          '<button type="button" class="item-card-start-btn" title="Запустить все действия">Пуск</button>' +
-        '</div>';
+        '<div class="item-card-date">' + escapeHtml(comboCountText(comboActs(c).length)) + '</div>';
     }
     if(c.type === "habit"){ // цвет привычки — фон всей карточки (applyCardLook), здесь значок календаря с галочкой и название
       return '<div class="item-card-icon">' + iconSvg("habit") + '</div>' +
@@ -898,11 +893,7 @@ window.initItemCardsModule = function(deps){
     return '<div class="item-card-icon">' + icon + '</div>' +
       '<div class="item-card-title"></div>' +
       '<div class="item-card-date">' + escapeHtml(isoToRu(c.date)) + '</div>' +
-      remindBtnHtml(c) +
-      (isSingletonCard(c) ? // «Сегодня» и «Напоминалка»: «Пуск» делает то же, что скан их QR-кода
-        '<div class="item-card-timer-btns">' +
-          '<button type="button" class="item-card-start-btn" title="' + (c.type === "reminder" ? 'Показать напоминание' : 'Создать заметку с сегодняшней датой') + '">Пуск</button>' +
-        '</div>' : '');
+      remindBtnHtml(c);
   }
   function renderGrid(){
     screenMode = "grid";
@@ -1191,8 +1182,6 @@ window.initItemCardsModule = function(deps){
       if(flippedId === id){ flipCard(id, false); return; } // тап по QR/обороту — назад
       if(flippedId) unflipAny();
       if(c.type === "weather" && e.target.closest(".item-card-wx-btn")){ hideRevealed(); showWeatherOverlay(c); return; } // «Показать»: погода без скана QR
-      if(isSingletonCard(c) && e.target.closest(".item-card-start-btn")){ hideRevealed(); runSingletonCard(c); return; } // «Пуск» у «Сегодня» и «Напоминалки»
-      if(e.target.closest(".item-card-start-btn")){ startTimerForCard(c); return; } // «Пуск»: запуск, а если уже идёт — заново
       if(e.target.closest(".item-card-stop-btn")){ stopTimerForCard(c); return; } // «Стоп»: отмена таймера
       if(revealedIds[id]){ hideRevealed(); return; }
       if(c.type === "remind"){ onCardTap(c); return; } // у «Напоминания» нет QR-кода: оборота нет, тап сразу открывает форму
@@ -1216,8 +1205,8 @@ window.initItemCardsModule = function(deps){
     });
   }
 
-  // Тап по карточке = «Пуск» = скан её QR-кода; форма правки открывается только долгим нажатием → «Редактировать».
-  // Там, где у карточки есть своя кнопка «Пуск» (таймер, будильник, комбинированный, «Сегодня», «Напоминалка»), тап делает то же,
+  // Тап по карточке = скан её QR-кода (отдельной кнопки «Пуск» нет); форма правки открывается только долгим нажатием → «Редактировать».
+  // У таймера, будильника, комбинированного, «Сегодня» и «Напоминалки» тап запускает их действие, то же,
   // что она; у остальных (предмет, привычка, задача, погода) — ровно то, что делал бы скан (`showScanned`).
   function onCardTap(c){
     if(isSingletonCard(c)){ runSingletonCard(c); return; }
@@ -2507,7 +2496,7 @@ window.initItemCardsModule = function(deps){
     showCardOverlay(c);
   }
   function openDatedNoteFromScan(c){ openTodayFromScan(c.id); }
-  // «Пуск» на карточке «Сегодня» / «Напоминалка» — ровно то же, что скан их QR-кода
+  // Нажатие на карточку «Сегодня» / «Напоминалка» — ровно то же, что скан их QR-кода
   function runSingletonCard(c){
     if(c.type === "datenote") openTodayFromScan(c.id);
     else if(c.type === "reminder") showReminderOverlay();
@@ -2625,7 +2614,6 @@ window.initItemCardsModule = function(deps){
     card.querySelector(".item-card-title").textContent = cardTitle(c);
     card.addEventListener("click", function(e){
       e.stopPropagation();
-      if((c.type === "timer" || c.type === "alarm") && e.target.closest(".item-card-start-btn")) startTimerForCard(c); // «Пуск» на показе: заново (у будильника — завести)
       if((c.type === "timer" || c.type === "alarm") && e.target.closest(".item-card-stop-btn")) stopTimerForCard(c); // «Стоп» на показе («Выкл.» у будильника)
     });
     o.appendChild(card);

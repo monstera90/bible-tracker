@@ -1,11 +1,12 @@
 /* ===========================================================================
    workouts.js
+   Версия: 3.0 (28.10)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
    Версия: 1.1 (27.10) — кнопки периода («1 мес. / 3 мес. / 6 мес. / Год») перенесены в нижний ряд слева от «Записи»; свайп влево/вправо работает по всей области вкладки (слушатели на контейнере).
    Версия: 1.0 (27.10) — новый файл. Вкладка «Тренировки» (`workouts`, кнопка `settingsTabWorkoutsBtn` в нижнем ряду набора 1,
-   между шестерёнкой и «Картой дней года»). `window.WorkoutsTab.{setStore, render, drain, refreshIfOpen}`.
+   между шестерёнкой и «Картой дней года»). `window.WorkoutsTab.{setStore, render, drain, refreshIfOpen, refreshTabMark, start}`.
 
    Что на экране:
    • период: «1 мес. / 3 мес. / 6 мес. / Год» (кнопки в нижнем ряду), стрелки «‹ ›» листают период назад и вперёд (свайп влево/вправо по
@@ -27,9 +28,9 @@
    Запись тренировки: {id, start, end, m (метры, итог), rawM (метры по GPS), totalMs, lostMs, gaps:[[с,по]], how:"map"|"raw"[, rpe (1…10)]}.
 
    «Нагрузка» (sRPE, session RPE): сразу после остановки (кнопкой в панели, в уведомлении или в острове — не важно, запись попадает в `drain`)
-   запись помечается как ожидающая оценки (`workoutsPendingRpe_v1`, список id, только на этом устройстве) и в области панели записи (`#wkLive`,
+   запись помечается как ожидающая оценки (поле `needRpe:1` в самой записи, поэтому метка уезжает в облако и окно оценки появляется и на другом устройстве; `needRpe` снимается при сохранении оценки; старый локальный список `workoutsPendingRpe_v1` один раз переносится в записи — `migrateLocalPending`) и в области панели записи (`#wkLive`,
    там же, где идёт таймер) вместо итога появляется окно «Насколько тяжёлой была тренировка?» с кнопками 1…10 и «Сохранить». Окно не закрывается
-   и ждёт ответа сколько угодно (хранится в localStorage; если запись удалить, ожидание снимается). Пока оценки нет, новая запись не стартует
+   и ждёт ответа сколько угодно (если запись удалить, ожидание снимается). Пока идёт запись или есть тренировка без оценки, язычок вкладки подсвечен как у непрочитанного ИПКД (`workouts-tab-unread`, `refreshTabMark`, раз в 2 с и после слияния с облаком). Карточка «Тренировка сохранена» после оценки без кнопок: закрывается нажатием и сама исчезает при следующем открытии вкладки. Пока оценки нет, новая запись не стартует
    (`startNative` отвечает "rpe"; кнопка «Запись» приглушена; `start()` для QR «Комбинированный» тоже отвечает "rpe"). Баллы тренировки =
    минуты × оценка; минуты — `Math.round(totalMs / 60000)` (общее время существующего таймера, с учётом и без учёта километров),
    баллы не хранятся, а считаются из `totalMs` и `rpe` (`loadOf`). Баллы показаны в строке записи списка и на итоговой карточке.
@@ -49,6 +50,8 @@
   var LOAD_CHECK_MS = 60000;                   // как часто пересчитывать кнопку-индикатор (дни выпадают сами)
   var RPE_LABELS = ["Очень легко", "Легко", "Умеренно", "Немного тяжело", "Тяжело", "Тяжело", "Очень тяжело", "Очень тяжело", "Почти предел", "Максимум усилий"];
   var POLL_MS = 500;
+  var TAB_MARK_MS = 2000;                      // как часто обновлять подсветку язычка вкладки
+  var PEND_CACHE_MS = 1500;
   var SWIPE_DX = 70, SWIPE_DY = 50;
   var MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
   var MONTHS_SHORT = ["янв.", "февр.", "март", "апр.", "май", "июнь", "июль", "авг.", "сент.", "окт.", "нояб.", "дек."];
@@ -85,6 +88,8 @@
   var rpeSel = 0;          // выбранная, но ещё не сохранённая оценка в окне «Насколько тяжёлой была тренировка?»
   var infoOpen = false;    // открыта справка про sRPE (кнопка-индикатор)
   var lastLoadCheck = 0;   // когда в последний раз пересчитывали кнопку-индикатор
+  var pendCache = null;    // {at, val}: короткий кэш pendingRecord (чтобы не перебирать все записи на каждом тике)
+  var tabMarkTimer = null; // таймер подсветки язычка вкладки
 
   // ---------- вспомогательное ----------
   function container(){ return document.getElementById("settingsTabContent"); }
@@ -193,35 +198,56 @@
     lastLoadCheck = Date.now();
   }
 
-  // записи, ждущие оценки: список id в localStorage, самый старый первым
+  // Запись ждёт оценки, если в ней стоит needRpe и нет оценки 1…10. Метка лежит в самой записи и синхронизируется вместе с ней.
+  function needsRpe(r){ return !!(r && r.needRpe && !rpeOk(r.rpe)); }
+  // старый локальный список ожидающих (только это устройство) → метка needRpe в записях; выполняется один раз
   function readPending(){
     try{
       var a = JSON.parse(localStorage.getItem(PENDING_KEY) || "[]");
       return Array.isArray(a) ? a.filter(function(x){ return typeof x === "string"; }) : [];
     }catch(e){ return []; }
   }
-  function writePending(a){
-    try{ if(a.length) localStorage.setItem(PENDING_KEY, JSON.stringify(a)); else localStorage.removeItem(PENDING_KEY); }catch(e){}
-  }
-  function addPending(id){
-    var a = readPending();
-    if(a.indexOf(id) < 0){ a.push(id); writePending(a); }
-  }
-  // первая запись, которой ещё нужна оценка (удалённые и уже оценённые из списка выбрасываются); null — ждать нечего
-  function pendingRecord(){
+  function migrateLocalPending(){
     var ids = readPending();
-    if(!ids.length || !STORE) return null;
+    if(!ids.length || !STORE) return;
     var byId = {};
     allRecords().forEach(function(r){ byId[r.id] = r; });
-    var keep = [], found = null;
     ids.forEach(function(id){
       var r = byId[id];
-      if(!r || rpeOk(r.rpe)) return;
-      keep.push(id);
-      if(!found) found = r;
+      if(!r || rpeOk(r.rpe) || r.needRpe) return;
+      var c = {};
+      Object.keys(r).forEach(function(k){ if(k !== "id") c[k] = r[k]; });
+      c.needRpe = 1;
+      try{ STORE.put(id, c); }catch(e){}
     });
-    if(keep.length !== ids.length) writePending(keep);
+    try{ localStorage.removeItem(PENDING_KEY); }catch(e){}
+    pendCache = null;
+  }
+  // самая старая запись, которой ещё нужна оценка (удалённые в списке не видны); null — ждать нечего
+  function pendingRecord(){
+    if(!STORE) return null;
+    var now = Date.now();
+    if(pendCache && now - pendCache.at < PEND_CACHE_MS) return pendCache.val;
+    migrateLocalPending();
+    var found = null;
+    allRecords().forEach(function(r){
+      if(needsRpe(r) && (!found || num(r.start) < num(found.start))) found = r;
+    });
+    pendCache = { at: now, val: found };
     return found;
+  }
+  // язычок вкладки: подсвечен, пока идёт запись или есть тренировка без оценки
+  function refreshTabMark(){
+    var btn = document.getElementById("settingsTabWorkoutsBtn");
+    if(!btn) return;
+    var st = readState();
+    var active = !!(st && st.status && st.status !== "idle");
+    btn.classList.toggle("workouts-tab-unread", active || !!pendingRecord());
+  }
+  function startTabMark(){
+    if(tabMarkTimer) return;
+    tabMarkTimer = setInterval(refreshTabMark, TAB_MARK_MS);
+    refreshTabMark();
   }
   function saveRpe(){
     var rec = pendingRecord();
@@ -229,12 +255,14 @@
     var c = {};
     Object.keys(rec).forEach(function(k){ if(k !== "id") c[k] = rec[k]; });
     c.rpe = rpeSel;
+    delete c.needRpe;
     try{ STORE.put(rec.id, c); }
     catch(e){ setMessage("Не удалось сохранить оценку. Попробуйте ещё раз.", ""); return; }
-    writePending(readPending().filter(function(x){ return x !== rec.id; }));
+    pendCache = null;
     saveLastResult({ id: rec.id, start: rec.start, m: rec.m, totalMs: rec.totalMs, gaps: rec.gaps || [], how: rec.how, rpe: rpeSel });
     rpeSel = 0; message = ""; messageAction = "";
     render(); // обновит список, кнопку-индикатор и панель
+    refreshTabMark();
   }
 
   // ---------- стили ----------
@@ -317,6 +345,7 @@
   function render(){
     var c = container();
     if(!c) return;
+    pendCache = null;
     ensureStyle();
     loadPeriod();
     clampEnd();
@@ -340,6 +369,7 @@
     lastShape = "";
     pollOnce(true);
     startPoll();
+    refreshTabMark();
   }
 
   function plural(n, a, b, c){
@@ -468,6 +498,7 @@
     if(delArm && delArm.id === id){
       clearArm();
       try{ if(STORE) STORE.remove(id); }catch(e){}
+      pendCache = null;
       openedId = null;
       render();
       return;
@@ -616,8 +647,8 @@
     });
     var rs = document.getElementById("wkRpeSave");
     if(rs) rs.addEventListener("click", saveRpe);
-    var cb = document.getElementById("wkResultOk");
-    if(cb) cb.addEventListener("click", function(){ saveLastResult(null); lastShape = ""; paintLive(true); });
+    var rc = document.getElementById("wkResultCard");
+    if(rc) rc.addEventListener("click", function(){ saveLastResult(null); lastShape = ""; paintLive(true); }); // нажатие на карточку закрывает её
     if(active) updateLiveNumbers(box, st);
   }
 
@@ -712,13 +743,12 @@
 
   function resultCardHtml(r){
     var how = r.how === "map" ? "маршрут сверен с картой OpenStreetMap" : "расстояние по GPS (сверить с картой не удалось)";
-    return '<div class="wk-card"><div class="wk-live-head"><span class="wk-dot ok"></span><span>Тренировка сохранена</span></div>' +
+    return '<div class="wk-card" id="wkResultCard"><div class="wk-live-head"><span class="wk-dot ok"></span><span>Тренировка сохранена</span></div>' +
       '<div class="wk-live-time">' + esc(fmtKm(r.m)) + '</div>' +
       '<div class="wk-live-dist">' + esc(fmtClock(r.totalMs)) + '</div>' +
       '<div class="wk-note">' + esc(how) + '</div>' +
       (rpeOk(r.rpe) ? '<div class="wk-note">Нагрузка: ' + minutesOf(r) + ' мин × ' + r.rpe + ' = ' + loadOf(r) + ' ' + pointsWord(loadOf(r)) + '</div>' : "") +
-      gapsHtml(r.gaps) +
-      '<div class="wk-btns"><button type="button" id="wkResultOk">Понятно</button></div></div>';
+      gapsHtml(r.gaps) + '</div>';
   }
 
   // ---------- забрать готовые записи у оболочки ----------
@@ -740,17 +770,21 @@
           gaps: Array.isArray(r.gaps) ? r.gaps.filter(function(g){ return Array.isArray(g) && g.length === 2; }) : [],
           how: r.how === "map" ? "map" : "raw"
         };
+        c.needRpe = 1; // сначала оценка тяжести (sRPE), итоговая карточка появится после неё; метка едет в облако вместе с записью
         try{ STORE.put(r.id, c); }catch(e){ return; }
-        addPending(r.id); // сначала оценка тяжести (sRPE), итоговая карточка появится после неё
+        pendCache = null;
       }
       ids.push(r.id);
     });
     if(ids.length){ try{ n.workoutAckFinished(JSON.stringify(ids)); }catch(e){} }
     refreshIfOpen();
+    refreshTabMark();
   }
 
   // вкладка открыта — перерисовать (после слияния с облаком, после забора записей)
   function refreshIfOpen(){
+    pendCache = null;
+    refreshTabMark();
     var btn = document.getElementById("settingsTabWorkoutsBtn");
     if(!btn || !btn.classList.contains("active")) return;
     var a = document.activeElement;
@@ -759,10 +793,11 @@
   }
 
   window.WorkoutsTab = {
-    setStore: function(s){ STORE = s; },
-    render: function(){ infoOpen = false; render(); },
+    setStore: function(s){ STORE = s; pendCache = null; startTabMark(); },
+    render: function(){ infoOpen = false; saveLastResult(null); render(); }, // итоговая карточка живёт до ухода с вкладки
     drain: drain,
     refreshIfOpen: refreshIfOpen,
+    refreshTabMark: refreshTabMark,
     start: function(){ var r = startNative(); if(r === "rpe") setMessage("Сначала оцените предыдущую тренировку — окно с вопросом выше.", ""); else if(r === "gps_off") setMessage("GPS выключен. Включите геолокацию и нажмите «Запись» снова.", "gps"); else if(r === "permission") setMessage("Разрешите доступ к геолокации в окне системы — запись начнётся сама.", ""); return r; }
   };
 })();

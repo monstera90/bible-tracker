@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 91.1 (28.10)
+   Версия: 92.0 (28.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -3553,6 +3553,7 @@
     // mdeditor.js).
     if(MdEditor && MdEditor.refreshBookmarksFromState) MdEditor.refreshBookmarksFromState();
     refreshHiddenTabsFromState(); // скрытые вкладки приходят из облака вместе с state
+    refreshTabMarksFromState(); // «заходил сегодня» на ИПКД / настроение / Red — тоже из облака
     // Если сейчас открыта одна из вкладок задач
     // (red/inbox/next/projects/waiting/read/someday/archive) — её тоже нужно перерисовать из
     // свежего state: rerenderAllFromState вызывается только после слияния с облаком (см.
@@ -16484,13 +16485,35 @@
     function p2(n){ return (n < 10 ? "0" : "") + n; }
     return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate());
   }
+  // День последнего захода на вкладки «ИПКД» / «Настроение» / «Red» лежит в state (`__tabSeen:<имя>` = {c: "ГГГГ-ММ-ДД", t}) и уезжает в облако:
+  // зашли на одном устройстве — подсветка снимается и на других. Передаётся сам день, а не «подсветка выключена»: так на другом устройстве
+  // подсветка сама вернётся в новые сутки (у Red — через 3 суток). Значение из localStorage (старое хранилище этого устройства) читается как запасное.
+  var TAB_SEEN_PREFIX = "__tabSeen:";
+  function tabSeenGet(name, legacyKey){
+    var rec = state[TAB_SEEN_PREFIX + name];
+    var v = (rec && typeof rec.c === "string") ? rec.c : "";
+    var l = "";
+    try{ l = localStorage.getItem(legacyKey) || ""; }catch(e){}
+    return l > v ? l : v; // ключи «ГГГГ-ММ-ДД» сравниваются как строки
+  }
+  function tabSeenSet(name, day){
+    var key = TAB_SEEN_PREFIX + name, rec = state[key];
+    if(rec && rec.c === day) return; // уже отмечено сегодня — лишний раз в облако не шлём
+    state[key] = {c: day, t: Date.now()};
+    saveLocalStateNow();
+    scheduleCloudPush();
+  }
+  // после слияния с облаком (rerenderAllFromState): подсветка вкладок могла измениться по данным другого устройства
+  function refreshTabMarksFromState(){
+    updateIpkdTabIcon();
+    updateMoodTabIcon();
+    updateRedTabIcon();
+  }
   function isIpkdOpenedToday(){
-    var v;
-    try{ v = localStorage.getItem(IPKD_LAST_OPENED_KEY); }catch(e){ v = null; }
-    return v === ipkdTodayDateKey();
+    return tabSeenGet("ipkd", IPKD_LAST_OPENED_KEY) === ipkdTodayDateKey();
   }
   function markIpkdOpenedToday(){
-    try{ localStorage.setItem(IPKD_LAST_OPENED_KEY, ipkdTodayDateKey()); }catch(e){}
+    tabSeenSet("ipkd", ipkdTodayDateKey());
     updateIpkdTabIcon();
   }
   // Пиктограмма вкладки — просто число (с ТЗ 29.09 вкладка стоит в вертикальном стеке второго
@@ -16520,12 +16543,10 @@
   var RED_LAST_OPENED_KEY = "redLastOpenedDate_v1";
   var RED_UNOPENED_DAYS = 3;
   function isMoodOpenedToday(){
-    var v;
-    try{ v = localStorage.getItem(MOOD_LAST_OPENED_KEY); }catch(e){ v = null; }
-    return v === ipkdTodayDateKey();
+    return tabSeenGet("mood", MOOD_LAST_OPENED_KEY) === ipkdTodayDateKey();
   }
   function markMoodOpenedToday(){
-    try{ localStorage.setItem(MOOD_LAST_OPENED_KEY, ipkdTodayDateKey()); }catch(e){}
+    tabSeenSet("mood", ipkdTodayDateKey());
     updateMoodTabIcon();
   }
   function updateMoodTabIcon(){
@@ -16543,13 +16564,12 @@
     return Math.round((dt - df) / 86400000);
   }
   function isRedStale(){
-    var v;
-    try{ v = localStorage.getItem(RED_LAST_OPENED_KEY); }catch(e){ v = null; }
+    var v = tabSeenGet("red", RED_LAST_OPENED_KEY);
     if(!v) return true; // ни разу не открывали — подсвечиваем
     return dateKeyDayDiff(v, ipkdTodayDateKey()) >= RED_UNOPENED_DAYS;
   }
   function markRedOpenedToday(){
-    try{ localStorage.setItem(RED_LAST_OPENED_KEY, ipkdTodayDateKey()); }catch(e){}
+    tabSeenSet("red", ipkdTodayDateKey());
     updateRedTabIcon();
   }
   function updateRedTabIcon(){
@@ -18230,7 +18250,7 @@
     var btn = document.createElement(orig.tagName.toLowerCase());
     if(btn.tagName === "BUTTON") btn.type = "button";
     btn.id = id;
-    btn.className = orig.className.replace(/\b(active|mood-tab-unread|red-tab-unread|ipkd-tab-unread)\b/g, "").replace(/\s+/g, " ").trim();
+    btn.className = orig.className.replace(/\b(active|mood-tab-unread|red-tab-unread|ipkd-tab-unread|workouts-tab-unread)\b/g, "").replace(/\s+/g, " ").trim();
     btn.title = BOTTOM_ALT_TAB_TITLES[key];
     btn.setAttribute("aria-label", BOTTOM_ALT_TAB_TITLES[key]);
     btn.innerHTML = BOTTOM_ALT_ICONS[key];
@@ -18239,7 +18259,7 @@
     orig.parentNode.insertBefore(btn, orig.nextSibling);
   }
   // декоративные язычки режима колеса: пустые и некликабельные (стиль — ensureTabDecorStyle)
-  var TAB_DECOR_STRIP = ["active", "mood-tab-unread", "red-tab-unread", "ipkd-tab-unread"];
+  var TAB_DECOR_STRIP = ["active", "mood-tab-unread", "red-tab-unread", "ipkd-tab-unread", "workouts-tab-unread"];
   function ensureTabDecorStyle(){
     if(document.getElementById("tabDecorStyle")) return;
     var st = document.createElement("style");
