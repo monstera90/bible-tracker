@@ -1,5 +1,6 @@
 /* ===========================================================================
    calendar.js
+   Версия: 8.1 (28.10) — «Неделя»: при открытии вкладки (и листании) сетка начинается с 8:00, а не с 7:00 (`WEEK_OPEN_HOUR` в `scrollWeek`); «Сегодня» по-прежнему к красной линии. Откат: calendar.js 8.0.
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -60,6 +61,7 @@
   var DAY_MS = 86400000;
   var HOUR_DEFAULT = 44;    // высота часа в режиме «Неделя» по умолчанию
   var HOUR_MIN = 28, HOUR_MAX = 110; // пределы щипка
+  var WEEK_OPEN_HOUR = 8;   // с какого часа неделя показана при открытии вкладки
   var ZOOM_KEY = "calendarHourPx_v1";
   var PINCH_MIN_GAP = 30;   // щипок считается, только если пальцы разведены по вертикали хотя бы на столько px
   var MIN_BLOCK_PX = 14;    // минимальная высота блока события в неделе
@@ -95,7 +97,7 @@
   var mode = "list";    // выбранный режим: "list" | "week" (хранится в MODE_KEY)
   var weekStart = null; // начало (понедельник 00:00) показанной недели; null — текущая
   var weekScrollKeep = null; // прокрутка недели, которую вернуть после формы
-  var weekScrollToNow = false; // кнопка «Сегодня»: один раз прокрутить к красной линии (иначе неделя всегда открывается с 7:00)
+  var weekScrollToNow = false; // кнопка «Сегодня»: один раз прокрутить к красной линии (иначе неделя всегда открывается с 8:00)
   var WEEK_SLIDE_MS = 260;   // длительность доезжания недели при перелистывании
   var hourPx = HOUR_DEFAULT; // текущая высота часа в неделе
   var pinchEndedAt = 0;      // когда закончился щипок (тап сразу после него игнорируется)
@@ -658,7 +660,7 @@
     var goNow = weekScrollToNow; weekScrollToNow = false;
     scrollWeek(c, goNow);
   }
-  // isNow — только после кнопки «Сегодня»: прокрутить к красной линии; иначе (открытие вкладки, листание) день виден с 7:00
+  // isNow — только после кнопки «Сегодня»: прокрутить к красной линии; иначе (открытие вкладки, листание) день виден с 8:00
   function scrollWeek(c, isNow){
     var keep = weekScrollKeep;
     weekScrollKeep = null;
@@ -666,7 +668,7 @@
       if(keep !== null){ c.scrollTop = keep; return; }
       var body = document.getElementById("calWkBody"), top = c.querySelector(".cal-wk-top");
       if(!body) return;
-      var hour = isNow ? Math.max(0, new Date().getHours() - 2) : 7;
+      var hour = isNow ? Math.max(0, new Date().getHours() - 2) : WEEK_OPEN_HOUR;
       var headH = top ? top.getBoundingClientRect().height : 0;
       c.scrollTop += body.getBoundingClientRect().top - c.getBoundingClientRect().top - headH + hour * hourPx;
     }
