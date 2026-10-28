@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 7.1 (27.10) — кнопка паузы острова тренировки цвета метки (красная/зелёная/жёлтая): `pauseBitmap(..., colorOverride)`, `workoutDotColor`.
 // Версия: 7.0 (27.10) — остров записи тренировки: `workoutExtras` (метка-диод красная/жёлтая/зелёная, время и дистанция, кнопки «Пауза» и «Стоп»), `workoutDotBitmap`, `elapsedText`. Откат: XiaomiIsland.kt 6.0.
 // Версия: 6.0 (25.10) — остров плеера «Музыка»: `musicExtras` (значок-нота, название трека и папка, кнопки «Назад / Пауза-Играть / Вперёд»), `musicIconBitmap`, `musicButtonBitmap`. Откат: XiaomiIsland.kt 5.2.
 // Версия: 5.2 (24.10) — жёлтый этап значка убран: красный начинается за 2 минуты до конца (`RED_MS` = 120 с; `STAGE_YELLOW` и `YELLOW_MS` удалены). Откат: XiaomiIsland.kt 5.1.
@@ -204,7 +205,7 @@ object XiaomiIsland {
     }
 
     /** Круглая кнопка паузы: тёмный круг, кольцо цвета этапа (доля [fraction] — сколько времени осталось, от верха по часовой), две полоски. */
-    fun pauseBitmap(fraction: Float, stage: Int, paused: Boolean = false): Bitmap {
+    fun pauseBitmap(fraction: Float, stage: Int, paused: Boolean = false, colorOverride: Int? = null): Bitmap {
         val size = 96
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
@@ -212,7 +213,7 @@ object XiaomiIsland {
         paint.color = 0xFF2A2A2A.toInt()
         paint.style = Paint.Style.FILL
         c.drawCircle(size / 2f, size / 2f, size / 2f, paint)
-        val color = stageColor(stage)
+        val color = colorOverride ?: stageColor(stage)
         val ring = RectF(8f, 8f, 88f, 88f)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 6f
@@ -504,7 +505,7 @@ object XiaomiIsland {
                 acts.putParcelable(
                     ACTION_WK_PAUSE,
                     Notification.Action.Builder(
-                        Icon.createWithBitmap(pauseBitmap(1f, STAGE_NORMAL, paused)), if (paused) "Продолжить" else "Пауза", pause
+                        Icon.createWithBitmap(pauseBitmap(1f, STAGE_NORMAL, paused, workoutDotColor(dot))), if (paused) "Продолжить" else "Пауза", pause
                     ).build()
                 )
                 acts.putParcelable(ACTION_WK_STOP, Notification.Action.Builder(crossIcon(), "Стоп", stop).build())
@@ -521,12 +522,14 @@ object XiaomiIsland {
     }
 
     /** Метка-диод тренировки: цветной круг (0 — красный, 1 — жёлтый, 2 — зелёный) с белым ободком. */
+    fun workoutDotColor(kind: Int): Int = when (kind) {
+        2 -> 0xFF2FA15F.toInt()
+        1 -> 0xFFFFB300.toInt()
+        else -> 0xFFE53935.toInt()
+    }
+
     fun workoutDotBitmap(kind: Int, size: Int = 96): Bitmap {
-        val color = when (kind) {
-            2 -> 0xFF2FA15F.toInt()
-            1 -> 0xFFFFB300.toInt()
-            else -> 0xFFE53935.toInt()
-        }
+        val color = workoutDotColor(kind)
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         c.scale(size / 96f, size / 96f)
