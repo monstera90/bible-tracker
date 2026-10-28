@@ -1,5 +1,6 @@
 /* ===========================================================================
    workouts.js
+   Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
    Версия: 1.1 (27.10) — кнопки периода («1 мес. / 3 мес. / 6 мес. / Год») перенесены в нижний ряд слева от «Записи»; свайп влево/вправо работает по всей области вкладки (слушатели на контейнере).
    Версия: 1.0 (27.10) — новый файл. Вкладка «Тренировки» (`workouts`, кнопка `settingsTabWorkoutsBtn` в нижнем ряду набора 1,
@@ -372,6 +373,12 @@
     paintLive();
   }
 
+  // старт записи без экрана (кнопка и QR «Комбинированный»): "ok" | "permission" | "gps_off" | "busy" | "nonative" | "error"
+  function startNative(){
+    var n = nat();
+    if(!n) return "nonative";
+    try{ return String(n.workoutStart()); }catch(e){ return "error"; }
+  }
   function onRecordTap(){
     var n = nat();
     if(!n){
@@ -381,8 +388,7 @@
     if(lastState && lastState.status && lastState.status !== "idle"){
       return; // запись уже идёт: управление — в панели
     }
-    var res = "";
-    try{ res = String(n.workoutStart()); }catch(e){ res = "error"; }
+    var res = startNative();
     if(res === "ok"){ message = ""; messageAction = ""; }
     else if(res === "permission") setMessage("Разрешите доступ к геолокации в окне системы — запись начнётся сама.", "");
     else if(res === "gps_off") setMessage("GPS выключен. Включите геолокацию и нажмите «Запись» снова.", "gps");
@@ -592,6 +598,7 @@
     setStore: function(s){ STORE = s; },
     render: render,
     drain: drain,
-    refreshIfOpen: refreshIfOpen
+    refreshIfOpen: refreshIfOpen,
+    start: function(){ var r = startNative(); if(r === "gps_off") setMessage("GPS выключен. Включите геолокацию и нажмите «Запись» снова.", "gps"); else if(r === "permission") setMessage("Разрешите доступ к геолокации в окне системы — запись начнётся сама.", ""); return r; }
   };
 })();

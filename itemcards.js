@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 31.0 (28.10) — структурная правка, карточка «Погода»: убрано «Качество воздуха» (функция `wxAqi` удалена, `european_aqi` больше не запрашивается); добавлено время восхода и захода солнца за дату показа (`wxClock`, поля `daily.sunrise`/`daily.sunset` прогноза, ячейка «Восход / закат»); температура, ветер и УФ-индекс — текущие (`current`). Kotlin не менялся. Откат: itemcards.js 30.1.
+   Версия: 31.0 (28.10) — структурная правка: «Комбинированный»: действие «Запустить тренировку» (`workout`: `COMBO_KINDS`, `comboRunWorkout`, очередь `pend.workout`, `deps.startWorkout`).
    Версия: 30.1 (27.10) — повтор напоминаний «каждый день»/«каждую неделю» и «каждые N дней» считается по календарным дням (`addDaysTs`, `dayIdx`): после перевода часов срок не уезжает на час (раньше прибавлялось ровно 24 ч × N). Откат: itemcards.js 30.0.
    Версия: 30.0 (27.10) — структурная правка: у карточек «Сегодня» и «Напоминалка» появилась кнопка «Пуск» (`runSingletonCard`: то же, что скан их QR — новая заметка с датой / случайное напоминание слоем); у будильника кнопка «Завести» переименована в «Пуск» (действие то же, `startAlarmForCard`). Откат: itemcards.js 29.1.
    Версия: 29.1 (26.10) — «Избранное»: скрытые карточки не бледнеют и заливкой (`cardBg` не делает цвет полупрозрачным в этом фильтре).
@@ -1472,7 +1472,7 @@ window.initItemCardsModule = function(deps){
       html += '<div class="item-form-hint">Время, повтор и название зашиты в код. Кто его отсканирует, у того будильник заведётся на ближайшее такое время (сегодня, если оно ещё не прошло, иначе завтра) и сработает карточкой на экране, в том числе заблокированном; выключить — смахнуть карточку. Повторы необязательны: если выбраны, будильник прозвонит ещё несколько раз через равные промежутки — каждый звонок гасится смахиванием.</div>';
     }
     if(type === "weather"){
-      html += '<div class="item-form-hint">Город зашит в код. Кто его отсканирует, увидит погоду за окном: сейчас (температура, ветер, влажность, УФ-индекс, осадки), время восхода и захода солнца и прогноз на три дня вперёд. Карточка на другом устройстве не нужна. Нужен интернет (данные Open-Meteo).</div>';
+      html += '<div class="item-form-hint">Город зашит в код. Кто его отсканирует, увидит погоду за окном: сейчас (температура, ветер, влажность, УФ-индекс, качество воздуха, осадки) и прогноз на три дня вперёд. Карточка на другом устройстве не нужна. Нужен интернет (данные Open-Meteo).</div>';
     }
     if(type === "habit"){
       html += '<div class="item-form-hint">Каждое сканирование кода отмечает сегодняшний день на карте привычки. В один день засчитывается одно сканирование — повторные в тот же день ничего не меняют. Название (до 40 знаков) зашито в код: если кто-то отсканирует его на другом устройстве, там появится такая же привычка (цвет каждый выбирает себе сам) и отметки пойдут уже у него.</div>';
@@ -2001,7 +2001,7 @@ window.initItemCardsModule = function(deps){
 
   // ---------- погода ----------
   // Карточка: {type:"weather", title:<город>, lat, lon, icon:"weather"}. QR: lt://v1/weather/<широта>,<долгота>[/<название>] (координаты до сотых).
-  // Данные — Open-Meteo (без ключа, CORS открыт): прогноз и восход/закат `api.open-meteo.com`, текущий УФ `air-quality-api.open-meteo.com`,
+  // Данные — Open-Meteo (без ключа, CORS открыт): прогноз `api.open-meteo.com`, воздух и УФ `air-quality-api.open-meteo.com`,
   // поиск города `geocoding-api.open-meteo.com`. Запросы XHR (на Android 5 нет fetch). sw.js эти адреса НЕ кэширует (иначе погода застынет).
   var WEATHER_CACHE_KEY = "itemCardsWeather_v1"; // последний удачный ответ по городу: показывается, если сети нет
   var WX_DAYS = ["ВС", "ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ"];
@@ -2067,10 +2067,11 @@ window.initItemCardsModule = function(deps){
     var n = Math.round(Number(v)), w = n < 3 ? "низкий" : (n < 6 ? "умеренный" : (n < 8 ? "высокий" : (n < 11 ? "очень высокий" : "экстремальный")));
     return n + " · " + w;
   }
-  // время «ЧЧ:ММ» из ISO-строки Open-Meteo («2026-10-28T07:12», уже по времени города); нет значения — «—»
-  function wxClock(iso){
-    var m = /T(\d{2}):(\d{2})/.exec(String(iso || ""));
-    return m ? m[1] + ":" + m[2] : "—";
+  // европейский индекс качества воздуха
+  function wxAqi(v){
+    if(v == null || isNaN(Number(v))) return "—";
+    var n = Number(v), w = n <= 20 ? "хорошее" : (n <= 40 ? "приемлемое" : (n <= 60 ? "умеренное" : (n <= 80 ? "плохое" : (n <= 100 ? "очень плохое" : "опасное"))));
+    return Math.round(n) + " · " + w;
   }
   function wxPlaceName(r){
     var out = String(r.name || "");
@@ -2115,16 +2116,16 @@ window.initItemCardsModule = function(deps){
     }
     try{ localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify(o)); }catch(e){}
   }
-  // cb({f, a, ts[, stale:true]}) или cb(null): f — прогноз (обязателен), a — УФ (может не быть); без сети — последний ответ из кэша
+  // cb({f, a, ts[, stale:true]}) или cb(null): f — прогноз (обязателен), a — воздух и УФ (может не быть); без сети — последний ответ из кэша
   function loadWeather(lat, lon, cb){
     lat = Number(lat); lon = Number(lon);
     if(!isFinite(lat) || !isFinite(lon)){ cb(null); return; }
     var key = lat.toFixed(2) + "," + lon.toFixed(2);
     var fUrl = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon +
       "&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m" +
-      "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,sunrise,sunset" +
+      "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max" +
       "&wind_speed_unit=ms&timezone=auto&forecast_days=4";
-    var aUrl = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + lat + "&longitude=" + lon + "&current=uv_index&timezone=auto";
+    var aUrl = "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=" + lat + "&longitude=" + lon + "&current=european_aqi,uv_index&timezone=auto";
     var f = null, a = null, left = 2;
     function done(){
       if(--left > 0) return;
@@ -2158,13 +2159,12 @@ window.initItemCardsModule = function(deps){
       '<div class="scan-weather-now"><span class="scan-weather-ico">' + wxIconSvg(wxKind(cur.weather_code)) + '</span>' +
         '<span class="scan-weather-temp">' + wxTemp(cur.temperature_2m) + '</span></div>' +
       '<div class="scan-weather-desc">' + escapeHtml(wxDesc(cur.weather_code)) + '</div>';
-    var sun = (d.sunrise && d.sunset) ? wxClock(d.sunrise[0]) + " / " + wxClock(d.sunset[0]) : "—"; // сегодня (первый день прогноза — по времени города)
     function stat(k, v){ return '<div class="scan-weather-stat"><span class="scan-weather-k">' + k + '</span><span class="scan-weather-v">' + escapeHtml(v) + '</span></div>'; }
     html += '<div class="scan-weather-stats">' +
       stat("Ветер", cur.wind_speed_10m != null ? wxNum(cur.wind_speed_10m, 1) + " м/с" : "—") +
       stat("Влажность", cur.relative_humidity_2m != null ? Math.round(cur.relative_humidity_2m) + "%" : "—") +
       stat("УФ-индекс", wxUv(air.uv_index)) +
-      stat("Восход / закат", sun) +
+      stat("Качество воздуха", wxAqi(air.european_aqi)) +
     '</div>';
     var pw = wxPrecipWord(cur.weather_code), mm = Number(cur.precipitation) || 0;
     if(pw || mm > 0){ // осадки показываются, только если они есть
@@ -2801,7 +2801,8 @@ window.initItemCardsModule = function(deps){
     { k: "bm", label: "Открыть закладку", cat: "open" },
     { k: "note", label: "Открыть заметку", cat: "open" },
     { k: "task", label: "Добавить задачу", cat: "task" },
-    { k: "event", label: "Событие в журнал", cat: "event" }
+    { k: "event", label: "Событие в журнал", cat: "event" },
+    { k: "workout", label: "Запустить тренировку", cat: "workout" }
   ];
   function comboKind(k){ for(var i = 0; i < COMBO_KINDS.length; i++) if(COMBO_KINDS[i].k === k) return COMBO_KINDS[i]; return null; }
   function comboScan(){ return window.CardScan || null; }
@@ -2820,7 +2821,7 @@ window.initItemCardsModule = function(deps){
     list.forEach(function(a){
       var n = cs.normCombo(a);
       if(!n || out.length >= COMBO_MAX) return;
-      if(n.k !== "timer" && n.k !== "event" && n.k !== "task" && a && a.name != null) n.name = String(a.name).slice(0, 80);
+      if(n.k !== "timer" && n.k !== "event" && n.k !== "task" && n.k !== "workout" && a && a.name != null) n.name = String(a.name).slice(0, 80);
       if(n.k === "note" && a && a.via === "bm") n.via = "bm";
       out.push(n);
     });
@@ -2910,6 +2911,17 @@ window.initItemCardsModule = function(deps){
     catch(e){ console.error(e); res = { status: "error", reason: "fail" }; }
     return comboTaskResult(a, res);
   }
+  // тренировка: запись стартует через my.js (мост оболочки); в браузере записи нет
+  function comboRunWorkout(){
+    var res = "error";
+    try{ res = deps.startWorkout ? String(deps.startWorkout()) : "unsupported"; }catch(e){ res = "error"; }
+    if(res === "ok") return { ok: true, text: "Запись тренировки начата: идёт поиск спутников" };
+    if(res === "busy") return { ok: true, text: "Запись тренировки уже идёт" };
+    if(res === "permission") return { ok: true, text: "Разрешите доступ к геолокации — запись начнётся сама" };
+    if(res === "gps_off") return { ok: false, text: "Тренировка не началась: GPS выключен" };
+    if(res === "nonative") return { ok: false, text: "Запись тренировки доступна только в приложении на телефоне" };
+    return { ok: false, text: "Не удалось начать запись тренировки" };
+  }
   // «открыть»: вкладка / закладка / заметка. Возвращает описание для слоя (слой при этом обычно не показывается — экран уходит)
   function comboRunOpen(a){
     if(a.k === "tab"){
@@ -2945,12 +2957,13 @@ window.initItemCardsModule = function(deps){
     // «Наушники должны быть подключены»: без них не срабатывает ни одно действие кода (ни таймер, ни задача, ни запись в журнал)
     var needHp = acts.some(function(a){ return (a.k === "track" || a.k === "folder") && a.hp; });
     if(needHp && !comboHeadphonesOn()){ showNoticeOverlay({ kind: "msg", text: "Вначале подключи наушники" }); return; }
-    var results = [], openAct = null, taskAct = null, eventText = "";
+    var results = [], openAct = null, taskAct = null, eventText = "", workoutAct = null;
     acts.forEach(function(a){
       if(a.k === "timer") results.push(comboRunTimer(a));
       else if(a.k === "track" || a.k === "folder") results.push(comboRunMusic(a, comboShownName(o.card, a)));
       else if(a.k === "task") taskAct = a;
       else if(a.k === "event") eventText = a.text;
+      else if(a.k === "workout") workoutAct = a;
       else openAct = a;
     });
     // журнал: ровно одна запись — комментарий события как написан, иначе заглушка
@@ -2961,8 +2974,9 @@ window.initItemCardsModule = function(deps){
       var pend = {};
       if(taskAct){ pend.task = taskAct; results.push({ ok: "queued", text: "Задача «" + taskAct.text + "» появится на вкладке, когда вы откроете приложение" }); }
       if(openAct) pend.open = openAct;
-      if(pend.task || pend.open) comboQueue(pend);
-      if(openAct){
+      if(workoutAct){ pend.workout = 1; results.push({ ok: "queued", text: "Тренировка начнётся, когда откроется приложение" }); }
+      if(pend.task || pend.open || pend.workout) comboQueue(pend);
+      if(openAct || workoutAct){
         if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(COMBO_NATIVE_ID, "note"); }catch(e){} }
         leaveStandalone();
         return;
@@ -2971,6 +2985,7 @@ window.initItemCardsModule = function(deps){
       return;
     }
     if(taskAct) results.push(comboRunTask(taskAct));
+    if(workoutAct) results.push(comboRunWorkout());
     if(openAct){
       if(scanHandle || overlayEl || scanNav) endScanSession(false); // сканер закрыт, экран уходит на открываемое место
       var r = comboRunOpen(openAct);
@@ -3014,7 +3029,7 @@ window.initItemCardsModule = function(deps){
     var q = [];
     try{ q = JSON.parse(localStorage.getItem(PENDING_COMBO_KEY) || "[]"); }catch(e){ q = []; }
     if(!Array.isArray(q)) q = [];
-    var now = Date.now(), keep = [], lastOpen = null;
+    var now = Date.now(), keep = [], lastOpen = null, doWorkout = false;
     q.forEach(function(x){
       if(!x || now - (Number(x.at) || 0) > 30 * 60 * 1000) return;
       var cs = comboScan();
@@ -3023,12 +3038,18 @@ window.initItemCardsModule = function(deps){
         if(t && t.k === "task"){ var tr = comboRunTask(t); if(!tr.ok) console.error(tr.text); }
         delete x.task;
       }
+      var wait = false;
       if(x.open){
         if(allowOpen){ var op = cs ? cs.normCombo(x.open) : null; if(op) lastOpen = op; }
-        else keep.push(x);
+        else wait = true;
       }
+      if(x.workout){
+        if(allowOpen) doWorkout = true; else wait = true;
+      }
+      if(wait) keep.push(x);
     });
     try{ if(keep.length) localStorage.setItem(PENDING_COMBO_KEY, JSON.stringify(keep)); else localStorage.removeItem(PENDING_COMBO_KEY); }catch(e){}
+    if(doWorkout){ var wr = comboRunWorkout(); if(!wr.ok) console.error(wr.text); }
     if(lastOpen) comboRunOpen(lastOpen);
   }
 
@@ -3232,6 +3253,7 @@ window.initItemCardsModule = function(deps){
       if(kind === "bm") return { k: "note", via: "bm", id: "", name: "" };
       if(kind === "note") return { k: "note", id: "", name: "" };
       if(kind === "task") return { k: "task", qid: newId(), tab: "", tag: "", text: "" };
+      if(kind === "workout") return { k: "workout" };
       return { k: "event", text: "" };
     }
     // собрать действия из состояния и полей; strict — с проверкой (ошибка по строке), иначе пропускаются незаполненные
@@ -3259,6 +3281,8 @@ window.initItemCardsModule = function(deps){
           var tx = taskText(body.querySelector(".combo-k-text").value);
           if(!tx || !a.tab){ if(strict) err = "Действие " + n + " («" + kl + "»): " + (!tx ? "введите текст задачи." : "выберите вкладку, куда добавлять задачу."); return; }
           out = { k: "task", qid: a.qid, tab: a.tab, tag: taskTag(body.querySelector(".combo-k-tag").value), text: tx };
+        } else if(r.kind === "workout"){
+          out = { k: "workout" };
         } else if(r.kind === "event"){
           var ev = body.querySelector(".combo-e-text").value.replace(/^\s+|\s+$/g, "").slice(0, 200);
           if(!ev){ if(strict) err = "Действие " + n + " («" + kl + "»): введите комментарий или уберите действие."; return; }
@@ -3380,6 +3404,8 @@ window.initItemCardsModule = function(deps){
         });
         body.querySelector(".combo-k-text").addEventListener("input", updateSize);
         body.querySelector(".combo-k-tag").addEventListener("input", updateSize);
+      } else if(r.kind === "workout"){
+        body.innerHTML = '<div class="item-form-hint">При скане начнётся запись тренировки: приложение запросит доступ к геолокации (если ещё не выдан) и начнёт искать спутники. Если запись уже идёт, ничего не изменится.</div>';
       } else if(r.kind === "event"){
         body.innerHTML = '<textarea class="mdeditor-cleanup-input combo-e-text" rows="2" maxlength="200" placeholder="Комментарий для журнала" style="resize:vertical;font-family:inherit;"></textarea>' +
           '<div class="item-form-hint">В журнале появится время запуска и этот комментарий — ровно так, как написан. Без этого действия в журнал попадает запись «' + escapeHtml(COMBO_STUB) + '».</div>';
