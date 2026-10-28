@@ -1,5 +1,5 @@
 // debug.js — общее место для отладочного кода "Графика чтения Библии".
-// Версия: 3.1 (28.10)
+// Версия: 3.2 (28.10)
 // Версия: 3.0 (12.10) — структурная правка: (1) копирование в буфер переписано (`copyViaExecCommand`,
 // `showManualCopyOverlay`): на Android 5 (WebView) `navigator.clipboard.writeText` отказывает, а запасного пути
 // при отказе не было — обе кнопки («копировать лог», «последние 100») писали «не удалось скопировать». Теперь сначала
@@ -575,6 +575,17 @@
     var onResize = function () {
       log("resize", snapshot());
     };
+    // Сторож нужен только против сброса прокрутки САМИМ браузером/перерисовкой после потери фокуса. Как только человек сам взялся
+    // за прокрутку (палец поехал / колесо), сторож снимается: иначе все 2 с он возвращал бы список на старое место на каждое
+    // событие scroll — список «дёргался» и не давал листать, а restore() через 0,5 с отбрасывал бы уже прокрученное назад.
+    // touchmove, а не touchstart: простое касание (тап) прокруткой не является.
+    var onUserScroll = function () {
+      if (!guardState.cancelled) log("guard:cancelled-by-user-scroll", snapshot());
+      guardState.cancelled = true;
+    };
+    var userScrollOpts = { passive: true, capture: true }; // старые WebView принимают объект как capture=true, это безвредно
+    container.addEventListener("touchmove", onUserScroll, userScrollOpts);
+    container.addEventListener("wheel", onUserScroll, userScrollOpts);
     container.addEventListener("scroll", onScroll);
     window.addEventListener("scroll", onWinScroll);
     window.addEventListener("resize", onResize);
@@ -583,6 +594,8 @@
       var gi = activeScrollGuards.indexOf(guardState);
       if (gi >= 0) activeScrollGuards.splice(gi, 1);
       log("guard:end", snapshot());
+      container.removeEventListener("touchmove", onUserScroll, true);
+      container.removeEventListener("wheel", onUserScroll, true);
       container.removeEventListener("scroll", onScroll);
       window.removeEventListener("scroll", onWinScroll);
       window.removeEventListener("resize", onResize);
