@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.1 (28.10)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
 // Версия: 4.0 (25.10) — выбор папки с музыкой (`musicFolderLauncher`, `pickMusicFolder`) для вкладки «Музыка».
@@ -46,6 +47,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.Lifecycle
 import androidx.webkit.WebViewCompat
 import org.json.JSONObject
 import java.io.File
@@ -312,9 +314,18 @@ class MainActivity : ComponentActivity() {
         return Pair(id, mode)
     }
 
+    override fun onStart() {
+        super.onStart()
+        // WebView паузится только в onStop (см. ниже), а здесь гарантированно «просыпается» при любом возврате в приложение.
+        webView.onResume()
+    }
+
     override fun onResume() {
         super.onResume()
         webView.onResume()
+        // Chromium мог не нарисовать кадр, пока окно было скрыто/на паузе (возврат жестом «назад», быстрое переключение приложений):
+        // просим перерисовать сразу после того, как окно встало на место.
+        webView.post { if (!isDestroyed) webView.invalidate() }
         // Шаг 5: пока приложение на экране, напоминания и общие задачи показывает страница, а не оболочка.
         NotifyStore.appForeground = true
         // Открыл приложение (в том числе по уведомлению «Таймер закончился») — вибрация конца таймера карточки больше не нужна.
@@ -361,9 +372,17 @@ class MainActivity : ComponentActivity() {
         if (pageTrusted) {
             webView.evaluateJavascript("window.__ltOnAppPause && window.__ltOnAppPause()", null)
         }
-        webView.onPause()
+        // webView.onPause() здесь НЕ вызывается: пока Activity только на паузе (жест возврата/переключения приложений, плавающие и
+        // боковые окна, шторка), окно приложения ещё может быть на экране, а Chromium перестаёт рисовать поставленный на паузу
+        // WebView — получался белый экран. Пауза WebView — в onStop, когда окно действительно скрыто.
         claudeTab.pause()
         super.onPause()
+    }
+
+    override fun onStop() {
+        // Окно скрыто: теперь можно остановить анимации и таймеры страницы (страница о паузе уже узнала в onPause).
+        webView.onPause()
+        super.onStop()
     }
 
     override fun onDestroy() {
@@ -462,6 +481,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        // Окно снова в фокусе, а приложение на экране: WebView не должен оставаться на паузе (подстраховка для нестандартных
+        // последовательностей onPause/onResume при возврате из других приложений).
+        if (hasFocus && ::webView.isInitialized && !isDestroyed && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            webView.onResume()
+        }
         // После диалогов, шторки и возврата из других приложений система может вернуть панели: прячем снова.
         if (hasFocus && fullscreen) applyFullscreen(true)
     }
