@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 92.0 (28.10)
+   Версия: 93.0 (28.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -22983,11 +22983,62 @@
     if(!rects || !rects.length) return null;
     return rects[rects.length - 1];
   }
+  // Запись стиля только если значение реально изменилось: подгонка перезапускается сама (наблюдатель ниже), и повторный пересчёт
+  // с тем же результатом не должен ничего менять в раскладке — иначе наблюдатель запускал бы его снова и снова.
+  function setStyleIfChanged(el, prop, val){
+    if(el.style[prop] !== val) el.style[prop] = val;
+  }
   function fitTaskActions(body){
     if(!body) return;
     var actions = body.querySelector(".task-actions");
     var textEl = body.querySelector(".task-text-view") || body.querySelector(".task-editable");
     if(!actions || !textEl) return;
+    watchTaskBodyFit(body, actions);
+    fitTaskActionsNow(body, actions, textEl);
+  }
+  // Подгонка считается по раскладке строк на момент вызова, а раскладка потом может поменяться сама, без события resize и без
+  // нашего вызова: подгрузился шрифт или словарь переносов (строк стало больше/меньше), поменялись поля окна, ширина значков,
+  // загрузилась картинка. Раньше каждую такую причину ловили отдельным вызовом refitAllVisibleTaskBodies — пропущенная причина
+  // оставляла кнопки на старом месте, поверх текста. Теперь строка сама следит за своими размерами (ResizeObserver: тело строки —
+  // меняется высота/ширина текста, и группа кнопок — меняется её ширина) и пересчитывается при любом изменении, какой бы ни была причина.
+  // Где ResizeObserver нет (очень старый WebView), остаются прежние явные вызовы.
+  // (без начальных значений: var поднимается без значения, и присваивание здесь затёрло бы то, что fitTaskActions успел сделать раньше)
+  var taskFitObserver, taskFitQueue, taskFitRaf;
+  function taskFitFlush(){
+    taskFitRaf = 0;
+    var list = taskFitQueue || [];
+    taskFitQueue = [];
+    for(var i = 0; i < list.length; i++){
+      if(document.body.contains(list[i])) fitTaskActions(list[i]);
+    }
+  }
+  function onTaskFitResize(entries){
+    for(var i = 0; i < entries.length; i++){
+      var el = entries[i].target;
+      if(!document.body.contains(el)){ // строку перерисовали/убрали — наблюдать за ней больше незачем
+        try{ if(taskFitObserver) taskFitObserver.unobserve(el); }catch(e){}
+        continue;
+      }
+      // первое срабатывание — просто «исходный размер» после самой подгонки, пересчитывать нечего
+      if(!el._fitSeen){ el._fitSeen = true; continue; }
+      var body = el.classList.contains("task-body") ? el : (el.closest ? el.closest(".task-body") : null);
+      if(!taskFitQueue) taskFitQueue = [];
+      if(body && taskFitQueue.indexOf(body) < 0) taskFitQueue.push(body);
+    }
+    if(taskFitQueue && taskFitQueue.length && !taskFitRaf){
+      // пересчёт — в следующем кадре, а не прямо в колбэке наблюдателя: так нет цикла «изменили стиль → снова колбэк» в том же кадре
+      taskFitRaf = window.requestAnimationFrame ? window.requestAnimationFrame(taskFitFlush) : setTimeout(taskFitFlush, 16);
+    }
+  }
+  function watchTaskBodyFit(body, actions){
+    if(typeof ResizeObserver === "undefined") return;
+    try{
+      if(!taskFitObserver) taskFitObserver = new ResizeObserver(onTaskFitResize);
+      taskFitObserver.observe(body);     // повторный observe того же элемента ничего не делает
+      taskFitObserver.observe(actions);  // группу кнопок перерисовывают заново (innerHTML), поэтому следим при каждой подгонке
+    }catch(e){}
+  }
+  function fitTaskActionsNow(body, actions, textEl){
     // Текст, обрезанный по TASK_CLAMP_LINES строкам (.task-text-clamped) и реально не помещающийся
     // (scrollHeight > clientHeight) — line-clamp только визуально прячет лишние строки, сама
     // раскладка текста внутри происходит как обычно, так что Range.getClientRects() у textEl ниже
@@ -22997,15 +23048,15 @@
     // строки.
     if(textEl.classList.contains("task-text-clamped") && textEl.scrollHeight > textEl.clientHeight + 1){
       var actionsHeightClamped = actions.offsetHeight;
-      actions.style.top = (textEl.clientHeight + 4) + "px";
-      body.style.paddingBottom = (actionsHeightClamped + 4) + "px";
+      setStyleIfChanged(actions, "top", (textEl.clientHeight + 4) + "px");
+      setStyleIfChanged(body, "paddingBottom", (actionsHeightClamped + 4) + "px");
       return;
     }
     var lastRect = getLastLineRect(textEl);
     var bodyRect = body.getBoundingClientRect();
     if(!lastRect || !bodyRect.width){
-      body.style.paddingBottom = "";
-      actions.style.top = "0px";
+      setStyleIfChanged(body, "paddingBottom", "");
+      setStyleIfChanged(actions, "top", "0px");
       return;
     }
     var gap = 8;
@@ -23023,17 +23074,17 @@
     var VISUAL_SLACK_PX = 4;
     if(actionsWidth - VISUAL_SLACK_PX <= availableAfter){
       var top = lastRect.top - bodyRect.top + (lastRect.height - actionsHeight) / 2;
-      actions.style.top = Math.max(0, top) + "px";
-      body.style.paddingBottom = "";
+      setStyleIfChanged(actions, "top", Math.max(0, top) + "px");
+      setStyleIfChanged(body, "paddingBottom", "");
     } else {
-      actions.style.top = (lastRect.bottom - bodyRect.top + 4) + "px";
+      setStyleIfChanged(actions, "top", (lastRect.bottom - bodyRect.top + 4) + "px");
       var padNeeded = actionsHeight + 4;
       if(textEl.classList.contains("task-has-img")){
         // ТЗ 05.10: блок текста с картинкой слева может быть ниже последней строки (картинка в две
         // строки выше самого текста) — этот запас под кнопки уже есть, лишний отступ не добавляем
         padNeeded = Math.max(0, padNeeded - (textEl.getBoundingClientRect().bottom - lastRect.bottom));
       }
-      body.style.paddingBottom = padNeeded + "px";
+      setStyleIfChanged(body, "paddingBottom", padNeeded + "px");
     }
   }
   // пересчитывает подгонку кнопок у ВСЕХ строк задач, видимых прямо сейчас, — нужно при изменении
@@ -23058,6 +23109,8 @@
     }
   }
   window.addEventListener("resize", refitAllVisibleTaskBodies);
+  // догрузка веб-шрифта меняет ширину букв — а значит и последнюю строку текста, не обязательно меняя высоту строки (её наблюдатель не заметил бы)
+  try{ if(document.fonts && document.fonts.addEventListener) document.fonts.addEventListener("loadingdone", refitAllVisibleTaskBodies); }catch(e){}
 
   // копирование текста задачи (кнопка-пиктограмма .task-copy-btn, см. bindTaskRowActions ниже) —
   // тот же приём, что и у копирования субтитров (см. copyBtn в renderSettingsTabSubtitleExtract):
