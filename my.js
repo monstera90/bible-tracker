@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 98.0 (30.10)
+   Версия: 99.0 (30.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -10008,6 +10008,35 @@
       if(tab !== topTab || !glued) tab.classList.remove("tab-flush-top");
     });
     if(glued && topTab) topTab.classList.add("tab-flush-top");
+    updateSettingsCornerPatchBottomHeight();
+  }
+
+  // Заплатка левого нижнего угла (.settings-corner-patch-bl): занимает место слева от видимого нижнего ряда
+  // вкладок (ряд прибит к правому краю, его левый край зависит от числа видимых вкладок). Ширина — до левого
+  // края самой левой видимой вкладки + 14px под её скруглённый угол; высота и положение — по ряду. В раскладке
+  // левши ряд слева, а заплатка справа (inset-inline-start) — ширина считается от правого края экрана.
+  var settingsCornerPatchBL = document.querySelector(".settings-corner-patch-bl");
+  function updateSettingsCornerPatchBottomHeight(){
+    if(!settingsCornerPatchBL) return;
+    var row = null, rr = null;
+    [document.getElementById("settingsTabsGear"), document.getElementById("settingsTabsGearSet2")].forEach(function(el){
+      if(!el || rr) return;
+      var r = el.getBoundingClientRect();
+      if(r.width > 0 && r.height > 0){ row = el; rr = r; }
+    });
+    if(!row){
+      settingsCornerPatchBL.style.width = "0px";
+      settingsCornerPatchBL.style.height = "0px";
+      return;
+    }
+    var rtl = document.documentElement.classList.contains("lefty");
+    var vw = document.documentElement.clientWidth || window.innerWidth;
+    var vh = document.documentElement.clientHeight || window.innerHeight;
+    var w = rtl ? (vw - rr.right) : rr.left;
+    w = Math.max(0, w) + SETTINGS_TAB_CORNER_RADIUS;
+    settingsCornerPatchBL.style.width = Math.round(w) + "px";
+    settingsCornerPatchBL.style.height = Math.round(rr.height) + "px";
+    settingsCornerPatchBL.style.bottom = Math.max(0, Math.round(vh - rr.bottom)) + "px";
   }
 
   // t: 0 (совсем свёрнуто, в точку у угла (maxX,maxY) — там же стоит кнопка) .. 1 (открыто

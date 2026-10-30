@@ -1,6 +1,6 @@
 /* ===========================================================================
    modals.css
-   Версия: 16.3 (28.10)
+   Версия: 17.0 (30.10)
    Версия: 16.2 (25.10) — `.settings-modal-box.cal-week-flush`: окно без боковых полей и боковой рамки, пока на вкладке «Календарь» открыт режим «Неделя» (calendar.js `syncFlush`).
    Версия: 16.1 (25.10) — компактные язычки: боковые 35×55px (было 45×68), нижние 55×35px, кнопка-язычок `.settings-fab` 35×35px; отступы оверлея и заплатка угла под колонку 35px.
    Версия: 16.0 (22.10) — структурная правка: кнопка тегов задач `.task-tag-wrap` (слот 4 между «+» и скрепкой) + попап `.task-tag-popup`; слоты 4–12 теперь считаются как `N + var(--tag-s, 0)` (класс `.fab-tag-shift` на окне ставит `--tag-s:1`: все кнопки левее «+» уезжают на одну позицию, пока видна кнопка тегов). Откат: modals.css 15.0.
@@ -372,6 +372,34 @@
      (updateSettingsCornerPatchHeight) инлайн-стилем — display:none его не трогает. */
   @media (min-width:601px){
     .settings-corner-patch{ display:none; }
+  }
+  /* Заплатка левого нижнего угла: закрывает тёмную подложку слева от нижнего ряда вкладок
+     (ряд прибит к правому краю и растёт справа налево, поэтому слева от него остаётся пустое место,
+     размер которого зависит от числа видимых вкладок). Положение, ширину и высоту ставит my.js
+     (updateSettingsCornerPatchBottomHeight); цвет — как у верхней заплатки. inset-inline-start —
+     в раскладке левши заплатка сама переезжает вправо вместе с рядом вкладок. ::after — квадрат 10×10
+     над заплаткой, закрашивает вырез скруглённого левого нижнего угла окна (border-end-start-radius). */
+  .settings-corner-patch-bl{
+    position:fixed;
+    inset-inline-start:0;
+    bottom:0;
+    width:0;
+    height:0;
+    background:var(--theme-color, var(--wood));
+    pointer-events:none;
+  }
+  .settings-corner-patch-bl::after{
+    content:"";
+    position:absolute;
+    bottom:100%;
+    inset-inline-start:0;
+    width:10px;
+    height:10px;
+    background:var(--theme-color, var(--wood));
+  }
+  .settings-modal-overlay.reading-mode-active .settings-corner-patch-bl{ display:none; }
+  @media (min-width:601px){
+    .settings-corner-patch-bl{ display:none; }
   }
   /* ---------- дубликат пилюли синхронизации для окна настроек (27.09) ----------
      ТЗ пользователя: мерцающий индикатор синхронизации (.sync-status#syncStatusPill
