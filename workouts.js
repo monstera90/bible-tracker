@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 3.1 (28.10)
+   Версия: 4.0 (30.10)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -799,6 +799,10 @@
     setStore: function(s){ STORE = s; pendCache = null; startTabMark(); },
     render: function(){ infoOpen = false; saveLastResult(null); render(); }, // итоговая карточка живёт до ухода с вкладки
     drain: drain,
+    // для календаря («трекеры занятий»): записи как есть — [{id, start, end, totalMs (мс чистого движения), m (метры)}], новые сверху
+    records: function(){
+      return allRecords().map(function(r){ return { id: r.id, start: r.start, end: num(r.end), totalMs: num(r.totalMs), m: num(r.m) }; });
+    },
     refreshIfOpen: refreshIfOpen,
     refreshTabMark: refreshTabMark,
     start: function(){ var r = startNative(); if(r === "rpe") setMessage("Сначала оцените предыдущую тренировку — окно с вопросом выше.", ""); else if(r === "gps_off") setMessage("GPS выключен. Включите геолокацию и нажмите «Запись» снова.", "gps"); else if(r === "permission") setMessage("Разрешите доступ к геолокации в окне системы — запись начнётся сама.", ""); return r; }

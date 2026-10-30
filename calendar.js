@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 8.2 (30.10)
+   Версия: 9.0 (30.10)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -89,6 +89,9 @@
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M4 11.5L12 4l8 7.5"></path><path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"></path><path d="M10 20v-5h4v5"></path>' +
     '</svg>';
+  var TRK_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M3 12h4l2.5-6 4 12 2.5-6H21"></path></svg>';
   var PLUS_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
@@ -135,6 +138,69 @@
   // ---------- хранение ----------
   var STORE = null;            // провайдер хранилища от my.js: {list, put, remove, importLocal, canEditShared}
   var IMPORTED_KEY = "calendarImported_v1";
+  // ---------- «Трекеры занятий»: точное время того, что я делал (сейчас — записи тренировок; позже музыка, чтение и т. п.) ----------
+  // Отдельный слой поверх запланированных мероприятий; кнопка в нижнем ряду показывает/скрывает его (TRK_KEY, на устройстве).
+  // Новый трекер = ещё один элемент TRACKER_SOURCES: get() отдаёт [{start, end, sub}] (мс), label — название занятия.
+  var TRK_KEY = "calendarTrackers_v1";
+  var TRK_LANE = 14;           // px: полоса справа в колонке дня под трекеры (события при включённом слое сужаются на неё)
+  var trackersOn = false;
+  var TRACKER_SOURCES = [
+    { key: "workout", label: "Тренировка", get: function(){
+      var W = window.WorkoutsTab;
+      var list = (W && W.records) ? W.records() : [];
+      return list.map(function(r){
+        var sub = [];
+        if(r.totalMs > 0){ var mins = Math.round(r.totalMs / 60000); sub.push(mins >= 60 ? Math.floor(mins / 60) + " ч " + pad2(mins % 60) + " мин" : mins + " мин"); }
+        if(r.m > 0) sub.push((Math.round(r.m / 10) / 100).toFixed(2).replace(".", ",") + " км");
+        return { start: r.start, end: r.end, dur: r.totalMs, sub: sub.join(" · ") };
+      });
+    } }
+  ];
+  function loadTrackersOn(){ try{ trackersOn = localStorage.getItem(TRK_KEY) === "1"; }catch(e){ trackersOn = false; } }
+  function saveTrackersOn(){ try{ localStorage.setItem(TRK_KEY, trackersOn ? "1" : "0"); }catch(e){} }
+  // трекеры, пересекающие отрезок [from, to): [{src, label, start, end, sub}]; запись без конца — по длительности, иначе минутная
+  function trackerItems(from, to){
+    var out = [];
+    TRACKER_SOURCES.forEach(function(src){
+      var list = [];
+      try{ list = src.get() || []; }catch(e){ list = []; }
+      list.forEach(function(r){
+        if(!r || typeof r.start !== "number" || !isFinite(r.start)) return;
+        var end = r.end > r.start ? r.end : r.start + Math.max(60000, r.dur || 0);
+        if(r.start >= to || end <= from) return;
+        out.push({ src: src.key, label: src.label, start: r.start, end: end, sub: r.sub || "" });
+      });
+    });
+    return out;
+  }
+  function trackerText(t){ return t.label + " · " + timeRange(t.start, t.end - t.start) + (t.sub ? " · " + t.sub : ""); }
+  // куски трекеров недели по дням (как weekSegments): [день 0..6] → [{top, bottom, t}]
+  function weekTrackerSegments(ws){
+    var days = [[], [], [], [], [], [], []];
+    trackerItems(ws, dayStartAt(ws, 7)).forEach(function(t){
+      for(var i = 0; i < 7; i++){
+        var ds = dayStartAt(ws, i), de = dayStartAt(ws, i + 1);
+        if(t.end <= ds || t.start >= de) continue;
+        var top = t.start > ds ? minutesOfDay(t.start) : 0;
+        var bottom = t.end >= de ? 1440 : minutesOfDay(t.end);
+        days[i].push({ top: top, bottom: Math.max(bottom, top + 1), t: t });
+      }
+    });
+    return days;
+  }
+  var trkToastTimer = null;
+  function trackerToast(text){
+    var old = document.getElementById("calTrkToast");
+    if(old && old.parentNode) old.parentNode.removeChild(old);
+    var el = document.createElement("div");
+    el.id = "calTrkToast";
+    el.className = "cal-trk-toast";
+    el.textContent = text;
+    document.body.appendChild(el);
+    clearTimeout(trkToastTimer);
+    trkToastTimer = setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 4000);
+  }
+
   var weekRenderedAt = 0;      // когда нарисована неделя: от этого дня считается красная линия «сейчас»
   var lastSig = null;          // подпись списка при последней отрисовке/обновлении (refresh не перерисовывает без перемен)
   function validEvent(e){
@@ -274,6 +340,9 @@
         rows.push({ at: at, dur: dur, ev: ev, series: true, first: i === 0, open: open, more: list.length - 1 });
       });
     });
+    if(trackersOn) trackerItems(from, to).forEach(function(t){
+      rows.push({ at: t.start, dur: t.end - t.start, trk: t });
+    });
     if(!rows.length) return '<div class="event-empty">Мероприятий пока нет. Нажмите «+», чтобы добавить.</div>';
     rows.sort(function(a, b){ return a.at - b.at; });
     var html = "", lastDay = "";
@@ -282,6 +351,10 @@
       if(day !== lastDay){
         html += '<div class="event-day" data-day="' + day + '">' + dayLabel(r.at) + '</div>';
         lastDay = day;
+      }
+      if(r.trk){
+        html += '<div class="event-row cal-trk-row"><span class="event-time">' + timeRange(r.at, r.dur) + '</span> ' + esc(r.trk.label) + (r.trk.sub ? '<span class="cal-rep"> · ' + esc(r.trk.sub) + '</span>' : '') + '</div>';
+        return;
       }
       var badge = "";
       if(r.series && r.more > 0){
@@ -349,6 +422,7 @@
   // ---------- нижний ряд и режимы ----------
   function clampHour(v){ return Math.max(HOUR_MIN, Math.min(HOUR_MAX, v)); }
   function loadMode(){
+    loadTrackersOn();
     try{
       mode = localStorage.getItem(MODE_KEY) === "week" ? "week" : "list";
       var z = parseFloat(localStorage.getItem(ZOOM_KEY));
@@ -360,12 +434,21 @@
     return '<div class="mdeditor-fab-row">' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarModeBtn" title="' + (mode === "week" ? "Режим: список" : "Режим: неделя") + '">' +
         (mode === "week" ? LIST_ICON_SVG : WEEK_ICON_SVG) + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn' + (trackersOn ? ' pressed' : '') + '" id="calendarTrkBtn" title="' + (trackersOn ? 'Скрыть трекеры занятий' : 'Показать трекеры занятий') + '">' + TRK_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarAddBtn" title="Новое мероприятие">' + PLUS_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarHomeStub" tabindex="-1" aria-disabled="true">' + HOME_ICON_SVG + '</button>' +
     '</div>';
   }
   function bindFab(){
     document.getElementById("calendarAddBtn").addEventListener("click", function(){ weekRememberScroll(); openForm(null); });
+    document.getElementById("calendarTrkBtn").addEventListener("click", function(){
+      trackersOn = !trackersOn;
+      saveTrackersOn();
+      var tb = document.getElementById("calendarTrkBtn");
+      if(mode === "week"){ weekRememberScroll(); renderWeek(); return; }
+      refreshList(); // список: обновляется только содержимое, прокрутка остаётся
+      if(tb){ tb.classList.toggle("pressed", trackersOn); tb.title = trackersOn ? "Скрыть трекеры занятий" : "Показать трекеры занятий"; }
+    });
     document.getElementById("calendarModeBtn").addEventListener("click", function(){
       mode = mode === "week" ? "list" : "week";
       saveMode();
@@ -436,6 +519,8 @@
   function weekHtml(ws){
     var now = Date.now(), todayKey = dateValue(now);
     var segsByDay = weekSegments(ws);
+    var lane = trackersOn ? TRK_LANE : 0;
+    var trkByDay = lane ? weekTrackerSegments(ws) : null;
     var head = '<div class="cal-wk-head"><div class="cal-wk-gutter"></div>';
     var cols = '';
     for(var i = 0; i < 7; i++){
@@ -448,11 +533,24 @@
         var top = sg.top * hourPx / 60;
         var h = Math.max(MIN_BLOCK_PX, (sg.bottom - sg.top) * hourPx / 60 - 1);
         var w = 100 / sg.cols, left = sg.col * w;
+        var posCss = lane
+          ? 'left:calc(' + (left / 100).toFixed(4) + ' * (100% - ' + lane + 'px));width:calc(' + (w / 100).toFixed(4) + ' * (100% - ' + lane + 'px) - 1px)'
+          : 'left:' + left.toFixed(2) + '%;width:calc(' + w.toFixed(2) + '% - 1px)';
         var tall = h >= 30;
         blocks += '<div class="cal-wk-ev cal-c-' + calOf(sg.ev) + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
-          ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;left:' + left.toFixed(2) + '%;width:calc(' + w.toFixed(2) + '% - 1px)">' +
+          ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + '">' +
           (tall ? '<span class="cal-wk-et">' + timeValue(sg.at) + '</span>' : '') + esc(sg.ev.title) + '</div>';
       });
+      if(trkByDay){
+        var tsegs = trkByDay[i];
+        packDay(tsegs);
+        tsegs.forEach(function(tg){
+          var tt = tg.top * hourPx / 60, th = Math.max(MIN_BLOCK_PX, (tg.bottom - tg.top) * hourPx / 60 - 1);
+          var cw = lane / tg.cols;
+          blocks += '<div class="cal-wk-trk cal-trk-' + tg.t.src + '" data-t="' + tg.top + '" data-b="' + tg.bottom + '" data-txt="' + esc(trackerText(tg.t)) + '"' +
+            ' style="top:' + tt.toFixed(1) + 'px;height:' + th.toFixed(1) + 'px;left:calc(100% - ' + (lane - tg.col * cw).toFixed(2) + 'px);width:' + Math.max(2, cw - 1).toFixed(2) + 'px"></div>';
+        });
+      }
       var nowLine = isToday ? '<div class="cal-wk-now" data-m="' + minutesOfDay(now) + '" style="top:' + (minutesOfDay(now) * hourPx / 60).toFixed(1) + 'px"></div>' : '';
       cols += '<div class="cal-wk-col' + (isToday ? ' cal-wk-today-col' : '') + '" data-day="' + ds + '">' + blocks + nowLine + '</div>';
     }
@@ -487,6 +585,12 @@
       var t = +list[i].getAttribute("data-t"), b = +list[i].getAttribute("data-b");
       list[i].style.top = (t * hourPx / 60).toFixed(1) + "px";
       list[i].style.height = Math.max(MIN_BLOCK_PX, (b - t) * hourPx / 60 - 1).toFixed(1) + "px";
+    }
+    list = wk.querySelectorAll(".cal-wk-trk");
+    for(i = 0; i < list.length; i++){
+      var tt = +list[i].getAttribute("data-t"), tb = +list[i].getAttribute("data-b");
+      list[i].style.top = (tt * hourPx / 60).toFixed(1) + "px";
+      list[i].style.height = Math.max(MIN_BLOCK_PX, (tb - tt) * hourPx / 60 - 1).toFixed(1) + "px";
     }
     list = wk.querySelectorAll(".cal-wk-now");
     for(i = 0; i < list.length; i++) list[i].style.top = (+list[i].getAttribute("data-m") * hourPx / 60).toFixed(1) + "px";
@@ -600,6 +704,8 @@
     var wk = document.getElementById("calWeek");
     wk.addEventListener("click", function(e){
       if(Date.now() - pinchEndedAt < 350) return; // тап, оставшийся от щипка
+      var trk = e.target.closest ? e.target.closest(".cal-wk-trk") : null;
+      if(trk){ trackerToast(trk.getAttribute("data-txt") || ""); return; }
       var blk = e.target.closest ? e.target.closest(".cal-wk-ev") : null;
       if(blk){
         var ev = findEvent(blk.getAttribute("data-id"));

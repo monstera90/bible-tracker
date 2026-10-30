@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 93.1 (30.10)
+   Версия: 93.3 (30.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -10468,6 +10468,7 @@
     if(!container) return;
     if(window.CalendarTab){
       ensureCalendarStore();
+      try{ ensureWorkoutsStore(); }catch(e){} // «трекеры занятий» календаря читают записи тренировок
       window.CalendarTab.render();
       // общие мероприятия — подтянуть из группы (тот же доступ, что у общих задач); пришло что-то новое — календарь сам перерисуется
       if(sharedGroup && isGroupTasksActive()) refreshGroupEvents().then(rerenderCalendarIfOpen);
@@ -21731,6 +21732,39 @@
   // в переиспользуемую функцию — нужен сразу двум кнопкам и сразу в двух местах (обычные вкладки
   // задач и "Все задачи проекта", см. bindTaskRowActions/bindRowActions). sdvig пальца/мыши больше
   // MOVE_CANCEL_PX отменяет удержание, как и в исходном приёме.
+  // После удержания отметка сбрасывается, строка задачи перерисовывается, и под всё ещё прижатым пальцем оказывается текст —
+  // браузер начинал его выделять. Пока палец не отпущен (и ещё 400 мс после) выделение гасится: selectstart, selectionchange, user-select.
+  var holdGuard = { on: false, safety: null, release: null, saved: "" };
+  function holdGuardKill(e){ if(e && e.cancelable) e.preventDefault(); }
+  function holdGuardClear(){ try{ var sel = window.getSelection && window.getSelection(); if(sel && sel.removeAllRanges) sel.removeAllRanges(); }catch(e){} }
+  function holdGuardOn(){
+    clearTimeout(holdGuard.release);
+    if(!holdGuard.on){
+      holdGuard.on = true;
+      document.addEventListener("selectstart", holdGuardKill, true);
+      document.addEventListener("selectionchange", holdGuardClear, true);
+      var st = document.documentElement.style;
+      holdGuard.saved = st.webkitUserSelect || "";
+      st.webkitUserSelect = "none";
+    }
+    holdGuardClear();
+    clearTimeout(holdGuard.safety);
+    holdGuard.safety = setTimeout(holdGuardOff, 8000); // страховка, если отпускание пальца не пришло
+  }
+  function holdGuardOff(){
+    clearTimeout(holdGuard.safety); clearTimeout(holdGuard.release);
+    if(!holdGuard.on) return;
+    holdGuard.on = false;
+    document.removeEventListener("selectstart", holdGuardKill, true);
+    document.removeEventListener("selectionchange", holdGuardClear, true);
+    document.documentElement.style.webkitUserSelect = holdGuard.saved;
+    holdGuardClear();
+  }
+  function holdGuardRelease(){
+    if(!holdGuard.on) return;
+    clearTimeout(holdGuard.release);
+    holdGuard.release = setTimeout(holdGuardOff, 400);
+  }
   function bindTapOrHold(el, onTap, onHold){
     if(!el) return;
     var HOLD_MS = 250, MOVE_CANCEL_PX = 10;
@@ -21747,7 +21781,7 @@
       moved = false;
       startXY = {x:x, y:y};
       clearTimer();
-      timer = setTimeout(function(){ holdFired = true; onHold(); }, HOLD_MS);
+      timer = setTimeout(function(){ holdFired = true; holdGuardOn(); onHold(); }, HOLD_MS);
     }
     function move(x, y){
       if(!startXY) return;
@@ -21766,6 +21800,7 @@
     el.addEventListener("touchmove", function(e){ var t = e.touches[0]; move(t.clientX, t.clientY); }, {passive:true});
     el.addEventListener("touchend", function(e){
       clearTimer();
+      holdGuardRelease();
       if(!touchHandled) return;
       touchHandled = false;
       if(e.cancelable) e.preventDefault(); // подстраховка от "призрачного" клика на части сборок
@@ -21773,10 +21808,10 @@
       if(moved){ moved = false; return; } // свайп от кнопки — не тап
       onTap();
     }, {passive:false});
-    el.addEventListener("touchcancel", function(){ clearTimer(); touchHandled = false; });
+    el.addEventListener("touchcancel", function(){ clearTimer(); holdGuardRelease(); touchHandled = false; });
     el.addEventListener("mousedown", function(e){ start(e.clientX, e.clientY); });
     el.addEventListener("mousemove", function(e){ move(e.clientX, e.clientY); });
-    el.addEventListener("mouseup", clearTimer);
+    el.addEventListener("mouseup", function(){ clearTimer(); holdGuardRelease(); });
     // click остаётся рабочим путём только для мыши/клавиатуры — тач уже обработан выше вручную в
     // touchend (native click для него не придёт, раз мы погасили touchstart preventDefault'ом).
     el.addEventListener("click", function(e){
