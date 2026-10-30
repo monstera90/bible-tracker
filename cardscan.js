@@ -1,6 +1,6 @@
 /* ===========================================================================
    cardscan.js
-   Версия: 4.0 (26.10) — структурная правка: `decodeCrop` — если на целом кадре код не найден (рядом на листе соседний код: его уголки-«глаза» сбивают jsQR, как на лист с несколькими наклейками), кадр разбирается по квадратным вырезкам (по центру, со сдвигом влево и вправо; `CROPS`), удачная вырезка запоминается (`cropSticky`) и пробуется первой. Откат: cardscan.js 3.1.
+   Версия: 4.1 (30.10)
    Версия: 3.1 (26.10) — удержание кода вдвое короче (`HOLD_MIN_MS` 125, `HOLD_EDGE_MS` 300, `HOLD_SIDE_EFFECT_MS` 250, `EXCEED_PENALTY_MS` 75); в действиях «музыка» комбо-кода появилось поле `hp` («наушники обязательны», пятый элемент `["m"|"f", id, цикл, громкость, 1]`, при 0 не пишется). Откат: cardscan.js 3.0.
    Версия: 3.1 (28.10) — «Комбинированный»: действие `{k:"workout"}` «Запустить тренировку» (код `["w"]`, категория «тренировка»).
    Версия: 3.0 (26.10) — структурная правка: QR «Комбинированный» `lt://v1/combo/<JSON>` → `{kind:"combo", acts:[…]}` (`parseCombo`, `comboCode`, `comboCategory`, `COMBO_MAX`): до 5 действий, по одному из категории (таймер / музыка / «открыть» / задача / событие в журнал), JSON из коротких массивов (`["t",сек,название]`, `["m",id,цикл,громкость]`, `["f",…]`, `["o",ключ вкладки]`, `["b",хеш книги,id закладки]`, `["n",id заметки]`, `["k",id задачи,вкладка,тег,текст]`, `["e",текст]`); такой код — с побочным эффектом, удержание не меньше 0,5 с. Откат: cardscan.js 2.7.
@@ -43,8 +43,9 @@ window.CardScan = (function(){
   var ALARM_PREFIX = "lt://v1/alarm/";   // будильник: время, повтор и название в коде
   var WEATHER_PREFIX = "lt://v1/weather/"; // погода: координаты и название города в коде
   var HABIT_PREFIX = "lt://v1/habit/";
-  var COMBO_PREFIX = "lt://v1/combo/";   // «Комбинированный»: до 5 действий одним кодом (JSON из коротких массивов)
-  var COMBO_MAX = 5;
+  var COMBO_PREFIX = "lt://v1/combo/";   // «Комбинированный»: до 10 действий одним кодом (JSON из коротких массивов)
+  var COMBO_MAX = 10;
+  var COMBO_MULTI = { timer: 1, task: 1 }; // категории, где действий может быть несколько; из остальных — не больше одного
   var TASK_PREFIX = "lt://v1/task/";
   var TODAY_CODE = "lt://v1/today";       // «Сегодня»: один и тот же код у всех, заметку создаёт тот, кто сканирует
   var REMINDER_CODE = "lt://v1/reminder"; // «Напоминалка»: один и тот же код у всех, напоминание берётся у того, кто сканирует
@@ -55,7 +56,7 @@ window.CardScan = (function(){
   //   {kind:"alarm", hour, minute, every, times, title} — будильник, зашитый в код (lt://v1/alarm/<ЧЧММ>[,<5|15|30>,<1..4>][/<название>])
   //   {kind:"weather", lat, lon, title} — погода города, зашитая в код (lt://v1/weather/<широта>,<долгота>[/<название>])
   //   {kind:"habit", id, title} — привычка с названием в коде (lt://v1/habit/<id>/<название>)
-  //   {kind:"combo", acts} — «Комбинированный»: до 5 действий в самом коде (lt://v1/combo/<JSON>, см. comboCode/parseCombo)
+  //   {kind:"combo", acts} — «Комбинированный»: до 10 действий в самом коде (lt://v1/combo/<JSON>, см. comboCode/parseCombo)
   //   {kind:"task", tab, tag, text} — задача, зашитая в код (lt://v1/task/<ключ вкладки>[#<тег>]/<текст>)
   //   {kind:"today"} / {kind:"reminder"} — общие коды «Сегодня» и «Напоминалки» (lt://v1/today, lt://v1/reminder)
   //   {kind:"note", id}   — код заметки «Моего блокнота» (lt://v1/note/<id>)
@@ -120,7 +121,7 @@ window.CardScan = (function(){
     if(a.k === "workout") return { k: "workout" };
     return null;
   }
-  // список действий → список чистых действий (не больше COMBO_MAX, по одному из категории); null — что-то не так
+  // список действий → список чистых действий (не больше COMBO_MAX; из категорий вне COMBO_MULTI — по одному); null — что-то не так
   function normComboList(list){
     if(!Array.isArray(list) || !list.length || list.length > COMBO_MAX) return null;
     var out = [], seen = {};
@@ -128,7 +129,7 @@ window.CardScan = (function(){
       var n = normCombo(list[i]);
       if(!n) return null;
       var cat = comboCategory(n);
-      if(seen[cat]) return null;
+      if(seen[cat] && !COMBO_MULTI[cat]) return null;
       seen[cat] = 1;
       out.push(n);
     }

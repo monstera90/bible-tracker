@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 6.0 (26.10) — структурная правка: учёт времени таймеров для «Трекера экранов» (`elapsedMs`, `ScreenTimeStats.TIMERS` в `start`/`cancel`/`fire`).
+// Версия: 6.1 (30.10)
 // Версия: 5.7 (24.10) — скрытый таймер (`Timer.hidden`, `start(..., hidden)`): идёт и срабатывает как обычный, но без уведомления «идёт», острова, плашки в приложении, службы тика и этапов цвета; в конце — обычные вибрация и «Таймер закончился»; `listJson` отдаёт `hidden`. Откат: CardTimers.kt 5.6.
 // Версия: 5.6 (24.10) — этапы цвета значка: остался один, красный за 2 минуты до конца (`scheduleStages`); жёлтый убран, но его будильник от прежней версии снимается (`LEGACY_STAGE_YELLOW`). Откат: CardTimers.kt 5.5.
 // Версия: 5.5 (22.10) — эксперимент с чёрным фоном уведомления (`setColorized`) откачен: HyperOS не меняет цвет карточки. Прежнее: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
@@ -457,7 +457,7 @@ object CardTimers {
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
-                .setContentIntent(openApp(ctx))
+                .setContentIntent(actionIntent(ctx, CardTimerReceiver.ACTION_STOP_VIBRATE, t.id))
                 .setDeleteIntent(actionIntent(ctx, CardTimerReceiver.ACTION_STOP_VIBRATE, t.id))
                 .addAction(0, "Стоп", actionIntent(ctx, CardTimerReceiver.ACTION_STOP_VIBRATE, t.id))
                 .build()

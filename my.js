@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 93.0 (28.10)
+   Версия: 93.1 (30.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -4721,6 +4721,7 @@
     try{ if(window.ScreenTime) window.ScreenTime.setAppActive(true); }catch(e){}
     try{ ensureWorkoutsStore(); if(window.WorkoutsTab) window.WorkoutsTab.drain(); }catch(e){} // тренировки, законченные при закрытом приложении
     try{ if(window.MdEditor && MdEditor.onAppResume) MdEditor.onAppResume(); }catch(e){}
+    try{ if(window.CalendarTab && window.CalendarTab.tick) window.CalendarTab.tick(); }catch(e){} // красная линия недели календаря — по текущему времени
     // задачи из окна «Создать новую задачу» (ярлык), созданные пока приложение было закрыто/свёрнуто
     try{ pullNativeQuickTasks(); }catch(e){ if(window.Debug) window.Debug.log("Быстрая задача: " + (e && e.message ? e.message : e)); }
     // задачи «Создавать задачу», отсканированные в окне ярлыка без открытия приложения

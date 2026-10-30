@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 33.1 (28.10)
+   Версия: 33.2 (30.10)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -2790,8 +2790,9 @@ window.initItemCardsModule = function(deps){
   // =========================================================================
   // «Комбинированный» (type:"combo") — несколько действий одним QR-кодом и одной кнопкой «Пуск»
   // =========================================================================
-  // Карточка: {type:"combo", title, color, acts:[действие, …]}, действий не больше COMBO_MAX (5). Действие — объект с полем k
-  // (формат и проверка — cardscan.js: normCombo / normComboList / comboCode). Из каждой категории можно взять только одно:
+  // Карточка: {type:"combo", title, color, acts:[действие, …]}, действий не больше COMBO_MAX (10). Действие — объект с полем k
+  // (формат и проверка — cardscan.js: normCombo / normComboList / comboCode). Таймеров и задач может быть несколько (COMBO_MULTI), из остальных
+  // категорий — только одно:
   //   таймер · музыка (трек или папка) · «открыть» (вкладка, закладка или заметка — экран один) · задача · событие в журнал.
   // Код несёт всё сам (lt://v1/combo/<JSON>), карточка на другом устройстве не нужна. Скан кода и «Пуск» делают одно и то же
   // (`runCombo`): все действия стартуют разом, «открыть» — последним. В журнал всегда идёт ОДНА запись: комментарий события «как
@@ -2799,7 +2800,8 @@ window.initItemCardsModule = function(deps){
   var COMBO_NATIVE_ID = "combo";                  // служебный id входа из оболочки (окно ярлыка → приложение); у карточек буквы «o» в id нет
   var PENDING_COMBO_KEY = "pendingScanCombos_v1"; // очередь «окно ярлыка → приложение»: задача и «открыть», которые окно выполнить не может
   var COMBO_STUB = "Был выполнен ряд действий при сканировании qr-кода";
-  var COMBO_MAX = 5;
+  var COMBO_MAX = 10;
+  var COMBO_MULTI = { timer: 1, task: 1 }; // категории, где действий может быть несколько (совпадает с cardscan.js)
   var COMBO_CODE_MAX = 900; // байт: плотнее камера телефона код уже не читает
   var COMBO_KINDS = [
     { k: "timer", label: "Таймер", cat: "timer" },
@@ -2966,11 +2968,11 @@ window.initItemCardsModule = function(deps){
     // «Наушники должны быть подключены»: без них не срабатывает ни одно действие кода (ни таймер, ни задача, ни запись в журнал)
     var needHp = acts.some(function(a){ return (a.k === "track" || a.k === "folder") && a.hp; });
     if(needHp && !comboHeadphonesOn()){ showNoticeOverlay({ kind: "msg", text: "Вначале подключи наушники" }); return; }
-    var results = [], openAct = null, taskAct = null, eventText = "", workoutAct = null;
+    var results = [], openAct = null, taskActs = [], eventText = "", workoutAct = null;
     acts.forEach(function(a){
       if(a.k === "timer") results.push(comboRunTimer(a));
       else if(a.k === "track" || a.k === "folder") results.push(comboRunMusic(a, comboShownName(o.card, a)));
-      else if(a.k === "task") taskAct = a;
+      else if(a.k === "task") taskActs.push(a);
       else if(a.k === "event") eventText = a.text;
       else if(a.k === "workout") workoutAct = a;
       else openAct = a;
@@ -2981,10 +2983,13 @@ window.initItemCardsModule = function(deps){
     if(standalone){
       // окно ярлыка (scan.html): приложения здесь нет — задачу и «открыть» выполнит приложение (очередь), остальное уже сделано
       var pend = {};
-      if(taskAct){ pend.task = taskAct; results.push({ ok: "queued", text: "Задача «" + taskAct.text + "» появится на вкладке, когда вы откроете приложение" }); }
+      if(taskActs.length){
+        pend.tasks = taskActs;
+        taskActs.forEach(function(ta){ results.push({ ok: "queued", text: "Задача «" + ta.text + "» появится на вкладке, когда вы откроете приложение" }); });
+      }
       if(openAct) pend.open = openAct;
       if(workoutAct){ pend.workout = 1; results.push({ ok: "queued", text: "Тренировка начнётся, когда откроется приложение" }); }
-      if(pend.task || pend.open || pend.workout) comboQueue(pend);
+      if(pend.tasks || pend.open || pend.workout) comboQueue(pend);
       if(openAct || workoutAct){
         if(nativeScan && nativeScan.openInApp){ try{ nativeScan.openInApp(COMBO_NATIVE_ID, "note"); }catch(e){} }
         leaveStandalone();
@@ -2993,7 +2998,7 @@ window.initItemCardsModule = function(deps){
       showComboResultOverlay(results);
       return;
     }
-    if(taskAct) results.push(comboRunTask(taskAct));
+    taskActs.forEach(function(ta){ results.push(comboRunTask(ta)); });
     if(workoutAct) results.push(comboRunWorkout());
     if(openAct){
       if(scanHandle || overlayEl || scanNav) endScanSession(false); // сканер закрыт, экран уходит на открываемое место
@@ -3042,11 +3047,12 @@ window.initItemCardsModule = function(deps){
     q.forEach(function(x){
       if(!x || now - (Number(x.at) || 0) > 30 * 60 * 1000) return;
       var cs = comboScan();
-      if(x.task){
-        var t = cs ? cs.normCombo(x.task) : null;
+      var pt = Array.isArray(x.tasks) ? x.tasks : (x.task ? [x.task] : []); // x.task — записи прежней версии
+      pt.forEach(function(raw){
+        var t = cs ? cs.normCombo(raw) : null;
         if(t && t.k === "task"){ var tr = comboRunTask(t); if(!tr.ok) console.error(tr.text); }
-        delete x.task;
-      }
+      });
+      delete x.task; delete x.tasks;
       var wait = false;
       if(x.open){
         if(allowOpen){ var op = cs ? cs.normCombo(x.open) : null; if(op) lastOpen = op; }
@@ -3220,7 +3226,7 @@ window.initItemCardsModule = function(deps){
 
     var html = '<div class="mdeditor-tab item-card-form" id="itemCardForm">';
     html += '<h3 class="common-tab-title">' + escapeHtml(TYPE_LABEL.combo) + '</h3>';
-    html += '<div class="item-form-hint">Один код и кнопка «Пуск» запускают все выбранные действия сразу (не больше ' + COMBO_MAX + '). Из каждой группы можно взять только одно действие: таймер; музыка (трек или папка); открыть (вкладку, закладку или заметку — экран один); задача; событие в журнал. Всё, что нужно, зашито в сам код: карточка на другом устройстве не нужна, но трек, папка, заметка и закладка найдутся только там, где они есть.</div>';
+    html += '<div class="item-form-hint">Один код и кнопка «Пуск» запускают все выбранные действия сразу (не больше ' + COMBO_MAX + '). Таймеров и задач можно взять несколько; из остальных групп — только по одному действию: музыка (трек или папка); открыть (вкладку, закладку или заметку — экран один); событие в журнал; тренировка. Всё, что нужно, зашито в сам код: карточка на другом устройстве не нужна, но трек, папка, заметка и закладка найдутся только там, где они есть.</div>';
     html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="Название" maxlength="40" autocomplete="off">';
     html += '<div class="combo-rows" id="icfComboRows">';
     for(var i = 0; i < COMBO_MAX; i++){
@@ -3243,7 +3249,7 @@ window.initItemCardsModule = function(deps){
 
     function optionsFor(i){
       var used = {};
-      rows.forEach(function(r, j){ if(j !== i && r.kind) used[comboKind(r.kind).cat] = true; });
+      rows.forEach(function(r, j){ if(j !== i && r.kind && !COMBO_MULTI[comboKind(r.kind).cat]) used[comboKind(r.kind).cat] = true; });
       var h = '<option value="">' + (rows[i].kind ? "— убрать действие —" : "Добавить действие…") + '</option>';
       COMBO_KINDS.forEach(function(k){
         if(used[k.cat]) return; // категория уже занята другим пунктом
@@ -3273,7 +3279,7 @@ window.initItemCardsModule = function(deps){
         var a = r.a, body = rowEls[i].querySelector(".combo-body"), n = i + 1, kl = comboKind(r.kind).label;
         var out = null;
         if(r.kind === "timer"){
-          var sec = getWheel("ch") * 3600 + getWheel("cm") * 60 + getWheel("cs");
+          var sec = getWheel("ch" + i) * 3600 + getWheel("cm" + i) * 60 + getWheel("cs" + i);
           if(sec <= 0){ if(strict) err = "Действие " + n + " («" + kl + "»): задайте время."; return; }
           out = { k: "timer", sec: sec, name: timerQrTitle(body.querySelector(".combo-t-name").value) };
         } else if(r.kind === "track" || r.kind === "folder"){
@@ -3319,11 +3325,11 @@ window.initItemCardsModule = function(deps){
       var host;
       if(r.kind === "timer"){
         body.innerHTML = '<input type="text" class="mdeditor-cleanup-input combo-t-name" placeholder="Название таймера (необязательно)" maxlength="40" autocomplete="off">' +
-          '<div class="item-form-timer" id="icfTimer">' + wheelHtml("ch", 24, "ч") + wheelHtml("cm", 60, "мин") + wheelHtml("cs", 60, "с") + '</div>';
+          '<div class="item-form-timer">' + wheelHtml("ch" + i, 24, "ч") + wheelHtml("cm" + i, 60, "мин") + wheelHtml("cs" + i, 60, "с") + '</div>';
         body.querySelector(".combo-t-name").value = a.name || "";
         var t0 = a.sec | 0;
-        setWheel("ch", Math.floor(t0 / 3600)); setWheel("cm", Math.floor((t0 % 3600) / 60)); setWheel("cs", t0 % 60);
-        ["ch", "cm", "cs"].forEach(function(w){ var we = document.getElementById("icfWheel_" + w); if(we) we.addEventListener("scroll", function(){ clearTimeout(we._t); we._t = setTimeout(updateSize, 150); }); });
+        setWheel("ch" + i, Math.floor(t0 / 3600)); setWheel("cm" + i, Math.floor((t0 % 3600) / 60)); setWheel("cs" + i, t0 % 60);
+        ["ch" + i, "cm" + i, "cs" + i].forEach(function(w){ var we = document.getElementById("icfWheel_" + w); if(we) we.addEventListener("scroll", function(){ clearTimeout(we._t); we._t = setTimeout(updateSize, 150); }); });
         body.querySelector(".combo-t-name").addEventListener("input", updateSize);
       } else if(r.kind === "track" || r.kind === "folder"){
         var isT = r.kind === "track";

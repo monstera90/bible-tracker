@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 8.1 (28.10) — «Неделя»: при открытии вкладки (и листании) сетка начинается с 8:00, а не с 7:00 (`WEEK_OPEN_HOUR` в `scrollWeek`); «Сегодня» по-прежнему к красной линии. Откат: calendar.js 8.0.
+   Версия: 8.2 (30.10)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -135,6 +135,7 @@
   // ---------- хранение ----------
   var STORE = null;            // провайдер хранилища от my.js: {list, put, remove, importLocal, canEditShared}
   var IMPORTED_KEY = "calendarImported_v1";
+  var weekRenderedAt = 0;      // когда нарисована неделя: от этого дня считается красная линия «сейчас»
   var lastSig = null;          // подпись списка при последней отрисовке/обновлении (refresh не перерисовывает без перемен)
   function validEvent(e){
     return e && typeof e === "object" && typeof e.id === "string" && typeof e.title === "string" &&
@@ -448,7 +449,7 @@
         var h = Math.max(MIN_BLOCK_PX, (sg.bottom - sg.top) * hourPx / 60 - 1);
         var w = 100 / sg.cols, left = sg.col * w;
         var tall = h >= 30;
-        blocks += '<div class="cal-wk-ev cal-c-' + calOf(sg.ev) + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '"' +
+        blocks += '<div class="cal-wk-ev cal-c-' + calOf(sg.ev) + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
           ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;left:' + left.toFixed(2) + '%;width:calc(' + w.toFixed(2) + '% - 1px)">' +
           (tall ? '<span class="cal-wk-et">' + timeValue(sg.at) + '</span>' : '') + esc(sg.ev.title) + '</div>';
       });
@@ -490,6 +491,34 @@
     list = wk.querySelectorAll(".cal-wk-now");
     for(i = 0; i < list.length; i++) list[i].style.top = (+list[i].getAttribute("data-m") * hourPx / 60).toFixed(1) + "px";
   }
+  // Красная линия «сейчас» и затенение прошедших событий на уже нарисованной неделе. Зовётся раз в 30 с, при возврате
+  // на страницу и из my.js (`__ltOnAppResume`). Сменился день — неделя перерисовывается (прокрутка сохраняется).
+  function weekNowTick(){
+    if(screen !== "week" || mode !== "week") return;
+    var c = container(), wk = document.getElementById("calWeek");
+    if(!c || !wk || wk.querySelector(".cal-wk-clone")) return; // нет недели на экране или идёт листание
+    var now = Date.now();
+    if(weekRenderedAt && dateValue(now) !== dateValue(weekRenderedAt)){
+      if(weekStart !== null && weekStart === mondayOf(weekRenderedAt)) weekStart = mondayOf(now); // смотрели текущую неделю — идём за сегодняшней
+      weekScrollKeep = c.scrollTop;
+      renderWeek();
+      return;
+    }
+    var i, m = minutesOfDay(now), list = wk.querySelectorAll(".cal-wk-now");
+    for(i = 0; i < list.length; i++){
+      list[i].setAttribute("data-m", String(m));
+      list[i].style.top = (m * hourPx / 60).toFixed(1) + "px";
+    }
+    list = wk.querySelectorAll(".cal-wk-ev");
+    for(i = 0; i < list.length; i++){
+      var e = +list[i].getAttribute("data-e");
+      if(e) list[i].classList.toggle("cal-wk-past", e < now);
+    }
+  }
+  setInterval(weekNowTick, 30000);
+  document.addEventListener("visibilitychange", function(){ if(!document.hidden) weekNowTick(); });
+  window.addEventListener("focus", weekNowTick);
+  window.addEventListener("pageshow", weekNowTick);
   function weekRememberScroll(){
     var c = container();
     weekScrollKeep = (mode === "week" && c) ? c.scrollTop : null;
@@ -504,6 +533,7 @@
     if(weekStart === null) weekStart = cur;
     var ws = weekStart;
     c.innerHTML = '<div class="cal-week" id="calWeek">' + weekHtml(ws) + '</div>' + fabRowHtml();
+    weekRenderedAt = Date.now();
     bindFab();
     syncFlush();
     applyCalColors(document.getElementById("calWeek"));
@@ -972,6 +1002,8 @@
     render: function(){ importLegacy(); loadMode(); weekStart = null; weekScrollKeep = null; lastSig = JSON.stringify(load()); renderMain(); },
     // данные могли измениться снаружи (пришли чужие правки группы): перерисовать текущий экран, если список изменился.
     // Открытую форму не трогаем; прокрутка сохраняется. my.js зовёт только когда вкладка «Календарь» на экране.
+    // возврат в приложение (оболочка зовёт из my.js `__ltOnAppResume`): красная линия и прошедшие события — по текущему времени
+    tick: function(){ weekNowTick(); },
     refresh: function(){
       if(screen === "form") return;
       var sig = JSON.stringify(load());
