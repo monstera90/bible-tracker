@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 13.1 (31.10)
+   Версия: 13.2 (31.10)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -26,7 +26,7 @@
    Выбор хранится на устройстве (`calendarColors_v1` = {personal, shared, trk, hid, past} — "#rrggbb" или ""), `applyUserColors` кладёт его в
    `--cal-personal` / `--cal-shared` / `--cal-trk` / `--cal-hid` / `--cal-past` на `<html>` (пусто — убирает, действует цвет по умолчанию из components.css).
    Цвет прошедших мероприятий (`past`): пока не выбран, прошедшие остаются цвета своего календаря; выбран — прошедшие блоки недели и
-   строки списка получают его прямо в `style` (`pastBlockCss`, `paintPastBlock`; главнее цвета календаря и скрытых).
+   строки списка получают его прямо в `style` (`pastBlockCss`, `paintPastBlock`; главнее цвета календаря; у скрытого мероприятия с выбранным цветом скрытых действует цвет скрытых — `usePastColor`).
    Скрытые мероприятия: поле «Отображение» в форме («Показать»/«Скрыть»); признак хранится ТОЛЬКО на устройстве (`calendarHiddenIds_v1` = {id:1}),
    в запись мероприятия и в облако не уходит — скрытие общего мероприятия действует лишь у того, кто его скрыл. Кнопка-глаз `calendarHiddenBtn`
    (нижний ряд, после «Трекеров», не заливается — состояние показывает значок): глаз открыт — скрытые видны (`calendarShowHidden_v1` = "1"),
@@ -442,7 +442,7 @@
         badge = ' <span class="cal-more">' + (r.open ? '↻ свернуть' : '↻ ещё ' + r.more) + '</span>';
       }
       html += '<div class="event-row cal-row cal-c-' + calOf(r.ev) + (isHidden(r.ev.id) ? ' cal-hid' : '') + (r.at + r.dur < now ? ' cal-row-past' : '') + (r.series && !r.first ? ' cal-row-exp' : '') +
-        '" data-id="' + esc(r.ev.id) + '" data-at="' + r.at + '"' + (r.at + r.dur < now && userColors.past ? ' style="border-left-color:' + userColors.past + ' !important;"' : '') + '>' +
+        '" data-id="' + esc(r.ev.id) + '" data-at="' + r.at + '"' + (r.at + r.dur < now && usePastColor(isHidden(r.ev.id)) ? ' style="border-left-color:' + userColors.past + ' !important;"' : '') + '>' +
         '<span class="event-time">' + timeRange(r.at, r.dur) + '</span> ' + esc(r.ev.title) +
         (r.ev.repeat ? '<span class="cal-rep"> · ' + repeatLabel(r.ev.repeat) + '</span>' : '') + badge + '</div>';
     });
@@ -469,6 +469,8 @@
     var lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
     return lum > 0.6 ? "var(--ink)" : "var(--parchment)";
   }
+  // красить ли прошедшее мероприятие цветом прошедших: у скрытого с выбранным цветом скрытых главнее цвет скрытых
+  function usePastColor(hiddenEv){ return !!userColors.past && !(hiddenEv && userColors.hid); }
   function pastBlockCss(){ return userColors.past ? "background:" + userColors.past + " !important;color:" + fgForHex(userColors.past) + " !important;" : ""; }
   function paintPastBlock(el){
     if(!userColors.past || !el || !el.style || !el.style.setProperty) return;
@@ -644,7 +646,7 @@
           return;
         }
         blocks += '<div class="cal-wk-ev cal-c-' + calOf(sg.ev) + (isHidden(sg.ev.id) ? ' cal-hid' : '') + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
-          ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + (sg.at + sg.dur < now ? ';' + pastBlockCss() : '') + '">' +
+          ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + (sg.at + sg.dur < now && usePastColor(isHidden(sg.ev.id)) ? ';' + pastBlockCss() : '') + '">' +
           esc(sg.ev.title) + '</div>';
       });
       var nowLine = isToday ? '<div class="cal-wk-now" data-m="' + minutesOfDay(now) + '" style="top:' + (minutesOfDay(now) * hourPx / 60).toFixed(1) + 'px"></div>' : '';
@@ -714,7 +716,7 @@
       var e = +list[i].getAttribute("data-e");
       if(e){
         list[i].classList.toggle("cal-wk-past", e < now);
-        if(e < now) paintPastBlock(list[i]);
+        if(e < now && usePastColor(list[i].classList.contains("cal-hid"))) paintPastBlock(list[i]);
       }
     }
   }
