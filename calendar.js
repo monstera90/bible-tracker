@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 10.1 (30.10)
+   Версия: 11.0 (30.10)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -25,6 +25,10 @@
    комбинированных карточек (палитра 2×8, пустой квадрат — цвет по умолчанию): личный календарь, общий календарь, трекеры занятий.
    Выбор хранится на устройстве (`calendarColors_v1` = {personal, shared, trk} — "#rrggbb" или ""), `applyUserColors` кладёт его в
    `--cal-personal` / `--cal-shared` / `--cal-trk` на `<html>` (пусто — убирает, действует цвет по умолчанию из components.css).
+   Скрытые мероприятия: поле «Отображение» в форме («Показать»/«Скрыть»); признак хранится ТОЛЬКО на устройстве (`calendarHiddenIds_v1` = {id:1}),
+   в запись мероприятия и в облако не уходит — скрытие общего мероприятия действует лишь у того, кто его скрыл. Кнопка-глаз `calendarHiddenBtn`
+   (нижний ряд, после «Трекеров», не заливается — состояние показывает значок): глаз открыт — скрытые видны (`calendarShowHidden_v1` = "1"),
+   перечёркнут — не показываются ни в списке, ни в неделе (`isHidden`, `setHidden`, `showHidden`). Скрывается серия целиком.
    Мероприятие: {id, title, start, end, repeat, cal, updatedAt[, until, skip]}; cal — календарь: "personal" (по умолчанию, и если поля нет) | "shared"
    (поле «Календарь» в форме; в НОВОМ мероприятии стоит календарь последнего сохранённого — `calendarLastCal_v1`, `lastCal`/`rememberCal`, на устройстве; пока различие только в цвете: личный — как «Радость» в диаграмме настроений (--mood-joy), общий — цвет
    выделенной вкладки (--wood); переменные --cal-personal/--cal-shared и классы .cal-c-personal/.cal-c-shared в components.css); start/end — мс (локальное время), repeat — "" | day |
@@ -167,6 +171,30 @@
   function saveTrackersOn(){ try{ localStorage.setItem(TRK_KEY, trackersOn ? "1" : "0"); }catch(e){} }
   // ---------- цвета календарей (личный, общий, трекеры занятий): выбор пользователя, на устройстве ----------
   var COLORS_KEY = "calendarColors_v1";
+  // ---------- скрытые мероприятия: только на этом устройстве ----------
+  var HIDDEN_KEY = "calendarHiddenIds_v1";
+  var SHOW_HIDDEN_KEY = "calendarShowHidden_v1";
+  var hiddenIds = null;
+  function loadHidden(){
+    if(hiddenIds) return hiddenIds;
+    var o = null;
+    try{ o = JSON.parse(localStorage.getItem(HIDDEN_KEY) || "null"); }catch(e){ o = null; }
+    hiddenIds = (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
+    return hiddenIds;
+  }
+  function isHidden(id){ return !!loadHidden()[id]; }
+  function setHidden(id, on){
+    var h = loadHidden();
+    if(on) h[id] = 1; else delete h[id];
+    try{ localStorage.setItem(HIDDEN_KEY, JSON.stringify(h)); }catch(e){}
+  }
+  function showHidden(){ try{ return localStorage.getItem(SHOW_HIDDEN_KEY) === "1"; }catch(e){ return false; } }
+  function saveShowHidden(v){ try{ localStorage.setItem(SHOW_HIDDEN_KEY, v ? "1" : "0"); }catch(e){} }
+  // видно ли мероприятие в списке/неделе
+  function visibleEv(ev){ return showHidden() || !isHidden(ev.id); }
+  var EYE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+  var EYE_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path></svg>';
+  function eyeTitle(){ return showHidden() ? 'Скрытые мероприятия показаны (нажмите, чтобы скрыть)' : 'Скрытые мероприятия не показаны (нажмите, чтобы показать)'; }
   var COLOR_ITEMS = [
     { key: "personal", label: "Личный календарь", cssVar: "--cal-personal" },
     { key: "shared",   label: "Общий календарь",  cssVar: "--cal-shared" },
@@ -364,6 +392,7 @@
     var to = startOfDay(now) + (LIST_AHEAD_DAYS + 1) * DAY_MS;
     var rows = [];
     load().forEach(function(ev){
+      if(!visibleEv(ev)) return;
       var dur = Math.max(0, ev.end - ev.start);
       if(!ev.repeat){
         if(ev.start >= from && ev.start < to) rows.push({ at: ev.start, dur: dur, ev: ev });
@@ -395,7 +424,7 @@
       if(r.series && r.more > 0){
         badge = ' <span class="cal-more">' + (r.open ? '↻ свернуть' : '↻ ещё ' + r.more) + '</span>';
       }
-      html += '<div class="event-row cal-row cal-c-' + calOf(r.ev) + (r.at + r.dur < now ? ' cal-row-past' : '') + (r.series && !r.first ? ' cal-row-exp' : '') +
+      html += '<div class="event-row cal-row cal-c-' + calOf(r.ev) + (isHidden(r.ev.id) ? ' cal-hid' : '') + (r.at + r.dur < now ? ' cal-row-past' : '') + (r.series && !r.first ? ' cal-row-exp' : '') +
         '" data-id="' + esc(r.ev.id) + '" data-at="' + r.at + '">' +
         '<span class="event-time">' + timeRange(r.at, r.dur) + '</span> ' + esc(r.ev.title) +
         (r.ev.repeat ? '<span class="cal-rep"> · ' + repeatLabel(r.ev.repeat) + '</span>' : '') + badge + '</div>';
@@ -473,6 +502,7 @@
       '<button type="button" class="mdeditor-fab-btn" id="calendarModeBtn" title="' + (mode === "week" ? "Режим: список" : "Режим: неделя") + '">' +
         (mode === "week" ? LIST_ICON_SVG : WEEK_ICON_SVG) + '</button>' +
       '<button type="button" class="mdeditor-fab-btn' + (trackersOn ? ' pressed' : '') + '" id="calendarTrkBtn" title="' + (trackersOn ? 'Скрыть трекеры занятий' : 'Показать трекеры занятий') + '">' + TRK_ICON_SVG + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="calendarHiddenBtn" title="' + eyeTitle() + '">' + (showHidden() ? EYE_ICON_SVG : EYE_OFF_ICON_SVG) + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarColorBtn" title="Цвета календаря">' + COLOR_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarAddBtn" title="Новое мероприятие">' + PLUS_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarHomeStub" tabindex="-1" aria-disabled="true">' + HOME_ICON_SVG + '</button>' +
@@ -481,6 +511,13 @@
   function bindFab(){
     document.getElementById("calendarAddBtn").addEventListener("click", function(){ weekRememberScroll(); openForm(null); });
     document.getElementById("calendarColorBtn").addEventListener("click", function(){ weekRememberScroll(); openColors(); });
+    document.getElementById("calendarHiddenBtn").addEventListener("click", function(){
+      saveShowHidden(!showHidden());
+      var hb = document.getElementById("calendarHiddenBtn");
+      if(hb){ hb.innerHTML = showHidden() ? EYE_ICON_SVG : EYE_OFF_ICON_SVG; hb.title = eyeTitle(); }
+      if(mode === "week"){ weekRememberScroll(); renderWeek(); return; }
+      refreshList();
+    });
     document.getElementById("calendarTrkBtn").addEventListener("click", function(){
       trackersOn = !trackersOn;
       saveTrackersOn();
@@ -519,6 +556,7 @@
     var days = [[], [], [], [], [], [], []];
     var weekEnd = dayStartAt(ws, 7);
     load().forEach(function(ev){
+      if(!visibleEv(ev)) return;
       var dur = Math.max(0, ev.end - ev.start);
       occurrenceStarts(ev, ws - dur, weekEnd).forEach(function(at){
         var end = at + dur;
@@ -582,7 +620,7 @@
             (tall ? '<span class="cal-wk-et">' + timeValue(sg.t.start) + '</span>' : '') + esc(sg.t.label) + '</div>';
           return;
         }
-        blocks += '<div class="cal-wk-ev cal-c-' + calOf(sg.ev) + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
+        blocks += '<div class="cal-wk-ev cal-c-' + calOf(sg.ev) + (isHidden(sg.ev.id) ? ' cal-hid' : '') + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
           ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + '">' +
           (tall ? '<span class="cal-wk-et">' + timeValue(sg.at) + '</span>' : '') + esc(sg.ev.title) + '</div>';
       });
@@ -920,8 +958,10 @@
   function applyOnlyThis(ev, at, title, s, e, cal){
     var list = load();
     skipOccurrence(list, ev, at);
-    list.push({ id: newId(), title: title, start: s, end: e, repeat: "", cal: cal, updatedAt: Date.now() });
+    var nid = newId();
+    list.push({ id: nid, title: title, start: s, end: e, repeat: "", cal: cal, updatedAt: Date.now() });
     save(list);
+    return nid;
   }
   // «Это и последующие»: первое повторение — серия правится на месте; иначе старая серия обрывается (until), с этого повторения стартует новая
   function applyFollowing(ev, at, title, s, e, r, cal){
@@ -937,6 +977,7 @@
       }
       return rec;
     }
+    var usedId = ev.id;
     if(at === ev.start){
       replaceInList(list, make(ev.id));
     } else {
@@ -946,9 +987,11 @@
           list[i].updatedAt = now;
         }
       }
-      list.push(make(newId()));
+      usedId = newId();
+      list.push(make(usedId));
     }
     save(list);
+    return usedId;
   }
   function deleteOccurrence(ev, at, following){
     var list = load();
@@ -997,6 +1040,8 @@
         '<select class="mdeditor-cleanup-input" id="calCal">' +
         CALS.map(function(k){ return '<option value="' + k.key + '">' + k.label + '</option>'; }).join("") +
         '</select></div>' +
+      '<div class="cal-field"><div class="item-form-hint">Отображение</div>' +
+        '<select class="mdeditor-cleanup-input" id="calVis"><option value="show">Показать</option><option value="hide">Скрыть</option></select></div>' +
       '<div class="item-form-error" id="calError"></div>' +
       '<div class="cal-scope" id="calScope" style="display:none"></div>' +
       '<div class="item-form-buttons" id="calBtns">' +
@@ -1012,13 +1057,14 @@
     var titleEl = document.getElementById("calTitle");
     var sd = document.getElementById("calStartDate"), st = document.getElementById("calStartTime");
     var ed = document.getElementById("calEndDate"), et = document.getElementById("calEndTime");
-    var repEl = document.getElementById("calRepeat"), calEl = document.getElementById("calCal"), errEl = document.getElementById("calError");
+    var repEl = document.getElementById("calRepeat"), calEl = document.getElementById("calCal"), visEl = document.getElementById("calVis"), errEl = document.getElementById("calError");
     if(ev){
       titleEl.value = ev.title;
       sd.value = dateValue(baseS); st.value = timeValue(baseS);
       ed.value = dateValue(baseE); et.value = timeValue(baseE);
       repEl.value = ev.repeat || "";
       calEl.value = calOf(ev);
+      visEl.value = isHidden(ev.id) ? "hide" : "show";
     } else if(preset){
       sd.value = dateValue(preset); st.value = timeValue(preset);
       ed.value = dateValue(preset + HOUR_MS); et.value = timeValue(preset + HOUR_MS);
@@ -1035,11 +1081,10 @@
     }
     if(readOnly){
       [titleEl, sd, st, ed, et, repEl, calEl].forEach(function(el){ el.disabled = true; });
-      var svBtn = document.getElementById("calSave"), delRow = document.getElementById("calDelRow"), cnBtn = document.getElementById("calCancel");
-      if(svBtn) svBtn.style.display = "none";
+      var delRow = document.getElementById("calDelRow"), cnBtn = document.getElementById("calCancel");
       if(delRow) delRow.style.display = "none";
       if(cnBtn) cnBtn.textContent = "Назад";
-      errEl.textContent = "Общий календарь: у вас доступ только для чтения.";
+      errEl.textContent = "Общий календарь: у вас доступ только для чтения (отображение можно менять).";
     }
 
     // окончание = начало + 1 час, пока пользователь сам не правил окончание (у существующего мероприятия — не трогаем)
@@ -1084,6 +1129,8 @@
     }
 
     document.getElementById("calSave").addEventListener("click", function(){
+      var hideNow = visEl.value === "hide";
+      if(readOnly){ setHidden(ev.id, hideNow); return renderMain(); } // читатель группы меняет только своё отображение
       var title = titleEl.value.replace(/^\s+|\s+$/g, "");
       if(!title) return fail("Введите название мероприятия");
       var s = parseLocal(sd.value, st.value);
@@ -1099,11 +1146,14 @@
       var calv = calEl.value === "shared" ? "shared" : "personal";
 
       if(ev && ev.repeat){ // правка повторения серии
-        if(title === ev.title && s === baseS && e === baseE && r === ev.repeat && calv === calOf(ev)) return renderMain(); // ничего не менялось
-        var following = function(){ applyFollowing(ev, baseS, title, s, e, r, calv); rememberCal(calv); renderMain(); }; // не function-объявление в блоке: старый WebView (Android 5)
+        if(title === ev.title && s === baseS && e === baseE && r === ev.repeat && calv === calOf(ev)){ // менялось ли только отображение
+          if(hideNow !== isHidden(ev.id)) setHidden(ev.id, hideNow);
+          return renderMain();
+        }
+        var following = function(){ setHidden(applyFollowing(ev, baseS, title, s, e, r, calv), hideNow); rememberCal(calv); renderMain(); }; // не function-объявление в блоке: старый WebView (Android 5)
         if(r !== ev.repeat) return following(); // менялся вид повтора — это всегда «последующие», вопрос не нужен
         return askScope("Это повторяющееся мероприятие. Сохранить изменения:",
-          function(){ applyOnlyThis(ev, baseS, title, s, e, calv); rememberCal(calv); renderMain(); },
+          function(){ setHidden(applyOnlyThis(ev, baseS, title, s, e, calv), hideNow); rememberCal(calv); renderMain(); },
           following);
       }
 
@@ -1111,6 +1161,7 @@
       var rec = { id: ev ? ev.id : newId(), title: title, start: s, end: e, repeat: r, cal: calv, updatedAt: Date.now() };
       if(!replaceInList(list, rec)) list.push(rec);
       save(list);
+      setHidden(rec.id, hideNow);
       rememberCal(calv);
       renderMain();
     });
@@ -1132,6 +1183,7 @@
         }
         clearTimeout(armTimer);
         save(load().filter(function(x){ return x.id !== ev.id; }));
+        setHidden(ev.id, false);
         renderMain();
       });
     }
