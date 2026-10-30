@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 18.8 (31.10)
+   Версия: 18.9 (31.10)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4925,8 +4925,6 @@ body::after{
 .cal-hid{ opacity:.7; }
 .cal-wk-ev.cal-hid{ background:var(--cal-hid, var(--cal-color, var(--wood))) !important; color:var(--cal-hid-fg, var(--cal-fg, var(--parchment))) !important; }
 .cal-row.cal-hid{ border-left-color:var(--cal-hid, var(--cal-color, transparent)) !important; } /* цвет скрытых, выбранный пользователем, главнее цвета календаря (calendar.js) */
-.cal-has-past-color .cal-wk-ev.cal-wk-past{ background:var(--cal-past) !important; color:var(--cal-past-fg, var(--cal-fg, var(--parchment))) !important; }
-.cal-has-past-color .cal-row.cal-row-past{ border-left-color:var(--cal-past) !important; } /* цвет прошедших, выбранный пользователем (calendar.js); класс на <html> ставит applyUserColors */
 /* выбор цвета календарей (calendar.js, openColors): палитра как в форме комбинированных карточек (.habit-colors в itemcards.js) */
 .cal-palette{ display:flex; flex-direction:column; gap:8px; margin:6px 0 10px; padding:4px; }
 .cal-palette-row{ display:flex; gap:6px; }

@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 12.1 (31.10)
+   Версия: 13.0 (31.10)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -25,8 +25,8 @@
    комбинированных карточек (палитра 2×8, пустой квадрат — цвет по умолчанию): личный календарь, общий календарь, трекеры занятий.
    Выбор хранится на устройстве (`calendarColors_v1` = {personal, shared, trk, hid, past} — "#rrggbb" или ""), `applyUserColors` кладёт его в
    `--cal-personal` / `--cal-shared` / `--cal-trk` / `--cal-hid` / `--cal-past` на `<html>` (пусто — убирает, действует цвет по умолчанию из components.css).
-   Цвет прошедших мероприятий (`past`): пока не выбран, прошедшие остаются цвета своего календаря; выбран — класс `cal-has-past-color` на `<html>`
-   и прошедшие блоки недели/строки списка (`.cal-wk-past`/`.cal-row-past`) рисуются этим цветом, в том числе скрытые.
+   Цвет прошедших мероприятий (`past`): пока не выбран, прошедшие остаются цвета своего календаря; выбран — прошедшие блоки недели и
+   строки списка получают его прямо в `style` (`pastBlockCss`, `paintPastBlock`; главнее цвета календаря и скрытых).
    Скрытые мероприятия: поле «Отображение» в форме («Показать»/«Скрыть»); признак хранится ТОЛЬКО на устройстве (`calendarHiddenIds_v1` = {id:1}),
    в запись мероприятия и в облако не уходит — скрытие общего мероприятия действует лишь у того, кто его скрыл. Кнопка-глаз `calendarHiddenBtn`
    (нижний ряд, после «Трекеров», не заливается — состояние показывает значок): глаз открыт — скрытые видны (`calendarShowHidden_v1` = "1"),
@@ -59,8 +59,8 @@
    обычных мероприятий форма открывается сразу. Тап открывает форму ИМЕННО того повторения (`data-at`), а не первого.
    Повторы считаются от первого начала: k-е повторение = start + k периодов; для месяца/года день прижимается к концу
    месяца (31-е → 30-е/28-е), как у напоминаний карточек. Длительность повторения = end − start.
-   Список показывает окно: LIST_BACK_DAYS дней назад … LIST_AHEAD_DAYS вперёд от сегодня; при открытии прокручен к
-   сегодняшнему дню (или к ближайшему следующему).
+   Список показывает только предстоящее: с начала сегодняшнего дня и LIST_AHEAD_DAYS вперёд, прошедшие дни не показываются.
+   Список и неделя независимы: выбранная в неделе дата на список не влияет.
    =========================================================================== */
 (function(){
   "use strict";
@@ -68,7 +68,6 @@
   var KEY = "calendarEvents_v1";
   var MODE_KEY = "calendarMode_v1";
   var LAST_CAL_KEY = "calendarLastCal_v1"; // календарь последнего сохранённого мероприятия ("personal" | "shared"), подставляется в новое
-  var LIST_BACK_DAYS = 7;
   var LIST_AHEAD_DAYS = 90;
   var HOUR_MS = 3600000;
   var DAY_MS = 86400000;
@@ -238,8 +237,6 @@
       var v = userColors[it.key];
       if(v) root.style.setProperty(it.cssVar, v); else root.style.removeProperty(it.cssVar);
     });
-    // цвет прошедших включается только классом: пока пользователь его не выбрал, мероприятия остаются цвета своего календаря
-    if(root.classList){ if(userColors.past) root.classList.add("cal-has-past-color"); else root.classList.remove("cal-has-past-color"); }
   }
   // трекеры, пересекающие отрезок [from, to): [{src, label, start, end, sub}]; запись без конца — по длительности, иначе минутная
   function trackerItems(from, to){
@@ -408,7 +405,7 @@
   }
   function listHtml(){
     var now = Date.now();
-    var from = startOfDay(now) - LIST_BACK_DAYS * DAY_MS;
+    var from = startOfDay(now);
     var to = startOfDay(now) + (LIST_AHEAD_DAYS + 1) * DAY_MS;
     var rows = [];
     load().forEach(function(ev){
@@ -445,27 +442,11 @@
         badge = ' <span class="cal-more">' + (r.open ? '↻ свернуть' : '↻ ещё ' + r.more) + '</span>';
       }
       html += '<div class="event-row cal-row cal-c-' + calOf(r.ev) + (isHidden(r.ev.id) ? ' cal-hid' : '') + (r.at + r.dur < now ? ' cal-row-past' : '') + (r.series && !r.first ? ' cal-row-exp' : '') +
-        '" data-id="' + esc(r.ev.id) + '" data-at="' + r.at + '">' +
+        '" data-id="' + esc(r.ev.id) + '" data-at="' + r.at + '"' + (r.at + r.dur < now && userColors.past ? ' style="border-left-color:' + userColors.past + ' !important;"' : '') + '>' +
         '<span class="event-time">' + timeRange(r.at, r.dur) + '</span> ' + esc(r.ev.title) +
         (r.ev.repeat ? '<span class="cal-rep"> · ' + repeatLabel(r.ev.repeat) + '</span>' : '') + badge + '</div>';
     });
     return html;
-  }
-  function scrollToToday(c){
-    function go(){
-      var today = dateValue(Date.now());
-      var days = c.querySelectorAll(".event-day[data-day]");
-      var target = null;
-      for(var i = 0; i < days.length; i++){
-        if(days[i].getAttribute("data-day") >= today){ target = days[i]; break; }
-      }
-      if(!target){ c.scrollTop = c.scrollHeight; return; }
-      c.scrollTop += target.getBoundingClientRect().top - c.getBoundingClientRect().top - 4;
-    }
-    go();
-    if(window.requestAnimationFrame) window.requestAnimationFrame(go);
-    setTimeout(go, 60);
-    setTimeout(go, 250);
   }
   // ---------- цвета календарей и отступы окна ----------
   // цвет текста на блоке недели: тёмный или светлый — по яркости цвета календаря (цвета зависят от темы)
@@ -481,13 +462,25 @@
     var lum = (0.299 * +m[1] + 0.587 * +m[2] + 0.114 * +m[3]) / 255;
     return lum > 0.6 ? "var(--ink)" : "var(--parchment)";
   }
+  // Цвет прошедших мероприятий пишется прямо в style блока/строки (с !important), а не правилом в components.css: так он главнее
+  // цвета календаря и скрытых и не зависит от того, какая версия стилей загружена. Пока цвет не выбран — ничего не пишется.
+  function fgForHex(hex){
+    var n = parseInt(hex.slice(1), 16);
+    var lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    return lum > 0.6 ? "var(--ink)" : "var(--parchment)";
+  }
+  function pastBlockCss(){ return userColors.past ? "background:" + userColors.past + " !important;color:" + fgForHex(userColors.past) + " !important;" : ""; }
+  function paintPastBlock(el){
+    if(!userColors.past || !el || !el.style || !el.style.setProperty) return;
+    el.style.setProperty("background", userColors.past, "important");
+    el.style.setProperty("color", fgForHex(userColors.past), "important");
+  }
   function applyCalColors(el){
     if(!el || !el.style || !el.style.setProperty) return;
     el.style.setProperty("--cal-personal-fg", fgFor("--cal-personal"));
     el.style.setProperty("--cal-shared-fg", fgFor("--cal-shared"));
     el.style.setProperty("--cal-trk-fg", fgFor("--cal-trk"));
     el.style.setProperty("--cal-hid-fg", fgFor("--cal-hid"));
-    if(userColors.past) el.style.setProperty("--cal-past-fg", fgFor("--cal-past")); else el.style.removeProperty("--cal-past-fg");
   }
   // В режиме «Неделя» у окна убираются боковые поля (класс cal-week-flush на .settings-modal-box, modals.css), чтобы сетка
   // влезала целиком. Класс снимается сам, как только во вкладке перестаёт быть .cal-week (другой экран или другая вкладка):
@@ -651,7 +644,7 @@
           return;
         }
         blocks += '<div class="cal-wk-ev cal-c-' + calOf(sg.ev) + (isHidden(sg.ev.id) ? ' cal-hid' : '') + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
-          ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + '">' +
+          ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + (sg.at + sg.dur < now ? ';' + pastBlockCss() : '') + '">' +
           esc(sg.ev.title) + '</div>';
       });
       var nowLine = isToday ? '<div class="cal-wk-now" data-m="' + minutesOfDay(now) + '" style="top:' + (minutesOfDay(now) * hourPx / 60).toFixed(1) + 'px"></div>' : '';
@@ -719,7 +712,10 @@
     list = wk.querySelectorAll(".cal-wk-ev");
     for(i = 0; i < list.length; i++){
       var e = +list[i].getAttribute("data-e");
-      if(e) list[i].classList.toggle("cal-wk-past", e < now);
+      if(e){
+        list[i].classList.toggle("cal-wk-past", e < now);
+        if(e < now) paintPastBlock(list[i]);
+      }
     }
   }
   setInterval(weekNowTick, 30000);
@@ -966,7 +962,6 @@
       clearTimeout(tapTimer);
       tapTimer = setTimeout(function(){ lastKey = null; openForm(ev, at); }, DOUBLE_MS);
     });
-    scrollToToday(c);
   }
 
   // ---------- сохранение и удаление повторений ----------
