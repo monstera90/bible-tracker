@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 94.0 (30.10)
+   Версия: 95.0 (30.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -2088,7 +2088,7 @@
   // вынесена ДО общей проверки на renderSettingsTabSet2Stub.
   var SET2_TAB_IDS = {
     set2s_1: "settingsTabSet2Btn1", set2s_2: "settingsTabSet2Btn2", set2s_3: "settingsTabSet2Btn3",
-    set2s_4: "settingsTabSet2Btn4", set2s_11: "settingsTabSet2Btn11", set2s_12: "settingsTabSet2Btn12", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
+    set2s_4: "settingsTabSet2Btn4", set2s_11: "settingsTabSet2Btn11", set2s_12: "settingsTabSet2Btn12", set2s_13: "settingsTabSet2Btn13", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
     set2s_7: "settingsTabSet2Btn7", set2s_8: "settingsTabSet2Btn8", set2s_9: "settingsTabSet2Btn9",
     set2s_10: "settingsTabSet2Btn10"
   };
@@ -10968,6 +10968,7 @@
     stripDecorClasses(); // декоративные язычки режима колеса никогда не выглядят выбранными
     var container = document.getElementById("settingsTabContent");
     if(tab !== "set2s_12") progressPanelGoHome(); // панель «Прогресс» уходит домой до того, как содержимое окна заменит другая вкладка
+    if(tab !== "set2s_13") readingChartGoHome(); // график чтения (<main>) уходит домой до того, как содержимое окна заменит другая вкладка
     // Вкладки из TAB_SCROLL_AUTO_TABS (задачи + список книг) сами восстанавливают свою позицию
     // скролла ниже, после рендера (см. restoreTabScroll) — им сбрасывать scrollTop сейчас не нужно.
     var isAutoScrollTab = TAB_SCROLL_AUTO_TABS.indexOf(tab) !== -1;
@@ -11032,6 +11033,8 @@
     else if(tab === "set2s_11") renderSettingsTabMusic();
     // вкладка «Прогресс» (set2s_12, между «Музыкой» и «Разделением epub»): прогресс-бары и счётчики, раньше стоявшие в шапке
     else if(tab === "set2s_12") renderSettingsTabProgress();
+    // вкладка «График чтения» (set2s_13, между «Прогрессом» и «Разделением epub»): карточки книг с главами, раньше стоявшие на главной странице
+    else if(tab === "set2s_13") renderSettingsTabReadingChart();
     else if(tab === "set2s_5") renderSettingsTabEpubSplit();
     else if(tab === "set2s_6") renderSettingsTabImgResize();
     // седьмая боковая вкладка второго набора (set2s_7) — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: список книг
@@ -11232,6 +11235,57 @@
     }
     // пока панель лежала в скрытом контейнере, высота списка целей (--gb-h, режим «меньше прогресс-баров») не измерялась
     try{ renderGoalsSection(); }catch(e){}
+  }
+  // ===== ВКЛАДКА «ГРАФИК ЧТЕНИЯ» (set2s_13) =====
+  // Карточки книг Библии с главами раньше стояли на главной странице (<main id="booksContainer">). Теперь <main> лежит в
+  // скрытом #readingChartHome (index.html), а при заходе на вкладку переносится в #settingsTabContent САМ (не пересоздаётся —
+  // состояние, обработчики, раскрытые книги, «Скрыть прочитанное» остаются прежними). Когда содержимое окна заменяют другой
+  // вкладкой (innerHTML), он автоматически возвращается домой. Пока <main> скрыт, размеры не измеряются, поэтому при заходе
+  // на вкладку высоты сеток глав и подгонка названий книг пересчитываются.
+  var readingChartObserver = null;
+  var readingChartEl = null; // ссылка держит <main> живым, пока его на миг нет в документе (замена innerHTML)
+  function readingChartGoHome(){
+    var el = document.getElementById("booksContainer") || readingChartEl;
+    var home = document.getElementById("readingChartHome");
+    if(!el || !home) return;
+    var content = document.getElementById("settingsTabContent");
+    if(el.parentNode === content) return; // график на вкладке — всё в порядке
+    if(el.parentNode !== home) home.appendChild(el);
+  }
+  function refitReadingChart(){
+    try{
+      cacheAllChapterGridHeights();
+      computeBookCardMinWidths();
+      refreshAllBookNameFits();
+      Object.keys(bookMeta).forEach(function(bookName){
+        var meta = bookMeta[bookName];
+        if(!meta || !meta.card) return;
+        var open = meta.card.querySelector(".chapters-container.open");
+        if(open && meta.gridHeight != null) open.style.setProperty("--ch-h", meta.gridHeight + 28 + "px");
+      });
+    }catch(e){}
+  }
+  function renderSettingsTabReadingChart(){
+    var container = document.getElementById("settingsTabContent");
+    var home = document.getElementById("readingChartHome");
+    var el = readingChartEl || document.getElementById("booksContainer");
+    if(!container || !home || !el) return;
+    readingChartEl = el;
+    container.innerHTML = "";
+    container.appendChild(el);
+    if(!readingChartObserver && window.MutationObserver){
+      readingChartObserver = new MutationObserver(function(){
+        var c = document.getElementById("settingsTabContent");
+        if(!readingChartEl || !c) return;
+        if(readingChartEl.parentNode !== c){
+          var h = document.getElementById("readingChartHome");
+          if(h && readingChartEl.parentNode !== h) h.appendChild(readingChartEl);
+        }
+      });
+      readingChartObserver.observe(container, {childList: true});
+    }
+    refitReadingChart();
+    requestAnimationFrame(function(){ refitReadingChart(); requestAnimationFrame(refitReadingChart); });
   }
   function renderSettingsTabClaude(){
     if(window.ClaudeTabMod) window.ClaudeTabMod.render();
@@ -17517,7 +17571,7 @@
   //   вручную, а не через Object.keys(EXTRA_TAB_IDS), в котором только 2 из 5) идёт слева направо.
   var SETTINGS_SIDE_ORDER_1 = [CALENDAR_TAB_KEY].concat(Object.keys(TASK_TAB_IDS)).concat([EVENTS_TAB_KEY, SCREENTIME_TAB_KEY]); // calendar, worktasks..archive, events, screentime (снизу вверх)
   var SETTINGS_BOTTOM_ORDER_1 = ["gear","year","mood"].concat(Object.keys(EXTRA_TAB_IDS)); // gear,year,mood,extra2,extra3
-  var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_4, set2s_11, set2s_12, set2s_5..set2s_10 (порядок = порядок вкладок снизу вверх)
+  var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_4, set2s_11, set2s_12, set2s_13, set2s_5..set2s_10 (порядок = порядок вкладок снизу вверх)
   var SETTINGS_BOTTOM_ORDER_2 = ["gear"].concat(Object.keys(SET2_EXTRA_TAB_IDS));
   // последняя реально выбранная вкладка одного из двух стеков (см. switchSettingsTab выше) —
   // используется, чтобы при переключении набора (cycleSettingsTabSet) открывалась не первая
