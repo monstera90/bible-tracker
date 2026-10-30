@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 14.0 (30.10)
+     Версия: 14.1 (30.10)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -113,7 +113,6 @@ window.addEventListener("error", function(e){
     <span class="sync-status-text" id="syncStatusText">Настроить<br>синхронизацию</span>
   </div>
 
-  <h1>ГРАФИК ЧТЕНИЯ БИБЛИИ</h1>
   <p class="quote" id="dailyQuote" style="display:none;"></p>
 </header>
 
@@ -178,11 +177,14 @@ window.addEventListener("error", function(e){
 </div>
 </div>
 
-<!-- График чтения Библии (карточки книг с главами) — содержимое вкладки set2s_13 «График чтения». Пока вкладка не открыта,
-     <main> лежит здесь (скрыто, ids и обработчики живы); my.js (renderSettingsTabReadingChart) переносит его в
-     #settingsTabContent и возвращает обратно, когда содержимое вкладки заменено. -->
+<!-- График чтения Библии (заголовок + карточки книг с главами) — содержимое вкладки set2s_13 «График чтения». Пока вкладка не
+     открыта, обёртка #readingChartWrap лежит здесь (скрыто, ids и обработчики живы); my.js (renderSettingsTabReadingChart)
+     переносит её в #settingsTabContent и возвращает обратно, когда содержимое вкладки заменено. -->
 <div id="readingChartHome" style="display:none;">
+<div id="readingChartWrap">
+<h1 class="reading-chart-title">ГРАФИК ЧТЕНИЯ БИБЛИИ</h1>
 <main id="booksContainer"></main>
+</div>
 </div>
 
 <footer>
@@ -784,7 +786,7 @@ window.addEventListener("error", function(e){
         </svg>
       </button>
       <!-- Тринадцатая боковая вкладка второго набора (settingsTabSet2Btn13, "set2s_13"; между «Прогрессом» и «Разделением epub») —
-           «График чтения»: карточки книг Библии с главами, раньше стоявшие на главной странице (см. #readingChartHome выше
+           «График чтения»: заголовок и карточки книг Библии с главами, раньше стоявшие на главной странице (см. #readingChartHome выше
            и renderSettingsTabReadingChart в my.js). -->
       <button class="settings-tab" id="settingsTabSet2Btn13" title="График чтения">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">

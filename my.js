@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 95.0 (30.10)
+   Версия: 96.0 (30.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -10150,6 +10150,7 @@
     settingsWaveRAF = requestAnimationFrame(frame);
   }
 
+  var settingsOpenInstant = false; // true только на время автооткрытия окна при запуске (см. «ЗАПУСК» в конце файла)
   function openSettingsModal(){
     refreshSettingsTabsVisibility();
     // Режим чтения — оверлей (#settingsModalOverlay) существует в DOM всегда, поэтому
@@ -10184,7 +10185,7 @@
         clearProjectPickerResumeState();
       }
     }
-    var extraAnim = getExtraAnimationsEnabled();
+    var extraAnim = getExtraAnimationsEnabled() && !settingsOpenInstant; // при запуске приложения окно появляется сразу, без волны
     if(extraAnim){
       // Геометрию волны (updateSettingsWaveGeometry) нельзя мерить прямо сейчас: высоту/отступ окна
       // (settingsModalBox.style.height/marginTop) мы только что сбросили в "", а актуальные
@@ -11237,15 +11238,16 @@
     try{ renderGoalsSection(); }catch(e){}
   }
   // ===== ВКЛАДКА «ГРАФИК ЧТЕНИЯ» (set2s_13) =====
-  // Карточки книг Библии с главами раньше стояли на главной странице (<main id="booksContainer">). Теперь <main> лежит в
-  // скрытом #readingChartHome (index.html), а при заходе на вкладку переносится в #settingsTabContent САМ (не пересоздаётся —
-  // состояние, обработчики, раскрытые книги, «Скрыть прочитанное» остаются прежними). Когда содержимое окна заменяют другой
-  // вкладкой (innerHTML), он автоматически возвращается домой. Пока <main> скрыт, размеры не измеряются, поэтому при заходе
-  // на вкладку высоты сеток глав и подгонка названий книг пересчитываются.
+  // Заголовок «ГРАФИК ЧТЕНИЯ БИБЛИИ» и карточки книг Библии с главами раньше стояли на главной странице. Теперь они лежат в
+  // обёртке #readingChartWrap (h1 + <main id="booksContainer">) внутри скрытого #readingChartHome (index.html), а при заходе
+  // на вкладку обёртка переносится в #settingsTabContent САМА (не пересоздаётся — состояние, обработчики, раскрытые книги,
+  // «Скрыть прочитанное» остаются прежними). Когда содержимое окна заменяют другой вкладкой (innerHTML), она автоматически
+  // возвращается домой. Пока <main> скрыт, размеры не измеряются, поэтому при заходе на вкладку высоты сеток глав и
+  // подгонка названий книг пересчитываются.
   var readingChartObserver = null;
-  var readingChartEl = null; // ссылка держит <main> живым, пока его на миг нет в документе (замена innerHTML)
+  var readingChartEl = null; // ссылка держит обёртку живой, пока её на миг нет в документе (замена innerHTML)
   function readingChartGoHome(){
-    var el = document.getElementById("booksContainer") || readingChartEl;
+    var el = document.getElementById("readingChartWrap") || readingChartEl;
     var home = document.getElementById("readingChartHome");
     if(!el || !home) return;
     var content = document.getElementById("settingsTabContent");
@@ -11268,7 +11270,7 @@
   function renderSettingsTabReadingChart(){
     var container = document.getElementById("settingsTabContent");
     var home = document.getElementById("readingChartHome");
-    var el = readingChartEl || document.getElementById("booksContainer");
+    var el = readingChartEl || document.getElementById("readingChartWrap");
     if(!container || !home || !el) return;
     readingChartEl = el;
     container.innerHTML = "";
@@ -25173,6 +25175,15 @@
   try{ pushQuickTaskTheme(); }catch(e){}
   try{ ensureItemCards().drainPendingTasks(true); }catch(e){ if(window.Debug) window.Debug.log("Очередь QR-задач: " + (e && e.message ? e.message : e)); }
   try{ handleCardLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Карточка из оболочки: " + (e && e.message ? e.message : e)); }
+  // Главной страницы больше нет: после перезагрузки приложение сразу открывает окно настроек на последней вкладке
+  // (getResumeSettingsState внутри openSettingsModal). Остальные входы (карточка из оболочки, присланный файл) идут позже
+  // и просто переключают вкладку в уже открытом окне.
+  try{
+    if(settingsModalOverlay && !settingsModalOverlay.classList.contains("open")){
+      settingsOpenInstant = true;
+      try{ openSettingsModal(); }finally{ settingsOpenInstant = false; }
+    }
+  }catch(e){ if(window.Debug) window.Debug.log("Автооткрытие окна при запуске: " + (e && e.message ? e.message : e)); }
   Notifications.start();
   initPersonalTasksShadow();
   initSettingsShadow(); // Шаг 9

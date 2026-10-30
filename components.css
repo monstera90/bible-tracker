@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 18.3 (30.10)
+   Версия: 18.4 (30.10)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4943,10 +4943,21 @@ body::after{
 .progress-panel .goals-toggle-wrap{ margin-bottom:0; }
 .progress-panel .goals-toggle-btn{ color:var(--wood); }
 
-/* ---------- вкладка «График чтения» (set2s_13): <main id="booksContainer"> внутри окна настроек ----------
+/* ---------- вкладка «График чтения» (set2s_13): заголовок и <main id="booksContainer"> внутри окна настроек ----------
    Поля и ширину задаёт само окно (#settingsTabContent), а не страница, поэтому «страничные» margin/padding/max-width у main снимаются. */
-#settingsTabContent > main#booksContainer{
+#readingChartWrap{ flex:0 0 auto; padding:6px 2px 12px 2px; }
+#readingChartWrap > main#booksContainer{
   max-width:none;
   margin:8px 0 0 0;
-  padding:0 2px 12px 2px;
+  padding:0;
+}
+.reading-chart-title{
+  margin:4px 0 6px 0;
+  padding-bottom:8px;
+  text-align:center;
+  font-family:"Trajan Pro","Cinzel","Palatino Linotype",serif;
+  letter-spacing:2px;
+  font-size:clamp(16px,4.4vw,24px);
+  color:var(--wood);
+  border-bottom:2px solid var(--gold);
 }
