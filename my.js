@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 97.0 (30.10)
+   Версия: 98.0 (30.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -10917,6 +10917,7 @@
     else if(tab === "jointArchive") renderTaskArchiveTab(true);
     else if(tab === "import") renderSettingsTabImportPicker();
     else if(tab === "resetConfirm") renderSettingsTabResetConfirm();
+    else if(tab === "screen") renderSettingsTabScreen();
     else if(tab === "moodResetConfirm") renderSettingsTabMoodResetConfirm();
     // "Projects" — если внутри неё уже была открыта карточка конкретного проекта ("Все задачи
     // проекта", см. openTaskNextPicker и activeProjectPickerId ниже) и её не закрывали явно
@@ -17748,26 +17749,10 @@
     document.getElementById("settingsHourCb").addEventListener("change", function(){
       var cb = this;
       if(cb.checked){
-        closeSettingsModal();
         openHourGoalModal();
       } else {
         cb.checked = true; // визуально отменяем, пока не подтвердят
-        closeSettingsModal();
-        modalBox.innerHTML =
-          modalHeader("Весь прогресс будет потерян. Уверены?") +
-          '<button class="modal-btn primary" id="mSHourYes">Да</button>' +
-          '<button class="modal-btn" id="mSHourNo">Нет</button>';
-        bindClose();
-        modalOverlay.classList.add("open");
-        document.getElementById("mSHourYes").addEventListener("click", function(){
-          deactivateHourCounter();
-          closeModal();
-          openSettingsModal();
-        });
-        document.getElementById("mSHourNo").addEventListener("click", function(){
-          closeModal();
-          openSettingsModal();
-        });
+        openHourOffConfirmScreen();
       }
     });
 
@@ -17830,7 +17815,6 @@
     document.getElementById("settingsAddGoalBtn").addEventListener("click", function(){
       var id = createNewGoal();
       renderGoalsSection();
-      closeSettingsModal();
       openGoalSettingsModal(id);
     });
 
@@ -18130,6 +18114,33 @@
     });
   }
 
+  // ===== Экраны в области контента (служебная вкладка "screen") =====
+  // Бывшие отдельные модальные окна (настройка цели, выбор цвета цели, дополнительный счётчик, отключение
+  // счётчика) показываются прямо в #settingsTabContent, как ещё один экран: окно настроек не закрывается.
+  // build(container) рисует содержимое; «Назад»/завершение — leaveSettingsScreen (возврат на вкладку, откуда
+  // экран открыли). Системное «назад» работает через общий стек switchSettingsTab.
+  var settingsScreenBuild = null;
+  var settingsScreenBackTab = "gear";
+  function openSettingsScreen(build){
+    if(currentSettingsTab !== "screen") settingsScreenBackTab = currentSettingsTab;
+    settingsScreenBuild = build;
+    if(currentSettingsTab === "screen") renderSettingsTabScreen();
+    else switchSettingsTab("screen");
+  }
+  function renderSettingsTabScreen(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container || !settingsScreenBuild) return;
+    container.innerHTML = "";
+    settingsScreenBuild(container);
+  }
+  function leaveSettingsScreen(){
+    settingsScreenBuild = null;
+    switchSettingsTab(settingsScreenBackTab || "gear");
+  }
+  function settingsScreenBackBtnHtml(label){
+    return '<button class="modal-btn" id="screenBackBtn" style="margin-top:14px;">' + (label || "Назад") + '</button>';
+  }
+
   // ===== Подтверждение сброса прогресса (внутри настроек, вкладка "resetConfirm") =====
   function renderSettingsTabResetConfirm(){
     var container = document.getElementById("settingsTabContent");
@@ -18142,7 +18153,7 @@
       '</div>';
     document.getElementById("mResetConfirmYesBtn").addEventListener("click", function(){
       performFullReset();
-      closeSettingsModal();
+      switchSettingsTab("alt3");
     });
     document.getElementById("mResetConfirmNoBtn").addEventListener("click", function(){
       switchSettingsTab("alt3");
@@ -19419,32 +19430,57 @@
   }
 
   function openHourGoalModal(){
-    modalBox.innerHTML =
-      modalHeader("Дополнительный счётчик") +
-      '<div class="modal-btn-grid">' +
-        '<button id="mHour15">15</button>' +
-        '<button id="mHour30">30</button>' +
-        '<button id="mHour50">50</button>' +
-      '</div>';
-    bindClose();
-    modalOverlay.classList.add("open");
-    document.getElementById("mHour15").addEventListener("click", function(){ activateHourCounter(15, null); closeModal(); });
-    document.getElementById("mHour30").addEventListener("click", function(){ activateHourCounter(30, null); closeModal(); });
-    document.getElementById("mHour50").addEventListener("click", openMonthsToSeptemberModal);
+    openSettingsScreen(function(c){
+      c.innerHTML =
+        '<div class="settings-gear-tab">' +
+        '<h3 class="common-tab-title">Дополнительный счётчик</h3>' +
+        '<div class="modal-btn-grid">' +
+          '<button id="mHour15">15</button>' +
+          '<button id="mHour30">30</button>' +
+          '<button id="mHour50">50</button>' +
+        '</div>' +
+        settingsScreenBackBtnHtml("Отмена") +
+        '</div>';
+      document.getElementById("screenBackBtn").addEventListener("click", leaveSettingsScreen);
+      document.getElementById("mHour15").addEventListener("click", function(){ activateHourCounter(15, null); leaveSettingsScreen(); });
+      document.getElementById("mHour30").addEventListener("click", function(){ activateHourCounter(30, null); leaveSettingsScreen(); });
+      document.getElementById("mHour50").addEventListener("click", openMonthsToSeptemberModal);
+    });
   }
 
   function openMonthsToSeptemberModal(){
-    var buttons = "";
-    for(var i = 1; i <= 12; i++){ buttons += '<button data-months="' + i + '">' + i + '</button>'; }
-    modalBox.innerHTML =
-      modalHeader("Выберите количество месяцев до сентября") +
-      '<div class="modal-btn-grid">' + buttons + '</div>';
-    bindClose();
-    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-months]"), function(btn){
-      btn.addEventListener("click", function(){
-        activateHourCounter(50, Number(btn.getAttribute("data-months")));
-        closeModal();
+    openSettingsScreen(function(c){
+      var buttons = "";
+      for(var i = 1; i <= 12; i++){ buttons += '<button data-months="' + i + '">' + i + '</button>'; }
+      c.innerHTML =
+        '<div class="settings-gear-tab">' +
+        '<h3 class="common-tab-title">Выберите количество месяцев до сентября</h3>' +
+        '<div class="modal-btn-grid">' + buttons + '</div>' +
+        settingsScreenBackBtnHtml("Назад") +
+        '</div>';
+      document.getElementById("screenBackBtn").addEventListener("click", openHourGoalModal);
+      Array.prototype.forEach.call(c.querySelectorAll("[data-months]"), function(btn){
+        btn.addEventListener("click", function(){
+          activateHourCounter(50, Number(btn.getAttribute("data-months")));
+          leaveSettingsScreen();
+        });
       });
+    });
+  }
+
+  function openHourOffConfirmScreen(){
+    openSettingsScreen(function(c){
+      c.innerHTML =
+        '<div class="settings-gear-tab">' +
+        '<h3 class="common-tab-title">Весь прогресс будет потерян. Уверены?</h3>' +
+        '<button class="modal-btn primary" id="mSHourYes">Да</button>' +
+        '<button class="modal-btn" id="mSHourNo" style="margin-top:10px;">Нет</button>' +
+        '</div>';
+      document.getElementById("mSHourYes").addEventListener("click", function(){
+        deactivateHourCounter();
+        leaveSettingsScreen();
+      });
+      document.getElementById("mSHourNo").addEventListener("click", leaveSettingsScreen);
     });
   }
 
@@ -20399,45 +20435,52 @@
   function openGoalSettingsModal(goalId){
     var goal = getGoalData(goalId);
     if(!goal) return;
-    modalBox.innerHTML =
-      modalHeader("Настройка цели") +
-      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;">' +
-        '<input type="text" id="goalTitleInput" placeholder="Заголовок" value="' + escapeHtml(goal.title) + '" ' +
-          'style="flex:1;padding:10px;border:1px solid var(--groove-shadow);border-radius:6px;background:#fffef8;color:var(--ink);font-family:inherit;font-size:14px;">' +
-        '<div class="goal-color-square" id="goalColorSquare" style="background:' + (goal.color || GOAL_DEFAULT_COLOR) + ';"></div>' +
-      '</div>' +
-      '<div id="goalTasksList"></div>' +
-      '<button class="modal-btn" id="goalAddTaskBtn">Добавить задачу</button>' +
-      '<div class="modal-note" id="goalTaskLimitNote" style="text-align:center;"></div>' +
-      '<div class="modal-section">' +
-        '<button class="modal-btn danger" id="goalDeleteBtn">Удалить эту цель</button>' +
-      '</div>';
-    bindClose();
-    modalOverlay.classList.add("open");
-    renderGoalTasksList(goalId);
-
-    document.getElementById("goalTitleInput").addEventListener("input", function(){
-      var g = getGoalData(goalId); if(!g) return;
-      g.title = this.value;
-      saveGoal(goalId, g);
-      renderGoalsSection();
-    });
-    document.getElementById("goalColorSquare").addEventListener("click", function(){ openGoalColorPicker(goalId); });
-    document.getElementById("goalAddTaskBtn").addEventListener("click", function(){
-      var g = getGoalData(goalId); if(!g) return;
-      g.tasks = g.tasks || [];
-      if(g.tasks.length >= GOAL_MAX_TASKS) return;
-      g.tasks.push({text:"", checked:false});
-      saveGoal(goalId, g);
+    openSettingsScreen(function(c){
+      c.innerHTML =
+        '<div class="settings-gear-tab">' +
+        '<h3 class="common-tab-title">Настройка цели</h3>' +
+        '<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;">' +
+          '<input type="text" id="goalTitleInput" placeholder="Заголовок" value="' + escapeHtml(goal.title) + '" ' +
+            'style="flex:1;padding:10px;border:1px solid var(--groove-shadow);border-radius:6px;background:#fffef8;color:var(--ink);font-family:inherit;font-size:14px;">' +
+          '<div class="goal-color-square" id="goalColorSquare" style="background:' + (goal.color || GOAL_DEFAULT_COLOR) + ';"></div>' +
+        '</div>' +
+        '<div id="goalTasksList"></div>' +
+        '<button class="modal-btn" id="goalAddTaskBtn">Добавить задачу</button>' +
+        '<div class="modal-note" id="goalTaskLimitNote" style="text-align:center;"></div>' +
+        '<div class="modal-section">' +
+          '<button class="modal-btn danger" id="goalDeleteBtn">Удалить эту цель</button>' +
+        '</div>' +
+        settingsScreenBackBtnHtml("Назад") +
+        '</div>';
       renderGoalTasksList(goalId);
-      renderGoalsSection();
-    });
-    document.getElementById("goalDeleteBtn").addEventListener("click", function(){
-      openAppConfirmBar("Удалить эту цель вместе со всеми задачами?", function(){
-        deleteGoal(goalId);
-        closeModal();
+
+      document.getElementById("screenBackBtn").addEventListener("click", function(){
+        leaveSettingsScreen();
         renderGoalsSection();
-      }, { yesTitle:"Удалить" });
+      });
+      document.getElementById("goalTitleInput").addEventListener("input", function(){
+        var g = getGoalData(goalId); if(!g) return;
+        g.title = this.value;
+        saveGoal(goalId, g);
+        renderGoalsSection();
+      });
+      document.getElementById("goalColorSquare").addEventListener("click", function(){ openGoalColorPicker(goalId); });
+      document.getElementById("goalAddTaskBtn").addEventListener("click", function(){
+        var g = getGoalData(goalId); if(!g) return;
+        g.tasks = g.tasks || [];
+        if(g.tasks.length >= GOAL_MAX_TASKS) return;
+        g.tasks.push({text:"", checked:false});
+        saveGoal(goalId, g);
+        renderGoalTasksList(goalId);
+        renderGoalsSection();
+      });
+      document.getElementById("goalDeleteBtn").addEventListener("click", function(){
+        openAppConfirmBar("Удалить эту цель вместе со всеми задачами?", function(){
+          deleteGoal(goalId);
+          leaveSettingsScreen();
+          renderGoalsSection();
+        }, { yesTitle:"Удалить" });
+      });
     });
   }
 
@@ -20507,21 +20550,25 @@
   }
 
   function openGoalColorPicker(goalId){
-    var buttons = GOAL_COLORS.map(function(c){
-      return '<button data-color="' + c + '" style="background:' + c + ';"></button>';
-    }).join("");
-    modalBox.innerHTML =
-      modalHeader("Выберите цвет прогресс-бара") +
-      '<div class="goal-color-grid">' + buttons + '</div>';
-    bindClose();
-    modalOverlay.classList.add("open");
-    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-color]"), function(btn){
-      btn.addEventListener("click", function(){
-        var g = getGoalData(goalId); if(!g) return;
-        g.color = btn.getAttribute("data-color");
-        saveGoal(goalId, g);
-        renderGoalsSection();
-        openGoalSettingsModal(goalId);
+    openSettingsScreen(function(c){
+      var buttons = GOAL_COLORS.map(function(col){
+        return '<button data-color="' + col + '" style="background:' + col + ';"></button>';
+      }).join("");
+      c.innerHTML =
+        '<div class="settings-gear-tab">' +
+        '<h3 class="common-tab-title">Выберите цвет прогресс-бара</h3>' +
+        '<div class="goal-color-grid">' + buttons + '</div>' +
+        settingsScreenBackBtnHtml("Назад") +
+        '</div>';
+      document.getElementById("screenBackBtn").addEventListener("click", function(){ openGoalSettingsModal(goalId); });
+      Array.prototype.forEach.call(c.querySelectorAll("[data-color]"), function(btn){
+        btn.addEventListener("click", function(){
+          var g = getGoalData(goalId); if(!g) return;
+          g.color = btn.getAttribute("data-color");
+          saveGoal(goalId, g);
+          renderGoalsSection();
+          openGoalSettingsModal(goalId);
+        });
       });
     });
   }
