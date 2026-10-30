@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 9.0 (30.10)
+   Версия: 10.0 (30.10)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -21,6 +21,10 @@
    Экран: список мероприятий (дни без мероприятий не показываются) и нижний ряд кнопок `.mdeditor-fab-row`: «+» (новое
    мероприятие) слева от «домика»; «домик» здесь — пустышка в углу, как на списках «Мои книги» и «Карточки предметов».
    Тап по мероприятию открывает ту же форму для правки (с кнопкой «Удалить»).
+   Цвета календарей: кнопка «Цвета» (`calendarColorBtn`, нижний ряд, после «Трекеров») открывает экран `openColors` в стиле формы
+   комбинированных карточек (палитра 2×8, пустой квадрат — цвет по умолчанию): личный календарь, общий календарь, трекеры занятий.
+   Выбор хранится на устройстве (`calendarColors_v1` = {personal, shared, trk} — "#rrggbb" или ""), `applyUserColors` кладёт его в
+   `--cal-personal` / `--cal-shared` / `--cal-trk` на `<html>` (пусто — убирает, действует цвет по умолчанию из components.css).
    Мероприятие: {id, title, start, end, repeat, cal, updatedAt[, until, skip]}; cal — календарь: "personal" (по умолчанию, и если поля нет) | "shared"
    (поле «Календарь» в форме; в НОВОМ мероприятии стоит календарь последнего сохранённого — `calendarLastCal_v1`, `lastCal`/`rememberCal`, на устройстве; пока различие только в цвете: личный — как «Радость» в диаграмме настроений (--mood-joy), общий — цвет
    выделенной вкладки (--wood); переменные --cal-personal/--cal-shared и классы .cal-c-personal/.cal-c-shared в components.css); start/end — мс (локальное время), repeat — "" | day |
@@ -92,6 +96,10 @@
   var TRK_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M3 12h4l2.5-6 4 12 2.5-6H21"></path></svg>';
+  var COLOR_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-.9 2-1.8 0-1.3-1-1.6-1-2.7 0-1 .8-1.7 1.9-1.7H17a3.5 3.5 0 0 0 3.5-3.5C20.5 6.7 16.7 3.5 12 3.5z"></path>' +
+      '<circle cx="7.8" cy="11.5" r="1" fill="currentColor" stroke="none"></circle><circle cx="10.6" cy="7.6" r="1" fill="currentColor" stroke="none"></circle><circle cx="15.2" cy="7.8" r="1" fill="currentColor" stroke="none"></circle></svg>';
   var PLUS_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
@@ -158,6 +166,34 @@
   ];
   function loadTrackersOn(){ try{ trackersOn = localStorage.getItem(TRK_KEY) === "1"; }catch(e){ trackersOn = false; } }
   function saveTrackersOn(){ try{ localStorage.setItem(TRK_KEY, trackersOn ? "1" : "0"); }catch(e){} }
+  // ---------- цвета календарей (личный, общий, трекеры занятий): выбор пользователя, на устройстве ----------
+  var COLORS_KEY = "calendarColors_v1";
+  var COLOR_ITEMS = [
+    { key: "personal", label: "Личный календарь", cssVar: "--cal-personal" },
+    { key: "shared",   label: "Общий календарь",  cssVar: "--cal-shared" },
+    { key: "trk",      label: "Трекеры занятий",  cssVar: "--cal-trk" }
+  ];
+  // та же палитра, что в форме комбинированных карточек (itemcards.js HABIT_COLORS_*): первый пастельный квадрат — «по умолчанию»
+  var COLORS_BRIGHT = ["#ff0000", "#fb8c00", "#ffff00", "#43a047", "#00acc1", "#1e88e5", "#7f00ff", "#d81b60"];
+  var COLORS_PASTEL = ["", "#ffcba4", "#fff3a3", "#9cdb4e", "#40d5b5", "#a9ccf4", "#d4b8f0", "#f8bbd9"];
+  var userColors = { personal: "", shared: "", trk: "" };
+  function loadColors(){
+    var o = null;
+    try{ o = JSON.parse(localStorage.getItem(COLORS_KEY) || "null"); }catch(e){ o = null; }
+    COLOR_ITEMS.forEach(function(it){
+      var v = o && typeof o[it.key] === "string" ? o[it.key] : "";
+      userColors[it.key] = /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : "";
+    });
+  }
+  function saveColors(){ try{ localStorage.setItem(COLORS_KEY, JSON.stringify(userColors)); }catch(e){} }
+  function applyUserColors(){
+    var root = document.documentElement;
+    if(!root || !root.style) return;
+    COLOR_ITEMS.forEach(function(it){
+      var v = userColors[it.key];
+      if(v) root.style.setProperty(it.cssVar, v); else root.style.removeProperty(it.cssVar);
+    });
+  }
   // трекеры, пересекающие отрезок [from, to): [{src, label, start, end, sub}]; запись без конца — по длительности, иначе минутная
   function trackerItems(from, to){
     var out = [];
@@ -423,6 +459,8 @@
   function clampHour(v){ return Math.max(HOUR_MIN, Math.min(HOUR_MAX, v)); }
   function loadMode(){
     loadTrackersOn();
+    loadColors();
+    applyUserColors();
     try{
       mode = localStorage.getItem(MODE_KEY) === "week" ? "week" : "list";
       var z = parseFloat(localStorage.getItem(ZOOM_KEY));
@@ -435,12 +473,14 @@
       '<button type="button" class="mdeditor-fab-btn" id="calendarModeBtn" title="' + (mode === "week" ? "Режим: список" : "Режим: неделя") + '">' +
         (mode === "week" ? LIST_ICON_SVG : WEEK_ICON_SVG) + '</button>' +
       '<button type="button" class="mdeditor-fab-btn' + (trackersOn ? ' pressed' : '') + '" id="calendarTrkBtn" title="' + (trackersOn ? 'Скрыть трекеры занятий' : 'Показать трекеры занятий') + '">' + TRK_ICON_SVG + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="calendarColorBtn" title="Цвета календаря">' + COLOR_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarAddBtn" title="Новое мероприятие">' + PLUS_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarHomeStub" tabindex="-1" aria-disabled="true">' + HOME_ICON_SVG + '</button>' +
     '</div>';
   }
   function bindFab(){
     document.getElementById("calendarAddBtn").addEventListener("click", function(){ weekRememberScroll(); openForm(null); });
+    document.getElementById("calendarColorBtn").addEventListener("click", function(){ weekRememberScroll(); openColors(); });
     document.getElementById("calendarTrkBtn").addEventListener("click", function(){
       trackersOn = !trackersOn;
       saveTrackersOn();
@@ -1100,6 +1140,68 @@
         renderMain();
       });
     }
+  }
+
+  // ---------- экран «Цвета календаря» (разметка и классы как в форме комбинированных карточек) ----------
+  function paletteHtml(key){
+    var h = '<div class="cal-palette" data-key="' + key + '">';
+    [COLORS_BRIGHT, COLORS_PASTEL].forEach(function(row){
+      h += '<div class="cal-palette-row">';
+      row.forEach(function(hex){
+        h += hex
+          ? '<button type="button" class="cal-swatch" data-color="' + hex + '" style="background:' + hex + ';" title="' + hex + '"></button>'
+          : '<button type="button" class="cal-swatch none" data-color="" title="По умолчанию"></button>';
+      });
+      h += '</div>';
+    });
+    return h + '</div>';
+  }
+  function openColors(){
+    var c = container();
+    if(!c) return;
+    clearTimeout(tapTimer); tapTimer = null;
+    screen = "form";
+    var draft = {};
+    COLOR_ITEMS.forEach(function(it){ draft[it.key] = userColors[it.key]; });
+    var html = '<div class="mdeditor-tab item-card-form" id="calendarColorForm">' +
+      '<h3 class="common-tab-title">Цвета календаря</h3>' +
+      '<div class="item-form-hint">Цвет каждого календаря и трекеров занятий — необязательно. Пустой квадрат — цвет по умолчанию. Выбор действует на этом устройстве.</div>';
+    COLOR_ITEMS.forEach(function(it){
+      html += '<div class="cal-field"><div class="item-form-hint">' + esc(it.label) + '</div>' + paletteHtml(it.key) + '</div>';
+    });
+    html += '<div class="item-form-buttons">' +
+        '<button type="button" class="workbooks-run-btn" id="calColorSave">Сохранить</button>' +
+        '<button type="button" class="workbooks-run-btn" id="calColorCancel">Отмена</button>' +
+      '</div></div>';
+    c.innerHTML = html;
+    syncFlush();
+    c.scrollTop = 0;
+    function mark(){
+      Array.prototype.forEach.call(c.querySelectorAll(".cal-palette"), function(pal){
+        var cur = draft[pal.getAttribute("data-key")] || "";
+        Array.prototype.forEach.call(pal.querySelectorAll(".cal-swatch"), function(b){
+          var on = (b.getAttribute("data-color") || "") === cur;
+          if(on) b.classList.add("selected"); else b.classList.remove("selected");
+        });
+      });
+    }
+    mark();
+    document.getElementById("calendarColorForm").addEventListener("click", function(e){
+      var b = e.target && e.target.closest ? e.target.closest(".cal-swatch") : null;
+      if(!b) return;
+      var pal = b.parentNode && b.parentNode.parentNode;
+      var key = pal && pal.getAttribute ? pal.getAttribute("data-key") : null;
+      if(!key || !draft.hasOwnProperty(key)) return;
+      draft[key] = b.getAttribute("data-color") || "";
+      mark();
+    });
+    document.getElementById("calColorSave").addEventListener("click", function(){
+      COLOR_ITEMS.forEach(function(it){ userColors[it.key] = draft[it.key] || ""; });
+      saveColors();
+      applyUserColors();
+      renderMain();
+    });
+    document.getElementById("calColorCancel").addEventListener("click", function(){ renderMain(); });
   }
 
   window.CalendarTab = {

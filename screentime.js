@@ -1,7 +1,8 @@
 /* ===========================================================================
    screentime.js
-   Версия: 1.0 (26.10) — новый файл. Вкладка «Трекер экранов» (`screentime`, язычок над «Событиями» в стеке набора 1).
-   `window.ScreenTime.{init, render, getTotals, setAppActive}`.
+   Версия: 2.0 (30.10)
+   Вкладка «Трекер экранов» (`screentime`, язычок над «Событиями» в стеке набора 1).
+   `window.ScreenTime.{init, render, getTotals, getPeriodTotals, setAppActive}`.
 
    Что считает (всё суммируется по ВСЕМ устройствам):
      music  — сколько приложение воспроизводило музыку (считает оболочка Android: `ScreenTimeStats.kt`, мост `getScreenTimeTotals`, версия 16);
@@ -12,11 +13,18 @@
      timers — сколько насчитали все таймеры карточек (считает оболочка: `CardTimers.kt` → `ScreenTimeStats`).
    Экранное время идёт, только если окно настроек открыто, страница видима и приложение не свёрнуто (`__ltOnAppPause`/`__ltOnAppResume`).
 
-   Хранение и синхронизация: в общем `state` у КАЖДОГО устройства свой ключ `__screenTime:<deviceId>` = {c:{music,read,tasks,notes,qr,timers}, t}
-   (миллисекунды, только растут). Устройство пишет только свой ключ, поэтому слияние по ключам (last-write-wins) конфликтов не даёт;
-   общий итог = сумма по всем ключам с этим префиксом. В облако ключ уходит редко: при сворачивании приложения и не чаще раза в
-   PUSH_EVERY_MS, пока приложение открыто (в локальное хранилище — раз в SAVE_EVERY_MS).
-   Чтобы добавить новый счётчик: строка в CATEGORIES, правило в `categoryFor` (экранный) или источник в `readNative` (оболочка).
+   Периоды на экране (кнопки нижнего ряда, `PERIODS`, выбор — `localStorage` `screenTimePeriod_v1`): «День» (листать назад по дням,
+   вчера, позавчера…), «Нед.» (пн–вс), «Мес.» (календарный месяц), «6 мес.» (шесть календарных месяцев, последний — выбранный).
+   Листание — стрелки ‹ › и свайп по вкладке (как в «Тренировках»); в будущее листать нельзя (`shift`, `clampAnchor`).
+
+   Хранение и синхронизация: в общем `state` у КАЖДОГО устройства свой ключ `__screenTime:<deviceId>` =
+   {c:{music,read,tasks,notes,qr,timers}, d:{"ГГГГ-ММ-ДД":[music,read,tasks,notes,qr,timers]}, t}
+   (миллисекунды, только растут; `c` — накопленное за всё время, `d` — по суткам, порядок массива = порядок `CATEGORIES`, хранится
+   KEEP_DAYS суток). Время оболочки (музыка, таймеры) относится к суткам, в которые оно считано при записи (`flush`). Устройство пишет
+   только свой ключ, поэтому слияние по ключам (last-write-wins) конфликтов не даёт; итог за период = сумма по всем ключам с этим префиксом.
+   В облако ключ уходит редко: при сворачивании приложения и не чаще раза в PUSH_EVERY_MS, пока приложение открыто (в локальное
+   хранилище — раз в SAVE_EVERY_MS).
+   Чтобы добавить новый счётчик: строка В КОНЕЦ `CATEGORIES` (индекс в `d` — позиция), правило в `categoryFor` (экранный) или источник в `readNative` (оболочка).
    =========================================================================== */
 (function(){
   "use strict";
@@ -27,6 +35,22 @@
   var PUSH_EVERY_MS = 10 * 60 * 1000;   // отправка в облако, пока приложение открыто
   var NATIVE_EVERY_MS = 30 * 1000;      // опрос счётчиков оболочки
   var MAX_GAP_MS = 3000;                // дольше пауза между тиками = сон/заморозка страницы, не считаем
+  var KEEP_DAYS = 200;                  // сколько суток хранится посуточная разбивка (хватает на «6 мес.»)
+  var PERIOD_KEY = "screenTimePeriod_v1";
+  var SWIPE_DX = 70, SWIPE_DY = 50;     // как в workouts.js
+  var PERIODS = [
+    { id: "day",   label: "День" },
+    { id: "week",  label: "Нед." },
+    { id: "month", label: "Мес." },
+    { id: "6m",    label: "6 мес." }
+  ];
+  var MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+  var MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+  var MONTHS_SHORT = ["янв.", "февр.", "март", "апр.", "май", "июнь", "июль", "авг.", "сент.", "окт.", "нояб.", "дек."];
+  var WEEKDAYS = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+  var HOME_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M4 11.5L12 4l8 7.5"></path><path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"></path><path d="M10 20v-5h4v5"></path></svg>';
 
   // порядок = порядок строк на экране
   var CATEGORIES = [
@@ -48,7 +72,9 @@
 
   var deps = null;
   var appActive = true;
-  var pending = {};        // не записанные в state миллисекунды экранных счётчиков
+  var pending = {};        // не записанные в state миллисекунды экранных счётчиков: {"ГГГГ-ММ-ДД": {read: мс, …}}
+  var period = "day";      // выбранный период (PERIODS)
+  var anchor = null;       // дата (Date, 00:00), по которой определяется показанный период
   var lastTick = 0;
   var lastSave = 0, lastPush = 0, lastNative = 0;
   var dirtySincePush = false;
@@ -56,6 +82,16 @@
 
   function zeroSet(){ var o = {}; CATEGORIES.forEach(function(c){ o[c.id] = 0; }); return o; }
   function num(v){ v = Number(v); return (isFinite(v) && v > 0) ? Math.floor(v) : 0; }
+  function zeroArr(){ return CATEGORIES.map(function(){ return 0; }); }
+  function catIndex(id){ for(var i = 0; i < CATEGORIES.length; i++){ if(CATEGORIES[i].id === id) return i; } return -1; }
+
+  // ---------- даты (календарной датой, не прибавлением 24 ч: переход на летнее время) ----------
+  function pad2(n){ return (n < 10 ? "0" : "") + n; }
+  function dayKey(d){ return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+  function dayStart(ts){ var d = new Date(ts); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+  function addDays(d, n){ return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
+  function monthStart(d, n){ return new Date(d.getFullYear(), d.getMonth() + (n || 0), 1); }
+  function mondayOf(d){ return addDays(d, -((d.getDay() + 6) % 7)); }
 
   function myKey(){ return KEY_PREFIX + deps.getDeviceId(); }
 
@@ -63,6 +99,11 @@
     var st = deps.getState() || {};
     var rec = st[myKey()];
     return (rec && rec.c && typeof rec.c === "object") ? rec.c : null;
+  }
+  function getMyDays(){
+    var st = deps.getState() || {};
+    var rec = st[myKey()];
+    return (rec && rec.d && typeof rec.d === "object") ? rec.d : {};
   }
 
   // ---------- какой счётчик сейчас идёт ----------
@@ -89,7 +130,12 @@
     if(gap && isScreenOn()){
       var cat = null;
       try{ cat = categoryFor(deps.getContext()); }catch(e){}
-      if(cat){ pending[cat] = (pending[cat] || 0) + gap; dirtySincePush = true; }
+      if(cat){
+        var dk = dayKey(new Date(now));
+        var po = pending[dk] || (pending[dk] = {});
+        po[cat] = (po[cat] || 0) + gap;
+        dirtySincePush = true;
+      }
     }
     if(now - lastNative >= NATIVE_EVERY_MS && isScreenOn()) readNative();
     if(now - lastSave >= SAVE_EVERY_MS) flush(false);
@@ -115,22 +161,40 @@
     if(deps.isReady && !deps.isReady()) return;
     readNative();
     var cur = getMyRecord();
+    var days = {};
+    var oldDays = getMyDays();
+    Object.keys(oldDays).forEach(function(k){ if(Object.prototype.toString.call(oldDays[k]) === "[object Array]") days[k] = oldDays[k]; });
     var next = zeroSet();
     var changed = !cur;
     CATEGORIES.forEach(function(c){ next[c.id] = cur ? num(cur[c.id]) : 0; });
-    SCREEN_IDS.forEach(function(id){
-      var add = num(pending[id]);
-      if(add){ next[id] += add; changed = true; }
-      pending[id] = 0;
+    var todayKey = dayKey(new Date(now));
+    function bump(dk, id, add){
+      var arr = days[dk] ? days[dk].slice() : zeroArr();
+      var i = catIndex(id);
+      arr[i] = num(arr[i]) + add;
+      days[dk] = arr;
+    }
+    Object.keys(pending).forEach(function(dk){
+      var o = pending[dk];
+      SCREEN_IDS.forEach(function(id){
+        var add = num(o[id]);
+        if(add){ next[id] += add; bump(dk, id, add); changed = true; }
+      });
     });
+    pending = {};
     NATIVE_IDS.forEach(function(id){
       var v = nativeTotals ? num(nativeTotals[id]) : 0;
-      if(v > next[id]){ next[id] = v; changed = true; }   // только растёт
+      if(v > next[id]){
+        if(cur) bump(todayKey, id, v - next[id]);   // прирост за время с прошлой записи — в сегодняшние сутки
+        next[id] = v; changed = true;                // только растёт
+      }
     });
+    var oldest = dayKey(addDays(dayStart(now), -KEEP_DAYS));
+    Object.keys(days).forEach(function(k){ if(k < oldest){ delete days[k]; changed = true; } });
     if(changed){
       var st = deps.getState();
       if(st){
-        st[myKey()] = { c: next, t: now };
+        st[myKey()] = { c: next, d: days, t: now };
         deps.saveLocalState();
       }
     }
@@ -157,7 +221,9 @@
     // то, что ещё не записано в state на этом устройстве
     var cur = getMyRecord();
     if(!cur) devices++;
-    SCREEN_IDS.forEach(function(id){ total[id] += num(pending[id]); });
+    Object.keys(pending).forEach(function(dk){
+      SCREEN_IDS.forEach(function(id){ total[id] += num(pending[dk][id]); });
+    });
     NATIVE_IDS.forEach(function(id){
       var have = cur ? num(cur[id]) : 0;
       var v = nativeTotals ? num(nativeTotals[id]) : 0;
@@ -165,6 +231,106 @@
     });
     total.devices = devices;
     return total;
+  }
+
+  // ---------- итоги за период ----------
+  // сутки всех устройств + ещё не записанное на этом: {"ГГГГ-ММ-ДД": {music,read,…}}
+  function collectDays(){
+    var out = {};
+    function add(dk, id, ms){
+      if(!ms) return;
+      var o = out[dk] || (out[dk] = zeroSet());
+      o[id] += ms;
+    }
+    var st = deps.getState() || {};
+    Object.keys(st).forEach(function(k){
+      if(k.indexOf(KEY_PREFIX) !== 0) return;
+      var rec = st[k];
+      if(!rec || !rec.d || typeof rec.d !== "object") return;
+      Object.keys(rec.d).forEach(function(dk){
+        var arr = rec.d[dk];
+        if(Object.prototype.toString.call(arr) !== "[object Array]") return;
+        CATEGORIES.forEach(function(c, i){ add(dk, c.id, num(arr[i])); });
+      });
+    });
+    Object.keys(pending).forEach(function(dk){
+      SCREEN_IDS.forEach(function(id){ add(dk, id, num(pending[dk][id])); });
+    });
+    var cur = getMyRecord();
+    if(cur){
+      var todayKey = dayKey(new Date());
+      NATIVE_IDS.forEach(function(id){
+        var v = nativeTotals ? num(nativeTotals[id]) : 0;
+        if(v > num(cur[id])) add(todayKey, id, v - num(cur[id]));
+      });
+    }
+    return out;
+  }
+
+  // границы показанного периода (Date, включительно)
+  function rangeOf(per, a){
+    if(per === "week"){ var m = mondayOf(a); return { from: m, to: addDays(m, 6) }; }
+    if(per === "month"){ return { from: monthStart(a, 0), to: addDays(monthStart(a, 1), -1) }; }
+    if(per === "6m"){ return { from: monthStart(a, -5), to: addDays(monthStart(a, 1), -1) }; }
+    return { from: a, to: a };
+  }
+
+  // итоги по категориям за период [from, to] (Date)
+  function getPeriodTotals(from, to){
+    var days = collectDays();
+    var total = zeroSet();
+    for(var d = from; d.getTime() <= to.getTime(); d = addDays(d, 1)){
+      var o = days[dayKey(d)];
+      if(o) CATEGORIES.forEach(function(c){ total[c.id] += o[c.id]; });
+    }
+    return total;
+  }
+
+  function loadPeriod(){
+    try{
+      var v = localStorage.getItem(PERIOD_KEY);
+      if(PERIODS.some(function(p){ return p.id === v; })) period = v;
+    }catch(e){}
+  }
+  function savePeriod(){ try{ localStorage.setItem(PERIOD_KEY, period); }catch(e){} }
+
+  function clampAnchor(){
+    var today = dayStart(Date.now());
+    if(!anchor || anchor.getTime() > today.getTime()) anchor = today;
+  }
+
+  function isLatest(){
+    return rangeOf(period, anchor).to.getTime() >= dayStart(Date.now()).getTime();
+  }
+
+  function shift(dir){
+    clampAnchor();
+    if(period === "day") anchor = addDays(anchor, dir);
+    else if(period === "week") anchor = addDays(anchor, dir * 7);
+    else if(period === "month") anchor = monthStart(anchor, dir);
+    else anchor = monthStart(anchor, dir * 6);
+    clampAnchor();
+    render();
+  }
+
+  function periodTitle(){
+    var r = rangeOf(period, anchor);
+    var today = dayStart(Date.now());
+    if(period === "day"){
+      var diff = Math.round((today.getTime() - r.from.getTime()) / 86400000);
+      if(diff === 0) return "Сегодня";
+      if(diff === 1) return "Вчера";
+      if(diff === 2) return "Позавчера";
+      return WEEKDAYS[r.from.getDay()] + ", " + r.from.getDate() + " " + MONTHS_GEN[r.from.getMonth()] + (r.from.getFullYear() !== today.getFullYear() ? " " + r.from.getFullYear() : "");
+    }
+    if(period === "week"){
+      var a = r.from, b = r.to;
+      var left = a.getDate() + (a.getMonth() !== b.getMonth() ? " " + MONTHS_SHORT[a.getMonth()] : "");
+      return left + " – " + b.getDate() + " " + MONTHS_SHORT[b.getMonth()] + " " + b.getFullYear();
+    }
+    if(period === "month") return MONTHS[r.from.getMonth()] + " " + r.from.getFullYear();
+    var f = r.from, t = r.to;
+    return MONTHS_SHORT[f.getMonth()] + (f.getFullYear() !== t.getFullYear() ? " " + f.getFullYear() : "") + " – " + MONTHS_SHORT[t.getMonth()] + " " + t.getFullYear();
   }
 
   function fmt(ms){
@@ -180,7 +346,13 @@
     var st = document.createElement("style");
     st.id = "screenTimeStyle";
     st.textContent =
-      ".st-root{padding:14px 14px 24px;color:var(--wood);}" +
+      ".st-root{padding:14px 14px 64px;color:var(--wood);}" +
+      ".st-nav{display:flex;align-items:center;justify-content:space-between;margin:4px 0 6px;}" +
+      ".st-nav button{width:40px;height:36px;border-radius:10px;border:1px solid var(--groove-shadow);background:transparent;color:var(--ink);font-size:1.3em;line-height:1;cursor:pointer;}" +
+      ".st-nav button:disabled{opacity:.3;cursor:default;}" +
+      ".st-nav .st-per-title{font-weight:bold;text-align:center;flex:1;color:var(--ink);}" +
+      ".st-per{width:auto;min-width:40px;padding:0 6px;font:inherit;font-size:11px;white-space:nowrap;}" +
+      ".st-per.on{background:var(--wood);color:var(--parchment);border-color:var(--wood);}" +
       ".st-title{font-size:1.15em;font-weight:600;margin:2px 0 4px;}" +
       ".st-sub{opacity:.7;font-size:.85em;margin-bottom:14px;}" +
       ".st-row{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid rgba(127,127,127,.25);}" +
@@ -198,9 +370,10 @@
 
   function esc(s){ return String(s).replace(/[&<>"]/g, function(ch){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch]; }); }
 
-  function html(){
-    var t = getTotals();
-    var rows = CATEGORIES.map(function(c){
+  function rowsHtml(){
+    var r = rangeOf(period, anchor);
+    var t = getPeriodTotals(r.from, r.to);
+    return CATEGORIES.map(function(c){
       var ms = t[c.id];
       return '<div class="st-row">' +
         '<div class="st-ico"><svg viewBox="0 0 24 24">' + c.svg + '</svg></div>' +
@@ -208,25 +381,89 @@
         '<div class="st-val"><div class="st-big">' + fmt(ms) + '</div><div class="st-min">' + Math.floor(ms / 60000) + ' мин</div></div>' +
         '</div>';
     }).join("");
+  }
+
+  function subText(){
+    return "Сумма по всем устройствам (устройств в счёте: " + getTotals().devices + ")";
+  }
+
+  function html(){
     return '<div class="st-root" id="screenTimeRoot">' +
       '<div class="st-title">Трекер экранов</div>' +
-      '<div class="st-sub">Сумма по всем устройствам (устройств в счёте: ' + t.devices + ')</div>' + rows + '</div>';
+      '<div class="st-nav"><button type="button" id="stPrev" aria-label="Назад">‹</button><div class="st-per-title" id="stPerTitle">' + esc(periodTitle()) +
+      '</div><button type="button" id="stNext" aria-label="Вперёд"' + (isLatest() ? " disabled" : "") + '>›</button></div>' +
+      '<div class="st-sub" id="screenTimeSub">' + esc(subText()) + '</div>' +
+      '<div id="screenTimeRows">' + rowsHtml() + '</div></div>';
+  }
+
+  function fabRowHtml(){
+    return '<div class="mdeditor-fab-row">' +
+      PERIODS.map(function(p){
+        return '<button type="button" class="mdeditor-fab-btn st-per' + (p.id === period ? " on" : "") + '" data-period="' + p.id + '">' + p.label + '</button>';
+      }).join("") +
+      '<button type="button" class="mdeditor-fab-btn" id="stHomeStub" tabindex="-1" aria-disabled="true">' + HOME_ICON_SVG + '</button>' +
+      '</div>';
+  }
+
+  var swipeEl = null, swipeStart = null, swipeEnd = null;
+  // свайп по всей области вкладки; слушатели снимаются при каждой перерисовке
+  function bindSwipe(el){
+    if(swipeEl){
+      swipeEl.removeEventListener("touchstart", swipeStart, true);
+      swipeEl.removeEventListener("touchend", swipeEnd, true);
+    }
+    var sx = 0, sy = 0, on = false;
+    swipeStart = function(e){
+      if(!document.getElementById("screenTimeRoot") || !e.touches || e.touches.length !== 1){ on = false; return; }
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY; on = true;
+    };
+    swipeEnd = function(e){
+      if(!on) return;
+      on = false;
+      if(!document.getElementById("screenTimeRoot")) return;
+      var t = e.changedTouches && e.changedTouches[0];
+      if(!t) return;
+      var dx = t.clientX - sx, dy = t.clientY - sy;
+      if(Math.abs(dx) < SWIPE_DX || Math.abs(dy) > SWIPE_DY) return;
+      if(dx < 0 && isLatest()) return;   // в будущее листать нельзя
+      shift(dx > 0 ? -1 : 1);
+    };
+    swipeEl = el;
+    el.addEventListener("touchstart", swipeStart, { passive: true, capture: true });
+    el.addEventListener("touchend", swipeEnd, { passive: true, capture: true });
+  }
+
+  function bind(container){
+    Array.prototype.forEach.call(container.querySelectorAll(".st-per"), function(b){
+      b.addEventListener("click", function(){
+        period = b.getAttribute("data-period");
+        savePeriod();
+        render();
+      });
+    });
+    var prev = document.getElementById("stPrev"), next = document.getElementById("stNext");
+    if(prev) prev.addEventListener("click", function(){ shift(-1); });
+    if(next) next.addEventListener("click", function(){ if(!isLatest()) shift(1); });
+    bindSwipe(container);
   }
 
   function render(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
     ensureStyle();
+    loadPeriod();
+    clampAnchor();
     readNative();
     flush(false);
-    container.innerHTML = html();
+    container.innerHTML = html() + fabRowHtml();
+    bind(container);
     clearInterval(renderTimer);
     renderTimer = setInterval(function(){
-      var root = document.getElementById("screenTimeRoot");
-      if(!root){ clearInterval(renderTimer); renderTimer = null; return; }
-      var tmp = document.createElement("div");
-      tmp.innerHTML = html();
-      if(tmp.firstChild) root.innerHTML = tmp.firstChild.innerHTML;
+      var rows = document.getElementById("screenTimeRows");
+      if(!rows){ clearInterval(renderTimer); renderTimer = null; return; }
+      rows.innerHTML = rowsHtml();
+      var sub = document.getElementById("screenTimeSub");
+      if(sub) sub.textContent = subText();
     }, 5000);
   }
 
@@ -251,5 +488,5 @@
     });
   }
 
-  window.ScreenTime = { init: init, render: render, getTotals: getTotals, setAppActive: setAppActive };
+  window.ScreenTime = { init: init, render: render, getTotals: getTotals, getPeriodTotals: getPeriodTotals, setAppActive: setAppActive };
 })();
