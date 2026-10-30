@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 99.0 (30.10)
+   Версия: 100.0 (30.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -10220,7 +10220,10 @@
     // applyReadingModeVisual), а не из localStorage — так расчёт не зависит от порядка
     // инициализации переменных файла.
     var readingFull = !!(settingsModalOverlay && settingsModalOverlay.classList.contains("reading-mode-active"));
-    var ANDROID_NAV_BAR_H = 37; // px, замерено по скриншоту пользователя + 20px, чтобы поднять кнопку-язычок (.settings-fab) выше; уменьшено на 15px, затем поднято на 2px, затем опущено ещё на 8px (вместе с рядами вкладок и кнопкой — см. .settings-tabs/.settings-tabs-gear в modals.css), чтобы у окна не было "дыры" между его нижним краем и рядами
+    // Телефон (ширина ≤600px, как @media в modals.css): нижний ряд вкладок и язычок стоят вплотную к нижнему краю экрана,
+    // запас под ряд — ровно его высота (35px, .settings-tab-gear). Большой экран: прежние 37px.
+    var PHONE_LAYOUT = !!(window.matchMedia && window.matchMedia("(max-width:600px)").matches);
+    var ANDROID_NAV_BAR_H = PHONE_LAYOUT ? 35 : 37; // px, замерено по скриншоту пользователя + 20px, чтобы поднять кнопку-язычок (.settings-fab) выше; уменьшено на 15px, затем поднято на 2px, затем опущено ещё на 8px (вместе с рядами вкладок и кнопкой — см. .settings-tabs/.settings-tabs-gear в modals.css), чтобы у окна не было "дыры" между его нижним краем и рядами
     var fabTop = window.innerHeight - (readingFull ? 0 : ANDROID_NAV_BAR_H);
     var minTop = naturalTop; // не даём окну вылезти выше верхнего края оверлея
     // Высота окна больше не фиксируется числом.
