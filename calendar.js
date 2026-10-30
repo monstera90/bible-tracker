@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 10.0 (30.10)
+   Версия: 10.1 (30.10)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -150,7 +150,6 @@
   // Отдельный слой поверх запланированных мероприятий; кнопка в нижнем ряду показывает/скрывает его (TRK_KEY, на устройстве).
   // Новый трекер = ещё один элемент TRACKER_SOURCES: get() отдаёт [{start, end, sub}] (мс), label — название занятия.
   var TRK_KEY = "calendarTrackers_v1";
-  var TRK_LANE = 14;           // px: полоса справа в колонке дня под трекеры (события при включённом слое сужаются на неё)
   var trackersOn = false;
   var TRACKER_SOURCES = [
     { key: "workout", label: "Тренировка", get: function(){
@@ -437,6 +436,7 @@
     if(!el || !el.style || !el.style.setProperty) return;
     el.style.setProperty("--cal-personal-fg", fgFor("--cal-personal"));
     el.style.setProperty("--cal-shared-fg", fgFor("--cal-shared"));
+    el.style.setProperty("--cal-trk-fg", fgFor("--cal-trk"));
   }
   // В режиме «Неделя» у окна убираются боковые поля (класс cal-week-flush на .settings-modal-box, modals.css), чтобы сетка
   // влезала целиком. Класс снимается сам, как только во вкладке перестаёт быть .cal-week (другой экран или другая вкладка):
@@ -559,38 +559,33 @@
   function weekHtml(ws){
     var now = Date.now(), todayKey = dateValue(now);
     var segsByDay = weekSegments(ws);
-    var lane = trackersOn ? TRK_LANE : 0;
-    var trkByDay = lane ? weekTrackerSegments(ws) : null;
+    var trkByDay = trackersOn ? weekTrackerSegments(ws) : null;
     var head = '<div class="cal-wk-head"><div class="cal-wk-gutter"></div>';
     var cols = '';
     for(var i = 0; i < 7; i++){
       var ds = dayStartAt(ws, i), isToday = dateValue(ds) === todayKey;
       head += '<div class="cal-wk-dayh' + (isToday ? ' cal-wk-today' : '') + '"><span>' + WEEKDAYS[i] + '</span><b>' + new Date(ds).getDate() + '</b></div>';
-      var segs = segsByDay[i];
+      // трекеры — такие же блоки, как мероприятия: общая раскладка дня, в колонки они встают только при пересечении по времени
+      var segs = segsByDay[i].slice();
+      if(trkByDay) trkByDay[i].forEach(function(tg){ segs.push(tg); });
       packDay(segs);
       var blocks = '';
       segs.forEach(function(sg){
         var top = sg.top * hourPx / 60;
         var h = Math.max(MIN_BLOCK_PX, (sg.bottom - sg.top) * hourPx / 60 - 1);
         var w = 100 / sg.cols, left = sg.col * w;
-        var posCss = lane
-          ? 'left:calc(' + (left / 100).toFixed(4) + ' * (100% - ' + lane + 'px));width:calc(' + (w / 100).toFixed(4) + ' * (100% - ' + lane + 'px) - 1px)'
-          : 'left:' + left.toFixed(2) + '%;width:calc(' + w.toFixed(2) + '% - 1px)';
+        var posCss = 'left:' + left.toFixed(2) + '%;width:calc(' + w.toFixed(2) + '% - 1px)';
         var tall = h >= 30;
+        if(sg.t){
+          blocks += '<div class="cal-wk-trk cal-trk-' + sg.t.src + '" data-t="' + sg.top + '" data-b="' + sg.bottom + '" data-txt="' + esc(trackerText(sg.t)) + '"' +
+            ' style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + '">' +
+            (tall ? '<span class="cal-wk-et">' + timeValue(sg.t.start) + '</span>' : '') + esc(sg.t.label) + '</div>';
+          return;
+        }
         blocks += '<div class="cal-wk-ev cal-c-' + calOf(sg.ev) + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
           ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + '">' +
           (tall ? '<span class="cal-wk-et">' + timeValue(sg.at) + '</span>' : '') + esc(sg.ev.title) + '</div>';
       });
-      if(trkByDay){
-        var tsegs = trkByDay[i];
-        packDay(tsegs);
-        tsegs.forEach(function(tg){
-          var tt = tg.top * hourPx / 60, th = Math.max(MIN_BLOCK_PX, (tg.bottom - tg.top) * hourPx / 60 - 1);
-          var cw = lane / tg.cols;
-          blocks += '<div class="cal-wk-trk cal-trk-' + tg.t.src + '" data-t="' + tg.top + '" data-b="' + tg.bottom + '" data-txt="' + esc(trackerText(tg.t)) + '"' +
-            ' style="top:' + tt.toFixed(1) + 'px;height:' + th.toFixed(1) + 'px;left:calc(100% - ' + (lane - tg.col * cw).toFixed(2) + 'px);width:' + Math.max(2, cw - 1).toFixed(2) + 'px"></div>';
-        });
-      }
       var nowLine = isToday ? '<div class="cal-wk-now" data-m="' + minutesOfDay(now) + '" style="top:' + (minutesOfDay(now) * hourPx / 60).toFixed(1) + 'px"></div>' : '';
       cols += '<div class="cal-wk-col' + (isToday ? ' cal-wk-today-col' : '') + '" data-day="' + ds + '">' + blocks + nowLine + '</div>';
     }

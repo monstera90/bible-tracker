@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 18.1 (30.10)
+   Версия: 18.2 (30.10)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4920,7 +4920,7 @@ body::after{
 .cal-wk-ev{ position:absolute; box-sizing:border-box; overflow:hidden; padding:1px 2px; background:var(--cal-color, var(--wood)); color:var(--cal-fg, var(--parchment)); border-radius:3px; border:1px solid var(--parchment); font-size:10px; line-height:1.15; word-break:break-word; cursor:pointer; -webkit-tap-highlight-color:transparent; z-index:1; }
 .cal-wk-et{ display:block; font-size:9px; opacity:.85; font-variant-numeric:tabular-nums; }
 .cal-wk-past{ opacity:.6; }
-.cal-wk-trk{ position:absolute; box-sizing:border-box; background:var(--cal-trk, #2e9e6b); border-radius:2px; z-index:1; cursor:pointer; opacity:.9; -webkit-tap-highlight-color:transparent; }
+.cal-wk-trk{ position:absolute; box-sizing:border-box; overflow:hidden; padding:1px 2px; background:var(--cal-trk, #2e9e6b); color:var(--cal-trk-fg, var(--parchment)); border-radius:3px; border:1px dashed var(--parchment); font-size:10px; line-height:1.15; word-break:break-word; z-index:1; cursor:pointer; -webkit-tap-highlight-color:transparent; }
 .cal-trk-row{ border-left:3px dashed var(--cal-trk, #2e9e6b); padding-left:6px; }
 /* выбор цвета календарей (calendar.js, openColors): палитра как в форме комбинированных карточек (.habit-colors в itemcards.js) */
 .cal-palette{ display:flex; flex-direction:column; gap:8px; margin:6px 0 10px; padding:4px; }
