@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 12.0 (31.10)
+   Версия: 12.1 (31.10)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -23,8 +23,10 @@
    Тап по мероприятию открывает ту же форму для правки (с кнопкой «Удалить»).
    Цвета календарей: кнопка «Цвета» (`calendarColorBtn`, нижний ряд, после «Трекеров») открывает экран `openColors` в стиле формы
    комбинированных карточек (палитра 2×8, пустой квадрат — цвет по умолчанию): личный календарь, общий календарь, трекеры занятий.
-   Выбор хранится на устройстве (`calendarColors_v1` = {personal, shared, trk, hid} — "#rrggbb" или ""), `applyUserColors` кладёт его в
-   `--cal-personal` / `--cal-shared` / `--cal-trk` на `<html>` (пусто — убирает, действует цвет по умолчанию из components.css).
+   Выбор хранится на устройстве (`calendarColors_v1` = {personal, shared, trk, hid, past} — "#rrggbb" или ""), `applyUserColors` кладёт его в
+   `--cal-personal` / `--cal-shared` / `--cal-trk` / `--cal-hid` / `--cal-past` на `<html>` (пусто — убирает, действует цвет по умолчанию из components.css).
+   Цвет прошедших мероприятий (`past`): пока не выбран, прошедшие остаются цвета своего календаря; выбран — класс `cal-has-past-color` на `<html>`
+   и прошедшие блоки недели/строки списка (`.cal-wk-past`/`.cal-row-past`) рисуются этим цветом, в том числе скрытые.
    Скрытые мероприятия: поле «Отображение» в форме («Показать»/«Скрыть»); признак хранится ТОЛЬКО на устройстве (`calendarHiddenIds_v1` = {id:1}),
    в запись мероприятия и в облако не уходит — скрытие общего мероприятия действует лишь у того, кто его скрыл. Кнопка-глаз `calendarHiddenBtn`
    (нижний ряд, после «Трекеров», не заливается — состояние показывает значок): глаз открыт — скрытые видны (`calendarShowHidden_v1` = "1"),
@@ -213,12 +215,13 @@
     { key: "personal", label: "Личный календарь", cssVar: "--cal-personal" },
     { key: "shared",   label: "Общий календарь",  cssVar: "--cal-shared" },
     { key: "trk",      label: "Трекеры занятий",  cssVar: "--cal-trk" },
-    { key: "hid",      label: "Скрытые мероприятия", cssVar: "--cal-hid" }
+    { key: "hid",      label: "Скрытые мероприятия", cssVar: "--cal-hid" },
+    { key: "past",     label: "Прошедшие мероприятия", cssVar: "--cal-past" }
   ];
   // та же палитра, что в форме комбинированных карточек (itemcards.js HABIT_COLORS_*): первый пастельный квадрат — «по умолчанию»
   var COLORS_BRIGHT = ["#ff0000", "#fb8c00", "#ffff00", "#43a047", "#00acc1", "#1e88e5", "#7f00ff", "#d81b60"];
   var COLORS_PASTEL = ["", "#ffcba4", "#fff3a3", "#9cdb4e", "#40d5b5", "#a9ccf4", "#d4b8f0", "#f8bbd9"];
-  var userColors = { personal: "", shared: "", trk: "", hid: "" };
+  var userColors = { personal: "", shared: "", trk: "", hid: "", past: "" };
   function loadColors(){
     var o = null;
     try{ o = JSON.parse(localStorage.getItem(COLORS_KEY) || "null"); }catch(e){ o = null; }
@@ -235,6 +238,8 @@
       var v = userColors[it.key];
       if(v) root.style.setProperty(it.cssVar, v); else root.style.removeProperty(it.cssVar);
     });
+    // цвет прошедших включается только классом: пока пользователь его не выбрал, мероприятия остаются цвета своего календаря
+    if(root.classList){ if(userColors.past) root.classList.add("cal-has-past-color"); else root.classList.remove("cal-has-past-color"); }
   }
   // трекеры, пересекающие отрезок [from, to): [{src, label, start, end, sub}]; запись без конца — по длительности, иначе минутная
   function trackerItems(from, to){
@@ -482,6 +487,7 @@
     el.style.setProperty("--cal-shared-fg", fgFor("--cal-shared"));
     el.style.setProperty("--cal-trk-fg", fgFor("--cal-trk"));
     el.style.setProperty("--cal-hid-fg", fgFor("--cal-hid"));
+    if(userColors.past) el.style.setProperty("--cal-past-fg", fgFor("--cal-past")); else el.style.removeProperty("--cal-past-fg");
   }
   // В режиме «Неделя» у окна убираются боковые поля (класс cal-week-flush на .settings-modal-box, modals.css), чтобы сетка
   // влезала целиком. Класс снимается сам, как только во вкладке перестаёт быть .cal-week (другой экран или другая вкладка):
