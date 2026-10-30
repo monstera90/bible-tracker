@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 11.2 (30.10)
+   Версия: 12.0 (31.10)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -29,6 +29,9 @@
    в запись мероприятия и в облако не уходит — скрытие общего мероприятия действует лишь у того, кто его скрыл. Кнопка-глаз `calendarHiddenBtn`
    (нижний ряд, после «Трекеров», не заливается — состояние показывает значок): глаз открыт — скрытые видны (`calendarShowHidden_v1` = "1"),
    перечёркнут — не показываются ни в списке, ни в неделе (`isHidden`, `setHidden`, `showHidden`). Скрывается серия целиком.
+   Настройки календаря: кнопка-шестерёнка `calendarSettingsBtn` (нижний ряд, после «Цветов») открывает экран `openSettings`. Галочка
+   «Видимые мероприятия всегда перекрывают скрытые» (`calendarVisOverHidden_v1`, `visOverHidden`): в неделе `weekHtml` раскладывает
+   скрытые и видимые (вместе с трекерами) по колонкам раздельно (`packDay` дважды) и рисует видимые после скрытых — поверх.
    Мероприятие: {id, title, start, end, repeat, cal, updatedAt[, until, skip]}; cal — календарь: "personal" (по умолчанию, и если поля нет) | "shared"
    (поле «Календарь» в форме; в НОВОМ мероприятии стоит календарь последнего сохранённого — `calendarLastCal_v1`, `lastCal`/`rememberCal`, на устройстве; пока различие только в цвете: личный — как «Радость» в диаграмме настроений (--mood-joy), общий — цвет
    выделенной вкладки (--wood); переменные --cal-personal/--cal-shared и классы .cal-c-personal/.cal-c-shared в components.css); start/end — мс (локальное время), repeat — "" | day |
@@ -197,6 +200,14 @@
   function visibleEv(ev){ return showHidden() || !isHidden(ev.id); }
   var EYE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
   var EYE_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path></svg>';
+  // ---------- настройки календаря (кнопка-шестерёнка `calendarSettingsBtn`): на устройстве ----------
+  var VIS_OVER_KEY = "calendarVisOverHidden_v1";
+  function visOverHidden(){ try{ return localStorage.getItem(VIS_OVER_KEY) === "1"; }catch(e){ return false; } }
+  function saveVisOverHidden(v){ try{ localStorage.setItem(VIS_OVER_KEY, v ? "1" : "0"); }catch(e){} }
+  var GEAR_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<circle cx="12" cy="12" r="3"></circle>' +
+      '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
   function eyeTitle(){ return showHidden() ? 'Скрытые мероприятия показаны (нажмите, чтобы скрыть)' : 'Скрытые мероприятия не показаны (нажмите, чтобы показать)'; }
   var COLOR_ITEMS = [
     { key: "personal", label: "Личный календарь", cssVar: "--cal-personal" },
@@ -509,6 +520,7 @@
       '<button type="button" class="mdeditor-fab-btn" id="calendarTrkBtn" title="' + (trackersOn ? 'Скрыть трекеры занятий' : 'Показать трекеры занятий') + '">' + (trackersOn ? TRK_ICON_SVG : TRK_OFF_ICON_SVG) + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarHiddenBtn" title="' + eyeTitle() + '">' + (showHidden() ? EYE_ICON_SVG : EYE_OFF_ICON_SVG) + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarColorBtn" title="Цвета календаря">' + COLOR_ICON_SVG + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="calendarSettingsBtn" title="Настройки календаря">' + GEAR_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarAddBtn" title="Новое мероприятие">' + PLUS_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarHomeStub" tabindex="-1" aria-disabled="true">' + HOME_ICON_SVG + '</button>' +
     '</div>';
@@ -516,6 +528,7 @@
   function bindFab(){
     document.getElementById("calendarAddBtn").addEventListener("click", function(){ weekRememberScroll(); openForm(null); });
     document.getElementById("calendarColorBtn").addEventListener("click", function(){ weekRememberScroll(); openColors(); });
+    document.getElementById("calendarSettingsBtn").addEventListener("click", function(){ weekRememberScroll(); openSettings(); });
     document.getElementById("calendarHiddenBtn").addEventListener("click", function(){
       saveShowHidden(!showHidden());
       var hb = document.getElementById("calendarHiddenBtn");
@@ -611,7 +624,13 @@
       // трекеры — такие же блоки, как мероприятия: общая раскладка дня, в колонки они встают только при пересечении по времени
       var segs = segsByDay[i].slice();
       if(trkByDay) trkByDay[i].forEach(function(tg){ segs.push(tg); });
-      packDay(segs);
+      if(visOverHidden()){
+        // видимые мероприятия (и трекеры) не замечают скрытые: раскладываются отдельно и рисуются после них, то есть поверх
+        var hidSegs = [], visSegs = [];
+        segs.forEach(function(sg){ (sg.ev && isHidden(sg.ev.id) ? hidSegs : visSegs).push(sg); });
+        packDay(hidSegs); packDay(visSegs);
+        segs = hidSegs.concat(visSegs);
+      } else packDay(segs);
       var blocks = '';
       segs.forEach(function(sg){
         var top = sg.top * hourPx / 60;
@@ -1254,6 +1273,30 @@
       renderMain();
     });
     document.getElementById("calColorCancel").addEventListener("click", function(){ renderMain(); });
+  }
+
+  // ---------- экран «Настройки календаря» ----------
+  function openSettings(){
+    var c = container();
+    if(!c) return;
+    clearTimeout(tapTimer); tapTimer = null;
+    screen = "form";
+    var html = '<div class="mdeditor-tab item-card-form" id="calendarSettingsForm">' +
+      '<h3 class="common-tab-title">Настройки календаря</h3>' +
+      '<label style="display:flex;align-items:center;"><input type="checkbox" id="calSetVisOver"' + (visOverHidden() ? ' checked' : '') + ' style="width:22px;height:22px;flex-shrink:0;margin:0 10px 0 0;accent-color:var(--wood);"><span>Видимые мероприятия всегда перекрывают скрытые</span></label>' +
+      '<div class="item-form-hint">Работает в режиме «Неделя», когда показаны скрытые мероприятия: видимые рисуются поверх скрытых, не делят с ними место на колонки и не сужаются. Выбор действует на этом устройстве.</div>' +
+      '<div class="item-form-buttons">' +
+        '<button type="button" class="workbooks-run-btn" id="calSetSave">Сохранить</button>' +
+        '<button type="button" class="workbooks-run-btn" id="calSetCancel">Отмена</button>' +
+      '</div></div>';
+    c.innerHTML = html;
+    syncFlush();
+    c.scrollTop = 0;
+    document.getElementById("calSetSave").addEventListener("click", function(){
+      saveVisOverHidden(document.getElementById("calSetVisOver").checked);
+      renderMain();
+    });
+    document.getElementById("calSetCancel").addEventListener("click", function(){ renderMain(); });
   }
 
   window.CalendarTab = {
