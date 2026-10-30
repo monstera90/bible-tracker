@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 11.0 (30.10)
+   Версия: 11.2 (30.10)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -23,7 +23,7 @@
    Тап по мероприятию открывает ту же форму для правки (с кнопкой «Удалить»).
    Цвета календарей: кнопка «Цвета» (`calendarColorBtn`, нижний ряд, после «Трекеров») открывает экран `openColors` в стиле формы
    комбинированных карточек (палитра 2×8, пустой квадрат — цвет по умолчанию): личный календарь, общий календарь, трекеры занятий.
-   Выбор хранится на устройстве (`calendarColors_v1` = {personal, shared, trk} — "#rrggbb" или ""), `applyUserColors` кладёт его в
+   Выбор хранится на устройстве (`calendarColors_v1` = {personal, shared, trk, hid} — "#rrggbb" или ""), `applyUserColors` кладёт его в
    `--cal-personal` / `--cal-shared` / `--cal-trk` на `<html>` (пусто — убирает, действует цвет по умолчанию из components.css).
    Скрытые мероприятия: поле «Отображение» в форме («Показать»/«Скрыть»); признак хранится ТОЛЬКО на устройстве (`calendarHiddenIds_v1` = {id:1}),
    в запись мероприятия и в облако не уходит — скрытие общего мероприятия действует лишь у того, кто его скрыл. Кнопка-глаз `calendarHiddenBtn`
@@ -100,6 +100,9 @@
   var TRK_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M3 12h4l2.5-6 4 12 2.5-6H21"></path></svg>';
+  var TRK_OFF_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M3 12h4l2.5-6 4 12 2.5-6H21"></path><path d="M4 4l16 16"></path></svg>';
   var COLOR_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-.9 2-1.8 0-1.3-1-1.6-1-2.7 0-1 .8-1.7 1.9-1.7H17a3.5 3.5 0 0 0 3.5-3.5C20.5 6.7 16.7 3.5 12 3.5z"></path>' +
@@ -198,12 +201,13 @@
   var COLOR_ITEMS = [
     { key: "personal", label: "Личный календарь", cssVar: "--cal-personal" },
     { key: "shared",   label: "Общий календарь",  cssVar: "--cal-shared" },
-    { key: "trk",      label: "Трекеры занятий",  cssVar: "--cal-trk" }
+    { key: "trk",      label: "Трекеры занятий",  cssVar: "--cal-trk" },
+    { key: "hid",      label: "Скрытые мероприятия", cssVar: "--cal-hid" }
   ];
   // та же палитра, что в форме комбинированных карточек (itemcards.js HABIT_COLORS_*): первый пастельный квадрат — «по умолчанию»
   var COLORS_BRIGHT = ["#ff0000", "#fb8c00", "#ffff00", "#43a047", "#00acc1", "#1e88e5", "#7f00ff", "#d81b60"];
   var COLORS_PASTEL = ["", "#ffcba4", "#fff3a3", "#9cdb4e", "#40d5b5", "#a9ccf4", "#d4b8f0", "#f8bbd9"];
-  var userColors = { personal: "", shared: "", trk: "" };
+  var userColors = { personal: "", shared: "", trk: "", hid: "" };
   function loadColors(){
     var o = null;
     try{ o = JSON.parse(localStorage.getItem(COLORS_KEY) || "null"); }catch(e){ o = null; }
@@ -466,6 +470,7 @@
     el.style.setProperty("--cal-personal-fg", fgFor("--cal-personal"));
     el.style.setProperty("--cal-shared-fg", fgFor("--cal-shared"));
     el.style.setProperty("--cal-trk-fg", fgFor("--cal-trk"));
+    el.style.setProperty("--cal-hid-fg", fgFor("--cal-hid"));
   }
   // В режиме «Неделя» у окна убираются боковые поля (класс cal-week-flush на .settings-modal-box, modals.css), чтобы сетка
   // влезала целиком. Класс снимается сам, как только во вкладке перестаёт быть .cal-week (другой экран или другая вкладка):
@@ -501,7 +506,7 @@
     return '<div class="mdeditor-fab-row">' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarModeBtn" title="' + (mode === "week" ? "Режим: список" : "Режим: неделя") + '">' +
         (mode === "week" ? LIST_ICON_SVG : WEEK_ICON_SVG) + '</button>' +
-      '<button type="button" class="mdeditor-fab-btn' + (trackersOn ? ' pressed' : '') + '" id="calendarTrkBtn" title="' + (trackersOn ? 'Скрыть трекеры занятий' : 'Показать трекеры занятий') + '">' + TRK_ICON_SVG + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="calendarTrkBtn" title="' + (trackersOn ? 'Скрыть трекеры занятий' : 'Показать трекеры занятий') + '">' + (trackersOn ? TRK_ICON_SVG : TRK_OFF_ICON_SVG) + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarHiddenBtn" title="' + eyeTitle() + '">' + (showHidden() ? EYE_ICON_SVG : EYE_OFF_ICON_SVG) + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarColorBtn" title="Цвета календаря">' + COLOR_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarAddBtn" title="Новое мероприятие">' + PLUS_ICON_SVG + '</button>' +
@@ -524,7 +529,7 @@
       var tb = document.getElementById("calendarTrkBtn");
       if(mode === "week"){ weekRememberScroll(); renderWeek(); return; }
       refreshList(); // список: обновляется только содержимое, прокрутка остаётся
-      if(tb){ tb.classList.toggle("pressed", trackersOn); tb.title = trackersOn ? "Скрыть трекеры занятий" : "Показать трекеры занятий"; }
+      if(tb){ tb.innerHTML = trackersOn ? TRK_ICON_SVG : TRK_OFF_ICON_SVG; tb.title = trackersOn ? "Скрыть трекеры занятий" : "Показать трекеры занятий"; }
     });
     document.getElementById("calendarModeBtn").addEventListener("click", function(){
       mode = mode === "week" ? "list" : "week";
@@ -617,12 +622,12 @@
         if(sg.t){
           blocks += '<div class="cal-wk-trk cal-trk-' + sg.t.src + '" data-t="' + sg.top + '" data-b="' + sg.bottom + '" data-txt="' + esc(trackerText(sg.t)) + '"' +
             ' style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + '">' +
-            (tall ? '<span class="cal-wk-et">' + timeValue(sg.t.start) + '</span>' : '') + esc(sg.t.label) + '</div>';
+            esc(sg.t.label) + '</div>';
           return;
         }
         blocks += '<div class="cal-wk-ev cal-c-' + calOf(sg.ev) + (isHidden(sg.ev.id) ? ' cal-hid' : '') + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
           ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + '">' +
-          (tall ? '<span class="cal-wk-et">' + timeValue(sg.at) + '</span>' : '') + esc(sg.ev.title) + '</div>';
+          esc(sg.ev.title) + '</div>';
       });
       var nowLine = isToday ? '<div class="cal-wk-now" data-m="' + minutesOfDay(now) + '" style="top:' + (minutesOfDay(now) * hourPx / 60).toFixed(1) + 'px"></div>' : '';
       cols += '<div class="cal-wk-col' + (isToday ? ' cal-wk-today-col' : '') + '" data-day="' + ds + '">' + blocks + nowLine + '</div>';
