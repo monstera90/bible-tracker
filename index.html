@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 16.0 (30.10)
+     Версия: 17.0 (30.10)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -214,6 +214,8 @@ window.addEventListener("error", function(e){
   <div class="settings-corner-patch" aria-hidden="true"></div>
   <!-- Заплатка левого нижнего угла: слева от нижнего ряда вкладок (ширину и высоту ставит my.js, updateSettingsCornerPatchBottomHeight). -->
   <div class="settings-corner-patch-bl" aria-hidden="true"></div>
+  <!-- Заплатка правого нижнего угла (телефон): на месте плавающей кнопки, которая на телефоне невидима, но нажимается (my.js, updateSettingsCornerPatchBottomHeight). -->
+  <div class="settings-corner-patch-br" aria-hidden="true"></div>
   <div class="settings-modal-frame">
     <div class="settings-modal-box" id="settingsModalBox">
       <div class="settings-tab-content" id="settingsTabContent"></div>

@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 100.0 (30.10)
+   Версия: 101.0 (30.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -10016,6 +10016,7 @@
   // края самой левой видимой вкладки + 14px под её скруглённый угол; высота и положение — по ряду. В раскладке
   // левши ряд слева, а заплатка справа (inset-inline-start) — ширина считается от правого края экрана.
   var settingsCornerPatchBL = document.querySelector(".settings-corner-patch-bl");
+  var settingsCornerPatchBR = document.querySelector(".settings-corner-patch-br");
   function updateSettingsCornerPatchBottomHeight(){
     if(!settingsCornerPatchBL) return;
     var row = null, rr = null;
@@ -10027,6 +10028,7 @@
     if(!row){
       settingsCornerPatchBL.style.width = "0px";
       settingsCornerPatchBL.style.height = "0px";
+      if(settingsCornerPatchBR){ settingsCornerPatchBR.style.width = "0px"; settingsCornerPatchBR.style.height = "0px"; }
       return;
     }
     var rtl = document.documentElement.classList.contains("lefty");
@@ -10037,6 +10039,13 @@
     settingsCornerPatchBL.style.width = Math.round(w) + "px";
     settingsCornerPatchBL.style.height = Math.round(rr.height) + "px";
     settingsCornerPatchBL.style.bottom = Math.max(0, Math.round(vh - rr.bottom)) + "px";
+    // правый нижний угол: место плавающей кнопки (невидима на телефоне) — от края ряда до края экрана
+    if(settingsCornerPatchBR){
+      var wBR = rtl ? rr.left : (vw - rr.right);
+      settingsCornerPatchBR.style.width = Math.max(0, Math.round(wBR)) + "px";
+      settingsCornerPatchBR.style.height = Math.round(rr.height) + "px";
+      settingsCornerPatchBR.style.bottom = Math.max(0, Math.round(vh - rr.bottom)) + "px";
+    }
   }
 
   // t: 0 (совсем свёрнуто, в точку у угла (maxX,maxY) — там же стоит кнопка) .. 1 (открыто
