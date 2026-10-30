@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 96.0 (30.10)
+   Версия: 97.0 (30.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1208,9 +1208,8 @@
   var MIGRATED_KEY = "__migrated_v2";
   var CELEBRATION_SHOWN_KEY = "bibleCelebrationShown_v1";
   var GOALS_EXPANDED_KEY = "bibleGoalsBandExpanded_v1";
-  var FAB_VISIBLE_KEY = "bibleSettingsFabVisible_v1";
-  // Настройка "Скрывать статус бар PWA-приложения" (вкладка настроек, шестерёнка) — как и
-  // FAB_VISIBLE_KEY, это локальный флаг конкретного устройства/браузера, не синхронизируется в
+  // Настройка "Скрывать статус бар PWA-приложения" (вкладка настроек, шестерёнка) — это
+  // локальный флаг конкретного устройства/браузера, не синхронизируется в
   // облако и не попадает в экспорт (статус-бар — свойство экрана этого устройства, а не данных
   // пользователя). Технически включает/выключает Fullscreen API (см. applyStatusBarFullscreen
   // ниже): на Android это реально прячет системный статус-бар; на iOS Fullscreen API для PWA с
@@ -1451,35 +1450,6 @@
     requestAnimationFrame(function(){
       requestAnimationFrame(function(){ el.classList.add("visible"); });
     });
-  }
-
-  // Цитата меняется только тогда, когда пользователь ДЕЙСТВИТЕЛЬНО открыл страницу в новом
-  // временном слоте относительно своего прошлого визита — а не по факту того, что время просто
-  // прошло. Если человек не заходил весь слот целиком, для него ничего не "сгорает" и не
-  // накапливается: при следующем визите цитата сдвигается ровно на один шаг вперёд, а не
-  // "досчитывает" пропущенные слоты. Единая точка записи __quote — обе ветки ниже писали
-  // state[QUOTE_KEY] напрямую с одинаковой формой записи.
-  function setQuoteState(idx, slot){
-    var t = Date.now();
-    state[QUOTE_KEY] = {c: idx, t: t, slot: slot};
-    settingsShadowSet(QUOTE_KEY, {idx: idx, slot: slot}, t); // Шаг 9
-  }
-  function initQuote(){
-    var pool = buildQuotePool();
-    var rec = getQuoteRec();
-    var currentSlot = getDaySlot();
-    var idx = rec.c;
-
-    if(rec.slot < 0){
-      // самый первый визит вообще — фиксируем слот, цитату не сдвигаем
-      setQuoteState(idx, currentSlot);
-      saveLocalState();
-    } else if(currentSlot !== rec.slot){
-      idx = pool.length ? (idx + 1) % pool.length : 0;
-      setQuoteState(idx, currentSlot);
-      saveLocalState();
-    }
-    showQuote(pool, idx);
   }
 
   // Пересчитывает и перерисовывает шапку немедленно (без сдвига индекса по слотам) — вызывается
@@ -2492,36 +2462,6 @@
     dot.style.backgroundClip = "border-box";
     dot.style.backgroundSize = "100% 100%";
     dot.style.setProperty("--dot-ring", c[0]);
-  }
-
-  // ---------- переключатель видимости плавающей кнопки настроек ----------
-  // Управляет только показом/скрытием самого язычка (.settings-fab, id=settingsGearBtn) через
-  // display — состояние того, что выбрано ВНУТРИ окна настроек (активная вкладка, задачи и т.п.),
-  // хранится отдельно в своих собственных ключах localStorage и этим переключателем никак не
-  // затрагивается. По умолчанию (ключ ещё не сохранён) кнопка скрыта.
-  function isSettingsFabVisible(){
-    try{ return localStorage.getItem(FAB_VISIBLE_KEY) === "1"; }catch(e){ return false; }
-  }
-
-  function applySettingsFabVisibility(){
-    var visible = isSettingsFabVisible();
-    var fab = document.getElementById("settingsGearBtn");
-    if(fab) fab.style.display = visible ? "" : "none";
-    var readingFab = document.getElementById("readingModeFabBtn");
-    if(readingFab) readingFab.style.display = (visible && (getReadingModeActive() || getHideStatusBarEnabled())) ? "" : "none";
-    var toggleBtn = document.getElementById("fabToggleBtn");
-    if(toggleBtn) toggleBtn.textContent = visible ? "Убрать плавающую кнопку" : "Включить плавающую кнопку";
-  }
-
-  function initSettingsFabToggle(){
-    var toggleBtn = document.getElementById("fabToggleBtn");
-    if(!toggleBtn) return;
-    toggleBtn.addEventListener("click", function(){
-      var visible = isSettingsFabVisible();
-      try{ localStorage.setItem(FAB_VISIBLE_KEY, visible ? "0" : "1"); }catch(e){}
-      applySettingsFabVisibility();
-    });
-    applySettingsFabVisibility();
   }
 
   // ===================== ПРОПУЩЕННЫЕ ДНИ =====================
@@ -4410,12 +4350,14 @@
   var syncStatusTextDup = document.getElementById("syncStatusTextModalDup");
 
   function setSyncState(st, extraText){
-    syncStatusPill.setAttribute("data-state", st);
-    if(st !== "off") syncStatusPill.classList.remove("sync-collapsed");
     var labels = {off:"Настроить<br>синхронизацию",offline:"",syncing:"",synced:"",error:""};
     var html = (extraText != null ? extraText : labels[st]) || "";
-    syncStatusText.innerHTML = html;
-    syncStatusPill.style.display = (st === "off") ? "none" : "";
+    if(syncStatusPill){
+      syncStatusPill.setAttribute("data-state", st);
+      if(st !== "off") syncStatusPill.classList.remove("sync-collapsed");
+      if(syncStatusText) syncStatusText.innerHTML = html;
+      syncStatusPill.style.display = (st === "off") ? "none" : "";
+    }
     if(syncStatusPillDup){
       syncStatusPillDup.setAttribute("data-state", st);
       if(st !== "off") syncStatusPillDup.classList.remove("sync-collapsed");
@@ -4732,7 +4674,7 @@
   // досохраняет накопившееся, если по каким-то причинам ни немедленное сохранение, ни один из трёх
   // lifecycle-обработчиков не сработали. Сам по себе дешёвый и "не гоняется вхолостую" — реальная
   // запись в localStorage происходит, только когда есть незавершённый debounced saveTimer (оставлен
-  // намеренно только для не-пользовательских действий: initQuote, ensureFirstReadInitialized,
+  // намеренно только для не-пользовательских действий: ensureFirstReadInitialized,
   // слияние внутри doCloudSync — см. раздел «ХРАНЕНИЕ (с дебаунсом)»); в остальное время просто
   // читает переменную.
   var PERIODIC_SAVE_CHECK_MS = 2500;
@@ -4757,28 +4699,6 @@
   }
   function openModal(){ modalOverlay.classList.add("open"); renderModalHome(); }
   modalOverlay.addEventListener("click", function(e){ if(e.target === modalOverlay) closeModal(); });
-  syncStatusPill.addEventListener("click", openSyncSettingsTab);
-  // тот же обработчик, то же модальное окно (#modalOverlay уже стоит выше окна настроек по z-index
-  // — 1001 против 1000, см. .modal-overlay в modals.css) — "полностью функциональна", как и просил
-  // пользователь.
-  if(syncStatusPillDup) syncStatusPillDup.addEventListener("click", openSyncSettingsTab);
-
-  // надпись "Настроить синхронизацию" видна только до первого взаимодействия пользователя со
-  // страницей — дальше плашка сворачивается в обычную серую точку, чтобы не отвлекать от контента
-  (function(){
-    var collapseEvents = ["scroll","touchstart","pointerdown","mousedown","keydown","wheel"];
-    function collapseSyncPill(){
-      syncStatusPill.classList.add("sync-collapsed");
-      if(syncStatusPillDup) syncStatusPillDup.classList.add("sync-collapsed");
-      collapseEvents.forEach(function(ev){
-        window.removeEventListener(ev, collapseSyncPill, {capture:true});
-      });
-    }
-    collapseEvents.forEach(function(ev){
-      window.addEventListener(ev, collapseSyncPill, {capture:true, passive:true});
-    });
-  })();
-
   function modalHeader(title, subtitle){
     var h = '<button class="modal-close" id="mClose">&times;</button><h2>' + title + '</h2>';
     if(subtitle) h += '<p>' + subtitle + '</p>';
@@ -18628,12 +18548,6 @@
   }
   initSet2GearTab();
 
-  if(settingsModalOverlay){
-    settingsModalOverlay.addEventListener("click", function(e){
-      if(e.target === settingsModalOverlay) closeSettingsModal();
-    });
-  }
-
   var settingsGearBtn = document.getElementById("settingsGearBtn");
   if(settingsGearBtn){
     // Короткий клик по язычку: закрыто -> открыто.
@@ -18641,15 +18555,9 @@
       if(settingsModalOverlay && settingsModalOverlay.classList.contains("open")){
         // блокнот уже открыт: короткий клик всегда переключает набор вкладок по кругу (набор 1 <->
         // набор 2 <-> ...), пока второй набор разблокирован кодом — без ограничения числа
-        // переключений (см. cycleSettingsTabSet выше). Закрытие теперь только через клик мимо окна
-        // (см. выше).
-        if(isSet2Unlocked()){
-          cycleSettingsTabSet();
-        } else {
-          // второго набора для этого пользователя как будто не существует — крутить нечего, поэтому
-          // короткий клик по язычку по-прежнему сворачивает блокнот (как и раньше).
-          closeSettingsModal();
-        }
+        // переключений (см. cycleSettingsTabSet выше). Окно настроек не закрывается: главной
+        // страницы нет.
+        if(isSet2Unlocked()) cycleSettingsTabSet();
       } else {
         // открытие показывает набор и вкладку, на которых человек остановился в прошлый раз (см.
         // openSettingsModal/getResumeSettingsState выше) — переживает и закрытие приложения.
@@ -18657,37 +18565,7 @@
       }
     }
 
-    // Свайп вверх от язычка: пока окно настроек открыто, жест «палец на язычке -> вверх» закрывает
-    // его (то же closeSettingsModal, что и клик мимо окна) — возврат на главный экран со списком
-    // книг Библии. Обычный тап работает как раньше; после свайпа следующий click гасится
-    // (settingsGearSwipedAt), чтобы окно не переключило набор вкладок. touch-action:none нужен,
-    // чтобы браузер не забрал жест под прокрутку (иначе придёт pointercancel, не pointerup).
-    var settingsGearSwipedAt = 0;
-    var gearSwipe = null;
-    var GEAR_SWIPE_MIN_PX = 40;
-    settingsGearBtn.style.touchAction = "none";
-    settingsGearBtn.addEventListener("pointerdown", function(e){
-      if(e.pointerType === "mouse" && e.button !== 0) return;
-      gearSwipe = { id: e.pointerId, x: e.clientX, y: e.clientY };
-      try{ settingsGearBtn.setPointerCapture(e.pointerId); }catch(err){}
-    });
-    settingsGearBtn.addEventListener("pointerup", function(e){
-      var g = gearSwipe;
-      gearSwipe = null;
-      if(!g || g.id !== e.pointerId) return;
-      var dy = e.clientY - g.y, dx = e.clientX - g.x;
-      if(dy <= -GEAR_SWIPE_MIN_PX && Math.abs(dx) < Math.abs(dy) &&
-         settingsModalOverlay && settingsModalOverlay.classList.contains("open")){
-        settingsGearSwipedAt = Date.now();
-        closeSettingsModal();
-      }
-    });
-    settingsGearBtn.addEventListener("pointercancel", function(){ gearSwipe = null; });
-
-    settingsGearBtn.addEventListener("click", function(){
-      if(Date.now() - settingsGearSwipedAt < 500) return;
-      handleFabTap();
-    });
+    settingsGearBtn.addEventListener("click", handleFabTap);
   }
 
   // Автозакрытие раскрытых попапов «Аа»/«Ж» (и «Скачать» в субтитрах) кликом мимо. Один слушатель
@@ -21243,7 +21121,7 @@
     // вообще показан) — теперь это и режим чтения, и полноэкранный, у обоих одна и та же
     // CSS-причина прятать обычную кнопку в ряду вкладок.
     var readingFab = document.getElementById("readingModeFabBtn");
-    if(readingFab) readingFab.style.display = ((active || fullscreenActive) && isSettingsFabVisible()) ? "" : "none";
+    if(readingFab) readingFab.style.display = (active || fullscreenActive) ? "" : "none";
     syncFabsHiddenForReading();
     var iconHtml = (fullscreenActive || active) ? READING_BOOK_ICON_SVG : READING_BOOK_OFF_ICON_SVG;
     var titleText = fullscreenActive ? "Выйти из полноэкранного режима" : (active ? "Выключить режим чтения" : "Режим чтения");
@@ -24875,7 +24753,6 @@
       }).observe(el, {attributes:true, attributeFilter:["class"]});
     }
     arm(document.getElementById("modalOverlay"), function(){ closeModal(); });
-    arm(document.getElementById("settingsModalOverlay"), function(){ closeSettingsModal(); });
   })();
 
   // ===================== ПОЛУЧЕНИЕ ФАЙЛОВ ЧЕРЕЗ "ПОДЕЛИТЬСЯ" (Web Share
@@ -25152,12 +25029,10 @@
     applyStatusBarFullscreen(true);
     armHideStatusBarAutoRetry();
   }
-  initQuote();
   initPage();
   ensureFirstReadInitialized();
   updateOverallProgress();
   applyThemeToPage(getCurrentThemeId());
-  initSettingsFabToggle();
   refreshExtra2TabAppearance();
   refreshExtra3TabAppearance();
   updateMissedBanner();

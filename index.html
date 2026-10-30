@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 14.1 (30.10)
+     Версия: 15.0 (30.10)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -108,12 +108,6 @@ window.addEventListener("error", function(e){
 
 <header>
   <div class="app-version" id="appVersionText"></div>
-  <div class="sync-status" id="syncStatusPill" data-state="off">
-    <span class="sync-dot"></span>
-    <span class="sync-status-text" id="syncStatusText">Настроить<br>синхронизацию</span>
-  </div>
-
-  <p class="quote" id="dailyQuote" style="display:none;"></p>
 </header>
 
 <!-- Прогресс-бары и счётчики (общий прогресс, часы за месяц/год, личные цели, «пропущено дней») — содержимое вкладки
@@ -186,12 +180,6 @@ window.addEventListener("error", function(e){
 <main id="booksContainer"></main>
 </div>
 </div>
-
-<footer>
-  <div class="footer-line">
-    <div class="fab-toggle" id="fabToggleBtn">Включить плавающую кнопку</div>
-  </div>
-</footer>
 
 <!-- ===== плавающая кнопка настроек — угловой язычок ===== -->
 <!-- Раньше была отдельной круглой кнопкой с иконкой шестерёнки. Теперь —
