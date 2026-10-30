@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 13.0 (30.10)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -114,6 +115,13 @@ window.addEventListener("error", function(e){
 
   <h1>ГРАФИК ЧТЕНИЯ БИБЛИИ</h1>
   <p class="quote" id="dailyQuote" style="display:none;"></p>
+</header>
+
+<!-- Прогресс-бары и счётчики (общий прогресс, часы за месяц/год, личные цели, «пропущено дней») — содержимое вкладки
+     set2s_12 «Прогресс». Пока вкладка не открыта, панель лежит здесь (скрыто, ids и обработчики живы); my.js
+     (renderSettingsTabProgress) переносит её в #settingsTabContent и возвращает обратно, когда содержимое вкладки заменено. -->
+<div id="progressPanelHome" style="display:none;">
+<div class="progress-panel" id="progressPanel">
   <div class="overall-progress-wrap">
     <div class="xp-bar">
       <div class="xp-fill" id="overallFill"></div>
@@ -167,7 +175,8 @@ window.addEventListener("error", function(e){
   <div class="goals-toggle-wrap" id="goalsToggleWrap">
     <button class="goals-toggle-btn" id="goalsToggleBtn" title="Свернуть/развернуть личные цели">&#9660;</button>
   </div>
-</header>
+</div>
+</div>
 
 <main id="booksContainer"></main>
 
@@ -756,6 +765,17 @@ window.addEventListener("error", function(e){
           <circle cx="6" cy="18" r="3"></circle>
           <circle cx="17" cy="15.5" r="3"></circle>
           <path d="M9 9.5l11-2.5"></path>
+        </svg>
+      </button>
+      <!-- Двенадцатая боковая вкладка второго набора (settingsTabSet2Btn12, "set2s_12"; между «Музыкой» и «Разделением epub») —
+           «Прогресс»: прогресс-бары и счётчики, раньше стоявшие в шапке над графиком чтения (см. #progressPanel выше и
+           renderSettingsTabProgress в my.js). -->
+      <button class="settings-tab" id="settingsTabSet2Btn12" title="Прогресс">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="4.5" rx="1.2"></rect>
+          <rect x="3" y="9.75" width="18" height="4.5" rx="1.2"></rect>
+          <rect x="3" y="15.5" width="18" height="4.5" rx="1.2"></rect>
+          <path d="M5 6.25h7M5 12h11M5 17.75h4" stroke-width="2.2"></path>
         </svg>
       </button>
       <button class="settings-tab" id="settingsTabSet2Btn5" title="Разделение epub-файлов">

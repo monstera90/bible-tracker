@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 17.0 (30.10)
+   Версия: 18.0 (30.10)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4933,3 +4933,11 @@ body::after{
 .cal-field{ display:flex; flex-direction:column; gap:4px; }
 .cal-dt{ display:flex; gap:8px; }
 .cal-dt .mdeditor-cleanup-input{ flex:1 1 0; min-width:0; margin-bottom:0; }
+
+/* ---------- вкладка «Прогресс» (set2s_12): панель прогресс-баров и счётчиков, раньше стоявшая в шапке ---------- */
+.progress-panel{
+  padding:8px 2px 12px 2px;
+}
+/* на светлом фоне окна настроек светлая стрелка шапки не видна, а отрицательный нижний отступ нужен был только шапке */
+.progress-panel .goals-toggle-wrap{ margin-bottom:0; }
+.progress-panel .goals-toggle-btn{ color:var(--wood); }

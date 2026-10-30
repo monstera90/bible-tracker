@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 93.3 (30.10)
+   Версия: 94.0 (30.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -2088,7 +2088,7 @@
   // вынесена ДО общей проверки на renderSettingsTabSet2Stub.
   var SET2_TAB_IDS = {
     set2s_1: "settingsTabSet2Btn1", set2s_2: "settingsTabSet2Btn2", set2s_3: "settingsTabSet2Btn3",
-    set2s_4: "settingsTabSet2Btn4", set2s_11: "settingsTabSet2Btn11", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
+    set2s_4: "settingsTabSet2Btn4", set2s_11: "settingsTabSet2Btn11", set2s_12: "settingsTabSet2Btn12", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
     set2s_7: "settingsTabSet2Btn7", set2s_8: "settingsTabSet2Btn8", set2s_9: "settingsTabSet2Btn9",
     set2s_10: "settingsTabSet2Btn10"
   };
@@ -10967,6 +10967,7 @@
     });
     stripDecorClasses(); // декоративные язычки режима колеса никогда не выглядят выбранными
     var container = document.getElementById("settingsTabContent");
+    if(tab !== "set2s_12") progressPanelGoHome(); // панель «Прогресс» уходит домой до того, как содержимое окна заменит другая вкладка
     // Вкладки из TAB_SCROLL_AUTO_TABS (задачи + список книг) сами восстанавливают свою позицию
     // скролла ниже, после рендера (см. restoreTabScroll) — им сбрасывать scrollTop сейчас не нужно.
     var isAutoScrollTab = TAB_SCROLL_AUTO_TABS.indexOf(tab) !== -1;
@@ -11029,6 +11030,8 @@
     else if(tab === "set2s_4") renderSettingsTabForgottenNotes();
     // вкладка «Музыка» (set2s_11, между «Забытыми заметками» и «Разделением epub»): библиотека и плеер, см. music.js
     else if(tab === "set2s_11") renderSettingsTabMusic();
+    // вкладка «Прогресс» (set2s_12, между «Музыкой» и «Разделением epub»): прогресс-бары и счётчики, раньше стоявшие в шапке
+    else if(tab === "set2s_12") renderSettingsTabProgress();
     else if(tab === "set2s_5") renderSettingsTabEpubSplit();
     else if(tab === "set2s_6") renderSettingsTabImgResize();
     // седьмая боковая вкладка второго набора (set2s_7) — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: список книг
@@ -11190,6 +11193,45 @@
   }
   function renderSettingsTabMusic(){
     if(window.MusicTab) window.MusicTab.render();
+  }
+  // ===== ВКЛАДКА «ПРОГРЕСС» (set2s_12) =====
+  // Прогресс-бары и счётчики (общий прогресс, часы за месяц/год, личные цели, «пропущено дней») раньше стояли в шапке над
+  // графиком чтения. Теперь это одна панель #progressPanel (index.html): пока вкладка не открыта, она лежит в скрытом
+  // #progressPanelHome, а при заходе на вкладку переносится в #settingsTabContent САМА (не копируется — ids и все
+  // обработчики остаются прежними, поэтому пересчёт баров, ввод часов, цели и «Сбросить счётчик» работают как раньше).
+  // Когда содержимое окна заменяют другой вкладкой (innerHTML), панель автоматически возвращается домой.
+  var progressPanelObserver = null;
+  function progressPanelGoHome(){
+    var panel = document.getElementById("progressPanel");
+    var home = document.getElementById("progressPanelHome");
+    if(!panel){ panel = progressPanelEl; }
+    if(!panel || !home) return;
+    var content = document.getElementById("settingsTabContent");
+    if(panel.parentNode === content) return; // панель на вкладке — всё в порядке
+    if(panel.parentNode !== home) home.appendChild(panel);
+  }
+  var progressPanelEl = null; // ссылка держит панель живой, пока её на миг нет в документе (замена innerHTML)
+  function renderSettingsTabProgress(){
+    var container = document.getElementById("settingsTabContent");
+    var home = document.getElementById("progressPanelHome");
+    var panel = progressPanelEl || document.getElementById("progressPanel");
+    if(!container || !home || !panel) return;
+    progressPanelEl = panel;
+    container.innerHTML = "";
+    container.appendChild(panel);
+    if(!progressPanelObserver && window.MutationObserver){
+      progressPanelObserver = new MutationObserver(function(){
+        var c = document.getElementById("settingsTabContent");
+        if(!progressPanelEl || !c) return;
+        if(progressPanelEl.parentNode !== c){
+          var h = document.getElementById("progressPanelHome");
+          if(h && progressPanelEl.parentNode !== h) h.appendChild(progressPanelEl);
+        }
+      });
+      progressPanelObserver.observe(container, {childList: true});
+    }
+    // пока панель лежала в скрытом контейнере, высота списка целей (--gb-h, режим «меньше прогресс-баров») не измерялась
+    try{ renderGoalsSection(); }catch(e){}
   }
   function renderSettingsTabClaude(){
     if(window.ClaudeTabMod) window.ClaudeTabMod.render();
@@ -17475,7 +17517,7 @@
   //   вручную, а не через Object.keys(EXTRA_TAB_IDS), в котором только 2 из 5) идёт слева направо.
   var SETTINGS_SIDE_ORDER_1 = [CALENDAR_TAB_KEY].concat(Object.keys(TASK_TAB_IDS)).concat([EVENTS_TAB_KEY, SCREENTIME_TAB_KEY]); // calendar, worktasks..archive, events, screentime (снизу вверх)
   var SETTINGS_BOTTOM_ORDER_1 = ["gear","year","mood"].concat(Object.keys(EXTRA_TAB_IDS)); // gear,year,mood,extra2,extra3
-  var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_4, set2s_11, set2s_5..set2s_10 (порядок = порядок вкладок снизу вверх)
+  var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_4, set2s_11, set2s_12, set2s_5..set2s_10 (порядок = порядок вкладок снизу вверх)
   var SETTINGS_BOTTOM_ORDER_2 = ["gear"].concat(Object.keys(SET2_EXTRA_TAB_IDS));
   // последняя реально выбранная вкладка одного из двух стеков (см. switchSettingsTab выше) —
   // используется, чтобы при переключении набора (cycleSettingsTabSet) открывалась не первая
