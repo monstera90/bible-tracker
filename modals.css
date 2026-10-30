@@ -1,6 +1,6 @@
 /* ===========================================================================
    modals.css
-   Версия: 18.0 (30.10)
+   Версия: 18.1 (30.10)
    Версия: 16.2 (25.10) — `.settings-modal-box.cal-week-flush`: окно без боковых полей и боковой рамки, пока на вкладке «Календарь» открыт режим «Неделя» (calendar.js `syncFlush`).
    Версия: 16.1 (25.10) — компактные язычки: боковые 35×55px (было 45×68), нижние 55×35px, кнопка-язычок `.settings-fab` 35×35px; отступы оверлея и заплатка угла под колонку 35px.
    Версия: 16.0 (22.10) — структурная правка: кнопка тегов задач `.task-tag-wrap` (слот 4 между «+» и скрепкой) + попап `.task-tag-popup`; слоты 4–12 теперь считаются как `N + var(--tag-s, 0)` (класс `.fab-tag-shift` на окне ставит `--tag-s:1`: все кнопки левее «+» уезжают на одну позицию, пока видна кнопка тегов). Откат: modals.css 15.0.
@@ -947,6 +947,51 @@
     flex:0 0 55px;
     border-radius:0 0 14px 14px;
     box-shadow:calc(2px * var(--hand-sign, 1)) 2px 5px rgba(0,0,0,.3);
+  }
+
+  /* Телефон: просветы между скруглёнными углами соседних язычков (боковой стек и нижний ряд) закрашены цветом
+     заплаток углов экрана (var(--theme-color, var(--wood))). Зазор 1px между язычками не менялся. В каждый
+     вырез скругления кладётся квадрат 14×14 с радиальной заливкой «снаружи дуги» — сам язычок не перекрывается. */
+  @media (max-width:600px){
+    .settings-tab::before,
+    .settings-tab::after{
+      content:"";
+      position:absolute;
+      width:14px;
+      height:14px;
+      pointer-events:none;
+    }
+    .settings-tab{ position:relative; }
+    /* боковой стек: скруглены правые углы (в раскладке левши — левые) */
+    .settings-tab:not(.settings-tab-gear)::before{
+      top:0;
+      inset-inline-end:0;
+      background:radial-gradient(circle at 0 100%, transparent 13.5px, var(--theme-color, var(--wood)) 14px);
+    }
+    .settings-tab:not(.settings-tab-gear)::after{
+      bottom:0;
+      inset-inline-end:0;
+      background:radial-gradient(circle at 0 0, transparent 13.5px, var(--theme-color, var(--wood)) 14px);
+    }
+    html.lefty .settings-tab:not(.settings-tab-gear)::before{
+      background:radial-gradient(circle at 100% 100%, transparent 13.5px, var(--theme-color, var(--wood)) 14px);
+    }
+    html.lefty .settings-tab:not(.settings-tab-gear)::after{
+      background:radial-gradient(circle at 100% 0, transparent 13.5px, var(--theme-color, var(--wood)) 14px);
+    }
+    /* верхний язычок вплотную к верху экрана — угол прямой, закрашивать нечего */
+    .settings-tab.tab-flush-top::before{ display:none; }
+    /* нижний ряд: скруглены нижние углы */
+    .settings-tab-gear::before{
+      bottom:0;
+      left:0;
+      background:radial-gradient(circle at 100% 0, transparent 13.5px, var(--theme-color, var(--wood)) 14px);
+    }
+    .settings-tab-gear::after{
+      bottom:0;
+      right:0;
+      background:radial-gradient(circle at 0 0, transparent 13.5px, var(--theme-color, var(--wood)) 14px);
+    }
   }
 
   /* ---------- режим чтения (ТЗ пользователя от 18.09) ----------
