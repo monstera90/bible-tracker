@@ -1,6 +1,6 @@
 /* ===========================================================================
    search.js
-   Версия: 3.0 (31.10)
+   Версия: 4.0 (31.10)
    Версия: 2.5 (19.09) — в строке результата по задачам добавлена пиктограмма-часы
    «напоминание» (крайняя справа, правее кружка приоритета; ТЗ пользователя от
    19.09). Разметку даёт деп getReminderBtnHtml (taskReminderBtnHtml из my.js),
@@ -28,7 +28,7 @@
    Третий режим — «PDF» (кнопка с листком и надписью pdf): поиск по тексту PDF-файлов из папки, которую человек указал
    при первом нажатии. Тексты разбирает и хранит pdfindex.js (window.PdfIndex, deps.pdfIndex); правила совпадения слов,
    вид карточек и фрагментов — те же, что у заметок. Кнопка рядом («обновить PDF») сверяет папку с индексом: разбирает
-   новые и изменённые файлы, убирает пропавшие. Нажатие на результат пока ничего не открывает (deps.openPdf — запасной вход).
+   новые и изменённые файлы, убирает пропавшие. Нажатие на результат открывает экран просмотра: текст PDF с подсветкой найденных слов (`openPdfViewer`; deps.openPdf, если передан, главнее).
 
    Правило совпадения слова (общее для обоих режимов): слово документа
    подходит под искомое слово запроса, если оно НАЧИНАЕТСЯ с него (без
@@ -58,7 +58,7 @@ window.initSearchModule = function(deps){
   var openNoteByIdExternally = deps.openNoteByIdExternally;
   var getSearchableNotes = deps.getSearchableNotes;
   var pdfIndex = deps.pdfIndex || window.PdfIndex || null;
-  var openPdf = deps.openPdf || null; // (id, queryWords) — открыть PDF из результата поиска
+  var openPdf = deps.openPdf || function(id, words){ openPdfViewer(id, words); }; // (id, queryWords) — открыть PDF из результата поиска
   // "Поиск по задачам" — из my.js. getSearchableTasks уже исключает архив
   // (выполненные задачи) — так попросили, архив в поиске не участвует.
   var getSearchableTasks = deps.getSearchableTasks;
@@ -408,20 +408,24 @@ window.initSearchModule = function(deps){
   var SEARCH_PDF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M7 2.5h7l3 3V14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z"></path>' +
     '<path d="M14 2.5v3h3"></path>' +
-    '<rect x="1.5" y="12.4" width="9" height="6.4" rx="1.4"></rect>' +
-    '<text x="6" y="16.9" font-family="Georgia, serif" font-size="4.2" font-weight="bold" text-anchor="middle" stroke="none" fill="currentColor">pdf</text>' +
-    '<circle cx="17.6" cy="18.6" r="3.1"></circle>' +
-    '<line x1="19.9" y1="20.9" x2="22.3" y2="23.3"></line>' +
+    '<rect x="0.8" y="11.2" width="13.6" height="8.4" rx="1.4"></rect>' +
+    '<text x="7.6" y="17.3" font-family="Arial, Helvetica, sans-serif" font-size="7.4" font-weight="bold" text-anchor="middle" stroke="none" fill="currentColor">pdf</text>' +
+    '<circle cx="18.6" cy="18.6" r="3.1"></circle>' +
+    '<line x1="20.9" y1="20.9" x2="23.2" y2="23.3"></line>' +
     '</svg>';
   // "Обновить PDF" — тот же листок с биркой "pdf", вместо лупы — круговая стрелка.
   var SEARCH_PDF_SYNC_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M7 2.5h7l3 3V14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z"></path>' +
     '<path d="M14 2.5v3h3"></path>' +
-    '<rect x="1.5" y="12.4" width="9" height="6.4" rx="1.4"></rect>' +
-    '<text x="6" y="16.9" font-family="Georgia, serif" font-size="4.2" font-weight="bold" text-anchor="middle" stroke="none" fill="currentColor">pdf</text>' +
-    '<path d="M21 17.4a3.5 3.5 0 1 0 .5 2.6"></path>' +
-    '<path d="M21.2 14.6v3h-3"></path>' +
+    '<rect x="0.8" y="11.2" width="13.6" height="8.4" rx="1.4"></rect>' +
+    '<text x="7.6" y="17.3" font-family="Arial, Helvetica, sans-serif" font-size="7.4" font-weight="bold" text-anchor="middle" stroke="none" fill="currentColor">pdf</text>' +
+    '<path d="M22 17.4a3.5 3.5 0 1 0 .5 2.6"></path>' +
+    '<path d="M22.2 14.6v3h-3"></path>' +
     '</svg>';
+  var PDF_VIEW_UP_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"></path></svg>';
+  var PDF_VIEW_DOWN_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>';
+  var PDF_VIEW_HOME_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M4 11.5L12 4l8 7.5"></path><path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"></path><path d="M10 20v-5h4v5"></path></svg>';
 
   // ===================== ЖИВОЙ ПОИСК ПО ЗАГОЛОВКАМ =====================
   // Отдельный блок сразу под строкой поиска (searchTitleMatchesWrap) —
@@ -680,6 +684,133 @@ window.initSearchModule = function(deps){
       });
     }).then(null, function(e){
       empty("Не удалось выполнить поиск по PDF: " + ((e && e.message) ? e.message : e));
+    });
+  }
+
+  // ===================== ПРОСМОТР PDF ТЕКСТОМ =====================
+  // Экран вместо вкладки «Поиск» (подменяет #settingsTabContent, как экраны-инструкции): название файла, текст из
+  // индекса pdfindex.js абзацами, перед первым абзацем страницы — метка «стр. N»; слова, подходящие под запрос
+  // (то же правило «начинается с», что и в поиске), подсвечены. Стрелки внизу — к предыдущему/следующему слову,
+  // «домик» и системное «назад» — обратно к поиску (шаг в AppNav). Текст дорисовывается порциями, чтобы большой файл
+  // не подвешивал страницу; к первому найденному слову экран прокручивается, как только оно нарисовано.
+  var pdfViewSeq = 0;
+  var PDF_VIEW_CHUNK = 120; // абзацев за один проход
+  function pdfMetaOf(id){
+    var list = pdfIndex ? pdfIndex.metaCache() : [];
+    for(var i = 0; i < list.length; i++){ if(list[i].id === id) return list[i]; }
+    return null;
+  }
+  function scrollPdfViewTo(el){
+    var sc = document.getElementById("settingsTabContent");
+    if(!sc || !el) return;
+    var r = el.getBoundingClientRect(), c = sc.getBoundingClientRect();
+    sc.scrollTop += (r.top - c.top) - c.height / 3;
+  }
+  function openPdfViewer(id, queryWords){
+    var container = document.getElementById("settingsTabContent");
+    if(!container || !pdfIndex) return;
+    queryWords = queryWords || [];
+    var seq = ++pdfViewSeq;
+    var meta = pdfMetaOf(id);
+    var title = meta ? pdfTitleOf(meta) : "PDF";
+    if(window.AppNav){
+      window.AppNav.push(function(){ pdfViewSeq++; renderSettingsTabSearch(); });
+    }
+    container.scrollTop = 0;
+    container.innerHTML =
+      '<div class="mdeditor-tab">' +
+        '<h3 class="common-tab-title search-pdf-view-title">' + escapeHtml(title) + '</h3>' +
+        '<div class="search-pdf-view-info" id="searchPdfViewInfo">Загружаю текст…</div>' +
+        '<div class="search-pdf-view-text" id="searchPdfViewText"></div>' +
+      '</div>' +
+      '<div class="mdeditor-fab-row">' +
+        '<button type="button" class="mdeditor-fab-btn" id="searchPdfViewPrev" title="Предыдущее слово">' + PDF_VIEW_UP_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="searchPdfViewNext" title="Следующее слово">' + PDF_VIEW_DOWN_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="searchPdfViewHome" title="Назад к поиску">' + PDF_VIEW_HOME_ICON_SVG + '</button>' +
+      '</div>';
+
+    var homeBtn = document.getElementById("searchPdfViewHome");
+    if(homeBtn) homeBtn.addEventListener("click", function(){
+      if(window.AppNav) history.back(); else renderSettingsTabSearch();
+    });
+
+    var alive = function(){ return seq === pdfViewSeq && !!document.getElementById("searchPdfViewText"); };
+    var infoEl = document.getElementById("searchPdfViewInfo");
+    var setInfo = function(t){ if(infoEl) infoEl.textContent = t; };
+
+    pdfIndex.getText(id).then(function(rec){
+      if(!alive()) return;
+      if(!rec || !rec.text){
+        setInfo("Текст этого файла не найден в индексе. Нажмите «обновить PDF» на вкладке поиска.");
+        return;
+      }
+      var text = rec.text;
+      var tokens = tokenize(text);
+      var occ = queryWords.length ? findOccurrences(tokens, queryWords) : [];
+      var total = occ.length;
+      var paras = text.split("\n");
+      var pageAt = {};
+      var po = rec.po || [];
+      for(var k = 0; k + 1 < po.length; k += 2) pageAt[po[k + 1]] = po[k];
+      var textEl = document.getElementById("searchPdfViewText");
+      var cur = -1, marks = [], doneRender = false;
+      var updateInfo = function(){
+        if(!total){ setInfo(queryWords.length ? "Слов из запроса в тексте нет." : "Текст файла."); return; }
+        setInfo((cur >= 0 ? "Слово " + (cur + 1) + " из " + total : "Найдено слов: " + total));
+      };
+      var go = function(n){
+        marks = textEl.querySelectorAll("mark.search-highlight-mark");
+        if(!marks.length) return;
+        if(n < 0) n = 0;
+        if(n >= marks.length){
+          if(!doneRender) return;
+          n = marks.length - 1;
+        }
+        if(cur >= 0 && marks[cur]) marks[cur].className = "search-highlight-mark";
+        cur = n;
+        marks[cur].className = "search-highlight-mark search-pdf-view-cur";
+        scrollPdfViewTo(marks[cur]);
+        updateInfo();
+      };
+      var prevBtn = document.getElementById("searchPdfViewPrev");
+      var nextBtn = document.getElementById("searchPdfViewNext");
+      if(prevBtn) prevBtn.addEventListener("click", function(){ go(cur < 0 ? 0 : (cur === 0 ? (doneRender ? marks.length - 1 : 0) : cur - 1)); });
+      if(nextBtn) nextBtn.addEventListener("click", function(){
+        var m = textEl.querySelectorAll("mark.search-highlight-mark").length;
+        go(cur + 1 >= m && doneRender ? 0 : cur + 1);
+      });
+      updateInfo();
+
+      var pi = 0, pos = 0, oi = 0, firstDone = false;
+      function step(){
+        if(!alive()) return;
+        var html = "", hadMark = false, n = 0;
+        while(pi < paras.length && n < PDF_VIEW_CHUNK){
+          var p = paras[pi], end = pos + p.length;
+          if(pageAt[pos] !== undefined) html += '<div class="search-pdf-view-page">стр. ' + pageAt[pos] + '</div>';
+          if(p.length){
+            var h = "", last = pos;
+            while(oi < occ.length && occ[oi].from < end){
+              var o = occ[oi];
+              h += escapeHtml(text.slice(last, o.from)) + '<mark class="search-highlight-mark">' + escapeHtml(text.slice(o.from, o.to)) + '</mark>';
+              last = o.to;
+              hadMark = true;
+              oi++;
+            }
+            h += escapeHtml(text.slice(last, end));
+            html += '<p class="search-pdf-view-p">' + h + '</p>';
+          }
+          pos = end + 1;
+          pi++; n++;
+        }
+        textEl.insertAdjacentHTML("beforeend", html);
+        if(hadMark && !firstDone){ firstDone = true; go(0); }
+        if(pi < paras.length) setTimeout(step, 0);
+        else { doneRender = true; }
+      }
+      step();
+    }, function(e){
+      if(alive()) setInfo("Не удалось открыть текст: " + ((e && e.message) ? e.message : e));
     });
   }
 

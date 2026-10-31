@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 18.12 (31.10)
+   Версия: 19.0 (31.10)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4252,6 +4252,37 @@
   }
   .search-pdf-failed-title{ font-weight:bold; margin-bottom:2px; }
   .search-pdf-failed-row{ margin-top:2px; word-break:break-word; }
+  /* Кнопки «pdf» и «обновить PDF» (search.js): надпись на бирке мелкая, поэтому значок крупнее обычных 16px */
+  #searchPdfBtn svg, #searchPdfSyncBtn svg{ width:26px; height:26px; }
+  /* Экран просмотра PDF текстом (search.js, openPdfViewer) */
+  .search-pdf-view-title{ word-break:break-word; }
+  .search-pdf-view-info{
+    margin:4px 0 8px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:12.5px;
+    line-height:1.35;
+    color:var(--ink-soft);
+  }
+  .search-pdf-view-text{
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:var(--mdeditor-font-size, 15.5px);
+    line-height:1.5;
+    color:var(--ink);
+    padding-bottom:56px;
+  }
+  .search-pdf-view-p{ margin:0 0 .7em; word-break:break-word; }
+  .search-pdf-view-page{
+    margin:12px 0 6px;
+    padding-top:4px;
+    border-top:1px solid var(--groove-shadow);
+    font-size:11.5px;
+    color:var(--ink-soft);
+    text-align:center;
+  }
+  .search-highlight-mark.search-pdf-view-cur{
+    background:rgba(143,127,184,.7);
+    outline:2px solid var(--wood);
+  }
 
   /* декоративная подсветка найденного слова — бледно-сиреневый
      текстовыделитель (тот же оттенок, что и лиловый акцент приложения,

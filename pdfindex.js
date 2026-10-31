@@ -1,6 +1,6 @@
 /* ===========================================================================
    pdfindex.js
-   Версия: 1.0 (31.10)
+   Версия: 2.0 (31.10)
    Индекс текста PDF-файлов для режима «PDF» во вкладке «Поиск» (search.js).
 
    Что делает:
@@ -26,6 +26,7 @@
      sync({onProgress}) -> Promise<{added, removed, failed:[{name, msg}], total}>
      isSyncing() -> boolean
      eachText(cb) -> Promise            — cb({id, text, po}); вернуть false — остановить
+     getText(id) -> Promise<{id, text, po} | null>   — текст одного файла (для экрана просмотра)
      pageOf(rec, offset) -> номер страницы (с 1) по смещению в тексте
    Без fetch, async/await и let/const — работает в WebView Android 5.
    =========================================================================== */
@@ -398,6 +399,13 @@
     });
   }
 
+  // Текст одного файла по id (null, если файла нет в индексе).
+  function getText(id){
+    return openDb().then(function(db){
+      return reqP(db.transaction("text", "readonly").objectStore("text").get(id));
+    }).then(function(rec){ return rec || null; });
+  }
+
   // Номер страницы (с 1) по смещению в тексте файла.
   function pageOf(rec, offset){
     var po = rec && rec.po ? rec.po : [];
@@ -418,6 +426,7 @@
     sync: sync,
     isSyncing: isSyncing,
     eachText: eachText,
+    getText: getText,
     pageOf: pageOf
   };
 })(typeof window !== "undefined" ? window : globalThis);
