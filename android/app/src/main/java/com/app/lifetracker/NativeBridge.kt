@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 11.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
 // Версия: 9.0 (26.10) — мост версии 16: `getScreenTimeTotals` (счётчики музыки и таймеров для «Трекера экранов», `ScreenTimeStats`).
 // Версия: 8.0 (26.10) — мост версии 15: `musicHeadphones` (подключены ли наушники; для галочки «Наушники обязательны» в QR «Комбинированный»); `musicPlayTrack`/`musicPlayFolder` ставят громкость телефона.
@@ -38,13 +39,14 @@ class NativeBridge(private val activity: MainActivity) {
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
+         * 18: группа QR «Комбинированный» (comboGroupBegin / comboGroupEnd): таймеры, музыка и тренировка кода — одно целое (пауза и стоп общие, уведомления не смахиваются).
          * 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
          * 16: `getScreenTimeTotals()` — накопленные устройством миллисекунды музыки и таймеров для вкладки «Трекер экранов».
          * 15: `musicHeadphones()` — подключены ли наушники; `volumePct` в `musicPlayTrack`/`musicPlayFolder` теперь громкость самого телефона.
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 17
+        const val BRIDGE_VERSION = 18
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -454,6 +456,23 @@ class NativeBridge(private val activity: MainActivity) {
     fun startHiddenCardTimer(id: String?, title: String?, seconds: Int): Boolean {
         if (!activity.pageTrusted || id == null) return false
         return CardTimers.start(activity.applicationContext, id, title ?: "", seconds.toLong(), true)
+    }
+
+    /**
+     * QR «Комбинированный»: начало запуска действий. Всё, что стартует до comboGroupEnd (таймеры, музыка, тренировка), становится
+     * одной группой: пауза и стоп любого участника действуют на всех, их уведомления нельзя смахнуть.
+     */
+    @JavascriptInterface
+    fun comboGroupBegin() {
+        if (!activity.pageTrusted) return
+        ComboGroup.begin(activity.applicationContext)
+    }
+
+    /** Конец запуска. [workout]: "none" — тренировки нет или не началась; "expect" — начнётся позже (разрешение, окно ярлыка); "now" — уже идёт. */
+    @JavascriptInterface
+    fun comboGroupEnd(workout: String?) {
+        if (!activity.pageTrusted) return
+        ComboGroup.end(activity.applicationContext, workout)
     }
 
     @JavascriptInterface

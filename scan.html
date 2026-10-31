@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <!-- scan.html
+     Версия: 1.8 (31.10)
      Версия: 1.7 (26.10) — `deps.music.headphones` (мост `bridge.musicHeadphones`: комбо с галочкой «Наушники обязательны» проверяет наушники в окне ярлыка).
      Версия: 1.6 (26.10) — `deps.music` (QR «Комбинированный» в окне ярлыка включает трек/папку через мост: `bridge.musicPlayTrack`/`musicPlayFolder`).
      Версия: 1.5 (24.10) — `deps.alarms` (скан кода будильника в окне ярлыка заводит будильник через мост: `bridge.setAlarm`/`cancelAlarm`/`getAlarms`).
@@ -74,7 +75,9 @@
       native: bridge ? {
         openInApp: function(id, mode){ bridge.openInApp(String(id), String(mode)); },
         openUrl: function(url){ bridge.openUrl(String(url)); },
-        close: function(){ bridge.close(); }
+        close: function(){ bridge.close(); },
+        comboGroupBegin: function(){ if(typeof bridge.comboGroupBegin === "function") bridge.comboGroupBegin(); },
+        comboGroupEnd: function(mode){ if(typeof bridge.comboGroupEnd === "function") bridge.comboGroupEnd(String(mode || "none")); }
       } : null
     });
     mod.startStandaloneScan();

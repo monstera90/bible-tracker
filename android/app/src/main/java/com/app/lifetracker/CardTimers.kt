@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.2 (31.10)
+// Версия: 7.3 (31.10)
 // Версия: 5.7 (24.10) — скрытый таймер (`Timer.hidden`, `start(..., hidden)`): идёт и срабатывает как обычный, но без уведомления «идёт», острова, плашки в приложении, службы тика и этапов цвета; в конце — обычные вибрация и «Таймер закончился»; `listJson` отдаёт `hidden`. Откат: CardTimers.kt 5.6.
 // Версия: 5.6 (24.10) — этапы цвета значка: остался один, красный за 2 минуты до конца (`scheduleStages`); жёлтый убран, но его будильник от прежней версии снимается (`LEGACY_STAGE_YELLOW`). Откат: CardTimers.kt 5.5.
 // Версия: 5.5 (22.10) — эксперимент с чёрным фоном уведомления (`setColorized`) откачен: HyperOS не меняет цвет карточки. Прежнее: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
@@ -152,6 +152,7 @@ object CardTimers {
         map[id]?.let { ScreenTimeStats.add(ctx, ScreenTimeStats.TIMERS, elapsedMs(it, now)) } // перезапуск: прежний отсчёт тоже считается
         map[id] = t // тот же id — заново
         save(ctx, map)
+        ComboGroup.onTimerStart(ctx, id) // запуск внутри окна сбора комбо — участник группы, вне окна — выходит из неё
         scheduleAlarm(ctx, t)
         silence(ctx, id) // новый запуск гасит вибрацию и уведомление «Таймер закончился»
         postRunning(ctx, t)
@@ -159,39 +160,53 @@ object CardTimers {
         true
     }
 
-    fun pause(ctx: Context, id: String) = synchronized(LOCK) {
-        val map = load(ctx)
-        val t = map[id] ?: return@synchronized
-        if (!t.running) return@synchronized
-        val left = (t.endAt - System.currentTimeMillis()).coerceAtLeast(1000L)
-        val p = Timer(id, t.title, t.durationMs, false, 0L, left, t.hidden, t.dismissed)
-        floatDeferred.remove(id)
-        map[id] = p
-        save(ctx, map)
-        cancelAlarm(ctx, id)
-        postPaused(ctx, p)
+    /** Пауза. [propagate] = false — когда паузу рассылает группа комбо (`ComboGroup`), чтобы не гонять её по кругу. */
+    fun pause(ctx: Context, id: String, propagate: Boolean = true) {
+        val did = synchronized(LOCK) {
+            val map = load(ctx)
+            val t = map[id] ?: return@synchronized false
+            if (!t.running) return@synchronized false
+            val left = (t.endAt - System.currentTimeMillis()).coerceAtLeast(1000L)
+            val p = Timer(id, t.title, t.durationMs, false, 0L, left, t.hidden, t.dismissed)
+            floatDeferred.remove(id)
+            map[id] = p
+            save(ctx, map)
+            cancelAlarm(ctx, id)
+            postPaused(ctx, p)
+            true
+        }
+        if (did && propagate) ComboGroup.onTimerPaused(ctx, id)
     }
 
-    fun resume(ctx: Context, id: String) = synchronized(LOCK) {
-        val map = load(ctx)
-        val t = map[id] ?: return@synchronized
-        if (t.running) return@synchronized
-        val r = Timer(id, t.title, t.durationMs, true, System.currentTimeMillis() + t.remainingMs, 0L, t.hidden, false) // «Продолжить» снова показывает остров
-        map[id] = r
-        save(ctx, map)
-        scheduleAlarm(ctx, r)
-        postRunning(ctx, r)
-        if (!r.hidden) startTicker(ctx)
+    /** Продолжить. [propagate] = false — когда продолжение рассылает группа комбо. */
+    fun resume(ctx: Context, id: String, propagate: Boolean = true) {
+        val did = synchronized(LOCK) {
+            val map = load(ctx)
+            val t = map[id] ?: return@synchronized false
+            if (t.running) return@synchronized false
+            val r = Timer(id, t.title, t.durationMs, true, System.currentTimeMillis() + t.remainingMs, 0L, t.hidden, false) // «Продолжить» снова показывает остров
+            map[id] = r
+            save(ctx, map)
+            scheduleAlarm(ctx, r)
+            postRunning(ctx, r)
+            if (!r.hidden) startTicker(ctx)
+            true
+        }
+        if (did && propagate) ComboGroup.onTimerResumed(ctx, id)
     }
 
-    fun cancel(ctx: Context, id: String) = synchronized(LOCK) {
-        val map = load(ctx)
-        floatDeferred.remove(id)
-        map.remove(id)?.let { ScreenTimeStats.add(ctx, ScreenTimeStats.TIMERS, elapsedMs(it, System.currentTimeMillis())) }
-        save(ctx, map)
-        cancelAlarm(ctx, id)
-        cancelRunning(ctx, id)
-        silence(ctx, id) // «Стоп» гасит и вибрацию закончившегося таймера, и уведомление «Таймер закончился»
+    /** «Стоп». Таймер из группы комбо останавливает всю группу; [propagate] = false — когда это делает сама группа. */
+    fun cancel(ctx: Context, id: String, propagate: Boolean = true) {
+        synchronized(LOCK) {
+            val map = load(ctx)
+            floatDeferred.remove(id)
+            map.remove(id)?.let { ScreenTimeStats.add(ctx, ScreenTimeStats.TIMERS, elapsedMs(it, System.currentTimeMillis())) }
+            save(ctx, map)
+            cancelAlarm(ctx, id)
+            cancelRunning(ctx, id)
+            silence(ctx, id) // «Стоп» гасит и вибрацию закончившегося таймера, и уведомление «Таймер закончился»
+        }
+        if (propagate) ComboGroup.onTimerStopped(ctx, id) else ComboGroup.timerGone(ctx, id)
     }
 
     /**
@@ -202,6 +217,11 @@ object CardTimers {
         val map = load(ctx)
         val t = map[id] ?: return@synchronized
         if (t.dismissed) return@synchronized
+        if (ComboGroup.isTimerMember(ctx, id)) {
+            // таймер из комбо смахнуть нельзя: возвращаем уведомление на место (без раскрытия острова)
+            if (t.running) postRunning(ctx, t, false) else postPaused(ctx, t)
+            return@synchronized
+        }
         map[id] = Timer(t.id, t.title, t.durationMs, t.running, t.endAt, t.remainingMs, t.hidden, true)
         floatDeferred.remove(id)
         save(ctx, map)
@@ -233,6 +253,7 @@ object CardTimers {
         }
         map.remove(id)
         floatDeferred.remove(id)
+        ComboGroup.timerGone(ctx, id) // сработавший таймер из группы выходит; остальные участники идут дальше
         ScreenTimeStats.add(ctx, ScreenTimeStats.TIMERS, t.durationMs) // сработал: насчитал всё заданное время
         save(ctx, map)
         cancelRunning(ctx, id)

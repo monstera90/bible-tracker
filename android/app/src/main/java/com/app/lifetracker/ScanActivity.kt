@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 7.0 (31.10)
 // Версия: 6.0 (26.10) — мост ScanBridge: musicHeadphones (подключены ли наушники; комбо с галочкой «Наушники обязательны»).
 // Версия: 5.0 (26.10) — мост ScanBridge: musicPlayTrack / musicPlayFolder (QR «Комбинированный» из окна ярлыка включает трек или папку через MusicPlayer; приложение не открывается).
 // Версия: 4.0 (24.10) — мост ScanBridge: setAlarm / cancelAlarm / getAlarms (скан кода будильника в окне ярлыка заводит будильник CardAlarms).
@@ -318,6 +319,18 @@ class ScanActivity : ComponentActivity() {
         fun cancelTimer(id: String?) {
             if (id == null || !CARD_ID_RE.matches(id)) return
             CardTimers.cancel(applicationContext, id)
+        }
+
+        /** QR «Комбинированный»: начало запуска действий — всё, что стартует до comboGroupEnd, становится одной группой (общие пауза и стоп). */
+        @JavascriptInterface
+        fun comboGroupBegin() {
+            ComboGroup.begin(applicationContext)
+        }
+
+        /** Конец запуска. [workout]: "none" / "expect" (тренировку начнёт приложение) / "now". */
+        @JavascriptInterface
+        fun comboGroupEnd(workout: String?) {
+            ComboGroup.end(applicationContext, workout)
         }
 
         /** QR «Комбинированный»: играть один трек по id документа (папка с музыкой должна быть выбрана в приложении). */

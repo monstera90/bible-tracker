@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 5.1 (28.10)
+// Версия: 5.2 (31.10)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
 // Версия: 4.0 (25.10) — выбор папки с музыкой (`musicFolderLauncher`, `pickMusicFolder`) для вкладки «Музыка».
@@ -218,7 +218,7 @@ class MainActivity : ComponentActivity() {
     private val musicFolderLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             val ok = if (uri != null) MusicLibrary.setTree(applicationContext, uri) else false
-            if (ok) MusicPlayer.close() // папка сменилась — старая очередь больше не нужна
+            if (ok) MusicPlayer.close(false) // папка сменилась — старая очередь больше не нужна (группу комбо это не останавливает)
             runOnUiThread {
                 if (!isDestroyed && pageTrusted) {
                     webView.evaluateJavascript("window.__ltOnMusicFolder && window.__ltOnMusicFolder($ok)", null)

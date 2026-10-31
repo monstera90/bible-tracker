@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.0 (31.10)
 // Версия: 4.1 (27.10) — `setPhoneVolume`: `FLAG_SHOW_UI` (панель громкости системы синхронизируется — кнопки громкости больше не «скачут» от прежнего положения) и проверка значения через 0,4 с с одним повтором.
 // Версия: 4.0 (26.10) — структурная правка: учёт времени воспроизведения для «Трекера экранов» (`playing` копит отрезки в `ScreenTimeStats.MUSIC`, `livePlayingMs`).
 // Версия: 3.0 (26.10) — структурная правка: `playSingle`/`playFolder` ставят громкость самого телефона (`setPhoneVolume`: поток STREAM_MUSIC, процент от максимума), громкость плеера остаётся 1.0; `headphonesConnected` — подключены ли наушники (проводные, USB, Bluetooth, слуховой аппарат).
@@ -148,6 +149,7 @@ object MusicPlayer {
         }
         val idx = tracks.indexOfFirst { it.id == trackIdWanted }
         if (idx < 0) return false
+        ComboGroup.onMusicStart()
         main.post {
             queue = tracks
             folderTitle = folderName
@@ -215,6 +217,7 @@ object MusicPlayer {
         val one = listOf(Track(trackIdWanted, name, MusicLibrary.docUri(tree, trackIdWanted)))
         setPhoneVolume(ctx, volumePct)
         val vol = 1f
+        ComboGroup.onMusicStart() // внутри окна сбора комбо музыка становится участником группы
         main.post {
             queue = one
             folderTitle = ""
@@ -243,6 +246,7 @@ object MusicPlayer {
         val folderName = MusicLibrary.displayName(ctx, folderId) ?: ""
         setPhoneVolume(ctx, volumePct)
         val vol = 1f
+        ComboGroup.onMusicStart()
         main.post {
             queue = tracks
             folderTitle = folderName
@@ -261,7 +265,13 @@ object MusicPlayer {
     fun toggle() {
         main.post {
             if (active) {
-                if (playing) pauseNow() else resumeNow()
+                if (playing) {
+                    pauseNow()
+                    ComboGroup.onMusicPaused() // музыка из комбо: пауза ставит на паузу всю группу
+                } else {
+                    resumeNow()
+                    ComboGroup.onMusicResumed()
+                }
             }
         }
     }
@@ -280,9 +290,24 @@ object MusicPlayer {
         }
     }
 
-    fun close() {
-        main.post { closeNow() }
+    /** Закрыть плеер. Музыка из группы комбо закрывает всю группу; [propagate] = false — когда закрывает сама группа или смена папки. */
+    fun close(propagate: Boolean = true) {
+        main.post {
+            if (propagate) ComboGroup.onMusicClosed()
+            closeNow()
+        }
     }
+
+    /** Команды группы комбо (ComboGroup): без обратной рассылки. */
+    fun groupPause() {
+        main.post { if (active && playing) pauseNow() }
+    }
+
+    fun groupResume() {
+        main.post { if (active && !playing) resumeNow() }
+    }
+
+    fun groupClose() = close(false)
 
     /** JSON для страницы. */
     fun stateJson(): String =
@@ -451,6 +476,7 @@ object MusicPlayer {
     }
 
     private fun closeNow() {
+        ComboGroup.leaveMusic()
         releaseEngine()
         abandonFocus()
         active = false

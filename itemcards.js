@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 33.2 (30.10)
+   Версия: 34.0 (31.10)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -2925,13 +2925,21 @@ window.initItemCardsModule = function(deps){
   function comboRunWorkout(){
     var res = "error";
     try{ res = deps.startWorkout ? String(deps.startWorkout()) : "unsupported"; }catch(e){ res = "error"; }
-    if(res === "ok") return { ok: true, text: "Запись тренировки начата: идёт поиск спутников" };
-    if(res === "busy") return { ok: true, text: "Запись тренировки уже идёт" };
-    if(res === "rpe") return { ok: false, text: "Тренировка не началась: сначала оцените предыдущую во вкладке «Тренировки»" };
-    if(res === "permission") return { ok: true, text: "Разрешите доступ к геолокации — запись начнётся сама" };
-    if(res === "gps_off") return { ok: false, text: "Тренировка не началась: GPS выключен" };
-    if(res === "nonative") return { ok: false, text: "Запись тренировки доступна только в приложении на телефоне" };
-    return { ok: false, text: "Не удалось начать запись тренировки" };
+    if(res === "ok") return { ok: true, res: res, text: "Запись тренировки начата: идёт поиск спутников" };
+    if(res === "busy") return { ok: true, res: res, text: "Запись тренировки уже идёт" };
+    if(res === "rpe") return { ok: false, res: res, text: "Тренировка не началась: сначала оцените предыдущую во вкладке «Тренировки»" };
+    if(res === "permission") return { ok: true, res: res, text: "Разрешите доступ к геолокации — запись начнётся сама" };
+    if(res === "gps_off") return { ok: false, res: res, text: "Тренировка не началась: GPS выключен" };
+    if(res === "nonative") return { ok: false, res: res, text: "Запись тренировки доступна только в приложении на телефоне" };
+    return { ok: false, res: res, text: "Не удалось начать запись тренировки" };
+  }
+  // Группа «комбо» (оболочка, мост ≥18): всё, что код запустил между begin и end — таймеры (в том числе скрытые), музыка, тренировка —
+  // одно целое: пауза и стоп любого участника действуют на всех, их уведомления не смахиваются. Окно ярлыка — мост nativeScan, приложение — LifeTrackerNative.
+  // Без этих методов (браузер, старая оболочка) возвращает null — действия запускаются, как раньше, по отдельности.
+  function comboGroupApi(){
+    var b = standalone ? nativeScan : window.LifeTrackerNative;
+    if(b && typeof b.comboGroupBegin === "function" && typeof b.comboGroupEnd === "function") return b;
+    return null;
   }
   // «открыть»: вкладка / закладка / заметка. Возвращает описание для слоя (слой при этом обычно не показывается — экран уходит)
   function comboRunOpen(a){
@@ -2969,6 +2977,9 @@ window.initItemCardsModule = function(deps){
     var needHp = acts.some(function(a){ return (a.k === "track" || a.k === "folder") && a.hp; });
     if(needHp && !comboHeadphonesOn()){ showNoticeOverlay({ kind: "msg", text: "Вначале подключи наушники" }); return; }
     var results = [], openAct = null, taskActs = [], eventText = "", workoutAct = null;
+    var grp = comboGroupApi();
+    function grpEnd(mode){ if(grp){ try{ grp.comboGroupEnd(mode); }catch(e){} } }
+    if(grp){ try{ grp.comboGroupBegin(); }catch(e){ grp = null; } }
     acts.forEach(function(a){
       if(a.k === "timer") results.push(comboRunTimer(a));
       else if(a.k === "track" || a.k === "folder") results.push(comboRunMusic(a, comboShownName(o.card, a)));
@@ -2977,6 +2988,8 @@ window.initItemCardsModule = function(deps){
       else if(a.k === "workout") workoutAct = a;
       else openAct = a;
     });
+    // окно ярлыка: тренировку начнёт приложение (очередь) — группа ждёт её старта; в приложении конец сбора — после запуска тренировки (ниже)
+    if(standalone) grpEnd(workoutAct ? "expect" : "none");
     // журнал: ровно одна запись — комментарий события как написан, иначе заглушка
     evLog(eventText || COMBO_STUB);
     if(eventText) results.push({ ok: true, text: "В журнал записано: «" + eventText + "»" });
@@ -2999,7 +3012,11 @@ window.initItemCardsModule = function(deps){
       return;
     }
     taskActs.forEach(function(ta){ results.push(comboRunTask(ta)); });
-    if(workoutAct) results.push(comboRunWorkout());
+    var wres = null;
+    if(workoutAct){ wres = comboRunWorkout(); results.push(wres); }
+    // «ok»/«permission» — тренировка началась или начнётся после выдачи разрешения: группа ждёт её старта (если он уже был внутри окна сбора, ожидание не ставится);
+    // «busy» — запись уже шла, она входит в группу; иначе тренировки в группе нет
+    grpEnd(!wres ? "none" : ((wres.res === "ok" || wres.res === "permission") ? "expect" : (wres.res === "busy" ? "now" : "none")));
     if(openAct){
       if(scanHandle || overlayEl || scanNav) endScanSession(false); // сканер закрыт, экран уходит на открываемое место
       var r = comboRunOpen(openAct);

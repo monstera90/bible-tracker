@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.0 (28.10)
+// Версия: 3.0 (31.10)
 
 import android.content.Context
 import org.json.JSONArray
@@ -177,12 +177,17 @@ object WorkoutTracker {
             jumps = 0
             floatPending = true
             floatDeferred = false
+            ComboGroup.onWorkoutBegin() // старт внутри окна сбора комбо (или ожидаемый им) — участник группы
             return true
         }
     }
 
-    /** Пауза / продолжить. */
-    fun togglePause() {
+    /**
+     * Пауза / продолжить. Тренировка из группы комбо ставит на паузу (продолжает) всю группу;
+     * [propagate] = false — когда это делает сама группа.
+     */
+    fun togglePause(propagate: Boolean = true) {
+        var paused: Boolean? = null
         synchronized(lock) {
             val now = System.currentTimeMillis()
             if (status == ST_RUN) {
@@ -192,6 +197,7 @@ object WorkoutTracker {
                 curSeg = null
                 lastPt = null
                 cand.clear()
+                paused = true
             } else if (status == ST_PAUSE) {
                 status = ST_RUN
                 lastTickAt = now
@@ -200,16 +206,41 @@ object WorkoutTracker {
                 curSeg = null
                 lastPt = null
                 cand.clear()
+                paused = false
             }
         }
+        if (propagate) {
+            val p = paused
+            if (p == true) ComboGroup.onWorkoutPaused() else if (p == false) ComboGroup.onWorkoutResumed()
+        }
+    }
+
+    /** Команды группы комбо (ComboGroup): без обратной рассылки. */
+    fun groupPause(ctx: Context) {
+        if (status != ST_RUN) return
+        togglePause(false)
+        WorkoutService.refresh(ctx.applicationContext)
+    }
+
+    fun groupResume(ctx: Context) {
+        if (status != ST_PAUSE) return
+        togglePause(false)
+        WorkoutService.refresh(ctx.applicationContext)
+    }
+
+    fun groupStop(ctx: Context) {
+        stop(ctx, false)
+        WorkoutService.refresh(ctx.applicationContext)
     }
 
     /**
      * Остановить запись. Если связи не было ни разу (SEARCH) — записи нет, возвращает false. Иначе запускает фоновое
      * сопоставление с картой; по готовности запись попадает в `finished`, статус возвращается в IDLE.
      */
-    fun stop(ctx: Context): Boolean {
+    fun stop(ctx: Context, propagate: Boolean = true): Boolean {
         val app = ctx.applicationContext
+        if (propagate) ComboGroup.onWorkoutStopped() // тренировка из группы комбо останавливает всю группу
+        ComboGroup.leaveWorkout()
         val rec: Rec? = synchronized(lock) {
             val now = System.currentTimeMillis()
             if (status == ST_SEARCH) {

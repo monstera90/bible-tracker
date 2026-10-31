@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (25.10)
+// Версия: 1.1 (31.10)
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -102,6 +102,8 @@ class MusicService : Service() {
                 .setOnlyAlertOnce(true)
                 .setShowWhen(false)
                 .setContentIntent(openApp(ctx))
+            // музыка из комбо: уведомление смахнуть нельзя — смахнутое возвращается на место (REFRESH перестраивает его)
+            if (live && ComboGroup.isMusicMember()) b.setDeleteIntent(actionIntent(ctx, ACTION_REFRESH))
             if (live) {
                 b.addAction(android.R.drawable.ic_media_previous, "Назад", prev)
                 b.addAction(
