@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.0 (31.10)
 
 import android.content.Context
 import android.net.Uri
@@ -61,6 +62,9 @@ class WebAssetServer(private val context: Context, private val bundleDir: File?)
             // Файл, принятый из системного «Поделиться» (SharedInbox): ./__shared/<id>.
             if (rel.startsWith("__shared/")) return sharedFile(rel.removePrefix("__shared/"))
 
+            // PDF из выбранной папки поиска по PDF (PdfLibrary): ./__pdflib/<docId>.
+            if (rel.startsWith("__pdflib/")) return pdfLibFile(rel.removePrefix("__pdflib/"))
+
             if (bundleDir != null && bundleCanon != null) {
                 val file = File(bundleDir, rel)
                 val inside = try {
@@ -92,6 +96,16 @@ class WebAssetServer(private val context: Context, private val bundleDir: File?)
         } catch (e: IOException) {
             notFound()
         }
+    }
+
+    /** Отдаёт PDF из выбранной папки поиска по PDF странице приложения (тот же origin). Чужие id и снятое право дают 404. */
+    private fun pdfLibFile(docId: String): WebResourceResponse {
+        val stream = PdfLibrary.open(context, docId) ?: return notFound()
+        val headers = HashMap<String, String>()
+        headers["Cache-Control"] = "no-store"
+        val size = PdfLibrary.size(context, docId)
+        if (size > 0) headers["Content-Length"] = size.toString()
+        return WebResourceResponse("application/pdf", null, 200, "OK", headers, stream)
     }
 
     private fun openAsset(assetPath: String, name: String): WebResourceResponse {

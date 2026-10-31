@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 19.0 (31.10)
+     Версия: 20.0 (31.10)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -944,6 +944,9 @@ window.addEventListener("error", function(e){
 <!-- pdfparse.js — разбор текста из .pdf в ту же структуру глав/абзацев, что и
      fb2parse.js/epubparse.js; использует MiniDeflate (minideflate.js, выше). -->
 <script src="pdfparse.js"></script>
+<!-- pdfindex.js — индекс текста PDF для режима «PDF» во вкладке «Поиск» (search.js); использует
+     PdfParse (pdfparse.js, выше), должен идти ДО my.js (передаётся в search.js как deps.pdfIndex). -->
+<script src="pdfindex.js"></script>
 <script src="workbookparse.js"></script>
 <script src="workbooks.js"></script>
 <script src="jwlmerge.js"></script>

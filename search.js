@@ -1,5 +1,6 @@
 /* ===========================================================================
    search.js
+   Версия: 3.0 (31.10)
    Версия: 2.5 (19.09) — в строке результата по задачам добавлена пиктограмма-часы
    «напоминание» (крайняя справа, правее кружка приоритета; ТЗ пользователя от
    19.09). Разметку даёт деп getReminderBtnHtml (taskReminderBtnHtml из my.js),
@@ -23,6 +24,11 @@
    (см. renderSettingsTabSearch ниже): "Поиск по задачам" и "Поиск по
    заметкам". Каждый режим ищет только в своей области и выдаёт свой формат
    результатов — они никогда не смешиваются в одном списке.
+
+   Третий режим — «PDF» (кнопка с листком и надписью pdf): поиск по тексту PDF-файлов из папки, которую человек указал
+   при первом нажатии. Тексты разбирает и хранит pdfindex.js (window.PdfIndex, deps.pdfIndex); правила совпадения слов,
+   вид карточек и фрагментов — те же, что у заметок. Кнопка рядом («обновить PDF») сверяет папку с индексом: разбирает
+   новые и изменённые файлы, убирает пропавшие. Нажатие на результат пока ничего не открывает (deps.openPdf — запасной вход).
 
    Правило совпадения слова (общее для обоих режимов): слово документа
    подходит под искомое слово запроса, если оно НАЧИНАЕТСЯ с него (без
@@ -51,6 +57,8 @@ window.initSearchModule = function(deps){
   // [].
   var openNoteByIdExternally = deps.openNoteByIdExternally;
   var getSearchableNotes = deps.getSearchableNotes;
+  var pdfIndex = deps.pdfIndex || window.PdfIndex || null;
+  var openPdf = deps.openPdf || null; // (id, queryWords) — открыть PDF из результата поиска
   // "Поиск по задачам" — из my.js. getSearchableTasks уже исключает архив
   // (выполненные задачи) — так попросили, архив в поиске не участвует.
   var getSearchableTasks = deps.getSearchableTasks;
@@ -171,7 +179,7 @@ window.initSearchModule = function(deps){
     if(scroller) scroller.scrollTop = scroller.scrollHeight;
   }
 
-  var activeMode = null; // "notes" | "tasks"
+  var activeMode = null; // "notes" | "tasks" | "pdf"
   // Последний реально выполненный запрос — чтобы при возврате на вкладку
   // (например, кнопкой "назад" после перехода в открытую по клику
   // заметку) выдача была на месте, а не начиналась заново с пустого
@@ -179,6 +187,10 @@ window.initSearchModule = function(deps){
   // renderSettingsTabSearch), поэтому переживает пересоздание разметки
   // вкладки при каждом заходе (ТЗ пользователя от 08.09, второй заход).
   var lastQuery = "";
+  // Режим PDF: номер последнего поиска (устаревшие ответы отбрасываются), ход разбора и итог последней сверки.
+  var pdfSearchSeq = 0;
+  var pdfProgress = null;
+  var pdfNote = "";
 
   function renderSettingsTabSearch(){
     var container = document.getElementById("settingsTabContent");
@@ -190,21 +202,26 @@ window.initSearchModule = function(deps){
           '<input type="text" class="search-input" id="searchQueryInput" placeholder="Слово или несколько слов…" enterkeyhint="search">' +
         '</div>' +
         '<div class="search-title-matches" id="searchTitleMatchesWrap"></div>' +
+        '<div class="search-pdf-status" id="searchPdfStatus" hidden></div>' +
       '</div>' +
       '<div class="mdeditor-tab settings-content-bottom">' +
         '<div class="search-results" id="searchResultsWrap">' +
-          '<div class="search-empty">Выберите, что искать — задачи или заметки, — и введите слово.</div>' +
+          '<div class="search-empty">Выберите, что искать — задачи, заметки или PDF, — и введите слово.</div>' +
         '</div>' +
       '</div>' +
       '<div class="mdeditor-fab-row">' +
         '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="searchReadingBtn" title="Режим чтения"></button>' +
         '<button type="button" class="mdeditor-fab-btn" id="searchTasksBtn" title="Поиск по задачам">' + SEARCH_TASKS_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="searchNotesBtn" title="Поиск по заметкам">' + SEARCH_NOTES_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="searchPdfBtn" title="Поиск по PDF">' + SEARCH_PDF_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="searchPdfSyncBtn" title="Обновить PDF: найти новые файлы и разобрать их текст">' + SEARCH_PDF_SYNC_ICON_SVG + '</button>' +
       '</div>';
 
     var input = document.getElementById("searchQueryInput");
     var tasksBtn = document.getElementById("searchTasksBtn");
     var notesBtn = document.getElementById("searchNotesBtn");
+    var pdfBtn = document.getElementById("searchPdfBtn");
+    var pdfSyncBtn = document.getElementById("searchPdfSyncBtn");
     var readingBtn = document.getElementById("searchReadingBtn");
     if(readingBtn){
       // mousedown с preventDefault — чтобы нажатие не отнимало фокус у поля
@@ -218,6 +235,12 @@ window.initSearchModule = function(deps){
       lastQuery = input.value;
       if(activeMode === "notes") runNotesSearch(input.value);
       else if(activeMode === "tasks") runTasksSearch(input.value);
+      else if(activeMode === "pdf") runPdfSearch(input.value);
+    }
+    function updatePressed(){
+      if(tasksBtn) tasksBtn.classList.toggle("pressed", activeMode === "tasks");
+      if(notesBtn) notesBtn.classList.toggle("pressed", activeMode === "notes");
+      if(pdfBtn) pdfBtn.classList.toggle("pressed", activeMode === "pdf");
     }
     // Живой блок "совпадение по заголовку" сразу под строкой поиска — не
     // ждёт Enter, обновляется на каждое нажатие клавиши. Показывается
@@ -225,13 +248,14 @@ window.initSearchModule = function(deps){
     // заметок искать незачем — блок просто очищается).
     function syncTitleMatches(query){
       if(activeMode === "notes"){ runTitleSearch(query); return; }
+      if(activeMode === "pdf"){ runPdfTitleSearch(query); return; }
       var wrap = document.getElementById("searchTitleMatchesWrap");
       if(wrap) wrap.innerHTML = "";
     }
     function pressMode(mode){
       activeMode = mode;
-      if(tasksBtn) tasksBtn.classList.toggle("pressed", mode === "tasks");
-      if(notesBtn) notesBtn.classList.toggle("pressed", mode === "notes");
+      updatePressed();
+      renderPdfStatus();
       runActiveSearch();
       syncTitleMatches(input ? input.value : "");
       // "в поле ввода сразу ставится курсор и появляется клавиатура" — по
@@ -239,6 +263,75 @@ window.initSearchModule = function(deps){
       // уже что искать.
       if(input){ input.focus(); }
     }
+    // ----- режим PDF -----
+    // Первое нажатие (папка ещё не выбрана) открывает выбор папки и сразу разбирает файлы; дальше — обычный режим поиска.
+    function enterPdfMode(){
+      activeMode = "pdf";
+      updatePressed();
+      renderPdfStatus();
+      runActiveSearch();
+      syncTitleMatches(input ? input.value : "");
+      if(input) input.focus();
+    }
+    function startPdfSync(){
+      if(!pdfIndex) return;
+      pdfNote = "";
+      pdfProgress = { phase: "scan" };
+      renderPdfProgress();
+      // даём экрану прорисовать «Проверяю папку…» до обхода папки (мост считает синхронно)
+      setTimeout(function(){
+        pdfIndex.sync({ onProgress: function(p){ pdfProgress = p; renderPdfProgress(); } }).then(function(r){
+          pdfProgress = null;
+          pdfNote = pdfSummaryText(r);
+          renderPdfStatus();
+          if(activeMode === "pdf") runPdfSearch(input ? input.value : "", r);
+        }, function(e){
+          pdfProgress = null;
+          pdfNote = "";
+          renderPdfStatus();
+          var wrap = document.getElementById("searchResultsWrap");
+          if(wrap && activeMode === "pdf"){
+            wrap.innerHTML = '<div class="search-empty">' + escapeHtml((e && e.message) ? e.message : "Не удалось обновить PDF.") + '</div>';
+          }
+        });
+      }, 60);
+    }
+    function chooseFolder(thenSync){
+      if(!pdfIndex) return;
+      pdfIndex.pickFolder().then(function(ok){
+        if(!ok){
+          if(thenSync === "first"){ enterPdfMode(); }
+          return;
+        }
+        enterPdfMode();
+        startPdfSync();
+      });
+    }
+    function onPdfPress(){
+      if(!pdfIndex || pdfIndex.reason()){ enterPdfMode(); return; }
+      pdfIndex.getFolder().then(function(f){
+        if(!f.set){ chooseFolder("first"); return; }
+        enterPdfMode();
+      });
+    }
+    function onPdfSyncPress(){
+      if(!pdfIndex || pdfIndex.reason()){ enterPdfMode(); return; }
+      pdfIndex.getFolder().then(function(f){
+        if(!f.set){ chooseFolder("first"); return; }
+        if(activeMode !== "pdf") enterPdfMode();
+        if(!pdfIndex.isSyncing()) startPdfSync();
+      });
+    }
+    if(pdfBtn) pdfBtn.addEventListener("click", onPdfPress);
+    if(pdfSyncBtn) pdfSyncBtn.addEventListener("click", onPdfSyncPress);
+    var statusEl = document.getElementById("searchPdfStatus");
+    if(statusEl){
+      statusEl.addEventListener("click", function(ev){
+        var t = ev.target;
+        if(t && t.id === "searchPdfChangeBtn") chooseFolder("change");
+      });
+    }
+
     if(tasksBtn) tasksBtn.addEventListener("click", function(){ pressMode("tasks"); });
     if(notesBtn) notesBtn.addEventListener("click", function(){ pressMode("notes"); });
     if(input){
@@ -277,10 +370,11 @@ window.initSearchModule = function(deps){
     // выполненного поиска.
     if(activeMode && input){
       input.value = lastQuery;
-      if(tasksBtn) tasksBtn.classList.toggle("pressed", activeMode === "tasks");
-      if(notesBtn) notesBtn.classList.toggle("pressed", activeMode === "notes");
+      updatePressed();
+      renderPdfStatus();
       if(activeMode === "notes") runNotesSearch(lastQuery);
       else if(activeMode === "tasks") runTasksSearch(lastQuery);
+      else if(activeMode === "pdf") runPdfSearch(lastQuery);
       syncTitleMatches(lastQuery);
     }
   }
@@ -307,6 +401,26 @@ window.initSearchModule = function(deps){
     '<text x="6" y="17.2" font-family="Georgia, serif" font-size="5.3" font-weight="bold" text-anchor="middle" stroke="none" fill="currentColor">md</text>' +
     '<circle cx="17.6" cy="18.6" r="3.1"></circle>' +
     '<line x1="19.9" y1="20.9" x2="22.3" y2="23.3"></line>' +
+    '</svg>';
+
+
+  // "PDF" — тот же листок-бирка и лупа, что у "по заметкам", но на бирке мелкими буквами "pdf".
+  var SEARCH_PDF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M7 2.5h7l3 3V14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z"></path>' +
+    '<path d="M14 2.5v3h3"></path>' +
+    '<rect x="1.5" y="12.4" width="9" height="6.4" rx="1.4"></rect>' +
+    '<text x="6" y="16.9" font-family="Georgia, serif" font-size="4.2" font-weight="bold" text-anchor="middle" stroke="none" fill="currentColor">pdf</text>' +
+    '<circle cx="17.6" cy="18.6" r="3.1"></circle>' +
+    '<line x1="19.9" y1="20.9" x2="22.3" y2="23.3"></line>' +
+    '</svg>';
+  // "Обновить PDF" — тот же листок с биркой "pdf", вместо лупы — круговая стрелка.
+  var SEARCH_PDF_SYNC_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M7 2.5h7l3 3V14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z"></path>' +
+    '<path d="M14 2.5v3h3"></path>' +
+    '<rect x="1.5" y="12.4" width="9" height="6.4" rx="1.4"></rect>' +
+    '<text x="6" y="16.9" font-family="Georgia, serif" font-size="4.2" font-weight="bold" text-anchor="middle" stroke="none" fill="currentColor">pdf</text>' +
+    '<path d="M21 17.4a3.5 3.5 0 1 0 .5 2.6"></path>' +
+    '<path d="M21.2 14.6v3h-3"></path>' +
     '</svg>';
 
   // ===================== ЖИВОЙ ПОИСК ПО ЗАГОЛОВКАМ =====================
@@ -411,6 +525,162 @@ window.initSearchModule = function(deps){
       });
     });
     scrollSearchToBottom();
+  }
+
+
+  // ===================== ПОИСК ПО PDF =====================
+  // Правила те же, что у заметок (runNotesSearch): слово документа подходит, если НАЧИНАЕТСЯ с искомого, несколько
+  // слов — через И, до двух фрагментов-примеров. Тексты берутся из индекса pdfindex.js по одному (курсор IndexedDB):
+  // сначала быстрая проверка «слово встречается как подстрока» и только потом разбор на слова.
+  function pdfTitleOf(meta){
+    return String(meta.path || meta.name || "").replace(/\.pdf$/i, "");
+  }
+
+  function pdfSummaryText(r){
+    if(!r) return "";
+    var parts = [];
+    if(r.added) parts.push("обработано файлов: " + r.added);
+    if(r.removed) parts.push("убрано пропавших: " + r.removed);
+    if(!parts.length) parts.push("новых файлов нет");
+    return "Готово — " + parts.join(", ") + ".";
+  }
+
+  function renderPdfStatus(){
+    var el = document.getElementById("searchPdfStatus");
+    if(!el) return;
+    if(activeMode !== "pdf" || !pdfIndex || pdfIndex.reason()){
+      el.hidden = true;
+      el.innerHTML = "";
+      return;
+    }
+    el.hidden = false;
+    var paint = function(folderName, count){
+      var cur = document.getElementById("searchPdfStatus");
+      if(!cur || activeMode !== "pdf") return;
+      cur.innerHTML = (folderName === null ? "Папка с PDF не выбрана." : escapeHtml("Папка «" + folderName + "», в поиске PDF: " + count + ".")) +
+        (pdfNote ? " " + escapeHtml(pdfNote) : "") +
+        ' <button type="button" class="search-pdf-link" id="searchPdfChangeBtn">' + (folderName === null ? "выбрать папку" : "сменить папку") + '</button>';
+    };
+    Promise.all([pdfIndex.getFolder(), pdfIndex.loadMeta()]).then(function(r){
+      if(!r[0].set){ paint(null, 0); return; }
+      var withText = r[1].filter(function(m){ return !m.err; }).length;
+      paint(r[0].name || "PDF", withText);
+      // список названий для живого блока «совпадение по названию» теперь загружен
+      var inp = document.getElementById("searchQueryInput");
+      if(activeMode === "pdf" && inp && inp.value) runPdfTitleSearch(inp.value);
+    }, function(){ paint("PDF", 0); });
+  }
+
+  function renderPdfProgress(){
+    var wrap = document.getElementById("searchResultsWrap");
+    if(!wrap || activeMode !== "pdf" || !pdfProgress) return;
+    var p = pdfProgress, text;
+    if(p.phase === "parse"){
+      text = "Читаю PDF: " + p.index + " из " + p.total + " — " + p.name +
+        (p.pages ? " (стр. " + p.page + " из " + p.pages + ")" : "");
+    } else {
+      text = "Проверяю папку…";
+    }
+    wrap.innerHTML = '<div class="search-empty">' + escapeHtml(text) + '</div>';
+  }
+
+  function pdfFailedHtml(r){
+    if(!r || !r.failed || !r.failed.length) return "";
+    var shown = r.failed.slice(0, 8).map(function(f){
+      return '<div class="search-pdf-failed-row">' + escapeHtml(f.name) + " — " + escapeHtml(f.msg) + '</div>';
+    }).join("");
+    var more = r.failed.length > 8 ? '<div class="search-pdf-failed-row">… и ещё ' + (r.failed.length - 8) + '</div>' : "";
+    return '<div class="search-pdf-failed"><div class="search-pdf-failed-title">Не попали в поиск:</div>' + shown + more + '</div>';
+  }
+
+  // Живой блок «совпадение по названию файла» (как у заметок, но по именам PDF)
+  function runPdfTitleSearch(rawQuery){
+    var wrap = document.getElementById("searchTitleMatchesWrap");
+    if(!wrap) return;
+    var queryWords = splitQueryWords(rawQuery);
+    if(!queryWords.length || !pdfIndex){ wrap.innerHTML = ""; return; }
+    var list = pdfIndex.metaCache().filter(function(m){ return titleMatchesQuery(pdfTitleOf(m), queryWords); });
+    if(!list.length){ wrap.innerHTML = ""; return; }
+    wrap.innerHTML = list.map(function(m){
+      return '<div class="search-title-match" data-pdf-id="' + escapeHtml(m.id) + '">' +
+        highlightTitleMatches(pdfTitleOf(m), queryWords) + '</div>';
+    }).join("");
+    Array.prototype.forEach.call(wrap.querySelectorAll(".search-title-match"), function(el){
+      el.addEventListener("click", function(){
+        if(openPdf) openPdf(el.getAttribute("data-pdf-id"), queryWords);
+      });
+    });
+  }
+
+  // report — итог только что завершённой сверки (показывается, если запроса нет)
+  function runPdfSearch(rawQuery, report){
+    var wrap = document.getElementById("searchResultsWrap");
+    if(!wrap) return;
+    var seq = ++pdfSearchSeq;
+    var empty = function(text, extra){
+      if(seq !== pdfSearchSeq) return;
+      wrap.innerHTML = '<div class="search-empty">' + escapeHtml(text) + '</div>' + (extra || "");
+    };
+    if(!pdfIndex){ empty("Поиск по PDF недоступен: не загружен модуль индекса."); return; }
+    var why = pdfIndex.reason();
+    if(why){ empty(why); return; }
+    if(pdfIndex.isSyncing()){ renderPdfProgress(); return; }
+    var queryWords = splitQueryWords(rawQuery);
+    if(!queryWords.length){
+      if(report){ empty(pdfSummaryText(report) + " Введите слово для поиска.", pdfFailedHtml(report)); }
+      else empty("Введите слово для поиска.");
+      return;
+    }
+    pdfIndex.loadMeta().then(function(meta){
+      if(seq !== pdfSearchSeq) return null;
+      var withText = meta.filter(function(m){ return !m.err; });
+      if(!withText.length){
+        empty(meta.length ? "В найденных PDF нет текста, который можно искать." : "Индекс PDF пуст. Нажмите кнопку «обновить PDF» (листок со стрелкой).", pdfFailedHtml(report));
+        return null;
+      }
+      wrap.innerHTML = '<div class="search-empty">Ищу…</div>';
+      var byId = {};
+      meta.forEach(function(m){ byId[m.id] = m; });
+      var results = [];
+      return pdfIndex.eachText(function(rec){
+        if(seq !== pdfSearchSeq) return false;
+        var text = rec.text || "";
+        var lower = text.toLowerCase();
+        for(var i = 0; i < queryWords.length; i++){
+          if(lower.indexOf(queryWords[i]) === -1) return true;
+        }
+        var tokens = tokenize(text);
+        var occurrences = findOccurrences(tokens, queryWords);
+        if(!coversAllQueryWords(occurrences, queryWords.length)) return true;
+        var examples = pickExampleOccurrences(occurrences).map(function(o){
+          return buildFragmentHtml(text, tokens, o);
+        });
+        var m = byId[rec.id];
+        results.push({ id: rec.id, name: m ? pdfTitleOf(m) : rec.id, fragments: examples });
+        return true;
+      }).then(function(){
+        if(seq !== pdfSearchSeq) return;
+        if(!results.length){ empty("Ничего не найдено."); return; }
+        results.sort(function(a, b){
+          var x = a.name.toLowerCase(), y = b.name.toLowerCase();
+          return x < y ? -1 : (x > y ? 1 : 0);
+        });
+        wrap.innerHTML = results.map(function(r){
+          return '<div class="search-result-card" data-pdf-id="' + escapeHtml(r.id) + '">' +
+            '<div class="search-result-title">' + escapeHtml(r.name) + '</div>' +
+            r.fragments.map(function(f){ return '<div class="search-result-fragment">' + f + '</div>'; }).join("") +
+            '</div>';
+        }).join("");
+        Array.prototype.forEach.call(wrap.querySelectorAll(".search-result-card"), function(card){
+          card.addEventListener("click", function(){
+            if(openPdf) openPdf(card.getAttribute("data-pdf-id"), queryWords);
+          });
+        });
+        scrollSearchToBottom();
+      });
+    }).then(null, function(e){
+      empty("Не удалось выполнить поиск по PDF: " + ((e && e.message) ? e.message : e));
+    });
   }
 
   // ===================== ПОИСК ПО ЗАДАЧАМ =====================

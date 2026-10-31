@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 11.0 (31.10)
+// Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
 // Версия: 9.0 (26.10) — мост версии 16: `getScreenTimeTotals` (счётчики музыки и таймеров для «Трекера экранов», `ScreenTimeStats`).
 // Версия: 8.0 (26.10) — мост версии 15: `musicHeadphones` (подключены ли наушники; для галочки «Наушники обязательны» в QR «Комбинированный»); `musicPlayTrack`/`musicPlayFolder` ставят громкость телефона.
@@ -39,6 +39,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
+         * 19: поиск по PDF (pdfGetFolder / pdfPickFolder / pdfListAll): папка с PDF и список файлов; сами файлы страница читает по https://localhost/__pdflib/<docId>.
          * 18: группа QR «Комбинированный» (comboGroupBegin / comboGroupEnd): таймеры, музыка и тренировка кода — одно целое (пауза и стоп общие, уведомления не смахиваются).
          * 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
          * 16: `getScreenTimeTotals()` — накопленные устройством миллисекунды музыки и таймеров для вкладки «Трекер экранов».
@@ -46,7 +47,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 18
+        const val BRIDGE_VERSION = 19
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -523,6 +524,30 @@ class NativeBridge(private val activity: MainActivity) {
     fun getCardAlarms(): String {
         if (!activity.pageTrusted) return "[]"
         return CardAlarms.listJson(activity.applicationContext)
+    }
+
+    // ---------- поиск по PDF (PdfLibrary; вкладка «Поиск») ----------
+
+    /** JSON: {"set":true,"name":"..."} — папка с PDF выбрана; {"set":false} — нет. */
+    @JavascriptInterface
+    fun pdfGetFolder(): String {
+        if (!activity.pageTrusted) return "{}"
+        return PdfLibrary.folderJson(activity.applicationContext)
+    }
+
+    /** Открывает системное окно выбора папки; по результату страница получает window.__ltOnPdfFolder(true|false). */
+    @JavascriptInterface
+    fun pdfPickFolder(): Boolean {
+        if (!activity.pageTrusted) return false
+        activity.runOnUiThread { activity.pickPdfFolder() }
+        return true
+    }
+
+    /** Все PDF выбранной папки и вложенных: {"ok":true,"items":[{"id","name","path","size","mtime"}]}. */
+    @JavascriptInterface
+    fun pdfListAll(): String {
+        if (!activity.pageTrusted) return "{\"ok\":false}"
+        return PdfLibrary.listAllJson(activity.applicationContext)
     }
 
     // ---------- вкладка «Музыка» (MusicLibrary / MusicPlayer; set2s_11) ----------

@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 18.11 (31.10)
+   Версия: 18.12 (31.10)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4221,6 +4221,38 @@
      списках задач */
   .search-results .task-row{ margin-top:8px; }
   .search-results .task-row:first-child{ margin-top:0; }
+  /* ---------- Поиск, режим «PDF» (search.js) ----------
+     Строка состояния под полем поиска (папка, число файлов, итог последней сверки, «сменить папку») и список файлов,
+     не попавших в поиск (сканы без текста и т.п.). Сама выдача — те же .search-result-card/.search-result-fragment. */
+  .search-pdf-status{
+    margin-top:6px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:12.5px;
+    line-height:1.35;
+    color:var(--ink-soft);
+  }
+  .search-pdf-status[hidden]{ display:none; }
+  .search-pdf-link{
+    font:inherit;
+    color:var(--wood);
+    background:none;
+    border:none;
+    padding:0;
+    text-decoration:underline;
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .search-pdf-failed{
+    margin-top:10px;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:12.5px;
+    line-height:1.35;
+    color:var(--ink-soft);
+    text-align:start;
+  }
+  .search-pdf-failed-title{ font-weight:bold; margin-bottom:2px; }
+  .search-pdf-failed-row{ margin-top:2px; word-break:break-word; }
+
   /* декоративная подсветка найденного слова — бледно-сиреневый
      текстовыделитель (тот же оттенок, что и лиловый акцент приложения,
      см. theme-color в index.html), используется и здесь (в превью-
