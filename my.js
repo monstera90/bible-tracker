@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 102.2 (31.10)
+   Версия: 103.0 (31.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -2058,7 +2058,7 @@
   // вынесена ДО общей проверки на renderSettingsTabSet2Stub.
   var SET2_TAB_IDS = {
     set2s_1: "settingsTabSet2Btn1", set2s_2: "settingsTabSet2Btn2", set2s_3: "settingsTabSet2Btn3",
-    set2s_4: "settingsTabSet2Btn4", set2s_11: "settingsTabSet2Btn11", set2s_12: "settingsTabSet2Btn12", set2s_13: "settingsTabSet2Btn13", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6",
+    set2s_4: "settingsTabSet2Btn4", set2s_11: "settingsTabSet2Btn11", set2s_12: "settingsTabSet2Btn12", set2s_13: "settingsTabSet2Btn13", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6", set2s_14: "settingsTabSet2Btn14",
     set2s_7: "settingsTabSet2Btn7", set2s_8: "settingsTabSet2Btn8", set2s_9: "settingsTabSet2Btn9",
     set2s_10: "settingsTabSet2Btn10"
   };
@@ -7315,6 +7315,12 @@
   });
   var renderSettingsTabImgResize = ImgResize.renderSettingsTabImgResize;
 
+  // ===================== СТОЛ =====================
+  // Вкладка «Стол» (set2s_14, кнопка settingsTabSet2Btn14, в стеке над «Изменением размера изображения»): картинки рядом
+  // друг с другом, как на столе, и страницы. Вынесена в desk.js (см. index.html, sw.js); данные только на устройстве.
+  var Desk = window.initDeskModule({});
+  var renderSettingsTabDesk = Desk.renderSettingsTabDesk;
+
   // Реестр адаптеров синхронизации файлов (books/images) по kind. Должен существовать ДО
   // инициализации MdEditor ниже — тот регистрирует свой адаптер ("images") синхронно во время
   // initMdEditorModule.
@@ -11027,6 +11033,8 @@
     else if(tab === "set2s_13") renderSettingsTabReadingChart();
     else if(tab === "set2s_5") renderSettingsTabEpubSplit();
     else if(tab === "set2s_6") renderSettingsTabImgResize();
+    // вкладка «Стол» (set2s_14, над «Изменением размера изображения»): картинки на столе по страницам, см. desk.js
+    else if(tab === "set2s_14") renderSettingsTabDesk();
     // седьмая боковая вкладка второго набора (set2s_7) — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: список книг
     // (fb2/epub) из books/ (OPFS), тем же способом вынесена ДО общей проверки на
     // renderSettingsTabSet2Stub, что и остальные уже не-заглушки этого набора выше — см.
@@ -17587,7 +17595,7 @@
   //   вручную, а не через Object.keys(EXTRA_TAB_IDS), в котором только 2 из 5) идёт слева направо.
   var SETTINGS_SIDE_ORDER_1 = [CALENDAR_TAB_KEY].concat(Object.keys(TASK_TAB_IDS)).concat([EVENTS_TAB_KEY, SCREENTIME_TAB_KEY]); // calendar, worktasks..archive, events, screentime (снизу вверх)
   var SETTINGS_BOTTOM_ORDER_1 = ["gear","year","mood"].concat(Object.keys(EXTRA_TAB_IDS)); // gear,year,mood,extra2,extra3
-  var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_4, set2s_11, set2s_12, set2s_13, set2s_5..set2s_10 (порядок = порядок вкладок снизу вверх)
+  var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_1..set2s_4, set2s_11, set2s_12, set2s_13, set2s_5, set2s_6, set2s_14, set2s_7..set2s_10 (порядок = порядок вкладок снизу вверх)
   var SETTINGS_BOTTOM_ORDER_2 = ["gear"].concat(Object.keys(SET2_EXTRA_TAB_IDS));
   // последняя реально выбранная вкладка одного из двух стеков (см. switchSettingsTab выше) —
   // используется, чтобы при переключении набора (cycleSettingsTabSet) открывалась не первая

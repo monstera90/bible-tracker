@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 17.0 (30.10)
+     Версия: 18.0 (31.10)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -807,6 +807,17 @@ window.addEventListener("error", function(e){
           <path d="M21.5 18v2.5h-2.5"></path>
         </svg>
       </button>
+      <!-- Четырнадцатая боковая вкладка второго набора (settingsTabSet2Btn14, "set2s_14"; в стеке прямо над «Изменением размера изображения») —
+           «Стол»: несколько картинок рядом друг с другом, как на столе, и страницы, которые листаются. См. desk.js. -->
+      <button class="settings-tab" id="settingsTabSet2Btn14" title="Стол">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.5" y="4" width="10" height="8" rx="1"></rect>
+          <rect x="11" y="9.5" width="10.5" height="9" rx="1" fill="var(--icon-halo)"></rect>
+          <path d="M12.5 17l2.6-3 2 2 1.6-1.8 2 2.8"></path>
+          <path d="M3.5 10.5l2.4-2.6 1.8 1.6 1.6-1.6 1.7 2.6"></path>
+          <path d="M5 21h14"></path>
+        </svg>
+      </button>
       <!-- Седьмая боковая вкладка второго набора (settingsTabSet2Btn7, "set2s_7")
            — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "Мои книги" — хранилище книг
            (OPFS, books/) и переход в экран чтения fb2/epub. См.
@@ -938,6 +949,7 @@ window.addEventListener("error", function(e){
 <script src="s89draw.js"></script>
 <script src="s89fill.js"></script>
 <script src="imgresize.js"></script>
+<script src="desk.js"></script>
 <script src="cardscan.js"></script>
 <script src="cardpdf.js"></script>
 <script src="itemcards.js"></script>
