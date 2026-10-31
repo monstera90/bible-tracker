@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 104.1 (31.10)
+   Версия: 104.2 (31.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -24712,8 +24712,8 @@
     function isLiftEditable(el){ return isTaskEditable(el) || isNoteEditable(el); }
     // Поле имени заметки (переименование, mdeditor.js): подъёма текста не нужно (поле вверху), но клавиатура
     // должна перекрывать страницу, а не сжимать WebView — иначе нижний ряд вкладок подпрыгивает над клавиатурой.
-    // 70.0: сюда же поля имени в диалогах-карточках (.mdeditor-cleanup-input — «Имя новой заметки» и др.)
-    function isTitleInput(el){ return !!(el && el.classList && (el.classList.contains("mdeditor-title-input") || el.classList.contains("mdeditor-cleanup-input"))); }
+    // 70.0: сюда же поля имени в диалогах-карточках (.mdeditor-cleanup-input — «Имя новой заметки» и др.); поле запроса вкладки «Поиск» (.search-input) — тоже вверху, клавиатура перекрывает страницу, нижние вкладки на месте.
+    function isTitleInput(el){ return !!(el && el.classList && (el.classList.contains("mdeditor-title-input") || el.classList.contains("mdeditor-cleanup-input") || el.classList.contains("search-input"))); }
     var activeTitleInput = null;
     // 70.0: карточка-диалог (.mdeditor-cleanup-overlay) центрируется по всему окну, а клавиатура перекрывает его низ — добавляем
     // карточке нижний отступ на высоту перекрытия, чтобы она (и кнопки «Создать/Отмена») стояла над клавиатурой.
