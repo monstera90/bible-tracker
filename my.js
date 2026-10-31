@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 105.0 (31.10)
+   Версия: 106.0 (31.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -13473,7 +13473,7 @@
 
     var html = '';
     html += iconRow(BOOKS_VIEW_COVER_ICON_SVG, "Переключает список книг между показом обложками и обычным списком с именами файлов.");
-    html += iconRow(BOOKS_UPLOAD_ICON_SVG, "Загружает книгу с устройства — файл .fb2, .epub, .pdf или .zip (архив с книгами внутри). Из PDF берётся только текст: страницы-картинки (сканы) без текстового слоя и зашифрованные PDF не читаются.");
+    html += iconRow(BOOKS_UPLOAD_ICON_SVG, "Загружает книгу с устройства — файл .fb2, .epub, .pdf или .zip (архив с книгами внутри). PDF открывается страницами, как в обычном просмотрщике (картинки и оригинальная вёрстка; масштаб — щипком или двойным касанием). Если страницами открыть не удалось, PDF читается как текст — тогда сканы без текстового слоя и зашифрованные файлы не читаются.");
     html += iconRow(BOOKS_HIDE_TITLES_ICON_SVG, "Только в режиме «Обложки»: скрывает подписи с названиями книг под обложками. Повторное нажатие возвращает подписи.");
     html += iconRow(BOOK_NOTE_ICON_SVG, "Долгое нажатие на книге (в списке или на обложке): открывает заметку с подчёркиваниями и иллюстрациями этой книги. Если заметка ещё не привязана — предлагает создать новую или выбрать уже существующую.");
     html += iconRow(SHARE_ICON_SVG, "Долгое нажатие на книге (в списке или на обложке) раскрывает кнопки действий: «Поделиться» — системное меню Android с файлом книги; «Переименовать»; крестик «Удалить» — совсем, без возможности восстановить.");
@@ -14307,19 +14307,31 @@
           return {hash: hash, parsed: ipkdParsedCache.parsed};
         }
         var isPdfBook = /\.pdf$/i.test(name);
-        if(isPdfBook && pdfParsedCache && pdfParsedCache.hash === hash){
-          return {hash: hash, parsed: pdfParsedCache.parsed};
+        function parseAsText(){
+          if(isPdfBook && pdfParsedCache && pdfParsedCache.hash === hash){
+            return {hash: hash, parsed: pdfParsedCache.parsed};
+          }
+          var onPdfProgress = isPdfBook ? function(done, total){
+            var stEl = document.getElementById("booksStatus");
+            if(stEl){ stEl.textContent = "Разбор PDF: страница " + done + " из " + total + "…"; stEl.classList.remove("error"); }
+          } : null;
+          return parseBookBuffer(name, buf, onPdfProgress).then(function(parsed){
+            if(isPdfBook) pdfParsedCache = {hash: hash, parsed: parsed};
+            if(window.Debug) window.Debug.log("openBookReader[" + name + "]: parseBookBuffer занял " + Math.round(performance.now() - _tParse) + "мс, глав=" + parsed.chapters.length + ", блоков=" + parsed.chapters.reduce(function(s,c){return s+c.blocks.length;},0) + ", картинок=" + Object.keys(parsed.images).length);
+            if(name === IPKD_BOOK_NAME) ipkdParsedCache = {hash: hash, parsed: parsed};
+            return {hash: hash, parsed: parsed};
+          });
         }
-        var onPdfProgress = isPdfBook ? function(done, total){
-          var stEl = document.getElementById("booksStatus");
-          if(stEl){ stEl.textContent = "Разбор PDF: страница " + done + " из " + total + "…"; stEl.classList.remove("error"); }
-        } : null;
-        return parseBookBuffer(name, buf, onPdfProgress).then(function(parsed){
-          if(isPdfBook) pdfParsedCache = {hash: hash, parsed: parsed};
-          if(window.Debug) window.Debug.log("openBookReader[" + name + "]: parseBookBuffer занял " + Math.round(performance.now() - _tParse) + "мс, глав=" + parsed.chapters.length + ", блоков=" + parsed.chapters.reduce(function(s,c){return s+c.blocks.length;},0) + ", картинок=" + Object.keys(parsed.images).length);
-          if(name === IPKD_BOOK_NAME) ipkdParsedCache = {hash: hash, parsed: parsed};
-          return {hash: hash, parsed: parsed};
-        });
+        // PDF открывается страницами-картинками (pdfreader.js, pdf.js); текстовый разбор — только если страницами не вышло
+        if(isPdfBook && window.PdfPageReader && window.PdfPageReader.supported()){
+          return window.PdfPageReader.load(buf.slice(0)).then(function(handle){
+            return {hash: hash, pdf: handle, parsed: {chapters: [], images: {}}};
+          }, function(e){
+            if(window.Debug) window.Debug.log("openBookReader[" + name + "]: страницами PDF открыть не вышло (" + (e && e.message ? e.message : e) + "), читаем как текст");
+            return parseAsText();
+          });
+        }
+        return parseAsText();
       });
     }).then(function(res){
       if(currentSettingsTab !== startTab || bookReaderOwnerTab !== startOwner){
@@ -14351,6 +14363,10 @@
       // раздел "Обложки книг" выше) — не блокируем открытие книги, просто запускаем сохранение
       // параллельно (пишет файл только один раз, при первом успешном открытии — см.
       // saveBookCoverIfMissing).
+      if(res.pdf && !transientFile){
+        // обложка PDF — его первая страница
+        window.PdfPageReader.cover(res.pdf, 240).then(function(c){ saveBookCoverIfMissing(res.hash, c.base64, c.contentType); }).catch(function(){});
+      }
       var firstCoverImageId = findFirstBookImageId(res.parsed.chapters);
       if(!transientFile && firstCoverImageId && res.parsed.images[firstCoverImageId]){
         var coverSrc = res.parsed.images[firstCoverImageId];
@@ -14373,7 +14389,8 @@
       bookReaderState = {
         hash: res.hash, name: name, transient: !!transientFile,
         chapters: res.parsed.chapters, imageUrls: imageUrls, imageBase64: imageBase64,
-        mode: "text", textScrollTop: 0, chaptersScrollTop: 0,
+        pdf: res.pdf || null, pdfPos: null,
+        mode: res.pdf ? "pdf" : "text", textScrollTop: 0, chaptersScrollTop: 0,
         restorePosition: forcedPosition || (savedBookState && savedBookState.position) || null,
         restoreSource: forcedPosition ? "переход (закладка/глава)" : "сохранённая позиция чтения"
       };
@@ -14452,6 +14469,7 @@
     var container = document.getElementById("settingsTabContent");
     if(bookTraceOn()) bookTrace("renderBookReader: " + (!container ? "нет #settingsTabContent — выход" : (!bookReaderState ? "нет bookReaderState — выход" : "режим=" + bookReaderState.mode + ", restorePosition=" + posText(bookReaderState.restorePosition) + ", в контейнере сейчас: " + (container.querySelector("#bookChaptersList") ? "список глав" : (container.querySelector(".book-reader-p, .book-reader-image-wrap") ? "текст книги" : "другое")))));
     if(!container || !bookReaderState) return;
+    if(bookReaderState.pdf){ destroyBookReaderScrollListener(); renderBookReaderPdf(container); return; }
     // Запоминаем позицию ТОГО, что сейчас реально показано в контейнере, ПЕРЕД любой перерисовкой —
     // не только при смене режима текст<->главы (см. switchBookReaderMode ниже, она это уже делала
     // для своего случая), но и при обычном возврате на вкладку «Книги» после ухода на другую
@@ -14489,6 +14507,118 @@
     // bookReaderOwnerTab, а не на bookReaderState.name, потому что renderBookReader вызывается и
     // до, и после переключения текст/главы — владелец не меняется между ними в рамках одной книги.
     if(bookReaderOwnerTab === "set2s_8") bindIpkdReaderExtras();
+  }
+
+  // ---- PDF страницами (pdfreader.js) ----
+  // Книга-PDF показывается как настоящий PDF: страницы-картинки (canvas), масштаб щипком/двойным касанием/кнопками.
+  // Состояние — тот же bookReaderState (pdf = дескриптор pdf.js, mode "pdf", chapters пустой), поэтому «домик», «назад»
+  // и возврат на вкладку работают общим путём (renderBookReader → ветка bookReaderState.pdf). Место чтения — только на
+  // устройстве: localStorage `bookPdfPos_v1` {hash: {p, f, t}} (страница и доля её высоты).
+  var BOOK_PDF_POS_KEY = "bookPdfPos_v1";
+  var pdfView = null; // контроллер PdfPageReader.mount для открытого сейчас экрана
+  function pdfPosGet(hash){
+    try{
+      var all = JSON.parse(localStorage.getItem(BOOK_PDF_POS_KEY) || "{}");
+      var r = all[hash];
+      return r && r.p ? {page: r.p, frac: r.f || 0} : null;
+    }catch(e){ return null; }
+  }
+  function pdfPosSet(hash, page, frac){
+    try{
+      var all = JSON.parse(localStorage.getItem(BOOK_PDF_POS_KEY) || "{}");
+      all[hash] = {p: page, f: Math.round(frac * 1000) / 1000, t: Date.now()};
+      var keys = Object.keys(all);
+      if(keys.length > 200){
+        keys.sort(function(a, b){ return (all[a].t || 0) - (all[b].t || 0); });
+        for(var i = 0; i < keys.length - 200; i++) delete all[keys[i]];
+      }
+      localStorage.setItem(BOOK_PDF_POS_KEY, JSON.stringify(all));
+    }catch(e){}
+  }
+  // Уходим с экрана PDF (домик, перерисовка): запоминаем место и освобождаем страницы.
+  function leavePdfView(){
+    if(!pdfView) return;
+    try{
+      var p = pdfView.getPosition();
+      pdfView.flush();
+      if(bookReaderState && bookReaderState.pdf) bookReaderState.pdfPos = {page: p.page, frac: p.frac};
+      pdfView.destroy();
+    }catch(e){}
+    pdfView = null;
+  }
+  function pdfReaderFabRowHtml(){
+    var txt = "mdeditor-fab-btn mdeditor-fab-btn-text";
+    return (
+      '<div class="mdeditor-status" id="bookReaderStatus"></div>' +
+      '<div class="mdeditor-fab-row">' +
+        '<button type="button" class="' + txt + '" id="pdfPageBtn" title="Перейти на страницу" style="width:auto;min-width:var(--fab-size,40px);padding:0 8px;font-size:13px;"></button>' +
+        '<button type="button" class="' + txt + '" id="pdfZoomOutBtn" title="Уменьшить">−</button>' +
+        '<button type="button" class="' + txt + '" id="pdfZoomInBtn" title="Увеличить">+</button>' +
+        '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="bookReaderReadingBtn" title="Режим чтения"></button>' +
+        '<button type="button" class="mdeditor-fab-btn fullscreen-mode-btn" id="bookReaderFullscreenBtn" title="Полноэкранный режим"></button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="bookReaderHomeBtn" title="К списку книг">' + READER_HOME_ICON_SVG + '</button>' +
+      '</div>'
+    );
+  }
+  function renderBookReaderPdf(container){
+    var st = bookReaderState;
+    leavePdfView();
+    if(!st || !st.pdf) return;
+    if(st.pdf.released){
+      // документ освободили (между делом открыли другой PDF) — открываем книгу заново из файла
+      if(!st.transient){ bookReaderState = null; openBookReader(st.name); }
+      else container.innerHTML = '<div class="book-reader-tab"><p>Этот PDF уже закрыт — откройте его из файлового менеджера ещё раз.</p></div>';
+      return;
+    }
+    container.innerHTML = '<div class="book-reader-tab pdf-reader-tab">' + pdfReaderFabRowHtml() +
+      '<div class="pdf-pages" id="pdfPagesRoot"></div></div>';
+    container.scrollTop = 0;
+    var rootEl = container.querySelector("#pdfPagesRoot");
+    var pageBtn = document.getElementById("pdfPageBtn");
+    var hash = st.hash, transient = st.transient;
+    var start = st.pdfPos || (!transient ? pdfPosGet(hash) : null) || {page: 1, frac: 0};
+    var total = st.pdf.numPages;
+    if(pageBtn) pageBtn.textContent = start.page + "/" + total;
+
+    pdfView = window.PdfPageReader.mount(container, rootEl, st.pdf, {
+      startPage: start.page, startFrac: start.frac,
+      onPage: function(page, tot){ if(pageBtn) pageBtn.textContent = page + "/" + tot; },
+      onPosition: function(page, frac){ if(!transient) pdfPosSet(hash, page, frac); }
+    });
+
+    if(pageBtn) pageBtn.addEventListener("click", function(){
+      var cur = pdfView ? pdfView.getPosition().page : 1;
+      window.PdfPageReader.askPage(total, cur, function(p){ if(pdfView) pdfView.goTo(p, 0); });
+    });
+    var zin = document.getElementById("pdfZoomInBtn"), zout = document.getElementById("pdfZoomOutBtn");
+    if(zin) zin.addEventListener("click", function(){ if(pdfView) pdfView.setZoom(pdfView.getZoom() * 1.4); });
+    if(zout) zout.addEventListener("click", function(){ if(pdfView) pdfView.setZoom(pdfView.getZoom() / 1.4); });
+
+    var readingBtn = document.getElementById("bookReaderReadingBtn");
+    if(readingBtn){
+      readingBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+      bindTapOrHold(readingBtn, handleReadingBtnTap, handleReadingBtnHold);
+    }
+    var fullscreenBtn = document.getElementById("bookReaderFullscreenBtn");
+    if(fullscreenBtn){
+      fullscreenBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+      bindTapOrHold(fullscreenBtn, handleFullscreenBtnTap, function(){});
+    }
+    // «Домик» — к списку книг, шагом «назад» остаётся этот же PDF на этом же месте (как у текстового ридера).
+    var homeBtn = document.getElementById("bookReaderHomeBtn");
+    if(homeBtn){
+      homeBtn.addEventListener("click", function(){
+        var snapshot = bookReaderState;
+        leavePdfView();
+        window.AppNav.push(function(){
+          bookReaderState = snapshot;
+          renderBookReader();
+        });
+        bookReaderState = null;
+        renderSettingsTabBooks();
+      });
+    }
+    applyReadingModeVisual();
   }
 
   // Общий нижний ряд кнопок — одна и та же разметка в обоих режимах (текст/главы), просто с разной

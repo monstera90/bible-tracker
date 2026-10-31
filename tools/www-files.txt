@@ -1,5 +1,5 @@
 # Белый список файлов веб-части, которые попадают в APK (assets/www/) и в веб-бандл.
-# Версия: 4.0 (31.10)
+# Версия: 5.0 (31.10)
 # Пути от корня репозитория. Строки с # и пустые игнорируются.
 # Новый файл веб-части (подключённый в index.html или попавший в ASSETS в sw.js) добавляется сюда же:
 # tools/android_prepare.py остановит сборку с понятным сообщением, если файл забыли.
@@ -35,6 +35,7 @@ fb2parse.js
 epubparse.js
 pdfparse.js
 pdfindex.js
+pdfreader.js
 workbookparse.js
 workbooks.js
 jwlmerge.js
@@ -69,3 +70,8 @@ vendor/qrcode.min.js
 vendor/jsQR.js
 vendor/sql-wasm.js
 vendor/sql-wasm.wasm
+vendor/pdfjs/pdf.min.mjs
+vendor/pdfjs/pdf.worker.min.mjs
+vendor/pdfjs/openjpeg.wasm
+vendor/pdfjs/jbig2.wasm
+vendor/pdfjs/qcms_bg.wasm

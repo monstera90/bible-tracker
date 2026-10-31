@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.39.103";
+const APP_VERSION = "v0.39.104";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -160,6 +160,7 @@ const ASSETS = [
   "./epubparse.js",
   "./pdfparse.js",
   "./pdfindex.js",
+  "./pdfreader.js",
   "./workbookparse.js",
   "./workbooks.js",
   "./jwlmerge.js",
@@ -188,7 +189,12 @@ const ASSETS = [
   "./vendor/qrcode.min.js",
   "./vendor/jsQR.js",
   "./vendor/sql-wasm.js",
-  "./vendor/sql-wasm.wasm"
+  "./vendor/sql-wasm.wasm",
+  "./vendor/pdfjs/pdf.min.mjs",
+  "./vendor/pdfjs/pdf.worker.min.mjs",
+  "./vendor/pdfjs/openjpeg.wasm",
+  "./vendor/pdfjs/jbig2.wasm",
+  "./vendor/pdfjs/qcms_bg.wasm"
 ];
 
 // Проверяет ЛОКАЛЬНО (без единого обращения к сети — только cache.match),

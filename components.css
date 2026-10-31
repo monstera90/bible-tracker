@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 19.0 (31.10)
+   Версия: 20.0 (31.10)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4990,4 +4990,46 @@ body::after{
   font-size:clamp(16px,4.4vw,24px);
   color:var(--wood);
   border-bottom:2px solid var(--gold);
+}
+
+/* ---------- PDF-книги страницами (pdfreader.js, renderBookReaderPdf в my.js) ----------
+   .pdf-pages — горизонтальная прокрутка при увеличении (у #settingsTabContent overflow-x:hidden), вертикальная — у
+   самого #settingsTabContent; .pdf-pages-inner растягивается на zoom×100% ширины, страницы — на всю его ширину;
+   высоту каждой страницы ставит JS по размеру страницы PDF. Белая «бумага» не зависит от темы. */
+.pdf-reader-tab{ touch-action:pan-x pan-y; }
+.pdf-pages{
+  overflow-x:auto;
+  overflow-y:hidden;
+  padding:2px 0 90px 0;
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-touch-callout:none;
+}
+.pdf-pages-inner{ position:relative; }
+.pdf-page{
+  position:relative;
+  width:100%;
+  margin:0 0 6px 0;
+  background:#fff;
+  color:#999;
+  box-shadow:0 1px 4px rgba(0,0,0,.28);
+  overflow:hidden;
+  text-align:center;
+  font:14px sans-serif;
+}
+.pdf-page::before{
+  content:attr(data-n);
+  position:absolute;
+  left:0;
+  right:0;
+  top:40%;
+  color:#c4c4c4;
+  font:600 24px sans-serif;
+}
+.pdf-page .pdf-canvas{
+  position:relative;
+  display:block;
+  width:100%;
+  height:100%;
+  background:#fff;
 }
