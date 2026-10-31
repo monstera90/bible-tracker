@@ -1,8 +1,8 @@
 /* ===========================================================================
    screentime.js
-   Версия: 2.0 (30.10)
+   Версия: 3.0 (31.10)
    Вкладка «Трекер экранов» (`screentime`, язычок над «Событиями» в стеке набора 1).
-   `window.ScreenTime.{init, render, getTotals, getPeriodTotals, setAppActive}`.
+   `window.ScreenTime.{init, render, getTotals, getPeriodTotals, setAppActive, readingPeriods}`.
 
    Что считает (всё суммируется по ВСЕМ устройствам):
      music  — сколько приложение воспроизводило музыку (считает оболочка Android: `ScreenTimeStats.kt`, мост `getScreenTimeTotals`, версия 16);
@@ -24,6 +24,12 @@
    только свой ключ, поэтому слияние по ключам (last-write-wins) конфликтов не даёт; итог за период = сумма по всем ключам с этим префиксом.
    В облако ключ уходит редко: при сворачивании приложения и не чаще раза в PUSH_EVERY_MS, пока приложение открыто (в локальное
    хранилище — раз в SAVE_EVERY_MS).
+   «Чтение» для календаря (`readingPeriods`, трекер «Чтение» в calendar.js) — НЕ счётчик времени, а отдельная логика поверх того же признака
+   «открыт ридер книг/ИПКД» (`categoryFor` = "read"). Заход = непрерывное присутствие (паузы до RV_JOIN_MS склеиваются). Заход ≥ RV_QUALIFY_MS —
+   «засчитанный». Цепочка = заходы, между которыми меньше RV_GAP_MS; начинается засчитанным заходом. Период чтения показывается, если один заход
+   длился ≥ RV_CONT_MS либо в цепочке ≥ 2 засчитанных захода и от начала первого до конца последнего ≥ RV_SPAN_MS; после этого любой следующий заход
+   (хоть секундный) в пределах RV_GAP_MS продлевает период (`rvChains`, `rvEst`). Нет захода RV_GAP_MS — цепочка закрыта и уходит в готовые
+   периоды (`rvSave`); следующий заход начинает новую. Хранение — только на устройстве, `localStorage` `readVisits_v1` {v: заходы, p: периоды, c: текущий заход}.
    Чтобы добавить новый счётчик: строка В КОНЕЦ `CATEGORIES` (индекс в `d` — позиция), правило в `categoryFor` (экранный) или источник в `readNative` (оболочка).
    =========================================================================== */
 (function(){
@@ -37,6 +43,14 @@
   var MAX_GAP_MS = 3000;                // дольше пауза между тиками = сон/заморозка страницы, не считаем
   var KEEP_DAYS = 200;                  // сколько суток хранится посуточная разбивка (хватает на «6 мес.»)
   var PERIOD_KEY = "screenTimePeriod_v1";
+  var RV_KEY = "readVisits_v1";
+  var RV_JOIN_MS = 60 * 1000;            // уход из ридера короче минуты — тот же заход
+  var RV_QUALIFY_MS = 2 * 60 * 1000;     // заход, который считается «заходом»
+  var RV_GAP_MS = 20 * 60 * 1000;        // без заходов дольше — чтение закончилось
+  var RV_SPAN_MS = 15 * 60 * 1000;       // от первого захода до последнего (при ≥ 2 засчитанных)
+  var RV_CONT_MS = 20 * 60 * 1000;       // непрерывное чтение одним заходом
+  var RV_SAVE_MS = 15 * 1000;
+  var RV_KEEP_MS = 400 * 24 * 3600 * 1000;
   var SWIPE_DX = 70, SWIPE_DY = 50;     // как в workouts.js
   var PERIODS = [
     { id: "day",   label: "День" },
@@ -79,6 +93,9 @@
   var lastSave = 0, lastPush = 0, lastNative = 0;
   var dirtySincePush = false;
   var tickTimer = null, renderTimer = null;
+  var rv = { v: [], p: [] };  // заходы [начало, конец] и готовые периоды чтения [начало, конец] (мс)
+  var rvCur = null;           // текущий заход
+  var rvDirty = false, rvLastSave = 0;
 
   function zeroSet(){ var o = {}; CATEGORIES.forEach(function(c){ o[c.id] = 0; }); return o; }
   function num(v){ v = Number(v); return (isFinite(v) && v > 0) ? Math.floor(v) : 0; }
@@ -94,6 +111,89 @@
   function mondayOf(d){ return addDays(d, -((d.getDay() + 6) % 7)); }
 
   function myKey(){ return KEY_PREFIX + deps.getDeviceId(); }
+
+  // ---------- «Чтение» для календаря (не счётчик времени: см. шапку файла) ----------
+  function rvPairs(a){
+    var out = [];
+    if(!Array.isArray(a)) return out;
+    a.forEach(function(x){
+      if(Array.isArray(x) && isFinite(x[0]) && isFinite(x[1]) && x[1] >= x[0]) out.push([+x[0], +x[1]]);
+    });
+    return out;
+  }
+  function rvLoad(){
+    var o = null;
+    try{ o = JSON.parse(localStorage.getItem(RV_KEY) || "null"); }catch(e){ o = null; }
+    rv = { v: rvPairs(o && o.v), p: rvPairs(o && o.p) };
+    var c = rvPairs(o && o.c ? [o.c] : []);
+    rvCur = c.length ? c[0] : null;
+  }
+  // один тик присутствия в ридере/ИПКД
+  function rvTouch(now){
+    if(rvCur && now - rvCur[1] <= RV_JOIN_MS) rvCur[1] = now;
+    else{
+      if(rvCur) rv.v.push(rvCur);
+      rvCur = [now, now];
+    }
+    rvDirty = true;
+  }
+  function rvEst(c){
+    var span = c.e - c.s + TICK_MS; // отметки идут раз в TICK_MS: заход из N отметок длится N·TICK_MS
+    return span >= RV_CONT_MS || (c.q >= 2 && span >= RV_SPAN_MS);
+  }
+  // заходы (по времени) → цепочки {s, e, q (засчитанных заходов), vs (заходы цепочки)}
+  function rvChains(vis){
+    var out = [], cur = null;
+    vis.forEach(function(v){
+      var qual = (v[1] - v[0] + TICK_MS) >= RV_QUALIFY_MS;
+      if(cur && v[0] - cur.e >= RV_GAP_MS){ out.push(cur); cur = null; }
+      if(!cur){
+        if(!qual) return; // начать чтение может только засчитанный заход
+        cur = { s: v[0], e: v[1], q: 1, vs: [v] };
+        return;
+      }
+      if(qual || rvEst(cur)){ // короткий заход продлевает уже состоявшееся чтение
+        cur.e = Math.max(cur.e, v[1]);
+        if(qual) cur.q++;
+        cur.vs.push(v);
+      }
+    });
+    if(cur) out.push(cur);
+    return out;
+  }
+  function rvAll(){
+    var all = rv.v.slice();
+    if(rvCur) all.push(rvCur);
+    all.sort(function(a, b){ return a[0] - b[0]; });
+    return all;
+  }
+  // закрытые цепочки переезжают в готовые периоды, старые заходы убираются
+  function rvFinalize(now){
+    if(rvCur && now - rvCur[1] > RV_JOIN_MS){ rv.v.push(rvCur); rvCur = null; }
+    var chains = rvChains(rvAll());
+    var open = [];
+    chains.forEach(function(c){
+      if(c.e < now - RV_GAP_MS){ if(rvEst(c)) rv.p.push([c.s, c.e]); }
+      else c.vs.forEach(function(v){ open.push(v); });
+    });
+    rv.v = rv.v.filter(function(v){ return v[1] > now - RV_GAP_MS || open.indexOf(v) !== -1; });
+    var lim = now - RV_KEEP_MS;
+    rv.p = rv.p.filter(function(p){ return p[1] >= lim; });
+  }
+  function rvSave(now){
+    rvLastSave = now;
+    rvDirty = false;
+    try{
+      rvFinalize(now);
+      localStorage.setItem(RV_KEY, JSON.stringify({ v: rv.v, p: rv.p, c: rvCur }));
+    }catch(e){}
+  }
+  // периоды чтения для календаря: [{start, end}] (мс), включая идущий сейчас
+  function readingPeriods(){
+    var out = rv.p.map(function(p){ return { start: p[0], end: p[1] }; });
+    rvChains(rvAll()).forEach(function(c){ if(rvEst(c)) out.push({ start: c.s, end: c.e }); });
+    return out;
+  }
 
   function getMyRecord(){
     var st = deps.getState() || {};
@@ -135,10 +235,12 @@
         var po = pending[dk] || (pending[dk] = {});
         po[cat] = (po[cat] || 0) + gap;
         dirtySincePush = true;
+        if(cat === "read") rvTouch(now);
       }
     }
     if(now - lastNative >= NATIVE_EVERY_MS && isScreenOn()) readNative();
     if(now - lastSave >= SAVE_EVERY_MS) flush(false);
+    if(rvDirty && now - rvLastSave >= RV_SAVE_MS) rvSave(now);
     if(dirtySincePush && now - lastPush >= PUSH_EVERY_MS) flush(true);
   }
 
@@ -472,21 +574,23 @@
     if(appActive === on) return;
     appActive = on;
     lastTick = Date.now();
-    if(!on){ flush(true); }          // свернули: записать и отправить в облако
+    if(!on){ flush(true); rvSave(Date.now()); }          // свернули: записать и отправить в облако
     else readNative();
   }
 
   function init(d){
     deps = d;
     lastTick = lastSave = lastPush = Date.now();
+    rvLoad();
+    rvSave(lastTick);
     readNative();
     clearInterval(tickTimer);
     tickTimer = setInterval(tick, TICK_MS);
     document.addEventListener("visibilitychange", function(){
       lastTick = Date.now();
-      if(document.visibilityState === "hidden") flush(true);
+      if(document.visibilityState === "hidden"){ flush(true); rvSave(Date.now()); }
     });
   }
 
-  window.ScreenTime = { init: init, render: render, getTotals: getTotals, getPeriodTotals: getPeriodTotals, setAppActive: setAppActive };
+  window.ScreenTime = { init: init, render: render, getTotals: getTotals, getPeriodTotals: getPeriodTotals, setAppActive: setAppActive, readingPeriods: readingPeriods };
 })();

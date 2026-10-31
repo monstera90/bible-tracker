@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 13.2 (31.10)
+   Версия: 13.3 (31.10)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -171,6 +171,15 @@
         if(r.totalMs > 0){ var mins = Math.round(r.totalMs / 60000); sub.push(mins >= 60 ? Math.floor(mins / 60) + " ч " + pad2(mins % 60) + " мин" : mins + " мин"); }
         if(r.m > 0) sub.push((Math.round(r.m / 10) / 100).toFixed(2).replace(".", ",") + " км");
         return { start: r.start, end: r.end, dur: r.totalMs, sub: sub.join(" · ") };
+      });
+    } },
+    // чтение: периоды считает screentime.js (`readingPeriods`: ридер/ИПКД, правила заходов — в его шапке); только на этом устройстве
+    { key: "read", label: "Чтение", get: function(){
+      var S = window.ScreenTime;
+      var list = (S && S.readingPeriods) ? S.readingPeriods() : [];
+      return list.map(function(r){
+        var mins = Math.max(1, Math.round((r.end - r.start) / 60000));
+        return { start: r.start, end: r.end, dur: r.end - r.start, sub: mins >= 60 ? Math.floor(mins / 60) + " ч " + pad2(mins % 60) + " мин" : mins + " мин" };
       });
     } }
   ];
