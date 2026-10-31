@@ -18,6 +18,8 @@ import java.util.concurrent.Executors
  *   1. LifeTrackerNative.takeSharedFiles() даёт список {id, name, type, size};
  *   2. fetch("./__shared/<id>") отдаёт содержимое (WebAssetServer);
  *   3. LifeTrackerNative.releaseSharedFile(id) удаляет временную копию.
+ * То же для «Открыть с помощью» из файлового менеджера (ACTION_VIEW, pdf/epub): файл помечается view=true, страница
+ * открывает его в ридере, не добавляя в библиотеку.
  * Объект живёт в процессе, поэтому пересоздание Activity (recreate) принятые файлы не теряет.
  */
 object SharedInbox {
@@ -25,7 +27,7 @@ object SharedInbox {
     private const val EXTRA_HANDLED = "com.app.lifetracker.SHARE_HANDLED"
     private const val STALE_MS = 24L * 60 * 60 * 1000
 
-    class Item(val id: String, val name: String, val type: String, val size: Long, val file: File)
+    class Item(val id: String, val name: String, val type: String, val size: Long, val file: File, val view: Boolean = false)
 
     private val executor = Executors.newSingleThreadExecutor()
     private val lock = Any()
@@ -52,12 +54,15 @@ object SharedInbox {
     fun accept(context: Context, intent: Intent?, onAdded: () -> Unit, onFailed: () -> Unit): Boolean {
         if (intent == null) return false
         val action = intent.action
-        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return false
+        val isView = action == Intent.ACTION_VIEW
+        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE && !isView) return false
         if (intent.getBooleanExtra(EXTRA_HANDLED, false)) return false
         intent.putExtra(EXTRA_HANDLED, true)
 
         val uris = ArrayList<Uri>()
-        if (action == Intent.ACTION_SEND) {
+        if (isView) {
+            intent.data?.let { uris.add(it) }
+        } else if (action == Intent.ACTION_SEND) {
             IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { uris.add(it) }
         } else {
             IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { uris.addAll(it) }
@@ -75,7 +80,7 @@ object SharedInbox {
         for (uri in uris) {
             executor.execute {
                 val item = try {
-                    copyToInbox(appContext, uri, fallbackType)
+                    copyToInbox(appContext, uri, fallbackType, isView)
                 } catch (e: Exception) {
                     null
                 }
@@ -99,7 +104,7 @@ object SharedInbox {
         synchronized(lock) {
             for (item in ready.values) {
                 array.put(
-                    JSONObject().put("id", item.id).put("name", item.name).put("type", item.type).put("size", item.size)
+                    JSONObject().put("id", item.id).put("name", item.name).put("type", item.type).put("size", item.size).put("view", item.view)
                 )
             }
             ready.clear()
@@ -124,7 +129,7 @@ object SharedInbox {
         }
     }
 
-    private fun copyToInbox(context: Context, uri: Uri, fallbackType: String?): Item? {
+    private fun copyToInbox(context: Context, uri: Uri, fallbackType: String?, view: Boolean): Item? {
         val resolver = context.contentResolver
         var name: String? = null
         var declaredSize = -1L
@@ -180,6 +185,6 @@ object SharedInbox {
             dir.deleteRecursively()
             return null
         }
-        return Item(id, safeName, type, total, file)
+        return Item(id, safeName, type, total, file, view)
     }
 }

@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 104.2 (31.10)
+   Версия: 105.0 (31.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -14270,7 +14270,10 @@
   // путём (renderBookReaderText -> requestAnimationFrame -> scrollBookReaderToPosition, с её
   // собственной самокоррекцией через refine() — надёжнее и проще, чем городить свой rAF-скролл
   // рядом).
-  function openBookReader(name, resolveRestorePosition){
+  // opts.file — книга «на лету» (открыта из файлового менеджера, в библиотеку не добавляется): вместо чтения из OPFS
+  // берётся этот File; последняя открытая книга и обложка не запоминаются, в bookReaderState стоит transient.
+  function openBookReader(name, resolveRestorePosition, opts){
+    var transientFile = (opts && opts.file) ? opts.file : null;
     // Подчищаем картинки предыдущей открытой книги, если она осталась "подвешенной" в памяти
     // (например, после клика "Домик" — см. bindBookReaderFabRow ниже — без возврата "назад" в ту
     // книгу).
@@ -14287,13 +14290,14 @@
     function _dbg(label){
       if(window.Debug) window.Debug.log("openBookReader[" + name + "]: " + label + " +" + Math.round(performance.now() - _dbgT0) + "мс");
     }
-    return getBooksDirHandle().then(function(dir){
+    var readP = transientFile ? transientFile.arrayBuffer() : getBooksDirHandle().then(function(dir){
       return dir.getFileHandle(name);
     }).then(function(fh){
       return fh.getFile();
     }).then(function(file){
       return file.arrayBuffer();
-    }).then(function(buf){
+    });
+    return readP.then(function(buf){
       _dbg("файл прочитан, " + buf.byteLength + " байт");
       return sha256Hex(buf).then(function(hash){
         _dbg("хэш посчитан");
@@ -14348,7 +14352,7 @@
       // параллельно (пишет файл только один раз, при первом успешном открытии — см.
       // saveBookCoverIfMissing).
       var firstCoverImageId = findFirstBookImageId(res.parsed.chapters);
-      if(firstCoverImageId && res.parsed.images[firstCoverImageId]){
+      if(!transientFile && firstCoverImageId && res.parsed.images[firstCoverImageId]){
         var coverSrc = res.parsed.images[firstCoverImageId];
         saveBookCoverIfMissing(res.hash, coverSrc.base64, coverSrc.contentType);
       }
@@ -14363,11 +14367,11 @@
       // фоновой вкладки браузером (см. switchSettingsTab, ветка set2s_7). Служебный файл вкладки
       // "ИПКД" (IPKD_BOOK_NAME) сюда не пишем — в "Мои книги" он не показывается, и при первом
       // заходе туда автооткрытие по этому имени подсунуло бы публикацию в чужую вкладку.
-      if(name !== IPKD_BOOK_NAME) saveLastOpenedBookName(name);
+      if(name !== IPKD_BOOK_NAME && !transientFile) saveLastOpenedBookName(name);
       var savedBookState = getBookState(res.hash);
       var forcedPosition = resolveRestorePosition ? resolveRestorePosition(res.parsed.chapters) : null;
       bookReaderState = {
-        hash: res.hash, name: name,
+        hash: res.hash, name: name, transient: !!transientFile,
         chapters: res.parsed.chapters, imageUrls: imageUrls, imageBase64: imageBase64,
         mode: "text", textScrollTop: 0, chaptersScrollTop: 0,
         restorePosition: forcedPosition || (savedBookState && savedBookState.position) || null,
@@ -24990,6 +24994,28 @@
       }
     });
   }
+  // PDF/epub, открытые из файлового менеджера («Открыть с помощью»): читаются сразу, в библиотеку книг не попадают.
+  // Если в памяти уже открыта другая книга — сначала сохраняем её место (как при переходе по закладке), затем сбрасываем.
+  function openViewedBook(file){
+    if(bookReaderState){
+      if(currentSettingsTab === "set2s_7" && bookReaderState.mode !== "chapters"){
+        var leavingC = document.getElementById("settingsTabContent");
+        var leavingTrusted = bookReaderPosTrusted();
+        var leavingP = leavingC ? bookReaderLeavePosition(leavingC) : null;
+        autoUpdateMainBookmarkOnExit(leavingP);
+        if(leavingP && leavingTrusted) setBookPosition(bookReaderState.hash, leavingP);
+      }
+      destroyBookReaderScrollListener();
+      revokeBookReaderImages();
+      bookReaderTextRenderGen++;
+      bookReaderState = null;
+    }
+    booksTabVisitedThisSession = true; // иначе вкладка сама откроет последнюю книгу библиотеки
+    openSettingsTabDirect("set2s_7");
+    var st = document.getElementById("booksStatus");
+    if(st){ st.textContent = "Открываю «" + file.name + "»…"; st.classList.remove("error"); }
+    openBookReader(file.name, null, { file: file });
+  }
   function openSharedEpubSplit(file){
     openSettingsTabDirect("set2s_5");
     assignFileToInput(document.getElementById("epubSplitFileInput"), file);
@@ -25040,8 +25066,17 @@
   // Точка входа — по расширению файла решает, что показать. .fb2 и .mp4 (пока с единственным
   // пунктом) идут по единой схеме с .epub, чтобы позже, когда для .mp4 появятся другие функции,
   // ничего не пришлось переделывать — по факту сейчас .fb2 вообще не спрашивает выбор.
-  function handleSharedFile(file){
+  function handleSharedFile(file, viewOnly){
     var lower = (file.name || "").toLowerCase();
+    if(viewOnly && /\.(pdf|epub)$/.test(lower)){
+      openViewedBook(file);
+      return;
+    }
+    if(/\.pdf$/.test(lower)){
+      // PDF приходит только как «Открыть с помощью»; из «Поделиться» его никто не ждёт — тоже просто открываем
+      openViewedBook(file);
+      return;
+    }
     if(/\.fb2$/.test(lower)){
       importSharedBook(file);
       return;
@@ -25089,7 +25124,7 @@
       }).then(function(blob){
         try{ bridge.releaseSharedFile(item.id); }catch(e){}
         dbg("файл получен от оболочки: имя=\"" + (item.name || "") + "\", размер=" + blob.size + ", тип=\"" + (item.type || "") + "\"");
-        handleSharedFile(new File([blob], item.name || "shared-file", { type: item.type || blob.type || "" }));
+        handleSharedFile(new File([blob], item.name || "shared-file", { type: item.type || blob.type || "" }), !!item.view);
       }).catch(function(e){
         try{ bridge.releaseSharedFile(item.id); }catch(e2){}
         dbg("ошибка приёма от оболочки: " + (e && e.message ? e.message : e));
