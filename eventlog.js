@@ -1,6 +1,6 @@
 /* ===========================================================================
    eventlog.js
-   Версия: 3.0 (28.10) — структурная правка: удаление записи журнала долгим нажатием (≈0,5 с) на строке с событием: плашка «Подтвердить удаление?» с кнопками «Удалить» / «Отмена» (`bindLongPress`, `askDelete`, `closeDeleteBar`, `removeEntry`; `window.EventLog.remove`). Серые «предстоящие» строки не удаляются (считаются на лету). Удалённый ключ запоминается (`bibleEventDeletedKeys_v1`, до 200), чтобы таймер/будильник, дописывающий итог в уже удалённую запись, не создал её заново. Откат: eventlog.js 2.2.
+   Версия: 4.0 (31.10)
    Версия: 2.2 (25.10) — заголовки дней: «ПН 26.10.2026» (день недели + дата). Откат: eventlog.js 2.1
    Версия: 2.1 (25.10) — предстоящее у будильника: серой строкой показывается только ближайший звонок (первый; сработал — появляется второй повтор, и так далее), а не все сразу. Откат: eventlog.js 2.0.
    Версия: 2.0 (25.10) — структурная правка: у таймера и будильника ОДНА запись на запуск, которая меняется по ходу дела: «8:00 Был установлен таймер «Кофе»» → после срока «… и сработал через 23 минуты в **8:23**» / «… и был остановлен пользователем через 15 минут 23 секунды в **8:15**»;
@@ -474,39 +474,29 @@
   }
   // ---------------------------------------------------------------- удаление записи долгим нажатием
 
-  function closeDeleteBar(){
-    var b = document.getElementById("eventDelBar");
-    if(b && b.parentNode) b.parentNode.removeChild(b);
+  function clearRowHighlight(){
     var hl = document.querySelectorAll(".event-row-del");
     for(var i = 0; i < hl.length; i++) hl[i].className = hl[i].className.replace(/\s*event-row-del\b/g, "");
-    document.removeEventListener("touchstart", onOutsideDown, true);
-    document.removeEventListener("mousedown", onOutsideDown, true);
   }
-  function onOutsideDown(e){
-    var b = document.getElementById("eventDelBar");
-    var n = e.target;
-    while(n && n !== document){ if(n === b) return; n = n.parentNode; }
-    closeDeleteBar(); // тап мимо плашки — отмена
+  function closeDeleteBar(){
+    if(window.AppConfirmBar && window.AppConfirmBar.close) window.AppConfirmBar.close();
+    clearRowHighlight();
   }
-  // ref — запись журнала, как она была показана ({t, s, k}); row — нажатая строка (подсвечивается, пока открыта плашка)
+  // ref — запись журнала, как она была показана ({t, s, k}); row — нажатая строка: подсвечивается, пока открыта плашка,
+  // и служит якорем — те же два пузыря ✕/✓, что при удалении задачи (AppConfirmBar), но под строкой
   function askDelete(ref, row){
+    var bar = window.AppConfirmBar;
+    if(!bar || !bar.open) return;
     closeDeleteBar();
     if(row) row.className += " event-row-del";
-    var bar = document.createElement("div");
-    bar.id = "eventDelBar";
-    bar.className = "event-del-bar";
-    bar.innerHTML = '<span class="event-del-text">Подтвердить удаление?</span>' +
-      '<button type="button" class="event-del-btn event-del-no" aria-label="Отмена">\u2715</button>' +
-      '<button type="button" class="event-del-btn event-del-yes" aria-label="Удалить">\u2713</button>';
-    bar.querySelector(".event-del-no").addEventListener("click", function(e){ e.stopPropagation(); closeDeleteBar(); });
-    bar.querySelector(".event-del-yes").addEventListener("click", function(e){
-      e.stopPropagation();
-      closeDeleteBar();
+    // клик, которым заканчивается долгое нажатие, не должен сразу закрыть плашку как «клик мимо»
+    function guard(e){ e.stopImmediatePropagation(); e.preventDefault(); }
+    document.addEventListener("click", guard, true);
+    setTimeout(function(){ document.removeEventListener("click", guard, true); }, 700);
+    bar.open("Удалить запись?", function(){
+      clearRowHighlight();
       removeEntry(ref); // fire() перерисует открытый экран
-    });
-    document.body.appendChild(bar);
-    document.addEventListener("touchstart", onOutsideDown, true);
-    document.addEventListener("mousedown", onOutsideDown, true);
+    }, { yesTitle: "Удалить", anchorEl: row, placement: "below", onCancel: clearRowHighlight });
   }
   // долгое нажатие на строке события (кроме серых «предстоящих»): без сдвига пальца — прокрутка не считается
   function bindLongPress(box){

@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 18.10 (31.10)
+   Версия: 18.11 (31.10)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4844,44 +4844,10 @@ body::after{
 .event-time{ font-weight:bold; font-variant-numeric:tabular-nums; }
 .event-row-upcoming{ color:var(--ink-soft, var(--ink)); opacity:.75; }
 .event-empty{ text-align:center; color:var(--ink-soft, var(--ink)); padding:24px 0; }
-/* удаление записи долгим нажатием (eventlog.js): текст строк не выделяется, нажатая строка подсвечена, внизу плашка «Подтвердить удаление?».
+/* удаление записи долгим нажатием (eventlog.js): текст строк не выделяется, нажатая строка подсвечена, под ней пузыри ✕/✓ (AppConfirmBar из my.js).
    Без flex-gap (Android 5): отступы между кнопками — margin */
 #eventCenterList .event-row{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; -webkit-tap-highlight-color:transparent; }
 .event-row-del{ background:rgba(139,0,0,.16); border-radius:4px; }
-.event-del-bar{
-  position:fixed;
-  left:50%;
-  bottom:84px;
-  -webkit-transform:translateX(-50%);
-  transform:translateX(-50%);
-  z-index:10070;
-  box-sizing:border-box;
-  max-width:92vw;
-  padding:10px 14px;
-  display:flex;
-  align-items:center;
-  background:var(--bg-mid, #fbf4e2);
-  color:var(--ink, #000);
-  border:2px solid var(--ink, #000);
-  border-radius:14px;
-  box-shadow:0 4px 14px rgba(0,0,0,.35);
-  font-family:"Palatino Linotype",Georgia,serif;
-  font-size:15.5px;
-}
-.event-del-text{ font-weight:bold; margin-right:12px; }
-.event-del-btn{
-  min-width:44px;
-  height:36px;
-  margin-left:6px;
-  padding:0 12px;
-  border:1px solid currentColor;
-  border-radius:10px;
-  background:transparent;
-  color:inherit;
-  font:inherit;
-  font-weight:bold;
-}
-.event-del-yes{ color:#8b0000; }
 
 /* Календарь (calendar.js): список — на классах центра событий (.event-center/.event-day/.event-row), здесь только отличия */
 .cal-center{ padding-bottom:64px; } /* место под нижний ряд кнопок */

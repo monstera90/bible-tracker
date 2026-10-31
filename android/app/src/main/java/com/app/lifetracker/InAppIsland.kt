@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 8.7 (31.10)
 // Версия: 8.6 (22.10) — свёрнутая плашка возвращена к виду 8.0–8.2 (13sp название, 12sp время, letterSpacing 0.08, отступы 0.0087/0.0272): она точно совпадала с настоящим островом, правки 8.3 и 8.5 её испортили. Раскрытая карточка (8.3–8.5) не тронута. Откат: InAppIsland.kt 8.5.
 // Версия: 8.5 (22.10) — по замеру четырёх скриншотов (ширина 1159): название на плашке было мельче настоящего на ~14 % → 0.0350 × ширина экрана; время на плашке ниже на ~10 % и уже на ~19 % → 13.2sp, letterSpacing 0.13, tnum; время в карточке было выше на 7 % и уже на 12 % (вытянутые цифры) → размер 0.0450, letterSpacing 0.06, tnum. Откат: InAppIsland.kt 8.4.
 // Версия: 8.4 (22.10) — время в раскрытой карточке: по скриншотам оно вышло жирнее и крупнее настоящего — обводка 0.0026 → 0.0012 × ширина экрана, размер 0.0508 → 0.0483. Откат: InAppIsland.kt 8.3.
@@ -41,6 +42,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.Choreographer
 import android.os.SystemClock
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -49,6 +51,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -57,7 +60,18 @@ class InAppIsland(private val activity: Activity) {
     private val handler = Handler(Looper.getMainLooper())
     private val density = activity.resources.displayMetrics.density
 
-    private val layer = FrameLayout(activity)
+    // Корень окна: тап распознаётся здесь (trackTap), а не только кликом дочерней плашки — так нажатие не зависит от того,
+    // дошло ли оно до вложенного View, и «залипшая» анимация/состояние раскрытия не глушат плашку.
+    private val layer = object : FrameLayout(activity) {
+        override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+            try {
+                trackTap(ev)
+            } catch (e: Exception) {
+                // распознавание тапа — украшение: ошибка не должна ломать касания
+            }
+            return super.dispatchTouchEvent(ev)
+        }
+    }
     private val pill = LinearLayout(activity)
     private val pillIcon = ImageView(activity)
     private val pillName = TextView(activity)
@@ -121,7 +135,7 @@ class InAppIsland(private val activity: Activity) {
         layer.visibility = View.GONE
         pill.orientation = LinearLayout.HORIZONTAL
         pill.gravity = Gravity.CENTER_VERTICAL
-        pill.setOnClickListener { if (!animating) toggle() }
+        pill.isClickable = true // принимает касание (ACTION_UP дойдёт до окна); само раскрытие — trackTap
         layer.setOnTouchListener { _, e -> onLayerTouch(e) }
         pillName.apply {
             setTextColor(Color.WHITE)
@@ -341,7 +355,49 @@ class InAppIsland(private val activity: Activity) {
     }
 
     private fun toggle() {
+        // состояние «раскрыта», хотя карточка давно свёрнута (прервалась анимация/пересборка окна) — считаем свёрнутой
+        if (expanded && !animating && progress <= 0.001f) expanded = false
         if (expanded) collapse() else expand()
+    }
+
+    private var tapArmed = false
+    private var tapX = 0f
+    private var tapY = 0f
+    private val tapSlop = ViewConfiguration.get(activity).scaledTouchSlop
+
+    private fun inPill(x: Float, y: Float): Boolean {
+        if (pill.width <= 0 || pill.height <= 0) return true // раскладка ещё не прошла: всё окно — плашка
+        val pad = dp(6f)
+        return x >= pill.left - pad && x <= pill.right + pad && y >= pill.top - pad && y <= pill.bottom + pad
+    }
+
+    /** Анимация не дошла до конца (кадры не пришли): доводим до конечной точки, чтобы плашка снова нажималась. */
+    private fun finishStuckAnim() {
+        stopAnim()
+        applyProgress(animTo)
+        if (animTo == 0f) {
+            card.visibility = View.GONE
+            setWindowBig(false)
+        }
+    }
+
+    /** Нажатие на свёрнутую плашку = тап (ACTION_DOWN и ACTION_UP на плашке, палец не уехал дальше порога прокрутки). */
+    private fun trackTap(ev: MotionEvent) {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (animating && SystemClock.uptimeMillis() - animStart > animDur + 500L) finishStuckAnim()
+                tapArmed = !expanded && !animating && pill.visibility == View.VISIBLE && inPill(ev.x, ev.y)
+                tapX = ev.x
+                tapY = ev.y
+            }
+            MotionEvent.ACTION_MOVE -> if (tapArmed && (abs(ev.x - tapX) > tapSlop || abs(ev.y - tapY) > tapSlop)) tapArmed = false
+            MotionEvent.ACTION_UP -> {
+                val fire = tapArmed && !expanded && !animating && inPill(ev.x, ev.y)
+                tapArmed = false
+                if (fire) toggle()
+            }
+            MotionEvent.ACTION_CANCEL -> tapArmed = false
+        }
     }
 
     private fun expand() {

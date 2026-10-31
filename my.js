@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 102.0 (31.10)
+   Версия: 102.1 (31.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -24374,7 +24374,7 @@
   // под якорем; якорь пропал из DOM — у нижнего края / над клавиатурой.
   var APP_CONFIRM_BAR_EDGE_PX = 8;
   var APP_CONFIRM_BAR_ANCHOR_GAP_PX = 6;
-  function placeAppConfirmBarAtAnchor(box, anchor){
+  function placeAppConfirmBarAtAnchor(box, anchor, below){
     var kbTop = (window.AppKeyboard && window.AppKeyboard.getTop) ? window.AppKeyboard.getTop() : null;
     var vw = window.innerWidth, vh = window.innerHeight;
     var limitBottom = (kbTop != null) ? kbTop : vh;
@@ -24392,8 +24392,15 @@
     var w = box.offsetWidth, h = box.offsetHeight;
     var left = r.left + r.width / 2 - w / 2;
     left = Math.max(APP_CONFIRM_BAR_EDGE_PX, Math.min(left, vw - w - APP_CONFIRM_BAR_EDGE_PX));
-    var top = r.top - APP_CONFIRM_BAR_ANCHOR_GAP_PX - h;
-    if(top < APP_CONFIRM_BAR_EDGE_PX) top = r.bottom + APP_CONFIRM_BAR_ANCHOR_GAP_PX;
+    var top;
+    if(below){
+      // под якорем (журнал событий); нет места снизу — над ним
+      top = r.bottom + APP_CONFIRM_BAR_ANCHOR_GAP_PX;
+      if(top + h > limitBottom - APP_CONFIRM_BAR_EDGE_PX) top = r.top - APP_CONFIRM_BAR_ANCHOR_GAP_PX - h;
+    }else{
+      top = r.top - APP_CONFIRM_BAR_ANCHOR_GAP_PX - h;
+      if(top < APP_CONFIRM_BAR_EDGE_PX) top = r.bottom + APP_CONFIRM_BAR_ANCHOR_GAP_PX;
+    }
     if(top + h > limitBottom - APP_CONFIRM_BAR_EDGE_PX) top = Math.max(APP_CONFIRM_BAR_EDGE_PX, limitBottom - APP_CONFIRM_BAR_EDGE_PX - h);
     box.style.right = "auto";
     box.style.bottom = "auto";
@@ -24407,7 +24414,7 @@
     appConfirmBarEl = null;
     appConfirmBarBackdropEl = null;
   }
-  // opts: {yesTitle, noTitle, onCancel, blurBeforeYes} — blurBeforeYes нужен там, где плашка могла
+  // opts: {yesTitle, noTitle, onCancel, blurBeforeYes, anchorEl, placement:"below"} — blurBeforeYes нужен там, где плашка могла
   // встать над клавиатурой во время редактирования поля (иначе снятие фокуса при удалении
   // происходит уже ПОСЛЕ действия).
   function openAppConfirmBar(text, onYes, opts){
@@ -24449,7 +24456,7 @@
     appConfirmBarEl = box;
 
     function place(){
-      if(anchor){ placeAppConfirmBarAtAnchor(box, anchor); return; }
+      if(anchor){ placeAppConfirmBarAtAnchor(box, anchor, opts.placement === "below"); return; }
       var kbTop = (window.AppKeyboard && window.AppKeyboard.getTop) ? window.AppKeyboard.getTop() : null;
       var bottom = (kbTop != null)
         ? Math.max(0, window.innerHeight - kbTop) + APP_CONFIRM_BAR_GAP_PX
