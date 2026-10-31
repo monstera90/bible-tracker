@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 101.2 (30.10)
+   Версия: 102.0 (31.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -2543,6 +2543,7 @@
   }
 
   function updateMissedBanner(){
+    updateReadingTabMark(); // подсветка вкладки «График чтения» зависит от тех же отметок — обновляется всюду, где пересчитывается баннер
     var wrap = document.getElementById("missedWrap"), textEl = document.getElementById("missedText");
     if(!wrap || !textEl) return;
     var lastReadTs = computeEffectiveLastRead();
@@ -4637,6 +4638,7 @@
   document.addEventListener("visibilitychange", function(){
     if(window.Debug) window.Debug.log("visibilitychange -> " + document.visibilityState);
     if(document.visibilityState === "hidden") flushPendingSyncNow();
+    else updateReadingTabMark(); // вернулись в приложение — могли наступить новые сутки
   });
   window.addEventListener("pagehide", function(){
     if(window.Debug) window.Debug.log("pagehide");
@@ -10824,6 +10826,7 @@
     updateIpkdTabIcon();
     updateMoodTabIcon();
     updateRedTabIcon();
+    updateReadingTabMark();
     var settingsWasOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay &&
       settingsModalOverlay.classList.contains("open");
     var prevTab = currentSettingsTab;
@@ -16570,6 +16573,7 @@
     updateIpkdTabIcon();
     updateMoodTabIcon();
     updateRedTabIcon();
+    updateReadingTabMark();
   }
   function isIpkdOpenedToday(){
     return tabSeenGet("ipkd", IPKD_LAST_OPENED_KEY) === ipkdTodayDateKey();
@@ -16638,6 +16642,30 @@
     var btn = document.getElementById("settingsTabRedBtn");
     if(!btn) return;
     btn.classList.toggle("red-tab-unread", isRedStale());
+    stripDecorClasses();
+  }
+
+  // ===== ПОДСВЕТКА ВКЛАДКИ «ГРАФИК ЧТЕНИЯ» (set2s_13, кнопка settingsTabSet2Btn13) =====
+  // Заливка (.reading-tab-unread в modals.css, тот же var(--gold-light), что у ИПКД) стоит, пока сегодня в графике не поставлено
+  // ни одной отметки. В отличие от ИПКД снимается не заходом на вкладку, а самой отметкой, и считается прямо по state: есть глава с
+  // c === true и временем изменения t в сегодняшних сутках. Отметки глав синхронизируются между устройствами, поэтому отметка на
+  // любом из них снимает подсветку и на остальных (после слияния с облаком — refreshTabMarksFromState). Снятая отметка подсветку
+  // возвращает. «Сожжённые» перепроверки (addTodayExcludedKey) здесь не исключаются: повторная отметка главы — тоже отметка.
+  function isReadingMarkedToday(){
+    var dayStart = startOfDay(Date.now());
+    var keys = Object.keys(state);
+    for(var i = 0; i < keys.length; i++){
+      var k = keys[i];
+      if(k.charAt(0) === "_" || !/\|\d+$/.test(k)) continue; // ключ главы: «Книга|номер»
+      var rec = state[k];
+      if(rec && rec.c === true && typeof rec.t === "number" && rec.t >= dayStart) return true;
+    }
+    return false;
+  }
+  function updateReadingTabMark(){
+    var btn = document.getElementById("settingsTabSet2Btn13");
+    if(!btn) return;
+    btn.classList.toggle("reading-tab-unread", !isReadingMarkedToday());
     stripDecorClasses();
   }
 
@@ -18331,7 +18359,7 @@
     orig.parentNode.insertBefore(btn, orig.nextSibling);
   }
   // декоративные язычки режима колеса: пустые и некликабельные (стиль — ensureTabDecorStyle)
-  var TAB_DECOR_STRIP = ["active", "mood-tab-unread", "red-tab-unread", "ipkd-tab-unread", "workouts-tab-unread"];
+  var TAB_DECOR_STRIP = ["active", "mood-tab-unread", "red-tab-unread", "ipkd-tab-unread", "workouts-tab-unread", "reading-tab-unread"];
   function ensureTabDecorStyle(){
     if(document.getElementById("tabDecorStyle")) return;
     var st = document.createElement("style");
