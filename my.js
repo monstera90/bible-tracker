@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 103.0 (31.10)
+   Версия: 104.0 (31.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -12518,11 +12518,11 @@
   function registerBookInRegistry(hash, name, size){ return registerFileInRegistry("books", hash, name, size); }
   function syncFilesRegistry(){ return syncFileRegistry("books"); }
 
-  // Обрабатывает выбранный файл — точка входа для кнопки "Загрузить fb2, epub или zip книг" (см.
-  // renderSettingsTabBooks ниже). Одиночный .fb2 или .epub сохраняется как есть (сам разбор формата
+  // Обрабатывает выбранный файл — точка входа для кнопки "Загрузить fb2, epub, pdf или zip книг" (см.
+  // renderSettingsTabBooks ниже). Одиночный .fb2, .epub или .pdf сохраняется как есть (сам разбор формата
   // — на этапе ОТКРЫТИЯ книги, см. parseBookBuffer ниже, здесь файл только копируется в books/
   // байт-в-байт); .zip разбирается через MiniZip.extractAllFiles (произвольные бинарные записи, см.
-  // minizip.js) — из него берутся записи с расширением .fb2 ИЛИ .epub, остальное молча пропускается
+  // minizip.js) — из него берутся записи с расширением .fb2, .epub ИЛИ .pdf, остальное молча пропускается
   // (сам архив может быть просто "пачкой" из нескольких книг разных форматов; отдельный .epub
   // внутри такого zip — это вложенный zip-архив, который здесь не разворачивается ещё на один
   // уровень, а сохраняется как файл книги целиком, ровно как если бы его загрузили по одному).
@@ -12531,7 +12531,7 @@
   // стёрла бы предыдущую).
   function handleImportBooksFile(file, setStatusFn){
     var lowerName = (file.name || "").toLowerCase();
-    if(lowerName.endsWith(".fb2") || lowerName.endsWith(".epub")){
+    if(lowerName.endsWith(".fb2") || lowerName.endsWith(".epub") || lowerName.endsWith(".pdf")){
       file.arrayBuffer().then(function(buf){
         return saveBookFile(file.name, new Uint8Array(buf));
       }).then(function(result){
@@ -12559,9 +12559,9 @@
       file.arrayBuffer().then(function(buf){
         return window.MiniZip.extractAllFiles(buf);
       }).then(function(files){
-        var bookFiles = files.filter(function(f){ return /\.(fb2|epub)$/i.test(f.path); });
+        var bookFiles = files.filter(function(f){ return /\.(fb2|epub|pdf)$/i.test(f.path); });
         if(!bookFiles.length){
-          setStatusFn("В архиве не найдено файлов .fb2 или .epub.", true);
+          setStatusFn("В архиве не найдено файлов .fb2, .epub или .pdf.", true);
           return;
         }
         var added = 0, skipped = 0, tooBig = 0;
@@ -12592,7 +12592,7 @@
       });
       return;
     }
-    setStatusFn("Выберите файл .fb2, .epub или .zip.", true);
+    setStatusFn("Выберите файл .fb2, .epub, .pdf или .zip.", true);
   }
 
   // ===================== МОДЕЛЬ СОСТОЯНИЯ КНИГИ (READER_PLAN.md, Этап C, шаг 8) =====================
@@ -13255,7 +13255,7 @@
           '<button type="button" class="mdeditor-fab-btn" id="booksHideTitlesBtn" title="' + (hideTitlesOn ? "Показать заглавия" : "Скрыть заглавия") + '">' + booksHideTitlesButtonIconSvg(hideTitlesOn) + '</button>'
           : "") +
         '<button type="button" class="mdeditor-fab-btn" id="booksInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
-        '<button type="button" class="mdeditor-fab-btn" id="booksImportBtn" title="Загрузить fb2, epub или zip книгу">' + BOOKS_UPLOAD_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="booksImportBtn" title="Загрузить fb2, epub, pdf или zip книгу">' + BOOKS_UPLOAD_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="booksViewModeBtn" title="' + (coverMode ? "Список" : "Обложки") + '">' +
           (coverMode ? BOOKS_VIEW_LIST_ICON_SVG : BOOKS_VIEW_COVER_ICON_SVG) +
         '</button>' +
@@ -13471,7 +13471,7 @@
 
     var html = '';
     html += iconRow(BOOKS_VIEW_COVER_ICON_SVG, "Переключает список книг между показом обложками и обычным списком с именами файлов.");
-    html += iconRow(BOOKS_UPLOAD_ICON_SVG, "Загружает книгу с устройства — файл .fb2, .epub или .zip (архив с книгой внутри).");
+    html += iconRow(BOOKS_UPLOAD_ICON_SVG, "Загружает книгу с устройства — файл .fb2, .epub, .pdf или .zip (архив с книгами внутри). Из PDF берётся только текст: страницы-картинки (сканы) без текстового слоя и зашифрованные PDF не читаются.");
     html += iconRow(BOOKS_HIDE_TITLES_ICON_SVG, "Только в режиме «Обложки»: скрывает подписи с названиями книг под обложками. Повторное нажатие возвращает подписи.");
     html += iconRow(BOOK_NOTE_ICON_SVG, "Долгое нажатие на книге (в списке или на обложке): открывает заметку с подчёркиваниями и иллюстрациями этой книги. Если заметка ещё не привязана — предлагает создать новую или выбрать уже существующую.");
     html += iconRow(SHARE_ICON_SVG, "Долгое нажатие на книге (в списке или на обложке) раскрывает кнопки действий: «Поделиться» — системное меню Android с файлом книги; «Переименовать»; крестик «Удалить» — совсем, без возможности восстановить.");
@@ -13509,9 +13509,9 @@
     html += '<h3 class="common-tab-title">Книги</h3>';
     html += '<div class="' + listClass + '" id="booksList"></div>';
     html += '<div class="mdeditor-status" id="booksStatus"></div>';
-    // Кнопка "Загрузить fb2, epub или zip книгу" переехала в нижний ряд — здесь остаётся только
+    // Кнопка "Загрузить fb2, epub, pdf или zip книгу" переехала в нижний ряд — здесь остаётся только
     // скрытый <input type="file">, который она открывает.
-    html += '<input type="file" accept=".fb2,.epub,.zip,application/zip" id="booksImportInput" style="display:none;">';
+    html += '<input type="file" accept=".fb2,.epub,.pdf,.zip,application/zip,application/pdf" id="booksImportInput" style="display:none;">';
     html += booksFabRowHtml();
     html += '</div>';
     container.innerHTML = html;
@@ -14206,8 +14206,14 @@
   // синхронный (decodeFb2Buffer + Fb2Parse.parseFb2 — работают с уже скачанными байтами файла
   // напрямую), но оборачивается в Promise.resolve для единообразия с epub, где разбор асинхронный
   // (нужно сначала распаковать zip через MiniZip, см. epubparse.js).
-  function parseBookBuffer(name, buffer){
+  function parseBookBuffer(name, buffer, onProgress){
     var lowerName = (name || "").toLowerCase();
+    if(lowerName.endsWith(".pdf")){
+      if(!window.PdfParse || !window.PdfParse.parsePdf){
+        return Promise.reject(new Error("Модуль разбора PDF (pdfparse.js) не загружен."));
+      }
+      return window.PdfParse.parsePdf(buffer, {onProgress: onProgress});
+    }
     if(lowerName.endsWith(".epub")){
       if(!window.EpubParse || !window.EpubParse.parseEpub){
         return Promise.reject(new Error("Модуль разбора epub (epubparse.js) не загружен."));
@@ -14217,12 +14223,14 @@
     return Promise.resolve(Fb2Parse.parseFb2(decodeFb2Buffer(buffer)));
   }
 
-  // Имя книги без расширения формата (.fb2/.epub) — общее место вместо нескольких точечных
+  // Имя книги без расширения формата (.fb2/.epub/.pdf) — общее место вместо нескольких точечных
   // .replace(/\.fb2$/i, "") по файлу (список глав, заметка от иллюстрации, имя файла картинки при
   // экспорте в заметку), чтобы добавление ещё одного формата книг не требовало искать их все заново
   // по всему my.js.
+  // Последний разобранный PDF (разбор текста долгий, а книга открывается повторно при каждом входе в неё).
+  var pdfParsedCache = null; // {hash, parsed}
   function stripBookExt(name){
-    return (name || "").replace(/\.(fb2|epub)$/i, "");
+    return (name || "").replace(/\.(fb2|epub|pdf)$/i, "");
   }
 
   function revokeBookReaderImages(){
@@ -14292,7 +14300,16 @@
           if(window.Debug) window.Debug.log("openBookReader[" + name + "]: разбор не нужен — публикация уже разобрана в этой сессии");
           return {hash: hash, parsed: ipkdParsedCache.parsed};
         }
-        return parseBookBuffer(name, buf).then(function(parsed){
+        var isPdfBook = /\.pdf$/i.test(name);
+        if(isPdfBook && pdfParsedCache && pdfParsedCache.hash === hash){
+          return {hash: hash, parsed: pdfParsedCache.parsed};
+        }
+        var onPdfProgress = isPdfBook ? function(done, total){
+          var stEl = document.getElementById("booksStatus");
+          if(stEl){ stEl.textContent = "Разбор PDF: страница " + done + " из " + total + "…"; stEl.classList.remove("error"); }
+        } : null;
+        return parseBookBuffer(name, buf, onPdfProgress).then(function(parsed){
+          if(isPdfBook) pdfParsedCache = {hash: hash, parsed: parsed};
           if(window.Debug) window.Debug.log("openBookReader[" + name + "]: parseBookBuffer занял " + Math.round(performance.now() - _tParse) + "мс, глав=" + parsed.chapters.length + ", блоков=" + parsed.chapters.reduce(function(s,c){return s+c.blocks.length;},0) + ", картинок=" + Object.keys(parsed.images).length);
           if(name === IPKD_BOOK_NAME) ipkdParsedCache = {hash: hash, parsed: parsed};
           return {hash: hash, parsed: parsed};
