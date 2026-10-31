@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.0 (30.10)
+// Версия: 7.1 (31.10)
 // Версия: 5.7 (24.10) — скрытый таймер (`Timer.hidden`, `start(..., hidden)`): идёт и срабатывает как обычный, но без уведомления «идёт», острова, плашки в приложении, службы тика и этапов цвета; в конце — обычные вибрация и «Таймер закончился»; `listJson` отдаёт `hidden`. Откат: CardTimers.kt 5.6.
 // Версия: 5.6 (24.10) — этапы цвета значка: остался один, красный за 2 минуты до конца (`scheduleStages`); жёлтый убран, но его будильник от прежней версии снимается (`LEGACY_STAGE_YELLOW`). Откат: CardTimers.kt 5.5.
 // Версия: 5.5 (22.10) — эксперимент с чёрным фоном уведомления (`setColorized`) откачен: HyperOS не меняет цвет карточки. Прежнее: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
@@ -60,6 +60,14 @@ object CardTimers {
     private const val ACCENT = 0xFF8F7FB8.toInt()
     private const val MAX_SECONDS = 359_999L // 99:59:59
     private val ID_RE = Regex("^[A-Za-z0-9]{4,32}$")
+
+    /**
+     * Таймеры, чей остров просили раскрыть (запуск, «Продолжить»), пока приложение было на экране. Система остров при этом не
+     * показывает, а тихое обновление при сворачивании (`tickIsland` с float=false) его не вызывает — поэтому при уходе из
+     * приложения такой таймер перепоставляется ещё раз уже с раскрытием (как `MusicPlayer`/`WorkoutTracker.floatDeferred`).
+     * Трогается только под LOCK.
+     */
+    private val floatDeferred = HashSet<String>()
     private const val VIBRATE_TOTAL_MS = 60_000L // вибрация после срабатывания — 60 секунд (или до «Стоп»)
     private val VIBRATE_CYCLE = longArrayOf(400, 200, 400, 200, 800, 1000) // прежний рисунок «три удара» + пауза, 3 с
 
@@ -157,6 +165,7 @@ object CardTimers {
         if (!t.running) return@synchronized
         val left = (t.endAt - System.currentTimeMillis()).coerceAtLeast(1000L)
         val p = Timer(id, t.title, t.durationMs, false, 0L, left, t.hidden, t.dismissed)
+        floatDeferred.remove(id)
         map[id] = p
         save(ctx, map)
         cancelAlarm(ctx, id)
@@ -177,6 +186,7 @@ object CardTimers {
 
     fun cancel(ctx: Context, id: String) = synchronized(LOCK) {
         val map = load(ctx)
+        floatDeferred.remove(id)
         map.remove(id)?.let { ScreenTimeStats.add(ctx, ScreenTimeStats.TIMERS, elapsedMs(it, System.currentTimeMillis())) }
         save(ctx, map)
         cancelAlarm(ctx, id)
@@ -193,6 +203,7 @@ object CardTimers {
         val t = map[id] ?: return@synchronized
         if (t.dismissed) return@synchronized
         map[id] = Timer(t.id, t.title, t.durationMs, t.running, t.endAt, t.remainingMs, t.hidden, true)
+        floatDeferred.remove(id)
         save(ctx, map)
         cancelRunning(ctx, id) // если система уже вернула уведомление на место — убрать
     }
@@ -221,6 +232,7 @@ object CardTimers {
             return@synchronized
         }
         map.remove(id)
+        floatDeferred.remove(id)
         ScreenTimeStats.add(ctx, ScreenTimeStats.TIMERS, t.durationMs) // сработал: насчитал всё заданное время
         save(ctx, map)
         cancelRunning(ctx, id)
@@ -255,7 +267,7 @@ object CardTimers {
         var next = -1L
         for (t in load(ctx).values) {
             if (t.hidden || t.dismissed || !t.running || t.endAt <= now) continue // скрытый таймер и таймер со смахнутым уведомлением уведомления «идёт» не имеют
-            if (!NotifyStore.appForeground) postRunning(ctx, t, false)
+            if (!NotifyStore.appForeground) postRunning(ctx, t, floatDeferred.contains(t.id)) // раскрытие, пропавшее при открытом приложении, повторяется один раз
             if (next < 0) next = (t.endAt - now) % 1000L + 20L
         }
         next
@@ -422,6 +434,7 @@ object CardTimers {
     @SuppressLint("MissingPermission")
     private fun postRunning(ctx: Context, t: Timer, float: Boolean = true) {
         if (t.hidden || t.dismissed) return // скрытый таймер и таймер со смахнутым уведомлением: уведомления «идёт» нет
+        if (float) { if (NotifyStore.appForeground) floatDeferred.add(t.id) else floatDeferred.remove(t.id) } // приложение на экране: остров не покажется, раскрыть при сворачивании
         try {
             val n = buildRunning(ctx, t, float) ?: return
             val nm = NotificationManagerCompat.from(ctx)
