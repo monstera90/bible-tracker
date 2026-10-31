@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Версия: 3.0 (31.10) -->
+<!-- Версия: 3.1 (31.10) -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Шаг 4: приём файлов из «Поделиться» (intent-filter ниже) и FileProvider для отправки файлов.
@@ -92,8 +92,11 @@
                 <data android:mimeType="application/xml" />
             </intent-filter>
             <!-- «Открыть с помощью» для PDF и epub из файлового менеджера: файл читается в ридере без добавления в библиотеку
-                 (SharedInbox.accept принимает ACTION_VIEW, страница — handleSharedFile(file, true)). Второй фильтр — для
-                 менеджеров, которые отдают тип */* или octet-stream, но у файла есть расширение. -->
+                 (SharedInbox.accept принимает ACTION_VIEW, страница — handleSharedFile(file, true)). Фильтры разведены по случаям:
+                 1) тип известен (content:// из провайдера; файловые менеджеры пишут и нестандартные типы pdf/epub);
+                 2) тип «любой» или octet-stream, но в адресе есть расширение;
+                 3) тип не задан вовсе (file:// без типа), решает только расширение. Расширения — и строчные, и заглавные
+                 (pathPattern различает регистр). -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -101,7 +104,10 @@
                 <data android:scheme="content" />
                 <data android:scheme="file" />
                 <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/x-pdf" />
                 <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/epub" />
+                <data android:mimeType="application/x-epub+zip" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -114,9 +120,27 @@
                 <data android:pathPattern=".*\\.epub" />
                 <data android:pathPattern=".*\\..*\\.epub" />
                 <data android:pathPattern=".*\\..*\\..*\\.epub" />
+                <data android:pathPattern=".*\\.EPUB" />
                 <data android:pathPattern=".*\\.pdf" />
                 <data android:pathPattern=".*\\..*\\.pdf" />
                 <data android:pathPattern=".*\\..*\\..*\\.pdf" />
+                <data android:pathPattern=".*\\.PDF" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.epub" />
+                <data android:pathPattern=".*\\..*\\.epub" />
+                <data android:pathPattern=".*\\..*\\..*\\.epub" />
+                <data android:pathPattern=".*\\.EPUB" />
+                <data android:pathPattern=".*\\.pdf" />
+                <data android:pathPattern=".*\\..*\\.pdf" />
+                <data android:pathPattern=".*\\..*\\..*\\.pdf" />
+                <data android:pathPattern=".*\\.PDF" />
             </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"
