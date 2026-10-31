@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 102.1 (31.10)
+   Версия: 102.2 (31.10)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -8716,6 +8716,21 @@
       data.customComments.dailyLog.push({date: isoDate(Number(dayTs)), comments: yearCommentsByDay[dayTs]});
     });
 
+    // тренировки: читаемая копия (дата, километры, время, оценка и баллы); для восстановления используются записи wk:* в rawState
+    var workoutList = [];
+    try{
+      ensureWorkoutsStore();
+      if(window.WorkoutsTab && window.WorkoutsTab.exportRecords) workoutList = window.WorkoutsTab.exportRecords();
+    }catch(e){ workoutList = []; }
+    var workoutMeters = 0;
+    workoutList.forEach(function(w){ workoutMeters += w.meters || 0; });
+    data.workouts = {
+      note: "Тренировки (вкладка «Тренировки»): date — дата, km — километры, minutes/totalSeconds — время тренировки, rpe — оценка тяжести 1…10, points — баллы нагрузки (минуты × rpe). Записи с source «импорт» загружены из файла: у них только дата и километры.",
+      totalKm: Math.round(workoutMeters / 10) / 100,
+      count: workoutList.length,
+      list: workoutList
+    };
+
     // rawState — точный технический снимок всех данных приложения (то же, что хранится в
     // localStorage и синхронизируется в облаке). Разделы выше уже собраны в удобном для чтения (в
     // т.ч. нейросетью) виде — этот раздел дублирует ту же информацию без потерь и нужен только для
@@ -8733,6 +8748,7 @@
         "moodlog:*": "отметка настроения: c — значение настроения",
         "goal:*": "личная цель и список её задач",
         "goalcompletion:*": "отметка о выполнении задачи внутри цели",
+        "wk:*": "тренировка: c — {start, end, m (метры), totalMs, rpe, how, …}",
         "task:*": "задача (вне целей)",
         "taskcompletion:*": "отметка о выполнении задачи",
         "comment:*": "запись из списка кастомных комментариев",
@@ -8834,7 +8850,7 @@
 
   function exportSectionHtml(){
     return '<div class="modal-section">' +
-      '<p class="modal-note">Скачает ZIP-архив со всеми вашими данными: прогресс чтения, настроение, достижение целей, задачи, заметки (с картинками), книги и настройки устройства.</p>' +
+      '<p class="modal-note">Скачает ZIP-архив со всеми вашими данными: прогресс чтения, настроение, достижение целей, задачи, тренировки (дата, километры, время, баллы), заметки (с картинками), книги и настройки устройства.</p>' +
       '<p class="modal-note">⚠️ Файл содержит код синхронизации — это ключ шифрования облачных данных. Храните файл как пароль и никому не отправляйте.</p>' +
       '<button class="modal-btn" id="mExportData">Экспортировать личные данные</button>' +
       '</div>';
@@ -10673,6 +10689,14 @@
     put: function(id, data){
       var key = WORKOUT_KEY_PREFIX + id;
       state[key] = {c: data, t: calNextT(state[key])};
+      saveLocalStateNow(); scheduleCloudPush();
+    },
+    // пакетная запись (импорт файла): одно сохранение state на всю пачку; items = [{id, c}]
+    putMany: function(items){
+      items.forEach(function(it){
+        var key = WORKOUT_KEY_PREFIX + it.id;
+        state[key] = {c: it.c, t: calNextT(state[key])};
+      });
       saveLocalStateNow(); scheduleCloudPush();
     },
     remove: function(id){

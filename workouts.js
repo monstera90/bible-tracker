@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 4.0 (30.10)
+   Версия: 5.0 (31.10)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -37,6 +37,11 @@
    Кнопка-индикатор `#wkLoadBtn` (размер обычной кнопки ряда, самая левая в ряду, слева от «1 мес.») показывает сумму баллов за 7 дней: сегодня и 6 предыдущих
    календарных дней по дню начала тренировки (`loadWindowStart`: календарная дата, не 7×24 ч — безопасно при переводе часов; дни выпадают сами в полночь).
    Записи без оценки в сумму не входят (в том числе все записи, сделанные до появления «Нагрузки»). Нажатие на кнопку открывает/закрывает справку.
+   Импорт (кнопка-стрелка во втором ряду кнопок внизу, `#wkImportBtn`, скрытый `<input type=\"file\" id=\"wkImportInput\">`; `onImportFile`) принимает два вида файла, определяет их по содержимому:
+   (1) локальный архив «Экспортировать личные данные» (ZIP с data.json или сам data.json, `readLocalArchive`): берутся ТОЛЬКО записи `wk:*` из `rawState.data` (метры, время, оценка), остальные данные не трогаются; уже имеющиеся id пропускаются, метка `needRpe` не переносится;
+   (2) CSV-выгрузка стороннего трекера (`parseCsv`, колонки `date`, `distance_km`, `type_label`/`type_code`, `has_workout`): берутся только пробежки (`CSV_RUN_LABELS`/`CSV_RUN_CODES`) с километражем > 0 — дата и километры, без времени и баллов. Запись {start (дата и часы:минуты из колонки), end=start, m, rawM, totalMs:0, how:\"imp\", imp:1}, id `imp-ГГГГММДД-ЧЧММ` (повторный импорт не дублирует). Импортированные записи не попадают в `records()` для календаря (нет длительности).
+   Информация — кнопка «i» (`#wkInfoBtn`) открывает экран «Тренировки — кнопки» (`renderInfoScreen`), «домик» возвращает на вкладку.
+   Для экспорта — `WorkoutsTab.exportRecords()` (читаемый раздел `workouts` в data.json, собирает my.js).
    Хранилище — провайдер от my.js (`setStore`, раздел «ТРЕНИРОВКИ» в my.js): запись лежит в личном `state` под ключом
    `wk:<id>` = {c, t} и едет в облако вместе с остальными данными и в экспорт; удаление — тумбстоун {c:null, t}.
    =========================================================================== */
@@ -49,6 +54,8 @@
   var LOAD_DAYS = 7;                           // окно суммы баллов: сегодня и 6 предыдущих дней
   var LOAD_CHECK_MS = 60000;                   // как часто пересчитывать кнопку-индикатор (дни выпадают сами)
   var RPE_LABELS = ["Очень легко", "Легко", "Умеренно", "Немного тяжело", "Тяжело", "Тяжело", "Очень тяжело", "Очень тяжело", "Почти предел", "Максимум усилий"];
+  var CSV_RUN_LABELS = ["бег"];                // какие занятия из CSV считаются пробежкой (type_label)
+  var CSV_RUN_CODES = ["1", "8"];             // запасной признак, если type_label пуст (type_code)
   var POLL_MS = 500;
   var TAB_MARK_MS = 2000;                      // как часто обновлять подсветку язычка вкладки
   var PEND_CACHE_MS = 1500;
@@ -72,6 +79,10 @@
   var PAUSE_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>';
   var PLAY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"></path></svg>';
+  var INFO_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"></circle><path d="M12 11v6"></path><circle cx="12" cy="7.7" r="1" fill="currentColor" stroke="none"></circle></svg>';
+  var IMPORT_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V10"></path><path d="M7.5 13.5L12 9l4.5 4.5"></path><path d="M4.5 5.5h15"></path></svg>';
   var STOP_ICON_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>';
 
   var STORE = null;        // провайдер хранилища от my.js: {list, put, remove}
@@ -90,6 +101,9 @@
   var lastLoadCheck = 0;   // когда в последний раз пересчитывали кнопку-индикатор
   var pendCache = null;    // {at, val}: короткий кэш pendingRecord (чтобы не перебирать все записи на каждом тике)
   var tabMarkTimer = null; // таймер подсветки язычка вкладки
+  var infoScreen = false;  // открыт экран «Тренировки — кнопки» (кнопка «i»)
+  var importMsg = "";      // итог последнего импорта (карточка над панелью записи; нажатие закрывает)
+  var importBusy = false;  // идёт чтение файла импорта
 
   // ---------- вспомогательное ----------
   function container(){ return document.getElementById("settingsTabContent"); }
@@ -274,7 +288,7 @@
       ".wk-root{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;}" +
       ".wk-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:none;padding-bottom:12px;}" +
       ".wk-scroll::-webkit-scrollbar{display:none;width:0;height:0;}" +
-      "#wkLive{flex:none;max-height:60%;overflow-y:auto;margin-bottom:calc(var(--fab-size,36px) + 2 * var(--fab-gap,6px));}" +
+      "#wkLive{flex:none;max-height:60%;overflow-y:auto;margin-bottom:calc(2 * var(--fab-size,36px) + 3 * var(--fab-gap,6px));}" +
       "#wkLive .wk-card,#wkLive .wk-msg{margin-bottom:0;}" +
       "#wkLive > * + *{margin-top:var(--fab-gap,6px);}" +
       ".wk-per{width:auto;min-width:40px;padding:0 6px;font:inherit;font-size:11px;white-space:nowrap;}" +
@@ -339,13 +353,20 @@
       }).join("") +
       '<button type="button" class="mdeditor-fab-btn' + (active ? ' wk-active' : '') + (pendingRecord() && !active ? ' wk-blocked' : '') + '" id="wkRecBtn" title="' + (active ? "Идёт запись" : "Записать тренировку") + '">' + REC_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="wkHomeStub" tabindex="-1" aria-disabled="true">' + HOME_ICON_SVG + '</button>' +
-      '</div>';
+      '</div>' +
+      // второй ряд — над основным (в один ряд все кнопки на узком экране не помещаются)
+      '<div class="mdeditor-fab-row" style="bottom:calc(var(--fab-size,36px) + 2 * var(--fab-gap,6px));">' +
+      '<button type="button" class="mdeditor-fab-btn" id="wkInfoBtn" title="Информация" aria-label="Информация">' + INFO_ICON_SVG + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="wkImportBtn" title="Загрузить тренировки из файла" aria-label="Загрузить тренировки из файла">' + IMPORT_ICON_SVG + '</button>' +
+      '</div>' +
+      '<input type="file" id="wkImportInput" accept=".zip,.json,.csv,text/csv,application/zip,application/json" style="display:none;">';
   }
 
   function render(){
     var c = container();
     if(!c) return;
     pendCache = null;
+    infoScreen = false;
     ensureStyle();
     loadPeriod();
     clampEnd();
@@ -356,7 +377,7 @@
       '<div class="wk-nav"><button type="button" id="wkPrev" aria-label="Назад">‹</button><div class="wk-title">' + esc(periodTitle()) +
       '</div><button type="button" id="wkNext" aria-label="Вперёд"' + (endMonth.getTime() >= curMonth().getTime() ? " disabled" : "") + '>›</button></div>' +
       '<div class="wk-total"><div class="wk-km">' + esc(fmtKm(sumM(recs))) + '</div><div class="wk-sub">' +
-        (recs.length ? recs.length + " " + plural(recs.length, "тренировка", "тренировки", "тренировок") + " · " + esc(fmtTotal(sumMs(recs))) : "тренировок нет") +
+        (recs.length ? recs.length + " " + plural(recs.length, "тренировка", "тренировки", "тренировок") + (sumMs(recs) > 0 ? " · " + esc(fmtTotal(sumMs(recs))) : "") : "тренировок нет") +
       '</div></div>' +
       byMonthHtml(recs) +
       listHtml(recs) +
@@ -403,14 +424,15 @@
       var sub = [];
       if(rpeOk(r.rpe)) sub.push(minutesOf(r) + " мин × " + r.rpe + " = " + loadOf(r) + " " + pointsWord(loadOf(r)));
       else if(r.id === pid) sub.push("ждёт оценки");
-      if(r.how === "raw") sub.push("по GPS");
+      if(r.imp) sub.push("импорт");
+      else if(r.how === "raw") sub.push("по GPS");
       if(num(r.jumps) > 0) sub.push("выбросов GPS: " + Math.round(num(r.jumps)));
       if(num(r.lostMs) >= 1000) sub.push("без учёта км: " + fmtDur(r.lostMs));
       var open = openedId === r.id;
       return '<div class="wk-row" data-id="' + esc(r.id) + '">' +
         '<span class="wk-date">' + esc(dayLabel(r.start)) + ' <span class="wk-sub">' + esc(fmtHM(r.start)) + (sub.length ? " · " + esc(sub.join(" · ")) : "") + '</span></span>' +
         '<span class="wk-dist">' + esc(fmtKm(r.m)) + '</span>' +
-        '<span class="wk-time">' + esc(fmtClock(r.totalMs)) + '</span></div>' +
+        '<span class="wk-time">' + (num(r.totalMs) > 0 ? esc(fmtClock(r.totalMs)) : "") + '</span></div>' +
         (open ? '<button type="button" class="wk-del" data-del="' + esc(r.id) + '">Удалить</button>' : "");
     }).join("");
   }
@@ -455,6 +477,17 @@
       lb.classList.toggle("on", infoOpen);
       paintLive(true);
     });
+    var ib = document.getElementById("wkInfoBtn");
+    if(ib) ib.addEventListener("click", renderInfoScreen);
+    var imb = document.getElementById("wkImportBtn"), inp = document.getElementById("wkImportInput");
+    if(imb && inp){
+      imb.addEventListener("click", function(){ if(!importBusy) inp.click(); });
+      inp.addEventListener("change", function(){
+        var f = inp.files && inp.files[0];
+        inp.value = "";
+        if(f) onImportFile(f);
+      });
+    }
     bindSwipe(c);
   }
 
@@ -613,7 +646,7 @@
     var recBtn = document.getElementById("wkRecBtn");
     if(recBtn) recBtn.classList.toggle("wk-blocked", !!pendAny && !active);
     var shape = (active ? st.status + ":" + (st.fix ? 1 : 0) + ":" + ((st.gaps || []).length) : "idle") + "|" + (res ? res.id : "") + "|" + message + messageAction +
-      "|" + (pend ? pend.id + ":" + rpeSel : "") + "|" + (infoOpen ? "i" : "");
+      "|" + (pend ? pend.id + ":" + rpeSel : "") + "|" + (infoOpen ? "i" : "") + "|" + importMsg;
     if(!force && shape === lastShape && active){
       updateLiveNumbers(box, st);
       return;
@@ -622,6 +655,7 @@
     lastShape = shape;
     var html = "";
     if(infoOpen) html += infoCardHtml();
+    if(importMsg) html += '<div class="wk-msg" id="wkImportMsg">' + esc(importMsg) + '</div>';
     if(message){
       html += '<div class="wk-msg">' + esc(message) +
         (messageAction === "gps" ? '<br><button type="button" id="wkGpsBtn">Открыть настройки геолокации</button>' : "") + '</div>';
@@ -636,6 +670,8 @@
     if(pb) pb.addEventListener("click", function(){ var n = nat(); if(n) try{ n.workoutPause(); }catch(e){} pollOnce(true); });
     var sb = document.getElementById("wkStopBtn");
     if(sb) sb.addEventListener("click", onStopTap);
+    var im = document.getElementById("wkImportMsg");
+    if(im) im.addEventListener("click", function(){ importMsg = ""; lastShape = ""; paintLive(true); });
     var ic = document.getElementById("wkInfoCard");
     if(ic) ic.addEventListener("click", function(){
       infoOpen = false;
@@ -753,6 +789,203 @@
       gapsHtml(r.gaps) + '</div>';
   }
 
+  // ---------- экран «Тренировки — кнопки» (кнопка «i») ----------
+  function renderInfoScreen(){
+    var c = container();
+    if(!c) return;
+    infoScreen = true;
+    function row(svg, html){
+      return '<div class="task-info-item"><div class="task-info-icon">' + svg + '</div><div class="task-info-text">' + html + '</div></div>';
+    }
+    var html = "";
+    html += row(REC_ICON_SVG, "Вкладка записывает пробежки по GPS и считает километры. Запись («красный кружок») работает только в приложении для Android: поиск спутников → «Связь установлена» → пауза/стоп в панели или в уведомлении. После остановки оцените, насколько тяжёлой была тренировка (1…10).");
+    html += row('<span style="font-size:12px;font-weight:bold;">0</span>', "Число слева в нижнем ряду — нагрузка за 7 дней: баллы = минуты × оценка. Нажатие открывает пояснение.");
+    html += row('<span style="font-size:11px;font-weight:bold;">1 мес.</span>', "Период: месяц, 3 месяца, полгода, год. Стрелки ‹ › и свайп листают назад и вперёд, сверху — сумма километров и число тренировок. Нажатие на строку записи открывает «Удалить» (нужно нажать дважды).");
+    html += row(IMPORT_ICON_SVG, "Загружает тренировки из файла. Подходят два вида: архив «Экспортировать личные данные» (ZIP или data.json) — из него берутся только тренировки, остальные данные не меняются; и CSV-выгрузка стороннего трекера — из неё берутся только пробежки: дата и километры (время и баллы не переносятся). Уже имеющиеся тренировки повторно не добавляются.");
+    html += row(INFO_ICON_SVG, "Эта справка. Тренировки входят в экспорт личных данных: дата, километры, время и баллы.");
+    c.innerHTML =
+      '<h3 class="common-tab-title">Тренировки — кнопки</h3>' +
+      '<div class="task-info-body">' + html + '</div>' +
+      '<div class="mdeditor-fab-row">' +
+        '<button type="button" class="mdeditor-fab-btn" id="wkInfoHomeBtn" title="Назад к тренировкам">' + HOME_ICON_SVG + '</button>' +
+      '</div>';
+    var hb = document.getElementById("wkInfoHomeBtn");
+    if(hb) hb.addEventListener("click", function(){
+      // «Действие ВПЕРЁД»: шаг «назад» вернёт на этот экран — тот же приём, что у инструкции вкладки «Книги»
+      if(window.AppNav) window.AppNav.push(function(){ renderInfoScreen(); });
+      render();
+    });
+  }
+
+  // ---------- импорт тренировок из файла ----------
+  function readFileBytes(file){
+    return new Promise(function(resolve, reject){
+      var fr = new FileReader();
+      fr.onload = function(){ resolve(new Uint8Array(fr.result)); };
+      fr.onerror = function(){ reject(new Error("read")); };
+      fr.readAsArrayBuffer(file);
+    });
+  }
+  function decodeText(bytes){
+    var t = new TextDecoder("utf-8").decode(bytes);
+    return t.charCodeAt(0) === 0xFEFF ? t.slice(1) : t;
+  }
+  function localDate(ts){
+    var d = new Date(ts);
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  }
+
+  // CSV → массив строк-массивов (кавычки, \r\n, разделитель «,» или «;» — по первой строке)
+  function csvRows(text){
+    var first = text.split("\n", 1)[0];
+    var sep = (first.split(";").length > first.split(",").length) ? ";" : ",";
+    var rows = [], row = [], cur = "", q = false;
+    for(var i = 0; i < text.length; i++){
+      var ch = text.charAt(i);
+      if(q){
+        if(ch === '"'){ if(text.charAt(i + 1) === '"'){ cur += '"'; i++; } else q = false; }
+        else cur += ch;
+      } else if(ch === '"') q = true;
+      else if(ch === sep){ row.push(cur); cur = ""; }
+      else if(ch === "\n"){ row.push(cur); cur = ""; rows.push(row); row = []; }
+      else if(ch !== "\r") cur += ch;
+    }
+    if(cur !== "" || row.length){ row.push(cur); rows.push(row); }
+    return rows;
+  }
+
+  // CSV стороннего трекера: только пробежки с километражем; берётся дата (с часами и минутами из неё) и километры
+  function parseCsv(text){
+    var rows = csvRows(text);
+    if(!rows.length) throw new Error("csv_format");
+    var head = rows[0].map(function(h){ return String(h).trim().toLowerCase(); });
+    var iDate = head.indexOf("date"), iKm = head.indexOf("distance_km");
+    if(iDate < 0 || iKm < 0) throw new Error("csv_format");
+    var iLabel = head.indexOf("type_label"), iCode = head.indexOf("type_code"), iHas = head.indexOf("has_workout");
+    var out = [], used = {};
+    for(var r = 1; r < rows.length; r++){
+      var row = rows[r];
+      if(iHas >= 0 && String(row[iHas] || "").trim() !== "1") continue;
+      var label = iLabel >= 0 ? String(row[iLabel] || "").trim().toLowerCase() : "";
+      var code = iCode >= 0 ? String(row[iCode] || "").trim() : "";
+      var isRun = label ? CSV_RUN_LABELS.indexOf(label) >= 0 : CSV_RUN_CODES.indexOf(code) >= 0;
+      if(!isRun) continue;
+      var km = parseFloat(String(row[iKm] || "").replace(",", "."));
+      if(!(km > 0)) continue;
+      var m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/.exec(String(row[iDate] || "").trim());
+      if(!m) continue;
+      var hh = m[4] != null ? parseInt(m[4], 10) : 12, mi = m[5] != null ? parseInt(m[5], 10) : 0;
+      var start = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10), hh, mi, 0, 0).getTime();
+      if(!isFinite(start)) continue;
+      var id = "imp-" + m[1] + m[2] + m[3] + "-" + pad2(hh) + pad2(mi), n = 1, base = id;
+      while(used[id]){ n++; id = base + "-" + n; }
+      used[id] = true;
+      var meters = Math.round(km * 1000);
+      out.push({ id: id, c: { start: start, end: start, m: meters, rawM: meters, totalMs: 0, lostMs: 0, gaps: [], how: "imp", imp: 1 } });
+    }
+    return out;
+  }
+
+  // запись из локального архива → безопасный вид (как у drain), без метки ожидания оценки
+  function cleanRecord(c){
+    if(!c || typeof c !== "object" || typeof c.start !== "number" || !isFinite(c.start)) return null;
+    var o = {
+      start: c.start, end: num(c.end), m: Math.round(num(c.m)), rawM: Math.round(num(c.rawM)),
+      totalMs: Math.round(num(c.totalMs)), lostMs: Math.round(num(c.lostMs)),
+      gaps: Array.isArray(c.gaps) ? c.gaps.filter(function(g){ return Array.isArray(g) && g.length === 2; }) : [],
+      how: (c.how === "map" || c.how === "imp") ? c.how : "raw"
+    };
+    if(num(c.jumps) > 0) o.jumps = Math.round(num(c.jumps));
+    if(rpeOk(c.rpe)) o.rpe = Number(c.rpe);
+    if(c.imp) o.imp = 1;
+    return o;
+  }
+  function recordsFromRawState(raw){
+    var out = [];
+    Object.keys(raw).forEach(function(k){
+      if(k.indexOf("wk:") !== 0) return;
+      var rec = raw[k];
+      if(!rec || !rec.c) return; // тумбстоуны не переносим
+      var c = cleanRecord(rec.c);
+      if(c) out.push({ id: k.slice(3), c: c });
+    });
+    return out;
+  }
+  function readLocalArchive(bytes, isZip){
+    function fromJson(text){
+      var parsed;
+      try{ parsed = JSON.parse(text); }catch(e){ throw new Error("bad_json"); }
+      if(!parsed || !parsed.rawState || typeof parsed.rawState.data !== "object" || !parsed.rawState.data) throw new Error("no_raw_state");
+      return recordsFromRawState(parsed.rawState.data);
+    }
+    if(!isZip) return Promise.resolve(fromJson(decodeText(bytes)));
+    if(!window.MiniZip || !window.MiniZip.extractAllFiles) return Promise.reject(new Error("no_zip_module"));
+    return window.MiniZip.extractAllFiles(bytes).then(function(entries){
+      var entry = null;
+      entries.forEach(function(e){ if(/(^|\/)data\.json$/i.test(e.path)) entry = e; });
+      if(!entry) throw new Error("no_data_json");
+      return fromJson(decodeText(entry.data));
+    });
+  }
+
+  function importErrorText(err){
+    var code = err && err.message;
+    if(code === "csv_format") return "Не удалось импортировать: в CSV нет колонок date и distance_km.";
+    if(code === "no_raw_state") return "Не удалось импортировать: в файле нет данных приложения (возможно, архив сделан старой версией).";
+    if(code === "no_data_json") return "Не удалось импортировать: в архиве нет data.json.";
+    if(code === "no_zip_module") return "Не удалось прочитать ZIP: модуль не загружен.";
+    return "Не удалось прочитать файл. Подходят архив «Экспортировать личные данные» (ZIP или data.json) и CSV-выгрузка с тренировками.";
+  }
+
+  function applyImport(list, kindLabel){
+    if(!STORE) throw new Error("no_store");
+    var have = {};
+    allRecords().forEach(function(r){ have[r.id] = true; });
+    var items = [], skipped = 0, meters = 0;
+    list.forEach(function(it){
+      if(have[it.id]){ skipped++; return; }
+      have[it.id] = true;
+      items.push(it);
+      meters += num(it.c.m);
+    });
+    if(items.length){
+      if(typeof STORE.putMany === "function") STORE.putMany(items);
+      else items.forEach(function(it){ STORE.put(it.id, it.c); });
+    }
+    pendCache = null;
+    var text;
+    if(!list.length) text = "В файле не найдено тренировок для импорта.";
+    else {
+      text = kindLabel + ": добавлено " + items.length + " " + plural(items.length, "тренировка", "тренировки", "тренировок") +
+        (items.length ? " (" + fmtKm(meters) + ")" : "");
+      if(skipped) text += ", уже были: " + skipped;
+      text += ".";
+    }
+    return text;
+  }
+
+  function onImportFile(file){
+    if(importBusy) return;
+    importBusy = true;
+    importMsg = "Читаю файл…";
+    lastShape = ""; paintLive(true);
+    readFileBytes(file).then(function(bytes){
+      var isZip = bytes.length > 3 && bytes[0] === 0x50 && bytes[1] === 0x4B;
+      var head = isZip ? "" : decodeText(bytes.subarray(0, Math.min(bytes.length, 64))).replace(/^\s+/, "");
+      if(isZip) return readLocalArchive(bytes, true).then(function(l){ return { list: l, label: "Архив приложения" }; });
+      if(head.charAt(0) === "{") return readLocalArchive(bytes, false).then(function(l){ return { list: l, label: "Архив приложения" }; });
+      return { list: parseCsv(decodeText(bytes)), label: "CSV" };
+    }).then(function(res){
+      importMsg = applyImport(res.list, res.label);
+    }).catch(function(err){
+      importMsg = importErrorText(err);
+    }).then(function(){
+      importBusy = false;
+      render(); // новые записи сразу видны в итогах
+      lastShape = ""; paintLive(true);
+    });
+  }
+
   // ---------- забрать готовые записи у оболочки ----------
   function drain(){
     var n = nat();
@@ -790,6 +1023,7 @@
     refreshTabMark();
     var btn = document.getElementById("settingsTabWorkoutsBtn");
     if(!btn || !btn.classList.contains("active")) return;
+    if(infoScreen) return;
     var a = document.activeElement;
     if(a && a.tagName === "INPUT") return;
     render();
@@ -797,11 +1031,30 @@
 
   window.WorkoutsTab = {
     setStore: function(s){ STORE = s; pendCache = null; startTabMark(); },
-    render: function(){ infoOpen = false; saveLastResult(null); render(); }, // итоговая карточка живёт до ухода с вкладки
+    render: function(){ infoOpen = false; importMsg = ""; saveLastResult(null); render(); }, // итоговая карточка живёт до ухода с вкладки
     drain: drain,
     // для календаря («трекеры занятий»): записи как есть — [{id, start, end, totalMs (мс чистого движения), m (метры)}], новые сверху
     records: function(){
-      return allRecords().map(function(r){ return { id: r.id, start: r.start, end: num(r.end), totalMs: num(r.totalMs), m: num(r.m) }; });
+      return allRecords().filter(function(r){ return !r.imp; }).map(function(r){ return { id: r.id, start: r.start, end: num(r.end), totalMs: num(r.totalMs), m: num(r.m) }; });
+    },
+    // для экспорта (раздел `workouts` в data.json): читаемые записи, старые сверху
+    exportRecords: function(){
+      return allRecords().slice().reverse().map(function(r){
+        var o = {
+          id: r.id, date: localDate(r.start), start: new Date(r.start).toISOString(),
+          km: Math.round(num(r.m) / 10) / 100, meters: Math.round(num(r.m)),
+          source: r.imp ? "импорт" : (r.how === "map" ? "GPS + карта" : "GPS")
+        };
+        if(!r.imp){
+          o.rawMeters = Math.round(num(r.rawM));
+          o.totalSeconds = Math.round(num(r.totalMs) / 1000);
+          o.minutes = minutesOf(r);
+          o.lostSeconds = Math.round(num(r.lostMs) / 1000);
+          if(num(r.jumps) > 0) o.gpsJumps = Math.round(num(r.jumps));
+          if(rpeOk(r.rpe)){ o.rpe = Number(r.rpe); o.points = loadOf(r); }
+        }
+        return o;
+      });
     },
     refreshIfOpen: refreshIfOpen,
     refreshTabMark: refreshTabMark,
