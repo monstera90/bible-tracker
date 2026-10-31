@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 5.0 (31.10)
+   Версия: 5.1 (31.10)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -374,7 +374,7 @@
       '<div class="wk-nav"><button type="button" id="wkPrev" aria-label="Назад">‹</button><div class="wk-title">' + esc(periodTitle()) +
       '</div><button type="button" id="wkNext" aria-label="Вперёд"' + (endMonth.getTime() >= curMonth().getTime() ? " disabled" : "") + '>›</button></div>' +
       '<div class="wk-total"><div class="wk-km">' + esc(fmtKm(sumM(recs))) + '</div><div class="wk-sub">' +
-        (recs.length ? recs.length + " " + plural(recs.length, "тренировка", "тренировки", "тренировок") + (sumMs(recs) > 0 ? " · " + esc(fmtTotal(sumMs(recs))) : "") : "тренировок нет") +
+        summaryHtml(recs) +
       '</div></div>' +
       byMonthHtml(recs) +
       listHtml(recs) +
@@ -388,6 +388,16 @@
     pollOnce(true);
     startPoll();
     refreshTabMark();
+  }
+
+  // «86 тренировок · из них 2 · 21 мин»: время есть не у всех записей (импортированные без времени)
+  function summaryHtml(recs){
+    if(!recs.length) return "тренировок нет";
+    var timed = recs.filter(function(r){ return num(r.totalMs) > 0; });
+    var out = recs.length + " " + plural(recs.length, "тренировка", "тренировки", "тренировок");
+    if(!timed.length) return out;
+    if(timed.length < recs.length) out += " · из них " + timed.length;
+    return out + " · " + esc(fmtTotal(sumMs(timed)));
   }
 
   function plural(n, a, b, c){
