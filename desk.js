@@ -1,6 +1,6 @@
 /* ===========================================================================
    desk.js
-   Версия: 1.0 (31.10)
+   Версия: 2.0 (31.10)
    Вкладка «Стол» (set2s_14, кнопка settingsTabSet2Btn14; в стеке второго набора стоит над «Изменением размера
    изображения»): несколько картинок рядом друг с другом, как на столе, и несколько страниц-«столов», которые
    листаются. Точка входа — window.initDeskModule(deps) → { renderSettingsTabDesk }; my.js зовёт её из switchSettingsTab.
@@ -20,6 +20,8 @@
 
    Старый WebView (Android 5.0): только ES5, touch-события (+ мышь для браузера), без pointer events, без flex-gap,
    без canvas.toBlob (картинки идут через toDataURL), без Element.closest.
+   Файлы из системного выбора Android (content://) бывают без расширения и с пустым `type`, поэтому тип определяется по
+   сигнатуре файла (`sniffMime`), а не по имени/`file.type`; декодирование — через blob-URL, как в imgresize.js.
    =========================================================================== */
 
 window.initDeskModule = function(deps){
@@ -146,24 +148,66 @@ window.initDeskModule = function(deps){
   }
 
   // ---------------------------------------------------------------- чтение и уменьшение картинки
-  function isImageFile(f){
-    return /^image\//i.test(f.type || "") || /\.(jpe?g|png|gif|webp|bmp)$/i.test(f.name || "");
+  // Явно не картинка (pdf, видео, текст): тип известен и не image/*. Пустой тип и application/octet-stream
+  // пропускаем — так приходят файлы из системного выбора Android, настоящий тип узнаём по сигнатуре (sniffMime).
+  function isClearlyNotImage(f){
+    var t = String(f.type || "").toLowerCase();
+    return !!t && t.indexOf("image/") !== 0 && t !== "application/octet-stream";
   }
+  // Тип картинки по первым байтам файла; "" — не узнали.
+  function sniffMime(u8){
+    function at(i, str){
+      for(var k = 0; k < str.length; k++) if(u8[i + k] !== str.charCodeAt(k)) return false;
+      return true;
+    }
+    if(!u8 || u8.length < 12) return "";
+    if(u8[0] === 0xFF && u8[1] === 0xD8 && u8[2] === 0xFF) return "image/jpeg";
+    if(u8[0] === 0x89 && at(1, "PNG")) return "image/png";
+    if(at(0, "GIF8")) return "image/gif";
+    if(at(0, "RIFF") && at(8, "WEBP")) return "image/webp";
+    if(at(0, "BM")) return "image/bmp";
+    if(at(4, "ftyp")){
+      var brand = String.fromCharCode(u8[8], u8[9], u8[10], u8[11]);
+      if(/^(heic|heix|hevc|hevx|heim|heis|mif1|msf1)$/.test(brand)) return "image/heic";
+      if(/^avi[fs]$/.test(brand)) return "image/avif";
+    }
+    return "";
+  }
+  // cb(res, why): res = {url, w, h} (data:URL уже уменьшенной картинки) или null и причина why для сообщения.
   function readAndFit(file, cb){
     var fr = new FileReader();
-    fr.onerror = function(){ cb(null); };
+    fr.onerror = function(){ cb(null, "файл не читается"); };
     fr.onload = function(){
-      var srcUrl = String(fr.result || "");
+      var mime = "";
+      try{ mime = sniffMime(new Uint8Array(fr.result)); }catch(e){ mime = ""; }
+      if(!mime){
+        var t = String(file.type || "").toLowerCase();
+        if(/^image\/(jpeg|png|gif|webp|bmp)$/.test(t)) mime = t; // сигнатуру не узнали, но система уверена в типе
+      }
+      if(!mime){ cb(null, "это не картинка"); return; }
+      var blob = null, objUrl = null, URLApi = window.URL || window.webkitURL;
+      try{
+        blob = new Blob([fr.result], { type: mime });
+        objUrl = URLApi.createObjectURL(blob);
+      }catch(e){ cb(null, "не удалось подготовить файл"); return; }
+      function done(res, why){
+        try{ URLApi.revokeObjectURL(objUrl); }catch(e){}
+        cb(res, why);
+      }
       var img = new Image();
-      img.onerror = function(){ cb(null); };
+      img.onerror = function(){
+        done(null, (mime === "image/heic" || mime === "image/avif") ? "формат " + (mime === "image/heic" ? "HEIC" : "AVIF") + " не открывается" : "картинка не открылась");
+      };
       img.onload = function(){
         var nw = img.naturalWidth || img.width, nh = img.naturalHeight || img.height;
-        if(!(nw > 0 && nh > 0)){ cb(null); return; }
-        var isPng = /^data:image\/png/i.test(srcUrl);
-        var isJpg = /^data:image\/jpe?g/i.test(srcUrl);
+        if(!(nw > 0 && nh > 0)){ done(null, "картинка не открылась"); return; }
+        var isPng = mime === "image/png";
         var scale = Math.min(1, MAX_SIDE / Math.max(nw, nh));
-        if(scale === 1 && (isPng || isJpg) && file.size <= KEEP_ORIGINAL_BYTES){
-          cb({ url: srcUrl, w: nw, h: nh });
+        if(scale === 1 && (isPng || mime === "image/jpeg") && blob.size <= KEEP_ORIGINAL_BYTES){
+          var fr2 = new FileReader();
+          fr2.onerror = function(){ done(null, "файл не читается"); };
+          fr2.onload = function(){ done({ url: String(fr2.result || ""), w: nw, h: nh }); };
+          fr2.readAsDataURL(blob);
           return;
         }
         var cw = Math.max(1, Math.round(nw * scale)), ch = Math.max(1, Math.round(nh * scale));
@@ -174,13 +218,13 @@ window.initDeskModule = function(deps){
           if(!isPng){ ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, cw, ch); }
           ctx.drawImage(img, 0, 0, cw, ch);
           var out = isPng ? cv.toDataURL("image/png") : cv.toDataURL("image/jpeg", 0.86);
-          if(out.indexOf("data:image/") !== 0){ cb(null); return; }
-          cb({ url: out, w: cw, h: ch });
-        }catch(e){ cb(null); }
+          if(out.indexOf("data:image/") !== 0){ done(null, "не удалось уменьшить"); return; }
+          done({ url: out, w: cw, h: ch });
+        }catch(e){ done(null, "не хватило памяти на уменьшение"); }
       };
-      img.src = srcUrl;
+      img.src = objUrl;
     };
-    try{ fr.readAsDataURL(file); }catch(e){ cb(null); }
+    try{ fr.readAsArrayBuffer(file); }catch(e){ cb(null, "файл не читается"); }
   }
 
   // ---------------------------------------------------------------- DOM
@@ -224,13 +268,13 @@ window.initDeskModule = function(deps){
   function sheetEl(){ return q("deskSheet"); }
   function esc(s){ return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
 
-  function toast(text){
+  function toast(text, ms){
     var t = q("deskToast");
     if(!t) return;
     t.textContent = text;
     t.className = "desk-toast on";
     if(toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(function(){ var x = q("deskToast"); if(x) x.className = "desk-toast"; }, 2400);
+    toastTimer = setTimeout(function(){ var x = q("deskToast"); if(x) x.className = "desk-toast"; }, ms || 2400);
   }
 
   function disarm(){
@@ -478,27 +522,28 @@ window.initDeskModule = function(deps){
 
   function addFiles(files){
     var list = [];
-    for(var i = 0; i < files.length; i++) if(isImageFile(files[i])) list.push(files[i]);
+    for(var i = 0; i < files.length; i++) if(!isClearlyNotImage(files[i])) list.push(files[i]);
     if(!list.length){ toast("Нужны файлы-картинки."); return; }
-    var pageId = page().id, added = 0, failed = 0, full = false, idx = 0;
+    var pageId = page().id, added = 0, failed = 0, full = false, idx = 0, firstWhy = "";
     function next(){
       if(idx >= list.length){
         var msg = added ? ("Добавлено: " + added) : "Ничего не добавлено";
-        if(failed) msg += ". Не удалось прочитать: " + failed;
+        if(failed) msg += ". Не удалось добавить: " + failed + (firstWhy ? " (" + firstWhy + ")" : "");
         if(full) msg += ". На странице уже " + MAX_ITEMS + " картинок";
-        toast(msg + ".");
+        toast(msg + ".", failed ? 6000 : 2400);
         return;
       }
+      toast("Добавляю " + (idx + 1) + " из " + list.length + "…", 20000);
       var f = list[idx++];
       var pg = null;
       for(var p = 0; p < data.pages.length; p++) if(data.pages[p].id === pageId) pg = data.pages[p];
       if(!pg){ return; } // страницу удалили, пока читались файлы
       if(pg.items.length >= MAX_ITEMS){ full = true; idx = list.length; next(); return; }
-      readAndFit(f, function(res){
-        if(!res){ failed++; next(); return; }
+      readAndFit(f, function(res, why){
+        if(!res){ failed++; if(!firstWhy) firstWhy = why || ""; next(); return; }
         var id = uid();
         idbPut(id, res.url, function(ok){
-          if(!ok){ failed++; next(); return; }
+          if(!ok){ failed++; if(!firstWhy) firstWhy = "не удалось сохранить на устройстве"; next(); return; }
           imgCache[id] = res.url;
           var sz = stageSize();
           var hr = sz.w > 0 ? sz.h / sz.w : 1.3;
