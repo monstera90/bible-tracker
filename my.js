@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 115.1 (01.11)
+   Версия: 115.2 (01.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -10366,9 +10366,20 @@
     });
     var claudeBtn = document.getElementById(CLAUDE_STACK_BTN_ID);
     if(claudeBtn) claudeBtn.classList.remove("active"); // нижние язычки рядов не подсвечиваются
+    updateNotesWide();
     // меняет количество видимых язычков в #settingsTabs — пересчитываем заплатку (см.
     // updateSettingsCornerPatchHeight выше); единственный вызывающий.
     updateSettingsCornerPatchHeight();
+  }
+  // «Мой блокнот» без открытого бокового ряда: колонки язычков нет, окно растягивается на её ширину (класс notes-wide на оверлее, modals.css)
+  function updateNotesWide(){
+    if(!settingsModalOverlay) return;
+    var on = currentSettingsTab === NOTES_TAB_KEY && !bottomAltMode && !tasksStackMode && !infoStackMode && !toolsStackMode && !activitiesStackMode && !claudeStackMode;
+    if(on === settingsModalOverlay.classList.contains("notes-wide")) return;
+    settingsModalOverlay.classList.toggle("notes-wide", on);
+    if(settingsModalOverlay.classList.contains("open")){
+      try{ window.dispatchEvent(new Event("resize")); }catch(e){}
+    }
   }
   // Окно настроек всегда одного размера (см. .settings-modal-box в modals.css) — высота фиксирована
   // и не зависит от вкладки, поэтому верхний край окна не "прыгает" при переключении вкладок. Если
@@ -10901,6 +10912,7 @@
     // набор вкладок по клику на колесико
     if(BOTTOM_ALT_TAB_IDS){
       syncBottomAltModeForTab(tab);
+      updateNotesWide();
       Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
         var altBtn = document.getElementById(BOTTOM_ALT_TAB_IDS[key]);
         if(altBtn) altBtn.classList.toggle("active", tab === key);
@@ -10922,7 +10934,7 @@
     });
     Object.keys(SET2_TAB_IDS).forEach(function(key){
       var btn = document.getElementById(SET2_TAB_IDS[key]);
-      if(btn) btn.classList.toggle("active", tab === key);
+      if(btn) btn.classList.toggle("active", tab === key && key !== NOTES_TAB_KEY); // «Мои заметки» не подсвечивается
     });
     Object.keys(SET2_EXTRA_TAB_IDS).forEach(function(key){
       var btn = document.getElementById(SET2_EXTRA_TAB_IDS[key]);
