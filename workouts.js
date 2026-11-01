@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 6.0 (01.11)
+   Версия: 6.1 (01.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -57,7 +57,7 @@
   var CSV_RUN_LABELS = ["бег"];                // какие занятия из CSV считаются пробежкой (type_label)
   var CSV_RUN_CODES = ["1", "8"];             // запасной признак, если type_label пуст (type_code)
   var POLL_MS = 500;
-  var TIP_DAY_KEY = "workoutsTipDay_v1";       // {day:"ГГГГ-ММ-ДД", id}: совет сегодняшнего дня (только это устройство)
+  var TIP_DAY_KEY = "workoutsTipDay_v1";       // {day:"ГГГГ-ММ-ДД", id, ref}: совет сегодняшнего дня и id оценённой тренировки, под которую он выбран (только это устройство)
   var TIP_SEEN_KEY = "workoutsTipSeen_v1";     // id советов, уже показанных в текущем круге (без повторов, пока не покажутся все подходящие)
   var TIP_CTX_DAYS = 3;                        // оценка и дистанция берутся от последней оценённой тренировки не старше стольких календарных дней
   var TIP_LONG_DAYS = 90;                      // «длинная» пробежка = не короче медианы пробежек за столько дней
@@ -121,7 +121,7 @@
   var tipHidden = false;   // карточка совета закрыта нажатием (до следующего открытия вкладки)
   var tipEdit = null;      // форма совета: {id, ts, cat, rpe, dist, text}
   var tipDelArm = null;    // {id, timer}: первое нажатие «Удалить» у совета сделано
-  var tipDayMem = null;    // {day, id}: совет дня в памяти — запасной вариант, если localStorage недоступен
+  var tipDayMem = null;    // {day, id, ref}: совет дня в памяти — запасной вариант, если localStorage недоступен
   var importMsg = "";      // итог последнего импорта (карточка над панелью записи; нажатие закрывает)
   var importBusy = false;  // идёт чтение файла импорта
 
@@ -913,34 +913,41 @@
     allRecords().forEach(function(r){ // новые сверху
       if(!ref && !r.imp && r.start >= from && rpeOk(r.rpe) && num(r.m) > 0) ref = r;
     });
-    if(!ref) return { rpe: "", dist: "" };
-    return { rpe: rpeBand(ref.rpe), dist: num(ref.m) >= longThreshold().m ? "long" : "short" };
+    if(!ref) return { rpe: "", dist: "", ref: "" };
+    return { rpe: rpeBand(ref.rpe), dist: num(ref.m) >= longThreshold().m ? "long" : "short", ref: String(ref.id != null ? ref.id : ref.start) };
   }
   function tipFits(x, ctx){ return (!x.rpe || x.rpe === ctx.rpe) && (!x.dist || x.dist === ctx.dist); }
 
-  // совет сегодняшнего дня: выбирается при первом показе за день и до полуночи не меняется; без повторов, пока не покажутся все подходящие
+  // совет сегодняшнего дня: выбирается при первом показе за день и до полуночи не меняется, пока не появится новая оценённая
+  // тренировка (её id — `ref` в записи дня): тогда выбирается новый совет под её тяжесть и дистанцию; без повторов, пока не покажутся все подходящие
   function dayTip(){
     var list = tipsList();
     if(!list.length) return null;
     var today = dayKey();
-    var rec = readJson(TIP_DAY_KEY, null) || tipDayMem;
-    if(rec && rec.day === today){
-      for(var i = 0; i < list.length; i++){ if(list[i].id === rec.id) return list[i]; }
-    }
     var ctx = tipContext();
+    var rec = readJson(TIP_DAY_KEY, null) || tipDayMem;
+    var prevId = null;
+    if(rec && rec.day === today){
+      if((rec.ref || "") === ctx.ref){
+        for(var i = 0; i < list.length; i++){ if(list[i].id === rec.id) return list[i]; }
+      } else {
+        prevId = rec.id; // основание для совета изменилось (новая оценённая тренировка) — прежний совет не повторяем
+      }
+    }
     var pool = list.filter(function(x){ return tipFits(x, ctx); });
     if(!pool.length) return null;
     var seen = readJson(TIP_SEEN_KEY, []);
     if(!Array.isArray(seen)) seen = [];
-    var fresh = pool.filter(function(x){ return seen.indexOf(x.id) === -1; });
+    var fresh = pool.filter(function(x){ return seen.indexOf(x.id) === -1 && x.id !== prevId; });
     if(!fresh.length){
       seen = seen.filter(function(id){ return !pool.some(function(x){ return x.id === id; }); });
-      fresh = pool;
+      fresh = pool.filter(function(x){ return x.id !== prevId; });
+      if(!fresh.length) fresh = pool;
     }
     var pick = fresh[Math.floor(Math.random() * fresh.length)];
     seen.push(pick.id);
     writeJson(TIP_SEEN_KEY, seen);
-    var dayRec = { day: today, id: pick.id };
+    var dayRec = { day: today, id: pick.id, ref: ctx.ref };
     tipDayMem = writeJson(TIP_DAY_KEY, dayRec) ? null : dayRec; // в памяти держим, только если localStorage не принял запись
     return pick;
   }

@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 110.0 (01.11)
+   Версия: 110.1 (01.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -7181,7 +7181,7 @@
   var renderSettingsTabDesk = Desk.renderSettingsTabDesk;
 
   // ===================== СИСТЕМА =====================
-  // Вкладка «Система» (set2s_15, кнопка settingsTabSet2Btn15, в стеке второго набора самая нижняя): функции, связанные с работой
+  // Вкладка «Система» (set2s_15, кнопка settingsTabSet2Btn15, язычок режима колеса: в стеке набора 1 самый нижний): функции, связанные с работой
   // всей системы телефона (сейчас — усиление громкости). Вынесена в system.js; звук усиливает оболочка (мост версии 20).
   function renderSettingsTabSystem(){
     if(window.SystemTabMod) window.SystemTabMod.render();
@@ -10268,7 +10268,7 @@
       var btn = document.getElementById(TASK_TAB_IDS[key]);
       if(!btn) return;
       if(bottomAltMode){
-        var replacedByAlt = (key === "worktasks" || key === "red"); // на их местах стоят «Проверка обновлений» и «Скрытие вкладок»
+        var replacedByAlt = WHEEL_TASK_TABS_REPLACED.indexOf(key) !== -1; // на их местах стоят вкладки колеса (alt5, alt6, alt1..alt4)
         btn.style.display = replacedByAlt ? "none" : "flex";
         setTabDecor(btn, !replacedByAlt);
       } else {
@@ -10283,7 +10283,7 @@
     }
     var calBtnV = document.getElementById(CALENDAR_TAB_BTN_ID);
     if(calBtnV){
-      if(bottomAltMode){ calBtnV.style.display = "flex"; setTabDecor(calBtnV, true); }
+      if(bottomAltMode){ setTabDecor(calBtnV, false); calBtnV.style.display = "none"; } // на его месте — «Система»
       else { setTabDecor(calBtnV, false); calBtnV.style.display = showTasks ? "flex" : "none"; }
     }
     var stBtnV = document.getElementById(SCREENTIME_TAB_BTN_ID);
@@ -10808,8 +10808,8 @@
     // нижнего, набор 1 или 2) — служебные экраны вроде "import"/"resetConfirm"
     // (открываются кнопками ВНУТРИ вкладки настроек) не считаются отдельной позицией и не сбивают
     // запомненное место — см. cycleSettingsTabSet ниже.
-    if(SETTINGS_SIDE_ORDER_1.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(tab) !== -1 || tab === WORKOUTS_TAB_KEY ||
-       SETTINGS_SIDE_ORDER_2.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_2.indexOf(tab) !== -1){
+    if(tab !== WHEEL_SYSTEM_TAB_KEY && (SETTINGS_SIDE_ORDER_1.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(tab) !== -1 || tab === WORKOUTS_TAB_KEY ||
+       SETTINGS_SIDE_ORDER_2.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_2.indexOf(tab) !== -1)){
       settingsLastStackTab = tab;
       // тоже в localStorage — settingsLastStackTab сам живёт только в памяти вкладки и не
       // переживает перезапуск приложения (см. getResumeSettingsState/SETTINGS_LAST_TAB_KEY выше).
@@ -10961,7 +10961,7 @@
     else if(tab === "set2s_9") renderSettingsTabItemCards();
     // десятая боковая вкладка второго набора (set2s_10) — «Claude» (claudetab.js): нативный WebView с claude.ai
     else if(tab === "set2s_10") renderSettingsTabClaude();
-    // пятнадцатая боковая вкладка второго набора (set2s_15, самая нижняя в стеке) — «Система» (system.js): усиление громкости и др.
+    // «Система» (set2s_15, язычок режима колеса, самый нижний в стеке набора 1) — system.js: усиление громкости и др.
     else if(tab === "set2s_15") renderSettingsTabSystem();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
     else renderSettingsTabGear();
@@ -17732,7 +17732,7 @@
   //   вручную, а не через Object.keys(EXTRA_TAB_IDS), в котором только 2 из 5) идёт слева направо.
   var SETTINGS_SIDE_ORDER_1 = [CALENDAR_TAB_KEY].concat(Object.keys(TASK_TAB_IDS)).concat([EVENTS_TAB_KEY, SCREENTIME_TAB_KEY]); // calendar, worktasks..archive, events, screentime (снизу вверх)
   var SETTINGS_BOTTOM_ORDER_1 = ["gear","year","mood"].concat(Object.keys(EXTRA_TAB_IDS)); // gear,year,mood,extra2,extra3
-  var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_15, set2s_1..set2s_4, set2s_11, set2s_12, set2s_13, set2s_5, set2s_6, set2s_14, set2s_7..set2s_10 (порядок = порядок вкладок снизу вверх)
+  var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_15 (физически язычок колеса в стеке набора 1; здесь только ради соответствия позиций наборов), set2s_1..set2s_4, set2s_11, set2s_12, set2s_13, set2s_5, set2s_6, set2s_14, set2s_7..set2s_10 (порядок = порядок вкладок снизу вверх)
   var SETTINGS_BOTTOM_ORDER_2 = ["gear"].concat(Object.keys(SET2_EXTRA_TAB_IDS));
   // последняя реально выбранная вкладка одного из двух стеков (см. switchSettingsTab выше) —
   // используется, чтобы при переключении набора (cycleSettingsTabSet) открывалась не первая
@@ -17888,6 +17888,7 @@
     try{ savedSet = (localStorage.getItem(SETTINGS_LAST_SET_KEY) === "2") ? 2 : 1; }catch(e){}
     if(savedSet === 2 && !isSet2Unlocked()){ savedSet = 1; savedTab = null; }
     if(savedSet === 2 && savedTab === "gear") savedTab = null; // колесико набора 2 не открывается как вкладка
+    if(savedTab === WHEEL_SYSTEM_TAB_KEY) savedTab = null;     // «Система» — язычок режима колеса, как и alt-вкладки, при запуске не восстанавливается
     if(savedTab && (TASK_TAB_IDS.hasOwnProperty(savedTab) || savedTab === EVENTS_TAB_KEY || savedTab === CALENDAR_TAB_KEY || savedTab === SCREENTIME_TAB_KEY) && !getShowAllTasksEnabled()){
       savedTab = null;
     }
@@ -18365,7 +18366,7 @@
       else renderSettingsTabYear(yearGridScrollKeep);
       return;
     }
-    if(bottomAltMode && !BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab)) return;
+    if(bottomAltMode && !BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) && tab !== WHEEL_SYSTEM_TAB_KEY) return;
     if(tab === currentSettingsTab) return;
     switchSettingsTab(tab);
   }
@@ -18404,25 +18405,31 @@
   });
 
   // ===== ВТОРОЙ НАБОР НИЖНИХ ВКЛАДОК ПО КЛИКУ НА КОЛЕСИКО =====
-  // Сами вкладки-заглушки создаются здесь из JS (index.html не менялся) и встают в DOM сразу после
-  // «своей» оригинальной вкладки, поэтому занимают то же место в ряду. Режим хранится только в
-  // памяти (после перезапуска приложения ряд снова показывает обычные вкладки).
+  // Сами вкладки колеса создаются здесь из JS и встают в DOM сразу после «своей» оригинальной вкладки вертикального
+  // стека (BOTTOM_ALT_REPLACES), поэтому занимают то же место в стеке. «Система» (set2s_15) — настоящая кнопка из index.html,
+  // стоит первой в стеке (самая нижняя) и показывается только в режиме колеса. Режим хранится только в
+  // памяти (после перезапуска приложения стек снова показывает обычные вкладки).
   var BOTTOM_ALT_TAB_IDS = {
     alt1: "settingsTabAlt1Btn", alt2: "settingsTabAlt2Btn",
     alt3: "settingsTabAlt3Btn", alt4: "settingsTabAlt4Btn",
     alt5: "settingsTabAlt5Btn", alt6: "settingsTabAlt6Btn"
   };
+  // все шесть вкладок колеса стоят в вертикальном стеке набора 1 (снизу вверх): «Система» (set2s_15), alt5, alt6, alt1..alt4;
+  // каждая занимает место обычной вкладки стека, которая в режиме колеса скрыта
   var BOTTOM_ALT_REPLACES = {
-    alt1: "settingsTabYearBtn", alt2: "settingsTabMoodBtn",
-    alt3: "settingsTabExtra2Btn", alt4: "settingsTabExtra3Btn",
+    alt1: "settingsTabInboxBtn", alt2: "settingsTabNextBtn",
+    alt3: "settingsTabProjectsBtn", alt4: "settingsTabWaitingBtn",
     alt5: "settingsTabWorkTasksBtn", alt6: "settingsTabRedBtn"
   };
+  var WHEEL_SYSTEM_TAB_KEY = "set2s_15";            // «Система»: язычок режима колеса, самый нижний в стеке (на месте «Календаря»)
+  var WHEEL_SYSTEM_TAB_BTN_ID = "settingsTabSet2Btn15";
+  var WHEEL_TASK_TABS_REPLACED = ["worktasks", "red", "inbox", "next", "projects", "waiting"]; // вкладки задач, чьи места заняли alt-вкладки
   var BOTTOM_ALT_TAB_TITLES = {
     alt1: "Внешний вид", alt2: "Синхронизация",
     alt3: "Восстановление и сброс", alt4: "Дополнительные возможности",
     alt5: "Проверка обновлений", alt6: "Скрытие вкладок"
   };
-  var BOTTOM_ALT_ORIGINAL_TABS = ["year", "mood", "extra2", "extra3", "worktasks", "red", "workouts"];
+  var BOTTOM_ALT_ORIGINAL_TABS = ["year", "mood", "extra2", "extra3", "worktasks", "red", "inbox", "next", "projects", "waiting", "workouts"];
   var BOTTOM_ALT_SVG_OPEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">';
   var BOTTOM_ALT_ICONS = {
     // палитра с красками + кисточка
@@ -18510,17 +18517,18 @@
   function applyBottomAltMode(){
     Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
       var alt = document.getElementById(BOTTOM_ALT_TAB_IDS[key]);
-      var orig = document.getElementById(BOTTOM_ALT_REPLACES[key]);
-      if(key === "alt5" || key === "alt6"){ // эти две стоят в вертикальном стеке на месте worktasks и red (обычные вкладки там — flex)
-        if(alt) alt.style.display = bottomAltMode ? "flex" : "none";
-        return;
-      }
-      if(alt) alt.style.display = bottomAltMode ? "" : "none";
+      if(alt) alt.style.display = bottomAltMode ? "flex" : "none"; // все alt-вкладки стоят в вертикальном стеке (обычные вкладки там — flex)
+    });
+    // обычные вкладки нижнего ряда в режиме колеса скрыты: ряд — только шестерёнка (вкладки колеса теперь в вертикальном стеке)
+    ["settingsTabYearBtn", "settingsTabMoodBtn", "settingsTabExtra2Btn", "settingsTabExtra3Btn"].forEach(function(id){
+      var orig = document.getElementById(id);
       if(orig) orig.style.display = bottomAltMode ? "none" : "";
     });
+    var sysBtn = document.getElementById(WHEEL_SYSTEM_TAB_BTN_ID);
+    if(sysBtn) sysBtn.style.display = bottomAltMode ? "flex" : "none"; // «Система» — только в режиме колеса
     var wkAltOrig = document.getElementById(WORKOUTS_TAB_BTN_ID);
-    if(wkAltOrig) wkAltOrig.style.display = bottomAltMode ? "none" : ""; // в режиме колеса ряд — шестерёнка + 4 вкладки колеса
-    refreshSettingsTabsVisibility();   // вертикальный стек набора 1 (11 язычков, декор)
+    if(wkAltOrig) wkAltOrig.style.display = bottomAltMode ? "none" : ""; // в режиме колеса ряд — одна шестерёнка
+    refreshSettingsTabsVisibility();   // вертикальный стек набора 1 (декор вокруг вкладок колеса)
     updateBottomGearButtons();         // колесо подсвечено, пока показан набор вкладок колеса
     updateSettingsCornerPatchHeight(); // меняется число видимых язычков вертикального стека
   }
@@ -18547,7 +18555,7 @@
   // программным переходом или жестом «назад»), ряд сам переключается на нужный набор, чтобы
   // активная вкладка не оказалась скрытой
   function syncBottomAltModeForTab(tab){
-    if(BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab)) setBottomAltMode(true);
+    if(BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) || tab === WHEEL_SYSTEM_TAB_KEY) setBottomAltMode(true);
     else if(BOTTOM_ALT_ORIGINAL_TABS.indexOf(tab) !== -1) setBottomAltMode(false);
   }
   // вкладки-заглушки нового набора: только заголовок и пустое содержимое
@@ -18682,7 +18690,7 @@
     for(var o = 0; o < orders.length; o++){
       for(var i = 0; i < orders[o].length; i++){
         var key = orders[o][i];
-        if(key === "gear") continue;
+        if(key === "gear" || key === WHEEL_SYSTEM_TAB_KEY) continue;
         if(set === 1 && (TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY || key === CALENDAR_TAB_KEY || key === SCREENTIME_TAB_KEY) && !getShowAllTasksEnabled()) continue;
         if(!isSettingsTabUserHidden(key)) return key;
       }
