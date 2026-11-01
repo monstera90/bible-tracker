@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 25.0 (01.11)
+     Версия: 26.0 (01.11)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -473,6 +473,14 @@ window.addEventListener("error", function(e){
           <path d="M17 3c0 4-3 5-5 6 2 1 5 2 5 6"></path>
         </svg>
       </button>
+      <!-- Центр событий (история): колокольчик. Живёт ТОЛЬКО в режиме колеса — первая свободная вкладка бокового ряда сразу над «Дополнительными возможностями» (alt4);
+           в DOM стоит сразу после «Waiting», а alt4 создаётся из JS между ними. Не вкладка задач: свой ключ "events". -->
+      <button class="settings-tab" id="settingsTabEventsBtn" title="События" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"></path>
+          <path d="M10 20.5a2 2 0 0 0 4 0"></path>
+        </svg>
+      </button>
       <!-- Раскрытая книга: раньше корешок и створки были заметно вытянуты
            по высоте (13.6 в высоту при развороте всего 12 в ширину, да
            ещё и слабый изгиб делал страницы визуально узкими "лепестками",
@@ -551,21 +559,64 @@ window.addEventListener("error", function(e){
           <path d="M10 13h4"></path>
         </svg>
       </button>
-      <!-- Центр событий (история): над «Архивом», последний в DOM = самый верхний язычок стека (линия-срез сверху теперь у него).
-           Не вкладка задач: свой ключ "events", показывается по тем же условиям, что и вкладки задач. Колокольчик. -->
-      <button class="settings-tab" id="settingsTabEventsBtn" title="События" style="display:none;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"></path>
-          <path d="M10 20.5a2 2 0 0 0 4 0"></path>
+      <!-- Боковой ряд нижнего язычка «Статистика» (settingsTabInfoStackBtn, my.js infoStackMode). В DOM снизу вверх: Настроение, Прогресс,
+           График чтения, Трекер экранов, Карта дней года (на экране сверху вниз — наоборот). Показываются только в этом режиме. -->
+      <button class="settings-tab" id="settingsTabMoodBtn" title="Диаграмма настроения" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12,12 L12,1.5 A10.5,10.5 0 0,1 22.5,12 Z" fill="currentColor" opacity="0.7"></path>
+          <path d="M12,12 L22.5,12 A10.5,10.5 0 0,1 12,22.5 Z" fill="currentColor" opacity="0.25"></path>
+          <path d="M12,12 L12,22.5 A10.5,10.5 0 0,1 1.5,12 Z" fill="currentColor" opacity="0.15"></path>
+          <path d="M12,12 L1.5,12 A10.5,10.5 0 0,1 12,1.5 Z" fill="currentColor" opacity="0.5"></path>
         </svg>
       </button>
-      <!-- Трекер экранов (screentime.js): над «Событиями» (колокольчиком), последний в DOM = самый верхний язычок стека.
-           Не вкладка задач: свой ключ "screentime", показывается по тем же условиям. Секундомер с диаграммой. -->
+      <!-- Вкладка бокового ряда «Статистики» (settingsTabSet2Btn12, "set2s_12") —
+           «Прогресс»: прогресс-бары и счётчики, раньше стоявшие в шапке над графиком чтения (см. #progressPanel выше и
+           renderSettingsTabProgress в my.js). -->
+      <button class="settings-tab" id="settingsTabSet2Btn12" title="Прогресс" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="4.5" rx="1.2"></rect>
+          <rect x="3" y="9.75" width="18" height="4.5" rx="1.2"></rect>
+          <rect x="3" y="15.5" width="18" height="4.5" rx="1.2"></rect>
+          <path d="M5 6.25h7M5 12h11M5 17.75h4" stroke-width="2.2"></path>
+        </svg>
+      </button>
+      <!-- Вкладка бокового ряда «Статистики» (settingsTabSet2Btn13, "set2s_13") —
+           «График чтения»: заголовок и карточки книг Библии с главами, раньше стоявшие на главной странице (см. #readingChartHome выше
+           и renderSettingsTabReadingChart в my.js). -->
+      <button class="settings-tab" id="settingsTabSet2Btn13" title="График чтения" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 6.5C10.2 5.2 7.6 4.6 4 4.8v13.4c3.6-.2 6.2.4 8 1.7 1.8-1.3 4.4-1.9 8-1.7V4.8c-3.6-.2-6.2.4-8 1.7z"></path>
+          <path d="M12 6.5v13.4"></path>
+          <path d="M6.2 9.2l1.2 1.2 2.2-2.4" stroke-width="1.5"></path>
+          <path d="M14.4 9.6h3.4M14.4 12.6h3.4" stroke-width="1.5"></path>
+        </svg>
+      </button>
+      <!-- Трекер экранов (screentime.js): вкладка бокового ряда «Статистики» (settingsTabInfoStackBtn). Не вкладка задач: свой ключ "screentime". Секундомер с диаграммой. -->
       <button class="settings-tab" id="settingsTabScreenTimeBtn" title="Трекер экранов" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="13.5" r="7.5"></circle>
           <path d="M12 9.5v4l2.5 1.5"></path>
           <path d="M9.5 2.5h5"></path>
+        </svg>
+      </button>
+      <button class="settings-tab" id="settingsTabYearBtn" title="Карта дней года" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none">
+          <rect x="2" y="2" width="4" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
+          <rect x="8" y="2" width="4" height="4" rx="1" fill="currentColor" opacity="0.9"></rect>
+          <rect x="14" y="2" width="4" height="4" rx="1" fill="currentColor" opacity="0.5"></rect>
+          <rect x="20" y="2" width="2" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
+          <rect x="2" y="8" width="4" height="4" rx="1" fill="currentColor" opacity="0.5"></rect>
+          <rect x="8" y="8" width="4" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
+          <rect x="14" y="8" width="4" height="4" rx="1" fill="currentColor" opacity="0.9"></rect>
+          <rect x="20" y="8" width="2" height="4" rx="1" fill="currentColor" opacity="0.5"></rect>
+          <rect x="2" y="14" width="4" height="4" rx="1" fill="currentColor" opacity="0.9"></rect>
+          <rect x="8" y="14" width="4" height="4" rx="1" fill="currentColor" opacity="0.5"></rect>
+          <rect x="14" y="14" width="4" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
+          <rect x="20" y="14" width="2" height="4" rx="1" fill="currentColor" opacity="0.9"></rect>
+          <rect x="2" y="20" width="4" height="2" rx="1" fill="currentColor" opacity="0.25"></rect>
+          <rect x="8" y="20" width="4" height="2" rx="1" fill="currentColor" opacity="0.5"></rect>
+          <rect x="14" y="20" width="4" height="2" rx="1" fill="currentColor" opacity="0.9"></rect>
+          <rect x="20" y="20" width="2" height="2" rx="1" fill="currentColor" opacity="0.5"></rect>
         </svg>
       </button>
     </div>
@@ -609,6 +660,16 @@ window.addEventListener("error", function(e){
           <circle cx="12" cy="12" r="2.25"></circle>
         </svg>
       </button>
+      <!-- «Статистика» (settingsTabInfoStackBtn): между шестерёнкой и «Задачи и календарь»; работает как шестерёнка — включает свой боковой ряд
+           (Карта дней года, Трекер экранов, График чтения Библии, Прогресс, Настроение). Логика — my.js, infoStackMode. -->
+      <button class="settings-tab settings-tab-gear" id="settingsTabInfoStackBtn" title="Статистика">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3.5 20.5h17"></path>
+          <rect x="5" y="11" width="3.6" height="7.5" rx="0.9"></rect>
+          <rect x="10.2" y="5" width="3.6" height="13.5" rx="0.9"></rect>
+          <rect x="15.4" y="8.5" width="3.6" height="10" rx="0.9"></rect>
+        </svg>
+      </button>
       <!-- «Задачи и календарь» (settingsTabTasksStackBtn): справа от шестерёнки; включает свой боковой ряд — все вкладки задач и «Календарь»
            (нижний ряд не меняется). Пиктограмма — как у «Календаря». Логика — my.js, tasksStackMode. -->
       <button class="settings-tab settings-tab-gear" id="settingsTabTasksStackBtn" title="Задачи и календарь" style="display:none;">
@@ -627,34 +688,6 @@ window.addEventListener("error", function(e){
           <path d="M13.8 8.6l-3.4-.6-2.4 2.6"></path>
           <path d="M11.2 13l3.8 2.6-1.4 4.6"></path>
           <path d="M11.2 13l-2.4 3.6-3.8-.4"></path>
-        </svg>
-      </button>
-      <button class="settings-tab settings-tab-gear" id="settingsTabYearBtn" title="Карта дней года">
-        <svg viewBox="0 0 24 24" fill="none">
-          <rect x="2" y="2" width="4" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
-          <rect x="8" y="2" width="4" height="4" rx="1" fill="currentColor" opacity="0.9"></rect>
-          <rect x="14" y="2" width="4" height="4" rx="1" fill="currentColor" opacity="0.5"></rect>
-          <rect x="20" y="2" width="2" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
-          <rect x="2" y="8" width="4" height="4" rx="1" fill="currentColor" opacity="0.5"></rect>
-          <rect x="8" y="8" width="4" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
-          <rect x="14" y="8" width="4" height="4" rx="1" fill="currentColor" opacity="0.9"></rect>
-          <rect x="20" y="8" width="2" height="4" rx="1" fill="currentColor" opacity="0.5"></rect>
-          <rect x="2" y="14" width="4" height="4" rx="1" fill="currentColor" opacity="0.9"></rect>
-          <rect x="8" y="14" width="4" height="4" rx="1" fill="currentColor" opacity="0.5"></rect>
-          <rect x="14" y="14" width="4" height="4" rx="1" fill="currentColor" opacity="0.25"></rect>
-          <rect x="20" y="14" width="2" height="4" rx="1" fill="currentColor" opacity="0.9"></rect>
-          <rect x="2" y="20" width="4" height="2" rx="1" fill="currentColor" opacity="0.25"></rect>
-          <rect x="8" y="20" width="4" height="2" rx="1" fill="currentColor" opacity="0.5"></rect>
-          <rect x="14" y="20" width="4" height="2" rx="1" fill="currentColor" opacity="0.9"></rect>
-          <rect x="20" y="20" width="2" height="2" rx="1" fill="currentColor" opacity="0.5"></rect>
-        </svg>
-      </button>
-      <button class="settings-tab settings-tab-gear" id="settingsTabMoodBtn" title="Диаграмма настроения">
-        <svg viewBox="0 0 24 24" fill="none">
-          <path d="M12,12 L12,1.5 A10.5,10.5 0 0,1 22.5,12 Z" fill="currentColor" opacity="0.7"></path>
-          <path d="M12,12 L22.5,12 A10.5,10.5 0 0,1 12,22.5 Z" fill="currentColor" opacity="0.25"></path>
-          <path d="M12,12 L12,22.5 A10.5,10.5 0 0,1 1.5,12 Z" fill="currentColor" opacity="0.15"></path>
-          <path d="M12,12 L1.5,12 A10.5,10.5 0 0,1 12,1.5 Z" fill="currentColor" opacity="0.5"></path>
         </svg>
       </button>
       <button class="settings-tab settings-tab-gear" id="settingsTabExtra2Btn" title=""></button>
@@ -777,28 +810,6 @@ window.addEventListener("error", function(e){
           <circle cx="6" cy="18" r="3"></circle>
           <circle cx="17" cy="15.5" r="3"></circle>
           <path d="M9 9.5l11-2.5"></path>
-        </svg>
-      </button>
-      <!-- Двенадцатая боковая вкладка второго набора (settingsTabSet2Btn12, "set2s_12"; между «Музыкой» и «Разделением epub») —
-           «Прогресс»: прогресс-бары и счётчики, раньше стоявшие в шапке над графиком чтения (см. #progressPanel выше и
-           renderSettingsTabProgress в my.js). -->
-      <button class="settings-tab" id="settingsTabSet2Btn12" title="Прогресс">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="4" width="18" height="4.5" rx="1.2"></rect>
-          <rect x="3" y="9.75" width="18" height="4.5" rx="1.2"></rect>
-          <rect x="3" y="15.5" width="18" height="4.5" rx="1.2"></rect>
-          <path d="M5 6.25h7M5 12h11M5 17.75h4" stroke-width="2.2"></path>
-        </svg>
-      </button>
-      <!-- Тринадцатая боковая вкладка второго набора (settingsTabSet2Btn13, "set2s_13"; между «Прогрессом» и «Разделением epub») —
-           «График чтения»: заголовок и карточки книг Библии с главами, раньше стоявшие на главной странице (см. #readingChartHome выше
-           и renderSettingsTabReadingChart в my.js). -->
-      <button class="settings-tab" id="settingsTabSet2Btn13" title="График чтения">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 6.5C10.2 5.2 7.6 4.6 4 4.8v13.4c3.6-.2 6.2.4 8 1.7 1.8-1.3 4.4-1.9 8-1.7V4.8c-3.6-.2-6.2.4-8 1.7z"></path>
-          <path d="M12 6.5v13.4"></path>
-          <path d="M6.2 9.2l1.2 1.2 2.2-2.4" stroke-width="1.5"></path>
-          <path d="M14.4 9.6h3.4M14.4 12.6h3.4" stroke-width="1.5"></path>
         </svg>
       </button>
       <button class="settings-tab" id="settingsTabSet2Btn5" title="Разделение epub-файлов">

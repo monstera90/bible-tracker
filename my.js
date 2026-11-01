@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 111.1 (01.11)
+   Версия: 112.0 (01.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1728,6 +1728,12 @@
   // показывается по тем же условиям, что и вкладки задач / «События» / «Календарь».
   var SCREENTIME_TAB_KEY = "screentime";
   var SCREENTIME_TAB_BTN_ID = "settingsTabScreenTimeBtn";
+  // «Статистика» (нижний язычок settingsTabInfoStackBtn между шестерёнкой и «Задачи и календарь»): свой боковой ряд набора 1 (режим infoStackMode),
+  // работает как шестерёнка. Вкладки ряда сверху вниз: Карта дней года, Трекер экранов, График чтения, Прогресс, Настроение.
+  var INFO_STACK_BTN_ID = "settingsTabInfoStackBtn";
+  var INFO_STACK_TABS = ["year", "screentime", "set2s_13", "set2s_12", "mood"];
+  var INFO_STACK_BTN_IDS = { year: "settingsTabYearBtn", screentime: "settingsTabScreenTimeBtn", set2s_13: "settingsTabSet2Btn13", set2s_12: "settingsTabSet2Btn12", mood: "settingsTabMoodBtn" };
+  function isInfoStackTab(tab){ return INFO_STACK_TABS.indexOf(tab) !== -1; }
   // Вкладка «Тренировки» (workouts.js): нижний ряд набора 1, между шестерёнкой и «Картой дней года». В SETTINGS_BOTTOM_ORDER_1 НЕ входит
   // (иначе сдвинется соответствие позиций с нижним рядом набора 2) — запоминание последней вкладки и «набор» учитывают её отдельно.
   var WORKOUTS_TAB_KEY = "workouts";
@@ -10281,8 +10287,9 @@
     });
     var evBtn = document.getElementById(EVENTS_TAB_BTN_ID);
     if(evBtn){
-      if(bottomAltMode){ evBtn.style.display = "flex"; setTabDecor(evBtn, true); }
-      else { setTabDecor(evBtn, false); evBtn.style.display = (showTasks && !tasksStackMode) ? "flex" : "none"; }
+      // колокольчик — настоящая вкладка бокового ряда режима колеса (первая свободная над «Дополнительными возможностями»); вне колеса его нет
+      setTabDecor(evBtn, false);
+      evBtn.style.display = bottomAltMode ? "flex" : "none";
     }
     var calBtnV = document.getElementById(CALENDAR_TAB_BTN_ID);
     if(calBtnV){
@@ -10292,9 +10299,18 @@
     }
     var stBtnV = document.getElementById(SCREENTIME_TAB_BTN_ID);
     if(stBtnV){
+      // в режиме колеса — пустой декоративный язычок (как раньше), в режиме «Статистика» — настоящая вкладка
       if(bottomAltMode){ stBtnV.style.display = "flex"; setTabDecor(stBtnV, true); }
-      else { setTabDecor(stBtnV, false); stBtnV.style.display = (showTasks && !tasksStackMode) ? "flex" : "none"; }
+      else { setTabDecor(stBtnV, false); stBtnV.style.display = infoStackMode ? "flex" : "none"; }
     }
+    // остальные вкладки ряда «Статистика»: Карта дней года, График чтения, Прогресс, Настроение
+    Object.keys(INFO_STACK_BTN_IDS).forEach(function(key){
+      if(key === SCREENTIME_TAB_KEY) return;
+      var ib = document.getElementById(INFO_STACK_BTN_IDS[key]);
+      if(ib) ib.style.display = infoStackMode ? "flex" : "none";
+    });
+    var infoBtn = document.getElementById(INFO_STACK_BTN_ID);
+    if(infoBtn) infoBtn.classList.toggle("active", !!infoStackMode);
     // меняет количество видимых язычков в #settingsTabs — пересчитываем заплатку (см.
     // updateSettingsCornerPatchHeight выше); единственный вызывающий.
     updateSettingsCornerPatchHeight();
@@ -10812,7 +10828,7 @@
     // нижнего, набор 1 или 2) — служебные экраны вроде "import"/"resetConfirm"
     // (открываются кнопками ВНУТРИ вкладки настроек) не считаются отдельной позицией и не сбивают
     // запомненное место — см. cycleSettingsTabSet ниже.
-    if(tab !== WHEEL_SYSTEM_TAB_KEY && (SETTINGS_SIDE_ORDER_1.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(tab) !== -1 || tab === WORKOUTS_TAB_KEY ||
+    if(tab !== WHEEL_SYSTEM_TAB_KEY && (SETTINGS_SIDE_ORDER_1.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(tab) !== -1 || tab === WORKOUTS_TAB_KEY || isInfoStackTab(tab) ||
        SETTINGS_SIDE_ORDER_2.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_2.indexOf(tab) !== -1)){
       settingsLastStackTab = tab;
       // тоже в localStorage — settingsLastStackTab сам живёт только в памяти вкладки и не
@@ -17831,7 +17847,7 @@
     var set1Bottom = document.getElementById("settingsTabsGear");
     var set2Side = document.getElementById("settingsTabsSet2");
     var set2Bottom = document.getElementById("settingsTabsGearSet2");
-    var showSet1 = settingsActiveTabSet === 1 || bottomAltMode || tasksStackMode;
+    var showSet1 = settingsActiveTabSet === 1 || bottomAltMode || tasksStackMode || infoStackMode;
     if(set1Side) set1Side.style.display = showSet1 ? "" : "none";
     if(set1Bottom) set1Bottom.style.display = showSet1 ? "" : "none";
     if(set2Side) set2Side.style.display = showSet1 ? "none" : "";
@@ -17861,7 +17877,7 @@
     // боковые вкладки набора 1 (red..archive) скрыты, пока не включена галочка "Показать все мои
     // задачи" — переходить на скрытую вкладку не нужно, вместо неё открываем вкладку настроек (тот
     // же принцип, что и при обычном открытии блокнота, см. openSettingsModal).
-    if(settingsActiveTabSet === 1 && (TASK_TAB_IDS.hasOwnProperty(target) || target === EVENTS_TAB_KEY || target === CALENDAR_TAB_KEY || target === SCREENTIME_TAB_KEY) && !getShowAllTasksEnabled()){
+    if(settingsActiveTabSet === 1 && (TASK_TAB_IDS.hasOwnProperty(target) || target === CALENDAR_TAB_KEY) && !getShowAllTasksEnabled()){
       target = "gear";
     }
     // скрытую пользователем вкладку не открываем: берём первую не скрытую того же набора; у набора 2 не осталось ни одной —
@@ -17890,15 +17906,17 @@
     var savedTab = null, savedSet = 1;
     try{ savedTab = localStorage.getItem(SETTINGS_LAST_TAB_KEY); }catch(e){}
     try{ savedSet = (localStorage.getItem(SETTINGS_LAST_SET_KEY) === "2") ? 2 : 1; }catch(e){}
+    if(savedTab && isInfoStackTab(savedTab)) savedSet = 1; // вкладки ряда «Статистика» живут в наборе 1 (в том числе «График чтения» и «Прогресс», раньше стоявшие в наборе 2)
     if(savedSet === 2 && !isSet2Unlocked()){ savedSet = 1; savedTab = null; }
     if(savedSet === 2 && savedTab === "gear") savedTab = null; // колесико набора 2 не открывается как вкладка
-    if(savedTab === WHEEL_SYSTEM_TAB_KEY) savedTab = null;     // «Система» — язычок режима колеса, как и alt-вкладки, при запуске не восстанавливается
-    if(savedTab && (TASK_TAB_IDS.hasOwnProperty(savedTab) || savedTab === EVENTS_TAB_KEY || savedTab === CALENDAR_TAB_KEY || savedTab === SCREENTIME_TAB_KEY) && !getShowAllTasksEnabled()){
+    if(savedTab === WHEEL_SYSTEM_TAB_KEY || savedTab === EVENTS_TAB_KEY) savedTab = null; // «Система» и «События» — язычки режима колеса, как и alt-вкладки, при запуске не восстанавливаются
+    if(savedTab && (TASK_TAB_IDS.hasOwnProperty(savedTab) || savedTab === CALENDAR_TAB_KEY) && !getShowAllTasksEnabled()){
       savedTab = null;
     }
     if(savedTab){
-      var belongsToSet1 = SETTINGS_SIDE_ORDER_1.indexOf(savedTab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(savedTab) !== -1 || savedTab === WORKOUTS_TAB_KEY;
-      var belongsToSet2 = SETTINGS_SIDE_ORDER_2.indexOf(savedTab) !== -1 || SETTINGS_BOTTOM_ORDER_2.indexOf(savedTab) !== -1;
+      var savedIsInfo = isInfoStackTab(savedTab);
+      var belongsToSet1 = savedIsInfo || SETTINGS_SIDE_ORDER_1.indexOf(savedTab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(savedTab) !== -1 || savedTab === WORKOUTS_TAB_KEY;
+      var belongsToSet2 = !savedIsInfo && (SETTINGS_SIDE_ORDER_2.indexOf(savedTab) !== -1 || SETTINGS_BOTTOM_ORDER_2.indexOf(savedTab) !== -1);
       // набор переключили, но вкладку так и не выбрали: на экране была вкладка другого набора — открываем её набор
       if(savedSet === 1 && !belongsToSet1 && belongsToSet2 && isSet2Unlocked()) savedSet = 2;
       else if(savedSet === 2 && !belongsToSet2 && belongsToSet1) savedSet = 1;
@@ -18370,7 +18388,7 @@
       else renderSettingsTabYear(yearGridScrollKeep);
       return;
     }
-    if(bottomAltMode && !BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) && tab !== WHEEL_SYSTEM_TAB_KEY && BOTTOM_ROW_TABS.indexOf(tab) === -1) return; // нижний ряд в режиме колеса остаётся рабочим (его вкладка выключает режим колеса)
+    if(bottomAltMode && !BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) && tab !== WHEEL_SYSTEM_TAB_KEY && tab !== EVENTS_TAB_KEY && BOTTOM_ROW_TABS.indexOf(tab) === -1) return; // нижний ряд в режиме колеса остаётся рабочим (его вкладка выключает режим колеса)
     if(tab === currentSettingsTab) return;
     switchSettingsTab(tab);
   }
@@ -18434,8 +18452,8 @@
     alt3: "Восстановление и сброс", alt4: "Дополнительные возможности",
     alt5: "Проверка обновлений", alt6: "Скрытие вкладок"
   };
-  var BOTTOM_ROW_TABS = ["year", "mood", "extra2", "extra3", "workouts"]; // нижний ряд набора 1 (без шестерёнки)
-  var BOTTOM_ALT_ORIGINAL_TABS = ["year", "mood", "extra2", "extra3", "worktasks", "red", "inbox", "next", "projects", "waiting", "workouts"];
+  var BOTTOM_ROW_TABS = ["extra2", "extra3", "workouts"]; // нижний ряд набора 1 (без шестерёнки и язычков-переключателей рядов)
+  var BOTTOM_ALT_ORIGINAL_TABS = ["extra2", "extra3", "worktasks", "red", "inbox", "next", "projects", "waiting", "workouts"];
   var BOTTOM_ALT_SVG_OPEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">';
   var BOTTOM_ALT_ICONS = {
     // палитра с красками + кисточка
@@ -18474,6 +18492,9 @@
   // хранится в памяти, включается сам при открытии вкладки задач/календаря.
   var TASKS_STACK_BTN_ID = "settingsTabTasksStackBtn";
   var tasksStackMode = false;
+  // Режим «Статистика» (кнопка settingsTabInfoStackBtn): боковой ряд набора 1 показывает вкладки INFO_STACK_TABS. Взаимоисключающий с режимом колеса
+  // и режимом «Задачи и календарь»; хранится в памяти, включается сам при открытии любой вкладки ряда.
+  var infoStackMode = false;
 
   function createAltButton(key, id, origId){
     if(document.getElementById(id)) return;
@@ -18523,6 +18544,8 @@
     // кнопка «Задачи и календарь»: обработчик ставится здесь, а не рядом с шестерёнкой, — константа TASKS_STACK_BTN_ID объявлена ниже по файлу
     var tsBtn = document.getElementById(TASKS_STACK_BTN_ID);
     if(tsBtn && !tsBtn.__ltBound){ tsBtn.__ltBound = true; tsBtn.addEventListener("click", function(){ setTasksStackMode(!tasksStackMode); }); }
+    var infoBtn0 = document.getElementById(INFO_STACK_BTN_ID);
+    if(infoBtn0 && !infoBtn0.__ltBound){ infoBtn0.__ltBound = true; infoBtn0.addEventListener("click", function(){ setInfoStackMode(!infoStackMode); }); }
     Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
       createAltButton(key, BOTTOM_ALT_TAB_IDS[key], BOTTOM_ALT_REPLACES[key]);
     });
@@ -18544,7 +18567,7 @@
     on = !!on;
     if(on === bottomAltMode) return;
     bottomAltMode = on;
-    if(on) tasksStackMode = false;
+    if(on){ tasksStackMode = false; infoStackMode = false; }
     applyBottomAltMode();
     applySettingsTabSetVisibility(); // в режиме колеса всегда виден ряд набора 1, после — ряд активного набора
   }
@@ -18552,9 +18575,17 @@
     on = !!on;
     if(on === tasksStackMode) return;
     tasksStackMode = on;
-    if(on) bottomAltMode = false;
+    if(on){ bottomAltMode = false; infoStackMode = false; }
     applyBottomAltMode();            // обновляет вертикальный стек, подсветку кнопок и угловые заплатки
     applySettingsTabSetVisibility(); // ряд «Задачи и календарь» всегда на наборе 1
+  }
+  function setInfoStackMode(on){
+    on = !!on;
+    if(on === infoStackMode) return;
+    infoStackMode = on;
+    if(on){ bottomAltMode = false; tasksStackMode = false; }
+    applyBottomAltMode();            // обновляет вертикальный стек, подсветку кнопок и угловые заплатки
+    applySettingsTabSetVisibility(); // ряд «Статистика» всегда на наборе 1
   }
   var bottomAltEntrySet = 1; // набор, который был активен, когда включили колесо
   function toggleBottomAltMode(){
@@ -18572,11 +18603,11 @@
   // программным переходом или жестом «назад»), ряд сам переключается на нужный набор, чтобы
   // активная вкладка не оказалась скрытой
   function syncBottomAltModeForTab(tab){
-    if(BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) || tab === WHEEL_SYSTEM_TAB_KEY) setBottomAltMode(true);
+    if(BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) || tab === WHEEL_SYSTEM_TAB_KEY || tab === EVENTS_TAB_KEY) setBottomAltMode(true);
+    else if(isInfoStackTab(tab)) setInfoStackMode(true);
     else if(TASK_TAB_IDS.hasOwnProperty(tab) || tab === CALENDAR_TAB_KEY){ if(getShowAllTasksEnabled()) setTasksStackMode(true); else setBottomAltMode(false); }
     else {
       if(BOTTOM_ALT_ORIGINAL_TABS.indexOf(tab) !== -1) setBottomAltMode(false);
-      if(tab === EVENTS_TAB_KEY || tab === SCREENTIME_TAB_KEY) setTasksStackMode(false);
     }
   }
   // вкладки-заглушки нового набора: только заголовок и пустое содержимое
@@ -18712,7 +18743,8 @@
       for(var i = 0; i < orders[o].length; i++){
         var key = orders[o][i];
         if(key === "gear" || key === WHEEL_SYSTEM_TAB_KEY) continue;
-        if(set === 1 && (TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY || key === CALENDAR_TAB_KEY || key === SCREENTIME_TAB_KEY) && !getShowAllTasksEnabled()) continue;
+        if(set === 1 && (TASK_TAB_IDS.hasOwnProperty(key) || key === CALENDAR_TAB_KEY) && !getShowAllTasksEnabled()) continue;
+        if(key === EVENTS_TAB_KEY) continue; // «События» — вкладка режима колеса, как «Система» и alt-вкладки
         if(!isSettingsTabUserHidden(key)) return key;
       }
     }
@@ -18757,6 +18789,8 @@
     });
     var tsb = document.getElementById(TASKS_STACK_BTN_ID);
     if(tsb) tsb.classList.toggle("active", !!tasksStackMode);
+    var isb = document.getElementById(INFO_STACK_BTN_ID);
+    if(isb) isb.classList.toggle("active", !!infoStackMode);
   }
   function initSet2GearTab(){
     var oldIpkdBtn = document.getElementById("settingsTabSet2GearBtn5");
@@ -21546,8 +21580,8 @@
   // Открыть вкладку по ключу: окно настроек (если закрыто) и нужный набор вкладок. false — такого ключа нет.
   function openComboTab(key){
     key = String(key || "");
-    if(SET2_TAB_IDS.hasOwnProperty(key)){ openSettingsTabDirect(key); return true; }
-    var set1 = TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY || key === CALENDAR_TAB_KEY || key === SCREENTIME_TAB_KEY || key === WORKOUTS_TAB_KEY || key === "year" || key === "mood";
+    if(SET2_TAB_IDS.hasOwnProperty(key) && !isInfoStackTab(key)){ openSettingsTabDirect(key); return true; }
+    var set1 = TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY || key === CALENDAR_TAB_KEY || key === WORKOUTS_TAB_KEY || isInfoStackTab(key);
     if(!set1) return false;
     var alreadyOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay && settingsModalOverlay.classList.contains("open");
     if(!alreadyOpen) openSettingsModal();
