@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 21.0 (01.11)
+   Версия: 22.0 (01.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4976,6 +4976,26 @@ body::after{
   top:40%;
   color:#c4c4c4;
   font:600 24px sans-serif;
+}
+.pdf-hl-layer{
+  position:absolute;
+  left:0;
+  top:0;
+  right:0;
+  bottom:0;
+  pointer-events:none;
+}
+.pdf-hl{
+  position:absolute;
+  background:rgba(255,214,10,.42);
+  mix-blend-mode:multiply;
+  border-radius:2px;
+}
+.pdf-hl.pdf-hl-sel{ background:rgba(110,150,255,.42); }
+/* Полноэкранный режим: страницы PDF во всю ширину окна, без боковых полос (8px у .book-reader-tab — для текста книг). */
+.settings-modal-overlay.fullscreen-mode-active .book-reader-tab.pdf-reader-tab{
+  padding-left:0;
+  padding-right:0;
 }
 .pdf-page .pdf-canvas{
   position:relative;

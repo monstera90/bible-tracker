@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 108.0 (01.11)
+   Версия: 109.0 (01.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -14405,6 +14405,93 @@
     }catch(e){}
     pdfView = null;
   }
+  // ---- подчёркивание мыслей в PDF → заметка книги (тот же механизм, что у текста книг: addBookUnderline +
+  // MdEditor.appendTextToNoteId). Запись в book:<hash>.underlines с position {pdf:1, page, rects, text}: rects — прямоугольники
+  // подсветки в долях страницы, text — то, что ушло в заметку (по нему же текст убирается из заметки при снятии).
+  function pdfHighlightList(hash){
+    var data = getBookState(hash);
+    var out = [];
+    ((data && data.underlines) || []).forEach(function(u){
+      if(u && u.id && u.position && u.position.pdf && u.position.rects) out.push({id: u.id, page: u.position.page, rects: u.position.rects, text: u.position.text || ""});
+    });
+    return out;
+  }
+  function refreshPdfHighlights(){
+    if(pdfView && bookReaderState && bookReaderState.pdf && !bookReaderState.transient) pdfView.setHighlights(pdfHighlightList(bookReaderState.hash));
+  }
+  function handlePdfSelect(res){
+    var st = bookReaderState;
+    if(!st || !st.pdf || !res || !res.text) return;
+    var statusEl = document.getElementById("bookReaderStatus");
+    if(st.transient){
+      if(statusEl) statusEl.textContent = "Подчёркивать можно в книгах из «Моих книг»: этот файл открыт без добавления в библиотеку.";
+      return;
+    }
+    var hash = st.hash, text = res.text;
+    var data = getOrCreateBookState(hash);
+    var dup = data.underlines.filter(function(u){
+      return u.position && u.position.pdf && u.position.page === res.page && u.position.text === text;
+    })[0];
+    if(dup) return;
+    function finishWithNoteId(noteId){
+      var underlineId = addBookUnderline(hash, {pdf: 1, page: res.page, rects: res.rects, text: text});
+      var appended = MdEditor.appendTextToNoteId(noteId, text);
+      var st2 = document.getElementById("bookReaderStatus");
+      if(appended !== false){
+        markBookUnderlineMovedToNote(hash, underlineId);
+      } else if(st2){
+        st2.textContent = "Заметка книги не найдена: подчёркивание сохранено, но не перенесено. Привяжите заметку заново.";
+      }
+      refreshPdfHighlights();
+    }
+    if(data.noteId && !bookNoteIdIsMissing(data.noteId)){
+      finishWithNoteId(data.noteId);
+    } else {
+      attachBookNote(hash, st.name ? stripBookExt(st.name) : "", finishWithNoteId);
+    }
+  }
+  // Тап по подсветке: «Копировать» и урна над ней (та же обёртка и кнопки, что у подчёркиваний в тексте книг).
+  function showPdfHighlightActions(hl, rect){
+    removeBookReaderUnderlineTrashBtn();
+    if(!settingsModalBox || !bookReaderState) return;
+    var boxRect = settingsModalBox.getBoundingClientRect();
+    var hash = bookReaderState.hash;
+    var wrap = document.createElement("div");
+    wrap.className = "book-reader-underline-actions";
+    wrap.style.left = (rect.left - boxRect.left + rect.width / 2) + "px";
+    wrap.style.top = (rect.top - boxRect.top) + "px";
+    var copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "book-reader-underline-trash-btn book-reader-underline-copy-btn";
+    copyBtn.title = "Копировать";
+    copyBtn.innerHTML = READER_COPY_ICON_SVG;
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "book-reader-underline-trash-btn";
+    btn.title = "Убрать подчёркивание";
+    btn.innerHTML = READER_TRASH_ICON_SVG;
+    wrap.appendChild(copyBtn);
+    wrap.appendChild(btn);
+    settingsModalBox.appendChild(wrap);
+    bookReaderUnderlineTrashBtn = wrap;
+    bindBookReaderUnderlineDismissOnce();
+    copyBtn.addEventListener("click", function(ev){
+      ev.stopPropagation();
+      if(hl.text) window.LTCopyText(hl.text);
+      removeBookReaderUnderlineTrashBtn();
+    });
+    btn.addEventListener("click", function(ev){
+      ev.stopPropagation();
+      var removed = removeBookUnderline(hash, hl.id);
+      var data = getBookState(hash);
+      if(removed && removed.movedToNote && data && data.noteId && MdEditor && MdEditor.removeTextFromNoteId && removed.position && removed.position.text){
+        // false — в заметке уже не точно такой текст (правили вручную): заметку не трогаем, это не ошибка
+        MdEditor.removeTextFromNoteId(data.noteId, removed.position.text);
+      }
+      removeBookReaderUnderlineTrashBtn();
+      refreshPdfHighlights();
+    });
+  }
   function pdfReaderFabRowHtml(){
     var txt = "mdeditor-fab-btn mdeditor-fab-btn-text";
     return (
@@ -14442,7 +14529,15 @@
     pdfView = window.PdfPageReader.mount(container, rootEl, st.pdf, {
       startPage: start.page, startFrac: start.frac,
       onPage: function(page, tot){ if(pageBtn) pageBtn.textContent = page + "/" + tot; },
-      onPosition: function(page, frac){ if(!transient) pdfPosSet(hash, page, frac); }
+      onPosition: function(page, frac){ if(!transient) pdfPosSet(hash, page, frac); },
+      // подчёркивание мыслей: удержание на слове → в заметку книги (как в тексте fb2/epub)
+      highlights: transient ? [] : pdfHighlightList(hash),
+      onSelect: handlePdfSelect,
+      onNoText: function(){
+        var s1 = document.getElementById("bookReaderStatus");
+        if(s1) s1.textContent = "На этой странице нет текста для выделения (скан без распознавания).";
+      },
+      onHighlightTap: showPdfHighlightActions
     });
 
     if(pageBtn) pageBtn.addEventListener("click", function(){

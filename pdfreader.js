@@ -1,5 +1,5 @@
 /* pdfreader.js — постраничный просмотр PDF картинками (страницы как в настоящем PDF-просмотрщике).
-   Версия: 1.0 (31.10)
+   Версия: 2.0 (01.11)
 
    Зачем: книги-PDF во вкладке «Мои книги» раньше разбирались в текст (pdfparse.js) и показывались как fb2/epub.
    Теперь PDF открывается страницами — с картинками, шрифтами и вёрсткой оригинала. pdfparse.js остаётся для
@@ -15,10 +15,17 @@
                                            Буфер НЕ копируется и становится непригодным — передавать копию.
      release(handle)                     → освободить документ
      cover(handle, widthPx)              → Promise<{base64, contentType}> — первая страница JPEG (для обложки)
-     mount(container, root, handle, o)   → контроллер {destroy, goTo, setZoom, getZoom, getPosition, flush, pageCount}
+     mount(container, root, handle, o)   → контроллер {destroy, goTo, setZoom, getZoom, getPosition, flush, setHighlights, pageCount}
         container — прокручиваемый #settingsTabContent; root — пустой элемент для страниц;
         o.startPage (с 1), o.startFrac (0..1 — доля высоты страницы), o.zoom,
         o.onPage(page, total) — смена текущей страницы, o.onPosition(page, frac) — позиция (debounce 500 мс).
+        Подчёркивание мыслей (как в тексте книг): удержание 250 мс на слове подчёркивает его, не отпуская — ведём палец,
+        выделение растягивается по словам (в пределах страницы), у краёв экрана страница прокручивается сама.
+        o.onSelect({page, text, rects}) — выделение готово (палец отпущен), rects — [[x,y,w,h]…] в долях страницы;
+        o.onNoText() — на странице нет текстового слоя (скан без распознавания); o.highlights — [{id,page,rects}] уже
+        сохранённые подсветки, setHighlights(list) заменяет их; o.onHighlightTap(hl, clientRect) — тап по подсветке.
+        Слова и их границы берутся из getTextContent() (без текстового слоя pdf.js и без его CSS), геометрия —
+        в долях страницы, поэтому от масштаба не зависит; повёрнутый текст (и страницы с /Rotate) не выделяется.
      askPage(total, current, cb)         → маленькое окно «перейти на страницу» (prompt() в WebView не работает)
 
    Старый WebView (Android 5.0): динамического import() там нет — supported() вернёт false, ридер уйдёт в текстовый режим. */
@@ -33,6 +40,8 @@
   var WANT_BEHIND = 1, WANT_AHEAD = 2;   // сколько страниц вокруг видимых дорисовываем заранее
 
   var libPromise = null;
+  var libModule = null;
+  var HOLD_MS = 250, HOLD_MOVE_PX = 10;   // как в ридере книг (my.js LT_HOLD_MARK_MS / LT_HOLD_MOVE_PX)
   var currentHandle = null;
 
   function absUrl(p){ return new URL(p, document.baseURI).href; }
@@ -60,6 +69,7 @@
     var url = absUrl(BASE + "pdf.min.mjs");
     libPromise = importVia(url).catch(function(){ return importViaBlob(url); }).then(function(m){
       m.GlobalWorkerOptions.workerSrc = absUrl(BASE + "pdf.worker.min.mjs");
+      libModule = m;
       return m;
     }, function(e){ libPromise = null; throw e; });
     return libPromise;
@@ -109,6 +119,92 @@
 
   function clamp(v, lo, hi){ return v < lo ? lo : (v > hi ? hi : v); }
 
+  // ---- слова страницы (для подчёркивания) ----
+  var measureCtx = null;
+  function measure(str){
+    if(!measureCtx){
+      measureCtx = document.createElement("canvas").getContext("2d");
+      measureCtx.font = "100px sans-serif";
+    }
+    return measureCtx.measureText(str).width;
+  }
+  // Слова страницы в порядке чтения PDF: {t, x0, x1, top, bot, h, cy} — всё в долях ширины/высоты страницы.
+  // Границы слов внутри куска текста — по пропорциям ширины символов запасного шрифта (точность «до слова»).
+  function buildWords(page){
+    var vp = page.getViewport({scale: 1});
+    return page.getTextContent().then(function(tc){
+      var W = vp.width, H = vp.height, words = [], Util = libModule && libModule.Util;
+      if(!Util) return words;
+      for(var k = 0; k < tc.items.length; k++){
+        var it = tc.items[k];
+        if(!it.str || !it.transform || !/\S/.test(it.str)) continue;
+        var tx = Util.transform(vp.transform, it.transform);
+        var fh = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]);
+        if(!(fh > 0)) continue;
+        if(Math.abs(Math.atan2(tx[1], tx[0])) > 0.2) continue;   // повёрнутый текст не берём
+        var left = tx[4], base = tx[5], w = (it.width || 0) * vp.scale;
+        var top = base - fh * 0.92, bot = base + fh * 0.22;
+        var str = it.str, total = measure(str) || 1;
+        var re = /\S+/g, m;
+        while((m = re.exec(str))){
+          var x0 = left + w * measure(str.slice(0, m.index)) / total;
+          var x1 = left + w * measure(str.slice(0, m.index + m[0].length)) / total;
+          words.push({
+            t: m[0],
+            x0: clamp(x0 / W, 0, 1), x1: clamp(x1 / W, 0, 1),
+            top: top / H, bot: bot / H, h: (bot - top) / H, cy: (top + bot) / 2 / H
+          });
+        }
+      }
+      return words;
+    });
+  }
+  // ближайшее к точке слово (расстояние — в долях ширины страницы; aspect = высота/ширина страницы)
+  function nearestWord(words, fx, fy, aspect){
+    var best = -1, bd = 1e9;
+    for(var i = 0; i < words.length; i++){
+      var w = words[i];
+      var dx = fx < w.x0 ? w.x0 - fx : (fx > w.x1 ? fx - w.x1 : 0);
+      var dy = fy < w.top ? w.top - fy : (fy > w.bot ? fy - w.bot : 0);
+      var d = Math.sqrt(dx * dx + dy * aspect * dy * aspect);
+      if(d < bd){ bd = d; best = i; }
+    }
+    return {i: best, d: bd};
+  }
+  function rectsOfWords(words, lo, hi){
+    var out = [], cur = null;
+    for(var k = lo; k <= hi; k++){
+      var w = words[k];
+      if(cur && Math.abs(w.cy - cur.cy) < 0.5 * Math.max(w.h, cur.h)){
+        cur.x0 = Math.min(cur.x0, w.x0); cur.x1 = Math.max(cur.x1, w.x1);
+        cur.top = Math.min(cur.top, w.top); cur.bot = Math.max(cur.bot, w.bot);
+      } else {
+        if(cur) out.push(cur);
+        cur = {x0: w.x0, x1: w.x1, top: w.top, bot: w.bot, cy: w.cy};
+      }
+    }
+    if(cur) out.push(cur);
+    return out.map(function(r){
+      function q(v){ return Math.round(v * 10000) / 10000; }
+      return [q(r.x0), q(r.top), q(r.x1 - r.x0), q(r.bot - r.top)];
+    });
+  }
+  function textOfWords(words, lo, hi){
+    var s = "";
+    for(var k = lo; k <= hi; k++){
+      var w = words[k];
+      if(k > lo){
+        var prev = words[k - 1];
+        var newLine = Math.abs(w.cy - prev.cy) > 0.5 * Math.max(w.h, prev.h);
+        // перенос слова: «компь-» в конце строки и «ютер» в начале следующей склеиваем без дефиса
+        if(newLine && /[A-Za-zА-Яа-яЁё]-$/.test(s) && /^[a-zа-яё]/.test(w.t)) s = s.slice(0, -1);
+        else s += " ";
+      }
+      s += w.t;
+    }
+    return s.replace(/\s+/g, " ").trim();
+  }
+
   function mount(container, root, handle, o){
     o = o || {};
     var doc = handle.doc, n = handle.numPages;
@@ -119,6 +215,11 @@
     var rafPending = false, saveTimer = null;
     var queueRunning = false;
     var lastRootW = 0;
+    var wordsP = [], wordsSync = [];            // слова страниц: промис и готовый массив
+    var hlData = (o.highlights || []).slice();   // сохранённые подсветки [{id,page,rects}]
+    var sel = null;                              // идущее выделение {p, a, b, words}
+    var holdTimer = null, holdStart = null, touching = false, holdToken = 0;
+    var lastX = 0, lastY = 0, autoOn = false, swallowUntil = 0;
 
     var inner = document.createElement("div");
     inner.className = "pdf-pages-inner";
@@ -191,6 +292,7 @@
       if(c && c.tagName === "CANVAS"){ c.width = 0; c.height = 0; }
       els[i].textContent = "";
       st.done = false; st.key = null; st.err = false;
+      wordsP[i] = null; wordsSync[i] = null;
     }
 
     function renderKey(){ return Math.round(pageW()) + "@" + (window.devicePixelRatio || 1); }
@@ -222,6 +324,8 @@
           els[i].textContent = "";
           els[i].appendChild(canvas);
           st.done = true; st.key = key; st.err = false;
+          paintHl(i);
+          if(o.onSelect) getWords(i);   // слова готовим заранее, чтобы удержание сработало сразу
           try{ page.cleanup(); }catch(e){}
         }, function(e){
           st.task = null;
@@ -358,10 +462,160 @@
       return zoom;
     }
 
+    // ---- подчёркивание мыслей: слова, подсветки, выделение удержанием ----
+    function getWords(i){
+      if(wordsP[i]) return wordsP[i];
+      wordsP[i] = doc.getPage(i + 1).then(function(page){
+        return buildWords(page).then(function(words){
+          try{ page.cleanup(); }catch(e){}
+          wordsSync[i] = words;
+          return words;
+        });
+      }).catch(function(){ wordsSync[i] = []; return []; });
+      return wordsP[i];
+    }
+    function paintHl(i){
+      var el = els[i];
+      if(!el) return;
+      var old = el.querySelector(".pdf-hl-layer");
+      if(old) el.removeChild(old);
+      var list = [], k, j;
+      for(k = 0; k < hlData.length; k++) if(hlData[k].page === i + 1) list.push({rects: hlData[k].rects, cls: "pdf-hl"});
+      if(sel && sel.p === i){
+        var lo = Math.min(sel.a, sel.b), hi = Math.max(sel.a, sel.b);
+        list.push({rects: rectsOfWords(sel.words, lo, hi), cls: "pdf-hl pdf-hl-sel"});
+      }
+      if(!list.length || !states[i].done) return;
+      var layer = document.createElement("div");
+      layer.className = "pdf-hl-layer";
+      for(k = 0; k < list.length; k++){
+        for(j = 0; j < list[k].rects.length; j++){
+          var r = list[k].rects[j], d = document.createElement("div");
+          d.className = list[k].cls;
+          d.style.left = (r[0] * 100) + "%"; d.style.top = (r[1] * 100) + "%";
+          d.style.width = (r[2] * 100) + "%"; d.style.height = (r[3] * 100) + "%";
+          layer.appendChild(d);
+        }
+      }
+      el.appendChild(layer);
+    }
+    function setHighlights(list){
+      hlData = (list || []).slice();
+      for(var i = 0; i < n; i++) if(states[i].done) paintHl(i);
+    }
+    function pageIndexAtClientY(cy){
+      var cr = container.getBoundingClientRect();
+      var y = container.scrollTop + cy - cr.top - container.clientTop;
+      var p = pageAt(y);
+      var r = els[p].getBoundingClientRect();
+      return (cy >= r.top && cy <= r.bottom) ? p : -1;
+    }
+    function holdCancel(){ if(holdTimer){ clearTimeout(holdTimer); holdTimer = null; } holdToken++; }
+    function selCancel(){
+      if(!sel) return;
+      var p = sel.p; sel = null; paintHl(p);
+    }
+    function selStart(p, words, x, y){
+      if(!words.length){ if(o.onNoText) o.onNoText(); return; }
+      var r = els[p].getBoundingClientRect();
+      var aspect = r.height / r.width;
+      var nb = nearestWord(words, (x - r.left) / r.width, (y - r.top) / r.height, aspect);
+      if(nb.i < 0 || nb.d > 1.5 * words[nb.i].h * aspect) return;
+      sel = {p: p, a: nb.i, b: nb.i, words: words};
+      lastX = x; lastY = y;
+      paintHl(p);
+      try{ if(navigator.vibrate) navigator.vibrate(12); }catch(e){}
+      autoScroll();
+    }
+    function holdFire(){
+      holdTimer = null;
+      if(dead || !holdStart || !touching) return;
+      var x = holdStart.x, y = holdStart.y, token = holdToken;
+      var p = pageIndexAtClientY(y);
+      if(p < 0) return;
+      if(wordsSync[p]){ selStart(p, wordsSync[p], x, y); return; }
+      getWords(p).then(function(words){
+        if(dead || token !== holdToken || !touching || sel) return;
+        selStart(p, words, x, y);
+      });
+    }
+    function selUpdate(){
+      if(!sel) return;
+      var p2 = pageIndexAtClientY(lastY), words = sel.words, b = sel.b;
+      if(p2 < 0) return;
+      if(p2 < sel.p) b = 0;
+      else if(p2 > sel.p) b = words.length - 1;
+      else {
+        var r = els[p2].getBoundingClientRect();
+        var nb = nearestWord(words, (lastX - r.left) / r.width, (lastY - r.top) / r.height, r.height / r.width);
+        if(nb.i < 0) return;
+        b = nb.i;
+      }
+      if(b !== sel.b){ sel.b = b; paintHl(sel.p); }
+    }
+    function autoScroll(){
+      if(autoOn) return;
+      autoOn = true;
+      function tick(){
+        if(!sel || dead){ autoOn = false; return; }
+        var cr = container.getBoundingClientRect();
+        var top = Math.max(cr.top, 0) + 70;
+        var bottom = Math.min(cr.bottom, window.innerHeight) - 110;
+        var dy = 0;
+        if(lastY < top) dy = -Math.min(14, 2 + (top - lastY) / 6);
+        else if(lastY > bottom) dy = Math.min(14, 2 + (lastY - bottom) / 6);
+        if(dy){ container.scrollTop += dy; selUpdate(); }
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+    function selCommit(){
+      var s = sel;
+      sel = null;
+      if(!s) return;
+      paintHl(s.p);
+      var lo = Math.min(s.a, s.b), hi = Math.max(s.a, s.b);
+      var text = textOfWords(s.words, lo, hi);
+      if(!text) return;
+      if(o.onSelect) o.onSelect({page: s.p + 1, text: text, rects: rectsOfWords(s.words, lo, hi)});
+    }
+    function onClick(e){
+      if(Date.now() < swallowUntil){ e.preventDefault(); e.stopPropagation(); return; }
+      if(!o.onHighlightTap || !hlData.length || !root.contains(e.target)) return;
+      var p = pageIndexAtClientY(e.clientY);
+      if(p < 0) return;
+      var r = els[p].getBoundingClientRect();
+      var fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+      for(var k = 0; k < hlData.length; k++){
+        if(hlData[k].page !== p + 1) continue;
+        var rs = hlData[k].rects;
+        for(var j = 0; j < rs.length; j++){
+          var q = rs[j];
+          if(fx >= q[0] - 0.004 && fx <= q[0] + q[2] + 0.004 && fy >= q[1] - 0.004 && fy <= q[1] + q[3] + 0.004){
+            e.stopPropagation();
+            o.onHighlightTap(hlData[k], {
+              left: r.left + q[0] * r.width, top: r.top + q[1] * r.height,
+              width: q[2] * r.width, height: q[3] * r.height
+            });
+            return;
+          }
+        }
+      }
+    }
+
     // ---- жесты: щипок двумя пальцами и двойное касание ----
     var pinch = null, lastTap = {t: 0, x: 0, y: 0};
     function dist(a, b){ var dx = a.clientX - b.clientX, dy = a.clientY - b.clientY; return Math.sqrt(dx * dx + dy * dy); }
     function onTouchStart(e){
+      holdCancel();
+      if(sel) selCancel();
+      touching = e.touches.length > 0;
+      if(e.touches.length === 1 && o.onSelect && root.contains(e.target)){
+        var t0 = e.touches[0];
+        holdStart = {x: t0.clientX, y: t0.clientY};
+        lastX = t0.clientX; lastY = t0.clientY;
+        holdTimer = setTimeout(holdFire, HOLD_MS);
+      }
       if(e.touches.length === 2){
         var cr = container.getBoundingClientRect(), it = inner.getBoundingClientRect();
         var mx = (e.touches[0].clientX + e.touches[1].clientX) / 2, my = (e.touches[0].clientY + e.touches[1].clientY) / 2;
@@ -370,6 +624,17 @@
       }
     }
     function onTouchMove(e){
+      if(sel){
+        // выделение идёт: палец ведёт выделение, а не прокручивает страницу
+        if(e.cancelable) e.preventDefault();
+        lastX = e.touches[0].clientX; lastY = e.touches[0].clientY;
+        selUpdate();
+        return;
+      }
+      if(holdTimer && holdStart && e.touches.length === 1){
+        var tm = e.touches[0];
+        if(Math.abs(tm.clientX - holdStart.x) > HOLD_MOVE_PX || Math.abs(tm.clientY - holdStart.y) > HOLD_MOVE_PX) holdCancel();
+      }
       if(!pinch || e.touches.length < 2) return;
       if(e.cancelable) e.preventDefault();
       var s = dist(e.touches[0], e.touches[1]) / pinch.d0;
@@ -378,6 +643,18 @@
       inner.style.transform = "scale(" + s + ")";
     }
     function onTouchEnd(e){
+      holdCancel();
+      if(e.touches.length === 0) touching = false;
+      if(sel){
+        if(e.type === "touchcancel") selCancel();
+        else {
+          // отпускание после удержания не должно считаться ни кликом, ни двойным касанием
+          swallowUntil = Date.now() + 500;
+          lastTap.t = 0;
+          selCommit();
+        }
+        return;
+      }
       if(pinch && e.touches.length < 2){
         var p = pinch; pinch = null;
         inner.style.transform = ""; inner.style.transformOrigin = "";
@@ -397,6 +674,8 @@
       }
     }
 
+    function onContextMenu(e){ if(o.onSelect && root.contains(e.target)) e.preventDefault(); }
+
     function onResize(){
       if(!isAlive()) return;
       var w = root.clientWidth;
@@ -414,6 +693,8 @@
     container.addEventListener("touchmove", onTouchMove, {passive: false});
     container.addEventListener("touchend", onTouchEnd, {passive: true});
     container.addEventListener("touchcancel", onTouchEnd, {passive: true});
+    container.addEventListener("click", onClick);
+    container.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("resize", onResize);
 
     function destroy(){
@@ -426,6 +707,10 @@
       container.removeEventListener("touchmove", onTouchMove);
       container.removeEventListener("touchend", onTouchEnd);
       container.removeEventListener("touchcancel", onTouchEnd);
+      container.removeEventListener("click", onClick);
+      container.removeEventListener("contextmenu", onContextMenu);
+      holdCancel();
+      sel = null;
       window.removeEventListener("resize", onResize);
       for(var i = 0; i < n; i++){
         var st = states[i];
@@ -456,6 +741,7 @@
       getZoom: function(){ return zoom; },
       getPosition: function(){ return {page: curPage + 1, frac: curFrac}; },
       flush: flush,
+      setHighlights: setHighlights,
       pageCount: n
     };
   }
