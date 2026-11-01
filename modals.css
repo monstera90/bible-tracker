@@ -1,6 +1,6 @@
 /* ===========================================================================
    modals.css
-   Версия: 19.4 (01.11)
+   Версия: 20.0 (01.11)
    Версия: 16.2 (25.10) — `.settings-modal-box.cal-week-flush`: окно без боковых полей и боковой рамки, пока на вкладке «Календарь» открыт режим «Неделя» (calendar.js `syncFlush`).
    Версия: 16.1 (25.10) — компактные язычки: боковые 35×55px (было 45×68), нижние 55×35px, кнопка-язычок `.settings-fab` 35×35px; отступы оверлея и заплатка угла под колонку 35px.
    Версия: 16.0 (22.10) — структурная правка: кнопка тегов задач `.task-tag-wrap` (слот 4 между «+» и скрепкой) + попап `.task-tag-popup`; слоты 4–12 теперь считаются как `N + var(--tag-s, 0)` (класс `.fab-tag-shift` на окне ставит `--tag-s:1`: все кнопки левее «+» уезжают на одну позицию, пока видна кнопка тегов). Откат: modals.css 15.0.
@@ -388,15 +388,7 @@
     background:var(--theme-color, var(--wood));
     pointer-events:none;
   }
-  .settings-corner-patch-bl::after{
-    content:"";
-    position:absolute;
-    bottom:100%;
-    inset-inline-start:0;
-    width:10px;
-    height:10px;
-    background:var(--theme-color, var(--wood));
-  }
+  .settings-corner-patch-bl::after{ display:none; } /* левый нижний угол окна прямой — заливка выреза не нужна */
   .settings-modal-overlay.reading-mode-active .settings-corner-patch-bl{ display:none; }
   @media (min-width:601px){
     .settings-corner-patch-bl{ display:none; }
@@ -544,7 +536,7 @@
     border-radius:0;
     border-start-start-radius:10px;
     border-start-end-radius:10px;
-    border-end-start-radius:10px;
+    border-end-start-radius:0;
     width:100%;
     display:flex;
     flex-direction:column;
@@ -630,7 +622,7 @@
      основного правила .settings-modal-box (та же специфичность —
      решает порядок в файле). */
   @media (max-width:600px){
-    .settings-modal-box{ border-radius:0; border-end-start-radius:10px; border-start-end-radius:14px; }
+    .settings-modal-box{ border-radius:0; border-end-start-radius:0; border-start-end-radius:14px; }
     /* ТЗ 28.09: правый верхний угол области чтения на телефоне скруглён
        (14px — как у правого верхнего угла язычков стека, .settings-tab).
        Вырез угла закрашен цветом правой полосы
@@ -1068,7 +1060,9 @@
     width:calc(100% + 37px);
     max-width:none;
     border-start-end-radius:0;
+    border-end-end-radius:10px; /* закруглён правый нижний угол области чтения */
   }
+  .settings-modal-overlay.notes-wide::after{ display:none; } /* градиент статус-бар → полоса колонки: колонки нет */
   @media (max-width:600px){
     .settings-modal-overlay.notes-wide .settings-modal-box{ width:calc(100% + 35px); }
   }
