@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 106.0 (31.10)
+   Версия: 107.0 (01.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1207,8 +1207,8 @@
   var SHARED_GROUP_KEY = "bibleSharedGroup_v1";
   var MIGRATED_KEY = "__migrated_v2";
   var CELEBRATION_SHOWN_KEY = "bibleCelebrationShown_v1";
-  var GOALS_EXPANDED_KEY = "bibleGoalsBandExpanded_v1";
-  // Настройка "Скрывать статус бар PWA-приложения" (вкладка настроек, шестерёнка) — это
+  // Флаг полноэкранного режима («Скрывать статус бар PWA-приложения»; включается кнопками «смартфон» на вкладках
+  // задач, в ридере книг и в «Моём блокноте», галочки в настройках нет) — это
   // локальный флаг конкретного устройства/браузера, не синхронизируется в
   // облако и не попадает в экспорт (статус-бар — свойство экрана этого устройства, а не данных
   // пользователя). Технически включает/выключает Fullscreen API (см. applyStatusBarFullscreen
@@ -1250,7 +1250,7 @@
     applyStatusBarFullscreen(value);
   }
   // Сам вызов Fullscreen API. При enable=true пытается войти в полноэкранный режим — вызов должен
-  // идти либо из обработчика пользовательского жеста (клик по галочке), либо из
+  // идти либо из обработчика пользовательского жеста (нажатие кнопки полноэкранного режима), либо из
   // armHideStatusBarAutoRetry ниже (первый тап после запуска, если автозапуск при старте страницы
   // браузер заблокировал как жест-независимый вызов). При enable=false выходит из полноэкранного
   // режима, если он был включён.
@@ -1322,147 +1322,6 @@
     }
     return false;
   }
-
-
-  // ===================== ЦИТАТЫ ДНЯ =====================
-  // Шапка может показывать 2 вида записей, каждый включается отдельной галочкой в настройках.
-  // 1) BIBLE_QUOTES_ENABLED_KEY — библейские стихи: системный список QUOTES ниже + опционально один
-  //   свой стих (CUSTOM_VERSE_KEY), добавленный пользователем через настройки.
-  var BIBLE_QUOTES_ENABLED_KEY = "__bibleQuotesEnabled";
-  var CUSTOM_COMMENTS_ENABLED_KEY = "__customCommentsEnabled";
-  var CUSTOM_VERSE_KEY = "__customKeyVerse";
-
-  function getBibleQuotesEnabled(){ var r = state[BIBLE_QUOTES_ENABLED_KEY]; return !!(r && r.c); }
-  function setBibleQuotesEnabled(value){
-    state[BIBLE_QUOTES_ENABLED_KEY] = {c: value, t: Date.now()};
-    saveLocalStateNow();
-    scheduleCloudPush();
-    refreshHeaderQuote();
-  }
-  function getCustomCommentsEnabled(){ var r = state[CUSTOM_COMMENTS_ENABLED_KEY]; return !!(r && r.c); }
-  function setCustomCommentsEnabled(value){
-    state[CUSTOM_COMMENTS_ENABLED_KEY] = {c: value, t: Date.now()};
-    saveLocalStateNow();
-    scheduleCloudPush();
-    refreshHeaderQuote();
-  }
-  function getCustomVerse(){
-    var r = state[CUSTOM_VERSE_KEY];
-    return (r && r.c) ? r.c : {text:"", ref:""};
-  }
-  function setCustomVerse(text, ref){
-    text = (text || "").trim();
-    ref = (ref || "").trim();
-    state[CUSTOM_VERSE_KEY] = {c: (text ? {text:text, ref:ref} : null), t: Date.now()};
-    saveLocalStateNow();
-    scheduleCloudPush();
-    refreshHeaderQuote();
-  }
-
-  var QUOTE_KEY = "__quote";
-  var QUOTES = [
-    { text:"Счастлив тот, кто… находит радость в законе Иеговы и читает его вполголоса день и ночь", ref:"Псалом 1:1, 2", book:"Псалмы", ch:1, v1:1, v2:2 },
-    { text:"Закон Иеговы совершенен, восстанавливает силы", ref:"Псалом 19:7", book:"Псалмы", ch:19, v1:7 },
-    { text:"Счастливы те, кто стремится утолить свой духовный голод", ref:"Матфея 5:3", book:"Матфея", ch:5, v1:3 },
-    { text:"Я по-настоящему люблю закон Бога", ref:"Римлянам 7:22", book:"Римлянам", ch:7, v1:22 },
-    { text:"Как я люблю твой закон! Весь день размышляю о нём", ref:"Псалом 119:97", book:"Псалмы", ch:119, v1:97 },
-    { text:"Размышляй об этом, будь этим поглощён, чтобы твои духовные успехи были видны всем", ref:"1 Тим. 4:15", book:"1 Тимофею", ch:4, v1:15 },
-    { text:"Кто всматривается в совершенный закон, ведущий к свободе, и соблюдает его, тот не забывает услышанное", ref:"Иакова 1:25", book:"Иакова", ch:1, v1:25 },
-    { text:"Наставления Иеговы достойны доверия, делают неопытных мудрыми", ref:"Псалом 19:7", book:"Псалмы", ch:19, v1:7 },
-    { text:"Повеления Иеговы справедливы, радуют сердце", ref:"Псалом 19:8", book:"Псалмы", ch:19, v1:8 },
-    { text:"Всё написанное прежде было написано для нашего наставления", ref:"Рим. 15:4", book:"Римлянам", ch:15, v1:4 },
-    { text:"Заповедь Иеговы чиста, наделяет проницательностью", ref:"Псалом 19:8", book:"Псалмы", ch:19, v1:8 },
-    { text:"Закон, который ты дал, для меня лучше… золота и серебра", ref:"Псалом 119:72", book:"Псалмы", ch:119, v1:72 },
-    { text:"[Иегова] оживляет мою душу, ведёт путями праведности", ref:"Псалом 23:3", book:"Псалмы", ch:23, v1:3 },
-    { text:"Твои наставления прекрасны, поэтому я следую им", ref:"Псалом 119:129", book:"Псалмы", ch:119, v1:129 },
-    { text:"Всё Писание вдохновлено Богом и полезно", ref:"2 Тим. 3:16", book:"2 Тимофею", ch:3, v1:16 },
-    { text:"Твоё слово — это истина", ref:"Иоанна 17:17", book:"Иоанна", ch:17, v1:17 },
-    { text:"Людей направлял святой дух, и они передавали весть Бога", ref:"2 Пет. 1:21", book:"2 Петра", ch:1, v1:21 },
-    { text:"Вы хорошо делаете, что относитесь к [пророческому слову] со всем вниманием", ref:"2 Пет. 1:19", book:"2 Петра", ch:1, v1:19 },
-    { text:"[Писание] помогает обучать, обличать, исправлять, наставлять на правильный путь", ref:"2 Тим. 3:16", book:"2 Тимофею", ch:3, v1:16 },
-    { text:"Твоё слово — светильник для моих ног и свет на моём пути", ref:"Пс. 119:105", book:"Псалмы", ch:119, v1:105 }
-  ];
-
-  // Слоты дня: 0=ночь(0-8), 1=утро(8-12), 2=день(12-18), 3=вечер(18-24)
-  function getDaySlot(){
-    var h = new Date().getHours();
-    if(h < 8) return 0;
-    if(h < 12) return 1;
-    if(h < 18) return 2;
-    return 3;
-  }
-
-  function getQuoteRec(){
-    var rec = state[QUOTE_KEY];
-    if(!rec || typeof rec.c !== "number") return {c:0, t:0, slot:-1};
-    // миграция со старого формата (без slot)
-    if(typeof rec.slot !== "number"){
-      rec = {c: rec.c, t: rec.t, slot: -1};
-    }
-    return rec;
-  }
-
-  // Собирает общий список записей для ротации в шапке — из библейских стихов (системных + своего)
-  // и/или личных комментариев пользователя, в зависимости от того, какие галочки сейчас включены в
-  // настройках (см. getBibleQuotesEnabled/getCustomCommentsEnabled выше). Порядок: сначала все
-  // библейские, затем все комментарии — стабильный порядок важен, чтобы индекс idx осмысленно
-  // "листал" один и тот же список, пока он не меняется.
-  function buildQuotePool(){
-    var pool = [];
-    if(getBibleQuotesEnabled()){
-      QUOTES.forEach(function(q){
-        pool.push({type:"bible", text:q.text, ref:q.ref, book:q.book, ch:q.ch, v1:q.v1, v2:q.v2});
-      });
-      var custom = getCustomVerse();
-      if(custom && custom.text){
-        pool.push({type:"bible", text:custom.text, ref:custom.ref, custom:true});
-      }
-    }
-    if(getCustomCommentsEnabled()){
-      getAllComments().forEach(function(c){
-        if(c.c && c.c.text) pool.push({type:"comment", text:c.c.text});
-      });
-    }
-    return pool;
-  }
-
-  function showQuote(pool, idx){
-    var el = document.getElementById("dailyQuote");
-    if(!el) return;
-    if(!pool.length){
-      el.classList.remove("visible");
-      el.style.display = "none";
-      return;
-    }
-    el.style.display = "";
-    var q = pool[idx % pool.length];
-    var html;
-    if(q.type === "bible"){
-      var link = q.custom ? null : verseLink(q.book, q.ch, q.v1, q.v2);
-      var refHtml = q.ref ? (link
-        ? ' <a href="' + link + '" target="_blank" rel="noopener">(' + escapeHtml(q.ref) + ')</a>'
-        : ' (' + escapeHtml(q.ref) + ')') : "";
-      html = "«" + escapeHtml(q.text) + "»" + refHtml + ".";
-    } else {
-      html = linkifyHtml(q.text);
-    }
-    el.innerHTML = html;
-    requestAnimationFrame(function(){
-      requestAnimationFrame(function(){ el.classList.add("visible"); });
-    });
-  }
-
-  // Пересчитывает и перерисовывает шапку немедленно (без сдвига индекса по слотам) — вызывается
-  // сразу после того, как пользователь поменял галочки, свой стих или список личных комментариев,
-  // чтобы шапка не ждала следующего временного слота. Индекс лишь ограничивается новым размером
-  // списка (список мог измениться).
-  function refreshHeaderQuote(){
-    var pool = buildQuotePool();
-    var rec = getQuoteRec();
-    var idx = pool.length ? (rec.c % pool.length) : 0;
-    showQuote(pool, idx);
-  }
-
 
 
   var state = loadState();
@@ -1922,7 +1781,7 @@
   function syncTaskFabRowForTab(tab){
     fabRowSliderReset(); // смена вкладки/экрана — ряд всегда стартует с видимым «домиком»
     var addFab = document.getElementById("taskAddFab");
-    var isCommentsTab = (tab === "extra2" && getCustomCommentsEnabled());
+    var isCommentsTab = (tab === "extra2");
     var showTaskFab = TASK_MOVABLE_TABS.indexOf(tab) !== -1 || isCommentsTab;
     // Шаг 11 ТЗ синхронизации: viewer не должен видеть "+" на вкладке "Общие задачи" — сама вкладка
     // при этом остаётся движимой (showTaskFab ниже управляет ещё и домиком-заглушкой/скрепкой/Аа и
@@ -3484,7 +3343,6 @@
     renderHourBars();
     renderHourCounterMenu();
     renderGoalsSection();
-    renderAddGoalMenu();
     refreshYearGridIfOpen();
     try{ if(window.WorkoutsTab) window.WorkoutsTab.refreshIfOpen(); }catch(e){}
     // "Закладки" md-редактора тоже часть этого же state (см.
@@ -8378,7 +8236,6 @@
         "bibleReadingMode_v1": "режим чтения",
         "bibleRedSortByFlag_v1": "сортировка красных задач",
         "bibleNextHideLinkedTasks_v1": "переключатель «Дальше»",
-        "bibleGoalsBandExpanded_v1": "развёрнутость полосы целей",
         "bibleSet2Unlocked_v1": "разблокировка набора 2",
         "bibleHyphens_v1": "переносы слов (копия в IndexedDB bibleHyphensDB_v1 восстанавливается кодом)",
         "bibleLastOpenedBook_v1": "последняя открытая книга",
@@ -8408,6 +8265,7 @@
         "itemCardTimers_v1": "запасной таймер карточек в браузере (в приложении таймеры ведёт оболочка): момент окончания, у каждого устройства свой",
         "itemCardsSync_v1": "служебное: какие карточки уже ушли в облако и какие удалены здесь (синхронизация карточек, itemcards.js)",
         "bibleProjectPickerScrollMap_v1": "решение заказчика (Q16 C): мала польза",
+        "bibleGoalsBandExpanded_v1": "устарело: режим «меньше прогресс-баров» удалён, ключ больше не пишется",
         "ipkdLastOpenedDate_v1": "решение заказчика (Q16 C)",
         "moodLastOpenedDate_v1": "решение заказчика (Q16 C)",
         "redLastOpenedDate_v1": "решение заказчика (Q16 C)",
@@ -8625,11 +8483,6 @@
       moodCounter: {
         enabled: isMoodEnabled(),
         dailyMoodLog: []
-      },
-      headerQuotes: {
-        bibleQuotesEnabled: getBibleQuotesEnabled(),
-        customCommentsEnabled: getCustomCommentsEnabled(),
-        customVerse: getCustomVerse()
       },
       customComments: {
         note: "list — записи из вкладки \"Добавить кастомный комментарий\" (могут быть отредактированы/удалены независимо от их копий в Карте дней года). dailyLog — копии, привязанные к дню создания и показанные в Карте дней года; удаление записи из list их не затрагивает.",
@@ -11081,7 +10934,7 @@
     // #settingsTabContent), с собственной памятью позиции (см.
     // openTaskNextPicker/getSavedProjectScrollTop).
     if((TASK_TAB_IDS.hasOwnProperty(tab) && !(tab === "projects" && activeProjectPickerId)) ||
-       (tab === "extra2" && getCustomCommentsEnabled())) restoreTabScroll(tab);
+       tab === "extra2") restoreTabScroll(tab);
 
     if(isRealSwitch && window.AppNav){
       window.AppNav.push(function(){
@@ -11102,11 +10955,9 @@
     );
   }
 
-  // extra2 — вкладка "Добавить кастомный комментарий", когда включена соответствующая галочка в
-  // настройках (см. renderSettingsTabGear и refreshExtra2TabAppearance); иначе, как и extra3, —
-  // пока просто заглушка без содержимого.
+  // extra2 — вкладка "Добавить кастомный комментарий" (см. refreshExtra2TabAppearance); extra3 — «Review».
   function renderSettingsTabExtra(tabKey){
-    if(tabKey === "extra2" && getCustomCommentsEnabled()){
+    if(tabKey === "extra2"){
       renderCommentsTab();
       return;
     }
@@ -11233,8 +11084,6 @@
       });
       progressPanelObserver.observe(container, {childList: true});
     }
-    // пока панель лежала в скрытом контейнере, высота списка целей (--gb-h, режим «меньше прогресс-баров») не измерялась
-    try{ renderGoalsSection(); }catch(e){}
   }
   // ===== ВКЛАДКА «ГРАФИК ЧТЕНИЯ» (set2s_13) =====
   // Заголовок «ГРАФИК ЧТЕНИЯ БИБЛИИ» и карточки книг Библии с главами раньше стояли на главной странице. Теперь они лежат в
@@ -17940,33 +17789,18 @@
     if(!container) return;
     var hourOn = !!getHourGoal();
     var hourNotesOn = isHourNotesEnabled();
-    var reducedOn = getGoalsReducedView();
     var showAllTasksOn = getShowAllTasksEnabled();
-    var hideStatusBarOn = getHideStatusBarEnabled();
-    var bibleQuotesOn = getBibleQuotesEnabled();
-    var customCommentsOn = getCustomCommentsEnabled();
-    var customVerse = getCustomVerse();
     var debugModeOn = window.Debug ? window.Debug.isEnabled() : false;
     container.innerHTML =
       '<div class="settings-gear-tab">' + // обёртка для размера шрифта от «Аа»
       '<h3 class="common-tab-title">Дополнительные возможности</h3>' +
       '<div class="settings-row"><span>Добавить дополнительный счётчик</span><input type="checkbox" id="settingsHourCb"' + (hourOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" id="settingsHourNotesRow" style="' + (hourOn ? "" : "display:none;") + '"><span>Добавить комментарий в дополнительный счётчик</span><input type="checkbox" id="settingsHourNotesCb"' + (hourNotesOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row"><span>Видеть меньше прогресс-баров</span><input type="checkbox" id="settingsReducedCb"' + (reducedOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row"><span>Включить библейские стихи в шапке приложения</span><input type="checkbox" id="settingsBibleQuotesCb"' + (bibleQuotesOn ? " checked" : "") + '></div>' +
-      '<div class="settings-verse-block" id="settingsCustomVerseRow" style="' + (bibleQuotesOn ? "" : "display:none;") + '">' +
-        '<span class="settings-verse-label">Свой ключевой стих для шапки (по желанию)</span>' +
-        '<textarea class="settings-verse-input" id="settingsCustomVerseText" placeholder="Текст стиха…" rows="2"></textarea>' +
-        '<input type="text" class="settings-verse-input" id="settingsCustomVerseRef" placeholder="Ссылка, например: Иоанна 3:16">' +
-      '</div>' +
-      '<div class="settings-row"><span>Включить личные комментарии в шапке сайта</span><input type="checkbox" id="settingsCustomCommentsCb"' + (customCommentsOn ? " checked" : "") + '></div>' +
       '<div class="settings-row"><span>Показать все мои задачи</span><input type="checkbox" id="settingsShowAllTasksCb"' + (showAllTasksOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row"><span>Включить полноэкранный режим</span><input type="checkbox" id="settingsHideStatusBarCb"' + (hideStatusBarOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" style="border-bottom:none;"><span>Включить режим отладки</span><input type="checkbox" id="settingsDebugModeCb"' + (debugModeOn ? " checked" : "") + '></div>' +
-      '<button class="modal-btn" id="settingsAddGoalBtn" style="margin-top:16px;">Добавить для себя цель</button>' +
       // ярлык сканера QR-кодов карточек на рабочий стол: только в приложении (оболочка), в браузере создать ярлык нельзя
       (hasScanShortcutBridge() ?
-        '<button class="modal-btn" id="settingsScanShortcutBtn" style="margin-top:10px;">Создать ярлык сканера QR-кодов</button>' +
+        '<button class="modal-btn" id="settingsScanShortcutBtn" style="margin-top:16px;">Создать ярлык сканера QR-кодов</button>' +
         '<div class="modal-note" id="settingsScanShortcutNote" style="display:none;"></div>' +
         '<button class="modal-btn" id="settingsShortcutPermBtn" style="margin-top:8px; display:none;">Открыть разрешения приложения</button>'
         : '') +
@@ -17978,27 +17812,6 @@
         '</div>'
       ) +
       '</div>';
-
-    var customVerseTextEl = document.getElementById("settingsCustomVerseText");
-    var customVerseRefEl = document.getElementById("settingsCustomVerseRef");
-    if(customVerseTextEl) customVerseTextEl.value = customVerse.text || "";
-    if(customVerseRefEl) customVerseRefEl.value = customVerse.ref || "";
-    function saveCustomVerseFromInputs(){
-      setCustomVerse(customVerseTextEl.value, customVerseRefEl.value);
-    }
-    if(customVerseTextEl) customVerseTextEl.addEventListener("blur", saveCustomVerseFromInputs);
-    if(customVerseRefEl) customVerseRefEl.addEventListener("blur", saveCustomVerseFromInputs);
-
-    document.getElementById("settingsBibleQuotesCb").addEventListener("change", function(){
-      setBibleQuotesEnabled(this.checked);
-      var row = document.getElementById("settingsCustomVerseRow");
-      if(row) row.style.display = this.checked ? "" : "none";
-    });
-
-    document.getElementById("settingsCustomCommentsCb").addEventListener("change", function(){
-      setCustomCommentsEnabled(this.checked);
-      refreshExtra2TabAppearance();
-    });
 
     document.getElementById("settingsHourCb").addEventListener("change", function(){
       var cb = this;
@@ -18017,22 +17830,9 @@
       });
     }
 
-    document.getElementById("settingsReducedCb").addEventListener("change", function(){
-      setGoalsReducedView(this.checked);
-      goalsExpanded = true;
-      try{ localStorage.setItem(GOALS_EXPANDED_KEY, "1"); }catch(e){}
-      renderGoalsSection();
-    });
-
     document.getElementById("settingsShowAllTasksCb").addEventListener("change", function(){
       setShowAllTasksEnabled(this.checked);
       refreshSettingsTabsVisibility();
-    });
-
-    document.getElementById("settingsHideStatusBarCb").addEventListener("change", function(){
-      // Сам клик по галочке — жест пользователя, поэтому вход в fullscreen сработает сразу же, без
-      // необходимости в armHideStatusBarAutoRetry.
-      setHideStatusBarEnabled(this.checked);
     });
 
     document.getElementById("settingsDebugModeCb").addEventListener("change", function(){
@@ -18065,12 +17865,6 @@
         try{ window.LifeTrackerNative.openShortcutPermissionSettings(); }catch(e){}
       });
     }
-
-    document.getElementById("settingsAddGoalBtn").addEventListener("click", function(){
-      var id = createNewGoal();
-      renderGoalsSection();
-      openGoalSettingsModal(id);
-    });
 
     var secretCodeInput = document.getElementById("settingsSecretCodeInput");
     if(secretCodeInput){
@@ -20187,8 +19981,7 @@
 
     // личные комментарии из шапки, скопированные на этот день (см. createYearCommentCopy) —
     // независимый от вкладки "комментарии" список, показывается всегда, если для этого дня есть
-    // хоть одна такая запись (даже если галочка "Включить личные комментарии…" сейчас выключена —
-    // старые записи остаются доступны).
+    // хоть одна такая запись.
     var yearComments = getYearCommentsForDay(dayTs);
 
     container.innerHTML =
@@ -20539,17 +20332,6 @@
     "#D9534F","#B4A7D6","#5DADE2","#F1948A"
   ];
   var GOAL_MAX_TASKS = 20;
-  var goalsExpanded = (localStorage.getItem(GOALS_EXPANDED_KEY) !== "0"); // раскрыта ли полоса в режиме "видеть меньше" (сохраняется между перезагрузками)
-
-  function getGoalsReducedView(){
-    var r = state["__goalsReducedView"];
-    return !!(r && r.c);
-  }
-  function setGoalsReducedView(value){
-    state["__goalsReducedView"] = {c: value, t: Date.now()};
-    saveLocalStateNow();
-    scheduleCloudPush();
-  }
 
   function escapeHtml(s){
     return String(s == null ? "" : s)
@@ -20631,58 +20413,13 @@
     return bar;
   }
 
-  // По умолчанию бары целей просто стоят в общем потоке рядом с другими барами (тот же стиль, без
-  // рамки). Только если явно включён режим "Видеть меньше прогресс-баров" — они переезжают в
-  // отдельную полноширинную полосу со сворачивающим треугольником.
+  // Бары личных целей стоят в общем потоке панели «Прогресс» (#goalsListInline) рядом с остальными барами.
+  // Новая цель — кнопка «+» в нижнем ряду вкладки «Прогресс» (initProgressFabRow).
   function renderGoalsSection(){
     var inlineList = document.getElementById("goalsListInline");
-    var toggleWrap = document.getElementById("goalsToggleWrap");
-    var band = document.getElementById("goalsBand");
-    var list = document.getElementById("goalsList");
-    if(!inlineList || !toggleWrap || !band || !list) return;
-
-    var goals = getAllGoals();
-    var reduced = getGoalsReducedView();
-
+    if(!inlineList) return;
     inlineList.innerHTML = "";
-    list.innerHTML = "";
-
-    if(goals.length === 0){
-      toggleWrap.classList.remove("visible");
-      band.classList.remove("reduced-mode");
-      return;
-    }
-
-    if(reduced){
-      toggleWrap.classList.add("visible");
-      band.classList.add("reduced-mode");
-      goals.forEach(function(g){ list.appendChild(buildGoalBarEl(g)); });
-      band.classList.toggle("open", goalsExpanded);
-      // Реальная высота списка целей (а не произвольное большое число) подставляется уже после
-      // того, как бары целей добавлены в DOM — список короткий (обычно несколько целей), поэтому
-      // измерение здесь ничтожно дёшево, в отличие от больших сеток глав книг. +10 — это
-      // padding-top самой .goals-band (см. components.css): max-height считается по border-box
-      // вместе с этим паддингом, а scrollHeight списка внутри его не учитывает — без добавки нижняя
-      // цель в списке обрезалась ровно на эту высоту.
-      if(goalsExpanded) band.style.setProperty("--gb-h", (list.scrollHeight + 10) + "px");
-      var btn = document.getElementById("goalsToggleBtn");
-      if(btn) btn.innerHTML = goalsExpanded ? "&#9650;" : "&#9660;";
-    } else {
-      toggleWrap.classList.remove("visible");
-      band.classList.remove("reduced-mode");
-      goals.forEach(function(g){ inlineList.appendChild(buildGoalBarEl(g)); });
-    }
-  }
-
-  function renderAddGoalMenu(){
-    var row = document.getElementById("addGoalMenuRow");
-    if(!row) return;
-    row.innerHTML = '<button class="version-history-item" id="addGoalBtn">Добавить для себя цель</button>';
-    document.getElementById("addGoalBtn").addEventListener("click", function(){
-      var id = createNewGoal();
-      renderGoalsSection();
-      openGoalSettingsModal(id);
-    });
+    getAllGoals().forEach(function(g){ inlineList.appendChild(buildGoalBarEl(g)); });
   }
 
   // --- окно настройки цели: заголовок, цвет, список задач ---
@@ -20827,20 +20564,25 @@
     });
   }
 
-  var goalsToggleBtn = document.getElementById("goalsToggleBtn");
-  if(goalsToggleBtn){
-    goalsToggleBtn.addEventListener("click", function(){
-      goalsExpanded = !goalsExpanded;
-      try{ localStorage.setItem(GOALS_EXPANDED_KEY, goalsExpanded ? "1" : "0"); }catch(e){}
-      var band = document.getElementById("goalsBand");
-      if(band){
-        if(goalsExpanded){
-          var list = document.getElementById("goalsList");
-          if(list) band.style.setProperty("--gb-h", (list.scrollHeight + 10) + "px");
-        }
-        band.classList.toggle("open", goalsExpanded);
-      }
-      goalsToggleBtn.innerHTML = goalsExpanded ? "&#9650;" : "&#9660;";
+  // Нижний ряд вкладки «Прогресс» — тот же .mdeditor-fab-row, что у «Карточек», «Календаря» и книг: слева «+»
+  // (новая личная цель → окно настройки цели), правее неподвижный «домик»-пустышка (обработчика клика нет — как
+  // booksHomeStub/itemCardsHomeStub). Ряд лежит внутри #progressPanel и ездит вместе с панелью (вне вкладки панель
+  // скрыта в #progressPanelHome — скрыт и ряд); у панели нет position, поэтому ряд позиционируется от окна настроек.
+  var PROGRESS_PLUS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
+  function initProgressFabRow(){
+    var panel = document.getElementById("progressPanel");
+    if(!panel || document.getElementById("progressFabRow")) return;
+    var row = document.createElement("div");
+    row.className = "mdeditor-fab-row";
+    row.id = "progressFabRow";
+    row.innerHTML =
+      '<button type="button" class="mdeditor-fab-btn" id="progressAddGoalBtn" title="Добавить для себя цель">' + PROGRESS_PLUS_ICON_SVG + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="progressHomeStub" tabindex="-1" aria-disabled="true">' + READER_HOME_ICON_SVG + '</button>';
+    panel.appendChild(row);
+    document.getElementById("progressAddGoalBtn").addEventListener("click", function(){
+      var id = createNewGoal();
+      renderGoalsSection();
+      openGoalSettingsModal(id);
     });
   }
 
@@ -21405,8 +21147,8 @@
     var active = getReadingModeActive();
     // ⚠️ третье состояние той же кнопки, см.
     // FULLSCREEN_MODE_ICON_SVG/enterFullscreenDisplayMode/exitToNormalDisplayMode ниже.
-    // Переиспользует существующий флаг "Включить полноэкранный режим" из окна настроек
-    // (HIDE_STATUS_BAR_KEY), поэтому отдельного getFullscreenModeActive не заводим.
+    // Переиспользует флаг полноэкранного режима (HIDE_STATUS_BAR_KEY), поэтому отдельного
+    // getFullscreenModeActive не заводим.
     var fullscreenActive = getHideStatusBarEnabled();
     // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя — "в полноэкранном режиме не должно быть видно никаких
     // вкладок"): полноэкранный режим — это ГИБРИД, не просто галочка "скрыть статус-бар" сама по
@@ -22249,7 +21991,6 @@
       comment.c.yearCopied = true;
     }
     saveCommentData(id, comment.c);
-    refreshHeaderQuote();
     // см. пояснение у setTaskText выше
     if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
   }
@@ -22276,7 +22017,6 @@
     state["comment:" + id] = {c: null, t: Date.now()};
     saveLocalStateNow();
     scheduleCloudPush();
-    refreshHeaderQuote();
     // см. пояснение у setTaskText выше
     if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
     if(MdEditor && MdEditor.deleteImagesOfText) MdEditor.deleteImagesOfText(ownText);
@@ -22404,18 +22144,12 @@
     btn.innerHTML = REVIEW_TAB_ICON_SVG;
   }
 
-  // Меняет вид язычка extra2 в зависимости от галочки "Включить личные комментарии…" — вызывается
-  // при загрузке страницы и сразу после переключения галочки (см. renderSettingsTabGear).
+  // Ставит значок и подсказку язычка extra2 («Комментарии») — вызывается при загрузке страницы.
   function refreshExtra2TabAppearance(){
     var btn = document.getElementById("settingsTabExtra2Btn");
     if(!btn) return;
-    if(getCustomCommentsEnabled()){
-      btn.title = "Добавить кастомный комментарий";
-      btn.innerHTML = COMMENT_TAB_ICON_SVG;
-    } else {
-      btn.title = "";
-      btn.innerHTML = "";
-    }
+    btn.title = "Добавить кастомный комментарий";
+    btn.innerHTML = COMMENT_TAB_ICON_SVG;
   }
 
   // anchorCommentId (необязательный) — та же идея, что и anchorTaskId у renderTaskTabList (см.
@@ -23576,7 +23310,7 @@
     }
 
     var moveTabsKeys = TASK_MOVE_TARGET_TABS.slice();
-    if(getCustomCommentsEnabled()) moveTabsKeys.push("extra2");
+    moveTabsKeys.push("extra2");
     var moveTabsHtml = '<div class="task-info-tabs-row">' + moveTabsKeys.map(function(key){
       return '<div class="task-info-tab-mini">' + TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key] || key) + '</span></div>';
     }).join("") + '</div>';
@@ -23885,14 +23619,13 @@
   // в title/aria-label). "Комментарии" (extra2) — отдельный пункт ТОЛЬКО в этой плашке: это не
   // обычная вкладка-список задач, поэтому не входит в TASK_MOVE_TARGET_TABS (тот массив
   // используется ещё и импортом из .txt, и созданием новой задачи из "Моего блокнота" — там
-  // конвертация в комментарий не нужна). Показывается только если сама вкладка "Комментарии"
-  // включена в настройках (см. getCustomCommentsEnabled) — иначе задача исчезала бы в скрытую
-  // вкладку. Вкладок-назначений 8 (+ Comments = 9) — в сетке 5 в ряд это 5 сверху и 4 снизу, 10-я
+  // конвертация в комментарий не нужна). Показывается всегда — вкладка «Комментарии» не отключается.
+  // Вкладок-назначений 8 (+ Comments = 9) — в сетке 5 в ряд это 5 сверху и 4 снизу, 10-я
   // ячейка свободна (место под будущую вкладку; ширину плашки задаёт .app-bubble-grid в
   // modals.css).
   function taskMoveBubbleItems(task){
     var targetKeys = TASK_MOVE_TARGET_TABS.slice();
-    if(getCustomCommentsEnabled()) targetKeys.push("extra2");
+    targetKeys.push("extra2");
     return targetKeys.map(function(key){
       return { key: key, svg: TASK_MOVE_ICON_SVG(key), title: TASK_TAB_TITLES[key], current: key === taskEffectiveTab(task) };
     });
@@ -25379,7 +25112,7 @@
   renderHourCounterMenu();
   checkHourBoundaries();
   renderGoalsSection();
-  renderAddGoalMenu();
+  initProgressFabRow();
   try{ applyTaskIconScale(getTaskIconScalePct(), false); }catch(e){} // сохранённый размер значков задач — до первой отрисовки списков
   refreshSettingsTabsVisibility();
   initTabScrollTracking();
