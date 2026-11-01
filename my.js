@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 110.1 (01.11)
+   Версия: 110.2 (01.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -18366,7 +18366,7 @@
       else renderSettingsTabYear(yearGridScrollKeep);
       return;
     }
-    if(bottomAltMode && !BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) && tab !== WHEEL_SYSTEM_TAB_KEY) return;
+    if(bottomAltMode && !BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) && tab !== WHEEL_SYSTEM_TAB_KEY && BOTTOM_ROW_TABS.indexOf(tab) === -1) return; // нижний ряд в режиме колеса остаётся рабочим (его вкладка выключает режим колеса)
     if(tab === currentSettingsTab) return;
     switchSettingsTab(tab);
   }
@@ -18429,6 +18429,7 @@
     alt3: "Восстановление и сброс", alt4: "Дополнительные возможности",
     alt5: "Проверка обновлений", alt6: "Скрытие вкладок"
   };
+  var BOTTOM_ROW_TABS = ["year", "mood", "extra2", "extra3", "workouts"]; // нижний ряд набора 1 (без шестерёнки)
   var BOTTOM_ALT_ORIGINAL_TABS = ["year", "mood", "extra2", "extra3", "worktasks", "red", "inbox", "next", "projects", "waiting", "workouts"];
   var BOTTOM_ALT_SVG_OPEN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">';
   var BOTTOM_ALT_ICONS = {
@@ -18519,15 +18520,9 @@
       var alt = document.getElementById(BOTTOM_ALT_TAB_IDS[key]);
       if(alt) alt.style.display = bottomAltMode ? "flex" : "none"; // все alt-вкладки стоят в вертикальном стеке (обычные вкладки там — flex)
     });
-    // обычные вкладки нижнего ряда в режиме колеса скрыты: ряд — только шестерёнка (вкладки колеса теперь в вертикальном стеке)
-    ["settingsTabYearBtn", "settingsTabMoodBtn", "settingsTabExtra2Btn", "settingsTabExtra3Btn"].forEach(function(id){
-      var orig = document.getElementById(id);
-      if(orig) orig.style.display = bottomAltMode ? "none" : "";
-    });
     var sysBtn = document.getElementById(WHEEL_SYSTEM_TAB_BTN_ID);
     if(sysBtn) sysBtn.style.display = bottomAltMode ? "flex" : "none"; // «Система» — только в режиме колеса
-    var wkAltOrig = document.getElementById(WORKOUTS_TAB_BTN_ID);
-    if(wkAltOrig) wkAltOrig.style.display = bottomAltMode ? "none" : ""; // в режиме колеса ряд — одна шестерёнка
+    // нижний ряд от режима колеса не меняется — меняется только вертикальный стек
     refreshSettingsTabsVisibility();   // вертикальный стек набора 1 (декор вокруг вкладок колеса)
     updateBottomGearButtons();         // колесо подсвечено, пока показан набор вкладок колеса
     updateSettingsCornerPatchHeight(); // меняется число видимых язычков вертикального стека
