@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 27.0 (01.11)
+     Версия: 28.0 (01.11)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -419,6 +419,9 @@ window.addEventListener("error", function(e){
           <path d="M16 3v4"></path>
         </svg>
       </button>
+      <!-- Комментарии (extra2, renderCommentsTab): вкладка бокового ряда «Задачи и календарь» — второй снизу, над «Календарём».
+           Не вкладка задач: свой ключ "extra2". Значок и подсказку ставит my.js (refreshExtra2TabAppearance). -->
+      <button class="settings-tab" id="settingsTabExtra2Btn" title="" style="display:none;"></button>
       <!-- Вкладка-заглушка "Задачи в работе" / "worktasks" (ТЗ пользователя
            от 13.09) — устроена и работает точно как council/next (обычный
            список задач через общий renderTaskTabList, см. TASK_TAB_IDS в
@@ -700,6 +703,55 @@ window.addEventListener("error", function(e){
           <path d="M14.5 14.5h2.5M20.5 14.5h.01M14.5 17.5v3M17.5 17.5h3M18 20.5h2.5"></path>
         </svg>
       </button>
+      <!-- Боковой ряд нижнего язычка «Активности» (settingsTabActivitiesStackBtn, my.js activitiesStackMode). В DOM снизу вверх: ИПКД, Мои книги,
+           Поиск, Музыка, Тренировки (на экране сверху вниз: Тренировки, Музыка, Поиск, Книги, ИПКД). Ключи вкладок прежние (set2s_8, set2s_7, set2s_3,
+           set2s_11, workouts); кнопки скрыты display:none и показываются в refreshSettingsTabsVisibility. -->
+      <button class="settings-tab" id="settingsTabSet2Btn8" title="" style="display:none;">8</button>
+      <!-- Седьмая боковая вкладка второго набора (settingsTabSet2Btn7, "set2s_7")
+           — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "Мои книги" — хранилище книг
+           (OPFS, books/) и переход в экран чтения fb2/epub. См.
+           renderSettingsTabBooks в my.js (PROJECT_MAP_MYJS.md, строка 5885)
+           и её ветку в switchSettingsTab, по тому же принципу вынесена ДО
+           общей проверки на renderSettingsTabSet2Stub. -->
+      <button class="settings-tab" id="settingsTabSet2Btn7" title="Мои книги" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2.5" width="13" height="19" rx="1.3"></rect>
+          <line x1="5.3" y1="2.5" x2="5.3" y2="21.5" stroke-width="1.2"></line>
+          <text x="10.5" y="10.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="none" stroke="var(--icon-halo)" stroke-width="3.2" paint-order="stroke fill">epub</text>
+          <text x="10.5" y="10.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="currentColor" stroke="none">epub</text>
+          <text x="10.5" y="18.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="none" stroke="var(--icon-halo)" stroke-width="3.2" paint-order="stroke fill">fb2</text>
+          <text x="10.5" y="18.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="currentColor" stroke="none">fb2</text>
+        </svg>
+      </button>
+      <!-- Третья боковая вкладка второго набора (settingsTabSet2Btn3, "set2s_3")
+           — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "Поиск" (поиск по задачам/поиск
+           по заметкам, ТЗ пользователя от 08.09). См. renderSettingsTabSearch
+           в search.js и её отдельную ветку в switchSettingsTab, по тому же
+           принципу вынесена ДО общей проверки на renderSettingsTabSet2Stub. -->
+      <button class="settings-tab" id="settingsTabSet2Btn3" title="Поиск" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="10.5" cy="10.5" r="6.5"></circle>
+          <line x1="15.3" y1="15.3" x2="20.5" y2="20.5"></line>
+        </svg>
+      </button>
+      <button class="settings-tab" id="settingsTabSet2Btn11" title="Музыка" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 18V5.5l11-2.5v12.5"></path>
+          <circle cx="6" cy="18" r="3"></circle>
+          <circle cx="17" cy="15.5" r="3"></circle>
+          <path d="M9 9.5l11-2.5"></path>
+        </svg>
+      </button>
+      <button class="settings-tab" id="settingsTabWorkoutsBtn" style="display:none;" title="Тренировки">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="16" cy="4.5" r="1.9" fill="currentColor" stroke="none"></circle>
+          <path d="M14.4 7.8L11.2 13"></path>
+          <path d="M14.2 8.6l3.4 1.9 2.2-1.9"></path>
+          <path d="M13.8 8.6l-3.4-.6-2.4 2.6"></path>
+          <path d="M11.2 13l3.8 2.6-1.4 4.6"></path>
+          <path d="M11.2 13l-2.4 3.6-3.8-.4"></path>
+        </svg>
+      </button>
     </div>
     <!-- Горизонтальный ряд "лежачих" вкладок под окном настроек, развёрнутых
          на 90° относительно обычных: у них ширина и высота поменяны местами
@@ -769,17 +821,13 @@ window.addEventListener("error", function(e){
           <path d="M16 3v4"></path>
         </svg>
       </button>
-      <button class="settings-tab settings-tab-gear" id="settingsTabWorkoutsBtn" title="Тренировки">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="16" cy="4.5" r="1.9" fill="currentColor" stroke="none"></circle>
-          <path d="M14.4 7.8L11.2 13"></path>
-          <path d="M14.2 8.6l3.4 1.9 2.2-1.9"></path>
-          <path d="M13.8 8.6l-3.4-.6-2.4 2.6"></path>
-          <path d="M11.2 13l3.8 2.6-1.4 4.6"></path>
-          <path d="M11.2 13l-2.4 3.6-3.8-.4"></path>
+      <!-- «Активности» (settingsTabActivitiesStackBtn): справа от «Задачи и календарь»; работает как шестерёнка — включает свой боковой ряд
+           (Тренировки, Музыка, Поиск, Книги, ИПКД). Логика — my.js, activitiesStackMode. -->
+      <button class="settings-tab settings-tab-gear" id="settingsTabActivitiesStackBtn" title="Активности">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2.5 12.5h4l2.7-7 4.3 13 2.9-6H21.5"></path>
         </svg>
       </button>
-      <button class="settings-tab settings-tab-gear" id="settingsTabExtra2Btn" title=""></button>
     </div>
     <!-- ===== ВТОРОЙ НАБОР ВКЛАДОК (заглушки) =====
          Полный дубль первого набора по устройству: 9 боковых язычков
@@ -871,17 +919,6 @@ window.addEventListener("error", function(e){
           <path d="M6.5 3.5h11a1 1 0 0 1 1 1V21l-6.5-4-6.5 4V4.5a1 1 0 0 1 1-1z"></path>
         </svg>
       </button>
-      <!-- Третья боковая вкладка второго набора (settingsTabSet2Btn3, "set2s_3")
-           — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "Поиск" (поиск по задачам/поиск
-           по заметкам, ТЗ пользователя от 08.09). См. renderSettingsTabSearch
-           в search.js и её отдельную ветку в switchSettingsTab, по тому же
-           принципу вынесена ДО общей проверки на renderSettingsTabSet2Stub. -->
-      <button class="settings-tab" id="settingsTabSet2Btn3" title="Поиск">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="10.5" cy="10.5" r="6.5"></circle>
-          <line x1="15.3" y1="15.3" x2="20.5" y2="20.5"></line>
-        </svg>
-      </button>
       <button class="settings-tab" id="settingsTabSet2Btn4" title="Забытые заметки">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path>
@@ -892,31 +929,6 @@ window.addEventListener("error", function(e){
           <path d="M17 15.3v2.2l1.5 1"></path>
         </svg>
       </button>
-      <button class="settings-tab" id="settingsTabSet2Btn11" title="Музыка">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M9 18V5.5l11-2.5v12.5"></path>
-          <circle cx="6" cy="18" r="3"></circle>
-          <circle cx="17" cy="15.5" r="3"></circle>
-          <path d="M9 9.5l11-2.5"></path>
-        </svg>
-      </button>
-      <!-- Седьмая боковая вкладка второго набора (settingsTabSet2Btn7, "set2s_7")
-           — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "Мои книги" — хранилище книг
-           (OPFS, books/) и переход в экран чтения fb2/epub. См.
-           renderSettingsTabBooks в my.js (PROJECT_MAP_MYJS.md, строка 5885)
-           и её ветку в switchSettingsTab, по тому же принципу вынесена ДО
-           общей проверки на renderSettingsTabSet2Stub. -->
-      <button class="settings-tab" id="settingsTabSet2Btn7" title="Мои книги">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2" y="2.5" width="13" height="19" rx="1.3"></rect>
-          <line x1="5.3" y1="2.5" x2="5.3" y2="21.5" stroke-width="1.2"></line>
-          <text x="10.5" y="10.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="none" stroke="var(--icon-halo)" stroke-width="3.2" paint-order="stroke fill">epub</text>
-          <text x="10.5" y="10.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="currentColor" stroke="none">epub</text>
-          <text x="10.5" y="18.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="none" stroke="var(--icon-halo)" stroke-width="3.2" paint-order="stroke fill">fb2</text>
-          <text x="10.5" y="18.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="currentColor" stroke="none">fb2</text>
-        </svg>
-      </button>
-      <button class="settings-tab" id="settingsTabSet2Btn8" title="">8</button>
       <!-- Десятая боковая вкладка второго набора (settingsTabSet2Btn10, "set2s_10"; в стеке самая верхняя, над
            «Карточками предметов») — «Claude»: нативный WebView с claude.ai и автоотправка «Дальше» после
            снятия лимита. См. claudetab.js и ClaudeTab.kt. -->
