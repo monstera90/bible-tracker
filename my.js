@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 110.2 (01.11)
+   Версия: 111.0 (01.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -10264,6 +10264,9 @@
   }
   function refreshSettingsTabsVisibility(){
     var showTasks = getShowAllTasksEnabled();
+    if(!showTasks) tasksStackMode = false; // задачи отключены галочкой — отдельного ряда задач нет
+    var tsBtn = document.getElementById(TASKS_STACK_BTN_ID);
+    if(tsBtn) tsBtn.style.display = showTasks ? "" : "none";
     Object.keys(TASK_TAB_IDS).forEach(function(key){
       var btn = document.getElementById(TASK_TAB_IDS[key]);
       if(!btn) return;
@@ -10273,23 +10276,24 @@
         setTabDecor(btn, !replacedByAlt);
       } else {
         setTabDecor(btn, false);
-        btn.style.display = showTasks ? "flex" : "none";
+        btn.style.display = (showTasks && tasksStackMode) ? "flex" : "none";
       }
     });
     var evBtn = document.getElementById(EVENTS_TAB_BTN_ID);
     if(evBtn){
       if(bottomAltMode){ evBtn.style.display = "flex"; setTabDecor(evBtn, true); }
-      else { setTabDecor(evBtn, false); evBtn.style.display = showTasks ? "flex" : "none"; }
+      else { setTabDecor(evBtn, false); evBtn.style.display = (showTasks && !tasksStackMode) ? "flex" : "none"; }
     }
     var calBtnV = document.getElementById(CALENDAR_TAB_BTN_ID);
     if(calBtnV){
-      if(bottomAltMode){ setTabDecor(calBtnV, false); calBtnV.style.display = "none"; } // на его месте — «Система»
-      else { setTabDecor(calBtnV, false); calBtnV.style.display = showTasks ? "flex" : "none"; }
+      setTabDecor(calBtnV, false);
+      if(bottomAltMode) calBtnV.style.display = "none"; // на его месте — «Система»
+      else calBtnV.style.display = (showTasks && tasksStackMode) ? "flex" : "none";
     }
     var stBtnV = document.getElementById(SCREENTIME_TAB_BTN_ID);
     if(stBtnV){
       if(bottomAltMode){ stBtnV.style.display = "flex"; setTabDecor(stBtnV, true); }
-      else { setTabDecor(stBtnV, false); stBtnV.style.display = showTasks ? "flex" : "none"; }
+      else { setTabDecor(stBtnV, false); stBtnV.style.display = (showTasks && !tasksStackMode) ? "flex" : "none"; }
     }
     // меняет количество видимых язычков в #settingsTabs — пересчитываем заплатку (см.
     // updateSettingsCornerPatchHeight выше); единственный вызывающий.
@@ -17827,7 +17831,7 @@
     var set1Bottom = document.getElementById("settingsTabsGear");
     var set2Side = document.getElementById("settingsTabsSet2");
     var set2Bottom = document.getElementById("settingsTabsGearSet2");
-    var showSet1 = settingsActiveTabSet === 1 || bottomAltMode;
+    var showSet1 = settingsActiveTabSet === 1 || bottomAltMode || tasksStackMode;
     if(set1Side) set1Side.style.display = showSet1 ? "" : "none";
     if(set1Bottom) set1Bottom.style.display = showSet1 ? "" : "none";
     if(set2Side) set2Side.style.display = showSet1 ? "none" : "";
@@ -18374,6 +18378,10 @@
     toggleBottomAltMode();
   });
   (function(){
+    var tsBtn = document.getElementById(TASKS_STACK_BTN_ID);
+    if(tsBtn) tsBtn.addEventListener("click", function(){ setTasksStackMode(!tasksStackMode); });
+  })();
+  (function(){
     var wkBtn = document.getElementById(WORKOUTS_TAB_BTN_ID);
     if(wkBtn) wkBtn.addEventListener("click", function(){ switchSettingsTabOnClick(WORKOUTS_TAB_KEY); });
   })();
@@ -18464,6 +18472,11 @@
       '</svg>'
   };
   var bottomAltMode = false;
+  // Режим «Задачи и календарь» (кнопка settingsTabTasksStackBtn справа от шестерёнки): боковой ряд набора 1 показывает ТОЛЬКО вкладки задач
+  // и «Календарь»; вне этого режима (и в режиме колеса) их в ряду нет. Нижний ряд не меняется. Режим и режим колеса взаимоисключающие;
+  // хранится в памяти, включается сам при открытии вкладки задач/календаря.
+  var TASKS_STACK_BTN_ID = "settingsTabTasksStackBtn";
+  var tasksStackMode = false;
 
   function createAltButton(key, id, origId){
     if(document.getElementById(id)) return;
@@ -18531,8 +18544,17 @@
     on = !!on;
     if(on === bottomAltMode) return;
     bottomAltMode = on;
+    if(on) tasksStackMode = false;
     applyBottomAltMode();
     applySettingsTabSetVisibility(); // в режиме колеса всегда виден ряд набора 1, после — ряд активного набора
+  }
+  function setTasksStackMode(on){
+    on = !!on;
+    if(on === tasksStackMode) return;
+    tasksStackMode = on;
+    if(on) bottomAltMode = false;
+    applyBottomAltMode();            // обновляет вертикальный стек, подсветку кнопок и угловые заплатки
+    applySettingsTabSetVisibility(); // ряд «Задачи и календарь» всегда на наборе 1
   }
   var bottomAltEntrySet = 1; // набор, который был активен, когда включили колесо
   function toggleBottomAltMode(){
@@ -18551,7 +18573,11 @@
   // активная вкладка не оказалась скрытой
   function syncBottomAltModeForTab(tab){
     if(BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) || tab === WHEEL_SYSTEM_TAB_KEY) setBottomAltMode(true);
-    else if(BOTTOM_ALT_ORIGINAL_TABS.indexOf(tab) !== -1) setBottomAltMode(false);
+    else if(TASK_TAB_IDS.hasOwnProperty(tab) || tab === CALENDAR_TAB_KEY){ if(getShowAllTasksEnabled()) setTasksStackMode(true); else setBottomAltMode(false); }
+    else {
+      if(BOTTOM_ALT_ORIGINAL_TABS.indexOf(tab) !== -1) setBottomAltMode(false);
+      if(tab === EVENTS_TAB_KEY || tab === SCREENTIME_TAB_KEY) setTasksStackMode(false);
+    }
   }
   // вкладки-заглушки нового набора: только заголовок и пустое содержимое
   function renderSettingsTabBottomAlt(tab){
@@ -18729,6 +18755,8 @@
       var b = document.getElementById(id);
       if(b) b.classList.toggle("active", !!bottomAltMode);
     });
+    var tsb = document.getElementById(TASKS_STACK_BTN_ID);
+    if(tsb) tsb.classList.toggle("active", !!tasksStackMode);
   }
   function initSet2GearTab(){
     var oldIpkdBtn = document.getElementById("settingsTabSet2GearBtn5");
