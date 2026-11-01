@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 5.2 (31.10)
+   Версия: 6.0 (01.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -57,6 +57,15 @@
   var CSV_RUN_LABELS = ["бег"];                // какие занятия из CSV считаются пробежкой (type_label)
   var CSV_RUN_CODES = ["1", "8"];             // запасной признак, если type_label пуст (type_code)
   var POLL_MS = 500;
+  var TIP_DAY_KEY = "workoutsTipDay_v1";       // {day:"ГГГГ-ММ-ДД", id}: совет сегодняшнего дня (только это устройство)
+  var TIP_SEEN_KEY = "workoutsTipSeen_v1";     // id советов, уже показанных в текущем круге (без повторов, пока не покажутся все подходящие)
+  var TIP_CTX_DAYS = 3;                        // оценка и дистанция берутся от последней оценённой тренировки не старше стольких календарных дней
+  var TIP_LONG_DAYS = 90;                      // «длинная» пробежка = не короче медианы пробежек за столько дней
+  var TIP_LONG_MIN_RUNS = 5;                   // пробежек нужно для медианы; меньше — фиксированная граница
+  var TIP_LONG_FALLBACK_M = 5000;
+  var TIP_CATS = ["Объём и регулярность", "Техника", "Силовая", "Восстановление", "Анализ", "Другое"];
+  var TIP_RPE_OPTS = [["", "Любая"], ["low", "Лёгкая 1–3"], ["mid", "Средняя 4–6"], ["high", "Тяжёлая 7–10"]];
+  var TIP_DIST_OPTS = [["", "Любая"], ["short", "Короткая"], ["long", "Длинная"]];
   var TAB_MARK_MS = 2000;                      // как часто обновлять подсветку язычка вкладки
   var PEND_CACHE_MS = 1500;
   var SWIPE_DX = 70, SWIPE_DY = 50;
@@ -83,6 +92,12 @@
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"></circle><path d="M12 11v6"></path><circle cx="12" cy="7.7" r="1" fill="currentColor" stroke="none"></circle></svg>';
   var IMPORT_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V10"></path><path d="M7.5 13.5L12 9l4.5 4.5"></path><path d="M4.5 5.5h15"></path></svg>';
+  var TIP_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 21h4"></path><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1 2V16h5.2v-.2c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"></path></svg>';
+  var PLUS_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
+  var CHECK_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>';
   var STOP_ICON_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>';
 
   var STORE = null;        // провайдер хранилища от my.js: {list, put, remove}
@@ -101,7 +116,12 @@
   var lastLoadCheck = 0;   // когда в последний раз пересчитывали кнопку-индикатор
   var pendCache = null;    // {at, val}: короткий кэш pendingRecord (чтобы не перебирать все записи на каждом тике)
   var tabMarkTimer = null; // таймер подсветки язычка вкладки
-  var infoScreen = false;  // открыт экран «Тренировки — кнопки» (кнопка «i»)
+  var infoScreen = false;  // открыт боковой экран вместо вкладки: «Тренировки — кнопки» («i») или «Советы»
+  var tipsCache = null;    // {at, val}: короткий кэш списка советов
+  var tipHidden = false;   // карточка совета закрыта нажатием (до следующего открытия вкладки)
+  var tipEdit = null;      // форма совета: {id, ts, cat, rpe, dist, text}
+  var tipDelArm = null;    // {id, timer}: первое нажатие «Удалить» у совета сделано
+  var tipDayMem = null;    // {day, id}: совет дня в памяти — запасной вариант, если localStorage недоступен
   var importMsg = "";      // итог последнего импорта (карточка над панелью записи; нажатие закрывает)
   var importBusy = false;  // идёт чтение файла импорта
 
@@ -338,7 +358,21 @@
       ".wk-rpe-btn.on{background:var(--wood);border-color:var(--wood);color:var(--parchment);}" +
       ".wk-rpe-hint{margin-top:8px;color:var(--ink-soft);min-height:2.4em;}" +
       ".wk-btns button.wk-save:not(:disabled){background:var(--wood);border-color:var(--wood);color:var(--parchment);}" +
-      ".wk-btns button:disabled{opacity:.4;cursor:default;}";
+      ".wk-btns button:disabled{opacity:.4;cursor:default;}" +
+      ".wk-tip-ico{display:inline-block;width:18px;height:18px;flex:0 0 18px;color:var(--wood-dark);}" +
+      ".wk-tip-ico svg{display:block;width:18px;height:18px;}" +
+      ".wk-tip-text{margin-top:6px;line-height:1.35;}" +
+      ".wk-tip-meta{font-size:.8em;}" +
+      ".wk-tip-cat{margin:14px 0 2px;font-weight:bold;color:var(--wood-dark);}" +
+      ".wk-tip-row{padding:8px 2px;border-top:1px solid var(--groove-shadow);cursor:pointer;line-height:1.35;}" +
+      ".wk-tip-cat + .wk-tip-row{border-top:none;}" +
+      ".wk-tip-row .wk-sub{display:block;font-size:.8em;color:var(--ink-soft);margin-top:2px;}" +
+      ".wk-tip-lbl{margin:14px 0 6px;color:var(--ink-soft);}" +
+      ".wk-tip-input{display:block;width:100%;box-sizing:border-box;min-height:110px;padding:8px 10px;border-radius:10px;border:1px solid var(--groove-shadow);background:transparent;color:var(--ink);font:inherit;resize:vertical;}" +
+      ".wk-seg-btn{display:inline-block;margin:0 6px 6px 0;padding:6px 12px;border-radius:10px;border:1px solid var(--groove-shadow);background:transparent;color:var(--ink);font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
+      ".wk-seg-btn.on{background:var(--wood);border-color:var(--wood);color:var(--parchment);}" +
+      ".wk-tip-note{margin-top:10px;color:var(--ink-soft);font-size:.9em;}" +
+      ".wk-tip-err{margin-top:8px;color:var(--danger);}";
     document.head.appendChild(st);
   }
 
@@ -349,6 +383,7 @@
     return '<div class="mdeditor-fab-row">' +
       '<button type="button" class="mdeditor-fab-btn" id="wkInfoBtn" title="Информация" aria-label="Информация">' + INFO_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="wkImportBtn" title="Загрузить тренировки из файла" aria-label="Загрузить тренировки из файла">' + IMPORT_ICON_SVG + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="wkTipsBtn" title="Советы" aria-label="Советы">' + TIP_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn wk-load' + (lt.length >= 5 ? " long" : "") + (infoOpen ? " on" : "") + '" id="wkLoadBtn" title="Нагрузка за 7 дней" aria-label="Нагрузка за 7 дней">' + esc(lt) + '</button>' +
       PERIODS.map(function(p){
         return '<button type="button" class="mdeditor-fab-btn wk-per' + (p.months === months ? " on" : "") + '" data-months="' + p.months + '">' + p.label + '</button>';
@@ -486,6 +521,8 @@
     });
     var ib = document.getElementById("wkInfoBtn");
     if(ib) ib.addEventListener("click", renderInfoScreen);
+    var tb = document.getElementById("wkTipsBtn");
+    if(tb) tb.addEventListener("click", renderTipsScreen);
     var imb = document.getElementById("wkImportBtn"), inp = document.getElementById("wkImportInput");
     if(imb && inp){
       imb.addEventListener("click", function(){ if(!importBusy) inp.click(); });
@@ -652,8 +689,10 @@
     var pend = active ? null : pendAny;
     var recBtn = document.getElementById("wkRecBtn");
     if(recBtn) recBtn.classList.toggle("wk-blocked", !!pendAny && !active);
+    var tip = (!active && !pend) ? dayTip() : null;
+    var showTip = !!tip && !tipHidden && !infoOpen && !importMsg && !message;
     var shape = (active ? st.status + ":" + (st.fix ? 1 : 0) + ":" + ((st.gaps || []).length) : "idle") + "|" + (res ? res.id : "") + "|" + message + messageAction +
-      "|" + (pend ? pend.id + ":" + rpeSel : "") + "|" + (infoOpen ? "i" : "") + "|" + importMsg;
+      "|" + (pend ? pend.id + ":" + rpeSel : "") + "|" + (infoOpen ? "i" : "") + "|" + importMsg + "|" + (showTip ? tip.id + ":" + tip.text.length : "");
     if(!force && shape === lastShape && active){
       updateLiveNumbers(box, st);
       return;
@@ -670,6 +709,7 @@
     if(active) html += liveCardHtml(st);
     else if(pend) html += rpeCardHtml(pend);
     else if(res) html += resultCardHtml(res);
+    if(showTip) html += tipCardHtml(tip);
     box.innerHTML = html;
     var gb = document.getElementById("wkGpsBtn");
     if(gb) gb.addEventListener("click", function(){ var n = nat(); if(n) try{ n.openLocationSettings(); }catch(e){} });
@@ -691,6 +731,8 @@
     });
     var rs = document.getElementById("wkRpeSave");
     if(rs) rs.addEventListener("click", saveRpe);
+    var tc = document.getElementById("wkTipCard");
+    if(tc) tc.addEventListener("click", function(){ tipHidden = true; lastShape = ""; paintLive(true); }); // нажатие закрывает карточку до следующего открытия вкладки
     var rc = document.getElementById("wkResultCard");
     if(rc) rc.addEventListener("click", function(){ saveLastResult(null); lastShape = ""; paintLive(true); }); // нажатие на карточку закрывает её
     if(active) updateLiveNumbers(box, st);
@@ -809,6 +851,7 @@
     html += row('<span style="font-size:12px;font-weight:bold;">0</span>', "Число слева в нижнем ряду — нагрузка за 7 дней: баллы = минуты × оценка. Нажатие открывает пояснение.");
     html += row('<span style="font-size:11px;font-weight:bold;">1 мес.</span>', "Период: месяц, 3 месяца, полгода, год. Стрелки ‹ › и свайп листают назад и вперёд, сверху — сумма километров и число тренировок. Нажатие на строку записи открывает «Удалить» (нужно нажать дважды).");
     html += row(IMPORT_ICON_SVG, "Загружает тренировки из файла. Подходят два вида: архив «Экспортировать личные данные» (ZIP или data.json) — из него берутся только тренировки, остальные данные не меняются; и CSV-выгрузка стороннего трекера — из неё берутся только пробежки: дата и километры (время и баллы не переносятся). Уже имеющиеся тренировки повторно не добавляются.");
+    html += row(TIP_ICON_SVG, "Советы: один совет в день показывается внизу вкладки, когда запись не идёт. Нажатие на карточку закрывает её до следующего открытия вкладки. Кнопка открывает список советов: добавить, изменить, удалить; у каждого — категория и необязательные отметки: тяжесть последней тренировки (1–3, 4–6, 7–10) и её дистанция (короткая/длинная). Без отметок совет подходит всегда.");
     html += row(INFO_ICON_SVG, "Эта справка. Тренировки входят в экспорт личных данных: дата, километры, время и баллы.");
     c.innerHTML =
       '<h3 class="common-tab-title">Тренировки — кнопки</h3>' +
@@ -822,6 +865,236 @@
       if(window.AppNav) window.AppNav.push(function(){ renderInfoScreen(); });
       render();
     });
+  }
+
+  // ---------- советы ----------
+  // Совет = запись личного state под ключом "wktip:<id>" (хранилище my.js: listTips/putTip/removeTip) = {text, cat, rpe, dist, ts};
+  // едет в облако и в экспорт вместе с остальным state. rpe: ""|"low"(1–3)|"mid"(4–6)|"high"(7–10); dist: ""|"short"|"long"; пусто = подходит всегда.
+  function dayKey(d){ d = d || new Date(); return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+  function rpeBand(v){
+    v = Number(v);
+    if(!rpeOk(v)) return "";
+    return v <= 3 ? "low" : (v <= 6 ? "mid" : "high");
+  }
+  function readJson(key, def){
+    try{ var v = JSON.parse(localStorage.getItem(key)); return v == null ? def : v; }catch(e){ return def; }
+  }
+  function writeJson(key, v){ try{ localStorage.setItem(key, JSON.stringify(v)); return true; }catch(e){ return false; } }
+  function newTipId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+  function tipsList(){
+    if(!STORE || typeof STORE.listTips !== "function") return [];
+    var now = Date.now();
+    if(tipsCache && now - tipsCache.at < PEND_CACHE_MS) return tipsCache.val;
+    var list = [];
+    try{ list = STORE.listTips() || []; }catch(e){ list = []; }
+    list = list.filter(function(x){ return x && typeof x.text === "string" && x.text.trim() !== ""; })
+      .sort(function(a, b){ return num(a.ts) - num(b.ts); });
+    tipsCache = { at: now, val: list };
+    return list;
+  }
+
+  // граница «длинной» пробежки: середина (медиана) пробежек за последние TIP_LONG_DAYS дней; пробежек мало — фиксированная
+  function longThreshold(){
+    var n = new Date();
+    var from = new Date(n.getFullYear(), n.getMonth(), n.getDate() - TIP_LONG_DAYS, 0, 0, 0, 0).getTime();
+    var ms = [];
+    allRecords().forEach(function(r){ if(r.start >= from && num(r.m) > 0) ms.push(num(r.m)); });
+    if(ms.length < TIP_LONG_MIN_RUNS) return { m: TIP_LONG_FALLBACK_M, auto: false };
+    ms.sort(function(a, b){ return a - b; });
+    var h = Math.floor(ms.length / 2);
+    return { m: (ms.length % 2) ? ms[h] : (ms[h - 1] + ms[h]) / 2, auto: true };
+  }
+  // контекст выбора совета: тяжесть и дистанция последней оценённой тренировки не старше TIP_CTX_DAYS дней; нет такой — пустой контекст
+  function tipContext(){
+    var n = new Date();
+    var from = new Date(n.getFullYear(), n.getMonth(), n.getDate() - (TIP_CTX_DAYS - 1), 0, 0, 0, 0).getTime();
+    var ref = null;
+    allRecords().forEach(function(r){ // новые сверху
+      if(!ref && !r.imp && r.start >= from && rpeOk(r.rpe) && num(r.m) > 0) ref = r;
+    });
+    if(!ref) return { rpe: "", dist: "" };
+    return { rpe: rpeBand(ref.rpe), dist: num(ref.m) >= longThreshold().m ? "long" : "short" };
+  }
+  function tipFits(x, ctx){ return (!x.rpe || x.rpe === ctx.rpe) && (!x.dist || x.dist === ctx.dist); }
+
+  // совет сегодняшнего дня: выбирается при первом показе за день и до полуночи не меняется; без повторов, пока не покажутся все подходящие
+  function dayTip(){
+    var list = tipsList();
+    if(!list.length) return null;
+    var today = dayKey();
+    var rec = readJson(TIP_DAY_KEY, null) || tipDayMem;
+    if(rec && rec.day === today){
+      for(var i = 0; i < list.length; i++){ if(list[i].id === rec.id) return list[i]; }
+    }
+    var ctx = tipContext();
+    var pool = list.filter(function(x){ return tipFits(x, ctx); });
+    if(!pool.length) return null;
+    var seen = readJson(TIP_SEEN_KEY, []);
+    if(!Array.isArray(seen)) seen = [];
+    var fresh = pool.filter(function(x){ return seen.indexOf(x.id) === -1; });
+    if(!fresh.length){
+      seen = seen.filter(function(id){ return !pool.some(function(x){ return x.id === id; }); });
+      fresh = pool;
+    }
+    var pick = fresh[Math.floor(Math.random() * fresh.length)];
+    seen.push(pick.id);
+    writeJson(TIP_SEEN_KEY, seen);
+    var dayRec = { day: today, id: pick.id };
+    tipDayMem = writeJson(TIP_DAY_KEY, dayRec) ? null : dayRec; // в памяти держим, только если localStorage не принял запись
+    return pick;
+  }
+
+  function tipCardHtml(x){
+    return '<div class="wk-card wk-tip" id="wkTipCard"><div class="wk-live-head"><span class="wk-tip-ico">' + TIP_ICON_SVG + '</span><span>Совет дня</span></div>' +
+      '<div class="wk-tip-text">' + esc(x.text).replace(/\n/g, "<br>") + '</div>' +
+      '<div class="wk-note wk-tip-meta">' + esc(x.cat || "Другое") + '</div></div>';
+  }
+
+  // ---------- экран «Советы» (кнопка-лампочка в нижнем ряду) ----------
+  function tipCatOf(x){ return TIP_CATS.indexOf(x.cat) !== -1 ? x.cat : "Другое"; }
+  function tipTagsText(x){
+    var out = [];
+    if(x.rpe === "low") out.push("тяжесть 1–3");
+    else if(x.rpe === "mid") out.push("тяжесть 4–6");
+    else if(x.rpe === "high") out.push("тяжесть 7–10");
+    if(x.dist === "short") out.push("короткая дистанция");
+    else if(x.dist === "long") out.push("длинная дистанция");
+    return out.length ? out.join(" · ") : "подходит всегда";
+  }
+  function clearTipArm(){ if(tipDelArm){ clearTimeout(tipDelArm.timer); tipDelArm = null; } }
+  function tipsHomeBtnHtml(id, title){
+    return '<button type="button" class="mdeditor-fab-btn" id="' + id + '" title="' + title + '" aria-label="' + title + '">' + HOME_ICON_SVG + '</button>';
+  }
+
+  function renderTipsScreen(){
+    var c = container();
+    if(!c) return;
+    infoScreen = true;
+    tipEdit = null;
+    clearTipArm();
+    tipsCache = null;
+    var list = tipsList();
+    var thr = longThreshold();
+    var html = '<h3 class="common-tab-title">Советы</h3><div class="task-info-body">';
+    html += '<div class="wk-tip-note" style="margin:0 0 4px;">Длинная пробежка сейчас — от ' + esc(fmtKm(thr.m)) +
+      (thr.auto ? " (середина ваших пробежек за 3 месяца)." : " (пока мало пробежек — граница фиксированная).") + '</div>';
+    if(!list.length){
+      html += '<div class="wk-empty">Советов пока нет.<br>Нажмите «+», чтобы добавить.</div>';
+    } else {
+      TIP_CATS.forEach(function(cat){
+        var part = list.filter(function(x){ return tipCatOf(x) === cat; });
+        if(!part.length) return;
+        html += '<div class="wk-tip-cat">' + esc(cat) + '</div>';
+        part.forEach(function(x){
+          html += '<div class="wk-tip-row" data-tip="' + esc(x.id) + '">' + esc(x.text).replace(/\n/g, "<br>") + '<span class="wk-sub">' + esc(tipTagsText(x)) + '</span></div>';
+        });
+      });
+    }
+    html += '</div><div class="mdeditor-fab-row">' +
+      '<button type="button" class="mdeditor-fab-btn" id="wkTipAddBtn" title="Добавить совет" aria-label="Добавить совет">' + PLUS_ICON_SVG + '</button>' +
+      tipsHomeBtnHtml("wkTipsHomeBtn", "Назад к тренировкам") + '</div>';
+    c.innerHTML = html;
+    var add = document.getElementById("wkTipAddBtn");
+    if(add) add.addEventListener("click", function(){ renderTipForm(null); });
+    Array.prototype.forEach.call(c.querySelectorAll(".wk-tip-row"), function(row){
+      row.addEventListener("click", function(){
+        var id = row.getAttribute("data-tip"), found = null;
+        tipsList().forEach(function(x){ if(x.id === id) found = x; });
+        if(found) renderTipForm(found);
+      });
+    });
+    var hb = document.getElementById("wkTipsHomeBtn");
+    if(hb) hb.addEventListener("click", function(){
+      // «Действие ВПЕРЁД»: шаг «назад» вернёт на этот экран — тот же приём, что у справки «i»
+      if(window.AppNav) window.AppNav.push(function(){ renderTipsScreen(); });
+      render();
+    });
+  }
+
+  function segHtml(field, opts, cur){
+    return opts.map(function(o){
+      return '<button type="button" class="wk-seg-btn' + (o[0] === cur ? " on" : "") + '" data-f="' + field + '" data-v="' + esc(o[0]) + '">' + esc(o[1]) + '</button>';
+    }).join("");
+  }
+
+  // x — существующий совет или null (новый)
+  function renderTipForm(x){
+    var c = container();
+    if(!c) return;
+    infoScreen = true;
+    clearTipArm();
+    tipEdit = {
+      id: x ? x.id : "", ts: x ? num(x.ts) : 0,
+      cat: x ? tipCatOf(x) : TIP_CATS[0], rpe: x ? (x.rpe || "") : "", dist: x ? (x.dist || "") : "",
+      text: x ? x.text : ""
+    };
+    var html = '<h3 class="common-tab-title">' + (x ? "Совет" : "Новый совет") + '</h3><div class="task-info-body">' +
+      '<textarea id="wkTipText" class="wk-tip-input" rows="5" placeholder="Текст совета">' + esc(tipEdit.text) + '</textarea>' +
+      '<div class="wk-tip-lbl">Категория</div>' + segHtml("cat", TIP_CATS.map(function(k){ return [k, k]; }), tipEdit.cat) +
+      '<div class="wk-tip-lbl">Тяжесть последней тренировки</div>' + segHtml("rpe", TIP_RPE_OPTS, tipEdit.rpe) +
+      '<div class="wk-tip-lbl">Дистанция последней тренировки</div>' + segHtml("dist", TIP_DIST_OPTS, tipEdit.dist) +
+      '<div class="wk-tip-note">«Любая» — отметка не учитывается. Отметки сравниваются с последней оценённой тренировкой за ' + TIP_CTX_DAYS +
+      ' дня; если такой нет, показываются только советы без отметок.</div>' +
+      '<div class="wk-tip-err" id="wkTipErr"></div>' +
+      (x ? '<button type="button" class="wk-del" id="wkTipDel" style="margin-top:14px;">Удалить</button>' : "") +
+      '</div><div class="mdeditor-fab-row">' +
+      '<button type="button" class="mdeditor-fab-btn" id="wkTipSaveBtn" title="Сохранить" aria-label="Сохранить">' + CHECK_ICON_SVG + '</button>' +
+      tipsHomeBtnHtml("wkTipFormHomeBtn", "К списку советов") + '</div>';
+    c.innerHTML = html;
+    Array.prototype.forEach.call(c.querySelectorAll(".wk-seg-btn"), function(b){
+      b.addEventListener("click", function(){
+        var f = b.getAttribute("data-f");
+        tipEdit[f] = b.getAttribute("data-v") || "";
+        Array.prototype.forEach.call(c.querySelectorAll('.wk-seg-btn[data-f="' + f + '"]'), function(o){ o.classList.toggle("on", o === b); });
+      });
+    });
+    var sv = document.getElementById("wkTipSaveBtn");
+    if(sv) sv.addEventListener("click", saveTipForm);
+    var hb = document.getElementById("wkTipFormHomeBtn");
+    if(hb) hb.addEventListener("click", renderTipsScreen);
+    var del = document.getElementById("wkTipDel");
+    if(del) del.addEventListener("click", function(){ onTipDelete(del); });
+  }
+
+  function saveTipForm(){
+    if(!tipEdit) return;
+    var ta = document.getElementById("wkTipText"), err = document.getElementById("wkTipErr");
+    var text = ta ? String(ta.value).trim() : "";
+    if(!text){
+      if(err) err.textContent = "Введите текст совета.";
+      if(ta) ta.focus();
+      return;
+    }
+    if(!STORE || typeof STORE.putTip !== "function"){
+      if(err) err.textContent = "Хранилище недоступно. Перезапустите приложение.";
+      return;
+    }
+    var id = tipEdit.id || newTipId();
+    try{ STORE.putTip(id, { text: text, cat: tipEdit.cat, rpe: tipEdit.rpe, dist: tipEdit.dist, ts: tipEdit.ts || Date.now() }); }
+    catch(e){ if(err) err.textContent = "Не удалось сохранить совет. Попробуйте ещё раз."; return; }
+    tipsCache = null;
+    renderTipsScreen();
+  }
+
+  // два нажатия, как у удаления записи тренировки
+  function onTipDelete(btn){
+    var id = tipEdit && tipEdit.id;
+    if(!id) return;
+    if(tipDelArm && tipDelArm.id === id){
+      clearTipArm();
+      try{ if(STORE && typeof STORE.removeTip === "function") STORE.removeTip(id); }catch(e){}
+      tipsCache = null;
+      renderTipsScreen();
+      return;
+    }
+    clearTipArm();
+    btn.textContent = "Нажмите ещё раз";
+    btn.classList.add("armed");
+    tipDelArm = { id: id, timer: setTimeout(function(){
+      tipDelArm = null;
+      if(btn.isConnected !== false){ btn.textContent = "Удалить"; btn.classList.remove("armed"); }
+    }, 3000) };
   }
 
   // ---------- импорт тренировок из файла ----------
@@ -1027,6 +1300,7 @@
   // вкладка открыта — перерисовать (после слияния с облаком, после забора записей)
   function refreshIfOpen(){
     pendCache = null;
+    tipsCache = null;
     refreshTabMark();
     var btn = document.getElementById("settingsTabWorkoutsBtn");
     if(!btn || !btn.classList.contains("active")) return;
@@ -1037,8 +1311,8 @@
   }
 
   window.WorkoutsTab = {
-    setStore: function(s){ STORE = s; pendCache = null; startTabMark(); },
-    render: function(){ infoOpen = false; importMsg = ""; saveLastResult(null); render(); }, // итоговая карточка живёт до ухода с вкладки
+    setStore: function(s){ STORE = s; pendCache = null; tipsCache = null; startTabMark(); },
+    render: function(){ infoOpen = false; importMsg = ""; tipHidden = false; saveLastResult(null); render(); }, // итоговая карточка живёт до ухода с вкладки
     drain: drain,
     // для календаря («трекеры занятий»): записи как есть — [{id, start, end, totalMs (мс чистого движения), m (метры)}], новые сверху
     records: function(){
@@ -1061,6 +1335,12 @@
           if(rpeOk(r.rpe)){ o.rpe = Number(r.rpe); o.points = loadOf(r); }
         }
         return o;
+      });
+    },
+    // для экспорта (раздел `workouts` в data.json): советы как есть, по категориям
+    exportTips: function(){
+      return tipsList().map(function(x){
+        return { category: x.cat || "Другое", text: x.text, rpe: x.rpe || "", distance: x.dist || "" };
       });
     },
     refreshIfOpen: refreshIfOpen,

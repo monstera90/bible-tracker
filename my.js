@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 109.0 (01.11)
+   Версия: 110.0 (01.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -8593,11 +8593,15 @@
     }catch(e){ workoutList = []; }
     var workoutMeters = 0;
     workoutList.forEach(function(w){ workoutMeters += w.meters || 0; });
+    var workoutTips = [];
+    try{ if(window.WorkoutsTab && window.WorkoutsTab.exportTips) workoutTips = window.WorkoutsTab.exportTips(); }catch(e){ workoutTips = []; }
     data.workouts = {
       note: "Тренировки (вкладка «Тренировки»): date — дата, km — километры, minutes/totalSeconds — время тренировки, rpe — оценка тяжести 1…10, points — баллы нагрузки (минуты × rpe). Записи с source «импорт» загружены из файла: у них только дата и километры.",
       totalKm: Math.round(workoutMeters / 10) / 100,
       count: workoutList.length,
-      list: workoutList
+      list: workoutList,
+      tipsNote: "Советы вкладки «Тренировки»: category — категория, text — текст, rpe — для какой тяжести последней тренировки (low 1–3, mid 4–6, high 7–10; пусто — любой), distance — для какой дистанции (short, long; пусто — любой).",
+      tips: workoutTips
     };
 
     // rawState — точный технический снимок всех данных приложения (то же, что хранится в
@@ -8618,6 +8622,7 @@
         "goal:*": "личная цель и список её задач",
         "goalcompletion:*": "отметка о выполнении задачи внутри цели",
         "wk:*": "тренировка: c — {start, end, m (метры), totalMs, rpe, how, …}",
+        "wktip:*": "совет вкладки «Тренировки»: c — {text, cat, rpe, dist, ts}",
         "task:*": "задача (вне целей)",
         "taskcompletion:*": "отметка о выполнении задачи",
         "comment:*": "запись из списка кастомных комментариев",
@@ -10541,6 +10546,8 @@
   // Запись тренировки лежит в личном `state` под ключом "wk:<id>" = {c: данные, t}; тумбстоун — {c:null, t}. Едет в облако тем же
   // doCloudSync (mergeStates — last-write-wins по t) и попадает в экспорт вместе с остальным state, отдельных веток нет.
   var WORKOUT_KEY_PREFIX = "wk:";
+  // Советы вкладки: "wktip:<id>" = {c: {text, cat, rpe, dist, ts}, t}; тумбстоун — {c:null, t}. Те же правила синхронизации и экспорта.
+  var WORKOUT_TIP_PREFIX = "wktip:";
   var workoutsStoreReady = false;
   var workoutsStore = {
     list: function(){
@@ -10570,6 +10577,29 @@
     },
     remove: function(id){
       var key = WORKOUT_KEY_PREFIX + id, prev = state[key];
+      if(!prev || !prev.c) return;
+      state[key] = {c: null, t: calNextT(prev)};
+      saveLocalStateNow(); scheduleCloudPush();
+    },
+    listTips: function(){
+      var out = [];
+      Object.keys(state).forEach(function(k){
+        if(k.indexOf(WORKOUT_TIP_PREFIX) !== 0) return;
+        var r = state[k];
+        if(!r || !r.c || typeof r.c !== "object") return;
+        var o = JSON.parse(JSON.stringify(r.c));
+        o.id = k.slice(WORKOUT_TIP_PREFIX.length);
+        out.push(o);
+      });
+      return out;
+    },
+    putTip: function(id, data){
+      var key = WORKOUT_TIP_PREFIX + id;
+      state[key] = {c: data, t: calNextT(state[key])};
+      saveLocalStateNow(); scheduleCloudPush();
+    },
+    removeTip: function(id){
+      var key = WORKOUT_TIP_PREFIX + id, prev = state[key];
       if(!prev || !prev.c) return;
       state[key] = {c: null, t: calNextT(prev)};
       saveLocalStateNow(); scheduleCloudPush();
