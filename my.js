@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 115.4 (01.11)
+   Версия: 116.0 (01.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -10898,47 +10898,12 @@
       // переживает перезапуск приложения (см. getResumeSettingsState/SETTINGS_LAST_TAB_KEY выше).
       try{ localStorage.setItem(SETTINGS_LAST_TAB_KEY, tab); }catch(e){}
     }
-    var gearBtn = document.getElementById("settingsTabGearBtn");
-    var yearBtn = document.getElementById("settingsTabYearBtn");
-    var moodTabBtn = document.getElementById("settingsTabMoodBtn");
-    if(gearBtn) updateBottomGearButtons();
-    if(yearBtn) yearBtn.classList.toggle("active", tab === "year");
-    if(moodTabBtn) moodTabBtn.classList.toggle("active", tab === "mood");
-    var wkTabBtn = document.getElementById(WORKOUTS_TAB_BTN_ID);
-    if(wkTabBtn) wkTabBtn.classList.toggle("active", tab === WORKOUTS_TAB_KEY);
     // набор вкладок по клику на колесико
-    if(BOTTOM_ALT_TAB_IDS){
-      syncBottomAltModeForTab(tab);
-      updateNotesWide();
-      Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
-        var altBtn = document.getElementById(BOTTOM_ALT_TAB_IDS[key]);
-        if(altBtn) altBtn.classList.toggle("active", tab === key);
-      });
-    }
-    Object.keys(TASK_TAB_IDS).forEach(function(key){
-      var btn = document.getElementById(TASK_TAB_IDS[key]);
-      if(btn) btn.classList.toggle("active", tab === key);
-    });
-    var evTabBtn = document.getElementById(EVENTS_TAB_BTN_ID);
-    if(evTabBtn) evTabBtn.classList.toggle("active", tab === EVENTS_TAB_KEY);
-    var calTabBtn = document.getElementById(CALENDAR_TAB_BTN_ID);
-    if(calTabBtn) calTabBtn.classList.toggle("active", tab === CALENDAR_TAB_KEY);
-    var stTabBtn = document.getElementById(SCREENTIME_TAB_BTN_ID);
-    if(stTabBtn) stTabBtn.classList.toggle("active", tab === SCREENTIME_TAB_KEY);
-    Object.keys(EXTRA_TAB_IDS).forEach(function(key){
-      var btn = document.getElementById(EXTRA_TAB_IDS[key]);
-      if(btn) btn.classList.toggle("active", tab === key);
-    });
-    Object.keys(SET2_TAB_IDS).forEach(function(key){
-      var btn = document.getElementById(SET2_TAB_IDS[key]);
-      if(btn) btn.classList.toggle("active", tab === key);
-    });
-    Object.keys(SET2_EXTRA_TAB_IDS).forEach(function(key){
-      var btn = document.getElementById(SET2_EXTRA_TAB_IDS[key]);
-      if(btn) btn.classList.toggle("active", tab === key);
-    });
-    stripDecorClasses(); // декоративные язычки режима колеса никогда не выглядят выбранными
-    updateBottomGearButtons(); // подсветка нижних язычков рядов: снимается, когда выбрана вкладка бокового ряда
+    syncBottomAltModeForTab(tab);
+    updateNotesWide();
+    // выделена одна вкладка — нажатая последней: «Мои заметки» (нижний ряд) или вкладка бокового ряда; язычки рядов — по их нажатию (см. ниже)
+    bottomHighlightId = (tab === NOTES_TAB_KEY) ? SET2_TAB_IDS[NOTES_TAB_KEY] : null;
+    updateBottomGearButtons();
     var container = document.getElementById("settingsTabContent");
     if(tab !== "set2s_12") progressPanelGoHome(); // панель «Прогресс» уходит домой до того, как содержимое окна заменит другая вкладка
     if(tab !== "set2s_13") readingChartGoHome(); // график чтения (<main>) уходит домой до того, как содержимое окна заменит другая вкладка
@@ -18576,6 +18541,7 @@
   // Режим «Клод» (кнопка settingsTabClaudeStackBtn): боковой ряд набора 1 показывает вкладки CLAUDE_STACK_TABS. Взаимоисключающий с остальными режимами рядов;
   // хранится в памяти, включается сам при открытии вкладки ряда.
   var claudeStackMode = false;
+  var bottomHighlightId = null; // id нижнего язычка, нажатого последним (см. updateBottomGearButtons); null — выделена вкладка бокового ряда
 
   function createAltButton(key, id, origId){
     if(document.getElementById(id)) return;
@@ -18909,30 +18875,84 @@
   applyHiddenSettingsTabs();
   initBottomAltTabs();
 
-  // Нижние язычки, открывающие боковые ряды (шестерёнка, «Клод», «Инструменты», «Статистика», «Задачи и календарь», «Активности»), подсвечены, пока
-  // их ряд открыт, — но только если выбранной не является вкладка самого бокового ряда: подсвечены не бывают одновременно вкладка нижнего и вкладка бокового ряда.
-  function updateBottomGearButtons(){
-    var tab = currentSettingsTab;
-    var sideSelected = {
-      wheel: BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) || tab === WHEEL_SYSTEM_TAB_KEY || tab === EVENTS_TAB_KEY,
-      tasks: TASK_TAB_IDS.hasOwnProperty(tab) || tab === CALENDAR_TAB_KEY || tab === "extra2",
-      info: isInfoStackTab(tab),
-      tools: isToolsStackTab(tab),
-      activities: isActivitiesStackTab(tab),
-      claude: isClaudeStackTab(tab)
-    };
-    function mark(id, modeOn, key){
-      var b = document.getElementById(id);
-      if(b) b.classList.toggle("active", !!modeOn && !sideSelected[key] && tab !== NOTES_TAB_KEY); // открыты «Мои заметки» — подсвечены только они
-    }
-    mark("settingsTabGearBtn", bottomAltMode, "wheel");
-    mark("settingsTabGearBtnSet2", bottomAltMode, "wheel");
-    mark(TASKS_STACK_BTN_ID, tasksStackMode, "tasks");
-    mark(INFO_STACK_BTN_ID, infoStackMode, "info");
-    mark(TOOLS_STACK_BTN_ID, toolsStackMode, "tools");
-    mark(ACTIVITIES_STACK_BTN_ID, activitiesStackMode, "activities");
-    mark(CLAUDE_STACK_BTN_ID, claudeStackMode, "claude");
+  // Выделение вкладок: выделена ровно одна — нажатая последней. Нижние язычки (шестерёнка, «Клод», «Инструменты», «Статистика», «Задачи и календарь»,
+  // «Активности», «Мои заметки») и вкладки боковых рядов делят одно выделение: нажатие на нижний язычок снимает его с бокового ряда, нажатие на вкладку
+  // бокового ряда (или открытие заметок) снимает его с нижнего. bottomHighlightId — id нижнего язычка, нажатого последним; null — выделена вкладка бокового ряда.
+  function applySideActive(tab){
+    var yearBtn = document.getElementById("settingsTabYearBtn");
+    var moodTabBtn = document.getElementById("settingsTabMoodBtn");
+    if(yearBtn) yearBtn.classList.toggle("active", tab === "year");
+    if(moodTabBtn) moodTabBtn.classList.toggle("active", tab === "mood");
+    var wkTabBtn = document.getElementById(WORKOUTS_TAB_BTN_ID);
+    if(wkTabBtn) wkTabBtn.classList.toggle("active", tab === WORKOUTS_TAB_KEY);
+    Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
+      var altBtn = document.getElementById(BOTTOM_ALT_TAB_IDS[key]);
+      if(altBtn) altBtn.classList.toggle("active", tab === key);
+    });
+    Object.keys(TASK_TAB_IDS).forEach(function(key){
+      var btn = document.getElementById(TASK_TAB_IDS[key]);
+      if(btn) btn.classList.toggle("active", tab === key);
+    });
+    var evTabBtn = document.getElementById(EVENTS_TAB_BTN_ID);
+    if(evTabBtn) evTabBtn.classList.toggle("active", tab === EVENTS_TAB_KEY);
+    var calTabBtn = document.getElementById(CALENDAR_TAB_BTN_ID);
+    if(calTabBtn) calTabBtn.classList.toggle("active", tab === CALENDAR_TAB_KEY);
+    var stTabBtn = document.getElementById(SCREENTIME_TAB_BTN_ID);
+    if(stTabBtn) stTabBtn.classList.toggle("active", tab === SCREENTIME_TAB_KEY);
+    Object.keys(EXTRA_TAB_IDS).forEach(function(key){
+      var btn = document.getElementById(EXTRA_TAB_IDS[key]);
+      if(btn) btn.classList.toggle("active", tab === key);
+    });
+    Object.keys(SET2_TAB_IDS).forEach(function(key){
+      if(key === NOTES_TAB_KEY) return; // «Мои заметки» — нижний язычок, ведёт updateBottomGearButtons
+      var btn = document.getElementById(SET2_TAB_IDS[key]);
+      if(btn) btn.classList.toggle("active", tab === key);
+    });
+    Object.keys(SET2_EXTRA_TAB_IDS).forEach(function(key){
+      var btn = document.getElementById(SET2_EXTRA_TAB_IDS[key]);
+      if(btn) btn.classList.toggle("active", tab === key);
+    });
+    stripDecorClasses(); // декоративные язычки режима колеса никогда не выглядят выбранными
   }
+  function bottomHighlightIds(){
+    return ["settingsTabGearBtn", "settingsTabGearBtnSet2", TASKS_STACK_BTN_ID, INFO_STACK_BTN_ID, TOOLS_STACK_BTN_ID, ACTIVITIES_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY]];
+  }
+  function updateBottomGearButtons(){
+    var owner = bottomHighlightId;
+    bottomHighlightIds().forEach(function(id){
+      var b = document.getElementById(id);
+      if(!b) return;
+      var on = !!owner && (id === owner || (owner === "settingsTabGearBtn" && id === "settingsTabGearBtnSet2"));
+      b.classList.toggle("active", on);
+    });
+    if(owner){
+      Array.prototype.forEach.call(document.querySelectorAll("#settingsTabs .settings-tab, #settingsTabsSet2 .settings-tab"), function(b){ b.classList.remove("active"); });
+    } else {
+      applySideActive(currentSettingsTab);
+    }
+  }
+  (function(){
+    ["settingsTabs", "settingsTabsSet2"].forEach(function(id){
+      var el = document.getElementById(id);
+      if(!el) return;
+      el.addEventListener("click", function(e){
+        var t = e.target && e.target.closest ? e.target.closest(".settings-tab") : null;
+        if(!t || t.classList.contains("settings-tab-decor")) return;
+        bottomHighlightId = null;
+        updateBottomGearButtons();
+      });
+    });
+    ["settingsTabsGear", "settingsTabsGearSet2"].forEach(function(id){
+      var el = document.getElementById(id);
+      if(!el) return;
+      el.addEventListener("click", function(e){
+        var t = e.target && e.target.closest ? e.target.closest(".settings-tab") : null;
+        if(!t || bottomHighlightIds().indexOf(t.id) === -1) return;
+        bottomHighlightId = (t.id === "settingsTabGearBtnSet2") ? "settingsTabGearBtn" : t.id;
+        updateBottomGearButtons();
+      });
+    });
+  })();
   function initSet2GearTab(){
     var oldIpkdBtn = document.getElementById("settingsTabSet2GearBtn5");
     if(oldIpkdBtn && oldIpkdBtn.parentNode) oldIpkdBtn.parentNode.removeChild(oldIpkdBtn);
