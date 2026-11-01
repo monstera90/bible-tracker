@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 111.0 (01.11)
+   Версия: 111.1 (01.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -18377,10 +18377,7 @@
   if(settingsTabGearBtn) settingsTabGearBtn.addEventListener("click", function(){
     toggleBottomAltMode();
   });
-  (function(){
-    var tsBtn = document.getElementById(TASKS_STACK_BTN_ID);
-    if(tsBtn) tsBtn.addEventListener("click", function(){ setTasksStackMode(!tasksStackMode); });
-  })();
+
   (function(){
     var wkBtn = document.getElementById(WORKOUTS_TAB_BTN_ID);
     if(wkBtn) wkBtn.addEventListener("click", function(){ switchSettingsTabOnClick(WORKOUTS_TAB_KEY); });
@@ -18523,6 +18520,9 @@
   }
   function initBottomAltTabs(){
     ensureTabDecorStyle();
+    // кнопка «Задачи и календарь»: обработчик ставится здесь, а не рядом с шестерёнкой, — константа TASKS_STACK_BTN_ID объявлена ниже по файлу
+    var tsBtn = document.getElementById(TASKS_STACK_BTN_ID);
+    if(tsBtn && !tsBtn.__ltBound){ tsBtn.__ltBound = true; tsBtn.addEventListener("click", function(){ setTasksStackMode(!tasksStackMode); }); }
     Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
       createAltButton(key, BOTTOM_ALT_TAB_IDS[key], BOTTOM_ALT_REPLACES[key]);
     });
