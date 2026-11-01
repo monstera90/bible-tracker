@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 6.0 (31.10)
+// Версия: 6.1 (01.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
 // Версия: 4.0 (25.10) — выбор папки с музыкой (`musicFolderLauncher`, `pickMusicFolder`) для вкладки «Музыка».
@@ -350,6 +350,7 @@ class MainActivity : ComponentActivity() {
         NotifyStore.appForeground = true
         // Открыл приложение (в том числе по уведомлению «Таймер закончился») — вибрация конца таймера карточки больше не нужна.
         CardTimers.stopVibration(applicationContext)
+        try { VolumeBoost.restore(applicationContext) } catch (e: Exception) { /* усиление громкости поднимется при следующем входе */ }
         inAppIsland.start()
         // Подстраховка: будильники пропадают после «Остановить» в настройках, ставим заново из сохранённых данных.
         try {

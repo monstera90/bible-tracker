@@ -31,6 +31,8 @@
          в шторке. Начиная с Android 14 у такого сервиса обязателен тип; для таймера и секундомера подходит "specialUse".
          Когда понадобится: объявить <service android:name=".TimerService" android:foregroundServiceType="specialUse" ...>
          со свойством PROPERTY_SPECIAL_USE_FGS_SUBTYPE и запускать его из страницы через мост. -->
+    <!-- Вкладка «Система»: усиление громкости (LoudnessEnhancer на общей аудиосессии). -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Плеер вкладки «Музыка» (MusicService): служба переднего плана типа mediaPlayback. -->
@@ -242,5 +244,15 @@
             android:name=".WorkoutService"
             android:exported="false"
             android:foregroundServiceType="location" />
+
+        <!-- Вкладка «Система»: держит усиление громкости, пока оно выше 100 %, и проверяет, что система его не сбросила. -->
+        <service
+            android:name=".VolumeBoostService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="volume_boost_audio_effect" />
+        </service>
     </application>
 </manifest>
