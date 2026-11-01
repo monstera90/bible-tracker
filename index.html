@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 28.0 (01.11)
+     Версия: 29.0 (01.11)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -563,7 +563,7 @@ window.addEventListener("error", function(e){
         </svg>
       </button>
       <!-- Боковой ряд нижнего язычка «Статистика» (settingsTabInfoStackBtn, my.js infoStackMode). В DOM снизу вверх: Настроение, Прогресс,
-           График чтения, Трекер экранов, Карта дней года, Обзор (на экране сверху вниз — наоборот). Показываются только в этом режиме. -->
+           График чтения, Трекер экранов, Карта дней года, Обзор, Забытые заметки (на экране сверху вниз — наоборот). Показываются только в этом режиме. -->
       <button class="settings-tab" id="settingsTabMoodBtn" title="Диаграмма настроения" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none">
           <path d="M12,12 L12,1.5 A10.5,10.5 0 0,1 22.5,12 Z" fill="currentColor" opacity="0.7"></path>
@@ -622,9 +622,20 @@ window.addEventListener("error", function(e){
           <rect x="20" y="20" width="2" height="2" rx="1" fill="currentColor" opacity="0.5"></rect>
         </svg>
       </button>
-      <!-- «Обзор» (settingsTabExtra3Btn, ключ "extra3", renderReviewTab): вкладка бокового ряда «Статистики» (settingsTabInfoStackBtn), самая верхняя, над «Картой дней года».
+      <!-- «Обзор» (settingsTabExtra3Btn, ключ "extra3", renderReviewTab): вкладка бокового ряда «Статистики» (settingsTabInfoStackBtn), под «Забытыми заметками», над «Картой дней года».
            Значок и подпись ставит my.js (refreshExtra3TabAppearance). -->
       <button class="settings-tab" id="settingsTabExtra3Btn" title="Обзор" style="display:none;"></button>
+      <!-- «Забытые заметки» (settingsTabSet2Btn4, "set2s_4"): вкладка бокового ряда «Статистики», самая верхняя, над «Обзором». -->
+      <button class="settings-tab" id="settingsTabSet2Btn4" title="Забытые заметки" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path>
+          <path d="M15 3v4h4"></path>
+          <line x1="7.5" y1="11" x2="12" y2="11"></line>
+          <line x1="7.5" y1="15" x2="10.5" y2="15"></line>
+          <circle cx="17" cy="17.5" r="4.3" fill="var(--icon-halo)" stroke="currentColor" stroke-width="1.5"></circle>
+          <path d="M17 15.3v2.2l1.5 1"></path>
+        </svg>
+      </button>
       <!-- Боковой ряд нижнего язычка «Инструменты» (settingsTabToolsStackBtn, my.js toolsStackMode). В DOM снизу вверх: Объединение заметок,
            Заполнение бланков, Извлечение информации из графиков, Извлечение субтитров, Разделение epub, Изменение размера изображения, Стол,
            QR-коды (на экране сверху вниз — наоборот). Показываются только в этом режиме. -->
@@ -704,8 +715,8 @@ window.addEventListener("error", function(e){
         </svg>
       </button>
       <!-- Боковой ряд нижнего язычка «Активности» (settingsTabActivitiesStackBtn, my.js activitiesStackMode). В DOM снизу вверх: ИПКД, Мои книги,
-           Поиск, Музыка, Тренировки (на экране сверху вниз: Тренировки, Музыка, Поиск, Книги, ИПКД). Ключи вкладок прежние (set2s_8, set2s_7, set2s_3,
-           set2s_11, workouts); кнопки скрыты display:none и показываются в refreshSettingsTabsVisibility. -->
+           Поиск, Музыка, Тренировки, Закладки (на экране сверху вниз: Закладки, Тренировки, Музыка, Поиск, Книги, ИПКД). Ключи вкладок прежние (set2s_8, set2s_7, set2s_3,
+           set2s_11, workouts, set2s_2); кнопки скрыты display:none и показываются в refreshSettingsTabsVisibility. -->
       <button class="settings-tab" id="settingsTabSet2Btn8" title="" style="display:none;">8</button>
       <!-- Седьмая боковая вкладка второго набора (settingsTabSet2Btn7, "set2s_7")
            — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "Мои книги" — хранилище книг
@@ -752,6 +763,20 @@ window.addEventListener("error", function(e){
           <path d="M11.2 13l-2.4 3.6-3.8-.4"></path>
         </svg>
       </button>
+      <!-- «Закладки» (settingsTabSet2Btn2, "set2s_2"): вкладка бокового ряда «Активности», самая верхняя, над «Тренировками». -->
+      <button class="settings-tab" id="settingsTabSet2Btn2" title="Закладки" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6.5 3.5h11a1 1 0 0 1 1 1V21l-6.5-4-6.5 4V4.5a1 1 0 0 1 1-1z"></path>
+        </svg>
+      </button>
+      <!-- Боковой ряд нижнего язычка «Клод» (settingsTabClaudeStackBtn, my.js claudeStackMode): одна вкладка «Claude» (settingsTabSet2Btn10, "set2s_10" — claudetab.js).
+           Скрыта display:none, показывается в refreshSettingsTabsVisibility. -->
+      <button class="settings-tab" id="settingsTabSet2Btn10" title="Claude" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 5.5h16a1 1 0 0 1 1 1V16a1 1 0 0 1-1 1h-8l-4.5 3.5V17H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1z"></path>
+          <path d="M12 8v5M9.5 9.5l5 2M14.5 9.5l-5 2"></path>
+        </svg>
+      </button>
     </div>
     <!-- Горизонтальный ряд "лежачих" вкладок под окном настроек, развёрнутых
          на 90° относительно обычных: у них ширина и высота поменяны местами
@@ -793,6 +818,14 @@ window.addEventListener("error", function(e){
           <circle cx="12" cy="12" r="2.25"></circle>
         </svg>
       </button>
+      <!-- «Клод» (settingsTabClaudeStackBtn): между шестерёнкой и «Инструментами»; работает как шестерёнка — включает свой боковой ряд
+           (сейчас одна вкладка «Claude», set2s_10: claudetab.js, ClaudeTab.kt). Логика — my.js, claudeStackMode. -->
+      <button class="settings-tab settings-tab-gear" id="settingsTabClaudeStackBtn" title="Клод">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 5.5h16a1 1 0 0 1 1 1V16a1 1 0 0 1-1 1h-8l-4.5 3.5V17H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1z"></path>
+          <path d="M12 8v5M9.5 9.5l5 2M14.5 9.5l-5 2"></path>
+        </svg>
+      </button>
       <!-- «Инструменты» (settingsTabToolsStackBtn): между шестерёнкой и «Статистикой»; работает как шестерёнка — включает свой боковой ряд
            (QR-коды, Стол, Изменение размера изображения, Разделение epub, Извлечение субтитров, Извлечение информации из графиков,
            Заполнение бланков, Объединение заметок). Логика — my.js, toolsStackMode. -->
@@ -809,6 +842,20 @@ window.addEventListener("error", function(e){
           <rect x="5" y="11" width="3.6" height="7.5" rx="0.9"></rect>
           <rect x="10.2" y="5" width="3.6" height="13.5" rx="0.9"></rect>
           <rect x="15.4" y="8.5" width="3.6" height="10" rx="0.9"></rect>
+        </svg>
+      </button>
+      <!-- «Мои заметки» (settingsTabSet2Btn1, ключ "set2s_1", «Мой блокнот» — mdeditor.js): нижний язычок набора 1 справа от «Статистики».
+           Открывает заметки сразу, без бокового ряда: при открытии все боковые ряды выключаются (my.js, NOTES_TAB_KEY). -->
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2Btn1" title="Мои заметки">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="2.5" width="16" height="19" rx="1.5"></rect>
+          <circle cx="2.6" cy="6" r="1" fill="currentColor" stroke="none"></circle>
+          <circle cx="2.6" cy="10.5" r="1" fill="currentColor" stroke="none"></circle>
+          <circle cx="2.6" cy="15" r="1" fill="currentColor" stroke="none"></circle>
+          <circle cx="2.6" cy="19.5" r="1" fill="currentColor" stroke="none"></circle>
+          <line x1="8.5" y1="8" x2="17.5" y2="8"></line>
+          <line x1="8.5" y1="12" x2="17.5" y2="12"></line>
+          <line x1="8.5" y1="16" x2="14" y2="16"></line>
         </svg>
       </button>
       <!-- «Задачи и календарь» (settingsTabTasksStackBtn): справа от шестерёнки; включает свой боковой ряд — все вкладки задач и «Календарь»
@@ -895,50 +942,9 @@ window.addEventListener("error", function(e){
          ссылки [[Название]] между заметками). См. renderSettingsTabMdEditor
          в mdeditor.js и её отдельную ветку в switchSettingsTab, по тому же
          принципу вынесена ДО общей проверки на renderSettingsTabSet2Stub. -->
-    <div class="settings-tabs" id="settingsTabsSet2" style="display:none;">
-      <button class="settings-tab" id="settingsTabSet2Btn1" title="Мой блокнот">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="5" y="2.5" width="16" height="19" rx="1.5"></rect>
-          <circle cx="2.6" cy="6" r="1" fill="currentColor" stroke="none"></circle>
-          <circle cx="2.6" cy="10.5" r="1" fill="currentColor" stroke="none"></circle>
-          <circle cx="2.6" cy="15" r="1" fill="currentColor" stroke="none"></circle>
-          <circle cx="2.6" cy="19.5" r="1" fill="currentColor" stroke="none"></circle>
-          <line x1="8.5" y1="8" x2="17.5" y2="8"></line>
-          <line x1="8.5" y1="12" x2="17.5" y2="12"></line>
-          <line x1="8.5" y1="16" x2="14" y2="16"></line>
-        </svg>
-      </button>
-      <!-- Вторая боковая вкладка второго набора (settingsTabSet2Btn2, "set2s_2")
-           — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "Закладки" — список заметок из
-           "Моего блокнота" (settingsTabSet2Btn1), отмеченных закладкой. См.
-           renderSettingsTabMdBookmarks в mdeditor.js и её отдельную ветку в
-           switchSettingsTab, по тому же принципу вынесена ДО общей проверки
-           на renderSettingsTabSet2Stub. -->
-      <button class="settings-tab" id="settingsTabSet2Btn2" title="Закладки">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M6.5 3.5h11a1 1 0 0 1 1 1V21l-6.5-4-6.5 4V4.5a1 1 0 0 1 1-1z"></path>
-        </svg>
-      </button>
-      <button class="settings-tab" id="settingsTabSet2Btn4" title="Забытые заметки">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path>
-          <path d="M15 3v4h4"></path>
-          <line x1="7.5" y1="11" x2="12" y2="11"></line>
-          <line x1="7.5" y1="15" x2="10.5" y2="15"></line>
-          <circle cx="17" cy="17.5" r="4.3" fill="var(--icon-halo)" stroke="currentColor" stroke-width="1.5"></circle>
-          <path d="M17 15.3v2.2l1.5 1"></path>
-        </svg>
-      </button>
-      <!-- Десятая боковая вкладка второго набора (settingsTabSet2Btn10, "set2s_10"; в стеке самая верхняя, над
-           «Карточками предметов») — «Claude»: нативный WebView с claude.ai и автоотправка «Дальше» после
-           снятия лимита. См. claudetab.js и ClaudeTab.kt. -->
-      <button class="settings-tab" id="settingsTabSet2Btn10" title="Claude">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 5.5h16a1 1 0 0 1 1 1V16a1 1 0 0 1-1 1h-8l-4.5 3.5V17H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1z"></path>
-          <path d="M12 8v5M9.5 9.5l5 2M14.5 9.5l-5 2"></path>
-        </svg>
-      </button>
-    </div>
+    <div class="settings-tabs" id="settingsTabsSet2" style="display:none;"></div>
+    <!-- Боковых вкладок у набора 2 больше нет: «Мои заметки», «Закладки», «Забытые заметки» и «Клод» переехали в ряды набора 1
+         (кнопки лежат в #settingsTabs и #settingsTabsGear). Пустой контейнер оставлен ради логики наборов в my.js. -->
     <div class="settings-tabs-gear" id="settingsTabsGearSet2" style="display:none;">
       <!-- Пятая "лежачая" вкладка второго набора (settingsTabSet2GearBtn5,
            "set2b_5") — ЭТО БОЛЬШЕ НЕ ЗАГЛУШКА: вкладка "ИПКД" — ежедневное

@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 114.0 (01.11)
+   Версия: 115.0 (01.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1729,10 +1729,10 @@
   var SCREENTIME_TAB_KEY = "screentime";
   var SCREENTIME_TAB_BTN_ID = "settingsTabScreenTimeBtn";
   // «Статистика» (нижний язычок settingsTabInfoStackBtn между шестерёнкой и «Задачи и календарь»): свой боковой ряд набора 1 (режим infoStackMode),
-  // работает как шестерёнка. Вкладки ряда сверху вниз: Обзор, Карта дней года, Трекер экранов, График чтения, Прогресс, Настроение.
+  // работает как шестерёнка. Вкладки ряда сверху вниз: Забытые заметки, Обзор, Карта дней года, Трекер экранов, График чтения, Прогресс, Настроение.
   var INFO_STACK_BTN_ID = "settingsTabInfoStackBtn";
-  var INFO_STACK_TABS = ["extra3", "year", "screentime", "set2s_13", "set2s_12", "mood"];
-  var INFO_STACK_BTN_IDS = { extra3: "settingsTabExtra3Btn", year: "settingsTabYearBtn", screentime: "settingsTabScreenTimeBtn", set2s_13: "settingsTabSet2Btn13", set2s_12: "settingsTabSet2Btn12", mood: "settingsTabMoodBtn" };
+  var INFO_STACK_TABS = ["set2s_4", "extra3", "year", "screentime", "set2s_13", "set2s_12", "mood"];
+  var INFO_STACK_BTN_IDS = { set2s_4: "settingsTabSet2Btn4", extra3: "settingsTabExtra3Btn", year: "settingsTabYearBtn", screentime: "settingsTabScreenTimeBtn", set2s_13: "settingsTabSet2Btn13", set2s_12: "settingsTabSet2Btn12", mood: "settingsTabMoodBtn" };
   function isInfoStackTab(tab){ return INFO_STACK_TABS.indexOf(tab) !== -1; }
   // «Инструменты» (нижний язычок settingsTabToolsStackBtn между шестерёнкой и «Статистикой»): свой боковой ряд набора 1 (режим toolsStackMode),
   // работает как шестерёнка. Вкладки ряда сверху вниз: QR-коды, Стол, Изменение размера изображения, Разделение epub, Извлечение субтитров,
@@ -1745,13 +1745,23 @@
   };
   function isToolsStackTab(tab){ return TOOLS_STACK_TABS.indexOf(tab) !== -1; }
   // «Активности» (нижний язычок settingsTabActivitiesStackBtn справа от «Задачи и календарь»): свой боковой ряд набора 1 (режим activitiesStackMode),
-  // работает как шестерёнка. Вкладки ряда сверху вниз: Тренировки, Музыка, Поиск, Книги, ИПКД. Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
+  // работает как шестерёнка. Вкладки ряда сверху вниз: Закладки, Тренировки, Музыка, Поиск, Книги, ИПКД. Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
   var ACTIVITIES_STACK_BTN_ID = "settingsTabActivitiesStackBtn";
-  var ACTIVITIES_STACK_TABS = ["workouts", "set2s_11", "set2s_3", "set2s_7", "set2s_8"];
-  var ACTIVITIES_STACK_BTN_IDS = { workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_3: "settingsTabSet2Btn3", set2s_7: "settingsTabSet2Btn7", set2s_8: "settingsTabSet2Btn8" };
+  var ACTIVITIES_STACK_TABS = ["set2s_2", "workouts", "set2s_11", "set2s_3", "set2s_7", "set2s_8"];
+  var ACTIVITIES_STACK_BTN_IDS = { set2s_2: "settingsTabSet2Btn2", workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_3: "settingsTabSet2Btn3", set2s_7: "settingsTabSet2Btn7", set2s_8: "settingsTabSet2Btn8" };
   function isActivitiesStackTab(tab){ return ACTIVITIES_STACK_TABS.indexOf(tab) !== -1; }
-  // вкладка одного из трёх своих боковых рядов набора 1 («Статистика», «Инструменты» или «Активности») — набор 2 их не показывает
-  function isOwnStackTab(tab){ return isInfoStackTab(tab) || isToolsStackTab(tab) || isActivitiesStackTab(tab); }
+  // «Клод» (нижний язычок settingsTabClaudeStackBtn между шестерёнкой и «Инструментами»): свой боковой ряд набора 1 (режим claudeStackMode),
+  // работает как шестерёнка. Пока в ряду одна вкладка — «Claude» (set2s_10, claudetab.js); новая вкладка ряда: кнопка в `#settingsTabs` + ключ в списках ниже.
+  var CLAUDE_STACK_BTN_ID = "settingsTabClaudeStackBtn";
+  var CLAUDE_STACK_TABS = ["set2s_10"];
+  var CLAUDE_STACK_BTN_IDS = { set2s_10: "settingsTabSet2Btn10" };
+  function isClaudeStackTab(tab){ return CLAUDE_STACK_TABS.indexOf(tab) !== -1; }
+  // «Мои заметки» (set2s_1, «Мой блокнот», mdeditor.js): сама нижняя вкладка набора 1 справа от «Статистики» (кнопка settingsTabSet2Btn1 лежит в #settingsTabsGear),
+  // бокового ряда у неё нет — клик по ней выключает все боковые ряды (switchSettingsTabOnClick)
+  var NOTES_TAB_KEY = "set2s_1";
+  function isNotesBottomTab(tab){ return tab === NOTES_TAB_KEY; }
+  // вкладка набора 1 из «своих» (боковые ряды «Статистика», «Инструменты», «Активности», «Клод» и нижняя «Мои заметки») — набор 2 их не показывает
+  function isOwnStackTab(tab){ return isInfoStackTab(tab) || isToolsStackTab(tab) || isActivitiesStackTab(tab) || isClaudeStackTab(tab) || isNotesBottomTab(tab); }
   // Вкладка «Тренировки» (workouts.js): верхняя в боковом ряду «Активности» (ACTIVITIES_STACK_TABS). В SETTINGS_BOTTOM_ORDER_1 НЕ входит
   // (иначе сдвинется соответствие позиций с нижним рядом набора 2) — запоминание последней вкладки и «набор» учитывают её отдельно.
   var WORKOUTS_TAB_KEY = "workouts";
@@ -10349,6 +10359,13 @@
     });
     var activitiesBtn = document.getElementById(ACTIVITIES_STACK_BTN_ID);
     if(activitiesBtn) activitiesBtn.classList.toggle("active", !!activitiesStackMode);
+    // вкладки ряда «Клод»
+    Object.keys(CLAUDE_STACK_BTN_IDS).forEach(function(key){
+      var cb = document.getElementById(CLAUDE_STACK_BTN_IDS[key]);
+      if(cb) cb.style.display = claudeStackMode ? "flex" : "none";
+    });
+    var claudeBtn = document.getElementById(CLAUDE_STACK_BTN_ID);
+    if(claudeBtn) claudeBtn.classList.toggle("active", !!claudeStackMode);
     // меняет количество видимых язычков в #settingsTabs — пересчитываем заплатку (см.
     // updateSettingsCornerPatchHeight выше); единственный вызывающий.
     updateSettingsCornerPatchHeight();
@@ -17885,7 +17902,7 @@
     var set1Bottom = document.getElementById("settingsTabsGear");
     var set2Side = document.getElementById("settingsTabsSet2");
     var set2Bottom = document.getElementById("settingsTabsGearSet2");
-    var showSet1 = settingsActiveTabSet === 1 || bottomAltMode || tasksStackMode || infoStackMode || toolsStackMode || activitiesStackMode;
+    var showSet1 = settingsActiveTabSet === 1 || bottomAltMode || tasksStackMode || infoStackMode || toolsStackMode || activitiesStackMode || claudeStackMode;
     if(set1Side) set1Side.style.display = showSet1 ? "" : "none";
     if(set1Bottom) set1Bottom.style.display = showSet1 ? "" : "none";
     if(set2Side) set2Side.style.display = showSet1 ? "none" : "";
@@ -17963,6 +17980,7 @@
     if(!savedTab){
       savedTab = (savedSet === 1) ? (getShowAllTasksEnabled() ? "red" : "gear") : "set2s_1";
     }
+    if(isOwnStackTab(savedTab)) savedSet = 1; // вкладка по умолчанию набора 2 («Мои заметки») теперь живёт в наборе 1
     // скрытая пользователем вкладка: первая не скрытая того же набора, а если таких нет — вкладка настроек набора 1
     if(savedTab !== "gear" && isSettingsTabUserHidden(savedTab)){
       var alt = firstVisibleTabOfSet(savedSet);
@@ -18417,6 +18435,12 @@
   // хвосте). Простой guard — повторный клик по уже открытой вкладке просто ничего не делает, как и
   // было бы логично для переключателя вкладок (не кнопки "обновить").
   function switchSettingsTabOnClick(tab){
+    // «Мои заметки» — нижняя вкладка без своего ряда: выключаем все боковые ряды (в том числе колесо), затем открываем заметки
+    if(isNotesBottomTab(tab)){
+      setAllStackModesOff();
+      if(tab !== currentSettingsTab) switchSettingsTab(tab);
+      return;
+    }
     if(tab === "extra3" && tab === currentSettingsTab && reviewSubScreen){
       closeReviewSubScreen();
       return;
@@ -18539,6 +18563,9 @@
   // Режим «Активности» (кнопка settingsTabActivitiesStackBtn): боковой ряд набора 1 показывает вкладки ACTIVITIES_STACK_TABS. Взаимоисключающий с остальными режимами рядов;
   // хранится в памяти, включается сам при открытии любой вкладки ряда.
   var activitiesStackMode = false;
+  // Режим «Клод» (кнопка settingsTabClaudeStackBtn): боковой ряд набора 1 показывает вкладки CLAUDE_STACK_TABS. Взаимоисключающий с остальными режимами рядов;
+  // хранится в памяти, включается сам при открытии вкладки ряда.
+  var claudeStackMode = false;
 
   function createAltButton(key, id, origId){
     if(document.getElementById(id)) return;
@@ -18594,6 +18621,8 @@
     if(toolsBtn0 && !toolsBtn0.__ltBound){ toolsBtn0.__ltBound = true; toolsBtn0.addEventListener("click", function(){ setToolsStackMode(!toolsStackMode); }); }
     var activitiesBtn0 = document.getElementById(ACTIVITIES_STACK_BTN_ID);
     if(activitiesBtn0 && !activitiesBtn0.__ltBound){ activitiesBtn0.__ltBound = true; activitiesBtn0.addEventListener("click", function(){ setActivitiesStackMode(!activitiesStackMode); }); }
+    var claudeBtn0 = document.getElementById(CLAUDE_STACK_BTN_ID);
+    if(claudeBtn0 && !claudeBtn0.__ltBound){ claudeBtn0.__ltBound = true; claudeBtn0.addEventListener("click", function(){ setClaudeStackMode(!claudeStackMode); }); }
     Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
       createAltButton(key, BOTTOM_ALT_TAB_IDS[key], BOTTOM_ALT_REPLACES[key]);
     });
@@ -18615,7 +18644,7 @@
     on = !!on;
     if(on === bottomAltMode) return;
     bottomAltMode = on;
-    if(on){ tasksStackMode = false; infoStackMode = false; toolsStackMode = false; activitiesStackMode = false; }
+    if(on){ tasksStackMode = false; infoStackMode = false; toolsStackMode = false; activitiesStackMode = false; claudeStackMode = false; }
     applyBottomAltMode();
     applySettingsTabSetVisibility(); // в режиме колеса всегда виден ряд набора 1, после — ряд активного набора
   }
@@ -18623,7 +18652,7 @@
     on = !!on;
     if(on === tasksStackMode) return;
     tasksStackMode = on;
-    if(on){ bottomAltMode = false; infoStackMode = false; toolsStackMode = false; activitiesStackMode = false; }
+    if(on){ bottomAltMode = false; infoStackMode = false; toolsStackMode = false; activitiesStackMode = false; claudeStackMode = false; }
     applyBottomAltMode();            // обновляет вертикальный стек, подсветку кнопок и угловые заплатки
     applySettingsTabSetVisibility(); // ряд «Задачи и календарь» всегда на наборе 1
   }
@@ -18631,7 +18660,7 @@
     on = !!on;
     if(on === infoStackMode) return;
     infoStackMode = on;
-    if(on){ bottomAltMode = false; tasksStackMode = false; toolsStackMode = false; activitiesStackMode = false; }
+    if(on){ bottomAltMode = false; tasksStackMode = false; toolsStackMode = false; activitiesStackMode = false; claudeStackMode = false; }
     applyBottomAltMode();            // обновляет вертикальный стек, подсветку кнопок и угловые заплатки
     applySettingsTabSetVisibility(); // ряд «Статистика» всегда на наборе 1
   }
@@ -18639,7 +18668,7 @@
     on = !!on;
     if(on === toolsStackMode) return;
     toolsStackMode = on;
-    if(on){ bottomAltMode = false; tasksStackMode = false; infoStackMode = false; activitiesStackMode = false; }
+    if(on){ bottomAltMode = false; tasksStackMode = false; infoStackMode = false; activitiesStackMode = false; claudeStackMode = false; }
     applyBottomAltMode();            // обновляет вертикальный стек, подсветку кнопок и угловые заплатки
     applySettingsTabSetVisibility(); // ряд «Инструменты» всегда на наборе 1
   }
@@ -18647,9 +18676,26 @@
     on = !!on;
     if(on === activitiesStackMode) return;
     activitiesStackMode = on;
-    if(on){ bottomAltMode = false; tasksStackMode = false; infoStackMode = false; toolsStackMode = false; }
+    if(on){ bottomAltMode = false; tasksStackMode = false; infoStackMode = false; toolsStackMode = false; claudeStackMode = false; }
     applyBottomAltMode();            // обновляет вертикальный стек, подсветку кнопок и угловые заплатки
     applySettingsTabSetVisibility(); // ряд «Активности» всегда на наборе 1
+  }
+  function setClaudeStackMode(on){
+    on = !!on;
+    if(on === claudeStackMode) return;
+    claudeStackMode = on;
+    if(on){ bottomAltMode = false; tasksStackMode = false; infoStackMode = false; toolsStackMode = false; activitiesStackMode = false; }
+    applyBottomAltMode();            // обновляет вертикальный стек, подсветку кнопок и угловые заплатки
+    applySettingsTabSetVisibility(); // ряд «Клод» всегда на наборе 1
+  }
+  // выключает все режимы боковых рядов (колесо, «Задачи и календарь», «Статистика», «Инструменты», «Активности», «Клод») — боковая колонка пустеет
+  function setAllStackModesOff(){
+    setBottomAltMode(false);
+    setTasksStackMode(false);
+    setInfoStackMode(false);
+    setToolsStackMode(false);
+    setActivitiesStackMode(false);
+    setClaudeStackMode(false);
   }
   var bottomAltEntrySet = 1; // набор, который был активен, когда включили колесо
   function toggleBottomAltMode(){
@@ -18667,10 +18713,14 @@
   // программным переходом или жестом «назад»), ряд сам переключается на нужный набор, чтобы
   // активная вкладка не оказалась скрытой
   function syncBottomAltModeForTab(tab){
+    // «своя» вкладка набора 1 открыта, а на экране ряд набора 2 (пустой) — возвращаем набор 1
+    if(isOwnStackTab(tab) && settingsActiveTabSet !== 1){ settingsActiveTabSet = 1; applySettingsTabSetVisibility(); }
     if(BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) || tab === WHEEL_SYSTEM_TAB_KEY || tab === EVENTS_TAB_KEY) setBottomAltMode(true);
     else if(isInfoStackTab(tab)) setInfoStackMode(true);
     else if(isToolsStackTab(tab)) setToolsStackMode(true);
     else if(isActivitiesStackTab(tab)) setActivitiesStackMode(true);
+    else if(isClaudeStackTab(tab)) setClaudeStackMode(true);
+    else if(isNotesBottomTab(tab)){ /* «Мои заметки» — нижняя вкладка без своего ряда: открытый боковой ряд не трогаем (так из «Закладок» и «Забытых» заметка открывается, не сворачивая ряд) */ }
     else if(TASK_TAB_IDS.hasOwnProperty(tab) || tab === CALENDAR_TAB_KEY || tab === "extra2"){ if(getShowAllTasksEnabled()) setTasksStackMode(true); else setBottomAltMode(false); }
     else {
       if(BOTTOM_ALT_ORIGINAL_TABS.indexOf(tab) !== -1) setBottomAltMode(false);
@@ -18862,6 +18912,8 @@
     if(tlb) tlb.classList.toggle("active", !!toolsStackMode);
     var acb = document.getElementById(ACTIVITIES_STACK_BTN_ID);
     if(acb) acb.classList.toggle("active", !!activitiesStackMode);
+    var ccb = document.getElementById(CLAUDE_STACK_BTN_ID);
+    if(ccb) ccb.classList.toggle("active", !!claudeStackMode);
   }
   function initSet2GearTab(){
     var oldIpkdBtn = document.getElementById("settingsTabSet2GearBtn5");
@@ -18887,7 +18939,7 @@
         // набор 2 <-> ...), пока второй набор разблокирован кодом — без ограничения числа
         // переключений (см. cycleSettingsTabSet выше). Окно настроек не закрывается: главной
         // страницы нет.
-        if(isSet2Unlocked()) cycleSettingsTabSet();
+        // набор 2 пуст (все его вкладки переехали в ряды набора 1) — переключать нечего
       } else {
         // открытие показывает набор и вкладку, на которых человек остановился в прошлый раз (см.
         // openSettingsModal/getResumeSettingsState выше) — переживает и закрытие приложения.
