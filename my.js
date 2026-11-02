@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 117.0 (01.11)
+   Версия: 118.0 (02.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -10910,7 +10910,7 @@
     syncBottomAltModeForTab(tab);
     updateNotesWide();
     // выделена одна вкладка — нажатая последней: «Мои заметки» / «Мои книги» (нижний ряд; ИПКД подсвечивает «Книги») или вкладка бокового ряда; язычки рядов — по их нажатию (см. ниже)
-    bottomHighlightId = (tab === NOTES_TAB_KEY) ? SET2_TAB_IDS[NOTES_TAB_KEY] : (isBooksBottomTab(tab) ? SET2_TAB_IDS[BOOKS_TAB_KEY] : null);
+    rememberStackTab(tab); // последняя открытая вкладка своего бокового ряда — её откроет следующее нажатие на язычок ряда
     updateBottomGearButtons();
     var container = document.getElementById("settingsTabContent");
     if(tab !== "set2s_12") progressPanelGoHome(); // панель «Прогресс» уходит домой до того, как содержимое окна заменит другая вкладка
@@ -18635,15 +18635,15 @@
     ensureTabDecorStyle();
     // кнопка «Задачи и календарь»: обработчик ставится здесь, а не рядом с шестерёнкой, — константа TASKS_STACK_BTN_ID объявлена ниже по файлу
     var tsBtn = document.getElementById(TASKS_STACK_BTN_ID);
-    if(tsBtn && !tsBtn.__ltBound){ tsBtn.__ltBound = true; tsBtn.addEventListener("click", function(){ setTasksStackMode(true); }); }
+    if(tsBtn && !tsBtn.__ltBound){ tsBtn.__ltBound = true; tsBtn.addEventListener("click", function(){ openStackGroup("tasks"); }); }
     var infoBtn0 = document.getElementById(INFO_STACK_BTN_ID);
-    if(infoBtn0 && !infoBtn0.__ltBound){ infoBtn0.__ltBound = true; infoBtn0.addEventListener("click", function(){ setInfoStackMode(true); }); }
+    if(infoBtn0 && !infoBtn0.__ltBound){ infoBtn0.__ltBound = true; infoBtn0.addEventListener("click", function(){ openStackGroup("info"); }); }
     var toolsBtn0 = document.getElementById(TOOLS_STACK_BTN_ID);
-    if(toolsBtn0 && !toolsBtn0.__ltBound){ toolsBtn0.__ltBound = true; toolsBtn0.addEventListener("click", function(){ setToolsStackMode(true); }); }
+    if(toolsBtn0 && !toolsBtn0.__ltBound){ toolsBtn0.__ltBound = true; toolsBtn0.addEventListener("click", function(){ openStackGroup("tools"); }); }
     var activitiesBtn0 = document.getElementById(ACTIVITIES_STACK_BTN_ID);
-    if(activitiesBtn0 && !activitiesBtn0.__ltBound){ activitiesBtn0.__ltBound = true; activitiesBtn0.addEventListener("click", function(){ setActivitiesStackMode(true); }); }
+    if(activitiesBtn0 && !activitiesBtn0.__ltBound){ activitiesBtn0.__ltBound = true; activitiesBtn0.addEventListener("click", function(){ openStackGroup("activities"); }); }
     var claudeBtn0 = document.getElementById(CLAUDE_STACK_BTN_ID);
-    if(claudeBtn0 && !claudeBtn0.__ltBound){ claudeBtn0.__ltBound = true; claudeBtn0.addEventListener("click", function(){ setClaudeStackMode(true); }); }
+    if(claudeBtn0 && !claudeBtn0.__ltBound){ claudeBtn0.__ltBound = true; claudeBtn0.addEventListener("click", function(){ openStackGroup("claude"); }); }
     Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
       createAltButton(key, BOTTOM_ALT_TAB_IDS[key], BOTTOM_ALT_REPLACES[key]);
     });
@@ -18723,9 +18723,10 @@
     // повторное нажатие на шестерёнку ничего не делает: ряд колеса остаётся
     if(!bottomAltMode){
       bottomAltEntrySet = settingsActiveTabSet;
-      setBottomAltMode(true);
+      openStackGroup("wheel");
       return;
     }
+    if(!isStackGroupTab("wheel", currentSettingsTab)) openStackGroup("wheel"); // колесо уже включено, но открыта другая вкладка
     // язычок набора нажимали под колесом — теперь, когда колесо убрано, показываем вкладку нового
     // набора
     // (вкладку нового набора само не открываем: остаётся открытая, пока пользователь сам не нажмёт нужный язычок)
@@ -18962,19 +18963,92 @@
   function bottomHighlightIds(){
     return ["settingsTabGearBtn", "settingsTabGearBtnSet2", TASKS_STACK_BTN_ID, INFO_STACK_BTN_ID, TOOLS_STACK_BTN_ID, ACTIVITIES_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY], SET2_TAB_IDS[BOOKS_TAB_KEY]];
   }
+  // Внизу выделен ровно один язычок: «Мои заметки» / «Мои книги» (у них бокового ряда нет), иначе язычок включённого бокового ряда
+  // (колесо, «Задачи и календарь», «Статистика», «Инструменты», «Активности», «Клод»); второе выделение — вкладка в боковом ряду (applySideActive)
+  function computeBottomOwner(){
+    var t = currentSettingsTab;
+    if(isNotesBottomTab(t)) return SET2_TAB_IDS[NOTES_TAB_KEY];
+    if(isBooksBottomTab(t)) return SET2_TAB_IDS[BOOKS_TAB_KEY];
+    if(bottomAltMode) return "settingsTabGearBtn";
+    if(tasksStackMode) return TASKS_STACK_BTN_ID;
+    if(infoStackMode) return INFO_STACK_BTN_ID;
+    if(toolsStackMode) return TOOLS_STACK_BTN_ID;
+    if(activitiesStackMode) return ACTIVITIES_STACK_BTN_ID;
+    if(claudeStackMode) return CLAUDE_STACK_BTN_ID;
+    return "settingsTabGearBtn";
+  }
+  // ---- боковые ряды: какой вкладкой открывать ряд ----
+  var STACK_LAST_TAB_KEY = "bibleStackLastTab_v1";
+  function stackGroupTabs(g){
+    if(g === "wheel") return Object.keys(BOTTOM_ALT_TAB_IDS).concat([WHEEL_SYSTEM_TAB_KEY, EVENTS_TAB_KEY]);
+    if(g === "tasks") return Object.keys(TASK_TAB_IDS).concat([CALENDAR_TAB_KEY, "extra2"]);
+    if(g === "info") return INFO_STACK_TABS;
+    if(g === "tools") return TOOLS_STACK_TABS;
+    if(g === "activities") return ACTIVITIES_STACK_TABS;
+    if(g === "claude") return CLAUDE_STACK_TABS;
+    return [];
+  }
+  var STACK_GROUP_NAMES = ["wheel", "tasks", "info", "tools", "activities", "claude"];
+  function isStackGroupTab(g, tab){ return stackGroupTabs(g).indexOf(tab) !== -1; }
+  function stackGroupOfTab(tab){
+    for(var i = 0; i < STACK_GROUP_NAMES.length; i++) if(isStackGroupTab(STACK_GROUP_NAMES[i], tab)) return STACK_GROUP_NAMES[i];
+    return null;
+  }
+  function stackTabButtonId(tab){
+    return BOTTOM_ALT_TAB_IDS[tab] || TASK_TAB_IDS[tab] || (tab === EVENTS_TAB_KEY ? EVENTS_TAB_BTN_ID : null) || (tab === CALENDAR_TAB_KEY ? CALENDAR_TAB_BTN_ID : null) ||
+      (tab === SCREENTIME_TAB_KEY ? SCREENTIME_TAB_BTN_ID : null) || EXTRA_TAB_IDS[tab] || SET2_TAB_IDS[tab] || SET2_EXTRA_TAB_IDS[tab] ||
+      (tab === "year" ? "settingsTabYearBtn" : (tab === "mood" ? "settingsTabMoodBtn" : (tab === WORKOUTS_TAB_KEY ? WORKOUTS_TAB_BTN_ID : null)));
+  }
+  function readStackLastTabs(){
+    try{ var o = JSON.parse(localStorage.getItem(STACK_LAST_TAB_KEY) || "{}"); return (o && typeof o === "object") ? o : {}; }catch(e){ return {}; }
+  }
+  function rememberStackTab(tab){
+    var g = stackGroupOfTab(tab);
+    if(!g) return;
+    var o = readStackLastTabs();
+    if(o[g] === tab) return;
+    o[g] = tab;
+    try{ localStorage.setItem(STACK_LAST_TAB_KEY, JSON.stringify(o)); }catch(e){}
+  }
+  // вкладку ряда можно открыть: она не скрыта пользователем, у неё есть язычок и (для задач) включён показ задач
+  function stackTabUsable(g, tab){
+    if(!isStackGroupTab(g, tab)) return false;
+    if(g === "tasks" && !getShowAllTasksEnabled()) return false;
+    var id = stackTabButtonId(tab);
+    var btn = id ? document.getElementById(id) : null;
+    return !!btn && !btn.classList.contains("settings-tab-user-hidden");
+  }
+  // самая нижняя вкладка ряда: кнопки в #settingsTabs стоят в DOM снизу вверх
+  function stackBottommostTab(g){
+    var tabs = stackGroupTabs(g), byId = {};
+    tabs.forEach(function(t){ var id = stackTabButtonId(t); if(id) byId[id] = t; });
+    var host = document.getElementById("settingsTabs");
+    if(!host) return null;
+    for(var i = 0; i < host.children.length; i++){
+      var el = host.children[i], t2 = byId[el.id];
+      if(t2 && stackTabUsable(g, t2)) return t2;
+    }
+    return null;
+  }
+  // нажатие на язычок бокового ряда: включает ряд и открывает его последнюю открытую вкладку, а если такой не было — самую нижнюю
+  function openStackGroup(g){
+    var setters = { wheel: setBottomAltMode, tasks: setTasksStackMode, info: setInfoStackMode, tools: setToolsStackMode, activities: setActivitiesStackMode, claude: setClaudeStackMode };
+    setters[g](true);
+    if(isStackGroupTab(g, currentSettingsTab)){ updateBottomGearButtons(); return; }
+    var target = readStackLastTabs()[g];
+    if(!target || !stackTabUsable(g, target)) target = stackBottommostTab(g);
+    if(target) switchSettingsTab(target);
+    else updateBottomGearButtons();
+  }
   function updateBottomGearButtons(){
-    var owner = bottomHighlightId;
+    var owner = computeBottomOwner();
     bottomHighlightIds().forEach(function(id){
       var b = document.getElementById(id);
       if(!b) return;
       var on = !!owner && (id === owner || (owner === "settingsTabGearBtn" && id === "settingsTabGearBtnSet2"));
       b.classList.toggle("active", on);
     });
-    if(owner){
-      Array.prototype.forEach.call(document.querySelectorAll("#settingsTabs .settings-tab, #settingsTabsSet2 .settings-tab"), function(b){ b.classList.remove("active"); });
-    } else {
-      applySideActive(currentSettingsTab);
-    }
+    applySideActive(currentSettingsTab);
   }
   (function(){
     ["settingsTabs", "settingsTabsSet2"].forEach(function(id){
