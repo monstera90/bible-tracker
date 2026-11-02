@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 22.0 (01.11)
+   Версия: 23.0 (02.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4985,13 +4985,22 @@ body::after{
   bottom:0;
   pointer-events:none;
 }
+/* Цвет — как у подчёркивания в epub (.book-reader-underline): и для готовой подсветки, и для протяжки; multiply оставляет текст страницы читаемым */
 .pdf-hl{
   position:absolute;
-  background:rgba(255,214,10,.42);
+  background:var(--gold-light);
   mix-blend-mode:multiply;
-  border-radius:2px;
 }
-.pdf-hl.pdf-hl-sel{ background:rgba(110,150,255,.42); }
+html[data-theme="8"] .pdf-hl,
+html[data-theme="9"] .pdf-hl,
+html[data-theme="10"] .pdf-hl,
+html[data-theme="11"] .pdf-hl,
+html[data-theme="12"] .pdf-hl,
+html[data-theme="13"] .pdf-hl,
+html[data-theme="14"] .pdf-hl{
+  background:rgba(128,128,128,.38);
+  background:color-mix(in srgb, var(--wood) 48%, var(--parchment));
+}
 /* Полноэкранный режим: страницы PDF во всю ширину окна, без боковых полос (8px у .book-reader-tab — для текста книг). */
 .settings-modal-overlay.fullscreen-mode-active .book-reader-tab.pdf-reader-tab{
   padding-left:0;

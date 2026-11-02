@@ -1,5 +1,5 @@
 /* pdfreader.js — постраничный просмотр PDF картинками (страницы как в настоящем PDF-просмотрщике).
-   Версия: 2.0 (01.11)
+   Версия: 2.1 (02.11)
 
    Зачем: книги-PDF во вкладке «Мои книги» раньше разбирались в текст (pdfparse.js) и показывались как fb2/epub.
    Теперь PDF открывается страницами — с картинками, шрифтами и вёрсткой оригинала. pdfparse.js остаётся для
@@ -188,6 +188,17 @@
       function q(v){ return Math.round(v * 10000) / 10000; }
       return [q(r.x0), q(r.top), q(r.x1 - r.x0), q(r.bot - r.top)];
     });
+  }
+  // Сплошная заливка: прямоугольники строк растягиваются вниз до верха следующей строки (и убирается наложение), чтобы между строками
+  // не было просветов и двойного затемнения — выделение выглядит одним блоком, а не подчёркнутыми по отдельности словами и строками
+  function solidRects(rects){
+    var rs = rects.map(function(r){ return [r[0], r[1], r[2], r[3]]; }).sort(function(a, b){ return a[1] - b[1] || a[0] - b[0]; });
+    for(var i = 0; i + 1 < rs.length; i++){
+      var cur = rs[i], nxt = rs[i + 1];
+      var dy = nxt[1] - cur[1];
+      if(dy > 0 && dy < cur[3] * 1.8) cur[3] = dy;
+    }
+    return rs;
   }
   function textOfWords(words, lo, hi){
     var s = "";
@@ -489,8 +500,9 @@
       var layer = document.createElement("div");
       layer.className = "pdf-hl-layer";
       for(k = 0; k < list.length; k++){
-        for(j = 0; j < list[k].rects.length; j++){
-          var r = list[k].rects[j], d = document.createElement("div");
+        var solid = solidRects(list[k].rects);
+        for(j = 0; j < solid.length; j++){
+          var r = solid[j], d = document.createElement("div");
           d.className = list[k].cls;
           d.style.left = (r[0] * 100) + "%"; d.style.top = (r[1] * 100) + "%";
           d.style.width = (r[2] * 100) + "%"; d.style.height = (r[3] * 100) + "%";
