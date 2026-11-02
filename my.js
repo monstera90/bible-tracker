@@ -18726,7 +18726,7 @@
       openStackGroup("wheel");
       return;
     }
-    if(!isStackGroupTab("wheel", currentSettingsTab)) openStackGroup("wheel"); // колесо уже включено, но открыта другая вкладка
+    // колесо уже включено — ничего не делаем
     // язычок набора нажимали под колесом — теперь, когда колесо убрано, показываем вкладку нового
     // набора
     // (вкладку нового набора само не открываем: остаётся открытая, пока пользователь сам не нажмёт нужный язычок)
@@ -18742,7 +18742,7 @@
     else if(isToolsStackTab(tab)) setToolsStackMode(true);
     else if(isActivitiesStackTab(tab)) setActivitiesStackMode(true);
     else if(isClaudeStackTab(tab)) setClaudeStackMode(true);
-    else if(isStandaloneBottomTab(tab)){ /* «Мои заметки» и «Мои книги» (с ИПКД) — нижние вкладки без своего ряда: открытый боковой ряд не трогаем (так из «Закладок» и «Забытых» заметка или книга открывается, не сворачивая ряд) */ }
+    else if(isStandaloneBottomTab(tab)) setAllStackModesOff(); // «Мои заметки» и «Мои книги» (с ИПКД) — нижние вкладки без своего ряда: при любом способе открытия (язычок, «Закладки», ссылка, QR) боковой ряд убирается
     else if(TASK_TAB_IDS.hasOwnProperty(tab) || tab === CALENDAR_TAB_KEY || tab === "extra2"){ if(getShowAllTasksEnabled()) setTasksStackMode(true); else setBottomAltMode(false); }
     else {
       if(BOTTOM_ALT_ORIGINAL_TABS.indexOf(tab) !== -1) setBottomAltMode(false);
