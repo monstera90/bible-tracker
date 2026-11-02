@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 123.0 (02.11)
+   Версия: 124.0 (02.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1223,9 +1223,8 @@
   // нижний ряд, язычок-кнопка, ряды fab-кнопок, скругления углов) в modals.css/components.css
   // записаны ЛОГИЧЕСКИМИ свойствами (inset-inline-end, border-start-end-radius…) — поэтому любое
   // изменение размеров/отступов в обычной раскладке сразу действует и в зеркальной, отдельных
-  // «левых» чисел нигде нет (см. блок html.lefty в конце modals.css). Из JS зеркалятся только две
-  // вещи, где положение считается кодом: язычок/кнопка режима чтения (layoutSettingsModal) и волна
-  // открытия окна (settingsWavePolygonAt).
+  // «левых» чисел нигде нет (см. блок html.lefty в конце modals.css). Из JS зеркалится только одна
+  // вещь, где положение считается кодом: язычок/кнопка режима чтения (layoutSettingsModal).
   var LEFT_HAND_KEY = "leftHandedLayout";
   function isLeftHanded(){
     try{ return localStorage.getItem(LEFT_HAND_KEY) === "1"; }catch(e){ return false; }
@@ -1243,13 +1242,13 @@
   applyLeftHanded(isLeftHanded());
 
   // ===================== РАЗМЕР ЯЗЫЧКОВ ОКНА НАСТРОЕК =====================
-  // Вкладка «Внешний вид», пункт «Размер язычков»: 50 / 75 / 100 / 125 %. 50 % — прежний размер: длина язычка 40px (это
+  // Вкладка «Внешний вид», пункт «Размер язычков»: 50 / 65 / 75 / 100 %. 50 % — прежний размер: длина язычка 40px (это
   // ширина нижних язычков и высота боковых); толщина язычков (35px) и кнопка-язычок .settings-fab НЕ меняются. Язычки
   // всегда одной длины. По умолчанию 75 %, пока человек сам не выберет. Настройка ПО-УСТРОЙСТВУ (localStorage, в облако не
   // идёт), переживает перезапуск. Размер — одна CSS-переменная --tab-len на <html> (modals.css: .settings-tab,
-  // .settings-tab-gear); положение язычка-кнопки, заплаток углов и волны открытия берётся из реально измеренных рядов.
+  // .settings-tab-gear); положение язычка-кнопки и заплаток углов берётся из реально измеренных рядов.
   var TAB_SIZE_KEY = "bibleTabSize_v1";
-  var TAB_SIZE_OPTIONS = [50, 75, 100, 125];
+  var TAB_SIZE_OPTIONS = [50, 65, 75, 100];
   var TAB_SIZE_DEFAULT = 75;
   var TAB_SIZE_BASE_PX = 40; // длина язычка при 50 %
   function getTabSize(){
@@ -1706,21 +1705,6 @@
     // слиянии со старой облачной копией (ещё с {c:true,...} и более ранней меткой времени) закладка
     // неожиданно вернулась бы обратно.
     state[MD_BOOKMARK_PREFIX + name] = {c: !!bookmarked, t: Date.now()};
-    saveLocalStateNow();
-    scheduleCloudPush();
-  }
-
-  // ===================== ДОПОЛНИТЕЛЬНЫЕ АНИМАЦИИ =====================
-  // Настройка "Включить дополнительные анимации" (вкладка настроек, шестерёнка). Пока управляет
-  // только диагональной "волной" открытия/закрытия окна настроек от плавающей кнопки (см.
-  // animateSettingsWave ниже) — в будущем сюда же можно добавить и другие необязательные анимации
-  // за тем же флагом.
-  function getExtraAnimationsEnabled(){
-    var r = state["__extraAnimations"];
-    return !!(r && r.c);
-  }
-  function setExtraAnimationsEnabled(value){
-    state["__extraAnimations"] = {c: value, t: Date.now()};
     saveLocalStateNow();
     scheduleCloudPush();
   }
@@ -9889,62 +9873,6 @@
   var settingsModalBox = document.getElementById("settingsModalBox");
   var settingsModalFrame = settingsModalBox ? settingsModalBox.parentElement : null; // .settings-modal-frame
 
-  // ===== Волна открытия/закрытия окна настроек (доп. анимации) =====
-  // Разворачивается ТОЛЬКО рамка окна (.settings-modal-frame — она же содержит и сам блок настроек,
-  // и вертикальный стек вкладок, и горизонтальный ряд, см. index.html), а не весь экран. Тёмная
-  // подложка (.settings-modal-overlay) в волне не участвует — она просто плавно проявляется через
-  // opacity за то же время (см. animateSettingsWave), отдельно от геометрии волны.
-  // Клип применяется к рамке, но у самой рамки координатная система 0%..100% — это её СОБСТВЕННЫЙ
-  // бокс, а оба ряда вкладок торчат за его пределы (#settingsTabs — правее, через right:-45px;
-  // .settings-tabs-gear — ниже, через bottom:-45px, см. modals.css). Проценты 0..100 этот "хвост"
-  // не покрывают в принципе, поэтому раньше вкладки не участвовали в волне и появлялись рывком лишь
-  // в момент, когда клип снимался целиком (t=1, clip-path:none). Чтобы вкладки тоже разворачивались
-  // вместе с окном — считаем клип не в процентах, а в пикселях (px — валидная единица для
-  // clip-path: polygon(), отсчитывается от левого верхнего угла рамки и не ограничена её
-  // собственными width/height), и границы прямоугольника, который нужно раскрыть, берём не от самой
-  // рамки, а от РЕАЛЬНО измеренных прямоугольников #settingsTabs и .settings-tabs-gear (см.
-  // updateSettingsWaveGeometry).
-  // Форма волны — та же, что и была изначально: растущий из угла диагональный треугольник (t<=0.5),
-  // который затем дотягивается до противоположного угла пятиугольником (t>0.5), пока не закроет всю
-  // область целиком (см. settingsWavePolygonAt). Опорный угол — не сам getBoundingClientRect()
-  // кнопки (её высота считается по другой переменной, чем высота нижнего ряда вкладок, — из-за
-  // этого несовпадения при попытке стартовать ровно от угла кнопки прямоугольник расползался
-  // неравномерно по осям и "выпрыгивал"), а именно правый нижний угол ОБЩЕЙ области (окно + оба
-  // ряда вкладок) — кнопка и так стоит вплотную к этому углу, визуально неотличимо.
-  var settingsWaveRAF = null;
-  var SETTINGS_WAVE_DURATION = 400; // мс, см. обсуждение с пользователем
-  // Геометрия волны в px, в координатах рамки (0,0 — её левый верхний угол); пересчитывается в
-  // updateSettingsWaveGeometry перед каждым запуском волны. minX/minY/maxX/maxY — прямоугольник,
-  // который нужно открыть целиком: объединение рамки окна и обоих рядов вкладок; волна стартует из
-  // его правого нижнего угла (maxX,maxY).
-  var settingsWaveGeom = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
-
-  // Пересчитывает settingsWaveGeom от текущего размера рамки окна настроек и обоих рядов вкладок
-  // (#settingsTabs, #settingsTabsGear). Вызывается заново перед каждым запуском волны (а не один
-  // раз при layoutSettingsModal), т.к. размеры могут поменяться между открытиями (ресайз, поворот
-  // экрана, включена/выключена галочка "Показать все мои задачи"). Ряд, у которого сейчас нет ни
-  // одной видимой вкладки (нулевой width/height), не расширяет границы — это ожидаемо,
-  // разворачивать нечего.
-  function updateSettingsWaveGeometry(){
-    var empty = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
-    if(!settingsModalFrame){ settingsWaveGeom = empty; return; }
-    var frameRect = settingsModalFrame.getBoundingClientRect();
-    if(!frameRect.width || !frameRect.height){ settingsWaveGeom = empty; return; }
-
-    var minX = 0, minY = 0, maxX = frameRect.width, maxY = frameRect.height;
-    [document.getElementById("settingsTabs"), document.getElementById("settingsTabsGear")].forEach(function(el){
-      if(!el) return;
-      var r = el.getBoundingClientRect();
-      if(r.width <= 0 || r.height <= 0) return;
-      minX = Math.min(minX, r.left - frameRect.left);
-      minY = Math.min(minY, r.top - frameRect.top);
-      maxX = Math.max(maxX, r.right - frameRect.left);
-      maxY = Math.max(maxY, r.bottom - frameRect.top);
-    });
-
-    settingsWaveGeom = { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
-  }
-
   // ---------- заплатка цвета шапки в углу окна настроек (.settings-corner-
   // Если не виден ни один стек (режим чтения/полноэкранный, оба display:none) — прикрывать нечего,
   // высота 0.
@@ -10018,67 +9946,6 @@
     }
   }
 
-  // t: 0 (совсем свёрнуто, в точку у угла (maxX,maxY) — там же стоит кнопка) .. 1 (открыто
-  // полностью — окно и оба ряда вкладок). Первая половина (t<=0.5) — растущий треугольник от угла
-  // (maxX,maxY) до половины области (по главной диагонали). Вторая половина (t>0.5) — тот же
-  // треугольник дотягивается до противоположного угла (minX,minY), пятиугольником, пока не закроет
-  // всю область целиком. Число вершин специально разное в двух половинах — поэтому считается через
-  // JS/rAF, а не через CSS-transition (тот не умеет плавно менять число точек полигона).
-  function settingsWavePolygonAt(t){
-    var g = settingsWaveGeom;
-    // Раскладка для левши: окно и ряды вкладок стоят зеркально, а волна стартует из угла у язычка —
-    // то есть слева-снизу; все X-координаты полигона отражаются внутри прямоугольника [minX, maxX].
-    var lefty = isLeftHanded();
-    function mx(x){ return lefty ? (g.minX + g.maxX - x) : x; }
-    function poly(pts){
-      return "polygon(" + pts.map(function(p){ return mx(p[0]) + "px " + p[1] + "px"; }).join(", ") + ")";
-    }
-    if(t <= 0) return poly([[g.maxX, g.maxY], [g.maxX, g.maxY], [g.maxX, g.maxY]]);
-    if(t >= 1) return "none";
-    if(t <= 0.5){
-      var s = t * 2; // 0..1
-      var by = g.maxY - (g.maxY - g.minY) * s;
-      var cx = g.maxX - (g.maxX - g.minX) * s;
-      return poly([[g.maxX, g.maxY], [g.maxX, by], [cx, g.maxY]]);
-    }
-    var q = (t - 0.5) * 2; // 0..1
-    var topX = g.maxX - (g.maxX - g.minX) * q;
-    var leftY = g.maxY - (g.maxY - g.minY) * q;
-    return poly([[g.maxX, g.maxY], [g.maxX, g.minY], [topX, g.minY], [g.minX, leftY], [g.minX, g.maxY]]);
-  }
-
-  function setSettingsWaveClip(t){
-    if(!settingsModalFrame) return;
-    var poly = settingsWavePolygonAt(t);
-    settingsModalFrame.style.clipPath = poly;
-    settingsModalFrame.style.webkitClipPath = poly;
-  }
-
-  // opening=true — волна открытия: рамка разворачивается t=0->1, а тёмная подложка одновременно
-  // проявляется opacity 0->1. opening= false — обратная волна: рамка схлопывается t=1->0 (честно до
-  // полного нуля, чтобы гарантированно стянуться в точку у кнопки и исчезнуть), подложка
-  // одновременно гаснет opacity 1->0.
-  function animateSettingsWave(opening, onDone, durationMs){
-    if(settingsWaveRAF){ cancelAnimationFrame(settingsWaveRAF); settingsWaveRAF = null; }
-    updateSettingsWaveGeometry();
-    var start = null;
-    function frame(now){
-      if(start === null) start = now;
-      var p = Math.min(1, (now - start) / (durationMs || SETTINGS_WAVE_DURATION));
-      var t = opening ? p : (1 - p);
-      setSettingsWaveClip(t);
-      settingsModalOverlay.style.opacity = String(t);
-      if(p < 1){
-        settingsWaveRAF = requestAnimationFrame(frame);
-      } else {
-        settingsWaveRAF = null;
-        if(onDone) onDone();
-      }
-    }
-    settingsWaveRAF = requestAnimationFrame(frame);
-  }
-
-  var settingsOpenInstant = false; // true только на время автооткрытия окна при запуске (см. «ЗАПУСК» в конце файла)
   function openSettingsModal(){
     refreshSettingsTabsVisibility();
     // Режим чтения — оверлей (#settingsModalOverlay) существует в DOM всегда, поэтому
@@ -10113,36 +9980,9 @@
         clearProjectPickerResumeState();
       }
     }
-    var extraAnim = getExtraAnimationsEnabled() && !settingsOpenInstant; // при запуске приложения окно появляется сразу, без волны
-    if(extraAnim){
-      // Геометрию волны (updateSettingsWaveGeometry) нельзя мерить прямо сейчас: высоту/отступ окна
-      // (settingsModalBox.style.height/marginTop) мы только что сбросили в "", а актуальные
-      // значения выставляет layoutSettingsModal — и она запускается позже, тем же
-      // requestAnimationFrame ниже. Раньше геометрия волны считалась в процентах ("%"), а проценты
-      // в clip-path браузер пересчитывает сам при каждой перерисовке — поэтому можно было не думать
-      // о порядке. Теперь координаты в px (см. комментарий у settingsWavePolygonAt) — они статичны,
-      // снятый слишком рано (по ещё не актуальной рамке) размер так и останется неверным до конца
-      // анимации. Поэтому старт волны (updateSettingsWaveGeometry + setSettingsWaveClip(0) + сам
-      // rAF-цикл) переносим ВНУТРЬ того же requestAnimationFrame, СРАЗУ ПОСЛЕ layoutSettingsModal —
-      // оверлей при этом уже открыт, но невидим (opacity:0), так что один лишний кадр со старой
-      // геометрией зрителю не виден.
-      settingsModalOverlay.style.opacity = "0";
-      settingsModalOverlay.classList.add("open");
-      requestAnimationFrame(function(){
-        layoutSettingsModal();
-        updateSettingsWaveGeometry();
-        setSettingsWaveClip(0);
-        animateSettingsWave(true);
-      });
-    } else {
-      requestAnimationFrame(layoutSettingsModal);
-      if(settingsModalFrame){
-        settingsModalFrame.style.clipPath = "";
-        settingsModalFrame.style.webkitClipPath = "";
-      }
-      settingsModalOverlay.style.opacity = "";
-      settingsModalOverlay.classList.add("open");
-    }
+    requestAnimationFrame(layoutSettingsModal);
+    settingsModalOverlay.style.opacity = "";
+    settingsModalOverlay.classList.add("open");
   }
   // Плавающая кнопка-язычок (.settings-fab, id=settingsGearBtn) стоит на ФИКСИРОВАННОЙ высоте — у
   // самого нижнего края экрана (fabTop = 100% высоты окна браузера). Окно настроек привязано к НЕЙ,
@@ -10322,23 +10162,8 @@
     }
     var gearBtn = document.getElementById("settingsGearBtn");
     if(gearBtn) gearBtn.classList.remove("is-open");
-    if(getExtraAnimationsEnabled()){
-      animateSettingsWave(false, function(){
-        settingsModalOverlay.classList.remove("open");
-        settingsModalOverlay.style.opacity = "";
-        if(settingsModalFrame){
-          settingsModalFrame.style.clipPath = "";
-          settingsModalFrame.style.webkitClipPath = "";
-        }
-      });
-    } else {
-      settingsModalOverlay.classList.remove("open");
-      settingsModalOverlay.style.opacity = "";
-      if(settingsModalFrame){
-        settingsModalFrame.style.clipPath = "";
-        settingsModalFrame.style.webkitClipPath = "";
-      }
-    }
+    settingsModalOverlay.classList.remove("open");
+    settingsModalOverlay.style.opacity = "";
   }
   function refreshSettingsTabsVisibility(){
     var showTasks = getShowAllTasksEnabled();
@@ -10349,9 +10174,9 @@
       var btn = document.getElementById(TASK_TAB_IDS[key]);
       if(!btn) return;
       if(bottomAltMode){
-        var replacedByAlt = WHEEL_TASK_TABS_REPLACED.indexOf(key) !== -1; // на их местах стоят вкладки колеса (alt5, alt6, alt1..alt4)
-        btn.style.display = replacedByAlt ? "none" : "flex";
-        setTabDecor(btn, !replacedByAlt);
+        // в режиме колеса вкладок задач в стеке нет: шесть мест заняли вкладки колеса, остальные не показываются
+        btn.style.display = "none";
+        setTabDecor(btn, false);
       } else {
         setTabDecor(btn, false);
         btn.style.display = (showTasks && tasksStackMode) ? "flex" : "none";
@@ -10377,9 +10202,9 @@
     }
     var stBtnV = document.getElementById(SCREENTIME_TAB_BTN_ID);
     if(stBtnV){
-      // в режиме колеса — пустой декоративный язычок (как раньше), в режиме «Статистика» — настоящая вкладка
-      if(bottomAltMode){ stBtnV.style.display = "flex"; setTabDecor(stBtnV, true); }
-      else { setTabDecor(stBtnV, false); stBtnV.style.display = infoStackMode ? "flex" : "none"; }
+      // в режиме колеса язычка нет, в режиме «Статистика» — настоящая вкладка
+      setTabDecor(stBtnV, false);
+      stBtnV.style.display = (!bottomAltMode && infoStackMode) ? "flex" : "none";
     }
     // остальные вкладки ряда «Статистика»: Обзор, Карта дней года, График чтения, Прогресс, Настроение
     Object.keys(INFO_STACK_BTN_IDS).forEach(function(key){
@@ -18249,7 +18074,6 @@
     var colorMarkOn = getColorMarkEnabled();
     var bookCols = getBookColumns();
     var tabSize = getTabSize();
-    var extraAnimOn = getExtraAnimationsEnabled();
     container.innerHTML =
       '<div class="settings-gear-tab">' +
       '<h3 class="common-tab-title">Внешний вид</h3>' +
@@ -18272,7 +18096,6 @@
         '</div>' +
       '</div>' +
       '<div class="settings-row"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
-      '<div class="settings-row"><span>Включить дополнительные анимации</span><input type="checkbox" id="settingsExtraAnimCb"' + (extraAnimOn ? " checked" : "") + '></div>' +
       '<div class="settings-row" style="border-bottom:none;"><span>Зеркальное отображение интерфейса</span><input type="checkbox" id="settingsLeftHandedCb"' + (isLeftHanded() ? " checked" : "") + '></div>' +
       '</div>';
 
@@ -18318,10 +18141,6 @@
     document.getElementById("settingsColorMarkCb").addEventListener("change", function(){
       setColorMarkEnabled(this.checked);
       refreshAllChapterColorVisuals();
-    });
-
-    document.getElementById("settingsExtraAnimCb").addEventListener("change", function(){
-      setExtraAnimationsEnabled(this.checked);
     });
 
     document.getElementById("settingsLeftHandedCb").addEventListener("change", function(){
@@ -18725,7 +18544,6 @@
   };
   var WHEEL_SYSTEM_TAB_KEY = "set2s_15";            // «Система»: язычок режима колеса, самый нижний в стеке (на месте «Календаря»)
   var WHEEL_SYSTEM_TAB_BTN_ID = "settingsTabSet2Btn15";
-  var WHEEL_TASK_TABS_REPLACED = ["worktasks", "red", "inbox", "next", "projects", "waiting"]; // вкладки задач, чьи места заняли alt-вкладки
   var BOTTOM_ALT_TAB_TITLES = {
     alt1: "Внешний вид", alt2: "Синхронизация",
     alt3: "Восстановление и сброс", alt4: "Дополнительные возможности",
@@ -25820,8 +25638,7 @@
   // и просто переключают вкладку в уже открытом окне.
   try{
     if(settingsModalOverlay && !settingsModalOverlay.classList.contains("open")){
-      settingsOpenInstant = true;
-      try{ openSettingsModal(); }finally{ settingsOpenInstant = false; }
+      openSettingsModal();
     }
   }catch(e){ if(window.Debug) window.Debug.log("Автооткрытие окна при запуске: " + (e && e.message ? e.message : e)); }
   Notifications.start();
