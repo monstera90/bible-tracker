@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 124.0 (02.11)
+   Версия: 125.0 (02.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1732,15 +1732,16 @@
   // показывается по тем же условиям (галочка «Показать все мои задачи» / режим колеса).
   var EVENTS_TAB_KEY = "events";
   var EVENTS_TAB_BTN_ID = "settingsTabEventsBtn";
-  // Календарь (calendar.js): САМЫЙ нижний язычок бокового стека набора 1, под «Задачи в работе». Тоже не вкладка задач,
-  // показывается по тем же условиям, что и вкладки задач / «События».
+  // Календарь (calendar.js): самостоятельный нижний язычок набора 1 справа от «Задачи» (кнопка лежит в #settingsTabsGear), как «Заметки»/«Книги»:
+  // бокового ряда у него нет, окно открывается на всю область (isCalendarBottomTab, updateNotesWide). От вкладок задач и галочки «Показать все мои задачи» не зависит.
   var CALENDAR_TAB_KEY = "calendar";
   var CALENDAR_TAB_BTN_ID = "settingsTabCalendarBtn";
+  function isCalendarBottomTab(tab){ return tab === CALENDAR_TAB_KEY; }
   // Трекер экранов (screentime.js): САМЫЙ верхний язычок стека набора 1, над «События» (колокольчиком). Не вкладка задач,
   // показывается по тем же условиям, что и вкладки задач / «События» / «Календарь».
   var SCREENTIME_TAB_KEY = "screentime";
   var SCREENTIME_TAB_BTN_ID = "settingsTabScreenTimeBtn";
-  // «Статистика» (нижний язычок settingsTabInfoStackBtn между шестерёнкой и «Задачи и календарь»): свой боковой ряд набора 1 (режим infoStackMode),
+  // «Статистика» (нижний язычок settingsTabInfoStackBtn между шестерёнкой и «Задачи»): свой боковой ряд набора 1 (режим infoStackMode),
   // работает как шестерёнка. Вкладки ряда сверху вниз: Забытые заметки, Обзор, Карта дней года, Трекер экранов, График чтения, Прогресс, Настроение.
   var INFO_STACK_BTN_ID = "settingsTabInfoStackBtn";
   var INFO_STACK_TABS = ["set2s_4", "extra3", "year", "screentime", "set2s_13", "set2s_12", "mood"];
@@ -1756,7 +1757,7 @@
     set2b_4: "settingsTabSet2GearBtn4", set2b_1: "settingsTabSet2GearBtn1", set2b_2: "settingsTabSet2GearBtn2", set2b_3: "settingsTabSet2GearBtn3"
   };
   function isToolsStackTab(tab){ return TOOLS_STACK_TABS.indexOf(tab) !== -1; }
-  // «Активности» (нижний язычок settingsTabActivitiesStackBtn справа от «Задачи и календарь»): свой боковой ряд набора 1 (режим activitiesStackMode),
+  // «Активности» (нижний язычок settingsTabActivitiesStackBtn справа от «Календаря»): свой боковой ряд набора 1 (режим activitiesStackMode),
   // работает как шестерёнка. Вкладки ряда сверху вниз: Закладки, Тренировки, Музыка, Поиск, QR-коды. Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
   var ACTIVITIES_STACK_BTN_ID = "settingsTabActivitiesStackBtn";
   var ACTIVITIES_STACK_TABS = ["set2s_2", "workouts", "set2s_11", "set2s_3", "set2s_9"];
@@ -1772,14 +1773,14 @@
   // бокового ряда у неё нет — клик по ней выключает все боковые ряды (switchSettingsTabOnClick)
   var NOTES_TAB_KEY = "set2s_1";
   function isNotesBottomTab(tab){ return tab === NOTES_TAB_KEY; }
-  // «Мои книги» (set2s_7, ридер fb2/epub/pdf): такая же нижняя вкладка набора 1 между «Моими заметками» и «Задачи и календарь» (кнопка settingsTabSet2Btn7
+  // «Мои книги» (set2s_7, ридер fb2/epub/pdf): такая же нижняя вкладка набора 1 между «Моими заметками» и «Задачи» (кнопка settingsTabSet2Btn7
   // лежит в #settingsTabsGear), бокового ряда у неё нет. ИПКД (set2s_8) — не язычок, а экран внутри «Книг» (кнопка с числом месяца в их нижнем ряду):
   // ключ остаётся своим (общий ридер, переключение между списком и ИПКД идёт через switchSettingsTab), а язычок «Книги» подсвечен и на нём
   var BOOKS_TAB_KEY = "set2s_7";
   var IPKD_TAB_KEY = "set2s_8";
   function isBooksBottomTab(tab){ return tab === BOOKS_TAB_KEY || tab === IPKD_TAB_KEY; }
-  // нижняя вкладка без своего бокового ряда («Мои заметки» и «Мои книги» с ИПКД)
-  function isStandaloneBottomTab(tab){ return isNotesBottomTab(tab) || isBooksBottomTab(tab); }
+  // нижняя вкладка без своего бокового ряда («Мои заметки», «Мои книги» с ИПКД и «Календарь»)
+  function isStandaloneBottomTab(tab){ return isNotesBottomTab(tab) || isBooksBottomTab(tab) || isCalendarBottomTab(tab); }
   // «Заметки» и «Книги» — ОДИН нижний язычок (settingsTabSet2Btn1, пиктограмма заметок): внутри две части, между ними переключает строка заголовков
   // «Заметки | Книги» (NotesBooksSwitch ниже: нажатие на заголовок или свайп). Кнопка «Книг» (settingsTabSet2Btn7) в нижнем ряду скрыта, ключи вкладок прежние.
   var NB_LAST_KEY = "bibleNotesBooksLast_v1";
@@ -10191,10 +10192,9 @@
     var calBtnV = document.getElementById(CALENDAR_TAB_BTN_ID);
     if(calBtnV){
       setTabDecor(calBtnV, false);
-      if(bottomAltMode) calBtnV.style.display = "none"; // на его месте — «Система»
-      else calBtnV.style.display = (showTasks && tasksStackMode) ? "flex" : "none";
+      calBtnV.style.display = ""; // нижний язычок: виден всегда (в режиме колеса и при выключенных задачах тоже)
     }
-    // «Комментарии» — вкладка бокового ряда «Задачи и календарь» (над «Календарём»); в режиме колеса её нет
+    // «Комментарии» — вкладка бокового ряда «Задачи» (самая нижняя, под «Задачи в работе»); в режиме колеса её нет
     var cmBtnV = document.getElementById(EXTRA_TAB_IDS.extra2);
     if(cmBtnV){
       setTabDecor(cmBtnV, false);
@@ -10237,10 +10237,10 @@
     // updateSettingsCornerPatchHeight выше); единственный вызывающий.
     updateSettingsCornerPatchHeight();
   }
-  // «Мой блокнот» и «Книги» (с ИПКД) без открытого бокового ряда: колонки язычков нет, окно растягивается на её ширину (класс notes-wide на оверлее, modals.css)
+  // «Мой блокнот», «Книги» (с ИПКД) и «Календарь» без открытого бокового ряда: колонки язычков нет, окно растягивается на её ширину (класс notes-wide на оверлее, modals.css)
   function updateNotesWide(){
     if(!settingsModalOverlay) return;
-    var on = (currentSettingsTab === NOTES_TAB_KEY || isBooksBottomTab(currentSettingsTab)) && !bottomAltMode && !tasksStackMode && !infoStackMode && !toolsStackMode && !activitiesStackMode && !claudeStackMode;
+    var on = (currentSettingsTab === NOTES_TAB_KEY || isBooksBottomTab(currentSettingsTab) || isCalendarBottomTab(currentSettingsTab)) && !bottomAltMode && !tasksStackMode && !infoStackMode && !toolsStackMode && !activitiesStackMode && !claudeStackMode;
     if(on === settingsModalOverlay.classList.contains("notes-wide")) return;
     settingsModalOverlay.classList.toggle("notes-wide", on);
     if(settingsModalOverlay.classList.contains("open")){
@@ -17767,7 +17767,7 @@
   //   переключаются отдельными переменными gearBtn/yearBtn/moodTabBtn, а не через EXTRA_TAB_IDS —
   //   поэтому единственный полный список из всех 5 нижних вкладок первого набора собран здесь
   //   вручную, а не через Object.keys(EXTRA_TAB_IDS), в котором только 2 из 5) идёт слева направо.
-  var SETTINGS_SIDE_ORDER_1 = [CALENDAR_TAB_KEY].concat(Object.keys(TASK_TAB_IDS)).concat([EVENTS_TAB_KEY, SCREENTIME_TAB_KEY]); // calendar, worktasks..archive, events, screentime (снизу вверх)
+  var SETTINGS_SIDE_ORDER_1 = [CALENDAR_TAB_KEY].concat(Object.keys(TASK_TAB_IDS)).concat([EVENTS_TAB_KEY, SCREENTIME_TAB_KEY]); // calendar (место для соответствия позиций с набором 2, бокового язычка у него нет), worktasks..archive, events, screentime (снизу вверх)
   var SETTINGS_BOTTOM_ORDER_1 = ["gear","year","mood"].concat(Object.keys(EXTRA_TAB_IDS)); // gear,year,mood,extra2,extra3
   var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_15 (физически язычок колеса в стеке набора 1; здесь только ради соответствия позиций наборов), set2s_1..set2s_4, set2s_11, set2s_12, set2s_13, set2s_5, set2s_6, set2s_14, set2s_7..set2s_10 (порядок = порядок вкладок снизу вверх)
   var SETTINGS_BOTTOM_ORDER_2 = ["gear"].concat(Object.keys(SET2_EXTRA_TAB_IDS));
@@ -17894,7 +17894,7 @@
     // боковые вкладки набора 1 (red..archive) скрыты, пока не включена галочка "Показать все мои
     // задачи" — переходить на скрытую вкладку не нужно, вместо неё открываем вкладку настроек (тот
     // же принцип, что и при обычном открытии блокнота, см. openSettingsModal).
-    if(settingsActiveTabSet === 1 && (TASK_TAB_IDS.hasOwnProperty(target) || target === CALENDAR_TAB_KEY || target === "extra2") && !getShowAllTasksEnabled()){
+    if(settingsActiveTabSet === 1 && (TASK_TAB_IDS.hasOwnProperty(target) || target === "extra2") && !getShowAllTasksEnabled()){
       target = "gear";
     }
     // скрытую пользователем вкладку не открываем: берём первую не скрытую того же набора; у набора 2 не осталось ни одной —
@@ -17927,7 +17927,7 @@
     if(savedSet === 2 && !isSet2Unlocked()){ savedSet = 1; savedTab = null; }
     if(savedSet === 2 && savedTab === "gear") savedTab = null; // колесико набора 2 не открывается как вкладка
     if(savedTab === WHEEL_SYSTEM_TAB_KEY || savedTab === EVENTS_TAB_KEY) savedTab = null; // «Система» и «События» — язычки режима колеса, как и alt-вкладки, при запуске не восстанавливаются
-    if(savedTab && (TASK_TAB_IDS.hasOwnProperty(savedTab) || savedTab === CALENDAR_TAB_KEY || savedTab === "extra2") && !getShowAllTasksEnabled()){
+    if(savedTab && (TASK_TAB_IDS.hasOwnProperty(savedTab) || savedTab === "extra2") && !getShowAllTasksEnabled()){
       savedTab = null;
     }
     if(savedTab){
@@ -18584,13 +18584,13 @@
       '</svg>'
   };
   var bottomAltMode = false;
-  // Режим «Задачи и календарь» (кнопка settingsTabTasksStackBtn справа от шестерёнки): боковой ряд набора 1 показывает ТОЛЬКО вкладки задач
-  // и «Календарь»; вне этого режима (и в режиме колеса) их в ряду нет. Нижний ряд не меняется. Режим и режим колеса взаимоисключающие;
-  // хранится в памяти, включается сам при открытии вкладки задач/календаря.
+  // Режим «Задачи» (кнопка settingsTabTasksStackBtn справа от шестерёнки, пиктограмма — галочка): боковой ряд набора 1 показывает ТОЛЬКО вкладки задач
+  // и «Комментарии»; вне этого режима (и в режиме колеса) их в ряду нет. Нижний ряд не меняется. Режим и режим колеса взаимоисключающие;
+  // хранится в памяти, включается сам при открытии вкладки задач.
   var TASKS_STACK_BTN_ID = "settingsTabTasksStackBtn";
   var tasksStackMode = false;
   // Режим «Статистика» (кнопка settingsTabInfoStackBtn): боковой ряд набора 1 показывает вкладки INFO_STACK_TABS. Взаимоисключающий с режимом колеса
-  // и режимом «Задачи и календарь»; хранится в памяти, включается сам при открытии любой вкладки ряда.
+  // и режимом «Задачи»; хранится в памяти, включается сам при открытии любой вкладки ряда.
   var infoStackMode = false;
   // Режим «Инструменты» (кнопка settingsTabToolsStackBtn): боковой ряд набора 1 показывает вкладки TOOLS_STACK_TABS. Взаимоисключающий с остальными режимами рядов;
   // хранится в памяти, включается сам при открытии любой вкладки ряда.
@@ -18648,7 +18648,7 @@
   }
   function initBottomAltTabs(){
     ensureTabDecorStyle();
-    // кнопка «Задачи и календарь»: обработчик ставится здесь, а не рядом с шестерёнкой, — константа TASKS_STACK_BTN_ID объявлена ниже по файлу
+    // кнопка «Задачи»: обработчик ставится здесь, а не рядом с шестерёнкой, — константа TASKS_STACK_BTN_ID объявлена ниже по файлу
     var tsBtn = document.getElementById(TASKS_STACK_BTN_ID);
     if(tsBtn && !tsBtn.__ltBound){ tsBtn.__ltBound = true; tsBtn.addEventListener("click", function(){ openStackGroup("tasks"); }); }
     var infoBtn0 = document.getElementById(INFO_STACK_BTN_ID);
@@ -18691,7 +18691,7 @@
     tasksStackMode = on;
     if(on){ bottomAltMode = false; infoStackMode = false; toolsStackMode = false; activitiesStackMode = false; claudeStackMode = false; }
     applyBottomAltMode();            // обновляет вертикальный стек, подсветку кнопок и угловые заплатки
-    applySettingsTabSetVisibility(); // ряд «Задачи и календарь» всегда на наборе 1
+    applySettingsTabSetVisibility(); // ряд «Задачи» всегда на наборе 1
   }
   function setInfoStackMode(on){
     on = !!on;
@@ -18725,7 +18725,7 @@
     applyBottomAltMode();            // обновляет вертикальный стек, подсветку кнопок и угловые заплатки
     applySettingsTabSetVisibility(); // ряд «Клод» всегда на наборе 1
   }
-  // выключает все режимы боковых рядов (колесо, «Задачи и календарь», «Статистика», «Инструменты», «Активности», «Клод») — боковая колонка пустеет
+  // выключает все режимы боковых рядов (колесо, «Задачи», «Статистика», «Инструменты», «Активности», «Клод») — боковая колонка пустеет
   function setAllStackModesOff(){
     setBottomAltMode(false);
     setTasksStackMode(false);
@@ -18758,8 +18758,8 @@
     else if(isToolsStackTab(tab)) setToolsStackMode(true);
     else if(isActivitiesStackTab(tab)) setActivitiesStackMode(true);
     else if(isClaudeStackTab(tab)) setClaudeStackMode(true);
-    else if(isStandaloneBottomTab(tab)) setAllStackModesOff(); // «Мои заметки» и «Мои книги» (с ИПКД) — нижние вкладки без своего ряда: при любом способе открытия (язычок, «Закладки», ссылка, QR) боковой ряд убирается
-    else if(TASK_TAB_IDS.hasOwnProperty(tab) || tab === CALENDAR_TAB_KEY || tab === "extra2"){ if(getShowAllTasksEnabled()) setTasksStackMode(true); else setBottomAltMode(false); }
+    else if(isStandaloneBottomTab(tab)) setAllStackModesOff(); // «Мои заметки», «Мои книги» (с ИПКД) и «Календарь» — нижние вкладки без своего ряда: при любом способе открытия (язычок, «Закладки», ссылка, QR) боковой ряд убирается
+    else if(TASK_TAB_IDS.hasOwnProperty(tab) || tab === "extra2"){ if(getShowAllTasksEnabled()) setTasksStackMode(true); else setBottomAltMode(false); }
     else {
       if(BOTTOM_ALT_ORIGINAL_TABS.indexOf(tab) !== -1) setBottomAltMode(false);
     }
@@ -18898,7 +18898,7 @@
         var key = orders[o][i];
         if(key === "gear" || key === WHEEL_SYSTEM_TAB_KEY) continue;
         if(set === 2 && isOwnStackTab(key)) continue; // «Статистика», «Инструменты» и «Активности» живут в наборе 1
-        if(set === 1 && (TASK_TAB_IDS.hasOwnProperty(key) || key === CALENDAR_TAB_KEY || key === "extra2") && !getShowAllTasksEnabled()) continue;
+        if(set === 1 && (TASK_TAB_IDS.hasOwnProperty(key) || key === "extra2") && !getShowAllTasksEnabled()) continue;
         if(key === EVENTS_TAB_KEY) continue; // «События» — вкладка режима колеса, как «Система» и alt-вкладки
         if(!isSettingsTabUserHidden(key)) return key;
       }
@@ -18937,7 +18937,7 @@
   applyHiddenSettingsTabs();
   initBottomAltTabs();
 
-  // Выделение вкладок: выделена ровно одна — нажатая последней. Нижние язычки (шестерёнка, «Клод», «Инструменты», «Статистика», «Задачи и календарь»,
+  // Выделение вкладок: выделена ровно одна — нажатая последней. Нижние язычки (шестерёнка, «Клод», «Инструменты», «Статистика», «Задачи», «Календарь»,
   // «Активности», «Мои заметки») и вкладки боковых рядов делят одно выделение: нажатие на нижний язычок снимает его с бокового ряда, нажатие на вкладку
   // бокового ряда (или открытие заметок) снимает его с нижнего. bottomHighlightId — id нижнего язычка, нажатого последним; null — выделена вкладка бокового ряда.
   function applySideActive(tab){
@@ -18957,8 +18957,7 @@
     });
     var evTabBtn = document.getElementById(EVENTS_TAB_BTN_ID);
     if(evTabBtn) evTabBtn.classList.toggle("active", tab === EVENTS_TAB_KEY);
-    var calTabBtn = document.getElementById(CALENDAR_TAB_BTN_ID);
-    if(calTabBtn) calTabBtn.classList.toggle("active", tab === CALENDAR_TAB_KEY);
+    // «Календарь» — нижний язычок: подсветку ведёт updateBottomGearButtons (computeBottomOwner)
     var stTabBtn = document.getElementById(SCREENTIME_TAB_BTN_ID);
     if(stTabBtn) stTabBtn.classList.toggle("active", tab === SCREENTIME_TAB_KEY);
     Object.keys(EXTRA_TAB_IDS).forEach(function(key){
@@ -18977,13 +18976,14 @@
     stripDecorClasses(); // декоративные язычки режима колеса никогда не выглядят выбранными
   }
   function bottomHighlightIds(){
-    return ["settingsTabGearBtn", "settingsTabGearBtnSet2", TASKS_STACK_BTN_ID, INFO_STACK_BTN_ID, TOOLS_STACK_BTN_ID, ACTIVITIES_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY], SET2_TAB_IDS[BOOKS_TAB_KEY]];
+    return ["settingsTabGearBtn", "settingsTabGearBtnSet2", TASKS_STACK_BTN_ID, CALENDAR_TAB_BTN_ID, INFO_STACK_BTN_ID, TOOLS_STACK_BTN_ID, ACTIVITIES_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY], SET2_TAB_IDS[BOOKS_TAB_KEY]];
   }
   // Внизу выделен ровно один язычок: общий «Заметки»/«Книги» (у него бокового ряда нет), иначе язычок включённого бокового ряда
-  // (колесо, «Задачи и календарь», «Статистика», «Инструменты», «Активности», «Клод»); второе выделение — вкладка в боковом ряду (applySideActive)
+  // (колесо, «Задачи», «Статистика», «Инструменты», «Активности», «Клод»); второе выделение — вкладка в боковом ряду (applySideActive)
   function computeBottomOwner(){
     var t = currentSettingsTab;
     if(isNotesBottomTab(t)) return SET2_TAB_IDS[NOTES_TAB_KEY];
+    if(isCalendarBottomTab(t)) return CALENDAR_TAB_BTN_ID; // «Календарь» — свой нижний язычок без бокового ряда
     if(isBooksBottomTab(t)) return SET2_TAB_IDS[NOTES_TAB_KEY]; // «Книги» (и ИПКД) — часть общего нижнего язычка «Заметки»
     if(bottomAltMode) return "settingsTabGearBtn";
     if(tasksStackMode) return TASKS_STACK_BTN_ID;
@@ -18997,7 +18997,7 @@
   var STACK_LAST_TAB_KEY = "bibleStackLastTab_v1";
   function stackGroupTabs(g){
     if(g === "wheel") return Object.keys(BOTTOM_ALT_TAB_IDS).concat([WHEEL_SYSTEM_TAB_KEY, EVENTS_TAB_KEY]);
-    if(g === "tasks") return Object.keys(TASK_TAB_IDS).concat([CALENDAR_TAB_KEY, "extra2"]);
+    if(g === "tasks") return Object.keys(TASK_TAB_IDS).concat(["extra2"]);
     if(g === "info") return INFO_STACK_TABS;
     if(g === "tools") return TOOLS_STACK_TABS;
     if(g === "activities") return ACTIVITIES_STACK_TABS;
