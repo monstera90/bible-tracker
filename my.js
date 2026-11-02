@@ -14678,8 +14678,6 @@
       '<div class="mdeditor-fab-row">' +
         // «i» — самая левая кнопка ряда: полноэкранная инструкция по кнопкам ридера (renderBookReaderInfoScreen)
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
-        // ИПКД — сразу справа от «i»; в самом ридере ИПКД её нет (там вместо неё «домик» к списку книг)
-        (bookReaderOwnerTab === IPKD_TAB_KEY ? "" : ipkdFabBtnHtml()) +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderFlibustaBtn" title="Flibusta">' + READER_FLIBUSTA_ICON_SVG + '</button>' +
         '<span class="mdeditor-fontsize-wrap" id="bookReaderFontSizeWrap">' +
           '<div class="mdeditor-fontsize-popup" id="bookReaderFontSizePopup">' +
@@ -14748,9 +14746,6 @@
     var isIpkd = (bookReaderOwnerTab === "set2s_8");
 
     var html = '';
-    if(!isIpkd){
-      html += iconRow(ipkdDaySvg(), false, "ИПКД: открывает ежедневное чтение на сегодняшнем дне (на кнопке — сегодняшнее число месяца). Читаемая книга при этом закрывается, её место чтения сохраняется.");
-    }
     if(!isIpkd){
       html += iconRow(READER_FLIBUSTA_ICON_SVG, false, "Открывает каталог Flibusta: найденную книгу можно скачать прямо в приложение. Читаемая книга остаётся под каталогом — после закрытия каталога вы на том же месте.");
     }
@@ -14845,7 +14840,6 @@
     var bookmarkAddBtn = document.getElementById("bookReaderBookmarkAddBtn");
     if(bookmarkAddBtn) bookmarkAddBtn.addEventListener("click", addSeparateBookReaderBookmark);
 
-    bindIpkdFabBtn();
 
     var chaptersBtn = document.getElementById("bookReaderChaptersBtn");
     if(chaptersBtn){
