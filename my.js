@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 121.1 (02.11)
+   Версия: 121.2 (02.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -18675,7 +18675,7 @@
     var btn = document.createElement(orig.tagName.toLowerCase());
     if(btn.tagName === "BUTTON") btn.type = "button";
     btn.id = id;
-    btn.className = orig.className.replace(/\b(active|mood-tab-unread|red-tab-unread|ipkd-tab-unread|workouts-tab-unread)\b/g, "").replace(/\s+/g, " ").trim();
+    btn.className = orig.className.replace(/\b(active|mood-tab-unread|red-tab-unread|ipkd-tab-unread|workouts-tab-unread|settings-tab-user-hidden)\b/g, "").replace(/\s+/g, " ").trim();
     btn.title = BOTTOM_ALT_TAB_TITLES[key];
     btn.setAttribute("aria-label", BOTTOM_ALT_TAB_TITLES[key]);
     btn.innerHTML = BOTTOM_ALT_ICONS[key];
@@ -18732,6 +18732,7 @@
   function applyBottomAltMode(){
     Object.keys(BOTTOM_ALT_TAB_IDS).forEach(function(key){
       var alt = document.getElementById(BOTTOM_ALT_TAB_IDS[key]);
+      if(alt) alt.classList.remove("settings-tab-user-hidden"); // вкладки колеса скрыть нельзя (класс мог скопироваться у скрытой вкладки задач)
       if(alt) alt.style.display = bottomAltMode ? "flex" : "none"; // все alt-вкладки стоят в вертикальном стеке (обычные вкладки там — flex)
     });
     var sysBtn = document.getElementById(WHEEL_SYSTEM_TAB_BTN_ID);
