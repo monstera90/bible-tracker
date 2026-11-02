@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 120.0 (02.11)
+   Версия: 121.0 (02.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -14362,7 +14362,7 @@
       var savedBookState = getBookState(res.hash);
       var forcedPosition = resolveRestorePosition ? resolveRestorePosition(res.parsed.chapters) : null;
       bookReaderState = {
-        hash: res.hash, name: name, transient: !!transientFile,
+        hash: res.hash, name: name, transient: !!transientFile, file: transientFile,
         chapters: res.parsed.chapters, imageUrls: imageUrls, imageBase64: imageBase64,
         pdf: res.pdf || null, pdfPos: null,
         mode: res.pdf ? "pdf" : "text", textScrollTop: 0, chaptersScrollTop: 0,
@@ -14535,12 +14535,73 @@
   function refreshPdfHighlights(){
     if(pdfView && bookReaderState && bookReaderState.pdf && !bookReaderState.transient) pdfView.setHighlights(pdfHighlightList(bookReaderState.hash));
   }
+  // PDF открыт «на лету» (не из библиотеки): при попытке подчеркнуть спрашиваем, не добавить ли его в «Мои книги».
+  var pdfAddDialogOpen = false;
+  function openPdfAddToLibraryDialog(onYes){
+    if(!settingsModalBox || pdfAddDialogOpen) return;
+    pdfAddDialogOpen = true;
+    var overlay = document.createElement("div");
+    overlay.className = "mdeditor-cleanup-overlay";
+    var card = document.createElement("div");
+    card.className = "mdeditor-cleanup-card";
+    card.innerHTML =
+      '<div class="mdeditor-cleanup-title">Этот документ не в библиотеке</div>' +
+      '<div style="margin:0 0 10px 0;">Подчёркивания сохраняются только для книг из «Моих книг». Добавить в библиотеку?</div>' +
+      '<div class="mdeditor-cleanup-actions">' +
+        '<button type="button" class="mdeditor-cleanup-cancel" id="pdfAddLibNo">Нет</button>' +
+        '<button type="button" class="mdeditor-cleanup-cancel mdeditor-cleanup-primary" id="pdfAddLibYes">Да</button>' +
+      '</div>';
+    overlay.appendChild(card);
+    settingsModalBox.appendChild(overlay);
+    function close(){
+      pdfAddDialogOpen = false;
+      if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }
+    overlay.addEventListener("click", function(ev){ if(ev.target === overlay) close(); });
+    document.getElementById("pdfAddLibNo").addEventListener("click", close);
+    document.getElementById("pdfAddLibYes").addEventListener("click", function(){ close(); onYes(); });
+  }
+  // Копирует открытый «на лету» PDF в библиотеку и превращает текущий экран в обычную книгу (с сохранением места и подчёркиваний).
+  function addTransientPdfToLibrary(done){
+    var st = bookReaderState;
+    function fail(msg){
+      var s1 = document.getElementById("bookReaderStatus");
+      if(s1) s1.textContent = msg;
+      done(false);
+    }
+    if(!st || !st.transient || !st.file) return fail("Не удалось добавить: файл недоступен, откройте его из файлового менеджера ещё раз.");
+    st.file.arrayBuffer().then(function(buf){
+      return saveBookFile(st.name, new Uint8Array(buf));
+    }).then(function(result){
+      if(bookReaderState !== st) return done(false);
+      if(result.added) registerBookInRegistry(result.hash, result.name, result.size);
+      st.transient = false;
+      st.file = null;
+      st.hash = result.hash;
+      st.name = result.name;
+      ensureBookNameSynced(result.hash, result.name);
+      saveLastOpenedBookName(result.name);
+      if(st.pdf && !st.pdf.released){
+        window.PdfPageReader.cover(st.pdf, 240).then(function(c){ saveBookCoverIfMissing(result.hash, c.base64, c.contentType); }).catch(function(){});
+      }
+      var c0 = document.getElementById("settingsTabContent");
+      if(c0 && currentSettingsTab === "set2s_7") renderBookReaderPdf(c0); // место чтения сохраняет leavePdfView
+      done(true);
+    }).catch(function(e){
+      fail("Не удалось добавить в библиотеку: " + (e && e.message ? e.message : e));
+    });
+  }
   function handlePdfSelect(res){
     var st = bookReaderState;
     if(!st || !st.pdf || !res || !res.text) return;
     var statusEl = document.getElementById("bookReaderStatus");
     if(st.transient){
-      if(statusEl) statusEl.textContent = "Подчёркивать можно в книгах из «Моих книг»: этот файл открыт без добавления в библиотеку.";
+      openPdfAddToLibraryDialog(function(){
+        addTransientPdfToLibrary(function(ok){
+          // книга стала обычной — то же выделение идёт обычным путём: выбор заметки, запись подчёркивания
+          if(ok) handlePdfSelect(res);
+        });
+      });
       return;
     }
     var hash = st.hash, text = res.text;

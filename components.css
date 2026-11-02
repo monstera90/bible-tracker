@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 23.2 (02.11)
+   Версия: 23.3 (02.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4949,6 +4949,9 @@ body::after{
    самого #settingsTabContent; .pdf-pages-inner растягивается на zoom×100% ширины, страницы — на всю его ширину;
    высоту каждой страницы ставит JS по размеру страницы PDF. Белая «бумага» не зависит от темы. */
 .pdf-reader-tab{ touch-action:pan-x pan-y; }
+/* Страницы PDF — во всю ширину окна, без боковых полей (8px у .book-reader-tab — для текста книг) */
+.book-reader-tab.pdf-reader-tab{ padding-left:0; padding-right:0; }
+.pdf-reader-tab .mdeditor-status{ padding-left:8px; padding-right:8px; }
 .pdf-pages{
   overflow-x:auto;
   overflow-y:hidden;
