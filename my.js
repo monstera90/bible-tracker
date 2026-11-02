@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 122.0 (02.11)
+   Версия: 123.0 (02.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1241,6 +1241,34 @@
     layoutSettingsModal();
   }
   applyLeftHanded(isLeftHanded());
+
+  // ===================== РАЗМЕР ЯЗЫЧКОВ ОКНА НАСТРОЕК =====================
+  // Вкладка «Внешний вид», пункт «Размер язычков»: 50 / 75 / 100 / 125 %. 50 % — прежний размер: длина язычка 40px (это
+  // ширина нижних язычков и высота боковых); толщина язычков (35px) и кнопка-язычок .settings-fab НЕ меняются. Язычки
+  // всегда одной длины. По умолчанию 75 %, пока человек сам не выберет. Настройка ПО-УСТРОЙСТВУ (localStorage, в облако не
+  // идёт), переживает перезапуск. Размер — одна CSS-переменная --tab-len на <html> (modals.css: .settings-tab,
+  // .settings-tab-gear); положение язычка-кнопки, заплаток углов и волны открытия берётся из реально измеренных рядов.
+  var TAB_SIZE_KEY = "bibleTabSize_v1";
+  var TAB_SIZE_OPTIONS = [50, 75, 100, 125];
+  var TAB_SIZE_DEFAULT = 75;
+  var TAB_SIZE_BASE_PX = 40; // длина язычка при 50 %
+  function getTabSize(){
+    var v = null;
+    try{ v = localStorage.getItem(TAB_SIZE_KEY); }catch(e){}
+    var n = parseInt(v, 10);
+    return TAB_SIZE_OPTIONS.indexOf(n) !== -1 ? n : TAB_SIZE_DEFAULT;
+  }
+  function applyTabSize(pct){
+    document.documentElement.style.setProperty("--tab-len", (TAB_SIZE_BASE_PX * pct / 50) + "px");
+  }
+  function setTabSize(pct){
+    try{ localStorage.setItem(TAB_SIZE_KEY, String(pct)); }catch(e){}
+    applyTabSize(pct);
+    // язычок-кнопка и кнопка режима чтения позиционируются инлайн от нижнего ряда, заплатки углов считаются от рядов —
+    // пересчитываем после смены размера (function-декларация, ниже по файлу)
+    layoutSettingsModal();
+  }
+  applyTabSize(getTabSize());
 
   function getHideStatusBarEnabled(){
     try{ return localStorage.getItem(HIDE_STATUS_BAR_KEY) === "1"; }catch(e){ return false; }
@@ -8287,6 +8315,7 @@
         "bibleHideStatusBar_v1": "полноэкранный режим",
         "leftHandedLayout": "левша",
         "bibleBookColumns_v1": "колонки списка книг",
+        "bibleTabSize_v1": "размер язычков окна настроек на этом устройстве",
         "bibleBooksViewMode_v1": "вид списка книг",
         "bibleBooksHideTitles_v1": "скрытие заголовков книг",
         "bibleBookCoverDisabled_v1": "отключение обложек",
@@ -18219,6 +18248,7 @@
     if(!container) return;
     var colorMarkOn = getColorMarkEnabled();
     var bookCols = getBookColumns();
+    var tabSize = getTabSize();
     var extraAnimOn = getExtraAnimationsEnabled();
     container.innerHTML =
       '<div class="settings-gear-tab">' +
@@ -18231,6 +18261,14 @@
           '<label class="settings-book-cols-opt"><input type="checkbox" id="settingsBookCols1" data-cols="1"' + (bookCols === 1 ? " checked" : "") + '><span>1</span></label>' +
           '<label class="settings-book-cols-opt"><input type="checkbox" id="settingsBookCols2" data-cols="2"' + (bookCols === 2 ? " checked" : "") + '><span>2</span></label>' +
           '<label class="settings-book-cols-opt"><input type="checkbox" id="settingsBookCols3" data-cols="3"' + (bookCols === 3 ? " checked" : "") + '><span>3</span></label>' +
+        '</div>' +
+      '</div>' +
+      '<div class="settings-row settings-row-book-cols">' +
+        '<span>Размер язычков</span>' +
+        '<div class="settings-book-cols-options" style="flex-wrap:wrap;row-gap:8px;">' +
+          TAB_SIZE_OPTIONS.map(function(p){
+            return '<label class="settings-book-cols-opt"><input type="checkbox" class="settings-tab-size-cb" data-size="' + p + '"' + (tabSize === p ? " checked" : "") + '><span>' + p + '%</span></label>';
+          }).join("") +
         '</div>' +
       '</div>' +
       '<div class="settings-row"><span>Отмечать прочитанные главы другим цветом</span><input type="checkbox" id="settingsColorMarkCb"' + (colorMarkOn ? " checked" : "") + '></div>' +
@@ -18258,6 +18296,22 @@
           if(other !== chosen) other.checked = false;
         });
         setBookColumns(parseInt(chosen.getAttribute("data-cols"), 10));
+      });
+    });
+
+    // «Размер язычков»: ровно один вариант активен всегда (как у колонок книг)
+    var tabSizeInputs = Array.prototype.slice.call(container.querySelectorAll(".settings-tab-size-cb"));
+    tabSizeInputs.forEach(function(inp){
+      inp.addEventListener("change", function(){
+        if(!this.checked){
+          this.checked = true;
+          return;
+        }
+        var chosen = this;
+        tabSizeInputs.forEach(function(other){
+          if(other !== chosen) other.checked = false;
+        });
+        setTabSize(parseInt(chosen.getAttribute("data-size"), 10));
       });
     });
 
