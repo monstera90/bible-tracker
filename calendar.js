@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 14.0 (02.11)
+   Версия: 14.1 (02.11)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -207,7 +207,7 @@
   function showHidden(){ try{ return localStorage.getItem(SHOW_HIDDEN_KEY) === "1"; }catch(e){ return false; } }
   function saveShowHidden(v){ try{ localStorage.setItem(SHOW_HIDDEN_KEY, v ? "1" : "0"); }catch(e){} }
   // видно ли мероприятие в списке/неделе
-  function visibleEv(ev){ if(isTask(ev) && taskStateOf(ev) === "gone") return false; return showHidden() || !isHidden(ev.id); }
+  function visibleEv(ev){ if(isTask(ev) && taskStateOf(ev) !== "open") return false; return showHidden() || !isHidden(ev.id); }
   var EYE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
   var EYE_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path></svg>';
   // ---------- настройки календаря (кнопка-шестерёнка `calendarSettingsBtn`): на устройстве ----------
@@ -222,6 +222,7 @@
   var COLOR_ITEMS = [
     { key: "personal", label: "Личный календарь", cssVar: "--cal-personal" },
     { key: "shared",   label: "Общий календарь",  cssVar: "--cal-shared" },
+    { key: "task",     label: "Задачи",           cssVar: "--cal-task" },
     { key: "trk",      label: "Трекеры занятий",  cssVar: "--cal-trk" },
     { key: "hid",      label: "Скрытые мероприятия", cssVar: "--cal-hid" },
     { key: "past",     label: "Прошедшие мероприятия", cssVar: "--cal-past" }
@@ -229,7 +230,7 @@
   // та же палитра, что в форме комбинированных карточек (itemcards.js HABIT_COLORS_*): первый пастельный квадрат — «по умолчанию»
   var COLORS_BRIGHT = ["#ff0000", "#fb8c00", "#ffff00", "#43a047", "#00acc1", "#1e88e5", "#7f00ff", "#d81b60"];
   var COLORS_PASTEL = ["", "#ffcba4", "#fff3a3", "#9cdb4e", "#40d5b5", "#a9ccf4", "#d4b8f0", "#f8bbd9"];
-  var userColors = { personal: "", shared: "", trk: "", hid: "", past: "" };
+  var userColors = { personal: "", shared: "", task: "", trk: "", hid: "", past: "" };
   function loadColors(){
     var o = null;
     try{ o = JSON.parse(localStorage.getItem(COLORS_KEY) || "null"); }catch(e){ o = null; }
@@ -459,7 +460,7 @@
       if(r.series && r.more > 0){
         badge = ' <span class="cal-more">' + (r.open ? '↻ свернуть' : '↻ ещё ' + r.more) + '</span>';
       }
-      html += '<div class="event-row cal-row cal-c-' + calOf(r.ev) + (isHidden(r.ev.id) ? ' cal-hid' : '') + (r.at + r.dur < now ? ' cal-row-past' : '') + (isTask(r.ev) ? ' cal-row-task' + (taskStateOf(r.ev) === 'done' ? ' cal-task-done' : '') : '') + (r.series && !r.first ? ' cal-row-exp' : '') +
+      html += '<div class="event-row cal-row cal-c-' + (isTask(r.ev) ? 'task' : calOf(r.ev)) + (isHidden(r.ev.id) ? ' cal-hid' : '') + (r.at + r.dur < now ? ' cal-row-past' : '') + (r.series && !r.first ? ' cal-row-exp' : '') +
         '" data-id="' + esc(r.ev.id) + '" data-at="' + r.at + '"' + (r.at + r.dur < now && usePastColor(isHidden(r.ev.id)) ? ' style="border-left-color:' + userColors.past + ' !important;"' : '') + '>' +
         '<span class="event-time">' + timeRange(r.at, r.dur) + '</span> ' + (isTask(r.ev) ? taskMark(r.ev) : '') + esc(r.ev.title) +
         (r.ev.repeat ? '<span class="cal-rep"> · ' + repeatLabel(r.ev.repeat) + '</span>' : '') + badge + '</div>';
@@ -499,6 +500,7 @@
     if(!el || !el.style || !el.style.setProperty) return;
     el.style.setProperty("--cal-personal-fg", fgFor("--cal-personal"));
     el.style.setProperty("--cal-shared-fg", fgFor("--cal-shared"));
+    el.style.setProperty("--cal-task-fg", fgFor("--cal-task"));
     el.style.setProperty("--cal-trk-fg", fgFor("--cal-trk"));
     el.style.setProperty("--cal-hid-fg", fgFor("--cal-hid"));
   }
@@ -664,9 +666,9 @@
             esc(sg.t.label) + '</div>';
           return;
         }
-        blocks += '<div class="cal-wk-ev cal-c-' + calOf(sg.ev) + (isTask(sg.ev) ? ' cal-wk-task' + (taskStateOf(sg.ev) === 'done' ? ' cal-task-done' : '') : '') + (isHidden(sg.ev.id) ? ' cal-hid' : '') + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
+        blocks += '<div class="cal-wk-ev cal-c-' + (isTask(sg.ev) ? 'task' : calOf(sg.ev)) + (isHidden(sg.ev.id) ? ' cal-hid' : '') + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
           ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + (sg.at + sg.dur < now && usePastColor(isHidden(sg.ev.id)) ? ';' + pastBlockCss() : '') + '">' +
-          (isTask(sg.ev) ? taskMark(sg.ev) : '') + esc(sg.ev.title) + '</div>';
+          esc(sg.ev.title) + '</div>';
       });
       var nowLine = isToday ? '<div class="cal-wk-now" data-m="' + minutesOfDay(now) + '" style="top:' + (minutesOfDay(now) * hourPx / 60).toFixed(1) + 'px"></div>' : '';
       cols += '<div class="cal-wk-col' + (isToday ? ' cal-wk-today-col' : '') + '" data-day="' + ds + '">' + blocks + nowLine + '</div>';
@@ -1095,7 +1097,7 @@
         '<button type="button" class="workbooks-run-btn" id="calSave">Сохранить</button>' +
         '<button type="button" class="workbooks-run-btn" id="calCancel">Отмена</button>' +
       '</div>' +
-      (isNew ? '' : '<div class="item-form-buttons" id="calDelRow"><button type="button" class="workbooks-run-btn" id="calDelete">Удалить</button></div>') +
+      (isNew ? '' : '<div class="item-form-buttons" id="calDelRow"><button type="button" class="workbooks-run-btn" id="calDelete">Удалить</button>' + (isTask(ev) ? '<button type="button" class="workbooks-run-btn" id="calDone">Выполнена</button>' : '') + '</div>') +
     '</div>';
     c.innerHTML = html;
     syncFlush();
@@ -1251,6 +1253,11 @@
       renderMain();
     });
 
+    var doneBtn = document.getElementById("calDone");
+    if(doneBtn) doneBtn.addEventListener("click", function(){
+      if(TASKS && TASKS.done){ try{ TASKS.done(ev.taskId); }catch(e){} }
+      renderMain(); // выполненная задача из календаря исчезает
+    });
     var delBtn = document.getElementById("calDelete");
     if(delBtn){
       var armed = false, armTimer = null;

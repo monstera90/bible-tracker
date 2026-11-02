@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 23.1 (02.11)
+   Версия: 23.2 (02.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4871,8 +4871,9 @@ body::after{
 .cal-rep{ color:var(--ink-soft, var(--ink)); font-size:.9em; }
 .cal-more{ color:var(--ink-soft, var(--ink)); font-size:.9em; white-space:nowrap; padding:2px 4px; }
 /* цвета календарей (--mood-joy выставляет mood.js по теме; пока его нет — запасной --gold-light) */
-:root{ --cal-personal:var(--mood-joy, var(--gold-light)); --cal-shared:var(--wood); --cal-trk:#2e9e6b; } /* пользователь переопределяет на <html> (calendar.js, applyUserColors) */
+:root{ --cal-personal:var(--mood-joy, var(--gold-light)); --cal-shared:var(--wood); --cal-task:#e3d58f; --cal-trk:#2e9e6b; } /* пользователь переопределяет на <html> (calendar.js, applyUserColors) */
 .cal-c-personal{ --cal-color:var(--cal-personal); --cal-fg:var(--cal-personal-fg, var(--ink)); }
+.cal-c-task{ --cal-color:var(--cal-task); --cal-fg:var(--cal-task-fg, var(--ink)); }
 .cal-c-shared{ --cal-color:var(--cal-shared); --cal-fg:var(--cal-shared-fg, var(--parchment)); }
 .cal-row{ border-left:3px solid var(--cal-color, transparent); padding-left:6px; }
 .cal-row-exp{ margin-left:10px; }
@@ -5017,5 +5018,3 @@ html[data-theme="14"] .pdf-hl{
 /* задачи в календаре (calendar.js): переключатель «Мероприятие / Задача», блок задачи в неделе, выполненная задача */
 .cal-kind .workbooks-run-btn{ opacity:.55; }
 .cal-kind .workbooks-run-btn.cal-kind-on{ opacity:1; font-weight:700; }
-.cal-wk-ev.cal-wk-task{ border-style:dashed; }
-.cal-task-done{ text-decoration:line-through; opacity:.6; }
