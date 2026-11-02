@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 116.0 (01.11)
+   Версия: 117.0 (01.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1745,10 +1745,10 @@
   };
   function isToolsStackTab(tab){ return TOOLS_STACK_TABS.indexOf(tab) !== -1; }
   // «Активности» (нижний язычок settingsTabActivitiesStackBtn справа от «Задачи и календарь»): свой боковой ряд набора 1 (режим activitiesStackMode),
-  // работает как шестерёнка. Вкладки ряда сверху вниз: Закладки, Тренировки, Музыка, Поиск, Книги, ИПКД. Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
+  // работает как шестерёнка. Вкладки ряда сверху вниз: Закладки, Тренировки, Музыка, Поиск. Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
   var ACTIVITIES_STACK_BTN_ID = "settingsTabActivitiesStackBtn";
-  var ACTIVITIES_STACK_TABS = ["set2s_2", "workouts", "set2s_11", "set2s_3", "set2s_7", "set2s_8"];
-  var ACTIVITIES_STACK_BTN_IDS = { set2s_2: "settingsTabSet2Btn2", workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_3: "settingsTabSet2Btn3", set2s_7: "settingsTabSet2Btn7", set2s_8: "settingsTabSet2Btn8" };
+  var ACTIVITIES_STACK_TABS = ["set2s_2", "workouts", "set2s_11", "set2s_3"];
+  var ACTIVITIES_STACK_BTN_IDS = { set2s_2: "settingsTabSet2Btn2", workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_3: "settingsTabSet2Btn3" };
   function isActivitiesStackTab(tab){ return ACTIVITIES_STACK_TABS.indexOf(tab) !== -1; }
   // «Клод» (нижний язычок settingsTabClaudeStackBtn между шестерёнкой и «Инструментами»): свой боковой ряд набора 1 (режим claudeStackMode),
   // работает как шестерёнка. Пока в ряду одна вкладка — «Claude» (set2s_10, claudetab.js); новая вкладка ряда: кнопка в `#settingsTabs` + ключ в списках ниже.
@@ -1760,8 +1760,16 @@
   // бокового ряда у неё нет — клик по ней выключает все боковые ряды (switchSettingsTabOnClick)
   var NOTES_TAB_KEY = "set2s_1";
   function isNotesBottomTab(tab){ return tab === NOTES_TAB_KEY; }
-  // вкладка набора 1 из «своих» (боковые ряды «Статистика», «Инструменты», «Активности», «Клод» и нижняя «Мои заметки») — набор 2 их не показывает
-  function isOwnStackTab(tab){ return isInfoStackTab(tab) || isToolsStackTab(tab) || isActivitiesStackTab(tab) || isClaudeStackTab(tab) || isNotesBottomTab(tab); }
+  // «Мои книги» (set2s_7, ридер fb2/epub/pdf): такая же нижняя вкладка набора 1 между «Моими заметками» и «Задачи и календарь» (кнопка settingsTabSet2Btn7
+  // лежит в #settingsTabsGear), бокового ряда у неё нет. ИПКД (set2s_8) — не язычок, а экран внутри «Книг» (кнопка с числом месяца в их нижнем ряду):
+  // ключ остаётся своим (общий ридер, переключение между списком и ИПКД идёт через switchSettingsTab), а язычок «Книги» подсвечен и на нём
+  var BOOKS_TAB_KEY = "set2s_7";
+  var IPKD_TAB_KEY = "set2s_8";
+  function isBooksBottomTab(tab){ return tab === BOOKS_TAB_KEY || tab === IPKD_TAB_KEY; }
+  // нижняя вкладка без своего бокового ряда («Мои заметки» и «Мои книги» с ИПКД)
+  function isStandaloneBottomTab(tab){ return isNotesBottomTab(tab) || isBooksBottomTab(tab); }
+  // вкладка набора 1 из «своих» (боковые ряды «Статистика», «Инструменты», «Активности», «Клод» и нижние «Мои заметки», «Мои книги») — набор 2 их не показывает
+  function isOwnStackTab(tab){ return isInfoStackTab(tab) || isToolsStackTab(tab) || isActivitiesStackTab(tab) || isClaudeStackTab(tab) || isStandaloneBottomTab(tab); }
   // Вкладка «Тренировки» (workouts.js): верхняя в боковом ряду «Активности» (ACTIVITIES_STACK_TABS). В SETTINGS_BOTTOM_ORDER_1 НЕ входит
   // (иначе сдвинется соответствие позиций с нижним рядом набора 2) — запоминание последней вкладки и «набор» учитывают её отдельно.
   var WORKOUTS_TAB_KEY = "workouts";
@@ -4531,7 +4539,7 @@
   document.addEventListener("visibilitychange", function(){
     if(window.Debug) window.Debug.log("visibilitychange -> " + document.visibilityState);
     if(document.visibilityState === "hidden") flushPendingSyncNow();
-    else updateReadingTabMark(); // вернулись в приложение — могли наступить новые сутки
+    else { updateReadingTabMark(); updateIpkdTabIcon(); } // вернулись в приложение — могли наступить новые сутки (число на кнопке ИПКД, заливка язычка «Книги»)
   });
   window.addEventListener("pagehide", function(){
     if(window.Debug) window.Debug.log("pagehide");
@@ -10368,10 +10376,10 @@
     // updateSettingsCornerPatchHeight выше); единственный вызывающий.
     updateSettingsCornerPatchHeight();
   }
-  // «Мой блокнот» без открытого бокового ряда: колонки язычков нет, окно растягивается на её ширину (класс notes-wide на оверлее, modals.css)
+  // «Мой блокнот» и «Книги» (с ИПКД) без открытого бокового ряда: колонки язычков нет, окно растягивается на её ширину (класс notes-wide на оверлее, modals.css)
   function updateNotesWide(){
     if(!settingsModalOverlay) return;
-    var on = currentSettingsTab === NOTES_TAB_KEY && !bottomAltMode && !tasksStackMode && !infoStackMode && !toolsStackMode && !activitiesStackMode && !claudeStackMode;
+    var on = (currentSettingsTab === NOTES_TAB_KEY || isBooksBottomTab(currentSettingsTab)) && !bottomAltMode && !tasksStackMode && !infoStackMode && !toolsStackMode && !activitiesStackMode && !claudeStackMode;
     if(on === settingsModalOverlay.classList.contains("notes-wide")) return;
     settingsModalOverlay.classList.toggle("notes-wide", on);
     if(settingsModalOverlay.classList.contains("open")){
@@ -10901,8 +10909,8 @@
     // набор вкладок по клику на колесико
     syncBottomAltModeForTab(tab);
     updateNotesWide();
-    // выделена одна вкладка — нажатая последней: «Мои заметки» (нижний ряд) или вкладка бокового ряда; язычки рядов — по их нажатию (см. ниже)
-    bottomHighlightId = (tab === NOTES_TAB_KEY) ? SET2_TAB_IDS[NOTES_TAB_KEY] : null;
+    // выделена одна вкладка — нажатая последней: «Мои заметки» / «Мои книги» (нижний ряд; ИПКД подсвечивает «Книги») или вкладка бокового ряда; язычки рядов — по их нажатию (см. ниже)
+    bottomHighlightId = (tab === NOTES_TAB_KEY) ? SET2_TAB_IDS[NOTES_TAB_KEY] : (isBooksBottomTab(tab) ? SET2_TAB_IDS[BOOKS_TAB_KEY] : null);
     updateBottomGearButtons();
     var container = document.getElementById("settingsTabContent");
     if(tab !== "set2s_12") progressPanelGoHome(); // панель «Прогресс» уходит домой до того, как содержимое окна заменит другая вкладка
@@ -13196,6 +13204,7 @@
           '<button type="button" class="mdeditor-fab-btn" id="booksHideTitlesBtn" title="' + (hideTitlesOn ? "Показать заглавия" : "Скрыть заглавия") + '">' + booksHideTitlesButtonIconSvg(hideTitlesOn) + '</button>'
           : "") +
         '<button type="button" class="mdeditor-fab-btn" id="booksInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
+        ipkdFabBtnHtml() + // ИПКД — сразу справа от «i» (число месяца, открывает сегодняшний день)
         '<button type="button" class="mdeditor-fab-btn" id="booksImportBtn" title="Загрузить fb2, epub, pdf или zip книгу">' + BOOKS_UPLOAD_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="booksViewModeBtn" title="' + (coverMode ? "Список" : "Обложки") + '">' +
           (coverMode ? BOOKS_VIEW_LIST_ICON_SVG : BOOKS_VIEW_COVER_ICON_SVG) +
@@ -13228,6 +13237,7 @@
     if(infoBtn){
       infoBtn.addEventListener("click", function(){ renderBooksInfoScreen(); });
     }
+    bindIpkdFabBtn();
     var input = document.getElementById("booksImportInput");
     var importBtn = document.getElementById("booksImportBtn");
     if(importBtn && input){
@@ -13412,6 +13422,7 @@
 
     var html = '';
     html += iconRow(BOOKS_VIEW_COVER_ICON_SVG, "Переключает список книг между показом обложками и обычным списком с именами файлов.");
+    html += iconRow(ipkdDaySvg(), "ИПКД: открывает ежедневное чтение на сегодняшнем дне. На кнопке — сегодняшнее число месяца. Пока сегодня ИПКД не открывали, язычок «Мои книги» внизу залит цветом. Внутри ИПКД «домик» возвращает к списку книг.");
     html += iconRow(BOOKS_UPLOAD_ICON_SVG, "Загружает книгу с устройства — файл .fb2, .epub, .pdf или .zip (архив с книгами внутри). PDF открывается страницами, как в обычном просмотрщике (картинки и оригинальная вёрстка; масштаб — щипком или двойным касанием). Если страницами открыть не удалось, PDF читается как текст — тогда сканы без текстового слоя и зашифрованные файлы не читаются.");
     html += iconRow(BOOKS_HIDE_TITLES_ICON_SVG, "Только в режиме «Обложки»: скрывает подписи с названиями книг под обложками. Повторное нажатие возвращает подписи.");
     html += iconRow(BOOK_NOTE_ICON_SVG, "Долгое нажатие на книге (в списке или на обложке): открывает заметку с подчёркиваниями и иллюстрациями этой книги. Если заметка ещё не привязана — предлагает создать новую или выбрать уже существующую.");
@@ -14667,6 +14678,8 @@
       '<div class="mdeditor-fab-row">' +
         // «i» — самая левая кнопка ряда: полноэкранная инструкция по кнопкам ридера (renderBookReaderInfoScreen)
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
+        // ИПКД — сразу справа от «i»; в самом ридере ИПКД её нет (там вместо неё «домик» к списку книг)
+        (bookReaderOwnerTab === IPKD_TAB_KEY ? "" : ipkdFabBtnHtml()) +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderFlibustaBtn" title="Flibusta">' + READER_FLIBUSTA_ICON_SVG + '</button>' +
         '<span class="mdeditor-fontsize-wrap" id="bookReaderFontSizeWrap">' +
           '<div class="mdeditor-fontsize-popup" id="bookReaderFontSizePopup">' +
@@ -14736,6 +14749,9 @@
 
     var html = '';
     if(!isIpkd){
+      html += iconRow(ipkdDaySvg(), false, "ИПКД: открывает ежедневное чтение на сегодняшнем дне (на кнопке — сегодняшнее число месяца). Читаемая книга при этом закрывается, её место чтения сохраняется.");
+    }
+    if(!isIpkd){
       html += iconRow(READER_FLIBUSTA_ICON_SVG, false, "Открывает каталог Flibusta: найденную книгу можно скачать прямо в приложение. Читаемая книга остаётся под каталогом — после закрытия каталога вы на том же месте.");
     }
     html += iconRow('<span style="font-weight:600;font-size:15px;line-height:1;">Аа</span>', false,
@@ -14759,6 +14775,9 @@
     if(!isIpkd){
       html += iconRow(READER_HOME_ICON_SVG, false,
         "Выход из книги к списку книг. Если у основной закладки включён авторежим «А» — она встаёт на текущее место. Системное «назад» после выхода возвращает в эту же книгу на то же место.");
+    } else {
+      html += iconRow(READER_HOME_ICON_SVG, false,
+        "Выход из ИПКД к списку книг. Если у основной закладки включён авторежим «А» — она встаёт на текущее место.");
     }
     html += iconRow(READER_PIN_ICON_SVG, false,
       "Кнопка над иллюстрацией в тексте книги: отправляет картинку в заметку книги, и кнопка краснеет " +
@@ -14826,6 +14845,8 @@
     var bookmarkAddBtn = document.getElementById("bookReaderBookmarkAddBtn");
     if(bookmarkAddBtn) bookmarkAddBtn.addEventListener("click", addSeparateBookReaderBookmark);
 
+    bindIpkdFabBtn();
+
     var chaptersBtn = document.getElementById("bookReaderChaptersBtn");
     if(chaptersBtn){
       chaptersBtn.addEventListener("click", function(){
@@ -14842,6 +14863,8 @@
     var homeBtn = document.getElementById("bookReaderHomeBtn");
     if(homeBtn){
       homeBtn.addEventListener("click", function(){
+        // ридер ИПКД: «домик» ведёт на вкладку «Книги» (список) обычным переключением — switchSettingsTab сам сохраняет место и закладку
+        if(bookReaderOwnerTab === IPKD_TAB_KEY){ openBooksListFromIpkd(); return; }
         // renderSettingsTabBooks() ниже, в отличие от renderBookReader(), не снимает слушатель
         // прокрутки сам — контейнер общий, поэтому без этого он остался бы висеть и на экране
         // списка книг (см. destroyBookReaderScrollListener выше).
@@ -16801,20 +16824,43 @@
     tabSeenSet("ipkd", ipkdTodayDateKey());
     updateIpkdTabIcon();
   }
-  // Пиктограмма вкладки — просто число (с ТЗ 29.09 вкладка стоит в вертикальном стеке второго
-  // набора на месте заглушки 8, кнопка settingsTabSet2Btn8 из index.html; содержимое кнопки целиком
-  // заменяется здесь, обычный текстовый узел в язычке, font-size:32px из .settings-tab,
-  // modals.css); заливка "не открыта сегодня" (.ipkd-tab-unread, modals.css) — var(--gold-light),
-  // тот же пастельный акцент темы, что и у подчёркиваний книги (.book-reader-underline,
-  // components.css), а не свой отдельный цвет.
+  // ИПКД — не язычок, а кнопка в нижнем ряду «Книг» (список книг и ридер): квадрат с сегодняшним числом месяца, как у календаря
+  // (.ipkd-tab-icon, modals.css). Заливка «не открывали сегодня» (.ipkd-tab-unread, modals.css, цвет var(--gold-light) — тот же пастельный
+  // акцент темы, что у подчёркиваний книги) стоит на язычке «Книги», а не на самой кнопке, и не мешает заливке открытой вкладки.
+  function ipkdFabBtnHtml(){
+    return '<button type="button" class="mdeditor-fab-btn ipkd-fab-btn" id="ipkdFabBtn" title="ИПКД">' +
+      '<span class="ipkd-tab-icon"><span class="ipkd-day-num">' + String(new Date().getDate()) + '</span></span></button>';
+  }
+  // тот же значок как svg — для списка вкладок «Комбинированного» и экранов «i»
+  function ipkdDaySvg(){
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="4" y="4" width="16" height="16" rx="2.5"></rect>' +
+      '<text x="12" y="16.2" text-anchor="middle" font-size="10" font-family="Arial, Helvetica, sans-serif" font-weight="700" fill="currentColor" stroke="none">' +
+      String(new Date().getDate()) + '</text></svg>';
+  }
+  // «Книги» -> ИПКД: боковые ряды выключаются (окно чтения широкое, как у заметок), экран ИПКД всегда на сегодняшнем дне
+  function openIpkdFromBooks(){
+    setAllStackModesOff();
+    if(currentSettingsTab !== IPKD_TAB_KEY) switchSettingsTab(IPKD_TAB_KEY);
+  }
+  function bindIpkdFabBtn(){
+    var btn = document.getElementById("ipkdFabBtn");
+    if(btn) btn.addEventListener("click", openIpkdFromBooks);
+  }
+  // ИПКД -> список книг («домик» ридера ИПКД и пустого экрана). Явный выход к списку: последнюю книгу сама не подхватывает
+  function openBooksListFromIpkd(){
+    booksTabVisitedThisSession = true;
+    setAllStackModesOff();
+    if(currentSettingsTab !== BOOKS_TAB_KEY) switchSettingsTab(BOOKS_TAB_KEY);
+  }
+  // число на кнопке и заливка язычка «Книги» («ИПКД сегодня не открывали») — вызывается при каждом переключении вкладок, после слияния с облаком и при открытии ИПКД
   function updateIpkdTabIcon(){
-    var btn = document.getElementById("settingsTabSet2Btn8");
-    if(!btn) return;
-    // Пиктограмма — число в квадрате, как у календаря: span.ipkd-tab-icon — рамка-квадрат
-    // (modals.css), число внутри чуть мельче font-size вкладки (32px у .settings-tab), чтобы
-    // помещалось.
-    btn.innerHTML = '<span class="ipkd-tab-icon">' + String(new Date().getDate()) + '</span>';
-    btn.classList.toggle("ipkd-tab-unread", !isIpkdOpenedToday());
+    var day = String(new Date().getDate());
+    Array.prototype.forEach.call(document.querySelectorAll(".ipkd-day-num"), function(el){
+      if(el.textContent !== day) el.textContent = day;
+    });
+    var booksBtn = document.getElementById(SET2_TAB_IDS[BOOKS_TAB_KEY]);
+    if(booksBtn) booksBtn.classList.toggle("ipkd-tab-unread", !isIpkdOpenedToday());
     stripDecorClasses();
   }
 
@@ -16951,12 +16997,8 @@
   function bindIpkdReaderExtras(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
-    // "Домик" общего ряда увёл бы в чужой список "Мои книги", а Flibusta (OPDS) для единственной
-    // фиксированной публикации не имеет смысла — обе кнопки на этой вкладке просто не нужны, без
-    // всякой замены: любой заход на вкладку и так всегда открывает сегодняшний день сам (см.
-    // renderSettingsTabIpkd/openIpkdReaderToToday), отдельная кнопка для этого не нужна.
-    var homeBtn = document.getElementById("bookReaderHomeBtn");
-    if(homeBtn) homeBtn.remove();
+    // Flibusta (OPDS) для единственной фиксированной публикации не имеет смысла — кнопка не нужна.
+    // «Домик» остаётся и ведёт к списку книг (обработчик — в bindBookReaderFabRow, ветка ИПКД).
     var flibustaBtn = document.getElementById("bookReaderFlibustaBtn");
     if(flibustaBtn) flibustaBtn.remove();
     // Скрепка "заменить публикацию" — в общем нижнем ряду, сразу справа от «i» (с 09.10; раньше стояла
@@ -17034,6 +17076,7 @@
         '<div class="mdeditor-status" id="booksStatus"></div>' +
         '<div class="mdeditor-fab-row">' +
           '<button type="button" class="mdeditor-fab-btn" id="ipkdAttachBtn" title="Выбрать файл">' + PAPERCLIP_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-fab-btn" id="ipkdEmptyHomeBtn" title="К списку книг">' + READER_HOME_ICON_SVG + '</button>' +
         '</div>' +
         '<input type="file" accept=".epub" id="ipkdSwapInput" style="display:none;">' +
       '</div>';
@@ -17041,6 +17084,8 @@
     var input = document.getElementById("ipkdSwapInput");
     if(attachBtn && input) attachBtn.addEventListener("click", function(){ input.click(); });
     if(input) bindIpkdFileInput(input, false);
+    var emptyHomeBtn = document.getElementById("ipkdEmptyHomeBtn");
+    if(emptyHomeBtn) emptyHomeBtn.addEventListener("click", openBooksListFromIpkd);
   }
 
   // Вкладка «ИПКД» (восьмая в вертикальном стеке второго набора, set2s_8) — точка входа из
@@ -18410,8 +18455,8 @@
   // хвосте). Простой guard — повторный клик по уже открытой вкладке просто ничего не делает, как и
   // было бы логично для переключателя вкладок (не кнопки "обновить").
   function switchSettingsTabOnClick(tab){
-    // «Мои заметки» — нижняя вкладка без своего ряда: выключаем все боковые ряды (в том числе колесо), затем открываем заметки
-    if(isNotesBottomTab(tab)){
+    // «Мои заметки» и «Мои книги» — нижние вкладки без своего ряда: выключаем все боковые ряды (в том числе колесо), затем открываем вкладку
+    if(isStandaloneBottomTab(tab)){
       setAllStackModesOff();
       if(tab !== currentSettingsTab) switchSettingsTab(tab);
       return;
@@ -18696,7 +18741,7 @@
     else if(isToolsStackTab(tab)) setToolsStackMode(true);
     else if(isActivitiesStackTab(tab)) setActivitiesStackMode(true);
     else if(isClaudeStackTab(tab)) setClaudeStackMode(true);
-    else if(isNotesBottomTab(tab)){ /* «Мои заметки» — нижняя вкладка без своего ряда: открытый боковой ряд не трогаем (так из «Закладок» и «Забытых» заметка открывается, не сворачивая ряд) */ }
+    else if(isStandaloneBottomTab(tab)){ /* «Мои заметки» и «Мои книги» (с ИПКД) — нижние вкладки без своего ряда: открытый боковой ряд не трогаем (так из «Закладок» и «Забытых» заметка или книга открывается, не сворачивая ряд) */ }
     else if(TASK_TAB_IDS.hasOwnProperty(tab) || tab === CALENDAR_TAB_KEY || tab === "extra2"){ if(getShowAllTasksEnabled()) setTasksStackMode(true); else setBottomAltMode(false); }
     else {
       if(BOTTOM_ALT_ORIGINAL_TABS.indexOf(tab) !== -1) setBottomAltMode(false);
@@ -18804,7 +18849,7 @@
     }
     return res;
   }
-  var HIDEABLE_TAB_NAMES = { settingsTabSet2Btn8: "ИПКД" };
+  var HIDEABLE_TAB_NAMES = {};
   function hideableTabName(btn){
     if(HIDEABLE_TAB_NAMES[btn.id]) return HIDEABLE_TAB_NAMES[btn.id];
     var taskKey = btn.getAttribute("data-task");
@@ -18904,7 +18949,7 @@
       if(btn) btn.classList.toggle("active", tab === key);
     });
     Object.keys(SET2_TAB_IDS).forEach(function(key){
-      if(key === NOTES_TAB_KEY) return; // «Мои заметки» — нижний язычок, ведёт updateBottomGearButtons
+      if(key === NOTES_TAB_KEY || key === BOOKS_TAB_KEY) return; // «Мои заметки» и «Мои книги» — нижние язычки, ведёт updateBottomGearButtons
       var btn = document.getElementById(SET2_TAB_IDS[key]);
       if(btn) btn.classList.toggle("active", tab === key);
     });
@@ -18915,7 +18960,7 @@
     stripDecorClasses(); // декоративные язычки режима колеса никогда не выглядят выбранными
   }
   function bottomHighlightIds(){
-    return ["settingsTabGearBtn", "settingsTabGearBtnSet2", TASKS_STACK_BTN_ID, INFO_STACK_BTN_ID, TOOLS_STACK_BTN_ID, ACTIVITIES_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY]];
+    return ["settingsTabGearBtn", "settingsTabGearBtnSet2", TASKS_STACK_BTN_ID, INFO_STACK_BTN_ID, TOOLS_STACK_BTN_ID, ACTIVITIES_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY], SET2_TAB_IDS[BOOKS_TAB_KEY]];
   }
   function updateBottomGearButtons(){
     var owner = bottomHighlightId;
@@ -21734,7 +21779,10 @@
     Object.keys(SET2_TAB_IDS).forEach(function(k){
       var b = document.getElementById(SET2_TAB_IDS[k]);
       var title = (b && b.title) || fallback[k] || k;
-      add(k, title, btnSvg(SET2_TAB_IDS[k]));
+      var tabSvg = btnSvg(SET2_TAB_IDS[k]);
+      // у ИПКД больше нет своего язычка — значок рисуем сами: квадрат с сегодняшним числом, как на кнопке в нижнем ряду «Книг»
+      if(!tabSvg && k === IPKD_TAB_KEY) tabSvg = ipkdDaySvg();
+      add(k, title, tabSvg);
     });
     return out;
   }
