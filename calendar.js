@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 13.3 (31.10)
+   Версия: 14.0 (02.11)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самый нижний язычок бокового стека набора 1,
@@ -207,7 +207,7 @@
   function showHidden(){ try{ return localStorage.getItem(SHOW_HIDDEN_KEY) === "1"; }catch(e){ return false; } }
   function saveShowHidden(v){ try{ localStorage.setItem(SHOW_HIDDEN_KEY, v ? "1" : "0"); }catch(e){} }
   // видно ли мероприятие в списке/неделе
-  function visibleEv(ev){ return showHidden() || !isHidden(ev.id); }
+  function visibleEv(ev){ if(isTask(ev) && taskStateOf(ev) === "gone") return false; return showHidden() || !isHidden(ev.id); }
   var EYE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
   var EYE_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path></svg>';
   // ---------- настройки календаря (кнопка-шестерёнка `calendarSettingsBtn`): на устройстве ----------
@@ -292,6 +292,15 @@
 
   var weekRenderedAt = 0;      // когда нарисована неделя: от этого дня считается красная линия «сейчас»
   var lastSig = null;          // подпись списка при последней отрисовке/обновлении (refresh не перерисовывает без перемен)
+  // задачи календаря: провайдер от my.js (setTasks): add(title)→id, state(id)→"open"|"done"|"gone", rename(id,title), remove(id)
+  var TASKS = null;
+  var TASK_BLOCK_MIN = 30; // высота блока задачи в неделе, минут
+  function isTask(ev){ return !!(ev && ev.kind === "task" && ev.taskId); }
+  function taskStateOf(ev){
+    if(!TASKS || !TASKS.state) return "open";
+    try{ return TASKS.state(ev.taskId) || "open"; }catch(e){ return "open"; }
+  }
+  function taskMark(ev){ return taskStateOf(ev) === "done" ? "\u2611 " : "\u2610 "; }
   function validEvent(e){
     return e && typeof e === "object" && typeof e.id === "string" && typeof e.title === "string" &&
       typeof e.start === "number" && isFinite(e.start) && typeof e.end === "number" && isFinite(e.end);
@@ -450,9 +459,9 @@
       if(r.series && r.more > 0){
         badge = ' <span class="cal-more">' + (r.open ? '↻ свернуть' : '↻ ещё ' + r.more) + '</span>';
       }
-      html += '<div class="event-row cal-row cal-c-' + calOf(r.ev) + (isHidden(r.ev.id) ? ' cal-hid' : '') + (r.at + r.dur < now ? ' cal-row-past' : '') + (r.series && !r.first ? ' cal-row-exp' : '') +
+      html += '<div class="event-row cal-row cal-c-' + calOf(r.ev) + (isHidden(r.ev.id) ? ' cal-hid' : '') + (r.at + r.dur < now ? ' cal-row-past' : '') + (isTask(r.ev) ? ' cal-row-task' + (taskStateOf(r.ev) === 'done' ? ' cal-task-done' : '') : '') + (r.series && !r.first ? ' cal-row-exp' : '') +
         '" data-id="' + esc(r.ev.id) + '" data-at="' + r.at + '"' + (r.at + r.dur < now && usePastColor(isHidden(r.ev.id)) ? ' style="border-left-color:' + userColors.past + ' !important;"' : '') + '>' +
-        '<span class="event-time">' + timeRange(r.at, r.dur) + '</span> ' + esc(r.ev.title) +
+        '<span class="event-time">' + timeRange(r.at, r.dur) + '</span> ' + (isTask(r.ev) ? taskMark(r.ev) : '') + esc(r.ev.title) +
         (r.ev.repeat ? '<span class="cal-rep"> · ' + repeatLabel(r.ev.repeat) + '</span>' : '') + badge + '</div>';
     });
     return html;
@@ -594,6 +603,7 @@
           if(at >= de) continue;
           var top = at > ds ? minutesOfDay(at) : 0;
           var bottom = end >= de ? 1440 : minutesOfDay(end);
+          if(isTask(ev)) bottom = Math.min(1440, top + TASK_BLOCK_MIN);
           days[i].push({ top: top, bottom: Math.max(bottom, top + 1), ev: ev, at: at, dur: dur });
         }
       });
@@ -654,9 +664,9 @@
             esc(sg.t.label) + '</div>';
           return;
         }
-        blocks += '<div class="cal-wk-ev cal-c-' + calOf(sg.ev) + (isHidden(sg.ev.id) ? ' cal-hid' : '') + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
+        blocks += '<div class="cal-wk-ev cal-c-' + calOf(sg.ev) + (isTask(sg.ev) ? ' cal-wk-task' + (taskStateOf(sg.ev) === 'done' ? ' cal-task-done' : '') : '') + (isHidden(sg.ev.id) ? ' cal-hid' : '') + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
           ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + (sg.at + sg.dur < now && usePastColor(isHidden(sg.ev.id)) ? ';' + pastBlockCss() : '') + '">' +
-          esc(sg.ev.title) + '</div>';
+          (isTask(sg.ev) ? taskMark(sg.ev) : '') + esc(sg.ev.title) + '</div>';
       });
       var nowLine = isToday ? '<div class="cal-wk-now" data-m="' + minutesOfDay(now) + '" style="top:' + (minutesOfDay(now) * hourPx / 60).toFixed(1) + 'px"></div>' : '';
       cols += '<div class="cal-wk-col' + (isToday ? ' cal-wk-today-col' : '') + '" data-day="' + ds + '">' + blocks + nowLine + '</div>';
@@ -1058,25 +1068,26 @@
     var baseS = ev ? (ev.repeat && isFinite(at) ? at : ev.start) : 0;
     var baseE = ev ? baseS + Math.max(0, ev.end - ev.start) : 0;
     var html = '<div class="mdeditor-tab item-card-form" id="calendarForm">' +
-      '<h3 class="common-tab-title">' + (isNew ? "Новое мероприятие" : "Мероприятие") + '</h3>' +
+      '<h3 class="common-tab-title" id="calFormTitle">' + (isNew ? "Новое мероприятие" : (isTask(ev) ? "Задача" : "Мероприятие")) + '</h3>' +
+      (isNew && TASKS ? '<div class="item-form-buttons cal-kind" id="calKind"><button type="button" class="workbooks-run-btn cal-kind-on" id="calKindEv">Мероприятие</button><button type="button" class="workbooks-run-btn" id="calKindTask">Задача</button></div>' : '') +
       '<input type="text" class="mdeditor-cleanup-input item-form-title" id="calTitle" placeholder="Название мероприятия" maxlength="120" autocomplete="off">' +
       '<div class="cal-field"><div class="item-form-hint">Начало</div><div class="cal-dt">' +
         '<input type="date" class="mdeditor-cleanup-input" id="calStartDate" aria-label="Дата начала">' +
         '<input type="time" class="mdeditor-cleanup-input" id="calStartTime" aria-label="Время начала">' +
       '</div></div>' +
-      '<div class="cal-field"><div class="item-form-hint">Окончание</div><div class="cal-dt">' +
+      '<div class="cal-field" id="calEndField"><div class="item-form-hint">Окончание</div><div class="cal-dt">' +
         '<input type="date" class="mdeditor-cleanup-input" id="calEndDate" aria-label="Дата окончания">' +
         '<input type="time" class="mdeditor-cleanup-input" id="calEndTime" aria-label="Время окончания">' +
       '</div></div>' +
-      '<div class="cal-field"><div class="item-form-hint">Повторения</div>' +
+      '<div class="cal-field" id="calRepField"><div class="item-form-hint">Повторения</div>' +
         '<select class="mdeditor-cleanup-input" id="calRepeat"><option value="">Не повторять</option>' +
         REPEATS.map(function(r){ return '<option value="' + r.key + '">' + r.label + '</option>'; }).join("") +
         '</select></div>' +
-      '<div class="cal-field"><div class="item-form-hint">Календарь</div>' +
+      '<div class="cal-field" id="calCalField"><div class="item-form-hint">Календарь</div>' +
         '<select class="mdeditor-cleanup-input" id="calCal">' +
         CALS.map(function(k){ return '<option value="' + k.key + '">' + k.label + '</option>'; }).join("") +
         '</select></div>' +
-      '<div class="cal-field"><div class="item-form-hint">Отображение</div>' +
+      '<div class="cal-field" id="calVisField"><div class="item-form-hint">Отображение</div>' +
         '<select class="mdeditor-cleanup-input" id="calVis"><option value="show">Показать</option><option value="hide">Скрыть</option></select></div>' +
       '<div class="item-form-error" id="calError"></div>' +
       '<div class="cal-scope" id="calScope" style="display:none"></div>' +
@@ -1139,6 +1150,24 @@
       ed.addEventListener(t, onEnd); et.addEventListener(t, onEnd);
     });
 
+    // режим «Задача»: только название, дата и время; сама задача создаётся на вкладке «Ожидание»
+    var taskMode = isTask(ev);
+    function applyKind(){
+      var hide = taskMode ? "none" : "";
+      ["calEndField", "calRepField", "calCalField", "calVisField"].forEach(function(id){
+        var el = document.getElementById(id); if(el) el.style.display = hide;
+      });
+      var hd = document.getElementById("calFormTitle");
+      if(hd && isNew) hd.textContent = taskMode ? "Новая задача" : "Новое мероприятие";
+      titleEl.placeholder = taskMode ? "Название задачи" : "Название мероприятия";
+      var b1 = document.getElementById("calKindEv"), b2 = document.getElementById("calKindTask");
+      if(b1 && b2){ b1.className = "workbooks-run-btn" + (taskMode ? "" : " cal-kind-on"); b2.className = "workbooks-run-btn" + (taskMode ? " cal-kind-on" : ""); }
+    }
+    var kEv = document.getElementById("calKindEv"), kTask = document.getElementById("calKindTask");
+    if(kEv) kEv.addEventListener("click", function(){ taskMode = false; applyKind(); });
+    if(kTask) kTask.addEventListener("click", function(){ taskMode = true; applyKind(); });
+    applyKind();
+
     function leave(){ renderMain(); }
     document.getElementById("calCancel").addEventListener("click", leave);
     if(window.AppNav) window.AppNav.push(function(){ if(screen === "form") renderMain(); });
@@ -1166,6 +1195,26 @@
 
     document.getElementById("calSave").addEventListener("click", function(){
       var hideNow = visEl.value === "hide";
+      if(taskMode && !readOnly){
+        var ttl = titleEl.value.replace(/^\s+|\s+$/g, "");
+        if(!ttl) return fail("Введите название задачи");
+        var ts = parseLocal(sd.value, st.value);
+        if(isNaN(ts)) return fail("Укажите дату и время");
+        if(!TASKS) return fail("Задачи недоступны");
+        var tl = load(), trec;
+        if(ev){
+          trec = { id: ev.id, title: ttl, start: ts, end: ts, repeat: "", cal: "personal", kind: "task", taskId: ev.taskId, updatedAt: Date.now() };
+          if(ttl !== ev.title){ try{ TASKS.rename(ev.taskId, ttl); }catch(e){} }
+        } else {
+          var tid = null;
+          try{ tid = TASKS.add(ttl); }catch(e){ tid = null; }
+          if(!tid) return fail("Не удалось создать задачу");
+          trec = { id: newId(), title: ttl, start: ts, end: ts, repeat: "", cal: "personal", kind: "task", taskId: tid, updatedAt: Date.now() };
+        }
+        if(!replaceInList(tl, trec)) tl.push(trec);
+        save(tl);
+        return renderMain();
+      }
       if(readOnly){ setHidden(ev.id, hideNow); return renderMain(); } // читатель группы меняет только своё отображение
       var title = titleEl.value.replace(/^\s+|\s+$/g, "");
       if(!title) return fail("Введите название мероприятия");
@@ -1218,6 +1267,7 @@
           return;
         }
         clearTimeout(armTimer);
+        if(isTask(ev) && TASKS){ try{ TASKS.remove(ev.taskId); }catch(e){} }
         save(load().filter(function(x){ return x.id !== ev.id; }));
         setHidden(ev.id, false);
         renderMain();
@@ -1314,6 +1364,8 @@
   window.CalendarTab = {
     // my.js отдаёт хранилище (см. шапку); зовётся до первого render
     setStore: function(store){ STORE = store || null; },
+    // my.js отдаёт работу с задачами «Ожидания» (см. шапку)
+    setTasks: function(t){ TASKS = t || null; },
     render: function(){ importLegacy(); loadMode(); weekStart = null; weekScrollKeep = null; lastSig = JSON.stringify(load()); renderMain(); },
     // данные могли измениться снаружи (пришли чужие правки группы): перерисовать текущий экран, если список изменился.
     // Открытую форму не трогаем; прокрутка сохраняется. my.js зовёт только когда вкладка «Календарь» на экране.

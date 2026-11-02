@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 118.0 (02.11)
+   Версия: 119.0 (02.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -10716,8 +10716,32 @@
   function ensureCalendarStore(){
     if(calendarStoreReady || !window.CalendarTab || !window.CalendarTab.setStore) return;
     window.CalendarTab.setStore(calendarStore);
+    if(window.CalendarTab.setTasks) window.CalendarTab.setTasks(calendarTasksApi);
     calendarStoreReady = true;
   }
+  // Задачи, добавленные прямо в календаре (calendar.js, переключатель «Задача»): живут на вкладке «Ожидание» (waiting);
+  // запись календаря хранит только taskId. state: «gone» — задача удалена (из календаря пропадает), «done» — отмечена выполненной.
+  var calendarTasksApi = {
+    add: function(title){
+      var id = createTaskWithText("waiting", String(title || "").replace(/\s+/g, " ").trim());
+      try{ if(currentSettingsTab === "waiting") renderSettingsTabTask("waiting"); }catch(e){}
+      return id;
+    },
+    state: function(id){
+      var t = getTaskById(id);
+      if(!t) return "gone";
+      return t.c.checked === true ? "done" : "open";
+    },
+    rename: function(id, title){
+      var t = getTaskById(id);
+      if(!t) return;
+      var txt = String(title || "").replace(/\s+/g, " ").trim();
+      if(!txt || t.c.text === txt) return;
+      t.c.text = txt;
+      saveTaskData(id, t.c);
+    },
+    remove: function(id){ deleteTaskPermanently(id); }
+  };
 
   // ===================== ЗАПОМИНАНИЕ СКРОЛЛА ВКЛАДОК =====================
   // Общая функция для ЛЮБОЙ вкладки #settingsTabContent — тем же приёмом, что
