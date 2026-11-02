@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 6.1 (01.11)
+   Версия: 6.2 (02.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -25,7 +25,7 @@
    OpenStreetMap (если сервис недоступен — остаётся расстояние по GPS) и кладёт готовую запись в очередь; страница забирает её
    `drain()` (при открытии вкладки, при возврате в приложение, после остановки) и сохраняет через хранилище.
 
-   Запись тренировки: {id, start, end, m (метры, итог), rawM (метры по GPS), totalMs, lostMs, gaps:[[с,по]], how:"map"|"raw"[, jumps (сколько раз GPS «уезжал» в сторону и это отброшено, только если было), rpe (1…10)]}.
+   Запись тренировки: {id, start, end, m (метры, итог), rawM (метры по GPS), totalMs, lostMs, gaps:[[с,по]], how:"map"|"raw"[, up (набор высоты, м, только если был; считает оболочка по высоте GPS), jumps (сколько раз GPS «уезжал» в сторону и это отброшено, только если было), rpe (1…10)]}.
 
    «Нагрузка» (sRPE, session RPE): сразу после остановки (кнопкой в панели, в уведомлении или в острове — не важно, запись попадает в `drain`)
    запись помечается как ожидающая оценки (поле `needRpe:1` в самой записи, поэтому метка уезжает в облако и окно оценки появляется и на другом устройстве; `needRpe` снимается при сохранении оценки; старый локальный список `workoutsPendingRpe_v1` один раз переносится в записи — `migrateLocalPending`) и в области панели записи (`#wkLive`,
@@ -293,7 +293,7 @@
     try{ STORE.put(rec.id, c); }
     catch(e){ setMessage("Не удалось сохранить оценку. Попробуйте ещё раз.", ""); return; }
     pendCache = null;
-    saveLastResult({ id: rec.id, start: rec.start, m: rec.m, totalMs: rec.totalMs, gaps: rec.gaps || [], how: rec.how, jumps: rec.jumps, rpe: rpeSel });
+    saveLastResult({ id: rec.id, start: rec.start, m: rec.m, totalMs: rec.totalMs, gaps: rec.gaps || [], how: rec.how, jumps: rec.jumps, up: rec.up, rpe: rpeSel });
     rpeSel = 0; message = ""; messageAction = "";
     render(); // обновит список, кнопку-индикатор и панель
     refreshTabMark();
@@ -468,6 +468,7 @@
       else if(r.id === pid) sub.push("ждёт оценки");
       if(r.imp) sub.push("импорт");
       else if(r.how === "raw") sub.push("по GPS");
+      if(num(r.up) > 0) sub.push("↑ " + Math.round(num(r.up)) + " м");
       if(num(r.jumps) > 0) sub.push("выбросов GPS: " + Math.round(num(r.jumps)));
       if(num(r.lostMs) >= 1000) sub.push("без учёта км: " + fmtDur(r.lostMs));
       var open = openedId === r.id;
@@ -776,7 +777,7 @@
     if(status === "searching"){
       body = '<div class="wk-note" id="wkSat"></div><div class="wk-note">Время тренировки начнётся, когда связь будет установлена.</div>';
     } else {
-      body = '<div class="wk-live-time" id="wkTime"></div><div class="wk-live-dist" id="wkDist"></div><div class="wk-lost" id="wkLost" style="display:none"></div>' +
+      body = '<div class="wk-live-time" id="wkTime"></div><div class="wk-live-dist" id="wkDist"></div><div class="wk-lost" id="wkLost" style="display:none"></div><div class="wk-note" id="wkClimb" style="display:none"></div>' +
         (status === "finishing" ? gapsHtml(st.gaps) : "");
     }
     var btns = "";
@@ -792,7 +793,11 @@
   function updateLiveNumbers(box, st){
     var sat = box.querySelector("#wkSat");
     if(sat) sat.textContent = (st.sat >= 0) ? ("Найдено спутников: " + st.sat + (st.satTotal > 0 ? " из " + st.satTotal + " в зоне видимости" : "")) : "Ждём сигнал GPS";
-    var t = box.querySelector("#wkTime"), d = box.querySelector("#wkDist"), l = box.querySelector("#wkLost");
+    var t = box.querySelector("#wkTime"), d = box.querySelector("#wkDist"), l = box.querySelector("#wkLost"), cl = box.querySelector("#wkClimb");
+    if(cl){
+      if(num(st.upM) >= 1){ cl.style.display = ""; cl.textContent = "Набрано высоты: " + Math.round(num(st.upM)) + " м"; }
+      else cl.style.display = "none";
+    }
     if(t) t.textContent = fmtClock(st.totalMs);
     if(d) d.textContent = fmtKm(st.distM);
     if(l){
@@ -812,7 +817,7 @@
       ? '<b>' + rpeSel + '</b> — ' + esc(RPE_LABELS[rpeSel - 1]) + '. ' + mins + ' мин × ' + rpeSel + ' = ' + (mins * rpeSel) + ' ' + pointsWord(mins * rpeSel)
       : 'Выберите оценку: 1 — очень легко, 10 — максимум усилий.';
     return '<div class="wk-card"><div class="wk-live-head"><span class="wk-dot ok"></span><span class="wk-rpe-q">Насколько тяжёлой была тренировка?</span></div>' +
-      '<div class="wk-note">' + esc(dayLabel(rec.start)) + ' · ' + esc(fmtHM(rec.start)) + ' · ' + esc(fmtClock(rec.totalMs)) + ' · ' + esc(fmtKm(rec.m)) + '</div>' +
+      '<div class="wk-note">' + esc(dayLabel(rec.start)) + ' · ' + esc(fmtHM(rec.start)) + ' · ' + esc(fmtClock(rec.totalMs)) + ' · ' + esc(fmtKm(rec.m)) + (num(rec.up) > 0 ? ' · ↑ ' + Math.round(num(rec.up)) + ' м' : '') + '</div>' +
       '<div class="wk-rpe-grid">' + btns + '</div>' +
       '<div class="wk-rpe-hint">' + hint + '</div>' +
       '<div class="wk-btns"><button type="button" class="wk-save" id="wkRpeSave"' + (rpeOk(rpeSel) ? "" : " disabled") + '>Сохранить</button></div></div>';
@@ -833,6 +838,7 @@
       '<div class="wk-live-time">' + esc(fmtKm(r.m)) + '</div>' +
       '<div class="wk-live-dist">' + esc(fmtClock(r.totalMs)) + '</div>' +
       '<div class="wk-note">' + esc(how) + '</div>' +
+      (num(r.up) > 0 ? '<div class="wk-note">Набрано высоты: ' + Math.round(num(r.up)) + ' м</div>' : "") +
       (num(r.jumps) > 0 ? '<div class="wk-note">Отброшено выбросов GPS: ' + Math.round(num(r.jumps)) + '</div>' : "") +
       (rpeOk(r.rpe) ? '<div class="wk-note">Нагрузка: ' + minutesOf(r) + ' мин × ' + r.rpe + ' = ' + loadOf(r) + ' ' + pointsWord(loadOf(r)) + '</div>' : "") +
       gapsHtml(r.gaps) + '</div>';
@@ -1182,6 +1188,7 @@
       gaps: Array.isArray(c.gaps) ? c.gaps.filter(function(g){ return Array.isArray(g) && g.length === 2; }) : [],
       how: (c.how === "map" || c.how === "imp") ? c.how : "raw"
     };
+    if(num(c.up) > 0) o.up = Math.round(num(c.up));
     if(num(c.jumps) > 0) o.jumps = Math.round(num(c.jumps));
     if(rpeOk(c.rpe)) o.rpe = Number(c.rpe);
     if(c.imp) o.imp = 1;
@@ -1292,6 +1299,7 @@
           gaps: Array.isArray(r.gaps) ? r.gaps.filter(function(g){ return Array.isArray(g) && g.length === 2; }) : [],
           how: r.how === "map" ? "map" : "raw"
         };
+        if(num(r.up) > 0) c.up = Math.round(num(r.up));
         if(num(r.jumps) > 0) c.jumps = Math.round(num(r.jumps));
         c.needRpe = 1; // сначала оценка тяжести (sRPE), итоговая карточка появится после неё; метка едет в облако вместе с записью
         try{ STORE.put(r.id, c); }catch(e){ return; }
@@ -1338,6 +1346,7 @@
           o.totalSeconds = Math.round(num(r.totalMs) / 1000);
           o.minutes = minutesOf(r);
           o.lostSeconds = Math.round(num(r.lostMs) / 1000);
+          if(num(r.up) > 0) o.climbMeters = Math.round(num(r.up));
           if(num(r.jumps) > 0) o.gpsJumps = Math.round(num(r.jumps));
           if(rpeOk(r.rpe)){ o.rpe = Number(r.rpe); o.points = loadOf(r); }
         }

@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 3.0 (31.10)
+// Версия: 4.0 (02.11)
 
 import android.content.Context
 import org.json.JSONArray
@@ -70,6 +70,11 @@ object WorkoutTracker {
     /** Сколько после «Связь установлена» держать надпись на острове (мс). */
     const val CONNECTED_BANNER_MS = 6_000L
 
+    /** Набор высоты: высота GPS сглаживается (коэффициент за точку), подъём засчитывается, когда сглаженная высота ушла от последнего минимума больше чем на ALT_STEP (м). */
+    private const val ALT_ALPHA = 0.15
+    private const val ALT_STEP = 3.0
+    private const val ALT_ACC_MAX = 15f          // точки с худшей вертикальной точностью (м) не учитываются
+
     private const val PREFS = "workouts_native"
     private const val KEY_FINISHED = "finished"
 
@@ -92,7 +97,8 @@ object WorkoutTracker {
         val distM: Double,
         val startedAt: Long,
         val gaps: List<LongArray>,
-        val connectedBanner: Boolean
+        val connectedBanner: Boolean,
+        val upM: Double = 0.0
     )
 
     private val lock = Any()
@@ -119,6 +125,11 @@ object WorkoutTracker {
     private var lastPtT = 0L                        // время последней точки, стыкующейся с маршрутом (в том числе не прибавившей метры)
     private val cand = ArrayList<DoubleArray>()      // точки, не стыкующиеся с маршрутом (возможный выброс или сдвиг)
     private var jumps = 0                            // сколько раз GPS «уезжал» (выброс или сдвиг), за тренировку
+    private var upM = 0.0                            // набрано высоты за тренировку, м
+    private var altSm = Double.NaN                   // сглаженная высота (NaN — ещё не было точки после начала/разрыва)
+    private var altRising = false
+    private var altBase = 0.0                        // низшая сглаженная высота с последнего спуска
+    private var altRef = 0.0                         // высшая сглаженная высота во время подъёма
 
     // раскрыть остров при ближайшем обновлении уведомления (старт и «Связь установлена»)
     private var floatPending = false
@@ -175,6 +186,8 @@ object WorkoutTracker {
             lastPtT = 0L
             cand.clear()
             jumps = 0
+            upM = 0.0
+            resetAlt()
             floatPending = true
             floatDeferred = false
             ComboGroup.onWorkoutBegin() // старт внутри окна сбора комбо (или ожидаемый им) — участник группы
@@ -206,6 +219,7 @@ object WorkoutTracker {
                 curSeg = null
                 lastPt = null
                 cand.clear()
+                resetAlt()
                 paused = false
             }
         }
@@ -256,7 +270,7 @@ object WorkoutTracker {
                 status = ST_FINISH
                 val copy = ArrayList<List<DoubleArray>>()
                 segments.forEach { copy.add(ArrayList(it)) }
-                Rec(startedAt, now, okMs + lostMs, lostMs, ArrayList(gaps), distM, copy, jumps)
+                Rec(startedAt, now, okMs + lostMs, lostMs, ArrayList(gaps), distM, copy, jumps, upM)
             }
         }
         if (rec == null) return false
@@ -287,7 +301,7 @@ object WorkoutTracker {
     }
 
     /** Новая точка GPS. */
-    fun onLocation(lat: Double, lon: Double, acc: Float, hasAcc: Boolean) {
+    fun onLocation(lat: Double, lon: Double, acc: Float, hasAcc: Boolean, alt: Double = Double.NaN, vAcc: Float = -1f) {
         synchronized(lock) {
             val now = System.currentTimeMillis()
             val good = hasAcc && acc <= ACC_MAX
@@ -301,6 +315,8 @@ object WorkoutTracker {
                     lastGoodAt = now
                     floatPending = true // «Связь установлена» — раскрыть остров
                     startSegment(lat, lon, now)
+                    resetAlt()
+                    addAlt(alt, vAcc)
                 }
                 ST_PAUSE -> {
                     if (good) lastGoodAt = now
@@ -314,9 +330,11 @@ object WorkoutTracker {
                         fix = true
                         floatPending = true
                         startSegment(lat, lon, now)
+                        resetAlt()
                     } else {
                         addPoint(lat, lon, now)
                     }
+                    addAlt(alt, vAcc)
                 }
                 else -> {}
             }
@@ -339,6 +357,7 @@ object WorkoutTracker {
                 curSeg = null
                 lastPt = null
                 cand.clear()
+                resetAlt()
                 floatPending = true
             }
         }
@@ -356,7 +375,7 @@ object WorkoutTracker {
             val g = ArrayList<LongArray>(gaps)
             if (status == ST_RUN && !fix) g.add(longArrayOf(gapStart, now))
             val banner = status == ST_RUN && fix && startedAt > 0 && now - startedAt < CONNECTED_BANNER_MS
-            return Snapshot(status, fix, sat, satTotal, ok + lost, lost, distM, startedAt, g, banner)
+            return Snapshot(status, fix, sat, satTotal, ok + lost, lost, distM, startedAt, g, banner, upM)
         }
     }
 
@@ -380,6 +399,7 @@ object WorkoutTracker {
             .put("totalMs", s.totalMs)
             .put("lostMs", s.lostMs)
             .put("distM", s.distM)
+            .put("upM", Math.round(s.upM))
             .put("startedAt", s.startedAt)
             .put("gaps", gaps)
             .put("pending", pendingCount(ctx))
@@ -395,6 +415,42 @@ object WorkoutTracker {
             if (fix) okMs += d else lostMs += d
         }
         lastTickAt = now
+    }
+
+    private fun resetAlt() {
+        altSm = Double.NaN
+        altRising = false
+    }
+
+    /** Новая высота GPS: сглаживание и подсчёт подъёма с гистерезисом (шум высоты GPS — единицы метров, его не считаем). */
+    private fun addAlt(alt: Double, vAcc: Float) {
+        if (alt.isNaN() || (vAcc > 0f && vAcc > ALT_ACC_MAX)) return
+        if (altSm.isNaN()) {
+            altSm = alt
+            altBase = alt
+            altRef = alt
+            altRising = false
+            return
+        }
+        altSm += ALT_ALPHA * (alt - altSm)
+        val s = altSm
+        if (altRising) {
+            if (s >= altRef) {
+                upM += s - altRef
+                altRef = s
+            } else if (altRef - s >= ALT_STEP) {
+                altRising = false
+                altBase = s
+            }
+        } else {
+            if (s < altBase) {
+                altBase = s
+            } else if (s - altBase >= ALT_STEP) {
+                altRising = true
+                upM += s - altBase
+                altRef = s
+            }
+        }
     }
 
     private fun startSegment(lat: Double, lon: Double, t: Long) {
@@ -489,7 +545,8 @@ object WorkoutTracker {
         val gaps: List<LongArray>,
         val rawM: Double,
         val segments: List<List<DoubleArray>>,
-        val jumps: Int
+        val jumps: Int,
+        val climbM: Double
     ) {
         fun toJson(distM: Double, how: String): JSONObject {
             val g = JSONArray()
@@ -505,6 +562,7 @@ object WorkoutTracker {
                 .put("m", Math.round(distM))
                 .put("how", how)
                 .put("jumps", jumps)
+                .put("up", Math.round(climbM))
         }
     }
 

@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (27.10)
+// Версия: 1.1 (02.11)
 
 import android.Manifest
 import android.app.Notification
@@ -170,7 +170,11 @@ class WorkoutService : Service() {
 
     private val listener = object : LocationListener {
         override fun onLocationChanged(loc: Location) {
-            WorkoutTracker.onLocation(loc.latitude, loc.longitude, loc.accuracy, loc.hasAccuracy())
+            WorkoutTracker.onLocation(
+                loc.latitude, loc.longitude, loc.accuracy, loc.hasAccuracy(),
+                if (loc.hasAltitude()) loc.altitude else Double.NaN,
+                if (Build.VERSION.SDK_INT >= 26 && loc.hasVerticalAccuracy()) loc.verticalAccuracyMeters else -1f
+            )
         }
 
         @Deprecated("Deprecated in Java")

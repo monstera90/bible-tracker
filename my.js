@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 121.0 (02.11)
+   Версия: 121.1 (02.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1735,20 +1735,20 @@
   var INFO_STACK_BTN_IDS = { set2s_4: "settingsTabSet2Btn4", extra3: "settingsTabExtra3Btn", year: "settingsTabYearBtn", screentime: "settingsTabScreenTimeBtn", set2s_13: "settingsTabSet2Btn13", set2s_12: "settingsTabSet2Btn12", mood: "settingsTabMoodBtn" };
   function isInfoStackTab(tab){ return INFO_STACK_TABS.indexOf(tab) !== -1; }
   // «Инструменты» (нижний язычок settingsTabToolsStackBtn между шестерёнкой и «Статистикой»): свой боковой ряд набора 1 (режим toolsStackMode),
-  // работает как шестерёнка. Вкладки ряда сверху вниз: QR-коды, Стол, Изменение размера изображения, Разделение epub, Извлечение субтитров,
+  // работает как шестерёнка. Вкладки ряда сверху вниз: Стол, Изменение размера изображения, Разделение epub, Извлечение субтитров,
   // Извлечение информации из графиков, Заполнение бланков, Объединение заметок. Ключи и кнопки у них прежние (set2s_*/set2b_*), живут в наборе 1.
   var TOOLS_STACK_BTN_ID = "settingsTabToolsStackBtn";
-  var TOOLS_STACK_TABS = ["set2s_9", "set2s_14", "set2s_6", "set2s_5", "set2b_4", "set2b_1", "set2b_2", "set2b_3"];
+  var TOOLS_STACK_TABS = ["set2s_14", "set2s_6", "set2s_5", "set2b_4", "set2b_1", "set2b_2", "set2b_3"];
   var TOOLS_STACK_BTN_IDS = {
-    set2s_9: "settingsTabSet2Btn9", set2s_14: "settingsTabSet2Btn14", set2s_6: "settingsTabSet2Btn6", set2s_5: "settingsTabSet2Btn5",
+    set2s_14: "settingsTabSet2Btn14", set2s_6: "settingsTabSet2Btn6", set2s_5: "settingsTabSet2Btn5",
     set2b_4: "settingsTabSet2GearBtn4", set2b_1: "settingsTabSet2GearBtn1", set2b_2: "settingsTabSet2GearBtn2", set2b_3: "settingsTabSet2GearBtn3"
   };
   function isToolsStackTab(tab){ return TOOLS_STACK_TABS.indexOf(tab) !== -1; }
   // «Активности» (нижний язычок settingsTabActivitiesStackBtn справа от «Задачи и календарь»): свой боковой ряд набора 1 (режим activitiesStackMode),
-  // работает как шестерёнка. Вкладки ряда сверху вниз: Закладки, Тренировки, Музыка, Поиск. Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
+  // работает как шестерёнка. Вкладки ряда сверху вниз: Закладки, Тренировки, Музыка, Поиск, QR-коды. Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
   var ACTIVITIES_STACK_BTN_ID = "settingsTabActivitiesStackBtn";
-  var ACTIVITIES_STACK_TABS = ["set2s_2", "workouts", "set2s_11", "set2s_3"];
-  var ACTIVITIES_STACK_BTN_IDS = { set2s_2: "settingsTabSet2Btn2", workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_3: "settingsTabSet2Btn3" };
+  var ACTIVITIES_STACK_TABS = ["set2s_2", "workouts", "set2s_11", "set2s_3", "set2s_9"];
+  var ACTIVITIES_STACK_BTN_IDS = { set2s_2: "settingsTabSet2Btn2", workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_3: "settingsTabSet2Btn3", set2s_9: "settingsTabSet2Btn9" };
   function isActivitiesStackTab(tab){ return ACTIVITIES_STACK_TABS.indexOf(tab) !== -1; }
   // «Клод» (нижний язычок settingsTabClaudeStackBtn между шестерёнкой и «Инструментами»): свой боковой ряд набора 1 (режим claudeStackMode),
   // работает как шестерёнка. Пока в ряду одна вкладка — «Claude» (set2s_10, claudetab.js); новая вкладка ряда: кнопка в `#settingsTabs` + ключ в списках ниже.
