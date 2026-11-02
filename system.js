@@ -1,9 +1,9 @@
 /* ===========================================================================
    system.js
-   Версия: 1.1 (01.11)
+   Версия: 1.2 (02.11)
    Вкладка «Система» (set2s_15, кнопка settingsTabSet2Btn15; язычок режима колеса — в вертикальном стеке набора 1 самый нижний).
    Здесь — функции, связанные с работой всей системы телефона. Сейчас одна: «Усиление громкости в системе»
-   (100 % по умолчанию / 125 % / 150 % / 200 %). Звук усиливает оболочка Android (VolumeBoost.kt, служба
+   (100 % по умолчанию / 125 % / 150 % / 200 %) и выбор способа усиления (1 — LoudnessEnhancer, 2 — DynamicsProcessing; мост ≥21, `volumeBoostSetEngine`): прошивки принимают эффекты по-разному. Звук усиливает оболочка Android (VolumeBoost.kt, служба
    VolumeBoostService.kt; мост LifeTrackerNative версии 20: volumeBoostGet / volumeBoostSet), страница только
    показывает выбор и состояние. В браузере без моста вкладка показывает пояснение.
    Точка входа — window.SystemTabMod.render(); my.js зовёт её из switchSettingsTab.
@@ -42,6 +42,8 @@
       ".sys-opt{flex:1 1 60px;min-width:60px;font:inherit;font-size:15px;font-weight:600;padding:10px 6px;border-radius:10px;" +
       "border:1px solid var(--wood,#8f7fb8);background:var(--parchment,#f4f0f8);color:var(--wood-dark,#6a5a91);cursor:pointer;}" +
       ".sys-opt.on{background:var(--wood,#8f7fb8);color:var(--parchment,#f4f0f8);}" +
+      ".sys-engine-title{font-size:13px;font-weight:600;color:var(--ink,#3b3350);margin:12px 0 6px;}" +
+      ".sys-engine-sub{font-size:12px;color:var(--ink-soft,#6a6080);margin:0 0 8px;line-height:1.35;}" +
       ".sys-status{font-size:13px;line-height:1.35;min-height:18px;color:var(--ink-soft,#6a6080);}" +
       ".sys-status.ok{color:var(--status-ok,#2fa15f);}" +
       ".sys-status.err{color:var(--status-err,#b0432e);}";
@@ -63,6 +65,11 @@
     var btns = root.querySelectorAll(".sys-opt");
     for(var i = 0; i < btns.length; i++){
       btns[i].classList.toggle("on", Number(btns[i].getAttribute("data-pct")) === pct);
+    }
+    var eng = st && st.engine === 1 ? 1 : 0;
+    var eb = root.querySelectorAll(".sys-eng");
+    for(var j = 0; j < eb.length; j++){
+      eb[j].classList.toggle("on", Number(eb[j].getAttribute("data-eng")) === eng);
     }
     var s = statusText(st);
     var el = document.getElementById("systemBoostStatus");
@@ -111,6 +118,11 @@
           '<div class="sys-sub">Усиливает звук всех приложений. 100 % — без усиления. Выше 100 % звук может хрипеть, а на полной громкости — вредить слуху и динамикам: начните со 125 %.</div>' +
           '<div class="sys-opts">' + opts + '</div>' +
           '<div class="sys-status" id="systemBoostStatus"></div>' +
+          (typeof b.volumeBoostSetEngine === "function" ?
+            '<div class="sys-engine-title">Способ усиления</div>' +
+            '<div class="sys-engine-sub">Если на 125–200 % громкость не меняется, переключите способ: телефоны принимают их по-разному. Слышимый эффект — только на звуке, который играет.</div>' +
+            '<div class="sys-opts"><button type="button" class="sys-opt sys-eng" data-eng="0">1</button>' +
+            '<button type="button" class="sys-opt sys-eng" data-eng="1">2</button></div>' : '') +
         '</div>' +
       '</div>';
     var root = document.getElementById(ROOT_ID);
@@ -118,6 +130,12 @@
       var t = ev.target;
       while(t && t !== root && !(t.classList && t.classList.contains("sys-opt"))) t = t.parentNode;
       if(!t || t === root) return;
+      if(t.classList.contains("sys-eng")){
+        var est = null;
+        try{ est = JSON.parse(b.volumeBoostSetEngine(Number(t.getAttribute("data-eng"))) || "{}"); }catch(e){ est = null; }
+        paint(est && est.pct ? est : readState());
+        return;
+      }
       var pct = Number(t.getAttribute("data-pct"));
       var st = null;
       try{ st = JSON.parse(b.volumeBoostSet(pct) || "{}"); }catch(e){ st = null; }

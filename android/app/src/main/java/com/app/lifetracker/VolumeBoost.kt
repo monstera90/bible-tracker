@@ -1,11 +1,13 @@
 package com.app.lifetracker
-// Версия: 2.0 (02.11)
+// Версия: 3.0 (02.11)
 
 import android.content.Context
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.AudioPlaybackConfiguration
+import android.media.audiofx.AudioEffect
+import android.media.audiofx.DynamicsProcessing
 import android.media.audiofx.LoudnessEnhancer
 import android.os.Build
 import android.os.Handler
@@ -26,6 +28,8 @@ import kotlin.math.roundToInt
  * Эффект на сессии 0 цепляется к тому аудиовыходу, который играл в момент создания, поэтому его пересоздаём при смене
  * выхода (наушники, Bluetooth, экран) и когда начинает играть новый плеер (`startWatch`: AudioPlaybackCallback,
  * AudioDeviceCallback, Android 8+). Без этого «включено», а звук не меняется.
+ * Способов два (`engine`, SharedPreferences `volume_boost`): 0 — `LoudnessEnhancer`, 1 — `DynamicsProcessing` (Android 9+,
+ * входное усиление в дБ + лимитер) на той же сессии 0. Прошивки по-разному принимают эти эффекты, выбор — на вкладке «Система».
  * Эффект живёт, пока жив процесс, поэтому при усилении > 100 % работает служба переднего плана [VolumeBoostService]
  * (она же раз в 15 с проверяет, что эффект не сброшен системой, и поднимает его заново). Выбранный процент хранится в
  * SharedPreferences `volume_boost` и поднимается после перезагрузки (`NotifyReceiver`) и при входе в приложение.
@@ -33,9 +37,11 @@ import kotlin.math.roundToInt
 object VolumeBoost {
     private const val PREFS = "volume_boost"
     private const val KEY_PCT = "pct"
+    private const val KEY_ENGINE = "engine"
     val ALLOWED = intArrayOf(100, 125, 150, 200)
 
     @Volatile private var enhancer: LoudnessEnhancer? = null
+    @Volatile private var dyn: AudioEffect? = null // DynamicsProcessing; тип общий, чтобы класс грузился и на Android 5
     private var appCtx: Context? = null
     private var playbackCb: AudioManager.AudioPlaybackCallback? = null
     private var deviceCb: AudioDeviceCallback? = null
@@ -48,6 +54,25 @@ object VolumeBoost {
     fun saved(ctx: Context): Int {
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_PCT, 100)
         return if (ALLOWED.contains(p)) p else 100
+    }
+
+    fun engine(ctx: Context): Int {
+        val e = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_ENGINE, 0)
+        return if (e == 1) 1 else 0
+    }
+
+    /** Выбрать способ усиления (0 — LoudnessEnhancer, 1 — DynamicsProcessing) и сразу применить. */
+    @Synchronized
+    fun setEngine(ctx: Context, engine: Int): String {
+        val app = ctx.applicationContext
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_ENGINE, if (engine == 1) 1 else 0).apply()
+        release()
+        lastError = ""
+        if (saved(app) > 100) {
+            ensure(app)
+            VolumeBoostService.start(app)
+        }
+        return stateJson(app)
     }
 
     private fun gainMb(pct: Int): Int = (2000.0 * log10(pct / 100.0)).roundToInt()
@@ -89,6 +114,7 @@ object VolumeBoost {
             return true
         }
         startWatch(ctx.applicationContext)
+        if (engine(ctx) == 1) return ensureDynamics(pct)
         try {
             var e = enhancer
             if (e != null) {
@@ -116,6 +142,61 @@ object VolumeBoost {
             lastError = (t.message ?: t.javaClass.simpleName)
             return false
         }
+    }
+
+    /** Способ 1: DynamicsProcessing на сессии 0 — входное усиление в дБ и лимитер против клиппинга. */
+    private fun ensureDynamics(pct: Int): Boolean {
+        if (Build.VERSION.SDK_INT < 28) {
+            lastError = "этот способ нужен Android 9 и новее"
+            return false
+        }
+        try {
+            var d = dyn as DynamicsProcessing?
+            if (d != null) {
+                val alive = try { d.enabled && d.hasControl() } catch (t: Throwable) { false }
+                if (!alive) {
+                    releaseDynamics()
+                    d = null
+                }
+            }
+            if (d == null) {
+                val cfg = DynamicsProcessing.Config.Builder(
+                    DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION, 2,
+                    false, 0, false, 0, false, 0, true
+                ).build()
+                cfg.setLimiterAllChannelsTo(DynamicsProcessing.Limiter(true, true, 0, 1f, 60f, 10f, -1f, 0f))
+                d = DynamicsProcessing(0, 0, cfg)
+                dyn = d
+            }
+            val db = gainMb(pct) / 100f
+            d.setInputGainAllChannelsTo(db)
+            d.enabled = true
+            d.setInputGainAllChannelsTo(db)
+            if (!d.hasControl()) {
+                lastError = "система не отдала управление общим звуком"
+                return false
+            }
+            lastError = ""
+            return true
+        } catch (t: Throwable) {
+            releaseDynamics()
+            lastError = (t.message ?: t.javaClass.simpleName)
+            return false
+        }
+    }
+
+    private fun releaseDynamics() {
+        try {
+            dyn?.enabled = false
+        } catch (t: Throwable) {
+            // уже снят
+        }
+        try {
+            dyn?.release()
+        } catch (t: Throwable) {
+            // уже снят
+        }
+        dyn = null
     }
 
     private fun scheduleRebuild() {
@@ -192,12 +273,17 @@ object VolumeBoost {
             // уже снят
         }
         enhancer = null
+        releaseDynamics()
     }
 
     /** {"pct":150,"works":true,"error":""} — works: эффект сейчас реально включён и управляется. */
     fun stateJson(ctx: Context): String {
         val pct = saved(ctx)
-        val works = pct <= 100 || (try { enhancer?.let { it.enabled && it.hasControl() } ?: false } catch (t: Throwable) { false })
-        return JSONObject().put("pct", pct).put("works", works).put("error", lastError).toString()
+        val works = pct <= 100 || (try {
+            if (engine(ctx) == 1) dyn?.let { it.enabled && it.hasControl() } ?: false
+            else enhancer?.let { it.enabled && it.hasControl() } ?: false
+        } catch (t: Throwable) { false })
+        return JSONObject().put("pct", pct).put("works", works).put("error", lastError)
+            .put("engine", engine(ctx)).put("sdk", Build.VERSION.SDK_INT).toString()
     }
 }

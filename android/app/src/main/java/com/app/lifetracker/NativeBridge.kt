@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 13.0 (01.11)
+// Версия: 14.0 (02.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
 // Версия: 9.0 (26.10) — мост версии 16: `getScreenTimeTotals` (счётчики музыки и таймеров для «Трекера экранов», `ScreenTimeStats`).
@@ -40,6 +40,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
+         * 21: способ усиления громкости (volumeBoostSetEngine: 0 — LoudnessEnhancer, 1 — DynamicsProcessing).
          * 20: вкладка «Система»: усиление громкости всей системы (volumeBoostGet / volumeBoostSet; 100/125/150/200 %).
          * 19: поиск по PDF (pdfGetFolder / pdfPickFolder / pdfListAll): папка с PDF и список файлов; сами файлы страница читает по https://localhost/__pdflib/<docId>.
          * 18: группа QR «Комбинированный» (comboGroupBegin / comboGroupEnd): таймеры, музыка и тренировка кода — одно целое (пауза и стоп общие, уведомления не смахиваются).
@@ -49,7 +50,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 20
+        const val BRIDGE_VERSION = 21
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -833,5 +834,12 @@ class NativeBridge(private val activity: MainActivity) {
     fun volumeBoostSet(pct: Int): String {
         if (!activity.pageTrusted) return "{}"
         return VolumeBoost.set(activity.applicationContext, pct)
+    }
+
+    /** Способ усиления: 0 — LoudnessEnhancer, 1 — DynamicsProcessing; возвращает состояние, как [volumeBoostGet]. */
+    @JavascriptInterface
+    fun volumeBoostSetEngine(engine: Int): String {
+        if (!activity.pageTrusted) return "{}"
+        return VolumeBoost.setEngine(activity.applicationContext, engine)
     }
 }
