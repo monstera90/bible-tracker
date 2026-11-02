@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 119.1 (02.11)
+   Версия: 120.0 (02.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -21238,7 +21238,7 @@
       }
       return workSource.filter(function(t){
         if(t.c.checked === true) return false;
-        return taskEffectiveTab(t) === "worktasks" || getTaskWorkState(t) !== "off" || hasTaskReminder(t);
+        return taskEffectiveTab(t) === "worktasks" || getTaskWorkState(t) !== "off";
       }).sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
     }
     if(tab === "red"){
@@ -21265,6 +21265,17 @@
         redList.sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
       }
       return redList;
+    }
+    if(tab === "waiting"){
+      // витрина «Ожидание»: задачи, перенесённые на вкладку, И любая незакрытая задача с напоминанием (c.remindAt), из какой бы вкладки она ни была (личные и общие)
+      var waitSource = getAllTasks();
+      if(isGroupTasksActive()){
+        try{ waitSource = waitSource.concat(getAllGroupTasks()); }catch(e){}
+      }
+      return waitSource.filter(function(t){
+        if(t.c.checked === true) return false;
+        return taskEffectiveTab(t) === "waiting" || hasTaskReminder(t);
+      }).sort(function(a,b){ return (a.c.createdAt != null ? a.c.createdAt : a.t) - (b.c.createdAt != null ? b.c.createdAt : b.t); });
     }
     var plain = getAllTasks().filter(function(t){ return t.c.tab === tab && t.c.checked !== true; });
     // общие задачи, которые пользователь сам разложил на эту вкладку (задача остаётся общей)
@@ -21815,6 +21826,7 @@
     function onTab(t){
       if(tabKey === "red") return taskEffectiveTab(t) === "red" || t.c.flag === "red" || t.c.flag === "yellow";
       if(tabKey === "worktasks") return taskEffectiveTab(t) === "worktasks" || getTaskWorkState(t) !== "off";
+      if(tabKey === "waiting") return taskEffectiveTab(t) === "waiting" || hasTaskReminder(t);
       return taskEffectiveTab(t) === tabKey;
     }
     var found = null;
@@ -22136,7 +22148,7 @@
   // c.remindAt — время напоминания в мс (локальное время устройства); null/нет поля — напоминания
   // нет. Состояния кнопки: нет (часы) / стоит на другую дату (часы в закрашенном круге, как «в
   // работе» у чемодана) / стоит на СЕГОДНЯ. Показ самих уведомлений — notifications.js. Задачи с
-  // напоминанием попадают на вкладку с чемоданчиком (см. getTasksForTab, ветка worktasks).
+  // напоминанием показываются на вкладке «Ожидание» (см. getTasksForTab, ветка waiting).
   function getTaskReminderAt(task){
     var v = task && task.c ? task.c.remindAt : null;
     return (typeof v === "number" && isFinite(v) && v > 0) ? v : null;
@@ -22234,7 +22246,7 @@
   // клик по уведомлению (notifications.js): открыть окно задач на вкладке с напоминаниями
   // («чемоданчик»; у общих задач — «Общие задачи») и подвести список к нужной строке
   function openReminderTask(id){
-    var tab = isGroupTaskId(id) ? "jointtasks" : "worktasks";
+    var tab = isGroupTaskId(id) ? "jointtasks" : "waiting";
     var alreadyOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay &&
       settingsModalOverlay.classList.contains("open");
     if(!alreadyOpen) openSettingsModal();
@@ -24016,13 +24028,13 @@
     // часы «напоминание»: тап — выбор даты и времени (повторный тап на уже стоящем напоминании —
     // изменение; в диалоге есть «Удалить напоминание»), долгое нажатие (как у чемодана и кружка
     // приоритета) — снять напоминание, а если его не было — тот же диалог. На вкладке с
-    // чемоданчиком состав списка зависит от напоминаний (getTasksForTab), поэтому там полная
+    // «Ожидание» состав списка зависит от напоминаний (getTasksForTab), поэтому там полная
     // пересборка.
     var reminderBtn = body.querySelector(".task-reminder-btn");
     if(reminderBtn){
       var afterReminderChange = function(){
         var effectiveTab = tabKey || task.c.tab;
-        if(effectiveTab === "worktasks") renderTaskTabList(effectiveTab, id);
+        if(effectiveTab === "waiting") renderTaskTabList(effectiveTab, id);
         else renderTaskRowView(id, tabKey, onAfterAction);
       };
       bindTapOrHold(reminderBtn, function(){
