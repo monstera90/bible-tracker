@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 17.2 (02.11)
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
@@ -3401,11 +3402,15 @@ window.initMdEditorModule = function(deps){
   // ТОЛЬКО если на устройстве уже настроена обычная синхронизация (раздел
   // 1 ТЗ): без неё нет syncId, а значит и ключа шифрования.
   // ---------------------------------------------------------------------
+  // Строка заголовков «Заметки | Книги» (общая с вкладкой «Книги», рисует my.js: window.NotesBooksSwitch); без неё — обычный заголовок
+  function notesHeadHtml(){
+    return (window.NotesBooksSwitch && window.NotesBooksSwitch.html) ? window.NotesBooksSwitch.html("notes") : '<h3 class="common-tab-title">Мои заметки</h3>';
+  }
   function renderSetupScreen(container){
     if(!getSyncId()){
       container.innerHTML =
         '<div class="mdeditor-tab settings-content-bottom">' +
-          '<h3 class="common-tab-title">Мои заметки</h3>' +
+          notesHeadHtml() +
           '<p class="mdeditor-hint">Заметки хранятся в облаке и шифруются кодом синхронизации устройства. Сначала настройте обычную синхронизацию, а затем вернитесь на эту вкладку.</p>' +
           '<div class="mdeditor-setup-row">' +
             '<button type="button" class="task-import-attach-btn" id="mdEditorOpenSyncBtn" title="Настроить синхронизацию">' + PAPERCLIP_ICON_SVG + '</button>' +
@@ -3420,7 +3425,7 @@ window.initMdEditorModule = function(deps){
       });
       return;
     }
-    container.innerHTML = '<div class="mdeditor-tab mdeditor-hint">Загрузка…</div>';
+    container.innerHTML = '<div class="mdeditor-tab">' + notesHeadHtml() + '<div class="mdeditor-hint">Загрузка…</div></div>';
   }
 
   // ---------------------------------------------------------------------
@@ -3456,7 +3461,7 @@ window.initMdEditorModule = function(deps){
     var hasAnyNotes = false;
     notesMap.forEach(function(rec){ if(rec && !rec.deleted && rec.name && !isCardMetaRec(rec)) hasAnyNotes = true; });
     var html = '<div class="mdeditor-tab">';
-    html += '<h3 class="common-tab-title">' + (isRoot ? "Мои заметки" : escName(node.name)) + '</h3>';
+    html += isRoot ? notesHeadHtml() : '<h3 class="common-tab-title">' + escName(node.name) + '</h3>';
     if(!items.length){
       html += '<div class="mdeditor-empty">' + (isRoot ? "Заметок пока нет." : "Здесь пока пусто.") + '</div>';
     } else {

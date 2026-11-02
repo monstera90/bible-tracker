@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 121.2 (02.11)
+   Версия: 122.0 (02.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1768,6 +1768,13 @@
   function isBooksBottomTab(tab){ return tab === BOOKS_TAB_KEY || tab === IPKD_TAB_KEY; }
   // нижняя вкладка без своего бокового ряда («Мои заметки» и «Мои книги» с ИПКД)
   function isStandaloneBottomTab(tab){ return isNotesBottomTab(tab) || isBooksBottomTab(tab); }
+  // «Заметки» и «Книги» — ОДИН нижний язычок (settingsTabSet2Btn1, пиктограмма заметок): внутри две части, между ними переключает строка заголовков
+  // «Заметки | Книги» (NotesBooksSwitch ниже: нажатие на заголовок или свайп). Кнопка «Книг» (settingsTabSet2Btn7) в нижнем ряду скрыта, ключи вкладок прежние.
+  var NB_LAST_KEY = "bibleNotesBooksLast_v1";
+  function isNotesBooksTab(tab){ return isNotesBottomTab(tab) || isBooksBottomTab(tab); }
+  function nbLastPart(){
+    try{ return localStorage.getItem(NB_LAST_KEY) === "books" ? "books" : "notes"; }catch(e){ return "notes"; }
+  }
   // вкладка набора 1 из «своих» (боковые ряды «Статистика», «Инструменты», «Активности», «Клод» и нижние «Мои заметки», «Мои книги») — набор 2 их не показывает
   function isOwnStackTab(tab){ return isInfoStackTab(tab) || isToolsStackTab(tab) || isActivitiesStackTab(tab) || isClaudeStackTab(tab) || isStandaloneBottomTab(tab); }
   // Вкладка «Тренировки» (workouts.js): верхняя в боковом ряду «Активности» (ACTIVITIES_STACK_TABS). В SETTINGS_BOTTOM_ORDER_1 НЕ входит
@@ -10936,6 +10943,7 @@
     updateNotesWide();
     // выделена одна вкладка — нажатая последней: «Мои заметки» / «Мои книги» (нижний ряд; ИПКД подсвечивает «Книги») или вкладка бокового ряда; язычки рядов — по их нажатию (см. ниже)
     rememberStackTab(tab); // последняя открытая вкладка своего бокового ряда — её откроет следующее нажатие на язычок ряда
+    if(isNotesBooksTab(tab)){ try{ localStorage.setItem(NB_LAST_KEY, isNotesBottomTab(tab) ? "notes" : "books"); }catch(e){} } // часть, которую откроет общий язычок «Заметки»/«Книги»
     updateBottomGearButtons();
     var container = document.getElementById("settingsTabContent");
     if(tab !== "set2s_12") progressPanelGoHome(); // панель «Прогресс» уходит домой до того, как содержимое окна заменит другая вкладка
@@ -13483,7 +13491,7 @@
     var listClass = coverMode ? "books-cover-grid" : "mdeditor-list";
     if(hideTitlesOn) listClass += " hide-titles";
     var html = '<div class="mdeditor-tab books-list-tab">';
-    html += '<h3 class="common-tab-title">Книги</h3>';
+    html += nbSwitchHtml("books");
     html += '<div class="' + listClass + '" id="booksList"></div>';
     html += '<div class="mdeditor-status" id="booksStatus"></div>';
     // Кнопка "Загрузить fb2, epub, pdf или zip книгу" переехала в нижний ряд — здесь остаётся только
@@ -16939,7 +16947,7 @@
     Array.prototype.forEach.call(document.querySelectorAll(".ipkd-day-num"), function(el){
       if(el.textContent !== day) el.textContent = day;
     });
-    var booksBtn = document.getElementById(SET2_TAB_IDS[BOOKS_TAB_KEY]);
+    var booksBtn = document.getElementById(SET2_TAB_IDS[NOTES_TAB_KEY]); // язычок «Книг» теперь общий с «Заметками»
     if(booksBtn) booksBtn.classList.toggle("ipkd-tab-unread", !isIpkdOpenedToday());
     stripDecorClasses();
   }
@@ -18525,6 +18533,55 @@
   var settingsTabGearBtn = document.getElementById("settingsTabGearBtn");
   var settingsTabYearBtn = document.getElementById("settingsTabYearBtn");
   var settingsTabMoodBtn = document.getElementById("settingsTabMoodBtn");
+  // ===== СТРОКА ЗАГОЛОВКОВ «ЗАМЕТКИ | КНИГИ» =====
+  // Общий переключатель вкладки «Заметки»/«Книги»: две подписи на одной строке, активная выглядит как обычный заголовок вкладки, вторая блеклая
+  // (.nb-switch, components.css). Рисуется на корневом списке заметок (mdeditor.js: renderListScreen/renderSetupScreen), в списке книг и в «Загрузке…»;
+  // на вложенных экранах (папка, открытая заметка, ридер, закладки) строки нет. Свайп работает только пока строка есть в DOM:
+  // влево — «Книги», вправо — «Заметки»; жест не берётся с полей ввода и редактора (.cm-editor), у краёв экрана (системный жест «назад») и при заметном сдвиге по вертикали.
+  function nbSwitchHtml(active){
+    return '<div class="nb-switch" role="tablist">' +
+      '<span class="nb-switch-item' + (active === "notes" ? " active" : "") + '" role="tab" data-nb="notes">Заметки</span>' +
+      '<span class="nb-switch-item' + (active === "books" ? " active" : "") + '" role="tab" data-nb="books">Книги</span>' +
+      '</div>';
+  }
+  function nbOpenPart(which){
+    var key = which === "books" ? BOOKS_TAB_KEY : NOTES_TAB_KEY;
+    if(key === currentSettingsTab) return;
+    setAllStackModesOff();
+    switchSettingsTab(key);
+  }
+  window.NotesBooksSwitch = { html: nbSwitchHtml, open: nbOpenPart };
+  (function(){
+    var host = document.getElementById("settingsTabContent");
+    if(!host) return;
+    host.addEventListener("click", function(e){
+      var it = e.target && e.target.closest ? e.target.closest(".nb-switch-item") : null;
+      if(it) nbOpenPart(it.getAttribute("data-nb"));
+    });
+    var sx = 0, sy = 0, st = 0, armed = false;
+    host.addEventListener("touchstart", function(e){
+      armed = false;
+      if(!e.touches || e.touches.length !== 1) return;
+      if(!host.querySelector(".nb-switch")) return;
+      var tg = e.target;
+      if(tg && tg.closest && tg.closest("input, textarea, select, [contenteditable='true'], .cm-editor")) return;
+      var t = e.touches[0];
+      var w = window.innerWidth || document.documentElement.clientWidth || 0;
+      if(t.clientX < 24 || (w && t.clientX > w - 24)) return;
+      sx = t.clientX; sy = t.clientY; st = Date.now(); armed = true;
+    }, {passive: true});
+    host.addEventListener("touchend", function(e){
+      if(!armed) return;
+      armed = false;
+      var t = e.changedTouches && e.changedTouches[0];
+      if(!t) return;
+      var dx = t.clientX - sx, dy = t.clientY - sy;
+      if(Date.now() - st > 700) return;
+      if(Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return;
+      nbOpenPart(dx < 0 ? "books" : "notes");
+    }, {passive: true});
+    host.addEventListener("touchcancel", function(){ armed = false; }, {passive: true});
+  })();
   // ФИКС — лог показал: клик по кнопке вкладки, которая УЖЕ активна, всё равно заново гоняет
   // switchSettingsTab -> полный innerHTML-ребилд списка (renderTaskTabList и т.п.), хотя показывать
   // по сути нечего нового — сам переход в историю (AppNav) при этом даже не попадает (isRealSwitch
@@ -18538,6 +18595,12 @@
     // «Мои заметки» и «Мои книги» — нижние вкладки без своего ряда: выключаем все боковые ряды (в том числе колесо), затем открываем вкладку
     if(isStandaloneBottomTab(tab)){
       setAllStackModesOff();
+      // общий язычок «Заметки»/«Книги»: внутри пары повторное нажатие ничего не делает (между частями переключают заголовки вверху),
+      // из любой другой вкладки открывает ту часть, где человек был в прошлый раз
+      if(tab === NOTES_TAB_KEY){
+        if(isNotesBooksTab(currentSettingsTab)) return;
+        if(nbLastPart() === "books") tab = BOOKS_TAB_KEY;
+      }
       if(tab !== currentSettingsTab) switchSettingsTab(tab);
       return;
     }
@@ -18910,7 +18973,7 @@
   }
   // в список попадает язычок с пиктограммой (пустые заглушки без значка не считаем)
   function isHideableTabButton(btn){
-    return !isProtectedTabButton(btn) && !!btn.querySelector("svg, .ipkd-tab-icon");
+    return !isProtectedTabButton(btn) && btn.id !== SET2_TAB_IDS[BOOKS_TAB_KEY] && !!btn.querySelector("svg, .ipkd-tab-icon"); // кнопка «Книг» в нижнем ряду скрыта всегда
   }
   // порядок — как на экране: боковые стеки сверху вниз (в DOM они идут снизу вверх), нижние ряды слева направо;
   // вкладки набора 2 — только когда он разблокирован
@@ -18931,7 +18994,7 @@
     }
     return res;
   }
-  var HIDEABLE_TAB_NAMES = {};
+  var HIDEABLE_TAB_NAMES = { settingsTabSet2Btn1: "Заметки и книги" };
   function hideableTabName(btn){
     if(HIDEABLE_TAB_NAMES[btn.id]) return HIDEABLE_TAB_NAMES[btn.id];
     var taskKey = btn.getAttribute("data-task");
@@ -19044,12 +19107,12 @@
   function bottomHighlightIds(){
     return ["settingsTabGearBtn", "settingsTabGearBtnSet2", TASKS_STACK_BTN_ID, INFO_STACK_BTN_ID, TOOLS_STACK_BTN_ID, ACTIVITIES_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY], SET2_TAB_IDS[BOOKS_TAB_KEY]];
   }
-  // Внизу выделен ровно один язычок: «Мои заметки» / «Мои книги» (у них бокового ряда нет), иначе язычок включённого бокового ряда
+  // Внизу выделен ровно один язычок: общий «Заметки»/«Книги» (у него бокового ряда нет), иначе язычок включённого бокового ряда
   // (колесо, «Задачи и календарь», «Статистика», «Инструменты», «Активности», «Клод»); второе выделение — вкладка в боковом ряду (applySideActive)
   function computeBottomOwner(){
     var t = currentSettingsTab;
     if(isNotesBottomTab(t)) return SET2_TAB_IDS[NOTES_TAB_KEY];
-    if(isBooksBottomTab(t)) return SET2_TAB_IDS[BOOKS_TAB_KEY];
+    if(isBooksBottomTab(t)) return SET2_TAB_IDS[NOTES_TAB_KEY]; // «Книги» (и ИПКД) — часть общего нижнего язычка «Заметки»
     if(bottomAltMode) return "settingsTabGearBtn";
     if(tasksStackMode) return TASKS_STACK_BTN_ID;
     if(infoStackMode) return INFO_STACK_BTN_ID;
