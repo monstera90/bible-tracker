@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 17.3 (03.11)
+   Версия: 18.0 (04.11)
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
@@ -4741,17 +4741,22 @@ window.initMdEditorModule = function(deps){
   // которое движок заметок шифрует, отправляет и принимает так же, как заметки (last-write-wins, тумбстоуны).
   var cardMetaPulledOk = false;   // с момента запуска (или смены аккаунта) облако заметок успешно прочитано целиком
   var cardMetaListener = null;
+  var cardMetaExtraListeners = []; // дополнительные слушатели (вкладки-сайты «Интернет», usertabs.js): слот cardMetaListener занят itemcards.js
   var cardMetaNotifyTimer = null;
   function cardMetaRecId(cardId){ return "cm" + cardId; }
   function scheduleCardMetaNotify(){
-    if(!cardMetaListener) return;
+    if(!cardMetaListener && !cardMetaExtraListeners.length) return;
     if(cardMetaNotifyTimer) clearTimeout(cardMetaNotifyTimer);
     cardMetaNotifyTimer = setTimeout(function(){
       cardMetaNotifyTimer = null;
       if(cardMetaListener){ try{ cardMetaListener(); }catch(e){} }
+      cardMetaExtraListeners.slice().forEach(function(fn){ try{ fn(); }catch(e){} });
     }, 300);
   }
   function setCardMetaListener(fn){ cardMetaListener = typeof fn === "function" ? fn : null; }
+  function addCardMetaListener(fn){
+    if(typeof fn === "function" && cardMetaExtraListeners.indexOf(fn) === -1) cardMetaExtraListeners.push(fn);
+  }
   // ready — заметки загружены и настроена синхронизация (без неё зеркало не ведём: dirty-флаги движка живут только
   // в памяти, запись «в никуда» потом не догнать); pulled — облако уже прочитано целиком (можно считать «удалена на другом устройстве»).
   function cardMetaStatus(){
@@ -6814,6 +6819,7 @@ window.initMdEditorModule = function(deps){
     cardMetaSave: cardMetaSave,
     cardMetaRemove: cardMetaRemove,
     setCardMetaListener: setCardMetaListener,
+    addCardMetaListener: addCardMetaListener,
     getSearchableNotes: getSearchableNotes,
     getBookmarkedNotes: function(){ return notesReady ? collectNoteBookmarkItems().map(function(x){ return { id: x.id, name: x.name }; }) : []; },
     // READER_PLAN.md, Этап B, шаг 5 (11.09) — для общего ZIP-бэкапа
