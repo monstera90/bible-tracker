@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 4.0 (03.11)
+// Версия: 5.0 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -116,6 +116,14 @@ private class SiteWebView(context: Context) : WebView(context) {
  * (`onAppHidden`), WebView вкладки НЕ ставится на паузу, а переезжает в плавающее окно: страница скриптом PIN_JS оставляет на экране
  * только видео. Вернулся на вкладку (`show`) или в приложение (`onAppVisible`, если вкладка была открыта) — WebView встаёт на место,
  * скрипт снимается. Плавающее окно одно: новое видео закрывает прежнее (оно ставится на паузу).
+ * Сейчас плавающее окно ВЫКЛЮЧЕНО (`FLOAT_WINDOW = false`), вместо него — фоновое воспроизведение с островом (см. ниже).
+ *
+ * Фоновое воспроизведение (SiteMediaService): если на вкладке играет видео или звук, а человек ушёл с вкладки (`hideTab`), погасил
+ * экран или свернул приложение (`pause`/`onAppHidden`), WebView вкладки НЕ ставится на паузу (`Tab.bg`), страница видит себя
+ * «видимой» (скрипт MEDIA_JS подменяет `document.hidden` и глушит `visibilitychange`, иначе сайты вроде YouTube сами ставят паузу),
+ * а служба переднего плана держит процесс и показывает уведомление с островом Xiaomi: «Пауза/Играть» и «Закрыть». Раз в секунду
+ * `bgPollTask` смотрит на ролик: пауза — меняется кнопка, ролик закончился или пропал — всё снимается (WebView засыпает);
+ * вернулись на вкладку — служба убирается, видео продолжает играть в странице.
  */
 class UserTabs(private val activity: MainActivity, private val host: FrameLayout) {
 
@@ -135,6 +143,9 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         private const val KIND_LEFT = 1   // плавающее: ушли с вкладки
         private const val KIND_MIN = 2    // плавающее: свернули приложение, пока вкладка была открыта
         private const val FLOAT_POLL_MS = 1000L
+        private const val FLOAT_WINDOW = false       // плавающее окно с видео (FloatingVideo) выключено: сначала остров
+        private const val BG_POLL_MS = 1000L
+        private const val BG_PAUSED_MAX_MS = 10L * 60L * 1000L // на паузе в фоне дольше — вкладка засыпает, уведомление снимается
 
         /**
          * Находит играющее видео и оставляет на странице только его: всё остальное скрыто (visibility), у предков видео снимаются
@@ -186,6 +197,44 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
 
         /** Пауза/воспроизведение закреплённого видео: [1, на паузе (0/1)] или [0]. */
         private const val TOGGLE_JS = "(function(){var v=document.querySelector('[data-ltpin-v]');if(!v)return [0];if(v.paused){v.play();}else{v.pause();}return [1,v.paused?1:0];})()"
+
+        /**
+         * Находит играющий ролик (видео со звуком или длиннее минуты, либо любое аудио; зацикленные фоновые ролики сайтов не в счёт),
+         * помечает его атрибутом data-ltmedia и делает страницу «видимой»: document.hidden = false, visibilitychange глушится.
+         * Ответ: [1] — нашёлся, [0] — играющего ролика нет.
+         */
+        private const val MEDIA_JS = """(function(){try{var D=document,W=window,vs=D.querySelectorAll('video,audio'),best=null,sc=-1,i;
+for(i=0;i<vs.length;i++){var v=vs[i];
+if(v.paused||v.ended||v.readyState<2||v.loop)continue;
+var long=(v.duration>60||!isFinite(v.duration));
+if(v.muted&&!long)continue;
+var s=(v.tagName==='VIDEO'?1000000000:0)+(long?100000000:0)+(v.videoWidth||0)*(v.videoHeight||0);
+if(s>sc){sc=s;best=v;}}
+if(!best)return [0];
+var old=D.querySelectorAll('[data-ltmedia]');for(i=0;i<old.length;i++)old[i].removeAttribute('data-ltmedia');
+best.setAttribute('data-ltmedia','1');
+if(!W.__ltVis){W.__ltVis=1;
+try{Object.defineProperty(D,'hidden',{configurable:true,get:function(){return W.__ltVis===1?false:D.webkitHidden;}});}catch(e){}
+try{Object.defineProperty(D,'visibilityState',{configurable:true,get:function(){return W.__ltVis===1?'visible':'hidden';}});}catch(e){}
+W.addEventListener('visibilitychange',function(e){if(W.__ltVis===1)e.stopImmediatePropagation();},true);}
+else{W.__ltVis=1;}
+return [1];}catch(e){return [0];}})()"""
+
+        /** Состояние помеченного ролика: [1, на паузе (0/1), закончился (0/1), название] или [0], если ролик пропал. */
+        private const val MEDIA_STATE_JS = """(function(){try{var v=document.querySelector('[data-ltmedia]');if(!v)return [0];
+var t='';try{var m=navigator.mediaSession&&navigator.mediaSession.metadata;if(m&&m.title)t=String(m.title);}catch(e){}
+if(!t)t=document.title||'';
+return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
+
+        /** Пауза/воспроизведение помеченного ролика: [1, на паузе (0/1)] или [0]. */
+        private const val MEDIA_TOGGLE_JS = "(function(){var v=document.querySelector('[data-ltmedia]');if(!v)return [0];if(v.paused){v.play();}else{v.pause();}return [1,v.paused?1:0];})()"
+
+        /** Пауза помеченного ролика и возврат страницы в обычный режим видимости. */
+        private const val MEDIA_PAUSE_JS = "(function(){var v=document.querySelector('[data-ltmedia]');if(v){try{v.pause();}catch(e){}}" +
+            "var W=window,D=document;W.__ltVis=0;try{delete D.hidden;}catch(e){}try{delete D.visibilityState;}catch(e){}return 1;})()"
+
+        /** Возврат страницы в обычный режим видимости (видео продолжает играть). */
+        private const val MEDIA_RESTORE_JS = "(function(){var W=window,D=document;W.__ltVis=0;try{delete D.hidden;}catch(e){}try{delete D.visibilityState;}catch(e){}return 1;})()"
         private val ID_RE = Regex("[A-Za-z0-9_]{1,40}")
         // Адреса, на которые сайт возвращает человека после входа/выхода (signin-oidc, signin-google, signout-callback-oidc, /oauth/callback…):
         // сами по себе страницей не являются, повторно открытые отвечают ошибкой — «местом на сайте» не запоминаются.
@@ -206,6 +255,7 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
         var saveTask: Runnable? = null
         var floating = false   // WebView сейчас в плавающем окне с видео (FloatingVideo), а не в host
         var floatKind = 0      // KIND_LEFT / KIND_MIN
+        var bg = false         // видео/звук играет в фоне (SiteMediaService), WebView не усыпляется
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -221,6 +271,8 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
     private var appVisible = true                // окно приложения на экране (onStart…onStop)
     private var floatWin: FloatingVideo? = null
     private var floatTab: Tab? = null            // вкладка в плавающем окне (одна)
+    private var bgTab: Tab? = null               // вкладка с фоновым видео (одна)
+    private var bgPausedSince = 0L
 
     private fun k(id: String, name: String) = "$id.$name"
     private fun dir(): File = File(activity.applicationContext.filesDir, DIR).apply { mkdirs() }
@@ -274,6 +326,7 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
         }
         val t = tabs.getOrPut(id) { Tab(id) }
         if (t.floating) closeFloat(t, false) // вернулись на вкладку: видео из плавающего окна встаёт обратно в страницу и играет дальше
+        if (t.bg) endBackground(t, pause = false, sleep = false) // фоновое видео продолжает играть уже в самой странице
         for (o in tabs.values) if (o !== t && o.shown) hideTab(o)
         val v = ensureView(t)
         val d = activity.resources.displayMetrics.density
@@ -357,8 +410,13 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
         saveTab(t)
         v.clearFocus()
         v.translationX = OFFSCREEN_X
-        // играет видео — оно уходит в плавающее окно, иначе вкладка ставится на паузу
-        if (t.ready) tryFloat(t, v, KIND_LEFT) { if (!t.shown && !t.floating && t.view === v) v.onPause() }
+        if (!t.ready || t.bg) return
+        if (FLOAT_WINDOW) {
+            tryFloat(t, v, KIND_LEFT) { if (!t.shown && !t.floating && t.view === v) v.onPause() }
+        } else {
+            // играет видео/звук — вкладка остаётся живой в фоне (остров), иначе засыпает
+            tryBackground(t, v) { if (!t.shown && !t.floating && !t.bg && t.view === v) v.onPause() }
+        }
     }
 
     /** Прячет показанную вкладку (страница живёт за краем, позиция сохраняется). */
@@ -387,6 +445,7 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
         iconFile(id).delete()
         val t = tabs[id] ?: return
         if (t.floating) closeFloat(t, true)
+        if (t.bg) endBackground(t, pause = true, sleep = false)
         t.curUrl = clean
         t.curTitle = ""
         val v = t.view ?: return
@@ -402,6 +461,7 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
         val t = tabs.remove(id)
         if (t != null) {
             if (t.floating) closeFloat(t, true)
+            if (t.bg) endBackground(t, pause = true, sleep = false)
             if (t.shown) activity.setSiteKeyboardOverlay(false)
             val task = t.saveTask
             if (task != null) handler.removeCallbacks(task)
@@ -452,6 +512,13 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
     fun pause() {
         for (t in tabs.values) saveTab(t)
         try { CookieManager.getInstance().flush() } catch (e: Exception) { }
+        if (!FLOAT_WINDOW) {
+            // Служба запускается здесь, пока приложение ещё на экране: из onStop система может запуск не разрешить.
+            val t = shownTab()
+            val v = t?.view
+            if (t != null && v != null && t.ready && !t.bg) tryBackground(t, v) { }
+            SiteMedia.onAppBackground(activity.applicationContext)
+        }
     }
 
     fun destroy() {
@@ -461,6 +528,10 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
         floatTab = null
         floatWin?.detach()
         floatWin = null
+        handler.removeCallbacks(bgPollTask)
+        bgTab?.bg = false
+        bgTab = null
+        SiteMedia.end(activity.applicationContext)
         for (t in tabs.values) {
             val v = t.view ?: continue
             t.view = null
@@ -524,6 +595,10 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
         val t = shownTab() ?: return
         val v = t.view ?: return
         if (!t.ready || t.floating) return
+        if (!FLOAT_WINDOW) {
+            if (!t.bg) tryBackground(t, v) { }
+            return
+        }
         if (!win().canOverlay()) return // без разрешения «Поверх других приложений» окна вне приложения не будет
         tryFloat(t, v, KIND_MIN) { }
     }
@@ -531,6 +606,8 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
     /** Приложение вернулось на экран (onStart): видео, ушедшее в окно при сворачивании, встаёт обратно на свою вкладку. */
     fun onAppVisible() {
         appVisible = true
+        val b = bgTab
+        if (b != null && b.bg && b.shown) endBackground(b, pause = false, sleep = false) // вкладка снова на экране — остров не нужен
         val t = floatTab ?: return
         if (!t.floating || t.floatKind != KIND_MIN) return
         closeFloat(t, false)
@@ -650,6 +727,134 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
         }
     }
 
+    // ---------- фоновое воспроизведение (остров) ----------
+
+    private val bgListener = object : SiteMedia.Listener {
+        override fun onToggle() {
+            val v = bgTab?.view ?: return
+            v.evaluateJavascript(MEDIA_TOGGLE_JS) { raw ->
+                val a = parseNums(raw)
+                val t = bgTab
+                if (t != null && t.bg && a != null && a.size > 1 && a[0] == 1.0) {
+                    val paused = a[1] == 1.0
+                    bgPausedSince = if (paused) System.currentTimeMillis() else 0L
+                    SiteMedia.update(activity.applicationContext, SiteMedia.title, SiteMedia.sub, !paused)
+                }
+            }
+        }
+
+        override fun onClose() {
+            val t = bgTab ?: return
+            endBackground(t, pause = true, sleep = true)
+        }
+    }
+
+    private fun hostOf(url: String): String = try {
+        Uri.parse(url).host?.removePrefix("www.") ?: ""
+    } catch (e: Exception) {
+        ""
+    }
+
+    /**
+     * Ищет на странице играющий ролик (MEDIA_JS). Нашёлся — вкладка остаётся живой в фоне и показывается уведомление с островом;
+     * нет — вызывается [onNone] (при уходе с вкладки — пауза WebView, как раньше).
+     */
+    private fun tryBackground(t: Tab, v: WebView, onNone: () -> Unit) {
+        if (t.bg) return
+        v.evaluateJavascript(MEDIA_JS) { raw ->
+            val a = parseNums(raw)
+            if (a == null || a.isEmpty() || a[0] != 1.0) {
+                onNone()
+            } else if (t.view === v && !t.bg) {
+                if (t.shown && NotifyStore.appForeground) {
+                    // пока шёл ответ страницы, человек вернулся на вкладку/в приложение — фоновый режим не нужен
+                    v.evaluateJavascript(MEDIA_RESTORE_JS, null)
+                } else {
+                    startBackground(t, v)
+                }
+            }
+        }
+    }
+
+    private fun startBackground(t: Tab, v: WebView) {
+        val prev = bgTab
+        if (prev != null && prev !== t) endBackground(prev, pause = true, sleep = true) // фоновая вкладка одна: прежняя замолкает
+        t.bg = true
+        bgTab = t
+        bgPausedSince = 0L
+        v.onResume() // WebView вкладки не должен быть на паузе, пока играет видео
+        val title = t.curTitle.ifEmpty { prefs.getString(k(t.id, "title"), "") ?: "" }.ifEmpty { "Видео" }
+        SiteMedia.begin(activity.applicationContext, title, hostOf(t.curUrl), bgListener)
+        handler.removeCallbacks(bgPollTask)
+        handler.postDelayed(bgPollTask, BG_POLL_MS)
+    }
+
+    /**
+     * Снимает фоновый режим вкладки: уведомление и остров убираются, страница возвращается в обычный режим видимости.
+     * [pause] — ролик ставится на паузу; [sleep] — WebView вкладки засыпает (если она не на экране).
+     */
+    private fun endBackground(t: Tab, pause: Boolean, sleep: Boolean) {
+        if (!t.bg) return
+        handler.removeCallbacks(bgPollTask)
+        t.bg = false
+        if (bgTab === t) bgTab = null
+        SiteMedia.end(activity.applicationContext)
+        val v = t.view ?: return
+        v.evaluateJavascript(if (pause) MEDIA_PAUSE_JS else MEDIA_RESTORE_JS, null)
+        if (sleep && !t.shown) {
+            // даём скрипту паузы выполниться, потом усыпляем WebView
+            handler.postDelayed({ if (t.view === v && !t.shown && !t.floating && !t.bg) v.onPause() }, 300L)
+        }
+    }
+
+    /** Раз в секунду смотрит на ролик: пауза/«играет» и название — в уведомление; закончился или пропал — фоновый режим снимается. */
+    private val bgPollTask = object : Runnable {
+        override fun run() {
+            val t = bgTab
+            val v = t?.view
+            if (t == null || v == null || !t.bg) return
+            if (t.shown && NotifyStore.appForeground) {
+                endBackground(t, pause = false, sleep = false) // вкладка на экране, приложение открыто — остров не нужен
+                return
+            }
+            v.evaluateJavascript(MEDIA_STATE_JS) { raw ->
+                if (bgTab === t && t.bg) {
+                    val arr = try { if (raw.isNullOrEmpty() || raw == "null") null else JSONArray(raw) } catch (e: Exception) { null }
+                    if (arr == null || arr.optInt(0) != 1) {
+                        // ролик пропал (сайт мог подставить следующий) — ищем играющий заново
+                        v.evaluateJavascript(MEDIA_JS) { raw2 ->
+                            val a = parseNums(raw2)
+                            if (bgTab === t && t.bg) {
+                                if (a != null && a.isNotEmpty() && a[0] == 1.0) {
+                                    handler.postDelayed(this, BG_POLL_MS)
+                                } else {
+                                    endBackground(t, pause = false, sleep = true)
+                                }
+                            }
+                        }
+                    } else if (arr.optInt(2) == 1) {
+                        endBackground(t, pause = false, sleep = true) // ролик закончился
+                    } else {
+                        val paused = arr.optInt(1) == 1
+                        val now = System.currentTimeMillis()
+                        if (paused) {
+                            if (bgPausedSince == 0L) bgPausedSince = now
+                        } else {
+                            bgPausedSince = 0L
+                        }
+                        if (paused && !t.shown && now - bgPausedSince > BG_PAUSED_MAX_MS) {
+                            endBackground(t, pause = false, sleep = true) // долго на паузе в фоне — вкладка засыпает
+                        } else {
+                            val title = arr.optString(3, "").ifEmpty { t.curTitle }.ifEmpty { "Видео" }
+                            SiteMedia.update(activity.applicationContext, title, hostOf(t.curUrl), !paused)
+                            handler.postDelayed(this, BG_POLL_MS)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ---------- WebView ----------
 
     private fun initialParams(): FrameLayout.LayoutParams {
@@ -670,7 +875,7 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
         if (live < MAX_LIVE) return
         var victim: Tab? = null
         for (t in tabs.values) {
-            if (t === except || t.shown || t.floating || t.view == null) continue
+            if (t === except || t.shown || t.floating || t.bg || t.view == null) continue
             if (victim == null || t.lastUsed < victim.lastUsed) victim = t
         }
         val vt = victim ?: return
@@ -793,6 +998,7 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
             override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
                 // Процесс рендера упал: WebView убирается, при следующем показе он создастся заново и встанет на сохранённое место.
                 activity.runOnUiThread {
+                    if (t.bg) endBackground(t, pause = false, sleep = false)
                     if (t.floating) {
                         handler.removeCallbacks(floatPollTask)
                         floatWin?.detach()
@@ -879,7 +1085,7 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
         if (t.ready) return
         val v = t.view ?: return
         t.ready = true
-        if (t.shown) reveal(t) else v.onPause()
+        if (t.shown) reveal(t) else if (!t.bg) v.onPause()
         saveTab(t)
     }
 

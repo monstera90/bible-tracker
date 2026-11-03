@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 10.0 (03.11)
+// Версия: 10.1 (03.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
 // Версия: 4.0 (25.10) — выбор папки с музыкой (`musicFolderLauncher`, `pickMusicFolder`) для вкладки «Музыка».
@@ -361,6 +361,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         webView.onResume()
+        // Видео, игравшее в фоне, пока приложение было на паузе (шторка, переключение), снова на экране — остров не нужен.
+        userTabs.onAppVisible()
         // Chromium мог не нарисовать кадр, пока окно было скрыто/на паузе (возврат жестом «назад», быстрое переключение приложений):
         // просим перерисовать сразу после того, как окно встало на место.
         webView.post { if (!isDestroyed) webView.invalidate() }
