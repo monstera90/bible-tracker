@@ -1,6 +1,6 @@
 /* ===========================================================================
    usertabs.js
-   Версия: 1.3 (02.11)
+   Версия: 1.4 (02.11)
    Вкладки-сайты бокового ряда «Клод» (кнопка «+» над вкладкой «Claude», set2s_10). Каждая вкладка — свой адрес, который открывается
    по умолчанию; дальше вкладка помнит, где человек остановился на сайте (в том числе после закрытия приложения).
    Сам сайт показывает ОБОЛОЧКА: отдельный WebView на вкладку поверх области #userTabView (мост LifeTrackerNative ≥ 22, utab*;
@@ -325,6 +325,13 @@
       if(b){ try{ b.utabGo(t.id, u); }catch(e){} }
       render(keyOf(t.id));
     }
+    // клавиатура не сжимает окно (вкладки остаются на местах): поле адреса вверху, его она не закрывает
+    function kbOverlay(on){
+      var nb = window.LifeTrackerNative;
+      if(nb && typeof nb.setKeyboardOverlay === "function"){ try{ nb.setKeyboardOverlay(!!on); }catch(e){} }
+    }
+    input.addEventListener("focus", function(){ kbOverlay(true); });
+    input.addEventListener("blur", function(){ kbOverlay(false); });
     el("utOpen").addEventListener("click", openIt);
     input.addEventListener("keydown", function(e){ if(e.key === "Enter" || e.keyCode === 13){ e.preventDefault(); openIt(); } });
     if(hasHome){
