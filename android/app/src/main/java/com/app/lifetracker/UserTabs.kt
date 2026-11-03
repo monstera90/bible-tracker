@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 5.0 (03.11)
+// Версия: 5.1 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -145,6 +145,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         private const val FLOAT_POLL_MS = 1000L
         private const val FLOAT_WINDOW = false       // плавающее окно с видео (FloatingVideo) выключено: сначала остров
         private const val BG_POLL_MS = 1000L
+        private const val PROBE_MS = 2000L
         private const val BG_PAUSED_MAX_MS = 10L * 60L * 1000L // на паузе в фоне дольше — вкладка засыпает, уведомление снимается
 
         /**
@@ -326,7 +327,6 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
         }
         val t = tabs.getOrPut(id) { Tab(id) }
         if (t.floating) closeFloat(t, false) // вернулись на вкладку: видео из плавающего окна встаёт обратно в страницу и играет дальше
-        if (t.bg) endBackground(t, pause = false, sleep = false) // фоновое видео продолжает играть уже в самой странице
         for (o in tabs.values) if (o !== t && o.shown) hideTab(o)
         val v = ensureView(t)
         val d = activity.resources.displayMetrics.density
@@ -353,6 +353,7 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
             handler.postDelayed({ if (t.shown && !t.ready) markReady(t) }, REVEAL_TIMEOUT_MS)
         }
         startPeriodicSave()
+        startProbe()
     }
 
     /** Экранная клавиатура окно не сжимает (вкладки на местах): WebView укорачивается до её верха. */
@@ -524,6 +525,7 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
     fun destroy() {
         handler.removeCallbacksAndMessages(null)
         periodicOn = false
+        probeOn = false
         floatTab?.floating = false
         floatTab = null
         floatWin?.detach()
@@ -606,8 +608,7 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
     /** Приложение вернулось на экран (onStart): видео, ушедшее в окно при сворачивании, встаёт обратно на свою вкладку. */
     fun onAppVisible() {
         appVisible = true
-        val b = bgTab
-        if (b != null && b.bg && b.shown) endBackground(b, pause = false, sleep = false) // вкладка снова на экране — остров не нужен
+        startProbe()
         val t = floatTab ?: return
         if (!t.floating || t.floatKind != KIND_MIN) return
         closeFloat(t, false)
@@ -749,6 +750,31 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
         }
     }
 
+    private var probeOn = false
+
+    /**
+     * Пока вкладка на экране, раз в 2 с ищет играющий ролик: служба переднего плана должна стартовать, ПОКА приложение видно (из фона
+     * система запуск запрещает), — тогда при сворачивании остаётся только перепоставить уведомление (остров).
+     */
+    private fun startProbe() {
+        if (probeOn) return
+        probeOn = true
+        handler.postDelayed(probeTask, PROBE_MS)
+    }
+
+    private val probeTask = object : Runnable {
+        override fun run() {
+            val t = shownTab()
+            if (t == null || !appVisible) {
+                probeOn = false
+                return
+            }
+            val v = t.view
+            if (v != null && t.ready && !t.bg) tryBackground(t, v) { }
+            handler.postDelayed(this, PROBE_MS)
+        }
+    }
+
     private fun hostOf(url: String): String = try {
         Uri.parse(url).host?.removePrefix("www.") ?: ""
     } catch (e: Exception) {
@@ -766,12 +792,7 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
             if (a == null || a.isEmpty() || a[0] != 1.0) {
                 onNone()
             } else if (t.view === v && !t.bg) {
-                if (t.shown && NotifyStore.appForeground) {
-                    // пока шёл ответ страницы, человек вернулся на вкладку/в приложение — фоновый режим не нужен
-                    v.evaluateJavascript(MEDIA_RESTORE_JS, null)
-                } else {
-                    startBackground(t, v)
-                }
+                startBackground(t, v)
             }
         }
     }
@@ -813,10 +834,6 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
             val t = bgTab
             val v = t?.view
             if (t == null || v == null || !t.bg) return
-            if (t.shown && NotifyStore.appForeground) {
-                endBackground(t, pause = false, sleep = false) // вкладка на экране, приложение открыто — остров не нужен
-                return
-            }
             v.evaluateJavascript(MEDIA_STATE_JS) { raw ->
                 if (bgTab === t && t.bg) {
                     val arr = try { if (raw.isNullOrEmpty() || raw == "null") null else JSONArray(raw) } catch (e: Exception) { null }
@@ -842,7 +859,7 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
                         } else {
                             bgPausedSince = 0L
                         }
-                        if (paused && !t.shown && now - bgPausedSince > BG_PAUSED_MAX_MS) {
+                        if (paused && now - bgPausedSince > BG_PAUSED_MAX_MS) {
                             endBackground(t, pause = false, sleep = true) // долго на паузе в фоне — вкладка засыпает
                         } else {
                             val title = arr.optString(3, "").ifEmpty { t.curTitle }.ifEmpty { "Видео" }

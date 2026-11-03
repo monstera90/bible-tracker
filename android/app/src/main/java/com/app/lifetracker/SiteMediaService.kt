@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (03.11)
+// Версия: 1.1 (03.11)
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -115,6 +115,11 @@ class SiteMediaService : Service() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i) else ctx.startService(i)
             } catch (e: Exception) {
                 // запуск из фона не разрешён: видео играет, уведомление обновится при следующем изменении
+                try {
+                    android.widget.Toast.makeText(ctx, "Остров видео не запущен: " + e.javaClass.simpleName, android.widget.Toast.LENGTH_LONG).show()
+                } catch (e2: Exception) {
+                    // подсказка не показалась
+                }
             }
         }
 
