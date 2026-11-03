@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 24.0 (02.11)
+   Версия: 24.1 (03.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -5047,6 +5047,23 @@ html[data-theme="14"] .pdf-hl{
   height:100%;
   background:#fff;
 }
+
+/* картинки задачи в форме календаря (calendar.js): миниатюры (.task-img-wrap подставляет my.js, клик — просмотр) с крестиком и кнопка-скрепка */
+.cal-img-row{ display:flex; flex-wrap:wrap; }
+.cal-img-row:empty{ display:none; }
+.cal-img-item{ position:relative; margin:0 10px 10px 0; }
+.cal-img-item .task-img-wrap{ width:84px; height:84px; margin:0; }
+.cal-img-del{
+  position:absolute; top:-7px; right:-7px;
+  width:22px; height:22px; padding:0;
+  border-radius:50%;
+  border:1px solid var(--groove-shadow);
+  background:#fffef8; color:var(--wood);
+  font-size:15px; line-height:20px; text-align:center;
+  box-shadow:0 1px 3px rgba(0,0,0,.3);
+  cursor:pointer;
+}
+.cal-attach-btn svg{ width:16px; height:16px; vertical-align:-3px; margin-right:6px; }
 
 /* задачи в календаре (calendar.js): переключатель «Мероприятие / Задача», блок задачи в неделе, выполненная задача */
 .cal-kind .workbooks-run-btn{ opacity:.55; }

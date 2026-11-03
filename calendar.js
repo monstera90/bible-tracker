@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 14.2 (02.11)
+   Версия: 15.0 (03.11)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самостоятельный нижний язычок набора 1 справа от «Задачи»,
@@ -1073,6 +1073,7 @@
       '<h3 class="common-tab-title" id="calFormTitle">' + (isNew ? "Новое мероприятие" : (isTask(ev) ? "Задача" : "Мероприятие")) + '</h3>' +
       (isNew && TASKS ? '<div class="item-form-buttons cal-kind" id="calKind"><button type="button" class="workbooks-run-btn cal-kind-on" id="calKindEv">Мероприятие</button><button type="button" class="workbooks-run-btn" id="calKindTask">Задача</button></div>' : '') +
       '<input type="text" class="mdeditor-cleanup-input item-form-title" id="calTitle" placeholder="Название мероприятия" maxlength="120" autocomplete="off">' +
+      '<div class="cal-field" id="calImgField" style="display:none"><div class="cal-img-row" id="calImgRow"></div><button type="button" class="workbooks-run-btn cal-attach-btn" id="calAttach"></button></div>' +
       '<div class="cal-field"><div class="item-form-hint">Начало</div><div class="cal-dt">' +
         '<input type="date" class="mdeditor-cleanup-input" id="calStartDate" aria-label="Дата начала">' +
         '<input type="time" class="mdeditor-cleanup-input" id="calStartTime" aria-label="Время начала">' +
@@ -1154,11 +1155,46 @@
 
     // режим «Задача»: только название, дата и время; сама задача создаётся на вкладке «Ожидание»
     var taskMode = isTask(ev);
+    // Картинки задачи («скрепка») — те же, что у задачи на вкладках задач: живут в её тексте, календарь только показывает и меняет их через TASKS
+    var imgs = [], taskInfo = null;
+    if(ev && isTask(ev) && TASKS && TASKS.get){ try{ taskInfo = TASKS.get(ev.taskId); }catch(e){ taskInfo = null; } }
+    if(taskInfo){
+      imgs = taskInfo.images.slice();
+      if(taskInfo.title) titleEl.value = taskInfo.title; // название берётся из самой задачи (его могли поправить на вкладке задач)
+    }
+    var imgsStart = imgs.join("\n");
+    var canAttach = !!(TASKS && TASKS.pickImage) && !readOnly;
+    var imgRowEl = document.getElementById("calImgRow"), attachBtn = document.getElementById("calAttach");
+    function renderImgs(){
+      if(!imgRowEl) return;
+      var ph = (TASKS && TASKS.attachIcon) || "";
+      imgRowEl.innerHTML = imgs.map(function(n, i){
+        return '<span class="cal-img-item"><span class="task-img-wrap" data-img-name="' + esc(n) + '">' + ph + '</span>' +
+          '<button type="button" class="cal-img-del" data-i="' + i + '" aria-label="Убрать картинку">\u00d7</button></span>';
+      }).join("");
+    }
+    if(imgRowEl) imgRowEl.addEventListener("click", function(e){
+      var b = e.target && e.target.closest ? e.target.closest(".cal-img-del") : null;
+      if(!b) return;
+      imgs.splice(parseInt(b.getAttribute("data-i"), 10), 1);
+      renderImgs();
+    });
+    if(attachBtn){
+      attachBtn.innerHTML = ((TASKS && TASKS.attachIcon) || "") + '<span>Прикрепить картинку</span>';
+      attachBtn.addEventListener("click", function(){
+        TASKS.pickImage().then(function(name){
+          if(name && imgs.indexOf(name) < 0){ imgs.push(name); renderImgs(); }
+        });
+      });
+    }
+    renderImgs();
     function applyKind(){
       var hide = taskMode ? "none" : "";
       ["calEndField", "calRepField", "calCalField", "calVisField"].forEach(function(id){
         var el = document.getElementById(id); if(el) el.style.display = hide;
       });
+      var imgField = document.getElementById("calImgField");
+      if(imgField) imgField.style.display = (taskMode && canAttach) ? "" : "none";
       var hd = document.getElementById("calFormTitle");
       if(hd && isNew) hd.textContent = taskMode ? "Новая задача" : "Новое мероприятие";
       titleEl.placeholder = taskMode ? "Название задачи" : "Название мероприятия";
@@ -1206,10 +1242,13 @@
         var tl = load(), trec;
         if(ev){
           trec = { id: ev.id, title: ttl, start: ts, end: ts, repeat: "", cal: "personal", kind: "task", taskId: ev.taskId, updatedAt: Date.now() };
-          if(ttl !== ev.title){ try{ TASKS.rename(ev.taskId, ttl); }catch(e){} }
+          var curTitle = taskInfo ? taskInfo.title : ev.title;
+          if(ttl !== curTitle || imgs.join("\n") !== imgsStart){
+            try{ if(TASKS.update) TASKS.update(ev.taskId, ttl, imgs); else TASKS.rename(ev.taskId, ttl); }catch(e){}
+          }
         } else {
           var tid = null;
-          try{ tid = TASKS.add(ttl); }catch(e){ tid = null; }
+          try{ tid = TASKS.add(ttl, imgs); }catch(e){ tid = null; }
           if(!tid) return fail("Не удалось создать задачу");
           trec = { id: newId(), title: ttl, start: ts, end: ts, repeat: "", cal: "personal", kind: "task", taskId: tid, updatedAt: Date.now() };
         }

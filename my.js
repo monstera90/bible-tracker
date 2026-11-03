@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 127.1 (03.11)
+   Версия: 127.2 (03.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -10586,12 +10586,62 @@
   }
   // Задачи, добавленные прямо в календаре (calendar.js, переключатель «Задача»): живут на вкладке «Ожидание» (waiting);
   // запись календаря хранит только taskId. state: «gone» — задача удалена (из календаря пропадает), «done» — отмечена выполненной.
+  // Текст задачи с картинками — тот же вид, что даёт скрепка на вкладках задач: «![[имя]]» в тексте (splitTaskImages разбирает обратно).
+  // Задача одна и та же, где бы её ни создали и ни открыли (вкладка задач или календарь): картинки живут только в её тексте.
+  function calendarTaskText(title, images){
+    var ttl = String(title || "").replace(/\s+/g, " ").trim();
+    var toks = (images || []).map(function(n){ return "![[" + n + "]]"; }).join(" ");
+    return toks ? (ttl ? toks + " " + ttl : toks) : ttl;
+  }
   var calendarTasksApi = {
-    add: function(title){
-      var id = createTaskWithText("waiting", String(title || "").replace(/\s+/g, " ").trim());
+    add: function(title, images){
+      var id = createTaskWithText("waiting", calendarTaskText(title, images));
       try{ if(currentSettingsTab === "waiting") renderSettingsTabTask("waiting"); }catch(e){}
       return id;
     },
+    // название и картинки задачи из её текста (форма задачи в календаре)
+    get: function(id){
+      var t = getTaskById(id);
+      if(!t) return null;
+      var sp = splitTaskImages(t.c.text);
+      return { title: String(sp.text == null ? "" : sp.text).replace(/\s+/g, " ").trim(), images: sp.names.slice() };
+    },
+    update: function(id, title, images){
+      var t = getTaskById(id);
+      if(!t) return;
+      var txt = calendarTaskText(title, images);
+      if(!txt || t.c.text === txt) return;
+      t.c.text = txt;
+      saveTaskData(id, t.c);
+      if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
+    },
+    // выбор картинки в системном диалоге → пережатие → сохранение в images/ (OPFS), как у скрепки вкладок задач; Promise<имя|null>
+    pickImage: function(){
+      return new Promise(function(resolve){
+        var inp = document.createElement("input");
+        inp.type = "file";
+        inp.accept = "image/*";
+        inp.style.display = "none";
+        var done = false;
+        function finish(v){
+          if(done) return;
+          done = true;
+          try{ if(inp.parentNode) inp.parentNode.removeChild(inp); }catch(e){}
+          resolve(v);
+        }
+        inp.addEventListener("change", function(){
+          var f = inp.files && inp.files[0];
+          if(!f || !MdEditor || !MdEditor.prepareImageFile) return finish(null);
+          MdEditor.prepareImageFile(f).then(function(prep){
+            return MdEditor.saveImageBytes(prep.name, prep.bytes, prep.type);
+          }).then(function(name){ finish(name || null); }, function(){ finish(null); });
+        });
+        inp.addEventListener("cancel", function(){ finish(null); });
+        document.body.appendChild(inp);
+        inp.click();
+      });
+    },
+    attachIcon: PAPERCLIP_ICON_SVG,
     state: function(id){
       var t = getTaskById(id);
       if(!t) return "gone";
