@@ -1,6 +1,6 @@
 /* ===========================================================================
    usertabs.js
-   Версия: 1.1 (02.11)
+   Версия: 1.2 (02.11)
    Вкладки-сайты бокового ряда «Клод» (кнопка «+» над вкладкой «Claude», set2s_10). Каждая вкладка — свой адрес, который открывается
    по умолчанию; дальше вкладка помнит, где человек остановился на сайте (в том числе после закрытия приложения).
    Сам сайт показывает ОБОЛОЧКА: отдельный WebView на вкладку поверх области #userTabView (мост LifeTrackerNative ≥ 22, utab*;
@@ -21,7 +21,8 @@
   var ADD_BTN_ID = "settingsTabUserAddBtn";
   var CLAUDE_KEY = "set2s_10";
   var ID_RE = /^[A-Za-z0-9_]{1,40}$/;
-  var LONG_PRESS_MS = 550;
+  var LONG_PRESS_MS = 1000;
+  var ARM_MS = 4000;       // сколько крестик ждёт второго нажатия
 
   var deps = {};
   var tabs = [];            // [{id, home}] — старые первыми
@@ -29,6 +30,8 @@
   var iconRev = {};         // id -> ревизия значка, которую мы уже забрали
   var active = false;       // нативный WebView вкладки activeId должен быть на экране
   var activeId = null;
+  var armedId = null;       // вкладка, у которой после долгого нажатия показан крестик (следующее нажатие удаляет)
+  var armTimer = null;
   var formFor = null;       // id вкладки, у которой открыта форма адреса
   var timer = null;
   var lastRect = "";
@@ -122,11 +125,33 @@
   }
 
   // ---- кнопки вкладок ----
+  var CROSS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>';
+  function disarm(){
+    if(armTimer){ clearTimeout(armTimer); armTimer = null; }
+    document.removeEventListener("click", onDocClick, true);
+    var id = armedId;
+    armedId = null;
+    var t = id ? find(id) : null;
+    if(t) updateButton(t);
+  }
+  function onDocClick(e){
+    var b = armedId ? el(BTN_PREFIX + armedId) : null;
+    if(!b || !b.contains(e.target)) disarm();
+  }
+  // долгое нажатие (1 с): значок вкладки превращается в крестик; нажатие на него удаляет вкладку, любое другое действие или 4 с — отмена
+  function arm(id){
+    disarm();
+    armedId = id;
+    var b = el(BTN_PREFIX + id);
+    if(b){ b.innerHTML = CROSS_SVG; b.title = "Удалить вкладку"; }
+    armTimer = setTimeout(disarm, ARM_MS);
+    setTimeout(function(){ if(armedId === id) document.addEventListener("click", onDocClick, true); }, 0);
+  }
   function updateButton(t){
     var b = el(BTN_PREFIX + t.id);
     if(!b) return;
     var h = hostOf(t.home);
-    b.innerHTML = iconHtml(t);
+    b.innerHTML = armedId === t.id ? CROSS_SVG : iconHtml(t);
     b.title = h || "Новая вкладка";
     b.setAttribute("aria-label", h || "Новая вкладка");
   }
@@ -166,8 +191,14 @@
     b.id = BTN_PREFIX + t.id;
     b.setAttribute("data-lt-usertab", "1");
     b.style.display = "none";
-    bindLongPress(b, function(){ openForm(t.id); });
-    b.addEventListener("click", function(){ if(deps.switchTab) deps.switchTab(keyOf(t.id)); });
+    bindLongPress(b, function(){ arm(t.id); });
+    b.addEventListener("click", function(){
+      if(armedId === t.id){ disarm(); removeTab(t.id); return; } // второе нажатие на крестик
+      var key = keyOf(t.id);
+      // нажатие на уже открытую вкладку — форма адреса (изменить адрес, обновить, удалить)
+      if(deps.getCurrentTab && deps.getCurrentTab() === key) openForm(t.id);
+      else if(deps.switchTab) deps.switchTab(key);
+    });
     add.parentNode.insertBefore(b, add); // в DOM перед «+»: на экране сразу под ней (стек растёт снизу вверх)
     updateButton(t);
   }
@@ -233,6 +264,7 @@
     openForm(t.id);
   }
   function removeTab(id){
+    if(armedId === id) disarm();
     var b = bridge();
     if(activeId === id) hide();
     if(b){ try{ b.utabRemove(id); }catch(e){} }
@@ -375,6 +407,7 @@
   }
   // смена вкладки: уходим со вкладки-сайта (или переходим на другую) — WebView убирается; повторный рендер той же вкладки его не трогает
   function onSwitch(tab){
+    if(armedId) disarm();
     if(formFor && keyOf(formFor) !== tab) formFor = null;
     if(!(typeof tab === "string" && tab.indexOf(KEY_PREFIX) === 0 && idOf(tab) === activeId)) hide();
   }
