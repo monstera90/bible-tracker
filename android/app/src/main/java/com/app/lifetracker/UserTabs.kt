@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.3 (03.11)
+// Версия: 1.4 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -29,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
 /**
- * Вкладки-сайты бокового ряда «Клод» (кнопка «+», usertabs.js): у каждой вкладки свой WebView с нужным адресом, который лежит поверх
+ * Вкладки-сайты бокового ряда «Интернет» (кнопка «+», usertabs.js): у каждой вкладки свой WebView с нужным адресом, который лежит поверх
  * области содержимого главного WebView (страница присылает прямоугольник через мост: utabShow). Моста LifeTrackerNative в этих
  * WebView НЕТ — чужой сайт не получает доступа к приложению.
  *

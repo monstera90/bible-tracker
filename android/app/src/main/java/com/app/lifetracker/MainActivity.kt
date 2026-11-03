@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.2 (02.11)
+// Версия: 7.3 (03.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
 // Версия: 4.0 (25.10) — выбор папки с музыкой (`musicFolderLauncher`, `pickMusicFolder`) для вкладки «Музыка».
@@ -148,7 +148,7 @@ class MainActivity : ComponentActivity() {
     lateinit var claudeTab: ClaudeTab
         private set
 
-    /** Вкладки-сайты ряда «Клод» (кнопка «+»): по WebView на вкладку; управляется мостом (utab*). */
+    /** Вкладки-сайты ряда «Интернет» (кнопка «+»): по WebView на вкладку; управляется мостом (utab*). */
     lateinit var userTabs: UserTabs
         private set
 

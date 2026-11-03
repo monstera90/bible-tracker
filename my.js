@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 128.0 (03.11)
+   Версия: 128.1 (03.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1763,7 +1763,7 @@
   var ACTIVITIES_STACK_TABS = ["workouts", "set2s_11", "set2s_9"];
   var ACTIVITIES_STACK_BTN_IDS = { workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_9: "settingsTabSet2Btn9" };
   function isActivitiesStackTab(tab){ return ACTIVITIES_STACK_TABS.indexOf(tab) !== -1; }
-  // «Клод» (нижний язычок settingsTabClaudeStackBtn между шестерёнкой и «Инструментами»): свой боковой ряд набора 1 (режим claudeStackMode),
+  // «Интернет» (нижний язычок settingsTabClaudeStackBtn между шестерёнкой и «Инструментами»): свой боковой ряд набора 1 (режим claudeStackMode),
   // работает как шестерёнка. Пока в ряду одна вкладка — «Claude» (set2s_10, claudetab.js); новая вкладка ряда: кнопка в `#settingsTabs` + ключ в списках ниже.
   var CLAUDE_STACK_BTN_ID = "settingsTabClaudeStackBtn";
   var CLAUDE_STACK_TABS = ["set2s_10"];
@@ -1793,7 +1793,7 @@
   function nbLastPart(){
     try{ return localStorage.getItem(NB_LAST_KEY) === "books" ? "books" : "notes"; }catch(e){ return "notes"; }
   }
-  // вкладка набора 1 из «своих» (боковые ряды «Статистика», «Инструменты», «Активности», «Клод» и нижние «Мои заметки», «Мои книги») — набор 2 их не показывает
+  // вкладка набора 1 из «своих» (боковые ряды «Статистика», «Инструменты», «Активности», «Интернет» и нижние «Мои заметки», «Мои книги») — набор 2 их не показывает
   function isOwnStackTab(tab){ return isInfoStackTab(tab) || isToolsStackTab(tab) || isActivitiesStackTab(tab) || isClaudeStackTab(tab) || isStandaloneBottomTab(tab); }
   // Вкладка «Тренировки» (workouts.js): верхняя в боковом ряду «Активности» (ACTIVITIES_STACK_TABS). В SETTINGS_BOTTOM_ORDER_1 НЕ входит
   // (иначе сдвинется соответствие позиций с нижним рядом набора 2) — запоминание последней вкладки и «набор» учитывают её отдельно.
@@ -10231,13 +10231,13 @@
       if(ab) ab.style.display = activitiesStackMode ? "flex" : "none";
     });
     var activitiesBtn = document.getElementById(ACTIVITIES_STACK_BTN_ID);
-    // вкладки ряда «Клод»
+    // вкладки ряда «Интернет»
     Object.keys(CLAUDE_STACK_BTN_IDS).forEach(function(key){
       var cb = document.getElementById(CLAUDE_STACK_BTN_IDS[key]);
       if(cb) cb.style.display = claudeStackMode ? "flex" : "none";
     });
     var claudeBtn = document.getElementById(CLAUDE_STACK_BTN_ID);
-    // «+» и вкладки-сайты ряда «Клод» (usertabs.js)
+    // «+» и вкладки-сайты ряда «Интернет» (usertabs.js)
     if(window.UserTabsMod) window.UserTabsMod.applyVisibility(claudeStackMode);
     updateBottomGearButtons();
     updateNotesWide();
@@ -10965,7 +10965,7 @@
     else if(tab === "set2s_9") renderSettingsTabItemCards();
     // десятая боковая вкладка второго набора (set2s_10) — «Claude» (claudetab.js): нативный WebView с claude.ai
     else if(tab === "set2s_10") renderSettingsTabClaude();
-    // вкладка-сайт ряда «Клод» (ключ utab_<id>, кнопка «+», usertabs.js): адрес по умолчанию, место на странице запоминает оболочка
+    // вкладка-сайт ряда «Интернет» (ключ utab_<id>, кнопка «+», usertabs.js): адрес по умолчанию, место на странице запоминает оболочка
     else if(window.UserTabsMod && window.UserTabsMod.isKey(tab)) window.UserTabsMod.render(tab);
     // «Система» (set2s_15, язычок режима колеса, самый нижний в стеке набора 1) — system.js: усиление громкости и др.
     else if(tab === "set2s_15") renderSettingsTabSystem();
@@ -18674,7 +18674,7 @@
   // Режим «Активности» (кнопка settingsTabActivitiesStackBtn): боковой ряд набора 1 показывает вкладки ACTIVITIES_STACK_TABS. Взаимоисключающий с остальными режимами рядов;
   // хранится в памяти, включается сам при открытии любой вкладки ряда.
   var activitiesStackMode = false;
-  // Режим «Клод» (кнопка settingsTabClaudeStackBtn): боковой ряд набора 1 показывает вкладки CLAUDE_STACK_TABS. Взаимоисключающий с остальными режимами рядов;
+  // Режим «Интернет» (кнопка settingsTabClaudeStackBtn): боковой ряд набора 1 показывает вкладки CLAUDE_STACK_TABS. Взаимоисключающий с остальными режимами рядов;
   // хранится в памяти, включается сам при открытии вкладки ряда.
   var claudeStackMode = false;
   var bottomHighlightId = null; // id нижнего язычка, нажатого последним (см. updateBottomGearButtons); null — выделена вкладка бокового ряда
@@ -18799,9 +18799,9 @@
     claudeStackMode = on;
     if(on){ bottomAltMode = false; tasksStackMode = false; infoStackMode = false; toolsStackMode = false; activitiesStackMode = false; }
     applyBottomAltMode();            // обновляет вертикальный стек, подсветку кнопок и угловые заплатки
-    applySettingsTabSetVisibility(); // ряд «Клод» всегда на наборе 1
+    applySettingsTabSetVisibility(); // ряд «Интернет» всегда на наборе 1
   }
-  // выключает все режимы боковых рядов (колесо, «Задачи», «Статистика», «Инструменты», «Активности», «Клод») — боковая колонка пустеет
+  // выключает все режимы боковых рядов (колесо, «Задачи», «Статистика», «Инструменты», «Активности», «Интернет») — боковая колонка пустеет
   function setAllStackModesOff(){
     setBottomAltMode(false);
     setTasksStackMode(false);
@@ -19012,7 +19012,7 @@
   }
   applyHiddenSettingsTabs();
   initBottomAltTabs();
-  // «+» и вкладки-сайты ряда «Клод»: кнопки строит сам модуль (после initBottomAltTabs — режимы рядов уже объявлены)
+  // «+» и вкладки-сайты ряда «Интернет»: кнопки строит сам модуль (после initBottomAltTabs — режимы рядов уже объявлены)
   try{
     if(window.UserTabsMod) window.UserTabsMod.init({
       switchTab: switchSettingsTabOnClick,
@@ -19022,7 +19022,7 @@
     });
   }catch(e){}
 
-  // Выделение вкладок: выделена ровно одна — нажатая последней. Нижние язычки (шестерёнка, «Клод», «Инструменты», «Статистика», «Задачи», «Календарь»,
+  // Выделение вкладок: выделена ровно одна — нажатая последней. Нижние язычки (шестерёнка, «Интернет», «Инструменты», «Статистика», «Задачи», «Календарь»,
   // «Активности», «Мои заметки») и вкладки боковых рядов делят одно выделение: нажатие на нижний язычок снимает его с бокового ряда, нажатие на вкладку
   // бокового ряда (или открытие заметок) снимает его с нижнего. bottomHighlightId — id нижнего язычка, нажатого последним; null — выделена вкладка бокового ряда.
   function applySideActive(tab){
@@ -19058,14 +19058,14 @@
       var btn = document.getElementById(SET2_EXTRA_TAB_IDS[key]);
       if(btn) btn.classList.toggle("active", tab === key);
     });
-    if(window.UserTabsMod) window.UserTabsMod.applyActive(tab); // вкладки-сайты ряда «Клод»; «+» не красится никогда
+    if(window.UserTabsMod) window.UserTabsMod.applyActive(tab); // вкладки-сайты ряда «Интернет»; «+» не красится никогда
     stripDecorClasses(); // декоративные язычки режима колеса никогда не выглядят выбранными
   }
   function bottomHighlightIds(){
     return ["settingsTabGearBtn", "settingsTabGearBtnSet2", TASKS_STACK_BTN_ID, CALENDAR_TAB_BTN_ID, INFO_STACK_BTN_ID, TOOLS_STACK_BTN_ID, ACTIVITIES_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY], SET2_TAB_IDS[BOOKS_TAB_KEY]];
   }
   // Внизу выделен ровно один язычок: общий «Заметки»/«Книги» (у него бокового ряда нет), иначе язычок включённого бокового ряда
-  // (колесо, «Задачи», «Статистика», «Инструменты», «Активности», «Клод»); второе выделение — вкладка в боковом ряду (applySideActive)
+  // (колесо, «Задачи», «Статистика», «Инструменты», «Активности», «Интернет»); второе выделение — вкладка в боковом ряду (applySideActive)
   function computeBottomOwner(){
     var t = currentSettingsTab;
     if(isNotesBottomTab(t)) return SET2_TAB_IDS[NOTES_TAB_KEY];
@@ -21170,7 +21170,7 @@
     });
   }
 
-  // Нижний ряд вкладок-сайтов («Claude» — claudetab.js, вкладки «+» ряда «Клод» — usertabs.js): тот же .mdeditor-fab-row, что у остальных
+  // Нижний ряд вкладок-сайтов («Claude» — claudetab.js, вкладки «+» ряда «Интернет» — usertabs.js): тот же .mdeditor-fab-row, что у остальных
   // вкладок, — «полный экран» (как в ридере книг) слева от «домика» (onHome — возврат на первый экран сайта, адрес по умолчанию). Сайт показывает нативный WebView поверх страницы,
   // поэтому модули укорачивают его по верху ряда (#siteFabRow): иначе кнопки оказались бы под сайтом. Зовётся после каждой перерисовки вкладки.
   function mountSiteFabRow(container, onHome){

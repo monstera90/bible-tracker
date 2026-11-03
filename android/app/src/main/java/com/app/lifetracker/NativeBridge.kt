@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 16.0 (03.11)
+// Версия: 16.1 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
 // Версия: 9.0 (26.10) — мост версии 16: `getScreenTimeTotals` (счётчики музыки и таймеров для «Трекера экранов», `ScreenTimeStats`).
@@ -41,7 +41,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 23: `claudeHome()` — «домик» вкладки Claude (первый экран).
-         * 22: вкладки-сайты ряда «Клод» (utabShow / utabHide / utabGo / utabReload / utabRemove / utabGetState / utabGetIcon).
+         * 22: вкладки-сайты ряда «Интернет» (utabShow / utabHide / utabGo / utabReload / utabRemove / utabGetState / utabGetIcon).
          * 21: способ усиления громкости (volumeBoostSetEngine: 0 — LoudnessEnhancer, 1 — DynamicsProcessing).
          * 20: вкладка «Система»: усиление громкости всей системы (volumeBoostGet / volumeBoostSet; 100/125/150/200 %).
          * 19: поиск по PDF (pdfGetFolder / pdfPickFolder / pdfListAll): папка с PDF и список файлов; сами файлы страница читает по https://localhost/__pdflib/<docId>.
@@ -799,7 +799,7 @@ class NativeBridge(private val activity: MainActivity) {
         activity.runOnUiThread { activity.claudeTab.sendNow() }
     }
 
-    // ---------- вкладки-сайты ряда «Клод» (UserTabs; кнопка «+», usertabs.js) ----------
+    // ---------- вкладки-сайты ряда «Интернет» (UserTabs; кнопка «+», usertabs.js) ----------
 
     /** Показывает WebView вкладки-сайта [id] в прямоугольнике (CSS-пиксели страницы приложения); [url] — адрес по умолчанию при первом открытии. */
     @JavascriptInterface
