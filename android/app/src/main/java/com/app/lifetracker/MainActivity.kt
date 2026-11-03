@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 9.0 (03.11)
+// Версия: 10.0 (03.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
 // Версия: 4.0 (25.10) — выбор папки с музыкой (`musicFolderLauncher`, `pickMusicFolder`) для вкладки «Музыка».
@@ -156,6 +156,9 @@ class MainActivity : ComponentActivity() {
     @Volatile
     var pageTrusted: Boolean = false
         private set
+
+    /** Вкладка-сайт, которую просит открыть плавающее видео (кнопка «развернуть»); выполняется, когда приложение на экране. */
+    private var pendingOpenTab: String? = null
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var pendingPermission: PermissionRequest? = null
@@ -351,6 +354,8 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         // WebView паузится только в onStop (см. ниже), а здесь гарантированно «просыпается» при любом возврате в приложение.
         webView.onResume()
+        // Видео, ушедшее в плавающее окно при сворачивании, возвращается на свою (открытую) вкладку.
+        userTabs.onAppVisible()
     }
 
     override fun onResume() {
@@ -377,6 +382,33 @@ class MainActivity : ComponentActivity() {
         // Страница возвращает прокрутку открытой заметки (visibilitychange на возврате приходит не всегда).
         if (pageTrusted) {
             webView.evaluateJavascript("window.__ltOnAppResume && window.__ltOnAppResume()", null)
+        }
+        runPendingOpenTab()
+    }
+
+    /** Кнопка «развернуть» плавающего видео: открыть вкладку-сайт [id] (в странице) и, если приложение свёрнуто, вынести его на передний план. */
+    fun openUserTabFromIsland(id: String) {
+        if (!Regex("[A-Za-z0-9_]{1,40}").matches(id)) return
+        pendingOpenTab = id
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            runPendingOpenTab()
+            return
+        }
+        try {
+            val i = Intent(applicationContext, MainActivity::class.java)
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            applicationContext.startActivity(i)
+        } catch (e: Exception) {
+            // приложение не вынесено вперёд — вкладка откроется, когда человек вернётся сам (onResume)
+        }
+    }
+
+    private fun runPendingOpenTab() {
+        val id = pendingOpenTab ?: return
+        pendingOpenTab = null
+        if (pageTrusted) {
+            // id проверен выше (только буквы, цифры и «_»): в строку скрипта попадать нечему
+            webView.evaluateJavascript("window.__ltOpenUserTab && window.__ltOpenUserTab('$id')", null)
         }
     }
 
@@ -417,6 +449,8 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         // Окно скрыто: теперь можно остановить анимации и таймеры страницы (страница о паузе уже узнала в onPause).
         webView.onPause()
+        // Играет видео на открытой вкладке-сайте — оно уходит в плавающее окно и не прерывается (нужно «Поверх других приложений»).
+        userTabs.onAppHidden()
         super.onStop()
     }
 

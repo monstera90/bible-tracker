@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 3.2 (03.11)
+// Версия: 4.0 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -32,6 +32,7 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -110,6 +111,11 @@ private class SiteWebView(context: Context) : WebView(context) {
  *    грузится последний адрес и прокрутка доводится скриптом;
  *  - чтобы не было мерцания, свежесозданный WebView остаётся за краем, пока страница не загрузилась и прокрутка не встала на место.
  * Вход в аккаунты: cookie общие на всё приложение и сохраняются на диск (CookieManager.flush); user-agent без метки WebView.
+ *
+ * Плавающее видео (FloatingVideo): если на вкладке играет видео, а человек ушёл с вкладки (`hideTab`) или свернул приложение
+ * (`onAppHidden`), WebView вкладки НЕ ставится на паузу, а переезжает в плавающее окно: страница скриптом PIN_JS оставляет на экране
+ * только видео. Вернулся на вкладку (`show`) или в приложение (`onAppVisible`, если вкладка была открыта) — WebView встаёт на место,
+ * скрипт снимается. Плавающее окно одно: новое видео закрывает прежнее (оно ставится на паузу).
  */
 class UserTabs(private val activity: MainActivity, private val host: FrameLayout) {
 
@@ -126,6 +132,60 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         private const val MAX_LIVE = 4
         private const val RECOVER_MIN_GAP_MS = 60000L
         private const val ICON_PX = 64
+        private const val KIND_LEFT = 1   // плавающее: ушли с вкладки
+        private const val KIND_MIN = 2    // плавающее: свернули приложение, пока вкладка была открыта
+        private const val FLOAT_POLL_MS = 1000L
+
+        /**
+         * Находит играющее видео и оставляет на странице только его: всё остальное скрыто (visibility), у предков видео снимаются
+         * transform/filter/contain (иначе position:fixed считалось бы от них), видео — fixed в левом верхнем углу, размером с само видео
+         * (в пределах окна). Ответ: [1, innerWidth, innerHeight, ширина видео, высота видео] (CSS-пиксели) или [0], если подходящего видео нет.
+         * Подходит: играет, есть кадр, не зациклено (фоновые ролики сайтов), шире 160 px, со звуком или длиннее минуты/прямой эфир.
+         */
+        private const val PIN_JS = """(function(){try{var D=document,W=window;
+if(W.__ltUnpin){try{W.__ltUnpin();}catch(e){}}
+var vs=D.getElementsByTagName('video'),best=null,ba=-1,i;
+for(i=0;i<vs.length;i++){var v=vs[i];
+if(v.paused||v.ended||v.readyState<2||!v.videoWidth||!v.videoHeight||v.loop)continue;
+if(v.muted&&!(v.duration>60||!isFinite(v.duration)))continue;
+var r=v.getBoundingClientRect();if(r.width<160)continue;
+var a=r.width*r.height;if(a>ba){ba=a;best=v;}}
+if(!best)return [0];
+var sy=W.pageYOffset||D.documentElement.scrollTop||0;
+var iw=W.innerWidth,ih=W.innerHeight;
+var asp=best.videoHeight/best.videoWidth;
+var bw=iw,bh=iw*asp;if(bh>ih){bh=ih;bw=ih/asp;}
+bw=Math.round(bw);bh=Math.round(bh);
+var anc=[],n=best.parentNode;
+while(n&&n!==D&&n.nodeType===1){anc.push(n);n=n.parentNode;}
+for(i=0;i<anc.length;i++)anc[i].setAttribute('data-ltpin-a','1');
+best.setAttribute('data-ltpin-v','1');
+var st=D.createElement('style');st.id='__ltpin';
+st.textContent='html,body{background:#000!important;}'
++'html[data-ltpin-a],body[data-ltpin-a]{overflow:hidden!important;}'
++'body *{visibility:hidden!important;}'
++'[data-ltpin-a]{transform:none!important;filter:none!important;perspective:none!important;contain:none!important;will-change:auto!important;clip-path:none!important;}'
++'[data-ltpin-v]{visibility:visible!important;display:block!important;position:fixed!important;left:0!important;top:0!important;right:auto!important;bottom:auto!important;'
++'width:'+bw+'px!important;height:'+bh+'px!important;max-width:none!important;max-height:none!important;min-width:0!important;min-height:0!important;'
++'margin:0!important;padding:0!important;border:0!important;transform:none!important;object-fit:contain!important;background:#000!important;opacity:1!important;z-index:2147483647!important;}';
+(D.head||D.documentElement).appendChild(st);
+W.__ltUnpin=function(){try{for(var k=0;k<anc.length;k++)anc[k].removeAttribute('data-ltpin-a');
+best.removeAttribute('data-ltpin-v');}catch(e){}
+try{if(st.parentNode)st.parentNode.removeChild(st);}catch(e){}
+try{W.scrollTo(0,sy);}catch(e){}W.__ltUnpin=null;};
+return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
+
+        /** Снимает PIN_JS (видео продолжает играть). */
+        private const val UNPIN_JS = "(function(){if(window.__ltUnpin){window.__ltUnpin();}return 1;})()"
+
+        /** Ставит видео на паузу и снимает PIN_JS. */
+        private const val PAUSE_JS = "(function(){var v=document.querySelector('[data-ltpin-v]');if(v){try{v.pause();}catch(e){}}if(window.__ltUnpin){window.__ltUnpin();}return 1;})()"
+
+        /** Состояние закреплённого видео: [1, на паузе (0/1), закончилось (0/1)] или [0], если видео пропало. */
+        private const val STATE_JS = "(function(){var v=document.querySelector('[data-ltpin-v]');if(!v)return [0];return [1,v.paused?1:0,v.ended?1:0];})()"
+
+        /** Пауза/воспроизведение закреплённого видео: [1, на паузе (0/1)] или [0]. */
+        private const val TOGGLE_JS = "(function(){var v=document.querySelector('[data-ltpin-v]');if(!v)return [0];if(v.paused){v.play();}else{v.pause();}return [1,v.paused?1:0];})()"
         private val ID_RE = Regex("[A-Za-z0-9_]{1,40}")
         // Адреса, на которые сайт возвращает человека после входа/выхода (signin-oidc, signin-google, signout-callback-oidc, /oauth/callback…):
         // сами по себе страницей не являются, повторно открытые отвечают ошибкой — «местом на сайте» не запоминаются.
@@ -144,6 +204,8 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         var needFix = true
         var lastUsed = 0L
         var saveTask: Runnable? = null
+        var floating = false   // WebView сейчас в плавающем окне с видео (FloatingVideo), а не в host
+        var floatKind = 0      // KIND_LEFT / KIND_MIN
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -156,6 +218,9 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
     private var rH = 1
     private var kb = 0
     private var holes: List<RectF> = emptyList() // окна под кнопки страницы, px родителя
+    private var appVisible = true                // окно приложения на экране (onStart…onStop)
+    private var floatWin: FloatingVideo? = null
+    private var floatTab: Tab? = null            // вкладка в плавающем окне (одна)
 
     private fun k(id: String, name: String) = "$id.$name"
     private fun dir(): File = File(activity.applicationContext.filesDir, DIR).apply { mkdirs() }
@@ -208,6 +273,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
             prefs.edit().putString(k(id, "home"), clean).apply()
         }
         val t = tabs.getOrPut(id) { Tab(id) }
+        if (t.floating) closeFloat(t, false) // вернулись на вкладку: видео из плавающего окна встаёт обратно в страницу и играет дальше
         for (o in tabs.values) if (o !== t && o.shown) hideTab(o)
         val v = ensureView(t)
         val d = activity.resources.displayMetrics.density
@@ -267,7 +333,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         }
         holes = list
         val r = 8f * d
-        for (t in tabs.values) (t.view as? SiteWebView)?.setHoles(list, r)
+        for (t in tabs.values) if (!t.floating) (t.view as? SiteWebView)?.setHoles(list, r)
     }
 
     private fun applyRect(v: WebView, left: Int, top: Int, wPx: Int, hPx: Int) {
@@ -291,7 +357,8 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         saveTab(t)
         v.clearFocus()
         v.translationX = OFFSCREEN_X
-        if (t.ready) v.onPause()
+        // играет видео — оно уходит в плавающее окно, иначе вкладка ставится на паузу
+        if (t.ready) tryFloat(t, v, KIND_LEFT) { if (!t.shown && !t.floating && t.view === v) v.onPause() }
     }
 
     /** Прячет показанную вкладку (страница живёт за краем, позиция сохраняется). */
@@ -319,6 +386,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         stateFile(id).delete()
         iconFile(id).delete()
         val t = tabs[id] ?: return
+        if (t.floating) closeFloat(t, true)
         t.curUrl = clean
         t.curTitle = ""
         val v = t.view ?: return
@@ -333,6 +401,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         if (!ID_RE.matches(id)) return
         val t = tabs.remove(id)
         if (t != null) {
+            if (t.floating) closeFloat(t, true)
             if (t.shown) activity.setSiteKeyboardOverlay(false)
             val task = t.saveTask
             if (task != null) handler.removeCallbacks(task)
@@ -388,6 +457,10 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
     fun destroy() {
         handler.removeCallbacksAndMessages(null)
         periodicOn = false
+        floatTab?.floating = false
+        floatTab = null
+        floatWin?.detach()
+        floatWin = null
         for (t in tabs.values) {
             val v = t.view ?: continue
             t.view = null
@@ -411,6 +484,172 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         ensureView(t)
     }
 
+    // ---------- плавающее видео ----------
+
+    private val floatCallback = object : FloatingVideo.Callback {
+        override fun onExpand() {
+            val t = floatTab ?: return
+            activity.openUserTabFromIsland(t.id)
+        }
+
+        override fun onClose() {
+            val t = floatTab ?: return
+            closeFloat(t, true)
+        }
+
+        override fun onTogglePlay() {
+            val v = floatTab?.view ?: return
+            v.evaluateJavascript(TOGGLE_JS) { raw ->
+                val a = parseNums(raw)
+                if (a != null && a.size > 1 && a[0] == 1.0) floatWin?.setPaused(a[1] == 1.0)
+            }
+        }
+    }
+
+    private fun win(): FloatingVideo = floatWin ?: FloatingVideo(activity, floatCallback).also { floatWin = it }
+
+    private fun parseNums(raw: String?): DoubleArray? {
+        if (raw.isNullOrEmpty() || raw == "null") return null
+        return try {
+            val a = JSONArray(raw)
+            DoubleArray(a.length()) { a.optDouble(it, 0.0) }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Приложение свернули (onStop): играющее видео открытой вкладки уходит в плавающее окно поверх других приложений. */
+    fun onAppHidden() {
+        appVisible = false
+        val t = shownTab() ?: return
+        val v = t.view ?: return
+        if (!t.ready || t.floating) return
+        if (!win().canOverlay()) return // без разрешения «Поверх других приложений» окна вне приложения не будет
+        tryFloat(t, v, KIND_MIN) { }
+    }
+
+    /** Приложение вернулось на экран (onStart): видео, ушедшее в окно при сворачивании, встаёт обратно на свою вкладку. */
+    fun onAppVisible() {
+        appVisible = true
+        val t = floatTab ?: return
+        if (!t.floating || t.floatKind != KIND_MIN) return
+        closeFloat(t, false)
+        val v = t.view ?: return
+        t.shown = true
+        t.lastUsed = System.currentTimeMillis()
+        layoutShown(v)
+        activity.setSiteKeyboardOverlay(true)
+        if (t.ready) reveal(t)
+        startPeriodicSave()
+    }
+
+    /**
+     * Ищет на странице играющее видео и закрепляет его (PIN_JS). Нашлось и ничего не изменилось за время ответа страницы — вкладка
+     * уходит в плавающее окно; иначе вызывается [onNone] (при уходе с вкладки — пауза WebView, как раньше).
+     */
+    private fun tryFloat(t: Tab, v: WebView, kind: Int, onNone: () -> Unit) {
+        if (t.floating) return
+        v.evaluateJavascript(PIN_JS) { raw ->
+            val a = parseNums(raw)
+            if (a == null || a.isEmpty() || a[0] != 1.0) {
+                onNone()
+            } else {
+                val stale = t.view !== v || t.floating ||
+                    (kind == KIND_LEFT && t.shown) ||
+                    (kind == KIND_MIN && (appVisible || !t.shown))
+                if (stale) {
+                    if (t.view === v && !t.floating) v.evaluateJavascript(UNPIN_JS, null)
+                } else {
+                    startFloating(t, v, kind, a, onNone)
+                }
+            }
+        }
+    }
+
+    private fun startFloating(t: Tab, v: WebView, kind: Int, a: DoubleArray, onFail: () -> Unit) {
+        val iw = if (a.size > 1) a[1] else 0.0
+        val bw = if (a.size > 3) a[3] else 0.0
+        val bh = if (a.size > 4) a[4] else 0.0
+        val vw = v.width
+        val vh = v.height
+        if (iw <= 0.0 || bw <= 0.0 || bh <= 0.0 || vw <= 0 || vh <= 0) {
+            v.evaluateJavascript(UNPIN_JS, null)
+            onFail()
+            return
+        }
+        val conv = vw / iw // пикселей WebView в одном CSS-пикселе страницы
+        val rw = (bw * conv).roundToInt().coerceIn(1, vw)
+        val rh = (bh * conv).roundToInt().coerceIn(1, vh)
+        val prev = floatTab
+        if (prev != null && prev !== t) closeFloat(prev, true)
+        val w = win()
+        (v as? SiteWebView)?.setHoles(emptyList(), 0f)
+        w.show(v, vw, vh, rw, rh)
+        if (!w.isShown) {
+            // окно не встало (разрешение отозвано и т. п.) — всё возвращается как было
+            w.detach()
+            restoreToHost(v)
+            v.evaluateJavascript(UNPIN_JS, null)
+            onFail()
+            return
+        }
+        t.floating = true
+        t.floatKind = kind
+        t.shown = false
+        floatTab = t
+        v.onResume()
+        w.setPaused(false)
+        handler.removeCallbacks(floatPollTask)
+        handler.postDelayed(floatPollTask, FLOAT_POLL_MS)
+        if (kind == KIND_LEFT) w.askOverlayOnce()
+    }
+
+    /** Убирает плавающее окно: WebView возвращается в host (за край); [pause] — видео ставится на паузу, вкладка засыпает. */
+    private fun closeFloat(t: Tab, pause: Boolean) {
+        if (!t.floating) return
+        handler.removeCallbacks(floatPollTask)
+        t.floating = false
+        if (floatTab === t) floatTab = null
+        floatWin?.detach()
+        val v = t.view ?: return
+        v.evaluateJavascript(if (pause) PAUSE_JS else UNPIN_JS, null)
+        restoreToHost(v)
+        if (pause) {
+            // даём скрипту паузы выполниться, потом усыпляем WebView
+            handler.postDelayed({ if (t.view === v && !t.shown && !t.floating) v.onPause() }, 300L)
+        }
+    }
+
+    private fun restoreToHost(v: WebView) {
+        (v.parent as? ViewGroup)?.removeView(v)
+        v.scaleX = 1f
+        v.scaleY = 1f
+        roundTopRight(v)
+        (v as? SiteWebView)?.setHoles(holes, 8f * activity.resources.displayMetrics.density)
+        v.translationX = OFFSCREEN_X
+        host.addView(v, initialParams())
+    }
+
+    /** Раз в секунду смотрит на закреплённое видео: пауза — значок «играть»; видео закончилось или пропало — окно закрывается. */
+    private val floatPollTask = object : Runnable {
+        override fun run() {
+            val t = floatTab
+            val v = t?.view
+            if (t == null || v == null || !t.floating) return
+            v.evaluateJavascript(STATE_JS) { raw ->
+                if (t.floating && floatTab === t) {
+                    val a = parseNums(raw)
+                    if (a == null || a.isEmpty() || a[0] != 1.0 || (a.size > 2 && a[2] == 1.0)) {
+                        closeFloat(t, true)
+                    } else {
+                        floatWin?.setPaused(a.size > 1 && a[1] == 1.0)
+                        handler.postDelayed(this, FLOAT_POLL_MS)
+                    }
+                }
+            }
+        }
+    }
+
     // ---------- WebView ----------
 
     private fun initialParams(): FrameLayout.LayoutParams {
@@ -431,7 +670,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         if (live < MAX_LIVE) return
         var victim: Tab? = null
         for (t in tabs.values) {
-            if (t === except || t.shown || t.view == null) continue
+            if (t === except || t.shown || t.floating || t.view == null) continue
             if (victim == null || t.lastUsed < victim.lastUsed) victim = t
         }
         val vt = victim ?: return
@@ -554,6 +793,12 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
             override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
                 // Процесс рендера упал: WebView убирается, при следующем показе он создастся заново и встанет на сохранённое место.
                 activity.runOnUiThread {
+                    if (t.floating) {
+                        handler.removeCallbacks(floatPollTask)
+                        floatWin?.detach()
+                        if (floatTab === t) floatTab = null
+                        t.floating = false
+                    }
                     val old = t.view
                     t.view = null
                     t.ready = false
@@ -667,7 +912,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
     /** История переходов и прокрутка — в файл, адрес и прокрутка для запасного пути — в SharedPreferences. Недогруженную страницу не пишем. */
     private fun saveTab(t: Tab) {
         val v = t.view ?: return
-        if (!t.ready) return
+        if (!t.ready || t.floating) return // в плавающем окне страница закреплена на видео: её место не запоминается
         val url = v.url
         if (url.isNullOrEmpty() || url == "about:blank") return
         if (t.failed || isCallbackUrl(url)) return // страница ошибки и обратный вызов входа не запоминаются: прежнее место на сайте остаётся
