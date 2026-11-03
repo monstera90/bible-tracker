@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.4 (03.11)
+// Версия: 1.5 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -10,7 +10,10 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Parcel
 import android.util.Base64
+import android.graphics.Outline
+import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceError
@@ -362,6 +365,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         v.setBackgroundColor(0xFFFFFFFF.toInt())
         v.isVerticalScrollBarEnabled = false
         v.isHorizontalScrollBarEnabled = false
+        roundTopRight(v)
         configure(v, t)
         v.translationX = OFFSCREEN_X
         host.addView(v, initialParams())
@@ -381,6 +385,17 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
             if (target.isNotEmpty()) v.loadUrl(target)
         }
         return v
+    }
+
+    /** Скругляет только правый верхний угол сайта (как у окна настроек, 14 px страницы); остальные углы выносятся за границы вида. */
+    private fun roundTopRight(v: WebView) {
+        val r = 14f * activity.resources.displayMetrics.density
+        v.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect((-r).toInt(), 0, view.width, (view.height + r).toInt(), r)
+            }
+        }
+        v.clipToOutline = true
     }
 
     @SuppressLint("SetJavaScriptEnabled")
