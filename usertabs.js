@@ -1,6 +1,6 @@
 /* ===========================================================================
    usertabs.js
-   Версия: 1.0 (02.11)
+   Версия: 1.1 (02.11)
    Вкладки-сайты бокового ряда «Клод» (кнопка «+» над вкладкой «Claude», set2s_10). Каждая вкладка — свой адрес, который открывается
    по умолчанию; дальше вкладка помнит, где человек остановился на сайте (в том числе после закрытия приложения).
    Сам сайт показывает ОБОЛОЧКА: отдельный WebView на вкладку поверх области #userTabView (мост LifeTrackerNative ≥ 22, utab*;
@@ -379,10 +379,32 @@
     if(!(typeof tab === "string" && tab.indexOf(KEY_PREFIX) === 0 && idOf(tab) === activeId)) hide();
   }
 
+  // Страница от края до края: пока в окне вкладка-сайт, «Claude» или просмотр PDF, у окна и оверлея убираются боковые поля и рамка (modals.css .lt-edge)
+  var edgeObserver = null;
+  function syncEdge(){
+    var c = el("settingsTabContent");
+    if(!c) return;
+    var has = false;
+    for(var i = 0; i < c.children.length; i++){
+      var ch = c.children[i];
+      if(ch.id === "userTabView" || ch.id === "claudeTabView" || ch.classList.contains("pdf-reader-tab")){ has = true; break; }
+    }
+    var box = c.parentNode, ov = c.closest ? c.closest(".settings-modal-overlay") : null;
+    var was = !!(box && box.classList && box.classList.contains("lt-edge"));
+    if(box && box.classList) box.classList.toggle("lt-edge", has);
+    if(ov) ov.classList.toggle("lt-edge-ov", has);
+    if(was !== has){ try{ window.dispatchEvent(new Event("resize")); }catch(e){} }
+    if(!edgeObserver && window.MutationObserver){
+      edgeObserver = new MutationObserver(syncEdge);
+      edgeObserver.observe(c, { childList: true });
+    }
+  }
+
   function init(d){
     deps = d || {};
     tabs = load();
     ensureStyle();
+    syncEdge();
     var add = el(ADD_BTN_ID);
     if(add && !add.__ltBound){
       add.__ltBound = true;
