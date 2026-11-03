@@ -40,7 +40,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
-         * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 24: `utabFab(spec)` — кнопки «полный экран» и «домик» поверх сайта вкладки-сайта (сайт растянут под них).
          * 23: `claudeHome()` — «домик» вкладки Claude (первый экран).
          * 22: вкладки-сайты ряда «Интернет» (utabShow / utabHide / utabGo / utabReload / utabRemove / utabGetState / utabGetIcon).
          * 21: способ усиления громкости (volumeBoostSetEngine: 0 — LoudnessEnhancer, 1 — DynamicsProcessing).
@@ -811,14 +811,13 @@ class NativeBridge(private val activity: MainActivity) {
     }
 
     /**
-     * Окна под кнопки страницы: [spec] — «x,y,w,h;…» в CSS-пикселях страницы; пусто — окон нет. Возвращает true, если оболочка умеет окна
-     * (Android 10+); иначе страница оставляет прежнюю раскладку — сайт заканчивается над рядом кнопок.
+     * Кнопки страницы (полный экран, «домик») поверх сайта: [spec] — JSON {"bg","bd","fg":"#rrggbb","b":[{"k":"fs"|"home","x","y","w","h","on"}]}
+     * (CSS-пиксели страницы); пусто — кнопок нет. Нажатие оболочка сообщает странице: `window.SiteTabFab.tap(k)`.
      */
     @JavascriptInterface
-    fun utabHoles(spec: String?): Boolean {
-        if (!activity.pageTrusted || Build.VERSION.SDK_INT < 29) return false
-        activity.runOnUiThread { activity.userTabs.setHoles(spec) }
-        return true
+    fun utabFab(spec: String?) {
+        if (!activity.pageTrusted) return
+        activity.runOnUiThread { activity.userTabs.setFabs(spec) }
     }
 
     /** Прячет показанную вкладку-сайт (страница живёт за краем, место на ней сохраняется). */
