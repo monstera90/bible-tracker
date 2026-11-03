@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 10.2 (03.11)
+// Версия: 11.0 (04.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
 // Версия: 4.0 (25.10) — выбор папки с музыкой (`musicFolderLauncher`, `pickMusicFolder`) для вкладки «Музыка».
@@ -14,6 +14,7 @@ import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -292,7 +293,9 @@ class MainActivity : ComponentActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (userTabs.isVisible && userTabs.canGoBack()) {
+                if (isSiteFullscreen) {
+                    hideSiteFullscreen()
+                } else if (userTabs.isVisible && userTabs.canGoBack()) {
                     userTabs.goBack()
                 } else if (claudeTab.isVisible && claudeTab.canGoBack()) {
                     claudeTab.goBack()
@@ -462,6 +465,7 @@ class MainActivity : ComponentActivity() {
         handler.removeCallbacks(trialWatchdog)
         handler.removeCallbacks(keyboardPush)
         fileSaver.cancelAll()
+        hideSiteFullscreen()
         claudeTab.destroy()
         userTabs.destroy()
         (webView.parent as? ViewGroup)?.removeView(webView)
@@ -531,6 +535,62 @@ class MainActivity : ComponentActivity() {
         }
         // Высота полосы зависит от флага fullscreen: пересчитываем сразу, не дожидаясь смены панелей.
         ViewCompat.requestApplyInsets(root)
+    }
+
+    // ===== Полноэкранное видео вкладок-сайтов (WebChromeClient.onShowCustomView) =====
+    private var siteFsView: View? = null
+    private var siteFsHolder: FrameLayout? = null
+    private var siteFsCallback: WebChromeClient.CustomViewCallback? = null
+    private var siteFsPrevFullscreen = false
+    private var siteFsPrevOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+
+    val isSiteFullscreen: Boolean get() = siteFsView != null
+
+    /**
+     * Кнопка «во весь экран» у плеера на сайте вкладки «Интернет»: WebView отдаёт готовый вид ролика [view] — кладём его чёрным
+     * слоем поверх всего окна, прячем системные панели и поворачиваем экран в альбомный. Выход — кнопка плеера или «назад».
+     */
+    fun showSiteFullscreen(view: View, callback: WebChromeClient.CustomViewCallback) {
+        if (siteFsView != null) {
+            callback.onCustomViewHidden()
+            return
+        }
+        siteFsView = view
+        siteFsCallback = callback
+        siteFsPrevFullscreen = fullscreen
+        siteFsPrevOrientation = requestedOrientation
+        (view.parent as? ViewGroup)?.removeView(view)
+        val holder = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            isClickable = true
+            keepScreenOn = true
+            addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
+        siteFsHolder = holder
+        addContentView(holder, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        applyFullscreen(true)
+    }
+
+    /** Закрывает полноэкранное видео сайта (можно звать сколько угодно раз: без открытого вида ничего не делает). */
+    fun hideSiteFullscreen() {
+        val view = siteFsView ?: return
+        val callback = siteFsCallback
+        val holder = siteFsHolder
+        siteFsView = null
+        siteFsCallback = null
+        siteFsHolder = null
+        if (holder != null) {
+            holder.removeView(view)
+            (holder.parent as? ViewGroup)?.removeView(holder)
+        }
+        requestedOrientation = siteFsPrevOrientation
+        applyFullscreen(siteFsPrevFullscreen)
+        try {
+            callback?.onCustomViewHidden()
+        } catch (e: Exception) {
+            // WebView уже закрыл полноэкранный режим сам
+        }
     }
 
     /**

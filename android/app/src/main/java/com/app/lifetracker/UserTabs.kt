@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 6.0 (03.11)
+// Версия: 7.0 (04.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -520,6 +520,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
 
     /** Прячет показанную вкладку (страница живёт за краем, позиция сохраняется). */
     fun hide() {
+        activity.hideSiteFullscreen()
         for (t in tabs.values) hideTab(t)
         activity.setSiteKeyboardOverlay(false)
     }
@@ -1297,6 +1298,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
             override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
                 // Процесс рендера упал: WebView убирается, при следующем показе он создастся заново и встанет на сохранённое место.
                 activity.runOnUiThread {
+                    activity.hideSiteFullscreen()
                     if (t.bg) endBackground(t, pause = false, sleep = false)
                     if (t.floating) {
                         handler.removeCallbacks(floatPollTask)
@@ -1325,6 +1327,20 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
 
             override fun onReceivedIcon(view: WebView?, icon: Bitmap?) {
                 if (icon != null) saveIcon(t, icon)
+            }
+
+            // Кнопка «во весь экран» у плеера сайта: без этих двух методов WebView её нажатие молча игнорирует.
+            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                if (view == null) {
+                    callback?.onCustomViewHidden()
+                    return
+                }
+                if (callback == null) return
+                activity.showSiteFullscreen(view, callback)
+            }
+
+            override fun onHideCustomView() {
+                activity.hideSiteFullscreen()
             }
 
             override fun onReceivedTitle(view: WebView?, title: String?) {
