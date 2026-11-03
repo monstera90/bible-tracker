@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 5.2 (03.11)
+// Версия: 5.3 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -151,6 +151,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         private const val RESUME_AFTER_MS = 800L          // страница сама поставила ролик на паузу в фоне — через столько он запускается заново
         private const val RESUME_MAX_TRIES = 3            // попыток подряд, пока ролик не поиграл хотя бы RESUME_STABLE_MS
         private const val RESUME_STABLE_MS = 10000L
+        private const val DIAG_EVERY_MS = 5000L           // снимок страницы при пробе — не чаще (при уходе с вкладки/сворачивании — всегда)
         private const val BG_PAUSED_MAX_MS = 10L * 60L * 1000L // на паузе в фоне дольше — вкладка засыпает, уведомление снимается
 
         /**
@@ -263,6 +264,20 @@ return [1];}catch(e){return [0];}})()"""
 
         /** Возврат страницы в обычный режим видимости (видео продолжает играть). */
         private const val MEDIA_RESTORE_JS = "(function(){" + MEDIA_EL_JS + "W.__ltVis=0;try{var ow=v&&v.ownerDocument&&v.ownerDocument.defaultView;if(ow)ow.__ltVis=0;}catch(e){}return 1;})()"
+        /**
+         * Снимок страницы для журнала, когда играющий ролик не найден: адрес, все video/audio (пауза, readyState, loop, muted,
+         * длина, размер кадра) в самой странице и в доступных iframe, число iframe (и скольких из них не видно — чужое
+         * происхождение), число shadow-root. Ответ — одна строка.
+         */
+        private const val DIAG_JS = """(function(){try{var D=document,o=[],i;
+function add(root,tag){var els=root.querySelectorAll('video,audio'),j;for(j=0;j<els.length&&o.length<6;j++){var v=els[j];
+o.push(tag+v.tagName.charAt(0)+(v.paused?' пауза':' играет')+(v.ended?' конец':'')+' rs'+v.readyState+(v.loop?' loop':'')+(v.muted?' mute':'')+' d'+(isFinite(v.duration)?Math.round(v.duration):'inf')+' '+(v.videoWidth|0)+'x'+(v.videoHeight|0));}}
+add(D,'');
+var f=D.getElementsByTagName('iframe'),x=0,sh=0;
+for(i=0;i<f.length;i++){try{var d=f[i].contentDocument;if(d){add(d,'if:');}else{x++;}}catch(e){x++;}}
+var all=D.querySelectorAll('*'),n=Math.min(all.length,3000);for(i=0;i<n;i++){if(all[i].shadowRoot)sh++;}
+return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; ')+']':'')+' | iframe='+f.length+' чужих='+x+' | shadow='+sh;
+}catch(e){return 'ошибка '+e;}})()"""
         private val ID_RE = Regex("[A-Za-z0-9_]{1,40}")
         // Адреса, на которые сайт возвращает человека после входа/выхода (signin-oidc, signin-google, signout-callback-oidc, /oauth/callback…):
         // сами по себе страницей не являются, повторно открытые отвечают ошибкой — «местом на сайте» не запоминаются.
@@ -284,6 +299,8 @@ return [1];}catch(e){return [0];}})()"""
         var floating = false   // WebView сейчас в плавающем окне с видео (FloatingVideo), а не в host
         var floatKind = 0      // KIND_LEFT / KIND_MIN
         var bg = false         // видео/звук играет в фоне (SiteMediaService), WebView не усыпляется
+        var lastDiag = ""       // последний записанный в журнал снимок страницы при «видео не найдено»
+        var diagAt = 0L        // когда он записан (пробы раз в секунду пишут не чаще раза в DIAG_EVERY_MS)
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -442,12 +459,13 @@ return [1];}catch(e){return [0];}})()"""
         saveTab(t)
         v.clearFocus()
         v.translationX = OFFSCREEN_X
+        if (!t.ready) bgLog("уход с вкладки: страница ещё не готова — фон не проверяется")
         if (!t.ready || t.bg) return
         if (FLOAT_WINDOW) {
             tryFloat(t, v, KIND_LEFT) { if (!t.shown && !t.floating && t.view === v) v.onPause() }
         } else {
             // играет видео/звук — вкладка остаётся живой в фоне (остров), иначе засыпает
-            tryBackground(t, v) { if (!t.shown && !t.floating && !t.bg && t.view === v) v.onPause() }
+            tryBackground(t, v, "уход с вкладки", true) { if (!t.shown && !t.floating && !t.bg && t.view === v) v.onPause() }
         }
     }
 
@@ -548,7 +566,10 @@ return [1];}catch(e){return [0];}})()"""
             // Служба запускается здесь, пока приложение ещё на экране: из onStop система может запуск не разрешить.
             val t = shownTab()
             val v = t?.view
-            if (t != null && v != null && t.ready && !t.bg) tryBackground(t, v) { }
+            if (t == null) bgLog("свёрнуто: вкладка-сайт не открыта")
+            else if (v == null || !t.ready) bgLog("свёрнуто: страница вкладки не готова (ready=${t.ready})")
+            else if (t.bg) bgLog("свёрнуто: фон уже идёт")
+            else tryBackground(t, v, "сворачивание", true) { }
             SiteMedia.onAppBackground(activity.applicationContext)
         }
     }
@@ -629,7 +650,8 @@ return [1];}catch(e){return [0];}})()"""
         val v = t.view ?: return
         if (!t.ready || t.floating) return
         if (!FLOAT_WINDOW) {
-            if (!t.bg) tryBackground(t, v) { }
+            bgLog("onStop: фон=${t.bg}")
+            if (!t.bg) tryBackground(t, v, "onStop", true) { }
             return
         }
         if (!win().canOverlay()) return // без разрешения «Поверх других приложений» окна вне приложения не будет
@@ -640,6 +662,7 @@ return [1];}catch(e){return [0];}})()"""
     fun onAppVisible() {
         appVisible = true
         startProbe()
+        if (bgTab != null) bgLog("приложение на экране: фон идёт")
         val t = floatTab ?: return
         if (!t.floating || t.floatKind != KIND_MIN) return
         closeFloat(t, false)
@@ -820,14 +843,32 @@ return [1];}catch(e){return [0];}})()"""
      * Ищет на странице играющий ролик (MEDIA_JS). Нашёлся — вкладка остаётся живой в фоне и показывается уведомление с островом;
      * нет — вызывается [onNone] (при уходе с вкладки — пауза WebView, как раньше).
      */
-    private fun tryBackground(t: Tab, v: WebView, onNone: () -> Unit) {
+    private fun tryBackground(t: Tab, v: WebView, why: String = "", always: Boolean = false, onNone: () -> Unit) {
         if (t.bg) return
         v.evaluateJavascript(MEDIA_JS) { raw ->
             val a = parseNums(raw)
             if (a == null || a.isEmpty() || a[0] != 1.0) {
+                if (t.view === v) logMiss(t, v, why, always)
                 onNone()
             } else if (t.view === v && !t.bg) {
                 startBackground(t, v)
+            }
+        }
+    }
+
+    /**
+     * Играющий ролик не найден — в журнал пишется, что на странице есть (DIAG_JS). [always] — при уходе с вкладки и сворачивании
+     * (нужен ответ на каждое событие); пробы раз в секунду пишут, только если снимок изменился и прошло DIAG_EVERY_MS.
+     */
+    private fun logMiss(t: Tab, v: WebView, why: String, always: Boolean) {
+        val now = System.currentTimeMillis()
+        if (!always && now - t.diagAt < DIAG_EVERY_MS) return
+        t.diagAt = now
+        v.evaluateJavascript(DIAG_JS) { raw ->
+            val s = if (raw.isNullOrEmpty() || raw == "null") "страница не ответила" else raw.trim('"').take(400)
+            if (always || s != t.lastDiag) {
+                t.lastDiag = s
+                bgLog("видео не найдено" + (if (why.isEmpty()) "" else " ($why)") + ": " + s)
             }
         }
     }
