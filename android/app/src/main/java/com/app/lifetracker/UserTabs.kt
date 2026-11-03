@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (02.11)
+// Версия: 1.1 (02.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -308,6 +308,8 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         evictIfNeeded(t)
         val v = WebView(activity)
         v.setBackgroundColor(0xFFFFFFFF.toInt())
+        v.isVerticalScrollBarEnabled = false
+        v.isHorizontalScrollBarEnabled = false
         configure(v, t)
         v.translationX = OFFSCREEN_X
         host.addView(v, initialParams())

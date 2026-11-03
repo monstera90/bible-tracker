@@ -1,6 +1,6 @@
 /* ===========================================================================
    usertabs.js
-   Версия: 1.2 (02.11)
+   Версия: 1.3 (02.11)
    Вкладки-сайты бокового ряда «Клод» (кнопка «+» над вкладкой «Claude», set2s_10). Каждая вкладка — свой адрес, который открывается
    по умолчанию; дальше вкладка помнит, где человек остановился на сайте (в том числе после закрытия приложения).
    Сам сайт показывает ОБОЛОЧКА: отдельный WebView на вкладку поверх области #userTabView (мост LifeTrackerNative ≥ 22, utab*;
@@ -94,7 +94,8 @@
   }
 
   var GLOBE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
-    '<circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3c3 3.2 3 14.8 0 18"></path><path d="M12 3c-3 3.2-3 14.8 0 18"></path></svg>';
+    '<circle cx="12" cy="12" r="10"></circle><path d="M2 12h20"></path>' +
+    '<path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>';
   function letterSvg(ch){
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
       '<rect x="3.5" y="3.5" width="17" height="17" rx="4"></rect>' +

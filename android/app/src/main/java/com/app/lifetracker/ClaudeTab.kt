@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (21.10) — вкладка Claude: второй WebView с claude.ai поверх области содержимого + автоотправка «Дальше».
+// Версия: 1.1 (02.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -121,6 +121,8 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         view?.let { return it }
         val v = WebView(activity)
         v.setBackgroundColor(0xFFFFFFFF.toInt())
+        v.isVerticalScrollBarEnabled = false
+        v.isHorizontalScrollBarEnabled = false
         val s = v.settings
         s.javaScriptEnabled = true
         s.domStorageEnabled = true
