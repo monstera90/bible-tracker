@@ -1,6 +1,6 @@
 /* ===========================================================================
    claudetab.js
-   Версия: 1.0 (21.10)
+   Версия: 1.1 (03.11)
    Вкладка «Claude» (set2s_10, верхняя в вертикальном стеке второго набора, над «Карточками предметов»).
    Сам claude.ai показывает ОБОЛОЧКА: второй WebView поверх области #claudeTabView (мост LifeTrackerNative,
    версия 9: claudeShow/claudeHide/...). Здесь — только верхняя панель (автоотправка «Дальше» после снятия
@@ -46,12 +46,18 @@
     document.head.appendChild(st);
   }
 
+  // нижний ряд «полный экран + домик» (my.js, mountSiteFabRow)
+  function mountFab(c){
+    try{ if(window.SiteTabFab) window.SiteTabFab.mount(c); }catch(e){}
+  }
+
   function render(){
     var c = document.getElementById("settingsTabContent");
     if(!c) return;
     var b = bridge();
     if(!b){
       c.innerHTML = '<div class="mood-diagram-empty">Вкладка Claude работает только в приложении (APK) с обновлённой оболочкой.</div>';
+      mountFab(c);
       return;
     }
     ensureStyle();
@@ -84,6 +90,7 @@
     document.getElementById("claudeTestBtn").addEventListener("click", function(){ try{ b.claudeSendNow(); }catch(e){} });
     document.getElementById("claudeReloadBtn").addEventListener("click", function(){ try{ b.claudeReload(); }catch(e){} });
 
+    mountFab(c);
     active = true;
     lastRect = "";
     startTimer();
@@ -100,7 +107,13 @@
     var cr = c.getBoundingClientRect();
     var pad = parseFloat(getComputedStyle(c).paddingBottom) || 0;
     var top = v.getBoundingClientRect().top;
-    var h = Math.max(160, Math.floor(cr.bottom - pad - top));
+    var bottom = cr.bottom - pad;
+    var row = document.getElementById("siteFabRow"); // нативный WebView лежит поверх страницы — сайт заканчивается над рядом кнопок
+    if(row){
+      var rr = row.getBoundingClientRect();
+      if(rr.height > 0) bottom = Math.min(bottom, rr.top - 4);
+    }
+    var h = Math.max(160, Math.floor(bottom - top));
     v.style.height = h + "px";
     var r = v.getBoundingClientRect();
     var key = [r.left, r.top, r.width, r.height].map(Math.round).join(",");

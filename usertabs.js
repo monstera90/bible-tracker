@@ -1,6 +1,6 @@
 /* ===========================================================================
    usertabs.js
-   Версия: 1.4 (02.11)
+   Версия: 1.5 (03.11)
    Вкладки-сайты бокового ряда «Клод» (кнопка «+» над вкладкой «Claude», set2s_10). Каждая вкладка — свой адрес, который открывается
    по умолчанию; дальше вкладка помнит, где человек остановился на сайте (в том числе после закрытия приложения).
    Сам сайт показывает ОБОЛОЧКА: отдельный WebView на вкладку поверх области #userTabView (мост LifeTrackerNative ≥ 22, utab*;
@@ -282,6 +282,10 @@
   }
 
   // ---- содержимое вкладки ----
+  // нижний ряд «полный экран + домик» (my.js, mountSiteFabRow) — на каждом экране вкладки
+  function mountFab(c){
+    try{ if(window.SiteTabFab) window.SiteTabFab.mount(c); }catch(e){}
+  }
   function render(key){
     var id = idOf(key), t = find(id), c = el("settingsTabContent");
     if(!c || !t) return;
@@ -289,11 +293,13 @@
     if(!b){
       hide();
       c.innerHTML = '<div class="mood-diagram-empty">Вкладки-сайты работают только в приложении (APK) с обновлённой оболочкой.</div>';
+      mountFab(c);
       return;
     }
     ensureStyle();
     if(!t.home || formFor === id) renderForm(c, t);
     else renderPage(c, t);
+    mountFab(c);
   }
 
   function renderForm(c, t){
@@ -372,7 +378,13 @@
     var cr = c.getBoundingClientRect();
     var pad = parseFloat(getComputedStyle(c).paddingBottom) || 0;
     var top = v.getBoundingClientRect().top;
-    var h = Math.max(160, Math.floor(cr.bottom - pad - top));
+    var bottom = cr.bottom - pad;
+    var row = el("siteFabRow"); // нативный WebView лежит поверх страницы — сайт заканчивается над рядом кнопок, иначе они окажутся под ним
+    if(row){
+      var rr = row.getBoundingClientRect();
+      if(rr.height > 0) bottom = Math.min(bottom, rr.top - 4);
+    }
+    var h = Math.max(160, Math.floor(bottom - top));
     v.style.height = h + "px";
     var r = v.getBoundingClientRect();
     var key = [r.left, r.top, r.width, r.height].map(Math.round).join(",");

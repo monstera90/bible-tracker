@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 126.0 (02.11)
+   Версия: 127.0 (03.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -21099,6 +21099,29 @@
       openGoalSettingsModal(id);
     });
   }
+
+  // Нижний ряд вкладок-сайтов («Claude» — claudetab.js, вкладки «+» ряда «Клод» — usertabs.js): тот же .mdeditor-fab-row, что у остальных
+  // вкладок, — «полный экран» (как в ридере книг) слева от неподвижного «домика»-пустышки. Сайт показывает нативный WebView поверх страницы,
+  // поэтому модули укорачивают его по верху ряда (#siteFabRow): иначе кнопки оказались бы под сайтом. Зовётся после каждой перерисовки вкладки.
+  function mountSiteFabRow(container){
+    if(!container) return;
+    var old = document.getElementById("siteFabRow");
+    if(old && old.parentNode) old.parentNode.removeChild(old);
+    var row = document.createElement("div");
+    row.className = "mdeditor-fab-row";
+    row.id = "siteFabRow";
+    row.innerHTML =
+      '<button type="button" class="mdeditor-fab-btn fullscreen-mode-btn" id="siteFullscreenBtn"></button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="siteHomeStub" tabindex="-1" aria-disabled="true">' + READER_HOME_ICON_SVG + '</button>';
+    container.appendChild(row);
+    var fs = document.getElementById("siteFullscreenBtn");
+    var on = getHideStatusBarEnabled();
+    fs.innerHTML = on ? FULLSCREEN_MODE_ON_ICON_SVG : FULLSCREEN_MODE_ICON_SVG;
+    fs.title = on ? "Выйти из полноэкранного режима" : "Полноэкранный режим";
+    fs.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+    bindTapOrHold(fs, handleFullscreenBtnTap, function(){});
+  }
+  window.SiteTabFab = { mount: mountSiteFabRow };
 
   // ===================== ВКЛАДКИ ЗАДАЧ: ХРАНЕНИЕ =====================
   // Каждая задача — отдельный ключ "task:<id>" в общем state (та же схема {c:..., t:...}, что и у

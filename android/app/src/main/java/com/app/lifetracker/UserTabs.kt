@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.2 (02.11)
+// Версия: 1.3 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -13,6 +13,7 @@ import android.util.Base64
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebResourceError
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -54,8 +55,12 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         private const val REVEAL_TIMEOUT_MS = 8000L
         private const val PRELOAD_DELAY_MS = 2500L
         private const val MAX_LIVE = 4
+        private const val RECOVER_MIN_GAP_MS = 60000L
         private const val ICON_PX = 64
         private val ID_RE = Regex("[A-Za-z0-9_]{1,40}")
+        // Адреса, на которые сайт возвращает человека после входа/выхода (signin-oidc, signin-google, signout-callback-oidc, /oauth/callback…):
+        // сами по себе страницей не являются, повторно открытые отвечают ошибкой — «местом на сайте» не запоминаются.
+        private val CALLBACK_RE = Regex("(?i)/(signin|signout|signout-callback)-[a-z0-9]+(/|$)|/(oauth2?|auth|openid|oidc)/callback(/|$)")
     }
 
     private class Tab(val id: String) {
@@ -65,6 +70,8 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         @Volatile var curUrl = ""
         @Volatile var curTitle = ""
         @Volatile var canBack = false
+        @Volatile var failed = false   // главная страница не загрузилась (страница ошибки) — место на сайте не сохраняется
+        var recoverAt = 0L
         var needFix = true
         var lastUsed = 0L
         var saveTask: Runnable? = null
@@ -91,6 +98,26 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
 
     fun canGoBack(): Boolean = shownTab()?.view?.canGoBack() == true
     fun goBack() { shownTab()?.view?.goBack() }
+
+    private fun isCallbackUrl(url: String?): Boolean {
+        if (url.isNullOrEmpty()) return false
+        val path = try { Uri.parse(url).path } catch (e: Exception) { null }
+        if (path == null) return false
+        return CALLBACK_RE.containsMatchIn(path)
+    }
+
+    /**
+     * Обратный вызов входа (signin-oidc и т. п.) ответил ошибкой: вкладка один раз возвращается на домашний адрес — если вход уже
+     * состоялся, сайт откроется сразу, иначе покажет форму входа. Повтор не чаще раза в минуту, чтобы не крутиться по кругу.
+     */
+    private fun recoverFromFailedCallback(t: Tab, v: WebView) {
+        val now = System.currentTimeMillis()
+        if (now - t.recoverAt < RECOVER_MIN_GAP_MS) return
+        val home = prefs.getString(k(t.id, "home"), null)
+        if (home.isNullOrEmpty()) return
+        t.recoverAt = now
+        handler.post { if (t.view === v) v.loadUrl(home) }
+    }
 
     /** Только http(s) с хостом; http поднимается до https (открытый трафик в приложении запрещён). */
     private fun cleanUrl(raw: String?): String? {
@@ -342,6 +369,12 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         t.ready = false
         t.needFix = true
         t.lastUsed = System.currentTimeMillis()
+        // Место, сохранённое на обратном вызове входа (запомнено прежними версиями), сбрасывается: вкладка открывается с домашнего адреса.
+        val saved = prefs.getString(k(t.id, "url"), null)
+        if (isCallbackUrl(saved)) {
+            stateFile(t.id).delete()
+            prefs.edit().remove(k(t.id, "url")).putInt(k(t.id, "sy"), 0).apply()
+        }
         if (!restoreFromDisk(t.id, v)) {
             val last = prefs.getString(k(t.id, "url"), null)
             val target = if (!last.isNullOrEmpty()) last else prefs.getString(k(t.id, "home"), "") ?: ""
@@ -389,8 +422,21 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean =
                 handleUrl(if (url == null) null else Uri.parse(url))
 
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                if (view != null && t.view === view) t.failed = false
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 pageFinished(t, view)
+            }
+
+            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                if (request?.isForMainFrame == true) mainFrameFailed(t, view, request.url?.toString())
+            }
+
+            @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
+            override fun onReceivedError(view: WebView?, errorCode: Int, description: String?, failingUrl: String?) {
+                mainFrameFailed(t, view, failingUrl)
             }
 
             override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
@@ -434,6 +480,12 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
                 }
             }
         }
+    }
+
+    private fun mainFrameFailed(t: Tab, view: WebView?, url: String?) {
+        if (view == null || t.view !== view) return
+        t.failed = true
+        if (isCallbackUrl(url)) recoverFromFailedCallback(t, view)
     }
 
     /** true — переход перехвачен (не web-адрес уходит во внешнее приложение), false — грузит сам WebView. */
@@ -514,6 +566,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         if (!t.ready) return
         val url = v.url
         if (url.isNullOrEmpty() || url == "about:blank") return
+        if (t.failed || isCallbackUrl(url)) return // страница ошибки и обратный вызов входа не запоминаются: прежнее место на сайте остаётся
         val b = Bundle()
         val list = try { v.saveState(b) } catch (e: Exception) { null }
         if (list != null) {
