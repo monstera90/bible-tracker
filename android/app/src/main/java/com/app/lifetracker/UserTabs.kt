@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 3.0 (03.11)
+// Версия: 3.1 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -61,7 +61,10 @@ private class SiteWebView(context: Context) : WebView(context) {
         }
         val saved = canvas.save()
         val path = Path()
-        for (h in hs) path.addRoundRect(RectF(h.left - left, h.top - top, h.right - left, h.bottom - top), radius, radius, Path.Direction.CW)
+        // канва WebView смещена на его прокрутку (scrollX/scrollY) — окна должны стоять на месте кнопок, а не ехать вместе с содержимым сайта
+        val ox = left - scrollX
+        val oy = top - scrollY
+        for (h in hs) path.addRoundRect(RectF(h.left - ox, h.top - oy, h.right - ox, h.bottom - oy), radius, radius, Path.Direction.CW)
         canvas.clipOutPath(path)
         super.onDraw(canvas)
         canvas.restoreToCount(saved)
