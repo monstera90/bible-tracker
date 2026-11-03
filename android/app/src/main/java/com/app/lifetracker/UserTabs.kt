@@ -1,10 +1,12 @@
 package com.app.lifetracker
-// Версия: 3.1 (03.11)
+// Версия: 3.2 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.os.Build
@@ -46,6 +48,7 @@ private class SiteWebView(context: Context) : WebView(context) {
     private var holes: List<RectF> = emptyList()
     private var radius = 0f
     private var passThrough = false
+    private val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
 
     fun setHoles(list: List<RectF>, r: Float) {
         holes = list
@@ -61,12 +64,21 @@ private class SiteWebView(context: Context) : WebView(context) {
         }
         val saved = canvas.save()
         val path = Path()
+        val d = resources.displayMetrics.density
         // канва WebView смещена на его прокрутку (scrollX/scrollY) — окна должны стоять на месте кнопок, а не ехать вместе с содержимым сайта
         val ox = left - scrollX
         val oy = top - scrollY
-        for (h in hs) path.addRoundRect(RectF(h.left - ox, h.top - oy, h.right - ox, h.bottom - oy), radius, radius, Path.Direction.CW)
+        val local = ArrayList<RectF>(hs.size)
+        for (h in hs) {
+            val rc = RectF(h.left - ox, h.top - oy, h.right - ox, h.bottom - oy)
+            local.add(rc)
+            path.addRoundRect(rc, radius, radius, Path.Direction.CW)
+        }
         canvas.clipOutPath(path)
         super.onDraw(canvas)
+        // тень кнопки (как box-shadow у .mdeditor-fab-btn: 0 2px 6px rgba(0,0,0,.28)) — рисуется вокруг выреза; сама заливка вырезом отсечена
+        shadow.setShadowLayer(4.3f * d, 0f, 2f * d, 0x47000000)
+        for (rc in local) canvas.drawRoundRect(rc, radius, radius, shadow)
         canvas.restoreToCount(saved)
     }
 
@@ -254,7 +266,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
             }
         }
         holes = list
-        val r = 9f * d
+        val r = 8f * d
         for (t in tabs.values) (t.view as? SiteWebView)?.setHoles(list, r)
     }
 
@@ -438,7 +450,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         t.view?.let { return it }
         evictIfNeeded(t)
         val v = SiteWebView(activity)
-        v.setHoles(holes, 9f * activity.resources.displayMetrics.density)
+        v.setHoles(holes, 8f * activity.resources.displayMetrics.density)
         v.setBackgroundColor(0xFFFFFFFF.toInt())
         v.isVerticalScrollBarEnabled = false
         v.isHorizontalScrollBarEnabled = false
