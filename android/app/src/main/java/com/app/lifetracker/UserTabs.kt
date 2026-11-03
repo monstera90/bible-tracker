@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 5.3 (03.11)
+// Версия: 6.0 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -31,7 +31,10 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import org.json.JSONArray
 import org.json.JSONObject
@@ -51,6 +54,13 @@ private class SiteWebView(context: Context) : WebView(context) {
     private var radius = 0f
     private var passThrough = false
     private val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+
+    /** Идёт фоновое воспроизведение: окну приложения скрыться можно, а странице об этом знать нельзя (иначе Chromium гасит ролик). */
+    @Volatile var keepAwake = false
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(if (keepAwake && visibility != View.VISIBLE) View.VISIBLE else visibility)
+    }
 
     fun setHoles(list: List<RectF>, r: Float) {
         holes = list
@@ -152,6 +162,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         private const val RESUME_MAX_TRIES = 3            // попыток подряд, пока ролик не поиграл хотя бы RESUME_STABLE_MS
         private const val RESUME_STABLE_MS = 10000L
         private const val DIAG_EVERY_MS = 5000L           // снимок страницы при пробе — не чаще (при уходе с вкладки/сворачивании — всегда)
+        private const val FRAME_FRESH_MS = 8000L         // «играет» из кадра верно, пока сообщение не старше
         private const val BG_PAUSED_MAX_MS = 10L * 60L * 1000L // на паузе в фоне дольше — вкладка засыпает, уведомление снимается
 
         /**
@@ -246,17 +257,17 @@ return [1];}catch(e){return [0];}})()"""
         /** Помеченный ролик (запомнен в window.__ltMediaEl; запасной путь — атрибут data-ltmedia). */
         private const val MEDIA_EL_JS = "var W=window,v=(W.__ltMediaEl&&W.__ltMediaEl.isConnected)?W.__ltMediaEl:document.querySelector('[data-ltmedia]');"
 
-        /** Состояние помеченного ролика: [1, на паузе (0/1), закончился (0/1), название, секунда, readyState] или [0], если ролик пропал. */
+        /** Состояние помеченного ролика: [1, на паузе (0/1), закончился (0/1), название, секунда, readyState, ошибка play() или пусто] или [0], если ролик пропал. */
         private const val MEDIA_STATE_JS = "(function(){try{" + MEDIA_EL_JS + "if(!v)return [0];" +
             "var t='';try{var m=navigator.mediaSession&&navigator.mediaSession.metadata;if(m&&m.title)t=String(m.title);}catch(e){}" +
-            "if(!t)t=document.title||'';" +
-            "return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120),Math.round(v.currentTime||0),v.readyState|0];}catch(e){return [0];}})()"
+            "if(!t)t=document.title||'';var pe=W.__ltPlayErr||'';W.__ltPlayErr='';" +
+            "return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120),Math.round(v.currentTime||0),v.readyState|0,pe];}catch(e){return [0];}})()"
 
         /** Пауза/воспроизведение помеченного ролика: [1, на паузе (0/1)] или [0]. */
         private const val MEDIA_TOGGLE_JS = "(function(){" + MEDIA_EL_JS + "if(!v)return [0];if(v.paused){try{v.play();}catch(e){}}else{v.pause();}return [1,v.paused?1:0];})()"
 
         /** Запуск помеченного ролика (страница сама поставила его на паузу в фоне): [1] или [0]. */
-        private const val MEDIA_PLAY_JS = "(function(){" + MEDIA_EL_JS + "if(!v)return [0];if(v.paused&&!v.ended){try{var p=v.play();if(p&&p.catch)p.catch(function(){});}catch(e){}}return [1];})()"
+        private const val MEDIA_PLAY_JS = "(function(){" + MEDIA_EL_JS + "if(!v)return [0];if(v.paused&&!v.ended){try{var p=v.play();if(p&&p.catch)p.catch(function(e){W.__ltPlayErr=(e&&e.name)||'err';});}catch(e){}}return [1];})()"
 
         /** Пауза помеченного ролика и возврат страницы в обычный режим видимости. */
         private const val MEDIA_PAUSE_JS = "(function(){" + MEDIA_EL_JS + "if(v){try{v.pause();}catch(e){}}" +
@@ -264,6 +275,39 @@ return [1];}catch(e){return [0];}})()"""
 
         /** Возврат страницы в обычный режим видимости (видео продолжает играть). */
         private const val MEDIA_RESTORE_JS = "(function(){" + MEDIA_EL_JS + "W.__ltVis=0;try{var ow=v&&v.ownerDocument&&v.ownerDocument.defaultView;if(ow)ow.__ltVis=0;}catch(e){}return 1;})()"
+        /**
+         * Скрипт для КАЖДОГО iframe страницы (addDocumentStartJavascript, любые происхождения; в самой странице не работает):
+         * кадр всегда «видимый» (document.hidden = false, visibilitychange и blur глушатся), лучший ролик кадра сообщает состояние
+         * оболочке через объект ltFrameBridge (`m|пауза|конец|секунда|readyState` или `n`, если ролика нет), а команды `play`/`pause`/`toggle`
+         * от оболочки выполняет. Так видео из чужого iframe (плеер на другом домене) тоже может играть в фоне.
+         */
+        private const val FRAME_JS = """(function(){try{var W=window,D=document;
+if(W===W.top||W.__ltFrm)return;W.__ltFrm=1;
+function def(o,n,val){try{Object.defineProperty(o,n,{configurable:true,get:function(){return val;}});}catch(e){}}
+def(D,'hidden',false);def(D,'webkitHidden',false);def(D,'visibilityState','visible');def(D,'webkitVisibilityState','visible');
+try{D.hasFocus=function(){return true;};}catch(e){}
+function stop(e){if(e.type==='blur'&&e.target!==W&&e.target!==D)return;e.stopImmediatePropagation();}
+var ev=['visibilitychange','webkitvisibilitychange','blur'],i;
+for(i=0;i<ev.length;i++){W.addEventListener(ev[i],stop,true);D.addEventListener(ev[i],stop,true);}
+function init(){var B=W.ltFrameBridge,lt=0;
+function pick(){var els=D.querySelectorAll('video,audio'),best=null,sc=-1,j;
+for(j=0;j<els.length;j++){var v=els[j];if(v.loop)continue;
+var lg=(v.duration>60||!isFinite(v.duration));if(v.muted&&!lg)continue;
+var s=(v.paused?0:1000000000)+(v.tagName==='VIDEO'?100000000:0)+(v.videoWidth||0)*(v.videoHeight||0);
+if(s>sc){sc=s;best=v;}}return best;}
+function report(e){try{var now=Date.now();if(e&&e.type==='timeupdate'&&now-lt<1000)return;lt=now;var v=pick();
+B.postMessage(v?('m|'+(v.paused?1:0)+'|'+(v.ended?1:0)+'|'+Math.round(v.currentTime||0)+'|'+(v.readyState|0)):'n');}catch(x){}}
+var me=['play','playing','pause','ended','timeupdate','loadedmetadata','seeked','emptied'],k;
+for(k=0;k<me.length;k++){D.addEventListener(me[k],report,true);}
+setInterval(report,2000);
+B.onmessage=function(e){try{var v=pick();if(!v)return;var c=String(e.data);
+if(c==='pause'||(c==='toggle'&&!v.paused)){v.pause();}
+else if(c==='play'||c==='toggle'){var p=v.play();if(p&&p.catch)p.catch(function(x){try{B.postMessage('e|'+((x&&x.name)||'err'));}catch(y){}});}
+report();}catch(x){}};
+report();}
+if(W.ltFrameBridge){init();}else{var n=0,tm=setInterval(function(){if(W.ltFrameBridge||++n>30){clearInterval(tm);if(W.ltFrameBridge)init();}},100);}
+}catch(e){}})()"""
+
         /**
          * Снимок страницы для журнала, когда играющий ролик не найден: адрес, все video/audio (пауза, readyState, loop, muted,
          * длина, размер кадра) в самой странице и в доступных iframe, число iframe (и скольких из них не видно — чужое
@@ -300,6 +344,11 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         var floatKind = 0      // KIND_LEFT / KIND_MIN
         var bg = false         // видео/звук играет в фоне (SiteMediaService), WebView не усыпляется
         var lastDiag = ""       // последний записанный в журнал снимок страницы при «видео не найдено»
+        var frameProxy: JavaScriptReplyProxy? = null // кадр (iframe) с роликом: канал команд к нему (FRAME_JS)
+        var framePaused = true
+        var frameEnded = false
+        var frameSec = 0
+        var frameSeen = 0L     // когда кадр сообщил состояние последний раз
         var diagAt = 0L        // когда он записан (пробы раз в секунду пишут не чаще раза в DIAG_EVERY_MS)
     }
 
@@ -798,6 +847,16 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
                     bgResumeTries = 0
                     bgLog(if (paused) "пауза кнопкой уведомления" else "запуск кнопкой уведомления")
                     SiteMedia.update(activity.applicationContext, SiteMedia.title, SiteMedia.sub, !paused)
+                } else if (t != null && t.bg && frameHas(t)) {
+                    frameSend(t, "toggle")
+                    val paused = !t.framePaused
+                    t.framePaused = paused
+                    bgPausedSince = if (paused) System.currentTimeMillis() else 0L
+                    bgUserPaused = paused
+                    bgPausedVisible = false
+                    bgResumeTries = 0
+                    bgLog(if (paused) "пауза кнопкой уведомления (кадр)" else "запуск кнопкой уведомления (кадр)")
+                    SiteMedia.update(activity.applicationContext, SiteMedia.title, SiteMedia.sub, !paused)
                 }
             }
         }
@@ -847,7 +906,9 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         if (t.bg) return
         v.evaluateJavascript(MEDIA_JS) { raw ->
             val a = parseNums(raw)
-            if (a == null || a.isEmpty() || a[0] != 1.0) {
+            if ((a == null || a.isEmpty() || a[0] != 1.0) && t.view === v && !t.bg && frameActive(t)) {
+                startBackground(t, v) // ролик в iframe: страница его не видит, о нём сообщил скрипт кадра
+            } else if (a == null || a.isEmpty() || a[0] != 1.0) {
                 if (t.view === v) logMiss(t, v, why, always)
                 onNone()
             } else if (t.view === v && !t.bg) {
@@ -886,6 +947,8 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         bgPlayingSince = System.currentTimeMillis()
         bgLog("фон начат: " + hostOf(t.curUrl) + ", экран=" + (t.shown && appVisible))
         v.onResume() // WebView вкладки не должен быть на паузе, пока играет видео
+        (v as? SiteWebView)?.keepAwake = true
+        try { v.settings.mediaPlaybackRequiresUserGesture = false } catch (e: Exception) { } // повторный запуск после паузы страницы — без жеста
         val title = t.curTitle.ifEmpty { prefs.getString(k(t.id, "title"), "") ?: "" }.ifEmpty { "Видео" }
         SiteMedia.begin(activity.applicationContext, title, hostOf(t.curUrl), bgListener)
         handler.removeCallbacks(bgPollTask)
@@ -904,6 +967,9 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         if (bgTab === t) bgTab = null
         SiteMedia.end(activity.applicationContext)
         val v = t.view ?: return
+        (v as? SiteWebView)?.keepAwake = false
+        try { v.settings.mediaPlaybackRequiresUserGesture = true } catch (e: Exception) { }
+        if (pause && frameHas(t)) frameSend(t, "pause")
         v.evaluateJavascript(if (pause) MEDIA_PAUSE_JS else MEDIA_RESTORE_JS, null)
         if (sleep && !t.shown) {
             // даём скрипту паузы выполниться, потом усыпляем WebView
@@ -931,6 +997,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         bgPausedSince = now // следующая попытка — не раньше чем через RESUME_AFTER_MS
         bgLog("страница поставила паузу в фоне — запускаю заново, попытка $bgResumeTries")
         v.evaluateJavascript(MEDIA_PLAY_JS, null)
+        if (frameHas(t)) frameSend(t, "play")
     }
 
     /** Строка в панель отладки приложения (видна при галочке «Включить режим отладки»). */
@@ -947,7 +1014,9 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
             v.evaluateJavascript(MEDIA_STATE_JS) { raw ->
                 if (bgTab === t && t.bg) {
                     val arr = try { if (raw.isNullOrEmpty() || raw == "null") null else JSONArray(raw) } catch (e: Exception) { null }
-                    if (arr == null || arr.optInt(0) != 1) {
+                    if ((arr == null || arr.optInt(0) != 1) && frameHas(t)) {
+                        pollFrame(t, v, this)
+                    } else if (arr == null || arr.optInt(0) != 1) {
                         // ролик пропал (сайт мог подставить следующий) — ищем играющий заново
                         v.evaluateJavascript(MEDIA_JS) { raw2 ->
                             val a = parseNums(raw2)
@@ -964,6 +1033,8 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
                     } else {
                         val paused = arr.optInt(1) == 1
                         val now = System.currentTimeMillis()
+                        val playErr = arr.optString(6, "")
+                        if (playErr.isNotEmpty()) bgLog("play() отклонён: $playErr")
                         if (paused) {
                             if (bgPausedSince == 0L) {
                                 bgPausedSince = now
@@ -988,6 +1059,93 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
                     }
                 }
             }
+        }
+    }
+
+    // ---------- ролик в iframe (чужое происхождение): сообщения скрипта FRAME_JS ----------
+
+    private fun installFrameHook(v: WebView, t: Tab) {
+        try {
+            if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) ||
+                !WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
+            ) {
+                bgLog("кадры: этот WebView не умеет скрипты для iframe")
+                return
+            }
+            WebViewCompat.addWebMessageListener(v, "ltFrameBridge", setOf("*"), object : WebViewCompat.WebMessageListener {
+                override fun onPostMessage(view: WebView, message: WebMessageCompat, sourceOrigin: Uri, isMainFrame: Boolean, replyProxy: JavaScriptReplyProxy) {
+                    onFrameMessage(t, v, message.data, isMainFrame, replyProxy)
+                }
+            })
+            WebViewCompat.addDocumentStartJavaScript(v, FRAME_JS, setOf("*"))
+        } catch (e: Throwable) {
+            bgLog("кадры: не удалось поставить скрипт (" + e.javaClass.simpleName + ")")
+        }
+    }
+
+    private fun onFrameMessage(t: Tab, v: WebView, data: String?, isMainFrame: Boolean, reply: JavaScriptReplyProxy) {
+        if (isMainFrame || data == null || t.view !== v) return
+        val now = System.currentTimeMillis()
+        if (data.startsWith("e|")) {
+            bgLog("кадр: play() отклонён: " + data.substring(2).take(60))
+            return
+        }
+        if (data == "n") {
+            if (t.frameProxy === reply) t.frameProxy = null
+            return
+        }
+        val p = data.split("|")
+        if (p.size < 5 || p[0] != "m") return
+        val paused = p[1] == "1"
+        // молчащий кадр (реклама, второй плеер) не вытесняет играющий
+        if (t.frameProxy != null && t.frameProxy !== reply && frameActive(t) && paused) return
+        if (t.frameProxy !== reply) bgLog("кадр: ролик в iframe, пауза=$paused, сек=${p[3]}, ready=${p[4]}")
+        t.frameProxy = reply
+        t.framePaused = paused
+        t.frameEnded = p[2] == "1"
+        t.frameSec = p[3].toIntOrNull() ?: 0
+        t.frameSeen = now
+    }
+
+    /** Кадр сообщил, что ролик играет (и сообщение свежее). */
+    private fun frameActive(t: Tab): Boolean =
+        t.frameProxy != null && !t.framePaused && !t.frameEnded && System.currentTimeMillis() - t.frameSeen < FRAME_FRESH_MS
+
+    /** Кадр с роликом известен: играет (свежо) или стоит на паузе. */
+    private fun frameHas(t: Tab): Boolean =
+        t.frameProxy != null && (t.framePaused || t.frameEnded || System.currentTimeMillis() - t.frameSeen < FRAME_FRESH_MS)
+
+    private fun frameSend(t: Tab, cmd: String) {
+        try { t.frameProxy?.postMessage(cmd) } catch (e: Throwable) { bgLog("кадр: команда $cmd не дошла (" + e.javaClass.simpleName + ")") }
+    }
+
+    /** Опрос ролика в iframe: то же, что для ролика в самой странице (пауза, повторный запуск, закончился), состояние берётся из сообщений кадра. */
+    private fun pollFrame(t: Tab, v: WebView, task: Runnable) {
+        if (bgTab !== t || !t.bg) return
+        if (t.frameEnded) {
+            endBackground(t, pause = false, sleep = true)
+            return
+        }
+        val now = System.currentTimeMillis()
+        val paused = t.framePaused || now - t.frameSeen >= FRAME_FRESH_MS
+        if (paused) {
+            if (bgPausedSince == 0L) {
+                bgPausedSince = now
+                bgPausedVisible = t.shown && appVisible
+                bgLog("кадр на паузе, экран=$bgPausedVisible, сек=${t.frameSec}")
+            }
+            maybeResume(t, v, now)
+        } else {
+            if (bgPausedSince != 0L) bgPlayingSince = now
+            bgPausedSince = 0L
+            bgUserPaused = false
+            if (now - bgPlayingSince > RESUME_STABLE_MS) bgResumeTries = 0
+        }
+        if (paused && now - bgPausedSince > BG_PAUSED_MAX_MS) {
+            endBackground(t, pause = false, sleep = true)
+        } else {
+            SiteMedia.update(activity.applicationContext, t.curTitle.ifEmpty { "Видео" }, hostOf(t.curUrl), !paused)
+            handler.postDelayed(task, BG_POLL_MS)
         }
     }
 
@@ -1094,6 +1252,8 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         cookies.setAcceptCookie(true)
         cookies.setAcceptThirdPartyCookies(v, true)
 
+        installFrameHook(v, t)
+
         v.setDownloadListener { url, _, _, _, _ ->
             try { activity.openExternalLink(Uri.parse(url)) } catch (e: Exception) { }
         }
@@ -1107,7 +1267,10 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
                 handleUrl(if (url == null) null else Uri.parse(url))
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                if (view != null && t.view === view) t.failed = false
+                if (view != null && t.view === view) {
+                    t.failed = false
+                    t.frameProxy = null
+                }
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
