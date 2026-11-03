@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 10.1 (03.11)
+// Версия: 10.2 (03.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
 // Версия: 4.0 (25.10) — выбор папки с музыкой (`musicFolderLauncher`, `pickMusicFolder`) для вкладки «Музыка».
@@ -542,6 +542,14 @@ class MainActivity : ComponentActivity() {
         if (isDestroyed || !pageTrusted) return
         val safe = text.replace("\\", "/").replace("'", " ")
         webView.evaluateJavascript("window.Debug && window.Debug.log('kb', '$safe')", null)
+    }
+
+    /** Строка в панель отладки страницы (метка [tag]); без доверенной страницы или при выключенной отладке ничего не делает. */
+    fun debugLog(tag: String, text: String) {
+        if (isDestroyed || !pageTrusted) return
+        val safeTag = tag.replace(Regex("[^A-Za-z0-9_]"), "")
+        val safe = text.replace("\\", "/").replace("'", " ").replace("\n", " ")
+        webView.evaluateJavascript("window.Debug && window.Debug.log('$safeTag', '$safe')", null)
     }
 
     fun setSiteKeyboardOverlay(enabled: Boolean) {

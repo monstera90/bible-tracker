@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 5.1 (03.11)
+// Версия: 5.2 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -8,6 +8,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.media.AudioManager
 import android.graphics.RectF
 import android.os.Build
 import android.view.MotionEvent
@@ -121,9 +122,10 @@ private class SiteWebView(context: Context) : WebView(context) {
  * Фоновое воспроизведение (SiteMediaService): если на вкладке играет видео или звук, а человек ушёл с вкладки (`hideTab`), погасил
  * экран или свернул приложение (`pause`/`onAppHidden`), WebView вкладки НЕ ставится на паузу (`Tab.bg`), страница видит себя
  * «видимой» (скрипт MEDIA_JS подменяет `document.hidden` и глушит `visibilitychange`, иначе сайты вроде YouTube сами ставят паузу),
- * а служба переднего плана держит процесс и показывает уведомление с островом Xiaomi: «Пауза/Играть» и «Закрыть». Раз в секунду
- * `bgPollTask` смотрит на ролик: пауза — меняется кнопка, ролик закончился или пропал — всё снимается (WebView засыпает);
- * вернулись на вкладку — служба убирается, видео продолжает играть в странице.
+ * а служба переднего плана держит процесс и показывает уведомление с островом Xiaomi: «Пауза/Играть» и «Закрыть». Служба
+ * стартует, как только ролик заиграл (`probeTask`, пока приложение видно), а не при сворачивании. Раз в секунду `bgPollTask`
+ * смотрит на ролик: пауза — меняется кнопка (если страница сама поставила паузу в фоне — ролик запускается заново, `maybeResume`),
+ * ролик закончился или пропал — всё снимается (WebView засыпает); вернулись на вкладку — служба остаётся, пока ролик играет.
  */
 class UserTabs(private val activity: MainActivity, private val host: FrameLayout) {
 
@@ -145,7 +147,10 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         private const val FLOAT_POLL_MS = 1000L
         private const val FLOAT_WINDOW = false       // плавающее окно с видео (FloatingVideo) выключено: сначала остров
         private const val BG_POLL_MS = 1000L
-        private const val PROBE_MS = 2000L
+        private const val PROBE_MS = 1000L
+        private const val RESUME_AFTER_MS = 800L          // страница сама поставила ролик на паузу в фоне — через столько он запускается заново
+        private const val RESUME_MAX_TRIES = 3            // попыток подряд, пока ролик не поиграл хотя бы RESUME_STABLE_MS
+        private const val RESUME_STABLE_MS = 10000L
         private const val BG_PAUSED_MAX_MS = 10L * 60L * 1000L // на паузе в фоне дольше — вкладка засыпает, уведомление снимается
 
         /**
@@ -200,42 +205,64 @@ return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
         private const val TOGGLE_JS = "(function(){var v=document.querySelector('[data-ltpin-v]');if(!v)return [0];if(v.paused){v.play();}else{v.pause();}return [1,v.paused?1:0];})()"
 
         /**
-         * Находит играющий ролик (видео со звуком или длиннее минуты, либо любое аудио; зацикленные фоновые ролики сайтов не в счёт),
-         * помечает его атрибутом data-ltmedia и делает страницу «видимой»: document.hidden = false, visibilitychange глушится.
-         * Ответ: [1] — нашёлся, [0] — играющего ролика нет.
+         * Находит играющий ролик (видео со звуком или длиннее минуты, либо любое аудио; зацикленные фоновые ролики сайтов не в счёт):
+         * сначала в самой странице, затем — в открытых shadow-root и iframe того же происхождения. Лучший ролик запоминается в
+         * `window.__ltMediaEl` (и помечается data-ltmedia), страница (и страница iframe с роликом) становится «видимой»:
+         * document.hidden = false, hasFocus() = true, visibilitychange и blur окна глушатся — иначе сайты вроде YouTube сами ставят паузу
+         * при сворачивании. Ответ: [1] — нашёлся, [0] — играющего ролика нет.
          */
-        private const val MEDIA_JS = """(function(){try{var D=document,W=window,vs=D.querySelectorAll('video,audio'),best=null,sc=-1,i;
-for(i=0;i<vs.length;i++){var v=vs[i];
+        private const val MEDIA_JS = """(function(){try{var D=document,W=window;
+function hook(w){try{var d=w.document;if(w.__ltHooked){w.__ltVis=1;return;}w.__ltHooked=1;w.__ltVis=1;
+var P=w.Document&&w.Document.prototype;
+function real(n){try{var g=Object.getOwnPropertyDescriptor(P,n);return g&&g.get?g.get.call(d):undefined;}catch(e){return undefined;}}
+try{Object.defineProperty(d,'hidden',{configurable:true,get:function(){return w.__ltVis===1?false:real('hidden');}});}catch(e){}
+try{Object.defineProperty(d,'webkitHidden',{configurable:true,get:function(){return w.__ltVis===1?false:real('webkitHidden');}});}catch(e){}
+try{Object.defineProperty(d,'visibilityState',{configurable:true,get:function(){return w.__ltVis===1?'visible':real('visibilityState');}});}catch(e){}
+try{Object.defineProperty(d,'webkitVisibilityState',{configurable:true,get:function(){return w.__ltVis===1?'visible':real('webkitVisibilityState');}});}catch(e){}
+try{var hf=d.hasFocus;d.hasFocus=function(){return w.__ltVis===1?true:hf.call(d);};}catch(e){}
+var ev=['visibilitychange','webkitvisibilitychange','blur'];
+for(var i=0;i<ev.length;i++){w.addEventListener(ev[i],function(e){if(w.__ltVis!==1)return;if(e.type==='blur'&&e.target!==w&&e.target!==d)return;e.stopImmediatePropagation();},true);}
+}catch(e){}}
+function pick(root,out){var els=root.querySelectorAll('video,audio'),i;for(i=0;i<els.length;i++){var v=els[i];
 if(v.paused||v.ended||v.readyState<2||v.loop)continue;
 var long=(v.duration>60||!isFinite(v.duration));
 if(v.muted&&!long)continue;
 var s=(v.tagName==='VIDEO'?1000000000:0)+(long?100000000:0)+(v.videoWidth||0)*(v.videoHeight||0);
-if(s>sc){sc=s;best=v;}}
-if(!best)return [0];
-var old=D.querySelectorAll('[data-ltmedia]');for(i=0;i<old.length;i++)old[i].removeAttribute('data-ltmedia');
-best.setAttribute('data-ltmedia','1');
-if(!W.__ltVis){W.__ltVis=1;
-try{Object.defineProperty(D,'hidden',{configurable:true,get:function(){return W.__ltVis===1?false:D.webkitHidden;}});}catch(e){}
-try{Object.defineProperty(D,'visibilityState',{configurable:true,get:function(){return W.__ltVis===1?'visible':'hidden';}});}catch(e){}
-W.addEventListener('visibilitychange',function(e){if(W.__ltVis===1)e.stopImmediatePropagation();},true);}
-else{W.__ltVis=1;}
+out.push([s,v]);}}
+function deep(root,out,dep){if(dep>3)return;var all=root.querySelectorAll('*'),i,n=all.length>5000?5000:all.length;
+for(i=0;i<n;i++){var e=all[i];
+if(e.shadowRoot){pick(e.shadowRoot,out);deep(e.shadowRoot,out,dep+1);}
+if(e.tagName==='IFRAME'){try{var d=e.contentDocument;if(d){pick(d,out);deep(d,out,dep+1);}}catch(x){}}}}
+var c=[];pick(D,c);if(!c.length)deep(D,c,0);
+if(!c.length)return [0];
+var best=null,sc=-1,i;for(i=0;i<c.length;i++){if(c[i][0]>sc){sc=c[i][0];best=c[i][1];}}
+try{var old=W.__ltMediaEl;if(old&&old!==best)old.removeAttribute('data-ltmedia');}catch(e){}
+W.__ltMediaEl=best;best.setAttribute('data-ltmedia','1');
+hook(W);
+try{var ow=best.ownerDocument&&best.ownerDocument.defaultView;if(ow&&ow!==W)hook(ow);}catch(e){}
 return [1];}catch(e){return [0];}})()"""
 
-        /** Состояние помеченного ролика: [1, на паузе (0/1), закончился (0/1), название] или [0], если ролик пропал. */
-        private const val MEDIA_STATE_JS = """(function(){try{var v=document.querySelector('[data-ltmedia]');if(!v)return [0];
-var t='';try{var m=navigator.mediaSession&&navigator.mediaSession.metadata;if(m&&m.title)t=String(m.title);}catch(e){}
-if(!t)t=document.title||'';
-return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
+        /** Помеченный ролик (запомнен в window.__ltMediaEl; запасной путь — атрибут data-ltmedia). */
+        private const val MEDIA_EL_JS = "var W=window,v=(W.__ltMediaEl&&W.__ltMediaEl.isConnected)?W.__ltMediaEl:document.querySelector('[data-ltmedia]');"
+
+        /** Состояние помеченного ролика: [1, на паузе (0/1), закончился (0/1), название, секунда, readyState] или [0], если ролик пропал. */
+        private const val MEDIA_STATE_JS = "(function(){try{" + MEDIA_EL_JS + "if(!v)return [0];" +
+            "var t='';try{var m=navigator.mediaSession&&navigator.mediaSession.metadata;if(m&&m.title)t=String(m.title);}catch(e){}" +
+            "if(!t)t=document.title||'';" +
+            "return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120),Math.round(v.currentTime||0),v.readyState|0];}catch(e){return [0];}})()"
 
         /** Пауза/воспроизведение помеченного ролика: [1, на паузе (0/1)] или [0]. */
-        private const val MEDIA_TOGGLE_JS = "(function(){var v=document.querySelector('[data-ltmedia]');if(!v)return [0];if(v.paused){v.play();}else{v.pause();}return [1,v.paused?1:0];})()"
+        private const val MEDIA_TOGGLE_JS = "(function(){" + MEDIA_EL_JS + "if(!v)return [0];if(v.paused){try{v.play();}catch(e){}}else{v.pause();}return [1,v.paused?1:0];})()"
+
+        /** Запуск помеченного ролика (страница сама поставила его на паузу в фоне): [1] или [0]. */
+        private const val MEDIA_PLAY_JS = "(function(){" + MEDIA_EL_JS + "if(!v)return [0];if(v.paused&&!v.ended){try{var p=v.play();if(p&&p.catch)p.catch(function(){});}catch(e){}}return [1];})()"
 
         /** Пауза помеченного ролика и возврат страницы в обычный режим видимости. */
-        private const val MEDIA_PAUSE_JS = "(function(){var v=document.querySelector('[data-ltmedia]');if(v){try{v.pause();}catch(e){}}" +
-            "var W=window,D=document;W.__ltVis=0;try{delete D.hidden;}catch(e){}try{delete D.visibilityState;}catch(e){}return 1;})()"
+        private const val MEDIA_PAUSE_JS = "(function(){" + MEDIA_EL_JS + "if(v){try{v.pause();}catch(e){}}" +
+            "W.__ltVis=0;try{var ow=v&&v.ownerDocument&&v.ownerDocument.defaultView;if(ow)ow.__ltVis=0;}catch(e){}return 1;})()"
 
         /** Возврат страницы в обычный режим видимости (видео продолжает играть). */
-        private const val MEDIA_RESTORE_JS = "(function(){var W=window,D=document;W.__ltVis=0;try{delete D.hidden;}catch(e){}try{delete D.visibilityState;}catch(e){}return 1;})()"
+        private const val MEDIA_RESTORE_JS = "(function(){" + MEDIA_EL_JS + "W.__ltVis=0;try{var ow=v&&v.ownerDocument&&v.ownerDocument.defaultView;if(ow)ow.__ltVis=0;}catch(e){}return 1;})()"
         private val ID_RE = Regex("[A-Za-z0-9_]{1,40}")
         // Адреса, на которые сайт возвращает человека после входа/выхода (signin-oidc, signin-google, signout-callback-oidc, /oauth/callback…):
         // сами по себе страницей не являются, повторно открытые отвечают ошибкой — «местом на сайте» не запоминаются.
@@ -274,6 +301,10 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
     private var floatTab: Tab? = null            // вкладка в плавающем окне (одна)
     private var bgTab: Tab? = null               // вкладка с фоновым видео (одна)
     private var bgPausedSince = 0L
+    private var bgPausedVisible = false          // пауза началась, пока вкладка была на экране (человек поставил сам) — заново не запускается
+    private var bgUserPaused = false             // пауза кнопкой уведомления/острова
+    private var bgResumeTries = 0
+    private var bgPlayingSince = 0L
 
     private fun k(id: String, name: String) = "$id.$name"
     private fun dir(): File = File(activity.applicationContext.filesDir, DIR).apply { mkdirs() }
@@ -739,6 +770,10 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
                 if (t != null && t.bg && a != null && a.size > 1 && a[0] == 1.0) {
                     val paused = a[1] == 1.0
                     bgPausedSince = if (paused) System.currentTimeMillis() else 0L
+                    bgUserPaused = paused
+                    bgPausedVisible = false
+                    bgResumeTries = 0
+                    bgLog(if (paused) "пауза кнопкой уведомления" else "запуск кнопкой уведомления")
                     SiteMedia.update(activity.applicationContext, SiteMedia.title, SiteMedia.sub, !paused)
                 }
             }
@@ -798,11 +833,17 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
     }
 
     private fun startBackground(t: Tab, v: WebView) {
+        SiteMedia.logger = { text -> bgLog(text) }
         val prev = bgTab
         if (prev != null && prev !== t) endBackground(prev, pause = true, sleep = true) // фоновая вкладка одна: прежняя замолкает
         t.bg = true
         bgTab = t
         bgPausedSince = 0L
+        bgPausedVisible = false
+        bgUserPaused = false
+        bgResumeTries = 0
+        bgPlayingSince = System.currentTimeMillis()
+        bgLog("фон начат: " + hostOf(t.curUrl) + ", экран=" + (t.shown && appVisible))
         v.onResume() // WebView вкладки не должен быть на паузе, пока играет видео
         val title = t.curTitle.ifEmpty { prefs.getString(k(t.id, "title"), "") ?: "" }.ifEmpty { "Видео" }
         SiteMedia.begin(activity.applicationContext, title, hostOf(t.curUrl), bgListener)
@@ -816,6 +857,7 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
      */
     private fun endBackground(t: Tab, pause: Boolean, sleep: Boolean) {
         if (!t.bg) return
+        bgLog("фон снят: пауза=$pause, сон=$sleep")
         handler.removeCallbacks(bgPollTask)
         t.bg = false
         if (bgTab === t) bgTab = null
@@ -826,6 +868,33 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
             // даём скрипту паузы выполниться, потом усыпляем WebView
             handler.postDelayed({ if (t.view === v && !t.shown && !t.floating && !t.bg) v.onPause() }, 300L)
         }
+    }
+
+    /**
+     * Страница сама поставила ролик на паузу, пока человек был не на вкладке (сайт среагировал на сворачивание, потеря фокуса и т. п.):
+     * ролик запускается заново. Не трогаем: паузу поставил человек (кнопка уведомления или он сам при открытой вкладке), идёт звонок,
+     * играет другое приложение/музыка (звуковой фокус потерян не по нашей вине), уже сделано RESUME_MAX_TRIES попыток подряд.
+     */
+    private fun maybeResume(t: Tab, v: WebView, now: Long) {
+        if (bgUserPaused || bgPausedVisible) return
+        if (t.shown && appVisible) return
+        if (now - bgPausedSince < RESUME_AFTER_MS) return
+        if (bgResumeTries >= RESUME_MAX_TRIES) return
+        try {
+            val am = activity.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (am.mode != AudioManager.MODE_NORMAL || am.isMusicActive) return
+        } catch (e: Exception) {
+            // звуковая служба не ответила — решаем без неё
+        }
+        bgResumeTries++
+        bgPausedSince = now // следующая попытка — не раньше чем через RESUME_AFTER_MS
+        bgLog("страница поставила паузу в фоне — запускаю заново, попытка $bgResumeTries")
+        v.evaluateJavascript(MEDIA_PLAY_JS, null)
+    }
+
+    /** Строка в панель отладки приложения (видна при галочке «Включить режим отладки»). */
+    private fun bgLog(text: String) {
+        activity.debugLog("bg", text)
     }
 
     /** Раз в секунду смотрит на ролик: пауза/«играет» и название — в уведомление; закончился или пропал — фоновый режим снимается. */
@@ -855,9 +924,18 @@ return [1,v.paused?1:0,v.ended?1:0,t.slice(0,120)];}catch(e){return [0];}})()"""
                         val paused = arr.optInt(1) == 1
                         val now = System.currentTimeMillis()
                         if (paused) {
-                            if (bgPausedSince == 0L) bgPausedSince = now
+                            if (bgPausedSince == 0L) {
+                                bgPausedSince = now
+                                // пауза, начатая при открытой вкладке, — дело рук человека: заново не запускается
+                                bgPausedVisible = t.shown && appVisible
+                                bgLog("страница на паузе, экран=$bgPausedVisible, сек=${arr.optInt(4)}, ready=${arr.optInt(5)}")
+                            }
+                            maybeResume(t, v, now)
                         } else {
+                            if (bgPausedSince != 0L) bgPlayingSince = now
                             bgPausedSince = 0L
+                            bgUserPaused = false
+                            if (now - bgPlayingSince > RESUME_STABLE_MS) bgResumeTries = 0
                         }
                         if (paused && now - bgPausedSince > BG_PAUSED_MAX_MS) {
                             endBackground(t, pause = false, sleep = true) // долго на паузе в фоне — вкладка засыпает

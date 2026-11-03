@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.1 (03.11)
+// Версия: 1.2 (03.11)
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -34,6 +34,15 @@ object SiteMedia {
     @Volatile var sub = ""
     @Volatile var playing = true
     @Volatile var listener: Listener? = null
+    @Volatile var logger: ((String) -> Unit)? = null
+
+    fun log(text: String) {
+        try {
+            logger?.invoke(text)
+        } catch (e: Exception) {
+            // журнал не обязателен
+        }
+    }
     private var floatPending = false
     private var floatDeferred = false
 
@@ -115,6 +124,7 @@ class SiteMediaService : Service() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i) else ctx.startService(i)
             } catch (e: Exception) {
                 // запуск из фона не разрешён: видео играет, уведомление обновится при следующем изменении
+                SiteMedia.log("служба не запущена (" + action.substringAfterLast('.') + "): " + e.javaClass.simpleName)
                 try {
                     android.widget.Toast.makeText(ctx, "Остров видео не запущен: " + e.javaClass.simpleName, android.widget.Toast.LENGTH_LONG).show()
                 } catch (e2: Exception) {
@@ -149,6 +159,21 @@ class SiteMediaService : Service() {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
             return PendingIntent.getActivity(ctx, 6003, i, Compat.pendingFlags())
+        }
+
+        /** Простое уведомление без острова и кнопок: запасное, если полное не собралось (без него система обрушит службу). */
+        private fun buildPlain(ctx: Context): Notification {
+            ensureChannel(ctx)
+            return NotificationCompat.Builder(ctx, CHANNEL)
+                .setSmallIcon(R.drawable.ic_stat_notify)
+                .setColor(ACCENT)
+                .setContentTitle(if (SiteMedia.title.isNotEmpty()) SiteMedia.title else "Видео")
+                .setContentText(SiteMedia.sub)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false)
+                .setContentIntent(openApp(ctx))
+                .build()
         }
 
         /** Уведомление по состоянию [SiteMedia]; без активного видео — минимальное (его требует система при старте службы). */
@@ -194,11 +219,21 @@ class SiteMediaService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
         // после startForegroundService система требует перейти на передний план сразу
+        var foreground = false
         try {
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, build(applicationContext), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            val n = try {
+                build(applicationContext)
+            } catch (e: Exception) {
+                SiteMedia.log("уведомление с островом не собралось: " + e.javaClass.simpleName + " — ставлю простое")
+                buildPlain(applicationContext)
+            }
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            foreground = true
         } catch (e: Exception) {
             // уведомления запрещены или запуск не разрешён: ниже служба остановится, если играть нечему
+            SiteMedia.log("startForeground не удался: " + e.javaClass.simpleName + " " + (e.message ?: ""))
         }
+        if (foreground && action == ACTION_REFRESH && SiteMedia.active && wake == null) SiteMedia.log("служба на переднем плане")
         val l = SiteMedia.listener
         when (action) {
             ACTION_TOGGLE -> l?.onToggle()
