@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 127.0 (03.11)
+   Версия: 127.1 (03.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -21101,9 +21101,9 @@
   }
 
   // Нижний ряд вкладок-сайтов («Claude» — claudetab.js, вкладки «+» ряда «Клод» — usertabs.js): тот же .mdeditor-fab-row, что у остальных
-  // вкладок, — «полный экран» (как в ридере книг) слева от неподвижного «домика»-пустышки. Сайт показывает нативный WebView поверх страницы,
+  // вкладок, — «полный экран» (как в ридере книг) слева от «домика» (onHome — возврат на первый экран сайта, адрес по умолчанию). Сайт показывает нативный WebView поверх страницы,
   // поэтому модули укорачивают его по верху ряда (#siteFabRow): иначе кнопки оказались бы под сайтом. Зовётся после каждой перерисовки вкладки.
-  function mountSiteFabRow(container){
+  function mountSiteFabRow(container, onHome){
     if(!container) return;
     var old = document.getElementById("siteFabRow");
     if(old && old.parentNode) old.parentNode.removeChild(old);
@@ -21112,7 +21112,7 @@
     row.id = "siteFabRow";
     row.innerHTML =
       '<button type="button" class="mdeditor-fab-btn fullscreen-mode-btn" id="siteFullscreenBtn"></button>' +
-      '<button type="button" class="mdeditor-fab-btn" id="siteHomeStub" tabindex="-1" aria-disabled="true">' + READER_HOME_ICON_SVG + '</button>';
+      '<button type="button" class="mdeditor-fab-btn" id="siteHomeBtn" title="К первому экрану">' + READER_HOME_ICON_SVG + '</button>';
     container.appendChild(row);
     var fs = document.getElementById("siteFullscreenBtn");
     var on = getHideStatusBarEnabled();
@@ -21120,6 +21120,8 @@
     fs.title = on ? "Выйти из полноэкранного режима" : "Полноэкранный режим";
     fs.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
     bindTapOrHold(fs, handleFullscreenBtnTap, function(){});
+    var hb = document.getElementById("siteHomeBtn");
+    hb.addEventListener("click", function(){ try{ if(onHome) onHome(); }catch(e){} });
   }
   window.SiteTabFab = { mount: mountSiteFabRow };
 

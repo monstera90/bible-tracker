@@ -1,6 +1,6 @@
 /* ===========================================================================
    usertabs.js
-   Версия: 1.5 (03.11)
+   Версия: 1.6 (03.11)
    Вкладки-сайты бокового ряда «Клод» (кнопка «+» над вкладкой «Claude», set2s_10). Каждая вкладка — свой адрес, который открывается
    по умолчанию; дальше вкладка помнит, где человек остановился на сайте (в том числе после закрытия приложения).
    Сам сайт показывает ОБОЛОЧКА: отдельный WebView на вкладку поверх области #userTabView (мост LifeTrackerNative ≥ 22, utab*;
@@ -283,8 +283,20 @@
 
   // ---- содержимое вкладки ----
   // нижний ряд «полный экран + домик» (my.js, mountSiteFabRow) — на каждом экране вкладки
-  function mountFab(c){
-    try{ if(window.SiteTabFab) window.SiteTabFab.mount(c); }catch(e){}
+  function mountFab(c, t){
+    try{ if(window.SiteTabFab) window.SiteTabFab.mount(c, function(){ goHome(t); }); }catch(e){}
+  }
+  // «домик»: первый экран вкладки — адрес по умолчанию (сохранённое место на сайте сбрасывается, как при смене адреса)
+  function goHome(t){
+    var b = bridge();
+    if(!b || !t || !t.home) return;
+    formFor = null;
+    delete icons[t.id];
+    iconRev[t.id] = 0;
+    updateButton(t);
+    try{ b.utabGo(t.id, t.home); }catch(e){}
+    var c = el("settingsTabContent");
+    if(c && c.querySelector(".ut-form")) render(keyOf(t.id));
   }
   function render(key){
     var id = idOf(key), t = find(id), c = el("settingsTabContent");
@@ -293,13 +305,13 @@
     if(!b){
       hide();
       c.innerHTML = '<div class="mood-diagram-empty">Вкладки-сайты работают только в приложении (APK) с обновлённой оболочкой.</div>';
-      mountFab(c);
+      mountFab(c, t);
       return;
     }
     ensureStyle();
     if(!t.home || formFor === id) renderForm(c, t);
     else renderPage(c, t);
-    mountFab(c);
+    mountFab(c, t);
   }
 
   function renderForm(c, t){

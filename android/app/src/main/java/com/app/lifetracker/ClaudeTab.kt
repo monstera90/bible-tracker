@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.2 (02.11)
+// Версия: 1.3 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -106,6 +106,9 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     }
 
     fun reload() { view?.reload() }
+
+    /** «Домик»: первый экран вкладки. */
+    fun goHome() { view?.loadUrl(HOME_URL) }
 
     fun setAuto(enabled: Boolean, text: String?) {
         val clean = (text ?: "").replace(Regex("\\s+"), " ").trim().take(200).ifEmpty { DEFAULT_TEXT }

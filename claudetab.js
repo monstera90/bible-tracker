@@ -1,6 +1,6 @@
 /* ===========================================================================
    claudetab.js
-   Версия: 1.1 (03.11)
+   Версия: 1.2 (03.11)
    Вкладка «Claude» (set2s_10, верхняя в вертикальном стеке второго набора, над «Карточками предметов»).
    Сам claude.ai показывает ОБОЛОЧКА: второй WebView поверх области #claudeTabView (мост LifeTrackerNative,
    версия 9: claudeShow/claudeHide/...). Здесь — только верхняя панель (автоотправка «Дальше» после снятия
@@ -48,7 +48,12 @@
 
   // нижний ряд «полный экран + домик» (my.js, mountSiteFabRow)
   function mountFab(c){
-    try{ if(window.SiteTabFab) window.SiteTabFab.mount(c); }catch(e){}
+    try{
+      if(window.SiteTabFab) window.SiteTabFab.mount(c, function(){
+        var b = bridge();
+        if(b && typeof b.claudeHome === "function"){ try{ b.claudeHome(); }catch(e){} }
+      });
+    }catch(e){}
   }
 
   function render(){
