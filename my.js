@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 125.0 (02.11)
+   Версия: 126.0 (02.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1768,7 +1768,8 @@
   var CLAUDE_STACK_BTN_ID = "settingsTabClaudeStackBtn";
   var CLAUDE_STACK_TABS = ["set2s_10"];
   var CLAUDE_STACK_BTN_IDS = { set2s_10: "settingsTabSet2Btn10" };
-  function isClaudeStackTab(tab){ return CLAUDE_STACK_TABS.indexOf(tab) !== -1; }
+  // в ряд входят и вкладки-сайты (кнопка «+», usertabs.js): их ключи `utab_<id>` знает только UserTabsMod
+  function isClaudeStackTab(tab){ return CLAUDE_STACK_TABS.indexOf(tab) !== -1 || !!(window.UserTabsMod && window.UserTabsMod.isKey(tab)); }
   // «Мои заметки» (set2s_1, «Мой блокнот», mdeditor.js): сама нижняя вкладка набора 1 справа от «Статистики» (кнопка settingsTabSet2Btn1 лежит в #settingsTabsGear),
   // бокового ряда у неё нет — клик по ней выключает все боковые ряды (switchSettingsTabOnClick)
   var NOTES_TAB_KEY = "set2s_1";
@@ -10134,6 +10135,7 @@
   }
   function closeSettingsModal(){
     try{ if(window.ClaudeTabMod) window.ClaudeTabMod.hide(); }catch(e){}
+    try{ if(window.UserTabsMod) window.UserTabsMod.hide(); }catch(e){}
     closeAppConfirmBar();
     flushPendingYearDayNoteEdit();
     flushPendingYearCommentEdits();
@@ -10231,6 +10233,8 @@
       if(cb) cb.style.display = claudeStackMode ? "flex" : "none";
     });
     var claudeBtn = document.getElementById(CLAUDE_STACK_BTN_ID);
+    // «+» и вкладки-сайты ряда «Клод» (usertabs.js)
+    if(window.UserTabsMod) window.UserTabsMod.applyVisibility(claudeStackMode);
     updateBottomGearButtons();
     updateNotesWide();
     // меняет количество видимых язычков в #settingsTabs — пересчитываем заплатку (см.
@@ -10723,6 +10727,7 @@
     // раздел "ПОДСВЕТКА ВКЛАДОК «MOOD»/«RED»" ниже) — обновляем на каждое переключение, а не только
     // изнутри их собственного рендера.
     try{ if(window.ClaudeTabMod) window.ClaudeTabMod.onSwitch(tab); }catch(e){} // уход с «Claude»: нативный WebView убирается
+    try{ if(window.UserTabsMod) window.UserTabsMod.onSwitch(tab); }catch(e){} // то же для вкладок-сайтов (кнопка «+»)
     updateIpkdTabIcon();
     updateMoodTabIcon();
     updateRedTabIcon();
@@ -10906,6 +10911,8 @@
     else if(tab === "set2s_9") renderSettingsTabItemCards();
     // десятая боковая вкладка второго набора (set2s_10) — «Claude» (claudetab.js): нативный WebView с claude.ai
     else if(tab === "set2s_10") renderSettingsTabClaude();
+    // вкладка-сайт ряда «Клод» (ключ utab_<id>, кнопка «+», usertabs.js): адрес по умолчанию, место на странице запоминает оболочка
+    else if(window.UserTabsMod && window.UserTabsMod.isKey(tab)) window.UserTabsMod.render(tab);
     // «Система» (set2s_15, язычок режима колеса, самый нижний в стеке набора 1) — system.js: усиление громкости и др.
     else if(tab === "set2s_15") renderSettingsTabSystem();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
@@ -18841,7 +18848,7 @@
   }
   // шестерёнки (колесо обоих наборов) и вкладки режима колеса скрывать нельзя
   function isProtectedTabButton(btn){
-    return !btn || btn.id === "settingsTabGearBtn" || btn.id === "settingsTabGearBtnSet2" || /^settingsTabAlt\d+Btn$/.test(btn.id);
+    return !btn || btn.id === "settingsTabGearBtn" || btn.id === "settingsTabGearBtnSet2" || /^settingsTabAlt\d+Btn$/.test(btn.id) || btn.hasAttribute("data-lt-usertab"); // «+» и вкладки-сайты (usertabs.js) не скрываются
   }
   // в список попадает язычок с пиктограммой (пустые заглушки без значка не считаем)
   function isHideableTabButton(btn){
@@ -18936,6 +18943,15 @@
   }
   applyHiddenSettingsTabs();
   initBottomAltTabs();
+  // «+» и вкладки-сайты ряда «Клод»: кнопки строит сам модуль (после initBottomAltTabs — режимы рядов уже объявлены)
+  try{
+    if(window.UserTabsMod) window.UserTabsMod.init({
+      switchTab: switchSettingsTabOnClick,
+      getCurrentTab: function(){ return currentSettingsTab; },
+      refresh: refreshSettingsTabsVisibility,
+      confirm: openAppConfirmBar
+    });
+  }catch(e){}
 
   // Выделение вкладок: выделена ровно одна — нажатая последней. Нижние язычки (шестерёнка, «Клод», «Инструменты», «Статистика», «Задачи», «Календарь»,
   // «Активности», «Мои заметки») и вкладки боковых рядов делят одно выделение: нажатие на нижний язычок снимает его с бокового ряда, нажатие на вкладку
@@ -18973,6 +18989,7 @@
       var btn = document.getElementById(SET2_EXTRA_TAB_IDS[key]);
       if(btn) btn.classList.toggle("active", tab === key);
     });
+    if(window.UserTabsMod) window.UserTabsMod.applyActive(tab); // вкладки-сайты ряда «Клод»; «+» не красится никогда
     stripDecorClasses(); // декоративные язычки режима колеса никогда не выглядят выбранными
   }
   function bottomHighlightIds(){
@@ -19001,7 +19018,7 @@
     if(g === "info") return INFO_STACK_TABS;
     if(g === "tools") return TOOLS_STACK_TABS;
     if(g === "activities") return ACTIVITIES_STACK_TABS;
-    if(g === "claude") return CLAUDE_STACK_TABS;
+    if(g === "claude") return CLAUDE_STACK_TABS.concat(window.UserTabsMod ? window.UserTabsMod.keys() : []);
     return [];
   }
   var STACK_GROUP_NAMES = ["wheel", "tasks", "info", "tools", "activities", "claude"];
@@ -19013,6 +19030,7 @@
   function stackTabButtonId(tab){
     return BOTTOM_ALT_TAB_IDS[tab] || TASK_TAB_IDS[tab] || (tab === EVENTS_TAB_KEY ? EVENTS_TAB_BTN_ID : null) || (tab === CALENDAR_TAB_KEY ? CALENDAR_TAB_BTN_ID : null) ||
       (tab === SCREENTIME_TAB_KEY ? SCREENTIME_TAB_BTN_ID : null) || EXTRA_TAB_IDS[tab] || SET2_TAB_IDS[tab] || SET2_EXTRA_TAB_IDS[tab] ||
+      (window.UserTabsMod && window.UserTabsMod.isKey(tab) ? window.UserTabsMod.buttonId(tab) : null) ||
       (tab === "year" ? "settingsTabYearBtn" : (tab === "mood" ? "settingsTabMoodBtn" : (tab === WORKOUTS_TAB_KEY ? WORKOUTS_TAB_BTN_ID : null)));
   }
   function readStackLastTabs(){

@@ -49,6 +49,7 @@ cardscan.js
 cardpdf.js
 itemcards.js
 claudetab.js
+usertabs.js
 system.js
 music.js
 calendar.js

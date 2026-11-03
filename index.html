@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 32.0 (02.11)
+     Версия: 33.0 (02.11)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -751,6 +751,14 @@ window.addEventListener("error", function(e){
           <path d="M12 8v5M9.5 9.5l5 2M14.5 9.5l-5 2"></path>
         </svg>
       </button>
+      <!-- «+» ряда «Клод» (settingsTabUserAddBtn, usertabs.js): последняя в DOM, поэтому на экране над всеми вкладками ряда; создаёт вкладку-сайт
+           (кнопки вкладок-сайтов usertabs.js вставляет перед ней). Скрыта display:none, показывается в refreshSettingsTabsVisibility (UserTabsMod.applyVisibility);
+           никогда не бывает выбранной (.active не ставится). -->
+      <button class="settings-tab" id="settingsTabUserAddBtn" title="Новая вкладка" aria-label="Новая вкладка" data-lt-usertab="1" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M5 12h14"></path>
+        </svg>
+      </button>
     </div>
     <!-- Горизонтальный ряд "лежачих" вкладок под окном настроек, развёрнутых
          на 90° относительно обычных: у них ширина и высота поменяны местами
@@ -1010,6 +1018,7 @@ window.addEventListener("error", function(e){
 <script src="cardpdf.js"></script>
 <script src="itemcards.js"></script>
 <script src="claudetab.js"></script>
+<script src="usertabs.js"></script>
 <script src="system.js"></script>
 <script src="music.js"></script>
 <script src="calendar.js"></script>

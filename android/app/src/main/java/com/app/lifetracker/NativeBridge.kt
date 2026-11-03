@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 14.0 (02.11)
+// Версия: 15.0 (02.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
 // Версия: 9.0 (26.10) — мост версии 16: `getScreenTimeTotals` (счётчики музыки и таймеров для «Трекера экранов», `ScreenTimeStats`).
@@ -40,6 +40,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
+         * 22: вкладки-сайты ряда «Клод» (utabShow / utabHide / utabGo / utabReload / utabRemove / utabGetState / utabGetIcon).
          * 21: способ усиления громкости (volumeBoostSetEngine: 0 — LoudnessEnhancer, 1 — DynamicsProcessing).
          * 20: вкладка «Система»: усиление громкости всей системы (volumeBoostGet / volumeBoostSet; 100/125/150/200 %).
          * 19: поиск по PDF (pdfGetFolder / pdfPickFolder / pdfListAll): папка с PDF и список файлов; сами файлы страница читает по https://localhost/__pdflib/<docId>.
@@ -50,7 +51,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 21
+        const val BRIDGE_VERSION = 22
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -789,6 +790,57 @@ class NativeBridge(private val activity: MainActivity) {
     fun claudeSendNow() {
         if (!activity.pageTrusted) return
         activity.runOnUiThread { activity.claudeTab.sendNow() }
+    }
+
+    // ---------- вкладки-сайты ряда «Клод» (UserTabs; кнопка «+», usertabs.js) ----------
+
+    /** Показывает WebView вкладки-сайта [id] в прямоугольнике (CSS-пиксели страницы приложения); [url] — адрес по умолчанию при первом открытии. */
+    @JavascriptInterface
+    fun utabShow(id: String?, url: String?, x: Double, y: Double, w: Double, h: Double): Boolean {
+        if (!activity.pageTrusted || id == null) return false
+        activity.runOnUiThread { activity.userTabs.show(id, url ?: "", x, y, w, h) }
+        return true
+    }
+
+    /** Прячет показанную вкладку-сайт (страница живёт за краем, место на ней сохраняется). */
+    @JavascriptInterface
+    fun utabHide() {
+        if (!activity.pageTrusted) return
+        activity.runOnUiThread { activity.userTabs.hide() }
+    }
+
+    /** Новый адрес вкладки: сохранённое место сбрасывается, грузится новая страница. */
+    @JavascriptInterface
+    fun utabGo(id: String?, url: String?) {
+        if (!activity.pageTrusted || id == null) return
+        activity.runOnUiThread { activity.userTabs.go(id, url ?: "") }
+    }
+
+    @JavascriptInterface
+    fun utabReload(id: String?) {
+        if (!activity.pageTrusted || id == null) return
+        activity.runOnUiThread { activity.userTabs.reload(id) }
+    }
+
+    /** Вкладку удалили: WebView, сохранённое состояние и значок пропадают. */
+    @JavascriptInterface
+    fun utabRemove(id: String?) {
+        if (!activity.pageTrusted || id == null) return
+        activity.runOnUiThread { activity.userTabs.remove(id) }
+    }
+
+    /** JSON: {"created":bool,"ready":bool,"shown":bool,"url":"...","title":"...","canGoBack":bool,"rev":N} — rev растёт, когда сайт отдал новый значок. */
+    @JavascriptInterface
+    fun utabGetState(id: String?): String {
+        if (!activity.pageTrusted || id == null) return "{}"
+        return try { activity.userTabs.stateJson(id) } catch (e: Exception) { "{}" }
+    }
+
+    /** Значок сайта как data:image/png;base64 (пусто, пока сайт его не отдал). */
+    @JavascriptInterface
+    fun utabGetIcon(id: String?): String {
+        if (!activity.pageTrusted || id == null) return ""
+        return try { activity.userTabs.iconDataUrl(id) } catch (e: Exception) { "" }
     }
 
     /** Цвет статус-бара: "#rrggbb", "#rgb" или "rgb(r, g, b)". Значок светлый/тёмный выбирается по яркости цвета. */

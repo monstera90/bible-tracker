@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 6.1 (01.11)
+// Версия: 7.0 (02.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
 // Версия: 4.0 (25.10) — выбор папки с музыкой (`musicFolderLauncher`, `pickMusicFolder`) для вкладки «Музыка».
@@ -142,6 +142,10 @@ class MainActivity : ComponentActivity() {
     lateinit var claudeTab: ClaudeTab
         private set
 
+    /** Вкладки-сайты ряда «Клод» (кнопка «+»): по WebView на вкладку; управляется мостом (utab*). */
+    lateinit var userTabs: UserTabs
+        private set
+
     /** true, пока загружена страница приложения (https://localhost); мост отвечает только в этом случае. */
     @Volatile
     var pageTrusted: Boolean = false
@@ -279,7 +283,9 @@ class MainActivity : ComponentActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (claudeTab.isVisible && claudeTab.canGoBack()) {
+                if (userTabs.isVisible && userTabs.canGoBack()) {
+                    userTabs.goBack()
+                } else if (claudeTab.isVisible && claudeTab.canGoBack()) {
                     claudeTab.goBack()
                 } else if (webView.canGoBack()) {
                     webView.goBack()
@@ -302,6 +308,7 @@ class MainActivity : ComponentActivity() {
         webUpdater.checkInBackground()
         warnIfWebViewTooOld()
         claudeTab.startIfEnabled()
+        userTabs.preloadLast()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -397,6 +404,7 @@ class MainActivity : ComponentActivity() {
         // боковые окна, шторка), окно приложения ещё может быть на экране, а Chromium перестаёт рисовать поставленный на паузу
         // WebView — получался белый экран. Пауза WebView — в onStop, когда окно действительно скрыто.
         claudeTab.pause()
+        userTabs.pause()
         super.onPause()
     }
 
@@ -413,6 +421,7 @@ class MainActivity : ComponentActivity() {
         handler.removeCallbacks(keyboardPush)
         fileSaver.cancelAll()
         claudeTab.destroy()
+        userTabs.destroy()
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.destroy()
         super.onDestroy()
@@ -705,6 +714,7 @@ class MainActivity : ComponentActivity() {
         webView = SelectionMenuWebView(this) // без системного меню выделения (копирование — своя кнопка страницы)
         webHost = FrameLayout(this).apply { addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
         claudeTab = ClaudeTab(this, webHost)
+        userTabs = UserTabs(this, webHost)
         inAppIsland = InAppIsland(this)
 
         root = LinearLayout(this).apply {
