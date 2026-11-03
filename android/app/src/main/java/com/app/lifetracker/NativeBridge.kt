@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 17.0 (03.11)
+// Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
 // Версия: 9.0 (26.10) — мост версии 16: `getScreenTimeTotals` (счётчики музыки и таймеров для «Трекера экранов», `ScreenTimeStats`).
@@ -40,7 +40,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
-         * 24: `utabFab(spec)` — кнопки «полный экран» и «домик» поверх сайта вкладки-сайта (сайт растянут под них).
+         * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
          * 23: `claudeHome()` — «домик» вкладки Claude (первый экран).
          * 22: вкладки-сайты ряда «Интернет» (utabShow / utabHide / utabGo / utabReload / utabRemove / utabGetState / utabGetIcon).
          * 21: способ усиления громкости (volumeBoostSetEngine: 0 — LoudnessEnhancer, 1 — DynamicsProcessing).
@@ -811,13 +811,14 @@ class NativeBridge(private val activity: MainActivity) {
     }
 
     /**
-     * Кнопки страницы (полный экран, «домик») поверх сайта: [spec] — JSON {"bg","bd","fg":"#rrggbb","b":[{"k":"fs"|"home","x","y","w","h","on"}]}
-     * (CSS-пиксели страницы); пусто — кнопок нет. Нажатие оболочка сообщает странице: `window.SiteTabFab.tap(k)`.
+     * Окна под кнопки страницы: [spec] — «x,y,w,h;…» в CSS-пикселях страницы; пусто — окон нет. Возвращает true, если оболочка умеет окна
+     * (Android 10+); иначе страница оставляет прежнюю раскладку — сайт заканчивается над рядом кнопок.
      */
     @JavascriptInterface
-    fun utabFab(spec: String?) {
-        if (!activity.pageTrusted) return
-        activity.runOnUiThread { activity.userTabs.setFabs(spec) }
+    fun utabHoles(spec: String?): Boolean {
+        if (!activity.pageTrusted || Build.VERSION.SDK_INT < 29) return false
+        activity.runOnUiThread { activity.userTabs.setHoles(spec) }
+        return true
     }
 
     /** Прячет показанную вкладку-сайт (страница живёт за краем, место на ней сохраняется). */

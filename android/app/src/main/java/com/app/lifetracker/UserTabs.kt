@@ -1,14 +1,14 @@
 package com.app.lifetracker
-// Версия: 2.0 (03.11)
+// Версия: 3.0 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.os.Build
+import android.view.MotionEvent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -37,78 +37,48 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
 /**
- * Кнопка поверх сайта вкладки-сайта («полный экран» — [kind] "fs", «домик» — "home"): повторяет кнопку страницы (.mdeditor-fab-btn: скруглённый
- * квадрат, рамка, тень, значок 16×16 на сетке 24×24). Нативный WebView лежит поверх страницы и закрывал бы её кнопки; сайт растянут под
- * кнопки, а сами кнопки рисует оболочка — на любой версии Android. Цвета и размеры присылает страница (тема).
+ * WebView вкладки-сайта с «окнами»: прямоугольники (координаты родителя, px), где сайт не рисуется и не принимает нажатия —
+ * сквозь них видна страница приложения с её кнопками (полный экран, «домик»). Сайт при этом растянут на всю область и заходит
+ * под кнопки, как содержимое остальных вкладок. Вырез по контуру кнопки — `clipOutPath` (WebView честно учитывает такой
+ * сложный вырез только с Android 10, поэтому окна включаются с API 29); нажатие, начатое в окне, отдаётся нижнему (главному) WebView.
  */
-private class SiteFabButton(context: Context, val kind: String) : View(context) {
-    var on = false
-    var bg = Color.WHITE
-    var bd = Color.GRAY
-    var fg = Color.DKGRAY
-    private val d = context.resources.displayMetrics.density
-    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
+private class SiteWebView(context: Context) : WebView(context) {
+    private var holes: List<RectF> = emptyList()
+    private var radius = 0f
+    private var passThrough = false
 
-    init {
-        isClickable = true
-        elevation = 3f * d
-        outlineProvider = object : ViewOutlineProvider() {
-            override fun getOutline(view: View, outline: Outline) {
-                outline.setRoundRect(0, 0, view.width, view.height, 8f * d)
-                outline.setAlpha(1f)
-            }
-        }
-    }
-
-    override fun drawableStateChanged() {
-        super.drawableStateChanged()
+    fun setHoles(list: List<RectF>, r: Float) {
+        holes = list
+        radius = r
         invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
-        val w = width.toFloat()
-        val h = height.toFloat()
-        val r = 8f * d
-        val bw = d
-        fill.style = Paint.Style.FILL
-        fill.color = bg
-        fill.alpha = if (isPressed) 170 else 255
-        canvas.drawRoundRect(RectF(0f, 0f, w, h), r, r, fill)
-        line.color = bd
-        line.strokeWidth = bw
-        canvas.drawRoundRect(RectF(bw / 2, bw / 2, w - bw / 2, h - bw / 2), r - bw / 2, r - bw / 2, line)
-        val icon = 16f * d
-        val save = canvas.save()
-        canvas.translate((w - icon) / 2f, (h - icon) / 2f)
-        canvas.scale(icon / 24f, icon / 24f)
-        line.color = fg
-        line.strokeWidth = 1.7f
-        if (kind == "home") {
-            val roof = Path().apply { moveTo(4f, 11.5f); lineTo(12f, 4f); lineTo(20f, 11.5f) }
-            val body = Path().apply {
-                moveTo(6f, 10f); lineTo(6f, 19f); quadTo(6f, 20f, 7f, 20f); lineTo(17f, 20f)
-                quadTo(18f, 20f, 18f, 19f); lineTo(18f, 10f)
-            }
-            val door = Path().apply { moveTo(10f, 20f); lineTo(10f, 15f); lineTo(14f, 15f); lineTo(14f, 20f) }
-            canvas.drawPath(roof, line)
-            canvas.drawPath(body, line)
-            canvas.drawPath(door, line)
-        } else {
-            canvas.drawRoundRect(RectF(7f, 2.5f, 17f, 21.5f), 2.2f, 2.2f, line)
-            val y = if (on) 18.9f else 18.6f
-            canvas.drawLine(10.5f, y, 13.5f, y, line)
-            if (on) {
-                fill.color = fg
-                fill.alpha = 255
-                canvas.drawRoundRect(RectF(9.3f, 5f, 14.7f, 16.4f), 0.8f, 0.8f, fill)
-            }
+        val hs = holes
+        if (hs.isEmpty() || Build.VERSION.SDK_INT < 29) {
+            super.onDraw(canvas)
+            return
         }
-        canvas.restoreToCount(save)
+        val saved = canvas.save()
+        val path = Path()
+        for (h in hs) path.addRoundRect(RectF(h.left - left, h.top - top, h.right - left, h.bottom - top), radius, radius, Path.Direction.CW)
+        canvas.clipOutPath(path)
+        super.onDraw(canvas)
+        canvas.restoreToCount(saved)
+    }
+
+    private fun inHole(x: Float, y: Float): Boolean {
+        for (h in holes) if (h.contains(x + left, y + top)) return true
+        return false
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) passThrough = holes.isNotEmpty() && inHole(ev.x, ev.y)
+        if (passThrough) {
+            if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) passThrough = false
+            return false
+        }
+        return super.dispatchTouchEvent(ev)
     }
 }
 
@@ -170,7 +140,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
     private var rW = 1
     private var rH = 1
     private var kb = 0
-    private val fabs = LinkedHashMap<String, SiteFabButton>()
+    private var holes: List<RectF> = emptyList() // окна под кнопки страницы, px родителя
 
     private fun k(id: String, name: String) = "$id.$name"
     private fun dir(): File = File(activity.applicationContext.filesDir, DIR).apply { mkdirs() }
@@ -264,49 +234,25 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         layoutShown(v)
     }
 
-    /** Кнопки страницы поверх сайта (см. [SiteFabButton]); [spec] пуст или нет показанной вкладки — кнопки убираются. */
-    fun setFabs(spec: String?) {
-        if (spec.isNullOrEmpty() || shownTab() == null) { hideFabs(); return }
-        val o = try { JSONObject(spec) } catch (e: Exception) { hideFabs(); return }
-        val arr = o.optJSONArray("b") ?: run { hideFabs(); return }
+    /**
+     * Окна под кнопки страницы: [spec] — «x,y,w,h;x,y,w,h» в CSS-пикселях страницы (как прямоугольник в [show]); пусто — окон нет.
+     * Работает с Android 10 (API 29); раньше страница сама укорачивает сайт над рядом кнопок.
+     */
+    fun setHoles(spec: String?) {
+        if (Build.VERSION.SDK_INT < 29) return
         val d = activity.resources.displayMetrics.density
-        fun col(name: String, def: Int) = try { Color.parseColor(o.optString(name)) } catch (e: Exception) { def }
-        val bg = col("bg", Color.WHITE)
-        val bd = col("bd", Color.GRAY)
-        val fg = col("fg", Color.DKGRAY)
-        val seen = HashSet<String>()
-        for (i in 0 until minOf(arr.length(), 4)) {
-            val b = arr.optJSONObject(i) ?: continue
-            val kind = b.optString("k")
-            if (kind != "fs" && kind != "home") continue
-            val w = (b.optDouble("w", 0.0) * d).roundToInt()
-            val h = (b.optDouble("h", 0.0) * d).roundToInt()
-            if (w <= 0 || h <= 0) continue
-            seen.add(kind)
-            var f = fabs[kind]
-            if (f == null) {
-                f = SiteFabButton(activity, kind)
-                f.setOnClickListener { activity.runPageJs("window.SiteTabFab && window.SiteTabFab.tap('$kind')") }
-                fabs[kind] = f
-                host.addView(f, FrameLayout.LayoutParams(w, h))
+        val list = ArrayList<RectF>()
+        if (!spec.isNullOrEmpty() && spec.length < 400) {
+            for (part in spec.split(";")) {
+                val nums = part.split(",").mapNotNull { it.trim().toFloatOrNull() }
+                if (nums.size != 4 || nums[2] <= 0f || nums[3] <= 0f) continue
+                list.add(RectF(nums[0] * d, nums[1] * d, (nums[0] + nums[2]) * d, (nums[1] + nums[3]) * d))
+                if (list.size >= 8) break
             }
-            f.on = b.optBoolean("on", false)
-            f.bg = bg
-            f.bd = bd
-            f.fg = fg
-            val lp = FrameLayout.LayoutParams(w, h)
-            lp.leftMargin = (b.optDouble("x", 0.0) * d).roundToInt()
-            lp.topMargin = (b.optDouble("y", 0.0) * d).roundToInt()
-            f.layoutParams = lp
-            f.visibility = View.VISIBLE
-            f.bringToFront()
-            f.invalidate()
         }
-        for ((kind, f) in fabs) if (kind !in seen) f.visibility = View.GONE
-    }
-
-    private fun hideFabs() {
-        for (f in fabs.values) f.visibility = View.GONE
+        holes = list
+        val r = 9f * d
+        for (t in tabs.values) (t.view as? SiteWebView)?.setHoles(list, r)
     }
 
     private fun applyRect(v: WebView, left: Int, top: Int, wPx: Int, hPx: Int) {
@@ -336,7 +282,6 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
     /** Прячет показанную вкладку (страница живёт за краем, позиция сохраняется). */
     fun hide() {
         for (t in tabs.values) hideTab(t)
-        hideFabs()
         activity.setSiteKeyboardOverlay(false)
     }
 
@@ -489,7 +434,8 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
     private fun ensureView(t: Tab): WebView {
         t.view?.let { return it }
         evictIfNeeded(t)
-        val v = WebView(activity)
+        val v = SiteWebView(activity)
+        v.setHoles(holes, 9f * activity.resources.displayMetrics.density)
         v.setBackgroundColor(0xFFFFFFFF.toInt())
         v.isVerticalScrollBarEnabled = false
         v.isHorizontalScrollBarEnabled = false
@@ -497,7 +443,6 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         configure(v, t)
         v.translationX = OFFSCREEN_X
         host.addView(v, initialParams())
-        for (f in fabs.values) f.bringToFront()
         t.view = v
         t.ready = false
         t.needFix = true

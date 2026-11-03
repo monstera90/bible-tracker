@@ -1,6 +1,6 @@
 /* ===========================================================================
    usertabs.js
-   Версия: 2.0 (03.11)
+   Версия: 3.0 (03.11)
    Вкладки-сайты бокового ряда «Интернет» (кнопка «+» над вкладкой «Claude», set2s_10). Каждая вкладка — свой адрес, который открывается
    по умолчанию; дальше вкладка помнит, где человек остановился на сайте (в том числе после закрытия приложения).
    Сам сайт показывает ОБОЛОЧКА: отдельный WebView на вкладку поверх области #userTabView (мост LifeTrackerNative ≥ 22, utab*;
@@ -36,6 +36,7 @@
   var timer = null;
   var lastRect = "";
   var lastPoll = 0;
+  var holeSupport = null;   // умеет ли оболочка «окна» под кнопки страницы (мост ≥24, Android 10+); null — ещё не спрашивали
 
   function el(id){ return document.getElementById(id); }
   function bridge(){
@@ -382,33 +383,26 @@
     setTimeout(go, 120);
   }
 
-  function fabBridge(b){ return typeof b.utabFab === "function"; }
-  // «rgb(r, g, b)» из computed style -> «#rrggbb»
-  function hexOf(c){
-    var m = /rgba?\(([^)]+)\)/.exec(c || "");
-    if(!m) return "";
-    var p = m[1].split(",").map(function(x){ return Math.round(parseFloat(x)) || 0; });
-    return "#" + [p[0], p[1], p[2]].map(function(n){ return (n < 16 ? "0" : "") + Math.max(0, Math.min(255, n)).toString(16); }).join("");
-  }
-  // кнопки нижнего ряда (#siteFabRow) для оболочки: она рисует их поверх сайта (сайт — под ними); цвета берутся у настоящих кнопок (тема)
-  function fabSpecOf(row){
-    var ids = [["fs", "siteFullscreenBtn"], ["home", "siteHomeBtn"]], list = [], st = null;
-    for(var i = 0; i < ids.length; i++){
-      var bt = el(ids[i][1]);
-      if(!bt) continue;
-      var r = bt.getBoundingClientRect();
-      if(r.width <= 0 || r.height <= 0) continue;
-      if(!st) st = getComputedStyle(bt);
-      list.push({ k: ids[i][0], x: Math.round(r.left * 10) / 10, y: Math.round(r.top * 10) / 10, w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10,
-        on: ids[i][0] === "fs" && String(bt.title || "").indexOf("Выйти") === 0 });
+  // оболочка умеет «окна»: сайт растянут под кнопки нижнего ряда, а в местах кнопок не рисуется (сквозь окна видна страница)
+  function holesOk(b){
+    if(holeSupport === null){
+      holeSupport = false;
+      if(typeof b.utabHoles === "function"){ try{ holeSupport = !!b.utabHoles(""); }catch(e){} }
     }
-    if(!list.length || !st) return "";
-    return JSON.stringify({ bg: hexOf(st.backgroundColor), bd: hexOf(st.borderTopColor), fg: hexOf(st.color), b: list });
+    return holeSupport;
+  }
+  // прямоугольники кнопок ряда #siteFabRow: «x,y,w,h;x,y,w,h»
+  function holesOf(row){
+    var out = [], btns = row.querySelectorAll(".mdeditor-fab-btn");
+    for(var i = 0; i < btns.length; i++){
+      var r = btns[i].getBoundingClientRect();
+      if(r.width > 0 && r.height > 0) out.push([r.left - 1, r.top - 1, r.width + 2, r.height + 2].map(Math.round).join(","));
+    }
+    return out.join(";");
   }
 
   // область под вкладкой растягивается до низа окна (под кнопки, как содержимое других вкладок); прямоугольник отправляется оболочке
-  // (повторная отправка того же — не делается). Кнопки ряда поверх сайта рисует оболочка (utabFab, мост ≥24); со старой оболочкой
-  // нативный WebView закрыл бы кнопки страницы, поэтому сайт заканчивается над рядом.
+  // (повторная отправка того же — не делается). Без «окон» в оболочке сайт заканчивается над рядом кнопок: нативный WebView лежит поверх страницы.
   function sizeAndPush(){
     var c = el("settingsTabContent"), v = el("userTabView"), b = bridge();
     var t = (active && activeId) ? find(activeId) : null;
@@ -417,9 +411,10 @@
     var pad = parseFloat(getComputedStyle(c).paddingBottom) || 0;
     var top = v.getBoundingClientRect().top;
     var bottom = cr.bottom - pad;
-    var row = el("siteFabRow"), fab = "", native = fabBridge(b);
+    var row = el("siteFabRow");
+    var holes = "";
     if(row){
-      if(native) fab = fabSpecOf(row);
+      if(holesOk(b)) holes = holesOf(row);
       else{
         var rr = row.getBoundingClientRect();
         if(rr.height > 0) bottom = Math.min(bottom, rr.top - 4);
@@ -428,11 +423,11 @@
     var h = Math.max(160, Math.floor(bottom - top));
     v.style.height = h + "px";
     var r = v.getBoundingClientRect();
-    var key = [r.left, r.top, r.width, r.height].map(Math.round).join(",") + "|" + fab;
+    var key = [r.left, r.top, r.width, r.height].map(Math.round).join(",") + "|" + holes;
     if(key === lastRect) return;
     lastRect = key;
     try{ b.utabShow(t.id, t.home, r.left, r.top, r.width, r.height); }catch(e){}
-    if(native){ try{ b.utabFab(fab); }catch(e){} }
+    if(holeSupport){ try{ b.utabHoles(holes); }catch(e){} }
   }
 
   function pollState(){
