@@ -1,6 +1,6 @@
 /* ===========================================================================
    usertabs.js
-   Версия: 1.8 (03.11)
+   Версия: 2.0 (03.11)
    Вкладки-сайты бокового ряда «Интернет» (кнопка «+» над вкладкой «Claude», set2s_10). Каждая вкладка — свой адрес, который открывается
    по умолчанию; дальше вкладка помнит, где человек остановился на сайте (в том числе после закрытия приложения).
    Сам сайт показывает ОБОЛОЧКА: отдельный WebView на вкладку поверх области #userTabView (мост LifeTrackerNative ≥ 22, utab*;
@@ -36,6 +36,7 @@
   var timer = null;
   var lastRect = "";
   var lastPoll = 0;
+  var holeSupport = null;   // умеет ли оболочка «окна» под кнопки страницы (мост ≥24, Android 10+); null — ещё не спрашивали
 
   function el(id){ return document.getElementById(id); }
   function bridge(){
@@ -382,7 +383,26 @@
     setTimeout(go, 120);
   }
 
-  // область под вкладкой растягивается до низа содержимого; прямоугольник отправляется оболочке (повторная отправка того же — не делается)
+  // оболочка умеет «окна»: сайт растянут под кнопки нижнего ряда, а в местах кнопок не рисуется (сквозь окна видна страница)
+  function holesOk(b){
+    if(holeSupport === null){
+      holeSupport = false;
+      if(typeof b.utabHoles === "function"){ try{ holeSupport = !!b.utabHoles(""); }catch(e){} }
+    }
+    return holeSupport;
+  }
+  // прямоугольники кнопок ряда #siteFabRow: «x,y,w,h;x,y,w,h»
+  function holesOf(row){
+    var out = [], btns = row.querySelectorAll(".mdeditor-fab-btn");
+    for(var i = 0; i < btns.length; i++){
+      var r = btns[i].getBoundingClientRect();
+      if(r.width > 0 && r.height > 0) out.push([r.left - 1, r.top - 1, r.width + 2, r.height + 2].map(Math.round).join(","));
+    }
+    return out.join(";");
+  }
+
+  // область под вкладкой растягивается до низа окна (под кнопки, как содержимое других вкладок); прямоугольник отправляется оболочке
+  // (повторная отправка того же — не делается). Без «окон» в оболочке сайт заканчивается над рядом кнопок: нативный WebView лежит поверх страницы.
   function sizeAndPush(){
     var c = el("settingsTabContent"), v = el("userTabView"), b = bridge();
     var t = (active && activeId) ? find(activeId) : null;
@@ -391,18 +411,23 @@
     var pad = parseFloat(getComputedStyle(c).paddingBottom) || 0;
     var top = v.getBoundingClientRect().top;
     var bottom = cr.bottom - pad;
-    var row = el("siteFabRow"); // нативный WebView лежит поверх страницы — сайт заканчивается над рядом кнопок, иначе они окажутся под ним
+    var row = el("siteFabRow");
+    var holes = "";
     if(row){
-      var rr = row.getBoundingClientRect();
-      if(rr.height > 0) bottom = Math.min(bottom, rr.top - 4);
+      if(holesOk(b)) holes = holesOf(row);
+      else{
+        var rr = row.getBoundingClientRect();
+        if(rr.height > 0) bottom = Math.min(bottom, rr.top - 4);
+      }
     }
     var h = Math.max(160, Math.floor(bottom - top));
     v.style.height = h + "px";
     var r = v.getBoundingClientRect();
-    var key = [r.left, r.top, r.width, r.height].map(Math.round).join(",");
+    var key = [r.left, r.top, r.width, r.height].map(Math.round).join(",") + "|" + holes;
     if(key === lastRect) return;
     lastRect = key;
     try{ b.utabShow(t.id, t.home, r.left, r.top, r.width, r.height); }catch(e){}
+    if(holeSupport){ try{ b.utabHoles(holes); }catch(e){} }
   }
 
   function pollState(){

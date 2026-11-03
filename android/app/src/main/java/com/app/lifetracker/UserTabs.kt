@@ -1,9 +1,14 @@
 package com.app.lifetracker
-// Версия: 1.5 (03.11)
+// Версия: 2.0 (03.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Path
+import android.graphics.RectF
+import android.os.Build
+import android.view.MotionEvent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -30,6 +35,52 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
+
+/**
+ * WebView вкладки-сайта с «окнами»: прямоугольники (координаты родителя, px), где сайт не рисуется и не принимает нажатия —
+ * сквозь них видна страница приложения с её кнопками (полный экран, «домик»). Сайт при этом растянут на всю область и заходит
+ * под кнопки, как содержимое остальных вкладок. Вырез по контуру кнопки — `clipOutPath` (Android 8+; WebView честно учитывает такой
+ * сложный вырез только с Android 10, поэтому окна включаются с API 29); нажатие, начатое в окне, отдаётся нижнему (главному) WebView.
+ */
+private class SiteWebView(context: Context) : WebView(context) {
+    private var holes: List<RectF> = emptyList()
+    private var radius = 0f
+    private var passThrough = false
+
+    fun setHoles(list: List<RectF>, r: Float) {
+        holes = list
+        radius = r
+        invalidate()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val hs = holes
+        if (hs.isEmpty() || Build.VERSION.SDK_INT < 29) {
+            super.onDraw(canvas)
+            return
+        }
+        val saved = canvas.save()
+        val path = Path()
+        for (h in hs) path.addRoundRect(RectF(h.left - left, h.top - top, h.right - left, h.bottom - top), radius, radius, Path.Direction.CW)
+        canvas.clipOutPath(path)
+        super.onDraw(canvas)
+        canvas.restoreToCount(saved)
+    }
+
+    private fun inHole(x: Float, y: Float): Boolean {
+        for (h in holes) if (h.contains(x + left, y + top)) return true
+        return false
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) passThrough = holes.isNotEmpty() && inHole(ev.x, ev.y)
+        if (passThrough) {
+            if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) passThrough = false
+            return false
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+}
 
 /**
  * Вкладки-сайты бокового ряда «Интернет» (кнопка «+», usertabs.js): у каждой вкладки свой WebView с нужным адресом, который лежит поверх
@@ -89,6 +140,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
     private var rW = 1
     private var rH = 1
     private var kb = 0
+    private var holes: List<RectF> = emptyList() // окна под кнопки страницы, px родителя
 
     private fun k(id: String, name: String) = "$id.$name"
     private fun dir(): File = File(activity.applicationContext.filesDir, DIR).apply { mkdirs() }
@@ -180,6 +232,27 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         kb = px
         val v = shownTab()?.view ?: return
         layoutShown(v)
+    }
+
+    /**
+     * Окна под кнопки страницы: [spec] — «x,y,w,h;x,y,w,h» в CSS-пикселях страницы (как прямоугольник в [show]); пусто — окон нет.
+     * Работает с Android 10 (API 29); раньше страница сама укорачивает сайт над рядом кнопок.
+     */
+    fun setHoles(spec: String?) {
+        if (Build.VERSION.SDK_INT < 29) return
+        val d = activity.resources.displayMetrics.density
+        val list = ArrayList<RectF>()
+        if (!spec.isNullOrEmpty() && spec.length < 400) {
+            for (part in spec.split(";")) {
+                val nums = part.split(",").mapNotNull { it.trim().toFloatOrNull() }
+                if (nums.size != 4 || nums[2] <= 0f || nums[3] <= 0f) continue
+                list.add(RectF(nums[0] * d, nums[1] * d, (nums[0] + nums[2]) * d, (nums[1] + nums[3]) * d))
+                if (list.size >= 8) break
+            }
+        }
+        holes = list
+        val r = 9f * d
+        for (t in tabs.values) (t.view as? SiteWebView)?.setHoles(list, r)
     }
 
     private fun applyRect(v: WebView, left: Int, top: Int, wPx: Int, hPx: Int) {
@@ -361,7 +434,8 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
     private fun ensureView(t: Tab): WebView {
         t.view?.let { return it }
         evictIfNeeded(t)
-        val v = WebView(activity)
+        val v = SiteWebView(activity)
+        v.setHoles(holes, 9f * activity.resources.displayMetrics.density)
         v.setBackgroundColor(0xFFFFFFFF.toInt())
         v.isVerticalScrollBarEnabled = false
         v.isHorizontalScrollBarEnabled = false

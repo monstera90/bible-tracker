@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 16.1 (03.11)
+// Версия: 17.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
 // Версия: 9.0 (26.10) — мост версии 16: `getScreenTimeTotals` (счётчики музыки и таймеров для «Трекера экранов», `ScreenTimeStats`).
@@ -40,6 +40,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 10: вкладка «Проверка обновлений» (restartForWebUpdate; getWebUpdateState теперь отдаёт ещё и checkSeq).
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
+         * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
          * 23: `claudeHome()` — «домик» вкладки Claude (первый экран).
          * 22: вкладки-сайты ряда «Интернет» (utabShow / utabHide / utabGo / utabReload / utabRemove / utabGetState / utabGetIcon).
          * 21: способ усиления громкости (volumeBoostSetEngine: 0 — LoudnessEnhancer, 1 — DynamicsProcessing).
@@ -52,7 +53,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 23
+        const val BRIDGE_VERSION = 24
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -806,6 +807,17 @@ class NativeBridge(private val activity: MainActivity) {
     fun utabShow(id: String?, url: String?, x: Double, y: Double, w: Double, h: Double): Boolean {
         if (!activity.pageTrusted || id == null) return false
         activity.runOnUiThread { activity.userTabs.show(id, url ?: "", x, y, w, h) }
+        return true
+    }
+
+    /**
+     * Окна под кнопки страницы: [spec] — «x,y,w,h;…» в CSS-пикселях страницы; пусто — окон нет. Возвращает true, если оболочка умеет окна
+     * (Android 10+); иначе страница оставляет прежнюю раскладку — сайт заканчивается над рядом кнопок.
+     */
+    @JavascriptInterface
+    fun utabHoles(spec: String?): Boolean {
+        if (!activity.pageTrusted || Build.VERSION.SDK_INT < 29) return false
+        activity.runOnUiThread { activity.userTabs.setHoles(spec) }
         return true
     }
 
