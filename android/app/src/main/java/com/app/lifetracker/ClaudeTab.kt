@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.1 (02.11)
+// Версия: 1.2 (02.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -44,6 +44,11 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     private var view: WebView? = null
     private var shown = false
     private var lastStatus = "{}"
+    private var rL = 0
+    private var rT = 0
+    private var rW = 1
+    private var rH = 1
+    private var kb = 0
 
     val isVisible: Boolean get() = shown && view != null
 
@@ -64,16 +69,37 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         val d = activity.resources.displayMetrics.density
         val wPx = (w * d).roundToInt().coerceAtLeast(1)
         val hPx = (h * d).roundToInt().coerceAtLeast(1)
-        val lp = FrameLayout.LayoutParams(wPx, hPx)
-        lp.leftMargin = (x * d).roundToInt()
-        lp.topMargin = (y * d).roundToInt()
-        v.layoutParams = lp
+        rL = (x * d).roundToInt()
+        rT = (y * d).roundToInt()
+        rW = wPx
+        rH = hPx
+        layoutShown(v)
         v.translationX = 0f
         shown = true
+        activity.setSiteKeyboardOverlay(true)
+    }
+
+    /** Экранная клавиатура окно не сжимает (вкладки на местах): WebView укорачивается до её верха. */
+    private fun layoutShown(v: WebView) {
+        val h = if (kb > 0) minOf(rH, maxOf(1, host.height - kb - rT)) else rH
+        val cur = v.layoutParams as? FrameLayout.LayoutParams
+        if (cur != null && cur.width == rW && cur.height == h && cur.leftMargin == rL && cur.topMargin == rT) return
+        val lp = FrameLayout.LayoutParams(rW, h)
+        lp.leftMargin = rL
+        lp.topMargin = rT
+        v.layoutParams = lp
+    }
+
+    fun setKeyboardInset(px: Int) {
+        if (kb == px) return
+        kb = px
+        val v = view ?: return
+        if (shown) layoutShown(v)
     }
 
     fun hide() {
         shown = false
+        activity.setSiteKeyboardOverlay(false)
         val v = view ?: return
         v.clearFocus()
         v.translationX = OFFSCREEN_X

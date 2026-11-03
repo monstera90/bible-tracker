@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.1 (02.11)
+// Версия: 1.2 (02.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -74,6 +74,11 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
     private val prefs = activity.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val tabs = ConcurrentHashMap<String, Tab>()
     private var periodicOn = false
+    private var rL = 0
+    private var rT = 0
+    private var rW = 1
+    private var rH = 1
+    private var kb = 0
 
     private fun k(id: String, name: String) = "$id.$name"
     private fun dir(): File = File(activity.applicationContext.filesDir, DIR).apply { mkdirs() }
@@ -113,7 +118,12 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         val top = (y * d).roundToInt()
         val wPx = (w * d).roundToInt().coerceAtLeast(1)
         val hPx = (h * d).roundToInt().coerceAtLeast(1)
-        applyRect(v, left, top, wPx, hPx)
+        rL = left
+        rT = top
+        rW = wPx
+        rH = hPx
+        layoutShown(v)
+        activity.setSiteKeyboardOverlay(true)
         val wasShown = t.shown
         t.shown = true
         t.lastUsed = System.currentTimeMillis()
@@ -127,6 +137,19 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
             handler.postDelayed({ if (t.shown && !t.ready) markReady(t) }, REVEAL_TIMEOUT_MS)
         }
         startPeriodicSave()
+    }
+
+    /** Экранная клавиатура окно не сжимает (вкладки на местах): WebView укорачивается до её верха. */
+    private fun layoutShown(v: WebView) {
+        val h = if (kb > 0) minOf(rH, maxOf(1, host.height - kb - rT)) else rH
+        applyRect(v, rL, rT, rW, h)
+    }
+
+    fun setKeyboardInset(px: Int) {
+        if (kb == px) return
+        kb = px
+        val v = shownTab()?.view ?: return
+        layoutShown(v)
     }
 
     private fun applyRect(v: WebView, left: Int, top: Int, wPx: Int, hPx: Int) {
@@ -156,6 +179,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
     /** Прячет показанную вкладку (страница живёт за краем, позиция сохраняется). */
     fun hide() {
         for (t in tabs.values) hideTab(t)
+        activity.setSiteKeyboardOverlay(false)
     }
 
     fun reload(id: String) {
@@ -191,6 +215,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         if (!ID_RE.matches(id)) return
         val t = tabs.remove(id)
         if (t != null) {
+            if (t.shown) activity.setSiteKeyboardOverlay(false)
             val task = t.saveTask
             if (task != null) handler.removeCallbacks(task)
             t.shown = false

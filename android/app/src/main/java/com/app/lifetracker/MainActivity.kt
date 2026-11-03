@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.0 (02.11)
+// Версия: 7.2 (02.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
 // Версия: 4.0 (25.10) — выбор папки с музыкой (`musicFolderLauncher`, `pickMusicFolder`) для вкладки «Музыка».
@@ -118,6 +118,12 @@ class MainActivity : ComponentActivity() {
      */
     @Volatile
     private var keyboardOverlay = false
+
+    /** Показан WebView вкладки-сайта или «Claude»: клавиатура не сжимает окно (вкладки на местах), а сам WebView укорачивается до её верха. */
+    @Volatile
+    private var siteOverlay = false
+    private var lastDbgIme = -1
+    private var lastDbgSite = false
 
     /** Последняя высота клавиатуры, отправленная странице (CSS-пиксели), и отложенная отправка (склейка кадров анимации). */
     private var sentKeyboardCssPx = 0
@@ -495,6 +501,20 @@ class MainActivity : ComponentActivity() {
      * Вызывается мостом (в главном потоке): страница включает/выключает режим «клавиатура поверх страницы».
      * Нижняя полоса пересчитывается сразу: при включении она перестаёт расти вместе с клавиатурой.
      */
+    /** ВРЕМЕННАЯ отладка: строка в панель отладки страницы (видна при галочке «Включить режим отладки»). */
+    private fun dbg(text: String) {
+        if (isDestroyed || !pageTrusted) return
+        val safe = text.replace("\\", "/").replace("'", " ")
+        webView.evaluateJavascript("window.Debug && window.Debug.log('kb', '$safe')", null)
+    }
+
+    fun setSiteKeyboardOverlay(enabled: Boolean) {
+        dbg("siteOverlay $siteOverlay -> $enabled sdk=${android.os.Build.VERSION.SDK_INT}")
+        if (siteOverlay == enabled) return
+        siteOverlay = enabled
+        ViewCompat.requestApplyInsets(root)
+    }
+
     fun applyKeyboardOverlay(enabled: Boolean) {
         if (keyboardOverlay == enabled) return
         keyboardOverlay = enabled
@@ -742,7 +762,16 @@ class MainActivity : ComponentActivity() {
             // Обычный режим: WebView сжимается до верха клавиатуры. Режим «поверх страницы» (вводит текст задачи/заметки):
             // WebView не сжимается, клавиатура перекрывает его низ, а страница получает её высоту и поднимает текст сама.
             val overlay = keyboardOverlay
-            setStripHeight(navStrip, if (overlay) bars.bottom else max(bars.bottom, ime.bottom))
+            val noResize = overlay || siteOverlay
+            setStripHeight(navStrip, if (noResize) bars.bottom else max(bars.bottom, ime.bottom))
+            val siteKbPx = if (siteOverlay) max(0, ime.bottom - bars.bottom) else 0
+            if (ime.bottom != lastDbgIme || siteOverlay != lastDbgSite) {
+                lastDbgIme = ime.bottom
+                lastDbgSite = siteOverlay
+                dbg("ime=${ime.bottom} bars=${bars.bottom} site=$siteOverlay pageOverlay=$overlay navStrip=${if (noResize) bars.bottom else max(bars.bottom, ime.bottom)} kb=$siteKbPx host=${webHost.height}")
+            }
+            userTabs.setKeyboardInset(siteKbPx)
+            claudeTab.setKeyboardInset(siteKbPx)
             val kbPx = if (overlay) max(0, ime.bottom - bars.bottom) else 0
             val kbCss = (kbPx / resources.displayMetrics.density).roundToInt()
             if (kbCss != pendingKeyboardCssPx) {
