@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 131.1 (04.11)
+   Версия: 132.0 (04.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -18696,7 +18696,7 @@
     var btn = document.createElement(orig.tagName.toLowerCase());
     if(btn.tagName === "BUTTON") btn.type = "button";
     btn.id = id;
-    btn.className = orig.className.replace(/\b(active|mood-tab-unread|red-tab-unread|ipkd-tab-unread|workouts-tab-unread|settings-tab-user-hidden)\b/g, "").replace(/\s+/g, " ").trim();
+    btn.className = orig.className.replace(/\b(active|stack-group-unread|mood-tab-unread|red-tab-unread|ipkd-tab-unread|workouts-tab-unread|reading-tab-unread|settings-tab-user-hidden)\b/g, "").replace(/\s+/g, " ").trim();
     btn.title = BOTTOM_ALT_TAB_TITLES[key];
     btn.setAttribute("aria-label", BOTTOM_ALT_TAB_TITLES[key]);
     btn.innerHTML = BOTTOM_ALT_ICONS[key];
@@ -18705,7 +18705,7 @@
     orig.parentNode.insertBefore(btn, orig.nextSibling);
   }
   // декоративные язычки режима колеса: пустые и некликабельные (стиль — ensureTabDecorStyle)
-  var TAB_DECOR_STRIP = ["active", "mood-tab-unread", "red-tab-unread", "ipkd-tab-unread", "workouts-tab-unread", "reading-tab-unread"];
+  var TAB_DECOR_STRIP = ["active", "stack-group-unread", "mood-tab-unread", "red-tab-unread", "ipkd-tab-unread", "workouts-tab-unread", "reading-tab-unread"];
   function ensureTabDecorStyle(){
     if(document.getElementById("tabDecorStyle")) return;
     var st = document.createElement("style");
@@ -19187,6 +19187,51 @@
       });
     });
   })();
+  // ---- подсветка нижнего язычка ряда, если в самом ряду есть вкладка с подсветкой «что-то не сделано» ----
+  // Правило без списков: у вкладки ряда стоит любой класс вида `*-tab-unread` (mood-tab-unread, reading-tab-unread, …) — язычок этого ряда
+  // получает `stack-group-unread` (modals.css, тот же цвет). Новая вкладка/новая подсветка подхватывается сама: достаточно назвать класс
+  // `<что-то>-tab-unread` на кнопке вкладки, которая входит в `stackGroupTabs` ряда. Скрытые пользователем вкладки не считаются.
+  var STACK_GROUP_BOTTOM_IDS = {
+    wheel: ["settingsTabGearBtn", "settingsTabGearBtnSet2"], tasks: [TASKS_STACK_BTN_ID], info: [INFO_STACK_BTN_ID],
+    tools: [TOOLS_STACK_BTN_ID], activities: [ACTIVITIES_STACK_BTN_ID], claude: [CLAUDE_STACK_BTN_ID]
+  };
+  function hasUnreadMark(btn){
+    for(var i = 0; i < btn.classList.length; i++){
+      if(/-tab-unread$/.test(btn.classList[i])) return true;
+    }
+    return false;
+  }
+  function updateStackGroupMarks(){
+    STACK_GROUP_NAMES.forEach(function(g){
+      var any = false;
+      stackGroupTabs(g).forEach(function(tab){
+        if(any) return;
+        var id = stackTabButtonId(tab), btn = id ? document.getElementById(id) : null;
+        if(!btn || btn.classList.contains("settings-tab-user-hidden") || btn.classList.contains("settings-tab-decor")) return;
+        any = hasUnreadMark(btn);
+      });
+      (STACK_GROUP_BOTTOM_IDS[g] || []).forEach(function(bid){
+        var b = document.getElementById(bid);
+        if(b) b.classList.toggle("stack-group-unread", any);
+      });
+    });
+  }
+  (function(){
+    var queued = false;
+    function schedule(){
+      if(queued) return;
+      queued = true;
+      setTimeout(function(){ queued = false; try{ updateStackGroupMarks(); }catch(e){} }, 0);
+    }
+    if(typeof MutationObserver !== "undefined"){
+      var mo = new MutationObserver(schedule);
+      ["settingsTabs", "settingsTabsSet2"].forEach(function(id){
+        var el = document.getElementById(id);
+        if(el) mo.observe(el, { attributes: true, attributeFilter: ["class"], subtree: true, childList: true });
+      });
+    }
+    schedule();
+  })();
   function initSet2GearTab(){
     var oldIpkdBtn = document.getElementById("settingsTabSet2GearBtn5");
     if(oldIpkdBtn && oldIpkdBtn.parentNode) oldIpkdBtn.parentNode.removeChild(oldIpkdBtn);
@@ -19195,7 +19240,7 @@
     if(!row || !src || document.getElementById("settingsTabGearBtnSet2")) return;
     var btn = src.cloneNode(true);
     btn.id = "settingsTabGearBtnSet2";
-    btn.className = src.className.replace(/\bactive\b/g, "").replace(/\s+/g, " ").trim();
+    btn.className = src.className.replace(/\b(active|stack-group-unread)\b/g, "").replace(/\s+/g, " ").trim();
     btn.addEventListener("click", function(){ toggleBottomAltMode(); });
     row.insertBefore(btn, row.firstChild);
     updateBottomGearButtons();

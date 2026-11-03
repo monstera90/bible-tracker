@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 8.7 (31.10)
+// Версия: 8.8 (04.11)
 // Версия: 8.6 (22.10) — свёрнутая плашка возвращена к виду 8.0–8.2 (13sp название, 12sp время, letterSpacing 0.08, отступы 0.0087/0.0272): она точно совпадала с настоящим островом, правки 8.3 и 8.5 её испортили. Раскрытая карточка (8.3–8.5) не тронута. Откат: InAppIsland.kt 8.5.
 // Версия: 8.5 (22.10) — по замеру четырёх скриншотов (ширина 1159): название на плашке было мельче настоящего на ~14 % → 0.0350 × ширина экрана; время на плашке ниже на ~10 % и уже на ~19 % → 13.2sp, letterSpacing 0.13, tnum; время в карточке было выше на 7 % и уже на 12 % (вытянутые цифры) → размер 0.0450, letterSpacing 0.06, tnum. Откат: InAppIsland.kt 8.4.
 // Версия: 8.4 (22.10) — время в раскрытой карточке: по скриншотам оно вышло жирнее и крупнее настоящего — обводка 0.0026 → 0.0012 × ширина экрана, размер 0.0508 → 0.0483. Откат: InAppIsland.kt 8.3.
@@ -56,6 +56,10 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 class InAppIsland(private val activity: Activity) {
+
+    private companion object {
+        const val ASK_EVERY_MS = 12L * 60L * 60L * 1000L // как часто повторно просить разрешение «Поверх других приложений»
+    }
 
     private val handler = Handler(Looper.getMainLooper())
     private val density = activity.resources.displayMetrics.density
@@ -321,25 +325,39 @@ class InAppIsland(private val activity: Activity) {
         refresh()
     }
 
-    /** Один раз предлагает выдать разрешение «Поверх других приложений» — без него плашку нельзя нажать. */
+    private var askDialog: AlertDialog? = null
+
+    /**
+     * Предлагает выдать разрешение «Поверх других приложений» (на HyperOS/MIUI — «Отображение всплывающих окон»), пока его нет:
+     * система время от времени его сбрасывает, а без него плашку нельзя нажать. Повторно — не чаще раза в `ASK_EVERY_MS`.
+     */
     private fun askOverlayOnce() {
         if (Build.VERSION.SDK_INT < 23 || canOverlay() || activity.isFinishing) return
+        if (askDialog?.isShowing == true) return
         val prefs = activity.getSharedPreferences("island", Context.MODE_PRIVATE)
-        if (prefs.getBoolean("asked", false)) return
-        prefs.edit().putBoolean("asked", true).apply()
+        val now = System.currentTimeMillis()
+        val last = prefs.getLong("askedAt", 0L)
+        if (last in 1..now && now - last < ASK_EVERY_MS) return
+        prefs.edit().putLong("askedAt", now).apply()
         try {
-            AlertDialog.Builder(activity)
+            askDialog = AlertDialog.Builder(activity)
                 .setTitle("Плашка таймера")
-                .setMessage("Чтобы плашку сверху можно было нажимать и раскрывать, разрешите приложению «Поверх других приложений».")
-                .setPositiveButton("Открыть настройки") { _, _ ->
-                    try {
-                        activity.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + activity.packageName)))
-                    } catch (e: Exception) {
-                    }
-                }
+                .setMessage("Разрешение «Поверх других приложений» (в настройках Xiaomi — «Отображение всплывающих окон») выключено: система его время от времени сбрасывает. Без него плашку сверху нельзя нажать и раскрыть. Включить?")
+                .setPositiveButton("Открыть настройки") { _, _ -> openOverlaySettings() }
                 .setNegativeButton("Позже", null)
                 .show()
         } catch (e: Exception) {
+        }
+    }
+
+    private fun openOverlaySettings() {
+        try {
+            activity.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + activity.packageName)))
+        } catch (e: Exception) {
+            try {
+                activity.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + activity.packageName)))
+            } catch (e2: Exception) {
+            }
         }
     }
 

@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 15.0 (03.11)
+   Версия: 16.0 (04.11)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самостоятельный нижний язычок набора 1 справа от «Задачи»,
@@ -9,7 +9,7 @@
    ("list" | "week"), рисует нужный `renderMain` (из форм возвращаются тоже через него):
    • «Список» (в стиле центра событий — вкладки-колокольчика, eventlog.js: `.event-center`, `.event-day`, `.event-row`,
      `.event-time`) — `renderList`;
-   • «Неделя» (как в Google Календаре) — `renderWeek`: шапка с «‹ › Сегодня» и диапазоном дат, ряд дней Пн–Вс, сетка
+   • «Неделя» (как в Google Календаре) — `renderWeek`: шапка с «‹ ›» и диапазоном дат, ряд дней Пн–Вс, сетка
      24 часа × `hourPx` (щипок двумя пальцами по вертикали меняет высоту часа в пределах `HOUR_MIN`…`HOUR_MAX`, значение
      хранится в `calendarHourPx_v1`; на время жеста блоки пересчитываются на месте `applyZoom`, по отпусканию неделя
      перерисовывается — перераскладка пересечений), события блоками на своём месте (`weekSegments`: событие через полночь режется по дням, пересекающиеся
@@ -19,7 +19,7 @@
      возвращение из формы — ту же неделю с той же прокруткой (`weekStart`, `weekScrollKeep`). Шапка липкая (`position:sticky`;
      на старом WebView без sticky просто прокручивается вместе с сеткой).
    Экран: список мероприятий (дни без мероприятий не показываются) и нижний ряд кнопок `.mdeditor-fab-row`: «+» (новое
-   мероприятие) слева от «домика»; «домик» здесь — пустышка в углу, как на списках «Мои книги» и «Карточки предметов».
+   мероприятие) слева от «домика»; «домик» (`calendarHomeBtn`) — «сегодня»: в неделе открывает текущую неделю и крутит к красной линии, в списке сворачивает серии и возвращает наверх.
    Тап по мероприятию открывает ту же форму для правки (с кнопкой «Удалить»).
    Цвета календарей: кнопка «Цвета» (`calendarColorBtn`, нижний ряд, после «Трекеров») открывает экран `openColors` в стиле формы
    комбинированных карточек (палитра 2×8, пустой квадрат — цвет по умолчанию): личный календарь, общий календарь, трекеры занятий.
@@ -119,7 +119,7 @@
   var mode = "list";    // выбранный режим: "list" | "week" (хранится в MODE_KEY)
   var weekStart = null; // начало (понедельник 00:00) показанной недели; null — текущая
   var weekScrollKeep = null; // прокрутка недели, которую вернуть после формы
-  var weekScrollToNow = false; // кнопка «Сегодня»: один раз прокрутить к красной линии (иначе неделя всегда открывается с 8:00)
+  var weekScrollToNow = false; // «домик»: один раз прокрутить к красной линии (иначе неделя всегда открывается с 8:00)
   var WEEK_SLIDE_MS = 260;   // длительность доезжания недели при перелистывании
   var hourPx = HOUR_DEFAULT; // текущая высота часа в неделе
   var pinchEndedAt = 0;      // когда закончился щипок (тап сразу после него игнорируется)
@@ -543,7 +543,7 @@
       '<button type="button" class="mdeditor-fab-btn" id="calendarColorBtn" title="Цвета календаря">' + COLOR_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarSettingsBtn" title="Настройки календаря">' + GEAR_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarAddBtn" title="Новое мероприятие">' + PLUS_ICON_SVG + '</button>' +
-      '<button type="button" class="mdeditor-fab-btn" id="calendarHomeStub" tabindex="-1" aria-disabled="true">' + HOME_ICON_SVG + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="calendarHomeBtn" title="Сегодня">' + HOME_ICON_SVG + '</button>' +
     '</div>';
   }
   function bindFab(){
@@ -681,7 +681,6 @@
           '<button type="button" class="cal-wk-btn" id="calWkPrev" title="Предыдущая неделя">‹</button>' +
           '<div class="cal-wk-title">' + weekTitle(ws) + '</div>' +
           '<button type="button" class="cal-wk-btn" id="calWkNext" title="Следующая неделя">›</button>' +
-          '<button type="button" class="cal-wk-btn cal-wk-todaybtn" id="calWkToday">Сегодня</button>' +
         '</div>' + head +
       '</div>' +
       '<div class="cal-wk-body" id="calWkBody" style="height:' + (24 * hourPx) + 'px">' +
@@ -822,7 +821,7 @@
     }
     document.getElementById("calWkPrev").addEventListener("click", function(){ shift(-1); });
     document.getElementById("calWkNext").addEventListener("click", function(){ shift(1); });
-    document.getElementById("calWkToday").addEventListener("click", function(){ if(slide) return; weekStart = null; weekScrollKeep = null; weekScrollToNow = true; renderWeek(); });
+    document.getElementById("calendarHomeBtn").addEventListener("click", function(){ if(slide) return; weekStart = null; weekScrollKeep = null; weekScrollToNow = true; renderWeek(); });
     var wk = document.getElementById("calWeek");
     wk.addEventListener("click", function(e){
       if(Date.now() - pinchEndedAt < 350) return; // тап, оставшийся от щипка
@@ -918,7 +917,7 @@
     var goNow = weekScrollToNow; weekScrollToNow = false;
     scrollWeek(c, goNow);
   }
-  // isNow — только после кнопки «Сегодня»: прокрутить к красной линии; иначе (открытие вкладки, листание) день виден с 8:00
+  // isNow — только после «домика»: прокрутить к красной линии; иначе (открытие вкладки, листание) день виден с 8:00
   function scrollWeek(c, isNow){
     var keep = weekScrollKeep;
     weekScrollKeep = null;
@@ -963,6 +962,12 @@
       fabRowHtml();
     bindFab();
     syncFlush();
+    document.getElementById("calendarHomeBtn").addEventListener("click", function(){
+      expanded = {};
+      refreshList();
+      var cc = container();
+      if(cc) cc.scrollTop = 0;
+    });
     var lastKey = null, lastAt = 0;
     document.getElementById("calendarList").addEventListener("click", function(e){
       var row = e.target.closest ? e.target.closest(".cal-row") : null;
