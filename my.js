@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 127.2 (03.11)
+   Версия: 128.0 (03.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1748,20 +1748,20 @@
   var INFO_STACK_BTN_IDS = { set2s_4: "settingsTabSet2Btn4", extra3: "settingsTabExtra3Btn", year: "settingsTabYearBtn", screentime: "settingsTabScreenTimeBtn", set2s_13: "settingsTabSet2Btn13", set2s_12: "settingsTabSet2Btn12", mood: "settingsTabMoodBtn" };
   function isInfoStackTab(tab){ return INFO_STACK_TABS.indexOf(tab) !== -1; }
   // «Инструменты» (нижний язычок settingsTabToolsStackBtn между шестерёнкой и «Статистикой»): свой боковой ряд набора 1 (режим toolsStackMode),
-  // работает как шестерёнка. Вкладки ряда сверху вниз: Стол, Изменение размера изображения, Разделение epub, Извлечение субтитров,
+  // работает как шестерёнка. Вкладки ряда сверху вниз: Поиск, Стол, Изменение размера изображения, Разделение epub, Извлечение субтитров,
   // Извлечение информации из графиков, Заполнение бланков, Объединение заметок. Ключи и кнопки у них прежние (set2s_*/set2b_*), живут в наборе 1.
   var TOOLS_STACK_BTN_ID = "settingsTabToolsStackBtn";
-  var TOOLS_STACK_TABS = ["set2s_14", "set2s_6", "set2s_5", "set2b_4", "set2b_1", "set2b_2", "set2b_3"];
+  var TOOLS_STACK_TABS = ["set2s_3", "set2s_14", "set2s_6", "set2s_5", "set2b_4", "set2b_1", "set2b_2", "set2b_3"];
   var TOOLS_STACK_BTN_IDS = {
-    set2s_14: "settingsTabSet2Btn14", set2s_6: "settingsTabSet2Btn6", set2s_5: "settingsTabSet2Btn5",
+    set2s_3: "settingsTabSet2Btn3", set2s_14: "settingsTabSet2Btn14", set2s_6: "settingsTabSet2Btn6", set2s_5: "settingsTabSet2Btn5",
     set2b_4: "settingsTabSet2GearBtn4", set2b_1: "settingsTabSet2GearBtn1", set2b_2: "settingsTabSet2GearBtn2", set2b_3: "settingsTabSet2GearBtn3"
   };
   function isToolsStackTab(tab){ return TOOLS_STACK_TABS.indexOf(tab) !== -1; }
   // «Активности» (нижний язычок settingsTabActivitiesStackBtn справа от «Календаря»): свой боковой ряд набора 1 (режим activitiesStackMode),
-  // работает как шестерёнка. Вкладки ряда сверху вниз: Закладки, Тренировки, Музыка, Поиск, QR-коды. Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
+  // работает как шестерёнка. Вкладки ряда сверху вниз: Тренировки, Музыка, QR-коды. Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
   var ACTIVITIES_STACK_BTN_ID = "settingsTabActivitiesStackBtn";
-  var ACTIVITIES_STACK_TABS = ["set2s_2", "workouts", "set2s_11", "set2s_3", "set2s_9"];
-  var ACTIVITIES_STACK_BTN_IDS = { set2s_2: "settingsTabSet2Btn2", workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_3: "settingsTabSet2Btn3", set2s_9: "settingsTabSet2Btn9" };
+  var ACTIVITIES_STACK_TABS = ["workouts", "set2s_11", "set2s_9"];
+  var ACTIVITIES_STACK_BTN_IDS = { workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_9: "settingsTabSet2Btn9" };
   function isActivitiesStackTab(tab){ return ACTIVITIES_STACK_TABS.indexOf(tab) !== -1; }
   // «Клод» (нижний язычок settingsTabClaudeStackBtn между шестерёнкой и «Инструментами»): свой боковой ряд набора 1 (режим claudeStackMode),
   // работает как шестерёнка. Пока в ряду одна вкладка — «Claude» (set2s_10, claudetab.js); новая вкладка ряда: кнопка в `#settingsTabs` + ключ в списках ниже.
@@ -1774,6 +1774,10 @@
   // бокового ряда у неё нет — клик по ней выключает все боковые ряды (switchSettingsTabOnClick)
   var NOTES_TAB_KEY = "set2s_1";
   function isNotesBottomTab(tab){ return tab === NOTES_TAB_KEY; }
+  // Экран «Закладки» (общий список закладок заметок и книг, mdeditor.js `renderBookmarksScreen`): своей вкладки-язычка нет, открывается
+  // кнопкой слева от «домика» на экранах списка заметок и списка книг. Ключ прежний (set2s_2); окно и подсветка нижнего язычка — как у «Заметок».
+  var BOOKMARKS_TAB_KEY = "set2s_2";
+  function isBookmarksScreenTab(tab){ return tab === BOOKMARKS_TAB_KEY; }
   // «Мои книги» (set2s_7, ридер fb2/epub/pdf): такая же нижняя вкладка набора 1 между «Моими заметками» и «Задачи» (кнопка settingsTabSet2Btn7
   // лежит в #settingsTabsGear), бокового ряда у неё нет. ИПКД (set2s_8) — не язычок, а экран внутри «Книг» (кнопка с числом месяца в их нижнем ряду):
   // ключ остаётся своим (общий ридер, переключение между списком и ИПКД идёт через switchSettingsTab), а язычок «Книги» подсвечен и на нём
@@ -1781,7 +1785,7 @@
   var IPKD_TAB_KEY = "set2s_8";
   function isBooksBottomTab(tab){ return tab === BOOKS_TAB_KEY || tab === IPKD_TAB_KEY; }
   // нижняя вкладка без своего бокового ряда («Мои заметки», «Мои книги» с ИПКД и «Календарь»)
-  function isStandaloneBottomTab(tab){ return isNotesBottomTab(tab) || isBooksBottomTab(tab) || isCalendarBottomTab(tab); }
+  function isStandaloneBottomTab(tab){ return isNotesBottomTab(tab) || isBooksBottomTab(tab) || isCalendarBottomTab(tab) || isBookmarksScreenTab(tab); }
   // «Заметки» и «Книги» — ОДИН нижний язычок (settingsTabSet2Btn1, пиктограмма заметок): внутри две части, между ними переключает строка заголовков
   // «Заметки | Книги» (NotesBooksSwitch ниже: нажатие на заголовок или свайп). Кнопка «Книг» (settingsTabSet2Btn7) в нижнем ряду скрыта, ключи вкладок прежние.
   var NB_LAST_KEY = "bibleNotesBooksLast_v1";
@@ -10244,7 +10248,7 @@
   // «Мой блокнот», «Книги» (с ИПКД) и «Календарь» без открытого бокового ряда: колонки язычков нет, окно растягивается на её ширину (класс notes-wide на оверлее, modals.css)
   function updateNotesWide(){
     if(!settingsModalOverlay) return;
-    var on = (currentSettingsTab === NOTES_TAB_KEY || isBooksBottomTab(currentSettingsTab) || isCalendarBottomTab(currentSettingsTab)) && !bottomAltMode && !tasksStackMode && !infoStackMode && !toolsStackMode && !activitiesStackMode && !claudeStackMode;
+    var on = (currentSettingsTab === NOTES_TAB_KEY || isBooksBottomTab(currentSettingsTab) || isCalendarBottomTab(currentSettingsTab) || isBookmarksScreenTab(currentSettingsTab)) && !bottomAltMode && !tasksStackMode && !infoStackMode && !toolsStackMode && !activitiesStackMode && !claudeStackMode;
     if(on === settingsModalOverlay.classList.contains("notes-wide")) return;
     settingsModalOverlay.classList.toggle("notes-wide", on);
     if(settingsModalOverlay.classList.contains("open")){
@@ -13138,7 +13142,7 @@
   // вешается, как и на .task-project-fab-home там же по тому же принципу. Ряд кнопок расширен,
   // слева направо в разметке = справа налево на экране (см. .mdeditor-fab-row — position:absolute +
   // inset-inline-end, последний в разметке стоит ближе всего к правому краю): скрыть заглавия
-  // (только режим "Обложки"), "i", загрузить книгу, переключатель список/обложки, домик-заглушка.
+  // (только режим "Обложки"), "i", загрузить книгу, переключатель список/обложки, закладки, домик-заглушка.
   function booksFabRowHtml(){
     var coverMode = booksViewMode === "cover";
     var hideTitlesOn = getBooksHideTitles();
@@ -13153,11 +13157,16 @@
         '<button type="button" class="mdeditor-fab-btn" id="booksViewModeBtn" title="' + (coverMode ? "Список" : "Обложки") + '">' +
           (coverMode ? BOOKS_VIEW_LIST_ICON_SVG : BOOKS_VIEW_COVER_ICON_SVG) +
         '</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="booksBookmarksBtn" title="Закладки">' + READER_BOOKMARK_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="booksHomeStub" tabindex="-1" aria-disabled="true">' + READER_HOME_ICON_SVG + '</button>' +
       '</div>'
     );
   }
   function bindBooksFabRow(){
+    var bookmarksBtn = document.getElementById("booksBookmarksBtn");
+    if(bookmarksBtn){
+      bookmarksBtn.addEventListener("click", function(){ switchSettingsTab(BOOKMARKS_TAB_KEY); });
+    }
     var modeBtn = document.getElementById("booksViewModeBtn");
     if(modeBtn){
       modeBtn.addEventListener("click", function(){
@@ -14760,9 +14769,9 @@
       "Подчёркивание текста (без кнопки): задержите палец на слове — оно сразу подчёркивается и дописывается в заметку книги; не отпуская, ведите палец вниз или вверх — подчёркивание растянется по словам (в пределах абзаца). Когда заметка ещё не привязана, приложение предложит создать новую или выбрать существующую. Нажатие на подчёркнутый текст показывает кнопки: копировать текст и " +
       '<span class="task-icon-btn" style="display:inline-flex;vertical-align:middle;width:1.3em;height:1.3em;">' + READER_TRASH_ICON_SVG + '</span> — снять подчёркивание.');
     html += iconRow(READER_BOOKMARK_ADD_ICON_SVG, false,
-      "Добавляет отдельную закладку на первый видимый на экране абзац. Каждое нажатие — новая самостоятельная закладка (имя даётся автоматически), основную она не трогает. Все закладки собраны на вкладке «Закладки»; нажатие на значок закладки у правого края абзаца снимает её.");
+      "Добавляет отдельную закладку на первый видимый на экране абзац. Каждое нажатие — новая самостоятельная закладка (имя даётся автоматически), основную она не трогает. Все закладки собраны на экране «Закладки» (кнопка слева от «домика» в списках заметок и книг); нажатие на значок закладки у правого края абзаца снимает её.");
     html += iconRow(READER_BOOKMARK_ICON_SVG, false,
-      "Основная закладка книги (она одна на книгу). Нажатие переносит её на текущее место, старая снимается. Если новое место дальше прежнего на две главы и больше, прежнее место сохраняется — вернуть его можно кнопкой на вкладке «Закладки». Удержание кнопки включает авторежим — пиктограмма меняется на закладку с буквой «А» " +
+      "Основная закладка книги (она одна на книгу). Нажатие переносит её на текущее место, старая снимается. Если новое место дальше прежнего на две главы и больше, прежнее место сохраняется — вернуть его можно кнопкой на экране «Закладки». Удержание кнопки включает авторежим — пиктограмма меняется на закладку с буквой «А» " +
       '<span class="task-icon-btn" style="display:inline-flex;vertical-align:middle;width:1.3em;height:1.3em;">' + READER_BOOKMARK_AUTO_ICON_SVG + '</span>' +
       ": основная закладка сама встаёт на текущее место при выходе из книги, при сворачивании приложения и раз в 45 секунд, пока книга открыта. Повторное удержание выключает авторежим.");
     html += iconRow(READER_CHAPTERS_ICON_SVG, false,
@@ -16280,7 +16289,7 @@
       name = oldMain ? oldMain.name : "";
     }
     var status = document.getElementById("bookReaderStatus");
-    if(status) status.textContent = "Основная закладка «" + name + "» сохранена — см. вкладку «Закладки».";
+    if(status) status.textContent = "Основная закладка «" + name + "» сохранена — см. экран «Закладки» (кнопка слева от «домика» в списке заметок или книг).";
     if(navigator.vibrate){ try{ navigator.vibrate(15); }catch(e){} }
   }
 
@@ -16304,7 +16313,7 @@
     var newId = addBookBookmark(hash, pos, name, false);
     setBookReaderBookmarkMarkInDom(pos.ch, pos.blk, newId);
     var status = document.getElementById("bookReaderStatus");
-    if(status) status.textContent = "Закладка «" + name + "» сохранена — см. вкладку «Закладки».";
+    if(status) status.textContent = "Закладка «" + name + "» сохранена — см. экран «Закладки» (кнопка слева от «домика» в списке заметок или книг).";
     if(navigator.vibrate){ try{ navigator.vibrate(15); }catch(e){} }
   }
 
@@ -17511,27 +17520,40 @@
       '<div class="subtitle-controls-fab" id="srtControlsFab">' +
         // Статус-пилюля начинается пустой.
         '<span id="srtFileStatus" class="subtitle-file-status"></span>' +
-        '<div class="subtitle-action-row">' +
-          '<button type="button" class="mdeditor-fab-btn" id="srtInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
-          '<button type="button" class="workbooks-run-btn subtitle-start-btn" id="srtStartBtn" disabled>Начать</button>' +
-          '<button type="button" class="mdeditor-fab-btn" id="srtAttachBtn" title="Выбрать файл">' + PAPERCLIP_ICON_SVG + '</button>' +
-          // "Скачать" разворачивается в "md"/"txt" тем же приёмом, что и "Аа" в
-          // .mdeditor-fontsize-wrap/-popup у "Моих заметок" (см. components.css): клик по самой
-          // кнопке открывает попап из двух кнопок СТОЛБИКОМ над ней, клик по формату скачивает и
-          // сам закрывает попап (как "Ж"/"К"/"П"/"Ч" там же), повторный клик по самой кнопке — тоже
-          // закрывает.
-          '<span class="mdeditor-fontsize-wrap" id="srtDownloadWrap">' +
-            '<div class="mdeditor-fontsize-popup" id="srtDownloadPopup">' +
-              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="srtDownloadMdBtn" title="Скачать .md" disabled>md</button>' +
-              '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="srtDownloadTxtBtn" title="Скачать .txt" disabled>txt</button>' +
-            '</div>' +
-            '<button type="button" class="mdeditor-fab-btn subtitle-download-btn" id="srtDownloadBtn" title="Скачать" disabled>' + DOWNLOAD_ICON_SVG + '</button>' +
-          '</span>' +
-          '<button type="button" class="mdeditor-fab-btn subtitle-copy-btn" id="srtCopyBtn" title="Скопировать субтитры" disabled>' + COPY_ICON_SVG + '</button>' +
-          '<button type="button" class="mdeditor-fab-btn subtitle-save-note-btn" id="srtSaveNoteBtn" title="Сохранить в Мои заметки" disabled>' + DOWNLOAD_ICON_SVG + '</button>' +
-        '</div>' +
+      '</div>' +
+      // Ряд кнопок — тот же .mdeditor-fab-row, что и на остальных вкладках: тот же размер и промежуток кнопок,
+      // а если ряд не помещается в окно — его, как и там, можно сдвинуть пальцем (initFabRowSlider).
+      '<div class="mdeditor-fab-row" id="srtFabRow">' +
+        '<button type="button" class="mdeditor-fab-btn" id="srtInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text subtitle-start-btn" id="srtStartBtn" title="Начать" disabled>Начать</button>' +
+        '<button type="button" class="mdeditor-fab-btn" id="srtAttachBtn" title="Выбрать файл">' + PAPERCLIP_ICON_SVG + '</button>' +
+        // "Скачать" разворачивается в "md"/"txt" тем же приёмом, что и "Аа" в
+        // .mdeditor-fontsize-wrap/-popup у "Моих заметок" (см. components.css): клик по самой
+        // кнопке открывает попап из двух кнопок СТОЛБИКОМ над ней, клик по формату скачивает и
+        // сам закрывает попап (как "Ж"/"К"/"П"/"Ч" там же), повторный клик по самой кнопке — тоже
+        // закрывает.
+        '<span class="mdeditor-fontsize-wrap" id="srtDownloadWrap">' +
+          '<div class="mdeditor-fontsize-popup" id="srtDownloadPopup">' +
+            '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="srtDownloadMdBtn" title="Скачать .md" disabled>md</button>' +
+            '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text" id="srtDownloadTxtBtn" title="Скачать .txt" disabled>txt</button>' +
+          '</div>' +
+          '<button type="button" class="mdeditor-fab-btn subtitle-download-btn" id="srtDownloadBtn" title="Скачать" disabled>' + DOWNLOAD_ICON_SVG + '</button>' +
+        '</span>' +
+        '<button type="button" class="mdeditor-fab-btn subtitle-copy-btn" id="srtCopyBtn" title="Скопировать субтитры" disabled>' + COPY_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn subtitle-save-note-btn" id="srtSaveNoteBtn" title="Сохранить в Мои заметки" disabled>' + DOWNLOAD_ICON_SVG + '</button>' +
+        '<button type="button" class="mdeditor-fab-btn fullscreen-mode-btn" id="srtFullscreenBtn"></button>' +
       '</div>' +
       '<input type="file" accept=".mp4,video/mp4" id="srtFileInput" style="display:none;">';
+
+    // «Во весь экран» — та же кнопка, что и в ридере книг и на вкладках-сайтах (иконку и подпись потом обновляет applyReadingModeVisual).
+    var srtFullscreenBtn = document.getElementById("srtFullscreenBtn");
+    if(srtFullscreenBtn){
+      var srtFsOn = getHideStatusBarEnabled();
+      srtFullscreenBtn.innerHTML = srtFsOn ? FULLSCREEN_MODE_ON_ICON_SVG : FULLSCREEN_MODE_ICON_SVG;
+      srtFullscreenBtn.title = srtFsOn ? "Выйти из полноэкранного режима" : "Полноэкранный режим";
+      srtFullscreenBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+      bindTapOrHold(srtFullscreenBtn, handleFullscreenBtnTap, function(){});
+    }
 
     var fileInput = document.getElementById("srtFileInput");
     var fileStatusEl = document.getElementById("srtFileStatus");
@@ -17587,11 +17609,9 @@
     }
     function setCopyReady(ready){
       copyBtn.disabled = !ready;
-      copyBtn.classList.toggle("ready", !!ready);
     }
     function setSaveNoteReady(ready){
       saveNoteBtn.disabled = !ready;
-      saveNoteBtn.classList.toggle("ready", !!ready);
     }
     // Та же готовность, что и у копирования (есть извлечённый текст) — включает саму кнопку
     // "Скачать" и оба формата в попапе разом.
@@ -17599,7 +17619,6 @@
       downloadBtn.disabled = !ready;
       downloadMdBtn.disabled = !ready;
       downloadTxtBtn.disabled = !ready;
-      downloadBtn.classList.toggle("ready", !!ready);
     }
     // Скачивание текста результата как файла — имя берём от исходного видео (без расширения), чтобы
     // .md/.txt легко было соотнести с видео, из которого извлекли; если файл ещё не выбирали
@@ -19052,6 +19071,7 @@
     if(isNotesBottomTab(t)) return SET2_TAB_IDS[NOTES_TAB_KEY];
     if(isCalendarBottomTab(t)) return CALENDAR_TAB_BTN_ID; // «Календарь» — свой нижний язычок без бокового ряда
     if(isBooksBottomTab(t)) return SET2_TAB_IDS[NOTES_TAB_KEY]; // «Книги» (и ИПКД) — часть общего нижнего язычка «Заметки»
+    if(isBookmarksScreenTab(t)) return SET2_TAB_IDS[NOTES_TAB_KEY]; // экран «Закладки» открывается из «Заметок»/«Книг» — подсвечен тот же нижний язычок
     if(bottomAltMode) return "settingsTabGearBtn";
     if(tasksStackMode) return TASKS_STACK_BTN_ID;
     if(infoStackMode) return INFO_STACK_BTN_ID;
@@ -21970,7 +21990,7 @@
     add(WORKOUTS_TAB_KEY, "Тренировки", btnSvg(WORKOUTS_TAB_BTN_ID));
     add("year", "Карта дней года", btnSvg("settingsTabYearBtn"));
     add("mood", "Диаграмма настроения", btnSvg("settingsTabMoodBtn"));
-    var fallback = {set2s_8: "ИПКД"};
+    var fallback = {set2s_8: "ИПКД", set2s_2: "Закладки"};
     Object.keys(SET2_TAB_IDS).forEach(function(k){
       var b = document.getElementById(SET2_TAB_IDS[k]);
       var title = (b && b.title) || fallback[k] || k;

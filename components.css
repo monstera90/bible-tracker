@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 24.1 (03.11)
+   Версия: 24.2 (03.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -518,7 +518,7 @@
     font-family:"Palatino Linotype",Georgia,serif;
     font-size:var(--mdeditor-font-size, 15.5px);
     line-height:1.4;
-    padding:4px 0 84px 0;
+    padding:4px 0 110px 0;
     border:none;
     overflow:hidden;
     /* #settingsTabContent — flex-column (modals.css), а у блочного
@@ -584,7 +584,7 @@
     position:absolute;
     left:16px;
     right:16px;
-    bottom:7px;
+    bottom:calc(var(--fab-size, 36px) + var(--fab-gap, 6px) * 2);
     display:flex;
     flex-direction:column;
     align-items:flex-start;
@@ -620,73 +620,17 @@
      my.js). Как только там появляется текст (имя файла, "Готово —
      извлечено реплик: N." и т.п.) — пилюля показывается как обычно. */
   .subtitle-file-status:empty{ display:none; }
-  /* ряд кнопок: "i" / "Начать" / скрепка / "Скачать" / "Скопировать" /
-     заглушка — каждая по отдельности возвращает себе pointer-events:auto
-     (родитель .subtitle-controls-fab — none), поэтому пустое место между
-     кнопками не перехватывает клики/скролл по тексту под ним. */
-  .subtitle-action-row{
-    display:flex;
-    align-items:center;
-    gap:10px;
-    width:100%;
-  }
-  .subtitle-action-row > *{ pointer-events:auto; }
-  /* "Начать" — единственная не квадратная кнопка ряда, тянется на всё
-     оставшееся место между "i" и скрепкой (flex:1 уже есть у общего
-     .workbooks-run-btn, здесь только высота/шрифт под квадратных соседей —
-     та же высота 32px, что и у них). Шрифт — единый Palatino Linotype/
-     Georgia вкладки (см. блок-комментарий выше), не трогая общий
-     .workbooks-run-btn, которым пользуются другие вкладки. */
-  .subtitle-start-btn{
-    height:32px;
-    box-sizing:border-box;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    padding:0 14px;
-    font-family:"Palatino Linotype",Georgia,serif;
-  }
-  /* кнопка копирования (общепринятая пиктограмма — два листа внахлёст,
-     COPY_ICON_SVG в my.js): размер/базовый стиль — общий .mdeditor-fab-btn,
-     тот же квадрат 32x32, что у остальных кнопок ряда. Пока субтитры не
-     извлечены — обычный контурный вид fab-btn, неактивна; как только текст
-     извлечён, renderSettingsTabSubtitleExtract добавляет класс "ready" —
-     та же залитая заливка, что и у рабочей кнопки "Начать"
-     (.subtitle-start-btn). */
-  .subtitle-copy-btn.ready{
-    background:var(--wood);
-    color:var(--parchment);
-    border-color:var(--wood-dark);
-  }
-  .subtitle-copy-btn.ready:active{ background:var(--wood-dark); }
-  /* кнопка "Скачать" (теперь разворачивается в "md"/"txt" — см.
-     .mdeditor-fontsize-wrap/-popup ниже по файлу, ТЗ пользователя от
-     07.09, четвёртый заход) получает ту же заливку "ready", что и
-     копирование, как только субтитры извлечены (см. setDownloadReady в
-     my.js). Сами кнопки "md"/"txt" внутри попапа остаются обычным
-     контурным .mdeditor-fab-btn — заливку получает только сама
-     кнопка-переключатель, как и было с одиночной кнопкой раньше. */
-  .subtitle-download-btn.ready{
-    background:var(--wood);
-    color:var(--parchment);
-    border-color:var(--wood-dark);
-  }
-  .subtitle-download-btn.ready:active{ background:var(--wood-dark); }
+  /* ряд кнопок вкладки — обычный .mdeditor-fab-row (тот же размер, промежуток и прокрутка пальцем, что на других
+     вкладках); кнопки белые, заливки "готово" нет. "Начать" — единственная не квадратная: ширина по тексту
+     (правило в modals.css). */
   /* кнопка "Сохранить в Мои заметки" (справа от копирования, ТЗ
      пользователя от 07.09) — та же пиктограмка DOWNLOAD_ICON_SVG, что и у
      "Скачать" выше, но развёрнутая на 90°: у стрелки ">" в .toggle-check
      (см. выше по файлу) rotate(90deg) даёт стрелку вниз, значит на
      пиктограмке, где стрелка и так смотрит вниз, rotate(-90deg) даёт
      стрелку вправо — тот же смысл "переслать/сохранить", только не на
-     диск, а в заметку. Заливка "ready" — тот же язык, что у copy/download
-     рядом. */
+     диск, а в заметку. */
   .subtitle-save-note-btn svg{ transform:rotate(-90deg); }
-  .subtitle-save-note-btn.ready{
-    background:var(--wood);
-    color:var(--parchment);
-    border-color:var(--wood-dark);
-  }
-  .subtitle-save-note-btn.ready:active{ background:var(--wood-dark); }
 
   /* ---------- изменение размера изображения (вкладка settingsTabSet2Btn6,
      "set2s_6", см. renderSettingsTabImgResize в imgresize.js) ----------

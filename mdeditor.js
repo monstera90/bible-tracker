@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 17.2 (02.11)
+   Версия: 17.3 (03.11)
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
@@ -3502,6 +3502,8 @@ window.initMdEditorModule = function(deps){
     html += '<input type="file" accept=".zip,application/zip" id="mdEditorImportImagesZipInput" style="display:none;">';
     html += '<div class="mdeditor-fab-row">';
     html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorNewNoteBtn" title="Новая заметка">' + PLUS_ICON_SVG + '</button>';
+    // «Закладки» — сразу слева от «домика» (экран со списком закладок заметок и книг)
+    html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorBookmarksBtn" title="Закладки">' + BOOKMARK_ICON_SVG + '</button>';
     html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn" title="К списку заметок">' + HOME_ICON_SVG + '</button>';
     html += '</div>';
     html += '</div>';
@@ -3536,6 +3538,11 @@ window.initMdEditorModule = function(deps){
     var newNoteBtn = document.getElementById("mdEditorNewNoteBtn");
     if(newNoteBtn){
       newNoteBtn.addEventListener("click", function(){ openNewNoteDialog(node); });
+    }
+
+    var bookmarksBtn = document.getElementById("mdEditorBookmarksBtn");
+    if(bookmarksBtn){
+      bookmarksBtn.addEventListener("click", function(){ switchSettingsTab("set2s_2"); });
     }
 
     var homeBtn = document.getElementById("mdEditorHomeBtn");
@@ -4030,6 +4037,7 @@ window.initMdEditorModule = function(deps){
           // прокручивает ридер к нужному абзацу (my.js) — здесь дополнительно
           // ничего переключать не нужно (в отличие от заметок ниже, где
           // switchSettingsTab нужен явно для подсветки боковой иконки).
+          activeMdTab = "editor";
           openBookMarginBookmark(it.hash, it.position);
           return;
         }
