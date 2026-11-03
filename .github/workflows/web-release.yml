@@ -1,4 +1,5 @@
 name: Web release
+# Версия: 1.0 (03.11)
 
 # Выпуск веб-части для live-update (ПЕРЕЕЗД_В_APK.md, 6.5).
 # Как выпускать: поменять APP_VERSION в sw.js (например "v0.38.42") и закоммитить в main, как и раньше.
@@ -7,7 +8,7 @@ name: Web release
 #   web-v<версия>.zip и version.json ({"version", "url", "sha256"}). Приложение читает version.json из
 #   последнего релиза: https://github.com/<репозиторий>/releases/latest/download/version.json
 # Если версия не менялась (или не новее), релиз не создаётся, workflow заканчивается успешно.
-# APK этот workflow НЕ собирает (APK собирает android.yml по тегу apk-v* или вручную), а APK-релизы там помечены
+# APK этот workflow НЕ собирает (APK собирает android.yml: пуш в main с изменениями в android/**, тег apk-v* или вручную), а APK-релизы там помечены
 # --latest=false, поэтому «последним релизом» всегда остаётся веб-часть.
 # Ничего не коммитит в main, поэтому цикла «коммит запускает сборку» нет.
 
