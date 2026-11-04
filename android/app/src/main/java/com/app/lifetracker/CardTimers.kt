@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.3 (31.10)
+// Версия: 7.4 (04.11)
 // Версия: 5.7 (24.10) — скрытый таймер (`Timer.hidden`, `start(..., hidden)`): идёт и срабатывает как обычный, но без уведомления «идёт», острова, плашки в приложении, службы тика и этапов цвета; в конце — обычные вибрация и «Таймер закончился»; `listJson` отдаёт `hidden`. Откат: CardTimers.kt 5.6.
 // Версия: 5.6 (24.10) — этапы цвета значка: остался один, красный за 2 минуты до конца (`scheduleStages`); жёлтый убран, но его будильник от прежней версии снимается (`LEGACY_STAGE_YELLOW`). Откат: CardTimers.kt 5.5.
 // Версия: 5.5 (22.10) — эксперимент с чёрным фоном уведомления (`setColorized`) откачен: HyperOS не меняет цвет карточки. Прежнее: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
@@ -404,6 +404,17 @@ object CardTimers {
         if (run != null) return@synchronized Info(run.id, titleOf(run), true, run.endAt - now, run.durationMs)
         val p = all.firstOrNull { !it.running } ?: return@synchronized null
         Info(p.id, titleOf(p), false, p.remainingMs, p.durationMs)
+    }
+
+    /**
+     * Служба тика встала на уведомление главного таймера: убрать его же обычное уведомление (оно ставилось до старта службы),
+     * иначе у одного таймера в шторке два уведомления, а смахивание одного снимало бы оба.
+     */
+    fun dedupePrimary(ctx: Context) {
+        synchronized(LOCK) {
+            val id = primaryId(ctx) ?: return
+            cancelRunning(ctx, id)
+        }
     }
 
     /** Для службы тика: готовое уведомление главного таймера (или null, если идущих нет). */

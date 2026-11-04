@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 16.0 (04.11)
+   Версия: 16.1 (04.11)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самостоятельный нижний язычок набора 1 справа от «Задачи»,
@@ -23,8 +23,10 @@
    Тап по мероприятию открывает ту же форму для правки (с кнопкой «Удалить»).
    Цвета календарей: кнопка «Цвета» (`calendarColorBtn`, нижний ряд, после «Трекеров») открывает экран `openColors` в стиле формы
    комбинированных карточек (палитра 2×8, пустой квадрат — цвет по умолчанию): личный календарь, общий календарь, трекеры занятий.
-   Выбор хранится на устройстве (`calendarColors_v1` = {personal, shared, trk, hid, past} — "#rrggbb" или ""), `applyUserColors` кладёт его в
+   Выбор хранится на устройстве (`calendarColors_v1` = {personal, shared, task, trk, hid, past, trk_<ключ трекера>} — "#rrggbb" или ""), `applyUserColors` кладёт его в
    `--cal-personal` / `--cal-shared` / `--cal-trk` / `--cal-hid` / `--cal-past` на `<html>` (пусто — убирает, действует цвет по умолчанию из components.css).
+   У каждого трекера из `TRACKER_SOURCES` своя палитра (`trk_<key>`, строки в `COLOR_ITEMS` добавляются сами): выбранный цвет пишется прямо в `style`
+   блока недели / строки списка (`trkOwnColor`, `trkBlockCss`); пусто — действует общий цвет «Трекеры занятий» (`trk`).
    Цвет прошедших мероприятий (`past`): пока не выбран, прошедшие остаются цвета своего календаря; выбран — прошедшие блоки недели и
    строки списка получают его прямо в `style` (`pastBlockCss`, `paintPastBlock`; главнее цвета календаря; у скрытого мероприятия с выбранным цветом скрытых действует цвет скрытых — `usePastColor`).
    Скрытые мероприятия: поле «Отображение» в форме («Показать»/«Скрыть»); признак хранится ТОЛЬКО на устройстве (`calendarHiddenIds_v1` = {id:1}),
@@ -223,10 +225,13 @@
     { key: "personal", label: "Личный календарь", cssVar: "--cal-personal" },
     { key: "shared",   label: "Общий календарь",  cssVar: "--cal-shared" },
     { key: "task",     label: "Задачи",           cssVar: "--cal-task" },
-    { key: "trk",      label: "Трекеры занятий",  cssVar: "--cal-trk" },
+    { key: "trk",      label: "Трекеры занятий (общий цвет)", cssVar: "--cal-trk" },
     { key: "hid",      label: "Скрытые мероприятия", cssVar: "--cal-hid" },
     { key: "past",     label: "Прошедшие мероприятия", cssVar: "--cal-past" }
-  ];
+  ].concat(TRACKER_SOURCES.map(function(src){
+    // свой цвет у каждого трекера занятий; пусто — общий цвет «Трекеры занятий»
+    return { key: "trk_" + src.key, label: "Трекер: " + src.label, cssVar: "--cal-trk-" + src.key };
+  }));
   // та же палитра, что в форме комбинированных карточек (itemcards.js HABIT_COLORS_*): первый пастельный квадрат — «по умолчанию»
   var COLORS_BRIGHT = ["#ff0000", "#fb8c00", "#ffff00", "#43a047", "#00acc1", "#1e88e5", "#7f00ff", "#d81b60"];
   var COLORS_PASTEL = ["", "#ffcba4", "#fff3a3", "#9cdb4e", "#40d5b5", "#a9ccf4", "#d4b8f0", "#f8bbd9"];
@@ -247,6 +252,12 @@
       var v = userColors[it.key];
       if(v) root.style.setProperty(it.cssVar, v); else root.style.removeProperty(it.cssVar);
     });
+  }
+  // собственный цвет трекера (выбранный в «Цветах»): "#rrggbb" или "" — тогда действует общий цвет трекеров
+  function trkOwnColor(srcKey){ return userColors["trk_" + srcKey] || ""; }
+  function trkBlockCss(srcKey){
+    var c = trkOwnColor(srcKey);
+    return c ? "background:" + c + ";color:" + fgForHex(c) + ";" : "";
   }
   // трекеры, пересекающие отрезок [from, to): [{src, label, start, end, sub}]; запись без конца — по длительности, иначе минутная
   function trackerItems(from, to){
@@ -453,7 +464,7 @@
         lastDay = day;
       }
       if(r.trk){
-        html += '<div class="event-row cal-trk-row"><span class="event-time">' + timeRange(r.at, r.dur) + '</span> ' + esc(r.trk.label) + (r.trk.sub ? '<span class="cal-rep"> · ' + esc(r.trk.sub) + '</span>' : '') + '</div>';
+        html += '<div class="event-row cal-trk-row"' + (trkOwnColor(r.trk.src) ? ' style="border-left-color:' + trkOwnColor(r.trk.src) + ';"' : '') + '><span class="event-time">' + timeRange(r.at, r.dur) + '</span> ' + esc(r.trk.label) + (r.trk.sub ? '<span class="cal-rep"> · ' + esc(r.trk.sub) + '</span>' : '') + '</div>';
         return;
       }
       var badge = "";
@@ -662,7 +673,7 @@
         var tall = h >= 30;
         if(sg.t){
           blocks += '<div class="cal-wk-trk cal-trk-' + sg.t.src + '" data-t="' + sg.top + '" data-b="' + sg.bottom + '" data-txt="' + esc(trackerText(sg.t)) + '"' +
-            ' style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + '">' +
+            ' style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + ';' + trkBlockCss(sg.t.src) + '">' +
             esc(sg.t.label) + '</div>';
           return;
         }
@@ -1349,7 +1360,7 @@
     COLOR_ITEMS.forEach(function(it){ draft[it.key] = userColors[it.key]; });
     var html = '<div class="mdeditor-tab item-card-form" id="calendarColorForm">' +
       '<h3 class="common-tab-title">Цвета календаря</h3>' +
-      '<div class="item-form-hint">Цвет каждого календаря и трекеров занятий — необязательно. Пустой квадрат — цвет по умолчанию. Выбор действует на этом устройстве.</div>';
+      '<div class="item-form-hint">Цвет каждого календаря и трекеров занятий — необязательно. Пустой квадрат — цвет по умолчанию (у отдельного трекера — общий цвет трекеров). Выбор действует на этом устройстве.</div>';
     COLOR_ITEMS.forEach(function(it){
       html += '<div class="cal-field"><div class="item-form-hint">' + esc(it.label) + '</div>' + paletteHtml(it.key) + '</div>';
     });
