@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 7.0 (04.11)
+   Версия: 8.0 (04.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -41,10 +41,14 @@
    (1) локальный архив «Экспортировать личные данные» (ZIP с data.json или сам data.json, `readLocalArchive`): берутся ТОЛЬКО записи `wk:*` из `rawState.data` (метры, время, оценка), остальные данные не трогаются; уже имеющиеся id пропускаются, метка `needRpe` не переносится;
    (2) CSV-выгрузка стороннего трекера (`parseCsv`, колонки `date`, `distance_km`, `type_label`/`type_code`, `has_workout`): берутся только пробежки (`CSV_RUN_LABELS`/`CSV_RUN_CODES`) с километражем > 0 — дата и километры, без времени и баллов. Запись {start (дата и часы:минуты из колонки), end=start, m, rawM, totalMs:0, how:\"imp\", imp:1}, id `imp-ГГГГММДД-ЧЧММ` (повторный импорт не дублирует). Импортированные записи не попадают в `records()` для календаря (нет длительности).
    Информация — кнопка «i» (`#wkInfoBtn`) открывает экран «Тренировки — кнопки» (`renderInfoScreen`), «домик» возвращает на вкладку.
-   Рекорды — кнопка-кубок (`#wkRecordsBtn`, между лампочкой «Советы» и индикатором нагрузки) открывает экран «Рекорды» (`renderRecordsScreen`, расчёт — `bestRecords`):
+   Кубок — кнопка `#wkRecordsBtn` (между лампочкой «Советы» и индикатором нагрузки) открывает экран `renderTrophyScreen` из трёх частей «Рекорды | Цели | Награды» (строка заголовков `.wk-sw`, нажатие или свайп влево/вправо; открытая часть запоминается — `workoutsTrophyTab_v1`).
+   Часть «Рекорды» (`recordsBodyHtml`, расчёт — `bestRecords`):
    самое долгое время и самая длинная дистанция (`totalMs`, `m` по всем записям, у импортированных нет времени) и лучшее время на 5 км, 10 км, полумарафоне, марафоне. Дистанция записи считается
    по целой записи: подходит запись длиной от `REC_DIST_MIN` до `REC_DIST_MAX` от дистанции, время пересчитывается на ровную дистанцию (`totalMs × дистанция / m`). Нет подходящей записи — «ожидается».
    Для экспорта — `WorkoutsTab.exportRecords()` (читаемый раздел `workouts` в data.json, собирает my.js).
+   Часть «Цели»: цель — на текущий месяц, три вида (`GOAL_TYPES`): километраж 50/100/200/300/500 км, набор высоты 500/1000/2000/4000/8849 м, время тренировок 5/10/20/30/40 ч. Пока цель вида в месяце не достигнута, другую того же вида поставить нельзя; предлагаются только значения больше уже набранного за месяц; после достижения можно поставить следующую. Прогресс — по всем записям месяца (км — `m`, высота — `up`, время — `totalMs`), полоса заполняется сама. Запись цели — `wkgoal:<вид-месяц-значение>` = {type, month, target, setAt[, p50, p75, done]} (метки времени 50 %/75 %/достигнута, едут в облако). Цели прошлых месяцев — список «Прошлые цели».
+   Часть «Награды»: каталог `AWARD_DEFS` (`buildAwardDefs`): первая тренировка, первые 5 / 10 км, первый полумарафон, первый марафон (одна тренировка не короче 98 % дистанции — как в рекордах), общий километраж, число тренировок, серии дней подряд, время и набор высоты за одну тренировку и суммарно (Эверест 8849 м), скорость (5 км быстрее 30/25 мин, 10 км быстрее 60/50 мин, полумарафон быстрее 2 ч, марафон быстрее 4 ч), привычки (ранняя пташка, сова, год в движении), цели месяца (по награде за каждое значение цели, «Первая цель», «Тройная цель»). Условия считаются по записям (`awardCtx`), раз полученная награда хранится — `wkaward:<id>` = {ts (когда заслужена), at}; неполученные показаны бледно с прогрессом (`prog`).
+   Сообщения: награда, 50 %, 75 % цели и достигнутая цель (`evalProgress` на открытии вкладки, после забора записи, при открытии экрана кубка) складываются в `workoutsNotices_v1` (localStorage, только это устройство) и показываются в области совета дня вместо него (`noticeToShow`, карточка `#wkNoticeCard`; совет дня в это время не выбирается). Видно весь день события; на следующие дни (до 3) — только пока экран кубка не открывали (`markNoticesSeen`). Нажатие на карточку открывает экран кубка на нужной части. О награде, заслуженной раньше 3 дней назад, сообщения нет.
    Хранилище — провайдер от my.js (`setStore`, раздел «ТРЕНИРОВКИ» в my.js): запись лежит в личном `state` под ключом
    `wk:<id>` = {c, t} и едет в облако вместе с остальными данными и в экспорт; удаление — тумбстоун {c:null, t}.
    =========================================================================== */
@@ -74,6 +78,24 @@
   ];
   var REC_DIST_MIN = 0.98, REC_DIST_MAX = 1.10; // запись подходит на дистанцию, если её длина — от 98 % до 110 % дистанции
   var REC_WAIT_TEXT = "ожидается";
+  var TROPHY_TABS = [                          // части экрана кубка (слева направо)
+    { key: "records", label: "Рекорды" },
+    { key: "goals", label: "Цели" },
+    { key: "awards", label: "Награды" }
+  ];
+  var TROPHY_TAB_KEY = "workoutsTrophyTab_v1"; // какая часть экрана кубка открыта (только это устройство)
+  var NOTICE_KEY = "workoutsNotices_v1";       // сообщения о целях и наградах, показываемые вместо совета дня (только это устройство)
+  var NOTICE_UNSEEN_DAYS = 3;                  // сколько следующих дней сообщение остаётся, если экран кубка так и не открыли
+  var NOTICE_RECENT_MS = 3 * 86400000;         // о награде, заслуженной раньше, сообщения нет (старая история при первом пересчёте)
+  var GOAL_TYPES = [                           // виды месячных целей; opts — варианты (км / метры набора / часы)
+    { key: "km", title: "Километраж", unit: "км", opts: [50, 100, 200, 300, 500],
+      awardPrefix: "Цель месяца: ", awardSuffix: "", awardText: "Достигнута месячная цель по километражу:" },
+    { key: "up", title: "Набор высоты", unit: "м", opts: [500, 1000, 2000, 4000, 8849],
+      awardPrefix: "Цель месяца: ", awardSuffix: " набора", awardText: "Достигнута месячная цель по набору высоты:" },
+    { key: "time", title: "Время тренировок", unit: "ч", opts: [5, 10, 20, 30, 40],
+      awardPrefix: "Цель месяца: ", awardSuffix: " тренировок", awardText: "Достигнута месячная цель по времени тренировок:" }
+  ];
+  var AWARD_CATS = ["Дистанция за одну тренировку", "Общий километраж", "Регулярность", "Время и высота", "Скорость", "Привычки", "Цели месяца"];
   var TIP_CATS = ["Объём и регулярность", "Техника", "Силовая", "Восстановление", "Анализ", "Другое"];
   var TIP_RPE_OPTS = [["", "Любая"], ["low", "Лёгкая 1–3"], ["mid", "Средняя 4–6"], ["high", "Тяжёлая 7–10"]];
   var TIP_DIST_OPTS = [["", "Любая"], ["short", "Короткая"], ["long", "Длинная"]];
@@ -107,6 +129,8 @@
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 21h4"></path><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1 2V16h5.2v-.2c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"></path></svg>';
   var CUP_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8v5a4 4 0 0 1-8 0z"></path><path d="M8 6H5v1.5A3 3 0 0 0 8 10.5"></path><path d="M16 6h3v1.5a3 3 0 0 1-3 3"></path><path d="M12 13v5"></path><path d="M8.5 19.5h7"></path></svg>';
+  var MEDAL_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="5.5"></circle><path d="M8.7 13.6L7 21l5-2.6 5 2.6-1.7-7.4"></path></svg>';
   var PLUS_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
   var CHECK_ICON_SVG =
@@ -137,6 +161,8 @@
   var tipDayMem = null;    // {day, id, ref}: совет дня в памяти — запасной вариант, если localStorage недоступен
   var importMsg = "";      // итог последнего импорта (карточка над панелью записи; нажатие закрывает)
   var importBusy = false;  // идёт чтение файла импорта
+  var trophyTab = "records"; // открытая часть экрана кубка
+  var goalSel = {};        // выбранная, но ещё не поставленная цель: {km|up|time: значение}
 
   // ---------- вспомогательное ----------
   function container(){ return document.getElementById("settingsTabContent"); }
@@ -398,7 +424,31 @@
       ".wk-rec .wk-rec-val{font-weight:bold;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;}" +
       ".wk-rec .wk-rec-val.wait{font-weight:normal;color:var(--ink-soft);white-space:normal;max-width:45%;}" +
       ".wk-tip-note{margin-top:10px;color:var(--ink-soft);font-size:.9em;}" +
-      ".wk-tip-err{margin-top:8px;color:var(--danger);}";
+      ".wk-tip-err{margin-top:8px;color:var(--danger);}" +
+      // строка «Рекорды | Цели | Награды» — копия .nb-switch (components.css) под три части
+      ".wk-sw{display:flex;margin:2px 0 0 0;border-bottom:1px solid var(--groove-shadow);}" +
+      ".wk-sw-item{flex:1 1 33.333%;min-width:0;box-sizing:border-box;padding:6px 0;font-family:\"Palatino Linotype\",Georgia,serif;font-size:var(--mdeditor-font-size,15.5px);font-weight:bold;color:var(--wood);text-align:center;opacity:.4;cursor:pointer;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;}" +
+      ".wk-sw-item.active{opacity:1;cursor:default;}" +
+      // цели: карточка с полосой прогресса
+      ".wk-goal{margin:6px 0 8px;}" +
+      ".wk-goal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;font-weight:bold;}" +
+      ".wk-goal-pct{font-variant-numeric:tabular-nums;color:var(--wood-dark);white-space:nowrap;}" +
+      ".wk-goal-pct.done{color:#2fa15f;}" +
+      ".wk-bar{height:10px;border-radius:6px;background:var(--groove-shadow);overflow:hidden;margin:8px 0 6px;}" +
+      ".wk-bar-fill{height:100%;border-radius:6px;background:var(--wood);transition:width .3s;}" +
+      ".wk-bar-fill.done{background:#2fa15f;}" +
+      ".wk-goal .wk-sub{display:block;font-size:.85em;color:var(--ink-soft);}" +
+      ".wk-goal-set{display:block;margin:6px 0 4px;padding:8px 14px;border-radius:10px;border:1px solid var(--wood);background:var(--wood);color:var(--parchment);font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
+      ".wk-goal-set:disabled{background:transparent;border-color:var(--groove-shadow);color:var(--ink-soft);opacity:.6;cursor:default;}" +
+      // награды
+      ".wk-award{align-items:flex-start;}" +
+      ".wk-award:not(.on){opacity:.5;}" +
+      ".wk-medal{flex:0 0 28px;width:28px;height:28px;margin-top:1px;color:var(--ink-soft);}" +
+      ".wk-medal svg{display:block;width:28px;height:28px;}" +
+      ".wk-award.on .wk-medal{color:var(--wood-dark);}" +
+      ".wk-award.on .wk-medal circle{fill:var(--gold-light);}" +
+      ".wk-award .wk-award-meta{color:var(--wood-dark);}" +
+      ".wk-notice .wk-tip-text + .wk-tip-text{margin-top:8px;}";
     document.head.appendChild(st);
   }
 
@@ -429,6 +479,7 @@
     ensureStyle();
     loadPeriod();
     clampEnd();
+    evalProgress();
     var recs = inRange(allRecords());
     var html = '<div class="wk-root" id="' + rootId + '">' +
       '<div class="wk-scroll">' +
@@ -552,7 +603,7 @@
     var tb = document.getElementById("wkTipsBtn");
     if(tb) tb.addEventListener("click", renderTipsScreen);
     var rb = document.getElementById("wkRecordsBtn");
-    if(rb) rb.addEventListener("click", renderRecordsScreen);
+    if(rb) rb.addEventListener("click", function(){ renderTrophyScreen(); });
     var imb = document.getElementById("wkImportBtn"), inp = document.getElementById("wkImportInput");
     if(imb && inp){
       imb.addEventListener("click", function(){ if(!importBusy) inp.click(); });
@@ -719,10 +770,14 @@
     var pend = active ? null : pendAny;
     var recBtn = document.getElementById("wkRecBtn");
     if(recBtn) recBtn.classList.toggle("wk-blocked", !!pendAny && !active);
-    var tip = (!active && !pend) ? dayTip() : null;
-    var showTip = !!tip && !tipHidden && !infoOpen && !importMsg && !message;
+    // сообщение о награде / половине / трёх четвертях цели занимает место совета дня (и тогда совет дня не выбирается и не «сгорает»)
+    var notice = (!active && !pend) ? noticeToShow() : null;
+    var tip = (!active && !pend && !notice) ? dayTip() : null;
+    var calm = !tipHidden && !infoOpen && !importMsg && !message;
+    var showNotice = !!notice && calm;
+    var showTip = !!tip && calm;
     var shape = (active ? st.status + ":" + (st.fix ? 1 : 0) + ":" + ((st.gaps || []).length) : "idle") + "|" + (res ? res.id : "") + "|" + message + messageAction +
-      "|" + (pend ? pend.id + ":" + rpeSel : "") + "|" + (infoOpen ? "i" : "") + "|" + importMsg + "|" + (showTip ? tip.id + ":" + tip.text.length : "");
+      "|" + (pend ? pend.id + ":" + rpeSel : "") + "|" + (infoOpen ? "i" : "") + "|" + importMsg + "|" + (showTip ? tip.id + ":" + tip.text.length : "") + "|" + (showNotice ? notice.sig : "");
     if(!force && shape === lastShape && active){
       updateLiveNumbers(box, st);
       return;
@@ -739,7 +794,8 @@
     if(active) html += liveCardHtml(st);
     else if(pend) html += rpeCardHtml(pend);
     else if(res) html += resultCardHtml(res);
-    if(showTip) html += tipCardHtml(tip);
+    if(showNotice) html += noticeCardHtml(notice);
+    else if(showTip) html += tipCardHtml(tip);
     box.innerHTML = html;
     var gb = document.getElementById("wkGpsBtn");
     if(gb) gb.addEventListener("click", function(){ var n = nat(); if(n) try{ n.openLocationSettings(); }catch(e){} });
@@ -761,6 +817,8 @@
     });
     var rs = document.getElementById("wkRpeSave");
     if(rs) rs.addEventListener("click", saveRpe);
+    var nc = document.getElementById("wkNoticeCard");
+    if(nc) nc.addEventListener("click", function(){ renderTrophyScreen(nc.getAttribute("data-tab")); }); // нажатие открывает экран кубка на нужной части
     var tc = document.getElementById("wkTipCard");
     if(tc) tc.addEventListener("click", function(){ tipHidden = true; lastShape = ""; paintLive(true); }); // нажатие закрывает карточку до следующего открытия вкладки
     var rc = document.getElementById("wkResultCard");
@@ -903,7 +961,25 @@
     });
   }
 
-  // ---------- экран «Рекорды» (кнопка-кубок) ----------
+  // ---------- экран кубка: «Рекорды | Цели | Награды» ----------
+  // Три части на одной строке заголовков — как «Заметки | Книги» (my.js, NotesBooksSwitch): нажатие на заголовок или свайп влево/вправо.
+  // Стили свои (.wk-sw*, копия .nb-switch), чтобы не задеть переключатель заметок/книг. Открытая часть запоминается (`workoutsTrophyTab_v1`).
+  function trophyIndex(key){
+    for(var i = 0; i < TROPHY_TABS.length; i++){ if(TROPHY_TABS[i].key === key) return i; }
+    return -1;
+  }
+  function loadTrophyTab(){
+    var v = "";
+    try{ v = localStorage.getItem(TROPHY_TAB_KEY) || ""; }catch(e){}
+    return trophyIndex(v) !== -1 ? v : TROPHY_TABS[0].key;
+  }
+  function swHtml(active){
+    return '<div class="wk-sw" role="tablist">' + TROPHY_TABS.map(function(t){
+      return '<span class="wk-sw-item' + (t.key === active ? " active" : "") + '" role="tab" data-wktab="' + t.key + '">' + esc(t.label) + '</span>';
+    }).join("") + '</div>';
+  }
+
+  // ---------- часть «Рекорды» ----------
   // самая долгая и самая длинная запись; лучшее время на каждой дистанции из REC_DISTS (по целым записям подходящей длины)
   function bestRecords(){
     var out = { time: null, dist: null, races: {} };
@@ -938,14 +1014,9 @@
     return parts.join(" · ");
   }
 
-  function renderRecordsScreen(){
-    var c = container();
-    if(!c) return;
-    infoScreen = true;
-    ensureStyle();
+  function recordsBodyHtml(){
     var b = bestRecords();
-    var html = '<h3 class="common-tab-title">Рекорды</h3><div class="task-info-body">';
-    html += '<div class="wk-rec-cat">Самое долгое и самое длинное</div><div class="wk-card" style="padding:4px 12px;">';
+    var html = '<div class="wk-rec-cat">Самое долгое и самое длинное</div><div class="wk-card" style="padding:4px 12px;">';
     html += recRowHtml("Максимальное время бега", b.time ? fmtClock(b.time.totalMs) : null,
       b.time ? recSub(b.time, true, false, num(b.time.totalMs), num(b.time.m)) : "");
     html += recRowHtml("Максимальная дистанция бега", b.dist ? fmtKm(b.dist.m) : null,
@@ -955,15 +1026,544 @@
       var x = b.races[d.key];
       html += recRowHtml(d.label, x ? fmtClock(x.ms) : null, x ? recSub(x.rec, true, false, x.ms, d.m) : "");
     });
-    html += '</div></div><div class="mdeditor-fab-row">' +
+    return html + '</div>';
+  }
+
+  // ---------- цели месяца ----------
+  // Цель = запись личного state `wkgoal:<id>` = {c:{type, month:"ГГГГ-ММ", target, setAt[, p50, p75, done]}, t}; id = «вид-месяц-значение».
+  // p50/p75/done — метки времени, когда прогресс впервые дошёл до 50 % / 75 % / 100 % (едут в облако: второе устройство уже не сообщает о них заново).
+  function monthKey(d){ return d.getFullYear() + "-" + pad2(d.getMonth() + 1); }
+  function monthRange(key){
+    var p = String(key).split("-");
+    var a = monthStart(parseInt(p[0], 10) || 1970, (parseInt(p[1], 10) || 1) - 1);
+    return [a.getTime(), addMonths(a, 1).getTime()];
+  }
+  function monthTitle(key){
+    var p = String(key).split("-");
+    return (MONTHS[(parseInt(p[1], 10) || 1) - 1] || "") + " " + p[0];
+  }
+  function endOf(r){ return num(r.end) > num(r.start) ? num(r.end) : num(r.start); }
+  function goalType(key){
+    for(var i = 0; i < GOAL_TYPES.length; i++){ if(GOAL_TYPES[i].key === key) return GOAL_TYPES[i]; }
+    return null;
+  }
+  // вклад одной записи в цель, в единицах цели: км / метры набора / часы
+  function valOf(type, r){
+    if(type === "km") return num(r.m) / 1000;
+    if(type === "up") return num(r.up);
+    return num(r.totalMs) / 3600000;
+  }
+  function recsAsc(){ return allRecords().slice().reverse(); } // allRecords — новые сверху
+  function monthProgress(type, key, asc){
+    var rg = monthRange(key), sum = 0;
+    asc.forEach(function(r){ if(r.start >= rg[0] && r.start < rg[1]) sum += valOf(type, r); });
+    return sum;
+  }
+  function targetLabel(type, target){ return target + " " + goalType(type).unit; }
+  function goalLabel(g){ return monthTitle(g.month) + " · " + targetLabel(g.type, g.target); }
+  function progText(type, val, target){
+    if(type === "km") return fmtKm(val * 1000) + " из " + target + " км";
+    if(type === "up") return Math.round(val) + " из " + target + " м";
+    return fmtTotal(val * 3600000) + " из " + target + " ч";
+  }
+  function leftText(type, val, target){
+    var left = Math.max(0, target - val);
+    if(type === "km") return fmtKm(left * 1000);
+    if(type === "up") return Math.ceil(left) + " м";
+    return fmtTotal(left * 3600000);
+  }
+
+  function goalsList(){
+    if(!STORE || typeof STORE.listGoals !== "function") return [];
+    var list = [];
+    try{ list = STORE.listGoals() || []; }catch(e){ list = []; }
+    return list.filter(function(g){ return g && goalType(g.type) && typeof g.month === "string" && num(g.target) > 0; });
+  }
+  function goalCopy(g){
+    var c = {};
+    Object.keys(g).forEach(function(k){ if(k !== "id") c[k] = g[k]; });
+    return c;
+  }
+  function goalAwardTitle(type, target){ return goalType(type).awardPrefix + targetLabel(type, target) + goalType(type).awardSuffix; }
+
+  // пересчёт целей: отметки 50 % / 75 % / «достигнута»; для каждой отметки — сообщение вместо совета дня
+  function evalGoals(){
+    var goals = goalsList();
+    if(!goals.length) return;
+    var asc = recsAsc(), now = Date.now(), curKey = monthKey(new Date());
+    goals.forEach(function(g){
+      if(g.done) return;
+      var rg = monthRange(g.month), cum = 0, cross = 0;
+      asc.forEach(function(r){
+        if(r.start < rg[0] || r.start >= rg[1]) return;
+        cum += valOf(g.type, r);
+        if(!cross && cum >= g.target) cross = endOf(r);
+      });
+      var pct = cum / g.target * 100;
+      var c = goalCopy(g), changed = false;
+      if(pct >= 100){
+        c.done = cross || now;
+        if(!c.p50) c.p50 = now;
+        if(!c.p75) c.p75 = now;
+        changed = true;
+        pushNotice({ k: "gd:" + g.id, kind: "goal", tab: "goals",
+          text: "Цель «" + goalLabel(g) + "» достигнута! Награда: «" + goalAwardTitle(g.type, g.target) + "»." });
+      } else if(g.month === curKey){
+        if(pct >= 75 && !c.p75){
+          c.p75 = now; if(!c.p50) c.p50 = now; changed = true;
+          pushNotice({ k: "g75:" + g.id, kind: "goal", tab: "goals",
+            text: "Цель «" + goalLabel(g) + "»: пройдено три четверти пути — " + progText(g.type, cum, g.target) + "." });
+        } else if(pct >= 50 && !c.p50){
+          c.p50 = now; changed = true;
+          pushNotice({ k: "g50:" + g.id, kind: "goal", tab: "goals",
+            text: "Цель «" + goalLabel(g) + "»: пройдена половина пути — " + progText(g.type, cum, g.target) + "." });
+        }
+      }
+      if(changed){ try{ STORE.putGoal(g.id, c); }catch(e){} }
+    });
+  }
+
+  // можно ли поставить цель: нет невыполненной цели этого вида на текущий месяц и значение больше уже набранного за месяц
+  function setGoal(type, target){
+    var gt = goalType(type);
+    if(!gt || gt.opts.indexOf(target) === -1 || !STORE || typeof STORE.putGoal !== "function") return false;
+    var key = monthKey(new Date()), asc = recsAsc();
+    var open = goalsList().some(function(g){ return g.type === type && g.month === key && !g.done; });
+    if(open) return false;
+    var cum = monthProgress(type, key, asc);
+    if(cum >= target) return false;
+    var now = Date.now(), c = { type: type, month: key, target: target, setAt: now };
+    var pct = cum / target * 100;
+    if(pct >= 50) c.p50 = now; // что уже пройдено на момент выбора — молча, без сообщений
+    if(pct >= 75) c.p75 = now;
+    try{ STORE.putGoal(type + "-" + key + "-" + target, c); }catch(e){ return false; }
+    return true;
+  }
+
+  function barHtml(pct, done){
+    var w = Math.max(0, Math.min(100, pct));
+    return '<div class="wk-bar"><div class="wk-bar-fill' + (done ? " done" : "") + '" style="width:' + w.toFixed(1) + '%"></div></div>';
+  }
+
+  function goalCardHtml(g, cum){
+    var pct = Math.min(100, cum / g.target * 100);
+    var done = !!g.done;
+    return '<div class="wk-card wk-goal">' +
+      '<div class="wk-goal-head"><span class="wk-goal-name">' + esc(goalLabel(g)) + '</span><span class="wk-goal-pct' + (done ? " done" : "") + '">' +
+        (done ? "✓ 100%" : Math.floor(pct) + "%") + '</span></div>' +
+      barHtml(done ? 100 : pct, done) +
+      '<div class="wk-sub">' + (done
+        ? esc("Достигнута " + fmtDate(g.done) + " · " + progText(g.type, Math.max(cum, g.target), g.target))
+        : esc(progText(g.type, cum, g.target) + " · осталось " + leftText(g.type, cum, g.target))) + '</div></div>';
+  }
+
+  function goalsBodyHtml(){
+    var now = new Date(), key = monthKey(now), asc = recsAsc(), goals = goalsList();
+    var html = '<div class="wk-tip-note" style="margin:0 0 2px;">Цели — на текущий месяц (' + esc(monthTitle(key)) +
+      '). Пока цель не достигнута, другую того же вида поставить нельзя. За каждую достигнутую цель — награда.</div>';
+    GOAL_TYPES.forEach(function(gt){
+      html += '<div class="wk-rec-cat">' + esc(gt.title) + '</div>';
+      var cum = monthProgress(gt.key, key, asc);
+      var mine = goals.filter(function(g){ return g.type === gt.key && g.month === key; })
+        .sort(function(a, b){ return a.target - b.target; });
+      var open = mine.filter(function(g){ return !g.done; })[0];
+      mine.forEach(function(g){ html += goalCardHtml(g, cum); });
+      if(open){
+        html += '<div class="wk-tip-note">Другую цель можно будет поставить, когда эта будет достигнута.</div>';
+        return;
+      }
+      var opts = gt.opts.filter(function(o){ return o > cum; });
+      if(goalSel[gt.key] && opts.indexOf(goalSel[gt.key]) === -1) goalSel[gt.key] = 0;
+      if(!opts.length){
+        html += '<div class="wk-tip-note">Все цели этого вида на ' + esc(MONTHS[now.getMonth()].toLowerCase()) + ' уже превзойдены.</div>';
+        return;
+      }
+      html += '<div class="wk-tip-note" style="margin:0 0 6px;">' + (mine.length ? "Можно поставить следующую:" : "Выберите цель:") + '</div><div>';
+      opts.forEach(function(o){
+        html += '<button type="button" class="wk-seg-btn' + (goalSel[gt.key] === o ? " on" : "") + '" data-gsel="' + gt.key + ':' + o + '">' +
+          esc(monthTitle(key) + " · " + targetLabel(gt.key, o)) + '</button>';
+      });
+      html += '</div>';
+      var sel = goalSel[gt.key];
+      html += '<button type="button" class="wk-goal-set" data-gset="' + gt.key + '"' + (sel ? "" : " disabled") + '>' +
+        (sel ? esc("Поставить цель: " + targetLabel(gt.key, sel)) : "Поставить цель") + '</button>';
+    });
+    // прошлые месяцы: достигнутые и нет
+    var past = goals.filter(function(g){ return g.month !== key; })
+      .sort(function(a, b){ return a.month < b.month ? 1 : (a.month > b.month ? -1 : (a.type < b.type ? -1 : b.target - a.target)); });
+    if(past.length){
+      html += '<div class="wk-rec-cat">Прошлые цели</div><div class="wk-card" style="padding:4px 12px;">';
+      past.slice(0, 12).forEach(function(g){
+        var res = g.done ? "✓ достигнута" : esc(progText(g.type, monthProgress(g.type, g.month, asc), g.target));
+        html += '<div class="wk-rec"><span class="wk-rec-name">' + esc(goalLabel(g)) + '<span class="wk-sub">' + esc(goalType(g.type).title) +
+          '</span></span><span class="wk-rec-val' + (g.done ? "" : " wait") + '">' + res + '</span></div>';
+      });
+      html += '</div>';
+    }
+    return html;
+  }
+
+  // ---------- награды ----------
+  // Награда = запись личного state `wkaward:<id>` = {c:{ts (когда заслужена), at (когда записана)}, t}.
+  // Условия считаются по записям тренировок и целям (`AWARD_DEFS`); раз полученная награда остаётся, даже если запись потом удалили.
+  var AWARD_DEFS = null;
+  function awardsMap(){
+    var map = {};
+    if(!STORE || typeof STORE.listAwards !== "function") return map;
+    var list = [];
+    try{ list = STORE.listAwards() || []; }catch(e){ list = []; }
+    list.forEach(function(a){ if(a && a.id) map[a.id] = a; });
+    return map;
+  }
+
+  function awardCtx(){
+    var asc = recsAsc();
+    var runs = asc.filter(function(r){ return num(r.m) > 0; });
+    var timed = runs.filter(function(r){ return !r.imp && num(r.totalMs) > 0; });
+    var x = { asc: asc, runs: runs, timed: timed, goals: goalsList(), totalM: 0, maxM: 0, maxMs: 0, maxUp: 0, totalUp: 0,
+      maxStreak: 0, streakReach: {}, bestRace: {}, early: [], owl: [] };
+    var dayLast = {};
+    runs.forEach(function(r){
+      x.totalM += num(r.m);
+      if(num(r.m) > x.maxM) x.maxM = num(r.m);
+      var k = dayKey(new Date(r.start));
+      if(!dayLast[k] || r.start > dayLast[k]) dayLast[k] = r.start;
+      var h = new Date(r.start).getHours();
+      if(h >= 4 && h < 7) x.early.push(r);
+      if(h >= 21 || h < 4) x.owl.push(r);
+    });
+    asc.forEach(function(r){
+      if(num(r.totalMs) > x.maxMs) x.maxMs = num(r.totalMs);
+      if(num(r.up) > x.maxUp) x.maxUp = num(r.up);
+      x.totalUp += num(r.up);
+    });
+    timed.forEach(function(r){
+      REC_DISTS.forEach(function(d){
+        var m = num(r.m);
+        if(m < d.m * REC_DIST_MIN || m > d.m * REC_DIST_MAX) return;
+        var ms = num(r.totalMs) * d.m / m;
+        var cur = x.bestRace[d.key];
+        if(!cur || ms < cur) x.bestRace[d.key] = ms;
+      });
+    });
+    var keys = Object.keys(dayLast).sort();
+    var prevIdx = null, len = 0;
+    keys.forEach(function(k){
+      var p = k.split("-");
+      var idx = Math.round(Date.UTC(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10)) / 86400000);
+      len = (prevIdx !== null && idx === prevIdx + 1) ? len + 1 : 1;
+      prevIdx = idx;
+      if(len > x.maxStreak) x.maxStreak = len;
+      if(!x.streakReach[len]) x.streakReach[len] = dayLast[k];
+    });
+    return x;
+  }
+
+  function cumReach(list, fn, target){
+    var s = 0;
+    for(var i = 0; i < list.length; i++){
+      s += fn(list[i]);
+      if(s >= target) return endOf(list[i]);
+    }
+    return 0;
+  }
+  function firstWhere(list, pred){
+    for(var i = 0; i < list.length; i++){ if(pred(list[i])) return endOf(list[i]); }
+    return 0;
+  }
+  function goalDoneTs(ctx, type, target){
+    var best = 0;
+    ctx.goals.forEach(function(g){
+      if(g.done && g.type === type && g.target === target && (!best || g.done < best)) best = g.done;
+    });
+    return best;
+  }
+
+  function buildAwardDefs(){
+    var out = [];
+    function add(cat, id, title, text, calc, prog){ out.push({ cat: cat, id: id, title: title, text: text, calc: calc, prog: prog || null, noNotice: false }); }
+    var C = AWARD_CATS;
+    var distName = { "5": "5 км", "10": "10 км", "21": "21,1 км", "42": "42,2 км" };
+
+    add(C[0], "first", "Первая тренировка", "Записана первая тренировка с пройденными километрами.",
+      function(x){ return x.runs.length ? endOf(x.runs[0]) : 0; });
+    REC_DISTS.forEach(function(d){
+      var title = d.key === "21" ? "Первый полумарафон" : (d.key === "42" ? "Первый марафон" : "Первые " + d.label);
+      var need = d.m * REC_DIST_MIN;
+      add(C[0], "d" + d.key, title, "Одна тренировка длиной от " + distName[d.key] + (d.key === "21" ? " (полумарафон)." : (d.key === "42" ? " (марафон)." : ".")),
+        function(x){ return firstWhere(x.runs, function(r){ return num(r.m) >= need; }); },
+        function(x){ return x.maxM > 0 ? "самая длинная: " + fmtKm(x.maxM) : ""; });
+    });
+
+    [[100, "Сто километров"], [500, "Пятьсот километров"], [1000, "Тысяча километров"], [2000, "Две тысячи километров"]].forEach(function(p){
+      add(C[1], "c" + p[0], p[1], "Суммарно пройдено " + p[0] + " км.",
+        function(x){ return cumReach(x.runs, function(r){ return num(r.m) / 1000; }, p[0]); },
+        function(x){ return fmtKm(x.totalM) + " из " + p[0] + " км"; });
+    });
+
+    [10, 50, 100, 250].forEach(function(n){
+      add(C[2], "n" + n, n + " " + plural(n, "тренировка", "тренировки", "тренировок"), "Записано " + n + " " + plural(n, "тренировка", "тренировки", "тренировок") + " с километрами.",
+        function(x){ return x.runs.length >= n ? endOf(x.runs[n - 1]) : 0; },
+        function(x){ return x.runs.length + " из " + n; });
+    });
+    [[3, "3 дня подряд"], [7, "Неделя подряд"], [14, "Две недели подряд"], [30, "Месяц подряд"]].forEach(function(p){
+      add(C[2], "s" + p[0], p[1], "Тренировки " + p[0] + " " + plural(p[0], "день", "дня", "дней") + " подряд.",
+        function(x){ return x.streakReach[p[0]] || 0; },
+        function(x){ return "лучшая серия: " + x.maxStreak + " из " + p[0]; });
+    });
+
+    [[60, "Час в движении"], [120, "Два часа в движении"]].forEach(function(p){
+      add(C[3], "t" + p[0], p[1], "Одна тренировка длиной от " + (p[0] / 60) + " " + plural(p[0] / 60, "часа", "часов", "часов") + ".",
+        function(x){ return firstWhere(x.timed, function(r){ return num(r.totalMs) >= p[0] * 60000; }); },
+        function(x){ return x.maxMs > 0 ? "самая долгая: " + fmtTotal(x.maxMs) : ""; });
+    });
+    [[100, "Первая сотня метров вверх"], [500, "Горный бегун"]].forEach(function(p){
+      add(C[3], "u" + p[0], p[1], "За одну тренировку набрано от " + p[0] + " м высоты.",
+        function(x){ return firstWhere(x.asc, function(r){ return num(r.up) >= p[0]; }); },
+        function(x){ return x.maxUp > 0 ? "наибольший набор: " + Math.round(x.maxUp) + " м" : ""; });
+    });
+    [[1000, "Тысяча метров вверх"], [8849, "Эверест"]].forEach(function(p){
+      add(C[3], "uc" + p[0], p[1], "Суммарный набор высоты " + p[0] + " м" + (p[0] === 8849 ? " — как высота Эвереста." : "."),
+        function(x){ return cumReach(x.asc, function(r){ return num(r.up); }, p[0]); },
+        function(x){ return Math.round(x.totalUp) + " из " + p[0] + " м"; });
+    });
+
+    [["5", 30, "5 км быстрее 30 минут"], ["5", 25, "5 км быстрее 25 минут"], ["10", 60, "10 км быстрее часа"], ["10", 50, "10 км быстрее 50 минут"],
+     ["21", 120, "Полумарафон быстрее 2 часов"], ["42", 240, "Марафон быстрее 4 часов"]].forEach(function(p){
+      var d = null;
+      REC_DISTS.forEach(function(q){ if(q.key === p[0]) d = q; });
+      var limit = p[1] * 60000;
+      add(C[4], "p" + p[0] + "_" + p[1], p[2], "Время на дистанции меньше " + p[1] + " мин (по целой тренировке длиной " + fmtKm(d.m * REC_DIST_MIN).replace(" км", "") + "–" + fmtKm(d.m * REC_DIST_MAX).replace(" км", "") + " км).",
+        function(x){
+          return firstWhere(x.timed, function(r){
+            var m = num(r.m);
+            if(m < d.m * REC_DIST_MIN || m > d.m * REC_DIST_MAX) return false;
+            return num(r.totalMs) * d.m / m < limit;
+          });
+        },
+        function(x){ return x.bestRace[d.key] ? "лучшее время: " + fmtClock(x.bestRace[d.key]) : ""; });
+    });
+
+    add(C[5], "early", "Ранняя пташка", "5 тренировок, начатых между 4:00 и 7:00.",
+      function(x){ return x.early.length >= 5 ? endOf(x.early[4]) : 0; }, function(x){ return x.early.length + " из 5"; });
+    add(C[5], "owl", "Сова", "5 тренировок, начатых между 21:00 и 4:00.",
+      function(x){ return x.owl.length >= 5 ? endOf(x.owl[4]) : 0; }, function(x){ return x.owl.length + " из 5"; });
+    add(C[5], "year", "Год в движении", "Прошёл год с первой записанной тренировки.",
+      function(x){
+        if(!x.runs.length) return 0;
+        var ts = x.runs[0].start + 365 * 86400000;
+        return ts <= Date.now() ? ts : 0;
+      },
+      function(x){
+        if(!x.runs.length) return "";
+        return "прошло " + Math.max(0, Math.floor((Date.now() - x.runs[0].start) / 86400000)) + " из 365 дн.";
+      });
+
+    add(C[6], "g1", "Первая цель", "Достигнута первая цель месяца.",
+      function(x){
+        var best = 0;
+        x.goals.forEach(function(g){ if(g.done && (!best || g.done < best)) best = g.done; });
+        return best;
+      });
+    add(C[6], "g3", "Тройная цель", "В одном месяце достигнуты цели и по километражу, и по набору высоты, и по времени.",
+      function(x){
+        var byMonth = {}, best = 0;
+        x.goals.forEach(function(g){
+          if(!g.done) return;
+          var m = byMonth[g.month] = byMonth[g.month] || {};
+          if(!m[g.type] || g.done < m[g.type]) m[g.type] = g.done;
+        });
+        Object.keys(byMonth).forEach(function(k){
+          var m = byMonth[k];
+          if(!m.km || !m.up || !m.time) return;
+          var ts = Math.max(m.km, m.up, m.time);
+          if(!best || ts < best) best = ts;
+        });
+        return best;
+      });
+    GOAL_TYPES.forEach(function(gt){
+      gt.opts.forEach(function(o){
+        add(C[6], "gt_" + gt.key + "_" + o, goalAwardTitle(gt.key, o), gt.awardText + " " + targetLabel(gt.key, o) + ".",
+          function(x){ return goalDoneTs(x, gt.key, o); });
+        out[out.length - 1].noNotice = true; // о цели сообщает карточка самой цели
+      });
+    });
+    return out;
+  }
+  function awardDefs(){ if(!AWARD_DEFS) AWARD_DEFS = buildAwardDefs(); return AWARD_DEFS; }
+
+  // пересчёт наград: новые записываются одной пачкой; сообщение — только о свежих наградах (заслуженных не раньше NOTICE_RECENT_MS назад),
+  // чтобы при первом пересчёте по старой истории не сыпались сообщения о давних достижениях
+  function evalAwards(){
+    var stored = awardsMap(), ctx = awardCtx(), now = Date.now(), items = [];
+    awardDefs().forEach(function(def){
+      if(stored[def.id]) return;
+      var ts = def.calc(ctx);
+      if(!(ts > 0)) return;
+      items.push({ id: def.id, c: { ts: ts, at: now } });
+      if(def.noNotice || ts < now - NOTICE_RECENT_MS) return;
+      pushNotice({ k: "a:" + def.id, kind: "award", tab: "awards", text: "Новая награда: «" + def.title + "». " + def.text });
+    });
+    if(items.length){ try{ STORE.putAwardMany(items); }catch(e){} }
+  }
+
+  function evalProgress(){
+    if(!STORE || typeof STORE.putGoal !== "function" || typeof STORE.putAwardMany !== "function") return;
+    try{ evalGoals(); }catch(e){}
+    try{ evalAwards(); }catch(e){}
+  }
+
+  function awardsBodyHtml(){
+    var stored = awardsMap(), ctx = awardCtx(), defs = awardDefs();
+    var got = defs.filter(function(d){ return !!stored[d.id]; }).length;
+    var html = '<div class="wk-tip-note" style="margin:0 0 2px;">Получено наград: ' + got + ' из ' + defs.length + '.</div>';
+    AWARD_CATS.forEach(function(cat){
+      var part = defs.filter(function(d){ return d.cat === cat; });
+      if(!part.length) return;
+      html += '<div class="wk-rec-cat">' + esc(cat) + '</div><div class="wk-card" style="padding:4px 12px;">';
+      part.forEach(function(d){
+        var st = stored[d.id];
+        var meta = st ? "Получена " + fmtDate(st.ts) : (d.prog ? d.prog(ctx) : "");
+        html += '<div class="wk-rec wk-award' + (st ? " on" : "") + '"><span class="wk-medal">' + MEDAL_ICON_SVG + '</span>' +
+          '<span class="wk-rec-name">' + esc(d.title) + '<span class="wk-sub">' + esc(d.text) + '</span>' +
+          (meta ? '<span class="wk-sub wk-award-meta">' + esc(meta) + '</span>' : "") + '</span></div>';
+      });
+      html += '</div>';
+    });
+    return html;
+  }
+
+  // ---------- сообщения о целях и наградах (вместо совета дня) ----------
+  // Событие (награда / 50 % / 75 % / цель достигнута) записывается на устройстве и показывается в области совета дня весь день события;
+  // на следующие дни (до NOTICE_UNSEEN_DAYS) остаётся, только пока человек не открыл экран кубка. Открыл — на следующий день уже совет дня.
+  function dayIndex(key){
+    var p = String(key).split("-");
+    return Math.round(Date.UTC(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10)) / 86400000);
+  }
+  function readNotices(){
+    var v = readJson(NOTICE_KEY, []);
+    return Array.isArray(v) ? v : [];
+  }
+  function pushNotice(it){
+    var list = readNotices(), today = dayKey();
+    if(list.some(function(x){ return x && x.k === it.k; })) return;
+    it.day = today; it.ts = Date.now(); it.seen = 0;
+    list.push(it);
+    var ti = dayIndex(today);
+    list = list.filter(function(x){ return x && x.day && ti - dayIndex(x.day) <= NOTICE_UNSEEN_DAYS + 1; });
+    writeJson(NOTICE_KEY, list);
+    lastShape = "";
+  }
+  function visibleNotices(){
+    var today = dayKey(), ti = dayIndex(today);
+    return readNotices().filter(function(x){
+      if(!x || !x.day) return false;
+      var age = ti - dayIndex(x.day);
+      return age === 0 || (!x.seen && age > 0 && age <= NOTICE_UNSEEN_DAYS);
+    }).sort(function(a, b){ return num(b.ts) - num(a.ts); });
+  }
+  function markNoticesSeen(){
+    var list = readNotices(), ch = false;
+    list.forEach(function(x){ if(x && !x.seen){ x.seen = 1; ch = true; } });
+    if(ch) writeJson(NOTICE_KEY, list);
+  }
+  function noticeToShow(){
+    var vis = visibleNotices();
+    if(!vis.length) return null;
+    var shown = vis.slice(0, 3);
+    var hasAward = shown.some(function(x){ return x.kind === "award" || String(x.k).indexOf("gd:") === 0; });
+    return {
+      sig: shown.map(function(x){ return x.k; }).join(","),
+      head: hasAward ? "Награда" : "Цель месячного плана",
+      lines: shown.map(function(x){ return x.text; }),
+      more: vis.length - shown.length,
+      tab: shown[0].tab === "awards" ? "awards" : "goals"
+    };
+  }
+  function noticeCardHtml(n){
+    return '<div class="wk-card wk-tip wk-notice" id="wkNoticeCard" data-tab="' + esc(n.tab) + '"><div class="wk-live-head"><span class="wk-tip-ico">' + CUP_ICON_SVG + '</span><span>' + esc(n.head) + '</span></div>' +
+      n.lines.map(function(l){ return '<div class="wk-tip-text">' + esc(l) + '</div>'; }).join("") +
+      '<div class="wk-note wk-tip-meta">' + (n.more > 0 ? "и ещё " + n.more + " · " : "") + 'Нажмите, чтобы открыть</div></div>';
+  }
+
+  // ---------- сам экран ----------
+  function renderTrophyScreen(tab){
+    var c = container();
+    if(!c) return;
+    infoScreen = true;
+    ensureStyle();
+    if(trophyIndex(tab) === -1) tab = loadTrophyTab();
+    trophyTab = tab;
+    try{ localStorage.setItem(TROPHY_TAB_KEY, tab); }catch(e){}
+    var keep = document.getElementById("wkTrophy") ? { c: c.scrollTop, b: document.getElementById("wkTrophy").scrollTop } : null;
+    evalProgress();
+    markNoticesSeen();
+    var body = tab === "goals" ? goalsBodyHtml() : (tab === "awards" ? awardsBodyHtml() : recordsBodyHtml());
+    c.innerHTML = swHtml(tab) + '<div class="task-info-body" id="wkTrophy">' + body + '</div><div class="mdeditor-fab-row">' +
       tipsHomeBtnHtml("wkRecordsHomeBtn", "Назад к тренировкам") + '</div>';
-    c.innerHTML = html;
+    if(keep){
+      c.scrollTop = keep.c;
+      var tb = document.getElementById("wkTrophy");
+      if(tb) tb.scrollTop = keep.b;
+    }
+    Array.prototype.forEach.call(c.querySelectorAll(".wk-sw-item"), function(it){
+      it.addEventListener("click", function(){
+        var k = it.getAttribute("data-wktab");
+        if(k !== trophyTab) renderTrophyScreen(k);
+      });
+    });
+    Array.prototype.forEach.call(c.querySelectorAll("[data-gsel]"), function(b){
+      b.addEventListener("click", function(){
+        var p = String(b.getAttribute("data-gsel")).split(":");
+        goalSel[p[0]] = parseInt(p[1], 10) || 0;
+        renderTrophyScreen("goals");
+      });
+    });
+    Array.prototype.forEach.call(c.querySelectorAll("[data-gset]"), function(b){
+      b.addEventListener("click", function(){
+        var type = b.getAttribute("data-gset");
+        if(goalSel[type]) setGoal(type, goalSel[type]);
+        goalSel[type] = 0;
+        renderTrophyScreen("goals");
+      });
+    });
     var hb = document.getElementById("wkRecordsHomeBtn");
     if(hb) hb.addEventListener("click", function(){
       // «Действие ВПЕРЁД»: шаг «назад» вернёт на этот экран — тот же приём, что у справки «i»
-      if(window.AppNav) window.AppNav.push(function(){ renderRecordsScreen(); });
+      if(window.AppNav) window.AppNav.push(function(){ renderTrophyScreen(trophyTab); });
       render();
     });
+    bindTrophySwipe(c);
+  }
+
+  // свайп влево/вправо между частями; слушатели навешиваются один раз на контейнер и работают, только пока на экране есть #wkTrophy
+  var trophySwipeEl = null;
+  function bindTrophySwipe(c){
+    if(trophySwipeEl === c) return;
+    trophySwipeEl = c;
+    var sx = 0, sy = 0, st = 0, armed = false;
+    c.addEventListener("touchstart", function(e){
+      armed = false;
+      if(!document.getElementById("wkTrophy") || !e.touches || e.touches.length !== 1) return;
+      var t = e.touches[0];
+      var w = window.innerWidth || document.documentElement.clientWidth || 0;
+      if(t.clientX < 24 || (w && t.clientX > w - 24)) return; // у краёв — системный жест «назад»
+      sx = t.clientX; sy = t.clientY; st = Date.now(); armed = true;
+    }, { passive: true });
+    c.addEventListener("touchend", function(e){
+      if(!armed) return;
+      armed = false;
+      if(!document.getElementById("wkTrophy")) return;
+      var t = e.changedTouches && e.changedTouches[0];
+      if(!t) return;
+      var dx = t.clientX - sx, dy = t.clientY - sy;
+      if(Date.now() - st > 700) return;
+      if(Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 2) return;
+      var n = trophyIndex(trophyTab) + (dx < 0 ? 1 : -1);
+      if(n < 0 || n >= TROPHY_TABS.length) return;
+      renderTrophyScreen(TROPHY_TABS[n].key);
+    }, { passive: true });
+    c.addEventListener("touchcancel", function(){ armed = false; }, { passive: true });
   }
 
   // ---------- советы ----------
@@ -1401,6 +2001,7 @@
       ids.push(r.id);
     });
     if(ids.length){ try{ n.workoutAckFinished(JSON.stringify(ids)); }catch(e){} }
+    evalProgress();
     refreshIfOpen();
     refreshTabMark();
   }
@@ -1451,6 +2052,25 @@
       return tipsList().map(function(x){
         return { category: x.cat || "Другое", text: x.text, rpe: x.rpe || "", distance: x.dist || "" };
       });
+    },
+    // для экспорта (раздел `workouts` в data.json): цели месяцев (прогресс пересчитывается по записям)
+    exportGoals: function(){
+      var asc = recsAsc();
+      return goalsList().sort(function(a, b){ return a.month < b.month ? -1 : (a.month > b.month ? 1 : (a.type < b.type ? -1 : a.target - b.target)); }).map(function(g){
+        var cum = monthProgress(g.type, g.month, asc);
+        var o = { month: g.month, kind: goalType(g.type).title, target: g.target + " " + goalType(g.type).unit,
+          progress: (g.type === "km" ? Math.round(cum * 10) / 10 : (g.type === "up" ? Math.round(cum) : Math.round(cum * 10) / 10)) + " " + goalType(g.type).unit,
+          achieved: !!g.done };
+        if(g.done) o.achievedDate = localDate(g.done);
+        return o;
+      });
+    },
+    // для экспорта: полученные награды (без служебных записей), по дате
+    exportAwards: function(){
+      var stored = awardsMap(), out = [];
+      awardDefs().forEach(function(d){ if(stored[d.id]) out.push({ title: d.title, description: d.text, date: localDate(stored[d.id].ts), ts: stored[d.id].ts }); });
+      out.sort(function(a, b){ return a.ts - b.ts; });
+      return out.map(function(o){ return { title: o.title, description: o.description, date: o.date }; });
     },
     refreshIfOpen: refreshIfOpen,
     refreshTabMark: refreshTabMark,

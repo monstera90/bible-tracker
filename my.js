@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 133.0 (04.11)
+   Версия: 134.0 (04.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -8682,13 +8682,19 @@
     workoutList.forEach(function(w){ workoutMeters += w.meters || 0; });
     var workoutTips = [];
     try{ if(window.WorkoutsTab && window.WorkoutsTab.exportTips) workoutTips = window.WorkoutsTab.exportTips(); }catch(e){ workoutTips = []; }
+    var workoutGoals = [], workoutAwards = [];
+    try{ if(window.WorkoutsTab && window.WorkoutsTab.exportGoals) workoutGoals = window.WorkoutsTab.exportGoals(); }catch(e){ workoutGoals = []; }
+    try{ if(window.WorkoutsTab && window.WorkoutsTab.exportAwards) workoutAwards = window.WorkoutsTab.exportAwards(); }catch(e){ workoutAwards = []; }
     data.workouts = {
       note: "Тренировки (вкладка «Тренировки»): date — дата, km — километры, minutes/totalSeconds — время тренировки, rpe — оценка тяжести 1…10, points — баллы нагрузки (минуты × rpe). Записи с source «импорт» загружены из файла: у них только дата и километры.",
       totalKm: Math.round(workoutMeters / 10) / 100,
       count: workoutList.length,
       list: workoutList,
       tipsNote: "Советы вкладки «Тренировки»: category — категория, text — текст, rpe — для какой тяжести последней тренировки (low 1–3, mid 4–6, high 7–10; пусто — любой), distance — для какой дистанции (short, long; пусто — любой).",
-      tips: workoutTips
+      tips: workoutTips,
+      goalsNote: "Цели месяцев вкладки «Тренировки» (кубок → Цели): month — месяц, kind — вид (километраж, набор высоты, время тренировок), target — цель, progress — сколько набрано за месяц, achieved — достигнута ли. Награды (кубок → Награды): title — название, date — когда получена.",
+      goals: workoutGoals,
+      awards: workoutAwards
     };
 
     // rawState — точный технический снимок всех данных приложения (то же, что хранится в
@@ -8710,6 +8716,8 @@
         "goalcompletion:*": "отметка о выполнении задачи внутри цели",
         "wk:*": "тренировка: c — {start, end, m (метры), totalMs, rpe, how, …}",
         "wktip:*": "совет вкладки «Тренировки»: c — {text, cat, rpe, dist, ts}",
+        "wkgoal:*": "цель месяца вкладки «Тренировки»: c — {type (km|up|time), month, target, setAt, p50, p75, done}",
+        "wkaward:*": "награда вкладки «Тренировки»: c — {ts (когда заслужена), at}",
         "task:*": "задача (вне целей)",
         "taskcompletion:*": "отметка о выполнении задачи",
         "comment:*": "запись из списка кастомных комментариев",
@@ -10527,6 +10535,22 @@
   var WORKOUT_KEY_PREFIX = "wk:";
   // Советы вкладки: "wktip:<id>" = {c: {text, cat, rpe, dist, ts}, t}; тумбстоун — {c:null, t}. Те же правила синхронизации и экспорта.
   var WORKOUT_TIP_PREFIX = "wktip:";
+  // Цели месяца и награды вкладки: "wkgoal:<id>" = {c: {type, month, target, setAt[, p50, p75, done]}, t}, "wkaward:<id>" = {c: {ts, at}, t};
+  // тумбстоун — {c:null, t}. Те же правила синхронизации и экспорта.
+  var WORKOUT_GOAL_PREFIX = "wkgoal:";
+  var WORKOUT_AWARD_PREFIX = "wkaward:";
+  function workoutsListPrefix(prefix){
+    var out = [];
+    Object.keys(state).forEach(function(k){
+      if(k.indexOf(prefix) !== 0) return;
+      var r = state[k];
+      if(!r || !r.c || typeof r.c !== "object") return;
+      var o = JSON.parse(JSON.stringify(r.c));
+      o.id = k.slice(prefix.length);
+      out.push(o);
+    });
+    return out;
+  }
   var workoutsStoreReady = false;
   var workoutsStore = {
     list: function(){
@@ -10581,6 +10605,21 @@
       var key = WORKOUT_TIP_PREFIX + id, prev = state[key];
       if(!prev || !prev.c) return;
       state[key] = {c: null, t: calNextT(prev)};
+      saveLocalStateNow(); scheduleCloudPush();
+    },
+    listGoals: function(){ return workoutsListPrefix(WORKOUT_GOAL_PREFIX); },
+    putGoal: function(id, data){
+      var key = WORKOUT_GOAL_PREFIX + id;
+      state[key] = {c: data, t: calNextT(state[key])};
+      saveLocalStateNow(); scheduleCloudPush();
+    },
+    listAwards: function(){ return workoutsListPrefix(WORKOUT_AWARD_PREFIX); },
+    // награды пишутся пачкой (первый пересчёт по старой истории): одно сохранение state; items = [{id, c}]
+    putAwardMany: function(items){
+      items.forEach(function(it){
+        var key = WORKOUT_AWARD_PREFIX + it.id;
+        state[key] = {c: it.c, t: calNextT(state[key])};
+      });
       saveLocalStateNow(); scheduleCloudPush();
     }
   };
