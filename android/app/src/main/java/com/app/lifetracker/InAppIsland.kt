@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 9.0 (04.11)
 // Версия: 8.8 (04.11)
 // Версия: 8.6 (22.10) — свёрнутая плашка возвращена к виду 8.0–8.2 (13sp название, 12sp время, letterSpacing 0.08, отступы 0.0087/0.0272): она точно совпадала с настоящим островом, правки 8.3 и 8.5 её испортили. Раскрытая карточка (8.3–8.5) не тронута. Откат: InAppIsland.kt 8.5.
 // Версия: 8.5 (22.10) — по замеру четырёх скриншотов (ширина 1159): название на плашке было мельче настоящего на ~14 % → 0.0350 × ширина экрана; время на плашке ниже на ~10 % и уже на ~19 % → 13.2sp, letterSpacing 0.13, tnum; время в карточке было выше на 7 % и уже на 12 % (вытянутые цифры) → размер 0.0450, letterSpacing 0.06, tnum. Откат: InAppIsland.kt 8.4.
@@ -127,6 +128,8 @@ class InAppIsland(private val activity: Activity) {
     private var shownCardName: String? = null
     private var shownPauseKey: String? = null
     private var scrW = 0
+    private var pomoMode = false // плашка показывает помодоро (точка фазы и время), а не таймер карточки
+    private var shownPomoKey: String? = null
 
     private fun dp(v: Float) = (v * density).roundToInt()
 
@@ -373,6 +376,10 @@ class InAppIsland(private val activity: Activity) {
     }
 
     private fun toggle() {
+        if (pomoMode) { // помодоро: плашка не раскрывается, нажатие возвращает на вкладку «Помодоро»
+            (activity as? MainActivity)?.openPomodoroTab()
+            return
+        }
         // состояние «раскрыта», хотя карточка давно свёрнута (прервалась анимация/пересборка окна) — считаем свёрнутой
         if (expanded && !animating && progress <= 0.001f) expanded = false
         if (expanded) collapse() else expand()
@@ -498,7 +505,13 @@ class InAppIsland(private val activity: Activity) {
 
     private fun refresh() {
         val r = cutout
-        val info = CardTimers.primaryInfo(activity.applicationContext)
+        val pomo = PomodoroTimer.islandInfo(activity.applicationContext)
+        if (pomo != null && r != null) {
+            refreshPomodoro(r, pomo)
+            return
+        }
+        if (pomoMode) leavePomodoro()
+        val info = if (pomo != null) null else CardTimers.primaryInfo(activity.applicationContext)
         if (info == null) autoShownFor = null
         if (r == null || info == null) {
             hide()
@@ -545,6 +558,61 @@ class InAppIsland(private val activity: Activity) {
             }
         }
         layer.visibility = View.VISIBLE
+    }
+
+    /**
+     * Плашка помодоро: слева кольцо-точка цвета фазы, справа остаток времени — и больше ничего (всё остальное на вкладке
+     * «Помодоро»). В последнюю минуту и на «Готово» цвет пульсирует, в паузе — приглушён и цифры не идут, после перерыва
+     * справа «+М:СС» — сколько уже пауза. Тап возвращает на вкладку (см. [toggle]); пока вкладка на экране, плашки нет.
+     */
+    private fun refreshPomodoro(r: Rect, p: PomodoroTimer.Snapshot) {
+        layoutFor(r)
+        attach()
+        if (!attached) {
+            hide()
+            return
+        }
+        askOverlayOnce()
+        if (!pomoMode) {
+            pomoMode = true
+            if (expanded || animating) { // таймер карточки был раскрыт: сворачиваем мгновенно
+                stopAnim()
+                expanded = false
+                applyProgress(0f)
+                card.visibility = View.GONE
+                setWindowBig(false)
+            }
+            pillName.visibility = View.GONE
+            shownPomoKey = null
+            shownClock = null
+        }
+        currentId = null
+        val now = System.currentTimeMillis()
+        val color = PomodoroTimer.colorFor(p, now)
+        val frac = PomodoroTimer.fractionLeft(p)
+        val glyph = if (p.flash) 1 else if (!p.running && p.phase != PomodoroTimer.PH_WAIT) 2 else 0
+        // менять View только когда значение изменилось (лишняя раскладка окна — лишнее мигание)
+        val key = "" + color + "/" + (frac * 60f).toInt() + "/" + glyph
+        if (key != shownPomoKey) {
+            shownPomoKey = key
+            pillIcon.setImageBitmap(XiaomiIsland.pomoRingBitmap(color, frac, 96, glyph))
+        }
+        val text = PomodoroTimer.pillText(p)
+        if (text != shownClock) {
+            shownClock = text
+            pillTime.text = text
+        }
+        layer.visibility = View.VISIBLE
+    }
+
+    /** Помодоро кончилось (или показывается таймер карточки): плашка снова обычная — со значком, названием и временем. */
+    private fun leavePomodoro() {
+        pomoMode = false
+        pillName.visibility = View.VISIBLE
+        shownPomoKey = null
+        shownStage = -1
+        shownClock = null
+        shownTitle = null
     }
 
     /** Размеры и места плашки и карточки считаются от выреза; пересчёт — только когда вырез поменялся. */

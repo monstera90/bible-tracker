@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 19.0 (04.11)
 // Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
@@ -41,6 +42,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 25: вкладка «Помодоро» (pomodoroStart / pomodoroPause / pomodoroPlus5 / pomodoroSkip / pomodoroStop / pomodoroState / pomodoroUi).
          * 23: `claudeHome()` — «домик» вкладки Claude (первый экран).
          * 22: вкладки-сайты ряда «Интернет» (utabShow / utabHide / utabGo / utabReload / utabRemove / utabGetState / utabGetIcon).
          * 21: способ усиления громкости (volumeBoostSetEngine: 0 — LoudnessEnhancer, 1 — DynamicsProcessing).
@@ -53,7 +55,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 24
+        const val BRIDGE_VERSION = 25
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -889,6 +891,72 @@ class NativeBridge(private val activity: MainActivity) {
         } catch (e: IllegalArgumentException) {
             null
         }
+    }
+
+    // ---------- вкладка «Помодоро» (PomodoroTimer / PomodoroService; set2s_16) ----------
+
+    /**
+     * Начать сессию: [task] — название задачи, длительности в минутах, [cycles] — рабочих циклов до длинного перерыва.
+     * Повторный вызов начинает сессию заново. Возвращает состояние, как [pomodoroState].
+     */
+    @JavascriptInterface
+    fun pomodoroStart(task: String?, workMin: Int, shortMin: Int, longMin: Int, cycles: Int): String {
+        if (!activity.pageTrusted) return "{}"
+        val ctx = activity.applicationContext
+        PomodoroTimer.start(ctx, task, workMin, shortMin, longMin, cycles)
+        return PomodoroTimer.stateJson(ctx)
+    }
+
+    /** Пауза / продолжить (в ожидании после перерыва ничего не делает). */
+    @JavascriptInterface
+    fun pomodoroPause(): String {
+        if (!activity.pageTrusted) return "{}"
+        val ctx = activity.applicationContext
+        PomodoroTimer.togglePause(ctx)
+        return PomodoroTimer.stateJson(ctx)
+    }
+
+    /** «+5 минут»: продлевает фазу; в первую минуту перерыва возвращает к работе ещё на 5 минут. */
+    @JavascriptInterface
+    fun pomodoroPlus5(): String {
+        if (!activity.pageTrusted) return "{}"
+        val ctx = activity.applicationContext
+        PomodoroTimer.plus5(ctx)
+        return PomodoroTimer.stateJson(ctx)
+    }
+
+    /** Пропустить перерыв / начать работу после перерыва (во время работы ничего не делает). */
+    @JavascriptInterface
+    fun pomodoroSkip(): String {
+        if (!activity.pageTrusted) return "{}"
+        val ctx = activity.applicationContext
+        PomodoroTimer.skip(ctx)
+        return PomodoroTimer.stateJson(ctx)
+    }
+
+    @JavascriptInterface
+    fun pomodoroStop(): String {
+        if (!activity.pageTrusted) return "{}"
+        val ctx = activity.applicationContext
+        PomodoroTimer.stop(ctx)
+        return PomodoroTimer.stateJson(ctx)
+    }
+
+    /**
+     * JSON: {"active","workMin","shortMin","longMin","cycles","now"} и, пока сессия идёт, ещё {"phase":"work|short|long|wait",
+     * "running","endAt","leftMs","totalMs","waitSince","phaseStart","flashUntil","cycle","task"}. Время — часы телефона (мс).
+     */
+    @JavascriptInterface
+    fun pomodoroState(): String {
+        if (!activity.pageTrusted) return "{}"
+        return PomodoroTimer.stateJson(activity.applicationContext)
+    }
+
+    /** Страница сообщает (раз в секунду), что вкладка «Помодоро» на экране: пока это так, плашка в приложении скрыта. */
+    @JavascriptInterface
+    fun pomodoroUi(open: Boolean) {
+        if (!activity.pageTrusted) return
+        PomodoroTimer.uiOpen = open
     }
 
     // ---------- вкладка «Система»: усиление громкости (VolumeBoost; set2s_15) ----------

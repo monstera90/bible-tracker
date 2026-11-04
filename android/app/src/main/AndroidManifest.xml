@@ -251,6 +251,21 @@
             android:exported="false"
             android:foregroundServiceType="location" />
 
+        <!-- Помодоро: будильник конца фазы. -->
+        <receiver
+            android:name=".PomodoroReceiver"
+            android:exported="false" />
+
+        <!-- Вкладка «Помодоро»: уведомление с кнопками и остров Xiaomi, раз в секунду обновляется, пока идёт сессия. -->
+        <service
+            android:name=".PomodoroService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="pomodoro_island_countdown" />
+        </service>
+
         <!-- Вкладка «Система»: держит усиление громкости, пока оно выше 100 %, и проверяет, что система его не сбросила. -->
         <service
             android:name=".VolumeBoostService"

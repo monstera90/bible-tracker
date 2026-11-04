@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 132.0 (04.11)
+   Версия: 133.0 (04.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1758,10 +1758,10 @@
   };
   function isToolsStackTab(tab){ return TOOLS_STACK_TABS.indexOf(tab) !== -1; }
   // «Активности» (нижний язычок settingsTabActivitiesStackBtn справа от «Календаря»): свой боковой ряд набора 1 (режим activitiesStackMode),
-  // работает как шестерёнка. Вкладки ряда сверху вниз: Тренировки, Музыка, QR-коды. Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
+  // работает как шестерёнка. Вкладки ряда сверху вниз: Тренировки, Музыка, Помодоро, QR-коды. Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
   var ACTIVITIES_STACK_BTN_ID = "settingsTabActivitiesStackBtn";
-  var ACTIVITIES_STACK_TABS = ["workouts", "set2s_11", "set2s_9"];
-  var ACTIVITIES_STACK_BTN_IDS = { workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_9: "settingsTabSet2Btn9" };
+  var ACTIVITIES_STACK_TABS = ["workouts", "set2s_11", "set2s_16", "set2s_9"];
+  var ACTIVITIES_STACK_BTN_IDS = { workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_16: "settingsTabSet2Btn16", set2s_9: "settingsTabSet2Btn9" };
   function isActivitiesStackTab(tab){ return ACTIVITIES_STACK_TABS.indexOf(tab) !== -1; }
   // «Интернет» (нижний язычок settingsTabClaudeStackBtn между шестерёнкой и «Инструментами»): свой боковой ряд набора 1 (режим claudeStackMode),
   // работает как шестерёнка. Пока в ряду одна вкладка — «Claude» (set2s_10, claudetab.js); новая вкладка ряда: кнопка в `#settingsTabs` + ключ в списках ниже.
@@ -1987,7 +1987,8 @@
     set2s_1: "settingsTabSet2Btn1", set2s_2: "settingsTabSet2Btn2", set2s_3: "settingsTabSet2Btn3",
     set2s_4: "settingsTabSet2Btn4", set2s_11: "settingsTabSet2Btn11", set2s_12: "settingsTabSet2Btn12", set2s_13: "settingsTabSet2Btn13", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6", set2s_14: "settingsTabSet2Btn14",
     set2s_7: "settingsTabSet2Btn7", set2s_8: "settingsTabSet2Btn8", set2s_9: "settingsTabSet2Btn9",
-    set2s_10: "settingsTabSet2Btn10"
+    set2s_10: "settingsTabSet2Btn10",
+    set2s_16: "settingsTabSet2Btn16"
   };
   var SET2_EXTRA_TAB_IDS = {
     set2b_1: "settingsTabSet2GearBtn1", set2b_2: "settingsTabSet2GearBtn2", set2b_3: "settingsTabSet2GearBtn3",
@@ -4597,8 +4598,16 @@
     // задачи «Создавать задачу», отсканированные в окне ярлыка без открытия приложения
     try{ ensureItemCards().drainPendingTasks(true); }catch(e){ if(window.Debug) window.Debug.log("Очередь QR-задач: " + (e && e.message ? e.message : e)); }
     try{ if(window.UserTabsMod && window.UserTabsMod.syncSoon) window.UserTabsMod.syncSoon(true); }catch(e){} // вкладки «Интернет» с других устройств
+    try{ if(window.PomodoroTab) window.PomodoroTab.sync(); }catch(e){} // помодоро: состояние и «вкладка на экране» заново
   };
   // APK: кнопка «развернуть» плавающего видео (FloatingVideo.kt) — открыть вкладку-сайт `utab_<id>`; сама вкладка, показавшись, забирает видео обратно.
+  // APK: нажатие на плашку помодоро в приложении (InAppIsland) — открыть вкладку «Помодоро».
+  window.__ltOpenPomodoro = function(){
+    try{
+      openSettingsTabDirect("set2s_16");
+      return true;
+    }catch(e){ return false; }
+  };
   window.__ltOpenUserTab = function(id){
     try{
       var key = "utab_" + String(id || "");
@@ -10934,6 +10943,8 @@
     else if(tab === "set2s_4") renderSettingsTabForgottenNotes();
     // вкладка «Музыка» (set2s_11, между «Забытыми заметками» и «Разделением epub»): библиотека и плеер, см. music.js
     else if(tab === "set2s_11") renderSettingsTabMusic();
+    // вкладка «Помодоро» (set2s_16, ряд «Активности» между «Музыкой» и «QR-кодами»): таймер, кольцо, кнопки, см. pomodoro.js
+    else if(tab === "set2s_16") renderSettingsTabPomodoro();
     // вкладка «Прогресс» (set2s_12, между «Музыкой» и «Разделением epub»): прогресс-бары и счётчики, раньше стоявшие в шапке
     else if(tab === "set2s_12") renderSettingsTabProgress();
     // вкладка «График чтения» (set2s_13, между «Прогрессом» и «Разделением epub»): карточки книг с главами, раньше стоявшие на главной странице
@@ -11103,6 +11114,9 @@
   }
   function renderSettingsTabMusic(){
     if(window.MusicTab) window.MusicTab.render();
+  }
+  function renderSettingsTabPomodoro(){
+    if(window.PomodoroTab) window.PomodoroTab.render();
   }
   // ===== ВКЛАДКА «ПРОГРЕСС» (set2s_12) =====
   // Прогресс-бары и счётчики (общий прогресс, часы за месяц/год, личные цели, «пропущено дней») раньше стояли в шапке над

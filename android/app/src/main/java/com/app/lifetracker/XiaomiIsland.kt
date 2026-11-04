@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 9.0 (04.11)
 // Версия: 8.0 (03.11)
 // Версия: 7.1 (27.10) — кнопка паузы острова тренировки цвета метки (красная/зелёная/жёлтая): `pauseBitmap(..., colorOverride)`, `workoutDotColor`.
 // Версия: 7.0 (27.10) — остров записи тренировки: `workoutExtras` (метка-диод красная/жёлтая/зелёная, время и дистанция, кнопки «Пауза» и «Стоп»), `workoutDotBitmap`, `elapsedText`. Откат: XiaomiIsland.kt 6.0.
@@ -22,6 +23,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Typeface
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
@@ -633,6 +635,184 @@ object XiaomiIsland {
         c.drawCircle(48f, 48f, 26f, paint)
         paint.style = Paint.Style.FILL
         c.drawCircle(48f, 48f, 13f, paint)
+        return bmp
+    }
+
+    // ---------- остров «Помодоро» ----------
+
+    private const val PIC_POMO_KEY = "miui.focus.pic_pomo_"
+    private const val PIC_POMO_BIG_KEY = "miui.focus.pic_pomo_big_"
+    private const val ACTION_POMO_A = "miui.focus.action_pomo_a"
+    private const val ACTION_POMO_B = "miui.focus.action_pomo_b"
+    private const val ACTION_POMO_C = "miui.focus.action_pomo_c"
+
+    /**
+     * Extras острова для помодоро-сессии ([PomodoroService]) или null, если остров не поддерживается. Свёрнутый: кольцо-точка
+     * цвета фазы и остаток времени (в паузе — статичная цифра, в «Готово» и ожидании — текст). Раскрытый: время, задача и
+     * «цикл N из M» (в перерыве — подсказка), кольцо прогресса и до трёх кнопок: пауза, «+5 минут», «пропустить перерыв»
+     * («Стоп» в работе; в ожидании — «Начать работу» и «Стоп»). Картинки получают новый ключ при смене цвета/кольца —
+     * система не подставит старую из кэша. [float] — раскрыть остров при появлении (смена фазы, запуск).
+     */
+    fun pomodoroExtras(
+        ctx: Context, s: PomodoroTimer.Snapshot, float: Boolean,
+        pause: android.app.PendingIntent, plus: android.app.PendingIntent, skip: android.app.PendingIntent, stop: android.app.PendingIntent
+    ): Bundle? {
+        if (!available(ctx)) return null
+        return try {
+            val now = System.currentTimeMillis()
+            val wait = s.phase == PomodoroTimer.PH_WAIT
+            val paused = !s.running && !wait
+            val counting = s.running && !wait && !s.flash
+            val color = PomodoroTimer.colorFor(s, now)
+            val frac = PomodoroTimer.fractionLeft(s)
+            val glyph = if (s.flash) 1 else if (paused) 2 else 0
+            val key = "" + s.phase + "_" + glyph + "_" + (frac * 60f).toInt() + "_" + Integer.toHexString(color)
+            val picKey = PIC_POMO_KEY + key
+            val bigKey = PIC_POMO_BIG_KEY + key
+            val label = PomodoroTimer.label(s)
+            val timer = if (counting) {
+                JSONObject().put("timerType", -1).put("timerWhen", s.endAt)
+                    .put("timerTotal", s.totalMs.coerceAtLeast(1L)).put("timerSystemCurrent", now)
+            } else {
+                null
+            }
+            val staticTitle = when {
+                s.flash -> "Готово"
+                wait -> "Перерыв +" + elapsedText(s.overMs)
+                else -> "Пауза " + clockText(s.leftMs)
+            }
+            val pic = JSONObject().put("type", 1).put("pic", picKey)
+            val left = JSONObject().put("type", 1).put("picInfo", pic)
+                .put("textInfo", JSONObject().put("title", if (timer != null) label else staticTitle).put("content", ""))
+            val big = JSONObject().put("imageTextInfoLeft", left)
+            if (timer != null) big.put("sameWidthDigitInfo", JSONObject().put("timerInfo", timer)) else big.put("picInfo", pic)
+            val island = JSONObject()
+                .put("islandProperty", 1)
+                .put("islandOrder", true)
+                .put("dismissIsland", false)
+                .put("bigIslandArea", big)
+                .put("smallIslandArea", JSONObject().put("picInfo", pic))
+            if (timer != null) island.put("islandTimeout", ((s.endAt - now) / 1000).coerceAtLeast(1) + 5)
+            val headline = when {
+                s.flash -> "Готово"
+                wait -> "+" + elapsedText(s.overMs)
+                else -> clockText(s.leftMs)
+            }
+            val anim = JSONObject().put("type", 0).put("src", bigKey)
+            val base = JSONObject().put("type", 1).put("title", headline).put("content", PomodoroTimer.detail(s)).put("animIconInfo", anim)
+            val v2 = JSONObject()
+                .put("protocol", 1)
+                .put("business", "pomodoro_timer")
+                .put("islandFirstFloat", float)
+                .put("enableFloat", false)
+                .put("updatable", true)
+                .put("ticker", label)
+                .put("tickerPic", picKey)
+                .put("aodTitle", label)
+                .put("param_island", island)
+                .put("iconTextInfo", base)
+            if (timer != null) v2.put("timeout", ((s.endAt - now) / 60000).coerceAtLeast(1) + 1)
+            val pics = Bundle().apply {
+                putParcelable(picKey, Icon.createWithBitmap(pomoRingBitmap(color, frac, 96, glyph)))
+                putParcelable(bigKey, Icon.createWithBitmap(pomoRingBitmap(color, frac, 192, glyph)))
+            }
+            val acts = Bundle()
+            val list = org.json.JSONArray()
+            fun add(k: String, a: Notification.Action) {
+                acts.putParcelable(k, a)
+                list.put(JSONObject().put("action", k))
+            }
+            if (wait) {
+                add(ACTION_POMO_A, Notification.Action.Builder(Icon.createWithBitmap(pomoButtonBitmap(1)), "Начать работу", skip).build())
+                add(ACTION_POMO_B, Notification.Action.Builder(crossIcon(), "Стоп", stop).build())
+            } else {
+                add(
+                    ACTION_POMO_A,
+                    Notification.Action.Builder(Icon.createWithBitmap(pauseBitmap(frac, STAGE_NORMAL, paused, color)), if (paused) "Продолжить" else "Пауза", pause).build()
+                )
+                add(
+                    ACTION_POMO_B,
+                    Notification.Action.Builder(Icon.createWithBitmap(pomoButtonBitmap(2)), if (s.undo) "Ещё 5 мин работы" else "+5 минут", plus).build()
+                )
+                if (s.phase == PomodoroTimer.PH_WORK) {
+                    add(ACTION_POMO_C, Notification.Action.Builder(crossIcon(), "Стоп", stop).build())
+                } else {
+                    add(ACTION_POMO_C, Notification.Action.Builder(Icon.createWithBitmap(pomoButtonBitmap(3)), "Пропустить перерыв", skip).build())
+                }
+            }
+            v2.put("actions", list)
+            Bundle().apply {
+                putBundle("miui.focus.pics", pics)
+                putBundle("miui.focus.actions", acts)
+                putString("miui.focus.param", JSONObject().put("param_v2", v2).toString())
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Кольцо фазы помодоро: тёмный круг, кольцо цвета фазы (доля [fraction] — сколько осталось, от верха по часовой) и
+     * в центре точка ([glyph] 0), галочка «Готово» (1) или две полоски «пауза» (2). Им рисуется и плашка в приложении.
+     */
+    fun pomoRingBitmap(color: Int, fraction: Float, size: Int = 96, glyph: Int = 0): Bitmap {
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.scale(size / 96f, size / 96f)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFF1E1E1E.toInt()
+        c.drawCircle(48f, 48f, 48f, paint)
+        val ring = RectF(10f, 10f, 86f, 86f)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 8f
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.color = 0xFF3A3A3A.toInt()
+        c.drawArc(ring, 0f, 360f, false, paint)
+        paint.color = color
+        if (fraction >= 0.999f) c.drawArc(ring, 0f, 360f, false, paint)
+        else if (fraction > 0f) c.drawArc(ring, -90f, 360f * fraction, false, paint)
+        when (glyph) {
+            1 -> {
+                paint.strokeJoin = Paint.Join.ROUND
+                c.drawPath(Path().apply { moveTo(34f, 49f); lineTo(44f, 59f); lineTo(63f, 38f) }, paint)
+            }
+            2 -> {
+                paint.style = Paint.Style.FILL
+                c.drawRoundRect(RectF(36f, 32f, 44f, 64f), 3f, 3f, paint)
+                c.drawRoundRect(RectF(52f, 32f, 60f, 64f), 3f, 3f, paint)
+            }
+            else -> {
+                paint.style = Paint.Style.FILL
+                c.drawCircle(48f, 48f, 17f, paint)
+            }
+        }
+        return bmp
+    }
+
+    /** Круглая кнопка острова помодоро: 1 — «Начать» (треугольник), 2 — «+5», 3 — «пропустить» (треугольник и черта). */
+    fun pomoButtonBitmap(kind: Int): Bitmap {
+        val size = 96
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFF2A2A2A.toInt()
+        c.drawCircle(48f, 48f, 48f, paint)
+        paint.color = Color.WHITE
+        when (kind) {
+            1 -> c.drawPath(Path().apply { moveTo(38f, 28f); lineTo(38f, 68f); lineTo(70f, 48f); close() }, paint)
+            2 -> {
+                paint.typeface = Typeface.DEFAULT_BOLD
+                paint.textSize = 38f
+                paint.textAlign = Paint.Align.CENTER
+                c.drawText("+5", 48f, 61f, paint)
+            }
+            else -> {
+                c.drawRect(60f, 30f, 66f, 66f, paint)
+                c.drawPath(Path().apply { moveTo(28f, 30f); lineTo(28f, 66f); lineTo(56f, 48f); close() }, paint)
+            }
+        }
         return bmp
     }
 }

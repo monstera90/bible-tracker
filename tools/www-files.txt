@@ -52,6 +52,7 @@ claudetab.js
 usertabs.js
 system.js
 music.js
+pomodoro.js
 calendar.js
 workouts.js
 scan.html

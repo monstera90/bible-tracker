@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 12.0 (04.11)
 // Версия: 11.0 (04.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
@@ -417,6 +418,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Нажатие на плашку помодоро (InAppIsland): страница открывает вкладку «Помодоро». */
+    fun openPomodoroTab() {
+        if (pageTrusted) webView.evaluateJavascript("window.__ltOpenPomodoro && window.__ltOpenPomodoro()", null)
+    }
+
     override fun onPause() {
         NotifyStore.appForeground = false
         inAppIsland.stop()
@@ -431,6 +437,12 @@ class MainActivity : ComponentActivity() {
             MusicPlayer.onAppBackground(applicationContext)
         } catch (e: Exception) {
             // остров обновится при следующем изменении трека
+        }
+        // Идёт помодоро: вкладка больше не на экране, остров не показывался — перепоставляем уведомление сразу.
+        try {
+            PomodoroTimer.onAppBackground(applicationContext)
+        } catch (e: Exception) {
+            // остров обновится следующим тиком службы
         }
         // Идёт запись тренировки: пока приложение было на экране, остров не показывался — перепоставляем уведомление сразу.
         try {
