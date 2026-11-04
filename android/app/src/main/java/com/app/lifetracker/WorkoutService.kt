@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.1 (02.11)
+// Версия: 1.2 (04.11)
 
 import android.Manifest
 import android.app.Notification
@@ -32,7 +32,7 @@ import java.util.Locale
  * Служба переднего плана вкладки «Тренировки»: держит GPS (LocationManager, провайдер GPS) и процесс живым при погашенном
  * экране, раз в секунду обновляет уведомление (а на Xiaomi с HyperOS — остров: [XiaomiIsland.workoutExtras]). Всю логику
  * записи ведёт [WorkoutTracker]; службе остаётся принимать точки и кнопки «Пауза/Продолжить» и «Стоп» из уведомления/острова.
- * Останавливается сама, когда запись закончилась (статус IDLE), в том числе после сопоставления маршрута с картой.
+ * Останавливается сама, когда запись закончилась (статус IDLE), в том числе после сохранения записи.
  */
 class WorkoutService : Service() {
 
@@ -115,7 +115,7 @@ class WorkoutService : Service() {
                 }
                 WorkoutTracker.ST_FINISH -> {
                     title = "Тренировка завершена"
-                    text = "Сопоставляю маршрут с картой…"
+                    text = "Сохраняю запись…"
                 }
                 else -> {
                     title = XiaomiIsland.elapsedText(s.totalMs) + "  ·  " + kmText(s.distM) + if (paused) "  (пауза)" else ""
@@ -173,7 +173,8 @@ class WorkoutService : Service() {
             WorkoutTracker.onLocation(
                 loc.latitude, loc.longitude, loc.accuracy, loc.hasAccuracy(),
                 if (loc.hasAltitude()) loc.altitude else Double.NaN,
-                if (Build.VERSION.SDK_INT >= 26 && loc.hasVerticalAccuracy()) loc.verticalAccuracyMeters else -1f
+                if (Build.VERSION.SDK_INT >= 26 && loc.hasVerticalAccuracy()) loc.verticalAccuracyMeters else -1f,
+                if (loc.hasSpeed()) loc.speed else -1f
             )
         }
 

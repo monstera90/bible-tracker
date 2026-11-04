@@ -1,12 +1,9 @@
 package com.app.lifetracker
-// Версия: 5.0 (04.11)
+// Версия: 6.0 (04.11)
 
 import android.content.Context
-import android.net.ConnectivityManager
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.pow
@@ -31,8 +28,12 @@ import kotlin.math.sqrt
  *    а путь внутри сдвинутого участка считается как обычно. Число таких случаев — `jumps` в записи.
  *  • PAUSE — время и километраж стоят; GPS продолжает работать, чтобы связь не терялась на паузе.
  *  • Общее время = okMs + lostMs.
- *  • При остановке (FINISH) маршрут по сегментам сопоставляется с картой OpenStreetMap (map matching, публичный сервер
- *    Valhalla, пешеходный профиль); если сервис недоступен или результат неправдоподобен — остаётся расстояние по GPS.
+ *  • Шум GPS (петляющие координаты). Точка, прошедшая проверку скорости, сглаживается фильтром Калмана ([smooth]: модель
+ *    «положение + скорость», доверие к измерению зависит от заявленной точности точки). Километры набираются по хордам между
+ *    опорными точками: шаг засчитывается, только когда сглаженная позиция ушла от опорной дальше порога
+ *    max([MIN_STEP_M], [STEP_ACC_K] × точность) (не больше [STEP_MAX_M]) — дрожание в пределах погрешности расстояние не растит.
+ *    Если спутниковая (доплеровская) скорость говорит «стою» (< [STILL_SPEED]), небольшие смещения тоже не считаются.
+ *  • Расстояние ВСЕГДА по GPS: сверки с картами нет (на бездорожье троп в OSM нет, привязка к чужой дороге искажала километры).
  *    Готовая запись кладётся в SharedPreferences `workouts_native` (ключ `finished`), страница забирает её
  *    (`takeFinishedJson` / `ackFinished`) — даже если приложение было закрыто, когда тренировка закончилась.
  */
@@ -50,8 +51,24 @@ object WorkoutTracker {
     /** Нет годной точки дольше этого времени — связь потеряна (мс). */
     private const val LOSS_MS = 10_000L
 
-    /** Шаг короче этого значения не считается (дрожание GPS на месте), метры. */
+    /** Шаг короче этого значения не считается никогда (дрожание GPS на месте), метры. */
     private const val MIN_STEP_M = 3.0
+
+    /** Порог засчёта шага растёт с заявленной погрешностью точки: max(MIN_STEP_M, STEP_ACC_K × точность), но не больше STEP_MAX_M. */
+    private const val STEP_ACC_K = 1.0
+    private const val STEP_MAX_M = 15.0
+
+    /** Доплеровская скорость ниже этого значения — человек стоит: смещение меньше max(2 × порог, 10 м) не считается (м/с). */
+    private const val STILL_SPEED = 0.6f
+
+    /** Фильтр Калмана: ожидаемое ускорение бегуна (м/с²) и минимальная точность измерения (м). */
+    private const val KF_ACCEL = 1.0
+    private const val KF_ACC_MIN = 4.0
+
+    /** Дольше этого перерыва между принятыми точками (с) фильтр начинает заново с новой точки. */
+    private const val KF_RESET_S = 10.0
+
+    private const val M_PER_DEG = 111_194.93
 
     /** Скорость выше этого значения — не бег, а ошибка GPS: точка в маршрут не попадает (м/с, 9 м/с = 32 км/ч). */
     private const val MAX_SPEED = 9.0
@@ -78,14 +95,6 @@ object WorkoutTracker {
 
     private const val PREFS = "workouts_native"
     private const val KEY_FINISHED = "finished"
-
-    // Сопоставление с картой: публичный сервер Valhalla (данные OpenStreetMap), пешеходный профиль.
-    private const val MATCH_URL = "https://valhalla1.openstreetmap.de/trace_route"
-    private const val MATCH_CHUNK = 400          // точек в одном запросе
-    private const val MATCH_MIN_STEP_M = 8.0     // точки гуще этого шага перед отправкой прореживаются
-    private const val MATCH_MIN_SEG_M = 40.0     // короче — сегмент не сопоставляется
-    private const val MATCH_RATIO_LO = 0.85      // результат принимается, если лежит в этих пределах от расстояния по GPS
-    private const val MATCH_RATIO_HI = 1.20
 
     /** Снимок состояния для моста и уведомления. */
     class Snapshot(
@@ -120,17 +129,29 @@ object WorkoutTracker {
     private var lastTickAt = 0L
     private var distM = 0.0
     private val gaps = ArrayList<LongArray>()
-    private val segments = ArrayList<ArrayList<DoubleArray>>()
-    private var curSeg: ArrayList<DoubleArray>? = null
+    private var hasRoute = false                    // есть опорная точка маршрута (после начала/разрыва/паузы её нет)
     private var lastPt: DoubleArray? = null
     private var lastPtT = 0L                        // время последней точки, стыкующейся с маршрутом (в том числе не прибавившей метры)
-    private val cand = ArrayList<DoubleArray>()      // точки, не стыкующиеся с маршрутом (возможный выброс или сдвиг)
+    private val cand = ArrayList<DoubleArray>()      // точки [lat, lon, t, acc, speed], не стыкующиеся с маршрутом (возможный выброс или сдвиг)
     private var jumps = 0                            // сколько раз GPS «уезжал» (выброс или сдвиг), за тренировку
     private var upM = 0.0                            // набрано высоты за тренировку, м
     private var altSm = Double.NaN                   // сглаженная высота (NaN — ещё не было точки после начала/разрыва)
     private var altRising = false
     private var altBase = 0.0                        // низшая сглаженная высота с последнего спуска
     private var altRef = 0.0                         // высшая сглаженная высота во время подъёма
+
+    // фильтр Калмана (метры в плоскости с началом в kfLat0/kfLon0; по обеим осям одинаковый, поэтому ковариация общая)
+    private var kfLat0 = 0.0
+    private var kfLon0 = 0.0
+    private var kfCos = 1.0
+    private var kfX = 0.0
+    private var kfY = 0.0
+    private var kfVx = 0.0
+    private var kfVy = 0.0
+    private var kfP00 = 0.0
+    private var kfP01 = 0.0
+    private var kfP11 = 0.0
+    private var kfT = 0L
 
     // раскрыть остров при ближайшем обновлении уведомления (старт и «Связь установлена»)
     private var floatPending = false
@@ -181,8 +202,7 @@ object WorkoutTracker {
             lastTickAt = now
             distM = 0.0
             gaps.clear()
-            segments.clear()
-            curSeg = null
+            hasRoute = false
             lastPt = null
             lastPtT = 0L
             cand.clear()
@@ -208,7 +228,7 @@ object WorkoutTracker {
                 accountTo(now)
                 if (!fix) gaps.add(longArrayOf(gapStart, now)) // разрыв закрывается на паузе
                 status = ST_PAUSE
-                curSeg = null
+                hasRoute = false
                 lastPt = null
                 cand.clear()
                 paused = true
@@ -217,7 +237,7 @@ object WorkoutTracker {
                 lastTickAt = now
                 fix = lastGoodAt > 0 && now - lastGoodAt <= FRESH_MS
                 if (!fix) gapStart = now
-                curSeg = null
+                hasRoute = false
                 lastPt = null
                 cand.clear()
                 resetAlt()
@@ -249,8 +269,8 @@ object WorkoutTracker {
     }
 
     /**
-     * Остановить запись. Если связи не было ни разу (SEARCH) — записи нет, возвращает false. Иначе запускает фоновое
-     * сопоставление с картой; по готовности запись попадает в `finished`, статус возвращается в IDLE.
+     * Остановить запись. Если связи не было ни разу (SEARCH) — записи нет, возвращает false. Иначе в фоновом потоке запись
+     * попадает в `finished` (расстояние по GPS), статус возвращается в IDLE.
      */
     fun stop(ctx: Context, propagate: Boolean = true): Boolean {
         val app = ctx.applicationContext
@@ -269,18 +289,12 @@ object WorkoutTracker {
                     if (!fix) gaps.add(longArrayOf(gapStart, now))
                 }
                 status = ST_FINISH
-                val copy = ArrayList<List<DoubleArray>>()
-                segments.forEach { copy.add(ArrayList(it)) }
-                Rec(startedAt, now, okMs + lostMs, lostMs, ArrayList(gaps), distM, copy, jumps, upM)
+                Rec(startedAt, now, okMs + lostMs, lostMs, ArrayList(gaps), distM, jumps, upM)
             }
         }
         if (rec == null) return false
         Thread {
-            val done = try {
-                finish(app, rec)
-            } catch (e: Exception) {
-                rec.toJson(rec.rawM, "raw")
-            }
+            val done = rec.toJson(rec.rawM, "raw")
             try {
                 appendFinished(app, done)
             } catch (e: Exception) {
@@ -288,7 +302,7 @@ object WorkoutTracker {
             }
             synchronized(lock) { status = ST_IDLE }
             WorkoutService.refresh(app)
-            retryPending(app) // сеть могла появиться: догнать и записи, сохранённые раньше без интернета (после основной записи — порядок очереди важен)
+            dropLegacyMatch(app)
         }.start()
         return true
     }
@@ -303,7 +317,7 @@ object WorkoutTracker {
     }
 
     /** Новая точка GPS. */
-    fun onLocation(lat: Double, lon: Double, acc: Float, hasAcc: Boolean, alt: Double = Double.NaN, vAcc: Float = -1f) {
+    fun onLocation(lat: Double, lon: Double, acc: Float, hasAcc: Boolean, alt: Double = Double.NaN, vAcc: Float = -1f, speed: Float = -1f) {
         synchronized(lock) {
             val now = System.currentTimeMillis()
             val good = hasAcc && acc <= ACC_MAX
@@ -316,7 +330,7 @@ object WorkoutTracker {
                     fix = true
                     lastGoodAt = now
                     floatPending = true // «Связь установлена» — раскрыть остров
-                    startSegment(lat, lon, now)
+                    startSegment(lat, lon, now, acc)
                     resetAlt()
                     addAlt(alt, vAcc)
                 }
@@ -331,10 +345,10 @@ object WorkoutTracker {
                         gaps.add(longArrayOf(gapStart, now))
                         fix = true
                         floatPending = true
-                        startSegment(lat, lon, now)
+                        startSegment(lat, lon, now, acc)
                         resetAlt()
                     } else {
-                        addPoint(lat, lon, now)
+                        addPoint(lat, lon, now, acc, speed)
                     }
                     addAlt(alt, vAcc)
                 }
@@ -356,7 +370,7 @@ object WorkoutTracker {
                 lostMs += back
                 fix = false
                 gapStart = lastGoodAt
-                curSeg = null
+                hasRoute = false
                 lastPt = null
                 cand.clear()
                 resetAlt()
@@ -455,15 +469,14 @@ object WorkoutTracker {
         }
     }
 
-    private fun startSegment(lat: Double, lon: Double, t: Long) {
-        val seg = ArrayList<DoubleArray>()
+    /** Новая опорная точка маршрута (начало, возврат связи, пауза, устойчивый сдвиг): фильтр и хорды начинаются заново. */
+    private fun startSegment(lat: Double, lon: Double, t: Long, acc: Float) {
         val p = doubleArrayOf(lat, lon, t.toDouble())
-        seg.add(p)
-        segments.add(seg)
-        curSeg = seg
+        hasRoute = true
         lastPt = p
         lastPtT = t
         cand.clear()
+        kfInit(lat, lon, acc, t)
     }
 
     /** Можно ли добраться от точки a (время at, мс) до (lat, lon, t) не быстрее [MAX_SPEED]; время между точками зажато в [DT_MIN]..maxDt. */
@@ -472,14 +485,13 @@ object WorkoutTracker {
         return haversine(a[0], a[1], lat, lon) <= MAX_SPEED * dt
     }
 
-    private fun addPoint(lat: Double, lon: Double, t: Long) {
-        val seg = curSeg
+    private fun addPoint(lat: Double, lon: Double, t: Long, acc: Float, speed: Float) {
         val prev = lastPt
-        if (seg == null || prev == null) {
-            startSegment(lat, lon, t)
+        if (!hasRoute || prev == null) {
+            startSegment(lat, lon, t, acc)
             return
         }
-        val p = doubleArrayOf(lat, lon, t.toDouble())
+        val p = doubleArrayOf(lat, lon, t.toDouble(), acc.toDouble(), speed.toDouble())
         // 1) Уже есть кандидат (точка, не стыковавшаяся с маршрутом). Если новая точка согласована с ним, она принадлежит
         //    тому же «уехавшему» участку и к маршруту присоединиться не может — сколько бы времени ни прошло.
         if (cand.isNotEmpty()) {
@@ -496,12 +508,7 @@ object WorkoutTracker {
                 jumps++
                 cand.clear()
             }
-            lastPtT = t
-            val d = haversine(prev[0], prev[1], lat, lon)
-            if (d < MIN_STEP_M) return
-            distM += d
-            seg.add(p)
-            lastPt = p
+            routeStep(lat, lon, t, acc, speed)
             return
         }
         // 3) Не стыкуется ни с маршрутом, ни с кандидатом: новый кандидат (прежний был одиночным выбросом).
@@ -510,22 +517,87 @@ object WorkoutTracker {
         cand.add(p)
     }
 
-    /** Устойчивый сдвиг: новый сегмент с первой точки кандидата; путь внутри сдвинутого участка считается как обычно, переход к нему — нет. */
+    /**
+     * Точка стыкуется с маршрутом: сглаживаем и добавляем хорду от опорной точки, если позиция ушла дальше порога
+     * (дрожание GPS и «петли» внутри погрешности расстояние не растят). Опорная точка двигается только вместе с засчитанным шагом.
+     */
+    private fun routeStep(lat: Double, lon: Double, t: Long, acc: Float, speed: Float) {
+        val prev = lastPt ?: return
+        val sm = smooth(lat, lon, acc, t)
+        lastPtT = t
+        val d = haversine(prev[0], prev[1], sm[0], sm[1])
+        val thr = (STEP_ACC_K * acc).coerceIn(MIN_STEP_M, STEP_MAX_M)
+        if (d < thr) return
+        if (speed >= 0f && speed < STILL_SPEED && d < maxOf(2 * thr, 10.0)) return // датчик скорости: стоим, это дрейф
+        distM += d
+        lastPt = doubleArrayOf(sm[0], sm[1], t.toDouble())
+    }
+
+    /** Устойчивый сдвиг: новый участок с первой точки кандидата; путь внутри сдвинутого участка считается как обычно, переход к нему — нет. */
     private fun acceptJump() {
         jumps++
         val pts = ArrayList(cand)
-        startSegment(pts[0][0], pts[0][1], pts[0][2].toLong()) // очищает cand
-        val seg = curSeg ?: return
+        val first = pts[0]
+        startSegment(first[0], first[1], first[2].toLong(), first[3].toFloat()) // очищает cand
         for (i in 1 until pts.size) {
             val q = pts[i]
-            val prev = lastPt ?: return
-            val d = haversine(prev[0], prev[1], q[0], q[1])
-            if (d < MIN_STEP_M) continue
-            distM += d
-            seg.add(q)
-            lastPt = q
+            routeStep(q[0], q[1], q[2].toLong(), q[3].toFloat(), q[4].toFloat())
         }
-        lastPtT = pts[pts.size - 1][2].toLong()
+    }
+
+    // ---------- фильтр Калмана ----------
+
+    private fun kfR(acc: Float): Double {
+        val sd = maxOf(acc.toDouble(), KF_ACC_MIN) * 0.8
+        return sd * sd
+    }
+
+    private fun kfInit(lat: Double, lon: Double, acc: Float, t: Long) {
+        kfLat0 = lat
+        kfLon0 = lon
+        kfCos = cos(Math.toRadians(lat))
+        kfX = 0.0
+        kfY = 0.0
+        kfVx = 0.0
+        kfVy = 0.0
+        kfP00 = kfR(acc)
+        kfP01 = 0.0
+        kfP11 = 4.0
+        kfT = t
+    }
+
+    /** Сглаженная позиция [lat, lon] после очередной точки (модель «положение + скорость», общая для обеих осей). */
+    private fun smooth(lat: Double, lon: Double, acc: Float, t: Long): DoubleArray {
+        val rawDt = (t - kfT) / 1000.0
+        if (rawDt > KF_RESET_S || rawDt < 0.0) {
+            kfInit(lat, lon, acc, t)
+            return doubleArrayOf(lat, lon)
+        }
+        val dt = rawDt.coerceIn(0.2, 5.0)
+        val zx = (lon - kfLon0) * kfCos * M_PER_DEG
+        val zy = (lat - kfLat0) * M_PER_DEG
+        // прогноз
+        val q = KF_ACCEL * KF_ACCEL
+        kfX += kfVx * dt
+        kfY += kfVy * dt
+        val p00 = kfP00 + dt * (2 * kfP01 + dt * kfP11) + q * dt * dt * dt * dt / 4
+        val p01 = kfP01 + dt * kfP11 + q * dt * dt * dt / 2
+        val p11 = kfP11 + q * dt * dt
+        // поправка по измерению
+        val s = p00 + kfR(acc)
+        val k0 = p00 / s
+        val k1 = p01 / s
+        val ix = zx - kfX
+        val iy = zy - kfY
+        kfX += k0 * ix
+        kfY += k0 * iy
+        kfVx += k1 * ix
+        kfVy += k1 * iy
+        kfP00 = (1 - k0) * p00
+        kfP01 = (1 - k0) * p01
+        kfP11 = p11 - k1 * p01
+        kfT = t
+        return doubleArrayOf(kfLat0 + kfY / M_PER_DEG, kfLon0 + kfX / (M_PER_DEG * kfCos))
     }
 
     private fun haversine(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -546,7 +618,6 @@ object WorkoutTracker {
         val lostMs: Long,
         val gaps: List<LongArray>,
         val rawM: Double,
-        val segments: List<List<DoubleArray>>,
         val jumps: Int,
         val climbM: Double
     ) {
@@ -568,230 +639,17 @@ object WorkoutTracker {
         }
     }
 
-    // ---------- сопоставление с картой ----------
+    // ---------- наследие: очередь сверки с картой ----------
 
-    /** Признак «нет связи с сервисом карт» (а не «дорога не найдена»): такая запись сохраняется по GPS и достраивается позже. */
-    private class MatchCtx { var netFail = false }
+    private const val KEY_LEGACY_PENDING = "pending_match"
 
-    private fun finish(ctx: Context, rec: Rec): JSONObject {
-        val mc = MatchCtx()
-        var total = 0.0
-        var fixed = 0.0 // куски, которые не сопоставляются с картой вовсе (короткие)
-        var matchedAny = false
-        var rawAll = 0.0
-        val eligible = JSONArray() // куски для сопоставления с картой: {raw, pts} — на случай, если сети нет
-        for (seg in rec.segments) {
-            val raw = segmentLength(seg)
-            rawAll += raw
-            if (raw < MATCH_MIN_SEG_M || seg.size < 3) {
-                total += raw
-                fixed += raw
-                continue
-            }
-            eligible.put(JSONObject().put("raw", raw).put("pts", thinPoints(seg)))
-            val m = matchSegment(seg, mc)
-            if (m != null && m >= raw * MATCH_RATIO_LO && m <= raw * MATCH_RATIO_HI) {
-                total += m
-                matchedAny = true
-            } else {
-                total += raw
-            }
-        }
-        val rawTotal = rawAll.coerceAtLeast(rec.rawM)
-        if (mc.netFail && eligible.length() > 0) {
-            // сети не было: тренировка сохраняется по GPS, трек откладывается — карта подтянется при подключении к интернету
-            val json = rec.toJson(rawTotal, "raw").put("pend", 1)
-            try {
-                addPending(ctx, JSONObject().put("id", json.getString("id")).put("fixed", fixed).put("rawTotal", rawTotal)
-                    .put("at", System.currentTimeMillis()).put("segs", eligible))
-            } catch (e: Exception) {
-                json.remove("pend") // трек не сохранился — ждать нечего
-            }
-            return json
-        }
-        // если вся тренировка не нашла пары на карте — остаётся расстояние по GPS целиком
-        val how = if (matchedAny) "map" else "raw"
-        return rec.toJson(if (matchedAny) total else rawTotal, how)
-    }
-
-    /** Точки куска не гуще MATCH_MIN_STEP_M, [[lat, lon], ...] (6 знаков) — компактно для хранения. */
-    private fun thinPoints(seg: List<DoubleArray>): JSONArray {
-        val out = JSONArray()
-        var last: DoubleArray? = null
-        for (p in seg) {
-            if (last == null || haversine(last[0], last[1], p[0], p[1]) >= MATCH_MIN_STEP_M) {
-                out.put(JSONArray().put(Math.round(p[0] * 1e6) / 1e6).put(Math.round(p[1] * 1e6) / 1e6))
-                last = p
-            }
-        }
-        return out
-    }
-
-    // ---------- тренировки без интернета: трек ждёт сети, потом карта «подтягивается» ----------
-
-    private const val KEY_PENDING = "pending_match"
-    private const val PENDING_MAX_AGE_MS = 60L * 24 * 3600 * 1000
-    private val retrying = java.util.concurrent.atomic.AtomicBoolean(false)
-
-    private fun readPending(ctx: Context): JSONArray = try {
-        JSONArray(prefs(ctx).getString(KEY_PENDING, "[]") ?: "[]")
-    } catch (e: Exception) {
-        JSONArray()
-    }
-
-    @Synchronized
-    private fun addPending(ctx: Context, item: JSONObject) {
-        val arr = readPending(ctx)
-        arr.put(item)
-        if (!prefs(ctx).edit().putString(KEY_PENDING, arr.toString()).commit()) throw IllegalStateException("pending not saved")
-    }
-
-    @Synchronized
-    private fun dropPending(ctx: Context, id: String) {
-        val arr = readPending(ctx)
-        val keep = JSONArray()
-        for (i in 0 until arr.length()) {
-            val o = arr.optJSONObject(i) ?: continue
-            if (o.optString("id") != id) keep.put(o)
-        }
-        prefs(ctx).edit().putString(KEY_PENDING, keep.toString()).commit()
-    }
-
-    fun hasPendingMatch(ctx: Context): Boolean = readPending(ctx).length() > 0
-
-    private fun networkUp(ctx: Context): Boolean = try {
-        val cm = ctx.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        @Suppress("DEPRECATION")
-        cm.activeNetworkInfo?.isConnected == true
-    } catch (e: Exception) {
-        true // не смогли проверить — пробуем, неудача безвредна
-    }
-
-    /**
-     * Достроить записи, сохранённые без интернета: когда сеть есть, трек сопоставляется с картой, а итог (`m`, `how`)
-     * уходит странице обновлением записи (`upd:1`). Зовётся при запуске/возврате в приложение, при появлении сети и
-     * когда страница забирает записи. Работает в фоновом потоке, одновременно — не больше одного прохода.
-     */
-    fun retryPending(ctx: Context) {
-        val app = ctx.applicationContext
-        if (readPending(app).length() == 0) return
-        if (!networkUp(app)) return
-        if (!retrying.compareAndSet(false, true)) return
-        Thread {
-            try {
-                val arr = readPending(app)
-                val now = System.currentTimeMillis()
-                for (i in 0 until arr.length()) {
-                    val it = arr.optJSONObject(i) ?: continue
-                    val id = it.optString("id")
-                    if (now - it.optLong("at", now) > PENDING_MAX_AGE_MS) { dropPending(app, id); continue }
-                    val mc = MatchCtx()
-                    var total = it.optDouble("fixed", 0.0)
-                    var matchedAny = false
-                    val segs = it.optJSONArray("segs") ?: JSONArray()
-                    for (k in 0 until segs.length()) {
-                        val so = segs.optJSONObject(k) ?: continue
-                        val raw = so.optDouble("raw", 0.0)
-                        val pa = so.optJSONArray("pts") ?: continue
-                        val pts = ArrayList<DoubleArray>()
-                        for (j in 0 until pa.length()) {
-                            val p = pa.optJSONArray(j) ?: continue
-                            pts.add(doubleArrayOf(p.optDouble(0), p.optDouble(1)))
-                        }
-                        val m = if (pts.size >= 2) matchSegment(pts, mc) else null
-                        if (m != null && m >= raw * MATCH_RATIO_LO && m <= raw * MATCH_RATIO_HI) {
-                            total += m
-                            matchedAny = true
-                        } else {
-                            total += raw
-                        }
-                        if (mc.netFail) break
-                    }
-                    if (mc.netFail) break // сеть пропала посреди прохода — остальное в следующий раз
-                    val upd = JSONObject().put("id", "u" + id).put("rid", id).put("upd", 1) // id в очереди свой: подтверждение записи страницей не должно съесть обновление
-                        .put("m", Math.round(if (matchedAny) total else it.optDouble("rawTotal", total)))
-                        .put("how", if (matchedAny) "map" else "raw")
-                    appendFinished(app, upd)
-                    dropPending(app, id)
-                }
-            } catch (e: Exception) {
-                // не вышло — повторится при следующем запуске/появлении сети
-            } finally {
-                retrying.set(false)
-            }
-        }.start()
-    }
-
-    private fun segmentLength(seg: List<DoubleArray>): Double {
-        var s = 0.0
-        for (i in 1 until seg.size) s += haversine(seg[i - 1][0], seg[i - 1][1], seg[i][0], seg[i][1])
-        return s
-    }
-
-    /** Длина сегмента по карте (метры) или null, если сервис не ответил / не нашёл дорогу хотя бы для одного куска. */
-    private fun matchSegment(seg: List<DoubleArray>, mc: MatchCtx): Double? {
-        // прореживание: оставляем точки не гуще MATCH_MIN_STEP_M
-        val pts = ArrayList<DoubleArray>()
-        pts.add(seg[0])
-        for (i in 1 until seg.size) {
-            val last = pts[pts.size - 1]
-            if (haversine(last[0], last[1], seg[i][0], seg[i][1]) >= MATCH_MIN_STEP_M) pts.add(seg[i])
-        }
-        if (pts.size < 2) return null
-        var total = 0.0
-        var from = 0
-        while (from < pts.size - 1) {
-            val to = minOf(pts.size, from + MATCH_CHUNK)
-            val chunk = pts.subList(from, to)
-            if (chunk.size >= 2) {
-                val raw = segmentLength(chunk)
-                val m = if (raw >= 15.0) matchChunk(chunk, mc) else null
-                if (mc.netFail) return null
-                total += if (m != null && m >= raw * MATCH_RATIO_LO && m <= raw * MATCH_RATIO_HI) m else raw
-            }
-            if (to >= pts.size) break
-            from = to - 1 // концы кусков стыкуются в одной точке
-        }
-        return total
-    }
-
-    private fun matchChunk(chunk: List<DoubleArray>, mc: MatchCtx): Double? {
-        var conn: HttpURLConnection? = null
-        return try {
-            val shape = JSONArray()
-            for (p in chunk) shape.put(JSONObject().put("lat", p[0]).put("lon", p[1]))
-            val body = JSONObject()
-                .put("shape", shape)
-                .put("costing", "pedestrian")
-                .put("shape_match", "map_snap")
-                .put("units", "kilometers")
-                .put("trace_options", JSONObject().put("search_radius", 40).put("gps_accuracy", 12).put("interpolation_distance", 10))
-                .toString()
-            conn = URL(MATCH_URL).openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
-            conn.connectTimeout = 8000
-            conn.readTimeout = 25000
-            conn.doOutput = true
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.setRequestProperty("User-Agent", "LifeTracker/1.0 (workout map matching)")
-            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            val code = conn.responseCode
-            if (code == 429 || code >= 500) { mc.netFail = true; return null } // сервис перегружен/недоступен — повторить позже
-            if (code != 200) return null
-            val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-            val km = JSONObject(text).getJSONObject("trip").getJSONObject("summary").getDouble("length")
-            if (km.isNaN() || km <= 0) null else km * 1000.0
-        } catch (e: java.io.IOException) {
-            mc.netFail = true // нет сети, обрыв, тайм-аут
-            null
+    /** Старые версии откладывали треки для сверки с картой; сверки больше нет — очередь стирается. */
+    fun dropLegacyMatch(ctx: Context) {
+        try {
+            val p = prefs(ctx)
+            if (p.contains(KEY_LEGACY_PENDING)) p.edit().remove(KEY_LEGACY_PENDING).commit()
         } catch (e: Exception) {
-            null
-        } finally {
-            try {
-                conn?.disconnect()
-            } catch (e: Exception) {
-                // уже закрыто
-            }
+            // не вышло — безвредно, повторится
         }
     }
 

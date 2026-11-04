@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 19.1 (04.11)
+// Версия: 19.2 (04.11)
 // Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
@@ -699,7 +699,7 @@ class NativeBridge(private val activity: MainActivity) {
     @JavascriptInterface
     fun workoutTakeFinished(): String {
         if (!activity.pageTrusted) return "[]"
-        WorkoutTracker.retryPending(activity.applicationContext) // записи, сохранённые без интернета: достроить по карте, когда сеть есть
+        WorkoutTracker.dropLegacyMatch(activity.applicationContext) // очередь сверки с картой от старых версий больше не нужна
         return WorkoutTracker.takeFinishedJson(activity.applicationContext)
     }
 

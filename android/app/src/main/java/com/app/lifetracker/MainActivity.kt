@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 12.1 (04.11)
+// Версия: 13.0 (04.11)
 // Версия: 11.0 (04.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
@@ -20,10 +20,6 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.net.Uri
 import android.provider.Settings
 import android.os.Build
@@ -364,39 +360,6 @@ class MainActivity : ComponentActivity() {
         webView.onResume()
         // Видео, ушедшее в плавающее окно при сворачивании, возвращается на свою (открытую) вкладку.
         userTabs.onAppVisible()
-        // Тренировки, записанные без интернета: достроить по карте сразу и при появлении сети, пока приложение на экране.
-        WorkoutTracker.retryPending(applicationContext)
-        watchNetworkForWorkouts()
-    }
-
-    private var workoutNetCallback: ConnectivityManager.NetworkCallback? = null
-
-    private fun watchNetworkForWorkouts() {
-        if (workoutNetCallback != null) return // callback дешёвый и ничего не делает, пока нет записей, ждущих карту
-        try {
-            val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-            val cb = object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) {
-                    WorkoutTracker.retryPending(applicationContext)
-                }
-            }
-            cm.registerNetworkCallback(
-                NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), cb
-            )
-            workoutNetCallback = cb
-        } catch (e: Exception) {
-            // нет разрешения/сервиса — достройка пойдёт при запуске и возврате в приложение
-        }
-    }
-
-    private fun unwatchNetworkForWorkouts() {
-        val cb = workoutNetCallback ?: return
-        workoutNetCallback = null
-        try {
-            (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(cb)
-        } catch (e: Exception) {
-            // уже снят
-        }
     }
 
     override fun onResume() {
@@ -505,7 +468,6 @@ class MainActivity : ComponentActivity() {
         webView.onPause()
         // Играет видео на открытой вкладке-сайте — оно уходит в плавающее окно и не прерывается (нужно «Поверх других приложений»).
         userTabs.onAppHidden()
-        unwatchNetworkForWorkouts()
         super.onStop()
     }
 
