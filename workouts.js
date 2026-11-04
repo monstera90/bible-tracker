@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 6.2 (02.11)
+   Версия: 7.0 (04.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -41,6 +41,9 @@
    (1) локальный архив «Экспортировать личные данные» (ZIP с data.json или сам data.json, `readLocalArchive`): берутся ТОЛЬКО записи `wk:*` из `rawState.data` (метры, время, оценка), остальные данные не трогаются; уже имеющиеся id пропускаются, метка `needRpe` не переносится;
    (2) CSV-выгрузка стороннего трекера (`parseCsv`, колонки `date`, `distance_km`, `type_label`/`type_code`, `has_workout`): берутся только пробежки (`CSV_RUN_LABELS`/`CSV_RUN_CODES`) с километражем > 0 — дата и километры, без времени и баллов. Запись {start (дата и часы:минуты из колонки), end=start, m, rawM, totalMs:0, how:\"imp\", imp:1}, id `imp-ГГГГММДД-ЧЧММ` (повторный импорт не дублирует). Импортированные записи не попадают в `records()` для календаря (нет длительности).
    Информация — кнопка «i» (`#wkInfoBtn`) открывает экран «Тренировки — кнопки» (`renderInfoScreen`), «домик» возвращает на вкладку.
+   Рекорды — кнопка-кубок (`#wkRecordsBtn`, между лампочкой «Советы» и индикатором нагрузки) открывает экран «Рекорды» (`renderRecordsScreen`, расчёт — `bestRecords`):
+   самое долгое время и самая длинная дистанция (`totalMs`, `m` по всем записям, у импортированных нет времени) и лучшее время на 5 км, 10 км, полумарафоне, марафоне. Дистанция записи считается
+   по целой записи: подходит запись длиной от `REC_DIST_MIN` до `REC_DIST_MAX` от дистанции, время пересчитывается на ровную дистанцию (`totalMs × дистанция / m`). Нет подходящей записи — «ожидается».
    Для экспорта — `WorkoutsTab.exportRecords()` (читаемый раздел `workouts` в data.json, собирает my.js).
    Хранилище — провайдер от my.js (`setStore`, раздел «ТРЕНИРОВКИ» в my.js): запись лежит в личном `state` под ключом
    `wk:<id>` = {c, t} и едет в облако вместе с остальными данными и в экспорт; удаление — тумбстоун {c:null, t}.
@@ -63,6 +66,14 @@
   var TIP_LONG_DAYS = 90;                      // «длинная» пробежка = не короче медианы пробежек за столько дней
   var TIP_LONG_MIN_RUNS = 5;                   // пробежек нужно для медианы; меньше — фиксированная граница
   var TIP_LONG_FALLBACK_M = 5000;
+  var REC_DISTS = [                            // дистанции экрана «Рекорды» (метры)
+    { key: "5", label: "5 км", m: 5000 },
+    { key: "10", label: "10 км", m: 10000 },
+    { key: "21", label: "Полумарафон", m: 21097.5 },
+    { key: "42", label: "Марафон", m: 42195 }
+  ];
+  var REC_DIST_MIN = 0.98, REC_DIST_MAX = 1.10; // запись подходит на дистанцию, если её длина — от 98 % до 110 % дистанции
+  var REC_WAIT_TEXT = "ожидается";
   var TIP_CATS = ["Объём и регулярность", "Техника", "Силовая", "Восстановление", "Анализ", "Другое"];
   var TIP_RPE_OPTS = [["", "Любая"], ["low", "Лёгкая 1–3"], ["mid", "Средняя 4–6"], ["high", "Тяжёлая 7–10"]];
   var TIP_DIST_OPTS = [["", "Любая"], ["short", "Короткая"], ["long", "Длинная"]];
@@ -94,6 +105,8 @@
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V10"></path><path d="M7.5 13.5L12 9l4.5 4.5"></path><path d="M4.5 5.5h15"></path></svg>';
   var TIP_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 21h4"></path><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1 2V16h5.2v-.2c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"></path></svg>';
+  var CUP_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8v5a4 4 0 0 1-8 0z"></path><path d="M8 6H5v1.5A3 3 0 0 0 8 10.5"></path><path d="M16 6h3v1.5a3 3 0 0 1-3 3"></path><path d="M12 13v5"></path><path d="M8.5 19.5h7"></path></svg>';
   var PLUS_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
   var CHECK_ICON_SVG =
@@ -165,6 +178,11 @@
   function dayLabel(ts){
     var d = new Date(ts);
     return pad2(d.getDate()) + "." + pad2(d.getMonth() + 1) + " · " + WEEKDAYS[d.getDay()];
+  }
+
+  function fmtDate(ts){
+    var d = new Date(ts);
+    return pad2(d.getDate()) + "." + pad2(d.getMonth() + 1) + "." + d.getFullYear();
   }
 
   // ---------- период ----------
@@ -371,6 +389,14 @@
       ".wk-tip-input{display:block;width:100%;box-sizing:border-box;min-height:110px;padding:8px 10px;border-radius:10px;border:1px solid var(--groove-shadow);background:transparent;color:var(--ink);font:inherit;resize:vertical;}" +
       ".wk-seg-btn{display:inline-block;margin:0 6px 6px 0;padding:6px 12px;border-radius:10px;border:1px solid var(--groove-shadow);background:transparent;color:var(--ink);font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
       ".wk-seg-btn.on{background:var(--wood);border-color:var(--wood);color:var(--parchment);}" +
+      ".wk-rec-cat{margin:14px 0 2px;font-weight:bold;color:var(--wood-dark);}" +
+      ".wk-rec-cat:first-child{margin-top:4px;}" +
+      ".wk-rec{display:flex;align-items:center;gap:10px;padding:10px 2px;border-top:1px solid var(--groove-shadow);line-height:1.3;}" +
+      ".wk-rec:first-child{border-top:none;}" +
+      ".wk-rec .wk-rec-name{flex:1;min-width:0;}" +
+      ".wk-rec .wk-sub{display:block;font-size:.8em;color:var(--ink-soft);margin-top:2px;}" +
+      ".wk-rec .wk-rec-val{font-weight:bold;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;}" +
+      ".wk-rec .wk-rec-val.wait{font-weight:normal;color:var(--ink-soft);white-space:normal;max-width:45%;}" +
       ".wk-tip-note{margin-top:10px;color:var(--ink-soft);font-size:.9em;}" +
       ".wk-tip-err{margin-top:8px;color:var(--danger);}";
     document.head.appendChild(st);
@@ -384,6 +410,7 @@
       '<button type="button" class="mdeditor-fab-btn" id="wkInfoBtn" title="Информация" aria-label="Информация">' + INFO_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="wkImportBtn" title="Загрузить тренировки из файла" aria-label="Загрузить тренировки из файла">' + IMPORT_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="wkTipsBtn" title="Советы" aria-label="Советы">' + TIP_ICON_SVG + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="wkRecordsBtn" title="Рекорды" aria-label="Рекорды">' + CUP_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn wk-load' + (lt.length >= 5 ? " long" : "") + (infoOpen ? " on" : "") + '" id="wkLoadBtn" title="Нагрузка за 7 дней" aria-label="Нагрузка за 7 дней">' + esc(lt) + '</button>' +
       PERIODS.map(function(p){
         return '<button type="button" class="mdeditor-fab-btn wk-per' + (p.months === months ? " on" : "") + '" data-months="' + p.months + '">' + p.label + '</button>';
@@ -524,6 +551,8 @@
     if(ib) ib.addEventListener("click", renderInfoScreen);
     var tb = document.getElementById("wkTipsBtn");
     if(tb) tb.addEventListener("click", renderTipsScreen);
+    var rb = document.getElementById("wkRecordsBtn");
+    if(rb) rb.addEventListener("click", renderRecordsScreen);
     var imb = document.getElementById("wkImportBtn"), inp = document.getElementById("wkImportInput");
     if(imb && inp){
       imb.addEventListener("click", function(){ if(!importBusy) inp.click(); });
@@ -858,6 +887,7 @@
     html += row('<span style="font-size:11px;font-weight:bold;">1 мес.</span>', "Период: месяц, 3 месяца, полгода, год. Стрелки ‹ › и свайп листают назад и вперёд, сверху — сумма километров и число тренировок. Нажатие на строку записи открывает «Удалить» (нужно нажать дважды).");
     html += row(IMPORT_ICON_SVG, "Загружает тренировки из файла. Подходят два вида: архив «Экспортировать личные данные» (ZIP или data.json) — из него берутся только тренировки, остальные данные не меняются; и CSV-выгрузка стороннего трекера — из неё берутся только пробежки: дата и километры (время и баллы не переносятся). Уже имеющиеся тренировки повторно не добавляются.");
     html += row(TIP_ICON_SVG, "Советы: один совет в день показывается внизу вкладки, когда запись не идёт. Нажатие на карточку закрывает её до следующего открытия вкладки. Кнопка открывает список советов: добавить, изменить, удалить; у каждого — категория и необязательные отметки: тяжесть последней тренировки (1–3, 4–6, 7–10) и её дистанция (короткая/длинная). Без отметок совет подходит всегда.");
+    html += row(CUP_ICON_SVG, "Рекорды: самое долгое время и самая длинная дистанция, а также лучшее время на 5 км, 10 км, полумарафоне и марафоне. На дистанцию подходит запись длиной от 98 % до 110 % этой дистанции (время пересчитывается на ровную дистанцию); импортированные записи без времени в лучших временах не участвуют. Пока подходящей записи нет, пишет «ожидается».");
     html += row(INFO_ICON_SVG, "Эта справка. Тренировки входят в экспорт личных данных: дата, километры, время и баллы.");
     c.innerHTML =
       '<h3 class="common-tab-title">Тренировки — кнопки</h3>' +
@@ -869,6 +899,69 @@
     if(hb) hb.addEventListener("click", function(){
       // «Действие ВПЕРЁД»: шаг «назад» вернёт на этот экран — тот же приём, что у инструкции вкладки «Книги»
       if(window.AppNav) window.AppNav.push(function(){ renderInfoScreen(); });
+      render();
+    });
+  }
+
+  // ---------- экран «Рекорды» (кнопка-кубок) ----------
+  // самая долгая и самая длинная запись; лучшее время на каждой дистанции из REC_DISTS (по целым записям подходящей длины)
+  function bestRecords(){
+    var out = { time: null, dist: null, races: {} };
+    allRecords().forEach(function(r){
+      var m = num(r.m), t = num(r.totalMs);
+      if(m > 0 && (!out.dist || m > num(out.dist.m))) out.dist = r;
+      if(t > 0 && (!out.time || t > num(out.time.totalMs))) out.time = r;
+      if(m <= 0 || t <= 0) return;
+      REC_DISTS.forEach(function(d){
+        if(m < d.m * REC_DIST_MIN || m > d.m * REC_DIST_MAX) return;
+        var ms = t * d.m / m; // время на ровную дистанцию
+        var cur = out.races[d.key];
+        if(!cur || ms < cur.ms) out.races[d.key] = { ms: ms, rec: r };
+      });
+    });
+    return out;
+  }
+
+  function recRowHtml(name, val, sub){
+    if(val === null){
+      return '<div class="wk-rec"><span class="wk-rec-name">' + esc(name) + '</span><span class="wk-rec-val wait">' + esc(REC_WAIT_TEXT) + '</span></div>';
+    }
+    return '<div class="wk-rec"><span class="wk-rec-name">' + esc(name) + (sub ? '<span class="wk-sub">' + esc(sub) + '</span>' : "") +
+      '</span><span class="wk-rec-val">' + esc(val) + '</span></div>';
+  }
+  // «12.10.2026 · 14,2 км · темп 5:12 /км»; темп — по целой записи или по ровной дистанции, если передана distM
+  function recSub(r, withKm, withTime, paceMs, paceM){
+    var parts = [fmtDate(r.start)];
+    if(withKm) parts.push(fmtKm(r.m));
+    if(withTime) parts.push(fmtClock(r.totalMs));
+    if(paceMs > 0 && paceM > 0) parts.push("темп " + fmtClock(paceMs / (paceM / 1000)) + " /км");
+    return parts.join(" · ");
+  }
+
+  function renderRecordsScreen(){
+    var c = container();
+    if(!c) return;
+    infoScreen = true;
+    ensureStyle();
+    var b = bestRecords();
+    var html = '<h3 class="common-tab-title">Рекорды</h3><div class="task-info-body">';
+    html += '<div class="wk-rec-cat">Самое долгое и самое длинное</div><div class="wk-card" style="padding:4px 12px;">';
+    html += recRowHtml("Максимальное время бега", b.time ? fmtClock(b.time.totalMs) : null,
+      b.time ? recSub(b.time, true, false, num(b.time.totalMs), num(b.time.m)) : "");
+    html += recRowHtml("Максимальная дистанция бега", b.dist ? fmtKm(b.dist.m) : null,
+      b.dist ? recSub(b.dist, false, num(b.dist.totalMs) > 0, num(b.dist.totalMs), num(b.dist.m)) : "");
+    html += '</div><div class="wk-rec-cat">Лучшее время на дистанции</div><div class="wk-card" style="padding:4px 12px;">';
+    REC_DISTS.forEach(function(d){
+      var x = b.races[d.key];
+      html += recRowHtml(d.label, x ? fmtClock(x.ms) : null, x ? recSub(x.rec, true, false, x.ms, d.m) : "");
+    });
+    html += '</div></div><div class="mdeditor-fab-row">' +
+      tipsHomeBtnHtml("wkRecordsHomeBtn", "Назад к тренировкам") + '</div>';
+    c.innerHTML = html;
+    var hb = document.getElementById("wkRecordsHomeBtn");
+    if(hb) hb.addEventListener("click", function(){
+      // «Действие ВПЕРЁД»: шаг «назад» вернёт на этот экран — тот же приём, что у справки «i»
+      if(window.AppNav) window.AppNav.push(function(){ renderRecordsScreen(); });
       render();
     });
   }
