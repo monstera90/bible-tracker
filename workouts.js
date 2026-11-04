@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 8.1 (04.11)
+   Версия: 8.2 (04.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -22,7 +22,8 @@
    (метка с красной становится зелёной, идёт время) → если связь пропала, километры на этом участке не считаются, а время
    идёт; при остановке показывается сообщение «не писалась с … по …». Пауза и остановка — в панели и в уведомлении/острове
    Xiaomi. Общее время = время с учётом километров + время без учёта. После остановки оболочка сопоставляет маршрут с картой
-   OpenStreetMap (если сервис недоступен — остаётся расстояние по GPS) и кладёт готовую запись в очередь; страница забирает её
+   OpenStreetMap и кладёт готовую запись в очередь; без интернета запись сохраняется сразу по GPS с меткой `pend:1`, трек ждёт сети в оболочке, а при подключении
+   приходит обновление записи (`upd:1`, `rid`, `m`, `how`) — `drain` меняет километры и снимает `pend`; нет данных от сервиса по другой причине (дорога не найдена) — остаётся GPS; страница забирает её
    `drain()` (при открытии вкладки, при возврате в приложение, после остановки) и сохраняет через хранилище.
 
    Запись тренировки: {id, start, end, m (метры, итог), rawM (метры по GPS), totalMs, lostMs, gaps:[[с,по]], how:"map"|"raw"[, up (набор высоты, м, только если был; считает оболочка по высоте GPS), jumps (сколько раз GPS «уезжал» в сторону и это отброшено, только если было), rpe (1…10)]}.
@@ -338,7 +339,7 @@
     try{ STORE.put(rec.id, c); }
     catch(e){ setMessage("Не удалось сохранить оценку. Попробуйте ещё раз.", ""); return; }
     pendCache = null;
-    saveLastResult({ id: rec.id, start: rec.start, m: rec.m, totalMs: rec.totalMs, gaps: rec.gaps || [], how: rec.how, jumps: rec.jumps, up: rec.up, rpe: rpeSel });
+    saveLastResult({ id: rec.id, start: rec.start, m: rec.m, totalMs: rec.totalMs, gaps: rec.gaps || [], how: rec.how, pend: rec.pend, jumps: rec.jumps, up: rec.up, rpe: rpeSel });
     rpeSel = 0; message = ""; messageAction = "";
     render(); // обновит список, кнопку-индикатор и панель
     refreshTabMark();
@@ -546,7 +547,7 @@
       if(rpeOk(r.rpe)) sub.push(minutesOf(r) + " мин × " + r.rpe + " = " + loadOf(r) + " " + pointsWord(loadOf(r)));
       else if(r.id === pid) sub.push("ждёт оценки");
       if(r.imp) sub.push("импорт");
-      else if(r.how === "raw") sub.push("по GPS");
+      else if(r.how === "raw") sub.push(r.pend ? "по GPS, карта подтянется при интернете" : "по GPS");
       if(num(r.up) > 0) sub.push("↑ " + Math.round(num(r.up)) + " м");
       if(num(r.jumps) > 0) sub.push("выбросов GPS: " + Math.round(num(r.jumps)));
       if(num(r.lostMs) >= 1000) sub.push("без учёта км: " + fmtDur(r.lostMs));
@@ -921,7 +922,7 @@
   }
 
   function resultCardHtml(r){
-    var how = r.how === "map" ? "маршрут сверен с картой OpenStreetMap" : "расстояние по GPS (сверить с картой не удалось)";
+    var how = r.how === "map" ? "маршрут сверен с картой OpenStreetMap" : (r.pend ? "расстояние по GPS; маршрут сверится с картой, когда появится интернет" : "расстояние по GPS (сверить с картой не удалось)");
     return '<div class="wk-card" id="wkResultCard"><div class="wk-live-head"><span class="wk-dot ok"></span><span>Тренировка сохранена</span></div>' +
       '<div class="wk-live-time">' + esc(fmtKm(r.m)) + '</div>' +
       '<div class="wk-live-dist">' + esc(fmtClock(r.totalMs)) + '</div>' +
@@ -1989,6 +1990,21 @@
     var have = {};
     allRecords().forEach(function(r){ have[r.id] = true; });
     arr.forEach(function(r){
+      if(r && r.upd === 1 && typeof r.id === "string" && typeof r.rid === "string"){
+        // достройка записи, сохранённой без интернета: оболочка сверила трек с картой — обновляем километры, остальное не трогаем
+        var cur = null;
+        allRecords().forEach(function(x){ if(x.id === r.rid) cur = x; });
+        if(cur){
+          var u = {};
+          Object.keys(cur).forEach(function(k){ if(k !== "id" && k !== "pend") u[k] = cur[k]; });
+          u.m = Math.round(num(r.m));
+          u.how = r.how === "map" ? "map" : "raw";
+          try{ STORE.put(r.rid, u); }catch(e){ return; } // не вышло — обновление остаётся в очереди
+          pendCache = null;
+        }
+        ids.push(r.id); // записи нет (удалена) — обновление тоже не нужно
+        return;
+      }
       if(!r || typeof r.id !== "string" || typeof r.start !== "number") return;
       if(!have[r.id]){
         var c = {
@@ -1999,8 +2015,10 @@
         };
         if(num(r.up) > 0) c.up = Math.round(num(r.up));
         if(num(r.jumps) > 0) c.jumps = Math.round(num(r.jumps));
+        if(r.pend === 1) c.pend = 1; // записано без интернета: километры по GPS, карта подтянется позже (оболочка пришлёт обновление)
         c.needRpe = 1; // сначала оценка тяжести (sRPE), итоговая карточка появится после неё; метка едет в облако вместе с записью
         try{ STORE.put(r.id, c); }catch(e){ return; }
+        have[r.id] = true;
         pendCache = null;
       }
       ids.push(r.id);

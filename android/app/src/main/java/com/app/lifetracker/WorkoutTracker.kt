@@ -1,7 +1,8 @@
 package com.app.lifetracker
-// Версия: 4.0 (02.11)
+// Версия: 5.0 (04.11)
 
 import android.content.Context
+import android.net.ConnectivityManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -287,6 +288,7 @@ object WorkoutTracker {
             }
             synchronized(lock) { status = ST_IDLE }
             WorkoutService.refresh(app)
+            retryPending(app) // сеть могла появиться: догнать и записи, сохранённые раньше без интернета (после основной записи — порядок очереди важен)
         }.start()
         return true
     }
@@ -568,18 +570,26 @@ object WorkoutTracker {
 
     // ---------- сопоставление с картой ----------
 
+    /** Признак «нет связи с сервисом карт» (а не «дорога не найдена»): такая запись сохраняется по GPS и достраивается позже. */
+    private class MatchCtx { var netFail = false }
+
     private fun finish(ctx: Context, rec: Rec): JSONObject {
+        val mc = MatchCtx()
         var total = 0.0
+        var fixed = 0.0 // куски, которые не сопоставляются с картой вовсе (короткие)
         var matchedAny = false
         var rawAll = 0.0
+        val eligible = JSONArray() // куски для сопоставления с картой: {raw, pts} — на случай, если сети нет
         for (seg in rec.segments) {
             val raw = segmentLength(seg)
             rawAll += raw
             if (raw < MATCH_MIN_SEG_M || seg.size < 3) {
                 total += raw
+                fixed += raw
                 continue
             }
-            val m = matchSegment(seg)
+            eligible.put(JSONObject().put("raw", raw).put("pts", thinPoints(seg)))
+            val m = matchSegment(seg, mc)
             if (m != null && m >= raw * MATCH_RATIO_LO && m <= raw * MATCH_RATIO_HI) {
                 total += m
                 matchedAny = true
@@ -587,9 +597,129 @@ object WorkoutTracker {
                 total += raw
             }
         }
+        val rawTotal = rawAll.coerceAtLeast(rec.rawM)
+        if (mc.netFail && eligible.length() > 0) {
+            // сети не было: тренировка сохраняется по GPS, трек откладывается — карта подтянется при подключении к интернету
+            val json = rec.toJson(rawTotal, "raw").put("pend", 1)
+            try {
+                addPending(ctx, JSONObject().put("id", json.getString("id")).put("fixed", fixed).put("rawTotal", rawTotal)
+                    .put("at", System.currentTimeMillis()).put("segs", eligible))
+            } catch (e: Exception) {
+                json.remove("pend") // трек не сохранился — ждать нечего
+            }
+            return json
+        }
         // если вся тренировка не нашла пары на карте — остаётся расстояние по GPS целиком
         val how = if (matchedAny) "map" else "raw"
-        return rec.toJson(if (matchedAny) total else rawAll.coerceAtLeast(rec.rawM), how)
+        return rec.toJson(if (matchedAny) total else rawTotal, how)
+    }
+
+    /** Точки куска не гуще MATCH_MIN_STEP_M, [[lat, lon], ...] (6 знаков) — компактно для хранения. */
+    private fun thinPoints(seg: List<DoubleArray>): JSONArray {
+        val out = JSONArray()
+        var last: DoubleArray? = null
+        for (p in seg) {
+            if (last == null || haversine(last[0], last[1], p[0], p[1]) >= MATCH_MIN_STEP_M) {
+                out.put(JSONArray().put(Math.round(p[0] * 1e6) / 1e6).put(Math.round(p[1] * 1e6) / 1e6))
+                last = p
+            }
+        }
+        return out
+    }
+
+    // ---------- тренировки без интернета: трек ждёт сети, потом карта «подтягивается» ----------
+
+    private const val KEY_PENDING = "pending_match"
+    private const val PENDING_MAX_AGE_MS = 60L * 24 * 3600 * 1000
+    private val retrying = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun readPending(ctx: Context): JSONArray = try {
+        JSONArray(prefs(ctx).getString(KEY_PENDING, "[]") ?: "[]")
+    } catch (e: Exception) {
+        JSONArray()
+    }
+
+    @Synchronized
+    private fun addPending(ctx: Context, item: JSONObject) {
+        val arr = readPending(ctx)
+        arr.put(item)
+        if (!prefs(ctx).edit().putString(KEY_PENDING, arr.toString()).commit()) throw IllegalStateException("pending not saved")
+    }
+
+    @Synchronized
+    private fun dropPending(ctx: Context, id: String) {
+        val arr = readPending(ctx)
+        val keep = JSONArray()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            if (o.optString("id") != id) keep.put(o)
+        }
+        prefs(ctx).edit().putString(KEY_PENDING, keep.toString()).commit()
+    }
+
+    fun hasPendingMatch(ctx: Context): Boolean = readPending(ctx).length() > 0
+
+    private fun networkUp(ctx: Context): Boolean = try {
+        val cm = ctx.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        @Suppress("DEPRECATION")
+        cm.activeNetworkInfo?.isConnected == true
+    } catch (e: Exception) {
+        true // не смогли проверить — пробуем, неудача безвредна
+    }
+
+    /**
+     * Достроить записи, сохранённые без интернета: когда сеть есть, трек сопоставляется с картой, а итог (`m`, `how`)
+     * уходит странице обновлением записи (`upd:1`). Зовётся при запуске/возврате в приложение, при появлении сети и
+     * когда страница забирает записи. Работает в фоновом потоке, одновременно — не больше одного прохода.
+     */
+    fun retryPending(ctx: Context) {
+        val app = ctx.applicationContext
+        if (readPending(app).length() == 0) return
+        if (!networkUp(app)) return
+        if (!retrying.compareAndSet(false, true)) return
+        Thread {
+            try {
+                val arr = readPending(app)
+                val now = System.currentTimeMillis()
+                for (i in 0 until arr.length()) {
+                    val it = arr.optJSONObject(i) ?: continue
+                    val id = it.optString("id")
+                    if (now - it.optLong("at", now) > PENDING_MAX_AGE_MS) { dropPending(app, id); continue }
+                    val mc = MatchCtx()
+                    var total = it.optDouble("fixed", 0.0)
+                    var matchedAny = false
+                    val segs = it.optJSONArray("segs") ?: JSONArray()
+                    for (k in 0 until segs.length()) {
+                        val so = segs.optJSONObject(k) ?: continue
+                        val raw = so.optDouble("raw", 0.0)
+                        val pa = so.optJSONArray("pts") ?: continue
+                        val pts = ArrayList<DoubleArray>()
+                        for (j in 0 until pa.length()) {
+                            val p = pa.optJSONArray(j) ?: continue
+                            pts.add(doubleArrayOf(p.optDouble(0), p.optDouble(1)))
+                        }
+                        val m = if (pts.size >= 2) matchSegment(pts, mc) else null
+                        if (m != null && m >= raw * MATCH_RATIO_LO && m <= raw * MATCH_RATIO_HI) {
+                            total += m
+                            matchedAny = true
+                        } else {
+                            total += raw
+                        }
+                        if (mc.netFail) break
+                    }
+                    if (mc.netFail) break // сеть пропала посреди прохода — остальное в следующий раз
+                    val upd = JSONObject().put("id", "u" + id).put("rid", id).put("upd", 1) // id в очереди свой: подтверждение записи страницей не должно съесть обновление
+                        .put("m", Math.round(if (matchedAny) total else it.optDouble("rawTotal", total)))
+                        .put("how", if (matchedAny) "map" else "raw")
+                    appendFinished(app, upd)
+                    dropPending(app, id)
+                }
+            } catch (e: Exception) {
+                // не вышло — повторится при следующем запуске/появлении сети
+            } finally {
+                retrying.set(false)
+            }
+        }.start()
     }
 
     private fun segmentLength(seg: List<DoubleArray>): Double {
@@ -599,7 +729,7 @@ object WorkoutTracker {
     }
 
     /** Длина сегмента по карте (метры) или null, если сервис не ответил / не нашёл дорогу хотя бы для одного куска. */
-    private fun matchSegment(seg: List<DoubleArray>): Double? {
+    private fun matchSegment(seg: List<DoubleArray>, mc: MatchCtx): Double? {
         // прореживание: оставляем точки не гуще MATCH_MIN_STEP_M
         val pts = ArrayList<DoubleArray>()
         pts.add(seg[0])
@@ -615,7 +745,8 @@ object WorkoutTracker {
             val chunk = pts.subList(from, to)
             if (chunk.size >= 2) {
                 val raw = segmentLength(chunk)
-                val m = if (raw >= 15.0) matchChunk(chunk) else null
+                val m = if (raw >= 15.0) matchChunk(chunk, mc) else null
+                if (mc.netFail) return null
                 total += if (m != null && m >= raw * MATCH_RATIO_LO && m <= raw * MATCH_RATIO_HI) m else raw
             }
             if (to >= pts.size) break
@@ -624,7 +755,7 @@ object WorkoutTracker {
         return total
     }
 
-    private fun matchChunk(chunk: List<DoubleArray>): Double? {
+    private fun matchChunk(chunk: List<DoubleArray>, mc: MatchCtx): Double? {
         var conn: HttpURLConnection? = null
         return try {
             val shape = JSONArray()
@@ -644,10 +775,15 @@ object WorkoutTracker {
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("User-Agent", "LifeTracker/1.0 (workout map matching)")
             conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            if (conn.responseCode != 200) return null
+            val code = conn.responseCode
+            if (code == 429 || code >= 500) { mc.netFail = true; return null } // сервис перегружен/недоступен — повторить позже
+            if (code != 200) return null
             val text = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             val km = JSONObject(text).getJSONObject("trip").getJSONObject("summary").getDouble("length")
             if (km.isNaN() || km <= 0) null else km * 1000.0
+        } catch (e: java.io.IOException) {
+            mc.netFail = true // нет сети, обрыв, тайм-аут
+            null
         } catch (e: Exception) {
             null
         } finally {
