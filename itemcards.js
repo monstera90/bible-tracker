@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 34.0 (31.10)
+   Версия: 35.0 (05.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -354,6 +354,7 @@ window.initItemCardsModule = function(deps){
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + ICONS[name] + '</svg>';
   }
   var PLUS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
+  var DRAG_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"></path><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"></path></svg>';
   var SIZE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="12" rx="1.5"></rect><rect x="13" y="9" width="8" height="12" rx="1.5"></rect></svg>';
   var SCAN_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8"></path><path d="M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8"></path><path d="M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16"></path><path d="M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"></path><rect x="8" y="8" width="3" height="3"></rect><rect x="13" y="8" width="3" height="3"></rect><rect x="8" y="13" width="3" height="3"></rect><path d="M13 13h3v3"></path></svg>';
   // часы со стрелкой вокруг («история»), слегка изменённые: стрелка по часовой, на кнопке «сегодняшняя дата»
@@ -599,6 +600,7 @@ window.initItemCardsModule = function(deps){
   var revealedIds = {};
   var flippedId = null;
   var typeMenuOpen = false;
+  var dragMode = false; // режим «менять карточки местами» (кнопка #itemCardsDragBtn); только на время открытой вкладки
   var lastRenderAt = 0; // время последней перерисовки сетки: прокрутка сразу после неё (сдвиг содержимого) кнопки карточки не прячет
   // фильтр по типу карточек (кнопка-воронка слева от «+»): all | timer | item | task | fav («Избранное» — только карточки с признаком `fav`)
   var FILTER_KEY = "itemCardsFilter_v1";
@@ -902,7 +904,7 @@ window.initItemCardsModule = function(deps){
     var el = container();
     if(!el) return;
     var cards = loadCards();
-    var html = '<div class="mdeditor-tab item-cards-tab" id="itemCardsTab">';
+    var html = '<div class="mdeditor-tab item-cards-tab' + (dragMode ? ' item-cards-dragmode' : '') + '" id="itemCardsTab">';
     html += '<div class="item-cards-grid" id="itemCardsGrid"></div>';
     // «Сегодня» — одна на всё приложение: пока карточка есть, пункта в меню нет (вернётся после удаления карточки)
     var hasDateNote = cards.some(function(c){ return c.type === "datenote"; });
@@ -945,6 +947,7 @@ window.initItemCardsModule = function(deps){
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsAddBtn" title="Новая карточка">' + PLUS_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsScanBtn" title="Сканировать QR-код">' + SCAN_ICON_SVG + '</button>' +
       (showPdf ? '<button type="button" class="mdeditor-fab-btn" id="itemCardsPdfBtn" title="PDF с QR-кодами для печати">' + PDF_ICON_SVG + '</button>' : '') +
+      '<button type="button" class="mdeditor-fab-btn' + (dragMode ? ' pressed' : '') + '" id="itemCardsDragBtn" title="' + (dragMode ? 'Перетягивание включено: удерживайте карточку и перетащите на место другой (нажмите, чтобы выключить)' : 'Менять карточки местами') + '">' + DRAG_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsSizeBtn" title="Размер карточек">' + SIZE_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsHomeStub" tabindex="-1" aria-disabled="true">' + READER_HOME_ICON_SVG + '</button>' +
     '</div>';
@@ -1117,6 +1120,87 @@ window.initItemCardsModule = function(deps){
     for(var i = 0; i < btns.length; i++) btns[i].classList.remove("visible");
   }
 
+  // ---------- перетягивание карточек (режим кнопки #itemCardsDragBtn) ----------
+  // Удержание карточки → она едет за пальцем (transform), у краёв окна список прокручивается; отпустили над другой карточкой —
+  // они меняются местами в общем списке (порядок только на этом устройстве, в облако не уходит).
+  var dragState = null;
+  function dragScroller(grid){
+    var el = grid;
+    while(el && el !== document.body){
+      var cs = window.getComputedStyle ? window.getComputedStyle(el) : null;
+      var oy = cs ? cs.overflowY : "";
+      if((oy === "auto" || oy === "scroll") && el.scrollHeight > el.clientHeight + 1) return el;
+      el = el.parentNode;
+    }
+    return container();
+  }
+  function dragApply(){
+    var d = dragState;
+    if(!d) return;
+    var dx = d.x - d.sx;
+    var dy = (d.y - d.sy) + (d.scroller ? d.scroller.scrollTop - d.st0 : 0);
+    d.node.style.transform = "translate(" + dx + "px," + dy + "px) scale(1.06)";
+    var cards = d.grid.querySelectorAll(".item-card");
+    var hit = null;
+    for(var i = 0; i < cards.length; i++){
+      if(cards[i] === d.node) continue;
+      var r = cards[i].getBoundingClientRect();
+      if(d.x >= r.left && d.x <= r.right && d.y >= r.top && d.y <= r.bottom){ hit = cards[i]; break; }
+    }
+    if(hit !== d.target){
+      if(d.target) d.target.classList.remove("item-card-drop");
+      if(hit) hit.classList.add("item-card-drop");
+      d.target = hit;
+    }
+  }
+  function dragTick(){
+    var d = dragState;
+    if(!d) return;
+    var sc = d.scroller;
+    if(sc){
+      var r = sc.getBoundingClientRect();
+      var zone = 70, speed = 0;
+      if(d.y < r.top + zone) speed = -Math.ceil(16 * Math.min(1, (r.top + zone - d.y) / zone));
+      else if(d.y > r.bottom - zone) speed = Math.ceil(16 * Math.min(1, (d.y - (r.bottom - zone)) / zone));
+      if(speed){ var before = sc.scrollTop; sc.scrollTop = before + speed; if(sc.scrollTop !== before) dragApply(); }
+    }
+    d.raf = window.requestAnimationFrame ? window.requestAnimationFrame(dragTick) : setTimeout(dragTick, 30);
+  }
+  function beginDrag(grid, cardNode, x, y){
+    if(dragState) return;
+    hideRevealed();
+    if(flippedId) unflipAny();
+    var sc = dragScroller(grid);
+    dragState = { grid: grid, node: cardNode, id: cardNode.dataset.id, sx: x, sy: y, x: x, y: y, scroller: sc, st0: sc ? sc.scrollTop : 0, target: null, raf: 0 };
+    cardNode.classList.add("item-card-dragging");
+    try{ if(navigator.vibrate) navigator.vibrate(15); }catch(e){}
+    dragApply();
+    dragTick();
+  }
+  function moveDrag(x, y){
+    if(!dragState) return;
+    dragState.x = x; dragState.y = y;
+    dragApply();
+  }
+  function endDrag(commit){
+    var d = dragState;
+    if(!d) return;
+    dragState = null;
+    if(window.cancelAnimationFrame && d.raf) window.cancelAnimationFrame(d.raf); else clearTimeout(d.raf);
+    d.node.classList.remove("item-card-dragging");
+    d.node.style.transform = "";
+    if(d.target) d.target.classList.remove("item-card-drop");
+    if(!commit || !d.target) return;
+    var list = loadCards(), a = -1, b = -1, tid = d.target.dataset.id;
+    for(var i = 0; i < list.length; i++){ if(list[i].id === d.id) a = i; if(list[i].id === tid) b = i; }
+    if(a < 0 || b < 0 || a === b) return;
+    var tmp = list[a]; list[a] = list[b]; list[b] = tmp;
+    persistCards(); // порядок хранится только здесь: сверку с облаком и пересчёт напоминаний не запускаем
+    var st = d.scroller ? d.scroller.scrollTop : 0;
+    renderGrid();
+    if(d.scroller) d.scroller.scrollTop = st;
+  }
+
   function bindGrid(grid){
     var LONG_MS = 350, MOVE_PX = 10, DOUBLE_MS = 300;
     var pressTimer = null, startXY = null, longFired = false;
@@ -1127,8 +1211,12 @@ window.initItemCardsModule = function(deps){
       longFired = false; startXY = { x: x, y: y };
       clearPress();
       // удержание часов напоминания — снять напоминание (как у задач); кнопки правки/удаления при этом не раскрываются
-      if(target && target.closest && target.closest(".item-card-remind-btn")){
+      if(!dragMode && target && target.closest && target.closest(".item-card-remind-btn")){
         pressTimer = setTimeout(function(){ longFired = true; clearCardReminder(cardNode.dataset.id); }, LONG_MS);
+        return;
+      }
+      if(dragMode){
+        pressTimer = setTimeout(function(){ longFired = true; beginDrag(grid, cardNode, x, y); }, LONG_MS);
         return;
       }
       pressTimer = setTimeout(function(){
@@ -1140,18 +1228,24 @@ window.initItemCardsModule = function(deps){
       }, LONG_MS);
     }
     function movePress(x, y){
+      if(dragState){ moveDrag(x, y); return; }
       if(!startXY) return;
       var dx = x - startXY.x, dy = y - startXY.y;
       if(Math.sqrt(dx * dx + dy * dy) > MOVE_PX) clearPress();
     }
     grid.addEventListener("touchstart", function(e){ var t = e.touches[0]; startPress(e.target.closest(".item-card"), t.clientX, t.clientY, e.target); }, { passive: true });
-    grid.addEventListener("touchmove", function(e){ var t = e.touches[0]; movePress(t.clientX, t.clientY); }, { passive: true });
-    grid.addEventListener("touchend", clearPress);
-    grid.addEventListener("touchcancel", clearPress);
+    if(dragMode){
+      // в режиме перетягивания прокрутку на время переноса гасим (слушатель не пассивный, и только в этом режиме)
+      grid.addEventListener("touchmove", function(e){ var t = e.touches[0]; if(dragState){ e.preventDefault(); } movePress(t.clientX, t.clientY); }, { passive: false });
+    } else {
+      grid.addEventListener("touchmove", function(e){ var t = e.touches[0]; movePress(t.clientX, t.clientY); }, { passive: true });
+    }
+    grid.addEventListener("touchend", function(){ clearPress(); if(dragState) endDrag(true); });
+    grid.addEventListener("touchcancel", function(){ clearPress(); if(dragState) endDrag(false); });
     grid.addEventListener("mousedown", function(e){ startPress(e.target.closest(".item-card"), e.clientX, e.clientY, e.target); });
     grid.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
-    grid.addEventListener("mouseup", clearPress);
-    grid.addEventListener("mouseleave", clearPress);
+    grid.addEventListener("mouseup", function(){ clearPress(); if(dragState) endDrag(true); });
+    grid.addEventListener("mouseleave", function(){ clearPress(); if(dragState) endDrag(false); });
     grid.addEventListener("contextmenu", function(e){ e.preventDefault(); });
 
     grid.addEventListener("click", function(e){
@@ -1162,6 +1256,7 @@ window.initItemCardsModule = function(deps){
       if(!c) return;
       if(longFired){ longFired = false; return; }
       e.stopPropagation();
+      if(dragMode) return; // режим перетягивания: нажатия по карточкам ничего не запускают
       clearAttention(id); // любое взаимодействие с карточкой снимает жирную обводку
       if(e.target.closest(".item-card-remind-btn")){ hideRevealed(); openCardReminder(c); return; }
       if(e.target.closest(".item-card-eye-btn")){ // глаз: показывать всегда ↔ скрыть (скрытая видна и в PDF не попадает)
@@ -1330,6 +1425,15 @@ window.initItemCardsModule = function(deps){
       if(sb1) sb1.classList.remove("open");
       setShowHidden(!getShowHidden());
       unflipAny();
+      renderGrid();
+    });
+    document.getElementById("itemCardsDragBtn").addEventListener("click", function(){
+      closeTypeMenu();
+      var sb3 = document.getElementById("itemCardsSizeBar");
+      if(sb3) sb3.classList.remove("open");
+      hideRevealed();
+      unflipAny();
+      dragMode = !dragMode;
       renderGrid();
     });
     var filterBtn = document.getElementById("itemCardsFilterBtn");
@@ -3516,6 +3620,8 @@ window.initItemCardsModule = function(deps){
   function renderSettingsTabItemCards(){
     flippedId = null;
     typeMenuOpen = false;
+    dragMode = false;
+    dragState = null;
     cardsCache = null; // записи могла изменить страница scan.html (кнопка «сегодняшняя дата»)
     renderGrid();
     cloudSyncOnEnter();

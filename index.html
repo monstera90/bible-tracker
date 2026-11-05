@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 35.0 (04.11)
+     Версия: 35.1 (05.11)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -115,7 +115,9 @@ window.addEventListener("error", function(e){
      (renderSettingsTabProgress) переносит её в #settingsTabContent и возвращает обратно, когда содержимое вкладки заменено. -->
 <div id="progressPanelHome" style="display:none;">
 <div class="progress-panel" id="progressPanel">
+  <h3 class="common-tab-title progress-panel-title">Мои цели</h3>
   <div class="overall-progress-wrap">
+    <div class="progress-caption">Чтение Библии</div>
     <div class="xp-bar">
       <div class="xp-fill" id="overallFill"></div>
       <div class="xp-text" id="overallText">0 из 1189 глав (0%)</div>
@@ -123,6 +125,7 @@ window.addEventListener("error", function(e){
   </div>
 
   <div class="hour-bar-wrap" id="hourMonthWrap">
+    <div class="progress-caption">Часы за месяц</div>
     <div class="hour-bar" id="hourMonthBar">
       <div class="hour-bar-light-fill" id="hourMonthLightFill"></div>
       <div class="hour-bar-dark-fill" id="hourMonthDarkFill"></div>
@@ -142,6 +145,7 @@ window.addEventListener("error", function(e){
   </div>
 
   <div class="hour-bar-wrap" id="hourYearWrap">
+    <div class="progress-caption">Часы за год</div>
     <div class="hour-bar hour-year-bar" id="hourYearBar">
       <div class="hour-year-collapsed" id="hourYearCollapsed">
         <div class="hour-bar-light-fill" id="hourYearLightFill"></div>
@@ -565,7 +569,7 @@ window.addEventListener("error", function(e){
       <!-- Вкладка бокового ряда «Статистики» (settingsTabSet2Btn12, "set2s_12") —
            «Прогресс»: прогресс-бары и счётчики, раньше стоявшие в шапке над графиком чтения (см. #progressPanel выше и
            renderSettingsTabProgress в my.js). -->
-      <button class="settings-tab" id="settingsTabSet2Btn12" title="Прогресс" style="display:none;">
+      <button class="settings-tab" id="settingsTabSet2Btn12" title="Мои цели" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="4" width="18" height="4.5" rx="1.2"></rect>
           <rect x="3" y="9.75" width="18" height="4.5" rx="1.2"></rect>

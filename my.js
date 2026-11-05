@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 134.0 (04.11)
+   Версия: 135.0 (05.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1742,7 +1742,7 @@
   var SCREENTIME_TAB_KEY = "screentime";
   var SCREENTIME_TAB_BTN_ID = "settingsTabScreenTimeBtn";
   // «Статистика» (нижний язычок settingsTabInfoStackBtn между шестерёнкой и «Задачи»): свой боковой ряд набора 1 (режим infoStackMode),
-  // работает как шестерёнка. Вкладки ряда сверху вниз: Забытые заметки, Обзор, Карта дней года, Трекер экранов, График чтения, Прогресс, Настроение.
+  // работает как шестерёнка. Вкладки ряда сверху вниз: Забытые заметки, Обзор, Карта дней года, Трекер экранов, График чтения, Мои цели, Настроение.
   var INFO_STACK_BTN_ID = "settingsTabInfoStackBtn";
   var INFO_STACK_TABS = ["set2s_4", "extra3", "year", "screentime", "set2s_13", "set2s_12", "mood"];
   var INFO_STACK_BTN_IDS = { set2s_4: "settingsTabSet2Btn4", extra3: "settingsTabExtra3Btn", year: "settingsTabYearBtn", screentime: "settingsTabScreenTimeBtn", set2s_13: "settingsTabSet2Btn13", set2s_12: "settingsTabSet2Btn12", mood: "settingsTabMoodBtn" };
@@ -14078,6 +14078,13 @@
       '<path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"></path>' +
       '<path d="M10 20v-5h4v5"></path>' +
     '</svg>';
+  // «В библиотеку» — книга со знаком «+» (кнопка видна только у книги, открытой без добавления в «Мои книги»).
+  var READER_LIBRARY_ADD_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H16v14H6.5A1.5 1.5 0 0 0 5 18.5v-14z"></path>' +
+      '<path d="M5 18.5A1.5 1.5 0 0 0 6.5 20H16"></path>' +
+      '<path d="M19 6v6M16 9h6"></path>' +
+    '</svg>';
   // "Главы" — список (три строки), в режиме списка глав кнопка переключается на
   // READER_TEXT_ICON_SVG (раскрытая книга) — тот же приём переключения иконки на кнопке, что у
   // mdEditorModeBtn (EYE/CODE) в mdeditor.js.
@@ -14552,8 +14559,8 @@
     document.getElementById("pdfAddLibNo").addEventListener("click", close);
     document.getElementById("pdfAddLibYes").addEventListener("click", function(){ close(); onYes(); });
   }
-  // Копирует открытый «на лету» PDF в библиотеку и превращает текущий экран в обычную книгу (с сохранением места и подчёркиваний).
-  function addTransientPdfToLibrary(done){
+  // Копирует открытую «на лету» книгу (PDF, epub) в библиотеку и превращает текущий экран в обычную книгу (с сохранением места и подчёркиваний).
+  function addTransientBookToLibrary(done){
     var st = bookReaderState;
     function fail(msg){
       var s1 = document.getElementById("bookReaderStatus");
@@ -14572,14 +14579,43 @@
       st.name = result.name;
       ensureBookNameSynced(result.hash, result.name);
       saveLastOpenedBookName(result.name);
+      var doneMsg = result.added ? "Книга добавлена в библиотеку." : "Эта книга уже есть в библиотеке.";
       if(st.pdf && !st.pdf.released){
         window.PdfPageReader.cover(st.pdf, 240).then(function(c){ saveBookCoverIfMissing(result.hash, c.base64, c.contentType); }).catch(function(){});
+      } else if(!st.pdf){
+        var coverId = findFirstBookImageId(st.chapters);
+        if(coverId && st.imageBase64 && st.imageBase64[coverId]) saveBookCoverIfMissing(result.hash, st.imageBase64[coverId].base64, st.imageBase64[coverId].contentType);
       }
       var c0 = document.getElementById("settingsTabContent");
-      if(c0 && currentSettingsTab === "set2s_7") renderBookReaderPdf(c0); // место чтения сохраняет leavePdfView
+      if(st.pdf){
+        if(c0 && currentSettingsTab === "set2s_7") renderBookReaderPdf(c0); // место чтения сохраняет leavePdfView; ряд кнопок собирается без «В библиотеку»
+      } else {
+        var addBtnGone = document.getElementById("bookReaderAddLibBtn");
+        if(addBtnGone && addBtnGone.parentNode) addBtnGone.parentNode.removeChild(addBtnGone);
+      }
+      var s2 = document.getElementById("bookReaderStatus");
+      if(s2) s2.textContent = doneMsg;
       done(true);
     }).catch(function(e){
       fail("Не удалось добавить в библиотеку: " + (e && e.message ? e.message : e));
+    });
+  }
+  // Кнопка «В библиотеку» (#bookReaderAddLibBtn) — есть в нижнем ряду, только пока книга открыта «на лету».
+  function bookReaderAddLibBtnHtml(){
+    if(!bookReaderState || !bookReaderState.transient) return '';
+    return '<button type="button" class="mdeditor-fab-btn" id="bookReaderAddLibBtn" title="Добавить книгу в библиотеку">' + READER_LIBRARY_ADD_ICON_SVG + '</button>';
+  }
+  function bindBookReaderAddLibBtn(){
+    var btn = document.getElementById("bookReaderAddLibBtn");
+    if(!btn) return;
+    btn.addEventListener("click", function(){
+      if(btn.disabled) return;
+      btn.disabled = true;
+      addTransientBookToLibrary(function(ok){
+        if(ok) return;
+        var again = document.getElementById("bookReaderAddLibBtn");
+        if(again) again.disabled = false;
+      });
     });
   }
   function handlePdfSelect(res){
@@ -14588,7 +14624,7 @@
     var statusEl = document.getElementById("bookReaderStatus");
     if(st.transient){
       openPdfAddToLibraryDialog(function(){
-        addTransientPdfToLibrary(function(ok){
+        addTransientBookToLibrary(function(ok){
           // книга стала обычной — то же выделение идёт обычным путём: выбор заметки, запись подчёркивания
           if(ok) handlePdfSelect(res);
         });
@@ -14668,6 +14704,7 @@
         '<button type="button" class="' + txt + '" id="pdfPageBtn" title="Перейти на страницу" style="width:auto;min-width:var(--fab-size,40px);padding:0 8px;font-size:13px;"></button>' +
         '<button type="button" class="' + txt + '" id="pdfZoomOutBtn" title="Уменьшить">−</button>' +
         '<button type="button" class="' + txt + '" id="pdfZoomInBtn" title="Увеличить">+</button>' +
+        bookReaderAddLibBtnHtml() +
         '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="bookReaderReadingBtn" title="Режим чтения"></button>' +
         '<button type="button" class="mdeditor-fab-btn fullscreen-mode-btn" id="bookReaderFullscreenBtn" title="Полноэкранный режим"></button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderHomeBtn" title="К списку книг">' + READER_HOME_ICON_SVG + '</button>' +
@@ -14726,6 +14763,7 @@
       fullscreenBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
       bindTapOrHold(fullscreenBtn, handleFullscreenBtnTap, function(){});
     }
+    bindBookReaderAddLibBtn();
     // «Домик» — к списку книг, шагом «назад» остаётся этот же PDF на этом же месте (как у текстового ридера).
     var homeBtn = document.getElementById("bookReaderHomeBtn");
     if(homeBtn){
@@ -14767,6 +14805,7 @@
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderChaptersBtn" title="' + (chaptersMode ? "К тексту" : "Главы") + '">' +
           (chaptersMode ? READER_TEXT_ICON_SVG : READER_CHAPTERS_ICON_SVG) +
         '</button>' +
+        bookReaderAddLibBtnHtml() +
         // режим чтения — сразу слева от «домика»
         '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="bookReaderReadingBtn" title="Режим чтения"></button>' +
         // полноэкранный режим — сразу слева от «домика», режим чтения — следующая кнопка
@@ -14823,6 +14862,9 @@
     var isIpkd = (bookReaderOwnerTab === "set2s_8");
 
     var html = '';
+    if(bookReaderState.transient){
+      html += iconRow(READER_LIBRARY_ADD_ICON_SVG, false, "Добавляет открытую книгу в библиотеку «Мои книги»: она останется там, а закладки и подчёркивания будут сохраняться. Кнопка есть, только пока книга открыта из файлового менеджера и ещё не в библиотеке.");
+    }
     if(!isIpkd){
       html += iconRow(READER_FLIBUSTA_ICON_SVG, false, "Открывает каталог Flibusta: найденную книгу можно скачать прямо в приложение. Читаемая книга остаётся под каталогом — после закрытия каталога вы на том же месте.");
     }
@@ -14916,6 +14958,7 @@
 
     var bookmarkAddBtn = document.getElementById("bookReaderBookmarkAddBtn");
     if(bookmarkAddBtn) bookmarkAddBtn.addEventListener("click", addSeparateBookReaderBookmark);
+    bindBookReaderAddLibBtn();
 
 
     var chaptersBtn = document.getElementById("bookReaderChaptersBtn");
@@ -17233,7 +17276,7 @@
         boxSize = end - offset;
       }
       if(boxSize < headerSize || offset + boxSize > end) break;
-      boxes.push({ type: type, bodyStart: offset + headerSize, end: offset + boxSize });
+      boxes.push({ type: type, start: offset, bodyStart: offset + headerSize, end: offset + boxSize });
       offset += boxSize;
     }
     return boxes;
@@ -17365,6 +17408,165 @@
     if(version === 1) return view.getUint32(box.bodyStart + 20);
     return view.getUint32(box.bodyStart + 12);
   }
+  // Заголовок дорожки: номер, тип обработчика, кодек образца, язык, шкала времени и таблицы образцов (stbl).
+  function readMp4TrackInfo(view, trak){
+    var trakChildren = parseMp4Boxes(view, trak.bodyStart, trak.end);
+    var tkhd = findMp4Box(trakChildren, "tkhd");
+    var mdia = findMp4Box(trakChildren, "mdia");
+    if(!mdia) return null;
+    var mdiaChildren = parseMp4Boxes(view, mdia.bodyStart, mdia.end);
+    var hdlr = findMp4Box(mdiaChildren, "hdlr");
+    if(!hdlr) return null;
+    var info = { trackId: 0, handler: "", codec: "", lang: "", timescale: 0, stbl: null };
+    if(tkhd){
+      try{ info.trackId = view.getUint32(tkhd.bodyStart + (view.getUint8(tkhd.bodyStart) === 1 ? 20 : 12)); }catch(e){}
+    }
+    info.handler = String.fromCharCode(
+      view.getUint8(hdlr.bodyStart + 8), view.getUint8(hdlr.bodyStart + 9),
+      view.getUint8(hdlr.bodyStart + 10), view.getUint8(hdlr.bodyStart + 11)
+    );
+    var mdhd = findMp4Box(mdiaChildren, "mdhd");
+    if(mdhd){
+      try{
+        info.timescale = readMp4MdhdTimescale(view, mdhd);
+        var langCode = view.getUint16(mdhd.bodyStart + (view.getUint8(mdhd.bodyStart) === 1 ? 32 : 20));
+        var l3 = String.fromCharCode(((langCode >> 10) & 31) + 0x60, ((langCode >> 5) & 31) + 0x60, (langCode & 31) + 0x60);
+        if(/^[a-z]{3}$/.test(l3) && l3 !== "und") info.lang = l3;
+      }catch(e){}
+    }
+    var minf = findMp4Box(mdiaChildren, "minf");
+    var stbl = minf ? findMp4Box(parseMp4Boxes(view, minf.bodyStart, minf.end), "stbl") : null;
+    if(stbl){
+      info.stbl = parseMp4Boxes(view, stbl.bodyStart, stbl.end);
+      var stsd = findMp4Box(info.stbl, "stsd");
+      if(stsd && stsd.bodyStart + 16 <= stsd.end){
+        info.codec = String.fromCharCode(
+          view.getUint8(stsd.bodyStart + 12), view.getUint8(stsd.bodyStart + 13),
+          view.getUint8(stsd.bodyStart + 14), view.getUint8(stsd.bodyStart + 15)
+        );
+      }
+    }
+    return info;
+  }
+  // Образцы дорожки из таблиц stbl (обычный, не фрагментированный mp4): [{off,size,dur}], dur — в единицах шкалы дорожки.
+  function readMp4StblSamples(view, info){
+    var out = [];
+    var stbl = info.stbl;
+    if(!stbl) return out;
+    var stszBox = findMp4Box(stbl, "stsz");
+    var stscBox = findMp4Box(stbl, "stsc");
+    var stcoBox = findMp4Box(stbl, "stco");
+    var co64Box = findMp4Box(stbl, "co64");
+    if(!stszBox || !stscBox || !(stcoBox || co64Box)) return out;
+    var sampleSizes = readMp4Stsz(view, stszBox);
+    var stscEntries = readMp4Stsc(view, stscBox);
+    var chunkOffsets = stcoBox ? readMp4Stco(view, stcoBox, false) : readMp4Stco(view, co64Box, true);
+    var sampleOffsets = computeMp4SampleOffsets(chunkOffsets, stscEntries, sampleSizes);
+    var sttsBox = findMp4Box(stbl, "stts");
+    var durations = null;
+    if(sttsBox){
+      try{ durations = expandMp4Stts(readMp4Stts(view, sttsBox), sampleSizes.length); }catch(e){ durations = null; }
+    }
+    for(var i = 0; i < sampleOffsets.length; i++){
+      out.push({ off: sampleOffsets[i], size: sampleSizes[i], dur: durations ? durations[i] : 0 });
+    }
+    return out;
+  }
+  // Образцы дорожки из фрагментов (moof/traf/trun) — так хранят субтитры фрагментированные mp4 (скачанные с потоковых сайтов).
+  function readMp4FragmentSamples(view, topBoxes, moovChildren, trackId){
+    var out = [];
+    var defDur = 0, defSize = 0;
+    var mvex = findMp4Box(moovChildren, "mvex");
+    if(mvex){
+      parseMp4Boxes(view, mvex.bodyStart, mvex.end).forEach(function(b){
+        if(b.type === "trex" && b.bodyStart + 20 <= b.end && view.getUint32(b.bodyStart + 4) === trackId){
+          defDur = view.getUint32(b.bodyStart + 12);
+          defSize = view.getUint32(b.bodyStart + 16);
+        }
+      });
+    }
+    topBoxes.forEach(function(moof){
+      if(moof.type !== "moof") return;
+      parseMp4Boxes(view, moof.bodyStart, moof.end).forEach(function(traf){
+        if(traf.type !== "traf") return;
+        var kids = parseMp4Boxes(view, traf.bodyStart, traf.end);
+        var tfhd = findMp4Box(kids, "tfhd");
+        if(!tfhd || tfhd.bodyStart + 8 > tfhd.end) return;
+        var tfFlags = view.getUint32(tfhd.bodyStart) & 0xFFFFFF;
+        if(view.getUint32(tfhd.bodyStart + 4) !== trackId) return;
+        var p = tfhd.bodyStart + 8;
+        var base = moof.start;
+        var fDur = defDur, fSize = defSize;
+        if(tfFlags & 0x1){ base = view.getUint32(p) * 4294967296 + view.getUint32(p + 4); p += 8; }
+        if(tfFlags & 0x2) p += 4;
+        if(tfFlags & 0x8){ fDur = view.getUint32(p); p += 4; }
+        if(tfFlags & 0x10){ fSize = view.getUint32(p); p += 4; }
+        var cursor = base;
+        kids.forEach(function(trun){
+          if(trun.type !== "trun" || trun.bodyStart + 8 > trun.end) return;
+          var flags = view.getUint32(trun.bodyStart) & 0xFFFFFF;
+          var count = view.getUint32(trun.bodyStart + 4);
+          var q = trun.bodyStart + 8;
+          if(flags & 0x1){ cursor = base + view.getInt32(q); q += 4; }
+          if(flags & 0x4) q += 4;
+          for(var i = 0; i < count; i++){
+            var dur = fDur, size = fSize;
+            if(flags & 0x100){ dur = view.getUint32(q); q += 4; }
+            if(flags & 0x200){ size = view.getUint32(q); q += 4; }
+            if(flags & 0x400) q += 4;
+            if(flags & 0x800) q += 4;
+            out.push({ off: cursor, size: size, dur: dur });
+            cursor += size;
+          }
+        });
+      });
+    });
+    return out;
+  }
+  // WebVTT в mp4 (wvtt): образец — набор боксов; текст реплики лежит в vttc → payl.
+  function decodeMp4WvttSample(view, arrayBuffer, off, size){
+    var parts = [];
+    parseMp4Boxes(view, off, off + size).forEach(function(b){
+      if(b.type !== "vttc") return;
+      parseMp4Boxes(view, b.bodyStart, b.end).forEach(function(c){
+        if(c.type === "payl") parts.push(new TextDecoder("utf-8").decode(new Uint8Array(arrayBuffer, c.bodyStart, c.end - c.bodyStart)));
+      });
+    });
+    return parts.join("\n");
+  }
+  // Реплики одной дорожки субтитров: [{text, gapBefore}], gapBefore — пауза (сек) перед репликой.
+  function readMp4TrackCues(view, arrayBuffer, info, samples){
+    var fileLen = arrayBuffer.byteLength;
+    var scale = info.timescale > 0 ? info.timescale : 0;
+    var cues = [];
+    var pendingGap = 0;
+    for(var i = 0; i < samples.length; i++){
+      var off = samples[i].off, size = samples[i].size;
+      var durSec = scale ? samples[i].dur / scale : 0;
+      var text = "";
+      try{
+        if(info.codec === "wvtt"){
+          if(size >= 8 && off + size <= fileLen) text = decodeMp4WvttSample(view, arrayBuffer, off, size);
+        } else if(size >= 2 && off + 2 <= fileLen){
+          var textLen = view.getUint16(off);
+          var usableLen = Math.min(textLen, size - 2, fileLen - off - 2);
+          if(usableLen > 0) text = decodeTx3gSampleText(new Uint8Array(arrayBuffer, off + 2, usableLen));
+        }
+      }catch(e){ text = ""; }
+      text = text.replace(/\r\n/g, "\n").trim();
+      if(text){
+        cues.push({ text: text, gapBefore: pendingGap });
+        pendingGap = 0;
+      } else {
+        pendingGap += durSec;
+      }
+    }
+    return cues;
+  }
+  // Главная функция: находит ВСЕ текстовые дорожки субтитров в mp4 (обычном и фрагментированном), читает каждую и берёт
+  // самую полную (по числу знаков): в файле бывает несколько дорожек — другие языки, «только надписи», названия глав
+  // (у них тоже обработчик «text»), и первая по порядку не обязательно содержит всю речь. Результат — массив реплик
+  // с полем info: {tracks, chosen, lang, codec} для строки статуса.
   function extractSubtitleCuesFromMp4(arrayBuffer){
     var view = new DataView(arrayBuffer);
     var fileLen = arrayBuffer.byteLength;
@@ -17375,88 +17577,36 @@
     var traks = findAllMp4Boxes(moovChildren, "trak");
     if(!traks.length) throw new Error("в файле не найдено ни одной дорожки (trak)");
 
-    var subtitleMdiaChildren = null;
     var seenHandlers = [];
+    var candidates = [];
+    var unsupported = [];
     for(var t = 0; t < traks.length; t++){
-      var trakChildren = parseMp4Boxes(view, traks[t].bodyStart, traks[t].end);
-      var mdia = findMp4Box(trakChildren, "mdia");
-      if(!mdia) continue;
-      var mdiaChildren = parseMp4Boxes(view, mdia.bodyStart, mdia.end);
-      var hdlr = findMp4Box(mdiaChildren, "hdlr");
-      if(!hdlr) continue;
-      var handlerType = String.fromCharCode(
-        view.getUint8(hdlr.bodyStart + 8), view.getUint8(hdlr.bodyStart + 9),
-        view.getUint8(hdlr.bodyStart + 10), view.getUint8(hdlr.bodyStart + 11)
-      );
-      seenHandlers.push(handlerType);
-      if(handlerType === "text" || handlerType === "sbtl" || handlerType === "subt"){
-        subtitleMdiaChildren = mdiaChildren;
-        break;
-      }
+      var info = readMp4TrackInfo(view, traks[t]);
+      if(!info) continue;
+      seenHandlers.push(info.handler);
+      var isTextual = info.handler === "text" || info.handler === "sbtl" || info.handler === "subt" || info.handler === "clcp" ||
+        info.codec === "tx3g" || info.codec === "wvtt" || info.codec === "stpp";
+      if(!isTextual) continue;
+      if(info.codec && info.codec !== "tx3g" && info.codec !== "text" && info.codec !== "wvtt"){ unsupported.push(info.codec); continue; }
+      candidates.push(info);
     }
-    if(!subtitleMdiaChildren){
+    if(!candidates.length){
+      if(unsupported.length) throw new Error("формат дорожки субтитров («" + unsupported.join("», «") + "») не поддерживается — читаются только tx3g (mov_text) и WebVTT");
       throw new Error("в этом видео не найдено дорожки субтитров (найдены дорожки: " + (seenHandlers.join(", ") || "нет ни одной") + ") — либо субтитры вшиты прямо в картинку, а не хранятся отдельной текстовой дорожкой");
     }
 
-    var minf = findMp4Box(subtitleMdiaChildren, "minf");
-    if(!minf) throw new Error("повреждена структура дорожки субтитров (нет minf)");
-    var stbl = findMp4Box(parseMp4Boxes(view, minf.bodyStart, minf.end), "stbl");
-    if(!stbl) throw new Error("повреждена структура дорожки субтитров (нет stbl)");
-    var stblChildren = parseMp4Boxes(view, stbl.bodyStart, stbl.end);
-
-    var stszBox = findMp4Box(stblChildren, "stsz");
-    var stscBox = findMp4Box(stblChildren, "stsc");
-    var stcoBox = findMp4Box(stblChildren, "stco");
-    var co64Box = findMp4Box(stblChildren, "co64");
-    if(!stszBox || !stscBox || !(stcoBox || co64Box)){
-      throw new Error("повреждена структура дорожки субтитров (нет stsz/stsc/stco)");
-    }
-    var sampleSizes = readMp4Stsz(view, stszBox);
-    var stscEntries = readMp4Stsc(view, stscBox);
-    var chunkOffsets = stcoBox ? readMp4Stco(view, stcoBox, false) : readMp4Stco(view, co64Box, true);
-    var sampleOffsets = computeMp4SampleOffsets(chunkOffsets, stscEntries, sampleSizes);
-
-    // stts даёт длительность каждого сэмпла — а у tx3g-дорожки "пустой" сэмпл между двумя репликами
-    // (0 байт текста) на самом деле и есть пауза: его длительность буквально равна времени тишины
-    // на экране между репликами. Это единственный сигнал о паузах в речи, который вообще есть в
-    // самом mp4 (никаких таймкодов в привычном виде тут никогда не было — они не нужны и не
-    // читаются, см. общий комментарий выше). Если этой информации почему-то нет (нет stts или mdhd,
-    // или timescale==0) — просто не считаем паузы, и весь текст в итоге уйдёт одним абзацем (см.
-    // reflowSubtitleCues ниже) — это и есть договорённый запасной вариант.
-    var sttsBox = findMp4Box(stblChildren, "stts");
-    var mdhdBox = findMp4Box(subtitleMdiaChildren, "mdhd");
-    var sampleDurationsSec = null;
-    if(sttsBox && mdhdBox){
-      try{
-        var timescale = readMp4MdhdTimescale(view, mdhdBox);
-        if(timescale > 0){
-          var rawDurations = expandMp4Stts(readMp4Stts(view, sttsBox), sampleSizes.length);
-          sampleDurationsSec = rawDurations.map(function(d){ return d / timescale; });
-        }
-      }catch(e){ sampleDurationsSec = null; }
-    }
-
-    var cues = [];
-    var pendingGap = 0;
-    for(var i = 0; i < sampleOffsets.length; i++){
-      var off = sampleOffsets[i];
-      var size = sampleSizes[i];
-      var durSec = sampleDurationsSec ? sampleDurationsSec[i] : 0;
-      if(size < 2 || off + 2 > fileLen){ pendingGap += durSec; continue; }
-      var textLen = view.getUint16(off);
-      if(textLen <= 0){ pendingGap += durSec; continue; }
-      var usableLen = Math.min(textLen, size - 2, fileLen - off - 2);
-      if(usableLen <= 0){ pendingGap += durSec; continue; }
-      var bytes = new Uint8Array(arrayBuffer, off + 2, usableLen);
-      var text = decodeTx3gSampleText(bytes).replace(/\r\n/g, "\n").trim();
-      if(text){
-        cues.push({ text: text, gapBefore: pendingGap });
-        pendingGap = 0;
-      } else {
-        pendingGap += durSec;
-      }
-    }
-    return cues;
+    var best = null, bestChars = -1;
+    candidates.forEach(function(info){
+      var samples = readMp4StblSamples(view, info);
+      if(info.trackId) samples = samples.concat(readMp4FragmentSamples(view, topBoxes, moovChildren, info.trackId));
+      var cues = readMp4TrackCues(view, arrayBuffer, info, samples);
+      var chars = 0;
+      cues.forEach(function(c){ chars += c.text.length; });
+      if(chars > bestChars){ bestChars = chars; best = { cues: cues, info: info }; }
+    });
+    var result = best.cues;
+    result.info = { tracks: candidates.length, lang: best.info.lang, codec: best.info.codec };
+    return result;
   }
 
   // Реплики (сэмплы), как они лежат в mp4, — это ещё не готовый текст: одна реплика может быть
@@ -17765,7 +17915,8 @@
           setDownloadReady(true);
           setSaveNoteReady(true);
           try{ localStorage.setItem(SUBTITLE_EXTRACT_TEXT_KEY, extractedText); }catch(e){}
-          setFileStatus("Готово — извлечено реплик: " + cues.length + ".", "success");
+          var ci = cues.info || {};
+          setFileStatus("Готово — извлечено реплик: " + cues.length + "." + (ci.tracks > 1 ? " Дорожек субтитров в файле: " + ci.tracks + ", взята самая полная" + (ci.lang ? " (" + ci.lang + ")" : "") + "." : ""), "success");
         } else {
           setFileStatus("Дорожка субтитров в этом видео пуста.", "error");
         }
@@ -21100,7 +21251,7 @@
 
     var textEl = document.createElement("div");
     textEl.className = "goal-bar-text";
-    textEl.textContent = goal.data.title || "Без названия";
+    textEl.textContent = (goal.data.title || "Без названия") + (n > 0 ? " · " + checkedCount + "/" + n : "");
     bar.appendChild(textEl);
     bar.addEventListener("click", function(){ openGoalSettingsModal(goal.id); });
     return bar;
@@ -21392,11 +21543,32 @@
     saveLocalStateNow();
     scheduleCloudPush();
   }
+  // Только что созданные кнопкой «+» задачи, в которые ещё ничего не вписано: запись уже есть (строка открывается в правке), но если
+  // правку закончили пустой (setTaskText с пустым текстом), задача не сохраняется — удаляется. Живёт в памяти: после первого
+  // непустого текста id снимается, и пустой текст у уже заполненной задачи остаётся обычной правкой.
+  var freshTaskIds = {};
+  function removeFreshEmptyTask(id){
+    delete freshTaskIds[id];
+    deleteTaskPermanently(id);
+    var rows = document.querySelectorAll('.task-row[data-id="' + id + '"]');
+    Array.prototype.forEach.call(rows, function(r){ if(r.parentNode) r.parentNode.removeChild(r); });
+    var wrap = document.getElementById("taskListWrap");
+    if(wrap && !wrap.querySelector(".task-row") && !wrap.querySelector(".task-empty")){
+      var msg = document.createElement("div");
+      msg.className = "task-empty";
+      msg.textContent = "Здесь пока нет задач.";
+      wrap.insertBefore(msg, wrap.firstChild);
+    }
+  }
   function createTask(tab){
     // TASK_SHARED_TASKS, Шаг 3 — если устройство привязано к группе и группа уже активна как
     // источник данных (см. isGroupTasksActive), новая задача вкладки "Общие задачи" создаётся в
     // облаке, а не локально.
-    if(tab === "jointtasks" && isGroupTasksActive()) return createGroupTask();
+    if(tab === "jointtasks" && isGroupTasksActive()){
+      var gid = createGroupTask();
+      if(gid) freshTaskIds[gid] = true;
+      return gid;
+    }
     var id = genTaskId();
     // на вкладке Red своего хранилища нет (см. пояснение выше) — такая задача реально уходит в
     // inbox, но сразу получает красную отметку, поэтому продолжает быть видна на Red. Тем же
@@ -21407,6 +21579,7 @@
     var flag = (tab === "red") ? "red" : null;
     var inWork = (tab === "worktasks");
     saveTaskData(id, {text: "", tab: homeTab, checked: false, checkedAt: null, completionKey: null, nextForProjectId: null, flag: flag, inWork: inWork});
+    freshTaskIds[id] = true;
     return id;
   }
   // как createTask, но сразу с готовым текстом — для массового восстановления задач из .txt (см.
@@ -21988,6 +22161,10 @@
   function setTaskText(id, text){
     var task = getTaskById(id);
     if(!task) return;
+    if(freshTaskIds[id]){
+      if(!String(text == null ? "" : text).trim()){ removeFreshEmptyTask(id); return; } // пустая новая задача не сохраняется
+      delete freshTaskIds[id];
+    }
     task.c.text = text;
     saveTaskData(id, task.c);
     // ТЗ пользователя от 14.09 — корзина сирот картинок (mdeditor.js) пропускает дорогой обход
@@ -23961,6 +24138,16 @@
       '</div>';
   }
 
+  // Развёрнутая и большая редактируемая задача на широком экране (сетка колонок, .task-grid-list) занимает всю строку сетки
+  // и стоит по центру, а не в одной из колонок: класс на .task-row (стили — modals.css, .task-row-wide).
+  function setTaskRowWide(body, on){
+    var row = body && body.parentNode;
+    if(row && row.classList && row.classList.contains("task-row")) row.classList.toggle("task-row-wide", !!on);
+  }
+  function isBigTaskText(text){
+    var t = String(text || "");
+    return t.length > 280 || t.split("\n").length > 6;
+  }
   function renderTaskRowView(id, tabKey, onAfterAction){
     var body = document.querySelector('.task-body[data-id="' + id + '"]');
     var task = getTaskById(id);
@@ -23975,6 +24162,7 @@
     // целиком, ни (что важнее) корректно определить через scrollHeight/clientHeight, что обрезка
     // больше не нужна, когда задачу укоротили редактированием (см. updateTaskExpandBtn).
     var isExpanded = !!expandedTaskIds[id];
+    setTaskRowWide(body, isExpanded);
     var jointSignatureHtml = buildTaskJointSignatureHtml(task.c, id);
     // не только вкладка «Общие задачи»: общая задача может лежать и на Red
     var isJointReadOnlyRow = (tabKey === "jointtasks" || isGroupTaskId(id)) && isGroupTasksReadOnly();
@@ -24274,6 +24462,7 @@
     var task = getTaskById(id);
     if(!body || !task) return;
     flushPendingTaskEdits(); // если в этот момент редактировалась другая строка — сохранить её
+    setTaskRowWide(body, isBigTaskText(task.c.text) || !!expandedTaskIds[id]);
     var isProjectsTab = task.c.tab === "projects";
     var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
     body.innerHTML =

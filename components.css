@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 24.3 (04.11)
+   Версия: 24.4 (05.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -5011,3 +5011,64 @@ html[data-theme="14"] .pdf-hl{
 /* задачи в календаре (calendar.js): переключатель «Мероприятие / Задача», блок задачи в неделе, выполненная задача */
 .cal-kind .workbooks-run-btn{ opacity:.55; }
 .cal-kind .workbooks-run-btn.cal-kind-on{ opacity:1; font-weight:700; }
+
+/* ---------- вкладка «Мои цели» (set2s_12): оформление панели баров ----------
+   Без :has(), flex-gap и inset (старый WebView): отступы — через margin. Размеры и тексты баров, которыми управляет JS, не меняются. */
+.progress-panel-title{ margin:2px 0 10px 0; }
+.progress-panel .progress-caption{
+  margin:0 4px 4px 4px;
+  font-size:11.5px;
+  font-weight:bold;
+  letter-spacing:.6px;
+  text-transform:uppercase;
+  color:var(--ink-soft, #6b6449);
+}
+.progress-panel .overall-progress-wrap,
+.progress-panel .hour-bar-wrap,
+.progress-panel .missed-wrap{
+  padding:8px 10px 10px 10px;
+  margin-top:12px;
+  border:1px solid var(--groove-shadow, rgba(0,0,0,.18));
+  border-radius:12px;
+  background:rgba(255,255,255,.28);
+  box-shadow:0 1px 3px rgba(0,0,0,.12);
+}
+.progress-panel .overall-progress-wrap{ margin-top:0; }
+.progress-panel .xp-bar,
+.progress-panel .hour-bar,
+.progress-panel .goal-bar{
+  height:32px;
+  border-radius:10px;
+  border-width:1px;
+}
+.progress-panel .goals-list-inline{ display:block; }
+.progress-panel .goals-list-inline:not(:empty){
+  margin-top:12px;
+  padding:8px 10px 2px 10px;
+  border:1px solid var(--groove-shadow, rgba(0,0,0,.18));
+  border-radius:12px;
+  background:rgba(255,255,255,.28);
+  box-shadow:0 1px 3px rgba(0,0,0,.12);
+}
+.progress-panel .goals-list-inline:not(:empty)::before{
+  content:"Личные цели";
+  display:block;
+  margin:0 4px 6px 4px;
+  font-size:11.5px;
+  font-weight:bold;
+  letter-spacing:.6px;
+  text-transform:uppercase;
+  color:var(--ink-soft, #6b6449);
+}
+.progress-panel .goal-bar{ margin-bottom:8px; }
+
+/* ---------- перетягивание карточек QR (itemcards.js, кнопка #itemCardsDragBtn) ---------- */
+.item-cards-dragmode .item-card{ border-style:dashed; }
+.item-card.item-card-dragging{
+  z-index:30;
+  opacity:.9;
+  box-shadow:0 8px 22px rgba(0,0,0,.35);
+  -webkit-transition:none;
+  transition:none;
+}
+.item-card.item-card-drop{ box-shadow:0 0 0 3px var(--ink, #000); }
