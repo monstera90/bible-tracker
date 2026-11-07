@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 35.1 (05.11)
+     Версия: 35.2 (07.11)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -556,8 +556,9 @@ window.addEventListener("error", function(e){
           <path d="M10 13h4"></path>
         </svg>
       </button>
-      <!-- Боковой ряд нижнего язычка «Статистика» (settingsTabInfoStackBtn, my.js infoStackMode). В DOM снизу вверх: Настроение, Прогресс,
-           График чтения, Трекер экранов, Карта дней года, Обзор, Забытые заметки (на экране сверху вниз — наоборот). Показываются только в этом режиме. -->
+      <!-- Боковой ряд нижнего язычка «Статистика» (settingsTabInfoStackBtn, my.js infoStackMode). В DOM снизу вверх: Настроение,
+           Трекер экранов, Карта дней года, Обзор, Забытые заметки (на экране сверху вниз — наоборот). Показываются только в этом режиме.
+           Кнопки «Мои цели» и «График чтения» лежат в DOM ниже «Трекера экранов», но принадлежат ряду «Активности» (самые нижние). -->
       <button class="settings-tab" id="settingsTabMoodBtn" title="Диаграмма настроения" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none">
           <path d="M12,12 L12,1.5 A10.5,10.5 0 0,1 22.5,12 Z" fill="currentColor" opacity="0.7"></path>
@@ -566,7 +567,7 @@ window.addEventListener("error", function(e){
           <path d="M12,12 L1.5,12 A10.5,10.5 0 0,1 12,1.5 Z" fill="currentColor" opacity="0.5"></path>
         </svg>
       </button>
-      <!-- Вкладка бокового ряда «Статистики» (settingsTabSet2Btn12, "set2s_12") —
+      <!-- Вкладка бокового ряда «Активности» (settingsTabSet2Btn12, "set2s_12"), самая нижняя —
            «Прогресс»: прогресс-бары и счётчики, раньше стоявшие в шапке над графиком чтения (см. #progressPanel выше и
            renderSettingsTabProgress в my.js). -->
       <button class="settings-tab" id="settingsTabSet2Btn12" title="Мои цели" style="display:none;">
@@ -577,7 +578,7 @@ window.addEventListener("error", function(e){
           <path d="M5 6.25h7M5 12h11M5 17.75h4" stroke-width="2.2"></path>
         </svg>
       </button>
-      <!-- Вкладка бокового ряда «Статистики» (settingsTabSet2Btn13, "set2s_13") —
+      <!-- Вкладка бокового ряда «Активности» (settingsTabSet2Btn13, "set2s_13"), над «Моими целями» —
            «График чтения»: заголовок и карточки книг Библии с главами, раньше стоявшие на главной странице (см. #readingChartHome выше
            и renderSettingsTabReadingChart в my.js). -->
       <button class="settings-tab" id="settingsTabSet2Btn13" title="График чтения" style="display:none;">
@@ -726,7 +727,8 @@ window.addEventListener("error", function(e){
         </svg>
       </button>
       <!-- Боковой ряд нижнего язычка «Активности» (settingsTabActivitiesStackBtn, my.js activitiesStackMode). В DOM снизу вверх:
-           QR-коды, Помодоро, Музыка, Тренировки (на экране сверху вниз: Тренировки, Музыка, Помодоро, QR-коды). Ключи вкладок прежние (set2s_9,
+           QR-коды, Помодоро, Музыка, Тренировки (кнопки «Мои цели» и «График чтения» физически лежат в файле раньше, возле «Настроения», поэтому
+           на экране стоят ниже всех) (на экране сверху вниз: Тренировки, Музыка, Помодоро, QR-коды, График чтения, Мои цели). Ключи вкладок прежние (set2s_9,
            set2s_11, workouts); кнопки скрыты display:none и показываются в refreshSettingsTabsVisibility.
            «Книги» (settingsTabSet2Btn7) — часть общего нижнего язычка «Заметки» (кнопка в ряду скрыта), ИПКД — кнопка с числом месяца на нижней панели «Книг». -->
       <button class="settings-tab" id="settingsTabSet2Btn11" title="Музыка" style="display:none;">

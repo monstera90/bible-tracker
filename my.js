@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 135.0 (05.11)
+   Версия: 135.1 (07.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1742,10 +1742,10 @@
   var SCREENTIME_TAB_KEY = "screentime";
   var SCREENTIME_TAB_BTN_ID = "settingsTabScreenTimeBtn";
   // «Статистика» (нижний язычок settingsTabInfoStackBtn между шестерёнкой и «Задачи»): свой боковой ряд набора 1 (режим infoStackMode),
-  // работает как шестерёнка. Вкладки ряда сверху вниз: Забытые заметки, Обзор, Карта дней года, Трекер экранов, График чтения, Мои цели, Настроение.
+  // работает как шестерёнка. Вкладки ряда сверху вниз: Забытые заметки, Обзор, Карта дней года, Трекер экранов, Настроение.
   var INFO_STACK_BTN_ID = "settingsTabInfoStackBtn";
-  var INFO_STACK_TABS = ["set2s_4", "extra3", "year", "screentime", "set2s_13", "set2s_12", "mood"];
-  var INFO_STACK_BTN_IDS = { set2s_4: "settingsTabSet2Btn4", extra3: "settingsTabExtra3Btn", year: "settingsTabYearBtn", screentime: "settingsTabScreenTimeBtn", set2s_13: "settingsTabSet2Btn13", set2s_12: "settingsTabSet2Btn12", mood: "settingsTabMoodBtn" };
+  var INFO_STACK_TABS = ["set2s_4", "extra3", "year", "screentime", "mood"];
+  var INFO_STACK_BTN_IDS = { set2s_4: "settingsTabSet2Btn4", extra3: "settingsTabExtra3Btn", year: "settingsTabYearBtn", screentime: "settingsTabScreenTimeBtn", mood: "settingsTabMoodBtn" };
   function isInfoStackTab(tab){ return INFO_STACK_TABS.indexOf(tab) !== -1; }
   // «Инструменты» (нижний язычок settingsTabToolsStackBtn между шестерёнкой и «Статистикой»): свой боковой ряд набора 1 (режим toolsStackMode),
   // работает как шестерёнка. Вкладки ряда сверху вниз: Поиск, Стол, Изменение размера изображения, Разделение epub, Извлечение субтитров,
@@ -1758,10 +1758,10 @@
   };
   function isToolsStackTab(tab){ return TOOLS_STACK_TABS.indexOf(tab) !== -1; }
   // «Активности» (нижний язычок settingsTabActivitiesStackBtn справа от «Календаря»): свой боковой ряд набора 1 (режим activitiesStackMode),
-  // работает как шестерёнка. Вкладки ряда сверху вниз: Тренировки, Музыка, Помодоро, QR-коды. Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
+  // работает как шестерёнка. Вкладки ряда сверху вниз: Тренировки, Музыка, Помодоро, QR-коды, График чтения, Мои цели. Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
   var ACTIVITIES_STACK_BTN_ID = "settingsTabActivitiesStackBtn";
-  var ACTIVITIES_STACK_TABS = ["workouts", "set2s_11", "set2s_16", "set2s_9"];
-  var ACTIVITIES_STACK_BTN_IDS = { workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_16: "settingsTabSet2Btn16", set2s_9: "settingsTabSet2Btn9" };
+  var ACTIVITIES_STACK_TABS = ["workouts", "set2s_11", "set2s_16", "set2s_9", "set2s_13", "set2s_12"];
+  var ACTIVITIES_STACK_BTN_IDS = { workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_16: "settingsTabSet2Btn16", set2s_9: "settingsTabSet2Btn9", set2s_13: "settingsTabSet2Btn13", set2s_12: "settingsTabSet2Btn12" };
   function isActivitiesStackTab(tab){ return ACTIVITIES_STACK_TABS.indexOf(tab) !== -1; }
   // «Интернет» (нижний язычок settingsTabClaudeStackBtn между шестерёнкой и «Инструментами»): свой боковой ряд набора 1 (режим claudeStackMode),
   // работает как шестерёнка. Пока в ряду одна вкладка — «Claude» (set2s_10, claudetab.js); новая вкладка ряда: кнопка в `#settingsTabs` + ключ в списках ниже.
@@ -10239,7 +10239,7 @@
       setTabDecor(stBtnV, false);
       stBtnV.style.display = (!bottomAltMode && infoStackMode) ? "flex" : "none";
     }
-    // остальные вкладки ряда «Статистика»: Обзор, Карта дней года, График чтения, Прогресс, Настроение
+    // остальные вкладки ряда «Статистика»: Обзор, Карта дней года, Настроение
     Object.keys(INFO_STACK_BTN_IDS).forEach(function(key){
       if(key === SCREENTIME_TAB_KEY) return;
       var ib = document.getElementById(INFO_STACK_BTN_IDS[key]);
