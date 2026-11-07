@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 140.0 (07.11)
+   Версия: 140.1 (07.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1244,12 +1244,12 @@
   // ===================== РАЗМЕР ЯЗЫЧКОВ ОКНА НАСТРОЕК =====================
   // Вкладка «Внешний вид», пункт «Размер язычков»: 50 / 65 / 75 / 100 %. 50 % — прежний размер: длина язычка 40px (это
   // ширина нижних язычков и высота боковых); толщина язычков (35px) и кнопка-язычок .settings-fab НЕ меняются. Язычки
-  // всегда одной длины. По умолчанию 75 %, пока человек сам не выберет. Настройка ПО-УСТРОЙСТВУ (localStorage, в облако не
+  // всегда одной длины. По умолчанию 50 %, пока человек сам не выберет. Настройка ПО-УСТРОЙСТВУ (localStorage, в облако не
   // идёт), переживает перезапуск. Размер — одна CSS-переменная --tab-len на <html> (modals.css: .settings-tab,
   // .settings-tab-gear); положение язычка-кнопки и заплаток углов берётся из реально измеренных рядов.
   var TAB_SIZE_KEY = "bibleTabSize_v1";
   var TAB_SIZE_OPTIONS = [50, 65, 75, 100];
-  var TAB_SIZE_DEFAULT = 75;
+  var TAB_SIZE_DEFAULT = 50;
   var TAB_SIZE_BASE_PX = 40; // длина язычка при 50 %
   function getTabSize(){
     var v = null;

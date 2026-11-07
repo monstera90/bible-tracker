@@ -1,6 +1,6 @@
 /* ===========================================================================
    pomodoro.js
-   Версия: 1.0 (04.11)
+   Версия: 1.1 (07.11)
    Вкладка «Помодоро» (set2s_16, кнопка settingsTabSet2Btn16; боковой ряд «Активности» между «Музыкой» и «QR-кодами»).
    Здесь вся полная информация о сессии: кольцо прогресса, остаток времени, название задачи, «цикл N из M», кнопки
    «Пауза», «+5 минут», «Пропустить перерыв» («Начать работу» после перерыва) и «Завершить». Сам таймер, будильник конца
@@ -10,6 +10,8 @@
    (endAt/waitSince из состояния), состояние перечитывает раз в секунду. В браузере без моста вкладка показывает пояснение.
    Точка входа — window.PomodoroTab.{render,sync}; my.js зовёт render из switchSettingsTab, sync — из __ltOnAppResume.
    Стили вставляет сам модуль; без flex-gap, grid и inset (старый WebView Android 5.0).
+   Раскладка: заголовок вверху, карточка с кольцом/формой и кнопками прижата к низу области (`margin-top:auto`, как
+   `.settings-content-bottom` у остальных вкладок) — до кнопок дотягиваться большим пальцем.
    =========================================================================== */
 (function(){
   "use strict";
@@ -90,12 +92,12 @@
     var st0 = document.createElement("style");
     st0.id = "pomodoroTabStyle";
     st0.textContent =
-      ".pomo-root{--pomo:#e24a33;--pomo-soft:rgba(226,74,51,.10);}" +
+      ".pomo-root{--pomo:#e24a33;--pomo-soft:rgba(226,74,51,.10);display:flex;flex-direction:column;flex:1 0 auto;}" +
       ".pomo-phase-short{--pomo:#5fbf98;--pomo-soft:rgba(95,191,152,.14);}" +
       ".pomo-phase-long{--pomo:#7c9fd8;--pomo-soft:rgba(124,159,216,.16);}" +
       ".pomo-phase-wait{--pomo:#d6a24a;--pomo-soft:rgba(214,162,74,.14);}" +
       ".pomo-paused{--pomo:#8f8f8f;--pomo-soft:rgba(143,143,143,.10);}" +
-      ".pomo-card{padding:14px 12px 16px;border-radius:18px;background:var(--pomo-soft);text-align:center;transition:background .6s;}" +
+      ".pomo-card{margin-top:auto;padding:14px 12px 16px;border-radius:18px;background:var(--pomo-soft);text-align:center;transition:background .6s;}" +
       ".pomo-label{font-size:15px;font-weight:700;color:var(--pomo);margin:0 0 8px;letter-spacing:.02em;transition:color .6s;}" +
       ".pomo-ringwrap{position:relative;width:72%;max-width:250px;margin:0 auto;}" +
       ".pomo-ring{display:block;width:100%;height:auto;}" +
