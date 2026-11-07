@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 24.4 (05.11)
+   Версия: 24.5 (07.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -447,36 +447,6 @@
     margin:8px 0 0 0;
     padding-bottom:6px;
     border-bottom:1px solid var(--groove-shadow);
-  }
-  /* Строка заголовков «Заметки | Книги» (my.js, NotesBooksSwitch): общий переключатель вкладки «Заметки»/«Книги». Рамка и шрифт те же, что у
-     .common-tab-title (заголовок вкладки): активная подпись выглядит как обычный заголовок, неактивная блеклая. Отступ сверху (8px у заголовка)
-     разложен на 2px у строки + 6px внутри подписей, чтобы нажимаемая область была выше самих букв. */
-  .nb-switch{
-    display:flex;
-    margin:2px 0 0 0;
-    border-bottom:1px solid var(--groove-shadow);
-  }
-  .nb-switch-item{
-    -webkit-box-flex:1;
-    -webkit-flex:1 1 50%;
-    flex:1 1 50%;
-    min-width:0;
-    box-sizing:border-box;
-    padding:6px 0;
-    font-family:"Palatino Linotype",Georgia,serif;
-    font-size:var(--mdeditor-font-size, 15.5px);
-    font-weight:bold;
-    color:var(--wood);
-    text-align:center;
-    opacity:.4;
-    cursor:pointer;
-    -webkit-user-select:none;
-    user-select:none;
-    -webkit-tap-highlight-color:transparent;
-  }
-  .nb-switch-item.active{
-    opacity:1;
-    cursor:default;
   }
   .subtitle-extract-hint{
     font-family:"Palatino Linotype",Georgia,serif;

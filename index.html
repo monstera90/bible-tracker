@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 35.2 (07.11)
+     Версия: 36.0 (07.11)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -556,9 +556,12 @@ window.addEventListener("error", function(e){
           <path d="M10 13h4"></path>
         </svg>
       </button>
+      <!-- Пустая невидимая вкладка-промежуток ряда «Задачи и активности» (my.js: TASKS_GAP_BTN_ID, tasksStackMode): ровно один язычок отступа между «Архивом»
+           (верх набора задач) и «Моими целями» (низ набора активностей). Не вкладка: ключа нет, нажатий нет (.settings-tab-gap, modals.css). В DOM стоит между ними. -->
+      <button class="settings-tab settings-tab-gap" id="settingsTabTasksGapBtn" tabindex="-1" aria-hidden="true" style="display:none;"></button>
       <!-- Боковой ряд нижнего язычка «Статистика» (settingsTabInfoStackBtn, my.js infoStackMode). В DOM снизу вверх: Настроение,
            Трекер экранов, Карта дней года, Обзор, Забытые заметки (на экране сверху вниз — наоборот). Показываются только в этом режиме.
-           Кнопки «Мои цели» и «График чтения» лежат в DOM ниже «Трекера экранов», но принадлежат ряду «Активности» (самые нижние). -->
+           Кнопки «Мои цели» и «График чтения» лежат в DOM ниже «Трекера экранов», но принадлежат набору активностей ряда «Задачи и активности» (самые нижние). -->
       <button class="settings-tab" id="settingsTabMoodBtn" title="Диаграмма настроения" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none">
           <path d="M12,12 L12,1.5 A10.5,10.5 0 0,1 22.5,12 Z" fill="currentColor" opacity="0.7"></path>
@@ -567,7 +570,7 @@ window.addEventListener("error", function(e){
           <path d="M12,12 L1.5,12 A10.5,10.5 0 0,1 12,1.5 Z" fill="currentColor" opacity="0.5"></path>
         </svg>
       </button>
-      <!-- Вкладка бокового ряда «Активности» (settingsTabSet2Btn12, "set2s_12"), самая нижняя —
+      <!-- Вкладка набора активностей ряда «Задачи и активности» (settingsTabSet2Btn12, "set2s_12"), самая нижняя —
            «Прогресс»: прогресс-бары и счётчики, раньше стоявшие в шапке над графиком чтения (см. #progressPanel выше и
            renderSettingsTabProgress в my.js). -->
       <button class="settings-tab" id="settingsTabSet2Btn12" title="Мои цели" style="display:none;">
@@ -578,7 +581,7 @@ window.addEventListener("error", function(e){
           <path d="M5 6.25h7M5 12h11M5 17.75h4" stroke-width="2.2"></path>
         </svg>
       </button>
-      <!-- Вкладка бокового ряда «Активности» (settingsTabSet2Btn13, "set2s_13"), над «Моими целями» —
+      <!-- Вкладка набора активностей ряда «Задачи и активности» (settingsTabSet2Btn13, "set2s_13"), над «Моими целями» —
            «График чтения»: заголовок и карточки книг Библии с главами, раньше стоявшие на главной странице (см. #readingChartHome выше
            и renderSettingsTabReadingChart в my.js). -->
       <button class="settings-tab" id="settingsTabSet2Btn13" title="График чтения" style="display:none;">
@@ -726,11 +729,10 @@ window.addEventListener("error", function(e){
           <path d="M9.6 3.6c1.5-.2 3.3-.2 4.8 0"></path>
         </svg>
       </button>
-      <!-- Боковой ряд нижнего язычка «Активности» (settingsTabActivitiesStackBtn, my.js activitiesStackMode). В DOM снизу вверх:
-           QR-коды, Помодоро, Музыка, Тренировки (кнопки «Мои цели» и «График чтения» физически лежат в файле раньше, возле «Настроения», поэтому
-           на экране стоят ниже всех) (на экране сверху вниз: Тренировки, Музыка, Помодоро, QR-коды, График чтения, Мои цели). Ключи вкладок прежние (set2s_9,
-           set2s_11, workouts); кнопки скрыты display:none и показываются в refreshSettingsTabsVisibility.
-           «Книги» (settingsTabSet2Btn7) — часть общего нижнего язычка «Заметки» (кнопка в ряду скрыта), ИПКД — кнопка с числом месяца на нижней панели «Книг». -->
+      <!-- Набор АКТИВНОСТЕЙ в боковом ряду нижнего язычка «Задачи и активности» (settingsTabTasksStackBtn, my.js tasksStackMode, ACTIVITIES_STACK_TABS). В DOM снизу вверх:
+           QR-коды, Помодоро, Музыка, Тренировки (кнопки «Мои цели» и «График чтения» физически лежат в файле раньше, между «Архивом» и «Настроением», поэтому на экране
+           стоят ниже всех активностей; на экране сверху вниз: Тренировки, Музыка, Помодоро, QR-коды, График чтения, Мои цели, пустой промежуток, затем задачи).
+           Ключи вкладок прежние (set2s_9, set2s_11, set2s_16, workouts); кнопки скрыты display:none и показываются в refreshSettingsTabsVisibility. -->
       <button class="settings-tab" id="settingsTabSet2Btn11" title="Музыка" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <path d="M9 18V5.5l11-2.5v12.5"></path>
@@ -833,8 +835,8 @@ window.addEventListener("error", function(e){
           <rect x="15.4" y="8.5" width="3.6" height="10" rx="0.9"></rect>
         </svg>
       </button>
-      <!-- «Заметки» и «Книги» (settingsTabSet2Btn1, ключ "set2s_1", «Мой блокнот» — mdeditor.js): общий нижний язычок набора 1 справа от «Статистики» (пиктограмма заметок).
-           Открывает заметки или книги (где человек был в прошлый раз) без бокового ряда: при открытии все боковые ряды выключаются (my.js, NOTES_TAB_KEY, NotesBooksSwitch). -->
+      <!-- «Заметки» (settingsTabSet2Btn1, ключ "set2s_1", «Мой блокнот» — mdeditor.js): нижний язычок набора 1 справа от «Статистики» (пиктограмма заметок), справа от него — «Книги».
+           Открывает заметки без бокового ряда: при открытии все боковые ряды выключаются (my.js, NOTES_TAB_KEY). -->
       <button class="settings-tab settings-tab-gear" id="settingsTabSet2Btn1" title="Мои заметки">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <rect x="5" y="2.5" width="16" height="19" rx="1.5"></rect>
@@ -847,23 +849,20 @@ window.addEventListener("error", function(e){
           <line x1="8.5" y1="16" x2="14" y2="16"></line>
         </svg>
       </button>
-      <!-- «Мои книги» (settingsTabSet2Btn7, ключ "set2s_7"; ридер fb2/epub/pdf, OPFS books/): в нижнем ряду кнопка скрыта (display:none) — «Книги» — часть
-           общего язычка «Заметки» (settingsTabSet2Btn1); между частями переключает строка заголовков «Заметки | Книги» (my.js, NotesBooksSwitch). Кнопка остаётся
-           в разметке ради ключа вкладки и пиктограммы. ИПКД (ключ "set2s_8") — кнопка с числом месяца в нижнем ряду «Книг» (my.js, ipkdFabBtnHtml);
-           пока сегодня ИПКД не открывали, залит общий язычок (.ipkd-tab-unread, modals.css). См. renderSettingsTabBooks в my.js (PROJECT_MAP_MYJS.md). -->
-      <button class="settings-tab settings-tab-gear" id="settingsTabSet2Btn7" title="Мои книги" style="display:none;">
+      <!-- «Мои книги» (settingsTabSet2Btn7, ключ "set2s_7"; ридер fb2/epub/pdf, OPFS books/): отдельный нижний язычок справа от «Заметок» (settingsTabSet2Btn1),
+           пиктограмма — раскрытая книга, как у вкладки-списка задач read. ИПКД (ключ "set2s_8") — кнопка с числом месяца в нижнем ряду «Книг» (my.js, ipkdFabBtnHtml);
+           пока сегодня ИПКД не открывали, залит язычок «Книги» (.ipkd-tab-unread, modals.css). См. renderSettingsTabBooks в my.js (PROJECT_MAP_MYJS.md). -->
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2Btn7" title="Мои книги">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2" y="2.5" width="13" height="19" rx="1.3"></rect>
-          <line x1="5.3" y1="2.5" x2="5.3" y2="21.5" stroke-width="1.2"></line>
-          <text x="10.5" y="10.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="none" stroke="var(--icon-halo)" stroke-width="3.2" paint-order="stroke fill">epub</text>
-          <text x="10.5" y="10.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="currentColor" stroke="none">epub</text>
-          <text x="10.5" y="18.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="none" stroke="var(--icon-halo)" stroke-width="3.2" paint-order="stroke fill">fb2</text>
-          <text x="10.5" y="18.5" text-anchor="middle" font-size="7" font-family="Arial, Helvetica, sans-serif" font-weight="800" fill="currentColor" stroke="none">fb2</text>
+          <path d="M12 7c-1.8-1-4.5-1.3-7-1.3v10c2.5 0 4.7.3 7 1.3"></path>
+          <path d="M12 7c1.8-1 4.5-1.3 7-1.3v10c-2.5 0-4.7.3-7 1.3"></path>
+          <path d="M12 7v10"></path>
         </svg>
       </button>
-      <!-- «Задачи» (settingsTabTasksStackBtn): справа от шестерёнки; включает свой боковой ряд — все вкладки задач и «Комментарии»
-           (нижний ряд не меняется). Пиктограмма — галочка без чекбокса. Логика — my.js, tasksStackMode. -->
-      <button class="settings-tab settings-tab-gear" id="settingsTabTasksStackBtn" title="Задачи" style="display:none;">
+      <!-- «Задачи и активности» (settingsTabTasksStackBtn): справа от «Книг», слева от «Календаря»; включает свой боковой ряд из ДВУХ РАЗНЫХ наборов вкладок:
+           сверху АКТИВНОСТИ (Тренировки, Музыка, Помодоро, QR-коды, График чтения, Мои цели), снизу ЗАДАЧИ (все вкладки задач и «Комментарии»), между ними одна
+           невидимая вкладка-промежуток (settingsTabTasksGapBtn). Пиктограмма — галочка без чекбокса. Логика — my.js, tasksStackMode, ACTIVITIES_STACK_TABS, TASK_TAB_IDS. -->
+      <button class="settings-tab settings-tab-gear" id="settingsTabTasksStackBtn" title="Задачи и активности">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4.5 12.8l4.6 4.7L19.5 6.5"></path>
         </svg>
@@ -876,13 +875,6 @@ window.addEventListener("error", function(e){
           <path d="M3.5 10h17"></path>
           <path d="M8 3v4"></path>
           <path d="M16 3v4"></path>
-        </svg>
-      </button>
-      <!-- «Активности» (settingsTabActivitiesStackBtn): справа от «Календаря»; работает как шестерёнка — включает свой боковой ряд
-           (Закладки, Тренировки, Музыка, Поиск). Логика — my.js, activitiesStackMode. -->
-      <button class="settings-tab settings-tab-gear" id="settingsTabActivitiesStackBtn" title="Активности">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M2.5 12.5h4l2.7-7 4.3 13 2.9-6H21.5"></path>
         </svg>
       </button>
     </div>

@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 18.0 (04.11)
+   Версия: 18.1 (07.11)
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
@@ -3402,9 +3402,9 @@ window.initMdEditorModule = function(deps){
   // ТОЛЬКО если на устройстве уже настроена обычная синхронизация (раздел
   // 1 ТЗ): без неё нет syncId, а значит и ключа шифрования.
   // ---------------------------------------------------------------------
-  // Строка заголовков «Заметки | Книги» (общая с вкладкой «Книги», рисует my.js: window.NotesBooksSwitch); без неё — обычный заголовок
+  // Заголовок вкладки «Заметки» (у «Книг» — свой нижний язычок и свой заголовок)
   function notesHeadHtml(){
-    return (window.NotesBooksSwitch && window.NotesBooksSwitch.html) ? window.NotesBooksSwitch.html("notes") : '<h3 class="common-tab-title">Мои заметки</h3>';
+    return '<h3 class="common-tab-title">Мои заметки</h3>';
   }
   function renderSetupScreen(container){
     if(!getSyncId()){
