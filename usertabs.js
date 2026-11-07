@@ -1,6 +1,6 @@
 /* ===========================================================================
    usertabs.js
-   Версия: 4.0 (04.11)
+   Версия: 4.1 (07.11)
    Вкладки-сайты бокового ряда «Интернет» (кнопка «+» над вкладкой «Claude», set2s_10). Каждая вкладка — свой адрес, который открывается
    по умолчанию; дальше вкладка помнит, где человек остановился на сайте (в том числе после закрытия приложения).
    Сам сайт показывает ОБОЛОЧКА: отдельный WebView на вкладку поверх области #userTabView (мост LifeTrackerNative ≥ 22, utab*;
@@ -193,7 +193,7 @@
       var p = (e.touches && e.touches[0]) || e;
       sx = p.clientX; sy = p.clientY;
       clearTimeout(tm);
-      tm = setTimeout(function(){ fired = true; cb(); }, LONG_PRESS_MS);
+      tm = setTimeout(function(){ if(window.TabReorder && window.TabReorder.busy()) return; fired = true; cb(); }, LONG_PRESS_MS);
     }
     function move(e){
       var p = (e.touches && e.touches[0]) || e;

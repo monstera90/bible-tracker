@@ -50,6 +50,7 @@ cardpdf.js
 itemcards.js
 claudetab.js
 usertabs.js
+tabreorder.js
 system.js
 music.js
 pomodoro.js

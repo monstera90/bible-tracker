@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 138.0 (07.11)
+   Версия: 139.0 (07.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -8325,6 +8325,7 @@
         "leftHandedLayout": "левша",
         "bibleBookColumns_v1": "колонки списка книг",
         "bibleTabSize_v1": "размер язычков окна настроек на этом устройстве",
+        "bibleTabOrder_v1": "порядок язычков окна настроек на этом устройстве (по группам)",
         "bibleBooksViewMode_v1": "вид списка книг",
         "bibleBooksHideTitles_v1": "скрытие заголовков книг",
         "bibleBookCoverDisabled_v1": "отключение обложек",
@@ -19160,6 +19161,23 @@
   }
   applyHiddenSettingsTabs();
   initBottomAltTabs();
+  // Перестановка язычков (tabreorder.js): менять местами можно только язычки ОДНОЙ группы, группы не смешиваются.
+  // Нижний ряд — одна группа; в боковом стеке: «Статистика» и «Настройки» (два набора ряда «Настройки и статистика»), «Инструменты»,
+  // «Активности» и «Задачи» (два набора ряда «Задачи и активности»), «Интернет» (Claude и вкладки-сайты). «+» ряда «Интернет» и
+  // невидимые промежутки в группы не входят — они стоят на месте. Порядок — порядок кнопок в DOM (`bibleTabOrder_v1`).
+  function tabReorderGroups(){
+    function vals(o){ return Object.keys(o).map(function(k){ return o[k]; }); }
+    var ut = window.UserTabsMod;
+    return {
+      bottom: { host: "settingsTabsGear", ids: [INFO_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, TOOLS_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY], SET2_TAB_IDS[BOOKS_TAB_KEY], TASKS_STACK_BTN_ID, CALENDAR_TAB_BTN_ID] },
+      stats: { host: "settingsTabs", ids: vals(INFO_STACK_BTN_IDS) },
+      settings: { host: "settingsTabs", ids: vals(BOTTOM_ALT_TAB_IDS).concat([WHEEL_SYSTEM_TAB_BTN_ID, EVENTS_TAB_BTN_ID]) },
+      tools: { host: "settingsTabs", ids: vals(TOOLS_STACK_BTN_IDS) },
+      activities: { host: "settingsTabs", ids: vals(ACTIVITIES_STACK_BTN_IDS) },
+      tasks: { host: "settingsTabs", ids: vals(TASK_TAB_IDS).concat([EXTRA_TAB_IDS.extra2]) },
+      internet: { host: "settingsTabs", ids: vals(CLAUDE_STACK_BTN_IDS).concat(ut ? ut.keys().map(function(k){ return ut.buttonId(k); }) : []) }
+    };
+  }
   // «+» и вкладки-сайты ряда «Интернет»: кнопки строит сам модуль (после initBottomAltTabs — режимы рядов уже объявлены)
   try{
     if(window.UserTabsMod) window.UserTabsMod.init({
@@ -19168,6 +19186,13 @@
       refresh: refreshSettingsTabsVisibility,
       confirm: openAppConfirmBar,
       getMdEditor: function(){ return MdEditor; } // список вкладок ходит по каналу карточек QR (скрытые записи заметок)
+    });
+  }catch(e){}
+  // перестановка язычков долгим нажатием и перетаскиванием (после UserTabsMod.init — кнопки вкладок-сайтов уже есть)
+  try{
+    if(window.TabReorder) window.TabReorder.init({
+      getGroups: tabReorderGroups,
+      onChange: function(){ updateSettingsCornerPatchHeight(); } // самый верхний язычок мог смениться — пересчёт заплаток углов
     });
   }catch(e){}
 
