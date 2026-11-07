@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 38.0 (07.11)
+     Версия: 39.0 (07.11)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -712,15 +712,6 @@ window.addEventListener("error", function(e){
           <line x1="15.3" y1="15.3" x2="20.5" y2="20.5"></line>
         </svg>
       </button>
-      <button class="settings-tab" id="settingsTabSet2Btn9" title="Карточки предметов" style="display:none;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3.5" y="3.5" width="6" height="6" rx="1"></rect>
-          <rect x="14.5" y="3.5" width="6" height="6" rx="1"></rect>
-          <rect x="3.5" y="14.5" width="6" height="6" rx="1"></rect>
-          <path d="M6.5 6.5h.01M17.5 6.5h.01M6.5 17.5h.01"></path>
-          <path d="M14.5 14.5h2.5M20.5 14.5h.01M14.5 17.5v3M17.5 17.5h3M18 20.5h2.5"></path>
-        </svg>
-      </button>
       <button class="settings-tab" id="settingsTabSet2Btn16" title="Помодоро" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="13.5" r="7.5"></circle>
@@ -855,8 +846,19 @@ window.addEventListener("error", function(e){
           <path d="M12 7v10"></path>
         </svg>
       </button>
-      <!-- «Задачи и активности» (settingsTabTasksStackBtn): справа от «Книг», слева от «Календаря»; включает свой боковой ряд из ДВУХ РАЗНЫХ наборов вкладок:
-           сверху АКТИВНОСТИ (Тренировки, Музыка, Помодоро, QR-коды, График чтения, Мои цели), снизу ЗАДАЧИ (все вкладки задач и «Комментарии»), между ними одна
+      <!-- «QR-коды» / «Карточки предметов» (settingsTabSet2Btn9, ключ "set2s_9", itemcards.js): самостоятельный нижний язычок набора 1 справа от «Книг»,
+           как «Заметки»/«Книги»/«Календарь»: бокового ряда нет, окно на всю область (my.js: isItemCardsBottomTab, updateNotesWide). -->
+      <button class="settings-tab settings-tab-gear" id="settingsTabSet2Btn9" title="Карточки предметов">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3.5" y="3.5" width="6" height="6" rx="1"></rect>
+          <rect x="14.5" y="3.5" width="6" height="6" rx="1"></rect>
+          <rect x="3.5" y="14.5" width="6" height="6" rx="1"></rect>
+          <path d="M6.5 6.5h.01M17.5 6.5h.01M6.5 17.5h.01"></path>
+          <path d="M14.5 14.5h2.5M20.5 14.5h.01M14.5 17.5v3M17.5 17.5h3M18 20.5h2.5"></path>
+        </svg>
+      </button>
+      <!-- «Задачи и активности» (settingsTabTasksStackBtn): справа от «QR-кодов», слева от «Календаря»; включает свой боковой ряд из ДВУХ РАЗНЫХ наборов вкладок:
+           сверху АКТИВНОСТИ (Тренировки, Музыка, Помодоро, График чтения, Мои цели), снизу ЗАДАЧИ (все вкладки задач и «Комментарии»), между ними одна
            невидимая вкладка-промежуток (settingsTabTasksGapBtn). Пиктограмма — галочка без чекбокса. Логика — my.js, tasksStackMode, ACTIVITIES_STACK_TABS, TASK_TAB_IDS. -->
       <button class="settings-tab settings-tab-gear" id="settingsTabTasksStackBtn" title="Задачи и активности">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 140.1 (07.11)
+   Версия: 141.0 (07.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1765,8 +1765,8 @@
   // Отдельного режима и язычка «Активности» нет. Вкладки АКТИВНОСТЕЙ сверху вниз: Тренировки, Музыка, Помодоро, QR-коды, График чтения, Мои цели.
   // Ключи и кнопки у них прежние (workouts, set2s_*), живут в наборе 1.
   var TASKS_GAP_BTN_ID = "settingsTabTasksGapBtn";
-  var ACTIVITIES_STACK_TABS = ["workouts", "set2s_11", "set2s_16", "set2s_9", "set2s_13", "set2s_12"];
-  var ACTIVITIES_STACK_BTN_IDS = { workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_16: "settingsTabSet2Btn16", set2s_9: "settingsTabSet2Btn9", set2s_13: "settingsTabSet2Btn13", set2s_12: "settingsTabSet2Btn12" };
+  var ACTIVITIES_STACK_TABS = ["workouts", "set2s_11", "set2s_16", "set2s_13", "set2s_12"];
+  var ACTIVITIES_STACK_BTN_IDS = { workouts: "settingsTabWorkoutsBtn", set2s_11: "settingsTabSet2Btn11", set2s_16: "settingsTabSet2Btn16", set2s_13: "settingsTabSet2Btn13", set2s_12: "settingsTabSet2Btn12" };
   function isActivitiesStackTab(tab){ return ACTIVITIES_STACK_TABS.indexOf(tab) !== -1; }
   // «Интернет» (нижний язычок settingsTabClaudeStackBtn между шестерёнкой и «Инструментами»): свой боковой ряд набора 1 (режим claudeStackMode),
   // работает как шестерёнка. Пока в ряду одна вкладка — «Claude» (set2s_10, claudetab.js); новая вкладка ряда: кнопка в `#settingsTabs` + ключ в списках ниже.
@@ -1789,8 +1789,12 @@
   var BOOKS_TAB_KEY = "set2s_7";
   var IPKD_TAB_KEY = "set2s_8";
   function isBooksBottomTab(tab){ return tab === BOOKS_TAB_KEY || tab === IPKD_TAB_KEY; }
-  // нижняя вкладка без своего бокового ряда («Мои заметки», «Мои книги» с ИПКД и «Календарь»)
-  function isStandaloneBottomTab(tab){ return isNotesBottomTab(tab) || isBooksBottomTab(tab) || isCalendarBottomTab(tab) || isBookmarksScreenTab(tab); }
+  // «QR-коды» / «Карточки предметов» (set2s_9, itemcards.js): нижняя вкладка набора 1 справа от «Мои книги» (кнопка settingsTabSet2Btn9 лежит в #settingsTabsGear),
+  // бокового ряда у неё нет, окно открывается на всю область (updateNotesWide)
+  var ITEM_CARDS_TAB_KEY = "set2s_9";
+  function isItemCardsBottomTab(tab){ return tab === ITEM_CARDS_TAB_KEY; }
+  // нижняя вкладка без своего бокового ряда («Мои заметки», «Мои книги» с ИПКД, «QR-коды» и «Календарь»)
+  function isStandaloneBottomTab(tab){ return isNotesBottomTab(tab) || isBooksBottomTab(tab) || isItemCardsBottomTab(tab) || isCalendarBottomTab(tab) || isBookmarksScreenTab(tab); }
   // «Заметки» (settingsTabSet2Btn1, пиктограмма заметок) и «Книги» (settingsTabSet2Btn7, пиктограмма раскрытой книги) — ДВА отдельных нижних язычка рядом:
   // заметки слева, книги справа от них. Переключателя «Заметки | Книги» вверху экрана нет; ключи вкладок прежние (set2s_1, set2s_7).
   // вкладка набора 1 из «своих» (боковые ряды «Статистика», «Инструменты», «Задачи и активности» (набор активностей), «Интернет» и нижние «Мои заметки», «Мои книги») — набор 2 их не показывает
@@ -10277,10 +10281,10 @@
     // updateSettingsCornerPatchHeight выше); единственный вызывающий.
     updateSettingsCornerPatchHeight();
   }
-  // «Мой блокнот», «Книги» (с ИПКД) и «Календарь» без открытого бокового ряда: колонки язычков нет, окно растягивается на её ширину (класс notes-wide на оверлее, modals.css)
+  // «Мой блокнот», «Книги» (с ИПКД), «QR-коды» и «Календарь» без открытого бокового ряда: колонки язычков нет, окно растягивается на её ширину (класс notes-wide на оверлее, modals.css)
   function updateNotesWide(){
     if(!settingsModalOverlay) return;
-    var on = (currentSettingsTab === NOTES_TAB_KEY || isBooksBottomTab(currentSettingsTab) || isCalendarBottomTab(currentSettingsTab) || isBookmarksScreenTab(currentSettingsTab)) && !bottomAltMode && !tasksStackMode && !toolsStackMode && !claudeStackMode;
+    var on = (currentSettingsTab === NOTES_TAB_KEY || isBooksBottomTab(currentSettingsTab) || isItemCardsBottomTab(currentSettingsTab) || isCalendarBottomTab(currentSettingsTab) || isBookmarksScreenTab(currentSettingsTab)) && !bottomAltMode && !tasksStackMode && !toolsStackMode && !claudeStackMode;
     if(on === settingsModalOverlay.classList.contains("notes-wide")) return;
     settingsModalOverlay.classList.toggle("notes-wide", on);
     if(settingsModalOverlay.classList.contains("open")){
@@ -18722,7 +18726,7 @@
   // хвосте). Простой guard — повторный клик по уже открытой вкладке просто ничего не делает, как и
   // было бы логично для переключателя вкладок (не кнопки "обновить").
   function switchSettingsTabOnClick(tab){
-    // «Мои заметки», «Мои книги» и «Календарь» — нижние вкладки без своего ряда: выключаем все боковые ряды (в том числе колесо), затем открываем вкладку
+    // «Мои заметки», «Мои книги», «QR-коды» и «Календарь» — нижние вкладки без своего ряда: выключаем все боковые ряды (в том числе колесо), затем открываем вкладку
     if(isStandaloneBottomTab(tab)){
       setAllStackModesOff();
       // «Заметки» и «Книги» — отдельные язычки: повторное нажатие на свой язычок (в «Книгах» это и экран ИПКД) ничего не делает
@@ -19214,7 +19218,7 @@
     function vals(o){ return Object.keys(o).map(function(k){ return o[k]; }); }
     var ut = window.UserTabsMod;
     return {
-      bottom: { host: "settingsTabsGear", ids: [INFO_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, TOOLS_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY], SET2_TAB_IDS[BOOKS_TAB_KEY], TASKS_STACK_BTN_ID, CALENDAR_TAB_BTN_ID] },
+      bottom: { host: "settingsTabsGear", ids: [INFO_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, TOOLS_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY], SET2_TAB_IDS[BOOKS_TAB_KEY], SET2_TAB_IDS[ITEM_CARDS_TAB_KEY], TASKS_STACK_BTN_ID, CALENDAR_TAB_BTN_ID] },
       stats: { host: "settingsTabs", ids: vals(INFO_STACK_BTN_IDS) },
       settings: { host: "settingsTabs", ids: vals(BOTTOM_ALT_TAB_IDS).concat([WHEEL_SYSTEM_TAB_BTN_ID, EVENTS_TAB_BTN_ID]) },
       tools: { host: "settingsTabs", ids: vals(TOOLS_STACK_BTN_IDS) },
@@ -19283,7 +19287,7 @@
     stripDecorClasses(); // декоративные язычки режима колеса никогда не выглядят выбранными
   }
   function bottomHighlightIds(){
-    return ["settingsTabGearBtnSet2", TASKS_STACK_BTN_ID, CALENDAR_TAB_BTN_ID, INFO_STACK_BTN_ID, TOOLS_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY], SET2_TAB_IDS[BOOKS_TAB_KEY]];
+    return ["settingsTabGearBtnSet2", TASKS_STACK_BTN_ID, CALENDAR_TAB_BTN_ID, INFO_STACK_BTN_ID, TOOLS_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY], SET2_TAB_IDS[BOOKS_TAB_KEY], SET2_TAB_IDS[ITEM_CARDS_TAB_KEY]];
   }
   // Внизу выделен ровно один язычок: «Заметки», «Книги» или «Календарь» (бокового ряда у них нет), иначе язычок включённого бокового ряда
   // (колесо, «Задачи и активности», «Статистика», «Инструменты», «Интернет»); второе выделение — вкладка в боковом ряду (applySideActive)
@@ -19292,6 +19296,7 @@
     var t = currentSettingsTab;
     if(isNotesBottomTab(t)){ nbLastOwnerKey = NOTES_TAB_KEY; return SET2_TAB_IDS[NOTES_TAB_KEY]; }
     if(isCalendarBottomTab(t)) return CALENDAR_TAB_BTN_ID; // «Календарь» — свой нижний язычок без бокового ряда
+    if(isItemCardsBottomTab(t)) return SET2_TAB_IDS[ITEM_CARDS_TAB_KEY]; // «QR-коды» — свой нижний язычок без бокового ряда
     if(isBooksBottomTab(t)){ nbLastOwnerKey = BOOKS_TAB_KEY; return SET2_TAB_IDS[BOOKS_TAB_KEY]; } // «Книги» (и ИПКД) — свой нижний язычок
     if(isBookmarksScreenTab(t)) return SET2_TAB_IDS[nbLastOwnerKey]; // экран «Закладки» открывается из «Заметок» или «Книг» — подсвечен язычок, откуда зашли
     if(bottomAltMode) return INFO_STACK_BTN_ID;

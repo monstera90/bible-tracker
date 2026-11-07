@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 24.7 (07.11)
+   Версия: 24.8 (07.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4421,6 +4421,15 @@ body::after{
   border:1px solid var(--groove-shadow);
   border-radius:8px;
   box-shadow:0 2px 6px rgba(0,0,0,.28);
+}
+/* «QR-коды» — нижняя вкладка без бокового ряда (окно шире на колонку, .notes-wide): меню «+»/PDF и ползунок размера, как и нижний ряд кнопок,
+   отступают от правого края на ширину колонки (--notes-wide-extra), чтобы стоять на том же месте экрана */
+.settings-modal-overlay.notes-wide .item-cards-tab .item-type-menu:not(.item-filter-menu){
+  inset-inline-end:calc(var(--fab-gap, 6px) + var(--notes-wide-extra, 0px));
+}
+.settings-modal-overlay.notes-wide .item-cards-tab .fontsize-bar{
+  inset-inline-end:calc(var(--fab-gap, 6px) + var(--notes-wide-extra, 0px));
+  width:calc(100% - var(--fab-gap, 6px) * 2 - var(--notes-wide-extra, 0px));
 }
 .item-type-menu .workbooks-run-btn{
   display:block;
