@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 35.0 (05.11)
+   Версия: 35.1 (07.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -651,6 +651,8 @@ window.initItemCardsModule = function(deps){
     try{ localStorage.setItem(SHOWHID_KEY, showHidden ? "1" : "0"); }catch(e){}
   }
   var EYE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+  // «График отметок» привычки (кнопка при долгом нажатии на карточку-привычку): сетка дней, часть клеток закрашена
+  var CHART_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="4.6" height="4.6" rx="1"></rect><rect x="9.7" y="3.5" width="4.6" height="4.6" rx="1" fill="currentColor"></rect><rect x="15.9" y="3.5" width="4.6" height="4.6" rx="1"></rect><rect x="3.5" y="9.7" width="4.6" height="4.6" rx="1" fill="currentColor"></rect><rect x="9.7" y="9.7" width="4.6" height="4.6" rx="1" fill="currentColor"></rect><rect x="15.9" y="9.7" width="4.6" height="4.6" rx="1"></rect><rect x="3.5" y="15.9" width="4.6" height="4.6" rx="1"></rect><rect x="9.7" y="15.9" width="4.6" height="4.6" rx="1"></rect><rect x="15.9" y="15.9" width="4.6" height="4.6" rx="1" fill="currentColor"></rect></svg>';
   var STAR_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9 6.8 19.7l1-5.9-4.3-4.1 5.9-.8z"></path></svg>';
   var STAR_FILLED_ICON_SVG = STAR_ICON_SVG.replace('fill="none"', 'fill="currentColor"');
   var EYE_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path></svg>';
@@ -981,6 +983,8 @@ window.initItemCardsModule = function(deps){
           '<button type="button" class="mdeditor-share-btn item-card-fav-btn' + (revealed ? " visible" : "") + '" title="' + (c.fav ? "В избранном (нажмите, чтобы убрать)" : "Добавить в избранное") + '">' + (c.fav ? STAR_FILLED_ICON_SVG : STAR_ICON_SVG) + '</button>' +
           // тап по карточке = «Пуск» (скан кода), поэтому правка формы — только этой кнопкой (появляется по долгому нажатию, тот же стиль, что у глаза)
           '<button type="button" class="mdeditor-share-btn item-card-edit-btn' + (revealed ? " visible" : "") + '" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
+          // привычка: график отметок (карта дней) открывается отсюда — тап по карточке теперь отмечает день, других путей к графику нет
+          (c.type === "habit" ? '<button type="button" class="mdeditor-share-btn item-card-chart-btn' + (revealed ? " visible" : "") + '" title="График отметок">' + CHART_ICON_SVG + '</button>' : '') +
         '</div>';
       card.querySelector(".item-card-title").textContent = cardTitle(c);
       applyCardLook(card, c);
@@ -1116,7 +1120,7 @@ window.initItemCardsModule = function(deps){
     for(var k in revealedIds){ if(revealedIds.hasOwnProperty(k)){ any = true; break; } }
     if(!any) return;
     revealedIds = {};
-    var btns = document.querySelectorAll("#itemCardsGrid .mdeditor-delete-btn.visible, #itemCardsGrid .item-card-eye-btn.visible, #itemCardsGrid .item-card-fav-btn.visible, #itemCardsGrid .item-card-edit-btn.visible");
+    var btns = document.querySelectorAll("#itemCardsGrid .mdeditor-delete-btn.visible, #itemCardsGrid .item-card-eye-btn.visible, #itemCardsGrid .item-card-fav-btn.visible, #itemCardsGrid .item-card-edit-btn.visible, #itemCardsGrid .item-card-chart-btn.visible");
     for(var i = 0; i < btns.length; i++) btns[i].classList.remove("visible");
   }
 
@@ -1223,7 +1227,7 @@ window.initItemCardsModule = function(deps){
         longFired = true;
         clearAttention(cardNode.dataset.id);
         revealedIds[cardNode.dataset.id] = true;
-        var btns = cardNode.querySelectorAll(".mdeditor-delete-btn, .item-card-eye-btn, .item-card-fav-btn, .item-card-edit-btn");
+        var btns = cardNode.querySelectorAll(".mdeditor-delete-btn, .item-card-eye-btn, .item-card-fav-btn, .item-card-edit-btn, .item-card-chart-btn");
         for(var i = 0; i < btns.length; i++) btns[i].classList.add("visible");
       }, LONG_MS);
     }
@@ -1268,6 +1272,7 @@ window.initItemCardsModule = function(deps){
       }
       if(e.target.closest(".item-card-fav-btn")){ toggleFav(c); return; } // звезда: в избранное ↔ из избранного (кнопки остаются раскрытыми)
       if(e.target.closest(".item-card-edit-btn")){ hideRevealed(); openForm(c.type, c); return; }
+      if(e.target.closest(".item-card-chart-btn")){ hideRevealed(); openHabitMap(c.id); return; } // график отметок привычки
       if(e.target.closest(".mdeditor-delete-btn")){
         openAppConfirmBar("Удалить карточку «" + (c.title || "без названия") + "»?" + (c.type === "remind" ? " Напоминание будет отменено." : " QR-код перестанет работать."), function(){
           deleteCard(c.id);
