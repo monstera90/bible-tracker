@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 137.0 (07.11)
+   Версия: 138.0 (07.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -12595,6 +12595,14 @@
   function getLastOpenedBookName(){
     try{ return localStorage.getItem(LAST_OPENED_BOOK_KEY); }catch(e){ return null; }
   }
+  // Выход из книги к СПИСКУ («домик»/«назад») — «последней открытой книги» больше нет: после перезапуска вкладка
+  // «Книги» должна открыться списком, а не бросать в книгу. Возврат шагом «назад» к снимку книги её возвращает.
+  function forgetLastOpenedBookOnListExit(){
+    saveLastOpenedBookName("");
+  }
+  function restoreLastOpenedBookFromSnapshot(st){
+    if(st && st.name && st.name !== IPKD_BOOK_NAME && !st.transient) saveLastOpenedBookName(st.name);
+  }
   function bookStateKey(hash){
     return "book:" + hash;
   }
@@ -14380,6 +14388,7 @@
         destroyBookReaderScrollListener();
         revokeBookReaderImages();
         bookReaderState = null;
+        forgetLastOpenedBookOnListExit();
         // renderSettingsTabBooks() всегда — заменено на диспетчер по bookReaderOwnerTab: для
         // обычных книг (set2s_7, значение по умолчанию) поведение не изменилось,
         // renderBookReaderOwnerTab ниже так же зовёт renderSettingsTabBooks(). См. раздел "ВКЛАДКА
@@ -14774,9 +14783,11 @@
         leavePdfView();
         window.AppNav.push(function(){
           bookReaderState = snapshot;
+          restoreLastOpenedBookFromSnapshot(snapshot);
           renderBookReader();
         });
         bookReaderState = null;
+        forgetLastOpenedBookOnListExit();
         renderSettingsTabBooks();
       });
     }
@@ -14989,9 +15000,11 @@
         var snapshot = bookReaderState;
         window.AppNav.push(function(){
           bookReaderState = snapshot;
+          restoreLastOpenedBookFromSnapshot(snapshot);
           renderBookReader();
         });
         bookReaderState = null;
+        forgetLastOpenedBookOnListExit();
         renderSettingsTabBooks();
       });
     }

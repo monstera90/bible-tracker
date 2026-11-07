@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 18.1 (07.11)
+   Версия: 19.0 (07.11)
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
@@ -1695,35 +1695,84 @@ window.initMdEditorModule = function(deps){
   // в другой подпапке — индекс плоский по всей папке), получает суффикс
   // "(2)" и т.д. через suggestFreeImageName выше, а не молча
   // перезаписывает существующий файл.
-  function insertImageAtCursor(file){
-    if(!cmView || !imagesDirHandle) return;
-    var finalName = imageIndex.has(file.name.toLowerCase()) ? suggestFreeImageName(file.name) : file.name;
-    // Читаем байты один раз (не file напрямую в writable.write) — тот же
-    // ArrayBuffer идёт и на запись, и на хэш для облачного манифеста
-    // (recordImageAdded, ТЗ пользователя от 14.09).
-    file.arrayBuffer().then(function(buf){
-      return imagesDirHandle.getFileHandle(finalName, { create: true }).then(function(fileHandle){
-        return fileHandle.createWritable().then(function(writable){
-          return writable.write(buf).then(function(){ return writable.close(); });
-        }).then(function(){ return fileHandle; });
-      }).then(function(fileHandle){
-        imageIndex.set(finalName.toLowerCase(), { handle: fileHandle, name: finalName });
-        recordImageAdded(finalName, buf);
-        var sel = cmView.state.selection.main;
-        var insertText = "![[" + finalName + "]]";
+  // Место вставки запоминается в момент нажатия на скрепку (imageInsertTarget): пока открыт системный выбор файла,
+  // приложение уходит на паузу, __ltOnAppPause уничтожает редактор (flushPendingMdEditorEdit → destroyEditor,
+  // cmView = null), а после возврата он пересобирается с задержкой — поэтому вставка ждёт новый cmView.
+  var imageInsertTarget = null; // { file: openFile, from, to }
+  function rememberImageInsertTarget(){
+    imageInsertTarget = null;
+    if(!openFile) return;
+    var from = typeof openFile.cursorPos === "number" ? openFile.cursorPos : 0, to = from;
+    if(cmView){
+      try{ var sel = cmView.state.selection.main; from = sel.from; to = sel.to; }catch(e){}
+    }
+    imageInsertTarget = { file: openFile, from: from, to: to };
+  }
+  // Имя файла от системного выбора Android бывает пустым, без расширения («image:1234») или со знаками, ломающими ![[…]]
+  function imageFileNameFor(file){
+    var n = String(file.name || "").replace(/[\[\]\/\\:*?"<>|]/g, "_").replace(/^\s+|\s+$/g, "");
+    if(!/\.[A-Za-z0-9]{2,5}$/.test(n)){
+      var t = String(file.type || "").toLowerCase();
+      var ext = t === "image/png" ? ".png" : t === "image/gif" ? ".gif" : t === "image/webp" ? ".webp" : t === "image/heic" ? ".heic" : t === "image/svg+xml" ? ".svg" : ".jpg";
+      n = (n || ("image-" + Date.now())) + ext;
+    }
+    return n;
+  }
+  function placeImageLink(target, insertText, tries){
+    tries = tries || 0;
+    var f = target.file;
+    if(openFile === f && screen === "editor" && !noteInfoOpen){
+      if(cmView && !editorNotMounted()){
+        var len = cmView.state.doc.length;
+        var from = Math.min(target.from, len), to = Math.min(Math.max(target.to, from), len);
         cmView.dispatch({
-          changes: { from: sel.from, to: sel.to, insert: insertText },
-          selection: { anchor: sel.from + insertText.length }
+          changes: { from: from, to: to, insert: insertText },
+          selection: { anchor: from + insertText.length }
         });
         cmView.focus();
-        // Раздел 7 ТЗ (TASK_FILE_SYNC_RTDB.md, шаг 5, 16.09): картинка
-        // больше лимита сохранится локально как обычно (гейт внутри
-        // registerFileInRegistry в my.js её просто не отправит в облачный
-        // реестр), но пользователя об этом стоит предупредить — тем же
-        // текстом, что и у книг (handleImportBooksFile в my.js).
-        if(deps.fileExceedsSyncSizeLimit && deps.fileExceedsSyncSizeLimit(buf.byteLength)){
-          setStatus(deps.getFileSyncSizeWarning ? deps.getFileSyncSizeWarning() : "Файл слишком большой и не будет синхронизирован автоматически.", false);
-        }
+        return;
+      }
+      if(tries < 80){ setTimeout(function(){ placeImageLink(target, insertText, tries + 1); }, 100); return; }
+    }
+    // редактор не собрался (или заметку уже закрыли) — ссылка пишется прямо в текст заметки
+    var t = String(f.text || "");
+    var a = Math.min(target.from, t.length), b = Math.min(Math.max(target.to, a), t.length);
+    f.text = t.slice(0, a) + insertText + t.slice(b);
+    f.cursorPos = a + insertText.length;
+    f.dirty = false;
+    editNoteRecordText(f.id, f.text);
+    if(openFile === f && screen === "editor" && !noteInfoOpen) remountEditorInPlace(null);
+  }
+  function insertImageAtCursor(file){
+    var target = imageInsertTarget;
+    imageInsertTarget = null;
+    if(!target && openFile) target = { file: openFile, from: (typeof openFile.cursorPos === "number" ? openFile.cursorPos : 0), to: (typeof openFile.cursorPos === "number" ? openFile.cursorPos : 0) };
+    if(!target || !target.file){ setStatus("Не удалось вставить картинку: заметка не открыта.", true); return; }
+    ensureImagesReady().then(function(ok){
+      if(!ok || !imagesDirHandle) throw new Error("Хранилище изображений недоступно.");
+      var baseName = imageFileNameFor(file);
+      var finalName = imageIndex.has(baseName.toLowerCase()) ? suggestFreeImageName(baseName) : baseName;
+      // Читаем байты один раз (не file напрямую в writable.write) — тот же
+      // ArrayBuffer идёт и на запись, и на хэш для облачного манифеста
+      // (recordImageAdded, ТЗ пользователя от 14.09).
+      return file.arrayBuffer().then(function(buf){
+        return imagesDirHandle.getFileHandle(finalName, { create: true }).then(function(fileHandle){
+          return fileHandle.createWritable().then(function(writable){
+            return writable.write(buf).then(function(){ return writable.close(); });
+          }).then(function(){ return fileHandle; });
+        }).then(function(fileHandle){
+          imageIndex.set(finalName.toLowerCase(), { handle: fileHandle, name: finalName });
+          recordImageAdded(finalName, buf);
+          placeImageLink(target, "![[" + finalName + "]]", 0);
+          // Раздел 7 ТЗ (TASK_FILE_SYNC_RTDB.md, шаг 5, 16.09): картинка
+          // больше лимита сохранится локально как обычно (гейт внутри
+          // registerFileInRegistry в my.js её просто не отправит в облачный
+          // реестр), но пользователя об этом стоит предупредить — тем же
+          // текстом, что и у книг (handleImportBooksFile в my.js).
+          if(deps.fileExceedsSyncSizeLimit && deps.fileExceedsSyncSizeLimit(buf.byteLength)){
+            setStatus(deps.getFileSyncSizeWarning ? deps.getFileSyncSizeWarning() : "Файл слишком большой и не будет синхронизирован автоматически.", false);
+          }
+        });
       });
     }).catch(function(e){
       setStatus("Не удалось сохранить картинку: " + (e && e.message ? e.message : e), true);
@@ -2715,6 +2764,7 @@ window.initMdEditorModule = function(deps){
       openFile = null;
       destroyEditor();
       screen = "list";
+      persistListScreenIfList();
       setStatus("Эта заметка была удалена на другом устройстве.", false);
     } else if(cmView && rec){
       openFile.text = rec.text;
@@ -4640,6 +4690,7 @@ window.initMdEditorModule = function(deps){
     // старте модуля, см. initImagesStorage) — здесь просто подстраховка на
     // случай самого первого клика до его завершения.
     document.getElementById("mdEditorImageBtn").addEventListener("click", function(){
+      rememberImageInsertTarget(); // до диалога: пока он открыт, редактор будет уничтожен паузой приложения
       ensureImagesReady().then(function(ok){
         if(!ok){
           setStatus("Не удалось получить доступ к хранилищу изображений в этом браузере.", true);
@@ -4702,6 +4753,7 @@ window.initMdEditorModule = function(deps){
         currentDirNode = prevDirNode;
         screen = prevScreen;
         render();
+        persistListScreenIfList(); // вернулись «назад» к списку — после перезапуска откроется список, а не последняя заметка
       });
       goHome();
     });
@@ -4849,6 +4901,7 @@ window.initMdEditorModule = function(deps){
       currentDirNode = prevDirNode;
       screen = prevScreen;
       render();
+      persistListScreenIfList(); // вернулись «назад» к списку — после перезапуска откроется список, а не последняя заметка
       if(prevScrollTop !== null){
         var restoredScrollHost = document.getElementById("settingsTabContent");
         if(restoredScrollHost) restoredScrollHost.scrollTop = prevScrollTop;
@@ -5187,6 +5240,7 @@ window.initMdEditorModule = function(deps){
       currentDirNode = prevDirNode;
       screen = prevScreen;
       render();
+      persistListScreenIfList(); // вернулись «назад» к списку — после перезапуска откроется список, а не последняя заметка
       if(prevScrollTop !== null){
         var restoredScrollHost = document.getElementById("settingsTabContent");
         if(restoredScrollHost) restoredScrollHost.scrollTop = prevScrollTop;
@@ -5228,6 +5282,7 @@ window.initMdEditorModule = function(deps){
       currentDirNode = prevDirNode;
       screen = prevScreen;
       render();
+      persistListScreenIfList(); // вернулись «назад» к списку — после перезапуска откроется список, а не последняя заметка
       if(prevScrollTop !== null){
         var restoredScrollHost = document.getElementById("settingsTabContent");
         if(restoredScrollHost) restoredScrollHost.scrollTop = prevScrollTop;
@@ -5270,6 +5325,7 @@ window.initMdEditorModule = function(deps){
       currentDirNode = prevDirNode;
       screen = prevScreen;
       render();
+      persistListScreenIfList(); // вернулись «назад» к списку — после перезапуска откроется список, а не последняя заметка
       if(prevScrollTop !== null){
         var restoredScrollHost = document.getElementById("settingsTabContent");
         if(restoredScrollHost) restoredScrollHost.scrollTop = prevScrollTop;
@@ -5537,6 +5593,9 @@ window.initMdEditorModule = function(deps){
     for(var k in patch){ if(patch.hasOwnProperty(k)) docState[k] = patch[k]; }
     docState.updatedAt = Date.now();
     idbSet("lastNote", docState).catch(function(){});
+  }
+  function persistListScreenIfList(){
+    if(screen === "list") persistDocStateNow({ screen: "list", id: null, name: null, cursorPos: 0, scrollPercent: null });
   }
   function currentScrollPercent(){
     var sc = document.getElementById("settingsTabContent");
