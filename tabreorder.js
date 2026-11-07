@@ -1,6 +1,6 @@
 /* ===========================================================================
    tabreorder.js
-   Версия: 1.0 (07.11)
+   Версия: 1.1 (07.11)
    Перестановка язычков окна настроек: долгое нажатие (≈0,45 с) поднимает язычок, дальше его можно тащить пальцем (мышью) и бросить на
    нужное место. Менять местами можно только язычки ОДНОЙ группы; группы не смешиваются, а язычок не выходит за границы своей группы.
    Состав групп отдаёт my.js (`TabReorder.init({getGroups})`, функция `tabReorderGroups`): { имя: {host: id контейнера, ids: [id кнопок]} }.
@@ -8,8 +8,9 @@
    Порядок = порядок кнопок в DOM внутри их контейнера: переставляются только кнопки одной группы, каждая встаёт на место (слот)
    другой, поэтому остальные кнопки контейнера остаются там, где были. Остальной код (самая нижняя вкладка ряда, список «Скрытие вкладок»)
    читает DOM и порядок подхватывает сам.
-   Хранение — localStorage `bibleTabOrder_v1` ({имя группы: [id кнопок в порядке DOM]}), только на устройстве, входит в экспорт. Кнопки,
-   которых в списке нет (новая вкладка-сайт), остаются там, куда их вставили. Новые кнопки подхватывает MutationObserver.
+   Хранение отдаёт my.js: `deps.loadOrder()` → {имя группы: [id кнопок в порядке DOM]}, `deps.saveOrder(имя, [id])` (порядок лежит в state и
+   едет в облако). Без этих deps — запасной localStorage `bibleTabOrder_v1`. Кнопки, которых в списке нет (вкладка-сайт другого
+   устройства, новая вкладка), остаются там, куда их вставили. Новые кнопки подхватывает MutationObserver.
    Жесты — touch + мышь, без pointer events и без options-объекта в addEventListener (старый WebView, Android 5.0).
    Публично: window.TabReorder.{init, busy, apply}; `busy()` — идёт перетаскивание (usertabs.js не ставит крестик удаления).
    =========================================================================== */
@@ -71,14 +72,22 @@
 
   // ---- хранение ----
   function readStore(){
+    if(deps && deps.loadOrder){
+      try{ var d = deps.loadOrder(); return (d && typeof d === "object") ? d : {}; }catch(e){ return {}; }
+    }
     try{ var o = JSON.parse(localStorage.getItem(STORE_KEY) || "{}"); return (o && typeof o === "object") ? o : {}; }catch(e){ return {}; }
   }
   function writeStore(o){
     try{ localStorage.setItem(STORE_KEY, JSON.stringify(o)); }catch(e){}
   }
   function saveGroup(name, g){
+    var ids = membersOf(g).map(function(el){ return el.id; });
+    if(deps && deps.saveOrder){
+      try{ deps.saveOrder(name, ids); }catch(e){}
+      return;
+    }
     var o = readStore();
-    o[name] = membersOf(g).map(function(el){ return el.id; });
+    o[name] = ids;
     writeStore(o);
   }
 

@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 139.0 (07.11)
+   Версия: 140.0 (07.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -3421,6 +3421,7 @@
     // mdeditor.js).
     if(MdEditor && MdEditor.refreshBookmarksFromState) MdEditor.refreshBookmarksFromState();
     refreshHiddenTabsFromState(); // скрытые вкладки приходят из облака вместе с state
+    refreshTabOrderFromState(); // порядок язычков тоже приходит из облака вместе с state
     refreshTabMarksFromState(); // «заходил сегодня» на ИПКД / настроение / Red — тоже из облака
     // Если сейчас открыта одна из вкладок задач
     // (red/inbox/next/projects/waiting/read/someday/archive) — её тоже нужно перерисовать из
@@ -8325,7 +8326,7 @@
         "leftHandedLayout": "левша",
         "bibleBookColumns_v1": "колонки списка книг",
         "bibleTabSize_v1": "размер язычков окна настроек на этом устройстве",
-        "bibleTabOrder_v1": "порядок язычков окна настроек на этом устройстве (по группам)",
+        "bibleTabOrder_v1": "порядок язычков окна настроек (по группам) — старое хранилище, читается только для переноса в state",
         "bibleBooksViewMode_v1": "вид списка книг",
         "bibleBooksHideTitles_v1": "скрытие заголовков книг",
         "bibleBookCoverDisabled_v1": "отключение обложек",
@@ -19161,10 +19162,54 @@
   }
   applyHiddenSettingsTabs();
   initBottomAltTabs();
+  // Порядок язычков лежит в state — по записи на группу (`__tabOrder:<группа>` = {c: "v1:id1,id2", t}) — и ездит через облако: переставили
+  // язычки на одном устройстве — они переставятся на всех устройствах аккаунта (слияние по последнему t, как у остальных настроек).
+  // Значение — строка, а не массив (Firebase отбрасывает пустые массивы и пересобирает индексы). Кнопки, которых на устройстве нет
+  // (вкладки-сайты другого устройства), при применении пропускаются. Старое хранилище — localStorage `bibleTabOrder_v1`: один раз
+  // переносится в state (t=1 — любое настоящее изменение на другом устройстве новее).
+  var TAB_ORDER_STATE_PREFIX = "__tabOrder:";
+  var TAB_ORDER_VALUE_PREFIX = "v1:";
+  var TAB_ORDER_LEGACY_KEY = "bibleTabOrder_v1";
+  function tabOrderLoad(){
+    var res = {}, legacy = null, migrated = false;
+    Object.keys(tabReorderGroups()).forEach(function(name){
+      var key = TAB_ORDER_STATE_PREFIX + name, rec = state[key];
+      if(rec && typeof rec.c === "string" && rec.c.indexOf(TAB_ORDER_VALUE_PREFIX) === 0){
+        res[name] = rec.c.slice(TAB_ORDER_VALUE_PREFIX.length).split(",").filter(function(id){ return !!id; });
+        return;
+      }
+      if(legacy === null){
+        try{ legacy = JSON.parse(localStorage.getItem(TAB_ORDER_LEGACY_KEY) || "{}"); }catch(e){ legacy = {}; }
+        if(!legacy || typeof legacy !== "object") legacy = {};
+      }
+      var arr = Array.isArray(legacy[name]) ? legacy[name].filter(function(id){ return typeof id === "string" && id; }) : [];
+      if(arr.length){
+        res[name] = arr;
+        state[key] = {c: TAB_ORDER_VALUE_PREFIX + arr.join(","), t: 1};
+        migrated = true;
+      }
+    });
+    if(migrated){
+      saveLocalStateNow();
+      scheduleCloudPush();
+      try{ localStorage.removeItem(TAB_ORDER_LEGACY_KEY); }catch(e){}
+    }
+    return res;
+  }
+  function tabOrderSave(name, ids){
+    state[TAB_ORDER_STATE_PREFIX + name] = {c: TAB_ORDER_VALUE_PREFIX + ids.join(","), t: Date.now()};
+    saveLocalStateNow();
+    scheduleCloudPush();
+    try{ localStorage.removeItem(TAB_ORDER_LEGACY_KEY); }catch(e){}
+  }
+  // после слияния с облаком (rerenderAllFromState): язычки встают в порядок, пришедший с другого устройства
+  function refreshTabOrderFromState(){
+    try{ if(window.TabReorder) window.TabReorder.apply(); }catch(e){}
+  }
   // Перестановка язычков (tabreorder.js): менять местами можно только язычки ОДНОЙ группы, группы не смешиваются.
   // Нижний ряд — одна группа; в боковом стеке: «Статистика» и «Настройки» (два набора ряда «Настройки и статистика»), «Инструменты»,
   // «Активности» и «Задачи» (два набора ряда «Задачи и активности»), «Интернет» (Claude и вкладки-сайты). «+» ряда «Интернет» и
-  // невидимые промежутки в группы не входят — они стоят на месте. Порядок — порядок кнопок в DOM (`bibleTabOrder_v1`).
+  // невидимые промежутки в группы не входят — они стоят на месте. Порядок — порядок кнопок в DOM (`state["__tabOrder:<группа>"]`).
   function tabReorderGroups(){
     function vals(o){ return Object.keys(o).map(function(k){ return o[k]; }); }
     var ut = window.UserTabsMod;
@@ -19192,6 +19237,8 @@
   try{
     if(window.TabReorder) window.TabReorder.init({
       getGroups: tabReorderGroups,
+      loadOrder: tabOrderLoad,
+      saveOrder: tabOrderSave,
       onChange: function(){ updateSettingsCornerPatchHeight(); } // самый верхний язычок мог смениться — пересчёт заплаток углов
     });
   }catch(e){}
