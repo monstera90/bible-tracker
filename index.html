@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 37.0 (07.11)
+     Версия: 38.0 (07.11)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -803,6 +803,17 @@ window.addEventListener("error", function(e){
          modals.css), не зависит от ширины окна настроек и больше не
          считается JS-ом. -->
     <div class="settings-tabs-gear" id="settingsTabsGear">
+      <!-- «Настройки и статистика» (settingsTabInfoStackBtn): первый язычок нижнего ряда (отдельной шестерёнки нет), пиктограмма — столбики статистики; включает боковой ряд
+           из ДВУХ наборов вкладок: сверху СТАТИСТИКА (Забытые заметки, Обзор, Карта дней года, Трекер экранов, Настроение), снизу НАСТРОЙКИ (вкладки колеса alt1..alt6,
+           «Система», «События»), между ними одна невидимая вкладка-промежуток (settingsTabTasksGapBtn). Логика — my.js, bottomAltMode, INFO_STACK_TABS. -->
+      <button class="settings-tab settings-tab-gear" id="settingsTabInfoStackBtn" title="Настройки и статистика">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3.5 20.5h17"></path>
+          <rect x="5" y="11" width="3.6" height="7.5" rx="0.9"></rect>
+          <rect x="10.2" y="5" width="3.6" height="13.5" rx="0.9"></rect>
+          <rect x="15.4" y="8.5" width="3.6" height="10" rx="0.9"></rect>
+        </svg>
+      </button>
       <!-- «Интернет» (settingsTabClaudeStackBtn): между шестерёнкой и «Инструментами»; работает как шестерёнка — включает свой боковой ряд
            (сейчас одна вкладка «Claude», set2s_10: claudetab.js, ClaudeTab.kt). Логика — my.js, claudeStackMode. -->
       <button class="settings-tab settings-tab-gear" id="settingsTabClaudeStackBtn" title="Интернет">
@@ -818,17 +829,6 @@ window.addEventListener("error", function(e){
       <button class="settings-tab settings-tab-gear" id="settingsTabToolsStackBtn" title="Инструменты">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
-        </svg>
-      </button>
-      <!-- «Настройки и статистика» (settingsTabInfoStackBtn): первый язычок нижнего ряда (отдельной шестерёнки нет), пиктограмма — столбики статистики; включает боковой ряд
-           из ДВУХ наборов вкладок: сверху СТАТИСТИКА (Забытые заметки, Обзор, Карта дней года, Трекер экранов, Настроение), снизу НАСТРОЙКИ (вкладки колеса alt1..alt6,
-           «Система», «События»), между ними одна невидимая вкладка-промежуток (settingsTabTasksGapBtn). Логика — my.js, bottomAltMode, INFO_STACK_TABS. -->
-      <button class="settings-tab settings-tab-gear" id="settingsTabInfoStackBtn" title="Настройки и статистика">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3.5 20.5h17"></path>
-          <rect x="5" y="11" width="3.6" height="7.5" rx="0.9"></rect>
-          <rect x="10.2" y="5" width="3.6" height="13.5" rx="0.9"></rect>
-          <rect x="15.4" y="8.5" width="3.6" height="10" rx="0.9"></rect>
         </svg>
       </button>
       <!-- «Заметки» (settingsTabSet2Btn1, ключ "set2s_1", «Мой блокнот» — mdeditor.js): нижний язычок набора 1 справа от «Статистики» (пиктограмма заметок), справа от него — «Книги».

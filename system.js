@@ -1,6 +1,6 @@
 /* ===========================================================================
    system.js
-   Версия: 1.2 (02.11)
+   Версия: 1.3 (07.11)
    Вкладка «Система» (set2s_15, кнопка settingsTabSet2Btn15; язычок режима колеса — в вертикальном стеке набора 1 самый нижний).
    Здесь — функции, связанные с работой всей системы телефона. Сейчас одна: «Усиление громкости в системе»
    (100 % по умолчанию / 125 % / 150 % / 200 %) и выбор способа усиления (1 — LoudnessEnhancer, 2 — DynamicsProcessing; мост ≥21, `volumeBoostSetEngine`): прошивки принимают эффекты по-разному. Звук усиливает оболочка Android (VolumeBoost.kt, служба
@@ -120,7 +120,7 @@
           '<div class="sys-status" id="systemBoostStatus"></div>' +
           (typeof b.volumeBoostSetEngine === "function" ?
             '<div class="sys-engine-title">Способ усиления</div>' +
-            '<div class="sys-engine-sub">Если на 125–200 % громкость не меняется, переключите способ: телефоны принимают их по-разному. Слышимый эффект — только на звуке, который играет.</div>' +
+            '<div class="sys-engine-sub">Если на 125–200 % громкость не меняется, переключите способ: телефоны принимают их по-разному.</div>' +
             '<div class="sys-opts"><button type="button" class="sys-opt sys-eng" data-eng="0">1</button>' +
             '<button type="button" class="sys-opt sys-eng" data-eng="1">2</button></div>' : '') +
         '</div>' +
