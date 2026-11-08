@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.5 (08.11)
+// Версия: 7.6 (08.11)
 // Версия: 5.7 (24.10) — скрытый таймер (`Timer.hidden`, `start(..., hidden)`): идёт и срабатывает как обычный, но без уведомления «идёт», острова, плашки в приложении, службы тика и этапов цвета; в конце — обычные вибрация и «Таймер закончился»; `listJson` отдаёт `hidden`. Откат: CardTimers.kt 5.6.
 // Версия: 5.6 (24.10) — этапы цвета значка: остался один, красный за 2 минуты до конца (`scheduleStages`); жёлтый убран, но его будильник от прежней версии снимается (`LEGACY_STAGE_YELLOW`). Откат: CardTimers.kt 5.5.
 // Версия: 5.5 (22.10) — эксперимент с чёрным фоном уведомления (`setColorized`) откачен: HyperOS не меняет цвет карточки. Прежнее: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
@@ -289,10 +289,13 @@ object CardTimers {
             val now = System.currentTimeMillis()
             // остров один на помодоро и таймеры: если помодоро закончится раньше, оно держит главное место, а таймеры не перепоставляем
             val pomoLeads = pomoRank < islandRankLocked(ctx, now)
+            // и между самими таймерами: несколько идущих уведомлений по секунде дёргали бы остров так же — тикает только тот, что закончится раньше
+            val leadId = primaryId(ctx)
             var next = -1L
             for (t in load(ctx).values) {
                 if (t.hidden || t.dismissed || !t.running || t.endAt <= now) continue // скрытый таймер и таймер со смахнутым уведомлением уведомления «идёт» не имеют
-                if (!NotifyStore.appForeground && !pomoLeads) postRunning(ctx, t, floatDeferred.contains(t.id)) // раскрытие, пропавшее при открытом приложении, повторяется один раз
+                val mayPost = !pomoLeads && (t.id == leadId || floatDeferred.contains(t.id))
+                if (!NotifyStore.appForeground && mayPost) postRunning(ctx, t, floatDeferred.contains(t.id)) // раскрытие, пропавшее при открытом приложении, повторяется один раз
                 if (next < 0) next = (t.endAt - now) % 1000L + 20L
             }
             next

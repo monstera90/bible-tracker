@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (01.11)
+// Версия: 1.1 (08.11)
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -25,7 +25,7 @@ class VolumeBoostService : Service() {
 
     companion object {
         const val CHANNEL = "volume_boost"
-        const val NOTIFICATION_ID = 6
+        const val NOTIFICATION_ID = 9 // не 6: 6 у WorkoutService, и при одновременной работе уведомления подменяли бы друг друга
         private const val ACTION_OFF = "com.app.lifetracker.volumeboost.OFF"
         private const val ACTION_STOP = "com.app.lifetracker.volumeboost.STOP"
         private const val CHECK_MS = 15000L

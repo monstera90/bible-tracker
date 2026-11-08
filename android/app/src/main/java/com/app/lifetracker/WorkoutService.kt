@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.2 (04.11)
+// Версия: 1.3 (08.11)
 
 import android.Manifest
 import android.app.Notification
@@ -20,6 +20,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -39,6 +40,7 @@ class WorkoutService : Service() {
     companion object {
         const val CHANNEL = "workout"
         const val NOTIFICATION_ID = 6
+        private const val FOLLOWER_POST_MS = 20_000L // как часто перепоставлять уведомление, пока остров держит таймер/помодоро
 
         private const val ACTION_REFRESH = "com.app.lifetracker.workout.REFRESH"
         private const val ACTION_PAUSE = "com.app.lifetracker.workout.PAUSE"
@@ -189,6 +191,12 @@ class WorkoutService : Service() {
         }
     }
 
+    private var lastPostAt = 0L
+
+    /** Идёт таймер карточки (с уведомлением) или фаза помодоро — они держат остров Xiaomi (см. [PomodoroTimer.islandRank]). */
+    private fun otherIslandLeads(ctx: Context): Boolean =
+        XiaomiIsland.available(ctx) && (CardTimers.islandRank(ctx) != Long.MAX_VALUE || PomodoroTimer.islandRank(ctx) != Long.MAX_VALUE)
+
     private val tick = object : Runnable {
         override fun run() {
             WorkoutTracker.tick()
@@ -197,11 +205,17 @@ class WorkoutService : Service() {
                 shutdown()
                 return
             }
-            try {
-                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                nm.notify(NOTIFICATION_ID, build(applicationContext))
-            } catch (e: Exception) {
-                // уведомление обновится следующим тиком
+            // остров Xiaomi один на всех: пока идёт таймер карточки или помодоро (у них есть конец, они главнее), тренировка
+            // перепоставляет уведомление редко — иначе два уведомления по секунде по очереди выходили бы на главное место
+            val nowMs = SystemClock.elapsedRealtime()
+            if (!otherIslandLeads(applicationContext) || nowMs - lastPostAt >= FOLLOWER_POST_MS) {
+                lastPostAt = nowMs
+                try {
+                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    nm.notify(NOTIFICATION_ID, build(applicationContext))
+                } catch (e: Exception) {
+                    // уведомление обновится следующим тиком
+                }
             }
             handler.postDelayed(this, 1000L)
         }
