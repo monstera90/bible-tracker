@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 141.0 (07.11)
+   Версия: 141.1 (08.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -14617,10 +14617,11 @@
       fail("Не удалось добавить в библиотеку: " + (e && e.message ? e.message : e));
     });
   }
-  // Кнопка «В библиотеку» (#bookReaderAddLibBtn) — есть в нижнем ряду, только пока книга открыта «на лету».
+  // Кнопка «В библиотеку» (#bookReaderAddLibBtn) — круглая, висит справа от «домика» вне потока ряда (position:absolute, modals.css), только пока книга
+  // открыта «на лету»: ряд не растёт, «домик» и остальные кнопки не двигаются. Стоит в разметке сразу после «домика».
   function bookReaderAddLibBtnHtml(){
     if(!bookReaderState || !bookReaderState.transient) return '';
-    return '<button type="button" class="mdeditor-fab-btn" id="bookReaderAddLibBtn" title="Добавить книгу в библиотеку">' + READER_LIBRARY_ADD_ICON_SVG + '</button>';
+    return '<button type="button" class="mdeditor-fab-btn book-reader-addlib-btn" id="bookReaderAddLibBtn" title="Добавить книгу в библиотеку">' + READER_LIBRARY_ADD_ICON_SVG + '</button>';
   }
   function bindBookReaderAddLibBtn(){
     var btn = document.getElementById("bookReaderAddLibBtn");
@@ -14721,10 +14722,10 @@
         '<button type="button" class="' + txt + '" id="pdfPageBtn" title="Перейти на страницу" style="width:auto;min-width:var(--fab-size,40px);padding:0 8px;font-size:13px;"></button>' +
         '<button type="button" class="' + txt + '" id="pdfZoomOutBtn" title="Уменьшить">−</button>' +
         '<button type="button" class="' + txt + '" id="pdfZoomInBtn" title="Увеличить">+</button>' +
-        bookReaderAddLibBtnHtml() +
         '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="bookReaderReadingBtn" title="Режим чтения"></button>' +
         '<button type="button" class="mdeditor-fab-btn fullscreen-mode-btn" id="bookReaderFullscreenBtn" title="Полноэкранный режим"></button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderHomeBtn" title="К списку книг">' + READER_HOME_ICON_SVG + '</button>' +
+        bookReaderAddLibBtnHtml() + // круглая, снаружи ряда справа от «домика»
       '</div>'
     );
   }
@@ -14824,12 +14825,12 @@
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderChaptersBtn" title="' + (chaptersMode ? "К тексту" : "Главы") + '">' +
           (chaptersMode ? READER_TEXT_ICON_SVG : READER_CHAPTERS_ICON_SVG) +
         '</button>' +
-        bookReaderAddLibBtnHtml() +
         // режим чтения — сразу слева от «домика»
         '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="bookReaderReadingBtn" title="Режим чтения"></button>' +
         // полноэкранный режим — сразу слева от «домика», режим чтения — следующая кнопка
         '<button type="button" class="mdeditor-fab-btn fullscreen-mode-btn" id="bookReaderFullscreenBtn" title="Полноэкранный режим"></button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderHomeBtn" title="К списку книг">' + READER_HOME_ICON_SVG + '</button>' +
+        bookReaderAddLibBtnHtml() + // круглая, снаружи ряда справа от «домика»
       '</div>' +
       // ползунок размера шрифта («Аа», 14.10) — отдельный элемент рядом с рядом кнопок (ряд двигается свайпом, ползунок нет)
       '<div class="fontsize-bar" id="bookReaderFontSizeBar">' +

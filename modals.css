@@ -1,6 +1,6 @@
 /* ===========================================================================
    modals.css
-   Версия: 21.11 (07.11)
+   Версия: 21.12 (08.11)
    Версия: 16.2 (25.10) — `.settings-modal-box.cal-week-flush`: окно без боковых полей и боковой рамки, пока на вкладке «Календарь» открыт режим «Неделя» (calendar.js `syncFlush`).
    Версия: 16.1 (25.10) — компактные язычки: боковые 35×55px (было 45×68), нижние 55×35px, кнопка-язычок `.settings-fab` 35×35px; отступы оверлея и заплатка угла под колонку 35px.
    Версия: 16.0 (22.10) — структурная правка: кнопка тегов задач `.task-tag-wrap` (слот 4 между «+» и скрепкой) + попап `.task-tag-popup`; слоты 4–12 теперь считаются как `N + var(--tag-s, 0)` (класс `.fab-tag-shift` на окне ставит `--tag-s:1`: все кнопки левее «+» уезжают на одну позицию, пока видна кнопка тегов). Откат: modals.css 15.0.
@@ -1065,6 +1065,25 @@
   }
   .settings-modal-overlay.notes-wide .settings-modal-box .mdeditor-fab-row{
     inset-inline-end:calc(var(--fab-gap, 6px) + var(--notes-wide-extra, 0px));
+  }
+  /* «В библиотеку» (#bookReaderAddLibBtn, книга открыта «на лету»): круглая кнопка поменьше висит ВНЕ потока ряда справа от «домика» — в освободившейся
+     колонке вкладок (--notes-wide-extra), поэтому ряд не растёт, «домик» и остальные кнопки стоят на месте. Диаметр = колонка − 6px, зазор до «домика» 5px.
+     Логические свойства — в раскладке левши кнопка уходит на другую сторону вместе с рядом. */
+  .mdeditor-fab-row .mdeditor-fab-btn.book-reader-addlib-btn{
+    --lib-d:calc(var(--notes-wide-extra, 0px) - 6px);
+    position:absolute;
+    width:var(--lib-d);height:var(--lib-d);
+    inset-inline-end:calc(-1 * (var(--lib-d) + 5px));
+    bottom:calc((var(--fab-size, 36px) - var(--lib-d)) / 2);
+    border-radius:50%;
+    padding:0;
+  }
+  .mdeditor-fab-row .mdeditor-fab-btn.book-reader-addlib-btn svg{ width:15px; height:15px; }
+  /* в режиме чтения окно не расширено и колонки нет — справа места нет: кнопка встаёт над «домиком» */
+  .settings-modal-overlay.reading-mode-active .mdeditor-fab-row .mdeditor-fab-btn.book-reader-addlib-btn{
+    --lib-d:30px;
+    inset-inline-end:calc((var(--fab-size, 36px) - var(--lib-d)) / 2);
+    bottom:calc(100% + 6px);
   }
   .settings-modal-box.lt-flush-sides{
     padding-left:0;
