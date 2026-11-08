@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (04.11)
+// Версия: 1.1 (08.11)
 
 import android.app.PendingIntent
 import android.content.Context
@@ -333,6 +333,18 @@ object PomodoroTimer {
 
     /** Данные для плашки внутри приложения; null — сессии нет или вкладка «Помодоро» на экране. */
     fun islandInfo(ctx: Context): Snapshot? = if (uiOpen) null else snapshot(ctx)
+
+    /**
+     * Очередь за остров Xiaomi: он один на помодоро и таймеры карточек, и тот, чьё уведомление перепоставили последним, выходит
+     * на главное место — два тикающих по секунде уведомления дёргали остров туда-сюда. Раз в секунду перепоставляет только
+     * «главный»: у кого раньше конец (меньше — главнее). 0 — идёт «Готово» (показать сразу); Long.MAX_VALUE — фаза не идёт
+     * (пауза, ожидание после перерыва, сессии нет). Сравнивается с [CardTimers.islandRank].
+     */
+    fun islandRank(ctx: Context): Long {
+        val s = snapshot(ctx) ?: return Long.MAX_VALUE
+        if (s.flash) return 0L
+        return if (s.running && s.phase != PH_WAIT) s.endAt else Long.MAX_VALUE
+    }
 
     @Synchronized
     fun stateJson(ctx: Context): String {

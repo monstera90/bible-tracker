@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (04.11)
+// Версия: 1.1 (08.11)
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -20,6 +20,8 @@ import androidx.core.app.ServiceCompat
  * Служба переднего плана помодоро: раз в секунду перепоставляет уведомление (на Xiaomi с HyperOS — остров,
  * [XiaomiIsland.pomodoroExtras]), потому что свёрнутый остров сам не тикает, и ловит конец фазы, если будильник опоздал.
  * Пока приложение на экране, уведомление не перепоставляется (остров под плашкой [InAppIsland] мигал бы).
+ * На Xiaomi остров один на помодоро и таймеры карточек: если идущий таймер закончится раньше фазы, уведомление не перепоставляется
+ * (иначе два уведомления по очереди выходили бы на главное место и остров дёргался), см. [PomodoroTimer.islandRank].
  * Кнопки уведомления/острова — «Пауза/Продолжить», «+5 минут», «Пропустить перерыв»/«Начать работу», «Стоп».
  * Останавливается сама, когда сессия закончилась.
  */
@@ -149,6 +151,13 @@ class PomodoroService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
 
+    /** Остров Xiaomi держит таймер карточки: он закончится раньше (или помодоро сейчас не тикает) — своё уведомление не трогаем. */
+    private fun timerLeadsIsland(ctx: Context): Boolean {
+        if (!XiaomiIsland.available(ctx)) return false
+        val t = CardTimers.islandRank(ctx)
+        return t != Long.MAX_VALUE && t <= PomodoroTimer.islandRank(ctx)
+    }
+
     private val tick = object : Runnable {
         override fun run() {
             val ctx = applicationContext
@@ -161,7 +170,7 @@ class PomodoroService : Service() {
                 shutdown()
                 return
             }
-            if (!NotifyStore.appForeground) {
+            if (!NotifyStore.appForeground && !timerLeadsIsland(ctx)) {
                 try {
                     val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                     nm.notify(NOTIFICATION_ID, build(ctx))
