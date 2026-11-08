@@ -119,9 +119,10 @@
 
   // task: { date, student, partner, hall, itemNumber, itemTitle }
   // templateImage: ImageBitmap | HTMLImageElement (см. loadImage)
-  // canvas: <canvas> - создать ОДИН раз снаружи и переиспользовать для
-  // всех заданий подряд (пересоздавать canvas на каждое задание накладно
-  // по памяти и заметно замедляет пакетную отрисовку на телефоне).
+  // canvas: <canvas> - создаётся снаружи (createCanvasForImage) и переиспользуется:
+  // пересоздавать canvas на каждое задание накладно по памяти и заметно замедляет
+  // пакетную отрисовку на телефоне. Бланки кодируются параллельно, поэтому у каждого
+  // бланка, пока он кодируется, свой canvas из небольшого пула (см. s89fill.js).
   // Возвращает Promise<Blob> (image/png - для такой картинки на белом
   // фоне кодируется заметно быстрее, чем image/jpeg).
   function createCanvasForImage(templateImage){

@@ -237,6 +237,37 @@ window.initS89FillModule = function(deps){
     try{ localStorage.setItem(YEAR_KEY, String(year)); }catch(e){}
   }
 
+  // ---- запуск (состояние живёт в модуле, а не во вкладке) ----
+  // renderSettingsTabS89Fill перерисовывает вкладку заново при каждом входе, а заполнение бланков идёт дальше и после ухода
+  // с неё: прогресс, готовые файлы и «идёт ли запуск» хранятся здесь и при возврате подставляются в новую разметку
+  // (раньше они были локальными переменными старой вкладки: после возврата кнопка «Скачать» была серой, журнал пустым, а
+  // «Начать» снова активной — со стороны выглядело, будто заполнение остановилось).
+  var job = { running: false, logText: "", files: null };
+  var MAX_ENCODE_IN_FLIGHT = 3; // сколько бланков кодируется в PNG одновременно (у каждого свой canvas)
+
+  function byId(id){ return document.getElementById(id); }
+
+  function setLog(text){
+    job.logText = text;
+    var el = byId("s89Log");
+    if(el) el.textContent = text;
+  }
+
+  // canStart — есть ли подложка и ссылка; кнопки ищутся по id в текущей разметке (вкладку могли перерисовать)
+  function applyJobUi(canStart){
+    var startEl = byId("s89StartBtn"), dlEl = byId("s89DownloadBtn");
+    if(startEl) startEl.disabled = job.running || !canStart;
+    if(dlEl){
+      var ready = !job.running && !!(job.files && job.files.length);
+      dlEl.disabled = !ready;
+      if(ready) dlEl.classList.add("ready"); else dlEl.classList.remove("ready");
+    }
+  }
+
+  function canStartNow(){
+    return !!(loadPersisted(TEMPLATE_KEY) && loadDocumentLink());
+  }
+
   // ---- вкладка ----
 
   function renderSettingsTabS89Fill(){
@@ -247,7 +278,6 @@ window.initS89FillModule = function(deps){
     var documentLink = loadDocumentLink(); // строка
     var documentName = loadDocumentName(); // строка (кэш, может быть пустой)
     var startYear = loadStartYear();
-    var generatedFiles = null; // [{ name, blob }] | null
 
     container.innerHTML =
       '<div class="settings-content-bottom s89fill-tab">' +
@@ -300,7 +330,7 @@ window.initS89FillModule = function(deps){
     });
 
     function refreshStartEnabled(){
-      startBtn.disabled = !(templateInfo && documentLink);
+      applyJobUi(!!(templateInfo && documentLink));
     }
 
     // Сверка с облаком - если на другом устройстве подложку меняли позже,
@@ -316,9 +346,9 @@ window.initS89FillModule = function(deps){
       }
     });
 
-    function log(text){
-      if(logEl) logEl.textContent = text;
-    }
+    // вернулись на вкладку: журнал, «Начать» и «Скачать» — как у идущего или уже законченного запуска
+    if(job.logText) logEl.textContent = job.logText;
+    refreshStartEnabled();
 
     document.getElementById("s89TemplateAttachBtn").addEventListener("click", function(){
       document.getElementById("s89TemplateInput").click();
@@ -385,32 +415,46 @@ window.initS89FillModule = function(deps){
     });
 
     startBtn.addEventListener("click", function(){
-      if(!templateInfo || !documentLink) return;
+      if(job.running || !templateInfo || !documentLink) return;
       var exportUrl = toExportUrl(documentLink);
       if(!exportUrl){
-        log("Не похоже на ссылку гугл-документа.");
+        setLog("Не похоже на ссылку гугл-документа.");
         return;
       }
 
-      startBtn.disabled = true;
-      downloadBtn.disabled = true;
-      downloadBtn.classList.remove("ready");
-      generatedFiles = null;
-      log("[s89fill v4: no-store] Загружаю документ…");
+      var startedLink = documentLink;
+      var templateDataUrl = templateInfo.dataUrl;
+      job.running = true;
+      job.files = null;
+      applyJobUi(false);
+      setLog("[s89fill v5] Загружаю документ…");
       var fetchDiag = "";
       var fetchStartedAt = performance.now();
+
+      function finishRun(){
+        job.running = false;
+        applyJobUi(canStartNow());
+      }
 
       if(!fontLoadPromise){
         fontLoadPromise = S89Draw.loadFont(FONT_URL);
       }
 
-      // Имя запрашиваем с mobilebasic-страницы параллельно с загрузкой
-      // .docx - если она не даст имени, ниже используется dc:title из уже
-      // скачанного buf (без повторной загрузки).
-      var docIdForName = extractDocId(documentLink);
+      // Имя документа нужно только для подписи на вкладке — бланкам оно не нужно, поэтому рисование его НЕ ждёт (раньше ждало:
+      // медленный ответ mobilebasic-страницы задерживал начало на несколько секунд, отсюда «то за пару секунд, то очень долго»).
+      // Если страница имени не дала, берётся dc:title из уже скачанного .docx.
+      var docIdForName = extractDocId(startedLink);
       var namePromise = docIdForName
         ? fetchNameFromMobilebasic(docIdForName).catch(function(){ return null; })
         : Promise.resolve(null);
+
+      function applyDocumentName(realName){
+        if(!realName || loadDocumentLink() !== startedLink || realName === loadDocumentName()) return;
+        documentName = realName;
+        saveDocumentName(realName);
+        var textEl = byId("s89DocumentText");
+        if(textEl) textEl.textContent = realName;
+      }
 
       Promise.all([
         fetchFresh(exportUrl).then(function(r){
@@ -422,18 +466,12 @@ window.initS89FillModule = function(deps){
         }).then(function(buf){
           fetchDiag = Math.round(buf.byteLength / 1024) + " КБ, " +
             Math.round(performance.now() - fetchStartedAt) + " мс, " + fetchDiag;
-          return namePromise.then(function(mobileName){
-            return (mobileName ? Promise.resolve(mobileName) : MiniZip.extractDocxTitle(buf));
-          }).then(function(realName){
-            if(realName && realName !== documentName){
-              documentName = realName;
-              saveDocumentName(realName);
-              documentTextEl.textContent = realName;
-            }
-            return buf;
-          });
+          namePromise.then(function(mobileName){
+            return mobileName || MiniZip.extractDocxTitle(buf);
+          }).then(applyDocumentName).catch(function(){});
+          return buf;
         }),
-        dataUrlToBlob(templateInfo.dataUrl).then(function(blob){ return S89Draw.loadImage(blob); }),
+        dataUrlToBlob(templateDataUrl).then(function(blob){ return S89Draw.loadImage(blob); }),
         fontLoadPromise,
       ]).then(function(results){
         var docBuf = results[0];
@@ -445,7 +483,7 @@ window.initS89FillModule = function(deps){
         ]).then(function(parts){
           var xml = parts[0];
           if(parts[1]) fetchDiag += ", изменён " + parts[1];
-          log("Разбираю задания…");
+          setLog("Разбираю задания…");
           var tasks = S89Tasks.buildTasks([xml], startYear);
           var datesInfo = tasks.length
             ? "; даты заданий: " + tasks[0].date + " – " + tasks[tasks.length - 1].date
@@ -453,67 +491,87 @@ window.initS89FillModule = function(deps){
           console.log("s89fill: документ скачан (" + fetchDiag + ")" + datesInfo);
 
           if(!tasks.length){
-            log("В документе не нашлось подходящих заданий.");
-            startBtn.disabled = false;
+            setLog("В документе не нашлось подходящих заданий.");
+            finishRun();
             return;
           }
 
-          var results2 = [];
-          var i = 0;
-          var sharedCanvas = S89Draw.createCanvasForImage(templateImage);
+          // Кодирование PNG — самая долгая часть, и идёт оно в фоновом потоке, поэтому бланки делаются «конвейером»:
+          // до MAX_ENCODE_IN_FLIGHT штук одновременно, у каждого свой canvas из небольшого пула (общий canvas нельзя —
+          // следующий бланк перерисовал бы тот, что ещё кодируется). Порядок файлов сохраняется по индексу задания.
+          var total = tasks.length;
+          var results2 = new Array(total);
+          var freeCanvases = [];
+          for(var c = 0; c < Math.min(MAX_ENCODE_IN_FLIGHT, total); c++){
+            freeCanvases.push(S89Draw.createCanvasForImage(templateImage));
+          }
+          var next = 0, finished = 0;
           var batchStart = performance.now();
           var drawTotalMs = 0;
           var encodeTotalMs = 0;
 
-          function renderNext(){
-            if(i >= tasks.length){
-              generatedFiles = results2;
-              var totalMs = performance.now() - batchStart;
-              var perImage = tasks.length ? totalMs / tasks.length : 0;
-              log(
-                "[v4] Документ: " + fetchDiag + datesInfo + ". " +
-                "Готово: заполнено бланков - " + results2.length + " за " +
-                (totalMs / 1000).toFixed(1) + " с (в среднем " + perImage.toFixed(0) +
-                " мс/бланк; рисование " + (drawTotalMs / tasks.length).toFixed(0) +
-                " мс, сохранение в PNG " + (encodeTotalMs / tasks.length).toFixed(0) + " мс)."
-              );
-              downloadBtn.disabled = false;
-              downloadBtn.classList.add("ready");
-              startBtn.disabled = false;
-              return;
-            }
-            var task = tasks[i];
-            log("Рисую " + (i + 1) + " из " + tasks.length + "…");
-            S89Draw.renderTaskImage(task, templateImage, sharedCanvas, function(timing){
-              drawTotalMs += timing.drawMs;
-              encodeTotalMs += timing.encodeMs;
-            }).then(function(blob){
-              var studentPart = S89Draw.sanitizeFilename(task.student).replace(/\s+/g, "_");
-              var filename = task.date + "_" + studentPart + "_" + task.itemNumber + ".png";
-              results2.push({ name: filename, blob: blob });
-              i++;
-              renderNext();
-            }).catch(function(err){
-              console.error("s89fill: ошибка отрисовки задания", task, err);
-              i++;
-              renderNext();
-            });
+          function finishBatch(){
+            job.files = results2.filter(function(f){ return !!f; });
+            var totalMs = performance.now() - batchStart;
+            var perImage = totalMs / total;
+            setLog(
+              "[v5] Документ: " + fetchDiag + datesInfo + ". " +
+              "Готово: заполнено бланков - " + job.files.length + " за " +
+              (totalMs / 1000).toFixed(1) + " с (в среднем " + perImage.toFixed(0) +
+              " мс/бланк; рисование " + (drawTotalMs / total).toFixed(0) +
+              " мс, сохранение в PNG " + (encodeTotalMs / total).toFixed(0) + " мс на бланк, параллельно)."
+            );
+            finishRun();
           }
-          renderNext();
+
+          function pump(){
+            while(next < total && freeCanvases.length){
+              (function(idx, canvas){
+                var task = tasks[idx];
+                var p;
+                try{
+                  p = S89Draw.renderTaskImage(task, templateImage, canvas, function(timing){
+                    drawTotalMs += timing.drawMs;
+                    encodeTotalMs += timing.encodeMs;
+                  });
+                }catch(err){
+                  p = Promise.reject(err);
+                }
+                p.then(function(blob){
+                  var studentPart = S89Draw.sanitizeFilename(task.student).replace(/\s+/g, "_");
+                  results2[idx] = { name: task.date + "_" + studentPart + "_" + task.itemNumber + ".png", blob: blob };
+                }).catch(function(err){
+                  console.error("s89fill: ошибка отрисовки задания", task, err);
+                }).then(function(){
+                  freeCanvases.push(canvas);
+                  finished++;
+                  if(finished >= total){
+                    finishBatch();
+                  }else{
+                    setLog("Заполнено " + finished + " из " + total + "…");
+                    pump();
+                  }
+                });
+              })(next++, freeCanvases.pop());
+            }
+          }
+          setLog("Рисую бланки (" + total + ")…");
+          pump();
         });
       }).catch(function(err){
         console.error("s89fill:", err);
-        log("Ошибка: " + (err && err.message ? err.message : String(err)));
-        startBtn.disabled = false;
+        setLog("Ошибка: " + (err && err.message ? err.message : String(err)));
+        finishRun();
       });
     });
 
     downloadBtn.addEventListener("click", function(){
-      if(!generatedFiles || !generatedFiles.length) return;
+      var files = job.files;
+      if(!files || !files.length) return;
       var i = 0;
       function downloadNext(){
-        if(i >= generatedFiles.length) return;
-        var item = generatedFiles[i];
+        if(i >= files.length) return;
+        var item = files[i];
         var url = URL.createObjectURL(item.blob);
         var a = document.createElement("a");
         a.href = url;
