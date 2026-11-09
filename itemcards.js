@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 35.1 (07.11)
+   Версия: 35.2 (08.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -2005,10 +2005,19 @@ window.initItemCardsModule = function(deps){
     if(updateTimerTexts()) ensureTick();
   }
   function evLog(text, opts){ try{ if(window.EventLog) window.EventLog.add(text, opts); }catch(e){} }
+  var TIMER_RESTART_GUARD_MS = 10000; // повторный пуск того же таймера быстрее — случайный (двойное нажатие, повторный скан)
+  var timerStartedAt = {};
   function startTimerForCard(c){
     if(c && c.type === "combo"){ runCombo(c.acts, { card: c }); return; } // «Пуск» комбинированного: все действия разом
     if(c && c.type === "alarm"){ startAlarmForCard(c); return; } // кнопки «Пуск» и «Выкл.» у будильника те же, что у таймера
     if(!c || c.type !== "timer" || !(c.seconds > 0)) return;
+    var startedPrev = timerStartedAt[runId(c)] || 0;
+    if(startedPrev && Date.now() - startedPrev < TIMER_RESTART_GUARD_MS){
+      refreshTimers();
+      var cur = timerInfo(runId(c));
+      if(cur && cur.running){ syncTimersView(); return; } // только что запущен и идёт: не перезапускаем и в журнал второй раз не пишем
+    }
+    timerStartedAt[runId(c)] = Date.now();
     try{ getTimerApi().start(runId(c), c.title || "", c.seconds, !!c.noIsland); }catch(e){}
     try{ if(window.EventLog) window.EventLog.timerStarted(runId(c), c.title || "", c.seconds); }catch(e){}
     syncTimersView();
@@ -2086,6 +2095,15 @@ window.initItemCardsModule = function(deps){
     var hm = alarmHM(c), api = getAlarmApi(), at = 0;
     if(!hm) return 0;
     if(!api.set){ if(!standalone){ try{ alert("Будильник работает только в приложении на телефоне."); }catch(e){} } return 0; }
+    // уже заведён с теми же настройками и звонок ещё впереди: повторное нажатие случайно — ничего заново не заводим (иначе
+    // сбросились бы идущие повторы) и в журнал не пишем; пока человек сам не выключит, повторы журнал не засоряют
+    refreshAlarms();
+    var prev = alarmInfo(runId(c));
+    if(prev && prev.nextAt > Date.now() && (prev.hour | 0) === hm.h && (prev.minute | 0) === hm.m &&
+       (prev.every | 0) === (alarmEvery(c) | 0) && ((prev.every | 0) === 0 || (prev.times | 0) === (alarmTimes(c) | 0))){
+      syncAlarmsView();
+      return prev.nextAt;
+    }
     try{ at = api.set(runId(c), c.title || "", hm.h, hm.m, alarmEvery(c), alarmTimes(c)) || 0; }catch(e){ at = 0; }
     if(at){
       var setText = "Будильник " + alarmClock(c) + (c.title ? " «" + c.title + "»" : "") + " заведён: " + dayWord(at);
@@ -2502,7 +2520,7 @@ window.initItemCardsModule = function(deps){
     try{ res = deps.addTaskFromQr ? deps.addTaskFromQr(p.tab, p.text, p.tag || "") : { status: "error", reason: "unsupported" }; }
     catch(e){ console.error(e); res = { status: "error", reason: "fail" }; }
     if(res && res.status === "added") evLog("Была добавлена новая задача «" + (res.text || p.text) + "»");
-    else if(res && res.status === "moved") evLog("Задача «" + (res.text || p.text) + "» перенесена в конец вкладки" + (res.tabTitle ? " " + res.tabTitle : ""));
+    else if(res && res.status === "moved" && !res.unchanged) evLog("Задача «" + (res.text || p.text) + "» перенесена в конец вкладки" + (res.tabTitle ? " " + res.tabTitle : ""));
     if(!silent) showTaskResultOverlay(p, res);
     return res;
   }
@@ -2592,7 +2610,7 @@ window.initItemCardsModule = function(deps){
     }
     if(c.type === "habit"){ // скан привычки: один день — одна отметка, повторный скан в тот же день ничего не делает
       var added = markHabitToday(c.id);
-      evLog(cardTitle(c));
+      if(added) evLog(cardTitle(c)); // повторный скан в тот же день («Сегодня уже отмечено») в журнал второй раз не пишется
       scanDirty = true;
       showCardOverlay(findCard(c.id) || c, added ? "Сегодня отмечено" : "Сегодня уже отмечено");
       return;

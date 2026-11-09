@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 16.1 (04.11)
+   Версия: 16.2 (08.11)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самостоятельный нижний язычок набора 1 справа от «Задачи»,
@@ -175,6 +175,15 @@
         return { start: r.start, end: r.end, dur: r.totalMs, sub: sub.join(" · ") };
       });
     } },
+    // помодоро: законченные рабочие отрезки (pomodoro.js, `records()`; едут в облако — видны и на другом устройстве); название блока — название сессии
+    { key: "pomodoro", label: "Помодоро", get: function(){
+      var P = window.PomodoroTab;
+      var list = (P && P.records) ? P.records() : [];
+      return list.map(function(r){
+        var mins = Math.max(1, Math.round((r.end - r.start) / 60000));
+        return { start: r.start, end: r.end, dur: r.end - r.start, title: r.task, sub: mins >= 60 ? Math.floor(mins / 60) + " ч " + pad2(mins % 60) + " мин" : mins + " мин" };
+      });
+    } },
     // чтение: периоды считает screentime.js (`readingPeriods`: ридер/ИПКД, правила заходов — в его шапке); только на этом устройстве
     { key: "read", label: "Чтение", get: function(){
       var S = window.ScreenTime;
@@ -269,7 +278,7 @@
         if(!r || typeof r.start !== "number" || !isFinite(r.start)) return;
         var end = r.end > r.start ? r.end : r.start + Math.max(60000, r.dur || 0);
         if(r.start >= to || end <= from) return;
-        out.push({ src: src.key, label: src.label, start: r.start, end: end, sub: r.sub || "" });
+        out.push({ src: src.key, label: (typeof r.title === "string" && r.title.trim()) ? r.title.trim() : src.label, start: r.start, end: end, sub: r.sub || "" }); // r.title — своё название блока (помодоро: название сессии)
       });
     });
     return out;

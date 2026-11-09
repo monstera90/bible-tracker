@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.1 (08.11)
+// Версия: 1.2 (08.11)
 
 import android.app.PendingIntent
 import android.content.Context
@@ -9,6 +9,7 @@ import android.media.AudioAttributes
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
+import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.PI
 import kotlin.math.sin
@@ -40,6 +41,11 @@ object PomodoroTimer {
     private const val PREFS = "pomodoro"
     private const val KEY = "state"
     private const val ALARM_CODE = 8801
+
+    /** Очередь законченных рабочих отрезков для страницы (календарь и «История»): SharedPreferences `pomodoro` → `done`. */
+    private const val DONE_KEY = "done"
+    private const val MIN_RECORD_MS = 60_000L // отрезок короче минуты (случайный запуск) не записывается
+    private const val MAX_DONE = 200
 
     class Snapshot(
         val phase: Int,
@@ -124,6 +130,55 @@ object PomodoroTimer {
         }
     }
 
+    // ---------- законченные рабочие отрезки ----------
+
+    /**
+     * Рабочая фаза закончилась (сама — по сроку, или человек нажал «Завершить» / начал сессию заново): отрезок [phaseStart; [at]]
+     * кладётся в очередь. Страница забирает его [takeFinishedJson], пишет в календарь («Трекеры занятий») и в «Историю» и
+     * подтверждает [ackFinished]. Вызывать, пока фаза ещё рабочая (до [beginBreakInternal] и до сброса [active]).
+     */
+    private fun recordWork(ctx: Context, at: Long) {
+        if (!active || phase != PH_WORK || phaseStart <= 0L || at - phaseStart < MIN_RECORD_MS) return
+        try {
+            val prefs = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val arr = JSONArray(prefs.getString(DONE_KEY, "[]") ?: "[]")
+            val id = "po$phaseStart"
+            for (i in 0 until arr.length()) if (arr.optJSONObject(i)?.optString("id") == id) return
+            arr.put(JSONObject().put("id", id).put("task", task).put("start", phaseStart).put("end", at))
+            val keep = JSONArray()
+            for (i in maxOf(0, arr.length() - MAX_DONE) until arr.length()) keep.put(arr.get(i))
+            prefs.edit().putString(DONE_KEY, keep.toString()).apply()
+        } catch (e: Exception) {
+            // отрезок не записался: в календаре и «Истории» его не будет, на сам таймер это не влияет
+        }
+    }
+
+    /** JSON-массив законченных рабочих отрезков, которые страница ещё не сохранила: [{"id","task","start","end"}] (мс). */
+    @Synchronized
+    fun takeFinishedJson(ctx: Context): String =
+        ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(DONE_KEY, "[]") ?: "[]"
+
+    /** Страница сохранила отрезки с этими id (JSON-массив строк) — убрать их из очереди. */
+    @Synchronized
+    fun ackFinished(ctx: Context, idsJson: String?) {
+        if (idsJson == null) return
+        try {
+            val ids = HashSet<String>()
+            val got = JSONArray(idsJson)
+            for (i in 0 until got.length()) ids.add(got.optString(i))
+            val prefs = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val arr = JSONArray(prefs.getString(DONE_KEY, "[]") ?: "[]")
+            val keep = JSONArray()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                if (!ids.contains(o.optString("id"))) keep.put(o)
+            }
+            prefs.edit().putString(DONE_KEY, keep.toString()).apply()
+        } catch (e: Exception) {
+            // очередь останется как есть: страница заберёт отрезки при следующем обращении (повторы она отсеивает по id)
+        }
+    }
+
     // ---------- будильник конца фазы ----------
 
     private fun alarmIntent(ctx: Context): PendingIntent {
@@ -184,6 +239,7 @@ object PomodoroTimer {
     @Synchronized
     fun start(ctx: Context, taskName: String?, work: Int, shortM: Int, longM: Int, cyc: Int) {
         load(ctx)
+        recordWork(ctx, System.currentTimeMillis()) // повторный запуск посреди работы: прежний отрезок закрывается
         workMin = work.coerceIn(1, 180)
         shortMin = shortM.coerceIn(1, 60)
         longMin = longM.coerceIn(1, 120)
@@ -208,6 +264,7 @@ object PomodoroTimer {
             val at = endAt
             val fresh = now - at < 30_000L
             if (phase == PH_WORK) {
+                recordWork(ctx, at)
                 beginBreakInternal(at, cycle % cycles == 0)
                 flashUntil = at + FLASH_MS
             } else {
@@ -299,6 +356,8 @@ object PomodoroTimer {
     @Synchronized
     fun stop(ctx: Context) {
         load(ctx)
+        val now = System.currentTimeMillis()
+        recordWork(ctx, if (running && endAt > 0L) minOf(now, endAt) else now) // «Завершить» посреди работы: отрезок до этого момента
         active = false
         running = false
         cancelAlarm(ctx)

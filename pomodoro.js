@@ -1,6 +1,6 @@
 /* ===========================================================================
    pomodoro.js
-   Версия: 1.1 (07.11)
+   Версия: 2.0 (08.11)
    Вкладка «Помодоро» (set2s_16, кнопка settingsTabSet2Btn16; боковой ряд «Активности» между «Музыкой» и «QR-кодами»).
    Здесь вся полная информация о сессии: кольцо прогресса, остаток времени, название задачи, «цикл N из M», кнопки
    «Пауза», «+5 минут», «Пропустить перерыв» («Начать работу» после перерыва) и «Завершить». Сам таймер, будильник конца
@@ -8,7 +8,12 @@
    мост LifeTrackerNative версии 25: pomodoroStart / pomodoroPause / pomodoroPlus5 / pomodoroSkip / pomodoroStop /
    pomodoroState / pomodoroUi). Страница только показывает состояние и шлёт команды; время считает по часам телефона
    (endAt/waitSince из состояния), состояние перечитывает раз в секунду. В браузере без моста вкладка показывает пояснение.
-   Точка входа — window.PomodoroTab.{render,sync}; my.js зовёт render из switchSettingsTab, sync — из __ltOnAppResume.
+   Законченные рабочие отрезки (мост ≥26: pomodoroTakeFinished / pomodoroAckFinished): оболочка копит их в очереди (работа кончилась
+   сама или нажато «Завершить»; короче минуты не записывается), страница забирает их в `drain`, кладёт в личный state через
+   хранилище от my.js (`setStore`, ключ `pomo:<id>` = {task, start, end}; едет в облако) и пишет в «Историю» («Пользователь начал
+   работу над «…» и закончил её в 8:00»; запись журнала — только на том устройстве, где отрезок забран). Календарь («Трекеры
+   занятий») читает их через `records()`.
+   Точка входа — window.PomodoroTab.{render,sync,setStore,drain,records}; my.js зовёт render из switchSettingsTab, sync и drain — из __ltOnAppResume.
    Стили вставляет сам модуль; без flex-gap, grid и inset (старый WebView Android 5.0).
    Раскладка: заголовок вверху, карточка с кольцом/формой и кнопками прижата к низу области (`margin-top:auto`, как
    `.settings-content-bottom` у остальных вкладок) — до кнопок дотягиваться большим пальцем.
@@ -36,6 +41,11 @@
   function bridge(){
     var b = window.LifeTrackerNative;
     return (b && typeof b.pomodoroStart === "function" && typeof b.pomodoroState === "function") ? b : null;
+  }
+  // очередь законченных рабочих отрезков есть у оболочки с мостом ≥26
+  function nativeDone(){
+    var b = window.LifeTrackerNative;
+    return (b && typeof b.pomodoroTakeFinished === "function" && typeof b.pomodoroAckFinished === "function") ? b : null;
   }
   function esc(s){
     return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
@@ -284,11 +294,60 @@
     try{ b.pomodoroUi(isVisible(root)); }catch(e){}
     if(!root){ stopTimers(); return; }
     setState(parse(b.pomodoroState()));
+    if(Date.now() - lastDrainAt > DRAIN_EVERY_MS) drain(); // рабочая фаза кончилась при открытой вкладке — отрезок сразу в календарь и «Историю»
   }
   function setState(s){
     st = s;
     if(!s) stopArmedAt = 0;
     paint();
+  }
+
+  // ---------- законченные рабочие отрезки: календарь и «История» ----------
+  var STORE = null;        // хранилище от my.js: list() → [{id, task, start, end}], put(id, data)
+  var lastDrainAt = 0;
+  var DRAIN_EVERY_MS = 5000;
+
+  function clockLabel(ts){ var d = new Date(ts); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); }
+
+  // строка «Истории»; ключ записи — id отрезка, поэтому повторный забор того же отрезка второй раз не пишется
+  function logWork(id, c){
+    var EL = window.EventLog;
+    if(!EL || typeof EL.add !== "function") return;
+    var what = c.task ? "над «" + c.task + "»" : "по таймеру помодоро";
+    try{ EL.add("Пользователь начал работу " + what + " и закончил её в \u27E6" + clockLabel(c.end) + "\u27E7", { at: c.end, key: "pomodoro:" + id, bold: true }); }catch(e){}
+  }
+
+  function drain(){
+    var n = nativeDone();
+    if(!n || !STORE) return;
+    lastDrainAt = Date.now();
+    var arr;
+    try{ arr = JSON.parse(String(n.pomodoroTakeFinished())); }catch(e){ return; }
+    if(!Array.isArray(arr) || !arr.length) return;
+    var have = {};
+    STORE.list().forEach(function(r){ have[r.id] = true; });
+    var ids = [];
+    arr.forEach(function(r){
+      if(!r || typeof r.id !== "string" || typeof r.start !== "number" || typeof r.end !== "number") return;
+      if(!have[r.id]){
+        var c = { task: String(r.task || "").slice(0, 60), start: r.start, end: r.end };
+        try{ STORE.put(r.id, c); }catch(e){ return; }
+        have[r.id] = true;
+        logWork(r.id, c);
+      }
+      ids.push(r.id);
+    });
+    if(ids.length){ try{ n.pomodoroAckFinished(JSON.stringify(ids)); }catch(e){} }
+  }
+
+  // для календаря («трекеры занятий»): [{id, task, start, end}], новые сверху
+  function records(){
+    if(!STORE) return [];
+    return STORE.list().filter(function(r){
+      return r && typeof r.start === "number" && typeof r.end === "number" && r.end > r.start;
+    }).map(function(r){
+      return { id: r.id, task: String(r.task || ""), start: r.start, end: r.end };
+    }).sort(function(a, b){ return b.start - a.start; });
   }
 
   // ---------- команды ----------
@@ -373,12 +432,20 @@
     paint();
     try{ b.pomodoroUi(true); }catch(e){}
     startTimers();
+    drain();
   }
 
   // вернулись в приложение: сразу перечитать состояние (оболочка при сворачивании сбросила «вкладка на экране»)
   function sync(){
+    drain();
     if(document.getElementById(ROOT_ID)) poll();
   }
 
-  window.PomodoroTab = { render: render, sync: sync };
+  window.PomodoroTab = {
+    render: render,
+    sync: sync,
+    setStore: function(s){ STORE = s; },
+    drain: drain,
+    records: records
+  };
 })();

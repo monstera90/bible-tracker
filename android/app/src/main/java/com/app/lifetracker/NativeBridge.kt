@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 19.2 (04.11)
+// Версия: 20.0 (08.11)
 // Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
@@ -42,6 +42,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 26: помодоро: законченные рабочие отрезки для календаря и «Истории» (pomodoroTakeFinished / pomodoroAckFinished).
          * 25: вкладка «Помодоро» (pomodoroStart / pomodoroPause / pomodoroPlus5 / pomodoroSkip / pomodoroStop / pomodoroState / pomodoroUi).
          * 23: `claudeHome()` — «домик» вкладки Claude (первый экран).
          * 22: вкладки-сайты ряда «Интернет» (utabShow / utabHide / utabGo / utabReload / utabRemove / utabGetState / utabGetIcon).
@@ -55,7 +56,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 25
+        const val BRIDGE_VERSION = 26
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -951,6 +952,20 @@ class NativeBridge(private val activity: MainActivity) {
     fun pomodoroState(): String {
         if (!activity.pageTrusted) return "{}"
         return PomodoroTimer.stateJson(activity.applicationContext)
+    }
+
+    /** JSON-массив законченных рабочих отрезков помодоро, которые страница ещё не сохранила: [{"id","task","start","end"}] (мс). */
+    @JavascriptInterface
+    fun pomodoroTakeFinished(): String {
+        if (!activity.pageTrusted) return "[]"
+        return PomodoroTimer.takeFinishedJson(activity.applicationContext)
+    }
+
+    /** Страница сохранила отрезки с этими id (JSON-массив строк) — убрать их из очереди оболочки. */
+    @JavascriptInterface
+    fun pomodoroAckFinished(idsJson: String?) {
+        if (!activity.pageTrusted || idsJson == null) return
+        PomodoroTimer.ackFinished(activity.applicationContext, idsJson)
     }
 
     /** Страница сообщает (раз в секунду), что вкладка «Помодоро» на экране: пока это так, плашка в приложении скрыта. */

@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 141.1 (08.11)
+   Версия: 142.0 (08.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -4603,7 +4603,7 @@
     // задачи «Создавать задачу», отсканированные в окне ярлыка без открытия приложения
     try{ ensureItemCards().drainPendingTasks(true); }catch(e){ if(window.Debug) window.Debug.log("Очередь QR-задач: " + (e && e.message ? e.message : e)); }
     try{ if(window.UserTabsMod && window.UserTabsMod.syncSoon) window.UserTabsMod.syncSoon(true); }catch(e){} // вкладки «Интернет» с других устройств
-    try{ if(window.PomodoroTab) window.PomodoroTab.sync(); }catch(e){} // помодоро: состояние и «вкладка на экране» заново
+    try{ ensurePomodoroStore(); if(window.PomodoroTab) window.PomodoroTab.sync(); }catch(e){} // помодоро: состояние и «вкладка на экране» заново, законченные отрезки — в календарь и «Историю»
   };
   // APK: кнопка «развернуть» плавающего видео (FloatingVideo.kt) — открыть вкладку-сайт `utab_<id>`; сама вкладка, показавшись, забирает видео обратно.
   // APK: нажатие на плашку помодоро в приложении (InAppIsland) — открыть вкладку «Помодоро».
@@ -8721,6 +8721,7 @@
         "goal:*": "личная цель и список её задач",
         "goalcompletion:*": "отметка о выполнении задачи внутри цели",
         "wk:*": "тренировка: c — {start, end, m (метры), totalMs, rpe, how, …}",
+        "pomo:*": "рабочий отрезок помодоро: c — {task (название), start, end} (мс)",
         "wktip:*": "совет вкладки «Тренировки»: c — {text, cat, rpe, dist, ts}",
         "wkgoal:*": "цель месяца вкладки «Тренировки»: c — {type (km|up|time), month, target, setAt, p50, p75, done}",
         "wkaward:*": "награда вкладки «Тренировки»: c — {ts (когда заслужена), at}",
@@ -10637,6 +10638,36 @@
     window.WorkoutsTab.setStore(workoutsStore);
     workoutsStoreReady = true;
   }
+  // ===================== ПОМОДОРО (pomodoro.js) =====================
+  // Законченный рабочий отрезок лежит в личном `state` под ключом "pomo:<id>" = {c: {task, start, end}, t} и едет в облако тем же
+  // doCloudSync (mergeStates — по t), попадает в экспорт; календарь («Трекеры занятий») читает его через PomodoroTab.records().
+  // Отрезки забирает у оболочки pomodoro.js (drain): при запуске, возврате в приложение, входе на вкладку и раз в 5 с, пока вкладка открыта.
+  var POMODORO_KEY_PREFIX = "pomo:";
+  var pomodoroStoreReady = false;
+  var pomodoroStore = {
+    list: function(){
+      var out = [];
+      Object.keys(state).forEach(function(k){
+        if(k.indexOf(POMODORO_KEY_PREFIX) !== 0) return;
+        var r = state[k];
+        if(!r || !r.c || typeof r.c !== "object") return;
+        var o = JSON.parse(JSON.stringify(r.c));
+        o.id = k.slice(POMODORO_KEY_PREFIX.length);
+        out.push(o);
+      });
+      return out;
+    },
+    put: function(id, data){
+      var key = POMODORO_KEY_PREFIX + id;
+      state[key] = {c: data, t: calNextT(state[key])};
+      saveLocalStateNow(); scheduleCloudPush();
+    }
+  };
+  function ensurePomodoroStore(){
+    if(pomodoroStoreReady || !window.PomodoroTab || !window.PomodoroTab.setStore) return;
+    window.PomodoroTab.setStore(pomodoroStore);
+    pomodoroStoreReady = true;
+  }
   function renderSettingsTabWorkouts(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
@@ -10648,8 +10679,11 @@
   }
   // при запуске: забрать тренировки, законченные, пока приложение было закрыто
   setTimeout(function(){ try{ ensureWorkoutsStore(); if(window.WorkoutsTab) window.WorkoutsTab.drain(); }catch(e){} }, 3000);
+  // при запуске: забрать рабочие отрезки помодоро, законченные, пока приложение было закрыто
+  setTimeout(function(){ try{ ensurePomodoroStore(); if(window.PomodoroTab) window.PomodoroTab.drain(); }catch(e){} }, 3500);
 
   function ensureCalendarStore(){
+    ensurePomodoroStore(); // источник «Помодоро» в «Трекерах занятий» читает хранилище отрезков
     if(calendarStoreReady || !window.CalendarTab || !window.CalendarTab.setStore) return;
     window.CalendarTab.setStore(calendarStore);
     if(window.CalendarTab.setTasks) window.CalendarTab.setTasks(calendarTasksApi);
@@ -11163,6 +11197,7 @@
     if(window.MusicTab) window.MusicTab.render();
   }
   function renderSettingsTabPomodoro(){
+    ensurePomodoroStore();
     if(window.PomodoroTab) window.PomodoroTab.render();
   }
   // ===== ВКЛАДКА «ПРОГРЕСС» (set2s_12) =====
@@ -22240,14 +22275,20 @@
     var id;
     if(found){
       id = found.id;
-      if(tag && normTaskTag(found.c.tag) !== tag){ found.c.tag = tag; saveTaskData(id, found.c); } // код с тегом ставит его и уже существующей задаче
+      // задача уже на этой вкладке и ниже всех остальных (тот же код отсканирован повторно): переносить некуда — createdAt зря не
+      // двигаем, а вызывающий код (itemcards.js) в журнал «перенесена в конец» не пишет (info.unchanged)
+      var createdKey = function(t){ return t.c.createdAt != null ? t.c.createdAt : t.t; };
+      var alreadyLast = onTab(found) && all.every(function(t){ return t.id === found.id || createdKey(t) <= createdKey(found); });
+      var tagChanged = !!(tag && normTaskTag(found.c.tag) !== tag);
+      if(tagChanged){ found.c.tag = tag; saveTaskData(id, found.c); } // код с тегом ставит его и уже существующей задаче
       if(!onTab(found)){
         if(tabKey === "red"){ found.c.flag = "red"; saveTaskData(id, found.c); }
         else if(tabKey === "worktasks"){ found.c.inWork = true; saveTaskData(id, found.c); }
         else id = moveTaskToTab(id, tabKey);
       }
-      moveTaskToEdge(id, "bottom");
+      if(!alreadyLast) moveTaskToEdge(id, "bottom");
       info.status = "moved";
+      if(alreadyLast && !tagChanged) info.unchanged = true;
     } else {
       if(tabKey === "jointtasks" && groupOn){
         id = genGroupTaskId();
