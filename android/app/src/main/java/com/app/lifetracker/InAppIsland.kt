@@ -182,7 +182,6 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private var pomoMode = false // плашка показывает помодоро (точка фазы и время), а не таймер карточки
     private var shownPomoKey: String? = null
     private var musicMode = false // плашка показывает плеер (значок ноты, название, номер трека): нажатие — пауза/продолжить; только пока приложение на экране
-    private var idleMode = false // плашка пустая: ничего не идёт, но системный остров выключен — плашка висит постоянно (нажатие ничего не делает)
     private var shownMuTitle: String? = null
     private var shownMuSub: String? = null
     private var textMaxW = 0 // предельная ширина текста раскрытой карточки музыки (левее кнопок)
@@ -514,7 +513,6 @@ class InAppIsland private constructor(private val appCtx: Context) {
     }
 
     private fun toggle() {
-        if (idleMode) return // пустая плашка: нажимать нечего
         if (swMode) { // секундомер: пауза/продолжить
             val ctx = appCtx
             StopwatchTimer.togglePause(ctx)
@@ -692,12 +690,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
             refreshMusic(r)
             return
         }
-        // системный остров выключен: плашка висит постоянно, даже когда ничего не идёт
-        if (pomo == null && cardInfo == null && sw == null && r != null && !IslandSettings.systemEnabled(appCtx)) {
-            refreshIdle(r)
-            return
-        }
-        if (pomoMode || musicMode || idleMode) leavePomodoro()
+        if (pomoMode || musicMode) leavePomodoro()
         val info = cardInfo
         if (info == null) autoShownFor = null
         if (r == null || info == null) {
@@ -764,7 +757,6 @@ class InAppIsland private constructor(private val appCtx: Context) {
         askOverlayOnce()
         swMode = false
         musicMode = false
-        idleMode = false
         if (!pomoMode) {
             pomoMode = true
             if (expanded || animating) { // таймер карточки был раскрыт: сворачиваем мгновенно
@@ -808,7 +800,6 @@ class InAppIsland private constructor(private val appCtx: Context) {
         }
         askOverlayOnce()
         musicMode = false
-        idleMode = false
         if (!pomoMode || !swMode) {
             pomoMode = true
             swMode = true
@@ -858,8 +849,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
             musicMode = true
             pomoMode = false
             swMode = false
-            idleMode = false
-            if (expanded || animating) { // другая карточка была раскрыта: сворачиваем мгновенно
+                if (expanded || animating) { // другая карточка была раскрыта: сворачиваем мгновенно
                 stopAnim()
                 expanded = false
                 applyProgress(0f)
@@ -905,45 +895,6 @@ class InAppIsland private constructor(private val appCtx: Context) {
         layer.visibility = View.VISIBLE
     }
 
-    /**
-     * Пустая плашка: системный остров выключен, ничего не идёт — чёрная «таблетка» вокруг выреза висит постоянно
-     * (в приложении и, пока жив процесс и выдано «Поверх других приложений», поверх других приложений). Нажатие ничего не делает.
-     */
-    private fun refreshIdle(r: Rect) {
-        layoutFor(r)
-        attach()
-        if (!attached) {
-            hide()
-            return
-        }
-        if (!idleMode) {
-            idleMode = true
-            pomoMode = false
-            swMode = false
-            musicMode = false
-            if (expanded || animating) { // карточка была раскрыта (таймер или музыка кончились): сворачиваем мгновенно
-                stopAnim()
-                expanded = false
-                applyProgress(0f)
-                card.visibility = View.GONE
-                setWindowBig(false)
-            }
-            pillName.visibility = View.GONE
-            pillIcon.setImageDrawable(null)
-            pillTime.text = ""
-            shownPomoKey = null
-            shownClock = null
-            shownTitle = null
-            shownStage = -1
-            shownPauseKey = null
-            shownCardName = null
-            applyCardTextMode(false)
-        }
-        currentId = null
-        setPillWidth(0) // пустая плашка — самая узкая: только чёрная середина под камеру
-        layer.visibility = View.VISIBLE
-    }
-
     /** Текст карточки: у музыки — название трека одной строкой, обрезается многоточием левее кнопок; у таймера — крупные цифры. */
     private fun applyCardTextMode(music: Boolean) {
         cardTime.letterSpacing = if (music) 0.01f else 0.06f
@@ -957,7 +908,6 @@ class InAppIsland private constructor(private val appCtx: Context) {
         pomoMode = false
         swMode = false
         musicMode = false
-        idleMode = false
         pillName.visibility = View.VISIBLE
         shownPomoKey = null
         shownStage = -1

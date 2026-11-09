@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.1 (31.10)
+// Версия: 1.2 (09.11)
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -152,6 +152,7 @@ class MusicService : Service() {
             ACTION_NEXT -> MusicPlayer.next()
             ACTION_CLOSE -> MusicPlayer.close()
         }
+        if (MusicPlayer.active) InAppIsland.ensureBackground(applicationContext) // системный остров выключен: плашка музыки висит и при свёрнутом приложении
         if (action == ACTION_STOP || !MusicPlayer.active) {
             try {
                 ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
