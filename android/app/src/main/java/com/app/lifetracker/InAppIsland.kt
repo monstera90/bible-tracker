@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 18.0 (09.11)
+// Версия: 18.1 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -63,7 +63,7 @@ private class Item(val key: String, val kind: Int) {
     var onStop: (() -> Unit)? = null
     var onExtra: (() -> Unit)? = null // добавочная кнопка карточки слева от паузы (помодоро: «+5»); null — кнопки нет
 
-    /** Есть карточка, которая листается смахиванием: у всех занятий. Нажатием на капсулу раскрываются не все: помодоро открывает вкладку, секундомер ставится на паузу ([activate]). */
+    /** Есть карточка, которая листается смахиванием: у всех занятий. Нажатием на капсулу раскрываются все, кроме секундомера: он ставится на паузу по двойному нажатию ([activate]). */
     val expandable: Boolean get() = true
 
     /** Карточка с крупными цифрами (таймер, помодоро, секундомер, тренировка); у музыки и видео — название одной строкой. */
@@ -213,6 +213,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private var cardMusicStyle: Boolean? = null
     private var tapItem: Item? = null // чьё занятие нажато (капсула — первое)
     private var swTapAt = 0L // время первого нажатия на секундомер (для двойного)
+    private var cardSwiped = false
     private var swipeX = 0f
     private var swipeY = 0f
     private val swStopTask = Runnable {
@@ -266,17 +267,25 @@ class InAppIsland private constructor(private val appCtx: Context) {
         card.visibility = View.GONE
         card.background = cardBg
         card.isClickable = true // не пропускает нажатия на страницу под карточкой; нажатие мимо кнопок сворачивает
-        card.setOnClickListener { } // касание карточки (мимо кнопок) ничего не делает; сворачивает нажатие мимо неё
+        // нажатие на карточку помодоро (мимо кнопок) открывает вкладку «Помодоро»; у остальных занятий ничего не делает; сворачивает нажатие мимо неё
+        card.setOnClickListener {
+            if (!cardSwiped && expanded && !animating && selItem()?.kind == K_POMO) {
+                collapse()
+                openPomodoro()
+            }
+        }
         // Смахивание по карточке влево/вправо — переключение между занятиями (кнопки и значки внизу получают нажатия сами).
         card.setOnTouchListener { _, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     swipeX = e.x
                     swipeY = e.y
+                    cardSwiped = false
                 }
                 MotionEvent.ACTION_UP -> {
                     val dx = e.x - swipeX
                     val dy = e.y - swipeY
+                    cardSwiped = abs(dx) > tapSlop || abs(dy) > tapSlop // смахивание — не нажатие: вкладку не открываем
                     if (expanded && !animating && abs(dx) > scrW * 0.1f && abs(dx) > abs(dy) * 1.5f) stepCard(if (dx < 0) 1 else -1)
                 }
             }
@@ -766,7 +775,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
 
     /**
      * Нажатие на капсулу (или кружок). Таймер, музыка, видео — раскрываются в карточку именно этого занятия; помодоро —
-     * вкладка «Помодоро» (на плашке не раскрывается); секундомер — пауза/продолжить по двойному нажатию (долгое нажатие — сброс, см. [swStopTask]).
+     * раскрывается в карточку, нажатие на саму карточку открывает вкладку «Помодоро» ([openPomodoro]); секундомер — пауза/продолжить по двойному нажатию (долгое нажатие — сброс, см. [swStopTask]).
      */
     private fun activate(m: Item) {
         when (m.kind) {
@@ -783,16 +792,17 @@ class InAppIsland private constructor(private val appCtx: Context) {
                     swTapAt = now
                 }
             }
-            K_POMO -> {
-                val a = activity
-                if (a is MainActivity) a.openPomodoroTab() else openAppOnPomodoro()
-            }
             else -> {
                 // состояние «раскрыта», хотя карточка давно свёрнута (прервалась анимация/пересборка окна) — считаем свёрнутой
                 if (expanded && !animating && progress <= 0.001f) expanded = false
                 if (expanded) collapse() else expand(m.key)
             }
         }
+    }
+
+    private fun openPomodoro() {
+        val a = activity
+        if (a is MainActivity) a.openPomodoroTab() else openAppOnPomodoro()
     }
 
     /** Нажатие на плашку помодоро, когда приложение не на экране: выносим его вперёд сразу на вкладку «Помодоро». */
