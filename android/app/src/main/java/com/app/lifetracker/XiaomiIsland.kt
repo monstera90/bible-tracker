@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 10.2 (09.11)
+// Версия: 10.3 (09.11)
 // Версия: 8.0 (03.11)
 // Версия: 7.1 (27.10) — кнопка паузы острова тренировки цвета метки (красная/зелёная/жёлтая): `pauseBitmap(..., colorOverride)`, `workoutDotColor`.
 // Версия: 7.0 (27.10) — остров записи тренировки: `workoutExtras` (метка-диод красная/жёлтая/зелёная, время и дистанция, кнопки «Пауза» и «Стоп»), `workoutDotBitmap`, `elapsedText`. Откат: XiaomiIsland.kt 6.0.
@@ -370,14 +370,14 @@ object XiaomiIsland {
         }
     }
 
-    /** Значок плеера для острова: фиолетовый круг (#7F00FF, как у сканера и таймеров) и белая нота. */
-    fun musicIconBitmap(size: Int = 96): Bitmap {
+    /** Значок плеера для острова: фиолетовый круг (#7F00FF, как у сканера и таймеров; на паузе — жёлтый, как у секундомера) и белая нота. */
+    fun musicIconBitmap(size: Int = 96, paused: Boolean = false): Bitmap {
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         c.scale(size / 96f, size / 96f)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         paint.style = Paint.Style.FILL
-        paint.color = 0xFF7F00FF.toInt()
+        paint.color = if (paused) SW_PAUSE_COLOR else 0xFF7F00FF.toInt()
         c.drawCircle(48f, 48f, 48f, paint)
         paint.color = Color.WHITE
         // головка ноты, штиль и флажок

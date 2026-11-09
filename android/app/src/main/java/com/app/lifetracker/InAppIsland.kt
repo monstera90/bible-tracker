@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 11.1 (09.11)
+// Версия: 12.0 (09.11)
 // Версия: 8.8 (04.11)
 // Версия: 8.6 (22.10) — свёрнутая плашка возвращена к виду 8.0–8.2 (13sp название, 12sp время, letterSpacing 0.08, отступы 0.0087/0.0272): она точно совпадала с настоящим островом, правки 8.3 и 8.5 её испортили. Раскрытая карточка (8.3–8.5) не тронута. Откат: InAppIsland.kt 8.5.
 // Версия: 8.5 (22.10) — по замеру четырёх скриншотов (ширина 1159): название на плашке было мельче настоящего на ~14 % → 0.0350 × ширина экрана; время на плашке ниже на ~10 % и уже на ~19 % → 13.2sp, letterSpacing 0.13, tnum; время в карточке было выше на 7 % и уже на 12 % (вытянутые цифры) → размер 0.0450, letterSpacing 0.06, tnum. Откат: InAppIsland.kt 8.4.
@@ -181,6 +181,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private var scrW = 0
     private var pomoMode = false // плашка показывает помодоро (точка фазы и время), а не таймер карточки
     private var shownPomoKey: String? = null
+    private var musicMode = false // плашка показывает плеер (значок ноты, название, номер трека): нажатие — пауза/продолжить; только пока приложение на экране
     private var swMode = false // плашка показывает секундомер (значок и время): нажатие — пауза/продолжить, долгое — сброс
     private val swStopTask = Runnable {
         if (tapArmed && swMode) {
@@ -497,6 +498,10 @@ class InAppIsland private constructor(private val appCtx: Context) {
     }
 
     private fun toggle() {
+        if (musicMode) { // плеер: пауза/продолжить (состояние подхватит ближайшее обновление плашки)
+            MusicPlayer.toggle()
+            return
+        }
         if (swMode) { // секундомер: пауза/продолжить
             val ctx = appCtx
             StopwatchTimer.togglePause(ctx)
@@ -667,7 +672,12 @@ class InAppIsland private constructor(private val appCtx: Context) {
             refreshStopwatch(r, sw)
             return
         }
-        if (pomoMode) leavePomodoro()
+        // музыка — самый низкий приоритет; без приложения на экране плашки плеера нет (там уведомление и системный остров)
+        if (pomo == null && cardInfo == null && sw == null && r != null && activity != null && MusicPlayer.active) {
+            refreshMusic(r)
+            return
+        }
+        if (pomoMode || musicMode) leavePomodoro()
         val info = cardInfo
         if (info == null) autoShownFor = null
         if (r == null || info == null) {
@@ -733,6 +743,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         }
         askOverlayOnce()
         swMode = false
+        musicMode = false
         if (!pomoMode) {
             pomoMode = true
             if (expanded || animating) { // таймер карточки был раскрыт: сворачиваем мгновенно
@@ -775,6 +786,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
             return
         }
         askOverlayOnce()
+        musicMode = false
         if (!pomoMode || !swMode) {
             pomoMode = true
             swMode = true
@@ -803,10 +815,60 @@ class InAppIsland private constructor(private val appCtx: Context) {
         layer.visibility = View.VISIBLE
     }
 
+    /**
+     * Плашка плеера (приложение на экране, ничего важнее не идёт): слева значок ноты (фиолетовый — играет, жёлтый — пауза)
+     * и название трека, справа номер трека в очереди «3/12» (при одном треке пусто). Нажатие — пауза/продолжить.
+     */
+    private fun refreshMusic(r: Rect) {
+        val title = MusicPlayer.title
+        val counter = MusicPlayer.counterText()
+        layoutFor(r)
+        fitPill(title, listOf(timePattern(counter)))
+        attach()
+        if (!attached) {
+            hide()
+            return
+        }
+        askOverlayOnce()
+        if (!musicMode) {
+            musicMode = true
+            pomoMode = false
+            swMode = false
+            if (expanded || animating) { // таймер карточки был раскрыт: сворачиваем мгновенно
+                stopAnim()
+                expanded = false
+                applyProgress(0f)
+                card.visibility = View.GONE
+                setWindowBig(false)
+            }
+            pillName.visibility = View.VISIBLE
+            shownPomoKey = null
+            shownClock = null
+            shownTitle = null
+            shownStage = -1
+        }
+        currentId = null
+        val key = "mu" + MusicPlayer.playing
+        if (key != shownPomoKey) {
+            shownPomoKey = key
+            pillIcon.setImageBitmap(XiaomiIsland.musicIconBitmap(96, !MusicPlayer.playing))
+        }
+        if (title != shownTitle) {
+            shownTitle = title
+            pillName.text = title
+        }
+        if (counter != shownClock) {
+            shownClock = counter
+            pillTime.text = counter
+        }
+        layer.visibility = View.VISIBLE
+    }
+
     /** Помодоро кончилось (или показывается таймер карточки): плашка снова обычная — со значком, названием и временем. */
     private fun leavePomodoro() {
         pomoMode = false
         swMode = false
+        musicMode = false
         pillName.visibility = View.VISIBLE
         shownPomoKey = null
         shownStage = -1
