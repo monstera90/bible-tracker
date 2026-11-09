@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 19.0 (09.11)
+// Версия: 19.1 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -1300,7 +1300,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         pillTime.strokePx = screenW * 0.0021f
         gapPx = (screenW * 0.0087f).roundToInt()
         val iconSize = (h * 0.57f).roundToInt()
-        camGap = (screenW * 0.075f).roundToInt()
+        camGap = (screenW * 0.066f).roundToInt()
         // Левая половина (значок, название) и правая (время) — каждая своей ширины (setPillWidth), чёрная середина — под камеру:
         // капсула сдвигается (pillShift) так, чтобы середина оставалась точно против выреза, а название не уходило под камеру.
         val leftBox = LinearLayout(appCtx).apply {
