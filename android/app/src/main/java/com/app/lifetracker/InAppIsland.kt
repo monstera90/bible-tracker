@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 14.0 (09.11)
+// Версия: 15.0 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -40,7 +40,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 
-// Виды занятий на плашке; порядок — приоритет (раньше — левее на плашке и главнее).
+// Виды занятий на плашке; порядок — приоритет (первое — в капсуле, остальные — кружками справа от неё).
 private const val K_POMO = 0
 private const val K_TIMER = 1
 private const val K_SW = 2
@@ -136,10 +136,13 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private val pill = LinearLayout(appCtx)
     private val pillIcon = ImageView(appCtx)
     private val pillName = TextView(appCtx)
-    private val pillTimeA = StrokeText(appCtx) // два и больше занятий: время первого — рядом со значком, слева от камеры
-    private val pillIconB = ImageView(appCtx) // два и больше занятий: значок второго — справа от камеры, перед его временем
-    private val pillTime = StrokeText(appCtx) // одно занятие — его время; два и больше — время второго
-    private val dot = ImageView(appCtx) // третье занятие: кружок справа от плашки, своё окно (только с разрешением «Поверх других приложений»)
+    private val pillTime = StrokeText(appCtx) // время первого занятия (справа от камеры)
+    private val dots = Array(3) { ImageView(appCtx) } // кружки остальных занятий справа от капсулы; с разрешением «Поверх других приложений» — каждый в своём окне
+    private val dotLps = arrayOfNulls<WindowManager.LayoutParams>(3)
+    private val dotMode = IntArray(3) // 0 — не показан, 1 — ребёнок layer (запасной режим), 2 — своё окно
+    private val dotShown = arrayOfNulls<String>(3) // что нарисовано в кружке — перерисовка только при изменении
+    private val dotKeys = arrayOfNulls<String>(3) // чьё занятие в кружке
+    private var dotCap = 2 // сколько кружков помещается справа от капсулы (считается в layoutFor)
     private val card = FrameLayout(appCtx)
     private val cardContent = FrameLayout(appCtx)
     private val cardIcon = ImageView(appCtx)
@@ -184,26 +187,20 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private var builtFor: Rect? = null
     private var scrW = 0
     private var textMaxW = 0 // предельная ширина текста раскрытой карточки музыки/видео (левее кнопок)
-    private var pillCapW = 0 // предельная ширина плашки сейчас: одно занятие — pillMaxW, два и больше — multiMaxW
-    private var multiMaxW = 0
+    private var pillCapW = 0 // предельная ширина капсулы (= pillMaxW)
     private var gapPx = 0 // зазор между значком и временем/названием
 
     private var curItems: List<Item> = emptyList() // занятия последнего обновления, по приоритету
     private var selKey: String? = null // чьё занятие показано в раскрытой карточке
-    private val shownIc = arrayOfNulls<String>(2) // что сейчас нарисовано в значках плашки (A, B) — перерисовка только при изменении
-    private val shownTxt = arrayOfNulls<String>(3) // тексты плашки (название/время A/время B)
-    private var iconBGap = -1
-    private var shownDotKey: String? = null
-    private var dotLp: WindowManager.LayoutParams? = null
-    private var dotAttached = false
-    private var dotItemKey: String? = null
+    private val shownIc = arrayOfNulls<String>(1) // что сейчас нарисовано в значке капсулы — перерисовка только при изменении
+    private val shownTxt = arrayOfNulls<String>(2) // тексты капсулы (название/время)
     private var shownCardIcon: String? = null
     private var shownCardBig: String? = null
     private var shownCardSub: String? = null
     private var shownCardBtn: String? = null
     private var shownStrip: String? = null
     private var cardMusicStyle: Boolean? = null
-    private var tapItem: Item? = null // чьё место нажато (в плашке с двумя занятиями — левая или правая половина)
+    private var tapItem: Item? = null // чьё занятие нажато (капсула — первое)
     private var swipeX = 0f
     private var swipeY = 0f
     private val swStopTask = Runnable {
@@ -237,20 +234,21 @@ class InAppIsland private constructor(private val appCtx: Context) {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
-        for (t in listOf(pillTime, pillTimeA)) {
+        for (t in listOf(pillTime)) {
             t.setTextColor(Color.WHITE)
             t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             t.typeface = Typeface.DEFAULT
             t.letterSpacing = 0.08f
             t.maxLines = 1
         }
-        pillTimeA.visibility = View.GONE
-        pillIconB.visibility = View.GONE
-        dot.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK) }
-        dot.scaleType = ImageView.ScaleType.FIT_CENTER
-        dot.setOnClickListener {
-            val k = dotItemKey
-            curItems.firstOrNull { it.key == k }?.let { activate(it) }
+        for (i in dots.indices) {
+            val d = dots[i]
+            d.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK) }
+            d.scaleType = ImageView.ScaleType.FIT_CENTER
+            d.setOnClickListener {
+                val k = dotKeys[i]
+                curItems.firstOrNull { m -> m.key == k }?.let { m -> onCircleTap(m) }
+            }
         }
 
         card.visibility = View.GONE
@@ -451,7 +449,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
     }
 
     private fun detach() {
-        detachDot()
+        detachDots()
         if (!attached) return
         try {
             if (mode == 2) wm().removeViewImmediate(layer) else (layer.parent as? ViewGroup)?.removeView(layer)
@@ -461,65 +459,120 @@ class InAppIsland private constructor(private val appCtx: Context) {
         mode = 0
     }
 
-    private fun detachDot() {
-        if (!dotAttached) return
+    private fun detachDots() {
+        for (i in dots.indices) detachDot(i)
+    }
+
+    private fun detachDot(i: Int) {
+        val m = dotMode[i]
+        if (m == 0) return
         try {
-            wm().removeViewImmediate(dot)
+            if (m == 2) wm().removeViewImmediate(dots[i]) else (dots[i].parent as? ViewGroup)?.removeView(dots[i])
         } catch (e: Exception) {
         }
-        dotAttached = false
-        shownDotKey = null
+        dotMode[i] = 0
+        dotLps[i] = null
+        dotShown[i] = null
     }
 
     /**
-     * Третье занятие — кружок справа от плашки, в своём маленьком окне (одно окно с плашкой пришлось бы делать симметричным
-     * и закрывало бы строку состояния слева). Только пока окно поверх всех есть, плашка свёрнута и покоится; иначе кружка нет.
+     * Занятия-кружки: при свёрнутой капсуле — все, кроме первого (оно в капсуле); пока карточка раскрыта (и во время её
+     * движения) — все, кроме показанного в карточке: невыбранные занятия остаются сверху.
      */
-    private fun updateDot(items: List<Item>) {
-        val third = items.getOrNull(2)
-        if (third == null || mode != 2 || !attached || expanded || animating || pillH <= 0) {
-            detachDot()
-            return
-        }
-        val extra = items.size - 3
-        val key = third.key + "|" + third.iconKey + "|" + extra
-        if (key != shownDotKey) {
-            shownDotKey = key
-            var bmp = third.iconFn(96)
-            if (extra > 0) bmp = withBadge(bmp, extra)
-            dot.setImageBitmap(bmp)
-        }
-        dotItemKey = third.key
-        val x = pillW / 2 + dp(6f) + pillH / 2
-        val lp = dotLp
-        if (!dotAttached || lp == null) {
-            val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-            val wl = WindowManager.LayoutParams(pillH, pillH, windowType(), flags, PixelFormat.TRANSLUCENT)
-            wl.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            wl.x = x
-            wl.y = winY
-            if (Build.VERSION.SDK_INT >= 28) wl.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            dotLp = wl
-            try {
-                wm().addView(dot, wl)
-                dotAttached = true
-            } catch (e: Exception) {
-                dotAttached = false
+    private fun circleItems(items: List<Item>): List<Item> {
+        val sel = if (expanded || animating) items.firstOrNull { it.key == selKey } else null
+        return if (sel != null) items.filter { it !== sel } else items.drop(1)
+    }
+
+    /** Нажатие на кружок: при раскрытой карточке — переключает её на это занятие, иначе как нажатие на капсулу. */
+    private fun onCircleTap(m: Item) {
+        if (expanded && !animating && m.expandable) selectCard(m.key) else activate(m)
+    }
+
+    /**
+     * Кружки справа от капсулы, вплотную друг к другу ([circleItems]); больше, чем помещается ([dotCap]), — на последнем
+     * кружке «+N» (скрытые видны в раскрытой карточке). Рисуются в своих маленьких окнах (одно окно с капсулой пришлось бы
+     * делать симметричным, и оно закрывало бы строку состояния слева); без разрешения «Поверх других приложений» — внутри layer.
+     */
+    private fun updateDots(items: List<Item>) {
+        val circles = if (attached && pillH > 0) circleItems(items) else emptyList()
+        val shown = circles.take(dotCap)
+        for (i in dots.indices) {
+            if (i >= shown.size) {
+                detachDot(i)
+                continue
             }
-        } else if (lp.x != x || lp.width != pillH || lp.y != winY) {
-            lp.x = x
-            lp.width = pillH
-            lp.height = pillH
-            lp.y = winY
-            try {
-                wm().updateViewLayout(dot, lp)
-            } catch (e: Exception) {
+            val m = shown[i]
+            val extra = if (i == shown.size - 1) circles.size - shown.size else 0
+            val key = m.key + "|" + m.iconKey + "|" + extra
+            if (key != dotShown[i]) {
+                dotShown[i] = key
+                var bmp = m.iconFn(96)
+                if (extra > 0) bmp = withBadge(bmp, extra)
+                dots[i].setImageBitmap(bmp)
+            }
+            dotKeys[i] = m.key
+            placeDot(i, pillW / 2 + dp(6f) + pillH / 2 + i * (pillH + dp(6f)))
+        }
+    }
+
+    /** Ставит кружок i так, чтобы его центр был на x от середины капсулы. */
+    private fun placeDot(i: Int, x: Int) {
+        val d = dots[i]
+        if (mode == 2) {
+            if (dotMode[i] == 1) detachDot(i)
+            val lp = dotLps[i]
+            if (dotMode[i] != 2 || lp == null) {
+                val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                val wl = WindowManager.LayoutParams(pillH, pillH, windowType(), flags, PixelFormat.TRANSLUCENT)
+                wl.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                wl.x = x
+                wl.y = winY
+                if (Build.VERSION.SDK_INT >= 28) wl.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                try {
+                    wm().addView(d, wl)
+                    dotLps[i] = wl
+                    dotMode[i] = 2
+                } catch (e: Exception) {
+                    dotMode[i] = 0
+                }
+            } else if (lp.x != x || lp.width != pillH || lp.y != winY) {
+                lp.x = x
+                lp.width = pillH
+                lp.height = pillH
+                lp.y = winY
+                try {
+                    wm().updateViewLayout(d, lp)
+                } catch (e: Exception) {
+                }
+            }
+        } else {
+            if (dotMode[i] == 2) detachDot(i)
+            val lp = d.layoutParams as? FrameLayout.LayoutParams
+            if (dotMode[i] != 1 || lp == null) {
+                val nl = FrameLayout.LayoutParams(pillH, pillH).apply {
+                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    topMargin = pillTop
+                    leftMargin = x
+                }
+                try {
+                    layer.addView(d, nl)
+                    dotMode[i] = 1
+                } catch (e: Exception) {
+                    dotMode[i] = 0
+                }
+            } else if (lp.leftMargin != x || lp.width != pillH || lp.topMargin != pillTop) {
+                lp.width = pillH
+                lp.height = pillH
+                lp.topMargin = pillTop
+                lp.leftMargin = x
+                d.layoutParams = lp
             }
         }
     }
 
-    /** Значок с белым кружком «+N» в углу: занятий больше трёх, не поместившиеся видны в раскрытой карточке. */
+    /** Значок с белым кружком «+N» в углу: кружков больше, чем помещается справа; скрытые видны в раскрытой карточке. */
     private fun withBadge(src: Bitmap, extra: Int): Bitmap {
         val out = src.copy(Bitmap.Config.ARGB_8888, true)
         val c = Canvas(out)
@@ -649,7 +702,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         pill.visibility = View.VISIBLE
         selKey = null
         curItems = emptyList()
-        detachDot()
+        detachDots()
         if (mode == 2) detach() // окно поверх всех не должно оставаться и перехватывать касания
     }
 
@@ -700,15 +753,6 @@ class InAppIsland private constructor(private val appCtx: Context) {
         return x >= pill.left - pad && x <= pill.right + pad && y >= pill.top - pad && y <= pill.bottom + pad
     }
 
-    /** Чьё место под пальцем: при одном занятии — оно, при двух и больше — левая половина плашки (первое) или правая (второе). */
-    private fun itemAt(x: Float): Item? {
-        val l = curItems
-        if (l.isEmpty()) return null
-        if (l.size < 2) return l[0]
-        val mid = if (pill.width > 0) pill.left + pill.width / 2f else layer.width / 2f
-        return if (x < mid) l[0] else l[1]
-    }
-
     /** Анимация не дошла до конца (кадры не пришли): доводим до конечной точки, чтобы плашка снова нажималась. */
     private fun finishStuckAnim() {
         stopAnim()
@@ -725,7 +769,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
             MotionEvent.ACTION_DOWN -> {
                 if (animating && SystemClock.uptimeMillis() - animStart > animDur + 500L) finishStuckAnim()
                 tapArmed = !expanded && !animating && pill.visibility == View.VISIBLE && inPill(ev.x, ev.y)
-                tapItem = if (tapArmed) itemAt(ev.x) else null
+                tapItem = if (tapArmed) curItems.firstOrNull() else null
                 if (tapItem == null) tapArmed = false
                 tapX = ev.x
                 tapY = ev.y
@@ -832,8 +876,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
 
     /**
      * Все занятия, которые сейчас можно показать, по приоритету: помодоро, таймеры карточек (по близости конца), секундомер,
-     * музыка, видео вкладки-сайта. Раньше показывалось одно, остальные молчали; теперь живут вместе (плашка из двух-трёх
-     * занятий — см. [bindCompact]). Музыка и видео вне приложения — только при выключенном системном острове.
+     * музыка, видео вкладки-сайта. Первое — в капсуле, остальные — кружками справа (см. [bindCompact], [updateDots]). Музыка и видео вне приложения — только при выключенном системном острове.
      */
     private fun collectItems(): List<Item> {
         val out = ArrayList<Item>(6)
@@ -944,7 +987,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         if (expanded && mode == 1 && System.currentTimeMillis() - expandedAt > 6000L) collapse() // без окна поверх всех «мимо» не поймать — по таймеру
         bindCompact(items)
         bindCard(items)
-        updateDot(items)
+        updateDots(items)
         layer.visibility = View.VISIBLE
     }
 
@@ -961,43 +1004,13 @@ class InAppIsland private constructor(private val appCtx: Context) {
         view.text = text
     }
 
-    /**
-     * Свёрнутая плашка. Одно занятие — как прежде: значок и название слева от камеры, время справа. Два — капсула делится
-     * камерой: слева значок и время первого, справа значок и время второго. Три и больше — то же плюс кружок со значком
-     * третьего справа от плашки ([updateDot]; при четырёх и больше на нём «+N»).
-     */
+    /** Свёрнутая капсула — первое занятие: значок и название слева от камеры, время справа. Остальные занятия — кружки ([updateDots]). */
     private fun bindCompact(items: List<Item>) {
         val a = items[0]
-        val multi = items.size >= 2
-        pillName.visibility = if (!multi && a.name.isNotEmpty()) View.VISIBLE else View.GONE
-        pillTimeA.visibility = if (multi) View.VISIBLE else View.GONE
-        pillIconB.visibility = if (multi) View.VISIBLE else View.GONE
+        pillName.visibility = if (a.name.isNotEmpty()) View.VISIBLE else View.GONE
         setIcon(0, pillIcon, a)
-        if (!multi) {
-            setTxt(0, pillName, a.name)
-            setTxt(2, pillTime, a.time)
-            shownIc[1] = null
-            return
-        }
-        val b = items[1]
-        setTxt(1, pillTimeA, a.time)
-        setIcon(1, pillIconB, b)
-        setTxt(2, pillTime, b.time)
-        val gap = if (b.time.isEmpty()) 0 else gapPx // значок второго без времени прижат к краю, как значок первого
-        if (gap != iconBGap) {
-            iconBGap = gap
-            (pillIconB.layoutParams as? LinearLayout.LayoutParams)?.let {
-                it.marginEnd = gap
-                pillIconB.layoutParams = it
-            }
-        }
-        (pillTimeA.layoutParams as? LinearLayout.LayoutParams)?.let {
-            val g = if (a.time.isEmpty()) 0 else gapPx
-            if (it.marginStart != g) {
-                it.marginStart = g
-                pillTimeA.layoutParams = it
-            }
-        }
+        setTxt(0, pillName, a.name)
+        setTxt(1, pillTime, a.time)
     }
 
     /** Раскрытая карточка выбранного занятия (с карточкой: таймеры, музыка, видео); с двумя и больше — ряд значков внизу. */
@@ -1079,32 +1092,20 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private fun timePattern(text: String): String = text.replace(Regex("[0-9]"), "8")
 
     /**
-     * Подгоняет ширину плашки под содержимое. Одно занятие: значок (и название, если есть) слева, самое широкое из образцов
-     * времени справа. Два и больше: слева значок и время первого, справа значок и время второго — обе половины равны,
-     * середина под камеру. Предел: одно занятие — прежняя ширина, два и больше — шире ([multiMaxW]).
+     * Подгоняет ширину капсулы под первое занятие: значок (и название, если есть) слева, самое широкое из образцов времени
+     * справа, середина под камеру. Предел — прежняя ширина ([pillMaxW]).
      */
     private fun fitFor(items: List<Item>) {
         if (pillMaxW <= 0 || scrW <= 0) return
         val iconW = pillH * 0.57f
         val extra = pillTime.strokePx + dp(2f)
-        if (items.size == 1) {
-            pillCapW = pillMaxW
-            val a = items[0]
-            var left = scrW * 0.024f + iconW
-            if (a.name.isNotEmpty()) left += gapPx + pillName.paint.measureText(a.name) + dp(2f)
-            var timeW = 0f
-            for (t in a.samples) timeW = max(timeW, pillTime.paint.measureText(t))
-            val right = timeW + extra + scrW * 0.0272f
-            setPillWidth((camGap + 2f * max(left, right)).roundToInt())
-            return
-        }
-        pillCapW = multiMaxW
-        var wa = 0f
-        for (t in items[0].samples) wa = max(wa, pillTime.paint.measureText(t))
-        var wb = 0f
-        for (t in items[1].samples) wb = max(wb, pillTime.paint.measureText(t))
-        val left = scrW * 0.024f + iconW + (if (wa > 0f) gapPx + wa + extra else 0f)
-        val right = scrW * 0.0272f + iconW + (if (wb > 0f) gapPx + wb + extra else 0f)
+        pillCapW = pillMaxW
+        val a = items[0]
+        var left = scrW * 0.024f + iconW
+        if (a.name.isNotEmpty()) left += gapPx + pillName.paint.measureText(a.name) + dp(2f)
+        var timeW = 0f
+        for (t in a.samples) timeW = max(timeW, pillTime.paint.measureText(t))
+        val right = timeW + extra + scrW * 0.0272f
         setPillWidth((camGap + 2f * max(left, right)).roundToInt())
     }
 
@@ -1141,15 +1142,13 @@ class InAppIsland private constructor(private val appCtx: Context) {
         val left = r.centerX() - w / 2
 
         // дети переезжают в новые контейнеры: сначала отцепляем от старых (иначе addView бросает исключение)
-        for (v in listOf<View>(pillIcon, pillName, pillTimeA, pillIconB, pillTime)) (v.parent as? ViewGroup)?.removeView(v)
+        for (v in listOf<View>(pillIcon, pillName, pillTime)) (v.parent as? ViewGroup)?.removeView(v)
         pill.removeAllViews()
         pill.background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = h / 2f }
         val side = (screenW * 0.024f).roundToInt()
         pill.setPadding(0, 0, 0, 0)
         pillTime.strokePx = screenW * 0.0021f
-        pillTimeA.strokePx = pillTime.strokePx
         gapPx = (screenW * 0.0087f).roundToInt()
-        iconBGap = -1
         val iconSize = (h * 0.57f).roundToInt()
         camGap = (screenW * 0.075f).roundToInt()
         // Левая и правая половины равны, чёрная середина — под камеру: плашка остаётся симметричной вокруг выреза,
@@ -1160,13 +1159,11 @@ class InAppIsland private constructor(private val appCtx: Context) {
             setPadding(side, 0, 0, 0)
             addView(pillIcon, LinearLayout.LayoutParams(iconSize, iconSize))
             addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = gapPx })
-            addView(pillTimeA, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = gapPx })
         }
         pillTime.setPadding(0, 0, 0, 0)
         val rightBox = LinearLayout(appCtx).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
             setPadding(0, 0, (screenW * 0.0272f).roundToInt(), 0)
-            addView(pillIconB, LinearLayout.LayoutParams(iconSize, iconSize).apply { marginEnd = gapPx })
             addView(pillTime)
         }
         pill.addView(leftBox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
@@ -1179,11 +1176,12 @@ class InAppIsland private constructor(private val appCtx: Context) {
         pillW = w
         pillMaxW = w
         pillCapW = w
-        multiMaxW = max(w, (screenW * 0.56f).roundToInt()) // плашка из двух и больше занятий шире одиночной
         val dotPad = (h * 0.16f).roundToInt()
-        dot.setPadding(dotPad, dotPad, dotPad, dotPad)
+        for (d in dots) d.setPadding(dotPad, dotPad, dotPad, dotPad)
         pillH = h
         centerX = r.centerX()
+        val dotRoom = screenW - (screenW / 2 + w / 2 + dp(6f)) - dp(8f)
+        dotCap = ((dotRoom + dp(6f)) / (h + dp(6f))).coerceIn(1, dots.size) // сколько кружков помещается справа от капсулы
 
         // раскрытая карточка — размеры по записи экрана острова Xiaomi (ширина экрана 1220 px: 1130 × 260, отступ сверху 18)
         cardW = (screenW * 0.9286f).roundToInt()
