@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.1 (09.11)
+// Версия: 7.2 (09.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -149,6 +149,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         private const val SAVE_DEBOUNCE_MS = 1500L
         private const val REVEAL_TIMEOUT_MS = 4000L
         private const val PRELOAD_DELAY_MS = 2500L
+        private const val PRELOAD_STEP_TIMEOUT_MS = 6000L
         private const val MAX_LIVE = 4
         private const val RECOVER_MIN_GAP_MS = 60000L
         private const val ICON_PX = 64
@@ -448,6 +449,8 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
             reveal(t)
         } else if (!wasShown) {
             handler.postDelayed({ if (t.shown && !t.ready) markReady(t) }, REVEAL_TIMEOUT_MS)
+            // предзагруженная вкладка успела пройти первый кадр, пока была за краем: onPageCommitVisible уже не придёт
+            if (v.progress >= 60) revealEarly(t, v)
         }
         startPeriodicSave()
         startProbe()
@@ -645,18 +648,49 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         tabs.clear()
     }
 
-    /** При запуске приложения последняя открытая вкладка догружается за краем — к заходу на неё страница уже на месте. */
+    /**
+     * При запуске приложения все вкладки-сайты (до MAX_LIVE) по очереди поднимаются за краем из сохранённого места (restoreState или последний адрес):
+     * к заходу на любую страницу она уже на месте. Первой идёт последняя открытая, дальше — по давности сохранения. Следующая начинает грузиться,
+     * когда предыдущая готова (или через PRELOAD_STEP_TIMEOUT_MS), чтобы не нагружать телефон при запуске.
+     */
     fun preloadLast() {
         handler.postDelayed({ doPreload() }, PRELOAD_DELAY_MS)
     }
 
     private fun doPreload() {
-        val id = prefs.getString(KEY_LAST, null) ?: return
-        if (!ID_RE.matches(id)) return
-        if (prefs.getString(k(id, "home"), null).isNullOrEmpty()) return
+        val ids = ArrayList<String>()
+        val last = prefs.getString(KEY_LAST, null)
+        val others = ArrayList<String>()
+        for (key in prefs.all.keys) {
+            if (!key.endsWith(".home")) continue
+            val id = key.removeSuffix(".home")
+            if (!ID_RE.matches(id) || id == last) continue
+            if (prefs.getString(key, null).isNullOrEmpty()) continue
+            others.add(id)
+        }
+        others.sortByDescending { stateFile(it).lastModified() }
+        if (last != null && ID_RE.matches(last) && !prefs.getString(k(last, "home"), null).isNullOrEmpty()) ids.add(last)
+        ids.addAll(others)
+        preloadStep(ids.take(MAX_LIVE).toMutableList())
+    }
+
+    private fun preloadStep(queue: MutableList<String>) {
+        if (queue.isEmpty()) return
+        val id = queue.removeAt(0)
         val t = tabs.getOrPut(id) { Tab(id) }
-        if (t.view != null) return
-        ensureView(t)
+        if (t.view == null) {
+            ensureView(t)
+            val started = System.currentTimeMillis()
+            val waiter = object : Runnable {
+                override fun run() {
+                    if (t.ready || t.view == null || System.currentTimeMillis() - started > PRELOAD_STEP_TIMEOUT_MS) preloadStep(queue)
+                    else handler.postDelayed(this, 300)
+                }
+            }
+            handler.postDelayed(waiter, 300)
+        } else {
+            preloadStep(queue)
+        }
     }
 
     // ---------- плавающее видео ----------
@@ -1399,7 +1433,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
 
     /** Сайт показывается, как только появился первый кадр (до onPageFinished): без долгого пустого экрана; прокрутка доводится так же, как в [pageFinished]. */
     private fun revealEarly(t: Tab, v: WebView?) {
-        if (v == null || t.view !== v || t.ready) return
+        if (v == null || t.view !== v || t.ready || !t.shown) return // предзагруженная за краем вкладка дожидается onPageFinished
         val u = v.url
         if (u.isNullOrEmpty() || u == "about:blank") return
         if (t.needFix) {
