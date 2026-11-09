@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 19.2 (09.11)
+// Версия: 20.0 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -266,11 +266,14 @@ class InAppIsland private constructor(private val appCtx: Context) {
         card.visibility = View.GONE
         card.background = cardBg
         card.isClickable = true // не пропускает нажатия на страницу под карточкой; нажатие мимо кнопок сворачивает
-        // нажатие на карточку помодоро (мимо кнопок) открывает вкладку «Помодоро»; у остальных занятий ничего не делает; сворачивает нажатие мимо неё
+        // нажатие на карточку (мимо кнопок) открывает вкладку занятия — помодоро, музыка, видео, тренировка (`tabKeyOf`); у таймеров и секундомера вкладки нет, нажатие ничего не делает
         card.setOnClickListener {
-            if (!cardSwiped && expanded && !animating && selItem()?.kind == K_POMO) {
-                collapse()
-                openPomodoro()
+            if (!cardSwiped && expanded && !animating) {
+                val key = selItem()?.let { tabKeyOf(it) }
+                if (key != null) {
+                    collapse()
+                    openTab(key)
+                }
             }
         }
         // Смахивание по карточке влево/вправо — переключение между занятиями (кнопки и значки внизу получают нажатия сами).
@@ -772,8 +775,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
     }
 
     /**
-     * Нажатие на капсулу (или кружок). Таймер, музыка, видео — раскрываются в карточку именно этого занятия; помодоро —
-     * раскрывается в карточку, нажатие на саму карточку открывает вкладку «Помодоро» ([openPomodoro]); секундомер — раскрывается в карточку с паузой и «Стоп» (долгое нажатие на капсулу — сброс, см. [swStopTask]).
+     * Нажатие на капсулу (или кружок). Любое занятие раскрывается в карточку именно этого занятия; нажатие на саму карточку (мимо кнопок)
+     * у помодоро, музыки, видео и тренировки открывает вкладку занятия ([openTab]), у таймеров и секундомера — ничего; секундомер — карточка с паузой и «Стоп» (долгое нажатие на капсулу — сброс, см. [swStopTask]).
      */
     private fun activate(m: Item) {
         // состояние «раскрыта», хотя карточка давно свёрнута (прервалась анимация/пересборка окна) — считаем свёрнутой
@@ -781,16 +784,26 @@ class InAppIsland private constructor(private val appCtx: Context) {
         if (expanded) collapse() else expand(m.key)
     }
 
-    private fun openPomodoro() {
-        val a = activity
-        if (a is MainActivity) a.openPomodoroTab() else openAppOnPomodoro()
+    /** Ключ вкладки приложения, связанной с занятием; null — вкладки нет (таймер карточки, секундомер) или её не определить. */
+    private fun tabKeyOf(m: Item): String? = when (m.kind) {
+        K_POMO -> "set2s_16"
+        K_MUSIC -> "set2s_11"
+        K_WORKOUT -> "workouts"
+        K_VIDEO -> SiteMedia.tabId.takeIf { it.isNotEmpty() }?.let { "utab_$it" }
+        else -> null
     }
 
-    /** Нажатие на плашку помодоро, когда приложение не на экране: выносим его вперёд сразу на вкладку «Помодоро». */
-    private fun openAppOnPomodoro() {
+    private fun openTab(key: String) {
+        val a = activity
+        if (a is MainActivity) a.openAppTab(key) else openAppOnTab(key)
+    }
+
+    /** Нажатие на карточку, когда приложение не на экране: выносим его вперёд сразу на вкладку занятия. */
+    private fun openAppOnTab(key: String) {
         try {
             val i = Intent(appCtx, MainActivity::class.java)
-            i.action = MainActivity.ACTION_OPEN_POMODORO
+            i.action = MainActivity.ACTION_OPEN_TAB
+            i.putExtra(MainActivity.EXTRA_TAB, key)
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             appCtx.startActivity(i)
         } catch (e: Exception) {

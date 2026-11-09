@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.2 (09.11)
+// Версия: 7.3 (09.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -985,7 +985,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         (v as? SiteWebView)?.keepAwake = true
         try { v.settings.mediaPlaybackRequiresUserGesture = false } catch (e: Exception) { } // повторный запуск после паузы страницы — без жеста
         val title = t.curTitle.ifEmpty { prefs.getString(k(t.id, "title"), "") ?: "" }.ifEmpty { "Видео" }
-        SiteMedia.begin(activity.applicationContext, title, hostOf(t.curUrl), bgListener)
+        SiteMedia.begin(activity.applicationContext, title, hostOf(t.curUrl), bgListener, t.id)
         handler.removeCallbacks(bgPollTask)
         handler.postDelayed(bgPollTask, BG_POLL_MS)
     }

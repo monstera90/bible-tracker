@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 14.0 (09.11)
+// Версия: 15.0 (09.11)
 // Версия: 11.0 (04.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
@@ -81,8 +81,10 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_TASK_ID = "taskId"
         const val EXTRA_KIND = "kind"
 
-        // Нажатие на плашку помодоро (InAppIsland), когда приложение не на экране: вынести вперёд и открыть вкладку «Помодоро».
-        const val ACTION_OPEN_POMODORO = "com.app.lifetracker.OPEN_POMODORO"
+        // Нажатие на карточку острова (InAppIsland), когда приложение не на экране: вынести вперёд и открыть вкладку занятия (ключ — EXTRA_TAB).
+        const val ACTION_OPEN_TAB = "com.app.lifetracker.OPEN_TAB"
+        const val EXTRA_TAB = "tab"
+        private val TAB_KEY_RE = Regex("[A-Za-z0-9_]{1,60}")
 
         /** Запущенная Activity (или null): получатель кнопок уведомления сообщает через неё странице о новом действии. */
         @Volatile
@@ -164,7 +166,7 @@ class MainActivity : ComponentActivity() {
 
     /** Вкладка-сайт, которую просит открыть плавающее видео (кнопка «развернуть»); выполняется, когда приложение на экране. */
     private var pendingOpenTab: String? = null
-    private var pendingOpenPomodoro = false
+    private var pendingOpenAppTab: String? = null // ключ вкладки, которую надо открыть в странице, когда окно встанет на место
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var pendingPermission: PermissionRequest? = null
@@ -336,7 +338,7 @@ class MainActivity : ComponentActivity() {
         // Шаг 4: «Поделиться» (ACTION_SEND / ACTION_SEND_MULTIPLE) при уже запущенном приложении.
         handleShareIntent(intent)
         if (intent.action == ACTION_DIAG) webView.loadUrl(WebAssetServer.DIAG_URL)
-        if (intent.action == ACTION_OPEN_POMODORO) pendingOpenPomodoro = true // выполнится в onResume, как только окно встанет на место
+        if (intent.action == ACTION_OPEN_TAB) pendingOpenAppTab = intent.getStringExtra(EXTRA_TAB) // выполнится в onResume, как только окно встанет на место
         val cardLaunch = cardLaunchOf(intent)
         if (cardLaunch != null) {
             if (pageTrusted) {
@@ -396,9 +398,10 @@ class MainActivity : ComponentActivity() {
             webView.evaluateJavascript("window.__ltOnAppResume && window.__ltOnAppResume()", null)
         }
         runPendingOpenTab()
-        if (pendingOpenPomodoro && pageTrusted) {
-            pendingOpenPomodoro = false
-            openPomodoroTab()
+        val appTab = pendingOpenAppTab
+        if (appTab != null && pageTrusted) {
+            pendingOpenAppTab = null
+            openAppTab(appTab)
         }
     }
 
@@ -428,9 +431,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Нажатие на плашку помодоро (InAppIsland): страница открывает вкладку «Помодоро». */
-    fun openPomodoroTab() {
-        if (pageTrusted) webView.evaluateJavascript("window.__ltOpenPomodoro && window.__ltOpenPomodoro()", null)
+    /** Нажатие на карточку острова (InAppIsland): страница открывает вкладку [key] («Помодоро», «Музыка», «Тренировки», вкладка-сайт). */
+    fun openAppTab(key: String) {
+        // ключ проверен (только буквы, цифры и «_»): в строку скрипта попадать нечему; допустимость вкладки решает страница
+        if (!TAB_KEY_RE.matches(key)) return
+        if (pageTrusted) webView.evaluateJavascript("window.__ltOpenTab && window.__ltOpenTab('$key')", null)
     }
 
     override fun onPause() {

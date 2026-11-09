@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.3 (09.11)
+// Версия: 1.4 (09.11)
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -33,6 +33,7 @@ object SiteMedia {
     @Volatile var title = ""
     @Volatile var sub = ""
     @Volatile var playing = true
+    @Volatile var tabId = "" // id вкладки-сайта (`utab_<id>` в странице), чьё видео идёт: по нему нажатие на карточку острова открывает вкладку
     @Volatile var listener: Listener? = null
     @Volatile var logger: ((String) -> Unit)? = null
 
@@ -47,7 +48,8 @@ object SiteMedia {
     private var floatDeferred = false
 
     /** Начало фонового воспроизведения: уведомление появляется, остров раскрывается один раз. */
-    fun begin(ctx: Context, title: String, sub: String, l: Listener) {
+    fun begin(ctx: Context, title: String, sub: String, l: Listener, tabId: String = "") {
+        this.tabId = tabId
         this.title = title
         this.sub = sub
         playing = true
@@ -72,6 +74,7 @@ object SiteMedia {
     fun end(ctx: Context) {
         val was = active
         active = false
+        tabId = ""
         listener = null
         floatPending = false
         floatDeferred = false

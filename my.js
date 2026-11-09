@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 142.1 (09.11)
+   Версия: 143.0 (09.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -4606,10 +4606,14 @@
     try{ ensurePomodoroStore(); if(window.PomodoroTab) window.PomodoroTab.sync(); }catch(e){} // помодоро: состояние и «вкладка на экране» заново, законченные отрезки — в календарь и «Историю»
   };
   // APK: кнопка «развернуть» плавающего видео (FloatingVideo.kt) — открыть вкладку-сайт `utab_<id>`; сама вкладка, показавшись, забирает видео обратно.
-  // APK: нажатие на плашку помодоро в приложении (InAppIsland) — открыть вкладку «Помодоро».
-  window.__ltOpenPomodoro = function(){
+  // APK: нажатие на раскрытую карточку острова (InAppIsland) — открыть вкладку занятия: «Помодоро», «Музыка», «Тренировки» или вкладку-сайт с видео.
+  var ISLAND_OPEN_TABS = { set2s_16: 1, set2s_11: 1, workouts: 1 };
+  window.__ltOpenTab = function(key){
     try{
-      openSettingsTabDirect("set2s_16");
+      key = String(key || "");
+      var ok = ISLAND_OPEN_TABS.hasOwnProperty(key) || (key.indexOf("utab_") === 0 && window.UserTabsMod && window.UserTabsMod.isKey(key));
+      if(!ok) return false;
+      openSettingsTabDirect(key);
       return true;
     }catch(e){ return false; }
   };
