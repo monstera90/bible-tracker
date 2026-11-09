@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 19.1 (09.11)
+// Версия: 19.2 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -1218,21 +1218,26 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private fun timePattern(text: String): String = text.replace(Regex("[0-9]"), "8")
 
     /**
-     * Подгоняет капсулу под первое занятие. Левая половина (значок и название, если есть) и правая (время) — каждая по своему
-     * содержимому, середина под камеру: без названия слева остаётся только значок, и капсула уже и смещена к правой половине
-     * ([pillShift]). Предел — прежняя ширина ([pillMaxW]); не влезло — название обрезается.
+     * Подгоняет капсулу под САМОЕ ШИРОКОЕ из занятий, что идут сейчас: левая половина (значок и название, если есть) и правая
+     * (время) берут наибольшую ширину среди всех занятий, поэтому при смене занятия в капсуле (смахиванием, по окончании)
+     * размер не прыгает; одно короткое занятие (например, только видео) — компактная капсула. Середина под камеру; капсула
+     * смещена к более широкой половине ([pillShift]). Предел — прежняя ширина ([pillMaxW]); не влезло — название обрезается.
      */
     private fun fitFor(items: List<Item>) {
         if (pillMaxW <= 0 || scrW <= 0) return
         val iconW = pillH * 0.57f
         val extra = pillTime.strokePx + dp(2f)
         pillCapW = pillMaxW
-        val a = items[0]
-        var left = scrW * 0.024f + iconW + dp(2f)
-        if (a.name.isNotEmpty()) left += gapPx + pillName.paint.measureText(a.name)
-        var timeW = 0f
-        for (t in a.samples) timeW = max(timeW, pillTime.paint.measureText(t))
-        val right = timeW + extra + scrW * 0.0272f
+        var left = 0f
+        var right = 0f
+        for (a in items) {
+            var l = scrW * 0.024f + iconW + dp(2f)
+            if (a.name.isNotEmpty()) l += gapPx + pillName.paint.measureText(a.name)
+            var timeW = 0f
+            for (t in a.samples) timeW = max(timeW, pillTime.paint.measureText(t))
+            left = max(left, l)
+            right = max(right, timeW + extra + scrW * 0.0272f)
+        }
         setPillWidth(left.roundToInt(), right.roundToInt())
     }
 
