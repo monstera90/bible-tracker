@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 16.2 (08.11)
+   Версия: 16.3 (09.11)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самостоятельный нижний язычок набора 1 справа от «Задачи»,
@@ -164,6 +164,7 @@
   // Новый трекер = ещё один элемент TRACKER_SOURCES: get() отдаёт [{start, end, sub}] (мс), label — название занятия.
   var TRK_KEY = "calendarTrackers_v1";
   var trackersOn = false;
+  var POMO_CAL_MIN_MS = 20 * 60 * 1000; // рабочие отрезки помодоро короче 20 минут в календарь не попадают (в «Истории» и трекере экранов они остаются)
   var TRACKER_SOURCES = [
     { key: "workout", label: "Тренировка", get: function(){
       var W = window.WorkoutsTab;
@@ -179,7 +180,7 @@
     { key: "pomodoro", label: "Помодоро", get: function(){
       var P = window.PomodoroTab;
       var list = (P && P.records) ? P.records() : [];
-      return list.map(function(r){
+      return list.filter(function(r){ return r.end - r.start >= POMO_CAL_MIN_MS; }).map(function(r){
         var mins = Math.max(1, Math.round((r.end - r.start) / 60000));
         return { start: r.start, end: r.end, dur: r.end - r.start, title: r.task, sub: mins >= 60 ? Math.floor(mins / 60) + " ч " + pad2(mins % 60) + " мин" : mins + " мин" };
       });

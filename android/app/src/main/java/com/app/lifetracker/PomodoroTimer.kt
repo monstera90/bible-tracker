@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.2 (08.11)
+// Версия: 2.0 (09.11)
 
 import android.app.PendingIntent
 import android.content.Context
@@ -77,6 +77,7 @@ object PomodoroTimer {
     private var waitSince = 0L
     private var phaseStart = 0L
     private var flashUntil = 0L
+    private var workSince = 0L // с какого момента идёт непрерывный рабочий отрезок без паузы (0 — не идёт); копится в ScreenTimeStats.POMODORO
 
     /** Вкладка «Помодоро» сейчас на экране (страница сообщает раз в секунду): плашка в приложении тогда не нужна. */
     @Volatile
@@ -111,6 +112,7 @@ object PomodoroTimer {
             waitSince = o.optLong("waitSince", 0L)
             phaseStart = o.optLong("phaseStart", 0L)
             flashUntil = o.optLong("flashUntil", 0L)
+            workSince = if (o.has("workSince")) o.optLong("workSince", 0L) else if (active && running && phase == PH_WORK) phaseStart else 0L
         } catch (e: Exception) {
             active = false
         }
@@ -123,7 +125,7 @@ object PomodoroTimer {
                 .put("endAt", endAt).put("leftMs", leftMs).put("totalMs", totalMs)
                 .put("cycle", cycle).put("cycles", cycles).put("task", task)
                 .put("workMin", workMin).put("shortMin", shortMin).put("longMin", longMin)
-                .put("waitSince", waitSince).put("phaseStart", phaseStart).put("flashUntil", flashUntil)
+                .put("waitSince", waitSince).put("phaseStart", phaseStart).put("flashUntil", flashUntil).put("workSince", workSince)
             ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, o.toString()).apply()
         } catch (e: Exception) {
             // не записалось: сессия живёт в памяти до закрытия процесса
@@ -179,6 +181,30 @@ object PomodoroTimer {
         }
     }
 
+    // ---------- время реальной работы для «Трекера экранов» ----------
+
+    /** Закрыть идущий рабочий отрезок на моменте [at]: сколько реально отработано (паузы не считаются) уходит в счётчик, порога нет. */
+    private fun flushWork(ctx: Context, at: Long) {
+        val from = workSince
+        if (from <= 0L) return
+        workSince = 0L
+        ScreenTimeStats.add(ctx, ScreenTimeStats.POMODORO, at - from)
+    }
+
+    /** Момент, до которого рабочая фаза реально шла: не позже её срока (будильник мог опоздать). */
+    private fun workBound(now: Long): Long = if (running && endAt > 0L) minOf(now, endAt) else now
+
+    /** Итог для моста `getScreenTimeTotals`: накопленное + идущий сейчас рабочий отрезок (в одной блокировке с [flushWork], чтобы не считать дважды). */
+    @Synchronized
+    fun totalWorkMs(ctx: Context): Long {
+        load(ctx)
+        var live = 0L
+        if (active && phase == PH_WORK && running && workSince > 0L) {
+            live = (workBound(System.currentTimeMillis()) - workSince).coerceAtLeast(0L)
+        }
+        return ScreenTimeStats.get(ctx, ScreenTimeStats.POMODORO) + live
+    }
+
     // ---------- будильник конца фазы ----------
 
     private fun alarmIntent(ctx: Context): PendingIntent {
@@ -215,6 +241,7 @@ object PomodoroTimer {
         phaseStart = at
         waitSince = 0L
         flashUntil = 0L
+        workSince = at
         floatPending = true
         schedule(ctx)
         save(ctx)
@@ -239,6 +266,7 @@ object PomodoroTimer {
     @Synchronized
     fun start(ctx: Context, taskName: String?, work: Int, shortM: Int, longM: Int, cyc: Int) {
         load(ctx)
+        if (active && phase == PH_WORK) flushWork(ctx, workBound(System.currentTimeMillis()))
         recordWork(ctx, System.currentTimeMillis()) // повторный запуск посреди работы: прежний отрезок закрывается
         workMin = work.coerceIn(1, 180)
         shortMin = shortM.coerceIn(1, 60)
@@ -264,6 +292,7 @@ object PomodoroTimer {
             val at = endAt
             val fresh = now - at < 30_000L
             if (phase == PH_WORK) {
+                flushWork(ctx, at)
                 recordWork(ctx, at)
                 beginBreakInternal(at, cycle % cycles == 0)
                 flashUntil = at + FLASH_MS
@@ -306,12 +335,14 @@ object PomodoroTimer {
         if (!active || phase == PH_WAIT) return
         val now = System.currentTimeMillis()
         if (running) {
+            if (phase == PH_WORK) flushWork(ctx, workBound(now))
             leftMs = (endAt - now).coerceAtLeast(0L)
             running = false
             flashUntil = 0L
         } else {
             endAt = now + leftMs
             running = true
+            if (phase == PH_WORK) workSince = now
         }
         schedule(ctx)
         save(ctx)
@@ -331,6 +362,7 @@ object PomodoroTimer {
             endAt = now + PLUS_MS
             phaseStart = now
             flashUntil = 0L
+            workSince = now
         } else if (running) {
             endAt += PLUS_MS
             totalMs += PLUS_MS
@@ -358,6 +390,8 @@ object PomodoroTimer {
         load(ctx)
         val now = System.currentTimeMillis()
         recordWork(ctx, if (running && endAt > 0L) minOf(now, endAt) else now) // «Завершить» посреди работы: отрезок до этого момента
+        if (phase == PH_WORK) flushWork(ctx, workBound(now))
+        workSince = 0L
         active = false
         running = false
         cancelAlarm(ctx)

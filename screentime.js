@@ -1,6 +1,6 @@
 /* ===========================================================================
    screentime.js
-   Версия: 3.0 (31.10)
+   Версия: 3.1 (09.11)
    Вкладка «Трекер экранов» (`screentime`, язычок над «Событиями» в стеке набора 1).
    `window.ScreenTime.{init, render, getTotals, getPeriodTotals, setAppActive, readingPeriods}`.
 
@@ -10,7 +10,8 @@
      tasks  — экранное время на всех вкладках задач (TASK_TAB_IDS, архив) и на вкладке «Календарь»; «Comments» не входит;
      notes  — экранное время «Моего блокнота» + «Извлечения субтитров» (один счётчик);
      qr     — экранное время, пока открыта форма создания/правки карточки с QR (вкладка «Карточки предметов», `#itemCardForm`);
-     timers — сколько насчитали все таймеры карточек (считает оболочка: `CardTimers.kt` → `ScreenTimeStats`).
+     timers — сколько насчитали все таймеры карточек (считает оболочка: `CardTimers.kt` → `ScreenTimeStats`);
+     pomodoro — сколько реально проработал любой помодоро-таймер: только рабочие фазы без пауз, порога нет (считает оболочка: `PomodoroTimer.kt` → `ScreenTimeStats`).
    Экранное время идёт, только если окно настроек открыто, страница видима и приложение не свёрнуто (`__ltOnAppPause`/`__ltOnAppResume`).
 
    Периоды на экране (кнопки нижнего ряда, `PERIODS`, выбор — `localStorage` `screenTimePeriod_v1`): «День» (листать назад по дням,
@@ -18,7 +19,7 @@
    Листание — стрелки ‹ › и свайп по вкладке (как в «Тренировках»); в будущее листать нельзя (`shift`, `clampAnchor`).
 
    Хранение и синхронизация: в общем `state` у КАЖДОГО устройства свой ключ `__screenTime:<deviceId>` =
-   {c:{music,read,tasks,notes,qr,timers}, d:{"ГГГГ-ММ-ДД":[music,read,tasks,notes,qr,timers]}, t}
+   {c:{music,read,tasks,notes,qr,timers,pomodoro}, d:{"ГГГГ-ММ-ДД":[music,read,tasks,notes,qr,timers,pomodoro]}, t}
    (миллисекунды, только растут; `c` — накопленное за всё время, `d` — по суткам, порядок массива = порядок `CATEGORIES`, хранится
    KEEP_DAYS суток). Время оболочки (музыка, таймеры) относится к суткам, в которые оно считано при записи (`flush`). Устройство пишет
    только свой ключ, поэтому слияние по ключам (last-write-wins) конфликтов не даёт; итог за период = сумма по всем ключам с этим префиксом.
@@ -79,10 +80,12 @@
     { id: "qr",     title: "QR-коды",             hint: "создание и правка карточек с QR",
       svg: '<rect x="4" y="4" width="6" height="6" rx="1"></rect><rect x="14" y="4" width="6" height="6" rx="1"></rect><rect x="4" y="14" width="6" height="6" rx="1"></rect><path d="M14 14h2.5v2.5H14zM18 18h2M18 14v2"></path>' },
     { id: "timers", title: "Таймеры",             hint: "сколько насчитали все таймеры",
-      svg: '<circle cx="12" cy="13.5" r="7.5"></circle><path d="M12 9.5v4l2.5 1.5"></path><path d="M9.5 2.5h5"></path>' }
+      svg: '<circle cx="12" cy="13.5" r="7.5"></circle><path d="M12 9.5v4l2.5 1.5"></path><path d="M9.5 2.5h5"></path>' },
+    { id: "pomodoro", title: "Помодоро",          hint: "сколько реально проработал помодоро-таймер",
+      svg: '<circle cx="12" cy="13.5" r="7"></circle><path d="M9 6.5c1 .3 2 .1 3-.6 1 .7 2 .9 3 .6"></path><path d="M12 5.9V3.5"></path>' }
   ];
   var SCREEN_IDS = ["read", "tasks", "notes", "qr"];   // считаются здесь, по экрану
-  var NATIVE_IDS = ["music", "timers"];                 // считает оболочка
+  var NATIVE_IDS = ["music", "timers", "pomodoro"];     // считает оболочка
 
   var deps = null;
   var appActive = true;
@@ -252,7 +255,7 @@
       var n = window.LifeTrackerNative;
       if(!n || typeof n.getScreenTimeTotals !== "function") return;
       var o = JSON.parse(n.getScreenTimeTotals());
-      nativeTotals = { music: num(o.music), timers: num(o.timers) };
+      nativeTotals = { music: num(o.music), timers: num(o.timers), pomodoro: num(o.pomodoro) };
     }catch(e){}
   }
 
