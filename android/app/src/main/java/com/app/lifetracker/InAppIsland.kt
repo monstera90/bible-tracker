@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 17.0 (09.11)
+// Версия: 17.1 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -935,7 +935,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
             m.iconKey = "" + color + "/" + (frac * 60f).toInt() + "/" + glyph
             m.iconFn = { s -> XiaomiIsland.pomoRingBitmap(color, frac, s, glyph) }
             m.time = PomodoroTimer.pillText(pomo)
-            m.samples = listOf(timePattern(m.time), "88:88", "+88:88", "Готово")
+            // образцы ширины — по длине фазы, а не «на все случаи» (запас под «+88:88» и «Готово» оставлял пустоту в середине капсулы)
+            m.samples = listOf(timePattern(m.time), if (pomo.totalMs >= 3_600_000L) "8:88:88" else if (pomo.totalMs >= 600_000L) "88:88" else "8:88")
             m.big = m.time
             m.sub = (if (pomo.task.isNotEmpty()) pomo.task + " · " else "") + PomodoroTimer.label(pomo) + " · " + PomodoroTimer.cycleText(pomo)
             val pomoWait = pomo.phase == PomodoroTimer.PH_WAIT
@@ -1016,7 +1017,6 @@ class InAppIsland private constructor(private val appCtx: Context) {
             val title = if (SiteMedia.title.isNotEmpty()) SiteMedia.title else "Видео"
             m.iconKey = "vi"
             m.iconFn = { s -> XiaomiIsland.videoIconBitmap(s) }
-            m.name = title
             m.big = title
             val site = SiteMedia.sub
             m.sub = (if (site.isNotBlank()) site + " · " else "") + (if (playing) "играет" else "пауза")
@@ -1205,8 +1205,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
         val extra = pillTime.strokePx + dp(2f)
         pillCapW = pillMaxW
         val a = items[0]
-        var left = scrW * 0.024f + iconW + gapPx
-        if (a.name.isNotEmpty()) left += gapPx + pillName.paint.measureText(a.name) + dp(2f)
+        var left = scrW * 0.024f + iconW + dp(2f)
+        if (a.name.isNotEmpty()) left += gapPx + pillName.paint.measureText(a.name)
         var timeW = 0f
         for (t in a.samples) timeW = max(timeW, pillTime.paint.measureText(t))
         val right = timeW + extra + scrW * 0.0272f
