@@ -1,6 +1,6 @@
 /* ===========================================================================
    usertabs.js
-   Версия: 4.1 (07.11)
+   Версия: 4.2 (09.11)
    Вкладки-сайты бокового ряда «Интернет» (кнопка «+» над вкладкой «Claude», set2s_10). Каждая вкладка — свой адрес, который открывается
    по умолчанию; дальше вкладка помнит, где человек остановился на сайте (в том числе после закрытия приложения).
    Сам сайт показывает ОБОЛОЧКА: отдельный WebView на вкладку поверх области #userTabView (мост LifeTrackerNative ≥ 22, utab*;
@@ -149,8 +149,13 @@
       ".ut-btns button{font:inherit;font-size:14px;margin:0 8px 8px 0;padding:7px 12px;border-radius:8px;" +
       "border:1px solid var(--wood,#5b4a8a);background:var(--parchment,#f4f0f8);color:var(--wood,#5b4a8a);}" +
       ".ut-btns button.primary{background:var(--wood,#5b4a8a);color:var(--parchment,#f4f0f8);}" +
-      "#userTabView{width:100%;}" +
-      ".ut-loading{font-size:13px;opacity:.7;padding:8px 2px;}";
+      "#userTabView{width:100%;position:relative;}" +
+      "#userTabView.ut-wait{background:#fff;border-radius:0 14px 0 0;}" +
+      ".ut-loading{position:absolute;left:0;right:0;top:0;bottom:0;display:-webkit-flex;display:flex;-webkit-flex-direction:column;flex-direction:column;" +
+      "-webkit-align-items:center;align-items:center;-webkit-justify-content:center;justify-content:center;color:#6b5a9a;font-size:14px;text-align:center;padding:0 24px;}" +
+      ".ut-spin{width:30px;height:30px;box-sizing:border-box;border-radius:50%;border:3px solid rgba(127,0,255,.18);border-top-color:#7F00FF;" +
+      "margin-bottom:12px;-webkit-animation:utSpin .8s linear infinite;animation:utSpin .8s linear infinite;}" +
+      "@-webkit-keyframes utSpin{to{-webkit-transform:rotate(360deg);}}@keyframes utSpin{to{transform:rotate(360deg);}}";
     document.head.appendChild(st);
   }
 
@@ -413,7 +418,9 @@
   }
 
   function renderPage(c, t){
-    c.innerHTML = '<div id="userTabView"><div class="ut-loading">Загрузка…</div></div>';
+    var host = hostOf(t.home).replace(/^www\./, "");
+    c.innerHTML = '<div id="userTabView" class="ut-wait"><div class="ut-loading"><div class="ut-spin"></div><div>' +
+      (host ? "Открываю " + esc(host) : "Открываю сайт") + '</div></div></div>';
     active = true;
     activeId = t.id;
     lastRect = "";
@@ -480,12 +487,23 @@
     syncIcon(activeId, st);
   }
 
+  // заглушка «Открываю…» снимается, как только оболочка сообщила, что страница готова
+  function dropWaitPanel(){
+    var v = el("userTabView");
+    if(!v || !active || !activeId || v.className.indexOf("ut-wait") < 0) return;
+    if(!readState(activeId).ready) return;
+    v.className = v.className.replace("ut-wait", "").replace(/\s+$/, "");
+    var l = v.querySelector(".ut-loading");
+    if(l && l.parentNode) l.parentNode.removeChild(l);
+  }
+
   function startTimer(){
     if(timer) return;
     timer = setInterval(function(){
       sizeAndPush();
       var now = Date.now();
       if(now - lastPoll > 2000){ lastPoll = now; pollState(); }
+      dropWaitPanel();
     }, 400);
     window.addEventListener("resize", sizeAndPush);
   }

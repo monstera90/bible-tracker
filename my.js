@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 142.0 (08.11)
+   Версия: 142.1 (09.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -14611,6 +14611,30 @@
     document.getElementById("pdfAddLibNo").addEventListener("click", close);
     document.getElementById("pdfAddLibYes").addEventListener("click", function(){ close(); onYes(); });
   }
+  // Короткий тост внизу окна (своя разметка, а не системный Toast: системный держится ~2 с и этого срока приложение не меняет; работает и в браузере).
+  var shortToastEl = null, shortToastTimer = null, shortToastHideTimer = null;
+  function showShortToast(text, ms){
+    if(!shortToastEl){
+      shortToastEl = document.createElement("div");
+      shortToastEl.setAttribute("role", "status");
+      shortToastEl.style.cssText =
+        "position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + 96px);z-index:1600;max-width:80vw;box-sizing:border-box;" +
+        "-webkit-transform:translateX(-50%);transform:translateX(-50%);padding:8px 16px;border-radius:18px;" +
+        "background:var(--wood);color:var(--parchment);font-size:14px;line-height:1.3;text-align:center;" +
+        "box-shadow:0 2px 10px rgba(0,0,0,.35);pointer-events:none;opacity:0;transition:opacity .18s;";
+      document.body.appendChild(shortToastEl);
+    }
+    if(shortToastTimer) clearTimeout(shortToastTimer);
+    if(shortToastHideTimer) clearTimeout(shortToastHideTimer);
+    shortToastEl.textContent = text;
+    shortToastEl.style.display = "block";
+    void shortToastEl.offsetWidth;
+    shortToastEl.style.opacity = "1";
+    shortToastTimer = setTimeout(function(){
+      shortToastEl.style.opacity = "0";
+      shortToastHideTimer = setTimeout(function(){ shortToastEl.style.display = "none"; }, 220);
+    }, ms || 1400);
+  }
   // Копирует открытую «на лету» книгу (PDF, epub) в библиотеку и превращает текущий экран в обычную книгу (с сохранением места и подчёркиваний).
   function addTransientBookToLibrary(done){
     var st = bookReaderState;
@@ -14631,7 +14655,7 @@
       st.name = result.name;
       ensureBookNameSynced(result.hash, result.name);
       saveLastOpenedBookName(result.name);
-      var doneMsg = result.added ? "Книга добавлена в библиотеку." : "Эта книга уже есть в библиотеке.";
+      var doneMsg = result.added ? "Добавлено в библиотеку" : "Уже в библиотеке";
       if(st.pdf && !st.pdf.released){
         window.PdfPageReader.cover(st.pdf, 240).then(function(c){ saveBookCoverIfMissing(result.hash, c.base64, c.contentType); }).catch(function(){});
       } else if(!st.pdf){
@@ -14646,7 +14670,8 @@
         if(addBtnGone && addBtnGone.parentNode) addBtnGone.parentNode.removeChild(addBtnGone);
       }
       var s2 = document.getElementById("bookReaderStatus");
-      if(s2) s2.textContent = doneMsg;
+      if(s2) s2.textContent = "";
+      showShortToast(doneMsg);
       done(true);
     }).catch(function(e){
       fail("Не удалось добавить в библиотеку: " + (e && e.message ? e.message : e));

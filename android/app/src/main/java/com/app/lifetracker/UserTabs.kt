@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.0 (04.11)
+// Версия: 7.1 (09.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -147,7 +147,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         private const val OFFSCREEN_X = 20000f
         private const val SAVE_EVERY_MS = 4000L
         private const val SAVE_DEBOUNCE_MS = 1500L
-        private const val REVEAL_TIMEOUT_MS = 8000L
+        private const val REVEAL_TIMEOUT_MS = 4000L
         private const val PRELOAD_DELAY_MS = 2500L
         private const val MAX_LIVE = 4
         private const val RECOVER_MIN_GAP_MS = 60000L
@@ -1278,6 +1278,11 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
                 pageFinished(t, view)
             }
 
+            // Первый кадр новой страницы уже нарисован — показываем сайт, не дожидаясь конца загрузки (API 23+).
+            override fun onPageCommitVisible(view: WebView?, url: String?) {
+                revealEarly(t, view)
+            }
+
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                 if (request?.isForMainFrame == true) mainFrameFailed(t, view, request.url?.toString())
             }
@@ -1324,6 +1329,11 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
                 callback: ValueCallback<Array<Uri>>?,
                 params: FileChooserParams?
             ): Boolean = activity.handleFileChooser(callback, params)
+
+            // Запасной путь для Android 5–6, где нет onPageCommitVisible: показываем сайт, когда загружено больше половины.
+            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M && newProgress >= 60) revealEarly(t, view)
+            }
 
             override fun onReceivedIcon(view: WebView?, icon: Bitmap?) {
                 if (icon != null) saveIcon(t, icon)
@@ -1385,6 +1395,23 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         }
         markReady(t)
         scheduleSave(t)
+    }
+
+    /** Сайт показывается, как только появился первый кадр (до onPageFinished): без долгого пустого экрана; прокрутка доводится так же, как в [pageFinished]. */
+    private fun revealEarly(t: Tab, v: WebView?) {
+        if (v == null || t.view !== v || t.ready) return
+        val u = v.url
+        if (u.isNullOrEmpty() || u == "about:blank") return
+        if (t.needFix) {
+            val sy = prefs.getInt(k(t.id, "sy"), 0)
+            val cssY = (sy / activity.resources.displayMetrics.density).roundToInt()
+            if (cssY > 0) {
+                t.needFix = false
+                v.evaluateJavascript(scrollJs(cssY)) { markReady(t) }
+                return
+            }
+        }
+        markReady(t)
     }
 
     /** Доводит прокрутку до сохранённой (если восстановление WebView её не вернуло); останавливается, как только человек коснулся экрана. */
