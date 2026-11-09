@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 11.0 (09.11)
+// Версия: 11.1 (09.11)
 // Версия: 8.8 (04.11)
 // Версия: 8.6 (22.10) — свёрнутая плашка возвращена к виду 8.0–8.2 (13sp название, 12sp время, letterSpacing 0.08, отступы 0.0087/0.0272): она точно совпадала с настоящим островом, правки 8.3 и 8.5 её испортили. Раскрытая карточка (8.3–8.5) не тронута. Откат: InAppIsland.kt 8.5.
 // Версия: 8.5 (22.10) — по замеру четырёх скриншотов (ширина 1159): название на плашке было мельче настоящего на ~14 % → 0.0350 × ширина экрана; время на плашке ниже на ~10 % и уже на ~19 % → 13.2sp, letterSpacing 0.13, tnum; время в карточке было выше на 7 % и уже на 12 % (вытянутые цифры) → размер 0.0450, letterSpacing 0.06, tnum. Откат: InAppIsland.kt 8.4.
@@ -55,6 +55,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 class InAppIsland private constructor(private val appCtx: Context) {
@@ -143,6 +144,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private var pillTop = 0
     private var pillW = 0
     private var pillH = 0
+    private var pillMaxW = 0 // самая широкая плашка (прежний размер); по содержимому ширина подгоняется вниз — fitPill/setPillWidth
+    private var camGap = 0 // чёрная середина плашки под камеру: слева от неё значок и название, справа время
     private var cardTop = 0
     private var cardW = 0
     private var cardH = 0
@@ -672,6 +675,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
             return
         }
         layoutFor(r)
+        fitTimerPill(info)
         attach()
         if (!attached) {
             hide()
@@ -721,6 +725,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
      */
     private fun refreshPomodoro(r: Rect, p: PomodoroTimer.Snapshot) {
         layoutFor(r)
+        fitPill(null, listOf(timePattern(PomodoroTimer.pillText(p)), "88:88", "+88:88", "Готово"))
         attach()
         if (!attached) {
             hide()
@@ -763,6 +768,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
     /** Плашка секундомера: слева значок (синий — идёт, жёлтый — пауза), справа время. Нажатие — пауза/продолжить, долгое — сброс (см. [toggle], [swStopTask]). */
     private fun refreshStopwatch(r: Rect, s: StopwatchTimer.Snapshot) {
         layoutFor(r)
+        fitPill(null, listOf(timePattern(XiaomiIsland.elapsedText(s.elapsedMs))))
         attach()
         if (!attached) {
             hide()
@@ -808,6 +814,47 @@ class InAppIsland private constructor(private val appCtx: Context) {
         shownTitle = null
     }
 
+    /** Цифры заменяются «8» (самая широкая): ширина плашки считается по образцу и не прыгает на каждой смене цифры. */
+    private fun timePattern(text: String): String = text.replace(Regex("[0-9]"), "8")
+
+    /** Таймер карточки: название слева от камеры, время справа; ширина времени — по длине, какой оно достигнет за весь таймер. */
+    private fun fitTimerPill(info: CardTimers.Info) {
+        val span = max(info.totalMs, info.leftMs)
+        val sample = if (span >= 3_600_000L) "8:88:88" else if (span >= 600_000L) "88:88" else "8:88"
+        fitPill(info.title, listOf(sample))
+    }
+
+    /**
+     * Подгоняет ширину плашки под содержимое: значок (и название, если есть) слева, самое широкое из образцов времени
+     * справа, середина под камеру. Больше прежней ширины плашка не бывает — длинное название обрезается многоточием.
+     */
+    private fun fitPill(name: String?, timeSamples: List<String>) {
+        if (pillMaxW <= 0 || scrW <= 0) return
+        var left = scrW * 0.024f + pillH * 0.57f
+        if (name != null) left += scrW * 0.0087f + pillName.paint.measureText(name) + dp(2f)
+        var timeW = 0f
+        for (t in timeSamples) timeW = max(timeW, pillTime.paint.measureText(t))
+        val right = timeW + pillTime.strokePx + dp(2f) + scrW * 0.0272f
+        setPillWidth((camGap + 2f * max(left, right)).roundToInt())
+    }
+
+    /**
+     * Меняет ширину свёрнутой плашки вместе с окном. Только в покое (не раскрыта и не анимируется): размер окна и раскладка
+     * внутри него в это время не двигаются, иначе «дрожание»; отложенное применится при следующем обновлении.
+     */
+    private fun setPillWidth(want: Int) {
+        val w = want.coerceIn(min(camGap + 2 * dp(8f), pillMaxW), pillMaxW)
+        if (w == pillW || expanded || animating) return
+        pillW = w
+        pillLeft = centerX - w / 2
+        (pill.layoutParams as? FrameLayout.LayoutParams)?.let {
+            it.width = w
+            pill.layoutParams = it
+        }
+        applyProgress(progress)
+        setWindowBig(false)
+    }
+
     /** Размеры и места плашки и карточки считаются от выреза; пересчёт — только когда вырез поменялся. */
     private fun layoutFor(r: Rect) {
         if (builtFor == r) return
@@ -827,27 +874,34 @@ class InAppIsland private constructor(private val appCtx: Context) {
         pill.removeAllViews()
         pill.background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = h / 2f }
         val side = (screenW * 0.024f).roundToInt()
-        pill.setPadding(side, 0, (screenW * 0.0272f).roundToInt(), 0)
+        pill.setPadding(0, 0, 0, 0)
         pillTime.strokePx = screenW * 0.0021f
         val iconSize = (h * 0.57f).roundToInt()
+        camGap = (screenW * 0.075f).roundToInt()
+        // Левая и правая половины равны, чёрная середина — под камеру: плашка остаётся симметричной вокруг выреза,
+        // как бы ни менялась её ширина (fitPill), а название не уходит под камеру.
         val leftBox = LinearLayout(appCtx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            setPadding(side, 0, 0, 0)
             addView(pillIcon, LinearLayout.LayoutParams(iconSize, iconSize))
             addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = (screenW * 0.0087f).roundToInt() })
         }
-        pillTime.setPadding((screenW * 0.02f).roundToInt(), 0, 0, 0)
+        pillTime.setPadding(0, 0, 0, 0)
         val rightBox = LinearLayout(appCtx).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            setPadding(0, 0, (screenW * 0.0272f).roundToInt(), 0)
             addView(pillTime)
         }
         pill.addView(leftBox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        pill.addView(rightBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        pill.addView(View(appCtx), LinearLayout.LayoutParams(camGap, ViewGroup.LayoutParams.MATCH_PARENT))
+        pill.addView(rightBox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         pill.layoutParams = FrameLayout.LayoutParams(w, h).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; topMargin = top }
 
         pillLeft = left
         pillTop = top
         pillW = w
+        pillMaxW = w
         pillH = h
         centerX = r.centerX()
 
