@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 17.2 (09.11)
+// Версия: 17.3 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -208,6 +208,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private var shownStrip: String? = null
     private var cardMusicStyle: Boolean? = null
     private var tapItem: Item? = null // чьё занятие нажато (капсула — первое)
+    private var swTapAt = 0L // время первого нажатия на секундомер (для двойного)
     private var swipeX = 0f
     private var swipeY = 0f
     private val swStopTask = Runnable {
@@ -751,15 +752,22 @@ class InAppIsland private constructor(private val appCtx: Context) {
 
     /**
      * Нажатие на капсулу (или кружок). Таймер, музыка, видео — раскрываются в карточку именно этого занятия; помодоро —
-     * вкладка «Помодоро» (на плашке не раскрывается); секундомер — пауза/продолжить (долгое нажатие — сброс, см. [swStopTask]).
+     * вкладка «Помодоро» (на плашке не раскрывается); секундомер — пауза/продолжить по двойному нажатию (долгое нажатие — сброс, см. [swStopTask]).
      */
     private fun activate(m: Item) {
         when (m.kind) {
             K_SW -> {
-                val ctx = appCtx
-                StopwatchTimer.togglePause(ctx)
-                StopwatchService.refresh(ctx)
-                refresh()
+                // пауза — по двойному нажатию (одиночное только запоминается); долгое нажатие — сброс, см. [swStopTask]
+                val now = SystemClock.uptimeMillis()
+                if (swTapAt > 0L && now - swTapAt <= max(ViewConfiguration.getDoubleTapTimeout().toLong(), 400L)) {
+                    swTapAt = 0L
+                    val ctx = appCtx
+                    StopwatchTimer.togglePause(ctx)
+                    StopwatchService.refresh(ctx)
+                    refresh()
+                } else {
+                    swTapAt = now
+                }
             }
             K_POMO -> {
                 val a = activity
@@ -851,6 +859,9 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private fun collapse() {
         if (!expanded) return
         expanded = false
+        // свёрнутой остаётся то занятие, что было в карточке (в том числе после смахивания): оно становится главным в капсуле
+        val shown = selKey
+        if (shown != null && curItems.any { it.key == shown }) frontKey = shown
         animateTo(0f, 280L, AccelerateDecelerateInterpolator())
     }
 
