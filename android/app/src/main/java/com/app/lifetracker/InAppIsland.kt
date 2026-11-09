@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 18.1 (09.11)
+// Версия: 18.2 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -63,7 +63,7 @@ private class Item(val key: String, val kind: Int) {
     var onStop: (() -> Unit)? = null
     var onExtra: (() -> Unit)? = null // добавочная кнопка карточки слева от паузы (помодоро: «+5»); null — кнопки нет
 
-    /** Есть карточка, которая листается смахиванием: у всех занятий. Нажатием на капсулу раскрываются все, кроме секундомера: он ставится на паузу по двойному нажатию ([activate]). */
+    /** Есть карточка, которая листается смахиванием: у всех занятий. Нажатием на капсулу раскрываются все ([activate]). */
     val expandable: Boolean get() = true
 
     /** Карточка с крупными цифрами (таймер, помодоро, секундомер, тренировка); у музыки и видео — название одной строкой. */
@@ -212,7 +212,6 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private var shownStrip: String? = null
     private var cardMusicStyle: Boolean? = null
     private var tapItem: Item? = null // чьё занятие нажато (капсула — первое)
-    private var swTapAt = 0L // время первого нажатия на секундомер (для двойного)
     private var cardSwiped = false
     private var swipeX = 0f
     private var swipeY = 0f
@@ -775,29 +774,12 @@ class InAppIsland private constructor(private val appCtx: Context) {
 
     /**
      * Нажатие на капсулу (или кружок). Таймер, музыка, видео — раскрываются в карточку именно этого занятия; помодоро —
-     * раскрывается в карточку, нажатие на саму карточку открывает вкладку «Помодоро» ([openPomodoro]); секундомер — пауза/продолжить по двойному нажатию (долгое нажатие — сброс, см. [swStopTask]).
+     * раскрывается в карточку, нажатие на саму карточку открывает вкладку «Помодоро» ([openPomodoro]); секундомер — раскрывается в карточку с паузой и «Стоп» (долгое нажатие на капсулу — сброс, см. [swStopTask]).
      */
     private fun activate(m: Item) {
-        when (m.kind) {
-            K_SW -> {
-                // пауза — по двойному нажатию (одиночное только запоминается); долгое нажатие — сброс, см. [swStopTask]
-                val now = SystemClock.uptimeMillis()
-                if (swTapAt > 0L && now - swTapAt <= max(ViewConfiguration.getDoubleTapTimeout().toLong(), 400L)) {
-                    swTapAt = 0L
-                    val ctx = appCtx
-                    StopwatchTimer.togglePause(ctx)
-                    StopwatchService.refresh(ctx)
-                    refresh()
-                } else {
-                    swTapAt = now
-                }
-            }
-            else -> {
-                // состояние «раскрыта», хотя карточка давно свёрнута (прервалась анимация/пересборка окна) — считаем свёрнутой
-                if (expanded && !animating && progress <= 0.001f) expanded = false
-                if (expanded) collapse() else expand(m.key)
-            }
-        }
+        // состояние «раскрыта», хотя карточка давно свёрнута (прервалась анимация/пересборка окна) — считаем свёрнутой
+        if (expanded && !animating && progress <= 0.001f) expanded = false
+        if (expanded) collapse() else expand(m.key)
     }
 
     private fun openPomodoro() {
