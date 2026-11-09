@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 17.1 (09.11)
+// Версия: 17.2 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -484,12 +484,12 @@ class InAppIsland private constructor(private val appCtx: Context) {
     }
 
     /**
-     * Занятия-кружки: при свёрнутой капсуле — все, кроме первого (оно в капсуле); пока карточка раскрыта (и во время её
-     * движения) — все, кроме показанного в карточке: невыбранные занятия остаются сверху.
+     * Занятия-кружки: только при свёрнутой капсуле — все, кроме первого (оно в капсуле). Пока карточка раскрыта (и во время её
+     * движения) кружка нет.
      */
     private fun circleItems(items: List<Item>): List<Item> {
-        val sel = if (expanded || animating) items.firstOrNull { it.key == selKey } else null
-        return if (sel != null) items.filter { it !== sel } else items.drop(1)
+        if (expanded || animating) return emptyList() // пока карточка раскрыта (и движется), кружка нет: он только у свёрнутой капсулы
+        return items.drop(1)
     }
 
     /**
