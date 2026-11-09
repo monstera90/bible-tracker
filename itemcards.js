@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 35.2 (08.11)
+   Версия: 36.0 (09.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -984,7 +984,8 @@ window.initItemCardsModule = function(deps){
           // тап по карточке = «Пуск» (скан кода), поэтому правка формы — только этой кнопкой (появляется по долгому нажатию, тот же стиль, что у глаза)
           '<button type="button" class="mdeditor-share-btn item-card-edit-btn' + (revealed ? " visible" : "") + '" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
           // привычка: график отметок (карта дней) открывается отсюда — тап по карточке теперь отмечает день, других путей к графику нет
-          (c.type === "habit" ? '<button type="button" class="mdeditor-share-btn item-card-chart-btn' + (revealed ? " visible" : "") + '" title="График отметок">' + CHART_ICON_SVG + '</button>' : '') +
+          // «Сегодня»: схема дней, когда написана заметка дня (openDatedNotesMap)
+          ((c.type === "habit" || c.type === "datenote") ? '<button type="button" class="mdeditor-share-btn item-card-chart-btn' + (revealed ? " visible" : "") + '" title="' + (c.type === "habit" ? "График отметок" : "Схема заметок") + '">' + CHART_ICON_SVG + '</button>' : '') +
         '</div>';
       card.querySelector(".item-card-title").textContent = cardTitle(c);
       applyCardLook(card, c);
@@ -1007,10 +1008,9 @@ window.initItemCardsModule = function(deps){
   var HABIT_MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
   var HABIT_WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
   function isoOfDate(d){ return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
-  function habitMapMarkup(c){
-    var color = cardColor(c) || "var(--wood)"; // без цвета — цвет выбранной вкладки (темы)
-    var marked = {};
-    habitDays(c).forEach(function(d){ marked[d] = 1; });
+  // Общая сетка карты дней: 365 дней, неделя в строке. isMarked(iso) → закрашенный день, attrsOf(iso) → доп. атрибуты клетки (или null).
+  function dayMapMarkup(color, isMarked, attrsOf){
+    var count = 0;
     var now = new Date();
     var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     var winStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 364); // 365 дней включительно
@@ -1020,7 +1020,7 @@ window.initItemCardsModule = function(deps){
     var html = '<div class="year-grid-v-row year-grid-v-header"><span class="year-grid-v-month-label"></span>';
     for(var wd = 0; wd < 7; wd++) html += '<span class="year-grid-v-weekday">' + HABIT_WEEKDAYS[wd] + '</span>';
     html += '</div>';
-    var lastMonth = -1, count = 0, todayIsoStr = isoOfDate(today);
+    var lastMonth = -1, todayIsoStr = isoOfDate(today);
     for(var row = 0; row < rows; row++){
       var first = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + row * 7);
       var label = "";
@@ -1028,15 +1028,19 @@ window.initItemCardsModule = function(deps){
       html += '<div class="year-grid-v-row"><span class="year-grid-v-month-label">' + label + '</span>';
       for(var col = 0; col < 7; col++){
         var d = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + row * 7 + col);
-        var cls = "year-grid-v-cell", style = "";
+        var cls = "year-grid-v-cell", style = "", attrs = "";
         if(d < winStart) cls += " empty";
         else if(d > today) cls += " future";
         else {
           var iso = isoOfDate(d);
-          if(marked[iso]){ count++; style = ' style="background:' + color + ';border-color:rgba(0,0,0,.25);"'; }
+          if(isMarked(iso)){
+            count++;
+            style = ' style="background:' + color + ';border-color:rgba(0,0,0,.25);"';
+            if(attrsOf) attrs = attrsOf(iso) || "";
+          }
           if(iso === todayIsoStr) cls += " today";
         }
-        html += '<span class="' + cls + '"' + style + '></span>';
+        html += '<span class="' + cls + '"' + style + attrs + '></span>';
       }
       html += '</div>';
     }
@@ -1045,6 +1049,12 @@ window.initItemCardsModule = function(deps){
     for(var sp = 0; sp < 7; sp++) html += '<span class="year-grid-v-cell empty"></span>';
     html += '</div>';
     return { html: html, count: count };
+  }
+  function habitMapMarkup(c){
+    var color = cardColor(c) || "var(--wood)"; // без цвета — цвет выбранной вкладки (темы)
+    var marked = {};
+    habitDays(c).forEach(function(d){ marked[d] = 1; });
+    return dayMapMarkup(color, function(iso){ return !!marked[iso]; }, null);
   }
   function openHabitMap(id){
     var c = findCard(id);
@@ -1063,6 +1073,55 @@ window.initItemCardsModule = function(deps){
     var sc = document.getElementById("habitMapScroll");
     requestAnimationFrame(function(){ sc.scrollTop = sc.scrollHeight; }); // сразу к текущей неделе (внизу)
     if(window.AppNav) window.AppNav.push(function(){ renderGrid(); });
+  }
+
+  // ---------- схема заметок «Сегодня» ----------
+  // Та же карта дней, что у привычки: закрашены дни, когда написана заметка дня (заметка `дд.мм.гггг`, MdEditor.getDayNoteIdsByDay).
+  // Нажатие на закрашенный день открывает заметку; «назад» из заметки возвращает к карте (шаг в AppNav).
+  function openDatedNotesMap(id, noPush, tries){
+    var c = findCard(id);
+    var el = container();
+    if(!c || !el) return;
+    ensureHabitStyles();
+    screenMode = "form"; // не сетка: возврат на вкладку всегда перерисовывает сетку карточек
+    var md = getMdEditor();
+    var byTs = (md && md.getDayNoteIdsByDay) ? md.getDayNoteIdsByDay() : null; // null — заметки ещё не загружены
+    var waiting = byTs === null && (tries || 0) < 25;
+    var byIso = {};
+    if(byTs) Object.keys(byTs).forEach(function(ts){ byIso[isoOfDate(new Date(Number(ts)))] = byTs[ts]; });
+    var built = dayMapMarkup(cardColor(c) || "var(--wood)", function(iso){ return !!byIso[iso]; }, function(iso){ return ' data-note="' + byIso[iso] + '"'; });
+    el.innerHTML =
+      '<div class="year-grid-tab-header">' +
+        '<div class="common-tab-title"><span class="habit-map-dot" style="background:' + (cardColor(c) || "var(--wood)") + ';"></span><span>Заметки по дням</span></div>' +
+        '<button type="button" class="year-grid-active-days-btn" tabindex="-1" title="Дней с заметками за последние 365 дней">' + (waiting ? "…" : built.count) + '</button>' +
+      '</div>' +
+      '<div class="year-grid-v-scroll" id="datedMapScroll">' + built.html + '</div>';
+    var sc = document.getElementById("datedMapScroll");
+    requestAnimationFrame(function(){ sc.scrollTop = sc.scrollHeight; }); // сразу к текущей неделе (внизу)
+    sc.addEventListener("click", function(e){
+      var cell = e.target.closest ? e.target.closest(".year-grid-v-cell") : null;
+      var noteId = cell && cell.getAttribute("data-note");
+      if(noteId) openDayNoteFromMap(id, noteId);
+    });
+    if(!noPush && !tries && window.AppNav) window.AppNav.push(function(){ renderGrid(); });
+    if(waiting) setTimeout(function(){ // заметки на холодном старте грузятся не сразу: перерисовываем карту, пока она на экране
+      if(document.getElementById("datedMapScroll")) openDatedNotesMap(id, true, (tries || 0) + 1);
+    }, 300);
+  }
+  function backToDatedNotesMap(cardId){
+    if(deps.openItemCardsTab){ try{ deps.openItemCardsTab(); }catch(e){} }
+    openDatedNotesMap(cardId, true);
+  }
+  function openDayNoteFromMap(cardId, noteId){
+    var md = getMdEditor();
+    if(!md || !md.openNoteByQr) return;
+    if(deps.openNotesTab){ try{ deps.openNotesTab(); }catch(e){} }
+    if(md.openNoteByQr(noteId)){
+      // «назад» из заметки (системное или домик с history.back) — снова карта
+      if(window.AppNav) window.AppNav.push(function(){ backToDatedNotesMap(cardId); });
+    } else {
+      backToDatedNotesMap(cardId); // заметку успели удалить — остаёмся на карте
+    }
   }
 
   // ---------- оборот карточки: QR ----------
@@ -1272,7 +1331,7 @@ window.initItemCardsModule = function(deps){
       }
       if(e.target.closest(".item-card-fav-btn")){ toggleFav(c); return; } // звезда: в избранное ↔ из избранного (кнопки остаются раскрытыми)
       if(e.target.closest(".item-card-edit-btn")){ hideRevealed(); openForm(c.type, c); return; }
-      if(e.target.closest(".item-card-chart-btn")){ hideRevealed(); openHabitMap(c.id); return; } // график отметок привычки
+      if(e.target.closest(".item-card-chart-btn")){ hideRevealed(); if(c.type === "datenote") openDatedNotesMap(c.id); else openHabitMap(c.id); return; } // график отметок привычки / схема заметок «Сегодня»
       if(e.target.closest(".mdeditor-delete-btn")){
         openAppConfirmBar("Удалить карточку «" + (c.title || "без названия") + "»?" + (c.type === "remind" ? " Напоминание будет отменено." : " QR-код перестанет работать."), function(){
           deleteCard(c.id);

@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 19.0 (07.11)
+   Версия: 20.0 (09.11)
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
@@ -5002,6 +5002,20 @@ window.initMdEditorModule = function(deps){
     });
     return out;
   }
+  // дни с написанной заметкой: {начало дня (мс): id заметки}; пустые заметки не считаются; null — заметки ещё не загружены
+  function getDayNoteIdsByDay(){
+    if(!notesReady) return null;
+    var out = {};
+    notesMap.forEach(function(rec){
+      if(!rec || rec.deleted || !rec.name || isCardMetaRec(rec)) return;
+      var m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(rec.name);
+      if(!m) return;
+      var d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+      if(d.getDate() !== Number(m[1])) return; // 31.02.… и подобное — не дата
+      if(noteBodyOnly(rec.text).trim()) out[d.getTime()] = rec.id;
+    });
+    return out;
+  }
   // ---- QR-код заметки (кнопка `mdEditorQrBtn` в нижнем ряду редактора) ----
   // QR любой заметки — `lt://v1/note/<id заметки>` (разбор — cardscan.js, открытие — itemcards.js через `openNoteByQr`).
   // Отдельной записи «у заметки есть QR» нет: заметка «имеет код», когда лежит в папке QR_NOTES_FOLDER (в корне или глубже).
@@ -6871,6 +6885,7 @@ window.initMdEditorModule = function(deps){
     setDayNote: setDayNote,
     importDayNote: importDayNote,
     getDayNotesByDay: getDayNotesByDay,
+    getDayNoteIdsByDay: getDayNoteIdsByDay,
     openNoteByQr: openNoteByQr,
     cardMetaStatus: cardMetaStatus,
     cardMetaPull: cardMetaPull,
