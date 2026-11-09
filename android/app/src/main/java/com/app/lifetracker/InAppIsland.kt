@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 17.3 (09.11)
+// Версия: 18.0 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -61,6 +61,7 @@ private class Item(val key: String, val kind: Int) {
     var btnFn: (() -> Bitmap)? = null
     var onToggle: (() -> Unit)? = null
     var onStop: (() -> Unit)? = null
+    var onExtra: (() -> Unit)? = null // добавочная кнопка карточки слева от паузы (помодоро: «+5»); null — кнопки нет
 
     /** Есть карточка, которая листается смахиванием: у всех занятий. Нажатием на капсулу раскрываются не все: помодоро открывает вкладку, секундомер ставится на паузу ([activate]). */
     val expandable: Boolean get() = true
@@ -154,6 +155,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private val cardName = TextView(appCtx)
     private val pauseBtn = ImageView(appCtx)
     private val stopBtn = ImageView(appCtx)
+    private val plusBtn = ImageView(appCtx) // «+5» помодоро
     private val strip = LinearLayout(appCtx) // карточка с двумя и больше занятиями: ряд значков для переключения
     private val cardBar = View(appCtx) // полоска внизу карточки (при одном занятии с карточкой)
     private val cardBg = GradientDrawable().apply { setColor(Color.BLACK) }
@@ -193,6 +195,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private var expandedAt = 0L
     private var builtFor: Rect? = null
     private var scrW = 0
+    private var btnStep = 0 // ширина кнопки карточки с промежутком (px): на столько уже текст, когда есть кнопка «+5»
+    private var cardPlus = false // в карточке показана кнопка «+5»
     private var textMaxW = 0 // предельная ширина текста раскрытой карточки музыки/видео (левее кнопок)
     private var pillCapW = 0 // предельная ширина капсулы (= pillMaxW)
     private var gapPx = 0 // зазор между значком и временем/названием
@@ -288,6 +292,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
             ellipsize = TextUtils.TruncateAt.END
         }
         pauseBtn.setOnClickListener { onPauseClick() }
+        plusBtn.setImageBitmap(XiaomiIsland.pomoButtonBitmap(2))
+        plusBtn.setOnClickListener { onExtraClick() }
         stopBtn.apply {
             setImageBitmap(XiaomiIsland.crossBitmap())
             setOnClickListener { onStopClick() }
@@ -674,6 +680,14 @@ class InAppIsland private constructor(private val appCtx: Context) {
         refresh()
     }
 
+    private fun onExtraClick() {
+        val m = selItem() ?: return
+        m.onExtra?.invoke()
+        expandedAt = System.currentTimeMillis()
+        handler.postDelayed({ refresh() }, 150L)
+        refresh()
+    }
+
     private fun onStopClick() {
         val m = selItem() ?: return
         m.onStop?.invoke()
@@ -949,13 +963,17 @@ class InAppIsland private constructor(private val appCtx: Context) {
             // образцы ширины — по длине фазы, а не «на все случаи» (запас под «+88:88» и «Готово» оставлял пустоту в середине капсулы)
             m.samples = listOf(timePattern(m.time), if (pomo.totalMs >= 3_600_000L) "8:88:88" else if (pomo.totalMs >= 600_000L) "88:88" else "8:88")
             m.big = m.time
-            m.sub = (if (pomo.task.isNotEmpty()) pomo.task + " · " else "") + PomodoroTimer.label(pomo) + " · " + PomodoroTimer.cycleText(pomo)
+            m.name = pomo.task // название задачи — только на свёрнутой капсуле (если указано)
+            // в карточке — только «цикл N из M»; фаза называется, лишь когда это не обычная работа (перерыв, пауза, «Готово»)
+            m.sub = if (pomo.phase == PomodoroTimer.PH_WORK && pomo.running && !pomo.flash) PomodoroTimer.cycleText(pomo)
+            else PomodoroTimer.label(pomo) + " · " + PomodoroTimer.cycleText(pomo)
             val pomoWait = pomo.phase == PomodoroTimer.PH_WAIT
             val pomoPaused = !pomo.running || pomoWait
             m.btnKey = "" + (frac * 200f).roundToInt() + "/" + color + "/" + pomoPaused
             m.btnFn = { XiaomiIsland.pauseBitmap(frac, 0, pomoPaused, color) }
             m.onToggle = { if (pomoWait) PomodoroTimer.skip(ctx) else PomodoroTimer.togglePause(ctx) }
             m.onStop = { PomodoroTimer.stop(ctx) }
+            if (!pomoWait) m.onExtra = { PomodoroTimer.plus5(ctx) } // в ожидании после перерыва продлевать нечего
             out.add(m)
         }
         for (inf in CardTimers.allInfos(ctx)) {
@@ -1142,10 +1160,13 @@ class InAppIsland private constructor(private val appCtx: Context) {
             return
         }
         val music = !sel.digitCard
-        if (cardMusicStyle != music) {
+        val plus = sel.onExtra != null
+        if (cardMusicStyle != music || cardPlus != plus) {
             cardMusicStyle = music
+            cardPlus = plus
             applyCardTextMode(music)
         }
+        plusBtn.visibility = if (plus) View.VISIBLE else View.GONE
         val ik = sel.key + "|" + sel.iconKey
         if (ik != shownCardIcon) {
             shownCardIcon = ik
@@ -1198,8 +1219,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private fun applyCardTextMode(music: Boolean) {
         cardTime.letterSpacing = if (music) 0.01f else 0.06f
         cardTime.ellipsize = if (music) TextUtils.TruncateAt.END else null
-        cardTime.maxWidth = if (music && textMaxW > 0) textMaxW else Int.MAX_VALUE
-        cardName.maxWidth = if (textMaxW > 0) textMaxW else Int.MAX_VALUE
+        cardTime.maxWidth = if (music && textMaxW > 0) textMaxW - (if (cardPlus) btnStep else 0) else Int.MAX_VALUE
+        cardName.maxWidth = if (textMaxW > 0) textMaxW - (if (cardPlus) btnStep else 0) else Int.MAX_VALUE
     }
 
     /** Цифры заменяются «8» (самая широкая): ширина плашки считается по образцу и не прыгает на каждой смене цифры. */
@@ -1337,7 +1358,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         winW = (cardW * 1.12f).roundToInt()
         winY = pillTop
         winH = (cardTop + cardH * 1.12f).roundToInt() - pillTop
-        for (v in listOf<View>(cardIcon, cardTime, cardName, pauseBtn, stopBtn, cardBar, strip)) (v.parent as? ViewGroup)?.removeView(v)
+        for (v in listOf<View>(cardIcon, cardTime, cardName, plusBtn, pauseBtn, stopBtn, cardBar, strip)) (v.parent as? ViewGroup)?.removeView(v)
         cardContent.removeAllViews()
         cardTime.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0450f) // высота цифр как у настоящего (замер: 40 px при 1159; было 0.0483 — выше на 7 %)
         cardTime.letterSpacing = 0.06f // цифры у настоящего шире (125 px против 112 у копии)
@@ -1346,6 +1367,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         cardName.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0354f) // как у настоящего острова (было 0.0328)
         cardTime.translationY = -screenW * 0.0017f
         cardName.translationY = -screenW * 0.0034f
+        btnStep = btn + gap
         textMaxW = (cardW - screenW * 0.2f - (edge + 2 * btn + gap) - screenW * 0.02f).roundToInt() // текст карточки музыки не заходит под кнопки
         applyCardTextMode(cardMusicStyle == true)
         val texts = LinearLayout(appCtx).apply {
@@ -1359,6 +1381,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
             marginStart = (screenW * 0.2f).roundToInt()
         })
         cardContent.addView(pauseBtn, FrameLayout.LayoutParams(btn, btn).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; marginEnd = edge + btn + gap })
+        cardContent.addView(plusBtn, FrameLayout.LayoutParams(btn, btn).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; marginEnd = edge + 2 * (btn + gap) })
         cardContent.addView(stopBtn, FrameLayout.LayoutParams(btn, btn).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; marginEnd = edge })
         (cardBar.background as? GradientDrawable)?.cornerRadius = screenW * 0.004f
         cardContent.addView(cardBar, FrameLayout.LayoutParams((screenW * 0.152f).roundToInt(), (screenW * 0.008f).roundToInt()).apply {
