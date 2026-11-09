@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 20.0 (09.11)
+// Версия: 20.1 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -73,6 +73,7 @@ private class Item(val key: String, val kind: Int) {
 class InAppIsland private constructor(private val appCtx: Context) {
 
     companion object {
+        private const val MIN_TIME_SAMPLE = "8:88" // образец времени секундомера (М:СС): по нему считается наименьшая ширина свёрнутой капсулы
         private const val ASK_EVERY_MS = 12L * 60L * 60L * 1000L // как часто повторно просить разрешение «Поверх других приложений»
         private const val IDLE_STOP_TICKS = 20 // в фоне: столько тиков (по 0,5 с) без плашки — и цикл останавливается до следующего вызова службы
 
@@ -1233,7 +1234,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
     /**
      * Подгоняет капсулу под САМОЕ ШИРОКОЕ из занятий, что идут сейчас: левая половина (значок и название, если есть) и правая
      * (время) берут наибольшую ширину среди всех занятий, поэтому при смене занятия в капсуле (смахиванием, по окончании)
-     * размер не прыгает; одно короткое занятие (например, только видео) — компактная капсула. Середина под камеру; капсула
+     * размер не прыгает. Наименьший размер — секундомера (значок слева, время М:СС справа, [MIN_TIME_SAMPLE]): видео и другие занятия
+     * без времени или с коротким временем не уже его. Середина под камеру; капсула
      * смещена к более широкой половине ([pillShift]). Предел — прежняя ширина ([pillMaxW]); не влезло — название обрезается.
      */
     private fun fitFor(items: List<Item>) {
@@ -1241,8 +1243,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
         val iconW = pillH * 0.57f
         val extra = pillTime.strokePx + dp(2f)
         pillCapW = pillMaxW
-        var left = 0f
-        var right = 0f
+        var left = scrW * 0.024f + iconW + dp(2f) // значок без названия
+        var right = pillTime.paint.measureText(MIN_TIME_SAMPLE) + extra + scrW * 0.0272f // время М:СС
         for (a in items) {
             var l = scrW * 0.024f + iconW + dp(2f)
             if (a.name.isNotEmpty()) l += gapPx + pillName.paint.measureText(a.name)
