@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 18.2 (09.11)
+// Версия: 19.0 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -499,13 +499,12 @@ class InAppIsland private constructor(private val appCtx: Context) {
     }
 
     /**
-     * Занятия-кружки: только при свёрнутой капсуле — все, кроме первого (оно в капсуле). Пока карточка раскрыта (и во время её
-     * движения) кружка нет.
+     * Занятия-кружки: круглой плашки справа от капсулы больше нет — список всегда пуст ([updateDots] прячет кружок).
+     * К остальным занятиям ведёт раскрытая карточка (смахивание, ряд значков внизу).
      */
-    private fun circleItems(items: List<Item>): List<Item> {
-        if (expanded || animating) return emptyList() // пока карточка раскрыта (и движется), кружка нет: он только у свёрнутой капсулы
-        return items.drop(1)
-    }
+    @Suppress("UNUSED_PARAMETER")
+    private fun circleItems(items: List<Item>): List<Item> = emptyList()
+
 
     /**
      * Нажатие на кружок: при раскрытой карточке — переключает её на это занятие; при свёрнутой капсуле — занятие из кружка
