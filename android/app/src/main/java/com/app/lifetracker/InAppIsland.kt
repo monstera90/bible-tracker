@@ -1,26 +1,5 @@
 package com.app.lifetracker
-// Версия: 13.0 (09.11)
-// Версия: 8.8 (04.11)
-// Версия: 8.6 (22.10) — свёрнутая плашка возвращена к виду 8.0–8.2 (13sp название, 12sp время, letterSpacing 0.08, отступы 0.0087/0.0272): она точно совпадала с настоящим островом, правки 8.3 и 8.5 её испортили. Раскрытая карточка (8.3–8.5) не тронута. Откат: InAppIsland.kt 8.5.
-// Версия: 8.5 (22.10) — по замеру четырёх скриншотов (ширина 1159): название на плашке было мельче настоящего на ~14 % → 0.0350 × ширина экрана; время на плашке ниже на ~10 % и уже на ~19 % → 13.2sp, letterSpacing 0.13, tnum; время в карточке было выше на 7 % и уже на 12 % (вытянутые цифры) → размер 0.0450, letterSpacing 0.06, tnum. Откат: InAppIsland.kt 8.4.
-// Версия: 8.4 (22.10) — время в раскрытой карточке: по скриншотам оно вышло жирнее и крупнее настоящего — обводка 0.0026 → 0.0012 × ширина экрана, размер 0.0508 → 0.0483. Откат: InAppIsland.kt 8.3.
-// Версия: 8.3 (22.10) — название таймера как у настоящего острова (по записи экрана): на плашке крупнее на ~5 % (0.0307 × ширина экрана вместо 13sp), на 2,5 px правее и на ~3 px выше, время на ~6 px левее; в карточке название крупнее на ~8 % и выше на ~4 px, время выше на ~2 px. Откат: InAppIsland.kt 8.2.
-// Версия: 8.2 (22.10) — время в раскрытой карточке жирнее, как у настоящего острова Xiaomi: `cardTime` — `StrokeText` (обводка `strokePx = screenW × 0.0026`); размер прежний 0.0508 × ширина экрана (шрифт настоящего острова задаёт система, увеличить его из приложения нельзя). Откат: InAppIsland.kt 8.0.
-// Версия: 8.0 (22.10) — карточка и плашка больше не полупрозрачные. Причина: с Android 12 окно поверх всех (TYPE_APPLICATION_OVERLAY) с FLAG_NOT_TOUCHABLE система само принудительно делает непрозрачным не больше чем на 80 % (alpha ≤ 0.8). Теперь окно с картинкой ПРИНИМАЕТ нажатия (без FLAG_NOT_TOUCHABLE, alpha 1): в покое свёрнутой плашки оно ровно по плашке, на время анимации и пока карточка раскрыта — рамка всего движения (меняет размер только когда раскладка внутри неё не меняется: p=0 ↔ плашка в углу окна). Отдельные окна нажатий (touchView) убраны, кнопки «пауза»/«стоп» — обычные View-клики, нажатие мимо карточки внутри окна и ACTION_OUTSIDE сворачивают. Откат: InAppIsland.kt 7.1.
-// Версия: 7.1 (22.10) — (1) убрано проявление окна (alpha 0→1 за 140 мс): карточка на раскрытии выглядела полупрозрачной; (2) плашка больше не раскрывается сама при запуске таймера — остаётся свёрнутой, раскрывается только нажатием. Откат: InAppIsland.kt 7.0.
-// Версия: 7.0 (22.10) — дрожание на смене размера: по записи экрана на последнем кадре сворачивания плашка на один кадр прыгала к левому краю (размер/положение окна и раскладка внутри него применялись не одновременно). Теперь окно с картинкой (`layer`) одно большое и НИКОГДА не меняет размер и положение, а нажатия принимают отдельные прозрачные окна (`touchView`: под плашкой — тап раскрывает; под карточкой — кнопки «пауза»/«стоп» по координатам `pauseRect`/`stopRect`, нажатие мимо сворачивает); окно с картинкой — FLAG_NOT_TOUCHABLE. Плашка рисуется поверх карточки, поэтому её значок и текст плавно проявляются при сворачивании, а не появляются рывком. Откат: InAppIsland.kt 6.0.
-// Версия: 6.0 (22.10) — против мерцания копии острова: (1) вырез на миг пропадает при пересчёте WindowInsets (открытие приложения, прятание панелей) — раньше это сразу убирало окно и плашка пропадала и появлялась заново, теперь `setCutout(null)` ждёт 400 мс (`hideAfterCutoutLoss`); (2) тексты и кольцо паузы перерисовываются только когда изменились (раньше каждые 500 мс — лишние раскладки окна); (3) первое появление окна — короткое проявление 140 мс, а не резкое «вспыхивание». Откат: InAppIsland.kt 5.0.
-// Версия: 5.0 (21.10) — как у оригинала: (1) анимация раскрытия/сворачивания идёт по кадрам Choreographer (не зависит от выключенных анимаций системы), а окно на время анимации равно рамке всего движения — раньше оно ресайзилось покадрово с задержкой, карточка обрезалась и «прыгала»; (2) карточка не гаснет по таймеру, а сворачивается нажатием в любое место мимо неё (FLAG_WATCH_OUTSIDE_TOUCH → ACTION_OUTSIDE; касание при этом работает как обычно); таймер 6 с остался только в запасном режиме без разрешения; (3) окно раскрытой карточки начинается с её верха, а не с верха экрана — строка состояния по бокам и над карточкой снова тянет шторку. Откат: InAppIsland.kt 4.1.
-// Версия: 4.1 (21.10) — раскрытая карточка стоит ниже, как у настоящего острова под строкой состояния: отступ сверху 0.108 ширины экрана (было 0.0148), высота 0.2147, ширина 0.9286 (замер по скриншоту: верх 126, высота 247, ширина 1074 при ширине 1159). Откат: InAppIsland.kt 4.0.
-// Версия: 4.0 (21.10) — плашка живёт в собственном окне поверх всех (TYPE_APPLICATION_OVERLAY, разрешение «Поверх других приложений»), размером ровно с плашку/карточку, поэтому нажатие по ней доходит (окно строки состояния перехватывало касания к окну приложения). Без разрешения — запасной вариант в decorView (виден, но не нажимается; автораскрытие при запуске таймера остаётся); при первом показе один раз предлагается выдать разрешение. Окно убирается в onPause. Откат: InAppIsland.kt 3.1.
-// Версия: 3.1 (21.10) — плашка раскрывается сама, когда таймер только что запущен (первые 3 с), как «всплытие» настоящего острова: нажатие на саму плашку до приложения не доходит, пока видна системная строка состояния (окно SystemUI сверху перехватывает касания). Раскрытая карточка ниже строки состояния — кнопки нажимаются. Откат: InAppIsland.kt 3.0.
-// Версия: 3.0 (21.10) — раскрытие как у острова Xiaomi (по записи экрана): плашка плавно растёт в широкую карточку на месте (ширина 0.926 экрана, высота 0.213, радиус 0.082, отскок на раскрытии), содержимое проявляется после 30% пути, плашка гаснет; внутри значок, время, название, круглая кнопка паузы/«продолжить» с кольцом остатка, «Стоп», полоска внизу; нажатие мимо кнопок или 6 с — сворачивание обратно в плашку. Откат: InAppIsland.kt 2.0.
-// Версия: 2.0 (21.10) — жирное время рисуется обводкой (`StrokeText`): HyperOS игнорирует жирное начертание у системного шрифта, цифры выходили тонкими. Время 12sp + обводка 0.0021 ширины экрана + разрядка 0.08 (шире, как у острова), правое поле 0.0272, текст на ~1,5 px выше (плашка 0.0077 сверху, высота 0.0878, без верхнего отступа). Откат: InAppIsland.kt 1.4.
-// Версия: 1.4 (21.10) — вторая сверка со скриншотом: время сдвинуто влево на 11 px (правое поле 0.0335 ширины), начертание не через вес (HyperOS его игнорировал): время — sans-serif BOLD, название — sans-serif-medium; значок 0.57 высоты и на пиксель ниже, плашка на пиксель ниже. Откат: InAppIsland.kt 1.3.
-// Версия: 1.3 (21.10) — сверка со скриншотом острова: время 13sp жирное (высота цифр 32 px вместо 37), название обычным начертанием (вес 400), правая часть по размеру времени, название получает всё остальное место и не обрезается; плашка выше на 3 px, шире на 2 px. Откат: InAppIsland.kt 1.2.
-// Версия: 1.2 (21.10) — подгонка по скриншотам настоящего острова и плашки: ширина 0.41, отступ сверху 0.007, боковые поля 0.024, значок 0.58 высоты, зазор до названия 0.0104 ширины экрана, время — обычное начертание (у острова не жирное). Откат: InAppIsland.kt 1.1.
-// Версия: 1.1 (21.10) — размеры плашки считаются от ширины экрана (по замеру настоящего острова Poco X6 Pro: ширина 0.43, высота 0.086, отступ сверху 0.011 ширины экрана), а не от рамки выреза: система отдаёт рамку размером со всю строку состояния, плашка выходила огромной. Откат: InAppIsland.kt 1.0.
-// Версия: 1.0 (21.10) — плашка таймера внутри приложения, пока оно на экране: чёрная «таблетка» вокруг выреза камеры (как свёрнутый остров Xiaomi) со значком, названием слева и временем справа; нажатие раскрывает карточку с большим значком, временем и кнопкой «Стоп». Без выреза сверху (поворот, телефон без выреза) плашки нет.
+// Версия: 14.0 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -57,6 +36,34 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+
+// Виды занятий на плашке; порядок — приоритет (раньше — левее на плашке и главнее).
+private const val K_POMO = 0
+private const val K_TIMER = 1
+private const val K_SW = 2
+private const val K_MUSIC = 3
+private const val K_VIDEO = 4
+
+/** Одно занятие на плашке: всё, что нужно нарисовать свёрнутую капсулу, кружок и раскрытую карточку. */
+private class Item(val key: String, val kind: Int) {
+    var iconKey = "" // меняется, когда значок надо перерисовать
+    var iconFn: (Int) -> Bitmap = { XiaomiIsland.iconBitmap(0, it) }
+    var time = "" // справа на плашке (пусто — только значок)
+    var samples: List<String> = emptyList() // образцы ширины времени (цифры — «8»)
+    var name = "" // название слева на плашке одного занятия (пусто — без названия)
+    var big = "" // главная строка раскрытой карточки
+    var sub = "" // вторая строка
+    var btnKey = ""
+    var btnFn: (() -> Bitmap)? = null
+    var onToggle: (() -> Unit)? = null
+    var onStop: (() -> Unit)? = null
+
+    /** Раскрывается в карточку; помодоро (нажатие — вкладка) и секундомер (нажатие — пауза) — нет. */
+    val expandable: Boolean get() = kind == K_TIMER || kind == K_MUSIC || kind == K_VIDEO
+}
 
 class InAppIsland private constructor(private val appCtx: Context) {
 
@@ -129,7 +136,10 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private val pill = LinearLayout(appCtx)
     private val pillIcon = ImageView(appCtx)
     private val pillName = TextView(appCtx)
-    private val pillTime = StrokeText(appCtx)
+    private val pillTimeA = StrokeText(appCtx) // два и больше занятий: время первого — рядом со значком, слева от камеры
+    private val pillIconB = ImageView(appCtx) // два и больше занятий: значок второго — справа от камеры, перед его временем
+    private val pillTime = StrokeText(appCtx) // одно занятие — его время; два и больше — время второго
+    private val dot = ImageView(appCtx) // третье занятие: кружок справа от плашки, своё окно (только с разрешением «Поверх других приложений»)
     private val card = FrameLayout(appCtx)
     private val cardContent = FrameLayout(appCtx)
     private val cardIcon = ImageView(appCtx)
@@ -137,6 +147,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private val cardName = TextView(appCtx)
     private val pauseBtn = ImageView(appCtx)
     private val stopBtn = ImageView(appCtx)
+    private val strip = LinearLayout(appCtx) // карточка с двумя и больше занятиями: ряд значков для переключения
+    private val cardBar = View(appCtx) // полоска внизу карточки (при одном занятии с карточкой)
     private val cardBg = GradientDrawable().apply { setColor(Color.BLACK) }
 
     // геометрия плашки и карточки (px), считается в layoutFor
@@ -169,25 +181,33 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private var started = false
     private var expanded = false
     private var expandedAt = 0L
-    private var currentId: String? = null
-    private var shownStage = -1
     private var builtFor: Rect? = null
-    private var paused = false
-    private var autoShownFor: String? = null
-    private var shownClock: String? = null
-    private var shownTitle: String? = null
-    private var shownCardName: String? = null
-    private var shownPauseKey: String? = null
     private var scrW = 0
-    private var pomoMode = false // плашка показывает помодоро (точка фазы и время), а не таймер карточки
-    private var shownPomoKey: String? = null
-    private var musicMode = false // плашка показывает плеер (значок ноты, название, номер трека): нажатие — пауза/продолжить; только пока приложение на экране
-    private var shownMuTitle: String? = null
-    private var shownMuSub: String? = null
-    private var textMaxW = 0 // предельная ширина текста раскрытой карточки музыки (левее кнопок)
-    private var swMode = false // плашка показывает секундомер (значок и время): нажатие — пауза/продолжить, долгое — сброс
+    private var textMaxW = 0 // предельная ширина текста раскрытой карточки музыки/видео (левее кнопок)
+    private var pillCapW = 0 // предельная ширина плашки сейчас: одно занятие — pillMaxW, два и больше — multiMaxW
+    private var multiMaxW = 0
+    private var gapPx = 0 // зазор между значком и временем/названием
+
+    private var curItems: List<Item> = emptyList() // занятия последнего обновления, по приоритету
+    private var selKey: String? = null // чьё занятие показано в раскрытой карточке
+    private val shownIc = arrayOfNulls<String>(2) // что сейчас нарисовано в значках плашки (A, B) — перерисовка только при изменении
+    private val shownTxt = arrayOfNulls<String>(3) // тексты плашки (название/время A/время B)
+    private var iconBGap = -1
+    private var shownDotKey: String? = null
+    private var dotLp: WindowManager.LayoutParams? = null
+    private var dotAttached = false
+    private var dotItemKey: String? = null
+    private var shownCardIcon: String? = null
+    private var shownCardBig: String? = null
+    private var shownCardSub: String? = null
+    private var shownCardBtn: String? = null
+    private var shownStrip: String? = null
+    private var cardMusicStyle: Boolean? = null
+    private var tapItem: Item? = null // чьё место нажато (в плашке с двумя занятиями — левая или правая половина)
+    private var swipeX = 0f
+    private var swipeY = 0f
     private val swStopTask = Runnable {
-        if (tapArmed && swMode) {
+        if (tapArmed && tapItem?.kind == K_SW) {
             tapArmed = false
             val ctx = appCtx
             StopwatchTimer.stop(ctx)
@@ -217,18 +237,41 @@ class InAppIsland private constructor(private val appCtx: Context) {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
-        pillTime.apply {
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-            typeface = Typeface.DEFAULT
-            letterSpacing = 0.08f
-            maxLines = 1
+        for (t in listOf(pillTime, pillTimeA)) {
+            t.setTextColor(Color.WHITE)
+            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            t.typeface = Typeface.DEFAULT
+            t.letterSpacing = 0.08f
+            t.maxLines = 1
+        }
+        pillTimeA.visibility = View.GONE
+        pillIconB.visibility = View.GONE
+        dot.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK) }
+        dot.scaleType = ImageView.ScaleType.FIT_CENTER
+        dot.setOnClickListener {
+            val k = dotItemKey
+            curItems.firstOrNull { it.key == k }?.let { activate(it) }
         }
 
         card.visibility = View.GONE
         card.background = cardBg
         card.isClickable = true // не пропускает нажатия на страницу под карточкой; нажатие мимо кнопок сворачивает
         card.setOnClickListener { } // касание карточки (мимо кнопок) ничего не делает; сворачивает нажатие мимо неё
+        // Смахивание по карточке влево/вправо — переключение между занятиями (кнопки и значки внизу получают нажатия сами).
+        card.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    swipeX = e.x
+                    swipeY = e.y
+                }
+                MotionEvent.ACTION_UP -> {
+                    val dx = e.x - swipeX
+                    val dy = e.y - swipeY
+                    if (expanded && !animating && abs(dx) > scrW * 0.1f && abs(dx) > abs(dy) * 1.5f) stepCard(if (dx < 0) 1 else -1)
+                }
+            }
+            false
+        }
         cardTime.apply {
             setTextColor(Color.WHITE)
             maxLines = 1
@@ -243,6 +286,10 @@ class InAppIsland private constructor(private val appCtx: Context) {
             setImageBitmap(XiaomiIsland.crossBitmap())
             setOnClickListener { onStopClick() }
         }
+        strip.orientation = LinearLayout.HORIZONTAL
+        strip.gravity = Gravity.CENTER
+        strip.visibility = View.GONE
+        cardBar.background = GradientDrawable().apply { setColor(0xFF3A3A3A.toInt()) }
         card.addView(cardContent)
         layer.addView(card)
         layer.addView(pill) // плашка выше карточки: её значок и текст проявляются/гаснут поверх, а не появляются рывком
@@ -404,6 +451,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
     }
 
     private fun detach() {
+        detachDot()
         if (!attached) return
         try {
             if (mode == 2) wm().removeViewImmediate(layer) else (layer.parent as? ViewGroup)?.removeView(layer)
@@ -411,6 +459,80 @@ class InAppIsland private constructor(private val appCtx: Context) {
         }
         attached = false
         mode = 0
+    }
+
+    private fun detachDot() {
+        if (!dotAttached) return
+        try {
+            wm().removeViewImmediate(dot)
+        } catch (e: Exception) {
+        }
+        dotAttached = false
+        shownDotKey = null
+    }
+
+    /**
+     * Третье занятие — кружок справа от плашки, в своём маленьком окне (одно окно с плашкой пришлось бы делать симметричным
+     * и закрывало бы строку состояния слева). Только пока окно поверх всех есть, плашка свёрнута и покоится; иначе кружка нет.
+     */
+    private fun updateDot(items: List<Item>) {
+        val third = items.getOrNull(2)
+        if (third == null || mode != 2 || !attached || expanded || animating || pillH <= 0) {
+            detachDot()
+            return
+        }
+        val extra = items.size - 3
+        val key = third.key + "|" + third.iconKey + "|" + extra
+        if (key != shownDotKey) {
+            shownDotKey = key
+            var bmp = third.iconFn(96)
+            if (extra > 0) bmp = withBadge(bmp, extra)
+            dot.setImageBitmap(bmp)
+        }
+        dotItemKey = third.key
+        val x = pillW / 2 + dp(6f) + pillH / 2
+        val lp = dotLp
+        if (!dotAttached || lp == null) {
+            val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            val wl = WindowManager.LayoutParams(pillH, pillH, windowType(), flags, PixelFormat.TRANSLUCENT)
+            wl.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            wl.x = x
+            wl.y = winY
+            if (Build.VERSION.SDK_INT >= 28) wl.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            dotLp = wl
+            try {
+                wm().addView(dot, wl)
+                dotAttached = true
+            } catch (e: Exception) {
+                dotAttached = false
+            }
+        } else if (lp.x != x || lp.width != pillH || lp.y != winY) {
+            lp.x = x
+            lp.width = pillH
+            lp.height = pillH
+            lp.y = winY
+            try {
+                wm().updateViewLayout(dot, lp)
+            } catch (e: Exception) {
+            }
+        }
+    }
+
+    /** Значок с белым кружком «+N» в углу: занятий больше трёх, не поместившиеся видны в раскрытой карточке. */
+    private fun withBadge(src: Bitmap, extra: Int): Bitmap {
+        val out = src.copy(Bitmap.Config.ARGB_8888, true)
+        val c = Canvas(out)
+        val s = out.width.toFloat()
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        p.color = Color.WHITE
+        c.drawCircle(s * 0.78f, s * 0.78f, s * 0.26f, p)
+        p.color = Color.BLACK
+        p.typeface = Typeface.DEFAULT_BOLD
+        p.textSize = s * 0.3f
+        p.textAlign = Paint.Align.CENTER
+        c.drawText((if (extra > 9) "9+" else "+" + extra), s * 0.78f, s * 0.78f + s * 0.1f, p)
+        return out
     }
 
     private fun windowType(): Int =
@@ -445,33 +567,49 @@ class InAppIsland private constructor(private val appCtx: Context) {
         return true
     }
 
+    private fun selItem(): Item? = curItems.firstOrNull { it.key == selKey }
+
     private fun onPauseClick() {
-        if (musicMode) { // карточка плеера: пауза/играть (команда выполняется в главном потоке чуть позже — обновляем с задержкой)
-            MusicPlayer.toggle()
-            expandedAt = System.currentTimeMillis()
-            handler.postDelayed({ refresh() }, 150L)
-            return
-        }
-        val id = currentId
-        if (id != null) {
-            val ctx = appCtx
-            if (paused) CardTimers.resume(ctx, id) else CardTimers.pause(ctx, id)
-        }
+        val m = selItem() ?: return
+        m.onToggle?.invoke()
         expandedAt = System.currentTimeMillis()
+        if (m.kind != K_TIMER) handler.postDelayed({ refresh() }, 150L) // музыка и видео выполняют команду в другом потоке — обновляем чуть позже
         refresh()
     }
 
     private fun onStopClick() {
-        if (musicMode) { // карточка плеера: закрыть плеер
-            MusicPlayer.close()
-            collapse()
-            handler.postDelayed({ refresh() }, 150L)
-            return
-        }
-        val id = currentId
-        if (id != null) CardTimers.cancel(appCtx, id)
-        collapse()
+        val m = selItem() ?: return
+        m.onStop?.invoke()
+        expandedAt = System.currentTimeMillis()
+        // последнее занятие с карточкой — сворачиваем сразу; иначе карточка перейдёт на соседнее при обновлении
+        if (curItems.count { it.expandable } <= 1) collapse()
+        handler.postDelayed({ refresh() }, 150L)
         refresh()
+    }
+
+    /** Выбрать, чьё занятие показано в раскрытой карточке (значок в ряду внизу, смахивание). */
+    private fun selectCard(key: String) {
+        if (key == selKey) return
+        selKey = key
+        expandedAt = System.currentTimeMillis()
+        resetCardCache()
+        refresh()
+    }
+
+    private fun stepCard(dir: Int) {
+        val ex = curItems.filter { it.expandable }
+        if (ex.size < 2) return
+        val i = ex.indexOfFirst { it.key == selKey }.coerceAtLeast(0)
+        selectCard(ex[(i + dir + ex.size) % ex.size].key)
+    }
+
+    private fun resetCardCache() {
+        shownCardIcon = null
+        shownCardBig = null
+        shownCardSub = null
+        shownCardBtn = null
+        shownStrip = null
+        cardMusicStyle = null
     }
 
     private var askDialog: AlertDialog? = null
@@ -509,25 +647,34 @@ class InAppIsland private constructor(private val appCtx: Context) {
         card.visibility = View.GONE
         pill.alpha = 1f
         pill.visibility = View.VISIBLE
+        selKey = null
+        curItems = emptyList()
+        detachDot()
         if (mode == 2) detach() // окно поверх всех не должно оставаться и перехватывать касания
     }
 
-    private fun toggle() {
-        if (swMode) { // секундомер: пауза/продолжить
-            val ctx = appCtx
-            StopwatchTimer.togglePause(ctx)
-            StopwatchService.refresh(ctx)
-            refresh()
-            return
+    /**
+     * Нажатие на капсулу (или кружок). Таймер, музыка, видео — раскрываются в карточку именно этого занятия; помодоро —
+     * вкладка «Помодоро» (на плашке не раскрывается); секундомер — пауза/продолжить (долгое нажатие — сброс, см. [swStopTask]).
+     */
+    private fun activate(m: Item) {
+        when (m.kind) {
+            K_SW -> {
+                val ctx = appCtx
+                StopwatchTimer.togglePause(ctx)
+                StopwatchService.refresh(ctx)
+                refresh()
+            }
+            K_POMO -> {
+                val a = activity
+                if (a is MainActivity) a.openPomodoroTab() else openAppOnPomodoro()
+            }
+            else -> {
+                // состояние «раскрыта», хотя карточка давно свёрнута (прервалась анимация/пересборка окна) — считаем свёрнутой
+                if (expanded && !animating && progress <= 0.001f) expanded = false
+                if (expanded) collapse() else expand(m.key)
+            }
         }
-        if (pomoMode) { // помодоро: плашка не раскрывается, нажатие возвращает на вкладку «Помодоро»
-            val a = activity
-            if (a is MainActivity) a.openPomodoroTab() else openAppOnPomodoro()
-            return
-        }
-        // состояние «раскрыта», хотя карточка давно свёрнута (прервалась анимация/пересборка окна) — считаем свёрнутой
-        if (expanded && !animating && progress <= 0.001f) expanded = false
-        if (expanded) collapse() else expand()
     }
 
     /** Нажатие на плашку помодоро, когда приложение не на экране: выносим его вперёд сразу на вкладку «Помодоро». */
@@ -553,6 +700,15 @@ class InAppIsland private constructor(private val appCtx: Context) {
         return x >= pill.left - pad && x <= pill.right + pad && y >= pill.top - pad && y <= pill.bottom + pad
     }
 
+    /** Чьё место под пальцем: при одном занятии — оно, при двух и больше — левая половина плашки (первое) или правая (второе). */
+    private fun itemAt(x: Float): Item? {
+        val l = curItems
+        if (l.isEmpty()) return null
+        if (l.size < 2) return l[0]
+        val mid = if (pill.width > 0) pill.left + pill.width / 2f else layer.width / 2f
+        return if (x < mid) l[0] else l[1]
+    }
+
     /** Анимация не дошла до конца (кадры не пришли): доводим до конечной точки, чтобы плашка снова нажималась. */
     private fun finishStuckAnim() {
         stopAnim()
@@ -569,10 +725,12 @@ class InAppIsland private constructor(private val appCtx: Context) {
             MotionEvent.ACTION_DOWN -> {
                 if (animating && SystemClock.uptimeMillis() - animStart > animDur + 500L) finishStuckAnim()
                 tapArmed = !expanded && !animating && pill.visibility == View.VISIBLE && inPill(ev.x, ev.y)
+                tapItem = if (tapArmed) itemAt(ev.x) else null
+                if (tapItem == null) tapArmed = false
                 tapX = ev.x
                 tapY = ev.y
                 handler.removeCallbacks(swStopTask)
-                if (tapArmed && swMode) handler.postDelayed(swStopTask, 700L)
+                if (tapArmed && tapItem?.kind == K_SW) handler.postDelayed(swStopTask, 700L)
             }
             MotionEvent.ACTION_MOVE -> if (tapArmed && (abs(ev.x - tapX) > tapSlop || abs(ev.y - tapY) > tapSlop)) {
                 tapArmed = false
@@ -580,9 +738,10 @@ class InAppIsland private constructor(private val appCtx: Context) {
             }
             MotionEvent.ACTION_UP -> {
                 handler.removeCallbacks(swStopTask)
+                val m = tapItem
                 val fire = tapArmed && !expanded && !animating && inPill(ev.x, ev.y)
                 tapArmed = false
-                if (fire) toggle()
+                if (fire && m != null) activate(m)
             }
             MotionEvent.ACTION_CANCEL -> {
                 handler.removeCallbacks(swStopTask)
@@ -591,9 +750,11 @@ class InAppIsland private constructor(private val appCtx: Context) {
         }
     }
 
-    private fun expand() {
+    private fun expand(key: String) {
         if (expanded) return
         expanded = true
+        selKey = key
+        resetCardCache()
         expandedAt = System.currentTimeMillis()
         card.visibility = View.VISIBLE
         refresh()
@@ -669,233 +830,244 @@ class InAppIsland private constructor(private val appCtx: Context) {
         pill.visibility = if (pillAlpha <= 0f) View.INVISIBLE else View.VISIBLE
     }
 
+    /**
+     * Все занятия, которые сейчас можно показать, по приоритету: помодоро, таймеры карточек (по близости конца), секундомер,
+     * музыка, видео вкладки-сайта. Раньше показывалось одно, остальные молчали; теперь живут вместе (плашка из двух-трёх
+     * занятий — см. [bindCompact]). Музыка и видео вне приложения — только при выключенном системном острове.
+     */
+    private fun collectItems(): List<Item> {
+        val out = ArrayList<Item>(6)
+        val now = System.currentTimeMillis()
+        val ctx = appCtx
+        val pomo = PomodoroTimer.islandInfo(ctx)
+        if (pomo != null) {
+            val m = Item("pomo", K_POMO)
+            val color = PomodoroTimer.colorFor(pomo, now)
+            val frac = PomodoroTimer.fractionLeft(pomo)
+            val glyph = if (pomo.flash) 1 else if (!pomo.running && pomo.phase != PomodoroTimer.PH_WAIT) 2 else 0
+            m.iconKey = "" + color + "/" + (frac * 60f).toInt() + "/" + glyph
+            m.iconFn = { s -> XiaomiIsland.pomoRingBitmap(color, frac, s, glyph) }
+            m.time = PomodoroTimer.pillText(pomo)
+            m.samples = listOf(timePattern(m.time), "88:88", "+88:88", "Готово")
+            out.add(m)
+        }
+        for (inf in CardTimers.allInfos(ctx)) {
+            val m = Item("t:" + inf.id, K_TIMER)
+            val stage = XiaomiIsland.stageFor(inf.leftMs)
+            val paused = !inf.running
+            val fraction = (if (inf.totalMs > 0) inf.leftMs.toFloat() / inf.totalMs else 1f).coerceIn(0f, 1f)
+            m.iconKey = "t" + stage
+            m.iconFn = { s -> XiaomiIsland.iconBitmap(stage, s) }
+            m.time = XiaomiIsland.clockText(inf.leftMs)
+            val span = max(inf.totalMs, inf.leftMs)
+            m.samples = listOf(if (span >= 3_600_000L) "8:88:88" else if (span >= 600_000L) "88:88" else "8:88")
+            m.name = inf.title
+            m.big = m.time
+            m.sub = if (inf.running) inf.title else inf.title + " · пауза"
+            m.btnKey = "" + (fraction * 200f).roundToInt() + "/" + stage + "/" + paused
+            m.btnFn = { XiaomiIsland.pauseBitmap(fraction, stage, paused) }
+            val id = inf.id
+            m.onToggle = { if (paused) CardTimers.resume(ctx, id) else CardTimers.pause(ctx, id) }
+            m.onStop = { CardTimers.cancel(ctx, id) }
+            out.add(m)
+        }
+        val sw = StopwatchTimer.snapshot(ctx)
+        if (sw != null) {
+            val m = Item("sw", K_SW)
+            m.iconKey = "sw" + sw.running
+            m.iconFn = { s -> XiaomiIsland.stopwatchBitmap(sw.running, s) }
+            m.time = XiaomiIsland.elapsedText(sw.elapsedMs)
+            m.samples = listOf(timePattern(m.time))
+            out.add(m)
+        }
+        val outside = activity != null || !IslandSettings.systemEnabled(ctx)
+        if (MusicPlayer.active && outside) {
+            val m = Item("music", K_MUSIC)
+            val title = MusicPlayer.title
+            val counter = MusicPlayer.counterText()
+            val playing = MusicPlayer.playing
+            m.iconKey = "mu" + playing
+            m.iconFn = { s -> XiaomiIsland.musicIconBitmap(s, !playing) }
+            m.time = counter
+            m.samples = listOf(timePattern(counter))
+            m.big = if (title.isBlank()) "Музыка" else title
+            val parts = ArrayList<String>()
+            if (MusicPlayer.folderTitle.isNotBlank()) parts.add(MusicPlayer.folderTitle)
+            if (counter.isNotEmpty()) parts.add("трек " + counter.replace("/", " из "))
+            parts.add(if (playing) "играет" else "пауза")
+            m.sub = parts.joinToString(" · ")
+            m.btnKey = "mu" + playing
+            m.btnFn = { XiaomiIsland.musicButtonBitmap(if (playing) 2 else 1) }
+            m.onToggle = { MusicPlayer.toggle() }
+            m.onStop = { MusicPlayer.close() }
+            out.add(m)
+        }
+        if (SiteMedia.active && outside) {
+            val m = Item("video", K_VIDEO)
+            val playing = SiteMedia.playing
+            val title = if (SiteMedia.title.isNotEmpty()) SiteMedia.title else "Видео"
+            m.iconKey = "vi"
+            m.iconFn = { s -> XiaomiIsland.videoIconBitmap(s) }
+            m.name = title
+            m.big = title
+            val site = SiteMedia.sub
+            m.sub = (if (site.isNotBlank()) site + " · " else "") + (if (playing) "играет" else "пауза")
+            m.btnKey = "vi" + playing
+            m.btnFn = { XiaomiIsland.musicButtonBitmap(if (playing) 2 else 1) }
+            m.onToggle = { SiteMedia.listener?.onToggle() }
+            m.onStop = { SiteMedia.listener?.onClose() }
+            out.add(m)
+        }
+        return out
+    }
+
     private fun refresh() {
         val r = if (activity != null) cutout else if (isUpright()) loadCutout() else null
-        val pomo = PomodoroTimer.islandInfo(appCtx)
-        if (pomo != null && r != null) {
-            refreshPomodoro(r, pomo)
-            return
-        }
-        val cardInfo = if (pomo != null) null else CardTimers.primaryInfo(appCtx)
-        // секундомер уступает помодоро и таймеру карточки: те ждут срока, а секундомер — нет
-        val sw = if (pomo == null && cardInfo == null) StopwatchTimer.snapshot(appCtx) else null
-        if (sw != null && r != null) {
-            refreshStopwatch(r, sw)
-            return
-        }
-        // музыка — самый низкий приоритет среди занятий; без приложения на экране плашка плеера бывает только при выключенном системном острове
-        if (pomo == null && cardInfo == null && sw == null && r != null && MusicPlayer.active &&
-            (activity != null || !IslandSettings.systemEnabled(appCtx))
-        ) {
-            refreshMusic(r)
-            return
-        }
-        if (pomoMode || musicMode) leavePomodoro()
-        val info = cardInfo
-        if (info == null) autoShownFor = null
-        if (r == null || info == null) {
+        if ((activity as? MainActivity)?.isSiteFullscreen == true) { // полноэкранное видео сайта: поверх него плашка не нужна
             hide()
             return
         }
+        val items = if (r == null) emptyList() else collectItems()
+        if (r == null || items.isEmpty()) {
+            hide()
+            return
+        }
+        curItems = items
         layoutFor(r)
-        fitTimerPill(info)
+        fitFor(items)
         attach()
         if (!attached) {
             hide()
             return
         }
         askOverlayOnce()
-        currentId = info.id
-        paused = !info.running
         if (expanded && mode == 1 && System.currentTimeMillis() - expandedAt > 6000L) collapse() // без окна поверх всех «мимо» не поймать — по таймеру
-        val stage = XiaomiIsland.stageFor(info.leftMs)
-        if (stage != shownStage) {
-            shownStage = stage
-            pillIcon.setImageBitmap(XiaomiIsland.iconBitmap(stage, 96))
-            cardIcon.setImageBitmap(XiaomiIsland.iconBitmap(stage, 192))
+        bindCompact(items)
+        bindCard(items)
+        updateDot(items)
+        layer.visibility = View.VISIBLE
+    }
+
+    private fun setIcon(slot: Int, view: ImageView, m: Item) {
+        val k = m.key + "|" + m.iconKey
+        if (shownIc[slot] == k) return
+        shownIc[slot] = k
+        view.setImageBitmap(m.iconFn(96))
+    }
+
+    private fun setTxt(slot: Int, view: TextView, text: String) {
+        if (shownTxt[slot] == text) return
+        shownTxt[slot] = text
+        view.text = text
+    }
+
+    /**
+     * Свёрнутая плашка. Одно занятие — как прежде: значок и название слева от камеры, время справа. Два — капсула делится
+     * камерой: слева значок и время первого, справа значок и время второго. Три и больше — то же плюс кружок со значком
+     * третьего справа от плашки ([updateDot]; при четырёх и больше на нём «+N»).
+     */
+    private fun bindCompact(items: List<Item>) {
+        val a = items[0]
+        val multi = items.size >= 2
+        pillName.visibility = if (!multi && a.name.isNotEmpty()) View.VISIBLE else View.GONE
+        pillTimeA.visibility = if (multi) View.VISIBLE else View.GONE
+        pillIconB.visibility = if (multi) View.VISIBLE else View.GONE
+        setIcon(0, pillIcon, a)
+        if (!multi) {
+            setTxt(0, pillName, a.name)
+            setTxt(2, pillTime, a.time)
+            shownIc[1] = null
+            return
         }
-        // менять View только когда значение изменилось: каждый setText/setImageBitmap — лишняя раскладка и перерисовка окна
-        val clock = XiaomiIsland.clockText(info.leftMs)
-        if (clock != shownClock) {
-            shownClock = clock
-            pillTime.text = clock
-            cardTime.text = clock
+        val b = items[1]
+        setTxt(1, pillTimeA, a.time)
+        setIcon(1, pillIconB, b)
+        setTxt(2, pillTime, b.time)
+        val gap = if (b.time.isEmpty()) 0 else gapPx // значок второго без времени прижат к краю, как значок первого
+        if (gap != iconBGap) {
+            iconBGap = gap
+            (pillIconB.layoutParams as? LinearLayout.LayoutParams)?.let {
+                it.marginEnd = gap
+                pillIconB.layoutParams = it
+            }
         }
-        if (info.title != shownTitle) {
-            shownTitle = info.title
-            pillName.text = info.title
+        (pillTimeA.layoutParams as? LinearLayout.LayoutParams)?.let {
+            val g = if (a.time.isEmpty()) 0 else gapPx
+            if (it.marginStart != g) {
+                it.marginStart = g
+                pillTimeA.layoutParams = it
+            }
         }
-        val cardNameText = if (info.running) info.title else info.title + " · пауза"
-        if (cardNameText != shownCardName) {
-            shownCardName = cardNameText
-            cardName.text = cardNameText
+    }
+
+    /** Раскрытая карточка выбранного занятия (с карточкой: таймеры, музыка, видео); с двумя и больше — ряд значков внизу. */
+    private fun bindCard(items: List<Item>) {
+        val ex = items.filter { it.expandable }
+        val found = ex.firstOrNull { it.key == selKey }
+        val sel: Item
+        if (found != null) {
+            sel = found
+        } else if (expanded && ex.isNotEmpty()) { // выбранное занятие кончилось: карточка переходит на соседнее
+            sel = ex[0]
+            selKey = sel.key
+            resetCardCache()
+        } else {
+            if (expanded) collapse() // карточкам показывать больше нечего
+            if (!expanded) selKey = null
+            return
+        }
+        val music = sel.kind != K_TIMER
+        if (cardMusicStyle != music) {
+            cardMusicStyle = music
+            applyCardTextMode(music)
+        }
+        val ik = sel.key + "|" + sel.iconKey
+        if (ik != shownCardIcon) {
+            shownCardIcon = ik
+            cardIcon.setImageBitmap(sel.iconFn(192))
+        }
+        if (sel.big != shownCardBig) {
+            shownCardBig = sel.big
+            cardTime.text = sel.big
+        }
+        if (sel.sub != shownCardSub) {
+            shownCardSub = sel.sub
+            cardName.text = sel.sub
         }
         if (card.visibility == View.VISIBLE) {
-            val fraction = (if (info.totalMs > 0) info.leftMs.toFloat() / info.totalMs else 1f).coerceIn(0f, 1f)
-            val pauseKey = "" + (fraction * 200f).roundToInt() + "/" + stage + "/" + paused
-            if (pauseKey != shownPauseKey) {
-                shownPauseKey = pauseKey
-                pauseBtn.setImageBitmap(XiaomiIsland.pauseBitmap(fraction, stage, paused))
+            val bk = sel.key + "|" + sel.btnKey
+            if (bk != shownCardBtn) {
+                shownCardBtn = bk
+                sel.btnFn?.let { pauseBtn.setImageBitmap(it()) }
             }
         }
-        layer.visibility = View.VISIBLE
+        rebuildStrip(ex, sel.key)
     }
 
-    /**
-     * Плашка помодоро: слева кольцо-точка цвета фазы, справа остаток времени — и больше ничего (всё остальное на вкладке
-     * «Помодоро»). В последнюю минуту и на «Готово» цвет пульсирует, в паузе — приглушён и цифры не идут, после перерыва
-     * справа «+М:СС» — сколько уже пауза. Тап возвращает на вкладку (см. [toggle]); пока вкладка на экране, плашки нет.
-     */
-    private fun refreshPomodoro(r: Rect, p: PomodoroTimer.Snapshot) {
-        layoutFor(r)
-        fitPill(null, listOf(timePattern(PomodoroTimer.pillText(p)), "88:88", "+88:88", "Готово"))
-        attach()
-        if (!attached) {
-            hide()
+    private fun rebuildStrip(ex: List<Item>, current: String) {
+        val sig = ex.joinToString(",") { it.key + it.iconKey } + "|" + current
+        if (sig == shownStrip) return
+        shownStrip = sig
+        strip.removeAllViews()
+        if (ex.size < 2) {
+            strip.visibility = View.GONE
+            cardBar.visibility = View.VISIBLE
             return
         }
-        askOverlayOnce()
-        swMode = false
-        musicMode = false
-        if (!pomoMode) {
-            pomoMode = true
-            if (expanded || animating) { // таймер карточки был раскрыт: сворачиваем мгновенно
-                stopAnim()
-                expanded = false
-                applyProgress(0f)
-                card.visibility = View.GONE
-                setWindowBig(false)
-            }
-            pillName.visibility = View.GONE
-            shownPomoKey = null
-            shownClock = null
+        cardBar.visibility = View.GONE
+        strip.visibility = View.VISIBLE
+        val sd = (scrW * 0.032f).roundToInt()
+        for ((i, m) in ex.withIndex()) {
+            val iv = ImageView(appCtx)
+            iv.setImageBitmap(m.iconFn(96))
+            iv.alpha = if (m.key == current) 1f else 0.4f
+            val key = m.key
+            iv.setOnClickListener { selectCard(key) }
+            strip.addView(iv, LinearLayout.LayoutParams(sd, sd).apply { if (i > 0) marginStart = sd })
         }
-        currentId = null
-        val now = System.currentTimeMillis()
-        val color = PomodoroTimer.colorFor(p, now)
-        val frac = PomodoroTimer.fractionLeft(p)
-        val glyph = if (p.flash) 1 else if (!p.running && p.phase != PomodoroTimer.PH_WAIT) 2 else 0
-        // менять View только когда значение изменилось (лишняя раскладка окна — лишнее мигание)
-        val key = "" + color + "/" + (frac * 60f).toInt() + "/" + glyph
-        if (key != shownPomoKey) {
-            shownPomoKey = key
-            pillIcon.setImageBitmap(XiaomiIsland.pomoRingBitmap(color, frac, 96, glyph))
-        }
-        val text = PomodoroTimer.pillText(p)
-        if (text != shownClock) {
-            shownClock = text
-            pillTime.text = text
-        }
-        layer.visibility = View.VISIBLE
     }
 
-    /** Плашка секундомера: слева значок (синий — идёт, жёлтый — пауза), справа время. Нажатие — пауза/продолжить, долгое — сброс (см. [toggle], [swStopTask]). */
-    private fun refreshStopwatch(r: Rect, s: StopwatchTimer.Snapshot) {
-        layoutFor(r)
-        fitPill(null, listOf(timePattern(XiaomiIsland.elapsedText(s.elapsedMs))))
-        attach()
-        if (!attached) {
-            hide()
-            return
-        }
-        askOverlayOnce()
-        musicMode = false
-        if (!pomoMode || !swMode) {
-            pomoMode = true
-            swMode = true
-            if (expanded || animating) { // таймер карточки был раскрыт: сворачиваем мгновенно
-                stopAnim()
-                expanded = false
-                applyProgress(0f)
-                card.visibility = View.GONE
-                setWindowBig(false)
-            }
-            pillName.visibility = View.GONE
-            shownPomoKey = null
-            shownClock = null
-        }
-        currentId = null
-        val key = "sw" + s.running
-        if (key != shownPomoKey) {
-            shownPomoKey = key
-            pillIcon.setImageBitmap(XiaomiIsland.stopwatchBitmap(s.running, 96))
-        }
-        val text = XiaomiIsland.elapsedText(s.elapsedMs)
-        if (text != shownClock) {
-            shownClock = text
-            pillTime.text = text
-        }
-        layer.visibility = View.VISIBLE
-    }
-
-    /**
-     * Плашка плеера (ничего важнее не идёт): свёрнутая — значок ноты (фиолетовый — играет, жёлтый — пауза) и справа номер
-     * трека в очереди «3/12» (при одном треке пусто), без названия. Нажатие раскрывает карточку: название трека,
-     * «папка · трек N из M · состояние», кнопки пауза/играть и «закрыть».
-     */
-    private fun refreshMusic(r: Rect) {
-        val title = MusicPlayer.title
-        val counter = MusicPlayer.counterText()
-        val playing = MusicPlayer.playing
-        layoutFor(r)
-        fitPill(null, listOf(timePattern(counter)))
-        attach()
-        if (!attached) {
-            hide()
-            return
-        }
-        askOverlayOnce()
-        if (!musicMode) {
-            musicMode = true
-            pomoMode = false
-            swMode = false
-                if (expanded || animating) { // другая карточка была раскрыта: сворачиваем мгновенно
-                stopAnim()
-                expanded = false
-                applyProgress(0f)
-                card.visibility = View.GONE
-                setWindowBig(false)
-            }
-            pillName.visibility = View.GONE // название трека на свёрнутой плашке не показывается
-            shownPomoKey = null
-            shownClock = null
-            shownTitle = null
-            shownStage = -1
-            shownMuTitle = null
-            shownMuSub = null
-            shownPauseKey = null
-            applyCardTextMode(true)
-        }
-        currentId = null
-        if (expanded && mode == 1 && System.currentTimeMillis() - expandedAt > 6000L) collapse() // без окна поверх всех «мимо» не поймать — по таймеру
-        val key = "mu" + playing
-        if (key != shownPomoKey) {
-            shownPomoKey = key
-            pillIcon.setImageBitmap(XiaomiIsland.musicIconBitmap(96, !playing))
-            cardIcon.setImageBitmap(XiaomiIsland.musicIconBitmap(192, !playing))
-            pauseBtn.setImageBitmap(XiaomiIsland.musicButtonBitmap(if (playing) 2 else 1))
-        }
-        if (counter != shownClock) {
-            shownClock = counter
-            pillTime.text = counter
-        }
-        if (title != shownMuTitle) {
-            shownMuTitle = title
-            cardTime.text = if (title.isBlank()) "Музыка" else title
-        }
-        val parts = ArrayList<String>()
-        if (MusicPlayer.folderTitle.isNotBlank()) parts.add(MusicPlayer.folderTitle)
-        if (counter.isNotEmpty()) parts.add("трек " + counter.replace("/", " из "))
-        parts.add(if (playing) "играет" else "пауза")
-        val sub = parts.joinToString(" · ")
-        if (sub != shownMuSub) {
-            shownMuSub = sub
-            cardName.text = sub
-        }
-        layer.visibility = View.VISIBLE
-    }
-
-    /** Текст карточки: у музыки — название трека одной строкой, обрезается многоточием левее кнопок; у таймера — крупные цифры. */
+    /** Текст карточки: у музыки и видео — название одной строкой, обрезается многоточием левее кнопок; у таймера — крупные цифры. */
     private fun applyCardTextMode(music: Boolean) {
         cardTime.letterSpacing = if (music) 0.01f else 0.06f
         cardTime.ellipsize = if (music) TextUtils.TruncateAt.END else null
@@ -903,44 +1075,36 @@ class InAppIsland private constructor(private val appCtx: Context) {
         cardName.maxWidth = if (music && textMaxW > 0) textMaxW else Int.MAX_VALUE
     }
 
-    /** Помодоро кончилось (или показывается таймер карточки): плашка снова обычная — со значком, названием и временем. */
-    private fun leavePomodoro() {
-        pomoMode = false
-        swMode = false
-        musicMode = false
-        pillName.visibility = View.VISIBLE
-        shownPomoKey = null
-        shownStage = -1
-        shownClock = null
-        shownTitle = null
-        shownMuTitle = null
-        shownMuSub = null
-        shownPauseKey = null
-        shownCardName = null
-        applyCardTextMode(false)
-    }
-
     /** Цифры заменяются «8» (самая широкая): ширина плашки считается по образцу и не прыгает на каждой смене цифры. */
     private fun timePattern(text: String): String = text.replace(Regex("[0-9]"), "8")
 
-    /** Таймер карточки: название слева от камеры, время справа; ширина времени — по длине, какой оно достигнет за весь таймер. */
-    private fun fitTimerPill(info: CardTimers.Info) {
-        val span = max(info.totalMs, info.leftMs)
-        val sample = if (span >= 3_600_000L) "8:88:88" else if (span >= 600_000L) "88:88" else "8:88"
-        fitPill(info.title, listOf(sample))
-    }
-
     /**
-     * Подгоняет ширину плашки под содержимое: значок (и название, если есть) слева, самое широкое из образцов времени
-     * справа, середина под камеру. Больше прежней ширины плашка не бывает — длинное название обрезается многоточием.
+     * Подгоняет ширину плашки под содержимое. Одно занятие: значок (и название, если есть) слева, самое широкое из образцов
+     * времени справа. Два и больше: слева значок и время первого, справа значок и время второго — обе половины равны,
+     * середина под камеру. Предел: одно занятие — прежняя ширина, два и больше — шире ([multiMaxW]).
      */
-    private fun fitPill(name: String?, timeSamples: List<String>) {
+    private fun fitFor(items: List<Item>) {
         if (pillMaxW <= 0 || scrW <= 0) return
-        var left = scrW * 0.024f + pillH * 0.57f
-        if (name != null) left += scrW * 0.0087f + pillName.paint.measureText(name) + dp(2f)
-        var timeW = 0f
-        for (t in timeSamples) timeW = max(timeW, pillTime.paint.measureText(t))
-        val right = timeW + pillTime.strokePx + dp(2f) + scrW * 0.0272f
+        val iconW = pillH * 0.57f
+        val extra = pillTime.strokePx + dp(2f)
+        if (items.size == 1) {
+            pillCapW = pillMaxW
+            val a = items[0]
+            var left = scrW * 0.024f + iconW
+            if (a.name.isNotEmpty()) left += gapPx + pillName.paint.measureText(a.name) + dp(2f)
+            var timeW = 0f
+            for (t in a.samples) timeW = max(timeW, pillTime.paint.measureText(t))
+            val right = timeW + extra + scrW * 0.0272f
+            setPillWidth((camGap + 2f * max(left, right)).roundToInt())
+            return
+        }
+        pillCapW = multiMaxW
+        var wa = 0f
+        for (t in items[0].samples) wa = max(wa, pillTime.paint.measureText(t))
+        var wb = 0f
+        for (t in items[1].samples) wb = max(wb, pillTime.paint.measureText(t))
+        val left = scrW * 0.024f + iconW + (if (wa > 0f) gapPx + wa + extra else 0f)
+        val right = scrW * 0.0272f + iconW + (if (wb > 0f) gapPx + wb + extra else 0f)
         setPillWidth((camGap + 2f * max(left, right)).roundToInt())
     }
 
@@ -949,7 +1113,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
      * внутри него в это время не двигаются, иначе «дрожание»; отложенное применится при следующем обновлении.
      */
     private fun setPillWidth(want: Int) {
-        val w = want.coerceIn(min(camGap + 2 * dp(8f), pillMaxW), pillMaxW)
+        val cap = max(pillCapW, 1)
+        val w = want.coerceIn(min(camGap + 2 * dp(8f), cap), cap)
         if (w == pillW || expanded || animating) return
         pillW = w
         pillLeft = centerX - w / 2
@@ -976,12 +1141,15 @@ class InAppIsland private constructor(private val appCtx: Context) {
         val left = r.centerX() - w / 2
 
         // дети переезжают в новые контейнеры: сначала отцепляем от старых (иначе addView бросает исключение)
-        for (v in listOf<View>(pillIcon, pillName, pillTime)) (v.parent as? ViewGroup)?.removeView(v)
+        for (v in listOf<View>(pillIcon, pillName, pillTimeA, pillIconB, pillTime)) (v.parent as? ViewGroup)?.removeView(v)
         pill.removeAllViews()
         pill.background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = h / 2f }
         val side = (screenW * 0.024f).roundToInt()
         pill.setPadding(0, 0, 0, 0)
         pillTime.strokePx = screenW * 0.0021f
+        pillTimeA.strokePx = pillTime.strokePx
+        gapPx = (screenW * 0.0087f).roundToInt()
+        iconBGap = -1
         val iconSize = (h * 0.57f).roundToInt()
         camGap = (screenW * 0.075f).roundToInt()
         // Левая и правая половины равны, чёрная середина — под камеру: плашка остаётся симметричной вокруг выреза,
@@ -991,12 +1159,14 @@ class InAppIsland private constructor(private val appCtx: Context) {
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             setPadding(side, 0, 0, 0)
             addView(pillIcon, LinearLayout.LayoutParams(iconSize, iconSize))
-            addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = (screenW * 0.0087f).roundToInt() })
+            addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = gapPx })
+            addView(pillTimeA, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = gapPx })
         }
         pillTime.setPadding(0, 0, 0, 0)
         val rightBox = LinearLayout(appCtx).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
             setPadding(0, 0, (screenW * 0.0272f).roundToInt(), 0)
+            addView(pillIconB, LinearLayout.LayoutParams(iconSize, iconSize).apply { marginEnd = gapPx })
             addView(pillTime)
         }
         pill.addView(leftBox, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
@@ -1008,6 +1178,10 @@ class InAppIsland private constructor(private val appCtx: Context) {
         pillTop = top
         pillW = w
         pillMaxW = w
+        pillCapW = w
+        multiMaxW = max(w, (screenW * 0.56f).roundToInt()) // плашка из двух и больше занятий шире одиночной
+        val dotPad = (h * 0.16f).roundToInt()
+        dot.setPadding(dotPad, dotPad, dotPad, dotPad)
         pillH = h
         centerX = r.centerX()
 
@@ -1025,7 +1199,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         winW = (cardW * 1.12f).roundToInt()
         winY = pillTop
         winH = (cardTop + cardH * 1.12f).roundToInt() - pillTop
-        for (v in listOf<View>(cardIcon, cardTime, cardName, pauseBtn, stopBtn)) (v.parent as? ViewGroup)?.removeView(v)
+        for (v in listOf<View>(cardIcon, cardTime, cardName, pauseBtn, stopBtn, cardBar, strip)) (v.parent as? ViewGroup)?.removeView(v)
         cardContent.removeAllViews()
         cardTime.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0450f) // высота цифр как у настоящего (замер: 40 px при 1159; было 0.0483 — выше на 7 %)
         cardTime.letterSpacing = 0.06f // цифры у настоящего шире (125 px против 112 у копии)
@@ -1035,7 +1209,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         cardTime.translationY = -screenW * 0.0017f
         cardName.translationY = -screenW * 0.0034f
         textMaxW = (cardW - screenW * 0.2f - (edge + 2 * btn + gap) - screenW * 0.02f).roundToInt() // текст карточки музыки не заходит под кнопки
-        applyCardTextMode(musicMode)
+        applyCardTextMode(cardMusicStyle == true)
         val texts = LinearLayout(appCtx).apply {
             orientation = LinearLayout.VERTICAL
             addView(cardTime)
@@ -1048,11 +1222,17 @@ class InAppIsland private constructor(private val appCtx: Context) {
         })
         cardContent.addView(pauseBtn, FrameLayout.LayoutParams(btn, btn).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; marginEnd = edge + btn + gap })
         cardContent.addView(stopBtn, FrameLayout.LayoutParams(btn, btn).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; marginEnd = edge })
-        val bar = View(appCtx).apply { background = GradientDrawable().apply { setColor(0xFF3A3A3A.toInt()); cornerRadius = screenW * 0.004f } }
-        cardContent.addView(bar, FrameLayout.LayoutParams((screenW * 0.152f).roundToInt(), (screenW * 0.008f).roundToInt()).apply {
+        (cardBar.background as? GradientDrawable)?.cornerRadius = screenW * 0.004f
+        cardContent.addView(cardBar, FrameLayout.LayoutParams((screenW * 0.152f).roundToInt(), (screenW * 0.008f).roundToInt()).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             bottomMargin = (screenW * 0.008f).roundToInt()
         })
+        // ряд значков для переключения между занятиями (при двух и больше карточках) — вместо полоски
+        cardContent.addView(strip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (screenW * 0.032f).roundToInt()).apply {
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            bottomMargin = (screenW * 0.005f).roundToInt()
+        })
+        shownStrip = null
         card.removeView(cardContent)
         card.addView(cardContent, FrameLayout.LayoutParams(cardW, cardH).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL })
         card.layoutParams = FrameLayout.LayoutParams(w, h)
@@ -1072,3 +1252,4 @@ class StrokeText(context: android.content.Context) : TextView(context) {
         super.onDraw(canvas)
     }
 }
+

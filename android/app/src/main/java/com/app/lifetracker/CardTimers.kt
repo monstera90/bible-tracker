@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.7 (09.11)
+// Версия: 8.0 (09.11)
 // Версия: 5.7 (24.10) — скрытый таймер (`Timer.hidden`, `start(..., hidden)`): идёт и срабатывает как обычный, но без уведомления «идёт», острова, плашки в приложении, службы тика и этапов цвета; в конце — обычные вибрация и «Таймер закончился»; `listJson` отдаёт `hidden`. Откат: CardTimers.kt 5.6.
 // Версия: 5.6 (24.10) — этапы цвета значка: остался один, красный за 2 минуты до конца (`scheduleStages`); жёлтый убран, но его будильник от прежней версии снимается (`LEGACY_STAGE_YELLOW`). Откат: CardTimers.kt 5.5.
 // Версия: 5.5 (22.10) — эксперимент с чёрным фоном уведомления (`setColorized`) откачен: HyperOS не меняет цвет карточки. Прежнее: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
@@ -430,6 +430,19 @@ object CardTimers {
         if (run != null) return@synchronized Info(run.id, titleOf(run), true, run.endAt - now, run.durationMs)
         val p = all.firstOrNull { !it.running } ?: return@synchronized null
         Info(p.id, titleOf(p), false, p.remainingMs, p.durationMs)
+    }
+
+    /**
+     * Все таймеры для плашки в приложении: идущие по близости конца, затем приостановленные. Скрытые и смахнутые, как в
+     * [primaryInfo], не входят. Плашка показывает до трёх занятий сразу (несколько таймеров — каждый отдельно).
+     */
+    fun allInfos(ctx: Context): List<Info> = synchronized(LOCK) {
+        val now = System.currentTimeMillis()
+        val all = load(ctx).values.filter { !it.hidden && !it.dismissed }
+        val running = all.filter { it.running && it.endAt > now }.sortedBy { it.endAt }
+            .map { Info(it.id, titleOf(it), true, it.endAt - now, it.durationMs) }
+        val paused = all.filter { !it.running }.map { Info(it.id, titleOf(it), false, it.remainingMs, it.durationMs) }
+        running + paused
     }
 
     /**

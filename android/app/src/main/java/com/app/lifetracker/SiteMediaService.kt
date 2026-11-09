@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.2 (03.11)
+// Версия: 1.3 (09.11)
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -55,6 +55,7 @@ object SiteMedia {
         active = true
         floatPending = true
         SiteMediaService.refresh(ctx.applicationContext)
+        InAppIsland.ensureBackground(ctx.applicationContext) // системный остров выключен: плашка видео висит и при свёрнутом приложении
     }
 
     /** Название или состояние изменились — уведомление перестраивается (тихо, без раскрытия острова). */
@@ -65,6 +66,7 @@ object SiteMedia {
         this.sub = sub
         this.playing = playing
         SiteMediaService.refresh(ctx.applicationContext)
+        InAppIsland.ensureBackground(ctx.applicationContext)
     }
 
     fun end(ctx: Context) {
@@ -92,6 +94,7 @@ object SiteMedia {
             floatPending = true
         }
         SiteMediaService.refresh(ctx.applicationContext)
+        InAppIsland.ensureBackground(ctx.applicationContext)
     }
 }
 
