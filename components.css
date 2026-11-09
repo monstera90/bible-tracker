@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 24.8 (07.11)
+   Версия: 25.0 (10.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4869,6 +4869,22 @@ body::after{
 .cal-field{ display:flex; flex-direction:column; gap:4px; }
 .cal-dt{ display:flex; gap:8px; }
 .cal-dt .mdeditor-cleanup-input{ flex:1 1 0; min-width:0; margin-bottom:0; }
+
+/* ---------- колонка дня в ежедневной заметке (calendar.js mountDayColumn, mdeditor.js mountDayCalendar) ----------
+   Колонка — float:right В НАЧАЛЕ .mdeditor-editor-host, поэтому текст заметки обтекает её, а ниже её конца идёт во всю ширину. Чтобы строки CodeMirror
+   видели float, .cm-editor и .cm-scroller с этого момента обычные блоки (у CodeMirror они flex !important — каждый такой flex-контейнер был бы отдельным
+   блочным контекстом и обтекания не получил бы); без класса .daycal-on редактор не меняется. Ширина фиксирована в px (--daycal-w, ≈ день недели на
+   телефоне) и не зависит от ширины экрана; margin-right:-8px выводит её на правый край окна (у .mdeditor-tab боковые поля по 8px). z-index 2: выше
+   .cm-scroller (z-index:0, иначе он перехватывал бы нажатия) и ниже нижнего ряда кнопок (.mdeditor-fab-row, z-index 5). Конец колонки вмещает
+   .cm-content::after{clear:both}, а зазор под нижний ряд кнопок даёт padding-bottom у .cm-content. */
+.mdeditor-editor-host.daycal-on .cm-editor{ display:block !important; }
+.mdeditor-editor-host.daycal-on .cm-scroller{ display:block !important; }
+.cal-daycol{ float:right; width:var(--daycal-w, 52px); margin:0 -8px 0 8px; position:relative; z-index:2; box-sizing:border-box; touch-action:pan-y; font-family:"Palatino Linotype",Georgia,serif; color:var(--ink); -webkit-user-select:none; user-select:none; }
+.cal-daycol .cal-dc-body{ position:relative; width:100%; background-image:linear-gradient(to bottom, rgba(0,0,0,.14) 1px, transparent 1px); }
+.cal-daycol .cal-dc-labels span{ position:absolute; left:3px; font-size:8px; line-height:10px; color:var(--ink-soft, var(--ink)); opacity:.75; pointer-events:none; font-variant-numeric:tabular-nums; }
+.cal-daycol .cal-wk-col{ position:absolute; left:0; right:0; top:0; bottom:0; }
+/* форма мероприятия поверх заметки (calendar.js extForm): слой на всё окно настроек, выше нижнего ряда кнопок заметки */
+.cal-dayform{ position:absolute; left:0; right:0; top:0; bottom:0; z-index:20; background:var(--parchment); overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch; font-family:"Palatino Linotype",Georgia,serif; color:var(--ink); }
 
 /* ---------- вкладка «Прогресс» (set2s_12): панель прогресс-баров и счётчиков, раньше стоявшая в шапке ---------- */
 .progress-panel{

@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 20.0 (09.11)
+   Версия: 21.0 (10.11)
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
@@ -5707,7 +5707,27 @@ window.initMdEditorModule = function(deps){
     noteInfoOpen = false; // экран «i» при уходе на другую вкладку не запоминается
   }
 
+  // Календарь на сегодня в ежедневной заметке (заметка с именем сегодняшней даты `дд.мм.гггг`): плавающая колонка справа, текст её обтекает
+  // (calendar.js `mountDayColumn`, стили `.cal-daycol`/`.daycal-on` в components.css). Колонка живёт, пока жив host редактора.
+  var dayCal = null;
+  function isTodayDailyNote(){ return !!(openFile && String(openFile.name || "") === todayRu()); }
+  function unmountDayCalendar(){
+    if(dayCal){ try{ dayCal.destroy(); }catch(e){} dayCal = null; }
+  }
+  function mountDayCalendar(host){
+    unmountDayCalendar();
+    if(!host || !isTodayDailyNote()) return;
+    var CT = window.CalendarTab;
+    if(!CT || !CT.mountDayColumn) return;
+    try{
+      // форма мероприятия открывается слоем поверх заметки: правки текста перед этим сохраняем
+      dayCal = CT.mountDayColumn(host, { day: Date.now(), beforeForm: function(){ flushAutosaveNow(); } });
+    }catch(e){ dayCal = null; }
+    if(dayCal && cmView) cmView.requestMeasure(); // редактор стал обтекать колонку — перемерить строки
+  }
+
   function destroyEditor(){
+    unmountDayCalendar();
     if(cmView){ cmView.destroy(); cmView = null; }
     if(mdEditorImageResizeObserver){ mdEditorImageResizeObserver.disconnect(); mdEditorImageResizeObserver = null; }
     if(linksDebounceTimer){ clearTimeout(linksDebounceTimer); linksDebounceTimer = null; }
@@ -6428,6 +6448,7 @@ window.initMdEditorModule = function(deps){
         var state = EditorState.create({ doc: openFile.text, selection: { anchor: initialPos }, extensions: extensions });
         cmView = new EditorView({ state: state, parent: host });
         bindNoteHoldMarker(cmView); // маркер по удержанию в режиме чтения (14.10)
+        mountDayCalendar(host); // ежедневная заметка: календарь на сегодня справа
         // Ширина редактора может измениться не только от ввода текста
         // (что и так пересчитывает decorations) — поворот планшета,
         // изменение ширины окна настроек (layoutSettingsModal в my.js) и

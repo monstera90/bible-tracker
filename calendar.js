@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 16.3 (09.11)
+   Версия: 17.0 (10.11)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самостоятельный нижний язычок набора 1 справа от «Задачи»,
@@ -63,6 +63,13 @@
    месяца (31-е → 30-е/28-е), как у напоминаний карточек. Длительность повторения = end − start.
    Список показывает только предстоящее: с начала сегодняшнего дня и LIST_AHEAD_DAYS вперёд, прошедшие дни не показываются.
    Список и неделя независимы: выбранная в неделе дата на список не влияет.
+   Колонка дня в ежедневной заметке: `CalendarTab.mountDayColumn(host, {day, beforeForm})` (зовёт mdeditor.js `mountDayCalendar`) кладёт в начало
+   `host` плавающую колонку `.cal-daycol` (float:right, ширина = одного дня недели на телефоне, `--daycal-w`, у правого края окна) с одним днём
+   (`dayColHtml`, `weekSegments(day, 1)`): те же блоки, трекеры, красная линия, цвета, скрытые; тап по блоку — форма, тап по пустому месту — новое
+   мероприятие на этот час, щипок по вертикали — масштаб (общий `calendarHourPx_v1`); подписи часов лежат внутри колонки. Форма открывается ПОВЕРХ заметки
+   (`extForm`: `.cal-dayform` в `.settings-modal-box`, `container()` отдаёт её, `renderMain` при открытой форме её закрывает и возвращает `screen`),
+   заметка и редактор не перерисовываются. Колонка сама перерисовывается при изменении данных (раз в 30 с и из `tick`), сама снимается, если host ушёл из DOM.
+   Хранилище для неё подготавливает my.js: `window.__ltEnsureCalendarStore`.
    =========================================================================== */
 (function(){
   "use strict";
@@ -125,11 +132,13 @@
   var WEEK_SLIDE_MS = 260;   // длительность доезжания недели при перелистывании
   var hourPx = HOUR_DEFAULT; // текущая высота часа в неделе
   var pinchEndedAt = 0;      // когда закончился щипок (тап сразу после него игнорируется)
+  var extForm = null;  // форма, открытая ПОВЕРХ ежедневной заметки: {el, prevScreen, owner, onClose}; пока она есть, container() отдаёт её
+  var dayCols = [];    // живые колонки дня в заметках: [{tick, destroy, refresh}]
   var expanded = {};   // id серий, раскрытых в списке
   var tapTimer = null; // отложенный одиночный тап по строке серии
 
   // ---------- вспомогательное ----------
-  function container(){ return document.getElementById("settingsTabContent"); }
+  function container(){ return extForm ? extForm.el : document.getElementById("settingsTabContent"); }
   function pad2(n){ return (n < 10 ? "0" : "") + n; }
   function esc(s){
     return String(s == null ? "" : s).replace(/[&<>"']/g, function(ch){
@@ -286,10 +295,12 @@
   }
   function trackerText(t){ return t.label + " · " + timeRange(t.start, t.end - t.start) + (t.sub ? " · " + t.sub : ""); }
   // куски трекеров недели по дням (как weekSegments): [день 0..6] → [{top, bottom, t}]
-  function weekTrackerSegments(ws){
-    var days = [[], [], [], [], [], [], []];
-    trackerItems(ws, dayStartAt(ws, 7)).forEach(function(t){
-      for(var i = 0; i < 7; i++){
+  function weekTrackerSegments(ws, n){
+    n = n || 7;
+    var days = [];
+    for(var di = 0; di < n; di++) days.push([]);
+    trackerItems(ws, dayStartAt(ws, n)).forEach(function(t){
+      for(var i = 0; i < n; i++){
         var ds = dayStartAt(ws, i), de = dayStartAt(ws, i + 1);
         if(t.end <= ds || t.start >= de) continue;
         var top = t.start > ds ? minutesOfDay(t.start) : 0;
@@ -530,6 +541,7 @@
   // за этим следит MutationObserver на #settingsTabContent (без :has — он есть не везде).
   var flushObserver = null;
   function syncFlush(){
+    if(extForm) return; // форма поверх заметки: окно календаря не трогаем
     var c = container();
     if(!c) return;
     var box = c.parentNode;
@@ -593,7 +605,10 @@
       renderMain();
     });
   }
-  function renderMain(){ if(mode === "week") renderWeek(); else renderList(); }
+  function renderMain(){
+    if(extForm){ closeExtForm(); return; } // форма была открыта поверх заметки: выход из неё — обратно в заметку
+    if(mode === "week") renderWeek(); else renderList();
+  }
 
   // ---------- экран «Неделя» ----------
   function mondayOf(ts){
@@ -612,15 +627,17 @@
     return a.getDate() + "–" + b.getDate() + " " + MONTHS_SHORT[a.getMonth()] + " " + b.getFullYear();
   }
   // куски событий недели по дням: [день 0..6] → [{top,bottom (минуты), ev, at, dur}]
-  function weekSegments(ws){
-    var days = [[], [], [], [], [], [], []];
-    var weekEnd = dayStartAt(ws, 7);
+  function weekSegments(ws, n){
+    n = n || 7;
+    var days = [];
+    for(var di = 0; di < n; di++) days.push([]);
+    var weekEnd = dayStartAt(ws, n);
     load().forEach(function(ev){
       if(!visibleEv(ev)) return;
       var dur = Math.max(0, ev.end - ev.start);
       occurrenceStarts(ev, ws - dur, weekEnd).forEach(function(at){
         var end = at + dur;
-        for(var i = 0; i < 7; i++){
+        for(var i = 0; i < n; i++){
           var ds = dayStartAt(ws, i), de = dayStartAt(ws, i + 1);
           if(end <= ds && !(dur === 0 && at === ds)) continue;
           if(at >= de) continue;
@@ -655,6 +672,38 @@
     });
     flush();
   }
+  // колонка одного дня: блоки мероприятий/трекеров (раскладка пересечений) и красная линия «сейчас»; общая для недели и колонки в ежедневной заметке
+  function dayColHtml(ds, daySegs, dayTrk, isToday, now){
+    // трекеры — такие же блоки, как мероприятия: общая раскладка дня, в колонки они встают только при пересечении по времени
+    var segs = daySegs.slice();
+    if(dayTrk) dayTrk.forEach(function(tg){ segs.push(tg); });
+    if(visOverHidden()){
+      // видимые мероприятия (и трекеры) не замечают скрытые: раскладываются отдельно и рисуются после них, то есть поверх
+      var hidSegs = [], visSegs = [];
+      segs.forEach(function(sg){ (sg.ev && isHidden(sg.ev.id) ? hidSegs : visSegs).push(sg); });
+      packDay(hidSegs); packDay(visSegs);
+      segs = hidSegs.concat(visSegs);
+    } else packDay(segs);
+    var blocks = '';
+    segs.forEach(function(sg){
+      var top = sg.top * hourPx / 60;
+      var h = Math.max(MIN_BLOCK_PX, (sg.bottom - sg.top) * hourPx / 60 - 1);
+      var w = 100 / sg.cols, left = sg.col * w;
+      var posCss = 'left:' + left.toFixed(2) + '%;width:calc(' + w.toFixed(2) + '% - 1px)';
+      var tall = h >= 30;
+      if(sg.t){
+        blocks += '<div class="cal-wk-trk cal-trk-' + sg.t.src + '" data-t="' + sg.top + '" data-b="' + sg.bottom + '" data-txt="' + esc(trackerText(sg.t)) + '"' +
+          ' style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + ';' + trkBlockCss(sg.t.src) + '">' +
+          esc(sg.t.label) + '</div>';
+        return;
+      }
+      blocks += '<div class="cal-wk-ev cal-c-' + (isTask(sg.ev) ? 'task' : calOf(sg.ev)) + (isHidden(sg.ev.id) ? ' cal-hid' : '') + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
+        ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + (sg.at + sg.dur < now && usePastColor(isHidden(sg.ev.id)) ? ';' + pastBlockCss() : '') + '">' +
+        esc(sg.ev.title) + '</div>';
+    });
+    var nowLine = isToday ? '<div class="cal-wk-now" data-m="' + minutesOfDay(now) + '" style="top:' + (minutesOfDay(now) * hourPx / 60).toFixed(1) + 'px"></div>' : '';
+    return '<div class="cal-wk-col' + (isToday ? ' cal-wk-today-col' : '') + '" data-day="' + ds + '">' + blocks + nowLine + '</div>';
+  }
   function weekHtml(ws){
     var now = Date.now(), todayKey = dateValue(now);
     var segsByDay = weekSegments(ws);
@@ -664,35 +713,7 @@
     for(var i = 0; i < 7; i++){
       var ds = dayStartAt(ws, i), isToday = dateValue(ds) === todayKey;
       head += '<div class="cal-wk-dayh' + (isToday ? ' cal-wk-today' : '') + '"><span>' + WEEKDAYS[i] + '</span><b>' + new Date(ds).getDate() + '</b></div>';
-      // трекеры — такие же блоки, как мероприятия: общая раскладка дня, в колонки они встают только при пересечении по времени
-      var segs = segsByDay[i].slice();
-      if(trkByDay) trkByDay[i].forEach(function(tg){ segs.push(tg); });
-      if(visOverHidden()){
-        // видимые мероприятия (и трекеры) не замечают скрытые: раскладываются отдельно и рисуются после них, то есть поверх
-        var hidSegs = [], visSegs = [];
-        segs.forEach(function(sg){ (sg.ev && isHidden(sg.ev.id) ? hidSegs : visSegs).push(sg); });
-        packDay(hidSegs); packDay(visSegs);
-        segs = hidSegs.concat(visSegs);
-      } else packDay(segs);
-      var blocks = '';
-      segs.forEach(function(sg){
-        var top = sg.top * hourPx / 60;
-        var h = Math.max(MIN_BLOCK_PX, (sg.bottom - sg.top) * hourPx / 60 - 1);
-        var w = 100 / sg.cols, left = sg.col * w;
-        var posCss = 'left:' + left.toFixed(2) + '%;width:calc(' + w.toFixed(2) + '% - 1px)';
-        var tall = h >= 30;
-        if(sg.t){
-          blocks += '<div class="cal-wk-trk cal-trk-' + sg.t.src + '" data-t="' + sg.top + '" data-b="' + sg.bottom + '" data-txt="' + esc(trackerText(sg.t)) + '"' +
-            ' style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + ';' + trkBlockCss(sg.t.src) + '">' +
-            esc(sg.t.label) + '</div>';
-          return;
-        }
-        blocks += '<div class="cal-wk-ev cal-c-' + (isTask(sg.ev) ? 'task' : calOf(sg.ev)) + (isHidden(sg.ev.id) ? ' cal-hid' : '') + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
-          ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + (sg.at + sg.dur < now && usePastColor(isHidden(sg.ev.id)) ? ';' + pastBlockCss() : '') + '">' +
-          esc(sg.ev.title) + '</div>';
-      });
-      var nowLine = isToday ? '<div class="cal-wk-now" data-m="' + minutesOfDay(now) + '" style="top:' + (minutesOfDay(now) * hourPx / 60).toFixed(1) + 'px"></div>' : '';
-      cols += '<div class="cal-wk-col' + (isToday ? ' cal-wk-today-col' : '') + '" data-day="' + ds + '">' + blocks + nowLine + '</div>';
+      cols += dayColHtml(ds, segsByDay[i], trkByDay ? trkByDay[i] : null, isToday, now);
     }
     head += '</div>';
     var labels = '';
@@ -954,6 +975,166 @@
     if(window.requestAnimationFrame) window.requestAnimationFrame(go);
     setTimeout(go, 60);
     setTimeout(go, 250);
+  }
+
+  // ---------- колонка дня в ежедневной заметке (см. шапку) ----------
+  function loadZoom(){
+    try{
+      var z = parseFloat(localStorage.getItem(ZOOM_KEY));
+      hourPx = isFinite(z) ? clampHour(z) : HOUR_DEFAULT;
+    }catch(e){ hourPx = HOUR_DEFAULT; }
+  }
+  // закрыть форму, открытую поверх заметки: вернуть `screen`, убрать слой, перерисовать колонку
+  function closeExtForm(){
+    var f = extForm;
+    if(!f) return;
+    extForm = null;
+    if(f.el.parentNode) f.el.parentNode.removeChild(f.el);
+    screen = f.prevScreen;
+    try{ f.onClose(); }catch(e){}
+  }
+  function mountDayColumn(host, opts){
+    if(!host) return null;
+    opts = opts || {};
+    try{ if(window.__ltEnsureCalendarStore) window.__ltEnsureCalendarStore(); }catch(e){} // хранилище и трекеры готовит my.js (до открытия вкладки «Календарь» их нет)
+    importLegacy(); loadTrackersOn(); loadColors(); applyUserColors(); loadZoom();
+    var stale = host.querySelector(".cal-daycol");
+    if(stale && stale.parentNode) stale.parentNode.removeChild(stale);
+    var day = startOfDay(opts.day || Date.now());
+    var el = document.createElement("div");
+    el.className = "cal-daycol";
+    host.insertBefore(el, host.firstChild);
+    host.classList.add("daycal-on");
+    var dead = false, sig = "", wasToday = false, pinch = null, timer = null, ctl = null;
+
+    function signature(){
+      return JSON.stringify(load()) + "|" + (trackersOn ? JSON.stringify(trackerItems(day, dayStartAt(day, 1))) : "") + "|" + (showHidden() ? 1 : 0) + "|" + hourPx;
+    }
+    function draw(){
+      if(dead) return;
+      var now = Date.now(), isToday = dateValue(day) === dateValue(now);
+      wasToday = isToday;
+      var segs = weekSegments(day, 1)[0];
+      var trk = trackersOn ? weekTrackerSegments(day, 1)[0] : null;
+      var labels = "";
+      for(var h = 1; h < 24; h++) labels += '<span data-h="' + h + '" style="top:' + (h * hourPx + 1) + 'px">' + pad2(h) + ':00</span>';
+      el.innerHTML = '<div class="cal-dc-body" style="height:' + (24 * hourPx) + 'px;background-size:100% ' + hourPx + 'px">' +
+        '<div class="cal-dc-labels">' + labels + '</div>' + dayColHtml(day, segs, trk, isToday, now) + '</div>';
+      applyCalColors(el);
+      sig = signature();
+    }
+    // красная линия «сейчас» и пометка прошедших — на месте; изменились данные или сменился «сегодня» — полная перерисовка
+    function tick(){
+      if(dead) return;
+      if(!document.body.contains(el)){ destroy(); return; } // заметку закрыли/перерисовали — колонка не нужна
+      if(extForm) return;
+      var now = Date.now();
+      if(signature() !== sig || (dateValue(day) === dateValue(now)) !== wasToday){ draw(); return; }
+      var i, m = minutesOfDay(now), list = el.querySelectorAll(".cal-wk-now");
+      for(i = 0; i < list.length; i++){
+        list[i].setAttribute("data-m", String(m));
+        list[i].style.top = (m * hourPx / 60).toFixed(1) + "px";
+      }
+      list = el.querySelectorAll(".cal-wk-ev");
+      for(i = 0; i < list.length; i++){
+        var e = +list[i].getAttribute("data-e");
+        if(e){
+          list[i].classList.toggle("cal-wk-past", e < now);
+          if(e < now && usePastColor(list[i].classList.contains("cal-hid"))) paintPastBlock(list[i]);
+        }
+      }
+    }
+    function destroy(){
+      if(dead) return;
+      dead = true;
+      // редактор мог просто пересобраться (возврат в приложение): открытую форму не трогаем, но если новой колонки так и не появилось — убираем её
+      if(extForm && extForm.owner === ctl) setTimeout(function(){ if(extForm && extForm.owner === ctl && !dayCols.length) closeExtForm(); }, 1500);
+      clearInterval(timer);
+      var k = dayCols.indexOf(ctl);
+      if(k >= 0) dayCols.splice(k, 1);
+      if(el.parentNode) el.parentNode.removeChild(el);
+      host.classList.remove("daycal-on");
+    }
+    // форма мероприятия — слоем поверх окна (редактор заметки под ней не перерисовывается)
+    function openOver(fn){
+      if(extForm || dead) return;
+      var box = null, n = el.parentNode;
+      while(n && n !== document.body){
+        if(n.classList && n.classList.contains("settings-modal-box")){ box = n; break; }
+        n = n.parentNode;
+      }
+      if(!box) return;
+      if(opts.beforeForm){ try{ opts.beforeForm(); }catch(e){} }
+      var ov = document.createElement("div");
+      ov.className = "cal-dayform";
+      box.appendChild(ov);
+      extForm = { el: ov, prevScreen: screen, owner: ctl, onClose: function(){ dayCols.slice().forEach(function(c){ c.refresh(); }); } };
+      try{ fn(); }catch(err){ closeExtForm(); }
+    }
+    el.addEventListener("click", function(e){
+      if(Date.now() - pinchEndedAt < 350) return; // тап, оставшийся от щипка
+      var trkEl = e.target.closest ? e.target.closest(".cal-wk-trk") : null;
+      if(trkEl){ trackerToast(trkEl.getAttribute("data-txt") || ""); return; }
+      var blk = e.target.closest ? e.target.closest(".cal-wk-ev") : null;
+      if(blk){
+        var ev = findEvent(blk.getAttribute("data-id"));
+        if(!ev) return;
+        var at = +blk.getAttribute("data-at");
+        openOver(function(){ openForm(ev, at); });
+        return;
+      }
+      var col = e.target.closest ? e.target.closest(".cal-wk-col") : null;
+      if(!col) return;
+      // пустое место: новое мероприятие на этот день, начало — начало нажатого часа
+      var hour = Math.max(0, Math.min(23, Math.floor((e.clientY - col.getBoundingClientRect().top) / hourPx)));
+      var d = new Date(+col.getAttribute("data-day"));
+      var start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, 0, 0, 0).getTime();
+      openOver(function(){ openForm(null, null, start); });
+    });
+    // щипок двумя пальцами по вертикали — размер часа (как в неделе); один палец — обычная прокрутка заметки
+    function applyDayZoom(px){
+      hourPx = clampHour(px);
+      var body = el.querySelector(".cal-dc-body");
+      if(body){ body.style.height = (24 * hourPx) + "px"; body.style.backgroundSize = "100% " + hourPx + "px"; }
+      var i, list = el.querySelectorAll(".cal-dc-labels span");
+      for(i = 0; i < list.length; i++) list[i].style.top = (+list[i].getAttribute("data-h") * hourPx + 1) + "px";
+      list = el.querySelectorAll(".cal-wk-ev, .cal-wk-trk");
+      for(i = 0; i < list.length; i++){
+        var t = +list[i].getAttribute("data-t"), b = +list[i].getAttribute("data-b");
+        list[i].style.top = (t * hourPx / 60).toFixed(1) + "px";
+        list[i].style.height = Math.max(MIN_BLOCK_PX, (b - t) * hourPx / 60 - 1).toFixed(1) + "px";
+      }
+      list = el.querySelectorAll(".cal-wk-now");
+      for(i = 0; i < list.length; i++) list[i].style.top = (+list[i].getAttribute("data-m") * hourPx / 60).toFixed(1) + "px";
+    }
+    function gapOf(t){ return Math.abs(t[0].clientY - t[1].clientY); }
+    function midOf(t){ return (t[0].clientY + t[1].clientY) / 2; }
+    el.addEventListener("touchstart", function(e){
+      if(!e.touches || e.touches.length !== 2){ if(e.touches && e.touches.length > 2) pinch = null; return; }
+      var g = gapOf(e.touches), body = el.querySelector(".cal-dc-body");
+      pinch = (g >= PINCH_MIN_GAP && body) ? { gap0: g, px0: hourPx, anchor: (midOf(e.touches) - body.getBoundingClientRect().top) / hourPx } : null;
+    }, { passive: true });
+    el.addEventListener("touchmove", function(e){
+      if(!pinch || !e.touches || e.touches.length !== 2) return;
+      if(e.cancelable) e.preventDefault();
+      applyDayZoom(pinch.px0 * Math.max(gapOf(e.touches), 1) / pinch.gap0);
+      var body = el.querySelector(".cal-dc-body"), sc = document.getElementById("settingsTabContent");
+      if(body && sc) sc.scrollTop += body.getBoundingClientRect().top + pinch.anchor * hourPx - midOf(e.touches); // точка под пальцами остаётся на месте
+    }, { passive: false });
+    el.addEventListener("touchend", function(e){
+      if(!pinch || (e.touches && e.touches.length >= 2)) return;
+      pinch = null;
+      pinchEndedAt = Date.now();
+      try{ localStorage.setItem(ZOOM_KEY, String(hourPx)); }catch(err){}
+      draw(); // перерисовка: пересчёт раскладки пересекающихся блоков под новую высоту
+    }, { passive: true });
+    el.addEventListener("touchcancel", function(){ pinch = null; }, { passive: true });
+
+    ctl = { tick: tick, destroy: destroy, refresh: draw };
+    dayCols.push(ctl);
+    timer = setInterval(tick, 30000);
+    draw();
+    return ctl;
   }
 
   // перерисовать только список (раскрытие/сворачивание серий), не трогая прокрутку
@@ -1438,11 +1619,13 @@
     setStore: function(store){ STORE = store || null; },
     // my.js отдаёт работу с задачами «Ожидания» (см. шапку)
     setTasks: function(t){ TASKS = t || null; },
-    render: function(){ importLegacy(); loadMode(); weekStart = null; weekScrollKeep = null; lastSig = JSON.stringify(load()); renderMain(); },
+    render: function(){ if(extForm) closeExtForm(); importLegacy(); loadMode(); weekStart = null; weekScrollKeep = null; lastSig = JSON.stringify(load()); renderMain(); },
     // данные могли измениться снаружи (пришли чужие правки группы): перерисовать текущий экран, если список изменился.
     // Открытую форму не трогаем; прокрутка сохраняется. my.js зовёт только когда вкладка «Календарь» на экране.
     // возврат в приложение (оболочка зовёт из my.js `__ltOnAppResume`): красная линия и прошедшие события — по текущему времени
-    tick: function(){ weekNowTick(); },
+    tick: function(){ weekNowTick(); dayCols.slice().forEach(function(c){ c.tick(); }); },
+    // колонка одного дня (по умолчанию сегодня) внутри host — для ежедневной заметки, см. шапку; возвращает {tick, destroy, refresh}
+    mountDayColumn: function(host, opts){ return mountDayColumn(host, opts); },
     refresh: function(){
       if(screen === "form") return;
       var sig = JSON.stringify(load());
