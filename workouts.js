@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 9.1 (04.11)
+   Версия: 9.2 (09.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -351,10 +351,11 @@
     var st = document.createElement("style");
     st.id = "workoutsStyle";
     st.textContent =
-      ".wk-root{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;}" +
+      ".wk-root{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;position:relative;}" +
       ".wk-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:none;padding-bottom:12px;}" +
       ".wk-scroll::-webkit-scrollbar{display:none;width:0;height:0;}" +
-      "#wkLive{flex:none;max-height:60%;overflow-y:auto;margin-bottom:calc(var(--fab-size,36px) + 2 * var(--fab-gap,6px));}" +
+      "#wkLive{position:absolute;left:0;right:0;bottom:calc(var(--fab-size,36px) + 2 * var(--fab-gap,6px));max-height:60%;overflow-y:auto;z-index:5;pointer-events:none;}" +
+      "#wkLive > *{pointer-events:auto;box-shadow:0 4px 14px rgba(0,0,0,.28);}" +
       "#wkLive .wk-card,#wkLive .wk-msg{margin-bottom:0;}" +
       "#wkLive > * + *{margin-top:var(--fab-gap,6px);}" +
       ".wk-per{width:auto;min-width:40px;padding:0 6px;font:inherit;font-size:11px;white-space:nowrap;}" +
