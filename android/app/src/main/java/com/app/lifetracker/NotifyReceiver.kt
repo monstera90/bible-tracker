@@ -64,6 +64,7 @@ class NotifyReceiver : BroadcastReceiver() {
                 CardAlarms.restore(ctx) // будильники карточек: заново, опоздавшие звонки пропускаются
                 VolumeBoost.restore(ctx) // усиление громкости (вкладка «Система»): эффект и служба заново, если было включено
                 PomodoroTimer.restore(ctx) // помодоро: будильник фазы и служба заново, опоздавшие переходы догоняются
+                StopwatchService.refresh(ctx) // секундомер: служба и остров заново, если он шёл
             }
         }
     }

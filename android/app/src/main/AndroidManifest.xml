@@ -189,6 +189,27 @@
             android:taskAffinity=""
             android:theme="@style/ScanTheme" />
 
+        <!-- Ярлык «Секундомер» (долгое нажатие на иконку, res/xml/shortcuts.xml): без окна — запускает секундомер и службу с островом,
+             основное приложение не открывается (свой task, прозрачная тема, как у ScanActivity). -->
+        <activity
+            android:name=".StopwatchActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="@string/shortcut_stopwatch"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/ScanTheme" />
+
+        <!-- Секундомер: уведомление с кнопками и остров Xiaomi, раз в секунду обновляется, пока секундомер идёт. -->
+        <service
+            android:name=".StopwatchService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="stopwatch_island_clock" />
+        </service>
+
         <!-- Шаг 4: временные файлы для «Поделиться» (cache/share/, см. res/xml/file_paths.xml). -->
         <provider
             android:name="androidx.core.content.FileProvider"

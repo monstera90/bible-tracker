@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 9.0 (04.11)
+// Версия: 10.0 (09.11)
 // Версия: 8.8 (04.11)
 // Версия: 8.6 (22.10) — свёрнутая плашка возвращена к виду 8.0–8.2 (13sp название, 12sp время, letterSpacing 0.08, отступы 0.0087/0.0272): она точно совпадала с настоящим островом, правки 8.3 и 8.5 её испортили. Раскрытая карточка (8.3–8.5) не тронута. Откат: InAppIsland.kt 8.5.
 // Версия: 8.5 (22.10) — по замеру четырёх скриншотов (ширина 1159): название на плашке было мельче настоящего на ~14 % → 0.0350 × ширина экрана; время на плашке ниже на ~10 % и уже на ~19 % → 13.2sp, letterSpacing 0.13, tnum; время в карточке было выше на 7 % и уже на 12 % (вытянутые цифры) → размер 0.0450, letterSpacing 0.06, tnum. Откат: InAppIsland.kt 8.4.
@@ -130,6 +130,17 @@ class InAppIsland(private val activity: Activity) {
     private var scrW = 0
     private var pomoMode = false // плашка показывает помодоро (точка фазы и время), а не таймер карточки
     private var shownPomoKey: String? = null
+    private var swMode = false // плашка показывает секундомер (значок и время): нажатие — пауза/продолжить, долгое — сброс
+    private val swStopTask = Runnable {
+        if (tapArmed && swMode) {
+            tapArmed = false
+            val ctx = activity.applicationContext
+            StopwatchTimer.stop(ctx)
+            StopwatchService.stop(ctx)
+            try { pill.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) } catch (e: Exception) { }
+            refresh()
+        }
+    }
 
     private fun dp(v: Float) = (v * density).roundToInt()
 
@@ -376,6 +387,13 @@ class InAppIsland(private val activity: Activity) {
     }
 
     private fun toggle() {
+        if (swMode) { // секундомер: пауза/продолжить
+            val ctx = activity.applicationContext
+            StopwatchTimer.togglePause(ctx)
+            StopwatchService.refresh(ctx)
+            refresh()
+            return
+        }
         if (pomoMode) { // помодоро: плашка не раскрывается, нажатие возвращает на вкладку «Помодоро»
             (activity as? MainActivity)?.openPomodoroTab()
             return
@@ -414,14 +432,23 @@ class InAppIsland(private val activity: Activity) {
                 tapArmed = !expanded && !animating && pill.visibility == View.VISIBLE && inPill(ev.x, ev.y)
                 tapX = ev.x
                 tapY = ev.y
+                handler.removeCallbacks(swStopTask)
+                if (tapArmed && swMode) handler.postDelayed(swStopTask, 700L)
             }
-            MotionEvent.ACTION_MOVE -> if (tapArmed && (abs(ev.x - tapX) > tapSlop || abs(ev.y - tapY) > tapSlop)) tapArmed = false
+            MotionEvent.ACTION_MOVE -> if (tapArmed && (abs(ev.x - tapX) > tapSlop || abs(ev.y - tapY) > tapSlop)) {
+                tapArmed = false
+                handler.removeCallbacks(swStopTask)
+            }
             MotionEvent.ACTION_UP -> {
+                handler.removeCallbacks(swStopTask)
                 val fire = tapArmed && !expanded && !animating && inPill(ev.x, ev.y)
                 tapArmed = false
                 if (fire) toggle()
             }
-            MotionEvent.ACTION_CANCEL -> tapArmed = false
+            MotionEvent.ACTION_CANCEL -> {
+                handler.removeCallbacks(swStopTask)
+                tapArmed = false
+            }
         }
     }
 
@@ -510,8 +537,15 @@ class InAppIsland(private val activity: Activity) {
             refreshPomodoro(r, pomo)
             return
         }
+        val cardInfo = if (pomo != null) null else CardTimers.primaryInfo(activity.applicationContext)
+        // секундомер уступает помодоро и таймеру карточки: те ждут срока, а секундомер — нет
+        val sw = if (pomo == null && cardInfo == null) StopwatchTimer.snapshot(activity.applicationContext) else null
+        if (sw != null && r != null) {
+            refreshStopwatch(r, sw)
+            return
+        }
         if (pomoMode) leavePomodoro()
-        val info = if (pomo != null) null else CardTimers.primaryInfo(activity.applicationContext)
+        val info = cardInfo
         if (info == null) autoShownFor = null
         if (r == null || info == null) {
             hide()
@@ -573,6 +607,7 @@ class InAppIsland(private val activity: Activity) {
             return
         }
         askOverlayOnce()
+        swMode = false
         if (!pomoMode) {
             pomoMode = true
             if (expanded || animating) { // таймер карточки был раскрыт: сворачиваем мгновенно
@@ -605,9 +640,47 @@ class InAppIsland(private val activity: Activity) {
         layer.visibility = View.VISIBLE
     }
 
+    /** Плашка секундомера: слева значок (синий — идёт, жёлтый — пауза), справа время. Нажатие — пауза/продолжить, долгое — сброс (см. [toggle], [swStopTask]). */
+    private fun refreshStopwatch(r: Rect, s: StopwatchTimer.Snapshot) {
+        layoutFor(r)
+        attach()
+        if (!attached) {
+            hide()
+            return
+        }
+        askOverlayOnce()
+        if (!pomoMode || !swMode) {
+            pomoMode = true
+            swMode = true
+            if (expanded || animating) { // таймер карточки был раскрыт: сворачиваем мгновенно
+                stopAnim()
+                expanded = false
+                applyProgress(0f)
+                card.visibility = View.GONE
+                setWindowBig(false)
+            }
+            pillName.visibility = View.GONE
+            shownPomoKey = null
+            shownClock = null
+        }
+        currentId = null
+        val key = "sw" + s.running
+        if (key != shownPomoKey) {
+            shownPomoKey = key
+            pillIcon.setImageBitmap(XiaomiIsland.stopwatchBitmap(s.running, 96))
+        }
+        val text = XiaomiIsland.elapsedText(s.elapsedMs)
+        if (text != shownClock) {
+            shownClock = text
+            pillTime.text = text
+        }
+        layer.visibility = View.VISIBLE
+    }
+
     /** Помодоро кончилось (или показывается таймер карточки): плашка снова обычная — со значком, названием и временем. */
     private fun leavePomodoro() {
         pomoMode = false
+        swMode = false
         pillName.visibility = View.VISIBLE
         shownPomoKey = null
         shownStage = -1

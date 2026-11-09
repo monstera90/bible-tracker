@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 9.0 (04.11)
+// Версия: 10.0 (09.11)
 // Версия: 8.0 (03.11)
 // Версия: 7.1 (27.10) — кнопка паузы острова тренировки цвета метки (красная/зелёная/жёлтая): `pauseBitmap(..., colorOverride)`, `workoutDotColor`.
 // Версия: 7.0 (27.10) — остров записи тренировки: `workoutExtras` (метка-диод красная/жёлтая/зелёная, время и дистанция, кнопки «Пауза» и «Стоп»), `workoutDotBitmap`, `elapsedText`. Откат: XiaomiIsland.kt 6.0.
@@ -813,6 +813,103 @@ object XiaomiIsland {
                 c.drawPath(Path().apply { moveTo(28f, 30f); lineTo(28f, 66f); lineTo(56f, 48f); close() }, paint)
             }
         }
+        return bmp
+    }
+
+    // ---------- остров «Секундомер» ----------
+
+    private const val PIC_SW_KEY = "miui.focus.pic_sw"
+    private const val PIC_SW_BIG_KEY = "miui.focus.pic_sw_big"
+    private const val ACTION_SW_PAUSE = "miui.focus.action_sw_pause"
+    private const val ACTION_SW_STOP = "miui.focus.action_sw_stop"
+    private val SW_RUN_COLOR = 0xFF1E88E5.toInt()
+    private val SW_PAUSE_COLOR = 0xFFFFB300.toInt()
+
+    /**
+     * Extras острова секундомера ([StopwatchService]) или null, если остров не поддерживается. Свёрнутый: значок секундомера
+     * (синий — идёт, жёлтый — пауза) и время справа. Раскрытый: крупное время, ниже «Идёт»/«Пауза», кнопки «Пауза/Продолжить» и «Стоп».
+     * Время острова не тикает само — службу перепоставляет уведомление раз в секунду. [float] — раскрыть остров (запуск, продолжение).
+     */
+    fun stopwatchExtras(
+        ctx: Context, s: StopwatchTimer.Snapshot, float: Boolean,
+        pause: android.app.PendingIntent, stop: android.app.PendingIntent
+    ): Bundle? {
+        if (!available(ctx)) return null
+        return try {
+            val paused = !s.running
+            val key = if (paused) 0 else 1
+            val picKey = PIC_SW_KEY + key
+            val bigKey = PIC_SW_BIG_KEY + key
+            val total = elapsedText(s.elapsedMs)
+            val pic = JSONObject().put("type", 1).put("pic", picKey)
+            val left = JSONObject().put("type", 1).put("picInfo", pic)
+                .put("textInfo", JSONObject().put("title", if (paused) "Пауза" else "Секундомер"))
+            val big = JSONObject().put("imageTextInfoLeft", left)
+                .put("imageTextInfoRight", JSONObject().put("type", 2).put("textInfo", JSONObject().put("title", total)))
+            val island = JSONObject()
+                .put("islandProperty", 1)
+                .put("islandOrder", true)
+                .put("dismissIsland", false)
+                .put("bigIslandArea", big)
+                .put("smallIslandArea", JSONObject().put("picInfo", pic))
+            val anim = JSONObject().put("type", 0).put("src", bigKey)
+            val base = JSONObject().put("type", 1).put("title", total).put("content", if (paused) "Пауза" else "Секундомер идёт").put("animIconInfo", anim)
+            val v2 = JSONObject()
+                .put("protocol", 1)
+                .put("business", "stopwatch")
+                .put("islandFirstFloat", float)
+                .put("enableFloat", false)
+                .put("updatable", true)
+                .put("ticker", total)
+                .put("tickerPic", picKey)
+                .put("aodTitle", total)
+                .put("param_island", island)
+                .put("iconTextInfo", base)
+            val pics = Bundle().apply {
+                putParcelable(picKey, Icon.createWithBitmap(stopwatchBitmap(s.running, 96)))
+                putParcelable(bigKey, Icon.createWithBitmap(stopwatchBitmap(s.running, 192)))
+            }
+            val acts = Bundle()
+            val list = org.json.JSONArray()
+            acts.putParcelable(
+                ACTION_SW_PAUSE,
+                Notification.Action.Builder(
+                    Icon.createWithBitmap(pauseBitmap(1f, STAGE_NORMAL, paused, if (paused) SW_PAUSE_COLOR else SW_RUN_COLOR)),
+                    if (paused) "Продолжить" else "Пауза", pause
+                ).build()
+            )
+            acts.putParcelable(ACTION_SW_STOP, Notification.Action.Builder(crossIcon(), "Стоп", stop).build())
+            list.put(JSONObject().put("action", ACTION_SW_PAUSE))
+            list.put(JSONObject().put("action", ACTION_SW_STOP))
+            v2.put("actions", list)
+            Bundle().apply {
+                putBundle("miui.focus.pics", pics)
+                putBundle("miui.focus.actions", acts)
+                putString("miui.focus.param", JSONObject().put("param_v2", v2).toString())
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Значок секундомера: цветной круг (синий — идёт, жёлтый — пауза), белый циферблат со стрелкой и кнопкой сверху. Им рисуется и плашка в приложении. */
+    fun stopwatchBitmap(running: Boolean, size: Int = 96): Bitmap {
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.scale(size / 96f, size / 96f)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.style = Paint.Style.FILL
+        paint.color = if (running) SW_RUN_COLOR else SW_PAUSE_COLOR
+        c.drawCircle(48f, 48f, 48f, paint)
+        paint.color = Color.WHITE
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 6f
+        paint.strokeCap = Paint.Cap.ROUND
+        c.drawCircle(48f, 54f, 22f, paint)
+        c.drawLine(48f, 54f, 48f, 42f, paint)
+        c.drawLine(48f, 27f, 48f, 32f, paint)
+        paint.style = Paint.Style.FILL
+        c.drawRect(40f, 20f, 56f, 26f, paint)
         return bmp
     }
 }

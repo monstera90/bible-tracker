@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Версия: 1.0 (09.11) — значок пункта «Секундомер» в меню долгого нажатия на иконку приложения (res/xml/shortcuts.xml).
+     Фиолетовый (#7F00FF) круг, белый циферблат со стрелкой и кнопкой сверху. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#7F00FF"
+        android:pathData="M0,24 a24,24 0 1,0 48,0 a24,24 0 1,0 -48,0 Z" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:pathData="M24,17.5 a10.5,10.5 0 1,0 0,21 a10.5,10.5 0 1,0 0,-21 Z M24,28 L24,22 M24,13 L24,17.5" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M20.5,10 h7 v2.6 h-7 Z" />
+</vector>
