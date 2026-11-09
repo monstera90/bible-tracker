@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 16.0 (09.11)
+// Версия: 17.0 (09.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -46,6 +46,7 @@ private const val K_TIMER = 1
 private const val K_SW = 2
 private const val K_MUSIC = 3
 private const val K_VIDEO = 4
+private const val K_WORKOUT = 5
 
 /** Одно занятие на плашке: всё, что нужно нарисовать свёрнутую капсулу, кружок и раскрытую карточку. */
 private class Item(val key: String, val kind: Int) {
@@ -61,8 +62,11 @@ private class Item(val key: String, val kind: Int) {
     var onToggle: (() -> Unit)? = null
     var onStop: (() -> Unit)? = null
 
-    /** Раскрывается в карточку; помодоро (нажатие — вкладка) и секундомер (нажатие — пауза) — нет. */
-    val expandable: Boolean get() = kind == K_TIMER || kind == K_MUSIC || kind == K_VIDEO
+    /** Есть карточка, которая листается смахиванием: у всех занятий. Нажатием на капсулу раскрываются не все: помодоро открывает вкладку, секундомер ставится на паузу ([activate]). */
+    val expandable: Boolean get() = true
+
+    /** Карточка с крупными цифрами (таймер, помодоро, секундомер, тренировка); у музыки и видео — название одной строкой. */
+    val digitCard: Boolean get() = kind != K_MUSIC && kind != K_VIDEO
 }
 
 class InAppIsland private constructor(private val appCtx: Context) {
@@ -932,6 +936,14 @@ class InAppIsland private constructor(private val appCtx: Context) {
             m.iconFn = { s -> XiaomiIsland.pomoRingBitmap(color, frac, s, glyph) }
             m.time = PomodoroTimer.pillText(pomo)
             m.samples = listOf(timePattern(m.time), "88:88", "+88:88", "Готово")
+            m.big = m.time
+            m.sub = (if (pomo.task.isNotEmpty()) pomo.task + " · " else "") + PomodoroTimer.label(pomo) + " · " + PomodoroTimer.cycleText(pomo)
+            val pomoWait = pomo.phase == PomodoroTimer.PH_WAIT
+            val pomoPaused = !pomo.running || pomoWait
+            m.btnKey = "" + (frac * 200f).roundToInt() + "/" + color + "/" + pomoPaused
+            m.btnFn = { XiaomiIsland.pauseBitmap(frac, 0, pomoPaused, color) }
+            m.onToggle = { if (pomoWait) PomodoroTimer.skip(ctx) else PomodoroTimer.togglePause(ctx) }
+            m.onStop = { PomodoroTimer.stop(ctx) }
             out.add(m)
         }
         for (inf in CardTimers.allInfos(ctx)) {
@@ -961,6 +973,19 @@ class InAppIsland private constructor(private val appCtx: Context) {
             m.iconFn = { s -> XiaomiIsland.stopwatchBitmap(sw.running, s) }
             m.time = XiaomiIsland.elapsedText(sw.elapsedMs)
             m.samples = listOf(timePattern(m.time))
+            m.big = m.time
+            m.sub = if (sw.running) "Секундомер" else "Секундомер · пауза"
+            val swRun = sw.running
+            m.btnKey = "sw" + swRun
+            m.btnFn = { XiaomiIsland.pauseBitmap(1f, 0, !swRun, if (swRun) 0xFF1E88E5.toInt() else 0xFFFFB300.toInt()) }
+            m.onToggle = {
+                StopwatchTimer.togglePause(ctx)
+                StopwatchService.refresh(ctx)
+            }
+            m.onStop = {
+                StopwatchTimer.stop(ctx)
+                StopwatchService.stop(ctx)
+            }
             out.add(m)
         }
         val outside = activity != null || !IslandSettings.systemEnabled(ctx)
@@ -1000,6 +1025,42 @@ class InAppIsland private constructor(private val appCtx: Context) {
             m.onToggle = { SiteMedia.listener?.onToggle() }
             m.onStop = { SiteMedia.listener?.onClose() }
             out.add(m)
+        }
+        if (outside) {
+            val ws = WorkoutTracker.snapshot()
+            val searching = ws.status == WorkoutTracker.ST_SEARCH
+            val paused = ws.status == WorkoutTracker.ST_PAUSE
+            if (searching || paused || ws.status == WorkoutTracker.ST_RUN) {
+                val m = Item("workout", K_WORKOUT)
+                val dot = if (paused) 1 else if (ws.status == WorkoutTracker.ST_RUN && ws.fix) 2 else 0 // 0 — красная, 1 — жёлтая, 2 — зелёная (как на острове)
+                val km = WorkoutService.kmText(ws.distM)
+                val total = XiaomiIsland.elapsedText(ws.totalMs)
+                m.iconKey = "wk" + dot
+                m.iconFn = { s -> XiaomiIsland.workoutDotBitmap(dot, s) }
+                m.time = if (searching) "Поиск" else total
+                m.samples = listOf(timePattern(m.time), if (ws.totalMs >= 3_600_000L) "8:88:88" else "88:88")
+                m.big = if (searching) "Поиск…" else total
+                m.sub = when {
+                    searching -> if (ws.sat >= 0) "Найдено спутников: " + ws.sat else "Ждём сигнал GPS"
+                    ws.status == WorkoutTracker.ST_RUN && !ws.fix -> "Связи нет · " + km
+                    paused -> km + " · пауза"
+                    else -> km
+                }
+                if (!searching) { // в поиске спутников пауза недоступна — только «Стоп»
+                    val color = XiaomiIsland.workoutDotColor(dot)
+                    m.btnKey = "wk" + dot + paused
+                    m.btnFn = { XiaomiIsland.pauseBitmap(1f, 0, paused, color) }
+                    m.onToggle = {
+                        WorkoutTracker.togglePause()
+                        WorkoutService.refresh(ctx)
+                    }
+                }
+                m.onStop = {
+                    WorkoutTracker.stop(ctx)
+                    WorkoutService.refresh(ctx)
+                }
+                out.add(m)
+            }
         }
         return out
     }
@@ -1069,7 +1130,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
             if (!expanded) selKey = null
             return
         }
-        val music = sel.kind != K_TIMER
+        val music = !sel.digitCard
         if (cardMusicStyle != music) {
             cardMusicStyle = music
             applyCardTextMode(music)
@@ -1087,6 +1148,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
             shownCardSub = sel.sub
             cardName.text = sel.sub
         }
+        pauseBtn.visibility = if (sel.onToggle != null) View.VISIBLE else View.INVISIBLE
         if (card.visibility == View.VISIBLE) {
             val bk = sel.key + "|" + sel.btnKey
             if (bk != shownCardBtn) {
@@ -1109,7 +1171,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
         }
         cardBar.visibility = View.GONE
         strip.visibility = View.VISIBLE
-        val sd = (scrW * 0.032f).roundToInt()
+        // много занятий (например, десяток таймеров): значки уменьшаются, чтобы ряд поместился в ширину карточки
+        val sd = min(scrW * 0.032f, scrW * 0.84f / (2 * ex.size - 1)).roundToInt().coerceAtLeast(1)
         for ((i, m) in ex.withIndex()) {
             val iv = ImageView(appCtx)
             iv.setImageBitmap(m.iconFn(96))
@@ -1125,7 +1188,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         cardTime.letterSpacing = if (music) 0.01f else 0.06f
         cardTime.ellipsize = if (music) TextUtils.TruncateAt.END else null
         cardTime.maxWidth = if (music && textMaxW > 0) textMaxW else Int.MAX_VALUE
-        cardName.maxWidth = if (music && textMaxW > 0) textMaxW else Int.MAX_VALUE
+        cardName.maxWidth = if (textMaxW > 0) textMaxW else Int.MAX_VALUE
     }
 
     /** Цифры заменяются «8» (самая широкая): ширина плашки считается по образцу и не прыгает на каждой смене цифры. */
