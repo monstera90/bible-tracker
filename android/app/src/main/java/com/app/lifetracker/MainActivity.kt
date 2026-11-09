@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 13.0 (04.11)
+// Версия: 14.0 (09.11)
 // Версия: 11.0 (04.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
@@ -81,6 +81,9 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_TASK_ID = "taskId"
         const val EXTRA_KIND = "kind"
 
+        // Нажатие на плашку помодоро (InAppIsland), когда приложение не на экране: вынести вперёд и открыть вкладку «Помодоро».
+        const val ACTION_OPEN_POMODORO = "com.app.lifetracker.OPEN_POMODORO"
+
         /** Запущенная Activity (или null): получатель кнопок уведомления сообщает через неё странице о новом действии. */
         @Volatile
         var instance: MainActivity? = null
@@ -161,6 +164,7 @@ class MainActivity : ComponentActivity() {
 
     /** Вкладка-сайт, которую просит открыть плавающее видео (кнопка «развернуть»); выполняется, когда приложение на экране. */
     private var pendingOpenTab: String? = null
+    private var pendingOpenPomodoro = false
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var pendingPermission: PermissionRequest? = null
@@ -332,6 +336,7 @@ class MainActivity : ComponentActivity() {
         // Шаг 4: «Поделиться» (ACTION_SEND / ACTION_SEND_MULTIPLE) при уже запущенном приложении.
         handleShareIntent(intent)
         if (intent.action == ACTION_DIAG) webView.loadUrl(WebAssetServer.DIAG_URL)
+        if (intent.action == ACTION_OPEN_POMODORO) pendingOpenPomodoro = true // выполнится в onResume, как только окно встанет на место
         val cardLaunch = cardLaunchOf(intent)
         if (cardLaunch != null) {
             if (pageTrusted) {
@@ -375,6 +380,7 @@ class MainActivity : ComponentActivity() {
         // Открыл приложение (в том числе по уведомлению «Таймер закончился») — вибрация конца таймера карточки больше не нужна.
         CardTimers.stopVibration(applicationContext)
         try { VolumeBoost.restore(applicationContext) } catch (e: Exception) { /* усиление громкости поднимется при следующем входе */ }
+        inAppIsland.setActivity(this)
         inAppIsland.start()
         // Подстраховка: будильники пропадают после «Остановить» в настройках, ставим заново из сохранённых данных.
         try {
@@ -390,6 +396,10 @@ class MainActivity : ComponentActivity() {
             webView.evaluateJavascript("window.__ltOnAppResume && window.__ltOnAppResume()", null)
         }
         runPendingOpenTab()
+        if (pendingOpenPomodoro && pageTrusted) {
+            pendingOpenPomodoro = false
+            openPomodoroTab()
+        }
     }
 
     /** Кнопка «развернуть» плавающего видео: открыть вкладку-сайт [id] (в странице) и, если приложение свёрнуто, вынести его на передний план. */
@@ -425,7 +435,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         NotifyStore.appForeground = false
-        inAppIsland.stop()
+        inAppIsland.onActivityPaused(this)
         // Пока приложение было на экране, тик службы не перепоставлял уведомления таймеров — остров в шторке освежаем сразу.
         try {
             CardTimers.tickIsland(applicationContext)
@@ -474,6 +484,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         if (instance === this) instance = null
         NotifyStore.appForeground = false
+        inAppIsland.onActivityPaused(this) // страховка: Activity уходит насовсем, плашка не должна держать на неё ссылку
         handler.removeCallbacks(trialWatchdog)
         handler.removeCallbacks(keyboardPush)
         fileSaver.cancelAll()
@@ -851,7 +862,7 @@ class MainActivity : ComponentActivity() {
         webHost = FrameLayout(this).apply { addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
         claudeTab = ClaudeTab(this, webHost)
         userTabs = UserTabs(this, webHost)
-        inAppIsland = InAppIsland(this)
+        inAppIsland = InAppIsland.get(applicationContext)
 
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

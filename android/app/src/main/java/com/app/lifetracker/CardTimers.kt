@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.6 (08.11)
+// Версия: 7.7 (09.11)
 // Версия: 5.7 (24.10) — скрытый таймер (`Timer.hidden`, `start(..., hidden)`): идёт и срабатывает как обычный, но без уведомления «идёт», острова, плашки в приложении, службы тика и этапов цвета; в конце — обычные вибрация и «Таймер закончился»; `listJson` отдаёт `hidden`. Откат: CardTimers.kt 5.6.
 // Версия: 5.6 (24.10) — этапы цвета значка: остался один, красный за 2 минуты до конца (`scheduleStages`); жёлтый убран, но его будильник от прежней версии снимается (`LEGACY_STAGE_YELLOW`). Откат: CardTimers.kt 5.5.
 // Версия: 5.5 (22.10) — эксперимент с чёрным фоном уведомления (`setColorized`) откачен: HyperOS не меняет цвет карточки. Прежнее: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
@@ -274,9 +274,19 @@ object CardTimers {
         }
     }
 
-    /** Служба тика нужна только острову Xiaomi; на других телефонах отсчёт в шторке идёт сам. */
+    /**
+     * Служба тика нужна острову Xiaomi, а при выключенном системном острове — чтобы процесс жил, пока плашка [InAppIsland]
+     * висит поверх других приложений; на остальных телефонах отсчёт в шторке идёт сам.
+     */
     private fun startTicker(ctx: Context) {
-        if (XiaomiIsland.available(ctx)) TimerTickService.ensure(ctx)
+        if (XiaomiIsland.available(ctx) || !IslandSettings.systemEnabled(ctx)) TimerTickService.ensure(ctx)
+    }
+
+    /** Настройку острова переключили: идущим таймерам нужна (или больше не нужна) служба тика. */
+    fun onIslandSettingChanged(ctx: Context) {
+        val now = System.currentTimeMillis()
+        val any = synchronized(LOCK) { load(ctx).values.any { !it.hidden && !it.dismissed && it.running && it.endAt > now } }
+        if (any) startTicker(ctx)
     }
 
     /**
@@ -284,6 +294,8 @@ object CardTimers {
      * Возвращает задержку до следующего тика в мс или -1, если идущих таймеров нет (служба остановится).
      */
     fun tickIsland(ctx: Context): Long {
+        InAppIsland.ensureBackground(ctx) // системный остров выключен: плашка внутри приложения живёт и при свёрнутом приложении
+        val repost = XiaomiIsland.available(ctx) // перепост раз в секунду нужен только острову Xiaomi
         val pomoRank = PomodoroTimer.islandRank(ctx) // вне LOCK: у помодоро своя блокировка
         return synchronized(LOCK) {
             val now = System.currentTimeMillis()
@@ -295,7 +307,7 @@ object CardTimers {
             for (t in load(ctx).values) {
                 if (t.hidden || t.dismissed || !t.running || t.endAt <= now) continue // скрытый таймер и таймер со смахнутым уведомлением уведомления «идёт» не имеют
                 val mayPost = !pomoLeads && (t.id == leadId || floatDeferred.contains(t.id))
-                if (!NotifyStore.appForeground && mayPost) postRunning(ctx, t, floatDeferred.contains(t.id)) // раскрытие, пропавшее при открытом приложении, повторяется один раз
+                if (repost && !NotifyStore.appForeground && mayPost) postRunning(ctx, t, floatDeferred.contains(t.id)) // раскрытие, пропавшее при открытом приложении, повторяется один раз
                 if (next < 0) next = (t.endAt - now) % 1000L + 20L
             }
             next
@@ -470,7 +482,7 @@ object CardTimers {
             ) else null
             val island = XiaomiIsland.runningExtras(ctx, titleOf(t), t.endAt, t.durationMs, float, stop, pause)
             if (island != null) b.addExtras(island)
-            else b.addExtras(Bundle().apply { putBoolean("android.requestPromotedOngoing", true) })
+            else if (IslandSettings.systemEnabled(ctx)) b.addExtras(Bundle().apply { putBoolean("android.requestPromotedOngoing", true) })
             b.build()
         } catch (e: Exception) {
             null

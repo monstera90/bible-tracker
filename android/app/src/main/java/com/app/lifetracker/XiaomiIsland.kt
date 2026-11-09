@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 10.1 (09.11)
+// Версия: 10.2 (09.11)
 // Версия: 8.0 (03.11)
 // Версия: 7.1 (27.10) — кнопка паузы острова тренировки цвета метки (красная/зелёная/жёлтая): `pauseBitmap(..., colorOverride)`, `workoutDotColor`.
 // Версия: 7.0 (27.10) — остров записи тренировки: `workoutExtras` (метка-диод красная/жёлтая/зелёная, время и дистанция, кнопки «Пауза» и «Стоп»), `workoutDotBitmap`, `elapsedText`. Откат: XiaomiIsland.kt 6.0.
@@ -81,8 +81,9 @@ object XiaomiIsland {
         false
     }
 
+    /** Остров Xiaomi поддерживается телефоном и не отключён настройкой «Использовать системный плавающий остров» ([IslandSettings]). */
     fun available(ctx: Context): Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && isXiaomiDevice() && protocolVersion(ctx) >= 2
+        IslandSettings.systemEnabled(ctx) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && isXiaomiDevice() && protocolVersion(ctx) >= 2
 
     /**
      * Extras для уведомления идущего таймера (обратный отсчёт до [endAt]) или null, если остров не поддерживается.

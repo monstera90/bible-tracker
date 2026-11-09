@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.1 (08.11)
+// Версия: 1.2 (09.11)
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -170,6 +170,7 @@ class PomodoroService : Service() {
                 shutdown()
                 return
             }
+            InAppIsland.ensureBackground(ctx) // системный остров выключен: плашка помодоро висит поверх других приложений
             if (!NotifyStore.appForeground && !timerLeadsIsland(ctx)) {
                 try {
                     val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

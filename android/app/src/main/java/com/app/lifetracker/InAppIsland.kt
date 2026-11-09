@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 10.0 (09.11)
+// Версия: 11.0 (09.11)
 // Версия: 8.8 (04.11)
 // Версия: 8.6 (22.10) — свёрнутая плашка возвращена к виду 8.0–8.2 (13sp название, 12sp время, letterSpacing 0.08, отступы 0.0087/0.0272): она точно совпадала с настоящим островом, правки 8.3 и 8.5 её испортили. Раскрытая карточка (8.3–8.5) не тронута. Откат: InAppIsland.kt 8.5.
 // Версия: 8.5 (22.10) — по замеру четырёх скриншотов (ширина 1159): название на плашке было мельче настоящего на ~14 % → 0.0350 × ширина экрана; время на плашке ниже на ~10 % и уже на ~19 % → 13.2sp, letterSpacing 0.13, tnum; время в карточке было выше на 7 % и уже на 12 % (вытянутые цифры) → размер 0.0450, letterSpacing 0.06, tnum. Откат: InAppIsland.kt 8.4.
@@ -26,6 +26,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
+import android.view.Surface
 import android.graphics.PixelFormat
 import android.net.Uri
 import android.os.Build
@@ -56,18 +57,65 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-class InAppIsland(private val activity: Activity) {
+class InAppIsland private constructor(private val appCtx: Context) {
 
-    private companion object {
-        const val ASK_EVERY_MS = 12L * 60L * 60L * 1000L // как часто повторно просить разрешение «Поверх других приложений»
+    companion object {
+        private const val ASK_EVERY_MS = 12L * 60L * 60L * 1000L // как часто повторно просить разрешение «Поверх других приложений»
+        private const val IDLE_STOP_TICKS = 20 // в фоне: столько тиков (по 0,5 с) без плашки — и цикл останавливается до следующего вызова службы
+
+        @Volatile
+        private var instance: InAppIsland? = null
+
+        /** Единственная плашка процесса. Зовётся только из главного потока (создаёт View). */
+        fun get(ctx: Context): InAppIsland {
+            instance?.let { return it }
+            val i = InAppIsland(ctx.applicationContext)
+            instance = i
+            return i
+        }
+
+        /** Экран разрешения «Поверх других приложений» (запасной — сведения о приложении). */
+        fun openOverlaySettings(ctx: Context) {
+            try {
+                ctx.startActivity(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (e: Exception) {
+                try {
+                    ctx.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                } catch (e2: Exception) {
+                }
+            }
+        }
+
+        /**
+         * Из служб таймера, помодоро и секундомера (любой поток): системный остров выключен — запускает цикл плашки, даже если
+         * приложение не открыто (ярлык «Секундомер», службы переднего плана держат процесс). Включён — ничего не делает.
+         */
+        fun ensureBackground(ctx: Context) {
+            val app = ctx.applicationContext
+            if (IslandSettings.systemEnabled(app)) return
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    get(app).startBackground()
+                } catch (e: Exception) {
+                    // плашка — украшение
+                }
+            }
+        }
     }
 
+    /** Приложение на экране (между onResume и onPause MainActivity) — тогда есть Activity; в фоне и без приложения — null. */
+    private var activity: Activity? = null
+
     private val handler = Handler(Looper.getMainLooper())
-    private val density = activity.resources.displayMetrics.density
+    private val density = appCtx.resources.displayMetrics.density
 
     // Корень окна: тап распознаётся здесь (trackTap), а не только кликом дочерней плашки — так нажатие не зависит от того,
     // дошло ли оно до вложенного View, и «залипшая» анимация/состояние раскрытия не глушат плашку.
-    private val layer = object : FrameLayout(activity) {
+    private val layer = object : FrameLayout(appCtx) {
         override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
             try {
                 trackTap(ev)
@@ -77,17 +125,17 @@ class InAppIsland(private val activity: Activity) {
             return super.dispatchTouchEvent(ev)
         }
     }
-    private val pill = LinearLayout(activity)
-    private val pillIcon = ImageView(activity)
-    private val pillName = TextView(activity)
-    private val pillTime = StrokeText(activity)
-    private val card = FrameLayout(activity)
-    private val cardContent = FrameLayout(activity)
-    private val cardIcon = ImageView(activity)
-    private val cardTime = StrokeText(activity)
-    private val cardName = TextView(activity)
-    private val pauseBtn = ImageView(activity)
-    private val stopBtn = ImageView(activity)
+    private val pill = LinearLayout(appCtx)
+    private val pillIcon = ImageView(appCtx)
+    private val pillName = TextView(appCtx)
+    private val pillTime = StrokeText(appCtx)
+    private val card = FrameLayout(appCtx)
+    private val cardContent = FrameLayout(appCtx)
+    private val cardIcon = ImageView(appCtx)
+    private val cardTime = StrokeText(appCtx)
+    private val cardName = TextView(appCtx)
+    private val pauseBtn = ImageView(appCtx)
+    private val stopBtn = ImageView(appCtx)
     private val cardBg = GradientDrawable().apply { setColor(Color.BLACK) }
 
     // геометрия плашки и карточки (px), считается в layoutFor
@@ -134,7 +182,7 @@ class InAppIsland(private val activity: Activity) {
     private val swStopTask = Runnable {
         if (tapArmed && swMode) {
             tapArmed = false
-            val ctx = activity.applicationContext
+            val ctx = appCtx
             StopwatchTimer.stop(ctx)
             StopwatchService.stop(ctx)
             try { pill.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) } catch (e: Exception) { }
@@ -198,6 +246,7 @@ class InAppIsland(private val activity: Activity) {
         if (rect != null) {
             handler.removeCallbacks(hideAfterCutoutLoss)
             cutout = rect
+            saveCutout(rect)
             return
         }
         // При открытии приложения и смене режима панелей WindowInsets приходят заново и вырез на миг может пропасть:
@@ -216,6 +265,7 @@ class InAppIsland(private val activity: Activity) {
     fun start() {
         if (started) return
         started = true
+        idleTicks = 0
         handler.post(tick)
     }
 
@@ -226,22 +276,86 @@ class InAppIsland(private val activity: Activity) {
         hide()
     }
 
+    /** MainActivity.onResume: приложение на экране — плашка работает как всегда (и привязана к его окну в запасном режиме). */
+    fun setActivity(a: Activity?) {
+        if (activity === a) return
+        if (attached && mode == 1) detach() // запасное место — decorView прежней Activity
+        activity = a
+    }
+
+    /** MainActivity.onPause: системный остров включён — плашка уходит вместе с приложением; выключен — остаётся поверх других приложений. */
+    fun onActivityPaused(a: Activity) {
+        if (activity !== a) return
+        setActivity(null)
+        if (!backgroundWanted()) stop()
+    }
+
+    /** Из служб ([ensureBackground]): приложение не на экране, системный остров выключен — крутим цикл плашки сами. */
+    private fun startBackground() {
+        if (activity == null && backgroundWanted()) start()
+    }
+
+    /** Свёрнутое приложение показывает плашку, только если системный остров выключен и выдано «Поверх других приложений». */
+    private fun backgroundWanted(): Boolean = !IslandSettings.systemEnabled(appCtx) && canOverlay()
+
+    /** Вне приложения плашка рисуется только при обычном портретном положении экрана (вырез сохранён из портрета). */
+    @Suppress("DEPRECATION")
+    private fun isUpright(): Boolean = try {
+        wm().defaultDisplay.rotation == Surface.ROTATION_0
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun prefs() = appCtx.getSharedPreferences("island", Context.MODE_PRIVATE)
+
+    /** Вырез, виденный приложением в портрете, запоминается: без приложения (служба, ярлык) WindowInsets взять неоткуда. */
+    private fun saveCutout(r: Rect) {
+        if (!isUpright()) return
+        val key = "" + r.left + "," + r.top + "," + r.right + "," + r.bottom + "," + appCtx.resources.displayMetrics.widthPixels
+        val sp = prefs()
+        if (sp.getString("cut", "") == key) return
+        sp.edit().putString("cut", key).apply()
+    }
+
+    private fun loadCutout(): Rect? {
+        val parts = (prefs().getString("cut", null) ?: return null).split(",")
+        if (parts.size != 5) return null
+        val v = IntArray(5)
+        for (i in 0 until 5) v[i] = parts[i].toIntOrNull() ?: return null
+        if (v[4] != appCtx.resources.displayMetrics.widthPixels) return null // ширина другая (другой масштаб экрана) — вырез не тот
+        return Rect(v[0], v[1], v[2], v[3])
+    }
+
+    private var idleTicks = 0
+
     private val tick = object : Runnable {
         override fun run() {
             if (!started) return
+            val inBackground = activity == null
+            if (inBackground && !backgroundWanted()) { // настройку включили обратно или разрешение отозвали
+                stop()
+                return
+            }
             try {
                 refresh()
             } catch (e: Exception) {
                 hide() // плашка — украшение: любая ошибка не должна мешать приложению
             }
+            if (inBackground) {
+                // нечего показывать (таймер кончился, ландшафт): цикл не крутим вхолостую — службы запустят его снова
+                if (layer.visibility == View.VISIBLE) idleTicks = 0 else if (++idleTicks > IDLE_STOP_TICKS) {
+                    stop()
+                    return
+                }
+            }
             handler.postDelayed(this, 500L)
         }
     }
 
-    private fun wm() = activity.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    private fun wm() = appCtx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
     private fun canOverlay(): Boolean = try {
-        Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(activity)
+        Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(appCtx)
     } catch (e: Exception) {
         false
     }
@@ -249,6 +363,7 @@ class InAppIsland(private val activity: Activity) {
     /** Ставит слой в нужное место: своё окно поверх всех (нажимается) или, без разрешения, decorView. */
     private fun attach() {
         val want = if (canOverlay()) 2 else 1
+        if (want == 1 && activity == null) return // без разрешения и без приложения на экране плашке негде жить
         if (attached && mode == want) return
         detach()
         mode = want // сначала режим: от него зависят отступы и размер окна
@@ -270,7 +385,8 @@ class InAppIsland(private val activity: Activity) {
                 winLp = wl
                 wm().addView(layer, wl)
             } else {
-                (activity.window.decorView as ViewGroup).addView(
+                val host = activity?.window?.decorView as? ViewGroup ?: return
+                host.addView(
                     layer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 )
             }
@@ -325,7 +441,7 @@ class InAppIsland(private val activity: Activity) {
     private fun onPauseClick() {
         val id = currentId
         if (id != null) {
-            val ctx = activity.applicationContext
+            val ctx = appCtx
             if (paused) CardTimers.resume(ctx, id) else CardTimers.pause(ctx, id)
         }
         expandedAt = System.currentTimeMillis()
@@ -334,7 +450,7 @@ class InAppIsland(private val activity: Activity) {
 
     private fun onStopClick() {
         val id = currentId
-        if (id != null) CardTimers.cancel(activity.applicationContext, id)
+        if (id != null) CardTimers.cancel(appCtx, id)
         collapse()
         refresh()
     }
@@ -346,34 +462,25 @@ class InAppIsland(private val activity: Activity) {
      * система время от времени его сбрасывает, а без него плашку нельзя нажать. Повторно — не чаще раза в `ASK_EVERY_MS`.
      */
     private fun askOverlayOnce() {
-        if (Build.VERSION.SDK_INT < 23 || canOverlay() || activity.isFinishing) return
+        val act = activity ?: return // вопрос показывается только в открытом приложении
+        if (Build.VERSION.SDK_INT < 23 || canOverlay() || act.isFinishing) return
         if (askDialog?.isShowing == true) return
-        val prefs = activity.getSharedPreferences("island", Context.MODE_PRIVATE)
+        val prefs = prefs()
         val now = System.currentTimeMillis()
         val last = prefs.getLong("askedAt", 0L)
         if (last in 1..now && now - last < ASK_EVERY_MS) return
         prefs.edit().putLong("askedAt", now).apply()
         try {
-            askDialog = AlertDialog.Builder(activity)
+            askDialog = AlertDialog.Builder(act)
                 .setTitle("Плашка таймера")
                 .setMessage("Разрешение «Поверх других приложений» (в настройках Xiaomi — «Отображение всплывающих окон») выключено: система его время от времени сбрасывает. Без него плашку сверху нельзя нажать и раскрыть. Включить?")
-                .setPositiveButton("Открыть настройки") { _, _ -> openOverlaySettings() }
+                .setPositiveButton("Открыть настройки") { _, _ -> openOverlaySettings(appCtx) }
                 .setNegativeButton("Позже", null)
                 .show()
         } catch (e: Exception) {
         }
     }
 
-    private fun openOverlaySettings() {
-        try {
-            activity.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + activity.packageName)))
-        } catch (e: Exception) {
-            try {
-                activity.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + activity.packageName)))
-            } catch (e2: Exception) {
-            }
-        }
-    }
 
     private fun hide() {
         stopAnim()
@@ -388,14 +495,15 @@ class InAppIsland(private val activity: Activity) {
 
     private fun toggle() {
         if (swMode) { // секундомер: пауза/продолжить
-            val ctx = activity.applicationContext
+            val ctx = appCtx
             StopwatchTimer.togglePause(ctx)
             StopwatchService.refresh(ctx)
             refresh()
             return
         }
         if (pomoMode) { // помодоро: плашка не раскрывается, нажатие возвращает на вкладку «Помодоро»
-            (activity as? MainActivity)?.openPomodoroTab()
+            val a = activity
+            if (a is MainActivity) a.openPomodoroTab() else openAppOnPomodoro()
             return
         }
         // состояние «раскрыта», хотя карточка давно свёрнута (прервалась анимация/пересборка окна) — считаем свёрнутой
@@ -403,10 +511,22 @@ class InAppIsland(private val activity: Activity) {
         if (expanded) collapse() else expand()
     }
 
+    /** Нажатие на плашку помодоро, когда приложение не на экране: выносим его вперёд сразу на вкладку «Помодоро». */
+    private fun openAppOnPomodoro() {
+        try {
+            val i = Intent(appCtx, MainActivity::class.java)
+            i.action = MainActivity.ACTION_OPEN_POMODORO
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            appCtx.startActivity(i)
+        } catch (e: Exception) {
+            // запуск из фона не разрешён: приложение откроется нажатием на уведомление
+        }
+    }
+
     private var tapArmed = false
     private var tapX = 0f
     private var tapY = 0f
-    private val tapSlop = ViewConfiguration.get(activity).scaledTouchSlop
+    private val tapSlop = ViewConfiguration.get(appCtx).scaledTouchSlop
 
     private fun inPill(x: Float, y: Float): Boolean {
         if (pill.width <= 0 || pill.height <= 0) return true // раскладка ещё не прошла: всё окно — плашка
@@ -531,15 +651,15 @@ class InAppIsland(private val activity: Activity) {
     }
 
     private fun refresh() {
-        val r = cutout
-        val pomo = PomodoroTimer.islandInfo(activity.applicationContext)
+        val r = if (activity != null) cutout else if (isUpright()) loadCutout() else null
+        val pomo = PomodoroTimer.islandInfo(appCtx)
         if (pomo != null && r != null) {
             refreshPomodoro(r, pomo)
             return
         }
-        val cardInfo = if (pomo != null) null else CardTimers.primaryInfo(activity.applicationContext)
+        val cardInfo = if (pomo != null) null else CardTimers.primaryInfo(appCtx)
         // секундомер уступает помодоро и таймеру карточки: те ждут срока, а секундомер — нет
-        val sw = if (pomo == null && cardInfo == null) StopwatchTimer.snapshot(activity.applicationContext) else null
+        val sw = if (pomo == null && cardInfo == null) StopwatchTimer.snapshot(appCtx) else null
         if (sw != null && r != null) {
             refreshStopwatch(r, sw)
             return
@@ -693,7 +813,7 @@ class InAppIsland(private val activity: Activity) {
         if (builtFor == r) return
         builtFor = Rect(r)
         if (attached) detach() // геометрия поменялась: окно с картинкой создаётся заново уже нужного размера
-        val screenW = activity.resources.displayMetrics.widthPixels
+        val screenW = appCtx.resources.displayMetrics.widthPixels
         scrW = screenW
         // Рамка выреза у Xiaomi — размером со всю строку состояния, по ней плашка выходит огромной. Размеры берём
         // от ширины экрана, как у настоящего острова (замер на Poco X6 Pro: 500 × 105 px при ширине 1220, отступ сверху 13 px).
@@ -710,14 +830,14 @@ class InAppIsland(private val activity: Activity) {
         pill.setPadding(side, 0, (screenW * 0.0272f).roundToInt(), 0)
         pillTime.strokePx = screenW * 0.0021f
         val iconSize = (h * 0.57f).roundToInt()
-        val leftBox = LinearLayout(activity).apply {
+        val leftBox = LinearLayout(appCtx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             addView(pillIcon, LinearLayout.LayoutParams(iconSize, iconSize))
             addView(pillName, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = (screenW * 0.0087f).roundToInt() })
         }
         pillTime.setPadding((screenW * 0.02f).roundToInt(), 0, 0, 0)
-        val rightBox = LinearLayout(activity).apply {
+        val rightBox = LinearLayout(appCtx).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
             addView(pillTime)
         }
@@ -754,7 +874,7 @@ class InAppIsland(private val activity: Activity) {
         cardName.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0354f) // как у настоящего острова (было 0.0328)
         cardTime.translationY = -screenW * 0.0017f
         cardName.translationY = -screenW * 0.0034f
-        val texts = LinearLayout(activity).apply {
+        val texts = LinearLayout(appCtx).apply {
             orientation = LinearLayout.VERTICAL
             addView(cardTime)
             addView(cardName)
@@ -766,7 +886,7 @@ class InAppIsland(private val activity: Activity) {
         })
         cardContent.addView(pauseBtn, FrameLayout.LayoutParams(btn, btn).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; marginEnd = edge + btn + gap })
         cardContent.addView(stopBtn, FrameLayout.LayoutParams(btn, btn).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; marginEnd = edge })
-        val bar = View(activity).apply { background = GradientDrawable().apply { setColor(0xFF3A3A3A.toInt()); cornerRadius = screenW * 0.004f } }
+        val bar = View(appCtx).apply { background = GradientDrawable().apply { setColor(0xFF3A3A3A.toInt()); cornerRadius = screenW * 0.004f } }
         cardContent.addView(bar, FrameLayout.LayoutParams((screenW * 0.152f).roundToInt(), (screenW * 0.008f).roundToInt()).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             bottomMargin = (screenW * 0.008f).roundToInt()

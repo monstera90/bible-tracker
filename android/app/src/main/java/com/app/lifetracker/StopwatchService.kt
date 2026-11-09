@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (09.11)
+// Версия: 1.1 (09.11)
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -20,7 +20,8 @@ import androidx.core.app.ServiceCompat
 /**
  * Служба переднего плана секундомера ([StopwatchTimer]): раз в секунду перепоставляет уведомление (на Xiaomi с HyperOS — остров,
  * [XiaomiIsland.stopwatchExtras]), потому что свёрнутый остров сам не тикает. Пока приложение на экране, уведомление не
- * перепоставляется (его заменяет плашка [InAppIsland]). Если остров Xiaomi держит помодоро или таймер карточки, секундомер
+ * перепоставляется (его заменяет плашка [InAppIsland]). При выключенном системном острове ([IslandSettings]) службе остров не
+ * нужен: она держит процесс, а плашку [InAppIsland] показывает и при свёрнутом приложении (в том числе после ярлыка «Секундомер»). Если остров Xiaomi держит помодоро или таймер карточки, секундомер
  * его не перебивает (иначе два тикающих уведомления дёргали бы остров). Кнопки — «Пауза/Продолжить» и «Стоп». Номер уведомления — 10.
  */
 class StopwatchService : Service() {
@@ -119,7 +120,7 @@ class StopwatchService : Service() {
             val island = XiaomiIsland.stopwatchExtras(ctx, s, StopwatchTimer.consumeFloat(), pause, stop)
             // На Xiaomi — остров по протоколу Xiaomi; на остальных — «живое обновление» Android 16.
             if (island != null) b.addExtras(island)
-            else b.addExtras(Bundle().apply { putBoolean("android.requestPromotedOngoing", true) })
+            else if (IslandSettings.systemEnabled(ctx)) b.addExtras(Bundle().apply { putBoolean("android.requestPromotedOngoing", true) })
             return b.build()
         }
     }
@@ -139,6 +140,7 @@ class StopwatchService : Service() {
                 shutdown()
                 return
             }
+            InAppIsland.ensureBackground(ctx) // системный остров выключен: плашка секундомера висит поверх других приложений
             if (!NotifyStore.appForeground && !othersLeadIsland(ctx)) {
                 try {
                     val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

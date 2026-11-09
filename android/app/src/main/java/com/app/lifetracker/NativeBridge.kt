@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 20.0 (08.11)
+// Версия: 21.0 (09.11)
 // Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
@@ -42,6 +42,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 27: вкладка «Система»: системный плавающий остров (islandGet / islandSetSystem / islandOpenOverlaySettings; IslandSettings).
          * 26: помодоро: законченные рабочие отрезки для календаря и «Истории» (pomodoroTakeFinished / pomodoroAckFinished).
          * 25: вкладка «Помодоро» (pomodoroStart / pomodoroPause / pomodoroPlus5 / pomodoroSkip / pomodoroStop / pomodoroState / pomodoroUi).
          * 23: `claudeHome()` — «домик» вкладки Claude (первый экран).
@@ -56,7 +57,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 26
+        const val BRIDGE_VERSION = 27
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -996,5 +997,47 @@ class NativeBridge(private val activity: MainActivity) {
     fun volumeBoostSetEngine(engine: Int): String {
         if (!activity.pageTrusted) return "{}"
         return VolumeBoost.setEngine(activity.applicationContext, engine)
+    }
+
+    // ---------- вкладка «Система»: системный плавающий остров (IslandSettings; мост ≥27) ----------
+
+    private fun islandJson(): String {
+        val ctx = activity.applicationContext
+        val overlay = try {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.M || android.provider.Settings.canDrawOverlays(ctx)
+        } catch (e: Exception) {
+            false
+        }
+        return JSONObject().put("system", IslandSettings.systemEnabled(ctx)).put("overlay", overlay).toString()
+    }
+
+    /** JSON: {"system":true|false,"overlay":true|false}; system — отдавать ли острова системе, overlay — выдано ли «Поверх других приложений». */
+    @JavascriptInterface
+    fun islandGet(): String {
+        if (!activity.pageTrusted) return "{}"
+        return islandJson()
+    }
+
+    /** Включить/выключить системный плавающий остров; идущим таймерам, помодоро и секундомеру тут же пересобираются службы. Возвращает состояние, как [islandGet]. */
+    @JavascriptInterface
+    fun islandSetSystem(on: Boolean): String {
+        if (!activity.pageTrusted) return "{}"
+        val ctx = activity.applicationContext
+        IslandSettings.setSystemEnabled(ctx, on)
+        try {
+            CardTimers.onIslandSettingChanged(ctx)
+            if (StopwatchTimer.isActive(ctx)) StopwatchService.refresh(ctx)
+            if (PomodoroTimer.isActive(ctx)) PomodoroService.refresh(ctx)
+        } catch (e: Exception) {
+            // службы подхватят настройку на следующем тике
+        }
+        return islandJson()
+    }
+
+    /** Открыть экран разрешения «Поверх других приложений» (на Xiaomi — «Отображение всплывающих окон»): без него плашка вне приложения не рисуется. */
+    @JavascriptInterface
+    fun islandOpenOverlaySettings() {
+        if (!activity.pageTrusted) return
+        activity.runOnUiThread { InAppIsland.openOverlaySettings(activity.applicationContext) }
     }
 }
