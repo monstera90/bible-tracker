@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 22.1 (10.11)
+   Версия: 22.2 (10.11)
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
@@ -2192,6 +2192,9 @@ window.initMdEditorModule = function(deps){
   // и "назад" должен вести прямо туда, откуда кликнули по ссылке, а не в
   // список заметок блокнота. См. pushMdNav ниже.
   var suppressNextNavPush = false;
+  // Шаг «назад», который кладёт автовозврат к последней заметке при первом заходе на вкладку (`resumeLastNoteOrShowList`): если
+  // сразу после него снаружи открыли заметку дня (календарь, карточка «Сегодня»), этот шаг лишний — его пропускаем (`createDatedNote`).
+  var lastPushedNavFn = null, resumeNavFn = null;
   // ---- размер шрифта (кнопка "Аа") — "единица" равна FONT_SIZE_STEP_PX,
   // применяется через CSS-переменную --mdeditor-font-size, выставляемую
   // на :root (document.documentElement), а не только на хост редактора —
@@ -2422,7 +2425,11 @@ window.initMdEditorModule = function(deps){
   // пришедший снаружи по [[ссылке]], не задваивал запись в истории.
   function pushMdNav(restoreFn){
     if(suppressNextNavPush){ suppressNextNavPush = false; return; }
-    if(window.AppNav && typeof window.AppNav.push === "function") window.AppNav.push(restoreFn);
+    resumeNavFn = null; // любой новый шаг: шаг автовозврата уже не последний
+    if(window.AppNav && typeof window.AppNav.push === "function"){
+      window.AppNav.push(restoreFn);
+      lastPushedNavFn = restoreFn;
+    }
   }
 
   function setStatus(msg, isError){
@@ -4866,9 +4873,13 @@ window.initMdEditorModule = function(deps){
     return found || DATED_NOTE_FOLDER;
   }
   // true — заметка создана и открыта; false — заметки ещё не загружены (вызывающий повторит позже)
-  function createDatedNote(){
+  // dayTs — начало нужного дня (мс); без него — сегодня. Вход снаружи (календарь, карточка «Сегодня»): переход на вкладку заметок уже шаг «назад».
+  function createDatedNote(dayTs){
     if(!notesReady) return false;
-    var base = todayRu();
+    // автовозврат к последней заметке успел положить свой шаг ровно перед этим открытием — он лишний («назад» вёл бы в список заметок)
+    if(resumeNavFn && window.AppNav && window.AppNav.top && window.AppNav.top() === resumeNavFn) resumeNavFn.__navSkip = true;
+    resumeNavFn = null;
+    var base = (typeof dayTs === "number" && isFinite(dayTs) && dayTs > 0) ? formatDateRu(new Date(dayTs)) : todayRu();
     // заметка на сегодня уже есть (имена уникальны по всему блокноту) — открываем её, новую не создаём
     var existingId = nameIndex.get(base.toLowerCase());
     var existing = existingId ? notesMap.get(existingId) : null;
@@ -5696,7 +5707,9 @@ window.initMdEditorModule = function(deps){
         for(var k in v){ if(v.hasOwnProperty(k)) docState[k] = v[k]; }
       }
       if(docState.screen === "editor" && docState.id && notesMap.has(docState.id) && !notesMap.get(docState.id).deleted){
+        lastPushedNavFn = null;
         openNoteById(docState.id, docState.cursorPos, docState.scrollPercent);
+        resumeNavFn = lastPushedNavFn;
       } else {
         screen = "list";
         render();

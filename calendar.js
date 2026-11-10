@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 17.1 (10.11)
+   Версия: 17.2 (10.11)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самостоятельный нижний язычок набора 1 справа от «Задачи»,
@@ -713,7 +713,7 @@
     var cols = '';
     for(var i = 0; i < 7; i++){
       var ds = dayStartAt(ws, i), isToday = dateValue(ds) === todayKey;
-      head += '<div class="cal-wk-dayh' + (isToday ? ' cal-wk-today' : '') + '"><span>' + WEEKDAYS[i] + '</span><b>' + new Date(ds).getDate() + '</b></div>';
+      head += '<div class="cal-wk-dayh' + (isToday ? ' cal-wk-today' : '') + '" data-day="' + ds + '"><span>' + WEEKDAYS[i] + '</span><b>' + new Date(ds).getDate() + '</b></div>';
       cols += dayColHtml(ds, segsByDay[i], trkByDay ? trkByDay[i] : null, isToday, now);
     }
     head += '</div>';
@@ -870,9 +870,9 @@
       if(Date.now() - pinchEndedAt < 350) return; // тап, оставшийся от щипка
       var trk = e.target.closest ? e.target.closest(".cal-wk-trk") : null;
       if(trk){ trackerToast(trk.getAttribute("data-txt") || ""); return; }
-      // сегодняшняя дата в шапке недели: открыть сегодняшнюю заметку (нет — создать)
-      var todayHead = e.target.closest ? e.target.closest(".cal-wk-dayh.cal-wk-today") : null;
-      if(todayHead){ if(OPEN_TODAY){ try{ OPEN_TODAY(); }catch(err){ console.error(err); } } return; }
+      // дата любого дня в шапке недели: открыть заметку этого дня (нет — создать)
+      var dayHead = e.target.closest ? e.target.closest(".cal-wk-dayh") : null;
+      if(dayHead){ if(OPEN_TODAY){ try{ OPEN_TODAY(+dayHead.getAttribute("data-day")); }catch(err){ console.error(err); } } return; }
       var blk = e.target.closest ? e.target.closest(".cal-wk-ev") : null;
       if(blk){
         var ev = findEvent(blk.getAttribute("data-id"));
