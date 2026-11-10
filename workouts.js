@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 10.0 (10.11)
+   Версия: 10.1 (10.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -379,6 +379,8 @@
       ".wk-row .wk-dist{font-weight:bold;font-variant-numeric:tabular-nums;}" +
       ".wk-row .wk-time{color:var(--ink-soft);min-width:64px;text-align:right;font-variant-numeric:tabular-nums;}" +
       ".wk-row .wk-sub{display:block;font-size:.8em;color:var(--ink-soft);}" +
+      ".wk-row.wk-row-del{background:rgba(180,60,60,.12);}" +
+      ".wk-row[data-id]{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;}" +
       ".wk-del{margin:0 0 6px auto;display:block;padding:6px 14px;border-radius:10px;border:1px solid var(--danger);background:transparent;color:var(--danger);font:inherit;cursor:pointer;}" +
       ".wk-del.armed{background:var(--danger);color:var(--parchment);}" +
       ".wk-empty{color:var(--ink-soft);text-align:center;margin:26px 0;}" +
@@ -553,11 +555,9 @@
     var pend = pendingRecord(), pid = pend ? pend.id : "";
     return recs.map(function(r){
       if(r.man){ // высота «внесена вручную» (карточка «+ к высоте»), когда в этот день тренировки не было: строка без километров и времени
-        var openM = openedId === r.id;
         return '<div class="wk-row" data-id="' + esc(r.id) + '">' +
           '<span class="wk-date">' + esc(dayLabel(r.start)) + ' <span class="wk-sub">' + esc(fmtHM(r.start)) + ' · ↑ ' + Math.round(num(r.up)) + ' м · внесено вручную</span></span>' +
-          '<span class="wk-dist"></span><span class="wk-time"></span></div>' +
-          (openM ? '<button type="button" class="wk-del" data-del="' + esc(r.id) + '">Удалить</button>' : "");
+          '<span class="wk-dist"></span><span class="wk-time"></span></div>';
       }
       var sub = [];
       if(rpeOk(r.rpe)) sub.push(minutesOf(r) + " мин × " + r.rpe + " = " + loadOf(r) + " " + pointsWord(loadOf(r)));
@@ -567,12 +567,10 @@
       if(num(r.up) > 0) sub.push("↑ " + Math.round(num(r.up)) + " м" + (num(r.upMan) > 0 ? " (из них внесено вручную " + Math.round(num(r.upMan)) + " м)" : ""));
       if(num(r.jumps) > 0) sub.push("выбросов GPS: " + Math.round(num(r.jumps)));
       if(num(r.lostMs) >= 1000) sub.push("без учёта км: " + fmtDur(r.lostMs));
-      var open = openedId === r.id;
       return '<div class="wk-row" data-id="' + esc(r.id) + '">' +
         '<span class="wk-date">' + esc(dayLabel(r.start)) + ' <span class="wk-sub">' + esc(fmtHM(r.start)) + (sub.length ? " · " + esc(sub.join(" · ")) : "") + '</span></span>' +
         '<span class="wk-dist">' + esc(fmtKm(r.m)) + '</span>' +
-        '<span class="wk-time">' + (num(r.totalMs) > 0 ? esc(fmtClock(r.totalMs)) : "") + '</span></div>' +
-        (open ? '<button type="button" class="wk-del" data-del="' + esc(r.id) + '">Удалить</button>' : "");
+        '<span class="wk-time">' + (num(r.totalMs) > 0 ? esc(fmtClock(r.totalMs)) : "") + '</span></div>';
     }).join("");
   }
 
@@ -597,17 +595,7 @@
         render();
       });
     });
-    Array.prototype.forEach.call(c.querySelectorAll(".wk-row[data-id]"), function(row){
-      row.addEventListener("click", function(){
-        var id = row.getAttribute("data-id");
-        openedId = (openedId === id) ? null : id;
-        clearArm();
-        render();
-      });
-    });
-    Array.prototype.forEach.call(c.querySelectorAll(".wk-del"), function(b){
-      b.addEventListener("click", function(){ onDelete(b); });
-    });
+    Array.prototype.forEach.call(c.querySelectorAll(".wk-row[data-id]"), bindRowLongPress);
     var rec = document.getElementById("wkRecBtn");
     if(rec) rec.addEventListener("click", onRecordTap);
     var lb = document.getElementById("wkLoadBtn");
@@ -670,23 +658,60 @@
   }
 
   function clearArm(){ if(delArm){ clearTimeout(delArm.timer); delArm = null; } }
-  function onDelete(btn){
-    var id = btn.getAttribute("data-del");
-    if(delArm && delArm.id === id){
-      clearArm();
+  // удаление записи (тренировка или «внесено вручную») — долгое нажатие на строке списка, плашка с одним крестиком (как у задач):
+  // нажатие на крестик удаляет, нажатие мимо — отмена
+  var ROW_PRESS_MS = 500, ROW_PRESS_TOL = 10;
+  var CROSS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>';
+  function clearRowMark(){
+    var hl = document.querySelectorAll(".wk-row-del");
+    for(var i = 0; i < hl.length; i++) hl[i].classList.remove("wk-row-del");
+  }
+  function askDeleteRow(id, row){
+    var bar = window.AppConfirmBar;
+    if(!bar || !bar.openGrid) return;
+    clearRowMark();
+    row.classList.add("wk-row-del");
+    // клик, которым заканчивается долгое нажатие, не должен сразу закрыть плашку как «клик мимо»
+    function guard(e){ e.stopImmediatePropagation(); e.preventDefault(); }
+    document.addEventListener("click", guard, true);
+    setTimeout(function(){ document.removeEventListener("click", guard, true); }, 700);
+    bar.openGrid(row, [{ key: "del", svg: CROSS_SVG, title: "Удалить" }], function(){
+      clearRowMark();
       try{ if(STORE) STORE.remove(id); }catch(e){}
       pendCache = null;
       openedId = null;
       render();
-      return;
+    }, { label: "Удалить запись?", onCancel: clearRowMark });
+  }
+  function bindRowLongPress(row){
+    var timer = null, sx = 0, sy = 0, lastTouchAt = 0;
+    function cancel(){ if(timer){ clearTimeout(timer); timer = null; } }
+    function down(e, isTouch){
+      if(isTouch) lastTouchAt = Date.now();
+      else if(Date.now() - lastTouchAt < 800) return; // эмулированные мышиные события после касания
+      var pt = (e.touches && e.touches[0]) || e;
+      sx = pt.clientX; sy = pt.clientY;
+      cancel();
+      timer = setTimeout(function(){
+        timer = null;
+        try{ if(navigator.vibrate) navigator.vibrate(20); }catch(err){}
+        askDeleteRow(row.getAttribute("data-id"), row);
+      }, ROW_PRESS_MS);
     }
-    clearArm();
-    btn.textContent = "Нажмите ещё раз";
-    btn.classList.add("armed");
-    delArm = { id: id, timer: setTimeout(function(){
-      delArm = null;
-      if(btn.isConnected !== false){ btn.textContent = "Удалить"; btn.classList.remove("armed"); }
-    }, 3000) };
+    function move(e){
+      if(!timer) return;
+      var pt = (e.touches && e.touches[0]) || e;
+      if(Math.abs(pt.clientX - sx) > ROW_PRESS_TOL || Math.abs(pt.clientY - sy) > ROW_PRESS_TOL) cancel();
+    }
+    row.addEventListener("touchstart", function(e){ down(e, true); });
+    row.addEventListener("touchmove", move);
+    row.addEventListener("touchend", cancel);
+    row.addEventListener("touchcancel", cancel);
+    row.addEventListener("mousedown", function(e){ down(e, false); });
+    row.addEventListener("mousemove", move);
+    row.addEventListener("mouseup", cancel);
+    row.addEventListener("mouseleave", cancel);
+    row.addEventListener("contextmenu", function(e){ e.preventDefault(); }); // системное меню при долгом нажатии не нужно
   }
 
   // ---------- запись ----------
@@ -965,7 +990,7 @@
     html += row(REC_ICON_SVG, "Набор высоты («↑ м») считается по высоте GPS: она сглаживается, подъём засчитывается после изменения больше 3 м. Для записи достаточно разрешения геолокации «Во время использования приложения» (с включённым «Точным местоположением»): запись идёт и при выключенном экране, пока висит уведомление тренировки. Начинайте запись при открытом приложении и не ограничивайте его в расходе батареи (на Xiaomi — «Без ограничений» и «Автозапуск»), иначе система может остановить запись. Записи хранятся на устройстве и входят в облачную синхронизацию и экспорт.");
     html += row('<span style="font-size:12px;font-weight:bold;">0</span>', "Число слева в нижнем ряду — нагрузка за 7 дней: баллы = минуты × оценка. Нажатие открывает пояснение.");
     html += row('<span style="font-size:11px;font-weight:bold;">1 мес.</span>', "Период: месяц, 3 месяца, полгода, год. Стрелки ‹ › и свайп листают назад и вперёд, сверху — сумма километров и число тренировок. Нажатие на строку записи открывает «Удалить» (нужно нажать дважды).");
-    html += row(UP_SVG, "Высота рядом с километражом — сумма набора за выбранный период. Метры, внесённые карточкой «+ к высоте» (или её QR-кодом), добавляются к последней сегодняшней тренировке, а если сегодня тренировки не было — в общий счётчик высоты отдельной строкой «внесено вручную».");
+    html += row(UP_SVG, "Удалить тренировку или внесённую высоту — долгое нажатие на строке списка, затем крестик на плашке (нажатие мимо — отмена). Высота рядом с километражом — сумма набора за выбранный период. Метры, внесённые карточкой «+ к высоте» (или её QR-кодом), добавляются к последней сегодняшней тренировке, а если сегодня тренировки не было — в общий счётчик высоты отдельной строкой «внесено вручную».");
     html += row(IMPORT_ICON_SVG, "Загружает тренировки из файла. Подходят два вида: архив «Экспортировать личные данные» (ZIP или data.json) — из него берутся только тренировки, остальные данные не меняются; и CSV-выгрузка стороннего трекера — из неё берутся только пробежки: дата и километры (время и баллы не переносятся). Уже имеющиеся тренировки повторно не добавляются.");
     html += row(TIP_ICON_SVG, "Советы: один совет в день показывается внизу вкладки, когда запись не идёт. Нажатие на карточку закрывает её до следующего открытия вкладки. Кнопка открывает список советов: добавить, изменить, удалить; у каждого — категория и необязательные отметки: тяжесть последней тренировки (1–3, 4–6, 7–10) и её дистанция (короткая/длинная). Без отметок совет подходит всегда.");
     html += row(CUP_ICON_SVG, "Рекорды: самое долгое время и самая длинная дистанция, а также лучшее время на 5 км, 10 км, полумарафоне и марафоне. На дистанцию подходит запись длиной от 98 % до 110 % этой дистанции (время пересчитывается на ровную дистанцию); импортированные записи без времени в лучших временах не участвуют. Пока подходящей записи нет, пишет «ожидается».");
