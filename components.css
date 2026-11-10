@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 25.0 (10.11)
+   Версия: 25.1 (10.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4883,6 +4883,7 @@ body::after{
 .cal-daycol .cal-dc-body{ position:relative; width:100%; background-image:linear-gradient(to bottom, rgba(0,0,0,.14) 1px, transparent 1px); }
 .cal-daycol .cal-dc-labels span{ position:absolute; left:3px; font-size:8px; line-height:10px; color:var(--ink-soft, var(--ink)); opacity:.75; pointer-events:none; font-variant-numeric:tabular-nums; }
 .cal-daycol .cal-wk-col{ position:absolute; left:0; right:0; top:0; bottom:0; }
+.cal-daycol .cal-wk-today-col{ background:transparent; } /* вся колонка — «сегодня»: серая подложка недели здесь не нужна, фон = фон окна */
 /* форма мероприятия поверх заметки (calendar.js extForm): слой на всё окно настроек, выше нижнего ряда кнопок заметки */
 .cal-dayform{ position:absolute; left:0; right:0; top:0; bottom:0; z-index:20; background:var(--parchment); overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch; font-family:"Palatino Linotype",Georgia,serif; color:var(--ink); }
 

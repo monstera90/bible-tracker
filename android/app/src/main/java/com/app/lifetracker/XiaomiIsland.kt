@@ -1,6 +1,6 @@
 package com.app.lifetracker
 // Версия: 10.3 (09.11)
-// Версия: 8.0 (03.11)
+// Версия: 8.1 (10.11)
 // Версия: 7.1 (27.10) — кнопка паузы острова тренировки цвета метки (красная/зелёная/жёлтая): `pauseBitmap(..., colorOverride)`, `workoutDotColor`.
 // Версия: 7.0 (27.10) — остров записи тренировки: `workoutExtras` (метка-диод красная/жёлтая/зелёная, время и дистанция, кнопки «Пауза» и «Стоп»), `workoutDotBitmap`, `elapsedText`. Откат: XiaomiIsland.kt 6.0.
 // Версия: 6.0 (25.10) — остров плеера «Музыка»: `musicExtras` (значок-нота, название трека и папка, кнопки «Назад / Пауза-Играть / Вперёд»), `musicIconBitmap`, `musicButtonBitmap`. Откат: XiaomiIsland.kt 5.2.
@@ -40,6 +40,10 @@ import org.json.JSONObject
  * выдаёт его по своим правилам). Любая ошибка здесь не мешает таймеру: [extras] вернёт null и уведомление пойдёт обычное.
  */
 object XiaomiIsland {
+
+    // Раскрывать ли остров сам при запуске/продолжении таймера (карточки, помодоро, секундомер). false — остров появляется свёрнутым, без всплывания;
+    // закреплённое уведомление и сам остров остаются. Музыка, видео и тренировка не затронуты.
+    private const val TIMER_FLOAT = false
 
     private const val PIC_KEY = "miui.focus.pic_timer"
     private const val PIC_BIG_KEY = "miui.focus.pic_timer_big"
@@ -156,7 +160,7 @@ object XiaomiIsland {
         val v2 = JSONObject()
             .put("protocol", 1)
             .put("business", "card_timer")
-            .put("islandFirstFloat", float)
+            .put("islandFirstFloat", float && TIMER_FLOAT)
             .put("enableFloat", false)
             .put("updatable", true)
             .put("ticker", title)
@@ -704,7 +708,7 @@ object XiaomiIsland {
             val v2 = JSONObject()
                 .put("protocol", 1)
                 .put("business", "pomodoro_timer")
-                .put("islandFirstFloat", float)
+                .put("islandFirstFloat", float && TIMER_FLOAT)
                 .put("enableFloat", false)
                 .put("updatable", true)
                 .put("ticker", label)
@@ -857,7 +861,7 @@ object XiaomiIsland {
             val v2 = JSONObject()
                 .put("protocol", 1)
                 .put("business", "stopwatch")
-                .put("islandFirstFloat", float)
+                .put("islandFirstFloat", float && TIMER_FLOAT)
                 .put("enableFloat", false)
                 .put("updatable", true)
                 .put("ticker", total)
