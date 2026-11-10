@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 37.0 (10.11)
+   Версия: 37.1 (10.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -1604,7 +1604,16 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     if(syncInfo.pending.length > 300) syncInfo.pending = syncInfo.pending.slice(-300);
     saveSyncInfo(syncInfo); // удалить и запись в облаке (reconcileCloud)
     saveCards();
+    // renderGrid пересобирает сетку, и прокрутка уходила в начало перечня — запоминаем позицию и возвращаем её
+    var gridBefore = document.getElementById("itemCardsGrid");
+    var scBefore = gridBefore ? dragScroller(gridBefore) : null;
+    var stBefore = scBefore ? scBefore.scrollTop : 0;
     renderGrid();
+    if(stBefore > 0){
+      var gridAfter = document.getElementById("itemCardsGrid");
+      var scAfter = (gridAfter ? dragScroller(gridAfter) : null) || scBefore;
+      if(scAfter) scAfter.scrollTop = stBefore; // браузер сам ограничит, если после удаления лента стала короче
+    }
   }
 
   // ---------- форма создания / правки ----------
