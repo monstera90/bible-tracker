@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 17.0 (10.11)
+   Версия: 17.1 (10.11)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самостоятельный нижний язычок набора 1 справа от «Задачи»,
@@ -327,6 +327,7 @@
   var lastSig = null;          // подпись списка при последней отрисовке/обновлении (refresh не перерисовывает без перемен)
   // задачи календаря: провайдер от my.js (setTasks): add(title)→id, state(id)→"open"|"done"|"gone", rename(id,title), remove(id)
   var TASKS = null;
+  var OPEN_TODAY = null; // my.js: открыть/создать сегодняшнюю заметку (setOpenToday)
   var TASK_BLOCK_MIN = 30; // высота блока задачи в неделе, минут
   function isTask(ev){ return !!(ev && ev.kind === "task" && ev.taskId); }
   function taskStateOf(ev){
@@ -869,6 +870,9 @@
       if(Date.now() - pinchEndedAt < 350) return; // тап, оставшийся от щипка
       var trk = e.target.closest ? e.target.closest(".cal-wk-trk") : null;
       if(trk){ trackerToast(trk.getAttribute("data-txt") || ""); return; }
+      // сегодняшняя дата в шапке недели: открыть сегодняшнюю заметку (нет — создать)
+      var todayHead = e.target.closest ? e.target.closest(".cal-wk-dayh.cal-wk-today") : null;
+      if(todayHead){ if(OPEN_TODAY){ try{ OPEN_TODAY(); }catch(err){ console.error(err); } } return; }
       var blk = e.target.closest ? e.target.closest(".cal-wk-ev") : null;
       if(blk){
         var ev = findEvent(blk.getAttribute("data-id"));
@@ -1619,6 +1623,8 @@
     setStore: function(store){ STORE = store || null; },
     // my.js отдаёт работу с задачами «Ожидания» (см. шапку)
     setTasks: function(t){ TASKS = t || null; },
+    // my.js отдаёт открытие сегодняшней заметки (тап по сегодняшней дате в шапке недели)
+    setOpenToday: function(fn){ OPEN_TODAY = typeof fn === "function" ? fn : null; },
     render: function(){ if(extForm) closeExtForm(); importLegacy(); loadMode(); weekStart = null; weekScrollKeep = null; lastSig = JSON.stringify(load()); renderMain(); },
     // данные могли измениться снаружи (пришли чужие правки группы): перерисовать текущий экран, если список изменился.
     // Открытую форму не трогаем; прокрутка сохраняется. my.js зовёт только когда вкладка «Календарь» на экране.

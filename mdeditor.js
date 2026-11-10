@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 21.0 (10.11)
+   Версия: 22.0 (10.11)
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
@@ -4752,6 +4752,7 @@ window.initMdEditorModule = function(deps){
         openFile = prevOpenFile;
         currentDirNode = prevDirNode;
         screen = prevScreen;
+        fixDeadOpenFile();
         render();
         persistListScreenIfList(); // вернулись «назад» к списку — после перезапуска откроется список, а не последняя заметка
       });
@@ -4895,11 +4896,13 @@ window.initMdEditorModule = function(deps){
     }
     pushMdNav(function(){
       flushAutosaveNow();
+      dropEmptyOpenNote();
       binding.pushNow({keepalive:true});
       destroyEditor();
       openFile = prevOpenFile;
       currentDirNode = prevDirNode;
       screen = prevScreen;
+      fixDeadOpenFile();
       render();
       persistListScreenIfList(); // вернулись «назад» к списку — после перезапуска откроется список, а не последняя заметка
       if(prevScrollTop !== null){
@@ -5114,8 +5117,42 @@ window.initMdEditorModule = function(deps){
     showNoteQr(plaque, openFile.id);
   }
 
+  // ---- пустые заметки не сохраняются ----
+  // При уходе из заметки (назад, «домик», другая вкладка) заметка без единого знака текста удаляется сама. Строка метаданных
+  // `%%meta:…%%` (даты создания/правки/открытия) за текст не считается. Текстом считаются буквы любых алфавитов, цифры, иероглифы,
+  // эмодзи и любые другие знаки вне латиницы/кириллицы-пунктуации; пробелы, переводы строк, ASCII-знаки препинания и разметка
+  // (`#`, `-`, `*`, `>`…) — нет. Скрытые заметки-карточки не трогаются.
+  function noteTextHasContent(text){
+    var body = noteBodyOnly(text);
+    for(var i = 0; i < body.length; i++){
+      var ch = body.charAt(i), code = body.charCodeAt(i);
+      if(ch.toLowerCase() !== ch.toUpperCase()) return true;      // буква (латиница, кириллица, греческий…)
+      if(code >= 48 && code <= 57) return true;                    // цифра
+      if(code >= 0x0370 && !(code >= 0x2000 && code <= 0x2BFF) && !(code >= 0x3000 && code <= 0x303F) && !(code >= 0xFE00 && code <= 0xFE0F) && !(code >= 0xFF00 && code <= 0xFF0F) && code !== 0xFEFF) return true; // нерегистровые письменности, эмодзи
+    }
+    return false;
+  }
+  function noteAlive(id){ var r = notesMap.get(id); return !!r && !r.deleted; }
+  // true — открытая заметка была пустой и удалена (openFile обнулён). Вызывать после flushAutosaveNow и до destroyEditor.
+  function dropEmptyOpenNote(){
+    if(!openFile || screen !== "editor") return false;
+    var rec = notesMap.get(openFile.id);
+    if(!rec || rec.deleted || isCardMetaRec(rec)) return false;
+    var text = cmView ? cmView.state.doc.toString() : (rec.text || "");
+    if(noteTextHasContent(text)) return false;
+    if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
+    deleteNoteRecord(openFile.id, true);
+    openFile = null;
+    return true;
+  }
+  // после возврата «назад» к заметке, которую успели удалить как пустую: вместо неё — список
+  function fixDeadOpenFile(){
+    if(openFile && !noteAlive(openFile.id)){ openFile = null; if(screen === "editor") screen = "list"; }
+  }
+
   function goHome(){
     flushAutosaveNow();
+    dropEmptyOpenNote();
     binding.pushNow({keepalive:true});
     destroyEditor();
     openFile = null;
@@ -5248,11 +5285,13 @@ window.initMdEditorModule = function(deps){
     }
     pushMdNav(function(){
       flushAutosaveNow();
+      dropEmptyOpenNote();
       binding.pushNow({keepalive:true});
       destroyEditor();
       openFile = prevOpenFile;
       currentDirNode = prevDirNode;
       screen = prevScreen;
+      fixDeadOpenFile();
       render();
       persistListScreenIfList(); // вернулись «назад» к списку — после перезапуска откроется список, а не последняя заметка
       if(prevScrollTop !== null){
@@ -5290,11 +5329,13 @@ window.initMdEditorModule = function(deps){
     }
     pushMdNav(function(){
       flushAutosaveNow();
+      dropEmptyOpenNote();
       binding.pushNow({keepalive:true});
       destroyEditor();
       openFile = prevOpenFile;
       currentDirNode = prevDirNode;
       screen = prevScreen;
+      fixDeadOpenFile();
       render();
       persistListScreenIfList(); // вернулись «назад» к списку — после перезапуска откроется список, а не последняя заметка
       if(prevScrollTop !== null){
@@ -5333,11 +5374,13 @@ window.initMdEditorModule = function(deps){
     }
     pushMdNav(function(){
       flushAutosaveNow();
+      dropEmptyOpenNote();
       binding.pushNow({keepalive:true});
       destroyEditor();
       openFile = prevOpenFile;
       currentDirNode = prevDirNode;
       screen = prevScreen;
+      fixDeadOpenFile();
       render();
       persistListScreenIfList(); // вернулись «назад» к списку — после перезапуска откроется список, а не последняя заметка
       if(prevScrollTop !== null){
@@ -5702,6 +5745,7 @@ window.initMdEditorModule = function(deps){
   // поэтому шлёт правки в облако немедленно, а не по debounce.
   function flushPendingMdEditorEdit(){
     flushAutosaveNow();
+    if(dropEmptyOpenNote()){ screen = "list"; persistListScreenIfList(); } // пустая заметка при уходе с вкладки удаляется, вернёмся к списку
     binding.pushNow({keepalive:true});
     destroyEditor();
     noteInfoOpen = false; // экран «i» при уходе на другую вкладку не запоминается

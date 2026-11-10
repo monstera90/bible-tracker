@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 25.4 (10.11)
+   Версия: 25.5 (10.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4883,7 +4883,7 @@ body::after{
 .cal-wk-dayh{ flex:1 1 0; min-width:0; text-align:center; padding:2px 0 3px 0; font-size:11px; color:var(--ink-soft, var(--ink)); line-height:1.2; }
 .cal-wk-dayh b{ display:block; font-size:14px; color:var(--ink); }
 .cal-wk-dayh.cal-wk-today b{ display:block; width:fit-content; margin:0 auto; text-align:center; min-width:22px; border-radius:11px; background:var(--wood); color:var(--parchment); }
-.cal-wk-dayh.cal-wk-today{ color:var(--wood); }
+.cal-wk-dayh.cal-wk-today{ color:var(--wood); cursor:pointer; }
 .cal-wk-body{ display:flex; position:relative; }
 .cal-wk-labels{ position:relative; }
 .cal-wk-labels span{ position:absolute; right:3px; font-size:9px; color:var(--ink-soft, var(--ink)); line-height:12px; font-variant-numeric:tabular-nums; }

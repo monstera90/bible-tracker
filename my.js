@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 143.8 (10.11)
+   Версия: 144.0 (10.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -10691,7 +10691,16 @@
     if(calendarStoreReady || !window.CalendarTab || !window.CalendarTab.setStore) return;
     window.CalendarTab.setStore(calendarStore);
     if(window.CalendarTab.setTasks) window.CalendarTab.setTasks(calendarTasksApi);
+    if(window.CalendarTab.setOpenToday) window.CalendarTab.setOpenToday(openTodayNoteFromCalendar);
     calendarStoreReady = true;
+  }
+  // тап по сегодняшней дате в шапке недели календаря (calendar.js): открывает сегодняшнюю заметку, а если её ещё нет — создаёт
+  // (тот же путь, что у карточки «Сегодня»: `MdEditor.createDatedNote`; заметки на холодном старте могут быть ещё не загружены — ждём)
+  function openTodayNoteFromCalendar(n){
+    n = n || 0;
+    if(n === 0) switchSettingsTab("set2s_1");
+    if(MdEditor && MdEditor.createDatedNote && MdEditor.createDatedNote()) return;
+    if(n < 25) setTimeout(function(){ openTodayNoteFromCalendar(n + 1); }, 300);
   }
   // колонка дня в ежедневной заметке (calendar.js mountDayColumn) работает без открытия вкладки «Календарь»: хранилище и трекеры готовим здесь
   window.__ltEnsureCalendarStore = function(){ ensureCalendarStore(); try{ ensureWorkoutsStore(); }catch(e){} };
