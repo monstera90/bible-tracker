@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 36.0 (09.11)
+   Версия: 37.0 (10.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -93,6 +93,9 @@ window.initItemCardsModule = function(deps){
   var ALARM_TIMES_MAX = 4;               // повторов не больше четырёх (всего звонков до пяти)
   var WEATHER_PREFIX = "lt://v1/weather/"; // «погода»: координаты и название города в самом коде
   var HABIT_PREFIX = "lt://v1/habit/";
+var CLIMB_PREFIX = "lt://v1/climb/";   // «+ к высоте»: метры в самом коде
+var CLIMB_MAX = 9999;                  // метров за один раз
+var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно ярлыка → приложение» для «+ к высоте» (тот же localStorage)
   var TASK_PREFIX = "lt://v1/task/";
   var TASK_TEXT_MAX = 80; // текст задачи в коде: длиннее — код плотнее и хуже читается на малой наклейке (на карточке и в PDF показывается только начало)
   var PENDING_TASKS_KEY = "pendingScanTasks_v1"; // очередь «окно ярлыка → приложение» (тот же localStorage)
@@ -145,6 +148,7 @@ window.initItemCardsModule = function(deps){
       var tg = taskTag(c.tag);
       return TASK_PREFIX + c.icon + (tg ? "#" + tg : "") + "/" + taskText(c.title);
     }
+    if(c && c.type === "climb" && climbMeters(c)) return CLIMB_PREFIX + climbMeters(c); // «+ к высоте»: метры в самом коде
     if(c && c.type === "combo"){ // «Комбинированный»: все действия в самом коде
       var cacts = comboActs(c);
       if(cacts.length) return window.CardScan.comboCode(cacts);
@@ -249,8 +253,9 @@ window.initItemCardsModule = function(deps){
     datepaper: '<path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path><rect x="8.5" y="11.5" width="7" height="6" rx="1"></rect><path d="M8.5 14h7"></path><path d="M10.5 10.2v2.2M13.5 10.2v2.2"></path>'
   };
   var ICON_ORDER = ["bottle", "container", "jar", "bicycle", "car", "vegetable", "paper"];
-  var DEFAULT_ICON = { item: "", timer: "", task: "", datenote: "datepaper", reminder: "reminder", weather: "weather", combo: "combo" };
+  var DEFAULT_ICON = { item: "", timer: "", task: "", datenote: "datepaper", reminder: "reminder", weather: "weather", combo: "combo", climb: "climb" };
   ICONS.weather = '<circle cx="8.5" cy="8.5" r="2.6"></circle><path d="M8.5 3v1.2M3 8.5h1.2M4.6 4.6l.9.9M12.4 4.6l-.9.9"></path><path d="M8 19.5h9.2a3.3 3.3 0 0 0 .5-6.55A4.6 4.6 0 0 0 9 12.6 3.4 3.4 0 0 0 8 19.5z"></path>';
+  ICONS.climb = '<path d="M2.5 20l6.5-11 4 6.5 2.5-3.5 6 8z"></path><path d="M18 3v5M15.5 5.5h5"></path>';
   ICONS.combo = '<path d="M12 2.5l9 5-9 5-9-5z"></path><path d="M3 12.5l9 5 9-5"></path><path d="M3 17l9 5 9-5"></path>';
   ICONS.habit = '<rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 10h16M8 3v4M16 3v4"></path><path d="M9 15l2 2 4-4"></path>';
   var DATENOTE_TITLE = "Сегодня";
@@ -335,7 +340,10 @@ window.initItemCardsModule = function(deps){
     document.head.appendChild(st);
   }
   function isSingletonCard(c){ return !!c && (c.type === "datenote" || c.type === "reminder"); }
+  // «+ к высоте»: метры карточки (целое 1…CLIMB_MAX), 0 — не задано
+  function climbMeters(c){ var n = Math.floor(Number(c && c.meters) || 0); return n >= 1 && n <= CLIMB_MAX ? n : 0; }
   function cardTitle(c){
+    if(c.type === "climb") return c.title || ("+ " + climbMeters(c) + " м");
     if(c.type === "datenote") return DATENOTE_TITLE;
     if(c.type === "reminder") return REMINDER_TITLE;
     return c.title || "";
@@ -402,7 +410,7 @@ window.initItemCardsModule = function(deps){
   // запись карточки в том виде, как она ходит между устройствами (и проверка пришедшей из облака)
   function cloudShape(r){
     if(!r || typeof r.id !== "string" || !/^[A-Za-z0-9]{4,32}$/.test(r.id)) return null;
-    if(r.type !== "timer" && r.type !== "alarm" && r.type !== "item" && r.type !== "task" && r.type !== "datenote" && r.type !== "reminder" && r.type !== "habit" && r.type !== "remind" && r.type !== "weather" && r.type !== "combo") return null;
+    if(r.type !== "timer" && r.type !== "alarm" && r.type !== "item" && r.type !== "task" && r.type !== "datenote" && r.type !== "reminder" && r.type !== "habit" && r.type !== "remind" && r.type !== "weather" && r.type !== "combo" && r.type !== "climb") return null;
     var o = {
       id: r.id,
       type: r.type,
@@ -415,6 +423,7 @@ window.initItemCardsModule = function(deps){
     };
     if(r.type === "task") o.tag = taskTag(r.tag);
     if(r.type === "combo") o.acts = comboActsForCloud(r.acts);
+    if(r.type === "climb") o.meters = climbMeters(r);
     if(r.hidden) o.hidden = 1; // «скрыть» — общий признак карточки любого типа
     if(r.fav) o.fav = 1; // «избранное» — тоже общий признак
     if(r.type === "timer" && r.noIsland) o.noIsland = 1; // скрытый таймер: без острова и уведомления «идёт»
@@ -609,6 +618,7 @@ window.initItemCardsModule = function(deps){
     { key: "timer", label: "Таймеры" },
     { key: "alarm", label: "Будильники" },
     { key: "weather", label: "Погода" },
+    { key: "climb", label: "К высоте" },
     { key: "item", label: "Предметы" },
     { key: "task", label: "Задачи" },
     { key: "habit", label: "Привычки" },
@@ -874,6 +884,11 @@ window.initItemCardsModule = function(deps){
           '<button type="button" class="item-card-wx-btn" title="Показать погоду">Показать</button>' +
         '</div>';
     }
+    if(c.type === "climb"){ // значок горы с плюсом, название и «+ N м»
+      return '<div class="item-card-icon">' + iconSvg(c.icon || "climb") + '</div>' +
+        '<div class="item-card-title"></div>' +
+        '<div class="item-card-date">+ ' + climbMeters(c) + ' м</div>';
+    }
     if(c.type === "combo"){ // значок «слои», название и число действий (запуск — нажатием на карточку)
       return '<div class="item-card-icon">' + iconSvg("combo") + '</div>' +
         '<div class="item-card-title"></div>' +
@@ -917,6 +932,7 @@ window.initItemCardsModule = function(deps){
       '<button type="button" class="workbooks-run-btn" data-type="htimer">Скрытый таймер</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="alarm">Будильник</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="weather">Погода</button>' +
+      '<button type="button" class="workbooks-run-btn" data-type="climb">+ к высоте</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="combo">Комбинированный</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="item">Предмет</button>' +
       '<button type="button" class="workbooks-run-btn" data-type="task">Создавать задачу</button>' +
@@ -1137,7 +1153,7 @@ window.initItemCardsModule = function(deps){
       if(host.dataset.built !== text) return;
       var size = Math.max(60, Math.round(card.clientWidth * 0.72));
       var qo = { text: text, width: size, height: size, colorDark: "#000000", colorLight: "#ffffff" };
-      if(cc && (cc.type === "task" || cc.type === "weather" || cc.type === "combo")) qo.correctLevel = window.QRCode.CorrectLevel.M; // текст внутри кода: уровень M — меньше модулей, код крупнее
+      if(cc && (cc.type === "task" || cc.type === "weather" || cc.type === "combo" || cc.type === "climb")) qo.correctLevel = window.QRCode.CorrectLevel.M; // текст внутри кода: уровень M — меньше модулей, код крупнее
       try{ new window.QRCode(host, qo); }catch(e){}
     }).catch(function(){ host.textContent = "QR недоступен"; });
   }
@@ -1592,7 +1608,7 @@ window.initItemCardsModule = function(deps){
   }
 
   // ---------- форма создания / правки ----------
-  var TYPE_LABEL = { timer: "Таймер", alarm: "Будильник", weather: "Погода", htimer: "Скрытый таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE, remind: "Напоминание", combo: "Комбинированный" };
+  var TYPE_LABEL = { timer: "Таймер", alarm: "Будильник", weather: "Погода", climb: "+ к высоте", htimer: "Скрытый таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE, remind: "Напоминание", combo: "Комбинированный" };
   // выбор цвета карточки (необязательный, у любого типа): разметка и привязка; первый пастельный квадрат — пустой цвет
   function colorPaletteHtml(type){
     var h = '<div class="item-form-hint">' + (type === "habit"
@@ -1624,6 +1640,7 @@ window.initItemCardsModule = function(deps){
     var data = card ? JSON.parse(JSON.stringify(card)) : {
       type: type, title: isSingle ? TYPE_LABEL[type] : "", icon: DEFAULT_ICON[type] || "", date: isSingle ? "" : todayIso(), seconds: 0
     };
+    if(type === "climb" && !card) data.meters = 0;
     if(isNew && hideIsland) data.noIsland = 1;
     data.color = isNew ? defaultColorFor(colorKey) : cardColor(card); // новая карточка — с запомненным цветом этого типа
     var colorTouched = false;
@@ -1635,6 +1652,9 @@ window.initItemCardsModule = function(deps){
     }
     if(type === "alarm"){
       html += '<div class="item-form-hint">Время, повтор и название зашиты в код. Кто его отсканирует, у того будильник заведётся на ближайшее такое время (сегодня, если оно ещё не прошло, иначе завтра) и сработает карточкой на экране, в том числе заблокированном; выключить — смахнуть карточку. Повторы необязательны: если выбраны, будильник прозвонит ещё несколько раз через равные промежутки — каждый звонок гасится смахиванием.</div>';
+    }
+    if(type === "climb"){
+      html += '<div class="item-form-hint">Метры зашиты в код. Нажатие на карточку или скан её кода добавляет эти метры к набору высоты в последней сегодняшней тренировке и в общий счётчик высоты. Если сегодня тренировки не было, метры просто попадают в общий счётчик. Такие метры на вкладке «Тренировки» помечаются как «внесено вручную». Повторное нажатие добавляет метры ещё раз.</div>';
     }
     if(type === "weather"){
       html += '<div class="item-form-hint">Город зашит в код. Кто его отсканирует, увидит погоду за окном: сейчас (температура, ветер, влажность, УФ-индекс, время рассвета и заката, осадки) и прогноз на три дня вперёд. Карточка на другом устройстве не нужна. Нужен интернет (данные Open-Meteo).</div>';
@@ -1648,7 +1668,7 @@ window.initItemCardsModule = function(deps){
     if(type === "remind"){
       html += '<div class="item-form-hint">Напоминание сработает в выбранный день и час. QR-кода у этой карточки нет.</div>';
     }
-    if(!isSingle && type !== "weather") html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="' + (type === "task" ? "Текст задачи (до " + TASK_TEXT_MAX + " знаков)" : "Название") + '" maxlength="' + (type === "task" ? TASK_TEXT_MAX : (type === "habit" ? HABIT_TITLE_MAX : 80)) + '" autocomplete="off">';
+    if(!isSingle && type !== "weather") html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfTitle" placeholder="' + (type === "task" ? "Текст задачи (до " + TASK_TEXT_MAX + " знаков)" : (type === "climb" ? "Название (необязательно)" : "Название")) + '" maxlength="' + (type === "task" ? TASK_TEXT_MAX : (type === "habit" ? HABIT_TITLE_MAX : 80)) + '" autocomplete="off">';
     if(isSingle){
       // только цвет (ниже)
     } else if(type === "task"){
@@ -1665,6 +1685,8 @@ window.initItemCardsModule = function(deps){
       catList.forEach(function(x){ html += '<option value="' + escapeHtml(x) + '">' + escapeHtml(x) + '</option>'; });
       html += '<option value="__new__">Новая категория…</option></select>' +
         '<input type="text" class="mdeditor-cleanup-input" id="icfCatNew" placeholder="Новая категория (до ' + TASK_TAG_MAX + ' знаков)" maxlength="' + TASK_TAG_MAX + '" autocomplete="off" style="display:none;"></div>';
+    } else if(type === "climb"){
+      html += '<input type="number" inputmode="numeric" min="1" max="' + CLIMB_MAX + '" step="1" class="mdeditor-cleanup-input item-form-title" id="icfMeters" placeholder="Метры высоты, например 50">';
     } else if(type === "weather"){
       html += '<input type="text" class="mdeditor-cleanup-input item-form-title" id="icfCity" placeholder="Город (например, Париж)" maxlength="60" autocomplete="off">';
       html += '<div class="item-form-hint" id="icfCityPicked"></div>';
@@ -1721,7 +1743,10 @@ window.initItemCardsModule = function(deps){
     if(titleEl) titleEl.value = data.title || "";
     var errEl = document.getElementById("icfError");
 
-    if(type === "alarm"){
+    if(type === "climb"){
+      var mIn = document.getElementById("icfMeters");
+      if(mIn && climbMeters(data)) mIn.value = String(climbMeters(data));
+    } else if(type === "alarm"){
       var ahm0 = alarmHM(data) || { h: 7, m: 0 }; // новый будильник — 07:00
       setWheel("h", ahm0.h);
       setWheel("m", ahm0.m);
@@ -1879,6 +1904,12 @@ window.initItemCardsModule = function(deps){
         data.tag = taskTag(csel.value === "__new__" ? cnew.value : csel.value);
         if(csel.value === "__new__" && !data.tag){ errEl.textContent = "Введите название категории или выберите «Без категории»."; return; }
       }
+      if(type === "climb"){
+        var mv = Math.floor(Number((document.getElementById("icfMeters") || {}).value));
+        if(!(mv >= 1 && mv <= CLIMB_MAX)){ errEl.textContent = "Введите метры высоты: целое число от 1 до " + CLIMB_MAX + "."; return; }
+        data.meters = mv;
+        if(!title) title = "+ " + mv + " м";
+      }
       if(type === "weather"){
         if(typeof data.lat !== "number" || typeof data.lon !== "number" || !data.title){ errEl.textContent = "Найдите город и выберите его из списка."; return; }
         title = data.title;
@@ -1930,6 +1961,7 @@ window.initItemCardsModule = function(deps){
           cur.date = data.date;
           cur.seconds = data.seconds;
           if(type === "weather"){ cur.lat = data.lat; cur.lon = data.lon; }
+          if(type === "climb") cur.meters = data.meters;
           if(type === "alarm"){ cur.alarmTime = data.alarmTime; cur.alarmEvery = data.alarmEvery; cur.alarmTimes = data.alarmTimes; }
           if(type === "remind"){ cur.comment = data.comment; cur.remindAt = data.remindAt; cur.repeatKind = data.repeatKind; cur.remindDone = 0; }
           cur.updatedAt = now;
@@ -2491,6 +2523,7 @@ window.initItemCardsModule = function(deps){
       showNoticeOverlay({ kind: "missing", id: p.id });
       return;
     }
+    if(p.kind === "climb"){ handleScannedClimb(p.meters); return; } // «+ к высоте» из самого кода: карточка не нужна
     if(p.kind === "habit"){ handleScannedHabit(p); return; } // привычка с названием в коде: нет карточки — создаём по коду
     if(p.kind === "reminder"){ showReminderOverlay(); return; } // общий код «Напоминалки»: карточка не нужна
     if(p.kind === "today"){ openTodayFromScan(); return; }       // общий код «Сегодня»: карточка не нужна
@@ -2502,6 +2535,53 @@ window.initItemCardsModule = function(deps){
     if(p.kind === "timer"){ showScanned(timerFromCode(p)); return; } // таймер из самого кода: отсчёт стартует сразу, карточка не нужна
     evLog("Просканирован QR-код: " + String(p.url || p.text || "").slice(0, 80));
     showNoticeOverlay({ kind: p.kind, url: p.url, text: p.text });
+  }
+
+  // ---------- «+ к высоте»: скан кода lt://v1/climb/<метры> или нажатие на карточку ----------
+  // В приложении метры добавляет my.js (deps.addClimb → WorkoutsTab.addClimb): к последней сегодняшней тренировке и в общий счётчик высоты,
+  // а если сегодня тренировки не было — только в счётчик (запись «внесено вручную»). Окно ярлыка (scan.html) вкладки «Тренировки»
+  // не содержит: метры кладутся в очередь (тот же localStorage), приложение выполняет её при запуске/возврате (`drainPendingClimbs`).
+  function climbNote(res){
+    if(!res || res.status !== "added") return "Не удалось добавить высоту";
+    return res.onto === "workout" ? "Добавлено в последнюю тренировку сегодня · всего за сегодня " + res.total + " м" : "Тренировки сегодня не было — добавлено в общий счётчик высоты · за сегодня " + res.total + " м";
+  }
+  function applyClimb(meters, silent){
+    var res;
+    try{ res = deps.addClimb ? deps.addClimb(meters) : { status: "error" }; }
+    catch(e){ console.error(e); res = { status: "error" }; }
+    if(res && res.status === "added") evLog("К высоте добавлено " + meters + " м (" + (res.onto === "workout" ? "в последнюю тренировку сегодня" : "в общий счётчик, тренировки сегодня не было") + ")");
+    return res;
+  }
+  function handleScannedClimb(meters, card){
+    meters = Math.floor(Number(meters) || 0);
+    var vc = card || { id: "climbscan", type: "climb", title: "+ " + meters + " м", meters: meters };
+    if(!(meters >= 1 && meters <= CLIMB_MAX)){ showNoticeOverlay({ kind: "msg", text: "Метры высоты в коде заданы неверно." }); return; }
+    if(standalone){
+      try{
+        var q = JSON.parse(localStorage.getItem(PENDING_CLIMB_KEY) || "[]");
+        if(!Array.isArray(q)) q = [];
+        q.push({ m: meters, at: Date.now() });
+        localStorage.setItem(PENDING_CLIMB_KEY, JSON.stringify(q.slice(-20)));
+      }catch(e){}
+      showCardOverlay(vc, "Принято — высота добавится, когда вы откроете приложение");
+      return;
+    }
+    var res = applyClimb(meters, false);
+    scanDirty = true;
+    showCardOverlay(vc, climbNote(res));
+  }
+  // очередь из окна ярлыка: свежие записи (не старше 12 часов, чтобы метры попали в ту же сутки-тренировку) выполняются молча
+  function drainPendingClimbs(){
+    var q = [];
+    try{ q = JSON.parse(localStorage.getItem(PENDING_CLIMB_KEY) || "[]"); }catch(e){ q = []; }
+    if(!Array.isArray(q) || !q.length) return;
+    if(!deps.addClimb) return; // окно ярлыка: очередь остаётся приложению
+    try{ localStorage.removeItem(PENDING_CLIMB_KEY); }catch(e){}
+    var now = Date.now();
+    q.forEach(function(x){
+      var m = Math.floor(Number(x && x.m) || 0);
+      if(m >= 1 && m <= CLIMB_MAX && now - (Number(x.at) || 0) < 12 * 3600 * 1000) applyClimb(m, true);
+    });
   }
 
   // ---------- привычка из кода lt://v1/habit/<id>/<название> ----------
@@ -2587,6 +2667,7 @@ window.initItemCardsModule = function(deps){
   // silent — без слоя (очередь из окна ярлыка выполняется в фоне: слой пользователь уже видел в самом окне)
   function drainPendingTasks(silent){
     cacheTaskTabs();
+    drainPendingClimbs(); // «+ к высоте», отсканированный в окне ярлыка
     drainPendingCombos(false); // задачи из «Комбинированного», отсканированного в окне ярлыка («открыть» ждёт своего входа)
     var q = [];
     try{ q = JSON.parse(localStorage.getItem(PENDING_TASKS_KEY) || "[]"); }catch(e){ q = []; }
@@ -2653,6 +2734,7 @@ window.initItemCardsModule = function(deps){
     return true;
   }
   function showScanned(c){
+    if(c.type === "climb"){ handleScannedClimb(climbMeters(c), c); return; } // «+ к высоте»: метры в тренировку/счётчик, слой с карточкой
     if(c.type === "weather"){ showWeatherOverlay(c, true); return; } // на случай кода по id карточки
     if(c.type === "alarm"){ // скан будильника: не заведён — заводится на ближайшее время; уже заведён (в том числе идут повторы) — выключается
       if(!alarmSupported()){ showNoticeOverlay({ kind: "msg", text: "Будильник работает только в приложении на телефоне." }); return; }

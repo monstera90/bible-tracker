@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 9.2 (09.11)
+   Версия: 10.0 (10.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -185,6 +185,9 @@
 
   // «10,7 км»: одна десятая, запятая; суммы считаются по точным метрам, округляется только показ
   function fmtKm(m){ return (Math.round(num(m) / 100) / 10).toFixed(1).replace(".", ",") + " км"; }
+  // «↑ 235 м»: стрелка вверх рисуется, а не символом (в старом WebView шрифт может её не знать)
+  var UP_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V5"></path><path d="M6 11l6-6 6 6"></path></svg>';
+  function fmtUpHtml(m){ return UP_SVG + " " + Math.round(num(m)) + " м"; }
   function fmtClock(ms){
     var s = Math.max(0, Math.floor(num(ms) / 1000));
     var h = Math.floor(s / 3600), mi = Math.floor((s % 3600) / 60), se = s % 60;
@@ -247,6 +250,7 @@
     return list.filter(function(r){ return r.start >= a && r.start < b; });
   }
   function sumM(list){ var s = 0; list.forEach(function(r){ s += num(r.m); }); return s; }
+  function sumUp(list){ var s = 0; list.forEach(function(r){ s += num(r.up); }); return s; } // высота: и с тренировок, и внесённая вручную
   function sumMs(list){ var s = 0; list.forEach(function(r){ s += num(r.totalMs); }); return s; }
 
   // ---------- «Нагрузка» (sRPE) ----------
@@ -367,6 +371,8 @@
       ".wk-total{text-align:center;margin:6px 0 12px;}" +
       ".wk-total .wk-km{font-size:2.3em;font-weight:bold;font-variant-numeric:tabular-nums;color:var(--wood-dark);}" +
       ".wk-total .wk-sub{color:var(--ink-soft);margin-top:2px;}" +
+      ".wk-total .wk-up{font-size:.52em;font-weight:600;white-space:nowrap;margin-left:.45em;}" +
+      ".wk-total .wk-up svg{width:.95em;height:.95em;vertical-align:-.12em;}" +
       ".wk-row{display:flex;align-items:center;gap:10px;padding:8px 2px;border-top:1px solid var(--groove-shadow);cursor:pointer;}" +
       ".wk-row:first-of-type{border-top:none;}" +
       ".wk-row .wk-date{flex:1;}" +
@@ -489,8 +495,8 @@
       '<h3 class="common-tab-title">Тренировки</h3>' +
       '<div class="wk-nav"><button type="button" id="wkPrev" aria-label="Назад">‹</button><div class="wk-title">' + esc(periodTitle()) +
       '</div><button type="button" id="wkNext" aria-label="Вперёд"' + (endMonth.getTime() >= curMonth().getTime() ? " disabled" : "") + '>›</button></div>' +
-      '<div class="wk-total"><div class="wk-km">' + esc(fmtKm(sumM(recs))) + '</div><div class="wk-sub">' +
-        summaryHtml(recs) +
+      '<div class="wk-total"><div class="wk-km">' + esc(fmtKm(sumM(recs))) + '<span class="wk-up">• ' + fmtUpHtml(sumUp(recs)) + '</span></div><div class="wk-sub">' +
+        summaryHtml(recs.filter(function(r){ return !r.man; })) +
       '</div></div>' +
       byMonthHtml(recs) +
       listHtml(recs) +
@@ -531,8 +537,10 @@
       var ms = addMonths(endMonth, -i);
       var a = ms.getTime(), b = addMonths(ms, 1).getTime();
       var part = recs.filter(function(r){ return r.start >= a && r.start < b; });
+      var partUp = sumUp(part);
+      part = part.filter(function(r){ return !r.man; }); // записи «внесено вручную» числом тренировок не считаются
       out.push('<div class="wk-row" data-month="' + ms.getFullYear() + "-" + ms.getMonth() + '">' +
-        '<span class="wk-date">' + esc(MONTHS[ms.getMonth()]) + (months === 12 || ms.getFullYear() !== endMonth.getFullYear() ? " " + ms.getFullYear() : "") + '</span>' +
+        '<span class="wk-date">' + esc(MONTHS[ms.getMonth()]) + (months === 12 || ms.getFullYear() !== endMonth.getFullYear() ? " " + ms.getFullYear() : "") + (partUp > 0 ? ' <span class="wk-sub">↑ ' + Math.round(partUp) + ' м</span>' : '') + '</span>' +
         '<span class="wk-dist">' + esc(fmtKm(sumM(part))) + '</span>' +
         '<span class="wk-time">' + (part.length ? part.length + " " + plural(part.length, "трен.", "трен.", "трен.") : "—") + '</span></div>');
     }
@@ -544,12 +552,19 @@
     if(months !== 1) return "";
     var pend = pendingRecord(), pid = pend ? pend.id : "";
     return recs.map(function(r){
+      if(r.man){ // высота «внесена вручную» (карточка «+ к высоте»), когда в этот день тренировки не было: строка без километров и времени
+        var openM = openedId === r.id;
+        return '<div class="wk-row" data-id="' + esc(r.id) + '">' +
+          '<span class="wk-date">' + esc(dayLabel(r.start)) + ' <span class="wk-sub">' + esc(fmtHM(r.start)) + ' · ↑ ' + Math.round(num(r.up)) + ' м · внесено вручную</span></span>' +
+          '<span class="wk-dist"></span><span class="wk-time"></span></div>' +
+          (openM ? '<button type="button" class="wk-del" data-del="' + esc(r.id) + '">Удалить</button>' : "");
+      }
       var sub = [];
       if(rpeOk(r.rpe)) sub.push(minutesOf(r) + " мин × " + r.rpe + " = " + loadOf(r) + " " + pointsWord(loadOf(r)));
       else if(r.id === pid) sub.push("ждёт оценки");
       if(r.imp) sub.push("импорт");
       else if(r.how === "raw") sub.push("по GPS");
-      if(num(r.up) > 0) sub.push("↑ " + Math.round(num(r.up)) + " м");
+      if(num(r.up) > 0) sub.push("↑ " + Math.round(num(r.up)) + " м" + (num(r.upMan) > 0 ? " (из них внесено вручную " + Math.round(num(r.upMan)) + " м)" : ""));
       if(num(r.jumps) > 0) sub.push("выбросов GPS: " + Math.round(num(r.jumps)));
       if(num(r.lostMs) >= 1000) sub.push("без учёта км: " + fmtDur(r.lostMs));
       var open = openedId === r.id;
@@ -950,6 +965,7 @@
     html += row(REC_ICON_SVG, "Набор высоты («↑ м») считается по высоте GPS: она сглаживается, подъём засчитывается после изменения больше 3 м. Для записи достаточно разрешения геолокации «Во время использования приложения» (с включённым «Точным местоположением»): запись идёт и при выключенном экране, пока висит уведомление тренировки. Начинайте запись при открытом приложении и не ограничивайте его в расходе батареи (на Xiaomi — «Без ограничений» и «Автозапуск»), иначе система может остановить запись. Записи хранятся на устройстве и входят в облачную синхронизацию и экспорт.");
     html += row('<span style="font-size:12px;font-weight:bold;">0</span>', "Число слева в нижнем ряду — нагрузка за 7 дней: баллы = минуты × оценка. Нажатие открывает пояснение.");
     html += row('<span style="font-size:11px;font-weight:bold;">1 мес.</span>', "Период: месяц, 3 месяца, полгода, год. Стрелки ‹ › и свайп листают назад и вперёд, сверху — сумма километров и число тренировок. Нажатие на строку записи открывает «Удалить» (нужно нажать дважды).");
+    html += row(UP_SVG, "Высота рядом с километражом — сумма набора за выбранный период. Метры, внесённые карточкой «+ к высоте» (или её QR-кодом), добавляются к последней сегодняшней тренировке, а если сегодня тренировки не было — в общий счётчик высоты отдельной строкой «внесено вручную».");
     html += row(IMPORT_ICON_SVG, "Загружает тренировки из файла. Подходят два вида: архив «Экспортировать личные данные» (ZIP или data.json) — из него берутся только тренировки, остальные данные не меняются; и CSV-выгрузка стороннего трекера — из неё берутся только пробежки: дата и километры (время и баллы не переносятся). Уже имеющиеся тренировки повторно не добавляются.");
     html += row(TIP_ICON_SVG, "Советы: один совет в день показывается внизу вкладки, когда запись не идёт. Нажатие на карточку закрывает её до следующего открытия вкладки. Кнопка открывает список советов: добавить, изменить, удалить; у каждого — категория и необязательные отметки: тяжесть последней тренировки (1–3, 4–6, 7–10) и её дистанция (короткая/длинная). Без отметок совет подходит всегда.");
     html += row(CUP_ICON_SVG, "Рекорды: самое долгое время и самая длинная дистанция, а также лучшее время на 5 км, 10 км, полумарафоне и марафоне. На дистанцию подходит запись длиной от 98 % до 110 % этой дистанции (время пересчитывается на ровную дистанцию); импортированные записи без времени в лучших временах не участвуют. Пока подходящей записи нет, пишет «ожидается».");
@@ -1241,7 +1257,7 @@
     });
     asc.forEach(function(r){
       if(num(r.totalMs) > x.maxMs) x.maxMs = num(r.totalMs);
-      if(num(r.up) > x.maxUp) x.maxUp = num(r.up);
+      if(!r.man && num(r.up) > x.maxUp) x.maxUp = num(r.up);
       x.totalUp += num(r.up);
     });
     timed.forEach(function(r){
@@ -1326,7 +1342,7 @@
     });
     [[100, "Первая сотня метров вверх"], [500, "Горный бегун"]].forEach(function(p){
       add(C[3], "u" + p[0], p[1], "За одну тренировку набрано от " + p[0] + " м высоты.",
-        function(x){ return firstWhere(x.asc, function(r){ return num(r.up) >= p[0]; }); },
+        function(x){ return firstWhere(x.asc, function(r){ return !r.man && num(r.up) >= p[0]; }); },
         function(x){ return x.maxUp > 0 ? "наибольший набор: " + Math.round(x.maxUp) + " м" : ""; });
     });
     [[1000, "Тысяча метров вверх"], [8849, "Эверест"]].forEach(function(p){
@@ -1890,9 +1906,11 @@
       start: c.start, end: num(c.end), m: Math.round(num(c.m)), rawM: Math.round(num(c.rawM)),
       totalMs: Math.round(num(c.totalMs)), lostMs: Math.round(num(c.lostMs)),
       gaps: Array.isArray(c.gaps) ? c.gaps.filter(function(g){ return Array.isArray(g) && g.length === 2; }) : [],
-      how: (c.how === "map" || c.how === "imp") ? c.how : "raw"
+      how: (c.how === "map" || c.how === "imp" || c.how === "man") ? c.how : "raw"
     };
     if(num(c.up) > 0) o.up = Math.round(num(c.up));
+    if(num(c.upMan) > 0) o.upMan = Math.round(num(c.upMan));
+    if(c.man) o.man = 1;
     if(num(c.jumps) > 0) o.jumps = Math.round(num(c.jumps));
     if(rpeOk(c.rpe)) o.rpe = Number(c.rpe);
     if(c.imp) o.imp = 1;
@@ -2023,6 +2041,42 @@
     refreshTabMark();
   }
 
+  // «+ к высоте» (карточка/QR из itemcards.js): метры добавляются к последней сегодняшней тренировке (up и upMan — «внесено вручную»);
+  // сегодня тренировки не было — в запись-строку того же дня (`man:1`, без км и времени), она идёт только в счётчик высоты.
+  // → {status:"added", onto:"workout"|"alone", total (набор высоты за сегодня, м)} | {status:"error"}
+  var CLIMB_MAX = 9999;
+  function addClimb(m){
+    m = Math.round(num(m));
+    if(!STORE || !(m >= 1) || m > CLIMB_MAX) return { status: "error" };
+    try{ drain(); }catch(e){}
+    var now = new Date();
+    var d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    var d1 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+    var today = allRecords().filter(function(r){ return r.start >= d0 && r.start < d1; }); // новые сверху
+    var target = null, alone = null;
+    today.forEach(function(r){ if(r.man){ if(!alone) alone = r; } else if(!target) target = r; });
+    var rec = target || alone, onto = target ? "workout" : "alone";
+    try{
+      if(rec){
+        var c = {};
+        Object.keys(rec).forEach(function(k){ if(k !== "id") c[k] = rec[k]; });
+        c.up = Math.round(num(rec.up)) + m;
+        c.upMan = Math.round(num(rec.upMan)) + m;
+        STORE.put(rec.id, c);
+      } else {
+        var ts = Date.now(), d = new Date(ts);
+        STORE.put("man-" + d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate()) + "-" + pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds()),
+          { start: ts, end: ts, m: 0, rawM: 0, totalMs: 0, lostMs: 0, gaps: [], how: "man", man: 1, up: m, upMan: m });
+      }
+    }catch(e){ return { status: "error" }; }
+    pendCache = null;
+    try{ evalProgress(); }catch(e){}
+    refreshIfOpen();
+    var total = 0;
+    allRecords().forEach(function(r){ if(r.start >= d0 && r.start < d1) total += num(r.up); });
+    return { status: "added", onto: onto, total: Math.round(total) };
+  }
+
   // вкладка открыта — перерисовать (после слияния с облаком, после забора записей)
   function refreshIfOpen(){
     pendCache = null;
@@ -2040,9 +2094,10 @@
     setStore: function(s){ STORE = s; pendCache = null; tipsCache = null; startTabMark(); },
     render: function(){ infoOpen = false; importMsg = ""; tipHidden = false; saveLastResult(null); render(); }, // итоговая карточка живёт до ухода с вкладки
     drain: drain,
+    addClimb: addClimb,
     // для календаря («трекеры занятий»): записи как есть — [{id, start, end, totalMs (мс чистого движения), m (метры)}], новые сверху
     records: function(){
-      return allRecords().filter(function(r){ return !r.imp; }).map(function(r){ return { id: r.id, start: r.start, end: num(r.end), totalMs: num(r.totalMs), m: num(r.m) }; });
+      return allRecords().filter(function(r){ return !r.imp && !r.man; }).map(function(r){ return { id: r.id, start: r.start, end: num(r.end), totalMs: num(r.totalMs), m: num(r.m) }; });
     },
     // для экспорта (раздел `workouts` в data.json): читаемые записи, старые сверху
     exportRecords: function(){
@@ -2050,7 +2105,7 @@
         var o = {
           id: r.id, date: localDate(r.start), start: new Date(r.start).toISOString(),
           km: Math.round(num(r.m) / 10) / 100, meters: Math.round(num(r.m)),
-          source: r.imp ? "импорт" : (r.how === "map" ? "GPS + карта" : "GPS")
+          source: r.imp ? "импорт" : (r.man ? "внесено вручную" : (r.how === "map" ? "GPS + карта" : "GPS"))
         };
         if(!r.imp){
           o.rawMeters = Math.round(num(r.rawM));
@@ -2058,6 +2113,7 @@
           o.minutes = minutesOf(r);
           o.lostSeconds = Math.round(num(r.lostMs) / 1000);
           if(num(r.up) > 0) o.climbMeters = Math.round(num(r.up));
+          if(num(r.upMan) > 0) o.manualClimbMeters = Math.round(num(r.upMan));
           if(num(r.jumps) > 0) o.gpsJumps = Math.round(num(r.jumps));
           if(rpeOk(r.rpe)){ o.rpe = Number(r.rpe); o.points = loadOf(r); }
         }

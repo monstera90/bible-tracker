@@ -1,6 +1,6 @@
 /* ===========================================================================
    pomodoro.js
-   Версия: 2.0 (08.11)
+   Версия: 2.1 (10.11)
    Вкладка «Помодоро» (set2s_16, кнопка settingsTabSet2Btn16; боковой ряд «Активности» между «Музыкой» и «QR-кодами»).
    Здесь вся полная информация о сессии: кольцо прогресса, остаток времени, название задачи, «цикл N из M», кнопки
    «Пауза», «+5 минут», «Пропустить перерыв» («Начать работу» после перерыва) и «Завершить». Сам таймер, будильник конца
@@ -103,6 +103,7 @@
     st0.id = "pomodoroTabStyle";
     st0.textContent =
       ".pomo-root{--pomo:#e24a33;--pomo-soft:rgba(226,74,51,.10);display:flex;flex-direction:column;flex:1 0 auto;}" +
+      ".pomo-root::after{content:\"\";display:block;flex:0 0 auto;height:12px;}" +
       ".pomo-phase-short{--pomo:#5fbf98;--pomo-soft:rgba(95,191,152,.14);}" +
       ".pomo-phase-long{--pomo:#7c9fd8;--pomo-soft:rgba(124,159,216,.16);}" +
       ".pomo-phase-wait{--pomo:#d6a24a;--pomo-soft:rgba(214,162,74,.14);}" +

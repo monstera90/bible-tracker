@@ -1,6 +1,6 @@
 /* ===========================================================================
    cardscan.js
-   Версия: 4.1 (30.10)
+   Версия: 5.0 (10.11)
    Версия: 3.1 (26.10) — удержание кода вдвое короче (`HOLD_MIN_MS` 125, `HOLD_EDGE_MS` 300, `HOLD_SIDE_EFFECT_MS` 250, `EXCEED_PENALTY_MS` 75); в действиях «музыка» комбо-кода появилось поле `hp` («наушники обязательны», пятый элемент `["m"|"f", id, цикл, громкость, 1]`, при 0 не пишется). Откат: cardscan.js 3.0.
    Версия: 3.1 (28.10) — «Комбинированный»: действие `{k:"workout"}` «Запустить тренировку» (код `["w"]`, категория «тренировка»).
    Версия: 3.0 (26.10) — структурная правка: QR «Комбинированный» `lt://v1/combo/<JSON>` → `{kind:"combo", acts:[…]}` (`parseCombo`, `comboCode`, `comboCategory`, `COMBO_MAX`): до 5 действий, по одному из категории (таймер / музыка / «открыть» / задача / событие в журнал), JSON из коротких массивов (`["t",сек,название]`, `["m",id,цикл,громкость]`, `["f",…]`, `["o",ключ вкладки]`, `["b",хеш книги,id закладки]`, `["n",id заметки]`, `["k",id задачи,вкладка,тег,текст]`, `["e",текст]`); такой код — с побочным эффектом, удержание не меньше 0,5 с. Откат: cardscan.js 2.7.
@@ -43,6 +43,7 @@ window.CardScan = (function(){
   var ALARM_PREFIX = "lt://v1/alarm/";   // будильник: время, повтор и название в коде
   var WEATHER_PREFIX = "lt://v1/weather/"; // погода: координаты и название города в коде
   var HABIT_PREFIX = "lt://v1/habit/";
+var CLIMB_PREFIX = "lt://v1/climb/";   // «+ к высоте»: метры в самом коде
   var COMBO_PREFIX = "lt://v1/combo/";   // «Комбинированный»: до 10 действий одним кодом (JSON из коротких массивов)
   var COMBO_MAX = 10;
   var COMBO_MULTI = { timer: 1, task: 1 }; // категории, где действий может быть несколько; из остальных — не больше одного
@@ -55,6 +56,7 @@ window.CardScan = (function(){
   //   {kind:"timer", seconds, title[, hidden:true]} — таймер, зашитый в код (lt://v1/timer/<секунды>[/<название>]; скрытый — lt://v1/htimer/…)
   //   {kind:"alarm", hour, minute, every, times, title} — будильник, зашитый в код (lt://v1/alarm/<ЧЧММ>[,<5|15|30>,<1..4>][/<название>])
   //   {kind:"weather", lat, lon, title} — погода города, зашитая в код (lt://v1/weather/<широта>,<долгота>[/<название>])
+  //   {kind:"climb", meters} — «+ к высоте», метры зашиты в код (lt://v1/climb/<метры 1…9999>)
   //   {kind:"habit", id, title} — привычка с названием в коде (lt://v1/habit/<id>/<название>)
   //   {kind:"combo", acts} — «Комбинированный»: до 10 действий в самом коде (lt://v1/combo/<JSON>, см. comboCode/parseCombo)
   //   {kind:"task", tab, tag, text} — задача, зашитая в код (lt://v1/task/<ключ вкладки>[#<тег>]/<текст>)
@@ -217,6 +219,13 @@ window.CardScan = (function(){
       }
       return { kind: "unknown", text: t };
     }
+    if(t.indexOf(CLIMB_PREFIX) === 0){
+      // «+ к высоте»: метры в самом коде (целое 1…9999) — карточка на устройстве не нужна
+      var cm = /^(\d{1,4})(?:\/[\s\S]*)?$/.exec(t.slice(CLIMB_PREFIX.length));
+      var cmeters = cm ? parseInt(cm[1], 10) : 0;
+      if(cmeters >= 1 && cmeters <= 9999) return { kind: "climb", meters: cmeters };
+      return { kind: "unknown", text: t };
+    }
     if(t.indexOf(COMBO_PREFIX) === 0){
       // «Комбинированный»: несколько действий одним кодом — карточка на устройстве не нужна
       var cacts = parseCombo(t.slice(COMBO_PREFIX.length));
@@ -367,7 +376,7 @@ window.CardScan = (function(){
       dn = Math.max(0, Math.min(1, dn));
       var need = HOLD_MIN_MS + (HOLD_EDGE_MS - HOLD_MIN_MS) * dn;
       var parsed = parseCode(text), kind = parsed.kind;
-      var sideEffect = kind === "task" || kind === "timer" || kind === "habit" || kind === "alarm" || kind === "combo";
+      var sideEffect = kind === "task" || kind === "timer" || kind === "habit" || kind === "alarm" || kind === "combo" || kind === "climb";
       // opts.longHold(разобранный код): приложение знает карточки — скан «Привычки» тоже отмечает день без отмены, как и таймер/задача
       if(!sideEffect && typeof opts.longHold === "function"){ try{ sideEffect = !!opts.longHold(parsed); }catch(e){} }
       if(sideEffect) need = Math.max(need, HOLD_SIDE_EFFECT_MS);
