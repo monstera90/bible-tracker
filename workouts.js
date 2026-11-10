@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 13.0 (10.11)
+   Версия: 14.0 (10.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -44,13 +44,14 @@
    Информация — кнопка «i» (`#wkInfoBtn`) открывает экран «Тренировки — кнопки» (`renderInfoScreen`), «домик» возвращает на вкладку.
    Кубок — кнопка `#wkRecordsBtn` (между лампочкой «Советы» и индикатором нагрузки) открывает экран `renderTrophyScreen` из трёх частей «Рекорды | Цели | Награды» (строка заголовков `.wk-sw`, нажатие или свайп влево/вправо; открытая часть запоминается — `workoutsTrophyTab_v1`).
    На каждой части слева от «домика» — кнопка «i» (`#wkTrophyInfoBtn`): экран `renderTrophyInfoScreen` с общими правилами этой части (то, чего нет на самом экране и в описаниях наград; тексты — `trophyInfoRows`); «домик» на нём возвращает к той же части.
-   Часть «Рекорды» (`recordsBodyHtml`, расчёт — `bestRecords`):
-   самое долгое время и самая длинная дистанция (`totalMs`, `m` по всем записям, у импортированных нет времени) и лучшее время на 5 км, 10 км, полумарафоне, марафоне. Дистанция записи считается
-   по целой записи: подходит запись длиной от `REC_DIST_MIN` до `REC_DIST_MAX` от дистанции, время пересчитывается на ровную дистанцию (`totalMs × дистанция / m`). Нет подходящей записи — «ожидается».
+   **Виды тренировки.** Рекорды, цели и награды считаются раздельно для бега, ходьбы и велосипеда: запись относится к виду по полю `type` (нет поля — бег, `kindOf`); строка «только высота» (`man`) и записи из CSV вида не имеют — это бег. Под строкой «Рекорды | Цели | Награды» — переключатель вида (`kindSwHtml`, `.wk-kindsw-btn`, `data-wkkind`, `workoutsTrophyKind_v1`, `trophyKind`/`loadTrophyKind`/`setTrophyKind`), он общий для трёх частей. Всё, что есть для бега, дано только при условии вида «Бег»: в текстах наград, целей и сообщений вид назван явно (`kindCond`, `KIND_LC`); тренировки других видов в бег не входят.
+   Часть «Рекорды» (`recordsBodyHtml(kind)`, расчёт — `bestRecords(kind)`):
+   самое долгое время и самая длинная дистанция выбранного вида (`totalMs`, `m`; у импортированных нет времени) и лучшее время на дистанциях вида (`recDists(kind)`, `REC_DISTS_KIND`: бег — 5 км, 10 км, полумарафон, марафон; ходьба — 5, 10, 20, 30 км; велосипед — 20, 50, 100, 200 км). Дистанция записи считается
+   по целой записи: подходит запись длиной от `REC_DIST_MIN` до `REC_DIST_MAX` от дистанции, время пересчитывается на ровную дистанцию (`totalMs × дистанция / m`). У бега и ходьбы в подписи — темп (/км), у велосипеда — средняя скорость (`fmtSpeed`). Нет подходящей записи — «ожидается».
    Для экспорта — `WorkoutsTab.exportRecords()` (читаемый раздел `workouts` в data.json, собирает my.js).
-   Часть «Цели»: цель — на текущий месяц, три вида (`GOAL_TYPES`): километраж 50/100/200/300/500 км, набор высоты 300/600/1000/2000/3000 м, время тренировок 5/10/20/30/40 ч. Пока цель вида в месяце не достигнута, другую того же вида поставить нельзя; предлагаются только значения больше уже набранного за месяц; после достижения можно поставить следующую. Прогресс — по всем записям месяца (км — `m`, высота — `up`, время — `totalMs`), полоса заполняется сама. Запись цели — `wkgoal:<вид-месяц-значение>` = {type, month, target, setAt[, p50, p75, done]} (метки времени 50 %/75 %/достигнута, едут в облако). Цели прошлых месяцев — список «Прошлые цели».
-   Часть «Награды»: каталог `AWARD_DEFS` (`buildAwardDefs`): первая тренировка, первые 5 / 10 км, первый полумарафон, первый марафон (одна тренировка не короче 98 % дистанции — как в рекордах), общий километраж, число тренировок, серии дней подряд, время и набор высоты за одну тренировку и суммарно (Эверест 8849 м), скорость (5 км быстрее 30/25 мин, 10 км быстрее 60/50 мин, полумарафон быстрее 2 ч, марафон быстрее 4 ч), привычки (ранняя пташка, сова, год в движении), цели месяца (по награде за каждое значение цели, «Первая цель», «Тройная цель»). Условия считаются по записям (`awardCtx`), раз полученная награда хранится — `wkaward:<id>` = {ts (когда заслужена), at}; неполученные показаны бледно с прогрессом (`prog`). **Обнуление:** долгое нажатие на полученную награду (`askResetAward`, `bindRowLongPress(row, onPress)`) → плашка с крестиком (`AppConfirmBar.openGrid`) → `resetAward`: запись `wkaward:<id>` заменяется на `{reset: ts}` (не «получена»: `awardsMap` берёт только записи с `ts`), сообщение `a:<id>` стирается; `awardResets`/`awardCtxFor` → `awardCtx(since)` считают только записи с `start ≥ reset` и цели с `done ≥ reset`, прогресс бледной награды тоже с нуля.
-   Сообщения: награда, 50 %, 75 % цели и достигнутая цель (`evalProgress` на открытии вкладки, после забора записи, при открытии экрана кубка) складываются в `workoutsNotices_v1` (localStorage, только это устройство) и показываются в области совета дня вместо него (`noticeToShow`, карточка `#wkNoticeCard`; совет дня в это время не выбирается). Видно весь день события; на следующие дни — пока экран кубка не открывали (`markNoticesSeen`), сколько бы дней ни прошло. Нажатие на карточку открывает экран кубка на нужной части. О новой награде сообщение есть всегда; молчат только награды старше 3 дней при самом первом пересчёте на устройстве (`AWARD_BASE_KEY`).
+   Часть «Цели»: цель — на текущий месяц, три типа (`GOAL_TYPES`: километраж, набор высоты, время тренировок) для КАЖДОГО вида тренировки отдельно; варианты — `GOAL_OPTS`/`goalOpts(kind, type)` (километраж: бег 50/100/200/300/500 км, ходьба 30/60/100/150/200 км, велосипед 100/200/400/600/1000 км; высота: бег и ходьба 300/600/1000/2000/3000 м, велосипед 500/1000/2000/4000/6000 м; время 5/10/20/30/40 ч у всех). Пока цель типа и вида в месяце не достигнута, другую того же типа и вида поставить нельзя; предлагаются только значения больше уже набранного за месяц; после достижения можно поставить следующую. Прогресс — только по записям вида цели (км — `m`, высота — `up`, время — `totalMs`), полоса заполняется сама. Запись цели — `wkgoal:<id>` = {type, month, target, setAt[, kind, p50, p75, done]}: `kind` — `walk`/`bike` (у бега поля нет); id бега — `<тип>-<месяц>-<значение>`, у ходьбы и велосипеда с префиксом `walk-`/`bike-` (`goalId`); метки времени 50 %/75 %/достигнута едут в облако. Цели прошлых месяцев — список «Прошлые цели».
+   Часть «Награды»: каталог `AWARD_DEFS` (`buildAwardDefs`) отдельно по видам (у каждой награды поле `kind`; `awardsBodyHtml(kind)` показывает награды выбранного вида). **Бег** (`buildRunAwards`, id прежние: `first`, `d5`, `c100`, `gt_km_50`…; условие — тренировки вида «Бег»): первая тренировка, первые 5 / 10 км, первый полумарафон, первый марафон (одна тренировка не короче 98 % дистанции — как в рекордах), общий километраж, число тренировок, серии дней подряд, время и набор высоты за одну тренировку и суммарно (Эверест 8849 м), скорость (5 км быстрее 30/25 мин, 10 км быстрее 60/50 мин, полумарафон быстрее 2 ч, марафон быстрее 4 ч), привычки (ранняя пташка, сова, год в движении). **Ходьба и велосипед** (`buildKindAwards(kind)`, id с префиксом `walk_`/`bike_`): первая тренировка, дистанция за одну тренировку (ходьба 5/10/20/30 км, велосипед 20/50/100/200 км), общий километраж (ходьба 50/250/500/1000 км, велосипед 200/1000/2500/5000 км), число тренировок, серии дней, время за одну тренировку (1/2/3 ч); скорости, высоты за одну тренировку и привычек у них нет. **Цели месяца** (`addGoalAwards`, у каждого вида свои): по награде за каждое значение цели, «Первая цель», «Тройная цель». Условия считаются по записям своего вида (`awardCtx(since, kind)`), раз полученная награда хранится — `wkaward:<id>` = {ts (когда заслужена), at}; неполученные показаны бледно с прогрессом (`prog`). **Обнуление:** долгое нажатие на полученную награду (`askResetAward`, `bindRowLongPress(row, onPress)`) → плашка с крестиком (`AppConfirmBar.openGrid`) → `resetAward`: запись `wkaward:<id>` заменяется на `{reset: ts}` (не «получена»: `awardsMap` берёт только записи с `ts`), сообщение `a:<id>` стирается; `awardResets`/`awardCtxFor(def)` → `awardCtx(since, kind)` считают только записи с `start ≥ reset` и цели с `done ≥ reset`, прогресс бледной награды тоже с нуля.
+   Сообщения: награда, 50 %, 75 % цели и достигнутая цель (в тексте назван вид; в записи сообщения поле `tk` — вид, нажатие открывает кубок на этом виде) (`evalProgress` на открытии вкладки, после забора записи, при открытии экрана кубка) складываются в `workoutsNotices_v1` (localStorage, только это устройство) и показываются в области совета дня вместо него (`noticeToShow`, карточка `#wkNoticeCard`; совет дня в это время не выбирается). Видно весь день события; на следующие дни — пока экран кубка не открывали (`markNoticesSeen`), сколько бы дней ни прошло. Нажатие на карточку открывает экран кубка на нужной части. О новой награде сообщение есть всегда; молчат только награды старше 3 дней при самом первом пересчёте на устройстве (`AWARD_BASE_KEY`).
    Хранилище — провайдер от my.js (`setStore`, раздел «ТРЕНИРОВКИ» в my.js): запись лежит в личном `state` под ключом
    `wk:<id>` = {c, t} и едет в облако вместе с остальными данными и в экспорт; удаление — тумбстоун {c:null, t}.
    =========================================================================== */
@@ -80,6 +81,28 @@
   ];
   var REC_DIST_MIN = 0.98, REC_DIST_MAX = 1.10; // запись подходит на дистанцию, если её длина — от 98 % до 110 % дистанции
   var REC_WAIT_TEXT = "ожидается";
+  var REC_DISTS_KIND = {                       // дистанции экрана «Рекорды» по видам тренировки (метры)
+    run: REC_DISTS,
+    walk: [
+      { key: "5", label: "5 км", m: 5000 },
+      { key: "10", label: "10 км", m: 10000 },
+      { key: "20", label: "20 км", m: 20000 },
+      { key: "30", label: "30 км", m: 30000 }
+    ],
+    bike: [
+      { key: "20", label: "20 км", m: 20000 },
+      { key: "50", label: "50 км", m: 50000 },
+      { key: "100", label: "100 км", m: 100000 },
+      { key: "200", label: "200 км", m: 200000 }
+    ]
+  };
+  var KIND_LC = { run: "бег", walk: "ходьба", bike: "велосипед" }; // в скобках у наград, целей и сообщений: «Цель месяца (бег): …»
+  var KIND_REC_NAMES = {                       // названия строк «Самое долгое и самое длинное»
+    run: { time: "Максимальное время бега", dist: "Максимальная дистанция бега" },
+    walk: { time: "Максимальное время ходьбы", dist: "Максимальная дистанция ходьбы" },
+    bike: { time: "Максимальное время на велосипеде", dist: "Максимальная дистанция на велосипеде" }
+  };
+  var TROPHY_KIND_KEY = "workoutsTrophyKind_v1"; // какой вид открыт на экране кубка (только это устройство)
   var TROPHY_TABS = [                          // части экрана кубка (слева направо)
     { key: "records", label: "Рекорды" },
     { key: "goals", label: "Цели" },
@@ -90,14 +113,16 @@
   var NOTICE_KEEP_MAX = 60;                    // сколько сообщений хранится (непрочитанные не пропадают по времени, только если их стало больше)
   var AWARD_BASE_KEY = "workoutsAwardsBase_v1"; // «первый пересчёт наград на этом устройстве уже был» (только это устройство)
   var NOTICE_RECENT_MS = 3 * 86400000;         // только при самом первом пересчёте: награды старше молчат (старая история не сыплется сообщениями)
-  var GOAL_TYPES = [                           // виды месячных целей; opts — варианты (км / метры набора / часы)
-    { key: "km", title: "Километраж", unit: "км", opts: [50, 100, 200, 300, 500],
-      awardPrefix: "Цель месяца: ", awardSuffix: "", awardText: "Достигнута месячная цель по километражу:" },
-    { key: "up", title: "Набор высоты", unit: "м", opts: [300, 600, 1000, 2000, 3000],
-      awardPrefix: "Цель месяца: ", awardSuffix: " набора", awardText: "Достигнута месячная цель по набору высоты:" },
-    { key: "time", title: "Время тренировок", unit: "ч", opts: [5, 10, 20, 30, 40],
-      awardPrefix: "Цель месяца: ", awardSuffix: " тренировок", awardText: "Достигнута месячная цель по времени тренировок:" }
+  var GOAL_TYPES = [                           // типы месячных целей (одинаковы у всех видов тренировки)
+    { key: "km", title: "Километраж", unit: "км", awardSuffix: "", awardText: "Достигнута месячная цель по километражу" },
+    { key: "up", title: "Набор высоты", unit: "м", awardSuffix: " набора", awardText: "Достигнута месячная цель по набору высоты" },
+    { key: "time", title: "Время тренировок", unit: "ч", awardSuffix: " тренировок", awardText: "Достигнута месячная цель по времени тренировок" }
   ];
+  var GOAL_OPTS = {                            // варианты целей по видам тренировки: км / метры набора / часы
+    run:  { km: [50, 100, 200, 300, 500],   up: [300, 600, 1000, 2000, 3000], time: [5, 10, 20, 30, 40] },
+    walk: { km: [30, 60, 100, 150, 200],    up: [300, 600, 1000, 2000, 3000], time: [5, 10, 20, 30, 40] },
+    bike: { km: [100, 200, 400, 600, 1000], up: [500, 1000, 2000, 4000, 6000], time: [5, 10, 20, 30, 40] }
+  };
   var AWARD_CATS = ["Дистанция за одну тренировку", "Общий километраж", "Регулярность", "Время и высота", "Скорость", "Привычки", "Цели месяца"];
   var TIP_CATS = ["Объём и регулярность", "Техника", "Силовая", "Восстановление", "Анализ", "Другое"];
   var TIP_RPE_OPTS = [["", "Любая"], ["low", "Лёгкая 1–3"], ["mid", "Средняя 4–6"], ["high", "Тяжёлая 7–10"]];
@@ -177,7 +202,8 @@
   var importMsg = "";      // итог последнего импорта (карточка над панелью записи; нажатие закрывает)
   var importBusy = false;  // идёт чтение файла импорта
   var trophyTab = "records"; // открытая часть экрана кубка
-  var goalSel = {};        // выбранная, но ещё не поставленная цель: {km|up|time: значение}
+  var goalSel = {};        // выбранная, но ещё не поставленная цель: {"<вид>:<тип>": значение}, например "walk:km"
+  var trophyKind = "run";  // вид тренировки, открытый на экране кубка
 
   // ---------- вид тренировки (бег / ходьба / велосипед) ----------
   var KINDS = {
@@ -189,6 +215,18 @@
   function kindKey(k){ return KINDS.hasOwnProperty(k) ? k : "run"; }
   function kindOf(r){ return kindKey(r && r.type); } // запись без поля `type` — бег
   function kindIconHtml(k){ return '<span class="wk-kind" title="' + esc(KINDS[k].label) + '">' + KINDS[k].svg + '</span>'; }
+  function kindCond(k){ return "вида «" + KINDS[kindKey(k)].label + "»"; } // «вида «Бег»» — условие, при котором даются рекорды, цели и награды
+  function kindRecs(list, kind){ return list.filter(function(r){ return kindOf(r) === kind; }); }
+  function recDists(kind){ return REC_DISTS_KIND[kindKey(kind)]; }
+  function loadTrophyKind(){
+    var v = "";
+    try{ v = localStorage.getItem(TROPHY_KIND_KEY) || ""; }catch(e){ v = trophyKind; } // нет localStorage — держим выбор в памяти
+    return KINDS.hasOwnProperty(v) ? v : "run";
+  }
+  function setTrophyKind(k){
+    trophyKind = kindKey(k);
+    try{ localStorage.setItem(TROPHY_KIND_KEY, trophyKind); }catch(e){}
+  }
 
   // ---------- вспомогательное ----------
   function container(){ return document.getElementById("settingsTabContent"); }
@@ -209,6 +247,11 @@
 
   // «10,7 км»: одна десятая, запятая; суммы считаются по точным метрам, округляется только показ
   function fmtKm(m){ return (Math.round(num(m) / 100) / 10).toFixed(1).replace(".", ",") + " км"; }
+  // «24,5 км/ч»: средняя скорость по времени и метрам (у велосипеда вместо темпа)
+  function fmtSpeed(ms, m){
+    var h = num(ms) / 3600000;
+    return (h > 0 ? Math.round(num(m) / 1000 / h * 10) / 10 : 0).toFixed(1).replace(".", ",") + " км/ч";
+  }
   // «↑ 235 м»: стрелка вверх рисуется, а не символом (в старом WebView шрифт может её не знать)
   var UP_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20V5"></path><path d="M6 11l6-6 6 6"></path></svg>';
   function fmtUpHtml(m){ return UP_SVG + " " + Math.round(num(m)) + " м"; }
@@ -470,6 +513,12 @@
       ".wk-sw{display:flex;margin:2px 0 0 0;border-bottom:1px solid var(--groove-shadow);}" +
       ".wk-sw-item{flex:1 1 33.333%;min-width:0;box-sizing:border-box;padding:6px 0;font-family:\"Palatino Linotype\",Georgia,serif;font-size:var(--mdeditor-font-size,15.5px);font-weight:bold;color:var(--wood);text-align:center;opacity:.4;cursor:pointer;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;}" +
       ".wk-sw-item.active{opacity:1;cursor:default;}" +
+      // переключатель вида тренировки под ней (бег / ходьба / велосипед); отступы — через margin (в старом WebView нет flex-gap)
+      ".wk-kindsw{display:flex;margin:8px 0 2px 0;}" +
+      ".wk-kindsw-btn{flex:1 1 33.333%;min-width:0;box-sizing:border-box;margin:0 6px 0 0;padding:6px 2px;border-radius:10px;border:1px solid var(--groove-shadow);background:transparent;color:var(--ink);font:inherit;text-align:center;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
+      ".wk-kindsw-btn:last-child{margin-right:0;}" +
+      ".wk-kindsw-btn.on{background:var(--wood);border-color:var(--wood);color:var(--parchment);}" +
+      ".wk-kindsw-ico{display:inline-block;width:16px;height:16px;vertical-align:-3px;margin-right:4px;}" +
       // цели: карточка с полосой прогресса
       ".wk-goal{margin:6px 0 8px;}" +
       ".wk-goal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;font-weight:bold;}" +
@@ -971,7 +1020,7 @@
     var rs = document.getElementById("wkRpeSave");
     if(rs) rs.addEventListener("click", saveRpe);
     var nc = document.getElementById("wkNoticeCard");
-    if(nc) nc.addEventListener("click", function(){ renderTrophyScreen(nc.getAttribute("data-tab")); }); // нажатие открывает экран кубка на нужной части
+    if(nc) nc.addEventListener("click", function(){ setTrophyKind(nc.getAttribute("data-kind")); renderTrophyScreen(nc.getAttribute("data-tab")); }); // нажатие открывает экран кубка на нужной части и виде
     var tc = document.getElementById("wkTipCard");
     if(tc) tc.addEventListener("click", function(){ tipHidden = true; lastShape = ""; paintLive(true); }); // нажатие закрывает карточку до следующего открытия вкладки
     var rc = document.getElementById("wkResultCard");
@@ -1131,6 +1180,12 @@
     try{ v = localStorage.getItem(TROPHY_TAB_KEY) || ""; }catch(e){}
     return trophyIndex(v) !== -1 ? v : TROPHY_TABS[0].key;
   }
+  // переключатель вида тренировки под строкой «Рекорды | Цели | Награды»: общий для трёх частей
+  function kindSwHtml(active){
+    return '<div class="wk-kindsw" role="tablist">' + KIND_ORDER.map(function(k){
+      return '<button type="button" class="wk-kindsw-btn' + (k === active ? " on" : "") + '" role="tab" data-wkkind="' + k + '">' + KINDS[k].svg.replace("<svg ", '<svg class="wk-kindsw-ico" ') + esc(KINDS[k].label) + '</button>';
+    }).join("") + '</div>';
+  }
   function swHtml(active){
     return '<div class="wk-sw" role="tablist">' + TROPHY_TABS.map(function(t){
       return '<span class="wk-sw-item' + (t.key === active ? " active" : "") + '" role="tab" data-wktab="' + t.key + '">' + esc(t.label) + '</span>';
@@ -1138,15 +1193,17 @@
   }
 
   // ---------- часть «Рекорды» ----------
-  // самая долгая и самая длинная запись; лучшее время на каждой дистанции из REC_DISTS (по целым записям подходящей длины)
-  function bestRecords(){
-    var out = { time: null, dist: null, races: {} };
-    allRecords().forEach(function(r){
+  // Рекорды считаются отдельно для каждого вида тренировки (бег / ходьба / велосипед): только по записям этого вида.
+  // Самая долгая и самая длинная запись вида; лучшее время на каждой дистанции вида из recDists(kind) (по целым записям подходящей длины)
+  function bestRecords(kind){
+    kind = kindKey(kind);
+    var out = { time: null, dist: null, races: {} }, dists = recDists(kind);
+    kindRecs(allRecords(), kind).forEach(function(r){
       var m = num(r.m), t = num(r.totalMs);
       if(m > 0 && (!out.dist || m > num(out.dist.m))) out.dist = r;
       if(t > 0 && (!out.time || t > num(out.time.totalMs))) out.time = r;
       if(m <= 0 || t <= 0) return;
-      REC_DISTS.forEach(function(d){
+      dists.forEach(function(d){
         if(m < d.m * REC_DIST_MIN || m > d.m * REC_DIST_MAX) return;
         var ms = t * d.m / m; // время на ровную дистанцию
         var cur = out.races[d.key];
@@ -1163,32 +1220,38 @@
     return '<div class="wk-rec"><span class="wk-rec-name">' + esc(name) + (sub ? '<span class="wk-sub">' + esc(sub) + '</span>' : "") +
       '</span><span class="wk-rec-val">' + esc(val) + '</span></div>';
   }
-  // «12.10.2026 · 14,2 км · темп 5:12 /км»; темп — по целой записи или по ровной дистанции, если передана distM
-  function recSub(r, withKm, withTime, paceMs, paceM){
+  // «12.10.2026 · 14,2 км · темп 5:12 /км»; темп — по целой записи или по ровной дистанции, если передана distM; у велосипеда вместо темпа — средняя скорость
+  function recSub(r, withKm, withTime, paceMs, paceM, kind){
     var parts = [fmtDate(r.start)];
     if(withKm) parts.push(fmtKm(r.m));
     if(withTime) parts.push(fmtClock(r.totalMs));
-    if(paceMs > 0 && paceM > 0) parts.push("темп " + fmtClock(paceMs / (paceM / 1000)) + " /км");
+    if(paceMs > 0 && paceM > 0){
+      parts.push(kindKey(kind) === "bike" ? "ср. скорость " + fmtSpeed(paceMs, paceM) : "темп " + fmtClock(paceMs / (paceM / 1000)) + " /км");
+    }
     return parts.join(" · ");
   }
 
-  function recordsBodyHtml(){
-    var b = bestRecords();
-    var html = '<div class="wk-rec-cat">Самое долгое и самое длинное</div><div class="wk-card" style="padding:4px 12px;">';
-    html += recRowHtml("Максимальное время бега", b.time ? fmtClock(b.time.totalMs) : null,
-      b.time ? recSub(b.time, true, false, num(b.time.totalMs), num(b.time.m)) : "");
-    html += recRowHtml("Максимальная дистанция бега", b.dist ? fmtKm(b.dist.m) : null,
-      b.dist ? recSub(b.dist, false, num(b.dist.totalMs) > 0, num(b.dist.totalMs), num(b.dist.m)) : "");
-    html += '</div><div class="wk-rec-cat">Лучшее время на дистанции</div><div class="wk-card" style="padding:4px 12px;">';
-    REC_DISTS.forEach(function(d){
+  function recordsBodyHtml(kind){
+    kind = kindKey(kind);
+    var b = bestRecords(kind), names = KIND_REC_NAMES[kind];
+    var html = '<div class="wk-tip-note" style="margin:0 0 2px;">Рекорды ' + esc(kindCond(kind)) + ': считаются только по тренировкам этого вида, остальные виды сюда не входят.</div>';
+    html += '<div class="wk-rec-cat">Самое долгое и самое длинное</div><div class="wk-card" style="padding:4px 12px;">';
+    html += recRowHtml(names.time, b.time ? fmtClock(b.time.totalMs) : null,
+      b.time ? recSub(b.time, true, false, num(b.time.totalMs), num(b.time.m), kind) : "");
+    html += recRowHtml(names.dist, b.dist ? fmtKm(b.dist.m) : null,
+      b.dist ? recSub(b.dist, false, num(b.dist.totalMs) > 0, num(b.dist.totalMs), num(b.dist.m), kind) : "");
+    html += '</div><div class="wk-rec-cat">Лучшее время на дистанции · ' + esc(KIND_LC[kind]) + '</div><div class="wk-card" style="padding:4px 12px;">';
+    recDists(kind).forEach(function(d){
       var x = b.races[d.key];
-      html += recRowHtml(d.label, x ? fmtClock(x.ms) : null, x ? recSub(x.rec, true, false, x.ms, d.m) : "");
+      html += recRowHtml(d.label, x ? fmtClock(x.ms) : null, x ? recSub(x.rec, true, false, x.ms, d.m, kind) : "");
     });
     return html + '</div>';
   }
 
   // ---------- цели месяца ----------
-  // Цель = запись личного state `wkgoal:<id>` = {c:{type, month:"ГГГГ-ММ", target, setAt[, p50, p75, done]}, t}; id = «вид-месяц-значение».
+  // Цель = запись личного state `wkgoal:<id>` = {c:{type, month:"ГГГГ-ММ", target, setAt[, kind, p50, p75, done]}, t}.
+  // `kind` — вид тренировки (walk | bike; у бега поля нет): прогресс цели считается только по записям её вида.
+  // id = «тип-месяц-значение» (у бега прежний; у ходьбы и велосипеда с префиксом «walk-»/«bike-», см. goalId).
   // p50/p75/done — метки времени, когда прогресс впервые дошёл до 50 % / 75 % / 100 % (едут в облако: второе устройство уже не сообщает о них заново).
   function monthKey(d){ return d.getFullYear() + "-" + pad2(d.getMonth() + 1); }
   function monthRange(key){
@@ -1205,6 +1268,11 @@
     for(var i = 0; i < GOAL_TYPES.length; i++){ if(GOAL_TYPES[i].key === key) return GOAL_TYPES[i]; }
     return null;
   }
+  function goalOpts(kind, type){
+    var o = GOAL_OPTS[kindKey(kind)];
+    return (o && o[type]) || [];
+  }
+  function goalId(kind, type, month, target){ return (kindKey(kind) === "run" ? "" : kindKey(kind) + "-") + type + "-" + month + "-" + target; }
   // вклад одной записи в цель, в единицах цели: км / метры набора / часы
   function valOf(type, r){
     if(type === "km") return num(r.m) / 1000;
@@ -1212,9 +1280,10 @@
     return num(r.totalMs) / 3600000;
   }
   function recsAsc(){ return allRecords().slice().reverse(); } // allRecords — новые сверху
-  function monthProgress(type, key, asc){
-    var rg = monthRange(key), sum = 0;
-    asc.forEach(function(r){ if(r.start >= rg[0] && r.start < rg[1]) sum += valOf(type, r); });
+  // прогресс цели за месяц — только по записям вида kind
+  function monthProgress(type, key, asc, kind){
+    var rg = monthRange(key), sum = 0, k = kindKey(kind);
+    asc.forEach(function(r){ if(kindOf(r) === k && r.start >= rg[0] && r.start < rg[1]) sum += valOf(type, r); });
     return sum;
   }
   function targetLabel(type, target){ return target + " " + goalType(type).unit; }
@@ -1235,14 +1304,17 @@
     if(!STORE || typeof STORE.listGoals !== "function") return [];
     var list = [];
     try{ list = STORE.listGoals() || []; }catch(e){ list = []; }
-    return list.filter(function(g){ return g && goalType(g.type) && typeof g.month === "string" && num(g.target) > 0; });
+    return list.filter(function(g){ return g && goalType(g.type) && typeof g.month === "string" && num(g.target) > 0; })
+      .map(function(g){ g.kind = kindKey(g.kind); return g; }); // у старых целей вида нет — это бег
   }
   function goalCopy(g){
     var c = {};
-    Object.keys(g).forEach(function(k){ if(k !== "id") c[k] = g[k]; });
+    Object.keys(g).forEach(function(k){ if(k !== "id" && !(k === "kind" && g.kind === "run")) c[k] = g[k]; }); // у бега поле kind не пишем
     return c;
   }
-  function goalAwardTitle(type, target){ return goalType(type).awardPrefix + targetLabel(type, target) + goalType(type).awardSuffix; }
+  // «Цель месяца (бег): 50 км» — вид назван в самом названии награды
+  function goalAwardTitle(kind, type, target){ return "Цель месяца (" + KIND_LC[kindKey(kind)] + "): " + targetLabel(type, target) + goalType(type).awardSuffix; }
+  function goalAwardText(kind, type, target){ return goalType(type).awardText + " (тренировки " + kindCond(kind) + "): " + targetLabel(type, target) + "."; }
 
   // пересчёт целей: отметки 50 % / 75 % / «достигнута»; для каждой отметки — сообщение вместо совета дня
   function evalGoals(){
@@ -1253,48 +1325,52 @@
       if(g.done) return;
       var rg = monthRange(g.month), cum = 0, cross = 0;
       asc.forEach(function(r){
+        if(kindOf(r) !== g.kind) return; // цель вида считается только по записям этого вида
         if(r.start < rg[0] || r.start >= rg[1]) return;
         cum += valOf(g.type, r);
         if(!cross && cum >= g.target) cross = endOf(r);
       });
       var pct = cum / g.target * 100;
       var c = goalCopy(g), changed = false;
+      var who = "» (" + KIND_LC[g.kind] + ")";
       if(pct >= 100){
         c.done = cross || now;
         if(!c.p50) c.p50 = now;
         if(!c.p75) c.p75 = now;
         changed = true;
-        pushNotice({ k: "gd:" + g.id, kind: "goal", tab: "goals",
-          text: "Цель «" + goalLabel(g) + "» достигнута! Награда: «" + goalAwardTitle(g.type, g.target) + "»." });
+        pushNotice({ k: "gd:" + g.id, kind: "goal", tab: "goals", tk: g.kind,
+          text: "Цель «" + goalLabel(g) + who + " достигнута! Награда: «" + goalAwardTitle(g.kind, g.type, g.target) + "»." });
       } else if(g.month === curKey){
         if(pct >= 75 && !c.p75){
           c.p75 = now; if(!c.p50) c.p50 = now; changed = true;
-          pushNotice({ k: "g75:" + g.id, kind: "goal", tab: "goals",
-            text: "Цель «" + goalLabel(g) + "»: пройдено три четверти пути — " + progText(g.type, cum, g.target) + "." });
+          pushNotice({ k: "g75:" + g.id, kind: "goal", tab: "goals", tk: g.kind,
+            text: "Цель «" + goalLabel(g) + who + ": пройдено три четверти пути — " + progText(g.type, cum, g.target) + "." });
         } else if(pct >= 50 && !c.p50){
           c.p50 = now; changed = true;
-          pushNotice({ k: "g50:" + g.id, kind: "goal", tab: "goals",
-            text: "Цель «" + goalLabel(g) + "»: пройдена половина пути — " + progText(g.type, cum, g.target) + "." });
+          pushNotice({ k: "g50:" + g.id, kind: "goal", tab: "goals", tk: g.kind,
+            text: "Цель «" + goalLabel(g) + who + ": пройдена половина пути — " + progText(g.type, cum, g.target) + "." });
         }
       }
       if(changed){ try{ STORE.putGoal(g.id, c); }catch(e){} }
     });
   }
 
-  // можно ли поставить цель: нет невыполненной цели этого вида на текущий месяц и значение больше уже набранного за месяц
-  function setGoal(type, target){
+  // можно ли поставить цель: нет невыполненной цели этого типа и вида на текущий месяц и значение больше уже набранного за месяц (по записям вида)
+  function setGoal(kind, type, target){
+    kind = kindKey(kind);
     var gt = goalType(type);
-    if(!gt || gt.opts.indexOf(target) === -1 || !STORE || typeof STORE.putGoal !== "function") return false;
+    if(!gt || goalOpts(kind, type).indexOf(target) === -1 || !STORE || typeof STORE.putGoal !== "function") return false;
     var key = monthKey(new Date()), asc = recsAsc();
-    var open = goalsList().some(function(g){ return g.type === type && g.month === key && !g.done; });
+    var open = goalsList().some(function(g){ return g.kind === kind && g.type === type && g.month === key && !g.done; });
     if(open) return false;
-    var cum = monthProgress(type, key, asc);
+    var cum = monthProgress(type, key, asc, kind);
     if(cum >= target) return false;
     var now = Date.now(), c = { type: type, month: key, target: target, setAt: now };
+    if(kind !== "run") c.kind = kind;
     var pct = cum / target * 100;
     if(pct >= 50) c.p50 = now; // что уже пройдено на момент выбора — молча, без сообщений
     if(pct >= 75) c.p75 = now;
-    try{ STORE.putGoal(type + "-" + key + "-" + target, c); }catch(e){ return false; }
+    try{ STORE.putGoal(goalId(kind, type, key, target), c); }catch(e){ return false; }
     return true;
   }
 
@@ -1315,13 +1391,16 @@
         : esc(progText(g.type, cum, g.target) + " · осталось " + leftText(g.type, cum, g.target))) + '</div></div>';
   }
 
-  function goalsBodyHtml(){
-    var now = new Date(), key = monthKey(now), asc = recsAsc(), goals = goalsList();
-    var html = '<div class="wk-tip-note" style="margin:0 0 2px;">Цели — на текущий месяц (' + esc(monthTitle(key)) +
-      '). Пока цель не достигнута, другую того же вида поставить нельзя. За каждую достигнутую цель — награда.</div>';
+  function goalsBodyHtml(kind){
+    kind = kindKey(kind);
+    var now = new Date(), key = monthKey(now), asc = recsAsc();
+    var goals = goalsList().filter(function(g){ return g.kind === kind; });
+    var html = '<div class="wk-tip-note" style="margin:0 0 2px;">Цели ' + esc(kindCond(kind)) + ' — на текущий месяц (' + esc(monthTitle(key)) +
+      '). Засчитываются только тренировки этого вида. Пока цель не достигнута, другую того же вида поставить нельзя. За каждую достигнутую цель — награда.</div>';
     GOAL_TYPES.forEach(function(gt){
-      html += '<div class="wk-rec-cat">' + esc(gt.title) + '</div>';
-      var cum = monthProgress(gt.key, key, asc);
+      var sk = kind + ":" + gt.key; // ключ выбора в goalSel
+      html += '<div class="wk-rec-cat">' + esc(gt.title) + ' · ' + esc(KIND_LC[kind]) + '</div>';
+      var cum = monthProgress(gt.key, key, asc, kind);
       var mine = goals.filter(function(g){ return g.type === gt.key && g.month === key; })
         .sort(function(a, b){ return a.target - b.target; });
       var open = mine.filter(function(g){ return !g.done; })[0];
@@ -1330,29 +1409,29 @@
         html += '<div class="wk-tip-note">Другую цель можно будет поставить, когда эта будет достигнута.</div>';
         return;
       }
-      var opts = gt.opts.filter(function(o){ return o > cum; });
-      if(goalSel[gt.key] && opts.indexOf(goalSel[gt.key]) === -1) goalSel[gt.key] = 0;
+      var opts = goalOpts(kind, gt.key).filter(function(o){ return o > cum; });
+      if(goalSel[sk] && opts.indexOf(goalSel[sk]) === -1) goalSel[sk] = 0;
       if(!opts.length){
         html += '<div class="wk-tip-note">Все цели этого вида на ' + esc(MONTHS[now.getMonth()].toLowerCase()) + ' уже превзойдены.</div>';
         return;
       }
       html += '<div class="wk-tip-note" style="margin:0 0 6px;">' + (mine.length ? "Можно поставить следующую:" : "Выберите цель:") + '</div><div>';
       opts.forEach(function(o){
-        html += '<button type="button" class="wk-seg-btn' + (goalSel[gt.key] === o ? " on" : "") + '" data-gsel="' + gt.key + ':' + o + '">' +
+        html += '<button type="button" class="wk-seg-btn' + (goalSel[sk] === o ? " on" : "") + '" data-gsel="' + sk + ':' + o + '">' +
           esc(monthTitle(key) + " · " + targetLabel(gt.key, o)) + '</button>';
       });
       html += '</div>';
-      var sel = goalSel[gt.key];
-      html += '<button type="button" class="wk-goal-set" data-gset="' + gt.key + '"' + (sel ? "" : " disabled") + '>' +
+      var sel = goalSel[sk];
+      html += '<button type="button" class="wk-goal-set" data-gset="' + sk + '"' + (sel ? "" : " disabled") + '>' +
         (sel ? esc("Поставить цель: " + targetLabel(gt.key, sel)) : "Поставить цель") + '</button>';
     });
     // прошлые месяцы: достигнутые и нет
     var past = goals.filter(function(g){ return g.month !== key; })
       .sort(function(a, b){ return a.month < b.month ? 1 : (a.month > b.month ? -1 : (a.type < b.type ? -1 : b.target - a.target)); });
     if(past.length){
-      html += '<div class="wk-rec-cat">Прошлые цели</div><div class="wk-card" style="padding:4px 12px;">';
+      html += '<div class="wk-rec-cat">Прошлые цели · ' + esc(KIND_LC[kind]) + '</div><div class="wk-card" style="padding:4px 12px;">';
       past.slice(0, 12).forEach(function(g){
-        var res = g.done ? "✓ достигнута" : esc(progText(g.type, monthProgress(g.type, g.month, asc), g.target));
+        var res = g.done ? "✓ достигнута" : esc(progText(g.type, monthProgress(g.type, g.month, asc, kind), g.target));
         html += '<div class="wk-rec"><span class="wk-rec-name">' + esc(goalLabel(g)) + '<span class="wk-sub">' + esc(goalType(g.type).title) +
           '</span></span><span class="wk-rec-val' + (g.done ? "" : " wait") + '">' + res + '</span></div>';
       });
@@ -1363,6 +1442,8 @@
 
   // ---------- награды ----------
   // Награда = запись личного state `wkaward:<id>` = {c:{ts (когда заслужена), at (когда записана)}, t}.
+  // Награды разделены по виду тренировки: у каждой def поле `kind` (run | walk | bike), условие считается только по записям этого вида.
+  // id наград бега прежние, у ходьбы и велосипеда — с префиксом «walk_» / «bike_».
   // Условия считаются по записям тренировок и целям (`AWARD_DEFS`); раз полученная награда остаётся, даже если запись потом удалили.
   var AWARD_DEFS = null;
   function awardsMap(){
@@ -1382,12 +1463,12 @@
     list.forEach(function(a){ if(a && a.id && !(num(a.ts) > 0) && num(a.reset) > 0) map[a.id] = num(a.reset); });
     return map;
   }
-  // контекст расчёта для награды с учётом обнуления (одинаковые «с какого момента» считаются один раз)
+  // контекст расчёта для награды с учётом обнуления и вида (одинаковые «вид + с какого момента» считаются один раз)
   function awardCtxFor(){
     var resets = awardResets(), cache = {};
-    return function(id){
-      var s = resets[id] || 0;
-      return cache[s] || (cache[s] = awardCtx(s));
+    return function(def){
+      var s = resets[def.id] || 0, k = kindKey(def.kind), ck = k + "|" + s;
+      return cache[ck] || (cache[ck] = awardCtx(s, k));
     };
   }
   function resetAward(id){
@@ -1399,13 +1480,15 @@
     return true;
   }
 
-  function awardCtx(since){
+  // контекст расчёта наград вида kind: только записи этого вида (запись без `type` и строка «только высота» — бег)
+  function awardCtx(since, kind){
     since = num(since);
-    var asc = recsAsc();
+    kind = kindKey(kind);
+    var asc = kindRecs(recsAsc(), kind);
     if(since > 0) asc = asc.filter(function(r){ return r.start >= since; });
-    var runs = asc.filter(function(r){ return num(r.m) > 0; });
+    var runs = asc.filter(function(r){ return num(r.m) > 0; }); // «runs» — записи вида с километрами (имя историческое)
     var timed = runs.filter(function(r){ return !r.imp && num(r.totalMs) > 0; });
-    var x = { asc: asc, runs: runs, timed: timed, goals: goalsList().filter(function(g){ return !(since > 0) || (g.done && g.done >= since); }), totalM: 0, maxM: 0, maxMs: 0, maxUp: 0, totalUp: 0,
+    var x = { asc: asc, runs: runs, timed: timed, goals: goalsList().filter(function(g){ return g.kind === kind && (!(since > 0) || (g.done && g.done >= since)); }), totalM: 0, maxM: 0, maxMs: 0, maxUp: 0, totalUp: 0,
       maxStreak: 0, streakReach: {}, bestRace: {}, early: [], owl: [] };
     var dayLast = {};
     runs.forEach(function(r){
@@ -1423,7 +1506,7 @@
       x.totalUp += num(r.up);
     });
     timed.forEach(function(r){
-      REC_DISTS.forEach(function(d){
+      recDists(kind).forEach(function(d){
         var m = num(r.m);
         if(m < d.m * REC_DIST_MIN || m > d.m * REC_DIST_MAX) return;
         var ms = num(r.totalMs) * d.m / m;
@@ -1464,93 +1547,36 @@
     return best;
   }
 
-  function buildAwardDefs(){
-    var out = [];
-    function add(cat, id, title, text, calc, prog){ out.push({ cat: cat, id: id, title: title, text: text, calc: calc, prog: prog || null, noNotice: false }); }
-    var C = AWARD_CATS;
-    var distName = { "5": "5 км", "10": "10 км", "21": "21,1 км", "42": "42,2 км" };
+  // названия наград ходьбы и велосипеда (у бега — прежние, в buildRunAwards)
+  var KIND_AWARD_TXT = {
+    walk: {
+      first: "Первая прогулка",
+      dist: function(d){ return "Пешком " + d.label; },
+      totals: [[50, "Пятьдесят километров пешком"], [250, "Двести пятьдесят километров пешком"], [500, "Пятьсот километров пешком"], [1000, "Тысяча километров пешком"]],
+      count: function(n){ return n + " " + plural(n, "прогулка", "прогулки", "прогулок"); },
+      streaks: [[3, "3 дня подряд пешком"], [7, "Неделя подряд пешком"], [14, "Две недели подряд пешком"], [30, "Месяц подряд пешком"]],
+      times: [[60, "Час на ногах"], [120, "Два часа на ногах"], [180, "Три часа на ногах"]]
+    },
+    bike: {
+      first: "Первая поездка",
+      dist: function(d){ return d.key === "100" ? "Первая сотня на велосипеде" : "Первые " + d.label + " на велосипеде"; },
+      totals: [[200, "Двести километров на велосипеде"], [1000, "Тысяча километров на велосипеде"], [2500, "Две с половиной тысячи километров на велосипеде"], [5000, "Пять тысяч километров на велосипеде"]],
+      count: function(n){ return n + " " + plural(n, "поездка", "поездки", "поездок"); },
+      streaks: [[3, "3 дня подряд на велосипеде"], [7, "Неделя подряд на велосипеде"], [14, "Две недели подряд на велосипеде"], [30, "Месяц подряд на велосипеде"]],
+      times: [[60, "Час в седле"], [120, "Два часа в седле"], [180, "Три часа в седле"]]
+    }
+  };
 
-    add(C[0], "first", "Первая тренировка", "Записана первая тренировка с пройденными километрами.",
-      function(x){ return x.runs.length ? endOf(x.runs[0]) : 0; });
-    REC_DISTS.forEach(function(d){
-      var title = d.key === "21" ? "Первый полумарафон (" + distName[d.key] + ")" : (d.key === "42" ? "Первый марафон (" + distName[d.key] + ")" : "Первые " + d.label);
-      var need = d.m * REC_DIST_MIN;
-      add(C[0], "d" + d.key, title, "Одна тренировка не короче 98 % дистанции" + (d.key === "5" || d.key === "10" ? " " + distName[d.key] : "") + " — от " + fmtKm(need) + ".",
-        function(x){ return firstWhere(x.runs, function(r){ return num(r.m) >= need; }); },
-        function(x){ return x.maxM > 0 ? "самая длинная: " + fmtKm(x.maxM) : ""; });
-    });
-
-    [[100, "Сто километров"], [500, "Пятьсот километров"], [1000, "Тысяча километров"], [2000, "Две тысячи километров"]].forEach(function(p){
-      add(C[1], "c" + p[0], p[1], "Суммарно пройдено " + p[0] + " км.",
-        function(x){ return cumReach(x.runs, function(r){ return num(r.m) / 1000; }, p[0]); },
-        function(x){ return fmtKm(x.totalM) + " из " + p[0] + " км"; });
-    });
-
-    [10, 50, 100, 250].forEach(function(n){
-      add(C[2], "n" + n, n + " " + plural(n, "тренировка", "тренировки", "тренировок"), "Записано " + n + " " + plural(n, "тренировка", "тренировки", "тренировок") + " с километрами.",
-        function(x){ return x.runs.length >= n ? endOf(x.runs[n - 1]) : 0; },
-        function(x){ return x.runs.length + " из " + n; });
-    });
-    [[3, "3 дня подряд"], [7, "Неделя подряд"], [14, "Две недели подряд"], [30, "Месяц подряд"]].forEach(function(p){
-      add(C[2], "s" + p[0], p[1], "Тренировки " + p[0] + " " + plural(p[0], "день", "дня", "дней") + " подряд.",
-        function(x){ return x.streakReach[p[0]] || 0; },
-        function(x){ return "лучшая серия: " + x.maxStreak + " из " + p[0]; });
-    });
-
-    [[60, "Час в движении"], [120, "Два часа в движении"]].forEach(function(p){
-      add(C[3], "t" + p[0], p[1], "Одна тренировка длиной от " + (p[0] / 60) + " " + plural(p[0] / 60, "часа", "часов", "часов") + ".",
-        function(x){ return firstWhere(x.timed, function(r){ return num(r.totalMs) >= p[0] * 60000; }); },
-        function(x){ return x.maxMs > 0 ? "самая долгая: " + fmtTotal(x.maxMs) : ""; });
-    });
-    [[100, "Первая сотня метров вверх"], [500, "Горный бегун"]].forEach(function(p){
-      add(C[3], "u" + p[0], p[1], "За одну тренировку набрано от " + p[0] + " м высоты.",
-        function(x){ return firstWhere(x.asc, function(r){ return !r.man && num(r.up) >= p[0]; }); },
-        function(x){ return x.maxUp > 0 ? "наибольший набор: " + Math.round(x.maxUp) + " м" : ""; });
-    });
-    [[1000, "Тысяча метров вверх"], [8849, "Эверест"]].forEach(function(p){
-      add(C[3], "uc" + p[0], p[1], "Суммарный набор высоты " + p[0] + " м" + (p[0] === 8849 ? " — как высота Эвереста." : "."),
-        function(x){ return cumReach(x.asc, function(r){ return num(r.up); }, p[0]); },
-        function(x){ return Math.round(x.totalUp) + " из " + p[0] + " м"; });
-    });
-
-    [["5", 30, "5 км быстрее 30 минут"], ["5", 25, "5 км быстрее 25 минут"], ["10", 60, "10 км быстрее часа"], ["10", 50, "10 км быстрее 50 минут"],
-     ["21", 120, "Полумарафон быстрее 2 часов"], ["42", 240, "Марафон быстрее 4 часов"]].forEach(function(p){
-      var d = null;
-      REC_DISTS.forEach(function(q){ if(q.key === p[0]) d = q; });
-      var limit = p[1] * 60000;
-      add(C[4], "p" + p[0] + "_" + p[1], p[2], "Время на дистанции меньше " + p[1] + " мин (по целой тренировке длиной " + fmtKm(d.m * REC_DIST_MIN).replace(" км", "") + "–" + fmtKm(d.m * REC_DIST_MAX).replace(" км", "") + " км).",
-        function(x){
-          return firstWhere(x.timed, function(r){
-            var m = num(r.m);
-            if(m < d.m * REC_DIST_MIN || m > d.m * REC_DIST_MAX) return false;
-            return num(r.totalMs) * d.m / m < limit;
-          });
-        },
-        function(x){ return x.bestRace[d.key] ? "лучшее время: " + fmtClock(x.bestRace[d.key]) : ""; });
-    });
-
-    add(C[5], "early", "Ранняя пташка", "5 тренировок, начатых между 4:00 и 7:00.",
-      function(x){ return x.early.length >= 5 ? endOf(x.early[4]) : 0; }, function(x){ return x.early.length + " из 5"; });
-    add(C[5], "owl", "Сова", "5 тренировок, начатых между 21:00 и 4:00.",
-      function(x){ return x.owl.length >= 5 ? endOf(x.owl[4]) : 0; }, function(x){ return x.owl.length + " из 5"; });
-    add(C[5], "year", "Год в движении", "Прошёл год с первой записанной тренировки.",
-      function(x){
-        if(!x.runs.length) return 0;
-        var ts = x.runs[0].start + 365 * 86400000;
-        return ts <= Date.now() ? ts : 0;
-      },
-      function(x){
-        if(!x.runs.length) return "";
-        return "прошло " + Math.max(0, Math.floor((Date.now() - x.runs[0].start) / 86400000)) + " из 365 дн.";
-      });
-
-    add(C[6], "g1", "Первая цель", "Достигнута первая цель месяца.",
+  // «Цели месяца» — одинаковый набор у каждого вида (по своим целям вида)
+  function addGoalAwards(kind, add, out){
+    var C = AWARD_CATS, lc = KIND_LC[kind], cond = kindCond(kind);
+    add(C[6], "g1", "Первая цель (" + lc + ")", "Достигнута первая цель месяца (тренировки " + cond + ").",
       function(x){
         var best = 0;
         x.goals.forEach(function(g){ if(g.done && (!best || g.done < best)) best = g.done; });
         return best;
       });
-    add(C[6], "g3", "Тройная цель", "В одном месяце достигнуты цели и по километражу, и по набору высоты, и по времени.",
+    add(C[6], "g3", "Тройная цель (" + lc + ")", "В одном месяце достигнуты цели и по километражу, и по набору высоты, и по времени (тренировки " + cond + ").",
       function(x){
         var byMonth = {}, best = 0;
         x.goals.forEach(function(g){
@@ -1567,8 +1593,8 @@
         return best;
       });
     GOAL_TYPES.forEach(function(gt){
-      gt.opts.forEach(function(o){
-        add(C[6], "gt_" + gt.key + "_" + o, goalAwardTitle(gt.key, o), gt.awardText + " " + targetLabel(gt.key, o) + ".",
+      goalOpts(kind, gt.key).forEach(function(o){
+        add(C[6], "gt_" + gt.key + "_" + o, goalAwardTitle(kind, gt.key, o), goalAwardText(kind, gt.key, o),
           function(x){ return goalDoneTs(x, gt.key, o); });
         out[out.length - 1].noNotice = true; // о цели сообщает карточка самой цели
         out[out.length - 1].count = function(x){ // сколько раз (в скольких месяцах) достигнута именно эта цель
@@ -1576,6 +1602,133 @@
         };
       });
     });
+  }
+
+  // награды бега: условие — тренировки вида «Бег» (id без префикса — такими они уже лежат в хранилище)
+  function buildRunAwards(add, out){
+    var C = AWARD_CATS, cond = kindCond("run");
+    var distName = { "5": "5 км", "10": "10 км", "21": "21,1 км", "42": "42,2 км" };
+
+    add(C[0], "first", "Первая тренировка", "Записана первая тренировка " + cond + " с пройденными километрами.",
+      function(x){ return x.runs.length ? endOf(x.runs[0]) : 0; });
+    REC_DISTS.forEach(function(d){
+      var title = d.key === "21" ? "Первый полумарафон (" + distName[d.key] + ")" : (d.key === "42" ? "Первый марафон (" + distName[d.key] + ")" : "Первые " + d.label);
+      var need = d.m * REC_DIST_MIN;
+      add(C[0], "d" + d.key, title, "Одна тренировка " + cond + " не короче 98 % дистанции" + (d.key === "5" || d.key === "10" ? " " + distName[d.key] : "") + " — от " + fmtKm(need) + ".",
+        function(x){ return firstWhere(x.runs, function(r){ return num(r.m) >= need; }); },
+        function(x){ return x.maxM > 0 ? "самая длинная: " + fmtKm(x.maxM) : ""; });
+    });
+
+    [[100, "Сто километров"], [500, "Пятьсот километров"], [1000, "Тысяча километров"], [2000, "Две тысячи километров"]].forEach(function(p){
+      add(C[1], "c" + p[0], p[1], "Суммарно пройдено " + p[0] + " км в тренировках " + cond + ".",
+        function(x){ return cumReach(x.runs, function(r){ return num(r.m) / 1000; }, p[0]); },
+        function(x){ return fmtKm(x.totalM) + " из " + p[0] + " км"; });
+    });
+
+    [10, 50, 100, 250].forEach(function(n){
+      add(C[2], "n" + n, n + " " + plural(n, "тренировка", "тренировки", "тренировок"), "Записано " + n + " " + plural(n, "тренировка", "тренировки", "тренировок") + " " + cond + " с километрами.",
+        function(x){ return x.runs.length >= n ? endOf(x.runs[n - 1]) : 0; },
+        function(x){ return x.runs.length + " из " + n; });
+    });
+    [[3, "3 дня подряд"], [7, "Неделя подряд"], [14, "Две недели подряд"], [30, "Месяц подряд"]].forEach(function(p){
+      add(C[2], "s" + p[0], p[1], "Тренировки " + cond + " " + p[0] + " " + plural(p[0], "день", "дня", "дней") + " подряд.",
+        function(x){ return x.streakReach[p[0]] || 0; },
+        function(x){ return "лучшая серия: " + x.maxStreak + " из " + p[0]; });
+    });
+
+    [[60, "Час в движении"], [120, "Два часа в движении"]].forEach(function(p){
+      add(C[3], "t" + p[0], p[1], "Одна тренировка " + cond + " длиной от " + (p[0] / 60) + " " + plural(p[0] / 60, "часа", "часов", "часов") + ".",
+        function(x){ return firstWhere(x.timed, function(r){ return num(r.totalMs) >= p[0] * 60000; }); },
+        function(x){ return x.maxMs > 0 ? "самая долгая: " + fmtTotal(x.maxMs) : ""; });
+    });
+    [[100, "Первая сотня метров вверх"], [500, "Горный бегун"]].forEach(function(p){
+      add(C[3], "u" + p[0], p[1], "За одну тренировку " + cond + " набрано от " + p[0] + " м высоты.",
+        function(x){ return firstWhere(x.asc, function(r){ return !r.man && num(r.up) >= p[0]; }); },
+        function(x){ return x.maxUp > 0 ? "наибольший набор: " + Math.round(x.maxUp) + " м" : ""; });
+    });
+    [[1000, "Тысяча метров вверх"], [8849, "Эверест"]].forEach(function(p){
+      add(C[3], "uc" + p[0], p[1], "Суммарный набор высоты " + p[0] + " м в тренировках " + cond + (p[0] === 8849 ? " — как высота Эвереста." : "."),
+        function(x){ return cumReach(x.asc, function(r){ return num(r.up); }, p[0]); },
+        function(x){ return Math.round(x.totalUp) + " из " + p[0] + " м"; });
+    });
+
+    [["5", 30, "5 км быстрее 30 минут"], ["5", 25, "5 км быстрее 25 минут"], ["10", 60, "10 км быстрее часа"], ["10", 50, "10 км быстрее 50 минут"],
+     ["21", 120, "Полумарафон быстрее 2 часов"], ["42", 240, "Марафон быстрее 4 часов"]].forEach(function(p){
+      var d = null;
+      REC_DISTS.forEach(function(q){ if(q.key === p[0]) d = q; });
+      var limit = p[1] * 60000;
+      add(C[4], "p" + p[0] + "_" + p[1], p[2], "Тренировка " + cond + ": время на дистанции меньше " + p[1] + " мин (по целой тренировке длиной " + fmtKm(d.m * REC_DIST_MIN).replace(" км", "") + "–" + fmtKm(d.m * REC_DIST_MAX).replace(" км", "") + " км).",
+        function(x){
+          return firstWhere(x.timed, function(r){
+            var m = num(r.m);
+            if(m < d.m * REC_DIST_MIN || m > d.m * REC_DIST_MAX) return false;
+            return num(r.totalMs) * d.m / m < limit;
+          });
+        },
+        function(x){ return x.bestRace[d.key] ? "лучшее время: " + fmtClock(x.bestRace[d.key]) : ""; });
+    });
+
+    add(C[5], "early", "Ранняя пташка", "5 тренировок " + cond + ", начатых между 4:00 и 7:00.",
+      function(x){ return x.early.length >= 5 ? endOf(x.early[4]) : 0; }, function(x){ return x.early.length + " из 5"; });
+    add(C[5], "owl", "Сова", "5 тренировок " + cond + ", начатых между 21:00 и 4:00.",
+      function(x){ return x.owl.length >= 5 ? endOf(x.owl[4]) : 0; }, function(x){ return x.owl.length + " из 5"; });
+    add(C[5], "year", "Год в движении", "Прошёл год с первой записанной тренировки " + cond + ".",
+      function(x){
+        if(!x.runs.length) return 0;
+        var ts = x.runs[0].start + 365 * 86400000;
+        return ts <= Date.now() ? ts : 0;
+      },
+      function(x){
+        if(!x.runs.length) return "";
+        return "прошло " + Math.max(0, Math.floor((Date.now() - x.runs[0].start) / 86400000)) + " из 365 дн.";
+      });
+
+    addGoalAwards("run", add, out);
+  }
+
+  // награды ходьбы и велосипеда (kind = "walk" | "bike"): по аналогии с бегом — километры, число тренировок, серии, время за одну тренировку, цели месяца
+  function buildKindAwards(kind, add, out){
+    var C = AWARD_CATS, cond = kindCond(kind), T = KIND_AWARD_TXT[kind];
+    add(C[0], "first", T.first, "Записана первая тренировка " + cond + " с пройденными километрами.",
+      function(x){ return x.runs.length ? endOf(x.runs[0]) : 0; });
+    recDists(kind).forEach(function(d){
+      var need = d.m * REC_DIST_MIN;
+      add(C[0], "d" + d.key, T.dist(d), "Одна тренировка " + cond + " не короче 98 % дистанции " + d.label + " — от " + fmtKm(need) + ".",
+        function(x){ return firstWhere(x.runs, function(r){ return num(r.m) >= need; }); },
+        function(x){ return x.maxM > 0 ? "самая длинная: " + fmtKm(x.maxM) : ""; });
+    });
+    T.totals.forEach(function(p){
+      add(C[1], "c" + p[0], p[1], "Суммарно пройдено " + p[0] + " км в тренировках " + cond + ".",
+        function(x){ return cumReach(x.runs, function(r){ return num(r.m) / 1000; }, p[0]); },
+        function(x){ return fmtKm(x.totalM) + " из " + p[0] + " км"; });
+    });
+    [10, 50, 100, 250].forEach(function(n){
+      add(C[2], "n" + n, T.count(n), "Записано " + n + " " + plural(n, "тренировка", "тренировки", "тренировок") + " " + cond + " с километрами.",
+        function(x){ return x.runs.length >= n ? endOf(x.runs[n - 1]) : 0; },
+        function(x){ return x.runs.length + " из " + n; });
+    });
+    T.streaks.forEach(function(p){
+      add(C[2], "s" + p[0], p[1], "Тренировки " + cond + " " + p[0] + " " + plural(p[0], "день", "дня", "дней") + " подряд.",
+        function(x){ return x.streakReach[p[0]] || 0; },
+        function(x){ return "лучшая серия: " + x.maxStreak + " из " + p[0]; });
+    });
+    T.times.forEach(function(p){
+      add(C[3], "t" + p[0], p[1], "Одна тренировка " + cond + " длиной от " + (p[0] / 60) + " " + plural(p[0] / 60, "часа", "часов", "часов") + ".",
+        function(x){ return firstWhere(x.timed, function(r){ return num(r.totalMs) >= p[0] * 60000; }); },
+        function(x){ return x.maxMs > 0 ? "самая долгая: " + fmtTotal(x.maxMs) : ""; });
+    });
+    addGoalAwards(kind, add, out);
+  }
+
+  function buildAwardDefs(){
+    var out = [];
+    function maker(kind){
+      var pre = kind === "run" ? "" : kind + "_"; // id наград бега прежние
+      return function(cat, id, title, text, calc, prog){ out.push({ cat: cat, kind: kind, id: pre + id, title: title, text: text, calc: calc, prog: prog || null, noNotice: false }); };
+    }
+    buildRunAwards(maker("run"), out);
+    buildKindAwards("walk", maker("walk"), out);
+    buildKindAwards("bike", maker("bike"), out);
     return out;
   }
   function awardDefs(){ if(!AWARD_DEFS) AWARD_DEFS = buildAwardDefs(); return AWARD_DEFS; }
@@ -1588,11 +1741,11 @@
     try{ base = localStorage.getItem(AWARD_BASE_KEY) === "1"; }catch(e){ base = true; }
     awardDefs().forEach(function(def){
       if(stored[def.id]) return;
-      var ts = def.calc(ctxFor(def.id));
+      var ts = def.calc(ctxFor(def));
       if(!(ts > 0)) return;
       items.push({ id: def.id, c: { ts: ts, at: now } });
       if(def.noNotice || (!base && ts < now - NOTICE_RECENT_MS)) return;
-      pushNotice({ k: "a:" + def.id, kind: "award", tab: "awards", text: "Новая награда: «" + def.title + "». " + def.text });
+      pushNotice({ k: "a:" + def.id, kind: "award", tab: "awards", tk: def.kind, text: "Новая награда (" + KIND_LC[def.kind] + "): «" + def.title + "». " + def.text });
     });
     if(items.length){ try{ STORE.putAwardMany(items); }catch(e){} }
     if(!base){ try{ localStorage.setItem(AWARD_BASE_KEY, "1"); }catch(e){} }
@@ -1604,18 +1757,20 @@
     try{ evalAwards(); }catch(e){}
   }
 
-  function awardsBodyHtml(){
-    var stored = awardsMap(), ctxFor = awardCtxFor(), defs = awardDefs();
+  function awardsBodyHtml(kind){
+    kind = kindKey(kind);
+    var stored = awardsMap(), ctxFor = awardCtxFor();
+    var defs = awardDefs().filter(function(d){ return d.kind === kind; });
     var got = defs.filter(function(d){ return !!stored[d.id]; }).length;
-    var html = '<div class="wk-tip-note" style="margin:0 0 2px;">Получено наград: ' + got + ' из ' + defs.length + '.</div>';
+    var html = '<div class="wk-tip-note" style="margin:0 0 2px;">Награды ' + esc(kindCond(kind)) + ' даются только за тренировки этого вида. Получено наград: ' + got + ' из ' + defs.length + '.</div>';
     AWARD_CATS.forEach(function(cat){
       var part = defs.filter(function(d){ return d.cat === cat; });
       if(!part.length) return;
       html += '<div class="wk-rec-cat">' + esc(cat) + '</div><div class="wk-card" style="padding:4px 12px;">';
       part.forEach(function(d){
         var st = stored[d.id];
-        var cnt = (st && d.count) ? d.count(ctxFor(d.id)) : 0;
-        var meta = st ? "Получена " + fmtDate(st.ts) : (d.prog ? d.prog(ctxFor(d.id)) : "");
+        var cnt = (st && d.count) ? d.count(ctxFor(d)) : 0;
+        var meta = st ? "Получена " + fmtDate(st.ts) : (d.prog ? d.prog(ctxFor(d)) : "");
         html += '<div class="wk-rec wk-award' + (st ? " on" : "") + '"' + (st ? ' data-aid="' + esc(d.id) + '"' : "") + '><span class="wk-medal">' + MEDAL_ICON_SVG + (cnt > 0 ? '<span class="wk-medal-x">x ' + cnt + '</span>' : "") + '</span>' +
           '<span class="wk-rec-name">' + esc(d.title) + '<span class="wk-sub">' + esc(d.text) + '</span>' +
           (meta ? '<span class="wk-sub wk-award-meta">' + esc(meta) + '</span>' : "") + '</span></div>';
@@ -1670,11 +1825,12 @@
       head: hasAward ? "Награда" : "Цель месячного плана",
       lines: shown.map(function(x){ return x.text; }),
       more: vis.length - shown.length,
-      tab: shown[0].tab === "awards" ? "awards" : "goals"
+      tab: shown[0].tab === "awards" ? "awards" : "goals",
+      tk: kindKey(shown[0].tk) // вид первого сообщения: нажатие открывает кубок на нём (у старых сообщений поля нет — бег)
     };
   }
   function noticeCardHtml(n){
-    return '<div class="wk-card wk-tip wk-notice" id="wkNoticeCard" data-tab="' + esc(n.tab) + '"><div class="wk-live-head"><span class="wk-tip-ico">' + CUP_ICON_SVG + '</span><span>' + esc(n.head) + '</span></div>' +
+    return '<div class="wk-card wk-tip wk-notice" id="wkNoticeCard" data-tab="' + esc(n.tab) + '" data-kind="' + esc(n.tk) + '"><div class="wk-live-head"><span class="wk-tip-ico">' + CUP_ICON_SVG + '</span><span>' + esc(n.head) + '</span></div>' +
       n.lines.map(function(l){ return '<div class="wk-tip-text">' + esc(l) + '</div>'; }).join("") +
       '<div class="wk-note wk-tip-meta">' + (n.more > 0 ? "и ещё " + n.more + " · " : "") + 'Нажмите, чтобы открыть</div></div>';
   }
@@ -1688,11 +1844,13 @@
     if(trophyIndex(tab) === -1) tab = loadTrophyTab();
     trophyTab = tab;
     try{ localStorage.setItem(TROPHY_TAB_KEY, tab); }catch(e){}
+    var kind = loadTrophyKind();
+    trophyKind = kind;
     var keep = document.getElementById("wkTrophy") ? { c: c.scrollTop, b: document.getElementById("wkTrophy").scrollTop } : null;
     evalProgress();
     markNoticesSeen();
-    var body = tab === "goals" ? goalsBodyHtml() : (tab === "awards" ? awardsBodyHtml() : recordsBodyHtml());
-    c.innerHTML = swHtml(tab) + '<div class="task-info-body" id="wkTrophy">' + body + '</div><div class="mdeditor-fab-row">' +
+    var body = tab === "goals" ? goalsBodyHtml(kind) : (tab === "awards" ? awardsBodyHtml(kind) : recordsBodyHtml(kind));
+    c.innerHTML = swHtml(tab) + kindSwHtml(kind) + '<div class="task-info-body" id="wkTrophy">' + body + '</div><div class="mdeditor-fab-row">' +
       '<button type="button" class="mdeditor-fab-btn" id="wkTrophyInfoBtn" title="Как это работает" aria-label="Как это работает">' + INFO_ICON_SVG + '</button>' +
       tipsHomeBtnHtml("wkRecordsHomeBtn", "Назад к тренировкам") + '</div>';
     if(keep){
@@ -1706,18 +1864,24 @@
         if(k !== trophyTab) renderTrophyScreen(k);
       });
     });
+    Array.prototype.forEach.call(c.querySelectorAll(".wk-kindsw-btn"), function(b){
+      b.addEventListener("click", function(){
+        var k = b.getAttribute("data-wkkind");
+        if(k !== trophyKind){ setTrophyKind(k); renderTrophyScreen(trophyTab); }
+      });
+    });
     Array.prototype.forEach.call(c.querySelectorAll("[data-gsel]"), function(b){
       b.addEventListener("click", function(){
-        var p = String(b.getAttribute("data-gsel")).split(":");
-        goalSel[p[0]] = parseInt(p[1], 10) || 0;
+        var p = String(b.getAttribute("data-gsel")).split(":"); // «вид:тип:значение»
+        goalSel[p[0] + ":" + p[1]] = parseInt(p[2], 10) || 0;
         renderTrophyScreen("goals");
       });
     });
     Array.prototype.forEach.call(c.querySelectorAll("[data-gset]"), function(b){
       b.addEventListener("click", function(){
-        var type = b.getAttribute("data-gset");
-        if(goalSel[type]) setGoal(type, goalSel[type]);
-        goalSel[type] = 0;
+        var p = String(b.getAttribute("data-gset")).split(":"), sk = p[0] + ":" + p[1]; // «вид:тип»
+        if(goalSel[sk]) setGoal(p[0], p[1], goalSel[sk]);
+        goalSel[sk] = 0;
         renderTrophyScreen("goals");
       });
     });
@@ -1746,30 +1910,35 @@
   // ---------- справка частей кубка (кнопка «i» слева от «домика») ----------
   // Только общие правила; то, что уже написано на самом экране или под названием награды, не повторяется.
   function trophyInfoRows(tab){
+    var kinds = "Виды тренировки. Бег, ходьба и велосипед считаются раздельно: переключатель вида — под строкой «Рекорды | Цели | Награды», он общий для трёх частей. Запись относится к тому виду, который выбран при старте записи. У старых записей, записей из CSV и строки «только высота» вида нет — они считаются бегом. Всё, что есть для бега, даётся только при условии вида «Бег»: ходьба и велосипед в бег не входят, и наоборот.";
     if(tab === "records") return [
-      "Откуда берутся. Рекорды считаются по всем записям заново при каждом открытии, поэтому удалили запись — рекорд пересчитался. Сообщений о новых рекордах нет.",
-      "Время и дистанция. «Максимальное время» берётся по общему времени тренировки, «Максимальная дистанция» — по километрам. У записей, импортированных из CSV, нет времени: они участвуют только в дистанции. Строка «только высота» не учитывается.",
-      "Лучшее время на дистанции. Берётся только целая тренировка длиной от 98 % до 110 % дистанции: кусок внутри длинной пробежки не засчитывается. Время пересчитывается на ровную дистанцию, и темп в строке — тоже по ровной дистанции.",
-      "Дистанции. Полумарафон — 21,0975 км, марафон — 42,195 км.",
+      kinds,
+      "Откуда берутся. Рекорды считаются по всем записям выбранного вида заново при каждом открытии, поэтому удалили запись — рекорд пересчитался. Сообщений о новых рекордах нет.",
+      "Время и дистанция. «Максимальное время» берётся по общему времени тренировки, «Максимальная дистанция» — по километрам. У записей, импортированных из CSV, нет времени: они участвуют только в дистанции бега. Строка «только высота» не учитывается.",
+      "Лучшее время на дистанции. Берётся только целая тренировка длиной от 98 % до 110 % дистанции: кусок внутри длинной тренировки не засчитывается. Время пересчитывается на ровную дистанцию, и темп в строке — тоже по ровной дистанции. У велосипеда вместо темпа показана средняя скорость.",
+      "Дистанции. Бег: 5 км, 10 км, полумарафон (21,0975 км) и марафон (42,195 км). Ходьба: 5, 10, 20 и 30 км. Велосипед: 20, 50, 100 и 200 км.",
       "«Ожидается» значит, что подходящей записи ещё нет."
     ];
     if(tab === "goals") return [
-      "Как считается прогресс. По всем записям месяца, по дате начала тренировки: тренировка, начатая 31-го вечером, идёт в тот месяц. Километры — по записи, высота — набор (включая внесённый вручную), время — общее время тренировки. У записей, импортированных из CSV, времени нет.",
-      "Что предлагается. Только значения больше уже набранного за месяц. По одной цели каждого вида можно вести одновременно: километраж, высота и время не мешают друг другу.",
-      "Сообщения. На 50 % и 75 % цели текущего месяца и при достижении на вкладке «Тренировки» появляется карточка вместо совета дня. Если вы выбрали цель, когда половина или три четверти уже пройдены, об этих отметках сообщения не будет. Карточки хранятся на этом устройстве; отметки 50 %, 75 % и достижения синхронизируются, поэтому второе устройство не повторяет сообщение.",
+      kinds,
+      "Как считается прогресс. По записям выбранного вида в месяце, по дате начала тренировки: тренировка, начатая 31-го вечером, идёт в тот месяц. Километры — по записи, высота — набор (включая внесённый вручную в тренировку этого вида), время — общее время тренировки. У записей, импортированных из CSV, времени нет.",
+      "Что предлагается. Только значения больше уже набранного за месяц, и у каждого вида свои. Километраж: бег 50–500 км, ходьба 30–200 км, велосипед 100–1000 км. Набор высоты: бег и ходьба 300–3000 м, велосипед 500–6000 м. Время: 5–40 ч у всех видов. По одной цели каждого типа можно вести одновременно, а цели разных видов тренировки не мешают друг другу.",
+      "Сообщения. На 50 % и 75 % цели текущего месяца и при достижении на вкладке «Тренировки» появляется карточка вместо совета дня; в ней назван вид тренировки. Если вы выбрали цель, когда половина или три четверти уже пройдены, об этих отметках сообщения не будет. Карточки хранятся на этом устройстве; отметки 50 %, 75 % и достижения синхронизируются, поэтому второе устройство не повторяет сообщение.",
       "Дата достижения. Это окончание той тренировки, на которой цель набрана.",
-      "Достигнутая цель остаётся достигнутой, даже если тренировку потом удалили. Цель, не выполненная в свой месяц, остаётся в «Прошлых целях» с итоговым прогрессом; если позже добавить или импортировать тренировки за тот месяц и набрать нужное, она засчитается задним числом. В «Прошлых целях» показаны последние 12."
+      "Достигнутая цель остаётся достигнутой, даже если тренировку потом удалили. Цель, не выполненная в свой месяц, остаётся в «Прошлых целях» с итоговым прогрессом; если позже добавить или импортировать тренировки того же вида за тот месяц и набрать нужное, она засчитается задним числом. В «Прошлых целях» показаны последние 12 целей выбранного вида."
     ];
     return [
-      "Что засчитывается. Награды считаются по записанным тренировкам с километрами. Строка «только высота» (метры, внесённые в день без тренировки) тренировкой не считается: в награды «за одну тренировку» по высоте она не входит, но в суммарный набор высоты метры идут. Записи, загруженные из CSV стороннего трекера, учитываются в километрах, числе тренировок, сериях и привычках; в наградах за время и скорость — нет, потому что у них нет времени.",
-      "Дни в сериях. День — календарный, по дате начала тренировки (местное время). Несколько тренировок за день — один день серии.",
+      kinds,
+      "Что засчитывается. Награды вида считаются по записанным тренировкам этого вида с километрами. Строка «только высота» (метры, внесённые в день без тренировки) вида не имеет и идёт в бег: в награды «за одну тренировку» по высоте она не входит, но в суммарный набор высоты бега метры идут. Записи, загруженные из CSV стороннего трекера, — это бег: они учитываются в километрах, числе тренировок, сериях и привычках; в наградах за время и скорость — нет, потому что у них нет времени.",
+      "Какие награды у какого вида. У бега полный набор: дистанции, общий километраж, число тренировок, серии, время и высота, скорость, привычки, цели месяца. У ходьбы и велосипеда: дистанция за одну тренировку, общий километраж, число тренировок, серии, время за одну тренировку и цели месяца; наград за скорость, высоту за одну тренировку и привычки у них нет.",
+      "Дни в сериях. День — календарный, по дате начала тренировки (местное время). Несколько тренировок вида за день — один день серии этого вида; серия бега и серия ходьбы не складываются.",
       "Дата награды. Это день, когда условие было выполнено, а не день, когда вы открыли экран. Старые тренировки засчитываются задним числом — в том числе после импорта.",
       "Награда не пропадает сама. Раз полученная награда остаётся, даже если тренировку потом удалили. Награды синхронизируются между вашими устройствами и входят в экспорт личных данных.",
       "Когда пересчитываются. При открытии вкладки «Тренировки», после новой записи и при открытии экрана кубка.",
-      "Обнуление. Долгое нажатие на полученную награду открывает плашку с крестиком (нажатие мимо — отмена). После крестика награда пропадает, и её нужно заслужить заново с нуля: считаются только тренировки, начатые после обнуления (для наград за цели месяца — цели, достигнутые после обнуления; сами цели не меняются). Обнуление синхронизируется между устройствами; из экспорта обнулённая награда исчезает. Ещё не полученные (бледные) награды не обнуляются.",
-      "Счётчик «x N». У полученных наград за конкретную цель месяца под медалью показано, сколько раз эта цель достигнута (в разных месяцах). Только у наград за конкретную цель («Цель месяца: …»); у «Первой цели» и «Тройной цели» счётчика нет. После обнуления счёт начинается заново.",
+      "Обнуление. Долгое нажатие на полученную награду открывает плашку с крестиком (нажатие мимо — отмена). После крестика награда пропадает, и её нужно заслужить заново с нуля: считаются только тренировки её вида, начатые после обнуления (для наград за цели месяца — цели её вида, достигнутые после обнуления; сами цели не меняются). Обнуление синхронизируется между устройствами; из экспорта обнулённая награда исчезает. Ещё не полученные (бледные) награды не обнуляются.",
+      "Счётчик «x N». У полученных наград за конкретную цель месяца под медалью показано, сколько раз эта цель достигнута (в разных месяцах). Только у наград за конкретную цель («Цель месяца (бег): …»); у «Первой цели» и «Тройной цели» счётчика нет. После обнуления счёт начинается заново.",
       "Бледные и яркие. Яркая — получена (с датой), бледная — ещё нет. Под названием бледной награды — текущий прогресс; у наград без прогресса (например, «Первая цель») строки нет.",
-      "Сообщения. О каждой новой награде на вкладке «Тренировки» появляется карточка вместо совета дня: весь день события, а дальше — пока вы не откроете экран кубка. Нажатие на карточку открывает награды. Исключения: о наградах за цели месяца сообщает карточка самой цели; при самом первом пересчёте на устройстве молчат награды старше 3 дней. Сообщения хранятся только на этом устройстве."
+      "Сообщения. О каждой новой награде на вкладке «Тренировки» появляется карточка вместо совета дня (в ней назван вид тренировки): весь день события, а дальше — пока вы не откроете экран кубка. Нажатие на карточку открывает награды этого вида. Исключения: о наградах за цели месяца сообщает карточка самой цели; при самом первом пересчёте на устройстве молчат награды старше 3 дней. Сообщения хранятся только на этом устройстве."
     ];
   }
   function renderTrophyInfoScreen(tab){
@@ -2365,9 +2534,9 @@
     // для экспорта (раздел `workouts` в data.json): цели месяцев (прогресс пересчитывается по записям)
     exportGoals: function(){
       var asc = recsAsc();
-      return goalsList().sort(function(a, b){ return a.month < b.month ? -1 : (a.month > b.month ? 1 : (a.type < b.type ? -1 : a.target - b.target)); }).map(function(g){
-        var cum = monthProgress(g.type, g.month, asc);
-        var o = { month: g.month, kind: goalType(g.type).title, target: g.target + " " + goalType(g.type).unit,
+      return goalsList().sort(function(a, b){ return a.month < b.month ? -1 : (a.month > b.month ? 1 : (a.kind < b.kind ? -1 : (a.kind > b.kind ? 1 : (a.type < b.type ? -1 : a.target - b.target)))); }).map(function(g){
+        var cum = monthProgress(g.type, g.month, asc, g.kind);
+        var o = { workout: KINDS[g.kind].label, month: g.month, kind: goalType(g.type).title, target: g.target + " " + goalType(g.type).unit,
           progress: (g.type === "km" ? Math.round(cum * 10) / 10 : (g.type === "up" ? Math.round(cum) : Math.round(cum * 10) / 10)) + " " + goalType(g.type).unit,
           achieved: !!g.done };
         if(g.done) o.achievedDate = localDate(g.done);
@@ -2377,9 +2546,9 @@
     // для экспорта: полученные награды (без служебных записей), по дате
     exportAwards: function(){
       var stored = awardsMap(), out = [];
-      awardDefs().forEach(function(d){ if(stored[d.id]) out.push({ title: d.title, description: d.text, date: localDate(stored[d.id].ts), ts: stored[d.id].ts }); });
+      awardDefs().forEach(function(d){ if(stored[d.id]) out.push({ workout: KINDS[d.kind].label, title: d.title, description: d.text, date: localDate(stored[d.id].ts), ts: stored[d.id].ts }); });
       out.sort(function(a, b){ return a.ts - b.ts; });
-      return out.map(function(o){ return { title: o.title, description: o.description, date: o.date }; });
+      return out.map(function(o){ return { workout: o.workout, title: o.title, description: o.description, date: o.date }; });
     },
     refreshIfOpen: refreshIfOpen,
     refreshTabMark: refreshTabMark,
