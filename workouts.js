@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 12.4 (10.11)
+   Версия: 13.0 (10.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -26,7 +26,7 @@
    `drain()` (при открытии вкладки, при возврате в приложение, после остановки) и сохраняет через хранилище. Обновления `upd:1` (от старых версий оболочки)
    и метка `pend` игнорируются.
 
-   Запись тренировки: {id, start, end, m (метры, итог), rawM (метры по GPS), totalMs, lostMs, gaps:[[с,по]], how:"raw" (у записей старых версий встречается "map"; у импортированных "imp")[, up (набор высоты, м, только если был; считает оболочка по высоте GPS), jumps (сколько раз GPS «уезжал» в сторону и это отброшено, только если было), rpe (1…10)]}.
+   Запись тренировки: {id, start, end, m (метры, итог), rawM (метры по GPS), totalMs, lostMs, gaps:[[с,по]], how:"raw" (у записей старых версий встречается "map"; у импортированных "imp")[, type ("walk" | "bike"; нет поля — бег; пишет оболочка, мост ≥28), up (набор высоты, м, только если был; считает оболочка по высоте GPS), jumps (сколько раз GPS «уезжал» в сторону и это отброшено, только если было), rpe (1…10)]}.
 
    «Нагрузка» (sRPE, session RPE): сразу после остановки (кнопкой в панели, в уведомлении или в острове — не важно, запись попадает в `drain`)
    запись помечается как ожидающая оценки (поле `needRpe:1` в самой записи, поэтому метка уезжает в облако и окно оценки появляется и на другом устройстве; `needRpe` снимается при сохранении оценки; старый локальный список `workoutsPendingRpe_v1` один раз переносится в записи — `migrateLocalPending`) и в области панели записи (`#wkLive`,
@@ -121,6 +121,18 @@
   var REC_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
       '<circle cx="12" cy="12" r="8.5"></circle><circle cx="12" cy="12" r="3.6" fill="currentColor" stroke="none"></circle></svg>';
+  var RUN_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<circle cx="15.5" cy="4.5" r="1.8"></circle><path d="M14 8l-3 5"></path><path d="M14 8.5l3.5 2.5 2-1"></path><path d="M13 9l-3.5.5L8 12.5"></path>' +
+      '<path d="M11 13l3.5 2.5-.5 4.5"></path><path d="M11 13l-3 3-3 .5"></path></svg>';
+  var WALK_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<circle cx="12" cy="4.5" r="1.8"></circle><path d="M12 8v6"></path><path d="M12 9.5L9 13"></path><path d="M12 9.5l3 3.5"></path>' +
+      '<path d="M12 14l-2.5 6"></path><path d="M12 14l2.5 6"></path></svg>';
+  var BIKE_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+      '<circle cx="18.5" cy="17.5" r="3.5"></circle><circle cx="5.5" cy="17.5" r="3.5"></circle><circle cx="15" cy="5" r="1"></circle>' +
+      '<path d="M12 17.5V14l-3-3 4-3 2 3h2"></path></svg>';
   var PAUSE_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>';
   var PLAY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"></path></svg>';
@@ -166,6 +178,17 @@
   var importBusy = false;  // идёт чтение файла импорта
   var trophyTab = "records"; // открытая часть экрана кубка
   var goalSel = {};        // выбранная, но ещё не поставленная цель: {km|up|time: значение}
+
+  // ---------- вид тренировки (бег / ходьба / велосипед) ----------
+  var KINDS = {
+    run: { label: "Бег", svg: RUN_ICON_SVG },
+    walk: { label: "Ходьба", svg: WALK_ICON_SVG },
+    bike: { label: "Велосипед", svg: BIKE_ICON_SVG }
+  };
+  var KIND_ORDER = ["run", "walk", "bike"];
+  function kindKey(k){ return KINDS.hasOwnProperty(k) ? k : "run"; }
+  function kindOf(r){ return kindKey(r && r.type); } // запись без поля `type` — бег
+  function kindIconHtml(k){ return '<span class="wk-kind" title="' + esc(KINDS[k].label) + '">' + KINDS[k].svg + '</span>'; }
 
   // ---------- вспомогательное ----------
   function container(){ return document.getElementById("settingsTabContent"); }
@@ -402,6 +425,12 @@
       ".wk-msg button{margin-top:8px;padding:6px 12px;border-radius:10px;border:1px solid var(--wood);background:transparent;color:var(--wood-dark);font:inherit;cursor:pointer;}" +
       ".wk-gaps{margin-top:8px;color:var(--ink);}" +
       ".wk-gaps div{margin-top:3px;}" +
+      ".wk-kind{display:inline-block;width:18px;height:18px;vertical-align:-4px;margin-right:6px;color:var(--wood-dark);}" +
+      ".wk-kind svg{display:block;width:18px;height:18px;}" +
+      ".wk-live-head .wk-kind{margin-right:0;vertical-align:middle;}" +
+      ".wk-kind-menu{position:absolute;z-index:6;pointer-events:none;}" +
+      ".wk-kind-menu .wk-kind-btn + .wk-kind-btn{margin-top:var(--fab-gap,6px);}" +
+      ".wk-kind-menu .wk-kind-btn svg{width:20px;height:20px;}" +
       "#wkRecBtn.wk-active{color:#e53935;}" +
       "#wkRecBtn.wk-blocked{opacity:.45;}" +
       ".wk-load{padding:0;font:inherit;font-size:12px;font-weight:bold;line-height:1;font-variant-numeric:tabular-nums;color:var(--wood-dark);overflow:hidden;}" +
@@ -570,7 +599,7 @@
       if(num(r.jumps) > 0) sub.push("выбросов GPS: " + Math.round(num(r.jumps)));
       if(num(r.lostMs) >= 1000) sub.push("без учёта км: " + fmtDur(r.lostMs));
       return '<div class="wk-row" data-id="' + esc(r.id) + '">' +
-        '<span class="wk-date">' + esc(dayLabel(r.start)) + ' <span class="wk-sub">' + esc(fmtHM(r.start)) + (sub.length ? " · " + esc(sub.join(" · ")) : "") + '</span></span>' +
+        '<span class="wk-date">' + kindIconHtml(kindOf(r)) + esc(dayLabel(r.start)) + ' <span class="wk-sub">' + esc(fmtHM(r.start)) + (sub.length ? " · " + esc(sub.join(" · ")) : "") + '</span></span>' +
         '<span class="wk-dist">' + esc(fmtKm(r.m)) + '</span>' +
         '<span class="wk-time">' + (num(r.totalMs) > 0 ? esc(fmtClock(r.totalMs)) : "") + '</span></div>';
     }).join("");
@@ -740,13 +769,62 @@
     paintLive();
   }
 
-  // старт записи без экрана (кнопка и QR «Комбинированный»): "ok" | "permission" | "gps_off" | "busy" | "nonative" | "error"
-  function startNative(){
+  // старт записи без экрана (кнопка и QR «Комбинированный»; без вида — бег): "ok" | "permission" | "gps_off" | "busy" | "nonative" | "oldshell" | "error"
+  function startNative(kind){
     var n = nat();
     if(!n) return "nonative";
     if(pendingRecord()) return "rpe"; // предыдущая тренировка ещё без оценки — новую не начинаем
-    try{ return String(n.workoutStart()); }catch(e){ return "error"; }
+    kind = kindKey(kind);
+    try{
+      if(typeof n.workoutStartKind !== "undefined") return String(n.workoutStartKind(kind));
+      if(kind === "run") return String(n.workoutStart());
+      return "oldshell"; // оболочка старше моста 28: ходьбу и велосипед она записать не умеет
+    }catch(e){ return "error"; }
   }
+
+  // меню видов над кнопкой записи: вставляется соседом ряда (не ребёнком — ряд считает своих детей кнопками), позиция — от окна настроек
+  function closeKindMenu(){
+    var m = document.getElementById("wkKindMenu");
+    if(m && m.parentNode) m.parentNode.removeChild(m);
+  }
+  var kindMenuBound = false;
+  function bindKindMenuDismiss(){
+    if(kindMenuBound) return;
+    kindMenuBound = true;
+    document.addEventListener("click", function(e){
+      var m = document.getElementById("wkKindMenu");
+      if(!m) return;
+      var rb = document.getElementById("wkRecBtn");
+      if(m.contains(e.target) || (rb && rb.contains(e.target))) return;
+      closeKindMenu();
+    }, true);
+  }
+  function openKindMenu(btn){
+    closeKindMenu();
+    var row = btn.parentNode;
+    if(!row || !row.parentNode) return;
+    var m = document.createElement("div");
+    m.id = "wkKindMenu";
+    m.className = "wk-kind-menu";
+    m.innerHTML = KIND_ORDER.map(function(k){
+      return '<button type="button" class="mdeditor-fab-btn wk-kind-btn" data-kind="' + k + '" title="' + esc(KINDS[k].label) + '" aria-label="' + esc(KINDS[k].label) + '">' + KINDS[k].svg + '</button>';
+    }).join("");
+    row.parentNode.insertBefore(m, row.nextSibling);
+    var op = m.offsetParent || row.parentNode;
+    var pr = op.getBoundingClientRect(), br = btn.getBoundingClientRect();
+    var gap = parseFloat(getComputedStyle(row).bottom) || 6;
+    m.style.left = Math.round(br.left - pr.left - (op.clientLeft || 0)) + "px";
+    m.style.bottom = Math.round(pr.bottom - br.top - (op.clientTop || 0) + gap) + "px";
+    Array.prototype.forEach.call(m.querySelectorAll(".wk-kind-btn"), function(b){
+      b.addEventListener("click", function(e){
+        e.stopPropagation();
+        var k = b.getAttribute("data-kind");
+        closeKindMenu();
+        startKind(k);
+      });
+    });
+  }
+
   function onRecordTap(){
     var n = nat();
     if(!n){
@@ -756,12 +834,25 @@
     if(lastState && lastState.status && lastState.status !== "idle"){
       return; // запись уже идёт: управление — в панели
     }
-    var res = startNative();
+    if(document.getElementById("wkKindMenu")){ closeKindMenu(); return; }
+    if(pendingRecord()){
+      setMessage("Сначала оцените предыдущую тренировку — окно с вопросом выше.", "");
+      pollOnce(true);
+      return;
+    }
+    var btn = document.getElementById("wkRecBtn");
+    if(!btn) return;
+    bindKindMenuDismiss();
+    openKindMenu(btn);
+  }
+  function startKind(kind){
+    var res = startNative(kind);
     if(res === "ok"){ message = ""; messageAction = ""; }
     else if(res === "permission") setMessage("Разрешите доступ к геолокации в окне системы — запись начнётся сама.", "");
-    else if(res === "gps_off") setMessage("GPS выключен. Включите геолокацию и нажмите «Запись» снова.", "gps");
+    else if(res === "gps_off") setMessage("GPS выключен. Включите геолокацию и выберите вид тренировки снова.", "gps");
     else if(res === "busy") message = "";
     else if(res === "rpe") setMessage("Сначала оцените предыдущую тренировку — окно с вопросом выше.", "");
+    else if(res === "oldshell") setMessage("Ходьба и велосипед заработают после обновления приложения (нужна новая сборка APK).", "");
     else setMessage("Не удалось начать запись.", "");
     pollOnce(true);
   }
@@ -798,6 +889,7 @@
     if(recBtn){
       var active = !!(st && st.status && st.status !== "idle");
       recBtn.classList.toggle("wk-active", active);
+      if(active) closeKindMenu();
     }
     if(Date.now() - lastLoadCheck >= LOAD_CHECK_MS) updateLoadBtn();
     paintLive(force);
@@ -935,7 +1027,7 @@
       btns = '<div class="wk-btns"><button type="button" id="wkPauseBtn">' + (status === "paused" ? PLAY_ICON_SVG + "<span>Продолжить</span>" : PAUSE_ICON_SVG + "<span>Пауза</span>") +
         '</button><button type="button" class="wk-stop" id="wkStopBtn">' + STOP_ICON_SVG + '<span>Стоп</span></button></div>';
     }
-    return '<div class="wk-card"><div class="wk-live-head"><span class="wk-dot' + dotClass + '"></span><span>' + esc(head) + '</span></div>' + body + btns + '</div>';
+    return '<div class="wk-card"><div class="wk-live-head"><span class="wk-dot' + dotClass + '"></span><span>' + esc(head) + '</span> ' + kindIconHtml(kindKey(st.kind)) + '</div>' + body + btns + '</div>';
   }
 
   function updateLiveNumbers(box, st){
@@ -2168,6 +2260,7 @@
           gaps: Array.isArray(r.gaps) ? r.gaps.filter(function(g){ return Array.isArray(g) && g.length === 2; }) : [],
           how: "raw"
         };
+        if(r.type === "walk" || r.type === "bike") c.type = r.type; // бег — без поля
         if(num(r.up) > 0) c.up = Math.round(num(r.up));
         if(num(r.jumps) > 0) c.jumps = Math.round(num(r.jumps));
         c.needRpe = 1; // сначала оценка тяжести (sRPE), итоговая карточка появится после неё; метка едет в облако вместе с записью
@@ -2249,6 +2342,7 @@
           km: Math.round(num(r.m) / 10) / 100, meters: Math.round(num(r.m)),
           source: r.imp ? "импорт" : (r.man ? "внесено вручную" : (r.how === "map" ? "GPS + карта" : "GPS"))
         };
+        if(!r.man) o.type = kindOf(r);
         if(!r.imp){
           o.rawMeters = Math.round(num(r.rawM));
           o.totalSeconds = Math.round(num(r.totalMs) / 1000);

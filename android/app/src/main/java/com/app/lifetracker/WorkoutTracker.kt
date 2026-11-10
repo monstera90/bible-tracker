@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 6.0 (04.11)
+// Версия: 7.0 (10.11)
 
 import android.content.Context
 import org.json.JSONArray
@@ -11,7 +11,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Вкладка «Тренировки»: состояние одной записи тренировки (бег) по GPS. Данные приходят от [WorkoutService]
+ * Вкладка «Тренировки»: состояние одной записи тренировки (бег, ходьба или велосипед — [kind]) по GPS. Данные приходят от [WorkoutService]
  * (LocationListener и GnssStatus), состояние читает мост ([NativeBridge.workoutState]) и уведомление службы.
  *
  * Как считается:
@@ -70,8 +70,26 @@ object WorkoutTracker {
 
     private const val M_PER_DEG = 111_194.93
 
-    /** Скорость выше этого значения — не бег, а ошибка GPS: точка в маршрут не попадает (м/с, 9 м/с = 32 км/ч). */
+    /** Скорость выше этого значения — не бег и не ходьба, а ошибка GPS: точка в маршрут не попадает (м/с, 9 м/с = 32 км/ч). */
     private const val MAX_SPEED = 9.0
+
+    /** То же для велосипеда (м/с, 22 м/с ≈ 79 км/ч: спуски быстрые, но выше — уже ошибка GPS). */
+    private const val MAX_SPEED_BIKE = 22.0
+
+    const val KIND_RUN = "run"
+    const val KIND_WALK = "walk"
+    const val KIND_BIKE = "bike"
+
+    /** Вид тренировки из страницы: неизвестное значение — бег. */
+    fun normKind(k: String?): String = when (k) {
+        KIND_WALK -> KIND_WALK
+        KIND_BIKE -> KIND_BIKE
+        else -> KIND_RUN
+    }
+
+    /** Вид, с которым начнётся запись после ответа на системный запрос геолокации (см. [MainActivity]). */
+    @Volatile
+    var nextKind: String = KIND_RUN
 
     /** Сколько подряд согласованных между собой точек, не стыкующихся с маршрутом, считать устойчивым сдвигом: новый сегмент. */
     private const val JUMP_CONFIRM = 5
@@ -134,6 +152,8 @@ object WorkoutTracker {
     private var lastPtT = 0L                        // время последней точки, стыкующейся с маршрутом (в том числе не прибавившей метры)
     private val cand = ArrayList<DoubleArray>()      // точки [lat, lon, t, acc, speed], не стыкующиеся с маршрутом (возможный выброс или сдвиг)
     private var jumps = 0                            // сколько раз GPS «уезжал» (выброс или сдвиг), за тренировку
+    @Volatile
+    private var kind = KIND_RUN                      // вид текущей записи
     private var upM = 0.0                            // набрано высоты за тренировку, м
     private var altSm = Double.NaN                   // сглаженная высота (NaN — ещё не было точки после начала/разрыва)
     private var altRising = false
@@ -184,10 +204,11 @@ object WorkoutTracker {
 
     // ---------- управление ----------
 
-    /** Начать запись: «Поиск спутников». false — уже идёт. */
-    fun begin(): Boolean {
+    /** Начать запись вида [k] (бег / ходьба / велосипед): «Поиск спутников». false — уже идёт. */
+    fun begin(k: String = KIND_RUN): Boolean {
         synchronized(lock) {
             if (status != ST_IDLE) return false
+            kind = normKind(k)
             val now = System.currentTimeMillis()
             status = ST_SEARCH
             sat = -1
@@ -289,7 +310,7 @@ object WorkoutTracker {
                     if (!fix) gaps.add(longArrayOf(gapStart, now))
                 }
                 status = ST_FINISH
-                Rec(startedAt, now, okMs + lostMs, lostMs, ArrayList(gaps), distM, jumps, upM)
+                Rec(startedAt, now, okMs + lostMs, lostMs, ArrayList(gaps), distM, jumps, upM, kind)
             }
         }
         if (rec == null) return false
@@ -416,6 +437,7 @@ object WorkoutTracker {
             .put("lostMs", s.lostMs)
             .put("distM", s.distM)
             .put("upM", Math.round(s.upM))
+            .put("kind", kind)
             .put("startedAt", s.startedAt)
             .put("gaps", gaps)
             .put("pending", pendingCount(ctx))
@@ -482,7 +504,7 @@ object WorkoutTracker {
     /** Можно ли добраться от точки a (время at, мс) до (lat, lon, t) не быстрее [MAX_SPEED]; время между точками зажато в [DT_MIN]..maxDt. */
     private fun stepOk(a: DoubleArray, at: Long, lat: Double, lon: Double, t: Long, maxDt: Double): Boolean {
         val dt = ((t - at) / 1000.0).coerceIn(DT_MIN, maxDt)
-        return haversine(a[0], a[1], lat, lon) <= MAX_SPEED * dt
+        return haversine(a[0], a[1], lat, lon) <= (if (kind == KIND_BIKE) MAX_SPEED_BIKE else MAX_SPEED) * dt
     }
 
     private fun addPoint(lat: Double, lon: Double, t: Long, acc: Float, speed: Float) {
@@ -619,7 +641,8 @@ object WorkoutTracker {
         val gaps: List<LongArray>,
         val rawM: Double,
         val jumps: Int,
-        val climbM: Double
+        val climbM: Double,
+        val kind: String
     ) {
         fun toJson(distM: Double, how: String): JSONObject {
             val g = JSONArray()
@@ -636,6 +659,7 @@ object WorkoutTracker {
                 .put("how", how)
                 .put("jumps", jumps)
                 .put("up", Math.round(climbM))
+                .apply { if (kind != KIND_RUN) put("type", kind) } // бег — без поля
         }
     }
 

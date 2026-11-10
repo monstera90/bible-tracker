@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 15.1 (10.11)
+// Версия: 15.2 (10.11)
 // Версия: 11.0 (04.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
@@ -214,7 +214,7 @@ class MainActivity : ComponentActivity() {
     private val locationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
             val granted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true
-            if (granted && WorkoutService.gpsEnabled(applicationContext) && WorkoutTracker.begin()) {
+            if (granted && WorkoutService.gpsEnabled(applicationContext) && WorkoutTracker.begin(WorkoutTracker.nextKind)) {
                 WorkoutService.refresh(applicationContext)
             }
             runOnUiThread {

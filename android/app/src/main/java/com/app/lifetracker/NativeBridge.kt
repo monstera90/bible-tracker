@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 21.0 (09.11)
+// Версия: 22.0 (10.11)
 // Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
@@ -42,6 +42,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 28: `workoutStartKind(kind)` — запись тренировки с видом "run" | "walk" | "bike" (у велосипеда выше предел скорости точки GPS; в записи поле `type`).
          * 27: вкладка «Система»: системный плавающий остров (islandGet / islandSetSystem / islandOpenOverlaySettings; IslandSettings).
          * 26: помодоро: законченные рабочие отрезки для календаря и «Истории» (pomodoroTakeFinished / pomodoroAckFinished).
          * 25: вкладка «Помодоро» (pomodoroStart / pomodoroPause / pomodoroPlus5 / pomodoroSkip / pomodoroStop / pomodoroState / pomodoroUi).
@@ -57,7 +58,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 27
+        const val BRIDGE_VERSION = 28
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -659,16 +660,22 @@ class NativeBridge(private val activity: MainActivity) {
      * "busy" — запись уже идёт; "denied" — страница не доверенная.
      */
     @JavascriptInterface
-    fun workoutStart(): String {
+    fun workoutStart(): String = workoutStartKind(WorkoutTracker.KIND_RUN)
+
+    /** То же с видом тренировки: "run" (бег), "walk" (ходьба), "bike" (велосипед); другое значение — бег. */
+    @JavascriptInterface
+    fun workoutStartKind(kind: String?): String {
         if (!activity.pageTrusted) return "denied"
+        val k = WorkoutTracker.normKind(kind)
         if (WorkoutTracker.status != WorkoutTracker.ST_IDLE) return "busy"
         val ctx = activity.applicationContext
         if (!WorkoutService.hasLocationPermission(ctx)) {
+            WorkoutTracker.nextKind = k
             activity.runOnUiThread { activity.requestLocationForWorkout() }
             return "permission"
         }
         if (!WorkoutService.gpsEnabled(ctx)) return "gps_off"
-        if (!WorkoutTracker.begin()) return "busy"
+        if (!WorkoutTracker.begin(k)) return "busy"
         WorkoutService.refresh(ctx)
         return "ok"
     }
