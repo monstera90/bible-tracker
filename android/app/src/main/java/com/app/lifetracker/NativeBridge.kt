@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 22.0 (10.11)
+// Версия: 23.0 (10.11)
 // Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
@@ -42,6 +42,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 29: `musicDelete(folderId, trackId)` — удалить трек с устройства (вкладка «Музыка»); `allFilesState()` / `allFilesRequest()` — доступ ко всем файлам (AllFilesAccess).
          * 28: `workoutStartKind(kind)` — запись тренировки с видом "run" | "walk" | "bike" (у велосипеда выше предел скорости точки GPS; в записи поле `type`).
          * 27: вкладка «Система»: системный плавающий остров (islandGet / islandSetSystem / islandOpenOverlaySettings; IslandSettings).
          * 26: помодоро: законченные рабочие отрезки для календаря и «Истории» (pomodoroTakeFinished / pomodoroAckFinished).
@@ -58,7 +59,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 28
+        const val BRIDGE_VERSION = 29
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -636,6 +637,34 @@ class NativeBridge(private val activity: MainActivity) {
     fun musicClose() {
         if (!activity.pageTrusted) return
         MusicPlayer.close()
+    }
+
+    /**
+     * Удалить трек [trackId] с устройства без вопросов (долгое нажатие на треке → крестик). Ответ: "ok" — удалён (из очереди
+     * плеера тоже убран); "perm" — не хватило прав: страница просит «Доступ ко всем файлам» (`allFilesRequest`); "fail" — не вышло.
+     * [folderId] — папка списка, из которого нажали (сейчас не нужна, оставлена для будущих действий файлового менеджера).
+     */
+    @JavascriptInterface
+    fun musicDelete(folderId: String?, trackId: String?): String {
+        if (!activity.pageTrusted || trackId.isNullOrEmpty()) return MusicLibrary.DEL_FAIL
+        val res = MusicLibrary.delete(activity.applicationContext, trackId)
+        if (res == MusicLibrary.DEL_OK) MusicPlayer.onTrackDeleted(trackId)
+        return res
+    }
+
+    /** JSON {"granted":true|false,"sdk":N} — выдан ли доступ ко всем файлам. */
+    @JavascriptInterface
+    fun allFilesState(): String {
+        if (!activity.pageTrusted) return "{}"
+        return AllFilesAccess.stateJson(activity.applicationContext)
+    }
+
+    /** Запросить доступ ко всем файлам (на Android 11+ откроется экран настроек); ответ — window.__ltOnAllFiles(true|false). */
+    @JavascriptInterface
+    fun allFilesRequest(): Boolean {
+        if (!activity.pageTrusted) return false
+        activity.runOnUiThread { activity.requestAllFilesAccess() }
+        return true
     }
 
     /** JSON {"music": мс, "timers": мс} — сколько этот телефон проиграл музыки и насчитали таймеры карточек (вкладка «Трекер экранов»). */

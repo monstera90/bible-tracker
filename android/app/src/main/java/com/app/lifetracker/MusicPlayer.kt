@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 6.0 (10.11)
 // Версия: 5.1 (09.11)
 // Версия: 4.1 (27.10) — `setPhoneVolume`: `FLAG_SHOW_UI` (панель громкости системы синхронизируется — кнопки громкости больше не «скачут» от прежнего положения) и проверка значения через 0,4 с с одним повтором.
 // Версия: 4.0 (26.10) — структурная правка: учёт времени воспроизведения для «Трекера экранов» (`playing` копит отрезки в `ScreenTimeStats.MUSIC`, `livePlayingMs`).
@@ -287,6 +288,34 @@ object MusicPlayer {
     fun prev() {
         main.post {
             if (active) startTrack(if (index > 0) index - 1 else 0)
+        }
+    }
+
+    /**
+     * Файл трека [id] удалён с устройства (вкладка «Музыка», долгое нажатие → крестик): убрать его из очереди. Если он играл —
+     * играет следующий (на месте удалённого), а когда удалён последний и очередь не зациклена, или единственный — плеер закрывается.
+     */
+    fun onTrackDeleted(id: String) {
+        main.post {
+            if (!active) return@post
+            val at = queue.indexOfFirst { it.id == id }
+            if (at < 0) return@post
+            val wasCurrent = at == index
+            queue = queue.filterIndexed { i, _ -> i != at }
+            count = queue.size
+            if (queue.isEmpty()) {
+                closeNow()
+                return@post
+            }
+            if (!wasCurrent) {
+                if (at < index) index--
+                return@post
+            }
+            when {
+                at < queue.size -> startTrack(at)
+                loopQueue -> startTrack(0)
+                else -> closeNow()
+            }
         }
     }
 

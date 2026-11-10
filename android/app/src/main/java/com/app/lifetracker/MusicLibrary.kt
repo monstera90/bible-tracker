@@ -1,9 +1,11 @@
 package com.app.lifetracker
+// Версия: 2.0 (10.11)
 // Версия: 1.1 (26.10) — `displayName(ctx, docId)`: имя документа по id (нужно, чтобы играть трек/папку прямо по id из QR «Комбинированный», без списка папки).
 // Версия: 1.0 (25.10)
 
 import android.content.Context
 import android.content.Intent
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.provider.DocumentsContract
 import org.json.JSONArray
@@ -44,12 +46,20 @@ object MusicLibrary {
         return if (granted) uri else null
     }
 
-    /** Запоминает выбранную папку (с постоянным правом на чтение). false — система не дала право. */
+    /** Запоминает выбранную папку (с постоянным правом на чтение и запись — запись нужна для удаления треков). false — система не дала право. */
     fun setTree(ctx: Context, uri: Uri): Boolean {
         try {
-            ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            ctx.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
         } catch (e: Exception) {
-            return false
+            // запись не дали — оставляем хотя бы чтение (удалять тогда сможет только «Доступ ко всем файлам»)
+            try {
+                ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e2: Exception) {
+                return false
+            }
         }
         val name = try {
             queryName(ctx, uri, DocumentsContract.getTreeDocumentId(uri))
@@ -126,6 +136,64 @@ object MusicLibrary {
             if (a.dir != b.dir) (if (a.dir) -1 else 1) else naturalCompare(a.name, b.name)
         })
         return res
+    }
+
+    const val DEL_OK = "ok"
+    const val DEL_PERM = "perm"
+    const val DEL_FAIL = "fail"
+
+    /**
+     * Удаляет звуковой файл [docId] с устройства (без корзины). Только файл внутри выбранной папки, не папка.
+     * Сначала штатно через SAF (нужно право на запись в папку), если его нет — напрямую по пути, при выданном
+     * «Доступе ко всем файлам». Результат: [DEL_OK]; [DEL_PERM] — не хватило прав (страница просит доступ ко всем файлам);
+     * [DEL_FAIL] — файл не найден, не звуковой или система отказала.
+     */
+    fun delete(ctx: Context, docId: String?): String {
+        if (docId.isNullOrEmpty()) return DEL_FAIL
+        val tree = treeUri(ctx) ?: return DEL_FAIL
+        try {
+            // файл должен лежать внутри выбранной папки
+            val root = DocumentsContract.getTreeDocumentId(tree)
+            val prefix = if (root.endsWith("/") || root.endsWith(":")) root else "$root/"
+            if (!docId.startsWith(prefix)) return DEL_FAIL
+            // и быть звуковым файлом, а не папкой
+            val doc = DocumentsContract.buildDocumentUriUsingTree(tree, docId)
+            var name: String? = null
+            var mime = ""
+            ctx.contentResolver.query(
+                doc,
+                arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE),
+                null, null, null
+            )?.use { c ->
+                if (c.moveToFirst()) {
+                    name = c.getString(0)
+                    mime = c.getString(1) ?: ""
+                }
+            }
+            val n = name ?: return DEL_FAIL
+            if (mime == DocumentsContract.Document.MIME_TYPE_DIR || !isAudio(n)) return DEL_FAIL
+
+            // 1) штатный путь SAF
+            try {
+                if (DocumentsContract.deleteDocument(ctx.contentResolver, doc)) return DEL_OK
+            } catch (e: Exception) {
+                // нет права на запись в папку или поставщик не умеет удалять — пробуем напрямую
+            }
+
+            // 2) прямое удаление при «Доступе ко всем файлам»
+            if (!AllFilesAccess.granted(ctx)) return DEL_PERM
+            val f = AllFilesAccess.fileForDocId(docId) ?: return DEL_FAIL
+            if (!f.isFile) return DEL_FAIL
+            if (!f.delete()) return DEL_FAIL
+            try {
+                MediaScannerConnection.scanFile(ctx.applicationContext, arrayOf(f.absolutePath), null, null)
+            } catch (e: Exception) {
+                // запись из системной медиатеки уберётся при следующем сканировании
+            }
+            return DEL_OK
+        } catch (e: Exception) {
+            return DEL_FAIL
+        }
     }
 
     fun listJson(ctx: Context, docId: String?): String {

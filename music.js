@@ -1,5 +1,6 @@
 /* ===========================================================================
    music.js
+   Версия: 2.0 (10.11)
    Версия: 1.3 (25.10) — при возврате на вкладку открывается та же папка, где ушли; для каждого сохранённого уровня заново кладутся записи AppNav (после записи переключения вкладки), поэтому «назад» поднимается по папкам, а не уходит на другую вкладку. Сброс в корень из 1.2 убран.
    Версия: 1.2 (25.10) — «назад» уходило на другую вкладку: глубина папок сохранялась при уходе с вкладки, а записей AppNav для неё уже не было (поверх лежала запись переключения вкладки). Теперь при входе на вкладку список начинается с корня, а запись входа в папку проверяет, что она ещё актуальна, иначе передаёт «назад» дальше.
    Версия: 1.1 (25.10) — жест «назад» поднимает на уровень выше: вход в подпапку кладёт возврат в стек window.AppNav (как везде в приложении), кнопка ← в шапке делает history.back().
@@ -9,6 +10,9 @@
    musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState), здесь —
    только экран: выбор папки с музыкой при первом входе, список «папки и треки как есть» и тонкая полоса плеера прямо над
    нижним рядом вкладок (⏮ ⏯ ⏭ и ✕). Полоса видна только на этой вкладке; музыка при уходе с вкладки не прерывается.
+   Долгое нажатие на треке (≈0,35 с) открывает справа от него кнопки действий (`ROW_ACTIONS`; сейчас одна — красный крестик, как в сетке
+   заметок): нажатие на крестик удаляет файл с устройства сразу, без вопросов (мост ≥29 `musicDelete`; не хватает прав — просит
+   «Доступ ко всем файлам», `allFilesRequest`, и повторяет удаление после выдачи, `window.__ltOnAllFiles`). Новая кнопка — новая запись в `ROW_ACTIONS`.
    В браузере без моста вкладка показывает пояснение. Точка входа — window.MusicTab.render(); my.js зовёт её из
    switchSettingsTab. Опрос состояния плеера (раз в 500 мс) останавливается сам, когда экран вкладки пропал из DOM.
    =========================================================================== */
@@ -23,6 +27,9 @@
   var items = [];        // содержимое открытой папки
   var timer = null;
   var lastState = null;
+  var longFired = false;   // долгое нажатие сработало — следующий за ним click не должен запускать трек
+  var pendingDel = null;   // удаление ждёт выдачи «Доступа ко всем файлам»: {folder, id}
+  var ASKED_KEY = "musicAllFilesAsked_v1";
 
   function bridge(){
     var b = window.LifeTrackerNative;
@@ -45,9 +52,25 @@
     play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8v14.4a.8.8 0 0 0 1.2.7l11.5-7.2a.8.8 0 0 0 0-1.4L8.2 4.1A.8.8 0 0 0 7 4.8z"></path></svg>',
     pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4.5" width="4" height="15" rx="1"></rect><rect x="14" y="4.5" width="4" height="15" rx="1"></rect></svg>',
     close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg>',
+    del: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>',
     back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg>',
     gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6z"></path><path d="M12 11v5M9.5 13.5h5"></path></svg>'
   };
+
+  // Кнопки, которые появляются справа от трека после долгого нажатия: слева направо, крестик — всегда крайний справа.
+  // Новая кнопка = новая запись (key, title, icon, run(track)) перед «del».
+  var ROW_ACTIONS = [
+    { key: "del", title: "Удалить", icon: ICON.del, run: deleteTrack }
+  ];
+
+  function actsHtml(){
+    var h = '<span class="music-acts">';
+    for(var i = 0; i < ROW_ACTIONS.length; i++){
+      var a = ROW_ACTIONS[i];
+      h += '<button type="button" class="music-act music-act-' + a.key + '" data-act="' + a.key + '" title="' + esc(a.title) + '">' + a.icon + '</button>';
+    }
+    return h + '</span>';
+  }
 
   function ensureStyle(){
     if(document.getElementById("musicTabStyle")) return;
@@ -67,6 +90,19 @@
       "#musicTabRoot .music-row svg{flex:0 0 22px;width:22px;height:22px;opacity:.85;}" +
       "#musicTabRoot .music-row span{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
       "#musicTabRoot .music-row.cur{background:rgba(127,0,255,.14);font-weight:600;}" +
+      "#musicTabRoot .music-item{position:relative;}" +
+      "#musicTabRoot .music-item .music-row{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;}" +
+      "#musicTabRoot .music-acts{display:none;position:absolute;right:2px;top:50%;margin-top:-15px;height:30px;padding:2px;box-sizing:border-box;" +
+        "align-items:center;border-radius:8px;background:var(--parchment,#f4f0f8);}" +
+      "#musicTabRoot .music-item.acts-on .music-acts{display:flex;}" +
+      "#musicTabRoot .music-act{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;margin:0 0 0 2px;padding:0;" +
+        "border:none;border-radius:6px;background:transparent;color:var(--wood,#5b4a8a);cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
+      "#musicTabRoot .music-act:first-child{margin-left:0;}" +
+      "#musicTabRoot .music-act svg{width:16px;height:16px;}" +
+      "#musicTabRoot .music-act-del{color:var(--danger,#c0392b);}" +
+      "@media (hover:hover) and (pointer:fine){#musicTabRoot .music-act:hover{background:var(--parchment-dark,rgba(127,127,127,.18));}}" +
+      "#musicToast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);max-width:86%;box-sizing:border-box;padding:9px 14px;border-radius:10px;" +
+        "background:rgba(30,30,30,.92);color:#fff;font-size:14px;line-height:1.35;text-align:center;z-index:100000;pointer-events:none;}" +
       "#musicTabRoot .music-empty{padding:28px 14px;text-align:center;font-size:15px;line-height:1.45;opacity:.9;}" +
       "#musicTabRoot .music-big{margin-top:14px;font:inherit;font-size:15px;padding:10px 18px;border-radius:10px;border:1px solid var(--wood,#5b4a8a);" +
         "background:var(--wood,#5b4a8a);color:var(--parchment,#f4f0f8);}" +
@@ -145,12 +181,15 @@
 
     document.getElementById("musicBackBtn").addEventListener("click", goUp);
     document.getElementById("musicChangeBtn").addEventListener("click", pickFolder);
-    document.getElementById("musicList").addEventListener("click", onListClick);
+    var listEl = document.getElementById("musicList");
+    listEl.addEventListener("click", onListClick);
+    bindLongPress(listEl);
     bindBar(b);
     lastState = null;
     openFolder();
     poll();
     startTimer();
+    if(fresh) askAllFilesOnce(b);
     // сохранённая глубина папок: записи AppNav для неё заново; после синхронного переключения вкладки в my.js,
     // чтобы они легли поверх записи этого переключения
     if(fresh && stack.length > 1 && window.AppNav){
@@ -173,7 +212,7 @@
 
   function cur(){ return stack[stack.length - 1]; }
 
-  function openFolder(){
+  function openFolder(keepScroll){
     var b = bridge(); if(!b) return;
     var res = parse(b.musicList(cur().id), { ok: false });
     var list = document.getElementById("musicList");
@@ -196,10 +235,12 @@
     var html = "";
     for(var i = 0; i < items.length; i++){
       var it = items[i];
-      html += '<button class="music-row" data-i="' + i + '">' + (it.dir ? ICON.folder : ICON.note) + '<span>' + esc(it.name) + '</span></button>';
+      html += '<div class="music-item"><button class="music-row" data-i="' + i + '">' + (it.dir ? ICON.folder : ICON.note) + '<span>' + esc(it.name) + '</span></button>' +
+        (it.dir ? '' : actsHtml()) + '</div>';
     }
+    var keep = keepScroll === true ? list.scrollTop : 0;
     list.innerHTML = html;
-    list.scrollTop = 0;
+    list.scrollTop = keep;
     markCurrent();
   }
 
@@ -218,7 +259,22 @@
   }
 
   function onListClick(ev){
-    var row = ev.target.closest ? ev.target.closest(".music-row") : null;
+    var t = ev.target;
+    var act = t.closest ? t.closest(".music-act") : null;
+    if(act){
+      longFired = false;
+      var itemEl = act.closest(".music-item");
+      var row0 = itemEl ? itemEl.querySelector(".music-row") : null;
+      var it0 = row0 ? items[parseInt(row0.getAttribute("data-i"), 10)] : null;
+      var key = act.getAttribute("data-act");
+      if(it0) for(var k = 0; k < ROW_ACTIONS.length; k++){
+        if(ROW_ACTIONS[k].key === key){ ROW_ACTIONS[k].run(it0); break; }
+      }
+      return;
+    }
+    if(longFired){ longFired = false; return; } // click, которым закончилось долгое нажатие: кнопки остаются, трек не запускается
+    var row = t.closest ? t.closest(".music-row") : null;
+    hideActs();
     if(!row) return;
     var it = items[parseInt(row.getAttribute("data-i"), 10)];
     if(!it) return;
@@ -232,6 +288,138 @@
     var ok = false;
     try{ ok = b.musicPlay(cur().id, it.id, cur().name); }catch(e){}
     if(ok) setTimeout(poll, 150);
+  }
+
+  // ---------- долгое нажатие на треке → кнопки действий справа ----------
+
+  var LONG_PRESS_MS = 350, MOVE_CANCEL_PX = 10;
+  var pressTimer = null, pressXY = null, lastTouchAt = 0;
+
+  function clearPress(){ if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; } }
+
+  function hideActs(){
+    var list = document.getElementById("musicList");
+    if(!list) return;
+    var on = list.querySelectorAll(".music-item.acts-on");
+    for(var i = 0; i < on.length; i++) on[i].classList.remove("acts-on");
+  }
+
+  function startPress(itemEl, x, y){
+    longFired = false; // новое касание: прежнее долгое нажатие больше не ждёт своего click
+    if(!itemEl) return;
+    var row = itemEl.querySelector(".music-row");
+    var it = row ? items[parseInt(row.getAttribute("data-i"), 10)] : null;
+    if(!it || it.dir) return; // только у треков (у папок кнопок нет)
+    pressXY = { x: x, y: y };
+    clearPress();
+    pressTimer = setTimeout(function(){
+      pressTimer = null;
+      longFired = true;
+      hideActs();
+      itemEl.classList.add("acts-on");
+      try{ if(navigator.vibrate) navigator.vibrate(20); }catch(e){}
+    }, LONG_PRESS_MS);
+  }
+
+  function movePress(x, y){
+    if(!pressXY || !pressTimer) return;
+    var dx = x - pressXY.x, dy = y - pressXY.y;
+    if(Math.sqrt(dx * dx + dy * dy) > MOVE_CANCEL_PX) clearPress();
+  }
+
+  function bindLongPress(list){
+    list.addEventListener("touchstart", function(e){
+      lastTouchAt = Date.now();
+      var t = e.touches[0];
+      startPress(e.target.closest ? e.target.closest(".music-item") : null, t.clientX, t.clientY);
+    }, { passive: true });
+    list.addEventListener("touchmove", function(e){ var t = e.touches[0]; movePress(t.clientX, t.clientY); }, { passive: true });
+    list.addEventListener("touchend", clearPress);
+    list.addEventListener("touchcancel", clearPress);
+    // мышь (браузер); эмулированные после касания события мыши пропускаем
+    list.addEventListener("mousedown", function(e){
+      if(Date.now() - lastTouchAt < 800) return;
+      startPress(e.target.closest ? e.target.closest(".music-item") : null, e.clientX, e.clientY);
+    });
+    list.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
+    list.addEventListener("mouseup", clearPress);
+    list.addEventListener("mouseleave", clearPress);
+    // системное меню долгого нажатия на треке не нужно
+    list.addEventListener("contextmenu", function(e){
+      if(e.target.closest && e.target.closest(".music-item")) e.preventDefault();
+    });
+    // прокрутка списка прячет раскрытые кнопки
+    list.addEventListener("scroll", function(){ clearPress(); hideActs(); }, { passive: true });
+  }
+
+  // ---------- удаление трека ----------
+
+  function toast(text){
+    ensureStyle();
+    var old = document.getElementById("musicToast");
+    if(old && old.parentNode) old.parentNode.removeChild(old);
+    var el = document.createElement("div");
+    el.id = "musicToast";
+    el.textContent = text;
+    document.body.appendChild(el);
+    setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); }, 3200);
+  }
+
+  // файл удаляется сразу, без вопросов; ответ оболочки: "ok" | "perm" (нужен «Доступ ко всем файлам») | "fail"
+  function deleteTrack(it){
+    var b = bridge();
+    if(!b || typeof b.musicDelete !== "function"){
+      toast("Чтобы удалять треки, обновите приложение (APK)");
+      return;
+    }
+    var folderId = cur().id;
+    var res = "fail";
+    try{ res = String(b.musicDelete(folderId, it.id)); }catch(e){}
+    if(res === "ok"){
+      hideActs();
+      if(rootEl()) openFolder(true);
+      setTimeout(poll, 150);
+      return;
+    }
+    if(res === "perm" && typeof b.allFilesRequest === "function"){
+      pendingDel = { folder: folderId, id: it.id };
+      toast("Разрешите «Доступ ко всем файлам» — трек удалится сразу после этого");
+      try{ b.allFilesRequest(); }catch(e){}
+      return;
+    }
+    toast("Не удалось удалить файл");
+  }
+
+  // оболочка сообщает, выдан ли «Доступ ко всем файлам» (после экрана настроек / системного запроса)
+  window.__ltOnAllFiles = function(ok){
+    var p = pendingDel;
+    pendingDel = null;
+    if(!p) return;
+    var b = bridge();
+    if(!ok || !b || typeof b.musicDelete !== "function"){
+      toast("Без доступа ко всем файлам трек удалить нельзя");
+      return;
+    }
+    var res = "fail";
+    try{ res = String(b.musicDelete(p.folder, p.id)); }catch(e){}
+    if(res === "ok"){
+      if(rootEl()) openFolder(true);
+      setTimeout(poll, 150);
+    }else{
+      toast("Не удалось удалить файл");
+    }
+  };
+
+  // один раз при первом входе на вкладку просим «Доступ ко всем файлам» (удаление треков, дальше — работа с файлами)
+  function askAllFilesOnce(b){
+    try{
+      if(typeof b.allFilesState !== "function" || typeof b.allFilesRequest !== "function") return;
+      if(localStorage.getItem(ASKED_KEY)) return;
+      localStorage.setItem(ASKED_KEY, "1");
+      var st = parse(b.allFilesState(), {});
+      if(st.granted !== false) return;
+      b.allFilesRequest();
+    }catch(e){}
   }
 
   // ---------- полоса плеера ----------

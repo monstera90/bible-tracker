@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 15.2 (10.11)
+// Версия: 16.0 (10.11)
 // Версия: 11.0 (04.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
@@ -235,9 +235,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Вкладка «Музыка»: системное окно выбора папки; страница узнаёт результат через window.__ltOnMusicFolder(true|false).
+    // Вкладка «Музыка»: системное окно выбора папки (с правом на чтение и запись — запись нужна, чтобы удалять треки);
+    // страница узнаёт результат через window.__ltOnMusicFolder(true|false).
     private val musicFolderLauncher =
-        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val uri = if (result.resultCode == android.app.Activity.RESULT_OK) result.data?.data else null
             val ok = if (uri != null) MusicLibrary.setTree(applicationContext, uri) else false
             if (ok) MusicPlayer.close(false) // папка сменилась — старая очередь больше не нужна (группу комбо это не останавливает)
             runOnUiThread {
@@ -250,9 +252,58 @@ class MainActivity : ComponentActivity() {
     /** Вызывается мостом в главном потоке. */
     fun pickMusicFolder() {
         try {
-            musicFolderLauncher.launch(null)
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+            )
+            musicFolderLauncher.launch(intent)
         } catch (e: Exception) {
             toast("Не удалось открыть выбор папки")
+        }
+    }
+
+    // Доступ ко всем файлам (AllFilesAccess): Android 11+ — экран настроек (ответ ловим в onResume), Android 6–10 — системный запрос.
+    // Страница узнаёт результат через window.__ltOnAllFiles(true|false).
+    private var awaitingAllFiles = false
+
+    private val allFilesPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
+            notifyAllFiles()
+        }
+
+    private fun notifyAllFiles() {
+        val ok = AllFilesAccess.granted(applicationContext)
+        runOnUiThread {
+            if (!isDestroyed && pageTrusted) {
+                webView.evaluateJavascript("window.__ltOnAllFiles && window.__ltOnAllFiles($ok)", null)
+            }
+        }
+    }
+
+    /** Вызывается мостом в главном потоке. */
+    fun requestAllFilesAccess() {
+        if (AllFilesAccess.granted(applicationContext)) {
+            notifyAllFiles()
+            return
+        }
+        try {
+            if (AllFilesAccess.usesSettingsScreen()) {
+                awaitingAllFiles = true
+                try {
+                    startActivity(AllFilesAccess.settingsIntent(this))
+                } catch (e: ActivityNotFoundException) {
+                    startActivity(AllFilesAccess.settingsListIntent())
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                allFilesPermissionLauncher.launch(
+                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                )
+            }
+        } catch (e: Exception) {
+            awaitingAllFiles = false
+            toast("Не удалось открыть настройки доступа к файлам")
         }
     }
 
@@ -396,6 +447,11 @@ class MainActivity : ComponentActivity() {
         // Страница возвращает прокрутку открытой заметки (visibilitychange на возврате приходит не всегда).
         if (pageTrusted) {
             webView.evaluateJavascript("window.__ltOnAppResume && window.__ltOnAppResume()", null)
+        }
+        // Вернулись с экрана «Доступ ко всем файлам» — сообщаем странице, выдан ли доступ.
+        if (awaitingAllFiles) {
+            awaitingAllFiles = false
+            notifyAllFiles()
         }
         runPendingOpenTab()
         val appTab = pendingOpenAppTab
