@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.4 (09.11)
+// Версия: 2.0 (10.11)
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -27,6 +27,9 @@ object SiteMedia {
 
         /** Кнопка «Закрыть»: видео на паузу, уведомление убрать. */
         fun onClose()
+
+        /** Кнопка режима на карточке острова: фон ↔ фон с плавающим окном ([IslandSettings.floatVideo]). */
+        fun onToggleFloat()
     }
 
     @Volatile var active = false

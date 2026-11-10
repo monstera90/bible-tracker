@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 10.3 (09.11)
+// Версия: 11.0 (10.11)
 // Версия: 8.1 (10.11)
 // Версия: 7.1 (27.10) — кнопка паузы острова тренировки цвета метки (красная/зелёная/жёлтая): `pauseBitmap(..., colorOverride)`, `workoutDotColor`.
 // Версия: 7.0 (27.10) — остров записи тренировки: `workoutExtras` (метка-диод красная/жёлтая/зелёная, время и дистанция, кнопки «Пауза» и «Стоп»), `workoutDotBitmap`, `elapsedText`. Откат: XiaomiIsland.kt 6.0.
@@ -505,6 +505,28 @@ object XiaomiIsland {
         c.drawRoundRect(RectF(24f, 31f, 72f, 65f), 8f, 8f, paint)
         paint.color = 0xFF7F00FF.toInt()
         c.drawPath(Path().apply { moveTo(41f, 39f); lineTo(41f, 57f); lineTo(57f, 48f); close() }, paint)
+        return bmp
+    }
+
+    /**
+     * Значок кнопки режима видео на раскрытой карточке острова: тот же фиолетовый круг, что и [videoIconBitmap]. [float] false —
+     * «экран» с треугольником (видео играет в фоне), true — «экран» с маленьким окошком в углу (фон с плавающим окном).
+     */
+    fun videoModeBitmap(float: Boolean, size: Int = 192): Bitmap {
+        if (!float) return videoIconBitmap(size)
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.scale(size / 96f, size / 96f)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFF7F00FF.toInt()
+        c.drawCircle(48f, 48f, 48f, paint)
+        paint.color = Color.WHITE
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 4f
+        c.drawRoundRect(RectF(24f, 30f, 72f, 66f), 7f, 7f, paint)
+        paint.style = Paint.Style.FILL
+        c.drawRoundRect(RectF(45f, 46f, 68f, 62f), 4f, 4f, paint)
         return bmp
     }
 

@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 20.1 (09.11)
+// Версия: 21.0 (10.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -62,6 +62,9 @@ private class Item(val key: String, val kind: Int) {
     var onToggle: (() -> Unit)? = null
     var onStop: (() -> Unit)? = null
     var onExtra: (() -> Unit)? = null // добавочная кнопка карточки слева от паузы (помодоро: «+5»); null — кнопки нет
+    var modeKey = "" // кнопка режима вместо значка карточки (видео: фон / фон с плавающим окном); меняется, когда её надо перерисовать
+    var modeFn: (() -> Bitmap)? = null
+    var onMode: (() -> Unit)? = null // null — у занятия обычный значок, кнопки режима нет
 
     /** Есть карточка, которая листается смахиванием: у всех занятий. Нажатием на капсулу раскрываются все ([activate]). */
     val expandable: Boolean get() = true
@@ -157,6 +160,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private val pauseBtn = ImageView(appCtx)
     private val stopBtn = ImageView(appCtx)
     private val plusBtn = ImageView(appCtx) // «+5» помодоро
+    private val modeBtn = ImageView(appCtx) // видео: режим «фон» / «фон с плавающим окном» — на месте значка карточки
     private val strip = LinearLayout(appCtx) // карточка с двумя и больше занятиями: ряд значков для переключения
     private val cardBar = View(appCtx) // полоска внизу карточки (при одном занятии с карточкой)
     private val cardBg = GradientDrawable().apply { setColor(Color.BLACK) }
@@ -210,6 +214,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private var shownCardBig: String? = null
     private var shownCardSub: String? = null
     private var shownCardBtn: String? = null
+    private var shownCardMode: String? = null
     private var shownStrip: String? = null
     private var cardMusicStyle: Boolean? = null
     private var tapItem: Item? = null // чьё занятие нажато (капсула — первое)
@@ -306,6 +311,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         pauseBtn.setOnClickListener { onPauseClick() }
         plusBtn.setImageBitmap(XiaomiIsland.pomoButtonBitmap(2))
         plusBtn.setOnClickListener { onExtraClick() }
+        modeBtn.setOnClickListener { onModeClick() }
         stopBtn.apply {
             setImageBitmap(XiaomiIsland.crossBitmap())
             setOnClickListener { onStopClick() }
@@ -699,6 +705,14 @@ class InAppIsland private constructor(private val appCtx: Context) {
         refresh()
     }
 
+    private fun onModeClick() {
+        val m = selItem() ?: return
+        m.onMode?.invoke()
+        expandedAt = System.currentTimeMillis()
+        handler.postDelayed({ refresh() }, 150L)
+        refresh()
+    }
+
     private fun onStopClick() {
         val m = selItem() ?: return
         m.onStop?.invoke()
@@ -730,6 +744,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         shownCardBig = null
         shownCardSub = null
         shownCardBtn = null
+        shownCardMode = null
         shownStrip = null
         cardMusicStyle = null
     }
@@ -1058,6 +1073,10 @@ class InAppIsland private constructor(private val appCtx: Context) {
             m.btnFn = { XiaomiIsland.musicButtonBitmap(if (playing) 2 else 1) }
             m.onToggle = { SiteMedia.listener?.onToggle() }
             m.onStop = { SiteMedia.listener?.onClose() }
+            val floatOn = IslandSettings.floatVideo(ctx)
+            m.modeKey = "fl$floatOn"
+            m.modeFn = { XiaomiIsland.videoModeBitmap(floatOn) }
+            m.onMode = { SiteMedia.listener?.onToggleFloat() }
             out.add(m)
         }
         if (outside) {
@@ -1176,6 +1195,16 @@ class InAppIsland private constructor(private val appCtx: Context) {
         if (ik != shownCardIcon) {
             shownCardIcon = ik
             cardIcon.setImageBitmap(sel.iconFn(192))
+        }
+        val hasMode = sel.onMode != null
+        cardIcon.visibility = if (hasMode) View.INVISIBLE else View.VISIBLE
+        modeBtn.visibility = if (hasMode) View.VISIBLE else View.GONE
+        if (hasMode) {
+            val mk = sel.key + "|" + sel.modeKey
+            if (mk != shownCardMode) {
+                shownCardMode = mk
+                sel.modeFn?.let { modeBtn.setImageBitmap(it()) }
+            }
         }
         if (sel.big != shownCardBig) {
             shownCardBig = sel.big
@@ -1369,7 +1398,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         winW = (cardW * 1.12f).roundToInt()
         winY = pillTop
         winH = (cardTop + cardH * 1.12f).roundToInt() - pillTop
-        for (v in listOf<View>(cardIcon, cardTime, cardName, plusBtn, pauseBtn, stopBtn, cardBar, strip)) (v.parent as? ViewGroup)?.removeView(v)
+        for (v in listOf<View>(cardIcon, modeBtn, cardTime, cardName, plusBtn, pauseBtn, stopBtn, cardBar, strip)) (v.parent as? ViewGroup)?.removeView(v)
         cardContent.removeAllViews()
         cardTime.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0450f) // высота цифр как у настоящего (замер: 40 px при 1159; было 0.0483 — выше на 7 %)
         cardTime.letterSpacing = 0.06f // цифры у настоящего шире (125 px против 112 у копии)
@@ -1387,6 +1416,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
             addView(cardName)
         }
         cardContent.addView(cardIcon, FrameLayout.LayoutParams(ic, ic).apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL; marginStart = (screenW * 0.045f).roundToInt() })
+        // кнопка режима видео — на месте значка (центр тот же), размером с остальные кнопки карточки
+        cardContent.addView(modeBtn, FrameLayout.LayoutParams(btn, btn).apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL; marginStart = edge })
         cardContent.addView(texts, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
             gravity = Gravity.START or Gravity.CENTER_VERTICAL
             marginStart = (screenW * 0.2f).roundToInt()

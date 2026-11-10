@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.4 (10.11)
+// Версия: 8.0 (10.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -172,7 +172,9 @@ private class SiteWebView(context: Context) : WebView(context) {
  * (`onAppHidden`), WebView вкладки НЕ ставится на паузу, а переезжает в плавающее окно: страница скриптом PIN_JS оставляет на экране
  * только видео. Вернулся на вкладку (`show`) или в приложение (`onAppVisible`, если вкладка была открыта) — WebView встаёт на место,
  * скрипт снимается. Плавающее окно одно: новое видео закрывает прежнее (оно ставится на паузу).
- * Сейчас плавающее окно ВЫКЛЮЧЕНО (`FLOAT_WINDOW = false`), вместо него — фоновое воспроизведение с островом (см. ниже).
+ * Окно включается режимом видео (`IslandSettings.floatVideo`, кнопка на раскрытой карточке видео в `InAppIsland`: «фон» ↔ «фон с
+ * плавающим окном»; одно значение на приложение). Окно — надстройка над фоновым воспроизведением (см. ниже): служба и остров идут
+ * как обычно, а ролик, который нашёл PIN_JS, дополнительно показывается в окне; не нашёл (звук, iframe) — остаётся только фон.
  *
  * Фоновое воспроизведение (SiteMediaService): если на вкладке играет видео или звук, а человек ушёл с вкладки (`hideTab`), погасил
  * экран или свернул приложение (`pause`/`onAppHidden`), WebView вкладки НЕ ставится на паузу (`Tab.bg`), страница видит себя
@@ -201,7 +203,6 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
         private const val KIND_LEFT = 1   // плавающее: ушли с вкладки
         private const val KIND_MIN = 2    // плавающее: свернули приложение, пока вкладка была открыта
         private const val FLOAT_POLL_MS = 1000L
-        private const val FLOAT_WINDOW = false       // плавающее окно с видео (FloatingVideo) выключено: сначала остров
         private const val BG_POLL_MS = 1000L
         private const val PROBE_MS = 1000L
         private const val RESUME_AFTER_MS = 800L          // страница сама поставила ролик на паузу в фоне — через столько он запускается заново
@@ -556,14 +557,27 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         saveTab(t)
         v.clearFocus()
         v.translationX = OFFSCREEN_X
-        if (!t.ready) bgLog("уход с вкладки: страница ещё не готова — фон не проверяется")
-        if (!t.ready || t.bg) return
-        if (FLOAT_WINDOW) {
-            tryFloat(t, v, KIND_LEFT) { if (!t.shown && !t.floating && t.view === v) v.onPause() }
-        } else {
-            // играет видео/звук — вкладка остаётся живой в фоне (остров), иначе засыпает
-            tryBackground(t, v, "уход с вкладки", true) { if (!t.shown && !t.floating && !t.bg && t.view === v) v.onPause() }
+        if (!t.ready) {
+            bgLog("уход с вкладки: страница ещё не готова — фон не проверяется")
+            return
         }
+        if (t.floating) return
+        if (floatWanted()) {
+            // режим «фон с плавающим окном»: ролик страницы уходит в окно; не нашёлся — только фон (или сон, если ничего не играет)
+            tryFloat(t, v, KIND_LEFT) { backgroundOrSleep(t, v, "уход с вкладки") }
+            return
+        }
+        if (t.bg) return
+        backgroundOrSleep(t, v, "уход с вкладки")
+    }
+
+    /** Режим видео «фон с плавающим окном» включён (одна настройка на приложение, [IslandSettings.floatVideo]). */
+    private fun floatWanted(): Boolean = IslandSettings.floatVideo(activity.applicationContext)
+
+    /** Играет видео/звук — вкладка остаётся живой в фоне (остров), иначе засыпает. */
+    private fun backgroundOrSleep(t: Tab, v: WebView, why: String) {
+        if (t.bg) return
+        tryBackground(t, v, why, true) { if (!t.shown && !t.floating && !t.bg && t.view === v) v.onPause() }
     }
 
     /** Прячет показанную вкладку (страница живёт за краем, позиция сохраняется). */
@@ -660,16 +674,14 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
     fun pause() {
         for (t in tabs.values) saveTab(t)
         try { CookieManager.getInstance().flush() } catch (e: Exception) { }
-        if (!FLOAT_WINDOW) {
-            // Служба запускается здесь, пока приложение ещё на экране: из onStop система может запуск не разрешить.
-            val t = shownTab()
-            val v = t?.view
-            if (t == null) bgLog("свёрнуто: вкладка-сайт не открыта")
-            else if (v == null || !t.ready) bgLog("свёрнуто: страница вкладки не готова (ready=${t.ready})")
-            else if (t.bg) bgLog("свёрнуто: фон уже идёт")
-            else tryBackground(t, v, "сворачивание", true) { }
-            SiteMedia.onAppBackground(activity.applicationContext)
-        }
+        // Служба запускается здесь, пока приложение ещё на экране: из onStop система может запуск не разрешить (окно, если нужно, — в onAppHidden).
+        val t = shownTab()
+        val v = t?.view
+        if (t == null) bgLog("свёрнуто: вкладка-сайт не открыта")
+        else if (v == null || !t.ready) bgLog("свёрнуто: страница вкладки не готова (ready=${t.ready})")
+        else if (t.bg) bgLog("свёрнуто: фон уже идёт")
+        else tryBackground(t, v, "сворачивание", true) { }
+        SiteMedia.onAppBackground(activity.applicationContext)
     }
 
     fun destroy() {
@@ -749,6 +761,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         override fun onClose() {
             val t = floatTab ?: return
             closeFloat(t, true)
+            if (t.bg) endBackground(t, pause = true, sleep = true) // закрыли окно — закрыто и видео: служба и остров снимаются
         }
 
         override fun onTogglePlay() {
@@ -778,13 +791,14 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         val t = shownTab() ?: return
         val v = t.view ?: return
         if (!t.ready || t.floating) return
-        if (!FLOAT_WINDOW) {
-            bgLog("onStop: фон=${t.bg}")
-            if (!t.bg) tryBackground(t, v, "onStop", true) { }
+        // без разрешения «Поверх других приложений» окна вне приложения не будет — остаётся только фон
+        if (floatWanted() && win().canOverlay()) {
+            bgLog("onStop: плавающее окно, фон=${t.bg}")
+            tryFloat(t, v, KIND_MIN) { if (!t.bg) tryBackground(t, v, "onStop", true) { } }
             return
         }
-        if (!win().canOverlay()) return // без разрешения «Поверх других приложений» окна вне приложения не будет
-        tryFloat(t, v, KIND_MIN) { }
+        bgLog("onStop: фон=${t.bg}")
+        if (!t.bg) tryBackground(t, v, "onStop", true) { }
     }
 
     /** Приложение вернулось на экран (onStart): видео, ушедшее в окно при сворачивании, встаёт обратно на свою вкладку. */
@@ -795,6 +809,11 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         val t = floatTab ?: return
         if (!t.floating || t.floatKind != KIND_MIN) return
         closeFloat(t, false)
+        restoreShown(t)
+    }
+
+    /** Вкладка, ушедшая в окно при сворачивании, снова на экране на своём месте. */
+    private fun restoreShown(t: Tab) {
         val v = t.view ?: return
         t.shown = true
         t.lastUsed = System.currentTimeMillis()
@@ -802,6 +821,33 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         activity.setSiteKeyboardOverlay(true)
         if (t.ready) reveal(t)
         startPeriodicSave()
+    }
+
+    /**
+     * Кнопка режима на карточке видео в острове: настройка меняется сразу, ролик подстраивается под неё. «Только фон» — окно убирается,
+     * видео играет дальше; «с окном» — если человек уже ушёл с вкладки (или приложение свёрнуто и есть разрешение), окно появляется сразу,
+     * иначе — когда он уйдёт. Разрешение «Поверх других приложений» предлагается один раз.
+     */
+    private fun applyFloatMode(on: Boolean) {
+        val ft = floatTab
+        if (!on) {
+            if (ft != null && ft.floating) {
+                val wasMin = ft.floatKind == KIND_MIN
+                closeFloat(ft, false)
+                if (wasMin) restoreShown(ft)
+            }
+            return
+        }
+        win().askOverlayOnce()
+        val t = bgTab ?: return
+        val v = t.view ?: return
+        if (!t.ready || t.floating) return
+        if (t.shown) {
+            if (appVisible || !win().canOverlay()) return
+            tryFloat(t, v, KIND_MIN) { }
+        } else {
+            tryFloat(t, v, KIND_LEFT) { }
+        }
     }
 
     /**
@@ -945,6 +991,13 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
             val t = bgTab ?: return
             endBackground(t, pause = true, sleep = true)
         }
+
+        override fun onToggleFloat() {
+            val on = !IslandSettings.floatVideo(activity.applicationContext)
+            IslandSettings.setFloatVideo(activity.applicationContext, on)
+            bgLog(if (on) "режим видео: фон с плавающим окном" else "режим видео: только фон")
+            applyFloatMode(on)
+        }
     }
 
     private var probeOn = false
@@ -1043,6 +1096,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         if (!t.bg) return
         bgLog("фон снят: пауза=$pause, сон=$sleep")
         handler.removeCallbacks(bgPollTask)
+        if (t.floating) closeFloat(t, pause) // окно живёт только вместе с фоном: видео кончилось/закрыто — окна нет
         t.bg = false
         if (bgTab === t) bgTab = null
         SiteMedia.end(activity.applicationContext)
@@ -1383,13 +1437,13 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
                 // Процесс рендера упал: WebView убирается, при следующем показе он создастся заново и встанет на сохранённое место.
                 activity.runOnUiThread {
                     activity.hideSiteFullscreen()
-                    if (t.bg) endBackground(t, pause = false, sleep = false)
                     if (t.floating) {
                         handler.removeCallbacks(floatPollTask)
                         floatWin?.detach()
                         if (floatTab === t) floatTab = null
                         t.floating = false
                     }
+                    if (t.bg) endBackground(t, pause = false, sleep = false)
                     val old = t.view
                     t.view = null
                     t.ready = false
