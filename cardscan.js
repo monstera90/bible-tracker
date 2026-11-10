@@ -1,6 +1,6 @@
 /* ===========================================================================
    cardscan.js
-   Версия: 5.0 (10.11)
+   Версия: 5.1 (10.11)
    Версия: 3.1 (26.10) — удержание кода вдвое короче (`HOLD_MIN_MS` 125, `HOLD_EDGE_MS` 300, `HOLD_SIDE_EFFECT_MS` 250, `EXCEED_PENALTY_MS` 75); в действиях «музыка» комбо-кода появилось поле `hp` («наушники обязательны», пятый элемент `["m"|"f", id, цикл, громкость, 1]`, при 0 не пишется). Откат: cardscan.js 3.0.
    Версия: 3.1 (28.10) — «Комбинированный»: действие `{k:"workout"}` «Запустить тренировку» (код `["w"]`, категория «тренировка»).
    Версия: 3.0 (26.10) — структурная правка: QR «Комбинированный» `lt://v1/combo/<JSON>` → `{kind:"combo", acts:[…]}` (`parseCombo`, `comboCode`, `comboCategory`, `COMBO_MAX`): до 5 действий, по одному из категории (таймер / музыка / «открыть» / задача / событие в журнал), JSON из коротких массивов (`["t",сек,название]`, `["m",id,цикл,громкость]`, `["f",…]`, `["o",ключ вкладки]`, `["b",хеш книги,id закладки]`, `["n",id заметки]`, `["k",id задачи,вкладка,тег,текст]`, `["e",текст]`); такой код — с побочным эффектом, удержание не меньше 0,5 с. Откат: cardscan.js 2.7.
@@ -272,6 +272,7 @@ var CLIMB_PREFIX = "lt://v1/climb/";   // «+ к высоте»: метры в �
       '<video id="cardScanVideo" playsinline autoplay muted></video><div class="scan-frame"></div></div>' +
       '<canvas id="cardScanCanvas" style="display:none;"></canvas>' +
       '<div class="modal-note card-scan-note" id="cardScanNote"></div>' +
+      '<button type="button" class="scan-torch-btn" id="cardScanTorch" aria-label="Вспышка" aria-pressed="false" title="Вспышка" style="display:none;"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L5 14h6l-1 8 8-12h-6z"/></svg></button>' +
       (opts.windowed ? '' : '<button type="button" class="modal-btn card-scan-back" id="cardScanBack">Назад</button>');
     document.body.appendChild(layer);
 
@@ -388,7 +389,47 @@ var CLIMB_PREFIX = "lt://v1/climb/";   // «+ к высоте»: метры в �
     function setLive(){ if(!closed) layer.className += (layer.className.indexOf(" scan-live") < 0 ? " scan-live" : ""); }
     video.addEventListener("playing", setLive);
 
+    // ---------- вспышка (torch) ----------
+    // Кнопка справа от видоискателя. Показывается, только когда камера умеет вспышку (track.getCapabilities().torch; если браузер
+    // возможностей не отдаёт — пробуем, а при отказе кнопку прячем). Вспышка гаснет сама, когда камера останавливается.
+    var torchBtn = layer.querySelector("#cardScanTorch");
+    var torchOn = false;
+    function torchTrack(){
+      try{ return stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null; }catch(e){ return null; }
+    }
+    function torchPaint(){
+      if(!torchBtn) return;
+      torchBtn.className = "scan-torch-btn" + (torchOn ? " on" : "");
+      torchBtn.setAttribute("aria-pressed", torchOn ? "true" : "false");
+    }
+    function initTorch(){
+      if(!torchBtn || closed) return;
+      var tr = torchTrack();
+      if(!tr || typeof tr.applyConstraints !== "function"){ torchBtn.style.display = "none"; return; }
+      var caps = null;
+      try{ caps = typeof tr.getCapabilities === "function" ? tr.getCapabilities() : null; }catch(e){ caps = null; }
+      var ok = caps ? !!caps.torch : true;
+      torchBtn.style.display = ok ? "" : "none";
+    }
+    if(torchBtn){
+      torchBtn.addEventListener("click", function(e){
+        e.stopPropagation();
+        var tr = torchTrack();
+        if(!tr) return;
+        var want = !torchOn;
+        try{
+          tr.applyConstraints({ advanced: [{ torch: want }] }).then(function(){
+            torchOn = want; torchPaint();
+          }, function(){
+            torchOn = false; torchPaint(); torchBtn.style.display = "none"; // камера вспышку не включила — кнопка не нужна
+          });
+        }catch(err){ torchOn = false; torchPaint(); torchBtn.style.display = "none"; }
+      });
+    }
+    video.addEventListener("playing", initTorch);
+
     function stopCamera(){
+      torchOn = false; torchPaint();
       if(raf){ cancelAnimationFrame(raf); raf = null; }
       if(stream){
         try{ stream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
@@ -416,7 +457,7 @@ var CLIMB_PREFIX = "lt://v1/climb/";   // «+ к высоте»: метры в �
       // окно ярлыка: нажатие мимо окна камеры (и мимо строки ошибки) закрывает сканер
       layer.addEventListener("click", function(e){
         var t = e.target;
-        if(t && t.closest && (t.closest(".scan-video-wrap") || t.closest(".card-scan-note"))) return;
+        if(t && t.closest && (t.closest(".scan-video-wrap") || t.closest(".card-scan-note") || t.closest(".scan-torch-btn"))) return;
         goBack();
       });
     }
@@ -434,6 +475,7 @@ var CLIMB_PREFIX = "lt://v1/climb/";   // «+ к высоте»: метры в �
       navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } } }).then(function(s){
         if(closed){ try{ s.getTracks().forEach(function(t){ t.stop(); }); }catch(e){} return; }
         stream = s;
+        initTorch();
         video.srcObject = s;
         try{ video.play(); }catch(e){}
         raf = requestAnimationFrame(tick);

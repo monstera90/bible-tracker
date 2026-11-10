@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 25.3 (10.11)
+   Версия: 25.4 (10.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4600,6 +4600,27 @@ body::after{
   color:#fff;
 }
 .card-scan-note.error{ color:#ffb4a8; }
+/* вспышка: круглая кнопка справа от видоискателя (по центру свободного поля справа от рамки); включена — жёлтая */
+.scan-torch-btn{
+  position:absolute;
+  top:50%;
+  right:8px;
+  right:calc((100vw - min(70vw, 70vh)) / 4 - 20px);
+  width:40px;
+  height:40px;
+  margin-top:-20px;
+  padding:0;
+  border:none;
+  border-radius:50%;
+  background:rgba(0,0,0,.55);
+  color:#fff;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:5;
+  -webkit-tap-highlight-color:transparent;
+}
+.scan-torch-btn.on{ background:#ffd54a; color:#000; }
 .card-scan-back{
   position:absolute;
   left:50%;
