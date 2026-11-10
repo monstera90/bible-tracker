@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 8.0 (09.11)
+// Версия: 8.1 (10.11)
 // Версия: 5.7 (24.10) — скрытый таймер (`Timer.hidden`, `start(..., hidden)`): идёт и срабатывает как обычный, но без уведомления «идёт», острова, плашки в приложении, службы тика и этапов цвета; в конце — обычные вибрация и «Таймер закончился»; `listJson` отдаёт `hidden`. Откат: CardTimers.kt 5.6.
 // Версия: 5.6 (24.10) — этапы цвета значка: остался один, красный за 2 минуты до конца (`scheduleStages`); жёлтый убран, но его будильник от прежней версии снимается (`LEGACY_STAGE_YELLOW`). Откат: CardTimers.kt 5.5.
 // Версия: 5.5 (22.10) — эксперимент с чёрным фоном уведомления (`setColorized`) откачен: HyperOS не меняет цвет карточки. Прежнее: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
@@ -49,7 +49,8 @@ import java.util.Locale
  */
 object CardTimers {
 
-    const val CHANNEL_RUN = "card_timer_run"
+    const val CHANNEL_RUN = "card_timer_run_quiet"
+    private const val CHANNEL_RUN_OLD = "card_timer_run"
     const val CHANNEL_DONE = "card_timer_done"
     private const val TAG_RUN = "card-timer-"
     private const val TAG_DONE = "card-timer-done-"
@@ -380,10 +381,14 @@ object CardTimers {
     fun ensureChannels(ctx: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (nm.getNotificationChannel(CHANNEL_RUN_OLD) != null) nm.deleteNotificationChannel(CHANNEL_RUN_OLD) // прежний канал мог всплывать
         if (nm.getNotificationChannel(CHANNEL_RUN) == null) {
             val ch = NotificationChannel(CHANNEL_RUN, "Идущие таймеры карточек", NotificationManager.IMPORTANCE_LOW)
-            ch.description = "Отсчёт запущенных таймеров карточек"
+            ch.description = "Отсчёт запущенных таймеров карточек (закреплённое, без всплывающего окна)"
             ch.setShowBadge(false)
+            ch.setSound(null, null)
+            ch.enableVibration(false)
+            ch.enableLights(false)
             nm.createNotificationChannel(ch)
         }
         if (nm.getNotificationChannel(CHANNEL_DONE) == null) {
@@ -474,14 +479,13 @@ object CardTimers {
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
+                .setSilent(true)
                 .setShowWhen(true)
                 .setWhen(t.endAt)
                 .setUsesChronometer(true)
                 .setChronometerCountDown(true)
                 .setContentIntent(openApp(ctx))
                 .setDeleteIntent(actionIntent(ctx, CardTimerReceiver.ACTION_DISMISSED, t.id))
-                .addAction(0, "Пауза", actionIntent(ctx, CardTimerReceiver.ACTION_PAUSE, t.id))
-                .addAction(0, "✕ Отмена", actionIntent(ctx, CardTimerReceiver.ACTION_CANCEL, t.id))
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
                 // до Android 7 обратного хронометра нет: показываем время окончания
                 b.setUsesChronometer(false).setContentText("Закончится в " + clock(t.endAt))
@@ -535,11 +539,10 @@ object CardTimers {
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
+                .setSilent(true)
                 .setShowWhen(false)
                 .setContentIntent(openApp(ctx))
                 .setDeleteIntent(actionIntent(ctx, CardTimerReceiver.ACTION_DISMISSED, t.id))
-                .addAction(0, "Продолжить", actionIntent(ctx, CardTimerReceiver.ACTION_RESUME, t.id))
-                .addAction(0, "✕ Отмена", actionIntent(ctx, CardTimerReceiver.ACTION_CANCEL, t.id))
             XiaomiIsland.pausedExtras(ctx, titleOf(t), left(t.remainingMs), t.remainingMs)?.let { b.addExtras(it) }
             NotificationManagerCompat.from(ctx).notify(TAG_RUN + t.id, NOTIFICATION_ID, b.build())
         } catch (e: Exception) {
