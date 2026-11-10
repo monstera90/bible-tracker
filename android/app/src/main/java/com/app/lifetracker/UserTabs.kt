@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 8.0 (10.11)
+// Версия: 8.1 (10.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -470,6 +470,9 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
             prefs.edit().putString(k(id, "home"), clean).apply()
         }
         val t = tabs.getOrPut(id) { Tab(id) }
+        // Окно открыто при сворачивании (KIND_MIN): страница вкладки не знает, что приложение скрыто, и раз в пару секунд заново присылает
+        // прямоугольник (её опрос видит shown=false) — это не возврат на вкладку, окно остаётся до onAppVisible.
+        if (t.floating && t.floatKind == KIND_MIN && !appVisible) return
         if (t.floating) closeFloat(t, false) // вернулись на вкладку: видео из плавающего окна встаёт обратно в страницу и играет дальше
         for (o in tabs.values) if (o !== t && o.shown) hideTab(o)
         val v = ensureView(t)
