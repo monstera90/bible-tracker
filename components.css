@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 25.1 (10.11)
+   Версия: 25.2 (10.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4641,6 +4641,23 @@ body::after{
   justify-content:center;
   z-index:10061;
   padding:0;
+}
+/* «Отмена» под карточкой при сканировании: откатывает действие этого скана (itemcards.js, showCardOverlay) */
+.scan-card-cancel-btn{
+  position:absolute;
+  left:50%;
+  -webkit-transform:translateX(-50%);
+  transform:translateX(-50%);
+  min-width:140px;
+  height:40px;
+  padding:0 24px;
+  border-radius:20px;
+  background:rgba(0,0,0,.55);
+  border:none;
+  color:#fff;
+  font-size:16px;
+  font-weight:700;
+  z-index:10061;
 }
 .scan-notice{
   box-sizing:border-box;

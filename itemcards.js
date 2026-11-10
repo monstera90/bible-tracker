@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 37.1 (10.11)
+   Версия: 37.2 (10.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -2605,6 +2605,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     var col = defaultColorFor("habit"); if(col) c.color = col;
     loadCards().push(c);
     saveCards();
+    scanCreatedHabitId = c.id; // «Отмена» на показе скана уберёт и саму созданную по коду карточку
     return c;
   }
   function handleScannedHabit(p){
@@ -2742,6 +2743,51 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     saveCards();
     return true;
   }
+  // ---------- «Отмена» под карточкой при сканировании ----------
+  // Слой скана с действием (отметка привычки, запуск таймера, заведённый будильник, запись в журнал) получает кнопку «Отмена»:
+  // она откатывает именно то, что сделал этот скан, и закрывает слой. Откат — функция `undo`, собранная в `showScanned`.
+  var scanCreatedHabitId = "";
+  function evLogUndo(text, since){
+    try{
+      if(!window.EventLog || !window.EventLog.list || !window.EventLog.remove) return;
+      var want = String(text || "").replace(/\s+/g, " ").trim();
+      var list = window.EventLog.list() || [];
+      for(var i = list.length - 1; i >= 0; i--){
+        var e = list[i];
+        if(e && (e.t || 0) >= since - 1000 && String(e.s || "").replace(/\s+/g, " ").trim() === want){ window.EventLog.remove(e); return; }
+      }
+    }catch(e){}
+  }
+  // то же по ключу записи (таймеры и будильники пишутся с ключом `timer:<id>:<мс>` / `alarm:<id>:<мс>`)
+  function evLogUndoKey(prefix, since){
+    try{
+      if(!window.EventLog || !window.EventLog.list || !window.EventLog.remove) return;
+      var list = window.EventLog.list() || [];
+      for(var i = list.length - 1; i >= 0; i--){
+        var e = list[i];
+        if(e && e.k && String(e.k).indexOf(prefix) === 0 && (e.t || 0) >= since - 1000){ window.EventLog.remove(e); return; }
+      }
+    }catch(e){}
+  }
+  function undoHabitMark(id, since, title, dropCard){
+    reloadCards();
+    var cur = findCard(id);
+    if(!cur) return;
+    if(dropCard){ // карточку создал сам скан — убираем её целиком (как deleteCard, но без перерисовки сетки под слоем)
+      cardsCache = loadCards().filter(function(x){ return x.id !== id; });
+      var syncInfo = loadSyncInfo();
+      delete syncInfo.synced[id];
+      if(syncInfo.pending.indexOf(id) < 0) syncInfo.pending.push(id);
+      saveSyncInfo(syncInfo);
+      saveCards();
+    } else {
+      var t = todayIso();
+      cur.days = normHabitDays(habitDays(cur).filter(function(d){ return d !== t; }));
+      cur.updatedAt = Date.now();
+      saveCards();
+    }
+    evLogUndo(title, since);
+  }
   function showScanned(c){
     if(c.type === "climb"){ handleScannedClimb(climbMeters(c), c); return; } // «+ к высоте»: метры в тренировку/счётчик, слой с карточкой
     if(c.type === "weather"){ showWeatherOverlay(c, true); return; } // на случай кода по id карточки
@@ -2755,22 +2801,27 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       }
       var alAt = startAlarmForCard(c);
       if(!alAt){ showNoticeOverlay({ kind: "msg", text: "Не удалось завести будильник." }); return; }
-      showCardOverlay(c, "Заведён: " + dayWord(alAt) + " в " + clockOf(alAt));
+      var alSince = Date.now();
+      showCardOverlay(c, "Заведён: " + dayWord(alAt) + " в " + clockOf(alAt), function(){ stopAlarmForCard(c); evLogUndoKey("alarm:" + runId(c) + ":", alSince); });
       return;
     }
     if(c.type === "habit"){ // скан привычки: один день — одна отметка, повторный скан в тот же день ничего не делает
+      var hSince = Date.now();
+      var hCreated = scanCreatedHabitId === c.id; scanCreatedHabitId = "";
       var added = markHabitToday(c.id);
       if(added) evLog(cardTitle(c)); // повторный скан в тот же день («Сегодня уже отмечено») в журнал второй раз не пишется
       scanDirty = true;
-      showCardOverlay(findCard(c.id) || c, added ? "Сегодня отмечено" : "Сегодня уже отмечено");
+      var hTitle = cardTitle(c);
+      showCardOverlay(findCard(c.id) || c, added ? "Сегодня отмечено" : "Сегодня уже отмечено", (added || hCreated) ? function(){ undoHabitMark(c.id, hSince, hTitle, hCreated); } : null);
       return;
     }
     if(c.type === "task"){ handleScannedTask({ tab: c.icon, tag: taskTag(c.tag), text: c.title }); return; } // на случай кода по id карточки
     if(c.type === "datenote"){ openDatedNoteFromScan(c); return; }
     if(c.type === "reminder"){ showReminderOverlay(); return; } // «Напоминалка»: случайное напоминание из «Комментариев» слоем
-    if(c.type === "timer") startTimerForCard(c); // скан таймера: отсчёт стартует сразу (если уже шёл — заново)
-    else evLog(cardTitle(c)); // предмет и прочие карточки: в журнал — название
-    showCardOverlay(c);
+    var cSince = Date.now(), cUndo = null;
+    if(c.type === "timer"){ startTimerForCard(c); cUndo = function(){ stopTimerForCard(c); evLogUndoKey("timer:" + runId(c) + ":", cSince); }; } // скан таймера: отсчёт стартует сразу (если уже шёл — заново)
+    else { evLog(cardTitle(c)); var cTitle = cardTitle(c); cUndo = function(){ evLogUndo(cTitle, cSince); }; } // предмет и прочие карточки: в журнал — название
+    showCardOverlay(c, "", cUndo);
   }
   function openDatedNoteFromScan(c){ openTodayFromScan(c.id); }
   // Нажатие на карточку «Сегодня» / «Напоминалка» — ровно то же, что скан их QR-кода
@@ -2880,7 +2931,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     var vw = window.innerWidth || 360, vh = window.innerHeight || 640;
     return Math.max(120, Math.floor(Math.min(vw - 32, (vh - 120) / (4 / 3), 480))); // высота карточки = ширина × 4/3 (3:4)
   }
-  function showCardOverlay(c, noteText){
+  function showCardOverlay(c, noteText, undo){
     ensureHabitStyles();
     var o = newOverlay();
     var card = document.createElement("div");
@@ -2903,6 +2954,20 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     if(c.type === "timer") syncTimersView();
     if(c.type === "alarm") syncAlarmsView();
     if(isLegacyAnim()){ o.style.animation = "none"; card.style.animation = "none"; } // Android 5: без анимации
+    if(typeof undo === "function"){ // «Отмена» — прямо под карточкой (высота карточки = ширина × 4/3, слой центрирует её по вертикали)
+      var cb = document.createElement("button");
+      cb.type = "button";
+      cb.className = "scan-card-cancel-btn";
+      cb.textContent = "Отмена";
+      cb.style.top = "calc(50% + " + Math.round(overlayCardWidth() * 2 / 3 + 14) + "px)";
+      cb.addEventListener("click", function(e){
+        e.stopPropagation();
+        try{ undo(); }catch(err){ console.error(err); }
+        scanDirty = true;
+        endScanSession(true);
+      });
+      o.appendChild(cb);
+    }
     if(c.type === "habit" && !standalone){ // карта дней привычки: тап по карточке теперь отмечает день, поэтому карта открывается отсюда
       var mb = document.createElement("button");
       mb.type = "button";
