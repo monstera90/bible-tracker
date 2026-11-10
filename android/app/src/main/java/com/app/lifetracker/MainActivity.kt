@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 15.0 (09.11)
+// Версия: 15.1 (10.11)
 // Версия: 11.0 (04.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
@@ -571,6 +571,7 @@ class MainActivity : ComponentActivity() {
     private var siteFsCallback: WebChromeClient.CustomViewCallback? = null
     private var siteFsPrevFullscreen = false
     private var siteFsPrevOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    private var siteFsOnExit: (() -> Unit)? = null
 
     val isSiteFullscreen: Boolean get() = siteFsView != null
 
@@ -578,11 +579,12 @@ class MainActivity : ComponentActivity() {
      * Кнопка «во весь экран» у плеера на сайте вкладки «Интернет»: WebView отдаёт готовый вид ролика [view] — кладём его чёрным
      * слоем поверх всего окна, прячем системные панели и поворачиваем экран в альбомный. Выход — кнопка плеера или «назад».
      */
-    fun showSiteFullscreen(view: View, callback: WebChromeClient.CustomViewCallback) {
+    fun showSiteFullscreen(view: View, callback: WebChromeClient.CustomViewCallback, onExit: (() -> Unit)? = null) {
         if (siteFsView != null) {
             callback.onCustomViewHidden()
             return
         }
+        siteFsOnExit = onExit
         siteFsView = view
         siteFsCallback = callback
         siteFsPrevFullscreen = fullscreen
@@ -618,6 +620,13 @@ class MainActivity : ComponentActivity() {
             callback?.onCustomViewHidden()
         } catch (e: Exception) {
             // WebView уже закрыл полноэкранный режим сам
+        }
+        val onExit = siteFsOnExit
+        siteFsOnExit = null
+        try {
+            onExit?.invoke() // вернуть страницу на место, где открывали полный экран
+        } catch (e: Exception) {
+            // страницы уже нет
         }
     }
 

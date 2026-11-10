@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.3 (09.11)
+// Версия: 7.4 (10.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -16,6 +16,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.os.Parcel
 import android.util.Base64
 import android.graphics.Outline
@@ -41,6 +42,7 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -99,8 +101,51 @@ private class SiteWebView(context: Context) : WebView(context) {
         return false
     }
 
+    // ---- место на странице при выходе из полноэкранного видео ----
+    // Вход в полноэкранный режим поворачивает окно в альбомный и обратно: страница пересчитывается, и прокрутка уезжает в начало.
+    // Запоминаем её перед входом ([rememberScrollForFullscreen]) и возвращаем после выхода ([restoreScrollAfterFullscreen]).
+    private var lastNonZeroY = 0
+    private var zeroedAt = 0L          // когда прокрутка последний раз упала с ненулевой в ноль (сама страница могла сбросить её при запросе полного экрана)
+    private var lastTouchAt = 0L
+    private var fsActive = false
+    private var fsX = 0
+    private var fsY = 0
+
+    override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
+        super.onScrollChanged(l, t, oldl, oldt)
+        if (fsActive) return
+        if (t > 0) lastNonZeroY = t else if (oldt > 0) zeroedAt = SystemClock.uptimeMillis()
+    }
+
+    fun rememberScrollForFullscreen() {
+        val now = SystemClock.uptimeMillis()
+        fsX = scrollX
+        // страница сбросила прокрутку в ноль прямо перед запросом полного экрана — берём место, где человек был до этого
+        fsY = if (scrollY == 0 && lastNonZeroY > 0 && now - zeroedAt < 1500) lastNonZeroY else scrollY
+        fsActive = true
+    }
+
+    fun restoreScrollAfterFullscreen() {
+        if (!fsActive) return
+        fsActive = false
+        val x = fsX
+        val y = fsY
+        if (y <= 0) return
+        val start = SystemClock.uptimeMillis()
+        // окно и страница возвращаются к прежнему размеру не сразу — пробуем несколько раз, пока человек сам не тронул страницу
+        for (d in longArrayOf(0L, 120L, 300L, 600L, 1000L, 1600L)) {
+            postDelayed({
+                if (lastTouchAt >= start) return@postDelayed
+                if (abs(scrollY - y) > 2 || abs(scrollX - x) > 2) scrollTo(x, y)
+            }, d)
+        }
+    }
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (ev.actionMasked == MotionEvent.ACTION_DOWN) passThrough = holes.isNotEmpty() && inHole(ev.x, ev.y)
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            lastTouchAt = SystemClock.uptimeMillis()
+            passThrough = holes.isNotEmpty() && inHole(ev.x, ev.y)
+        }
         if (passThrough) {
             if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) passThrough = false
             return false
@@ -1380,7 +1425,9 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
                     return
                 }
                 if (callback == null) return
-                activity.showSiteFullscreen(view, callback)
+                val sv = t.view as? SiteWebView
+                if (!activity.isSiteFullscreen) sv?.rememberScrollForFullscreen()
+                activity.showSiteFullscreen(view, callback) { sv?.restoreScrollAfterFullscreen() }
             }
 
             override fun onHideCustomView() {
