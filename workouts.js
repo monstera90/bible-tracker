@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 12.1 (10.11)
+   Версия: 12.2 (10.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -455,7 +455,8 @@
       // награды
       ".wk-award{align-items:flex-start;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;}" +
       ".wk-award:not(.on){opacity:.5;}" +
-      ".wk-medal{flex:0 0 28px;width:28px;height:28px;margin-top:1px;color:var(--ink-soft);}" +
+      ".wk-medal{flex:0 0 28px;width:28px;margin-top:1px;color:var(--ink-soft);}" +
+      ".wk-medal-x{display:block;margin-top:2px;text-align:center;font-size:12px;line-height:1.2;white-space:nowrap;font-weight:bold;}" +
       ".wk-medal svg{display:block;width:28px;height:28px;}" +
       ".wk-award.on .wk-medal{color:var(--wood-dark);}" +
       ".wk-award.on .wk-medal circle{fill:var(--gold-light);}" +
@@ -1457,6 +1458,7 @@
         x.goals.forEach(function(g){ if(g.done && (!best || g.done < best)) best = g.done; });
         return best;
       });
+    out[out.length - 1].count = function(x){ return x.goals.filter(function(g){ return g.done; }).length; }; // сколько целей достигнуто всего
     add(C[6], "g3", "Тройная цель", "В одном месяце достигнуты цели и по километражу, и по набору высоты, и по времени.",
       function(x){
         var byMonth = {}, best = 0;
@@ -1473,11 +1475,23 @@
         });
         return best;
       });
+    out[out.length - 1].count = function(x){ // в скольких месяцах достигнуты цели всех трёх видов
+      var byMonth = {}, n = 0;
+      x.goals.forEach(function(g){
+        if(!g.done) return;
+        (byMonth[g.month] = byMonth[g.month] || {})[g.type] = 1;
+      });
+      Object.keys(byMonth).forEach(function(k){ var m = byMonth[k]; if(m.km && m.up && m.time) n++; });
+      return n;
+    };
     GOAL_TYPES.forEach(function(gt){
       gt.opts.forEach(function(o){
         add(C[6], "gt_" + gt.key + "_" + o, goalAwardTitle(gt.key, o), gt.awardText + " " + targetLabel(gt.key, o) + ".",
           function(x){ return goalDoneTs(x, gt.key, o); });
         out[out.length - 1].noNotice = true; // о цели сообщает карточка самой цели
+        out[out.length - 1].count = function(x){ // сколько раз (в скольких месяцах) достигнута именно эта цель
+          return x.goals.filter(function(g){ return g.done && g.type === gt.key && g.target === o; }).length;
+        };
       });
     });
     return out;
@@ -1518,8 +1532,9 @@
       html += '<div class="wk-rec-cat">' + esc(cat) + '</div><div class="wk-card" style="padding:4px 12px;">';
       part.forEach(function(d){
         var st = stored[d.id];
+        var cnt = (st && d.count) ? d.count(ctxFor(d.id)) : 0;
         var meta = st ? "Получена " + fmtDate(st.ts) : (d.prog ? d.prog(ctxFor(d.id)) : "");
-        html += '<div class="wk-rec wk-award' + (st ? " on" : "") + '"' + (st ? ' data-aid="' + esc(d.id) + '"' : "") + '><span class="wk-medal">' + MEDAL_ICON_SVG + '</span>' +
+        html += '<div class="wk-rec wk-award' + (st ? " on" : "") + '"' + (st ? ' data-aid="' + esc(d.id) + '"' : "") + '><span class="wk-medal">' + MEDAL_ICON_SVG + (cnt > 0 ? '<span class="wk-medal-x">x ' + cnt + '</span>' : "") + '</span>' +
           '<span class="wk-rec-name">' + esc(d.title) + '<span class="wk-sub">' + esc(d.text) + '</span>' +
           (meta ? '<span class="wk-sub wk-award-meta">' + esc(meta) + '</span>' : "") + '</span></div>';
       });
@@ -1670,6 +1685,7 @@
       "Награда не пропадает сама. Раз полученная награда остаётся, даже если тренировку потом удалили. Награды синхронизируются между вашими устройствами и входят в экспорт личных данных.",
       "Когда пересчитываются. При открытии вкладки «Тренировки», после новой записи и при открытии экрана кубка.",
       "Обнуление. Долгое нажатие на полученную награду открывает плашку с крестиком (нажатие мимо — отмена). После крестика награда пропадает, и её нужно заслужить заново с нуля: считаются только тренировки, начатые после обнуления (для наград за цели месяца — цели, достигнутые после обнуления; сами цели не меняются). Обнуление синхронизируется между устройствами; из экспорта обнулённая награда исчезает. Ещё не полученные (бледные) награды не обнуляются.",
+      "Счётчик «x N». У полученных наград категории «Цели месяца» под медалью показано, сколько раз цель достигнута (в разных месяцах). У награды за конкретную цель — именно эта цель, у «Первой цели» — все достигнутые цели, у «Тройной цели» — месяцы, где достигнуты цели всех трёх видов. После обнуления счёт начинается заново.",
       "Бледные и яркие. Яркая — получена (с датой), бледная — ещё нет. Под названием бледной награды — текущий прогресс; у наград без прогресса (например, «Первая цель») строки нет.",
       "Сообщения. О каждой новой награде на вкладке «Тренировки» появляется карточка вместо совета дня: весь день события, а дальше — пока вы не откроете экран кубка. Нажатие на карточку открывает награды. Исключения: о наградах за цели месяца сообщает карточка самой цели; при самом первом пересчёте на устройстве молчат награды старше 3 дней. Сообщения хранятся только на этом устройстве."
     ];
