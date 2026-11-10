@@ -1,6 +1,6 @@
 /* ===========================================================================
    desk.js
-   Версия: 2.2 (10.11)
+   Версия: 3.0 (10.11)
    Вкладка «Стол» (set2s_14, кнопка settingsTabSet2Btn14; в стеке второго набора стоит над «Изменением размера
    изображения»): несколько картинок рядом друг с другом, как на столе, и несколько страниц-«столов», которые
    листаются. Точка входа — window.initDeskModule(deps) → { renderSettingsTabDesk }; my.js зовёт её из switchSettingsTab.
@@ -309,20 +309,19 @@ window.initDeskModule = function(deps){
     var st = document.createElement("style");
     st.id = "deskTabStyle";
     st.textContent =
-      "#deskTabRoot{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;color:var(--wood,#5b4a8a);}" +
-      "#deskTabRoot .desk-bar{display:flex;align-items:center;flex:0 0 auto;padding:4px 0 6px;}" +
-      "#deskTabRoot .desk-ib{flex:0 0 auto;width:36px;height:36px;padding:7px;margin-right:4px;box-sizing:border-box;border-radius:8px;" +
-        "border:1px solid var(--wood,#5b4a8a);background:var(--parchment,#f4f0f8);color:var(--wood,#5b4a8a);display:flex;align-items:center;justify-content:center;" +
+      "#deskTabRoot{position:relative;display:flex;flex-direction:column;flex:1 1 auto;min-height:0;color:var(--wood,#5b4a8a);}" +
+      "#deskTabRoot .desk-bar{position:absolute;left:var(--fab-gap,6px);right:var(--fab-gap,6px);bottom:var(--fab-gap,6px);z-index:5;display:flex;align-items:center;gap:var(--fab-gap,6px);pointer-events:none;}" +
+      "#deskTabRoot .desk-ib{flex:0 0 auto;width:var(--fab-size,36px);height:var(--fab-size,36px);padding:8px;box-sizing:border-box;border-radius:8px;pointer-events:auto;" +
+        "border:1px solid var(--groove-shadow,rgba(0,0,0,.35));background:#fffef8;color:var(--wood,#5b4a8a);box-shadow:0 2px 6px rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;" +
         "-webkit-tap-highlight-color:transparent;}" +
       "#deskTabRoot .desk-ib svg{width:100%;height:100%;}" +
       "#deskTabRoot .desk-ib[disabled]{opacity:.35;}" +
       "#deskTabRoot .desk-ib.armed{background:#c62828;border-color:#c62828;color:#fff;}" +
-      "#deskTabRoot .desk-pg{flex:0 0 auto;min-width:58px;padding:0 4px;text-align:center;font-size:15px;font-weight:600;margin-right:4px;}" +
+      "#deskTabRoot .desk-pg{flex:0 0 auto;min-width:var(--fab-size,36px);height:var(--fab-size,36px);padding:0 8px;box-sizing:border-box;border-radius:8px;display:flex;align-items:center;justify-content:center;" +
+        "border:1px solid var(--groove-shadow,rgba(0,0,0,.35));background:#fffef8;box-shadow:0 2px 6px rgba(0,0,0,.28);font-size:14px;font-weight:600;pointer-events:none;}" +
       "#deskTabRoot .desk-sp{flex:1 1 auto;min-width:0;}" +
-      "#deskTabRoot .desk-tools{display:flex;flex:0 0 auto;align-items:center;}" +
-      "#deskTabRoot .desk-tools .desk-ib:last-child{margin-right:0;}" +
-      "#deskTabRoot .desk-stage{position:relative;flex:1 1 auto;min-height:200px;overflow:hidden;border-radius:10px;" +
-        "border:1px solid var(--groove-shadow,rgba(0,0,0,.35));background:rgba(127,127,127,.13);box-shadow:inset 0 1px 6px rgba(0,0,0,.18);" +
+      "#deskTabRoot .desk-tools{display:flex;flex:0 0 auto;align-items:center;gap:var(--fab-gap,6px);}" +
+      "#deskTabRoot .desk-stage{position:relative;flex:1 1 auto;min-height:200px;overflow:hidden;background:rgba(127,127,127,.13);" +
         "-ms-touch-action:none;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;}" +
       "#deskTabRoot .desk-sheet{position:absolute;left:0;top:0;right:0;bottom:0;}" +
       "#deskTabRoot .desk-item{position:absolute;box-sizing:border-box;background:#fff;box-shadow:0 2px 7px rgba(0,0,0,.38);}" +
@@ -332,7 +331,7 @@ window.initDeskModule = function(deps){
       "#deskTabRoot .desk-handle:after{content:'';position:absolute;right:3px;bottom:3px;width:20px;height:20px;border-radius:50%;" +
         "background:#7F00FF;border:2px solid #fff;box-sizing:border-box;box-shadow:0 1px 3px rgba(0,0,0,.5);}" +
       "#deskTabRoot .desk-empty{position:absolute;left:0;right:0;top:40%;padding:0 20px;text-align:center;font-size:15px;line-height:1.45;opacity:.8;pointer-events:none;}" +
-      "#deskTabRoot .desk-toast{position:absolute;left:10px;right:10px;bottom:10px;padding:7px 10px;border-radius:8px;text-align:center;font-size:13px;" +
+      "#deskTabRoot .desk-toast{position:absolute;left:10px;right:10px;bottom:calc(var(--fab-size,36px) + var(--fab-gap,6px) * 2 + 4px);padding:7px 10px;border-radius:8px;text-align:center;font-size:13px;" +
         "background:rgba(0,0,0,.72);color:#fff;pointer-events:none;opacity:0;-webkit-transition:opacity .2s;transition:opacity .2s;}" +
       "#deskTabRoot .desk-toast.on{opacity:1;}";
     document.head.appendChild(st);
@@ -375,6 +374,10 @@ window.initDeskModule = function(deps){
     ensureStyle();
     c.innerHTML =
       '<div id="' + ROOT_ID + '">' +
+        '<div class="desk-stage" id="deskStage"><div class="desk-sheet" id="deskSheet"></div>' +
+          '<div class="desk-empty" id="deskEmpty">Стол пуст.<br>Нажмите кнопку с картинкой и «+», чтобы выложить фото.</div>' +
+          '<div class="desk-toast" id="deskToast"></div>' +
+        '</div>' +
         '<div class="desk-bar">' +
           '<button type="button" class="desk-ib" id="deskPrevBtn" title="Предыдущая страница">' + ICON.prev + '</button>' +
           '<div class="desk-pg" id="deskPageNum"></div>' +
@@ -390,10 +393,6 @@ window.initDeskModule = function(deps){
             '<button type="button" class="desk-ib" id="deskBackBtn" title="На задний план">' + ICON.back + '</button>' +
             '<button type="button" class="desk-ib" id="deskDelItemBtn" title="Удалить картинку">' + ICON.trash + '</button>' +
           '</div>' +
-        '</div>' +
-        '<div class="desk-stage" id="deskStage"><div class="desk-sheet" id="deskSheet"></div>' +
-          '<div class="desk-empty" id="deskEmpty">Стол пуст.<br>Нажмите кнопку с картинкой и «+», чтобы выложить фото.</div>' +
-          '<div class="desk-toast" id="deskToast"></div>' +
         '</div>' +
         '<input type="file" id="deskFileInput" accept="image/*" style="display:none;">' +
       '</div>';

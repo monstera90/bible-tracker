@@ -1,6 +1,6 @@
 /* ===========================================================================
    modals.css
-   Версия: 21.13 (10.11)
+   Версия: 21.14 (10.11)
    Версия: 16.2 (25.10) — `.settings-modal-box.cal-week-flush`: окно без боковых полей и боковой рамки, пока на вкладке «Календарь» открыт режим «Неделя» (calendar.js `syncFlush`).
    Версия: 16.1 (25.10) — компактные язычки: боковые 35×55px (было 45×68), нижние 55×35px, кнопка-язычок `.settings-fab` 35×35px; отступы оверлея и заплатка угла под колонку 35px.
    Версия: 16.0 (22.10) — структурная правка: кнопка тегов задач `.task-tag-wrap` (слот 4 между «+» и скрепкой) + попап `.task-tag-popup`; слоты 4–12 теперь считаются как `N + var(--tag-s, 0)` (класс `.fab-tag-shift` на окне ставит `--tag-s:1`: все кнопки левее «+» уезжают на одну позицию, пока видна кнопка тегов). Откат: modals.css 15.0.
@@ -559,7 +559,8 @@
     border-right:none;
   }
   .settings-modal-box:has(> #settingsTabContent > .mdeditor-tab),
-  .settings-modal-box:has(> #settingsTabContent > .book-reader-tab){
+  .settings-modal-box:has(> #settingsTabContent > .book-reader-tab),
+  .settings-modal-box:has(> #settingsTabContent > #deskTabRoot){
     padding-left:0;
     padding-right:0;
     /* ПРАВКА (16.09): у самого окна есть border:1px solid var(--groove-shadow)
