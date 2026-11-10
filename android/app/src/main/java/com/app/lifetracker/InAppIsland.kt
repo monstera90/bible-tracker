@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 21.0 (10.11)
+// Версия: 22.0 (10.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -61,6 +61,9 @@ private class Item(val key: String, val kind: Int) {
     var btnFn: (() -> Bitmap)? = null
     var onToggle: (() -> Unit)? = null
     var onStop: (() -> Unit)? = null
+    var endKey = "" // крайняя правая кнопка карточки вместо крестика «Стоп» (музыка: пауза/играть); меняется, когда её надо перерисовать
+    var endFn: (() -> Bitmap)? = null
+    var onEnd: (() -> Unit)? = null // null — справа обычный крестик (onStop)
     var onExtra: (() -> Unit)? = null // добавочная кнопка карточки слева от паузы (помодоро: «+5»); null — кнопки нет
     var modeKey = "" // кнопка режима вместо значка карточки (видео: фон / фон с плавающим окном); меняется, когда её надо перерисовать
     var modeFn: (() -> Bitmap)? = null
@@ -215,12 +218,21 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private var shownCardSub: String? = null
     private var shownCardBtn: String? = null
     private var shownCardMode: String? = null
+    private var shownCardEnd: String? = null
     private var shownStrip: String? = null
     private var cardMusicStyle: Boolean? = null
     private var tapItem: Item? = null // чьё занятие нажато (капсула — первое)
     private var cardSwiped = false
     private var swipeX = 0f
     private var swipeY = 0f
+    private val musicStopTask = Runnable {
+        if (tapArmed && tapItem?.kind == K_MUSIC) {
+            tapArmed = false
+            MusicPlayer.close() // долгое нажатие на свёрнутую капсулу музыки: остановить и закрыть плеер
+            try { pill.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) } catch (e: Exception) { }
+            refresh()
+        }
+    }
     private val swStopTask = Runnable {
         if (tapArmed && tapItem?.kind == K_SW) {
             tapArmed = false
@@ -715,6 +727,14 @@ class InAppIsland private constructor(private val appCtx: Context) {
 
     private fun onStopClick() {
         val m = selItem() ?: return
+        val end = m.onEnd
+        if (end != null) { // справа не крестик, а своя кнопка (музыка: пауза/играть) — карточка остаётся
+            end()
+            expandedAt = System.currentTimeMillis()
+            handler.postDelayed({ refresh() }, 150L)
+            refresh()
+            return
+        }
         m.onStop?.invoke()
         expandedAt = System.currentTimeMillis()
         // последнее занятие с карточкой — сворачиваем сразу; иначе карточка перейдёт на соседнее при обновлении
@@ -745,6 +765,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         shownCardSub = null
         shownCardBtn = null
         shownCardMode = null
+        shownCardEnd = null
         shownStrip = null
         cardMusicStyle = null
     }
@@ -859,14 +880,18 @@ class InAppIsland private constructor(private val appCtx: Context) {
                 tapX = ev.x
                 tapY = ev.y
                 handler.removeCallbacks(swStopTask)
+                handler.removeCallbacks(musicStopTask)
                 if (tapArmed && tapItem?.kind == K_SW) handler.postDelayed(swStopTask, 700L)
+                if (tapArmed && tapItem?.kind == K_MUSIC) handler.postDelayed(musicStopTask, 700L)
             }
             MotionEvent.ACTION_MOVE -> if (tapArmed && (abs(ev.x - tapX) > tapSlop || abs(ev.y - tapY) > tapSlop)) {
                 tapArmed = false
                 handler.removeCallbacks(swStopTask)
+                handler.removeCallbacks(musicStopTask)
             }
             MotionEvent.ACTION_UP -> {
                 handler.removeCallbacks(swStopTask)
+                handler.removeCallbacks(musicStopTask)
                 val m = tapItem
                 val fire = tapArmed && !expanded && !animating && inPill(ev.x, ev.y)
                 tapArmed = false
@@ -874,6 +899,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
             }
             MotionEvent.ACTION_CANCEL -> {
                 handler.removeCallbacks(swStopTask)
+                handler.removeCallbacks(musicStopTask)
                 tapArmed = false
             }
         }
@@ -1054,9 +1080,13 @@ class InAppIsland private constructor(private val appCtx: Context) {
             if (counter.isNotEmpty()) parts.add("трек " + counter.replace("/", " из "))
             parts.add(if (playing) "играет" else "пауза")
             m.sub = parts.joinToString(" · ")
-            m.btnKey = "mu" + playing
-            m.btnFn = { XiaomiIsland.musicButtonBitmap(if (playing) 2 else 1) }
-            m.onToggle = { MusicPlayer.toggle() }
+            // в карточке: слева «следующий трек», справа (на месте крестика) пауза/играть; закрытие — долгим нажатием на капсулу ([musicStopTask])
+            m.btnKey = "munext"
+            m.btnFn = { XiaomiIsland.musicButtonBitmap(3) }
+            m.onToggle = { MusicPlayer.next() }
+            m.endKey = "mu" + playing
+            m.endFn = { XiaomiIsland.musicButtonBitmap(if (playing) 2 else 1) }
+            m.onEnd = { MusicPlayer.toggle() }
             m.onStop = { MusicPlayer.close() }
             out.add(m)
         }
@@ -1220,6 +1250,13 @@ class InAppIsland private constructor(private val appCtx: Context) {
             if (bk != shownCardBtn) {
                 shownCardBtn = bk
                 sel.btnFn?.let { pauseBtn.setImageBitmap(it()) }
+            }
+        }
+        if (card.visibility == View.VISIBLE) {
+            val ek = sel.key + "|" + (if (sel.onEnd != null) sel.endKey else "x")
+            if (ek != shownCardEnd) {
+                shownCardEnd = ek
+                stopBtn.setImageBitmap(sel.endFn?.invoke() ?: XiaomiIsland.crossBitmap())
             }
         }
         rebuildStrip(ex, sel.key)
