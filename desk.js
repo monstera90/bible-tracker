@@ -1,6 +1,6 @@
 /* ===========================================================================
    desk.js
-   Версия: 2.1 (10.11)
+   Версия: 2.2 (10.11)
    Вкладка «Стол» (set2s_14, кнопка settingsTabSet2Btn14; в стеке второго набора стоит над «Изменением размера
    изображения»): несколько картинок рядом друг с другом, как на столе, и несколько страниц-«столов», которые
    листаются. Точка входа — window.initDeskModule(deps) → { renderSettingsTabDesk }; my.js зовёт её из switchSettingsTab.
@@ -42,6 +42,7 @@ window.initDeskModule = function(deps){
   var DECODE_MS = 12000;        // сколько ждём открытия картинки одним способом, мс
   var FILE_MS = 35000;          // сколько ждём одну картинку целиком, мс (дольше — сообщаем, на каком шаге застряли)
   var IDB_MS = 8000;            // сколько ждём IndexedDB, мс; не ответил — картинка идёт в запасное хранилище
+  var PICK_KEY = "deskPickAt_v1"; // метка «выбор файла открыт»; осталась после перезагрузки страницы — приложение перезапустилось во время выбора
   var LS_PREFIX = "deskImg_";   // запасное хранение картинки в localStorage, если IndexedDB не отвечает
 
   var ICON = {
@@ -67,6 +68,8 @@ window.initDeskModule = function(deps){
   var resizeBound = false;
   var dbRef = null;
   var dbFailed = false;
+  var pickWait = false;       // системный выбор файла открыт, ответа ещё нет
+  var pickBound = false;
   var adding = false;         // идёт добавление картинок
 
   function dlog(t){ try{ if(window.Debug && window.Debug.log) window.Debug.log("Стол: " + t); }catch(e){} }
@@ -392,7 +395,7 @@ window.initDeskModule = function(deps){
           '<div class="desk-empty" id="deskEmpty">Стол пуст.<br>Нажмите кнопку с картинкой и «+», чтобы выложить фото.</div>' +
           '<div class="desk-toast" id="deskToast"></div>' +
         '</div>' +
-        '<input type="file" id="deskFileInput" accept="image/*" multiple style="display:none;">' +
+        '<input type="file" id="deskFileInput" accept="image/*" style="display:none;">' +
       '</div>';
     bindShell();
     return true;
@@ -882,9 +885,28 @@ window.initDeskModule = function(deps){
     q("deskAddImgBtn").addEventListener("click", function(){
       if(adding){ toast("Идёт добавление, подождите…", 2500); return; }
       toast("Открываю выбор файла…", 3000);
-      try{ fileInput.click(); }catch(e){ toast("Не удалось открыть выбор файла.", 5000); }
+      pickWait = true;
+      try{ localStorage.setItem(PICK_KEY, String(Date.now())); }catch(e){}
+      try{ fileInput.click(); }catch(e){ pickWait = false; toast("Не удалось открыть выбор файла.", 5000); }
     });
+    function onBack(){
+      if(!pickWait) return;
+      setTimeout(function(){
+        if(!pickWait) return;
+        pickWait = false;
+        try{ localStorage.removeItem(PICK_KEY); }catch(e){}
+        dlog("после выбора файла событие не пришло");
+        toast("Система не передала файл (или выбор отменён).", 6000);
+      }, 2500);
+    }
+    if(!pickBound){
+      pickBound = true;
+      window.addEventListener("focus", onBack);
+      document.addEventListener("visibilitychange", function(){ if(document.visibilityState === "visible") onBack(); });
+    }
     function onPicked(){
+      pickWait = false;
+      try{ localStorage.removeItem(PICK_KEY); }catch(e){}
       var fl = fileInput.files;
       var arr = [];
       if(fl) for(var i = 0; i < fl.length; i++) arr.push(fl[i]);
@@ -922,6 +944,16 @@ window.initDeskModule = function(deps){
     armed = "";
     if(!renderShell()) return;
     renderPage(0);
+    try{
+      var pk = parseInt(localStorage.getItem(PICK_KEY) || "0", 10);
+      if(pk){
+        localStorage.removeItem(PICK_KEY);
+        if(Date.now() - pk < 600000){
+          dlog("страница перезапущена во время выбора файла");
+          toast("Приложение перезапустилось, пока был открыт выбор файла.", 9000);
+        }
+      }
+    }catch(e){}
     // размеры стола известны только после раскладки окна — подгоняем картинки ещё раз
     setTimeout(function(){ if(rootEl()) relayout(); }, 60);
   }
