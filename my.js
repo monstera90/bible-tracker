@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 143.5 (10.11)
+   Версия: 143.6 (10.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -25447,7 +25447,8 @@
   // плашка на приложение: открывает/закрывает те же appConfirmBarEl/closeAppConfirmBar, что и
   // openAppConfirmBar. items: [{key, svg, title, current}] (current — пузырь залит цветом темы);
   // onPick(key) — вызывается ПОСЛЕ закрытия плашки; opts: {label, onCancel, blurBeforePick}
-  // (blurBeforePick — снять фокус с редактируемой строки перед действием, как у удаления).
+  // (blurBeforePick — снять фокус с редактируемой строки перед действием, как у удаления); opts.text — видимая подпись слева от пузырей
+  // (вопрос; тогда пузыри идут одним рядом справа, без сетки).
   function openAppBubbleGrid(anchor, items, onPick, opts){
     closeAppConfirmBar();
     opts = opts || {};
@@ -25459,12 +25460,17 @@
     // размер пузыря — тот же замер, что у плашки удаления (до перехода в режим сетки)
     var bubblePx = measureFabBubblePx(box);
     if(bubblePx > 0) box.style.setProperty("--rb", bubblePx + "px");
-    box.classList.add("app-bubble-grid");
-    box.innerHTML = items.map(function(it){
+    var bubblesHtml = items.map(function(it){
       var t = escapeHtml(it.title || "");
       return '<button type="button" class="reminder-bubble reminder-bubble-date' + (it.current ? ' is-set' : '') +
         '" data-key="' + escapeHtml(it.key) + '" title="' + t + '" aria-label="' + t + '">' + it.svg + '</button>';
     }).join("");
+    if(opts.text){
+      box.innerHTML = '<span class="app-confirm-bar-text">' + escapeHtml(opts.text) + '</span><span class="app-confirm-bar-btns">' + bubblesHtml + '</span>';
+    }else{
+      box.classList.add("app-bubble-grid");
+      box.innerHTML = bubblesHtml;
+    }
     appConfirmBarEl = box;
 
     function place(){ placeAppConfirmBarAtAnchor(box, anchor); }

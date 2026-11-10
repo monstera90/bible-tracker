@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 12.0 (10.11)
+   Версия: 12.1 (10.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -453,7 +453,7 @@
       ".wk-goal-set{display:block;margin:6px 0 4px;padding:8px 14px;border-radius:10px;border:1px solid var(--wood);background:var(--wood);color:var(--parchment);font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
       ".wk-goal-set:disabled{background:transparent;border-color:var(--groove-shadow);color:var(--ink-soft);opacity:.6;cursor:default;}" +
       // награды
-      ".wk-award{align-items:flex-start;}" +
+      ".wk-award{align-items:flex-start;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;}" +
       ".wk-award:not(.on){opacity:.5;}" +
       ".wk-medal{flex:0 0 28px;width:28px;height:28px;margin-top:1px;color:var(--ink-soft);}" +
       ".wk-medal svg{display:block;width:28px;height:28px;}" +
@@ -690,6 +690,7 @@
     if(!bar || !bar.openGrid) return;
     clearRowMark();
     row.classList.add("wk-row-del");
+    try{ var sel = window.getSelection && window.getSelection(); if(sel && sel.removeAllRanges) sel.removeAllRanges(); }catch(e){} // долгое нажатие могло начать выделение текста
     function guard(e){ e.stopImmediatePropagation(); e.preventDefault(); }
     document.addEventListener("click", guard, true);
     setTimeout(function(){ document.removeEventListener("click", guard, true); }, 700);
@@ -697,7 +698,7 @@
       clearRowMark();
       resetAward(id);
       renderTrophyScreen("awards");
-    }, { label: "Обнулить награду?", onCancel: clearRowMark });
+    }, { label: "Обнулить награду?", text: "Обнулить награду?", onCancel: clearRowMark });
   }
   function bindRowLongPress(row, onPress){
     var timer = null, sx = 0, sy = 0, lastTouchAt = 0;
@@ -1626,6 +1627,7 @@
     if(tab === "awards"){
       Array.prototype.forEach.call(c.querySelectorAll(".wk-award[data-aid]"), function(r){
         bindRowLongPress(r, function(){ askResetAward(r.getAttribute("data-aid"), r); });
+        r.addEventListener("selectstart", function(e){ e.preventDefault(); }); // текст награды при долгом нажатии не выделяется
       });
     }
     var ab = document.getElementById("wkTrophyInfoBtn");
