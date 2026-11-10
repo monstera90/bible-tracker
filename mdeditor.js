@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 22.0 (10.11)
+   Версия: 22.1 (10.11)
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
@@ -4894,6 +4894,8 @@ window.initMdEditorModule = function(deps){
       var scrollHost = document.getElementById("settingsTabContent");
       if(scrollHost) prevScrollTop = scrollHost.scrollTop;
     }
+    // вход снаружи (календарь, карточка «Сегодня»): переход на вкладку заметок уже шаг «назад» — второго (в список) не добавляем, как в openNoteByIdExternally
+    suppressNextNavPush = true;
     pushMdNav(function(){
       flushAutosaveNow();
       dropEmptyOpenNote();
