@@ -1,6 +1,6 @@
 /* ===========================================================================
    desk.js
-   Версия: 2.0 (31.10)
+   Версия: 2.1 (10.11)
    Вкладка «Стол» (set2s_14, кнопка settingsTabSet2Btn14; в стеке второго набора стоит над «Изменением размера
    изображения»): несколько картинок рядом друг с другом, как на столе, и несколько страниц-«столов», которые
    листаются. Точка входа — window.initDeskModule(deps) → { renderSettingsTabDesk }; my.js зовёт её из switchSettingsTab.
@@ -39,6 +39,10 @@ window.initDeskModule = function(deps){
   var MIN_W = 0.14;             // наименьшая ширина картинки, доля ширины стола
   var SWIPE_MIN = 60;           // px — свайп по пустому месту листает страницу
   var ARM_MS = 2600;            // сколько секунд «взведено» двойное нажатие удаления
+  var DECODE_MS = 12000;        // сколько ждём открытия картинки одним способом, мс
+  var FILE_MS = 35000;          // сколько ждём одну картинку целиком, мс (дольше — сообщаем, на каком шаге застряли)
+  var IDB_MS = 8000;            // сколько ждём IndexedDB, мс; не ответил — картинка идёт в запасное хранилище
+  var LS_PREFIX = "deskImg_";   // запасное хранение картинки в localStorage, если IndexedDB не отвечает
 
   var ICON = {
     prev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></svg>',
@@ -63,6 +67,9 @@ window.initDeskModule = function(deps){
   var resizeBound = false;
   var dbRef = null;
   var dbFailed = false;
+  var adding = false;         // идёт добавление картинок
+
+  function dlog(t){ try{ if(window.Debug && window.Debug.log) window.Debug.log("Стол: " + t); }catch(e){} }
 
   function uid(){ return "d" + Date.now().toString(36) + Math.floor(Math.random() * 1679616).toString(36); }
 
@@ -113,30 +120,44 @@ window.initDeskModule = function(deps){
     req.onerror = function(){ dbFailed = true; cb(null); };
     req.onblocked = function(){ dbFailed = true; cb(null); };
   }
+  function lsPut(id, url){
+    try{ localStorage.setItem(LS_PREFIX + id, url); return true; }catch(e){ return false; }
+  }
+  function lsGet(id){
+    try{ var v = localStorage.getItem(LS_PREFIX + id); return typeof v === "string" && v ? v : null; }catch(e){ return null; }
+  }
+  function lsDel(id){ try{ localStorage.removeItem(LS_PREFIX + id); }catch(e){} }
   function idbPut(id, url, cb){
+    var fin = false;
+    var t = setTimeout(function(){ if(!fin){ fin = true; dlog("IndexedDB не ответил на запись"); cb(false); } }, IDB_MS);
+    function end(ok){ if(fin) return; fin = true; clearTimeout(t); cb(ok); }
     openDb(function(db){
-      if(!db){ cb(false); return; }
+      if(!db){ end(false); return; }
       try{
         var tx = db.transaction(STORE, "readwrite");
         tx.objectStore(STORE).put(url, id);
-        tx.oncomplete = function(){ cb(true); };
-        tx.onerror = function(){ cb(false); };
-        tx.onabort = function(){ cb(false); };
-      }catch(e){ cb(false); }
+        tx.oncomplete = function(){ end(true); };
+        tx.onerror = function(){ end(false); };
+        tx.onabort = function(){ end(false); };
+      }catch(e){ end(false); }
     });
   }
   function idbGet(id, cb){
+    var fin = false;
+    var t = setTimeout(function(){ if(!fin){ fin = true; cb(null); } }, IDB_MS);
+    function end(v){ if(fin) return; fin = true; clearTimeout(t); cb(v); }
     openDb(function(db){
-      if(!db){ cb(null); return; }
+      if(!db){ end(null); return; }
       try{
         var r = db.transaction(STORE, "readonly").objectStore(STORE).get(id);
-        r.onsuccess = function(){ cb(typeof r.result === "string" ? r.result : null); };
-        r.onerror = function(){ cb(null); };
-      }catch(e){ cb(null); }
+        r.onsuccess = function(){ end(typeof r.result === "string" ? r.result : null); };
+        r.onerror = function(){ end(null); };
+      }catch(e){ end(null); }
     });
   }
   function idbDelete(ids){
     if(!ids || !ids.length) return;
+    for(var j = 0; j < ids.length; j++) lsDel(ids[j]);
     openDb(function(db){
       if(!db) return;
       try{
@@ -173,58 +194,110 @@ window.initDeskModule = function(deps){
     }
     return "";
   }
+  // Уменьшает уже открытую картинку до MAX_SIDE и отдаёт data:URL. origBlob — исходник (только известные jpg/png):
+  // маленький исходник в пределах MAX_SIDE остаётся как есть.
+  function fitImage(img, isPng, origBlob, done){
+    var nw = img.naturalWidth || img.width, nh = img.naturalHeight || img.height;
+    if(!(nw > 0 && nh > 0)){ done(null, "картинка не открылась"); return; }
+    var scale = Math.min(1, MAX_SIDE / Math.max(nw, nh));
+    if(scale === 1 && origBlob && origBlob.size <= KEEP_ORIGINAL_BYTES){
+      var fr2 = new FileReader();
+      fr2.onerror = function(){ done(null, "файл не читается"); };
+      fr2.onload = function(){ done({ url: String(fr2.result || ""), w: nw, h: nh }); };
+      fr2.readAsDataURL(origBlob);
+      return;
+    }
+    var cw = Math.max(1, Math.round(nw * scale)), ch = Math.max(1, Math.round(nh * scale));
+    try{
+      var cv = document.createElement("canvas");
+      cv.width = cw; cv.height = ch;
+      var ctx = cv.getContext("2d");
+      if(!isPng){ ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, cw, ch); }
+      ctx.drawImage(img, 0, 0, cw, ch);
+      var out = isPng ? cv.toDataURL("image/png") : cv.toDataURL("image/jpeg", 0.86);
+      if(out.indexOf("data:image/") !== 0){ done(null, "не удалось уменьшить"); return; }
+      done({ url: out, w: cw, h: ch });
+    }catch(e){ done(null, "не хватило памяти на уменьшение"); }
+  }
+
+  // Открывает Blob/File как картинку через blob-URL с таймаутом. cb(img|null, why, release): release() отпускает blob-URL
+  // (звать, когда картинка больше не нужна).
+  function decodeBlob(blob, cb){
+    var URLApi = window.URL || window.webkitURL, u = null, img = new Image(), fin = false, t = null;
+    function release(){ try{ if(u) URLApi.revokeObjectURL(u); }catch(e){} u = null; }
+    function end(ok, why){
+      if(fin) return;
+      fin = true; clearTimeout(t);
+      img.onload = null; img.onerror = null;
+      cb(ok ? img : null, why, release);
+    }
+    try{ u = URLApi.createObjectURL(blob); }catch(e){ end(false, "не удалось подготовить файл"); return; }
+    t = setTimeout(function(){ end(false, "картинка не открывается (нет ответа)"); }, DECODE_MS);
+    img.onerror = function(){ end(false, "картинка не открылась"); };
+    img.onload = function(){ end(true); };
+    img.src = u;
+  }
+
   // cb(res, why): res = {url, w, h} (data:URL уже уменьшенной картинки) или null и причина why для сообщения.
-  function readAndFit(file, cb){
-    var fr = new FileReader();
-    fr.onerror = function(){ cb(null, "файл не читается"); };
-    fr.onload = function(){
-      var mime = "";
-      try{ mime = sniffMime(new Uint8Array(fr.result)); }catch(e){ mime = ""; }
-      if(!mime){
-        var t = String(file.type || "").toLowerCase();
-        if(/^image\/(jpeg|png|gif|webp|bmp)$/.test(t)) mime = t; // сигнатуру не узнали, но система уверена в типе
-      }
-      if(!mime){ cb(null, "это не картинка"); return; }
-      var blob = null, objUrl = null, URLApi = window.URL || window.webkitURL;
-      try{
-        blob = new Blob([fr.result], { type: mime });
-        objUrl = URLApi.createObjectURL(blob);
-      }catch(e){ cb(null, "не удалось подготовить файл"); return; }
-      function done(res, why){
-        try{ URLApi.revokeObjectURL(objUrl); }catch(e){}
-        cb(res, why);
-      }
-      var img = new Image();
-      img.onerror = function(){
-        done(null, (mime === "image/heic" || mime === "image/avif") ? "формат " + (mime === "image/heic" ? "HEIC" : "AVIF") + " не открывается" : "картинка не открылась");
-      };
-      img.onload = function(){
-        var nw = img.naturalWidth || img.width, nh = img.naturalHeight || img.height;
-        if(!(nw > 0 && nh > 0)){ done(null, "картинка не открылась"); return; }
-        var isPng = mime === "image/png";
-        var scale = Math.min(1, MAX_SIDE / Math.max(nw, nh));
-        if(scale === 1 && (isPng || mime === "image/jpeg") && blob.size <= KEEP_ORIGINAL_BYTES){
-          var fr2 = new FileReader();
-          fr2.onerror = function(){ done(null, "файл не читается"); };
-          fr2.onload = function(){ done({ url: String(fr2.result || ""), w: nw, h: nh }); };
-          fr2.readAsDataURL(blob);
-          return;
+  // stage(текст) — на каком шаге сейчас файл (для сообщения на экране). Два способа: сначала файл открывается напрямую
+  // (без чтения в память: у файлов из Android-выбора бывает пустой тип), не вышло — читаем FileReader и определяем тип по сигнатуре.
+  function readAndFit(file, cb, stage){
+    var over = false, curStage = "начало";
+    function st(t){ curStage = t; if(stage) stage(t); }
+    var total = setTimeout(function(){
+      if(over) return;
+      over = true;
+      dlog("таймаут на шаге «" + curStage + "»");
+      cb(null, "нет ответа на шаге «" + curStage + "»");
+    }, FILE_MS);
+    function fin(res, why){
+      if(over) return;
+      over = true; clearTimeout(total);
+      cb(res, why);
+    }
+    var ft = String(file.type || "").toLowerCase();
+    var guessPng = ft === "image/png" || /\.png$/i.test(String(file.name || ""));
+
+    function viaReader(why1){
+      st("читаю файл");
+      var fr = new FileReader();
+      fr.onerror = function(){ fin(null, "файл не читается"); };
+      fr.onload = function(){
+        if(over) return;
+        var mime = "";
+        try{ mime = sniffMime(new Uint8Array(fr.result)); }catch(e){ mime = ""; }
+        if(!mime){
+          if(/^image\/(jpeg|png|gif|webp|bmp)$/.test(ft)) mime = ft; // сигнатуру не узнали, но система уверена в типе
         }
-        var cw = Math.max(1, Math.round(nw * scale)), ch = Math.max(1, Math.round(nh * scale));
-        try{
-          var cv = document.createElement("canvas");
-          cv.width = cw; cv.height = ch;
-          var ctx = cv.getContext("2d");
-          if(!isPng){ ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, cw, ch); }
-          ctx.drawImage(img, 0, 0, cw, ch);
-          var out = isPng ? cv.toDataURL("image/png") : cv.toDataURL("image/jpeg", 0.86);
-          if(out.indexOf("data:image/") !== 0){ done(null, "не удалось уменьшить"); return; }
-          done({ url: out, w: cw, h: ch });
-        }catch(e){ done(null, "не хватило памяти на уменьшение"); }
+        if(!mime){ fin(null, "это не картинка"); return; }
+        var blob = null;
+        try{ blob = new Blob([fr.result], { type: mime }); }catch(e){ fin(null, "не удалось подготовить файл"); return; }
+        st("открываю картинку (запасной способ)");
+        decodeBlob(blob, function(img, why, release){
+          if(!img){
+            release();
+            fin(null, (mime === "image/heic" || mime === "image/avif") ? "формат " + (mime === "image/heic" ? "HEIC" : "AVIF") + " не открывается" : (why || why1 || "картинка не открылась"));
+            return;
+          }
+          st("уменьшаю");
+          var keep = (mime === "image/png" || mime === "image/jpeg") ? blob : null;
+          fitImage(img, mime === "image/png", keep, function(res, why3){ release(); fin(res, why3); });
+        });
       };
-      img.src = objUrl;
-    };
-    try{ fr.readAsArrayBuffer(file); }catch(e){ cb(null, "файл не читается"); }
+      try{ fr.readAsArrayBuffer(file); }catch(e){ fin(null, "файл не читается"); }
+    }
+
+    st("открываю картинку");
+    decodeBlob(file, function(img, why, release){
+      if(over){ release(); return; }
+      if(!img){ release(); dlog("напрямую не открылась (" + why + "), читаю через FileReader"); viaReader(why); return; }
+      st("уменьшаю");
+      fitImage(img, guessPng, null, function(res, why2){
+        release();
+        if(!res){ dlog("напрямую не уменьшилась (" + why2 + "), читаю через FileReader"); viaReader(why2); return; }
+        fin(res, why2);
+      });
+    });
   }
 
   // ---------------------------------------------------------------- DOM
@@ -454,6 +527,7 @@ window.initDeskModule = function(deps){
 
   function loadImage(id){
     idbGet(id, function(url){
+      if(!url) url = lsGet(id);
       if(url){ imgCache[id] = url; setImgSrc(id); }
     });
   }
@@ -520,30 +594,45 @@ window.initDeskModule = function(deps){
     return { x: Math.min(0.02 + n * 0.04, Math.max(0, 1 - w)), y: Math.min(0.02 + n * 0.04, Math.max(0, hr - h)) };
   }
 
-  function addFiles(files){
+  // files — массив File; onEnd() — когда все обработаны (или ушли с ошибкой).
+  function addFiles(files, onEnd){
     var list = [];
     for(var i = 0; i < files.length; i++) if(!isClearlyNotImage(files[i])) list.push(files[i]);
-    if(!list.length){ toast("Нужны файлы-картинки."); return; }
-    var pageId = page().id, added = 0, failed = 0, full = false, idx = 0, firstWhy = "";
+    if(!list.length){ toast("Нужны файлы-картинки.", 5000); if(onEnd) onEnd(); return; }
+    adding = true;
+    var pageId = page().id, added = 0, failed = 0, full = false, idx = 0, firstWhy = "", viaLs = 0;
+    function finish(){
+      adding = false;
+      if(onEnd) onEnd();
+    }
     function next(){
       if(idx >= list.length){
         var msg = added ? ("Добавлено: " + added) : "Ничего не добавлено";
         if(failed) msg += ". Не удалось добавить: " + failed + (firstWhy ? " (" + firstWhy + ")" : "");
         if(full) msg += ". На странице уже " + MAX_ITEMS + " картинок";
-        toast(msg + ".", failed ? 6000 : 2400);
+        if(viaLs) msg += ". Сохранено запасным способом: " + viaLs;
+        dlog(msg);
+        toast(msg + ".", failed ? 9000 : 2400);
+        finish();
         return;
       }
-      toast("Добавляю " + (idx + 1) + " из " + list.length + "…", 20000);
+      var n = idx + 1;
+      toast("Файл " + n + " из " + list.length + "…", 40000);
       var f = list[idx++];
+      dlog("файл " + n + ": имя=" + (f.name || "?") + ", тип=" + (f.type || "пусто") + ", размер=" + (f.size || 0));
       var pg = null;
       for(var p = 0; p < data.pages.length; p++) if(data.pages[p].id === pageId) pg = data.pages[p];
-      if(!pg){ return; } // страницу удалили, пока читались файлы
+      if(!pg){ finish(); return; } // страницу удалили, пока читались файлы
       if(pg.items.length >= MAX_ITEMS){ full = true; idx = list.length; next(); return; }
       readAndFit(f, function(res, why){
-        if(!res){ failed++; if(!firstWhy) firstWhy = why || ""; next(); return; }
+        if(!res){ failed++; if(!firstWhy) firstWhy = why || ""; dlog("файл " + n + ": ошибка — " + why); next(); return; }
         var id = uid();
+        toast("Файл " + n + " из " + list.length + ": сохраняю…", 40000);
         idbPut(id, res.url, function(ok){
-          if(!ok){ failed++; if(!firstWhy) firstWhy = "не удалось сохранить на устройстве"; next(); return; }
+          if(!ok){
+            if(lsPut(id, res.url)){ viaLs++; }
+            else { failed++; if(!firstWhy) firstWhy = "не удалось сохранить на устройстве"; next(); return; }
+          }
           imgCache[id] = res.url;
           var sz = stageSize();
           var hr = sz.w > 0 ? sz.h / sz.w : 1.3;
@@ -568,7 +657,7 @@ window.initDeskModule = function(deps){
           saveNow();
           next();
         });
-      });
+      }, function(t){ toast("Файл " + n + " из " + list.length + ": " + t + "…", 40000); });
     }
     next();
   }
@@ -790,14 +879,24 @@ window.initDeskModule = function(deps){
     q("deskPrevBtn").addEventListener("click", function(){ gotoPage(data.cur - 1, -1); });
     q("deskNextBtn").addEventListener("click", function(){ gotoPage(data.cur + 1, 1); });
     q("deskAddPageBtn").addEventListener("click", addPage);
-    q("deskAddImgBtn").addEventListener("click", function(){ fileInput.click(); });
-    fileInput.addEventListener("change", function(){
+    q("deskAddImgBtn").addEventListener("click", function(){
+      if(adding){ toast("Идёт добавление, подождите…", 2500); return; }
+      toast("Открываю выбор файла…", 3000);
+      try{ fileInput.click(); }catch(e){ toast("Не удалось открыть выбор файла.", 5000); }
+    });
+    function onPicked(){
       var fl = fileInput.files;
       var arr = [];
       if(fl) for(var i = 0; i < fl.length; i++) arr.push(fl[i]);
-      fileInput.value = "";
-      if(arr.length) addFiles(arr);
-    });
+      dlog("выбор файлов: " + arr.length);
+      if(!arr.length){ return; }
+      if(adding){ return; }
+      toast("Выбрано файлов: " + arr.length, 40000);
+      // значение поля не сбрасываем, пока файлы не обработаны: иначе системная ссылка на файл может отпуститься раньше чтения
+      addFiles(arr, function(){ try{ fileInput.value = ""; }catch(e){} });
+    }
+    fileInput.addEventListener("change", onPicked);
+    fileInput.addEventListener("input", onPicked);
     q("deskDelPageBtn").addEventListener("click", function(){
       if(armed === "page"){ disarm(); deletePage(); return; }
       var n = page().items.length;
