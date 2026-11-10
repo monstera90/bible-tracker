@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 22.0 (10.11)
+// Версия: 23.0 (10.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -225,21 +225,14 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private var cardSwiped = false
     private var swipeX = 0f
     private var swipeY = 0f
-    private val musicStopTask = Runnable {
-        if (tapArmed && tapItem?.kind == K_MUSIC) {
+    /** Долгое нажатие (≈0,7 с) на свёрнутую капсулу любого занятия — то же, что крестик «Стоп» в карточке (`Item.onStop`), с лёгкой вибрацией. */
+    private val longStopTask = Runnable {
+        val m = tapItem
+        if (tapArmed && m != null) {
             tapArmed = false
-            MusicPlayer.close() // долгое нажатие на свёрнутую капсулу музыки: остановить и закрыть плеер
             try { pill.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) } catch (e: Exception) { }
-            refresh()
-        }
-    }
-    private val swStopTask = Runnable {
-        if (tapArmed && tapItem?.kind == K_SW) {
-            tapArmed = false
-            val ctx = appCtx
-            StopwatchTimer.stop(ctx)
-            StopwatchService.stop(ctx)
-            try { pill.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) } catch (e: Exception) { }
+            m.onStop?.invoke()
+            handler.postDelayed({ refresh() }, 150L)
             refresh()
         }
     }
@@ -813,7 +806,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
 
     /**
      * Нажатие на капсулу (или кружок). Любое занятие раскрывается в карточку именно этого занятия; нажатие на саму карточку (мимо кнопок)
-     * у помодоро, музыки, видео и тренировки открывает вкладку занятия ([openTab]), у таймеров и секундомера — ничего; секундомер — карточка с паузой и «Стоп» (долгое нажатие на капсулу — сброс, см. [swStopTask]).
+     * у помодоро, музыки, видео и тренировки открывает вкладку занятия ([openTab]), у таймеров и секундомера — ничего; долгое нажатие на капсулу любого занятия — «Стоп», см. [longStopTask].
      */
     private fun activate(m: Item) {
         // состояние «раскрыта», хотя карточка давно свёрнута (прервалась анимация/пересборка окна) — считаем свёрнутой
@@ -879,27 +872,22 @@ class InAppIsland private constructor(private val appCtx: Context) {
                 if (tapItem == null) tapArmed = false
                 tapX = ev.x
                 tapY = ev.y
-                handler.removeCallbacks(swStopTask)
-                handler.removeCallbacks(musicStopTask)
-                if (tapArmed && tapItem?.kind == K_SW) handler.postDelayed(swStopTask, 700L)
-                if (tapArmed && tapItem?.kind == K_MUSIC) handler.postDelayed(musicStopTask, 700L)
+                handler.removeCallbacks(longStopTask)
+                if (tapArmed && tapItem?.onStop != null) handler.postDelayed(longStopTask, 700L)
             }
             MotionEvent.ACTION_MOVE -> if (tapArmed && (abs(ev.x - tapX) > tapSlop || abs(ev.y - tapY) > tapSlop)) {
                 tapArmed = false
-                handler.removeCallbacks(swStopTask)
-                handler.removeCallbacks(musicStopTask)
+                handler.removeCallbacks(longStopTask)
             }
             MotionEvent.ACTION_UP -> {
-                handler.removeCallbacks(swStopTask)
-                handler.removeCallbacks(musicStopTask)
+                handler.removeCallbacks(longStopTask)
                 val m = tapItem
                 val fire = tapArmed && !expanded && !animating && inPill(ev.x, ev.y)
                 tapArmed = false
                 if (fire && m != null) activate(m)
             }
             MotionEvent.ACTION_CANCEL -> {
-                handler.removeCallbacks(swStopTask)
-                handler.removeCallbacks(musicStopTask)
+                handler.removeCallbacks(longStopTask)
                 tapArmed = false
             }
         }
@@ -1080,7 +1068,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
             if (counter.isNotEmpty()) parts.add("трек " + counter.replace("/", " из "))
             parts.add(if (playing) "играет" else "пауза")
             m.sub = parts.joinToString(" · ")
-            // в карточке: слева «следующий трек», справа (на месте крестика) пауза/играть; закрытие — долгим нажатием на капсулу ([musicStopTask])
+            // в карточке: слева «следующий трек», справа (на месте крестика) пауза/играть; закрытие — долгим нажатием на капсулу ([longStopTask])
             m.btnKey = "munext"
             m.btnFn = { XiaomiIsland.musicButtonBitmap(3) }
             m.onToggle = { MusicPlayer.next() }
