@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 143.7 (10.11)
+   Версия: 143.8 (10.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -11150,6 +11150,7 @@
           return TASK_MOVABLE_TABS.map(function(k){ return {key: k, title: taskQrTabTitle(k), svg: TASK_MOVE_ICON_SVG(k)}; });
         },
         addTaskFromQr: addTaskFromQr,
+        deleteTaskFromQr: deleteTaskFromQr,
         addClimb: function(m){ ensureWorkoutsStore(); return window.WorkoutsTab && window.WorkoutsTab.addClimb ? window.WorkoutsTab.addClimb(m) : { status: "error" }; }, // «+ к высоте»: метры в сегодняшнюю тренировку / общий счётчик высоты
         // «Комбинированный»: выбор вкладки/закладки, открытие и задача по id
         getComboTabs: getComboTabList,
@@ -22336,6 +22337,38 @@
       info.status = "added";
     }
     // открытая вкладка задач сразу показывает новый список/порядок (кроме момента, когда в ней идёт редактирование строки)
+    try{
+      var ae = document.activeElement;
+      var editing = !!(ae && ae.classList && ae.classList.contains("task-editable"));
+      if(!editing && !activeProjectPickerRerender && settingsModalOverlay && settingsModalOverlay.classList.contains("open") && TASK_TAB_IDS.hasOwnProperty(currentSettingsTab)) renderSettingsTabTask(currentSettingsTab);
+    }catch(e){}
+    return info;
+  }
+  // Кнопка «Удалить задачу» в слое QR «Создавать задачу» (itemcards.js → deps.deleteTaskFromQr): ищется та же задача, что нашёл бы
+  // addTaskFromQr (невыполненная, тот же текст; сначала на вкладке кода, иначе любая) и удаляется насовсем. Нет такой — ничего не меняется.
+  function deleteTaskFromQr(tabKey, rawText){
+    var text = String(rawText == null ? "" : rawText).replace(/\s+/g, " ").trim();
+    var info = {text: text, status: "none"};
+    if(!text || TASK_MOVABLE_TABS.indexOf(tabKey) === -1){ info.status = "error"; return info; }
+    var groupOn = isGroupTasksActive(), groupRO = groupOn && isGroupTasksReadOnly();
+    function keyOf(t){ return String(t || "").replace(/\s+/g, " ").trim().toLowerCase(); }
+    var want = keyOf(text);
+    var all = getAllTasks();
+    if(groupOn && !groupRO){ try{ all = all.concat(getAllGroupTasks()); }catch(e){} }
+    var same = all.filter(function(t){ return t.c.checked !== true && keyOf(t.c.text) === want; });
+    if(!same.length) return info;
+    function onTab(t){
+      if(tabKey === "red") return taskEffectiveTab(t) === "red" || t.c.flag === "red" || t.c.flag === "yellow";
+      if(tabKey === "worktasks") return taskEffectiveTab(t) === "worktasks" || getTaskWorkState(t) !== "off";
+      if(tabKey === "waiting") return taskEffectiveTab(t) === "waiting" || hasTaskReminder(t);
+      return taskEffectiveTab(t) === tabKey;
+    }
+    var found = null;
+    for(var i = 0; i < same.length && !found; i++) if(onTab(same[i])) found = same[i];
+    if(!found) found = same[0];
+    if(isGroupTaskId(found.id) && (!groupOn || groupRO)){ info.status = "error"; info.reason = "readonly"; return info; }
+    deleteTaskPermanently(found.id);
+    info.status = "deleted";
     try{
       var ae = document.activeElement;
       var editing = !!(ae && ae.classList && ae.classList.contains("task-editable"));

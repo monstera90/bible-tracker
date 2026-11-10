@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 37.2 (10.11)
+   Версия: 38.0 (10.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -2685,7 +2685,32 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     if(!Array.isArray(q)) return;
     var now = Date.now();
     q = q.filter(function(x){ return x && typeof x.tab === "string" && typeof x.text === "string" && now - (Number(x.at) || 0) < 30 * 60 * 1000; });
-    for(var i = 0; i < q.length; i++) applyScannedTask(q[i], silent === true || i < q.length - 1);
+    for(var i = 0; i < q.length; i++){
+      if(q[i].del) applyDeletedTask(q[i]);
+      else applyScannedTask(q[i], silent === true || i < q.length - 1);
+    }
+  }
+  // «Удалить задачу» в слое скана: есть такая задача — удаляется, нет — ничего не меняется
+  function applyDeletedTask(p){
+    var res;
+    try{ res = deps.deleteTaskFromQr ? deps.deleteTaskFromQr(p.tab, p.text) : { status: "none" }; }
+    catch(e){ console.error(e); res = { status: "none" }; }
+    if(res && res.status === "deleted") evLog("Задача «" + (res.text || p.text) + "» удалена");
+    return res;
+  }
+  function deleteScannedTask(p){
+    if(standalone){ // окно ярлыка: приложения нет — удаление встаёт в ту же очередь следом за добавлением, приложение выполнит по порядку
+      try{
+        var q = JSON.parse(localStorage.getItem(PENDING_TASKS_KEY) || "[]");
+        if(!Array.isArray(q)) q = [];
+        q.push({ tab: p.tab, tag: p.tag || "", text: p.text, at: Date.now(), del: true });
+        localStorage.setItem(PENDING_TASKS_KEY, JSON.stringify(q.slice(-20)));
+      }catch(e){}
+      endScanSession(true);
+      return;
+    }
+    var res = applyDeletedTask(p);
+    if(res && res.status === "deleted") endScanSession(true); // удалена — слой закрывается; такой задачи нет — ничего не происходит
   }
   // слой: задача «…» добавлена (или перенесена в конец) на вкладку (пиктограмма и название)
   function showTaskResultOverlay(p, res){
@@ -2716,6 +2741,12 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
         tgEl.textContent = "Тег: " + res.tag;
         card.appendChild(tgEl);
       }
+      var delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "workbooks-run-btn scan-task-del-btn";
+      delBtn.textContent = "Удалить задачу";
+      delBtn.addEventListener("click", function(e){ e.stopPropagation(); deleteScannedTask(p); });
+      card.appendChild(delBtn);
     } else {
       var why = res && res.reason;
       head.textContent = why === "badtab" ? "Код ссылается на вкладку, которой нет в этой версии приложения."
