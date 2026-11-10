@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 11.1 (10.11)
+   Версия: 12.0 (10.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -49,7 +49,7 @@
    по целой записи: подходит запись длиной от `REC_DIST_MIN` до `REC_DIST_MAX` от дистанции, время пересчитывается на ровную дистанцию (`totalMs × дистанция / m`). Нет подходящей записи — «ожидается».
    Для экспорта — `WorkoutsTab.exportRecords()` (читаемый раздел `workouts` в data.json, собирает my.js).
    Часть «Цели»: цель — на текущий месяц, три вида (`GOAL_TYPES`): километраж 50/100/200/300/500 км, набор высоты 300/600/1000/2000/3000 м, время тренировок 5/10/20/30/40 ч. Пока цель вида в месяце не достигнута, другую того же вида поставить нельзя; предлагаются только значения больше уже набранного за месяц; после достижения можно поставить следующую. Прогресс — по всем записям месяца (км — `m`, высота — `up`, время — `totalMs`), полоса заполняется сама. Запись цели — `wkgoal:<вид-месяц-значение>` = {type, month, target, setAt[, p50, p75, done]} (метки времени 50 %/75 %/достигнута, едут в облако). Цели прошлых месяцев — список «Прошлые цели».
-   Часть «Награды»: каталог `AWARD_DEFS` (`buildAwardDefs`): первая тренировка, первые 5 / 10 км, первый полумарафон, первый марафон (одна тренировка не короче 98 % дистанции — как в рекордах), общий километраж, число тренировок, серии дней подряд, время и набор высоты за одну тренировку и суммарно (Эверест 8849 м), скорость (5 км быстрее 30/25 мин, 10 км быстрее 60/50 мин, полумарафон быстрее 2 ч, марафон быстрее 4 ч), привычки (ранняя пташка, сова, год в движении), цели месяца (по награде за каждое значение цели, «Первая цель», «Тройная цель»). Условия считаются по записям (`awardCtx`), раз полученная награда хранится — `wkaward:<id>` = {ts (когда заслужена), at}; неполученные показаны бледно с прогрессом (`prog`).
+   Часть «Награды»: каталог `AWARD_DEFS` (`buildAwardDefs`): первая тренировка, первые 5 / 10 км, первый полумарафон, первый марафон (одна тренировка не короче 98 % дистанции — как в рекордах), общий километраж, число тренировок, серии дней подряд, время и набор высоты за одну тренировку и суммарно (Эверест 8849 м), скорость (5 км быстрее 30/25 мин, 10 км быстрее 60/50 мин, полумарафон быстрее 2 ч, марафон быстрее 4 ч), привычки (ранняя пташка, сова, год в движении), цели месяца (по награде за каждое значение цели, «Первая цель», «Тройная цель»). Условия считаются по записям (`awardCtx`), раз полученная награда хранится — `wkaward:<id>` = {ts (когда заслужена), at}; неполученные показаны бледно с прогрессом (`prog`). **Обнуление:** долгое нажатие на полученную награду (`askResetAward`, `bindRowLongPress(row, onPress)`) → плашка с крестиком (`AppConfirmBar.openGrid`) → `resetAward`: запись `wkaward:<id>` заменяется на `{reset: ts}` (не «получена»: `awardsMap` берёт только записи с `ts`), сообщение `a:<id>` стирается; `awardResets`/`awardCtxFor` → `awardCtx(since)` считают только записи с `start ≥ reset` и цели с `done ≥ reset`, прогресс бледной награды тоже с нуля.
    Сообщения: награда, 50 %, 75 % цели и достигнутая цель (`evalProgress` на открытии вкладки, после забора записи, при открытии экрана кубка) складываются в `workoutsNotices_v1` (localStorage, только это устройство) и показываются в области совета дня вместо него (`noticeToShow`, карточка `#wkNoticeCard`; совет дня в это время не выбирается). Видно весь день события; на следующие дни — пока экран кубка не открывали (`markNoticesSeen`), сколько бы дней ни прошло. Нажатие на карточку открывает экран кубка на нужной части. О новой награде сообщение есть всегда; молчат только награды старше 3 дней при самом первом пересчёте на устройстве (`AWARD_BASE_KEY`).
    Хранилище — провайдер от my.js (`setStore`, раздел «ТРЕНИРОВКИ» в my.js): запись лежит в личном `state` под ключом
    `wk:<id>` = {c, t} и едет в облако вместе с остальными данными и в экспорт; удаление — тумбстоун {c:null, t}.
@@ -380,7 +380,7 @@
       ".wk-row .wk-dist{font-weight:bold;font-variant-numeric:tabular-nums;}" +
       ".wk-row .wk-time{color:var(--ink-soft);min-width:64px;text-align:right;font-variant-numeric:tabular-nums;}" +
       ".wk-row .wk-sub{display:block;font-size:.8em;color:var(--ink-soft);}" +
-      ".wk-row.wk-row-del{background:rgba(180,60,60,.12);}" +
+      ".wk-row.wk-row-del,.wk-award.wk-row-del{background:rgba(180,60,60,.12);}" +
       ".wk-row[data-id]{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;}" +
       ".wk-del{margin:0 0 6px auto;display:block;padding:6px 14px;border-radius:10px;border:1px solid var(--danger);background:transparent;color:var(--danger);font:inherit;cursor:pointer;}" +
       ".wk-del.armed{background:var(--danger);color:var(--parchment);}" +
@@ -596,7 +596,7 @@
         render();
       });
     });
-    Array.prototype.forEach.call(c.querySelectorAll(".wk-row[data-id]"), bindRowLongPress);
+    Array.prototype.forEach.call(c.querySelectorAll(".wk-row[data-id]"), function(r){ bindRowLongPress(r); });
     var rec = document.getElementById("wkRecBtn");
     if(rec) rec.addEventListener("click", onRecordTap);
     var lb = document.getElementById("wkLoadBtn");
@@ -684,7 +684,22 @@
       render();
     }, { label: "Удалить запись?", onCancel: clearRowMark });
   }
-  function bindRowLongPress(row){
+  // долгое нажатие на полученную награду → плашка с крестиком «Обнулить»; нажатие мимо — отмена
+  function askResetAward(id, row){
+    var bar = window.AppConfirmBar;
+    if(!bar || !bar.openGrid) return;
+    clearRowMark();
+    row.classList.add("wk-row-del");
+    function guard(e){ e.stopImmediatePropagation(); e.preventDefault(); }
+    document.addEventListener("click", guard, true);
+    setTimeout(function(){ document.removeEventListener("click", guard, true); }, 700);
+    bar.openGrid(row, [{ key: "del", svg: CROSS_SVG, title: "Обнулить" }], function(){
+      clearRowMark();
+      resetAward(id);
+      renderTrophyScreen("awards");
+    }, { label: "Обнулить награду?", onCancel: clearRowMark });
+  }
+  function bindRowLongPress(row, onPress){
     var timer = null, sx = 0, sy = 0, lastTouchAt = 0;
     function cancel(){ if(timer){ clearTimeout(timer); timer = null; } }
     function down(e, isTouch){
@@ -696,7 +711,7 @@
       timer = setTimeout(function(){
         timer = null;
         try{ if(navigator.vibrate) navigator.vibrate(20); }catch(err){}
-        askDeleteRow(row.getAttribute("data-id"), row);
+        (onPress || askDeleteRow)(row.getAttribute("data-id"), row);
       }, ROW_PRESS_MS);
     }
     function move(e){
@@ -1261,15 +1276,42 @@
     if(!STORE || typeof STORE.listAwards !== "function") return map;
     var list = [];
     try{ list = STORE.listAwards() || []; }catch(e){ list = []; }
-    list.forEach(function(a){ if(a && a.id) map[a.id] = a; });
+    list.forEach(function(a){ if(a && a.id && num(a.ts) > 0) map[a.id] = a; }); // запись только с `reset` (награду обнулили) — не «получена»
     return map;
   }
+  // обнулённые награды: id → момент обнуления; считаются только тренировки и цели после него
+  function awardResets(){
+    var map = {};
+    if(!STORE || typeof STORE.listAwards !== "function") return map;
+    var list = [];
+    try{ list = STORE.listAwards() || []; }catch(e){ list = []; }
+    list.forEach(function(a){ if(a && a.id && !(num(a.ts) > 0) && num(a.reset) > 0) map[a.id] = num(a.reset); });
+    return map;
+  }
+  // контекст расчёта для награды с учётом обнуления (одинаковые «с какого момента» считаются один раз)
+  function awardCtxFor(){
+    var resets = awardResets(), cache = {};
+    return function(id){
+      var s = resets[id] || 0;
+      return cache[s] || (cache[s] = awardCtx(s));
+    };
+  }
+  function resetAward(id){
+    if(!STORE || typeof STORE.putAwardMany !== "function") return false;
+    try{ STORE.putAwardMany([{ id: id, c: { reset: Date.now() } }]); }catch(e){ return false; }
+    // иначе сообщение о повторной награде не появится: pushNotice не повторяет уже бывший ключ
+    writeJson(NOTICE_KEY, readNotices().filter(function(x){ return !(x && x.k === "a:" + id); }));
+    lastShape = "";
+    return true;
+  }
 
-  function awardCtx(){
+  function awardCtx(since){
+    since = num(since);
     var asc = recsAsc();
+    if(since > 0) asc = asc.filter(function(r){ return r.start >= since; });
     var runs = asc.filter(function(r){ return num(r.m) > 0; });
     var timed = runs.filter(function(r){ return !r.imp && num(r.totalMs) > 0; });
-    var x = { asc: asc, runs: runs, timed: timed, goals: goalsList(), totalM: 0, maxM: 0, maxMs: 0, maxUp: 0, totalUp: 0,
+    var x = { asc: asc, runs: runs, timed: timed, goals: goalsList().filter(function(g){ return !(since > 0) || (g.done && g.done >= since); }), totalM: 0, maxM: 0, maxMs: 0, maxUp: 0, totalUp: 0,
       maxStreak: 0, streakReach: {}, bestRace: {}, early: [], owl: [] };
     var dayLast = {};
     runs.forEach(function(r){
@@ -1444,12 +1486,12 @@
   // пересчёт наград: новые записываются одной пачкой и о каждой новой есть сообщение (непрочитанные ждут, пока открывают экран кубка);
   // исключение — самый первый пересчёт на устройстве: там молчат награды старше NOTICE_RECENT_MS (старая история)
   function evalAwards(){
-    var stored = awardsMap(), ctx = awardCtx(), now = Date.now(), items = [];
+    var stored = awardsMap(), ctxFor = awardCtxFor(), now = Date.now(), items = [];
     var base = false;
     try{ base = localStorage.getItem(AWARD_BASE_KEY) === "1"; }catch(e){ base = true; }
     awardDefs().forEach(function(def){
       if(stored[def.id]) return;
-      var ts = def.calc(ctx);
+      var ts = def.calc(ctxFor(def.id));
       if(!(ts > 0)) return;
       items.push({ id: def.id, c: { ts: ts, at: now } });
       if(def.noNotice || (!base && ts < now - NOTICE_RECENT_MS)) return;
@@ -1466,7 +1508,7 @@
   }
 
   function awardsBodyHtml(){
-    var stored = awardsMap(), ctx = awardCtx(), defs = awardDefs();
+    var stored = awardsMap(), ctxFor = awardCtxFor(), defs = awardDefs();
     var got = defs.filter(function(d){ return !!stored[d.id]; }).length;
     var html = '<div class="wk-tip-note" style="margin:0 0 2px;">Получено наград: ' + got + ' из ' + defs.length + '.</div>';
     AWARD_CATS.forEach(function(cat){
@@ -1475,8 +1517,8 @@
       html += '<div class="wk-rec-cat">' + esc(cat) + '</div><div class="wk-card" style="padding:4px 12px;">';
       part.forEach(function(d){
         var st = stored[d.id];
-        var meta = st ? "Получена " + fmtDate(st.ts) : (d.prog ? d.prog(ctx) : "");
-        html += '<div class="wk-rec wk-award' + (st ? " on" : "") + '"><span class="wk-medal">' + MEDAL_ICON_SVG + '</span>' +
+        var meta = st ? "Получена " + fmtDate(st.ts) : (d.prog ? d.prog(ctxFor(d.id)) : "");
+        html += '<div class="wk-rec wk-award' + (st ? " on" : "") + '"' + (st ? ' data-aid="' + esc(d.id) + '"' : "") + '><span class="wk-medal">' + MEDAL_ICON_SVG + '</span>' +
           '<span class="wk-rec-name">' + esc(d.title) + '<span class="wk-sub">' + esc(d.text) + '</span>' +
           (meta ? '<span class="wk-sub wk-award-meta">' + esc(meta) + '</span>' : "") + '</span></div>';
       });
@@ -1581,6 +1623,11 @@
         renderTrophyScreen("goals");
       });
     });
+    if(tab === "awards"){
+      Array.prototype.forEach.call(c.querySelectorAll(".wk-award[data-aid]"), function(r){
+        bindRowLongPress(r, function(){ askResetAward(r.getAttribute("data-aid"), r); });
+      });
+    }
     var ab = document.getElementById("wkTrophyInfoBtn");
     if(ab) ab.addEventListener("click", function(){
       // шаг «назад» вернёт на ту же часть кубка
@@ -1618,8 +1665,9 @@
       "Что засчитывается. Награды считаются по записанным тренировкам с километрами. Строка «только высота» (метры, внесённые в день без тренировки) тренировкой не считается: в награды «за одну тренировку» по высоте она не входит, но в суммарный набор высоты метры идут. Записи, загруженные из CSV стороннего трекера, учитываются в километрах, числе тренировок, сериях и привычках; в наградах за время и скорость — нет, потому что у них нет времени.",
       "Дни в сериях. День — календарный, по дате начала тренировки (местное время). Несколько тренировок за день — один день серии.",
       "Дата награды. Это день, когда условие было выполнено, а не день, когда вы открыли экран. Старые тренировки засчитываются задним числом — в том числе после импорта.",
-      "Награда не пропадает. Раз полученная награда остаётся, даже если тренировку потом удалили. Награды синхронизируются между вашими устройствами и входят в экспорт личных данных.",
+      "Награда не пропадает сама. Раз полученная награда остаётся, даже если тренировку потом удалили. Награды синхронизируются между вашими устройствами и входят в экспорт личных данных.",
       "Когда пересчитываются. При открытии вкладки «Тренировки», после новой записи и при открытии экрана кубка.",
+      "Обнуление. Долгое нажатие на полученную награду открывает плашку с крестиком (нажатие мимо — отмена). После крестика награда пропадает, и её нужно заслужить заново с нуля: считаются только тренировки, начатые после обнуления (для наград за цели месяца — цели, достигнутые после обнуления; сами цели не меняются). Обнуление синхронизируется между устройствами; из экспорта обнулённая награда исчезает. Ещё не полученные (бледные) награды не обнуляются.",
       "Бледные и яркие. Яркая — получена (с датой), бледная — ещё нет. Под названием бледной награды — текущий прогресс; у наград без прогресса (например, «Первая цель») строки нет.",
       "Сообщения. О каждой новой награде на вкладке «Тренировки» появляется карточка вместо совета дня: весь день события, а дальше — пока вы не откроете экран кубка. Нажатие на карточку открывает награды. Исключения: о наградах за цели месяца сообщает карточка самой цели; при самом первом пересчёте на устройстве молчат награды старше 3 дней. Сообщения хранятся только на этом устройстве."
     ];
