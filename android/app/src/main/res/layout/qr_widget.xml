@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Версия: 1.0 (11.11)
+     Виджет «Стопка QR-карточек» 2×2. StackView сам рисует «стопку»: передняя карточка занимает 90 % ширины и высоты и стоит в правом
+     верхнем углу, следующие выглядывают снизу слева. Чтобы стопки не было видно, StackView увеличен в 1/0,9 раза вокруг центра и сдвинут
+     на 5,56 % стороны виджета (≈10 dp для 2×2 на Poco X6 Pro, сторона ≈178 dp) влево и вниз: передняя карточка ложится ровно на виджет,
+     а выглядывающие края уходят за границы и обрезаются родителем. Подгонка по устройству: translationX/translationY. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clipChildren="true"
+    android:clipToPadding="true">
+
+    <StackView
+        android:id="@+id/qr_stack"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:loopViews="true"
+        android:scaleX="1.1111"
+        android:scaleY="1.1111"
+        android:translationX="-10dp"
+        android:translationY="10dp" />
+
+    <TextView
+        android:id="@+id/qr_empty"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/qr_widget_empty_bg"
+        android:gravity="center"
+        android:padding="12dp"
+        android:textColor="#FFFFFF"
+        android:textSize="12sp" />
+
+    <ImageView
+        android:id="@+id/qr_dots"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|center_vertical"
+        android:layout_marginEnd="5dp"
+        android:layout_marginRight="5dp"
+        android:contentDescription="@null"
+        android:scaleType="center"
+        android:visibility="gone" />
+</FrameLayout>

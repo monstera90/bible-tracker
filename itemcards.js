@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 41.0 (11.11)
+   Версия: 42.0 (11.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -400,6 +400,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   }
   function persistCards(){
     try{ localStorage.setItem(CARDS_KEY, JSON.stringify(cardsCache || [])); }catch(e){}
+    try{ if(window.WidgetsTab && window.WidgetsTab.scheduleSync) window.WidgetsTab.scheduleSync(); }catch(e){} // лица карточек в виджетах рабочего стола
   }
   // сохранить и поставить сверку с облаком в очередь (в scan.html облака нет — сверка при следующем входе во вкладку)
   function saveCards(){
@@ -3196,6 +3197,56 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     renderGrid();
   }
 
+  // Окно ярлыка открыто нажатием на карточку виджета рабочего стола: код карточки обрабатывается так, как если бы его только что отсканировали
+  function runScannedCode(text){
+    reloadCards();
+    handleScanned(String(text || ""));
+  }
+
+  // ---------- для «Конструктора виджетов» (widgets.js) ----------
+  // Лицо карточки для виджета: цвет, название, крупный текст (время), малый текст, значок (svg белым). Карточка «Напоминание» кода не имеет — в виджет не годится.
+  function widgetFace(c){
+    var f = { id: c.id, type: c.type, title: cardTitle(c), big: "", sub: "", svg: "", color: effColor(c), code: qrTextFor(c), live: [], hidden: !!c.hidden, fav: !!c.fav };
+    f.shade = cardShade(f.color);
+    if(c.type === "timer"){
+      f.big = formatTimer(c.seconds | 0);
+      var tt = timerQrTitle(c.title);
+      f.live.push({ k: "timer", id: timerCodeId(c.seconds | 0, tt, !!c.noIsland) }); // запущенный по коду
+      f.live.push({ k: "timer", id: runId(c) });                                       // запущенный кнопкой карточки
+    } else if(c.type === "alarm"){
+      f.big = alarmClock(c);
+    } else if(c.type === "weather"){
+      f.svg = iconSvg(c.icon || "weather");
+    } else if(c.type === "climb"){
+      f.svg = iconSvg(c.icon || "climb"); f.sub = "+ " + climbMeters(c) + " м";
+    } else if(c.type === "combo"){
+      var acts = comboActs(c);
+      f.svg = iconSvg("combo"); f.sub = comboCountText(acts.length);
+      acts.forEach(function(a){
+        if(a.k === "timer") f.live.push({ k: "timer", id: timerCodeId(a.sec, timerQrTitle(a.name), false) });
+        if(a.k === "workout") f.live.push({ k: "workout", id: "" });
+      });
+    } else if(c.type === "habit"){
+      f.svg = iconSvg("habit");
+    } else if(c.type === "task"){
+      f.svg = taskTabSvg(c.icon); if(taskTag(c.tag)) f.sub = "#" + taskTag(c.tag);
+    } else if(c.type === "datenote"){
+      f.svg = iconSvg("datepaper");
+    } else if(c.type === "reminder"){
+      f.svg = iconSvg("reminder");
+    } else {
+      f.svg = iconSvg(c.icon); f.sub = isoToRu(c.date);
+    }
+    return f;
+  }
+  function widgetFilterList(){
+    return FILTERS.filter(function(f){ return f.key !== "remind"; }).map(function(f){ return { key: f.key, label: f.label }; });
+  }
+  function widgetCardList(filterKey){
+    reloadCards();
+    return loadCards().filter(function(c){ return c.type !== "remind" && cardMatchesFilter(c, filterKey || "all"); }).map(widgetFace);
+  }
+
   // страница scan.html: сразу сканер, результат — на прозрачном фоне поверх рабочего стола
   function startStandaloneScan(){
     reloadCards();
@@ -3947,6 +3998,10 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     drainPendingTasks: drainPendingTasks,
     drainPendingCombos: drainPendingCombos,
     startStandaloneScan: startStandaloneScan,
+    runScannedCode: runScannedCode,
+    widgetCards: widgetCardList,
+    widgetFilters: widgetFilterList,
+    widgetFace: function(id){ reloadCards(); var c = findCard(id); return (c && c.type !== "remind") ? widgetFace(c) : null; },
     getCards: function(){ return loadCards().slice(); },
     qrTextForId: function(id){ return QR_PREFIX + id; }
   };

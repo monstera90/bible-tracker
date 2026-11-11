@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.0 (31.10)
+// Версия: 8.0 (11.11)
 // Версия: 6.0 (26.10) — мост ScanBridge: musicHeadphones (подключены ли наушники; комбо с галочкой «Наушники обязательны»).
 // Версия: 5.0 (26.10) — мост ScanBridge: musicPlayTrack / musicPlayFolder (QR «Комбинированный» из окна ярлыка включает трек или папку через MusicPlayer; приложение не открывается).
 // Версия: 4.0 (24.10) — мост ScanBridge: setAlarm / cancelAlarm / getAlarms (скан кода будильника в окне ярлыка заводит будильник CardAlarms).
@@ -52,6 +52,8 @@ class ScanActivity : ComponentActivity() {
     companion object {
         private val CARD_ID_RE = Regex("^[A-Za-z0-9]{4,32}$")
         const val SCAN_URL = WebAssetServer.ORIGIN + "/scan.html"
+        /** Нажатие на карточку виджета «Стопка QR-карточек»: extra `code` — текст QR, `tok` — ключ установки (QrWidgets.token). */
+        const val ACTION_SCAN_CODE = "com.app.lifetracker.SCAN_CODE"
     }
 
     private lateinit var server: WebAssetServer
@@ -59,6 +61,16 @@ class ScanActivity : ComponentActivity() {
     private lateinit var webView: WebView
 
     private var pendingPermission: PermissionRequest? = null
+
+    /** Код из виджета: страница забирает его один раз (`takeInitialCode`) и ведёт себя, как после сканирования этого QR. */
+    private var initialCode: String = ""
+
+    private fun readCode(i: Intent?) {
+        initialCode = ""
+        if (i != null && i.action == ACTION_SCAN_CODE && QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
+            initialCode = (i.getStringExtra("code") ?: "").take(2000)
+        }
+    }
 
     /** true, пока висит системный запрос разрешения камеры: окно не закрываем при уходе на передний план диалога. */
     private var permissionDialogOpen = false
@@ -119,12 +131,14 @@ class ScanActivity : ComponentActivity() {
             }
         })
 
+        readCode(intent)
         webView.loadUrl(SCAN_URL)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // Ярлык нажат повторно, пока окно открыто: перезапускаем сканер.
+        // Ярлык нажат повторно, пока окно открыто: перезапускаем сканер (или показываем код карточки из виджета).
+        readCode(intent)
         webView.loadUrl(SCAN_URL)
     }
 
@@ -352,6 +366,14 @@ class ScanActivity : ComponentActivity() {
         /** Снимок таймеров (тот же JSON, что у NativeBridge.getCardTimers) — показать оставшееся время на карточке. */
         @JavascriptInterface
         fun getTimers(): String = CardTimers.listJson(applicationContext)
+
+        /** Код QR, с которым окно открыто из виджета (один раз; пусто — обычный сканер). */
+        @JavascriptInterface
+        fun takeInitialCode(): String {
+            val c = initialCode
+            initialCode = ""
+            return c
+        }
 
         @JavascriptInterface
         fun close() {

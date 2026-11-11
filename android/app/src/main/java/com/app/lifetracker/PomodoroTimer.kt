@@ -277,6 +277,7 @@ object PomodoroTimer {
         cycle = 1
         beginWork(ctx, System.currentTimeMillis())
         PomodoroService.refresh(ctx)
+        QrWidgets.onActivityChanged(ctx)
     }
 
     /** Конец фазы (будильник или тик службы): работа → перерыв, перерыв → ожидание. Опоздавшие переходы догоняются по порядку. */
@@ -398,6 +399,7 @@ object PomodoroTimer {
         save(ctx)
         stopVibration(ctx)
         PomodoroService.stop(ctx)
+        QrWidgets.onActivityChanged(ctx)
     }
 
     /** После перезагрузки/смены времени: будильник заново, опоздавшие переходы догоняются. */

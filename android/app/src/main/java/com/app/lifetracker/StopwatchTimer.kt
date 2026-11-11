@@ -35,6 +35,7 @@ object StopwatchTimer {
             .putBoolean(KEY_ACTIVE, true).putBoolean(KEY_RUNNING, true)
             .putLong(KEY_ACC, 0L).putLong(KEY_RUN_START, System.currentTimeMillis())
             .apply()
+        QrWidgets.onActivityChanged(ctx)
         return true
     }
 
@@ -55,6 +56,7 @@ object StopwatchTimer {
     @Synchronized
     fun stop(ctx: Context) {
         sp(ctx).edit().clear().apply()
+        QrWidgets.onActivityChanged(ctx)
     }
 
     @Synchronized

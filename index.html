@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
-     Версия: 39.0 (07.11)
+     Версия: 40.0 (11.11)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
      Версия: 11.0 (26.10) — структурная правка: кнопка вкладки «Трекер экранов» `settingsTabScreenTimeBtn` (самый верхний язычок стека набора 1, над «События») и подключён `screentime.js`.
      Версия: 10.0 (25.10) — структурная правка: кнопка вкладки «Календарь» `settingsTabCalendarBtn` (самый нижний язычок стека набора 1, под «Задачи в работе») и подключён `calendar.js`.
@@ -468,6 +468,16 @@ window.addEventListener("error", function(e){
           <path d="M6 21h12"></path>
           <path d="M7 3c0 4 3 5 5 6-2 1-5 2-5 6"></path>
           <path d="M17 3c0 4-3 5-5 6 2 1 5 2 5 6"></path>
+        </svg>
+      </button>
+      <!-- «Конструктор виджетов» (widgets.js): вкладка режима колеса между «Дополнительными возможностями» (alt4, создаётся из JS сразу после Waiting) и «Событиями».
+           Живёт только в режиме колеса. -->
+      <button class="settings-tab" id="settingsTabWidgetsBtn" title="Конструктор виджетов" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="7" y="9" width="13" height="12" rx="2.5"></rect>
+          <path d="M5 6.5h11"></path>
+          <path d="M3.5 3.5h8"></path>
+          <path d="M13.5 15h3M15 13.5v3"></path>
         </svg>
       </button>
       <!-- Центр событий (история): колокольчик. Живёт ТОЛЬКО в режиме колеса — первая свободная вкладка бокового ряда сразу над «Дополнительными возможностями» (alt4);
@@ -1014,6 +1024,7 @@ window.addEventListener("error", function(e){
 <script src="cardscan.js"></script>
 <script src="cardpdf.js"></script>
 <script src="itemcards.js"></script>
+<script src="widgets.js"></script>
 <script src="claudetab.js"></script>
 <script src="usertabs.js"></script>
 <script src="tabreorder.js"></script>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Версия: 1.0 (11.11) -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:resizeMode="none"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/qr_widget"
+    android:previewImage="@mipmap/ic_launcher_app"
+    android:configure="com.app.lifetracker.QrWidgetConfigActivity"
+    android:widgetCategory="home_screen" />

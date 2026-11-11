@@ -137,6 +137,9 @@ object CardTimers {
         arr.toString()
     }
 
+    /** Есть ли таймер с таким id (идёт или на паузе; сработавший и отменённый убираются). Для виджета «по релевантности». */
+    fun hasId(ctx: Context, id: String): Boolean = synchronized(LOCK) { load(ctx).containsKey(id) }
+
     /** Сколько таймер уже насчитал (без времени на паузе); у дошедшего до конца — всё заданное время. */
     private fun elapsedMs(t: Timer, now: Long): Long {
         val left = if (t.running) (t.endAt - now) else t.remainingMs
@@ -158,6 +161,7 @@ object CardTimers {
         silence(ctx, id) // новый запуск гасит вибрацию и уведомление «Таймер закончился»
         postRunning(ctx, t)
         if (!hidden) startTicker(ctx)
+        QrWidgets.onActivityChanged(ctx)
         true
     }
 
@@ -206,6 +210,7 @@ object CardTimers {
             cancelAlarm(ctx, id)
             cancelRunning(ctx, id)
             silence(ctx, id) // «Стоп» гасит и вибрацию закончившегося таймера, и уведомление «Таймер закончился»
+            QrWidgets.onActivityChanged(ctx)
         }
         if (propagate) ComboGroup.onTimerStopped(ctx, id) else ComboGroup.timerGone(ctx, id)
     }
@@ -260,6 +265,7 @@ object CardTimers {
         cancelRunning(ctx, id)
         vibrate(ctx)
         postDone(ctx, t)
+        QrWidgets.onActivityChanged(ctx)
     }
 
     /** После перезагрузки, смены времени и обновления приложения: будильники и уведомления — заново. */

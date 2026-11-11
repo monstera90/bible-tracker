@@ -50,7 +50,10 @@ class WorkoutService : Service() {
         private const val PALE_RED = 0xFFE57373.toInt()
 
         /** Запустить службу (после [WorkoutTracker.begin]) или перестроить её уведомление. */
-        fun refresh(ctx: Context) = send(ctx, ACTION_REFRESH)
+        fun refresh(ctx: Context) {
+            send(ctx, ACTION_REFRESH)
+            QrWidgets.onActivityChanged(ctx)
+        }
 
         fun hasLocationPermission(ctx: Context): Boolean =
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED

@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 23.0 (10.11)
+// Версия: 24.0 (11.11)
 // Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
@@ -42,6 +42,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 31: виджеты рабочего стола «Стопка QR-карточек» (widgetsSync / widgetsState / widgetPin; QrWidgets).
          * 30: `pasteText()` — текст из буфера обмена (кнопка «Вставить» кругового меню выделения, ctxmenu.js).
          * 29: `musicDelete(folderId, trackId)` — удалить трек с устройства (вкладка «Музыка»); `allFilesState()` / `allFilesRequest()` — доступ ко всем файлам (AllFilesAccess).
          * 28: `workoutStartKind(kind)` — запись тренировки с видом "run" | "walk" | "bike" (у велосипеда выше предел скорости точки GPS; в записи поле `type`).
@@ -60,7 +61,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 30
+        const val BRIDGE_VERSION = 31
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -1098,5 +1099,32 @@ class NativeBridge(private val activity: MainActivity) {
     fun islandOpenOverlaySettings() {
         if (!activity.pageTrusted) return
         activity.runOnUiThread { InAppIsland.openOverlaySettings(activity.applicationContext) }
+    }
+
+    // ---------- виджеты «Стопка QR-карточек» (мост ≥31) ----------
+
+    /** Страница присылает все виджеты конструктора и картинки лиц карточек (widgets.js). true — принято. */
+    @JavascriptInterface
+    fun widgetsSync(json: String?): Boolean {
+        if (!activity.pageTrusted) return false
+        return QrWidgets.sync(activity.applicationContext, json)
+    }
+
+    /** {"sdk","canPin","placed":{id виджета конструктора: число экземпляров на рабочем столе}}. */
+    @JavascriptInterface
+    fun widgetsState(): String {
+        if (!activity.pageTrusted) return "{}"
+        return try {
+            QrWidgets.stateJson(activity.applicationContext)
+        } catch (e: Exception) {
+            "{}"
+        }
+    }
+
+    /** Просит рабочий стол поставить виджет: "requested" | "unsupported" | "missing" | "failed". */
+    @JavascriptInterface
+    fun widgetPin(widgetId: String?): String {
+        if (!activity.pageTrusted || widgetId.isNullOrEmpty()) return "failed"
+        return QrWidgets.requestPin(activity.applicationContext, widgetId)
     }
 }
