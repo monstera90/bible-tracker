@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.39.214";
+const APP_VERSION = "v0.39.215";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -184,6 +184,7 @@ const ASSETS = [
   "./mdeditor.js",
   "./codemirror.bundle.js",
   "./search.js",
+  "./ctxmenu.js",
   "./notifications.js",
   "./flibusta.js",
   "./DejaVuSans.ttf",

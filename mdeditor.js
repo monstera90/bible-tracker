@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 22.2 (10.11)
+   Версия: 23.0 (10.11)
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
@@ -7041,6 +7041,26 @@ window.initMdEditorModule = function(deps){
     retryImageCleanup: maybeRunImageCleanup,
     // TASK_UNIFIED_SYNC.md, шаг 5, находка 3 (верификация 23.09) — вызывается
     // ИЗ my.js, joinWithCode, см. resetLocalNotesForAccountSwitch выше.
-    resetLocalNotesForAccountSwitch: resetLocalNotesForAccountSwitch
+    resetLocalNotesForAccountSwitch: resetLocalNotesForAccountSwitch,
+    // Круговое меню выделения (ctxmenu.js, регистрирует my.js): ctxInfo(el) — выделение открытого редактора CodeMirror
+    // ({from,to,text}) или null, если el не в нём; ctxReplace(from,to,text) — заменить диапазон текстом ("" — вырезать).
+    ctxInfo: function(el){
+      if(!cmView || !el || !cmView.dom.contains(el)) return null;
+      var m = cmView.state.selection.main;
+      return { from: m.from, to: m.to, text: cmView.state.sliceDoc(m.from, m.to) };
+    },
+    ctxReplace: function(from, to, text){
+      if(!cmView) return false;
+      var len = cmView.state.doc.length;
+      from = Math.max(0, Math.min(len, from));
+      to = Math.max(from, Math.min(len, to));
+      cmView.dispatch({
+        changes: { from: from, to: to, insert: text },
+        selection: { anchor: from + text.length },
+        scrollIntoView: true
+      });
+      cmView.focus();
+      return true;
+    }
   };
 };

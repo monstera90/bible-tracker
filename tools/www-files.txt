@@ -1,5 +1,5 @@
 # Белый список файлов веб-части, которые попадают в APK (assets/www/) и в веб-бандл.
-# Версия: 5.0 (31.10)
+# Версия: 6.0 (10.11)
 # Пути от корня репозитория. Строки с # и пустые игнорируются.
 # Новый файл веб-части (подключённый в index.html или попавший в ASSETS в sw.js) добавляется сюда же:
 # tools/android_prepare.py остановит сборку с понятным сообщением, если файл забыли.
@@ -60,6 +60,7 @@ scan.html
 mdeditor.js
 codemirror.bundle.js
 search.js
+ctxmenu.js
 notifications.js
 eventlog.js
 screentime.js

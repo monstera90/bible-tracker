@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 144.1 (10.11)
+   Версия: 145.0 (10.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -7434,6 +7434,13 @@
     fileExceedsSyncSizeLimit: fileExceedsSyncSizeLimit,
     getFileSyncSizeWarning: function(){ return FILE_SYNC_SIZE_WARNING; }
   });
+  // Круговое меню выделения (ctxmenu.js): мост к CodeMirror заметок и «Переслать» в задачи (sendTextToTaskList).
+  if(window.LTCtx && window.LTCtx.init){
+    window.LTCtx.init({
+      cm: { info: MdEditor.ctxInfo, replace: MdEditor.ctxReplace },
+      sendToTask: function(text, opts){ sendTextToTaskList(text, opts); }
+    });
+  }
   var renderSettingsTabMdEditor = MdEditor.renderSettingsTabMdEditor;
   var renderSettingsTabMdBookmarks = MdEditor.renderSettingsTabMdBookmarks;
   var renderSettingsTabForgottenNotes = MdEditor.renderSettingsTabForgottenNotes;
@@ -8221,6 +8228,8 @@
         var N = window.LifeTrackerNative;
         if(ok && N && typeof N.showToast !== "undefined") N.showToast("Скопировано");
       } catch(e){}
+      // история «последние 10 скопированных в приложении» кругового меню (ctxmenu.js)
+      try { if(ok && window.LTClip) window.LTClip.push(text); } catch(e){}
       return ok;
     }
     try {
@@ -8367,6 +8376,7 @@
         "commentsOrderAsc_v1": "одноразовая миграция",
         "bibleSwInstallReportShownAt_v1": "технический отчёт об установке",
         "bibleProjectPickerResume_v1": "решение заказчика (Q16 C): временная отметка экрана",
+        "ltClipHistory_v1": "история скопированных в приложении фрагментов (круговое меню, ctxmenu.js): только на этом устройстве",
         "itemCardTimers_v1": "запасной таймер карточек в браузере (в приложении таймеры ведёт оболочка): момент окончания, у каждого устройства свой",
         "itemCardsSync_v1": "служебное: какие карточки уже ушли в облако и какие удалены здесь (синхронизация карточек, itemcards.js)",
         "bibleProjectPickerScrollMap_v1": "решение заказчика (Q16 C): мала польза",
@@ -24731,6 +24741,59 @@
         var newTab = btn.getAttribute("data-tab");
         createTaskWithText(newTab, text);
         closeModal();
+      });
+    });
+  }
+
+  // «Переслать» кругового меню (ctxmenu.js): окно выбора списка задач, выбранный текст становится новой задачей там.
+  // opts.remove — убрать текст из источника (правка в заметке/задаче; у книги и другого «только для чтения» текста его нет).
+  // Порядок: сначала remove (источник ещё на месте), потом создание задачи и перерисовка вкладки; общая задача в режиме
+  // «только чтение» — отказ ДО удаления. Нажатия в окне не отнимают фокус у редактируемой строки (mousedown).
+  function sendTextToTaskList(text, opts){
+    opts = opts || {};
+    text = String(text == null ? "" : text).replace(/\r\n?/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+    if(!text) return;
+    function say(msg){ try{ if(window.LTCtx) window.LTCtx.toast(msg); }catch(e){} }
+    var buttons = TASK_MOVE_TARGET_TABS.map(function(key){
+      return '<button type="button" data-tab="' + key + '">' +
+        TASK_MOVE_ICON_SVG(key) + '<span>' + escapeHtml(TASK_TAB_TITLES[key]) + '</span></button>';
+    }).join("");
+    modalBox.innerHTML =
+      modalHeader("Переслать в список задач") +
+      '<div class="task-picker-grid">' + buttons + '</div>';
+    bindClose();
+    modalOverlay.classList.add("open");
+    Array.prototype.forEach.call(modalBox.querySelectorAll("[data-tab]"), function(btn){
+      btn.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      btn.addEventListener("click", function(){
+        var key = btn.getAttribute("data-tab");
+        var groupOn = key === "jointtasks" && isGroupTasksActive();
+        if(groupOn && isGroupTasksReadOnly()){
+          closeModal();
+          say("Общие задачи сейчас только для чтения");
+          return;
+        }
+        closeModal();
+        if(typeof opts.remove === "function"){
+          try{ opts.remove(); }catch(eRm){}
+          flushPendingTaskEdits(); // правка исходной задачи (вырезанный кусок) сразу попадает в хранилище
+        }
+        if(groupOn){
+          var gid = genGroupTaskId();
+          saveGroupTaskData(gid, {text: text, tab: "jointtasks", checked: false, checkedAt: null,
+            completionKey: null, nextForProjectId: null, flag: null, inWork: false,
+            createdBy: getDeviceId(), completedBy: null, tag: null});
+          if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
+        }else{
+          createTaskWithText(key, text);
+        }
+        // открытая вкладка задач сразу показывает новую задачу (кроме момента, когда в ней идёт редактирование строки)
+        try{
+          var ae = document.activeElement;
+          var editing = !!(ae && ae.classList && ae.classList.contains("task-editable"));
+          if(!editing && !activeProjectPickerRerender && settingsModalOverlay && settingsModalOverlay.classList.contains("open") && TASK_TAB_IDS.hasOwnProperty(currentSettingsTab)) renderSettingsTabTask(currentSettingsTab);
+        }catch(eR){}
+        say("Задача создана: " + TASK_TAB_TITLES[key]);
       });
     });
   }

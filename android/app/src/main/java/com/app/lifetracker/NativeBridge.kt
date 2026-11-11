@@ -42,6 +42,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 30: `pasteText()` — текст из буфера обмена (кнопка «Вставить» кругового меню выделения, ctxmenu.js).
          * 29: `musicDelete(folderId, trackId)` — удалить трек с устройства (вкладка «Музыка»); `allFilesState()` / `allFilesRequest()` — доступ ко всем файлам (AllFilesAccess).
          * 28: `workoutStartKind(kind)` — запись тренировки с видом "run" | "walk" | "bike" (у велосипеда выше предел скорости точки GPS; в записи поле `type`).
          * 27: вкладка «Система»: системный плавающий остров (islandGet / islandSetSystem / islandOpenOverlaySettings; IslandSettings).
@@ -59,7 +60,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 29
+        const val BRIDGE_VERSION = 30
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -427,6 +428,28 @@ class NativeBridge(private val activity: MainActivity) {
         }
         latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
         return ok
+    }
+
+    /** Текст из буфера обмена (кнопка «Вставить» кругового меню выделения). Пустая строка — буфер пуст или в нём не текст. */
+    @JavascriptInterface
+    fun pasteText(): String {
+        if (!activity.pageTrusted) return ""
+        var out = ""
+        val latch = java.util.concurrent.CountDownLatch(1)
+        activity.runOnUiThread {
+            try {
+                val cm = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val clip = cm.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    out = clip.getItemAt(0).coerceToText(activity).toString()
+                }
+            } catch (e: Exception) {
+                out = ""
+            }
+            latch.countDown()
+        }
+        latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+        return out
     }
 
     // ===== Ярлык «Создать новую задачу» (QuickTaskActivity) =====
