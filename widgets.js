@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 1.0 (11.11)
+   Версия: 1.1 (11.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -236,13 +236,16 @@
         ".wg-slot{position:relative;margin:6px 6px 14px;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
         ".wg-slot-empty{width:96px;height:96px;box-sizing:border-box;border:2px dashed var(--groove-shadow);border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--ink-soft);}" +
         ".wg-slot-empty svg{width:34px;height:34px;}" +
-        ".wg-card{position:relative;width:96px;height:96px;font-size:96px;border-radius:.12em;color:#fff;overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:.05em .05em;}" +
+        ".wg-card{position:relative;width:96px;height:96px;border-radius:12px;color:#fff;overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:5px;}" +
+        ".wg-card > *{flex:0 0 auto;max-width:100%;box-sizing:border-box;}" +
         ".wg-card.used{opacity:.35;}" +
-        ".wg-card-ico{width:.27em;height:.27em;margin-bottom:.03em;}" +
-        ".wg-card-ico svg{width:100%;height:100%;}" +
-        ".wg-card-title{max-width:100%;font-family:\"Palatino Linotype\",Georgia,serif;font-size:.12em;line-height:1.25;font-weight:700;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}" +
-        ".wg-card-big{font-size:.19em;line-height:1.1;font-weight:700;white-space:nowrap;margin-top:.03em;}" +
-        ".wg-card-sub{font-size:.09em;line-height:1.2;margin-top:.03em;}" +
+        ".wg-card-ico{width:26px;height:26px;margin-bottom:3px;}" +
+        ".wg-card-ico svg{display:block;width:26px;height:26px;}" +
+        ".wg-card-title{font-family:\"Palatino Linotype\",Georgia,serif;font-size:11.5px;line-height:1.25;font-weight:700;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:normal;}" +
+        ".wg-card-title.t-s{font-size:10px;}" +
+        ".wg-card-title.t-xs{font-size:8.5px;}" +
+        ".wg-card-big{font-size:18px;line-height:1.1;font-weight:700;white-space:nowrap;margin-top:3px;}" +
+        ".wg-card-sub{font-size:8.6px;line-height:1.2;margin-top:3px;}" +
         ".wg-badge{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:var(--wood);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;}" +
         ".wg-check{display:flex;align-items:center;margin:10px 2px;font-size:15px;color:var(--ink);}" +
         ".wg-check input[type=checkbox]{width:22px;height:22px;margin:0 10px 0 0;flex:0 0 auto;}" +
@@ -263,10 +266,15 @@
     }
 
     // ---------- разметка ----------
+    function titleSize(t){
+      var m = 0; String(t).split(/\s+/).forEach(function(w){ if(w.length > m) m = w.length; });
+      var base = (arguments[1] === "timer" || arguments[1] === "alarm") ? 1 : 0;
+      return (m >= 11) ? " t-xs" : (m >= 8 + base ? " t-s" : "");
+    }
     function faceHtml(f, cls, extra){
       return '<div class="wg-card' + (cls ? " " + cls : "") + '" style="background:' + f.color + ';box-shadow:0 4px 0 ' + f.shade + ';">' +
         (f.svg ? '<div class="wg-card-ico">' + String(f.svg).replace(/currentColor/g, "#ffffff") + '</div>' : '') +
-        (f.title ? '<div class="wg-card-title">' + esc(f.title) + '</div>' : '') +
+        (f.title ? '<div class="wg-card-title' + titleSize(f.title, f.type) + '">' + esc(f.title) + '</div>' : '') +
         (f.big ? '<div class="wg-card-big">' + esc(f.big) + '</div>' : '') +
         (f.sub ? '<div class="wg-card-sub">' + esc(f.sub) + '</div>' : '') +
         (extra || '') + '</div>';
