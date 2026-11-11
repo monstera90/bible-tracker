@@ -1,6 +1,6 @@
 /* ===========================================================================
    ctxmenu.js
-   Версия: 2.0 (11.11)
+   Версия: 2.1 (11.11)
    Круговое контекстное меню выделения текста и история скопированных в приложении фрагментов.
    Системное меню выделения в APK скрыто (SelectionMenuWebView.kt), поэтому «Копировать / Вставить / Вырезать» и
    «Переслать в задачу» — здесь. Круг из пяти секторов-пиктограмм: копировать, вставить, вырезать, переслать (стрелка
@@ -53,7 +53,8 @@
   var SIZE = 156;          // внутренняя сетка SVG (viewBox)
   var DISP = 116;          // сторона круга на экране, px
   var SHOW_DELAY = 380;    // мс покоя выделения до показа круга (ручки выделения двигаются без событий касания)
-  var LONG_PRESS_MS = 650; // долгое нажатие в поле ввода без выделения → круг с «Вставить»
+  var LONG_PRESS_MS = 400; // запасной таймер долгого нажатия в поле ввода (основной путь — событие contextmenu в момент вибрации)
+  var NEAR_RIGHT = 56;     // насколько правее поля ввода (px) нажатие ещё считается нажатием «рядом с текстом»
   var S = {
     hooks: {},
     ctx: null,       // {kind:"cm"|"ce"|"field"|"ro", text, rect, ...} — что выделено, пока открыто меню
@@ -63,7 +64,9 @@
     armT: 0,
     dismissed: null, // «вид:текст» выделения, с которым круг уже закрыли действием — не показывать снова, пока выделение то же
     touchAt: 0,
-    lpT: 0, lpX: 0, lpY: 0
+    lpT: 0, lpX: 0, lpY: 0,
+    lpAt: 0,         // когда начато нажатие, подходящее под долгое
+    lpGuard: 0       // до этого момента (мс) смена выделения не прячет круг долгого нажатия
   };
 
   // ===================== СТИЛИ (вставляет сам модуль) =====================
@@ -469,6 +472,17 @@
   document.addEventListener("selectionchange", function(){
     if(S.listEl) return;
     if(S.ctx && S.ctx.pinned) return; // круг подчёркнутого фрагмента привязан к тапу, а не к выделению
+    if(S.ctx && S.ctx.lp && S.root && Date.now() < S.lpGuard){
+      // Chromium ещё доделывает долгое нажатие (курсор/слово): круг не прячем, а перерисуем, если выделилось слово
+      clearTimeout(S.armT);
+      S.armT = setTimeout(function(){
+        S.armT = 0;
+        if(!S.root || !S.ctx || !S.ctx.lp) return;
+        var c2 = readCtx();
+        if(c2 && c2.text && c2.text.replace(/\s+/g, "")) show(c2, c2.rect);
+      }, 120);
+      return;
+    }
     if(S.root) hide();
     arm();
   });
@@ -479,11 +493,12 @@
     S.dismissed = null; // новое касание вне круга: тап по выделенному тексту снова вызывает круг
     S.touchAt = Date.now();
     // долгое нажатие в поле ввода без выделенного слова — круг с «Вставить» и историей
-    clearTimeout(S.lpT);
+    clearTimeout(S.lpT); S.lpT = 0;
     if(e.touches && e.touches.length === 1 && t && !skipEl(t)){
-      var editable = (t.isContentEditable) || (t.closest && t.closest(".cm-editor")) || isTextField(t);
-      if(editable){
-        S.lpX = e.touches[0].clientX; S.lpY = e.touches[0].clientY;
+      var t0 = e.touches[0];
+      if(editableAt(t, t0.clientX, t0.clientY)){
+        S.lpX = t0.clientX; S.lpY = t0.clientY;
+        S.lpAt = Date.now();
         S.lpT = setTimeout(onLongPress, LONG_PRESS_MS);
       }
     }
@@ -495,12 +510,27 @@
   }, true);
   function touchEnd(e){
     if(e && inOwnUi(e.target)) return;
+    // Chromium при долгом нажатии (вибрация) сам ставит курсор/выделяет слово и присылает touchcancel — раньше это
+    // гасило таймер, и круг не появлялся (особенно при нажатии на пустое место справа от текста). Нажатие уже
+    // «долгое» — показываем круг, а не отменяем.
+    if(e && e.type === "touchcancel" && S.lpT && Date.now() - S.lpAt >= 250){
+      clearTimeout(S.lpT); S.lpT = 0;
+      setTimeout(onLongPress, 40);
+      return;
+    }
     clearTimeout(S.lpT); S.lpT = 0;
     S.touchAt = 0;
     arm(250);
   }
   document.addEventListener("touchend", touchEnd, true);
   document.addEventListener("touchcancel", touchEnd, true);
+  // Событие contextmenu приходит в тот же миг, что и вибрация долгого нажатия: показываем круг сразу, не дожидаясь таймера.
+  document.addEventListener("contextmenu", function(e){
+    if(!S.lpT || inOwnUi(e.target)) return;
+    clearTimeout(S.lpT); S.lpT = 0;
+    S.lpGuard = Date.now() + 700;
+    setTimeout(onLongPress, 50); // даём Chromium поставить курсор / выделить слово
+  }, true);
   document.addEventListener("mouseup", function(e){
     if(inOwnUi(e.target)) return;
     arm(250);
@@ -515,8 +545,24 @@
     S.touchAt = 0;
     var c = readCtx();
     if(!c) return;
+    S.lpGuard = Date.now() + 700;
     if(c.text && c.text.replace(/\s+/g, "")){ arm(0); return; } // выделено слово — обычный путь
+    c.lp = true; // круг долгого нажатия без выделения: смена выделения сразу после него его не прячет
     show(c, { left: S.lpX, right: S.lpX, top: S.lpY - 6, bottom: S.lpY + 6 });
+  }
+
+  // Нажатие в поле ввода — или рядом с ним: чуть правее/левее текста и по высоте самого поля, пока оно в фокусе
+  // (пустое место справа от строки может не быть частью поля, и нажатие туда раньше долгим не считалось).
+  function editableAt(t, x, y){
+    if(t.isContentEditable || (t.closest && t.closest(".cm-editor")) || isTextField(t)) return true;
+    var ae = document.activeElement;
+    if(!ae || skipEl(ae) || inOwnUi(ae)) return false;
+    var host = null;
+    if(ae.closest && ae.closest(".cm-editor")) host = ae.closest(".cm-editor");
+    else if(ae.isContentEditable || isTextField(ae)) host = ae;
+    if(!host) return false;
+    var r = host.getBoundingClientRect();
+    return y >= r.top && y <= r.bottom && x >= r.left - 8 && x <= r.right + NEAR_RIGHT;
   }
 
   // сдвинулась страница / набирают текст / закрыли окно — круг уже не там
