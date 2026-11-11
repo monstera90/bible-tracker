@@ -1,6 +1,6 @@
 /* ===========================================================================
    ctxmenu.js
-   Версия: 1.0 (10.11)
+   Версия: 1.1 (10.11)
    Круговое контекстное меню выделения текста и история скопированных в приложении фрагментов.
    Системное меню выделения в APK скрыто (SelectionMenuWebView.kt), поэтому «Копировать / Вставить / Вырезать» и
    «Переслать в задачу» — здесь. Круг из пяти секторов-пиктограмм: копировать, вставить, вырезать, переслать (стрелка
@@ -48,7 +48,8 @@
   };
 
   // ===================== СОСТОЯНИЕ =====================
-  var SIZE = 156;          // сторона круга, px
+  var SIZE = 156;          // внутренняя сетка SVG (viewBox)
+  var DISP = 116;          // сторона круга на экране, px
   var SHOW_DELAY = 380;    // мс покоя выделения до показа круга (ручки выделения двигаются без событий касания)
   var LONG_PRESS_MS = 650; // долгое нажатие в поле ввода без выделения → круг с «Вставить»
   var S = {
@@ -69,11 +70,11 @@
     var st = document.createElement("style");
     st.id = "ltCtxStyle";
     st.textContent =
-      ".lt-ctx-root{position:fixed;left:0;top:0;width:" + SIZE + "px;height:" + SIZE + "px;z-index:100000;" +
+      ".lt-ctx-root{position:fixed;left:0;top:0;width:" + DISP + "px;height:" + DISP + "px;z-index:100000;" +
         "-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;" +
         "opacity:0;-webkit-transform:scale(.86);transform:scale(.86);-webkit-transition:opacity .12s,-webkit-transform .12s;transition:opacity .12s,transform .12s;}" +
       ".lt-ctx-root.on{opacity:1;-webkit-transform:scale(1);transform:scale(1);}" +
-      ".lt-ctx-root svg{display:block;width:" + SIZE + "px;height:" + SIZE + "px;overflow:visible;-webkit-filter:drop-shadow(0 3px 7px rgba(0,0,0,.38));filter:drop-shadow(0 3px 7px rgba(0,0,0,.38));}" +
+      ".lt-ctx-root svg{display:block;width:" + DISP + "px;height:" + DISP + "px;overflow:visible;-webkit-filter:drop-shadow(0 3px 7px rgba(0,0,0,.38));filter:drop-shadow(0 3px 7px rgba(0,0,0,.38));}" +
       ".lt-ctx-sec{color:var(--wood-dark);cursor:pointer;}" +
       ".lt-ctx-sec path.lt-ctx-bg{fill:var(--parchment);stroke:var(--wood);stroke-width:1.5;stroke-linejoin:round;}" +
       ".lt-ctx-sec:active path.lt-ctx-bg{fill:var(--gold);}" +
@@ -332,7 +333,7 @@
       hist: editable
     };
     var a = rect || ctx.rect || { left: window.innerWidth / 2, right: window.innerWidth / 2, top: window.innerHeight / 2, bottom: window.innerHeight / 2 };
-    var pos = placeBox(SIZE, SIZE, a);
+    var pos = placeBox(DISP, DISP, a);
     var root = document.createElement("div");
     root.className = "lt-ctx-root";
     root.style.left = pos.left + "px";
@@ -343,8 +344,8 @@
     root.addEventListener("click", onRootClick);
     document.body.appendChild(root);
     S.root = root;
-    S.cx = pos.left + SIZE / 2;
-    S.cy = pos.top + SIZE / 2;
+    S.cx = pos.left + DISP / 2;
+    S.cy = pos.top + DISP / 2;
     requestAnimationFrame(function(){ if(S.root === root) root.className = "lt-ctx-root on"; });
   }
 
