@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 147.0 (11.11)
+   Версия: 147.1 (11.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -7275,7 +7275,13 @@
   // ===================== СТОЛ =====================
   // Вкладка «Стол» (set2s_14, кнопка settingsTabSet2Btn14, в стеке над «Изменением размера изображения»): картинки рядом
   // друг с другом, как на столе, и страницы. Вынесена в desk.js (см. index.html, sw.js); данные только на устройстве.
-  var Desk = window.initDeskModule({});
+  var Desk = window.initDeskModule({
+    handleFullscreenBtnTap: handleFullscreenBtnTap,
+    bindTapOrHold: bindTapOrHold,
+    getHideStatusBarEnabled: getHideStatusBarEnabled,
+    FULLSCREEN_MODE_ICON_SVG: FULLSCREEN_MODE_ICON_SVG,
+    FULLSCREEN_MODE_ON_ICON_SVG: FULLSCREEN_MODE_ON_ICON_SVG
+  });
   var renderSettingsTabDesk = Desk.renderSettingsTabDesk;
 
   // ===================== СИСТЕМА =====================

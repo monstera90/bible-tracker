@@ -1,6 +1,6 @@
 /* ===========================================================================
    desk.js
-   Версия: 3.0 (10.11)
+   Версия: 4.0 (11.11)
    Вкладка «Стол» (set2s_14, кнопка settingsTabSet2Btn14; в стеке второго набора стоит над «Изменением размера
    изображения»): несколько картинок рядом друг с другом, как на столе, и несколько страниц-«столов», которые
    листаются. Точка входа — window.initDeskModule(deps) → { renderSettingsTabDesk }; my.js зовёт её из switchSettingsTab.
@@ -9,6 +9,13 @@
    прежними); двигать картинку пальцем; менять размер — угловой кружок выбранной картинки или щипок двумя пальцами;
    «на передний/задний план»; удалить картинку/страницу (двойное нажатие); листать страницы кнопками ‹ › или
    свайпом по пустому месту стола; добавить страницу «+».
+
+   Рисунки поверх стола (кнопка «фигуры» в нижнем ряду открывает панель инструментов): карандаш, линия, стрелка, квадрат,
+   круг, треугольник, текст и палитра цвета. Рисунки лежат в отдельном слое над ВСЕМИ картинками страницы (`.desk-marks`,
+   один SVG на страницу) и хранятся в `page.marks` (не в `items`); каждый рисунок — самостоятельный элемент: его можно
+   выбрать нажатием на линию, двигать, менять размер (угловые кружки или щипок), перекрашивать и удалять (двойное нажатие).
+   Геометрия — точки `p` в долях ширины стола (как x/y/w у картинок); у текста `p[0]` — левый верхний угол, `fs` — кегль в долях ширины.
+   Кнопка «во весь экран» — самая правая в нижнем ряду (та же, что на других вкладках: handleFullscreenBtnTap из deps).
 
    Хранение — только на этом устройстве (в облако и в экспорт не входит):
    - раскладка (страницы, положение и размер картинок) — localStorage `deskLayout_v1`;
@@ -55,6 +62,30 @@ window.initDeskModule = function(deps){
     back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="1.3"></rect><rect x="3" y="3" width="12" height="12" rx="1.3" fill="currentColor" fill-opacity=".35"></rect></svg>'
   };
 
+  ICON.draw = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="5"></circle><rect x="11" y="11" width="10" height="10" rx="1.5"></rect></svg>';
+  ICON.pen = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1-4L16.5 4.5a1.8 1.8 0 0 1 2.5 0l.5.5a1.8 1.8 0 0 1 0 2.5L8 19z"></path><path d="M14.5 6.5l3 3"></path></svg>';
+  ICON.line = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5L19.5 4.5"></path></svg>';
+  ICON.arrow = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5L19 5"></path><path d="M10 5h9v9"></path></svg>';
+  ICON.rect = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="1.5"></rect></svg>';
+  ICON.circle = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"></circle></svg>';
+  ICON.tri = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5l8.5 15h-17z"></path></svg>';
+  ICON.text = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 7V5h13v2"></path><path d="M12 5v14.5"></path><path d="M9 19.5h6"></path></svg>';
+
+  var TOOLS = [
+    ["pen", "Карандаш"], ["line", "Линия"], ["arrow", "Стрелка"], ["rect", "Квадрат"],
+    ["circle", "Круг"], ["tri", "Треугольник"], ["text", "Текст"]
+  ];
+  var PALETTE = ["#000000", "#ffffff", "#e53935", "#fb8c00", "#fdd835", "#43a047", "#00acc1", "#1e88e5", "#5e35b1", "#d81b60", "#8d6e63", "#757575"];
+  var MARK_KINDS = { pen: 1, line: 1, arrow: 1, rect: 1, circle: 1, tri: 1, text: 1 };
+  var COLOR_KEY = "deskColor_v1";
+  var DEF_COLOR = "#e53935";
+  var MAX_MARKS = 300;          // рисунков на страницу
+  var MAX_PEN_PTS = 1500;       // точек в одном штрихе карандаша
+  var TEXT_FS = 0.06;           // кегль нового текста, доля ширины стола
+  var HIT_PX = 16;              // допуск нажатия на линию рисунка, px
+  var HANDLE_PX = 24;           // допуск нажатия на угловой кружок, px
+  var MIN_MARK_PX = 24;         // наименьший размер рисунка при масштабировании, px
+
   // ---------------------------------------------------------------- данные
   var data = null;            // { v:1, cur:0, pages:[{id, items:[{id,x,y,w,ar}]}] }; порядок items = порядок наложения (последний сверху)
   var imgCache = {};          // id → data:URL (только для картинок текущей страницы)
@@ -71,19 +102,50 @@ window.initDeskModule = function(deps){
   var pickWait = false;       // системный выбор файла открыт, ответа ещё нет
   var pickBound = false;
   var adding = false;         // идёт добавление картинок
+  var selMark = null;         // выбранный рисунок (selId и selMark не бывают заняты одновременно)
+  var tool = "";              // активный инструмент рисования: pen|line|arrow|rect|circle|tri|text или ""
+  var drawOpen = false;       // панель инструментов открыта
+  var paletteOpen = false;
+  var curColor = DEF_COLOR;
+  var marksRaf = 0;
+  var sizeTimer = null;
+  var lastSize = "";
+  var dlgState = null;        // окно ввода текста: { mode:"new"|"edit", x, y, id }
 
   function dlog(t){ try{ if(window.Debug && window.Debug.log) window.Debug.log("Стол: " + t); }catch(e){} }
 
   function uid(){ return "d" + Date.now().toString(36) + Math.floor(Math.random() * 1679616).toString(36); }
 
+  function cleanMarks(ms){
+    var out = [];
+    if(!ms || !ms.length) return out;
+    for(var i = 0; i < ms.length && out.length < MAX_MARKS; i++){
+      var m = ms[i];
+      if(!m || !m.id || !MARK_KINDS[m.k] || !m.p || !m.p.length) continue;
+      var ok = true, pp = [];
+      for(var j = 0; j < m.p.length && j < MAX_PEN_PTS; j++){
+        var pt = m.p[j];
+        if(!pt || !isFinite(pt[0]) || !isFinite(pt[1])){ ok = false; break; }
+        pp.push([pt[0], pt[1]]);
+      }
+      if(!ok) continue;
+      if(m.k === "text"){
+        if(!(m.fs > 0) || typeof m.t !== "string" || !m.t) continue;
+      } else if(m.k !== "pen" && pp.length < 2) continue;
+      out.push({ id: String(m.id), k: m.k, c: typeof m.c === "string" && /^#[0-9a-f]{6}$/i.test(m.c) ? m.c : DEF_COLOR, p: pp, fs: m.fs, t: m.t });
+    }
+    return out;
+  }
+
   function loadData(){
     var d = null;
     try{ d = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "null"); }catch(e){ d = null; }
     if(!d || !d.pages || !d.pages.length){
-      d = { v: 1, cur: 0, pages: [{ id: uid(), items: [] }] };
+      d = { v: 1, cur: 0, pages: [{ id: uid(), items: [], marks: [] }] };
     }
     if(typeof d.cur !== "number" || d.cur < 0 || d.cur >= d.pages.length) d.cur = 0;
     for(var p = 0; p < d.pages.length; p++){
+      d.pages[p].marks = cleanMarks(d.pages[p].marks);
       var its = d.pages[p].items;
       if(!its || !its.length){ d.pages[p].items = []; continue; }
       var clean = [];
@@ -311,12 +373,33 @@ window.initDeskModule = function(deps){
     st.textContent =
       "#deskTabRoot{position:relative;display:flex;flex-direction:column;flex:1 1 auto;min-height:0;color:var(--wood,#5b4a8a);}" +
       "#deskTabRoot .desk-bar{position:absolute;left:var(--fab-gap,6px);right:var(--fab-gap,6px);bottom:var(--fab-gap,6px);z-index:5;display:flex;align-items:center;gap:var(--fab-gap,6px);pointer-events:none;}" +
-      "#deskTabRoot .desk-ib{flex:0 0 auto;width:var(--fab-size,36px);height:var(--fab-size,36px);padding:8px;box-sizing:border-box;border-radius:8px;pointer-events:auto;" +
+      "#deskTabRoot .desk-ib{flex:0 1 auto;min-width:28px;width:var(--fab-size,36px);height:var(--fab-size,36px);padding:8px;box-sizing:border-box;border-radius:8px;pointer-events:auto;" +
         "border:1px solid var(--groove-shadow,rgba(0,0,0,.35));background:#fffef8;color:var(--wood,#5b4a8a);box-shadow:0 2px 6px rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;" +
         "-webkit-tap-highlight-color:transparent;}" +
       "#deskTabRoot .desk-ib svg{width:100%;height:100%;}" +
       "#deskTabRoot .desk-ib[disabled]{opacity:.35;}" +
       "#deskTabRoot .desk-ib.armed{background:#c62828;border-color:#c62828;color:#fff;}" +
+      "#deskTabRoot .desk-ib.on{background:#7F00FF;border-color:#7F00FF;color:#fff;}" +
+      "#deskTabRoot .desk-dot{display:block;width:100%;height:100%;border-radius:50%;border:2px solid rgba(0,0,0,.4);box-sizing:border-box;}" +
+      "#deskTabRoot .desk-dbar{position:absolute;left:var(--fab-gap,6px);right:var(--fab-gap,6px);bottom:calc(var(--fab-size,36px) + var(--fab-gap,6px) * 2);z-index:6;display:none;justify-content:flex-end;pointer-events:none;}" +
+      "#deskTabRoot .desk-dbar.on{display:flex;}" +
+      "#deskTabRoot .desk-dbar .desk-ib{margin-left:var(--fab-gap,6px);}" +
+      "#deskTabRoot .desk-pal{position:absolute;right:var(--fab-gap,6px);bottom:calc(var(--fab-size,36px) + var(--fab-gap,6px) * 2 + 4px);z-index:7;display:none;width:244px;max-width:calc(100% - 12px);padding:8px;box-sizing:border-box;border-radius:10px;" +
+        "border:1px solid var(--groove-shadow,rgba(0,0,0,.35));background:#fffef8;box-shadow:0 2px 8px rgba(0,0,0,.35);}" +
+      "#deskTabRoot .desk-pal.on{display:block;}" +
+      "#deskTabRoot .desk-pal.up{bottom:calc(var(--fab-size,36px) * 2 + var(--fab-gap,6px) * 3 + 4px);}" +
+      "#deskTabRoot .desk-sw{display:inline-block;vertical-align:top;width:30px;height:30px;margin:4px;border-radius:50%;box-sizing:border-box;border:2px solid rgba(0,0,0,.3);}" +
+      "#deskTabRoot .desk-sw.cur{border:3px solid #7F00FF;}" +
+      "#deskTabRoot .desk-marks{position:absolute;left:0;top:0;right:0;bottom:0;z-index:100000;pointer-events:none;}" +
+      "#deskTabRoot .desk-marks svg{display:block;}" +
+      "#deskTabRoot .desk-dlg{position:absolute;left:0;top:0;right:0;bottom:0;z-index:30;display:none;background:rgba(0,0,0,.35);}" +
+      "#deskTabRoot .desk-dlg.on{display:block;}" +
+      "#deskTabRoot .desk-dlg-box{position:absolute;left:12px;right:12px;top:12%;padding:10px;box-sizing:border-box;border-radius:10px;background:#fffef8;box-shadow:0 3px 12px rgba(0,0,0,.45);}" +
+      "#deskTabRoot .desk-dlg textarea{display:block;width:100%;min-height:84px;box-sizing:border-box;padding:8px;font-size:16px;line-height:1.35;border-radius:8px;resize:none;" +
+        "border:1px solid var(--groove-shadow,rgba(0,0,0,.35));background:#fff;color:#222;-webkit-user-select:text;user-select:text;}" +
+      "#deskTabRoot .desk-dlg-btns{display:flex;justify-content:flex-end;margin-top:8px;}" +
+      "#deskTabRoot .desk-dlg-btns button{height:36px;padding:0 16px;margin-left:8px;border-radius:8px;font-size:15px;border:1px solid var(--groove-shadow,rgba(0,0,0,.35));background:#fffef8;color:var(--wood,#5b4a8a);}" +
+      "#deskTabRoot .desk-dlg-btns button.ok{background:#7F00FF;border-color:#7F00FF;color:#fff;}" +
       "#deskTabRoot .desk-pg{flex:0 0 auto;min-width:var(--fab-size,36px);height:var(--fab-size,36px);padding:0 8px;box-sizing:border-box;border-radius:8px;display:flex;align-items:center;justify-content:center;" +
         "border:1px solid var(--groove-shadow,rgba(0,0,0,.35));background:#fffef8;box-shadow:0 2px 6px rgba(0,0,0,.28);font-size:14px;font-weight:600;pointer-events:none;}" +
       "#deskTabRoot .desk-sp{flex:1 1 auto;min-width:0;}" +
@@ -355,9 +438,10 @@ window.initDeskModule = function(deps){
   function disarm(){
     armed = "";
     if(armTimer){ clearTimeout(armTimer); armTimer = null; }
-    var b1 = q("deskDelItemBtn"), b2 = q("deskDelPageBtn");
+    var b1 = q("deskDelItemBtn"), b2 = q("deskDelPageBtn"), b3 = q("deskDelMarkBtn");
     if(b1) b1.className = "desk-ib";
     if(b2) b2.className = "desk-ib";
+    if(b3) b3.className = "desk-ib";
   }
   function arm(kind, btnId, hint){
     disarm();
@@ -366,6 +450,19 @@ window.initDeskModule = function(deps){
     if(b) b.className = "desk-ib armed";
     toast(hint);
     armTimer = setTimeout(disarm, ARM_MS);
+  }
+
+  function toolButtonsHtml(){
+    var h = "";
+    for(var i = 0; i < TOOLS.length; i++){
+      h += '<button type="button" class="desk-ib" data-tool="' + TOOLS[i][0] + '" id="deskTool_' + TOOLS[i][0] + '" title="' + TOOLS[i][1] + '">' + ICON[TOOLS[i][0]] + '</button>';
+    }
+    return h;
+  }
+  function paletteHtml(){
+    var h = "";
+    for(var i = 0; i < PALETTE.length; i++) h += '<span class="desk-sw" data-c="' + PALETTE[i] + '" style="background:' + PALETTE[i] + ';"></span>';
+    return h;
   }
 
   function renderShell(){
@@ -378,12 +475,21 @@ window.initDeskModule = function(deps){
           '<div class="desk-empty" id="deskEmpty">Стол пуст.<br>Нажмите кнопку с картинкой и «+», чтобы выложить фото.</div>' +
           '<div class="desk-toast" id="deskToast"></div>' +
         '</div>' +
+        '<div class="desk-dbar" id="deskDrawBar">' + toolButtonsHtml() +
+          '<button type="button" class="desk-ib" id="deskColorBtn" title="Цвет"></button>' +
+        '</div>' +
+        '<div class="desk-pal" id="deskPalette">' + paletteHtml() + '</div>' +
+        '<div class="desk-dlg" id="deskDlg"><div class="desk-dlg-box">' +
+          '<textarea id="deskDlgText" rows="3" maxlength="400" placeholder="Текст"></textarea>' +
+          '<div class="desk-dlg-btns"><button type="button" id="deskDlgCancel">Отмена</button><button type="button" class="ok" id="deskDlgOk">Готово</button></div>' +
+        '</div></div>' +
         '<div class="desk-bar">' +
           '<button type="button" class="desk-ib" id="deskPrevBtn" title="Предыдущая страница">' + ICON.prev + '</button>' +
           '<div class="desk-pg" id="deskPageNum"></div>' +
           '<button type="button" class="desk-ib" id="deskNextBtn" title="Следующая страница">' + ICON.next + '</button>' +
           '<div class="desk-sp"></div>' +
           '<div class="desk-tools" id="deskPageTools">' +
+            '<button type="button" class="desk-ib" id="deskDrawBtn" title="Рисование">' + ICON.draw + '</button>' +
             '<button type="button" class="desk-ib" id="deskAddImgBtn" title="Добавить картинки">' + ICON.addImg + '</button>' +
             '<button type="button" class="desk-ib" id="deskAddPageBtn" title="Новая страница">' + ICON.addPage + '</button>' +
             '<button type="button" class="desk-ib" id="deskDelPageBtn" title="Удалить страницу">' + ICON.trash + '</button>' +
@@ -393,6 +499,12 @@ window.initDeskModule = function(deps){
             '<button type="button" class="desk-ib" id="deskBackBtn" title="На задний план">' + ICON.back + '</button>' +
             '<button type="button" class="desk-ib" id="deskDelItemBtn" title="Удалить картинку">' + ICON.trash + '</button>' +
           '</div>' +
+          '<div class="desk-tools" id="deskMarkTools" style="display:none;">' +
+            '<button type="button" class="desk-ib" id="deskMarkColorBtn" title="Цвет"></button>' +
+            '<button type="button" class="desk-ib" id="deskMarkEditBtn" title="Изменить текст" style="display:none;">' + ICON.text + '</button>' +
+            '<button type="button" class="desk-ib" id="deskDelMarkBtn" title="Удалить рисунок">' + ICON.trash + '</button>' +
+          '</div>' +
+          '<button type="button" class="desk-ib fullscreen-mode-btn" id="deskFullscreenBtn" title="Полноэкранный режим"></button>' +
         '</div>' +
         '<input type="file" id="deskFileInput" accept="image/*" style="display:none;">' +
       '</div>';
@@ -465,6 +577,7 @@ window.initDeskModule = function(deps){
     var kids = sh.childNodes;
     for(var i = 0; i < kids.length; i++){
       var el = kids[i];
+      if(!el.getAttribute || !el.getAttribute("data-id")) continue; // слой рисунков
       var isSel = el.getAttribute("data-id") === selId;
       el.className = isSel ? "desk-item sel" : "desk-item";
       var h = null, ch = el.childNodes;
@@ -477,10 +590,16 @@ window.initDeskModule = function(deps){
         el.removeChild(h);
       }
     }
-    var pt = q("deskPageTools"), itl = q("deskItemTools");
-    if(pt) pt.style.display = selId ? "none" : "flex";
+    var pt = q("deskPageTools"), itl = q("deskItemTools"), mt = q("deskMarkTools");
+    if(pt) pt.style.display = (selId || selMark) ? "none" : "flex";
     if(itl) itl.style.display = selId ? "flex" : "none";
+    if(mt) mt.style.display = selMark ? "flex" : "none";
+    var sm = selMark ? findMark(selMark) : null;
+    var eb = q("deskMarkEditBtn");
+    if(eb) eb.style.display = (sm && sm.k === "text") ? "" : "none";
+    syncColorBtns();
     disarm();
+    renderMarks();
   }
 
   function updateBar(){
@@ -490,7 +609,7 @@ window.initDeskModule = function(deps){
     if(p) p.disabled = data.cur <= 0;
     if(nx) nx.disabled = data.cur >= data.pages.length - 1;
     var em = q("deskEmpty");
-    if(em) em.style.display = page().items.length ? "none" : "";
+    if(em) em.style.display = (page().items.length || page().marks.length) ? "none" : "";
   }
 
   // Полная перерисовка текущей страницы. dir: -1/1 — направление листания для короткой анимации, 0 — без неё.
@@ -504,7 +623,7 @@ window.initDeskModule = function(deps){
     for(var k = 0; k < its.length; k++) keep[its[k].id] = true;
     for(var key in imgCache) if(imgCache.hasOwnProperty(key) && !keep[key]) delete imgCache[key];
 
-    sh.innerHTML = "";
+    sh.innerHTML = '<div class="desk-marks" id="deskMarks"></div>';
     for(var i = 0; i < its.length; i++){
       var el = makeItemEl(its[i]);
       applyRect(el, rectOf(its[i], sz.w, sz.h));
@@ -514,6 +633,7 @@ window.initDeskModule = function(deps){
       else loadImage(its[i].id);
     }
     if(selId && !findItem(selId)) selId = null;
+    if(selMark && !findMark(selMark)) selMark = null;
     syncSelectionView();
     updateBar();
     if(dir){
@@ -543,21 +663,22 @@ window.initDeskModule = function(deps){
       var el = itemEl(its[i].id);
       if(el) applyRect(el, rectOf(its[i], sz.w, sz.h));
     }
+    renderMarks();
   }
 
   // ---------------------------------------------------------------- страницы
   function gotoPage(n, dir){
     if(n < 0 || n >= data.pages.length || n === data.cur) return;
     data.cur = n;
-    selId = null;
+    selId = null; selMark = null;
     saveSoon();
     renderPage(dir || 1);
   }
   function addPage(){
     if(data.pages.length >= MAX_PAGES){ toast("Больше " + MAX_PAGES + " страниц не поместится."); return; }
-    data.pages.splice(data.cur + 1, 0, { id: uid(), items: [] });
+    data.pages.splice(data.cur + 1, 0, { id: uid(), items: [], marks: [] });
     data.cur++;
-    selId = null;
+    selId = null; selMark = null;
     saveNow();
     renderPage(1);
   }
@@ -569,11 +690,12 @@ window.initDeskModule = function(deps){
     for(var j = 0; j < ids.length; j++) delete imgCache[ids[j]];
     if(data.pages.length === 1){
       pg.items = [];
+      pg.marks = [];
     } else {
       data.pages.splice(data.cur, 1);
       if(data.cur >= data.pages.length) data.cur = data.pages.length - 1;
     }
-    selId = null;
+    selId = null; selMark = null;
     saveNow();
     renderPage(0);
   }
@@ -690,9 +812,517 @@ window.initDeskModule = function(deps){
   }
 
   function select(id){
-    if(selId === id) return;
+    if(selId === id && !selMark) return;
     selId = id;
+    selMark = null;
     syncSelectionView();
+  }
+  function selectMark(id){
+    if(selMark === id && !selId) return;
+    selMark = id;
+    selId = null;
+    syncSelectionView();
+  }
+  function clearSel(){
+    if(!selId && !selMark) return;
+    selId = null;
+    selMark = null;
+    syncSelectionView();
+  }
+
+  // ---------------------------------------------------------------- рисунки поверх стола
+  function findMark(id){
+    var ms = page().marks;
+    for(var i = 0; i < ms.length; i++) if(ms[i].id === id) return ms[i];
+    return null;
+  }
+  function cloneMark(m){
+    var c = { id: m.id, k: m.k, c: m.c, p: [], fs: m.fs, t: m.t };
+    for(var i = 0; i < m.p.length; i++) c.p.push([m.p[i][0], m.p[i][1]]);
+    return c;
+  }
+  function r4(v){ return Math.round(v * 10000) / 10000; }
+  function n1(v){ return Math.round(v * 10) / 10; }
+  function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+  function strokeW(W){ return clamp(W * 0.011, 3, 7); }
+
+  var measureCtx = null;
+  function textSize(m, W){
+    var fs = m.fs * W, lines = String(m.t || "").split("\n"), mw = 0, i;
+    try{
+      if(!measureCtx) measureCtx = document.createElement("canvas").getContext("2d");
+      measureCtx.font = "600 " + fs + "px sans-serif";
+      for(i = 0; i < lines.length; i++) mw = Math.max(mw, measureCtx.measureText(lines[i]).width);
+    }catch(e){
+      for(i = 0; i < lines.length; i++) mw = Math.max(mw, lines[i].length * fs * 0.58);
+    }
+    return { w: Math.max(mw, fs * 0.6), h: lines.length * fs * 1.2 };
+  }
+  function ptsPx(m, W){
+    var out = [];
+    for(var i = 0; i < m.p.length; i++) out.push({ x: m.p[i][0] * W, y: m.p[i][1] * W });
+    return out;
+  }
+  function bboxPx(m, W){
+    if(m.k === "text"){
+      var ts = textSize(m, W);
+      return { x: m.p[0][0] * W, y: m.p[0][1] * W, w: ts.w, h: ts.h };
+    }
+    var x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for(var i = 0; i < m.p.length; i++){
+      var x = m.p[i][0] * W, y = m.p[i][1] * W;
+      if(x < x0) x0 = x; if(x > x1) x1 = x;
+      if(y < y0) y0 = y; if(y > y1) y1 = y;
+    }
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
+  // --- попадание пальцем
+  function segDist(p, a, b){
+    var dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy, t = 0;
+    if(l2 > 0) t = clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / l2, 0, 1);
+    var x = a.x + t * dx - p.x, y = a.y + t * dy - p.y;
+    return Math.sqrt(x * x + y * y);
+  }
+  function polyDist(p, V, closed){
+    var best = 1e9, n = V.length;
+    for(var i = 0; i < n - 1; i++) best = Math.min(best, segDist(p, V[i], V[i + 1]));
+    if(closed && n > 2) best = Math.min(best, segDist(p, V[n - 1], V[0]));
+    return best;
+  }
+  function inRect(p, b, pad){
+    return p.x >= b.x - pad && p.x <= b.x + b.w + pad && p.y >= b.y - pad && p.y <= b.y + b.h + pad;
+  }
+  function hitOne(m, pt, W){
+    var k = m.k, b = bboxPx(m, W), P = ptsPx(m, W), T = HIT_PX;
+    if(k === "text") return inRect(pt, b, 6);
+    if(k === "line" || k === "arrow") return segDist(pt, P[0], P[1]) <= T;
+    if(k === "pen") return P.length === 1 ? segDist(pt, P[0], P[0]) <= T : polyDist(pt, P, false) <= T;
+    if(b.w < T * 2 && b.h < T * 2) return inRect(pt, b, T);
+    if(k === "rect") return polyDist(pt, [{ x: b.x, y: b.y }, { x: b.x + b.w, y: b.y }, { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }], true) <= T;
+    if(k === "tri") return polyDist(pt, [{ x: b.x + b.w / 2, y: b.y }, { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h }], true) <= T;
+    if(k === "circle"){
+      var rx = Math.max(b.w / 2, 1), ry = Math.max(b.h / 2, 1);
+      var nx = (pt.x - (b.x + rx)) / rx, ny = (pt.y - (b.y + ry)) / ry;
+      return Math.abs(Math.sqrt(nx * nx + ny * ny) - 1) * Math.min(rx, ry) <= T;
+    }
+    return false;
+  }
+  function hitMark(pt, W){
+    var ms = page().marks;
+    for(var i = ms.length - 1; i >= 0; i--) if(hitOne(ms[i], pt, W)) return ms[i];
+    return null;
+  }
+
+  // Кружки выбранного рисунка: у фигур по двум точкам — на самих точках (h = 0/1), у карандаша и текста — «s» в углу рамки.
+  function markHandles(m, W){
+    var P = ptsPx(m, W);
+    if(m.k === "pen" || m.k === "text"){
+      var b = bboxPx(m, W), sz = stageSize();
+      return [{ h: "s", x: sz.w > 0 ? Math.min(b.x + b.w + 8, sz.w - 10) : b.x + b.w + 8, y: sz.h > 0 ? Math.min(b.y + b.h + 8, sz.h - 10) : b.y + b.h + 8 }];
+    }
+    return [{ h: 0, x: P[0].x, y: P[0].y }, { h: 1, x: P[1].x, y: P[1].y }];
+  }
+  function handleAt(m, pt, W){
+    var hs = markHandles(m, W), best = null, bd = HANDLE_PX;
+    for(var i = 0; i < hs.length; i++){
+      var dx = hs[i].x - pt.x, dy = hs[i].y - pt.y, d = Math.sqrt(dx * dx + dy * dy);
+      if(d <= bd){ bd = d; best = hs[i].h; }
+    }
+    return best;
+  }
+
+  // --- отрисовка (один SVG на страницу; пересобирается целиком, не чаще кадра)
+  function shapeSvg(m, P, W, sw, col, halo){
+    var s = "", i, k = m.k;
+    var st = ' fill="none" stroke="' + col + '" stroke-width="' + n1(sw) + '" stroke-linecap="round" stroke-linejoin="round"';
+    if(k === "line" || k === "arrow"){
+      s += '<line x1="' + n1(P[0].x) + '" y1="' + n1(P[0].y) + '" x2="' + n1(P[1].x) + '" y2="' + n1(P[1].y) + '"' + st + '/>';
+      if(k === "arrow"){
+        var dx = P[1].x - P[0].x, dy = P[1].y - P[0].y, len = Math.sqrt(dx * dx + dy * dy);
+        if(len > 1){
+          var a = Math.atan2(dy, dx), L = Math.min(14 + sw * 2, len * 0.6);
+          s += '<path d="M' + n1(P[1].x - L * Math.cos(a - 0.5)) + ' ' + n1(P[1].y - L * Math.sin(a - 0.5)) +
+            'L' + n1(P[1].x) + ' ' + n1(P[1].y) +
+            'L' + n1(P[1].x - L * Math.cos(a + 0.5)) + ' ' + n1(P[1].y - L * Math.sin(a + 0.5)) + '"' + st + '/>';
+        }
+      }
+    } else if(k === "rect" || k === "circle" || k === "tri"){
+      var b = bboxPx(m, W);
+      if(k === "rect"){
+        s += '<rect x="' + n1(b.x) + '" y="' + n1(b.y) + '" width="' + n1(b.w) + '" height="' + n1(b.h) + '"' + st + '/>';
+      } else if(k === "circle"){
+        s += '<ellipse cx="' + n1(b.x + b.w / 2) + '" cy="' + n1(b.y + b.h / 2) + '" rx="' + n1(b.w / 2) + '" ry="' + n1(b.h / 2) + '"' + st + '/>';
+      } else {
+        s += '<polygon points="' + n1(b.x + b.w / 2) + ',' + n1(b.y) + ' ' + n1(b.x + b.w) + ',' + n1(b.y + b.h) + ' ' + n1(b.x) + ',' + n1(b.y + b.h) + '"' + st + '/>';
+      }
+    } else if(k === "pen"){
+      if(P.length === 1){
+        s += '<circle cx="' + n1(P[0].x) + '" cy="' + n1(P[0].y) + '" r="' + n1(sw / 2) + '" fill="' + col + '"/>';
+      } else {
+        var d = "M" + n1(P[0].x) + " " + n1(P[0].y);
+        for(i = 1; i < P.length - 1; i++){
+          d += "Q" + n1(P[i].x) + " " + n1(P[i].y) + " " + n1((P[i].x + P[i + 1].x) / 2) + " " + n1((P[i].y + P[i + 1].y) / 2);
+        }
+        d += "L" + n1(P[P.length - 1].x) + " " + n1(P[P.length - 1].y);
+        s += '<path d="' + d + '"' + st + '/>';
+      }
+    } else if(k === "text"){
+      var fs = m.fs * W, lines = String(m.t || "").split("\n");
+      s += '<text font-size="' + n1(fs) + '" font-weight="600" font-family="sans-serif" fill="' + col + '"' +
+        (halo ? ' stroke="#444" stroke-width="3" stroke-linejoin="round"' : '') + '>';
+      for(i = 0; i < lines.length; i++){
+        s += '<tspan x="' + n1(P[0].x) + '" y="' + n1(P[0].y + fs * (0.9 + 1.2 * i)) + '">' + esc(lines[i]) + '</tspan>';
+      }
+      s += '</text>';
+    }
+    return s;
+  }
+  function markSvg(m, W, sw){
+    var P = ptsPx(m, W), col = m.c || DEF_COLOR, out = "";
+    if(col.toLowerCase() === "#ffffff") out += shapeSvg(m, P, W, sw + 3, "#444444", true); // тёмная подложка, чтобы белое было видно на светлом
+    return out + shapeSvg(m, P, W, sw, col, false);
+  }
+  function selectionSvg(m, W){
+    var b = bboxPx(m, W), s = "", hs = markHandles(m, W), pad = 8;
+    s += '<rect x="' + n1(b.x - pad) + '" y="' + n1(b.y - pad) + '" width="' + n1(b.w + pad * 2) + '" height="' + n1(b.h + pad * 2) + '" fill="none" stroke="#7F00FF" stroke-width="1.5" stroke-dasharray="5 4"/>';
+    for(var i = 0; i < hs.length; i++){
+      s += '<circle cx="' + n1(hs[i].x) + '" cy="' + n1(hs[i].y) + '" r="9" fill="#7F00FF" stroke="#ffffff" stroke-width="2"/>';
+    }
+    return s;
+  }
+  function renderMarks(){
+    var host = q("deskMarks");
+    if(!host) return;
+    var sz = stageSize();
+    if(sz.w <= 0 || sz.h <= 0) return;
+    var ms = page().marks, sw = strokeW(sz.w), html = "";
+    for(var i = 0; i < ms.length; i++) html += markSvg(ms[i], sz.w, sw);
+    var sm = selMark ? findMark(selMark) : null;
+    if(sm) html += selectionSvg(sm, sz.w);
+    host.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="' + sz.w + '" height="' + sz.h + '" viewBox="0 0 ' + sz.w + ' ' + sz.h + '">' + html + '</svg>';
+  }
+  function scheduleMarks(){
+    if(marksRaf) return;
+    var run = function(){ marksRaf = 0; renderMarks(); };
+    marksRaf = (window.requestAnimationFrame ? window.requestAnimationFrame(run) : setTimeout(run, 16)) || 1;
+  }
+
+  // --- правка рисунка
+  // Целиком внутрь стола (только сдвигом).
+  function fitMarkIntoStage(m, sz){
+    var b = bboxPx(m, sz.w), dx = 0, dy = 0;
+    if(b.x < 0) dx = -b.x; else if(b.x + b.w > sz.w) dx = sz.w - b.x - b.w;
+    if(b.y < 0) dy = -b.y; else if(b.y + b.h > sz.h) dy = sz.h - b.y - b.h;
+    if(!dx && !dy) return;
+    for(var i = 0; i < m.p.length; i++) m.p[i] = [r4(m.p[i][0] + dx / sz.w), r4(m.p[i][1] + dy / sz.w)];
+  }
+  function translateMark(m, orig, dx, dy, sz){
+    var b = bboxPx(orig, sz.w), nx = b.x + dx, ny = b.y + dy;
+    if(b.w <= sz.w) nx = clamp(nx, 0, sz.w - b.w);
+    if(b.h <= sz.h) ny = clamp(ny, 0, sz.h - b.h);
+    var ddx = (nx - b.x) / sz.w, ddy = (ny - b.y) / sz.w;
+    for(var i = 0; i < orig.p.length; i++) m.p[i] = [r4(orig.p[i][0] + ddx), r4(orig.p[i][1] + ddy)];
+  }
+  // Равномерное масштабирование относительно точки (cx, cy), px.
+  function scaleMark(m, orig, s, cx, cy, sz){
+    for(var i = 0; i < orig.p.length; i++){
+      m.p[i] = [r4((cx + (orig.p[i][0] * sz.w - cx) * s) / sz.w), r4((cy + (orig.p[i][1] * sz.w - cy) * s) / sz.w)];
+    }
+    if(orig.k === "text") m.fs = r4(orig.fs * s);
+  }
+  function scaleLimits(orig, sz, maxByStage){
+    var b = bboxPx(orig, sz.w), big = Math.max(b.w, b.h, 1);
+    var minS = Math.min(1, MIN_MARK_PX / big);
+    var maxS = maxByStage ? Math.min(maxByStage.w / Math.max(b.w, 1), maxByStage.h / Math.max(b.h, 1)) : 1e9;
+    if(orig.k === "text") maxS = Math.min(maxS, 0.4 / orig.fs);
+    return { min: minS, max: Math.max(minS, maxS) };
+  }
+
+  function deleteMark(id){
+    var ms = page().marks;
+    for(var i = 0; i < ms.length; i++){ if(ms[i].id === id){ ms.splice(i, 1); break; } }
+    selMark = null;
+    syncSelectionView();
+    updateBar();
+    saveNow();
+  }
+
+  // --- жесты рисунков. beginMarkGesture: true — касание забрали рисунки (выбор, перенос, кружок, новый штрих).
+  function beginMarkGesture(p, sz){
+    var sm = selMark ? findMark(selMark) : null;
+    if(sm){
+      var h = handleAt(sm, p, sz.w);
+      if(h !== null){
+        gesture = { type: "mhandle", id: sm.id, h: h, sx: p.x, sy: p.y, orig: cloneMark(sm), moved: false };
+        return true;
+      }
+      // без инструмента нажатие внутри рамки двигает выбранный рисунок; с инструментом — только по самой линии (иначе не нарисовать рядом)
+      if(!tool && (hitOne(sm, p, sz.w) || inRect(p, bboxPx(sm, sz.w), 8))){
+        gesture = { type: "mmove", id: sm.id, sx: p.x, sy: p.y, orig: cloneMark(sm), moved: false, wasSel: true };
+        return true;
+      }
+    }
+    if(tool){
+      startDraw(p, sz);
+      return true;
+    }
+    var hm = hitMark(p, sz.w);
+    if(hm){
+      selectMark(hm.id);
+      gesture = { type: "mmove", id: hm.id, sx: p.x, sy: p.y, orig: cloneMark(hm), moved: false, wasSel: false };
+      return true;
+    }
+    return false;
+  }
+
+  function startDraw(p, sz){
+    if(tool === "text"){
+      gesture = { type: "text", sx: p.x, sy: p.y, moved: false };
+      return;
+    }
+    var ms = page().marks;
+    if(ms.length >= MAX_MARKS){ toast("На странице уже " + MAX_MARKS + " рисунков."); gesture = { type: "text", sx: p.x, sy: p.y, moved: true }; return; }
+    var x = r4(clamp(p.x, 0, sz.w) / sz.w), y = r4(clamp(p.y, 0, sz.h) / sz.w);
+    var m = { id: uid(), k: tool, c: curColor, p: [[x, y]] };
+    if(tool !== "pen") m.p.push([x, y]);
+    ms.push(m);
+    if(selMark){ selMark = null; syncSelectionView(); }
+    gesture = { type: "draw", id: m.id, lx: p.x, ly: p.y, sx: p.x, sy: p.y, len: 0, moved: false };
+    scheduleMarks();
+  }
+
+  function moveMarkGesture(g, pts, sz){
+    var p = pts[0], m, dx, dy;
+    if(g.type === "text"){
+      if(Math.abs(p.x - g.sx) > 8 || Math.abs(p.y - g.sy) > 8) g.moved = true;
+      return;
+    }
+    m = findMark(g.id);
+    if(!m) return;
+    if(g.type === "draw"){
+      var cx = clamp(p.x, 0, sz.w), cy = clamp(p.y, 0, sz.h);
+      if(m.k === "pen"){
+        var ddx = cx - g.lx, ddy = cy - g.ly, dd = Math.sqrt(ddx * ddx + ddy * ddy);
+        if(dd >= 2.5 && m.p.length < MAX_PEN_PTS){
+          m.p.push([r4(cx / sz.w), r4(cy / sz.w)]);
+          g.lx = cx; g.ly = cy; g.len += dd;
+        }
+      } else {
+        m.p[1] = [r4(cx / sz.w), r4(cy / sz.w)];
+        var sx0 = m.p[0][0] * sz.w - cx, sy0 = m.p[0][1] * sz.w - cy;
+        g.len = Math.sqrt(sx0 * sx0 + sy0 * sy0);
+      }
+      g.moved = true;
+      scheduleMarks();
+      return;
+    }
+    if(g.type === "mpinch"){
+      if(pts.length < 2) return;
+      var b0 = bboxPx(g.orig, sz.w), lim = scaleLimits(g.orig, sz, { w: sz.w, h: sz.h });
+      var s = clamp(dist(pts[0], pts[1]) / g.d0, lim.min, lim.max);
+      scaleMark(m, g.orig, s, b0.x + b0.w / 2, b0.y + b0.h / 2, sz);
+      fitMarkIntoStage(m, sz);
+      g.moved = true;
+      scheduleMarks();
+      return;
+    }
+    dx = p.x - g.sx; dy = p.y - g.sy;
+    if(Math.abs(dx) > 3 || Math.abs(dy) > 3) g.moved = true;
+    if(!g.moved) return;
+    if(g.type === "mmove"){
+      translateMark(m, g.orig, dx, dy, sz);
+    } else if(g.h === "s"){ // карандаш и текст: масштаб от левого верхнего угла рамки по проекции смещения на диагональ
+      var b = bboxPx(g.orig, sz.w), den = b.w * b.w + b.h * b.h;
+      var lim2 = scaleLimits(g.orig, sz, { w: Math.max(1, sz.w - b.x), h: Math.max(1, sz.h - b.y) });
+      var s2 = clamp(1 + (den > 0 ? (dx * b.w + dy * b.h) / den : 0), lim2.min, lim2.max);
+      scaleMark(m, g.orig, s2, b.x, b.y, sz);
+    } else { // фигура: тянем одну из двух точек
+      m.p[g.h] = [r4(clamp(p.x, 0, sz.w) / sz.w), r4(clamp(p.y, 0, sz.h) / sz.w)];
+    }
+    scheduleMarks();
+  }
+
+  function removeMarkQuiet(id){
+    var ms = page().marks;
+    for(var i = 0; i < ms.length; i++){ if(ms[i].id === id){ ms.splice(i, 1); return; } }
+  }
+  function abortDraw(){
+    var g = gesture;
+    gesture = null;
+    if(g && g.type === "draw") removeMarkQuiet(g.id);
+    renderMarks();
+  }
+
+  function endMarkGesture(g){
+    var sz = stageSize();
+    if(g.type === "text"){
+      if(!g.moved && tool === "text"){
+        openTextDlg({ mode: "new", x: clamp(g.sx, 0, sz.w), y: clamp(g.sy, 0, sz.h) });
+      }
+      return;
+    }
+    if(g.type === "draw"){
+      var m = findMark(g.id);
+      if(!m) return;
+      var tiny = (m.k === "pen") ? g.len < 3 : g.len < 10;
+      if(tiny){ removeMarkQuiet(g.id); renderMarks(); updateBar(); return; }
+      updateBar();
+      saveNow();
+      if(m.k !== "pen"){ tool = ""; syncDrawUi(); selectMark(m.id); } // фигура: инструмент сам выключается, рисунок выбран — сразу можно поправить
+      else renderMarks();
+      return;
+    }
+    if(g.moved){ saveNow(); renderMarks(); return; }
+    // нажатие на уже выбранный текст без сдвига — правка текста
+    if(g.type === "mmove" && g.wasSel){
+      var tm = findMark(g.id);
+      if(tm && tm.k === "text") openTextDlg({ mode: "edit", id: tm.id });
+    }
+  }
+
+  // --- текст
+  function openTextDlg(st){
+    var dlg = q("deskDlg"), ta = q("deskDlgText");
+    if(!dlg || !ta) return;
+    dlgState = st;
+    var cur = "";
+    if(st.mode === "edit"){ var m = findMark(st.id); cur = m ? m.t : ""; }
+    ta.value = cur;
+    dlg.className = "desk-dlg on";
+    setTimeout(function(){ try{ ta.focus(); }catch(e){} }, 60);
+  }
+  function closeTextDlg(){
+    var dlg = q("deskDlg"), ta = q("deskDlgText");
+    if(ta){ try{ ta.blur(); }catch(e){} }
+    if(dlg) dlg.className = "desk-dlg";
+    dlgState = null;
+  }
+  function okTextDlg(){
+    var ta = q("deskDlgText"), st = dlgState;
+    var txt = ta ? String(ta.value || "").replace(/\s+$/, "") : "";
+    closeTextDlg();
+    if(!st || !txt.replace(/\s/g, "")) return;
+    var sz = stageSize();
+    if(st.mode === "edit"){
+      var m = findMark(st.id);
+      if(!m) return;
+      m.t = txt;
+      fitMarkIntoStage(m, sz);
+      saveNow();
+      renderMarks();
+      return;
+    }
+    if(page().marks.length >= MAX_MARKS){ toast("На странице уже " + MAX_MARKS + " рисунков."); return; }
+    var nm = { id: uid(), k: "text", c: curColor, p: [[r4(st.x / sz.w), r4(st.y / sz.w)]], fs: TEXT_FS, t: txt };
+    fitMarkIntoStage(nm, sz);
+    page().marks.push(nm);
+    tool = "";
+    syncDrawUi();
+    updateBar();
+    saveNow();
+    selectMark(nm.id);
+  }
+
+  // --- панель инструментов и палитра
+  function swatchHtml(c){ return '<span class="desk-dot" style="background:' + c + ';"></span>'; }
+  function syncColorBtns(){
+    var sm = selMark ? findMark(selMark) : null;
+    var c = sm ? sm.c : curColor;
+    var a = q("deskColorBtn"), b = q("deskMarkColorBtn");
+    if(a) a.innerHTML = swatchHtml(c);
+    if(b) b.innerHTML = swatchHtml(c);
+    var pal = q("deskPalette");
+    if(pal){
+      var kids = pal.childNodes;
+      for(var i = 0; i < kids.length; i++){
+        if(kids[i].getAttribute) kids[i].className = "desk-sw" + (kids[i].getAttribute("data-c") === c ? " cur" : "");
+      }
+    }
+  }
+  function syncDrawUi(){
+    var bar = q("deskDrawBar"), btn = q("deskDrawBtn"), pal = q("deskPalette");
+    if(bar) bar.className = "desk-dbar" + (drawOpen ? " on" : "");
+    if(btn) btn.className = "desk-ib" + (drawOpen ? " on" : "");
+    for(var i = 0; i < TOOLS.length; i++){
+      var tb = q("deskTool_" + TOOLS[i][0]);
+      if(tb) tb.className = "desk-ib" + (tool === TOOLS[i][0] ? " on" : "");
+    }
+    if(pal) pal.className = "desk-pal" + (paletteOpen ? " on" : "") + (drawOpen ? " up" : "");
+    syncColorBtns();
+  }
+  function setPalette(on){
+    paletteOpen = !!on;
+    syncDrawUi();
+  }
+  function setTool(k){
+    tool = (tool === k) ? "" : k;
+    if(tool){ clearSel(); paletteOpen = false; }
+    syncDrawUi();
+    if(tool === "text") toast("Нажмите на стол там, где нужен текст", 2600);
+  }
+  function setColor(c){
+    curColor = c;
+    try{ localStorage.setItem(COLOR_KEY, c); }catch(e){}
+    var sm = selMark ? findMark(selMark) : null;
+    if(sm){ sm.c = c; saveNow(); renderMarks(); }
+    paletteOpen = false;
+    syncDrawUi();
+  }
+
+  function startSizeWatch(){
+    if(sizeTimer) clearInterval(sizeTimer);
+    lastSize = "";
+    // стол меняет размер без события resize (полноэкранный режим, клавиатура) — следим сами
+    sizeTimer = setInterval(function(){
+      if(!rootEl()){ clearInterval(sizeTimer); sizeTimer = null; return; }
+      var sz = stageSize(), key = sz.w + "x" + sz.h;
+      if(key !== lastSize){ lastSize = key; relayout(); }
+    }, 350);
+  }
+
+  function bindMarkUi(){
+    q("deskDrawBtn").addEventListener("click", function(){
+      drawOpen = !drawOpen;
+      if(!drawOpen){ tool = ""; paletteOpen = false; }
+      syncDrawUi();
+    });
+    for(var i = 0; i < TOOLS.length; i++){
+      (function(k){ q("deskTool_" + k).addEventListener("click", function(){ setTool(k); }); })(TOOLS[i][0]);
+    }
+    q("deskColorBtn").addEventListener("click", function(){ setPalette(!paletteOpen); });
+    q("deskMarkColorBtn").addEventListener("click", function(){ setPalette(!paletteOpen); });
+    q("deskPalette").addEventListener("click", function(e){
+      var t = e.target, c = t && t.getAttribute ? t.getAttribute("data-c") : null;
+      if(c) setColor(c);
+    });
+    q("deskMarkEditBtn").addEventListener("click", function(){
+      var m = selMark ? findMark(selMark) : null;
+      if(m && m.k === "text") openTextDlg({ mode: "edit", id: m.id });
+    });
+    q("deskDelMarkBtn").addEventListener("click", function(){
+      if(!selMark) return;
+      if(armed === "mark"){ disarm(); deleteMark(selMark); return; }
+      arm("mark", "deskDelMarkBtn", "Нажмите ещё раз — рисунок удалится");
+    });
+    q("deskDlgOk").addEventListener("click", okTextDlg);
+    q("deskDlgCancel").addEventListener("click", closeTextDlg);
+    var fsb = q("deskFullscreenBtn");
+    if(fsb){
+      if(deps && deps.handleFullscreenBtnTap && deps.bindTapOrHold){
+        var fsOn = deps.getHideStatusBarEnabled ? deps.getHideStatusBarEnabled() : false;
+        fsb.innerHTML = fsOn ? deps.FULLSCREEN_MODE_ON_ICON_SVG : deps.FULLSCREEN_MODE_ICON_SVG;
+        fsb.title = fsOn ? "Выйти из полноэкранного режима" : "Полноэкранный режим";
+        fsb.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+        deps.bindTapOrHold(fsb, function(){
+          deps.handleFullscreenBtnTap();
+          var delays = [120, 450, 1000];
+          for(var d = 0; d < delays.length; d++) setTimeout(function(){ if(rootEl()) relayout(); }, delays[d]);
+        }, function(){});
+      } else {
+        fsb.style.display = "none";
+      }
+    }
   }
 
   // ---------------------------------------------------------------- жесты (touch + мышь)
@@ -719,6 +1349,11 @@ window.initDeskModule = function(deps){
   function beginGesture(pts, target){
     var sz = stageSize();
     if(pts.length >= 2){
+      var smp = selMark ? findMark(selMark) : null;
+      if(smp){
+        gesture = { type: "mpinch", id: smp.id, d0: Math.max(10, dist(pts[0], pts[1])), orig: cloneMark(smp), moved: false };
+        return;
+      }
       // щипок: масштабируем выбранную картинку (или ту, на которой начат жест)
       var id = selId || (gesture && gesture.id);
       var it = id ? findItem(id) : null;
@@ -728,6 +1363,7 @@ window.initDeskModule = function(deps){
       return;
     }
     var p = pts[0];
+    if(beginMarkGesture(p, sz)) return;
     var handle = isHandle(target);
     var el = hitItem(target);
     if(el){
@@ -774,6 +1410,10 @@ window.initDeskModule = function(deps){
       g.moved = true;
       return;
     }
+    if(g.type === "mpinch" || g.type === "mmove" || g.type === "mhandle" || g.type === "draw" || g.type === "text"){
+      moveMarkGesture(g, pts, sz);
+      return;
+    }
     var p = pts[0];
     var dx = p.x - g.sx, dy = p.y - g.sy;
     if(g.type === "swipe"){
@@ -805,8 +1445,12 @@ window.initDeskModule = function(deps){
     var g = gesture;
     gesture = null;
     if(!g) return;
+    if(g.type === "draw" || g.type === "text" || g.type === "mmove" || g.type === "mhandle" || g.type === "mpinch"){
+      endMarkGesture(g);
+      return;
+    }
     if(g.type === "swipe"){
-      if(!g.moved){ select(null); return; } // тап по пустому месту — снять выбор
+      if(!g.moved){ clearSel(); return; } // тап по пустому месту — снять выбор
       if(Math.abs(g.dx) >= SWIPE_MIN && Math.abs(g.dx) > Math.abs(g.dy) * 1.5){
         if(g.dx < 0) gotoPage(data.cur + 1, 1); else gotoPage(data.cur - 1, -1);
       }
@@ -825,10 +1469,13 @@ window.initDeskModule = function(deps){
     st.addEventListener("touchstart", function(e){
       lastTouchAt = Date.now();
       if(e.touches.length > 2) return;
+      if(paletteOpen) setPalette(false);
       if(e.cancelable) e.preventDefault();
       var pts = pointsOf(e);
       if(e.touches.length === 2){
         if(gesture && gesture.type === "swipe") gesture = null;
+        else if(gesture && gesture.type === "draw") abortDraw();
+        else if(gesture && gesture.type === "text") gesture = null;
         beginGesture(pts, e.target);
       } else {
         beginGesture(pts, e.target);
@@ -841,6 +1488,15 @@ window.initDeskModule = function(deps){
     }, { passive: false });
     function touchDone(e){
       lastTouchAt = Date.now();
+      if(e.touches && e.touches.length === 1 && gesture && gesture.type === "mpinch"){
+        var mpId = gesture.id, mp0 = findMark(mpId);
+        saveNow();
+        if(mp0){
+          var mpp = localPoint(e.touches[0]);
+          gesture = { type: "mmove", id: mpId, sx: mpp.x, sy: mpp.y, orig: cloneMark(mp0), moved: true, wasSel: true };
+        } else gesture = null;
+        return;
+      }
       if(e.touches && e.touches.length === 1 && gesture && gesture.type === "pinch"){
         // один палец остался — продолжаем как перемещение выбранной картинки
         var keepId = gesture.id;
@@ -856,7 +1512,14 @@ window.initDeskModule = function(deps){
       endGesture();
     }
     st.addEventListener("touchend", touchDone, { passive: true });
-    st.addEventListener("touchcancel", function(){ lastTouchAt = Date.now(); if(gesture && gesture.type !== "swipe") saveNow(); gesture = null; }, { passive: true });
+    st.addEventListener("touchcancel", function(){
+      lastTouchAt = Date.now();
+      var gc = gesture;
+      gesture = null;
+      if(!gc) return;
+      if(gc.type === "draw" || gc.type === "text" || gc.type === "mmove" || gc.type === "mhandle" || gc.type === "mpinch") endMarkGesture(gc);
+      else if(gc.type !== "swipe") saveNow();
+    }, { passive: true });
 
     // мышь (браузер на компьютере); после касания эмулированные события мыши игнорируем
     st.addEventListener("mousedown", function(e){
@@ -930,6 +1593,7 @@ window.initDeskModule = function(deps){
       if(armed === "item"){ disarm(); deleteItem(selId); return; }
       arm("item", "deskDelItemBtn", "Нажмите ещё раз — картинка удалится");
     });
+    bindMarkUi();
     if(!resizeBound){
       resizeBound = true;
       window.addEventListener("resize", function(){ if(rootEl()) relayout(); });
@@ -939,10 +1603,18 @@ window.initDeskModule = function(deps){
   function renderSettingsTabDesk(){
     if(!data) data = loadData();
     selId = null;
+    selMark = null;
     gesture = null;
     armed = "";
+    tool = "";
+    drawOpen = false;
+    paletteOpen = false;
+    dlgState = null;
+    try{ var sc = localStorage.getItem(COLOR_KEY); if(sc && /^#[0-9a-f]{6}$/i.test(sc)) curColor = sc; }catch(e){}
     if(!renderShell()) return;
     renderPage(0);
+    syncDrawUi();
+    startSizeWatch();
     try{
       var pk = parseInt(localStorage.getItem(PICK_KEY) || "0", 10);
       if(pk){
