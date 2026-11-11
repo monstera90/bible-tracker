@@ -1,6 +1,6 @@
 /* ===========================================================================
    cardscan.js
-   Версия: 5.1 (10.11)
+   Версия: 6.0 (11.11)
    Версия: 3.1 (26.10) — удержание кода вдвое короче (`HOLD_MIN_MS` 125, `HOLD_EDGE_MS` 300, `HOLD_SIDE_EFFECT_MS` 250, `EXCEED_PENALTY_MS` 75); в действиях «музыка» комбо-кода появилось поле `hp` («наушники обязательны», пятый элемент `["m"|"f", id, цикл, громкость, 1]`, при 0 не пишется). Откат: cardscan.js 3.0.
    Версия: 3.1 (28.10) — «Комбинированный»: действие `{k:"workout"}` «Запустить тренировку» (код `["w"]`, категория «тренировка»).
    Версия: 3.0 (26.10) — структурная правка: QR «Комбинированный» `lt://v1/combo/<JSON>` → `{kind:"combo", acts:[…]}` (`parseCombo`, `comboCode`, `comboCategory`, `COMBO_MAX`): до 5 действий, по одному из категории (таймер / музыка / «открыть» / задача / событие в журнал), JSON из коротких массивов (`["t",сек,название]`, `["m",id,цикл,громкость]`, `["f",…]`, `["o",ключ вкладки]`, `["b",хеш книги,id закладки]`, `["n",id заметки]`, `["k",id задачи,вкладка,тег,текст]`, `["e",текст]`); такой код — с побочным эффектом, удержание не меньше 0,5 с. Откат: cardscan.js 2.7.
@@ -53,6 +53,7 @@ var CLIMB_PREFIX = "lt://v1/climb/";   // «+ к высоте»: метры в �
 
   // Разбор текста из QR:
   //   {kind:"card", id}   — код карточки приложения (lt://v1/card/<id>)
+  // У timer/alarm/climb/habit может быть ещё `color:"#rrggbb"` (хвост кода `~rrggbb`).
   //   {kind:"timer", seconds, title[, hidden:true]} — таймер, зашитый в код (lt://v1/timer/<секунды>[/<название>]; скрытый — lt://v1/htimer/…)
   //   {kind:"alarm", hour, minute, every, times, title} — будильник, зашитый в код (lt://v1/alarm/<ЧЧММ>[,<5|15|30>,<1..4>][/<название>])
   //   {kind:"weather", lat, lon, title} — погода города, зашитая в код (lt://v1/weather/<широта>,<долгота>[/<название>])
@@ -179,7 +180,7 @@ var CLIMB_PREFIX = "lt://v1/climb/";   // «+ к высоте»: метры в �
     return normComboList(list);
   }
 
-  function parseCode(text){
+  function parseCodeBody(text){
     var t = String(text == null ? "" : text).replace(/^[\s\uFEFF]+|[\s\uFEFF]+$/g, ""); // \uFEFF: библиотека QR ставит BOM перед текстом с кириллицей
     if(t === TODAY_CODE) return { kind: "today" };
     if(t === REMINDER_CODE) return { kind: "reminder" };
@@ -257,6 +258,16 @@ var CLIMB_PREFIX = "lt://v1/climb/";   // «+ к высоте»: метры в �
     if(/^lt:\/\//i.test(t)) return { kind: "unknown", text: t };
     if(/^https?:\/\/\S+$/i.test(t)) return { kind: "url", url: t };
     return { kind: "text", text: t };
+  }
+
+  // Любой код `lt://…` может заканчиваться цветом `~rrggbb` (карточка при показе по скану красится им): хвост срезается до разбора,
+  // цвет попадает в результат `color:"#rrggbb"` у таймера, будильника, «+ к высоте» и привычки. Нет хвоста — поля `color` нет.
+  function parseCode(text){
+    var t = String(text == null ? "" : text).replace(/^[\s\uFEFF]+|[\s\uFEFF]+$/g, "");
+    var cm = /^(lt:\/\/[\s\S]*)~([0-9a-fA-F]{6})$/.exec(t);
+    var res = parseCodeBody(cm ? cm[1] : t);
+    if(cm && res && (res.kind === "timer" || res.kind === "alarm" || res.kind === "climb" || res.kind === "habit")) res.color = "#" + cm[2].toLowerCase();
+    return res;
   }
 
   // open({ loadJsqr: () => Promise, onCode(text), onBack(), windowed?: bool }) → { close() }
