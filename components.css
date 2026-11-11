@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 25.7 (11.11)
+   Версия: 25.8 (11.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4335,14 +4335,18 @@ body::after{
   position:absolute;
   inset:0;
   box-sizing:border-box;
-  padding:calc(var(--item-card-w, 112px) * 0.08);
+  padding:calc(var(--item-card-w, 112px) * 0.07) calc(var(--item-card-w, 112px) * 0.06);
   display:flex;
   flex-direction:column;
   align-items:center;
   justify-content:center;
   text-align:center;
 }
-.item-card-front{ padding-bottom:calc(var(--item-card-w, 112px) * 0.2); } /* нижняя полоса под часы, значок листа и «Пуск» — при пропорции 3:4 содержимое не должно на них наезжать */
+/* карточка квадратная: нижняя полоса оставляется только там, где внизу есть кнопки (часы-напоминание у предмета; «Стоп»/«Выкл.» у таймера и будильника) */
+.item-card-item .item-card-front{ padding-bottom:calc(var(--item-card-w, 112px) * 0.22); }
+.item-card-timer .item-card-front,
+.item-card-alarm .item-card-front{ padding-bottom:calc(var(--item-card-w, 112px) * 0.27); }
+.item-card-front > *{ flex:0 0 auto; max-width:100%; box-sizing:border-box; } /* строки лица не сжимаются (иначе вторая строка названия обрезалась) */
 .item-card-back{ background:transparent; padding:0; } /* оборот — та же заливка, что у лица (у самой карточки); QR лежит на своей светлой подложке */
 .item-card-qr{
   display:flex;
@@ -4355,34 +4359,48 @@ body::after{
 .item-card-qr img,
 .item-card-qr canvas{ display:block; }
 .item-card-icon{
-  width:calc(var(--item-card-w, 112px) * 0.3);
-  height:calc(var(--item-card-w, 112px) * 0.3);
-  margin-bottom:calc(var(--item-card-w, 112px) * 0.04);
+  width:calc(var(--item-card-w, 112px) * 0.27);
+  height:calc(var(--item-card-w, 112px) * 0.27);
+  margin-bottom:calc(var(--item-card-w, 112px) * 0.03);
 }
 .item-card-icon svg{ width:100%; height:100%; }
 .item-card-title{
   max-width:100%;
   font-family:"Palatino Linotype",Georgia,serif; /* тот же шрифт и межстрочный интервал, что у ридера, заметок и задач */
   font-size:calc(var(--item-card-w, 112px) * 0.12);
-  line-height:1.4;
+  line-height:1.25;
   font-weight:700;
   overflow:hidden;
   display:-webkit-box;
   -webkit-line-clamp:2;
   -webkit-box-orient:vertical;
-  word-break:break-word;
+  word-break:normal; /* слово не рвём: длинное слово ужимает шрифт (fitCardText в itemcards.js) */
 }
+.item-card-title.item-card-title-brk{ word-break:break-word; } /* запасной вариант: слово не влезло даже в наименьшем шрифте */
 .item-card-date{
-  margin-top:calc(var(--item-card-w, 112px) * 0.04);
-  font-size:calc(var(--item-card-w, 112px) * 0.1);
+  margin-top:calc(var(--item-card-w, 112px) * 0.03);
+  font-size:calc(var(--item-card-w, 112px) * 0.09);
+  line-height:1.2;
   color:var(--ink-soft, inherit);
   font-variant-numeric:tabular-nums;
 }
 .item-card-time{
-  margin-top:calc(var(--item-card-w, 112px) * 0.08);
-  font-size:calc(var(--item-card-w, 112px) * 0.22);
+  margin-top:calc(var(--item-card-w, 112px) * 0.03);
+  font-size:calc(var(--item-card-w, 112px) * 0.19);
+  line-height:1.1;
+  white-space:nowrap;
   font-weight:700;
   font-variant-numeric:tabular-nums;
+}
+/* таймер и будильник: название чуть мельче, строка «повтор…/заведён…» в одну строку (длинная — с многоточием) */
+.item-card-timer .item-card-title,
+.item-card-alarm .item-card-title{ font-size:calc(var(--item-card-w, 112px) * 0.11); }
+.item-card-date.item-card-alarm-state{
+  margin-top:calc(var(--item-card-w, 112px) * 0.02);
+  font-size:calc(var(--item-card-w, 112px) * 0.085);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 .item-card .book-cover-actions{ grid-template-columns:repeat(2, 36px); z-index:2; }
 /* кнопка-глаз карточки: третья после «Изменить» и «Удалить»; при ширине карточки от 77px три кнопки в ряд не помещаются, поэтому она переносится во второй ряд сетки */

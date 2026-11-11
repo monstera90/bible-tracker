@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 40.0 (11.11)
+   Версия: 41.0 (11.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -602,6 +602,29 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   var BOOKS_BASE_PX = 110;
   var CARD_ASPECT = 1; // высота карточки = ширина × CARD_ASPECT (квадрат, как `height` у .item-card в components.css)
   var GRID_GAP_PX = 10; // столбцовый зазор сетки (как gap в .item-cards-grid, components.css)
+  // Подгонка текста карточки под её ширину: слово названия не рвётся («Напоминал/ка»), а ужимает шрифт (до 0,075 ширины карточки);
+  // цифры времени ужимаются так же, чтобы не вылезать за карточку. Нет места даже в наименьшем шрифте — название рвётся по буквам.
+  function fitCardText(scope){
+    if(!scope || !scope.querySelectorAll) return;
+    var nodes = scope.querySelectorAll(".item-card-title, .item-card-time");
+    for(var i = 0; i < nodes.length; i++){
+      var el = nodes[i];
+      el.style.fontSize = "";
+      el.classList.remove("item-card-title-brk");
+      if(!el.clientWidth) continue; // карточка не показана (нет размеров) — мерить нечего
+      if(!(el.scrollWidth > el.clientWidth + 1)) continue;
+      var card = el.closest ? el.closest(".item-card") : null;
+      var cw = card ? card.clientWidth : 0;
+      var size = parseFloat(window.getComputedStyle(el).fontSize) || 0;
+      if(!cw || !size) continue;
+      var minSize = cw * 0.075;
+      while(el.scrollWidth > el.clientWidth + 1 && size > minSize){
+        size -= 0.5;
+        el.style.fontSize = size + "px";
+      }
+      if(el.scrollWidth > el.clientWidth + 1 && el.classList.contains("item-card-title")) el.classList.add("item-card-title-brk");
+    }
+  }
   function applySize(rootEl){
     if(!rootEl) return;
     var cs = window.getComputedStyle(rootEl);
@@ -619,7 +642,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     if(resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(function(){
       var tab = document.querySelector(".item-cards-tab");
-      if(tab && document.getElementById("itemCardsGrid")) applySize(tab);
+      if(tab && document.getElementById("itemCardsGrid")){ applySize(tab); fitCardText(document.getElementById("itemCardsGrid")); }
     }, 120);
   });
 
@@ -1023,6 +1046,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       applyCardLook(card, c);
       grid.appendChild(card);
     });
+    fitCardText(grid);
     bindGrid(grid);
     syncTimersView();
     syncAlarmsView();
@@ -1600,7 +1624,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     range.addEventListener("input", function(){
       var v = parseFloat(range.value);
       if(!isFinite(v)) return;
-      setScale(v); applySize(tab); showVal();
+      setScale(v); applySize(tab); fitCardText(document.getElementById("itemCardsGrid")); showVal();
     });
   }
 
@@ -2993,6 +3017,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       if((c.type === "timer" || c.type === "alarm") && e.target.closest(".item-card-stop-btn")) stopTimerForCard(c); // «Стоп» на показе («Выкл.» у будильника)
     });
     o.appendChild(card);
+    fitCardText(card);
     if(noteText){
       var noteEl = document.createElement("div");
       noteEl.className = "habit-scan-note";
