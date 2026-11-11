@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 39.0 (11.11)
+   Версия: 40.0 (11.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -275,11 +275,25 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   // (lt://v1/card/<id>); скан отмечает сегодняшний день (в один день засчитывается один раз), тап открывает карту дней.
   // Палитра цвета карточки (у ВСЕХ типов карточек): 8 ярких и 8 пастельных; первый пастельный квадрат — ПУСТОЙ цвет (""): карточка
   // без заливки, как раньше. Пустой цвет — по умолчанию; у привычки отметки на карте тогда берут цвет темы (var(--wood)).
-  var HABIT_COLORS_BRIGHT = ["#ff0000", "#fb8c00", "#ffff00", "#43a047", "#00acc1", "#1e88e5", "#7f00ff", "#d81b60"];
-  var HABIT_COLORS_PASTEL = ["", "#ffcba4", "#fff3a3", "#9cdb4e", "#40d5b5", "#a9ccf4", "#d4b8f0", "#f8bbd9"]; // "" — цвет по умолчанию (DEFAULT_CARD_COLOR), рисуется сиреневым квадратом
-  var CARD_COLORS_ROW3 = ["#fe9eb9", "#70e0bc", "#fdd84b", "#59cb01", "#20b0f7", "#ff9501", "#d081ff", "#0ca5e9"]; // «Пастельные леденцы» (без сиреневого — он по умолчанию) и яркие
-  var CARD_COLORS_ROW4 = ["#15b8a7", "#6366f1", "#1f3a89", "#ff6b5d", "#fe9f1d", "#e8457a", "#8c6e63"]; // «Океан» и «Тёплый закат»
-  var CARD_PALETTE_ROWS = [HABIT_COLORS_BRIGHT, HABIT_COLORS_PASTEL, CARD_COLORS_ROW3, CARD_COLORS_ROW4];
+  // Палитра: столбец = один оттенок (сверху тёмные и насыщенные, вниз светлее), слева направо — как радуга: красный, оранжевый, жёлтый,
+  // зелёный, бирюзовый, синий, фиолетовый, розовый. "" — цвет по умолчанию (DEFAULT_CARD_COLOR), рисуется сиреневым квадратом (в фиолетовом столбце).
+  var CARD_PALETTE_COLS = [
+    ["#ff0000", "#ff6b5d"],
+    ["#8c6e63", "#fb8c00", "#ff9501", "#fe9f1d", "#ffcba4"],
+    ["#ffff00", "#fdd84b", "#fff3a3"],
+    ["#43a047", "#59cb01", "#9cdb4e"],
+    ["#00acc1", "#15b8a7", "#40d5b5", "#70e0bc"],
+    ["#1f3a89", "#1e88e5", "#0ca5e9", "#20b0f7", "#a9ccf4"],
+    ["#6366f1", "#7f00ff", "#d081ff", "", "#d4b8f0"],
+    ["#d81b60", "#e8457a", "#fe9eb9", "#f8bbd9"]
+  ];
+  // строки сетки из столбцов; в коротком столбце пустые места (undefined) рисуются невидимым квадратом
+  var CARD_PALETTE_ROWS = (function(){
+    var n = 0, rows = [];
+    CARD_PALETTE_COLS.forEach(function(col){ if(col.length > n) n = col.length; });
+    for(var r = 0; r < n; r++) rows.push(CARD_PALETTE_COLS.map(function(col){ return col[r]; }));
+    return rows;
+  })();
   var DEFAULT_CARD_COLOR = "#b9a1ff"; // сиреневый («Пастельные леденцы»): цвет карточки, у которой цвет не задан (в том числе созданной раньше)
   var HABIT_MAX_DAYS = 1830; // пять лет отметок; больше в записи (и в облаке) не держим
   function isCardColor(v){ return /^#[0-9a-fA-F]{6}$/.test(String(v || "")); }
@@ -336,6 +350,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       ".habit-colors{display:flex;flex-direction:column;gap:8px;margin:10px 0;padding:4px;}" +
       ".habit-color-row{display:flex;gap:6px;}" +
       // квадрат без aspect-ratio: проценты в padding считаются от ширины строки, поэтому высота = ширине
+      ".habit-color-gap{flex:0 0 calc((100% - 42px) / 8);height:0;padding:0 0 calc((100% - 42px) / 8) 0;}" +
       ".habit-color{flex:0 0 calc((100% - 42px) / 8);height:0;padding:0 0 calc((100% - 42px) / 8) 0;border:1px solid rgba(0,0,0,.18);border-radius:8px;box-sizing:border-box;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
       ".habit-color.selected{box-shadow:0 0 0 2px var(--parchment,#fff),0 0 0 4px var(--ink,#000);}" +
       ".habit-map-dot{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:8px;vertical-align:-1px;border:1px solid rgba(0,0,0,.2);}" +
@@ -585,6 +600,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   // полей по бокам; поля — только 8px самой вкладки, как у книг). Саму ширину считаем здесь, а не в CSS, потому что
   // от неё считается всё внутри карточки (шрифты, пиктограмма, кнопки: переменная --item-card-w).
   var BOOKS_BASE_PX = 110;
+  var CARD_ASPECT = 1; // высота карточки = ширина × CARD_ASPECT (квадрат, как `height` у .item-card в components.css)
   var GRID_GAP_PX = 10; // столбцовый зазор сетки (как gap в .item-cards-grid, components.css)
   function applySize(rootEl){
     if(!rootEl) return;
@@ -882,10 +898,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     }
     if(c.type === "weather"){ // значок погоды и название города
       return '<div class="item-card-icon">' + iconSvg(c.icon || "weather") + '</div>' +
-        '<div class="item-card-title"></div>' +
-        '<div class="item-card-timer-btns">' +
-          '<button type="button" class="item-card-wx-btn" title="Показать погоду">Показать</button>' +
-        '</div>';
+        '<div class="item-card-title"></div>'; // погода показывается нажатием на саму карточку
     }
     if(c.type === "climb"){ // значок горы с плюсом, название и «+ N м»
       return '<div class="item-card-icon">' + iconSvg(c.icon || "climb") + '</div>' +
@@ -1359,7 +1372,6 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       }
       if(flippedId === id){ flipCard(id, false); return; } // тап по QR/обороту — назад
       if(flippedId) unflipAny();
-      if(c.type === "weather" && e.target.closest(".item-card-wx-btn")){ hideRevealed(); showWeatherOverlay(c); return; } // «Показать»: погода без скана QR
       if(e.target.closest(".item-card-stop-btn")){ stopTimerForCard(c); return; } // «Стоп»: отмена таймера
       if(revealedIds[id]){ hideRevealed(); return; }
       if(c.type === "remind"){ onCardTap(c); return; } // у «Напоминания» нет QR-кода: оборота нет, тап сразу открывает форму
@@ -1621,16 +1633,18 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
 
   // ---------- форма создания / правки ----------
   var TYPE_LABEL = { timer: "Таймер", alarm: "Будильник", weather: "Погода", climb: "+ к высоте", htimer: "Скрытый таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE, remind: "Напоминание", combo: "Комбинированный" };
-  // выбор цвета карточки (необязательный, у любого типа): разметка и привязка; первый пастельный квадрат — цвет по умолчанию (пустое значение)
+  // выбор цвета карточки (необязательный, у любого типа): разметка и привязка; сиреневый квадрат — цвет по умолчанию (пустое значение)
   function colorPaletteHtml(type){
     var h = '<div class="item-form-hint">' + (type === "habit"
-      ? 'Цвет карточки и отметок на карте. Первый квадрат второго ряда (сиреневый) — по умолчанию: отметки в цвете темы.'
-      : 'Цвет карточки — необязательно. Первый квадрат второго ряда (сиреневый) — цвет по умолчанию.') + '</div>';
+      ? 'Цвет карточки и отметок на карте. Сиреневый квадрат — по умолчанию: отметки в цвете темы.'
+      : 'Цвет карточки — необязательно. Сиреневый квадрат — цвет по умолчанию.') + '</div>';
     h += '<div class="habit-colors" id="icfColors">';
     CARD_PALETTE_ROWS.forEach(function(row){
       h += '<div class="habit-color-row">';
       row.forEach(function(hex){
-        h += hex
+        h += hex === undefined
+          ? '<span class="habit-color-gap"></span>'
+          : hex
           ? '<button type="button" class="habit-color" data-color="' + hex + '" style="background:' + hex + ';" title="' + hex + '"></button>'
           : '<button type="button" class="habit-color" data-color="" style="background:' + DEFAULT_CARD_COLOR + ';" title="По умолчанию"></button>';
       });
@@ -2963,7 +2977,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   // ширина карточки при сканировании: почти вся ширина экрана с полями, на низком экране ограничена высотой
   function overlayCardWidth(){
     var vw = window.innerWidth || 360, vh = window.innerHeight || 640;
-    return Math.max(120, Math.floor(Math.min(vw - 32, (vh - 120) / (4 / 3), 480))); // высота карточки = ширина × 4/3 (3:4)
+    return Math.max(120, Math.floor(Math.min(vw - 32, (vh - 120) / CARD_ASPECT, 480))); // высота карточки = ширина × CARD_ASPECT
   }
   function showCardOverlay(c, noteText, undo){
     ensureHabitStyles();
@@ -2988,12 +3002,12 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     if(c.type === "timer") syncTimersView();
     if(c.type === "alarm") syncAlarmsView();
     if(isLegacyAnim()){ o.style.animation = "none"; card.style.animation = "none"; } // Android 5: без анимации
-    if(typeof undo === "function"){ // «Отмена» — прямо под карточкой (высота карточки = ширина × 4/3, слой центрирует её по вертикали)
+    if(typeof undo === "function"){ // «Отмена» — прямо под карточкой (высота карточки = ширина × CARD_ASPECT, слой центрирует её по вертикали)
       var cb = document.createElement("button");
       cb.type = "button";
       cb.className = "scan-card-cancel-btn";
       cb.textContent = "Отмена";
-      cb.style.top = "calc(50% + " + Math.round(overlayCardWidth() * 2 / 3 + 14) + "px)";
+      cb.style.top = "calc(50% + " + Math.round(overlayCardWidth() * (CARD_ASPECT / 2 + 0.04) + 14) + "px)";
       cb.addEventListener("click", function(e){
         e.stopPropagation();
         try{ undo(); }catch(err){ console.error(err); }

@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 25.6 (11.11)
+   Версия: 25.7 (11.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4317,7 +4317,7 @@ body::after{
   position:relative;
   box-sizing:border-box;
   width:100%; /* ширина колонки сетки; = --item-card-w (её считает JS) */
-  height:calc(var(--item-card-w, 112px) * 1.3333); /* пропорция 3:4 (заказчик, 18.10: менее вытянутые, чем 2:3) */
+  height:var(--item-card-w, 112px); /* квадрат, как виджет батареи (= CARD_ASPECT в itemcards.js) */
   border:none;
   border-radius:calc(var(--item-card-w, 112px) * 0.12);
   background:#b9a1ff; /* запасное значение: заливку и --card-shade ставит itemcards.js (applyCardLook), без цвета — сиреневый */
@@ -4342,7 +4342,7 @@ body::after{
   justify-content:center;
   text-align:center;
 }
-.item-card-front{ padding-bottom:calc(var(--item-card-w, 112px) * 0.26); } /* нижняя полоса под часы, значок листа и «Пуск» — при пропорции 3:4 содержимое не должно на них наезжать */
+.item-card-front{ padding-bottom:calc(var(--item-card-w, 112px) * 0.2); } /* нижняя полоса под часы, значок листа и «Пуск» — при пропорции 3:4 содержимое не должно на них наезжать */
 .item-card-back{ background:transparent; padding:0; } /* оборот — та же заливка, что у лица (у самой карточки); QR лежит на своей светлой подложке */
 .item-card-qr{
   display:flex;
@@ -4355,8 +4355,8 @@ body::after{
 .item-card-qr img,
 .item-card-qr canvas{ display:block; }
 .item-card-icon{
-  width:calc(var(--item-card-w, 112px) * 0.36);
-  height:calc(var(--item-card-w, 112px) * 0.36);
+  width:calc(var(--item-card-w, 112px) * 0.3);
+  height:calc(var(--item-card-w, 112px) * 0.3);
   margin-bottom:calc(var(--item-card-w, 112px) * 0.04);
 }
 .item-card-icon svg{ width:100%; height:100%; }
@@ -4368,7 +4368,7 @@ body::after{
   font-weight:700;
   overflow:hidden;
   display:-webkit-box;
-  -webkit-line-clamp:3;
+  -webkit-line-clamp:2;
   -webkit-box-orient:vertical;
   word-break:break-word;
 }
@@ -4792,8 +4792,7 @@ body::after{
   bottom:calc(var(--item-card-w, 112px) * 0.06);
   display:flex;
 }
-.item-card-stop-btn,
-.item-card-wx-btn{
+.item-card-stop-btn{
   flex:1 1 0;
   min-width:0;
   padding:calc(var(--item-card-w, 112px) * 0.02) 0;
