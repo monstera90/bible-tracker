@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 25.8 (11.11)
+   Версия: 26.0 (11.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -3010,7 +3010,7 @@
      перенести на заметки (.cm-md-para-start) и задачи (.fmt-para); если нет — вернуть
      `text-indent:1ch` и удалить правило ::before ниже. */
   /* Маркер по удержанию в ридере книг (my.js, bindBookReaderHoldMarker, 13.10): системное выделение
-     текста книги выключено — слово подчёркивается своим жестом, копирование — кнопка у урны.
+     текста книги выключено — слово подчёркивается своим жестом, копирование и снятие — круг ctxmenu.js по тапу на подчёркивание.
      .lt-sel-probe — на долю секунды при удержании, чтобы узнать позицию под пальцем. */
   .book-reader{ -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; position:relative; isolation:isolate; }
   .book-reader.lt-sel-probe{ -webkit-user-select:text; user-select:text; }
@@ -3200,41 +3200,6 @@
   @media (hover:hover) and (pointer:fine){
     .book-reader-pin-btn.pinned:hover{ background:#fffef8; color:var(--danger, #c0392b); }
   }
-  /* ---------- Кнопка-урна снятия подчёркивания (READER_PLAN.md, Этап D,
-     шаг 13, доработка 11.09). Появляется рядом с тапнутым <mark
-     class="book-reader-underline"> (см. showBookReaderUnderlineTrashBtn в
-     my.js) — тот же круглый базовый вид, что .book-reader-pin-btn, но
-     сразу окрашена в var(--danger) (действие необратимо удаляет
-     подчёркивание, в отличие от pin-кнопки с двумя равноценными
-     состояниями). Позиционируется абсолютно от .settings-modal-box (JS
-     сам считает left/top через getBoundingClientRect — см. my.js), поэтому
-     здесь только сам вид и центрирование над точкой (переданной как
-     left/top угла подчёркивания) через transform. ---------- */
-  .book-reader-underline-actions{
-    position:absolute;
-    transform:translate(-50%,-100%) translateY(-6px);
-    display:flex; gap:8px;
-    z-index:5;
-  }
-  .book-reader-underline-trash-btn{
-    position:relative;
-    width:32px; height:32px;
-    border-radius:50%;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    background:#fffef8;
-    border:1px solid var(--groove-shadow);
-    color:var(--danger, #c0392b);
-    cursor:pointer;
-    box-shadow:0 2px 6px rgba(0,0,0,.28);
-    -webkit-tap-highlight-color:transparent;
-  }
-  .book-reader-underline-trash-btn svg{ width:17px; height:17px; }
-  @media (hover:hover) and (pointer:fine){
-    .book-reader-underline-trash-btn:hover{ background:var(--danger, #c0392b); color:#fffef8; }
-  }
-  /* «Копировать» рядом с урной (13.10) — тот же вид и цвет, что у урны: отдельных правил нет (класс .book-reader-underline-copy-btn — только метка для JS/карты). */
   /* ТЗ 28.09: в ТЁМНЫХ темах (data-theme 8..13, см. THEMES в my.js)
      var(--gold-light) давал странный, полупрозрачный по виду оттенок.
      Здесь подчёркивание — ТОТ ЖЕ оттенок, что акцент темы (--wood: у
@@ -3313,57 +3278,17 @@
   @media (hover:hover) and (pointer:fine){
     .book-reader-pin-btn.pinned:hover{ background:#fffef8; color:var(--danger, #c0392b); }
   }
-  /* ---------- Кнопка-урна снятия подчёркивания (READER_PLAN.md, Этап D,
-     шаг 13, доработка 11.09). Появляется рядом с тапнутым <mark
-     class="book-reader-underline"> (см. showBookReaderUnderlineTrashBtn в
-     my.js) — тот же круглый базовый вид, что .book-reader-pin-btn, но
-     сразу окрашена в var(--danger) (действие необратимо удаляет
-     подчёркивание, в отличие от pin-кнопки с двумя равноценными
-     состояниями). Позиционируется абсолютно от .settings-modal-box (JS
-     сам считает left/top через getBoundingClientRect — см. my.js), поэтому
-     здесь только сам вид и центрирование над точкой (переданной как
-     left/top угла подчёркивания) через transform. ---------- */
-  .book-reader-underline-actions{
-    position:absolute;
-    transform:translate(-50%,-100%) translateY(-6px);
-    display:flex; gap:8px;
-    z-index:5;
-  }
-  .book-reader-underline-trash-btn{
-    position:relative;
-    width:32px; height:32px;
-    border-radius:50%;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    background:#fffef8;
-    border:1px solid var(--groove-shadow);
-    color:var(--danger, #c0392b);
-    cursor:pointer;
-    box-shadow:0 2px 6px rgba(0,0,0,.28);
-    -webkit-tap-highlight-color:transparent;
-  }
-  .book-reader-underline-trash-btn svg{ width:17px; height:17px; }
-  @media (hover:hover) and (pointer:fine){
-    .book-reader-underline-trash-btn:hover{ background:var(--danger, #c0392b); color:#fffef8; }
-  }
-  /* «Копировать» рядом с урной: тот же вид, но значок не красный (после правила урны — иначе оно перебьёт цвет) */
-  .book-reader-underline-trash-btn.book-reader-underline-copy-btn{ color:var(--wood-dark, #6a5a91); }
-  @media (hover:hover) and (pointer:fine){
-    .book-reader-underline-trash-btn.book-reader-underline-copy-btn:hover{ background:var(--wood-dark, #6a5a91); color:#fffef8; }
-  }
   /* ТЗ 28.09: в ТЁМНЫХ темах (data-theme 8..14, см. THEMES в my.js) белые
      кнопки (#fffef8) режут глаз — здесь они красятся как невыбранные
      вкладки (.settings-tab: фон var(--tab-bg, var(--parchment)), значок
      var(--wood)) + окантовка 1px того же цвета, что у выделенной вкладки
      (.settings-tab.active: var(--wood)). Затронуты: кнопки нижнего ряда
      (.mdeditor-fab-btn — скрепка, Аа, карандаш, закладки, меню, домик и
-     т.д. на всех вкладках), булавка иллюстрации ридера и урна снятия
-     подчёркивания (её значок остаётся var(--danger)). :where() даёт
+     т.д. на всех вкладках) и булавка иллюстрации ридера. :where() даёт
      нулевую специфичность самому селектору темы — поэтому :hover,
      .pressed и disabled выше/ниже по-прежнему работают как раньше.
      Светлые темы (1..7) не затронуты. */
-  :where(html[data-theme="8"],html[data-theme="9"],html[data-theme="10"],html[data-theme="11"],html[data-theme="12"],html[data-theme="13"],html[data-theme="14"]) :is(.mdeditor-fab-btn, .book-reader-pin-btn, .book-reader-underline-trash-btn){
+  :where(html[data-theme="8"],html[data-theme="9"],html[data-theme="10"],html[data-theme="11"],html[data-theme="12"],html[data-theme="13"],html[data-theme="14"]) :is(.mdeditor-fab-btn, .book-reader-pin-btn){
     background:var(--tab-bg, var(--parchment));
     border:1px solid var(--wood);
   }

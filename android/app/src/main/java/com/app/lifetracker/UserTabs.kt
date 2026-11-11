@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 8.1 (10.11)
+// Версия: 8.2 (11.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -51,7 +51,7 @@ import kotlin.math.roundToInt
  * под кнопки, как содержимое остальных вкладок. Вырез по контуру кнопки — `clipOutPath` (WebView честно учитывает такой
  * сложный вырез только с Android 10, поэтому окна включаются с API 29); нажатие, начатое в окне, отдаётся нижнему (главному) WebView.
  */
-private class SiteWebView(context: Context) : WebView(context) {
+private class SiteWebView(context: Context) : SelectionMenuWebView(context) {
     private var holes: List<RectF> = emptyList()
     private var radius = 0f
     private var passThrough = false
@@ -556,6 +556,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
     private fun hideTab(t: Tab) {
         if (!t.shown) return
         t.shown = false
+        activity.siteSelectionMenu.hide()
         val v = t.view ?: return
         saveTab(t)
         v.clearFocus()
@@ -1325,6 +1326,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         t.view?.let { return it }
         evictIfNeeded(t)
         val v = SiteWebView(activity)
+        v.selectionListener = activity.siteSelectionMenu
         v.setHoles(holes, 8f * activity.resources.displayMetrics.density)
         v.setBackgroundColor(0xFFFFFFFF.toInt())
         v.isVerticalScrollBarEnabled = false

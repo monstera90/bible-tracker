@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.3 (03.11)
+// Версия: 1.4 (11.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -99,6 +99,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
 
     fun hide() {
         shown = false
+        activity.siteSelectionMenu.hide()
         activity.setSiteKeyboardOverlay(false)
         val v = view ?: return
         v.clearFocus()
@@ -148,7 +149,8 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     @SuppressLint("SetJavaScriptEnabled")
     private fun ensureView(): WebView {
         view?.let { return it }
-        val v = WebView(activity)
+        val v = SelectionMenuWebView(activity)
+        v.selectionListener = activity.siteSelectionMenu
         v.setBackgroundColor(0xFFFFFFFF.toInt())
         v.isVerticalScrollBarEnabled = false
         v.isHorizontalScrollBarEnabled = false

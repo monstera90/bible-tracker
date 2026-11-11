@@ -1,12 +1,14 @@
 /* ===========================================================================
    ctxmenu.js
-   Версия: 1.1 (10.11)
+   Версия: 2.0 (11.11)
    Круговое контекстное меню выделения текста и история скопированных в приложении фрагментов.
    Системное меню выделения в APK скрыто (SelectionMenuWebView.kt), поэтому «Копировать / Вставить / Вырезать» и
    «Переслать в задачу» — здесь. Круг из пяти секторов-пиктограмм: копировать, вставить, вырезать, переслать (стрелка
-   вправо), последние 10 скопированных фрагментов.
+   вправо), последние 10 скопированных фрагментов; в центре — ластик: удаляет выделенный текст (заметки, поля ввода),
+   у текста «только для чтения» неактивен. Подчёркнутый фрагмент книги: `showFor` открывает тот же круг по тапу, ластик
+   снимает подчёркивание (своя функция `erase`). Страницы вкладок-сайтов в APK — тот же круг в Kotlin (SiteSelectionMenu.kt).
    Экспорт: window.LTClip.{push,list,clear} — история (localStorage `ltClipHistory_v1`, только устройство; пишет
-   window.LTCopyText из my.js); window.LTCtx.{init,hide,toast}. my.js зовёт init({cm, sendToTask}) один раз.
+   window.LTCopyText из my.js); window.LTCtx.{init,hide,toast,showFor}. my.js зовёт init({cm, sendToTask}) один раз.
    Без сторонних библиотек, ES5 (старый WebView): без pointer events, без :has(), без flex-gap.
    =========================================================================== */
 (function(){
@@ -81,8 +83,10 @@
       ".lt-ctx-ico{fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;pointer-events:none;}" +
       ".lt-ctx-dis{opacity:.38;cursor:default;}" +
       ".lt-ctx-dis:active path.lt-ctx-bg{fill:var(--parchment);}" +
-      ".lt-ctx-hub{fill:var(--parchment-dark);stroke:var(--wood);stroke-width:1.5;cursor:pointer;}" +
-      ".lt-ctx-hubx{fill:none;stroke:var(--ink-soft);stroke-width:1.8;stroke-linecap:round;pointer-events:none;}" +
+      ".lt-ctx-hubg{color:var(--wood-dark);cursor:pointer;}" +
+      ".lt-ctx-hub{fill:var(--parchment-dark);stroke:var(--wood);stroke-width:1.5;}" +
+      ".lt-ctx-hubg:active .lt-ctx-hub{fill:var(--gold);}" +
+      ".lt-ctx-hubg.lt-ctx-dis:active .lt-ctx-hub{fill:var(--parchment-dark);}" +
       ".lt-ctx-list{position:fixed;z-index:100001;box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch;" +
         "background:var(--parchment);border:1px solid var(--groove-shadow);border-radius:12px;box-shadow:0 4px 14px rgba(0,0,0,.4);" +
         "font-family:\"Palatino Linotype\",Georgia,serif;color:var(--ink);-webkit-user-select:none;user-select:none;}" +
@@ -105,7 +109,11 @@
     paste: '<path d="M9 3h6v3H9z"></path><path d="M8 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2"></path>',
     cut:   '<circle cx="6" cy="6" r="2.6"></circle><circle cx="6" cy="18" r="2.6"></circle><path d="M8 7.8L20 18"></path><path d="M8 16.2L20 6"></path>',
     fwd:   '<path d="M5 12h13"></path><path d="M13 6l6 6-6 6"></path>',
-    hist:  '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"></path><path d="M3.5 4v4.5H8"></path><path d="M12 7.5V12l3 2"></path>'
+    hist:  '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"></path><path d="M3.5 4v4.5H8"></path><path d="M12 7.5V12l3 2"></path>',
+    erase: '<path d="M9.132 6.404L16.095 1.528L21.831 9.72L14.868 14.596Z" fill="currentColor" fill-opacity=".25" stroke="none"></path>' +
+           '<path d="M2.169 11.28L16.095 1.528L21.831 9.72L7.905 19.472Z" stroke-width="1.5"></path>' +
+           '<path d="M9.132 6.404L14.868 14.596" stroke-width="1.5"></path>' +
+           '<path d="M5 22H19" stroke-width="1.5"></path>'
   };
   var SECTORS = [
     { act: "copy",  title: "Копировать" },
@@ -125,7 +133,7 @@
       " L" + pt(cx, cy, r, a1) + " A" + r + " " + r + " 0 0 0 " + pt(cx, cy, r, a0) + " Z";
   }
 
-  function menuSvg(en){
+  function menuSvg(en, eraseTitle){
     var c = SIZE / 2, R = c - 4, r = 25, n = SECTORS.length, step = 360 / n;
     var html = '<svg viewBox="0 0 ' + SIZE + ' ' + SIZE + '" xmlns="http://www.w3.org/2000/svg">';
     for(var i = 0; i < n; i++){
@@ -138,8 +146,10 @@
         '<g class="lt-ctx-ico" transform="translate(' + (parseFloat(mp[0]) - 12).toFixed(2) + ' ' + (parseFloat(mp[1]) - 12).toFixed(2) + ')">' + ICONS[sec.act] + '</g>' +
         '</g>';
     }
-    html += '<g data-act="close"><circle class="lt-ctx-hub" cx="' + c + '" cy="' + c + '" r="' + (r - 3) + '"></circle>' +
-      '<path class="lt-ctx-hubx" d="M' + (c - 6) + ' ' + (c - 6) + 'L' + (c + 6) + ' ' + (c + 6) + 'M' + (c + 6) + ' ' + (c - 6) + 'L' + (c - 6) + ' ' + (c + 6) + '"></path></g>';
+    // центр — ластик (удалить выделенное; в книге — снять подчёркивание)
+    html += '<g class="lt-ctx-hubg' + (en.erase ? '' : ' lt-ctx-dis') + '" data-act="erase"><title>' + eraseTitle + '</title>' +
+      '<circle class="lt-ctx-hub" cx="' + c + '" cy="' + c + '" r="' + (r - 3) + '"></circle>' +
+      '<g class="lt-ctx-ico" transform="translate(' + (c - 12) + ' ' + (c - 12) + ')">' + ICONS.erase + '</g></g>';
     return html + '</svg>';
   }
 
@@ -315,13 +325,17 @@
     S.root = null; S.listEl = null;
   }
   function hide(){
+    var c = S.ctx;
     removeEls();
     S.ctx = null;
+    if(c && typeof c.onHide === "function"){ try{ c.onHide(); }catch(e){} }
   }
 
   function show(ctx, rect){
     injectStyle();
     removeEls();
+    var prev = S.ctx;
+    if(prev && prev !== ctx && typeof prev.onHide === "function"){ try{ prev.onHide(); }catch(e){} }
     S.ctx = ctx;
     var editable = ctx.kind !== "ro";
     var has = !!(ctx.text && ctx.text.replace(/\s+/g, ""));
@@ -330,7 +344,9 @@
       paste: editable,
       cut: editable && has,
       fwd: has && !!S.hooks.sendToTask,
-      hist: editable
+      hist: editable,
+      // ластик: у книги и других мест со своим действием — всегда; иначе удаляет выделенный текст, если его можно менять
+      erase: typeof ctx.erase === "function" || (editable && has)
     };
     var a = rect || ctx.rect || { left: window.innerWidth / 2, right: window.innerWidth / 2, top: window.innerHeight / 2, bottom: window.innerHeight / 2 };
     var pos = placeBox(DISP, DISP, a);
@@ -338,7 +354,7 @@
     root.className = "lt-ctx-root";
     root.style.left = pos.left + "px";
     root.style.top = pos.top + "px";
-    root.innerHTML = menuSvg(en);
+    root.innerHTML = menuSvg(en, ctx.eraseTitle || "Удалить выделенный текст");
     // нажатие на круг не отнимает фокус и не сбрасывает выделение
     root.addEventListener("mousedown", function(e){ e.preventDefault(); });
     root.addEventListener("click", onRootClick);
@@ -405,7 +421,7 @@
     if(!g) return;
     var act = g.getAttribute("data-act");
     var c = S.ctx;
-    if(act === "close" || !c){ if(c) S.dismissed = sigOf(c); hide(); return; }
+    if(!c){ hide(); return; }
     if(g.getAttribute("class") && g.getAttribute("class").indexOf("lt-ctx-dis") !== -1) return;
     if(act === "hist"){ openList(); return; }
     S.dismissed = sigOf(c);
@@ -425,6 +441,9 @@
         if(!t){ toast("Буфер обмена пуст"); return; }
         if(!replaceSel(c, t)) toast("Не удалось вставить");
       });
+    }else if(act === "erase"){
+      if(typeof c.erase === "function"){ try{ c.erase(); }catch(eEr){} }
+      else if(!replaceSel(c, "")) toast("Не удалось удалить");
     }else if(act === "fwd"){
       // у книги и другого текста «только для чтения» выделение остаётся на месте; в заметке и задаче — убирается
       var remove = c.kind === "ro" ? null : function(){ return replaceSel(c, ""); };
@@ -449,6 +468,7 @@
 
   document.addEventListener("selectionchange", function(){
     if(S.listEl) return;
+    if(S.ctx && S.ctx.pinned) return; // круг подчёркнутого фрагмента привязан к тапу, а не к выделению
     if(S.root) hide();
     arm();
   });
@@ -485,6 +505,10 @@
     if(inOwnUi(e.target)) return;
     arm(250);
   }, true);
+  document.addEventListener("mousedown", function(e){
+    if(inOwnUi(e.target)) return;
+    if(S.ctx && S.ctx.pinned) hide(); // мышь: клик мимо круга убирает его (у касаний это делает touchstart)
+  }, true);
 
   function onLongPress(){
     S.lpT = 0;
@@ -507,6 +531,22 @@
   window.addEventListener("popstate", function(){ hide(); });
 
   // ===================== ПУБЛИЧНОЕ =====================
+  // Круг по тапу на подчёркнутый фрагмент книги: o = {text, rect:{left,top,right|width,bottom|height}, erase(), eraseTitle, onHide}.
+  // Тип «только для чтения»: копировать и переслать работают, вставить/вырезать/история неактивны, ластик вызывает o.erase.
+  function showFor(o){
+    o = o || {};
+    var r = o.rect || null;
+    if(r){
+      r = { left: r.left, top: r.top,
+        right: r.right != null ? r.right : r.left + (r.width || 0),
+        bottom: r.bottom != null ? r.bottom : r.top + (r.height || 0) };
+    }
+    hide();
+    S.dismissed = null;
+    show({ kind: "ro", text: String(o.text == null ? "" : o.text), rect: r, erase: o.erase,
+      eraseTitle: o.eraseTitle, onHide: o.onHide, pinned: true }, r);
+  }
+
   // hooks: { cm: {info(el)→{from,to,text}|null, replace(from,to,text)→bool}, sendToTask(text, {remove}) }
   window.LTCtx = {
     init: function(hooks){
@@ -514,6 +554,7 @@
       injectStyle();
     },
     hide: hide,
-    toast: toast
+    toast: toast,
+    showFor: showFor
   };
 })();

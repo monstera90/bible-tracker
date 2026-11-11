@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 146.0 (11.11)
+   Версия: 147.0 (11.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -14260,16 +14260,14 @@
       '<path d="M6.5 17.5L16 8l3 3-9.5 9.5H6.5v-3z"></path>' +
       '<path d="M14 6l4 4"></path>' +
     '</svg>';
-  // Плавающая кнопка-урна над подчёркиванием — тап по уже подчёркнутому фрагменту показывает эту
-  // кнопку рядом с ним (см. showBookReaderUnderlineTrashBtn ниже), тап по ней снимает
-  // подчёркивание. Тот же язык иконок, что и остальные кнопки ридера.
-  var READER_TRASH_ICON_SVG =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
-      '<path d="M5 7h14"></path>' +
-      '<path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>' +
-      '<path d="M7 7l1 13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-13"></path>' +
-      '<line x1="10" y1="11" x2="10" y2="17"></line>' +
-      '<line x1="14" y1="11" x2="14" y2="17"></line>' +
+  // Ластик в центре круга над подчёркиванием (тап по подчёркнутому фрагменту — showBookReaderUnderlineTrashBtn
+  // ниже); здесь нужен только для справки ридера. Тот же рисунок, что в ctxmenu.js (ICONS.erase).
+  var READER_ERASER_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M9.132 6.404L16.095 1.528L21.831 9.72L14.868 14.596Z" fill="currentColor" fill-opacity=".25" stroke="none"></path>' +
+      '<path d="M2.169 11.28L16.095 1.528L21.831 9.72L7.905 19.472Z"></path>' +
+      '<path d="M9.132 6.404L14.868 14.596"></path>' +
+      '<path d="M5 22H19"></path>' +
     '</svg>';
 
   // XML-декларация в начале fb2 (<?xml ... encoding="windows-1251"?>) всегда ASCII-совместима,
@@ -14792,47 +14790,28 @@
       attachBookNote(hash, st.name ? stripBookExt(st.name) : "", finishWithNoteId);
     }
   }
-  // Тап по подсветке: «Копировать» и урна над ней (та же обёртка и кнопки, что у подчёркиваний в тексте книг).
+  // Тап по подсветке: круг контекстного меню (ctxmenu.js, LTCtx.showFor — тот же, что у подчёркиваний в тексте книг);
+  // ластик в центре снимает подсветку.
   function showPdfHighlightActions(hl, rect){
     removeBookReaderUnderlineTrashBtn();
-    if(!settingsModalBox || !bookReaderState) return;
-    var boxRect = settingsModalBox.getBoundingClientRect();
+    if(!bookReaderState || !window.LTCtx || !window.LTCtx.showFor) return;
     var hash = bookReaderState.hash;
-    var wrap = document.createElement("div");
-    wrap.className = "book-reader-underline-actions";
-    wrap.style.left = (rect.left - boxRect.left + rect.width / 2) + "px";
-    wrap.style.top = (rect.top - boxRect.top) + "px";
-    var copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.className = "book-reader-underline-trash-btn book-reader-underline-copy-btn";
-    copyBtn.title = "Копировать";
-    copyBtn.innerHTML = READER_COPY_ICON_SVG;
-    var btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "book-reader-underline-trash-btn";
-    btn.title = "Убрать подчёркивание";
-    btn.innerHTML = READER_TRASH_ICON_SVG;
-    wrap.appendChild(copyBtn);
-    wrap.appendChild(btn);
-    settingsModalBox.appendChild(wrap);
-    bookReaderUnderlineTrashBtn = wrap;
-    bindBookReaderUnderlineDismissOnce();
-    copyBtn.addEventListener("click", function(ev){
-      ev.stopPropagation();
-      if(hl.text) window.LTCopyText(hl.text);
-      removeBookReaderUnderlineTrashBtn();
+    window.LTCtx.showFor({
+      text: hl.text || "",
+      rect: rect,
+      eraseTitle: "Убрать подчёркивание",
+      erase: function(){
+        var removed = removeBookUnderline(hash, hl.id);
+        var data = getBookState(hash);
+        if(removed && removed.movedToNote && data && data.noteId && MdEditor && MdEditor.removeTextFromNoteId && removed.position && removed.position.text){
+          // false — в заметке уже не точно такой текст (правили вручную): заметку не трогаем, это не ошибка
+          MdEditor.removeTextFromNoteId(data.noteId, removed.position.text);
+        }
+        refreshPdfHighlights();
+      },
+      onHide: function(){ bookReaderUnderlineTrashBtn = null; }
     });
-    btn.addEventListener("click", function(ev){
-      ev.stopPropagation();
-      var removed = removeBookUnderline(hash, hl.id);
-      var data = getBookState(hash);
-      if(removed && removed.movedToNote && data && data.noteId && MdEditor && MdEditor.removeTextFromNoteId && removed.position && removed.position.text){
-        // false — в заметке уже не точно такой текст (правили вручную): заметку не трогаем, это не ошибка
-        MdEditor.removeTextFromNoteId(data.noteId, removed.position.text);
-      }
-      removeBookReaderUnderlineTrashBtn();
-      refreshPdfHighlights();
-    });
+    bookReaderUnderlineTrashBtn = true;
   }
   function pdfReaderFabRowHtml(){
     var txt = "mdeditor-fab-btn mdeditor-fab-btn-text";
@@ -15011,8 +14990,8 @@
     html += iconRow('<span style="font-weight:600;font-size:15px;line-height:1;">Аа</span>', false,
       "Размер шрифта и переносы слов. Нажатие раскрывает ползунок размера (влево — мельче, вправо — крупнее) и кнопку переносов слов (включает и выключает автоматические переносы). Размер шрифта общий с задачами и «Моим блокнотом», у режима чтения он свой.");
     html += iconRow(READER_SELECT_ICON_SVG, false,
-      "Подчёркивание текста (без кнопки): задержите палец на слове — оно сразу подчёркивается и дописывается в заметку книги; не отпуская, ведите палец вниз или вверх — подчёркивание растянется по словам (в пределах абзаца). Когда заметка ещё не привязана, приложение предложит создать новую или выбрать существующую. Нажатие на подчёркнутый текст показывает кнопки: копировать текст и " +
-      '<span class="task-icon-btn" style="display:inline-flex;vertical-align:middle;width:1.3em;height:1.3em;">' + READER_TRASH_ICON_SVG + '</span> — снять подчёркивание.');
+      "Подчёркивание текста (без кнопки): задержите палец на слове — оно сразу подчёркивается и дописывается в заметку книги; не отпуская, ведите палец вниз или вверх — подчёркивание растянется по словам (в пределах абзаца). Когда заметка ещё не привязана, приложение предложит создать новую или выбрать существующую. Нажатие на подчёркнутый текст открывает круг: копировать, переслать в задачи, а ластик в центре круга " +
+      '<span class="task-icon-btn" style="display:inline-flex;vertical-align:middle;width:1.3em;height:1.3em;">' + READER_ERASER_ICON_SVG + '</span> — снять подчёркивание.');
     html += iconRow(READER_BOOKMARK_ADD_ICON_SVG, false,
       "Добавляет отдельную закладку на первый видимый на экране абзац. Каждое нажатие — новая самостоятельная закладка (имя даётся автоматически), основную она не трогает. Все закладки собраны на экране «Закладки» (кнопка слева от «домика» в списках заметок и книг); нажатие на значок закладки у правого края абзаца снимает её.");
     html += iconRow(READER_BOOKMARK_ICON_SVG, false,
@@ -16599,13 +16578,12 @@
     }
   }
 
-  // ===================== СНЯТИЕ ПОДЧЁРКИВАНИЯ — КНОПКА-УРНА (READER_PLAN.md,
-  // Этап D, шаг 13, доработка 11.09) =====================
+  // ===================== СНЯТИЕ ПОДЧЁРКИВАНИЯ — КРУГ С ЛАСТИКОМ (READER_PLAN.md, Этап D, шаг 13) =====================
   // Тап по уже подчёркнутому фрагменту (<mark class="book-reader-underline">, data-underline-id на
-  // нём — см. renderRunsHtml/getBookUnderlineRangesForBlock выше) показывает рядом круглую
-  // плавающую кнопку с иконкой урны (READER_TRASH_ICON_SVG). Тап по кнопке:
-  // 1) снимает подчёркивание из модели книги (removeBookUnderline) — навсегда, в отличие от
-  //   прежнего поведения "никогда не удаляются";
+  // нём — см. renderRunsHtml/getBookUnderlineRangesForBlock выше) открывает круговое меню ctxmenu.js
+  // (LTCtx.showFor): копировать и переслать в задачи работают с текстом этого подчёркивания, вставить/
+  // вырезать/история неактивны (книга только читается). Ластик в центре — снятие подчёркивания:
+  // 1) снимает подчёркивание из модели книги (removeBookUnderline) — навсегда;
   // 2) если текст этого подчёркивания успел попасть в заметку книги (movedToNote) — пытается убрать
   //   его оттуда ТЕМ ЖЕ приёмом, что и открепление иллюстрации: MdEditor.removeTextFromNoteId ищет
   //   ТОЧНОЕ совпадение текста. Если пользователь уже отредактировал этот кусок в заметке вручную —
@@ -16613,11 +16591,8 @@
   //   подчёркивание в самом тексте книги при этом всё равно снимается;
   // 3) перерисовывает абзац (refreshBookReaderParagraphHighlight) — без полного рендера ридера,
   //   чтобы не сбрасывать scrollTop.
-  // Кнопка позиционируется абсолютно от .settings-modal-box (тот же приём, что диалоги имени
-  // заметки/очистки — settingsModalBox.appendChild), а не добавляется внутрь #settingsTabContent, —
-  // иначе её съело бы обнуление innerHTML при следующем рендере абзаца. Из-за этого при скролле
-  // текста или клике вне кнопки/урны она просто скрывается (см. bindBookReaderUnderlineDismissOnce
-  // ниже), а не остаётся "прилипшей" не на своём месте.
+  // Круг скрывается сам (тап мимо, прокрутка — ctxmenu.js); bookReaderUnderlineTrashBtn — признак «круг
+  // подчёркивания открыт» (снимается через onHide), чтобы полный рендер ридера мог его убрать.
 
   // Плоский текст блока (конкатенация runs[].text) — те же координаты, что s/e у подчёркивания;
   // нужен, чтобы восстановить исходный текст выделения по position и проверить/убрать его в
@@ -16628,54 +16603,27 @@
 
   var bookReaderUnderlineTrashBtn = null;
   function removeBookReaderUnderlineTrashBtn(){
-    if(bookReaderUnderlineTrashBtn && bookReaderUnderlineTrashBtn.parentNode){
-      bookReaderUnderlineTrashBtn.parentNode.removeChild(bookReaderUnderlineTrashBtn);
-    }
+    if(!bookReaderUnderlineTrashBtn) return;
     bookReaderUnderlineTrashBtn = null;
+    try{ window.LTCtx.hide(); }catch(e){}
   }
 
   function showBookReaderUnderlineTrashBtn(markEl, hash, underlineId, ch, blk){
     removeBookReaderUnderlineTrashBtn();
-    if(!settingsModalBox) return;
-    var rect = markEl.getBoundingClientRect();
-    var boxRect = settingsModalBox.getBoundingClientRect();
-    // Две кнопки рядом над подчёркиванием (13.10): «Копировать» и урна. Обёртка — один элемент
-    // (bookReaderUnderlineTrashBtn), её и ищет скрытие по тапу вне (bindBookReaderUnderlineDismissOnce).
-    var wrap = document.createElement("div");
-    wrap.className = "book-reader-underline-actions";
-    wrap.style.left = (rect.left - boxRect.left + rect.width / 2) + "px";
-    wrap.style.top = (rect.top - boxRect.top) + "px";
-    var copyBtn = document.createElement("button");
-    copyBtn.type = "button";
-    copyBtn.className = "book-reader-underline-trash-btn book-reader-underline-copy-btn";
-    copyBtn.title = "Копировать";
-    copyBtn.innerHTML = READER_COPY_ICON_SVG;
-    var btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "book-reader-underline-trash-btn";
-    btn.title = "Убрать подчёркивание";
-    btn.innerHTML = READER_TRASH_ICON_SVG;
-    wrap.appendChild(copyBtn);
-    wrap.appendChild(btn);
-    settingsModalBox.appendChild(wrap);
-    bookReaderUnderlineTrashBtn = wrap;
-    copyBtn.addEventListener("click", function(ev){
-      ev.stopPropagation();
-      var data = getBookState(hash);
-      var u = data && data.underlines ? data.underlines.filter(function(x){ return x.id === underlineId; })[0] : null;
-      var chapter = bookReaderState && bookReaderState.chapters[ch];
-      var block = chapter && chapter.blocks[blk];
-      if(u && u.position && block){
-        var text = flatBlockText(block).slice(u.position.s, u.position.e).trim();
-        if(text) window.LTCopyText(text);
-      }
-      removeBookReaderUnderlineTrashBtn();
+    if(!window.LTCtx || !window.LTCtx.showFor) return;
+    var data = getBookState(hash);
+    var u = data && data.underlines ? data.underlines.filter(function(x){ return x.id === underlineId; })[0] : null;
+    var chapter = bookReaderState && bookReaderState.chapters[ch];
+    var block = chapter && chapter.blocks[blk];
+    var text = (u && u.position && block) ? flatBlockText(block).slice(u.position.s, u.position.e).trim() : "";
+    window.LTCtx.showFor({
+      text: text,
+      rect: markEl.getBoundingClientRect(),
+      eraseTitle: "Убрать подчёркивание",
+      erase: function(){ deleteBookUnderline(hash, underlineId, ch, blk); },
+      onHide: function(){ bookReaderUnderlineTrashBtn = null; }
     });
-    btn.addEventListener("click", function(ev){
-      ev.stopPropagation();
-      deleteBookUnderline(hash, underlineId, ch, blk);
-      removeBookReaderUnderlineTrashBtn();
-    });
+    bookReaderUnderlineTrashBtn = true;
   }
 
   // Собственно снятие: см. пункты 1-3 в комментарии к разделу выше.
@@ -16696,7 +16644,7 @@
     refreshBookReaderParagraphHighlight(ch, blk);
   }
 
-  // Клик по <mark> — открывает кнопку-урну; игнорируем, если это конец протяжённого выделения
+  // Клик по <mark> — открывает круг с ластиком; игнорируем, если это конец протяжённого выделения
   // (drag) — иначе обычное выделение текста внутри уже подчёркнутого фрагмента (например, для
   // копирования) конфликтовало бы с открытием кнопки при каждом отпускании пальца/мыши. scope —
   // необязательный элемент, внутри которого искать <mark> (по умолчанию — весь #settingsTabContent,
@@ -16726,7 +16674,7 @@
     bindBookReaderUnderlineDismissOnce();
   }
 
-  // Скрытие кнопки-урны вне тапа по ней самой/по подчёркиванию — один document-level слушатель,
+  // Скрытие круга подчёркивания вне тапа по нему самому/по подчёркиванию — один document-level слушатель,
   // включается лениво, один раз. "scroll" не всплывает — слушаем в фазе перехвата (capture=true),
   // чтобы поймать скролл #settingsTabContent.
   var bookReaderUnderlineDismissBound = false;
@@ -16735,7 +16683,7 @@
     bookReaderUnderlineDismissBound = true;
     document.addEventListener("click", function(ev){
       if(!bookReaderUnderlineTrashBtn) return;
-      if(bookReaderUnderlineTrashBtn.contains(ev.target)) return;
+      if(ev.target.closest && ev.target.closest(".lt-ctx-root, .lt-ctx-list")) return;
       if(ev.target.closest && ev.target.closest(".book-reader-underline")) return;
       removeBookReaderUnderlineTrashBtn();
     });

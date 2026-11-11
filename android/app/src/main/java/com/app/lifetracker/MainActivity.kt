@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 16.0 (10.11)
+// Версия: 17.0 (11.11)
 // Версия: 11.0 (04.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
@@ -157,6 +157,10 @@ class MainActivity : ComponentActivity() {
 
     /** Вкладки-сайты ряда «Интернет» (кнопка «+»): по WebView на вкладку; управляется мостом (utab*). */
     lateinit var userTabs: UserTabs
+        private set
+
+    /** Круговое меню выделения текста на страницах сайтов и вкладки «Claude» (аналог ctxmenu.js главной страницы). */
+    lateinit var siteSelectionMenu: SiteSelectionMenu
         private set
 
     /** true, пока загружена страница приложения (https://localhost); мост отвечает только в этом случае. */
@@ -737,6 +741,17 @@ class MainActivity : ComponentActivity() {
         if (hasFocus && fullscreen) applyFullscreen(true)
     }
 
+    /** Выполняет скрипт в главной странице приложения (только доверенной); [cb] получает результат (JSON) в главном потоке. */
+    fun evalInPage(js: String, cb: ((String?) -> Unit)? = null) {
+        runOnUiThread {
+            if (!pageTrusted) {
+                cb?.invoke(null)
+            } else {
+                webView.evaluateJavascript(js) { r -> cb?.invoke(r) }
+            }
+        }
+    }
+
     /** Короткое сообщение внизу экрана (из любого потока). */
     fun toast(text: String) {
         runOnUiThread { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
@@ -930,6 +945,7 @@ class MainActivity : ComponentActivity() {
         navStrip = View(this).apply { setBackgroundColor(PAGE_BG_COLOR) }
         webView = SelectionMenuWebView(this) // без системного меню выделения (копирование — своя кнопка страницы)
         webHost = FrameLayout(this).apply { addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
+        siteSelectionMenu = SiteSelectionMenu(this, webHost)
         claudeTab = ClaudeTab(this, webHost)
         userTabs = UserTabs(this, webHost)
         inAppIsland = InAppIsland.get(applicationContext)
