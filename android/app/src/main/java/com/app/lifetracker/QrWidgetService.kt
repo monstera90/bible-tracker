@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.2 (12.11)
+// Версия: 1.1 (12.11)
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
@@ -38,14 +38,10 @@ class QrWidgetService : RemoteViewsService() {
             bitmaps.clear()
         }
 
-        // ⚠️ Смахивание StackView фабрике не видно, а RemoteViewsAdapter кэширует уже загруженные карточки и getViewAt при листании не
-        // зовёт. Поэтому карточек «виртуально» в VIRT раз больше (позиция % число карточек): окно кэша сдвигается вместе с листанием,
-        // и на каждое смахивание система запрашивает у фабрики новую позицию — это и есть сигнал для точек.
-        override fun getCount(): Int = if (cards.size < 2) cards.size else cards.size * VIRT
+        override fun getCount(): Int = cards.size
 
         override fun getViewAt(position: Int): RemoteViews? {
-            if (cards.isEmpty()) return null
-            val c = cards[position % cards.size]
+            val c = cards.getOrNull(position) ?: return null
             val rv = RemoteViews(ctx.packageName, R.layout.qr_widget_item)
             val bmp = bitmaps.getOrPut(c.key) { QrWidgets.bitmapFor(ctx, c) }
             rv.setImageViewBitmap(R.id.qr_card_img, bmp)
@@ -56,12 +52,11 @@ class QrWidgetService : RemoteViewsService() {
 
         override fun getLoadingView(): RemoteViews? = null
         override fun getViewTypeCount(): Int = 1
-        override fun getItemId(position: Int): Long = position.toLong()
+        override fun getItemId(position: Int): Long = (cards.getOrNull(position)?.key?.hashCode() ?: position).toLong()
         override fun hasStableIds(): Boolean = true
 
         companion object {
             private const val QUIET_MS = 2500L
-            private const val VIRT = 20
         }
     }
 }

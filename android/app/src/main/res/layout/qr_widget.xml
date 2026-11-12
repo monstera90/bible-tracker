@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Версия: 3.0 (12.11)
+<!-- Версия: 2.3 (12.11)
      Виджет «Стопка QR-карточек» 2×2. Картинка карточки — прямоугольник высотой 1,06 ширины (QrWidgets.FACE_ASPECT) и заполняет весь слот
      лаунчера. StackView рисует «стопку» сам, и его передняя карточка (замер на Poco, в долях размера StackView): по ширине ≈0,877, по
      высоте ≈0,833, с внутренним отступом от левого нижнего угла ≈2,2 % ширины и ≈1,8 % высоты; остальные карточки выглядывают сверху
@@ -86,5 +86,16 @@
             android:padding="12dp"
             android:textColor="#FFFFFF"
             android:textSize="12sp" />
+
+        <ImageView
+            android:id="@+id/qr_dots"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end|center_vertical"
+            android:layout_marginEnd="5dp"
+            android:layout_marginRight="5dp"
+            android:contentDescription="@null"
+            android:scaleType="center"
+            android:visibility="gone" />
     </FrameLayout>
 </FrameLayout>
