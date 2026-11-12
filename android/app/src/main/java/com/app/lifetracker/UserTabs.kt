@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 8.2 (11.11)
+// Версия: 8.3 (13.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -174,7 +174,8 @@ private class SiteWebView(context: Context) : SelectionMenuWebView(context) {
  * скрипт снимается. Плавающее окно одно: новое видео закрывает прежнее (оно ставится на паузу).
  * Окно включается режимом видео (`IslandSettings.floatVideo`, кнопка на раскрытой карточке видео в `InAppIsland`: «фон» ↔ «фон с
  * плавающим окном»; одно значение на приложение). Окно — надстройка над фоновым воспроизведением (см. ниже): служба и остров идут
- * как обычно, а ролик, который нашёл PIN_JS, дополнительно показывается в окне; не нашёл (звук, iframe) — остаётся только фон.
+ * как обычно, а ролик, который нашёл PIN_JS (<video> страницы) или `pinFrameJs` (плеер в iframe — закрепляется сам кадр, состояние и пауза — через FRAME_JS), дополнительно
+ * показывается в окне; не нашёл (звук без картинки) — остаётся только фон.
  *
  * Фоновое воспроизведение (SiteMediaService): если на вкладке играет видео или звук, а человек ушёл с вкладки (`hideTab`), погасил
  * экран или свернул приложение (`pause`/`onAppHidden`), WebView вкладки НЕ ставится на паузу (`Tab.bg`), страница видит себя
@@ -218,7 +219,7 @@ class UserTabs(private val activity: MainActivity, private val host: FrameLayout
          * (в пределах окна). Ответ: [1, innerWidth, innerHeight, ширина видео, высота видео] (CSS-пиксели) или [0], если подходящего видео нет.
          * Подходит: играет, есть кадр, не зациклено (фоновые ролики сайтов), шире 160 px, со звуком или длиннее минуты/прямой эфир.
          */
-        private const val PIN_JS = """(function(){try{var D=document,W=window;
+        private const val PIN_VIDEO_PICK = """(function(){try{var D=document,W=window;
 if(W.__ltUnpin){try{W.__ltUnpin();}catch(e){}}
 var vs=D.getElementsByTagName('video'),best=null,ba=-1,i;
 for(i=0;i<vs.length;i++){var v=vs[i];
@@ -227,9 +228,32 @@ if(v.muted&&!(v.duration>60||!isFinite(v.duration)))continue;
 var r=v.getBoundingClientRect();if(r.width<160)continue;
 var a=r.width*r.height;if(a>ba){ba=a;best=v;}}
 if(!best)return [0];
-var sy=W.pageYOffset||D.documentElement.scrollTop||0;
-var iw=W.innerWidth,ih=W.innerHeight;
 var asp=best.videoHeight/best.videoWidth;
+"""
+
+        /**
+         * Видео в iframe (плеер сайта обычно встроен кадром; чужое происхождение страница не видит): закрепляется сам кадр — он и есть плеер.
+         * Берётся самый большой видимый iframe шире 160 px; свой ролик в нём проверяется, только если кадр того же происхождения. CROSS = true
+         * (оболочка знает по скрипту FRAME_JS, что в кадре играет ролик) — подходит любой кадр, в том числе чужой.
+         */
+        private const val PIN_FRAME_PICK = """(function(CROSS){try{var D=document,W=window;
+if(W.__ltUnpin){try{W.__ltUnpin();}catch(e){}}
+var fs=D.getElementsByTagName('iframe'),best=null,ba=-1,i;
+for(i=0;i<fs.length;i++){var f=fs[i];
+var r=f.getBoundingClientRect();if(r.width<160||r.height<90)continue;
+try{var cs=W.getComputedStyle(f);if(cs.visibility==='hidden'||cs.display==='none')continue;}catch(e){}
+var ok=!!CROSS;
+if(!ok){try{var d=f.contentDocument;if(d){var vv=d.querySelectorAll('video'),j;
+for(j=0;j<vv.length;j++){var q=vv[j];if(!q.paused&&!q.ended&&q.readyState>=2&&!q.loop){ok=true;break;}}}}catch(e){}}
+if(!ok)continue;
+var a=r.width*r.height;if(a>ba){ba=a;best=f;}}
+if(!best)return [0];
+var br=best.getBoundingClientRect();
+var asp=br.height/br.width;
+"""
+
+        private const val PIN_APPLY = """var sy=W.pageYOffset||D.documentElement.scrollTop||0;
+var iw=W.innerWidth,ih=W.innerHeight;
 var bw=iw,bh=iw*asp;if(bh>ih){bh=ih;bw=ih/asp;}
 bw=Math.round(bw);bh=Math.round(bh);
 var anc=[],n=best.parentNode;
@@ -249,7 +273,21 @@ W.__ltUnpin=function(){try{for(var k=0;k<anc.length;k++)anc[k].removeAttribute('
 best.removeAttribute('data-ltpin-v');}catch(e){}
 try{if(st.parentNode)st.parentNode.removeChild(st);}catch(e){}
 try{W.scrollTo(0,sy);}catch(e){}W.__ltUnpin=null;};
-return [1,iw,ih,bw,bh];}catch(e){return [0];}})()"""
+return [1,iw,ih,bw,bh];}catch(e){return [0];}})"""
+
+        private const val PIN_JS = PIN_VIDEO_PICK + PIN_APPLY + "()"
+
+        /** Закрепление iframe с роликом ([PIN_FRAME_PICK]); [cross] — в кадре играет ролик по данным FRAME_JS (подходит любой кадр). */
+        private fun pinFrameJs(cross: Boolean): String = PIN_FRAME_PICK + PIN_APPLY + "(" + cross + ")"
+
+        /** Состояние ролика в закреплённом кадре того же происхождения: [1, на паузе, закончился] или [0], если кадра нет. */
+        private const val FRAME_STATE_JS = "(function(){var f=document.querySelector('[data-ltpin-v]');if(!f)return [0];try{var d=f.contentDocument;var vs=d.querySelectorAll('video'),b=null,i;for(i=0;i<vs.length;i++){if(!vs[i].paused){b=vs[i];break;}}if(!b&&vs.length)b=vs[0];if(!b)return [1,0,0];return [1,b.paused?1:0,b.ended?1:0];}catch(e){return [1,0,0];}})()"
+
+        /** Пауза/воспроизведение ролика в закреплённом кадре того же происхождения: [1, на паузе] или [0]. */
+        private const val FRAME_TOGGLE_JS = "(function(){var f=document.querySelector('[data-ltpin-v]');if(!f)return [0];try{var d=f.contentDocument;var vs=d.querySelectorAll('video'),b=null,i;for(i=0;i<vs.length;i++){if(!vs[i].paused){b=vs[i];break;}}if(!b&&vs.length)b=vs[0];if(!b)return [0];if(b.paused){b.play();}else{b.pause();}return [1,b.paused?1:0];}catch(e){return [0];}})()"
+
+        /** Пауза ролика в закреплённом кадре того же происхождения и снятие закрепления. */
+        private const val FRAME_PAUSE_JS = "(function(){var f=document.querySelector('[data-ltpin-v]');if(f){try{var vs=f.contentDocument.querySelectorAll('video'),i;for(i=0;i<vs.length;i++){vs[i].pause();}}catch(e){}}if(window.__ltUnpin){window.__ltUnpin();}return 1;})()"
 
         /** Снимает PIN_JS (видео продолжает играть). */
         private const val UNPIN_JS = "(function(){if(window.__ltUnpin){window.__ltUnpin();}return 1;})()"
@@ -389,6 +427,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         var saveTask: Runnable? = null
         var floating = false   // WebView сейчас в плавающем окне с видео (FloatingVideo), а не в host
         var floatKind = 0      // KIND_LEFT / KIND_MIN
+        var floatFrame = false // в окне закреплён iframe с роликом (а не <video> страницы)
         var bg = false         // видео/звук играет в фоне (SiteMediaService), WebView не усыпляется
         var lastDiag = ""       // последний записанный в журнал снимок страницы при «видео не найдено»
         var frameProxy: JavaScriptReplyProxy? = null // кадр (iframe) с роликом: канал команд к нему (FRAME_JS)
@@ -769,8 +808,16 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         }
 
         override fun onTogglePlay() {
-            val v = floatTab?.view ?: return
-            v.evaluateJavascript(TOGGLE_JS) { raw ->
+            val ft = floatTab ?: return
+            val v = ft.view ?: return
+            if (ft.floatFrame && frameHas(ft)) {
+                frameSend(ft, "toggle")
+                val paused = !ft.framePaused
+                ft.framePaused = paused
+                floatWin?.setPaused(paused)
+                return
+            }
+            v.evaluateJavascript(if (ft.floatFrame) FRAME_TOGGLE_JS else TOGGLE_JS) { raw ->
                 val a = parseNums(raw)
                 if (a != null && a.size > 1 && a[0] == 1.0) floatWin?.setPaused(a[1] == 1.0)
             }
@@ -863,21 +910,41 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         v.evaluateJavascript(PIN_JS) { raw ->
             val a = parseNums(raw)
             if (a == null || a.isEmpty() || a[0] != 1.0) {
-                onNone()
+                // <video> в самой странице нет — плеер сайта чаще всего встроен кадром (iframe): закрепляется сам кадр
+                tryFloatFrame(t, v, kind, onNone)
             } else {
-                val stale = t.view !== v || t.floating ||
-                    (kind == KIND_LEFT && t.shown) ||
-                    (kind == KIND_MIN && (appVisible || !t.shown))
-                if (stale) {
-                    if (t.view === v && !t.floating) v.evaluateJavascript(UNPIN_JS, null)
-                } else {
-                    startFloating(t, v, kind, a, onNone)
-                }
+                afterPin(t, v, kind, a, false, onNone)
             }
         }
     }
 
-    private fun startFloating(t: Tab, v: WebView, kind: Int, a: DoubleArray, onFail: () -> Unit) {
+    private fun tryFloatFrame(t: Tab, v: WebView, kind: Int, onNone: () -> Unit) {
+        if (t.view !== v || t.floating) return
+        val cross = frameActive(t)
+        v.evaluateJavascript(pinFrameJs(cross)) { raw ->
+            val a = parseNums(raw)
+            if (a == null || a.isEmpty() || a[0] != 1.0) {
+                bgLog("плавающее окно: ни видео, ни кадра с роликом не нашлось (кадр сообщает: ${if (cross) "играет" else "нет"})")
+                onNone()
+            } else {
+                bgLog("плавающее окно: закреплён кадр с роликом")
+                afterPin(t, v, kind, a, true, onNone)
+            }
+        }
+    }
+
+    private fun afterPin(t: Tab, v: WebView, kind: Int, a: DoubleArray, frame: Boolean, onNone: () -> Unit) {
+        val stale = t.view !== v || t.floating ||
+            (kind == KIND_LEFT && t.shown) ||
+            (kind == KIND_MIN && (appVisible || !t.shown))
+        if (stale) {
+            if (t.view === v && !t.floating) v.evaluateJavascript(UNPIN_JS, null)
+        } else {
+            startFloating(t, v, kind, a, frame, onNone)
+        }
+    }
+
+    private fun startFloating(t: Tab, v: WebView, kind: Int, a: DoubleArray, frame: Boolean, onFail: () -> Unit) {
         val iw = if (a.size > 1) a[1] else 0.0
         val bw = if (a.size > 3) a[3] else 0.0
         val bh = if (a.size > 4) a[4] else 0.0
@@ -906,6 +973,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         }
         t.floating = true
         t.floatKind = kind
+        t.floatFrame = frame
         t.shown = false
         floatTab = t
         v.onResume()
@@ -923,7 +991,17 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         if (floatTab === t) floatTab = null
         floatWin?.detach()
         val v = t.view ?: return
-        v.evaluateJavascript(if (pause) PAUSE_JS else UNPIN_JS, null)
+        if (t.floatFrame) {
+            if (pause) {
+                if (frameHas(t)) frameSend(t, "pause")
+                v.evaluateJavascript(FRAME_PAUSE_JS, null)
+            } else {
+                v.evaluateJavascript(UNPIN_JS, null)
+            }
+        } else {
+            v.evaluateJavascript(if (pause) PAUSE_JS else UNPIN_JS, null)
+        }
+        t.floatFrame = false
         restoreToHost(v)
         if (pause) {
             // даём скрипту паузы выполниться, потом усыпляем WebView
@@ -947,7 +1025,17 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
             val t = floatTab
             val v = t?.view
             if (t == null || v == null || !t.floating) return
-            v.evaluateJavascript(STATE_JS) { raw ->
+            if (t.floatFrame && frameHas(t)) {
+                // ролик в кадре: состояние — из сообщений скрипта кадра (FRAME_JS)
+                if (t.frameEnded) {
+                    closeFloat(t, true)
+                } else {
+                    floatWin?.setPaused(t.framePaused)
+                    handler.postDelayed(this, FLOAT_POLL_MS)
+                }
+                return
+            }
+            v.evaluateJavascript(if (t.floatFrame) FRAME_STATE_JS else STATE_JS) { raw ->
                 if (t.floating && floatTab === t) {
                     val a = parseNums(raw)
                     if (a == null || a.isEmpty() || a[0] != 1.0 || (a.size > 2 && a[2] == 1.0)) {
