@@ -1,6 +1,6 @@
 /* ===========================================================================
    usertabs.js
-   Версия: 4.2 (09.11)
+   Версия: 5.0 (13.11)
    Вкладки-сайты бокового ряда «Интернет» (кнопка «+» над вкладкой «Claude», set2s_10). Каждая вкладка — свой адрес, который открывается
    по умолчанию; дальше вкладка помнит, где человек остановился на сайте (в том числе после закрытия приложения).
    Сам сайт показывает ОБОЛОЧКА: отдельный WebView на вкладку поверх области #userTabView (мост LifeTrackerNative ≥ 22, utab*;
@@ -327,9 +327,26 @@
   }
 
   // ---- содержимое вкладки ----
-  // нижний ряд «полный экран + домик» (my.js, mountSiteFabRow) — на каждом экране вкладки
+  // нижний ряд «поделиться + полный экран + домик» (my.js, mountSiteFabRow) — на каждом экране вкладки
   function mountFab(c, t){
-    try{ if(window.SiteTabFab) window.SiteTabFab.mount(c, function(){ goHome(t); }); }catch(e){}
+    try{ if(window.SiteTabFab) window.SiteTabFab.mount(c, function(){ goHome(t); }, function(){ shareTab(t); }); }catch(e){}
+  }
+  // «Поделиться»: ссылка на ТЕКУЩУЮ страницу сайта (адрес берётся у оболочки, а не из t.home) — в системное меню Android
+  function shareTab(t){
+    if(!t) return;
+    var st = readState(t.id), url = String(st.url || "").trim();
+    if(!url || url === "about:blank") return;
+    var title = String(st.title || "").trim();
+    try{
+      if(navigator.share){
+        var p = navigator.share(title ? { title: title, url: url } : { url: url });
+        if(p && p.catch) p.catch(function(){}); // отмена меню — не ошибка
+        return;
+      }
+    }catch(e){}
+    var b = window.LifeTrackerNative;
+    try{ if(b && typeof b.shareText === "function" && b.shareText(title, url)) return; }catch(e){}
+    try{ if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url); }catch(e){}
   }
   // «домик»: первый экран вкладки — адрес по умолчанию (сохранённое место на сайте сбрасывается, как при смене адреса)
   function goHome(t){
