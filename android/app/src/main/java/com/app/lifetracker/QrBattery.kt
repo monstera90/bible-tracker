@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 4.0 (13.11)
+// Версия: 4.1 (13.11)
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -44,6 +44,10 @@ object QrBattery {
 
     /** Во сколько раз значки телефона и наушников и кольца вокруг них больше исходных (толщина линий прежняя). */
     private const val ICON_SCALE = 1.5f
+
+    /** Высота центров колец, доля ширины карточки: верхний ряд — прежнее место кругов карточки «Заряд» (телефон и наушники), нижний ряд карточки «несколько устройств». */
+    private const val ROW_TOP = 0.310f
+    private const val ROW_BOTTOM = 0.740f
 
     /** Ключ карточки в стопке (не совпадает с id настоящих карточек). */
     const val KEY = "__battery"
@@ -374,8 +378,8 @@ object QrBattery {
 
     /**
      * Лицо карточки «несколько устройств»: от одного до четырёх колец со значками, без надписей. Размеры колец и значков те же, что у карточки «Заряд».
-     * Два круга — в один ряд по центру высоты; три — два сверху и один по центру снизу; четыре — два ряда (верхний на месте столбцов карточки «Заряд»,
-     * нижний симметрично относительно середины карточки).
+     * Верхний ряд стоит на месте столбцов карточки «Заряд» (`ROW_TOP`, телефон слева, второе устройство справа; один круг — по центру): один-два круга — только он;
+     * три — третий по центру нижнего ряда (`ROW_BOTTOM`); четыре — два в нижнем ряду под верхними.
      */
     fun renderMulti(ctx: Context, face: Int = DEFAULT_FACE): Bitmap {
         val w = FACE_PX.toFloat()
@@ -393,15 +397,14 @@ object QrBattery {
         val list = devices(ctx)
         val left = 0.268f
         val right = 0.732f
-        val rowTop = 0.273f
-        val rowBottom = QrWidgets.FACE_BODY - rowTop
-        val mid = QrWidgets.FACE_BODY / 2f
+        val rowTop = ROW_TOP
+        val rowBottom = ROW_BOTTOM
         for ((i, d) in list.withIndex()) {
             val fx: Float
             val fy: Float
             when (list.size) {
-                1 -> { fx = 0.5f; fy = mid }
-                2 -> { fx = if (i == 0) left else right; fy = mid }
+                1 -> { fx = 0.5f; fy = rowTop }
+                2 -> { fx = if (i == 0) left else right; fy = rowTop }
                 3 -> if (i < 2) { fx = if (i == 0) left else right; fy = rowTop } else { fx = 0.5f; fy = rowBottom }
                 else -> { fx = if (i % 2 == 0) left else right; fy = if (i < 2) rowTop else rowBottom }
             }
@@ -527,7 +530,7 @@ object QrBattery {
     /** Один столбец с центром на доле [fx] ширины. Размеры и шрифты не зависят от того, один столбец или два; кольца у телефона и наушников одинаковые. */
     private fun column(g: Canvas, w: Float, fx: Float, pct: Int, headphones: Boolean) {
         val cx = w * fx
-        val cy = w * 0.300f
+        val cy = w * ROW_TOP
         ringIcon(g, w, cx, cy, pct, if (headphones) "headphones" else "phone")
 
         val t = Paint(Paint.ANTI_ALIAS_FLAG)

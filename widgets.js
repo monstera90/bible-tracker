@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 3.1 (13.11)
+   Версия: 3.2 (13.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -362,7 +362,7 @@
     function batFaceHtml(w){
       var hex = batHex(w), shade = cardsOf().cardShade(hex);
       function col(cx, pct, hp){
-        var cy = 30, t = ringSvg(cx, cy, pct, hp ? "headphones" : "phone");
+        var cy = 31, t = ringSvg(cx, cy, pct, hp ? "headphones" : "phone");
         t += '<text x="' + cx + '" y="58.2" font-size="5.11" text-anchor="middle" fill="#fff" font-family="sans-serif">Заряд</text>';
         t += '<text x="' + cx + '" y="66.7" font-size="6.5" text-anchor="middle" fill="#fff" font-weight="700" font-family="\'Palatino Linotype\',Georgia,serif">' + (hp ? "Наушники" : "Телефон") + '</text>';
         t += '<text x="' + cx + '" y="85.7" font-size="16" text-anchor="middle" fill="#fff" font-weight="900" font-family="sans-serif">' + pct + '%</text>';
@@ -374,7 +374,7 @@
     function bat2FaceHtml(w){
       var hex = bat2Hex(w), shade = cardsOf().cardShade(hex);
       return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' +
-        ringSvg(26.8, 27.3, 78, "phone") + ringSvg(73.2, 27.3, 64, "headphones") + ringSvg(26.8, 74.7, 52, "watch") + ringSvg(73.2, 74.7, 90, "speaker") + '</svg></div>';
+        ringSvg(26.8, 31, 78, "phone") + ringSvg(73.2, 31, 64, "headphones") + ringSvg(26.8, 74, 52, "watch") + ringSvg(73.2, 74, 90, "speaker") + '</svg></div>';
     }
     // Строка списка виджетов: что в стопке, кроме карточек QR-кодов
     function contentText(w){
