@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.3 (08.11)
+// Версия: 1.4 (13.11)
 
 import android.Manifest
 import android.app.Notification
@@ -19,8 +19,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
+import android.media.AudioAttributes
 import android.os.Looper
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -181,6 +184,7 @@ class WorkoutService : Service() {
                 if (Build.VERSION.SDK_INT >= 26 && loc.hasVerticalAccuracy()) loc.verticalAccuracyMeters else -1f,
                 if (loc.hasSpeed()) loc.speed else -1f
             )
+            if (WorkoutTracker.consumePauseBuzz()) vibratePausedMoving()
         }
 
         @Deprecated("Deprecated in Java")
@@ -191,6 +195,32 @@ class WorkoutService : Service() {
         }
 
         override fun onProviderDisabled(provider: String) {
+        }
+    }
+
+    /** Запись на паузе, а человек движется: два коротких толчка (как у будильника — и в беззвучном режиме). */
+    @Suppress("DEPRECATION")
+    private fun vibratePausedMoving() {
+        try {
+            val v = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
+            if (!v.hasVibrator()) return
+            val timings = longArrayOf(0, 250, 130, 250)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val effect = VibrationEffect.createWaveform(timings, -1)
+                try {
+                    val attrs = AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                    v.vibrate(effect, attrs)
+                } catch (e: Exception) {
+                    v.vibrate(effect)
+                }
+            } else {
+                v.vibrate(timings, -1)
+            }
+        } catch (e: Exception) {
+            // вибрации нет или нет разрешения
         }
     }
 

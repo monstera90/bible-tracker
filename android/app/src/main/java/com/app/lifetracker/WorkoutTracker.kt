@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.0 (10.11)
+// Версия: 7.1 (13.11)
 
 import android.content.Context
 import org.json.JSONArray
@@ -75,6 +75,15 @@ object WorkoutTracker {
 
     /** То же для велосипеда (м/с, 22 м/с ≈ 79 км/ч: спуски быстрые, но выше — уже ошибка GPS). */
     private const val MAX_SPEED_BIKE = 22.0
+
+    /** Пауза: движение (скорость не ниже этого значения, м/с; у велосипеда — своё) дольше [PAUSE_MOVE_MS] напоминает вибрацией, что запись стоит. */
+    private const val PAUSE_MOVE_SPEED = 1.0f
+    private const val PAUSE_MOVE_SPEED_BIKE = 2.5f
+    private const val PAUSE_MOVE_MS = 8_000L
+
+    /** Сразу после нажатия «Пауза» движение не считается (человек ещё идёт/едет), и между напоминаниями — не чаще раза в это время. */
+    private const val PAUSE_GRACE_MS = 15_000L
+    private const val PAUSE_BUZZ_GAP_MS = 60_000L
 
     const val KIND_RUN = "run"
     const val KIND_WALK = "walk"
@@ -173,6 +182,15 @@ object WorkoutTracker {
     private var kfP11 = 0.0
     private var kfT = 0L
 
+    // движение на паузе (напоминание вибрацией)
+    private var pauseAt = 0L                        // когда нажали «Пауза»
+    private var pauseMoveSince = 0L                 // с какого момента идёт непрерывное движение (0 — не идёт)
+    private var pauseBuzzAt = 0L                    // когда напоминали в последний раз
+    private var ppLat = 0.0                         // предыдущая годная точка на паузе (для скорости, если датчик её не даёт)
+    private var ppLon = 0.0
+    private var ppT = 0L
+    private var pauseBuzzDue = false
+
     // раскрыть остров при ближайшем обновлении уведомления (старт и «Связь установлена»)
     private var floatPending = false
     private var floatDeferred = false
@@ -252,6 +270,11 @@ object WorkoutTracker {
                 hasRoute = false
                 lastPt = null
                 cand.clear()
+                pauseAt = now
+                pauseMoveSince = 0L
+                pauseBuzzAt = 0L
+                ppT = 0L
+                pauseBuzzDue = false
                 paused = true
             } else if (status == ST_PAUSE) {
                 status = ST_RUN
@@ -356,7 +379,10 @@ object WorkoutTracker {
                     addAlt(alt, vAcc)
                 }
                 ST_PAUSE -> {
-                    if (good) lastGoodAt = now
+                    if (good) {
+                        lastGoodAt = now
+                        checkPauseMotion(lat, lon, now, speed)
+                    }
                 }
                 ST_RUN -> {
                     if (!good) return
@@ -375,6 +401,40 @@ object WorkoutTracker {
                 }
                 else -> {}
             }
+        }
+    }
+
+    /**
+     * Пауза, а человек бежит/идёт/едет (по виду записи): скорость не ниже порога непрерывно [PAUSE_MOVE_MS] — выставляется флаг
+     * напоминания (его забирает служба, [consumePauseBuzz]). Скорость — доплеровская, а если датчик её не даёт — по смещению между точками.
+     */
+    private fun checkPauseMotion(lat: Double, lon: Double, now: Long, speed: Float) {
+        var v = speed.toDouble()
+        val dt = (now - ppT) / 1000.0
+        if (v < 0 && ppT > 0 && dt >= 0.5 && dt <= 10.0) v = haversine(ppLat, ppLon, lat, lon) / dt
+        if (ppT > 0 && dt > 10.0) pauseMoveSince = 0L // точек долго не было — непрерывность потеряна
+        ppLat = lat
+        ppLon = lon
+        ppT = now
+        val thr = if (kind == KIND_BIKE) PAUSE_MOVE_SPEED_BIKE else PAUSE_MOVE_SPEED
+        if (v < thr) {
+            pauseMoveSince = 0L
+            return
+        }
+        if (pauseMoveSince == 0L) pauseMoveSince = now
+        if (now - pauseAt < PAUSE_GRACE_MS) return
+        if (now - pauseMoveSince >= PAUSE_MOVE_MS && now - pauseBuzzAt >= PAUSE_BUZZ_GAP_MS) {
+            pauseBuzzAt = now
+            pauseBuzzDue = true
+        }
+    }
+
+    /** Нужно ли напомнить вибрацией, что запись на паузе, а человек движется (читается один раз на событие). */
+    fun consumePauseBuzz(): Boolean {
+        synchronized(lock) {
+            val f = pauseBuzzDue
+            pauseBuzzDue = false
+            return f && status == ST_PAUSE
         }
     }
 
