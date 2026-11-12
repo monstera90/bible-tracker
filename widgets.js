@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 3.0 (12.11)
+   Версия: 3.1 (13.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -321,6 +321,27 @@
         t += '<rect x="' + (cx - 3.5) + '" y="' + (cy - 5.5) + '" width="7" height="11" rx="1.6"' + WH + sw + '/>';
         t += '<circle cx="' + cx + '" cy="' + (cy - 3) + '" r="0.9" fill="#fff"/>';
         t += '<circle cx="' + cx + '" cy="' + (cy + 1.8) + '" r="2.2"' + WH + sw + '/>';
+      } else if(kind === "earbuds"){
+        [-1, 1].forEach(function(sg){
+          t += '<circle cx="' + (cx + sg * 2.8) + '" cy="' + (cy - 1.4) + '" r="1.8"' + WH + sw + '/>';
+          t += '<path d="M' + (cx + sg * 4.4) + ' ' + (cy - 1.4) + ' V' + (cy + 4) + '"' + WH + sw + '/>';
+        });
+      } else if(kind === "keyboard"){
+        t += '<rect x="' + (cx - 5.2) + '" y="' + (cy - 3) + '" width="10.4" height="6" rx="0.8"' + WH + sw + '/>';
+        for(var k = -2; k <= 2; k++){
+          t += '<circle cx="' + (cx + k * 1.6) + '" cy="' + (cy - 1.5) + '" r="0.45" fill="#fff"/>';
+          t += '<circle cx="' + (cx + k * 1.6) + '" cy="' + (cy - 0.3) + '" r="0.45" fill="#fff"/>';
+        }
+        t += '<path d="M' + (cx - 2.6) + ' ' + (cy + 1.5) + ' H' + (cx + 2.6) + '"' + WH + sw + '/>';
+      } else if(kind === "laptop"){
+        t += '<rect x="' + (cx - 3.6) + '" y="' + (cy - 4) + '" width="7.2" height="5.6" rx="0.6"' + WH + sw + '/>';
+        t += '<path d="M' + (cx - 5) + ' ' + (cy + 3.4) + ' H' + (cx + 5) + '"' + WH + sw + '/>';
+      } else if(kind === "tablet"){
+        t += '<rect x="' + (cx - 5.8) + '" y="' + (cy - 4.2) + '" width="11.6" height="8.4" rx="1"' + WH + sw + '/>';
+        t += '<circle cx="' + (cx + 4.6) + '" cy="' + cy + '" r="0.5" fill="#fff"/>';
+      } else if(kind === "shutter"){
+        t += '<circle cx="' + cx + '" cy="' + cy + '" r="4"' + WH + sw + '/>';
+        t += '<circle cx="' + cx + '" cy="' + cy + '" r="2.2" fill="#fff"/>';
       } else if(kind === "generic"){
         t += '<path d="M' + (cx - 2.8) + ' ' + (cy - 2.6) + ' L' + (cx + 2.8) + ' ' + (cy + 2.6) + ' L' + cx + ' ' + (cy + 5.4) + ' L' + cx + ' ' + (cy - 5.4) + ' L' + (cx + 2.8) + ' ' + (cy - 2.6) + ' L' + (cx - 2.8) + ' ' + (cy + 2.6) + '"' + WH + sw + '/>';
       } else {
@@ -364,7 +385,7 @@
       if(!extra.length) return cardWord(0);
       return (w.battery && !w.batteryMulti) ? "заряд аккумулятора" : extra.join(" + ");
     }
-    var ICON_NAMES = { phone: "телефон", headphones: "наушники", watch: "часы", speaker: "колонка", generic: "значок Bluetooth" };
+    var ICON_NAMES = { phone: "телефон", headphones: "наушники", earbuds: "наушники-вкладыши", watch: "часы", speaker: "колонка", keyboard: "клавиатура", laptop: "ноутбук", tablet: "планшет", shutter: "кнопка съёмки", generic: "значок Bluetooth" };
     // Парные Bluetooth-устройства телефона (из оболочки, поле bt.devices): имена и значок, который им достанется
     function batDevicesText(){
       var st = nativeState(), bt = st && st.bt, ds = bt && bt.devices;

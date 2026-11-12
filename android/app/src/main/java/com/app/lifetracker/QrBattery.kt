@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 3.0 (12.11)
+// Версия: 4.0 (13.11)
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -240,6 +240,7 @@ object QrBattery {
         val c = d.bluetoothClass ?: return "generic"
         return when {
             c.majorDeviceClass == BluetoothClass.Device.Major.WEARABLE -> "watch"
+            c.majorDeviceClass == BluetoothClass.Device.Major.COMPUTER -> "laptop"
             c.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO -> when (c.deviceClass) {
                 BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER, BluetoothClass.Device.AUDIO_VIDEO_PORTABLE_AUDIO,
                 BluetoothClass.Device.AUDIO_VIDEO_HIFI_AUDIO, BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO -> "speaker"
@@ -251,9 +252,14 @@ object QrBattery {
 
     /** Правила «часть названия → значок» (регистр не важен); проверяются по порядку, раньше класса устройства. */
     private val NAME_ICONS = listOf(
+        "shutter" to "shutter", "selfie" to "shutter",
+        "keyboard" to "keyboard", "клавиатур" to "keyboard",
+        "desktop" to "laptop", "laptop" to "laptop", "notebook" to "laptop", "ноутбук" to "laptop",
+        "xiaomi pad" to "tablet", "ipad" to "tablet", "tablet" to "tablet", "планшет" to "tablet",
+        "pods" to "earbuds", "buds" to "earbuds", "earbud" to "earbuds",
         "watch" to "watch", "band" to "watch", "часы" to "watch", "браслет" to "watch",
         "speaker" to "speaker", "колонк" to "speaker", "soundbar" to "speaker", "boombox" to "speaker",
-        "buds" to "headphones", "pods" to "headphones", "earbud" to "headphones", "headphone" to "headphones", "headset" to "headphones", "наушник" to "headphones"
+        "life q35" to "headphones", "headphone" to "headphones", "headset" to "headphones", "наушник" to "headphones"
     )
 
     private class Dev(val icon: String, val level: Int)
@@ -429,6 +435,11 @@ object QrBattery {
             "headphones" -> drawHeadphones(g, w, cx, cy)
             "watch" -> drawWatch(g, w, cx, cy)
             "speaker" -> drawSpeaker(g, w, cx, cy)
+            "earbuds" -> drawEarbuds(g, w, cx, cy)
+            "keyboard" -> drawKeyboard(g, w, cx, cy)
+            "laptop" -> drawLaptop(g, w, cx, cy)
+            "tablet" -> drawTablet(g, w, cx, cy)
+            "shutter" -> drawShutter(g, w, cx, cy)
             "generic" -> drawBluetooth(g, w, cx, cy)
             else -> drawPhone(g, w, cx, cy)
         }
@@ -451,6 +462,53 @@ object QrBattery {
         fill.color = 0xFFFFFFFF.toInt()
         g.drawCircle(cx, cy - w * 0.03f, w * 0.009f, fill)
         g.drawCircle(cx, cy + w * 0.018f, w * 0.022f, p)
+    }
+
+    /** Значок наушников-вкладышей: две «головки» с ножками снаружи. */
+    private fun drawEarbuds(g: Canvas, w: Float, cx: Float, cy: Float) {
+        val p = iconPaint(w)
+        for (sgn in intArrayOf(-1, 1)) {
+            g.drawCircle(cx + sgn * w * 0.028f, cy - w * 0.014f, w * 0.018f, p)
+            g.drawLine(cx + sgn * w * 0.044f, cy - w * 0.014f, cx + sgn * w * 0.044f, cy + w * 0.040f, p)
+        }
+    }
+
+    /** Значок клавиатуры: корпус, два ряда клавиш точками и пробел. */
+    private fun drawKeyboard(g: Canvas, w: Float, cx: Float, cy: Float) {
+        val p = iconPaint(w)
+        g.drawRoundRect(RectF(cx - w * 0.052f, cy - w * 0.030f, cx + w * 0.052f, cy + w * 0.030f), w * 0.008f, w * 0.008f, p)
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+        fill.color = 0xFFFFFFFF.toInt()
+        for (i in -2..2) {
+            g.drawCircle(cx + i * w * 0.016f, cy - w * 0.015f, w * 0.0045f, fill)
+            g.drawCircle(cx + i * w * 0.016f, cy - w * 0.003f, w * 0.0045f, fill)
+        }
+        g.drawLine(cx - w * 0.026f, cy + w * 0.015f, cx + w * 0.026f, cy + w * 0.015f, p)
+    }
+
+    /** Значок ноутбука: экран и основание. */
+    private fun drawLaptop(g: Canvas, w: Float, cx: Float, cy: Float) {
+        val p = iconPaint(w)
+        g.drawRoundRect(RectF(cx - w * 0.036f, cy - w * 0.040f, cx + w * 0.036f, cy + w * 0.016f), w * 0.006f, w * 0.006f, p)
+        g.drawLine(cx - w * 0.050f, cy + w * 0.034f, cx + w * 0.050f, cy + w * 0.034f, p)
+    }
+
+    /** Значок планшета: широкая рамка и кнопка сбоку. */
+    private fun drawTablet(g: Canvas, w: Float, cx: Float, cy: Float) {
+        val p = iconPaint(w)
+        g.drawRoundRect(RectF(cx - w * 0.058f, cy - w * 0.042f, cx + w * 0.058f, cy + w * 0.042f), w * 0.010f, w * 0.010f, p)
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+        fill.color = 0xFFFFFFFF.toInt()
+        g.drawCircle(cx + w * 0.046f, cy, w * 0.005f, fill)
+    }
+
+    /** Значок кнопки съёмки (штатив, селфи-пульт): круглая кнопка с точкой-«спуском». */
+    private fun drawShutter(g: Canvas, w: Float, cx: Float, cy: Float) {
+        val p = iconPaint(w)
+        g.drawCircle(cx, cy, w * 0.040f, p)
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+        fill.color = 0xFFFFFFFF.toInt()
+        g.drawCircle(cx, cy, w * 0.022f, fill)
     }
 
     /** Запасной значок — знак Bluetooth. */
