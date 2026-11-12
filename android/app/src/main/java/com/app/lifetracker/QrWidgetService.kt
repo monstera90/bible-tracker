@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (11.11)
+// Версия: 1.1 (12.11)
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
@@ -9,7 +9,7 @@ import android.os.SystemClock
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 
-/** Поставщик карточек для StackView виджета «Стопка QR-карточек»: по одной картинке-лицу на карточку, нажатие несёт код QR. */
+/** Поставщик карточек для StackView виджета «Стопка QR-карточек»: по одной картинке-лицу на карточку, нажатие несёт код QR и ключ (id) карточки. */
 class QrWidgetService : RemoteViewsService() {
 
     override fun onGetViewFactory(intent: Intent): RemoteViewsFactory =
@@ -45,7 +45,7 @@ class QrWidgetService : RemoteViewsService() {
             val rv = RemoteViews(ctx.packageName, R.layout.qr_widget_item)
             val bmp = bitmaps.getOrPut(c.key) { QrWidgets.bitmapFor(ctx, c) }
             rv.setImageViewBitmap(R.id.qr_card_img, bmp)
-            rv.setOnClickFillInIntent(R.id.qr_card_img, Intent().putExtra("code", c.code))
+            rv.setOnClickFillInIntent(R.id.qr_card_img, Intent().putExtra("code", c.code).putExtra("key", c.key))
             if (cards.size > 1 && SystemClock.uptimeMillis() > quietUntil) QrWidgets.onPossibleSwipe(ctx, widgetId, cards.size)
             return rv
         }

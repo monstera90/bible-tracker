@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 42.0 (11.11)
+   Версия: 43.0 (12.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -1423,7 +1423,15 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   // Тап по карточке = скан её QR-кода (отдельной кнопки «Пуск» нет); форма правки открывается только долгим нажатием → «Редактировать».
   // У таймера, будильника, комбинированного, «Сегодня» и «Напоминалки» тап запускает их действие, то же,
   // что она; у остальных (предмет, привычка, задача, погода) — ровно то, что делал бы скан (`showScanned`).
+  // «Конструктор виджетов»: сообщить оболочке, что действие настоящей карточки сработало (мост ≥32) — она скроет карточку в стопке виджета
+  // или перенесёт её в конец, если так выбрано в настройках карточки («После срабатывания»). Нажатие в самом виджете оболочка видит сама.
+  function notifyWidgetFired(c){
+    if(!c || c.virtual || standalone || c.type === "remind") return;
+    var N = window.LifeTrackerNative;
+    if(N && typeof N.widgetCardFired === "function"){ try{ N.widgetCardFired(String(c.id)); }catch(e){} }
+  }
   function onCardTap(c){
+    notifyWidgetFired(c);
     if(isSingletonCard(c)){ runSingletonCard(c); return; }
     if(c.type === "timer" || c.type === "alarm" || c.type === "combo"){ startTimerForCard(c); return; }
     if(c.type === "remind"){ showCardOverlay(c); return; } // «Напоминание» без QR-кода: просто крупный показ карточки, в журнал не пишется
@@ -2862,6 +2870,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     evLogUndo(title, since);
   }
   function showScanned(c){
+    notifyWidgetFired(c);
     if(c.type === "climb"){ handleScannedClimb(climbMeters(c), c); return; } // «+ к высоте»: метры в тренировку/счётчик, слой с карточкой
     if(c.type === "weather"){ showWeatherOverlay(c, true); return; } // на случай кода по id карточки
     if(c.type === "alarm"){ // скан будильника: не заведён — заводится на ближайшее время; уже заведён (в том числе идут повторы) — выключается
@@ -2878,6 +2887,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       showCardOverlay(c, "Заведён: " + dayWord(alAt) + " в " + clockOf(alAt), function(){ stopAlarmForCard(c); evLogUndoKey("alarm:" + runId(c) + ":", alSince); });
       return;
     }
+    if(c.type === "combo"){ runCombo(c.acts, { card: c, scan: true }); return; } // код карточки (виджет рабочего стола): те же действия, что у «Пуск» на карточке
     if(c.type === "habit"){ // скан привычки: один день — одна отметка, повторный скан в тот же день ничего не делает
       var hSince = Date.now();
       var hCreated = scanCreatedHabitId === c.id; scanCreatedHabitId = "";
@@ -3206,7 +3216,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   // ---------- для «Конструктора виджетов» (widgets.js) ----------
   // Лицо карточки для виджета: цвет, название, крупный текст (время), малый текст, значок (svg белым). Карточка «Напоминание» кода не имеет — в виджет не годится.
   function widgetFace(c){
-    var f = { id: c.id, type: c.type, title: cardTitle(c), big: "", sub: "", svg: "", color: effColor(c), code: qrTextFor(c), live: [], hidden: !!c.hidden, fav: !!c.fav };
+    var f = { id: c.id, type: c.type, title: cardTitle(c), big: "", sub: "", svg: "", color: effColor(c), code: QR_PREFIX + c.id, live: [], hidden: !!c.hidden, fav: !!c.fav };
     f.shade = cardShade(f.color);
     if(c.type === "timer"){
       f.big = formatTimer(c.seconds | 0);
@@ -3999,6 +4009,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     drainPendingCombos: drainPendingCombos,
     startStandaloneScan: startStandaloneScan,
     runScannedCode: runScannedCode,
+    onAppResume: function(){ cardsCache = null; if(gridVisible()) renderGrid(); }, // карточку могли сработать из виджета (окно ярлыка): состояние таймеров, будильников и привычек — заново
     widgetCards: widgetCardList,
     widgetFilters: widgetFilterList,
     widgetFace: function(id){ reloadCards(); var c = findCard(id); return (c && c.type !== "remind") ? widgetFace(c) : null; },

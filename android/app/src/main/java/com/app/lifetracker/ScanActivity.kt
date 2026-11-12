@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 8.0 (11.11)
+// Версия: 8.1 (12.11)
 // Версия: 6.0 (26.10) — мост ScanBridge: musicHeadphones (подключены ли наушники; комбо с галочкой «Наушники обязательны»).
 // Версия: 5.0 (26.10) — мост ScanBridge: musicPlayTrack / musicPlayFolder (QR «Комбинированный» из окна ярлыка включает трек или папку через MusicPlayer; приложение не открывается).
 // Версия: 4.0 (24.10) — мост ScanBridge: setAlarm / cancelAlarm / getAlarms (скан кода будильника в окне ярлыка заводит будильник CardAlarms).
@@ -69,6 +69,9 @@ class ScanActivity : ComponentActivity() {
         initialCode = ""
         if (i != null && i.action == ACTION_SCAN_CODE && QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
             initialCode = (i.getStringExtra("code") ?: "").take(2000)
+            // нажатие на карточку в виджете = её действие сработало: «после срабатывания» (скрыть / в конец) применяет QrWidgets
+            val key = i.getStringExtra("key") ?: ""
+            if (key.isNotEmpty()) QrWidgets.onCardFired(applicationContext, key)
         }
     }
 

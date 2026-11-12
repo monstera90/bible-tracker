@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (11.11)
+// Версия: 1.2 (12.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -38,7 +38,10 @@ import java.util.UUID
  * (`sync`), при старте/остановке таймера, помодоро, секундомера и тренировки (`onActivityChanged`), по будильнику смены интервала
  * времени суток (`ACTION_TICK`) и по будильнику «слайд-шоу» (`ACTION_ROTATE`).
  *
- * Нажатие на карточку открывает ScanActivity с кодом карточки — ровно то, что произошло бы при сканировании этого QR.
+ * Нажатие на карточку открывает ScanActivity с кодом настоящей карточки (`lt://v1/card/<id>`) — ровно то, что произошло бы при её сканировании.
+ * «После срабатывания» (`after` у карточки): "hide" — карточка скрыта в стопке до конца дня, "end" — уходит в конец стопки; если скрыты все карточки,
+ * виджет показывает «На сегодня больше ничего». Срабатывание — нажатие в виджете ([onCardFired] из ScanActivity) или нажатие/скан карточки
+ * в приложении (мост ≥32 `widgetCardFired`).
  */
 object QrWidgets {
 
@@ -48,6 +51,7 @@ object QrWidgets {
     private const val K_TOP = "top"
     private const val K_PEND = "pend"
     private const val K_TOKEN = "token"
+    private const val K_FIRED = "fired"
 
     const val ACTION_ROTATE = "com.app.lifetracker.QRW_ROTATE"
     const val ACTION_TICK = "com.app.lifetracker.QRW_TICK"
@@ -73,7 +77,7 @@ object QrWidgets {
     private val hideTokens = HashMap<Int, Any>()
 
     class Live(val k: String, val id: String)
-    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>)
+    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none")
     class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>)
     class Ordered(val cards: List<Card>, val topKey: String)
 
@@ -123,7 +127,8 @@ object QrWidgets {
                         val days = HashSet<Int>()
                         val da = c.optJSONArray("days")
                         if (da != null) for (x in 0 until da.length()) da.optInt(x).let { if (it in 1..7) days.add(it) }
-                        cards.add(Card(key, c.optString("code", ""), c.optString("title", ""), live, times, days))
+                        val after = c.optString("after", "none").let { if (it == "hide" || it == "end") it else "none" }
+                        cards.add(Card(key, c.optString("code", ""), c.optString("title", ""), live, times, days, after))
                         if (cards.size >= MAX_CARDS) break
                     }
                 }
@@ -318,22 +323,127 @@ object QrWidgets {
         return true
     }
 
+    // ---------- «после срабатывания»: скрытые и перенесённые в конец ----------
+
+    private fun dayKey(): Int {
+        val c = Calendar.getInstance()
+        return c.get(Calendar.YEAR) * 10000 + (c.get(Calendar.MONTH) + 1) * 100 + c.get(Calendar.DAY_OF_MONTH)
+    }
+
+    private fun startOfToday(): Long {
+        val c = Calendar.getInstance()
+        c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
+        return c.timeInMillis
+    }
+
+    /** Состояние виджета конструктора: {"day":ГГГГММДД,"hidden":[ключи],"moved":{ключ:мс}}; скрытое действует только в день записи. */
+    private fun firedOf(ctx: Context, cfgId: String): JSONObject {
+        val st = jmap(ctx, K_FIRED).optJSONObject(cfgId) ?: return JSONObject()
+        if (st.optInt("day", 0) != dayKey()) st.put("hidden", JSONArray())
+        return st
+    }
+
+    private fun hiddenKeys(ctx: Context, cfg: Cfg): Set<String> {
+        val arr = firedOf(ctx, cfg.id).optJSONArray("hidden") ?: return emptySet()
+        val out = HashSet<String>()
+        for (i in 0 until arr.length()) out.add(arr.optString(i))
+        return out
+    }
+
+    /** Карточки, которые сейчас видны в стопке, в порядке «как собрал пользователь, перенесённые в конец — после них, по времени переноса». */
+    private fun visibleCards(ctx: Context, cfg: Cfg): List<Card> {
+        val st = firedOf(ctx, cfg.id)
+        val hidden = hiddenKeys(ctx, cfg)
+        val moved = st.optJSONObject("moved") ?: JSONObject()
+        val shown = cfg.cards.filter { !(it.after == "hide" && it.key in hidden) }
+        if (shown.none { it.after == "end" && moved.has(it.key) }) return shown
+        return shown.withIndex().sortedWith(
+            compareBy<IndexedValue<Card>> { if (it.value.after == "end") moved.optLong(it.value.key, 0L) else 0L }.thenBy { it.index }
+        ).map { it.value }
+    }
+
+    fun visibleCount(ctx: Context, cfg: Cfg): Int = visibleCards(ctx, cfg).size
+
+    /** Все карточки виджета скрыты («На сегодня больше ничего»). */
+    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = cfg.cards.isNotEmpty() && visibleCards(ctx, cfg).isEmpty()
+
+    private fun movedToday(ctx: Context, cfg: Cfg, c: Card): Boolean {
+        if (c.after != "end") return false
+        val at = (firedOf(ctx, cfg.id).optJSONObject("moved") ?: return false).optLong(c.key, 0L)
+        return at >= startOfToday()
+    }
+
     /**
-     * Порядок стопки. Без «релевантности» — как собрал пользователь. С ней сверху то, что идёт сейчас (важнее — выше: тренировка, помодоро,
-     * таймер, секундомер), затем карточки, у которых сейчас «их» время суток и день, затем остальные в исходном порядке.
+     * Действие карточки [cardKey] сработало (нажатие в виджете, в приложении или скан): у карточек с «после срабатывания» = «скрывать» она
+     * убирается из стопки до конца дня, с «в конец» — уходит в конец стопки. Виджеты, где карточки нет или выбрано «ничего», не трогаются.
+     */
+    fun onCardFired(ctx: Context, cardKey: String) {
+        if (!KEY_RE.matches(cardKey)) return
+        val app = ctx.applicationContext
+        val touchedCfgs = HashSet<String>()
+        synchronized(LOCK) {
+            val all = jmap(app, K_FIRED)
+            for (cfg in configs(app)) {
+                val card = cfg.cards.firstOrNull { it.key == cardKey } ?: continue
+                if (card.after == "none") continue
+                val st = firedOf(app, cfg.id)
+                st.put("day", dayKey())
+                if (card.after == "hide") {
+                    val arr = st.optJSONArray("hidden") ?: JSONArray()
+                    var has = false
+                    for (i in 0 until arr.length()) if (arr.optString(i) == cardKey) has = true
+                    if (!has) arr.put(cardKey)
+                    st.put("hidden", arr)
+                } else {
+                    val mv = st.optJSONObject("moved") ?: JSONObject()
+                    mv.put(cardKey, System.currentTimeMillis())
+                    st.put("moved", mv)
+                }
+                all.put(cfg.id, st)
+                touchedCfgs.add(cfg.id)
+            }
+            if (touchedCfgs.isNotEmpty()) prefs(app).edit().putString(K_FIRED, all.toString()).apply()
+        }
+        if (touchedCfgs.isEmpty()) return
+        refreshAll(app, true)
+        // стопка снова показывает первую из оставшихся карточек
+        try {
+            val mgr = AppWidgetManager.getInstance(app)
+            for (id in mgr.getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java))) {
+                val cfgId = jmap(app, K_BIND).optString(id.toString(), "")
+                if (cfgId in touchedCfgs) {
+                    val rv = RemoteViews(app.packageName, R.layout.qr_widget)
+                    rv.setDisplayedChild(R.id.qr_stack, 0)
+                    mgr.partiallyUpdateAppWidget(id, rv)
+                }
+            }
+        } catch (e: Exception) {
+            // виджет удалили
+        }
+    }
+
+    /**
+     * Порядок стопки. Без «релевантности» — как собрал пользователь (скрытые убраны, перенесённые в конец — в конце). С ней сверху то, что идёт
+     * сейчас (важнее — выше: тренировка, помодоро, таймер, секундомер), затем карточки, у которых сейчас «их» время суток и день, затем
+     * остальные в исходном порядке. Карточки, перенесённые «в конец» сегодня, всегда в самом конце (по времени переноса) — даже если они идут
+     * сейчас или у них «их» время; со следующего дня они снова участвуют в подборе.
      * [Ordered.topKey] — ключ карточки наверху, если она поднята по релевантности (иначе пусто).
      */
     fun order(ctx: Context, cfg: Cfg): Ordered {
-        if (!cfg.relevance || cfg.cards.size < 2) return Ordered(cfg.cards, "")
+        val base = visibleCards(ctx, cfg)
+        if (!cfg.relevance || base.size < 2) return Ordered(base, "")
         val cal = Calendar.getInstance()
-        val scored = cfg.cards.mapIndexed { i, c ->
+        val tail = base.filter { movedToday(ctx, cfg, it) } // уже стоят в порядке переноса
+        val head = base.filter { !movedToday(ctx, cfg, it) }
+        if (head.isEmpty()) return Ordered(tail, "")
+        val scored = head.mapIndexed { i, c ->
             val live = liveRank(ctx, c)
             val s = if (live > 0) 1000 + live else if (scheduledNow(c, cal)) 500 else 0
             Triple(c, s, i)
         }
         val sorted = scored.sortedWith(compareByDescending<Triple<Card, Int, Int>> { it.second }.thenBy { it.third })
         val top = sorted.first()
-        return Ordered(sorted.map { it.first }, if (top.second > 0) top.first.key else "")
+        return Ordered(sorted.map { it.first } + tail, if (top.second > 0) top.first.key else "")
     }
 
     // ---------- обновление ----------
@@ -348,11 +458,16 @@ object QrWidgets {
         svc.data = Uri.parse(svc.toUri(Intent.URI_INTENT_SCHEME))
         rv.setRemoteAdapter(R.id.qr_stack, svc)
         rv.setEmptyView(R.id.qr_stack, R.id.qr_empty)
+        val allDone = cfg != null && isAllDone(app, cfg)
         rv.setTextViewText(
             R.id.qr_empty,
             if (cfg == null) "Виджет не выбран.\nОткройте приложение → «Конструктор виджетов»"
+            else if (allDone) "На сегодня больше ничего"
             else "В виджете нет карточек.\nДобавьте их в конструкторе"
         )
+        // все карточки скрыты — полупрозрачная плашка, как папка на телефонах Xiaomi; иначе обычная сиреневая
+        rv.setInt(R.id.qr_empty, "setBackgroundResource", if (allDone) R.drawable.qr_widget_done_bg else R.drawable.qr_widget_empty_bg)
+        rv.setTextViewTextSize(R.id.qr_empty, android.util.TypedValue.COMPLEX_UNIT_SP, if (allDone) 14f else 12f)
         rv.setViewVisibility(R.id.qr_dots, android.view.View.GONE)
         val tpl = Intent(app, ScanActivity::class.java)
         tpl.action = ScanActivity.ACTION_SCAN_CODE
@@ -445,17 +560,19 @@ object QrWidgets {
 
     private fun scheduleAll(app: Context, ids: IntArray, force: Boolean) {
         var anyRel = false
+        var anyHide = false
         for (id in ids) {
             val cfg = cfgFor(app, id)
-            if (cfg != null && cfg.rotate && cfg.cards.size > 1) {
+            if (cfg != null && cfg.rotate && visibleCount(app, cfg) > 1) {
                 if (force || rotatePi(app, id, false) == null) {
                     cancelRotate(app, id)
                     setAlarm(app, System.currentTimeMillis() + cfg.rotateMin * 60_000L, rotatePi(app, id, true)!!)
                 }
             } else cancelRotate(app, id)
             if (cfg != null && cfg.relevance) anyRel = true
+            if (cfg != null && cfg.cards.any { it.after == "hide" }) anyHide = true // скрытое возвращается в полночь
         }
-        if (anyRel) setAlarm(app, nextBoundary(), tickPi(app, true)!!)
+        if (anyRel || anyHide) setAlarm(app, nextBoundary(), tickPi(app, true)!!)
         else tickPi(app, false)?.let { am(app).cancel(it); it.cancel() }
     }
 
@@ -466,12 +583,12 @@ object QrWidgets {
     fun rotate(ctx: Context, id: Int) {
         val app = ctx.applicationContext
         val cfg = cfgFor(app, id) ?: return
-        if (!cfg.rotate || cfg.cards.size < 2) return
+        if (!cfg.rotate || visibleCount(app, cfg) < 2) return
         val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
         if (screenOn(pm)) {
             val rv = RemoteViews(app.packageName, R.layout.qr_widget)
             rv.showNext(R.id.qr_stack)
-            putDots(app, rv, cfg.cards.size)
+            putDots(app, rv, visibleCount(app, cfg))
             AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
             scheduleHide(app, id)
         }

@@ -1,11 +1,12 @@
 /* ===========================================================================
    widgets.js
-   Версия: 1.1 (11.11)
+   Версия: 1.2 (12.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
-   необязательные время суток (утро/обед/вечер) и дни недели, когда она поднимается наверх.
-   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days}],rotate,rotateMin,relevance}]}), только на устройстве.
+   необязательные время суток (утро/обед/вечер) и дни недели, когда она поднимается наверх, и что делать со стопкой после срабатывания карточки
+   (`after`: "none" — ничего (по умолчанию) / "hide" — скрыть до конца дня / "end" — переместить в конец).
+   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after}],rotate,rotateMin,relevance}]}), только на устройстве.
    Страница рисует лица карточек в PNG (canvas, `pngFor`) и шлёт их оболочке вместе с настройками (мост ≥31 `widgetsSync`).
    Точка входа: window.initWidgetsModule(deps) → window.WidgetsTab.{render, scheduleSync}.
    =========================================================================== */
@@ -20,6 +21,11 @@
     { k: "m", label: "Утро", hint: "5–11" },
     { k: "d", label: "Обед", hint: "11–15" },
     { k: "e", label: "Вечер", hint: "17–23" }
+  ];
+  var AFTERS = [
+    { k: "none", label: "Ничего не делать" },
+    { k: "hide", label: "Скрывать карточку в стопке" },
+    { k: "end", label: "Перемещать карточку в конец стопки" }
   ];
   var DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]; // 1..7
   var PLUS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
@@ -43,12 +49,13 @@
       o.list = o.list.filter(function(w){ return w && w.id && Array.isArray(w.cards); });
       o.list.forEach(function(w){
         w.cards = w.cards.filter(function(c){ return c && c.cid; }).slice(0, MAX_CARDS);
-        w.cards.forEach(function(c){ c.times = Array.isArray(c.times) ? c.times : []; c.days = Array.isArray(c.days) ? c.days : []; });
+        w.cards.forEach(function(c){ c.times = Array.isArray(c.times) ? c.times : []; c.days = Array.isArray(c.days) ? c.days : []; c.after = normAfter(c.after); });
         w.rotateMin = Math.max(1, Math.min(720, w.rotateMin | 0 || 5));
         w.rotate = !!w.rotate; w.relevance = !!w.relevance && !w.rotate;
       });
       return o;
     }
+    function normAfter(v){ return (v === "hide" || v === "end") ? v : "none"; }
     function save(){ try{ localStorage.setItem(KEY, JSON.stringify(data)); }catch(e){} }
     function changed(){ save(); scheduleSync(600); }
     function widgetById(id){ for(var i = 0; i < data.list.length; i++) if(data.list[i].id === id) return data.list[i]; return null; }
@@ -170,7 +177,7 @@
             id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance,
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
-              return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days };
+              return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after) };
             })
           };
         });
@@ -224,7 +231,7 @@
       st.id = "widgetsTabStyle";
       st.textContent =
         ".widgets-tab{padding:10px 12px 96px;}" +
-        ".wg-title{font-size:20px;font-weight:700;text-align:center;margin:6px 0 14px;color:var(--ink);}" +
+        ".widgets-tab .common-tab-title{margin-bottom:12px;}" +
         ".wg-hint{font-size:13px;line-height:1.35;color:var(--ink-soft);margin:6px 2px 10px;}" +
         ".wg-row{display:flex;align-items:center;padding:10px 12px;margin:0 0 8px;border-radius:14px;background:var(--gold-light);color:var(--ink);cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
         ".wg-row-ico{flex:0 0 auto;width:42px;height:42px;border-radius:10px;margin-right:12px;}" +
@@ -295,7 +302,7 @@
 
     function listHtml(){
       var st = nativeState(), placed = (st && st.placed) || {};
-      var html = '<div class="wg-title">Конструктор виджетов</div>';
+      var html = '<h3 class="common-tab-title">Конструктор виджетов</h3>';
       if(!data.list.length){
         html += '<div class="wg-empty">Виджетов пока нет.<br>Нажмите «+», чтобы собрать стопку из карточек QR-кодов.</div>';
       }
@@ -312,7 +319,7 @@
     }
 
     function formHtml(a){
-      var w = a.w, html = '<div class="wg-title">' + esc(wname(w)) + '</div><div class="wg-slots">';
+      var w = a.w, html = '<h3 class="common-tab-title">' + esc(wname(w)) + '</h3><div class="wg-slots">';
       for(var i = 0; i < MAX_CARDS; i++){
         var c = w.cards[i], f = c ? cardsOf().widgetFace(c.cid) : null;
         if(c && f){
@@ -340,13 +347,16 @@
     function cardHtml(a){
       var w = a.w, c = w.cards[a.i], f = c ? cardsOf().widgetFace(c.cid) : null;
       if(!c) return '';
-      var html = '<div class="wg-title">Карточка ' + (a.i + 1) + ' из ' + w.cards.length + '</div>';
+      var html = '<h3 class="common-tab-title">Карточка ' + (a.i + 1) + ' из ' + w.cards.length + '</h3>';
       if(f) html += '<div class="wg-preview">' + faceHtml(f, "") + '</div>';
       html += '<div class="wg-sec">Время суток</div><div class="wg-chips" id="wgTimes">';
       WINDOWS.forEach(function(t){ html += '<div class="wg-chip' + (c.times.indexOf(t.k) >= 0 ? ' on' : '') + '" data-k="' + t.k + '">' + t.label + '<small>' + t.hint + ' ч</small></div>'; });
       html += '</div><div class="wg-sec">Дни недели</div><div class="wg-chips" id="wgDays">';
       DAYS.forEach(function(d, i){ html += '<div class="wg-chip' + (c.days.indexOf(i + 1) >= 0 ? ' on' : '') + '" data-d="' + (i + 1) + '">' + d + '</div>'; });
       html += '</div><div class="wg-hint">Необязательно. Если выбрать, карточка поднимается наверх в эти часы и дни — при включённом «Переключении по релевантности». Если не выбрано ничего, она ничем не выделяется.</div>';
+      html += '<div class="wg-sec">После срабатывания</div><select class="mdeditor-cleanup-input" id="wgAfter" aria-label="После срабатывания карточки">' +
+        AFTERS.map(function(o){ return '<option value="' + o.k + '"' + (normAfter(c.after) === o.k ? ' selected' : '') + '>' + o.label + '</option>'; }).join('') + '</select>' +
+        '<div class="wg-hint">Что делать с карточкой в стопке, когда её действие сработало — по нажатию в виджете, в приложении или по скану кода. Скрытая карточка возвращается на следующий день; если скрыты все, виджет пишет «На сегодня больше ничего».</div>';
       html += '<div class="wg-btns"><button type="button" class="workbooks-run-btn" id="wgReplaceBtn">Заменить карточку</button>' +
         '<button type="button" class="workbooks-run-btn" id="wgRemoveBtn">Убрать из виджета</button></div>';
       html += fabRow(homeBtn("К виджету"));
@@ -359,7 +369,7 @@
       if(!filters.some(function(f){ return f.key === fk; })) fk = "all";
       var used = {}; a.w.cards.forEach(function(c, i){ if(i !== a.replace) used[c.cid] = 1; });
       var list = cardsOf().widgetCards(fk);
-      var html = '<div class="wg-title">Выберите карточку</div><div class="wg-slots">';
+      var html = '<h3 class="common-tab-title">Выберите карточку</h3><div class="wg-slots">';
       if(!list.length) html += '<div class="wg-empty">Нет подходящих карточек.</div>';
       list.forEach(function(f){
         html += '<div class="wg-slot" data-cid="' + esc(f.id) + '"' + (used[f.id] ? ' data-used="1"' : '') + '>' + faceHtml(f, used[f.id] ? "used" : "") + '</div>';
@@ -452,6 +462,8 @@
       Array.prototype.forEach.call($("wgDays").children, function(ch){
         ch.addEventListener("click", function(){ toggle(c.days, parseInt(ch.getAttribute("data-d"), 10)); ch.classList.toggle("on"); changed(); });
       });
+      var aft = $("wgAfter");
+      if(aft) aft.addEventListener("change", function(){ c.after = normAfter(aft.value); changed(); });
       $("wgReplaceBtn").addEventListener("click", function(){ go("pick", { w: a.w, draft: false, replace: a.i, form: a }); });
       $("wgRemoveBtn").addEventListener("click", function(){ a.w.cards.splice(a.i, 1); changed(); backUi(); });
     }
@@ -470,7 +482,7 @@
           if(s.getAttribute("data-used")) return;
           var cid = s.getAttribute("data-cid"), w = a.w;
           if(a.replace >= 0 && w.cards[a.replace]) w.cards[a.replace].cid = cid;
-          else if(w.cards.length < MAX_CARDS) w.cards.push({ cid: cid, times: [], days: [] });
+          else if(w.cards.length < MAX_CARDS) w.cards.push({ cid: cid, times: [], days: [], after: "none" });
           var form = a.form && a.form.draft !== undefined ? a.form : null;
           if(a.draft && form) commitDraft(form);
           changed();

@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 24.0 (11.11)
+// Версия: 25.0 (12.11)
 // Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
@@ -43,6 +43,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
          * 31: виджеты рабочего стола «Стопка QR-карточек» (widgetsSync / widgetsState / widgetPin; QrWidgets).
+         * 32: `widgetCardFired` — действие карточки сработало в приложении («После срабатывания» у карточки виджета).
          * 30: `pasteText()` — текст из буфера обмена (кнопка «Вставить» кругового меню выделения, ctxmenu.js).
          * 29: `musicDelete(folderId, trackId)` — удалить трек с устройства (вкладка «Музыка»); `allFilesState()` / `allFilesRequest()` — доступ ко всем файлам (AllFilesAccess).
          * 28: `workoutStartKind(kind)` — запись тренировки с видом "run" | "walk" | "bike" (у велосипеда выше предел скорости точки GPS; в записи поле `type`).
@@ -61,7 +62,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 31
+        const val BRIDGE_VERSION = 32
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -1118,6 +1119,17 @@ class NativeBridge(private val activity: MainActivity) {
             QrWidgets.stateJson(activity.applicationContext)
         } catch (e: Exception) {
             "{}"
+        }
+    }
+
+    /** Действие карточки [cardId] сработало в приложении: в виджетах, где у неё выбрано «скрывать» или «в конец», стопка обновится. */
+    @JavascriptInterface
+    fun widgetCardFired(cardId: String?) {
+        if (!activity.pageTrusted || cardId.isNullOrEmpty()) return
+        try {
+            QrWidgets.onCardFired(activity.applicationContext, cardId)
+        } catch (e: Exception) {
+            // виджеты не должны мешать приложению
         }
     }
 
