@@ -1,11 +1,11 @@
 package com.app.lifetracker
-// Версия: 2.0 (12.11)
+// Версия: 1.2 (12.11)
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.view.View
+import android.os.SystemClock
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 
@@ -20,38 +20,48 @@ class QrWidgetService : RemoteViewsService() {
         private var cards: List<QrWidgets.Card> = emptyList()
         private val bitmaps = HashMap<String, Bitmap>()
 
-        override fun onCreate() {}
+        // Первые обращения после загрузки данных — не смахивание: точки показываем только после этой паузы.
+        @Volatile private var quietUntil = 0L
+
+        override fun onCreate() {
+            quietUntil = SystemClock.uptimeMillis() + QUIET_MS
+        }
 
         override fun onDataSetChanged() {
             val cfg = QrWidgets.cfgFor(ctx, widgetId)
             cards = if (cfg == null) emptyList() else QrWidgets.order(ctx, cfg).cards
             bitmaps.clear()
+            quietUntil = SystemClock.uptimeMillis() + QUIET_MS
         }
 
         override fun onDestroy() {
             bitmaps.clear()
         }
 
-        override fun getCount(): Int = cards.size
+        // ⚠️ Смахивание StackView фабрике не видно, а RemoteViewsAdapter кэширует уже загруженные карточки и getViewAt при листании не
+        // зовёт. Поэтому карточек «виртуально» в VIRT раз больше (позиция % число карточек): окно кэша сдвигается вместе с листанием,
+        // и на каждое смахивание система запрашивает у фабрики новую позицию — это и есть сигнал для точек.
+        override fun getCount(): Int = if (cards.size < 2) cards.size else cards.size * VIRT
 
         override fun getViewAt(position: Int): RemoteViews? {
-            val c = cards.getOrNull(position) ?: return null
+            if (cards.isEmpty()) return null
+            val c = cards[position % cards.size]
             val rv = RemoteViews(ctx.packageName, R.layout.qr_widget_item)
             val bmp = bitmaps.getOrPut(c.key) { QrWidgets.bitmapFor(ctx, c) }
             rv.setImageViewBitmap(R.id.qr_card_img, bmp)
-            val fill = Intent().putExtra("code", c.code).putExtra("key", c.key)
-            rv.setOnClickFillInIntent(R.id.qr_card_img, fill)
-            rv.setOnClickFillInIntent(R.id.qr_item_root, fill)
-            if (cards.size > 1) {
-                rv.setImageViewBitmap(R.id.qr_item_dots, QrWidgets.dotsBitmap(ctx, cards.size, position))
-                rv.setViewVisibility(R.id.qr_item_dots, View.VISIBLE)
-            } else rv.setViewVisibility(R.id.qr_item_dots, View.GONE)
+            rv.setOnClickFillInIntent(R.id.qr_card_img, Intent().putExtra("code", c.code).putExtra("key", c.key))
+            if (cards.size > 1 && SystemClock.uptimeMillis() > quietUntil) QrWidgets.onPossibleSwipe(ctx, widgetId, cards.size)
             return rv
         }
 
         override fun getLoadingView(): RemoteViews? = null
         override fun getViewTypeCount(): Int = 1
-        override fun getItemId(position: Int): Long = (cards.getOrNull(position)?.key?.hashCode() ?: position).toLong()
+        override fun getItemId(position: Int): Long = position.toLong()
         override fun hasStableIds(): Boolean = true
+
+        companion object {
+            private const val QUIET_MS = 2500L
+            private const val VIRT = 20
+        }
     }
 }
