@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.2 (12.11)
+// Версия: 3.0 (12.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -58,7 +58,6 @@ object QrWidgets {
     const val ACTION_TICK = "com.app.lifetracker.QRW_TICK"
 
     private const val PEND_TTL_MS = 3 * 60_000L
-    private const val DOTS_SHOW_MS = 1400L
     private const val MAX_CARDS = 10
     private val KEY_RE = Regex("^[A-Za-z0-9_-]{1,40}$")
 
@@ -75,7 +74,6 @@ object QrWidgets {
     private val LOCK = Any()
     private val main = Handler(Looper.getMainLooper())
     private val refreshToken = Any()
-    private val hideTokens = HashMap<Int, Any>()
 
     class Live(val k: String, val id: String)
     class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none")
@@ -475,7 +473,6 @@ object QrWidgets {
         // все карточки скрыты — полупрозрачная плашка, как папка на телефонах Xiaomi; иначе обычная сиреневая
         rv.setInt(R.id.qr_empty, "setBackgroundResource", if (allDone) R.drawable.qr_widget_done_bg else R.drawable.qr_widget_empty_bg)
         rv.setTextViewTextSize(R.id.qr_empty, android.util.TypedValue.COMPLEX_UNIT_SP, if (allDone) 14f else 12f)
-        rv.setViewVisibility(R.id.qr_dots, android.view.View.GONE)
         val tpl = Intent(app, ScanActivity::class.java)
         tpl.action = ScanActivity.ACTION_SCAN_CODE
         tpl.putExtra("tok", token(app))
@@ -661,55 +658,19 @@ object QrWidgets {
         if (screenOn(pm)) {
             val rv = RemoteViews(app.packageName, R.layout.qr_widget)
             rv.showNext(R.id.qr_stack)
-            putDots(app, rv, visibleCount(app, cfg))
             AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
-            scheduleHide(app, id)
         }
         setAlarm(app, System.currentTimeMillis() + cfg.rotateMin * 60_000L, rotatePi(app, id, true)!!)
     }
 
     // ---------- точки справа ----------
 
-    private fun putDots(app: Context, rv: RemoteViews, n: Int) {
-        if (n < 2) return
-        rv.setImageViewBitmap(R.id.qr_dots, dotsBitmap(app, n))
-        rv.setViewVisibility(R.id.qr_dots, android.view.View.VISIBLE)
-    }
-
-    private fun scheduleHide(app: Context, id: Int) {
-        val token = synchronized(hideTokens) { hideTokens.getOrPut(id) { Any() } }
-        main.removeCallbacksAndMessages(token)
-        main.postAtTime({
-            try {
-                val rv = RemoteViews(app.packageName, R.layout.qr_widget)
-                rv.setViewVisibility(R.id.qr_dots, android.view.View.GONE)
-                AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
-            } catch (e: Exception) {
-                // виджет удалили
-            }
-        }, token, SystemClock.uptimeMillis() + DOTS_SHOW_MS)
-    }
-
     /**
-     * Фабрика карточек просит очередную карточку уже после первой загрузки — значит, пользователь смахнул стопку: на мгновение
-     * показываем справа вертикальные точки (по числу карточек), потом они пропадают.
+     * Точки-индикатор положения: n кружков по вертикали, закрашен кружок карточки pos. Рисуются внутри самой карточки стопки
+     * (qr_widget_item.xml), потому что смахивание StackView фабрике не видно: RemoteViewsAdapter держит загруженные карточки в кэше
+     * и getViewAt при листании не зовёт.
      */
-    fun onPossibleSwipe(ctx: Context, id: Int, n: Int) {
-        if (n < 2) return
-        val app = ctx.applicationContext
-        main.post {
-            try {
-                val rv = RemoteViews(app.packageName, R.layout.qr_widget)
-                putDots(app, rv, n)
-                AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
-                scheduleHide(app, id)
-            } catch (e: Exception) {
-                // виджет удалили
-            }
-        }
-    }
-
-    private fun dotsBitmap(ctx: Context, n: Int): Bitmap {
+    fun dotsBitmap(ctx: Context, n: Int, pos: Int): Bitmap {
         val d = ctx.resources.displayMetrics.density
         val r = 2.6f * d
         val gap = 4.4f * d
@@ -722,10 +683,12 @@ object QrWidgets {
         ring.color = 0x66000000
         val fill = Paint(Paint.ANTI_ALIAS_FLAG)
         fill.color = 0xF2FFFFFF.toInt()
+        val dim = Paint(Paint.ANTI_ALIAS_FLAG)
+        dim.color = 0x73FFFFFF
         for (i in 0 until n) {
             val cy = pad + r + i * (2 * r + gap)
             g.drawCircle(w / 2f, cy, r + 1.1f * d, ring)
-            g.drawCircle(w / 2f, cy, r, fill)
+            g.drawCircle(w / 2f, cy, r, if (i == pos) fill else dim)
         }
         return bmp
     }

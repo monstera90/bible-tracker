@@ -1,8 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Версия: 1.0 (11.11) — одна карточка стопки: готовая картинка лица (скруглённый квадрат с цветным выступом снизу). -->
-<ImageView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/qr_card_img"
+<!-- Версия: 2.0 (12.11) — одна карточка стопки: готовая картинка лица (скруглённый квадрат с цветным выступом снизу) и справа точки-индикатор
+     положения (закрашена точка этой карточки). Правый отступ точек больше, чем у слота: передняя карточка выходит за правый край слота на 2–4 %. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/qr_item_root"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:contentDescription="@null"
-    android:scaleType="fitXY" />
+    android:layout_height="match_parent">
+
+    <ImageView
+        android:id="@+id/qr_card_img"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitXY" />
+
+    <ImageView
+        android:id="@+id/qr_item_dots"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|center_vertical"
+        android:layout_marginEnd="11dp"
+        android:layout_marginRight="11dp"
+        android:contentDescription="@null"
+        android:scaleType="center"
+        android:visibility="gone" />
+</FrameLayout>
