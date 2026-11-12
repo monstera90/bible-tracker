@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (12.11)
+// Версия: 2.0 (12.11)
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -15,7 +15,6 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.media.AudioManager
@@ -27,14 +26,17 @@ import org.json.JSONObject
  * Карточка «Заряд» в стопке виджета (галочка «Отображать заряд аккумулятора» в форме виджета, `Cfg.battery`).
  * Рисуется здесь же, а не страницей: заряд меняется сам, картинку страница заранее не пришлёт.
  *
- * Внешний вид: синий квадрат с цветным выступом снизу (пропорции как у остальных лиц, `QrWidgets.FACE_*`), в нём один или два столбца:
- * кольцо с значком, «Заряд», «Телефон»/«Наушники», крупные проценты. Наушники подключены (известен заряд) — два столбца (телефон слева,
- * наушники справа); нет — только телефон, и его столбец стоит по центру с теми же размерами и шрифтами.
+ * Внешний вид: квадрат цвета, выбранного в форме виджета (палитра та же, что у карточек QR-кодов), с выступом снизу на пятую часть темнее
+ * (пропорции как у остальных лиц, `QrWidgets.FACE_*`), в нём один или два столбца: кольцо со значком, «Заряд», «Телефон»/«Наушники»,
+ * крупные проценты. Кольца у обоих столбцов одного размера. Наушники подключены — два столбца (телефон слева, наушники справа; заряд
+ * неизвестен — «--%»); нет — только телефон, и его столбец стоит по центру с теми же размерами и шрифтами.
  *
  * Заряд телефона — липкий `ACTION_BATTERY_CHANGED`. Заряд наушников — Bluetooth: подключённое аудиоустройство из сопряжённых, уровень
- * `BluetoothDevice.getBatteryLevel()` (скрытый метод, через рефлексию) или последнее значение из широкого вещания
- * `BATTERY_LEVEL_CHANGED` (его ловит приёмник, пока жив процесс). Нужны `BLUETOOTH` (до Android 11) / `BLUETOOTH_CONNECT` (12+, запрашивает
- * `MainActivity.requestBluetoothForWidget`); нет разрешения, Bluetooth выключен или заряд не отдаётся — наушников «нет».
+ * `BluetoothDevice.getBatteryLevel()` (скрытый метод, через рефлексию; на новых Android может быть закрыт) или последнее значение из
+ * широкого вещания `BATTERY_LEVEL_CHANGED` — это то же число, что показывают настройки системы, но приходит оно только при подключении
+ * и смене заряда, поэтому приёмник нужно поднять до подключения (`register` зовётся и из `QrWidgets.onBluetoothChanged`). Нужны
+ * `BLUETOOTH` (до Android 11) / `BLUETOOTH_CONNECT` (12+, запрашивает `MainActivity.requestBluetoothForWidget`). Причину, по которой
+ * заряд наушников неизвестен, отдаёт [status] (страница показывает её в форме виджета).
  */
 object QrBattery {
 
@@ -49,8 +51,9 @@ object QrBattery {
     private const val EXTRA_LEVEL = "android.bluetooth.device.extra.BATTERY_LEVEL"
 
     private const val FACE_PX = 480
-    private const val COLOR_FACE = 0xFF2175D9.toInt()
-    private const val COLOR_SHADE = 0xFF1357A5.toInt()
+
+    /** Цвет лица, если страница его не прислала: сиреневый, как у карточек без цвета (`DEFAULT_CARD_COLOR` в itemcards.js). */
+    const val DEFAULT_FACE = 0xFFB9A1FF.toInt()
 
     @Volatile private var registered = false
 
@@ -71,6 +74,9 @@ object QrBattery {
     private fun btPermitted(ctx: Context): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             androidx.core.content.ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+
+    /** Нужно ли ещё разрешение «Устройства поблизости» (Android 12+) для чтения заряда наушников. */
+    fun permissionMissing(ctx: Context): Boolean = !btPermitted(ctx.applicationContext)
 
     private fun adapterOf(ctx: Context): BluetoothAdapter? = try {
         if (Build.VERSION.SDK_INT >= 18) (ctx.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
@@ -141,30 +147,55 @@ object QrBattery {
         return Pair(addrs, names)
     }
 
-    /** Заряд подключённых Bluetooth-наушников, 0..100; -1 — наушников нет или заряд не известен (тогда виджет показывает только телефон). */
+    /** Итог поиска наушников: [reason] — ok (заряд известен) / nolevel (подключены, заряд не отдаются) / perm / off / nobt / none. */
+    private class Probe(val reason: String, val name: String = "", val level: Int = -1)
+
     @SuppressLint("MissingPermission")
-    fun headphonesLevel(ctx: Context): Int {
+    private fun probe(ctx: Context): Probe {
         return try {
             val app = ctx.applicationContext
-            if (!btPermitted(app)) return -1
-            val adapter = adapterOf(app) ?: return -1
-            if (!adapter.isEnabled) return -1
-            val bonded = adapter.bondedDevices ?: return -1
+            if (!btPermitted(app)) return Probe("perm")
+            val adapter = adapterOf(app) ?: return Probe("nobt")
+            if (!adapter.isEnabled) return Probe("off")
+            val bonded = adapter.bondedDevices ?: return Probe("none")
             val (addrs, names) = activeOutputs(app)
-            var fallback = -1
+            var known: Probe? = null // подключённое устройство с известным зарядом, но не активный аудиовыход
+            var unknown: Probe? = null // подключённое устройство без заряда
             for (d in bonded) {
                 val active = addrs.contains(d.address.uppercase()) || (d.name != null && names.contains(d.name))
                 val audio = d.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO
                 if (!active && !(audio && isConnected(d))) continue
                 val lv = levelOf(app, d)
-                if (lv < 0) continue
-                if (active) return lv
-                if (fallback < 0) fallback = lv
+                val nm = d.name ?: ""
+                if (lv >= 0) {
+                    if (active) return Probe("ok", nm, lv)
+                    if (known == null) known = Probe("ok", nm, lv)
+                } else if (unknown == null) {
+                    unknown = Probe("nolevel", nm)
+                }
             }
-            fallback
+            known ?: unknown ?: Probe("none")
+        } catch (e: SecurityException) {
+            Probe("perm")
         } catch (e: Throwable) {
-            -1
+            Probe("none")
         }
+    }
+
+    /** Заряд подключённых Bluetooth-наушников, 0..100; -2 — подключены, но заряд не известен («--%»); -1 — наушников нет (виджет показывает только телефон). */
+    fun headphonesLevel(ctx: Context): Int {
+        val p = probe(ctx)
+        return when (p.reason) {
+            "ok" -> p.level
+            "nolevel" -> -2
+            else -> -1
+        }
+    }
+
+    /** {"reason","name","level"} — что с наушниками сейчас; для формы виджета (мост `widgetsState`, поле `bt`). */
+    fun status(ctx: Context): JSONObject {
+        val p = probe(ctx)
+        return JSONObject().put("reason", p.reason).put("name", p.name).put("level", p.level)
     }
 
     /** Строка «телефон/наушники» — по ней виджет понимает, что картинку пора перерисовать. */
@@ -208,8 +239,16 @@ object QrBattery {
 
     // ---------- картинка карточки ----------
 
-    /** Лицо карточки «Заряд»: та же пропорция и скругление, что у остальных лиц стопки. */
-    fun render(ctx: Context): Bitmap {
+    /** Цвет выступа снизу: каждый канал на пятую часть темнее (тот же расчёт, что `cardShade` в itemcards.js). */
+    private fun shadeOf(face: Int): Int {
+        val r = Math.round(((face shr 16) and 255) * 0.8f)
+        val g = Math.round(((face shr 8) and 255) * 0.8f)
+        val b = Math.round((face and 255) * 0.8f)
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+    }
+
+    /** Лицо карточки «Заряд»: та же пропорция и скругление, что у остальных лиц стопки; [face] — цвет, выбранный в форме виджета. */
+    fun render(ctx: Context, face: Int = DEFAULT_FACE): Bitmap {
         val w = FACE_PX.toFloat()
         val body = Math.round(w * QrWidgets.FACE_BODY).toFloat()
         val shift = Math.round(w * QrWidgets.FACE_SHADE).toFloat()
@@ -217,14 +256,14 @@ object QrBattery {
         val g = Canvas(bmp)
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
         val r = w * QrWidgets.FACE_RADIUS
-        p.color = COLOR_SHADE
+        p.color = shadeOf(face)
         g.drawRoundRect(RectF(0f, shift, w, shift + body), r, r, p)
-        p.color = COLOR_FACE
+        p.color = face or (0xFF shl 24)
         g.drawRoundRect(RectF(0f, 0f, w, body), r, r, p)
 
         val phone = phoneLevel(ctx)
         val hp = headphonesLevel(ctx)
-        if (hp >= 0) {
+        if (hp != -1) {
             column(g, w, 0.268f, phone, false)
             column(g, w, 0.732f, hp, true)
         } else {
@@ -233,12 +272,12 @@ object QrBattery {
         return bmp
     }
 
-    /** Один столбец с центром на доле [fx] ширины. Размеры и шрифты не зависят от того, один столбец или два. */
+    /** Один столбец с центром на доле [fx] ширины. Размеры и шрифты не зависят от того, один столбец или два; кольца у телефона и наушников одинаковые. */
     private fun column(g: Canvas, w: Float, fx: Float, pct: Int, headphones: Boolean) {
         val cx = w * fx
         val cy = w * 0.310f
-        val rr = w * (if (headphones) 0.1434f else 0.1283f)
-        val sw = w * 0.0205f
+        val rr = w * 0.1263f
+        val sw = w * 0.0212f
 
         val ring = Paint(Paint.ANTI_ALIAS_FLAG)
         ring.style = Paint.Style.STROKE
@@ -260,76 +299,72 @@ object QrBattery {
         t.textAlign = Paint.Align.CENTER
 
         t.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-        t.textSize = w * 0.057f
-        g.drawText("Заряд", cx, w * 0.584f, t)
+        t.textSize = w * 0.0511f
+        g.drawText("Заряд", cx, w * 0.582f, t)
 
+        // «Телефон»/«Наушники» — жирный с засечками; небольшая обводка добавляет плотности, если системный шрифт тоньше образца
         t.typeface = Typeface.create("serif", Typeface.BOLD)
-        t.textSize = w * 0.072f
+        t.textSize = w * 0.065f
+        t.style = Paint.Style.FILL_AND_STROKE
+        t.strokeWidth = w * 0.0022f
         g.drawText(if (headphones) "Наушники" else "Телефон", cx, w * 0.667f, t)
 
-        t.typeface = Typeface.create("sans-serif", Typeface.BOLD)
-        t.textSize = w * 0.195f
+        // проценты — самый плотный вес системного гротеска (black), с той же обводкой
+        t.typeface = Typeface.create("sans-serif-black", Typeface.NORMAL)
+        t.textSize = w * 0.160f
+        t.strokeWidth = w * 0.0030f
         val text = if (pct < 0) "--%" else "$pct%"
         val maxW = w * 0.43f
         val tw = t.measureText(text)
         if (tw > maxW) t.textScaleX = maxW / tw // «100%» сжимается по ширине, высота цифр прежняя
-        g.drawText(text, cx, w * 0.858f, t)
+        g.drawText(text, cx, w * 0.857f, t)
     }
 
+    /** Кисть значков: толстая линия с закруглёнными концами (как в образце — вес линии значка ≈ 0,0126 ширины карточки). */
     private fun iconPaint(w: Float): Paint {
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
         p.style = Paint.Style.STROKE
-        p.strokeWidth = w * 0.0100f
+        p.strokeWidth = w * 0.0126f
         p.strokeCap = Paint.Cap.ROUND
         p.strokeJoin = Paint.Join.ROUND
         p.color = 0xFFFFFFFF.toInt()
         return p
     }
 
-    /** Значок телефона: рамка с вырезом сверху и точкой снизу. */
+    /** Значок телефона: рамка, «чёлка» сверху (выступ верхней грани вниз) и точка снизу. */
     private fun drawPhone(g: Canvas, w: Float, cx: Float, cy: Float) {
         val p = iconPaint(w)
-        val mid = cy + w * 0.006f
-        val hw = w * 0.043f
-        val hh = w * 0.0605f
-        val left = cx - hw
-        val right = cx + hw
+        val mid = cy + w * 0.0057f
+        val hw = w * 0.0367f
+        val hh = w * 0.0547f
         val top = mid - hh
         val bottom = mid + hh
-        val rad = w * 0.022f
-        g.drawRoundRect(RectF(left, top, right, bottom), rad, rad, p)
-        // вырез под камеру: стираем кусок верхней грани цветом лица и рисуем «ступеньку» ниже
-        val nw = w * 0.019f
-        val nd = w * 0.012f
-        val erase = Paint(Paint.ANTI_ALIAS_FLAG)
-        erase.style = Paint.Style.STROKE
-        erase.strokeWidth = p.strokeWidth + 2f
-        erase.color = COLOR_FACE
-        g.drawLine(cx - nw, top, cx + nw, top, erase)
-        val path = Path()
-        path.moveTo(cx - nw, top)
-        path.lineTo(cx - nw, top + nd)
-        path.lineTo(cx + nw, top + nd)
-        path.lineTo(cx + nw, top)
-        g.drawPath(path, p)
-        val dot = Paint(Paint.ANTI_ALIAS_FLAG)
-        dot.color = 0xFFFFFFFF.toInt()
-        g.drawCircle(cx, bottom - w * 0.031f, w * 0.0068f, dot)
+        val rad = w * 0.0127f
+        g.drawRoundRect(RectF(cx - hw, top, cx + hw, bottom), rad, rad, p)
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+        fill.color = 0xFFFFFFFF.toInt()
+        val nw = w * 0.012f
+        val nr = w * 0.0063f
+        g.drawRoundRect(RectF(cx - nw, top - w * 0.004f, cx + nw, top + w * 0.0123f), nr, nr, fill)
+        g.drawCircle(cx, bottom - w * 0.0231f, w * 0.0064f, fill)
     }
 
-    /** Значок наушников: дуга-оголовье и две чашки. */
+    /** Значок наушников: дуга-оголовье, переходящая в стенки двух чашек. */
     private fun drawHeadphones(g: Canvas, w: Float, cx: Float, cy: Float) {
         val p = iconPaint(w)
-        val rad = w * 0.050f
-        val arcCy = cy + w * 0.0172f
+        val rad = w * 0.0487f
+        val arcCy = cy + w * 0.0063f
         g.drawArc(RectF(cx - rad, arcCy - rad, cx + rad, arcCy + rad), 180f, 180f, false, p)
-        val top = cy + w * 0.0152f
-        val bottom = cy + w * 0.0626f
-        val cupW = w * 0.036f
-        val cr = w * 0.018f
-        val l1 = cx - w * 0.049f
-        g.drawRoundRect(RectF(l1, top, l1 + cupW, bottom), cr, cr, p)
-        val r2 = cx + w * 0.049f
-        g.drawRoundRect(RectF(r2 - cupW, top, r2, bottom), cr, cr, p)
+        val cupTop = cy + w * 0.0131f
+        val cupBottom = cy + w * 0.0548f
+        val cupW = w * 0.0298f
+        val cr = w * 0.0149f
+        val outer = w * 0.0487f
+        // левая: стенка дуги продолжается вниз до закругления чашки
+        g.drawLine(cx - outer, arcCy, cx - outer, cupTop + cr, p)
+        g.drawRoundRect(RectF(cx - outer, cupTop, cx - outer + cupW, cupBottom), cr, cr, p)
+        // правая — зеркально
+        g.drawLine(cx + outer, arcCy, cx + outer, cupTop + cr, p)
+        g.drawRoundRect(RectF(cx + outer - cupW, cupTop, cx + outer, cupBottom), cr, cr, p)
     }
 }

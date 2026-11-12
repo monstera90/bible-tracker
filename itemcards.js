@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 43.1 (12.11)
+   Версия: 44.0 (12.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -1670,6 +1670,8 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   function colorPaletteHtml(type){
     var h = '<div class="item-form-hint">' + (type === "habit"
       ? 'Цвет карточки и отметок на карте. Сиреневый квадрат — по умолчанию: отметки в цвете темы.'
+      : type === "battery"
+      ? 'Цвет карточки с зарядом. Сиреневый квадрат — цвет по умолчанию.'
       : 'Цвет карточки — необязательно. Сиреневый квадрат — цвет по умолчанию.') + '</div>';
     h += '<div class="habit-colors" id="icfColors">';
     CARD_PALETTE_ROWS.forEach(function(row){
@@ -4012,6 +4014,12 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     onAppResume: function(){ cardsCache = null; if(gridVisible()) renderGrid(); }, // карточку могли сработать из виджета (окно ярлыка): состояние таймеров, будильников и привычек — заново
     widgetCards: widgetCardList,
     widgetFilters: widgetFilterList,
+    // выбор цвета для виджета (карточка «Заряд», widgets.js): та же палитра и те же запомненные цвета, что в форме карточки
+    colorPalette: function(type){ ensureHabitStyles(); return colorPaletteHtml(type || "battery"); },
+    paletteColor: function(hex){ return effColor({ color: hex }); },
+    cardShade: cardShade,
+    defaultColor: defaultColorFor,
+    rememberColor: rememberColorFor,
     widgetFace: function(id){ reloadCards(); var c = findCard(id); return (c && c.type !== "remind") ? widgetFace(c) : null; },
     getCards: function(){ return loadCards().slice(); },
     qrTextForId: function(id){ return QR_PREFIX + id; }
