@@ -1,24 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Версия: 1.0 (11.11)
+<!-- Версия: 1.1 (12.11)
      Виджет «Стопка QR-карточек» 2×2. StackView сам рисует «стопку»: передняя карточка занимает 90 % ширины и высоты и стоит в левом
-     нижнем углу, следующие выглядывают сверху справа. Чтобы стопки не было видно, StackView увеличен в 1/0,9 раза вокруг центра и сдвинут
-     на 5,56 % стороны виджета (≈10 dp для 2×2 на Poco X6 Pro, сторона ≈178 dp) вправо и вверх: передняя карточка ложится ровно на виджет,
-     а выглядывающие края уходят за границы и обрезаются родителем. Подгонка по устройству: translationX/translationY. -->
+     нижнем углу, следующие выглядывают сверху справа. StackView увеличен в 1/0,9 раза вокруг центра и сдвинут вправо и вверх, чтобы передняя
+     карточка легла на виджет, а выглядывающие края ушли за границы. Подгонка по устройству (Poco X6 Pro, HyperOS): translationX/translationY.
+     Внешний FrameLayout `qr_clip` обрезает всё, что вылезает за переднюю карточку: сверху и справа — отступы 15,5 dp и 4,4 dp (края карточки
+     на этом телефоне), у StackView внутри — такие же отрицательные отступы, чтобы его размер и положение остались прежними. Карточка стоит
+     на одной высоте с системной папкой того же ряда (translationY 0). -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:clipChildren="true"
     android:clipToPadding="true">
 
-    <StackView
-        android:id="@+id/qr_stack"
+    <FrameLayout
+        android:id="@+id/qr_clip"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:loopViews="true"
-        android:scaleX="1.1111"
-        android:scaleY="1.1111"
-        android:translationX="10dp"
-        android:translationY="-10dp" />
+        android:layout_marginTop="15.5dp"
+        android:layout_marginRight="4.4dp"
+        android:layout_marginEnd="4.4dp"
+        android:clipChildren="true"
+        android:clipToPadding="true">
+
+        <StackView
+            android:id="@+id/qr_stack"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_marginTop="-15.5dp"
+            android:layout_marginRight="-4.4dp"
+            android:layout_marginEnd="-4.4dp"
+            android:loopViews="true"
+            android:scaleX="1.1111"
+            android:scaleY="1.1111"
+            android:translationX="10dp"
+            android:translationY="0dp" />
+    </FrameLayout>
 
     <TextView
         android:id="@+id/qr_empty"
