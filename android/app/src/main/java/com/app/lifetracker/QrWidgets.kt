@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.1 (12.11)
+// Версия: 2.2 (12.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -282,16 +282,21 @@ object QrWidgets {
 
     private fun fallbackBitmap(title: String): Bitmap {
         val s = 360
-        val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+        val body = Math.round(s * FACE_BODY).toFloat()
+        val shift = Math.round(s * FACE_SHADE).toFloat()
+        val bmp = Bitmap.createBitmap(s, (body + shift).toInt(), Bitmap.Config.ARGB_8888)
         val g = Canvas(bmp)
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        val r = s * FACE_RADIUS
+        p.color = 0xFF8D78DF.toInt()
+        g.drawRoundRect(RectF(0f, shift, s.toFloat(), shift + body), r, r, p)
         p.color = 0xFFB9A1FF.toInt()
-        g.drawRoundRect(RectF(0f, 0f, s.toFloat(), s * 0.96f), s * 0.12f, s * 0.12f, p)
+        g.drawRoundRect(RectF(0f, 0f, s.toFloat(), body), r, r, p)
         p.color = Color.WHITE
         p.textSize = s * 0.12f
         p.textAlign = Paint.Align.CENTER
         p.isFakeBoldText = true
-        g.drawText(title.take(14), s / 2f, s * 0.5f, p)
+        g.drawText(title.take(14), s / 2f, body / 2f, p)
         return bmp
     }
 
@@ -499,8 +504,15 @@ object QrWidgets {
     /** Сторона карточки (dp), если лаунчер не сообщил размер области. */
     private const val DEFAULT_SIDE_DP = 175f
 
-    /** Радиус скругления лица карточки — 12 % стороны (как в widgets.js `drawFace`). */
+    /** Радиус скругления лица карточки — 12 % ширины (как в widgets.js `drawFace`). */
     private const val FACE_RADIUS = 0.12f
+
+    /** Тело карточки и цветной выступ снизу, доли ширины — те же `FACE_BODY`/`FACE_SHADE` в widgets.js. */
+    private const val FACE_BODY = 1.02f
+    private const val FACE_SHADE = 0.04f
+
+    /** Высота картинки карточки / её ширина (≈1,06): к этой пропорции приводится область виджета. */
+    private const val FACE_ASPECT = FACE_BODY + FACE_SHADE
 
     /** Размер области, отданной виджету лаунчером: [ширина, высота] в dp; null — лаунчер не сообщил (тогда карточка занимает всю область). */
     private fun hostSizeDp(ctx: Context, mgr: AppWidgetManager, id: Int): FloatArray? {
@@ -512,9 +524,9 @@ object QrWidgets {
     }
 
     /**
-     * Передняя карточка занимает ВСЮ область виджета (см. layout/qr_widget.xml). Лаунчер может отдать область не квадратную — тогда
-     * картинка карточки растянулась бы, поэтому у `qr_root` выставляются отступы по длинной стороне: карточка — квадрат по короткой.
-     * Радиус контура обрезки (`qr_clip`) подбирается под радиус лица карточки (12 % стороны), шаг 2 dp.
+     * Картинка карточки имеет пропорцию [FACE_ASPECT] (высота/ширина) и занимает ВСЮ область виджета (см. layout/qr_widget.xml). Область
+     * у лаунчера почти такая же; если она заметно (больше 8 %) выше или шире — у `qr_root` выставляются отступы, чтобы картинка не
+     * растягивалась. Радиус контура обрезки (`qr_clip`) подбирается под радиус лица карточки (12 % ширины), шаг 2 dp.
      */
     private fun applyHostLayout(ctx: Context, rv: RemoteViews, size: FloatArray?) {
         val d = ctx.resources.displayMetrics.density
@@ -524,11 +536,12 @@ object QrWidgets {
         if (size != null) {
             val w = size[0]
             val h = size[1]
-            sideDp = Math.min(w, h)
-            val diff = Math.abs(w - h)
-            if (diff > 0.08f * Math.max(w, h)) {
-                val p = Math.round(diff / 2f * d)
-                if (w > h) padX = p else padY = p
+            sideDp = Math.min(w, h / FACE_ASPECT)
+            val idealH = w * FACE_ASPECT
+            if (h > idealH * 1.08f) {
+                padY = Math.round((h - idealH) / 2f * d)
+            } else if (h < idealH / 1.08f) {
+                padX = Math.round((w - h / FACE_ASPECT) / 2f * d)
             }
         }
         rv.setViewPadding(R.id.qr_root, padX, padY, padX, padY)

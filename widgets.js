@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 1.2 (12.11)
+   Версия: 1.3 (12.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -15,7 +15,9 @@
   var KEY = "qrWidgets_v1";
   var PICK_FILTER_KEY = "widgetsPickFilter_v1";
   var MAX_CARDS = 10;
-  var FACE_PX = 480; // сторона картинки лица для оболочки
+  var FACE_PX = 480; // ширина картинки лица для оболочки
+  var FACE_BODY = 1.02; // высота тела карточки = ширина × FACE_BODY (то же — CARD_ASPECT в itemcards.js и FACE_BODY/FACE_SHADE в QrWidgets.kt)
+  var FACE_SHADE = 0.04; // цветной выступ снизу, доля ширины
   // интервалы времени суток — те же значения в QrWidgets.kt (WINDOWS)
   var WINDOWS = [
     { k: "m", label: "Утро", hint: "5–11" },
@@ -96,10 +98,10 @@
       });
     }
     function drawFace(face, icon){
-      var S = FACE_PX, cv = document.createElement("canvas");
-      cv.width = S; cv.height = S;
+      var S = FACE_PX, bodyH = Math.round(S * FACE_BODY), shift = Math.round(S * FACE_SHADE), cv = document.createElement("canvas");
+      cv.width = S; cv.height = bodyH + shift;
       var g = cv.getContext("2d");
-      var bodyH = Math.round(S * 0.96), r = S * 0.12, shift = S * 0.04;
+      var r = S * 0.12;
       rrect(g, 0, shift, S, bodyH, r); g.fillStyle = face.shade; g.fill();   // цветной выступ снизу
       rrect(g, 0, 0, S, bodyH, r); g.fillStyle = face.color; g.fill();
       var maxW = S * 0.86, serif = '"Palatino Linotype",Georgia,serif', sans = "sans-serif";
@@ -241,9 +243,9 @@
         ".wg-empty{text-align:center;color:var(--ink-soft);padding:40px 16px;font-size:15px;}" +
         ".wg-slots{display:flex;flex-wrap:wrap;justify-content:center;margin:0 -6px 8px;}" +
         ".wg-slot{position:relative;margin:6px 6px 14px;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
-        ".wg-slot-empty{width:96px;height:96px;box-sizing:border-box;border:2px dashed var(--groove-shadow);border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--ink-soft);}" +
+        ".wg-slot-empty{width:96px;height:98px;box-sizing:border-box;border:2px dashed var(--groove-shadow);border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--ink-soft);}" +
         ".wg-slot-empty svg{width:34px;height:34px;}" +
-        ".wg-card{position:relative;width:96px;height:96px;border-radius:12px;color:#fff;overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:5px;}" +
+        ".wg-card{position:relative;width:96px;height:98px;border-radius:12px;color:#fff;overflow:hidden;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:5px;}" +
         ".wg-card > *{flex:0 0 auto;max-width:100%;box-sizing:border-box;}" +
         ".wg-card.used{opacity:.35;}" +
         ".wg-card-ico{width:26px;height:26px;margin-bottom:3px;}" +

@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 26.0 (11.11)
+   Версия: 26.1 (12.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
    Версия: 16.3 (27.10) — кнопка «Копировать» `#mdEditorCopyBtn` снова видна в режиме чтения и полноэкранном (правило `.reading-mode-active` прячет только маркер `#mdEditorHighlightBtn`). Откат: components.css 16.2.
@@ -4242,7 +4242,7 @@ body::after{
   position:relative;
   box-sizing:border-box;
   width:100%; /* ширина колонки сетки; = --item-card-w (её считает JS) */
-  height:var(--item-card-w, 112px); /* квадрат, как виджет батареи (= CARD_ASPECT в itemcards.js) */
+  height:calc(var(--item-card-w, 112px) * 1.02); /* пропорция виджета: тело 1,02 ширины + выступ 0,04 (= CARD_ASPECT в itemcards.js) */
   border:none;
   border-radius:calc(var(--item-card-w, 112px) * 0.12);
   background:#b9a1ff; /* запасное значение: заливку и --card-shade ставит itemcards.js (applyCardLook), без цвета — сиреневый */
