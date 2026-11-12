@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 2.0 (12.11)
+   Версия: 3.0 (12.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -8,7 +8,8 @@
    (`after`: "none" — ничего (по умолчанию) / "hide" — скрыть до конца дня / "end" — переместить в конец).
    Галочка «Отображать заряд аккумулятора» (`battery`): в стопку добавляется служебная карточка с зарядом телефона и Bluetooth-наушников — её рисует оболочка (QrBattery.kt), страница шлёт только флаг.
    Цвет карточки «Заряд» (`batColor`: "" — по умолчанию, сиреневый, иначе "#rrggbb") выбирается палитрой под галочкой — той же, что в форме карточки QR-кодов (itemcards.js `colorPalette`, запомненный цвет — `defaultColor/rememberColor`); карточка заряда показана в форме после десятого слота (`batFaceHtml`), статус наушников из оболочки — `batStatusText`.
-   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after}],rotate,rotateMin,relevance,battery,batColor}]}), только на устройстве.
+   Галочка «Отображать заряд аккумулятора (несколько устройств)» (`batteryMulti`, цвет `bat2Color`, палитра `icfColors2`): ещё одна служебная карточка — только значки и кольца заряда, без надписей: телефон и до трёх подключённых Bluetooth-устройств (QrBattery.renderMulti); в форме её лицо — `bat2FaceHtml`, значки — `iconSvg`, список парных устройств из оболочки — `batDevicesText`.
+   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color}]}), только на устройстве.
    Страница рисует лица карточек в PNG (canvas, `pngFor`) и шлёт их оболочке вместе с настройками (мост ≥31 `widgetsSync`).
    Точка входа: window.initWidgetsModule(deps) → window.WidgetsTab.{render, scheduleSync}.
    =========================================================================== */
@@ -59,6 +60,8 @@
         w.rotate = !!w.rotate; w.relevance = !!w.relevance && !w.rotate; w.battery = !!w.battery;
         if(typeof w.batColor !== "string") w.batColor = w.battery ? LEGACY_BAT_COLOR : "";
         else if(w.batColor && !/^#[0-9a-fA-F]{6}$/.test(w.batColor)) w.batColor = "";
+        w.batteryMulti = !!w.batteryMulti;
+        if(typeof w.bat2Color !== "string" || (w.bat2Color && !/^#[0-9a-fA-F]{6}$/.test(w.bat2Color))) w.bat2Color = "";
       });
       return o;
     }
@@ -74,6 +77,7 @@
     }
     function cardsOf(){ return deps.getItemCards(); }
     function batHex(w){ return cardsOf().paletteColor(w.batColor); } // цвет, которым рисуется карточка заряда (пусто — сиреневый)
+    function bat2Hex(w){ return cardsOf().paletteColor(w.bat2Color); } // то же для карточки заряда нескольких устройств
 
     // ---------- лицо карточки → PNG для оболочки ----------
     function rrect(g, x, y, w, h, r){
@@ -182,7 +186,7 @@
         keys.forEach(function(k, i){ if(urls[i]) images[k] = urls[i]; });
         var widgets = data.list.map(function(w){
           return {
-            id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance, battery: !!w.battery, batColor: w.battery ? batHex(w) : "",
+            id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance, battery: !!w.battery, batColor: w.battery ? batHex(w) : "", batteryMulti: !!w.batteryMulti, bat2Color: w.batteryMulti ? bat2Hex(w) : "",
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
               return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after) };
@@ -227,7 +231,7 @@
       render();
     }
     function leaveScreen(top){
-      if(top && top.s === "form" && top.a && top.a.draft && !top.a.w.cards.length && !top.a.w.battery) top.a.draft = false; // пустой новый виджет не сохраняется
+      if(top && top.s === "form" && top.a && top.a.draft && !top.a.w.cards.length && !top.a.w.battery && !top.a.w.batteryMulti) top.a.draft = false; // пустой новый виджет не сохраняется
     }
     function cur(){ return stack[stack.length - 1]; }
 
@@ -298,29 +302,74 @@
         (extra || '') + '</div>';
     }
     // Карточка «Заряд» в форме: уменьшенная копия лица, которое рисует оболочка (QrBattery.kt; числа — доли ширины карточки ×100, образец 78 % / 64 %)
+    var WH = ' fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round"';
+    var ICON_SCALE = 1.5; // как ICON_SCALE в QrBattery.kt: значок и кольцо крупнее исходных, толщина линий прежняя
+    // Значок устройства с центром (cx, cy): phone / headphones / watch / speaker / generic (знак Bluetooth)
+    function iconSvg(kind, cx, cy){
+      var sw = ' stroke-width="' + (1.26 / ICON_SCALE).toFixed(3) + '"', t = '';
+      if(kind === "headphones"){
+        var ac = cy + 0.63, ct = cy + 1.31, cb = cy + 5.48, L = cx - 4.87, R = cx + 4.87;
+        t += '<path d="M' + L + ' ' + ac + ' A4.87 4.87 0 0 1 ' + R + ' ' + ac + '"' + WH + sw + '/>';
+        t += '<path d="M' + L + ' ' + ac + ' V' + (ct + 1.49) + ' M' + R + ' ' + ac + ' V' + (ct + 1.49) + '"' + WH + sw + '/>';
+        t += '<rect x="' + L + '" y="' + ct + '" width="2.98" height="' + (cb - ct) + '" rx="1.49"' + WH + sw + '/>';
+        t += '<rect x="' + (R - 2.98) + '" y="' + ct + '" width="2.98" height="' + (cb - ct) + '" rx="1.49"' + WH + sw + '/>';
+      } else if(kind === "watch"){
+        t += '<rect x="' + (cx - 3.2) + '" y="' + (cy - 3.4) + '" width="6.4" height="6.8" rx="1.4"' + WH + sw + '/>';
+        t += '<rect x="' + (cx - 1.7) + '" y="' + (cy - 5.8) + '" width="3.4" height="2.4" rx="0.8"' + WH + sw + '/>';
+        t += '<rect x="' + (cx - 1.7) + '" y="' + (cy + 3.4) + '" width="3.4" height="2.4" rx="0.8"' + WH + sw + '/>';
+      } else if(kind === "speaker"){
+        t += '<rect x="' + (cx - 3.5) + '" y="' + (cy - 5.5) + '" width="7" height="11" rx="1.6"' + WH + sw + '/>';
+        t += '<circle cx="' + cx + '" cy="' + (cy - 3) + '" r="0.9" fill="#fff"/>';
+        t += '<circle cx="' + cx + '" cy="' + (cy + 1.8) + '" r="2.2"' + WH + sw + '/>';
+      } else if(kind === "generic"){
+        t += '<path d="M' + (cx - 2.8) + ' ' + (cy - 2.6) + ' L' + (cx + 2.8) + ' ' + (cy + 2.6) + ' L' + cx + ' ' + (cy + 5.4) + ' L' + cx + ' ' + (cy - 5.4) + ' L' + (cx + 2.8) + ' ' + (cy - 2.6) + ' L' + (cx - 2.8) + ' ' + (cy + 2.6) + '"' + WH + sw + '/>';
+      } else {
+        var mid = cy + 0.57;
+        t += '<rect x="' + (cx - 3.67) + '" y="' + (mid - 5.47) + '" width="7.34" height="10.94" rx="1.27"' + WH + sw + '/>';
+        t += '<rect x="' + (cx - 1.2) + '" y="' + (mid - 5.87) + '" width="2.4" height="1.63" rx="0.63" fill="#fff"/>';
+        t += '<circle cx="' + cx + '" cy="' + (mid + 3.16) + '" r="0.64" fill="#fff"/>';
+      }
+      return '<g transform="translate(' + cx + ' ' + cy + ') scale(' + ICON_SCALE + ') translate(' + (-cx) + ' ' + (-cy) + ')">' + t + '</g>';
+    }
+    // Кольцо заряда (доля pct, 0..100) со значком внутри
+    function ringSvg(cx, cy, pct, kind){
+      var r = 12.63 * ICON_SCALE, c = 2 * Math.PI * r, t = "";
+      t += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r.toFixed(2) + '" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="2.12"/>';
+      t += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r.toFixed(2) + '"' + WH + ' stroke-width="2.12" stroke-dasharray="' + (c * pct / 100).toFixed(2) + ' ' + c.toFixed(2) + '" transform="rotate(-90 ' + cx + ' ' + cy + ')"/>';
+      return t + iconSvg(kind, cx, cy);
+    }
     function batFaceHtml(w){
-      var hex = batHex(w), shade = cardsOf().cardShade(hex), WH = ' fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round"';
+      var hex = batHex(w), shade = cardsOf().cardShade(hex);
       function col(cx, pct, hp){
-        var cy = 31, r = 12.63, c = 2 * Math.PI * r, mid = cy + 0.57, t = "";
-        t += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="2.12"/>';
-        t += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '"' + WH + ' stroke-width="2.12" stroke-dasharray="' + (c * pct / 100).toFixed(2) + ' ' + c.toFixed(2) + '" transform="rotate(-90 ' + cx + ' ' + cy + ')"/>';
-        if(hp){
-          var ac = cy + 0.63, ct = cy + 1.31, cb = cy + 5.48, L = cx - 4.87, R = cx + 4.87;
-          t += '<path d="M' + L + ' ' + ac + ' A4.87 4.87 0 0 1 ' + R + ' ' + ac + '"' + WH + ' stroke-width="1.26"/>';
-          t += '<path d="M' + L + ' ' + ac + ' V' + (ct + 1.49) + ' M' + R + ' ' + ac + ' V' + (ct + 1.49) + '"' + WH + ' stroke-width="1.26"/>';
-          t += '<rect x="' + L + '" y="' + ct + '" width="2.98" height="' + (cb - ct) + '" rx="1.49"' + WH + ' stroke-width="1.26"/>';
-          t += '<rect x="' + (R - 2.98) + '" y="' + ct + '" width="2.98" height="' + (cb - ct) + '" rx="1.49"' + WH + ' stroke-width="1.26"/>';
-        } else {
-          t += '<rect x="' + (cx - 3.67) + '" y="' + (mid - 5.47) + '" width="7.34" height="10.94" rx="1.27"' + WH + ' stroke-width="1.26"/>';
-          t += '<rect x="' + (cx - 1.2) + '" y="' + (mid - 5.87) + '" width="2.4" height="1.63" rx="0.63" fill="#fff"/>';
-          t += '<circle cx="' + cx + '" cy="' + (mid + 3.16) + '" r="0.64" fill="#fff"/>';
-        }
+        var cy = 30, t = ringSvg(cx, cy, pct, hp ? "headphones" : "phone");
         t += '<text x="' + cx + '" y="58.2" font-size="5.11" text-anchor="middle" fill="#fff" font-family="sans-serif">Заряд</text>';
         t += '<text x="' + cx + '" y="66.7" font-size="6.5" text-anchor="middle" fill="#fff" font-weight="700" font-family="\'Palatino Linotype\',Georgia,serif">' + (hp ? "Наушники" : "Телефон") + '</text>';
         t += '<text x="' + cx + '" y="85.7" font-size="16" text-anchor="middle" fill="#fff" font-weight="900" font-family="sans-serif">' + pct + '%</text>';
         return t;
       }
       return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' + col(26.8, 78, false) + col(73.2, 64, true) + '</svg></div>';
+    }
+    // Карточка «несколько устройств» в форме: четыре кольца без надписей (образец; в виджете — телефон и до трёх подключённых Bluetooth-устройств)
+    function bat2FaceHtml(w){
+      var hex = bat2Hex(w), shade = cardsOf().cardShade(hex);
+      return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' +
+        ringSvg(26.8, 27.3, 78, "phone") + ringSvg(73.2, 27.3, 64, "headphones") + ringSvg(26.8, 74.7, 52, "watch") + ringSvg(73.2, 74.7, 90, "speaker") + '</svg></div>';
+    }
+    // Строка списка виджетов: что в стопке, кроме карточек QR-кодов
+    function contentText(w){
+      var extra = [];
+      if(w.battery) extra.push("заряд");
+      if(w.batteryMulti) extra.push("заряд устройств");
+      if(w.cards.length) return cardWord(w.cards.length) + (extra.length ? " + " + extra.join(" + ") : "");
+      if(!extra.length) return cardWord(0);
+      return (w.battery && !w.batteryMulti) ? "заряд аккумулятора" : extra.join(" + ");
+    }
+    var ICON_NAMES = { phone: "телефон", headphones: "наушники", watch: "часы", speaker: "колонка", generic: "значок Bluetooth" };
+    // Парные Bluetooth-устройства телефона (из оболочки, поле bt.devices): имена и значок, который им достанется
+    function batDevicesText(){
+      var st = nativeState(), bt = st && st.bt, ds = bt && bt.devices;
+      if(!ds || !ds.length) return "";
+      return "Парные Bluetooth-устройства (значок): " + ds.map(function(d){ return (d.name || "без имени") + " (" + (ICON_NAMES[d.icon] || ICON_NAMES.generic) + (d.on ? ", подключено" : "") + ")"; }).join("; ") + ".";
     }
     // Что с наушниками сейчас (из оболочки, поле bt в widgetsState): причина, по которой в карточке «Заряд» нет их заряда
     function batStatusText(){
@@ -357,9 +406,9 @@
       data.list.forEach(function(w){
         var f = w.cards.length ? cardsOf().widgetFace(w.cards[0].cid) : null;
         html += '<div class="wg-row" data-id="' + esc(w.id) + '">' +
-          '<div class="wg-row-ico" style="background:' + (f ? f.color : (w.battery ? batHex(w) : "var(--gold)")) + ';"></div>' +
+          '<div class="wg-row-ico" style="background:' + (f ? f.color : (w.battery ? batHex(w) : (w.batteryMulti ? bat2Hex(w) : "var(--gold)"))) + ';"></div>' +
           '<div class="wg-row-txt"><div class="wg-row-name">' + esc(wname(w)) + '</div>' +
-          '<div class="wg-row-sub">' + (w.cards.length || !w.battery ? cardWord(w.cards.length) : '') + (w.battery ? (w.cards.length ? ' + заряд' : 'заряд аккумулятора') : '') + ' · ' + modeText(w) + (placed[w.id] ? ' · на рабочем столе' : '') + '</div></div></div>';
+          '<div class="wg-row-sub">' + contentText(w) + ' · ' + modeText(w) + (placed[w.id] ? ' · на рабочем столе' : '') + '</div></div></div>';
       });
       if(!bridge()) html += '<div class="wg-hint">Виджеты работают только в приложении на телефоне (Android).</div>';
       html += fabRow('<button type="button" class="mdeditor-fab-btn" id="wgAddBtn" title="Новый виджет">' + PLUS_SVG + '</button>' + homeBtn("", true));
@@ -380,17 +429,25 @@
         }
       }
       if(w.battery) html += '<div class="wg-slot" data-bat="1" id="wgBatSlot">' + batFaceHtml(w) + '</div>'; // карточка заряда — последняя в стопке, место рядом с десятым слотом
+      if(w.batteryMulti) html += '<div class="wg-slot" data-bat="1" id="wgBat2Slot">' + bat2FaceHtml(w) + '</div>'; // карточка заряда нескольких устройств — после карточки заряда
       html += '</div>';
       html += '<label class="wg-check"><input type="checkbox" id="wgRotate"' + (w.rotate ? ' checked' : '') + '>Переключать виджеты по кругу</label>';
       if(w.rotate) html += '<div class="wg-min">каждые<input type="number" id="wgRotMin" min="1" max="720" value="' + w.rotateMin + '">мин</div>';
       html += '<label class="wg-check"><input type="checkbox" id="wgRel"' + (w.relevance ? ' checked' : '') + '>Переключение по релевантности</label>';
       html += '<div class="wg-hint">По кругу — карточки сменяют друг друга сами. По релевантности — наверху то, что запущено сейчас (тренировка, затем помодоро, затем таймеры и секундомер), следом карточки, у которых сейчас их время суток и день. Включить можно что-то одно.</div>';
-      html += '<label class="wg-check"><input type="checkbox" id="wgBat"' + (w.battery ? ' checked' : '') + '>Отображать заряд аккумулятора</label>';
+      html += '<label class="wg-check"><input type="checkbox" id="wgBat"' + (w.battery ? ' checked' : '') + '>Отображать заряд аккумулятора (наушники и телефон)</label>';
       html += '<div class="wg-hint">В стопке появится карточка с зарядом телефона и, если подключены Bluetooth-наушники, их заряда. Нет галочки — карточки в стопке нет.</div>';
       if(w.battery){
         html += cardsOf().colorPalette("battery");
         var bst = batStatusText();
         if(bst) html += '<div class="wg-bat-status" id="wgBatStatus">' + esc(bst) + '</div>';
+      }
+      html += '<label class="wg-check"><input type="checkbox" id="wgBat2"' + (w.batteryMulti ? ' checked' : '') + '>Отображать заряд аккумулятора (несколько устройств)</label>';
+      html += '<div class="wg-hint">Ещё одна карточка в стопке — без надписей, только значки и кольца заряда: телефон и до трёх подключённых Bluetooth-устройств (наушники, часы, колонка и т. п.).</div>';
+      if(w.batteryMulti){
+        html += cardsOf().colorPalette("battery2", "icfColors2");
+        var dst = batDevicesText();
+        if(dst) html += '<div class="wg-bat-status" id="wgBat2Status">' + esc(dst) + '</div>';
       }
       var st = nativeState(), placed = st && st.placed && st.placed[w.id];
       html += '<div class="wg-btns">';
@@ -473,7 +530,7 @@
       }
     }
     function commitDraft(a){
-      if(a.draft && (a.w.cards.length || a.w.battery)){ a.draft = false; data.n = Math.max(data.n, a.w.n); data.list.push(a.w); }
+      if(a.draft && (a.w.cards.length || a.w.battery || a.w.batteryMulti)){ a.draft = false; data.n = Math.max(data.n, a.w.n); data.list.push(a.w); }
     }
     function bindForm(a){
       var w = a.w;
@@ -493,29 +550,37 @@
         if(w.battery) w.batColor = cardsOf().defaultColor("battery"); // запомненный цвет (как у новых карточек QR-кодов), иначе сиреневый
         commitDraft(a); changed(); render();
       });
-      var colorsEl = $("icfColors");
-      if(colorsEl){
+      var bat2 = $("wgBat2");
+      bat2.addEventListener("change", function(){
+        w.batteryMulti = bat2.checked;
+        if(w.batteryMulti) w.bat2Color = cardsOf().defaultColor("battery2");
+        commitDraft(a); changed(); render();
+      });
+      // палитры цвета карточек заряда: [id палитры, поле цвета, ключ запомненного цвета, id места карточки, лицо карточки]
+      [["icfColors", "batColor", "battery", "wgBatSlot", batFaceHtml], ["icfColors2", "bat2Color", "battery2", "wgBat2Slot", bat2FaceHtml]].forEach(function(p){
+        var colorsEl = $(p[0]);
+        if(!colorsEl) return;
         var markColors = function(){
           var bs = colorsEl.querySelectorAll(".habit-color");
-          for(var i = 0; i < bs.length; i++) bs[i].classList.toggle("selected", bs[i].getAttribute("data-color") === (w.batColor || ""));
+          for(var i = 0; i < bs.length; i++) bs[i].classList.toggle("selected", bs[i].getAttribute("data-color") === (w[p[1]] || ""));
         };
         markColors();
         colorsEl.addEventListener("click", function(e){
           var b = e.target.closest(".habit-color");
           if(!b) return;
-          w.batColor = b.getAttribute("data-color") || ""; // "" — по умолчанию (сиреневый)
-          cardsOf().rememberColor("battery", w.batColor);
+          w[p[1]] = b.getAttribute("data-color") || ""; // "" — по умолчанию (сиреневый)
+          cardsOf().rememberColor(p[2], w[p[1]]);
           markColors();
-          var slot = $("wgBatSlot"); if(slot) slot.innerHTML = batFaceHtml(w);
+          var slot = $(p[3]); if(slot) slot.innerHTML = p[4](w);
           commitDraft(a); changed();
         });
-      }
+      });
       var mn = $("wgRotMin");
       if(mn) mn.addEventListener("change", function(){ w.rotateMin = Math.max(1, Math.min(720, parseInt(mn.value, 10) || 5)); mn.value = w.rotateMin; commitDraft(a); changed(); });
       var pin = $("wgPinBtn");
       if(pin) pin.addEventListener("click", function(){
         var hint = $("wgPinHint");
-        if(!w.cards.length && !w.battery){ hint.textContent = "Сначала добавьте в виджет карточку или включите «Отображать заряд аккумулятора»."; return; }
+        if(!w.cards.length && !w.battery && !w.batteryMulti){ hint.textContent = "Сначала добавьте в виджет карточку или включите «Отображать заряд аккумулятора»."; return; }
         commitDraft(a); save();
         hint.textContent = "Готовлю…";
         syncNow().then(function(ok){

@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.2 (12.11)
+// Версия: 3.0 (12.11)
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -20,6 +20,8 @@ import android.graphics.Typeface
 import android.media.AudioManager
 import android.os.BatteryManager
 import android.os.Build
+import android.graphics.Path
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -45,6 +47,11 @@ object QrBattery {
 
     /** Ключ карточки в стопке (не совпадает с id настоящих карточек). */
     const val KEY = "__battery"
+
+    /** Ключ карточки «несколько устройств»: только кольца и значки, без надписей. */
+    const val KEY2 = "__battery2"
+
+    fun isBatteryKey(key: String): Boolean = key == KEY || key == KEY2
 
     private const val PREFS = "qr_widgets"
     private const val K_LEVELS = "btlevels"
@@ -198,8 +205,92 @@ object QrBattery {
     /** {"reason","name","level"} — что с наушниками сейчас; для формы виджета (мост `widgetsState`, поле `bt`). */
     fun status(ctx: Context): JSONObject {
         val p = probe(ctx)
-        return JSONObject().put("reason", p.reason).put("name", p.name).put("level", p.level)
+        return JSONObject().put("reason", p.reason).put("name", p.name).put("level", p.level).put("devices", pairedDevices(ctx))
     }
+
+    /** Парные Bluetooth-устройства: [{name, on (подключено), icon}] — форма виджета показывает их имена и значок, который достанется каждому. */
+    @SuppressLint("MissingPermission")
+    private fun pairedDevices(ctx: Context): JSONArray {
+        val out = JSONArray()
+        try {
+            val app = ctx.applicationContext
+            if (!btPermitted(app)) return out
+            val adapter = adapterOf(app) ?: return out
+            if (!adapter.isEnabled) return out
+            val (addrs, names) = activeOutputs(app)
+            for (d in adapter.bondedDevices ?: emptySet<BluetoothDevice>()) {
+                val on = isActive(d, addrs, names) || isConnected(d)
+                out.put(JSONObject().put("name", d.name ?: "").put("on", on).put("icon", iconKind(d)))
+                if (out.length() >= 30) break
+            }
+        } catch (e: Throwable) {
+            // список не обязателен
+        }
+        return out
+    }
+
+    private fun isActive(d: BluetoothDevice, addrs: Set<String>, names: Set<String>): Boolean =
+        addrs.contains(d.address.uppercase()) || (d.name != null && names.contains(d.name))
+
+    /** Значок устройства: сначала по названию (правила ниже), затем по классу Bluetooth-устройства; запасной — знак Bluetooth. */
+    @SuppressLint("MissingPermission")
+    private fun iconKind(d: BluetoothDevice): String {
+        val n = (d.name ?: "").lowercase()
+        if (n.isNotEmpty()) for ((part, kind) in NAME_ICONS) if (n.contains(part)) return kind
+        val c = d.bluetoothClass ?: return "generic"
+        return when {
+            c.majorDeviceClass == BluetoothClass.Device.Major.WEARABLE -> "watch"
+            c.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO -> when (c.deviceClass) {
+                BluetoothClass.Device.AUDIO_VIDEO_LOUDSPEAKER, BluetoothClass.Device.AUDIO_VIDEO_PORTABLE_AUDIO,
+                BluetoothClass.Device.AUDIO_VIDEO_HIFI_AUDIO, BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO -> "speaker"
+                else -> "headphones"
+            }
+            else -> "generic"
+        }
+    }
+
+    /** Правила «часть названия → значок» (регистр не важен); проверяются по порядку, раньше класса устройства. */
+    private val NAME_ICONS = listOf(
+        "watch" to "watch", "band" to "watch", "часы" to "watch", "браслет" to "watch",
+        "speaker" to "speaker", "колонк" to "speaker", "soundbar" to "speaker", "boombox" to "speaker",
+        "buds" to "headphones", "pods" to "headphones", "earbud" to "headphones", "headphone" to "headphones", "headset" to "headphones", "наушник" to "headphones"
+    )
+
+    private class Dev(val icon: String, val level: Int)
+
+    /** Круги карточки «несколько устройств»: телефон, затем до трёх подключённых Bluetooth-устройств (сначала звуковые). Уровень -1 — заряд не известен. */
+    @SuppressLint("MissingPermission")
+    private fun devices(ctx: Context): List<Dev> {
+        val out = ArrayList<Dev>()
+        out.add(Dev("phone", phoneLevel(ctx)))
+        try {
+            val app = ctx.applicationContext
+            if (!btPermitted(app)) return out
+            val adapter = adapterOf(app) ?: return out
+            if (!adapter.isEnabled) return out
+            val bonded = adapter.bondedDevices ?: return out
+            val (addrs, names) = activeOutputs(app)
+            val live = ArrayList<Triple<Int, String, Dev>>() // (порядок, название, круг)
+            for (d in bonded) {
+                val active = isActive(d, addrs, names)
+                if (!active && !isConnected(d)) continue
+                val audio = d.bluetoothClass?.majorDeviceClass == BluetoothClass.Device.Major.AUDIO_VIDEO
+                val rank = if (active) 0 else if (audio) 1 else 2
+                live.add(Triple(rank, d.name ?: "", Dev(iconKind(d), levelOf(app, d))))
+            }
+            live.sortWith(compareBy({ it.first }, { it.second }))
+            for (t in live) {
+                if (out.size >= 4) break
+                out.add(t.third)
+            }
+        } catch (e: Throwable) {
+            // остаётся только телефон
+        }
+        return out
+    }
+
+    /** Строка по кругам карточки «несколько устройств» — по ней виджет понимает, что картинку пора перерисовать. */
+    fun signatureMulti(ctx: Context): String = devices(ctx).joinToString("|") { it.icon + ":" + it.level }
 
     /** Строка «телефон/наушники» — по ней виджет понимает, что картинку пора перерисовать. */
     fun signature(ctx: Context): String = phoneLevel(ctx).toString() + "/" + headphonesLevel(ctx)
@@ -275,10 +366,46 @@ object QrBattery {
         return bmp
     }
 
-    /** Один столбец с центром на доле [fx] ширины. Размеры и шрифты не зависят от того, один столбец или два; кольца у телефона и наушников одинаковые. */
-    private fun column(g: Canvas, w: Float, fx: Float, pct: Int, headphones: Boolean) {
-        val cx = w * fx
-        val cy = w * 0.300f
+    /**
+     * Лицо карточки «несколько устройств»: от одного до четырёх колец со значками, без надписей. Размеры колец и значков те же, что у карточки «Заряд».
+     * Два круга — в один ряд по центру высоты; три — два сверху и один по центру снизу; четыре — два ряда (верхний на месте столбцов карточки «Заряд»,
+     * нижний симметрично относительно середины карточки).
+     */
+    fun renderMulti(ctx: Context, face: Int = DEFAULT_FACE): Bitmap {
+        val w = FACE_PX.toFloat()
+        val body = Math.round(w * QrWidgets.FACE_BODY).toFloat()
+        val shift = Math.round(w * QrWidgets.FACE_SHADE).toFloat()
+        val bmp = Bitmap.createBitmap(FACE_PX, (body + shift).toInt(), Bitmap.Config.ARGB_8888)
+        val g = Canvas(bmp)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        val r = w * QrWidgets.FACE_RADIUS
+        p.color = shadeOf(face)
+        g.drawRoundRect(RectF(0f, shift, w, shift + body), r, r, p)
+        p.color = face or (0xFF shl 24)
+        g.drawRoundRect(RectF(0f, 0f, w, body), r, r, p)
+
+        val list = devices(ctx)
+        val left = 0.268f
+        val right = 0.732f
+        val rowTop = 0.273f
+        val rowBottom = QrWidgets.FACE_BODY - rowTop
+        val mid = QrWidgets.FACE_BODY / 2f
+        for ((i, d) in list.withIndex()) {
+            val fx: Float
+            val fy: Float
+            when (list.size) {
+                1 -> { fx = 0.5f; fy = mid }
+                2 -> { fx = if (i == 0) left else right; fy = mid }
+                3 -> if (i < 2) { fx = if (i == 0) left else right; fy = rowTop } else { fx = 0.5f; fy = rowBottom }
+                else -> { fx = if (i % 2 == 0) left else right; fy = if (i < 2) rowTop else rowBottom }
+            }
+            ringIcon(g, w, w * fx, w * fy, d.level, d.icon)
+        }
+        return bmp
+    }
+
+    /** Кольцо заряда [pct] (меньше нуля — заряд не известен, только дорожка) с центром в (cx, cy) и значок [icon] внутри. */
+    private fun ringIcon(g: Canvas, w: Float, cx: Float, cy: Float, pct: Int, icon: String) {
         val rr = w * 0.1263f * ICON_SCALE // кольцо растёт вместе со значком
         val sw = w * 0.0212f
 
@@ -298,8 +425,52 @@ object QrBattery {
         // значок крупнее: масштаб от центра кольца, толщина линии остаётся прежней (iconPaint делит её на ICON_SCALE)
         g.save()
         g.scale(ICON_SCALE, ICON_SCALE, cx, cy)
-        if (headphones) drawHeadphones(g, w, cx, cy) else drawPhone(g, w, cx, cy)
+        when (icon) {
+            "headphones" -> drawHeadphones(g, w, cx, cy)
+            "watch" -> drawWatch(g, w, cx, cy)
+            "speaker" -> drawSpeaker(g, w, cx, cy)
+            "generic" -> drawBluetooth(g, w, cx, cy)
+            else -> drawPhone(g, w, cx, cy)
+        }
         g.restore()
+    }
+
+    /** Значок часов: корпус и два ремешка. */
+    private fun drawWatch(g: Canvas, w: Float, cx: Float, cy: Float) {
+        val p = iconPaint(w)
+        g.drawRoundRect(RectF(cx - w * 0.032f, cy - w * 0.034f, cx + w * 0.032f, cy + w * 0.034f), w * 0.014f, w * 0.014f, p)
+        g.drawRoundRect(RectF(cx - w * 0.017f, cy - w * 0.058f, cx + w * 0.017f, cy - w * 0.034f), w * 0.008f, w * 0.008f, p)
+        g.drawRoundRect(RectF(cx - w * 0.017f, cy + w * 0.034f, cx + w * 0.017f, cy + w * 0.058f), w * 0.008f, w * 0.008f, p)
+    }
+
+    /** Значок колонки: корпус, маленький динамик сверху и большой снизу. */
+    private fun drawSpeaker(g: Canvas, w: Float, cx: Float, cy: Float) {
+        val p = iconPaint(w)
+        g.drawRoundRect(RectF(cx - w * 0.035f, cy - w * 0.055f, cx + w * 0.035f, cy + w * 0.055f), w * 0.016f, w * 0.016f, p)
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+        fill.color = 0xFFFFFFFF.toInt()
+        g.drawCircle(cx, cy - w * 0.03f, w * 0.009f, fill)
+        g.drawCircle(cx, cy + w * 0.018f, w * 0.022f, p)
+    }
+
+    /** Запасной значок — знак Bluetooth. */
+    private fun drawBluetooth(g: Canvas, w: Float, cx: Float, cy: Float) {
+        val p = iconPaint(w)
+        val path = Path()
+        path.moveTo(cx - w * 0.028f, cy - w * 0.026f)
+        path.lineTo(cx + w * 0.028f, cy + w * 0.026f)
+        path.lineTo(cx, cy + w * 0.054f)
+        path.lineTo(cx, cy - w * 0.054f)
+        path.lineTo(cx + w * 0.028f, cy - w * 0.026f)
+        path.lineTo(cx - w * 0.028f, cy + w * 0.026f)
+        g.drawPath(path, p)
+    }
+
+    /** Один столбец с центром на доле [fx] ширины. Размеры и шрифты не зависят от того, один столбец или два; кольца у телефона и наушников одинаковые. */
+    private fun column(g: Canvas, w: Float, fx: Float, pct: Int, headphones: Boolean) {
+        val cx = w * fx
+        val cy = w * 0.300f
+        ringIcon(g, w, cx, cy, pct, if (headphones) "headphones" else "phone")
 
         val t = Paint(Paint.ANTI_ALIAS_FLAG)
         t.color = 0xFFFFFFFF.toInt()

@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 44.0 (12.11)
+   Версия: 44.1 (12.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -1667,13 +1667,15 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   // ---------- форма создания / правки ----------
   var TYPE_LABEL = { timer: "Таймер", alarm: "Будильник", weather: "Погода", climb: "+ к высоте", htimer: "Скрытый таймер", item: "Предмет", task: "Создавать задачу", habit: "Привычка", datenote: DATENOTE_TITLE, reminder: REMINDER_TITLE, remind: "Напоминание", combo: "Комбинированный" };
   // выбор цвета карточки (необязательный, у любого типа): разметка и привязка; сиреневый квадрат — цвет по умолчанию (пустое значение)
-  function colorPaletteHtml(type){
+  function colorPaletteHtml(type, domId){
     var h = '<div class="item-form-hint">' + (type === "habit"
       ? 'Цвет карточки и отметок на карте. Сиреневый квадрат — по умолчанию: отметки в цвете темы.'
       : type === "battery"
       ? 'Цвет карточки с зарядом. Сиреневый квадрат — цвет по умолчанию.'
+      : type === "battery2"
+      ? 'Цвет карточки с зарядом нескольких устройств. Сиреневый квадрат — цвет по умолчанию.'
       : 'Цвет карточки — необязательно. Сиреневый квадрат — цвет по умолчанию.') + '</div>';
-    h += '<div class="habit-colors" id="icfColors">';
+    h += '<div class="habit-colors" id="' + (domId || "icfColors") + '">';
     CARD_PALETTE_ROWS.forEach(function(row){
       h += '<div class="habit-color-row">';
       row.forEach(function(hex){
@@ -4015,7 +4017,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     widgetCards: widgetCardList,
     widgetFilters: widgetFilterList,
     // выбор цвета для виджета (карточка «Заряд», widgets.js): та же палитра и те же запомненные цвета, что в форме карточки
-    colorPalette: function(type){ ensureHabitStyles(); return colorPaletteHtml(type || "battery"); },
+    colorPalette: function(type, domId){ ensureHabitStyles(); return colorPaletteHtml(type || "battery", domId); },
     paletteColor: function(hex){ return effColor({ color: hex }); },
     cardShade: cardShade,
     defaultColor: defaultColorFor,

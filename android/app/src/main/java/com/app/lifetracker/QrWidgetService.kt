@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.2 (12.11)
+// Версия: 1.3 (12.11)
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
@@ -46,7 +46,7 @@ class QrWidgetService : RemoteViewsService() {
             val bmp = bitmaps.getOrPut(c.key) { QrWidgets.bitmapFor(ctx, c) }
             rv.setImageViewBitmap(R.id.qr_card_img, bmp)
             // карточка заряда — не QR-карточка: нажатие на неё ничего не делает (без fill-in intent шаблон не срабатывает)
-            if (c.key != QrBattery.KEY) rv.setOnClickFillInIntent(R.id.qr_card_img, Intent().putExtra("code", c.code).putExtra("key", c.key))
+            if (!QrBattery.isBatteryKey(c.key)) rv.setOnClickFillInIntent(R.id.qr_card_img, Intent().putExtra("code", c.code).putExtra("key", c.key))
             if (cards.size > 1 && SystemClock.uptimeMillis() > quietUntil) QrWidgets.onPossibleSwipe(ctx, widgetId, cards.size)
             return rv
         }
