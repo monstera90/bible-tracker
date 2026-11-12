@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.0 (12.11)
+// Версия: 2.1 (12.11)
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -39,6 +39,9 @@ import org.json.JSONObject
  * заряд наушников неизвестен, отдаёт [status] (страница показывает её в форме виджета).
  */
 object QrBattery {
+
+    /** Во сколько раз значки телефона и наушников больше исходных (кольцо не меняется). */
+    private const val ICON_SCALE = 1.5f
 
     /** Ключ карточки в стопке (не совпадает с id настоящих карточек). */
     const val KEY = "__battery"
@@ -292,7 +295,11 @@ object QrBattery {
             g.drawArc(RectF(cx - rr, cy - rr, cx + rr, cy + rr), -90f, 360f * pct / 100f, false, ring)
         }
 
+        // значок крупнее: масштаб от центра кольца, толщина линии остаётся прежней (iconPaint делит её на ICON_SCALE)
+        g.save()
+        g.scale(ICON_SCALE, ICON_SCALE, cx, cy)
         if (headphones) drawHeadphones(g, w, cx, cy) else drawPhone(g, w, cx, cy)
+        g.restore()
 
         val t = Paint(Paint.ANTI_ALIAS_FLAG)
         t.color = 0xFFFFFFFF.toInt()
@@ -324,7 +331,7 @@ object QrBattery {
     private fun iconPaint(w: Float): Paint {
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
         p.style = Paint.Style.STROKE
-        p.strokeWidth = w * 0.0126f
+        p.strokeWidth = w * 0.0126f / ICON_SCALE
         p.strokeCap = Paint.Cap.ROUND
         p.strokeJoin = Paint.Join.ROUND
         p.color = 0xFFFFFFFF.toInt()
