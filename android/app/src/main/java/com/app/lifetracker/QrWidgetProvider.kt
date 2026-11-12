@@ -1,10 +1,11 @@
 package com.app.lifetracker
-// Версия: 1.0 (11.11)
+// Версия: 2.0 (12.11)
 
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 
 /** Виджет «Стопка QR-карточек» 2×2. Всё содержимое и логика — в [QrWidgets]. */
 class QrWidgetProvider : AppWidgetProvider() {
@@ -18,6 +19,15 @@ class QrWidgetProvider : AppWidgetProvider() {
             }
         }
         QrWidgets.refreshAll(context)
+    }
+
+    override fun onAppWidgetOptionsChanged(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, newOptions: Bundle) {
+        try {
+            QrWidgets.updateHostLayout(context, appWidgetManager, appWidgetId)
+        } catch (e: Exception) {
+            // виджет удалили или лаунчер не принял обновление
+        }
+        super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
     }
 
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {

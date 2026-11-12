@@ -1,59 +1,73 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Версия: 1.1 (12.11)
-     Виджет «Стопка QR-карточек» 2×2. StackView сам рисует «стопку»: передняя карточка занимает 90 % ширины и высоты и стоит в левом
-     нижнем углу, следующие выглядывают сверху справа. StackView увеличен в 1/0,9 раза вокруг центра и сдвинут вправо и вверх, чтобы передняя
-     карточка легла на виджет, а выглядывающие края ушли за границы. Подгонка по устройству (Poco X6 Pro, HyperOS): translationX/translationY.
-     Внешний FrameLayout `qr_clip` обрезает всё, что вылезает за переднюю карточку: сверху и справа — отступы 15,5 dp и 4,4 dp (края карточки
-     на этом телефоне), у StackView внутри — такие же отрицательные отступы, чтобы его размер и положение остались прежними. Карточка стоит
-     на одной высоте с системной папкой того же ряда (translationY 0). -->
+<!-- Версия: 2.0 (12.11)
+     Виджет «Стопка QR-карточек» 2×2. StackView рисует «стопку» сам: передняя карточка — 90 % его ширины и высоты в левом нижнем углу,
+     остальные выглядывают сверху справа. Поэтому StackView делается в 1/0,9 раза больше области виджета (в двух LinearLayout у
+     единственного ребёнка вес 1 при weightSum 0,9 — он занимает 1/0,9 родителя) и прижимается к левому нижнему углу (gravity bottom у
+     qr_v, у qr_h ребёнок идёт слева): передняя карточка точно заполняет область, без масштабирования, а края задних уходят за границу
+     области и обрезаются. qr_clip обрезает всё по скруглённому контуру (clipToOutline; фон qr_widget_clip_<dp> — прозрачный, нужен
+     только ради контура; радиус = 12 % стороны карточки, нужный фон подставляет QrWidgets.applyHostLayout): задние карточки не видны и
+     сквозь прозрачные углы передней. qr_root — отступы, которые QrWidgets выставляет, чтобы карточка была квадратом, если лаунчер
+     отдал не квадратную область. layoutDirection ltr — иначе при письме справа налево стопка уедет в другую сторону. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/qr_root"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:clipChildren="true"
-    android:clipToPadding="true">
+    android:layout_height="match_parent">
 
     <FrameLayout
         android:id="@+id/qr_clip"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_marginTop="15.5dp"
-        android:layout_marginRight="4.4dp"
-        android:layout_marginEnd="4.4dp"
+        android:background="@drawable/qr_widget_clip_22"
         android:clipChildren="true"
-        android:clipToPadding="true">
+        android:clipToOutline="true"
+        android:layoutDirection="ltr">
 
-        <StackView
-            android:id="@+id/qr_stack"
+        <LinearLayout
+            android:id="@+id/qr_h"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:layout_marginTop="-15.5dp"
-            android:layout_marginRight="-4.4dp"
-            android:layout_marginEnd="-4.4dp"
-            android:loopViews="true"
-            android:scaleX="1.1111"
-            android:scaleY="1.1111"
-            android:translationX="10dp"
-            android:translationY="0dp" />
+            android:clipChildren="true"
+            android:orientation="horizontal"
+            android:weightSum="0.9">
+
+            <LinearLayout
+                android:id="@+id/qr_v"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:clipChildren="true"
+                android:gravity="bottom"
+                android:orientation="vertical"
+                android:weightSum="0.9">
+
+                <StackView
+                    android:id="@+id/qr_stack"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:loopViews="true" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/qr_empty"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/qr_widget_empty_bg"
+            android:gravity="center"
+            android:padding="12dp"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp" />
+
+        <ImageView
+            android:id="@+id/qr_dots"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end|center_vertical"
+            android:layout_marginEnd="5dp"
+            android:layout_marginRight="5dp"
+            android:contentDescription="@null"
+            android:scaleType="center"
+            android:visibility="gone" />
     </FrameLayout>
-
-    <TextView
-        android:id="@+id/qr_empty"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:background="@drawable/qr_widget_empty_bg"
-        android:gravity="center"
-        android:padding="12dp"
-        android:textColor="#FFFFFF"
-        android:textSize="12sp" />
-
-    <ImageView
-        android:id="@+id/qr_dots"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="end|center_vertical"
-        android:layout_marginEnd="5dp"
-        android:layout_marginRight="5dp"
-        android:contentDescription="@null"
-        android:scaleType="center"
-        android:visibility="gone" />
 </FrameLayout>

@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.2 (12.11)
+// Версия: 2.0 (12.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -7,6 +7,7 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -453,6 +454,7 @@ object QrWidgets {
         if (!isBound(app, id)) claimPending(app, id)
         val cfg = cfgFor(app, id)
         val rv = RemoteViews(app.packageName, R.layout.qr_widget)
+        applyHostLayout(app, rv, hostSizeDp(app, mgr, id))
         val svc = Intent(app, QrWidgetService::class.java)
         svc.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
         svc.data = Uri.parse(svc.toUri(Intent.URI_INTENT_SCHEME))
@@ -490,6 +492,64 @@ object QrWidgets {
         }
         mgr.updateAppWidget(id, rv)
         mgr.notifyAppWidgetViewDataChanged(id, R.id.qr_stack)
+    }
+
+    // ---------- размер области виджета ----------
+
+    /** Сторона карточки (dp), если лаунчер не сообщил размер области. */
+    private const val DEFAULT_SIDE_DP = 175f
+
+    /** Радиус скругления лица карточки — 12 % стороны (как в widgets.js `drawFace`). */
+    private const val FACE_RADIUS = 0.12f
+
+    /** Размер области, отданной виджету лаунчером: [ширина, высота] в dp; null — лаунчер не сообщил (тогда карточка занимает всю область). */
+    private fun hostSizeDp(ctx: Context, mgr: AppWidgetManager, id: Int): FloatArray? {
+        val o = try { mgr.getAppWidgetOptions(id) } catch (e: Exception) { null } ?: return null
+        val land = ctx.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val w = o.getInt(if (land) AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH else AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
+        val h = o.getInt(if (land) AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT else AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0)
+        return if (w > 0 && h > 0) floatArrayOf(w.toFloat(), h.toFloat()) else null
+    }
+
+    /**
+     * Передняя карточка занимает ВСЮ область виджета (см. layout/qr_widget.xml). Лаунчер может отдать область не квадратную — тогда
+     * картинка карточки растянулась бы, поэтому у `qr_root` выставляются отступы по длинной стороне: карточка — квадрат по короткой.
+     * Радиус контура обрезки (`qr_clip`) подбирается под радиус лица карточки (12 % стороны), шаг 2 dp.
+     */
+    private fun applyHostLayout(ctx: Context, rv: RemoteViews, size: FloatArray?) {
+        val d = ctx.resources.displayMetrics.density
+        var padX = 0
+        var padY = 0
+        var sideDp = DEFAULT_SIDE_DP
+        if (size != null) {
+            val w = size[0]
+            val h = size[1]
+            sideDp = Math.min(w, h)
+            val diff = Math.abs(w - h)
+            if (diff > 0.03f * Math.max(w, h)) {
+                val p = Math.round(diff / 2f * d)
+                if (w > h) padX = p else padY = p
+            }
+        }
+        rv.setViewPadding(R.id.qr_root, padX, padY, padX, padY)
+        val r = (Math.round(sideDp * FACE_RADIUS / 2f) * 2).coerceIn(16, 26)
+        val res = when (r) {
+            16 -> R.drawable.qr_widget_clip_16
+            18 -> R.drawable.qr_widget_clip_18
+            20 -> R.drawable.qr_widget_clip_20
+            22 -> R.drawable.qr_widget_clip_22
+            24 -> R.drawable.qr_widget_clip_24
+            else -> R.drawable.qr_widget_clip_26
+        }
+        rv.setInt(R.id.qr_clip, "setBackgroundResource", res)
+    }
+
+    /** Лаунчер изменил размер виджета: пересчитать отступы и контур, не трогая карточки (стопка остаётся на месте). */
+    fun updateHostLayout(ctx: Context, mgr: AppWidgetManager, id: Int) {
+        val app = ctx.applicationContext
+        val rv = RemoteViews(app.packageName, R.layout.qr_widget)
+        applyHostLayout(app, rv, hostSizeDp(app, mgr, id))
+        mgr.partiallyUpdateAppWidget(id, rv)
     }
 
     fun refreshAll(ctx: Context, resetTop: Boolean = false, forceAlarms: Boolean = false) {
