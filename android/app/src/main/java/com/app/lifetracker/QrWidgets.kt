@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.0 (12.11)
+// Версия: 2.1 (12.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -526,7 +526,7 @@ object QrWidgets {
             val h = size[1]
             sideDp = Math.min(w, h)
             val diff = Math.abs(w - h)
-            if (diff > 0.03f * Math.max(w, h)) {
+            if (diff > 0.08f * Math.max(w, h)) {
                 val p = Math.round(diff / 2f * d)
                 if (w > h) padX = p else padY = p
             }
