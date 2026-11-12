@@ -33,6 +33,8 @@ minixlsx.js
 docxparse.js
 fb2parse.js
 epubparse.js
+pdfglyphs.js
+pdfglyphs_data.js
 pdfparse.js
 pdfindex.js
 pdfreader.js

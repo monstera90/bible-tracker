@@ -1006,6 +1006,10 @@ window.addEventListener("error", function(e){
 <script src="epubparse.js"></script>
 <!-- pdfparse.js — разбор текста из .pdf в ту же структуру глав/абзацев, что и
      fb2parse.js/epubparse.js; использует MiniDeflate (minideflate.js, выше). -->
+<!-- pdfglyphs.js + pdfglyphs_data.js — восстановление букв по форме глифов для PDF с «зашифрованными» шрифтами
+     (кракозябры при копировании, например журналы jw.org); используются pdfparse.js, должны идти ДО него. -->
+<script src="pdfglyphs.js"></script>
+<script src="pdfglyphs_data.js"></script>
 <script src="pdfparse.js"></script>
 <!-- pdfindex.js — индекс текста PDF для режима «PDF» во вкладке «Поиск» (search.js); использует
      PdfParse (pdfparse.js, выше), должен идти ДО my.js (передаётся в search.js как deps.pdfIndex). -->

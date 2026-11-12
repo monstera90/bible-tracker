@@ -1,6 +1,6 @@
 /* ===========================================================================
    pdfparse.js
-   Версия: 1.0 (31.10)
+   Версия: 2.0 (13.11)
    Самописный (без сторонних библиотек) разбор текста из .pdf в ТОЧНО ТАКУЮ ЖЕ
    структуру глав -> абзацев, что у fb2parse.js / epubparse.js, — экран чтения
    в my.js (закладки, подчёркивания, позиция чтения) работает с PDF как с
@@ -18,12 +18,12 @@
    Что умеет: поиск объектов сканированием файла (не зависит от битой
    xref-таблицы), потоки объектов (ObjStm), фильтры Flate/ASCIIHex/ASCII85/
    LZW/RunLength (+PNG-предикторы), дерево страниц, шрифты с ToUnicode,
-   простые шрифты с Encoding/Differences, составные шрифты Identity-H,
+   «зашифрованные» CFF-шрифты (буква по форме глифа через pdfglyphs.js), простые шрифты с Encoding/Differences, составные шрифты Identity-H,
    формы (XObject Form) с текстом. Текст всех страниц «как есть» из
    видимого и невидимого слоя (OCR-слой сканов тоже читается).
    Чего НЕ умеет: зашифрованные PDF (бросает ошибку), сканы без текстового
    слоя (бросает ошибку), шрифты без ToUnicode с кодами-номерами глифов
-   (такие символы пропускаются), повёрнутый текст.
+   (такие символы пропускаются; исключение — CFF/Type1C-шрифты с «зашифрованными» именами, см. выше), повёрнутый текст.
    Зависит от MiniDeflate.inflateRawSync (minideflate.js, идёт раньше).
    =========================================================================== */
 (function (global) {
@@ -628,21 +628,69 @@
       }
       table = baseEncoding(baseName).slice();
       var encD = this.D(enc);
-      var diffs = encD ? this.A(encD.Differences) : null;
+      var diffs = encD ? this.A(encD.Differences) : null, codeNames = null;
       if (diffs) {
         var code = 0;
+        codeNames = Object.create(null);
         for (var j = 0; j < diffs.length; j++) {
           var it = this.R(diffs[j]);
           if (typeof it === "number") code = it;
-          else if (it instanceof PName) { var ch = glyphToUnicode(it.n); if (code < 256) table[code] = ch; code++; }
+          else if (it instanceof PName) { var ch = glyphToUnicode(it.n); if (code < 256) { table[code] = ch; codeNames[code] = it.n; } code++; }
         }
       }
       f.enc = table;
     }
     var tu = this.streamText(fd.ToUnicode);
     if (tu) parseToUnicode(tu, f);
+    if (sub !== "Type0" && sub !== "Type3") { try { applyShapeDecode(this, fd, f, typeof codeNames === "undefined" ? null : codeNames); } catch (e) { /* остаётся разбор по ToUnicode */ } }
     return f;
   };
+
+  // ---------------------------------------------------------- «зашифрованные» шрифты
+  // Некоторые PDF (например, журналы jw.org) называют кириллические глифы в шрифте латинскими
+  // именами и повторяют их в ToUnicode — копирование даёт «b\ b*V\1 \/SZ\h1ab,\H». Поэтому у встроенного
+  // CFF-шрифта (Type1C) букву определяют по форме глифа (pdfglyphs.js) и сверяют с тем, что дают
+  // ToUnicode/имена. Если для кириллицы без латинских двойников они расходятся — шрифт «зашифрован»,
+  // и для него (f.shape) берутся буквы по форме. Честные латинские шрифты не затрагиваются.
+  var CYR_NOLOOK = /[бгджзийклмнптфцчшщъыьэюяБГДЖЗИЙЛПФЦЧШЩЪЫЬЭЮЯ]/;
+  function applyShapeDecode(doc, fd, f, codeNames) {
+    var PG = global.PdfGlyphs;
+    if (!PG || typeof PG.decodeFont !== "function") return;
+    var fdesc = doc.D(fd.FontDescriptor);
+    if (!fdesc) return;
+    var ff = doc.R(fdesc.FontFile3);
+    if (!(ff instanceof PStream)) return;
+    var bytes = doc.decode(ff);
+    if (!bytes || bytes.length < 16) return;
+    var res = PG.decodeFont(bytes);
+    if (!res || !res.ok) return;
+    if (!codeNames || !Object.keys(codeNames).length) { // кодировка без Differences — встроенная кодировка CFF
+      codeNames = Object.create(null);
+      var c2g = res.font.code2gid;
+      for (var k in c2g) if (res.font.names[c2g[k]]) codeNames[k] = res.font.names[c2g[k]];
+    }
+    if (!Object.keys(codeNames).length) { // совсем без кодировки (WinAnsi/Standard): код — это ASCII-символ, который «называет» глиф
+      for (var gi = 1; gi < res.font.names.length; gi++) {
+        var nm = res.font.names[gi], ch0 = glyphToUnicode(nm);
+        if (ch0 && ch0.length === 1 && ch0.charCodeAt(0) > 32 && ch0.charCodeAt(0) < 127) codeNames[ch0.charCodeAt(0)] = nm;
+      }
+    }
+    var hit = 0, ok = 0, code;
+    for (code in codeNames) {
+      var g = res.glyphs[codeNames[code]];
+      if (!g) continue;
+      var cur = (f.uni && f.uni[code] !== undefined) ? f.uni[code] : (f.enc ? f.enc[code] : "");
+      if (!cur) continue;
+      if (g.c && g.d < 0.3 && CYR_NOLOOK.test(g.c) && g.d < g.ld - 0.05 && /^[\x20-\x7E]$/.test(cur)) hit++;
+      else if (g.lc && g.ld < 0.15 && cur === g.lc) ok++;
+    }
+    if (hit < 2 || hit < ok * 2) return;
+    f.shape = Object.create(null);
+    for (code in codeNames) {
+      var gg = res.glyphs[codeNames[code]];
+      f.shape[code] = gg && gg.c ? gg.c : "";
+    }
+  }
   function glyphWidth(f, code) { // в тысячных долях em
     if (f.cid) { var w = f.wmap ? f.wmap[code] : undefined; return w === undefined ? f.dw : w; }
     if (f.widths) {
@@ -653,6 +701,7 @@
     return code === 32 ? 278 : 550;
   }
   function glyphText(f, code) {
+    if (f.shape && f.shape[code] !== undefined) return f.shape[code];
     if (f.uni) { var u = f.uni[code]; if (u !== undefined) return u; }
     if (f.enc) return f.enc[code] || "";
     return "";
@@ -669,17 +718,50 @@
   // Сборка строк: куски текста с позициями собираются в «ряды» по базовой линии подряд идущих
   // кусков (некоторые генераторы, например LibreOffice, выводят куски одной строки в порядке
   // шрифтов, а не слева направо), при закрытии ряда куски сортируются по x и склеиваются.
-  function LineBuilder() { this.lines = []; this.cur = null; }
-  LineBuilder.prototype.add = function (text, x, endX, y, fs) {
+  function LineBuilder() { this.lines = []; this.cur = null; this.pend = null; }
+  var COMB = /^[\u0300-\u036F]+$/;
+  var VOWELS = /[аеёиоуыэюяАЕЁИОУЫЭЮЯ]/;
+  // Диакритика, нарисованная отдельным куском (точки над «ё», ударение), приклеивается к ближайшей
+  // подходящей букве ряда; значок лежит по центру буквы, поэтому ищем букву, у которой центр ближе всего.
+  function attachMark(chunk, mark, mx, fs) {
+    if (!chunk.xs || chunk.xs.length !== chunk.text.length) return false;
+    var re = mark === "\u0308" ? /[еЕ]/ : VOWELS, best = -1, bd = fs * 0.7, i;
+    for (i = 0; i < chunk.text.length; i++) {
+      if (!re.test(chunk.text.charAt(i))) continue;
+      var nx = i + 1 < chunk.xs.length ? chunk.xs[i + 1] : chunk.endX;
+      var cx = (chunk.xs[i] + Math.max(nx, chunk.xs[i] + fs * 0.3)) / 2, d = Math.abs(mx - cx);
+      if (d < bd) { bd = d; best = i; }
+    }
+    if (best < 0) return false;
+    chunk.text = chunk.text.slice(0, best + 1) + mark + chunk.text.slice(best + 1);
+    chunk.xs.splice(best + 1, 0, chunk.xs[best]);
+    return true;
+  }
+  LineBuilder.prototype.mark = function (text, x, y, fs) {
+    var c = this.cur;
+    if (!fs || fs < 1) fs = 10;
+    if (c && Math.abs(y - c.y) <= fs * 1.2) {
+      for (var k = c.chunks.length - 1; k >= 0 && k >= c.chunks.length - 6; k--) if (attachMark(c.chunks[k], text, x, fs)) return;
+    }
+    this.pend = { t: text, x: x, y: y, fs: fs };
+  };
+  LineBuilder.prototype.add = function (text, x, endX, y, fs, xs) {
     if (!text) return;
     var c = this.cur;
     if (!fs || fs < 1) fs = 10;
+    var chunk = { text: text, x: x, endX: endX, i: 0, xs: xs && xs.length === text.length ? xs.slice() : null };
     if (c && Math.abs(y - c.y) <= Math.max(c.fs, fs) * 0.45) {
-      c.chunks.push({ text: text, x: x, endX: endX, i: c.chunks.length });
+      chunk.i = c.chunks.length;
+      c.chunks.push(chunk);
       if (fs > c.fs) c.fs = fs;
     } else {
       this.flush();
-      this.cur = { y: y, fs: fs, chunks: [{ text: text, x: x, endX: endX, i: 0 }] };
+      this.cur = { y: y, fs: fs, chunks: [chunk] };
+    }
+    var pd = this.pend;
+    if (pd) {
+      this.pend = null;
+      if (Math.abs(pd.y - y) <= fs * 1.5) attachMark(chunk, pd.t, pd.x, fs);
     }
   };
   LineBuilder.prototype.flush = function () {
@@ -688,17 +770,35 @@
     this.cur = null;
     var ch = c.chunks;
     if (ch.length > 1) ch.sort(function (a, b) { return (a.x - b.x) || (a.i - b.i); });
+    // Зазоры между соседними кусками. В плотно набранных строках буквы стоят «внахлёст» (зазор около
+    // нуля или отрицательный даже между словами), поэтому пробелом считается ещё и зазор, который заметно
+    // больше обоих соседних («пик»).
+    var gaps = [0], e0 = ch[0].endX, q;
+    for (q = 1; q < ch.length; q++) { gaps.push(ch[q].x - e0); if (ch[q].endX > e0) e0 = ch[q].endX; }
+    var base = 0;
+    if (ch.length > 4) { // стабильный «нахлёст» всей строки (плотный трекинг) — сдвигаем порог на него
+      var srt = gaps.slice(1).sort(function (x1, x2) { return x1 - x2; }), med = srt[srt.length >> 1], near = 0, gi;
+      for (gi = 0; gi < srt.length; gi++) if (Math.abs(srt[gi] - med) < c.fs * 0.12) near++;
+      if (med < -c.fs * 0.1 && near >= srt.length * 0.7) base = Math.max(-c.fs * 0.5, med);
+    }
     var text = "", endX = ch[0].endX;
     for (var k = 0; k < ch.length; k++) {
       var it = ch[k];
       if (k > 0) {
-        var gap = it.x - endX;
-        if (gap > c.fs * 0.16 && text.charAt(text.length - 1) !== " " && it.text.charAt(0) !== " ") text += " ";
+        var gap = it.x - endX, mx = Math.max(k > 1 ? gaps[k - 1] : -1e9, k + 1 < ch.length ? gaps[k + 1] : -1e9);
+        var yo = /^[еЕ]\u0308/.test(it.text);
+        var isSp = yo ? gap - base > c.fs * 0.4 : (gap - base > c.fs * 0.115 || (gap > -c.fs * 0.15 && mx > -1e8 && gap - mx > c.fs * 0.2));
+        if (isSp && text.charAt(text.length - 1) !== " " && it.text.charAt(0) !== " ") text += " ";
       }
       text += it.text;
       if (it.endX > endX) endX = it.endX;
     }
     text = text.replace(/[\u00A0\u2000-\u200B\u202F\u3000]/g, " ").replace(/[ \t]+/g, " ").replace(/^ +| +$/g, "");
+    text = text.replace(/^\u02D9(?= )/, "\u2022"); // маркер списка из шрифта-орнамента
+    // Цифры «0» и «3» в этих шрифтах рисуются почти как «О» и «З»: исправляем по соседям.
+    text = text.replace(/[0-9О]*[0-9][0-9О]*/g, function (m) { return m.replace(/О/g, "0"); })
+      .replace(/(\d) О{3}(?![А-Яа-я])/g, "$1 000").replace(/(^|[^А-Яа-яЁёA-Za-z0-9])([03])(?=[а-яё])/g, function (m, p1, d) { return p1 + (d === "0" ? "О" : "З"); });
+    try { text = text.normalize("NFC"); } catch (e) { /* старый WebView */ }
     if (text) this.lines.push({ text: text, x: ch[0].x, endX: endX, y: c.y, fs: c.fs });
   };
 
@@ -756,7 +856,7 @@
     function showStr(str) {
       var f = st.g.font, fsz = st.g.fs, th = st.g.th;
       var M = mul(st.tm, st.g.ctm);
-      var text = "", adv = 0;
+      var text = "", adv = 0, xsA = [];
       var bytes = f ? f.bytes : 1, k = 0, len = str.length;
       while (k < len) {
         var code;
@@ -766,12 +866,23 @@
         else { code = str.charCodeAt(k); k++; }
         var w = f ? glyphWidth(f, code) : (code === 32 ? 278 : 550);
         var t = f ? glyphText(f, code) : String.fromCharCode(code);
-        if (t) { text += t; stats.mapped++; } else if (code !== 32) stats.unmapped++;
+        if (t) { var x0 = M[4] + adv * M[0]; text += t; for (var q2 = 0; q2 < t.length; q2++) xsA.push(x0); stats.mapped++; } else if (code !== 32) stats.unmapped++;
+        // В последней (растянутой) строке абзаца пробел между словами нередко задан не знаком пробела,
+        // а большим межсимвольным интервалом Tc внутри одной строки TJ — читаем его как пробел.
+        if (t && k < len && st.g.tc > 0.18 * fsz && code !== 32 && !/^[\u0300-\u036F]+$/.test(t)) { text += " "; xsA.push(M[4] + (adv + (w / 1000 * fsz) * th) * M[0]); }
         adv += (w / 1000 * fsz + st.g.tc + ((bytes === 1 && code === 32) ? st.g.tw : 0)) * th;
       }
       var scaleY = Math.sqrt(M[2] * M[2] + M[3] * M[3]) || 1;
       var endX = M[4] + adv * M[0];
-      if (text) { stats.shows++; lb.add(fixText(text), M[4], endX, M[5] + st.g.rise * scaleY, fsz * scaleY); }
+      if (text) {
+        stats.shows++;
+        var ft = fixText(text);
+        if (COMB.test(ft)) lb.mark(ft, M[4], M[5] + st.g.rise * scaleY, fsz * scaleY);
+        else {
+          var sw = ft.replace(/([\u0300-\u036F])([А-Яа-яЁё])/g, "$2$1"); // значок перед буквой — ставим после
+          lb.add(sw, M[4], endX, M[5] + st.g.rise * scaleY, fsz * scaleY, sw === text ? xsA : null);
+        }
+      }
       st.tm = mul([1, 0, 0, 1, adv, 0], st.tm);
     }
     function stepOp(op) {
