@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 25.0 (12.11)
+// Версия: 25.1 (12.11)
 // Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
@@ -1108,7 +1108,10 @@ class NativeBridge(private val activity: MainActivity) {
     @JavascriptInterface
     fun widgetsSync(json: String?): Boolean {
         if (!activity.pageTrusted) return false
-        return QrWidgets.sync(activity.applicationContext, json)
+        val ok = QrWidgets.sync(activity.applicationContext, json)
+        // галочку «Отображать заряд аккумулятора» включили — просим доступ к Bluetooth (заряд наушников)
+        if (ok && QrWidgets.consumeBatteryAsk(activity.applicationContext)) activity.runOnUiThread { activity.requestBluetoothForWidget() }
+        return ok
     }
 
     /** {"sdk","canPin","placed":{id виджета конструктора: число экземпляров на рабочем столе}}. */

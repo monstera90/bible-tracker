@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 17.0 (11.11)
+// Версия: 18.0 (12.11)
 // Версия: 11.0 (04.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
 // Версия: 4.1 (25.10) — onPause перепоставляет уведомление плеера (`MusicPlayer.onAppBackground`): остров «Музыки» появляется после сворачивания приложения. Откат: MainActivity.kt 4.0.
@@ -213,6 +213,26 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+    // Карточка «Заряд» в виджете: на Android 12+ заряд Bluetooth-наушников доступен только с разрешением «Устройства поблизости» (BLUETOOTH_CONNECT).
+    private val btPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            try {
+                QrWidgets.onBatteryChanged(applicationContext, true)
+            } catch (e: Exception) {
+                // виджеты не должны мешать приложению
+            }
+        }
+
+    fun requestBluetoothForWidget() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) return
+        try {
+            btPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+        } catch (e: Exception) {
+            // запрос не открылся — виджет покажет только телефон
+        }
+    }
 
     // Вкладка «Тренировки»: запрос геолокации. После «Разрешить» запись начинается сама, страница узнаёт об этом из workoutState.
     private val locationPermissionLauncher =

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Версия: 3.5 (11.11) -->
+<!-- Версия: 3.6 (12.11) -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Шаг 4: приём файлов из «Поделиться» (intent-filter ниже) и FileProvider для отправки файлов.
@@ -16,6 +16,9 @@
          рабочем столе» в настройках приложения — его выдаёт пользователь (кнопка «Открыть разрешения приложения»). -->
     <uses-permission android:name="com.android.launcher.permission.INSTALL_SHORTCUT" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Карточка «Заряд» виджета: заряд Bluetooth-наушников (до Android 11 — BLUETOOTH, с 12 — BLUETOOTH_CONNECT, его запрашивает MainActivity.requestBluetoothForWidget). -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- Android 16: «живые обновления» (продвигаемые постоянные уведомления; у Xiaomi HyperOS 3 — динамический остров) для таймеров карточек. -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
@@ -312,6 +315,8 @@
             android:label="Стопка QR-карточек">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+                <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

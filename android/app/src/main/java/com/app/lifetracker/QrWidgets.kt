@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.2 (12.11)
+// Версия: 3.0 (12.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -43,6 +43,10 @@ import java.util.UUID
  * «После срабатывания» (`after` у карточки): "hide" — карточка скрыта в стопке до конца дня, "end" — уходит в конец стопки; если скрыты все карточки,
  * виджет показывает «На сегодня больше ничего». Срабатывание — нажатие в виджете ([onCardFired] из ScanActivity) или нажатие/скан карточки
  * в приложении (мост ≥32 `widgetCardFired`).
+ *
+ * Галочка «Отображать заряд аккумулятора» (`battery` у виджета): в конец стопки добавляется служебная карточка [QrBattery.KEY] — её лицо рисует
+ * [QrBattery.render] (заряд телефона и Bluetooth-наушников), нажатие на неё ничего не делает. Картинка перерисовывается по будильнику
+ * `ACTION_BATTERY` (раз в 5 минут, если заряд изменился), при подключении/отключении Bluetooth-устройства и при вещании о заряде наушников.
  */
 object QrWidgets {
 
@@ -53,12 +57,17 @@ object QrWidgets {
     private const val K_PEND = "pend"
     private const val K_TOKEN = "token"
     private const val K_FIRED = "fired"
+    private const val K_BTWANT = "btwant"
+    private const val K_BTASK = "btask"
 
     const val ACTION_ROTATE = "com.app.lifetracker.QRW_ROTATE"
     const val ACTION_TICK = "com.app.lifetracker.QRW_TICK"
+    const val ACTION_BATTERY = "com.app.lifetracker.QRW_BATTERY"
 
     private const val PEND_TTL_MS = 3 * 60_000L
     private const val DOTS_SHOW_MS = 1400L
+    private const val BATTERY_EVERY_MS = 5 * 60_000L
+    private const val BATTERY_AFTER_BT_MS = 6_000L
     private const val MAX_CARDS = 10
     private val KEY_RE = Regex("^[A-Za-z0-9_-]{1,40}$")
 
@@ -79,7 +88,7 @@ object QrWidgets {
 
     class Live(val k: String, val id: String)
     class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none")
-    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>)
+    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false)
     class Ordered(val cards: List<Card>, val topKey: String)
 
     private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -133,10 +142,12 @@ object QrWidgets {
                         if (cards.size >= MAX_CARDS) break
                     }
                 }
+                val battery = o.optBoolean("battery", false)
+                if (battery) cards.add(Card(QrBattery.KEY, "", "Заряд", emptyList(), emptySet(), emptySet(), "none")) // карточка заряда — последняя в стопке
                 out.add(
                     Cfg(
                         id, o.optString("name", "Виджет"), o.optBoolean("rotate", false),
-                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards
+                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery
                     )
                 )
             }
@@ -260,7 +271,14 @@ object QrWidgets {
             }
             dir.listFiles()?.forEach { f -> if (f.name !in keep) f.delete() }
             root.remove("images")
-            synchronized(LOCK) { prefs(app).edit().putString(K_CFG, root.toString()).apply() }
+            var wantBattery = false
+            root.optJSONArray("widgets")?.let { ws -> for (i in 0 until ws.length()) if (ws.optJSONObject(i)?.optBoolean("battery", false) == true) wantBattery = true }
+            synchronized(LOCK) {
+                val e = prefs(app).edit().putString(K_CFG, root.toString())
+                // галочку только что включили — страница попросит у пользователя доступ к Bluetooth (для заряда наушников)
+                if (wantBattery && !prefs(app).getBoolean(K_BTWANT, false)) e.putBoolean(K_BTASK, true)
+                e.putBoolean(K_BTWANT, wantBattery).apply()
+            }
             refreshAll(app, true, true)
             true
         } catch (e: Exception) {
@@ -268,7 +286,16 @@ object QrWidgets {
         }
     }
 
+    /** true один раз после того, как галочку «Отображать заряд аккумулятора» включили: пора запросить доступ к Bluetooth. */
+    fun consumeBatteryAsk(ctx: Context): Boolean = synchronized(LOCK) {
+        val p = prefs(ctx)
+        val ask = p.getBoolean(K_BTASK, false)
+        if (ask) p.edit().putBoolean(K_BTASK, false).apply()
+        ask
+    }
+
     fun bitmapFor(ctx: Context, c: Card): Bitmap {
+        if (c.key == QrBattery.KEY) return QrBattery.render(ctx)
         val f = File(imgDir(ctx), c.key + ".png")
         if (f.exists()) {
             try {
@@ -458,6 +485,7 @@ object QrWidgets {
         val app = ctx.applicationContext
         if (!isBound(app, id)) claimPending(app, id)
         val cfg = cfgFor(app, id)
+        if (cfg != null && cfg.battery) QrBattery.register(app)
         val rv = RemoteViews(app.packageName, R.layout.qr_widget)
         applyHostLayout(app, rv, hostSizeDp(app, mgr, id))
         val svc = Intent(app, QrWidgetService::class.java)
@@ -505,11 +533,11 @@ object QrWidgets {
     private const val DEFAULT_SIDE_DP = 175f
 
     /** Радиус скругления лица карточки — 12 % ширины (как в widgets.js `drawFace`). */
-    private const val FACE_RADIUS = 0.12f
+    internal const val FACE_RADIUS = 0.12f
 
     /** Тело карточки и цветной выступ снизу, доли ширины — те же `FACE_BODY`/`FACE_SHADE` в widgets.js. */
-    private const val FACE_BODY = 1.02f
-    private const val FACE_SHADE = 0.04f
+    internal const val FACE_BODY = 1.02f
+    internal const val FACE_SHADE = 0.04f
 
     /** Высота картинки карточки / её ширина (≈1,06): к этой пропорции приводится область виджета. */
     private const val FACE_ASPECT = FACE_BODY + FACE_SHADE
@@ -617,6 +645,13 @@ object QrWidgets {
         return PendingIntent.getBroadcast(ctx, 4999, i, f)
     }
 
+    private fun batteryPi(ctx: Context, create: Boolean): PendingIntent? {
+        val i = Intent(ctx, QrWidgetProvider::class.java)
+        i.action = ACTION_BATTERY
+        val f = (if (create) PendingIntent.FLAG_UPDATE_CURRENT else PendingIntent.FLAG_NO_CREATE) or immutable()
+        return PendingIntent.getBroadcast(ctx, 4998, i, f)
+    }
+
     private fun cancelRotate(ctx: Context, id: Int) {
         rotatePi(ctx, id, false)?.let { am(ctx).cancel(it); it.cancel() }
     }
@@ -634,8 +669,10 @@ object QrWidgets {
     private fun scheduleAll(app: Context, ids: IntArray, force: Boolean) {
         var anyRel = false
         var anyHide = false
+        var anyBattery = false
         for (id in ids) {
             val cfg = cfgFor(app, id)
+            if (cfg != null && cfg.battery) anyBattery = true
             if (cfg != null && cfg.rotate && visibleCount(app, cfg) > 1) {
                 if (force || rotatePi(app, id, false) == null) {
                     cancelRotate(app, id)
@@ -647,6 +684,54 @@ object QrWidgets {
         }
         if (anyRel || anyHide) setAlarm(app, nextBoundary(), tickPi(app, true)!!)
         else tickPi(app, false)?.let { am(app).cancel(it); it.cancel() }
+        if (anyBattery) {
+            QrBattery.register(app)
+            if (force || batteryPi(app, false) == null) setAlarm(app, System.currentTimeMillis() + BATTERY_EVERY_MS, batteryPi(app, true)!!)
+        } else batteryPi(app, false)?.let { am(app).cancel(it); it.cancel() }
+    }
+
+    // ---------- карточка заряда ----------
+
+    @Volatile private var lastBatterySig = ""
+
+    /** Перерисовать карточку заряда в виджетах, где она включена, но только если заряд телефона или наушников изменился (или [force]). */
+    fun onBatteryChanged(ctx: Context, force: Boolean = false) {
+        val app = ctx.applicationContext
+        val mgr = AppWidgetManager.getInstance(app)
+        val ids = mgr.getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java)).filter { cfgFor(app, it)?.battery == true }
+        if (ids.isEmpty()) return
+        val sig = QrBattery.signature(app)
+        if (!force && sig == lastBatterySig) return
+        lastBatterySig = sig
+        for (id in ids) {
+            try {
+                mgr.notifyAppWidgetViewDataChanged(id, R.id.qr_stack)
+            } catch (e: Exception) {
+                // виджет удалили
+            }
+        }
+    }
+
+    /** Будильник `ACTION_BATTERY`: обновляет карточку заряда (экран погашен — не будим) и ставит следующий через 5 минут. */
+    fun onBatteryTick(ctx: Context) {
+        val app = ctx.applicationContext
+        val ids = AppWidgetManager.getInstance(app).getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java))
+        if (ids.none { cfgFor(app, it)?.battery == true }) {
+            batteryPi(app, false)?.let { am(app).cancel(it); it.cancel() }
+            return
+        }
+        QrBattery.register(app)
+        val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (screenOn(pm)) onBatteryChanged(app)
+        setAlarm(app, System.currentTimeMillis() + BATTERY_EVERY_MS, batteryPi(app, true)!!)
+    }
+
+    /** Bluetooth-устройство подключилось или отключилось: заряд наушников становится известен не сразу, поэтому проверяем через несколько секунд. */
+    fun onBluetoothChanged(ctx: Context) {
+        val app = ctx.applicationContext
+        val ids = AppWidgetManager.getInstance(app).getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java))
+        if (ids.none { cfgFor(app, it)?.battery == true }) return
+        setAlarm(app, System.currentTimeMillis() + BATTERY_AFTER_BT_MS, batteryPi(app, true)!!)
     }
 
     @Suppress("DEPRECATION")

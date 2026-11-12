@@ -1,12 +1,13 @@
 /* ===========================================================================
    widgets.js
-   Версия: 1.3 (12.11)
+   Версия: 1.4 (12.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
    необязательные время суток (утро/обед/вечер) и дни недели, когда она поднимается наверх, и что делать со стопкой после срабатывания карточки
    (`after`: "none" — ничего (по умолчанию) / "hide" — скрыть до конца дня / "end" — переместить в конец).
-   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after}],rotate,rotateMin,relevance}]}), только на устройстве.
+   Галочка «Отображать заряд аккумулятора» (`battery`): в стопку добавляется служебная карточка с зарядом телефона и Bluetooth-наушников — её рисует оболочка (QrBattery.kt), страница шлёт только флаг.
+   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after}],rotate,rotateMin,relevance,battery}]}), только на устройстве.
    Страница рисует лица карточек в PNG (canvas, `pngFor`) и шлёт их оболочке вместе с настройками (мост ≥31 `widgetsSync`).
    Точка входа: window.initWidgetsModule(deps) → window.WidgetsTab.{render, scheduleSync}.
    =========================================================================== */
@@ -53,7 +54,7 @@
         w.cards = w.cards.filter(function(c){ return c && c.cid; }).slice(0, MAX_CARDS);
         w.cards.forEach(function(c){ c.times = Array.isArray(c.times) ? c.times : []; c.days = Array.isArray(c.days) ? c.days : []; c.after = normAfter(c.after); });
         w.rotateMin = Math.max(1, Math.min(720, w.rotateMin | 0 || 5));
-        w.rotate = !!w.rotate; w.relevance = !!w.relevance && !w.rotate;
+        w.rotate = !!w.rotate; w.relevance = !!w.relevance && !w.rotate; w.battery = !!w.battery;
       });
       return o;
     }
@@ -176,7 +177,7 @@
         keys.forEach(function(k, i){ if(urls[i]) images[k] = urls[i]; });
         var widgets = data.list.map(function(w){
           return {
-            id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance,
+            id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance, battery: !!w.battery,
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
               return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after) };
@@ -221,7 +222,7 @@
       render();
     }
     function leaveScreen(top){
-      if(top && top.s === "form" && top.a && top.a.draft && !top.a.w.cards.length) top.a.draft = false; // пустой новый виджет не сохраняется
+      if(top && top.s === "form" && top.a && top.a.draft && !top.a.w.cards.length && !top.a.w.battery) top.a.draft = false; // пустой новый виджет не сохраняется
     }
     function cur(){ return stack[stack.length - 1]; }
 
@@ -311,9 +312,9 @@
       data.list.forEach(function(w){
         var f = w.cards.length ? cardsOf().widgetFace(w.cards[0].cid) : null;
         html += '<div class="wg-row" data-id="' + esc(w.id) + '">' +
-          '<div class="wg-row-ico" style="background:' + (f ? f.color : "var(--gold)") + ';"></div>' +
+          '<div class="wg-row-ico" style="background:' + (f ? f.color : (w.battery ? "#2175d9" : "var(--gold)")) + ';"></div>' +
           '<div class="wg-row-txt"><div class="wg-row-name">' + esc(wname(w)) + '</div>' +
-          '<div class="wg-row-sub">' + cardWord(w.cards.length) + ' · ' + modeText(w) + (placed[w.id] ? ' · на рабочем столе' : '') + '</div></div></div>';
+          '<div class="wg-row-sub">' + (w.cards.length || !w.battery ? cardWord(w.cards.length) : '') + (w.battery ? (w.cards.length ? ' + заряд' : 'заряд аккумулятора') : '') + ' · ' + modeText(w) + (placed[w.id] ? ' · на рабочем столе' : '') + '</div></div></div>';
       });
       if(!bridge()) html += '<div class="wg-hint">Виджеты работают только в приложении на телефоне (Android).</div>';
       html += fabRow('<button type="button" class="mdeditor-fab-btn" id="wgAddBtn" title="Новый виджет">' + PLUS_SVG + '</button>' + homeBtn("", true));
@@ -338,6 +339,8 @@
       if(w.rotate) html += '<div class="wg-min">каждые<input type="number" id="wgRotMin" min="1" max="720" value="' + w.rotateMin + '">мин</div>';
       html += '<label class="wg-check"><input type="checkbox" id="wgRel"' + (w.relevance ? ' checked' : '') + '>Переключение по релевантности</label>';
       html += '<div class="wg-hint">По кругу — карточки сменяют друг друга сами. По релевантности — наверху то, что запущено сейчас (тренировка, затем помодоро, затем таймеры и секундомер), следом карточки, у которых сейчас их время суток и день. Включить можно что-то одно.</div>';
+      html += '<label class="wg-check"><input type="checkbox" id="wgBat"' + (w.battery ? ' checked' : '') + '>Отображать заряд аккумулятора</label>';
+      html += '<div class="wg-hint">В стопке появится карточка с зарядом телефона и, если подключены Bluetooth-наушники, их заряда. Нет галочки — карточки в стопке нет.</div>';
       var st = nativeState(), placed = st && st.placed && st.placed[w.id];
       html += '<div class="wg-btns">';
       if(bridge()) html += '<button type="button" class="workbooks-run-btn" id="wgPinBtn">' + (placed ? 'Добавить ещё один на рабочий стол' : 'Добавить на рабочий стол') + '</button><div class="wg-hint" id="wgPinHint"></div>';
@@ -419,7 +422,7 @@
       }
     }
     function commitDraft(a){
-      if(a.draft && a.w.cards.length){ a.draft = false; data.n = Math.max(data.n, a.w.n); data.list.push(a.w); }
+      if(a.draft && (a.w.cards.length || a.w.battery)){ a.draft = false; data.n = Math.max(data.n, a.w.n); data.list.push(a.w); }
     }
     function bindForm(a){
       var w = a.w;
@@ -432,12 +435,14 @@
       var rot = $("wgRotate"), rel = $("wgRel");
       rot.addEventListener("change", function(){ w.rotate = rot.checked; if(w.rotate) w.relevance = false; commitDraft(a); changed(); render(); });
       rel.addEventListener("change", function(){ w.relevance = rel.checked; if(w.relevance) w.rotate = false; commitDraft(a); changed(); render(); });
+      var bat = $("wgBat");
+      bat.addEventListener("change", function(){ w.battery = bat.checked; commitDraft(a); changed(); render(); });
       var mn = $("wgRotMin");
       if(mn) mn.addEventListener("change", function(){ w.rotateMin = Math.max(1, Math.min(720, parseInt(mn.value, 10) || 5)); mn.value = w.rotateMin; commitDraft(a); changed(); });
       var pin = $("wgPinBtn");
       if(pin) pin.addEventListener("click", function(){
         var hint = $("wgPinHint");
-        if(!w.cards.length){ hint.textContent = "Сначала добавьте в виджет хотя бы одну карточку."; return; }
+        if(!w.cards.length && !w.battery){ hint.textContent = "Сначала добавьте в виджет карточку или включите «Отображать заряд аккумулятора»."; return; }
         commitDraft(a); save();
         hint.textContent = "Готовлю…";
         syncNow().then(function(ok){
