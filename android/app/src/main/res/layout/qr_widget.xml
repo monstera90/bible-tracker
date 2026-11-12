@@ -1,14 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--  Версия: 2.2 (12.11)
-     Виджет «Стопка QR-карточек» 2×2. Картинка карточки — прямоугольник высотой 1,06 ширины (QrWidgets.FACE_ASPECT). StackView рисует
-     «стопку» сам: передняя карточка получается меньше 0,9 его размера (замер на Poco: по ширине ≈0,877, по высоте ≈0,833), в левом
-     нижнем углу, остальные выглядывают сверху справа. Поэтому StackView делается больше области (у единственного ребёнка вес 1 при
-     weightSum: qr_h 0,86 — по ширине, qr_v 0,80 — по высоте) и прижимается к левому нижнему углу (gravity bottom у qr_v, у qr_h ребёнок
-     идёт слева): передняя карточка на 2–4 % БОЛЬШЕ области — выходит за верхний и правый края, и задние карточки не видны ни по
-     краям, ни сквозь прозрачные углы передней. Без масштабирования. qr_clip режет всё по скруглённому контуру (clipToOutline; фон
-     qr_widget_clip_<dp> — прозрачный, нужен только ради контура; радиус ≈ 12 % ширины карточки, подставляет QrWidgets.applyHostLayout),
-     нижняя окантовка остаётся видна целиком. qr_root — отступы на случай, если лаунчер отдал явно другую пропорцию. layoutDirection
-     ltr — иначе при письме справа налево стопка уедет. -->
+<!-- Версия: 2.3 (12.11)
+     Виджет «Стопка QR-карточек» 2×2. Картинка карточки — прямоугольник высотой 1,06 ширины (QrWidgets.FACE_ASPECT) и заполняет весь слот
+     лаунчера. StackView рисует «стопку» сам, и его передняя карточка (замер на Poco, в долях размера StackView): по ширине ≈0,877, по
+     высоте ≈0,833, с внутренним отступом от левого нижнего угла ≈2,2 % ширины и ≈1,8 % высоты; остальные карточки выглядывают сверху
+     справа. Поэтому StackView больше слота и сдвинут так, чтобы левый и нижний края передней карточки совпали с краями слота, а верхний
+     и правый вышли за слот на 2–4 % (задних карточек не видно ни по краям, ни сквозь прозрачные углы передней). Всё — только весами
+     (weightSum), поэтому сдвиг пропорционален размеру слота и от dp не зависит; scale/translation не используются. Цепочка вложенных
+     LinearLayout: qr_h1 (gravity right, weightSum 0,975) → qr_v1 (gravity top, weightSum 0,977) → qr_h2 (weightSum 0,87) → qr_v2
+     (gravity bottom, weightSum 0,82) → StackView. Внешняя пара (0,975 / 0,977) шире и выше слота ровно настолько, чтобы внутренний
+     отступ StackView ушёл за левый и нижний края (0,975 = 1 − 0,0217/0,87; 0,977 = 1 − 0,0183/0,82); внутренняя пара (0,87 / 0,82) задаёт
+     выход карточки за верх и правый край. Подгонка по скриншоту — менять только эти числа. Все LinearLayout режут по своим границам,
+     они совпадают с границами слота, поэтому лишнее уходит за слот. qr_clip режет всё по скруглённому контуру (clipToOutline; фон
+     qr_widget_clip_<dp> — прозрачный, нужен только ради контура; радиус ≈ 12 % ширины карточки, подставляет QrWidgets.applyHostLayout).
+     qr_root — отступы на случай, если лаунчер отдал явно другую пропорцию. layoutDirection ltr — иначе при письме справа налево
+     стопка уедет. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/qr_root"
     android:layout_width="match_parent"
@@ -24,29 +29,51 @@
         android:layoutDirection="ltr">
 
         <LinearLayout
-            android:id="@+id/qr_h"
+            android:id="@+id/qr_h1"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:clipChildren="true"
+            android:gravity="right"
             android:orientation="horizontal"
-            android:weightSum="0.86">
+            android:weightSum="0.975">
 
             <LinearLayout
-                android:id="@+id/qr_v"
+                android:id="@+id/qr_v1"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:clipChildren="true"
-                android:gravity="bottom"
+                android:gravity="top"
                 android:orientation="vertical"
-                android:weightSum="0.80">
+                android:weightSum="0.977">
 
-                <StackView
-                    android:id="@+id/qr_stack"
+                <LinearLayout
+                    android:id="@+id/qr_h2"
                     android:layout_width="match_parent"
                     android:layout_height="0dp"
                     android:layout_weight="1"
-                    android:loopViews="true" />
+                    android:clipChildren="true"
+                    android:orientation="horizontal"
+                    android:weightSum="0.87">
+
+                    <LinearLayout
+                        android:id="@+id/qr_v2"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:clipChildren="true"
+                        android:gravity="bottom"
+                        android:orientation="vertical"
+                        android:weightSum="0.82">
+
+                        <StackView
+                            android:id="@+id/qr_stack"
+                            android:layout_width="match_parent"
+                            android:layout_height="0dp"
+                            android:layout_weight="1"
+                            android:loopViews="true" />
+                    </LinearLayout>
+                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
 
