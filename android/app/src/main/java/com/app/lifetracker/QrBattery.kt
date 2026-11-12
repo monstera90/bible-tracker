@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.1 (12.11)
+// Версия: 2.2 (12.11)
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -40,7 +40,7 @@ import org.json.JSONObject
  */
 object QrBattery {
 
-    /** Во сколько раз значки телефона и наушников больше исходных (кольцо не меняется). */
+    /** Во сколько раз значки телефона и наушников и кольца вокруг них больше исходных (толщина линий прежняя). */
     private const val ICON_SCALE = 1.5f
 
     /** Ключ карточки в стопке (не совпадает с id настоящих карточек). */
@@ -278,8 +278,8 @@ object QrBattery {
     /** Один столбец с центром на доле [fx] ширины. Размеры и шрифты не зависят от того, один столбец или два; кольца у телефона и наушников одинаковые. */
     private fun column(g: Canvas, w: Float, fx: Float, pct: Int, headphones: Boolean) {
         val cx = w * fx
-        val cy = w * 0.310f
-        val rr = w * 0.1263f
+        val cy = w * 0.300f
+        val rr = w * 0.1263f * ICON_SCALE // кольцо растёт вместе со значком
         val sw = w * 0.0212f
 
         val ring = Paint(Paint.ANTI_ALIAS_FLAG)
