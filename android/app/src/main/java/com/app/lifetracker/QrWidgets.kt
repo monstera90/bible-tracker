@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.2 (13.11)
+// Версия: 7.3 (13.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -51,9 +51,9 @@ import java.util.UUID
  * `ACTION_BATTERY` (раз в 5 минут, если заряд изменился), при подключении Bluetooth-устройства (серия проверок через 6, 15, 30, 60 и 120 с, пока заряд не станет известен), при отключении и при вещании о заряде устройств.
  *
  * Галочки «Показывать задачи» (`tasks`) и «Показывать события календаря» (`events`): страница присылает в `dyn` кандидатов — задачи (`k`="task", `at` — время
- * задачи, мс) и ближайшие события (`k`="event") — и по две картинки на каждого: `<ключ>.png` («Сегодня») и `<ключ>_b.png` («Просрочено» у задачи, «Завтра»
- * у события). Что показать, решает оболочка по часам ([dynShown], [dynBitmap]), поэтому надпись и состав меняются без приложения: задача видна, пока её время
- * сегодня или раньше (раньше начала суток — «Просрочено»); событие — одно, ближайшее из ещё не начавшихся на сегодня или завтра ([nextEventKey]); нет такого —
+ * задачи, мс) и ближайшие события (`k`="event") — и до четырёх картинок на каждого: `<ключ>.png` («Сегодня»), `<ключ>_t.png` («Завтра»), `<ключ>_w.png` (день недели — до даты два дня
+ * и больше) и `<ключ>_o.png` («Просрочено» у задачи). Что показать, решает оболочка по часам ([dynShown], [dynBitmap]), поэтому надпись и состав меняются без приложения:
+ * задача видна, пока её время в пределах [DYN_DAYS] суток (раньше начала суток — «Просрочено»); событие — одно, ближайшее из ещё не начавшихся в этих пределах ([nextEventKey]); нет такого —
  * карточки нет. Будильник `ACTION_TICK` ставится на полночь и на начало ближайшего события ([nextDynChange]). Карточки стоят после QR-карточек и перед карточками заряда;
  * нажатие на них ничего не делает. Среди этих карточек события всегда стоят перед задачами (событие важнее).
  *
@@ -100,6 +100,7 @@ object QrWidgets {
     private const val BT_ASK_EVERY_MS = 24 * 3_600_000L
     private const val MAX_CARDS = 50
     private const val MAX_DYN = 24
+    private const val DYN_DAYS = 7 // окно задач и событий: сегодня и ещё шесть дней (совпадает с FEED_DAYS в widgets.js)
     private val KEY_RE = Regex("^[A-Za-z0-9_-]{1,40}$")
 
     // Интервалы времени суток (минуты от полуночи, [начало; конец)). Те же значения показывает страница (widgets.js, WINDOWS).
@@ -404,11 +405,15 @@ object QrWidgets {
         return fallbackBitmap(c.title)
     }
 
-    /** Картинка карточки задачи/события для нынешнего момента: «Просрочено» / «Завтра» — `<ключ>_b.png`, «Сегодня» — `<ключ>.png`; нет нужной — берётся вторая. */
+    /** Картинка карточки задачи/события для нынешнего момента: «Просрочено» — `<ключ>_o.png`, «Сегодня» — `<ключ>.png`, «Завтра» — `<ключ>_t.png`, день недели — `<ключ>_w.png`; нет нужной — берутся соседние. */
     private fun dynBitmap(ctx: Context, c: Card): Bitmap? {
         val now = System.currentTimeMillis()
-        val second = if (c.dyn == "task") c.at < dayStart(now, 0) else c.at >= dayStart(now, 1)
-        val names = if (second) listOf(c.key + "_b", c.key) else listOf(c.key, c.key + "_b")
+        val names = when {
+            c.at < dayStart(now, 0) -> listOf(c.key + "_o", c.key)
+            c.at < dayStart(now, 1) -> listOf(c.key, c.key + "_o")
+            c.at < dayStart(now, 2) -> listOf(c.key + "_t", c.key + "_w", c.key)
+            else -> listOf(c.key + "_w", c.key + "_t", c.key)
+        }
         for (name in names) {
             val f = File(imgDir(ctx), "$name.png")
             if (!f.exists()) continue
@@ -486,9 +491,9 @@ object QrWidgets {
         return c.timeInMillis
     }
 
-    /** Ключ события, которое сейчас показывает карточка «события календаря»: ближайшее из ещё не начавшихся на сегодня или завтра; пусто — показывать нечего. */
+    /** Ключ события, которое сейчас показывает карточка «события календаря»: ближайшее из ещё не начавшихся в пределах [DYN_DAYS] суток; пусто — показывать нечего. */
     private fun nextEventKey(cfg: Cfg, now: Long): String {
-        val limit = dayStart(now, 2)
+        val limit = dayStart(now, DYN_DAYS)
         var best: Card? = null
         for (c in cfg.cards) {
             if (c.dyn != "event" || c.at <= now || c.at >= limit) continue
@@ -497,14 +502,14 @@ object QrWidgets {
         return best?.key ?: ""
     }
 
-    /** Карточка задачи видна, пока её время сегодня или раньше (просроченная — до отметки); событие — только то, что выбрал [nextEventKey]. */
+    /** Карточка задачи видна, пока её время раньше конца окна [DYN_DAYS] суток (просроченная — до отметки); событие — только то, что выбрал [nextEventKey]. */
     private fun dynShown(c: Card, now: Long, nextEv: String): Boolean = when (c.dyn) {
-        "task" -> c.at < dayStart(now, 1)
+        "task" -> c.at < dayStart(now, DYN_DAYS)
         "event" -> c.key == nextEv
         else -> true
     }
 
-    /** Когда пора перерисовать карточки задач и событий: полночь («Завтра» → «Сегодня», задача → «Просрочено») или начало ближайшего события. */
+    /** Когда пора перерисовать карточки задач и событий: полночь (день недели → «Завтра» → «Сегодня», задача → «Просрочено») или начало ближайшего события. */
     private fun nextDynChange(cfg: Cfg): Long {
         val now = System.currentTimeMillis()
         var at = dayStart(now, 1) + 5_000L

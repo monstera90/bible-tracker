@@ -1,6 +1,6 @@
 /* ===========================================================================
    desk.js
-   Версия: 4.0 (11.11)
+   Версия: 5.0 (13.11)
    Вкладка «Стол» (set2s_14, кнопка settingsTabSet2Btn14; в стеке второго набора стоит над «Изменением размера
    изображения»): несколько картинок рядом друг с другом, как на столе, и несколько страниц-«столов», которые
    листаются. Точка входа — window.initDeskModule(deps) → { renderSettingsTabDesk }; my.js зовёт её из switchSettingsTab.
@@ -9,6 +9,11 @@
    прежними); двигать картинку пальцем; менять размер — угловой кружок выбранной картинки или щипок двумя пальцами;
    «на передний/задний план»; удалить картинку/страницу (двойное нажатие); листать страницы кнопками ‹ › или
    свайпом по пустому месту стола; добавить страницу «+».
+   Масштаб всего стола: щипок двумя пальцами по пустому месту (оба пальца не на выбранной картинке/рисунке) увеличивает и
+   уменьшает стол вместе с картинками и рисунками (`Z`, слой `#deskZoom`, `applyZoom`), двумя пальцами же стол двигается;
+   пока масштаб не 100 %, один палец по пустому месту тоже двигает стол (а не листает страницу), значок «NN %» справа
+   вверху возвращает 100 %. Масштаб нигде не хранится. Координаты жестов (`localPoint`) пересчитаны в координаты стола
+   (`x`/`y`), а сырые экранные — `rx`/`ry` (нужны самому жесту масштаба).
 
    Рисунки поверх стола (кнопка «фигуры» в нижнем ряду открывает панель инструментов): карандаш, линия, стрелка, квадрат,
    круг, треугольник, текст и палитра цвета. Рисунки лежат в отдельном слое над ВСЕМИ картинками страницы (`.desk-marks`,
@@ -42,6 +47,8 @@ window.initDeskModule = function(deps){
   var KEEP_ORIGINAL_BYTES = 900 * 1024; // маленький исходник jpg/png в пределах MAX_SIDE оставляем как есть
   var MAX_PAGES = 50;
   var MAX_ITEMS = 60;           // на одну страницу
+var MIN_ZOOM = 0.5;           // масштаб всего стола: наименьший и наибольший
+var MAX_ZOOM = 5;
   var NEW_W = 0.3;              // ширина новой картинки, доля ширины стола
   var MIN_W = 0.14;             // наименьшая ширина картинки, доля ширины стола
   var SWIPE_MIN = 60;           // px — свайп по пустому месту листает страницу
@@ -91,6 +98,7 @@ window.initDeskModule = function(deps){
   var imgCache = {};          // id → data:URL (только для картинок текущей страницы)
   var selId = null;           // выбранная картинка
   var gesture = null;
+  var Z = { z: 1, tx: 0, ty: 0 }; // масштаб и сдвиг всего стола (только показ, не хранится): экран = z * точка стола + (tx, ty)
   var lastTouchAt = 0;
   var saveTimer = null;
   var toastTimer = null;
@@ -406,6 +414,8 @@ window.initDeskModule = function(deps){
       "#deskTabRoot .desk-tools{display:flex;flex:0 0 auto;align-items:center;gap:var(--fab-gap,6px);}" +
       "#deskTabRoot .desk-stage{position:relative;flex:1 1 auto;min-height:200px;overflow:hidden;background:rgba(127,127,127,.13);" +
         "-ms-touch-action:none;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;}" +
+      "#deskTabRoot .desk-zoom{position:absolute;left:0;top:0;right:0;bottom:0;-webkit-transform-origin:0 0;transform-origin:0 0;}" +
+      "#deskTabRoot .desk-zoom-badge{position:absolute;top:8px;right:8px;z-index:7;display:none;padding:5px 10px;border-radius:14px;font-size:13px;font-weight:700;background:rgba(0,0,0,.65);color:#fff;-webkit-tap-highlight-color:transparent;}" +
       "#deskTabRoot .desk-sheet{position:absolute;left:0;top:0;right:0;bottom:0;}" +
       "#deskTabRoot .desk-item{position:absolute;box-sizing:border-box;background:#fff;box-shadow:0 2px 7px rgba(0,0,0,.38);}" +
       "#deskTabRoot .desk-item.sel{outline:2px solid #7F00FF;}" +
@@ -469,9 +479,11 @@ window.initDeskModule = function(deps){
     var c = q("settingsTabContent");
     if(!c) return false;
     ensureStyle();
+    Z.z = 1; Z.tx = 0; Z.ty = 0;
     c.innerHTML =
       '<div id="' + ROOT_ID + '">' +
-        '<div class="desk-stage" id="deskStage"><div class="desk-sheet" id="deskSheet"></div>' +
+        '<div class="desk-stage" id="deskStage"><div class="desk-zoom" id="deskZoom"><div class="desk-sheet" id="deskSheet"></div></div>' +
+          '<div class="desk-zoom-badge" id="deskZoomBadge">100%</div>' +
           '<div class="desk-empty" id="deskEmpty">Стол пуст.<br>Нажмите кнопку с картинкой и «+», чтобы выложить фото.</div>' +
           '<div class="desk-toast" id="deskToast"></div>' +
         '</div>' +
@@ -516,6 +528,31 @@ window.initDeskModule = function(deps){
     var s = stageEl();
     return { w: s ? s.clientWidth : 0, h: s ? s.clientHeight : 0 };
   }
+
+  // Масштаб всего стола. Слой #deskZoom (внутри — лист с картинками и рисунками) сдвигается и растягивается как есть;
+  // данные и размеры картинок не меняются.
+  function clampZoom(){
+    var sz = stageSize();
+    Z.z = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Z.z));
+    var ex = sz.w * (1 - Z.z), ey = sz.h * (1 - Z.z);
+    Z.tx = Math.max(Math.min(0, ex), Math.min(Math.max(0, ex), Z.tx));
+    Z.ty = Math.max(Math.min(0, ey), Math.min(Math.max(0, ey), Z.ty));
+  }
+  function zoomed(){ return Math.abs(Z.z - 1) > 0.02; }
+  function applyZoom(){
+    var el = q("deskZoom");
+    if(!el) return;
+    clampZoom();
+    var tr = (!zoomed() && Math.abs(Z.tx) < 0.5 && Math.abs(Z.ty) < 0.5) ? "" : "translate(" + Z.tx.toFixed(1) + "px," + Z.ty.toFixed(1) + "px) scale(" + Z.z.toFixed(4) + ")";
+    el.style.webkitTransform = tr;
+    el.style.transform = tr;
+    var b = q("deskZoomBadge");
+    if(b){
+      b.style.display = zoomed() ? "block" : "none";
+      b.innerHTML = Math.round(Z.z * 100) + "%";
+    }
+  }
+  function resetZoom(){ Z.z = 1; Z.tx = 0; Z.ty = 0; applyZoom(); }
 
   // Прямоугольник картинки в пикселях стола, всегда целиком внутри него (только для показа, в данные не пишется).
   function rectOf(it, W, H){
@@ -664,6 +701,7 @@ window.initDeskModule = function(deps){
       if(el) applyRect(el, rectOf(its[i], sz.w, sz.h));
     }
     renderMarks();
+    applyZoom();
   }
 
   // ---------------------------------------------------------------- страницы
@@ -1339,27 +1377,45 @@ window.initDeskModule = function(deps){
   }
   function localPoint(p){
     var r = stageEl().getBoundingClientRect();
-    return { x: p.clientX - r.left, y: p.clientY - r.top };
+    var rx = p.clientX - r.left, ry = p.clientY - r.top;
+    // x, y — в координатах стола (с учётом масштаба), rx, ry — на экране относительно стола
+    return { x: (rx - Z.tx) / Z.z, y: (ry - Z.ty) / Z.z, rx: rx, ry: ry };
   }
   function dist(a, b){
     var dx = a.x - b.x, dy = a.y - b.y;
     return Math.sqrt(dx * dx + dy * dy);
   }
 
-  function beginGesture(pts, target){
+  // targets — элементы под пальцами (для щипка): по ним видно, на выбранной ли картинке пальцы
+  function beginGesture(pts, target, targets){
     var sz = stageSize();
     if(pts.length >= 2){
       var smp = selMark ? findMark(selMark) : null;
       if(smp){
-        gesture = { type: "mpinch", id: smp.id, d0: Math.max(10, dist(pts[0], pts[1])), orig: cloneMark(smp), moved: false };
-        return;
+        var bb = bboxPx(smp, sz.w), onMark = false;
+        for(var mi = 0; mi < 2; mi++) if(pts[mi].x >= bb.x - 30 && pts[mi].x <= bb.x + bb.w + 30 && pts[mi].y >= bb.y - 30 && pts[mi].y <= bb.y + bb.h + 30) onMark = true;
+        if(onMark){
+          gesture = { type: "mpinch", id: smp.id, d0: Math.max(10, dist(pts[0], pts[1])), orig: cloneMark(smp), moved: false };
+          return;
+        }
       }
-      // щипок: масштабируем выбранную картинку (или ту, на которой начат жест)
+      // щипок: масштабируем выбранную картинку (или ту, на которой начат жест), если хоть один палец на ней
       var id = selId || (gesture && gesture.id);
       var it = id ? findItem(id) : null;
-      if(!it){ gesture = null; return; }
-      var r = rectOf(it, sz.w, sz.h);
-      gesture = { type: "pinch", id: id, d0: Math.max(10, dist(pts[0], pts[1])), r0: r };
+      var onIt = false;
+      if(it && targets){
+        for(var ti = 0; ti < targets.length; ti++){
+          var hel = hitItem(targets[ti]);
+          if(hel && hel.getAttribute("data-id") === id) onIt = true;
+        }
+      }
+      if(it && (onIt || !targets)){
+        var r = rectOf(it, sz.w, sz.h);
+        gesture = { type: "pinch", id: id, d0: Math.max(10, dist(pts[0], pts[1])), r0: r };
+        return;
+      }
+      // иначе — масштаб и сдвиг всего стола
+      gesture = { type: "zoom", d0: Math.max(10, rawDist(pts[0], pts[1])), z0: Z.z, tx0: Z.tx, ty0: Z.ty, mx0: (pts[0].rx + pts[1].rx) / 2, my0: (pts[0].ry + pts[1].ry) / 2 };
       return;
     }
     var p = pts[0];
@@ -1379,8 +1435,11 @@ window.initDeskModule = function(deps){
       gesture = { type: handle ? "resize" : "move", id: iid, sx: p.x, sy: p.y, r0: r2, moved: false };
       return;
     }
+    if(zoomed()){ gesture = { type: "pan", sx: p.rx, sy: p.ry, tx0: Z.tx, ty0: Z.ty, moved: false }; return; } // стол увеличен/уменьшен — палец двигает стол
     gesture = { type: "swipe", sx: p.x, sy: p.y, moved: false, dx: 0, dy: 0 };
   }
+  function rawDist(a, b){ var dx = a.rx - b.rx, dy = a.ry - b.ry; return Math.sqrt(dx * dx + dy * dy); }
+  function zoomTo(z, tx, ty){ Z.z = z; Z.tx = tx; Z.ty = ty; applyZoom(); }
 
   function setItemFromRect(it, r, sz){
     it.x = r.x / sz.w;
@@ -1393,6 +1452,22 @@ window.initDeskModule = function(deps){
     var sz = stageSize();
     if(sz.w <= 0) return;
     var g = gesture;
+    if(g.type === "zoom"){
+      if(pts.length < 2) return;
+      var nz = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, g.z0 * rawDist(pts[0], pts[1]) / g.d0));
+      var mx = (pts[0].rx + pts[1].rx) / 2, my = (pts[0].ry + pts[1].ry) / 2;
+      // точка стола под серединой пальцев в начале жеста остаётся под серединой пальцев
+      var cx0 = (g.mx0 - g.tx0) / g.z0, cy0 = (g.my0 - g.ty0) / g.z0;
+      zoomTo(nz, mx - nz * cx0, my - nz * cy0);
+      g.moved = true;
+      return;
+    }
+    if(g.type === "pan"){
+      var pp = pts[0];
+      if(Math.abs(pp.rx - g.sx) > 4 || Math.abs(pp.ry - g.sy) > 4) g.moved = true;
+      if(g.moved) zoomTo(Z.z, g.tx0 + (pp.rx - g.sx), g.ty0 + (pp.ry - g.sy));
+      return;
+    }
     if(g.type === "pinch"){
       if(pts.length < 2) return;
       var it = findItem(g.id);
@@ -1449,6 +1524,8 @@ window.initDeskModule = function(deps){
       endMarkGesture(g);
       return;
     }
+    if(g.type === "zoom") return;
+    if(g.type === "pan"){ if(!g.moved) clearSel(); return; }
     if(g.type === "swipe"){
       if(!g.moved){ clearSel(); return; } // тап по пустому месту — снять выбор
       if(Math.abs(g.dx) >= SWIPE_MIN && Math.abs(g.dx) > Math.abs(g.dy) * 1.5){
@@ -1471,12 +1548,13 @@ window.initDeskModule = function(deps){
       if(e.touches.length > 2) return;
       if(paletteOpen) setPalette(false);
       if(e.cancelable) e.preventDefault();
+      if(e.target && e.target.id === "deskZoomBadge"){ gesture = null; resetZoom(); return; }
       var pts = pointsOf(e);
       if(e.touches.length === 2){
-        if(gesture && gesture.type === "swipe") gesture = null;
+        if(gesture && (gesture.type === "swipe" || gesture.type === "pan")) gesture = null;
         else if(gesture && gesture.type === "draw") abortDraw();
         else if(gesture && gesture.type === "text") gesture = null;
-        beginGesture(pts, e.target);
+        beginGesture(pts, e.target, [e.touches[0].target, e.touches[1].target]);
       } else {
         beginGesture(pts, e.target);
       }
@@ -1495,6 +1573,12 @@ window.initDeskModule = function(deps){
           var mpp = localPoint(e.touches[0]);
           gesture = { type: "mmove", id: mpId, sx: mpp.x, sy: mpp.y, orig: cloneMark(mp0), moved: true, wasSel: true };
         } else gesture = null;
+        return;
+      }
+      if(e.touches && e.touches.length === 1 && gesture && gesture.type === "zoom"){
+        // один палец остался — дальше он двигает стол
+        var zp = localPoint(e.touches[0]);
+        gesture = { type: "pan", sx: zp.rx, sy: zp.ry, tx0: Z.tx, ty0: Z.ty, moved: true };
         return;
       }
       if(e.touches && e.touches.length === 1 && gesture && gesture.type === "pinch"){
@@ -1518,13 +1602,22 @@ window.initDeskModule = function(deps){
       gesture = null;
       if(!gc) return;
       if(gc.type === "draw" || gc.type === "text" || gc.type === "mmove" || gc.type === "mhandle" || gc.type === "mpinch") endMarkGesture(gc);
-      else if(gc.type !== "swipe") saveNow();
+      else if(gc.type !== "swipe" && gc.type !== "zoom" && gc.type !== "pan") saveNow();
     }, { passive: true });
+
+    // колесо мыши (браузер на компьютере) — масштаб стола вокруг указателя
+    st.addEventListener("wheel", function(e){
+      if(e.cancelable) e.preventDefault();
+      var rp = localPoint(e), nz = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Z.z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      var cx = rp.x, cy = rp.y;
+      zoomTo(nz, rp.rx - nz * cx, rp.ry - nz * cy);
+    }, { passive: false });
 
     // мышь (браузер на компьютере); после касания эмулированные события мыши игнорируем
     st.addEventListener("mousedown", function(e){
       if(Date.now() - lastTouchAt < 700 || e.button !== 0) return;
       e.preventDefault();
+      if(e.target && e.target.id === "deskZoomBadge"){ resetZoom(); return; }
       beginGesture([localPoint(e)], e.target);
       function mm(ev){ moveGesture([localPoint(ev)]); }
       function mu(){

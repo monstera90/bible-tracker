@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 4.3 (13.11)
+   Версия: 4.4 (13.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -9,7 +9,7 @@
    Галочка «Отображать заряд аккумулятора» (`battery`): в стопку добавляется служебная карточка с зарядом телефона и Bluetooth-наушников — её рисует оболочка (QrBattery.kt), страница шлёт только флаг.
    Цвет карточки «Заряд» (`batColor`: "" — по умолчанию, сиреневый, иначе "#rrggbb") выбирается палитрой под галочкой — той же, что в форме карточки QR-кодов (itemcards.js `colorPalette`, запомненный цвет — `defaultColor/rememberColor`); карточка заряда показана в форме после последнего слота (и кнопки «+») (`batFaceHtml`), статус наушников из оболочки — `batStatusText`.
    Галочка «Отображать заряд аккумулятора (несколько устройств)» (`batteryMulti`, цвет `bat2Color`, палитра `icfColors2`): ещё одна служебная карточка — только значки и кольца заряда, без надписей: телефон и до трёх подключённых Bluetooth-устройств (QrBattery.renderMulti); в форме её лицо — `bat2FaceHtml`, значки — `iconSvg`, список парных устройств из оболочки — `batDevicesText`.
-   Галочки «Показывать задачи» (`tasks`, цвет `tasksColor`, палитра `icfColors3`) и «Показывать события календаря» (`events`, цвет `eventsColor`, палитра `icfColors4`): в стопку добавляются динамические карточки по данным календаря (`CalendarTab.widgetFeed` через `deps.getCalendarFeed`, `buildFeed`). Задачи: каждая открытая задача календаря на сегодня или просроченная — отдельная карточка (до `MAX_TASKS`); событие: ближайшее запланированное на сегодня или завтра (в оболочку уходят `MAX_EVENTS` кандидатов, показывает первое будущее — решает QrWidgets.kt по текущему времени). Лицо — `drawDynFace` (размеры сняты с макета, доли ширины карточки — `DYN`), у каждой карточки две картинки: `<ключ>` («Сегодня») и `<ключ>_b` («Просрочено» у задачи, «Завтра» у события), какую показать — выбирает оболочка (так надпись меняется в полночь без приложения). Данные меняются → `feedChanged` (из my.js: запись состояния и возврат в приложение) сверяет `feedSig` и при отличии шлёт `syncNow`. Палитра общая с карточками QR-кодов (`itemcards.colorPalette`), цвет по умолчанию — как на макете (`TASK_COLOR`/`EVENT_COLOR`), последний выбранный — `widgetsDynColors_v1`.
+   Галочки «Показывать задачи» (`tasks`, цвет `tasksColor`, палитра `icfColors3`) и «Показывать события календаря» (`events`, цвет `eventsColor`, палитра `icfColors4`): в стопку добавляются динамические карточки по данным календаря (`CalendarTab.widgetFeed` через `deps.getCalendarFeed`, `buildFeed`). Задачи: каждая открытая задача календаря на ближайшую неделю (`FEED_DAYS`) или просроченная — отдельная карточка (до `MAX_TASKS`); событие: ближайшее запланированное в пределах недели (в оболочку уходят `MAX_EVENTS` кандидатов, показывает первое будущее — решает QrWidgets.kt по текущему времени). Лицо — `drawDynFace` (размеры сняты с макета, доли ширины карточки — `DYN`), у каждой карточки до четырёх картинок: `<ключ>` («Сегодня»), `<ключ>_t` («Завтра»), `<ключ>_w` (день недели, если до даты два дня и больше) и `<ключ>_o` («Просрочено», только у задачи); какую показать — выбирает оболочка (так надпись меняется в полночь без приложения). Данные меняются → `feedChanged` (из my.js: запись состояния и возврат в приложение) сверяет `feedSig` и при отличии шлёт `syncNow`. Палитра общая с карточками QR-кодов (`itemcards.colorPalette`), цвет по умолчанию — как на макете (`TASK_COLOR`/`EVENT_COLOR`), последний выбранный — `widgetsDynColors_v1`.
    Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor}]}), только на устройстве.
    Страница рисует лица карточек в PNG (canvas, `pngFor`) и шлёт их оболочке вместе с настройками (мост ≥31 `widgetsSync`).
    Точка входа: window.initWidgetsModule(deps) → window.WidgetsTab.{render, scheduleSync}.
@@ -28,17 +28,18 @@
   var DYN_LAST_KEY = "widgetsDynColors_v1"; // последний выбранный цвет карточек задач/событий: {task, event}
   var MAX_TASKS = 12; // карточек задач в виджете (ближайшие по времени, просроченные первыми)
   var MAX_EVENTS = 4; // кандидатов в «следующее событие»: оболочка показывает первое, которое ещё не началось
-  var FEED_DAYS = 3; // сегодня, завтра, послезавтра: оболочка сама решает по часам, что показать, пока приложение закрыто
+  var FEED_DAYS = 7; // неделя вперёд (сегодня…через 6 дней, чтобы название дня недели было однозначным): оболочка сама решает по часам, что показать, пока приложение закрыто
   var DAY_MS = 86400000;
   // Лицо динамической карточки (доли ширины карточки; сняты с макета 660 px): значок Tabler — «circle-check» / «calendar-event» (сетка 24, линия 2),
   // надпись «Сегодня»…, название (serif, жирное), время (крупно). Базовые линии букв, верх значка — от верха карточки. Верхние ≈7 % лица в виджете скрыты обрезкой стопки (qr_widget.xml: передняя карточка выходит за слот сверху), поэтому значок не поднимается выше `iconTop2`, а лишняя строка названия (`DYN2`) уходит вниз.
-  var DYN = { unit: 0.00955, iconTop: 0.138, labelBase: 0.448, titleBase: 0.577, timeBase: 0.858, labelFs: 0.064, titleFs: 0.097, timeFs: 0.27 };
+  var DYN = { unit: 0.00955, iconTop: 0.138, labelBase: 0.448, titleBase: 0.577, timeBase: 0.858, labelFs: 0.076, titleFs: 0.108, timeFs: 0.27 };
   var DYN2 = { iconTop: 0.126, labelBase: 0.432, titleBase: 0.543, lineH: 1.1, timeGap: 0.281 }; // название в две строки: значок почти на месте (выше нельзя — обрежется), остальное сдвигается вниз
   var DYN_ICONS = {
     task: '<circle cx="12" cy="12" r="9"/><path d="M9 12l2 2l4 -4"/>',
     event: '<path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/><path d="M8 15h2v2h-2z"/>'
   };
-  var DYN_LABELS = { task: ["Сегодня", "Просрочено"], event: ["Сегодня", "Завтра"] }; // [картинка `<ключ>`, картинка `<ключ>_b`]
+  var DYN_LABELS = { today: "Сегодня", over: "Просрочено", tom: "Завтра" };
+  var WEEKDAYS_FULL = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"]; // по Date.getDay(): надпись карточки через два дня и дальше
   var DYN_SAMPLE = { task: { title: "Купить молоко", time: "18:00" }, event: { title: "Приём у врача", time: "15:30" } };
   // интервалы времени суток — те же значения в QrWidgets.kt (WINDOWS)
   var WINDOWS = [
@@ -210,19 +211,19 @@
     function dynIconSvg(kind){
       return '<svg xmlns="http://www.w3.org/2000/svg" width="288" height="288" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + DYN_ICONS[kind] + '</svg>';
     }
-    // название: одна строка (шрифт ужимается до 0,078 ширины), иначе две (до 0,062), иначе вторая строка обрезается «…»
+    // название: одна строка (шрифт ужимается до 0,088 ширины), иначе две (до 0,07), иначе вторая строка обрезается «…»
     function fitTitle(g, text, S, maxW, fam){
       text = String(text || "").replace(/\s+/g, " ").replace(/^ | $/g, "") || "Без названия";
       function setF(f){ g.font = "700 " + f + "px " + fam; }
       var fs;
-      for(fs = S * DYN.titleFs; fs >= S * 0.078; fs *= 0.96){ setF(fs); if(g.measureText(text).width <= maxW) return { lines: [text], fs: fs }; }
-      for(fs = S * 0.08; fs >= S * 0.062; fs *= 0.95){
+      for(fs = S * DYN.titleFs; fs >= S * 0.088; fs *= 0.96){ setF(fs); if(g.measureText(text).width <= maxW) return { lines: [text], fs: fs }; }
+      for(fs = S * 0.09; fs >= S * 0.07; fs *= 0.95){
         setF(fs);
         var lines = wrapLines(g, text, maxW), ok = lines.length <= 2;
         if(ok) lines.forEach(function(l){ if(g.measureText(l).width > maxW) ok = false; });
         if(ok) return { lines: lines, fs: fs };
       }
-      fs = S * 0.062; setF(fs);
+      fs = S * 0.07; setF(fs);
       var ls = wrapLines(g, text, maxW);
       if(ls.length > 2){
         ls = ls.slice(0, 2);
@@ -284,20 +285,23 @@
       function f(a){ return a.map(function(x){ return [x.at, x.title]; }); }
       return JSON.stringify([f(feed.tasks), f(feed.events)]);
     }
-    // Карточки виджетов и картинки к ним. Ключи — `dt_<id виджета>_<n>` (задача) и `de_<id виджета>_<n>` (событие); картинка `<ключ>` — «Сегодня»,
-    // `<ключ>_b` — «Просрочено» / «Завтра». Нужна только та, что может понадобиться: просроченной задаче — вторая, событию сегодня — первая.
+    // Карточки виджетов и картинки к ним. Ключи — `dt_<id виджета>_<n>` (задача) и `de_<id виджета>_<n>` (событие). Надпись зависит от того, сколько дней
+    // осталось до даты карточки, и меняется в полночь без приложения, поэтому шлются все картинки, которые понадобятся: `<ключ>` — «Сегодня», `<ключ>_t` — «Завтра»,
+    // `<ключ>_w` — день недели («Суббота»; только если до даты два дня и больше), `<ключ>_o` — «Просрочено» (только у задачи). Какую показать, выбирает оболочка.
     function dynItems(feed){
       var today = startOfDay(Date.now()), jobs = [], per = {};
       data.list.forEach(function(w){
         var items = [];
         function add(kind, list, prefix){
-          var hex = dynHex(w, kind), shade = cardsOf().cardShade(hex), labels = DYN_LABELS[kind];
+          var hex = dynHex(w, kind), shade = cardsOf().cardShade(hex);
           list.forEach(function(it, i){
-            var key = prefix + w.id + "_" + i, dayAt = startOfDay(it.at);
-            var needA = kind === "task" ? dayAt >= today : true, needB = kind === "task" ? true : dayAt > today;
+            var key = prefix + w.id + "_" + i, dayAt = startOfDay(it.at), d0 = Math.round((dayAt - today) / DAY_MS);
             function face(id, label){ return { id: "dyn:" + id, color: hex, shade: shade, kind: kind, label: label, title: it.title, time: hhmm(it.at) }; }
-            if(needA) jobs.push({ key: key, face: face(key, labels[0]) });
-            if(needB) jobs.push({ key: key + "_b", face: face(key + "_b", labels[1]) });
+            function put(suffix, label){ jobs.push({ key: key + suffix, face: face(key + suffix, label) }); }
+            if(d0 >= 2) put("_w", WEEKDAYS_FULL[new Date(it.at).getDay()]);
+            if(d0 >= 1) put("_t", DYN_LABELS.tom);
+            if(d0 >= 0) put("", DYN_LABELS.today);
+            if(kind === "task") put("_o", DYN_LABELS.over);
             items.push({ key: key, k: kind, at: it.at, title: it.title });
           });
         }
@@ -540,7 +544,7 @@
     function dynFaceHtml(kind, hex){
       var shade = cardsOf().cardShade(hex), smp = DYN_SAMPLE[kind], u = DYN.unit * 100;
       var t = '<g transform="translate(' + (50 - 12 * u).toFixed(2) + ' ' + (DYN.iconTop * 100 - 2 * u).toFixed(2) + ') scale(' + u.toFixed(4) + ')" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + DYN_ICONS[kind] + '</g>';
-      t += '<text x="50" y="' + (DYN.labelBase * 100).toFixed(1) + '" font-size="' + (DYN.labelFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-family="sans-serif">' + DYN_LABELS[kind][0] + '</text>';
+      t += '<text x="50" y="' + (DYN.labelBase * 100).toFixed(1) + '" font-size="' + (DYN.labelFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-family="sans-serif">' + DYN_LABELS.today + '</text>';
       t += '<text x="50" y="' + (DYN.titleBase * 100).toFixed(1) + '" font-size="' + (DYN.titleFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700" font-family="\'Palatino Linotype\',Georgia,serif">' + esc(smp.title) + '</text>';
       t += '<text x="50" y="' + (DYN.timeBase * 100).toFixed(1) + '" font-size="' + (DYN.timeFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700" font-family="sans-serif">' + smp.time + '</text>';
       return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' + t + '</svg></div>';
