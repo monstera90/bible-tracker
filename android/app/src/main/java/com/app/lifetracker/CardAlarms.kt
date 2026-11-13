@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (24.10)
+// Версия: 1.1 (14.11)
 
 import android.annotation.SuppressLint
 import android.app.AlarmManager
@@ -114,6 +114,9 @@ object CardAlarms {
         arr.toString()
     }
 
+    /** Заведён ли будильник [id] (запись есть, пока не отзвонил последний повтор): по этому виджет рисует лицо «Заведён». */
+    fun isArmed(ctx: Context, id: String): Boolean = synchronized(LOCK) { load(ctx).containsKey(id) }
+
     // ---------- действия ----------
     /** Ближайшее ЧЧ:ММ строго после now: сегодня, если ещё не наступило, иначе завтра. */
     private fun nextOccurrence(hour: Int, minute: Int, now: Long): Long {
@@ -138,6 +141,7 @@ object CardAlarms {
         save(ctx, map)
         cancelNotification(ctx, id) // повторный скан гасит звонок прежнего заведения
         schedule(ctx, a)
+        QrWidgets.onAlarmsChanged(ctx)
         firstAt
     }
 
@@ -152,6 +156,7 @@ object CardAlarms {
             // будильника уже нет
         }
         cancelNotification(ctx, id)
+        QrWidgets.onAlarmsChanged(ctx)
     }
 
     /** Сработал системный будильник: звонок (если не опоздал) и постановка следующего повтора. */
@@ -169,6 +174,7 @@ object CardAlarms {
         if (n > a.times) {
             map.remove(id) // звонки закончились
             save(ctx, map)
+            QrWidgets.onAlarmsChanged(ctx)
         } else {
             val next = Alarm(a.id, a.title, a.hour, a.minute, a.everyMin, a.times, a.firstAt, n)
             map[id] = next

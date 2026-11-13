@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 46.0 (13.11)
+   Версия: 46.1 (14.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -3313,6 +3313,15 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       if(nativeScan && nativeScan.close){ try{ nativeScan.close(); }catch(e){} }
       return;
     }
+    if(text.indexOf("alarmmark:") === 0){ // нажатие на карточку-будильник в виджете: заводит или выключает будильник без слоя, окно сразу закрывается (лицо в виджете показывает «Заведён»)
+      var alid = text.slice(10), alc = findCard(alid);
+      if(alc && alc.type === "alarm" && alarmSupported()){
+        refreshAlarms();
+        if(alarmInfo(runId(alc))) stopAlarmForCard(alc); else startAlarmForCard(alc);
+      }
+      if(nativeScan && nativeScan.close){ try{ nativeScan.close(); }catch(e){} }
+      return;
+    }
     handleScanned(text);
   }
 
@@ -3327,7 +3336,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       f.live.push({ k: "timer", id: timerCodeId(c.seconds | 0, tt, !!c.noIsland) }); // запущенный по коду
       f.live.push({ k: "timer", id: runId(c) });                                       // запущенный кнопкой карточки
     } else if(c.type === "alarm"){
-      f.big = alarmClock(c);
+      f.big = alarmClock(c); f.title = c.title || "Будильник"; f.alarmId = runId(c); // alarmId: по нему оболочка узнаёт, заведён ли будильник (лицо с надписью «Заведён»)
     } else if(c.type === "weather"){
       f.svg = iconSvg(c.icon || "weather");
     } else if(c.type === "climb"){

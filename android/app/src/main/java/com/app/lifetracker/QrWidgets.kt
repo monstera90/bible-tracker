@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 10.0 (13.11)
+// Версия: 10.1 (14.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -125,6 +125,7 @@ object QrWidgets {
     private val LOCK = Any()
     private val main = Handler(Looper.getMainLooper())
     private val refreshToken = Any()
+    private val alarmToken = Any()
     private val hideTokens = HashMap<Int, Any>()
     private val returnTokens = HashMap<Int, Any>()
 
@@ -139,7 +140,7 @@ object QrWidgets {
 
     class Live(val k: String, val id: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
-    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "")
+    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val alarmId: String = "")
     class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
@@ -199,7 +200,7 @@ object QrWidgets {
                         val da = c.optJSONArray("days")
                         if (da != null) for (x in 0 until da.length()) da.optInt(x).let { if (it in 1..7) days.add(it) }
                         val after = c.optString("after", "none").let { if (it == "hide" || it == "end") it else "none" }
-                        cards.add(Card(key, c.optString("code", ""), c.optString("title", ""), live, times, days, after, habit = c.optBoolean("habit", false)))
+                        cards.add(Card(key, c.optString("code", ""), c.optString("title", ""), live, times, days, after, habit = c.optBoolean("habit", false), alarmId = c.optString("alarm", "").take(40)))
                         if (cards.size >= MAX_CARDS) break
                     }
                 }
@@ -409,6 +410,16 @@ object QrWidgets {
         if (c.key == QrBattery.KEY) return QrBattery.render(ctx, c.color)
         if (c.key == QrBattery.KEY2) return QrBattery.renderMulti(ctx, c.color)
         if (c.dyn.isNotEmpty()) dynBitmap(ctx, c)?.let { return it }
+        if (c.alarmId.isNotEmpty() && CardAlarms.isArmed(ctx, c.alarmId)) { // будильник заведён — лицо с надписью «Заведён» (`<ключ>_on.png`)
+            val on = File(imgDir(ctx), c.key + "_on.png")
+            if (on.exists()) {
+                try {
+                    BitmapFactory.decodeFile(on.path)?.let { return it }
+                } catch (e: Throwable) {
+                    // не хватило памяти или файл повреждён — обычное лицо ниже
+                }
+            }
+        }
         val f = File(imgDir(ctx), c.key + ".png")
         if (f.exists()) {
             try {
@@ -889,6 +900,19 @@ object QrWidgets {
             }
         }
         scheduleAll(app, ids, forceAlarms)
+    }
+
+    /** Будильник карточки заведён, выключен или отзвонил: если в виджетах есть карточка-будильник, перерисовываем их (лицо «Заведён» меняется). */
+    fun onAlarmsChanged(ctx: Context) {
+        val app = ctx.applicationContext
+        main.removeCallbacksAndMessages(alarmToken)
+        main.postAtTime({
+            try {
+                if (configs(app).any { cfg -> cfg.cards.any { it.alarmId.isNotEmpty() } }) refreshAll(app)
+            } catch (e: Exception) {
+                // обновление виджета не должно ронять приложение
+            }
+        }, alarmToken, SystemClock.uptimeMillis() + 300L)
     }
 
     /** Вызывается при старте/остановке таймера, помодоро, секундомера и тренировки: обновляем виджеты «по релевантности» (не чаще раза в 0,4 с). */

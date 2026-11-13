@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 5.3 (13.11)
+   Версия: 5.4 (14.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -38,8 +38,10 @@
   var DYN2 = { iconTop: 0.126, labelBase: 0.432, titleBase: 0.543, lineH: 1.1, timeGap: 0.281 }; // название в две строки: значок почти на месте (выше нельзя — обрежется), остальное сдвигается вниз
   var DYN_ICONS = {
     task: '<circle cx="12" cy="12" r="9"/><path d="M9 12l2 2l4 -4"/>',
-    event: '<path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/><path d="M8 15h2v2h-2z"/>'
+    event: '<path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/><path d="M8 15h2v2h-2z"/>',
+    alarm: '<path d="M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6"/><path d="M9 17v1a3 3 0 0 0 6 0v-1"/>'
   };
+  var ALARM_ON_LABEL = "Заведён"; // надпись на лице карточки-будильника, пока будильник заведён (место надписи дня у карточки события); не заведён — места под неё пустое
   var DYN_LABELS = { today: "Сегодня", over: "Просрочено", tom: "Завтра" }; // у просроченной задачи к «Просрочено» добавляется «, сегодня» / «, вчера» / «, 1 января»
   var MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
   var WEEKDAYS_FULL = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"]; // по Date.getDay(): надпись карточки через два дня и дальше
@@ -250,8 +252,9 @@
       g.textAlign = "center"; g.textBaseline = "alphabetic"; g.fillStyle = "#ffffff";
       if(icon){ var u = S * DYN.unit; g.drawImage(icon, (S - 24 * u) / 2, S * iconTop - 2 * u, 24 * u, 24 * u); }
       var lfs = S * DYN.labelFsMax; // надпись дня крупнее: «Сегодня, Четверг» — до labelFsMax, длинные ужимаются, но не меньше labelFs
-      g.font = "400 " + lfs + "px " + sans;
-      while(lfs > S * DYN.labelFs && g.measureText(face.label).width > maxW){ lfs *= 0.97; g.font = "400 " + lfs + "px " + sans; }
+      var lw = face.labelBold ? "700 " : "400 ";
+      g.font = lw + lfs + "px " + sans;
+      while(lfs > S * DYN.labelFs && g.measureText(face.label).width > maxW){ lfs *= 0.97; g.font = lw + lfs + "px " + sans; }
       g.fillText(face.label, S / 2, S * labelBase, maxW);
       g.font = "700 " + fit.fs + "px " + serif;
       fit.lines.forEach(function(ln, i){ g.fillText(ln, S / 2, S * titleBase + i * lh, maxW); });
@@ -259,8 +262,12 @@
       g.fillText(face.time, S / 2, S * timeBase, maxW);
       return cv;
     }
+    // лицо карточки-будильника — как у события календаря (значок, надпись, название, время); надпись «Заведён» — только у заведённого
+    function alarmFace(f, armed){
+      return { id: "alarm:" + f.id + (armed ? "_on" : ""), color: f.color, shade: f.shade, kind: "alarm", label: armed ? ALARM_ON_LABEL : "", labelBold: !!armed, title: f.title || "Будильник", time: f.big || "" };
+    }
     function dynPng(face){
-      var sig = JSON.stringify([face.color, face.kind, face.label, face.title, face.time]);
+      var sig = JSON.stringify([face.color, face.kind, face.label, face.labelBold, face.title, face.time]);
       var hit = pngCache[face.id];
       if(hit && hit.sig === sig) return Promise.resolve(hit.url);
       return svgImage(dynIconSvg(face.kind)).then(function(icon){
@@ -350,18 +357,23 @@
       var keys = Object.keys(faces);
       var feed = usesDyn() ? buildFeed() : null;
       var dyn = feed ? dynItems(feed) : { perWidget: {}, jobs: [] };
-      var all = keys.map(function(k){ return pngFor(faces[k]); }).concat(dyn.jobs.map(function(j){ return dynPng(j.face); }));
+      // карточка-будильник: два лица — `<id>` (не заведён) и `<id>_on` (заведён, с надписью «Заведён»); какое показать, решает оболочка по CardAlarms
+      var alarmKeys = keys.filter(function(k){ return faces[k].type === "alarm"; });
+      var all = keys.map(function(k){ return faces[k].type === "alarm" ? dynPng(alarmFace(faces[k], false)) : pngFor(faces[k]); })
+        .concat(dyn.jobs.map(function(j){ return dynPng(j.face); }))
+        .concat(alarmKeys.map(function(k){ return dynPng(alarmFace(faces[k], true)); }));
       return Promise.all(all).then(function(urls){
         var images = {};
         keys.forEach(function(k, i){ if(urls[i]) images[k] = urls[i]; });
         dyn.jobs.forEach(function(j, i){ if(urls[keys.length + i]) images[j.key] = urls[keys.length + i]; });
+        alarmKeys.forEach(function(k, i){ var u = urls[keys.length + dyn.jobs.length + i]; if(u) images[k + "_on"] = u; });
         var widgets = data.list.map(function(w){
           return {
             id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance, battery: !!w.battery, batColor: w.battery ? batHex(w) : "", batteryMulti: !!w.batteryMulti, bat2Color: w.batteryMulti ? bat2Hex(w) : "",
             tasks: !!w.tasks, events: !!w.events, rpeAsk: !!w.rpeAsk, dyn: dyn.perWidget[w.id] || [],
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
-              return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after), habit: f.type === "habit" };
+              return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after), habit: f.type === "habit", alarm: f.type === "alarm" ? (f.alarmId || "") : "" };
             })
           };
         });
@@ -468,7 +480,15 @@
       var base = (arguments[1] === "timer" || arguments[1] === "alarm") ? 1 : 0;
       return (m >= 11) ? " t-xs" : (m >= 8 + base ? " t-s" : "");
     }
+    // Карточка-будильник в форме: то же лицо, что рисует drawDynFace (без надписи «Заведён»; числа — доли ширины карточки ×100, см. DYN)
+    function alarmFaceHtml(f, cls, extra){
+      var u = DYN.unit * 100, t = '<g transform="translate(' + (50 - 12 * u).toFixed(2) + ' ' + (DYN.iconTop * 100 - 2 * u).toFixed(2) + ') scale(' + u.toFixed(4) + ')" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + DYN_ICONS.alarm + '</g>';
+      t += '<text x="50" y="' + (DYN.titleBase * 100).toFixed(1) + '" font-size="' + (DYN.titleFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700" textLength="' + Math.min(82, Math.round(String(f.title || "Будильник").length * 6.2)) + '" lengthAdjust="spacingAndGlyphs" font-family="\'Palatino Linotype\',Georgia,serif">' + esc(f.title || "Будильник") + '</text>';
+      t += '<text x="50" y="' + (DYN.timeBase * 100).toFixed(1) + '" font-size="' + (DYN.timeFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700" font-family="sans-serif">' + esc(f.big || "") + '</text>';
+      return '<div class="wg-card wg-bat-card' + (cls ? " " + cls : "") + '" style="background:' + f.color + ';box-shadow:0 4px 0 ' + f.shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' + t + '</svg>' + (extra || '') + '</div>';
+    }
     function faceHtml(f, cls, extra){
+      if(f.type === "alarm") return alarmFaceHtml(f, cls, extra);
       return '<div class="wg-card' + (cls ? " " + cls : "") + '" style="background:' + f.color + ';box-shadow:0 4px 0 ' + f.shade + ';">' +
         (f.svg ? '<div class="wg-card-ico">' + String(f.svg).replace(/currentColor/g, "#ffffff") + '</div>' : '') +
         (f.title ? '<div class="wg-card-title' + titleSize(f.title, f.type) + '">' + esc(f.title) + '</div>' : '') +
