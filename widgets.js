@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 5.6 (14.11)
+   Версия: 5.7 (14.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -265,7 +265,7 @@
     }
     // лицо карточки-будильника — как у события календаря (значок, надпись, название, время); надпись «Заведён» — только у заведённого
     function alarmFace(f, armed){
-      return { id: "alarm:" + f.id + (armed ? "_on" : ""), color: f.color, shade: f.shade, kind: "alarm", label: armed ? ALARM_ON_LABEL : ALARM_OFF_LABEL, labelBold: !!armed, title: f.title || "Будильник", time: f.big || "" };
+      return { id: "alarm:" + f.id + (armed ? "_on" : ""), color: f.color, shade: f.shade, kind: "alarm", label: armed ? ALARM_ON_LABEL : ALARM_OFF_LABEL, labelBold: true, title: f.title || "Будильник", time: f.big || "" };
     }
     function dynPng(face){
       var sig = JSON.stringify([face.color, face.kind, face.label, face.labelBold, face.title, face.time]);
