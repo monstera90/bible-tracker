@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.1 (13.11)
+// Версия: 7.2 (13.11)
 
 import android.content.Context
 import org.json.JSONArray
@@ -341,6 +341,7 @@ object WorkoutTracker {
             val done = rec.toJson(rec.rawM, "raw")
             try {
                 appendFinished(app, done)
+                QrWidgets.onRpeChanged(app) // запись ждёт оценки нагрузки — карточка «Как тренировка?» в виджетах встаёт наверх
             } catch (e: Exception) {
                 // запись не сохранилась: хуже всего, но служба всё равно должна остановиться
             }

@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.4 (13.11)
+// Версия: 8.0 (13.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -56,6 +56,10 @@ import java.util.UUID
  * задача видна, пока её время в пределах [DYN_DAYS] суток (время прошло — «Просрочено, сегодня» / «вчера» / дата); событие — одно, ближайшее из ещё не начавшихся в этих пределах ([nextEventKey]); нет такого —
  * карточки нет. Будильник `ACTION_TICK` ставится на полночь и на начало ближайшего события ([nextDynChange]). Карточки стоят после QR-карточек и перед карточками заряда;
  * нажатие на них ничего не делает. Среди этих карточек события всегда стоят перед задачами (событие важнее).
+ *
+ * Галочка «Спрашивать о тренировке» (`rpeAsk` у виджета): пока есть тренировка без оценки нагрузки ([QrRpe.pendingId]), над ВСЕМИ карточками стоит служебная
+ * карточка [QrRpe.KEY] «Как тренировка?» с кнопками 1…10 ([rpeCard], [order]); ответ ложится в очередь [QrRpe.answer], карточка исчезает. Наверх она возвращается
+ * по тому же правилу, что и рекомендованная ([topAnchor]), даже без «релевантности»; порядок остальных карточек от неё не зависит; слайд-шоу на это время стоит ([rotate]).
  *
  * Возврат наверх («по релевантности», [armReturn]/[fireReturn]): если пользователь смахнул стопку, а наверху лежит рекомендованная
  * карточка (идёт занятие или сейчас «её» время суток — [Ordered.topKey]) либо карточка события/задачи календаря ([anchorKey]), то через минуту
@@ -128,7 +132,7 @@ object QrWidgets {
     class Live(val k: String, val id: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
     class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L)
-    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false) {
+    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
     }
@@ -193,6 +197,7 @@ object QrWidgets {
                 }
                 val tasksOn = o.optBoolean("tasks", false)
                 val eventsOn = o.optBoolean("events", false)
+                val rpeAskOn = o.optBoolean("rpeAsk", false)
                 val ds = o.optJSONArray("dyn")
                 if (ds != null && (tasksOn || eventsOn)) {
                     val evs = ArrayList<Card>()
@@ -221,7 +226,7 @@ object QrWidgets {
                 out.add(
                     Cfg(
                         id, o.optString("name", "Виджет"), o.optBoolean("rotate", false),
-                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn
+                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn
                     )
                 )
             }
@@ -391,6 +396,7 @@ object QrWidgets {
     }
 
     fun bitmapFor(ctx: Context, c: Card): Bitmap {
+        if (c.key == QrRpe.KEY) return QrRpe.render(ctx, c.color)
         if (c.key == QrBattery.KEY) return QrBattery.render(ctx, c.color)
         if (c.key == QrBattery.KEY2) return QrBattery.renderMulti(ctx, c.color)
         if (c.dyn.isNotEmpty()) dynBitmap(ctx, c)?.let { return it }
@@ -556,10 +562,10 @@ object QrWidgets {
         ).map { it.value }
     }
 
-    fun visibleCount(ctx: Context, cfg: Cfg): Int = visibleCards(ctx, cfg).size
+    fun visibleCount(ctx: Context, cfg: Cfg): Int = visibleCards(ctx, cfg).size + (if (rpeCard(ctx, cfg) != null) 1 else 0)
 
     /** Все карточки виджета скрыты («На сегодня больше ничего»). */
-    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = (cfg.cards.isNotEmpty() || cfg.tasks || cfg.events) && visibleCards(ctx, cfg).isEmpty()
+    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = (cfg.cards.isNotEmpty() || cfg.tasks || cfg.events || cfg.rpeAsk) && visibleCards(ctx, cfg).isEmpty() && rpeCard(ctx, cfg) == null
 
     private fun movedToday(ctx: Context, cfg: Cfg, c: Card): Boolean {
         if (c.after != "end") return false
@@ -626,6 +632,18 @@ object QrWidgets {
      * [Ordered.topKey] — ключ карточки наверху, если она поднята по релевантности (иначе пусто).
      */
     fun order(ctx: Context, cfg: Cfg): Ordered {
+        val ord = orderBase(ctx, cfg)
+        val rpe = rpeCard(ctx, cfg) ?: return ord
+        return Ordered(listOf(rpe) + ord.cards, rpe.key) // «Как тренировка?» — самая важная: над всеми, остальные стоят как стояли
+    }
+
+    /** Карточка «Как тренировка?», пока у виджета включено «Спрашивать о тренировке» и есть запись без оценки; иначе null. */
+    private fun rpeCard(ctx: Context, cfg: Cfg): Card? {
+        if (!cfg.rpeAsk || QrRpe.pendingId(ctx).isEmpty()) return null
+        return Card(QrRpe.KEY, "", "Как тренировка?", emptyList(), emptySet(), emptySet(), "none", QrRpe.DEFAULT_COLOR)
+    }
+
+    private fun orderBase(ctx: Context, cfg: Cfg): Ordered {
         val base = visibleCards(ctx, cfg)
         if (!cfg.relevance || base.size < 2) return Ordered(base, "")
         val cal = Calendar.getInstance()
@@ -650,6 +668,15 @@ object QrWidgets {
         if (ord.topKey.isNotEmpty()) return ord.topKey
         val first = ord.cards.firstOrNull() ?: return ""
         return if (first.dyn.isNotEmpty()) first.key else ""
+    }
+
+    /**
+     * Карточка, на которой стопка «стоит наверху» и к которой возвращается: «Как тренировка?» (у любого виджета с этой галочкой), иначе — [anchorKey]
+     * (только «по релевантности»). Пусто — своего места у стопки нет.
+     */
+    private fun topAnchor(cfg: Cfg, ord: Ordered): String {
+        if (ord.topKey == QrRpe.KEY) return QrRpe.KEY
+        return if (cfg.relevance) anchorKey(ord) else ""
     }
 
     // ---------- обновление ----------
@@ -684,8 +711,8 @@ object QrWidgets {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
         rv.setPendingIntentTemplate(R.id.qr_stack, PendingIntent.getActivity(app, id, tpl, flags))
 
-        if (cfg != null && cfg.relevance) {
-            val topNew = anchorKey(order(app, cfg))
+        if (cfg != null && (cfg.relevance || cfg.rpeAsk)) {
+            val topNew = topAnchor(cfg, order(app, cfg))
             val topOld = jmap(app, K_TOP).optString(id.toString(), "")
             if (resetTop || topNew != topOld) {
                 rv.setDisplayedChild(R.id.qr_stack, 0)
@@ -794,6 +821,19 @@ object QrWidgets {
                 // обновление виджета не должно ронять приложение
             }
         }, refreshToken, SystemClock.uptimeMillis() + 400L)
+    }
+
+    /**
+     * Появилась или пропала запись без оценки нагрузки (тренировка закончилась, оценка поставлена в виджете или в приложении): виджеты с галочкой
+     * «Спрашивать о тренировке» перерисовываются — карточка «Как тренировка?» встаёт наверх или уходит; стопка при этом показывает верхнюю карточку.
+     */
+    fun onRpeChanged(ctx: Context) {
+        val app = ctx.applicationContext
+        try {
+            if (configs(app).any { it.rpeAsk }) refreshAll(app)
+        } catch (e: Exception) {
+            // обновление виджета не должно ронять приложение
+        }
     }
 
     // ---------- слайд-шоу и границы времени суток ----------
@@ -967,7 +1007,7 @@ object QrWidgets {
         val cfg = cfgFor(app, id) ?: return
         if (!cfg.rotate || visibleCount(app, cfg) < 2) return
         val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (screenOn(pm)) {
+        if (screenOn(pm) && rpeCard(app, cfg) == null) { // пока висит «Как тренировка?», слайд-шоу стопку не листает
             val rv = RemoteViews(app.packageName, R.layout.qr_widget)
             rv.showNext(R.id.qr_stack)
             suppressSwipe(id)
@@ -1037,9 +1077,9 @@ object QrWidgets {
     /** Взводит возврат стопки наверх через [RETURN_AFTER_MS] (каждое новое смахивание отодвигает его). Только «по релевантности» и только если есть рекомендованная карточка. */
     private fun armReturn(app: Context, id: Int) {
         val cfg = cfgFor(app, id) ?: return
-        if (!cfg.relevance) return
+        if (!cfg.relevance && !cfg.rpeAsk) return
         val ord = order(app, cfg)
-        if (anchorKey(ord).isEmpty() || ord.cards.size < 2) return
+        if (topAnchor(cfg, ord).isEmpty() || ord.cards.size < 2) return
         val due = System.currentTimeMillis() + RETURN_AFTER_MS
         synchronized(LOCK) {
             val m = jmap(app, K_RETURN)
@@ -1093,9 +1133,9 @@ object QrWidgets {
     /** Показывает в стопке верхнюю карточку порядка [order] — рекомендованную или более важную, чем та, на которой остановился пользователь. */
     private fun returnToTop(app: Context, id: Int) {
         val cfg = cfgFor(app, id) ?: return
-        if (!cfg.relevance) return
+        if (!cfg.relevance && !cfg.rpeAsk) return
         val ord = order(app, cfg)
-        val anchor = anchorKey(ord)
+        val anchor = topAnchor(cfg, ord)
         if (anchor.isEmpty() || ord.cards.size < 2) return
         suppressSwipe(id)
         dotsOn.remove(id)

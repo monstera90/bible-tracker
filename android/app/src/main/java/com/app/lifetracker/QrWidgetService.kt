@@ -1,11 +1,12 @@
 package com.app.lifetracker
-// Версия: 2.0 (13.11)
+// Версия: 2.1 (13.11)
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.SystemClock
+import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 
@@ -65,8 +66,13 @@ class QrWidgetService : RemoteViewsService() {
             val c = cards[((position % n) + n) % n]
             val bmp = bitmaps[c.key] ?: QrWidgets.bitmapFor(ctx, c)
             rv.setImageViewBitmap(R.id.qr_card_img, bmp)
+            // «Как тренировка?»: поверх картинки — десять прозрачных зон-кнопок 1…10, у каждой своё число в fill-in intent (ScanActivity ловит его без окна);
+            // у остальных карточек зоны скрыты (видимость задаётся всегда: элемент списка может быть переиспользован)
+            val isRpe = c.key == QrRpe.KEY
+            rv.setViewVisibility(R.id.rpe_grid, if (isRpe) View.VISIBLE else View.GONE)
+            if (isRpe) for (i in RPE_BUTTONS.indices) rv.setOnClickFillInIntent(RPE_BUTTONS[i], Intent().putExtra("rpe", i + 1))
             // карточки заряда, задач и событий — не QR-карточки: нажатие на них ничего не делает (без fill-in intent шаблон не срабатывает)
-            if (!QrBattery.isBatteryKey(c.key) && c.dyn.isEmpty()) rv.setOnClickFillInIntent(R.id.qr_card_img, Intent().putExtra("code", c.code).putExtra("key", c.key))
+            if (!isRpe && !QrBattery.isBatteryKey(c.key) && c.dyn.isEmpty()) rv.setOnClickFillInIntent(R.id.qr_card_img, Intent().putExtra("code", c.code).putExtra("key", c.key))
             if (n > 1 && SystemClock.uptimeMillis() > quietUntil) QrWidgets.onPossibleSwipe(ctx, widgetId, n)
             return rv
         }
@@ -83,6 +89,12 @@ class QrWidgetService : RemoteViewsService() {
 
         companion object {
             private const val QUIET_MS = 4000L
+
+            /** Зоны кнопок 1…10 карточки «Как тренировка?» (layout/qr_widget_item.xml). */
+            private val RPE_BUTTONS = intArrayOf(
+                R.id.rpe_b1, R.id.rpe_b2, R.id.rpe_b3, R.id.rpe_b4, R.id.rpe_b5,
+                R.id.rpe_b6, R.id.rpe_b7, R.id.rpe_b8, R.id.rpe_b9, R.id.rpe_b10
+            )
 
             /** Во сколько раз счётчик больше числа карточек (при двух и больше): позиции «по кругу», карточка = позиция % число. */
             private const val VIRT = 12

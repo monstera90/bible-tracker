@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 25.1 (12.11)
+// Версия: 26.0 (13.11)
 // Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
@@ -42,6 +42,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 33: оценка нагрузки тренировки из виджета (`widgetRpeSet` / `widgetRpeTake` / `widgetRpeAck`; QrRpe).
          * 31: виджеты рабочего стола «Стопка QR-карточек» (widgetsSync / widgetsState / widgetPin; QrWidgets).
          * 32: `widgetCardFired` — действие карточки сработало в приложении («После срабатывания» у карточки виджета).
          * 30: `pasteText()` — текст из буфера обмена (кнопка «Вставить» кругового меню выделения, ctxmenu.js).
@@ -62,7 +63,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 32
+        const val BRIDGE_VERSION = 33
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -1133,6 +1134,39 @@ class NativeBridge(private val activity: MainActivity) {
             QrWidgets.onCardFired(activity.applicationContext, cardId)
         } catch (e: Exception) {
             // виджеты не должны мешать приложению
+        }
+    }
+
+    /** Страница сообщает, какая тренировка ждёт оценки нагрузки (id записи; пусто — никакая): карточка «Как тренировка?» в виджетах встаёт наверх или уходит. */
+    @JavascriptInterface
+    fun widgetRpeSet(recordId: String?) {
+        if (!activity.pageTrusted) return
+        try {
+            if (QrRpe.setFromPage(activity.applicationContext, recordId)) QrWidgets.onRpeChanged(activity.applicationContext)
+        } catch (e: Exception) {
+            // виджеты не должны мешать приложению
+        }
+    }
+
+    /** JSON `[{id, rpe, at}]` — оценки, поставленные кнопками карточки в виджете и ещё не применённые к записям. */
+    @JavascriptInterface
+    fun widgetRpeTake(): String {
+        if (!activity.pageTrusted) return "[]"
+        return try {
+            QrRpe.takeAnswers(activity.applicationContext)
+        } catch (e: Exception) {
+            "[]"
+        }
+    }
+
+    /** Страница применила оценки к записям с этими id (JSON-массив) — убрать их из очереди. */
+    @JavascriptInterface
+    fun widgetRpeAck(idsJson: String?) {
+        if (!activity.pageTrusted) return
+        try {
+            QrRpe.ackAnswers(activity.applicationContext, idsJson)
+        } catch (e: Exception) {
+            // повторится
         }
     }
 

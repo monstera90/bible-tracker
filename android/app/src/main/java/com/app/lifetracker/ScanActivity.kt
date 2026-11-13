@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 8.1 (12.11)
+// Версия: 9.0 (13.11)
 // Версия: 6.0 (26.10) — мост ScanBridge: musicHeadphones (подключены ли наушники; комбо с галочкой «Наушники обязательны»).
 // Версия: 5.0 (26.10) — мост ScanBridge: musicPlayTrack / musicPlayFolder (QR «Комбинированный» из окна ярлыка включает трек или папку через MusicPlayer; приложение не открывается).
 // Версия: 4.0 (24.10) — мост ScanBridge: setAlarm / cancelAlarm / getAlarms (скан кода будильника в окне ярлыка заводит будильник CardAlarms).
@@ -65,6 +65,22 @@ class ScanActivity : ComponentActivity() {
     /** Код из виджета: страница забирает его один раз (`takeInitialCode`) и ведёт себя, как после сканирования этого QR. */
     private var initialCode: String = ""
 
+    /**
+     * Нажатие на кнопку 1…10 карточки «Как тренировка?» в виджете (extra `rpe`, ключ `tok` тот же): оценка уходит в [QrRpe.answer], окно не нужно.
+     * true — это был такой запрос (ответ принят или нет — окно сканера открывать не надо).
+     */
+    private fun handleRpe(i: Intent?): Boolean {
+        if (i == null || i.action != ACTION_SCAN_CODE || !i.hasExtra("rpe")) return false
+        if (QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
+            try {
+                QrRpe.answer(applicationContext, i.getIntExtra("rpe", 0))
+            } catch (e: Exception) {
+                // оценка не сохранилась — карточка останется, можно нажать ещё раз
+            }
+        }
+        return true
+    }
+
     private fun readCode(i: Intent?) {
         initialCode = ""
         if (i != null && i.action == ACTION_SCAN_CODE && QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
@@ -95,6 +111,13 @@ class ScanActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Кнопка оценки с карточки «Как тренировка?»: без окна — сохранили и сразу закрылись (webView и сервер не создаются)
+        if (handleRpe(intent)) {
+            finishAndRemoveTask()
+            overridePendingTransition(0, 0)
+            return
+        }
 
         // Окно рисуется под системными панелями (сканер на весь экран); отступы передаём странице.
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -140,6 +163,7 @@ class ScanActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (handleRpe(intent)) return // окно сканера уже открыто и остаётся как было
         // Ярлык нажат повторно, пока окно открыто: перезапускаем сканер (или показываем код карточки из виджета).
         readCode(intent)
         webView.loadUrl(SCAN_URL)

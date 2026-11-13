@@ -1,12 +1,12 @@
 /* ===========================================================================
    workouts.js
-   Версия: 15.0 (13.11)
+   Версия: 16.0 (13.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
    Версия: 1.1 (27.10) — кнопки периода («1 мес. / 3 мес. / 6 мес. / Год») перенесены в нижний ряд слева от «Записи»; свайп влево/вправо работает по всей области вкладки (слушатели на контейнере).
    Версия: 1.0 (27.10) — новый файл. Вкладка «Тренировки» (`workouts`, кнопка `settingsTabWorkoutsBtn` в нижнем ряду набора 1,
-   между шестерёнкой и «Картой дней года»). `window.WorkoutsTab.{setStore, render, drain, refreshIfOpen, refreshTabMark, start}`.
+   между шестерёнкой и «Картой дней года»). `window.WorkoutsTab.{setStore, render, drain, refreshIfOpen, refreshTabMark, start}`. Виджет «Как тренировка?» (widgets.js, `rpeAsk`; мост ≥33): страница сообщает оболочке, какая запись ждёт оценки (`syncWidgetRpe`, из `refreshTabMark` и `drain`), и забирает оценки, поставленные кнопками 1…10 на карточке виджета (`drainWidgetRpe` → `applyRpe`, в конце `drain`).
 
    Что на экране:
    • период: «1 мес. / 3 мес. / 6 мес. / Год» (кнопки в нижнем ряду), стрелки «‹ ›» листают период назад и вперёд (свайп влево/вправо по
@@ -394,6 +394,52 @@
     var st = readState();
     var active = !!(st && st.status && st.status !== "idle");
     btn.classList.toggle("workouts-tab-unread", active || !!pendingRecord());
+    syncWidgetRpe();
+  }
+  // Карточка «Как тренировка?» в виджетах: оболочка узнаёт, какая запись ждёт оценки (id; пусто — никакая); отправляется только при изменении.
+  // Тренировку, которую страница ещё не забрала у оболочки, оболочка знает сама, поэтому пустое значение её не гасит.
+  var lastWidgetRpe = null;
+  function syncWidgetRpe(){
+    var n = window.LifeTrackerNative;
+    if(!n || typeof n.widgetRpeSet !== "function" || !STORE) return;
+    var rec = pendingRecord();
+    var id = rec ? String(rec.id) : "";
+    if(id === lastWidgetRpe) return;
+    lastWidgetRpe = id;
+    try{ n.widgetRpeSet(id); }catch(e){}
+  }
+  // оценка записи (из виджета): то же, что saveRpe, без окна; false — не сохранилось
+  function applyRpe(rec, val){
+    if(!rec || !rpeOk(val) || !STORE) return false;
+    var c = {};
+    Object.keys(rec).forEach(function(k){ if(k !== "id") c[k] = rec[k]; });
+    c.rpe = val;
+    delete c.needRpe;
+    try{ STORE.put(rec.id, c); }catch(e){ return false; }
+    pendCache = null;
+    try{ checkLoadRecord(rec, val); }catch(e){}
+    return true;
+  }
+  // оценки, поставленные кнопками 1…10 на карточке «Как тренировка?» в виджете, ещё не применённые к записям (мост ≥33)
+  function drainWidgetRpe(){
+    var n = window.LifeTrackerNative;
+    if(!n || typeof n.widgetRpeTake !== "function" || !STORE) return;
+    var arr;
+    try{ arr = JSON.parse(String(n.widgetRpeTake())); }catch(e){ return; }
+    if(!Array.isArray(arr) || !arr.length) return;
+    var byId = {};
+    allRecords().forEach(function(r){ byId[r.id] = r; });
+    var ack = [];
+    arr.forEach(function(a){
+      if(!a || typeof a.id !== "string") return;
+      var rec = byId[a.id];
+      if(!rec) return; // записи ещё нет (придёт из очереди оболочки или облака) — ответ ждёт следующего раза
+      if(needsRpe(rec) && rpeOk(a.rpe) && !applyRpe(rec, Number(a.rpe))) return; // не сохранилась — повторим
+      ack.push(a.id);
+    });
+    if(ack.length){ try{ n.widgetRpeAck(JSON.stringify(ack)); }catch(e){} }
+    pendCache = null;
+    refreshIfOpen();
   }
   function startTabMark(){
     if(tabMarkTimer) return;
@@ -2437,6 +2483,12 @@
 
   // ---------- забрать готовые записи у оболочки ----------
   function drain(){
+    drainFinished();
+    try{ drainWidgetRpe(); }catch(e){}
+    lastWidgetRpe = null; // после возврата в приложение оболочке сообщается состояние заново
+    try{ syncWidgetRpe(); }catch(e){}
+  }
+  function drainFinished(){
     var n = nat();
     if(!n || !STORE) return;
     var arr;

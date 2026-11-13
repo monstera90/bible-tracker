@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 4.5 (13.11)
+   Версия: 5.0 (13.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -9,8 +9,9 @@
    Галочка «Отображать заряд аккумулятора» (`battery`): в стопку добавляется служебная карточка с зарядом телефона и Bluetooth-наушников — её рисует оболочка (QrBattery.kt), страница шлёт только флаг.
    Цвет карточки «Заряд» (`batColor`: "" — по умолчанию, сиреневый, иначе "#rrggbb") выбирается палитрой под галочкой — той же, что в форме карточки QR-кодов (itemcards.js `colorPalette`, запомненный цвет — `defaultColor/rememberColor`); карточка заряда показана в форме после последнего слота (и кнопки «+») (`batFaceHtml`), статус наушников из оболочки — `batStatusText`.
    Галочка «Отображать заряд аккумулятора (несколько устройств)» (`batteryMulti`, цвет `bat2Color`, палитра `icfColors2`): ещё одна служебная карточка — только значки и кольца заряда, без надписей: телефон и до трёх подключённых Bluetooth-устройств (QrBattery.renderMulti); в форме её лицо — `bat2FaceHtml`, значки — `iconSvg`, список парных устройств из оболочки — `batDevicesText`.
+   Галочка «Спрашивать о тренировке» (`rpeAsk`): пока есть тренировка без оценки нагрузки (1–10), над всеми карточками стопки стоит служебная карточка «Как тренировка?» с кнопками 1…10 — её рисует оболочка (QrRpe.kt), страница шлёт только флаг; в форме показан образец лица (`rpeFaceHtml`, цвет `RPE_COLOR`). Оценку из виджета страница забирает в workouts.js (`drainWidgetRpe`, мост ≥33).
    Галочки «Показывать задачи» (`tasks`, цвет `tasksColor`, палитра `icfColors3`) и «Показывать события календаря» (`events`, цвет `eventsColor`, палитра `icfColors4`): в стопку добавляются динамические карточки по данным календаря (`CalendarTab.widgetFeed` через `deps.getCalendarFeed`, `buildFeed`). Задачи: каждая открытая задача календаря на ближайшую неделю (`FEED_DAYS`) или просроченная — отдельная карточка (до `MAX_TASKS`); событие: ближайшее запланированное в пределах недели (в оболочку уходят `MAX_EVENTS` кандидатов, показывает первое будущее — решает QrWidgets.kt по текущему времени). Лицо — `drawDynFace` (размеры сняты с макета, доли ширины карточки — `DYN`), у каждой карточки до четырёх картинок: `<ключ>` («Сегодня»), `<ключ>_t` («Завтра»), `<ключ>_w` (день недели, если до даты два дня и больше) и `<ключ>_s`/`<ключ>_y`/`<ключ>_o` («Просрочено, сегодня» / «…, вчера» / «…, 1 января», только у задачи); какую показать — выбирает оболочка (так надпись меняется в полночь без приложения). Данные меняются → `feedChanged` (из my.js: запись состояния и возврат в приложение) сверяет `feedSig` и при отличии шлёт `syncNow`. Палитра общая с карточками QR-кодов (`itemcards.colorPalette`), цвет по умолчанию — как на макете (`TASK_COLOR`/`EVENT_COLOR`), последний выбранный — `widgetsDynColors_v1`.
-   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor}]}), только на устройстве.
+   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor,rpeAsk}]}), только на устройстве.
    Страница рисует лица карточек в PNG (canvas, `pngFor`) и шлёт их оболочке вместе с настройками (мост ≥31 `widgetsSync`).
    Точка входа: window.initWidgetsModule(deps) → window.WidgetsTab.{render, scheduleSync}.
    =========================================================================== */
@@ -24,6 +25,7 @@
   var FACE_SHADE = 0.04; // цветной выступ снизу, доля ширины
   var LEGACY_BAT_COLOR = "#2175d9"; // цвет карточки заряда у виджетов, сохранённых до выбора цвета: остаются синими
   var TASK_COLOR = "#1e88e5"; // цвет карточек задач по умолчанию (синий макета; квадрат палитры QR-кодов)
+  var RPE_COLOR = "#8000ff"; // цвет карточки «Как тренировка?» (фиолетовый макета; в оболочке — QrRpe.DEFAULT_COLOR)
   var EVENT_COLOR = "#317bf6"; // цвет карточки события по умолчанию (синий макета, чуть насыщеннее)
   var DYN_LAST_KEY = "widgetsDynColors_v1"; // последний выбранный цвет карточек задач/событий: {task, event}
   var MAX_TASKS = 12; // карточек задач в виджете (ближайшие по времени, просроченные первыми)
@@ -84,13 +86,13 @@
         else if(w.batColor && !/^#[0-9a-fA-F]{6}$/.test(w.batColor)) w.batColor = "";
         w.batteryMulti = !!w.batteryMulti;
         if(typeof w.bat2Color !== "string" || (w.bat2Color && !/^#[0-9a-fA-F]{6}$/.test(w.bat2Color))) w.bat2Color = "";
-        w.tasks = !!w.tasks; w.events = !!w.events;
+        w.tasks = !!w.tasks; w.events = !!w.events; w.rpeAsk = !!w.rpeAsk;
         w.tasksColor = normHex(w.tasksColor); w.eventsColor = normHex(w.eventsColor);
       });
       return o;
     }
     function normHex(v){ return (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)) ? v.toLowerCase() : ""; }
-    function hasContent(w){ return !!(w.cards.length || w.battery || w.batteryMulti || w.tasks || w.events); }
+    function hasContent(w){ return !!(w.cards.length || w.battery || w.batteryMulti || w.tasks || w.events || w.rpeAsk); }
     function normAfter(v){ return (v === "hide" || v === "end") ? v : "none"; }
     function save(){ try{ localStorage.setItem(KEY, JSON.stringify(data)); }catch(e){} }
     function changed(){ save(); scheduleSync(600); }
@@ -353,7 +355,7 @@
         var widgets = data.list.map(function(w){
           return {
             id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance, battery: !!w.battery, batColor: w.battery ? batHex(w) : "", batteryMulti: !!w.batteryMulti, bat2Color: w.batteryMulti ? bat2Hex(w) : "",
-            tasks: !!w.tasks, events: !!w.events, dyn: dyn.perWidget[w.id] || [],
+            tasks: !!w.tasks, events: !!w.events, rpeAsk: !!w.rpeAsk, dyn: dyn.perWidget[w.id] || [],
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
               return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after) };
@@ -555,6 +557,20 @@
       t += '<text x="50" y="' + (DYN.timeBase * 100).toFixed(1) + '" font-size="' + (DYN.timeFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700" font-family="sans-serif">' + smp.time + '</text>';
       return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' + t + '</svg></div>';
     }
+    // Карточка «Как тренировка?» в форме: образец лица (в виджете её рисует оболочка, QrRpe.kt; числа — доли ширины карточки ×100: значок «календарь с галочкой» (клетка 0,96), две строки заголовка, сетка кнопок 2×5)
+    function rpeFaceHtml(){
+      var hex = RPE_COLOR, shade = cardsOf().cardShade(hex), serif = "font-family=\"'Palatino Linotype',Georgia,serif\"";
+      var t = '<g transform="translate(38.48 3.5) scale(0.96)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M11.5 21h-5.5a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v6"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/><path d="M15 19l2 2l4 -4"/></g>';
+      t += '<text x="50" y="41.3" font-size="13" text-anchor="middle" fill="#fff" font-weight="700" ' + serif + '>Как</text>';
+      t += '<text x="50" y="54.2" font-size="13" text-anchor="middle" fill="#fff" font-weight="700" textLength="82" lengthAdjust="spacingAndGlyphs" ' + serif + '>тренировка?</text>';
+      for(var i = 0; i < 10; i++){
+        var x = 4.7 + (i % 5) * 18.73, y = i < 5 ? 62.06 : 80.88;
+        t += '<rect x="' + (x + 0.48).toFixed(2) + '" y="' + (y + 0.48).toFixed(2) + '" width="14.74" height="14.54" rx="2.9" fill="none" stroke="#fff" stroke-width="0.95"/>';
+        t += '<text x="' + (x + 7.85).toFixed(2) + '" y="' + (y + 9.7).toFixed(2) + '" font-size="5.5" text-anchor="middle" fill="#fff" font-weight="700" ' + serif + '>' + (i + 1) + '</text>';
+      }
+      return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' + t + '</svg></div>';
+    }
     function tasksFaceHtml(w){ return dynFaceHtml("task", dynHex(w, "task")); }
     function eventsFaceHtml(w){ return dynFaceHtml("event", dynHex(w, "event")); }
     // Строка списка виджетов: что в стопке, кроме карточек QR-кодов
@@ -564,6 +580,7 @@
       if(w.batteryMulti) extra.push("заряд устройств");
       if(w.tasks) extra.push("задачи");
       if(w.events) extra.push("события");
+      if(w.rpeAsk) extra.push("вопрос о тренировке");
       if(w.cards.length) return cardWord(w.cards.length) + (extra.length ? " + " + extra.join(" + ") : "");
       if(!extra.length) return cardWord(0);
       return (w.battery && extra.length === 1) ? "заряд аккумулятора" : extra.join(" + ");
@@ -635,6 +652,7 @@
       if(w.batteryMulti) html += '<div class="wg-slot" data-bat="1" id="wgBat2Slot">' + bat2FaceHtml(w) + '</div>'; // карточка заряда нескольких устройств — после карточки заряда
       if(w.tasks) html += '<div class="wg-slot" data-bat="1" id="wgTasksSlot">' + tasksFaceHtml(w) + '</div>'; // образец карточки задачи (в виджете их столько, сколько задач)
       if(w.events) html += '<div class="wg-slot" data-bat="1" id="wgEventsSlot">' + eventsFaceHtml(w) + '</div>'; // образец карточки события
+      if(w.rpeAsk) html += '<div class="wg-slot" data-bat="1" id="wgRpeSlot">' + rpeFaceHtml() + '</div>'; // образец «Как тренировка?» (в виджете она стоит над всеми карточками, пока есть запись без оценки)
       html += '</div>';
       html += '<label class="wg-check"><input type="checkbox" id="wgRotate"' + (w.rotate ? ' checked' : '') + '>Переключать виджеты по кругу</label>';
       if(w.rotate) html += '<div class="wg-min">каждые<input type="number" id="wgRotMin" min="1" max="720" value="' + w.rotateMin + '">мин</div>';
@@ -660,6 +678,8 @@
       html += '<label class="wg-check"><input type="checkbox" id="wgEvents"' + (w.events ? ' checked' : '') + '>Показывать события календаря</label>';
       html += '<div class="wg-hint">Одна карточка — следующее запланированное событие, с надписью «Сегодня» или «Завтра». Если ни сегодня, ни завтра событий нет, карточки в стопке нет. Нет галочки — карточки события в стопке нет.</div>';
       if(w.events) html += cardsOf().colorPalette("wgevents", "icfColors4");
+      html += '<label class="wg-check"><input type="checkbox" id="wgRpe"' + (w.rpeAsk ? ' checked' : '') + '>Спрашивать о тренировке</label>';
+      html += '<div class="wg-hint">После тренировки, пока вы не оценили нагрузку, наверху стопки появляется карточка «Как тренировка?» с кнопками от 1 до 10. Нажатие на число сразу сохраняет оценку, и карточка исчезает. Если пролистнуть на другую карточку, через минуту она вернётся наверх; порядок остальных карточек не меняется. Нет галочки — карточки нет.</div>';
       var st = nativeState(), placed = st && st.placed && st.placed[w.id];
       html += '<div class="wg-btns">';
       if(bridge()) html += '<button type="button" class="workbooks-run-btn" id="wgPinBtn">' + (placed ? 'Добавить ещё один на рабочий стол' : 'Добавить на рабочий стол') + '</button><div class="wg-hint" id="wgPinHint"></div>';
@@ -777,6 +797,11 @@
       ev.addEventListener("change", function(){
         w.events = ev.checked;
         if(w.events) w.eventsColor = dynColorFor("event");
+        commitDraft(a); changed(); render();
+      });
+      var rpe = $("wgRpe");
+      rpe.addEventListener("change", function(){
+        w.rpeAsk = rpe.checked;
         commitDraft(a); changed(); render();
       });
       // палитры цвета карточек: [id палитры, поле цвета, ключ запомненного цвета, id места карточки, лицо карточки, вид динамической карточки]
