@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.2 (13.11)
+// Версия: 2.3 (13.11)
 
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -46,7 +46,14 @@ class QrWidgetProvider : AppWidgetProvider() {
             }
             QrWidgets.ACTION_TICK -> QrWidgets.refreshAll(context)
             QrWidgets.ACTION_BATTERY -> QrWidgets.onBatteryTick(context)
-            "android.bluetooth.device.action.ACL_CONNECTED", "android.bluetooth.device.action.ACL_DISCONNECTED" -> QrWidgets.onBluetoothChanged(context)
+            QrWidgets.ACTION_BT_BURST -> QrWidgets.onBtBurst(
+                context,
+                intent.getIntExtra(QrWidgets.EXTRA_STEP, 0),
+                intent.getLongExtra(QrWidgets.EXTRA_SINCE, 0L),
+                intent.getBooleanExtra(QrWidgets.EXTRA_CONNECTED, true)
+            )
+            "android.bluetooth.device.action.ACL_CONNECTED" -> QrWidgets.onBluetoothChanged(context, true)
+            "android.bluetooth.device.action.ACL_DISCONNECTED" -> QrWidgets.onBluetoothChanged(context, false)
             else -> super.onReceive(context, intent)
         }
     }

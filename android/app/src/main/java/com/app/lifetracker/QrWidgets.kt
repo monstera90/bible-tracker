@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.0 (13.11)
+// Версия: 7.1 (13.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -48,7 +48,7 @@ import java.util.UUID
  * Галочка «Отображать заряд аккумулятора» (`battery` у виджета): в конец стопки добавляется служебная карточка [QrBattery.KEY] — её лицо рисует
  * [QrBattery.render] (заряд телефона и Bluetooth-наушников), нажатие на неё ничего не делает. Галочка «…(несколько устройств)» (`batteryMulti`) добавляет
  * после неё ещё одну служебную карточку [QrBattery.KEY2] ([QrBattery.renderMulti]): только кольца и значки телефона и до трёх подключённых Bluetooth-устройств. Картинка перерисовывается по будильнику
- * `ACTION_BATTERY` (раз в 5 минут, если заряд изменился), при подключении/отключении Bluetooth-устройства и при вещании о заряде наушников.
+ * `ACTION_BATTERY` (раз в 5 минут, если заряд изменился), при подключении Bluetooth-устройства (серия проверок через 6, 15, 30, 60 и 120 с, пока заряд не станет известен), при отключении и при вещании о заряде устройств.
  *
  * Галочки «Показывать задачи» (`tasks`) и «Показывать события календаря» (`events`): страница присылает в `dyn` кандидатов — задачи (`k`="task", `at` — время
  * задачи, мс) и ближайшие события (`k`="event") — и по две картинки на каждого: `<ключ>.png` («Сегодня») и `<ключ>_b.png` («Просрочено» у задачи, «Завтра»
@@ -81,13 +81,22 @@ object QrWidgets {
     const val ACTION_TICK = "com.app.lifetracker.QRW_TICK"
     const val ACTION_BATTERY = "com.app.lifetracker.QRW_BATTERY"
     const val ACTION_RETURN = "com.app.lifetracker.QRW_RETURN"
+    const val ACTION_BT_BURST = "com.app.lifetracker.QRW_BT_BURST"
+    const val EXTRA_STEP = "step"
+    const val EXTRA_SINCE = "since"
+    const val EXTRA_CONNECTED = "connected"
 
     private const val PEND_TTL_MS = 3 * 60_000L
     private const val DOTS_SHOW_MS = 1400L
     private const val RETURN_AFTER_MS = 60_000L
     private const val SWIPE_QUIET_MS = 4_000L
     private const val BATTERY_EVERY_MS = 5 * 60_000L
-    private const val BATTERY_AFTER_BT_MS = 6_000L
+
+    /** Серия проверок заряда после подключения Bluetooth-устройства: через столько мс от подключения (6, 15, 30, 60, 120 с). */
+    private val BT_BURST_AT = longArrayOf(6_000L, 15_000L, 30_000L, 60_000L, 120_000L)
+
+    /** Запас назад от момента подключения: заряд, пришедший чуть раньше, чем мы обработали подключение, считается свежим. */
+    private const val BT_SINCE_SLACK_MS = 5_000L
     private const val BT_ASK_EVERY_MS = 24 * 3_600_000L
     private const val MAX_CARDS = 10
     private const val MAX_DYN = 24
@@ -809,6 +818,16 @@ object QrWidgets {
         return PendingIntent.getBroadcast(ctx, 4998, i, f)
     }
 
+    /** Будильник серии проверок заряда: один на все устройства, новое подключение заменяет прежнюю серию. */
+    private fun btBurstPi(ctx: Context, step: Int, since: Long, connected: Boolean): PendingIntent {
+        val i = Intent(ctx, QrWidgetProvider::class.java)
+        i.action = ACTION_BT_BURST
+        i.putExtra(EXTRA_STEP, step)
+        i.putExtra(EXTRA_SINCE, since)
+        i.putExtra(EXTRA_CONNECTED, connected)
+        return PendingIntent.getBroadcast(ctx, 4997, i, PendingIntent.FLAG_UPDATE_CURRENT or immutable())
+    }
+
     private fun returnPi(ctx: Context, id: Int, create: Boolean): PendingIntent? {
         val i = Intent(ctx, QrWidgetProvider::class.java)
         i.action = ACTION_RETURN
@@ -896,14 +915,37 @@ object QrWidgets {
         setAlarm(app, System.currentTimeMillis() + BATTERY_EVERY_MS, batteryPi(app, true)!!)
     }
 
-    /** Bluetooth-устройство подключилось или отключилось: заряд наушников становится известен не сразу, поэтому проверяем через несколько секунд. */
-    fun onBluetoothChanged(ctx: Context) {
+    /**
+     * Bluetooth-устройство (любое: наушники, часы, колонка…) подключилось или отключилось. Подключение: заряд устройство сообщает не сразу
+     * (от нескольких секунд до полминуты), поэтому проверяем серией — через 6, 15, 30, 60 и 120 с, пока у всех подключённых устройств
+     * свежий заряд не станет известен ([onBtBurst]). Отключение: одна перерисовка через 6 с, чтобы карточка убрала устройство.
+     */
+    fun onBluetoothChanged(ctx: Context, connected: Boolean = true) {
         val app = ctx.applicationContext
         val ids = AppWidgetManager.getInstance(app).getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java))
         if (ids.none { cfgFor(app, it)?.anyBattery == true }) return
         // наушники сообщают заряд сразу после подключения (за секунды): приёмник нужно поднять сейчас, а не по будильнику, иначе значение пропустим
         QrBattery.register(app)
-        setAlarm(app, System.currentTimeMillis() + BATTERY_AFTER_BT_MS, batteryPi(app, true)!!)
+        val now = System.currentTimeMillis()
+        setAlarm(app, now + BT_BURST_AT[0], btBurstPi(app, 0, now - BT_SINCE_SLACK_MS, connected))
+    }
+
+    /**
+     * Шаг серии проверок [step] после подключения: перерисовывает карточки заряда (если что-то изменилось — на погашенном экране тоже,
+     * это дёшево) и, если заряд подключённых устройств ещё не весь известен, ставит следующий шаг. После последнего шага серия кончается;
+     * дальше работают обычный будильник раз в 5 минут и вещание о смене заряда.
+     */
+    fun onBtBurst(ctx: Context, step: Int, since: Long, connected: Boolean) {
+        val app = ctx.applicationContext
+        val ids = AppWidgetManager.getInstance(app).getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java))
+        if (ids.none { cfgFor(app, it)?.anyBattery == true }) return
+        QrBattery.register(app)
+        onBatteryChanged(app)
+        if (!connected) return
+        if (QrBattery.settled(app, since)) return
+        val next = step + 1
+        if (next >= BT_BURST_AT.size) return
+        setAlarm(app, System.currentTimeMillis() + (BT_BURST_AT[next] - BT_BURST_AT[step]), btBurstPi(app, next, since, true))
     }
 
     @Suppress("DEPRECATION")

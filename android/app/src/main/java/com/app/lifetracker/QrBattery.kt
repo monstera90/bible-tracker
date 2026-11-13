@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 4.1 (13.11)
+// Версия: 4.2 (13.11)
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -112,6 +112,16 @@ object QrBattery {
             if (System.currentTimeMillis() - a.optLong(1) > LEVEL_TTL_MS) -1 else a.optInt(0, -1)
         } catch (e: Throwable) {
             -1
+        }
+    }
+
+    /** Когда уровень устройства последний раз получен (из вещания или чтением), мс; 0 — ни разу. */
+    private fun cacheStamp(ctx: Context, addr: String): Long {
+        return try {
+            val o = JSONObject(ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(K_LEVELS, "{}") ?: "{}")
+            o.optJSONArray(addr.uppercase())?.optLong(1) ?: 0L
+        } catch (e: Throwable) {
+            0L
         }
     }
 
@@ -299,6 +309,33 @@ object QrBattery {
         return out
     }
 
+    /**
+     * Узнали ли заряд всех сейчас подключённых Bluetooth-устройств (любых, не только наушников) после времени [since]: значение должно быть
+     * свежим — получено при этом подключении, а не оставшимся в кэше от прошлого. Подключённых устройств пока нет (система ещё не отметила
+     * подключение) — false, проверку надо повторить. Нет разрешения, Bluetooth выключен или ошибка — true: повторять нечего.
+     * Устройство, которое заряд не сообщает вовсе (клавиатура, колонка), удерживает false — серия проверок сама остановится по числу шагов.
+     */
+    @SuppressLint("MissingPermission")
+    fun settled(ctx: Context, since: Long): Boolean {
+        return try {
+            val app = ctx.applicationContext
+            if (!btPermitted(app)) return true
+            val adapter = adapterOf(app) ?: return true
+            if (!adapter.isEnabled) return true
+            val (addrs, names) = activeOutputs(app)
+            var any = false
+            for (d in adapter.bondedDevices ?: emptySet<BluetoothDevice>()) {
+                if (!isActive(d, addrs, names) && !isConnected(d)) continue
+                any = true
+                levelOf(app, d) // удачное чтение само обновит отметку времени в кэше
+                if (cacheStamp(app, d.address) < since) return false
+            }
+            any
+        } catch (e: Throwable) {
+            true
+        }
+    }
+
     /** Строка по кругам карточки «несколько устройств» — по ней виджет понимает, что картинку пора перерисовать. */
     fun signatureMulti(ctx: Context): String = devices(ctx).joinToString("|") { it.icon + ":" + it.level }
 
@@ -316,7 +353,8 @@ object QrBattery {
                     val dev = i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
                     if (dev != null && lv in 0..100) cacheLevel(c, dev.address, lv)
                 }
-                if (i.action != ACTION_LEVEL) QrWidgets.onBluetoothChanged(c) // подключение/отключение: заряд станет известен через пару секунд
+                // подключение: серия проверок (заряд становится известен через секунды); отключение: одна перерисовка
+                if (i.action != ACTION_LEVEL) QrWidgets.onBluetoothChanged(c, i.action == BluetoothDevice.ACTION_ACL_CONNECTED)
                 QrWidgets.onBatteryChanged(c)
             } catch (e: Throwable) {
                 // виджет не должен ронять приложение
