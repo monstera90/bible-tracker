@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.4 (14.11)
+// Версия: 2.5 (14.11)
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
@@ -72,7 +72,13 @@ class QrWidgetService : RemoteViewsService() {
             rv.setViewVisibility(R.id.rpe_grid, if (isRpe) View.VISIBLE else View.GONE)
             if (isRpe) for (i in RPE_BUTTONS.indices) rv.setOnClickFillInIntent(RPE_BUTTONS[i], Intent().putExtra("rpe", i + 1))
             // карточки заряда и событий — не QR-карточки: нажатие на них ничего не делает; у задач — своё (ниже) (без fill-in intent шаблон не срабатывает)
-            if (!isRpe && !QrBattery.isBatteryKey(c.key) && c.dyn.isEmpty()) rv.setOnClickFillInIntent(R.id.qr_card_img, Intent().putExtra("code", if (c.alarmId.isNotEmpty()) "alarmmark:" + c.key else c.code).putExtra("key", c.key).putExtra("habit", c.habit)) // будильник: страница заводит/выключает его молча (`alarmmark:<id>`), полноэкранной карточки нет
+            if (!isRpe && !QrBattery.isBatteryKey(c.key) && c.dyn.isEmpty()) {
+                val fill = Intent().putExtra("key", c.key).putExtra("habit", c.habit)
+                // будильник: ScanActivity заводит/выключает его сама, без окна и страницы (`alarm`); нет настроек от страницы — прежний путь (`alarmmark:<id>`)
+                if (c.alarmId.isNotEmpty() && c.alarmSpec != null) fill.putExtra("alarm", c.key)
+                else fill.putExtra("code", if (c.alarmId.isNotEmpty()) "alarmmark:" + c.key else c.code)
+                rv.setOnClickFillInIntent(R.id.qr_card_img, fill)
+            }
             // карточка задачи: двойное нажатие отмечает задачу выполненной (одно — ничего; ждёт окно ScanActivity)
             if (c.dyn == "task" && c.tid.isNotEmpty()) rv.setOnClickFillInIntent(R.id.qr_card_img, Intent().putExtra("task", c.tid))
             if (n > 1 && SystemClock.uptimeMillis() > quietUntil) QrWidgets.onPossibleSwipe(ctx, widgetId, n)

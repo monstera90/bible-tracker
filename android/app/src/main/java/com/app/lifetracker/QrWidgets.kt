@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 10.1 (14.11)
+// Версия: 11.0 (14.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -85,6 +85,9 @@ object QrWidgets {
     private const val K_BTASK = "btask"
     private const val K_BTASKAT = "btaskat"
     private const val K_RETURN = "ret"
+    private const val K_AEV = "alarmEv"       // очередь: заведённые/выключенные нажатием в виджете будильники — страница запишет их в журнал событий
+    private const val K_AEVSEQ = "alarmEvSeq"
+    private const val AEV_MAX = 50
 
     const val ACTION_ROTATE = "com.app.lifetracker.QRW_ROTATE"
     const val ACTION_TICK = "com.app.lifetracker.QRW_TICK"
@@ -139,8 +142,10 @@ object QrWidgets {
     private val adapterRev = HashMap<Int, Int>()
 
     class Live(val k: String, val id: String)
+    /** Настройки будильника карточки (от страницы): нажатие в виджете заводит/выключает его без окна и страницы. */
+    class AlarmSpec(val hour: Int, val minute: Int, val every: Int, val times: Int, val title: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
-    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val alarmId: String = "")
+    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null)
     class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
@@ -169,6 +174,14 @@ object QrWidgets {
     private fun parseColor(v: String): Int {
         if (!Regex("^#[0-9a-fA-F]{6}$").matches(v)) return QrBattery.DEFAULT_FACE
         return (0xFF shl 24) or v.substring(1).toInt(16)
+    }
+
+    private fun parseAlarmSpec(o: JSONObject?): AlarmSpec? {
+        if (o == null) return null
+        val h = o.optInt("h", -1)
+        val m = o.optInt("m", -1)
+        if (h !in 0..23 || m !in 0..59) return null
+        return AlarmSpec(h, m, o.optInt("every", 0), o.optInt("times", 0), o.optString("title", "").take(200))
     }
 
     private fun parse(text: String?): List<Cfg> {
@@ -200,7 +213,7 @@ object QrWidgets {
                         val da = c.optJSONArray("days")
                         if (da != null) for (x in 0 until da.length()) da.optInt(x).let { if (it in 1..7) days.add(it) }
                         val after = c.optString("after", "none").let { if (it == "hide" || it == "end") it else "none" }
-                        cards.add(Card(key, c.optString("code", ""), c.optString("title", ""), live, times, days, after, habit = c.optBoolean("habit", false), alarmId = c.optString("alarm", "").take(40)))
+                        cards.add(Card(key, c.optString("code", ""), c.optString("title", ""), live, times, days, after, habit = c.optBoolean("habit", false), alarmId = c.optString("alarm", "").take(40), alarmSpec = parseAlarmSpec(c.optJSONObject("alarmSpec"))))
                         if (cards.size >= MAX_CARDS) break
                     }
                 }
@@ -614,6 +627,71 @@ object QrWidgets {
             val present = HashSet<String>()
             for (cfg in configs(app)) for (c in cfg.cards) if (c.dyn == "task" && c.tid.isNotEmpty()) present.add(c.tid)
             if (h.retainAll(present)) putIdSet(app, K_THIDE, h)
+        }
+    }
+
+    /**
+     * Нажатие на карточку-будильник в виджете (ScanActivity, extra `alarm`): без окна и страницы заводит будильник CardAlarms или, если он заведён, выключает.
+     * Лицо с надписью «Заведён» меняется само (`CardAlarms` → [onAlarmsChanged]). Запись для журнала событий встаёт в очередь (`widgetAlarmTake`/`widgetAlarmAck`, мост ≥35).
+     * false — карточки нет или настроек будильника у неё нет (старая отправка от страницы): окно откроет прежний путь через страницу.
+     */
+    fun toggleAlarm(ctx: Context, cardKey: String): Boolean {
+        if (!KEY_RE.matches(cardKey)) return false
+        val app = ctx.applicationContext
+        val card = configs(app).asSequence().flatMap { it.cards.asSequence() }
+            .firstOrNull { it.key == cardKey && it.alarmId.isNotEmpty() && it.alarmSpec != null } ?: return false
+        val spec = card.alarmSpec ?: return false
+        val now = System.currentTimeMillis()
+        if (CardAlarms.isArmed(app, card.alarmId)) {
+            CardAlarms.cancel(app, card.alarmId)
+            queueAlarmEvent(app, JSONObject().put("id", card.alarmId).put("on", false).put("title", spec.title).put("ts", now))
+        } else {
+            val at = CardAlarms.set(app, card.alarmId, spec.title, spec.hour, spec.minute, spec.every, spec.times)
+            if (at > 0L) {
+                queueAlarmEvent(
+                    app,
+                    JSONObject().put("id", card.alarmId).put("on", true).put("title", spec.title).put("ts", now).put("at", at)
+                        .put("h", spec.hour).put("m", spec.minute).put("every", spec.every).put("times", spec.times)
+                )
+            }
+        }
+        return true
+    }
+
+    private fun queueAlarmEvent(app: Context, ev: JSONObject) {
+        synchronized(LOCK) {
+            val p = prefs(app)
+            val seq = p.getLong(K_AEVSEQ, 0L) + 1L
+            val arr = try { JSONArray(p.getString(K_AEV, "[]")) } catch (e: Exception) { JSONArray() }
+            arr.put(ev.put("n", seq))
+            val out = JSONArray()
+            for (i in maxOf(0, arr.length() - AEV_MAX) until arr.length()) out.put(arr.get(i))
+            p.edit().putString(K_AEV, out.toString()).putLong(K_AEVSEQ, seq).apply()
+        }
+    }
+
+    /** JSON-массив записей о будильниках, заведённых/выключенных в виджете и ещё не внесённых страницей в журнал. */
+    fun takeAlarmEvents(ctx: Context): String = synchronized(LOCK) { prefs(ctx).getString(K_AEV, "[]") ?: "[]" }
+
+    /** Страница внесла записи с этими номерами `n` (JSON-массив) — убрать их из очереди. */
+    fun ackAlarmEvents(ctx: Context, nsJson: String?) {
+        val ns = HashSet<Long>()
+        try {
+            val a = JSONArray(nsJson ?: "[]")
+            for (i in 0 until a.length()) ns.add(a.optLong(i))
+        } catch (e: Exception) {
+            return
+        }
+        if (ns.isEmpty()) return
+        synchronized(LOCK) {
+            val p = prefs(ctx)
+            val arr = try { JSONArray(p.getString(K_AEV, "[]")) } catch (e: Exception) { JSONArray() }
+            val out = JSONArray()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                if (o.optLong("n") !in ns) out.put(o)
+            }
+            p.edit().putString(K_AEV, out.toString()).apply()
         }
     }
 

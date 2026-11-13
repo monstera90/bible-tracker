@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 26.0 (13.11)
+// Версия: 27.0 (14.11)
 // Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
@@ -42,6 +42,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 35: будильники, заведённые/выключенные нажатием на карточку в виджете (`widgetAlarmTake` / `widgetAlarmAck`; QrWidgets): страница вносит их в журнал событий.
          * 34: задачи, отмеченные двойным нажатием на карточку в виджете (`widgetTaskTake` / `widgetTaskAck`; QrWidgets).
          * 33: оценка нагрузки тренировки из виджета (`widgetRpeSet` / `widgetRpeTake` / `widgetRpeAck`; QrRpe).
          * 31: виджеты рабочего стола «Стопка QR-карточек» (widgetsSync / widgetsState / widgetPin; QrWidgets).
@@ -64,7 +65,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 34
+        const val BRIDGE_VERSION = 35
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -1188,6 +1189,28 @@ class NativeBridge(private val activity: MainActivity) {
         if (!activity.pageTrusted) return
         try {
             QrWidgets.ackTaskDone(activity.applicationContext, idsJson)
+        } catch (e: Exception) {
+            // повторится
+        }
+    }
+
+    /** JSON-массив записей {n,id,on,title,ts[,at,h,m,every,times]} о будильниках, заведённых/выключенных нажатием в виджете и ещё не внесённых страницей в журнал. */
+    @JavascriptInterface
+    fun widgetAlarmTake(): String {
+        if (!activity.pageTrusted) return "[]"
+        return try {
+            QrWidgets.takeAlarmEvents(activity.applicationContext)
+        } catch (e: Exception) {
+            "[]"
+        }
+    }
+
+    /** Страница внесла записи с этими номерами `n` (JSON-массив) — убрать их из очереди. */
+    @JavascriptInterface
+    fun widgetAlarmAck(nsJson: String?) {
+        if (!activity.pageTrusted) return
+        try {
+            QrWidgets.ackAlarmEvents(activity.applicationContext, nsJson)
         } catch (e: Exception) {
             // повторится
         }

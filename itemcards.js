@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 46.1 (14.11)
+   Версия: 47.0 (14.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -2799,8 +2799,34 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   }
   // очередь из окна ярлыка: свежие записи (не старше 30 минут) выполняются, слой показывает результат последней
   // silent — без слоя (очередь из окна ярлыка выполняется в фоне: слой пользователь уже видел в самом окне)
+  // Будильники, заведённые/выключенные нажатием на карточку в виджете (оболочка делает это сама, мост ≥35): вносим их в журнал событий
+  function drainWidgetAlarms(){
+    var n = window.LifeTrackerNative;
+    if(!n || typeof n.widgetAlarmTake !== "function" || typeof n.widgetAlarmAck !== "function") return;
+    var arr;
+    try{ arr = JSON.parse(String(n.widgetAlarmTake())); }catch(e){ return; }
+    if(!Array.isArray(arr) || !arr.length) return;
+    var ack = [];
+    arr.forEach(function(ev){
+      if(!ev || typeof ev.n !== "number" || typeof ev.id !== "string") return;
+      try{
+        var title = String(ev.title || ""), ts = Number(ev.ts) || 0;
+        if(ev.on){
+          var clock = pad2(ev.h | 0) + ":" + pad2(ev.m | 0);
+          var text = "Будильник " + clock + (title ? " «" + title + "»" : "") + " заведён: " + dayWord(ev.at);
+          if(window.EventLog && window.EventLog.alarmStarted) window.EventLog.alarmStarted(ev.id, title, Number(ev.at) || 0, ev.every | 0, ev.times | 0, text, ts);
+        }else if(window.EventLog && window.EventLog.alarmCancelled){
+          window.EventLog.alarmCancelled(ev.id, title, ts);
+        }
+      }catch(e){}
+      ack.push(ev.n);
+    });
+    if(ack.length){ try{ n.widgetAlarmAck(JSON.stringify(ack)); }catch(e){} }
+    try{ cardsCache = null; if(gridVisible()) renderGrid(); }catch(e){}
+  }
   function drainPendingTasks(silent){
     cacheTaskTabs();
+    drainWidgetAlarms(); // будильники из виджета — в журнал событий
     drainPendingClimbs(); // «+ к высоте», отсканированный в окне ярлыка
     drainPendingCombos(false); // задачи из «Комбинированного», отсканированного в окне ярлыка («открыть» ждёт своего входа)
     var q = [];
@@ -3336,7 +3362,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       f.live.push({ k: "timer", id: timerCodeId(c.seconds | 0, tt, !!c.noIsland) }); // запущенный по коду
       f.live.push({ k: "timer", id: runId(c) });                                       // запущенный кнопкой карточки
     } else if(c.type === "alarm"){
-      f.big = alarmClock(c); f.title = c.title || "Будильник"; f.alarmId = runId(c); // alarmId: по нему оболочка узнаёт, заведён ли будильник (лицо с надписью «Заведён»)
+      f.big = alarmClock(c); f.title = c.title || "Будильник"; f.alarmId = runId(c); var ahm = alarmHM(c); f.alarmSpec = ahm ? { h: ahm.h, m: ahm.m, every: alarmEvery(c), times: alarmTimes(c), title: c.title || "" } : null; // alarmSpec: по ним оболочка сама заводит/выключает будильник по нажатию в виджете, без окна; alarmId: по нему оболочка узнаёт, заведён ли будильник (лицо с надписью «Заведён»)
     } else if(c.type === "weather"){
       f.svg = iconSvg(c.icon || "weather");
     } else if(c.type === "climb"){

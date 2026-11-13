@@ -1,6 +1,6 @@
 /* ===========================================================================
    eventlog.js
-   Версия: 4.0 (31.10)
+   Версия: 4.1 (14.11)
    Версия: 2.2 (25.10) — заголовки дней: «ПН 26.10.2026» (день недели + дата). Откат: eventlog.js 2.1
    Версия: 2.1 (25.10) — предстоящее у будильника: серой строкой показывается только ближайший звонок (первый; сработал — появляется второй повтор, и так далее), а не все сразу. Откат: eventlog.js 2.0.
    Версия: 2.0 (25.10) — структурная правка: у таймера и будильника ОДНА запись на запуск, которая меняется по ходу дела: «8:00 Был установлен таймер «Кофе»» → после срока «… и сработал через 23 минуты в **8:23**» / «… и был остановлен пользователем через 15 минут 23 секунды в **8:15**»;
@@ -332,10 +332,10 @@
     if(!update(p.key, text, { bold: true })) add(text, { at: p.setAt, key: p.key, bold: true });
   }
   // text — запись «будильник заведён» (её составляет карточка); firstAt — момент первого звонка
-  function alarmStarted(id, title, firstAt, every, times, text){
+  function alarmStarted(id, title, firstAt, every, times, text, atTs){ // atTs — когда будильник заведён, если запись вносится позже (нажатие в виджете)
     if(!id || !(firstAt > 0)) return;
     var pend = readAlarmPend();
-    var now = Date.now();
+    var now = atTs > 0 ? atTs : Date.now();
     if(pend[id]) finishAlarm(pend[id], "replaced", now);
     var p = { id: String(id), title: cleanText(title), setAt: now, firstAt: firstAt, every: every | 0, times: (every | 0) ? (times | 0) : 0, logged: 0 };
     p.key = "alarm:" + p.id + ":" + now;
@@ -344,19 +344,19 @@
     add(text, { at: now, key: p.key });
   }
   // «Выкл.» на карточке (вызывать ДО отмены в оболочке: иначе будильника уже нет в списке)
-  function alarmCancelled(id, title){
+  function alarmCancelled(id, title, atTs){
     var pend = readAlarmPend();
     var p = pend[id];
     if(p){
       delete pend[id];
       writeAlarmPend(pend);
-      finishAlarm(p, "cancelled", Date.now());
+      finishAlarm(p, "cancelled", atTs > 0 ? atTs : Date.now());
       return;
     }
     var al = readAlarms();
     var known = false;
     if(al) al.forEach(function(a){ if(a && String(a.id) === String(id)) known = true; });
-    if(known) add(alarmName(title) + " был отключён пользователем");
+    if(known) add(alarmName(title) + " был отключён пользователем", atTs > 0 ? { at: atTs } : undefined);
   }
   function reconcileAlarms(){
     var pend = readAlarmPend();

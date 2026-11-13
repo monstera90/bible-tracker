@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 11.0 (13.11)
+// Версия: 12.0 (14.11)
 // Версия: 6.0 (26.10) — мост ScanBridge: musicHeadphones (подключены ли наушники; комбо с галочкой «Наушники обязательны»).
 // Версия: 5.0 (26.10) — мост ScanBridge: musicPlayTrack / musicPlayFolder (QR «Комбинированный» из окна ярлыка включает трек или папку через MusicPlayer; приложение не открывается).
 // Версия: 4.0 (24.10) — мост ScanBridge: setAlarm / cancelAlarm / getAlarms (скан кода будильника в окне ярлыка заводит будильник CardAlarms).
@@ -85,6 +85,23 @@ class ScanActivity : ComponentActivity() {
                 QrRpe.answer(applicationContext, i.getIntExtra("rpe", 0))
             } catch (e: Exception) {
                 // оценка не сохранилась — карточка останется, можно нажать ещё раз
+            }
+        }
+        return true
+    }
+
+    /**
+     * Нажатие на карточку-будильник в виджете (extra `alarm` = ключ карточки, тот же `tok`): будильник заводится или выключается сразу в оболочке ([QrWidgets.toggleAlarm]),
+     * окно и страница не нужны. true — это был такой запрос.
+     */
+    private fun handleAlarm(i: Intent?): Boolean {
+        if (i == null || i.action != ACTION_SCAN_CODE || !i.hasExtra("alarm")) return false
+        if (QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
+            val key = i.getStringExtra("alarm") ?: ""
+            try {
+                if (QrWidgets.toggleAlarm(applicationContext, key)) QrWidgets.onCardFired(applicationContext, key) // нажатие = действие сработало («после срабатывания»)
+            } catch (e: Exception) {
+                // не получилось — карточка останется как была, можно нажать ещё раз
             }
         }
         return true
@@ -235,7 +252,7 @@ class ScanActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         // Кнопка оценки с карточки «Как тренировка?»: без окна — сохранили и сразу закрылись (webView и сервер не создаются)
-        if (handleRpe(intent)) {
+        if (handleRpe(intent) || handleAlarm(intent)) {
             finishAndRemoveTask()
             overridePendingTransition(0, 0)
             return
@@ -308,6 +325,13 @@ class ScanActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (handleRpe(intent)) return // окно сканера уже открыто и остаётся как было
+        if (handleAlarm(intent)) {
+            if (!::webView.isInitialized) { // окна со страницей нет (ждали второго нажатия) — просто закрываемся
+                finishAndRemoveTask()
+                overridePendingTransition(0, 0)
+            }
+            return
+        }
         val task = taskIdOf(intent)
         if (task != null) {
             beginTaskWait(task)
