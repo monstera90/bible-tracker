@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 4.2 (13.11)
+// Версия: 4.3 (13.11)
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -415,9 +415,9 @@ object QrBattery {
     }
 
     /**
-     * Лицо карточки «несколько устройств»: от одного до четырёх колец со значками, без надписей. Размеры колец и значков те же, что у карточки «Заряд».
-     * Верхний ряд стоит на месте столбцов карточки «Заряд» (`ROW_TOP`, телефон слева, второе устройство справа; один круг — по центру): один-два круга — только он;
-     * три — третий по центру нижнего ряда (`ROW_BOTTOM`); четыре — два в нижнем ряду под верхними.
+     * Лицо карточки «несколько устройств»: всегда четыре кольца сетки 2×2, сколько бы устройств ни было подключено. Левое верхнее — телефон
+     * с зарядом; остальные три — подключённые Bluetooth-устройства по мере подключения (кольцо заряда и значок), свободные места — пустые
+     * кольца-дорожки без значков. Размеры колец и значков те же, что у карточки «Заряд»; верхний ряд стоит на месте столбцов карточки «Заряд» (`ROW_TOP`), нижний — `ROW_BOTTOM`.
      */
     fun renderMulti(ctx: Context, face: Int = DEFAULT_FACE): Bitmap {
         val w = FACE_PX.toFloat()
@@ -437,16 +437,11 @@ object QrBattery {
         val right = 0.732f
         val rowTop = ROW_TOP
         val rowBottom = ROW_BOTTOM
-        for ((i, d) in list.withIndex()) {
-            val fx: Float
-            val fy: Float
-            when (list.size) {
-                1 -> { fx = 0.5f; fy = rowTop }
-                2 -> { fx = if (i == 0) left else right; fy = rowTop }
-                3 -> if (i < 2) { fx = if (i == 0) left else right; fy = rowTop } else { fx = 0.5f; fy = rowBottom }
-                else -> { fx = if (i % 2 == 0) left else right; fy = if (i < 2) rowTop else rowBottom }
-            }
-            ringIcon(g, w, w * fx, w * fy, d.level, d.icon)
+        for (i in 0 until 4) {
+            val d = list.getOrNull(i) // нет устройства — пустое кольцо без значка
+            val fx = if (i % 2 == 0) left else right
+            val fy = if (i < 2) rowTop else rowBottom
+            ringIcon(g, w, w * fx, w * fy, d?.level ?: -1, d?.icon ?: "")
         }
         return bmp
     }
@@ -482,6 +477,7 @@ object QrBattery {
             "tablet" -> drawTablet(g, w, cx, cy)
             "shutter" -> drawShutter(g, w, cx, cy)
             "generic" -> drawBluetooth(g, w, cx, cy)
+            "" -> {} // пустое место в карточке «несколько устройств»: только дорожка кольца
             else -> drawPhone(g, w, cx, cy)
         }
         g.restore()
