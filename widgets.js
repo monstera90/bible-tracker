@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 5.0 (13.11)
+   Версия: 5.1 (13.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -34,7 +34,7 @@
   var DAY_MS = 86400000;
   // Лицо динамической карточки (доли ширины карточки; сняты с макета 660 px): значок Tabler — «circle-check» / «calendar-event» (сетка 24, линия 2),
   // надпись «Сегодня»…, название (serif, жирное), время (крупно). Базовые линии букв, верх значка — от верха карточки. Верхние ≈7 % лица в виджете скрыты обрезкой стопки (qr_widget.xml: передняя карточка выходит за слот сверху), поэтому значок не поднимается выше `iconTop2`, а лишняя строка названия (`DYN2`) уходит вниз.
-  var DYN = { unit: 0.00955, iconTop: 0.138, labelBase: 0.448, titleBase: 0.577, timeBase: 0.858, labelFs: 0.076, titleFs: 0.108, timeFs: 0.27 };
+  var DYN = { unit: 0.00955, iconTop: 0.138, labelBase: 0.448, titleBase: 0.577, timeBase: 0.858, labelFs: 0.076, labelFsMax: 0.1, titleFs: 0.108, timeFs: 0.27 };
   var DYN2 = { iconTop: 0.126, labelBase: 0.432, titleBase: 0.543, lineH: 1.1, timeGap: 0.281 }; // название в две строки: значок почти на месте (выше нельзя — обрежется), остальное сдвигается вниз
   var DYN_ICONS = {
     task: '<circle cx="12" cy="12" r="9"/><path d="M9 12l2 2l4 -4"/>',
@@ -249,7 +249,9 @@
       var timeBase = n > 1 ? titleBase + (n - 1) * lh / S + DYN2.timeGap : DYN.timeBase;
       g.textAlign = "center"; g.textBaseline = "alphabetic"; g.fillStyle = "#ffffff";
       if(icon){ var u = S * DYN.unit; g.drawImage(icon, (S - 24 * u) / 2, S * iconTop - 2 * u, 24 * u, 24 * u); }
-      g.font = "400 " + (S * DYN.labelFs) + "px " + sans;
+      var lfs = S * DYN.labelFsMax; // надпись дня крупнее: «Сегодня, Четверг» — до labelFsMax, длинные ужимаются, но не меньше labelFs
+      g.font = "400 " + lfs + "px " + sans;
+      while(lfs > S * DYN.labelFs && g.measureText(face.label).width > maxW){ lfs *= 0.97; g.font = "400 " + lfs + "px " + sans; }
       g.fillText(face.label, S / 2, S * labelBase, maxW);
       g.font = "700 " + fit.fs + "px " + serif;
       fit.lines.forEach(function(ln, i){ g.fillText(ln, S / 2, S * titleBase + i * lh, maxW); });
@@ -301,9 +303,10 @@
             var key = prefix + w.id + "_" + i, dayAt = startOfDay(it.at), d0 = Math.round((dayAt - today) / DAY_MS);
             function face(id, label){ return { id: "dyn:" + id, color: hex, shade: shade, kind: kind, label: label, title: it.title, time: hhmm(it.at) }; }
             function put(suffix, label){ jobs.push({ key: key + suffix, face: face(key + suffix, label) }); }
-            if(d0 >= 2) put("_w", WEEKDAYS_FULL[new Date(it.at).getDay()]);
-            if(d0 >= 1) put("_t", DYN_LABELS.tom);
-            if(d0 >= 0) put("", DYN_LABELS.today);
+            var wd = WEEKDAYS_FULL[new Date(it.at).getDay()];
+            if(d0 >= 2) put("_w", wd);
+            if(d0 >= 1) put("_t", DYN_LABELS.tom + ", " + wd);
+            if(d0 >= 0) put("", DYN_LABELS.today + ", " + wd);
             if(kind === "task"){
               var od = new Date(it.at);
               if(d0 >= 0) put("_s", DYN_LABELS.over + ", сегодня");
@@ -552,7 +555,7 @@
     function dynFaceHtml(kind, hex){
       var shade = cardsOf().cardShade(hex), smp = DYN_SAMPLE[kind], u = DYN.unit * 100;
       var t = '<g transform="translate(' + (50 - 12 * u).toFixed(2) + ' ' + (DYN.iconTop * 100 - 2 * u).toFixed(2) + ') scale(' + u.toFixed(4) + ')" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + DYN_ICONS[kind] + '</g>';
-      t += '<text x="50" y="' + (DYN.labelBase * 100).toFixed(1) + '" font-size="' + (DYN.labelFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-family="sans-serif">' + DYN_LABELS.today + '</text>';
+      t += '<text x="50" y="' + (DYN.labelBase * 100).toFixed(1) + '" font-size="' + (DYN.labelFsMax * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-family="sans-serif">' + DYN_LABELS.today + ', ' + WEEKDAYS_FULL[4] + '</text>';
       t += '<text x="50" y="' + (DYN.titleBase * 100).toFixed(1) + '" font-size="' + (DYN.titleFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700" font-family="\'Palatino Linotype\',Georgia,serif">' + esc(smp.title) + '</text>';
       t += '<text x="50" y="' + (DYN.timeBase * 100).toFixed(1) + '" font-size="' + (DYN.timeFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700" font-family="sans-serif">' + smp.time + '</text>';
       return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' + t + '</svg></div>';
@@ -676,7 +679,7 @@
       html += '<div class="wg-hint">Каждая невыполненная задача из календаря на сегодня — отдельная карточка. Если задачу не отметить, на карточке вместо «Сегодня» будет «Просрочено», и она остаётся в стопке, пока вы её не отметите. Нет галочки — карточек задач в стопке нет.</div>';
       if(w.tasks) html += cardsOf().colorPalette("wgtasks", "icfColors3");
       html += '<label class="wg-check"><input type="checkbox" id="wgEvents"' + (w.events ? ' checked' : '') + '>Показывать события календаря</label>';
-      html += '<div class="wg-hint">Одна карточка — следующее запланированное событие, с надписью «Сегодня» или «Завтра». Если ни сегодня, ни завтра событий нет, карточки в стопке нет. Нет галочки — карточки события в стопке нет.</div>';
+      html += '<div class="wg-hint">Одна карточка — следующее запланированное событие, с надписью «Сегодня, Четверг» или «Завтра, Суббота» (день недели — когда состоится событие). Если ни сегодня, ни завтра событий нет, карточки в стопке нет. Нет галочки — карточки события в стопке нет.</div>';
       if(w.events) html += cardsOf().colorPalette("wgevents", "icfColors4");
       html += '<label class="wg-check"><input type="checkbox" id="wgRpe"' + (w.rpeAsk ? ' checked' : '') + '>Спрашивать о тренировке</label>';
       html += '<div class="wg-hint">После тренировки, пока вы не оценили нагрузку, наверху стопки появляется карточка «Как тренировка?» с кнопками от 1 до 10. Нажатие на число сразу сохраняет оценку, и карточка исчезает. Если пролистнуть на другую карточку, через минуту она вернётся наверх; порядок остальных карточек не меняется. Нет галочки — карточки нет.</div>';
