@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.4 (13.11)
+// Версия: 2.0 (13.11)
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
@@ -9,7 +9,15 @@ import android.os.SystemClock
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 
-/** Поставщик карточек для StackView виджета «Стопка QR-карточек»: по одной картинке-лицу на карточку, нажатие несёт код QR и ключ (id) карточки. */
+/**
+ * Поставщик карточек для StackView виджета «Стопка QR-карточек»: по одной картинке-лицу на карточку, нажатие несёт код QR и ключ (id) карточки.
+ *
+ * ⚠️ Смахивание стопки фабрике не видно: система кэширует загруженные карточки (лимит кэша RemoteViews ≈ 2 МБ, а лицо — ≈ 1 МБ) и
+ * `getViewAt` зовёт только для новых позиций. Поэтому счётчик отдаётся в [VIRT] раз больше числа карточек (позиция % число): окно
+ * кэша сдвигается, и фабрику зовут при каждом смахивании (`QrWidgets.onPossibleSwipe` — точки справа и возврат наверх).
+ * Пока система подгружает карточку, стопка показывает заглушку (`getLoadingView`), а не пустое место: все картинки готовятся заранее,
+ * в `onDataSetChanged`, и `getViewAt` их только отдаёт.
+ */
 class QrWidgetService : RemoteViewsService() {
 
     override fun onGetViewFactory(intent: Intent): RemoteViewsFactory =
@@ -18,7 +26,7 @@ class QrWidgetService : RemoteViewsService() {
     private class Factory(private val ctx: Context, private val widgetId: Int) : RemoteViewsFactory {
 
         private var cards: List<QrWidgets.Card> = emptyList()
-        private val bitmaps = HashMap<String, Bitmap>()
+        private var bitmaps: Map<String, Bitmap> = emptyMap()
 
         // Первые обращения после загрузки данных — не смахивание: точки показываем только после этой паузы.
         @Volatile private var quietUntil = 0L
@@ -28,36 +36,56 @@ class QrWidgetService : RemoteViewsService() {
         }
 
         override fun onDataSetChanged() {
-            val cfg = QrWidgets.cfgFor(ctx, widgetId)
-            cards = if (cfg == null) emptyList() else QrWidgets.order(ctx, cfg).cards
-            bitmaps.clear()
+            try {
+                val cfg = QrWidgets.cfgFor(ctx, widgetId)
+                val list = if (cfg == null) emptyList() else QrWidgets.order(ctx, cfg).cards
+                val fresh = HashMap<String, Bitmap>()
+                for (c in list) fresh[c.key] = QrWidgets.bitmapFor(ctx, c)
+                cards = list
+                bitmaps = fresh
+            } catch (e: Throwable) {
+                // не хватило памяти или сбой данных — остаются прежние карточки
+            }
             quietUntil = SystemClock.uptimeMillis() + QUIET_MS
         }
 
         override fun onDestroy() {
-            bitmaps.clear()
+            bitmaps = emptyMap()
         }
 
-        override fun getCount(): Int = cards.size
+        override fun getCount(): Int = if (cards.size >= 2) cards.size * VIRT else cards.size
 
-        override fun getViewAt(position: Int): RemoteViews? {
-            val c = cards.getOrNull(position) ?: return null
+        override fun getViewAt(position: Int): RemoteViews {
             val rv = RemoteViews(ctx.packageName, R.layout.qr_widget_item)
-            val bmp = bitmaps.getOrPut(c.key) { QrWidgets.bitmapFor(ctx, c) }
+            val n = cards.size
+            if (n == 0) {
+                rv.setImageViewBitmap(R.id.qr_card_img, QrWidgets.skeletonBitmap())
+                return rv
+            }
+            val c = cards[((position % n) + n) % n]
+            val bmp = bitmaps[c.key] ?: QrWidgets.bitmapFor(ctx, c)
             rv.setImageViewBitmap(R.id.qr_card_img, bmp)
             // карточки заряда, задач и событий — не QR-карточки: нажатие на них ничего не делает (без fill-in intent шаблон не срабатывает)
             if (!QrBattery.isBatteryKey(c.key) && c.dyn.isEmpty()) rv.setOnClickFillInIntent(R.id.qr_card_img, Intent().putExtra("code", c.code).putExtra("key", c.key))
-            if (cards.size > 1 && SystemClock.uptimeMillis() > quietUntil) QrWidgets.onPossibleSwipe(ctx, widgetId, cards.size)
+            if (n > 1 && SystemClock.uptimeMillis() > quietUntil) QrWidgets.onPossibleSwipe(ctx, widgetId, n)
             return rv
         }
 
-        override fun getLoadingView(): RemoteViews? = null
+        override fun getLoadingView(): RemoteViews? {
+            val rv = RemoteViews(ctx.packageName, R.layout.qr_widget_item)
+            rv.setImageViewBitmap(R.id.qr_card_img, QrWidgets.skeletonBitmap())
+            return rv
+        }
+
         override fun getViewTypeCount(): Int = 1
-        override fun getItemId(position: Int): Long = (cards.getOrNull(position)?.key?.hashCode() ?: position).toLong()
-        override fun hasStableIds(): Boolean = true
+        override fun getItemId(position: Int): Long = position.toLong()
+        override fun hasStableIds(): Boolean = false
 
         companion object {
-            private const val QUIET_MS = 2500L
+            private const val QUIET_MS = 4000L
+
+            /** Во сколько раз счётчик больше числа карточек (при двух и больше): позиции «по кругу», карточка = позиция % число. */
+            private const val VIRT = 12
         }
     }
 }

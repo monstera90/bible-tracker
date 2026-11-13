@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.1 (12.11)
+// Версия: 2.2 (13.11)
 
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -39,6 +39,10 @@ class QrWidgetProvider : AppWidgetProvider() {
             QrWidgets.ACTION_ROTATE -> {
                 val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
                 if (id != AppWidgetManager.INVALID_APPWIDGET_ID) QrWidgets.rotate(context, id)
+            }
+            QrWidgets.ACTION_RETURN -> {
+                val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+                if (id != AppWidgetManager.INVALID_APPWIDGET_ID) QrWidgets.fireReturn(context, id)
             }
             QrWidgets.ACTION_TICK -> QrWidgets.refreshAll(context)
             QrWidgets.ACTION_BATTERY -> QrWidgets.onBatteryTick(context)

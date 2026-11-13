@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 5.0 (13.11)
+// Версия: 6.0 (13.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -26,6 +26,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.Calendar
+import java.util.Collections
 import java.util.UUID
 
 /**
@@ -54,7 +55,12 @@ import java.util.UUID
  * у события). Что показать, решает оболочка по часам ([dynShown], [dynBitmap]), поэтому надпись и состав меняются без приложения: задача видна, пока её время
  * сегодня или раньше (раньше начала суток — «Просрочено»); событие — одно, ближайшее из ещё не начавшихся на сегодня или завтра ([nextEventKey]); нет такого —
  * карточки нет. Будильник `ACTION_TICK` ставится на полночь и на начало ближайшего события ([nextDynChange]). Карточки стоят после QR-карточек и перед карточками заряда;
- * нажатие на них ничего не делает.
+ * нажатие на них ничего не делает. Среди этих карточек события всегда стоят перед задачами (событие важнее).
+ *
+ * Возврат наверх («по релевантности», [armReturn]/[fireReturn]): если пользователь смахнул стопку, а наверху лежит рекомендованная
+ * карточка (идёт занятие или сейчас «её» время суток — [Ordered.topKey]), то через минуту после последнего смахивания стопка снова
+ * показывает верхнюю карточку порядка [order]. Смахивание система оболочке не сообщает, его видно только по запросу фабрики
+ * ([QrWidgetService]: счётчик в `VIRT` раз больше числа карточек), см. [onPossibleSwipe].
  */
 object QrWidgets {
 
@@ -68,13 +74,17 @@ object QrWidgets {
     private const val K_BTWANT = "btwant"
     private const val K_BTASK = "btask"
     private const val K_BTASKAT = "btaskat"
+    private const val K_RETURN = "ret"
 
     const val ACTION_ROTATE = "com.app.lifetracker.QRW_ROTATE"
     const val ACTION_TICK = "com.app.lifetracker.QRW_TICK"
     const val ACTION_BATTERY = "com.app.lifetracker.QRW_BATTERY"
+    const val ACTION_RETURN = "com.app.lifetracker.QRW_RETURN"
 
     private const val PEND_TTL_MS = 3 * 60_000L
     private const val DOTS_SHOW_MS = 1400L
+    private const val RETURN_AFTER_MS = 60_000L
+    private const val SWIPE_QUIET_MS = 4_000L
     private const val BATTERY_EVERY_MS = 5 * 60_000L
     private const val BATTERY_AFTER_BT_MS = 6_000L
     private const val BT_ASK_EVERY_MS = 24 * 3_600_000L
@@ -96,6 +106,13 @@ object QrWidgets {
     private val main = Handler(Looper.getMainLooper())
     private val refreshToken = Any()
     private val hideTokens = HashMap<Int, Any>()
+    private val returnTokens = HashMap<Int, Any>()
+
+    /** Виджеты, у которых сейчас показаны точки справа (чтобы при серии смахиваний не слать лишних обновлений). */
+    private val dotsOn: MutableSet<Int> = Collections.synchronizedSet(HashSet<Int>())
+
+    /** До какого момента (uptime) запросы фабрики не считаются смахиванием: стопку только что переставили мы сами. */
+    private val swipeQuiet = HashMap<Int, Long>()
 
     class Live(val k: String, val id: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
@@ -167,6 +184,8 @@ object QrWidgets {
                 val eventsOn = o.optBoolean("events", false)
                 val ds = o.optJSONArray("dyn")
                 if (ds != null && (tasksOn || eventsOn)) {
+                    val evs = ArrayList<Card>()
+                    val tks = ArrayList<Card>()
                     var n = 0
                     for (j in 0 until ds.length()) {
                         val d = ds.optJSONObject(j) ?: continue
@@ -175,9 +194,12 @@ object QrWidgets {
                         val at = d.optLong("at", 0L)
                         if (!KEY_RE.matches(key) || at <= 0L) continue
                         if (!((kind == "task" && tasksOn) || (kind == "event" && eventsOn))) continue
-                        cards.add(Card(key, "", d.optString("title", ""), emptyList(), emptySet(), emptySet(), "none", QrBattery.DEFAULT_FACE, kind, at)) // после QR-карточек, перед карточками заряда
+                        val dc = Card(key, "", d.optString("title", ""), emptyList(), emptySet(), emptySet(), "none", QrBattery.DEFAULT_FACE, kind, at)
+                        if (kind == "event") evs.add(dc) else tks.add(dc)
                         if (++n >= MAX_DYN) break
                     }
+                    cards.addAll(evs) // после QR-карточек, перед карточками заряда; событие важнее задачи — стоит раньше
+                    cards.addAll(tks)
                 }
                 val battery = o.optBoolean("battery", false)
                 val batColor = parseColor(o.optString("batColor", ""))
@@ -230,6 +252,7 @@ object QrWidgets {
                 b.remove(id.toString())
                 t.remove(id.toString())
                 cancelRotate(ctx, id)
+                clearReturn(ctx, id)
             }
             prefs(ctx).edit().putString(K_BIND, b.toString()).putString(K_TOP, t.toString()).apply()
         }
@@ -550,6 +573,8 @@ object QrWidgets {
                 if (cfgId in touchedCfgs) {
                     val rv = RemoteViews(app.packageName, R.layout.qr_widget)
                     rv.setDisplayedChild(R.id.qr_stack, 0)
+                    suppressSwipe(id)
+                    clearReturn(app, id)
                     mgr.partiallyUpdateAppWidget(id, rv)
                 }
             }
@@ -619,6 +644,7 @@ object QrWidgets {
             val topOld = jmap(app, K_TOP).optString(id.toString(), "")
             if (resetTop || topNew != topOld) {
                 rv.setDisplayedChild(R.id.qr_stack, 0)
+                clearReturn(app, id)
                 synchronized(LOCK) {
                     val t = jmap(app, K_TOP)
                     t.put(id.toString(), topNew)
@@ -626,6 +652,8 @@ object QrWidgets {
                 }
             }
         }
+        suppressSwipe(id) // перерисовка и перезагрузка карточек — не смахивание
+        dotsOn.remove(id)
         mgr.updateAppWidget(id, rv)
         mgr.notifyAppWidgetViewDataChanged(id, R.id.qr_stack)
     }
@@ -755,6 +783,14 @@ object QrWidgets {
         return PendingIntent.getBroadcast(ctx, 4998, i, f)
     }
 
+    private fun returnPi(ctx: Context, id: Int, create: Boolean): PendingIntent? {
+        val i = Intent(ctx, QrWidgetProvider::class.java)
+        i.action = ACTION_RETURN
+        i.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+        val f = (if (create) PendingIntent.FLAG_UPDATE_CURRENT else PendingIntent.FLAG_NO_CREATE) or immutable()
+        return PendingIntent.getBroadcast(ctx, 100_000 + id, i, f)
+    }
+
     private fun cancelRotate(ctx: Context, id: Int) {
         rotatePi(ctx, id, false)?.let { am(ctx).cancel(it); it.cancel() }
     }
@@ -856,6 +892,8 @@ object QrWidgets {
         if (screenOn(pm)) {
             val rv = RemoteViews(app.packageName, R.layout.qr_widget)
             rv.showNext(R.id.qr_stack)
+            suppressSwipe(id)
+            dotsOn.add(id)
             putDots(app, rv, visibleCount(app, cfg))
             AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
             scheduleHide(app, id)
@@ -876,6 +914,7 @@ object QrWidgets {
         main.removeCallbacksAndMessages(token)
         main.postAtTime({
             try {
+                dotsOn.remove(id)
                 val rv = RemoteViews(app.packageName, R.layout.qr_widget)
                 rv.setViewVisibility(R.id.qr_dots, android.view.View.GONE)
                 AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
@@ -885,24 +924,131 @@ object QrWidgets {
         }, token, SystemClock.uptimeMillis() + DOTS_SHOW_MS)
     }
 
+    /** Стопку только что переставили мы (обновление, возврат наверх, «после срабатывания»): запросы фабрики в ближайшие секунды — не смахивание. */
+    private fun suppressSwipe(id: Int) {
+        synchronized(swipeQuiet) { swipeQuiet[id] = SystemClock.uptimeMillis() + SWIPE_QUIET_MS }
+    }
+
+    private fun swipeSuppressed(id: Int): Boolean = synchronized(swipeQuiet) { SystemClock.uptimeMillis() < (swipeQuiet[id] ?: 0L) }
+
     /**
      * Фабрика карточек просит очередную карточку уже после первой загрузки — значит, пользователь смахнул стопку: на мгновение
-     * показываем справа вертикальные точки (по числу карточек), потом они пропадают.
+     * показываем справа вертикальные точки (по числу карточек), потом они пропадают; у виджета «по релевантности» взводится
+     * возврат наверх через минуту ([armReturn]). Точки при серии смахиваний не обновляются заново, только продлевается показ.
      */
     fun onPossibleSwipe(ctx: Context, id: Int, n: Int) {
-        if (n < 2) return
+        if (n < 2 || swipeSuppressed(id)) return
         val app = ctx.applicationContext
         main.post {
             try {
-                val rv = RemoteViews(app.packageName, R.layout.qr_widget)
-                putDots(app, rv, n)
-                AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
+                if (dotsOn.add(id)) {
+                    val rv = RemoteViews(app.packageName, R.layout.qr_widget)
+                    putDots(app, rv, n)
+                    AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
+                }
                 scheduleHide(app, id)
+                armReturn(app, id)
             } catch (e: Exception) {
                 // виджет удалили
             }
         }
     }
+
+    // ---------- возврат наверх ----------
+
+    /** Взводит возврат стопки наверх через [RETURN_AFTER_MS] (каждое новое смахивание отодвигает его). Только «по релевантности» и только если есть рекомендованная карточка. */
+    private fun armReturn(app: Context, id: Int) {
+        val cfg = cfgFor(app, id) ?: return
+        if (!cfg.relevance) return
+        val ord = order(app, cfg)
+        if (ord.topKey.isEmpty() || ord.cards.size < 2) return
+        val due = System.currentTimeMillis() + RETURN_AFTER_MS
+        synchronized(LOCK) {
+            val m = jmap(app, K_RETURN)
+            m.put(id.toString(), due)
+            prefs(app).edit().putString(K_RETURN, m.toString()).apply()
+        }
+        // точно по времени — пока жив процесс; будильник — запасной (процесс могли выгрузить)
+        val token = synchronized(returnTokens) { returnTokens.getOrPut(id) { Any() } }
+        main.removeCallbacksAndMessages(token)
+        main.postAtTime({
+            try {
+                fireReturn(app, id)
+            } catch (e: Exception) {
+                // виджет удалили
+            }
+        }, token, SystemClock.uptimeMillis() + RETURN_AFTER_MS)
+        returnPi(app, id, true)?.let { setAlarm(app, due + 3_000L, it) }
+    }
+
+    /** Снимает ожидающий возврат (стопка и так переставлена наверх, или виджет удалён). */
+    private fun clearReturn(app: Context, id: Int) {
+        synchronized(LOCK) {
+            val m = jmap(app, K_RETURN)
+            if (m.has(id.toString())) {
+                m.remove(id.toString())
+                prefs(app).edit().putString(K_RETURN, m.toString()).apply()
+            }
+        }
+        val token = synchronized(returnTokens) { returnTokens[id] }
+        if (token != null) main.removeCallbacksAndMessages(token)
+        returnPi(app, id, false)?.let { am(app).cancel(it); it.cancel() }
+    }
+
+    /** Время возврата пришло (из обработчика или будильника `ACTION_RETURN`): если его не отодвинули новым смахиванием — стопка наверх. */
+    fun fireReturn(ctx: Context, id: Int) {
+        val app = ctx.applicationContext
+        val now = System.currentTimeMillis()
+        val due = synchronized(LOCK) {
+            val m = jmap(app, K_RETURN)
+            val d = m.optLong(id.toString(), 0L)
+            if (d > 0L && now >= d - 500L) {
+                m.remove(id.toString())
+                prefs(app).edit().putString(K_RETURN, m.toString()).apply()
+                d
+            } else 0L
+        }
+        if (due == 0L) return
+        returnToTop(app, id)
+    }
+
+    /** Показывает в стопке верхнюю карточку порядка [order] — рекомендованную или более важную, чем та, на которой остановился пользователь. */
+    private fun returnToTop(app: Context, id: Int) {
+        val cfg = cfgFor(app, id) ?: return
+        if (!cfg.relevance) return
+        val ord = order(app, cfg)
+        if (ord.topKey.isEmpty() || ord.cards.size < 2) return
+        suppressSwipe(id)
+        dotsOn.remove(id)
+        val rv = RemoteViews(app.packageName, R.layout.qr_widget)
+        rv.setDisplayedChild(R.id.qr_stack, 0)
+        rv.setViewVisibility(R.id.qr_dots, android.view.View.GONE)
+        AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
+        synchronized(LOCK) {
+            val t = jmap(app, K_TOP)
+            t.put(id.toString(), ord.topKey)
+            prefs(app).edit().putString(K_TOP, t.toString()).apply()
+        }
+    }
+
+    /** Полупрозрачный «скелет» карточки — показывается вместо пустого места, пока система подгружает карточку. */
+    private val skeleton: Bitmap by lazy {
+        val s = 160
+        val body = Math.round(s * FACE_BODY).toFloat()
+        val shift = Math.round(s * FACE_SHADE).toFloat()
+        val bmp = Bitmap.createBitmap(s, (body + shift).toInt(), Bitmap.Config.ARGB_8888)
+        val g = Canvas(bmp)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        val r = s * FACE_RADIUS
+        p.color = 0x4D000000
+        g.drawRoundRect(RectF(0f, shift, s.toFloat(), shift + body), r, r, p)
+        p.color = 0x73FFFFFF
+        g.drawRoundRect(RectF(0f, 0f, s.toFloat(), body), r, r, p)
+        bmp
+    }
+
+    /** Картинка-заглушка для карточки, которую система ещё не загрузила (и на случай пустой стопки). */
+    fun skeletonBitmap(): Bitmap = skeleton
 
     private fun dotsBitmap(ctx: Context, n: Int): Bitmap {
         val d = ctx.resources.displayMetrics.density
