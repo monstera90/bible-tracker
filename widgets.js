@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 4.1 (13.11)
+   Версия: 4.2 (13.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -717,7 +717,7 @@
       if(home && !home.getAttribute("aria-disabled")) home.addEventListener("click", function(){ if(top.s === "form") homeUi(); else backUi(); });
       if(top.s === "list"){
         $("wgAddBtn").addEventListener("click", function(){
-          var w = { id: "w" + Date.now().toString(36), n: data.n + 1, cards: [], rotate: false, rotateMin: 5, relevance: false };
+          var w = { id: "w" + Date.now().toString(36), n: data.n + 1, cards: [], rotate: false, rotateMin: 5, relevance: true }; // у нового виджета «Переключение по релевантности» включено по умолчанию
           go("form", { w: w, draft: true });
         });
         Array.prototype.forEach.call(root.querySelectorAll(".wg-row"), function(r){
