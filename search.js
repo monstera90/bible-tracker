@@ -1,6 +1,6 @@
 /* ===========================================================================
    search.js
-   Версия: 4.0 (31.10)
+   Версия: 4.1 (13.11)
    Версия: 2.5 (19.09) — в строке результата по задачам добавлена пиктограмма-часы
    «напоминание» (крайняя справа, правее кружка приоритета; ТЗ пользователя от
    19.09). Разметку даёт деп getReminderBtnHtml (taskReminderBtnHtml из my.js),
@@ -210,7 +210,6 @@ window.initSearchModule = function(deps){
         '</div>' +
       '</div>' +
       '<div class="mdeditor-fab-row">' +
-        '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="searchReadingBtn" title="Режим чтения"></button>' +
         '<button type="button" class="mdeditor-fab-btn" id="searchTasksBtn" title="Поиск по задачам">' + SEARCH_TASKS_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="searchNotesBtn" title="Поиск по заметкам">' + SEARCH_NOTES_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="searchPdfBtn" title="Поиск по PDF">' + SEARCH_PDF_ICON_SVG + '</button>' +
@@ -222,13 +221,6 @@ window.initSearchModule = function(deps){
     var notesBtn = document.getElementById("searchNotesBtn");
     var pdfBtn = document.getElementById("searchPdfBtn");
     var pdfSyncBtn = document.getElementById("searchPdfSyncBtn");
-    var readingBtn = document.getElementById("searchReadingBtn");
-    if(readingBtn){
-      // mousedown с preventDefault — чтобы нажатие не отнимало фокус у поля
-      // поиска (клавиатура не прыгает), как у той же кнопки в заметках/книгах.
-      readingBtn.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
-      readingBtn.addEventListener("click", function(){ toggleReadingMode(); });
-    }
     applyReadingModeVisual();
 
     function runActiveSearch(){

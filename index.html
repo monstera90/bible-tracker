@@ -273,28 +273,6 @@ window.addEventListener("error", function(e){
       <span class="task-info-wrap" id="taskInfoWrap">
         <button type="button" class="mdeditor-fab-btn" id="taskInfoBtn" title="Что означают кнопки задач"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"></circle><path d="M12 11v6"></path><circle cx="12" cy="7.7" r="1" fill="currentColor" stroke="none"></circle></svg></button>
       </span>
-      <!-- кнопка режима чтения (.task-reading-wrap/taskReadingBtn, ТЗ
-           пользователя от 18.09) — переключает глобальный режим чтения
-           (см. READING_MODE_KEY/applyReadingModeVisual в my.js): прячет
-           боковой/нижний ряды вкладок окна настроек, область содержимого
-           растягивается на освободившееся место — работает на ЛЮБОМ
-           экране приложения (заметки/книги/любая вкладка задач), не
-           только там, где есть эта кнопка. Стоит на right:248 — слот
-           между "i" (288) и "Ж" (208), тот же, что раньше делили "глаз"/
-           сортировка (переехали на 328, см. их комментарии выше). Видна
-           на любой вкладке задач (то же условие showTaskFab, что и у "i"
-           выше), КРОМЕ экрана "Все задачи проекта" — там этот слот занят
-           кнопкой-звеном этого экрана (.task-project-fab-link ниже по
-           файлу); явное скрытие — в openTaskNextPicker/my.js. Фон НЕ
-           закрашивается через общий .pressed — вместо этого переключается
-           сама иконка (открытая книга/перечёркнутая книга, тем же
-           приёмом, что и у "глаза" выше — innerHTML целиком, см.
-           applyReadingModeVisual/READING_BOOK_ICON_SVG/
-           READING_BOOK_OFF_ICON_SVG в my.js), поэтому здесь кнопка
-           изначально пустая. -->
-      <span class="task-reading-wrap" id="taskReadingWrap">
-        <button type="button" class="mdeditor-fab-btn" id="taskReadingBtn" title="Включить режим чтения"></button>
-      </span>
       <!-- кнопка сортировки Red по отметке (.task-red-sort-wrap/
            taskRedSortBtn, RED_SORT_BY_FLAG_KEY/getRedSortByFlag/
            setRedSortByFlag в my.js, ТЗ пользователя от 15.09). Делит слот

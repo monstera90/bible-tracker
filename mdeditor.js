@@ -1,6 +1,6 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 23.0 (10.11)
+   Версия: 24.0 (13.11)
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
@@ -188,9 +188,7 @@ window.initMdEditorModule = function(deps){
   // тот же fontSizeStepReading, что и у режима чтения.
   var getFullscreenModeActive = deps.getFullscreenModeActive || function(){ return false; };
   var bindTapOrHold = deps.bindTapOrHold || function(el, onTap){ if(el) el.addEventListener("click", onTap); };
-  var handleReadingBtnTap = deps.handleReadingBtnTap || toggleReadingMode;
-  var handleReadingBtnHold = deps.handleReadingBtnHold || function(){};
-  var handleFullscreenBtnTap = deps.handleFullscreenBtnTap || function(){};
+    var handleFullscreenBtnTap = deps.handleFullscreenBtnTap || function(){};
   // Кнопка «i» в нижнем ряду редактора заметки (ТЗ пользователя от 20.09) —
   // та же пиктограмма, что у «i» на вкладках задач (INFO_ICON_SVG в my.js).
   var INFO_ICON_SVG = deps.INFO_ICON_SVG || "i";
@@ -4515,11 +4513,9 @@ window.initMdEditorModule = function(deps){
       code("**") + ", " + code(">") + ", " + code("[[ ]]") + ". Удобно, когда нужно поправить сами символы. Иконка меняется на глаз " +
       "(" + '<span class="note-info-inline">' + EYE_ICON_SVG + '</span>' + "), пока показан код.");
     html += row(btnIcon("Аа"),
-      "Размер шрифта: ползунок (влево — мельче, вправо — крупнее) и кнопка переносов слов, размер один и тот же на всех вкладках приложения. В режиме чтения (кнопка ниже) размер запоминается отдельно от обычного.");
+      "Размер шрифта: ползунок (влево — мельче, вправо — крупнее) и кнопка переносов слов, размер один и тот же на всех вкладках приложения. В полноэкранном режиме (кнопка ниже) размер запоминается отдельно от обычного.");
     html += row(btnIcon("", "fullscreen-mode-btn"),
       "Полноэкранный режим: прячет строку состояния и ряды вкладок; повторное нажатие возвращает всё обратно.");
-    html += row(btnIcon("", "reading-mode-btn"),
-      "Режим чтения: прячет ряды вкладок и растягивает окно на весь экран; повторное нажатие возвращает всё обратно.");
     html += row(btnIcon(DOWNLOAD_ICON_SVG), "Скачивает эту заметку файлом .md.");
     html += row(btnIcon(HOME_ICON_SVG), "Возвращает к списку заметок.");
 
@@ -4567,9 +4563,7 @@ window.initMdEditorModule = function(deps){
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorImageBtn" title="Вставить картинку">' + PAPERCLIP_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorQrBtn" title="QR-код заметки">' + QR_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorModeBtn" title="Переключить режим кода">' + (codeMode ? EYE_ICON_SVG : CODE_ICON_SVG) + '</button>' +
-          // режим чтения — сразу слева от «домика» (ТЗ пользователя от 30.09: одно и то же место на всех экранах)
-          '<button type="button" class="mdeditor-fab-btn reading-mode-btn" id="mdEditorReadingBtn" title="Режим чтения"></button>' +
-          // полноэкранный режим — сразу слева от «домика» (режим чтения — следующая кнопка)
+          // полноэкранный режим — сразу слева от «домика»
           '<button type="button" class="mdeditor-fab-btn fullscreen-mode-btn" id="mdEditorFullscreenBtn" title="Полноэкранный режим"></button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn2" title="К списку заметок">' + HOME_ICON_SVG + '</button>' +
         '</div>' +
@@ -4729,20 +4723,6 @@ window.initMdEditorModule = function(deps){
       infoBtn.addEventListener("click", openNoteInfoScreen);
     }
 
-    // Кнопка режима чтения (ТЗ пользователя от 19.09) — тот же переключатель,
-    // что и на вкладках задач/в ридере книг (см. toggleReadingMode в my.js).
-    // mousedown с preventDefault — как у остальных кнопок ряда: не забирает
-    // фокус/выделение у CodeMirror. Иконку и title ставит
-    // applyReadingModeVisual (кнопка при рендере пустая).
-    var readingBtn = document.getElementById("mdEditorReadingBtn");
-    if(readingBtn){
-      readingBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
-      // ⚠️ ИЗМЕНЕНО (27.09, ТЗ пользователя): тап/удержание вместо обычного
-      // click — короткий клик по-прежнему toggleReadingMode
-      // (handleReadingBtnTap), удержание включает полноэкранный режим
-      // (handleReadingBtnHold), см. пояснение у deps выше.
-      bindTapOrHold(readingBtn, handleReadingBtnTap, handleReadingBtnHold);
-    }
     var fullscreenBtnE = document.getElementById("mdEditorFullscreenBtn");
     if(fullscreenBtnE){
       fullscreenBtnE.addEventListener("mousedown", function(e){ e.preventDefault(); });
