@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 6.1 (13.11)
+// Версия: 7.0 (13.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -57,8 +57,10 @@ import java.util.UUID
  * карточки нет. Будильник `ACTION_TICK` ставится на полночь и на начало ближайшего события ([nextDynChange]). Карточки стоят после QR-карточек и перед карточками заряда;
  * нажатие на них ничего не делает. Среди этих карточек события всегда стоят перед задачами (событие важнее).
  *
- * Возврат наверх («по релевантности», [armReturn]/[fireReturn]): если пользователь смахнул стопку, то через минуту после последнего смахивания стопка снова
- * показывает верхнюю карточку порядка [order]. Смахивание система оболочке не сообщает, его видно только по запросу фабрики
+ * Возврат наверх («по релевантности», [armReturn]/[fireReturn]): если пользователь смахнул стопку, а наверху лежит рекомендованная
+ * карточка (идёт занятие или сейчас «её» время суток — [Ordered.topKey]) либо карточка события/задачи календаря ([anchorKey]), то через минуту
+ * после последнего смахивания стопка снова показывает верхнюю карточку порядка [order]. Данные от страницы (`sync`), не менявшие настройки
+ * виджета (только состав задач и событий), положение стопки не трогают ([structSig]). Смахивание система оболочке не сообщает, его видно только по запросу фабрики
  * ([QrWidgetService]: счётчик в `VIRT` раз больше числа карточек), см. [onPossibleSwipe].
  */
 object QrWidgets {
@@ -338,7 +340,9 @@ object QrWidgets {
             root.remove("images")
             var wantBattery = false
             root.optJSONArray("widgets")?.let { ws -> for (i in 0 until ws.length()) if (ws.optJSONObject(i)?.let { it.optBoolean("battery", false) || it.optBoolean("batteryMulti", false) } == true) wantBattery = true }
+            var structChanged = true
             synchronized(LOCK) {
+                structChanged = structSig(prefs(app).getString(K_CFG, null)) != structSig(root.toString())
                 val e = prefs(app).edit().putString(K_CFG, root.toString())
                 // галочку только что включили — страница попросит у пользователя доступ к Bluetooth (для заряда наушников);
                 // не дали (или не успели) — просим снова не чаще раза в сутки, пока галочка включена
@@ -348,10 +352,23 @@ object QrWidgets {
                 if (first || again) e.putBoolean(K_BTASK, true).putLong(K_BTASKAT, now)
                 e.putBoolean(K_BTWANT, wantBattery).apply()
             }
-            refreshAll(app, true, true)
+            // положение стопки сбрасываем, только если поменялись настройки виджета; новые задачи/события и перерисовка лиц стопку не двигают
+            refreshAll(app, structChanged, true)
             true
         } catch (e: Exception) {
             false
+        }
+    }
+
+    /** Подпись настроек виджетов без списков `dyn` (состав задач и событий меняется сам и положения стопки не касается). */
+    private fun structSig(text: String?): String {
+        if (text.isNullOrEmpty()) return ""
+        return try {
+            val root = JSONObject(text)
+            root.optJSONArray("widgets")?.let { ws -> for (i in 0 until ws.length()) ws.optJSONObject(i)?.remove("dyn") }
+            root.toString()
+        } catch (e: Exception) {
+            text
         }
     }
 
@@ -606,6 +623,16 @@ object QrWidgets {
         return Ordered(sorted.map { it.first } + tail, if (top.second > 0) top.first.key else "")
     }
 
+    /**
+     * Ключ карточки, на которую стопка возвращается и от смены которой встаёт наверх: рекомендованная по релевантности ([Ordered.topKey]),
+     * а если такой нет — верхняя карточка события или задачи календаря (событие всегда выше задач). Пусто — «своего места» у стопки нет.
+     */
+    private fun anchorKey(ord: Ordered): String {
+        if (ord.topKey.isNotEmpty()) return ord.topKey
+        val first = ord.cards.firstOrNull() ?: return ""
+        return if (first.dyn.isNotEmpty()) first.key else ""
+    }
+
     // ---------- обновление ----------
 
     fun update(ctx: Context, mgr: AppWidgetManager, id: Int, resetTop: Boolean = false) {
@@ -639,7 +666,7 @@ object QrWidgets {
         rv.setPendingIntentTemplate(R.id.qr_stack, PendingIntent.getActivity(app, id, tpl, flags))
 
         if (cfg != null && cfg.relevance) {
-            val topNew = order(app, cfg).topKey
+            val topNew = anchorKey(order(app, cfg))
             val topOld = jmap(app, K_TOP).optString(id.toString(), "")
             if (resetTop || topNew != topOld) {
                 rv.setDisplayedChild(R.id.qr_stack, 0)
@@ -955,12 +982,12 @@ object QrWidgets {
 
     // ---------- возврат наверх ----------
 
-    /** Взводит возврат стопки наверх через [RETURN_AFTER_MS] (каждое новое смахивание отодвигает его). Только «по релевантности». */
+    /** Взводит возврат стопки наверх через [RETURN_AFTER_MS] (каждое новое смахивание отодвигает его). Только «по релевантности» и только если есть рекомендованная карточка. */
     private fun armReturn(app: Context, id: Int) {
         val cfg = cfgFor(app, id) ?: return
         if (!cfg.relevance) return
         val ord = order(app, cfg)
-        if (ord.cards.size < 2) return // наверху — первая карточка порядка [order], даже если ни одна не «рекомендована» (задачи и события календаря)
+        if (anchorKey(ord).isEmpty() || ord.cards.size < 2) return
         val due = System.currentTimeMillis() + RETURN_AFTER_MS
         synchronized(LOCK) {
             val m = jmap(app, K_RETURN)
@@ -1016,7 +1043,8 @@ object QrWidgets {
         val cfg = cfgFor(app, id) ?: return
         if (!cfg.relevance) return
         val ord = order(app, cfg)
-        if (ord.cards.size < 2) return // наверху — первая карточка порядка [order], даже если ни одна не «рекомендована» (задачи и события календаря)
+        val anchor = anchorKey(ord)
+        if (anchor.isEmpty() || ord.cards.size < 2) return
         suppressSwipe(id)
         dotsOn.remove(id)
         val rv = RemoteViews(app.packageName, R.layout.qr_widget)
@@ -1025,7 +1053,7 @@ object QrWidgets {
         AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
         synchronized(LOCK) {
             val t = jmap(app, K_TOP)
-            t.put(id.toString(), ord.topKey)
+            t.put(id.toString(), anchor)
             prefs(app).edit().putString(K_TOP, t.toString()).apply()
         }
     }
