@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 147.3 (13.11)
+   Версия: 148.0 (13.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -1529,6 +1529,7 @@
   // IndexedDB).
   function writeStateToLocalStorage(label){
     personalShadowTouch();
+    widgetsFeedTouch();
     var split = splitStateForLocalStorage(state);
     try{
       var mainJson = JSON.stringify(split.main);
@@ -4608,6 +4609,7 @@
     try{ ensureItemCards().onAppResume(); }catch(e){} // карточки, сработавшие из виджета рабочего стола
     try{ if(window.UserTabsMod && window.UserTabsMod.syncSoon) window.UserTabsMod.syncSoon(true); }catch(e){} // вкладки «Интернет» с других устройств
     try{ ensurePomodoroStore(); if(window.PomodoroTab) window.PomodoroTab.sync(); }catch(e){} // помодоро: состояние и «вкладка на экране» заново, законченные отрезки — в календарь и «Историю»
+    widgetsFeedTouch(); // карточки «задачи» и «события календаря» в виджетах: время ушло вперёд
   };
   // APK: кнопка «развернуть» плавающего видео (FloatingVideo.kt) — открыть вкладку-сайт `utab_<id>`; сама вкладка, показавшись, забирает видео обратно.
   // APK: нажатие на раскрытую карточку острова (InAppIsland) — открыть вкладку занятия: «Помодоро», «Музыка», «Тренировки» или вкладку-сайт с видео.
@@ -10343,11 +10345,22 @@
       WidgetsMod = window.initWidgetsModule({
         escapeHtml: escapeHtml,
         READER_HOME_ICON_SVG: READER_HOME_ICON_SVG,
-        getItemCards: ensureItemCards
+        getItemCards: ensureItemCards,
+        // задачи и события календаря для карточек стопки (галочки «Показывать задачи» / «Показывать события календаря»)
+        getCalendarFeed: function(from, to){
+          try{
+            ensureCalendarStore();
+            return (window.CalendarTab && window.CalendarTab.widgetFeed) ? window.CalendarTab.widgetFeed(from, to) : [];
+          }catch(e){ return []; }
+        }
       });
       window.WidgetsTab = WidgetsMod;
     }
     return WidgetsMod;
+  }
+  // состояние (задачи, календарь) изменилось или приложение вернулось на экран: виджеты с карточками «задачи»/«события» перепроверят данные
+  function widgetsFeedTouch(){
+    try{ if(WidgetsMod && WidgetsMod.feedChanged) WidgetsMod.feedChanged(); }catch(e){}
   }
   function renderSettingsTabWidgets(){
     var container = document.getElementById("settingsTabContent");

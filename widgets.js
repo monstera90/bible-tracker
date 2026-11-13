@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 3.2 (13.11)
+   Версия: 4.0 (13.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -9,7 +9,8 @@
    Галочка «Отображать заряд аккумулятора» (`battery`): в стопку добавляется служебная карточка с зарядом телефона и Bluetooth-наушников — её рисует оболочка (QrBattery.kt), страница шлёт только флаг.
    Цвет карточки «Заряд» (`batColor`: "" — по умолчанию, сиреневый, иначе "#rrggbb") выбирается палитрой под галочкой — той же, что в форме карточки QR-кодов (itemcards.js `colorPalette`, запомненный цвет — `defaultColor/rememberColor`); карточка заряда показана в форме после десятого слота (`batFaceHtml`), статус наушников из оболочки — `batStatusText`.
    Галочка «Отображать заряд аккумулятора (несколько устройств)» (`batteryMulti`, цвет `bat2Color`, палитра `icfColors2`): ещё одна служебная карточка — только значки и кольца заряда, без надписей: телефон и до трёх подключённых Bluetooth-устройств (QrBattery.renderMulti); в форме её лицо — `bat2FaceHtml`, значки — `iconSvg`, список парных устройств из оболочки — `batDevicesText`.
-   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color}]}), только на устройстве.
+   Галочки «Показывать задачи» (`tasks`, цвет `tasksColor`, палитра `icfColors3`) и «Показывать события календаря» (`events`, цвет `eventsColor`, палитра `icfColors4`): в стопку добавляются динамические карточки по данным календаря (`CalendarTab.widgetFeed` через `deps.getCalendarFeed`, `buildFeed`). Задачи: каждая открытая задача календаря на сегодня или просроченная — отдельная карточка (до `MAX_TASKS`); событие: ближайшее запланированное на сегодня или завтра (в оболочку уходят `MAX_EVENTS` кандидатов, показывает первое будущее — решает QrWidgets.kt по текущему времени). Лицо — `drawDynFace` (размеры сняты с макета, доли ширины карточки — `DYN`), у каждой карточки две картинки: `<ключ>` («Сегодня») и `<ключ>_b` («Просрочено» у задачи, «Завтра» у события), какую показать — выбирает оболочка (так надпись меняется в полночь без приложения). Данные меняются → `feedChanged` (из my.js: запись состояния и возврат в приложение) сверяет `feedSig` и при отличии шлёт `syncNow`. Палитра общая с карточками QR-кодов (`itemcards.colorPalette`), цвет по умолчанию — как на макете (`TASK_COLOR`/`EVENT_COLOR`), последний выбранный — `widgetsDynColors_v1`.
+   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor}]}), только на устройстве.
    Страница рисует лица карточек в PNG (canvas, `pngFor`) и шлёт их оболочке вместе с настройками (мост ≥31 `widgetsSync`).
    Точка входа: window.initWidgetsModule(deps) → window.WidgetsTab.{render, scheduleSync}.
    =========================================================================== */
@@ -22,6 +23,22 @@
   var FACE_BODY = 1.02; // высота тела карточки = ширина × FACE_BODY (то же — CARD_ASPECT в itemcards.js и FACE_BODY/FACE_SHADE в QrWidgets.kt)
   var FACE_SHADE = 0.04; // цветной выступ снизу, доля ширины
   var LEGACY_BAT_COLOR = "#2175d9"; // цвет карточки заряда у виджетов, сохранённых до выбора цвета: остаются синими
+  var TASK_COLOR = "#1e88e5"; // цвет карточек задач по умолчанию (синий макета; квадрат палитры QR-кодов)
+  var EVENT_COLOR = "#317bf6"; // цвет карточки события по умолчанию (синий макета, чуть насыщеннее)
+  var DYN_LAST_KEY = "widgetsDynColors_v1"; // последний выбранный цвет карточек задач/событий: {task, event}
+  var MAX_TASKS = 12; // карточек задач в виджете (ближайшие по времени, просроченные первыми)
+  var MAX_EVENTS = 4; // кандидатов в «следующее событие»: оболочка показывает первое, которое ещё не началось
+  var FEED_DAYS = 3; // сегодня, завтра, послезавтра: оболочка сама решает по часам, что показать, пока приложение закрыто
+  var DAY_MS = 86400000;
+  // Лицо динамической карточки (доли ширины карточки; сняты с макета 660 px): значок Tabler — «circle-check» / «calendar-event» (сетка 24, линия 2),
+  // надпись «Сегодня»…, название (serif, жирное), время (крупно). Базовые линии букв, верх значка — от верха карточки.
+  var DYN = { unit: 0.00955, iconTop: 0.138, labelBase: 0.448, titleBase: 0.577, timeBase: 0.858, labelFs: 0.064, titleFs: 0.097, timeFs: 0.27 };
+  var DYN_ICONS = {
+    task: '<circle cx="12" cy="12" r="9"/><path d="M9 12l2 2l4 -4"/>',
+    event: '<path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/><path d="M8 15h2v2h-2z"/>'
+  };
+  var DYN_LABELS = { task: ["Сегодня", "Просрочено"], event: ["Сегодня", "Завтра"] }; // [картинка `<ключ>`, картинка `<ключ>_b`]
+  var DYN_SAMPLE = { task: { title: "Купить молоко", time: "18:00" }, event: { title: "Приём у врача", time: "15:30" } };
   // интервалы времени суток — те же значения в QrWidgets.kt (WINDOWS)
   var WINDOWS = [
     { k: "m", label: "Утро", hint: "5–11" },
@@ -44,6 +61,8 @@
     var stack = [{ s: "list" }];
     var armed = null;
     var syncTimer = null;
+    var feedTimer = null;
+    var lastFeedSig = "";
     var pngCache = {};
     var styleDone = false;
 
@@ -62,9 +81,13 @@
         else if(w.batColor && !/^#[0-9a-fA-F]{6}$/.test(w.batColor)) w.batColor = "";
         w.batteryMulti = !!w.batteryMulti;
         if(typeof w.bat2Color !== "string" || (w.bat2Color && !/^#[0-9a-fA-F]{6}$/.test(w.bat2Color))) w.bat2Color = "";
+        w.tasks = !!w.tasks; w.events = !!w.events;
+        w.tasksColor = normHex(w.tasksColor); w.eventsColor = normHex(w.eventsColor);
       });
       return o;
     }
+    function normHex(v){ return (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)) ? v.toLowerCase() : ""; }
+    function hasContent(w){ return !!(w.cards.length || w.battery || w.batteryMulti || w.tasks || w.events); }
     function normAfter(v){ return (v === "hide" || v === "end") ? v : "none"; }
     function save(){ try{ localStorage.setItem(KEY, JSON.stringify(data)); }catch(e){} }
     function changed(){ save(); scheduleSync(600); }
@@ -78,6 +101,21 @@
     function cardsOf(){ return deps.getItemCards(); }
     function batHex(w){ return cardsOf().paletteColor(w.batColor); } // цвет, которым рисуется карточка заряда (пусто — сиреневый)
     function bat2Hex(w){ return cardsOf().paletteColor(w.bat2Color); } // то же для карточки заряда нескольких устройств
+    function dynHex(w, kind){ return cardsOf().paletteColor(kind === "task" ? w.tasksColor : w.eventsColor); } // цвет карточек задач / события (пусто — сиреневый)
+    // цвет для только что включённой галочки: последний выбранный (в том числе сиреневый), иначе синий макета
+    function dynColorFor(kind){
+      var o = null;
+      try{ o = JSON.parse(localStorage.getItem(DYN_LAST_KEY) || "null"); }catch(e){}
+      if(o && typeof o === "object" && typeof o[kind] === "string") return normHex(o[kind]);
+      return kind === "task" ? TASK_COLOR : EVENT_COLOR;
+    }
+    function rememberDynColor(kind, hex){
+      var o = null;
+      try{ o = JSON.parse(localStorage.getItem(DYN_LAST_KEY) || "null"); }catch(e){}
+      if(!o || typeof o !== "object") o = {};
+      o[kind] = normHex(hex);
+      try{ localStorage.setItem(DYN_LAST_KEY, JSON.stringify(o)); }catch(e){}
+    }
 
     // ---------- лицо карточки → PNG для оболочки ----------
     function rrect(g, x, y, w, h, r){
@@ -167,6 +205,117 @@
       });
     }
 
+    // ---------- карточки «Задачи» и «События календаря» ----------
+    function dynIconSvg(kind){
+      return '<svg xmlns="http://www.w3.org/2000/svg" width="288" height="288" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + DYN_ICONS[kind] + '</svg>';
+    }
+    // название: одна строка (шрифт ужимается до 0,078 ширины), иначе две (до 0,062), иначе вторая строка обрезается «…»
+    function fitTitle(g, text, S, maxW, fam){
+      text = String(text || "").replace(/\s+/g, " ").replace(/^ | $/g, "") || "Без названия";
+      function setF(f){ g.font = "700 " + f + "px " + fam; }
+      var fs;
+      for(fs = S * DYN.titleFs; fs >= S * 0.078; fs *= 0.96){ setF(fs); if(g.measureText(text).width <= maxW) return { lines: [text], fs: fs }; }
+      for(fs = S * 0.084; fs >= S * 0.062; fs *= 0.95){
+        setF(fs);
+        var lines = wrapLines(g, text, maxW), ok = lines.length <= 2;
+        if(ok) lines.forEach(function(l){ if(g.measureText(l).width > maxW) ok = false; });
+        if(ok) return { lines: lines, fs: fs };
+      }
+      fs = S * 0.062; setF(fs);
+      var ls = wrapLines(g, text, maxW);
+      if(ls.length > 2){
+        ls = ls.slice(0, 2);
+        var last = ls[1];
+        while(last.length > 1 && g.measureText(last + "…").width > maxW) last = last.slice(0, -1);
+        ls[1] = last + "…";
+      }
+      return { lines: ls, fs: fs };
+    }
+    // face: {color, shade, kind, label, title, time}
+    function drawDynFace(face, icon){
+      var S = FACE_PX, bodyH = Math.round(S * FACE_BODY), shift = Math.round(S * FACE_SHADE), cv = document.createElement("canvas");
+      cv.width = S; cv.height = bodyH + shift;
+      var g = cv.getContext("2d"), r = S * 0.12;
+      rrect(g, 0, shift, S, bodyH, r); g.fillStyle = face.shade; g.fill();   // цветной выступ снизу
+      rrect(g, 0, 0, S, bodyH, r); g.fillStyle = face.color; g.fill();
+      var maxW = S * 0.86, serif = '"Palatino Linotype",Georgia,serif', sans = "sans-serif";
+      var fit = fitTitle(g, face.title, S, maxW, serif), lh = fit.fs * 1.2, up = (fit.lines.length - 1) * lh / 2; // две строки названия раздвигают макет вверх и вниз поровну
+      g.textAlign = "center"; g.textBaseline = "alphabetic"; g.fillStyle = "#ffffff";
+      if(icon){ var u = S * DYN.unit; g.drawImage(icon, (S - 24 * u) / 2, S * DYN.iconTop - 2 * u - up, 24 * u, 24 * u); }
+      g.font = "400 " + (S * DYN.labelFs) + "px " + sans;
+      g.fillText(face.label, S / 2, S * DYN.labelBase - up, maxW);
+      g.font = "700 " + fit.fs + "px " + serif;
+      fit.lines.forEach(function(ln, i){ g.fillText(ln, S / 2, S * DYN.titleBase + (i - (fit.lines.length - 1) / 2) * lh, maxW); });
+      g.font = "700 " + (S * DYN.timeFs) + "px " + sans;
+      g.fillText(face.time, S / 2, S * DYN.timeBase + up, maxW);
+      return cv;
+    }
+    function dynPng(face){
+      var sig = JSON.stringify([face.color, face.kind, face.label, face.title, face.time]);
+      var hit = pngCache[face.id];
+      if(hit && hit.sig === sig) return Promise.resolve(hit.url);
+      return svgImage(dynIconSvg(face.kind)).then(function(icon){
+        var url = "";
+        try{ url = drawDynFace(face, icon).toDataURL("image/png"); }
+        catch(e){ try{ url = drawDynFace(face, null).toDataURL("image/png"); }catch(e2){ url = ""; } }
+        if(url) pngCache[face.id] = { sig: sig, url: url };
+        return url;
+      });
+    }
+    function startOfDay(ts){ var d = new Date(ts); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); }
+    function addDays(ts, n){ var d = new Date(ts); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n).getTime(); } // календарные дни (переход на летнее время не сдвигает полночь)
+    function hhmm(ts){ var d = new Date(ts), h = d.getHours(), m = d.getMinutes(); return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m; }
+    function usesDyn(){ for(var i = 0; i < data.list.length; i++) if(data.list[i].tasks || data.list[i].events) return true; return false; }
+    // что нужно карточкам: {tasks:[{at,title}], events:[{at,title}]}; задачи — открытые на сегодня и просроченные, события — ещё не начавшиеся
+    function buildFeed(){
+      var now = Date.now(), list = [], feed = { tasks: [], events: [] };
+      try{ list = (deps.getCalendarFeed && deps.getCalendarFeed(now, addDays(startOfDay(now), FEED_DAYS))) || []; }catch(e){ list = []; }
+      list.forEach(function(it){
+        var o = { at: it.at, title: it.title };
+        if(it.k === "task"){ if(feed.tasks.length < MAX_TASKS) feed.tasks.push(o); }
+        else if(it.at >= now && feed.events.length < MAX_EVENTS) feed.events.push(o);
+      });
+      return feed;
+    }
+    function feedSig(feed){
+      function f(a){ return a.map(function(x){ return [x.at, x.title]; }); }
+      return JSON.stringify([f(feed.tasks), f(feed.events)]);
+    }
+    // Карточки виджетов и картинки к ним. Ключи — `dt_<id виджета>_<n>` (задача) и `de_<id виджета>_<n>` (событие); картинка `<ключ>` — «Сегодня»,
+    // `<ключ>_b` — «Просрочено» / «Завтра». Нужна только та, что может понадобиться: просроченной задаче — вторая, событию сегодня — первая.
+    function dynItems(feed){
+      var today = startOfDay(Date.now()), jobs = [], per = {};
+      data.list.forEach(function(w){
+        var items = [];
+        function add(kind, list, prefix){
+          var hex = dynHex(w, kind), shade = cardsOf().cardShade(hex), labels = DYN_LABELS[kind];
+          list.forEach(function(it, i){
+            var key = prefix + w.id + "_" + i, dayAt = startOfDay(it.at);
+            var needA = kind === "task" ? dayAt >= today : true, needB = kind === "task" ? true : dayAt > today;
+            function face(id, label){ return { id: "dyn:" + id, color: hex, shade: shade, kind: kind, label: label, title: it.title, time: hhmm(it.at) }; }
+            if(needA) jobs.push({ key: key, face: face(key, labels[0]) });
+            if(needB) jobs.push({ key: key + "_b", face: face(key + "_b", labels[1]) });
+            items.push({ key: key, k: kind, at: it.at, title: it.title });
+          });
+        }
+        if(w.tasks) add("task", feed.tasks, "dt_");
+        if(w.events) add("event", feed.events, "de_");
+        per[w.id] = items;
+      });
+      return { perWidget: per, jobs: jobs };
+    }
+    // данные календаря или время изменились: если для карточек «задачи»/«события» это что-то меняет — отправить виджеты заново
+    function feedChanged(){
+      if(feedTimer || !bridge() || !usesDyn()) return;
+      feedTimer = setTimeout(function(){
+        feedTimer = null;
+        if(!usesDyn()) return;
+        var sig = "";
+        try{ sig = feedSig(buildFeed()); }catch(e){ return; }
+        if(sig !== lastFeedSig) scheduleSync(300);
+      }, 4000);
+    }
+
     // ---------- отправка оболочке ----------
     function scheduleSync(ms){
       if(!bridge()) return;
@@ -181,12 +330,17 @@
       data.list.forEach(function(w){ w.cards.forEach(function(c){ ids[c.cid] = 1; }); });
       Object.keys(ids).forEach(function(id){ var f = ic.widgetFace(id); if(f) faces[id] = f; });
       var keys = Object.keys(faces);
-      return Promise.all(keys.map(function(k){ return pngFor(faces[k]); })).then(function(urls){
+      var feed = usesDyn() ? buildFeed() : null;
+      var dyn = feed ? dynItems(feed) : { perWidget: {}, jobs: [] };
+      var all = keys.map(function(k){ return pngFor(faces[k]); }).concat(dyn.jobs.map(function(j){ return dynPng(j.face); }));
+      return Promise.all(all).then(function(urls){
         var images = {};
         keys.forEach(function(k, i){ if(urls[i]) images[k] = urls[i]; });
+        dyn.jobs.forEach(function(j, i){ if(urls[keys.length + i]) images[j.key] = urls[keys.length + i]; });
         var widgets = data.list.map(function(w){
           return {
             id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance, battery: !!w.battery, batColor: w.battery ? batHex(w) : "", batteryMulti: !!w.batteryMulti, bat2Color: w.batteryMulti ? bat2Hex(w) : "",
+            tasks: !!w.tasks, events: !!w.events, dyn: dyn.perWidget[w.id] || [],
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
               return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after) };
@@ -194,7 +348,10 @@
           };
         });
         if(data.list.length && !data.ever){ data.ever = true; save(); }
-        try{ return !!b.widgetsSync(JSON.stringify({ v: 1, widgets: widgets, images: images })); }catch(e){ return false; }
+        var ok = false;
+        try{ ok = !!b.widgetsSync(JSON.stringify({ v: 1, widgets: widgets, images: images })); }catch(e){ ok = false; }
+        if(ok && feed) lastFeedSig = feedSig(feed);
+        return ok;
       });
     }
 
@@ -231,7 +388,7 @@
       render();
     }
     function leaveScreen(top){
-      if(top && top.s === "form" && top.a && top.a.draft && !top.a.w.cards.length && !top.a.w.battery && !top.a.w.batteryMulti) top.a.draft = false; // пустой новый виджет не сохраняется
+      if(top && top.s === "form" && top.a && top.a.draft && !hasContent(top.a.w)) top.a.draft = false; // пустой новый виджет не сохраняется
     }
     function cur(){ return stack[stack.length - 1]; }
 
@@ -376,14 +533,27 @@
       return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' +
         ringSvg(26.8, 31, 78, "phone") + ringSvg(73.2, 31, 64, "headphones") + ringSvg(26.8, 74, 52, "watch") + ringSvg(73.2, 74, 90, "speaker") + '</svg></div>';
     }
+    // Карточка задачи / события в форме: образец лица (в виджете — настоящие задачи и событие; числа — доли ширины карточки ×100, см. DYN)
+    function dynFaceHtml(kind, hex){
+      var shade = cardsOf().cardShade(hex), smp = DYN_SAMPLE[kind], u = DYN.unit * 100;
+      var t = '<g transform="translate(' + (50 - 12 * u).toFixed(2) + ' ' + (DYN.iconTop * 100 - 2 * u).toFixed(2) + ') scale(' + u.toFixed(4) + ')" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + DYN_ICONS[kind] + '</g>';
+      t += '<text x="50" y="' + (DYN.labelBase * 100).toFixed(1) + '" font-size="' + (DYN.labelFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-family="sans-serif">' + DYN_LABELS[kind][0] + '</text>';
+      t += '<text x="50" y="' + (DYN.titleBase * 100).toFixed(1) + '" font-size="' + (DYN.titleFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700" font-family="\'Palatino Linotype\',Georgia,serif">' + esc(smp.title) + '</text>';
+      t += '<text x="50" y="' + (DYN.timeBase * 100).toFixed(1) + '" font-size="' + (DYN.timeFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700" font-family="sans-serif">' + smp.time + '</text>';
+      return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' + t + '</svg></div>';
+    }
+    function tasksFaceHtml(w){ return dynFaceHtml("task", dynHex(w, "task")); }
+    function eventsFaceHtml(w){ return dynFaceHtml("event", dynHex(w, "event")); }
     // Строка списка виджетов: что в стопке, кроме карточек QR-кодов
     function contentText(w){
       var extra = [];
       if(w.battery) extra.push("заряд");
       if(w.batteryMulti) extra.push("заряд устройств");
+      if(w.tasks) extra.push("задачи");
+      if(w.events) extra.push("события");
       if(w.cards.length) return cardWord(w.cards.length) + (extra.length ? " + " + extra.join(" + ") : "");
       if(!extra.length) return cardWord(0);
-      return (w.battery && !w.batteryMulti) ? "заряд аккумулятора" : extra.join(" + ");
+      return (w.battery && extra.length === 1) ? "заряд аккумулятора" : extra.join(" + ");
     }
     var ICON_NAMES = { phone: "телефон", headphones: "наушники", earbuds: "наушники-вкладыши", watch: "часы", speaker: "колонка", keyboard: "клавиатура", laptop: "ноутбук", tablet: "планшет", shutter: "кнопка съёмки", generic: "значок Bluetooth" };
     // Парные Bluetooth-устройства телефона (из оболочки, поле bt.devices): имена и значок, который им достанется
@@ -427,7 +597,7 @@
       data.list.forEach(function(w){
         var f = w.cards.length ? cardsOf().widgetFace(w.cards[0].cid) : null;
         html += '<div class="wg-row" data-id="' + esc(w.id) + '">' +
-          '<div class="wg-row-ico" style="background:' + (f ? f.color : (w.battery ? batHex(w) : (w.batteryMulti ? bat2Hex(w) : "var(--gold)"))) + ';"></div>' +
+          '<div class="wg-row-ico" style="background:' + (f ? f.color : (w.battery ? batHex(w) : (w.batteryMulti ? bat2Hex(w) : (w.tasks ? dynHex(w, "task") : (w.events ? dynHex(w, "event") : "var(--gold)"))))) + ';"></div>' +
           '<div class="wg-row-txt"><div class="wg-row-name">' + esc(wname(w)) + '</div>' +
           '<div class="wg-row-sub">' + contentText(w) + ' · ' + modeText(w) + (placed[w.id] ? ' · на рабочем столе' : '') + '</div></div></div>';
       });
@@ -451,6 +621,8 @@
       }
       if(w.battery) html += '<div class="wg-slot" data-bat="1" id="wgBatSlot">' + batFaceHtml(w) + '</div>'; // карточка заряда — последняя в стопке, место рядом с десятым слотом
       if(w.batteryMulti) html += '<div class="wg-slot" data-bat="1" id="wgBat2Slot">' + bat2FaceHtml(w) + '</div>'; // карточка заряда нескольких устройств — после карточки заряда
+      if(w.tasks) html += '<div class="wg-slot" data-bat="1" id="wgTasksSlot">' + tasksFaceHtml(w) + '</div>'; // образец карточки задачи (в виджете их столько, сколько задач)
+      if(w.events) html += '<div class="wg-slot" data-bat="1" id="wgEventsSlot">' + eventsFaceHtml(w) + '</div>'; // образец карточки события
       html += '</div>';
       html += '<label class="wg-check"><input type="checkbox" id="wgRotate"' + (w.rotate ? ' checked' : '') + '>Переключать виджеты по кругу</label>';
       if(w.rotate) html += '<div class="wg-min">каждые<input type="number" id="wgRotMin" min="1" max="720" value="' + w.rotateMin + '">мин</div>';
@@ -470,6 +642,12 @@
         var dst = batDevicesText();
         if(dst) html += '<div class="wg-bat-status" id="wgBat2Status">' + esc(dst) + '</div>';
       }
+      html += '<label class="wg-check"><input type="checkbox" id="wgTasks"' + (w.tasks ? ' checked' : '') + '>Показывать задачи</label>';
+      html += '<div class="wg-hint">Каждая невыполненная задача из календаря на сегодня — отдельная карточка. Если задачу не отметить, на карточке вместо «Сегодня» будет «Просрочено», и она остаётся в стопке, пока вы её не отметите. Нет галочки — карточек задач в стопке нет.</div>';
+      if(w.tasks) html += cardsOf().colorPalette("wgtasks", "icfColors3");
+      html += '<label class="wg-check"><input type="checkbox" id="wgEvents"' + (w.events ? ' checked' : '') + '>Показывать события календаря</label>';
+      html += '<div class="wg-hint">Одна карточка — следующее запланированное событие, с надписью «Сегодня» или «Завтра». Если ни сегодня, ни завтра событий нет, карточки в стопке нет. Нет галочки — карточки события в стопке нет.</div>';
+      if(w.events) html += cardsOf().colorPalette("wgevents", "icfColors4");
       var st = nativeState(), placed = st && st.placed && st.placed[w.id];
       html += '<div class="wg-btns">';
       if(bridge()) html += '<button type="button" class="workbooks-run-btn" id="wgPinBtn">' + (placed ? 'Добавить ещё один на рабочий стол' : 'Добавить на рабочий стол') + '</button><div class="wg-hint" id="wgPinHint"></div>';
@@ -551,7 +729,7 @@
       }
     }
     function commitDraft(a){
-      if(a.draft && (a.w.cards.length || a.w.battery || a.w.batteryMulti)){ a.draft = false; data.n = Math.max(data.n, a.w.n); data.list.push(a.w); }
+      if(a.draft && hasContent(a.w)){ a.draft = false; data.n = Math.max(data.n, a.w.n); data.list.push(a.w); }
     }
     function bindForm(a){
       var w = a.w;
@@ -577,8 +755,21 @@
         if(w.batteryMulti) w.bat2Color = cardsOf().defaultColor("battery2");
         commitDraft(a); changed(); render();
       });
-      // палитры цвета карточек заряда: [id палитры, поле цвета, ключ запомненного цвета, id места карточки, лицо карточки]
-      [["icfColors", "batColor", "battery", "wgBatSlot", batFaceHtml], ["icfColors2", "bat2Color", "battery2", "wgBat2Slot", bat2FaceHtml]].forEach(function(p){
+      var tk = $("wgTasks");
+      tk.addEventListener("change", function(){
+        w.tasks = tk.checked;
+        if(w.tasks) w.tasksColor = dynColorFor("task");
+        commitDraft(a); changed(); render();
+      });
+      var ev = $("wgEvents");
+      ev.addEventListener("change", function(){
+        w.events = ev.checked;
+        if(w.events) w.eventsColor = dynColorFor("event");
+        commitDraft(a); changed(); render();
+      });
+      // палитры цвета карточек: [id палитры, поле цвета, ключ запомненного цвета, id места карточки, лицо карточки, вид динамической карточки]
+      [["icfColors", "batColor", "battery", "wgBatSlot", batFaceHtml], ["icfColors2", "bat2Color", "battery2", "wgBat2Slot", bat2FaceHtml],
+       ["icfColors3", "tasksColor", "", "wgTasksSlot", tasksFaceHtml, "task"], ["icfColors4", "eventsColor", "", "wgEventsSlot", eventsFaceHtml, "event"]].forEach(function(p){
         var colorsEl = $(p[0]);
         if(!colorsEl) return;
         var markColors = function(){
@@ -590,7 +781,7 @@
           var b = e.target.closest(".habit-color");
           if(!b) return;
           w[p[1]] = b.getAttribute("data-color") || ""; // "" — по умолчанию (сиреневый)
-          cardsOf().rememberColor(p[2], w[p[1]]);
+          if(p[5]) rememberDynColor(p[5], w[p[1]]); else cardsOf().rememberColor(p[2], w[p[1]]);
           markColors();
           var slot = $(p[3]); if(slot) slot.innerHTML = p[4](w);
           commitDraft(a); changed();
@@ -601,7 +792,7 @@
       var pin = $("wgPinBtn");
       if(pin) pin.addEventListener("click", function(){
         var hint = $("wgPinHint");
-        if(!w.cards.length && !w.battery && !w.batteryMulti){ hint.textContent = "Сначала добавьте в виджет карточку или включите «Отображать заряд аккумулятора»."; return; }
+        if(!hasContent(w)){ hint.textContent = "Сначала добавьте в виджет карточку или включите одну из галочек (заряд, задачи, события)."; return; }
         commitDraft(a); save();
         hint.textContent = "Готовлю…";
         syncNow().then(function(ok){
@@ -664,6 +855,6 @@
       render();
     }
 
-    return { render: renderTab, scheduleSync: scheduleSync, syncNow: syncNow, hasWidgets: function(){ return data.list.length > 0 || !!data.ever; } };
+    return { render: renderTab, scheduleSync: scheduleSync, syncNow: syncNow, feedChanged: feedChanged, hasWidgets: function(){ return data.list.length > 0 || !!data.ever; } };
   };
 })();

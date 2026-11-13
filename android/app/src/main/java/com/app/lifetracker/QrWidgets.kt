@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 4.1 (12.11)
+// Версия: 5.0 (13.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -48,6 +48,13 @@ import java.util.UUID
  * [QrBattery.render] (заряд телефона и Bluetooth-наушников), нажатие на неё ничего не делает. Галочка «…(несколько устройств)» (`batteryMulti`) добавляет
  * после неё ещё одну служебную карточку [QrBattery.KEY2] ([QrBattery.renderMulti]): только кольца и значки телефона и до трёх подключённых Bluetooth-устройств. Картинка перерисовывается по будильнику
  * `ACTION_BATTERY` (раз в 5 минут, если заряд изменился), при подключении/отключении Bluetooth-устройства и при вещании о заряде наушников.
+ *
+ * Галочки «Показывать задачи» (`tasks`) и «Показывать события календаря» (`events`): страница присылает в `dyn` кандидатов — задачи (`k`="task", `at` — время
+ * задачи, мс) и ближайшие события (`k`="event") — и по две картинки на каждого: `<ключ>.png` («Сегодня») и `<ключ>_b.png` («Просрочено» у задачи, «Завтра»
+ * у события). Что показать, решает оболочка по часам ([dynShown], [dynBitmap]), поэтому надпись и состав меняются без приложения: задача видна, пока её время
+ * сегодня или раньше (раньше начала суток — «Просрочено»); событие — одно, ближайшее из ещё не начавшихся на сегодня или завтра ([nextEventKey]); нет такого —
+ * карточки нет. Будильник `ACTION_TICK` ставится на полночь и на начало ближайшего события ([nextDynChange]). Карточки стоят после QR-карточек и перед карточками заряда;
+ * нажатие на них ничего не делает.
  */
 object QrWidgets {
 
@@ -72,6 +79,7 @@ object QrWidgets {
     private const val BATTERY_AFTER_BT_MS = 6_000L
     private const val BT_ASK_EVERY_MS = 24 * 3_600_000L
     private const val MAX_CARDS = 10
+    private const val MAX_DYN = 24
     private val KEY_RE = Regex("^[A-Za-z0-9_-]{1,40}$")
 
     // Интервалы времени суток (минуты от полуночи, [начало; конец)). Те же значения показывает страница (widgets.js, WINDOWS).
@@ -90,8 +98,9 @@ object QrWidgets {
     private val hideTokens = HashMap<Int, Any>()
 
     class Live(val k: String, val id: String)
-    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE)
-    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false) {
+    /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
+    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L)
+    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
     }
@@ -154,6 +163,22 @@ object QrWidgets {
                         if (cards.size >= MAX_CARDS) break
                     }
                 }
+                val tasksOn = o.optBoolean("tasks", false)
+                val eventsOn = o.optBoolean("events", false)
+                val ds = o.optJSONArray("dyn")
+                if (ds != null && (tasksOn || eventsOn)) {
+                    var n = 0
+                    for (j in 0 until ds.length()) {
+                        val d = ds.optJSONObject(j) ?: continue
+                        val key = d.optString("key", "")
+                        val kind = d.optString("k", "")
+                        val at = d.optLong("at", 0L)
+                        if (!KEY_RE.matches(key) || at <= 0L) continue
+                        if (!((kind == "task" && tasksOn) || (kind == "event" && eventsOn))) continue
+                        cards.add(Card(key, "", d.optString("title", ""), emptyList(), emptySet(), emptySet(), "none", QrBattery.DEFAULT_FACE, kind, at)) // после QR-карточек, перед карточками заряда
+                        if (++n >= MAX_DYN) break
+                    }
+                }
                 val battery = o.optBoolean("battery", false)
                 val batColor = parseColor(o.optString("batColor", ""))
                 if (battery) cards.add(Card(QrBattery.KEY, "", "Заряд", emptyList(), emptySet(), emptySet(), "none", batColor)) // карточка заряда — последняя в стопке
@@ -163,7 +188,7 @@ object QrWidgets {
                 out.add(
                     Cfg(
                         id, o.optString("name", "Виджет"), o.optBoolean("rotate", false),
-                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti
+                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn
                     )
                 )
             }
@@ -319,6 +344,7 @@ object QrWidgets {
     fun bitmapFor(ctx: Context, c: Card): Bitmap {
         if (c.key == QrBattery.KEY) return QrBattery.render(ctx, c.color)
         if (c.key == QrBattery.KEY2) return QrBattery.renderMulti(ctx, c.color)
+        if (c.dyn.isNotEmpty()) dynBitmap(ctx, c)?.let { return it }
         val f = File(imgDir(ctx), c.key + ".png")
         if (f.exists()) {
             try {
@@ -328,6 +354,23 @@ object QrWidgets {
             }
         }
         return fallbackBitmap(c.title)
+    }
+
+    /** Картинка карточки задачи/события для нынешнего момента: «Просрочено» / «Завтра» — `<ключ>_b.png`, «Сегодня» — `<ключ>.png`; нет нужной — берётся вторая. */
+    private fun dynBitmap(ctx: Context, c: Card): Bitmap? {
+        val now = System.currentTimeMillis()
+        val second = if (c.dyn == "task") c.at < dayStart(now, 0) else c.at >= dayStart(now, 1)
+        val names = if (second) listOf(c.key + "_b", c.key) else listOf(c.key, c.key + "_b")
+        for (name in names) {
+            val f = File(imgDir(ctx), "$name.png")
+            if (!f.exists()) continue
+            try {
+                BitmapFactory.decodeFile(f.path)?.let { return it }
+            } catch (e: Throwable) {
+                // не хватило памяти или файл повреждён — пробуем вторую картинку
+            }
+        }
+        return null
     }
 
     private fun fallbackBitmap(title: String): Bitmap {
@@ -386,6 +429,41 @@ object QrWidgets {
         return c.get(Calendar.YEAR) * 10000 + (c.get(Calendar.MONTH) + 1) * 100 + c.get(Calendar.DAY_OF_MONTH)
     }
 
+    /** Начало суток через [days] календарных дней от момента [now] (0 — сегодняшняя полночь; переход на летнее время не сдвигает). */
+    private fun dayStart(now: Long, days: Int): Long {
+        val c = Calendar.getInstance()
+        c.timeInMillis = now
+        c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
+        if (days != 0) c.add(Calendar.DAY_OF_YEAR, days)
+        return c.timeInMillis
+    }
+
+    /** Ключ события, которое сейчас показывает карточка «события календаря»: ближайшее из ещё не начавшихся на сегодня или завтра; пусто — показывать нечего. */
+    private fun nextEventKey(cfg: Cfg, now: Long): String {
+        val limit = dayStart(now, 2)
+        var best: Card? = null
+        for (c in cfg.cards) {
+            if (c.dyn != "event" || c.at <= now || c.at >= limit) continue
+            if (best == null || c.at < best.at) best = c
+        }
+        return best?.key ?: ""
+    }
+
+    /** Карточка задачи видна, пока её время сегодня или раньше (просроченная — до отметки); событие — только то, что выбрал [nextEventKey]. */
+    private fun dynShown(c: Card, now: Long, nextEv: String): Boolean = when (c.dyn) {
+        "task" -> c.at < dayStart(now, 1)
+        "event" -> c.key == nextEv
+        else -> true
+    }
+
+    /** Когда пора перерисовать карточки задач и событий: полночь («Завтра» → «Сегодня», задача → «Просрочено») или начало ближайшего события. */
+    private fun nextDynChange(cfg: Cfg): Long {
+        val now = System.currentTimeMillis()
+        var at = dayStart(now, 1) + 5_000L
+        for (c in cfg.cards) if (c.dyn == "event" && c.at > now && c.at + 1_000L < at) at = c.at + 1_000L
+        return at
+    }
+
     private fun startOfToday(): Long {
         val c = Calendar.getInstance()
         c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
@@ -411,7 +489,9 @@ object QrWidgets {
         val st = firedOf(ctx, cfg.id)
         val hidden = hiddenKeys(ctx, cfg)
         val moved = st.optJSONObject("moved") ?: JSONObject()
-        val shown = cfg.cards.filter { !(it.after == "hide" && it.key in hidden) }
+        val now = System.currentTimeMillis()
+        val nextEv = nextEventKey(cfg, now)
+        val shown = cfg.cards.filter { !(it.after == "hide" && it.key in hidden) && dynShown(it, now, nextEv) }
         if (shown.none { it.after == "end" && moved.has(it.key) }) return shown
         return shown.withIndex().sortedWith(
             compareBy<IndexedValue<Card>> { if (it.value.after == "end") moved.optLong(it.value.key, 0L) else 0L }.thenBy { it.index }
@@ -421,7 +501,7 @@ object QrWidgets {
     fun visibleCount(ctx: Context, cfg: Cfg): Int = visibleCards(ctx, cfg).size
 
     /** Все карточки виджета скрыты («На сегодня больше ничего»). */
-    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = cfg.cards.isNotEmpty() && visibleCards(ctx, cfg).isEmpty()
+    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = (cfg.cards.isNotEmpty() || cfg.tasks || cfg.events) && visibleCards(ctx, cfg).isEmpty()
 
     private fun movedToday(ctx: Context, cfg: Cfg, c: Card): Boolean {
         if (c.after != "end") return false
@@ -693,9 +773,11 @@ object QrWidgets {
         var anyRel = false
         var anyHide = false
         var anyBattery = false
+        var dynAt = Long.MAX_VALUE
         for (id in ids) {
             val cfg = cfgFor(app, id)
             if (cfg != null && cfg.anyBattery) anyBattery = true
+            if (cfg != null && (cfg.tasks || cfg.events)) dynAt = Math.min(dynAt, nextDynChange(cfg))
             if (cfg != null && cfg.rotate && visibleCount(app, cfg) > 1) {
                 if (force || rotatePi(app, id, false) == null) {
                     cancelRotate(app, id)
@@ -705,7 +787,9 @@ object QrWidgets {
             if (cfg != null && cfg.relevance) anyRel = true
             if (cfg != null && cfg.cards.any { it.after == "hide" }) anyHide = true // скрытое возвращается в полночь
         }
-        if (anyRel || anyHide) setAlarm(app, nextBoundary(), tickPi(app, true)!!)
+        var tickAt = if (anyRel || anyHide) nextBoundary() else Long.MAX_VALUE
+        tickAt = Math.min(tickAt, dynAt)
+        if (tickAt != Long.MAX_VALUE) setAlarm(app, tickAt, tickPi(app, true)!!)
         else tickPi(app, false)?.let { am(app).cancel(it); it.cancel() }
         if (anyBattery) {
             QrBattery.register(app)
