@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 6.0 (13.11)
+// Версия: 6.1 (13.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -57,8 +57,7 @@ import java.util.UUID
  * карточки нет. Будильник `ACTION_TICK` ставится на полночь и на начало ближайшего события ([nextDynChange]). Карточки стоят после QR-карточек и перед карточками заряда;
  * нажатие на них ничего не делает. Среди этих карточек события всегда стоят перед задачами (событие важнее).
  *
- * Возврат наверх («по релевантности», [armReturn]/[fireReturn]): если пользователь смахнул стопку, а наверху лежит рекомендованная
- * карточка (идёт занятие или сейчас «её» время суток — [Ordered.topKey]), то через минуту после последнего смахивания стопка снова
+ * Возврат наверх («по релевантности», [armReturn]/[fireReturn]): если пользователь смахнул стопку, то через минуту после последнего смахивания стопка снова
  * показывает верхнюю карточку порядка [order]. Смахивание система оболочке не сообщает, его видно только по запросу фабрики
  * ([QrWidgetService]: счётчик в `VIRT` раз больше числа карточек), см. [onPossibleSwipe].
  */
@@ -956,12 +955,12 @@ object QrWidgets {
 
     // ---------- возврат наверх ----------
 
-    /** Взводит возврат стопки наверх через [RETURN_AFTER_MS] (каждое новое смахивание отодвигает его). Только «по релевантности» и только если есть рекомендованная карточка. */
+    /** Взводит возврат стопки наверх через [RETURN_AFTER_MS] (каждое новое смахивание отодвигает его). Только «по релевантности». */
     private fun armReturn(app: Context, id: Int) {
         val cfg = cfgFor(app, id) ?: return
         if (!cfg.relevance) return
         val ord = order(app, cfg)
-        if (ord.topKey.isEmpty() || ord.cards.size < 2) return
+        if (ord.cards.size < 2) return // наверху — первая карточка порядка [order], даже если ни одна не «рекомендована» (задачи и события календаря)
         val due = System.currentTimeMillis() + RETURN_AFTER_MS
         synchronized(LOCK) {
             val m = jmap(app, K_RETURN)
@@ -1017,7 +1016,7 @@ object QrWidgets {
         val cfg = cfgFor(app, id) ?: return
         if (!cfg.relevance) return
         val ord = order(app, cfg)
-        if (ord.topKey.isEmpty() || ord.cards.size < 2) return
+        if (ord.cards.size < 2) return // наверху — первая карточка порядка [order], даже если ни одна не «рекомендована» (задачи и события календаря)
         suppressSwipe(id)
         dotsOn.remove(id)
         val rv = RemoteViews(app.packageName, R.layout.qr_widget)
