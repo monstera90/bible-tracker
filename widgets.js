@@ -1,13 +1,13 @@
 /* ===========================================================================
    widgets.js
-   Версия: 4.2 (13.11)
+   Версия: 4.3 (13.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
    необязательные время суток (утро/обед/вечер) и дни недели, когда она поднимается наверх, и что делать со стопкой после срабатывания карточки
    (`after`: "none" — ничего (по умолчанию) / "hide" — скрыть до конца дня / "end" — переместить в конец).
    Галочка «Отображать заряд аккумулятора» (`battery`): в стопку добавляется служебная карточка с зарядом телефона и Bluetooth-наушников — её рисует оболочка (QrBattery.kt), страница шлёт только флаг.
-   Цвет карточки «Заряд» (`batColor`: "" — по умолчанию, сиреневый, иначе "#rrggbb") выбирается палитрой под галочкой — той же, что в форме карточки QR-кодов (itemcards.js `colorPalette`, запомненный цвет — `defaultColor/rememberColor`); карточка заряда показана в форме после десятого слота (`batFaceHtml`), статус наушников из оболочки — `batStatusText`.
+   Цвет карточки «Заряд» (`batColor`: "" — по умолчанию, сиреневый, иначе "#rrggbb") выбирается палитрой под галочкой — той же, что в форме карточки QR-кодов (itemcards.js `colorPalette`, запомненный цвет — `defaultColor/rememberColor`); карточка заряда показана в форме после последнего слота (и кнопки «+») (`batFaceHtml`), статус наушников из оболочки — `batStatusText`.
    Галочка «Отображать заряд аккумулятора (несколько устройств)» (`batteryMulti`, цвет `bat2Color`, палитра `icfColors2`): ещё одна служебная карточка — только значки и кольца заряда, без надписей: телефон и до трёх подключённых Bluetooth-устройств (QrBattery.renderMulti); в форме её лицо — `bat2FaceHtml`, значки — `iconSvg`, список парных устройств из оболочки — `batDevicesText`.
    Галочки «Показывать задачи» (`tasks`, цвет `tasksColor`, палитра `icfColors3`) и «Показывать события календаря» (`events`, цвет `eventsColor`, палитра `icfColors4`): в стопку добавляются динамические карточки по данным календаря (`CalendarTab.widgetFeed` через `deps.getCalendarFeed`, `buildFeed`). Задачи: каждая открытая задача календаря на сегодня или просроченная — отдельная карточка (до `MAX_TASKS`); событие: ближайшее запланированное на сегодня или завтра (в оболочку уходят `MAX_EVENTS` кандидатов, показывает первое будущее — решает QrWidgets.kt по текущему времени). Лицо — `drawDynFace` (размеры сняты с макета, доли ширины карточки — `DYN`), у каждой карточки две картинки: `<ключ>` («Сегодня») и `<ключ>_b` («Просрочено» у задачи, «Завтра» у события), какую показать — выбирает оболочка (так надпись меняется в полночь без приложения). Данные меняются → `feedChanged` (из my.js: запись состояния и возврат в приложение) сверяет `feedSig` и при отличии шлёт `syncNow`. Палитра общая с карточками QR-кодов (`itemcards.colorPalette`), цвет по умолчанию — как на макете (`TASK_COLOR`/`EVENT_COLOR`), последний выбранный — `widgetsDynColors_v1`.
    Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor}]}), только на устройстве.
@@ -18,7 +18,7 @@
   "use strict";
   var KEY = "qrWidgets_v1";
   var PICK_FILTER_KEY = "widgetsPickFilter_v1";
-  var MAX_CARDS = 10;
+  var MAX_CARDS = 50;
   var FACE_PX = 480; // ширина картинки лица для оболочки
   var FACE_BODY = 1.02; // высота тела карточки = ширина × FACE_BODY (то же — CARD_ASPECT в itemcards.js и FACE_BODY/FACE_SHADE в QrWidgets.kt)
   var FACE_SHADE = 0.04; // цветной выступ снизу, доля ширины
@@ -611,18 +611,17 @@
 
     function formHtml(a){
       var w = a.w, html = '<h3 class="common-tab-title">' + esc(wname(w)) + '</h3><div class="wg-slots">';
-      for(var i = 0; i < MAX_CARDS; i++){
-        var c = w.cards[i], f = c ? cardsOf().widgetFace(c.cid) : null;
-        if(c && f){
+      for(var i = 0; i < w.cards.length; i++){
+        var c = w.cards[i], f = cardsOf().widgetFace(c.cid);
+        if(f){
           var sched = (c.times.length || c.days.length) ? '<div class="wg-badge">⏰</div>' : '';
           html += '<div class="wg-slot" data-i="' + i + '">' + faceHtml(f, "", sched) + '</div>';
-        } else if(c){
-          html += '<div class="wg-slot" data-i="' + i + '"><div class="wg-slot-empty">?</div></div>'; // карточку удалили
         } else {
-          html += '<div class="wg-slot" data-add="1"><div class="wg-slot-empty">' + PLUS_SVG + '</div></div>';
+          html += '<div class="wg-slot" data-i="' + i + '"><div class="wg-slot-empty">?</div></div>'; // карточку удалили
         }
       }
-      if(w.battery) html += '<div class="wg-slot" data-bat="1" id="wgBatSlot">' + batFaceHtml(w) + '</div>'; // карточка заряда — последняя в стопке, место рядом с десятым слотом
+      if(w.cards.length < MAX_CARDS) html += '<div class="wg-slot" data-add="1"><div class="wg-slot-empty">' + PLUS_SVG + '</div></div>'; // всегда одна «+», пока не достигнут предел
+      if(w.battery) html += '<div class="wg-slot" data-bat="1" id="wgBatSlot">' + batFaceHtml(w) + '</div>'; // карточка заряда — последняя в стопке, после слотов и «+»
       if(w.batteryMulti) html += '<div class="wg-slot" data-bat="1" id="wgBat2Slot">' + bat2FaceHtml(w) + '</div>'; // карточка заряда нескольких устройств — после карточки заряда
       if(w.tasks) html += '<div class="wg-slot" data-bat="1" id="wgTasksSlot">' + tasksFaceHtml(w) + '</div>'; // образец карточки задачи (в виджете их столько, сколько задач)
       if(w.events) html += '<div class="wg-slot" data-bat="1" id="wgEventsSlot">' + eventsFaceHtml(w) + '</div>'; // образец карточки события

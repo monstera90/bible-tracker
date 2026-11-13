@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 7.1 (13.11)
+// Версия: 7.2 (13.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -98,7 +98,7 @@ object QrWidgets {
     /** Запас назад от момента подключения: заряд, пришедший чуть раньше, чем мы обработали подключение, считается свежим. */
     private const val BT_SINCE_SLACK_MS = 5_000L
     private const val BT_ASK_EVERY_MS = 24 * 3_600_000L
-    private const val MAX_CARDS = 10
+    private const val MAX_CARDS = 50
     private const val MAX_DYN = 24
     private val KEY_RE = Regex("^[A-Za-z0-9_-]{1,40}$")
 
