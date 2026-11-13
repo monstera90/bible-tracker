@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 4.0 (13.11)
+   Версия: 4.1 (13.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -31,8 +31,9 @@
   var FEED_DAYS = 3; // сегодня, завтра, послезавтра: оболочка сама решает по часам, что показать, пока приложение закрыто
   var DAY_MS = 86400000;
   // Лицо динамической карточки (доли ширины карточки; сняты с макета 660 px): значок Tabler — «circle-check» / «calendar-event» (сетка 24, линия 2),
-  // надпись «Сегодня»…, название (serif, жирное), время (крупно). Базовые линии букв, верх значка — от верха карточки.
+  // надпись «Сегодня»…, название (serif, жирное), время (крупно). Базовые линии букв, верх значка — от верха карточки. Верхние ≈7 % лица в виджете скрыты обрезкой стопки (qr_widget.xml: передняя карточка выходит за слот сверху), поэтому значок не поднимается выше `iconTop2`, а лишняя строка названия (`DYN2`) уходит вниз.
   var DYN = { unit: 0.00955, iconTop: 0.138, labelBase: 0.448, titleBase: 0.577, timeBase: 0.858, labelFs: 0.064, titleFs: 0.097, timeFs: 0.27 };
+  var DYN2 = { iconTop: 0.126, labelBase: 0.432, titleBase: 0.543, lineH: 1.1, timeGap: 0.281 }; // название в две строки: значок почти на месте (выше нельзя — обрежется), остальное сдвигается вниз
   var DYN_ICONS = {
     task: '<circle cx="12" cy="12" r="9"/><path d="M9 12l2 2l4 -4"/>',
     event: '<path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/><path d="M8 15h2v2h-2z"/>'
@@ -215,7 +216,7 @@
       function setF(f){ g.font = "700 " + f + "px " + fam; }
       var fs;
       for(fs = S * DYN.titleFs; fs >= S * 0.078; fs *= 0.96){ setF(fs); if(g.measureText(text).width <= maxW) return { lines: [text], fs: fs }; }
-      for(fs = S * 0.084; fs >= S * 0.062; fs *= 0.95){
+      for(fs = S * 0.08; fs >= S * 0.062; fs *= 0.95){
         setF(fs);
         var lines = wrapLines(g, text, maxW), ok = lines.length <= 2;
         if(ok) lines.forEach(function(l){ if(g.measureText(l).width > maxW) ok = false; });
@@ -239,15 +240,17 @@
       rrect(g, 0, shift, S, bodyH, r); g.fillStyle = face.shade; g.fill();   // цветной выступ снизу
       rrect(g, 0, 0, S, bodyH, r); g.fillStyle = face.color; g.fill();
       var maxW = S * 0.86, serif = '"Palatino Linotype",Georgia,serif', sans = "sans-serif";
-      var fit = fitTitle(g, face.title, S, maxW, serif), lh = fit.fs * 1.2, up = (fit.lines.length - 1) * lh / 2; // две строки названия раздвигают макет вверх и вниз поровну
+      var fit = fitTitle(g, face.title, S, maxW, serif), n = fit.lines.length, lh = fit.fs * (n > 1 ? DYN2.lineH : 1.2);
+      var iconTop = n > 1 ? DYN2.iconTop : DYN.iconTop, labelBase = n > 1 ? DYN2.labelBase : DYN.labelBase, titleBase = n > 1 ? DYN2.titleBase : DYN.titleBase;
+      var timeBase = n > 1 ? titleBase + (n - 1) * lh / S + DYN2.timeGap : DYN.timeBase;
       g.textAlign = "center"; g.textBaseline = "alphabetic"; g.fillStyle = "#ffffff";
-      if(icon){ var u = S * DYN.unit; g.drawImage(icon, (S - 24 * u) / 2, S * DYN.iconTop - 2 * u - up, 24 * u, 24 * u); }
+      if(icon){ var u = S * DYN.unit; g.drawImage(icon, (S - 24 * u) / 2, S * iconTop - 2 * u, 24 * u, 24 * u); }
       g.font = "400 " + (S * DYN.labelFs) + "px " + sans;
-      g.fillText(face.label, S / 2, S * DYN.labelBase - up, maxW);
+      g.fillText(face.label, S / 2, S * labelBase, maxW);
       g.font = "700 " + fit.fs + "px " + serif;
-      fit.lines.forEach(function(ln, i){ g.fillText(ln, S / 2, S * DYN.titleBase + (i - (fit.lines.length - 1) / 2) * lh, maxW); });
+      fit.lines.forEach(function(ln, i){ g.fillText(ln, S / 2, S * titleBase + i * lh, maxW); });
       g.font = "700 " + (S * DYN.timeFs) + "px " + sans;
-      g.fillText(face.time, S / 2, S * DYN.timeBase + up, maxW);
+      g.fillText(face.time, S / 2, S * timeBase, maxW);
       return cv;
     }
     function dynPng(face){
