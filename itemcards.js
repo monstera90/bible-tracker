@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 45.0 (13.11)
+   Версия: 46.0 (13.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -323,7 +323,44 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     return out.length > HABIT_MAX_DAYS ? out.slice(-HABIT_MAX_DAYS) : out;
   }
   function habitDays(c){ return normHabitDays(c && c.days); }
-  function mergeHabitDays(a, b){ return normHabitDays((a || []).concat(b || [])); } // объединение: отметки не пропадают при расхождении устройств
+  // Снятая отметка: день уходит из `days`, а в `offs[день]` остаётся время снятия (иначе при сверке с облаком отметка вернулась бы);
+  // `ons[день]` — время последней постановки отметки. День считается отмеченным, если он в `days` и снятие не позже постановки.
+  var HABIT_STAMPS_MAX = 400, HABIT_ONS_RECENT = 60;
+  function normStamps(o){
+    var out = {}, keys = [];
+    if(o && typeof o === "object"){
+      Object.keys(o).forEach(function(k){
+        var v = Number(o[k]);
+        if(/^\d{4}-\d{2}-\d{2}$/.test(k) && isFinite(v) && v > 0){ out[k] = Math.floor(v); keys.push(k); }
+      });
+    }
+    keys.sort();
+    if(keys.length > HABIT_STAMPS_MAX) keys.slice(0, keys.length - HABIT_STAMPS_MAX).forEach(function(k){ delete out[k]; });
+    return out;
+  }
+  function habitOffs(c){ return normStamps(c && c.offs); }
+  function habitOns(c){ // свежие постановки и те, что нужны, чтобы перебить снятие
+    var ons = normStamps(c && c.ons), offs = habitOffs(c), keys = Object.keys(ons).sort(), out = {};
+    keys.forEach(function(k, i){ if(offs[k] || i >= keys.length - HABIT_ONS_RECENT) out[k] = ons[k]; });
+    return out;
+  }
+  function mergeHabitState(a, b){ // объединение: отметки не пропадают при расхождении устройств, снятые — не возвращаются
+    var offs = habitOffs(a), ons = habitOns(a), ob = habitOffs(b), nb = habitOns(b);
+    Object.keys(ob).forEach(function(k){ if(!(offs[k] >= ob[k])) offs[k] = ob[k]; });
+    Object.keys(nb).forEach(function(k){ if(!(ons[k] >= nb[k])) ons[k] = nb[k]; });
+    var days = normHabitDays(habitDays(a).concat(habitDays(b))).filter(function(d){ return !(offs[d] > (ons[d] || 0)); });
+    return { days: days, offs: normStamps(offs), ons: habitOns({ ons: ons, offs: offs }) };
+  }
+  function sameStamps(a, b){
+    var ka = Object.keys(a), kb = Object.keys(b);
+    if(ka.length !== kb.length) return false;
+    for(var i = 0; i < ka.length; i++) if(a[ka[i]] !== b[ka[i]]) return false;
+    return true;
+  }
+  function sameHabitState(c, m){
+    var d = habitDays(c);
+    return d.length === m.days.length && d.join(",") === m.days.join(",") && sameStamps(habitOffs(c), m.offs) && sameStamps(habitOns(c), m.ons);
+  }
   function effColor(c){ return cardColor(c) || DEFAULT_CARD_COLOR; } // цвет, которым карточка рисуется: свой или сиреневый по умолчанию
   // нижняя «тень» карточки (цветной выступ снизу): тот же цвет, темнее на пятую часть (на глаз совпадает с образцами из макета)
   function cardShade(hex){
@@ -448,7 +485,11 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     if(r.fav) o.fav = 1; // «избранное» — тоже общий признак
     if(r.type === "timer" && r.noIsland) o.noIsland = 1; // скрытый таймер: без острова и уведомления «идёт»
     var col = cardColor(r); if(col) o.color = col; // цвет карточки — у любого типа (пусто — без цвета)
-    if(r.type === "habit") o.days = habitDays(r);
+    if(r.type === "habit"){
+      o.days = habitDays(r);
+      var hOffs = habitOffs(r), hOns = habitOns(r);
+      if(Object.keys(hOffs).length){ o.offs = hOffs; o.ons = hOns; }
+    }
     if(r.type === "alarm"){ var ahm = alarmHM(r); o.alarmTime = ahm ? pad2(ahm.h) + ":" + pad2(ahm.m) : ""; o.alarmEvery = alarmEvery(r); o.alarmTimes = alarmTimes(r); }
     if(r.type === "weather"){ // город: координаты (название — в title)
       var wla = Number(r.lat), wlo = Number(r.lon);
@@ -507,10 +548,11 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       // привычка: отметки дней объединяются (скан на одном устройстве не должен затираться правкой на другом)
       var daysLocalGrew = false, daysRemoteLacks = false;
       if(c.type === "habit" && r.type === "habit"){
-        var mergedDays = mergeHabitDays(c.days, r.days);
-        daysLocalGrew = mergedDays.length !== habitDays(c).length;
-        daysRemoteLacks = mergedDays.length !== habitDays(r).length;
-        c.days = mergedDays; r.days = mergedDays.slice();
+        var mergedHabit = mergeHabitState(c, r);
+        daysLocalGrew = !sameHabitState(c, mergedHabit);
+        daysRemoteLacks = !sameHabitState(r, mergedHabit);
+        c.days = mergedHabit.days; c.offs = mergedHabit.offs; c.ons = mergedHabit.ons;
+        r.days = mergedHabit.days.slice(); r.offs = mergedHabit.offs; r.ons = mergedHabit.ons;
       }
       if(ru > lu){
         // пришла более новая версия: журнал срабатываний (remindDone) остаётся своим, если напоминание то же; иначе отсчёт заново
@@ -1131,16 +1173,25 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     document.getElementById("habitMapTitle").textContent = c.title || "Привычка";
     var sc = document.getElementById("habitMapScroll");
     requestAnimationFrame(function(){ sc.scrollTop = sc.scrollHeight; }); // сразу к текущей неделе (внизу)
-    // нажатие на день — отметка; снять её нельзя: отметки устройств при сверке с облаком объединяются, снятая вернулась бы
+    // нажатие на день — отметка; нажатие на отмеченный день снимает её (снятие помнится в `offs`, при сверке с облаком отметка не вернётся)
     sc.addEventListener("click", function(e){
       var cell = e.target.closest ? e.target.closest(".year-grid-v-cell") : null;
       var iso = cell && cell.getAttribute("data-iso");
       var cur = iso ? findCard(id) : null;
-      if(!cur || !markHabitDay(id, iso)) return;
+      if(!cur) return;
+      var cnt = document.getElementById("habitMapCount");
+      if(habitDays(cur).indexOf(iso) >= 0){
+        if(!unmarkHabitDay(id, iso)) return;
+        if(iso === todayIso()){ var t0 = new Date(); evLogUndo(cardTitle(cur), new Date(t0.getFullYear(), t0.getMonth(), t0.getDate()).getTime()); }
+        cell.style.background = "";
+        cell.style.borderColor = "";
+        if(cnt) cnt.textContent = String(Math.max(0, (parseInt(cnt.textContent, 10) || 0) - 1));
+        return;
+      }
+      if(!markHabitDay(id, iso)) return;
       if(iso === todayIso()) evLog(cardTitle(cur));
       cell.style.background = cardColor(cur) || "var(--wood)";
       cell.style.borderColor = "rgba(0,0,0,.25)";
-      var cnt = document.getElementById("habitMapCount");
       if(cnt) cnt.textContent = String((parseInt(cnt.textContent, 10) || 0) + 1);
     });
     if(window.AppNav) window.AppNav.push(function(){ renderGrid(); });
@@ -2844,7 +2895,25 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     if(days.indexOf(iso) >= 0) return false;
     days.push(iso);
     c.days = normHabitDays(days);
-    c.updatedAt = Date.now();
+    var offsM = habitOffs(c), onsM = habitOns(c), nowM = Date.now();
+    onsM[iso] = Math.max(nowM, (offsM[iso] || 0) + 1); // постановка новее прежнего снятия
+    c.ons = habitOns({ ons: onsM, offs: offsM });
+    c.updatedAt = nowM;
+    saveCards();
+    return true;
+  }
+  // снять отметку дня iso: true — снята, false — отметки не было (или это не привычка)
+  function unmarkHabitDay(id, iso){
+    var c = findCard(id);
+    if(!c || c.type !== "habit" || !/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return false;
+    var days = habitDays(c);
+    if(days.indexOf(iso) < 0) return false;
+    c.days = normHabitDays(days.filter(function(d){ return d !== iso; }));
+    var offsM = habitOffs(c), onsM = habitOns(c), nowM = Date.now();
+    offsM[iso] = Math.max(nowM, (onsM[iso] || 0) + 1); // снятие новее прежней постановки
+    c.offs = normStamps(offsM);
+    c.ons = habitOns({ ons: onsM, offs: c.offs });
+    c.updatedAt = nowM;
     saveCards();
     return true;
   }
@@ -2886,10 +2955,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       saveSyncInfo(syncInfo);
       saveCards();
     } else {
-      var t = todayIso();
-      cur.days = normHabitDays(habitDays(cur).filter(function(d){ return d !== t; }));
-      cur.updatedAt = Date.now();
-      saveCards();
+      unmarkHabitDay(id, todayIso()); // «Отмена» скана: отметка снимается так же, как на карте дней (с «надгробием» для облака)
     }
     evLogUndo(title, since);
   }
