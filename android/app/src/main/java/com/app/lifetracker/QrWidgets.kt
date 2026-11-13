@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 9.0 (13.11)
+// Версия: 9.1 (13.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -130,6 +130,9 @@ object QrWidgets {
 
     /** До какого момента (uptime) запросы фабрики не считаются смахиванием: стопку только что переставили мы сами. */
     private val swipeQuiet = HashMap<Int, Long>()
+
+    /** Версия адаптера стопки у виджета (extra `rev` в intent службы): смена версии заставляет систему создать адаптер заново, с пустым кэшем карточек. */
+    private val adapterRev = HashMap<Int, Int>()
 
     class Live(val k: String, val id: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
@@ -611,23 +614,10 @@ object QrWidgets {
             if (touchedCfgs.isNotEmpty()) prefs(app).edit().putString(K_FIRED, all.toString()).apply()
         }
         if (touchedCfgs.isEmpty()) return
-        refreshAll(app, true)
-        // стопка снова показывает первую из оставшихся карточек
-        try {
-            val mgr = AppWidgetManager.getInstance(app)
-            for (id in mgr.getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java))) {
-                val cfgId = jmap(app, K_BIND).optString(id.toString(), "")
-                if (cfgId in touchedCfgs) {
-                    val rv = RemoteViews(app.packageName, R.layout.qr_widget)
-                    rv.setDisplayedChild(R.id.qr_stack, 0)
-                    suppressSwipe(id)
-                    clearReturn(app, id)
-                    mgr.partiallyUpdateAppWidget(id, rv)
-                }
-            }
-        } catch (e: Exception) {
-            // виджет удалили
-        }
+        // Стопка возвращается к первой из оставшихся карточек ОДНИМ полным обновлением (сброс — в том же RemoteViews, до перезагрузки данных,
+        // адаптер создаётся заново): отдельное partiallyUpdateAppWidget(setDisplayedChild) после notifyAppWidgetViewDataChanged гонялось с
+        // перезагрузкой карточек (после двойного нажатия по привычке стопка переставала листаться).
+        refreshAll(app, true, false, touchedCfgs)
     }
 
     /**
@@ -687,7 +677,7 @@ object QrWidgets {
 
     // ---------- обновление ----------
 
-    fun update(ctx: Context, mgr: AppWidgetManager, id: Int, resetTop: Boolean = false) {
+    fun update(ctx: Context, mgr: AppWidgetManager, id: Int, resetTop: Boolean = false, rebuild: Boolean = false) {
         val app = ctx.applicationContext
         if (!isBound(app, id)) claimPending(app, id)
         val cfg = cfgFor(app, id)
@@ -696,6 +686,12 @@ object QrWidgets {
         applyHostLayout(app, rv, hostSizeDp(app, mgr, id))
         val svc = Intent(app, QrWidgetService::class.java)
         svc.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+        // rebuild: новая версия адаптера (другой intent — система создаёт RemoteViewsAdapter и фабрику заново); иначе версия прежняя и адаптер живёт
+        val rev = synchronized(adapterRev) {
+            if (rebuild) adapterRev[id] = (adapterRev[id] ?: 0) + 1
+            adapterRev[id] ?: 0
+        }
+        svc.putExtra("rev", rev)
         svc.data = Uri.parse(svc.toUri(Intent.URI_INTENT_SCHEME))
         rv.setRemoteAdapter(R.id.qr_stack, svc)
         rv.setEmptyView(R.id.qr_stack, R.id.qr_empty)
@@ -717,6 +713,10 @@ object QrWidgets {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
         rv.setPendingIntentTemplate(R.id.qr_stack, PendingIntent.getActivity(app, id, tpl, flags))
 
+        if (rebuild) {
+            rv.setDisplayedChild(R.id.qr_stack, 0) // тем же обновлением, что и данные: стопка показывает первую карточку
+            clearReturn(app, id)
+        }
         if (cfg != null && (cfg.relevance || cfg.rpeAsk)) {
             val topNew = topAnchor(cfg, order(app, cfg))
             val topOld = jmap(app, K_TOP).optString(id.toString(), "")
@@ -802,13 +802,14 @@ object QrWidgets {
         mgr.partiallyUpdateAppWidget(id, rv)
     }
 
-    fun refreshAll(ctx: Context, resetTop: Boolean = false, forceAlarms: Boolean = false) {
+    fun refreshAll(ctx: Context, resetTop: Boolean = false, forceAlarms: Boolean = false, rebuildCfgs: Set<String> = emptySet()) {
         val app = ctx.applicationContext
         val mgr = AppWidgetManager.getInstance(app)
         val ids = mgr.getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java))
         for (id in ids) {
             try {
-                update(app, mgr, id, resetTop)
+                val rebuild = rebuildCfgs.isNotEmpty() && cfgFor(app, id)?.id in rebuildCfgs
+                update(app, mgr, id, resetTop, rebuild)
             } catch (e: Exception) {
                 // один сбойный виджет не мешает остальным
             }
