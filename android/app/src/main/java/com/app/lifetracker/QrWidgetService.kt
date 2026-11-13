@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.1 (13.11)
+// Версия: 2.2 (13.11)
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
@@ -72,7 +72,7 @@ class QrWidgetService : RemoteViewsService() {
             rv.setViewVisibility(R.id.rpe_grid, if (isRpe) View.VISIBLE else View.GONE)
             if (isRpe) for (i in RPE_BUTTONS.indices) rv.setOnClickFillInIntent(RPE_BUTTONS[i], Intent().putExtra("rpe", i + 1))
             // карточки заряда, задач и событий — не QR-карточки: нажатие на них ничего не делает (без fill-in intent шаблон не срабатывает)
-            if (!isRpe && !QrBattery.isBatteryKey(c.key) && c.dyn.isEmpty()) rv.setOnClickFillInIntent(R.id.qr_card_img, Intent().putExtra("code", c.code).putExtra("key", c.key))
+            if (!isRpe && !QrBattery.isBatteryKey(c.key) && c.dyn.isEmpty()) rv.setOnClickFillInIntent(R.id.qr_card_img, Intent().putExtra("code", c.code).putExtra("key", c.key).putExtra("habit", c.habit))
             if (n > 1 && SystemClock.uptimeMillis() > quietUntil) QrWidgets.onPossibleSwipe(ctx, widgetId, n)
             return rv
         }

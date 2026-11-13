@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 44.2 (13.11)
+   Версия: 45.0 (13.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
    Версия: 31.1 (28.10) — `comboRunWorkout`: ответ "rpe" (предыдущая тренировка ещё без оценки sRPE — новая не начинается).
@@ -353,6 +353,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       ".habit-color-gap{flex:0 0 calc((100% - 42px) / 8);height:0;padding:0 0 calc((100% - 42px) / 8) 0;}" +
       ".habit-color{flex:0 0 calc((100% - 42px) / 8);height:0;padding:0 0 calc((100% - 42px) / 8) 0;border:1px solid rgba(0,0,0,.18);border-radius:8px;box-sizing:border-box;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
       ".habit-color.selected{box-shadow:0 0 0 2px var(--parchment,#fff),0 0 0 4px var(--ink,#000);}" +
+      ".year-grid-v-cell[data-iso]{cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
       ".habit-map-dot{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:8px;vertical-align:-1px;border:1px solid rgba(0,0,0,.2);}" +
       ".habit-scan-note{position:absolute;left:0;right:0;bottom:9%;text-align:center;color:#fff;font-size:18px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,.7);pointer-events:none;padding:0 16px;}";
     document.head.appendChild(st);
@@ -1066,7 +1067,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   var HABIT_WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
   function isoOfDate(d){ return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
   // Общая сетка карты дней: 365 дней, неделя в строке. isMarked(iso) → закрашенный день, attrsOf(iso) → доп. атрибуты клетки (или null).
-  function dayMapMarkup(color, isMarked, attrsOf){
+  function dayMapMarkup(color, isMarked, attrsOf, withIso){
     var count = 0;
     var now = new Date();
     var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1090,10 +1091,11 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
         else if(d > today) cls += " future";
         else {
           var iso = isoOfDate(d);
+          if(withIso) attrs = ' data-iso="' + iso + '"'; // клетка нажимаема: день привычки отмечается нажатием
           if(isMarked(iso)){
             count++;
             style = ' style="background:' + color + ';border-color:rgba(0,0,0,.25);"';
-            if(attrsOf) attrs = attrsOf(iso) || "";
+            if(attrsOf) attrs += attrsOf(iso) || "";
           }
           if(iso === todayIsoStr) cls += " today";
         }
@@ -1111,7 +1113,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     var color = cardColor(c) || "var(--wood)"; // без цвета — цвет выбранной вкладки (темы)
     var marked = {};
     habitDays(c).forEach(function(d){ marked[d] = 1; });
-    return dayMapMarkup(color, function(iso){ return !!marked[iso]; }, null);
+    return dayMapMarkup(color, function(iso){ return !!marked[iso]; }, null, true);
   }
   function openHabitMap(id){
     var c = findCard(id);
@@ -1123,12 +1125,24 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     el.innerHTML =
       '<div class="year-grid-tab-header">' +
         '<div class="common-tab-title"><span class="habit-map-dot" style="background:' + (cardColor(c) || "var(--wood)") + ';"></span><span id="habitMapTitle"></span></div>' +
-        '<button type="button" class="year-grid-active-days-btn" tabindex="-1" title="Дней с отметками за последние 365 дней">' + built.count + '</button>' +
+        '<button type="button" class="year-grid-active-days-btn" tabindex="-1" id="habitMapCount" title="Дней с отметками за последние 365 дней">' + built.count + '</button>' +
       '</div>' +
       '<div class="year-grid-v-scroll" id="habitMapScroll">' + built.html + '</div>';
     document.getElementById("habitMapTitle").textContent = c.title || "Привычка";
     var sc = document.getElementById("habitMapScroll");
     requestAnimationFrame(function(){ sc.scrollTop = sc.scrollHeight; }); // сразу к текущей неделе (внизу)
+    // нажатие на день — отметка; снять её нельзя: отметки устройств при сверке с облаком объединяются, снятая вернулась бы
+    sc.addEventListener("click", function(e){
+      var cell = e.target.closest ? e.target.closest(".year-grid-v-cell") : null;
+      var iso = cell && cell.getAttribute("data-iso");
+      var cur = iso ? findCard(id) : null;
+      if(!cur || !markHabitDay(id, iso)) return;
+      if(iso === todayIso()) evLog(cardTitle(cur));
+      cell.style.background = cardColor(cur) || "var(--wood)";
+      cell.style.borderColor = "rgba(0,0,0,.25)";
+      var cnt = document.getElementById("habitMapCount");
+      if(cnt) cnt.textContent = String((parseInt(cnt.textContent, 10) || 0) + 1);
+    });
     if(window.AppNav) window.AppNav.push(function(){ renderGrid(); });
   }
 
@@ -1422,7 +1436,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
 
   // Тап по карточке = скан её QR-кода (отдельной кнопки «Пуск» нет); форма правки открывается только долгим нажатием → «Редактировать».
   // У таймера, будильника, комбинированного, «Сегодня» и «Напоминалки» тап запускает их действие, то же,
-  // что она; у остальных (предмет, привычка, задача, погода) — ровно то, что делал бы скан (`showScanned`).
+  // что она; у привычки — карта дней (`openHabitMap`), у остальных (предмет, задача, погода) — ровно то, что делал бы скан (`showScanned`).
   // «Конструктор виджетов»: сообщить оболочке, что действие настоящей карточки сработало (мост ≥32) — она скроет карточку в стопке виджета
   // или перенесёт её в конец, если так выбрано в настройках карточки («После срабатывания»). Нажатие в самом виджете оболочка видит сама.
   function notifyWidgetFired(c){
@@ -1431,6 +1445,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     if(N && typeof N.widgetCardFired === "function"){ try{ N.widgetCardFired(String(c.id)); }catch(e){} }
   }
   function onCardTap(c){
+    if(c.type === "habit"){ openHabitMap(c.id); return; } // привычка: карта дней (отметка — нажатием на день); скан кода по-прежнему отмечает сегодня
     notifyWidgetFired(c);
     if(isSingletonCard(c)){ runSingletonCard(c); return; }
     if(c.type === "timer" || c.type === "alarm" || c.type === "combo"){ startTimerForCard(c); return; }
@@ -2820,13 +2835,14 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
 
   // найденная по скану карточка: таймер стартует сразу и показывается слоем; «Сегодня» слоя не имеет — сразу создаёт заметку
   // отметить сегодняшний день: true — отмечено сейчас, false — сегодня уже отмечено (или это не привычка)
-  function markHabitToday(id){
+  function markHabitToday(id){ return markHabitDay(id, todayIso()); }
+  // отметить день iso (ГГГГ-ММ-ДД, не позже сегодня): true — отмечено сейчас, false — уже отмечен (или не привычка)
+  function markHabitDay(id, iso){
     var c = findCard(id);
-    if(!c || c.type !== "habit") return false;
-    var t = todayIso();
+    if(!c || c.type !== "habit" || !/^\d{4}-\d{2}-\d{2}$/.test(String(iso)) || iso > todayIso()) return false;
     var days = habitDays(c);
-    if(days.indexOf(t) >= 0) return false;
-    days.push(t);
+    if(days.indexOf(iso) >= 0) return false;
+    days.push(iso);
     c.days = normHabitDays(days);
     c.updatedAt = Date.now();
     saveCards();
@@ -3204,6 +3220,12 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   // вход из оболочки (ScanActivity → MainActivity): mode "note" — «Сегодня» (id карточки) либо заметка по QR (id заметки),
   // "create" — создать карточку с этим id (код уже напечатан)
   function openCardFromNative(id, mode){
+    if(mode === "habitmap"){ // одно нажатие на карточку-привычку в виджете: карта дней
+      reloadCards();
+      var hc = findCard(id);
+      if(hc && hc.type === "habit") openHabitMap(id); else renderGrid();
+      return;
+    }
     if(mode === "note" && id === COMBO_NATIVE_ID){ drainPendingCombos(true); return; } // «Комбинированный» из окна ярлыка: задача и «открыть»
     if(mode === "note" && id === TASK_NATIVE_ID){ drainPendingTasks(); return; } // «Создавать задачу», отсканированный в окне ярлыка
     if(mode === "note" && id === TODAY_NATIVE_ID){ createDatedNoteWhenReady(0); return; } // общий код «Сегодня» из окна ярлыка
@@ -3218,7 +3240,14 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   // Окно ярлыка открыто нажатием на карточку виджета рабочего стола: код карточки обрабатывается так, как если бы его только что отсканировали
   function runScannedCode(text){
     reloadCards();
-    handleScanned(String(text || ""));
+    text = String(text || "");
+    if(text.indexOf("habitmark:") === 0){ // двойное нажатие на привычку в виджете: отметка на сегодня без слоя, окно сразу закрывается
+      var hid = text.slice(10), hc = findCard(hid);
+      if(hc && hc.type === "habit" && markHabitToday(hid)) evLog(cardTitle(hc));
+      if(nativeScan && nativeScan.close){ try{ nativeScan.close(); }catch(e){} }
+      return;
+    }
+    handleScanned(text);
   }
 
   // ---------- для «Конструктора виджетов» (widgets.js) ----------

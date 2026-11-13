@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 149.0 (13.11)
+   Версия: 149.1 (13.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -11234,13 +11234,13 @@
     // «Комбинированный» из окна ярлыка: вкладку не переключаем — сначала выполняется очередь (задача, «открыть»)
     if(String(id) === "combo"){ ensureItemCards().openCardFromNative("combo", "note"); return; }
     openSettingsTabDirect("set2s_9");
-    ensureItemCards().openCardFromNative(String(id), mode === "create" ? "create" : "note");
+    ensureItemCards().openCardFromNative(String(id), mode === "create" ? "create" : (mode === "habitmap" ? "habitmap" : "note"));
   }
   window.__ltOpenCard = openCardFromNative;
   function handleCardLaunchParam(){
     var m = /[?&]card=([A-Za-z0-9]{4,32})(?:&|$)/.exec(location.search || "");
     if(!m) return;
-    var mode = /[?&]cardmode=create(?:&|$)/.test(location.search) ? "create" : "note";
+    var mode = /[?&]cardmode=create(?:&|$)/.test(location.search) ? "create" : (/[?&]cardmode=habitmap(?:&|$)/.test(location.search) ? "habitmap" : "note");
     try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
     setTimeout(function(){ openCardFromNative(m[1], mode); }, 0);
   }

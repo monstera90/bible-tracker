@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 9.0 (13.11)
+// Версия: 10.0 (13.11)
 // Версия: 6.0 (26.10) — мост ScanBridge: musicHeadphones (подключены ли наушники; комбо с галочкой «Наушники обязательны»).
 // Версия: 5.0 (26.10) — мост ScanBridge: musicPlayTrack / musicPlayFolder (QR «Комбинированный» из окна ярлыка включает трек или папку через MusicPlayer; приложение не открывается).
 // Версия: 4.0 (24.10) — мост ScanBridge: setAlarm / cancelAlarm / getAlarms (скан кода будильника в окне ярлыка заводит будильник CardAlarms).
@@ -18,6 +18,9 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.MotionEvent
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.RenderProcessGoneDetail
@@ -54,6 +57,12 @@ class ScanActivity : ComponentActivity() {
         const val SCAN_URL = WebAssetServer.ORIGIN + "/scan.html"
         /** Нажатие на карточку виджета «Стопка QR-карточек»: extra `code` — текст QR, `tok` — ключ установки (QrWidgets.token). */
         const val ACTION_SCAN_CODE = "com.app.lifetracker.SCAN_CODE"
+
+        /**
+         * Карточка-привычка в виджете (extra `habit`): окно без страницы ждёт второго нажатия столько мс. Не пришло — одно нажатие
+         * (открывается карта дней в приложении), пришло — двойное (отметка на сегодня, карточка уходит из виджета до полуночи).
+         */
+        const val HABIT_DOUBLE_MS = 400L
     }
 
     private lateinit var server: WebAssetServer
@@ -79,6 +88,69 @@ class ScanActivity : ComponentActivity() {
             }
         }
         return true
+    }
+
+    /** Ключ карточки-привычки, если это нажатие на неё в виджете (extra `habit`, тот же `tok`); иначе null. */
+    private fun habitKeyOf(i: Intent?): String? {
+        if (i == null || i.action != ACTION_SCAN_CODE || !i.getBooleanExtra("habit", false)) return null
+        if (!QrWidgets.tokenOk(this, i.getStringExtra("tok"))) return null
+        val key = i.getStringExtra("key") ?: return null
+        return if (CARD_ID_RE.matches(key)) key else null
+    }
+
+    private val habitHandler = Handler(Looper.getMainLooper())
+    private val habitSingleRun = Runnable { habitSingle() }
+    private var habitWaiting = false
+    private var habitKey = ""
+
+    /** Первое нажатие на привычку: окно прозрачное, страницы нет — ждём второго нажатия (его принимает [dispatchTouchEvent] или новый intent виджета). */
+    private fun beginHabitWait(key: String) {
+        if (habitWaiting && habitKey == key) {
+            habitDouble()
+            return
+        }
+        habitKey = key
+        habitWaiting = true
+        habitHandler.removeCallbacks(habitSingleRun)
+        habitHandler.postDelayed(habitSingleRun, HABIT_DOUBLE_MS)
+    }
+
+    /** Второго нажатия не было: приложение открывается на карте дней привычки (окно запущено нами, фоновых запретов нет). */
+    private fun habitSingle() {
+        if (!habitWaiting) return
+        habitWaiting = false
+        val intent = Intent(this, MainActivity::class.java).apply {
+            action = MainActivity.ACTION_OPEN_CARD
+            putExtra(MainActivity.EXTRA_CARD_ID, habitKey)
+            putExtra(MainActivity.EXTRA_CARD_MODE, "habitmap")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            // приложение не запустилось — просто закрываем окно
+        }
+        finishAndRemoveTask()
+    }
+
+    /** Двойное нажатие: карточка уходит из стопки до полуночи, страница молча отмечает сегодня (`habitmark:<id>`) и закрывает окно. */
+    private fun habitDouble() {
+        if (!habitWaiting) return
+        habitWaiting = false
+        habitHandler.removeCallbacks(habitSingleRun)
+        QrWidgets.hideHabitToday(applicationContext, habitKey)
+        initWeb()
+        initialCode = "habitmark:" + habitKey
+        webView.loadUrl(SCAN_URL)
+        habitHandler.postDelayed({ finishAndRemoveTask() }, 5000L) // страница закрывает окно сама; это запас на случай сбоя
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (habitWaiting) {
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) habitDouble()
+            return true
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
     private fun readCode(i: Intent?) {
@@ -124,20 +196,8 @@ class ScanActivity : ComponentActivity() {
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
 
-        // Бандл веб-части: только чтение (см. WebUpdater.activeBundleReadOnly), состояние обновлений не трогаем.
-        val updater = WebUpdater(File(filesDir, "web"), { readBuiltinVersion() }, false)
-        val bundle = try {
-            updater.activeBundleReadOnly()
-        } catch (e: Exception) {
-            null
-        }
-        server = WebAssetServer(applicationContext, bundle)
-
-        webView = WebView(this)
-        webView.setBackgroundColor(Color.TRANSPARENT)
         root = FrameLayout(this)
         root.setBackgroundColor(Color.TRANSPARENT)
-        root.addView(webView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         setContentView(root)
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
@@ -149,22 +209,58 @@ class ScanActivity : ComponentActivity() {
             WindowInsetsCompat.CONSUMED
         }
 
-        setupWebView()
-
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 finishAndRemoveTask()
             }
         })
 
+        // Нажатие на карточку-привычку в виджете: страницу не строим (WebView задержал бы окно), сначала ждём второго нажатия
+        val habit = habitKeyOf(intent)
+        if (habit != null) {
+            beginHabitWait(habit)
+            return
+        }
+
+        initWeb()
         readCode(intent)
         webView.loadUrl(SCAN_URL)
+    }
+
+    /** Страница со сканером (один раз): сервер ресурсов, WebView, мост. */
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun initWeb() {
+        if (::webView.isInitialized) return
+        // Бандл веб-части: только чтение (см. WebUpdater.activeBundleReadOnly), состояние обновлений не трогаем.
+        val updater = WebUpdater(File(filesDir, "web"), { readBuiltinVersion() }, false)
+        val bundle = try {
+            updater.activeBundleReadOnly()
+        } catch (e: Exception) {
+            null
+        }
+        server = WebAssetServer(applicationContext, bundle)
+
+        webView = WebView(this)
+        webView.setBackgroundColor(Color.TRANSPARENT)
+        root.addView(webView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        pushInsets()
+
+        setupWebView()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (handleRpe(intent)) return // окно сканера уже открыто и остаётся как было
+        // Привычка в виджете: второе нажатие, пока окно ждёт, — двойное; иначе новое ожидание
+        val habit = habitKeyOf(intent)
+        if (habit != null) {
+            beginHabitWait(habit)
+            return
+        }
         // Ярлык нажат повторно, пока окно открыто: перезапускаем сканер (или показываем код карточки из виджета).
+        habitWaiting = false
+        habitHandler.removeCallbacks(habitSingleRun)
+        initWeb()
         readCode(intent)
         webView.loadUrl(SCAN_URL)
     }
@@ -182,6 +278,7 @@ class ScanActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        habitHandler.removeCallbacksAndMessages(null)
         try {
             webView.stopLoading()
             webView.destroy()

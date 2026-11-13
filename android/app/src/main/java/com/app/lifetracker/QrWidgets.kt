@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 8.0 (13.11)
+// Версия: 9.0 (13.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -44,6 +44,8 @@ import java.util.UUID
  * «После срабатывания» (`after` у карточки): "hide" — карточка скрыта в стопке до конца дня, "end" — уходит в конец стопки; если скрыты все карточки,
  * виджет показывает «На сегодня больше ничего». Срабатывание — нажатие в виджете ([onCardFired] из ScanActivity) или нажатие/скан карточки
  * в приложении (мост ≥32 `widgetCardFired`).
+ * Карточка-привычка (`habit` у карточки): одно нажатие открывает в приложении карту дней, двойное — отмечает сегодня и убирает карточку из стопки до
+ * конца дня при любом «после срабатывания» ([hideHabitToday]); различает их окно [ScanActivity] (ждёт второго нажатия, [ScanActivity.HABIT_DOUBLE_MS]).
  *
  * Галочка «Отображать заряд аккумулятора» (`battery` у виджета): в конец стопки добавляется служебная карточка [QrBattery.KEY] — её лицо рисует
  * [QrBattery.render] (заряд телефона и Bluetooth-наушников), нажатие на неё ничего не делает. Галочка «…(несколько устройств)» (`batteryMulti`) добавляет
@@ -131,7 +133,7 @@ object QrWidgets {
 
     class Live(val k: String, val id: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
-    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L)
+    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false)
     class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
@@ -191,7 +193,7 @@ object QrWidgets {
                         val da = c.optJSONArray("days")
                         if (da != null) for (x in 0 until da.length()) da.optInt(x).let { if (it in 1..7) days.add(it) }
                         val after = c.optString("after", "none").let { if (it == "hide" || it == "end") it else "none" }
-                        cards.add(Card(key, c.optString("code", ""), c.optString("title", ""), live, times, days, after))
+                        cards.add(Card(key, c.optString("code", ""), c.optString("title", ""), live, times, days, after, habit = c.optBoolean("habit", false)))
                         if (cards.size >= MAX_CARDS) break
                     }
                 }
@@ -528,6 +530,9 @@ object QrWidgets {
         return at
     }
 
+    /** Двойное нажатие на карточку-привычку в виджете: карточка убирается из стопки до полуночи, что бы ни стояло в «после срабатывания». */
+    fun hideHabitToday(ctx: Context, cardKey: String) = onCardFired(ctx, cardKey, true)
+
     private fun startOfToday(): Long {
         val c = Calendar.getInstance()
         c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
@@ -555,7 +560,7 @@ object QrWidgets {
         val moved = st.optJSONObject("moved") ?: JSONObject()
         val now = System.currentTimeMillis()
         val nextEv = nextEventKey(cfg, now)
-        val shown = cfg.cards.filter { !(it.after == "hide" && it.key in hidden) && dynShown(it, now, nextEv) }
+        val shown = cfg.cards.filter { !((it.after == "hide" || it.habit) && it.key in hidden) && dynShown(it, now, nextEv) }
         if (shown.none { it.after == "end" && moved.has(it.key) }) return shown
         return shown.withIndex().sortedWith(
             compareBy<IndexedValue<Card>> { if (it.value.after == "end") moved.optLong(it.value.key, 0L) else 0L }.thenBy { it.index }
@@ -577,7 +582,7 @@ object QrWidgets {
      * Действие карточки [cardKey] сработало (нажатие в виджете, в приложении или скан): у карточек с «после срабатывания» = «скрывать» она
      * убирается из стопки до конца дня, с «в конец» — уходит в конец стопки. Виджеты, где карточки нет или выбрано «ничего», не трогаются.
      */
-    fun onCardFired(ctx: Context, cardKey: String) {
+    fun onCardFired(ctx: Context, cardKey: String, forceHide: Boolean = false) {
         if (!KEY_RE.matches(cardKey)) return
         val app = ctx.applicationContext
         val touchedCfgs = HashSet<String>()
@@ -585,10 +590,11 @@ object QrWidgets {
             val all = jmap(app, K_FIRED)
             for (cfg in configs(app)) {
                 val card = cfg.cards.firstOrNull { it.key == cardKey } ?: continue
-                if (card.after == "none") continue
+                if (forceHide && !card.habit) continue
+                if (card.after == "none" && !forceHide) continue
                 val st = firedOf(app, cfg.id)
                 st.put("day", dayKey())
-                if (card.after == "hide") {
+                if (card.after == "hide" || forceHide) {
                     val arr = st.optJSONArray("hidden") ?: JSONArray()
                     var has = false
                     for (i in 0 until arr.length()) if (arr.optString(i) == cardKey) has = true
@@ -916,7 +922,7 @@ object QrWidgets {
                 }
             } else cancelRotate(app, id)
             if (cfg != null && cfg.relevance) anyRel = true
-            if (cfg != null && cfg.cards.any { it.after == "hide" }) anyHide = true // скрытое возвращается в полночь
+            if (cfg != null && cfg.cards.any { it.after == "hide" || it.habit }) anyHide = true // скрытое возвращается в полночь
         }
         var tickAt = if (anyRel || anyHide) nextBoundary() else Long.MAX_VALUE
         tickAt = Math.min(tickAt, dynAt)
