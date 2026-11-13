@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 10.0 (13.11)
+// Версия: 11.0 (13.11)
 // Версия: 6.0 (26.10) — мост ScanBridge: musicHeadphones (подключены ли наушники; комбо с галочкой «Наушники обязательны»).
 // Версия: 5.0 (26.10) — мост ScanBridge: musicPlayTrack / musicPlayFolder (QR «Комбинированный» из окна ярлыка включает трек или папку через MusicPlayer; приложение не открывается).
 // Версия: 4.0 (24.10) — мост ScanBridge: setAlarm / cancelAlarm / getAlarms (скан кода будильника в окне ярлыка заводит будильник CardAlarms).
@@ -98,6 +98,52 @@ class ScanActivity : ComponentActivity() {
         return if (CARD_ID_RE.matches(key)) key else null
     }
 
+    /** Id задачи, если это нажатие на карточку задачи в виджете (extra `task`, тот же `tok`); иначе null. */
+    private fun taskIdOf(i: Intent?): String? {
+        if (i == null || i.action != ACTION_SCAN_CODE || !i.hasExtra("task")) return null
+        if (!QrWidgets.tokenOk(this, i.getStringExtra("tok"))) return null
+        val id = i.getStringExtra("task") ?: return null
+        return if (id.isNotEmpty() && id.length <= 80) id else null
+    }
+
+    private var taskWaiting = false
+    private var taskId = ""
+    private val taskSingleRun = Runnable { taskSingle() }
+
+    /** Первое нажатие на карточку задачи: окно прозрачное, ждём второго (как у привычки). */
+    private fun beginTaskWait(id: String) {
+        if (taskWaiting && taskId == id) {
+            taskDouble()
+            return
+        }
+        taskId = id
+        taskWaiting = true
+        habitHandler.removeCallbacks(taskSingleRun)
+        habitHandler.postDelayed(taskSingleRun, HABIT_DOUBLE_MS)
+    }
+
+    /** Второго нажатия не было: одно нажатие на задачу ничего не делает — окно закрывается. */
+    private fun taskSingle() {
+        if (!taskWaiting) return
+        taskWaiting = false
+        finishAndRemoveTask()
+        overridePendingTransition(0, 0)
+    }
+
+    /** Двойное нажатие: задача отмечается выполненной (очередь оболочки → страница), карточка уходит из стопки. */
+    private fun taskDouble() {
+        if (!taskWaiting) return
+        taskWaiting = false
+        habitHandler.removeCallbacks(taskSingleRun)
+        try {
+            QrWidgets.completeTask(applicationContext, taskId)
+        } catch (e: Exception) {
+            // виджет не должен ронять окно
+        }
+        finishAndRemoveTask()
+        overridePendingTransition(0, 0)
+    }
+
     private val habitHandler = Handler(Looper.getMainLooper())
     private val habitSingleRun = Runnable { habitSingle() }
     private var habitWaiting = false
@@ -146,6 +192,10 @@ class ScanActivity : ComponentActivity() {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (taskWaiting) {
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) taskDouble()
+            return true
+        }
         if (habitWaiting) {
             if (ev.actionMasked == MotionEvent.ACTION_DOWN) habitDouble()
             return true
@@ -215,6 +265,13 @@ class ScanActivity : ComponentActivity() {
             }
         })
 
+        // Нажатие на карточку задачи в виджете: страницу не строим, ждём второго нажатия
+        val task = taskIdOf(intent)
+        if (task != null) {
+            beginTaskWait(task)
+            return
+        }
+
         // Нажатие на карточку-привычку в виджете: страницу не строим (WebView задержал бы окно), сначала ждём второго нажатия
         val habit = habitKeyOf(intent)
         if (habit != null) {
@@ -251,6 +308,11 @@ class ScanActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (handleRpe(intent)) return // окно сканера уже открыто и остаётся как было
+        val task = taskIdOf(intent)
+        if (task != null) {
+            beginTaskWait(task)
+            return
+        }
         // Привычка в виджете: второе нажатие, пока окно ждёт, — двойное; иначе новое ожидание
         val habit = habitKeyOf(intent)
         if (habit != null) {
@@ -259,6 +321,7 @@ class ScanActivity : ComponentActivity() {
         }
         // Ярлык нажат повторно, пока окно открыто: перезапускаем сканер (или показываем код карточки из виджета).
         habitWaiting = false
+        taskWaiting = false
         habitHandler.removeCallbacks(habitSingleRun)
         initWeb()
         readCode(intent)

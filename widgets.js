@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 5.2 (13.11)
+   Версия: 5.3 (13.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -281,13 +281,13 @@
       try{ list = (deps.getCalendarFeed && deps.getCalendarFeed(now, addDays(startOfDay(now), FEED_DAYS))) || []; }catch(e){ list = []; }
       list.forEach(function(it){
         var o = { at: it.at, title: it.title };
-        if(it.k === "task"){ if(feed.tasks.length < MAX_TASKS) feed.tasks.push(o); }
+        if(it.k === "task"){ o.tid = it.tid || ""; if(feed.tasks.length < MAX_TASKS) feed.tasks.push(o); }
         else if(it.at >= now && feed.events.length < MAX_EVENTS) feed.events.push(o);
       });
       return feed;
     }
     function feedSig(feed){
-      function f(a){ return a.map(function(x){ return [x.at, x.title]; }); }
+      function f(a){ return a.map(function(x){ return [x.at, x.title, x.tid || ""]; }); }
       return JSON.stringify([f(feed.tasks), f(feed.events)]);
     }
     // Карточки виджетов и картинки к ним. Ключи — `dt_<id виджета>_<n>` (задача) и `de_<id виджета>_<n>` (событие). Надпись зависит от того, сколько дней
@@ -313,7 +313,7 @@
               if(d0 >= -1) put("_y", DYN_LABELS.over + ", вчера");
               put("_o", DYN_LABELS.over + ", " + od.getDate() + " " + MONTHS_GEN[od.getMonth()]);
             }
-            items.push({ key: key, k: kind, at: it.at, title: it.title });
+            items.push({ key: key, k: kind, at: it.at, title: it.title, tid: it.tid || "" });
           });
         }
         if(w.tasks) add("task", feed.tasks, "dt_");

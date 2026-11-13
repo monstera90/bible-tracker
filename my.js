@@ -1,7 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
-   Версия: 149.1 (13.11)
+   Версия: 149.2 (13.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
    Версия: 89.0 (27.10) — структурная правка: скрытые вкладки окна настроек синхронизируются между устройствами аккаунта: список в `state["__hiddenTabs"]` ({c:"v1:id1,id2", t}), `loadHiddenSettingsTabs`/`saveHiddenSettingsTabs`, `refreshHiddenTabsFromState` (из `rerenderAllFromState`); старый localStorage `bibleHiddenSettingsTabs_v1` один раз переносится (t=1). Откат: my.js 88.0.
@@ -4601,6 +4601,7 @@
     try{ ensureItemCards().onAppResume(); }catch(e){} // карточки, сработавшие из виджета рабочего стола
     try{ if(window.UserTabsMod && window.UserTabsMod.syncSoon) window.UserTabsMod.syncSoon(true); }catch(e){} // вкладки «Интернет» с других устройств
     try{ ensurePomodoroStore(); if(window.PomodoroTab) window.PomodoroTab.sync(); }catch(e){} // помодоро: состояние и «вкладка на экране» заново, законченные отрезки — в календарь и «Историю»
+    try{ drainWidgetTasks(); }catch(e){} // задачи, отмеченные двойным нажатием в виджете
     widgetsFeedTouch(); // карточки «задачи» и «события календаря» в виджетах: время ушло вперёд
   };
   // APK: кнопка «развернуть» плавающего видео (FloatingVideo.kt) — открыть вкладку-сайт `utab_<id>`; сама вкладка, показавшись, забирает видео обратно.
@@ -10330,6 +10331,24 @@
     return WidgetsMod;
   }
   // состояние (задачи, календарь) изменилось или приложение вернулось на экран: виджеты с карточками «задачи»/«события» перепроверят данные
+  // Двойное нажатие на карточку задачи в виджете (мост ≥34): оболочка складывает id задач в очередь, страница отмечает их выполненными
+  function drainWidgetTasks(){
+    var n = window.LifeTrackerNative;
+    if(!n || typeof n.widgetTaskTake !== "function" || typeof n.widgetTaskAck !== "function") return;
+    var arr;
+    try{ arr = JSON.parse(String(n.widgetTaskTake())); }catch(e){ return; }
+    if(!Array.isArray(arr) || !arr.length) return;
+    var ack = [];
+    arr.forEach(function(id){
+      if(typeof id !== "string" || !id) return;
+      try{
+        if(calendarTasksApi.state(id) === "open") calendarTasksApi.done(id);
+        ack.push(id);
+      }catch(e){}
+    });
+    if(ack.length){ try{ n.widgetTaskAck(JSON.stringify(ack)); }catch(e){} }
+    widgetsFeedTouch();
+  }
   function widgetsFeedTouch(){
     try{ if(WidgetsMod && WidgetsMod.feedChanged) WidgetsMod.feedChanged(); }catch(e){}
   }
@@ -26148,6 +26167,7 @@
   try{ pullNativeQuickTasks(); }catch(e){ if(window.Debug) window.Debug.log("Быстрая задача: " + (e && e.message ? e.message : e)); }
   try{ pushQuickTaskTheme(); }catch(e){}
   try{ ensureItemCards().drainPendingTasks(true); }catch(e){ if(window.Debug) window.Debug.log("Очередь QR-задач: " + (e && e.message ? e.message : e)); }
+  try{ drainWidgetTasks(); }catch(e){} // задачи, отмеченные двойным нажатием в виджете, пока приложение было закрыто
   try{ if(localStorage.getItem("qrWidgets_v1")){ ensureWidgets(); window.WidgetsTab.scheduleSync(4000); } }catch(e){} // лица карточек в виджетах рабочего стола
   try{ handleCardLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Карточка из оболочки: " + (e && e.message ? e.message : e)); }
   // Главной страницы больше нет: после перезагрузки приложение сразу открывает окно настроек на последней вкладке

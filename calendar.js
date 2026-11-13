@@ -1,6 +1,6 @@
 /* ===========================================================================
    calendar.js
-   Версия: 18.0 (13.11)
+   Версия: 18.1 (13.11)
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
    Вкладка «Календарь» (ключ `calendar`, кнопка `settingsTabCalendarBtn` — самостоятельный нижний язычок набора 1 справа от «Задачи»,
@@ -1644,7 +1644,7 @@
     },
     // для «Конструктора виджетов» (widgets.js): задачи и события для карточек стопки. Открытые задачи календаря, начало которых раньше `to`
     // (просроченные — тоже), и ближайшие повторения обычных мероприятий с началом в [from, to). Скрытые на этом устройстве не отдаются.
-    // [{k:"task"|"event", id, title, at}] по возрастанию `at`; хранилище и задачи должны быть заданы (my.js `__ltEnsureCalendarStore`)
+    // [{k:"task"|"event", id, title, at[, tid — id задачи у k="task"]}] по возрастанию `at`; хранилище и задачи должны быть заданы (my.js `__ltEnsureCalendarStore`)
     widgetFeed: function(from, to){
       var out = [];
       load().forEach(function(ev){
@@ -1653,7 +1653,7 @@
           if(taskStateOf(ev) !== "open" || ev.start >= to) return;
           var title = ev.title;
           if(TASKS && TASKS.get){ try{ var ti = TASKS.get(ev.taskId); if(ti && ti.title) title = ti.title; }catch(e){} }
-          out.push({ k: "task", id: ev.id, title: String(title || ""), at: ev.start });
+          out.push({ k: "task", id: ev.id, tid: String(ev.taskId), title: String(title || ""), at: ev.start });
           return;
         }
         occurrenceStarts(ev, from, to).forEach(function(at){ out.push({ k: "event", id: ev.id, title: String(ev.title || ""), at: at }); });

@@ -42,6 +42,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 34: задачи, отмеченные двойным нажатием на карточку в виджете (`widgetTaskTake` / `widgetTaskAck`; QrWidgets).
          * 33: оценка нагрузки тренировки из виджета (`widgetRpeSet` / `widgetRpeTake` / `widgetRpeAck`; QrRpe).
          * 31: виджеты рабочего стола «Стопка QR-карточек» (widgetsSync / widgetsState / widgetPin; QrWidgets).
          * 32: `widgetCardFired` — действие карточки сработало в приложении («После срабатывания» у карточки виджета).
@@ -63,7 +64,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 33
+        const val BRIDGE_VERSION = 34
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -1165,6 +1166,28 @@ class NativeBridge(private val activity: MainActivity) {
         if (!activity.pageTrusted) return
         try {
             QrRpe.ackAnswers(activity.applicationContext, idsJson)
+        } catch (e: Exception) {
+            // повторится
+        }
+    }
+
+    /** JSON-массив id задач, которые отметили выполненными двойным нажатием на карточку задачи в виджете и которые страница ещё не применила. */
+    @JavascriptInterface
+    fun widgetTaskTake(): String {
+        if (!activity.pageTrusted) return "[]"
+        return try {
+            QrWidgets.takeTaskDone(activity.applicationContext)
+        } catch (e: Exception) {
+            "[]"
+        }
+    }
+
+    /** Страница отметила задачи с этими id (JSON-массив) — убрать их из очереди. */
+    @JavascriptInterface
+    fun widgetTaskAck(idsJson: String?) {
+        if (!activity.pageTrusted) return
+        try {
+            QrWidgets.ackTaskDone(activity.applicationContext, idsJson)
         } catch (e: Exception) {
             // повторится
         }

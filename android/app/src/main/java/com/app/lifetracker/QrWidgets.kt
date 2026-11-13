@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 9.1 (13.11)
+// Версия: 10.0 (13.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -57,7 +57,8 @@ import java.util.UUID
  * и больше) и у задачи `<ключ>_s.png` («Просрочено, сегодня»), `<ключ>_y.png` («Просрочено, вчера»), `<ключ>_o.png` («Просрочено, 1 января»). Что показать, решает оболочка по часам ([dynShown], [dynBitmap]), поэтому надпись и состав меняются без приложения:
  * задача видна, пока её время в пределах [DYN_DAYS] суток (время прошло — «Просрочено, сегодня» / «вчера» / дата); событие — одно, ближайшее из ещё не начавшихся в этих пределах ([nextEventKey]); нет такого —
  * карточки нет. Будильник `ACTION_TICK` ставится на полночь и на начало ближайшего события ([nextDynChange]). Карточки стоят после QR-карточек и перед карточками заряда;
- * нажатие на них ничего не делает. Среди этих карточек события всегда стоят перед задачами (событие важнее).
+ * нажатие на карточку события ничего не делает, двойное нажатие на карточку задачи отмечает её выполненной ([completeTask], ждёт [ScanActivity.HABIT_DOUBLE_MS]).
+ * Среди этих карточек события всегда стоят перед задачами (событие важнее).
  *
  * Галочка «Спрашивать о тренировке» (`rpeAsk` у виджета): пока есть тренировка без оценки нагрузки ([QrRpe.pendingId]), над ВСЕМИ карточками стоит служебная
  * карточка [QrRpe.KEY] «Как тренировка?» с кнопками 1…10 ([rpeCard], [order]); ответ ложится в очередь [QrRpe.answer], карточка исчезает. Наверх она возвращается
@@ -78,6 +79,8 @@ object QrWidgets {
     private const val K_PEND = "pend"
     private const val K_TOKEN = "token"
     private const val K_FIRED = "fired"
+    private const val K_TDONE = "taskDone" // очередь: id задач, отмеченных двойным нажатием в виджете, ещё не применённых страницей
+    private const val K_THIDE = "taskHide"  // id уже забранных страницей задач: карточка скрыта, пока `sync` не пришлёт состав без неё
     private const val K_BTWANT = "btwant"
     private const val K_BTASK = "btask"
     private const val K_BTASKAT = "btaskat"
@@ -136,7 +139,7 @@ object QrWidgets {
 
     class Live(val k: String, val id: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
-    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false)
+    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "")
     class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
@@ -215,7 +218,7 @@ object QrWidgets {
                         val at = d.optLong("at", 0L)
                         if (!KEY_RE.matches(key) || at <= 0L) continue
                         if (!((kind == "task" && tasksOn) || (kind == "event" && eventsOn))) continue
-                        val dc = Card(key, "", d.optString("title", ""), emptyList(), emptySet(), emptySet(), "none", QrBattery.DEFAULT_FACE, kind, at)
+                        val dc = Card(key, "", d.optString("title", ""), emptyList(), emptySet(), emptySet(), "none", QrBattery.DEFAULT_FACE, kind, at, tid = d.optString("tid", "").take(80))
                         if (kind == "event") evs.add(dc) else tks.add(dc)
                         if (++n >= MAX_DYN) break
                     }
@@ -373,6 +376,7 @@ object QrWidgets {
                 e.putBoolean(K_BTWANT, wantBattery).apply()
             }
             // положение стопки сбрасываем, только если поменялись настройки виджета; новые задачи/события и перерисовка лиц стопку не двигают
+            pruneHiddenTasks(app)
             refreshAll(app, structChanged, true)
             true
         } catch (e: Exception) {
@@ -533,6 +537,75 @@ object QrWidgets {
         return at
     }
 
+    private fun idSet(ctx: Context, key: String): MutableSet<String> {
+        val out = LinkedHashSet<String>()
+        try {
+            val a = JSONArray(prefs(ctx).getString(key, "[]"))
+            for (i in 0 until a.length()) a.optString(i).let { if (it.isNotEmpty()) out.add(it) }
+        } catch (e: Exception) {
+            // повреждённая запись — считаем пустой
+        }
+        return out
+    }
+
+    private fun putIdSet(ctx: Context, key: String, ids: Set<String>) {
+        prefs(ctx).edit().putString(key, JSONArray(ids.toList()).toString()).apply()
+    }
+
+    /** Задачи, которые считаются выполненными в виджете: ждут страницу или уже забраны ею, но состав карточек ещё старый. */
+    private fun doneTaskIds(ctx: Context): Set<String> = synchronized(LOCK) { idSet(ctx, K_TDONE) + idSet(ctx, K_THIDE) }
+
+    /**
+     * Двойное нажатие на карточку задачи в виджете: id задачи встаёт в очередь (страница отметит её выполненной — `widgetTaskTake`/`widgetTaskAck`, мост ≥34),
+     * карточка сразу уходит из стопки, стопка возвращается к первой карточке.
+     */
+    fun completeTask(ctx: Context, taskId: String) {
+        if (taskId.isEmpty() || taskId.length > 80) return
+        val app = ctx.applicationContext
+        val cfgIds = HashSet<String>()
+        synchronized(LOCK) {
+            val q = idSet(app, K_TDONE)
+            q.add(taskId)
+            putIdSet(app, K_TDONE, q)
+            for (cfg in configs(app)) if (cfg.cards.any { it.dyn == "task" && it.tid == taskId }) cfgIds.add(cfg.id)
+        }
+        if (cfgIds.isNotEmpty()) refreshAll(app, true, false, cfgIds)
+    }
+
+    /** JSON-массив id задач, отмеченных в виджете и ещё не применённых страницей. */
+    fun takeTaskDone(ctx: Context): String = synchronized(LOCK) { JSONArray(idSet(ctx, K_TDONE).toList()).toString() }
+
+    /** Страница отметила эти задачи: из очереди они уходят в «скрытые» (до новой отправки состава карточек). */
+    fun ackTaskDone(ctx: Context, idsJson: String?) {
+        val app = ctx.applicationContext
+        val ids = HashSet<String>()
+        try {
+            val a = JSONArray(idsJson ?: "[]")
+            for (i in 0 until a.length()) a.optString(i).let { if (it.isNotEmpty()) ids.add(it) }
+        } catch (e: Exception) {
+            return
+        }
+        if (ids.isEmpty()) return
+        synchronized(LOCK) {
+            val q = idSet(app, K_TDONE)
+            val h = idSet(app, K_THIDE)
+            for (id in ids) if (q.remove(id)) h.add(id)
+            putIdSet(app, K_TDONE, q)
+            putIdSet(app, K_THIDE, h)
+        }
+    }
+
+    /** После отправки состава карточек: в «скрытых» остаются только задачи, которые в нём всё ещё есть. */
+    private fun pruneHiddenTasks(app: Context) {
+        synchronized(LOCK) {
+            val h = idSet(app, K_THIDE)
+            if (h.isEmpty()) return
+            val present = HashSet<String>()
+            for (cfg in configs(app)) for (c in cfg.cards) if (c.dyn == "task" && c.tid.isNotEmpty()) present.add(c.tid)
+            if (h.retainAll(present)) putIdSet(app, K_THIDE, h)
+        }
+    }
+
     /** Двойное нажатие на карточку-привычку в виджете: карточка убирается из стопки до полуночи, что бы ни стояло в «после срабатывания». */
     fun hideHabitToday(ctx: Context, cardKey: String) = onCardFired(ctx, cardKey, true)
 
@@ -563,7 +636,8 @@ object QrWidgets {
         val moved = st.optJSONObject("moved") ?: JSONObject()
         val now = System.currentTimeMillis()
         val nextEv = nextEventKey(cfg, now)
-        val shown = cfg.cards.filter { !((it.after == "hide" || it.habit) && it.key in hidden) && dynShown(it, now, nextEv) }
+        val doneTasks = doneTaskIds(ctx)
+        val shown = cfg.cards.filter { !((it.after == "hide" || it.habit) && it.key in hidden) && !(it.dyn == "task" && it.tid.isNotEmpty() && it.tid in doneTasks) && dynShown(it, now, nextEv) }
         if (shown.none { it.after == "end" && moved.has(it.key) }) return shown
         return shown.withIndex().sortedWith(
             compareBy<IndexedValue<Card>> { if (it.value.after == "end") moved.optLong(it.value.key, 0L) else 0L }.thenBy { it.index }
