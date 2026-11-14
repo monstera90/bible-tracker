@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.6 (14.11)
+// Версия: 2.7 (14.11) — карточка события: три зоны нажатия (левый край — предыдущее событие, правый — следующее, центр — форма события в приложении), точки места в ряду на лице.
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
@@ -42,7 +42,11 @@ class QrWidgetService : RemoteViewsService() {
                 val cfg = QrWidgets.cfgFor(ctx, widgetId)
                 val list = if (cfg == null) emptyList() else QrWidgets.order(ctx, cfg).cards
                 val fresh = HashMap<String, Bitmap>()
-                for (c in list) fresh[c.key] = QrWidgets.bitmapFor(ctx, c)
+                val pos = if (cfg != null && cfg.events) QrWidgets.eventPos(ctx, cfg) else Pair(0, 0)
+                for (c in list) {
+                    val bmp = QrWidgets.bitmapFor(ctx, c)
+                    fresh[c.key] = if (c.dyn == "event") QrWidgets.withEventDots(bmp, pos.first, pos.second) else bmp
+                }
                 cards = list
                 bitmaps = fresh
             } catch (e: Throwable) {
@@ -72,7 +76,16 @@ class QrWidgetService : RemoteViewsService() {
             val isRpe = c.key == QrRpe.KEY
             rv.setViewVisibility(R.id.rpe_grid, if (isRpe) View.VISIBLE else View.GONE)
             if (isRpe) for (i in RPE_BUTTONS.indices) rv.setOnClickFillInIntent(RPE_BUTTONS[i], Intent().putExtra("rpe", i + 1))
-            // карточки заряда и событий — не QR-карточки: нажатие на них ничего не делает; у задач — своё (ниже) (без fill-in intent шаблон не срабатывает)
+            // карточка события: три зоны поверх лица (видимость задаётся всегда — элемент списка может быть переиспользован)
+            val isEv = c.dyn == "event"
+            rv.setViewVisibility(R.id.ev_zones, if (isEv) View.VISIBLE else View.GONE)
+            if (isEv) {
+                // у первого и последнего события нажатие у края ничего не меняет (QrWidgets.eventNav: ряд не зациклен), но intent у зоны всегда один и тот же
+                rv.setOnClickFillInIntent(R.id.ev_left, Intent().putExtra("evnav", -1).putExtra("wid", widgetId))
+                rv.setOnClickFillInIntent(R.id.ev_right, Intent().putExtra("evnav", 1).putExtra("wid", widgetId))
+                rv.setOnClickFillInIntent(R.id.ev_center, Intent().putExtra("evopen", c.eid).putExtra("evat", c.at))
+            }
+            // карточки заряда — не QR-карточки: нажатие на них ничего не делает; у задач — своё (ниже) (без fill-in intent шаблон не срабатывает)
             if (!isRpe && !QrBattery.isBatteryKey(c.key) && c.dyn.isEmpty()) {
                 val fill = Intent().putExtra("key", c.key).putExtra("habit", c.habit)
                 // будильник: ScanActivity заводит/выключает его сама, без окна и страницы (`alarm`); нет настроек от страницы — прежний путь (`alarmmark:<id>`)

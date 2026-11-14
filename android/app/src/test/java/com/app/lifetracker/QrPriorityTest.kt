@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 3.2 (14.11)
+// Версия: 3.3 (14.11) — тест ряда событий (eventIndex, без зацикливания)
 
 import com.app.lifetracker.QrWidgets.Card
 import com.app.lifetracker.QrWidgets.Cfg
@@ -558,5 +558,22 @@ class QrPriorityTest {
         val v = QrPriority.check(bad, cf, s)
         assertTrue(v.any { it.startsWith("10") })
         assertTrue(v.any { it.startsWith("11") })
+    }
+    @Test fun eventRow_indexPicksNthUpcoming_notLooped() {
+        val c = cal(12)
+        val now = c.timeInMillis
+        val h = 3_600_000L
+        val cards = listOf(
+            card("e2", dyn = "event", at = now + 3 * h), card("e0", dyn = "event", at = now + h),
+            card("e1", dyn = "event", at = now + 2 * h), card("past", dyn = "event", at = now - 1000L)
+        )
+        val cf = cfg(cards)
+        val s = snap(c)
+        assertEquals(listOf("e0", "e1", "e2"), QrPriority.eventCards(cf, s).map { it.key })
+        assertEquals("e0", QrPriority.nextEventKey(cf, s))
+        assertEquals("e1", QrPriority.nextEventKey(cf, s.copy(eventIndex = 1)))
+        assertEquals("e2", QrPriority.nextEventKey(cf, s.copy(eventIndex = 7))) // за краем ряда — крайнее, не по кругу
+        assertEquals("e0", QrPriority.nextEventKey(cf, s.copy(eventIndex = -3)))
+        assertEquals(listOf("e1"), keys(run(cf, s.copy(eventIndex = 1))))
     }
 }

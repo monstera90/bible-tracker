@@ -8,6 +8,7 @@ package com.app.lifetracker
 // Версия: 3.0 (21.10) — плашка таймера в приложении: `inAppIsland` (InAppIsland.kt), вырез камеры берётся из WindowInsets, старт/стоп в onResume/onPause. Откат: MainActivity.kt 2.1.
 // Версия: 2.1 (21.10) — onResume гасит вибрацию конца таймера карточки (CardTimers.stopVibration).
 // Версия: 2.0 (21.10) — вкладка Claude: `webHost` (FrameLayout вокруг главного WebView) и `claudeTab` (ClaudeTab.kt), `handleFileChooser`/`openExternalLink` вынесены для второго WebView.
+// Версия: 1.1 (14.11) — вход ACTION_OPEN_EVENT (виджет → форма мероприятия: window.__ltOpenCalendarEvent / ?calev=<id>&calat=<мс>).
 // Версия: 1.0 (16.10) — вход ACTION_OPEN_CARD (ScanActivity → страница: window.__ltOpenCard / ?card=<id>).
 
 import android.Manifest
@@ -72,6 +73,11 @@ class MainActivity : ComponentActivity() {
         // ScanActivity (ярлык «Сканировать QR-код») просит открыть приложение внутри карточки: заметка по id либо
         // создание карточки под уже напечатанный код. Страница получает это как window.__ltOpenCard(id, mode).
         const val ACTION_OPEN_CARD = "com.app.lifetracker.OPEN_CARD"
+        /** Нажатие на карточку события календаря в виджете (ScanActivity): страница открывает форму этого мероприятия — window.__ltOpenCalendarEvent(id, at) / ?calev=<id>&calat=<мс>. */
+        const val ACTION_OPEN_EVENT = "com.app.lifetracker.OPEN_EVENT"
+        const val EXTRA_EVENT_ID = "eventId"
+        const val EXTRA_EVENT_AT = "eventAt"
+        private val EVENT_ID_RE = Regex("^[A-Za-z0-9_-]{1,64}$")
         const val EXTRA_CARD_ID = "cardId"
         const val EXTRA_CARD_MODE = "cardMode"
         private val CARD_ID_RE = Regex("^[A-Za-z0-9]{4,32}$")
@@ -392,9 +398,11 @@ class MainActivity : ComponentActivity() {
         handleNotifyIntent(intent)
         handleShareIntent(intent)
         val cardLaunch = cardLaunchOf(intent)
+        val eventLaunch = eventLaunchOf(intent)
         webView.loadUrl(
             when {
                 intent?.action == ACTION_DIAG -> WebAssetServer.DIAG_URL
+                eventLaunch != null -> WebAssetServer.START_URL + "?calev=" + eventLaunch.first + "&calat=" + eventLaunch.second
                 cardLaunch != null -> WebAssetServer.START_URL + "?card=" + cardLaunch.first + "&cardmode=" + cardLaunch.second
                 else -> WebAssetServer.START_URL
             }
@@ -414,6 +422,15 @@ class MainActivity : ComponentActivity() {
         handleShareIntent(intent)
         if (intent.action == ACTION_DIAG) webView.loadUrl(WebAssetServer.DIAG_URL)
         if (intent.action == ACTION_OPEN_TAB) pendingOpenAppTab = intent.getStringExtra(EXTRA_TAB) // выполнится в onResume, как только окно встанет на место
+        val eventLaunch = eventLaunchOf(intent)
+        if (eventLaunch != null) {
+            if (pageTrusted) {
+                // id проверен (буквы, цифры, «_», «-»), время — число: в строку скрипта попадать нечему
+                webView.evaluateJavascript("window.__ltOpenCalendarEvent && window.__ltOpenCalendarEvent('${eventLaunch.first}',${eventLaunch.second})", null)
+            } else {
+                webView.loadUrl(WebAssetServer.START_URL + "?calev=" + eventLaunch.first + "&calat=" + eventLaunch.second)
+            }
+        }
         val cardLaunch = cardLaunchOf(intent)
         if (cardLaunch != null) {
             if (pageTrusted) {
@@ -425,6 +442,14 @@ class MainActivity : ComponentActivity() {
                 webView.loadUrl(WebAssetServer.START_URL + "?card=" + cardLaunch.first + "&cardmode=" + cardLaunch.second)
             }
         }
+    }
+
+    /** (id события, начало повторения в мс) из intent ACTION_OPEN_EVENT или null. */
+    private fun eventLaunchOf(intent: Intent?): Pair<String, Long>? {
+        if (intent?.action != ACTION_OPEN_EVENT) return null
+        val id = intent.getStringExtra(EXTRA_EVENT_ID) ?: return null
+        if (!EVENT_ID_RE.matches(id)) return null
+        return Pair(id, Math.max(0L, intent.getLongExtra(EXTRA_EVENT_AT, 0L)))
     }
 
     /** (id, режим) из intent ACTION_OPEN_CARD или null; id проверяется, режим — только "note", "create" или "habitmap" (карта дней привычки). */

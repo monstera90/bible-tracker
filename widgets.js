@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 5.8 (14.11)
+   Версия: 5.9 (14.11) — карточка события листается нажатием у левого/правого края (до 10 событий, QrWidgets.kt): в оболочку уходят 10 кандидатов и id события (`eid`) — центр карточки открывает форму именно этого события.
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -30,7 +30,7 @@
   var EVENT_COLOR = "#317bf6"; // цвет карточки события по умолчанию (синий макета, чуть насыщеннее)
   var DYN_LAST_KEY = "widgetsDynColors_v1"; // последний выбранный цвет карточек задач/событий: {task, event}
   var MAX_TASKS = 12; // карточек задач в виджете (ближайшие по времени, просроченные первыми)
-  var MAX_EVENTS = 4; // кандидатов в «следующее событие»: оболочка показывает первое, которое ещё не началось
+  var MAX_EVENTS = 10; // кандидатов в «следующее событие»: оболочка показывает первое, которое ещё не началось, а нажатие у края карточки листает до 10 событий вперёд/назад (без зацикливания)
   var FEED_DAYS = 7; // неделя вперёд (сегодня…через 6 дней, чтобы название дня недели было однозначным): оболочка сама решает по часам, что показать, пока приложение закрыто
   var DAY_MS = 86400000;
   // Лицо динамической карточки (доли ширины карточки; сняты с макета 660 px): значок Tabler — «circle-check» / «calendar-event» (сетка 24, линия 2),
@@ -297,12 +297,12 @@
       list.forEach(function(it){
         var o = { at: it.at, title: it.title };
         if(it.k === "task"){ o.tid = it.tid || ""; if(feed.tasks.length < MAX_TASKS) feed.tasks.push(o); }
-        else if(it.at >= now && feed.events.length < MAX_EVENTS) feed.events.push(o);
+        else if(it.at >= now && feed.events.length < MAX_EVENTS){ o.eid = String(it.id || ""); feed.events.push(o); }
       });
       return feed;
     }
     function feedSig(feed){
-      function f(a){ return a.map(function(x){ return [x.at, x.title, x.tid || ""]; }); }
+      function f(a){ return a.map(function(x){ return [x.at, x.title, x.tid || "", x.eid || ""]; }); }
       return JSON.stringify([f(feed.tasks), f(feed.events)]);
     }
     // Карточки виджетов и картинки к ним. Ключи — `dt_<id виджета>_<n>` (задача) и `de_<id виджета>_<n>` (событие). Надпись зависит от того, сколько дней
@@ -328,7 +328,7 @@
               if(d0 >= -1) put("_y", DYN_LABELS.over + ", вчера");
               put("_o", DYN_LABELS.over + ", " + od.getDate() + " " + MONTHS_GEN[od.getMonth()]);
             }
-            items.push({ key: key, k: kind, at: it.at, title: it.title, tid: it.tid || "" });
+            items.push({ key: key, k: kind, at: it.at, title: it.title, tid: it.tid || "", eid: it.eid || "" });
           });
         }
         if(w.tasks) add("task", feed.tasks, "dt_");

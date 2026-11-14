@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 3.3 (14.11)
+// Версия: 3.4 (14.11) — карточка события листается: [Snapshot.eventIndex], [eventCards] (до [EVENT_NAV_MAX] ближайших событий), [nextEventKey] берёт событие с этим номером.
 
 import com.app.lifetracker.QrWidgets.Card
 import com.app.lifetracker.QrWidgets.Cfg
@@ -79,7 +79,9 @@ object QrPriority {
         val movedAt: Map<String, Long> = emptyMap(),
         val doneTaskIds: Set<String> = emptySet(),
         val rpePending: Boolean = false,
-        val lastTopKey: String = ""
+        val lastTopKey: String = "",
+        /** Какое по счёту из ближайших событий показывает карточка события (0 — первое; нажатие у края карточки листает, без зацикливания). */
+        val eventIndex: Int = 0
     )
 
     class Scored(val card: Card, val score: Int, val reason: String)
@@ -246,15 +248,20 @@ object QrPriority {
 
     // ---------- фильтр и перенос в конец ----------
 
-    /** Ключ события, которое сейчас показывает карточка «события календаря»: ближайшее из ещё не начавшихся в пределах [DYN_DAYS] суток; пусто — показывать нечего. */
-    fun nextEventKey(cfg: Cfg, s: Snapshot): String {
+    /** Сколько ближайших событий можно пролистать на карточке события. */
+    const val EVENT_NAV_MAX = 10
+
+    /** Ближайшие ещё не начавшиеся события в пределах [DYN_DAYS] суток по возрастанию времени (при равном — как их прислала страница), не больше [EVENT_NAV_MAX]. */
+    fun eventCards(cfg: Cfg, s: Snapshot): List<Card> {
         val limit = dayStart(s.cal, s.now, DYN_DAYS)
-        var best: Card? = null
-        for (c in cfg.cards) {
-            if (c.dyn != "event" || c.at <= s.now || c.at >= limit) continue
-            if (best == null || c.at < best.at) best = c
-        }
-        return best?.key ?: ""
+        return cfg.cards.filter { it.dyn == "event" && it.at > s.now && it.at < limit }.sortedBy { it.at }.take(EVENT_NAV_MAX)
+    }
+
+    /** Ключ события, которое сейчас показывает карточка «события календаря»: [Snapshot.eventIndex]-е из ближайших ([eventCards]; номер за краем списка — крайнее); пусто — показывать нечего. */
+    fun nextEventKey(cfg: Cfg, s: Snapshot): String {
+        val list = eventCards(cfg, s)
+        if (list.isEmpty()) return ""
+        return list[s.eventIndex.coerceIn(0, list.size - 1)].key
     }
 
     /** Карточка задачи видна, пока её время раньше конца окна [DYN_DAYS] суток (просроченная — до отметки); событие — только то, что выбрано [nextEventKey]. */

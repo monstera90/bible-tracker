@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 13.6 (14.11)
+// Версия: 13.7 (14.11) — карточка события листается нажатием у левого/правого края (до 10 событий, без зацикливания, [eventNav]), центр открывает форму этого события в приложении (`eid`); через минуту ряд возвращается к первому событию ([EVENT_RESET_MS]).
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -59,7 +59,10 @@ import java.util.UUID
  * и больше) и у задачи `<ключ>_s.png` («Просрочено, сегодня»), `<ключ>_y.png` («Просрочено, вчера»), `<ключ>_o.png` («Просрочено, 1 января»). Что показать, решает оболочка по часам ([QrPriority.build], [dynBitmap]), поэтому надпись и состав меняются без приложения:
  * задача видна, пока её время в пределах [QrPriority.DYN_DAYS] суток (время прошло — «Просрочено, сегодня» / «вчера» / дата); событие — одно, ближайшее из ещё не начавшихся в этих пределах ([QrPriority.nextEventKey]); нет такого —
  * карточки нет. Будильник `ACTION_TICK` ставится на полночь и на начало ближайшего события ([nextDynChange]). Карточки стоят после QR-карточек и перед карточками заряда;
- * нажатие на карточку события ничего не делает, двойное нажатие на карточку задачи отмечает её выполненной ([completeTask], ждёт [ScanActivity.HABIT_DOUBLE_MS]).
+ * Карточка события: нажатие у левого края — предыдущее событие, у правого — следующее (до [QrPriority.EVENT_NAV_MAX] ближайших, ряд не зациклен; номер хранит [eventNav], через [EVENT_RESET_MS]
+ * без нажатий ряд сам возвращается к первому событию — [eventIndexOf], [nextDynChange]); внизу карточки точки показывают место в ряду ([withEventDots]); нажатие в центре открывает в приложении форму
+ * именно этого события (extra `evopen` → [ScanActivity] → MainActivity.ACTION_OPEN_EVENT → страница `__ltOpenCalendarEvent`).
+ * Двойное нажатие на карточку задачи отмечает её выполненной ([completeTask], ждёт [ScanActivity.HABIT_DOUBLE_MS]).
  * Среди этих карточек события всегда стоят перед задачами (событие важнее).
  *
  * Порядок карточек (фильтр, «Как тренировка?», «в конец», баллы релевантности, «к чему возвращаться») считает [QrPriority] — чистая функция от
@@ -104,6 +107,7 @@ object QrWidgets {
     private const val K_RETFIRST = "retfirst" // id виджета → время первого смахивания в текущей серии (потолок откладывания возврата)
     private const val K_AEV = "alarmEv"       // очередь: заведённые/выключенные нажатием в виджете будильники — страница запишет их в журнал событий
     private const val K_AEVSEQ = "alarmEvSeq"
+    private const val K_EVIDX = "evidx"         // id виджета конструктора → {i: номер события в ряду карточки события, t: время последнего нажатия, мс}
     private const val AEV_MAX = 50
 
     const val ACTION_ROTATE = "com.app.lifetracker.QRW_ROTATE"
@@ -118,6 +122,8 @@ object QrWidgets {
     private const val PEND_TTL_MS = 3 * 60_000L
     private const val DOTS_SHOW_MS = 1400L
     private const val RETURN_AFTER_MS = 60_000L
+    /** Столько мс после последнего нажатия у края ряд событий остаётся пролистанным, затем снова показывает первое (ближайшее) событие. */
+    const val EVENT_RESET_MS = 60_000L
     /** Возврат наверх не откладывается дольше этого от первого смахивания серии, сколько бы раз фабрику ни дёргали. */
     private const val RETURN_MAX_DEFER_MS = 3 * 60_000L
     /** Страховка возврата: шаг проверки и минимальное время от последней постановки стопки наверх (пока смахивание хоть раз не было замечено). */
@@ -164,7 +170,7 @@ object QrWidgets {
     /** Настройки будильника карточки (от страницы): нажатие в виджете заводит/выключает его без окна и страницы. */
     class AlarmSpec(val hour: Int, val minute: Int, val every: Int, val times: Int, val title: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
-    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal")
+    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal")
     class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
@@ -251,7 +257,7 @@ object QrWidgets {
                         val at = d.optLong("at", 0L)
                         if (!KEY_RE.matches(key) || at <= 0L) continue
                         if (!((kind == "task" && tasksOn) || (kind == "event" && eventsOn))) continue
-                        val dc = Card(key, "", d.optString("title", ""), emptyList(), emptySet(), emptySet(), "none", QrBattery.DEFAULT_FACE, kind, at, tid = d.optString("tid", "").take(80))
+                        val dc = Card(key, "", d.optString("title", ""), emptyList(), emptySet(), emptySet(), "none", QrBattery.DEFAULT_FACE, kind, at, tid = d.optString("tid", "").take(80), eid = d.optString("eid", "").take(64))
                         if (kind == "event") evs.add(dc) else tks.add(dc)
                         if (++n >= MAX_DYN) break
                     }
@@ -539,7 +545,76 @@ object QrWidgets {
             for (c in cfg.cards) if ((c.dyn == "event" || c.dyn == "task") && c.at > now && c.at + 1_000L < at) at = c.at + 1_000L
         }
         if (cfg.relevance) at = Math.min(at, plan(ctx, cfg).nextChangeAt)
+        if (cfg.events) eventResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // пролистанный ряд событий вернётся к первому
         return at
+    }
+
+    // ---------- ряд событий на карточке события ----------
+
+    private fun evEntry(ctx: Context, cfgId: String): JSONObject? = synchronized(LOCK) { jmap(ctx, K_EVIDX).optJSONObject(cfgId) }
+
+    /** Номер события в ряду карточки события виджета [cfgId]: 0 — первое; не нажимали [EVENT_RESET_MS] — снова 0. */
+    private fun eventIndexOf(ctx: Context, cfgId: String, now: Long): Int {
+        val e = evEntry(ctx, cfgId) ?: return 0
+        val i = e.optInt("i", 0)
+        if (i <= 0 || now - e.optLong("t", 0L) >= EVENT_RESET_MS || now < e.optLong("t", 0L)) return 0
+        return i
+    }
+
+    /** Когда пролистанный ряд вернётся к первому событию (с запасом на неточность будильника); null — ряд и так на первом. */
+    private fun eventResetAt(ctx: Context, cfgId: String, now: Long): Long? {
+        if (eventIndexOf(ctx, cfgId, now) <= 0) return null
+        return (evEntry(ctx, cfgId)?.optLong("t", 0L) ?: return null) + EVENT_RESET_MS + 500L
+    }
+
+    /** (номер показанного события, сколько событий в ряду) для виджета [cfg]; в ряду меньше двух событий листать нечего. */
+    fun eventPos(ctx: Context, cfg: Cfg): Pair<Int, Int> {
+        val s = snapshot(ctx, cfg)
+        val n = QrPriority.eventCards(cfg, s).size
+        return Pair(if (n == 0) 0 else s.eventIndex.coerceIn(0, n - 1), n)
+    }
+
+    /**
+     * Нажатие у края карточки события в виджете [widgetId] ([dir] = -1 — предыдущее событие, 1 — следующее). Ряд не зациклен: у первого и последнего события нажатие ничего не меняет.
+     * Стопка не сбрасывается — перерисовывается только карточка события ([refreshAll] без возврата наверх).
+     */
+    fun eventNav(ctx: Context, widgetId: Int, dir: Int) {
+        if (dir != -1 && dir != 1) return
+        val app = ctx.applicationContext
+        val cfg = cfgFor(app, widgetId) ?: return
+        if (!cfg.events) return
+        val pos = eventPos(app, cfg)
+        val to = (pos.first + dir).coerceIn(0, Math.max(0, pos.second - 1))
+        if (pos.second == 0 || to == pos.first) return
+        synchronized(LOCK) {
+            val all = jmap(app, K_EVIDX)
+            all.put(cfg.id, JSONObject().put("i", to).put("t", System.currentTimeMillis()))
+            prefs(app).edit().putString(K_EVIDX, all.toString()).apply()
+        }
+        refreshAll(app)
+    }
+
+    /** Копия лица карточки события с рядом точек внизу: сколько событий в ряду и какое показано (светлее). Событие одно — картинка без изменений. */
+    fun withEventDots(src: Bitmap, index: Int, total: Int): Bitmap {
+        if (total < 2) return src
+        return try {
+            val out = src.copy(Bitmap.Config.ARGB_8888, true) ?: return src
+            val g = Canvas(out)
+            val w = out.width.toFloat()
+            val p = Paint(Paint.ANTI_ALIAS_FLAG)
+            val r = w * 0.0125f
+            val step = w * 0.048f
+            val x0 = w / 2f - step * (total - 1) / 2f
+            val y = w * 0.972f
+            for (k in 0 until total) {
+                p.color = Color.WHITE
+                p.alpha = if (k == index) 255 else 110
+                g.drawCircle(x0 + step * k, y, if (k == index) r * 1.25f else r, p)
+            }
+            out
+        } catch (e: Throwable) {
+            src // не хватило памяти — карточка без точек
+        }
     }
 
     private fun idSet(ctx: Context, key: String): MutableSet<String> {
@@ -728,7 +803,8 @@ object QrWidgets {
             hiddenKeys = hiddenKeys(ctx, cfg),
             movedAt = moved,
             doneTaskIds = doneTaskIds(ctx),
-            rpePending = rpePending(ctx, cfg)
+            rpePending = rpePending(ctx, cfg),
+            eventIndex = if (cfg.events) eventIndexOf(ctx, cfg.id, now) else 0
         )
     }
 

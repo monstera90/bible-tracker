@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 13.0 (14.11) — нажатия на карточку события в виджете (extra `evnav` — листание ряда, `evopen` — форма события в приложении): без окна, [handleEvent].
 // Версия: 12.0 (14.11)
 // Версия: 6.0 (26.10) — мост ScanBridge: musicHeadphones (подключены ли наушники; комбо с галочкой «Наушники обязательны»).
 // Версия: 5.0 (26.10) — мост ScanBridge: musicPlayTrack / musicPlayFolder (QR «Комбинированный» из окна ярлыка включает трек или папку через MusicPlayer; приложение не открывается).
@@ -54,6 +55,7 @@ class ScanActivity : ComponentActivity() {
 
     companion object {
         private val CARD_ID_RE = Regex("^[A-Za-z0-9]{4,32}$")
+        private val EVENT_ID_RE = Regex("^[A-Za-z0-9_-]{1,64}$")
         const val SCAN_URL = WebAssetServer.ORIGIN + "/scan.html"
         /** Нажатие на карточку виджета «Стопка QR-карточек»: extra `code` — текст QR, `tok` — ключ установки (QrWidgets.token). */
         const val ACTION_SCAN_CODE = "com.app.lifetracker.SCAN_CODE"
@@ -102,6 +104,35 @@ class ScanActivity : ComponentActivity() {
                 if (QrWidgets.toggleAlarm(applicationContext, key)) QrWidgets.onCardFired(applicationContext, key) // нажатие = действие сработало («после срабатывания»)
             } catch (e: Exception) {
                 // не получилось — карточка останется как была, можно нажать ещё раз
+            }
+        }
+        return true
+    }
+
+    /**
+     * Нажатие на карточку события в виджете (тот же `tok`): `evnav` (-1 / 1, `wid` — id виджета) листает ряд событий ([QrWidgets.eventNav]); `evopen` (id события, `evat` — начало
+     * повторения, мс) открывает приложение на форме этого события (MainActivity.ACTION_OPEN_EVENT). Окно и страница сканера не нужны. true — это был такой запрос.
+     */
+    private fun handleEvent(i: Intent?): Boolean {
+        if (i == null || i.action != ACTION_SCAN_CODE || !(i.hasExtra("evnav") || i.hasExtra("evopen"))) return false
+        if (QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
+            try {
+                if (i.hasExtra("evnav")) {
+                    QrWidgets.eventNav(applicationContext, i.getIntExtra("wid", -1), i.getIntExtra("evnav", 0))
+                } else {
+                    val id = i.getStringExtra("evopen") ?: ""
+                    if (EVENT_ID_RE.matches(id)) {
+                        val open = Intent(this, MainActivity::class.java).apply {
+                            action = MainActivity.ACTION_OPEN_EVENT
+                            putExtra(MainActivity.EXTRA_EVENT_ID, id)
+                            putExtra(MainActivity.EXTRA_EVENT_AT, i.getLongExtra("evat", 0L))
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(open)
+                    }
+                }
+            } catch (e: Exception) {
+                // не получилось — карточка осталась как была, можно нажать ещё раз
             }
         }
         return true
@@ -252,7 +283,7 @@ class ScanActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         // Кнопка оценки с карточки «Как тренировка?»: без окна — сохранили и сразу закрылись (webView и сервер не создаются)
-        if (handleRpe(intent) || handleAlarm(intent)) {
+        if (handleRpe(intent) || handleAlarm(intent) || handleEvent(intent)) {
             finishAndRemoveTask()
             overridePendingTransition(0, 0)
             return
@@ -327,6 +358,13 @@ class ScanActivity : ComponentActivity() {
         if (handleRpe(intent)) return // окно сканера уже открыто и остаётся как было
         if (handleAlarm(intent)) {
             if (!::webView.isInitialized) { // окна со страницей нет (ждали второго нажатия) — просто закрываемся
+                finishAndRemoveTask()
+                overridePendingTransition(0, 0)
+            }
+            return
+        }
+        if (handleEvent(intent)) {
+            if (!::webView.isInitialized) { // окна со страницей нет — просто закрываемся
                 finishAndRemoveTask()
                 overridePendingTransition(0, 0)
             }

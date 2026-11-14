@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 149.3 (14.11) — вход из оболочки `window.__ltOpenCalendarEvent(id, at)` / параметры `?calev=<id>&calat=<мс>` при старте (`openCalendarEventFromNative`, `handleCalendarEventLaunchParam`): нажатие на карточку события в виджете открывает форму этого мероприятия.
    Версия: 149.2 (13.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
    Версия: 90.0 (27.10) — структурная правка: вкладка `workouts` «Тренировки» (`workouts.js`) в нижнем ряду набора 1 между шестерёнкой и «Картой дней года»: `WORKOUTS_TAB_KEY`/`WORKOUTS_TAB_BTN_ID`, раздел «ТРЕНИРОВКИ» (`workoutsStore`: записи в state под `wk:<id>`, `renderSettingsTabWorkouts`, `ensureWorkoutsStore`), ветки в `switchSettingsTab`/`applyBottomAltMode`/`isSettingsTabUserHidden`/`getComboTabList`, `WorkoutsTab.drain` при запуске и в `__ltOnAppResume`.
@@ -11262,6 +11263,31 @@
     var mode = /[?&]cardmode=create(?:&|$)/.test(location.search) ? "create" : (/[?&]cardmode=habitmap(?:&|$)/.test(location.search) ? "habitmap" : "note");
     try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
     setTimeout(function(){ openCardFromNative(m[1], mode); }, 0);
+  }
+  // Нажатие на карточку события календаря в виджете (QrWidgets → ScanActivity → MainActivity): вкладка «Календарь» и форма этого мероприятия.
+  // Оболочка зовёт window.__ltOpenCalendarEvent(id, at) (приложение уже запущено); холодный старт — параметры адреса ?calev=<id>&calat=<мс>.
+  // На холодном старте хранилище календаря может быть ещё не загружено — повторяем попытку (до ~8 с), пока мероприятие не найдётся.
+  function openCalendarEventFromNative(id, at){
+    id = String(id || "");
+    if(!/^[A-Za-z0-9_-]{1,64}$/.test(id)) return;
+    at = +at;
+    openSettingsTabDirect(CALENDAR_TAB_KEY);
+    var tries = 0;
+    (function attempt(){
+      try{
+        ensureCalendarStore();
+        if(window.CalendarTab && window.CalendarTab.openEvent && window.CalendarTab.openEvent(id, at)) return;
+      }catch(e){}
+      if(++tries < 28) setTimeout(attempt, 300);
+    })();
+  }
+  window.__ltOpenCalendarEvent = openCalendarEventFromNative;
+  function handleCalendarEventLaunchParam(){
+    var m = /[?&]calev=([A-Za-z0-9_-]{1,64})(?:&|$)/.exec(location.search || "");
+    if(!m) return;
+    var a = /[?&]calat=(\d{1,16})(?:&|$)/.exec(location.search || "");
+    try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
+    setTimeout(function(){ openCalendarEventFromNative(m[1], a ? +a[1] : 0); }, 0);
   }
   function renderSettingsTabMusic(){
     if(window.MusicTab) window.MusicTab.render();
@@ -26170,6 +26196,7 @@
   try{ drainWidgetTasks(); }catch(e){} // задачи, отмеченные двойным нажатием в виджете, пока приложение было закрыто
   try{ if(localStorage.getItem("qrWidgets_v1")){ ensureWidgets(); window.WidgetsTab.scheduleSync(4000); } }catch(e){} // лица карточек в виджетах рабочего стола
   try{ handleCardLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Карточка из оболочки: " + (e && e.message ? e.message : e)); }
+  try{ handleCalendarEventLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Событие из виджета: " + (e && e.message ? e.message : e)); }
   // Главной страницы больше нет: после перезагрузки приложение сразу открывает окно настроек на последней вкладке
   // (getResumeSettingsState внутри openSettingsModal). Остальные входы (карточка из оболочки, присланный файл) идут позже
   // и просто переключают вкладку в уже открытом окне.

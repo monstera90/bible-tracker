@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Версия: 2.0 (13.11) — одна карточка стопки: готовая картинка лица (скруглённый квадрат с цветным выступом снизу).
+<!-- Версия: 2.1 (14.11) — `ev_zones`: три прозрачные зоны карточки события (края 0,28 — листают ряд событий, центр 0,44 — форма события); у остальных карточек скрыта.
+     Версия: 2.0 (13.11) — одна карточка стопки: готовая картинка лица (скруглённый квадрат с цветным выступом снизу).
      Поверх картинки — сетка из десяти прозрачных зон-кнопок 1…10 для карточки «Как тренировка?» (QrRpe); у остальных карточек `rpe_grid` скрыта.
      Числа — доли ширины лица (высота лица = 1,06 ширины, weightSum вертикали 1,06), те же, что BTN_* в QrRpe.kt: зоны по горизонтали — по 0,1874 вокруг кнопок
      (0,0315 по краям), по вертикали — две строки по 0,1882 (0,604…0,7922 и 0,7922…0,9804). -->
@@ -13,6 +14,19 @@
         android:layout_height="match_parent"
         android:contentDescription="@null"
         android:scaleType="fitXY" />
+
+    <LinearLayout
+        android:id="@+id/ev_zones"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        android:weightSum="1">
+
+        <FrameLayout android:id="@+id/ev_left" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.28" />
+        <FrameLayout android:id="@+id/ev_center" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.44" />
+        <FrameLayout android:id="@+id/ev_right" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.28" />
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/rpe_grid"
