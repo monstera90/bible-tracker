@@ -429,6 +429,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         var floatKind = 0      // KIND_LEFT / KIND_MIN
         var floatFrame = false // в окне закреплён iframe с роликом (а не <video> страницы)
         var bg = false         // видео/звук играет в фоне (SiteMediaService), WebView не усыпляется
+        var bgDismissed = false // остров видео убран удержанием при открытом приложении: проба не возвращает его, пока ролик не встанет на паузу/пропадёт
         var lastDiag = ""       // последний записанный в журнал снимок страницы при «видео не найдено»
         var frameProxy: JavaScriptReplyProxy? = null // кадр (iframe) с роликом: канал команд к нему (FRAME_JS)
         var framePaused = true
@@ -1081,6 +1082,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
 
         override fun onClose() {
             val t = bgTab ?: return
+            t.bgDismissed = t.shown && appVisible // при открытом приложении ролик может остаться играть — остров не возвращаем
             endBackground(t, pause = true, sleep = true)
         }
 
@@ -1112,7 +1114,21 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
                 return
             }
             val v = t.view
-            if (v != null && t.ready && !t.bg) tryBackground(t, v) { }
+            if (v != null && t.ready && !t.bg) {
+                if (t.bgDismissed) {
+                    // остров убрали удержанием: ждём, пока ролик встанет на паузу или пропадёт, — тогда новый запуск снова покажет остров
+                    if (frameActive(t)) {
+                        // ролик в iframe всё ещё играет
+                    } else {
+                        v.evaluateJavascript(MEDIA_STATE_JS) { raw ->
+                            val arr = try { if (raw.isNullOrEmpty() || raw == "null") null else JSONArray(raw) } catch (e: Exception) { null }
+                            if (arr == null || arr.optInt(0) != 1 || arr.optInt(1) == 1) t.bgDismissed = false
+                        }
+                    }
+                } else {
+                    tryBackground(t, v) { }
+                }
+            }
             handler.postDelayed(this, PROBE_MS)
         }
     }
