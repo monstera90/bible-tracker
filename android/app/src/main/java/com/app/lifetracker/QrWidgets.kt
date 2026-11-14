@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 14.2 (14.11) — слайд-шоу листает стопку через showPrevious: позиции стопки теперь идут в обратном порядке ([QrWidgetService]), иначе оно шло бы по карточкам назад.
 // Версия: 14.1 (14.11) — галочка «Показывать будильники» (`alarms`, список `alm`): одна карточка со всеми будильниками, листается у краёв ([alarmNav]).
 // Версия: 14.0 (14.11)
 
@@ -1392,7 +1393,7 @@ object QrWidgets {
         val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
         if (screenOn(pm) && !rpePending(app, cfg)) { // пока висит «Как тренировка?», слайд-шоу стопку не листает
             val rv = RemoteViews(app.packageName, R.layout.qr_widget)
-            rv.showNext(R.id.qr_stack)
+            rv.showPrevious(R.id.qr_stack) // позиции стопки идут в обратную сторону (QrWidgetService.getViewAt): «позиция − 1» — это следующая карточка
             suppressSwipe(id)
             dotsOn.add(id)
             putDots(app, rv, visibleCount(app, cfg))
