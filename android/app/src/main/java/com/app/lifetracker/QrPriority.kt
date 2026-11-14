@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.0 (14.11)
+// Версия: 3.0 (14.11)
 
 import com.app.lifetracker.QrWidgets.Card
 import com.app.lifetracker.QrWidgets.Cfg
@@ -17,6 +17,10 @@ import java.util.Calendar
  * Этап 2: новые сигналы (звонит / скоро сработает будильник карточки, событие и задача календаря, низкий заряд) и устойчивость: новая верхняя
  * карточка заменяет прежнюю ([Snapshot.lastTopKey]) только если её балл выше минимум на [HYSTERESIS] или у прежней балл упал до 0; звонящий
  * будильник гистерезис обходит. Балл карточки — максимум по её сигналам, не сумма.
+ *
+ * Этап 3: ручной приоритет карточки [Card.prio] (только при «релевантности»): «top» прибавляет [PRIO_TOP_BONUS] к баллу, «low» ставит [SCORE_LOW]
+ * (карточка не поднимается ни по какому сигналу и стоит ниже обычных); «в конец» и скрытие сильнее приоритета. Объяснение: [Scored.reason] у каждой
+ * оценённой карточки, [Result.topTitle] / [Result.topReason] — у верхней (оболочка отдаёт их странице мостом `widgetWhy`).
  */
 object QrPriority {
 
@@ -41,6 +45,10 @@ object QrPriority {
     /** Заряд телефона не выше [BATTERY_LOW_PERCENT] — только карточки заряда. */
     const val SCORE_BATTERY_LOW = 450
     const val BATTERY_LOW_PERCENT = 15
+    /** Ручной приоритет «наверх»: прибавка к баллу карточки (при любых её сигналах; без сигналов балл = эта прибавка). */
+    const val PRIO_TOP_BONUS = 300
+    /** Ручной приоритет «вниз»: балл не выше нуля — на единицу ниже обычных карточек без сигналов, чтобы карточка действительно стояла после них. */
+    const val SCORE_LOW = -1
 
     /** «Скоро»: за сколько до будильника или события оно поднимает карточку. */
     const val SOON_MS = 60L * 60_000L
@@ -89,7 +97,11 @@ object QrPriority {
          */
         val nextChangeAt: Long,
         /** Верхняя карточка по релевантности без «Как тренировка?» — её оболочка запоминает как [Snapshot.lastTopKey] для следующего расчёта. */
-        val mainTopKey: String = ""
+        val mainTopKey: String = "",
+        /** Название верхней карточки ([topKey]); пусто, если наверху нет выделенной карточки. */
+        val topTitle: String = "",
+        /** Почему она наверху («Идёт тренировка», «Будильник через 25 мин», «Сейчас её время: утро»); пусто, если [topKey] пуст. */
+        val topReason: String = ""
     )
 
     // ---------- построение ----------
@@ -115,7 +127,7 @@ object QrPriority {
                 // sortedWith устойчивая: при равных баллах остаётся порядок пользователя; события и заряд уточняет tidy
                 val sorted = ArrayList(tidy(scored.sortedWith(compareByDescending<Scored> { it.score })))
                 if (sorted.first().score > 0) top = sorted.first().card.key
-                top = keepPrevTop(sorted, top, s.lastTopKey)
+                top = keepPrevTop(sorted, top, s)
                 main.addAll(sorted)
                 for (c in tail) main.add(Scored(c, 0, ""))
             }
@@ -125,7 +137,8 @@ object QrPriority {
         out.addAll(main)
         val topKey = if (s.rpePending) QrRpe.KEY else top
         val next = if (cfg.relevance) nextChange(base, s) else Long.MAX_VALUE
-        return Result(out, topKey, anchorOf(cfg, s, main, top), next, top)
+        val topScored: Scored? = if (s.rpePending) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
+        return Result(out, topKey, anchorOf(cfg, s, main, top), next, top, topScored?.card?.title ?: "", topScored?.reason ?: "")
     }
 
     /**
@@ -133,14 +146,15 @@ object QrPriority {
      * лишь окончание сигнала (у прежней балл 0), её уход из основной части или звонящий будильник. Удержанная карточка переезжает в начало [sorted],
      * остальной порядок не трогается. Возвращает ключ верхней карточки.
      */
-    private fun keepPrevTop(sorted: MutableList<Scored>, top: String, prev: String): String {
+    private fun keepPrevTop(sorted: MutableList<Scored>, top: String, s: Snapshot): String {
+        val prev = s.lastTopKey
         if (top.isEmpty() || prev.isEmpty() || prev == top || prev == QrRpe.KEY) return top
         val idx = sorted.indexOfFirst { it.card.key == prev }
         if (idx <= 0) return top
         val ps = sorted[idx].score
         val first = sorted[0].score
         if (ps <= 0 || first >= ps + HYSTERESIS) return top
-        if (first >= SCORE_ALARM_RINGING && ps < SCORE_ALARM_RINGING) return top
+        if (isRinging(sorted[0].card, s) && !isRinging(sorted[idx].card, s)) return top
         sorted.add(0, sorted.removeAt(idx))
         return prev
     }
@@ -169,6 +183,12 @@ object QrPriority {
         }
         return out
     }
+
+    /** Будильник карточки звонит сейчас (по баллу не определить: «наверх» поднимает и обычные карточки выше [SCORE_ALARM_RINGING]). */
+    private fun isRinging(c: Card, s: Snapshot): Boolean = c.alarmId.isNotEmpty() && c.alarmId in s.ringingAlarmIds
+
+    /** Ручной приоритет из настроек: только «top» или «low», всё остальное — «normal». */
+    fun normPrio(v: String?): String = if (v == "top" || v == "low") v else "normal"
 
     /** Карточка заряда (константы ключей подставляются при сборке — класс QrBattery в JVM-тестах не загружается). */
     private fun isBattery(key: String): Boolean = key == QrBattery.KEY || key == QrBattery.KEY2
@@ -280,6 +300,13 @@ object QrPriority {
         }
         if (isBattery(c.key) && s.batteryPercent in 0..BATTERY_LOW_PERCENT) cand(SCORE_BATTERY_LOW, "Заряд " + s.batteryPercent + " %")
         if (scheduledNow(c, s.cal)) cand(SCORE_SCHEDULED, "Сейчас её время" + windowName(c, s.cal))
+        if (c.prio == "top") {
+            best += PRIO_TOP_BONUS
+            why = if (why.isEmpty()) "Приоритет «наверх»" else why + " · приоритет «наверх»"
+        } else if (c.prio == "low") {
+            best = SCORE_LOW
+            why = ""
+        }
         return Pair(best, why)
     }
 
@@ -395,7 +422,13 @@ object QrPriority {
             val prev = result.cards.firstOrNull { it.card.key == s.lastTopKey && !movedToday(it.card, s) }
             val topS = result.cards.firstOrNull { it.card.key == result.mainTopKey && it.card.key != QrRpe.KEY }
             if (prev != null && topS != null && prev !== topS && prev.score > 0 && topS.score < prev.score + HYSTERESIS &&
-                !(topS.score >= SCORE_ALARM_RINGING && prev.score < SCORE_ALARM_RINGING)) bad.add("9: верхняя карточка сменилась без достаточного отрыва")
+                !(isRinging(topS.card, s) && !isRinging(prev.card, s))) bad.add("9: верхняя карточка сменилась без достаточного отрыва")
+
+            // 10. и 11. Ручной приоритет: «вниз» — балл не выше нуля, «наверх» — не ниже прибавки (баллы считаются, только когда в основной части две карточки и больше)
+            for (x in head) {
+                if (x.card.prio == "low" && x.score > 0) bad.add("10: у карточки с приоритетом «вниз» балл выше нуля: " + x.card.key)
+                if (main.size >= 2 && x.card.prio == "top" && x.score < PRIO_TOP_BONUS) bad.add("11: у карточки с приоритетом «наверх» балл ниже прибавки: " + x.card.key)
+            }
         }
         return bad
     }

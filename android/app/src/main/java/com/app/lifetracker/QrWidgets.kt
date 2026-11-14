@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 13.0 (14.11)
+// Версия: 13.1 (14.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -67,6 +67,8 @@ import java.util.UUID
  * а [order] / [plan] / [visibleCount] / [isAllDone] — тонкие обёртки. В отладочной сборке [plan] проверяет результат ([QrPriority.check]) и пишет нарушения в лог.
  * Для баллов «по релевантности» в [snapshot] читаются ещё будильники карточек ([CardAlarms.nextTimes], [CardAlarms.ringingIds]), заряд телефона ([QrBattery.phoneLevel])
  * и верхняя карточка прошлого расчёта (`lasttop` по id виджета, пишет [plan]): новая верхняя карточка не вытесняет прежнюю без отрыва в [QrPriority.HYSTERESIS] баллов.
+ * Ручной приоритет карточки ([Card.prio], поле `prio` у карточки в настройках: «top» / «normal» / «low») учитывает [QrPriority]; почему сверху именно эта карточка, [plan] запоминает
+ * (`why` по id виджета) и отдаёт странице [whyJson] (мост `widgetWhy`, версия 36).
  * Перерисовку без внешнего события ставит [nextDynChange] (минимум из своего значения и [QrPriority.Result.nextChangeAt]); смена заряда через порог 15 %
  * ([onBatteryChanged]) и будильники ([onAlarmsChanged], в том числе повторный звонок и смахивание) пересчитывают порядок.
  *
@@ -88,6 +90,8 @@ object QrWidgets {
     private const val K_TOP = "top"
     /** cfg.id → верхняя карточка по релевантности при прошлом расчёте ([QrPriority.Snapshot.lastTopKey], устойчивость порядка). */
     private const val K_LASTTOP = "lasttop"
+    /** cfg.id → {key, title, reason} верхней карточки, как её показал последний расчёт ([QrPriority.Result.topReason]); читает мост `widgetWhy`. */
+    private const val K_WHY = "why"
     private const val K_PEND = "pend"
     private const val K_TOKEN = "token"
     private const val K_FIRED = "fired"
@@ -146,7 +150,7 @@ object QrWidgets {
     /** Настройки будильника карточки (от страницы): нажатие в виджете заводит/выключает его без окна и страницы. */
     class AlarmSpec(val hour: Int, val minute: Int, val every: Int, val times: Int, val title: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
-    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null)
+    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal")
     class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
@@ -214,7 +218,7 @@ object QrWidgets {
                         val da = c.optJSONArray("days")
                         if (da != null) for (x in 0 until da.length()) da.optInt(x).let { if (it in 1..7) days.add(it) }
                         val after = c.optString("after", "none").let { if (it == "hide" || it == "end") it else "none" }
-                        cards.add(Card(key, c.optString("code", ""), c.optString("title", ""), live, times, days, after, habit = c.optBoolean("habit", false), alarmId = c.optString("alarm", "").take(40), alarmSpec = parseAlarmSpec(c.optJSONObject("alarmSpec"))))
+                        cards.add(Card(key, c.optString("code", ""), c.optString("title", ""), live, times, days, after, habit = c.optBoolean("habit", false), alarmId = c.optString("alarm", "").take(40), alarmSpec = parseAlarmSpec(c.optJSONObject("alarmSpec")), prio = QrPriority.normPrio(c.optString("prio", "normal"))))
                         if (cards.size >= MAX_CARDS) break
                     }
                 }
@@ -719,6 +723,7 @@ object QrWidgets {
         val s = snapshot(ctx, cfg)
         val res = QrPriority.build(cfg, s)
         if (cfg.relevance && res.mainTopKey != s.lastTopKey) rememberTop(ctx, cfg.id, res.mainTopKey)
+        rememberWhy(ctx, cfg.id, whyOf(res))
         if ((ctx.applicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
             try {
                 for (v in QrPriority.check(res, cfg, s)) Log.e("QrPriority", cfg.id + ": " + v)
@@ -737,6 +742,34 @@ object QrWidgets {
             t.put(cfgId, key)
             prefs(ctx).edit().putString(K_LASTTOP, t.toString()).apply()
         }
+    }
+
+    private fun whyOf(res: QrPriority.Result): JSONObject =
+        JSONObject().put("key", res.topKey).put("title", res.topTitle).put("reason", res.topReason)
+
+    /** Запоминает, какая карточка сейчас наверху виджета и почему (пишет только при изменении: расчёт идёт при каждой перерисовке). */
+    private fun rememberWhy(ctx: Context, cfgId: String, why: JSONObject) {
+        synchronized(LOCK) {
+            val t = jmap(ctx, K_WHY)
+            if (t.optJSONObject(cfgId)?.toString() == why.toString()) return
+            t.put(cfgId, why)
+            prefs(ctx).edit().putString(K_WHY, t.toString()).apply()
+        }
+    }
+
+    /**
+     * `{"key","title","reason"}` — какая карточка сейчас наверху виджета конструктора [cfgId] и почему (мост `widgetWhy`, страница пишет это в форме виджета);
+     * `key` пуст — ничего не выделено. Берётся то, что показал последний расчёт; если виджет ещё не считался — считается сейчас, без запоминания верхней карточки.
+     * Пустая строка — такого виджета нет.
+     */
+    fun whyJson(ctx: Context, cfgId: String): String {
+        val app = ctx.applicationContext
+        val cfg = configs(app).firstOrNull { it.id == cfgId } ?: return ""
+        val mgr = AppWidgetManager.getInstance(app)
+        val placed = mgr.getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java)).any { cfgFor(app, it)?.id == cfgId }
+        val saved = if (placed) jmap(app, K_WHY).optJSONObject(cfgId) else null // не стоящий на рабочем столе виджет мог остаться в памяти от прежнего расчёта
+        if (saved != null) return saved.toString()
+        return whyOf(QrPriority.build(cfg, snapshot(app, cfg))).toString()
     }
 
     fun visibleCount(ctx: Context, cfg: Cfg): Int = QrPriority.visibleCount(cfg, snapshot(ctx, cfg))

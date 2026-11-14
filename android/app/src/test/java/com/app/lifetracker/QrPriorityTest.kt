@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.0 (14.11)
+// Версия: 3.0 (14.11)
 
 import com.app.lifetracker.QrWidgets.Card
 import com.app.lifetracker.QrWidgets.Cfg
@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Calendar
 
-/** Сценарии из ТЗ TZ_card_priority.md, п. 7 (этапы 1 и 2). Каждый сценарий дополнительно проходит [QrPriority.check]. */
+/** Сценарии из ТЗ TZ_card_priority.md, п. 7 (этапы 1–3). Каждый сценарий дополнительно проходит [QrPriority.check]. */
 class QrPriorityTest {
 
     /** Понедельник, 16.11.2026, [h]:[mi]. */
@@ -22,8 +22,8 @@ class QrPriorityTest {
 
     private fun card(
         key: String, after: String = "none", live: List<Live> = emptyList(), times: Set<String> = emptySet(),
-        days: Set<Int> = emptySet(), dyn: String = "", at: Long = 0L, habit: Boolean = false, tid: String = "", alarmId: String = ""
-    ) = Card(key = key, code = "", title = key, live = live, times = times, days = days, after = after, dyn = dyn, at = at, habit = habit, tid = tid, alarmId = alarmId)
+        days: Set<Int> = emptySet(), dyn: String = "", at: Long = 0L, habit: Boolean = false, tid: String = "", alarmId: String = "", prio: String = "normal"
+    ) = Card(key = key, code = "", title = key, live = live, times = times, days = days, after = after, dyn = dyn, at = at, habit = habit, tid = tid, alarmId = alarmId, prio = prio)
 
     private fun cfg(cards: List<Card>, relevance: Boolean = false, rpeAsk: Boolean = false) =
         Cfg(id = "w", name = "w", rotate = false, rotateMin = 5, relevance = relevance, cards = cards, rpeAsk = rpeAsk)
@@ -419,5 +419,130 @@ class QrPriorityTest {
         val noPrev = QrPriority.build(cf, snap(cal(12), battery = 10)) // верх — «sch», как без запомненной карточки
         val s = snap(cal(12), battery = 10, lastTop = QrBattery.KEY) // а прежняя верхняя — заряд, отрыв всего 50
         assertTrue(QrPriority.check(noPrev, cf, s).any { it.startsWith("9") })
+    }
+
+    // ---------- этап 3: ручной приоритет и объяснение ----------
+
+    @Test fun prio_top_aboveNormalWithoutSignals() {
+        val cards = listOf(card("a"), card("b", prio = "top"), card("c"))
+        val r = run(cfg(cards, true), snap(cal(12)))
+        assertEquals(listOf("b", "a", "c"), keys(r))
+        assertEquals("b", r.topKey)
+        assertEquals(QrPriority.PRIO_TOP_BONUS, r.cards[0].score)
+    }
+
+    @Test fun prio_top_addsToSignal_notOverRunningTimer() {
+        val c = cal(12)
+        // «своё время» 500 + 300 = 800, таймер 1020 всё равно выше
+        val cards = listOf(card("s", times = setOf("d"), prio = "top"), card("t", live = listOf(Live("timer", "x"))))
+        val r = run(cfg(cards, true), snap(c, timers = setOf("x")))
+        assertEquals(listOf("t", "s"), keys(r))
+        assertEquals(QrPriority.SCORE_SCHEDULED + QrPriority.PRIO_TOP_BONUS, r.cards[1].score)
+        // а выше «обычной» карточки со своим временем (500) — 300 без сигналов не хватает, 800 с сигналом хватает
+        val plain = listOf(card("s", times = setOf("d")), card("n", prio = "top"))
+        assertEquals(listOf("s", "n"), keys(run(cfg(plain, true), snap(c))))
+        val both = listOf(card("s", times = setOf("d")), card("n", times = setOf("d"), prio = "top"))
+        assertEquals(listOf("n", "s"), keys(run(cfg(both, true), snap(c))))
+    }
+
+    @Test fun prio_low_belowNormal_evenWithSignals() {
+        val c = cal(12)
+        val cards = listOf(
+            card("lowTimer", live = listOf(Live("timer", "x")), prio = "low"), card("lowSched", times = setOf("d"), prio = "low"),
+            card("a"), card("b")
+        )
+        val r = run(cfg(cards, true), snap(c, timers = setOf("x")))
+        assertEquals(listOf("a", "b", "lowTimer", "lowSched"), keys(r))
+        assertTrue(r.cards.all { it.score <= 0 })
+        assertEquals("", r.topKey)
+    }
+
+    @Test fun prio_low_ringingAlarmDoesNotRise() {
+        val now = cal(12).timeInMillis
+        val cards = listOf(card("al", alarmId = "AL1", prio = "low"), card("n"))
+        val r = run(cfg(cards, true), snap(cal(12), ringing = setOf("AL1"), alarms = mapOf("AL1" to now)))
+        assertEquals(listOf("n", "al"), keys(r))
+    }
+
+    @Test fun prio_endAndHidden_strongerThanTop() {
+        val c = cal(12)
+        val cards = listOf(card("e", after = "end", prio = "top"), card("h", after = "hide", prio = "top"), card("a"), card("b"))
+        val r = run(cfg(cards, true), snap(c, moved = mapOf("e" to c.timeInMillis), hidden = setOf("h")))
+        assertEquals(listOf("a", "b", "e"), keys(r)) // «h» скрыта, «e» — в самом конце, хотя «наверх»
+        assertEquals("", r.topKey)
+    }
+
+    @Test fun prio_ignoredWithoutRelevance() {
+        val cards = listOf(card("a"), card("b", prio = "top"), card("c", prio = "low"))
+        val r = run(cfg(cards, false), snap(cal(12)))
+        assertEquals(listOf("a", "b", "c"), keys(r))
+        assertEquals("", r.topKey)
+    }
+
+    @Test fun prio_normalizes() {
+        assertEquals("top", QrPriority.normPrio("top"))
+        assertEquals("low", QrPriority.normPrio("low"))
+        assertEquals("normal", QrPriority.normPrio("normal"))
+        assertEquals("normal", QrPriority.normPrio("whatever"))
+        assertEquals("normal", QrPriority.normPrio(null))
+        assertEquals("normal", card("x").prio) // старые данные без поля
+    }
+
+    @Test fun prio_top_notRingingBypass() {
+        // «наверх» + будильник через 30 мин = 1100, как у звонящего, но это не звонок: гистерезис держит прежнюю верхнюю (таймер 1020, отрыв 80)
+        val now = cal(12).timeInMillis
+        val cards = listOf(card("p", live = listOf(Live("timer", "x"))), card("q", alarmId = "AL1", prio = "top"))
+        val r = run(cfg(cards, true), snap(cal(12), timers = setOf("x"), alarms = mapOf("AL1" to now + 30 * min), lastTop = "p"))
+        assertEquals("p", r.topKey)
+        assertEquals(listOf("p", "q"), keys(r))
+        // а звонящий будильник без «наверх» (1100) гистерезис обходит, как раньше
+        val c2 = listOf(card("p", live = listOf(Live("workout", ""))), card("q", alarmId = "AL1"))
+        val r2 = run(cfg(c2, true), snap(cal(12), workout = true, ringing = setOf("AL1"), alarms = mapOf("AL1" to now), lastTop = "p"))
+        assertEquals("q", r2.topKey)
+    }
+
+    @Test fun why_reasonOfTopCard() {
+        val now = cal(12).timeInMillis
+        // занятие
+        val a = run(cfg(listOf(card("n"), card("t", live = listOf(Live("timer", "x")))), true), snap(cal(12), timers = setOf("x")))
+        assertEquals("t", a.topTitle)
+        assertEquals("Идёт таймер", a.topReason)
+        // будильник через 25 мин
+        val b = run(cfg(listOf(card("n"), card("al", alarmId = "AL1")), true), snap(cal(12), alarms = mapOf("AL1" to now + 25 * min)))
+        assertEquals("Будильник через 25 мин", b.topReason)
+        // «её» время суток
+        val c = run(cfg(listOf(card("n"), card("m", times = setOf("m"))), true), snap(cal(8)))
+        assertEquals("Сейчас её время: утро", c.topReason)
+        // приоритет «наверх»: без сигналов и вместе с ними
+        val d = run(cfg(listOf(card("n"), card("p", prio = "top")), true), snap(cal(12)))
+        assertEquals("Приоритет «наверх»", d.topReason)
+        val e = run(cfg(listOf(card("n"), card("p", live = listOf(Live("timer", "x")), prio = "top")), true), snap(cal(12), timers = setOf("x")))
+        assertEquals("Идёт таймер · приоритет «наверх»", e.topReason)
+        // «Как тренировка?»
+        val f = run(cfg(listOf(card("n"), card("m")), true, rpeAsk = true), snap(cal(12), rpe = true))
+        assertEquals("Как тренировка?", f.topTitle)
+        assertEquals("Ждёт оценки тренировки", f.topReason)
+        // ничего не выделено
+        val g = run(cfg(listOf(card("n"), card("m")), true), snap(cal(12)))
+        assertEquals("", g.topKey)
+        assertEquals("", g.topTitle)
+        assertEquals("", g.topReason)
+        // без «релевантности» верха нет
+        assertEquals("", run(cfg(listOf(card("n"), card("m", prio = "top")), false), snap(cal(12))).topReason)
+    }
+
+    @Test fun check_catchesPrioViolations() {
+        val cards = listOf(card("a", prio = "low"), card("b", prio = "top"), card("c"))
+        val cf = cfg(cards, true)
+        val s = snap(cal(12))
+        val good = QrPriority.build(cf, s)
+        // подмена: у «низкого» балл выше нуля, у «верхнего» — ниже прибавки
+        val bad = QrPriority.Result(
+            listOf(QrPriority.Scored(cards[0], 5, ""), QrPriority.Scored(cards[1], 10, ""), QrPriority.Scored(cards[2], 0, "")),
+            good.topKey, good.anchorKey, good.nextChangeAt, good.mainTopKey
+        )
+        val v = QrPriority.check(bad, cf, s)
+        assertTrue(v.any { it.startsWith("10") })
+        assertTrue(v.any { it.startsWith("11") })
     }
 }

@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 27.0 (14.11)
+// Версия: 28.0 (14.11)
 // Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
 // Версия: 10.0 (27.10) — мост версии 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
@@ -42,6 +42,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 36: `widgetWhy(cfgId)` — какая карточка сейчас наверху виджета конструктора и почему (QrWidgets.whyJson): страница пишет это в форме виджета; ручной приоритет карточки `prio` приходит в `widgetsSync`.
          * 35: будильники, заведённые/выключенные нажатием на карточку в виджете (`widgetAlarmTake` / `widgetAlarmAck`; QrWidgets): страница вносит их в журнал событий.
          * 34: задачи, отмеченные двойным нажатием на карточку в виджете (`widgetTaskTake` / `widgetTaskAck`; QrWidgets).
          * 33: оценка нагрузки тренировки из виджета (`widgetRpeSet` / `widgetRpeTake` / `widgetRpeAck`; QrRpe).
@@ -65,7 +66,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 35
+        const val BRIDGE_VERSION = 36
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -1213,6 +1214,17 @@ class NativeBridge(private val activity: MainActivity) {
             QrWidgets.ackAlarmEvents(activity.applicationContext, nsJson)
         } catch (e: Exception) {
             // повторится
+        }
+    }
+
+    /** `{"key","title","reason"}` — карточка наверху виджета конструктора [cfgId] и причина («Идёт тренировка», «Будильник через 25 мин»); `key` пуст — ничего не выделено; `{}` — виджета нет. */
+    @JavascriptInterface
+    fun widgetWhy(cfgId: String?): String {
+        if (!activity.pageTrusted || cfgId.isNullOrEmpty()) return "{}"
+        return try {
+            QrWidgets.whyJson(activity.applicationContext, cfgId).ifEmpty { "{}" }
+        } catch (e: Exception) {
+            "{}"
         }
     }
 

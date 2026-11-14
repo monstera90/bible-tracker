@@ -1,17 +1,18 @@
 /* ===========================================================================
    widgets.js
-   Версия: 5.7 (14.11)
+   Версия: 5.8 (14.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
    необязательные время суток (утро/обед/вечер) и дни недели, когда она поднимается наверх, и что делать со стопкой после срабатывания карточки
-   (`after`: "none" — ничего (по умолчанию) / "hide" — скрыть до конца дня / "end" — переместить в конец).
+   (`after`: "none" — ничего (по умолчанию) / "hide" — скрыть до конца дня / "end" — переместить в конец) и «Приоритет» (`prio`: "normal" — обычный (по умолчанию) / "top" — +300 к баллам / "low" — не поднимается по сигналам и стоит ниже обычных; действует при «Переключении по релевантности», считает QrPriority.kt).
+   В форме виджета при включённой релевантности строка «Сейчас сверху: … — причина» (мост версии ≥36 `widgetWhy`, `whyText`; обновляется при открытии формы и через пару секунд после правки).
    Галочка «Отображать заряд аккумулятора» (`battery`): в стопку добавляется служебная карточка с зарядом телефона и Bluetooth-наушников — её рисует оболочка (QrBattery.kt), страница шлёт только флаг.
    Цвет карточки «Заряд» (`batColor`: "" — по умолчанию, сиреневый, иначе "#rrggbb") выбирается палитрой под галочкой — той же, что в форме карточки QR-кодов (itemcards.js `colorPalette`, запомненный цвет — `defaultColor/rememberColor`); карточка заряда показана в форме после последнего слота (и кнопки «+») (`batFaceHtml`), статус наушников из оболочки — `batStatusText`.
    Галочка «Отображать заряд аккумулятора (несколько устройств)» (`batteryMulti`, цвет `bat2Color`, палитра `icfColors2`): ещё одна служебная карточка — только значки и кольца заряда, без надписей: телефон и до трёх подключённых Bluetooth-устройств (QrBattery.renderMulti); в форме её лицо — `bat2FaceHtml`, значки — `iconSvg`, список парных устройств из оболочки — `batDevicesText`.
    Галочка «Спрашивать о тренировке» (`rpeAsk`): пока есть тренировка без оценки нагрузки (1–10), над всеми карточками стопки стоит служебная карточка «Как тренировка?» с кнопками 1…10 — её рисует оболочка (QrRpe.kt), страница шлёт только флаг; в форме показан образец лица (`rpeFaceHtml`, цвет `RPE_COLOR`). Оценку из виджета страница забирает в workouts.js (`drainWidgetRpe`, мост ≥33).
    Галочки «Показывать задачи» (`tasks`, цвет `tasksColor`, палитра `icfColors3`) и «Показывать события календаря» (`events`, цвет `eventsColor`, палитра `icfColors4`): в стопку добавляются динамические карточки по данным календаря (`CalendarTab.widgetFeed` через `deps.getCalendarFeed`, `buildFeed`). Задачи: каждая открытая задача календаря на ближайшую неделю (`FEED_DAYS`) или просроченная — отдельная карточка (до `MAX_TASKS`); событие: ближайшее запланированное в пределах недели (в оболочку уходят `MAX_EVENTS` кандидатов, показывает первое будущее — решает QrWidgets.kt по текущему времени). Лицо — `drawDynFace` (размеры сняты с макета, доли ширины карточки — `DYN`), у каждой карточки до четырёх картинок: `<ключ>` («Сегодня»), `<ключ>_t` («Завтра»), `<ключ>_w` (день недели, если до даты два дня и больше) и `<ключ>_s`/`<ключ>_y`/`<ключ>_o` («Просрочено, сегодня» / «…, вчера» / «…, 1 января», только у задачи); какую показать — выбирает оболочка (так надпись меняется в полночь без приложения). Данные меняются → `feedChanged` (из my.js: запись состояния и возврат в приложение) сверяет `feedSig` и при отличии шлёт `syncNow`. Палитра общая с карточками QR-кодов (`itemcards.colorPalette`), цвет по умолчанию — как на макете (`TASK_COLOR`/`EVENT_COLOR`), последний выбранный — `widgetsDynColors_v1`.
-   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor,rpeAsk}]}), только на устройстве.
+   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after,prio}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor,rpeAsk}]}), только на устройстве.
    Страница рисует лица карточек в PNG (canvas, `pngFor`) и шлёт их оболочке вместе с настройками (мост ≥31 `widgetsSync`).
    Точка входа: window.initWidgetsModule(deps) → window.WidgetsTab.{render, scheduleSync}.
    =========================================================================== */
@@ -58,6 +59,11 @@
     { k: "hide", label: "Скрывать карточку в стопке" },
     { k: "end", label: "Перемещать карточку в конец стопки" }
   ];
+  var PRIOS = [
+    { k: "normal", label: "Обычный" },
+    { k: "top", label: "Наверх (+300 к баллам)" },
+    { k: "low", label: "Вниз (не поднимать, ниже обычных)" }
+  ];
   var DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]; // 1..7
   var PLUS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
   var FILTER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8.5V20l-4-2v-4.5L3 5z"></path></svg>';
@@ -82,7 +88,7 @@
       o.list = o.list.filter(function(w){ return w && w.id && Array.isArray(w.cards); });
       o.list.forEach(function(w){
         w.cards = w.cards.filter(function(c){ return c && c.cid; }).slice(0, MAX_CARDS);
-        w.cards.forEach(function(c){ c.times = Array.isArray(c.times) ? c.times : []; c.days = Array.isArray(c.days) ? c.days : []; c.after = normAfter(c.after); });
+        w.cards.forEach(function(c){ c.times = Array.isArray(c.times) ? c.times : []; c.days = Array.isArray(c.days) ? c.days : []; c.after = normAfter(c.after); c.prio = normPrio(c.prio); });
         w.rotateMin = Math.max(1, Math.min(720, w.rotateMin | 0 || 5));
         w.rotate = !!w.rotate; w.relevance = !!w.relevance && !w.rotate; w.battery = !!w.battery;
         if(typeof w.batColor !== "string") w.batColor = w.battery ? LEGACY_BAT_COLOR : "";
@@ -97,6 +103,7 @@
     function normHex(v){ return (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)) ? v.toLowerCase() : ""; }
     function hasContent(w){ return !!(w.cards.length || w.battery || w.batteryMulti || w.tasks || w.events || w.rpeAsk); }
     function normAfter(v){ return (v === "hide" || v === "end") ? v : "none"; }
+    function normPrio(v){ return (v === "top" || v === "low") ? v : "normal"; }
     function save(){ try{ localStorage.setItem(KEY, JSON.stringify(data)); }catch(e){} }
     function changed(){ save(); scheduleSync(600); }
     function widgetById(id){ for(var i = 0; i < data.list.length; i++) if(data.list[i].id === id) return data.list[i]; return null; }
@@ -374,7 +381,7 @@
             tasks: !!w.tasks, events: !!w.events, rpeAsk: !!w.rpeAsk, dyn: dyn.perWidget[w.id] || [],
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
-              return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after), habit: f.type === "habit", alarm: f.type === "alarm" ? (f.alarmId || "") : "", alarmSpec: f.type === "alarm" ? (f.alarmSpec || null) : null };
+              return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after), prio: normPrio(c.prio), habit: f.type === "habit", alarm: f.type === "alarm" ? (f.alarmId || "") : "", alarmSpec: f.type === "alarm" ? (f.alarmSpec || null) : null };
             })
           };
         });
@@ -382,6 +389,7 @@
         var ok = false;
         try{ ok = !!b.widgetsSync(JSON.stringify({ v: 1, widgets: widgets, images: images })); }catch(e){ ok = false; }
         if(ok && feed) lastFeedSig = feedSig(feed);
+        if(ok) setTimeout(refreshWhy, 1500); // оболочка перерисовывает виджеты сразу после sync, причину верхней карточки берём уже после пересчёта
         return ok;
       });
     }
@@ -632,6 +640,23 @@
     function homeBtn(title, disabled){
       return '<button type="button" class="mdeditor-fab-btn" id="wgHomeBtn" title="' + esc(title) + '"' + (disabled ? ' tabindex="-1" aria-disabled="true"' : '') + '>' + HOME_SVG + '</button>';
     }
+    // «Сейчас сверху: … — причина»: что оболочка (QrWidgets.kt, мост ≥36 widgetWhy) поставила наверх этого виджета при последнем расчёте. Пусто — моста нет, виджет ещё не отправлен оболочке или порядок не зависит от баллов
+    function whyText(w){
+      var b = window.LifeTrackerNative;
+      if(!w || !bridge() || typeof b.widgetWhy !== "function" || !(w.relevance || w.rpeAsk)) return "";
+      var o = null;
+      try{ o = JSON.parse(b.widgetWhy(w.id) || "{}"); }catch(e){ o = null; }
+      if(!o || typeof o.key !== "string") return "";
+      if(o.key) return "Сейчас сверху: «" + (o.title || "карточка") + "»" + (o.reason ? " — " + o.reason : "") + ".";
+      return w.relevance ? "Сейчас сверху ничего не выделено: карточки идут в вашем порядке." : "";
+    }
+    var whyWid = "";
+    function refreshWhy(){
+      var el = document.getElementById("wgWhy");
+      if(!el || !whyWid) return;
+      var w = widgetById(whyWid), t = w ? whyText(w) : "";
+      el.textContent = t; el.style.display = t ? "" : "none";
+    }
     function modeText(w){
       if(w.rotate) return "по кругу, раз в " + w.rotateMin + " мин";
       if(w.relevance) return "по релевантности";
@@ -682,6 +707,11 @@
       if(w.rotate) html += '<div class="wg-min">каждые<input type="number" id="wgRotMin" min="1" max="720" value="' + w.rotateMin + '">мин</div>';
       html += '<label class="wg-check"><input type="checkbox" id="wgRel"' + (w.relevance ? ' checked' : '') + '>Переключение по релевантности</label>';
       html += '<div class="wg-hint">По кругу — карточки сменяют друг друга сами. По релевантности — наверху то, что запущено сейчас (тренировка, затем помодоро, затем таймеры и секундомер), следом карточки, у которых сейчас их время суток и день. Включить можно что-то одно.</div>';
+      if(bridge() && typeof window.LifeTrackerNative.widgetWhy === "function" && (w.relevance || w.rpeAsk)){
+        whyWid = w.id;
+        var wt = whyText(w);
+        html += '<div class="wg-bat-status" id="wgWhy"' + (wt ? '' : ' style="display:none"') + '>' + esc(wt) + '</div>';
+      }
       html += '<label class="wg-check"><input type="checkbox" id="wgBat"' + (w.battery ? ' checked' : '') + '>Отображать заряд аккумулятора (наушники и телефон)</label>';
       html += '<div class="wg-hint">В стопке появится карточка с зарядом телефона и, если подключены Bluetooth-наушники, их заряда. Нет галочки — карточки в стопке нет.</div>';
       if(w.battery){
@@ -725,6 +755,9 @@
       html += '<div class="wg-sec">После срабатывания</div><select class="mdeditor-cleanup-input" id="wgAfter" aria-label="После срабатывания карточки">' +
         AFTERS.map(function(o){ return '<option value="' + o.k + '"' + (normAfter(c.after) === o.k ? ' selected' : '') + '>' + o.label + '</option>'; }).join('') + '</select>' +
         '<div class="wg-hint">Что делать с карточкой в стопке, когда её действие сработало — по нажатию в виджете, в приложении или по скану кода. Скрытая карточка возвращается на следующий день; если скрыты все, виджет пишет «На сегодня больше ничего».</div>';
+      html += '<div class="wg-sec">Приоритет</div><select class="mdeditor-cleanup-input" id="wgPrio" aria-label="Приоритет карточки">' +
+        PRIOS.map(function(o){ return '<option value="' + o.k + '"' + (normPrio(c.prio) === o.k ? ' selected' : '') + '>' + o.label + '</option>'; }).join('') + '</select>' +
+        '<div class="wg-hint">Работает при включённом «Переключении по релевантности». «Наверх» прибавляет карточке 300 баллов к тем, что у неё есть по занятиям, будильнику, времени суток и дням: сама по себе она встанет выше обычных карточек, но не выше идущей тренировки, звонящего будильника и близкого события. «Вниз» — по сигналам карточка не поднимается и стоит ниже обычных. Перенос «в конец» и скрытие сильнее приоритета.</div>';
       html += '<div class="wg-btns"><button type="button" class="workbooks-run-btn" id="wgReplaceBtn">Заменить карточку</button>' +
         '<button type="button" class="workbooks-run-btn" id="wgRemoveBtn">Убрать из виджета</button></div>';
       html += fabRow(homeBtn("К виджету"));
@@ -882,6 +915,8 @@
       });
       var aft = $("wgAfter");
       if(aft) aft.addEventListener("change", function(){ c.after = normAfter(aft.value); changed(); });
+      var prio = $("wgPrio");
+      if(prio) prio.addEventListener("change", function(){ c.prio = normPrio(prio.value); changed(); });
       $("wgReplaceBtn").addEventListener("click", function(){ go("pick", { w: a.w, draft: false, replace: a.i, form: a }); });
       $("wgRemoveBtn").addEventListener("click", function(){ a.w.cards.splice(a.i, 1); changed(); backUi(); });
     }
@@ -900,7 +935,7 @@
           if(s.getAttribute("data-used")) return;
           var cid = s.getAttribute("data-cid"), w = a.w;
           if(a.replace >= 0 && w.cards[a.replace]) w.cards[a.replace].cid = cid;
-          else if(w.cards.length < MAX_CARDS) w.cards.push({ cid: cid, times: [], days: [], after: "none" });
+          else if(w.cards.length < MAX_CARDS) w.cards.push({ cid: cid, times: [], days: [], after: "none", prio: "normal" });
           var form = a.form && a.form.draft !== undefined ? a.form : null;
           if(a.draft && form) commitDraft(form);
           changed();
