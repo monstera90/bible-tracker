@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 5.9 (14.11) — карточка события листается нажатием у левого/правого края (до 10 событий, QrWidgets.kt): в оболочку уходят 10 кандидатов и id события (`eid`) — центр карточки открывает форму именно этого события.
+   Версия: 6.0 (14.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -66,6 +66,7 @@
   ];
   var DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]; // 1..7
   var PLUS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
+  var INFO_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5.5"></path><circle cx="12" cy="7.6" r="0.6" fill="currentColor"></circle></svg>';
   var FILTER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8.5V20l-4-2v-4.5L3 5z"></path></svg>';
 
   window.initWidgetsModule = function(deps){
@@ -706,39 +707,52 @@
       html += '<label class="wg-check"><input type="checkbox" id="wgRotate"' + (w.rotate ? ' checked' : '') + '>Переключать виджеты по кругу</label>';
       if(w.rotate) html += '<div class="wg-min">каждые<input type="number" id="wgRotMin" min="1" max="720" value="' + w.rotateMin + '">мин</div>';
       html += '<label class="wg-check"><input type="checkbox" id="wgRel"' + (w.relevance ? ' checked' : '') + '>Переключение по релевантности</label>';
-      html += '<div class="wg-hint">По кругу — карточки сменяют друг друга сами. По релевантности — наверху то, что запущено сейчас (тренировка, затем помодоро, затем таймеры и секундомер), следом карточки, у которых сейчас их время суток и день. Включить можно что-то одно.</div>';
       if(bridge() && typeof window.LifeTrackerNative.widgetWhy === "function" && (w.relevance || w.rpeAsk)){
         whyWid = w.id;
         var wt = whyText(w);
         html += '<div class="wg-bat-status" id="wgWhy"' + (wt ? '' : ' style="display:none"') + '>' + esc(wt) + '</div>';
       }
       html += '<label class="wg-check"><input type="checkbox" id="wgBat"' + (w.battery ? ' checked' : '') + '>Отображать заряд аккумулятора (наушники и телефон)</label>';
-      html += '<div class="wg-hint">В стопке появится карточка с зарядом телефона и, если подключены Bluetooth-наушники, их заряда. Нет галочки — карточки в стопке нет.</div>';
       if(w.battery){
         html += cardsOf().colorPalette("battery");
         var bst = batStatusText();
         if(bst) html += '<div class="wg-bat-status" id="wgBatStatus">' + esc(bst) + '</div>';
       }
       html += '<label class="wg-check"><input type="checkbox" id="wgBat2"' + (w.batteryMulti ? ' checked' : '') + '>Отображать заряд аккумулятора (несколько устройств)</label>';
-      html += '<div class="wg-hint">Ещё одна карточка в стопке — без надписей, только значки и кольца заряда: телефон и до трёх подключённых Bluetooth-устройств (наушники, часы, колонка и т. п.).</div>';
       if(w.batteryMulti){
         html += cardsOf().colorPalette("battery2", "icfColors2");
         var dst = batDevicesText();
         if(dst) html += '<div class="wg-bat-status" id="wgBat2Status">' + esc(dst) + '</div>';
       }
       html += '<label class="wg-check"><input type="checkbox" id="wgTasks"' + (w.tasks ? ' checked' : '') + '>Показывать задачи</label>';
-      html += '<div class="wg-hint">Каждая невыполненная задача из календаря на сегодня — отдельная карточка. Если задачу не отметить, на карточке вместо «Сегодня» будет «Просрочено», и она остаётся в стопке, пока вы её не отметите. Нет галочки — карточек задач в стопке нет.</div>';
       if(w.tasks) html += cardsOf().colorPalette("wgtasks", "icfColors3");
       html += '<label class="wg-check"><input type="checkbox" id="wgEvents"' + (w.events ? ' checked' : '') + '>Показывать события календаря</label>';
-      html += '<div class="wg-hint">Одна карточка — следующее запланированное событие, с надписью «Сегодня, Четверг» или «Завтра, Суббота» (день недели — когда состоится событие). Если ни сегодня, ни завтра событий нет, карточки в стопке нет. Нет галочки — карточки события в стопке нет.</div>';
       if(w.events) html += cardsOf().colorPalette("wgevents", "icfColors4");
       html += '<label class="wg-check"><input type="checkbox" id="wgRpe"' + (w.rpeAsk ? ' checked' : '') + '>Спрашивать о тренировке</label>';
-      html += '<div class="wg-hint">После тренировки, пока вы не оценили нагрузку, наверху стопки появляется карточка «Как тренировка?» с кнопками от 1 до 10. Нажатие на число сразу сохраняет оценку, и карточка исчезает. Если пролистнуть на другую карточку, через минуту она вернётся наверх; порядок остальных карточек не меняется. Нет галочки — карточки нет.</div>';
       var st = nativeState(), placed = st && st.placed && st.placed[w.id];
       html += '<div class="wg-btns">';
       if(bridge()) html += '<button type="button" class="workbooks-run-btn" id="wgPinBtn">' + (placed ? 'Добавить ещё один на рабочий стол' : 'Добавить на рабочий стол') + '</button><div class="wg-hint" id="wgPinHint"></div>';
       html += '<button type="button" class="workbooks-run-btn" id="wgDelBtn">Удалить виджет</button></div>';
-      html += fabRow(homeBtn("К списку виджетов"));
+      html += fabRow('<button type="button" class="mdeditor-fab-btn" id="wgInfoBtn" title="Описание галочек">' + INFO_SVG + '</button>' + homeBtn("К списку виджетов"));
+      return html;
+    }
+
+    // экран «i»: описание всех галочек формы виджета (в самой форме остаются только пункты с галочками)
+    var INFO_ITEMS = [
+      ["Переключать виджеты по кругу", "Карточки сменяют друг друга сами раз в заданное число минут. Включить можно что-то одно: «по кругу» или «по релевантности»."],
+      ["Переключение по релевантности", "Наверху то, что запущено сейчас (тренировка, затем помодоро, затем таймеры и секундомер), следом карточки, у которых сейчас их время суток и день. Включить можно что-то одно: «по кругу» или «по релевантности»."],
+      ["Отображать заряд аккумулятора (наушники и телефон)", "В стопке появится карточка с зарядом телефона и, если подключены Bluetooth-наушники, их заряда. Нет галочки — карточки в стопке нет."],
+      ["Отображать заряд аккумулятора (несколько устройств)", "Ещё одна карточка в стопке — без надписей, только значки и кольца заряда: телефон и до трёх подключённых Bluetooth-устройств (наушники, часы, колонка и т. п.)."],
+      ["Показывать задачи", "Каждая невыполненная задача из календаря на сегодня — отдельная карточка. Если задачу не отметить, на карточке вместо «Сегодня» будет «Просрочено», и она остаётся в стопке, пока вы её не отметите. Нет галочки — карточек задач в стопке нет."],
+      ["Показывать события календаря", "Одна карточка — следующее запланированное событие, с надписью «Сегодня, Четверг» или «Завтра, Суббота» (день недели — когда состоится событие). Если ни сегодня, ни завтра событий нет, карточки в стопке нет. Нет галочки — карточки события в стопке нет."],
+      ["Спрашивать о тренировке", "После тренировки, пока вы не оценили нагрузку, наверху стопки появляется карточка «Как тренировка?» с кнопками от 1 до 10. Нажатие на число сразу сохраняет оценку, и карточка исчезает. Если пролистнуть на другую карточку, через минуту она вернётся наверх; порядок остальных карточек не меняется. Нет галочки — карточки нет."]
+    ];
+    function infoHtml(){
+      var html = '<h3 class="common-tab-title">Описание галочек</h3>';
+      INFO_ITEMS.forEach(function(it){
+        html += '<div class="wg-sec">' + esc(it[0]) + '</div><div class="wg-hint">' + esc(it[1]) + '</div>';
+      });
+      html += fabRow(homeBtn("К виджету"));
       return html;
     }
 
@@ -793,6 +807,7 @@
       else if(top.s === "form") body = formHtml(top.a);
       else if(top.s === "card") body = cardHtml(top.a);
       else if(top.s === "pick") body = pickHtml(top.a);
+      else if(top.s === "info") body = infoHtml();
       el.innerHTML = '<div class="mdeditor-tab widgets-tab" id="widgetsTabRoot">' + body + '</div>';
       bind(top);
     }
@@ -829,6 +844,8 @@
           else go("card", { w: w, i: parseInt(s.getAttribute("data-i"), 10), form: a });
         });
       });
+      var infoBtn = $("wgInfoBtn");
+      if(infoBtn) infoBtn.addEventListener("click", function(){ go("info", {}); });
       var rot = $("wgRotate"), rel = $("wgRel");
       rot.addEventListener("change", function(){ w.rotate = rot.checked; if(w.rotate) w.relevance = false; commitDraft(a); changed(); render(); });
       rel.addEventListener("change", function(){ w.relevance = rel.checked; if(w.relevance) w.rotate = false; commitDraft(a); changed(); render(); });
