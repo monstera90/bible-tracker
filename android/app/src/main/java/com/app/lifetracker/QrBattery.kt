@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 4.4 (14.11)
+// Версия: 4.5 (14.11)
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -7,6 +7,9 @@ import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothHeadset
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
@@ -23,9 +26,12 @@ import android.graphics.Typeface
 import android.media.AudioManager
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.graphics.Path
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 
 /**
  * Карточка «Заряд» в стопке виджета (галочка «Отображать заряд аккумулятора» в форме виджета, `Cfg.battery`).
@@ -42,6 +48,11 @@ import org.json.JSONObject
  * и смене заряда, поэтому приёмник нужно поднять до подключения (`register` зовётся и из `QrWidgets.onBluetoothChanged`). Нужны
  * `BLUETOOTH` (до Android 11) / `BLUETOOTH_CONNECT` (12+, запрашивает `MainActivity.requestBluetoothForWidget`). Причину, по которой
  * заряд наушников неизвестен, отдаёт [status] (страница показывает её в форме виджета).
+ *
+ * Источники заряда устройства, по порядку ([levelOf]): `system` — скрытый `getBatteryLevel()` (кэш Bluetooth-стека, мгновенно); `meta` — скрытые
+ * метаданные устройства (`getMetadata`, заряд вкладышей); `broadcast` — вещание `BATTERY_LEVEL_CHANGED`; `hfp` — команда гарнитуры
+ * `+IPHONEACCEV` (то, из чего стек и делает заряд наушников); `gatt` — BLE-служба батареи 0x180F (фитнес-браслеты, часы, пульты): приложение
+ * само подключается к устройству, читает заряд и отключается, раз в несколько минут. Откуда взят заряд, [status] отдаёт в поле `src`.
  */
 object QrBattery {
 
@@ -140,6 +151,16 @@ object QrBattery {
         }
     }
 
+    /** Откуда взят последний уровень устройства: system / meta / broadcast / hfp / gatt (пусто — неизвестно). */
+    private fun cachedSrc(ctx: Context, addr: String): String {
+        return try {
+            val o = JSONObject(ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(K_LEVELS, "{}") ?: "{}")
+            o.optJSONArray(addr.uppercase())?.optString(2, "broadcast") ?: ""
+        } catch (e: Throwable) {
+            ""
+        }
+    }
+
     /** Когда уровень устройства последний раз получен (из вещания или чтением), мс; 0 — ни разу. */
     private fun cacheStamp(ctx: Context, addr: String): Long {
         return try {
@@ -150,11 +171,11 @@ object QrBattery {
         }
     }
 
-    private fun cacheLevel(ctx: Context, addr: String, level: Int) {
+    private fun cacheLevel(ctx: Context, addr: String, level: Int, src: String = "broadcast") {
         try {
             val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             val o = JSONObject(p.getString(K_LEVELS, "{}") ?: "{}")
-            o.put(addr.uppercase(), org.json.JSONArray().put(level).put(System.currentTimeMillis()))
+            o.put(addr.uppercase(), org.json.JSONArray().put(level).put(System.currentTimeMillis()).put(src))
             p.edit().putString(K_LEVELS, o.toString()).apply()
         } catch (e: Throwable) {
             // кэш не обязателен
@@ -166,13 +187,150 @@ object QrBattery {
         try {
             val v = BluetoothDevice::class.java.getMethod("getBatteryLevel").invoke(d) as? Int
             if (v != null && v in 0..100) {
-                cacheLevel(ctx, d.address, v)
+                cacheLevel(ctx, d.address, v, "system")
                 return v
             }
         } catch (e: Throwable) {
-            // метод скрыт или недоступен — берём последнее значение из вещания
+            // метод скрыт или недоступен — следующий источник
         }
+        val m = metaLevel(d)
+        if (m >= 0) {
+            cacheLevel(ctx, d.address, m, "meta")
+            return m
+        }
+        if (gattCandidate(d)) requestGatt(ctx, d) // ответ придёт позже и сам перерисует карточку; пока — последнее известное значение
         return cachedLevel(ctx, d.address)
+    }
+
+    // ---------- метаданные устройства (скрытый getMetadata) ----------
+
+    /** Заряд из метаданных стека: основной (18), иначе меньший из левого (10) и правого (11) вкладыша; значение — цифры в тексте. -1 — нет. */
+    @SuppressLint("MissingPermission")
+    private fun metaLevel(d: BluetoothDevice): Int {
+        return try {
+            val m = BluetoothDevice::class.java.getMethod("getMetadata", Int::class.javaPrimitiveType)
+            fun get(key: Int): Int {
+                val b = m.invoke(d, key) as? ByteArray ?: return -1
+                return String(b, Charsets.UTF_8).trim().toIntOrNull()?.takeIf { it in 0..100 } ?: -1
+            }
+            val main = get(18)
+            if (main >= 0) return main
+            val l = get(10)
+            val r = get(11)
+            when {
+                l >= 0 && r >= 0 -> Math.min(l, r)
+                l >= 0 -> l
+                else -> r
+            }
+        } catch (e: Throwable) {
+            -1
+        }
+    }
+
+    // ---------- BLE: служба батареи 0x180F (браслеты, часы, пульты) ----------
+
+    private val SVC_BATTERY: UUID = UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb")
+    private val CHR_LEVEL: UUID = UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
+    private const val GATT_TIMEOUT_MS = 20_000L
+    private const val GATT_RETRY_OK_MS = 5 * 60_000L
+    private const val GATT_RETRY_FAIL_MS = 10 * 60_000L
+    private const val GATT_RETRY_NONE_MS = 6 * 3_600_000L // у устройства нет службы батареи — не мучаем его часами
+
+    private val gattBusy = java.util.concurrent.ConcurrentHashMap<String, BluetoothGatt>()
+    private val gattNext = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val mainH: Handler by lazy { Handler(Looper.getMainLooper()) }
+
+    /** BLE-устройство, у которого стоит спросить заряд по GATT: не звуковое, не компьютер и не телефон. */
+    @SuppressLint("MissingPermission")
+    private fun gattCandidate(d: BluetoothDevice): Boolean = try {
+        val le = d.type == BluetoothDevice.DEVICE_TYPE_LE || d.type == BluetoothDevice.DEVICE_TYPE_DUAL
+        val major = d.bluetoothClass?.majorDeviceClass
+        le && major != BluetoothClass.Device.Major.AUDIO_VIDEO && major != BluetoothClass.Device.Major.COMPUTER && major != BluetoothClass.Device.Major.PHONE
+    } catch (e: Throwable) {
+        false
+    }
+
+    private fun finishGatt(addr: String) {
+        val g = gattBusy.remove(addr) ?: return
+        try {
+            g.disconnect()
+            g.close()
+        } catch (e: Throwable) {
+            // уже закрыто
+        }
+    }
+
+    /** Подключиться к устройству по GATT, прочитать заряд (0x2A19) и отключиться; не чаще раза в несколько минут на устройство. */
+    @SuppressLint("MissingPermission")
+    private fun requestGatt(ctx: Context, d: BluetoothDevice) {
+        val addr = d.address.uppercase()
+        val now = System.currentTimeMillis()
+        if (gattBusy.containsKey(addr) || now < (gattNext[addr] ?: 0L)) return
+        gattNext[addr] = now + GATT_RETRY_FAIL_MS // по умолчанию как неудача; прочитанный заряд сократит паузу
+        val app = ctx.applicationContext
+        val cb = object : BluetoothGattCallback() {
+            override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+                if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
+                    try {
+                        if (!g.discoverServices()) finishGatt(addr)
+                    } catch (e: Throwable) {
+                        finishGatt(addr)
+                    }
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
+                    finishGatt(addr)
+                }
+            }
+
+            override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+                val ch = if (status == BluetoothGatt.GATT_SUCCESS) g.getService(SVC_BATTERY)?.getCharacteristic(CHR_LEVEL) else null
+                if (ch == null) {
+                    if (status == BluetoothGatt.GATT_SUCCESS) gattNext[addr] = System.currentTimeMillis() + GATT_RETRY_NONE_MS
+                    finishGatt(addr)
+                    return
+                }
+                try {
+                    if (!g.readCharacteristic(ch)) finishGatt(addr)
+                } catch (e: Throwable) {
+                    finishGatt(addr)
+                }
+            }
+
+            private fun got(value: ByteArray?, status: Int) {
+                val v = if (value != null && value.isNotEmpty()) value[0].toInt() and 0xFF else -1
+                if (status == BluetoothGatt.GATT_SUCCESS && v in 0..100) {
+                    cacheLevel(app, addr, v, "gatt")
+                    gattNext[addr] = System.currentTimeMillis() + GATT_RETRY_OK_MS
+                    mainH.post {
+                        try {
+                            QrWidgets.onBatteryChanged(app)
+                        } catch (e: Throwable) {
+                            // виджет не должен ронять приложение
+                        }
+                    }
+                }
+                finishGatt(addr)
+            }
+
+            // Android 13+ зовёт этот вариант, до 13 — следующий
+            override fun onCharacteristicRead(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
+                got(value, status)
+            }
+
+            @Deprecated("Deprecated in Java")
+            @Suppress("DEPRECATION")
+            override fun onCharacteristicRead(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+                got(characteristic.value, status)
+            }
+        }
+        try {
+            val g = if (Build.VERSION.SDK_INT >= 23) d.connectGatt(app, false, cb, BluetoothDevice.TRANSPORT_LE) else d.connectGatt(app, false, cb)
+            if (g != null) {
+                gattBusy[addr] = g
+                mainH.postDelayed({ finishGatt(addr) }, GATT_TIMEOUT_MS)
+            }
+        } catch (e: Throwable) {
+            gattBusy.remove(addr)
+        }
     }
 
     /** Подключённые Bluetooth-аудиовыходы: адреса (Android 9+) и названия — их заряд читаем в первую очередь. */
@@ -197,7 +355,7 @@ object QrBattery {
     }
 
     /** Итог поиска наушников: [reason] — ok (заряд известен) / nolevel (подключены, заряд не отдаются) / perm / off / nobt / none. */
-    private class Probe(val reason: String, val name: String = "", val level: Int = -1)
+    private class Probe(val reason: String, val name: String = "", val level: Int = -1, val src: String = "")
 
     @SuppressLint("MissingPermission")
     private fun probe(ctx: Context): Probe {
@@ -217,8 +375,9 @@ object QrBattery {
                 val lv = levelOf(app, d)
                 val nm = d.name ?: ""
                 if (lv >= 0) {
-                    if (active) return Probe("ok", nm, lv)
-                    if (known == null) known = Probe("ok", nm, lv)
+                    val src = cachedSrc(app, d.address)
+                    if (active) return Probe("ok", nm, lv, src)
+                    if (known == null) known = Probe("ok", nm, lv, src)
                 } else if (unknown == null) {
                     unknown = Probe("nolevel", nm)
                 }
@@ -244,7 +403,7 @@ object QrBattery {
     /** {"reason","name","level"} — что с наушниками сейчас; для формы виджета (мост `widgetsState`, поле `bt`). */
     fun status(ctx: Context): JSONObject {
         val p = probe(ctx)
-        return JSONObject().put("reason", p.reason).put("name", p.name).put("level", p.level).put("devices", pairedDevices(ctx))
+        return JSONObject().put("reason", p.reason).put("name", p.name).put("level", p.level).put("src", p.src).put("devices", pairedDevices(ctx))
     }
 
     /** Парные Bluetooth-устройства: [{name, on (подключено), icon}] — форма виджета показывает их имена и значок, который достанется каждому. */
@@ -409,6 +568,37 @@ object QrBattery {
         }
     }
 
+    /** Команды гарнитуры (HFP): Apple `+IPHONEACCEV` — заряд наушников: пары «ключ, значение», ключ 1 — заряд 0..9, то есть (значение + 1) × 10 %. */
+    private const val COMPANY_APPLE = 76
+
+    private val vendorReceiver = object : BroadcastReceiver() {
+        @Suppress("DEPRECATION")
+        override fun onReceive(c: Context, i: Intent) {
+            try {
+                val cmd = i.getStringExtra(BluetoothHeadset.EXTRA_VENDOR_SPECIFIC_HEADSET_EVENT_CMD) ?: return
+                if (!cmd.equals("+IPHONEACCEV", ignoreCase = true)) return
+                val dev = i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+                val args = i.getSerializableExtra(BluetoothHeadset.EXTRA_VENDOR_SPECIFIC_HEADSET_EVENT_ARGS) as? Array<*> ?: return
+                fun num(a: Any?): Int = (a as? Int) ?: a?.toString()?.trim()?.toIntOrNull() ?: -1
+                var level = -1
+                var k = 1
+                while (k + 1 < args.size) {
+                    if (num(args[k]) == 1) {
+                        val v = num(args[k + 1])
+                        if (v in 0..9) level = (v + 1) * 10
+                    }
+                    k += 2
+                }
+                if (level < 0) return
+                cacheLevel(c, dev.address, level, "hfp")
+                markLive(dev.address)
+                QrWidgets.onBatteryChanged(c)
+            } catch (e: Throwable) {
+                // виджет не должен ронять приложение
+            }
+        }
+    }
+
     /** Вещание о подключении/отключении из манифестного приёмника виджета: отмечаем устройство, чтобы карточка увидела его сразу. */
     @Suppress("DEPRECATION")
     fun noteAcl(i: Intent, connected: Boolean) {
@@ -434,6 +624,13 @@ object QrBattery {
             val app = ctx.applicationContext
             if (Build.VERSION.SDK_INT >= 33) app.registerReceiver(receiver, f, Context.RECEIVER_EXPORTED) else app.registerReceiver(receiver, f)
             registered = true
+            try {
+                val vf = IntentFilter(BluetoothHeadset.ACTION_VENDOR_SPECIFIC_HEADSET_EVENT)
+                vf.addCategory(BluetoothHeadset.VENDOR_SPECIFIC_HEADSET_EVENT_COMPANY_ID_CATEGORY + "." + COMPANY_APPLE)
+                if (Build.VERSION.SDK_INT >= 33) app.registerReceiver(vendorReceiver, vf, Context.RECEIVER_EXPORTED) else app.registerReceiver(vendorReceiver, vf)
+            } catch (e: Throwable) {
+                // события гарнитуры необязательны
+            }
         } catch (e: Throwable) {
             // нет разрешения или запрещено системой — остаётся опрос по таймеру
         }
