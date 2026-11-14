@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (14.11)
+// Версия: 2.0 (14.11)
 
 import com.app.lifetracker.QrWidgets.Card
 import com.app.lifetracker.QrWidgets.Cfg
@@ -14,8 +14,9 @@ import java.util.Calendar
  * Фильтр (карточки нет в стопке вообще): скрытые сегодня, выполненные задачи, события и задачи вне окна [DYN_DAYS].
  * [check] проверяет инварианты результата; значения баллов — в таблице констант ниже.
  *
- * Этап 1 (вынос): баллы только прежние — идёт занятие (1000 + ранг), «её» время (500), остальное 0. Остальные поля [Snapshot]
- * (будильники, заряд, [Snapshot.lastTopKey]) пока не читаются.
+ * Этап 2: новые сигналы (звонит / скоро сработает будильник карточки, событие и задача календаря, низкий заряд) и устойчивость: новая верхняя
+ * карточка заменяет прежнюю ([Snapshot.lastTopKey]) только если её балл выше минимум на [HYSTERESIS] или у прежней балл упал до 0; звонящий
+ * будильник гистерезис обходит. Балл карточки — максимум по её сигналам, не сумма.
  */
 object QrPriority {
 
@@ -25,8 +26,28 @@ object QrPriority {
     const val SCORE_POMODORO = 1030
     const val SCORE_TIMER = 1020
     const val SCORE_STOPWATCH = 1010
+    /** Звонит будильник карточки: выше любых занятий; гистерезис не держит прежнюю верхнюю карточку. */
+    const val SCORE_ALARM_RINGING = 1100
+    /** Будильник карточки сработает в ближайшие [SOON_MS] (заведённый позже — 0). */
+    const val SCORE_ALARM_SOON = 800
+    /** Событие календаря начнётся в ближайшие [SOON_MS]. */
+    const val SCORE_EVENT_SOON = 750
+    /** Задача календаря просрочена. */
+    const val SCORE_TASK_OVERDUE = 650
+    /** Задача календаря на сегодня (время ещё не прошло). */
+    const val SCORE_TASK_TODAY = 520
     /** «Её» время суток и день недели ([scheduledNow]). */
     const val SCORE_SCHEDULED = 500
+    /** Заряд телефона не выше [BATTERY_LOW_PERCENT] — только карточки заряда. */
+    const val SCORE_BATTERY_LOW = 450
+    const val BATTERY_LOW_PERCENT = 15
+
+    /** «Скоро»: за сколько до будильника или события оно поднимает карточку. */
+    const val SOON_MS = 60L * 60_000L
+    /** Новая верхняя карточка заменяет прежнюю, если её балл выше минимум на столько. */
+    const val HYSTERESIS = 100
+    /** Пока звонит будильник, порядок перепроверяется с этим шагом (смахнутое уведомление и его таймаут не присылают события). */
+    private const val RINGING_POLL_MS = 60_000L
 
     /** Окно задач и событий: сегодня и ещё шесть дней (совпадает с FEED_DAYS в widgets.js). */
     const val DYN_DAYS = 7
@@ -35,7 +56,7 @@ object QrPriority {
     val WINDOWS: Map<String, Pair<Int, Int>> = mapOf("m" to (5 * 60 to 11 * 60), "d" to (11 * 60 to 15 * 60), "e" to (17 * 60 to 23 * 60))
     private val BOUNDARIES = intArrayOf(0, 5 * 60, 11 * 60, 15 * 60, 17 * 60, 23 * 60)
 
-    /** Всё, что нужно для расчёта. Поля, которые этап 1 не читает, имеют значения по умолчанию. */
+    /** Всё, что нужно для расчёта (оболочка собирает его в [QrWidgets.snapshot]); у необязательных полей значения по умолчанию. */
     data class Snapshot(
         val now: Long,
         val cal: Calendar,
@@ -62,8 +83,13 @@ object QrPriority {
         val topKey: String,
         /** К чему возвращаться и от смены чего вставать наверх (прежние anchorKey/topAnchor). */
         val anchorKey: String,
-        /** Когда порядок может измениться без внешнего события (ближайшая граница окон времени суток, только при «релевантности»); иначе [Long.MAX_VALUE]. */
-        val nextChangeAt: Long
+        /**
+         * Когда порядок может измениться без внешнего события (только при «релевантности»; иначе [Long.MAX_VALUE]): ближайшее из границы окон времени
+         * суток, «до события 60 мин», «до будильника 60 мин», времени задачи на сегодня (станет просроченной), а пока звонит будильник — через минуту.
+         */
+        val nextChangeAt: Long,
+        /** Верхняя карточка по релевантности без «Как тренировка?» — её оболочка запоминает как [Snapshot.lastTopKey] для следующего расчёта. */
+        val mainTopKey: String = ""
     )
 
     // ---------- построение ----------
@@ -86,18 +112,81 @@ object QrPriority {
                     val sc = scoreOf(c, s)
                     scored.add(Scored(c, sc.first, sc.second))
                 }
-                // sortedWith устойчивая: при равных баллах остаётся порядок пользователя (события в cfg стоят раньше задач)
-                val sorted = scored.sortedWith(compareByDescending<Scored> { it.score })
+                // sortedWith устойчивая: при равных баллах остаётся порядок пользователя; события и заряд уточняет tidy
+                val sorted = ArrayList(tidy(scored.sortedWith(compareByDescending<Scored> { it.score })))
+                if (sorted.first().score > 0) top = sorted.first().card.key
+                top = keepPrevTop(sorted, top, s.lastTopKey)
                 main.addAll(sorted)
                 for (c in tail) main.add(Scored(c, 0, ""))
-                if (sorted.first().score > 0) top = sorted.first().card.key
             }
         }
         val out = ArrayList<Scored>()
         if (s.rpePending) out.add(Scored(rpeCard(), 0, "Ждёт оценки тренировки"))
         out.addAll(main)
         val topKey = if (s.rpePending) QrRpe.KEY else top
-        return Result(out, topKey, anchorOf(cfg, s, main, top), if (cfg.relevance) nextBoundary(s.now, s.cal) else Long.MAX_VALUE)
+        val next = if (cfg.relevance) nextChange(base, s) else Long.MAX_VALUE
+        return Result(out, topKey, anchorOf(cfg, s, main, top), next, top)
+    }
+
+    /**
+     * Устойчивость: прежняя верхняя карточка ([prev]) остаётся наверху, если новая лидирует меньше чем на [HYSTERESIS] баллов; сменить её сразу могут
+     * лишь окончание сигнала (у прежней балл 0), её уход из основной части или звонящий будильник. Удержанная карточка переезжает в начало [sorted],
+     * остальной порядок не трогается. Возвращает ключ верхней карточки.
+     */
+    private fun keepPrevTop(sorted: MutableList<Scored>, top: String, prev: String): String {
+        if (top.isEmpty() || prev.isEmpty() || prev == top || prev == QrRpe.KEY) return top
+        val idx = sorted.indexOfFirst { it.card.key == prev }
+        if (idx <= 0) return top
+        val ps = sorted[idx].score
+        val first = sorted[0].score
+        if (ps <= 0 || first >= ps + HYSTERESIS) return top
+        if (first >= SCORE_ALARM_RINGING && ps < SCORE_ALARM_RINGING) return top
+        sorted.add(0, sorted.removeAt(idx))
+        return prev
+    }
+
+    /**
+     * При равных баллах (после устойчивой сортировки — в порядке пользователя): места, занятые событиями и задачами календаря, переписываются
+     * «сначала события, потом задачи», карточки заряда — после остальных. Остальные карточки с равным баллом остаются где стояли.
+     */
+    private fun tidy(sorted: List<Scored>): List<Scored> {
+        val out = ArrayList<Scored>(sorted.size)
+        var i = 0
+        while (i < sorted.size) {
+            var j = i
+            while (j < sorted.size && sorted[j].score == sorted[i].score) j++
+            val run = sorted.subList(i, j)
+            val dynSlots = run.indices.filter { run[it].card.dyn.isNotEmpty() }
+            val ordered = ArrayList(run)
+            if (dynSlots.size > 1) {
+                val dyn = dynSlots.map { run[it] }
+                val re = dyn.filter { it.card.dyn == "event" } + dyn.filter { it.card.dyn != "event" }
+                for (k in dynSlots.indices) ordered[dynSlots[k]] = re[k]
+            }
+            out.addAll(ordered.filter { !isBattery(it.card.key) })
+            out.addAll(ordered.filter { isBattery(it.card.key) })
+            i = j
+        }
+        return out
+    }
+
+    /** Карточка заряда (константы ключей подставляются при сборке — класс QrBattery в JVM-тестах не загружается). */
+    private fun isBattery(key: String): Boolean = key == QrBattery.KEY || key == QrBattery.KEY2
+
+    /** Ближайший момент, когда порядок меняется сам (без события извне); см. [Result.nextChangeAt]. */
+    private fun nextChange(shown: List<Card>, s: Snapshot): Long {
+        var at = nextBoundary(s.now, s.cal)
+        val tomorrow = dayStart(s.cal, s.now, 1)
+        fun soon(t: Long) { if (t > s.now && t < at) at = t }
+        for (c in shown) {
+            if (c.dyn == "event") soon(c.at - SOON_MS + 1_000L)
+            if (c.dyn == "task" && c.at >= s.now && c.at < tomorrow) soon(c.at + 1_000L) // станет просроченной
+            if (c.alarmId.isNotEmpty()) {
+                s.alarms[c.alarmId]?.let { soon(it - SOON_MS + 1_000L) }
+                if (c.alarmId in s.ringingAlarmIds) soon(s.now + RINGING_POLL_MS)
+            }
+        }
+        return at
     }
 
     /** Сколько карточек сейчас в стопке (с «Как тренировка?»): для isAllDone и точек. */
@@ -161,24 +250,53 @@ object QrPriority {
 
     // ---------- баллы ----------
 
-    /** Балл карточки и причина: максимум по сигналам, не сумма. */
+    /** Балл карточки и причина (для объяснения): максимум по сигналам, не сумма. */
     private fun scoreOf(c: Card, s: Snapshot): Pair<Int, String> {
         var best = 0
         var why = ""
+        fun cand(sc: Int, w: String) { if (sc > best) { best = sc; why = w } }
         for (l in c.live) {
-            var sc = 0
-            var w = ""
             when (l.k) {
-                "workout" -> if (s.workoutActive) { sc = SCORE_WORKOUT; w = "Идёт тренировка" }
-                "pomodoro" -> if (s.pomodoroActive) { sc = SCORE_POMODORO; w = "Идёт помодоро" }
-                "timer" -> if (l.id.isNotEmpty() && l.id in s.activeTimerIds) { sc = SCORE_TIMER; w = "Идёт таймер" }
-                "stopwatch" -> if (s.stopwatchActive) { sc = SCORE_STOPWATCH; w = "Идёт секундомер" }
+                "workout" -> if (s.workoutActive) cand(SCORE_WORKOUT, "Идёт тренировка")
+                "pomodoro" -> if (s.pomodoroActive) cand(SCORE_POMODORO, "Идёт помодоро")
+                "timer" -> if (l.id.isNotEmpty() && l.id in s.activeTimerIds) cand(SCORE_TIMER, "Идёт таймер")
+                "stopwatch" -> if (s.stopwatchActive) cand(SCORE_STOPWATCH, "Идёт секундомер")
             }
-            if (sc > best) { best = sc; why = w }
         }
-        if (best > 0) return Pair(best, why)
-        if (scheduledNow(c, s.cal)) return Pair(SCORE_SCHEDULED, "Сейчас её время")
-        return Pair(0, "")
+        if (c.alarmId.isNotEmpty()) {
+            if (c.alarmId in s.ringingAlarmIds) cand(SCORE_ALARM_RINGING, "Звонит будильник")
+            else s.alarms[c.alarmId]?.let { at ->
+                val d = at - s.now
+                if (d in 0..SOON_MS) cand(SCORE_ALARM_SOON, "Будильник " + inMinutes(d))
+            }
+        }
+        if (c.dyn == "event") {
+            val d = c.at - s.now
+            if (d in 0..SOON_MS) cand(SCORE_EVENT_SOON, "Событие " + inMinutes(d))
+        }
+        if (c.dyn == "task") {
+            if (c.at < s.now) cand(SCORE_TASK_OVERDUE, "Задача просрочена")
+            else if (c.at < dayStart(s.cal, s.now, 1)) cand(SCORE_TASK_TODAY, "Задача на сегодня")
+        }
+        if (isBattery(c.key) && s.batteryPercent in 0..BATTERY_LOW_PERCENT) cand(SCORE_BATTERY_LOW, "Заряд " + s.batteryPercent + " %")
+        if (scheduledNow(c, s.cal)) cand(SCORE_SCHEDULED, "Сейчас её время" + windowName(c, s.cal))
+        return Pair(best, why)
+    }
+
+    /** «через N мин» (с округлением вверх; меньше минуты — «сейчас»). */
+    private fun inMinutes(ms: Long): String {
+        val m = (ms + 59_999L) / 60_000L
+        return if (m <= 0L) "сейчас" else "через $m мин"
+    }
+
+    /** «: утро» / «: обед» / «: вечер» — окно, в которое попали сейчас; у карточки без времени суток (только дни недели) пусто. */
+    private fun windowName(c: Card, cal: Calendar): String {
+        val m = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+        for (k in listOf("m", "d", "e")) {
+            val w = WINDOWS[k] ?: continue
+            if (k in c.times && m >= w.first && m < w.second) return ": " + (if (k == "m") "утро" else if (k == "d") "обед" else "вечер")
+        }
+        return ""
     }
 
     private fun scheduledNow(c: Card, cal: Calendar): Boolean {
@@ -249,7 +367,9 @@ object QrPriority {
         // 4. При равном балле событие выше задачи
         val scored = result.cards.filter { it.card.key != QrRpe.KEY }
         for (i in scored.indices) for (j in i + 1 until scored.size) {
-            if (scored[i].score == scored[j].score && scored[i].card.dyn == "task" && scored[j].card.dyn == "event") bad.add("4: задача выше события при равном балле")
+            // исключение: удержанная устойчивостью верхняя карточка стоит первой, даже если рядом событие с тем же баллом
+            val held = i == 0 && scored[0].card.key == result.mainTopKey && result.mainTopKey == s.lastTopKey
+            if (!held && scored[i].score == scored[j].score && scored[i].card.dyn == "task" && scored[j].card.dyn == "event") bad.add("4: задача выше события при равном балле")
         }
 
         // 5. Без релевантности — порядок пользователя, topKey пуст (кроме rpe)
@@ -264,6 +384,19 @@ object QrPriority {
         // 7. topKey — первая карточка основной части (или «Как тренировка?»)
         if (result.topKey.isNotEmpty() && result.topKey != QrRpe.KEY && main.firstOrNull()?.key != result.topKey) bad.add("7: topKey не первая карточка основной части")
         if (result.topKey == QrRpe.KEY && rpeAt != 0) bad.add("7: topKey — rpe, но её нет наверху")
+
+        // 8. При «релевантности» основная часть (без перенесённых) идёт по убыванию баллов; удержанная верхняя карточка — вне счёта
+        if (cfg.relevance) {
+            val head = result.cards.filter { it.card.key != QrRpe.KEY && !movedToday(it.card, s) }
+            val from = if (head.isNotEmpty() && head[0].card.key == result.mainTopKey && result.mainTopKey == s.lastTopKey) 1 else 0
+            for (i in from + 1 until head.size) if (head[i].score > head[i - 1].score) bad.add("8: баллы не по убыванию у " + head[i].card.key)
+
+            // 9. Гистерезис: верхняя карточка сменилась только при отрыве минимум на HYSTERESIS, падении прежней до 0 или звонящем будильнике
+            val prev = result.cards.firstOrNull { it.card.key == s.lastTopKey && !movedToday(it.card, s) }
+            val topS = result.cards.firstOrNull { it.card.key == result.mainTopKey && it.card.key != QrRpe.KEY }
+            if (prev != null && topS != null && prev !== topS && prev.score > 0 && topS.score < prev.score + HYSTERESIS &&
+                !(topS.score >= SCORE_ALARM_RINGING && prev.score < SCORE_ALARM_RINGING)) bad.add("9: верхняя карточка сменилась без достаточного отрыва")
+        }
         return bad
     }
 }

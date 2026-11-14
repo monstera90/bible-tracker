@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (14.11)
+// Версия: 2.0 (14.11)
 
 import com.app.lifetracker.QrWidgets.Card
 import com.app.lifetracker.QrWidgets.Cfg
@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Calendar
 
-/** Сценарии из ТЗ TZ_card_priority.md, п. 7 (этап 1). Каждый сценарий дополнительно проходит [QrPriority.check]. */
+/** Сценарии из ТЗ TZ_card_priority.md, п. 7 (этапы 1 и 2). Каждый сценарий дополнительно проходит [QrPriority.check]. */
 class QrPriorityTest {
 
     /** Понедельник, 16.11.2026, [h]:[mi]. */
@@ -22,17 +22,19 @@ class QrPriorityTest {
 
     private fun card(
         key: String, after: String = "none", live: List<Live> = emptyList(), times: Set<String> = emptySet(),
-        days: Set<Int> = emptySet(), dyn: String = "", at: Long = 0L, habit: Boolean = false, tid: String = ""
-    ) = Card(key = key, code = "", title = key, live = live, times = times, days = days, after = after, dyn = dyn, at = at, habit = habit, tid = tid)
+        days: Set<Int> = emptySet(), dyn: String = "", at: Long = 0L, habit: Boolean = false, tid: String = "", alarmId: String = ""
+    ) = Card(key = key, code = "", title = key, live = live, times = times, days = days, after = after, dyn = dyn, at = at, habit = habit, tid = tid, alarmId = alarmId)
 
     private fun cfg(cards: List<Card>, relevance: Boolean = false, rpeAsk: Boolean = false) =
         Cfg(id = "w", name = "w", rotate = false, rotateMin = 5, relevance = relevance, cards = cards, rpeAsk = rpeAsk)
 
     private fun snap(c: Calendar, workout: Boolean = false, pomodoro: Boolean = false, stopwatch: Boolean = false,
                      timers: Set<String> = emptySet(), hidden: Set<String> = emptySet(), moved: Map<String, Long> = emptyMap(),
-                     done: Set<String> = emptySet(), rpe: Boolean = false) =
+                     done: Set<String> = emptySet(), rpe: Boolean = false, alarms: Map<String, Long> = emptyMap(),
+                     ringing: Set<String> = emptySet(), battery: Int = -1, lastTop: String = "") =
         QrPriority.Snapshot(now = c.timeInMillis, cal = c, workoutActive = workout, pomodoroActive = pomodoro, stopwatchActive = stopwatch,
-            activeTimerIds = timers, hiddenKeys = hidden, movedAt = moved, doneTaskIds = done, rpePending = rpe)
+            activeTimerIds = timers, alarms = alarms, ringingAlarmIds = ringing, batteryPercent = battery, hiddenKeys = hidden, movedAt = moved,
+            doneTaskIds = done, rpePending = rpe, lastTopKey = lastTop)
 
     /** Строит порядок и проверяет инварианты. */
     private fun run(cfg: Cfg, s: QrPriority.Snapshot): QrPriority.Result {
@@ -199,5 +201,223 @@ class QrPriorityTest {
         // rpe без rpePending
         val withRpe = QrPriority.Result(good.cards + QrPriority.build(cfg(cards, false, true), snap(cal(12), rpe = true)).cards.take(1), "", "", Long.MAX_VALUE)
         assertTrue(QrPriority.check(withRpe, cf, s).isNotEmpty())
+    }
+
+    // ---------- этап 2: новые сигналы ----------
+
+    private val min = 60_000L
+    private val hour = 3_600_000L
+
+    private fun scoreOf(r: QrPriority.Result, key: String) = r.cards.first { it.card.key == key }.score
+
+    @Test fun alarmRinging_topOfAll_aboveWorkout() {
+        val live = listOf(Live("workout", ""))
+        val cards = listOf(card("a", alarmId = "AL1"), card("w", live = live), card("s", times = setOf("d")))
+        val c = cal(12)
+        val r = run(cfg(cards, true), snap(c, workout = true, ringing = setOf("AL1"), alarms = mapOf("AL1" to c.timeInMillis + 5 * min)))
+        assertEquals(listOf("a", "w", "s"), keys(r))
+        assertEquals("a", r.topKey)
+        assertEquals(QrPriority.SCORE_ALARM_RINGING, scoreOf(r, "a"))
+        assertEquals("Звонит будильник", r.cards[0].reason)
+        // прежняя верхняя карточка (занятие) звонящий будильник не удерживает: отрыв всего 60, но гистерезис он обходит
+        val held = run(cfg(cards, true), snap(c, workout = true, ringing = setOf("AL1"), lastTop = "w"))
+        assertEquals("a", held.topKey)
+    }
+
+    @Test fun alarmSoon_within60min_only() {
+        val c = cal(12)
+        val cards = listOf(card("s", times = setOf("d")), card("a", alarmId = "AL1"))
+        val soon = run(cfg(cards, true), snap(c, alarms = mapOf("AL1" to c.timeInMillis + 30 * min)))
+        assertEquals(listOf("a", "s"), keys(soon))
+        assertEquals(QrPriority.SCORE_ALARM_SOON, scoreOf(soon, "a"))
+        assertEquals("Будильник через 30 мин", soon.cards[0].reason)
+        val late = run(cfg(cards, true), snap(c, alarms = mapOf("AL1" to c.timeInMillis + 90 * min)))
+        assertEquals(listOf("s", "a"), keys(late)) // «заведённый позже» — 0
+        assertEquals(0, scoreOf(late, "a"))
+        val none = run(cfg(cards, true), snap(c)) // не заведён
+        assertEquals(0, scoreOf(none, "a"))
+    }
+
+    @Test fun eventSoon_within60min_only() {
+        val c = cal(12)
+        val now = c.timeInMillis
+        val cards = listOf(card("s", times = setOf("d")), card("e", dyn = "event", at = now + 30 * min))
+        val soon = run(cfg(cards, true), snap(c))
+        assertEquals(listOf("e", "s"), keys(soon))
+        assertEquals(QrPriority.SCORE_EVENT_SOON, scoreOf(soon, "e"))
+        val later = run(cfg(listOf(card("s", times = setOf("d")), card("e", dyn = "event", at = now + 61 * min)), true), snap(c))
+        assertEquals(listOf("s", "e"), keys(later))
+    }
+
+    @Test fun tasks_overdue_today_tomorrow() {
+        val c = cal(12)
+        val now = c.timeInMillis
+        val cards = listOf(
+            card("z"), card("today", dyn = "task", at = now + 2 * hour, tid = "A"),
+            card("over", dyn = "task", at = now - hour, tid = "B"), card("tom", dyn = "task", at = now + 24 * hour, tid = "C")
+        )
+        val r = run(cfg(cards, true), snap(c))
+        assertEquals(listOf("over", "today", "z", "tom"), keys(r))
+        assertEquals(QrPriority.SCORE_TASK_OVERDUE, scoreOf(r, "over"))
+        assertEquals(QrPriority.SCORE_TASK_TODAY, scoreOf(r, "today"))
+        assertEquals(0, scoreOf(r, "tom"))
+        assertEquals("over", r.topKey)
+    }
+
+    @Test fun signalsOrder_byTable() {
+        val c = cal(12)
+        val now = c.timeInMillis
+        val cards = listOf(
+            card("bat", alarmId = ""), card("sch", times = setOf("d")), card("today", dyn = "task", at = now + hour, tid = "A"),
+            card("over", dyn = "task", at = now - hour, tid = "B"), card("ev", dyn = "event", at = now + 20 * min), card("al", alarmId = "AL1")
+        )
+        val r = run(cfg(cards, true), snap(c, alarms = mapOf("AL1" to now + 10 * min)))
+        assertEquals(listOf("al", "ev", "over", "today", "sch", "bat"), keys(r))
+    }
+
+    @Test fun battery_low_raisesOnlyBatteryCards() {
+        val cards = listOf(card("a"), card("b"), card(QrBattery.KEY))
+        val low = run(cfg(cards, true), snap(cal(12), battery = 15))
+        assertEquals(listOf(QrBattery.KEY, "a", "b"), keys(low))
+        assertEquals(QrPriority.SCORE_BATTERY_LOW, scoreOf(low, QrBattery.KEY))
+        assertEquals("Заряд 15 %", low.cards[0].reason)
+        for (p in listOf(16, 80, -1)) assertEquals(listOf("a", "b", QrBattery.KEY), keys(run(cfg(cards, true), snap(cal(12), battery = p))))
+        // заряд второго вида («несколько устройств») — тот же балл; обычная карточка с таким баллом не получает
+        val multi = run(cfg(listOf(card("a"), card(QrBattery.KEY2)), true), snap(cal(12), battery = 5))
+        assertEquals(listOf(QrBattery.KEY2, "a"), keys(multi))
+    }
+
+    @Test fun battery_withoutReason_staysLast_evenIfListedFirst() {
+        val cards = listOf(card(QrBattery.KEY), card("a"), card("b"))
+        assertEquals(listOf("a", "b", QrBattery.KEY), keys(run(cfg(cards, true), snap(cal(12), battery = 80))))
+    }
+
+    @Test fun eventBeforeTask_equalScore_evenIfTaskListedFirst() {
+        val now = cal(12).timeInMillis
+        val cards = listOf(card("t", dyn = "task", at = now + 24 * hour, tid = "T"), card("q"), card("e", dyn = "event", at = now + 2 * hour))
+        val r = run(cfg(cards, true), snap(cal(12)))
+        assertEquals(listOf("e", "q", "t"), keys(r)) // места задач и событий переписаны: событие раньше; «q» остался на своём
+    }
+
+    @Test fun reasons_scheduledWindow() {
+        val r = run(cfg(listOf(card("z"), card("s", times = setOf("d"))), true), snap(cal(12)))
+        assertEquals("Сейчас её время: обед", r.cards[0].reason)
+        assertEquals("Задача просрочена", run(cfg(listOf(card("o", dyn = "task", at = cal(12).timeInMillis - hour, tid = "B"), card("z")), true), snap(cal(12))).cards[0].reason)
+    }
+
+    // ---------- этап 2: устойчивость ----------
+
+    @Test fun hysteresis_diff50_keepsPrev() {
+        val cards = listOf(card("sch", times = setOf("d")), card(QrBattery.KEY))
+        // прежняя верхняя — заряд (450), претендент — «её» время (500): отрыв 50
+        val r = run(cfg(cards, true), snap(cal(12), battery = 10, lastTop = QrBattery.KEY))
+        assertEquals(QrBattery.KEY, r.topKey)
+        assertEquals(listOf(QrBattery.KEY, "sch"), keys(r)) // удержанная — первая, остальной порядок как обычно
+        assertEquals(QrBattery.KEY, r.anchorKey)
+        assertEquals(QrBattery.KEY, r.mainTopKey)
+        // без прежней верхней порядок обычный
+        assertEquals("sch", run(cfg(cards, true), snap(cal(12), battery = 10)).topKey)
+    }
+
+    @Test fun hysteresis_diff130_changes() {
+        val now = cal(12).timeInMillis
+        val cards = listOf(card("today", dyn = "task", at = now + 2 * hour, tid = "A"), card("over", dyn = "task", at = now - hour, tid = "B"))
+        val r = run(cfg(cards, true), snap(cal(12), lastTop = "today")) // 520 → 650
+        assertEquals("over", r.topKey)
+        assertEquals(listOf("over", "today"), keys(r))
+    }
+
+    @Test fun hysteresis_diffExactly100_changes() {
+        val now = cal(12).timeInMillis
+        val cards = listOf(card("over", dyn = "task", at = now - hour, tid = "B"), card("ev", dyn = "event", at = now + 10 * min))
+        val r = run(cfg(cards, true), snap(cal(12), lastTop = "over")) // 650 → 750: «минимум на 100»
+        assertEquals("ev", r.topKey)
+        // отрыв 99 удержал бы: 800 (будильник) против 750 (событие) — 50
+        val c2 = listOf(card("ev", dyn = "event", at = now + 10 * min), card("al", alarmId = "AL1"))
+        val r2 = run(cfg(c2, true), snap(cal(12), lastTop = "ev", alarms = mapOf("AL1" to now + 10 * min)))
+        assertEquals("ev", r2.topKey)
+        assertEquals(listOf("ev", "al"), keys(r2))
+    }
+
+    @Test fun hysteresis_prevSignalEnded_replaced() {
+        val cards = listOf(card("s", times = setOf("d")), card("t", live = listOf(Live("timer", "x"))))
+        val r = run(cfg(cards, true), snap(cal(12), lastTop = "t")) // таймер кончился: балл 0
+        assertEquals("s", r.topKey)
+    }
+
+    @Test fun hysteresis_prevGone_ignored() {
+        val cards = listOf(card("s", times = setOf("d")), card("b"))
+        assertEquals("s", run(cfg(cards, true), snap(cal(12), lastTop = "gone")).topKey)
+        assertEquals("s", run(cfg(cards, true), snap(cal(12), lastTop = QrRpe.KEY)).topKey)
+        // прежняя верхняя перенесена «в конец» сегодня — не удерживается
+        val c = cal(12)
+        val moved = listOf(card("s", times = setOf("d")), card("m", after = "end", times = setOf("d")), card("b"))
+        val r = run(cfg(moved, true), snap(c, moved = mapOf("m" to c.timeInMillis), lastTop = "m"))
+        assertEquals(listOf("s", "b", "m"), keys(r))
+    }
+
+    @Test fun hysteresis_off_withoutRelevance() {
+        val cards = listOf(card("a"), card("b"))
+        val r = run(cfg(cards, false), snap(cal(12), lastTop = "b"))
+        assertEquals(listOf("a", "b"), keys(r))
+        assertEquals("", r.topKey)
+    }
+
+    @Test fun hysteresis_stableWhenRepeated() {
+        // повторный расчёт с запомненной верхней карточкой даёт тот же порядок
+        val cards = listOf(card("sch", times = setOf("d")), card(QrBattery.KEY))
+        val s1 = snap(cal(12), battery = 10, lastTop = QrBattery.KEY)
+        val r1 = run(cfg(cards, true), s1)
+        val r2 = run(cfg(cards, true), snap(cal(12), battery = 10, lastTop = r1.mainTopKey))
+        assertEquals(keys(r1), keys(r2))
+    }
+
+    @Test fun rpe_keepsMainTopSeparately() {
+        val cards = listOf(card("s", times = setOf("d")), card("b"))
+        val r = run(cfg(cards, true, rpeAsk = true), snap(cal(12), rpe = true))
+        assertEquals(QrRpe.KEY, r.topKey)
+        assertEquals("s", r.mainTopKey) // по нему запоминается прежняя верхняя, пока висит «Как тренировка?»
+    }
+
+    // ---------- этап 2: когда пересчитывать ----------
+
+    @Test fun nextChange_eventSoonAlarmSoonTaskRinging() {
+        val c = cal(12)
+        val now = c.timeInMillis
+        val boundary = cal(15, 0).timeInMillis + 5_000L
+        // событие в 14:30 → «до события 60 мин» наступит в 13:30:01
+        val ev = run(cfg(listOf(card("a"), card("e", dyn = "event", at = cal(14, 30).timeInMillis)), true), snap(c))
+        assertEquals(cal(13, 30).timeInMillis + 1_000L, ev.nextChangeAt)
+        // будильник в 16:30 → 15:30:01 позже границы окон: остаётся граница
+        val al = run(cfg(listOf(card("a"), card("b", alarmId = "AL1")), true), snap(c, alarms = mapOf("AL1" to cal(16, 30).timeInMillis)))
+        assertEquals(boundary, al.nextChangeAt)
+        // будильник в 14:10 → 13:10:01
+        val al2 = run(cfg(listOf(card("a"), card("b", alarmId = "AL1")), true), snap(c, alarms = mapOf("AL1" to cal(14, 10).timeInMillis)))
+        assertEquals(cal(13, 10).timeInMillis + 1_000L, al2.nextChangeAt)
+        // задача сегодня в 12:40 → станет просроченной в 12:40:01
+        val tk = run(cfg(listOf(card("a"), card("t", dyn = "task", at = cal(12, 40).timeInMillis, tid = "T")), true), snap(c))
+        assertEquals(cal(12, 40).timeInMillis + 1_000L, tk.nextChangeAt)
+        // звонит — перепроверка через минуту
+        val ring = run(cfg(listOf(card("a"), card("b", alarmId = "AL1")), true), snap(c, ringing = setOf("AL1")))
+        assertEquals(now + 60_000L, ring.nextChangeAt)
+        // без «релевантности» пересчёт по времени не нужен
+        assertEquals(Long.MAX_VALUE, run(cfg(listOf(card("a"), card("e", dyn = "event", at = now + 2 * hour)), false), snap(c)).nextChangeAt)
+    }
+
+    @Test fun nextChange_midnightRollsTasks() {
+        // 23:30: ближайшее — полночь (+5 с), задача «на завтра» станет «на сегодня»
+        val c = cal(23, 30)
+        val r = run(cfg(listOf(card("a"), card("t", dyn = "task", at = cal(23, 30).timeInMillis + 2 * hour, tid = "T")), true), snap(c))
+        val mid = cal(0, 0, day = 17)
+        mid.set(Calendar.SECOND, 5)
+        assertEquals(mid.timeInMillis, r.nextChangeAt)
+    }
+
+    @Test fun check_catchesHysteresisViolation() {
+        val cards = listOf(card("sch", times = setOf("d")), card(QrBattery.KEY))
+        val cf = cfg(cards, true)
+        val noPrev = QrPriority.build(cf, snap(cal(12), battery = 10)) // верх — «sch», как без запомненной карточки
+        val s = snap(cal(12), battery = 10, lastTop = QrBattery.KEY) // а прежняя верхняя — заряд, отрыв всего 50
+        assertTrue(QrPriority.check(noPrev, cf, s).any { it.startsWith("9") })
     }
 }

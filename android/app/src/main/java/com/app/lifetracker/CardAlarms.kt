@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.1 (14.11)
+// Версия: 1.2 (14.11)
 
 import android.annotation.SuppressLint
 import android.app.AlarmManager
@@ -114,6 +114,29 @@ object CardAlarms {
         arr.toString()
     }
 
+    /** Ближайший звонок каждого заведённого будильника: id → момент (мс). Для порядка карточек ([QrPriority]). */
+    fun nextTimes(ctx: Context): Map<String, Long> = synchronized(LOCK) {
+        val out = HashMap<String, Long>()
+        for (a in load(ctx).values) out[a.id] = a.nextAt()
+        out
+    }
+
+    /** id будильников, карточка-уведомление которых сейчас на экране (звонят, пока не смахнули). Android 6 и ниже узнать не могут — пусто. */
+    fun ringingIds(ctx: Context): Set<String> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return emptySet()
+        return try {
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val out = HashSet<String>()
+            for (n in nm.activeNotifications) {
+                val tag = n.tag
+                if (n.id == NOTIFICATION_ID && tag != null && tag.startsWith(TAG)) out.add(tag.substring(TAG.length))
+            }
+            out
+        } catch (e: Exception) {
+            emptySet()
+        }
+    }
+
     /** Заведён ли будильник [id] (запись есть, пока не отзвонил последний повтор): по этому виджет рисует лицо «Заведён». */
     fun isArmed(ctx: Context, id: String): Boolean = synchronized(LOCK) { load(ctx).containsKey(id) }
 
@@ -180,6 +203,7 @@ object CardAlarms {
             map[id] = next
             save(ctx, map)
             schedule(ctx, next)
+            QrWidgets.onAlarmsChanged(ctx) // повтор прозвонил: карточка будильника поднимается наверх стопки
         }
     }
 
@@ -200,6 +224,16 @@ object CardAlarms {
             putExtra(CardAlarmReceiver.EXTRA_ID, id)
         }
         return PendingIntent.getBroadcast(ctx, ("alarmfire$id").hashCode(), intent, Compat.pendingFlags())
+    }
+
+    /** Смахивание звонящей карточки: виджеты пересчитывают порядок (будильник больше не «звонит»). */
+    private fun dismissIntent(ctx: Context, id: String): PendingIntent {
+        val intent = Intent(ctx, CardAlarmReceiver::class.java).apply {
+            action = CardAlarmReceiver.ACTION_DISMISS
+            data = Uri.parse("ltcardalarm://dismiss/$id")
+            putExtra(CardAlarmReceiver.EXTRA_ID, id)
+        }
+        return PendingIntent.getBroadcast(ctx, ("alarmdismiss$id").hashCode(), intent, Compat.pendingFlags())
     }
 
     private fun openApp(ctx: Context): PendingIntent {
@@ -284,6 +318,7 @@ object CardAlarms {
                 .setWhen(a.nextAt())
                 .setShowWhen(true)
                 .setContentIntent(openApp(ctx))
+                .setDeleteIntent(dismissIntent(ctx, a.id))
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
                 // каналов нет: звук и вибрацию задаёт само уведомление (канал на Android 8+ делает то же)
                 b.setSound(alarmSound(), AudioManager.STREAM_ALARM)

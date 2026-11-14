@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 12.0 (14.11)
+// Версия: 13.0 (14.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -65,6 +65,10 @@ import java.util.UUID
  * Порядок карточек (фильтр, «Как тренировка?», «в конец», баллы релевантности, «к чему возвращаться») считает [QrPriority] — чистая функция от
  * [QrPriority.Snapshot]; здесь [snapshot] собирает его из источников ([WorkoutTracker], [PomodoroTimer], [StopwatchTimer], [CardTimers], [firedOf], [doneTaskIds], [QrRpe]),
  * а [order] / [plan] / [visibleCount] / [isAllDone] — тонкие обёртки. В отладочной сборке [plan] проверяет результат ([QrPriority.check]) и пишет нарушения в лог.
+ * Для баллов «по релевантности» в [snapshot] читаются ещё будильники карточек ([CardAlarms.nextTimes], [CardAlarms.ringingIds]), заряд телефона ([QrBattery.phoneLevel])
+ * и верхняя карточка прошлого расчёта (`lasttop` по id виджета, пишет [plan]): новая верхняя карточка не вытесняет прежнюю без отрыва в [QrPriority.HYSTERESIS] баллов.
+ * Перерисовку без внешнего события ставит [nextDynChange] (минимум из своего значения и [QrPriority.Result.nextChangeAt]); смена заряда через порог 15 %
+ * ([onBatteryChanged]) и будильники ([onAlarmsChanged], в том числе повторный звонок и смахивание) пересчитывают порядок.
  *
  * Галочка «Спрашивать о тренировке» (`rpeAsk` у виджета): пока есть тренировка без оценки нагрузки ([QrRpe.pendingId]), над ВСЕМИ карточками стоит служебная
  * карточка [QrRpe.KEY] «Как тренировка?» с кнопками 1…10 ([QrPriority.build], [order]); ответ ложится в очередь [QrRpe.answer], карточка исчезает. Наверх она возвращается
@@ -82,6 +86,8 @@ object QrWidgets {
     private const val K_CFG = "cfg"
     private const val K_BIND = "bind"
     private const val K_TOP = "top"
+    /** cfg.id → верхняя карточка по релевантности при прошлом расчёте ([QrPriority.Snapshot.lastTopKey], устойчивость порядка). */
+    private const val K_LASTTOP = "lasttop"
     private const val K_PEND = "pend"
     private const val K_TOKEN = "token"
     private const val K_FIRED = "fired"
@@ -503,11 +509,18 @@ object QrWidgets {
         return c.timeInMillis
     }
 
-    /** Когда пора перерисовать карточки задач и событий: полночь (день недели → «Завтра» → «Сегодня», задача → «Просрочено») или начало ближайшего события/задачи. */
-    private fun nextDynChange(cfg: Cfg): Long {
+    /**
+     * Когда пора перерисовать виджет: у карточек задач и событий — полночь (день недели → «Завтра» → «Сегодня», задача → «Просрочено») или начало ближайшего
+     * события/задачи; при «релевантности» ещё и момент, когда сам собой изменится порядок ([QrPriority.Result.nextChangeAt]). Берётся ближайшее из них.
+     */
+    private fun nextDynChange(ctx: Context, cfg: Cfg): Long {
         val now = System.currentTimeMillis()
-        var at = dayStart(now, 1) + 5_000L
-        for (c in cfg.cards) if ((c.dyn == "event" || c.dyn == "task") && c.at > now && c.at + 1_000L < at) at = c.at + 1_000L
+        var at = Long.MAX_VALUE
+        if (cfg.tasks || cfg.events) {
+            at = dayStart(now, 1) + 5_000L
+            for (c in cfg.cards) if ((c.dyn == "event" || c.dyn == "task") && c.at > now && c.at + 1_000L < at) at = c.at + 1_000L
+        }
+        if (cfg.relevance) at = Math.min(at, plan(ctx, cfg).nextChangeAt)
         return at
     }
 
@@ -683,12 +696,17 @@ object QrWidgets {
             }
         }
         val st = WorkoutTracker.status
+        val hasAlarms = rel && cfg.cards.any { it.alarmId.isNotEmpty() }
         return QrPriority.Snapshot(
             now = now, cal = cal,
             workoutActive = rel && (st == WorkoutTracker.ST_SEARCH || st == WorkoutTracker.ST_RUN || st == WorkoutTracker.ST_PAUSE),
             pomodoroActive = rel && PomodoroTimer.isActive(ctx),
             stopwatchActive = rel && StopwatchTimer.isActive(ctx),
             activeTimerIds = timers,
+            alarms = if (hasAlarms) CardAlarms.nextTimes(ctx) else emptyMap(),
+            ringingAlarmIds = if (hasAlarms) CardAlarms.ringingIds(ctx) else emptySet(),
+            batteryPercent = if (rel && cfg.anyBattery) QrBattery.phoneLevel(ctx) else -1,
+            lastTopKey = if (rel) jmap(ctx, K_LASTTOP).optString(cfg.id, "") else "",
             hiddenKeys = hiddenKeys(ctx, cfg),
             movedAt = moved,
             doneTaskIds = doneTaskIds(ctx),
@@ -700,6 +718,7 @@ object QrWidgets {
     private fun plan(ctx: Context, cfg: Cfg): QrPriority.Result {
         val s = snapshot(ctx, cfg)
         val res = QrPriority.build(cfg, s)
+        if (cfg.relevance && res.mainTopKey != s.lastTopKey) rememberTop(ctx, cfg.id, res.mainTopKey)
         if ((ctx.applicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
             try {
                 for (v in QrPriority.check(res, cfg, s)) Log.e("QrPriority", cfg.id + ": " + v)
@@ -708,6 +727,16 @@ object QrWidgets {
             }
         }
         return res
+    }
+
+    /** Запоминает верхнюю карточку по релевантности: следующий расчёт не отдаст верх новой карточке без заметного отрыва. */
+    private fun rememberTop(ctx: Context, cfgId: String, key: String) {
+        synchronized(LOCK) {
+            val t = jmap(ctx, K_LASTTOP)
+            if (t.optString(cfgId, "") == key) return
+            t.put(cfgId, key)
+            prefs(ctx).edit().putString(K_LASTTOP, t.toString()).apply()
+        }
     }
 
     fun visibleCount(ctx: Context, cfg: Cfg): Int = QrPriority.visibleCount(cfg, snapshot(ctx, cfg))
@@ -1011,7 +1040,7 @@ object QrWidgets {
         for (id in ids) {
             val cfg = cfgFor(app, id)
             if (cfg != null && cfg.anyBattery) anyBattery = true
-            if (cfg != null && (cfg.tasks || cfg.events)) dynAt = Math.min(dynAt, nextDynChange(cfg))
+            if (cfg != null && (cfg.tasks || cfg.events || cfg.relevance)) dynAt = Math.min(dynAt, nextDynChange(app, cfg))
             if (cfg != null && cfg.rotate && visibleCount(app, cfg) > 1) {
                 if (force || rotatePi(app, id, false) == null) {
                     cancelRotate(app, id)
@@ -1034,6 +1063,7 @@ object QrWidgets {
     // ---------- карточка заряда ----------
 
     @Volatile private var lastBatterySig = ""
+    @Volatile private var lastBatteryLow = false
 
     /** Перерисовать карточку заряда в виджетах, где она включена, но только если заряд телефона или наушников изменился (или [force]). */
     fun onBatteryChanged(ctx: Context, force: Boolean = false) {
@@ -1045,8 +1075,16 @@ object QrWidgets {
         val sig = QrBattery.signature(app) + if (multi) "|" + QrBattery.signatureMulti(app) else ""
         if (!force && sig == lastBatterySig) return
         lastBatterySig = sig
+        // порог «низкий заряд» пересечён: при «релевантности» карточка заряда поднимается (или опускается) — пересчёт порядка и, если сменился верх, возврат стопки
+        val low = QrBattery.phoneLevel(app).let { it in 0..QrPriority.BATTERY_LOW_PERCENT }
+        val lowChanged = low != lastBatteryLow
+        lastBatteryLow = low
         for (id in ids) {
             try {
+                if (lowChanged && cfgFor(app, id)?.relevance == true) {
+                    update(app, mgr, id)
+                    continue
+                }
                 mgr.notifyAppWidgetViewDataChanged(id, R.id.qr_stack)
             } catch (e: Exception) {
                 // виджет удалили
