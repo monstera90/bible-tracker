@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.9 (14.11) — карточка «Будильники» (dyn = "alarm"): края листают будильники (`alnav`), центр заводит/выключает показанный (`alarm`), внизу точки.
 // Версия: 2.8 (14.11)
 
 import android.appwidget.AppWidgetManager
@@ -44,11 +45,13 @@ class QrWidgetService : RemoteViewsService() {
                 val fresh = HashMap<String, Bitmap>()
                 val pos = if (cfg != null && cfg.events) QrWidgets.eventPos(ctx, cfg) else Pair(0, 0)
                 val tpos = if (cfg != null && cfg.tasks) QrWidgets.taskPos(ctx, cfg) else Pair(0, 0)
+                val apos = if (cfg != null && cfg.alarms) QrWidgets.alarmPos(ctx, cfg) else Pair(0, 0)
                 for (c in list) {
                     val bmp = QrWidgets.bitmapFor(ctx, c)
                     fresh[c.key] = when (c.dyn) {
                         "event" -> QrWidgets.withEventDots(bmp, pos.first, pos.second)
                         "task" -> QrWidgets.withEventDots(bmp, tpos.first, tpos.second)
+                        "alarm" -> QrWidgets.withEventDots(bmp, apos.first, apos.second)
                         else -> bmp
                     }
                 }
@@ -84,7 +87,16 @@ class QrWidgetService : RemoteViewsService() {
             // карточка события: три зоны поверх лица (видимость задаётся всегда — элемент списка может быть переиспользован)
             val isEv = c.dyn == "event"
             val isTk = c.dyn == "task"
-            rv.setViewVisibility(R.id.ev_zones, if (isEv || isTk) View.VISIBLE else View.GONE)
+            val isAl = c.dyn == "alarm"
+            rv.setViewVisibility(R.id.ev_zones, if (isEv || isTk || isAl) View.VISIBLE else View.GONE)
+            if (isAl) {
+                // карточка будильников: края листают ряд будильников (QrWidgets.alarmNav, без зацикливания), центр и вся карточка — завести/выключить показанный будильник (ScanActivity)
+                rv.setOnClickFillInIntent(R.id.ev_left, Intent().putExtra("alnav", -1).putExtra("wid", widgetId))
+                rv.setOnClickFillInIntent(R.id.ev_right, Intent().putExtra("alnav", 1).putExtra("wid", widgetId))
+                val toggle = if (c.alarmSpec != null) Intent().putExtra("alarm", c.key) else Intent().putExtra("code", "alarmmark:" + c.key)
+                rv.setOnClickFillInIntent(R.id.ev_center, toggle)
+                rv.setOnClickFillInIntent(R.id.qr_card_img, Intent(toggle))
+            }
             if (isTk) {
                 // карточка задач: края листают ряд задач (QrWidgets.taskNav, без зацикливания), центр — двойное нажатие отмечает показанную задачу (ScanActivity)
                 rv.setOnClickFillInIntent(R.id.ev_left, Intent().putExtra("tknav", -1).putExtra("wid", widgetId))

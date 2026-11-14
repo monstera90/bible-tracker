@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 14.1 (14.11) — галочка «Показывать будильники» (`alarms`, список `alm`): одна карточка со всеми будильниками, листается у краёв ([alarmNav]).
 // Версия: 14.0 (14.11)
 
 import android.app.AlarmManager
@@ -66,6 +67,12 @@ import java.util.UUID
  * Двойное нажатие в центре карточки задач отмечает показанную задачу выполненной ([completeTask], ждёт [ScanActivity.HABIT_DOUBLE_MS]); следующая задача занимает её место.
  * Среди этих карточек события всегда стоят перед задачами (событие важнее).
  *
+ * Галочка «Показывать будильники» (`alarms` у виджета, `alm` — все будильники пользователя: ключ карточки, id и настройки будильника): одна карточка на все будильники,
+ * показан один из них ([QrPriority.alarmCards] по времени суток). Нажатие у левого края — предыдущий, у правого — следующий (без зацикливания; номер хранит [alarmNav] в [K_ALIDX],
+ * через [EVENT_RESET_MS] без нажатий ряд возвращается к главному будильнику: звонящему, иначе заведённому с ближайшим звонком — [QrPriority.defaultAlarmIndex]; точки внизу — [withEventDots]);
+ * нажатие в центре заводит показанный будильник или выключает его ([toggleAlarm], показанный будильник при этом не меняется). Лицо — `<ключ>.png` / `<ключ>_on.png` («Заведён»), как у прежней карточки-будильника.
+ * Балл карточки по релевантности считается по всем будильникам ряда: звонит любой — выше всего, зазвонит в ближайший час — «скоро». Карточка стоит после карточек задач и перед карточками заряда.
+ *
  * Порядок карточек (фильтр, «Как тренировка?», «в конец», баллы релевантности, «к чему возвращаться») считает [QrPriority] — чистая функция от
  * [QrPriority.Snapshot]; здесь [snapshot] собирает его из источников ([WorkoutTracker], [PomodoroTimer], [StopwatchTimer], [CardTimers], [firedOf], [doneTaskIds], [QrRpe]),
  * а [order] / [plan] / [visibleCount] / [isAllDone] — тонкие обёртки. В отладочной сборке [plan] проверяет результат ([QrPriority.check]) и пишет нарушения в лог.
@@ -110,6 +117,7 @@ object QrWidgets {
     private const val K_AEVSEQ = "alarmEvSeq"
     private const val K_TKIDX = "tkidx"         // id виджета конструктора → {i: номер задачи в ряду карточки задач, t: время последнего нажатия, мс}
     private const val K_EVIDX = "evidx"         // id виджета конструктора → {i: номер события в ряду карточки события, t: время последнего нажатия, мс}
+    private const val K_ALIDX = "alidx"         // id виджета конструктора → {i: номер будильника в ряду карточки будильников (0 — первый по времени), t: время последнего нажатия, мс}
     private const val AEV_MAX = 50
 
     const val ACTION_ROTATE = "com.app.lifetracker.QRW_ROTATE"
@@ -173,7 +181,7 @@ object QrWidgets {
     class AlarmSpec(val hour: Int, val minute: Int, val every: Int, val times: Int, val title: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
     class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal")
-    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false) {
+    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
     }
@@ -266,6 +274,21 @@ object QrWidgets {
                     cards.addAll(evs) // после QR-карточек, перед карточками заряда; событие важнее задачи — стоит раньше
                     cards.addAll(tks)
                 }
+                val alarmsOn = o.optBoolean("alarms", false)
+                val alm = o.optJSONArray("alm")
+                if (alm != null && alarmsOn) {
+                    val als = ArrayList<Card>()
+                    for (j in 0 until alm.length()) {
+                        val d = alm.optJSONObject(j) ?: continue
+                        val key = d.optString("key", "")
+                        val spec = parseAlarmSpec(d.optJSONObject("alarmSpec"))
+                        val aid = d.optString("alarm", "").take(40)
+                        if (!KEY_RE.matches(key) || aid.isEmpty() || spec == null || cards.any { it.key == key } || als.any { it.key == key }) continue
+                        als.add(Card(key, "", d.optString("title", ""), emptyList(), emptySet(), emptySet(), "none", QrBattery.DEFAULT_FACE, "alarm", 0L, alarmId = aid, alarmSpec = spec))
+                        if (als.size >= QrPriority.ALARM_NAV_MAX) break
+                    }
+                    cards.addAll(als) // после задач, перед карточками заряда
+                }
                 val battery = o.optBoolean("battery", false)
                 val batColor = parseColor(o.optString("batColor", ""))
                 if (battery) cards.add(Card(QrBattery.KEY, "", "Заряд", emptyList(), emptySet(), emptySet(), "none", batColor)) // карточка заряда — последняя в стопке
@@ -275,7 +298,7 @@ object QrWidgets {
                 out.add(
                     Cfg(
                         id, o.optString("name", "Виджет"), o.optBoolean("rotate", false),
-                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn
+                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn, alarmsOn
                     )
                 )
             }
@@ -425,12 +448,12 @@ object QrWidgets {
         }
     }
 
-    /** Подпись настроек виджетов без списков `dyn` (состав задач и событий меняется сам и положения стопки не касается). */
+    /** Подпись настроек виджетов без списков `dyn` и `alm` (состав задач, событий и будильников меняется сам и положения стопки не касается). */
     private fun structSig(text: String?): String {
         if (text.isNullOrEmpty()) return ""
         return try {
             val root = JSONObject(text)
-            root.optJSONArray("widgets")?.let { ws -> for (i in 0 until ws.length()) ws.optJSONObject(i)?.remove("dyn") }
+            root.optJSONArray("widgets")?.let { ws -> for (i in 0 until ws.length()) ws.optJSONObject(i)?.let { it.remove("dyn"); it.remove("alm") } }
             root.toString()
         } catch (e: Exception) {
             text
@@ -449,7 +472,7 @@ object QrWidgets {
         if (c.key == QrRpe.KEY) return QrRpe.render(ctx, c.color)
         if (c.key == QrBattery.KEY) return QrBattery.render(ctx, c.color)
         if (c.key == QrBattery.KEY2) return QrBattery.renderMulti(ctx, c.color)
-        if (c.dyn.isNotEmpty()) dynBitmap(ctx, c)?.let { return it }
+        if (c.dyn == "event" || c.dyn == "task") dynBitmap(ctx, c)?.let { return it }
         if (c.alarmId.isNotEmpty() && CardAlarms.isArmed(ctx, c.alarmId)) { // будильник заведён — лицо с надписью «Заведён» (`<ключ>_on.png`)
             val on = File(imgDir(ctx), c.key + "_on.png")
             if (on.exists()) {
@@ -549,6 +572,7 @@ object QrWidgets {
         if (cfg.relevance) at = Math.min(at, plan(ctx, cfg).nextChangeAt)
         if (cfg.events) eventResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // пролистанный ряд событий вернётся к первому
         if (cfg.tasks) rowResetAt(ctx, K_TKIDX, cfg.id, now)?.let { at = Math.min(at, it) } // то же для ряда задач
+        if (cfg.alarms) alarmResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // и для ряда будильников
         return at
     }
 
@@ -627,6 +651,43 @@ object QrWidgets {
         val to = (pos.first + dir).coerceIn(0, Math.max(0, pos.second - 1))
         if (pos.second == 0 || to == pos.first) return
         saveRowIndex(app, K_TKIDX, cfg.id, to)
+        refreshAll(app)
+    }
+
+    /** Номер будильника, выбранный нажатием у края карточки будильников (или нажатием в центре); нет нажатий за [EVENT_RESET_MS] — -1 (показан главный будильник). */
+    private fun alarmIndexOf(ctx: Context, cfgId: String, now: Long): Int {
+        val e = rowEntry(ctx, K_ALIDX, cfgId) ?: return -1
+        val t = e.optLong("t", 0L)
+        if (now - t >= EVENT_RESET_MS || now < t) return -1
+        return e.optInt("i", -1).let { if (it < 0) -1 else it }
+    }
+
+    /** Когда пролистанный ряд будильников вернётся к главному; null — ряд и так на главном. */
+    private fun alarmResetAt(ctx: Context, cfgId: String, now: Long): Long? {
+        if (alarmIndexOf(ctx, cfgId, now) < 0) return null
+        return (rowEntry(ctx, K_ALIDX, cfgId)?.optLong("t", 0L) ?: return null) + EVENT_RESET_MS + 500L
+    }
+
+    /** (номер показанного будильника, сколько будильников в ряду) для виджета [cfg]; в ряду меньше двух будильников листать нечего. */
+    fun alarmPos(ctx: Context, cfg: Cfg): Pair<Int, Int> {
+        val s = snapshot(ctx, cfg)
+        val list = QrPriority.alarmCards(cfg, s)
+        return Pair(QrPriority.alarmShownIndex(list, s), list.size)
+    }
+
+    /**
+     * Нажатие у края карточки будильников в виджете [widgetId] ([dir] = -1 — предыдущий будильник, 1 — следующий). Ряд не зациклен: у первого и последнего будильника нажатие ничего не меняет.
+     * Стопка не сбрасывается — перерисовывается только карточка будильников ([refreshAll] без возврата наверх).
+     */
+    fun alarmNav(ctx: Context, widgetId: Int, dir: Int) {
+        if (dir != -1 && dir != 1) return
+        val app = ctx.applicationContext
+        val cfg = cfgFor(app, widgetId) ?: return
+        if (!cfg.alarms) return
+        val pos = alarmPos(app, cfg)
+        val to = (pos.first + dir).coerceIn(0, Math.max(0, pos.second - 1))
+        if (pos.second == 0 || to == pos.first) return
+        saveRowIndex(app, K_ALIDX, cfg.id, to)
         refreshAll(app)
     }
 
@@ -733,6 +794,7 @@ object QrWidgets {
         val card = configs(app).asSequence().flatMap { it.cards.asSequence() }
             .firstOrNull { it.key == cardKey && it.alarmId.isNotEmpty() && it.alarmSpec != null } ?: return false
         val spec = card.alarmSpec ?: return false
+        holdAlarmRow(app, cardKey)
         val now = System.currentTimeMillis()
         if (CardAlarms.isArmed(app, card.alarmId)) {
             CardAlarms.cancel(app, card.alarmId)
@@ -748,6 +810,19 @@ object QrWidgets {
             }
         }
         return true
+    }
+
+    /**
+     * Нажатие в центре карточки будильников: будильник заведён/выключен, а «главный» будильник ряда ([QrPriority.defaultAlarmIndex]) от этого меняется —
+     * чтобы карточка не перескочила на другой будильник, номер нажатого запоминается как выбранный (на [EVENT_RESET_MS], как после нажатия у края).
+     */
+    private fun holdAlarmRow(app: Context, cardKey: String) {
+        for (cfg in configs(app)) {
+            if (!cfg.alarms) continue
+            val list = QrPriority.alarmCards(cfg, snapshot(app, cfg))
+            val i = list.indexOfFirst { it.key == cardKey }
+            if (i >= 0) saveRowIndex(app, K_ALIDX, cfg.id, i)
+        }
     }
 
     private fun queueAlarmEvent(app: Context, ev: JSONObject) {
@@ -825,7 +900,8 @@ object QrWidgets {
             }
         }
         val st = WorkoutTracker.status
-        val hasAlarms = rel && cfg.cards.any { it.alarmId.isNotEmpty() }
+        val hasAlarms = cfg.cards.any { it.alarmId.isNotEmpty() && (rel || it.dyn == "alarm") } // карточке «Будильники» заведённые и звонящие нужны и без «релевантности» (какой будильник показать)
+        val ringing: Set<String> = if (hasAlarms) CardAlarms.ringingIds(ctx) else emptySet()
         return QrPriority.Snapshot(
             now = now, cal = cal,
             workoutActive = rel && (st == WorkoutTracker.ST_SEARCH || st == WorkoutTracker.ST_RUN || st == WorkoutTracker.ST_PAUSE),
@@ -833,7 +909,7 @@ object QrWidgets {
             stopwatchActive = rel && StopwatchTimer.isActive(ctx),
             activeTimerIds = timers,
             alarms = if (hasAlarms) CardAlarms.nextTimes(ctx) else emptyMap(),
-            ringingAlarmIds = if (hasAlarms) CardAlarms.ringingIds(ctx) else emptySet(),
+            ringingAlarmIds = ringing,
             batteryPercent = if (rel && cfg.anyBattery) QrBattery.phoneLevel(ctx) else -1,
             lastTopKey = if (rel) jmap(ctx, K_LASTTOP).optString(cfg.id, "") else "",
             hiddenKeys = hiddenKeys(ctx, cfg),
@@ -841,7 +917,9 @@ object QrWidgets {
             doneTaskIds = doneTaskIds(ctx),
             rpePending = rpePending(ctx, cfg),
             eventIndex = if (cfg.events) eventIndexOf(ctx, cfg.id, now) else 0,
-            taskIndex = if (cfg.tasks) rowIndexOf(ctx, K_TKIDX, cfg.id, now) else 0
+            taskIndex = if (cfg.tasks) rowIndexOf(ctx, K_TKIDX, cfg.id, now) else 0,
+            alarmIndex = if (cfg.alarms) alarmIndexOf(ctx, cfg.id, now) else -1,
+            alarmRowRinging = cfg.cards.any { it.dyn == "alarm" && it.alarmId in ringing }
         )
     }
 
@@ -902,7 +980,7 @@ object QrWidgets {
     fun visibleCount(ctx: Context, cfg: Cfg): Int = QrPriority.visibleCount(cfg, snapshot(ctx, cfg))
 
     /** Все карточки виджета скрыты («На сегодня больше ничего»). */
-    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = (cfg.cards.isNotEmpty() || cfg.tasks || cfg.events || cfg.rpeAsk) && visibleCount(ctx, cfg) == 0
+    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = (cfg.cards.isNotEmpty() || cfg.tasks || cfg.events || cfg.alarms || cfg.rpeAsk) && visibleCount(ctx, cfg) == 0
 
     /**
      * Действие карточки [cardKey] сработало (нажатие в виджете, в приложении или скан): у карточек с «после срабатывания» = «скрывать» она

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.1 (14.11) — карточка «Будильники» (dyn = "alarm"): одна на все будильники пользователя, листается у краёв как события и задачи ([alarmCards], [nextAlarmKey]).
 // Версия: 4.0 (14.11)
 
 import com.app.lifetracker.QrWidgets.Card
@@ -83,7 +84,11 @@ object QrPriority {
         /** Какое по счёту из ближайших событий показывает карточка события (0 — первое; нажатие у края карточки листает, без зацикливания). */
         val eventIndex: Int = 0,
         /** Какая по счёту из ближайших задач показана на единственной карточке задач (0 — первая; нажатие у края листает, без зацикливания). */
-        val taskIndex: Int = 0
+        val taskIndex: Int = 0,
+        /** Какой по счёту будильник показывает карточка «Будильники» (по времени суток, [alarmCards]); -1 — не листали: показан главный ([defaultAlarmIndex]: звонящий, иначе ближайший заведённый). */
+        val alarmIndex: Int = -1,
+        /** Звонит какой-нибудь из будильников карточки «Будильники» (карточка при этом не отдаёт верх устойчивостью, как звонящий будильник обычной карточки). */
+        val alarmRowRinging: Boolean = false
     )
 
     class Scored(val card: Card, val score: Int, val reason: String)
@@ -113,6 +118,7 @@ object QrPriority {
     fun build(cfg: Cfg, s: Snapshot): Result {
         val base = visible(cfg, s)
         val rowTaskAt = taskCards(cfg, s).firstOrNull()?.at ?: 0L // балл карточки задач считается по первой задаче ряда: листание не двигает карточку в стопке
+        val rowAlarm = alarmRowScore(cfg, s) // то же для карточки будильников: балл по всем будильникам ряда, а не по показанному
         val main = ArrayList<Scored>()
         var top = ""
         if (!cfg.relevance || base.size < 2) {
@@ -126,7 +132,7 @@ object QrPriority {
             } else {
                 val scored = ArrayList<Scored>()
                 for (c in head) {
-                    val sc = scoreOf(c, s, rowTaskAt)
+                    val sc = scoreOf(c, s, rowTaskAt, rowAlarm)
                     scored.add(Scored(c, sc.first, sc.second))
                 }
                 lift(scored)
@@ -142,7 +148,7 @@ object QrPriority {
         if (s.rpePending) out.add(Scored(rpeCard(), 0, "Ждёт оценки тренировки"))
         out.addAll(main)
         val topKey = if (s.rpePending) QrRpe.KEY else top
-        val next = if (cfg.relevance) nextChange(base, s, rowTaskAt) else Long.MAX_VALUE
+        val next = if (cfg.relevance) nextChange(cfg, base, s, rowTaskAt) else Long.MAX_VALUE
         val topScored: Scored? = if (s.rpePending) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
         return Result(out, topKey, anchorOf(cfg, s, main, top), next, top, topScored?.card?.title ?: "", topScored?.reason ?: "")
     }
@@ -192,7 +198,7 @@ object QrPriority {
             var j = i
             while (j < sorted.size && sorted[j].score == sorted[i].score) j++
             val run = sorted.subList(i, j)
-            val dynSlots = run.indices.filter { run[it].card.dyn.isNotEmpty() }
+            val dynSlots = run.indices.filter { isCal(run[it].card) }
             val ordered = ArrayList(run)
             if (dynSlots.size > 1) {
                 val dyn = dynSlots.map { run[it] }
@@ -206,8 +212,12 @@ object QrPriority {
         return out
     }
 
-    /** Будильник карточки звонит сейчас (по баллу не определить: «наверх» поднимает и обычные карточки выше [SCORE_ALARM_RINGING]). */
-    private fun isRinging(c: Card, s: Snapshot): Boolean = c.alarmId.isNotEmpty() && c.alarmId in s.ringingAlarmIds
+    /** Карточка события или задачи календаря (карточка «Будильники» тоже динамическая, но к календарю не относится). */
+    private fun isCal(c: Card): Boolean = c.dyn == "event" || c.dyn == "task"
+
+    /** Будильник карточки звонит сейчас (по баллу не определить: «наверх» поднимает и обычные карточки выше [SCORE_ALARM_RINGING]); у карточки «Будильники» — любой из её будильников. */
+    private fun isRinging(c: Card, s: Snapshot): Boolean =
+        if (c.dyn == "alarm") s.alarmRowRinging else c.alarmId.isNotEmpty() && c.alarmId in s.ringingAlarmIds
 
     /** Ручной приоритет из настроек: только «top» или «low», всё остальное — «normal». */
     fun normPrio(v: String?): String = if (v == "top" || v == "low") v else "normal"
@@ -216,7 +226,7 @@ object QrPriority {
     private fun isBattery(key: String): Boolean = key == QrBattery.KEY || key == QrBattery.KEY2
 
     /** Ближайший момент, когда порядок меняется сам (без события извне); см. [Result.nextChangeAt]. */
-    private fun nextChange(shown: List<Card>, s: Snapshot, rowTaskAt: Long): Long {
+    private fun nextChange(cfg: Cfg, shown: List<Card>, s: Snapshot, rowTaskAt: Long): Long {
         var at = nextBoundary(s.now, s.cal)
         val tomorrow = dayStart(s.cal, s.now, 1)
         fun soon(t: Long) { if (t > s.now && t < at) at = t }
@@ -226,10 +236,14 @@ object QrPriority {
                 val at0 = if (rowTaskAt > 0L) rowTaskAt else c.at
                 if (at0 >= s.now && at0 < tomorrow) soon(at0 + 1_000L) // станет просроченной
             }
-            if (c.alarmId.isNotEmpty()) {
+            if (c.alarmId.isNotEmpty() && c.dyn != "alarm") {
                 s.alarms[c.alarmId]?.let { soon(it - SOON_MS + 1_000L) }
                 if (c.alarmId in s.ringingAlarmIds) soon(s.now + RINGING_POLL_MS)
             }
+        }
+        for (c in alarmCards(cfg, s)) { // карточка «Будильники»: показан один будильник, а балл зависит от всех
+            s.alarms[c.alarmId]?.let { soon(it - SOON_MS + 1_000L) }
+            if (c.alarmId in s.ringingAlarmIds) soon(s.now + RINGING_POLL_MS)
         }
         return at
     }
@@ -249,7 +263,7 @@ object QrPriority {
         if (!cfg.relevance) return ""
         if (top.isNotEmpty()) return top
         val first = main.firstOrNull()?.card ?: return ""
-        return if (first.dyn.isNotEmpty()) first.key else ""
+        return if (isCal(first)) first.key else ""
     }
 
     // ---------- фильтр и перенос в конец ----------
@@ -286,23 +300,74 @@ object QrPriority {
         return list[s.taskIndex.coerceIn(0, list.size - 1)].key
     }
 
-    /** Задача — только та, что выбрана [nextTaskKey] (одна карточка на все задачи); событие — только то, что выбрано [nextEventKey]. */
-    private fun dynShown(c: Card, nextEv: String, nextTask: String): Boolean = when (c.dyn) {
+    /** Сколько будильников можно пролистать на карточке «Будильники» (то же число — MAX_ALARMS в widgets.js). */
+    const val ALARM_NAV_MAX = 16
+
+    /** Все будильники пользователя для карточки «Будильники»: по времени суток (затем название и ключ — порядок не зависит от того, заведён будильник), не больше [ALARM_NAV_MAX]. */
+    fun alarmCards(cfg: Cfg, s: Snapshot): List<Card> =
+        cfg.cards.filter { it.dyn == "alarm" && it.alarmId.isNotEmpty() }
+            .sortedWith(compareBy<Card>({ it.alarmSpec?.let { sp -> sp.hour * 60 + sp.minute } ?: Int.MAX_VALUE }, { it.title }, { it.key }))
+            .take(ALARM_NAV_MAX)
+
+    /** Какой будильник показан, пока ряд не листали: звонящий, иначе заведённый с ближайшим звонком, иначе первый по времени. */
+    fun defaultAlarmIndex(list: List<Card>, s: Snapshot): Int {
+        val ring = list.indexOfFirst { it.alarmId in s.ringingAlarmIds }
+        if (ring >= 0) return ring
+        var best = -1
+        var bestAt = Long.MAX_VALUE
+        for (i in list.indices) {
+            val at = s.alarms[list[i].alarmId] ?: continue
+            if (at < bestAt) { bestAt = at; best = i }
+        }
+        return if (best >= 0) best else 0
+    }
+
+    /** Номер показанного будильника в [alarmCards] (когда ряд листали — [Snapshot.alarmIndex], иначе [defaultAlarmIndex]). */
+    fun alarmShownIndex(list: List<Card>, s: Snapshot): Int =
+        if (list.isEmpty()) 0 else if (s.alarmIndex < 0) defaultAlarmIndex(list, s) else s.alarmIndex.coerceIn(0, list.size - 1)
+
+    /** Ключ будильника, который сейчас показывает карточка «Будильники»; пусто — показывать нечего. */
+    fun nextAlarmKey(cfg: Cfg, s: Snapshot): String {
+        val list = alarmCards(cfg, s)
+        if (list.isEmpty()) return ""
+        return list[alarmShownIndex(list, s)].key
+    }
+
+    /**
+     * Балл карточки «Будильники» (один на весь ряд, чтобы листание не двигало карточку в стопке): звонит любой — [SCORE_ALARM_RINGING], иначе какой-то
+     * заведённый зазвонит в ближайшие [SOON_MS] — [SCORE_ALARM_SOON]; null — сигналов нет.
+     */
+    private fun alarmRowScore(cfg: Cfg, s: Snapshot): Pair<Int, String>? {
+        val list = alarmCards(cfg, s)
+        if (list.isEmpty()) return null
+        if (list.any { it.alarmId in s.ringingAlarmIds }) return Pair(SCORE_ALARM_RINGING, "Звонит будильник")
+        var soonest = Long.MAX_VALUE
+        for (c in list) {
+            val d = (s.alarms[c.alarmId] ?: continue) - s.now
+            if (d in 0..SOON_MS && d < soonest) soonest = d
+        }
+        return if (soonest == Long.MAX_VALUE) null else Pair(SCORE_ALARM_SOON, "Будильник " + inMinutes(soonest))
+    }
+
+    /** Задача — только та, что выбрана [nextTaskKey] (одна карточка на все задачи); событие — только то, что выбрано [nextEventKey]; будильник — [nextAlarmKey]. */
+    private fun dynShown(c: Card, nextEv: String, nextTask: String, nextAlarm: String): Boolean = when (c.dyn) {
         "task" -> c.key == nextTask
         "event" -> c.key == nextEv
+        "alarm" -> c.key == nextAlarm
         else -> true
     }
 
-    private fun isShown(c: Card, s: Snapshot, nextEv: String, nextTask: String): Boolean =
+    private fun isShown(c: Card, s: Snapshot, nextEv: String, nextTask: String, nextAlarm: String): Boolean =
         !((c.after == "hide" || c.habit) && c.key in s.hiddenKeys) &&
             !(c.dyn == "task" && c.tid.isNotEmpty() && c.tid in s.doneTaskIds) &&
-            dynShown(c, nextEv, nextTask)
+            dynShown(c, nextEv, nextTask, nextAlarm)
 
     /** Карточки, которые видны в стопке: в порядке «как собрал пользователь, перенесённые в конец — после них, по времени переноса». */
     private fun visible(cfg: Cfg, s: Snapshot): List<Card> {
         val nextEv = nextEventKey(cfg, s)
         val nextTask = nextTaskKey(cfg, s)
-        val shown = cfg.cards.filter { isShown(it, s, nextEv, nextTask) }
+        val nextAlarm = nextAlarmKey(cfg, s)
+        val shown = cfg.cards.filter { isShown(it, s, nextEv, nextTask, nextAlarm) }
         if (shown.none { it.after == "end" && s.movedAt.containsKey(it.key) }) return shown
         return shown.withIndex().sortedWith(
             compareBy<IndexedValue<Card>> { if (it.value.after == "end") (s.movedAt[it.value.key] ?: 0L) else 0L }.thenBy { it.index }
@@ -318,7 +383,7 @@ object QrPriority {
     // ---------- баллы ----------
 
     /** Балл карточки и причина (для объяснения): максимум по сигналам, не сумма. */
-    private fun scoreOf(c: Card, s: Snapshot, rowTaskAt: Long = 0L): Pair<Int, String> {
+    private fun scoreOf(c: Card, s: Snapshot, rowTaskAt: Long = 0L, rowAlarm: Pair<Int, String>? = null): Pair<Int, String> {
         var best = 0
         var why = ""
         fun cand(sc: Int, w: String) { if (sc > best) { best = sc; why = w } }
@@ -330,7 +395,9 @@ object QrPriority {
                 "stopwatch" -> if (s.stopwatchActive) cand(SCORE_STOPWATCH, "Идёт секундомер")
             }
         }
-        if (c.alarmId.isNotEmpty()) {
+        if (c.dyn == "alarm") {
+            rowAlarm?.let { cand(it.first, it.second) }
+        } else if (c.alarmId.isNotEmpty()) {
             if (c.alarmId in s.ringingAlarmIds) cand(SCORE_ALARM_RINGING, "Звонит будильник")
             else s.alarms[c.alarmId]?.let { at ->
                 val d = at - s.now
@@ -427,9 +494,10 @@ object QrPriority {
         // 2. и 6. Нет скрытых, выполненных и вне окна; нет дублей; ничего не потеряно
         val nextEv = nextEventKey(cfg, s)
         val nextTask = nextTaskKey(cfg, s)
-        for (c in main) if (!isShown(c, s, nextEv, nextTask)) bad.add("2: лишняя карточка " + c.key)
+        val nextAlarm = nextAlarmKey(cfg, s)
+        for (c in main) if (!isShown(c, s, nextEv, nextTask, nextAlarm)) bad.add("2: лишняя карточка " + c.key)
         if (keys.toSet().size != keys.size) bad.add("6: дубли ключей")
-        for (c in cfg.cards) if (isShown(c, s, nextEv, nextTask) && main.none { it.key == c.key }) bad.add("6: потеряна карточка " + c.key)
+        for (c in cfg.cards) if (isShown(c, s, nextEv, nextTask, nextAlarm) && main.none { it.key == c.key }) bad.add("6: потеряна карточка " + c.key)
 
         // 3. «В конец», перенесённые сегодня, — подряд в самом конце, в порядке переноса
         val movedIdx = main.indices.filter { movedToday(main[it], s) }

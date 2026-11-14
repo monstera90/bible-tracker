@@ -1,6 +1,6 @@
 /* ===========================================================================
    widgets.js
-   Версия: 6.1 (14.11)
+   Версия: 6.2 (14.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
@@ -12,7 +12,8 @@
    Галочка «Отображать заряд аккумулятора (несколько устройств)» (`batteryMulti`, цвет `bat2Color`, палитра `icfColors2`): ещё одна служебная карточка — только значки и кольца заряда, без надписей: телефон и до трёх подключённых Bluetooth-устройств (QrBattery.renderMulti); в форме её лицо — `bat2FaceHtml`, значки — `iconSvg`, список парных устройств из оболочки — `batDevicesText`.
    Галочка «Спрашивать о тренировке» (`rpeAsk`): пока есть тренировка без оценки нагрузки (1–10), над всеми карточками стопки стоит служебная карточка «Как тренировка?» с кнопками 1…10 — её рисует оболочка (QrRpe.kt), страница шлёт только флаг; в форме показан образец лица (`rpeFaceHtml`, цвет `RPE_COLOR`). Оценку из виджета страница забирает в workouts.js (`drainWidgetRpe`, мост ≥33).
    Галочки «Показывать задачи» (`tasks`, цвет `tasksColor`, палитра `icfColors3`) и «Показывать события календаря» (`events`, цвет `eventsColor`, палитра `icfColors4`): в стопку добавляются динамические карточки по данным календаря (`CalendarTab.widgetFeed` через `deps.getCalendarFeed`, `buildFeed`). Задачи: открытые задачи календаря на ближайшую неделю (`FEED_DAYS`) и просроченные — в оболочку уходят до `MAX_TASKS` кандидатов, а в стопке одна карточка задач, которую нажатием у левого/правого края листают по задачам (QrWidgets.kt `taskNav`); событие: ближайшее запланированное в пределах недели (в оболочку уходят `MAX_EVENTS` кандидатов, показывает первое будущее — решает QrWidgets.kt по текущему времени). Лицо — `drawDynFace` (размеры сняты с макета, доли ширины карточки — `DYN`), у каждой карточки до четырёх картинок: `<ключ>` («Сегодня»), `<ключ>_t` («Завтра»), `<ключ>_w` (день недели, если до даты два дня и больше) и `<ключ>_s`/`<ключ>_y`/`<ключ>_o` («Просрочено, сегодня» / «…, вчера» / «…, 1 января», только у задачи); какую показать — выбирает оболочка (так надпись меняется в полночь без приложения). Данные меняются → `feedChanged` (из my.js: запись состояния и возврат в приложение) сверяет `feedSig` и при отличии шлёт `syncNow`. Палитра общая с карточками QR-кодов (`itemcards.colorPalette`), цвет по умолчанию — как на макете (`TASK_COLOR`/`EVENT_COLOR`), последний выбранный — `widgetsDynColors_v1`.
-   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after,prio}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor,rpeAsk}]}), только на устройстве.
+   Галочка «Показывать будильники» (`alarms`): в стопку добавляется одна карточка со ВСЕМИ будильниками пользователя (карточки «Будильник» вкладки QR-кодов; `widgetAlarms` в itemcards.js; в оболочку уходят до `MAX_ALARMS` штук в поле `alm`: ключ карточки, id и настройки будильника, название). Нажатие у левого/правого края листает будильники так же, как события и задачи (QrWidgets.kt `alarmNav`), нажатие в центре заводит/выключает показанный будильник. Лицо каждого будильника — `alarmFace`, два состояния (`<id>` и `<id>_on`) шлются как прежде. Отдельно будильник в стопку больше не выбирается (из списка «Выберите карточку» убран); будильники, выбранные в виджете раньше, при первой отправке переносятся на галочку (`migrateAlarmCards`).
+   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after,prio}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor,alarms,rpeAsk}]}), только на устройстве.
    Страница рисует лица карточек в PNG (canvas, `pngFor`) и шлёт их оболочке вместе с настройками (мост ≥31 `widgetsSync`).
    Точка входа: window.initWidgetsModule(deps) → window.WidgetsTab.{render, scheduleSync}.
    =========================================================================== */
@@ -30,6 +31,7 @@
   var EVENT_COLOR = "#317bf6"; // цвет карточки события по умолчанию (синий макета, чуть насыщеннее)
   var DYN_LAST_KEY = "widgetsDynColors_v1"; // последний выбранный цвет карточек задач/событий: {task, event}
   var MAX_TASKS = 12; // задач, между которыми листает единственная карточка задач (ближайшие по времени, просроченные первыми; то же число — QrPriority.TASK_NAV_MAX)
+  var MAX_ALARMS = 16; // будильников, между которыми листает карточка будильников (то же число — QrPriority.ALARM_NAV_MAX)
   var MAX_EVENTS = 10; // кандидатов в «следующее событие»: оболочка показывает первое, которое ещё не началось, а нажатие у края карточки листает до 10 событий вперёд/назад (без зацикливания)
   var FEED_DAYS = 7; // неделя вперёд (сегодня…через 6 дней, чтобы название дня недели было однозначным): оболочка сама решает по часам, что показать, пока приложение закрыто
   var DAY_MS = 86400000;
@@ -96,13 +98,13 @@
         else if(w.batColor && !/^#[0-9a-fA-F]{6}$/.test(w.batColor)) w.batColor = "";
         w.batteryMulti = !!w.batteryMulti;
         if(typeof w.bat2Color !== "string" || (w.bat2Color && !/^#[0-9a-fA-F]{6}$/.test(w.bat2Color))) w.bat2Color = "";
-        w.tasks = !!w.tasks; w.events = !!w.events; w.rpeAsk = !!w.rpeAsk;
+        w.tasks = !!w.tasks; w.events = !!w.events; w.alarms = !!w.alarms; w.rpeAsk = !!w.rpeAsk;
         w.tasksColor = normHex(w.tasksColor); w.eventsColor = normHex(w.eventsColor);
       });
       return o;
     }
     function normHex(v){ return (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)) ? v.toLowerCase() : ""; }
-    function hasContent(w){ return !!(w.cards.length || w.battery || w.batteryMulti || w.tasks || w.events || w.rpeAsk); }
+    function hasContent(w){ return !!(w.cards.length || w.battery || w.batteryMulti || w.tasks || w.events || w.alarms || w.rpeAsk); }
     function normAfter(v){ return (v === "hide" || v === "end") ? v : "none"; }
     function normPrio(v){ return (v === "top" || v === "low") ? v : "normal"; }
     function save(){ try{ localStorage.setItem(KEY, JSON.stringify(data)); }catch(e){} }
@@ -115,6 +117,19 @@
       try{ return JSON.parse(b.widgetsState() || "{}"); }catch(e){ return null; }
     }
     function cardsOf(){ return deps.getItemCards(); }
+    // Будильник в стопку по одному больше не выбирается: у виджетов, где он уже стоит среди карточек, он убирается, а вместо него включается «Показывать будильники»
+    function migrateAlarmCards(){
+      var changedAny = false;
+      try{
+        var ic = cardsOf();
+        if(!ic || typeof ic.widgetFace !== "function") return;
+        data.list.forEach(function(w){
+          var keep = w.cards.filter(function(c){ var f = ic.widgetFace(c.cid); return !(f && f.type === "alarm"); });
+          if(keep.length !== w.cards.length){ w.cards = keep; w.alarms = true; changedAny = true; }
+        });
+      }catch(e){}
+      if(changedAny) save();
+    }
     function batHex(w){ return cardsOf().paletteColor(w.batColor); } // цвет, которым рисуется карточка заряда (пусто — сиреневый)
     function bat2Hex(w){ return cardsOf().paletteColor(w.bat2Color); } // то же для карточки заряда нескольких устройств
     function dynHex(w, kind){ return cardsOf().paletteColor(kind === "task" ? w.tasksColor : w.eventsColor); } // цвет карточек задач / события (пусто — сиреневый)
@@ -290,6 +305,7 @@
     function startOfDay(ts){ var d = new Date(ts); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); }
     function addDays(ts, n){ var d = new Date(ts); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n).getTime(); } // календарные дни (переход на летнее время не сдвигает полночь)
     function hhmm(ts){ var d = new Date(ts), h = d.getHours(), m = d.getMinutes(); return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m; }
+    function usesAlarms(){ for(var i = 0; i < data.list.length; i++) if(data.list[i].alarms) return true; return false; }
     function usesDyn(){ for(var i = 0; i < data.list.length; i++) if(data.list[i].tasks || data.list[i].events) return true; return false; }
     // что нужно карточкам: {tasks:[{at,title}], events:[{at,title}]}; задачи — открытые на сегодня и просроченные, события — ещё не начавшиеся
     function buildFeed(){
@@ -360,8 +376,14 @@
     function syncNow(){
       var b = bridge();
       if(!b) return Promise.resolve(false);
+      migrateAlarmCards();
       var ic = cardsOf(), ids = {}, faces = {};
       data.list.forEach(function(w){ w.cards.forEach(function(c){ ids[c.cid] = 1; }); });
+      var alarmRows = []; // все будильники пользователя для карточки «Будильники» (у кого в виджете включена галочка)
+      if(usesAlarms()){
+        try{ alarmRows = ic.widgetAlarms().filter(function(f){ return f.alarmSpec; }).slice(0, MAX_ALARMS); }catch(e){ alarmRows = []; }
+        alarmRows.forEach(function(f){ ids[f.id] = 1; });
+      }
       Object.keys(ids).forEach(function(id){ var f = ic.widgetFace(id); if(f) faces[id] = f; });
       var keys = Object.keys(faces);
       var feed = usesDyn() ? buildFeed() : null;
@@ -379,7 +401,7 @@
         var widgets = data.list.map(function(w){
           return {
             id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance, battery: !!w.battery, batColor: w.battery ? batHex(w) : "", batteryMulti: !!w.batteryMulti, bat2Color: w.batteryMulti ? bat2Hex(w) : "",
-            tasks: !!w.tasks, events: !!w.events, rpeAsk: !!w.rpeAsk, dyn: dyn.perWidget[w.id] || [],
+            tasks: !!w.tasks, events: !!w.events, alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], rpeAsk: !!w.rpeAsk, dyn: dyn.perWidget[w.id] || [],
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
               return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after), prio: normPrio(c.prio), habit: f.type === "habit", alarm: f.type === "alarm" ? (f.alarmId || "") : "", alarmSpec: f.type === "alarm" ? (f.alarmSpec || null) : null };
@@ -604,6 +626,14 @@
       }
       return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' + t + '</svg></div>';
     }
+    // Карточка «Будильники» в форме: лицо первого будильника пользователя (в виджете — все будильники, их листают у краёв), нет будильников — образец
+    function alarmsFaceHtml(){
+      var list = [];
+      try{ list = cardsOf().widgetAlarms(); }catch(e){ list = []; }
+      if(list.length) return alarmFaceHtml(list[0], "");
+      var hex = cardsOf().paletteColor("");
+      return alarmFaceHtml({ title: "Подъём", big: "07:00", color: hex, shade: cardsOf().cardShade(hex) }, "");
+    }
     function tasksFaceHtml(w){ return dynFaceHtml("task", dynHex(w, "task")); }
     function eventsFaceHtml(w){ return dynFaceHtml("event", dynHex(w, "event")); }
     // Строка списка виджетов: что в стопке, кроме карточек QR-кодов
@@ -613,6 +643,7 @@
       if(w.batteryMulti) extra.push("заряд устройств");
       if(w.tasks) extra.push("задачи");
       if(w.events) extra.push("события");
+      if(w.alarms) extra.push("будильники");
       if(w.rpeAsk) extra.push("вопрос о тренировке");
       if(w.cards.length) return cardWord(w.cards.length) + (extra.length ? " + " + extra.join(" + ") : "");
       if(!extra.length) return cardWord(0);
@@ -677,7 +708,7 @@
       data.list.forEach(function(w){
         var f = w.cards.length ? cardsOf().widgetFace(w.cards[0].cid) : null;
         html += '<div class="wg-row" data-id="' + esc(w.id) + '">' +
-          '<div class="wg-row-ico" style="background:' + (f ? f.color : (w.battery ? batHex(w) : (w.batteryMulti ? bat2Hex(w) : (w.tasks ? dynHex(w, "task") : (w.events ? dynHex(w, "event") : "var(--gold)"))))) + ';"></div>' +
+          '<div class="wg-row-ico" style="background:' + (f ? f.color : (w.battery ? batHex(w) : (w.batteryMulti ? bat2Hex(w) : (w.tasks ? dynHex(w, "task") : (w.events ? dynHex(w, "event") : (w.alarms ? cardsOf().paletteColor("") : "var(--gold)")))))) + ';"></div>' +
           '<div class="wg-row-txt"><div class="wg-row-name">' + esc(wname(w)) + '</div>' +
           '<div class="wg-row-sub">' + contentText(w) + ' · ' + modeText(w) + (placed[w.id] ? ' · на рабочем столе' : '') + '</div></div></div>';
       });
@@ -702,6 +733,7 @@
       if(w.batteryMulti) html += '<div class="wg-slot" data-bat="1" id="wgBat2Slot">' + bat2FaceHtml(w) + '</div>'; // карточка заряда нескольких устройств — после карточки заряда
       if(w.tasks) html += '<div class="wg-slot" data-bat="1" id="wgTasksSlot">' + tasksFaceHtml(w) + '</div>'; // образец карточки задач (в виджете это одна карточка, которую листают по задачам)
       if(w.events) html += '<div class="wg-slot" data-bat="1" id="wgEventsSlot">' + eventsFaceHtml(w) + '</div>'; // образец карточки события
+      if(w.alarms) html += '<div class="wg-slot" data-bat="1" id="wgAlarmsSlot">' + alarmsFaceHtml() + '</div>'; // карточка будильников (в виджете одна на все будильники, листается у краёв)
       if(w.rpeAsk) html += '<div class="wg-slot" data-bat="1" id="wgRpeSlot">' + rpeFaceHtml() + '</div>'; // образец «Как тренировка?» (в виджете она стоит над всеми карточками, пока есть запись без оценки)
       html += '</div>';
       html += '<label class="wg-check"><input type="checkbox" id="wgRotate"' + (w.rotate ? ' checked' : '') + '>Переключать виджеты по кругу</label>';
@@ -728,6 +760,7 @@
       if(w.tasks) html += cardsOf().colorPalette("wgtasks", "icfColors3");
       html += '<label class="wg-check"><input type="checkbox" id="wgEvents"' + (w.events ? ' checked' : '') + '>Показывать события календаря</label>';
       if(w.events) html += cardsOf().colorPalette("wgevents", "icfColors4");
+      html += '<label class="wg-check"><input type="checkbox" id="wgAlarms"' + (w.alarms ? ' checked' : '') + '>Показывать будильники</label>';
       html += '<label class="wg-check"><input type="checkbox" id="wgRpe"' + (w.rpeAsk ? ' checked' : '') + '>Спрашивать о тренировке</label>';
       var st = nativeState(), placed = st && st.placed && st.placed[w.id];
       html += '<div class="wg-btns">';
@@ -745,6 +778,7 @@
       ["Отображать заряд аккумулятора (несколько устройств)", "Ещё одна карточка в стопке — без надписей, только значки и кольца заряда: телефон и до трёх подключённых Bluetooth-устройств (наушники, часы, колонка и т. п.)."],
       ["Показывать задачи", "Одна карточка с ближайшими невыполненными задачами из календаря: просроченные первыми, затем сегодняшние и на неделю вперёд. Нажатие у левого или правого края карточки листает задачи, двойное нажатие в центре отмечает показанную задачу выполненной, и на её место встаёт следующая. Если не отметить, вместо «Сегодня» будет «Просрочено». Через минуту без нажатий снова показывается первая задача. Нет галочки — карточки задач в стопке нет."],
       ["Показывать события календаря", "Одна карточка — следующее запланированное событие, с надписью «Сегодня, Четверг» или «Завтра, Суббота» (день недели — когда состоится событие). Если ни сегодня, ни завтра событий нет, карточки в стопке нет. Нет галочки — карточки события в стопке нет."],
+      ["Показывать будильники", "Одна карточка со всеми вашими будильниками (карточки «Будильник» вкладки QR-кодов): время, название и надпись «Заведён» / «Не заведён». Нажатие у левого или правого края карточки листает будильники, нажатие в центре заводит показанный будильник или выключает его. Пока будильник звонит, показан он; иначе — ближайший из заведённых (нет заведённых — первый по времени). Через минуту без нажатий карточка снова показывает его. Нет галочки — карточки будильников в стопке нет."],
       ["Спрашивать о тренировке", "После тренировки, пока вы не оценили нагрузку, наверху стопки появляется карточка «Как тренировка?» с кнопками от 1 до 10. Нажатие на число сразу сохраняет оценку, и карточка исчезает. Если пролистнуть на другую карточку, через минуту она вернётся наверх; порядок остальных карточек не меняется. Нет галочки — карточки нет."]
     ];
     function infoHtml(){
@@ -873,6 +907,11 @@
         if(w.events) w.eventsColor = dynColorFor("event");
         commitDraft(a); changed(); render();
       });
+      var alm = $("wgAlarms");
+      alm.addEventListener("change", function(){
+        w.alarms = alm.checked;
+        commitDraft(a); changed(); render();
+      });
       var rpe = $("wgRpe");
       rpe.addEventListener("change", function(){
         w.rpeAsk = rpe.checked;
@@ -903,7 +942,7 @@
       var pin = $("wgPinBtn");
       if(pin) pin.addEventListener("click", function(){
         var hint = $("wgPinHint");
-        if(!hasContent(w)){ hint.textContent = "Сначала добавьте в виджет карточку или включите одну из галочек (заряд, задачи, события)."; return; }
+        if(!hasContent(w)){ hint.textContent = "Сначала добавьте в виджет карточку или включите одну из галочек (заряд, задачи, события, будильники)."; return; }
         commitDraft(a); save();
         hint.textContent = "Готовлю…";
         syncNow().then(function(ok){
@@ -965,6 +1004,7 @@
       if(armed){ armed.active = false; armed = null; }
       stack = [{ s: "list" }];
       data = load();
+      migrateAlarmCards();
       render();
     }
 

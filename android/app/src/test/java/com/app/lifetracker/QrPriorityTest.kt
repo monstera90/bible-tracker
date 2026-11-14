@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 3.5 (14.11) — карточка «Будильники» (alarmRow_*).
 // Версия: 3.4 (14.11)
 
 import com.app.lifetracker.QrWidgets.Card
@@ -601,5 +602,61 @@ class QrPriorityTest {
         assertEquals(listOf("t1"), keys(run(cf, done)))
         // задач нет — карточки нет
         assertEquals("", QrPriority.nextTaskKey(cfg(emptyList(), false), s))
+    }
+
+    /** Будильник для карточки «Будильники»: id в оболочке — `id_<ключ>`. */
+    private fun alarmCard(key: String, h: Int, m: Int) = Card(
+        key = key, code = "", title = key, live = emptyList(), times = emptySet(), days = emptySet(),
+        dyn = "alarm", alarmId = "id_" + key, alarmSpec = QrWidgets.AlarmSpec(h, m, 0, 0, key)
+    )
+
+    @Test fun alarmRow_oneCardByClock_defaultRingingThenNearestArmed() {
+        val c = cal(12)
+        val now = c.timeInMillis
+        val cf = cfg(listOf(alarmCard("a9", 21, 0), alarmCard("a7", 7, 0), alarmCard("a8", 8, 30)))
+        val s = snap(c)
+        assertEquals(listOf("a7", "a8", "a9"), QrPriority.alarmCards(cf, s).map { it.key }) // по времени суток, не по порядку присылки
+        assertEquals("a7", QrPriority.nextAlarmKey(cf, s)) // ничего не заведено — первый по времени
+        val armed = snap(c, alarms = mapOf("id_a8" to now + 20 * hour, "id_a9" to now + 9 * hour))
+        assertEquals("a9", QrPriority.nextAlarmKey(cf, armed)) // заведённый с ближайшим звонком
+        assertEquals("a8", QrPriority.nextAlarmKey(cf, snap(c, alarms = armed.alarms, ringing = setOf("id_a8")))) // звонящий важнее
+        assertEquals("a8", QrPriority.nextAlarmKey(cf, armed.copy(alarmIndex = 1))) // листали — показан выбранный
+        assertEquals("a9", QrPriority.nextAlarmKey(cf, s.copy(alarmIndex = 7))) // за краем ряда — крайний, не по кругу
+        assertEquals("a7", QrPriority.nextAlarmKey(cf, s.copy(alarmIndex = 0)))
+        assertEquals(listOf("a8"), keys(run(cf, s.copy(alarmIndex = 1)))) // в стопке одна карточка на все будильники
+        assertEquals("", QrPriority.nextAlarmKey(cfg(emptyList()), s)) // будильников нет — карточки нет
+    }
+
+    @Test fun alarmRow_scoreFromAllAlarms_notFromShownOne() {
+        val c = cal(12)
+        val now = c.timeInMillis
+        val cf = cfg(listOf(card("a"), alarmCard("a7", 7, 0), alarmCard("a9", 21, 0)), relevance = true)
+        // показан a7 (листали), а зазвонит a9 через 30 минут: карточка всё равно поднимается
+        val s = snap(c, alarms = mapOf("id_a9" to now + 30 * 60_000L)).copy(alarmIndex = 0)
+        val r = run(cf, s)
+        assertEquals(listOf("a7", "a"), keys(r))
+        assertEquals("a7", r.topKey)
+        assertEquals("Будильник через 30 мин", r.topReason)
+        // до звонка дальше часа — карточка не выделена
+        val far = run(cf, snap(c, alarms = mapOf("id_a9" to now + 3 * hour)).copy(alarmIndex = 0))
+        assertEquals(listOf("a", "a7"), keys(far))
+        assertEquals("", far.topKey)
+        // нет релевантности — порядок пользователя, баллов нет
+        assertEquals(listOf("a", "a7"), keys(run(cfg(cf.cards, false), s)))
+    }
+
+    @Test fun alarmRow_ringingBeatsHysteresis_andNextChange() {
+        val c = cal(12)
+        val now = c.timeInMillis
+        val cf = cfg(listOf(card("b", times = setOf("d")), alarmCard("a7", 7, 0), alarmCard("a9", 21, 0)), relevance = true)
+        // прежде наверху была «b» (её время суток), зазвонил a9 — звонящий забирает верх сразу, хотя показан a7
+        val ring = snap(c, alarms = mapOf("id_a9" to now - 1000L), ringing = setOf("id_a9"), lastTop = "b").copy(alarmIndex = 0, alarmRowRinging = true)
+        val r = run(cf, ring)
+        assertEquals("a7", r.topKey)
+        assertEquals("Звонит будильник", r.topReason)
+        assertEquals(now + 60_000L, r.nextChangeAt) // пока звонит — перепроверка через минуту
+        // заведённый на 15:00 а9 зазвонит позже: «скоро» наступит в 14:00:01 (раньше границы окон 15:00:05)
+        val soon = run(cf, snap(c, alarms = mapOf("id_a9" to now + 3 * hour)).copy(alarmIndex = 0))
+        assertEquals(now + 2 * hour + 1_000L, soon.nextChangeAt)
     }
 }

@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 47.1 (14.11) — «Конструктор виджетов»: карточки-будильники убраны из списка выбора (`widgetCards`, `widgetFilters`); для галочки «Показывать будильники» все будильники отдаёт `widgetAlarms`.
    Версия: 47.0 (14.11)
    Версия: 32.0 (28.10) — структурная правка: «Погода»: вместо качества воздуха — время рассвета и заката (`wxTime`, поля `sunrise,sunset` в daily-запросе прогноза; `wxAqi` удалена, `european_aqi` из запроса воздуха убран, остался только УФ). Kotlin не менялся. Откат: itemcards.js 31.2.
    Версия: 31.2 (28.10) — «Комбинированный»: пункт «Запустить тренировку» переименован в «Запустить тренировку - бег» (код `["w"]` и ключ `workout` прежние — старые QR работают).
@@ -3387,12 +3388,20 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     }
     return f;
   }
+  // Будильники в стопку виджета по одному не выбираются: их показывает одна карточка по галочке «Показывать будильники» (widgetAlarmList)
   function widgetFilterList(){
-    return FILTERS.filter(function(f){ return f.key !== "remind"; }).map(function(f){ return { key: f.key, label: f.label }; });
+    return FILTERS.filter(function(f){ return f.key !== "remind" && f.key !== "alarm"; }).map(function(f){ return { key: f.key, label: f.label }; });
   }
   function widgetCardList(filterKey){
     reloadCards();
-    return loadCards().filter(function(c){ return c.type !== "remind" && cardMatchesFilter(c, filterKey || "all"); }).map(widgetFace);
+    return loadCards().filter(function(c){ return c.type !== "remind" && c.type !== "alarm" && cardMatchesFilter(c, filterKey || "all"); }).map(widgetFace);
+  }
+  // Все будильники пользователя (лица для карточки «Будильники» в виджете): по времени суток, затем по названию
+  function widgetAlarmList(){
+    reloadCards();
+    return loadCards().filter(function(c){ return c.type === "alarm" && alarmHM(c); }).map(widgetFace).sort(function(a, b){
+      return a.big < b.big ? -1 : (a.big > b.big ? 1 : (a.title < b.title ? -1 : (a.title > b.title ? 1 : 0)));
+    });
   }
 
   // страница scan.html: сразу сканер, результат — на прозрачном фоне поверх рабочего стола
@@ -4150,6 +4159,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     onAppResume: function(){ cardsCache = null; if(gridVisible()) renderGrid(); }, // карточку могли сработать из виджета (окно ярлыка): состояние таймеров, будильников и привычек — заново
     widgetCards: widgetCardList,
     widgetFilters: widgetFilterList,
+    widgetAlarms: widgetAlarmList,
     // выбор цвета для виджета (карточка «Заряд», widgets.js): та же палитра и те же запомненные цвета, что в форме карточки
     colorPalette: function(type, domId){ ensureHabitStyles(); return colorPaletteHtml(type || "battery", domId); },
     paletteColor: function(hex){ return effColor({ color: hex }); },
