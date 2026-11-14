@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 14.4 (14.11) — цвет карточек «Как тренировка?» и «Как настроение?» задаёт палитра формы виджета (`rpeColor`, `moodColor` → [Cfg]).
 // Версия: 14.3 (14.11) — галочка «Спрашивать о настроении» (`moodAsk`): служебная карточка «Как настроение?» ([QrMood]) — по правилам «Как тренировка?»: над всеми обычными карточками, под «Как тренировка?»; появляется в 20:30, если настроение сегодня не отмечено ([nextDynChange], [onMoodChanged]).
 // Версия: 14.2 (14.11) — слайд-шоу листает стопку через showPrevious: позиции стопки теперь идут в обратном порядке ([QrWidgetService]), иначе оно шло бы по карточкам назад.
 // Версия: 14.1 (14.11) — галочка «Показывать будильники» (`alarms`, список `alm`): одна карточка со всеми будильниками, листается у краёв ([alarmNav]).
@@ -187,7 +188,7 @@ object QrWidgets {
     class AlarmSpec(val hour: Int, val minute: Int, val every: Int, val times: Int, val title: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
     class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal")
-    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false) {
+    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false, val rpeColor: Int = QrRpe.DEFAULT_COLOR, val moodColor: Int = QrMood.DEFAULT_COLOR) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
     }
@@ -212,8 +213,8 @@ object QrWidgets {
     // ---------- настройки ----------
 
     /** "#rrggbb" от страницы (цвет карточки заряда, выбранный в форме виджета) → цвет; нет или неверно — сиреневый по умолчанию. */
-    private fun parseColor(v: String): Int {
-        if (!Regex("^#[0-9a-fA-F]{6}$").matches(v)) return QrBattery.DEFAULT_FACE
+    private fun parseColor(v: String, def: Int = QrBattery.DEFAULT_FACE): Int {
+        if (!Regex("^#[0-9a-fA-F]{6}$").matches(v)) return def
         return (0xFF shl 24) or v.substring(1).toInt(16)
     }
 
@@ -262,6 +263,8 @@ object QrWidgets {
                 val eventsOn = o.optBoolean("events", false)
                 val rpeAskOn = o.optBoolean("rpeAsk", false)
                 val moodAskOn = o.optBoolean("moodAsk", false)
+                val rpeColor = parseColor(o.optString("rpeColor", ""), QrRpe.DEFAULT_COLOR) // цвет служебных карточек из палитры формы; нет — фиолетовый макета
+                val moodColor = parseColor(o.optString("moodColor", ""), QrMood.DEFAULT_COLOR)
                 val ds = o.optJSONArray("dyn")
                 if (ds != null && (tasksOn || eventsOn)) {
                     val evs = ArrayList<Card>()
@@ -305,7 +308,7 @@ object QrWidgets {
                 out.add(
                     Cfg(
                         id, o.optString("name", "Виджет"), o.optBoolean("rotate", false),
-                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn, alarmsOn, moodAskOn
+                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn, alarmsOn, moodAskOn, rpeColor, moodColor
                     )
                 )
             }

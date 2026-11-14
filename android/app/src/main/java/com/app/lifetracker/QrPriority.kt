@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.4 (14.11) — служебные карточки «Как тренировка?» / «Как настроение?» берут цвет из [Cfg] (`rpeColor`, `moodColor`).
 // Версия: 4.3 (14.11) — вторая служебная карточка «Как настроение?» ([QrMood.KEY], [Snapshot.moodPending]): стоит над всеми обычными карточками, под «Как тренировка?»; [check] знает обе.
 // Версия: 4.2 (14.11) — будильник «скоро» поднимает карточку за 30 минут, а не за час ([ALARM_SOON_MS]); балл [SCORE_ALARM_SOON] выше события «скоро» на гистерезис, чтобы будильник перебивал календарь.
 // Версия: 4.1 (14.11) — карточка «Будильники» (dyn = "alarm"): одна на все будильники пользователя, листается у краёв как события и задачи ([alarmCards], [nextAlarmKey]).
@@ -154,8 +155,8 @@ object QrPriority {
             }
         }
         val out = ArrayList<Scored>()
-        if (s.rpePending) out.add(Scored(rpeCard(), 0, "Ждёт оценки тренировки"))
-        if (s.moodPending) out.add(Scored(moodCard(), 0, "Сегодня настроение ещё не отмечено"))
+        if (s.rpePending) out.add(Scored(rpeCard(cfg), 0, "Ждёт оценки тренировки"))
+        if (s.moodPending) out.add(Scored(moodCard(cfg), 0, "Сегодня настроение ещё не отмечено"))
         out.addAll(main)
         val serviceKey = serviceKeyOf(s)
         val topKey = if (serviceKey.isNotEmpty()) serviceKey else top
@@ -263,10 +264,10 @@ object QrPriority {
     fun visibleCount(cfg: Cfg, s: Snapshot): Int = visible(cfg, s).size + (if (s.rpePending) 1 else 0) + (if (s.moodPending) 1 else 0)
 
     /** Карточка «Как тренировка?» — служебная, над всеми. */
-    private fun rpeCard(): Card = Card(QrRpe.KEY, "", "Как тренировка?", emptyList(), emptySet(), emptySet(), "none", QrRpe.DEFAULT_COLOR)
+    private fun rpeCard(cfg: Cfg): Card = Card(QrRpe.KEY, "", "Как тренировка?", emptyList(), emptySet(), emptySet(), "none", cfg.rpeColor)
 
     /** Карточка «Как настроение?» — служебная, над всеми обычными, под «Как тренировка?». */
-    private fun moodCard(): Card = Card(QrMood.KEY, "", "Как настроение?", emptyList(), emptySet(), emptySet(), "none", QrMood.DEFAULT_COLOR)
+    private fun moodCard(cfg: Cfg): Card = Card(QrMood.KEY, "", "Как настроение?", emptyList(), emptySet(), emptySet(), "none", cfg.moodColor)
 
     /** Служебная карточка стопки («Как тренировка?» / «Как настроение?»), а не настоящая. */
     private fun isService(key: String): Boolean = key == QrRpe.KEY || key == QrMood.KEY

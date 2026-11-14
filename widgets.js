@@ -1,5 +1,6 @@
 /* ===========================================================================
    widgets.js
+   Версия: 6.5 (14.11) — палитры цвета в форме свёрнуты: справа от пункта квадрат выбранного цвета, нажатие открывает палитру, после выбора она сворачивается; палитры (`rpeColor`, `moodColor`, `icfColors5/6`) у «Спрашивать о тренировке» и «Спрашивать о настроении»; из описания «заряд (несколько устройств)» убран список парных Bluetooth-устройств.
    Версия: 6.4 (14.11) — «Сегодня, <день>» и «Как настроение?» того же размера, что на карточке события календаря (образец `moodFaceHtml`; в виджете — QrMood.kt).
    Версия: 6.3 (14.11) — галочка «Спрашивать о настроении» (`moodAsk`): служебная карточка «Как настроение?» (оболочка, QrMood.kt; в форме — образец `moodFaceHtml`, цвет `RPE_COLOR`); ответ из виджета страница вносит в журнал настроения (mood.js `drainWidgetMood`, мост ≥37).
    Версия: 6.2 (14.11)
@@ -11,12 +12,12 @@
    В форме виджета при включённой релевантности строка «Сейчас сверху: … — причина» (мост версии ≥36 `widgetWhy`, `whyText`; обновляется при открытии формы и через пару секунд после правки).
    Галочка «Отображать заряд аккумулятора» (`battery`): в стопку добавляется служебная карточка с зарядом телефона и Bluetooth-наушников — её рисует оболочка (QrBattery.kt), страница шлёт только флаг.
    Цвет карточки «Заряд» (`batColor`: "" — по умолчанию, сиреневый, иначе "#rrggbb") выбирается палитрой под галочкой — той же, что в форме карточки QR-кодов (itemcards.js `colorPalette`, запомненный цвет — `defaultColor/rememberColor`); карточка заряда показана в форме после последнего слота (и кнопки «+») (`batFaceHtml`), статус наушников из оболочки — `batStatusText`.
-   Галочка «Отображать заряд аккумулятора (несколько устройств)» (`batteryMulti`, цвет `bat2Color`, палитра `icfColors2`): ещё одна служебная карточка — только значки и кольца заряда, без надписей: телефон и до трёх подключённых Bluetooth-устройств (QrBattery.renderMulti); в форме её лицо — `bat2FaceHtml`, значки — `iconSvg`, список парных устройств из оболочки — `batDevicesText`.
+   Галочка «Отображать заряд аккумулятора (несколько устройств)» (`batteryMulti`, цвет `bat2Color`, палитра `icfColors2`): ещё одна служебная карточка — только значки и кольца заряда, без надписей: телефон и до трёх подключённых Bluetooth-устройств (QrBattery.renderMulti); в форме её лицо — `bat2FaceHtml`, значки — `iconSvg` (списка парных Bluetooth-устройств под галочкой нет).
    Галочка «Спрашивать о тренировке» (`rpeAsk`): пока есть тренировка без оценки нагрузки (1–10), над всеми карточками стопки стоит служебная карточка «Как тренировка?» с кнопками 1…10 — её рисует оболочка (QrRpe.kt), страница шлёт только флаг; в форме показан образец лица (`rpeFaceHtml`, цвет `RPE_COLOR`). Оценку из виджета страница забирает в workouts.js (`drainWidgetRpe`, мост ≥33).
    Галочки «Показывать задачи» (`tasks`, цвет `tasksColor`, палитра `icfColors3`) и «Показывать события календаря» (`events`, цвет `eventsColor`, палитра `icfColors4`): в стопку добавляются динамические карточки по данным календаря (`CalendarTab.widgetFeed` через `deps.getCalendarFeed`, `buildFeed`). Задачи: открытые задачи календаря на ближайшую неделю (`FEED_DAYS`) и просроченные — в оболочку уходят до `MAX_TASKS` кандидатов, а в стопке одна карточка задач, которую нажатием у левого/правого края листают по задачам (QrWidgets.kt `taskNav`); событие: ближайшее запланированное в пределах недели (в оболочку уходят `MAX_EVENTS` кандидатов, показывает первое будущее — решает QrWidgets.kt по текущему времени). Лицо — `drawDynFace` (размеры сняты с макета, доли ширины карточки — `DYN`), у каждой карточки до четырёх картинок: `<ключ>` («Сегодня»), `<ключ>_t` («Завтра»), `<ключ>_w` (день недели, если до даты два дня и больше) и `<ключ>_s`/`<ключ>_y`/`<ключ>_o` («Просрочено, сегодня» / «…, вчера» / «…, 1 января», только у задачи); какую показать — выбирает оболочка (так надпись меняется в полночь без приложения). Данные меняются → `feedChanged` (из my.js: запись состояния и возврат в приложение) сверяет `feedSig` и при отличии шлёт `syncNow`. Палитра общая с карточками QR-кодов (`itemcards.colorPalette`), цвет по умолчанию — как на макете (`TASK_COLOR`/`EVENT_COLOR`), последний выбранный — `widgetsDynColors_v1`.
    Галочка «Показывать будильники» (`alarms`): в стопку добавляется одна карточка со ВСЕМИ будильниками пользователя (карточки «Будильник» вкладки QR-кодов; `widgetAlarms` в itemcards.js; в оболочку уходят до `MAX_ALARMS` штук в поле `alm`: ключ карточки, id и настройки будильника, название). Нажатие у левого/правого края листает будильники так же, как события и задачи (QrWidgets.kt `alarmNav`), нажатие в центре заводит/выключает показанный будильник. Лицо каждого будильника — `alarmFace`, два состояния (`<id>` и `<id>_on`) шлются как прежде. Отдельно будильник в стопку больше не выбирается (из списка «Выберите карточку» убран); будильники, выбранные в виджете раньше, при первой отправке переносятся на галочку (`migrateAlarmCards`).
    Галочка «Спрашивать о настроении» (`moodAsk`): с 20:30, если сегодня не было ни одной отметки настроения, над всеми обычными карточками (под «Как тренировка?», выше календаря) стоит служебная карточка «Как настроение?» с восемью эмодзи-кнопками — её рисует оболочка (QrMood.kt), страница шлёт только флаг и сообщает время последней отметки (mood.js `syncWidgetMood`, мост ≥37). Нажатие на эмодзи сразу записывает настроение и убирает карточку.
-   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after,prio}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor,alarms,rpeAsk,moodAsk}]}), только на устройстве.
+   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after,prio}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor,alarms,rpeAsk,rpeColor,moodAsk,moodColor}]}), только на устройстве.
    Страница рисует лица карточек в PNG (canvas, `pngFor`) и шлёт их оболочке вместе с настройками (мост ≥31 `widgetsSync`).
    Точка входа: window.initWidgetsModule(deps) → window.WidgetsTab.{render, scheduleSync}.
    =========================================================================== */
@@ -103,6 +104,7 @@
         if(typeof w.bat2Color !== "string" || (w.bat2Color && !/^#[0-9a-fA-F]{6}$/.test(w.bat2Color))) w.bat2Color = "";
         w.tasks = !!w.tasks; w.events = !!w.events; w.alarms = !!w.alarms; w.rpeAsk = !!w.rpeAsk; w.moodAsk = !!w.moodAsk;
         w.tasksColor = normHex(w.tasksColor); w.eventsColor = normHex(w.eventsColor);
+        w.rpeColor = normHex(w.rpeColor) || RPE_COLOR; w.moodColor = normHex(w.moodColor) || RPE_COLOR; // служебные карточки: пусто — фиолетовый макета, как было до палитры
       });
       return o;
     }
@@ -135,6 +137,8 @@
     }
     function batHex(w){ return cardsOf().paletteColor(w.batColor); } // цвет, которым рисуется карточка заряда (пусто — сиреневый)
     function bat2Hex(w){ return cardsOf().paletteColor(w.bat2Color); } // то же для карточки заряда нескольких устройств
+    function rpeHex(w){ return w.rpeColor || RPE_COLOR; } // цвет карточки «Как тренировка?»
+    function moodHex(w){ return w.moodColor || RPE_COLOR; } // цвет карточки «Как настроение?»
     function dynHex(w, kind){ return cardsOf().paletteColor(kind === "task" ? w.tasksColor : w.eventsColor); } // цвет карточек задач / события (пусто — сиреневый)
     // цвет для только что включённой галочки: последний выбранный (в том числе сиреневый), иначе синий макета
     function dynColorFor(kind){
@@ -404,7 +408,7 @@
         var widgets = data.list.map(function(w){
           return {
             id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance, battery: !!w.battery, batColor: w.battery ? batHex(w) : "", batteryMulti: !!w.batteryMulti, bat2Color: w.batteryMulti ? bat2Hex(w) : "",
-            tasks: !!w.tasks, events: !!w.events, alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], rpeAsk: !!w.rpeAsk, moodAsk: !!w.moodAsk, dyn: dyn.perWidget[w.id] || [],
+            tasks: !!w.tasks, events: !!w.events, alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], rpeAsk: !!w.rpeAsk, rpeColor: w.rpeAsk ? rpeHex(w) : "", moodAsk: !!w.moodAsk, moodColor: w.moodAsk ? moodHex(w) : "", dyn: dyn.perWidget[w.id] || [],
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
               return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after), prio: normPrio(c.prio), habit: f.type === "habit", alarm: f.type === "alarm" ? (f.alarmId || "") : "", alarmSpec: f.type === "alarm" ? (f.alarmSpec || null) : null };
@@ -492,6 +496,10 @@
         ".wg-bat-status{font-size:13px;line-height:1.35;color:var(--ink);margin:6px 2px 10px;}" +
         ".wg-badge{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;background:var(--wood);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;}" +
         ".wg-check{display:flex;align-items:center;margin:10px 2px;font-size:15px;color:var(--ink);}" +
+        ".wg-checkrow{display:flex;align-items:center;}" +
+        ".wg-checkrow .wg-check{flex:1 1 auto;min-width:0;}" +
+        ".wg-swatch{flex:0 0 auto;width:30px;height:30px;margin:0 2px 0 10px;padding:0;border-radius:8px;border:1px solid rgba(0,0,0,.25);box-shadow:inset 0 0 0 2px rgba(255,255,255,.35);cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
+        ".wg-swatch.open{box-shadow:0 0 0 2px var(--parchment,#fff),0 0 0 4px var(--ink,#000);}" +
         ".wg-check input[type=checkbox]{width:22px;height:22px;margin:0 10px 0 0;flex:0 0 auto;}" +
         ".wg-min{margin:0 2px 8px 32px;font-size:14px;color:var(--ink);}" +
         ".wg-min input{width:64px;font-size:16px;padding:4px 6px;margin:0 6px;text-align:center;}" +
@@ -616,8 +624,8 @@
       return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' + t + '</svg></div>';
     }
     // Карточка «Как тренировка?» в форме: образец лица (в виджете её рисует оболочка, QrRpe.kt; числа — доли ширины карточки ×100: значок «календарь с галочкой» (клетка 0,96), две строки заголовка, сетка кнопок 2×5)
-    function rpeFaceHtml(){
-      var hex = RPE_COLOR, shade = cardsOf().cardShade(hex), serif = "font-family=\"'Palatino Linotype',Georgia,serif\"";
+    function rpeFaceHtml(w){
+      var hex = w ? rpeHex(w) : RPE_COLOR, shade = cardsOf().cardShade(hex), serif = "font-family=\"'Palatino Linotype',Georgia,serif\"";
       var t = '<g transform="translate(38.48 3.5) scale(0.96)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
         '<path d="M11.5 21h-5.5a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v6"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/><path d="M15 19l2 2l4 -4"/></g>';
       t += '<text x="50" y="41.3" font-size="13" text-anchor="middle" fill="#fff" font-weight="700" ' + serif + '>Как</text>';
@@ -631,8 +639,8 @@
     }
     // Карточка «Как настроение?» в форме: образец лица (в виджете её рисует оболочка, QrMood.kt; числа — доли ширины карточки ×100: значок «смайлик в круге» (клетка 0,756), «Сегодня, <день недели>», заголовок, сетка кнопок-эмодзи 2×4; значок сдвинут на 4 вниз, к кнопкам; надписи — того же размера, что на карточке события календаря)
     var MOOD_EMOJI = ["😌", "😊", "🙄", "😕", "😰", "😡", "🥱", "😔"]; // как CHECKIN_ORDER в mood.js: Внутренний мир, Радость, Спокойствие, Грусть, Тревожность, Раздражительность, Сонливость, Подавленность
-    function moodFaceHtml(){
-      var hex = RPE_COLOR, shade = cardsOf().cardShade(hex), serif = "font-family=\"'Palatino Linotype',Georgia,serif\"";
+    function moodFaceHtml(w){
+      var hex = w ? moodHex(w) : RPE_COLOR, shade = cardsOf().cardShade(hex), serif = "font-family=\"'Palatino Linotype',Georgia,serif\"";
       var day = WEEKDAYS_FULL[new Date().getDay()].toLowerCase();
       var t = '<g transform="translate(50 17.8) scale(0.756)" fill="none" stroke="#fff" stroke-width="0.97" stroke-linecap="round" stroke-linejoin="round">' +
         '<circle cx="0" cy="0" r="9"/><path d="M-3 -2h.01"/><path d="M3 -2h.01"/><path d="M-2.5 3a3.5 3.5 0 0 0 5 0"/></g>';
@@ -669,13 +677,6 @@
       if(w.cards.length) return cardWord(w.cards.length) + (extra.length ? " + " + extra.join(" + ") : "");
       if(!extra.length) return cardWord(0);
       return (w.battery && extra.length === 1) ? "заряд аккумулятора" : extra.join(" + ");
-    }
-    var ICON_NAMES = { phone: "телефон", headphones: "наушники", earbuds: "наушники-вкладыши", watch: "часы", speaker: "колонка", keyboard: "клавиатура", laptop: "ноутбук", tablet: "планшет", shutter: "кнопка съёмки", generic: "значок Bluetooth" };
-    // Парные Bluetooth-устройства телефона (из оболочки, поле bt.devices): имена и значок, который им достанется
-    function batDevicesText(){
-      var st = nativeState(), bt = st && st.bt, ds = bt && bt.devices;
-      if(!ds || !ds.length) return "";
-      return "Парные Bluetooth-устройства (значок): " + ds.map(function(d){ return (d.name || "без имени") + " (" + (ICON_NAMES[d.icon] || ICON_NAMES.generic) + (d.on ? ", подключено" : "") + ")"; }).join("; ") + ".";
     }
     // Что с наушниками сейчас (из оболочки, поле bt в widgetsState): причина, по которой в карточке «Заряд» нет их заряда
     function batStatusText(){
@@ -738,6 +739,12 @@
       return html;
     }
 
+    // строка пункта с галочкой; у пунктов с цветом справа квадрат выбранного цвета (нажатие открывает палитру `pal`, она сворачивается после выбора)
+    function checkRow(id, on, text, pal, hex){
+      return '<div class="wg-checkrow"><label class="wg-check"><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '>' + text + '</label>' +
+        (pal && on ? '<button type="button" class="wg-swatch" id="wgSw_' + pal[0] + '" data-pal="' + pal[0] + '" style="background:' + hex + ';" title="Цвет карточки" aria-label="Цвет карточки"></button>' : '') + '</div>';
+    }
+    function palBlock(pal){ return '<div class="wg-pal" id="wgPal_' + pal[0] + '" style="display:none">' + cardsOf().colorPalette(pal[1], pal[0]) + '</div>'; }
     function formHtml(a){
       var w = a.w, html = '<h3 class="common-tab-title">' + esc(wname(w)) + '</h3><div class="wg-slots">';
       for(var i = 0; i < w.cards.length; i++){
@@ -755,8 +762,8 @@
       if(w.tasks) html += '<div class="wg-slot" data-bat="1" id="wgTasksSlot">' + tasksFaceHtml(w) + '</div>'; // образец карточки задач (в виджете это одна карточка, которую листают по задачам)
       if(w.events) html += '<div class="wg-slot" data-bat="1" id="wgEventsSlot">' + eventsFaceHtml(w) + '</div>'; // образец карточки события
       if(w.alarms) html += '<div class="wg-slot" data-bat="1" id="wgAlarmsSlot">' + alarmsFaceHtml() + '</div>'; // карточка будильников (в виджете одна на все будильники, листается у краёв)
-      if(w.rpeAsk) html += '<div class="wg-slot" data-bat="1" id="wgRpeSlot">' + rpeFaceHtml() + '</div>'; // образец «Как тренировка?» (в виджете она стоит над всеми карточками, пока есть запись без оценки)
-      if(w.moodAsk) html += '<div class="wg-slot" data-bat="1" id="wgMoodSlot">' + moodFaceHtml() + '</div>'; // образец «Как настроение?» (в виджете она стоит над всеми обычными карточками с 20:30, пока сегодня не отмечено настроение)
+      if(w.rpeAsk) html += '<div class="wg-slot" data-bat="1" id="wgRpeSlot">' + rpeFaceHtml(w) + '</div>'; // образец «Как тренировка?» (в виджете она стоит над всеми карточками, пока есть запись без оценки)
+      if(w.moodAsk) html += '<div class="wg-slot" data-bat="1" id="wgMoodSlot">' + moodFaceHtml(w) + '</div>'; // образец «Как настроение?» (в виджете она стоит над всеми обычными карточками с 20:30, пока сегодня не отмечено настроение)
       html += '</div>';
       html += '<label class="wg-check"><input type="checkbox" id="wgRotate"' + (w.rotate ? ' checked' : '') + '>Переключать виджеты по кругу</label>';
       if(w.rotate) html += '<div class="wg-min">каждые<input type="number" id="wgRotMin" min="1" max="720" value="' + w.rotateMin + '">мин</div>';
@@ -766,25 +773,23 @@
         var wt = whyText(w);
         html += '<div class="wg-bat-status" id="wgWhy"' + (wt ? '' : ' style="display:none"') + '>' + esc(wt) + '</div>';
       }
-      html += '<label class="wg-check"><input type="checkbox" id="wgBat"' + (w.battery ? ' checked' : '') + '>Отображать заряд аккумулятора (наушники и телефон)</label>';
+      html += checkRow("wgBat", w.battery, "Отображать заряд аккумулятора (наушники и телефон)", ["icfColors", "battery"], batHex(w));
       if(w.battery){
-        html += cardsOf().colorPalette("battery");
+        html += palBlock(["icfColors", "battery"]);
         var bst = batStatusText();
         if(bst) html += '<div class="wg-bat-status" id="wgBatStatus">' + esc(bst) + '</div>';
       }
-      html += '<label class="wg-check"><input type="checkbox" id="wgBat2"' + (w.batteryMulti ? ' checked' : '') + '>Отображать заряд аккумулятора (несколько устройств)</label>';
-      if(w.batteryMulti){
-        html += cardsOf().colorPalette("battery2", "icfColors2");
-        var dst = batDevicesText();
-        if(dst) html += '<div class="wg-bat-status" id="wgBat2Status">' + esc(dst) + '</div>';
-      }
-      html += '<label class="wg-check"><input type="checkbox" id="wgTasks"' + (w.tasks ? ' checked' : '') + '>Показывать задачи</label>';
-      if(w.tasks) html += cardsOf().colorPalette("wgtasks", "icfColors3");
-      html += '<label class="wg-check"><input type="checkbox" id="wgEvents"' + (w.events ? ' checked' : '') + '>Показывать события календаря</label>';
-      if(w.events) html += cardsOf().colorPalette("wgevents", "icfColors4");
+      html += checkRow("wgBat2", w.batteryMulti, "Отображать заряд аккумулятора (несколько устройств)", ["icfColors2", "battery2"], bat2Hex(w));
+      if(w.batteryMulti) html += palBlock(["icfColors2", "battery2"]);
+      html += checkRow("wgTasks", w.tasks, "Показывать задачи", ["icfColors3", "wgtasks"], dynHex(w, "task"));
+      if(w.tasks) html += palBlock(["icfColors3", "wgtasks"]);
+      html += checkRow("wgEvents", w.events, "Показывать события календаря", ["icfColors4", "wgevents"], dynHex(w, "event"));
+      if(w.events) html += palBlock(["icfColors4", "wgevents"]);
       html += '<label class="wg-check"><input type="checkbox" id="wgAlarms"' + (w.alarms ? ' checked' : '') + '>Показывать будильники</label>';
-      html += '<label class="wg-check"><input type="checkbox" id="wgRpe"' + (w.rpeAsk ? ' checked' : '') + '>Спрашивать о тренировке</label>';
-      html += '<label class="wg-check"><input type="checkbox" id="wgMood"' + (w.moodAsk ? ' checked' : '') + '>Спрашивать о настроении</label>';
+      html += checkRow("wgRpe", w.rpeAsk, "Спрашивать о тренировке", ["icfColors5", "wgrpe"], rpeHex(w));
+      if(w.rpeAsk) html += palBlock(["icfColors5", "wgrpe"]);
+      html += checkRow("wgMood", w.moodAsk, "Спрашивать о настроении", ["icfColors6", "wgmood"], moodHex(w));
+      if(w.moodAsk) html += palBlock(["icfColors6", "wgmood"]);
       var st = nativeState(), placed = st && st.placed && st.placed[w.id];
       html += '<div class="wg-btns">';
       if(bridge()) html += '<button type="button" class="workbooks-run-btn" id="wgPinBtn">' + (placed ? 'Добавить ещё один на рабочий стол' : 'Добавить на рабочий стол') + '</button><div class="wg-hint" id="wgPinHint"></div>';
@@ -939,29 +944,43 @@
       var rpe = $("wgRpe");
       rpe.addEventListener("change", function(){
         w.rpeAsk = rpe.checked;
+        if(w.rpeAsk) w.rpeColor = cardsOf().defaultColor("wgrpe") || RPE_COLOR; // запомненный цвет, иначе фиолетовый макета
         commitDraft(a); changed(); render();
       });
       var mood = $("wgMood");
       mood.addEventListener("change", function(){
         w.moodAsk = mood.checked;
+        if(w.moodAsk) w.moodColor = cardsOf().defaultColor("wgmood") || RPE_COLOR;
         commitDraft(a); changed(); render();
       });
-      // палитры цвета карточек: [id палитры, поле цвета, ключ запомненного цвета, id места карточки, лицо карточки, вид динамической карточки]
+      // палитры цвета карточек (свёрнуты; открываются квадратом справа от пункта, после выбора сворачиваются):
+      // [id палитры, поле цвета, ключ запомненного цвета, id места карточки, лицо карточки, вид динамической карточки, сиреневый квадрат — явный цвет (служебные карточки)]
       [["icfColors", "batColor", "battery", "wgBatSlot", batFaceHtml], ["icfColors2", "bat2Color", "battery2", "wgBat2Slot", bat2FaceHtml],
-       ["icfColors3", "tasksColor", "", "wgTasksSlot", tasksFaceHtml, "task"], ["icfColors4", "eventsColor", "", "wgEventsSlot", eventsFaceHtml, "event"]].forEach(function(p){
-        var colorsEl = $(p[0]);
+       ["icfColors3", "tasksColor", "", "wgTasksSlot", tasksFaceHtml, "task"], ["icfColors4", "eventsColor", "", "wgEventsSlot", eventsFaceHtml, "event"],
+       ["icfColors5", "rpeColor", "wgrpe", "wgRpeSlot", rpeFaceHtml, "", true], ["icfColors6", "moodColor", "wgmood", "wgMoodSlot", moodFaceHtml, "", true]].forEach(function(p){
+        var colorsEl = $(p[0]), palEl = $("wgPal_" + p[0]), sw = $("wgSw_" + p[0]);
         if(!colorsEl) return;
+        var lilac = cardsOf().paletteColor("");
+        var curVal = function(){ var v = w[p[1]] || ""; return (p[6] && v === lilac) ? "" : v; }; // у служебных карточек пусто значит фиолетовый, поэтому сиреневый хранится явно
         var markColors = function(){
           var bs = colorsEl.querySelectorAll(".habit-color");
-          for(var i = 0; i < bs.length; i++) bs[i].classList.toggle("selected", bs[i].getAttribute("data-color") === (w[p[1]] || ""));
+          for(var i = 0; i < bs.length; i++) bs[i].classList.toggle("selected", bs[i].getAttribute("data-color") === curVal());
         };
         markColors();
+        if(sw && palEl) sw.addEventListener("click", function(){
+          var open = palEl.style.display === "none";
+          palEl.style.display = open ? "" : "none";
+          sw.classList.toggle("open", open);
+        });
         colorsEl.addEventListener("click", function(e){
           var b = e.target.closest(".habit-color");
           if(!b) return;
-          w[p[1]] = b.getAttribute("data-color") || ""; // "" — по умолчанию (сиреневый)
+          var c = b.getAttribute("data-color") || "";
+          w[p[1]] = (p[6] && !c) ? lilac : c; // "" — по умолчанию (сиреневый)
           if(p[5]) rememberDynColor(p[5], w[p[1]]); else cardsOf().rememberColor(p[2], w[p[1]]);
           markColors();
+          if(sw){ sw.style.background = p[6] ? w[p[1]] : cardsOf().paletteColor(w[p[1]]); sw.classList.remove("open"); }
+          if(palEl) palEl.style.display = "none"; // после выбора палитра сворачивается
           var slot = $(p[3]); if(slot) slot.innerHTML = p[4](w);
           commitDraft(a); changed();
         });
