@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.0 (14.11) — будильник «скоро» за 30 минут, а не за час; будильник «скоро» перебивает событие (alarmSoon_beatsEventSoon_*, alarmRow_soonBeatsEvent_*).
 // Версия: 3.5 (14.11) — карточка «Будильники» (alarmRow_*).
 // Версия: 3.4 (14.11)
 
@@ -239,13 +240,18 @@ class QrPriorityTest {
         assertEquals("a", held.topKey)
     }
 
-    @Test fun alarmSoon_within60min_only() {
+    @Test fun alarmSoon_within30min_only() {
         val c = cal(12)
         val cards = listOf(card("s", times = setOf("d")), card("a", alarmId = "AL1"))
         val soon = run(cfg(cards, true), snap(c, alarms = mapOf("AL1" to c.timeInMillis + 30 * min)))
         assertEquals(listOf("a", "s"), keys(soon))
         assertEquals(QrPriority.SCORE_ALARM_SOON, scoreOf(soon, "a"))
         assertEquals("Будильник через 30 мин", soon.cards[0].reason)
+        val edge = run(cfg(cards, true), snap(c, alarms = mapOf("AL1" to c.timeInMillis + 31 * min))) // раньше «скоро» наступало за час — теперь за 30 минут
+        assertEquals(listOf("s", "a"), keys(edge))
+        assertEquals(0, scoreOf(edge, "a"))
+        val inHour = run(cfg(cards, true), snap(c, alarms = mapOf("AL1" to c.timeInMillis + 60 * min)))
+        assertEquals(listOf("s", "a"), keys(inHour))
         val late = run(cfg(cards, true), snap(c, alarms = mapOf("AL1" to c.timeInMillis + 90 * min)))
         assertEquals(listOf("s", "a"), keys(late)) // «заведённый позже» — 0
         assertEquals(0, scoreOf(late, "a"))
@@ -351,11 +357,25 @@ class QrPriorityTest {
         val cards = listOf(card("over", dyn = "task", at = now - hour, tid = "B"), card("ev", dyn = "event", at = now + 10 * min))
         val r = run(cfg(cards, true), snap(cal(12), lastTop = "over")) // 650 → 750: «минимум на 100»
         assertEquals("ev", r.topKey)
-        // отрыв 99 удержал бы: 800 (будильник) против 750 (событие) — 50
-        val c2 = listOf(card("ev", dyn = "event", at = now + 10 * min), card("al", alarmId = "AL1"))
-        val r2 = run(cfg(c2, true), snap(cal(12), lastTop = "ev", alarms = mapOf("AL1" to now + 10 * min)))
-        assertEquals("ev", r2.topKey)
-        assertEquals(listOf("ev", "al"), keys(r2))
+        // отрыв меньше 100 удержал бы: идущая тренировка (1040) против таймера (1020) — 20
+        val c2 = listOf(card("t", live = listOf(Live("timer", "x"))), card("w", live = listOf(Live("workout", ""))))
+        val r2 = run(cfg(c2, true), snap(cal(12), timers = setOf("x"), workout = true, lastTop = "t"))
+        assertEquals("t", r2.topKey)
+        assertEquals(listOf("t", "w"), keys(r2))
+    }
+
+    @Test fun alarmSoon_beatsEventSoon_evenWhenEventOnTop() {
+        val now = cal(12).timeInMillis
+        val cards = listOf(card("ev", dyn = "event", at = now + 10 * min), card("al", alarmId = "AL1"))
+        // событие уже наверху, но будильник через 10 минут отрывается ровно на гистерезис и забирает верх
+        val r = run(cfg(cards, true), snap(cal(12), lastTop = "ev", alarms = mapOf("AL1" to now + 10 * min)))
+        assertEquals("al", r.topKey)
+        assertEquals(listOf("al", "ev"), keys(r))
+        assertEquals(QrPriority.SCORE_EVENT_SOON + QrPriority.HYSTERESIS, QrPriority.SCORE_ALARM_SOON)
+        // событие в окне часа, а будильник дальше 30 минут: наверху остаётся событие
+        val far = run(cfg(cards, true), snap(cal(12), lastTop = "ev", alarms = mapOf("AL1" to now + 45 * min)))
+        assertEquals("ev", far.topKey)
+        assertEquals(listOf("ev", "al"), keys(far))
     }
 
     @Test fun hysteresis_prevSignalEnded_replaced() {
@@ -407,12 +427,12 @@ class QrPriorityTest {
         // событие в 14:30 → «до события 60 мин» наступит в 13:30:01
         val ev = run(cfg(listOf(card("a"), card("e", dyn = "event", at = cal(14, 30).timeInMillis)), true), snap(c))
         assertEquals(cal(13, 30).timeInMillis + 1_000L, ev.nextChangeAt)
-        // будильник в 16:30 → 15:30:01 позже границы окон: остаётся граница
+        // будильник в 16:30 → 16:00:01 позже границы окон: остаётся граница
         val al = run(cfg(listOf(card("a"), card("b", alarmId = "AL1")), true), snap(c, alarms = mapOf("AL1" to cal(16, 30).timeInMillis)))
         assertEquals(boundary, al.nextChangeAt)
-        // будильник в 14:10 → 13:10:01
+        // будильник в 14:10 → «до будильника 30 мин» наступит в 13:40:01
         val al2 = run(cfg(listOf(card("a"), card("b", alarmId = "AL1")), true), snap(c, alarms = mapOf("AL1" to cal(14, 10).timeInMillis)))
-        assertEquals(cal(13, 10).timeInMillis + 1_000L, al2.nextChangeAt)
+        assertEquals(cal(13, 40).timeInMillis + 1_000L, al2.nextChangeAt)
         // задача сегодня в 12:40 → станет просроченной в 12:40:01
         val tk = run(cfg(listOf(card("a"), card("t", dyn = "task", at = cal(12, 40).timeInMillis, tid = "T")), true), snap(c))
         assertEquals(cal(12, 40).timeInMillis + 1_000L, tk.nextChangeAt)
@@ -508,10 +528,10 @@ class QrPriorityTest {
     }
 
     @Test fun prio_top_notRingingBypass() {
-        // «наверх» + будильник через 30 мин = 1100, как у звонящего, но это не звонок: гистерезис держит прежнюю верхнюю (таймер 1020, отрыв 80)
+        // «наверх» + будильник через 30 мин = 1150, выше звонящего (1100), но это не звонок: звонящий будильник другой карточки гистерезис не теряет (отрыв 50)
         val now = cal(12).timeInMillis
-        val cards = listOf(card("p", live = listOf(Live("timer", "x"))), card("q", alarmId = "AL1", prio = "top"))
-        val r = run(cfg(cards, true), snap(cal(12), timers = setOf("x"), alarms = mapOf("AL1" to now + 30 * min), lastTop = "p"))
+        val cards = listOf(card("p", alarmId = "AL2"), card("q", alarmId = "AL1", prio = "top"))
+        val r = run(cfg(cards, true), snap(cal(12), ringing = setOf("AL2"), alarms = mapOf("AL1" to now + 30 * min, "AL2" to now), lastTop = "p"))
         assertEquals("p", r.topKey)
         assertEquals(listOf("p", "q"), keys(r))
         // а звонящий будильник без «наверх» (1100) гистерезис обходит, как раньше
@@ -637,7 +657,10 @@ class QrPriorityTest {
         assertEquals(listOf("a7", "a"), keys(r))
         assertEquals("a7", r.topKey)
         assertEquals("Будильник через 30 мин", r.topReason)
-        // до звонка дальше часа — карточка не выделена
+        // до звонка дальше 30 минут — карточка не выделена
+        val mid = run(cf, snap(c, alarms = mapOf("id_a9" to now + 45 * 60_000L)).copy(alarmIndex = 0))
+        assertEquals(listOf("a", "a7"), keys(mid)) // 45 минут: раньше (за час) уже поднималась
+        assertEquals("", mid.topKey)
         val far = run(cf, snap(c, alarms = mapOf("id_a9" to now + 3 * hour)).copy(alarmIndex = 0))
         assertEquals(listOf("a", "a7"), keys(far))
         assertEquals("", far.topKey)
@@ -655,8 +678,23 @@ class QrPriorityTest {
         assertEquals("a7", r.topKey)
         assertEquals("Звонит будильник", r.topReason)
         assertEquals(now + 60_000L, r.nextChangeAt) // пока звонит — перепроверка через минуту
-        // заведённый на 15:00 а9 зазвонит позже: «скоро» наступит в 14:00:01 (раньше границы окон 15:00:05)
+        // заведённый на 15:00 а9 зазвонит позже: «скоро» наступит в 14:30:01 (раньше границы окон 15:00:05)
         val soon = run(cf, snap(c, alarms = mapOf("id_a9" to now + 3 * hour)).copy(alarmIndex = 0))
-        assertEquals(now + 2 * hour + 1_000L, soon.nextChangeAt)
+        assertEquals(now + 2 * hour + 30 * min + 1_000L, soon.nextChangeAt)
+    }
+
+    @Test fun alarmRow_soonBeatsEvent_evenWhenShownAnotherAlarm() {
+        val c = cal(12)
+        val now = c.timeInMillis
+        val cf = cfg(listOf(card("ev", dyn = "event", at = now + 20 * min), alarmCard("a7", 7, 0), alarmCard("a9", 21, 0)), relevance = true)
+        // событие наверху, показан a7 (листали), а зазвонит a9 через 20 минут: карточка будильников забирает верх у календаря
+        val s = snap(c, alarms = mapOf("id_a9" to now + 20 * min), lastTop = "ev").copy(alarmIndex = 0)
+        val r = run(cf, s)
+        assertEquals(listOf("a7", "ev"), keys(r))
+        assertEquals("a7", r.topKey)
+        assertEquals("Будильник через 20 мин", r.topReason)
+        // будильник дальше 30 минут — календарь остаётся наверху
+        val later = run(cf, snap(c, alarms = mapOf("id_a9" to now + 40 * min), lastTop = "ev").copy(alarmIndex = 0))
+        assertEquals("ev", later.topKey)
     }
 }

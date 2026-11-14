@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.2 (14.11) — будильник «скоро» поднимает карточку за 30 минут, а не за час ([ALARM_SOON_MS]); балл [SCORE_ALARM_SOON] выше события «скоро» на гистерезис, чтобы будильник перебивал календарь.
 // Версия: 4.1 (14.11) — карточка «Будильники» (dyn = "alarm"): одна на все будильники пользователя, листается у краёв как события и задачи ([alarmCards], [nextAlarmKey]).
 // Версия: 4.0 (14.11)
 
@@ -33,8 +34,11 @@ object QrPriority {
     const val SCORE_STOPWATCH = 1010
     /** Звонит будильник карточки: выше любых занятий; гистерезис не держит прежнюю верхнюю карточку. */
     const val SCORE_ALARM_RINGING = 1100
-    /** Будильник карточки сработает в ближайшие [SOON_MS] (заведённый позже — 0). */
-    const val SCORE_ALARM_SOON = 800
+    /**
+     * Будильник карточки сработает в ближайшие [ALARM_SOON_MS] (заведённый позже — 0). Выше [SCORE_EVENT_SOON] ровно на [HYSTERESIS] (750 + 100):
+     * иначе событие, уже стоящее наверху, удерживалось бы гистерезисом и будильник не мог его заменить.
+     */
+    const val SCORE_ALARM_SOON = 850
     /** Событие календаря начнётся в ближайшие [SOON_MS]. */
     const val SCORE_EVENT_SOON = 750
     /** Задача календаря просрочена. */
@@ -51,8 +55,10 @@ object QrPriority {
     /** Ручной приоритет «вниз»: балл не выше нуля — на единицу ниже обычных карточек без сигналов, чтобы карточка действительно стояла после них. */
     const val SCORE_LOW = -1
 
-    /** «Скоро»: за сколько до будильника или события оно поднимает карточку. */
+    /** «Скоро» для события календаря: за сколько до начала оно поднимает карточку. */
     const val SOON_MS = 60L * 60_000L
+    /** «Скоро» для будильника: за сколько до звонка он поднимает карточку (любой из будильников ряда, что бы ни было показано). */
+    const val ALARM_SOON_MS = 30L * 60_000L
     /** Новая верхняя карточка заменяет прежнюю, если её балл выше минимум на столько. */
     const val HYSTERESIS = 100
     /** Пока звонит будильник, порядок перепроверяется с этим шагом (смахнутое уведомление и его таймаут не присылают события). */
@@ -102,7 +108,7 @@ object QrPriority {
         val anchorKey: String,
         /**
          * Когда порядок может измениться без внешнего события (только при «релевантности»; иначе [Long.MAX_VALUE]): ближайшее из границы окон времени
-         * суток, «до события 60 мин», «до будильника 60 мин», времени задачи на сегодня (станет просроченной), а пока звонит будильник — через минуту.
+         * суток, «до события 60 мин», «до будильника 30 мин», времени задачи на сегодня (станет просроченной), а пока звонит будильник — через минуту.
          */
         val nextChangeAt: Long,
         /** Верхняя карточка по релевантности без «Как тренировка?» — её оболочка запоминает как [Snapshot.lastTopKey] для следующего расчёта. */
@@ -237,12 +243,12 @@ object QrPriority {
                 if (at0 >= s.now && at0 < tomorrow) soon(at0 + 1_000L) // станет просроченной
             }
             if (c.alarmId.isNotEmpty() && c.dyn != "alarm") {
-                s.alarms[c.alarmId]?.let { soon(it - SOON_MS + 1_000L) }
+                s.alarms[c.alarmId]?.let { soon(it - ALARM_SOON_MS + 1_000L) }
                 if (c.alarmId in s.ringingAlarmIds) soon(s.now + RINGING_POLL_MS)
             }
         }
         for (c in alarmCards(cfg, s)) { // карточка «Будильники»: показан один будильник, а балл зависит от всех
-            s.alarms[c.alarmId]?.let { soon(it - SOON_MS + 1_000L) }
+            s.alarms[c.alarmId]?.let { soon(it - ALARM_SOON_MS + 1_000L) }
             if (c.alarmId in s.ringingAlarmIds) soon(s.now + RINGING_POLL_MS)
         }
         return at
@@ -335,7 +341,7 @@ object QrPriority {
 
     /**
      * Балл карточки «Будильники» (один на весь ряд, чтобы листание не двигало карточку в стопке): звонит любой — [SCORE_ALARM_RINGING], иначе какой-то
-     * заведённый зазвонит в ближайшие [SOON_MS] — [SCORE_ALARM_SOON]; null — сигналов нет.
+     * заведённый зазвонит в ближайшие [ALARM_SOON_MS] — [SCORE_ALARM_SOON]; null — сигналов нет.
      */
     private fun alarmRowScore(cfg: Cfg, s: Snapshot): Pair<Int, String>? {
         val list = alarmCards(cfg, s)
@@ -344,7 +350,7 @@ object QrPriority {
         var soonest = Long.MAX_VALUE
         for (c in list) {
             val d = (s.alarms[c.alarmId] ?: continue) - s.now
-            if (d in 0..SOON_MS && d < soonest) soonest = d
+            if (d in 0..ALARM_SOON_MS && d < soonest) soonest = d
         }
         return if (soonest == Long.MAX_VALUE) null else Pair(SCORE_ALARM_SOON, "Будильник " + inMinutes(soonest))
     }
@@ -401,7 +407,7 @@ object QrPriority {
             if (c.alarmId in s.ringingAlarmIds) cand(SCORE_ALARM_RINGING, "Звонит будильник")
             else s.alarms[c.alarmId]?.let { at ->
                 val d = at - s.now
-                if (d in 0..SOON_MS) cand(SCORE_ALARM_SOON, "Будильник " + inMinutes(d))
+                if (d in 0..ALARM_SOON_MS) cand(SCORE_ALARM_SOON, "Будильник " + inMinutes(d))
             }
         }
         if (c.dyn == "event") {
