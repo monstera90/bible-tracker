@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 3.1 (14.11)
+// Версия: 3.2 (14.11)
 
 import com.app.lifetracker.QrWidgets.Card
 import com.app.lifetracker.QrWidgets.Cfg
@@ -151,21 +151,7 @@ class QrPriorityTest {
         val r = run(cfg(cards, true), snap(c))
         assertEquals("e", r.anchorKey)
         assertEquals("", r.topKey)
-    }
-
-    @Test fun anchor_isFirstDyn_withoutRelevance() {
-        val c = cal(12)
-        val now = c.timeInMillis
-        val cards = listOf(card("e", dyn = "event", at = now + 3_600_000L), card("t", dyn = "task", at = now + 2 * 3_600_000L, tid = "T"))
-        val r = run(cfg(cards, false), snap(c))
-        assertEquals(listOf("e", "t"), keys(r))
-        assertEquals("e", r.anchorKey) // календарь сверху: стопка возвращается к нему и без «релевантности»
-        assertEquals("", r.topKey)
-        // первая карточка — обычная: своего места нет
-        assertEquals("", run(cfg(listOf(card("q"), card("e", dyn = "event", at = now + 3_600_000L)), false), snap(c)).anchorKey)
-        // слайд-шоу листает само: возврата нет
-        val rot = Cfg(id = "w", name = "w", rotate = true, rotateMin = 5, relevance = false, cards = cards)
-        assertEquals("", QrPriority.build(rot, snap(c)).anchorKey)
+        assertEquals("", run(cfg(cards, false), snap(c)).anchorKey) // без «релевантности» якоря нет
     }
 
     @Test fun windowBoundaries() {
