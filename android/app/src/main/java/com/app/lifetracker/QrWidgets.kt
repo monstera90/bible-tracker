@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 13.3 (14.11)
+// Версия: 13.4 (14.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -1313,15 +1313,14 @@ object QrWidgets {
         if (anchor.isEmpty() || res.cards.size < 2) return
         suppressSwipe(id)
         dotsOn.remove(id)
-        val rv = RemoteViews(app.packageName, R.layout.qr_widget)
-        rv.setDisplayedChild(R.id.qr_stack, 0)
-        rv.setViewVisibility(R.id.qr_dots, android.view.View.GONE)
-        AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
         synchronized(LOCK) {
             val t = jmap(app, K_TOP)
             t.put(id.toString(), anchor)
             prefs(app).edit().putString(K_TOP, t.toString()).apply()
         }
+        // ОДНО полное обновление с пересозданием адаптера (как в onCardFired): сброс положения идёт в том же RemoteViews, что и данные.
+        // Прежний возврат одним partiallyUpdateAppWidget(setDisplayedChild(0)) у смахнутой стопки не срабатывал — позицию StackView он не менял.
+        update(app, AppWidgetManager.getInstance(app), id, true, true)
     }
 
     /** Полупрозрачный «скелет» карточки — показывается вместо пустого места, пока система подгружает карточку. */
