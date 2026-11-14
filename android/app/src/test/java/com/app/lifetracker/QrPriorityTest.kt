@@ -139,9 +139,23 @@ class QrPriorityTest {
         val h = 3_600_000L
         val cards = listOf(card("q"), card("e", dyn = "event", at = now + h), card("t", dyn = "task", at = now + 2 * h, tid = "T"))
         val r = run(cfg(cards, true), snap(c))
-        assertEquals(listOf("q", "e", "t"), keys(r))
-        assertEquals("", r.topKey)
-        assertEquals("", r.anchorKey) // первая карточка — не событие: «своего места» нет
+        assertEquals(listOf("e", "t", "q"), keys(r)) // событие поднято над задачей на сегодня (календарь важнее задач)
+        assertEquals("e", r.topKey)
+        assertEquals("e", r.anchorKey)
+    }
+
+    @Test fun calendarAboveTasks_evenIfEventFar_andPrevTopWasTask() {
+        val c = cal(12)
+        val now = c.timeInMillis
+        val cards = listOf(
+            card("t1", dyn = "task", at = now - hour, tid = "A"), card("t2", dyn = "task", at = now + 2 * hour, tid = "B"),
+            card("e", dyn = "event", at = now + 30 * hour), card("q")
+        )
+        // прежней верхней была просроченная задача (650): гистерезис не должен оставлять её наверху
+        val r = run(cfg(cards, true), snap(c, lastTop = "t1"))
+        assertEquals(listOf("e", "t1", "t2", "q"), keys(r))
+        assertEquals("e", r.anchorKey)
+        assertEquals(QrPriority.SCORE_TASK_OVERDUE + QrPriority.HYSTERESIS, scoreOf(r, "e"))
     }
 
     @Test fun anchor_isFirstDyn_whenNoRecommended() {

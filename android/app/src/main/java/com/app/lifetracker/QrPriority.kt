@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 3.2 (14.11)
+// Версия: 3.3 (14.11)
 
 import com.app.lifetracker.QrWidgets.Card
 import com.app.lifetracker.QrWidgets.Cfg
@@ -124,6 +124,7 @@ object QrPriority {
                     val sc = scoreOf(c, s)
                     scored.add(Scored(c, sc.first, sc.second))
                 }
+                lift(scored)
                 // sortedWith устойчивая: при равных баллах остаётся порядок пользователя; события и заряд уточняет tidy
                 val sorted = ArrayList(tidy(scored.sortedWith(compareByDescending<Scored> { it.score })))
                 if (sorted.first().score > 0) top = sorted.first().card.key
@@ -139,6 +140,22 @@ object QrPriority {
         val next = if (cfg.relevance) nextChange(base, s) else Long.MAX_VALUE
         val topScored: Scored? = if (s.rpePending) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
         return Result(out, topKey, anchorOf(cfg, s, main, top), next, top, topScored?.card?.title ?: "", topScored?.reason ?: "")
+    }
+
+    /**
+     * Событие календаря важнее задач: если в стопке есть задача с баллом, событие получает балл самой «сильной» задачи плюс [HYSTERESIS] (иначе
+     * удержание прежней верхней карточки оставило бы наверху задачу). Раньше событие дальше часа до начала имело балл 0 и стояло ниже любой задачи
+     * на сегодня — новый виджет вставал на задаче, а не на календаре. Более высокие баллы события («скоро», приоритет «наверх») не трогаются.
+     */
+    private fun lift(scored: MutableList<Scored>) {
+        var maxTask = 0
+        for (x in scored) if (x.card.dyn == "task" && x.score > maxTask) maxTask = x.score
+        if (maxTask <= 0) return
+        val want = maxTask + HYSTERESIS
+        for (i in scored.indices) {
+            val x = scored[i]
+            if (x.card.dyn == "event" && x.score < want) scored[i] = Scored(x.card, want, "Календарь выше задач")
+        }
     }
 
     /**

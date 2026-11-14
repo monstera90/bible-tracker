@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 13.4 (14.11)
+// Версия: 13.5 (14.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -101,6 +101,7 @@ object QrWidgets {
     private const val K_BTASK = "btask"
     private const val K_BTASKAT = "btaskat"
     private const val K_RETURN = "ret"
+    private const val K_RETFIRST = "retfirst" // id виджета → время первого смахивания в текущей серии (потолок откладывания возврата)
     private const val K_AEV = "alarmEv"       // очередь: заведённые/выключенные нажатием в виджете будильники — страница запишет их в журнал событий
     private const val K_AEVSEQ = "alarmEvSeq"
     private const val AEV_MAX = 50
@@ -117,6 +118,8 @@ object QrWidgets {
     private const val PEND_TTL_MS = 3 * 60_000L
     private const val DOTS_SHOW_MS = 1400L
     private const val RETURN_AFTER_MS = 60_000L
+    /** Возврат наверх не откладывается дольше этого от первого смахивания серии, сколько бы раз фабрику ни дёргали. */
+    private const val RETURN_MAX_DEFER_MS = 3 * 60_000L
     private const val SWIPE_QUIET_MS = 4_000L
     private const val BATTERY_EVERY_MS = 5 * 60_000L
 
@@ -832,16 +835,25 @@ object QrWidgets {
 
     fun update(ctx: Context, mgr: AppWidgetManager, id: Int, resetTop: Boolean = false, rebuild: Boolean = false) {
         val app = ctx.applicationContext
-        if (!isBound(app, id)) claimPending(app, id)
+        val wasBound = isBound(app, id)
+        if (!wasBound) claimPending(app, id)
+        val fresh = !wasBound && isBound(app, id) // виджет только что положили на экран: стопка обязана стоять на первой карточке порядка
         val cfg = cfgFor(app, id)
         if (cfg != null && cfg.anyBattery) QrBattery.register(app)
         val rv = RemoteViews(app.packageName, R.layout.qr_widget)
         applyHostLayout(app, rv, hostSizeDp(app, mgr, id))
+        // Нужно ли поставить стопку на верхнюю карточку. Одиночный setDisplayedChild(0) у уже смахнутой стопки позицию не менял (так «возврат» молча не срабатывал),
+        // поэтому любой сброс наверх — всегда полное пересоздание адаптера (то же, что в onCardFired, там это работает).
+        val topNew = if (cfg != null && (cfg.relevance || cfg.rpeAsk)) plan(app, cfg).anchorKey else ""
+        val topOld = jmap(app, K_TOP).optString(id.toString(), "")
+        val trackTop = cfg != null && (cfg.relevance || cfg.rpeAsk)
+        val moveTop = fresh || (trackTop && (resetTop || topNew != topOld))
+        val doRebuild = rebuild || moveTop
         val svc = Intent(app, QrWidgetService::class.java)
         svc.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
         // rebuild: новая версия адаптера (другой intent — система создаёт RemoteViewsAdapter и фабрику заново); иначе версия прежняя и адаптер живёт
         val rev = synchronized(adapterRev) {
-            if (rebuild) adapterRev[id] = (adapterRev[id] ?: 0) + 1
+            if (doRebuild) adapterRev[id] = (adapterRev[id] ?: 0) + 1
             adapterRev[id] ?: 0
         }
         svc.putExtra("rev", rev)
@@ -866,21 +878,15 @@ object QrWidgets {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
         rv.setPendingIntentTemplate(R.id.qr_stack, PendingIntent.getActivity(app, id, tpl, flags))
 
-        if (rebuild) {
+        if (doRebuild) {
             rv.setDisplayedChild(R.id.qr_stack, 0) // тем же обновлением, что и данные: стопка показывает первую карточку
             clearReturn(app, id)
         }
-        if (cfg != null && (cfg.relevance || cfg.rpeAsk)) {
-            val topNew = plan(app, cfg).anchorKey
-            val topOld = jmap(app, K_TOP).optString(id.toString(), "")
-            if (resetTop || topNew != topOld) {
-                rv.setDisplayedChild(R.id.qr_stack, 0)
-                clearReturn(app, id)
-                synchronized(LOCK) {
-                    val t = jmap(app, K_TOP)
-                    t.put(id.toString(), topNew)
-                    prefs(app).edit().putString(K_TOP, t.toString()).apply()
-                }
+        if (trackTop && (moveTop || topNew != topOld)) {
+            synchronized(LOCK) {
+                val t = jmap(app, K_TOP)
+                t.put(id.toString(), topNew)
+                prefs(app).edit().putString(K_TOP, t.toString()).apply()
             }
         }
         suppressSwipe(id) // перерисовка и перезагрузка карточек — не смахивание
@@ -1232,6 +1238,13 @@ object QrWidgets {
         if (n < 2 || swipeSuppressed(id)) return
         val app = ctx.applicationContext
         main.post {
+            // Возврат наверх взводим ПЕРВЫМ и отдельно: сбой при рисовании точек (виджет удалили, лаунчер не принял обновление) раньше глотался общим catch
+            // и до armReturn дело не доходило — стопка не возвращалась никогда.
+            try {
+                armReturn(app, id)
+            } catch (e: Exception) {
+                Log.e("QrReturn", "armReturn: " + e)
+            }
             try {
                 if (dotsOn.add(id)) {
                     val rv = RemoteViews(app.packageName, R.layout.qr_widget)
@@ -1239,7 +1252,6 @@ object QrWidgets {
                     AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
                 }
                 scheduleHide(app, id)
-                armReturn(app, id)
             } catch (e: Exception) {
                 // виджет удалили
             }
@@ -1254,12 +1266,21 @@ object QrWidgets {
         if (!cfg.relevance && !cfg.rpeAsk) return
         val res = plan(app, cfg)
         if (res.anchorKey.isEmpty() || res.cards.size < 2) return
-        val due = System.currentTimeMillis() + RETURN_AFTER_MS
-        synchronized(LOCK) {
+        val now = System.currentTimeMillis()
+        // Каждое смахивание отодвигает возврат на минуту, но не дальше RETURN_MAX_DEFER_MS от первого: если система сама дёргает фабрику
+        // (перерисовка, перезагрузка карточек), «смахивания» шли бы без конца и возврат откладывался бы вечно.
+        val due = synchronized(LOCK) {
             val m = jmap(app, K_RETURN)
-            m.put(id.toString(), due)
-            prefs(app).edit().putString(K_RETURN, m.toString()).apply()
+            val f = jmap(app, K_RETFIRST)
+            val first = if (m.optLong(id.toString(), 0L) > 0L && f.optLong(id.toString(), 0L) > 0L) f.optLong(id.toString(), 0L) else now
+            val d = Math.max(now + 1_000L, Math.min(now + RETURN_AFTER_MS, first + RETURN_MAX_DEFER_MS))
+            m.put(id.toString(), d)
+            f.put(id.toString(), first)
+            prefs(app).edit().putString(K_RETURN, m.toString()).putString(K_RETFIRST, f.toString()).apply()
+            d
         }
+        Log.d("QrReturn", "armed id=" + id + " in " + (due - now) + " ms, anchor=" + res.anchorKey)
+        val delay = Math.max(1_000L, due - now)
         // точно по времени — пока жив процесс; будильник — запасной (процесс могли выгрузить)
         val token = synchronized(returnTokens) { returnTokens.getOrPut(id) { Any() } }
         main.removeCallbacksAndMessages(token)
@@ -1267,9 +1288,9 @@ object QrWidgets {
             try {
                 fireReturn(app, id)
             } catch (e: Exception) {
-                // виджет удалили
+                Log.e("QrReturn", "fireReturn: " + e)
             }
-        }, token, SystemClock.uptimeMillis() + RETURN_AFTER_MS)
+        }, token, SystemClock.uptimeMillis() + delay)
         returnPi(app, id, true)?.let { setAlarm(app, due + 3_000L, it) }
     }
 
@@ -1277,9 +1298,11 @@ object QrWidgets {
     private fun clearReturn(app: Context, id: Int) {
         synchronized(LOCK) {
             val m = jmap(app, K_RETURN)
-            if (m.has(id.toString())) {
+            val f = jmap(app, K_RETFIRST)
+            if (m.has(id.toString()) || f.has(id.toString())) {
                 m.remove(id.toString())
-                prefs(app).edit().putString(K_RETURN, m.toString()).apply()
+                f.remove(id.toString())
+                prefs(app).edit().putString(K_RETURN, m.toString()).putString(K_RETFIRST, f.toString()).apply()
             }
         }
         val token = synchronized(returnTokens) { returnTokens[id] }
@@ -1293,14 +1316,17 @@ object QrWidgets {
         val now = System.currentTimeMillis()
         val due = synchronized(LOCK) {
             val m = jmap(app, K_RETURN)
+            val f = jmap(app, K_RETFIRST)
             val d = m.optLong(id.toString(), 0L)
             if (d > 0L && now >= d - 500L) {
                 m.remove(id.toString())
-                prefs(app).edit().putString(K_RETURN, m.toString()).apply()
+                f.remove(id.toString())
+                prefs(app).edit().putString(K_RETURN, m.toString()).putString(K_RETFIRST, f.toString()).apply()
                 d
             } else 0L
         }
         if (due == 0L) return
+        Log.d("QrReturn", "fire id=" + id)
         returnToTop(app, id)
     }
 
