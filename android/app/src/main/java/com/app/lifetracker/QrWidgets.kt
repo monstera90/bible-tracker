@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 14.3 (14.11) — галочка «Спрашивать о настроении» (`moodAsk`): служебная карточка «Как настроение?» ([QrMood]) — по правилам «Как тренировка?»: над всеми обычными карточками, под «Как тренировка?»; появляется в 20:30, если настроение сегодня не отмечено ([nextDynChange], [onMoodChanged]).
 // Версия: 14.2 (14.11) — слайд-шоу листает стопку через showPrevious: позиции стопки теперь идут в обратном порядке ([QrWidgetService]), иначе оно шло бы по карточкам назад.
 // Версия: 14.1 (14.11) — галочка «Показывать будильники» (`alarms`, список `alm`): одна карточка со всеми будильниками, листается у краёв ([alarmNav]).
 // Версия: 14.0 (14.11)
@@ -87,6 +88,10 @@ import java.util.UUID
  * Галочка «Спрашивать о тренировке» (`rpeAsk` у виджета): пока есть тренировка без оценки нагрузки ([QrRpe.pendingId]), над ВСЕМИ карточками стоит служебная
  * карточка [QrRpe.KEY] «Как тренировка?» с кнопками 1…10 ([QrPriority.build], [order]); ответ ложится в очередь [QrRpe.answer], карточка исчезает. Наверх она возвращается
  * по тому же правилу, что и рекомендованная ([QrPriority.Result.anchorKey]), даже без «релевантности»; порядок остальных карточек от неё не зависит; слайд-шоу на это время стоит ([rotate]).
+ *
+ * Галочка «Спрашивать о настроении» (`moodAsk` у виджета): вечером с 20:30, если за сегодня не было ни одной отметки настроения ([QrMood.pending]), над всеми обычными карточками стоит служебная
+ * карточка [QrMood.KEY] «Как настроение?» с восемью эмодзи-кнопками; приоритет тот же, что у «Как тренировка?» (выше календаря), а если ждут обе — «Как тренировка?» выше. Ответ ложится в очередь
+ * [QrMood.answer], карточка сразу исчезает; в полночь уходит, не дожидаясь ответа. Верх, возврат наверх и остановка слайд-шоу — как у «Как тренировка?».
  *
  * Возврат наверх («по релевантности», [armReturn]/[fireReturn]): если пользователь смахнул стопку, а наверху лежит рекомендованная
  * карточка (идёт занятие или сейчас «её» время суток — [Ordered.topKey]) либо карточка события/задачи календаря ([QrPriority.Result.anchorKey]), то через минуту
@@ -182,7 +187,7 @@ object QrWidgets {
     class AlarmSpec(val hour: Int, val minute: Int, val every: Int, val times: Int, val title: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
     class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal")
-    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false) {
+    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
     }
@@ -256,6 +261,7 @@ object QrWidgets {
                 val tasksOn = o.optBoolean("tasks", false)
                 val eventsOn = o.optBoolean("events", false)
                 val rpeAskOn = o.optBoolean("rpeAsk", false)
+                val moodAskOn = o.optBoolean("moodAsk", false)
                 val ds = o.optJSONArray("dyn")
                 if (ds != null && (tasksOn || eventsOn)) {
                     val evs = ArrayList<Card>()
@@ -299,7 +305,7 @@ object QrWidgets {
                 out.add(
                     Cfg(
                         id, o.optString("name", "Виджет"), o.optBoolean("rotate", false),
-                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn, alarmsOn
+                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn, alarmsOn, moodAskOn
                     )
                 )
             }
@@ -471,6 +477,7 @@ object QrWidgets {
 
     fun bitmapFor(ctx: Context, c: Card): Bitmap {
         if (c.key == QrRpe.KEY) return QrRpe.render(ctx, c.color)
+        if (c.key == QrMood.KEY) return QrMood.render(ctx, c.color)
         if (c.key == QrBattery.KEY) return QrBattery.render(ctx, c.color)
         if (c.key == QrBattery.KEY2) return QrBattery.renderMulti(ctx, c.color)
         if (c.dyn == "event" || c.dyn == "task") dynBitmap(ctx, c)?.let { return it }
@@ -571,6 +578,7 @@ object QrWidgets {
             for (c in cfg.cards) if ((c.dyn == "event" || c.dyn == "task") && c.at > now && c.at + 1_000L < at) at = c.at + 1_000L
         }
         if (cfg.relevance) at = Math.min(at, plan(ctx, cfg).nextChangeAt)
+        if (cfg.moodAsk) at = Math.min(at, QrMood.nextChangeAt(now)) // 20:30 — «Как настроение?» появится, полночь — уйдёт
         if (cfg.events) eventResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // пролистанный ряд событий вернётся к первому
         if (cfg.tasks) rowResetAt(ctx, K_TKIDX, cfg.id, now)?.let { at = Math.min(at, it) } // то же для ряда задач
         if (cfg.alarms) alarmResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // и для ряда будильников
@@ -883,6 +891,12 @@ object QrWidgets {
     /** «Как тренировка?» ждёт оценки: у виджета включено «Спрашивать о тренировке» и есть запись без оценки. */
     private fun rpePending(ctx: Context, cfg: Cfg): Boolean = cfg.rpeAsk && QrRpe.pendingId(ctx).isNotEmpty()
 
+    /** «Как настроение?» ждёт отметки: у виджета включено «Спрашивать о настроении», время 20:30 наступило и сегодня настроение не отмечали. */
+    private fun moodPending(ctx: Context, cfg: Cfg): Boolean = cfg.moodAsk && QrMood.pending(ctx)
+
+    /** Какая-нибудь из служебных карточек («Как тренировка?», «Как настроение?») сейчас стоит наверху стопки этого виджета. */
+    private fun servicePending(ctx: Context, cfg: Cfg): Boolean = rpePending(ctx, cfg) || moodPending(ctx, cfg)
+
     /** Собирает из источников оболочки всё, что нужно [QrPriority] для расчёта порядка виджета [cfg]. Живые занятия читаются только при «релевантности». */
     private fun snapshot(ctx: Context, cfg: Cfg): QrPriority.Snapshot {
         val now = System.currentTimeMillis()
@@ -917,6 +931,7 @@ object QrWidgets {
             movedAt = moved,
             doneTaskIds = doneTaskIds(ctx),
             rpePending = rpePending(ctx, cfg),
+            moodPending = moodPending(ctx, cfg),
             eventIndex = if (cfg.events) eventIndexOf(ctx, cfg.id, now) else 0,
             taskIndex = if (cfg.tasks) rowIndexOf(ctx, K_TKIDX, cfg.id, now) else 0,
             alarmIndex = if (cfg.alarms) alarmIndexOf(ctx, cfg.id, now) else -1,
@@ -981,7 +996,7 @@ object QrWidgets {
     fun visibleCount(ctx: Context, cfg: Cfg): Int = QrPriority.visibleCount(cfg, snapshot(ctx, cfg))
 
     /** Все карточки виджета скрыты («На сегодня больше ничего»). */
-    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = (cfg.cards.isNotEmpty() || cfg.tasks || cfg.events || cfg.alarms || cfg.rpeAsk) && visibleCount(ctx, cfg) == 0
+    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = (cfg.cards.isNotEmpty() || cfg.tasks || cfg.events || cfg.alarms || cfg.rpeAsk || cfg.moodAsk) && visibleCount(ctx, cfg) == 0
 
     /**
      * Действие карточки [cardKey] сработало (нажатие в виджете, в приложении или скан): у карточек с «после срабатывания» = «скрывать» она
@@ -1047,9 +1062,9 @@ object QrWidgets {
         applyHostLayout(app, rv, hostSizeDp(app, mgr, id))
         // Нужно ли поставить стопку на верхнюю карточку. Одиночный setDisplayedChild(0) у уже смахнутой стопки позицию не менял (так «возврат» молча не срабатывал),
         // поэтому любой сброс наверх — всегда полное пересоздание адаптера (то же, что в onCardFired, там это работает).
-        val topNew = if (cfg != null && (cfg.relevance || cfg.rpeAsk)) plan(app, cfg).anchorKey else ""
+        val topNew = if (cfg != null && (cfg.relevance || cfg.rpeAsk || cfg.moodAsk)) plan(app, cfg).anchorKey else ""
         val topOld = jmap(app, K_TOP).optString(id.toString(), "")
-        val trackTop = cfg != null && (cfg.relevance || cfg.rpeAsk)
+        val trackTop = cfg != null && (cfg.relevance || cfg.rpeAsk || cfg.moodAsk)
         val moveTop = fresh || (trackTop && (resetTop || topNew != topOld))
         val doRebuild = rebuild || moveTop
         val svc = Intent(app, QrWidgetService::class.java)
@@ -1219,6 +1234,19 @@ object QrWidgets {
         }
     }
 
+    /**
+     * Настроение отмечено (кнопкой карточки в виджете или в приложении — страница сообщила время последней отметки): виджеты с галочкой «Спрашивать о настроении»
+     * перерисовываются — карточка «Как настроение?» уходит (или встаёт наверх, если отметку удалили до 20:30 следующего дня и т. п.); стопка показывает верхнюю карточку.
+     */
+    fun onMoodChanged(ctx: Context) {
+        val app = ctx.applicationContext
+        try {
+            if (configs(app).any { it.moodAsk }) refreshAll(app)
+        } catch (e: Exception) {
+            // обновление виджета не должно ронять приложение
+        }
+    }
+
     // ---------- слайд-шоу и границы времени суток ----------
 
     private fun am(ctx: Context) = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -1283,7 +1311,7 @@ object QrWidgets {
         for (id in ids) {
             val cfg = cfgFor(app, id)
             if (cfg != null && cfg.anyBattery) anyBattery = true
-            if (cfg != null && (cfg.tasks || cfg.events || cfg.relevance)) dynAt = Math.min(dynAt, nextDynChange(app, cfg))
+            if (cfg != null && (cfg.tasks || cfg.events || cfg.relevance || cfg.moodAsk)) dynAt = Math.min(dynAt, nextDynChange(app, cfg))
             if (cfg != null && cfg.rotate && visibleCount(app, cfg) > 1) {
                 if (force || rotatePi(app, id, false) == null) {
                     cancelRotate(app, id)
@@ -1391,7 +1419,7 @@ object QrWidgets {
         val cfg = cfgFor(app, id) ?: return
         if (!cfg.rotate || visibleCount(app, cfg) < 2) return
         val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (screenOn(pm) && !rpePending(app, cfg)) { // пока висит «Как тренировка?», слайд-шоу стопку не листает
+        if (screenOn(pm) && !servicePending(app, cfg)) { // пока висит «Как тренировка?» или «Как настроение?», слайд-шоу стопку не листает
             val rv = RemoteViews(app.packageName, R.layout.qr_widget)
             rv.showPrevious(R.id.qr_stack) // позиции стопки идут в обратную сторону (QrWidgetService.getViewAt): «позиция − 1» — это следующая карточка
             suppressSwipe(id)
@@ -1487,7 +1515,7 @@ object QrWidgets {
             val on = screenOn(pm)
             for (id in ids) {
                 val cfg = cfgFor(app, id) ?: continue
-                if (!cfg.relevance && !cfg.rpeAsk) continue
+                if (!cfg.relevance && !cfg.rpeAsk && !cfg.moodAsk) continue
                 again = true
                 if (!on || id in returnWorked) continue
                 val pending = synchronized(LOCK) { jmap(app, K_RETURN).optLong(id.toString(), 0L) > 0L }
@@ -1513,7 +1541,7 @@ object QrWidgets {
     /** Взводит возврат стопки наверх через [RETURN_AFTER_MS] (каждое новое смахивание отодвигает его). Только «по релевантности» и только если есть рекомендованная карточка. */
     private fun armReturn(app: Context, id: Int) {
         val cfg = cfgFor(app, id) ?: return
-        if (!cfg.relevance && !cfg.rpeAsk) return
+        if (!cfg.relevance && !cfg.rpeAsk && !cfg.moodAsk) return
         val res = plan(app, cfg)
         if (res.anchorKey.isEmpty() || res.cards.size < 2) return
         val now = System.currentTimeMillis()
@@ -1584,7 +1612,7 @@ object QrWidgets {
     /** Показывает в стопке верхнюю карточку порядка [order] — рекомендованную или более важную, чем та, на которой остановился пользователь. */
     private fun returnToTop(app: Context, id: Int) {
         val cfg = cfgFor(app, id) ?: return
-        if (!cfg.relevance && !cfg.rpeAsk) return
+        if (!cfg.relevance && !cfg.rpeAsk && !cfg.moodAsk) return
         val res = plan(app, cfg)
         val anchor = res.anchorKey
         if (anchor.isEmpty() || res.cards.size < 2) return

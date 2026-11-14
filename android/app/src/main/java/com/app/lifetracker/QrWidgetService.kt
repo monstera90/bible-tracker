@@ -87,6 +87,10 @@ class QrWidgetService : RemoteViewsService() {
             val isRpe = c.key == QrRpe.KEY
             rv.setViewVisibility(R.id.rpe_grid, if (isRpe) View.VISIBLE else View.GONE)
             if (isRpe) for (i in RPE_BUTTONS.indices) rv.setOnClickFillInIntent(RPE_BUTTONS[i], Intent().putExtra("rpe", i + 1))
+            // «Как настроение?»: восемь прозрачных зон-кнопок с эмодзи, у каждой свой номер 0…7 в fill-in intent (ScanActivity ловит его без окна); у остальных зоны скрыты
+            val isMood = c.key == QrMood.KEY
+            rv.setViewVisibility(R.id.mood_grid, if (isMood) View.VISIBLE else View.GONE)
+            if (isMood) for (i in MOOD_BUTTONS.indices) rv.setOnClickFillInIntent(MOOD_BUTTONS[i], Intent().putExtra("mood", i))
             // карточка события: три зоны поверх лица (видимость задаётся всегда — элемент списка может быть переиспользован)
             val isEv = c.dyn == "event"
             val isTk = c.dyn == "task"
@@ -113,7 +117,7 @@ class QrWidgetService : RemoteViewsService() {
                 rv.setOnClickFillInIntent(R.id.ev_center, Intent().putExtra("evopen", c.eid).putExtra("evat", c.at))
             }
             // карточки заряда — не QR-карточки: нажатие на них ничего не делает; у задач — своё (ниже) (без fill-in intent шаблон не срабатывает)
-            if (!isRpe && !QrBattery.isBatteryKey(c.key) && c.dyn.isEmpty()) {
+            if (!isRpe && !isMood && !QrBattery.isBatteryKey(c.key) && c.dyn.isEmpty()) {
                 val fill = Intent().putExtra("key", c.key).putExtra("habit", c.habit)
                 // будильник: ScanActivity заводит/выключает его сама, без окна и страницы (`alarm`); нет настроек от страницы — прежний путь (`alarmmark:<id>`)
                 if (c.alarmId.isNotEmpty() && c.alarmSpec != null) fill.putExtra("alarm", c.key)
@@ -143,6 +147,12 @@ class QrWidgetService : RemoteViewsService() {
             private val RPE_BUTTONS = intArrayOf(
                 R.id.rpe_b1, R.id.rpe_b2, R.id.rpe_b3, R.id.rpe_b4, R.id.rpe_b5,
                 R.id.rpe_b6, R.id.rpe_b7, R.id.rpe_b8, R.id.rpe_b9, R.id.rpe_b10
+            )
+
+            /** Зоны кнопок-эмодзи карточки «Как настроение?» (layout/qr_widget_item.xml). */
+            private val MOOD_BUTTONS = intArrayOf(
+                R.id.mood_b1, R.id.mood_b2, R.id.mood_b3, R.id.mood_b4,
+                R.id.mood_b5, R.id.mood_b6, R.id.mood_b7, R.id.mood_b8
             )
 
             /** Во сколько раз счётчик больше числа карточек (при двух и больше): позиции «по кругу», карточка = (−позиция) % число (в обратную сторону, см. getViewAt). */

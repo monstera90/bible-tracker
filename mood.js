@@ -1,5 +1,6 @@
 /* ===========================================================================
    mood.js
+   Версия: 1.3 (14.11) — карточка «Как настроение?» в виджетах рабочего стола (мост ≥37): `syncWidgetMood` / `syncWidgetMoodSoon` сообщают оболочке время последней отметки настроения, `drainWidgetMood` вносит в журнал (`moodlog:`) настроения, отмеченные кнопками карточки в виджете; `commitMoodTabCheckin` сразу сообщает о новой отметке.
    Версия: 1.2 (02.10) — новое чувство «Подавленность» (ключ `dejected`, эмодзи 😔): запись в `moodCategoriesResolved`, цвет в `computeMoodPalette` (средний тон, не тёмный), кнопка в сетке отметок после «Сонливости» (`CHECKIN_ORDER`). Диаграммы и список по дням берут категории из `moodCategoriesResolved`, отдельных правок не потребовали.
    Версия: 1.1 (29.09) — `--mood-joy` на <html> (цвет «Радости» для отметок задач), `window.syncMoodJoyColor`.
    Функционал отслеживания настроения: счётчик, чек-ин, диаграмма настроения.
@@ -552,6 +553,73 @@
     saveLocalState();
     scheduleCloudPush();
     refreshYearGridIfOpen();
+    syncWidgetMood(false); // карточка «Как настроение?» в виджете уходит сразу
+  }
+
+  // --- карточка «Как настроение?» в виджетах рабочего стола (QrMood.kt, мост ≥37) ---
+  // Оболочка показывает её с 20:30, если за сегодня не было ни одной отметки, поэтому ей нужно знать время последней отметки (в том числе пришедшей из облака
+  // с другого устройства). Ответы, нажатые на самой карточке в виджете, лежат в очереди оболочки, пока страница не внесёт их в журнал.
+  var WIDGET_MOOD_KEYS = ["down", "joy", "calm", "sad", "anxiety", "anger", "sleepy", "dejected"];
+  var lastWidgetMood = null;
+  var widgetMoodTimer = 0;
+  function widgetMoodBridge(){
+    var n = global.LifeTrackerNative;
+    return (n && typeof n.widgetMoodSet === "function" && typeof n.widgetMoodTake === "function" && typeof n.widgetMoodAck === "function") ? n : null;
+  }
+  // время последней отметки настроения среди видимых (после сброса данных — только новее сброса); 0 — отметок нет
+  function lastMoodMarkAt(){
+    var floor = getMoodDataResetAt(), st = state(), last = 0;
+    Object.keys(st).forEach(function(k){
+      if(k.indexOf("moodlog:") !== 0) return;
+      var rec = st[k];
+      if(rec && typeof rec.c === "string" && typeof rec.t === "number" && rec.t >= floor && rec.t > last) last = rec.t;
+    });
+    return last;
+  }
+  // сообщить оболочке время последней отметки; только при изменении (force — всегда)
+  function syncWidgetMood(force){
+    var n = widgetMoodBridge();
+    if(!n) return;
+    var at = lastMoodMarkAt();
+    if(!force && at === lastWidgetMood) return;
+    lastWidgetMood = at;
+    try{ n.widgetMoodSet(String(at)); }catch(e){}
+  }
+  // то же с задержкой: зовётся при каждой записи состояния, поэтому не чаще раза в пару секунд
+  function syncWidgetMoodSoon(){
+    if(widgetMoodTimer || !widgetMoodBridge()) return;
+    widgetMoodTimer = setTimeout(function(){ widgetMoodTimer = 0; try{ syncWidgetMood(false); }catch(e){} }, 2500);
+  }
+  // настроения, отмеченные кнопками карточки в виджете, ещё не внесённые в журнал: запись получает время нажатия и постоянный ключ (повторный вынос не задваивает)
+  function drainWidgetMood(){
+    var n = widgetMoodBridge();
+    if(!n) return;
+    var arr;
+    try{ arr = JSON.parse(String(n.widgetMoodTake())); }catch(e){ return; }
+    if(!Array.isArray(arr)) arr = [];
+    var ack = [], written = false;
+    arr.forEach(function(a){
+      if(!a || typeof a.at !== "number" || !isFinite(a.at)) return;
+      var ts = Math.floor(a.at);
+      if(WIDGET_MOOD_KEYS.indexOf(a.k) < 0 || ts <= 0){ ack.push(a.at); return; } // мусор — просто убрать из очереди
+      var sid = "moodsession:" + ts + "-w", lid = "moodlog:" + ts + "-" + a.k + "-w";
+      if(!state()[lid]){
+        state()[sid] = {c: 1, t: ts};
+        state()[lid] = {c: a.k, t: ts};
+        if(!state()[MOOD_FIRST_LOG_KEY] || state()[MOOD_FIRST_LOG_KEY].c == null || state()[MOOD_FIRST_LOG_KEY].c < getMoodDataResetAt()){
+          setHourState(MOOD_FIRST_LOG_KEY, ts);
+        }
+        written = true;
+      }
+      ack.push(a.at);
+    });
+    if(written){
+      saveLocalState();
+      scheduleCloudPush();
+      refreshYearGridIfOpen();
+    }
+    syncWidgetMood(true); // оболочка узнаёт о новой отметке раньше, чем очередь опустеет: карточка не вернётся
+    if(ack.length){ try{ n.widgetMoodAck(JSON.stringify(ack)); }catch(e){} }
   }
 
   function bindMoodCheckinBlock(){
@@ -650,7 +718,10 @@
       resetMoodData: resetMoodData,
       renderSettingsTabMood: renderSettingsTabMood,
       renderSettingsTabMoodResetConfirm: renderSettingsTabMoodResetConfirm,
-      getMoodsByDay: getMoodsByDay
+      getMoodsByDay: getMoodsByDay,
+      syncWidgetMood: syncWidgetMood,
+      syncWidgetMoodSoon: syncWidgetMoodSoon,
+      drainWidgetMood: drainWidgetMood
     };
   }
 

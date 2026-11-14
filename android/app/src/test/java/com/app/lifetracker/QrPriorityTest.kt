@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.1 (14.11) — служебная карточка «Как настроение?» (mood_*): над календарём, под «Как тренировка?».
 // Версия: 4.0 (14.11) — будильник «скоро» за 30 минут, а не за час; будильник «скоро» перебивает событие (alarmSoon_beatsEventSoon_*, alarmRow_soonBeatsEvent_*).
 // Версия: 3.5 (14.11) — карточка «Будильники» (alarmRow_*).
 // Версия: 3.4 (14.11)
@@ -27,16 +28,16 @@ class QrPriorityTest {
         days: Set<Int> = emptySet(), dyn: String = "", at: Long = 0L, habit: Boolean = false, tid: String = "", alarmId: String = "", prio: String = "normal"
     ) = Card(key = key, code = "", title = key, live = live, times = times, days = days, after = after, dyn = dyn, at = at, habit = habit, tid = tid, alarmId = alarmId, prio = prio)
 
-    private fun cfg(cards: List<Card>, relevance: Boolean = false, rpeAsk: Boolean = false) =
-        Cfg(id = "w", name = "w", rotate = false, rotateMin = 5, relevance = relevance, cards = cards, rpeAsk = rpeAsk)
+    private fun cfg(cards: List<Card>, relevance: Boolean = false, rpeAsk: Boolean = false, moodAsk: Boolean = false) =
+        Cfg(id = "w", name = "w", rotate = false, rotateMin = 5, relevance = relevance, cards = cards, rpeAsk = rpeAsk, moodAsk = moodAsk)
 
     private fun snap(c: Calendar, workout: Boolean = false, pomodoro: Boolean = false, stopwatch: Boolean = false,
                      timers: Set<String> = emptySet(), hidden: Set<String> = emptySet(), moved: Map<String, Long> = emptyMap(),
                      done: Set<String> = emptySet(), rpe: Boolean = false, alarms: Map<String, Long> = emptyMap(),
-                     ringing: Set<String> = emptySet(), battery: Int = -1, lastTop: String = "") =
+                     ringing: Set<String> = emptySet(), battery: Int = -1, lastTop: String = "", mood: Boolean = false) =
         QrPriority.Snapshot(now = c.timeInMillis, cal = c, workoutActive = workout, pomodoroActive = pomodoro, stopwatchActive = stopwatch,
             activeTimerIds = timers, alarms = alarms, ringingAlarmIds = ringing, batteryPercent = battery, hiddenKeys = hidden, movedAt = moved,
-            doneTaskIds = done, rpePending = rpe, lastTopKey = lastTop)
+            doneTaskIds = done, rpePending = rpe, moodPending = mood, lastTopKey = lastTop)
 
     /** Строит порядок и проверяет инварианты. */
     private fun run(cfg: Cfg, s: QrPriority.Snapshot): QrPriority.Result {
@@ -696,5 +697,64 @@ class QrPriorityTest {
         // будильник дальше 30 минут — календарь остаётся наверху
         val later = run(cf, snap(c, alarms = mapOf("id_a9" to now + 40 * min), lastTop = "ev").copy(alarmIndex = 0))
         assertEquals("ev", later.topKey)
+    }
+
+    // ---------- «Как настроение?» (служебная карточка, как «Как тренировка?») ----------
+
+    @Test fun mood_aboveCalendarAndEverything_evenWithoutRelevance() {
+        val c = cal(20, 30)
+        val now = c.timeInMillis
+        val cards = listOf(card("a"), card("ev", dyn = "event", at = now + 30 * 60_000L), card("tk", dyn = "task", at = now + 60_000L))
+        for (rel in listOf(false, true)) {
+            val r = run(cfg(cards, rel, moodAsk = true), snap(c, mood = true))
+            assertEquals("__mood", keys(r).first())
+            assertEquals("__mood", r.topKey)
+            assertEquals("__mood", r.anchorKey)
+            assertEquals("Как настроение?", r.topTitle)
+            assertEquals("Сегодня настроение ещё не отмечено", r.topReason)
+            assertEquals(4, QrPriority.visibleCount(cfg(cards, rel, moodAsk = true), snap(c, mood = true)))
+            assertEquals(listOf("a", "ev", "tk").sorted(), keys(r).drop(1).sorted()) // остальные карточки на месте, ничего не потеряно
+        }
+    }
+
+    @Test fun mood_notPending_noCard() {
+        val c = cal(12)
+        val cards = listOf(card("a"), card("b"))
+        val r = run(cfg(cards, true, moodAsk = true), snap(c, mood = false))
+        assertEquals(listOf("a", "b"), keys(r))
+        assertEquals("", r.topKey)
+        assertEquals("", r.anchorKey)
+        assertEquals(2, QrPriority.visibleCount(cfg(cards, true, moodAsk = true), snap(c, mood = false)))
+    }
+
+    @Test fun mood_underRpe_whenBothPending() {
+        val c = cal(21)
+        val cards = listOf(card("a"), card("b"))
+        val r = run(cfg(cards, true, rpeAsk = true, moodAsk = true), snap(c, rpe = true, mood = true))
+        assertEquals(listOf("__rpe", "__mood", "a", "b"), keys(r))
+        assertEquals("__rpe", r.topKey)
+        assertEquals("__rpe", r.anchorKey)
+        assertEquals(4, QrPriority.visibleCount(cfg(cards, true, rpeAsk = true, moodAsk = true), snap(c, rpe = true, mood = true)))
+        // оценили тренировку — настроение встаёт наверх
+        val r2 = run(cfg(cards, true, rpeAsk = true, moodAsk = true), snap(c, rpe = false, mood = true))
+        assertEquals(listOf("__mood", "a", "b"), keys(r2))
+        assertEquals("__mood", r2.topKey)
+    }
+
+    @Test fun mood_aloneInStack_isNotAllDone() {
+        val c = cal(22)
+        val cf = cfg(emptyList(), false, moodAsk = true)
+        val r = run(cf, snap(c, mood = true))
+        assertEquals(listOf("__mood"), keys(r))
+        assertEquals(1, QrPriority.visibleCount(cf, snap(c, mood = true)))
+        assertEquals(0, QrPriority.visibleCount(cf, snap(c, mood = false)))
+    }
+
+    @Test fun mood_doesNotBreakHysteresis_mainTopStillRemembered() {
+        val c = cal(20, 40)
+        val cards = listOf(card("a"), card("t", live = listOf(Live("timer", "x"))))
+        val r = run(cfg(cards, true, moodAsk = true), snap(c, timers = setOf("x"), mood = true))
+        assertEquals("__mood", r.topKey)
+        assertEquals("t", r.mainTopKey) // оболочка запоминает как «прежнюю верхнюю» именно основную, а не служебную
     }
 }

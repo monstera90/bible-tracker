@@ -4603,6 +4603,7 @@
     try{ if(window.UserTabsMod && window.UserTabsMod.syncSoon) window.UserTabsMod.syncSoon(true); }catch(e){} // вкладки «Интернет» с других устройств
     try{ ensurePomodoroStore(); if(window.PomodoroTab) window.PomodoroTab.sync(); }catch(e){} // помодоро: состояние и «вкладка на экране» заново, законченные отрезки — в календарь и «Историю»
     try{ drainWidgetTasks(); }catch(e){} // задачи, отмеченные двойным нажатием в виджете
+    try{ drainWidgetMood(); }catch(e){} // настроения, отмеченные кнопками карточки «Как настроение?» в виджете
     widgetsFeedTouch(); // карточки «задачи» и «события календаря» в виджетах: время ушло вперёд
   };
   // APK: кнопка «развернуть» плавающего видео (FloatingVideo.kt) — открыть вкладку-сайт `utab_<id>`; сама вкладка, показавшись, забирает видео обратно.
@@ -10352,6 +10353,11 @@
   }
   function widgetsFeedTouch(){
     try{ if(WidgetsMod && WidgetsMod.feedChanged) WidgetsMod.feedChanged(); }catch(e){}
+    try{ if(Mood && Mood.syncWidgetMoodSoon) Mood.syncWidgetMoodSoon(); }catch(e){} // время последней отметки настроения — оболочке (карточка «Как настроение?»; отметка могла прийти из облака)
+  }
+  // Карточка «Как настроение?» в виджете (мост ≥37): отметки, нажатые на ней, вносятся в журнал настроения
+  function drainWidgetMood(){
+    if(Mood && Mood.drainWidgetMood) Mood.drainWidgetMood();
   }
   function renderSettingsTabWidgets(){
     var container = document.getElementById("settingsTabContent");
@@ -26194,6 +26200,7 @@
   try{ pushQuickTaskTheme(); }catch(e){}
   try{ ensureItemCards().drainPendingTasks(true); }catch(e){ if(window.Debug) window.Debug.log("Очередь QR-задач: " + (e && e.message ? e.message : e)); }
   try{ drainWidgetTasks(); }catch(e){} // задачи, отмеченные двойным нажатием в виджете, пока приложение было закрыто
+  try{ drainWidgetMood(); }catch(e){} // настроения, отмеченные в виджете, пока приложение было закрыто
   try{ if(localStorage.getItem("qrWidgets_v1")){ ensureWidgets(); window.WidgetsTab.scheduleSync(4000); } }catch(e){} // лица карточек в виджетах рабочего стола
   try{ handleCardLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Карточка из оболочки: " + (e && e.message ? e.message : e)); }
   try{ handleCalendarEventLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Событие из виджета: " + (e && e.message ? e.message : e)); }

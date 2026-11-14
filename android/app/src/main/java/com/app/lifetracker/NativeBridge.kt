@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 29.0 (14.11) — мост версии 37: карточка «Как настроение?» в виджетах (`widgetMoodSet` / `widgetMoodTake` / `widgetMoodAck`; QrMood).
 // Версия: 28.0 (14.11)
 // Версия: 18.0 (03.11)
 // Версия: 12.0 (31.10)
@@ -42,6 +43,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 37: отметка настроения из виджета (`widgetMoodSet` / `widgetMoodTake` / `widgetMoodAck`; QrMood): страница сообщает время последней отметки и вносит в журнал настроения ответы с карточки «Как настроение?».
          * 36: `widgetWhy(cfgId)` — какая карточка сейчас наверху виджета конструктора и почему (QrWidgets.whyJson): страница пишет это в форме виджета; ручной приоритет карточки `prio` приходит в `widgetsSync`.
          * 35: будильники, заведённые/выключенные нажатием на карточку в виджете (`widgetAlarmTake` / `widgetAlarmAck`; QrWidgets): страница вносит их в журнал событий.
          * 34: задачи, отмеченные двойным нажатием на карточку в виджете (`widgetTaskTake` / `widgetTaskAck`; QrWidgets).
@@ -66,7 +68,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 36
+        const val BRIDGE_VERSION = 37
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -1168,6 +1170,39 @@ class NativeBridge(private val activity: MainActivity) {
         if (!activity.pageTrusted) return
         try {
             QrRpe.ackAnswers(activity.applicationContext, idsJson)
+        } catch (e: Exception) {
+            // повторится
+        }
+    }
+
+    /** Страница сообщает время (мс) последней отметки настроения, 0 — отметок нет: карточка «Как настроение?» в виджетах появляется в 20:30 только если сегодня отметок не было. */
+    @JavascriptInterface
+    fun widgetMoodSet(lastMarkAt: String?) {
+        if (!activity.pageTrusted) return
+        try {
+            if (QrMood.setFromPage(activity.applicationContext, lastMarkAt)) QrWidgets.onMoodChanged(activity.applicationContext)
+        } catch (e: Exception) {
+            // виджеты не должны мешать приложению
+        }
+    }
+
+    /** JSON `[{k, at}]` — настроения (ключ чувства и время нажатия), отмеченные кнопками карточки в виджете и ещё не внесённые в журнал настроения. */
+    @JavascriptInterface
+    fun widgetMoodTake(): String {
+        if (!activity.pageTrusted) return "[]"
+        return try {
+            QrMood.takeAnswers(activity.applicationContext)
+        } catch (e: Exception) {
+            "[]"
+        }
+    }
+
+    /** Страница внесла отметки с этими временами `at` (JSON-массив чисел) — убрать их из очереди. */
+    @JavascriptInterface
+    fun widgetMoodAck(atsJson: String?) {
+        if (!activity.pageTrusted) return
+        try {
+            QrMood.ackAnswers(activity.applicationContext, atsJson)
         } catch (e: Exception) {
             // повторится
         }

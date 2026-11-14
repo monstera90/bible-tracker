@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.3 (14.11) — вторая служебная карточка «Как настроение?» ([QrMood.KEY], [Snapshot.moodPending]): стоит над всеми обычными карточками, под «Как тренировка?»; [check] знает обе.
 // Версия: 4.2 (14.11) — будильник «скоро» поднимает карточку за 30 минут, а не за час ([ALARM_SOON_MS]); балл [SCORE_ALARM_SOON] выше события «скоро» на гистерезис, чтобы будильник перебивал календарь.
 // Версия: 4.1 (14.11) — карточка «Будильники» (dyn = "alarm"): одна на все будильники пользователя, листается у краёв как события и задачи ([alarmCards], [nextAlarmKey]).
 // Версия: 4.0 (14.11)
@@ -11,7 +12,7 @@ import java.util.Calendar
  * Порядок карточек стопки виджета «Стопка QR-карточек» и ответ на вопрос «что сейчас должно лежать сверху» (ТЗ TZ_card_priority.md).
  *
  * Чистая функция: без Android, SharedPreferences и часов — всё нужное приходит в [Snapshot] (его собирает [QrWidgets.snapshot]).
- * Слои стопки сверху вниз: 1) служебная «Как тренировка?» ([QrRpe.KEY]); 2) основная часть — отфильтрованные карточки, при «релевантности»
+ * Слои стопки сверху вниз: 1) служебные «Как тренировка?» ([QrRpe.KEY]) и под ней «Как настроение?» ([QrMood.KEY]) — каждая, пока ждёт ответа; 2) основная часть — отфильтрованные карточки, при «релевантности»
  * по баллам, иначе в порядке пользователя; 3) хвост — карточки «после срабатывания: в конец», перенесённые сегодня, в порядке переноса.
  * Фильтр (карточки нет в стопке вообще): скрытые сегодня, выполненные задачи, события и задачи вне окна [DYN_DAYS].
  * [check] проверяет инварианты результата; значения баллов — в таблице констант ниже.
@@ -86,6 +87,8 @@ object QrPriority {
         val movedAt: Map<String, Long> = emptyMap(),
         val doneTaskIds: Set<String> = emptySet(),
         val rpePending: Boolean = false,
+        /** «Как настроение?» ждёт отметки: у виджета включено «Спрашивать о настроении», время [QrMood.ASK_MINUTE] наступило, а отметок за сегодня нет (считает [QrMood.pending]). */
+        val moodPending: Boolean = false,
         val lastTopKey: String = "",
         /** Какое по счёту из ближайших событий показывает карточка события (0 — первое; нажатие у края карточки листает, без зацикливания). */
         val eventIndex: Int = 0,
@@ -100,9 +103,9 @@ object QrPriority {
     class Scored(val card: Card, val score: Int, val reason: String)
 
     class Result(
-        /** Итоговый порядок: rpe, основная часть, хвост. */
+        /** Итоговый порядок: rpe, настроение, основная часть, хвост. */
         val cards: List<Scored>,
-        /** Карточка наверху по релевантности ("" — нет); у «Как тренировка?» — [QrRpe.KEY]. */
+        /** Карточка наверху по релевантности ("" — нет); у служебных — [QrRpe.KEY] («Как тренировка?») или [QrMood.KEY] («Как настроение?»). */
         val topKey: String,
         /** К чему возвращаться и от смены чего вставать наверх (прежние anchorKey/topAnchor). */
         val anchorKey: String,
@@ -152,10 +155,12 @@ object QrPriority {
         }
         val out = ArrayList<Scored>()
         if (s.rpePending) out.add(Scored(rpeCard(), 0, "Ждёт оценки тренировки"))
+        if (s.moodPending) out.add(Scored(moodCard(), 0, "Сегодня настроение ещё не отмечено"))
         out.addAll(main)
-        val topKey = if (s.rpePending) QrRpe.KEY else top
+        val serviceKey = serviceKeyOf(s)
+        val topKey = if (serviceKey.isNotEmpty()) serviceKey else top
         val next = if (cfg.relevance) nextChange(cfg, base, s, rowTaskAt) else Long.MAX_VALUE
-        val topScored: Scored? = if (s.rpePending) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
+        val topScored: Scored? = if (serviceKey.isNotEmpty()) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
         return Result(out, topKey, anchorOf(cfg, s, main, top), next, top, topScored?.card?.title ?: "", topScored?.reason ?: "")
     }
 
@@ -182,7 +187,7 @@ object QrPriority {
      */
     private fun keepPrevTop(sorted: MutableList<Scored>, top: String, s: Snapshot): String {
         val prev = s.lastTopKey
-        if (top.isEmpty() || prev.isEmpty() || prev == top || prev == QrRpe.KEY) return top
+        if (top.isEmpty() || prev.isEmpty() || prev == top || isService(prev)) return top
         val idx = sorted.indexOfFirst { it.card.key == prev }
         if (idx <= 0) return top
         val ps = sorted[idx].score
@@ -254,18 +259,28 @@ object QrPriority {
         return at
     }
 
-    /** Сколько карточек сейчас в стопке (с «Как тренировка?»): для isAllDone и точек. */
-    fun visibleCount(cfg: Cfg, s: Snapshot): Int = visible(cfg, s).size + (if (s.rpePending) 1 else 0)
+    /** Сколько карточек сейчас в стопке (со служебными «Как тренировка?» и «Как настроение?»): для isAllDone и точек. */
+    fun visibleCount(cfg: Cfg, s: Snapshot): Int = visible(cfg, s).size + (if (s.rpePending) 1 else 0) + (if (s.moodPending) 1 else 0)
 
     /** Карточка «Как тренировка?» — служебная, над всеми. */
     private fun rpeCard(): Card = Card(QrRpe.KEY, "", "Как тренировка?", emptyList(), emptySet(), emptySet(), "none", QrRpe.DEFAULT_COLOR)
 
+    /** Карточка «Как настроение?» — служебная, над всеми обычными, под «Как тренировка?». */
+    private fun moodCard(): Card = Card(QrMood.KEY, "", "Как настроение?", emptyList(), emptySet(), emptySet(), "none", QrMood.DEFAULT_COLOR)
+
+    /** Служебная карточка стопки («Как тренировка?» / «Как настроение?»), а не настоящая. */
+    private fun isService(key: String): Boolean = key == QrRpe.KEY || key == QrMood.KEY
+
+    /** Ключ служебной карточки, что стоит наверху (у «Как тренировка?» приоритет выше); пусто — служебных карточек нет. */
+    private fun serviceKeyOf(s: Snapshot): String = if (s.rpePending) QrRpe.KEY else if (s.moodPending) QrMood.KEY else ""
+
     /**
-     * Ключ карточки, на которую стопка возвращается и от смены которой встаёт наверх: «Как тренировка?» (у любого виджета с этой галочкой);
+     * Ключ карточки, на которую стопка возвращается и от смены которой встаёт наверх: «Как тренировка?», а если её нет — «Как настроение?» (у любого виджета с этими галочками);
      * иначе (только «по релевантности») рекомендованная карточка, а если такой нет — верхняя карточка события или задачи календаря. Пусто — своего места нет.
      */
     private fun anchorOf(cfg: Cfg, s: Snapshot, main: List<Scored>, top: String): String {
-        if (s.rpePending) return QrRpe.KEY
+        val service = serviceKeyOf(s)
+        if (service.isNotEmpty()) return service
         if (!cfg.relevance) return ""
         if (top.isNotEmpty()) return top
         val first = main.firstOrNull()?.card ?: return ""
@@ -489,13 +504,18 @@ object QrPriority {
         val cards = result.cards.map { it.card }
         val keys = cards.map { it.key }
 
-        // 1. «Как тренировка?» — только если ждёт оценки, и тогда первая
+        // 1. «Как тренировка?» — только если ждёт оценки, и тогда первая; «Как настроение?» — только если ждёт отметки, и тогда сразу под ней (или первая)
         val rpeAt = keys.indexOf(QrRpe.KEY)
         if (s.rpePending) {
             if (rpeAt != 0) bad.add("1: rpePending, но «Как тренировка?» не первая")
         } else if (rpeAt >= 0) bad.add("1: «Как тренировка?» есть без rpePending")
         if (keys.count { it == QrRpe.KEY } > 1) bad.add("1: «Как тренировка?» больше одной")
-        val main = if (rpeAt == 0) cards.drop(1) else cards
+        val moodAt = keys.indexOf(QrMood.KEY)
+        if (s.moodPending) {
+            if (moodAt != (if (s.rpePending) 1 else 0)) bad.add("1: moodPending, но «Как настроение?» не на своём месте")
+        } else if (moodAt >= 0) bad.add("1: «Как настроение?» есть без moodPending")
+        if (keys.count { it == QrMood.KEY } > 1) bad.add("1: «Как настроение?» больше одной")
+        val main = cards.filter { !isService(it.key) }
 
         // 2. и 6. Нет скрытых, выполненных и вне окна; нет дублей; ничего не потеряно
         val nextEv = nextEventKey(cfg, s)
@@ -515,35 +535,36 @@ object QrPriority {
         }
 
         // 4. При равном балле событие выше задачи
-        val scored = result.cards.filter { it.card.key != QrRpe.KEY }
+        val scored = result.cards.filter { !isService(it.card.key) }
         for (i in scored.indices) for (j in i + 1 until scored.size) {
             // исключение: удержанная устойчивостью верхняя карточка стоит первой, даже если рядом событие с тем же баллом
             val held = i == 0 && scored[0].card.key == result.mainTopKey && result.mainTopKey == s.lastTopKey
             if (!held && scored[i].score == scored[j].score && scored[i].card.dyn == "task" && scored[j].card.dyn == "event") bad.add("4: задача выше события при равном балле")
         }
 
-        // 5. Без релевантности — порядок пользователя, topKey пуст (кроме rpe)
+        // 5. Без релевантности — порядок пользователя, topKey пуст (кроме служебных)
         if (!cfg.relevance) {
             val rest = main.filter { !(it.after == "end" && s.movedAt.containsKey(it.key)) }
             val order = cfg.cards.map { it.key }
             val pos = rest.map { order.indexOf(it.key) }
             for (i in 1 until pos.size) if (pos[i] < pos[i - 1]) bad.add("5: нарушен порядок пользователя")
-            if (result.topKey.isNotEmpty() && result.topKey != QrRpe.KEY) bad.add("5: topKey не пуст без релевантности")
+            if (result.topKey.isNotEmpty() && !isService(result.topKey)) bad.add("5: topKey не пуст без релевантности")
         }
 
-        // 7. topKey — первая карточка основной части (или «Как тренировка?»)
-        if (result.topKey.isNotEmpty() && result.topKey != QrRpe.KEY && main.firstOrNull()?.key != result.topKey) bad.add("7: topKey не первая карточка основной части")
+        // 7. topKey — первая карточка основной части (или служебная карточка наверху)
+        if (result.topKey.isNotEmpty() && !isService(result.topKey) && main.firstOrNull()?.key != result.topKey) bad.add("7: topKey не первая карточка основной части")
         if (result.topKey == QrRpe.KEY && rpeAt != 0) bad.add("7: topKey — rpe, но её нет наверху")
+        if (result.topKey == QrMood.KEY && moodAt != 0) bad.add("7: topKey — настроение, но его нет наверху")
 
         // 8. При «релевантности» основная часть (без перенесённых) идёт по убыванию баллов; удержанная верхняя карточка — вне счёта
         if (cfg.relevance) {
-            val head = result.cards.filter { it.card.key != QrRpe.KEY && !movedToday(it.card, s) }
+            val head = result.cards.filter { !isService(it.card.key) && !movedToday(it.card, s) }
             val from = if (head.isNotEmpty() && head[0].card.key == result.mainTopKey && result.mainTopKey == s.lastTopKey) 1 else 0
             for (i in from + 1 until head.size) if (head[i].score > head[i - 1].score) bad.add("8: баллы не по убыванию у " + head[i].card.key)
 
             // 9. Гистерезис: верхняя карточка сменилась только при отрыве минимум на HYSTERESIS, падении прежней до 0 или звонящем будильнике
             val prev = result.cards.firstOrNull { it.card.key == s.lastTopKey && !movedToday(it.card, s) }
-            val topS = result.cards.firstOrNull { it.card.key == result.mainTopKey && it.card.key != QrRpe.KEY }
+            val topS = result.cards.firstOrNull { it.card.key == result.mainTopKey && !isService(it.card.key) }
             if (prev != null && topS != null && prev !== topS && prev.score > 0 && topS.score < prev.score + HYSTERESIS &&
                 !(isRinging(topS.card, s) && !isRinging(prev.card, s))) bad.add("9: верхняя карточка сменилась без достаточного отрыва")
 

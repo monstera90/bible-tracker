@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Версия: 2.1 (14.11) — `ev_zones`: три прозрачные зоны карточки события (края 0,28 — листают ряд событий, центр 0,44 — форма события); у остальных карточек скрыта.
+<!-- Версия: 2.2 (14.11) — `mood_grid`: восемь прозрачных зон-кнопок (2 ряда по 4) карточки «Как настроение?» (QrMood); у остальных карточек скрыта. Числа — доли ширины лица, те же, что BTN_* в QrMood.kt: столбцы по 0,2308 вокруг центров 0,1535 + k·0,2309 (поля 0,0384 по краям), ряды по 0,2314 (0,5223…0,7537 и 0,7537…0,9851; weightSum вертикали 1,06).
+     Версия: 2.1 (14.11) — `ev_zones`: три прозрачные зоны карточки события (края 0,28 — листают ряд событий, центр 0,44 — форма события); у остальных карточек скрыта.
      Версия: 2.0 (13.11) — одна карточка стопки: готовая картинка лица (скруглённый квадрат с цветным выступом снизу).
      Поверх картинки — сетка из десяти прозрачных зон-кнопок 1…10 для карточки «Как тренировка?» (QrRpe); у остальных карточек `rpe_grid` скрыта.
      Числа — доли ширины лица (высота лица = 1,06 ширины, weightSum вертикали 1,06), те же, что BTN_* в QrRpe.kt: зоны по горизонтали — по 0,1874 вокруг кнопок
@@ -77,5 +78,53 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="0.0796" />
+    </LinearLayout>
+    <LinearLayout
+        android:id="@+id/mood_grid"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:weightSum="1.06">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="0.5223" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="0.2314"
+            android:orientation="horizontal"
+            android:weightSum="1">
+
+            <FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.0384" />
+            <FrameLayout android:id="@+id/mood_b1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.2308" />
+            <FrameLayout android:id="@+id/mood_b2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.2308" />
+            <FrameLayout android:id="@+id/mood_b3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.2308" />
+            <FrameLayout android:id="@+id/mood_b4" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.2308" />
+            <FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.0384" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="0.2314"
+            android:orientation="horizontal"
+            android:weightSum="1">
+
+            <FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.0384" />
+            <FrameLayout android:id="@+id/mood_b5" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.2308" />
+            <FrameLayout android:id="@+id/mood_b6" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.2308" />
+            <FrameLayout android:id="@+id/mood_b7" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.2308" />
+            <FrameLayout android:id="@+id/mood_b8" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.2308" />
+            <FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="0.0384" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="0.0749" />
     </LinearLayout>
 </FrameLayout>

@@ -94,6 +94,22 @@ class ScanActivity : ComponentActivity() {
     }
 
     /**
+     * Нажатие на эмодзи карточки «Как настроение?» в виджете (extra `mood` = номер кнопки 0…7, ключ `tok` тот же): настроение уходит в [QrMood.answer], окно не нужно.
+     * true — это был такой запрос.
+     */
+    private fun handleMood(i: Intent?): Boolean {
+        if (i == null || i.action != ACTION_SCAN_CODE || !i.hasExtra("mood")) return false
+        if (QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
+            try {
+                QrMood.answer(applicationContext, i.getIntExtra("mood", -1))
+            } catch (e: Exception) {
+                // отметка не сохранилась — карточка останется, можно нажать ещё раз
+            }
+        }
+        return true
+    }
+
+    /**
      * Нажатие на карточку-будильник в виджете (extra `alarm` = ключ карточки, тот же `tok`): будильник заводится или выключается сразу в оболочке ([QrWidgets.toggleAlarm]),
      * окно и страница не нужны. true — это был такой запрос.
      */
@@ -288,7 +304,7 @@ class ScanActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         // Кнопка оценки с карточки «Как тренировка?»: без окна — сохранили и сразу закрылись (webView и сервер не создаются)
-        if (handleRpe(intent) || handleAlarm(intent) || handleEvent(intent)) {
+        if (handleRpe(intent) || handleMood(intent) || handleAlarm(intent) || handleEvent(intent)) {
             finishAndRemoveTask()
             overridePendingTransition(0, 0)
             return
@@ -360,7 +376,7 @@ class ScanActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (handleRpe(intent)) return // окно сканера уже открыто и остаётся как было
+        if (handleRpe(intent) || handleMood(intent)) return // окно сканера уже открыто и остаётся как было
         if (handleAlarm(intent)) {
             if (!::webView.isInitialized) { // окна со страницей нет (ждали второго нажатия) — просто закрываемся
                 finishAndRemoveTask()

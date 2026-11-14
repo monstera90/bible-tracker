@@ -1,5 +1,6 @@
 /* ===========================================================================
    widgets.js
+   Версия: 6.3 (14.11) — галочка «Спрашивать о настроении» (`moodAsk`): служебная карточка «Как настроение?» (оболочка, QrMood.kt; в форме — образец `moodFaceHtml`, цвет `RPE_COLOR`); ответ из виджета страница вносит в журнал настроения (mood.js `drainWidgetMood`, мост ≥37).
    Версия: 6.2 (14.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
@@ -13,7 +14,8 @@
    Галочка «Спрашивать о тренировке» (`rpeAsk`): пока есть тренировка без оценки нагрузки (1–10), над всеми карточками стопки стоит служебная карточка «Как тренировка?» с кнопками 1…10 — её рисует оболочка (QrRpe.kt), страница шлёт только флаг; в форме показан образец лица (`rpeFaceHtml`, цвет `RPE_COLOR`). Оценку из виджета страница забирает в workouts.js (`drainWidgetRpe`, мост ≥33).
    Галочки «Показывать задачи» (`tasks`, цвет `tasksColor`, палитра `icfColors3`) и «Показывать события календаря» (`events`, цвет `eventsColor`, палитра `icfColors4`): в стопку добавляются динамические карточки по данным календаря (`CalendarTab.widgetFeed` через `deps.getCalendarFeed`, `buildFeed`). Задачи: открытые задачи календаря на ближайшую неделю (`FEED_DAYS`) и просроченные — в оболочку уходят до `MAX_TASKS` кандидатов, а в стопке одна карточка задач, которую нажатием у левого/правого края листают по задачам (QrWidgets.kt `taskNav`); событие: ближайшее запланированное в пределах недели (в оболочку уходят `MAX_EVENTS` кандидатов, показывает первое будущее — решает QrWidgets.kt по текущему времени). Лицо — `drawDynFace` (размеры сняты с макета, доли ширины карточки — `DYN`), у каждой карточки до четырёх картинок: `<ключ>` («Сегодня»), `<ключ>_t` («Завтра»), `<ключ>_w` (день недели, если до даты два дня и больше) и `<ключ>_s`/`<ключ>_y`/`<ключ>_o` («Просрочено, сегодня» / «…, вчера» / «…, 1 января», только у задачи); какую показать — выбирает оболочка (так надпись меняется в полночь без приложения). Данные меняются → `feedChanged` (из my.js: запись состояния и возврат в приложение) сверяет `feedSig` и при отличии шлёт `syncNow`. Палитра общая с карточками QR-кодов (`itemcards.colorPalette`), цвет по умолчанию — как на макете (`TASK_COLOR`/`EVENT_COLOR`), последний выбранный — `widgetsDynColors_v1`.
    Галочка «Показывать будильники» (`alarms`): в стопку добавляется одна карточка со ВСЕМИ будильниками пользователя (карточки «Будильник» вкладки QR-кодов; `widgetAlarms` в itemcards.js; в оболочку уходят до `MAX_ALARMS` штук в поле `alm`: ключ карточки, id и настройки будильника, название). Нажатие у левого/правого края листает будильники так же, как события и задачи (QrWidgets.kt `alarmNav`), нажатие в центре заводит/выключает показанный будильник. Лицо каждого будильника — `alarmFace`, два состояния (`<id>` и `<id>_on`) шлются как прежде. Отдельно будильник в стопку больше не выбирается (из списка «Выберите карточку» убран); будильники, выбранные в виджете раньше, при первой отправке переносятся на галочку (`migrateAlarmCards`).
-   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after,prio}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor,alarms,rpeAsk}]}), только на устройстве.
+   Галочка «Спрашивать о настроении» (`moodAsk`): с 20:30, если сегодня не было ни одной отметки настроения, над всеми обычными карточками (под «Как тренировка?», выше календаря) стоит служебная карточка «Как настроение?» с восемью эмодзи-кнопками — её рисует оболочка (QrMood.kt), страница шлёт только флаг и сообщает время последней отметки (mood.js `syncWidgetMood`, мост ≥37). Нажатие на эмодзи сразу записывает настроение и убирает карточку.
+   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after,prio}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor,alarms,rpeAsk,moodAsk}]}), только на устройстве.
    Страница рисует лица карточек в PNG (canvas, `pngFor`) и шлёт их оболочке вместе с настройками (мост ≥31 `widgetsSync`).
    Точка входа: window.initWidgetsModule(deps) → window.WidgetsTab.{render, scheduleSync}.
    =========================================================================== */
@@ -98,13 +100,13 @@
         else if(w.batColor && !/^#[0-9a-fA-F]{6}$/.test(w.batColor)) w.batColor = "";
         w.batteryMulti = !!w.batteryMulti;
         if(typeof w.bat2Color !== "string" || (w.bat2Color && !/^#[0-9a-fA-F]{6}$/.test(w.bat2Color))) w.bat2Color = "";
-        w.tasks = !!w.tasks; w.events = !!w.events; w.alarms = !!w.alarms; w.rpeAsk = !!w.rpeAsk;
+        w.tasks = !!w.tasks; w.events = !!w.events; w.alarms = !!w.alarms; w.rpeAsk = !!w.rpeAsk; w.moodAsk = !!w.moodAsk;
         w.tasksColor = normHex(w.tasksColor); w.eventsColor = normHex(w.eventsColor);
       });
       return o;
     }
     function normHex(v){ return (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)) ? v.toLowerCase() : ""; }
-    function hasContent(w){ return !!(w.cards.length || w.battery || w.batteryMulti || w.tasks || w.events || w.alarms || w.rpeAsk); }
+    function hasContent(w){ return !!(w.cards.length || w.battery || w.batteryMulti || w.tasks || w.events || w.alarms || w.rpeAsk || w.moodAsk); }
     function normAfter(v){ return (v === "hide" || v === "end") ? v : "none"; }
     function normPrio(v){ return (v === "top" || v === "low") ? v : "normal"; }
     function save(){ try{ localStorage.setItem(KEY, JSON.stringify(data)); }catch(e){} }
@@ -401,7 +403,7 @@
         var widgets = data.list.map(function(w){
           return {
             id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance, battery: !!w.battery, batColor: w.battery ? batHex(w) : "", batteryMulti: !!w.batteryMulti, bat2Color: w.batteryMulti ? bat2Hex(w) : "",
-            tasks: !!w.tasks, events: !!w.events, alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], rpeAsk: !!w.rpeAsk, dyn: dyn.perWidget[w.id] || [],
+            tasks: !!w.tasks, events: !!w.events, alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], rpeAsk: !!w.rpeAsk, moodAsk: !!w.moodAsk, dyn: dyn.perWidget[w.id] || [],
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
               return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after), prio: normPrio(c.prio), habit: f.type === "habit", alarm: f.type === "alarm" ? (f.alarmId || "") : "", alarmSpec: f.type === "alarm" ? (f.alarmSpec || null) : null };
@@ -626,6 +628,22 @@
       }
       return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' + t + '</svg></div>';
     }
+    // Карточка «Как настроение?» в форме: образец лица (в виджете её рисует оболочка, QrMood.kt; числа — доли ширины карточки ×100: значок «смайлик в круге» (клетка 0,756), «Сегодня, <день недели>», заголовок, сетка кнопок-эмодзи 2×4; значок и надписи сдвинуты на 4 вниз, к кнопкам)
+    var MOOD_EMOJI = ["😌", "😊", "🙄", "😕", "😰", "😡", "🥱", "😔"]; // как CHECKIN_ORDER в mood.js: Внутренний мир, Радость, Спокойствие, Грусть, Тревожность, Раздражительность, Сонливость, Подавленность
+    function moodFaceHtml(){
+      var hex = RPE_COLOR, shade = cardsOf().cardShade(hex), serif = "font-family=\"'Palatino Linotype',Georgia,serif\"";
+      var day = WEEKDAYS_FULL[new Date().getDay()].toLowerCase();
+      var t = '<g transform="translate(50 17.8) scale(0.756)" fill="none" stroke="#fff" stroke-width="0.97" stroke-linecap="round" stroke-linejoin="round">' +
+        '<circle cx="0" cy="0" r="9"/><path d="M-3 -2h.01"/><path d="M3 -2h.01"/><path d="M-2.5 3a3.5 3.5 0 0 0 5 0"/></g>';
+      t += '<text x="50" y="33.1" font-size="4.67" text-anchor="middle" fill="#fff" font-family="sans-serif">' + DYN_LABELS.today + ', ' + esc(day) + '</text>';
+      t += '<text x="50" y="42.3" font-size="8.65" text-anchor="middle" fill="#fff" font-weight="700" textLength="71" lengthAdjust="spacingAndGlyphs" ' + serif + '>Как настроение?</text>';
+      for(var i = 0; i < 8; i++){
+        var cx = 15.35 + (i % 4) * 23.09, cy = i < 4 ? 63.8 : 86.93;
+        t += '<circle cx="' + cx.toFixed(2) + '" cy="' + cy.toFixed(2) + '" r="10.07" fill="none" stroke="#fff" stroke-width="0.82"/>';
+        t += '<text x="' + cx.toFixed(2) + '" y="' + (cy + 0.4).toFixed(2) + '" font-size="9.4" text-anchor="middle" dominant-baseline="central">' + MOOD_EMOJI[i] + '</text>';
+      }
+      return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' + t + '</svg></div>';
+    }
     // Карточка «Будильники» в форме: лицо первого будильника пользователя (в виджете — все будильники, их листают у краёв), нет будильников — образец
     function alarmsFaceHtml(){
       var list = [];
@@ -645,6 +663,7 @@
       if(w.events) extra.push("события");
       if(w.alarms) extra.push("будильники");
       if(w.rpeAsk) extra.push("вопрос о тренировке");
+      if(w.moodAsk) extra.push("вопрос о настроении");
       if(w.cards.length) return cardWord(w.cards.length) + (extra.length ? " + " + extra.join(" + ") : "");
       if(!extra.length) return cardWord(0);
       return (w.battery && extra.length === 1) ? "заряд аккумулятора" : extra.join(" + ");
@@ -675,7 +694,7 @@
     // «Сейчас сверху: … — причина»: что оболочка (QrWidgets.kt, мост ≥36 widgetWhy) поставила наверх этого виджета при последнем расчёте. Пусто — моста нет, виджет ещё не отправлен оболочке или порядок не зависит от баллов
     function whyText(w){
       var b = window.LifeTrackerNative;
-      if(!w || !bridge() || typeof b.widgetWhy !== "function" || !(w.relevance || w.rpeAsk)) return "";
+      if(!w || !bridge() || typeof b.widgetWhy !== "function" || !(w.relevance || w.rpeAsk || w.moodAsk)) return "";
       var o = null;
       try{ o = JSON.parse(b.widgetWhy(w.id) || "{}"); }catch(e){ o = null; }
       if(!o || typeof o.key !== "string") return "";
@@ -735,11 +754,12 @@
       if(w.events) html += '<div class="wg-slot" data-bat="1" id="wgEventsSlot">' + eventsFaceHtml(w) + '</div>'; // образец карточки события
       if(w.alarms) html += '<div class="wg-slot" data-bat="1" id="wgAlarmsSlot">' + alarmsFaceHtml() + '</div>'; // карточка будильников (в виджете одна на все будильники, листается у краёв)
       if(w.rpeAsk) html += '<div class="wg-slot" data-bat="1" id="wgRpeSlot">' + rpeFaceHtml() + '</div>'; // образец «Как тренировка?» (в виджете она стоит над всеми карточками, пока есть запись без оценки)
+      if(w.moodAsk) html += '<div class="wg-slot" data-bat="1" id="wgMoodSlot">' + moodFaceHtml() + '</div>'; // образец «Как настроение?» (в виджете она стоит над всеми обычными карточками с 20:30, пока сегодня не отмечено настроение)
       html += '</div>';
       html += '<label class="wg-check"><input type="checkbox" id="wgRotate"' + (w.rotate ? ' checked' : '') + '>Переключать виджеты по кругу</label>';
       if(w.rotate) html += '<div class="wg-min">каждые<input type="number" id="wgRotMin" min="1" max="720" value="' + w.rotateMin + '">мин</div>';
       html += '<label class="wg-check"><input type="checkbox" id="wgRel"' + (w.relevance ? ' checked' : '') + '>Переключение по релевантности</label>';
-      if(bridge() && typeof window.LifeTrackerNative.widgetWhy === "function" && (w.relevance || w.rpeAsk)){
+      if(bridge() && typeof window.LifeTrackerNative.widgetWhy === "function" && (w.relevance || w.rpeAsk || w.moodAsk)){
         whyWid = w.id;
         var wt = whyText(w);
         html += '<div class="wg-bat-status" id="wgWhy"' + (wt ? '' : ' style="display:none"') + '>' + esc(wt) + '</div>';
@@ -762,6 +782,7 @@
       if(w.events) html += cardsOf().colorPalette("wgevents", "icfColors4");
       html += '<label class="wg-check"><input type="checkbox" id="wgAlarms"' + (w.alarms ? ' checked' : '') + '>Показывать будильники</label>';
       html += '<label class="wg-check"><input type="checkbox" id="wgRpe"' + (w.rpeAsk ? ' checked' : '') + '>Спрашивать о тренировке</label>';
+      html += '<label class="wg-check"><input type="checkbox" id="wgMood"' + (w.moodAsk ? ' checked' : '') + '>Спрашивать о настроении</label>';
       var st = nativeState(), placed = st && st.placed && st.placed[w.id];
       html += '<div class="wg-btns">';
       if(bridge()) html += '<button type="button" class="workbooks-run-btn" id="wgPinBtn">' + (placed ? 'Добавить ещё один на рабочий стол' : 'Добавить на рабочий стол') + '</button><div class="wg-hint" id="wgPinHint"></div>';
@@ -779,7 +800,8 @@
       ["Показывать задачи", "Одна карточка с ближайшими невыполненными задачами из календаря: просроченные первыми, затем сегодняшние и на неделю вперёд. Нажатие у левого или правого края карточки листает задачи, двойное нажатие в центре отмечает показанную задачу выполненной, и на её место встаёт следующая. Если не отметить, вместо «Сегодня» будет «Просрочено». Через минуту без нажатий снова показывается первая задача. Нет галочки — карточки задач в стопке нет."],
       ["Показывать события календаря", "Одна карточка — следующее запланированное событие, с надписью «Сегодня, Четверг» или «Завтра, Суббота» (день недели — когда состоится событие). Если ни сегодня, ни завтра событий нет, карточки в стопке нет. Нет галочки — карточки события в стопке нет."],
       ["Показывать будильники", "Одна карточка со всеми вашими будильниками (карточки «Будильник» вкладки QR-кодов): время, название и надпись «Заведён» / «Не заведён». Нажатие у левого или правого края карточки листает будильники, нажатие в центре заводит показанный будильник или выключает его. Пока будильник звонит, показан он; иначе — ближайший из заведённых (нет заведённых — первый по времени). Через минуту без нажатий карточка снова показывает его. Нет галочки — карточки будильников в стопке нет."],
-      ["Спрашивать о тренировке", "После тренировки, пока вы не оценили нагрузку, наверху стопки появляется карточка «Как тренировка?» с кнопками от 1 до 10. Нажатие на число сразу сохраняет оценку, и карточка исчезает. Если пролистнуть на другую карточку, через минуту она вернётся наверх; порядок остальных карточек не меняется. Нет галочки — карточки нет."]
+      ["Спрашивать о тренировке", "После тренировки, пока вы не оценили нагрузку, наверху стопки появляется карточка «Как тренировка?» с кнопками от 1 до 10. Нажатие на число сразу сохраняет оценку, и карточка исчезает. Если пролистнуть на другую карточку, через минуту она вернётся наверх; порядок остальных карточек не меняется. Нет галочки — карточки нет."],
+      ["Спрашивать о настроении", "Каждый вечер в 20:30, если за день вы ни разу не отметили настроение (ни в приложении, ни в виджете), наверху стопки появляется карточка «Как настроение?» с восемью эмодзи — теми же чувствами, что на вкладке настроения. Нажатие на эмодзи сразу записывает настроение, и карточка исчезает; не отметили — в полночь она уходит сама, а завтра вечером придёт снова. Она стоит выше календаря и остальных карточек (как «Как тренировка?»); если ждут обе, «Как тренировка?» выше. Если пролистнуть на другую карточку, через минуту она вернётся наверх. Нет галочки — карточки нет."]
     ];
     function infoHtml(){
       var html = '<h3 class="common-tab-title">Описание галочек</h3>';
@@ -915,6 +937,11 @@
       var rpe = $("wgRpe");
       rpe.addEventListener("change", function(){
         w.rpeAsk = rpe.checked;
+        commitDraft(a); changed(); render();
+      });
+      var mood = $("wgMood");
+      mood.addEventListener("change", function(){
+        w.moodAsk = mood.checked;
         commitDraft(a); changed(); render();
       });
       // палитры цвета карточек: [id палитры, поле цвета, ключ запомненного цвета, id места карточки, лицо карточки, вид динамической карточки]
