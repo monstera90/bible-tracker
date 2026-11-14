@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 14.5 (14.11) — заряд наушников в карточке «Заряд» появляется сразу после подключения: первая проверка без паузы и частые проверки первых секунд ([BT_FAST_AT]), а не через 6 с по неточному будильнику.
 // Версия: 14.4 (14.11) — цвет карточек «Как тренировка?» и «Как настроение?» задаёт палитра формы виджета (`rpeColor`, `moodColor` → [Cfg]).
 // Версия: 14.3 (14.11) — галочка «Спрашивать о настроении» (`moodAsk`): служебная карточка «Как настроение?» ([QrMood]) — по правилам «Как тренировка?»: над всеми обычными карточками, под «Как тренировка?»; появляется в 20:30, если настроение сегодня не отмечено ([nextDynChange], [onMoodChanged]).
 // Версия: 14.2 (14.11) — слайд-шоу листает стопку через showPrevious: позиции стопки теперь идут в обратном порядке ([QrWidgetService]), иначе оно шло бы по карточкам назад.
@@ -148,8 +149,14 @@ object QrWidgets {
     private const val SWIPE_QUIET_MS = 4_000L
     private const val BATTERY_EVERY_MS = 5 * 60_000L
 
-    /** Серия проверок заряда после подключения Bluetooth-устройства: через столько мс от подключения (6, 15, 30, 60, 120 с). */
-    private val BT_BURST_AT = longArrayOf(6_000L, 15_000L, 30_000L, 60_000L, 120_000L)
+    /** Серия проверок заряда после подключения Bluetooth-устройства по будильнику (страховка, если процесс уснул): через столько мс от подключения (3, 8, 15, 30, 60, 120 с). */
+    private val BT_BURST_AT = longArrayOf(3_000L, 8_000L, 15_000L, 30_000L, 60_000L, 120_000L)
+
+    /** Быстрые проверки первых секунд после подключения (Handler, пока процесс жив): сразу, затем часто — заряд приходит через 1–5 с. */
+    private val BT_FAST_AT = longArrayOf(0L, 600L, 1_200L, 2_000L, 3_000L, 4_500L, 6_500L, 9_000L)
+
+    /** После отключения: система снимает звуковой выход не мгновенно, проверяем сразу и ещё дважды. */
+    private val BT_FAST_OFF_AT = longArrayOf(0L, 1_000L, 2_500L)
 
     /** Запас назад от момента подключения: заряд, пришедший чуть раньше, чем мы обработали подключение, считается свежим. */
     private const val BT_SINCE_SLACK_MS = 5_000L
@@ -1393,7 +1400,24 @@ object QrWidgets {
         QrBattery.register(app)
         val now = System.currentTimeMillis()
         setAlarm(app, now + BT_BURST_AT[0], btBurstPi(app, 0, now - BT_SINCE_SLACK_MS, connected))
+        // быстрые проверки: первая — без паузы (устройство уже отмечено подключённым), дальше каждые доли секунды; новое событие заменяет прежнюю серию
+        val gen = ++btFastGen
+        val since = now - BT_SINCE_SLACK_MS
+        for (at in if (connected) BT_FAST_AT else BT_FAST_OFF_AT) {
+            val run = Runnable {
+                if (gen != btFastGen) return@Runnable
+                try {
+                    onBatteryChanged(app)
+                } catch (e: Throwable) {
+                    // виджет не должен ронять приложение
+                }
+                if (connected && QrBattery.settled(app, since)) btFastGen++ // заряд всех подключённых уже известен — остальные проверки не нужны
+            }
+            if (at == 0L) run.run() else main.postDelayed(run, at)
+        }
     }
+
+    @Volatile private var btFastGen = 0
 
     /**
      * Шаг серии проверок [step] после подключения: перерисовывает карточки заряда (если что-то изменилось — на погашенном экране тоже,

@@ -1,12 +1,15 @@
 package com.app.lifetracker
-// Версия: 4.3 (13.11)
+// Версия: 4.4 (14.11)
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothHeadset
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -99,10 +102,32 @@ object QrBattery {
         null
     }
 
-    private fun isConnected(d: BluetoothDevice): Boolean = try {
-        (BluetoothDevice::class.java.getMethod("isConnected").invoke(d) as? Boolean) ?: false
-    } catch (e: Throwable) {
-        false
+    /** Устройства, о подключении которых нам сообщили события (адрес → когда): система отдаёт `isConnected` не всегда и не сразу. */
+    private val live = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Столько мс после события подключения отметке верим, даже если `isConnected` ещё говорит «нет» (состояние в системе может отстать от вещания). */
+    private const val LIVE_TRUST_MS = 60_000L
+
+    /** Отметить устройство подключённым (вещание о подключении, профиле или заряде — заряд шлёт только подключённое устройство). */
+    fun markLive(addr: String?) {
+        if (!addr.isNullOrEmpty()) live[addr.uppercase()] = System.currentTimeMillis()
+    }
+
+    /** Снять отметку: устройство отключилось. */
+    fun markGone(addr: String?) {
+        if (!addr.isNullOrEmpty()) live.remove(addr.uppercase())
+    }
+
+    /** Подключено ли устройство: свежая отметка из вещания — да сразу; иначе системный `isConnected` (рефлексия), а если он закрыт — отметка. */
+    private fun isConnected(d: BluetoothDevice): Boolean {
+        val t = live[d.address.uppercase()]
+        val sys: Boolean? = try {
+            BluetoothDevice::class.java.getMethod("isConnected").invoke(d) as? Boolean
+        } catch (e: Throwable) {
+            null
+        }
+        if (t != null && (sys == null || System.currentTimeMillis() - t < LIVE_TRUST_MS)) return true
+        return sys ?: false
     }
 
     private fun cachedLevel(ctx: Context, addr: String): Int {
@@ -348,17 +373,50 @@ object QrBattery {
         @Suppress("DEPRECATION")
         override fun onReceive(c: Context, i: Intent) {
             try {
-                if (i.action == ACTION_LEVEL) {
-                    val lv = i.getIntExtra(EXTRA_LEVEL, -1)
-                    val dev = i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
-                    if (dev != null && lv in 0..100) cacheLevel(c, dev.address, lv)
+                val dev = i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                when (i.action) {
+                    ACTION_LEVEL -> {
+                        val lv = i.getIntExtra(EXTRA_LEVEL, -1)
+                        if (dev != null && lv in 0..100) {
+                            cacheLevel(c, dev.address, lv)
+                            markLive(dev.address) // заряд присылает только подключённое устройство
+                        }
+                        QrWidgets.onBatteryChanged(c) // заряд пришёл — карточку перерисовываем сразу
+                    }
+                    BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                        markLive(dev?.address)
+                        QrWidgets.onBluetoothChanged(c, true)
+                        QrWidgets.onBatteryChanged(c)
+                    }
+                    BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                        markGone(dev?.address)
+                        QrWidgets.onBluetoothChanged(c, false)
+                        QrWidgets.onBatteryChanged(c)
+                    }
+                    BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED, BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED -> {
+                        // звуковой профиль подключился: наушники стали активным выходом — это раньше, чем отработает серия проверок
+                        if (i.getIntExtra(BluetoothProfile.EXTRA_STATE, -1) == BluetoothProfile.STATE_CONNECTED) {
+                            markLive(dev?.address)
+                            QrWidgets.onBluetoothChanged(c, true)
+                        }
+                        QrWidgets.onBatteryChanged(c)
+                    }
+                    else -> QrWidgets.onBatteryChanged(c)
                 }
-                // подключение: серия проверок (заряд становится известен через секунды); отключение: одна перерисовка
-                if (i.action != ACTION_LEVEL) QrWidgets.onBluetoothChanged(c, i.action == BluetoothDevice.ACTION_ACL_CONNECTED)
-                QrWidgets.onBatteryChanged(c)
             } catch (e: Throwable) {
                 // виджет не должен ронять приложение
             }
+        }
+    }
+
+    /** Вещание о подключении/отключении из манифестного приёмника виджета: отмечаем устройство, чтобы карточка увидела его сразу. */
+    @Suppress("DEPRECATION")
+    fun noteAcl(i: Intent, connected: Boolean) {
+        try {
+            val dev = i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+            if (connected) markLive(dev.address) else markGone(dev.address)
+        } catch (e: Throwable) {
+            // отметка не обязательна
         }
     }
 
@@ -371,6 +429,8 @@ object QrBattery {
             f.addAction(ACTION_LEVEL)
             f.addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
             f.addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            f.addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
+            f.addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
             val app = ctx.applicationContext
             if (Build.VERSION.SDK_INT >= 33) app.registerReceiver(receiver, f, Context.RECEIVER_EXPORTED) else app.registerReceiver(receiver, f)
             registered = true
