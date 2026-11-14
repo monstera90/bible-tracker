@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 47.3 (14.11) — карта привычки (и схема заметок «Сегодня») открывается прокрученной в самый низ, к сегодняшней неделе, всегда: `scrollMapToBottom` повторяет прокрутку, пока лента не получила размер (раньше одна попытка в следующем кадре — при открытии из виджета или сразу после смены вкладки она срабатывала до раскладки, и карта оставалась наверху).
    Версия: 47.2 (14.11) — подсказки палитры `colorPaletteHtml` для карточек «Как тренировка?» (`wgrpe`) и «Как настроение?» (`wgmood`) в форме виджета.
    Версия: 47.1 (14.11) — «Конструктор виджетов»: карточки-будильники убраны из списка выбора (`widgetCards`, `widgetFilters`); для галочки «Показывать будильники» все будильники отдаёт `widgetAlarms`.
    Версия: 47.0 (14.11)
@@ -1153,6 +1154,22 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     html += '</div>';
     return { html: html, count: count };
   }
+  // Прокрутить ленту карты до самого низа (сегодняшняя неделя). Одной попытки в следующем кадре мало: при открытии из виджета или сразу после
+  // смены вкладки лента ещё без размера (scrollHeight = clientHeight), и прокрутка уходила в пустоту. Повторяем, пока не доехали до упора
+  // (не дольше ~1,5 с); как только человек коснулся ленты — больше не трогаем.
+  function scrollMapToBottom(sc){
+    if(!sc) return;
+    var tries = 0, touched = false;
+    sc.addEventListener("touchstart", function(){ touched = true; }, { passive: true });
+    sc.addEventListener("wheel", function(){ touched = true; }, { passive: true });
+    function go(){
+      if(touched || !document.body.contains(sc)) return; // лента заменена другим экраном или её уже листают руками
+      sc.scrollTop = sc.scrollHeight;
+      var max = sc.scrollHeight - sc.clientHeight;
+      if((max <= 1 || sc.scrollTop < max - 1) && tries++ < 30) setTimeout(go, 50);
+    }
+    requestAnimationFrame(go);
+  }
   function habitMapMarkup(c){
     var color = cardColor(c) || "var(--wood)"; // без цвета — цвет выбранной вкладки (темы)
     var marked = {};
@@ -1174,7 +1191,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       '<div class="year-grid-v-scroll" id="habitMapScroll">' + built.html + '</div>';
     document.getElementById("habitMapTitle").textContent = c.title || "Привычка";
     var sc = document.getElementById("habitMapScroll");
-    requestAnimationFrame(function(){ sc.scrollTop = sc.scrollHeight; }); // сразу к текущей неделе (внизу)
+    scrollMapToBottom(sc); // сразу к текущей неделе (внизу)
     // нажатие на день — отметка; нажатие на отмеченный день снимает её (снятие помнится в `offs`, при сверке с облаком отметка не вернётся)
     sc.addEventListener("click", function(e){
       var cell = e.target.closest ? e.target.closest(".year-grid-v-cell") : null;
@@ -1221,7 +1238,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       '</div>' +
       '<div class="year-grid-v-scroll" id="datedMapScroll">' + built.html + '</div>';
     var sc = document.getElementById("datedMapScroll");
-    requestAnimationFrame(function(){ sc.scrollTop = sc.scrollHeight; }); // сразу к текущей неделе (внизу)
+    scrollMapToBottom(sc); // сразу к текущей неделе (внизу)
     sc.addEventListener("click", function(e){
       var cell = e.target.closest ? e.target.closest(".year-grid-v-cell") : null;
       var noteId = cell && cell.getAttribute("data-note");
